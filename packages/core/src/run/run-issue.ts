@@ -18,7 +18,11 @@ import type { Octokit } from '@octokit/rest';
 
 import type { ApprovalGate } from '../approvals/index.js';
 import { buildPhase as buildPhaseDefault } from '../phases/build.js';
-import { checkPhase as checkPhaseDefault, renderEnvironmentReleaseComment } from '../phases/check.js';
+import {
+  checkPhase as checkPhaseDefault,
+  remainingShowstoppers,
+  renderEnvironmentReleaseComment,
+} from '../phases/check.js';
 import { planPhase as planPhaseDefault } from '../phases/plan.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
 import { upsertSlicePlanComment } from '../readiness/slice-plan-github.js';
@@ -696,7 +700,12 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
         : check.stuck
           ? `lane stuck after ${check.reworkRounds} rework rounds (identical failures) — escalated`
           : `${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`;
-      return terminalParked(reason, message, checkFailure);
+      const showstoppers = remainingShowstoppers(check.summary);
+      const parkedMessage =
+        showstoppers.length > 0
+          ? `${message}\nremaining showstoppers:\n${showstoppers.map((s) => `- ${s}`).join('\n')}`
+          : message;
+      return terminalParked(reason, parkedMessage, checkFailure);
     }
     // Clean check — clear stale cross-run history so a future, genuinely different
     // failure is not mistaken for a repeat of one already resolved.

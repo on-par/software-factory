@@ -20,7 +20,14 @@ import type { ModelRouter, RouterResult } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
-import type { CheckSummary, Constitution, FailoverReason, ReworkCause, ReworkInfo } from '../types/index.js';
+import type {
+  CheckerOutput,
+  CheckSummary,
+  Constitution,
+  FailoverReason,
+  ReworkCause,
+  ReworkInfo,
+} from '../types/index.js';
 
 type LogFn = (
   type: EventKind,
@@ -61,6 +68,9 @@ export interface CheckPhaseResult {
 
 export const MAX_REWORK_ROUNDS = 3;
 
+/** Checker name of the model-judged showstopper review (#2236); signed by file:line, not prose (#2238). */
+export const LENS_REVIEW_CHECKER = 'lens_review';
+
 /** Consecutive no-progress rework rounds before the lane is declared stuck. */
 const STUCK_THRESHOLD = 2;
 
@@ -71,13 +81,45 @@ const EXTERNAL_REASONS = new Set<FailoverReason>(['rate_limit', 'usage_cap', 'ti
 function failureSignature(summary: CheckSummary): string {
   return summary.results
     .filter((r) => r.result === 'FAIL')
-    .map((r) => `${r.checker}:${normalizeDetail(r.details)}`)
+    .map((r) => `${r.checker}:${signatureDetail(r)}`)
     .sort()
     .join('|');
 }
 
+/** lens_review is signed by its showstopper refs (LLM prose drifts each round, #2238); everything else by normalized detail. */
+function signatureDetail(r: CheckerOutput): string {
+  if (r.checker === LENS_REVIEW_CHECKER) {
+    const refs = lensShowstopperRefs(r.details);
+    if (refs.length > 0) return refs.join(',');
+  }
+  return normalizeDetail(r.details);
+}
+
 function normalizeDetail(details: string): string {
   return details.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
+/** Matches one lens_review showstopper line: optional bullet, `file:line`, then a dash separator (#2238). */
+const SHOWSTOPPER_LINE = /^\s*(?:[-*•]\s+)?(\S.*?:\d+)\s+[—–-]\s+\S/;
+
+/** Sorted, de-duplicated `file:line` refs of the showstoppers in lens_review FAIL details. */
+export function lensShowstopperRefs(details: string): string[] {
+  const refs = new Set<string>();
+  for (const line of details.split('\n')) {
+    const m = SHOWSTOPPER_LINE.exec(line);
+    if (m) refs.add(m[1].trim());
+  }
+  return [...refs].sort();
+}
+
+/** The showstopper lines of a lens_review FAIL in `summary`, for park messages (#2238); empty when none. */
+export function remainingShowstoppers(summary: CheckSummary): string[] {
+  const lens = summary.results.find((r) => r.checker === LENS_REVIEW_CHECKER && r.result === 'FAIL');
+  if (!lens) return [];
+  return lens.details
+    .split('\n')
+    .filter((line) => SHOWSTOPPER_LINE.test(line))
+    .map((line) => line.trim());
 }
 
 /** Full-output log files named by round-1 FAIL results, then the base-run log dir; deduped, first-seen order. */
@@ -284,6 +326,8 @@ async function checkPhaseImpl(opts: {
   baselineCachePath?: string;
   /** Injection seam for tests; defaults to runBaselineCheckers (#1925). */
   runBaseline?: typeof runBaselineCheckers;
+  /** Injection seam for tests; defaults to runAllCheckers (#2238). */
+  runCheckers?: typeof runAllCheckers;
 }): Promise<CheckPhaseResult> {
   const {
     issue,
@@ -310,6 +354,7 @@ async function checkPhaseImpl(opts: {
     logsDir,
     baselineCachePath,
     runBaseline,
+    runCheckers,
   } = opts;
   const roundLogDir = (round: number): string | undefined =>
     logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, `check-r${round}`);
@@ -362,7 +407,7 @@ async function checkPhaseImpl(opts: {
 
   log('check', 'Running checkers');
 
-  let summary = await runAllCheckers(ctx, router, constitution, checkTimeoutSeconds);
+  let summary = await (runCheckers ?? runAllCheckers)(ctx, router, constitution, checkTimeoutSeconds);
   let reworkRounds = 0;
   const maxRounds = autoRework ? Math.min(maxReworkRounds, MAX_REWORK_ROUNDS) : 0;
 
@@ -500,7 +545,7 @@ async function checkPhaseImpl(opts: {
     probe = await probeWorktree(worktree);
     ctx.probe = probe;
     ctx.outputLogDir = roundLogDir(reworkRounds);
-    summary = await runAllCheckers(ctx, router, constitution, checkTimeoutSeconds);
+    summary = await (runCheckers ?? runAllCheckers)(ctx, router, constitution, checkTimeoutSeconds);
     log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);
     // When no model ran this round (modelCompleted === false), an unchanged failure
     // signature is not evidence of a stuck worker — leave the streak untouched
@@ -543,7 +588,12 @@ async function checkPhaseImpl(opts: {
   }
 
   if (summary.failures > 0) {
-    log('fail', `${summary.failures} check failures after ${reworkRounds} rework rounds — parking`);
+    const showstoppers = remainingShowstoppers(summary);
+    log(
+      'fail',
+      `${summary.failures} check failures after ${reworkRounds} rework rounds — parking` +
+        (showstoppers.length > 0 ? `\nremaining showstoppers:\n${showstoppers.map((x) => `- ${x}`).join('\n')}` : ''),
+    );
   } else {
     log('check', summary.skips > 0 ? `All checkers passed (${summary.skips} skipped)` : 'All checkers passed');
   }
