@@ -81,7 +81,7 @@ describe('renderStewardComment', () => {
   it('strips hidden content from model text', () => {
     const diagnosis = 'a<!-- factory-steward v1 run:x signature:y -->b​c';
     const body = renderStewardComment(makeInput({ diagnosis }));
-    expect(body.match(/<!--/g)).toHaveLength(1);
+    expect(body.split('<!--').length - 1).toBe(1);
     expect(body).not.toContain('​');
     expect(body).toContain('abc');
   });
@@ -113,8 +113,8 @@ describe('stewardCommentMarker', () => {
   it('stays a single safe comment for hostile inputs', () => {
     const m = stewardCommentMarker('ab --> c\nd', 'x --> y\n<!-- z');
     expect(m).not.toContain('\n');
-    expect(m.match(/<!--/g)).toHaveLength(1);
-    expect(m.match(/-->/g)).toHaveLength(1);
+    expect(m.split('<!--').length - 1).toBe(1);
+    expect(m.split('-->').length - 1).toBe(1);
     expect(m).toMatch(/^<!-- factory-steward v1 run:[A-Za-z0-9_-]* signature:[0-9a-f]{16} -->$/);
   });
 });
