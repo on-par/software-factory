@@ -139,6 +139,14 @@ describe('resolveSliceGate', () => {
     expect(await run()).toEqual({ kind: 'park', reason: 'slice plan lookup failed: github down' });
   });
 
+  it('parks without decomposing when the current slice already has an open PR', async () => {
+    const plan = withSliceState(planOf(2), 1, 'pr-open', 81);
+    const f = fake([{ id: 1, user: { id: BOT }, body: renderSlicePlanComment(plan) }]);
+    const { stub, run } = setup([], f);
+    expect(await run()).toMatchObject({ kind: 'park', reason: expect.stringContaining('PR #81') });
+    expect(stub.calls).toEqual([]);
+  });
+
   it('parks when every slice is merged', async () => {
     let plan = planOf(2);
     plan = withSliceState(withSliceState(plan, 1, 'merged'), 2, 'merged');

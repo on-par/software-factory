@@ -71,6 +71,13 @@ export async function resolveSliceGate(deps: {
     if (slice === undefined) {
       return { kind: 'park', reason: `every slice in the slice plan for #${issue} is merged — parked` };
     }
+    if (slice.state === 'pr-open') {
+      const pr = slice.prNumber === undefined ? 'with no PR number' : `PR #${slice.prNumber}`;
+      return {
+        kind: 'park',
+        reason: `slice ${slice.index}/${lookup.plan.slices.length} of #${issue} already has ${pr} open — the queue resumes after it merges, parked`,
+      };
+    }
     return { kind: 'slice', plan: lookup.plan, slice, created: false };
   }
   if (!deps.oversized) return { kind: 'none' };

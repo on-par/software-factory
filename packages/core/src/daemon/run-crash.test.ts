@@ -95,8 +95,14 @@ await runtime.submit(${JSON.stringify(input)}); setInterval(() => {}, 1000);`;
       },
     });
     expect(runtime.get(input.runId)?.status).toBe('interrupted');
-    if (alive(ownedPid))
-      await expect(runtime.submit({ ...input, runId: randomUUID() })).rejects.toMatchObject({ status: 409 });
+    if (alive(ownedPid)) {
+      // The owned group may exit between the liveness check and submit; only a still-live group must block.
+      const blocked = await runtime.submit({ ...input, runId: randomUUID() }).then(
+        () => false,
+        (error: { status?: number }) => error.status === 409,
+      );
+      if (!blocked) expect(alive(ownedPid)).toBe(false);
+    }
     await expect.poll(() => alive(ownedPid) || alive(cliPid), { timeout: 10_000 }).toBe(false);
     expect((await readFile(marker, 'utf8')).trim().split('\n')).toHaveLength(1);
     expect((await runtime.submit(input)).status).toBe('interrupted');

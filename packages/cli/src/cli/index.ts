@@ -190,6 +190,8 @@ import type {
   QueuePreflightDecision,
   QueueReleaseOutcome,
   RepoConfigYamlMigration,
+  SlicePlan,
+  SlicePlanCommentLookup,
   UnmergedGreenPr,
   WatchChecksOptions,
   WorktreeSandbox,
@@ -198,6 +200,8 @@ import {
   acquirePidFile,
   currentSlice,
   findSlicePlanComment,
+  upsertSlicePlanComment,
+  withSliceState,
   DEFAULT_GARDEN_MAX_CLUSTERS,
   DEFAULT_GARDEN_SINCE,
   capGardenClusters,
@@ -4265,11 +4269,20 @@ export interface OpenPullRequestEvidence {
   headRepoFullName: string | null;
 }
 
+/** A slice PR's state as the queue preflight sees it (ADR-0147). */
+export type SlicePullState = 'open' | 'merged' | 'closed';
+
 export interface QueuePreflightOps {
   expectedHeadRepoFullName: string;
   findOpenPR(issue: number): Promise<OpenPullRequestEvidence | undefined>;
   getLandState(prNumber: number): ReturnType<typeof getPullRequestLandState>;
   watch(ref: string): Promise<CiOutcome>;
+  /** The factory-written slice plan comment on the issue (ADR-0147). */
+  findSlicePlan(issue: number): Promise<SlicePlanCommentLookup>;
+  /** State of a slice PR found by the number recorded in the slice plan. */
+  getPullState(prNumber: number): Promise<SlicePullState>;
+  /** Rewrite the factory's slice plan comment in place. */
+  saveSlicePlan(issue: number, plan: SlicePlan): Promise<void>;
 }
 
 export function createQueuePreflightOps(octokit: Octokit, owner: string, repo: string): QueuePreflightOps {
@@ -4278,7 +4291,61 @@ export function createQueuePreflightOps(octokit: Octokit, owner: string, repo: s
     findOpenPR: (issue) => findOpenPRForIssue(octokit, owner, repo, issue),
     getLandState: (prNumber) => getPullRequestLandState(octokit, owner, repo, prNumber),
     watch: (ref) => internalOps.watchChecks({ octokit, owner, repo, ref }),
+    findSlicePlan: (issue) => findSlicePlanComment({ octokit, repo: `${owner}/${repo}`, issue }),
+    getPullState: async (prNumber) => {
+      const { data } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
+      if (data.merged || data.merged_at) return 'merged';
+      return data.state === 'open' ? 'open' : 'closed';
+    },
+    saveSlicePlan: async (issue, plan) => {
+      await upsertSlicePlanComment({ octokit, repo: `${owner}/${repo}`, issue, plan });
+    },
   };
+}
+
+/** ADR-0147: wait on the current slice PR, record its merge, or park when it was closed unmerged.
+ *  Returns undefined to fall through to the Closes-PR preflight. */
+async function preflightSlice(issue: number, deps: QueuePreflightOps): Promise<QueuePreflightDecision | undefined> {
+  let lookup: SlicePlanCommentLookup;
+  try {
+    lookup = await deps.findSlicePlan(issue);
+  } catch (err) {
+    return { kind: 'park', reason: `slice plan lookup failed: ${errorDetail(err)}` };
+  }
+  if (lookup.status === 'invalid') {
+    return {
+      kind: 'park',
+      reason: `slice plan comment ${lookup.commentId} on #${issue} is unreadable (${lookup.error})`,
+    };
+  }
+  if (lookup.status === 'not-found') return undefined;
+  const { plan } = lookup;
+  const slice = currentSlice(plan);
+  if (slice === undefined || slice.state !== 'pr-open') return undefined;
+  const label = `slice ${slice.index}/${plan.slices.length}`;
+  if (slice.prNumber === undefined) {
+    return { kind: 'park', reason: `${label} of #${issue} is pr-open but the slice plan records no PR number` };
+  }
+  const pr = slice.prNumber;
+  let state: SlicePullState;
+  try {
+    state = await deps.getPullState(pr);
+  } catch (err) {
+    return { kind: 'park', reason: `${label} PR #${pr} state lookup failed: ${errorDetail(err)}` };
+  }
+  if (state === 'open') return { kind: 'defer' };
+  if (state === 'closed') {
+    return { kind: 'park', reason: `${label} PR #${pr} was closed without merging` };
+  }
+  try {
+    await deps.saveSlicePlan(issue, withSliceState(plan, slice.index, 'merged', pr));
+  } catch (err) {
+    return {
+      kind: 'park',
+      reason: `${label} PR #${pr} merged but updating the slice plan failed: ${errorDetail(err)}`,
+    };
+  }
+  return undefined;
 }
 
 /** Resolve queued work from GitHub evidence without consuming model or worktree resources. */
@@ -4287,6 +4354,9 @@ export async function preflightQueuedIssue(
   deps: QueuePreflightOps,
 ): Promise<QueuePreflightDecision> {
   if (issue.labels.includes('factory:in-progress')) return { kind: 'defer' };
+
+  const slice = await preflightSlice(issue.number, deps);
+  if (slice) return slice;
 
   let pr: OpenPullRequestEvidence | undefined;
   try {

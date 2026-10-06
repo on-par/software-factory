@@ -6,7 +6,14 @@ import { dirname, join } from 'node:path';
 import type { ModelDiagnosis } from '@on-par/factory-core';
 import { getFactoryPaths, readPortLeases } from '@on-par/factory-core';
 import type { GithubQueue } from '@on-par/factory-core/internal';
-import { RunLockHeldError, resolveBranchPrefix } from '@on-par/factory-core/internal';
+import {
+  RunLockHeldError,
+  parseDecompositionOutput,
+  renderSlicePlanComment,
+  resolveBranchPrefix,
+  withSliceState,
+} from '@on-par/factory-core/internal';
+import type { SlicePlan } from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -3271,7 +3278,44 @@ describe('cli', () => {
       findOpenPR: async () => undefined,
       getLandState: async () => ({ isDraft: false, mergeStateStatus: 'CLEAN' }),
       watch: async () => 'success' as const,
+      findSlicePlan: async () => ({ status: 'not-found' as const }),
+      getPullState: async () => 'open' as const,
+      saveSlicePlan: async () => {},
     };
+
+    const sliceStory = (n: number) => ({
+      title: `Story ${n}`,
+      role: 'operator',
+      want: `thing ${n} works`,
+      soThat: 'value',
+      problemStatement: `Problem ${n}`,
+      inScope: [`scope ${n}`],
+      outOfScope: ['other'],
+      acceptanceCriteria: [{ name: `ac ${n}`, given: [], when: ['run'], then: ['works'] }],
+      verification: [{ command: 'npm test', passWhen: 'passes' }],
+      tracesTo: ['INT-PROBLEM-01'],
+    });
+    const slicePlan = (): SlicePlan => {
+      const stories = [1, 2, 3].map(sliceStory);
+      const parsed = parseDecompositionOutput(
+        JSON.stringify({
+          epic: { title: 'Epic', why: 'why', doneWhen: ['done'], children: stories.map((st) => st.title) },
+          stories,
+        }),
+      );
+      if (!parsed.ok) throw new Error(parsed.reason);
+      return {
+        issue: 7,
+        slices: parsed.decomposition.stories.map((story, i) => ({
+          index: i + 1,
+          title: story.title,
+          story,
+          state: 'pending' as const,
+        })),
+      };
+    };
+    const prOpenPlan = (): SlicePlan => withSliceState(slicePlan(), 1, 'pr-open', 81);
+    const foundPlan = (plan: SlicePlan) => ({ status: 'found' as const, commentId: 5, plan });
 
     it('creates GitHub-backed preflight operations with PR identity and head-SHA CI checks', async () => {
       const calls: any[] = [];
@@ -3406,10 +3450,164 @@ describe('cli', () => {
       }
     });
 
+    it('defers while the current slice PR is open without any Closes-PR work', async () => {
+      const findOpenPR = vi.fn(async () => undefined);
+      const getLandState = vi.fn();
+      const watch = vi.fn();
+      const saveSlicePlan = vi.fn(async () => {});
+      const result = await preflightQueuedIssue(
+        { number: 7, labels: [] },
+        {
+          ...baseDeps,
+          findOpenPR,
+          getLandState,
+          watch,
+          saveSlicePlan,
+          findSlicePlan: async () => foundPlan(prOpenPlan()),
+          getPullState: async () => 'open',
+        },
+      );
+      expect(result).toEqual({ kind: 'defer' });
+      for (const fn of [findOpenPR, getLandState, watch, saveSlicePlan]) expect(fn).not.toHaveBeenCalled();
+    });
+
+    it('marks the slice merged and builds once its PR merged', async () => {
+      const saveSlicePlan = vi.fn(async (_issue: number, _plan: SlicePlan) => {});
+      const result = await preflightQueuedIssue(
+        { number: 7, labels: [] },
+        {
+          ...baseDeps,
+          saveSlicePlan,
+          findSlicePlan: async () => foundPlan(prOpenPlan()),
+          getPullState: async () => 'merged',
+        },
+      );
+      expect(result).toEqual({ kind: 'build' });
+      expect(saveSlicePlan).toHaveBeenCalledTimes(1);
+      const [issue, plan] = saveSlicePlan.mock.calls[0];
+      expect(issue).toBe(7);
+      expect(plan.slices.map((sl) => [sl.state, sl.prNumber])).toEqual([
+        ['merged', 81],
+        ['pending', undefined],
+        ['pending', undefined],
+      ]);
+    });
+
+    it('parks naming the PR when the slice PR was closed without merging', async () => {
+      const saveSlicePlan = vi.fn(async () => {});
+      const result = await preflightQueuedIssue(
+        { number: 7, labels: [] },
+        {
+          ...baseDeps,
+          saveSlicePlan,
+          findSlicePlan: async () => foundPlan(prOpenPlan()),
+          getPullState: async () => 'closed',
+        },
+      );
+      expect(result.kind).toBe('park');
+      expect(result.kind === 'park' && result.reason).toContain('PR #81');
+      expect(result.kind === 'park' && result.reason).toContain('closed without merging');
+      expect(saveSlicePlan).not.toHaveBeenCalled();
+    });
+
+    it('keeps the Closes-PR decision when there is no slice plan', async () => {
+      const getPullState = vi.fn();
+      const result = await preflightQueuedIssue(
+        { number: 7, labels: [] },
+        {
+          ...baseDeps,
+          getPullState,
+          findOpenPR: async () => ({
+            number: 71,
+            branch: 'contributor/real-head',
+            headSha: 'abc123',
+            headRepoFullName: 'on-par/software-factory',
+          }),
+        },
+      );
+      expect(result).toEqual({ kind: 'adopt', branch: 'contributor/real-head' });
+      expect(getPullState).not.toHaveBeenCalled();
+    });
+
+    it('falls through for pending and all-merged slice plans', async () => {
+      const getPullState = vi.fn();
+      const allMerged = [1, 2, 3].reduce((p, n) => withSliceState(p, n, 'merged'), slicePlan());
+      for (const plan of [slicePlan(), allMerged]) {
+        const result = await preflightQueuedIssue(
+          { number: 7, labels: [] },
+          { ...baseDeps, getPullState, findSlicePlan: async () => foundPlan(plan) },
+        );
+        expect(result).toEqual({ kind: 'build' });
+      }
+      expect(getPullState).not.toHaveBeenCalled();
+    });
+
+    it('parks when slice evidence cannot be read or recorded', async () => {
+      const noNumber = slicePlan();
+      const cases = [
+        { findSlicePlan: async () => Promise.reject(new Error('rate limited')) },
+        { findSlicePlan: async () => ({ status: 'invalid' as const, commentId: 9, error: 'bad data' }) },
+        {
+          findSlicePlan: async () =>
+            foundPlan({
+              ...noNumber,
+              slices: noNumber.slices.map((sl, i) => (i === 0 ? { ...sl, state: 'pr-open' as const } : sl)),
+            }),
+        },
+        {
+          findSlicePlan: async () => foundPlan(prOpenPlan()),
+          getPullState: async () => Promise.reject(new Error('404')),
+        },
+        {
+          findSlicePlan: async () => foundPlan(prOpenPlan()),
+          getPullState: async () => 'merged' as const,
+          saveSlicePlan: async () => Promise.reject(new Error('403')),
+        },
+      ];
+      for (const overrides of cases) {
+        const result = await preflightQueuedIssue({ number: 7, labels: [] }, { ...baseDeps, ...overrides });
+        expect(result.kind).toBe('park');
+      }
+    });
+
+    it('maps slice PR state and reads and rewrites the slice plan comment', async () => {
+      const plan = prOpenPlan();
+      const updateComment = vi.fn(async () => ({ data: {} }));
+      const pulls: Record<number, any> = {
+        1: { state: 'closed', merged: true },
+        2: { state: 'closed', merged: false, merged_at: null },
+        3: { state: 'open', merged: false },
+      };
+      const octokit: any = {
+        rest: {
+          pulls: { get: async (o: any) => ({ data: pulls[o.pull_number] }) },
+          users: { getAuthenticated: async () => ({ data: { id: 42 } }) },
+          issues: {
+            listComments: async () => ({
+              data: [{ id: 555, user: { id: 42 }, body: renderSlicePlanComment(plan) }],
+            }),
+            updateComment,
+            createComment: vi.fn(),
+          },
+        },
+      };
+      const ops = createQueuePreflightOps(octokit, 'on-par', 'software-factory');
+      await expect(ops.getPullState(1)).resolves.toBe('merged');
+      await expect(ops.getPullState(2)).resolves.toBe('closed');
+      await expect(ops.getPullState(3)).resolves.toBe('open');
+      await expect(ops.findSlicePlan(7)).resolves.toMatchObject({ status: 'found', commentId: 555, plan });
+      await ops.saveSlicePlan(7, withSliceState(plan, 1, 'merged', 81));
+      expect(updateComment).toHaveBeenCalledWith(expect.objectContaining({ comment_id: 555 }));
+    });
+
     it('defers an already factory-owned candidate', async () => {
-      await expect(preflightQueuedIssue({ number: 7, labels: ['factory:in-progress'] }, baseDeps)).resolves.toEqual({
+      const findSlicePlan = vi.fn();
+      await expect(
+        preflightQueuedIssue({ number: 7, labels: ['factory:in-progress'] }, { ...baseDeps, findSlicePlan }),
+      ).resolves.toEqual({
         kind: 'defer',
       });
+      expect(findSlicePlan).not.toHaveBeenCalled();
     });
   });
 
