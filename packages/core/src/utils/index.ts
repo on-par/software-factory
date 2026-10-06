@@ -1,14 +1,25 @@
 // src/utils/index.ts — Shared utilities: logging, git ops, cost tracking, shell helpers
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 
-import type { EventKind } from '../events/kinds.js';
+import type { Octokit } from '@octokit/rest';
+import type { EventKind, LanePausedPayload } from '../events/kinds.js';
 import { createLogger } from '../logger/index.js';
-import type { CostEntry, FailoverReason, LogLevel, ReadinessInfo, ReworkInfo } from '../types/index.js';
+import type { PrClassificationRecord } from '../review/classifier.js';
+import type { PrLookup } from '../phases/ship.js';
+import type {
+  CostEntry,
+  FailoverReason,
+  LogLevel,
+  ReadinessInfo,
+  RemoteBranchRecord,
+  ReworkInfo,
+} from '../types/index.js';
 import { levelForType } from './format.js';
 import { execGit } from './git-exec.js';
 import { createMicroVm, removeMicroVm, type WorktreeSandbox } from './microvm.js';
+import { ensureWorktreeParentExcluded } from './worktree-location.js';
 
 export type { WorktreeSandbox } from './microvm.js';
 
@@ -28,6 +39,8 @@ export function logEvent(
     level?: LogLevel;
     rework?: ReworkInfo;
     readiness?: ReadinessInfo;
+    prClassification?: PrClassificationRecord;
+    lanePaused?: LanePausedPayload;
     actor?: string;
     model?: string;
     tokens?: { input: number; output: number };
@@ -40,6 +53,8 @@ export function logEvent(
     failoverReason?: FailoverReason;
     rework?: ReworkInfo;
     readiness?: ReadinessInfo;
+    prClassification?: PrClassificationRecord;
+    lanePaused?: LanePausedPayload;
     actor?: string;
     model?: string;
     tokens?: { input: number; output: number };
@@ -48,6 +63,8 @@ export function logEvent(
   if (extra?.failoverReason) meta.failoverReason = extra.failoverReason;
   if (extra?.rework) meta.rework = extra.rework;
   if (extra?.readiness) meta.readiness = extra.readiness;
+  if (extra?.prClassification) meta.prClassification = extra.prClassification;
+  if (extra?.lanePaused) meta.lanePaused = extra.lanePaused;
   if (extra?.actor) meta.actor = extra.actor;
   if (extra?.model) meta.model = extra.model;
   if (extra?.tokens) meta.tokens = extra.tokens;
@@ -105,6 +122,33 @@ export async function defaultRemoteBase(repoRoot: string): Promise<string> {
   return 'origin/main';
 }
 
+/** SHA of refs/remotes/origin/<branch>, or null when that remote-tracking ref does not
+ *  exist. Reads local refs only; call after gitFetch (setupWorktree does). Never throws. */
+export async function detectRemoteBranch(repoRoot: string, branch: string): Promise<string | null> {
+  try {
+    const { stdout } = await execGit(
+      `git rev-parse --verify -q ${shellEscape(`refs/remotes/origin/${branch}^{commit}`)}`,
+      { cwd: repoRoot },
+    );
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+export interface WorktreeSetupOptions {
+  /** Looks up an open PR whose head is `branch`; only called when origin/<branch> exists. */
+  findOpenPr?: (branch: string) => Promise<PrLookup>;
+}
+
+export interface WorktreeSetupResult {
+  /** The ref the worktree was created from. */
+  base: string;
+  /** Resolved HEAD SHA of the new worktree. */
+  head: string;
+  remoteBranch: RemoteBranchRecord | null;
+}
+
 export async function setupWorktree(
   repoRoot: string,
   branch: string,
@@ -112,13 +156,40 @@ export async function setupWorktree(
   startPoint?: string,
   sandbox?: WorktreeSandbox,
   log?: (type: EventKind, msg: string) => void,
-): Promise<void> {
+  opts?: WorktreeSetupOptions,
+): Promise<WorktreeSetupResult> {
   // The base of record is the freshly fetched remote-tracking ref — never local
   // branch state, which can be stale, dirty, or ahead (#1167).
   await gitFetch(repoRoot);
   const base = startPoint ?? (await defaultRemoteBase(repoRoot));
+  // An earlier run's push (#1868) is recorded and reported here, never adopted or discarded.
+  let remoteBranch: RemoteBranchRecord | null = null;
+  const remoteSha = await detectRemoteBranch(repoRoot, branch);
+  if (remoteSha) {
+    remoteBranch = { sha: remoteSha };
+    let prText = 'open PR not checked';
+    if (opts?.findOpenPr) {
+      let lookup: PrLookup;
+      try {
+        lookup = await opts.findOpenPr(branch);
+      } catch (err) {
+        lookup = { status: 'error', detail: err instanceof Error ? err.message : String(err) };
+      }
+      if (lookup.status === 'found') {
+        remoteBranch.prNumber = lookup.prNumber;
+        prText = `open PR #${lookup.prNumber}`;
+      } else if (lookup.status === 'absent') {
+        prText = 'no open PR';
+      } else {
+        prText = `open PR lookup failed: ${lookup.detail}`;
+      }
+    }
+    log?.('remote-branch-preexisting', `origin/${branch} already exists @ ${remoteSha}; ${prText}`);
+  }
   await execGit(`git worktree remove --force ${shellEscape(worktreePath)}`, { cwd: repoRoot }).catch(() => {});
   await execGit(`git branch -D ${shellEscape(branch)}`, { cwd: repoRoot }).catch(() => {});
+  mkdirSync(dirname(worktreePath), { recursive: true });
+  await ensureWorktreeParentExcluded(repoRoot, dirname(worktreePath));
   await execGit(`git worktree add -b ${shellEscape(branch)} ${shellEscape(worktreePath)} ${shellEscape(base)}`, {
     cwd: repoRoot,
   });
@@ -127,6 +198,7 @@ export async function setupWorktree(
   if (sandbox) {
     await createMicroVm({ ...sandbox, worktreePath, log });
   }
+  return { base, head: stdout.trim(), remoteBranch };
 }
 
 export async function cleanupWorktree(
@@ -285,10 +357,11 @@ export function branchFor(issue: number, title: string, prefix?: string): string
   return `${branchPrefixSlug(prefix)}/${issue}-${slugify(title)}`;
 }
 
-export async function getIssueTitle(repo: string, issue: number, octokit: any): Promise<string> {
+export async function getIssueTitle(repo: string, issue: number, octokit: Pick<Octokit, 'rest'>): Promise<string> {
+  const [owner, repoName] = repo.split('/');
   const { data } = await octokit.rest.issues.get({
-    owner: repo.split('/')[0],
-    repo: repo.split('/')[1],
+    owner,
+    repo: repoName,
     issue_number: issue,
   });
   return data.title;
@@ -305,14 +378,6 @@ export function shellEscape(s: string): string {
 export function ensureDir(path: string): void {
   if (!existsSync(path)) {
     mkdirSync(path, { recursive: true });
-  }
-}
-
-export function readJsonIfExists<T>(path: string, fallback: T): T {
-  try {
-    return JSON.parse(readFileSync(path, 'utf-8')) as T;
-  } catch {
-    return fallback;
   }
 }
 

@@ -27,6 +27,19 @@ describe('run-flags', () => {
     expect(readRunFlagOverrides(file)).toEqual({ autoMerge: false });
   });
 
+  it('pr-classifier flag: round-trips, coexists with autoMerge, and a wrong type reads as unset', () => {
+    const file = join(dir, 'run-flags.json');
+
+    writeRunFlagOverrides(file, { prClassifier: false });
+    expect(readRunFlagOverrides(file)).toEqual({ prClassifier: false });
+
+    writeRunFlagOverrides(file, { autoMerge: true, prClassifier: true });
+    expect(readRunFlagOverrides(file)).toEqual({ autoMerge: true, prClassifier: true });
+
+    writeFileSync(file, JSON.stringify({ autoMerge: true, prClassifier: 'yes' }));
+    expect(readRunFlagOverrides(file)).toEqual({ autoMerge: true });
+  });
+
   it('auto-merge flag: writing an empty override set removes a stale run-flags file', () => {
     const file = join(dir, 'run-flags.json');
 

@@ -27,14 +27,47 @@ export {
   DEFAULT_BUG_LABELS,
   DEFAULT_INTERNAL_REPO,
   fileBug,
+  findIssueByMarker,
   findMatchingIssue,
   fingerprintMarker,
   renderBugBody,
   renderOccurrenceComment,
+  renderUpstreamOccurrenceComment,
   resolveTargetRepo,
 } from './filing/index.js';
 
 // Filing policy: when to file, caps, and self-fix labeling (#374)
+// Evidence sanitizer for untrusted text (#1841, #1852)
+export { stripHiddenContent } from './filing/sanitize.js';
+
+// Redacted upstream factory report (#1858)
+export type { RedactionClass, RedactionContext } from './filing/redact.js';
+export { REDACTION_PLACEHOLDERS, redactText } from './filing/redact.js';
+export type { UpstreamEnvironment, UpstreamReport, UpstreamReportInput } from './filing/upstream.js';
+
+// Send upstream reports with outbox fallback (#1860)
+export type {
+  PendingUpstreamReport,
+  UpstreamOutboxEntry,
+  UpstreamSendInput,
+  UpstreamSendOutcome,
+  UpstreamSendResult,
+} from './filing/upstream-send.js';
+export {
+  classifyUpstreamSendError,
+  defaultUpstreamLedgerPath,
+  defaultUpstreamOutboxDir,
+  sendUpstreamReports,
+  writeUpstreamOutbox,
+} from './filing/upstream-send.js';
+export {
+  buildUpstreamReport,
+  factoryStackFrames,
+  UPSTREAM_TITLE_PREFIX,
+  upstreamInputFromEvidence,
+  upstreamReportMarker,
+} from './filing/upstream.js';
+
 export type { FilingDecision, FilingLedger, FilingPolicy, FilingSkipReason } from './filing/policy.js';
 export {
   DEFAULT_FILING_POLICY,
@@ -49,11 +82,14 @@ export {
 } from './filing/policy.js';
 
 // Config
-export { resolveFilingPolicy } from './config/index.js';
+export { resolveFilingPolicy, resolvePrClassifierPolicy } from './config/index.js';
+export type { EffectivePrClassifierPolicy } from './config/index.js';
 export type { EffectiveConfig } from './config/repo.js';
-export { resolveEffectiveConfig } from './config/repo.js';
+export { resolveEffectiveConfig, resolveReviewFloorRules } from './config/repo.js';
 export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix } from './config/index.js';
 export { FACTORY_RUNTIME_CONFIG_KEYS } from './config/index.js';
+export { isTrustedApprover, createOctokitCollaboratorPermissionClient } from './queue/approval.js';
+export type { CollaboratorPermissionClient, TrustedApproverOptions } from './queue/approval.js';
 export {
   migrateRepoConfigToYaml,
   REPO_CONFIG_FILENAMES,
@@ -171,6 +207,7 @@ export {
   ensureDir,
   escalationLine,
   formatEventLine,
+  getIssueTitle,
   gitFetch,
   isEscalation,
   levelForType,
@@ -197,6 +234,12 @@ export type { FileLockOptions, SyncFileLockOptions } from './utils/lock.js';
 export { withFileLock, withFileLockSync, withGitLock } from './utils/lock.js';
 export type { RunLockHolder, RunLockOptions } from './utils/run-lock.js';
 export { readRunLockHolder, RunLockHeldError, withRunLock } from './utils/run-lock.js';
+export {
+  ensureWorktreeParentExcluded,
+  formatWorktreeLocation,
+  laneWorktreePath,
+  resolveWorktreeRoot,
+} from './utils/worktree-location.js';
 export type {
   GcCandidate,
   GcHeadPrState,
@@ -207,8 +250,10 @@ export type {
   WorktreeListEntry,
 } from './utils/worktree-gc.js';
 export {
+  countUnpushedCommits,
   findCredentialFiles,
   formatGcReport,
+  isWorktreeClean,
   parseWorktreeList,
   scrubFile,
   sweepWorktrees,
@@ -479,6 +524,7 @@ export {
 export { wrapCommandInSandbox } from './sandbox/index.js';
 
 export { createRunRuntime } from './daemon/run-runtime.js';
+export { findOpenPR, type PrLookup } from './phases/ship.js';
 export { createShipExecutor } from './daemon/ship-executor.js';
 
 // Review verdict (#1679)
@@ -502,6 +548,22 @@ export type {
   ReviewFloorRuleSet,
 } from './review/floor.js';
 export { computeReviewFloor, DEFAULT_REVIEW_FLOOR_RULES } from './review/floor.js';
+
+// PR classifier shadow verdict (#1725)
+export type { PrClassificationRecord, PrClassifierClaim, PrShadowInput, PrShadowVerdict } from './review/classifier.js';
+export {
+  buildClassifierPrompt,
+  changedPathsFromDiff,
+  CLASSIFIER_PROMPT_VERSION,
+  classifierPolicyVersion,
+  classifyPrShadow,
+  parseClassifierOutput,
+  toClassificationRecord,
+} from './review/classifier.js';
+
+// PR classifier routing (#1724)
+export type { ReviewRouting } from './review/routing.js';
+export { classifierGateReason, parseNumstat, readReviewFloorChanges, resolveReviewRouting } from './review/routing.js';
 
 // Review fork-PR containment gate (#1684)
 export type {
@@ -534,3 +596,9 @@ export {
 } from './review/pr-reference.js';
 export type { ReviewConstitution, ReviewConstitutionSource } from './constitutions/index.js';
 export { DEFAULT_REVIEW_CONSTITUTION, describeReviewConstitutionSource } from './constitutions/index.js';
+
+// Readiness deep check (#1732)
+export type { DecompositionOutput } from './readiness/decompose.js';
+export { buildDecompositionPrompt, parseDecompositionOutput } from './readiness/decompose.js';
+export type { ReadinessGapCriterion, ReadinessGapReport } from './readiness/enrich.js';
+export { buildReadinessGapPrompt, parseReadinessGapOutput } from './readiness/enrich.js';

@@ -1,8 +1,13 @@
 // src/filing/index.ts — Auto-file a fingerprinted bug with dedup + repo routing (#373).
+// Evidence is capped and the raw log is referenced as host:path, never inlined (#1842).
 
+import { hostname } from 'node:os';
+
+import { defaultEvidenceCaps } from '@on-par/factory-config';
 import type { Octokit } from '@octokit/rest';
 
 import type { EvidencePack, FailoverReason, FingerprintedFailure } from '../types/index.js';
+import { fenceExcerpt, sanitizeEvidence, stripHiddenContent } from './sanitize.js';
 
 /** Where factory-internal faults are filed when origin === 'factory-internal'. */
 export const DEFAULT_INTERNAL_REPO = 'on-par/software-factory';
@@ -23,11 +28,14 @@ export interface CandidateIssue {
   number: number;
   body: string;
   state?: 'open' | 'closed';
+  closedAt?: string | null;
 }
 
 export interface FilingGitHubClient {
   /** Open + recently-closed issues (impl decides the window) to scan for the marker. */
   listCandidateIssues(input: { owner: string; repo: string }): Promise<CandidateIssue[]>;
+  /** Full-text body search (search/issues), open + recently-closed issues only; no label filter. */
+  searchIssues(input: { owner: string; repo: string; text: string }): Promise<CandidateIssue[]>;
   createIssue(input: {
     owner: string;
     repo: string;
@@ -47,6 +55,14 @@ export interface FileBugInput {
   runId?: string;
   internalRepo?: string;
   labels?: readonly string[];
+  /** Host that holds the raw log, printed as host:path (default: os.hostname()). */
+  host?: string;
+  /** Evidence size caps (default: defaultEvidenceCaps). */
+  caps?: EvidenceCaps;
+  /** Overrides the default "[factory] <reason> in <phase> (<component>)" title. Sanitized. */
+  title?: string;
+  /** Overrides the default "## Problem" paragraph. Sanitized. */
+  problem?: string;
 }
 
 export interface FileBugResult {
@@ -68,6 +84,16 @@ export function findMatchingIssue(issues: readonly CandidateIssue[], fingerprint
   return issues.find((i) => (i.body ?? '').includes(marker));
 }
 
+/** Exact-marker match over search results; lowest issue number wins (pure, exported). */
+export function findIssueByMarker(issues: readonly CandidateIssue[], marker: string): CandidateIssue | undefined {
+  return issues.filter((i) => (i.body ?? '').includes(marker)).sort((a, b) => a.number - b.number)[0];
+}
+
+/** Occurrence comment for an upstream report: fingerprint and time only, no evidence (ADR-0132). */
+export function renderUpstreamOccurrenceComment(fingerprint: string, now: () => Date): string {
+  return `Recurrence at ${now().toISOString()} reported by another factory run. (fingerprint ${fingerprint})`;
+}
+
 const SUSPECTED_CAUSE_BY_REASON: Record<FailoverReason, string> = {
   rate_limit: 'The model provider rate-limited requests before the phase could finish.',
   usage_cap: 'The model provider usage cap was reached before the phase could finish.',
@@ -86,10 +112,54 @@ function suspectedCause(reason: FailoverReason): string {
   return SUSPECTED_CAUSE_BY_REASON[reason] ?? 'See the evidence excerpt above.';
 }
 
-/** House bug format with the two hidden dedup/count markers appended last. */
-export function renderBugBody(evidence: EvidencePack, fingerprint: string, occurrences = 1): string {
+export interface EvidenceCaps {
+  maxExcerptChars: number;
+  maxBodyChars: number;
+}
+
+export interface RenderBugBodyOptions {
+  /** Host that holds the raw log (default: os.hostname()). */
+  host?: string;
+  /** Size caps (default: defaultEvidenceCaps from @on-par/factory-config). */
+  caps?: EvidenceCaps;
+  /** Overrides the default "## Problem" paragraph (sanitized; empty falls back to default). */
+  problem?: string;
+}
+
+export interface CappedExcerpt {
+  text: string;
+  truncated: boolean;
+  shownChars: number;
+  totalChars: number;
+}
+
+/** Cut an excerpt to at most maxChars, never leaving a lone high surrogate (pure, exported). */
+export function capEvidenceExcerpt(text: string, maxChars: number): CappedExcerpt {
+  const limit = Math.max(0, Math.floor(maxChars));
+  if (text.length <= limit) {
+    return { text, truncated: false, shownChars: text.length, totalChars: text.length };
+  }
+  let kept = text.slice(0, limit);
+  if (kept.length > 0 && /[\uD800-\uDBFF]/.test(kept[kept.length - 1])) kept = kept.slice(0, -1);
+  return { text: kept, truncated: true, shownChars: kept.length, totalChars: text.length };
+}
+
+function composeBody(
+  evidence: EvidencePack,
+  fingerprint: string,
+  occurrences: number,
+  pointer: string,
+  excerpt: CappedExcerpt,
+  problem: string | undefined,
+): string {
+  const note = excerpt.truncated
+    ? `\n\n_Evidence truncated: showing the first ${excerpt.shownChars} of ${excerpt.totalChars} characters. The full raw log stays on the originating machine at \`${pointer}\`._`
+    : '';
+  const problemText = problem?.trim()
+    ? problem.trim()
+    : `Factory failure in the ${evidence.phase} phase (${evidence.component}) — reason: ${evidence.reason}, origin: ${evidence.origin}.`;
   return `## Problem
-Factory failure in the ${evidence.phase} phase (${evidence.component}) — reason: ${evidence.reason}, origin: ${evidence.origin}.
+${problemText}
 
 ## Evidence
 - Repo under work: ${evidence.repo}
@@ -97,11 +167,9 @@ Factory failure in the ${evidence.phase} phase (${evidence.component}) — reaso
 - Phase / component: ${evidence.phase} / ${evidence.component}
 - Model: ${evidence.model}
 - Classified reason: ${evidence.reason}
-- Log: ${evidence.logPath}
+- Log: ${pointer}
 
-\`\`\`
-${evidence.eventExcerpt}
-\`\`\`
+${fenceExcerpt(excerpt.text)}${note}
 
 ## Suspected cause
 ${suspectedCause(evidence.reason)}
@@ -109,6 +177,43 @@ ${suspectedCause(evidence.reason)}
 ${fingerprintMarker(fingerprint)}
 ${countMarker(occurrences)}
 `;
+}
+
+/**
+ * House bug format with the two hidden dedup/count markers appended last. The excerpt is capped
+ * (per-excerpt and total-body); the structure and markers are never cut.
+ */
+export function renderBugBody(
+  evidence: EvidencePack,
+  fingerprint: string,
+  occurrences = 1,
+  options: RenderBugBodyOptions = {},
+): string {
+  const host = stripHiddenContent(options.host ?? hostname()) || 'unknown-host';
+  const caps = options.caps ?? defaultEvidenceCaps;
+  const pointer = `${host}:${evidence.logPath}`;
+  const problem = options.problem === undefined ? undefined : stripHiddenContent(options.problem);
+  let budget = caps.maxExcerptChars;
+  let body = composeBody(
+    evidence,
+    fingerprint,
+    occurrences,
+    pointer,
+    capEvidenceExcerpt(evidence.eventExcerpt, budget),
+    problem,
+  );
+  while (body.length > caps.maxBodyChars && budget > 0) {
+    budget = Math.max(0, budget - (body.length - caps.maxBodyChars));
+    body = composeBody(
+      evidence,
+      fingerprint,
+      occurrences,
+      pointer,
+      capEvidenceExcerpt(evidence.eventExcerpt, budget),
+      problem,
+    );
+  }
+  return body;
 }
 
 export function renderOccurrenceComment(
@@ -123,7 +228,8 @@ export function renderOccurrenceComment(
 }
 
 export async function fileBug(client: FilingGitHubClient, input: FileBugInput): Promise<FileBugResult> {
-  const { evidence, fingerprint } = input.fingerprinted;
+  const { fingerprint } = input.fingerprinted;
+  const evidence = sanitizeEvidence(input.fingerprinted.evidence);
   const target = resolveTargetRepo(evidence, input.internalRepo);
   const [owner, repo] = target.split('/');
   const issues = await client.listCandidateIssues({ owner, repo });
@@ -147,12 +253,13 @@ export async function fileBug(client: FilingGitHubClient, input: FileBugInput): 
   }
 
   const labels = [...(input.labels ?? DEFAULT_BUG_LABELS)];
-  const title = `[factory] ${evidence.reason} in ${evidence.phase} (${evidence.component})`;
+  const overrideTitle = input.title === undefined ? '' : stripHiddenContent(input.title).trim();
+  const title = overrideTitle || `[factory] ${evidence.reason} in ${evidence.phase} (${evidence.component})`;
   const { number } = await client.createIssue({
     owner,
     repo,
     title,
-    body: renderBugBody(evidence, fingerprint, 1),
+    body: renderBugBody(evidence, fingerprint, 1, { host: input.host, caps: input.caps, problem: input.problem }),
     labels,
   });
   return { action: 'created', repo: target, issueNumber: number, fingerprint, occurrences: 1 };
@@ -184,6 +291,20 @@ export function createOctokitFilingClient(octokit: Octokit, opts: OctokitFilingC
           number: issue.number,
           body: issue.body ?? '',
           state: issue.state as 'open' | 'closed' | undefined,
+        }));
+    },
+    async searchIssues({ owner, repo, text }) {
+      const since = now().getTime() - recentlyClosedDays * 24 * 60 * 60 * 1000;
+      const q = `repo:${owner}/${repo} is:issue in:body "${text.replaceAll('"', '')}"`;
+      const { data } = await octokit.rest.search.issuesAndPullRequests({ q, per_page: 100 });
+      return data.items
+        .filter((i) => !i.pull_request)
+        .filter((i) => i.state === 'open' || (i.closed_at != null && Date.parse(i.closed_at) >= since))
+        .map((i) => ({
+          number: i.number,
+          body: i.body ?? '',
+          state: i.state as 'open' | 'closed',
+          closedAt: i.closed_at ?? null,
         }));
     },
     async createIssue({ owner, repo, title, body, labels }) {

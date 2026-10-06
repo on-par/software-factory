@@ -1,6 +1,7 @@
 // src/types/index.ts — Core type definitions for the Software Factory
 
-import type { EventKind } from '../events/kinds.js';
+import type { EventKind, LanePausedPayload } from '../events/kinds.js';
+import type { PrClassificationRecord } from '../review/classifier.js';
 
 // ---------- Models ----------
 
@@ -52,6 +53,7 @@ export type TaskType =
   | 'check_design'
   | 'review_pr'
   | 'security_review'
+  | 'classify_pr'
   | 'dispute_resolution'
   | 'triage'
   | (string & {}); // extensible
@@ -83,12 +85,23 @@ export interface Constitution {
 
 export type CheckResult = 'PASS' | 'FAIL' | 'SKIP';
 
+/** One concrete input where the new behaviour is worse than the old (regression_hunt, #1798). */
+export interface RegressionFinding {
+  input: string;
+  before: string;
+  after: string;
+  evidence: string;
+  reproduced: boolean;
+}
+
 export interface CheckerOutput {
   checker: string;
   result: CheckResult;
   details: string;
   linksChecked?: number;
   broken?: number;
+  /** Structured findings (regression_hunt); rendered by renderCheckerFindings in the check summary and evidence pack. */
+  findings?: RegressionFinding[];
 }
 
 export interface CheckSummary {
@@ -184,7 +197,7 @@ export type RepoSlug = string;
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 /** Best-effort classification of why a rework round happened (#386). */
-export type ReworkCause = 'factory-fault' | 'direction-change' | 'external';
+export type ReworkCause = 'factory-fault' | 'direction-change' | 'external' | 'environment';
 
 /** Cause bucket for a retry attempt (#419): checker = rework round after failed
  *  checks, failover = provider/quota failover, timeout = runaway agent,
@@ -270,6 +283,9 @@ export interface FactoryEvent {
   rework?: ReworkInfo;
   readiness?: ReadinessInfo;
   queueReprioritization?: QueueReprioritizationRecord;
+  prClassification?: PrClassificationRecord;
+  /** Breaker details on a `lane-paused` event (#1916). */
+  lanePaused?: LanePausedPayload;
   model?: string;
   tokens?: { input: number; output: number };
   durationMs?: number;
@@ -284,7 +300,9 @@ export interface CostEntry {
   model: string;
   inputTokens: number;
   outputTokens: number;
-  cost: number;
+  cost: number | null;
+  /** True when no price was known for the model, so cost is null (#1738, ADR-0020). */
+  unpriced?: boolean;
   failoverReason?: FailoverReason;
   /** Set when this row is the cost of a retry attempt (#419). */
   retryCause?: RetryCause;
@@ -341,6 +359,14 @@ export type RunStatus =
   | 'merged'
   | 'failed';
 
+/** origin/<branch> as found when the lane worktree was created (#1868): an earlier
+ *  run's push that this run's fresh base does not include. */
+export interface RemoteBranchRecord {
+  sha: string;
+  /** Open PR whose head is this branch, when the lookup found one. */
+  prNumber?: number;
+}
+
 export interface IssueRunState {
   issue: number;
   lane: string;
@@ -359,6 +385,8 @@ export interface IssueRunState {
   startedAt: string;
   updatedAt: string;
   prNumber?: number;
+  /** Pre-existing origin/<branch> found at worktree creation (#1868). */
+  remoteBranch?: RemoteBranchRecord;
   failures?: CheckerOutput[];
 }
 

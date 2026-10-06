@@ -1,32 +1,21 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import type * as NodeOs from 'node:os';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
-
-// Redirect homedir() so the default estimateTrailingSpend() scan is hermetic.
-// Keep every other node:os export (tmpdir!) real.
-vi.mock('node:os', async (importOriginal) => {
-  const actual = await importOriginal<typeof NodeOs>();
-  return { ...actual, homedir: () => mockedHome };
-});
-
-// Stub the subscription signal so no test hits the keychain or network.
-vi.mock('./subscription.js', () => ({
-  fetchSubscriptionUsage: vi.fn(async () => null),
-}));
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { logEvent } from '../utils/index.js';
 import { readUsage, watchUsage } from './index.js';
-import { fetchSubscriptionUsage } from './subscription.js';
+import type { SubscriptionUsageDeps } from './subscription.js';
 
 type EmitEventArgs = Parameters<typeof logEvent>;
 
-// usage/index.ts only calls homedir() lazily, inside defaultTranscriptRoots()
-// at call time, so it's safe to assign this after the mocked imports above.
-const mockedHome = mkdtempSync(join(tmpdir(), 'factory-usage-home-'));
-const tempDirs: string[] = [mockedHome];
+const creds = JSON.stringify({
+  claudeAiOauth: { accessToken: 'sk-ant-oat-test', expiresAt: Date.now() + 3_600_000 },
+});
+
+const tempDirs: string[] = [];
+let home: string;
 
 function mkdtemp(): string {
   const dir = mkdtempSync(join(tmpdir(), 'factory-usage-'));
@@ -34,18 +23,41 @@ function mkdtemp(): string {
   return dir;
 }
 
+/** Fake subscription deps: null utilization means no token (fetch is never called). */
+function subscriptionDeps(utilization: number | null, fetchImpl = vi.fn<typeof fetch>()): SubscriptionUsageDeps {
+  if (utilization !== null) {
+    fetchImpl.mockResolvedValue(Response.json({ five_hour: { utilization, resets_at: null } }));
+  }
+  return {
+    platform: 'linux',
+    env: {},
+    readCredentialsFile: () => {
+      if (utilization === null) throw new Error('no credentials');
+      return creds;
+    },
+    fetchImpl,
+  };
+}
+
+beforeEach(() => {
+  home = mkdtempSync(join(tmpdir(), 'factory-usage-home-'));
+  tempDirs.push(home);
+  // Empty means "default profile", so the estimator uses `home` even if the shell sets CLAUDE_CONFIG_DIR.
+  vi.stubEnv('CLAUDE_CONFIG_DIR', '');
+});
+
 afterEach(() => {
-  vi.mocked(fetchSubscriptionUsage).mockReset();
-  for (const dir of tempDirs.splice(1)) {
+  vi.unstubAllEnvs();
+  for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 describe('readUsage defaults', () => {
   it('falls back to the default estimator over the default transcript roots', async () => {
-    vi.mocked(fetchSubscriptionUsage).mockResolvedValueOnce(null);
-    const transcript = join(mockedHome, '.claude/projects/p/session.jsonl');
-    mkdirSync(join(mockedHome, '.claude/projects/p'), { recursive: true });
+    const fetchImpl = vi.fn<typeof fetch>();
+    const transcript = join(home, '.claude/projects/p/session.jsonl');
+    mkdirSync(join(home, '.claude/projects/p'), { recursive: true });
     writeFileSync(
       transcript,
       JSON.stringify({
@@ -54,24 +66,38 @@ describe('readUsage defaults', () => {
       }) + '\n',
     );
 
-    const reading = await readUsage({ cap: 227, estimator: true });
+    const reading = await readUsage({
+      cap: 227,
+      estimator: true,
+      subscription: subscriptionDeps(null, fetchImpl),
+      home,
+    });
 
     expect(reading).toEqual({ pct: 3 / 227, source: 'estimate', detail: 'trailing-5h usage ~= $3 = 1% of $227 cap' });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('default fetchSubscription wires to fetchSubscriptionUsage', async () => {
-    vi.mocked(fetchSubscriptionUsage).mockResolvedValueOnce({ fiveHourUtilization: 42, fiveHourResetsAt: null });
+    const fetchImpl = vi.fn<typeof fetch>();
 
-    const reading = await readUsage({ cap: 227, estimator: false });
+    const reading = await readUsage({
+      cap: 227,
+      estimator: false,
+      subscription: subscriptionDeps(42, fetchImpl),
+      home,
+    });
 
     expect(reading).toEqual({ pct: 0.42, source: 'subscription', detail: '5h subscription window at 42%' });
-    expect(fetchSubscriptionUsage).toHaveBeenCalledOnce();
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://api.anthropic.com/api/oauth/usage',
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer sk-ant-oat-test' }) }),
+    );
   });
 });
 
 describe('watchUsage defaults', () => {
   it('uses the default readUsageFn and default setStop', async () => {
-    vi.mocked(fetchSubscriptionUsage).mockResolvedValueOnce({ fiveHourUtilization: 100, fiveHourResetsAt: null });
     const dir = mkdtemp();
     const stopFile = join(dir, 'STOP');
     const events: EmitEventArgs[] = [];
@@ -81,6 +107,8 @@ describe('watchUsage defaults', () => {
       stopAt: 0.75,
       pollMs: 180_000,
       stopFile,
+      subscription: subscriptionDeps(100),
+      home,
       eventsFile: join(dir, 'events.ndjson'),
       emitEvent: (...args) => {
         events.push(args);

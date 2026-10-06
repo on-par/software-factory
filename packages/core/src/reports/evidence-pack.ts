@@ -1,5 +1,8 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 
+import type { PrClassifierClaim, PrShadowVerdict } from '../review/classifier.js';
+import type { ReviewRouting } from '../review/routing.js';
+import { renderCheckerFindings } from '../checkers/index.js';
 import { specPaths } from '../spec/index.js';
 import type { CheckSummary, FactoryEvent } from '../types/index.js';
 import { readIssueEvents } from './local-run.js';
@@ -16,6 +19,8 @@ export interface EvidencePackRenderInput {
   designMarkdown?: string;
   events: FactoryEvent[];
   logFiles: string[];
+  /** PR classifier decision (#1724); the section is omitted when undefined. */
+  reviewRouting?: ReviewRouting;
 }
 
 export interface EvidencePackGatherInput {
@@ -26,10 +31,11 @@ export interface EvidencePackGatherInput {
   eventsFile?: string;
   startedAt?: string;
   logsDir?: string;
+  reviewRouting?: ReviewRouting;
 }
 
 export function renderEvidencePack(input: EvidencePackRenderInput): string {
-  const { checkSummary, reworkRounds, specSummary, designMarkdown, events, logFiles } = input;
+  const { checkSummary, reworkRounds, specSummary, designMarkdown, events, logFiles, reviewRouting } = input;
 
   const summaryParts = [
     checkSummary
@@ -54,13 +60,16 @@ export function renderEvidencePack(input: EvidencePackRenderInput): string {
       'Checker verdicts',
       checkSummary && checkSummary.results.length > 0
         ? checkSummary.results
-            .map(
-              (result) =>
+            .map((result) =>
+              [
                 `- ${RESULT_EMOJI[result.result] ?? '⚪'} ${result.result} \`${result.checker}\` — ${truncate(result.details, 200)}`,
+                ...(result.findings !== undefined ? renderCheckerFindings(result.findings).map((l) => `  ${l}`) : []),
+              ].join('\n'),
             )
             .join('\n')
         : '- No checker results recorded.',
     ),
+    ...(reviewRouting ? [section('Review routing', renderReviewRouting(reviewRouting))] : []),
     section('Frozen spec', specSummary ?? '- Spec summary unavailable.'),
     section('Design artifact', designMarkdown ?? '- No design artifact recorded.'),
     section(
@@ -96,7 +105,58 @@ export function gatherEvidencePack(input: EvidencePackGatherInput): string {
   const events = eventsFile && startedAt ? readIssueEvents(eventsFile, issue, startedAt) : [];
   const logFiles = readLogFiles(logsDir, issue);
 
-  return renderEvidencePack({ issue, checkSummary, reworkRounds, specSummary, designMarkdown, events, logFiles });
+  return renderEvidencePack({
+    issue,
+    checkSummary,
+    reworkRounds,
+    specSummary,
+    designMarkdown,
+    events,
+    logFiles,
+    reviewRouting: input.reviewRouting,
+  });
+}
+
+function renderReviewRouting(routing: ReviewRouting): string {
+  const lines = [
+    routing.floor === null
+      ? `- Floor: unavailable (classifier error: ${routing.error ?? 'unknown'})`
+      : `- Floor: **${routing.floor}**`,
+    routing.gated
+      ? `- Gate: held for a human — \`${routing.reason ?? 'classifier'}\``
+      : '- Gate: none — auto-merge eligible',
+  ];
+  if (routing.rules.length === 0) {
+    lines.push('- No rules fired.');
+  } else {
+    for (const rule of routing.rules) {
+      const paths = rule.paths.map((p) => `\`${p}\``).join(', ');
+      lines.push(`- \`${rule.id}\` (${rule.class}): ${paths === '' ? '(no paths)' : truncate(paths, 300)}`);
+    }
+  }
+  if (routing.shadow) lines.push(...renderShadowVerdict(routing.shadow));
+  return lines.join('\n');
+}
+
+function renderShadowVerdict(shadow: PrShadowVerdict): string[] {
+  const bullets = (items: string[]): string[] =>
+    items.length === 0 ? ['  - none'] : items.map((item) => `  - ${item}`);
+  const claim = (c: PrClassifierClaim): string =>
+    c.citation === '' ? truncate(c.text, 200) : `${truncate(c.text, 200)} — \`${c.citation}\``;
+  return [
+    '- **Shadow model verdict — shadow — no effect**',
+    shadow.modelClass === null
+      ? `  - Model class: unavailable — ${shadow.reason ?? 'unknown'}`
+      : `  - Model class: **${shadow.modelClass}** (\`${shadow.model ?? 'unknown'}\`, \`${shadow.promptVersion}\`, policy \`${shadow.policyVersion}\`)`,
+    `  - Final class: ${shadow.finalClass ?? 'unavailable'} (= floor)`,
+    '  - Cited claims:',
+    ...bullets(shadow.claims.map(claim)).map((l) => `  ${l}`),
+    '  - Unsupported claims (no citation):',
+    ...bullets(shadow.unsupportedClaims.map(claim)).map((l) => `  ${l}`),
+    '  - Not inspected:',
+    ...bullets(shadow.notInspected.map((s) => truncate(s, 200))).map((l) => `  ${l}`),
+    `  - ADRs consulted: ${shadow.adrIds.length === 0 ? 'none' : shadow.adrIds.join(', ')}`,
+  ];
 }
 
 function section(title: string, body: string): string {

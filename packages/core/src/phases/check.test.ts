@@ -12,8 +12,19 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
-import type { Constitution, ReworkInfo } from '../types/index.js';
-import { checkPhase } from './check.js';
+import type { BaselineReport } from '../checkers/baseline.js';
+import { BaselineCache } from '../checkers/baseline-cache.js';
+import type { CheckSummary, Constitution, ReworkInfo } from '../types/index.js';
+import {
+  baseFailingCheckers,
+  checkPhase,
+  type EnvironmentFailure,
+  excludeBaseFailing,
+  environmentLogPaths,
+  isEnvironmentFailure,
+  renderEnvironmentReleaseComment,
+  stuckSignature,
+} from './check.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -105,6 +116,580 @@ afterEach(async () => {
   tempDirs.clear();
 });
 
+describe('partial base overlap (#1929)', () => {
+  const summaryOf = (...results: Array<[string, 'PASS' | 'FAIL']>): CheckSummary => ({
+    results: results.map(([checker, result]) => ({
+      checker,
+      result,
+      details: result === 'FAIL' ? `${checker === 'tests' ? 'a' : 'b'} broke` : '',
+    })),
+    failures: results.filter(([, r]) => r === 'FAIL').length,
+    passes: results.filter(([, r]) => r === 'PASS').length,
+    skips: 0,
+    total: results.length,
+  });
+  const reportOf = (...entries: Array<[string, 'clean-on-base' | 'fails-on-base' | 'not-run']>): BaselineReport => ({
+    baseSha: 'abc1234567',
+    checkers: entries.map(([checker, verdict]) => ({ checker, verdict })),
+  });
+  const partialBaseline = async (o: { baseSha: string }) =>
+    ({
+      baseSha: o.baseSha,
+      checkers: [
+        { checker: 'tests', verdict: 'fails-on-base', baseResult: 'FAIL' },
+        { checker: 'lint', verdict: 'clean-on-base', baseResult: 'PASS' },
+      ],
+    }) as BaselineReport;
+
+  const makePartialWorktree = async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    await writeFile(join(worktree, 'package.json'), JSON.stringify({ scripts: { test: 'exit 1', lint: 'exit 1' } }));
+    return { worktree, specPath };
+  };
+
+  describe('baseFailingCheckers', () => {
+    it('returns fails-on-base checkers only', () => {
+      expect(baseFailingCheckers(reportOf(['tests', 'fails-on-base'], ['lint', 'clean-on-base']))).toEqual(
+        new Set(['tests']),
+      );
+    });
+
+    it('is empty without a usable baseline, or for not-run and clean-on-base entries', () => {
+      expect(baseFailingCheckers(undefined).size).toBe(0);
+      expect(baseFailingCheckers({ baseSha: 'abc1234567', checkers: [], error: 'boom' }).size).toBe(0);
+      expect(baseFailingCheckers(reportOf(['tests', 'not-run'], ['lint', 'clean-on-base'])).size).toBe(0);
+    });
+
+    it('keeps a checker with new failing tests, and includes one with an empty list', () => {
+      const report = (newFailingTests: string[]): BaselineReport => ({
+        baseSha: 'abc1234567',
+        checkers: [{ checker: 'tests', verdict: 'fails-on-base', newFailingTests }],
+      });
+      expect(baseFailingCheckers(report(['x'])).size).toBe(0);
+      expect(baseFailingCheckers(report([]))).toEqual(new Set(['tests']));
+    });
+  });
+
+  describe('excludeBaseFailing', () => {
+    it('drops only the excluded FAIL result and recomputes failures and total', () => {
+      const out = excludeBaseFailing(
+        summaryOf(['tests', 'FAIL'], ['lint', 'FAIL'], ['types', 'PASS']),
+        new Set(['tests']),
+      );
+      expect(out.results.map((r) => r.checker)).toEqual(['lint', 'types']);
+      expect(out.failures).toBe(1);
+      expect(out.total).toBe(2);
+      expect(out.passes).toBe(1);
+    });
+
+    it('keeps PASS results of an excluded checker', () => {
+      const out = excludeBaseFailing(summaryOf(['tests', 'PASS'], ['lint', 'FAIL']), new Set(['tests']));
+      expect(out.results.map((r) => r.checker)).toEqual(['tests', 'lint']);
+    });
+
+    it('returns the same reference when the set is empty', () => {
+      const summary = summaryOf(['tests', 'FAIL']);
+      expect(excludeBaseFailing(summary, new Set())).toBe(summary);
+    });
+  });
+
+  describe('stuckSignature', () => {
+    const both = summaryOf(['tests', 'FAIL'], ['lint', 'FAIL']);
+
+    it('excludes base-failing checkers and keeps the rest', () => {
+      const sig = stuckSignature(both, new Set(['tests']));
+      expect(sig).toContain('lint:');
+      expect(sig).not.toContain('tests:');
+    });
+
+    it('is the full signature with an empty set', () => {
+      const sig = stuckSignature(both, new Set());
+      expect(sig).toContain('lint:');
+      expect(sig).toContain('tests:');
+    });
+
+    it('falls back to the full non-empty signature when only base-failing checkers fail', () => {
+      const sig = stuckSignature(summaryOf(['tests', 'FAIL']), new Set(['tests']));
+      expect(sig).toContain('tests:');
+    });
+  });
+
+  const heldRun = async (priorFailureSignature: string) => {
+    const { worktree, specPath } = await makePartialWorktree();
+    const { router, stub } = makeRouter();
+    const result = await checkPhase({
+      issue: 1929,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      maxReworkRounds: 1,
+      diffBase: 'abc1234567',
+      priorFailureSignature,
+      log: () => {},
+      runBaseline: partialBaseline,
+    });
+    return { result, stub };
+  };
+
+  it('cross-run held matches the filtered or the full unfiltered signature', { timeout: 120_000 }, async () => {
+    const first = await heldRun('never-matches');
+    expect(first.result.failureSignature).toContain('lint:');
+    expect(first.result.failureSignature).not.toContain('tests:');
+
+    const filtered = await heldRun(first.result.failureSignature as string);
+    expect(filtered.result.crossRunStuck).toBe(true);
+    expect(filtered.stub.calls).toHaveLength(0);
+
+    const full = stuckSignature(first.result.summary, new Set());
+    expect(full).toContain('tests:');
+    const unfiltered = await heldRun(full);
+    expect(unfiltered.result.crossRunStuck).toBe(true);
+    expect(unfiltered.stub.calls).toHaveLength(0);
+  });
+
+  it('rework prompt and signature target only the lane-owned checker', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makePartialWorktree();
+    const { router, stub } = makeRouter();
+    const seen: string[][] = [];
+    const result = await checkPhase({
+      issue: 1929,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      maxReworkRounds: 1,
+      diffBase: 'abc1234567',
+      log: () => {},
+      runBaseline: async (o) => {
+        seen.push(o.failing.filter((r) => r.result === 'FAIL').map((r) => r.checker));
+        return partialBaseline(o);
+      },
+    });
+    expect(seen[0]).toEqual(expect.arrayContaining(['tests', 'lint']));
+    expect(stub.calls.length).toBeGreaterThanOrEqual(1);
+    expect(result.reworkRounds).toBe(1);
+    expect(result.environment).toBeUndefined();
+    expect(stub.calls[0].prompt).toContain('### lint');
+    expect(stub.calls[0].prompt).not.toContain('### tests');
+    expect(result.failureSignature).toContain('lint:');
+    expect(result.failureSignature).not.toContain('tests:');
+  });
+
+  it('stops rework when only base-failing checkers remain', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makePartialWorktree();
+    let calls = 0;
+    const fakeRouter = {
+      run: async () => {
+        calls++;
+        await writeFile(
+          join(worktree, 'package.json'),
+          JSON.stringify({ scripts: { test: 'exit 1', lint: 'exit 0' } }),
+        );
+        return { model: 'fake-model', output: 'done', exitCode: 0, attempts: [] };
+      },
+    } as any;
+    const messages: string[] = [];
+    const result = await checkPhase({
+      issue: 1929,
+      worktree,
+      specPath,
+      router: fakeRouter,
+      constitution: null,
+      maxReworkRounds: 2,
+      diffBase: 'abc1234567',
+      log: (_type, msg) => messages.push(msg),
+      runBaseline: partialBaseline,
+    });
+    expect(calls).toBe(1);
+    expect(messages.some((m) => m.includes('only base-failing checkers remain'))).toBe(true);
+    expect(result.passed).toBe(false);
+    expect(result.failureSignature).toContain('tests:');
+  });
+});
+
+describe('rework cause environment (#1927)', () => {
+  const summaryOf = (...results: Array<[string, 'PASS' | 'FAIL']>): CheckSummary => ({
+    results: results.map(([checker, result]) => ({ checker, result, details: '' })),
+    failures: results.filter(([, r]) => r === 'FAIL').length,
+    passes: results.filter(([, r]) => r === 'PASS').length,
+    skips: 0,
+    total: results.length,
+  });
+  const reportOf = (...entries: Array<[string, 'clean-on-base' | 'fails-on-base' | 'not-run']>): BaselineReport => ({
+    baseSha: 'abc1234567',
+    checkers: entries.map(([checker, verdict]) => ({ checker, verdict })),
+  });
+
+  it('is true when every failing checker fails on base', () => {
+    expect(isEnvironmentFailure(summaryOf(['tests', 'FAIL']), reportOf(['tests', 'fails-on-base']))).toBe(true);
+    expect(
+      isEnvironmentFailure(
+        summaryOf(['tests', 'FAIL'], ['lint', 'FAIL']),
+        reportOf(['tests', 'fails-on-base'], ['lint', 'fails-on-base']),
+      ),
+    ).toBe(true);
+  });
+
+  it('ignores baseline entries for checkers that did not fail', () => {
+    expect(
+      isEnvironmentFailure(
+        summaryOf(['tests', 'FAIL'], ['lint', 'PASS']),
+        reportOf(['tests', 'fails-on-base'], ['lint', 'clean-on-base']),
+      ),
+    ).toBe(true);
+  });
+
+  it('is false without a usable baseline', () => {
+    expect(isEnvironmentFailure(summaryOf(['tests', 'FAIL']), undefined)).toBe(false);
+    expect(
+      isEnvironmentFailure(summaryOf(['tests', 'FAIL']), { baseSha: 'abc1234567', checkers: [], error: 'boom' }),
+    ).toBe(false);
+  });
+
+  it('is false on partial overlap, not-run, or a missing checker', () => {
+    const failing = summaryOf(['tests', 'FAIL'], ['lint', 'FAIL']);
+    expect(isEnvironmentFailure(failing, reportOf(['tests', 'fails-on-base'], ['lint', 'clean-on-base']))).toBe(false);
+    expect(isEnvironmentFailure(failing, reportOf(['tests', 'fails-on-base'], ['lint', 'not-run']))).toBe(false);
+    expect(isEnvironmentFailure(failing, reportOf(['tests', 'fails-on-base']))).toBe(false);
+  });
+
+  it('is false when nothing failed', () => {
+    expect(isEnvironmentFailure(summaryOf(['tests', 'PASS']), reportOf(['tests', 'fails-on-base']))).toBe(false);
+  });
+
+  const runWithVerdict = async (
+    verdict: 'fails-on-base' | 'clean-on-base',
+    extra: { logsDir?: string; priorFailureSignature?: string } = {},
+  ) => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router, stub } = makeRouter();
+    const order: string[] = [];
+    const reworks: ReworkInfo[] = [];
+    const kinds: string[] = [];
+    const result = await checkPhase({
+      ...extra,
+      issue: 77,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      maxReworkRounds: 1,
+      diffBase: 'abc1234567',
+      log: (type, _msg, logExtra) => {
+        kinds.push(type);
+        if (type === 'rework' && logExtra?.rework) {
+          order.push('rework');
+          reworks.push(logExtra.rework);
+        }
+      },
+      runBaseline: async (o) => {
+        order.push('baseline');
+        return {
+          baseSha: o.baseSha,
+          checkers: o.failing
+            .filter((r) => r.result === 'FAIL')
+            .map((r) => ({ checker: r.checker, verdict, baseResult: verdict === 'fails-on-base' ? 'FAIL' : 'PASS' })),
+        } as BaselineReport;
+      },
+    });
+    return { order, reworks, result, kinds, stub };
+  };
+
+  it(
+    'skips rework and returns an environment failure when every failing checker fails on base (#1928)',
+    { timeout: 120_000 },
+    async () => {
+      const { reworks, result, stub } = await runWithVerdict('fails-on-base');
+      expect(reworks).toEqual([]);
+      expect(stub.calls).toHaveLength(0);
+      expect(result.reworkRounds).toBe(0);
+      expect(result.passed).toBe(false);
+      expect(result.environment).toEqual({
+        baseSha: 'abc1234567',
+        failingChecks: expect.any(Array),
+        logPaths: [],
+      });
+      expect(result.environment?.failingChecks.length).toBeGreaterThan(0);
+    },
+  );
+
+  it(
+    'includes the round-1 full-output log and the base log dir in logPaths (#1928)',
+    { timeout: 120_000 },
+    async () => {
+      const logsDir = await mkdtemp(join(tmpdir(), 'check-env-logs-'));
+      tempDirs.add(logsDir);
+      const { result } = await runWithVerdict('fails-on-base', { logsDir });
+      const paths = result.environment?.logPaths ?? [];
+      expect(paths.some((p) => p.startsWith(join(logsDir, 'issue-77', 'check-r0')))).toBe(true);
+      expect(paths).toContain(join(logsDir, 'issue-77', 'check-base'));
+    },
+  );
+
+  it('environment wins over a matching priorFailureSignature (#1928)', { timeout: 120_000 }, async () => {
+    const first = await runWithVerdict('fails-on-base');
+    const { result, kinds } = await runWithVerdict('fails-on-base', {
+      priorFailureSignature: first.result.failureSignature,
+    });
+    expect(kinds).not.toContain('held');
+    expect(result.crossRunStuck).toBeUndefined();
+    expect(result.environment).toBeDefined();
+  });
+
+  describe('environmentLogPaths / renderEnvironmentReleaseComment (#1928)', () => {
+    const failing = (checker: string, details: string) => ({ checker, result: 'FAIL' as const, details });
+    const sum = (results: CheckSummary['results']): CheckSummary => ({
+      results,
+      failures: results.filter((r) => r.result === 'FAIL').length,
+      passes: 0,
+      skips: 0,
+      total: results.length,
+    });
+
+    it('collects full-output paths from FAIL results, dedupes, ignores PASS, appends the base dir', () => {
+      const summary = sum([
+        failing('tests', 'exit 1\nfull output: /logs/a.log'),
+        failing('lint', 'x\nfull output: /logs/b.log\nfull output: /logs/a.log'),
+        { checker: 'types', result: 'PASS', details: 'full output: /logs/pass.log' },
+      ]);
+      expect(environmentLogPaths(summary, '/logs/check-base')).toEqual([
+        '/logs/a.log',
+        '/logs/b.log',
+        '/logs/check-base',
+      ]);
+      expect(environmentLogPaths(summary, undefined)).toEqual(['/logs/a.log', '/logs/b.log']);
+    });
+
+    it('renders checkers, the full SHA and every path', () => {
+      const failure: EnvironmentFailure = {
+        baseSha: 'abc1234567890def',
+        failingChecks: ['tests', 'lint'],
+        logPaths: ['/logs/a.log', '/logs/check-base'],
+      };
+      const body = renderEnvironmentReleaseComment(failure);
+      for (const needle of ['`tests`', '`lint`', 'abc1234567890def', '/logs/a.log', '/logs/check-base']) {
+        expect(body).toContain(needle);
+      }
+      expect(body).not.toContain('No log paths were recorded');
+    });
+
+    it('says so when no log paths were recorded', () => {
+      expect(renderEnvironmentReleaseComment({ baseSha: 'abc', failingChecks: ['tests'], logPaths: [] })).toContain(
+        'No log paths were recorded (logsDir not set).',
+      );
+    });
+  });
+
+  it('keeps factory-fault when the base is clean', { timeout: 120_000 }, async () => {
+    const { reworks } = await runWithVerdict('clean-on-base');
+    expect(reworks.length).toBeGreaterThan(0);
+    expect(reworks.every((r) => r.cause === 'factory-fault')).toBe(true);
+  });
+});
+
+describe('checkPhase baseline (#1925)', () => {
+  const cleanReport = (baseSha: string): BaselineReport => ({
+    baseSha,
+    checkers: [{ checker: 'tests', verdict: 'clean-on-base', baseResult: 'PASS' }],
+  });
+
+  it('does not call the baseline when round 1 passes', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makePassingWorktree();
+    const { router } = makeRouter();
+    const calls: unknown[] = [];
+    const result = await checkPhase({
+      issue: 1,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      log: () => {},
+      diffBase: 'abc12345',
+      runBaseline: async (o) => {
+        calls.push(o);
+        return cleanReport(o.baseSha);
+      },
+    });
+    expect(calls).toHaveLength(0);
+    expect(result.baseline).toBeUndefined();
+  });
+
+  it('reports a clean base without changing the outcome', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    const baseOpts = { issue: 77, worktree, specPath, router, constitution: null, autoRework: false };
+    const without = await checkPhase({ ...baseOpts, log: () => {} });
+
+    const logs: string[] = [];
+    const calls: any[] = [];
+    const result = await checkPhase({
+      ...baseOpts,
+      log: (type, msg) => {
+        if (type === 'check') logs.push(msg);
+      },
+      diffBase: 'abc1234567',
+      runBaseline: async (o) => {
+        calls.push(o);
+        return cleanReport(o.baseSha);
+      },
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].baseSha).toBe('abc1234567');
+    expect(calls[0].laneWorktree).toBe(worktree);
+    expect(calls[0].ctx.env).toEqual(calls[0].ctx.env);
+    expect(calls[0].ctx.env).toBeDefined();
+    expect(result.baseline).toEqual(cleanReport('abc1234567'));
+    expect(result.passed).toBe(without.passed);
+    expect(result.reworkRounds).toBe(without.reworkRounds);
+    expect(result.failureSignature).toBe(without.failureSignature);
+    expect(logs.some((m) => m.includes('clean on base'))).toBe(true);
+  });
+
+  it('logs when a checker also fails on base', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    const logs: string[] = [];
+    await checkPhase({
+      issue: 77,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      autoRework: false,
+      log: (type, msg) => {
+        if (type === 'check') logs.push(msg);
+      },
+      diffBase: 'abc1234567',
+      runBaseline: async (o) => ({
+        baseSha: o.baseSha,
+        checkers: [
+          {
+            checker: 'tests',
+            verdict: 'fails-on-base',
+            baseResult: 'FAIL',
+            sharedFailingTests: ['a'],
+            newFailingTests: ['b'],
+          },
+        ],
+      }),
+    });
+    expect(logs.some((m) => m.includes('tests also fails on base (1 shared, 1 new failing tests)'))).toBe(true);
+  });
+
+  it('passes a BaselineCache only when baselineCachePath is set (#1926)', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    const caches: unknown[] = [];
+    const base = {
+      issue: 77,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      autoRework: false,
+      diffBase: 'abc1234567',
+    };
+    const runBaseline = async (o: any) => {
+      caches.push(o.cache);
+      return cleanReport(o.baseSha);
+    };
+    await checkPhase({ ...base, log: () => {}, runBaseline });
+    await checkPhase({ ...base, log: () => {}, runBaseline, baselineCachePath: join(worktree, 'bc.json') });
+    expect(caches[0]).toBeUndefined();
+    expect(caches[1]).toBeInstanceOf(BaselineCache);
+  });
+
+  it('marks cached baseline entries in the log (#1926)', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    const logs: string[] = [];
+    await checkPhase({
+      issue: 77,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      autoRework: false,
+      log: (type, msg) => {
+        if (type === 'check') logs.push(msg);
+      },
+      diffBase: 'abc1234567',
+      runBaseline: async (o) => ({
+        baseSha: o.baseSha,
+        checkers: [{ checker: 'tests', verdict: 'clean-on-base', baseResult: 'PASS', cached: true }],
+      }),
+    });
+    expect(logs.some((m) => m.includes('tests clean on base (cached)'))).toBe(true);
+  });
+
+  it('runs the baseline once even when rework rounds happen', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    let calls = 0;
+    const result = await checkPhase({
+      issue: 77,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      log: () => {},
+      maxReworkRounds: 2,
+      diffBase: 'abc1234567',
+      runBaseline: async (o) => {
+        calls++;
+        return cleanReport(o.baseSha);
+      },
+    });
+    expect(result.reworkRounds).toBeGreaterThan(0);
+    expect(calls).toBe(1);
+  });
+
+  it('survives a rejecting baseline and records the error', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    const result = await checkPhase({
+      issue: 77,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      log: () => {},
+      autoRework: false,
+      diffBase: 'abc1234567',
+      runBaseline: async () => {
+        throw new Error('boom');
+      },
+    });
+    expect(result.passed).toBe(false);
+    expect(result.baseline?.error).toBe('boom');
+  });
+
+  it('skips the baseline when diffBase is undefined', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    const logs: string[] = [];
+    let calls = 0;
+    const result = await checkPhase({
+      issue: 77,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      autoRework: false,
+      log: (_t, msg) => logs.push(msg),
+      runBaseline: async (o) => {
+        calls++;
+        return cleanReport(o.baseSha);
+      },
+    });
+    expect(calls).toBe(0);
+    expect(result.baseline).toBeUndefined();
+    expect(logs.some((m) => m.includes('baseline skipped'))).toBe(true);
+  });
+});
+
 describe('checkPhase auto rework', () => {
   it('uses the completed Codex route and model for rework', { timeout: 120_000 }, async () => {
     const { worktree, specPath } = await makeFailingWorktree();
@@ -126,6 +711,32 @@ describe('checkPhase auto rework', () => {
     expect(stub.calls).toHaveLength(1);
     expect(stub.calls[0]).toMatchObject({ task: 'build_codex', model: 'codex-worker' });
     expect(stub.calls.some((call) => call.task === 'build_claude')).toBe(false);
+  });
+
+  it('threads the per-run id into the rework worker env (#1910)', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    await writeFile(join(worktree, 'App.sln'), '');
+    const envs: unknown[] = [];
+    const fakeRouter = {
+      run: async (_task: string, _prompt: string, options: { env?: unknown }) => {
+        envs.push(options.env);
+        return { model: 'fake-model', output: 'done', exitCode: 0, attempts: [] };
+      },
+    } as any;
+
+    await checkPhase({
+      issue: 1910,
+      worktree,
+      specPath,
+      router: fakeRouter,
+      constitution: null,
+      log: () => {},
+      maxReworkRounds: 1,
+      runId: 'r1',
+    });
+
+    expect(envs).toHaveLength(1);
+    expect(envs[0]).toMatchObject({ SharedCompilationId: 'factory-r1', MSBUILDDISABLENODEREUSE: '1' });
   });
 
   it('parks before rework when a collectable worker diff is empty', { timeout: 120_000 }, async () => {

@@ -152,7 +152,7 @@ export interface DecompositionOutput {
 }
 
 /** The same fenced-then-raw-JSON extraction the router uses for tool call parsing. */
-function extractJsonObject(output: string): string | undefined {
+export function extractJsonObject(output: string): string | undefined {
   const fenced = output.match(/```(?:json)?\n([\s\S]*?)```/);
   if (fenced) return fenced[1].trim();
 

@@ -4,9 +4,10 @@ export type ParkReason = Extract<EventKind, 'escalate' | 'timeout' | 'fail' | 'c
 
 export type BuildRoute = 'codex' | 'claude' | 'opencode';
 
-/** A run's terminal outcome. Only the `parked` variant is produced today (by the CLI's
- *  LaneParkError); `shipped` / `ready` / `escalated` are defined here for later stories
- *  (#4, #5) that re-point the CLI supervisor and the sim onto this union. */
+/** A run's terminal outcome. `parked` is produced by the CLI's LaneParkError and `released`
+ *  by an environment-caused CHECK failure (#1928, not a park); `shipped` / `ready` /
+ *  `escalated` are defined here for later stories (#4, #5) that re-point the CLI
+ *  supervisor and the sim onto this union. */
 export type RunOutcome =
   | { state: 'shipped'; route: BuildRoute; branch: string; reworkRounds: number; prNumber: number }
   | { state: 'ready'; route: BuildRoute; branch: string; reworkRounds: number; prNumber?: number }
@@ -17,6 +18,21 @@ export type RunOutcome =
       branch?: string;
       reworkRounds?: number;
       prNumber?: number;
+      /** CHECK failure signature (same value recorded in rework-history.json) — set only when CHECK parked the run (#1917). */
+      failureSignature?: string;
+      /** Names of the checkers that FAILed in that CHECK — set only alongside failureSignature. */
+      failingChecks?: string[];
+    }
+  | {
+      state: 'released';
+      reason: 'environment';
+      route?: BuildRoute;
+      branch?: string;
+      reworkRounds: number;
+      /** Base SHA every failing checker also failed on (#1928). */
+      baseSha: string;
+      failingChecks: string[];
+      failureSignature?: string;
     }
   | { state: 'escalated'; reason: string; route?: BuildRoute; branch?: string; reworkRounds?: number };
 

@@ -12,20 +12,12 @@ import type { LogLevel } from '../types/index.js';
 
 export type EventKind =
   | 'activity_touch_failed'
-  | 'adr_commit_skipped'
   | 'adr_context'
   | 'adr_context_empty'
-  | 'adr_draft_rejected'
-  | 'adr_draft_skipped'
-  | 'adr_drafts'
-  | 'adr_duplicate_skipped'
-  | 'adr_index_skipped'
   | 'adr_inject_completed'
   | 'adr_inject_started'
-  | 'adr_push_failed'
   | 'adr_read_degraded'
   | 'adr_skipped'
-  | 'adr_written'
   | 'approval_granted'
   | 'approval_requested'
   | 'await-merge'
@@ -51,10 +43,12 @@ export type EventKind =
   | 'design_artifact_invalid'
   | 'design_artifact_received'
   | 'design_open_questions'
+  | 'design_regression_unresolved'
   | 'design_shallow'
   | 'engine-restarted'
   | 'environment_cleanup'
   | 'environment_conflict'
+  | 'environment_dotnet'
   | 'environment_lease'
   | 'environment_lease_failed'
   | 'environment_lease_reaped'
@@ -64,6 +58,7 @@ export type EventKind =
   | 'environment_release'
   | 'environment_release_failed'
   | 'environment_warning'
+  | 'environment-released'
   | 'escalate'
   | 'evidence'
   | 'fail'
@@ -83,11 +78,14 @@ export type EventKind =
   | 'land'
   | 'landed'
   | 'lane-done'
+  | 'lane-paused'
   | 'lane-start'
   | 'local-only'
   | 'local-only-complete'
   | 'lock-stolen'
   | 'merge-gated'
+  | 'merge-gated-override'
+  | 'pr-classified'
   | 'merged'
   | 'model-override'
   | 'model_override_ignored'
@@ -119,6 +117,7 @@ export type EventKind =
   | 'readiness_enrichment_succeeded'
   | 'ready'
   | 'recovered'
+  | 'remote-branch-preexisting'
   | 'resource_limit'
   | 'resume-approved'
   | 'resumed'
@@ -152,6 +151,10 @@ export type EventKind =
   | 'usage_coordinator_poll_empty'
   | 'usage_coordinator_poll_failed'
   | 'usage_coordinator_poll_succeeded'
+  | 'upstream_report_outboxed'
+  | 'upstream_report_sent'
+  | 'upstream_report_bumped'
+  | 'upstream_report_skipped'
   | 'warn'
   | 'watchdog'
   | 'work-source'
@@ -178,24 +181,36 @@ export interface EventTraits {
   laneStatus?: LaneStatus;
 }
 
+/** Payload of a `lane-paused` event. Two triggers: the lane circuit breaker
+ *  (#1906/#1916) stopped `lane` after `firstIssue` and then `secondIssue` parked in
+ *  a row with the same non-empty failure `signature`; or CHECK found every failing
+ *  checker also failing on the base (#1928, `cause: 'environment'`), where
+ *  `firstIssue === secondIssue` and `signature` is the CHECK failure signature
+ *  (`''` when missing). */
+export interface LanePausedPayload {
+  lane: string;
+  /** `failureSignature()` shared by both parks. */
+  signature: string;
+  /** Checker names that failed in both parks (e.g. ['tests','lint']). */
+  failingChecks: string[];
+  firstIssue: number;
+  secondIssue: number;
+  /** Absent for the signature breaker (#1928). */
+  cause?: 'environment';
+  /** Base SHA the failing checkers also failed on; set when `cause` is 'environment'. */
+  baseSha?: string;
+}
+
 /** Every existing `EventKind`, classified once. New kinds must be added here —
  *  omitting one is a compile error, which is the point (#663). */
 export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   activity_touch_failed: { severity: 'info', isPark: false, isTerminal: false },
-  adr_commit_skipped: { severity: 'info', isPark: false, isTerminal: false },
   adr_context: { severity: 'info', isPark: false, isTerminal: false },
   adr_context_empty: { severity: 'info', isPark: false, isTerminal: false },
-  adr_draft_rejected: { severity: 'info', isPark: false, isTerminal: false },
-  adr_draft_skipped: { severity: 'info', isPark: false, isTerminal: false },
-  adr_drafts: { severity: 'info', isPark: false, isTerminal: false },
-  adr_duplicate_skipped: { severity: 'warn', isPark: false, isTerminal: false },
-  adr_index_skipped: { severity: 'info', isPark: false, isTerminal: false },
   adr_inject_completed: { severity: 'info', isPark: false, isTerminal: false },
   adr_inject_started: { severity: 'info', isPark: false, isTerminal: false },
-  adr_push_failed: { severity: 'warn', isPark: false, isTerminal: false },
   adr_read_degraded: { severity: 'info', isPark: false, isTerminal: false },
   adr_skipped: { severity: 'info', isPark: false, isTerminal: false },
-  adr_written: { severity: 'info', isPark: false, isTerminal: false },
   approval_granted: { severity: 'info', isPark: false, isTerminal: false },
   approval_requested: { severity: 'warn', isPark: false, isTerminal: false },
   'await-merge': { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'waiting-merge' },
@@ -220,6 +235,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   design_artifact_emitted: { severity: 'info', isPark: false, isTerminal: false },
   design_artifact_invalid: { severity: 'warn', isPark: false, isTerminal: false },
   design_artifact_received: { severity: 'info', isPark: false, isTerminal: false },
+  design_regression_unresolved: { severity: 'warn', isPark: false, isTerminal: false },
   design_open_questions: { severity: 'warn', isPark: false, isTerminal: false },
   design_shallow: { severity: 'info', isPark: false, isTerminal: false },
   // factoryd restarted a stale in-process engine (#1178) — operational anomaly
@@ -227,6 +243,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'engine-restarted': { severity: 'warn', isPark: false, isTerminal: false },
   environment_cleanup: { severity: 'info', isPark: false, isTerminal: false },
   environment_conflict: { severity: 'warn', isPark: false, isTerminal: false },
+  environment_dotnet: { severity: 'info', isPark: false, isTerminal: false },
   environment_lease: { severity: 'info', isPark: false, isTerminal: false },
   environment_lease_failed: { severity: 'info', isPark: false, isTerminal: false },
   environment_lease_reaped: { severity: 'info', isPark: false, isTerminal: false },
@@ -236,6 +253,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   environment_release: { severity: 'info', isPark: false, isTerminal: false },
   environment_release_failed: { severity: 'info', isPark: false, isTerminal: false },
   environment_warning: { severity: 'warn', isPark: false, isTerminal: false },
+  'environment-released': { severity: 'warn', isPark: false, isTerminal: true },
   escalate: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
   evidence: { severity: 'info', isPark: false, isTerminal: false },
   fail: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
@@ -259,11 +277,17 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   land: { severity: 'info', isPark: false, isTerminal: false },
   landed: { severity: 'info', isPark: false, isTerminal: true, laneStatus: 'merged' },
   'lane-done': { severity: 'info', isPark: false, isTerminal: false },
+  // The lane circuit breaker stopped claiming issues (#1906). Not a park: both
+  // issues already logged their own park, so counting this too would double
+  // human-intervention KPIs. No laneStatus: LaneStatus has no paused state yet.
+  'lane-paused': { severity: 'warn', isPark: false, isTerminal: false },
   'lane-start': { severity: 'info', isPark: false, isTerminal: false },
   'local-only': { severity: 'info', isPark: false, isTerminal: false },
   'local-only-complete': { severity: 'info', isPark: false, isTerminal: false },
   'lock-stolen': { severity: 'info', isPark: false, isTerminal: false },
   'merge-gated': { severity: 'info', isPark: false, isTerminal: false },
+  'merge-gated-override': { severity: 'warn', isPark: false, isTerminal: false },
+  'pr-classified': { severity: 'info', isPark: false, isTerminal: false },
   merged: { severity: 'info', isPark: false, isTerminal: true },
   'model-override': { severity: 'info', isPark: false, isTerminal: false },
   model_override_ignored: { severity: 'warn', isPark: false, isTerminal: false },
@@ -295,6 +319,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   readiness_enrichment_succeeded: { severity: 'info', isPark: false, isTerminal: false },
   ready: { severity: 'info', isPark: false, isTerminal: true, laneStatus: 'ready' },
   recovered: { severity: 'info', isPark: false, isTerminal: false },
+  'remote-branch-preexisting': { severity: 'info', isPark: false, isTerminal: false },
   resource_limit: { severity: 'warn', isPark: false, isTerminal: false },
   'resume-approved': { severity: 'info', isPark: false, isTerminal: false },
   resumed: { severity: 'info', isPark: false, isTerminal: false },
@@ -330,6 +355,10 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   usage_coordinator_poll_empty: { severity: 'warn', isPark: false, isTerminal: false },
   usage_coordinator_poll_failed: { severity: 'warn', isPark: false, isTerminal: false },
   usage_coordinator_poll_succeeded: { severity: 'info', isPark: false, isTerminal: false },
+  upstream_report_outboxed: { severity: 'warn', isPark: false, isTerminal: false },
+  upstream_report_sent: { severity: 'info', isPark: false, isTerminal: false },
+  upstream_report_bumped: { severity: 'info', isPark: false, isTerminal: false },
+  upstream_report_skipped: { severity: 'info', isPark: false, isTerminal: false },
   warn: { severity: 'warn', isPark: false, isTerminal: false },
   watchdog: { severity: 'info', isPark: false, isTerminal: false },
   'work-source': { severity: 'info', isPark: false, isTerminal: false },

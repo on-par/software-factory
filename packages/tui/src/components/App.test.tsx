@@ -30,8 +30,8 @@ function makeFakeFollow() {
   };
 }
 
-function ev(type: EventKind, msg: string, issue = '192', ts = new Date().toISOString()): FactoryEvent {
-  return { ts, type, issue, msg };
+function ev(type: EventKind, msg: string, issue = '192', ts = new Date().toISOString(), lane?: string): FactoryEvent {
+  return lane ? { ts, type, issue, msg, lane } : { ts, type, issue, msg };
 }
 
 const failureEvidence: EvidencePack = {
@@ -186,7 +186,7 @@ describe('App', () => {
     await flush();
 
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('1 lane · 2 issues');
+    expect(frame).toContain('lane default');
     expect(frame).toContain('#296');
     expect(frame).toContain('#301');
   });
@@ -214,7 +214,8 @@ describe('App', () => {
     await flush();
 
     const dashboardFrame = lastFrame() ?? '';
-    expect(dashboardFrame).toContain('1 lane · 2 issues');
+    expect(dashboardFrame).toContain('lane default');
+    expect(dashboardFrame).not.toContain('esc back · q quit');
   });
 
   it('stops following when the user presses q from the dashboard or detail view', async () => {
@@ -374,7 +375,7 @@ describe('App', () => {
     const costsRead: CostsRead = {
       entries: [
         {
-          ts: 't1',
+          ts: '2026-01-01T00:05:00.000Z',
           issue: '296',
           task: 'build',
           model: 'claude-sonnet-5',
@@ -395,13 +396,24 @@ describe('App', () => {
       />,
     );
 
+    fake.push(ev('build', 'Starting build phase', '296', '2026-01-01T00:00:00.000Z'));
     stdin.write('3');
     await flush();
 
     const frame = lastFrame() ?? '';
     expect(frame).toContain('#296');
     expect(frame).toContain('⚠ skipped 1 malformed line(s) in costs.jsonl');
-    expect(frame).toContain('session total');
+    expect(frame).toContain('All-time (costs.jsonl)');
+    expect(frame).not.toContain('session total');
+    expect(frame).not.toContain('per-model —');
+
+    stdin.write('\r');
+    await flush();
+    expect(lastFrame()).toContain('per-model — #296');
+
+    stdin.write('\u001b');
+    await flush();
+    expect(lastFrame()).not.toContain('per-model —');
   });
 
   it('shows the Health tab breaker state and reveals Effective config/KPIs on e', async () => {
@@ -424,7 +436,7 @@ describe('App', () => {
     let frame = lastFrame() ?? '';
     expect(frame).toContain('[5 Health]');
     expect(frame).toContain('anthropic: OPEN (rate-limit)');
-    expect(frame).toContain('(Effective config and KPIs hidden — press e to view)');
+    expect(frame).toContain('(Effective config and full KPIs hidden — press e to view)');
 
     stdin.write('e');
     await flush();
@@ -432,6 +444,22 @@ describe('App', () => {
     frame = lastFrame() ?? '';
     expect(frame).toContain('router: default');
     expect(frame).toContain('KPIs:');
+  });
+
+  it('toggles the Health window with w', async () => {
+    const fake = makeFakeFollow();
+    const { lastFrame, stdin } = render(<App eventsFile="ignored" follow={fake.follow} />);
+    stdin.write('5');
+    await flush();
+    await flush();
+    expect(lastFrame()).toContain('this run');
+    expect(lastFrame()).toContain('Merge rate');
+    stdin.write('w');
+    await flush();
+    expect(lastFrame()).toContain('last 24h');
+    stdin.write('w');
+    await flush();
+    expect(lastFrame()).toContain('this run');
   });
 
   it('scrolls the Log tab with the up arrow and re-enables follow with f', async () => {
@@ -487,7 +515,7 @@ describe('App', () => {
 
     stdin.write('1'); // back to Dashboard tab
     await flush();
-    expect(lastFrame()).toContain('1 lane · 2 issues');
+    expect(lastFrame()).toContain('lane default');
   });
 
   it('resets a stale dashboard drill-down when leaving and returning to the Dashboard tab', async () => {
@@ -510,8 +538,142 @@ describe('App', () => {
     await flush();
 
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('1 lane · 2 issues');
+    expect(frame).toContain('lane default');
     expect(frame).not.toContain('esc back · q quit');
+  });
+});
+
+describe('App lane drill-down (#1743)', () => {
+  const down = '\x1B[B';
+  const esc = '\x1B';
+
+  async function setup() {
+    const fake = makeFakeFollow();
+    const utils = render(<App eventsFile="ignored" follow={fake.follow} />);
+    return { fake, ...utils };
+  }
+
+  it('opens the lane view directly for a single lane', async () => {
+    const { fake, lastFrame } = await setup();
+    for (const n of ['1706', '1707', '1708']) fake.push(ev('plan', 'Starting plan phase', n, undefined, 'prefix'));
+    await flush();
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('lane prefix');
+    expect(frame).not.toContain('LANE');
+    expect(frame).not.toContain('open lane');
+    expect(frame).not.toContain('esc lanes');
+  });
+
+  it('lists several lanes, one row per lane', async () => {
+    const { fake, lastFrame } = await setup();
+    fake.push(ev('plan', 'Starting plan phase', '1706', undefined, 'prefix'));
+    fake.push(ev('plan', 'Starting plan phase', '1707', undefined, 'prefix'));
+    fake.push(ev('plan', 'Starting plan phase', '1801', undefined, 'docs'));
+    await flush();
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('2 lanes');
+    expect(frame).toContain('prefix');
+    expect(frame).toContain('docs');
+    expect(frame).toContain('open lane');
+    expect(frame).not.toContain('#1706');
+  });
+
+  it('drills into the selected lane, esc returns with the same lane selected', async () => {
+    const { fake, lastFrame, stdin } = await setup();
+    fake.push(ev('plan', 'Starting plan phase', '1706', undefined, 'prefix'));
+    fake.push(ev('plan', 'Starting plan phase', '1801', undefined, 'docs'));
+    await flush();
+    stdin.write(down);
+    await flush();
+    stdin.write('\r');
+    await flush();
+    let frame = lastFrame() ?? '';
+    expect(frame).toContain('lane docs');
+    expect(frame).toContain('#1801');
+    expect(frame).not.toContain('#1706');
+
+    stdin.write(esc);
+    await flush();
+    await flush();
+    frame = lastFrame() ?? '';
+    expect(frame).toContain('open lane');
+    expect(frame.split('\n').find((l) => l.includes('❯'))).toContain('docs');
+  });
+
+  it('opens issue detail from the lane view and esc returns to the lane view', async () => {
+    const { fake, lastFrame, stdin } = await setup();
+    fake.push(ev('plan', 'Starting plan phase', '1706', undefined, 'prefix'));
+    fake.push(ev('plan', 'Starting plan phase', '1707', undefined, 'prefix'));
+    await flush();
+    stdin.write(down);
+    await flush();
+    stdin.write('\r');
+    await flush();
+    expect(lastFrame()).toContain('esc back · q quit');
+    stdin.write(esc);
+    await flush();
+    await flush();
+    expect(lastFrame()).toContain('lane prefix');
+    expect(lastFrame()).not.toContain('esc back · q quit');
+  });
+
+  it('lists the lane queue below the event-log rows and drops started issues', async () => {
+    const fake = makeFakeFollow();
+    const queueReader: QueueReader = {
+      source: 'GitHub',
+      read: () => ({
+        entries: [
+          { lane: 'prefix', issue: 1801 },
+          { lane: 'prefix', issue: 1802 },
+        ],
+      }),
+    };
+    const { lastFrame } = render(<App eventsFile="ignored" follow={fake.follow} queueReader={queueReader} />);
+    fake.push(ev('plan', 'Starting plan phase', '1706', undefined, 'prefix'));
+    fake.push(ev('plan', 'Starting plan phase', '1707', undefined, 'prefix'));
+    await flush();
+    await flush();
+    expect(lastFrame()).toMatch(/queued \(1\) #1801[\s\S]*queued \(2\) #1802/);
+    fake.push(ev('plan', 'Starting plan phase', '1801', undefined, 'prefix'));
+    await flush();
+    await flush();
+    const frame = lastFrame() ?? '';
+    expect(frame.split('#1801').length - 1).toBe(1);
+    expect(frame).toContain('queued (1) #1802');
+  });
+
+  it('shows queue unavailable when the queue read throws', async () => {
+    const fake = makeFakeFollow();
+    const queueReader: QueueReader = {
+      source: 'GitHub',
+      read: () => {
+        throw new Error('nope');
+      },
+    };
+    const { lastFrame } = render(<App eventsFile="ignored" follow={fake.follow} queueReader={queueReader} />);
+    fake.push(ev('plan', 'Starting plan phase', '1706', undefined, 'prefix'));
+    fake.push(ev('plan', 'Starting plan phase', '1707', undefined, 'prefix'));
+    await flush();
+    await flush();
+    expect(lastFrame()).toContain('queue unavailable');
+  });
+
+  it('collapses merged issues and expands them on m', async () => {
+    const { fake, lastFrame, stdin } = await setup();
+    for (const n of ['1706', '1707', '1708', '1709']) {
+      fake.push(ev('plan', 'Starting plan phase', n, undefined, 'prefix'));
+      fake.push(ev('merged', 'merged', n, undefined, 'prefix'));
+    }
+    fake.push(ev('plan', 'Starting plan phase', '1710', undefined, 'prefix'));
+    await flush();
+    let frame = lastFrame() ?? '';
+    expect(frame).toContain('✔ 4 merged');
+    expect(frame).not.toContain('#1707');
+    stdin.write('m');
+    await flush();
+    await flush();
+    frame = lastFrame() ?? '';
+    expect(frame).toContain('#1707');
   });
 });
 

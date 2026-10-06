@@ -95,4 +95,78 @@ describe('DesignArtifactSchema', () => {
     expect(parsed.signatures).toEqual([]);
     expect(parsed.callGraph).toEqual([]);
   });
+
+  describe('edgeInputs/behaviorDelta/externalLists', () => {
+    const row = {
+      input: 'null design key',
+      branch: 'parse',
+      before: 'fails',
+      after: 'undefined',
+      verdict: 'better' as const,
+    };
+    const list = {
+      name: 'ParkReason',
+      location: 'packages/core/src/park.ts',
+      source: 'hand-maintained enum',
+      gaps: ['no held-on-merge value'],
+    };
+    const extended = {
+      ...validDesign,
+      edgeInputs: ['empty issue body', 'unicode title'],
+      behaviorDelta: [row],
+      externalLists: [list],
+    };
+
+    it('validates and preserves the new fields, including through serde', () => {
+      const parsed = DesignArtifactSchema.parse(extended);
+      expect(parsed.edgeInputs).toEqual(extended.edgeInputs);
+      expect(parsed.behaviorDelta).toEqual(extended.behaviorDelta);
+      expect(parsed.externalLists).toEqual(extended.externalLists);
+      const raw = serialize(DesignArtifactSchema, extended);
+      expect(deserialize(DesignArtifactSchema, raw)).toEqual(extended);
+    });
+
+    it('still validates old artifacts, leaving the fields undefined', () => {
+      const parsed = DesignArtifactSchema.parse(validDesign);
+      expect(parsed.edgeInputs).toBeUndefined();
+      expect(parsed.behaviorDelta).toBeUndefined();
+      expect(parsed.externalLists).toBeUndefined();
+    });
+
+    it('parses bare YAML keys (null) to undefined', () => {
+      const parsed = DesignArtifactSchema.parse({
+        ...validDesign,
+        edgeInputs: null,
+        behaviorDelta: null,
+        externalLists: null,
+      });
+      expect(parsed.edgeInputs).toBeUndefined();
+      expect(parsed.behaviorDelta).toBeUndefined();
+      expect(parsed.externalLists).toBeUndefined();
+    });
+
+    it('rejects an invalid verdict with a path to the verdict', () => {
+      const result = DesignArtifactSchema.safeParse({ ...validDesign, behaviorDelta: [{ ...row, verdict: 'meh' }] });
+      expect(result.success).toBe(false);
+      expect(
+        result.error?.issues.some((i) => JSON.stringify(i.path) === JSON.stringify(['behaviorDelta', 0, 'verdict'])),
+      ).toBe(true);
+    });
+
+    it.each(['same', 'better', 'worse', 'unknown'])('accepts verdict %s', (verdict) => {
+      expect(() => DesignArtifactSchema.parse({ ...validDesign, behaviorDelta: [{ ...row, verdict }] })).not.toThrow();
+    });
+
+    it('enforces required sub-fields', () => {
+      const { source, ...noSource } = list;
+      void source;
+      expect(() => DesignArtifactSchema.parse({ ...validDesign, externalLists: [noSource] })).toThrow();
+      expect(() =>
+        DesignArtifactSchema.parse({ ...validDesign, externalLists: [{ ...list, gaps: [] }] }),
+      ).not.toThrow();
+      const { verdict, ...noVerdict } = row;
+      void verdict;
+      expect(() => DesignArtifactSchema.parse({ ...validDesign, behaviorDelta: [noVerdict] })).toThrow();
+    });
+  });
 });

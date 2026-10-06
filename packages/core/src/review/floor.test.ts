@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  applyReviewFloorOverrides,
   computeReviewFloor,
   DEFAULT_REVIEW_FLOOR_RULES,
   type ReviewFloorPathChange,
@@ -124,5 +125,53 @@ describe('computeReviewFloor', () => {
     const copy = structuredClone(changes);
     computeReviewFloor({ changes });
     expect(changes).toEqual(copy);
+  });
+});
+
+describe('applyReviewFloorOverrides', () => {
+  const floorWith = (o: Parameters<typeof applyReviewFloorOverrides>[0], ...paths: string[]) =>
+    computeReviewFloor({ changes: paths.map((p) => change(p)), rules: applyReviewFloorOverrides(o) });
+
+  it('returns the base rules unchanged when nothing is set', () => {
+    expect(applyReviewFloorOverrides(undefined)).toBe(DEFAULT_REVIEW_FLOOR_RULES);
+    expect(applyReviewFloorOverrides({})).toBe(DEFAULT_REVIEW_FLOOR_RULES);
+  });
+
+  it('alwaysHuman adds a C rule and keeps every packaged C rule', () => {
+    const r = floorWith({ alwaysHuman: ['infra/', './Ops\\'] }, 'infra/main.tf');
+    expect(r.floor).toBe('C');
+    expect(ids(r)).toContain('repo-always-human');
+    expect(floorWith({ alwaysHuman: ['ops/'] }, 'ops/x.txt').floor).toBe('C');
+    const merged = applyReviewFloorOverrides({ alwaysHuman: ['infra/'] });
+    const packagedC = DEFAULT_REVIEW_FLOOR_RULES.rules.filter((x) => x.class === 'C').map((x) => x.id);
+    expect(merged.rules.map((x) => x.id)).toEqual(expect.arrayContaining(packagedC));
+  });
+
+  it('an empty alwaysHuman adds no rule', () => {
+    expect(applyReviewFloorOverrides({ alwaysHuman: [] }).rules.map((x) => x.id)).not.toContain('repo-always-human');
+  });
+
+  it('matches globs against the whole path', () => {
+    expect(floorWith({ alwaysHuman: ['**/*.tf'] }, 'modules/net/main.tf').floor).toBe('C');
+    expect(floorWith({ alwaysHuman: ['**/*.tf'] }, 'main.tf').floor).toBe('C');
+    expect(floorWith({ alwaysHuman: ['*.tf'] }, 'a.tf').floor).toBe('C');
+    expect(floorWith({ alwaysHuman: ['*.tf'] }, 'a/b.tf').floor).toBe('B');
+    expect(floorWith({ alwaysHuman: ['a/?.x', 'v1.0/**'] }, 'a/b.x').floor).toBe('C');
+    expect(floorWith({ alwaysHuman: ['a/?.x'] }, 'a/bc.x').floor).toBe('B');
+    expect(floorWith({ alwaysHuman: ['v1.0/**'] }, 'v1x0/y').floor).toBe('B');
+  });
+
+  it('autoEligible replaces the packaged A rules', () => {
+    expect(floorWith({ autoEligible: ['site/'] }, 'site/index.html').floor).toBe('A');
+    expect(floorWith({ autoEligible: ['site/'] }, 'docs/x.md').floor).toBe('B');
+    expect(floorWith({ autoEligible: [] }, 'docs/x.md').floor).toBe('B');
+    expect(floorWith({ maxDiffLines: 5 }, 'docs/x.md').floor).toBe('A');
+  });
+
+  it('maxDiffLines replaces maxLines', () => {
+    const rules = applyReviewFloorOverrides({ maxDiffLines: 10 });
+    expect(rules.maxLines).toBe(10);
+    expect(computeReviewFloor({ changes: [change('docs/x.md', 11)], rules }).floor).toBe('B');
+    expect(applyReviewFloorOverrides({ alwaysHuman: ['x/'] }).maxLines).toBe(DEFAULT_REVIEW_FLOOR_RULES.maxLines);
   });
 });

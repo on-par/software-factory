@@ -14,13 +14,31 @@ import { HarnessError } from './index.js';
 
 export type CodexExecFn = ExecFn;
 
+/** Injectable temp-file I/O for CodexCliHarness; each field defaults to node:fs/promises. */
+export interface CodexFsDeps {
+  writeFile?: (path: string, data: string) => Promise<void>;
+  readFile?: (path: string, encoding: 'utf-8') => Promise<string>;
+  unlink?: (path: string) => Promise<void>;
+}
+
 /** Runs a model via the Codex CLI:
  *  codex exec --json --sandbox <mode> -c approval_policy=never -C <worktree> [flags] -o <output> - < <prompt> */
 export class CodexCliHarness implements CodingHarness {
   readonly id = 'codex-cli';
   readonly agentic = true;
 
-  constructor(private execFn: CodexExecFn = defaultExecFn) {}
+  private readonly writeFile: (path: string, data: string) => Promise<void>;
+  private readonly readFile: (path: string, encoding: 'utf-8') => Promise<string>;
+  private readonly unlink: (path: string) => Promise<void>;
+
+  constructor(
+    private execFn: CodexExecFn = defaultExecFn,
+    fs: CodexFsDeps = {},
+  ) {
+    this.writeFile = fs.writeFile ?? writeFile;
+    this.readFile = fs.readFile ?? readFile;
+    this.unlink = fs.unlink ?? unlink;
+  }
 
   async run(request: HarnessRequest): Promise<HarnessResult> {
     const { model, prompt, worktree, timeoutSeconds, registry, sandbox, env, onPgid } = request;
@@ -29,9 +47,9 @@ export class CodexCliHarness implements CodingHarness {
     // Codex applies repeated config overrides in order; preserve arbitrary profile flags.
     const extraFlag = effort === undefined ? flags : `${flags} -c ${shellEscape(`model_reasoning_effort=${effort}`)}`;
 
-    const tmpFile = await mktemp(join(tmpdir(), 'factory-codex-'));
-    const outFile = await mktemp(join(tmpdir(), 'factory-codex-out-'));
-    await writeFile(tmpFile, prompt);
+    const tmpFile = await mktemp(join(tmpdir(), 'factory-codex-'), this.writeFile);
+    const outFile = await mktemp(join(tmpdir(), 'factory-codex-out-'), this.writeFile);
+    await this.writeFile(tmpFile, prompt);
 
     // With an outer containment sandbox, codex runs workspace-write inside it. Without one,
     // workspace-write is codex's own restriction and blocks legitimate writes, so the run
@@ -63,7 +81,7 @@ export class CodexCliHarness implements CodingHarness {
         });
       }
       assertServedModelMatches(extraFlag, execResult.stderr);
-      const output = await readFile(outFile, 'utf-8').catch(() => '');
+      const output = await this.readFile(outFile, 'utf-8').catch(() => '');
       if (output.trim().length === 0) {
         throw new HarnessError('codex CLI returned empty output', 'empty_response', { exitCode: 0 });
       }
@@ -71,15 +89,15 @@ export class CodexCliHarness implements CodingHarness {
       return { output, ...(usage ? { usage } : {}) };
     } finally {
       // Cleanup temp files (remove, don't zero out)
-      await unlink(tmpFile).catch(() => {});
-      await unlink(outFile).catch(() => {});
+      await this.unlink(tmpFile).catch(() => {});
+      await this.unlink(outFile).catch(() => {});
     }
   }
 }
 
-async function mktemp(prefix: string): Promise<string> {
+async function mktemp(prefix: string, write: (path: string, data: string) => Promise<void>): Promise<string> {
   const path = `${prefix}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  await writeFile(path, '');
+  await write(path, '');
   return path;
 }
 

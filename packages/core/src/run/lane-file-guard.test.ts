@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -137,5 +137,37 @@ describe('LaneFileGuard', () => {
     const guard = new LaneFileGuard(file);
 
     await expect(guard.release('acme/repo', 999)).resolves.toBeUndefined();
+  });
+
+  it('releaseIssue removes the issue claims across repos and leaves others alone', async () => {
+    const guard = new LaneFileGuard(await tmpFile());
+    await guard.register('acme/repo', 100, ['src/a.ts']);
+    await guard.register('other/repo', 100, ['src/b.ts']);
+    await guard.register('acme/repo', 200, ['src/a.ts']);
+
+    await expect(guard.releaseIssue(100)).resolves.toBe(true);
+
+    expect(await guard.findCollision('acme/repo', 300, ['src/b.ts'])).toBeUndefined();
+    expect(await guard.findCollision('acme/repo', 300, ['src/a.ts'])).toEqual({ issue: 200, file: 'src/a.ts' });
+  });
+
+  it('claimsForIssue returns the issue claims across repos without changing the file', async () => {
+    const file = await tmpFile();
+    const guard = new LaneFileGuard(file);
+    await guard.register('acme/repo', 100, ['src/a.ts']);
+    await guard.register('other/repo', 100, ['src/b.ts']);
+    await guard.register('acme/repo', 200, ['src/a.ts']);
+    const before = await readFile(file, 'utf-8');
+
+    const claims = await guard.claimsForIssue(100);
+
+    expect(claims.map((c) => c.repo).sort()).toEqual(['acme/repo', 'other/repo']);
+    expect(await guard.claimsForIssue(999)).toEqual([]);
+    expect(await readFile(file, 'utf-8')).toBe(before);
+  });
+
+  it('releaseIssue resolves false when the issue has no claim', async () => {
+    const guard = new LaneFileGuard(await tmpFile());
+    await expect(guard.releaseIssue(999)).resolves.toBe(false);
   });
 });

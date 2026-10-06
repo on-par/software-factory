@@ -23,12 +23,11 @@ afterEach(async () => {
 });
 
 describe('specPaths', () => {
-  it('derives all four artifact paths from the spec path, including md identity', () => {
+  it('derives all three artifact paths from the spec path, including md identity', () => {
     expect(specPaths('/x/plans/issue-N.md')).toEqual({
       md: '/x/plans/issue-N.md',
       designJson: '/x/plans/issue-N.design.json',
       designMd: '/x/plans/issue-N.design.md',
-      adr: '/x/plans/issue-N.adr.json',
     });
   });
 });
@@ -93,7 +92,7 @@ describe('readSpec / writeSpec', () => {
     await expect(readSpec(join(dir, 'missing.md'))).rejects.toThrow();
   });
 
-  it('round-trips body, data, and all three sidecars', async () => {
+  it('round-trips body, data, and both sidecars', async () => {
     const dir = await tempDir();
     const specPath = join(dir, 'issue-1.md');
     await writeSpec(specPath, {
@@ -101,7 +100,6 @@ describe('readSpec / writeSpec', () => {
       data: { route: 'codex', design: { restatedProblem: 'p' } },
       designJson: JSON.stringify({ restatedProblem: 'p' }, null, 2),
       designMd: '## Design artifact (#1)',
-      adrDrafts: JSON.stringify([{ title: 'Record ADR drafts', status: 'proposed' }], null, 2),
     });
 
     const parsed = await readSpec(specPath);
@@ -114,7 +112,6 @@ describe('readSpec / writeSpec', () => {
     const paths = specPaths(specPath);
     await expect(readFile(paths.designJson, 'utf-8')).resolves.toContain('restatedProblem');
     await expect(readFile(paths.designMd, 'utf-8')).resolves.toBe('## Design artifact (#1)');
-    await expect(readFile(paths.adr, 'utf-8')).resolves.toContain('Record ADR drafts');
   });
 
   it('writes the body raw when data is absent or empty', async () => {
@@ -137,32 +134,30 @@ describe('readSpec / writeSpec', () => {
     await expect(readFile(specPath, 'utf-8')).resolves.toContain('route: claude');
     await expect(readFile(specPaths(specPath).designMd, 'utf-8')).resolves.toBe('## Design artifact (#3)');
     expect(existsSync(specPaths(specPath).designJson)).toBe(false);
-    expect(existsSync(specPaths(specPath).adr)).toBe(false);
   });
 });
 
 describe('archiveSpec', () => {
-  it('archives all four present files into .archive under a shared timestamp prefix', async () => {
+  it('archives all three present files into .archive under a shared timestamp prefix', async () => {
     const dir = await tempDir();
     const specPath = join(dir, 'issue-4.md');
     const paths = specPaths(specPath);
     await writeFile(specPath, '---\nroute: codex\n---\n# Spec\n');
     await writeFile(paths.designJson, '{}');
     await writeFile(paths.designMd, '## md');
-    await writeFile(paths.adr, '[]');
 
     const archived = await archiveSpec(specPath);
 
-    expect(archived).toHaveLength(4);
+    expect(archived).toHaveLength(3);
     const prefixes = archived.map((p) => basename(p).split('-')[0]);
     expect(new Set(prefixes).size).toBe(1);
-    for (const file of ['issue-4.md', 'issue-4.design.json', 'issue-4.design.md', 'issue-4.adr.json']) {
+    for (const file of ['issue-4.md', 'issue-4.design.json', 'issue-4.design.md']) {
       expect(existsSync(join(dir, '.archive', `${prefixes[0]}-${file}`))).toBe(true);
       expect(existsSync(join(dir, file))).toBe(false);
     }
   });
 
-  it('returns [] when none of the four files exist', async () => {
+  it('returns [] when none of the three files exist', async () => {
     const dir = await tempDir();
     await expect(archiveSpec(join(dir, 'nothing.md'))).resolves.toEqual([]);
   });
@@ -170,12 +165,12 @@ describe('archiveSpec', () => {
   it('archives an orphaned sidecar even when the spec .md is missing', async () => {
     const dir = await tempDir();
     const specPath = join(dir, 'issue-5.md');
-    await writeFile(specPaths(specPath).adr, '[]');
+    await writeFile(specPaths(specPath).designJson, '{}');
 
     const archived = await archiveSpec(specPath);
 
     expect(archived).toHaveLength(1);
-    expect(archived[0]).toContain('issue-5.adr.json');
+    expect(archived[0]).toContain('issue-5.design.json');
     expect(existsSync(specPath)).toBe(false);
   });
 });

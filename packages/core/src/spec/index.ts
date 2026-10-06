@@ -1,8 +1,8 @@
 // src/spec/index.ts — the frozen-spec artifact set (#666): owns every path in the
-// four-file family (.factory/plans/issue-N.md plus the design JSON/MD and ADR-drafts
-// sidecars), the single route-normalization site, the only writer of the set, and the
-// archive rule. All six former consumers (plan, eval/score, eval/golden, sim/regressions,
-// design, adr/write) route through this module.
+// three-file family (.factory/plans/issue-N.md plus the design JSON/MD sidecars), the
+// single route-normalization site, the only writer of the set, and the archive rule.
+// Every consumer (plan, eval/score, eval/golden, sim/regressions, design) routes through
+// this module.
 
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
@@ -17,8 +17,6 @@ export interface SpecPaths {
   designJson: string;
   /** <base>.design.md */
   designMd: string;
-  /** <base>.adr.json */
-  adr: string;
 }
 
 export function specPaths(specPath: string): SpecPaths {
@@ -27,7 +25,6 @@ export function specPaths(specPath: string): SpecPaths {
     md: specPath,
     designJson: `${base}.design.json`,
     designMd: `${base}.design.md`,
-    adr: `${base}.adr.json`,
   };
 }
 
@@ -80,8 +77,6 @@ export interface WriteSpecInput {
   designJson?: string;
   /** Pre-rendered <base>.design.md content. */
   designMd?: string;
-  /** Pre-rendered <base>.adr.json content. */
-  adrDrafts?: string;
 }
 
 /** The only writer of the artifact set. Sidecar fields are pre-rendered strings. */
@@ -96,7 +91,6 @@ export async function writeSpec(specPath: string, spec: WriteSpecInput): Promise
   const sidecars: Array<{ path: string; content?: string }> = [
     { path: paths.designJson, content: spec.designJson },
     { path: paths.designMd, content: spec.designMd },
-    { path: paths.adr, content: spec.adrDrafts },
   ];
   for (const { path, content } of sidecars) {
     if (content === undefined) continue;
@@ -105,7 +99,7 @@ export async function writeSpec(specPath: string, spec: WriteSpecInput): Promise
   }
 }
 
-/** Archives every present member of the four-file set under .archive with one timestamp. */
+/** Archives every present member of the three-file set under .archive with one timestamp. */
 export async function archiveSpec(specPath: string): Promise<string[]> {
   const files = Object.values(specPaths(specPath)).filter((file) => existsSync(file));
   if (files.length === 0) return [];

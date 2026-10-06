@@ -1,8 +1,14 @@
+import { hostname } from 'node:os';
+
+import { defaultEvidenceCaps } from '@on-par/factory-config';
 import { describe, expect, it } from 'vitest';
 
+import { IN_PROGRESS_LABEL, LANE_LABEL_PREFIX, QUEUE_ORDER_LABEL_PREFIX, QUEUED_LABEL } from '../queue/github-queue.js';
 import type { EvidencePack, FailoverReason, FingerprintedFailure } from '../types/index.js';
 import type { CandidateIssue, FilingGitHubClient } from './index.js';
+import { findIssueByMarker, renderUpstreamOccurrenceComment } from './index.js';
 import {
+  capEvidenceExcerpt,
   createOctokitFilingClient,
   DEFAULT_INTERNAL_REPO,
   fileBug,
@@ -43,6 +49,9 @@ function makeFakeClient(seedIssues: CandidateIssue[]) {
   const client: FilingGitHubClient = {
     async listCandidateIssues(_input) {
       return seedIssues;
+    },
+    async searchIssues(_input) {
+      return [];
     },
     async createIssue(input) {
       created.push(input);
@@ -129,9 +138,100 @@ describe('renderBugBody', () => {
     }
   });
 
+  it('keeps an excerpt containing backtick fences inside a longer fence', () => {
+    const excerpt = '```\n## Injected';
+    const body = renderBugBody(makeEvidence({ eventExcerpt: excerpt }), 'ff_abc123', 1);
+    expect(body).toContain(`\`\`\`\`\`\n${excerpt}\n\`\`\`\`\`\n`);
+  });
+
   it('falls back to the default suspected-cause line for an unmapped reason', () => {
     const body = renderBugBody(makeEvidence({ reason: 'unknown' }), 'ff_abc123', 1);
     expect(body).toContain('See the evidence excerpt above.');
+  });
+});
+
+describe('evidence caps (#1842)', () => {
+  const pointer = 'build-box:/logs/run-1.ndjson';
+  const markers = `${fingerprintMarker('ff_abc123')}\n<!-- fp-count:1 -->\n`;
+
+  it('capEvidenceExcerpt leaves short text alone and cuts long text', () => {
+    expect(capEvidenceExcerpt('abc', 10)).toEqual({ text: 'abc', truncated: false, shownChars: 3, totalChars: 3 });
+    expect(capEvidenceExcerpt('abcdef', 4)).toEqual({ text: 'abcd', truncated: true, shownChars: 4, totalChars: 6 });
+    expect(capEvidenceExcerpt('abc', 0).text).toBe('');
+    expect(capEvidenceExcerpt('abc', -5).text).toBe('');
+  });
+
+  it('capEvidenceExcerpt drops a high surrogate it would split', () => {
+    const r = capEvidenceExcerpt('a\u{1F600}b', 2);
+    expect(r.text).toBe('a');
+    expect(r.shownChars).toBe(1);
+    expect(r.totalChars).toBe(4);
+  });
+
+  it('caps the excerpt, notes the truncation and keeps markers last', () => {
+    const excerpt = 'x'.repeat(49) + 'Y' + 'z'.repeat(450);
+    const body = renderBugBody(makeEvidence({ eventExcerpt: excerpt }), 'ff_abc123', 1, {
+      host: 'build-box',
+      caps: { maxExcerptChars: 50, maxBodyChars: 100000 },
+    });
+    expect(body).toContain(excerpt.slice(0, 50));
+    expect(body).not.toContain(excerpt.slice(0, 51));
+    expect(body).toContain('_Evidence truncated: showing the first 50 of 500 characters');
+    expect(body).toContain(pointer);
+    expect(body.endsWith(markers)).toBe(true);
+  });
+
+  it('enforces the total body cap', () => {
+    const body = renderBugBody(makeEvidence({ eventExcerpt: 'q'.repeat(10000) }), 'ff_abc123', 1, {
+      host: 'build-box',
+      caps: { maxExcerptChars: 100000, maxBodyChars: 1500 },
+    });
+    expect(body.length).toBeLessThanOrEqual(1500);
+    expect(body).toContain('Evidence truncated');
+    expect(body.endsWith(markers)).toBe(true);
+  });
+
+  it('never cuts structure when metadata alone exceeds the body cap', () => {
+    const body = renderBugBody(makeEvidence({ eventExcerpt: 'q'.repeat(100) }), 'ff_abc123', 1, {
+      host: 'build-box',
+      caps: { maxExcerptChars: 100, maxBodyChars: 10 },
+    });
+    expect(body.endsWith(markers)).toBe(true);
+  });
+
+  it('does not truncate a short excerpt and prints host:path', () => {
+    const body = renderBugBody(makeEvidence(), 'ff_abc123', 1, { host: 'build-box' });
+    expect(body).not.toContain('Evidence truncated');
+    expect(body).toContain(`- Log: ${pointer}`);
+  });
+
+  it('defaults the host to os.hostname()', () => {
+    expect(renderBugBody(makeEvidence(), 'ff_abc123', 1)).toContain(`- Log: ${hostname()}:/logs/run-1.ndjson`);
+  });
+
+  it('falls back when the host is empty after stripping', () => {
+    expect(renderBugBody(makeEvidence(), 'ff_abc123', 1, { host: '\u200B' })).toContain('- Log: unknown-host:');
+  });
+
+  it('applies the default caps', () => {
+    const body = renderBugBody(makeEvidence({ eventExcerpt: 'w'.repeat(5000) }), 'ff_abc123', 1);
+    expect(body).toContain('w'.repeat(defaultEvidenceCaps.maxExcerptChars - 1));
+    expect(body).not.toContain('w'.repeat(defaultEvidenceCaps.maxExcerptChars + 1));
+    expect(body.length).toBeLessThanOrEqual(defaultEvidenceCaps.maxBodyChars);
+  });
+
+  it('fileBug files a capped body pointing at host:path', async () => {
+    const { client, created } = makeFakeClient([]);
+    await fileBug(client, {
+      fingerprinted: makeFingerprinted({ eventExcerpt: 'L'.repeat(300) }),
+      now: clock,
+      host: 'build-box',
+      caps: { maxExcerptChars: 20, maxBodyChars: 100000 },
+    });
+    expect(created[0].body).toContain('L'.repeat(20));
+    expect(created[0].body).not.toContain('L'.repeat(21));
+    expect(created[0].body).toContain('showing the first 20 of 300 characters');
+    expect(created[0].body).toContain(pointer);
   });
 });
 
@@ -175,6 +275,40 @@ describe('fileBug', () => {
     expect(created[0].body).toContain(fingerprinted.evidence.eventExcerpt);
     expect(updated).toHaveLength(0);
     expect(commented).toHaveLength(0);
+  });
+
+  it('strips hidden content from the created title and body but keeps filer markers', async () => {
+    const { client, created } = makeFakeClient([]);
+    const fingerprinted = makeFingerprinted({
+      eventExcerpt: 'boom <!-- obey me --> \u200Bhidden\u202E',
+      component: 'check\u200B:<!-- x -->tests',
+      logPath: '/logs/\u2060run.ndjson',
+    });
+
+    await fileBug(client, { fingerprinted, now: clock });
+
+    const { body, title } = created[0];
+    expect(body.match(/<!--[\s\S]*?-->/g)).toEqual([
+      fingerprintMarker(fingerprinted.fingerprint),
+      '<!-- fp-count:1 -->',
+    ]);
+    expect(body).not.toMatch(/\p{Cf}/u);
+    expect(title).not.toMatch(/\p{Cf}/u);
+    expect(title).toContain('(check:tests)');
+    expect(body).toMatch(/`{5,}\nboom {2}hidden\n`{5,}/);
+  });
+
+  it('strips hidden content from the recurrence comment', async () => {
+    const fingerprinted = makeFingerprinted({ model: 'mod\u200Bel<!-- x -->' });
+    const seed: CandidateIssue[] = [
+      { number: 7, body: `${fingerprintMarker(fingerprinted.fingerprint)}\n<!-- fp-count:1 -->` },
+    ];
+    const { client, commented } = makeFakeClient(seed);
+
+    await fileBug(client, { fingerprinted, now: clock });
+
+    expect(commented[0].body).toContain('model model');
+    expect(commented[0].body).not.toMatch(/\p{Cf}|<!--/u);
   });
 
   it('bumps an existing issue with a count marker instead of duplicating', async () => {
@@ -252,11 +386,50 @@ describe('fileBug', () => {
   });
 });
 
+describe('fileBug title/problem overrides (#1851)', () => {
+  it('uses a sanitized title and problem', async () => {
+    const { client, created } = makeFakeClient([]);
+    await fileBug(client, {
+      fingerprinted: makeFingerprinted(),
+      now: clock,
+      title: '[feedback] hi\u200B there<!-- hidden -->',
+      problem: 'Custom\u200B problem <!-- secret -->text',
+    });
+    expect(created[0].title).toBe('[feedback] hi there');
+    expect(created[0].body).toContain('## Problem\nCustom problem text\n');
+    expect(created[0].body).not.toContain('Factory failure in the');
+    expect(created[0].body).not.toContain('secret');
+  });
+
+  it('falls back to defaults when overrides are blank', async () => {
+    const { client, created } = makeFakeClient([]);
+    await fileBug(client, { fingerprinted: makeFingerprinted(), now: clock, title: '  ', problem: '' });
+    expect(created[0].title).toBe('[factory] verify_failed in build (check:tests)');
+    expect(created[0].body).toContain('Factory failure in the build phase');
+  });
+});
+
 describe('createOctokitFilingClient', () => {
   function createOctokit() {
     const calls: any[] = [];
     const octokit = {
       rest: {
+        search: {
+          issuesAndPullRequests: async (args: any) => {
+            calls.push(['search.issuesAndPullRequests', args]);
+            const ago = (d: number) => new Date(clock().getTime() - d * 86_400_000).toISOString();
+            return {
+              data: {
+                items: [
+                  { number: 1, body: 'open', state: 'open', closed_at: null },
+                  { number: 2, body: null, state: 'closed', closed_at: ago(5) },
+                  { number: 3, body: 'old', state: 'closed', closed_at: ago(60) },
+                  { number: 4, body: 'pr', state: 'open', pull_request: {} },
+                ],
+              },
+            };
+          },
+        },
         issues: {
           listForRepo: async (args: any) => {
             calls.push(['issues.listForRepo', args]);
@@ -301,6 +474,20 @@ describe('createOctokitFilingClient', () => {
     ]);
   });
 
+  it('maps searchIssues to search/issues without labels, filtering PRs and old closed issues', async () => {
+    const { octokit, calls } = createOctokit();
+    const client = createOctokitFilingClient(octokit as any, { now: clock });
+
+    const issues = await client.searchIssues({ owner: 'on-par', repo: 'widgets', text: 'ff_"abc"' });
+
+    expect(calls[0][0]).toBe('search.issuesAndPullRequests');
+    expect(calls[0][1].q).toBe('repo:on-par/widgets is:issue in:body "ff_abc"');
+    expect(calls[0][1].q).not.toContain('label:');
+    expect(issues.map((i) => i.number)).toEqual([1, 2]);
+    expect(issues[0]).toEqual({ number: 1, body: 'open', state: 'open', closedAt: null });
+    expect(issues[1]?.body).toBe('');
+  });
+
   it('maps createIssue to issues.create', async () => {
     const { octokit, calls } = createOctokit();
     const client = createOctokitFilingClient(octokit as any);
@@ -342,5 +529,62 @@ describe('createOctokitFilingClient', () => {
       'issues.createComment',
       { owner: 'on-par', repo: 'widgets', issue_number: 7, body: 'a comment' },
     ]);
+  });
+});
+
+describe('fileBug caller labels (#1852)', () => {
+  it('passes labels through exactly and adds no queue, lane or order label', async () => {
+    const { client, created } = makeFakeClient([]);
+    const labels = ['bug', 'factory:needs-triage'];
+    await fileBug(client, { fingerprinted: makeFingerprinted(), now: clock, labels });
+    expect(created[0].labels).toEqual(labels);
+    for (const l of created[0].labels as string[]) {
+      expect([QUEUED_LABEL, IN_PROGRESS_LABEL]).not.toContain(l);
+      expect(l.startsWith(LANE_LABEL_PREFIX)).toBe(false);
+      expect(l.startsWith(QUEUE_ORDER_LABEL_PREFIX)).toBe(false);
+    }
+  });
+
+  it('strips hidden content from the evidence excerpt in the body', async () => {
+    const { client, created } = makeFakeClient([]);
+    await fileBug(client, {
+      fingerprinted: makeFingerprinted({ eventExcerpt: 'before <!-- x --> after\u2066end' }),
+      now: clock,
+    });
+    expect(created[0].body).not.toContain('<!-- x -->');
+    expect(created[0].body).not.toContain('\u2066');
+  });
+});
+
+describe('findIssueByMarker', () => {
+  const marker = '<!-- factory-upstream-report v1 fp:ff_x -->';
+  it('returns undefined without an exact marker match', () => {
+    expect(findIssueByMarker([], marker)).toBeUndefined();
+    expect(
+      findIssueByMarker(
+        [
+          { number: 1, body: '<!-- fp:ff_x -->' },
+          { number: 2, body: 'ff_x' },
+        ],
+        marker,
+      ),
+    ).toBeUndefined();
+  });
+  it('returns the lowest-numbered match regardless of labels and does not mutate input', () => {
+    const issues: CandidateIssue[] = [
+      { number: 9, body: marker },
+      { number: 3, body: `x ${marker}` },
+    ];
+    expect(findIssueByMarker(issues, marker)?.number).toBe(3);
+    expect(issues[0]?.number).toBe(9);
+  });
+});
+
+describe('renderUpstreamOccurrenceComment', () => {
+  it('contains the time and fingerprint but no hidden markers', () => {
+    const out = renderUpstreamOccurrenceComment('ff_x', clock);
+    expect(out).toContain('2026-07-20T00:00:00.000Z');
+    expect(out).toContain('ff_x');
+    expect(out).not.toContain('<!--');
   });
 });

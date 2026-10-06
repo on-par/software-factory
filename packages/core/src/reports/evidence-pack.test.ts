@@ -140,6 +140,111 @@ describe('renderEvidencePack', () => {
   });
 });
 
+describe('renderEvidencePack — review routing (#1724)', () => {
+  const base = { issue: 1, events: [], logFiles: [] };
+
+  it('has no Review routing section when no routing is given', () => {
+    expect(renderEvidencePack(base)).not.toContain('Review routing');
+  });
+
+  it('lists the floor, gate reason and each fired rule with its paths', () => {
+    const md = renderEvidencePack({
+      ...base,
+      reviewRouting: {
+        floor: 'C',
+        gated: true,
+        reason: 'classifier:floor:C:workflows',
+        rules: [
+          { id: 'workflows', class: 'C', paths: ['.github/workflows/ci.yml', 'b.yml'] },
+          { id: 'empty-diff', class: 'B', paths: [] },
+        ],
+      },
+    });
+    expect(md).toContain('Review routing');
+    expect(md).toContain('- Floor: **C**');
+    expect(md).toContain('- Gate: held for a human — `classifier:floor:C:workflows`');
+    expect(md).toContain('- `workflows` (C): `.github/workflows/ci.yml`, `b.yml`');
+    expect(md).toContain('- `empty-diff` (B): (no paths)');
+  });
+
+  it('renders an A floor as auto-merge eligible with no rules', () => {
+    const md = renderEvidencePack({ ...base, reviewRouting: { floor: 'A', gated: false, rules: [] } });
+    expect(md).toContain('- Floor: **A**');
+    expect(md).toContain('- Gate: none — auto-merge eligible');
+    expect(md).toContain('- No rules fired.');
+  });
+
+  it('renders a classifier error as unavailable', () => {
+    const md = renderEvidencePack({
+      ...base,
+      reviewRouting: { floor: null, gated: true, reason: 'classifier:error', error: 'boom', rules: [] },
+    });
+    expect(md).toContain('- Floor: unavailable (classifier error: boom)');
+    expect(md).toContain('`classifier:error`');
+  });
+});
+
+describe('renderEvidencePack — shadow model verdict (#1725)', () => {
+  const base = { issue: 1, events: [], logFiles: [] };
+  const shadow = {
+    modelClass: 'C' as const,
+    floorClass: 'A' as const,
+    finalClass: 'A' as const,
+    model: 'm-1',
+    promptVersion: 'classify-pr/v1',
+    policyVersion: 'floor-0123456789ab',
+    diffSha: 'f'.repeat(64),
+    adrIds: ['ADR-0121', 'ADR-0123'],
+    costUsd: null,
+    claims: [{ text: 'touches the gate', citation: 'src/a.ts:12' }],
+    unsupportedClaims: [{ text: 'vibes', citation: '' }],
+    notInspected: ['tests'],
+    droppedClaims: 0,
+  };
+
+  it('renders the labeled shadow block with class, claims, gaps and ADRs', () => {
+    const md = renderEvidencePack({
+      ...base,
+      reviewRouting: { floor: 'A', gated: false, rules: [], shadow },
+    });
+    expect(md).toContain('Shadow model verdict — shadow — no effect');
+    expect(md).toContain('Model class: **C** (`m-1`, `classify-pr/v1`, policy `floor-0123456789ab`)');
+    expect(md).toContain('Final class: A (= floor)');
+    expect(md).toContain('touches the gate — `src/a.ts:12`');
+    expect(md).toContain('- vibes');
+    expect(md).toContain('- tests');
+    expect(md).toContain('ADRs consulted: ADR-0121, ADR-0123');
+  });
+
+  it('renders the reason and "none" when the model verdict is unavailable', () => {
+    const md = renderEvidencePack({
+      ...base,
+      reviewRouting: {
+        floor: 'A',
+        gated: false,
+        rules: [],
+        shadow: {
+          ...shadow,
+          modelClass: null,
+          reason: 'classifier call failed: x',
+          claims: [],
+          unsupportedClaims: [],
+          notInspected: [],
+          adrIds: [],
+        },
+      },
+    });
+    expect(md).toContain('Model class: unavailable — classifier call failed: x');
+    expect(md).toContain('ADRs consulted: none');
+    expect(md).toContain('  - none');
+  });
+
+  it('renders no shadow block without a shadow verdict', () => {
+    const md = renderEvidencePack({ ...base, reviewRouting: { floor: 'A', gated: false, rules: [] } });
+    expect(md).not.toContain('Shadow model verdict');
+  });
+});
+
 describe('gatherEvidencePack', () => {
   it('reads a spec file, extracts the Goal section, filters events, and lists matching log files', () => {
     const dir = mkdtemp();
@@ -230,5 +335,55 @@ describe('gatherEvidencePack', () => {
     const markdown = gatherEvidencePack({ issue: 423, specPath });
 
     expect(markdown).toContain('- No design artifact recorded.');
+  });
+});
+
+describe('renderEvidencePack — regression_hunt (#1839)', () => {
+  const render = (results: CheckSummary['results'], counts: Partial<CheckSummary>) =>
+    renderEvidencePack({
+      checkSummary: { failures: 0, passes: 0, skips: 0, total: results.length, results, ...counts },
+      issue: 1839,
+      events: [],
+      logFiles: [],
+    });
+
+  it('shows nested findings in full for a FAIL', () => {
+    const out = render(
+      [
+        {
+          checker: 'regression_hunt',
+          result: 'FAIL',
+          details: 'regressed',
+          findings: [
+            {
+              input: 'npm-shrinkwrap.json only',
+              before: 'ok-before',
+              after: 'bad-after',
+              evidence: 'e',
+              reproduced: true,
+            },
+          ],
+        },
+      ],
+      { failures: 1 },
+    );
+    expect(out).toContain('`regression_hunt`');
+    expect(out).toMatch(/ {2}- input: npm-shrinkwrap\.json only .*before: ok-before.*after: bad-after.*reproduced/);
+  });
+
+  it('shows an explicit no-findings bullet for a PASS', () => {
+    const out = render([{ checker: 'regression_hunt', result: 'PASS', details: 'clean', findings: [] }], { passes: 1 });
+    expect(out).toContain('  - no findings');
+  });
+
+  it('shows a SKIP as a skip with its reason', () => {
+    const out = render(
+      [{ checker: 'regression_hunt', result: 'SKIP', details: 'review floor class A — regression hunt not run' }],
+      { skips: 1 },
+    );
+    expect(out).toContain('⚪ SKIP `regression_hunt` — review floor class A');
+    expect(out).not.toContain('PASS `regression_hunt`');
+    expect(out).toContain('0 pass, 0 fail, 1 skip');
+    expect(out).not.toContain('  - ');
   });
 });

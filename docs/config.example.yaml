@@ -40,6 +40,9 @@ version: 2
     # checker: "<model id>"
     # Triage model. Replaces the triage tier.
     # triage: "<model id>"
+    # PR classifier model (classify_pr route). Unset: the checker tier. Changing it demotes the
+    # classifier (ADR-0121).
+    # classifier: "<model id>"
 # Tier name -> ordered model ids. Replaces that packaged tier; the router uses the first available
 # model. An unknown model id fails loudly. The packaged tiers are:
 # tiers:
@@ -65,6 +68,8 @@ version: 2
   # fastPath: false
   # Checker-rework retries per issue (0-3).
   # maxReworkRounds: 1
+  # Lane circuit breaker threshold (non-negative integer). 0 turns the breaker off. Unset: 2.
+  # laneBreakerThreshold: 2
   # Usage watchdog. `factory run` / `supervise` flags beat these values.
   # watchdog:
     # Usage fraction (0-1] at which work pauses. Beats FACTORY_STOP_AT.
@@ -77,6 +82,16 @@ version: 2
     # watch: true
     # Use the list-price usage estimator. Beats FACTORY_USAGE_ESTIMATOR.
     # estimator: false
+# Review floor rules for the PR classifier. Unset keys use the packaged floor rules.
+# classifier:
+  # Path prefixes or globs forced to review class C. Added to the packaged C rules, never replacing
+  # them.
+  # alwaysHuman: ["<path prefix or glob>"]
+  # Path prefixes or globs eligible for class A. Replaces the packaged A rules (docs/, *.md,
+  # *.test.ts).
+  # autoEligible: ["<path prefix or glob>"]
+  # Total added+removed lines above which the floor is at least B.
+  # maxDiffLines: 500
 # Merge policy. `factory run` and `supervise` read `auto`; `factory land` reads `admin`. `factory
 # ship` and `run-issue` always stop at a ready-for-review PR.
 # run:
@@ -86,6 +101,9 @@ version: 2
     # auto: false
     # Merge with GitHub admin bypass of unmet requirements. Unset: FACTORY_MERGE_ADMIN=1.
     # admin: false
+    # Hold PRs whose review floor is B or C (or cannot be computed) for a human by applying
+    # no-auto-merge. Unset: FACTORY_PR_CLASSIFIER=1. --pr-classifier / --no-pr-classifier beat all.
+    # classifier: false
 # Phase timeouts in seconds. FACTORY_PLAN_TIMEOUT, FACTORY_BUILD_TIMEOUT, FACTORY_CHECK_TIMEOUT and
 # FACTORY_APPROVAL_TIMEOUT beat these values.
 timeouts:
@@ -99,16 +117,29 @@ timeouts:
 # auto-plan. Independent of the SHIP/auto-merge gate.
 plan_approval:
   enabled: false
+# Design-artifact gates at PLAN. blockUnresolvedRegressions: true stops PLAN before BUILD when a
+# worse/unknown behaviorDelta row is not in openQuestions (default false logs
+# design_regression_unresolved only). FACTORY_DESIGN_BLOCK_REGRESSIONS=1/0 beats it.
+design:
+  blockUnresolvedRegressions: false
+# BUILD policy. publishFromBuild: true lets the claude BUILD worker push, open a PR and wait for CI
+# before CHECK (the old behavior). Default false keeps BUILD commit-only on every route; SHIP pushes
+# and opens the PR after CHECK. FACTORY_BUILD_PUBLISH=1/0 beats it.
+build:
+  publishFromBuild: false
 # Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging
 ci:
   skip: false
-# Worktrees created as siblings of the repo
+# Where lane worktrees are created. "~/..." or an absolute path is a shared root, namespaced as
+# <parent>/<owner>/<repo>/. A repo-relative path is used as-is: "../" gives the old sibling layout;
+# ".factory/worktrees" keeps them inside the repo (auto-added to .git/info/exclude) but the repo's
+# own tools (jest, eslint, tsc, globbing scripts) may crawl into those nested checkouts.
 worktree:
-  parent: "../"
+  parent: "~/.factory/worktrees"
   gcTtlDays: 7
   autoGcOnRun: true
-# Lane workspace backend: "host" (sibling git worktrees) or "disposable-docker" (a managed container
-# per lane).
+# Lane workspace backend: "host" (git worktrees) or "disposable-docker" (a managed container per
+# lane).
 workspace:
   backend: "host"
 # Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty
@@ -169,6 +200,10 @@ ingest:
   label: "ready"
   lane: "auto"
   maxPerCycle: 20
+intake:
+  # GitHub logins whose approval counts. Unset: users with admin permission on the repo.
+  # trustedApprovers: ["<login>"]
+  enforce: "warn"
 # Guardrails for auto-filing self-defects. excludeReasons are never filed unless the same
 # fingerprint parks >= repeatThreshold times. maxPerRun/maxPerDay cap new bugs. Bugs whose origin is
 # factory-internal get selfFixLabel so the merge path refuses auto-merge (human approval required).

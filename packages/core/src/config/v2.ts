@@ -95,6 +95,7 @@ const ModelPinsSchema = z
       .describe('Fallback BUILD model; must be Codex-capable (used after a Claude build failure).'),
     checker: z.string().optional().describe('Pin the checker-tier model.'),
     triage: z.string().optional().describe('Pin the triage-tier model.'),
+    classifier: z.string().optional().describe('Pin the PR classifier model (classify_pr route).'),
   })
   .describe('Per-phase model pins. Each overrides the default tier resolution for that phase.');
 
@@ -186,7 +187,12 @@ const SandboxSchema = z
 
 const WorktreeSchema = z
   .object({
-    parent: z.string().default('../').describe('Directory (relative to the repo) where worktrees are created.'),
+    parent: z
+      .string()
+      .default('~/.factory/worktrees')
+      .describe(
+        'Where lane worktrees are created. "~/..." or an absolute path is a shared root, namespaced <parent>/<owner>/<repo>/; a repo-relative path is used as-is ("../" = sibling layout).',
+      ),
     gcTtlDays: z.number().default(7).describe('Age in days after which stale worktrees are garbage-collected.'),
     autoGcOnRun: z.boolean().default(true).describe('Garbage-collect stale worktrees at the start of each run.'),
   })

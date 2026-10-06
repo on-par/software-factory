@@ -15,6 +15,7 @@ import {
   zeroFill,
 } from './worktree-gc.js';
 import type { SweepDeps } from './worktree-gc.js';
+import { countUnpushedCommits, isWorktreeClean } from './worktree-gc.js';
 
 describe('parseWorktreeList', () => {
   it('parses main, branch, and detached worktree entries', () => {
@@ -116,6 +117,28 @@ describe('sweepWorktrees', () => {
     mkdirSync(repoRoot, { recursive: true });
     return { parentDir, repoRoot };
   }
+
+  it('reaps both a legacy sibling worktree and one under the shared worktree root (#1758)', async () => {
+    const { repoRoot: root } = setup();
+    const legacy = makeWorktree(`${basename(root)}-factory-ship-it-5`);
+    const shared = join(parentDir, 'home', '.factory', 'worktrees', 'o', 'r', `${basename(root)}-factory-ship-it-6`);
+    mkdirSync(shared, { recursive: true });
+    writeFileSync(join(shared, '.git'), 'gitdir: /somewhere');
+
+    const runCommand = async (cmd: string) => {
+      if (cmd === 'git worktree list --porcelain') {
+        return {
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${legacy}\nHEAD bbb\nbranch refs/heads/ship-it/5-a\n\nworktree ${shared}\nHEAD ccc\nbranch refs/heads/ship-it/6-b\n\n`,
+        };
+      }
+      if (cmd === 'git rev-parse --verify origin/main') return { stdout: 'aaa\n' };
+      if (cmd.includes('rev-parse --verify --quiet')) return { stdout: 'bbb\n' };
+      return { stdout: '' };
+    };
+
+    const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7 }, { runCommand });
+    expect(report.removed.map((r) => r.path).sort()).toEqual([legacy, shared].sort());
+  });
 
   it('never issues remove commands for the main worktree or non-factory-named worktrees', async () => {
     setup();
@@ -2379,5 +2402,32 @@ describe('formatGcReport', () => {
     expect(text).toContain(
       '/repo/foo-factory-ship-it-3 (ship-it/3-x) — issue #3: decomposed parent has uncommitted changes',
     );
+  });
+});
+
+describe('countUnpushedCommits / isWorktreeClean', () => {
+  it('parses the rev-list count', async () => {
+    expect(await countUnpushedCommits(async () => ({ stdout: '3\n', stderr: '' }), '/r', 'HEAD')).toBe(3);
+  });
+  it('returns null on failure or non-numeric output', async () => {
+    expect(
+      await countUnpushedCommits(
+        async () => {
+          throw new Error('x');
+        },
+        '/r',
+        'HEAD',
+      ),
+    ).toBeNull();
+    expect(await countUnpushedCommits(async () => ({ stdout: 'nope', stderr: '' }), '/r', 'HEAD')).toBeNull();
+  });
+  it('isWorktreeClean: true on empty porcelain, false on rejection or output', async () => {
+    expect(await isWorktreeClean(async () => ({ stdout: '', stderr: '' }), '/w')).toBe(true);
+    expect(await isWorktreeClean(async () => ({ stdout: ' M a', stderr: '' }), '/w')).toBe(false);
+    expect(
+      await isWorktreeClean(async () => {
+        throw new Error('x');
+      }, '/w'),
+    ).toBe(false);
   });
 });

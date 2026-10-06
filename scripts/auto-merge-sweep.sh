@@ -14,7 +14,8 @@
 # MAX_SLEEP_SECONDS (default 3600), resetting to SLEEP_SECONDS as soon as a pass
 # succeeds again. PRs that close more than one issue are skipped with an explicit
 # SKIPPING log line (factory land takes exactly one issue); they must be landed
-# manually.
+# manually. PRs labelled GATE_LABEL, or whose closing issue is labelled GATE_LABEL (or
+# whose labels can't be read), are skipped with a SKIPPING log line (human merge required).
 #
 # Usage: ORG=owner SWEEP_REPOS="example-app other-app" scripts/auto-merge-sweep.sh
 #
@@ -32,6 +33,8 @@
 #                     $HOME/.local/bin/factory)
 #   MERGE_FLAGS       flags passed to `gh pr merge` for standalone PRs
 #                     (default: --squash --delete-branch)
+#   GATE_LABEL        label marking a PR/issue as needing a human merge (default:
+#                     no-auto-merge; should match the repo's filing.selfFixLabel)
 #   SLEEP_SECONDS     delay between passes (default: 300)
 #   MAX_SLEEP_SECONDS backoff cap on sweep-wide failure (default: 3600)
 #   HEARTBEAT_FILE    heartbeat path (default: ~/.factory/auto-merge-sweep.heartbeat)
@@ -49,6 +52,9 @@ SWEEP_REPOS="${SWEEP_REPOS:-}"
 IFS=' ' read -r -a REPOS <<<"$SWEEP_REPOS"
 # Flags passed to `gh pr merge` for standalone PRs (word-split; no spaces within a flag).
 MERGE_FLAGS="${MERGE_FLAGS:---squash --delete-branch}"
+# Label that marks a PR/issue as needing a human merge; the sweep never merges it.
+GATE_LABEL="${GATE_LABEL:-no-auto-merge}"
+export GATE_LABEL
 SLEEP_SECONDS="${SLEEP_SECONDS:-300}"
 MAX_SLEEP_SECONDS="${MAX_SLEEP_SECONDS:-3600}"
 HEARTBEAT_FILE="${HEARTBEAT_FILE:-$HOME/.factory/auto-merge-sweep.heartbeat}"
@@ -99,21 +105,42 @@ sweep_repo() {
 
   local pr_json gh_exit
   pr_json="$(gh pr list --repo "$ghrepo" --state open \
-    --json number,isDraft,mergeable,statusCheckRollup,closingIssuesReferences 2>&1)"
+    --json number,isDraft,mergeable,statusCheckRollup,closingIssuesReferences,labels 2>&1)"
   gh_exit=$?
   if [ "$gh_exit" -ne 0 ]; then
     log "$repo: gh pr list failed (exit $gh_exit): $pr_json" >&2
     return 1
   fi
 
-  printf '%s' "$pr_json" | python3 "$SCRIPT_DIR/filter-green-prs.py" | while IFS=$'\t' read -r pr issue; do
+  printf '%s' "$pr_json" | python3 "$SCRIPT_DIR/filter-green-prs.py" | while IFS= read -r line; do
+    # Split on tabs by hand: `read` with a tab IFS collapses the empty issue column.
+    local pr issue gated rest
+    pr="${line%%$'\t'*}"
+    rest="${line#*$'\t'}"
+    issue="${rest%%$'\t'*}"
+    gated="${rest#*$'\t'}"
     [ -z "$pr" ] && continue
+    if [ -n "$gated" ]; then
+      log "$repo: SKIPPING PR #$pr: labelled $GATE_LABEL — awaiting human merge"
+      continue
+    fi
     if [[ "$issue" == *,* ]]; then
       log "$repo: SKIPPING PR #$pr: closes multiple issues (#${issue//,/, #}) — factory land takes exactly one issue; land manually"
       continue
     elif [ -n "$issue" ]; then
       if [ ! -d "$repo_dir" ]; then
         log "$repo: repo dir missing: $repo_dir"
+        continue
+      fi
+      local issue_labels label_exit
+      issue_labels="$(gh issue view "$issue" --repo "$ghrepo" --json labels --jq '.labels[].name' </dev/null 2>&1)"
+      label_exit=$?
+      if [ "$label_exit" -ne 0 ]; then
+        log "$repo: SKIPPING PR #$pr: could not read labels of issue #$issue (exit $label_exit) — failing closed on $GATE_LABEL"
+        continue
+      fi
+      if grep -qxF -- "$GATE_LABEL" <<<"$issue_labels"; then
+        log "$repo: SKIPPING PR #$pr: issue #$issue is labelled $GATE_LABEL — awaiting human merge"
         continue
       fi
       log "$repo: landing issue #$issue (PR #$pr) via factory land"

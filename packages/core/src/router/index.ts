@@ -566,6 +566,7 @@ export class ModelRouter {
       inputTokens,
       outputTokens,
       cost,
+      ...(cost === null ? { unpriced: true } : {}),
       estimated: usage === undefined,
       duration: elapsedMs ?? 0,
       ...(usage?.rawInputTokens !== undefined ? { rawInputTokens: usage.rawInputTokens } : {}),

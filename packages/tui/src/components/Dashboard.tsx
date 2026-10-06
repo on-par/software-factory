@@ -1,8 +1,8 @@
 import { Box, Text } from 'ink';
 import type { JSX } from 'react';
 
-import { type DashboardState, lanesOf, mergeTrainPosition } from '../dashboard.js';
-import { LaneRow } from './LaneRow.js';
+import { type DashboardState, lanesOf } from '../dashboard.js';
+import { LaneList } from './LaneList.js';
 import { StopBanner } from './StopBanner.js';
 
 export interface DashboardProps {
@@ -46,18 +46,10 @@ export function Dashboard({
       {state.lanes.length === 0 ? (
         <Text dimColor>(idle — no active claims)</Text>
       ) : (
-        state.lanes.map((lane, i) => (
-          <LaneRow
-            key={lane.issue}
-            lane={lane}
-            selected={i === selectedIndex}
-            now={now}
-            trainPosition={mergeTrainPosition(state, lane.issue)}
-          />
-        ))
+        <LaneList groups={lanesOf(state)} selectedIndex={selectedIndex} now={now} state={state} />
       )}
       {staleCount > 0 && <Text dimColor>{staleLanesLine(staleCount)}</Text>}
-      <Text dimColor>↑/↓ select · ⏎ detail · q quit</Text>
+      <Text dimColor>↑/↓ select · ⏎ open lane · q quit</Text>
     </Box>
   );
 }

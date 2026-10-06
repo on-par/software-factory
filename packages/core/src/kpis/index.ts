@@ -3,6 +3,21 @@
 import type { CostEntry, FactoryEvent, ReadinessInfo, ReworkCauseTag, RetryCause } from '../types/index.js';
 import { isHumanEvent } from './human.js';
 
+export type {
+  ClassifierClassStats,
+  ClassifierOutcomeBucket,
+  ClassifierOutcomeRecord,
+  ClassifierOutcomeVerdict,
+  ClassifierReport,
+} from './classifier-outcomes.js';
+export {
+  classifierOutcomeBucket,
+  formatClassifierReport,
+  joinClassifierOutcomes,
+  mergeClassifierOutcomes,
+  parseClassifierOutcomes,
+  summarizeClassifierOutcomes,
+} from './classifier-outcomes.js';
 export type { CommitSource, HumanSourceClient, PrSource } from './human.js';
 export {
   fetchHumanEventSources,
@@ -220,6 +235,7 @@ const TASK_PHASE: Record<string, string> = {
   dispute_resolution: 'check',
   review_pr: 'ship',
   security_review: 'ship',
+  classify_pr: 'ship',
 };
 
 /** Attributes one CostEntry to a phase, or null if the task isn't mapped.

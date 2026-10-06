@@ -18,6 +18,7 @@ import {
   compileChecker,
   fileExists,
   linksChecker,
+  renderCheckerFindings,
   lintChecker,
   runAllCheckers,
   runCustomChecker,
@@ -1254,6 +1255,20 @@ describe('runAllCheckers', () => {
     },
   );
 
+  it('restricts the run to the `only` names and runs everything when it is undefined (#1925)', async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
+
+    const subset = await runAllCheckers(makeContext(worktree), router, null, undefined, ['lint']);
+    expect(subset.results.map((r) => r.checker)).toEqual(['lint']);
+
+    const none = await runAllCheckers(makeContext(worktree), router, null, undefined, []);
+    expect(none.total).toBe(0);
+
+    const all = await runAllCheckers(makeContext(worktree), router, null, undefined, undefined);
+    expect(all.total).toBe(7);
+  });
+
   it('does not throw and fails closed when package.json is unreadable', { timeout: 60000 }, async () => {
     const worktree = await makeWorktree();
     await mkdir(join(worktree, 'package.json'));
@@ -1379,5 +1394,41 @@ describe('fileExists', () => {
   it('returns false for a directory', async () => {
     const worktree = await makeWorktree({ 'scripts/verify.sh': 'exit 0' });
     expect(await fileExists(join(worktree, 'scripts'))).toBe(false);
+  });
+});
+
+describe('regression_hunt output (#1839)', () => {
+  const finding = {
+    input: 'npm-shrinkwrap.json only',
+    before: 'npm ci installs',
+    after: 'npm install ignores lock',
+    evidence: 'ran it',
+    reproduced: true,
+  };
+
+  it('counts a SKIP under skips, never passes, and keeps findings on a FAIL', () => {
+    const summary = summarizeCheckerOutputs([
+      { checker: 'regression_hunt', result: 'SKIP', details: 'review floor class A — regression hunt not run' },
+      { checker: 'regression_hunt', result: 'FAIL', details: 'regressed', findings: [finding] },
+    ]);
+    expect(summary.skips).toBe(1);
+    expect(summary.passes).toBe(0);
+    expect(summary.results[1]?.findings).toEqual([finding]);
+  });
+
+  it('renders no findings for an empty list', () => {
+    expect(renderCheckerFindings([])).toEqual(['- no findings']);
+  });
+
+  it('renders a reproduced finding in full, truncating only evidence and collapsing newlines', () => {
+    const longAfter = 'a'.repeat(400);
+    const [line] = renderCheckerFindings([
+      { ...finding, input: 'line1\nline2', after: longAfter, evidence: 'e'.repeat(400) },
+    ]);
+    expect(line).toContain('input: line1 line2');
+    expect(line).toContain(`after: ${longAfter}`);
+    expect(line).toContain('reproduced');
+    expect(line).toContain(`${'e'.repeat(300)}…`);
+    expect(line).not.toContain('\n');
   });
 });

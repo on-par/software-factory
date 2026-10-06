@@ -166,7 +166,7 @@ export function buildBenchmarkManifest(input: BenchmarkArtifactsInput, gathered:
   const elapsedMs = Number.isFinite(startedMs) && Number.isFinite(endedMs) ? Math.max(0, endedMs - startedMs) : 0;
   const cost = gathered.costs.reduce(
     (acc, entry) => ({
-      totalUsd: acc.totalUsd + entry.cost,
+      totalUsd: acc.totalUsd + (entry.cost ?? 0),
       inputTokens: acc.inputTokens + entry.inputTokens,
       outputTokens: acc.outputTokens + entry.outputTokens,
     }),

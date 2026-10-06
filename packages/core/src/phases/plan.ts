@@ -7,12 +7,11 @@ import type { Octokit } from '@octokit/rest';
 import { createFsReader } from '@on-par/repo-context';
 
 import { adrLabel, readAdrContext, renderAdrConstraints } from '../adr/index.js';
-import { parseAdrDrafts } from '../adr/write.js';
 import type { ApprovalGate } from '../approvals/index.js';
 import { PLAN_SPEC_PREVIEW_BYTES } from '../approvals/index.js';
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
-import { parseDesignArtifact, renderDesignArtifact } from '../design/index.js';
+import { findUnresolvedRegressions, parseDesignArtifact, renderDesignArtifact } from '../design/index.js';
 import { buildFastPathSpec, isFastPathEligible } from '../efficiency/fast-path.js';
 import type { EventKind } from '../events/kinds.js';
 import {
@@ -29,6 +28,7 @@ import { applySteering, type ConsumedSteering, describeSteering } from '../steer
 import { archiveSpec, readSpec, updateSpecRoute, writeSpec } from '../spec/index.js';
 import type { Constitution, DesignArtifact, FailoverReason, ReadinessInfo } from '../types/index.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
+import { UNTRUSTED_ISSUE_BODY_NOTICE, wrapUntrustedIssueBody } from '../utils/untrusted-input.js';
 import { GITHUB_ISSUE_SOURCE, type GithubIssueParams } from '../work/github-issue.js';
 import { createDefaultWorkSourceRegistry, type WorkRequestSourceKind, type WorkSourceRegistry } from '../work/index.js';
 
@@ -64,7 +64,9 @@ ${constitutionCtx}
 ${adrCtx ?? ''}
 ## Issue #${issue}: ${issueTitle}
 
-${issueBody}
+${UNTRUSTED_ISSUE_BODY_NOTICE}
+
+${wrapUntrustedIssueBody(issueBody)}
 
 Steps:
 1. Read the issue above fully. Read CONTEXT.md if present. Any Accepted ADRs in this checkout
@@ -91,6 +93,20 @@ Steps:
    and do not write the spec file. A slice that takes 40 minutes to build is a
    planning failure, not a build problem.
 ${constitutionCtx ? '5. The constitution above defines the standards for this product. Your spec MUST satisfy every standard.' : '5. No constitution loaded — use your best judgment.'}
+6. RISKY-CHANGE FIELDS. If the plan changes a dispatch, switch, or match; a default branch
+   or fallthrough; or the flags passed to an external tool, you MUST fill the design fields
+   edgeInputs, behaviorDelta, and externalLists:
+   - edgeInputs: every input that reaches the default/fallthrough branch, including empty,
+     unknown, and malformed values.
+   - behaviorDelta: one row per input/branch with its behavior before and after the change,
+     and a verdict of same, better, worse, or unknown.
+   - externalLists: every closed list the change depends on (enum, allow-list, supported
+     values), checked against the upstream docs (read them, do not run the tool), with the
+     source and any gaps.
+   When replacing a tool's default call with explicit flags, list what each new explicit
+   flag turns off (defaults, config files, or behavior the implicit call had) as behaviorDelta rows.
+   Any behaviorDelta row with verdict worse or unknown must be fixed in the approach or
+   also listed in openQuestions. For any other change, omit these three keys.
 
 Write EXACTLY ONE file, at ${specPath}, in this shape:
 ---
@@ -124,18 +140,19 @@ design:
       passWhen: <what a pass looks like>
   riskBlastRadius: <what breaks if this is wrong>
   openQuestions: []   # anything you could not resolve; empty list if none
-adr:            # OPTIONAL — omit entirely unless this change makes a decision worth recording
-  - title: <short decision title>
-    context: |
-      <REQUIRED — the 'why': the forces and constraints that drove this decision.
-      A draft with an empty context is refused and never written.>
-    decision: |
-      <what was decided, in the active voice>
-    consequences: |
-      <the positive and negative consequences you accept>
-    references:
-      - text: <link text>
-        url: <url>
+  edgeInputs:     # OPTIONAL — required by step 6 for dispatch/default-branch/external-flag changes
+    - <input that reaches the default/fallthrough branch>
+  behaviorDelta:  # OPTIONAL — required by step 6
+    - input: <input>
+      branch: <branch it takes>
+      before: <behavior before>
+      after: <behavior after>
+      verdict: same|better|worse|unknown
+  externalLists:  # OPTIONAL — required by step 6
+    - name: <closed list>
+      location: <file/symbol where it lives>
+      source: <upstream doc checked>
+      gaps: []    # entries missing vs upstream; empty list if none
 ---
 # Spec: ${issueTitle} (#${issue})
 ## Goal
@@ -156,11 +173,8 @@ file must be one that exists (or one you are creating), and every name/symbol mu
 be one you actually read or are adding — omit an entry rather than guess. Quote
 signature values in single quotes; unquoted YAML breaks on the colons in a
 TypeScript signature.
-Add an \`adr:\` entry ONLY for a decision that constrains how future code must be written,
-would be expensive to reverse, or looks arbitrary from the code alone. Reversible
-implementation details (names, a helper's internal structure) are NOT ADRs. SHIP writes
-each entry into \`docs/adr/\` as an Accepted, next-numbered ADR in the same PR as the code,
-and updates the ADR index — so write it as the permanent record, not as notes to yourself.
+Do not record new ADRs. Recording an architecture decision is a separate process from this
+change: plan no ADR and no \`docs/adr/\` file, unless the issue itself asks for one.
 Do not run tests, do not write or edit any other file, do not touch git.
 If the issue is genuinely too vague to plan without a product decision only a human
 can make, print a line starting exactly with "ESCALATE:" followed by the question,
@@ -233,6 +247,8 @@ async function planPhaseImpl(opts: {
   fastPath?: boolean;
   /** Park oversized factory-task issues (sizeOk: false) instead of proceeding. Default true. */
   enforceSizeGate?: boolean;
+  /** Stop PLAN before BUILD when a worse/unknown behaviorDelta row is not in openQuestions (#1819). Default false = log only. */
+  blockUnresolvedRegressions?: boolean;
   /** Local-only mode: force the route to codex so builds use a local harness. */
   localOnly?: boolean;
   /** Repo config pins the build route (`.factory/config.json` → `route`). Forced
@@ -584,6 +600,18 @@ async function planPhaseImpl(opts: {
         log('size-gate-escalated', reason);
         return { ok: false, route, specPath, model: result.model, escalate: reason, designArtifact: null };
       }
+      const unresolved = findUnresolvedRegressions(designArtifact);
+      for (const row of unresolved) {
+        log(
+          'design_regression_unresolved',
+          `behaviorDelta row "${row.input}" (${row.branch}) has verdict ${row.verdict} and is not listed in openQuestions`,
+        );
+      }
+      if (unresolved.length > 0 && opts.blockUnresolvedRegressions) {
+        const reason = `plan has ${unresolved.length} unresolved behaviorDelta regression row(s) (verdict worse/unknown, not in openQuestions) — design.blockUnresolvedRegressions is on`;
+        log('escalate', reason);
+        return { ok: false, route, specPath, model: result.model, escalate: reason, designArtifact: null };
+      }
     } else {
       const blockedReason = blockedNoChangeSpecReason(parsed.body);
       if (blockedReason) {
@@ -591,18 +619,6 @@ async function planPhaseImpl(opts: {
         return { ok: false, route, specPath, model: result.model, escalate: blockedReason, designArtifact: null };
       }
       log('design_artifact_invalid', `spec frontmatter has no valid design artifact: ${designErrors.join('; ')}`);
-    }
-
-    const { drafts: adrDrafts, rejected: adrRejected } = parseAdrDrafts(parsed.data);
-    for (const r of adrRejected) {
-      log('adr_draft_rejected', `ADR draft "${r.title}" refused: ${r.errors.join('; ')}`);
-    }
-    if (adrDrafts.length > 0) {
-      await writeSpec(specPath, { adrDrafts: JSON.stringify(adrDrafts, null, 2) });
-      log(
-        'adr_drafts',
-        `${adrDrafts.length} ADR draft(s) frozen for SHIP: ${adrDrafts.map((d) => d.title).join(', ')}`,
-      );
     }
 
     log('plan', `Plan complete with model ${result.model}, route: ${route}`, { model: result.model });

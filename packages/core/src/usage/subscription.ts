@@ -20,6 +20,9 @@ export interface SubscriptionUsage {
 export interface SubscriptionUsageDeps {
   platform?: NodeJS.Platform;
   readKeychain?: () => Promise<string>;
+  /** Runs the default keychain reader's `security` call (execa's call shape);
+   *  defaults to the real execa. Ignored when readKeychain is injected. */
+  exec?: (file: string, args: readonly string[], options: { timeout: number }) => Promise<{ stdout: string }>;
   readCredentialsFile?: () => string;
   fetchImpl?: typeof fetch;
   now?: () => number;
@@ -28,10 +31,16 @@ export interface SubscriptionUsageDeps {
   env?: NodeJS.ProcessEnv;
 }
 
+const defaultKeychainExec: NonNullable<SubscriptionUsageDeps['exec']> = (file, args, options) =>
+  execa(file, args, options);
+
 /** Reads the selected profile's keychain entry — `Claude Code-credentials`, or its
  *  hash-suffixed variant when CLAUDE_CONFIG_DIR is set. */
-async function readKeychainFor(env: NodeJS.ProcessEnv): Promise<string> {
-  const result = await execa('security', ['find-generic-password', '-s', claudeKeychainService(env), '-w'], {
+async function readKeychainFor(
+  env: NodeJS.ProcessEnv,
+  exec: NonNullable<SubscriptionUsageDeps['exec']>,
+): Promise<string> {
+  const result = await exec('security', ['find-generic-password', '-s', claudeKeychainService(env), '-w'], {
     timeout: 10_000,
   });
   return result.stdout;
@@ -53,9 +62,10 @@ const UsageResponseSchema = z
 
 export async function readClaudeAccessToken(deps: SubscriptionUsageDeps = {}): Promise<string | null> {
   const env = deps.env ?? process.env;
+  const exec = deps.exec ?? defaultKeychainExec;
   const {
     platform = process.platform,
-    readKeychain = () => readKeychainFor(env),
+    readKeychain = () => readKeychainFor(env, exec),
     readCredentialsFile = () => readCredentialsFileFor(env),
     now = Date.now,
   } = deps;

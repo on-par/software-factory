@@ -33,6 +33,8 @@ export {
   resolveAutoFailover,
   resolveDefectWindowDays,
   resolveEnvironmentPorts,
+  resolveBuildPublish,
+  resolveDesignRegressionBlock,
   resolveEnvironmentProxy,
   resolveIngestConfig,
   resolveMergePolicy,
@@ -60,6 +62,7 @@ export {
   resolveEffectiveBuildRoute,
   resolveEffectiveModelPins,
   resolveEfficiencyPolicy,
+  resolveLaneBreakerThreshold,
   resolveUsageCap,
   resolveWatchdogPolicy,
   routeForBuildModel,
@@ -262,7 +265,7 @@ export { InvalidWorkspaceError, resolveLocalOnlyPolicy } from './work/local-only
 // Events
 export type { FollowEventsOptions } from './events/index.js';
 export { followEvents, readEvents } from './events/index.js';
-export type { EventKind, EventTraits, LaneStatus } from './events/kinds.js';
+export type { EventKind, EventTraits, LanePausedPayload, LaneStatus } from './events/kinds.js';
 export {
   eventTraitsFor,
   EVENT_TRAITS,
@@ -353,6 +356,15 @@ export type { SandboxEventType, SandboxPolicy, SandboxRuntime } from './sandbox/
 export { detectSandboxRuntime, resolveSandboxPolicy } from './sandbox/index.js';
 
 // Readiness
+export type { CriteriaReport, CriterionFinding, CriterionGrade } from './readiness/criteria.js';
+export { assessAcceptanceCriteria, gradeIssueCriteria } from './readiness/criteria.js';
+export type {
+  IssueDependencyState,
+  IssueInvestFinding,
+  IssueInvestReport,
+  IssueInvestStatus,
+} from './readiness/invest.js';
+export { findIssueDependencies, gradeIssueInvest } from './readiness/invest.js';
 export {
   EPIC_REQUIRED_FIELDS,
   FACTORY_BUG_REQUIRED_FIELDS,
@@ -438,6 +450,11 @@ export {
 // KPIs
 export type {
   CommitSource,
+  ClassifierClassStats,
+  ClassifierOutcomeBucket,
+  ClassifierOutcomeRecord,
+  ClassifierOutcomeVerdict,
+  ClassifierReport,
   DefectSourceClient,
   DefectSources,
   HealthKpis,
@@ -464,10 +481,16 @@ export {
   HUMAN_EVENT_TYPES,
   isDefectWindowClosed,
   isHumanEvent,
+  classifierOutcomeBucket,
+  formatClassifierReport,
+  joinClassifierOutcomes,
   KPI_DRIFT_THRESHOLD_RATIO,
   KPI_DRIFT_WINDOW_SIZE,
   kpisToHistoryRecord,
+  mergeClassifierOutcomes,
   mergedPrRefs,
+  parseClassifierOutcomes,
+  summarizeClassifierOutcomes,
   parseKpiHistory,
   reconstructHumanEvents,
   renderKpiDriftLine,
@@ -575,6 +598,7 @@ export type {
 } from './usage/index.js';
 export {
   aggregateCosts,
+  formatCostTotal,
   estimateTrailingSpend,
   formatUsageReport,
   readCostsFile,

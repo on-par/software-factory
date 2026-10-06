@@ -19,7 +19,7 @@ actual="$(run_filter <<'JSON'
 [{"number": 102, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": [{"number": 42}]}]
 JSON
 )"
-expected="$(printf '102\t42')"
+expected="$(printf '102\t42\t')"
 assert_eq "landable PR with one closing issue" "$expected" "$actual"
 
 # 2. Standalone landable PR (no closing issues) — trailing tab must survive
@@ -27,7 +27,7 @@ actual="$(run_filter <<'JSON'
 [{"number": 101, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": []}]
 JSON
 )"
-expected="$(printf '101\t')"
+expected="$(printf '101\t\t')"
 assert_eq "standalone landable PR" "$expected" "$actual"
 
 # 3. Draft PR => skipped
@@ -79,7 +79,7 @@ actual="$(run_filter <<'JSON'
 [{"number": 208, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [{"state": "SUCCESS"}], "closingIssuesReferences": []}]
 JSON
 )"
-expected="$(printf '208\t')"
+expected="$(printf '208\t\t')"
 assert_eq "StatusContext-style checks landable" "$expected" "$actual"
 
 # 9. Multi-issue PR — comma-joined, order-preserving dedup
@@ -87,7 +87,7 @@ actual="$(run_filter <<'JSON'
 [{"number": 103, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": [{"number": 55}, {"number": 56}, {"number": 55}]}]
 JSON
 )"
-expected="$(printf '103\t55,56')"
+expected="$(printf '103\t55,56\t')"
 assert_eq "multi-issue PR dedup" "$expected" "$actual"
 
 # 10. Empty stdin => empty output, exit 0
@@ -112,7 +112,29 @@ actual="$(run_filter <<'JSON'
 ]
 JSON
 )"
-expected="$(printf '301\t10\n304\t')"
+expected="$(printf '301\t10\t\n304\t\t')"
 assert_eq "mixed fixture, input order" "$expected" "$actual"
+
+# 13. PR labelled no-auto-merge => gated column set; other labels => empty
+actual="$(run_filter <<'JSON'
+[
+  {"number": 400, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": [{"number": 7}], "labels": [{"name": "no-auto-merge"}]},
+  {"number": 401, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": [], "labels": [{"name": "bug"}]}
+]
+JSON
+)"
+expected="$(printf '400\t7\tgated\n401\t\t')"
+assert_eq "gated column from PR labels" "$expected" "$actual"
+
+# 14. GATE_LABEL overrides the gate label
+actual="$(GATE_LABEL=hold run_filter <<'JSON'
+[
+  {"number": 402, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": [], "labels": [{"name": "hold"}]},
+  {"number": 403, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": [], "labels": [{"name": "no-auto-merge"}]}
+]
+JSON
+)"
+expected="$(printf '402\t\tgated\n403\t\t')"
+assert_eq "GATE_LABEL override" "$expected" "$actual"
 
 echo "PASS: filter-green-prs correctly identifies landable PRs (draft/mergeable/checks rules), joins closing issues with order-preserving dedup, and handles empty/whitespace stdin"

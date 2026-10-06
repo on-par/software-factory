@@ -22,6 +22,9 @@ import {
   resolveIngestConfig,
   resolveLocalOnly,
   resolveMergePolicy,
+  resolvePrClassifierPolicy,
+  resolveBuildPublish,
+  resolveDesignRegressionBlock,
   resolvePlanApproval,
   resolveProcessGroupGraceMs,
   resolveSkipCI,
@@ -83,12 +86,14 @@ describe('getFactoryPaths', () => {
       approvals: resolve(state, 'approvals'),
       steering: resolve(state, 'steering'),
       kpiHistory: resolve(state, 'kpi-history.jsonl'),
+      classifierOutcomes: resolve(state, 'classifier-outcomes.jsonl'),
       ingestWatermark: resolve(state, 'ingest-watermark'),
       ports: resolve(state, 'ports.json'),
       portsLock: resolve(state, 'ports.lock'),
       proxyState: resolve(state, 'proxy.json'),
       breaker: resolve(state, 'breaker.json'),
       reworkHistory: resolve(state, 'rework-history.json'),
+      baselineCache: resolve(state, 'baseline-cache.json'),
       laneFiles: resolve(state, 'lane-files.json'),
       runFlags: resolve(state, 'run-flags.json'),
     };
@@ -148,6 +153,7 @@ describe('getFactoryPaths', () => {
       'proxyState',
       'breaker',
       'reworkHistory',
+      'baselineCache',
       'laneFiles',
       'runFlags',
       'mergeLock',
@@ -162,6 +168,7 @@ describe('getFactoryPaths', () => {
       'runs',
       'costs',
       'kpiHistory',
+      'classifierOutcomes',
     ] as const;
 
     for (const key of runtimeKeys) {
@@ -352,6 +359,7 @@ describe('loadFactoryConfig', () => {
 
   it('shipped config has worktree gc defaults', () => {
     const config = loadFactoryConfig();
+    expect(config.worktree.parent).toBe('~/.factory/worktrees');
     expect(config.worktree.gcTtlDays).toBe(7);
     expect(config.worktree.autoGcOnRun).toBe(true);
   });
@@ -729,6 +737,20 @@ describe('loadFactoryConfigForRepo', () => {
     expect(() => loadFactoryConfigForRepo(path)).toThrow(/merge\.auto/);
   });
 
+  it('merges a repo intake overlay and keeps enforce at warn', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ version: 2, intake: { trustedApprovers: ['patrob'] } }));
+    const config = loadFactoryConfigForRepo(path);
+    expect(config.intake.trustedApprovers).toEqual(['patrob']);
+    expect(config.intake.enforce).toBe('warn');
+  });
+
+  it('rejects an invalid intake.enforce value', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ intake: { enforce: 'block' } }));
+    expect(() => loadFactoryConfigForRepo(path)).toThrow(/intake\.enforce/);
+  });
+
   it('throws "expected a JSON object" when the top level is an array', async () => {
     const path = join(dir, 'config.json');
     await writeFile(path, JSON.stringify([1, 2, 3]));
@@ -769,6 +791,12 @@ describe('loadFactoryConfigForRepo', () => {
     const config = loadFactoryConfigForRepo(path);
     expect(config.run).toEqual({ merge: { auto: false, admin: true } });
     expect(loadFactoryConfig().run).toBeUndefined();
+  });
+
+  it('parses run.merge.classifier from a repository config file (#1724)', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ run: { merge: { classifier: true } } }));
+    expect(loadFactoryConfigForRepo(path).run).toEqual({ merge: { classifier: true } });
   });
 
   it('overlays adr.mandate from a repository config file', async () => {
@@ -877,6 +905,38 @@ describe('resolveSkipCI', () => {
     const { ci: _ci, ...withoutCi } = config;
 
     expect(resolveSkipCI(withoutCi as typeof config, {})).toBe(false);
+  });
+});
+
+describe('resolvePrClassifierPolicy (#1724)', () => {
+  const config = loadFactoryConfig();
+  const withRepo = (classifier: boolean) => ({ ...config, run: { merge: { classifier } } });
+
+  it('defaults to off', () => {
+    expect(resolvePrClassifierPolicy(config, {})).toEqual({ enabled: false, source: 'default' });
+  });
+
+  it('FACTORY_PR_CLASSIFIER=1 turns it on', () => {
+    expect(resolvePrClassifierPolicy(config, { FACTORY_PR_CLASSIFIER: '1' })).toEqual({ enabled: true, source: 'env' });
+  });
+
+  it('run.merge.classifier beats the env, including an explicit false', () => {
+    expect(resolvePrClassifierPolicy(withRepo(false), { FACTORY_PR_CLASSIFIER: '1' })).toEqual({
+      enabled: false,
+      source: 'repo',
+    });
+    expect(resolvePrClassifierPolicy(withRepo(true), {})).toEqual({ enabled: true, source: 'repo' });
+  });
+
+  it('the flag beats everything', () => {
+    expect(resolvePrClassifierPolicy(withRepo(false), {}, { classifier: true })).toEqual({
+      enabled: true,
+      source: 'flag',
+    });
+    expect(resolvePrClassifierPolicy(withRepo(true), { FACTORY_PR_CLASSIFIER: '1' }, { classifier: false })).toEqual({
+      enabled: false,
+      source: 'flag',
+    });
   });
 });
 
@@ -1557,4 +1617,49 @@ it('shares only the daemon port lease registry across isolated delivery state ro
   } finally {
     vi.unstubAllEnvs();
   }
+});
+
+describe('resolveDesignRegressionBlock', () => {
+  const config = loadFactoryConfig();
+
+  it('defaults to false from the shipped config', () => {
+    expect(resolveDesignRegressionBlock(config, {})).toBe(false);
+  });
+
+  it('FACTORY_DESIGN_BLOCK_REGRESSIONS=1 wins over config false', () => {
+    expect(resolveDesignRegressionBlock(config, { FACTORY_DESIGN_BLOCK_REGRESSIONS: '1' })).toBe(true);
+  });
+
+  it('FACTORY_DESIGN_BLOCK_REGRESSIONS=0 wins over config true', () => {
+    const on = { ...config, design: { blockUnresolvedRegressions: true } };
+    expect(resolveDesignRegressionBlock(on, { FACTORY_DESIGN_BLOCK_REGRESSIONS: '0' })).toBe(false);
+  });
+
+  it('falls back to config when env is unset', () => {
+    const on = { ...config, design: { blockUnresolvedRegressions: true } };
+    expect(resolveDesignRegressionBlock(on, {})).toBe(true);
+  });
+});
+
+describe('resolveBuildPublish', () => {
+  const config = loadFactoryConfig();
+
+  it('defaults to false from the shipped config', () => {
+    expect(config.build.publishFromBuild).toBe(false);
+    expect(resolveBuildPublish(config, {})).toBe(false);
+  });
+
+  it('FACTORY_BUILD_PUBLISH=1 wins over config false', () => {
+    expect(resolveBuildPublish(config, { FACTORY_BUILD_PUBLISH: '1' })).toBe(true);
+  });
+
+  it('FACTORY_BUILD_PUBLISH=0 wins over config true', () => {
+    const on = { ...config, build: { publishFromBuild: true } };
+    expect(resolveBuildPublish(on, { FACTORY_BUILD_PUBLISH: '0' })).toBe(false);
+  });
+
+  it('falls back to config when env is unset', () => {
+    const on = { ...config, build: { publishFromBuild: true } };
+    expect(resolveBuildPublish(on, {})).toBe(true);
+  });
 });

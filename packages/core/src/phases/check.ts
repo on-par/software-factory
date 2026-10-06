@@ -3,7 +3,15 @@
 import { join } from 'node:path';
 
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
-import { type CheckerContext, probeWorktree, runAllCheckers, type WorktreeProbe } from '../checkers/index.js';
+import { BaselineCache } from '../checkers/baseline-cache.js';
+import { type BaselineReport, extractFailingTestNames, runBaselineCheckers } from '../checkers/baseline.js';
+import {
+  type CheckerContext,
+  probeWorktree,
+  renderCheckerFindings,
+  runAllCheckers,
+  type WorktreeProbe,
+} from '../checkers/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { laneEnv } from '../environment/index.js';
 import type { EventKind } from '../events/kinds.js';
@@ -20,6 +28,16 @@ type LogFn = (
   extra?: { failoverReason?: FailoverReason; rework?: ReworkInfo; durationMs?: number },
 ) => void;
 
+/** A CHECK failure caused by the base, not the issue (#1928). */
+export interface EnvironmentFailure {
+  /** diffBase the baseline ran on (BaselineReport.baseSha). */
+  baseSha: string;
+  /** Round-1 FAIL checker names, in summary order. */
+  failingChecks: string[];
+  /** Full-output log files from round 1 plus the base-run log dir; empty when logsDir is unset. */
+  logPaths: string[];
+}
+
 export interface CheckPhaseResult {
   passed: boolean;
   summary: CheckSummary;
@@ -34,6 +52,11 @@ export interface CheckPhaseResult {
    *  via ReworkHistory so a future run can detect a repeat. Present whenever the
    *  phase ends with `summary.failures > 0`; absent when it passes clean. */
   failureSignature?: string;
+  /** Round-1 failing checkers re-run on diffBase (#1925); absent when round 1 passed, worker_output failed, or no diffBase. */
+  baseline?: BaselineReport;
+  /** Set when every round-1 failing checker also fails on the base SHA (#1928): no rework
+   *  ran (`reworkRounds` is 0) and the caller releases the issue instead of parking it. */
+  environment?: EnvironmentFailure;
 }
 
 const MAX_REWORK_ROUNDS = 3;
@@ -57,6 +80,34 @@ function normalizeDetail(details: string): string {
   return details.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ').trim().slice(0, 200);
 }
 
+/** Full-output log files named by round-1 FAIL results, then the base-run log dir; deduped, first-seen order. */
+export function environmentLogPaths(summary: CheckSummary, baseLogDir: string | undefined): string[] {
+  const paths: string[] = [];
+  for (const r of summary.results.filter((x) => x.result === 'FAIL')) {
+    for (const m of r.details.matchAll(/^full output: (.+)$/gm)) paths.push(m[1]);
+  }
+  if (baseLogDir !== undefined) paths.push(baseLogDir);
+  return [...new Set(paths)];
+}
+
+export function renderEnvironmentReleaseComment(failure: EnvironmentFailure): string {
+  return [
+    '### Factory: CHECK failure caused by the base, not this issue',
+    '',
+    `Every failing checker also fails on base \`${failure.baseSha}\`, so no rework was run. This issue was released back to \`factory:queued\` and the lane is paused until the base is fixed.`,
+    '',
+    'Failing checkers:',
+    ...failure.failingChecks.map((c) => `- \`${c}\``),
+    '',
+    `Base SHA: \`${failure.baseSha}\``,
+    '',
+    ...(failure.logPaths.length > 0
+      ? ['Logs:', ...failure.logPaths.map((p) => `- \`${p}\``)]
+      : ['No log paths were recorded (logsDir not set).']),
+    '',
+  ].join('\n');
+}
+
 function failingCheckerNames(summary: CheckSummary): string[] {
   return summary.results.filter((r) => r.result === 'FAIL').map((r) => r.checker);
 }
@@ -70,19 +121,7 @@ function testFailureEvidence(summary: CheckSummary): Pick<ReworkInfo, 'failingTe
   if (!testsFailure) return {};
 
   const details = testsFailure.details.slice(0, MAX_FAILURE_OUTPUT_LENGTH);
-  const failingTests = details
-    .split(/\r?\n/)
-    .flatMap(
-      (line) =>
-        line.match(/(?:\bFAIL|[×✕●])\s+(.+)/)?.[1] ??
-        line.match(/\bnot ok \d+\s*-\s*(.+)/i)?.[1] ??
-        // .NET Microsoft.Testing.Platform: "failed Namespace.Class.Test (46ms)"
-        line.match(/\bfailed\s+(\S+)\s+\(\d/)?.[1] ??
-        [],
-    )
-    .map((identifier) => identifier.trim())
-    .filter((identifier) => identifier !== '')
-    .slice(0, MAX_FAILING_TESTS);
+  const failingTests = extractFailingTestNames(details).slice(0, MAX_FAILING_TESTS);
 
   return {
     ...(failingTests.length > 0 ? { failingTests } : {}),
@@ -141,6 +180,45 @@ function classifyReworkCause(opts: {
   return 'factory-fault';
 }
 
+/** True when every round-1 failing checker also fails on the base SHA (#1927): the failure
+ *  belongs to the environment/base, not the lane. False without a usable baseline, on any
+ *  clean-on-base or not-run failing checker, or when nothing failed. */
+export function isEnvironmentFailure(summary: CheckSummary, baseline: BaselineReport | undefined): boolean {
+  if (!baseline || baseline.error !== undefined) return false;
+  const failing = failingCheckerNames(summary);
+  if (failing.length === 0) return false;
+  return failing.every((name) => baseline.checkers.some((c) => c.checker === name && c.verdict === 'fails-on-base'));
+}
+
+/** Checkers rework ignores on partial overlap (#1929): fails-on-base with no new failing tests. Empty without a usable baseline. */
+export function baseFailingCheckers(baseline: BaselineReport | undefined): Set<string> {
+  if (!baseline || baseline.error !== undefined) return new Set();
+  return new Set(
+    baseline.checkers
+      .filter((c) => c.verdict === 'fails-on-base' && !(c.newFailingTests && c.newFailingTests.length > 0))
+      .map((c) => c.checker),
+  );
+}
+
+/** The summary without the FAIL results of excluded (base-failing) checkers. */
+export function excludeBaseFailing(summary: CheckSummary, excluded: ReadonlySet<string>): CheckSummary {
+  if (excluded.size === 0) return summary;
+  const results = summary.results.filter((r) => !(r.result === 'FAIL' && excluded.has(r.checker)));
+  return {
+    ...summary,
+    results,
+    failures: results.filter((r) => r.result === 'FAIL').length,
+    total: results.length,
+  };
+}
+
+/** Failure signature over the lane-owned failures; falls back to the full signature when the
+ *  filter leaves none, so a failing CHECK never gets an empty signature. */
+export function stuckSignature(summary: CheckSummary, excluded: ReadonlySet<string>): string {
+  const target = excludeBaseFailing(summary, excluded);
+  return failureSignature(target.failures > 0 ? target : summary);
+}
+
 export async function checkPhase(opts: Parameters<typeof checkPhaseImpl>[0]): Promise<CheckPhaseResult> {
   return withLifecycle(
     {
@@ -192,6 +270,8 @@ async function checkPhaseImpl(opts: {
   reworkModel?: string;
   /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
   laneId?: string;
+  /** Per-run id minted by runIssue; becomes SharedCompilationId=factory-<runId> for .NET lanes (#1910). */
+  runId?: string;
   /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
   bus?: LifecycleBus;
   /** Heartbeat hook (#1326), forwarded to `CheckerContext.onActivity` — bumps the
@@ -200,6 +280,10 @@ async function checkPhaseImpl(opts: {
   /** Factory logs dir (`.factory/state/logs`). When set, failing checker commands write
    *  their full output to `<logsDir>/issue-<n>/check-r<round>/` and FAIL details link it. */
   logsDir?: string;
+  /** state/baseline-cache.json (#1926); when set, baseline results are cached per base SHA + laneEnv hash. */
+  baselineCachePath?: string;
+  /** Injection seam for tests; defaults to runBaselineCheckers (#1925). */
+  runBaseline?: typeof runBaselineCheckers;
 }): Promise<CheckPhaseResult> {
   const {
     issue,
@@ -221,18 +305,36 @@ async function checkPhaseImpl(opts: {
     diffBase,
     reworkRoute,
     reworkModel,
+    runId,
     onActivity,
     logsDir,
+    baselineCachePath,
+    runBaseline,
   } = opts;
   const roundLogDir = (round: number): string | undefined =>
     logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, `check-r${round}`);
+  const checkBaseDir = logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, 'check-base');
+
+  // Each failing checker is logged individually, the same way SKIPs are: the parked
+  // outcome only carries an aggregate count, so without this the checker/details pairs
+  // that name WHY a run parked are never surfaced to the operator (#675).
+  const logFailures = (s: CheckSummary): void => {
+    for (const f of s.results.filter((r) => r.result === 'FAIL')) {
+      log(
+        'check',
+        f.findings?.length
+          ? `FAILED: ${f.checker} — ${f.details}\n${renderCheckerFindings(f.findings).join('\n')}`
+          : `FAILED: ${f.checker} — ${f.details}`,
+      );
+    }
+  };
 
   let probe = await probeWorktree(worktree);
   const ctx: CheckerContext = {
     worktree,
     specPath,
     diffBase,
-    env: laneEnv(appPort, process.env, appBaseUrl),
+    env: laneEnv(appPort, process.env, appBaseUrl, worktree, runId),
     onPgid,
     probe,
     log,
@@ -270,6 +372,58 @@ async function checkPhaseImpl(opts: {
     return { passed: false, summary, reworkRounds: 0, failureSignature: signature };
   }
 
+  let baseline: BaselineReport | undefined;
+  if (summary.failures > 0) {
+    if (diffBase === undefined) {
+      log('check', 'baseline skipped: no base SHA for this run');
+    } else {
+      baseline = await (runBaseline ?? runBaselineCheckers)({
+        baseSha: diffBase,
+        laneWorktree: worktree,
+        failing: summary.results,
+        ctx: {
+          ...ctx,
+          outputLogDir: checkBaseDir,
+        },
+        router,
+        constitution,
+        customCheckerTimeoutSeconds: checkTimeoutSeconds,
+        cache: baselineCachePath === undefined ? undefined : new BaselineCache(baselineCachePath),
+      }).catch((e: any) => ({ baseSha: diffBase, checkers: [], error: String(e?.message ?? e).slice(0, 300) }));
+      log('check', describeBaseline(baseline));
+    }
+  }
+
+  // Decided before the rework loop from the single pre-loop baseline (#1927).
+  const environmentCause = isEnvironmentFailure(summary, baseline);
+  if (environmentCause) log('check', 'every failing checker also fails on base — rework cause=environment');
+
+  // Environment cause (#1928): the lane cannot fix a broken base, so skip rework and the
+  // held check; the caller releases the issue and pauses the lane.
+  if (environmentCause && baseline) {
+    const environment: EnvironmentFailure = {
+      baseSha: baseline.baseSha,
+      failingChecks: failingCheckerNames(summary),
+      logPaths: environmentLogPaths(summary, checkBaseDir),
+    };
+    log(
+      'check',
+      `environment failure on base ${baseline.baseSha.slice(0, 8)} (${environment.failingChecks.join(', ')}) — skipping rework`,
+    );
+    logFailures(summary);
+    return {
+      passed: false,
+      summary,
+      reworkRounds: 0,
+      failureSignature: failureSignature(summary),
+      baseline,
+      environment,
+    };
+  }
+
+  const baseFailing = baseFailingCheckers(baseline);
+  if (baseFailing.size > 0) log('check', `dropping base-failing checkers from rework: ${[...baseFailing].join(', ')}`);
+
   // Cross-run stuck (#740): round one already reproduces the exact failure a
   // prior run parked on. Skip the rework loop entirely rather than re-burning
   // a full budget against a root cause nothing has fixed since — a watchdog
@@ -278,7 +432,8 @@ async function checkPhaseImpl(opts: {
   if (
     summary.failures > 0 &&
     priorFailureSignature !== undefined &&
-    failureSignature(summary) === priorFailureSignature
+    (stuckSignature(summary, baseFailing) === priorFailureSignature ||
+      failureSignature(summary) === priorFailureSignature)
   ) {
     const failingChecks = failingCheckerNames(summary);
     log(
@@ -293,6 +448,7 @@ async function checkPhaseImpl(opts: {
       stuck: true,
       crossRunStuck: true,
       failureSignature: priorFailureSignature,
+      ...(baseline ? { baseline } : {}),
     };
   }
 
@@ -300,8 +456,13 @@ async function checkPhaseImpl(opts: {
   let noProgressStreak = 0;
 
   while (summary.failures > 0 && reworkRounds < maxRounds) {
+    const target = excludeBaseFailing(summary, baseFailing);
+    if (target.failures === 0) {
+      log('check', `only base-failing checkers remain (${failingCheckerNames(summary).join(', ')}) — stopping rework`);
+      break;
+    }
     reworkRounds++;
-    const signatureBefore = failureSignature(summary);
+    const signatureBefore = stuckSignature(summary, baseFailing);
     const failingChecks = failingCheckerNames(summary);
     const evidence = testFailureEvidence(summary);
 
@@ -311,7 +472,7 @@ async function checkPhaseImpl(opts: {
       issue,
       worktree,
       specPath,
-      summary,
+      summary: target,
       constitution,
       router,
       log,
@@ -323,9 +484,10 @@ async function checkPhaseImpl(opts: {
       onPgid,
       reworkRoute,
       reworkModel,
+      runId,
     });
 
-    const cause = classifyReworkCause({ steering, failovers, failureReason });
+    const cause: ReworkCause = classifyReworkCause({ steering, failovers, failureReason });
     log(
       'rework',
       `round ${reworkRounds}/${maxRounds}: ${summary.failures} failing (${failingChecks.join(', ')}) — cause=${cause}`,
@@ -344,7 +506,7 @@ async function checkPhaseImpl(opts: {
     // signature is not evidence of a stuck worker — leave the streak untouched
     // (neither advanced nor reset) rather than treat a provider outage as no-progress (#642).
     if (modelCompleted) {
-      if (summary.failures > 0 && failureSignature(summary) === signatureBefore) {
+      if (summary.failures > 0 && stuckSignature(summary, baseFailing) === signatureBefore) {
         noProgressStreak++;
       } else {
         noProgressStreak = 0;
@@ -374,11 +536,10 @@ async function checkPhaseImpl(opts: {
     log('check', `SKIPPED: ${s.checker} — ${s.details}`);
   }
 
-  // Each failing checker is logged individually, the same way SKIPs are: the parked
-  // outcome only carries an aggregate count, so without this the checker/details pairs
-  // that name WHY a run parked are never surfaced to the operator (#675).
-  for (const f of summary.results.filter((r) => r.result === 'FAIL')) {
-    log('check', `FAILED: ${f.checker} — ${f.details}`);
+  logFailures(summary);
+
+  for (const p of summary.results.filter((r) => r.result === 'PASS' && r.findings?.length)) {
+    log('check', `FINDINGS: ${p.checker}\n${renderCheckerFindings(p.findings ?? []).join('\n')}`);
   }
 
   if (summary.failures > 0) {
@@ -397,8 +558,26 @@ async function checkPhaseImpl(opts: {
     summary,
     reworkRounds,
     stuck,
-    failureSignature: summary.failures > 0 ? failureSignature(summary) : undefined,
+    failureSignature: summary.failures > 0 ? stuckSignature(summary, baseFailing) : undefined,
+    ...(baseline ? { baseline } : {}),
   };
+}
+
+/** One-line summary of the baseline comparison for the CHECK log. */
+function describeBaseline(report: BaselineReport): string {
+  const parts = report.checkers.map((c) => {
+    if (c.verdict === 'fails-on-base') {
+      const counts =
+        c.sharedFailingTests && c.newFailingTests
+          ? ` (${c.sharedFailingTests.length} shared, ${c.newFailingTests.length} new failing tests)`
+          : '';
+      return `${c.checker} also fails on base${counts}${c.cached ? ' (cached)' : ''}`;
+    }
+    if (c.verdict === 'clean-on-base') return `${c.checker} clean on base${c.cached ? ' (cached)' : ''}`;
+    return `${c.checker} not run on base (${c.reason ?? 'unknown'})`;
+  });
+  const body = parts.length > 0 ? parts.join('; ') : 'no checkers compared';
+  return `baseline at ${report.baseSha.slice(0, 8)}: ${body}${report.error ? ` — error: ${report.error}` : ''}`;
 }
 
 interface ReworkWorkerOptions {
@@ -417,6 +596,7 @@ interface ReworkWorkerOptions {
   onPgid?: (pgid: number) => void;
   reworkRoute?: 'codex' | 'claude' | 'opencode';
   reworkModel?: string;
+  runId?: string;
 }
 
 async function reworkWorker(opts: ReworkWorkerOptions): Promise<{
@@ -441,6 +621,7 @@ async function reworkWorker(opts: ReworkWorkerOptions): Promise<{
     onPgid,
     reworkRoute = 'claude',
     reworkModel,
+    runId,
   } = opts;
   const constitutionCtx = buildConstitutionContext(constitution);
   const failures = summary.results.filter((r) => r.result === 'FAIL');
@@ -482,7 +663,7 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
       sandbox,
       onSandboxEvent: (type, detail) => log(type, detail),
       onLog: (msg) => log('router', msg),
-      env: laneEnv(appPort, process.env, appBaseUrl),
+      env: laneEnv(appPort, process.env, appBaseUrl, worktree, runId),
       onPgid,
       retryCause: 'checker',
       modelOverride: reworkModel,

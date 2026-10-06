@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ModelRegistry } from '../models/index.js';
 import { ModelRouter } from '../router/index.js';
+import { computeReviewFloor, DEFAULT_REVIEW_FLOOR_RULES } from '../review/floor.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { loadModelsConfig, type ModelsConfig, type RoutesConfig } from './index.js';
 import {
@@ -19,6 +20,8 @@ import {
   resolveEffectiveConfig,
   resolveEffectiveModelPins,
   resolveEfficiencyPolicy,
+  resolveLaneBreakerThreshold,
+  resolveReviewFloorRules,
   resolveUsageCap,
   resolveWatchdogPolicy,
   routeForBuildModel,
@@ -72,6 +75,7 @@ const routes: RoutesConfig = {
     build_codex: { tier: 'worker', description: 'stub', requires: 'codex' },
     check_tests: { tier: 'checker', description: 'stub' },
     triage: { tier: 'triage', description: 'stub' },
+    classify_pr: { tier: 'checker', description: 'stub' },
   },
 };
 
@@ -236,6 +240,35 @@ describe('loadRepoConfig', () => {
     expect(loadRepoConfig(repoRoot)).toEqual({
       version: 2,
       budget: { fastPath: true, maxReworkRounds: 1, perIssueCapUsd: 8 },
+    });
+  });
+
+  describe('budget.laneBreakerThreshold (#1915)', () => {
+    it('resolves to 2 when unset', async () => {
+      expect(resolveLaneBreakerThreshold(null)).toBe(2);
+      const repoRoot = await tempRepoRoot();
+      await writeRepoConfig(repoRoot, { version: 2 });
+      expect(resolveLaneBreakerThreshold(loadRepoConfig(repoRoot))).toBe(2);
+    });
+
+    it('keeps 0 (breaker off) rather than falling back to the default', async () => {
+      const repoRoot = await tempRepoRoot();
+      await writeRepoConfig(repoRoot, { version: 2, budget: { laneBreakerThreshold: 0 } });
+      const loaded = loadRepoConfig(repoRoot);
+      expect(loaded).toEqual({ version: 2, budget: { laneBreakerThreshold: 0 } });
+      expect(resolveLaneBreakerThreshold(loaded)).toBe(0);
+    });
+
+    it('loads a positive integer as written', async () => {
+      const repoRoot = await tempRepoRoot();
+      await writeRepoConfig(repoRoot, { version: 2, budget: { laneBreakerThreshold: 5 } });
+      expect(resolveLaneBreakerThreshold(loadRepoConfig(repoRoot))).toBe(5);
+    });
+
+    it.each([-1, 1.5, '2'])('rejects %j naming the key', async (value) => {
+      const repoRoot = await tempRepoRoot();
+      await writeRepoConfig(repoRoot, { version: 2, budget: { laneBreakerThreshold: value } });
+      expect(() => loadRepoConfig(repoRoot)).toThrow(/budget\.laneBreakerThreshold/);
     });
   });
 
@@ -865,6 +898,25 @@ describe('describeEffectiveConfig', () => {
     expect(lines).toContainEqual('Merge admin: on (.factory/config.json)');
   });
 
+  it('shows the PR classifier policy with its source (#1724)', () => {
+    const stub = new StubModelExecutor({ scripts: {} });
+    const router = new ModelRouter(models, routes, false, stub);
+    const base = { router, repo: null, env: {}, repoConfigPath: '.factory/config.json' };
+    expect(describeEffectiveConfig(base)).toContainEqual('PR classifier: off (default)');
+    expect(describeEffectiveConfig({ ...base, env: { FACTORY_PR_CLASSIFIER: '1' } })).toContainEqual(
+      'PR classifier: on (env: FACTORY_PR_CLASSIFIER)',
+    );
+    expect(describeEffectiveConfig({ ...base, prClassifier: { enabled: true, source: 'flag' } })).toContainEqual(
+      'PR classifier: on (flag: --pr-classifier)',
+    );
+    expect(describeEffectiveConfig({ ...base, prClassifier: { enabled: false, source: 'flag' } })).toContainEqual(
+      'PR classifier: off (flag: --no-pr-classifier)',
+    );
+    expect(describeEffectiveConfig({ ...base, prClassifier: { enabled: true, source: 'repo' } })).toContainEqual(
+      'PR classifier: on (.factory/config.json)',
+    );
+  });
+
   it('falls back to an env-only merge policy when none is passed', () => {
     const stub = new StubModelExecutor({ scripts: {} });
     const router = new ModelRouter(models, routes, false, stub);
@@ -939,4 +991,44 @@ it('shows scalar and task-specific effort overrides in factory status', () => {
   const lines = describeEffectiveConfig({ router, repo, env: {}, repoConfigPath: '.factory/config.json' });
   expect(lines).toContain('Effort gpt-model-a: {"plan":"high"} (.factory/config.json)');
   expect(lines).toContain('Effort claude-model: "low" (.factory/config.json)');
+});
+
+describe('classifier config (#1723)', () => {
+  it('a repo classifier section overrides the floor rules end to end', async () => {
+    const root = await tempRepoRoot();
+    await writeRepoConfig(root, { version: 2, classifier: { alwaysHuman: ['infra/'], maxDiffLines: 50 } });
+    const repo = loadRepoConfig(root);
+    const rules = resolveReviewFloorRules(repo);
+    expect(rules.maxLines).toBe(50);
+    const res = computeReviewFloor({ changes: [{ path: 'infra/main.tf', added: 1, removed: 0 }], rules });
+    expect(res.floor).toBe('C');
+    expect(res.rules.map((r) => r.id)).toContain('repo-always-human');
+  });
+
+  it('leaves the packaged rules untouched without a classifier section', () => {
+    expect(resolveReviewFloorRules(null)).toBe(DEFAULT_REVIEW_FLOOR_RULES);
+    expect(resolveReviewFloorRules({ version: 2 })).toBe(DEFAULT_REVIEW_FLOOR_RULES);
+  });
+
+  it('rejects unknown classifier keys and non-positive maxDiffLines', async () => {
+    const a = await tempRepoRoot();
+    await writeRepoConfig(a, { version: 2, classifier: { nope: true } });
+    expect(() => loadRepoConfig(a)).toThrow();
+    const b = await tempRepoRoot();
+    await writeRepoConfig(b, { version: 2, classifier: { maxDiffLines: 0 } });
+    expect(() => loadRepoConfig(b)).toThrow();
+  });
+
+  it('validates the classifier pin without touching the checker tier', () => {
+    expect(() => applyRepoConfig(models, { version: 2, models: { pins: { classifier: 'no-such-model' } } })).toThrow(
+      /models\.pins\.classifier.*no-such-model/s,
+    );
+    const result = applyRepoConfig(models, { version: 2, models: { pins: { classifier: 'claude-model' } } });
+    expect(result.tiers.checker).toEqual(models.tiers.checker);
+  });
+
+  it('the packaged classify_pr route is on the checker tier', async () => {
+    const { defaultRoutesConfig } = await import('@on-par/factory-config');
+    expect(defaultRoutesConfig.routes.classify_pr?.tier).toBe('checker');
+  });
 });

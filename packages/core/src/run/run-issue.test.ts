@@ -5,13 +5,15 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
-import type { BuildResult } from '../phases/build.js';
-import type { CheckPhaseResult } from '../phases/check.js';
-import type { PlanResult } from '../phases/plan.js';
-import type { ShipResult } from '../phases/ship.js';
+import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.js';
+import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
+import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
+import type { ShipResult, shipPhase as realShipPhase } from '../phases/ship.js';
+import type { PrShadowVerdict } from '../review/classifier.js';
+import { DEFAULT_REVIEW_FLOOR_RULES } from '../review/floor.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import type { CheckSummary, Constitution, DesignArtifact } from '../types/index.js';
@@ -19,18 +21,12 @@ import type { WorkRequest } from '../work/index.js';
 import { LaneFileGuard } from './lane-file-guard.js';
 import type { RunPolicy } from './policy.js';
 import type { Environment, Workspace } from './ports.js';
+import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
-vi.mock('../phases/plan.js', () => ({ planPhase: vi.fn() }));
-vi.mock('../phases/build.js', () => ({ buildPhase: vi.fn() }));
-vi.mock('../phases/check.js', () => ({ checkPhase: vi.fn() }));
-vi.mock('../phases/ship.js', () => ({ shipPhase: vi.fn() }));
-
-const { planPhase } = await import('../phases/plan.js');
-const { buildPhase } = await import('../phases/build.js');
-const { checkPhase } = await import('../phases/check.js');
-const { shipPhase } = await import('../phases/ship.js');
-const { runIssue } = await import('./run-issue.js');
-import type { RunPorts, RunRequest } from './run-issue.js';
+const planPhase = vi.fn<typeof realPlanPhase>();
+const buildPhase = vi.fn<typeof realBuildPhase>();
+const checkPhase = vi.fn<typeof realCheckPhase>();
+const shipPhase = vi.fn<typeof realShipPhase>();
 
 const execFile = promisify(execFileCb);
 
@@ -138,6 +134,10 @@ function basePorts(overrides: Partial<RunPorts> = {}): RunPorts {
     events: () => vi.fn(),
     breaker: new ProviderBreaker(`/tmp/run-issue-test-breaker-${breakerFileCounter}.json`),
     resolveConstitution: () => null,
+    planPhase,
+    buildPhase,
+    checkPhase,
+    shipPhase,
     ...overrides,
   };
 }
@@ -147,6 +147,18 @@ beforeEach(() => {
   vi.mocked(buildPhase).mockReset().mockResolvedValue(BUILD_OK);
   vi.mocked(checkPhase).mockReset().mockResolvedValue(CHECK_OK);
   vi.mocked(shipPhase).mockReset().mockResolvedValue(SHIP_OK);
+});
+
+describe('runIssue — recorded remote branch SHA (#1869)', () => {
+  it('threads the recorded remote SHA into shipPhase, undefined without a record', async () => {
+    await runIssue(baseRequest(), basePolicy(), basePorts());
+    expect(vi.mocked(shipPhase).mock.calls[0][0].recordedRemoteSha).toBeUndefined();
+
+    vi.mocked(shipPhase).mockClear();
+    const workspace = { path: '/tmp/wt', dispose: async () => {}, remoteBranch: { sha: 'd'.repeat(40) } } as Workspace;
+    await runIssue(baseRequest(), basePolicy(), basePorts({ workspace }));
+    expect(vi.mocked(shipPhase).mock.calls[0][0].recordedRemoteSha).toBe('d'.repeat(40));
+  });
 });
 
 describe('runIssue — invariant 1: constitution resolved exactly once', () => {
@@ -172,6 +184,65 @@ describe('runIssue — invariant 1: constitution resolved exactly once', () => {
     ]) {
       expect(call[0].constitution).toBe(constitution);
     }
+  });
+});
+
+describe('runIssue — per-run id threading (#1910)', () => {
+  it('mints one runId shared by BUILD and CHECK, fresh for every run', async () => {
+    await runIssue(baseRequest(), basePolicy(), basePorts());
+    const buildId = vi.mocked(buildPhase).mock.calls[0][0].runId;
+    expect(buildId).toMatch(/^[0-9a-f]{12}$/);
+    expect(vi.mocked(checkPhase).mock.calls[0][0].runId).toBe(buildId);
+
+    vi.mocked(buildPhase).mockClear();
+    await runIssue(baseRequest(), basePolicy(), basePorts());
+    expect(vi.mocked(buildPhase).mock.calls[0][0].runId).not.toBe(buildId);
+  });
+});
+
+describe('runIssue — .NET env event (#1911)', () => {
+  const dirs: string[] = [];
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true });
+  });
+
+  async function runWith(marker: string): Promise<Array<[string, string]>> {
+    for (const k of ['DiffEngine_Disabled', 'DOTNET_CLI_TELEMETRY_OPTOUT', 'DOTNET_NOLOGO', 'DOTNET_TieredPGO']) {
+      vi.stubEnv(k, undefined);
+    }
+    const path = await mkdtemp(join(tmpdir(), 'run-issue-dotnet-'));
+    dirs.push(path);
+    await writeFile(join(path, marker), '');
+    const events: Array<[string, string]> = [];
+    const log = vi.fn((type: string, msg: string) => events.push([type, msg]));
+    const workspace = { path, dispose: async () => {} } as Workspace;
+    await runIssue(baseRequest(), basePolicy(), basePorts({ workspace, events: () => log }));
+    return events;
+  }
+
+  it('logs one environment_dotnet event naming the applied variables for a .NET workspace', async () => {
+    const found = (await runWith('App.sln')).filter(([t]) => t === 'environment_dotnet');
+    expect(found).toHaveLength(1);
+    expect(found[0][1]).toContain('DiffEngine_Disabled=true');
+    expect(found[0][1]).toContain('DOTNET_NOLOGO=1');
+    expect(found[0][1]).toContain('SharedCompilationId=factory-');
+  });
+
+  it('logs no environment_dotnet event for a non-.NET workspace', async () => {
+    const events = await runWith('package.json');
+    expect(events.some(([t]) => t === 'environment_dotnet')).toBe(false);
+  });
+});
+
+describe('runIssue — publishFromBuild threading (#1867)', () => {
+  it('passes publishFromBuild to buildPhase, undefined by default', async () => {
+    await runIssue(baseRequest(), basePolicy(), basePorts());
+    expect(vi.mocked(buildPhase).mock.calls[0][0].publishFromBuild).toBeUndefined();
+
+    vi.mocked(buildPhase).mockClear();
+    await runIssue(baseRequest({ publishFromBuild: true }), basePolicy(), basePorts());
+    expect(vi.mocked(buildPhase).mock.calls[0][0].publishFromBuild).toBe(true);
   });
 });
 
@@ -490,6 +561,45 @@ describe('runIssue — reporting hooks', () => {
     await runIssue(baseRequest(), basePolicy(), basePorts({ reworkHistory: reworkHistory as never }));
     expect(reworkHistory.record).toHaveBeenCalledWith(1, 'sig-1', ['tests']);
     expect(reworkHistory.clear).not.toHaveBeenCalled();
+  });
+
+  it('carries the recorded failure signature and failing checks on the parked outcome (#1917)', async () => {
+    vi.mocked(checkPhase).mockResolvedValue({
+      passed: false,
+      summary: { ...CHECK_SUMMARY, results: [{ checker: 'tests', result: 'FAIL', details: 'nope' }] },
+      reworkRounds: 1,
+      failureSignature: 'sig-1',
+    });
+    const reworkHistory = {
+      priorSignature: vi.fn().mockResolvedValue(undefined),
+      record: vi.fn().mockResolvedValue(undefined),
+      clear: vi.fn().mockResolvedValue(undefined),
+    };
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ reworkHistory: reworkHistory as never }));
+    expect(outcome).toMatchObject({ state: 'parked', failureSignature: 'sig-1', failingChecks: ['tests'] });
+    const parked = outcome as Extract<typeof outcome, { state: 'parked' }>;
+    expect(reworkHistory.record).toHaveBeenCalledWith(1, parked.failureSignature, parked.failingChecks);
+  });
+
+  it('carries the signature on a held (cross-run stuck) CHECK park (#1917)', async () => {
+    vi.mocked(checkPhase).mockResolvedValue({
+      passed: false,
+      summary: { ...CHECK_SUMMARY, results: [{ checker: 'tests', result: 'FAIL', details: 'nope' }] },
+      reworkRounds: 0,
+      failureSignature: 'sig-1',
+      crossRunStuck: true,
+      stuck: true,
+    });
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts());
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'held', failureSignature: 'sig-1' });
+  });
+
+  it('leaves the signature undefined on a non-CHECK park (#1917)', async () => {
+    vi.mocked(buildPhase).mockResolvedValue({ ok: false, model: 'm', route: 'codex', reason: 'no_diff' });
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts());
+    expect(outcome.state).toBe('parked');
+    expect(outcome).not.toHaveProperty('failureSignature');
+    expect(outcome).not.toHaveProperty('failingChecks');
   });
 });
 
@@ -882,5 +992,239 @@ describe('runIssue — #1515: same-file lane guard', () => {
     const outcome = await runIssue(baseRequest(), basePolicy(), basePorts());
     expect(outcome.state).toBe('ready');
     expect(buildPhase).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('runIssue — PR classifier gate (#1724)', () => {
+  const RULES = DEFAULT_REVIEW_FLOOR_RULES;
+  const classifier = { rules: RULES, gateLabel: 'no-auto-merge' };
+
+  function setup(opts: {
+    changes?: { path: string; added: number; removed: number }[];
+    readError?: Error;
+    labelError?: Error;
+  }) {
+    const addLabels = vi.fn(async () => {
+      if (opts.labelError) throw opts.labelError;
+      return {};
+    });
+    const octokit = Object.assign({} as Octokit, { rest: { issues: { addLabels } } });
+    const readReviewFloorChanges = vi.fn(async () => {
+      if (opts.readError) throw opts.readError;
+      return opts.changes ?? [];
+    });
+    const events: { kind: string; msg: string; extra?: any }[] = [];
+    const classifyPr = vi.fn(async (): Promise<PrShadowVerdict> => verdict(null));
+    const ports = basePorts({
+      octokit,
+      readReviewFloorChanges,
+      classifyPr,
+      events: () => (kind: string, msg: string, extra?: any) => {
+        events.push({ kind, msg, extra });
+      },
+    });
+    return { addLabels, readReviewFloorChanges, classifyPr, events, ports };
+  }
+
+  function verdict(modelClass: 'A' | 'B' | 'C' | null, reason?: string): PrShadowVerdict {
+    return {
+      modelClass,
+      floorClass: 'A',
+      finalClass: 'A',
+      model: 'm-1',
+      promptVersion: 'classify-pr/v1',
+      policyVersion: 'floor-0123456789ab',
+      diffSha: 'f'.repeat(64),
+      adrIds: ['ADR-0121'],
+      costUsd: 0.01,
+      claims: [{ text: 'c', citation: 'a.ts:1' }],
+      unsupportedClaims: [],
+      notInspected: ['tests'],
+      droppedClaims: 0,
+      ...(reason ? { reason } : {}),
+    };
+  }
+  const classified = (events: { kind: string; msg: string; extra?: any }[]) =>
+    events.filter((e) => e.kind === 'pr-classified');
+
+  it('records the shadow verdict as one pr-classified event and hands it to ship', async () => {
+    const t = setup({ changes: [{ path: 'docs/guide.md', added: 3, removed: 0 }] });
+    t.classifyPr.mockResolvedValue(verdict('B'));
+    await runIssue(baseRequest({ prClassifier: { ...classifier, modelPin: 'pin' } }), basePolicy(), t.ports);
+    const [event] = classified(t.events);
+    expect(classified(t.events)).toHaveLength(1);
+    expect(event.extra.prClassification).toMatchObject({
+      modelClass: 'B',
+      floorClass: 'A',
+      finalClass: 'A',
+      model: 'm-1',
+      promptVersion: 'classify-pr/v1',
+      policyVersion: 'floor-0123456789ab',
+      adrIds: ['ADR-0121'],
+      notInspected: ['tests'],
+    });
+    expect(t.classifyPr).toHaveBeenCalledWith(expect.objectContaining({ modelPin: 'pin', floor: 'A' }));
+    expect(vi.mocked(shipPhase).mock.calls[0][0].reviewRouting?.shadow?.modelClass).toBe('B');
+  });
+
+  it('never lets a model C change an A floor: no label, no merge-gated', async () => {
+    const t = setup({ changes: [{ path: 'docs/guide.md', added: 3, removed: 0 }] });
+    t.classifyPr.mockResolvedValue(verdict('C'));
+    const outcome = await runIssue(baseRequest({ prClassifier: classifier }), basePolicy(), t.ports);
+    expect(outcome.state).toBe('ready');
+    expect(t.addLabels).not.toHaveBeenCalled();
+    expect(gated(t.events)).toHaveLength(0);
+    expect(vi.mocked(shipPhase).mock.calls[0][0].reviewRouting?.gated).toBe(false);
+  });
+
+  it('continues to ship when the model verdict is unavailable', async () => {
+    const t = setup({ changes: [{ path: 'docs/guide.md', added: 3, removed: 0 }] });
+    t.classifyPr.mockResolvedValue(verdict(null, 'classifier produced no JSON object'));
+    const outcome = await runIssue(baseRequest({ prClassifier: classifier }), basePolicy(), t.ports);
+    expect(outcome.state).toBe('ready');
+    expect(classified(t.events)[0].msg).toContain('classifier produced no JSON object');
+  });
+
+  it('logs a null verdict and still ships when the classifier port rejects', async () => {
+    const t = setup({ changes: [{ path: 'docs/guide.md', added: 3, removed: 0 }] });
+    t.classifyPr.mockRejectedValue(new Error('port blew up'));
+    const outcome = await runIssue(baseRequest({ prClassifier: classifier }), basePolicy(), t.ports);
+    expect(outcome.state).toBe('ready');
+    expect(classified(t.events)[0].extra.prClassification).toMatchObject({
+      modelClass: null,
+      reason: 'classifier error: port blew up',
+    });
+  });
+
+  it('does not call the shadow classifier when the flag is off', async () => {
+    const t = setup({ changes: [{ path: 'docs/guide.md', added: 3, removed: 0 }] });
+    await runIssue(baseRequest(), basePolicy(), t.ports);
+    expect(t.classifyPr).not.toHaveBeenCalled();
+    expect(classified(t.events)).toHaveLength(0);
+  });
+
+  const gated = (events: { kind: string; msg: string }[]) => events.filter((e) => e.kind === 'merge-gated');
+
+  it('is off by default: no git read, no label, no event, no routing passed to ship', async () => {
+    const t = setup({ changes: [{ path: '.github/workflows/ci.yml', added: 1, removed: 0 }] });
+    const outcome = await runIssue(baseRequest(), basePolicy(), t.ports);
+    expect(outcome.state).toBe('ready');
+    expect(t.readReviewFloorChanges).not.toHaveBeenCalled();
+    expect(t.addLabels).not.toHaveBeenCalled();
+    expect(gated(t.events)).toHaveLength(0);
+    expect(vi.mocked(shipPhase).mock.calls[0][0].reviewRouting).toBeUndefined();
+  });
+
+  it('holds a C-floor PR: labels the issue and logs merge-gated, then still ships', async () => {
+    const t = setup({ changes: [{ path: '.github/workflows/ci.yml', added: 1, removed: 0 }] });
+    const outcome = await runIssue(baseRequest({ issue: 7, prClassifier: classifier }), basePolicy(), t.ports);
+    expect(outcome.state).toBe('ready');
+    expect(t.addLabels).toHaveBeenCalledWith({ owner: 'o', repo: 'r', issue_number: 7, labels: ['no-auto-merge'] });
+    const [event] = gated(t.events);
+    expect(event.msg).toContain('classifier:floor:C:');
+    expect(event.msg).toContain('workflows');
+  });
+
+  it('lets an A-floor PR through untouched, and hands the receipt to ship', async () => {
+    const t = setup({ changes: [{ path: 'docs/guide.md', added: 3, removed: 0 }] });
+    await runIssue(baseRequest({ prClassifier: classifier }), basePolicy(), t.ports);
+    expect(t.addLabels).not.toHaveBeenCalled();
+    expect(gated(t.events)).toHaveLength(0);
+    expect(vi.mocked(shipPhase).mock.calls[0][0].reviewRouting).toMatchObject({ floor: 'A', gated: false });
+  });
+
+  it('fails closed when the diff cannot be read', async () => {
+    const t = setup({ readError: new Error('no base ref') });
+    await runIssue(baseRequest({ prClassifier: classifier }), basePolicy(), t.ports);
+    expect(t.addLabels).toHaveBeenCalledTimes(1);
+    expect(gated(t.events)[0].msg.startsWith('classifier:error')).toBe(true);
+  });
+
+  it('passes the floor and fired rules to ship as the receipt', async () => {
+    const t = setup({ changes: [{ path: '.github/workflows/ci.yml', added: 1, removed: 0 }] });
+    await runIssue(baseRequest({ prClassifier: classifier }), basePolicy(), t.ports);
+    const routing = vi.mocked(shipPhase).mock.calls[0][0].reviewRouting;
+    expect(routing?.floor).toBe('C');
+    expect(routing?.rules.map((r) => r.id)).toContain('workflows');
+  });
+
+  it('parks held and never ships when the gate label cannot be applied', async () => {
+    const t = setup({
+      changes: [{ path: '.github/workflows/ci.yml', added: 1, removed: 0 }],
+      labelError: new Error('403'),
+    });
+    const outcome = await runIssue(baseRequest({ prClassifier: classifier }), basePolicy(), t.ports);
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'held' });
+    expect(shipPhase).not.toHaveBeenCalled();
+  });
+
+  it('never runs for a local-only run', async () => {
+    const t = setup({ changes: [{ path: '.github/workflows/ci.yml', added: 1, removed: 0 }] });
+    await runIssue(baseRequest({ localOnly: true, prClassifier: classifier }), basePolicy(), t.ports);
+    expect(t.readReviewFloorChanges).not.toHaveBeenCalled();
+    expect(t.addLabels).not.toHaveBeenCalled();
+  });
+});
+
+describe('runIssue — environment release (#1928)', () => {
+  const ENV = {
+    baseSha: 'abc1234567890def',
+    failingChecks: ['tests', 'lint'],
+    logPaths: ['/logs/a.log', '/logs/check-base'],
+  };
+  const arrange = (request: Partial<RunRequest> = {}, createComment = vi.fn().mockResolvedValue({})) => {
+    vi.mocked(checkPhase).mockResolvedValue({
+      passed: false,
+      summary: CHECK_SUMMARY,
+      reworkRounds: 0,
+      environment: ENV,
+      failureSignature: 'sig',
+    });
+    const log = vi.fn();
+    const reworkHistory = {
+      priorSignature: vi.fn().mockResolvedValue(undefined),
+      record: vi.fn().mockResolvedValue(undefined),
+      clear: vi.fn().mockResolvedValue(undefined),
+    };
+    const ports = basePorts({
+      events: () => log,
+      octokit: { rest: { issues: { createComment } } } as never,
+      reworkHistory: reworkHistory as never,
+    });
+    return { log, createComment, reworkHistory, run: () => runIssue(baseRequest(request), basePolicy(), ports) };
+  };
+  const kinds = (log: ReturnType<typeof vi.fn>) => log.mock.calls.map((c) => c[0]);
+
+  it('returns a released outcome, posts one comment and emits environment-released', async () => {
+    const { run, log, createComment, reworkHistory } = arrange();
+    const outcome = await run();
+    expect(outcome).toMatchObject({
+      state: 'released',
+      reason: 'environment',
+      reworkRounds: 0,
+      baseSha: ENV.baseSha,
+      failingChecks: ENV.failingChecks,
+      failureSignature: 'sig',
+    });
+    expect(createComment).toHaveBeenCalledTimes(1);
+    const body = createComment.mock.calls[0][0].body as string;
+    for (const needle of ['tests', 'lint', ENV.baseSha, '/logs/a.log', '/logs/check-base']) {
+      expect(body).toContain(needle);
+    }
+    expect(kinds(log)).toContain('environment-released');
+    for (const parkKind of ['fail', 'escalate', 'held']) expect(kinds(log)).not.toContain(parkKind);
+    expect(reworkHistory.record).not.toHaveBeenCalled();
+  });
+
+  it('posts no comment on a local-only run', async () => {
+    const { run, createComment } = arrange({ localOnly: true });
+    expect(await run()).toMatchObject({ state: 'released' });
+    expect(createComment).not.toHaveBeenCalled();
+  });
+
+  it('logs environment_warning and still releases when the comment fails', async () => {
+    const { run, log } = arrange({}, vi.fn().mockRejectedValue(new Error('403')));
+    expect(await run()).toMatchObject({ state: 'released' });
+    expect(kinds(log)).toContain('environment_warning');
   });
 });

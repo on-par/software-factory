@@ -15,6 +15,8 @@ import {
 import { ProcessGroupTracker } from '../environment/process-groups.js';
 import type { SimWorkspace } from '../sim/workspace.js';
 import type { WorktreeSandbox } from '../utils/microvm.js';
+import type { PrLookup } from '../phases/ship.js';
+import type { RemoteBranchRecord } from '../types/index.js';
 import { cleanupWorktree, setupWorktree } from '../utils/index.js';
 import type { LocalOnlyPolicy } from '../work/local-only.js';
 
@@ -26,6 +28,8 @@ export interface Workspace {
   /** Tear down the working tree. Idempotent; a no-op for a caller-provided
    *  (local-only) workspace. */
   dispose(): Promise<void>;
+  /** Set only by worktreeWorkspace when origin/<branch> pre-existed at creation (#1868). */
+  readonly remoteBranch?: RemoteBranchRecord;
 }
 
 /** Optional lane environment bundling port-lease + pgid tracking + release as
@@ -54,14 +58,18 @@ export async function worktreeWorkspace(opts: {
   startPoint?: string;
   log?: (type: EventKind, msg: string) => void;
   sandbox?: WorktreeSandbox;
+  findOpenPr?: (branch: string) => Promise<PrLookup>;
   setup?: typeof setupWorktree;
   cleanup?: typeof cleanupWorktree;
 }): Promise<Workspace> {
   const setup = opts.setup ?? setupWorktree;
   const cleanup = opts.cleanup ?? cleanupWorktree;
-  await setup(opts.repoRoot, opts.branch, opts.worktreePath, opts.startPoint, opts.sandbox, opts.log);
+  const result = await setup(opts.repoRoot, opts.branch, opts.worktreePath, opts.startPoint, opts.sandbox, opts.log, {
+    findOpenPr: opts.findOpenPr,
+  });
   return {
     path: opts.worktreePath,
+    ...(result?.remoteBranch ? { remoteBranch: result.remoteBranch } : {}),
     dispose: () => cleanup(opts.repoRoot, opts.worktreePath, opts.log, opts.sandbox),
   };
 }

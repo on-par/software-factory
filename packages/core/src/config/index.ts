@@ -109,6 +109,7 @@ const FactoryConfigSchema = z.object({
         .object({
           auto: z.boolean().optional(),
           admin: z.boolean().optional(),
+          classifier: z.boolean().optional(),
         })
         .strict()
         .optional(),
@@ -144,6 +145,10 @@ const FactoryConfigSchema = z.object({
       comment: z.string().optional(),
     })
     .default({ enabled: false }),
+  design: z
+    .object({ blockUnresolvedRegressions: z.boolean().default(false) })
+    .default({ blockUnresolvedRegressions: false }),
+  build: z.object({ publishFromBuild: z.boolean().default(false) }).default({ publishFromBuild: false }),
   kpis: z
     .object({
       defectWindowDays: z.number().int().positive().default(14),
@@ -211,6 +216,13 @@ const FactoryConfigSchema = z.object({
       comment: z.string().optional(),
     })
     .default({ enabled: false, label: 'ready', lane: 'auto', maxPerCycle: 20 }),
+  intake: z
+    .object({
+      trustedApprovers: z.array(z.string().min(1)).optional(),
+      enforce: z.enum(['warn', 'enforce']).default('warn'),
+      comment: z.string().optional(),
+    })
+    .default({ enforce: 'warn' }),
   environment: z
     .object({
       ports: z
@@ -304,11 +316,14 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'ci',
   'sweep',
   'plan_approval',
+  'design',
+  'build',
   'kpis',
   'sandbox',
   'discovery',
   'filing',
   'ingest',
+  'intake',
   'environment',
   'auto_failover',
   'adr',
@@ -402,6 +417,18 @@ function resolveEnabledFlag(env: NodeJS.ProcessEnv, envVar: string, fallback: bo
 
 export function resolveSkipCI(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
   return resolveEnabledFlag(env, 'FACTORY_SKIP_CI', config.ci?.skip ?? false);
+}
+
+export function resolveBuildPublish(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
+  return resolveEnabledFlag(env, 'FACTORY_BUILD_PUBLISH', config.build?.publishFromBuild ?? false);
+}
+
+export function resolveDesignRegressionBlock(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
+  return resolveEnabledFlag(
+    env,
+    'FACTORY_DESIGN_BLOCK_REGRESSIONS',
+    config.design?.blockUnresolvedRegressions ?? false,
+  );
 }
 
 export function resolvePlanApproval(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
@@ -521,6 +548,25 @@ export interface EffectiveMergePolicy {
  *  supplied" and changes nothing; a boolean wins over config file and env alike. */
 export interface MergePolicyOverrides {
   auto?: boolean;
+  /** From `--pr-classifier` / `--no-pr-classifier` (#1724). */
+  classifier?: boolean;
+}
+
+export interface EffectivePrClassifierPolicy {
+  enabled: boolean;
+  source: MergePolicySource;
+}
+
+/** Resolve the PR classifier gate (#1724): flag > run.merge.classifier > FACTORY_PR_CLASSIFIER=1 > off. */
+export function resolvePrClassifierPolicy(
+  config: FactoryConfig,
+  env: NodeJS.ProcessEnv = process.env,
+  overrides: MergePolicyOverrides = {},
+): EffectivePrClassifierPolicy {
+  if (overrides.classifier !== undefined) return { enabled: overrides.classifier, source: 'flag' };
+  if (config.run?.merge?.classifier !== undefined) return { enabled: config.run.merge.classifier, source: 'repo' };
+  if (env.FACTORY_PR_CLASSIFIER === '1') return { enabled: true, source: 'env' };
+  return { enabled: false, source: 'default' };
 }
 
 /** Resolve auto-merge/admin-merge: an explicit per-invocation `overrides.auto` (from
@@ -613,12 +659,14 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string) {
     approvals: resolve(state, 'approvals'),
     steering: resolve(state, 'steering'),
     kpiHistory: resolve(state, 'kpi-history.jsonl'),
+    classifierOutcomes: resolve(state, 'classifier-outcomes.jsonl'),
     ingestWatermark: resolve(state, 'ingest-watermark'),
     ports: resolve(process.env.FACTORY_DAEMON_PORTS_DIR ?? state, 'ports.json'),
     portsLock: resolve(process.env.FACTORY_DAEMON_PORTS_DIR ?? state, 'ports.lock'),
     proxyState: resolve(state, 'proxy.json'),
     breaker: resolve(state, 'breaker.json'),
     reworkHistory: resolve(state, 'rework-history.json'),
+    baselineCache: resolve(state, 'baseline-cache.json'),
     laneFiles: resolve(state, 'lane-files.json'),
     /** Per-invocation CLI flag overrides recorded by `factory run` so a separate
      *  `factory status` process can attribute the policy to the flag (#1400). */

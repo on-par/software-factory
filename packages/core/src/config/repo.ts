@@ -7,6 +7,7 @@
 
 import { existsSync } from 'node:fs';
 
+import { defaultLaneBreakerThreshold } from '@on-par/factory-config';
 import { z } from 'zod';
 import { readRepoConfigFile } from './repo-config-file.js';
 import { runConfigSource } from './run-config-source.js';
@@ -14,6 +15,7 @@ import { runConfigSource } from './run-config-source.js';
 import type { ModelRegistry } from '../models/index.js';
 import { resolveModelOverrides } from '../models/index.js';
 import type { ModelRouter } from '../router/index.js';
+import { applyReviewFloorOverrides, type ReviewFloorRuleSet } from '../review/floor.js';
 import {
   FACTORY_RUNTIME_CONFIG_KEYS,
   getFactoryPaths,
@@ -22,6 +24,7 @@ import {
   resolveExperimental,
   resolveLocalOnly,
   type EffectiveMergePolicy,
+  type EffectivePrClassifierPolicy,
   type MergePolicySource,
   type ModelsConfig,
 } from './index.js';
@@ -96,6 +99,12 @@ export const RepoFactoryConfigV2Schema = z
             buildFallback: z.string().optional().describe('Codex-capable model to use after a Claude BUILD failure.'),
             checker: z.string().optional().describe('Checker model. Replaces the checker tier.'),
             triage: z.string().optional().describe('Triage model. Replaces the triage tier.'),
+            classifier: z
+              .string()
+              .optional()
+              .describe(
+                'PR classifier model (classify_pr route). Unset: the checker tier. Changing it demotes the classifier (ADR-0121).',
+              ),
           })
           .strict()
           .optional()
@@ -134,6 +143,12 @@ export const RepoFactoryConfigV2Schema = z
           .positive()
           .optional()
           .describe('Hard USD cap per issue, on top of the run-wide cap. Unset: no per-issue cap.'),
+        laneBreakerThreshold: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('Lane circuit breaker threshold (non-negative integer). 0 turns the breaker off. Unset: 2.'),
         /** Usage-watchdog knobs, colocated with `capUsd` since both gate the usage
          *  supervisor. Each field is independently optional so a repo can durably pin
          *  just one, e.g. `{"watchdog": {"pollSeconds": 60}}` (see resolveWatchdogPolicy). */
@@ -168,6 +183,30 @@ export const RepoFactoryConfigV2Schema = z
       })
       .strict()
       .optional(),
+    classifier: z
+      .object({
+        alwaysHuman: z
+          .array(z.string().min(1))
+          .optional()
+          .describe(
+            'Path prefixes or globs forced to review class C. Added to the packaged C rules, never replacing them.',
+          ),
+        autoEligible: z
+          .array(z.string().min(1))
+          .optional()
+          .describe(
+            'Path prefixes or globs eligible for class A. Replaces the packaged A rules (docs/, *.md, *.test.ts).',
+          ),
+        maxDiffLines: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe('Total added+removed lines above which the floor is at least B.'),
+      })
+      .strict()
+      .optional()
+      .describe('Review floor rules for the PR classifier. Unset keys use the packaged floor rules.'),
     /** Repo pins the build route for every issue (e.g. "opencode"). The plan
      *  phase still writes the spec, but the pinned route wins over the model's
      *  route choice so deepseek workers are actually used when pinned. */
@@ -198,6 +237,11 @@ export function resolveEfficiencyPolicy(repo: RepoFactoryConfig | null): Efficie
     maxReworkRounds: repo?.budget?.maxReworkRounds ?? 1,
     perIssueCapUsd: repo?.budget?.perIssueCapUsd,
   };
+}
+
+/** Resolve the lane breaker threshold: repo `budget.laneBreakerThreshold` > the packaged default (2). 0 means off. */
+export function resolveLaneBreakerThreshold(repo: RepoFactoryConfig | null): number {
+  return repo?.budget?.laneBreakerThreshold ?? defaultLaneBreakerThreshold;
 }
 
 // ---------- Loading ----------
@@ -331,6 +375,11 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
       );
     }
     tiers = { ...tiers, triage: [repo.models.pins.triage] };
+  }
+  if (repo.models?.pins?.classifier && !models.models[repo.models.pins.classifier]) {
+    throw new Error(
+      `.factory/config.json: models.pins.classifier references unknown model '${repo.models.pins.classifier}' (known models: ${knownModels})`,
+    );
   }
 
   for (const [tierName, modelIds] of Object.entries(tiers)) {
@@ -694,6 +743,8 @@ export interface DescribeEffectiveConfigOpts {
    *  FactoryConfig and pass it in. Omitting it falls back to an env-only policy (as if no
    *  repo file set merge/admin at all). */
   mergePolicy?: EffectiveMergePolicy;
+  /** PR classifier gate (#1724), resolved via `resolvePrClassifierPolicy`. Omitted ⇒ env-only. */
+  prClassifier?: EffectivePrClassifierPolicy;
 }
 
 function defaultMergePolicy(env: NodeJS.ProcessEnv): EffectiveMergePolicy {
@@ -793,6 +844,17 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
   lines.push(
     `Merge admin: ${mergePolicy.admin ? 'on' : 'off'} ${sourceLabel(mergePolicy.sources.admin, repoConfigPath, 'FACTORY_MERGE_ADMIN')}`,
   );
+  const prClassifier: EffectivePrClassifierPolicy =
+    opts.prClassifier ??
+    (env.FACTORY_PR_CLASSIFIER === '1' ? { enabled: true, source: 'env' } : { enabled: false, source: 'default' });
+  lines.push(
+    `PR classifier: ${prClassifier.enabled ? 'on' : 'off'} ${sourceLabel(
+      prClassifier.source,
+      repoConfigPath,
+      'FACTORY_PR_CLASSIFIER',
+      prClassifier.enabled ? '--pr-classifier' : '--no-pr-classifier',
+    )}`,
+  );
 
   const watchdog = resolveWatchdogPolicy(repo, env);
   lines.push(
@@ -818,4 +880,9 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
   }
 
   return lines;
+}
+
+/** Review floor rules for this repo: the classifier section merged onto the packaged rules (#1723). */
+export function resolveReviewFloorRules(repo: RepoFactoryConfig | null): ReviewFloorRuleSet {
+  return applyReviewFloorOverrides(repo?.classifier);
 }

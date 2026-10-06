@@ -69,6 +69,10 @@ export interface FactoryDefaults {
   ci: { skip: boolean; comment?: string };
   sweep: { heartbeatFile?: string; loopIntervalSeconds: number; staleThresholdMultiplier: number; comment?: string };
   plan_approval: { enabled: boolean; comment?: string };
+  /** PLAN design-artifact gates (#1819). */
+  design: { blockUnresolvedRegressions: boolean };
+  /** BUILD policy (#1867). publishFromBuild: true lets the claude BUILD worker push and open a PR before CHECK; default false = commit-only, SHIP publishes. */
+  build: { publishFromBuild: boolean };
   sandbox: {
     enabled: boolean;
     runtime: 'auto' | 'sandbox-exec' | 'firejail' | 'docker-sandbox' | 'none';
@@ -90,6 +94,12 @@ export interface FactoryDefaults {
     comment?: string;
   };
   ingest: { enabled: boolean; label: string; lane: string; maxPerCycle: number; comment?: string };
+  /**
+   * Issue-approval gate for claims (#1802). `trustedApprovers` lists the GitHub logins whose approval
+   * counts; unset means users with admin permission on the repo (a permission-lookup failure counts
+   * as untrusted). `enforce: 'warn'` only logs a missing/untrusted approval; `'enforce'` blocks the claim.
+   */
+  intake: { trustedApprovers?: string[]; enforce: 'warn' | 'enforce'; comment?: string };
   environment: {
     ports: { enabled: boolean; range: [number, number]; comment?: string };
     proxy: { enabled: boolean; port: number; domain: string; comment?: string };
@@ -514,7 +524,7 @@ export const defaultRoutesConfig: RoutesDefaults = {
     build_claude: {
       tier: 'worker',
       description:
-        'Claude implementation from frozen spec (design/UX tasks) - requires the claude-cli harness, which drives its own commits',
+        'Claude implementation from frozen spec (design/UX tasks) - requires the claude-cli harness, which drives its own commits (commit-only; SHIP publishes after CHECK)',
       requires: 'claude',
     },
     build_opencode: {
@@ -563,6 +573,10 @@ export const defaultRoutesConfig: RoutesDefaults = {
       tier: 'checker',
       description: 'Security review of the diff',
     },
+    classify_pr: {
+      tier: 'checker',
+      description: 'PR classifier: escalate-only review class (A/B/C) from the diff (ADR-0121)',
+    },
     dispute_resolution: {
       tier: 'boss',
       description: 'Boss arbitrates when worker disputes checker failure',
@@ -573,6 +587,22 @@ export const defaultRoutesConfig: RoutesDefaults = {
     },
   },
 };
+
+/** Size caps for auto-filed bug evidence (#1842). Raw logs stay local; issues get a capped excerpt plus a host:path pointer. */
+export interface EvidenceCapsDefaults {
+  /** Max characters of the evidence excerpt placed in a filed bug body. */
+  maxExcerptChars: number;
+  /** Max characters of the whole filed bug body. */
+  maxBodyChars: number;
+}
+
+export const defaultEvidenceCaps: EvidenceCapsDefaults = {
+  maxExcerptChars: 2000,
+  maxBodyChars: 8000,
+};
+
+/** Lane circuit breaker threshold (#1915): default for `budget.laneBreakerThreshold`. 0 turns the breaker off. */
+export const defaultLaneBreakerThreshold = 2;
 
 /** Global factory configuration: paths, timeouts, merge/worktree/budget/intake defaults. */
 export const defaultFactoryConfig: FactoryDefaults = {
@@ -598,8 +628,11 @@ export const defaultFactoryConfig: FactoryDefaults = {
       'Set FACTORY_MERGE=1 to enable autonomous squash-merge; set FACTORY_MERGE_ADMIN=1 to bypass unmet merge requirements with GitHub admin privileges',
   },
   worktree: {
-    parent: '../',
-    comment: 'Worktrees created as siblings of the repo',
+    parent: '~/.factory/worktrees',
+    comment:
+      'Where lane worktrees are created. "~/..." or an absolute path is a shared root, namespaced as <parent>/<owner>/<repo>/. ' +
+      'A repo-relative path is used as-is: "../" gives the old sibling layout; ".factory/worktrees" keeps them inside the repo ' +
+      "(auto-added to .git/info/exclude) but the repo's own tools (jest, eslint, tsc, globbing scripts) may crawl into those nested checkouts.",
     gcTtlDays: 7,
     autoGcOnRun: true,
   },
@@ -639,6 +672,17 @@ export const defaultFactoryConfig: FactoryDefaults = {
     comment:
       'OPTIONAL pre-code gate: when true (or --approve-plan / FACTORY_APPROVE_PLAN=1), PLAN pauses after freezing the spec and waits for operator approval before BUILD. Default off keeps unattended auto-plan. Independent of the SHIP/auto-merge gate.',
   },
+  /**
+   * Opt-in: when true, PLAN stops before BUILD if a behaviorDelta row with verdict worse/unknown is not listed in
+   * openQuestions. Default false = log design_regression_unresolved only, like the other design checks.
+   * FACTORY_DESIGN_BLOCK_REGRESSIONS=1/0 overrides.
+   */
+  design: { blockUnresolvedRegressions: false },
+  /**
+   * BUILD policy (#1867). false keeps BUILD commit-only on every route (SHIP pushes and
+   * opens the PR after CHECK); true lets the claude worker push and open a PR itself.
+   */
+  build: { publishFromBuild: false },
   sandbox: {
     enabled: true,
     runtime: 'auto',
@@ -675,6 +719,7 @@ export const defaultFactoryConfig: FactoryDefaults = {
     comment:
       'Always-on auto-ingest. When enabled, `factory supervise` polls each cycle for open issues carrying `label` and appends new ones (deduped against the queue and open factory/* PRs, legacy ship-it branches included) to the queue under `lane`. Enable per-run with FACTORY_AUTO_INGEST=1; disable with =0.',
   },
+  intake: { enforce: 'warn' },
   environment: {
     ports: {
       enabled: true,

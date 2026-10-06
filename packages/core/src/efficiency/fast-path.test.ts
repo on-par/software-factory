@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { findUnresolvedRegressions } from '../design/index.js';
+import { UNTRUSTED_ISSUE_BODY_NOTICE } from '../utils/untrusted-input.js';
 import { buildFastPathSpec, isFastPathEligible } from './fast-path.js';
 
 const completeIssue = `## Problem statement
@@ -32,7 +34,18 @@ describe('fast-path planning', () => {
 
     expect(spec.frontmatter.route).toBe('codex');
     expect(spec.frontmatter.design.openQuestions).toEqual([]);
+    expect(spec.frontmatter.design.behaviorDelta).toBeUndefined();
+    expect(findUnresolvedRegressions(spec.frontmatter.design)).toEqual([]);
     expect(spec.markdown).toContain('## Acceptance criteria');
     expect(spec.markdown).toContain('Update packages/cli/src/status.ts');
+  });
+});
+
+describe('fast-path spec untrusted body', () => {
+  it('freezes the issue body only inside the untrusted block with the notice', () => {
+    const { markdown } = buildFastPathSpec({ issue: 1840, title: 't', issueBody: completeIssue });
+    expect(markdown).toContain(`<untrusted-issue-body>\n${completeIssue.trim()}\n</untrusted-issue-body>`);
+    expect(markdown).toContain(UNTRUSTED_ISSUE_BODY_NOTICE);
+    expect(markdown.split(completeIssue.trim()).length).toBe(2);
   });
 });

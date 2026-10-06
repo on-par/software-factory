@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { FACTORY_TASK_REQUIRED_FIELDS } from './index.js';
-import { buildReadinessEnrichmentPrompt, buildReadinessEnrichmentRetryPrompt } from './enrich.js';
+import {
+  buildReadinessEnrichmentPrompt,
+  buildReadinessEnrichmentRetryPrompt,
+  buildReadinessGapPrompt,
+  parseReadinessGapOutput,
+} from './enrich.js';
 
 describe('buildReadinessEnrichmentPrompt', () => {
   it('treats source content as data and requires the scorer-compatible replacement body', () => {
@@ -43,5 +48,41 @@ describe('buildReadinessEnrichmentPrompt', () => {
       '<untrusted-previous-output>\n## Problem statement\nThe queue stalls.\n</untrusted-previous-output>',
     );
     expect(prompt).toContain('Do not wrap the output in a code fence');
+  });
+});
+
+describe('buildReadinessGapPrompt', () => {
+  it('delimits untrusted data and names the JSON keys', () => {
+    const prompt = buildReadinessGapPrompt({ title: 'T', body: 'B' });
+    expect(prompt).toContain('<untrusted-title>\nT\n</untrusted-title>');
+    expect(prompt).toContain('<untrusted-original-body>\nB\n</untrusted-original-body>');
+    for (const key of ['missingCriteria', 'unclearScope', 'negotiable', 'estimable']) expect(prompt).toContain(key);
+  });
+});
+
+describe('parseReadinessGapOutput', () => {
+  const obj = { missingCriteria: [{ name: 'n', when: ['w'], then: ['t'] }], estimable: ['vague'] };
+
+  it('accepts raw and fenced JSON and defaults optional arrays', () => {
+    for (const out of [JSON.stringify(obj), '```json\n' + JSON.stringify(obj) + '\n```']) {
+      const r = parseReadinessGapOutput(out);
+      expect(r).toEqual({
+        ok: true,
+        gaps: { missingCriteria: obj.missingCriteria, unclearScope: [], negotiable: [], estimable: ['vague'] },
+      });
+    }
+  });
+
+  it('rejects prose, broken JSON, and schema violations', () => {
+    expect(parseReadinessGapOutput('nothing here')).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('no JSON object'),
+    });
+    expect(parseReadinessGapOutput('{"a": }')).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('not valid JSON'),
+    });
+    const bad = JSON.stringify({ missingCriteria: [{ name: 'n', when: ['w'], then: [] }] });
+    expect(parseReadinessGapOutput(bad)).toMatchObject({ ok: false, reason: expect.stringContaining('gap schema') });
   });
 });

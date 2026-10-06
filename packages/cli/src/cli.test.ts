@@ -26,7 +26,11 @@ import {
   getPullRequestLandState,
   hasReachableWorker,
   InvalidProductNameError,
+  isHeadModifiedMergeError,
   isPermanentMergeCheckError,
+  cmdFeedback,
+  cmdFilingPreview,
+  runFeedbackCommand,
   IssueDecomposedError,
   IssueSkippedError,
   isPrMerged,
@@ -36,6 +40,7 @@ import {
   LandFailureError,
   laneQueueDeps,
   landOpenPullRequest,
+  LaneEnvironmentPauseError,
   LaneParkError,
   listOpenFactoryPRs,
   main,
@@ -2048,6 +2053,150 @@ describe('cli', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('pins both merge paths to the verified head SHA when one is given', async () => {
+    const calls: any[] = [];
+    const octokit: any = {
+      rest: {
+        pulls: { merge: async (args: any) => calls.push(['merge', args]) },
+        git: { deleteRef: async () => {} },
+      },
+    };
+    const run = async (command: string) => {
+      calls.push(['run', command]);
+    };
+
+    await squashMergeAndDelete(octokit, 'on-par', 'software-factory', 'ship-it/19-land', 123, { sha: 'abc123' });
+    await squashMergeAndDelete(octokit, 'on-par', 'software-factory', 'ship-it/19-land', 123, {
+      admin: true,
+      run,
+      sha: 'abc123',
+    });
+
+    expect(calls).toEqual([
+      ['merge', { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash', sha: 'abc123' }],
+      [
+        'run',
+        "gh pr merge 123 --repo 'on-par/software-factory' --admin --squash --delete-branch --match-head-commit 'abc123'",
+      ],
+    ]);
+  });
+
+  it('recognizes a head-moved merge refusal from the REST API and from gh', () => {
+    expect(isHeadModifiedMergeError(Object.assign(new Error('Conflict'), { status: 409 }))).toBe(true);
+    expect(
+      isHeadModifiedMergeError(
+        Object.assign(new Error('Command failed: gh pr merge'), {
+          stderr: 'GraphQL: Head branch was modified. Review and try the merge again. (mergePullRequest)',
+        }),
+      ),
+    ).toBe(true);
+    expect(isHeadModifiedMergeError(Object.assign(new Error('Base branch was modified'), { status: 405 }))).toBe(false);
+    expect(isHeadModifiedMergeError(new Error('Pull Request is still a draft'))).toBe(false);
+  });
+
+  describe('landOpenPullRequest head-SHA pinning', () => {
+    const cleanOctokit = (merge: (args: any) => Promise<unknown>, calls: any[]): any => ({
+      graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
+      rest: {
+        pulls: {
+          get: async (args: any) => {
+            calls.push(['get', args.pull_number]);
+            return { data: { head: { sha: 'abc123' } } };
+          },
+          merge,
+        },
+        git: { deleteRef: async () => {} },
+      },
+    });
+    const baseOpts = {
+      owner: 'on-par',
+      repoName: 'software-factory',
+      ghRepo: 'on-par/software-factory',
+      repoRoot: '/repo',
+      issue: 20,
+      branch: 'ship-it/20-pin',
+      worktree: '/repo-factory-20',
+      prNumber: 123,
+      pathExists: () => true,
+      sleep: async () => {
+        throw new Error('sleep should not be called');
+      },
+    };
+
+    it('watches CI on the PR head SHA, not the branch ref, and merges that SHA', async () => {
+      const calls: any[] = [];
+      const octokit = cleanOctokit(async (args) => calls.push(['merge', args.sha]), calls);
+
+      await landOpenPullRequest({
+        ...baseOpts,
+        octokit,
+        log: () => {},
+        watch: async (opts) => {
+          calls.push(['watch', opts.ref]);
+          return 'success';
+        },
+      });
+
+      expect(calls).toEqual([
+        ['get', 123],
+        ['watch', 'abc123'],
+        ['merge', 'abc123'],
+      ]);
+    });
+
+    it('surfaces a 409 head-moved merge refusal as CI-unverified without retrying', async () => {
+      const calls: any[] = [];
+      let mergeCalls = 0;
+      const octokit = cleanOctokit(async () => {
+        mergeCalls++;
+        throw Object.assign(new Error('Head branch was modified. Review and try the merge again.'), { status: 409 });
+      }, calls);
+
+      const err = await landOpenPullRequest({
+        ...baseOpts,
+        octokit,
+        log: (type, msg) => calls.push(['log', type, msg]),
+        watch: async () => 'success',
+      }).catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(CiUnverifiedError);
+      expect(mergeCalls).toBe(1);
+      expect(calls).toContainEqual([
+        'log',
+        'ci-failed',
+        'PR #123 head moved past CI-verified commit abc123 — refusing to merge an unverified head',
+      ]);
+    });
+
+    it('still runs an unpinned admin merge when the CI watch is skipped', async () => {
+      const calls: any[] = [];
+      const octokit = cleanOctokit(async () => calls.push(['merge']), calls);
+
+      await landOpenPullRequest({
+        ...baseOpts,
+        octokit,
+        log: () => {},
+        run: async (command: string) => calls.push(['run', command]),
+        skipCI: true,
+        adminMerge: true,
+      });
+
+      const runs = calls.filter((c) => c[0] === 'run');
+      expect(runs).toHaveLength(1);
+      expect(runs[0][1]).toContain('--admin');
+      expect(runs[0][1]).not.toContain('--match-head-commit');
+    });
+
+    it('still merges unpinned when the CI watch is skipped without admin', async () => {
+      const calls: any[] = [];
+      const octokit = cleanOctokit(async (args) => calls.push(['merge', args.sha]), calls);
+
+      await landOpenPullRequest({ ...baseOpts, octokit, log: () => {}, skipCI: true });
+
+      expect(calls).toEqual([['merge', undefined]]);
+    });
+  });
+
   it('reads the pull request land state fields', async () => {
     const calls: any[] = [];
     const octokit: any = {
@@ -2087,6 +2236,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } } }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2127,7 +2277,7 @@ describe('cli', () => {
     expect(calls).toEqual([
       ['run', 'git rebase origin/main', { cwd: '/repo-factory-20' }],
       ['run', "git push --force-with-lease origin 'ship-it/20-dirty'", { cwd: '/repo-factory-20' }],
-      ['merge', { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash' }],
+      ['merge', { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash', sha: 'abc123' }],
       ['deleteRef', { owner: 'on-par', repo: 'software-factory', ref: 'heads/ship-it/20-dirty' }],
     ]);
   });
@@ -2138,6 +2288,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2190,6 +2341,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2237,6 +2389,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2284,6 +2437,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2334,6 +2488,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'CLEAN' } } }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2390,6 +2545,7 @@ describe('cli', () => {
       },
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2425,7 +2581,7 @@ describe('cli', () => {
     expect(warnCall[2]).toContain('ready-for-review flip failed');
     expect(calls).toContainEqual([
       'merge',
-      { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash' },
+      { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash', sha: 'abc123' },
     ]);
   });
 
@@ -2435,6 +2591,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } } }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2484,6 +2641,7 @@ describe('cli', () => {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } } }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2539,6 +2697,7 @@ describe('cli', () => {
       },
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async (args: any) => {
             calls.push(['merge', args]);
           },
@@ -2592,6 +2751,7 @@ describe('cli', () => {
       },
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async () => {
             mergeCalls++;
             if (mergeCalls === 1) throw new Error('Pull Request is still a draft');
@@ -2641,6 +2801,7 @@ describe('cli', () => {
       },
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async () => {
             mergeCalls++;
             if (mergeCalls < 3) throw new Error('Pull Request is not mergeable');
@@ -2687,6 +2848,7 @@ describe('cli', () => {
       }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async () => {
             mergeCalls++;
             throw mergeError;
@@ -2736,6 +2898,7 @@ describe('cli', () => {
       }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async () => {
             mergeCalls++;
             throw new Error('At least 1 approving review is required by reviewers with write access.');
@@ -2797,6 +2960,7 @@ describe('cli', () => {
       }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async () => {
             trace.push('merge');
           },
@@ -2848,6 +3012,7 @@ describe('cli', () => {
       }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async () => {
             trace.push('merge');
           },
@@ -2916,6 +3081,7 @@ describe('cli', () => {
       },
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async () => {
             trace.push('merge');
           },
@@ -2968,6 +3134,7 @@ describe('cli', () => {
       }),
       rest: {
         pulls: {
+          get: async () => ({ data: { head: { sha: 'abc123' } } }),
           merge: async () => {
             mergeCalls++;
             trace.push('merge');
@@ -3038,6 +3205,17 @@ describe('cli', () => {
     it('maps a LaneParkError to its own reason', () => {
       expect(parkReasonFor(new LaneParkError('x', 'escalate'))).toBe('escalate');
       expect(parkReasonFor(new LaneParkError('x', 'fail'))).toBe('fail');
+    });
+
+    it('carries the failure signature and failing checks on LaneParkError when given', () => {
+      const err = new LaneParkError('x', 'fail', { failureSignature: 's', failingChecks: ['lint'] });
+      expect(err.failureSignature).toBe('s');
+      expect(err.failingChecks).toEqual(['lint']);
+      expect(err.outcome).toEqual({ state: 'parked', reason: 'fail', failureSignature: 's', failingChecks: ['lint'] });
+      const bare = new LaneParkError('x', 'fail');
+      expect(bare.failureSignature).toBeUndefined();
+      expect(bare.failingChecks).toBeUndefined();
+      expect(bare.outcome).toEqual({ state: 'parked', reason: 'fail' });
     });
 
     it('maps a LandConflictError to conflict', () => {
@@ -3428,6 +3606,159 @@ describe('cli', () => {
         'lane complete (0 merged, 0 awaiting review, 0 skipped, 0 decomposed, 1 parked)',
         { lane: 'app' },
       ]);
+    });
+
+    describe('lane breaker (#1918)', () => {
+      const parkErr = (signature?: string) =>
+        new LaneParkError('check failed', 'escalate', { failureSignature: signature, failingChecks: ['tests'] });
+      const harness = (behavior: Record<number, string | Error>, queued: number[]) => {
+        const shipped: number[] = [];
+        const events: any[] = [];
+        const released: any[] = [];
+        const claimNext = vi.fn(async () => buildClaim(queued.shift()));
+        const deps = {
+          claimNext,
+          ship: async (issue: number) => {
+            shipped.push(issue);
+            const b = behavior[issue];
+            if (b instanceof Error) throw b;
+            return 'branch';
+          },
+          waitMerge: async () => {},
+          releaseIssue: async (issue: number, outcome: string) => {
+            released.push([issue, outcome]);
+          },
+          pathExists: () => false,
+          emitEvent: ((...args: any[]) => {
+            events.push(args);
+          }) as any,
+        };
+        return { shipped, events, released, claimNext, deps };
+      };
+      const kinds = (events: any[], kind: string) => events.filter((e) => e[1] === kind);
+
+      it('pauses the lane after consecutive parks with the same signature', async () => {
+        const h = harness({ 1: parkErr('sig-A'), 2: parkErr('sig-A'), 3: parkErr('sig-A') }, [1, 2, 3]);
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, { ...h.deps, laneBreakerThreshold: 2 });
+
+        expect(h.shipped).toEqual([1, 2]);
+        expect(h.claimNext).toHaveBeenCalledTimes(2);
+        expect(kinds(h.events, 'lane-paused')).toHaveLength(1);
+        expect(kinds(h.events, 'lane-paused')[0][4]).toEqual({
+          lane: 'app',
+          lanePaused: { lane: 'app', signature: 'sig-A', failingChecks: ['tests'], firstIssue: 1, secondIssue: 2 },
+        });
+        expect(kinds(h.events, 'lane-done')).toHaveLength(0);
+        expect(kinds(h.events, 'parked')[1][3]).toContain("lane 'app' paused (lane breaker)");
+        expect(h.released).toEqual([
+          [1, 'parked'],
+          [2, 'parked'],
+        ]);
+      });
+
+      it('does not pause when signatures differ', async () => {
+        const h = harness({ 1: parkErr('sig-A'), 2: parkErr('sig-B') }, [1, 2, 3]);
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, { ...h.deps, laneBreakerThreshold: 2 });
+
+        expect(h.shipped).toEqual([1, 2, 3]);
+        expect(kinds(h.events, 'lane-paused')).toHaveLength(0);
+        expect(kinds(h.events, 'lane-done')).toHaveLength(1);
+      });
+
+      it('resets the streak on a merge, then trips on a fresh streak', async () => {
+        const h = harness({ 1: parkErr('sig-A'), 3: parkErr('sig-A'), 4: parkErr('sig-A') }, [1, 2, 3]);
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, { ...h.deps, laneBreakerThreshold: 2 });
+        expect(kinds(h.events, 'lane-paused')).toHaveLength(0);
+        expect(kinds(h.events, 'lane-done')).toHaveLength(1);
+
+        const h2 = harness({ 1: parkErr('sig-A'), 3: parkErr('sig-A'), 4: parkErr('sig-A') }, [1, 2, 3, 4]);
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, { ...h2.deps, laneBreakerThreshold: 2 });
+        const paused = kinds(h2.events, 'lane-paused');
+        expect(paused).toHaveLength(1);
+        expect(paused[0][4].lanePaused).toMatchObject({ firstIssue: 3, secondIssue: 4 });
+      });
+
+      it('leaves other lanes running when one lane pauses', async () => {
+        const a = harness({ 1: parkErr('sig-A'), 2: parkErr('sig-A'), 3: parkErr('sig-A') }, [1, 2, 3]);
+        const b = harness({}, [11, 12, 13]);
+        await Promise.all([
+          runLane('a', [], '/repo', 'on-par/software-factory', paths, { ...a.deps, laneBreakerThreshold: 2 }),
+          runLane('b', [], '/repo', 'on-par/software-factory', paths, { ...b.deps, laneBreakerThreshold: 2 }),
+        ]);
+
+        expect(a.shipped).toEqual([1, 2]);
+        expect(kinds(a.events, 'lane-paused')).toHaveLength(1);
+        expect(b.shipped).toEqual([11, 12, 13]);
+        expect(kinds(b.events, 'lane-paused')).toHaveLength(0);
+        expect(kinds(b.events, 'lane-done')).toHaveLength(1);
+      });
+
+      it.each([0, undefined])('never pauses when the threshold is %s', async (laneBreakerThreshold) => {
+        const h = harness({ 1: parkErr('sig-A'), 2: parkErr('sig-A'), 3: parkErr('sig-A') }, [1, 2, 3]);
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, { ...h.deps, laneBreakerThreshold });
+
+        expect(h.shipped).toEqual([1, 2, 3]);
+        expect(kinds(h.events, 'lane-paused')).toHaveLength(0);
+        expect(kinds(h.events, 'lane-done')[0][3]).toContain('3 parked');
+      });
+
+      it('does not pause on parks without a signature', async () => {
+        const h = harness({ 1: new Error('boom'), 2: new Error('boom'), 3: parkErr(''), 4: parkErr('') }, [1, 2, 3, 4]);
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, { ...h.deps, laneBreakerThreshold: 2 });
+
+        expect(h.shipped).toEqual([1, 2, 3, 4]);
+        expect(kinds(h.events, 'lane-paused')).toHaveLength(0);
+      });
+    });
+
+    describe('environment pause (#1928)', () => {
+      it.each([0, undefined])(
+        'releases the issue to queued and pauses the lane (threshold %s)',
+        async (laneBreakerThreshold) => {
+          const shipped: number[] = [];
+          const events: any[] = [];
+          const released: any[] = [];
+          const queue = [1, 2];
+          const claimNext = vi.fn(async () => buildClaim(queue.shift()));
+          await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+            claimNext,
+            ship: async (issue: number) => {
+              shipped.push(issue);
+              throw new LaneEnvironmentPauseError('base broken', {
+                baseSha: 'abc1234567890def',
+                failingChecks: ['tests'],
+                failureSignature: 'sig',
+              });
+            },
+            waitMerge: async () => {},
+            releaseIssue: async (issue: number, outcome: string) => {
+              released.push([issue, outcome]);
+            },
+            pathExists: () => false,
+            emitEvent: ((...args: any[]) => {
+              events.push(args);
+            }) as any,
+            laneBreakerThreshold,
+          });
+
+          const of = (kind: string) => events.filter((e) => e[1] === kind);
+          expect(shipped).toEqual([1]);
+          expect(released).toEqual([[1, 'queued']]);
+          expect(of('parked')).toHaveLength(0);
+          expect(of('lane-done')).toHaveLength(0);
+          expect(claimNext).toHaveBeenCalledTimes(1);
+          expect(of('lane-paused')).toHaveLength(1);
+          expect(of('lane-paused')[0][4].lanePaused).toEqual({
+            lane: 'app',
+            signature: 'sig',
+            failingChecks: ['tests'],
+            firstIssue: 1,
+            secondIssue: 1,
+            cause: 'environment',
+            baseSha: 'abc1234567890def',
+          });
+        },
+      );
     });
 
     it('reaps the parked worktree exactly once when ship throws a LaneParkError', async () => {
@@ -4996,5 +5327,71 @@ describe('withRepoRunLock', () => {
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ eventsFile: paths.events, type: 'lock-stolen' });
     expect(events[0].msg).toContain('4321');
+  });
+});
+
+describe('runFeedbackCommand (#1851)', () => {
+  const deps = (over: Record<string, unknown> = {}): any => ({
+    github: {
+      getPull: async () => ({ headRef: 'x', title: 't', url: 'u' }),
+      listReviews: async () => [],
+      listReviewComments: async () => [],
+    },
+    filing: {
+      listCandidateIssues: async () => [],
+      searchIssues: async () => [],
+      createIssue: async () => ({ number: 9 }),
+      updateIssue: async () => {},
+      commentIssue: async () => {},
+    },
+    paths: { events: '/nowhere/events', plans: '/p', logs: '/l' },
+    now: () => new Date(0),
+    host: 'h',
+    ...over,
+  });
+
+  it('prints the filed issue', async () => {
+    const lines: string[] = [];
+    await runFeedbackCommand('https://github.com/o/r/pull/1', { note: 'gap' }, deps(), (l) => lines.push(l));
+    expect(lines).toEqual(['Filed on-par/software-factory#9']);
+  });
+
+  it('maps validation errors to exit 2', async () => {
+    await expect(runFeedbackCommand('bogus', {}, deps())).rejects.toMatchObject({ code: 2 });
+  });
+
+  it('rethrows other errors untouched', async () => {
+    const d = deps({
+      github: {
+        getPull: async () => {
+          throw new Error('boom');
+        },
+      },
+    });
+    await expect(runFeedbackCommand('https://github.com/o/r/pull/1', {}, d)).rejects.toThrow('boom');
+  });
+
+  it('cmdFeedback wires real deps and refuses an invalid URL before any network call', async () => {
+    vi.stubEnv('GITHUB_TOKEN', 'ghp_test');
+    try {
+      await expect(cmdFeedback('bogus', {})).rejects.toMatchObject({ code: 2 });
+      await expect(cmdFeedback('bogus', { branchPrefix: 'ship-it' })).rejects.toMatchObject({ code: 2 });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
+describe('cmdFilingPreview (#1858)', () => {
+  it('exits 2 when no failure evidence matches the run id, with and without a branch prefix', async () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      await expect(cmdFilingPreview('no-such-run-1858', {})).rejects.toMatchObject({ code: 2 });
+      await expect(cmdFilingPreview('no-such-run-1858', { branchPrefix: 'ship-it' })).rejects.toMatchObject({
+        code: 2,
+      });
+    } finally {
+      stderr.mockRestore();
+    }
   });
 });

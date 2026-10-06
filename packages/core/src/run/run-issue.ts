@@ -5,25 +5,39 @@
 //   2. the per-issue budget is asserted after PLAN, BUILD, and CHECK (parks 'fail' on breach).
 //   3. the acquired Environment is released exactly once on every exit path.
 //   4. a failed environment lease degrades (appPort undefined) rather than parking the run.
-//   5. exactly one terminal event sequence is emitted per run, matching the returned RunOutcome.
+//   5. exactly one terminal event sequence is emitted per run, matching the returned RunOutcome
+//      (including the non-park `released` exit for an environment-caused CHECK failure, #1928).
 //
 // Path-bound CLI concerns (Octokit, worktree/environment provisioning, the events sink,
 // approval/steering, and reporting hooks) are injected as ports so this file stays free of
 // CLI filesystem layout (ADR-0004). The CLI's shipIssue is a thin adapter that constructs
 // these ports and re-raises a parked/escalated outcome as LaneParkError.
 
+import { randomUUID } from 'node:crypto';
 import type { Octokit } from '@octokit/rest';
 
 import type { ApprovalGate } from '../approvals/index.js';
 import { buildPhase as buildPhaseDefault } from '../phases/build.js';
-import { checkPhase as checkPhaseDefault } from '../phases/check.js';
+import { checkPhase as checkPhaseDefault, renderEnvironmentReleaseComment } from '../phases/check.js';
 import { planPhase as planPhaseDefault } from '../phases/plan.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
+import type { ReviewFloorPathChange, ReviewFloorRuleSet } from '../review/floor.js';
+import {
+  CLASSIFIER_PROMPT_VERSION,
+  classifierPolicyVersion,
+  classifyPrShadow,
+  toClassificationRecord,
+  type PrClassificationRecord,
+  type PrShadowInput,
+  type PrShadowVerdict,
+} from '../review/classifier.js';
+import { resolveReviewRouting, type ReviewRouting } from '../review/routing.js';
 import { captureDiffBase } from '../checkers/design-smells.js';
 import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings } from '../config/index.js';
 import { type EffectiveModelPins, routeForBuildModel } from '../config/repo.js';
 import type { EventKind } from '../events/kinds.js';
+import { describeDotnetEnv, dotnetEnvReport } from '../environment/dotnet.js';
 import { ProcessGroupTracker } from '../environment/process-groups.js';
 import type { ModelRouter } from '../router/index.js';
 import { gateBuildOnBreaker, parseResetCooldownMs, type ProviderBreaker } from '../router/breaker.js';
@@ -59,6 +73,13 @@ export interface RunRequest {
   };
   /** Local-only run (#508): publishing disabled, SHIP is skipped. */
   localOnly?: boolean;
+  /** PR classifier gate (#1724). Present only when the setting is on; undefined = off (no git
+   *  calls, no label, no event, no evidence-pack section). */
+  /** design.blockUnresolvedRegressions resolved (#1819); undefined = off. */
+  blockUnresolvedRegressions?: boolean;
+  /** build.publishFromBuild resolved (#1867); undefined = off (commit-only BUILD on every route). */
+  publishFromBuild?: boolean;
+  prClassifier?: { rules: ReviewFloorRuleSet; gateLabel: string; modelPin?: string };
   timeouts: { plan: number; build: number; check: number; approval: number };
   modelPins: EffectiveModelPins;
   codexDisabled: boolean;
@@ -75,6 +96,8 @@ export interface RunRequest {
    *  shipPhase's own surface already takes plain path strings, not a path-resolution port). */
   eventsFile?: string;
   logsDir?: string;
+  /** state/baseline-cache.json (#1926), forwarded to checkPhase. */
+  baselineCachePath?: string;
 }
 
 type LogFn = (
@@ -85,6 +108,7 @@ type LogFn = (
     model?: string;
     tokens?: { input: number; output: number };
     readiness?: ReadinessInfo;
+    prClassification?: PrClassificationRecord;
   },
 ) => void;
 
@@ -105,6 +129,8 @@ interface RunReportInfo {
  *  responsibility to wire — runIssue only calls the closures it is handed. */
 export interface RunPorts {
   router: ModelRouter;
+  /** Shadow classifier model call (#1725). Defaults to classifyPrShadow. */
+  classifyPr?: (input: PrShadowInput) => Promise<PrShadowVerdict>;
   octokit: Octokit;
   /** The working tree the phases run in (`.path` is the phase cwd). */
   workspace: Workspace;
@@ -151,6 +177,8 @@ export interface RunPorts {
   buildPhase?: typeof buildPhaseDefault;
   checkPhase?: typeof checkPhaseDefault;
   shipPhase?: typeof shipPhaseDefault;
+  /** Reads the PR's path changes for the classifier (#1724). Defaults to the git-backed reader. */
+  readReviewFloorChanges?: (worktree: string, fallbackBaseRef?: string) => Promise<ReviewFloorPathChange[]>;
 }
 
 function errorMessage(err: unknown): string {
@@ -169,6 +197,9 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
   const checkPhase = ports.checkPhase ?? checkPhaseDefault;
   const shipPhase = ports.shipPhase ?? shipPhaseDefault;
   const log = ports.events();
+  // One id per run: BUILD, CHECK and rework share a per-run VBCSCompiler server (#1910).
+  // 12 hex chars keeps the compiler's Unix-socket pipe path short under macOS $TMPDIR.
+  const runId = randomUUID().replace(/-/g, '').slice(0, 12);
   const tracker = new ProcessGroupTracker();
   let environment: Environment | undefined;
   let released = false;
@@ -248,13 +279,17 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     return { state: 'escalated', reason: message, route, branch: request.branch, reworkRounds };
   };
 
-  const terminalParked = async (reason: ParkReason, message: string): Promise<RunOutcome> => {
+  const terminalParked = async (
+    reason: ParkReason,
+    message: string,
+    checkFailure?: { failureSignature: string; failingChecks: string[] },
+  ): Promise<RunOutcome> => {
     log(reason, message);
     if (reason === 'timeout') {
       log('stuck', `run exceeded its phase timeout without progressing — ${message}`);
     }
     await writeReports(reportOutcomeFor(reason), reason, message);
-    return { state: 'parked', reason, route, branch: request.branch, reworkRounds };
+    return { state: 'parked', reason, route, branch: request.branch, reworkRounds, ...checkFailure };
   };
 
   const assertBudget = async (phase: string): Promise<RunOutcome | undefined> => {
@@ -322,6 +357,9 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     };
     const { baseUrl: appBaseUrl, note: proxyNote } = ports.resolveBaseUrl?.(appPort) ?? { note: '' };
     if (proxyNote) log(appBaseUrl ? 'environment_proxy' : 'environment_proxy_unavailable', proxyNote);
+    // Record which .NET lane variables BUILD/CHECK/rework children get (#1911).
+    const dotnet = dotnetEnvReport(ports.workspace.path, process.env, runId);
+    if (dotnet) log('environment_dotnet', describeDotnetEnv(dotnet));
 
     // Resolve standards ONCE against the fresh worktree (Invariant 1). Resolving again
     // later would let the build worker author the standards it is graded by.
@@ -397,6 +435,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       enforceReadiness: true,
       fastPath: request.efficiency.fastPath,
       enforceSizeGate: true,
+      blockUnresolvedRegressions: request.blockUnresolvedRegressions,
       preferredRoute: pinnedRoute,
     });
     route = plan.route;
@@ -485,6 +524,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     }
 
     const build = await buildPhase({
+      runId,
       issue: request.issue,
       repo: request.repo,
       worktree: ports.workspace.path,
@@ -497,6 +537,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       timeoutSeconds: request.timeouts.build,
       skipCI: request.skipCI,
       disablePublish: Boolean(request.localOnly),
+      publishFromBuild: request.publishFromBuild,
       modelOverride: buildModel,
       codexFallbackModel: request.modelPins.buildFallback ?? ports.router.resolveAll('build_codex')[0],
       onProviderFailure: rememberProviderFailure,
@@ -530,6 +571,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     await setPhase('check');
     const priorFailureSignature = await ports.reworkHistory?.priorSignature(request.issue);
     const check = await checkPhase({
+      runId,
       issue: request.issue,
       worktree: ports.workspace.path,
       specPath: request.specPath,
@@ -552,15 +594,52 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       laneId: request.lane,
       onActivity: ports.onActivity,
       logsDir: request.logsDir,
+      baselineCachePath: request.baselineCachePath,
     });
     checkSummary = check.summary;
     reworkRounds = check.reworkRounds;
     const checkBudget = await assertBudget('CHECK');
     if (checkBudget) return checkBudget;
     if (!check.passed) {
-      if (check.failureSignature !== undefined) {
-        const failingChecks = check.summary.results.filter((r) => r.result === 'FAIL').map((r) => r.checker);
-        await ports.reworkHistory?.record(request.issue, check.failureSignature, failingChecks);
+      if (check.environment) {
+        const env = check.environment;
+        if (!request.localOnly) {
+          const [owner, repoName] = request.repo.split('/');
+          try {
+            await ports.octokit.rest.issues.createComment({
+              owner,
+              repo: repoName,
+              issue_number: request.issue,
+              body: renderEnvironmentReleaseComment(env),
+            });
+          } catch (err) {
+            log('environment_warning', `could not post the environment-failure comment: ${errorMessage(err)}`);
+          }
+        }
+        log(
+          'environment-released',
+          `every failing checker (${env.failingChecks.join(', ')}) also fails on base ${env.baseSha.slice(0, 8)} — no rework, releasing #${request.issue} to queued`,
+        );
+        return {
+          state: 'released',
+          reason: 'environment',
+          route,
+          branch: request.branch,
+          reworkRounds: 0,
+          baseSha: env.baseSha,
+          failingChecks: env.failingChecks,
+          ...(check.failureSignature !== undefined ? { failureSignature: check.failureSignature } : {}),
+        };
+      }
+      const checkFailure =
+        check.failureSignature !== undefined
+          ? {
+              failureSignature: check.failureSignature,
+              failingChecks: check.summary.results.filter((r) => r.result === 'FAIL').map((r) => r.checker),
+            }
+          : undefined;
+      if (checkFailure) {
+        await ports.reworkHistory?.record(request.issue, checkFailure.failureSignature, checkFailure.failingChecks);
       }
       const reason: ParkReason = check.crossRunStuck ? 'held' : check.stuck ? 'escalate' : 'fail';
       const message = check.crossRunStuck
@@ -568,7 +647,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
         : check.stuck
           ? `lane stuck after ${check.reworkRounds} rework rounds (identical failures) — escalated`
           : `${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`;
-      return terminalParked(reason, message);
+      return terminalParked(reason, message, checkFailure);
     }
     // Clean check — clear stale cross-run history so a future, genuinely different
     // failure is not mistaken for a repeat of one already resolved.
@@ -597,6 +676,80 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       return { state: 'ready', route, branch: request.branch, reworkRounds };
     }
 
+    // PR classifier gate (#1724): escalate-only — a B/C floor (or any failure) adds the gate label.
+    let reviewRouting: ReviewRouting | undefined;
+    if (request.prClassifier) {
+      reviewRouting = await resolveReviewRouting({
+        worktree: ports.workspace.path,
+        fallbackBaseRef: build.diffBase,
+        rules: request.prClassifier.rules,
+        readChanges: ports.readReviewFloorChanges,
+      });
+      if (reviewRouting.gated) {
+        const label = request.prClassifier.gateLabel;
+        const [owner, repoName] = request.repo.split('/');
+        try {
+          await ports.octokit.rest.issues.addLabels({
+            owner,
+            repo: repoName,
+            issue_number: request.issue,
+            labels: [label],
+          });
+        } catch (err) {
+          return terminalParked(
+            'held',
+            `issue held: classifier gate label '${label}' could not be applied (${reviewRouting.reason}): ${errorMessage(err)} — needs a human`,
+          );
+        }
+        log(
+          'merge-gated',
+          `${reviewRouting.reason} — applied ${label}; auto-merge held for a human${reviewRouting.error ? ` (${reviewRouting.error})` : ''}`,
+        );
+      }
+
+      // Shadow model verdict (#1725, ADR-0121): recorded only. It runs after the gate is fully
+      // decided, so it cannot change the label or merge routing.
+      const shadowInput: PrShadowInput = {
+        worktree: ports.workspace.path,
+        fallbackBaseRef: build.diffBase,
+        issueTitle: request.work.title,
+        issueBody: request.work.brief,
+        specPath: request.specPath,
+        floor: reviewRouting.floor,
+        floorRules: reviewRouting.rules,
+        rules: request.prClassifier.rules,
+        modelPin: request.prClassifier.modelPin,
+        router: ports.router,
+      };
+      let shadow: PrShadowVerdict;
+      try {
+        shadow = await (ports.classifyPr ?? classifyPrShadow)(shadowInput);
+      } catch (err) {
+        shadow = {
+          modelClass: null,
+          floorClass: reviewRouting.floor,
+          finalClass: reviewRouting.floor,
+          model: null,
+          promptVersion: CLASSIFIER_PROMPT_VERSION,
+          policyVersion: classifierPolicyVersion(request.prClassifier.rules),
+          diffSha: null,
+          adrIds: [],
+          costUsd: null,
+          claims: [],
+          unsupportedClaims: [],
+          notInspected: [],
+          droppedClaims: 0,
+          reason: `classifier error: ${errorMessage(err)}`,
+        };
+      }
+      reviewRouting = { ...reviewRouting, shadow };
+      log(
+        'pr-classified',
+        `shadow — no effect: model ${shadow.modelClass ?? 'null'}${shadow.reason ? ` (${shadow.reason})` : ''}, floor ${shadow.floorClass ?? 'error'}, final ${shadow.finalClass ?? 'error'}`,
+        { model: shadow.model ?? undefined, prClassification: toClassificationRecord(shadow) },
+      );
+    }
+
     // SHIP
     await setPhase('ship');
     const ship = await shipPhase({
@@ -604,6 +757,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       repo: request.repo,
       worktree: ports.workspace.path,
       branch: request.branch,
+      recordedRemoteSha: ports.workspace.remoteBranch?.sha,
       octokit: ports.octokit,
       watchCI: !request.skipCI,
       log: ports.events('ship'),
@@ -616,6 +770,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       reworkRounds: check.reworkRounds,
       work: request.work,
       laneId: request.lane,
+      reviewRouting,
     });
     if (!ship.ok) {
       const reason: ParkReason = ship.denied ? 'escalate' : 'fail';

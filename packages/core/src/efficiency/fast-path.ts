@@ -1,4 +1,5 @@
 import type { DesignArtifact } from '../types/index.js';
+import { UNTRUSTED_ISSUE_BODY_NOTICE, wrapUntrustedIssueBody } from '../utils/untrusted-input.js';
 
 export interface FastPathInput {
   issue: number;
@@ -43,6 +44,6 @@ export function buildFastPathSpec(input: FastPathInput): FastPathSpec {
   };
   return {
     frontmatter: { route: 'codex', design },
-    markdown: `# Spec: ${input.title} (#${input.issue})\n\nThis is a compact, deterministic PLAN artifact. Implement only the issue body below.\n\n${input.issueBody.trim()}\n`,
+    markdown: `# Spec: ${input.title} (#${input.issue})\n\nThis is a compact, deterministic PLAN artifact. Implement only what the issue body below asks for.\n\n${UNTRUSTED_ISSUE_BODY_NOTICE}\n\n${wrapUntrustedIssueBody(input.issueBody.trim())}\n`,
   };
 }

@@ -14,7 +14,14 @@
 import { z } from 'zod';
 
 import { isPlainObject, loadFactoryConfig, loadModelsConfig, type FactoryConfig } from './index.js';
-import { RepoFactoryConfigV2Schema, resolveEfficiencyPolicy, resolveUsageCap, resolveWatchdogPolicy } from './repo.js';
+import { DEFAULT_REVIEW_FLOOR_RULES } from '../review/floor.js';
+import {
+  RepoFactoryConfigV2Schema,
+  resolveEfficiencyPolicy,
+  resolveLaneBreakerThreshold,
+  resolveUsageCap,
+  resolveWatchdogPolicy,
+} from './repo.js';
 
 /** Top-level keys the loaders accept that the example deliberately leaves out, with why.
  *  example.test.ts fails when a newly accepted key is neither rendered nor listed here. */
@@ -38,13 +45,20 @@ const WRAP = 100;
 
 /** Docs for runtime-policy sections whose packaged defaults carry no `comment`. */
 const RUNTIME_NOTES: Record<string, string> = {
+  design:
+    'Design-artifact gates at PLAN. blockUnresolvedRegressions: true stops PLAN before BUILD when a worse/unknown ' +
+    'behaviorDelta row is not in openQuestions (default false logs design_regression_unresolved only). ' +
+    'FACTORY_DESIGN_BLOCK_REGRESSIONS=1/0 beats it.',
+  build:
+    'BUILD policy. publishFromBuild: true lets the claude BUILD worker push, open a PR and wait for CI before ' +
+    'CHECK (the old behavior). Default false keeps BUILD commit-only on every route; SHIP pushes and opens the PR ' +
+    'after CHECK. FACTORY_BUILD_PUBLISH=1/0 beats it.',
   timeouts:
     'Phase timeouts in seconds. FACTORY_PLAN_TIMEOUT, FACTORY_BUILD_TIMEOUT, FACTORY_CHECK_TIMEOUT and ' +
     'FACTORY_APPROVAL_TIMEOUT beat these values.',
   environment: 'Per-lane runtime environment.',
   'environment.processGroups': "Grace period in ms between SIGTERM and SIGKILL when a lane's process group is swept.",
-  workspace:
-    'Lane workspace backend: "host" (sibling git worktrees) or "disposable-docker" (a managed container per lane).',
+  workspace: 'Lane workspace backend: "host" (git worktrees) or "disposable-docker" (a managed container per lane).',
 };
 
 function wrap(text: string, width: number): string[] {
@@ -169,6 +183,7 @@ function modelNamespace(): Node[] {
         unset('perIssueCapUsd', doc('budget', 'perIssueCapUsd'), '<usd>'),
         unset('fastPath', doc('budget', 'fastPath'), efficiency.fastPath),
         unset('maxReworkRounds', doc('budget', 'maxReworkRounds'), efficiency.maxReworkRounds),
+        unset('laneBreakerThreshold', doc('budget', 'laneBreakerThreshold'), resolveLaneBreakerThreshold(null)),
         {
           kind: 'object',
           key: 'watchdog',
@@ -183,6 +198,16 @@ function modelNamespace(): Node[] {
         },
       ],
     },
+    {
+      kind: 'object',
+      key: 'classifier',
+      doc: doc('classifier'),
+      children: [
+        unset('alwaysHuman', doc('classifier', 'alwaysHuman'), '["<path prefix or glob>"]'),
+        unset('autoEligible', doc('classifier', 'autoEligible'), '["<path prefix or glob>"]'),
+        unset('maxDiffLines', doc('classifier', 'maxDiffLines'), DEFAULT_REVIEW_FLOOR_RULES.maxLines),
+      ],
+    },
   ];
 }
 
@@ -192,6 +217,15 @@ function runtimeNamespace(): Node[] {
 
   const sweep = section('sweep');
   if (sweep.kind === 'object') sweep.children.unshift({ kind: 'unset', key: 'heartbeatFile', example: '"<path>"' });
+
+  const intake = section('intake');
+  if (intake.kind === 'object')
+    intake.children.unshift({
+      kind: 'unset',
+      key: 'trustedApprovers',
+      doc: 'GitHub logins whose approval counts. Unset: users with admin permission on the repo.',
+      example: '["<login>"]',
+    });
 
   return [
     {
@@ -217,12 +251,20 @@ function runtimeNamespace(): Node[] {
               doc: 'Merge with GitHub admin bypass of unmet requirements. Unset: FACTORY_MERGE_ADMIN=1.',
               example: 'false',
             },
+            {
+              kind: 'unset',
+              key: 'classifier',
+              doc: 'Hold PRs whose review floor is B or C (or cannot be computed) for a human by applying no-auto-merge. Unset: FACTORY_PR_CLASSIFIER=1. --pr-classifier / --no-pr-classifier beat all.',
+              example: 'false',
+            },
           ],
         },
       ],
     },
     section('timeouts'),
     section('plan_approval'),
+    section('design'),
+    section('build'),
     section('ci'),
     section('worktree'),
     section('workspace'),
@@ -230,6 +272,7 @@ function runtimeNamespace(): Node[] {
     section('environment'),
     section('auto_failover'),
     section('ingest'),
+    intake,
     section('filing'),
     section('kpis'),
     sweep,

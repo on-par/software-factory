@@ -9,6 +9,7 @@ import {
   buildDecompositionRetryPrompt,
   checkStoryInvest,
   decomposeOversizedIssue,
+  extractJsonObject,
   fileDecomposition,
   parseDecompositionOutput,
   renderChildIssueBody,
@@ -993,5 +994,13 @@ describe('renderChildIssueBody', () => {
     expect(readiness.template).toBe('factory-task');
     expect(readiness.pass).toBe(true);
     expect(readiness.sizeOk).not.toBe(false);
+  });
+});
+
+describe('extractJsonObject', () => {
+  it('extracts fenced and raw objects and returns undefined otherwise', () => {
+    expect(extractJsonObject('```json\n{"a":1}\n```')).toBe('{"a":1}');
+    expect(extractJsonObject('{"a":1}')).toBe('{"a":1}');
+    expect(extractJsonObject('no json')).toBeUndefined();
   });
 });
