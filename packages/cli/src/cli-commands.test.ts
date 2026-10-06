@@ -1816,14 +1816,39 @@ bash scripts/verify.sh
         for (const c of doc.clusters) expect(c.tracking).toEqual({ status: 'new' });
       });
 
-      it('renders unannotated and exits 0 when the search fails', async () => {
+      it('renders tracked: unknown and exits 0 when the search fails', async () => {
         writeEvents();
         h.octokit.rest.search.issuesAndPullRequests.mockRejectedValue(new Error('rate limited'));
         const res = await runMain('garden', '--report');
         expect(res.exited).toBe(false);
         expect(logged()).toContain('### 1.');
+        expect(logged()).toContain('- tracked: unknown');
         expect(logged()).not.toContain('- new');
-        expect(logged()).not.toContain('- tracked');
+        expect(errored()).toContain('issue search unavailable');
+      });
+
+      it('--json marks every cluster unknown when the search fails', async () => {
+        writeEvents();
+        h.octokit.rest.search.issuesAndPullRequests.mockRejectedValue(new Error('rate limited'));
+        const res = await runMain('garden', '--report', '--json');
+        expect(res.exited).toBe(false);
+        const doc = JSON.parse(logged());
+        expect(doc.clusters.length).toBeGreaterThan(0);
+        for (const c of doc.clusters) expect(c.tracking).toEqual({ status: 'unknown' });
+      });
+
+      it('marks every cluster unknown and exits 0 when the repo cannot be resolved (no network)', async () => {
+        writeEvents();
+        const execImpl = h.execImpl;
+        h.execImpl = (cmd: string) => {
+          if (cmd.startsWith('gh repo view'))
+            throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } });
+          return execImpl(cmd);
+        };
+        const res = await runMain('garden', '--report');
+        expect(res.exited).toBe(false);
+        expect(logged()).toContain('### 1.');
+        expect(logged()).toContain('- tracked: unknown');
         expect(errored()).toContain('issue search unavailable');
       });
     });

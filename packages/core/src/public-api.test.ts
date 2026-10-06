@@ -336,6 +336,7 @@ const INTERNAL_API_KEYS = [
   'findGardenTrackingIssue',
   'gardenClusterFingerprint',
   'gardenKeyMarker',
+  'markGardenTrackingUnknown',
   // Readiness deep check (#1732)
   'buildDecompositionPrompt',
   'parseDecompositionOutput',

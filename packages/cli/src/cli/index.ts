@@ -196,6 +196,7 @@ import {
   clusterGarden,
   dedupGardenClusters,
   filterGardenWindow,
+  markGardenTrackingUnknown,
   parseGardenDuration,
   readHarvestEvents,
   renderGardenJson,
@@ -1341,15 +1342,22 @@ async function cmdClassifierBacktestEntry(opts: ClassifierBacktestOptions) {
   }
 }
 
-/** Read-only GitHub search dedup (#2102); on any error the clusters are returned unannotated. */
+/** Read-only GitHub search dedup (#2102); on any error every cluster is marked tracking unknown (#2103). */
 async function annotateGardenClusters(clusters: GardenCluster[]): Promise<GardenCluster[]> {
+  const warn = (err: unknown) =>
+    console.error(`factory garden: issue search unavailable, tracking unknown: ${errorDetail(err)}`);
   try {
     const [owner, repo] = (await getGitHubRepo()).split('/');
     if (!owner || !repo) throw new Error('cannot resolve the GitHub repository');
-    return await dedupGardenClusters(clusters, { client: createOctokitFilingClient(getOctokit()), owner, repo });
+    return await dedupGardenClusters(clusters, {
+      client: createOctokitFilingClient(getOctokit()),
+      owner,
+      repo,
+      onSearchError: warn,
+    });
   } catch (err) {
-    console.error(`factory garden: issue search unavailable, clusters not annotated: ${errorDetail(err)}`);
-    return clusters;
+    warn(err);
+    return markGardenTrackingUnknown(clusters);
   }
 }
 

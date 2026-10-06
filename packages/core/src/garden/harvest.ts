@@ -13,8 +13,8 @@ export interface HarvestedEvent {
 
 export type GardenDimension = 'signature' | 'park-reason' | 'checker' | 'human';
 
-/** Whether an open issue already tracks a cluster (#2102). */
-export type GardenTracking = { status: 'tracked'; issue: number } | { status: 'new' };
+/** Whether an open issue already tracks a cluster (#2102); `unknown` when the issue search failed (#2103). */
+export type GardenTracking = { status: 'tracked'; issue: number } | { status: 'new' } | { status: 'unknown' };
 
 export interface GardenCluster {
   dimension: GardenDimension;
@@ -33,7 +33,8 @@ export interface GardenCluster {
   tracking?: GardenTracking;
 }
 
-const trackingLine = (t: GardenTracking): string => (t.status === 'tracked' ? `- tracked: #${t.issue}` : '- new');
+const trackingLine = (t: GardenTracking): string =>
+  t.status === 'tracked' ? `- tracked: #${t.issue}` : t.status === 'unknown' ? '- tracked: unknown' : '- new';
 
 const DEFAULT_GARDEN_SAMPLE_LIMIT = 5;
 
