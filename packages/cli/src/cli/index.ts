@@ -567,8 +567,11 @@ function resolveGitHubToken(shell: ShellOps = shellOps): string | undefined {
   return token;
 }
 
+/** Octokit factory for the current main() or cmdLand invocation (CliDeps.octokit); unset outside them. */
+let octokitFactory: (() => Octokit) | undefined;
+
 function getOctokit(shell: ShellOps = shellOps): Octokit {
-  return createFactoryOctokit(resolveGitHubToken(shell));
+  return octokitFactory ? octokitFactory() : createFactoryOctokit(resolveGitHubToken(shell));
 }
 
 export function errorDetail(err: unknown): string {
@@ -1580,9 +1583,11 @@ export function tuiQueueReader(input: {
   token?: () => string | undefined;
   octokit?: (token: string) => Octokit;
 }): QueueReader {
-  // Capture the invocation's shell seam: read() polls after main() has restored the module default.
+  // Capture the invocation's shell and octokit seams: read() polls after main() has restored the module default.
   const shell = shellOps;
-  const { token: resolveToken = () => resolveGitHubToken(shell), octokit = createFactoryOctokit } = input;
+  const injectedOctokit = octokitFactory;
+  const defaultOctokit = injectedOctokit ? () => injectedOctokit() : createFactoryOctokit;
+  const { token: resolveToken = () => resolveGitHubToken(shell), octokit = defaultOctokit } = input;
   if (input.localQueue) {
     return { source: 'local file', read: () => readQueue(input.queueFile, input.queueProposedFile) };
   }
@@ -3000,13 +3005,14 @@ export async function cmdReset(
   for (const line of lines) console.log(line);
 }
 
-/** deps overrides the config loaders, git ops and internal ops for this call, like shipIssue. */
+/** deps overrides the config loaders, git ops, internal ops and octokit for this call, like shipIssue. */
 export async function cmdLand(
   issueNum: number,
   opts: { branchPrefix?: string; allowGated?: boolean } = {},
-  deps: Pick<CliDeps, ConfigLoaderKey | GitOpKey | InternalOpKey | ShellOpKey> = {},
+  deps: Pick<CliDeps, ConfigLoaderKey | GitOpKey | InternalOpKey | ShellOpKey | 'octokit'> = {},
 ) {
   const previousLoaders = configLoaders;
+  const previousOctokitFactory = octokitFactory;
   const previousGitOps = gitOps;
   const previousInternalOps = internalOps;
   const previousShellOps = shellOps;
@@ -3014,6 +3020,7 @@ export async function cmdLand(
   gitOps = resolveGitOps(deps);
   internalOps = resolveInternalOps(deps);
   shellOps = resolveShellOps(deps);
+  octokitFactory = deps.octokit ?? octokitFactory;
   try {
     const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
     const repoRoot = await getRepoRoot();
@@ -3069,6 +3076,7 @@ export async function cmdLand(
     gitOps = previousGitOps;
     internalOps = previousInternalOps;
     shellOps = previousShellOps;
+    octokitFactory = previousOctokitFactory;
   }
 }
 
@@ -5405,7 +5413,7 @@ export interface CliDeps {
   daemon?: DaemonCtlDeps;
   /** Replaces the TUI entry point used by `factory tui`. */
   runTui?: typeof runTui;
-  /** Builds the GitHub client shipIssue uses. Defaults to createFactoryOctokit with the resolved token. */
+  /** Builds the GitHub client for every CLI GitHub call (shipIssue, land, queue, triage, …). Defaults to createFactoryOctokit with the resolved token. */
   octokit?: () => Octokit;
   /** Phase overrides forwarded into RunPorts by shipIssue, including calls made from main(). Each defaults to the factory-core phase. */
   planPhase?: RunPorts['planPhase'];
@@ -5972,12 +5980,14 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
   const previousShellOps = shellOps;
   const previousCoreOps = coreOps;
   const previousPhaseOps = phaseOps;
+  const previousOctokitFactory = octokitFactory;
   configLoaders = resolveConfigLoaders(deps, DEFAULT_CONFIG_LOADERS);
   gitOps = resolveGitOps(deps, DEFAULT_GIT_OPS);
   internalOps = resolveInternalOps(deps, DEFAULT_INTERNAL_OPS);
   shellOps = resolveShellOps(deps, DEFAULT_SHELL_OPS);
   coreOps = resolveCoreOps(deps, DEFAULT_CORE_OPS);
   phaseOps = resolvePhaseOps(deps, DEFAULT_PHASE_OPS);
+  octokitFactory = deps.octokit;
   try {
     await program.parseAsync(argv);
   } catch (err) {
@@ -5993,6 +6003,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     internalOps = previousInternalOps;
     shellOps = previousShellOps;
     coreOps = previousCoreOps;
+    octokitFactory = previousOctokitFactory;
     phaseOps = previousPhaseOps;
   }
 }
