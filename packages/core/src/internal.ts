@@ -2,6 +2,10 @@
 // own packages (cli, tui, root scripts). No stability guarantee: these exports may
 // change or disappear without notice. See ADR-0004 for the public/internal split.
 
+// Garden harvest (#2083)
+export type { GardenCluster, HarvestedEvent } from './garden/harvest.js';
+export { clusterCheckFailures, readHarvestEvents, renderGardenReport } from './garden/harvest.js';
+
 // Failure fingerprint & evidence
 export { captureFailure, fingerprintFailure, normalizeFailureMessage } from './failure/index.js';
 export type {

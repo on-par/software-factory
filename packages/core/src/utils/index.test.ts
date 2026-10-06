@@ -178,6 +178,19 @@ describe('utils', () => {
     expect(JSON.parse(lines[0]).level).toBe('error');
   });
 
+  it('writes checkFailure onto the line only when passed (#2083)', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+    const checkFailure = { signature: 'tests|boom', failingChecks: ['tests'] };
+
+    logEvent(eventsFile, 'fail', 5, 'parked', { checkFailure });
+    logEvent(eventsFile, 'fail', 5, 'parked again');
+
+    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
+    expect(JSON.parse(lines[0]).checkFailure).toEqual(checkFailure);
+    expect(JSON.parse(lines[1])).not.toHaveProperty('checkFailure');
+  });
+
   it('logs a structured failoverReason when extra is provided', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
     const eventsFile = join(tmpDir, 'events.ndjson');

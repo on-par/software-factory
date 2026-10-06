@@ -594,6 +594,28 @@ describe('runIssue — reporting hooks', () => {
     expect(outcome).toMatchObject({ state: 'parked', reason: 'held', failureSignature: 'sig-1' });
   });
 
+  it('logs checkFailure on a CHECK park event and none on a non-CHECK park (#2083)', async () => {
+    vi.mocked(checkPhase).mockResolvedValue({
+      passed: false,
+      summary: { ...CHECK_SUMMARY, results: [{ checker: 'tests', result: 'FAIL', details: 'nope' }] },
+      reworkRounds: 1,
+      failureSignature: 'sig-1',
+    });
+    const log = vi.fn();
+    await runIssue(baseRequest(), basePolicy(), basePorts({ events: () => log }));
+    expect(log).toHaveBeenCalledWith('fail', expect.any(String), {
+      checkFailure: { signature: 'sig-1', failingChecks: ['tests'] },
+    });
+
+    vi.mocked(buildPhase).mockResolvedValue({ ok: false, model: 'm', route: 'codex', reason: 'no_diff' });
+    vi.mocked(checkPhase).mockReset();
+    const buildLog = vi.fn();
+    await runIssue(baseRequest(), basePolicy(), basePorts({ events: () => buildLog }));
+    const parkCalls = buildLog.mock.calls.filter(([type]) => type === 'fail');
+    expect(parkCalls.length).toBeGreaterThan(0);
+    for (const call of parkCalls) expect(call[2]).toBeUndefined();
+  });
+
   it('leaves the signature undefined on a non-CHECK park (#1917)', async () => {
     vi.mocked(buildPhase).mockResolvedValue({ ok: false, model: 'm', route: 'codex', reason: 'no_diff' });
     const outcome = await runIssue(baseRequest(), basePolicy(), basePorts());

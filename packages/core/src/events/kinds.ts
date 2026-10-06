@@ -8,6 +8,7 @@
 // and EVENT_TRAITS is the single table every consumer reads instead of
 // maintaining its own classification.
 
+import type { StuckTrigger } from '../steward/detect.js';
 import type { LogLevel } from '../types/index.js';
 
 export type EventKind =
@@ -137,6 +138,7 @@ export type EventKind =
   | 'skip-ci'
   | 'skipped-already-closed'
   | 'size-gate-escalated'
+  | 'steward-triggered'
   | 'steering_applied'
   | 'steering_unconsumed'
   | 'stop-file-cleared'
@@ -199,6 +201,15 @@ export interface LanePausedPayload {
   cause?: 'environment';
   /** Base SHA the failing checkers also failed on; set when `cause` is 'environment'. */
   baseSha?: string;
+}
+
+/** Payload of a `steward-triggered` event (#2084): `detectStuck` classified a parked run as
+ *  stuck per ADR-0144. Emitted after the run's own park event, so it is not itself a park. */
+export interface StewardTriggeredPayload {
+  /** Which ADR-0144 trigger matched. */
+  trigger: StuckTrigger;
+  /** The run's CHECK failure signature, when the outcome carries one. */
+  failureSignature?: string;
 }
 
 /** Every existing `EventKind`, classified once. New kinds must be added here —
@@ -341,6 +352,9 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   // attempted, so this is a clean terminal outcome, never a park (#681).
   'skipped-already-closed': { severity: 'info', isPark: false, isTerminal: true },
   'size-gate-escalated': { severity: 'warn', isPark: false, isTerminal: false },
+  // The stuck-run steward picked up a parked run (ADR-0144). Not a park: the run already
+  // logged its own park, so counting this too would double human-intervention KPIs.
+  'steward-triggered': { severity: 'info', isPark: false, isTerminal: false },
   steering_applied: { severity: 'info', isPark: false, isTerminal: false },
   steering_unconsumed: { severity: 'info', isPark: false, isTerminal: false },
   'stop-file-cleared': { severity: 'warn', isPark: false, isTerminal: false },

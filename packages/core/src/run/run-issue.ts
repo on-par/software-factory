@@ -43,7 +43,14 @@ import type { ModelRouter } from '../router/index.js';
 import { gateBuildOnBreaker, parseResetCooldownMs, type ProviderBreaker } from '../router/breaker.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { describeSteering, type ConsumedSteering } from '../steering/index.js';
-import type { CheckSummary, Constitution, FailoverReason, FailurePhase, ReadinessInfo } from '../types/index.js';
+import type {
+  CheckFailureInfo,
+  CheckSummary,
+  Constitution,
+  FailoverReason,
+  FailurePhase,
+  ReadinessInfo,
+} from '../types/index.js';
 import type { WorkRequest, WorkRequestSourceKind } from '../work/index.js';
 import type { LaneFileGuard } from './lane-file-guard.js';
 import { touchedFilesFrom } from './lane-file-guard.js';
@@ -109,6 +116,7 @@ type LogFn = (
     tokens?: { input: number; output: number };
     readiness?: ReadinessInfo;
     prClassification?: PrClassificationRecord;
+    checkFailure?: CheckFailureInfo;
   },
 ) => void;
 
@@ -284,7 +292,13 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     message: string,
     checkFailure?: { failureSignature: string; failingChecks: string[] },
   ): Promise<RunOutcome> => {
-    log(reason, message);
+    log(
+      reason,
+      message,
+      checkFailure
+        ? { checkFailure: { signature: checkFailure.failureSignature, failingChecks: checkFailure.failingChecks } }
+        : undefined,
+    );
     if (reason === 'timeout') {
       log('stuck', `run exceeded its phase timeout without progressing — ${message}`);
     }
