@@ -32,7 +32,10 @@ export default defineConfig({
     // limit instead of loading several instrumented workspace graphs at once.
     fileParallelism: false,
     // Discover tests across all workspaces in one run so coverage aggregates.
-    include: [integrationOnly ? `packages/*/src/${INTEGRATION_GLOB}` : 'packages/*/src/**/*.test.{ts,tsx}'],
+    // scripts/ helpers with logic carry colocated tests too.
+    include: integrationOnly
+      ? [`packages/*/src/${INTEGRATION_GLOB}`]
+      : ['packages/*/src/**/*.test.{ts,tsx}', 'scripts/**/*.test.ts'],
     exclude: integrationOnly ? configDefaults.exclude : [...configDefaults.exclude, INTEGRATION_GLOB],
     coverage: {
       provider: 'v8',
