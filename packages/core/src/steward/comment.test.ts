@@ -1,5 +1,14 @@
-import { describe, expect, it } from 'vitest';
-import { renderStewardComment, stewardCommentMarker, type StewardCommentInput } from './comment.js';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  findStewardComment,
+  publishStewardComment,
+  renderStewardComment,
+  stewardCommentMarker,
+  stewardSignatureHash,
+  type StewardCommentGitHubClient,
+  type StewardCommentInput,
+  type StewardIssueComment,
+} from './comment.js';
 
 const SIG = 'tests:expected # got #';
 
@@ -116,5 +125,126 @@ describe('stewardCommentMarker', () => {
     expect(m.split('<!--').length - 1).toBe(1);
     expect(m.split('-->').length - 1).toBe(1);
     expect(m).toMatch(/^<!-- factory-steward v1 run:[A-Za-z0-9_-]* signature:[0-9a-f]{16} -->$/);
+  });
+
+  it('embeds the shared signature hash', () => {
+    expect(stewardCommentMarker('r1', SIG)).toContain(`signature:${stewardSignatureHash(SIG)}`);
+    expect(stewardSignatureHash(SIG)).toMatch(/^[0-9a-f]{16}$/);
+  });
+});
+
+function makeFakeClient(seedLabels: string[] = ['factory:stuck']) {
+  const comments = new Map<number, StewardIssueComment[]>();
+  const labels = new Map<number, string[]>([[123, [...seedLabels]]]);
+  const calls: { method: string; args: Record<string, unknown> }[] = [];
+  let nextId = 1000;
+  const client: StewardCommentGitHubClient = {
+    async listIssueComments(a) {
+      calls.push({ method: 'listIssueComments', args: a });
+      return (comments.get(a.issue_number) ?? []).map((c) => ({ ...c }));
+    },
+    async createIssueComment(a) {
+      calls.push({ method: 'createIssueComment', args: a });
+      const id = nextId++;
+      comments.set(a.issue_number, [...(comments.get(a.issue_number) ?? []), { id, body: a.body }]);
+      return { id };
+    },
+    async updateIssueComment(a) {
+      calls.push({ method: 'updateIssueComment', args: a });
+      for (const list of comments.values()) {
+        const c = list.find((x) => x.id === a.comment_id);
+        if (c) c.body = a.body;
+      }
+    },
+  };
+  return { client, comments, labels, calls, addLabels: vi.fn(), createPrComment: vi.fn() };
+}
+
+const target = { owner: 'o', repo: 'r', issue: 123 };
+
+describe('publishStewardComment', () => {
+  it('creates one comment on first post', async () => {
+    const fake = makeFakeClient();
+    const res = await publishStewardComment(fake.client, { ...makeInput(), ...target });
+    const list = fake.comments.get(123)!;
+    expect(list).toHaveLength(1);
+    expect(list[0]!.body).toContain(stewardCommentMarker('abc123def456', SIG));
+    expect(list[0]!.body).toContain('The unit tests fail because of an off-by-one.');
+    expect(list[0]!.body).toContain('Fix the loop bound.');
+    expect(res).toEqual({ action: 'created', commentId: list[0]!.id });
+    expect(fake.calls.some((c) => c.method === 'updateIssueComment')).toBe(false);
+  });
+
+  it('updates the same-signature comment in place across runs', async () => {
+    const fake = makeFakeClient();
+    const first = await publishStewardComment(fake.client, { ...makeInput(), ...target });
+    const second = await publishStewardComment(fake.client, {
+      ...makeInput({ diagnosis: 'Run B diagnosis.' }),
+      runId: 'run-b',
+      ...target,
+    });
+    const list = fake.comments.get(123)!;
+    expect(list).toHaveLength(1);
+    expect(list[0]!.id).toBe(first.commentId);
+    expect(list[0]!.body).toContain('Run B diagnosis.');
+    expect(list[0]!.body).not.toContain('off-by-one');
+    expect(second).toEqual({ action: 'updated', commentId: first.commentId });
+  });
+
+  it('posts a new comment for a different signature', async () => {
+    const fake = makeFakeClient();
+    await publishStewardComment(fake.client, { ...makeInput(), ...target });
+    const before = fake.comments.get(123)![0]!.body;
+    const res = await publishStewardComment(fake.client, { ...makeInput(), signature: 'other signature', ...target });
+    const list = fake.comments.get(123)!;
+    expect(list).toHaveLength(2);
+    expect(list[0]!.body).toBe(before);
+    expect(res.action).toBe('created');
+  });
+
+  it('leaves labels alone and never comments elsewhere', async () => {
+    const fake = makeFakeClient(['factory:stuck', 'bug']);
+    await publishStewardComment(fake.client, { ...makeInput(), ...target });
+    await publishStewardComment(fake.client, { ...makeInput(), runId: 'r2', ...target });
+    expect(fake.labels.get(123)).toEqual(['factory:stuck', 'bug']);
+    const ids = new Set(fake.comments.get(123)!.map((c) => c.id));
+    for (const call of fake.calls) {
+      expect(['listIssueComments', 'createIssueComment', 'updateIssueComment']).toContain(call.method);
+      if (call.method === 'updateIssueComment') expect(ids.has(call.args.comment_id as number)).toBe(true);
+      else expect(call.args.issue_number).toBe(123);
+    }
+    expect(fake.addLabels).not.toHaveBeenCalled();
+    expect(fake.createPrComment).not.toHaveBeenCalled();
+  });
+
+  it('propagates port errors without creating anything', async () => {
+    const fake = makeFakeClient();
+    fake.client.listIssueComments = async () => {
+      throw new Error('boom');
+    };
+    await expect(publishStewardComment(fake.client, { ...makeInput(), ...target })).rejects.toThrow('boom');
+    expect(fake.comments.size).toBe(0);
+  });
+});
+
+describe('findStewardComment', () => {
+  const hash = stewardSignatureHash(SIG);
+  it('ignores plain, other-factory and other-signature comments', () => {
+    const comments: StewardIssueComment[] = [
+      { id: 1, body: 'just a comment' },
+      { id: 2, body: '<!-- factory-upstream-report v1 fp:x -->' },
+      { id: 3, body: stewardCommentMarker('r', 'other') },
+    ];
+    expect(findStewardComment(comments, SIG)).toBeUndefined();
+  });
+
+  it('matches any run id and picks the lowest id', () => {
+    const comments: StewardIssueComment[] = [
+      { id: 9, body: stewardCommentMarker('run-z', SIG) },
+      { id: 4, body: `text\n<!-- factory-steward v1 run:abc signature:${hash} -->` },
+      { id: 2, body: stewardCommentMarker('r', 'other') },
+    ];
+    expect(findStewardComment(comments, SIG)?.id).toBe(4);
+    expect(findStewardComment([...comments].reverse(), SIG)?.id).toBe(4);
   });
 });
