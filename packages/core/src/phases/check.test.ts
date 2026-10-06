@@ -22,6 +22,9 @@ import {
   excludeBaseFailing,
   environmentLogPaths,
   isEnvironmentFailure,
+  LENS_REVIEW_CHECKER,
+  lensShowstopperRefs,
+  remainingShowstoppers,
   renderEnvironmentReleaseComment,
   stuckSignature,
 } from './check.js';
@@ -2197,6 +2200,144 @@ async function makeLintFailingWorktree(): Promise<{ worktree: string; specPath: 
 }
 
 /** Worktree whose package.json `test` script exits 0 only when PORT/FACTORY_APP_PORT/FACTORY_BASE_URL were forwarded into its process env. */
+function lensSummary(details: string, result: 'FAIL' | 'PASS' = 'FAIL'): CheckSummary {
+  return {
+    failures: result === 'FAIL' ? 1 : 0,
+    passes: result === 'PASS' ? 1 : 0,
+    skips: 0,
+    total: 1,
+    results: [{ checker: LENS_REVIEW_CHECKER, result, details }],
+  };
+}
+
+describe('lensShowstopperRefs', () => {
+  it('parses file:line refs from showstopper lines', () => {
+    expect(
+      lensShowstopperRefs(
+        'src/a.ts:12 — x. Failure scenario: y (lenses: security)\nsrc/b.ts:3 — z. Failure scenario: w (lenses: techlead, product)',
+      ),
+    ).toEqual(['src/a.ts:12', 'src/b.ts:3']);
+  });
+
+  it('sorts and de-duplicates', () => {
+    expect(lensShowstopperRefs('b.ts:1 — x\na.ts:2 — y\na.ts:2 — z')).toEqual(['a.ts:2', 'b.ts:1']);
+  });
+
+  it('accepts bullets, leading whitespace and dash variants', () => {
+    expect(lensShowstopperRefs('- a.ts:1 — x\n  * b.ts:2 - y\n• c.ts:3 – z')).toEqual(['a.ts:1', 'b.ts:2', 'c.ts:3']);
+  });
+
+  it('skips headers and unparsable text', () => {
+    expect(lensShowstopperRefs('2 showstoppers:\na.ts:1 — x')).toEqual(['a.ts:1']);
+    expect(lensShowstopperRefs('')).toEqual([]);
+    expect(lensShowstopperRefs('lens security returned malformed JSON')).toEqual([]);
+  });
+
+  it('keeps a Windows drive path intact', () => {
+    expect(lensShowstopperRefs('C:\\x\\a.ts:12 — s')).toEqual(['C:\\x\\a.ts:12']);
+  });
+});
+
+describe('stuckSignature for lens_review', () => {
+  const sig = (s: CheckSummary) => stuckSignature(s, new Set());
+
+  it('is equal for the same refs regardless of wording or order', () => {
+    const a = lensSummary(
+      'a.ts:1 — one. Failure scenario: s (lenses: security)\nb.ts:2 — two. Failure scenario: t (lenses: product)',
+    );
+    const b = lensSummary(
+      'b.ts:2 — other words. Failure scenario: q (lenses: techlead)\na.ts:1 — new text. Failure scenario: r (lenses: a, b)',
+    );
+    expect(sig(a)).toBe(sig(b));
+  });
+
+  it('differs when refs differ', () => {
+    expect(sig(lensSummary('a.ts:1 — x'))).not.toBe(sig(lensSummary('a.ts:2 — x')));
+  });
+
+  it('falls back to normalized detail when no refs parse', () => {
+    expect(sig(lensSummary('lens security returned malformed JSON'))).toBe(
+      'lens_review:lens security returned malformed json',
+    );
+    expect(sig(lensSummary('reason one'))).not.toBe(sig(lensSummary('reason two')));
+  });
+
+  it('leaves other checkers on normalized detail', () => {
+    const t = (d: string): CheckSummary => ({
+      failures: 1,
+      passes: 0,
+      skips: 0,
+      total: 1,
+      results: [{ checker: 'tests', result: 'FAIL', details: d }],
+    });
+    expect(sig(t('3 failed'))).toBe(sig(t('4 failed')));
+    expect(sig(t('3 failed'))).toBe('tests:# failed');
+  });
+});
+
+describe('remainingShowstoppers', () => {
+  it('returns trimmed showstopper lines of a lens_review FAIL', () => {
+    expect(remainingShowstoppers(lensSummary('2 showstoppers:\n  - a.ts:1 — x\nb.ts:2 — y'))).toEqual([
+      '- a.ts:1 — x',
+      'b.ts:2 — y',
+    ]);
+  });
+
+  it('is empty when lens_review passes or is absent', () => {
+    expect(remainingShowstoppers(lensSummary('a.ts:1 — x', 'PASS'))).toEqual([]);
+    expect(remainingShowstoppers({ failures: 0, passes: 0, skips: 0, total: 0, results: [] })).toEqual([]);
+  });
+});
+
+describe('checkPhase with lens_review signatures', () => {
+  const run = async (issue: number, detailsFor: (n: number) => string) => {
+    const worktree = await makeWorktreeWithFiles(issue, {});
+    const { router } = makeRouter();
+    const events: Array<[string, string]> = [];
+    let n = 0;
+    const check = await checkPhase({
+      issue,
+      worktree,
+      specPath: join(worktree, `issue-${issue}.md`),
+      router,
+      constitution: null,
+      log: (type, msg) => {
+        events.push([type, msg]);
+      },
+      runCheckers: async () => lensSummary(detailsFor(++n)),
+    });
+    return { check, events };
+  };
+
+  it('treats reworded findings at the same refs as stuck', { timeout: 120_000 }, async () => {
+    const { check, events } = await run(
+      2238,
+      (n) => `src/a.ts:12 — wording v${n}. Failure scenario: s${n} (lenses: security)`,
+    );
+    expect(check.stuck).toBe(true);
+    expect(check.reworkRounds).toBe(2);
+    expect(check.passed).toBe(false);
+    expect(events.filter(([t]) => t === 'stuck')).toHaveLength(1);
+    expect(check.summary.results[0]?.details).toContain('src/a.ts:12');
+    expect(events.find(([t]) => t === 'fail')?.[1]).toContain('src/a.ts:12');
+  });
+
+  it('caps at MAX_REWORK_ROUNDS when refs keep changing', { timeout: 120_000 }, async () => {
+    const { check, events } = await run(2239, (n) => `src/a.ts:${n} — w. Failure scenario: s (lenses: security)`);
+    expect(check.reworkRounds).toBe(3);
+    expect(check.stuck).toBe(false);
+    expect(check.passed).toBe(false);
+    const failMsg = events.find(([t]) => t === 'fail')?.[1] ?? '';
+    expect(failMsg).toContain('remaining showstoppers');
+    expect(failMsg).toContain('src/a.ts:4');
+  });
+
+  it('never exceeds the cap with constant wording', { timeout: 120_000 }, async () => {
+    const { check } = await run(2240, () => 'src/a.ts:12 — same. Failure scenario: s (lenses: security)');
+    expect(check.reworkRounds).toBeLessThanOrEqual(3);
+  });
+});
+
 async function makeEnvAssertingWorktree(issue: number): Promise<string> {
   const worktree = await mkdtemp(join(tmpdir(), `check-phase-env-${issue}-`));
   tempDirs.add(worktree);

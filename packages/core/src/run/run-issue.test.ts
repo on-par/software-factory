@@ -568,6 +568,34 @@ describe('runIssue — outcome mapping', () => {
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
   });
 
+  it('lists remaining lens_review showstoppers in the CHECK parked message', async () => {
+    const events: Array<[string, string]> = [];
+    const log = vi.fn((type: string, message: string) => events.push([type, message]));
+    const summary: CheckSummary = {
+      failures: 1,
+      passes: 0,
+      skips: 0,
+      total: 1,
+      results: [
+        {
+          checker: 'lens_review',
+          result: 'FAIL',
+          details: 'src/a.ts:12 — s. Failure scenario: f (lenses: security)',
+        },
+      ],
+    };
+    vi.mocked(checkPhase).mockResolvedValue({
+      passed: false,
+      reworkRounds: 3,
+      summary,
+      failureSignature: 'lens_review:src/a.ts:12',
+    });
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ events: () => log }));
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
+    const failMsg = events.find(([t, m]) => t === 'fail' && m.includes('remaining showstoppers'))?.[1];
+    expect(failMsg).toContain('src/a.ts:12');
+  });
+
   it("carries a failed SHIP's reason into the parked message", async () => {
     const events: Array<[string, string]> = [];
     const log = vi.fn((type: string, message: string) => events.push([type, message]));
