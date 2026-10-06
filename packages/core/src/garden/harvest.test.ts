@@ -6,7 +6,17 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { clusterCheckFailures, clusterGarden, readHarvestEvents, renderGardenReport } from './harvest.js';
+import {
+  capGardenClusters,
+  clusterCheckFailures,
+  clusterGarden,
+  filterGardenWindow,
+  type GardenCluster,
+  parseGardenDuration,
+  readHarvestEvents,
+  renderGardenJson,
+  renderGardenReport,
+} from './harvest.js';
 
 let dir: string;
 beforeEach(() => {
@@ -271,5 +281,71 @@ describe('garden harvest', () => {
       expect(only).toContain('## Human events');
       expect(only).not.toContain('## Park reasons');
     });
+  });
+});
+
+describe('garden report options (#2087)', () => {
+  it('parseGardenDuration accepts <int><h|d|w> only', () => {
+    expect(parseGardenDuration('7d')).toBe(7 * 86_400_000);
+    expect(parseGardenDuration('36h')).toBe(36 * 3_600_000);
+    expect(parseGardenDuration('2w')).toBe(2 * 604_800_000);
+    for (const bad of ['', '7', 'd', '0d', '-3d', '1.5d', '7D', '3m', ' 7d']) {
+      expect(parseGardenDuration(bad)).toBeUndefined();
+    }
+  });
+
+  it('filterGardenWindow keeps in-window events in order and drops unknown ages', () => {
+    const now = new Date('2026-01-15T00:00:00Z');
+    const f = write('w.ndjson', [
+      park('fail', '1', 's', '2026-01-10T00:00:00Z'),
+      park('fail', '2', 's', '2026-01-08T00:00:00Z'),
+      park('fail', '3', 's', '2026-01-01T00:00:00Z'),
+      JSON.stringify({ type: 'fail', issue: '4', msg: 'm' }),
+      park('fail', '5', 's', 'not-a-date'),
+      park('fail', '6', 's', '2026-02-01T00:00:00Z'),
+    ]);
+    const kept = filterGardenWindow(readHarvestEvents([f]), 7 * 86_400_000, now);
+    expect(kept.map((h) => h.event.issue)).toEqual(['1', '2', '6']);
+    expect(kept.map((h) => h.pointer)).toEqual([`${f}:1`, `${f}:2`, `${f}:6`]);
+  });
+
+  const cluster = (dimension: GardenCluster['dimension'], key: string, count: number): GardenCluster => ({
+    dimension,
+    key,
+    count,
+    issues: ['1'],
+    firstSeen: 'a',
+    lastSeen: 'b',
+    samples: ['p:1'],
+    failingChecks: [],
+  });
+
+  it('capGardenClusters keeps the highest counts across dimensions, in input order', () => {
+    const input = [
+      cluster('signature', 'a', 1),
+      cluster('signature', 'b', 3),
+      cluster('park-reason', 'c', 5),
+      cluster('checker', 'd', 3),
+    ];
+    expect(capGardenClusters(input, 2).map((c) => c.key)).toEqual(['b', 'c']);
+    expect(capGardenClusters(input, 1).map((c) => c.key)).toEqual(['c']);
+    expect(capGardenClusters(input, 99)).toEqual(input);
+  });
+
+  it('renderGardenJson emits one document with all cluster fields', () => {
+    const doc = JSON.parse(renderGardenJson([cluster('signature', 'a', 2)], { since: '14d', maxClusters: 10 }));
+    expect(doc.since).toBe('14d');
+    expect(doc.maxClusters).toBe(10);
+    expect(Object.keys(doc.clusters[0]).sort()).toEqual([
+      'count',
+      'dimension',
+      'failingChecks',
+      'firstSeen',
+      'issues',
+      'key',
+      'lastSeen',
+      'samples',
+    ]);
+    expect(JSON.parse(renderGardenJson([], { since: '1w', maxClusters: 3 })).clusters).toEqual([]);
   });
 });

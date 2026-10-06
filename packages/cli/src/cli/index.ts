@@ -188,8 +188,14 @@ import type {
 } from '@on-par/factory-core/internal';
 import {
   acquirePidFile,
+  DEFAULT_GARDEN_MAX_CLUSTERS,
+  DEFAULT_GARDEN_SINCE,
+  capGardenClusters,
   clusterGarden,
+  filterGardenWindow,
+  parseGardenDuration,
   readHarvestEvents,
+  renderGardenJson,
   renderGardenReport,
   formatWorktreeLocation,
   laneWorktreePath,
@@ -1261,15 +1267,42 @@ async function cmdClassifierReport(opts: { json?: boolean } = {}) {
   for (const line of formatClassifierReport(report)) console.log(line);
 }
 
-async function cmdGarden(opts: { report?: boolean } = {}) {
+async function cmdGarden(
+  opts: { report?: boolean; since?: string; maxClusters?: string; json?: boolean; out?: string } = {},
+) {
   if (!opts.report) {
     console.error('factory garden: pass --report (the only mode in this release)');
     process.exit(1);
   }
+  const since = opts.since ?? DEFAULT_GARDEN_SINCE;
+  const windowMs = parseGardenDuration(since);
+  if (windowMs === undefined) {
+    console.error(`factory garden: --since must look like 7d, 36h or 2w (got ${since})`);
+    process.exit(1);
+  }
+  const maxRaw = opts.maxClusters ?? String(DEFAULT_GARDEN_MAX_CLUSTERS);
+  if (!/^\d+$/.test(maxRaw) || Number(maxRaw) < 1) {
+    console.error(`factory garden: --max-clusters must be a positive integer (got ${maxRaw})`);
+    process.exit(1);
+  }
+  const maxClusters = Number(maxRaw);
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const clusters = clusterGarden(readHarvestEvents([paths.events]));
-  for (const line of renderGardenReport(clusters)) console.log(line);
+  const events = filterGardenWindow(readHarvestEvents([paths.events]), windowMs, new Date());
+  const clusters = capGardenClusters(clusterGarden(events), maxClusters);
+  const text = opts.json ? renderGardenJson(clusters, { since, maxClusters }) : renderGardenReport(clusters).join('\n');
+  if (opts.out) {
+    try {
+      writeFileSync(opts.out, `${text}\n`);
+    } catch (err) {
+      console.error(`factory garden: cannot write ${opts.out}: ${(err as Error).message}`);
+      process.exit(1);
+    }
+    console.error(`factory garden: wrote report to ${opts.out}`);
+    return;
+  }
+  if (opts.json) console.log(text);
+  else for (const line of text.split('\n')) console.log(line);
 }
 
 async function cmdKpis(opts: { branchPrefix?: string } = {}) {
@@ -5589,7 +5622,13 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .command('garden')
     .description('Read-only report of recurring failure patterns in local events (no network)')
     .option('--report', 'Print recurring CHECK failure-signature clusters as markdown')
-    .action((opts: { report?: boolean }) => cmdGarden(opts));
+    .option('--since <duration>', 'Only consider events from this window, e.g. 7d, 36h, 2w', DEFAULT_GARDEN_SINCE)
+    .option('--max-clusters <n>', 'Print at most this many clusters', String(DEFAULT_GARDEN_MAX_CLUSTERS))
+    .option('--json', 'Print the same cluster data as JSON')
+    .option('--out <file>', 'Write the report to this file instead of stdout')
+    .action((opts: { report?: boolean; since?: string; maxClusters?: string; json?: boolean; out?: string }) =>
+      cmdGarden(opts),
+    );
 
   program
     .command('tui')

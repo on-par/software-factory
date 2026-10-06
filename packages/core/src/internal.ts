@@ -3,8 +3,19 @@
 // change or disappear without notice. See ADR-0004 for the public/internal split.
 
 // Garden harvest (#2083)
-export type { GardenCluster, GardenDimension, HarvestedEvent } from './garden/harvest.js';
-export { clusterCheckFailures, clusterGarden, readHarvestEvents, renderGardenReport } from './garden/harvest.js';
+export type { GardenCluster, GardenDimension, GardenReportMeta, HarvestedEvent } from './garden/harvest.js';
+export {
+  DEFAULT_GARDEN_MAX_CLUSTERS,
+  DEFAULT_GARDEN_SINCE,
+  capGardenClusters,
+  clusterCheckFailures,
+  clusterGarden,
+  filterGardenWindow,
+  parseGardenDuration,
+  readHarvestEvents,
+  renderGardenJson,
+  renderGardenReport,
+} from './garden/harvest.js';
 
 // Failure fingerprint & evidence
 export { captureFailure, fingerprintFailure, normalizeFailureMessage } from './failure/index.js';
