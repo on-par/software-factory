@@ -1518,13 +1518,29 @@ bash scripts/verify.sh
       );
       await runMain('garden', '--report');
       const first = logged();
-      expect(first.match(/## 1\./g)).toHaveLength(1);
-      expect(first).not.toContain('## 2.');
+      expect(first).toContain('## CHECK failure signatures');
+      expect(first).toContain('## Park reasons');
+      expect(first).toContain('## Failing checkers');
+      expect(first).toContain('### 1. `fail`');
+      expect(first).toContain('### 1. `tests`');
+      expect(first).not.toContain('### 2.');
       expect(first).toContain('count: 3');
       for (const n of [1, 2, 3]) expect(first).toContain(`${paths().events}:${n}`);
       logSpy.mockClear();
       await runMain('garden', '--report');
       expect(logged()).toEqual(first);
+    });
+
+    it('excludes events of an environment-released run', async () => {
+      const line = (type: string, issue: string) =>
+        JSON.stringify({ ts: '2026-01-01T00:00:00Z', type, issue, msg: 'm' });
+      writeFileSync(
+        paths().events,
+        `${[line('human-edited', '9'), line('environment-released', '9'), parkLine('1', '2026-01-02T00:00:00Z')].join('\n')}\n`,
+      );
+      await runMain('garden', '--report');
+      expect(logged()).not.toContain('human-edited');
+      expect(logged()).not.toContain('## Human events');
     });
 
     it('prints no clusters for a missing events file and does not exit', async () => {

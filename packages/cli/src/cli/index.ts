@@ -188,7 +188,7 @@ import type {
 } from '@on-par/factory-core/internal';
 import {
   acquirePidFile,
-  clusterCheckFailures,
+  clusterGarden,
   readHarvestEvents,
   renderGardenReport,
   formatWorktreeLocation,
@@ -1268,7 +1268,7 @@ async function cmdGarden(opts: { report?: boolean } = {}) {
   }
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const clusters = clusterCheckFailures(readHarvestEvents([paths.events]));
+  const clusters = clusterGarden(readHarvestEvents([paths.events]));
   for (const line of renderGardenReport(clusters)) console.log(line);
 }
 
