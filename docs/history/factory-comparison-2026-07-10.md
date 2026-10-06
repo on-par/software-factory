@@ -1,6 +1,6 @@
 # Software Factory: bash `factory` vs. the TypeScript monorepo
 
-> **Historical snapshot (2026-07-10).** This comparison is kept for context only and does not describe the current factory. See [README.md](./README.md) for current status.
+> **⚠️ OBSOLETE — historical only (2026-07-10).** Do not trust the feature matrix or verdicts in this document. Claims such as "can't merge", "can't supervise" or "~40% wired" describe the TypeScript factory as it was on 2026-07-10 and are no longer true. Kept for context only. See [README.md](../../README.md) and [docs/status.md](../status.md) for current status.
 
 _Analysis date: 2026-07-10_
 
