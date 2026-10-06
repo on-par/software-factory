@@ -320,6 +320,10 @@ const PUBLIC_API_KEYS = [
 ];
 
 const INTERNAL_API_KEYS = [
+  // Garden harvest (#2083)
+  'clusterCheckFailures',
+  'readHarvestEvents',
+  'renderGardenReport',
   // Readiness deep check (#1732)
   'buildDecompositionPrompt',
   'parseDecompositionOutput',
