@@ -1,9 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { rankAdrsByRelevance } from '../adr/relevance.js';
+import type { AdrRelevanceCandidate } from '../adr/relevance.js';
 import { wrapUntrustedIssueBody } from '../utils/untrusted-input.js';
-import { buildStewardPacket } from './packet.js';
+import { buildStewardPacket, diffChangedPaths, STEWARD_PACKET_FILE, writeStewardPacket } from './packet.js';
 
 describe('buildStewardPacket', () => {
   let dir: string;
@@ -236,10 +238,7 @@ describe('buildStewardPacket', () => {
         status: 'absent',
         reason: 'unreadable',
       });
-      expect((await buildStewardPacket(join(dir, 'plain.txt'), issue)).logs).toEqual({
-        status: 'absent',
-        reason: 'unreadable',
-      });
+      await expect(buildStewardPacket(join(dir, 'plain.txt'), issue)).rejects.toThrow();
       expect((await buildStewardPacket(join(dir, 'nope'), issue)).logs).toEqual({
         status: 'absent',
         reason: 'missing',
@@ -258,5 +257,222 @@ describe('buildStewardPacket', () => {
       if (p.logs.status !== 'present') throw new Error('expected present');
       expect(p.logs.entries[0].pointer.startsWith(`${hostname()}:`)).toBe(true);
     });
+  });
+});
+
+function adr(
+  number: number | undefined,
+  title: string,
+  path: string,
+  decision: string,
+  text: string,
+): AdrRelevanceCandidate {
+  return { adr: { number, title, status: 'Accepted', date: '2026-10-01', path, decision }, text };
+}
+
+const STEWARD_FILE = 'packages/core/src/steward/packet.ts';
+const STEWARD_DIFF = `--- a/${STEWARD_FILE}\n+++ b/${STEWARD_FILE}\n@@ -1 +1 @@\n-a\n+b\n`;
+const issue = { number: 3, title: 'T', body: 'B' };
+
+function matching(n: number): AdrRelevanceCandidate[] {
+  return Array.from({ length: n }, (_, i) =>
+    adr(i + 1, `ADR ${i + 1}`, `docs/adr/${i + 1}.md`, `decision ${i + 1}`, `See ${STEWARD_FILE}`),
+  );
+}
+
+describe('ranked ADRs', () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'steward-adrs-'));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('is absent missing without adrCandidates', async () => {
+    const p = await buildStewardPacket(dir, issue);
+    expect(p.adrs).toEqual({ status: 'absent', reason: 'missing' });
+  });
+
+  it('is absent empty without changed paths or without a match', async () => {
+    const p = await buildStewardPacket(dir, issue, { adrCandidates: matching(2) });
+    expect(p.adrs).toEqual({ status: 'absent', reason: 'empty' });
+    const q = await buildStewardPacket(dir, issue, { adrCandidates: matching(2), changedPaths: ['zzz/none.ts'] });
+    expect(q.adrs).toEqual({ status: 'absent', reason: 'empty' });
+  });
+
+  it('reuses the ranker order unchanged', async () => {
+    await writeFile(join(dir, 'diff.patch'), STEWARD_DIFF);
+    const candidates = [
+      adr(1, 'Dir', 'docs/adr/1.md', 'd1', 'See packages/core/src/steward for more'),
+      adr(2, 'Unrelated', 'docs/adr/2.md', 'd2', 'Nothing relevant here'),
+      adr(3, 'File', 'docs/adr/3.md', 'd3', `Cites ${STEWARD_FILE}`),
+    ];
+    const p = await buildStewardPacket(dir, issue, { adrCandidates: candidates });
+    const expected = rankAdrsByRelevance(candidates, [STEWARD_FILE]).map((m) => ({
+      path: m.adr.path,
+      reason: m.reason,
+      changedPath: m.changedPath,
+    }));
+    if (p.adrs.status !== 'present') throw new Error('expected present');
+    expect(p.adrs.entries.map(({ path, reason, changedPath }) => ({ path, reason, changedPath }))).toEqual(expected);
+    expect(expected.length).toBeGreaterThan(0);
+    expect(p.adrs.entries.some((e) => e.path === 'docs/adr/2.md')).toBe(false);
+  });
+
+  it('caps to the top N and flags truncation', async () => {
+    const opts = { changedPaths: [STEWARD_FILE] };
+    const a = await buildStewardPacket(dir, issue, { ...opts, adrCandidates: matching(7), maxAdrs: 3 });
+    if (a.adrs.status !== 'present') throw new Error('expected present');
+    expect(a.adrs.entries).toHaveLength(3);
+    expect(a.adrs.originalCount).toBe(7);
+    expect(a.adrs.truncated).toBe(true);
+    const b = await buildStewardPacket(dir, issue, { ...opts, adrCandidates: matching(6) });
+    if (b.adrs.status !== 'present') throw new Error('expected present');
+    expect(b.adrs.entries).toHaveLength(5);
+    expect(b.adrs.truncated).toBe(true);
+    const c = await buildStewardPacket(dir, issue, { ...opts, adrCandidates: matching(5) });
+    if (c.adrs.status !== 'present') throw new Error('expected present');
+    expect(c.adrs.truncated).toBe(false);
+  });
+
+  it('sanitizes and caps decisions and titles', async () => {
+    const decision = `${'x'.repeat(700)}\u200b`;
+    const cands = [adr(1, 'Title <!-- x -->', 'docs/adr/1.md', decision, `Cites ${STEWARD_FILE}`)];
+    const p = await buildStewardPacket(dir, issue, { adrCandidates: cands, changedPaths: [STEWARD_FILE] });
+    if (p.adrs.status !== 'present') throw new Error('expected present');
+    const e = p.adrs.entries[0];
+    expect(e.decision).toHaveLength(600);
+    expect(e).toMatchObject({ truncated: true, originalChars: 700, chars: 600 });
+    expect(e.title).not.toContain('<!--');
+    const q = await buildStewardPacket(dir, issue, {
+      adrCandidates: cands,
+      changedPaths: [STEWARD_FILE],
+      maxAdrDecisionChars: 10,
+    });
+    if (q.adrs.status !== 'present') throw new Error('expected present');
+    expect(q.adrs.entries[0].decision).toHaveLength(10);
+  });
+
+  it('omits number for an unnumbered ADR', async () => {
+    const cands = [adr(undefined, 'No number', 'docs/adr/x.md', 'd', `Cites ${STEWARD_FILE}`)];
+    const p = await buildStewardPacket(dir, issue, { adrCandidates: cands, changedPaths: [STEWARD_FILE] });
+    if (p.adrs.status !== 'present') throw new Error('expected present');
+    expect('number' in p.adrs.entries[0]).toBe(false);
+  });
+
+  it('lets opts.changedPaths override the diff paths', async () => {
+    await writeFile(join(dir, 'diff.patch'), STEWARD_DIFF);
+    const p = await buildStewardPacket(dir, issue, { adrCandidates: matching(2), changedPaths: ['zzz/none.ts'] });
+    expect(p.adrs).toEqual({ status: 'absent', reason: 'empty' });
+  });
+
+  it('ranks files that fall past the diff cap', async () => {
+    const diff = `${STEWARD_DIFF}--- a/other/file.ts\n+++ b/${STEWARD_FILE.replace('packet', 'second')}\n+x\n`;
+    await writeFile(join(dir, 'diff.patch'), diff);
+    const second = 'packages/core/src/steward/second.ts';
+    const cands = [adr(1, 'Second', 'docs/adr/1.md', 'd', `Cites ${second}`)];
+    const p = await buildStewardPacket(dir, issue, { adrCandidates: cands, maxDiffLines: 2 });
+    if (p.diff.status !== 'present') throw new Error('expected present');
+    expect(p.diff.truncated).toBe(true);
+    expect(p.diff.text).not.toContain('second.ts');
+    if (p.adrs.status !== 'present') throw new Error('expected present');
+    expect(p.adrs.entries[0].changedPath).toBe(second);
+  });
+});
+
+describe('diffChangedPaths', () => {
+  it('returns [] for an empty diff', () => {
+    expect(diffChangedPaths('')).toEqual([]);
+  });
+
+  it('handles modify, add, delete and rename', () => {
+    const diff = [
+      '--- a/m.ts',
+      '+++ b/m.ts',
+      '--- /dev/null',
+      '+++ b/added.ts',
+      '--- a/gone.ts',
+      '+++ /dev/null',
+      '--- a/old.ts',
+      '+++ b/new.ts',
+    ].join('\n');
+    expect(diffChangedPaths(diff)).toEqual(['m.ts', 'added.ts', 'gone.ts', 'old.ts', 'new.ts']);
+  });
+
+  it('handles quoted paths, tab suffixes, CRLF and dedupes', () => {
+    const diff =
+      '--- "a/sp ace.ts"\r\n+++ "b/sp ace.ts"\r\n--- a/t.ts\t2026-01-01\n+++ b/t.ts\t2026-01-01\n+++ b/t.ts\n';
+    expect(diffChangedPaths(diff)).toEqual(['sp ace.ts', 't.ts']);
+  });
+});
+
+describe('packet persistence', () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'steward-persist-'));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  async function fixtures(): Promise<void> {
+    await writeFile(join(dir, 'issue-3.md'), '# Spec\n');
+    await writeFile(join(dir, 'diff.patch'), STEWARD_DIFF);
+    await mkdir(join(dir, 'check-r1'));
+    await writeFile(join(dir, 'check-r1', 'verify.log'), 'boom\n');
+  }
+
+  it('writes the full packet as steward-packet.json', async () => {
+    await fixtures();
+    const p = await buildStewardPacket(dir, issue, { adrCandidates: matching(2) });
+    expect([p.issue.status, p.plan.status, p.diff.status, p.logs.status, p.adrs.status]).toEqual(
+      Array(5).fill('present'),
+    );
+    const raw = await readFile(join(dir, STEWARD_PACKET_FILE), 'utf-8');
+    expect(raw.endsWith('\n')).toBe(true);
+    expect(JSON.parse(raw)).toEqual(p);
+    expect(await readdir(dir)).not.toContain(`${STEWARD_PACKET_FILE}.tmp`);
+  });
+
+  it('overwrites on a second call', async () => {
+    await fixtures();
+    await buildStewardPacket(dir, issue);
+    const p = await buildStewardPacket(dir, { number: 3, title: 'Second', body: 'B' });
+    expect(JSON.parse(await readFile(join(dir, STEWARD_PACKET_FILE), 'utf-8'))).toEqual(p);
+    expect(p.issue.untrustedBlock).toContain('Second');
+  });
+
+  it('creates a missing runDir and writeStewardPacket returns the path', async () => {
+    const sub = join(dir, 'new');
+    const p = await buildStewardPacket(sub, issue);
+    expect(JSON.parse(await readFile(join(sub, STEWARD_PACKET_FILE), 'utf-8'))).toEqual(p);
+    expect(await writeStewardPacket(sub, p)).toBe(join(sub, STEWARD_PACKET_FILE));
+  });
+
+  it('has no external side effects', async () => {
+    await fixtures();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    try {
+      await buildStewardPacket(dir, issue, { adrCandidates: matching(2) });
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+    const src = await readFile(new URL('./packet.ts', import.meta.url), 'utf-8');
+    const specifiers = [...src.matchAll(/from '([^']+)'/g)].map((m) => m[1]).sort();
+    expect(specifiers).toEqual(
+      [
+        'node:fs/promises',
+        'node:os',
+        'node:path',
+        '../adr/relevance.js',
+        '../adr/relevance.js',
+        '../filing/index.js',
+        '../filing/sanitize.js',
+        '../utils/untrusted-input.js',
+      ].sort(),
+    );
+    expect((await readdir(dir)).sort()).toEqual(['check-r1', 'diff.patch', 'issue-3.md', STEWARD_PACKET_FILE].sort());
   });
 });
