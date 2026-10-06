@@ -235,7 +235,6 @@ import {
   createOctokitQueueClient,
   daemonRuntimePaths,
   DEFAULT_FACTORYD_PORT,
-  defaultRegistryPath,
   ensureDir,
   FACTORY_RUNTIME_CONFIG_KEYS,
   findUnmergedGreenPrs,
@@ -294,7 +293,9 @@ import {
   cmdDaemonStatus,
   cmdDaemonStop,
   DaemonCtlError,
+  resolveFactorydConfig,
   type DaemonCtlDeps,
+  type FactorydConfig,
 } from './daemon.js';
 import {
   analyzeEventLog,
@@ -3782,12 +3783,15 @@ async function cmdProxy() {
  *  next to the registry file — daemon.pid single-instance guard, daemon.port
  *  bound-address record, daemon.log append sink (#1177). `factory daemon
  *  start|stop|status|logs` wrap this process in a launchd LaunchAgent (#1179). */
-async function cmdFactoryd(opts: { port?: string; registry?: string }): Promise<void> {
-  const registryFile = opts.registry ?? defaultRegistryPath();
-  const port = opts.port === undefined ? DEFAULT_FACTORYD_PORT : Number(opts.port);
-  if (!Number.isInteger(port) || port < 0 || port > 65535) {
-    throw new CliExitError(`invalid --port "${opts.port}" — expected an integer 0-65535`, 2);
+async function cmdFactoryd(opts: { port?: string; registry?: string; autoUpdate?: boolean }): Promise<void> {
+  let config: FactorydConfig;
+  try {
+    config = resolveFactorydConfig(opts);
+  } catch (err) {
+    if (err instanceof DaemonCtlError) throw new CliExitError(err.message, err.code);
+    throw err;
   }
+  const { registryFile, port } = config;
 
   const runtime = daemonRuntimePaths(dirname(registryFile));
   const acquired = await acquirePidFile(runtime);
@@ -6173,7 +6177,8 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .description('Run factoryd in the foreground: a localhost-only HTTP API over the repo registry')
     .option('--port <n>', `Port to bind on 127.0.0.1 (default ${DEFAULT_FACTORYD_PORT})`)
     .option('--registry <file>', 'Registry file to serve (default ~/.factory/registry.json)')
-    .action((opts: { port?: string; registry?: string }) => cmdFactoryd(opts));
+    .option('--auto-update', 'Opt in to automatic factoryd self-update (default: off)')
+    .action((opts: { port?: string; registry?: string; autoUpdate?: boolean }) => cmdFactoryd(opts));
   const daemonCtl = (fn: () => Promise<void>) =>
     fn().catch((err: unknown) => {
       if (err instanceof DaemonCtlError) throw new CliExitError(err.message, err.code);
