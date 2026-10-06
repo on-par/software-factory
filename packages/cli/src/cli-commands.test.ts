@@ -6072,7 +6072,7 @@ describe('shipIssue (direct)', () => {
     it('passes proxyUrl to the build phase, logs egress_summary, and closes the proxy', async () => {
       let port = 0;
       phases.buildPhase.mockImplementationOnce(async (opts) => {
-        const url = (opts.sandbox as any).proxyUrl as string;
+        const url = opts.sandbox!.proxyUrl!;
         port = Number(new URL(url).port);
         expect(await refused(port)).toBe('connected');
         return h.buildResult;
@@ -6087,7 +6087,7 @@ describe('shipIssue (direct)', () => {
     it('closes the proxy when the build phase throws', async () => {
       let port = 0;
       phases.buildPhase.mockImplementationOnce(async (opts) => {
-        port = Number(new URL((opts.sandbox as any).proxyUrl as string).port);
+        port = Number(new URL(opts.sandbox!.proxyUrl!).port);
         throw new Error('build blew up');
       });
       await expect(shipIssue(5, {}, ctx())).rejects.toThrow();
