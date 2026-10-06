@@ -183,6 +183,7 @@ file must be one that exists (or one you are creating), and every name/symbol mu
 be one you actually read or are adding — omit an entry rather than guess. Quote
 signature values in single quotes; unquoted YAML breaks on the colons in a
 TypeScript signature.
+Single-quote any list item that contains ': ' (for example a backticked \`uses: x@main\`) — unquoted, YAML reads the item as a map.
 Do not record new ADRs. Recording an architecture decision is a separate process from this
 change: plan no ADR and no \`docs/adr/\` file, unless the issue itself asks for one.
 Do not run tests, do not write or edit any other file, do not touch git.
@@ -528,7 +529,9 @@ async function planPhaseImpl(opts: {
   const adrContext = await readAdrContext(adrReader);
   const adrCtx = renderAdrConstraints(adrContext);
   if (adrContext.active.length > 0) {
-    const names = adrContext.active.map(adrLabel).join(', ');
+    const names = adrContext.active
+      .map((adr) => (adr.statusless ? `${adrLabel(adr)} (no status, treated as Accepted)` : adrLabel(adr)))
+      .join(', ');
     log(
       'adr_context',
       `${adrContext.active.length} accepted ADR(s) injected as design constraints: ${names}` +
@@ -538,7 +541,8 @@ async function planPhaseImpl(opts: {
     log('adr_context_empty', `no accepted ADRs found in ${adrContext.dir} — planning without ADR constraints`);
   }
   if (adrContext.skipped.length > 0) {
-    log('adr_skipped', `${adrContext.skipped.length} ADR file(s) skipped (not Accepted or unparsable)`);
+    const skippedList = adrContext.skipped.map((s) => `${s.path} (${s.reason})`).join(', ');
+    log('adr_skipped', `${adrContext.skipped.length} ADR file(s) skipped: ${skippedList}`);
   }
   log('adr_inject_completed', `ADR injection complete (${adrContext.active.length} active)`, {
     durationMs: Date.now() - adrInjectStartedAt,
@@ -620,7 +624,13 @@ async function planPhaseImpl(opts: {
       await updateSpecRoute(specPath, opts.preferredRoute, 'repo-config-pin');
     }
 
-    const { artifact: designArtifact, errors: designErrors } = parseDesignArtifact(parsed.data);
+    const { artifact: designArtifact, errors: designErrors, coerced: designCoerced } = parseDesignArtifact(parsed.data);
+    if (designCoerced.length > 0) {
+      log(
+        'design_artifact_coerced',
+        `coerced ${designCoerced.length} non-string design list item(s) to text: ${designCoerced.join(', ')}`,
+      );
+    }
     if (designArtifact) {
       await writeSpec(specPath, {
         designJson: JSON.stringify(designArtifact, null, 2),

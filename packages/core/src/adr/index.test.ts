@@ -24,6 +24,10 @@ Consequences text.
 `;
 }
 
+function statusless(title: string, decision: string): string {
+  return `# ${title}\n\nProse.\n\n## Decision\n\n${decision}\n`;
+}
+
 function withStatus(number: string, title: string, status: string): string {
   return `# ADR-${number}: ${title}
 
@@ -234,5 +238,35 @@ describe('readAdrContext changedPaths (#1722)', () => {
     expect(ctx.matches).toEqual([]);
     expect(ctx.active).toEqual(base.active);
     expect(ctx.truncated).toBe(base.truncated);
+  });
+
+  it('treats an ADR with no status as active and marks it statusless', async () => {
+    const reader = createInMemoryReader({
+      'docs/adr/0001-html-only-report-output.md': statusless('HTML-only report output', 'Emit HTML only.'),
+    });
+    const ctx = await readAdrContext(reader);
+    expect(ctx.active).toHaveLength(1);
+    expect(ctx.active[0]).toMatchObject({
+      number: 1,
+      title: 'HTML-only report output',
+      status: '',
+      statusless: true,
+    });
+    expect(ctx.skipped).toEqual([]);
+    expect(renderAdrConstraints(ctx)).toContain('ADR-0001 — HTML-only report output (no status, treated as Accepted)');
+  });
+
+  it('still skips explicit non-Accepted statuses next to a statusless ADR', async () => {
+    const reader = createInMemoryReader({
+      'docs/adr/0001-a.md': statusless('Plain', 'Do it.'),
+      'docs/adr/0002-old.md': withStatus('0002', 'Old', 'Superseded'),
+      'docs/adr/0003-draft.md': withStatus('0003', 'Drafty', 'Draft'),
+    });
+    const ctx = await readAdrContext(reader);
+    expect(ctx.active.map((a) => a.path)).toEqual(['docs/adr/0001-a.md']);
+    expect(ctx.skipped).toEqual([
+      { path: 'docs/adr/0002-old.md', reason: 'inactive' },
+      { path: 'docs/adr/0003-draft.md', reason: 'inactive' },
+    ]);
   });
 });

@@ -235,7 +235,6 @@ import {
   createOctokitQueueClient,
   daemonRuntimePaths,
   DEFAULT_FACTORYD_PORT,
-  defaultRegistryPath,
   ensureDir,
   FACTORY_RUNTIME_CONFIG_KEYS,
   findUnmergedGreenPrs,
@@ -294,7 +293,9 @@ import {
   cmdDaemonStatus,
   cmdDaemonStop,
   DaemonCtlError,
+  resolveFactorydConfig,
   type DaemonCtlDeps,
+  type FactorydConfig,
 } from './daemon.js';
 import {
   analyzeEventLog,
@@ -336,7 +337,7 @@ import { ensureFactoryExcluded, writeSampleQueue } from './init-files.js';
 import { cmdLogs } from './logs.js';
 import { applyHelpGroups } from './help-groups.js';
 import { mergeScopeNotice } from './merge-scope.js';
-import { createFactoryOctokit } from './octokit.js';
+import { createFactoryOctokit, formatDeprecation, type FactoryOctokitOptions } from './octokit.js';
 import { DeepCheckError, createDeepModelRunner, runIssueCheck, type DeepCheckModelRunner } from './ready-check.js';
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
 import { readRunFlagOverrides, writeRunFlagOverrides } from './run-flags.js';
@@ -622,8 +623,8 @@ function resolveGitHubToken(shell: ShellOps = shellOps): string | undefined {
 /** Octokit factory for the current main() or cmdLand invocation (CliDeps.octokit); unset outside them. */
 let octokitFactory: (() => Octokit) | undefined;
 
-function getOctokit(shell: ShellOps = shellOps): Octokit {
-  return octokitFactory ? octokitFactory() : createFactoryOctokit(resolveGitHubToken(shell));
+function getOctokit(shell: ShellOps = shellOps, options?: FactoryOctokitOptions): Octokit {
+  return octokitFactory ? octokitFactory() : createFactoryOctokit(resolveGitHubToken(shell), options);
 }
 
 export function errorDetail(err: unknown): string {
@@ -2043,7 +2044,15 @@ export async function shipIssue(
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot(shell));
   const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo(shell));
   const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
-  const octokit = (deps.octokit ?? (() => getOctokit(shell)))();
+  // GitHub REST deprecations seen on this run's client become one warn event per route (#2218).
+  const octokit = (
+    deps.octokit ??
+    (() =>
+      getOctokit(shell, {
+        log: (d) =>
+          logEvent(paths.events, 'github_api_deprecated', issueNum, formatDeprecation(d), { lane: ctx?.lane }),
+      }))
+  )();
   const [ghOwner, ghName] = ghRepo.split('/');
 
   const repoConfig = loaders.loadRepoConfig(repoRoot, paths.root);
@@ -3782,12 +3791,15 @@ async function cmdProxy() {
  *  next to the registry file — daemon.pid single-instance guard, daemon.port
  *  bound-address record, daemon.log append sink (#1177). `factory daemon
  *  start|stop|status|logs` wrap this process in a launchd LaunchAgent (#1179). */
-async function cmdFactoryd(opts: { port?: string; registry?: string }): Promise<void> {
-  const registryFile = opts.registry ?? defaultRegistryPath();
-  const port = opts.port === undefined ? DEFAULT_FACTORYD_PORT : Number(opts.port);
-  if (!Number.isInteger(port) || port < 0 || port > 65535) {
-    throw new CliExitError(`invalid --port "${opts.port}" — expected an integer 0-65535`, 2);
+async function cmdFactoryd(opts: { port?: string; registry?: string; autoUpdate?: boolean }): Promise<void> {
+  let config: FactorydConfig;
+  try {
+    config = resolveFactorydConfig(opts);
+  } catch (err) {
+    if (err instanceof DaemonCtlError) throw new CliExitError(err.message, err.code);
+    throw err;
   }
+  const { registryFile, port } = config;
 
   const runtime = daemonRuntimePaths(dirname(registryFile));
   const acquired = await acquirePidFile(runtime);
@@ -6173,7 +6185,8 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .description('Run factoryd in the foreground: a localhost-only HTTP API over the repo registry')
     .option('--port <n>', `Port to bind on 127.0.0.1 (default ${DEFAULT_FACTORYD_PORT})`)
     .option('--registry <file>', 'Registry file to serve (default ~/.factory/registry.json)')
-    .action((opts: { port?: string; registry?: string }) => cmdFactoryd(opts));
+    .option('--auto-update', 'Opt in to automatic factoryd self-update (default: off)')
+    .action((opts: { port?: string; registry?: string; autoUpdate?: boolean }) => cmdFactoryd(opts));
   const daemonCtl = (fn: () => Promise<void>) =>
     fn().catch((err: unknown) => {
       if (err instanceof DaemonCtlError) throw new CliExitError(err.message, err.code);

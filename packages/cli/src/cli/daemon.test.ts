@@ -4,6 +4,7 @@ import { mkdtempSync, appendFileSync, existsSync, mkdirSync, readFileSync, rmSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { DEFAULT_FACTORYD_PORT, defaultRegistryPath } from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -18,6 +19,7 @@ import {
   lastLines,
   parseLaunchctlPid,
   renderFactorydPlist,
+  resolveFactorydConfig,
 } from './daemon.js';
 import type { DaemonCtlDeps, LaunchctlExec } from './daemon.js';
 
@@ -71,6 +73,49 @@ describe('factorydFiles', () => {
       plistPath: join('/Users/op', 'Library', 'LaunchAgents', 'com.onpar.factoryd.plist'),
       logPath: join('/Users/op', '.factory', 'daemon.log'),
     });
+  });
+});
+
+describe('resolveFactorydConfig', () => {
+  const registry = '/tmp/r.json';
+
+  it('defaults auto-update to off', () => {
+    expect(resolveFactorydConfig({ registry })).toEqual({
+      registryFile: registry,
+      port: DEFAULT_FACTORYD_PORT,
+      autoUpdate: false,
+    });
+    expect(resolveFactorydConfig({ registry, autoUpdate: undefined }).autoUpdate).toBe(false);
+    expect(resolveFactorydConfig({ registry, autoUpdate: false }).autoUpdate).toBe(false);
+  });
+
+  it('opts in with autoUpdate: true and changes nothing else', () => {
+    expect(resolveFactorydConfig({ registry, autoUpdate: true })).toEqual({
+      registryFile: registry,
+      port: DEFAULT_FACTORYD_PORT,
+      autoUpdate: true,
+    });
+  });
+
+  it('accepts the port bounds', () => {
+    expect(resolveFactorydConfig({ registry, port: '0' }).port).toBe(0);
+    expect(resolveFactorydConfig({ registry, port: '65535' }).port).toBe(65535);
+  });
+
+  it.each(['abc', '-1', '65536', '1.5'])('rejects invalid port %s with code 2', (port) => {
+    let caught: unknown;
+    try {
+      resolveFactorydConfig({ registry, port });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(DaemonCtlError);
+    expect((caught as DaemonCtlError).code).toBe(2);
+    expect((caught as DaemonCtlError).message).toBe(`invalid --port "${port}" — expected an integer 0-65535`);
+  });
+
+  it('falls back to the default registry path', () => {
+    expect(resolveFactorydConfig({}).registryFile).toBe(defaultRegistryPath());
   });
 });
 

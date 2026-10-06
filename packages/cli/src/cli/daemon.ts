@@ -1,5 +1,6 @@
 // packages/cli/src/cli/daemon.ts — factory daemon start|stop|status|logs: launchctl
-// wrappers around the foreground factoryd (#1179, epic #764).
+// wrappers around the foreground factoryd (#1179, epic #764), plus `daemon run`
+// option resolution into FactorydConfig (#2128).
 
 import { execFile } from 'node:child_process';
 import {
@@ -16,7 +17,7 @@ import {
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { defaultRegistryPath, listRepos, loadRegistry } from '@on-par/factory-core/internal';
+import { DEFAULT_FACTORYD_PORT, defaultRegistryPath, listRepos, loadRegistry } from '@on-par/factory-core/internal';
 
 export const FACTORYD_LABEL = 'com.onpar.factoryd';
 
@@ -65,6 +66,30 @@ export function factorydFiles(home: string): { launchAgentsDir: string; plistPat
     plistPath: join(launchAgentsDir, `${FACTORYD_LABEL}.plist`),
     logPath: join(home, '.factory', 'daemon.log'),
   };
+}
+
+/** Resolved options for the foreground `factory daemon run` process. */
+export interface FactorydConfig {
+  /** Registry file served (default ~/.factory/registry.json). */
+  registryFile: string;
+  /** Port to bind on 127.0.0.1 (default DEFAULT_FACTORYD_PORT). */
+  port: number;
+  /** Opt-in auto-update (#2128). Off unless --auto-update was passed; nothing acts on it yet. */
+  autoUpdate: boolean;
+}
+
+/** Resolves `factory daemon run` options into a FactorydConfig. Throws
+ *  DaemonCtlError (code 2) on an invalid --port. */
+export function resolveFactorydConfig(opts: {
+  port?: string;
+  registry?: string;
+  autoUpdate?: boolean;
+}): FactorydConfig {
+  const port = opts.port === undefined ? DEFAULT_FACTORYD_PORT : Number(opts.port);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new DaemonCtlError(`invalid --port "${opts.port}" — expected an integer 0-65535`, 2);
+  }
+  return { registryFile: opts.registry ?? defaultRegistryPath(), port, autoUpdate: opts.autoUpdate === true };
 }
 
 function xmlEscape(s: string): string {

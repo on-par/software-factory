@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { DesignArtifactSchema } from './design.js';
+import { DesignArtifactSchema, coerceListItem, findCoercedDesignItems } from './design.js';
 import { deserialize, serialize } from './serde.js';
 
 const validDesign = {
@@ -168,5 +168,60 @@ describe('DesignArtifactSchema', () => {
       void verdict;
       expect(() => DesignArtifactSchema.parse({ ...validDesign, behaviorDelta: [noVerdict] })).toThrow();
     });
+  });
+});
+
+describe('design string-list coercion (#2216)', () => {
+  const plain = Array.from({ length: 11 }, (_, i) => `item ${i}`);
+  const mapItem = { 'a remote reusable workflow (`uses': 'org/repo/.github/workflows/x.yml@main`) — not followed' };
+  const mapText = 'a remote reusable workflow (`uses: org/repo/.github/workflows/x.yml@main`) — not followed';
+
+  it('rebuilds a one-key map in edgeInputs as the original line', () => {
+    const design = { ...validDesign, edgeInputs: [...plain, mapItem] };
+    const result = DesignArtifactSchema.safeParse(design);
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.edgeInputs?.[11]).toBe(mapText);
+    expect(findCoercedDesignItems(design)).toEqual(['edgeInputs[11]']);
+  });
+
+  it('turns a multi-key map in interfacesTouched into JSON text', () => {
+    const item = { file: 'src/a.ts', symbol: 'run' };
+    const result = DesignArtifactSchema.parse({ ...validDesign, interfacesTouched: [item] });
+    expect(result.interfacesTouched[0]).toBe(JSON.stringify(item));
+  });
+
+  it('coerces numbers, nested lists, null and null-valued one-key maps', () => {
+    const result = DesignArtifactSchema.parse({
+      ...validDesign,
+      behaviorContract: [42, ['a', 'b'], { foo: null }, { port: 8080 }, { k: { a: 1 } }],
+      openQuestions: [null],
+    });
+    expect(result.behaviorContract).toEqual(['42', '["a","b"]', 'foo:', 'port: 8080', 'k: {"a":1}']);
+    expect(result.openQuestions).toEqual(['null']);
+  });
+
+  it('coerces externalLists gaps and reports their path', () => {
+    const design = {
+      ...validDesign,
+      externalLists: [{ name: 'n', location: 'l', source: 's', gaps: ['ok', 'ok2', mapItem] }],
+    };
+    const result = DesignArtifactSchema.parse(design);
+    expect(result.externalLists?.[0]?.gaps[2]).toBe(mapText);
+    expect(findCoercedDesignItems(design)).toEqual(['externalLists[0].gaps[2]']);
+  });
+
+  it('still rejects an empty-string edgeInputs item', () => {
+    expect(DesignArtifactSchema.safeParse({ ...validDesign, edgeInputs: [''] }).success).toBe(false);
+  });
+
+  it('coerceListItem falls back to String for values JSON cannot represent', () => {
+    expect(coerceListItem(undefined)).toBe('undefined');
+    expect(coerceListItem('x')).toBe('x');
+  });
+
+  it('findCoercedDesignItems yields nothing for clean, null and non-array input', () => {
+    expect(findCoercedDesignItems(validDesign)).toEqual([]);
+    expect(findCoercedDesignItems(null)).toEqual([]);
+    expect(findCoercedDesignItems({ edgeInputs: 'x', externalLists: [null, { gaps: 'x' }] })).toEqual([]);
   });
 });

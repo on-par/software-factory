@@ -2,7 +2,7 @@
 // historical (still-open) signatures of #550 and #551 end to end through the real PLAN phase,
 // and pins the fixed #1172 ship path (re-pinned by #1222) through the real SHIP phase.
 
-import { DesignArtifactSchema } from '@on-par/contracts';
+import { DesignArtifactSchema, findCoercedDesignItems } from '@on-par/contracts';
 import matter from 'gray-matter';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -53,14 +53,19 @@ describe('sim regression fixtures (#567)', () => {
     expect(outcome550.githubCalls.some(([name]) => name === 'issues.update')).toBe(true);
   });
 
-  it('#551 silent design-artifact loss: designArtifact is null but the lane still ships', { timeout: 180_000 }, () => {
-    expect(outcome551.designArtifact).toBeNull();
-    expect(
-      outcome551.events.some((e) => e.type === 'design_artifact_invalid' && e.msg.includes('interfacesTouched')),
-    ).toBe(true);
-    expect(outcome551.state).toBe('shipped');
-    // When #551 lands: designArtifact becomes non-null and interfacesTouched has length 2.
-  });
+  it(
+    '#551 fixed behaviour (#2216): object interface item is coerced, artifact kept, lane ships',
+    { timeout: 180_000 },
+    () => {
+      expect(outcome551.designArtifact).not.toBeNull();
+      expect(outcome551.designArtifact?.interfacesTouched).toHaveLength(2);
+      expect(
+        outcome551.events.some((e) => e.type === 'design_artifact_coerced' && e.msg.includes('interfacesTouched[1]')),
+      ).toBe(true);
+      expect(outcome551.events.some((e) => e.type === 'design_artifact_invalid')).toBe(false);
+      expect(outcome551.state).toBe('shipped');
+    },
+  );
 
   it(
     '#1222 fixed behaviour (#1172): commits uncommitted build output after a green check and ships',
@@ -103,9 +108,8 @@ describe('sim regression fixtures (#567)', () => {
     expect(typeof design.interfacesTouched[1]).toBe('object');
 
     const result = DesignArtifactSchema.safeParse(design);
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues.some((issue) => issue.path.join('.') === 'interfacesTouched.1')).toBe(true);
-    }
+    // Coerced to text since #2216; the raw object item is what the model emitted.
+    expect(result.success).toBe(true);
+    expect(findCoercedDesignItems(design)).toEqual(['interfacesTouched[1]']);
   });
 });

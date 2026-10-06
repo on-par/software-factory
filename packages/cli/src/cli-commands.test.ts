@@ -3273,6 +3273,43 @@ bash scripts/verify.sh
       expect(readFileSync(logFile, 'utf-8')).toContain(`factoryd: listening on 127.0.0.1:${boundPort}`);
     });
 
+    it('daemon run --help lists --auto-update with its default of off', async () => {
+      const originalWrite = process.stdout.write.bind(process.stdout);
+      const written: string[] = [];
+      process.stdout.write = ((chunk: unknown) => {
+        written.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write;
+
+      let res: Awaited<ReturnType<typeof runMain>>;
+      try {
+        res = await runMain('daemon', 'run', '--help');
+      } finally {
+        process.stdout.write = originalWrite;
+      }
+
+      expect(res.exited).toBe(true);
+      const text = written.join('').replace(/\s+/g, ' ');
+      expect(text).toContain('--auto-update');
+      expect(text).toContain('Opt in to automatic factoryd self-update (default: off)');
+    });
+
+    it('accepts --auto-update and starts and stops exactly like the default run', async () => {
+      const registryFile = join(paths().state, 'registry.json');
+      writeFileSync(registryFile, JSON.stringify({ version: 1, repos: {} }));
+
+      const runPromise = runMain('daemon', 'run', '--auto-update', '--port', '0', '--registry', registryFile);
+      while (!logged().includes('listening on 127.0.0.1:')) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+
+      process.emit('SIGINT');
+      const res = await runPromise;
+
+      expect(res.exited).toBe(true);
+      expect(res.code).toBe(0);
+    });
+
     it('exits with code 2 on an invalid --port and never binds', async () => {
       const res = await runMain('daemon', 'run', '--port', 'abc');
       expect(res.exited).toBe(true);
