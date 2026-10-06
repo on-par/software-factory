@@ -214,6 +214,45 @@ describe('buildPlanPrompt', () => {
 });
 
 describe('planPhase', () => {
+  const megaSliceYaml = `design:
+  restatedProblem: A slice that is really five slices.
+  approach:
+    chosen: Do all of it.
+    rejected: []
+  interfacesTouched:
+    - packages/a.ts
+    - packages/b.ts
+    - packages/c.ts
+  targetTypes:
+${Array.from(
+  { length: 7 },
+  (_, i) => `    - name: Type${i}
+      file: packages/t${i}.ts
+      kind: changed`,
+).join('\n')}
+  signatures:
+${Array.from(
+  { length: 7 },
+  (_, i) => `    - symbol: fn${i}
+      file: packages/f${i}.ts
+      signature: '(x: string) => void'`,
+).join('\n')}
+  callGraph:
+${Array.from(
+  { length: 7 },
+  (_, i) => `    - from: caller
+      to: fn${i}
+      note: edge`,
+).join('\n')}
+  behaviorContract:
+    - Everything changes.
+  verificationPlan:
+    - command: npm test
+      passWhen: tests pass
+  riskBlastRadius: Everything.
+  openQuestions: []
+`;
+
   it('bypasses the boss model only for a ready, bounded fast-path issue', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
     tempDirs.add(worktree);
@@ -561,45 +600,6 @@ npm run test`;
   });
 
   describe('enforced build-scope budget (2026-08-15)', () => {
-    const megaSliceYaml = `design:
-  restatedProblem: A slice that is really five slices.
-  approach:
-    chosen: Do all of it.
-    rejected: []
-  interfacesTouched:
-    - packages/a.ts
-    - packages/b.ts
-    - packages/c.ts
-  targetTypes:
-${Array.from(
-  { length: 7 },
-  (_, i) => `    - name: Type${i}
-      file: packages/t${i}.ts
-      kind: changed`,
-).join('\n')}
-  signatures:
-${Array.from(
-  { length: 7 },
-  (_, i) => `    - symbol: fn${i}
-      file: packages/f${i}.ts
-      signature: '(x: string) => void'`,
-).join('\n')}
-  callGraph:
-${Array.from(
-  { length: 7 },
-  (_, i) => `    - from: caller
-      to: fn${i}
-      note: edge`,
-).join('\n')}
-  behaviorContract:
-    - Everything changes.
-  verificationPlan:
-    - command: npm test
-      passWhen: tests pass
-  riskBlastRadius: Everything.
-  openQuestions: []
-`;
-
     const validDecomposition = JSON.stringify({
       epic: {
         title: 'Split the mega slice',
@@ -663,6 +663,54 @@ ${Array.from(
       expect(result.ok).toBe(false);
       expect(result.escalate).toMatch(/bounded-build budget/);
       expect(result.decomposed).toBeUndefined();
+      expect(stub.calls.map((call) => call.task)).toContain('decompose');
+      expect(createComment).toHaveBeenCalledTimes(1);
+      expect(events).toContain('size-gate-escalated');
+      expect(events).toContain('decompose_comment_posted');
+    });
+
+    it('parks an over-budget design artifact the same way in explicit file mode', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-901.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{ output: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n` }],
+          decompose: [{ output: validDecomposition }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const createComment = vi.fn().mockResolvedValue({});
+      const events: string[] = [];
+
+      const result = await planPhase({
+        issue: 901,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit: {
+          rest: {
+            issues: {
+              get: async () => ({
+                data: {
+                  title: 'Mega slice',
+                  body: '## Problem statement\nToo big.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test',
+                },
+              }),
+              createComment,
+            },
+          },
+        } as any,
+        log: (type) => events.push(type),
+        sizeGateMode: 'file',
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.escalate).toMatch(/bounded-build budget/);
+      expect(result.decomposed).toBeUndefined();
+      expect(result.sliced).toBeUndefined();
       expect(stub.calls.map((call) => call.task)).toContain('decompose');
       expect(createComment).toHaveBeenCalledTimes(1);
       expect(events).toContain('size-gate-escalated');
@@ -1471,6 +1519,112 @@ npm run test`;
       expect(result.escalate).toMatch(/unreadable/);
       expect(stub.calls).toEqual([]);
       expect(createComment).not.toHaveBeenCalled();
+    });
+
+    describe('post-plan build-scope gate in slice mode (ADR-0147)', () => {
+      const smallBody =
+        '## Problem statement\nToo big.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test';
+
+      async function runPostPlan(opts: {
+        decompose?: string[];
+        comments?: { id: number; user: { id: number }; body: string }[];
+        listCommentsError?: Error;
+      }) {
+        const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+        tempDirs.add(worktree);
+        const stub = new StubModelExecutor({
+          scripts: {
+            decompose: (opts.decompose ?? []).map((output) => ({ output })),
+            plan: [{ output: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n` }],
+          },
+        });
+        const router = new ModelRouter(models, routes, false, stub);
+        const createComment = vi.fn().mockResolvedValue({ data: { id: 9999 } });
+        const updateComment = vi.fn().mockResolvedValue({ data: {} });
+        const create = vi.fn().mockResolvedValue({ data: { number: 701, id: 6701 } });
+        const events: string[] = [];
+        const result = await planPhase({
+          issue: 607,
+          repo: 'on-par/software-factory',
+          worktree,
+          specPath: join(worktree, 'issue-607.md'),
+          router,
+          constitution: null,
+          octokit: {
+            rest: {
+              users: { getAuthenticated: async () => ({ data: { id: BOT } }) },
+              issues: {
+                get: async () => ({ data: { title: 'Mega slice', body: smallBody } }),
+                listComments: opts.listCommentsError
+                  ? async () => {
+                      throw opts.listCommentsError;
+                    }
+                  : async () => ({ data: opts.comments ?? [] }),
+                createComment,
+                updateComment,
+                create,
+                update: vi.fn(),
+                addLabels: vi.fn().mockResolvedValue({}),
+              },
+            },
+            request: vi.fn().mockResolvedValue({ data: [] }),
+          } as any,
+          log: (type) => events.push(type),
+          sizeGateMode: 'slice',
+        });
+        return { result, stub, events, createComment, updateComment, create };
+      }
+
+      it('AC1: slices a whole issue, records one slice plan comment and ends before BUILD', async () => {
+        const { result, events, createComment, create } = await runPostPlan({ decompose: [decompositionOf(2)] });
+
+        expect(result.ok).toBe(false);
+        expect(result.sliced).toEqual({ sliceCount: 2 });
+        expect(createComment).toHaveBeenCalledTimes(1);
+        expect(createComment.mock.calls[0][0].body).toContain('<!-- factory:slice-plan v1 -->');
+        expect(create).not.toHaveBeenCalled();
+        expect(events).toContain('size-gate-sliced');
+        expect(events).not.toContain('size-gate-escalated');
+        expect(result.escalate).toMatch(/sliced into 2 slice/);
+      });
+
+      it('AC2: parks a slice that is still over budget and never slices again', async () => {
+        const { result, stub, events, createComment, updateComment } = await runPostPlan({
+          comments: [{ id: 1, user: { id: BOT }, body: planComment() }],
+        });
+
+        expect(result.ok).toBe(false);
+        expect(result.sliced).toBeUndefined();
+        expect(result.escalate).toMatch(
+          /slice 1\/2 of #607 exceeds the bounded-build budget .* a slice is never sliced again/,
+        );
+        expect(stub.calls.map((call) => call.task)).not.toContain('decompose');
+        expect(createComment).not.toHaveBeenCalled();
+        expect(updateComment).not.toHaveBeenCalled();
+        expect(events).toContain('size-gate-escalated');
+      });
+
+      it('falls back to the file-mode park when the decomposition has more than 5 slices', async () => {
+        const { result, createComment, create } = await runPostPlan({ decompose: [decompositionOf(6)] });
+
+        expect(result.ok).toBe(false);
+        expect(result.sliced).toBeUndefined();
+        expect(result.escalate).toMatch(
+          /^slice plan has 6 slices \(more than 5\) — plan scope exceeds the bounded-build budget/,
+        );
+        expect(create).not.toHaveBeenCalled();
+        for (const call of createComment.mock.calls) {
+          expect(call[0].body).not.toContain('<!-- factory:slice-plan v1 -->');
+        }
+      });
+
+      it('parks with the gate reason when the slice plan lookup fails', async () => {
+        const { result } = await runPostPlan({ listCommentsError: new Error('boom') });
+
+        expect(result.ok).toBe(false);
+        expect(result.escalate).toMatch(/slice plan lookup failed/);
+        expect(result.sliced).toBeUndefined();
+      });
     });
   });
 

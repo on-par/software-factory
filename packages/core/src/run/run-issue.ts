@@ -485,6 +485,11 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
         const childList = decomposedChildren.map((n) => `#${n}`).join(', ');
         return { state: 'escalated', reason: `issue #${request.issue} decomposed into ${childList}`, route };
       }
+      if (plan.sliced) {
+        return terminalEscalated(
+          `issue #${request.issue} sliced into ${plan.sliced.sliceCount} slice(s): ${plan.escalate ?? 'slice plan recorded'}`,
+        );
+      }
       return terminalEscalated(`plan escalated: ${plan.escalate ?? 'unknown'}`);
     }
     const planBudget = await assertBudget('PLAN');
