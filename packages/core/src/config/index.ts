@@ -77,6 +77,9 @@ const RoutesConfigSchema = z.object({
       tier: z.string(),
       description: z.string(),
       requires: z.string().optional(),
+      model: z.string().optional(),
+      allowedTools: z.array(z.string()).optional(),
+      output: z.literal('json').optional(),
     }),
   ),
 });
