@@ -38,5 +38,7 @@ export default defineConfig({
     // #796/#797: repo-wide as of #797 — production and tests alike. A chain is never to be
     // traded for a suppression; widen a double through one named, commented helper instead.
     'anti-slop/no-chained-type-assertions': 'error',
+    // #798/#1975: repo-wide. Replace dependencies through a real injected seam, never vi.mock/jest.mock.
+    'anti-slop/no-module-mocking': 'error',
   },
 });
