@@ -181,6 +181,44 @@ describe('shipPhase self-healing', () => {
     expect(logs).toContainEqual(['recovered', 'opened PR #123 for committed work on ship-it/23-self-heal']);
   });
 
+  it.each([
+    [{ index: 2, count: 3 }, true],
+    [{ index: 3, count: 3 }, false],
+  ])('titles and words the PR for slice %j (ADR-0147)', async (slice, partOf) => {
+    const { octokit, calls } = createOctokit();
+    const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
+      return { stdout: '' };
+    };
+
+    await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-s2-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: () => {},
+      run,
+      slice,
+    });
+
+    const create = calls.find((c) => c[0] === 'pulls.create')![1] as { title: string; body: string };
+    expect(create.title).toBe(`Self-heal committed work — slice ${slice.index}/${slice.count} (#23)`);
+    expect(create.body).toContain(`Implements slice ${slice.index}/${slice.count} of #23.`);
+    if (partOf) {
+      expect(create.body).toContain('Part of #23');
+      expect(create.body).not.toMatch(/Closes/);
+    } else {
+      expect(create.body).toContain('Closes #23');
+    }
+  });
+
   it('does not mark a pull request ready when it is not a draft', async () => {
     const { octokit, calls } = createOctokit(false);
     const logs: Array<[string, string]> = [];

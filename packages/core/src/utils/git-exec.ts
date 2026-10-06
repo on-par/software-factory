@@ -1,9 +1,9 @@
 // src/utils/git-exec.ts — one place where every git subprocess gets a deadline.
 
-import { exec as execCb } from 'node:child_process';
+import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 
-const exec = promisify(execCb);
+const execFile = promisify(execFileCb);
 
 /**
  * Hard ceiling for a single git subprocess. Long enough that a slow-but-live
@@ -30,7 +30,10 @@ function isTimeoutRejection(err: unknown): boolean {
 }
 
 /**
- * Runs one git command with an explicit timeout, killing the child on expiry.
+ * Runs `git <args>` with an explicit timeout, killing the child on expiry.
+ *
+ * The arguments go to git as an argv array, never through a shell, so a branch
+ * name or path can not inject shell syntax and callers need no quoting.
  *
  * Without a timeout a git subprocess that wedges — on its own worktree metadata
  * lock, on an unresponsive filesystem, on a credential prompt with no tty —
@@ -39,12 +42,13 @@ function isTimeoutRejection(err: unknown): boolean {
  * "Command failed" rejection, indistinguishable from git exiting non-zero on
  * its own, so that case is rewritten here into a named timeout error.
  */
-export async function execGit(cmd: string, opts: GitExecOptions = {}): Promise<GitExecResult> {
+export async function execGit(args: readonly string[], opts: GitExecOptions = {}): Promise<GitExecResult> {
   const timeoutMs = opts.timeoutMs ?? GIT_COMMAND_TIMEOUT_MS;
   try {
-    return await exec(cmd, { cwd: opts.cwd, timeout: timeoutMs });
+    return await execFile('git', args, { cwd: opts.cwd, timeout: timeoutMs });
   } catch (err) {
     if (!isTimeoutRejection(err)) throw err;
+    const cmd = ['git', ...args].join(' ');
     const where = opts.cwd === undefined ? '' : ` (cwd ${opts.cwd})`;
     throw Object.assign(new Error(`git command timed out after ${timeoutMs}ms and was killed${where}: ${cmd}`), {
       name: 'GitTimeoutError',

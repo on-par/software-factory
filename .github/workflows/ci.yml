@@ -124,5 +124,11 @@ jobs:
         run: bash scripts/filter-green-prs.test.sh
       - name: repo-merge-settings unit test
         run: bash scripts/repo-merge-settings.test.sh
+      - name: repo-about unit test
+        run: bash scripts/repo-about.test.sh
+      - name: repo-issue-optics unit test
+        run: bash scripts/repo-issue-optics.test.sh
       - name: ruleset-copilot-review unit test
         run: bash scripts/ruleset-copilot-review.test.sh
+      - name: publish-workspaces guard
+        run: bash scripts/publish-workspaces.test.sh

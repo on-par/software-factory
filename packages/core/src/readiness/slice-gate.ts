@@ -1,6 +1,6 @@
 // packages/core/src/readiness/slice-gate.ts — the PLAN pre-flight gate for ADR-0147 slice mode.
 //
-// In slice mode an oversized issue stays whole. This module finds the trusted slice plan comment
+// In slice mode an oversized issue stays whole and no issue is ever filed (ADR-0156). This module finds the trusted slice plan comment
 // (or decomposes once, without filing or commenting, and records a new plan) and tells PLAN which
 // slice to plan. It never throws: every GitHub I/O failure or unusable plan comes back as a park.
 
@@ -9,8 +9,14 @@ import type { Octokit } from '@octokit/rest';
 import type { EventKind } from '../events/kinds.js';
 import type { ModelRouter } from '../router/index.js';
 import { decomposeOversizedIssue } from './decompose.js';
-import type { DecomposeDriverDeps, DecompositionOutput } from './decompose.js';
-import { currentSlice, slicePlanFromDecomposition } from './slice-plan.js';
+import type { DecomposeDriverDeps } from './decompose.js';
+import {
+  SLICE_CAP_CEILING,
+  currentSlice,
+  overCapReason,
+  sliceCapExceeded,
+  slicePlanFromDecomposition,
+} from './slice-plan.js';
 import type { Slice, SlicePlan } from './slice-plan.js';
 import { findSlicePlanComment, upsertSlicePlanComment } from './slice-plan-github.js';
 
@@ -18,7 +24,7 @@ export type SliceGateOutcome =
   | { kind: 'none' }
   | { kind: 'slice'; plan: SlicePlan; slice: Slice; created: boolean }
   | { kind: 'park'; reason: string }
-  | { kind: 'fallback-file'; decomposition: DecompositionOutput; storyCount: number };
+  | { kind: 'over-cap'; plan: SlicePlan; reason: string };
 
 const errorDetail = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -29,6 +35,7 @@ export async function resolveSliceGate(deps: {
   body: string;
   oversized: boolean;
   sizeReason?: string;
+  maxSlices: number;
   worktree: string;
   router: ModelRouter;
   octokit: Octokit;
@@ -53,6 +60,13 @@ export async function resolveSliceGate(deps: {
     };
   }
   if (lookup.status === 'found') {
+    if (sliceCapExceeded(lookup.plan, deps.maxSlices)) {
+      return {
+        kind: 'over-cap',
+        plan: lookup.plan,
+        reason: overCapReason(lookup.plan.slices.length, deps.maxSlices),
+      };
+    }
     const slice = currentSlice(lookup.plan);
     if (slice === undefined) {
       return { kind: 'park', reason: `every slice in the slice plan for #${issue} is merged — parked` };
@@ -90,7 +104,10 @@ export async function resolveSliceGate(deps: {
   const built = slicePlanFromDecomposition(issue, decomposition);
   if (!built.ok) {
     if (built.reason === 'over-cap') {
-      return { kind: 'fallback-file', decomposition, storyCount: built.storyCount };
+      return {
+        kind: 'park',
+        reason: `slice decomposition produced ${built.storyCount} slices, more than the ceiling of ${SLICE_CAP_CEILING} — parked; split the issue`,
+      };
     }
     return {
       kind: 'park',
@@ -103,6 +120,13 @@ export async function resolveSliceGate(deps: {
     upserted = await upsertSlicePlanComment({ octokit, repo, issue, plan: built.plan });
   } catch (error) {
     return { kind: 'park', reason: `posting the slice plan failed: ${errorDetail(error)}` };
+  }
+  if (built.plan.slices.length > deps.maxSlices) {
+    return {
+      kind: 'over-cap',
+      plan: built.plan,
+      reason: overCapReason(built.plan.slices.length, deps.maxSlices),
+    };
   }
   log(
     'size-gate-sliced',

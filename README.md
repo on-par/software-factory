@@ -6,81 +6,57 @@ A multi-agent software factory that ships verified work autonomously. Built in T
 
 Honest snapshot of what works today vs. what is experimental. Statuses reflect the actual code, not the roadmap.
 
-| Feature                                               | Status          | Notes                                                                                                                                                                           |
-| ----------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `factory ship` pipeline (PLAN → BUILD → CHECK → SHIP) | ✅ Working      | Covered by an end-to-end pipeline integration test                                                                                                                              |
-| `factory triage` (queue from open issues)             | ✅ Working      |                                                                                                                                                                                 |
-| `factory run` (parallel lanes)                        | ✅ Working      | Merges are serialized per lane via a merge-wait step                                                                                                                            |
-| `factory land` / auto-merge                           | ✅ Working      | Auto-merge is **off by default** (`merge.auto: false`); set `FACTORY_MERGE=1` to enable autonomous squash-merge; add `FACTORY_MERGE_ADMIN=1` only when admin bypass is intended |
-| `factory supervise` (multi-window unattended runs)    | ✅ Working      | Waits for usage headroom, runs the queue, repeats until drained                                                                                                                 |
-| Usage-cap watchdog (`factory usage`, stop-at-cap)     | ✅ Working      | Trailing-5h cost-weighted usage vs. cap (Claude models only); lanes stop at the cap                                                                                             |
-| Codex worker builds (`codex exec`)                    | ✅ Working      | Used for the `build_codex` route                                                                                                                                                |
-| Claude models via the Claude CLI (`claude -p`)        | ✅ Working      | TRIAGE always shells out to `claude -p`; PLAN routes through the boss tier (local models first, Claude as failover)                                                             |
-| Harness dispatch (per-model provider adapters)        | ✅ Working      | Each model declares a `harness` in `defaults.ts`: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, `opencode`                                                        |
-| GPT worker models via the Codex CLI                   | ✅ Working      | `gpt-5.6-terra` (plan=high / build=medium) → `gpt-5.6-sol` → `gpt-5.1-codex`, dispatched through the `codex-cli` harness                                                        |
-| Local Ollama + OpenCode models                        | ⚠️ Experimental | Harnesses are contract-tested, but real-run behavior is unverified — expect failover to a cloud model                                                                           |
-| DeepSeek / gpt-4.1-mini via `claude --model ...`      | ⚠️ Experimental | The Claude CLI only serves Anthropic models; this wiring is unproven                                                                                                            |
-| Prompt evals (`npm run eval`)                         | ✅ Working      | Deterministic stub subset runs in CI on every PR; weekly real run checks prompt/constitution/skill regressions under pinned model IDs                                           |
-| Cost tracking (`factory cost`)                        | ✅ Working      | Per-task tokens and cost logged to `.factory/costs.jsonl`                                                                                                                       |
-| Constitutions + checker rework loop                   | ✅ Working      | Up to 3 rework rounds with dispute resolution                                                                                                                                   |
-| Server (`packages/server`)                            | ✅ Working      | Loopback `GET /events` relays the lane lifecycle bus as SSE, `Last-Event-ID` resume via a bounded replay ring — no auth, no control endpoints yet                               |
+| Feature                                               | Status     | Notes                                                                                                                                                                           |
+| ----------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `factory ship` pipeline (PLAN → BUILD → CHECK → SHIP) | ✅ Working | Covered by an end-to-end pipeline integration test                                                                                                                              |
+| `factory triage` (queue from open issues)             | ✅ Working |                                                                                                                                                                                 |
+| `factory run` (parallel lanes)                        | ✅ Working | Merges are serialized per lane via a merge-wait step                                                                                                                            |
+| `factory land` / auto-merge                           | ✅ Working | Auto-merge is **off by default** (`merge.auto: false`); set `FACTORY_MERGE=1` to enable autonomous squash-merge; add `FACTORY_MERGE_ADMIN=1` only when admin bypass is intended |
+| `factory supervise` (multi-window unattended runs)    | ✅ Working | Waits for usage headroom, runs the queue, repeats until drained                                                                                                                 |
+| Cost tracking (`factory cost`)                        | ✅ Working | Per-task tokens and cost logged to `.factory/costs.jsonl`                                                                                                                       |
+
+Full matrix — including model harnesses, prompt evals, the server, and experimental local/Ollama models — is in [docs/status.md](docs/status.md).
 
 ## Monorepo Structure
 
-```
-software-factory/
-├── packages/
-│   ├── core/         @on-par/factory-core     — Engine: router, constitutions, checkers, phases
-│   ├── cli/          @on-par/factory-cli      — CLI app (factory init, ship, run, triage, ...)
-│   ├── config/       @on-par/factory-config   — Shared JSON configs + product constitutions
-│   ├── contracts/    @on-par/contracts        — Shared typed seam: Issue/Epic/Story/DesignArtifact schemas
-│   ├── adr-kit/      @on-par/adr-kit          — Pure ADR kernel: parse/serialize/template/numbering, zero deps
-│   ├── repo-context/ @on-par/repo-context     — Read-only repo reader port: GitHub contents-API + in-memory, zero deps
-│   └── server/       @on-par/factory-server   — Local HTTP server: GET /events relays the lane lifecycle bus as SSE
-├── tsconfig.base.json
-└── package.json      (npm workspaces root)
-```
-
-### Package Dependencies
+An npm-workspaces monorepo. The Wave-1 publish packages:
 
 ```
-config      ←  core  ←  cli
-contracts   ←  core  ←  server
+packages/
+├── cli/           @on-par/factory-cli      — the `factory` command
+├── core/          @on-par/factory-core     — engine: router, phases, checkers
+├── config/        @on-par/factory-config   — typed defaults + constitutions (zero deps)
+├── contracts/     @on-par/contracts        — shared zod schemas (Issue/Epic/Story/Design)
+├── tui/           @on-par/factory-tui      — read-only Ink TUI for a live run
+├── adr-kit/       @on-par/adr-kit          — pure ADR kernel (zero deps)
+└── repo-context/  @on-par/repo-context     — read-only repo reader port (zero deps)
 ```
 
-- **@on-par/factory-config** — Zero dependencies. Ships `defaults.ts` (typed model registry, route table, and factory defaults) and constitution markdown files.
-- **@on-par/contracts** — Zero dependencies besides zod. Zod schemas + inferred types for the engineering-ready Issue/Epic/Story, Gherkin AcceptanceCriterion, and DesignArtifact shapes PLAN emits and BUILD consumes.
-- **@on-par/factory-core** — The engine. Model registry, router with failover, constitution loader, checker framework, and the four pipeline phases (PLAN → BUILD → CHECK → SHIP). Imports config and contracts.
-- **@on-par/factory-cli** — The `factory` CLI. Imports core.
-- **@on-par/factory-server** — Local HTTP server. `GET /events` relays the lane lifecycle bus as SSE, with `Last-Event-ID` resume via a bounded replay ring. Depends only on `@on-par/contracts` — no auth, loopback-only.
-- **@on-par/adr-kit** — Zero runtime dependencies. Pure, no-I/O ADR kernel: parses ADR markdown into a typed record, serializes it back byte-stably, models the repo's ADR convention (Nygard fallback, or inferred/reused when the repo already has ADRs), and provides next-number and index-table helpers. Not yet imported anywhere — the ADR reader, ADR writer, and readiness-conformance checker consume it in later stories of epic #464.
-- **@on-par/repo-context** — Zero runtime dependencies. Defines the `RepoContextReader` port (`readFile`, `readDir`, `exists`) that every repo-reading consumer shares, plus a GitHub contents-API implementation (for the proposer, which holds only a read-only token) and an in-memory implementation (for tests, and proof the port is backend-independent). Degrades to an empty result instead of throwing on a missing path, auth failure, or rate limit. Not yet imported anywhere — later stories of epic #464 wire it into the proposer and writer.
+Private workspaces (server, dashboard, product, scbench-adapter) also live here but are not published. For the dependency graph and per-package detail, see [docs/architecture.md](docs/architecture.md). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md) and the rules in [AGENTS.md](AGENTS.md).
 
 ## Quick Start (5 minutes)
 
 **Prerequisites**
 
-- Node.js ≥ 20
+- Node.js ≥ 24 (the `engines.node` field in the root and `packages/cli` `package.json`)
 - `git` and the GitHub CLI `gh`, authenticated (`gh auth login`) — the factory uses `gh repo view` to detect your repo and polls CI checks via the GitHub API when landing
 - Claude Code CLI (`claude`) on PATH — the TRIAGE phase shells out to `claude -p`, and Claude models in every tier dispatch through it
 - Optional: OpenAI Codex CLI (`codex`) for cheap worker builds, and `ollama` for free local worker models
 
-**Step 1 — Install**
+**Step 1 — Install from source**
 
-```bash
-npm install -g @on-par/factory-cli
-factory --version
-```
-
-Development alternative (clone and build from source):
+The `@on-par/*` packages are not on npm yet, so install the CLI from a clone:
 
 ```bash
 git clone https://github.com/on-par/software-factory
 cd software-factory
 npm install
 npm run build
-npm link --workspace @on-par/factory-cli
+npm link --workspace @on-par/factory-cli   # puts `factory` on your PATH
+factory --version
 ```
+
+> **Global npm install is not available yet.** `npm install -g @on-par/factory-cli` will work once the Wave-1 publish lands (epic #1566, blocked on #1560). Until then it returns a 404, so use the clone install above.
 
 **Step 2 — Point it at your repo**
 
@@ -274,18 +250,15 @@ runs are an explicit human opt-in outside the factory, or
 
 **What's OSS (this repo):** `packages/cli`, `packages/core`, and `packages/config` are the open-source core — the full local pipeline (router, constitutions, checkers, phases) runs from this repo alone, MIT-licensed.
 
-**What isn't:** the hosted control plane (web dashboard, multi-tenant orchestration) lives in a separate repo and is not part of this codebase. `packages/server` here is a real, narrow local server — its only route is `GET /events`, an SSE relay of the lane lifecycle bus, unauthenticated and loopback-only.
+**What isn't published:** `packages/dashboard` (web dashboard, Vite + React walking skeleton), `packages/product` (the proposer: brain-dump to engineering-ready issues), `packages/server` and `packages/scbench-adapter` (SlopCodeBench adapter) live in this monorepo as private workspaces and are not published to npm. A hosted multi-tenant control plane is not part of this codebase. `packages/server` is a real, narrow local server — its only route is `GET /events`, an SSE relay of the lane lifecycle bus, unauthenticated and loopback-only.
 
-**Safety note:** to run unattended, the factory invokes agent CLIs with permission checks disabled — `claude -p ... --dangerously-skip-permissions` and `codex exec --sandbox workspace-write --ask-for-approval never`. Every build runs inside an isolated git worktree (created as a sibling of your repo under the `factory/` branch prefix; override per command with `--branch-prefix`), never in your main checkout. The factory defaults to review mode: pipelines end at a green, ready-for-review PR and merging stays with you unless you explicitly opt in with `FACTORY_MERGE=1`. Admin bypass is separate: set `FACTORY_MERGE_ADMIN=1` only when the active GitHub token should use administrator privileges to merge through unmet requirements. Only run the factory against repos where you accept agent-authored code executing in that worktree (builds run tests, install dependencies, etc.).
+**Safety note:** to run unattended, the factory invokes agent CLIs with permission checks disabled — `claude -p ... --dangerously-skip-permissions` and `codex exec --sandbox workspace-write --ask-for-approval never`. Every build runs inside an isolated git worktree (created as a sibling of your repo under the `factory/` branch prefix; override per command with `--branch-prefix`), never in your main checkout. The factory defaults to review mode: pipelines end at a green, ready-for-review PR and merging stays with you unless you explicitly opt in with `FACTORY_MERGE=1`. Admin bypass is separate: set `FACTORY_MERGE_ADMIN=1` only when the active GitHub token should use administrator privileges to merge through unmet requirements. Only run the factory against repos where you accept agent-authored code executing in that worktree (builds run tests, install dependencies, etc.). To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
-## SaaS Roadmap
+## Contributing
 
-1. **Phase 1 (current)** — CLI tool (`@on-par/factory-cli`), run locally against any git repo
-2. **Phase 2** — Server mode (`@on-par/factory-server`) with GitHub webhook triggers
-3. **Phase 3** — Sandboxed execution via Docker/Daytona — users point at a repo, factory runs in isolated containers
-4. **Phase 4** — Multi-tenant SaaS with web dashboard, per-user model config, auto-merge policies
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the verify gate, how to try one issue against a throwaway repo, and the factory-task issue template.
 
-The monorepo structure means the server package can import `@on-par/factory-core` for the router, checkers, phases, and constitution loader without duplicating code. New apps (dashboard, sandbox runner, webhook handler) each get their own workspace package.
+Security issues: see [SECURITY.md](SECURITY.md) — please report privately, not as a public issue.
 
 ## License
 

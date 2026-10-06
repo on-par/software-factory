@@ -1,12 +1,14 @@
 import { execFile as execFileCb } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { parseSlicePlanComment, renderSlicePlanComment, type SlicePlan } from '../readiness/slice-plan.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.js';
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
@@ -123,6 +125,10 @@ function basePolicy(overrides: Partial<RunPolicy> = {}): RunPolicy {
   };
 }
 
+// Breaker files live in a private, unpredictable temp dir, never at a fixed /tmp path.
+const breakerDir = mkdtempSync(join(tmpdir(), 'run-issue-'));
+afterAll(() => rmSync(breakerDir, { recursive: true, force: true }));
+
 let breakerFileCounter = 0;
 
 function basePorts(overrides: Partial<RunPorts> = {}): RunPorts {
@@ -132,7 +138,7 @@ function basePorts(overrides: Partial<RunPorts> = {}): RunPorts {
     octokit: {} as Octokit,
     workspace: { path: '/tmp/wt', dispose: async () => {} } as Workspace,
     events: () => vi.fn(),
-    breaker: new ProviderBreaker(`/tmp/run-issue-test-breaker-${breakerFileCounter}.json`),
+    breaker: new ProviderBreaker(join(breakerDir, `breaker-${breakerFileCounter}.json`)),
     resolveConstitution: () => null,
     planPhase,
     buildPhase,
@@ -256,6 +262,105 @@ describe('runIssue — size gate mode (#2048)', () => {
     await runIssue(baseRequest({ sizeGateMode: mode }), basePolicy(), basePorts());
     expect(vi.mocked(planPhase).mock.calls[0][0].enforceSizeGate).toBe(expected);
     expect(vi.mocked(planPhase).mock.calls[0][0].sizeGateMode).toBe(mode);
+  });
+
+  it('passes maxSlices through to planPhase (ADR-0156)', async () => {
+    await runIssue(baseRequest({ sizeGateMode: 'slice', maxSlices: 7 }), basePolicy(), basePorts());
+    expect(vi.mocked(planPhase).mock.calls[0][0].maxSlices).toBe(7);
+  });
+});
+
+describe('runIssue — slice shipping (ADR-0147)', () => {
+  const story = (n: number) => ({
+    schemaVersion: 1 as const,
+    kind: 'story' as const,
+    filesLikelyTouched: [],
+    labels: [],
+    title: `Story ${n}`,
+    role: 'operator',
+    want: `thing ${n} works`,
+    soThat: 'value',
+    problemStatement: `Problem ${n}`,
+    inScope: [`Scope ${n}`],
+    outOfScope: ['Persistent storage'],
+    acceptanceCriteria: [{ name: `ac ${n}`, given: [], when: ['run'], then: ['works'] }],
+    verification: [{ command: 'npm test', passWhen: 'passes' }],
+    tracesTo: ['INT-PROBLEM-01'],
+  });
+  const slicePlan: SlicePlan = {
+    issue: 1,
+    slices: [
+      { index: 1, title: 'One', story: story(1) as never, state: 'merged', prNumber: 10 },
+      { index: 2, title: 'Two', story: story(2) as never, state: 'pending' },
+      { index: 3, title: 'Three', story: story(3) as never, state: 'pending' },
+    ],
+  };
+
+  function sliceSetup(updateComment: ReturnType<typeof vi.fn>, events: ReturnType<typeof vi.fn> = vi.fn()) {
+    vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, slice: { plan: slicePlan, index: 2 } });
+    const octokit: Octokit = {
+      rest: {
+        users: { getAuthenticated: async () => ({ data: { id: 7 } }) },
+        issues: {
+          listComments: async () => ({ data: [{ id: 99, user: { id: 7 }, body: renderSlicePlanComment(slicePlan) }] }),
+          updateComment,
+        },
+      },
+    } as never;
+    return basePorts({ octokit, events: () => events as never });
+  }
+
+  const recorded = (updateComment: ReturnType<typeof vi.fn>) => {
+    const parsed = parseSlicePlanComment(updateComment.mock.calls[0][0].body);
+    if (!parsed?.ok) throw new Error(JSON.stringify(parsed));
+    return parsed.plan.slices[1];
+  };
+
+  it('threads the slice to SHIP, records pr-open with the PR number and reports it on the outcome', async () => {
+    const updateComment = vi.fn().mockResolvedValue({ data: {} });
+    vi.mocked(shipPhase).mockResolvedValue({ ok: true, prNumber: 55 });
+    const outcome = await runIssue(baseRequest({ sizeGateMode: 'slice' }), basePolicy(), sliceSetup(updateComment));
+
+    expect(vi.mocked(shipPhase).mock.calls[0][0].slice).toEqual({ index: 2, count: 3 });
+    expect(recorded(updateComment)).toMatchObject({ index: 2, state: 'pr-open', prNumber: 55 });
+    expect(outcome).toMatchObject({ state: 'ready', prNumber: 55, slice: { index: 2, count: 3 } });
+  });
+
+  it('records the slice as merged when SHIP found it already delivered', async () => {
+    const updateComment = vi.fn().mockResolvedValue({ data: {} });
+    vi.mocked(shipPhase).mockResolvedValue({ ok: true, prNumber: 55, alreadyDelivered: true });
+    await runIssue(baseRequest({ sizeGateMode: 'slice' }), basePolicy(), sliceSetup(updateComment));
+
+    expect(recorded(updateComment)).toMatchObject({ index: 2, state: 'merged', prNumber: 55 });
+  });
+
+  it('parks with fail naming the PR when recording it in the slice plan comment fails', async () => {
+    const updateComment = vi.fn().mockRejectedValue(new Error('boom'));
+    vi.mocked(shipPhase).mockResolvedValue({ ok: true, prNumber: 55 });
+    const events = vi.fn();
+    const outcome = await runIssue(
+      baseRequest({ sizeGateMode: 'slice' }),
+      basePolicy(),
+      sliceSetup(updateComment, events),
+    );
+
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
+    expect(events).toHaveBeenCalledWith('fail', expect.stringContaining('PR #55'), undefined);
+  });
+
+  it('skips the comment write when SHIP returns no PR number', async () => {
+    const updateComment = vi.fn().mockResolvedValue({ data: {} });
+    vi.mocked(shipPhase).mockResolvedValue({ ok: true, alreadyDelivered: true });
+    const outcome = await runIssue(baseRequest({ sizeGateMode: 'slice' }), basePolicy(), sliceSetup(updateComment));
+
+    expect(updateComment).not.toHaveBeenCalled();
+    expect(outcome.state).toBe('ready');
+  });
+
+  it('leaves a non-slice run without slice on SHIP or the outcome', async () => {
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts());
+    expect(vi.mocked(shipPhase).mock.calls[0][0].slice).toBeUndefined();
+    expect(outcome).not.toHaveProperty('slice');
   });
 });
 
@@ -827,7 +932,7 @@ describe('runIssue — provider breaker and failover', () => {
       await opts.onProviderFailure?.({ provider: 'anthropic', reason: 'usage_cap' });
       return PLAN_OK;
     });
-    const breaker = new ProviderBreaker(`/tmp/run-issue-test-breaker-provider-fail.json`);
+    const breaker = new ProviderBreaker(join(breakerDir, 'breaker-provider-fail.json'));
     const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ events: () => log, breaker }));
     expect(outcome.state).toBe('ready');
     expect(events.some(([t, m]) => t === 'provider_breaker_open' && m.includes('anthropic'))).toBe(true);
@@ -844,7 +949,7 @@ describe('runIssue — provider breaker and failover', () => {
       });
       return PLAN_OK;
     });
-    const breaker = new ProviderBreaker(`/tmp/run-issue-test-breaker-reset-hint.json`);
+    const breaker = new ProviderBreaker(join(breakerDir, 'breaker-reset-hint.json'));
     await runIssue(
       baseRequest({ failover: { enabled: false, cooldownMs: 999, fallbackModel: 'x' } }),
       basePolicy(),
@@ -857,7 +962,7 @@ describe('runIssue — provider breaker and failover', () => {
 
   it('gates BUILD on an open codex breaker and reroutes a claude plan to its codex fallback', async () => {
     vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, route: 'claude' });
-    const breaker = new ProviderBreaker(`/tmp/run-issue-test-breaker-gate.json`);
+    const breaker = new ProviderBreaker(join(breakerDir, 'breaker-gate.json'));
     await breaker.open('anthropic', 'usage_cap', 60_000);
     const router = fakeRouter({
       'claude-build': { provider: 'anthropic' },

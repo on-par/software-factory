@@ -4,7 +4,7 @@
 
 import { readFile } from 'node:fs/promises';
 
-import { DesignArtifactSchema } from '@on-par/contracts';
+import { DesignArtifactSchema, findCoercedDesignItems } from '@on-par/contracts';
 
 import { specPaths } from '../spec/index.js';
 import type { DesignArtifact } from '../types/index.js';
@@ -12,18 +12,24 @@ import type { BehaviorDeltaRow } from '@on-par/contracts';
 
 export { DesignArtifactSchema };
 
-export function parseDesignArtifact(frontmatter: unknown): { artifact: DesignArtifact | null; errors: string[] } {
+export function parseDesignArtifact(frontmatter: unknown): {
+  artifact: DesignArtifact | null;
+  errors: string[];
+  coerced: string[];
+} {
   if (typeof frontmatter !== 'object' || frontmatter === null || !('design' in frontmatter)) {
-    return { artifact: null, errors: ['no design block in spec frontmatter'] };
+    return { artifact: null, errors: ['no design block in spec frontmatter'], coerced: [] };
   }
 
-  const result = DesignArtifactSchema.safeParse((frontmatter as { design: unknown }).design);
+  const design = (frontmatter as { design: unknown }).design;
+  const coerced = findCoercedDesignItems(design);
+  const result = DesignArtifactSchema.safeParse(design);
   if (!result.success) {
     const errors = result.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`);
-    return { artifact: null, errors };
+    return { artifact: null, errors, coerced };
   }
 
-  return { artifact: result.data, errors: [] };
+  return { artifact: result.data, errors: [], coerced };
 }
 
 function bulletList(items: string[]): string {

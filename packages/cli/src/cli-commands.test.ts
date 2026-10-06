@@ -82,7 +82,7 @@ const h = vi.hoisted(() => {
   };
 });
 
-import { microVmName } from '@on-par/factory-core/internal';
+import { microVmName, renderSlicePlanComment } from '@on-par/factory-core/internal';
 
 import { FACTORYD_LABEL, factorydFiles, type DaemonCtlDeps } from './cli/daemon.js';
 import { HELP_GROUPS, OTHER_GROUP } from './cli/help-groups.js';
@@ -156,7 +156,9 @@ function defaultOctokit() {
         get: vi.fn(async () => ({ data: { title: 'Fix the bug' } })),
         listForRepo: vi.fn(async () => ({ data: [] })),
         listLabelsOnIssue: vi.fn(async () => ({ data: [] })),
+        listComments: vi.fn(async () => ({ data: [] })),
       },
+      users: { getAuthenticated: vi.fn(async () => ({ data: { id: 7 } })) },
       pulls: {
         list: vi.fn(async ({ state }: any) =>
           state === 'open'
@@ -3271,6 +3273,43 @@ bash scripts/verify.sh
       expect(readFileSync(logFile, 'utf-8')).toContain(`factoryd: listening on 127.0.0.1:${boundPort}`);
     });
 
+    it('daemon run --help lists --auto-update with its default of off', async () => {
+      const originalWrite = process.stdout.write.bind(process.stdout);
+      const written: string[] = [];
+      process.stdout.write = ((chunk: unknown) => {
+        written.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write;
+
+      let res: Awaited<ReturnType<typeof runMain>>;
+      try {
+        res = await runMain('daemon', 'run', '--help');
+      } finally {
+        process.stdout.write = originalWrite;
+      }
+
+      expect(res.exited).toBe(true);
+      const text = written.join('').replace(/\s+/g, ' ');
+      expect(text).toContain('--auto-update');
+      expect(text).toContain('Opt in to automatic factoryd self-update (default: off)');
+    });
+
+    it('accepts --auto-update and starts and stops exactly like the default run', async () => {
+      const registryFile = join(paths().state, 'registry.json');
+      writeFileSync(registryFile, JSON.stringify({ version: 1, repos: {} }));
+
+      const runPromise = runMain('daemon', 'run', '--auto-update', '--port', '0', '--registry', registryFile);
+      while (!logged().includes('listening on 127.0.0.1:')) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+
+      process.emit('SIGINT');
+      const res = await runPromise;
+
+      expect(res.exited).toBe(true);
+      expect(res.code).toBe(0);
+    });
+
     it('exits with code 2 on an invalid --port and never binds', async () => {
       const res = await runMain('daemon', 'run', '--port', 'abc');
       expect(res.exited).toBe(true);
@@ -4131,6 +4170,29 @@ bash scripts/verify.sh
         expect(phases.planPhase.mock.calls.at(-1)?.[0].sizeGateMode).toBe('slice');
       });
 
+      it('--max-slices 6 passes maxSlices 6 to planPhase (ADR-0156)', async () => {
+        await runMain('run-issue', '5', '--size-gate', 'slice', '--max-slices', '6');
+        expect(phases.planPhase.mock.calls.at(-1)?.[0].maxSlices).toBe(6);
+      });
+
+      it('sizeGate.maxSlices in the config is used when the flag is absent', async () => {
+        h.factoryConfig = { ...h.factoryConfig, sizeGate: { mode: 'slice', maxSlices: 7 } };
+        await runMain('run-issue', '5');
+        expect(phases.planPhase.mock.calls.at(-1)?.[0].maxSlices).toBe(7);
+      });
+
+      it('defaults maxSlices to 10 with neither flag nor config', async () => {
+        await runMain('run-issue', '5');
+        expect(phases.planPhase.mock.calls.at(-1)?.[0].maxSlices).toBe(10);
+      });
+
+      it.each(['0', '21', '2.5', 'abc', ''])('rejects --max-slices %j with exit 2 before planning', async (value) => {
+        const res = await runMain('run-issue', '5', '--max-slices', value);
+        expect(res).toMatchObject({ exited: true, code: 2 });
+        expect(errored()).toContain('--max-slices');
+        expect(phases.planPhase).not.toHaveBeenCalled();
+      });
+
       it('rejects an unknown mode with exit 2 before planning', async () => {
         const res = await runMain('run-issue', '5', '--size-gate', 'bogus');
         expect(res).toMatchObject({ exited: true, code: 2 });
@@ -4173,7 +4235,7 @@ bash scripts/verify.sh
       expect(res.exited).toBe(true);
       const text = written.join('').replace(/\s+/g, ' ');
       expect(text).toContain('--run-children');
-      expect(text).toContain('When the size gate decomposes the issue, run the child issues it filed');
+      expect(text).toContain('File mode only: when the size gate files child issues, run them');
     });
 
     it('names the branch with the default factory prefix when --branch-prefix is omitted', async () => {
@@ -5271,6 +5333,65 @@ describe('shipIssue (direct)', () => {
     await shipIssue(5, {}, ctx(), { setupWorktree: custom });
     expect(custom.mock.calls[0]?.slice(0, 3)).toEqual([h.repoRoot, expect.any(String), expect.any(String)]);
     expect(setupWorktree).not.toHaveBeenCalled();
+  });
+
+  describe('slice branch (ADR-0147)', () => {
+    const sliceStory = (n: number) => ({
+      schemaVersion: 1 as const,
+      kind: 'story' as const,
+      filesLikelyTouched: [],
+      labels: [],
+      title: `Story ${n}`,
+      role: 'operator',
+      want: `thing ${n} works`,
+      soThat: 'value',
+      problemStatement: `Problem ${n}`,
+      inScope: [`Scope ${n}`],
+      outOfScope: ['Persistent storage'],
+      acceptanceCriteria: [{ name: `ac ${n}`, given: [], when: ['run'], then: ['works'] }],
+      verification: [{ command: 'npm test', passWhen: 'passes' }],
+      tracesTo: ['INT-PROBLEM-01'],
+    });
+    const planComment = renderSlicePlanComment({
+      issue: 5,
+      slices: [
+        { index: 1, title: 'One', story: sliceStory(1) as never, state: 'merged', prNumber: 10 },
+        { index: 2, title: 'Two', story: sliceStory(2) as never, state: 'pending' },
+      ],
+    });
+    const sliceOctokit = (listComments: () => Promise<unknown>) => {
+      const fake = defaultOctokit() as any;
+      fake.rest.issues.listComments = vi.fn(listComments);
+      return fake;
+    };
+    const custom = () =>
+      vi.fn(async (..._args: Parameters<NonNullable<CliDeps['setupWorktree']>>) => undefined as never);
+
+    it('builds slice 2 on the -s2- branch when slice 1 is merged', async () => {
+      const setup = custom();
+      const fake = sliceOctokit(async () => ({ data: [{ id: 1, user: { id: 7 }, body: planComment }] }));
+      await shipIssue(5, { sizeGate: 'slice' }, ctx(), { setupWorktree: setup, octokit: () => fake });
+      expect(setup.mock.calls[0]?.[1]).toBe('factory/5-s2-fix-the-bug');
+    });
+
+    it('does not look up the slice plan in file mode', async () => {
+      const setup = custom();
+      const fake = sliceOctokit(async () => ({ data: [] }));
+      await shipIssue(5, { sizeGate: 'file' }, ctx(), { setupWorktree: setup, octokit: () => fake });
+      expect(fake.rest.issues.listComments).not.toHaveBeenCalled();
+      expect(setup.mock.calls[0]?.[1]).toBe('factory/5-fix-the-bug');
+    });
+
+    it('parks before creating a worktree when the slice plan lookup throws', async () => {
+      const setup = custom();
+      const fake = sliceOctokit(async () => {
+        throw new Error('network down');
+      });
+      await expect(
+        shipIssue(5, { sizeGate: 'slice' }, ctx(), { setupWorktree: setup, octokit: () => fake }),
+      ).rejects.toBeInstanceOf(LaneParkError);
+      expect(setup).not.toHaveBeenCalled();
+    });
   });
 
   it('uses the injected octokit factory instead of the default client', async () => {

@@ -88,7 +88,7 @@ function fake(comments: { id: number; user: { id: number } | null; body?: string
   return { octokit, createComment, updateComment };
 }
 
-function setup(decompose: string[], f: ReturnType<typeof fake>, oversized = true) {
+function setup(decompose: string[], f: ReturnType<typeof fake>, oversized = true, maxSlices = 10) {
   const stub = new StubModelExecutor({ scripts: { decompose: decompose.map((output) => ({ output })) } });
   const router = new ModelRouter(models, routes, false, stub);
   const events: { type: string; msg: string }[] = [];
@@ -100,6 +100,7 @@ function setup(decompose: string[], f: ReturnType<typeof fake>, oversized = true
       body: 'body',
       oversized,
       sizeReason: 'too many items',
+      maxSlices,
       worktree: '/tmp/wt',
       router,
       octokit: f.octokit,
@@ -176,11 +177,50 @@ describe('resolveSliceGate', () => {
     expect(events.map((e) => e.type)).toContain('size-gate-sliced');
   });
 
-  it('falls back to file mode for more than 5 stories, posting nothing', async () => {
+  it('records an over-cap plan and returns over-cap without logging size-gate-sliced', async () => {
     const f = fake([]);
-    const { run } = setup([decompositionJson(6)], f);
-    expect(await run()).toMatchObject({ kind: 'fallback-file', storyCount: 6 });
+    const { events, run } = setup([decompositionJson(6)], f, true, 5);
+    const outcome = await run();
+    expect(outcome).toMatchObject({ kind: 'over-cap', reason: expect.stringContaining('--max-slices 6') });
+    expect(f.createComment).toHaveBeenCalledTimes(1);
+    const body = f.createComment.mock.calls[0][0].body as string;
+    expect(body.startsWith(SLICE_PLAN_MARKER)).toBe(true);
+    expect(outcome.kind === 'over-cap' && outcome.plan.slices.every((s) => s.state === 'pending')).toBe(true);
+    expect(events.map((e) => e.type)).not.toContain('size-gate-sliced');
+  });
+
+  it('parks without recording when the decomposition exceeds the ceiling of 20', async () => {
+    const f = fake([]);
+    const { run } = setup([decompositionJson(21)], f, true, 5);
+    expect(await run()).toMatchObject({ kind: 'park', reason: expect.stringContaining('ceiling of 20') });
     expect(f.createComment).not.toHaveBeenCalled();
+    expect(f.updateComment).not.toHaveBeenCalled();
+  });
+
+  it('parks a found all-pending plan over the cap without decomposing or rewriting', async () => {
+    const f = fake([{ id: 1, user: { id: BOT }, body: renderSlicePlanComment(planOf(6)) }]);
+    const { stub, run } = setup([], f, true, 5);
+    expect(await run()).toMatchObject({ kind: 'over-cap', reason: expect.stringContaining('cap 5') });
+    expect(stub.calls).toEqual([]);
+    expect(f.createComment).not.toHaveBeenCalled();
+    expect(f.updateComment).not.toHaveBeenCalled();
+  });
+
+  it('plans slice 1 of a found plan once the cap covers it', async () => {
+    const f = fake([{ id: 1, user: { id: BOT }, body: renderSlicePlanComment(planOf(6)) }]);
+    const { stub, run } = setup([], f, true, 6);
+    const outcome = await run();
+    expect(outcome).toMatchObject({ kind: 'slice', created: false });
+    expect(outcome.kind === 'slice' && outcome.slice.index).toBe(1);
+    expect(stub.calls).toEqual([]);
+  });
+
+  it('ignores the cap for a started plan', async () => {
+    const plan = withSliceState(planOf(6), 1, 'merged');
+    const f = fake([{ id: 1, user: { id: BOT }, body: renderSlicePlanComment(plan) }]);
+    const { run } = setup([], f, true, 5);
+    const outcome = await run();
+    expect(outcome.kind === 'slice' && outcome.slice.index).toBe(2);
   });
 
   it('parks when the decomposition fails INVEST twice', async () => {

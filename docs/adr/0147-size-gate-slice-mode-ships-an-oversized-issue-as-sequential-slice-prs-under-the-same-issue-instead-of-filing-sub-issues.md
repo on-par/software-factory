@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-05
 - Amends: [ADR-0043](0043-a-tripped-pre-flight-size-gate-files-sub-issues-under-the-original-issue-and-re-queues-them-the-post-plan-gate-still-parks.md) (adds `sizeGate.mode`; only `file` keeps ADR-0043's behavior)
+- Amended by: [ADR-0156](0156-size-gate-slice-mode-never-files-sub-issues-an-over-cap-slice-plan-is-recorded-and-parks-and-the-slice-cap-is-configurable.md) (slice mode never files issues; an over-cap plan is recorded and parks; `sizeGate.maxSlices` and `--max-slices` set the cap)
 
 ## Context
 

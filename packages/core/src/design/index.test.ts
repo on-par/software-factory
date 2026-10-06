@@ -53,6 +53,19 @@ describe('parseDesignArtifact', () => {
     expect(parsed).toEqual(validDesign);
   });
 
+  it('returns coerced [] for a clean design and for no design block', () => {
+    expect(parseDesignArtifact({ design: validDesign }).coerced).toEqual([]);
+    expect(parseDesignArtifact({ route: 'codex' }).coerced).toEqual([]);
+  });
+
+  it('returns the path of a coerced list item and still validates', () => {
+    const { artifact, coerced } = parseDesignArtifact({
+      design: { ...validDesign, edgeInputs: ['a', { 'x (`uses': 'y`)' }] },
+    });
+    expect(coerced).toEqual(['edgeInputs[1]']);
+    expect(artifact?.edgeInputs?.[1]).toBe('x (`uses: y`)');
+  });
+
   it('returns null with an error mentioning the missing block when design is absent', () => {
     const { artifact: parsed, errors } = parseDesignArtifact({ route: 'codex' });
     expect(parsed).toBeNull();

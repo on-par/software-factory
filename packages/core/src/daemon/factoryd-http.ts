@@ -109,6 +109,13 @@ export interface FactorydServer {
   stop(): Promise<void>;
 }
 
+/** Replace ASCII control characters so a request-controlled value (URL, slug)
+ *  cannot forge or split a log line. */
+function sanitizeForLog(value: string): string {
+  // oxlint-disable-next-line no-control-regex -- matching control characters is the point
+  return value.replace(/[\x00-\x1f\x7f]/g, '?');
+}
+
 function parsePathname(url: string | undefined): string {
   const raw = (url ?? '/').split('?')[0] ?? '/';
   if (raw.length > 1 && raw.endsWith('/')) return raw.slice(0, -1);
@@ -154,7 +161,7 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
     if (status === 405) headers.allow = allow;
     res.writeHead(status, headers);
     res.end(JSON.stringify(payload));
-    log(`${req.method ?? '-'} ${parsePathname(req.url)} ${status}`);
+    log(`${req.method ?? '-'} ${sanitizeForLog(parsePathname(req.url))} ${status}`);
   }
 
   async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
@@ -384,12 +391,13 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
         }
         const snapshot = setSafeRepoPolicyField(configPath, field, value, { confirmationToken });
         if (confirmation) {
-          log(`AUDIT ${slug}: ${confirmation.auditText}`);
+          log(`AUDIT ${sanitizeForLog(slug)}: ${confirmation.auditText}`);
         }
         send(res, req, 200, { repo: slug, ...snapshot });
         return;
       } catch (err) {
-        send(res, req, 500, { error: err instanceof Error ? err.message : String(err) });
+        log(`policy update failed for ${sanitizeForLog(slug)}: ${err instanceof Error ? err.message : String(err)}`);
+        send(res, req, 500, { error: 'failed to update policy' });
         return;
       }
     }
@@ -416,7 +424,7 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
           signal: drainSignal,
         })
           .catch((err: unknown) => {
-            log(`drain failed for ${slug}: ${err instanceof Error ? err.message : String(err)}`);
+            log(`drain failed for ${sanitizeForLog(slug)}: ${err instanceof Error ? err.message : String(err)}`);
             return undefined;
           })
           .finally(() => pendingDrains.delete(drain));
@@ -437,7 +445,7 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
         send(res, req, 500, { error: 'internal error' });
       } else {
         res.end();
-        log(`${req.method ?? '-'} ${parsePathname(req.url)} ${res.statusCode}`);
+        log(`${req.method ?? '-'} ${sanitizeForLog(parsePathname(req.url))} ${res.statusCode}`);
       }
     });
   });

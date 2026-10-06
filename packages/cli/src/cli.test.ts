@@ -3640,6 +3640,48 @@ describe('cli', () => {
       ]);
     });
 
+    it.each([
+      [2, 'queued', false],
+      [3, 'done', true],
+    ] as const)(
+      'slice %i/3 ready outcome releases as %s (waitMerge called: %s) (ADR-0147)',
+      async (index, released, waits) => {
+        const calls: any[] = [];
+        const claims = [buildClaim(5)!];
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+          claimNext: async () => claims.shift() ?? null,
+          ship: async (_issue, _opts, ctx) => {
+            ctx?.onOutcome?.({
+              state: 'ready',
+              route: 'codex',
+              branch: 'b',
+              reworkRounds: 0,
+              prNumber: 55,
+              slice: { index, count: 3 },
+            });
+            return 'b';
+          },
+          waitMerge: async (issue) => {
+            calls.push(['waitMerge', issue]);
+          },
+          releaseIssue: async (issue, outcome) => {
+            calls.push(['release', issue, outcome]);
+          },
+          pathExists: () => false,
+          emitEvent: () => {},
+        });
+
+        expect(calls).toEqual(
+          waits
+            ? [
+                ['waitMerge', 5],
+                ['release', 5, released],
+              ]
+            : [['release', 5, released]],
+        );
+      },
+    );
+
     it('heartbeats the claim lease every 5 minutes while ship/waitMerge are in flight, and stops once they settle (#1500)', async () => {
       vi.useFakeTimers();
       try {
@@ -4390,8 +4432,26 @@ describe('cli', () => {
         emitEvent: () => {},
       });
       expect(seen).toEqual([
-        { opts: {}, ctx: { repoRoot: '/repo', ghRepo: 'on-par/software-factory', paths, lane: 'app' } },
-        { opts: {}, ctx: { repoRoot: '/repo', ghRepo: 'on-par/software-factory', paths, lane: 'app' } },
+        {
+          opts: {},
+          ctx: {
+            repoRoot: '/repo',
+            ghRepo: 'on-par/software-factory',
+            paths,
+            lane: 'app',
+            onOutcome: expect.any(Function),
+          },
+        },
+        {
+          opts: {},
+          ctx: {
+            repoRoot: '/repo',
+            ghRepo: 'on-par/software-factory',
+            paths,
+            lane: 'app',
+            onOutcome: expect.any(Function),
+          },
+        },
       ]);
     });
 

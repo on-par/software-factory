@@ -137,6 +137,8 @@ import {
   resolveBuildPublish,
   resolveSizeGateMode,
   parseSizeGateMode,
+  parseMaxSlices,
+  resolveSizeGateMaxSlices,
   SIZE_GATE_MODES,
   type SizeGateMode,
   resolveDesignRegressionBlock,
@@ -237,7 +239,6 @@ import {
   createOctokitQueueClient,
   daemonRuntimePaths,
   DEFAULT_FACTORYD_PORT,
-  defaultRegistryPath,
   ensureDir,
   FACTORY_RUNTIME_CONFIG_KEYS,
   findUnmergedGreenPrs,
@@ -296,7 +297,9 @@ import {
   cmdDaemonStatus,
   cmdDaemonStop,
   DaemonCtlError,
+  resolveFactorydConfig,
   type DaemonCtlDeps,
+  type FactorydConfig,
 } from './daemon.js';
 import {
   analyzeEventLog,
@@ -334,10 +337,11 @@ import { cmdHostedQueue } from './hosted-queue.js';
 import { cmdHostedRunner } from './hosted-runner.js';
 import { resolveFactoryCheckoutCommit, runFilingPreview } from './filing.js';
 import { buildFeedbackDeps, type FeedbackDeps, runFeedback } from './feedback.js';
+import { ensureFactoryExcluded, writeSampleQueue } from './init-files.js';
 import { cmdLogs } from './logs.js';
 import { applyHelpGroups } from './help-groups.js';
 import { mergeScopeNotice } from './merge-scope.js';
-import { createFactoryOctokit } from './octokit.js';
+import { createFactoryOctokit, formatDeprecation, type FactoryOctokitOptions } from './octokit.js';
 import { DeepCheckError, createDeepModelRunner, runIssueCheck, type DeepCheckModelRunner } from './ready-check.js';
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
 import { readRunFlagOverrides, writeRunFlagOverrides } from './run-flags.js';
@@ -623,8 +627,8 @@ function resolveGitHubToken(shell: ShellOps = shellOps): string | undefined {
 /** Octokit factory for the current main() or cmdLand invocation (CliDeps.octokit); unset outside them. */
 let octokitFactory: (() => Octokit) | undefined;
 
-function getOctokit(shell: ShellOps = shellOps): Octokit {
-  return octokitFactory ? octokitFactory() : createFactoryOctokit(resolveGitHubToken(shell));
+function getOctokit(shell: ShellOps = shellOps, options?: FactoryOctokitOptions): Octokit {
+  return octokitFactory ? octokitFactory() : createFactoryOctokit(resolveGitHubToken(shell), options);
 }
 
 export function errorDetail(err: unknown): string {
@@ -694,25 +698,10 @@ async function cmdInit(opts: { force?: boolean } = {}) {
   ensureDir(paths.plans);
 
   // Add .factory/ to git exclude
-  const excludeFile = resolve(repoRoot, '.git/info/exclude');
-  const excludeContent = existsSync(excludeFile) ? readFileSync(excludeFile, 'utf-8') : '';
-  if (!excludeContent.includes('.factory/')) {
-    writeFileSync(excludeFile, excludeContent + (excludeContent.endsWith('\n') ? '' : '\n') + '.factory/\n');
-  }
+  ensureFactoryExcluded(resolve(repoRoot, '.git/info/exclude'));
 
   // Create sample queue if not exists
-  if (!existsSync(paths.queue)) {
-    writeFileSync(
-      paths.queue,
-      `# factory queue — "<lane> <issue#>", priority-ordered.
-# Lanes run in parallel; issues within a lane run serially.
-# Put issues that touch the same files in the same lane.
-# Example:
-#   app 61
-#   docs 66
-`,
-    );
-  }
+  writeSampleQueue(paths.queue);
 
   // Write onboarding files. Idempotent: never clobber an existing file unless --force.
   const force = opts.force === true;
@@ -966,6 +955,15 @@ function sizeGateOrExit(raw: string | undefined): SizeGateMode | undefined {
     throw new CliExitError(`factory: invalid --size-gate '${raw}' — expected one of: ${SIZE_GATE_MODES.join(', ')}`, 2);
   }
   return mode;
+}
+
+function maxSlicesOrExit(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const n = parseMaxSlices(raw);
+  if (n === undefined) {
+    throw new CliExitError(`factory: invalid --max-slices '${raw}' — expected a whole number from 1 to 20`, 2);
+  }
+  return n;
 }
 
 /** Deterministic run number for a brief, derived from its content digest.
@@ -2006,6 +2004,8 @@ export async function shipIssue(
     branchPrefix?: string;
     /** `run-issue --size-gate` (ADR-0147); undefined defers to sizeGate.mode in the config. */
     sizeGate?: SizeGateMode;
+    /** run-issue --max-slices (ADR-0156); undefined defers to sizeGate.maxSlices. */
+    maxSlices?: number;
     /** `--pr-classifier` / `--no-pr-classifier` (#1724); undefined defers to config/env. */
     prClassifier?: boolean;
   },
@@ -2048,7 +2048,15 @@ export async function shipIssue(
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot(shell));
   const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo(shell));
   const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
-  const octokit = (deps.octokit ?? (() => getOctokit(shell)))();
+  // GitHub REST deprecations seen on this run's client become one warn event per route (#2218).
+  const octokit = (
+    deps.octokit ??
+    (() =>
+      getOctokit(shell, {
+        log: (d) =>
+          logEvent(paths.events, 'github_api_deprecated', issueNum, formatDeprecation(d), { lane: ctx?.lane }),
+      }))
+  )();
   const [ghOwner, ghName] = ghRepo.split('/');
 
   const repoConfig = loaders.loadRepoConfig(repoRoot, paths.root);
@@ -2106,7 +2114,22 @@ export async function shipIssue(
       issue: issueNum,
     } satisfies GithubIssueParams));
   const issueTitle = work.title;
-  const branch = branchFor(issueNum, issueTitle, policy.effective.branchPrefix);
+  const sizeGateMode = opts.sizeGate ?? resolveSizeGateMode(factoryConfig);
+  const maxSlices = opts.maxSlices ?? resolveSizeGateMaxSlices(factoryConfig);
+  // ADR-0147: slice k >= 2 builds on its own branch, so read the slice plan before the worktree exists.
+  let sliceIndex: number | undefined;
+  if (sizeGateMode === 'slice' && !ctx?.localOnly && work.kind === GITHUB_ISSUE_SOURCE) {
+    try {
+      const lookup = await findSlicePlanComment({ octokit, repo: ghRepo, issue: issueNum });
+      if (lookup.status === 'found') sliceIndex = currentSlice(lookup.plan)?.index;
+    } catch (err) {
+      throw new LaneParkError(
+        `slice plan lookup failed for #${issueNum}: ${errorDetail(err)} — parked before creating a worktree`,
+        'escalate',
+      );
+    }
+  }
+  const branch = branchFor(issueNum, issueTitle, policy.effective.branchPrefix, sliceIndex);
   const worktree = ctx?.localOnly
     ? ctx.localOnly.workspace
     : worktreePathFor(repoRoot, ghRepo, issueNum, policy.effective.branchPrefix, loaders);
@@ -2292,7 +2315,8 @@ export async function shipIssue(
     localOnly: Boolean(ctx?.localOnly),
     blockUnresolvedRegressions: resolveDesignRegressionBlock(factoryConfig),
     publishFromBuild: resolveBuildPublish(factoryConfig),
-    sizeGateMode: opts.sizeGate ?? resolveSizeGateMode(factoryConfig),
+    sizeGateMode,
+    maxSlices,
     prClassifier: classifierPolicy.enabled
       ? {
           rules: resolveReviewFloorRules(repoConfig),
@@ -2674,6 +2698,7 @@ async function cmdRunIssue(
     branchPrefix?: string;
     runChildren?: boolean;
     sizeGate?: string;
+    maxSlices?: string;
   },
 ) {
   if (!coreOps.isCommandAvailable('claude')) {
@@ -2685,9 +2710,10 @@ async function cmdRunIssue(
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
 
-  const { runChildren, sizeGate: rawSizeGate, ...shipOpts } = opts;
+  const { runChildren, sizeGate: rawSizeGate, maxSlices: rawMaxSlices, ...shipOpts } = opts;
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const sizeGate = sizeGateOrExit(rawSizeGate);
+  const maxSlices = maxSlicesOrExit(rawMaxSlices);
 
   await withRepoRunLock(paths, 'factory run-issue', async () => {
     const ghRepo = await getGitHubRepo();
@@ -2721,14 +2747,18 @@ async function cmdRunIssue(
     }
 
     try {
-      await shipIssue(issueNum, { ...shipOpts, branchPrefix, sizeGate }, { repoRoot, ghRepo, workRequest: work });
+      await shipIssue(
+        issueNum,
+        { ...shipOpts, branchPrefix, sizeGate, maxSlices },
+        { repoRoot, ghRepo, workRequest: work },
+      );
     } catch (err: any) {
       if (err instanceof IssueSkippedError) return;
       if (err instanceof IssueDecomposedError && runChildren) {
         await runDecomposedChildren(
           issueNum,
           err.childIssues,
-          { ...shipOpts, branchPrefix, sizeGate },
+          { ...shipOpts, branchPrefix, sizeGate, maxSlices },
           { repoRoot, ghRepo, workSources },
         );
         return;
@@ -3765,12 +3795,15 @@ async function cmdProxy() {
  *  next to the registry file — daemon.pid single-instance guard, daemon.port
  *  bound-address record, daemon.log append sink (#1177). `factory daemon
  *  start|stop|status|logs` wrap this process in a launchd LaunchAgent (#1179). */
-async function cmdFactoryd(opts: { port?: string; registry?: string }): Promise<void> {
-  const registryFile = opts.registry ?? defaultRegistryPath();
-  const port = opts.port === undefined ? DEFAULT_FACTORYD_PORT : Number(opts.port);
-  if (!Number.isInteger(port) || port < 0 || port > 65535) {
-    throw new CliExitError(`invalid --port "${opts.port}" — expected an integer 0-65535`, 2);
+async function cmdFactoryd(opts: { port?: string; registry?: string; autoUpdate?: boolean }): Promise<void> {
+  let config: FactorydConfig;
+  try {
+    config = resolveFactorydConfig(opts);
+  } catch (err) {
+    if (err instanceof DaemonCtlError) throw new CliExitError(err.message, err.code);
+    throw err;
   }
+  const { registryFile, port } = config;
 
   const runtime = daemonRuntimePaths(dirname(registryFile));
   const acquired = await acquirePidFile(runtime);
@@ -4182,7 +4215,13 @@ type RunLaneDeps = {
   ship?: (
     issue: number,
     opts: { product?: string; autoRework?: boolean; interactive?: boolean; approvePlan?: boolean },
-    ctx?: { repoRoot: string; ghRepo: string; paths: ReturnType<typeof getFactoryPaths>; lane?: string },
+    ctx?: {
+      repoRoot: string;
+      ghRepo: string;
+      paths: ReturnType<typeof getFactoryPaths>;
+      lane?: string;
+      onOutcome?: (outcome: RunOutcome) => void;
+    },
   ) => Promise<string>;
   waitMerge?: typeof waitForMerge;
   pathExists?: (path: string) => boolean;
@@ -4501,10 +4540,34 @@ export async function runLane(
       continue;
     }
     try {
+      const sliceOutcome: { value?: RunOutcome } = {};
       const branch =
         decision.kind === 'adopt'
           ? decision.branch
-          : await withHeartbeat(issue, heartbeat, () => ship(issue, {}, { repoRoot, ghRepo, paths, lane }));
+          : await withHeartbeat(issue, heartbeat, () =>
+              ship(
+                issue,
+                {},
+                {
+                  repoRoot,
+                  ghRepo,
+                  paths,
+                  lane,
+                  onOutcome: (o) => {
+                    sliceOutcome.value = o;
+                  },
+                },
+              ),
+            );
+      const shipped = sliceOutcome.value;
+      if (shipped?.state === 'ready' && shipped.slice && shipped.slice.index < shipped.slice.count) {
+        // ADR-0147: a non-final slice's PR is open; hand the issue back for the next slice
+        // instead of waiting for the merge.
+        awaitingReview++;
+        streak = null;
+        await settle(issue, 'queued');
+        continue;
+      }
       await withHeartbeat(issue, heartbeat, () => waitMerge(issue, branch, repoRoot, ghRepo, paths));
       merged++;
       streak = null;
@@ -6057,10 +6120,17 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('--approve-plan', 'Pause after PLAN freezes the spec and wait for approval before BUILD')
     .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
-    .option('--run-children', 'When the size gate decomposes the issue, run the child issues it filed')
+    .option(
+      '--run-children',
+      'File mode only: when the size gate files child issues, run them (slice mode never files issues)',
+    )
     .option(
       '--size-gate <mode>',
-      'Size gate mode for this run: file (file child issues / park), slice (ship as sequential slice PRs) or off (skip both gates); beats sizeGate.mode in the config',
+      'Size gate mode for this run: file (file child issues / park), slice (ship as sequential slice PRs under the same issue; never files issues) or off (skip both gates); beats sizeGate.mode in the config',
+    )
+    .option(
+      '--max-slices <count>',
+      'Slice mode: most slices a not-yet-started slice plan may have (1-20); an over-cap plan is recorded and parks; beats sizeGate.maxSlices (default 10)',
     )
     .action(async (issueNum, opts) => {
       await cmdRunIssue(parseIssueArg(issueNum), opts);
@@ -6185,7 +6255,8 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .description('Run factoryd in the foreground: a localhost-only HTTP API over the repo registry')
     .option('--port <n>', `Port to bind on 127.0.0.1 (default ${DEFAULT_FACTORYD_PORT})`)
     .option('--registry <file>', 'Registry file to serve (default ~/.factory/registry.json)')
-    .action((opts: { port?: string; registry?: string }) => cmdFactoryd(opts));
+    .option('--auto-update', 'Opt in to automatic factoryd self-update (default: off)')
+    .action((opts: { port?: string; registry?: string; autoUpdate?: boolean }) => cmdFactoryd(opts));
   const daemonCtl = (fn: () => Promise<void>) =>
     fn().catch((err: unknown) => {
       if (err instanceof DaemonCtlError) throw new CliExitError(err.message, err.code);

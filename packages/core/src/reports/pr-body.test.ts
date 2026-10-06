@@ -71,6 +71,18 @@ describe('renderPrBody', () => {
     );
   });
 
+  it('renders Part of for a non-final slice and never a closing keyword', () => {
+    const body = renderPrBody({ summaryLine: 'x', diffStat: '', partOf: 7 });
+    expect(body.endsWith('Part of #7')).toBe(true);
+    expect(body).not.toMatch(/Closes/);
+  });
+
+  it('prefers Closes when both closes and partOf are set', () => {
+    const body = renderPrBody({ summaryLine: 'x', diffStat: '', closes: 7, partOf: 7 });
+    expect(body.endsWith('Closes #7')).toBe(true);
+    expect(body).not.toMatch(/Part of/);
+  });
+
   it('omits the intent sections and the Closes line when there is no spec and no issue', () => {
     const body = renderPrBody({ summaryLine: 'Implements local brief `b`.', diffStat: '' });
 

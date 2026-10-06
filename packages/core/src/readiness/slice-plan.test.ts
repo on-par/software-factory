@@ -4,11 +4,13 @@ import { describe, expect, it } from 'vitest';
 
 import type { DecompositionOutput } from './decompose.js';
 import {
-  MAX_SLICES,
+  SLICE_CAP_CEILING,
   SLICE_PLAN_MARKER,
   currentSlice,
+  overCapReason,
   parseSlicePlanComment,
   renderSlicePlanComment,
+  sliceCapExceeded,
   slicePlanFromDecomposition,
   withSliceState,
 } from './slice-plan.js';
@@ -58,7 +60,7 @@ const encode = (value: string): string =>
   `${SLICE_PLAN_MARKER}\n<!-- factory:slice-plan-data ${Buffer.from(value, 'utf8').toString('base64')} -->`;
 
 describe('slicePlanFromDecomposition', () => {
-  it.each([1, MAX_SLICES])('builds %i pending slices in story order', (count) => {
+  it.each([1, 10, SLICE_CAP_CEILING])('builds %i pending slices in story order', (count) => {
     const plan = built(count);
     expect(plan.issue).toBe(7);
     expect(plan.slices).toHaveLength(count);
@@ -70,9 +72,33 @@ describe('slicePlanFromDecomposition', () => {
     });
   });
 
-  it('rejects more than the cap and empty decompositions', () => {
-    expect(slicePlanFromDecomposition(7, decomposition(6))).toEqual({ ok: false, reason: 'over-cap', storyCount: 6 });
+  it('rejects more than the ceiling and empty decompositions', () => {
+    expect(slicePlanFromDecomposition(7, decomposition(21))).toEqual({ ok: false, reason: 'over-cap', storyCount: 21 });
     expect(slicePlanFromDecomposition(7, decomposition(0))).toEqual({ ok: false, reason: 'empty', storyCount: 0 });
+  });
+});
+
+describe('slice cap (ADR-0156)', () => {
+  it('round-trips a 20-slice plan and rejects 21 slices', () => {
+    const plan = built(20);
+    expect(parseSlicePlanComment(renderSlicePlanComment(plan))).toEqual({ ok: true, plan });
+    const over = { ...plan, slices: [...plan.slices, { ...plan.slices[0], index: 21 }] };
+    expect(parseSlicePlanComment(renderSlicePlanComment(over))).toMatchObject({ ok: false });
+  });
+
+  it('sliceCapExceeded only applies while every slice is pending', () => {
+    const plan = built(6);
+    expect(sliceCapExceeded(plan, 5)).toBe(true);
+    expect(sliceCapExceeded(plan, 6)).toBe(false);
+    expect(sliceCapExceeded(withSliceState(plan, 1, 'pr-open', 9), 5)).toBe(false);
+    expect(sliceCapExceeded(withSliceState(plan, 1, 'merged', 9), 5)).toBe(false);
+  });
+
+  it('overCapReason names the count, the cap and the flag', () => {
+    const reason = overCapReason(6, 5);
+    expect(reason).toContain('6 slices');
+    expect(reason).toContain('cap 5');
+    expect(reason).toContain('--max-slices 6');
   });
 });
 

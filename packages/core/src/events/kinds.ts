@@ -40,6 +40,7 @@ export type EventKind =
   | 'decompose_filed'
   | 'decompose_started'
   | 'defect-window-closed'
+  | 'design_artifact_coerced'
   | 'design_artifact_emitted'
   | 'design_artifact_invalid'
   | 'design_artifact_received'
@@ -65,6 +66,7 @@ export type EventKind =
   | 'fail'
   | 'failover'
   | 'fast_path'
+  | 'github_api_deprecated'
   | 'held'
   | 'human-abandoned'
   | 'human-approved'
@@ -244,6 +246,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   decompose_filed: { severity: 'info', isPark: false, isTerminal: false },
   decompose_started: { severity: 'info', isPark: false, isTerminal: false },
   'defect-window-closed': { severity: 'info', isPark: false, isTerminal: false },
+  design_artifact_coerced: { severity: 'warn', isPark: false, isTerminal: false },
   design_artifact_emitted: { severity: 'info', isPark: false, isTerminal: false },
   design_artifact_invalid: { severity: 'warn', isPark: false, isTerminal: false },
   design_artifact_received: { severity: 'info', isPark: false, isTerminal: false },
@@ -271,6 +274,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   fail: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   failover: { severity: 'info', isPark: false, isTerminal: false },
   fast_path: { severity: 'info', isPark: false, isTerminal: false },
+  // A GitHub REST call answered with a Deprecation header (#2218); logged once per route per run.
+  github_api_deprecated: { severity: 'warn', isPark: false, isTerminal: false },
   // A lane parked on the exact same checker-failure signature it parked on in
   // a prior run (ReworkHistory, #740) — distinct from 'escalate'/'fail' so a
   // watchdog or human scanning events.ndjson can tell "already tried and

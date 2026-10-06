@@ -46,11 +46,30 @@ export const BehaviorDeltaRowSchema = z.object({
   verdict: BehaviorVerdictSchema,
 });
 
+// js-yaml reads an unquoted list item containing ': ' as a one-key map (#2216, #551).
+// Turn it back into the line the model wrote; any other non-string becomes its JSON text,
+// so one bad item never discards the whole artifact.
+export function coerceListItem(item: unknown): unknown {
+  if (typeof item === 'string') return item;
+  if (item !== null && typeof item === 'object' && !Array.isArray(item)) {
+    const entries = Object.entries(item);
+    if (entries.length === 1) {
+      const [key, value] = entries[0]!;
+      if (value === null || value === undefined) return `${key}:`;
+      const text = typeof value === 'object' ? JSON.stringify(value) : String(value);
+      return `${key}: ${text}`;
+    }
+  }
+  return JSON.stringify(item) ?? String(item);
+}
+
+const stringListItem = z.preprocess(coerceListItem, z.string().min(1));
+
 export const ExternalListSchema = z.object({
   name: z.string().min(1),
   location: z.string().min(1),
   source: z.string().min(1),
-  gaps: z.array(z.string().min(1)),
+  gaps: z.array(stringListItem),
 });
 
 // A bare YAML key parses to null, which must not fail the whole parse; and unlike
@@ -60,7 +79,7 @@ const optionalList = <T extends z.ZodType>(item: T) => z.preprocess((v) => v ?? 
 export const DesignArtifactSchema = z.object({
   restatedProblem: z.string().min(1),
   approach: DesignApproachSchema,
-  interfacesTouched: z.array(z.string().min(1)),
+  interfacesTouched: z.array(stringListItem),
   // .nullish() (not .default()) so a bare YAML key with no items — which js-yaml
   // parses to null, not undefined — still defaults to [] instead of failing the
   // whole DesignArtifactSchema parse.
@@ -76,11 +95,11 @@ export const DesignArtifactSchema = z.object({
     .array(CallEdgeSchema)
     .nullish()
     .transform((v) => v ?? []),
-  behaviorContract: z.array(z.string().min(1)),
+  behaviorContract: z.array(stringListItem),
   verificationPlan: z.array(VerificationStepSchema),
   riskBlastRadius: z.string().min(1),
-  openQuestions: z.array(z.string()),
-  edgeInputs: optionalList(z.string().min(1)),
+  openQuestions: z.array(z.preprocess(coerceListItem, z.string())),
+  edgeInputs: optionalList(stringListItem),
   behaviorDelta: optionalList(BehaviorDeltaRowSchema),
   externalLists: optionalList(ExternalListSchema),
 });
@@ -95,3 +114,29 @@ export type BehaviorVerdict = z.infer<typeof BehaviorVerdictSchema>;
 export type BehaviorDeltaRow = z.infer<typeof BehaviorDeltaRowSchema>;
 export type ExternalList = z.infer<typeof ExternalListSchema>;
 export type DesignArtifact = z.infer<typeof DesignArtifactSchema>;
+
+const STRING_LIST_FIELDS = ['interfacesTouched', 'behaviorContract', 'openQuestions', 'edgeInputs'] as const;
+
+/** Paths (e.g. 'edgeInputs[11]', 'externalLists[0].gaps[2]') of the raw design's
+ *  string-list items that coerceListItem will rewrite. Non-object input or non-array
+ *  fields yield nothing. */
+export function findCoercedDesignItems(design: unknown): string[] {
+  if (typeof design !== 'object' || design === null) return [];
+  const d = design as Record<string, unknown>;
+  const paths: string[] = [];
+  const walk = (list: unknown, prefix: string) => {
+    if (!Array.isArray(list)) return;
+    list.forEach((item, i) => {
+      if (typeof item !== 'string') paths.push(`${prefix}[${i}]`);
+    });
+  };
+  for (const field of STRING_LIST_FIELDS) walk(d[field], field);
+  if (Array.isArray(d.externalLists)) {
+    d.externalLists.forEach((row, i) => {
+      if (typeof row === 'object' && row !== null) {
+        walk((row as Record<string, unknown>).gaps, `externalLists[${i}].gaps`);
+      }
+    });
+  }
+  return paths;
+}

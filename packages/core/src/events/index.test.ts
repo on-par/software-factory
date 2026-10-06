@@ -1,4 +1,4 @@
-import { appendFileSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, openSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -164,6 +164,42 @@ describe('followEvents', () => {
     await waitFor(() => seen.length >= 2);
     expect(seen[1].type).toBe('build');
     expect(seen[1].msg).toBe('Starting build phase, replacing the old log entirely');
+  });
+
+  it('reads a file rotated between stat and open from its start, not at the old offset', async () => {
+    // Pad a line to an exact byte length so the rotated file's line boundaries
+    // land on the old file's offsets.
+    const lineOfLength = (type: FactoryEvent['type'], msg: string, length: number): string => {
+      const base = line({ type, msg });
+      return line({ type, msg: msg + 'x'.repeat(length - base.length) });
+    };
+    const first = line({ type: 'plan', msg: 'first, padded so the rotated head fits inside it' });
+    const oldTail = line({ type: 'ship', msg: 'old tail, padded so the rotated head fits before it' });
+    writeFileSync(file, first);
+    let beforeOpen: (() => void) | undefined;
+    const openFile = (path: string): number => {
+      const hook = beforeOpen;
+      beforeOpen = undefined;
+      hook?.();
+      return openSync(path, 'r');
+    };
+    const seen: FactoryEvent[] = [];
+    const stop = followEvents(file, (e) => seen.push(e), { fromStart: true, pollMs: 10, openFile });
+    stops.push(stop);
+    await waitFor(() => seen.length >= 1);
+
+    // The old file grows, so the next tick has something to read. Just before
+    // that read opens the path, rotation swaps in a new file whose second line
+    // starts exactly at the old offset. Reading the new file at the old offset
+    // would deliver that line on its own, then again after the inode reset.
+    const replacement = join(dir, 'events-rotated.ndjson');
+    writeFileSync(replacement, lineOfLength('build', 'r1', first.length) + lineOfLength('check', 'r2', oldTail.length));
+    beforeOpen = () => renameSync(replacement, file);
+    appendFileSync(file, oldTail);
+
+    await waitFor(() => seen.length >= 3);
+    await delay(50);
+    expect(seen.map((e) => e.type)).toEqual(['plan', 'build', 'check']);
   });
 
   it('stop() halts delivery and is idempotent', async () => {

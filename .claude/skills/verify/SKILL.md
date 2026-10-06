@@ -32,7 +32,7 @@ The factory's own CHECK phase runs `bash scripts/verify.sh --no-e2e` in the buil
     - full path: `npm run test` (Vitest with coverage thresholds), then `npm run coverage-ratchet`
     - `--no-e2e`: `npx vitest run` (no coverage, no ratchet)
 11. `npm run eval -- --stub`
-12. Shell-script tests: `auto-merge-sweep`, `filter-green-prs`, `repo-merge-settings`, `ruleset-copilot-review`, `launchd/install-sweep-plist`
+12. Shell-script tests: `auto-merge-sweep`, `filter-green-prs`, `repo-merge-settings`, `repo-about`, `repo-issue-optics`, `ruleset-copilot-review`, `launchd/install-sweep-plist`, `publish-workspaces` (guards the publish list `scripts/publish-workspaces.txt` against the workspace graph)
 
 CI (`.github/workflows/ci.yml`) runs the same steps as the full path. It also runs `scripts/quickstart-smoke.sh` in a separate job. It does not run the `install-sweep-plist` test.
 

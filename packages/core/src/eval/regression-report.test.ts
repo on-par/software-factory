@@ -96,6 +96,16 @@ describe('formatRegressionIssue', () => {
     expect(issue.body).toContain('| a\\|b | ✅ | ✅ | — | — | — |  |');
   });
 
+  it('escapes backslashes before pipes so a trailing backslash cannot unescape the cell separator', () => {
+    const baseline = toBaseline(summaryOf([caseResult({ id: 'a\\', pass: true })]));
+    const summary = summaryOf([caseResult({ id: 'a\\', pass: true })]);
+    const comparison = compareToBaseline(summary, baseline);
+
+    const issue = formatRegressionIssue(summary, baseline, comparison, 'https://example.test/run');
+
+    expect(issue.body).toContain('| a\\\\ | ✅ | ✅ | — | — | — |  |');
+  });
+
   it('renders notes only when present', () => {
     const baselineWithMissingCase = toBaseline(summaryOf([caseResult({ id: 'a' })]));
     const summaryWithExtraCase = summaryOf([caseResult({ id: 'a' }), caseResult({ id: 'b' })]);

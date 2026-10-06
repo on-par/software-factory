@@ -20,9 +20,9 @@ import {
   type ReadinessEnrichmentRetryContext,
 } from '../readiness/enrich.js';
 import type { SizeGateMode } from '../config/index.js';
-import { decomposeOversizedIssue, publishDecomposition, renderChildIssueBody } from '../readiness/decompose.js';
+import { decomposeOversizedIssue, renderChildIssueBody } from '../readiness/decompose.js';
 import { resolveSliceGate } from '../readiness/slice-gate.js';
-import { MAX_SLICES } from '../readiness/slice-plan.js';
+import { DEFAULT_MAX_SLICES, type SlicePlan } from '../readiness/slice-plan.js';
 import { MAX_BUILD_CALL_EDGES, MAX_BUILD_SIGNATURES, MAX_BUILD_TARGET_TYPES } from '../readiness/size.js';
 import { scoreIssueReadiness } from '../readiness/index.js';
 import type { ModelRouter } from '../router/index.js';
@@ -50,6 +50,9 @@ export interface PlanResult {
    *  issue was sliced and its slice plan comment recorded. `ok` stays false: this run ends before
    *  BUILD, and the next run plans the current slice from the comment. */
   sliced?: { sliceCount: number };
+  /** Set on an ok result when PLAN planned one slice of a sliced issue (ADR-0147). SHIP titles the PR
+   *  from it, and runIssue records the PR in the slice plan comment. */
+  slice?: { plan: SlicePlan; index: number };
 }
 
 export interface PlanPromptOpts {
@@ -180,6 +183,7 @@ file must be one that exists (or one you are creating), and every name/symbol mu
 be one you actually read or are adding — omit an entry rather than guess. Quote
 signature values in single quotes; unquoted YAML breaks on the colons in a
 TypeScript signature.
+Single-quote any list item that contains ': ' (for example a backticked \`uses: x@main\`) — unquoted, YAML reads the item as a map.
 Do not record new ADRs. Recording an architecture decision is a separate process from this
 change: plan no ADR and no \`docs/adr/\` file, unless the issue itself asks for one.
 Do not run tests, do not write or edit any other file, do not touch git.
@@ -281,6 +285,8 @@ async function planPhaseImpl(opts: {
   enforceSizeGate?: boolean;
   /** sizeGate.mode (ADR-0147). 'slice' records a slice plan and plans only the current slice. Ignored when enforceSizeGate is false. */
   sizeGateMode?: SizeGateMode;
+  /** Slice cap for sizeGate.mode 'slice' (ADR-0156); default DEFAULT_MAX_SLICES. */
+  maxSlices?: number;
   /** Stop PLAN before BUILD when a worse/unknown behaviorDelta row is not in openQuestions (#1819). Default false = log only. */
   blockUnresolvedRegressions?: boolean;
   /** Local-only mode: force the route to codex so builds use a local harness. */
@@ -401,6 +407,7 @@ async function planPhaseImpl(opts: {
 
   let planningSlice = false;
   let sliceLabel = '';
+  let plannedSlice: PlanResult['slice'];
   if (enforceSizeGate && opts.sizeGateMode === 'slice' && source.kind === GITHUB_ISSUE_SOURCE) {
     const params = source.params as GithubIssueParams;
     const gate = await resolveSliceGate({
@@ -410,6 +417,7 @@ async function planPhaseImpl(opts: {
       body: issueBody,
       oversized: readiness.template === 'factory-task' && readiness.sizeOk === false,
       sizeReason: readiness.sizeReason,
+      maxSlices: opts.maxSlices ?? DEFAULT_MAX_SLICES,
       worktree,
       router,
       octokit,
@@ -429,22 +437,9 @@ async function planPhaseImpl(opts: {
       log('escalate', gate.reason);
       return park(gate.reason);
     }
-    if (gate.kind === 'fallback-file') {
-      const published = await publishDecomposition({
-        decomposition: gate.decomposition,
-        issue: params.issue,
-        repo: params.repo,
-        octokit,
-        log: (type, msg) => log(type, msg),
-        fileSubIssues: true,
-      });
-      return fileModeEscalation(
-        published.childIssues,
-        readiness,
-        specPath,
-        log,
-        `slice plan has ${gate.storyCount} slices (more than ${MAX_SLICES}) — `,
-      );
+    if (gate.kind === 'over-cap') {
+      log('size-gate-escalated', gate.reason);
+      return park(gate.reason);
     }
     if (gate.kind === 'slice') {
       const { plan, slice } = gate;
@@ -452,6 +447,7 @@ async function planPhaseImpl(opts: {
       issueBody = renderChildIssueBody(slice.story, params.issue);
       readiness = scoreIssueReadiness({ title: issueTitle, body: issueBody });
       planningSlice = true;
+      plannedSlice = { plan, index: slice.index };
       sliceLabel = `slice ${slice.index}/${plan.slices.length} of #${params.issue}`;
       log('plan', `planning slice ${slice.index}/${plan.slices.length} of #${params.issue}: ${slice.title}`);
       if (readiness.sizeOk === false) {
@@ -509,6 +505,7 @@ async function planPhaseImpl(opts: {
       specPath,
       model: 'fast-path',
       designArtifact: fastPath.frontmatter.design,
+      ...(plannedSlice ? { slice: plannedSlice } : {}),
     };
   }
 
@@ -532,7 +529,9 @@ async function planPhaseImpl(opts: {
   const adrContext = await readAdrContext(adrReader);
   const adrCtx = renderAdrConstraints(adrContext);
   if (adrContext.active.length > 0) {
-    const names = adrContext.active.map(adrLabel).join(', ');
+    const names = adrContext.active
+      .map((adr) => (adr.statusless ? `${adrLabel(adr)} (no status, treated as Accepted)` : adrLabel(adr)))
+      .join(', ');
     log(
       'adr_context',
       `${adrContext.active.length} accepted ADR(s) injected as design constraints: ${names}` +
@@ -542,7 +541,8 @@ async function planPhaseImpl(opts: {
     log('adr_context_empty', `no accepted ADRs found in ${adrContext.dir} — planning without ADR constraints`);
   }
   if (adrContext.skipped.length > 0) {
-    log('adr_skipped', `${adrContext.skipped.length} ADR file(s) skipped (not Accepted or unparsable)`);
+    const skippedList = adrContext.skipped.map((s) => `${s.path} (${s.reason})`).join(', ');
+    log('adr_skipped', `${adrContext.skipped.length} ADR file(s) skipped: ${skippedList}`);
   }
   log('adr_inject_completed', `ADR injection complete (${adrContext.active.length} active)`, {
     durationMs: Date.now() - adrInjectStartedAt,
@@ -624,7 +624,13 @@ async function planPhaseImpl(opts: {
       await updateSpecRoute(specPath, opts.preferredRoute, 'repo-config-pin');
     }
 
-    const { artifact: designArtifact, errors: designErrors } = parseDesignArtifact(parsed.data);
+    const { artifact: designArtifact, errors: designErrors, coerced: designCoerced } = parseDesignArtifact(parsed.data);
+    if (designCoerced.length > 0) {
+      log(
+        'design_artifact_coerced',
+        `coerced ${designCoerced.length} non-string design list item(s) to text: ${designCoerced.join(', ')}`,
+      );
+    }
     if (designArtifact) {
       await writeSpec(specPath, {
         designJson: JSON.stringify(designArtifact, null, 2),
@@ -692,6 +698,7 @@ async function planPhaseImpl(opts: {
             body: issueBody,
             oversized: true,
             sizeReason: `plan scope exceeds the bounded-build budget: ${scope}`,
+            maxSlices: opts.maxSlices ?? DEFAULT_MAX_SLICES,
             worktree,
             router,
             octokit,
@@ -703,18 +710,9 @@ async function planPhaseImpl(opts: {
             const reason = `plan scope exceeds the bounded-build budget (${scope}) — sliced into ${gate.plan.slices.length} slice(s); the next run plans slice ${gate.slice.index}`;
             return { ...park(reason), sliced: { sliceCount: gate.plan.slices.length } };
           }
-          if (gate.kind === 'fallback-file') {
-            await publishDecomposition({
-              decomposition: gate.decomposition,
-              issue: params.issue,
-              repo: params.repo,
-              octokit,
-              log: (type, msg) => log(type, msg),
-              fileSubIssues: false,
-            });
-            const reason = `slice plan has ${gate.storyCount} slices (more than ${MAX_SLICES}) — ${fileReason}`;
-            log('size-gate-escalated', reason);
-            return park(reason);
+          if (gate.kind === 'over-cap') {
+            log('size-gate-escalated', gate.reason);
+            return park(gate.reason);
           }
           const reason = gate.kind === 'park' ? gate.reason : fileReason;
           log('escalate', reason);
@@ -758,7 +756,14 @@ async function planPhaseImpl(opts: {
 
     log('plan', `Plan complete with model ${result.model}, route: ${route}`, { model: result.model });
 
-    const planResult: PlanResult = { ok: true, route, specPath, model: result.model, designArtifact };
+    const planResult: PlanResult = {
+      ok: true,
+      route,
+      specPath,
+      model: result.model,
+      designArtifact,
+      ...(plannedSlice ? { slice: plannedSlice } : {}),
+    };
 
     if (!approvalGate) return planResult;
 
