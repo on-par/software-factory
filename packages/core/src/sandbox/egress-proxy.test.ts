@@ -3,7 +3,14 @@ import net from 'node:net';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { egressSummaryMessage, isAllowedHost, startEgressProxy, type EgressProxy } from './egress-proxy.js';
+import {
+  egressSummaryMessage,
+  isAllowedHost,
+  isSafeHttpHeaderName,
+  sanitizeProxyHeaders,
+  startEgressProxy,
+  type EgressProxy,
+} from './egress-proxy.js';
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -195,5 +202,64 @@ describe('egressSummaryMessage', () => {
   it('says all on allowlist when every host is listed, and handles zero hosts', () => {
     expect(egressSummaryMessage(['github.com'], ['github.com'])).toBe('1 host(s) used, all on allowlist');
     expect(egressSummaryMessage([], ['github.com'])).toBe('0 host(s) used, all on allowlist');
+  });
+});
+
+describe('sanitizeProxyHeaders', () => {
+  it('forwards only allowlisted names and drops hop-by-hop / unsafe keys', () => {
+    const incoming = Object.create(null) as http.IncomingHttpHeaders;
+    incoming['content-type'] = 'application/json';
+    incoming['x-custom-evil'] = 'nope';
+    incoming.connection = 'keep-alive';
+    incoming['transfer-encoding'] = 'chunked';
+    incoming.authorization = 'Bearer t';
+    Object.defineProperty(incoming, '__proto__', { value: 'pollute', enumerable: true, configurable: true });
+    const out = sanitizeProxyHeaders(incoming);
+    expect(out['content-type']).toBe('application/json');
+    expect(out.authorization).toBe('Bearer t');
+    expect(Object.prototype.hasOwnProperty.call(out, 'x-custom-evil')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(out, 'connection')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(out, 'transfer-encoding')).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(out, '__proto__')).toBe(false);
+  });
+
+  it('applies overrides for allowlisted names (e.g. Host from the URL)', () => {
+    const out = sanitizeProxyHeaders({ host: '127.0.0.1:9', accept: '*/*' }, { host: 'api.example:443' });
+    expect(out.host).toBe('api.example:443');
+    expect(out.accept).toBe('*/*');
+  });
+
+  it('preserves content-type through an absolute-form plain HTTP round trip', async () => {
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json', 'x-upstream-only': '1' });
+      res.end('{"ok":true}');
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    cleanups.push(async () => {
+      server.closeAllConnections();
+      await new Promise<void>((r) => server.close(() => r()));
+    });
+    const upstreamPort = (server.address() as net.AddressInfo).port;
+    const proxy = await proxyWith([]);
+    const res = await new Promise<http.IncomingMessage>((resolve, reject) => {
+      http
+        .get({ host: '127.0.0.1', port: proxy.port, path: `http://localhost:${upstreamPort}/` }, resolve)
+        .on('error', reject);
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('application/json');
+    expect(res.headers['x-upstream-only']).toBeUndefined();
+    res.resume();
+  });
+});
+
+describe('isSafeHttpHeaderName', () => {
+  it('accepts RFC 7230 tokens and rejects separators / prototype keys', () => {
+    expect(isSafeHttpHeaderName('Content-Type')).toBe(true);
+    expect(isSafeHttpHeaderName('x-request-id')).toBe(true);
+    expect(isSafeHttpHeaderName('bad name')).toBe(false);
+    expect(isSafeHttpHeaderName('bad:name')).toBe(false);
+    expect(isSafeHttpHeaderName('__proto__')).toBe(false);
+    expect(isSafeHttpHeaderName('constructor')).toBe(false);
   });
 });

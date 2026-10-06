@@ -50,6 +50,104 @@ function rejectSocket(socket: Duplex, status: string): void {
   socket.destroy();
 }
 
+/** RFC 7230 §3.2.6 tchar+ — legal HTTP header-name charset. */
+const HEADER_NAME_RE = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+const HOP_BY_HOP = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailers',
+  'transfer-encoding',
+  'upgrade',
+  'proxy-connection',
+]);
+
+/**
+ * Forwardable header names as literal constants. Looking up / writing only these
+ * keys means remote header maps never become arbitrary property / header-name
+ * writes (CodeQL js/remote-property-injection). CONNECT tunnels never hit this
+ * path; plain HTTP absolute-form is the only consumer.
+ */
+const FORWARDABLE_HEADERS = [
+  'accept',
+  'accept-encoding',
+  'accept-language',
+  'age',
+  'authorization',
+  'cache-control',
+  'content-disposition',
+  'content-encoding',
+  'content-language',
+  'content-length',
+  'content-location',
+  'content-range',
+  'content-type',
+  'cookie',
+  'date',
+  'etag',
+  'expect',
+  'expires',
+  'forwarded',
+  'from',
+  'host',
+  'if-match',
+  'if-modified-since',
+  'if-none-match',
+  'if-range',
+  'if-unmodified-since',
+  'last-modified',
+  'link',
+  'location',
+  'max-forwards',
+  'origin',
+  'pragma',
+  'range',
+  'referer',
+  'retry-after',
+  'server',
+  'set-cookie',
+  'user-agent',
+  'vary',
+  'via',
+  'warning',
+  'www-authenticate',
+  'x-request-id',
+  'x-correlation-id',
+] as const;
+
+export function isSafeHttpHeaderName(name: string): boolean {
+  if (!HEADER_NAME_RE.test(name)) return false;
+  const lower = name.toLowerCase();
+  return lower !== '__proto__' && lower !== 'constructor' && lower !== 'prototype';
+}
+
+/**
+ * Rebuild a headers object using only allowlisted constant names.
+ * Drops hop-by-hop headers and anything outside the allowlist.
+ */
+export function sanitizeProxyHeaders(
+  headers: http.IncomingHttpHeaders,
+  overrides?: Readonly<Record<string, string>>,
+): http.OutgoingHttpHeaders {
+  // Fresh null-prototype map; keys are only literals from FORWARDABLE_HEADERS.
+  const out: Record<string, string | string[] | number> = Object.create(null);
+  for (const name of FORWARDABLE_HEADERS) {
+    if (HOP_BY_HOP.has(name)) continue;
+    const value = headers[name];
+    if (value !== undefined) out[name] = value;
+  }
+  if (overrides) {
+    for (const name of FORWARDABLE_HEADERS) {
+      const value = overrides[name];
+      if (value !== undefined) out[name] = value;
+    }
+  }
+  return out;
+}
+
 export function startEgressProxy(opts: EgressProxyOptions): Promise<EgressProxy> {
   const bindHost = opts.bindHost ?? '127.0.0.1';
   const seen = new Set<string>();
@@ -123,11 +221,11 @@ export function startEgressProxy(opts: EgressProxyOptions): Promise<EgressProxy>
       port: url.port ? Number(url.port) : 80,
       method: req.method,
       path: `${url.pathname}${url.search}`,
-      headers: req.headers,
+      headers: sanitizeProxyHeaders(req.headers, { host: url.host }),
     });
     upstream.on('socket', track);
     upstream.on('response', (up) => {
-      res.writeHead(up.statusCode ?? 502, up.headers);
+      res.writeHead(up.statusCode ?? 502, sanitizeProxyHeaders(up.headers));
       up.pipe(res);
       up.on('error', () => res.destroy());
     });
