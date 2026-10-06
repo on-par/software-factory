@@ -57,14 +57,35 @@ Evidence may cite only the packet. A quote that does not appear in the named ite
 ### Escalation
 
 - A verdict with `confidence` below 0.90 is an escalation. An escalation recommends no action. It reports the diagnosis and evidence as unconfirmed and hands the run to a human. Its `nextStep` is not presented as a recommendation.
-- A verdict with `confidence` of 0.90 or above is a recommendation. It still only recommends. The steward never acts on it (safety rules are in a later ADR).
+- A verdict with `confidence` of 0.90 or above is a recommendation. It still only recommends. The steward never acts on it (see Safety below).
 - Output that is not valid JSON, lacks a field, has an extra field, has a `confidence` that is not a number from 0 to 1, or has evidence that fails the rules above is treated as an escalation with confidence 0. It is never retried as a recommendation.
 - The 0.90 threshold is fixed by this ADR, not a config value.
 
-Adding a trigger, removing a non-trigger, or changing a packet cap, an output field or the escalation threshold requires a new ADR that supersedes this one.
+### Surface
+
+- The only v1 surface is one GitHub issue comment on the triggered issue. It carries the diagnosis, the evidence, the confidence, and either the recommendation or the escalation notice.
+- Out of scope in v1: PR comments, email, and repo markdown files (no notes, reports or docs written into the repo). Logs and run events are not a reader-facing surface.
+
+### Safety
+
+- The steward is tool-less. It is one model call over the packet, with no tool use, no shell, no file access and no network access beyond that call.
+- In v1 the steward never edits code, never changes labels, and never queues, re-queues, approves or releases work. A recommendation is text in the comment. A human decides whether to act.
+- The steward is off by default. It runs only when an operator turns it on explicitly. Any config key or env var added for it must default to off.
+- Comment evidence is sanitized and fenced like auto-filed bug evidence (ADR-0130), and the issue body is shown to the model only inside the untrusted block (ADR-0129).
+
+Adding a trigger, removing a non-trigger, changing a packet cap, an output field or the escalation threshold, adding a surface, or relaxing a safety rule requires a new ADR that supersedes this one.
 
 ## Consequences
 
-The steward never spends budget on environment, budget, hold, timeout or conflict states, and those keep their current human and ops paths. A `fail` park is a trigger only when it came from CHECK after the rework cap, so the steward must tell it apart from a budget `fail`. `escalate` parks (identical failures across rounds, ADR-0017 and stuck accounting) are not covered here and are left to the escalation story of #1942. Caps keep the steward's input bounded and predictable in cost, at the price of sometimes cutting the evidence that would have explained the failure. A cut is visible in the packet. Malformed or unsure output is treated as an escalation, so a confused model can only hand the run to a human, never push a low-confidence fix suggestion. The surface and safety rules are recorded in later ADRs.
+The steward never spends budget on environment, budget, hold, timeout or conflict states, and those keep their current human and ops paths. A `fail` park is a trigger only when it came from CHECK after the rework cap, so the steward must tell it apart from a budget `fail`. `escalate` parks (identical failures across rounds, ADR-0017 and stuck accounting) are not covered here and are left to the escalation story of #1942. Caps keep the steward's input bounded and predictable in cost, at the price of sometimes cutting the evidence that would have explained the failure. A cut is visible in the packet. Malformed or unsure output is treated as an escalation, so a confused model can only hand the run to a human, never push a low-confidence fix suggestion. The steward cannot change repo or queue state, so a wrong diagnosis costs only a misleading comment, at the price of a human having to act on every recommendation. It never interacts with the lane circuit breaker (ADR-0139), because it neither parks nor re-queues, and environment releases (ADR-0141) never reach it.
 
-References: #1984, #1987, parent #1942.
+## References
+
+- [ADR-0129: Issue bodies reach PLAN and BUILD only inside an untrusted-issue-body block](0129-issue-bodies-reach-plan-and-build-only-inside-an-untrusted-issue-body-block-with-a-do-not-follow-notice.md)
+- [ADR-0130: Auto-filed bug evidence is stripped of hidden content and fenced](0130-auto-filed-bug-evidence-is-stripped-of-hidden-content-and-fenced-longer-than-any-backtick-run-inside-it.md)
+- [ADR-0131: An auto-filed bug carries a capped excerpt and a host:path pointer](0131-an-auto-filed-bug-carries-a-capped-excerpt-and-a-host-path-pointer-to-the-local-raw-log-never-the-raw-log.md)
+- [ADR-0139: A lane pauses after consecutive parks with the same failure signature](0139-a-lane-pauses-after-consecutive-parks-with-the-same-failure-signature-and-pausing-only-stops-claiming.md)
+- [ADR-0141: A rework round is classified as environment when every round-1 failing checker also fails on the base SHA](0141-a-rework-round-is-classified-as-environment-when-every-round-1-failing-checker-also-fails-on-the-base-sha-decided-before-the-rework-loop.md)
+- [Issue #1722](https://github.com/on-par/software-factory/issues/1722)
+- [Issue #1984](https://github.com/on-par/software-factory/issues/1984), [Issue #1987](https://github.com/on-par/software-factory/issues/1987), [Issue #1990](https://github.com/on-par/software-factory/issues/1990)
+- [Parent issue #1942](https://github.com/on-par/software-factory/issues/1942)
