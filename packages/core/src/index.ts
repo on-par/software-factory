@@ -265,7 +265,7 @@ export { InvalidWorkspaceError, resolveLocalOnlyPolicy } from './work/local-only
 // Events
 export type { FollowEventsOptions } from './events/index.js';
 export { followEvents, readEvents } from './events/index.js';
-export type { EventKind, EventTraits, LanePausedPayload, LaneStatus } from './events/kinds.js';
+export type { EventKind, EventTraits, LanePausedPayload, LaneStatus, StewardTriggeredPayload } from './events/kinds.js';
 export {
   eventTraitsFor,
   EVENT_TRAITS,

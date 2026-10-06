@@ -191,6 +191,19 @@ describe('utils', () => {
     expect(JSON.parse(lines[1])).not.toHaveProperty('checkFailure');
   });
 
+  it('writes stewardTriggered onto the line only when passed (#2086)', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+    const stewardTriggered = { trigger: 'ship-failed' as const, failureSignature: 'sig-1' };
+
+    logEvent(eventsFile, 'steward-triggered', 5, 'stuck', { stewardTriggered });
+    logEvent(eventsFile, 'steward-triggered', 5, 'again');
+
+    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
+    expect(JSON.parse(lines[0]).stewardTriggered).toEqual(stewardTriggered);
+    expect(JSON.parse(lines[1])).not.toHaveProperty('stewardTriggered');
+  });
+
   it('logs a structured failoverReason when extra is provided', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
     const eventsFile = join(tmpDir, 'events.ndjson');

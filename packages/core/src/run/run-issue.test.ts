@@ -522,6 +522,82 @@ describe('runIssue — decomposition', () => {
   });
 });
 
+describe('runIssue — steward-triggered event (#2086)', () => {
+  const CHECK_EXHAUSTED: CheckPhaseResult = {
+    passed: false,
+    summary: { ...CHECK_SUMMARY, results: [{ checker: 'tests', result: 'FAIL', details: 'nope' }] },
+    reworkRounds: 3,
+    failureSignature: 'sig-1',
+  };
+  const stewardCalls = (log: ReturnType<typeof vi.fn>) => log.mock.calls.filter((c) => c[0] === 'steward-triggered');
+
+  it('logs nothing when the steward is off or false', async () => {
+    vi.mocked(checkPhase).mockResolvedValue(CHECK_EXHAUSTED);
+    for (const req of [baseRequest(), baseRequest({ stewardEnabled: false })]) {
+      const log = vi.fn();
+      await runIssue(req, basePolicy(), basePorts({ events: () => log }));
+      expect(stewardCalls(log)).toHaveLength(0);
+    }
+  });
+
+  it('logs one steward-triggered event after the fail park when enabled', async () => {
+    vi.mocked(checkPhase).mockResolvedValue(CHECK_EXHAUSTED);
+    const log = vi.fn();
+    await runIssue(baseRequest({ stewardEnabled: true }), basePolicy(), basePorts({ events: () => log }));
+    const calls = stewardCalls(log);
+    expect(calls).toHaveLength(1);
+    expect(calls[0][2]).toEqual({ stewardTriggered: { trigger: 'check-exhausted', failureSignature: 'sig-1' } });
+    const types = log.mock.calls.map((c) => c[0]);
+    expect(types.indexOf('steward-triggered')).toBeGreaterThan(types.indexOf('fail'));
+  });
+
+  it('uses the ship-failed trigger for a ci-failed park', async () => {
+    vi.mocked(shipPhase).mockRejectedValue(Object.assign(new Error('ci red'), { parkReason: 'ci-failed' }));
+    const log = vi.fn();
+    await runIssue(baseRequest({ stewardEnabled: true }), basePolicy(), basePorts({ events: () => log }));
+    const calls = stewardCalls(log);
+    expect(calls).toHaveLength(1);
+    expect(calls[0][2].stewardTriggered.trigger).toBe('ship-failed');
+  });
+
+  it('logs nothing for non-trigger parks', async () => {
+    const log = vi.fn();
+    vi.mocked(checkPhase).mockResolvedValue({ ...CHECK_EXHAUSTED, reworkRounds: 1 });
+    await runIssue(baseRequest({ stewardEnabled: true }), basePolicy(), basePorts({ events: () => log }));
+    vi.mocked(checkPhase).mockResolvedValue(CHECK_OK);
+    vi.mocked(buildPhase).mockResolvedValue({ ok: false, model: 'm', route: 'codex', reason: 'no_diff' });
+    await runIssue(baseRequest({ stewardEnabled: true }), basePolicy(), basePorts({ events: () => log }));
+    expect(stewardCalls(log)).toHaveLength(0);
+  });
+
+  it('leaves the park outcome and reports unchanged', async () => {
+    vi.mocked(checkPhase).mockResolvedValue(CHECK_EXHAUSTED);
+    const run = async (stewardEnabled: boolean) => {
+      const writeLocalRunReport = vi.fn().mockResolvedValue('/tmp/report.md');
+      const writeBenchmarkArtifacts = vi.fn().mockResolvedValue(undefined);
+      const touched = vi.fn();
+      const octokit: Octokit = new Proxy({} as Octokit, {
+        get: (_target, prop) => {
+          touched(prop);
+          return undefined;
+        },
+      });
+      const outcome = await runIssue(
+        baseRequest({ stewardEnabled }),
+        basePolicy(),
+        basePorts({ writeLocalRunReport, writeBenchmarkArtifacts, octokit }),
+      );
+      return { outcome, writeLocalRunReport, writeBenchmarkArtifacts, touched };
+    };
+    const off = await run(false);
+    const on = await run(true);
+    expect(on.outcome).toEqual(off.outcome);
+    expect(on.writeLocalRunReport.mock.calls).toEqual(off.writeLocalRunReport.mock.calls);
+    expect(on.writeBenchmarkArtifacts.mock.calls).toEqual(off.writeBenchmarkArtifacts.mock.calls);
+    expect(on.touched.mock.calls).toEqual(off.touched.mock.calls);
+  });
+});
+
 describe('runIssue — reporting hooks', () => {
   it('writes a local run report and benchmark artifacts on every parked exit', async () => {
     vi.mocked(checkPhase).mockResolvedValue({ passed: false, summary: CHECK_SUMMARY, reworkRounds: 1 });
