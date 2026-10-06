@@ -1,10 +1,15 @@
-// src/reports/pr-body.ts — the PR description SHIP opens with. It leads with the intent of the
-// change (the frozen spec's Goal, approach, and tests) so a reviewer sees why the change exists and
-// how it solves the ticket before the file list. The diff stat stays, collapsed, at the end.
+// src/reports/pr-body.ts — the PR description SHIP opens with. It is short: a 1-3 sentence summary
+// of the frozen spec's Goal and approach, a one-line proof (checker counts, rework rounds), an
+// optional risk line, the collapsed diff stat, the Closes / Part of line, and a fixed footer.
 
 import type { CheckSummary } from '../types/index.js';
 
 const SECTION_LIMIT = 4000;
+const WHAT_CHANGED_LIMIT = 600;
+const WHAT_CHANGED_SENTENCES = 3;
+
+/** Fixed last line of every PR body. */
+export const PR_BODY_FOOTER = 'This PR made possible by Software Factory.';
 
 export interface PrBodyInput {
   /** One line naming the work item, e.g. "Implements #23.". */
@@ -14,6 +19,10 @@ export interface PrBodyInput {
   diffStat: string;
   checkSummary?: CheckSummary;
   /** Issue the PR closes; omitted for a non-github work source. */
+  /** Rework rounds CHECK ran; undefined renders as 0. */
+  reworkRounds?: number;
+  /** The design artifact's Risk / blast radius; the Risk line is omitted when absent or blank. */
+  risk?: string;
   closes?: number;
   /** Parent issue of a non-final ADR-0147 slice; renders `Part of #N` and never a closing keyword. */
   partOf?: number;
@@ -27,28 +36,65 @@ export interface SpecIntent {
 
 export function renderPrBody(input: PrBodyInput): string {
   const intent = input.specBody === undefined ? {} : extractSpecIntent(input.specBody);
-  const verification = input.checkSummary
-    ? `Checkers: ${input.checkSummary.passes} pass, ${input.checkSummary.failures} fail, ${input.checkSummary.skips} skip. `
-    : '';
+  const whatChanged = summarizeIntent(intent);
+  const rounds = input.reworkRounds ?? 0;
+  const proof = input.checkSummary
+    ? `Checkers: ${input.checkSummary.passes} pass, ${input.checkSummary.failures} fail, ${input.checkSummary.skips} skip · Rework rounds: ${rounds}`
+    : `Checkers: not run · Rework rounds: ${rounds}`;
+  const risk = input.risk?.replace(/\s+/g, ' ').trim();
 
   return [
     section('Summary', input.summaryLine),
-    intent.goal === undefined ? undefined : section('Why', intent.goal),
-    intent.approach === undefined ? undefined : section('How', intent.approach),
-    intent.tests === undefined ? undefined : section('Tests', intent.tests),
-    section(
-      'Verification',
-      `${verification}This PR passed independent verification by checker agents before shipping.`,
-    ),
+    whatChanged === undefined ? undefined : section('What changed', whatChanged),
+    section('Proof', proof),
+    risk ? `**Risk:** ${risk}` : undefined,
     ['<details>', '<summary>Changed files</summary>', '', '```', input.diffStat, '```', '', '</details>'].join('\n'),
     input.closes !== undefined
       ? `Closes #${input.closes}`
       : input.partOf !== undefined
         ? `Part of #${input.partOf}`
         : undefined,
+    PR_BODY_FOOTER,
   ]
     .filter((part): part is string => part !== undefined)
     .join('\n\n');
+}
+
+/** A 1-3 sentence plain-prose digest of the goal and approach, cut at a sentence boundary within maxChars. */
+export function summarizeIntent(intent: SpecIntent, maxChars = WHAT_CHANGED_LIMIT): string | undefined {
+  const sources = [intent.goal, intent.approach].filter((text): text is string => text !== undefined);
+  if (sources.length === 0) return undefined;
+  const lines: string[] = [];
+  let inFence = false;
+  for (const line of sources.join('\n').split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence || /^\s*#{1,6}\s/.test(line)) continue;
+    lines.push(line.replace(/^\s*([-*+]|\d+\.)\s+/, ''));
+  }
+  const text = lines.join(' ').replace(/\s+/g, ' ').trim();
+  if (!text) return undefined;
+
+  const sentences = text
+    .split(/(?<=[.!?…])\s+/)
+    .map((piece) => piece.trim())
+    .filter((piece) => piece.length > 0)
+    .map((piece) => (/[.!?…]$/.test(piece) ? piece : `${piece}.`));
+
+  let result = '';
+  for (const sentence of sentences.slice(0, WHAT_CHANGED_SENTENCES)) {
+    const next = result === '' ? sentence : `${result} ${sentence}`;
+    if (next.length > maxChars) break;
+    result = next;
+  }
+  if (result !== '') return result;
+
+  const head = (sentences[0] ?? text).slice(0, maxChars - 1);
+  const lastSpace = head.lastIndexOf(' ');
+  const cut = lastSpace > 0 ? head.slice(0, lastSpace) : head;
+  return `${cut.trimEnd().replace(/[,;:]+$/, '')}…`;
 }
 
 /** Pulls the Goal, Files / approach, and Tests sections out of a frozen spec body. */

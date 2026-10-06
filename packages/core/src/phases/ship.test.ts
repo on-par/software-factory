@@ -1232,7 +1232,7 @@ describe('shipPhase evidence pack', () => {
 });
 
 describe('shipPhase PR description', () => {
-  it('opens the PR with the frozen spec goal, approach, and tests ahead of the diff stat', async () => {
+  it('opens the PR with a short what-changed summary ahead of the diff stat', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'ship-pr-body-test-'));
     try {
       const specPath = join(dir, 'issue-23.md');
@@ -1278,13 +1278,67 @@ describe('shipPhase PR description', () => {
 
       expect(result).toEqual({ ok: true, prNumber: 123 });
       const body: string = calls.find((c) => c[0] === 'pulls.create')[1].body;
-      expect(body).toContain('## Why\nA crashed run leaves committed work with no PR.');
-      expect(body).toContain('## How\nDetect commits ahead of main in `ship.ts`');
-      expect(body).toContain('## Tests\nCover the recovery path in `ship.test.ts`.');
+      expect(body).toContain('## What changed\nA crashed run leaves committed work with no PR.');
+      expect(body).toContain('## Proof\n');
+      for (const old of ['## Why', '## How', '## Tests']) expect(body).not.toContain(old);
+      expect(body).not.toMatch(/^\*\*Risk:\*\*/m);
       expect(body).not.toContain('route: codex');
       expect(body).not.toContain('Recovering uncommitted work.');
-      expect(body.indexOf('## Why')).toBeLessThan(body.indexOf('ship.ts | 12'));
+      expect(body.indexOf('## What changed')).toBeLessThan(body.indexOf('ship.ts | 12'));
+      expect(body.split('\n').at(-1)).toBe('This PR made possible by Software Factory.');
       expect(body).toContain('Closes #23');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('shipPhase PR risk line', () => {
+  it('adds the design artifact risk and rework rounds to the PR body', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ship-pr-risk-test-'));
+    try {
+      const specPath = join(dir, 'issue-23.md');
+      await writeFile(specPath, '---\nroute: codex\n---\n# Spec (#23)\n## Goal\nDo it.\n');
+      await writeFile(
+        join(dir, 'issue-23.design.json'),
+        JSON.stringify({
+          restatedProblem: 'p',
+          approach: { chosen: 'c', rejected: [{ option: 'o', reason: 'r' }] },
+          interfacesTouched: ['a.ts'],
+          targetTypes: [{ name: 'T', file: 'a.ts', kind: 'changed' }],
+          signatures: [{ symbol: 's', file: 'a.ts', signature: '() => void' }],
+          callGraph: [{ from: 'a', to: 'b', note: 'n' }],
+          behaviorContract: ['b'],
+          verificationPlan: [{ command: 'npm test', passWhen: 'green' }],
+          riskBlastRadius: 'Only ship.ts.',
+          openQuestions: [],
+        }),
+      );
+      const { octokit, calls } = createOctokit();
+      const run = async (command: string) => {
+        const remote = remoteHeadStub(command);
+        if (remote) return remote;
+        if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
+        if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
+        return { stdout: '' };
+      };
+
+      await shipPhase({
+        issue: 23,
+        repo: 'on-par/software-factory',
+        worktree: dir,
+        branch: 'ship-it/23-risk',
+        octokit: octokit as any,
+        watchCI: false,
+        log: () => {},
+        run,
+        specPath,
+        reworkRounds: 1,
+      });
+
+      const body: string = calls.find((c) => c[0] === 'pulls.create')[1].body;
+      expect(body).toContain('**Risk:** Only ship.ts.');
+      expect(body).toContain('Rework rounds: 1');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
