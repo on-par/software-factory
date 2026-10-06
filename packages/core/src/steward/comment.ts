@@ -1,4 +1,4 @@
-// src/steward/comment.ts — render a steward verdict as a fenced markdown issue comment with a hidden marker (#2118), and publish it once per failure signature (#2120, ADR-0144, ADR-0130)
+// src/steward/comment.ts — render a steward verdict as a fenced markdown issue comment with a hidden marker (#2118, #2119), and publish it once per failure signature (#2120, ADR-0144, ADR-0130)
 import { createHash } from 'node:crypto';
 import { fenceExcerpt, stripHiddenContent } from '../filing/sanitize.js';
 import type { StuckTrigger } from './detect.js';
@@ -7,9 +7,12 @@ import type { StewardVerdict } from './diagnose.js';
 /** Version tag in the hidden steward marker. */
 export const STEWARD_COMMENT_MARKER_VERSION = 'v1';
 
+/** First line of an escalated comment (#2119, ADR-0144). */
+export const STEWARD_ESCALATION_LINE = 'Escalated: steward confidence below 90%, no recommendation';
+
 export interface StewardCommentInput {
-  /** An EscalatedStewardVerdict is assignable; `escalate` is ignored here. */
-  verdict: StewardVerdict;
+  /** `escalate: true` (from applyEscalation) adds the escalation banner; absent or false renders the normal comment. */
+  verdict: StewardVerdict & { escalate?: boolean };
   trigger: StuckTrigger;
   runId: string;
   /** The run's failure signature; only its hash reaches the marker. */
@@ -44,7 +47,9 @@ function fenced(text: string): string {
 /** Render a steward verdict as a markdown comment body; all model text sits inside an unbreakable fence. */
 export function renderStewardComment(input: StewardCommentInput): string {
   const { verdict, trigger, runId, signature, runPointer } = input;
+  const escalated = verdict.escalate === true;
   const lines: string[] = [
+    ...(escalated ? [STEWARD_ESCALATION_LINE, ''] : []),
     '### Factory steward diagnosis',
     '',
     `- **Trigger:** ${trigger}`,
@@ -56,7 +61,7 @@ export function renderStewardComment(input: StewardCommentInput): string {
     '',
     fenced(verdict.diagnosis),
     '',
-    '**Recommended next step**',
+    escalated ? "**Model's suggested next step (unverified, not a recommendation)**" : '**Recommended next step**',
     '',
     fenced(verdict.nextStep),
     '',

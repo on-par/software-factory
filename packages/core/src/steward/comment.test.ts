@@ -3,6 +3,7 @@ import {
   findStewardComment,
   publishStewardComment,
   renderStewardComment,
+  STEWARD_ESCALATION_LINE,
   stewardCommentMarker,
   stewardSignatureHash,
   type StewardCommentGitHubClient,
@@ -246,5 +247,34 @@ describe('findStewardComment', () => {
     ];
     expect(findStewardComment(comments, SIG)?.id).toBe(4);
     expect(findStewardComment([...comments].reverse(), SIG)?.id).toBe(4);
+  });
+});
+
+describe('escalation', () => {
+  it('leads with the escalation line and relabels the next step', () => {
+    const body = renderStewardComment(makeInput({ escalate: true, confidence: 0.5 }));
+    const lines = body.split('\n');
+    expect(lines[0]).toBe(STEWARD_ESCALATION_LINE);
+    expect(lines[0]).toBe('Escalated: steward confidence below 90%, no recommendation');
+    expect(body).not.toContain('Recommended next step');
+    expect(body).toContain('not a recommendation');
+    expect(body).toContain('Fix the loop bound.');
+    expect(lines.at(-1)).toBe(stewardCommentMarker('abc123def456', SIG));
+  });
+
+  it('renders no banner when escalate is false', () => {
+    const body = renderStewardComment(makeInput({ escalate: false }));
+    expect(body).not.toContain(STEWARD_ESCALATION_LINE);
+    expect(body.split('\n')[0]).toBe('### Factory steward diagnosis');
+    expect(body).toContain('**Recommended next step**');
+  });
+
+  it('renders identically when escalate is absent or false', () => {
+    expect(renderStewardComment(makeInput())).toBe(renderStewardComment(makeInput({ escalate: false })));
+  });
+
+  it('keeps the banner outside any fence', () => {
+    const body = renderStewardComment(makeInput({ escalate: true }));
+    expect(outsideFence(body)).toContain(STEWARD_ESCALATION_LINE);
   });
 });
