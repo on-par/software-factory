@@ -78,7 +78,7 @@ export default defineConfig({
         // RATCHET per package: each metric set at the measured floor. Vitest 4
         // rebaselines the V8 mapping results, so these values are reset once
         // here and remain a non-decreasing guard afterwards.
-        'packages/adr-kit/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 91, statements: 98 },
+        'packages/adr-kit/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 92, statements: 98 },
         'packages/config/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 49, statements: 99 },
         'packages/contracts/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
         'packages/repo-context/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 98, statements: 99 },
