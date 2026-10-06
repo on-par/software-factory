@@ -255,10 +255,10 @@ async function shipPhaseImpl(opts: {
     const slice = inlineWork ? undefined : opts.slice;
     const finalSlice = !slice || slice.index >= slice.count;
     const summaryLine = inlineWork
-      ? `Implements local brief \`${inlineWork.id}\`. Built by the Software Factory (PLAN → BUILD → CHECK → SHIP).`
+      ? `Implements local brief \`${inlineWork.id}\`.`
       : slice
-        ? `Implements slice ${slice.index}/${slice.count} of #${issue}. Built by the Software Factory (PLAN → BUILD → CHECK → SHIP).`
-        : `Implements #${issue}. Built by the Software Factory (PLAN → BUILD → CHECK → SHIP).`;
+        ? `Implements slice ${slice.index}/${slice.count} of #${issue}.`
+        : `Implements #${issue}.`;
     const prTitle = inlineWork
       ? title
       : slice

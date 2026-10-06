@@ -176,6 +176,9 @@ describe('shipPhase self-healing', () => {
         body: expect.stringContaining('Closes #23'),
       }),
     ]);
+    const [, issueCreate] = calls.find(([name]) => name === 'pulls.create') as [string, any];
+    expect(issueCreate.body).toContain('## Summary\nImplements #23.\n');
+    expect(issueCreate.body).not.toContain('PLAN → BUILD → CHECK → SHIP');
     expect(calls).toContainEqual(['pulls.get', { owner: 'on-par', repo: 'software-factory', pull_number: 123 }]);
     expect(calls).toContainEqual(['graphql', expect.stringContaining('markPullRequestReadyForReview'), { id: 'PR_1' }]);
     expect(logs).toContainEqual(['recovered', 'opened PR #123 for committed work on ship-it/23-self-heal']);
@@ -211,6 +214,7 @@ describe('shipPhase self-healing', () => {
     const create = calls.find((c) => c[0] === 'pulls.create')![1] as { title: string; body: string };
     expect(create.title).toBe(`Self-heal committed work — slice ${slice.index}/${slice.count} (#23)`);
     expect(create.body).toContain(`Implements slice ${slice.index}/${slice.count} of #23.`);
+    expect(create.body).not.toContain('PLAN → BUILD → CHECK → SHIP');
     if (partOf) {
       expect(create.body).toContain('Part of #23');
       expect(create.body).not.toMatch(/Closes/);
@@ -947,6 +951,7 @@ describe('shipPhase inline work source (#507)', () => {
     ]);
     const [, createArgs] = calls.find(([name]) => name === 'pulls.create') as [string, any];
     expect(createArgs.body).not.toContain('Closes #');
+    expect(createArgs.body).not.toContain('PLAN → BUILD → CHECK → SHIP');
   });
 
   it('behaves exactly like today when work is a github-issue request (run-issue passthrough is inert)', async () => {
