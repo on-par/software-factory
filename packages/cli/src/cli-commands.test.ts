@@ -4094,6 +4094,57 @@ bash scripts/verify.sh
       expect(ops.sweepWorktrees).not.toHaveBeenCalled();
     });
 
+    describe('--size-gate (#2048)', () => {
+      const enforced = () => phases.planPhase.mock.calls.at(-1)?.[0].enforceSizeGate;
+
+      it('enforces the size gates with no config and no flag', async () => {
+        await runMain('run-issue', '5');
+        expect(enforced()).toBe(true);
+      });
+
+      it('skips the size gates when sizeGate.mode is off in the config', async () => {
+        h.factoryConfig = { ...h.factoryConfig, sizeGate: { mode: 'off' } };
+        await runMain('run-issue', '5');
+        expect(enforced()).toBe(false);
+      });
+
+      it('--size-gate off beats a file config', async () => {
+        h.factoryConfig = { ...h.factoryConfig, sizeGate: { mode: 'file' } };
+        await runMain('run-issue', '5', '--size-gate', 'off');
+        expect(enforced()).toBe(false);
+      });
+
+      it('--size-gate file beats an off config', async () => {
+        h.factoryConfig = { ...h.factoryConfig, sizeGate: { mode: 'off' } };
+        await runMain('run-issue', '5', '--size-gate', 'file');
+        expect(enforced()).toBe(true);
+      });
+
+      it('rejects an unknown mode with exit 2 before planning', async () => {
+        const res = await runMain('run-issue', '5', '--size-gate', 'bogus');
+        expect(res).toMatchObject({ exited: true, code: 2 });
+        expect(errored()).toContain('--size-gate');
+        expect(errored()).toContain('file');
+        expect(errored()).toContain('off');
+        expect(phases.planPhase).not.toHaveBeenCalled();
+      });
+
+      it('--help lists --size-gate', async () => {
+        const originalWrite = process.stdout.write;
+        const written: string[] = [];
+        process.stdout.write = ((chunk: string | Uint8Array) => {
+          written.push(String(chunk));
+          return true;
+        }) as typeof process.stdout.write;
+        try {
+          await runMain('run-issue', '--help');
+        } finally {
+          process.stdout.write = originalWrite;
+        }
+        expect(written.join('')).toContain('--size-gate');
+      });
+    });
+
     it('--help lists --run-children with its one-line description (#1750)', async () => {
       const originalWrite = process.stdout.write;
       const written: string[] = [];

@@ -135,6 +135,10 @@ import {
   resolveCodexDisabled,
   resolveDefectWindowDays,
   resolveBuildPublish,
+  resolveSizeGateMode,
+  parseSizeGateMode,
+  SIZE_GATE_MODES,
+  type SizeGateMode,
   resolveDesignRegressionBlock,
   resolveEffectiveModelPins,
   resolveEfficiencyPolicy,
@@ -947,6 +951,15 @@ function branchPrefixOrExit(raw: string | undefined): string {
   const prefix = resolveBranchPrefixOption(raw);
   if (prefix === null) throw new CliExitError(INVALID_BRANCH_PREFIX_MESSAGE, 2);
   return prefix;
+}
+
+function sizeGateOrExit(raw: string | undefined): SizeGateMode | undefined {
+  if (raw === undefined) return undefined;
+  const mode = parseSizeGateMode(raw);
+  if (mode === undefined) {
+    throw new CliExitError(`factory: invalid --size-gate '${raw}' — expected one of: ${SIZE_GATE_MODES.join(', ')}`, 2);
+  }
+  return mode;
 }
 
 /** Deterministic run number for a brief, derived from its content digest.
@@ -1985,6 +1998,8 @@ export async function shipIssue(
     sandbox?: boolean;
     approvePlan?: boolean;
     branchPrefix?: string;
+    /** `run-issue --size-gate` (ADR-0147); undefined defers to sizeGate.mode in the config. */
+    sizeGate?: SizeGateMode;
     /** `--pr-classifier` / `--no-pr-classifier` (#1724); undefined defers to config/env. */
     prClassifier?: boolean;
   },
@@ -2271,6 +2286,7 @@ export async function shipIssue(
     localOnly: Boolean(ctx?.localOnly),
     blockUnresolvedRegressions: resolveDesignRegressionBlock(factoryConfig),
     publishFromBuild: resolveBuildPublish(factoryConfig),
+    sizeGateMode: opts.sizeGate ?? resolveSizeGateMode(factoryConfig),
     prClassifier: classifierPolicy.enabled
       ? {
           rules: resolveReviewFloorRules(repoConfig),
@@ -2651,6 +2667,7 @@ async function cmdRunIssue(
     approvePlan?: boolean;
     branchPrefix?: string;
     runChildren?: boolean;
+    sizeGate?: string;
   },
 ) {
   if (!coreOps.isCommandAvailable('claude')) {
@@ -2662,8 +2679,9 @@ async function cmdRunIssue(
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
 
-  const { runChildren, ...shipOpts } = opts;
+  const { runChildren, sizeGate: rawSizeGate, ...shipOpts } = opts;
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
+  const sizeGate = sizeGateOrExit(rawSizeGate);
 
   await withRepoRunLock(paths, 'factory run-issue', async () => {
     const ghRepo = await getGitHubRepo();
@@ -2697,14 +2715,14 @@ async function cmdRunIssue(
     }
 
     try {
-      await shipIssue(issueNum, { ...shipOpts, branchPrefix }, { repoRoot, ghRepo, workRequest: work });
+      await shipIssue(issueNum, { ...shipOpts, branchPrefix, sizeGate }, { repoRoot, ghRepo, workRequest: work });
     } catch (err: any) {
       if (err instanceof IssueSkippedError) return;
       if (err instanceof IssueDecomposedError && runChildren) {
         await runDecomposedChildren(
           issueNum,
           err.childIssues,
-          { ...shipOpts, branchPrefix },
+          { ...shipOpts, branchPrefix, sizeGate },
           { repoRoot, ghRepo, workSources },
         );
         return;
@@ -5968,6 +5986,10 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .option('--run-children', 'When the size gate decomposes the issue, run the child issues it filed')
+    .option(
+      '--size-gate <mode>',
+      'Size gate mode for this run: file (file child issues / park) or off (skip both gates); beats sizeGate.mode in the config',
+    )
     .action(async (issueNum, opts) => {
       await cmdRunIssue(parseIssueArg(issueNum), opts);
     });

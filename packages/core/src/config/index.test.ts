@@ -24,6 +24,8 @@ import {
   resolveMergePolicy,
   resolvePrClassifierPolicy,
   resolveBuildPublish,
+  resolveSizeGateMode,
+  parseSizeGateMode,
   resolveDesignRegressionBlock,
   resolvePlanApproval,
   resolveProcessGroupGraceMs,
@@ -897,6 +899,48 @@ describe('loadRoutesConfig', () => {
     await writeFile(path, JSON.stringify({ version: 1, routes: { plan: { tier: 'boss' } } }));
 
     expect(() => loadRoutesConfig(path)).toThrow();
+  });
+});
+
+describe('resolveSizeGateMode (#2048)', () => {
+  it('defaults to file', () => {
+    expect(resolveSizeGateMode(loadFactoryConfig())).toBe('file');
+  });
+
+  it('resolves off', () => {
+    const config = loadFactoryConfig();
+    expect(resolveSizeGateMode({ ...config, sizeGate: { mode: 'off' } })).toBe('off');
+  });
+
+  it.each(['slice', 'OFF', ' off ', ''])('resolves unknown mode %j to file', (mode) => {
+    const config = loadFactoryConfig();
+    expect(resolveSizeGateMode({ ...config, sizeGate: { mode } })).toBe('file');
+  });
+
+  it('loads a config file with an unknown sizeGate.mode and resolves it to file', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
+    try {
+      const path = join(dir, 'factory.json');
+      const base = loadFactoryConfig();
+      await writeFile(path, JSON.stringify({ ...base, sizeGate: { mode: 'bogus' } }));
+      const config = loadFactoryConfig(path);
+      expect(resolveSizeGateMode(config)).toBe('file');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('parseSizeGateMode (#2048)', () => {
+  it('passes file and off through', () => {
+    expect(parseSizeGateMode('file')).toBe('file');
+    expect(parseSizeGateMode('off')).toBe('off');
+  });
+
+  it('returns undefined for anything else', () => {
+    expect(parseSizeGateMode('bogus')).toBeUndefined();
+    expect(parseSizeGateMode(undefined)).toBeUndefined();
+    expect(parseSizeGateMode(1)).toBeUndefined();
   });
 });
 
