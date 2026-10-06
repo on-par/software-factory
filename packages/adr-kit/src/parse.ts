@@ -24,8 +24,8 @@ function parseReferenceLine(line: string): AdrReference | undefined {
   if (m) return { text: m[2], url: m[3], marker: m[1] };
   m = /^\s*([-*])\s+<?(https?:\/\/[^\s>]+)>?\s*$/.exec(line);
   if (m) return { text: m[2], url: m[2], marker: m[1] };
-  m = /^\s*([-*])\s+(.+)$/.exec(line);
-  if (m) return { text: m[2], marker: m[1] };
+  m = /^\s*([-*])\s+(\S.*)?$/.exec(line);
+  if (m) return { text: m[2] ?? '', marker: m[1] };
   return undefined;
 }
 
@@ -63,23 +63,23 @@ function parseInternal(source: string, options?: { filename?: string }): ParseIn
   idx++;
 
   let number: number | undefined;
-  let title = '';
-  let titleStyle: AdrConvention['titleStyle'] = 'plain';
+  let title: string;
+  let titleStyle: AdrConvention['titleStyle'];
   let numberWidth = NYGARD_CONVENTION.numberWidth;
 
-  let m = /^#\s+ADR[-\s]?(\d+)\s*[:.—-]\s*(.+)$/i.exec(h1);
+  let m = /^#\s+ADR[-\s]?(\d+)\s*[:.—-]\s*(\S.*)?$/i.exec(h1);
   if (m) {
     number = Number(m[1]);
-    title = m[2];
+    title = m[2] ?? '';
     titleStyle = 'adr-prefix';
     numberWidth = m[1].length;
-  } else if ((m = /^#\s+(\d+)\.\s*(.+)$/.exec(h1))) {
+  } else if ((m = /^#\s+(\d+)\.\s*(\S.*)?$/.exec(h1))) {
     number = Number(m[1]);
-    title = m[2];
+    title = m[2] ?? '';
     titleStyle = 'numbered-dot';
   } else {
-    m = /^#\s+(.+)$/.exec(h1);
-    title = m ? m[1] : '';
+    m = /^#\s+(\S.*)?$/.exec(h1);
+    title = m?.[1] ?? '';
     titleStyle = 'plain';
   }
   if (number === undefined) {
@@ -97,7 +97,7 @@ function parseInternal(source: string, options?: { filename?: string }): ParseIn
   let metaBullet = '- ';
   let sawPreambleStatus = false;
   for (const line of preambleLines) {
-    const pm = /^(-\s+|\*\s+)?(Status|Date)\s*:\s*(.*)$/i.exec(line);
+    const pm = /^(-\s+|\*\s+)?(Status|Date)\s*:(.*)$/i.exec(line);
     if (!pm) continue;
     const bullet = pm[1] ?? '';
     const label = pm[2].toLowerCase();
@@ -115,7 +115,7 @@ function parseInternal(source: string, options?: { filename?: string }): ParseIn
   const sections: ParsedSection[] = [];
   let current: { heading: string; headingMarker: string; bodyLines: string[] } | undefined;
   for (const line of lines.slice(idx)) {
-    const hm = /^(#{2,6})\s+(.+)$/.exec(line);
+    const hm = /^(#{2,6})\s+(\S.*)?$/.exec(line);
     if (hm) {
       if (current)
         sections.push({
@@ -123,7 +123,7 @@ function parseInternal(source: string, options?: { filename?: string }): ParseIn
           headingMarker: current.headingMarker,
           body: trimBlankEdges(current.bodyLines),
         });
-      current = { heading: hm[2], headingMarker: `${hm[1]} `, bodyLines: [] };
+      current = { heading: hm[2] ?? '', headingMarker: `${hm[1]} `, bodyLines: [] };
     } else if (current) {
       current.bodyLines.push(line);
     }
