@@ -2,9 +2,9 @@
 // lifecycle: capture worktree state before the first attempt of an agentic
 // build task, then hard-reset back to it before every retry/failover attempt.
 
+import { constants } from 'node:fs';
 import { mkdir, realpath, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import type { ExecFn } from '../utils/exec.js';
 import { shellEscape } from '../utils/index.js';
@@ -85,13 +85,7 @@ export async function resetWorktreeState(
   let tracePath: string | undefined;
   try {
     const { stdout: diffText } = await execFn('git diff HEAD', { cwd: worktree, ...GIT_OPTS });
-    const traceDir = join(tmpdir(), 'factory-attempt-traces');
-    await mkdir(traceDir, { recursive: true });
-    const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const candidatePath = join(traceDir, `${basename(worktree)}-${stamp}.patch`);
-    const blob = `${statusText}\n${diffText}`;
-    await writeFile(candidatePath, blob);
-    tracePath = candidatePath;
+    tracePath = await writeAttemptTrace(worktree, `${statusText}\n${diffText}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     onLog(`warning: failed to write attempt trace before reset: ${message}`);
@@ -102,6 +96,27 @@ export async function resetWorktreeState(
   await execFn(`git clean -fd${cleanArgs ? ` ${cleanArgs}` : ''}`, { cwd: worktree, ...GIT_OPTS });
 
   return { didReset: true, ...(tracePath ? { tracePath } : {}) };
+}
+
+/** Write an attempt trace (the full `git diff`, which may hold secrets) under
+ *  `<worktree>/.factory/attempt-traces` with mode 0600. It used to go to a shared
+ *  `$TMPDIR/factory-attempt-traces`, which another local user could pre-create and read
+ *  (CodeQL #30). A `*` .gitignore in the trace dir keeps traces out of `git status` (so the
+ *  snapshot comparison stays stable), out of `git clean -fd`, and out of the ship phase's
+ *  `git add -A`. The agent controls the worktree, so a symlinked trace dir is refused. */
+async function writeAttemptTrace(worktree: string, blob: string): Promise<string> {
+  const traceDir = join(worktree, '.factory', 'attempt-traces');
+  await mkdir(traceDir, { recursive: true, mode: 0o700 });
+  const [realTraceDir, realWorktree] = await Promise.all([realpath(traceDir), realpath(worktree)]);
+  if (realTraceDir !== join(realWorktree, '.factory', 'attempt-traces')) {
+    throw new Error(`${traceDir} resolves outside the worktree`);
+  }
+  const noFollowWrite = constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW;
+  await writeFile(join(realTraceDir, '.gitignore'), '*\n', { flag: noFollowWrite });
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const tracePath = join(realTraceDir, `${stamp}.patch`);
+  await writeFile(tracePath, blob, { mode: 0o600, flag: 'wx' });
+  return tracePath;
 }
 
 function parseGitStatusPaths(status: string): string[] {
