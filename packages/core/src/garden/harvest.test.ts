@@ -1,10 +1,14 @@
 // src/garden/harvest.test.ts — Tests for the read-only garden harvest (#2083)
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
+import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   capGardenClusters,
@@ -347,5 +351,94 @@ describe('garden report options (#2087)', () => {
       'samples',
     ]);
     expect(JSON.parse(renderGardenJson([], { since: '1w', maxClusters: 3 })).clusters).toEqual([]);
+  });
+});
+
+describe('garden report is read-only and handles empty input (#2088)', () => {
+  const NOW = new Date('2026-01-02T00:00:00.000Z');
+  const report = (files: string[]) => {
+    const clusters = capGardenClusters(
+      clusterGarden(filterGardenWindow(readHarvestEvents(files), 14 * 86_400_000, NOW)),
+      10,
+    );
+    return {
+      clusters,
+      md: renderGardenReport(clusters),
+      json: renderGardenJson(clusters, { since: '14d', maxClusters: 10 }),
+    };
+  };
+
+  let fetchStub: ReturnType<typeof vi.fn>;
+  let spies: { mock: { calls: unknown[] } }[];
+  const boom = () => {
+    throw new Error('network');
+  };
+
+  beforeEach(() => {
+    fetchStub = vi.fn(boom);
+    vi.stubGlobal('fetch', fetchStub);
+    spies = [
+      vi.spyOn(http, 'request').mockImplementation(boom),
+      vi.spyOn(http, 'get').mockImplementation(boom),
+      vi.spyOn(https, 'request').mockImplementation(boom),
+      vi.spyOn(https, 'get').mockImplementation(boom),
+      vi.spyOn(net, 'connect').mockImplementation(boom),
+      vi.spyOn(net, 'createConnection').mockImplementation(boom),
+    ];
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  const expectNoNetwork = () => {
+    expect(fetchStub).not.toHaveBeenCalled();
+    for (const spy of spies) expect(spy.mock.calls).toHaveLength(0);
+  };
+
+  it('makes no network call on populated input', () => {
+    const f = write('pop.ndjson', [
+      park('fail', '1', 'sig', '2026-01-01T00:00:00.000Z'),
+      JSON.stringify({ ts: '2026-01-01T00:00:00.000Z', type: 'human-edited', issue: '2', msg: 'm' }),
+    ]);
+    const { clusters, md } = report([f]);
+    expect(clusters.length).toBeGreaterThan(0);
+    expect(md.join('\n')).toContain('# Garden report');
+    expectNoNetwork();
+  });
+
+  it('makes no network call on empty input', () => {
+    report([join(dir, 'missing.ndjson')]);
+    expectNoNetwork();
+  });
+
+  it('harvest.ts imports only local, read-only modules', () => {
+    const src = readFileSync(fileURLToPath(new URL('./harvest.ts', import.meta.url)), 'utf-8');
+    const specifiers = [...src.matchAll(/^\s*import\s[^;]*?from\s+'([^']+)'/gm)].map((m) => m[1]);
+    expect([...new Set(specifiers)].sort()).toEqual(['../events/kinds.js', '../types/index.js', 'node:fs']);
+    expect(src).not.toMatch(/fetch\(/);
+    expect(src).not.toMatch(/octokit/i);
+  });
+
+  describe('empty input renders no clusters and an empty JSON document', () => {
+    const cases: [string, () => string][] = [
+      ['a missing file', () => join(dir, 'missing.ndjson')],
+      [
+        'a zero-byte file',
+        () => {
+          const f = join(dir, 'empty.ndjson');
+          writeFileSync(f, '');
+          return f;
+        },
+      ],
+      ['only blank and malformed lines', () => write('junk.ndjson', ['', '   ', '{not json'])],
+      ['only out-of-window events', () => write('old.ndjson', [park('fail', '1', 's', '2025-01-01T00:00:00.000Z')])],
+    ];
+    it.each(cases)('%s', (_name, make) => {
+      const { md, json } = report([make()]);
+      expect(md).toEqual(['no clusters']);
+      expect(JSON.parse(json)).toEqual({ since: '14d', maxClusters: 10, clusters: [] });
+      expectNoNetwork();
+    });
   });
 });

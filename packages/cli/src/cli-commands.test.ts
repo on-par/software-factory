@@ -1617,6 +1617,82 @@ bash scripts/verify.sh
       expect(errored()).toContain(`factory garden: cannot write ${out}`);
     });
 
+    describe('read-only and empty input (#2088)', () => {
+      afterEach(() => {
+        vi.unstubAllGlobals();
+      });
+
+      const emptyDoc = { since: '14d', maxClusters: 10, clusters: [] };
+
+      const guardSideEffects = () => {
+        const octokitFactory = vi.fn(() => h.octokit);
+        ops.octokit = octokitFactory;
+        const fetchFn = vi.fn(async () => {
+          throw new Error('network');
+        });
+        vi.stubGlobal('fetch', fetchFn);
+        return () => {
+          expect(octokitFactory).not.toHaveBeenCalled();
+          expect(fetchFn).not.toHaveBeenCalled();
+          const cmds = [...ops.exec.mock.calls, ...ops.execSync.mock.calls].map((c) => String(c[0]));
+          expect(cmds.filter((c) => /(^|\s)gh\s/.test(c))).toEqual([]);
+          for (const fn of Object.values(h.octokit.rest.issues)) expect(fn).not.toHaveBeenCalled();
+        };
+      };
+
+      it('makes no network call and creates no GitHub issue, label or comment', async () => {
+        writeFileSync(paths().events, `${[parkLine('1', hoursAgo(2)), parkLine('2', hoursAgo(1))].join('\n')}\n`);
+        const argvs = [
+          ['garden', '--report'],
+          ['garden', '--report', '--json'],
+          ['garden', '--report', '--out', join(h.repoRoot, 'r.md')],
+        ];
+        for (const argv of argvs) {
+          const check = guardSideEffects();
+          const res = await runMain(...argv);
+          expect(res.exited).toBe(false);
+          check();
+        }
+      });
+
+      it('an empty events file prints no clusters and exits 0', async () => {
+        writeFileSync(paths().events, '');
+        const res = await runMain('garden', '--report');
+        expect(res.exited).toBe(false);
+        expect(res.code).toBeUndefined();
+        expect(logged()).toContain('no clusters');
+      });
+
+      it('only out-of-window events print no clusters and exit 0', async () => {
+        writeFileSync(paths().events, `${parkLine('1', hoursAgo(24 * 30))}\n`);
+        const res = await runMain('garden', '--report');
+        expect(res.exited).toBe(false);
+        expect(logged()).toContain('no clusters');
+      });
+
+      it('--json with empty input prints an empty clusters document and exits 0', async () => {
+        const res = await runMain('garden', '--report', '--json');
+        expect(res.exited).toBe(false);
+        expect(JSON.parse(logged())).toEqual(emptyDoc);
+      });
+
+      it('--out with empty input writes no clusters and exits 0', async () => {
+        const out = join(h.repoRoot, 'empty.md');
+        const res = await runMain('garden', '--report', '--out', out);
+        expect(res.exited).toBe(false);
+        expect(readFileSync(out, 'utf8')).toBe('no clusters\n');
+        expect(logSpy).not.toHaveBeenCalled();
+        expect(errored()).toContain('wrote report to');
+      });
+
+      it('--json --out with empty input writes the empty JSON document', async () => {
+        const out = join(h.repoRoot, 'empty.json');
+        const res = await runMain('garden', '--report', '--json', '--out', out);
+        expect(res.exited).toBe(false);
+        expect(JSON.parse(readFileSync(out, 'utf8'))).toEqual(emptyDoc);
+      });
+    });
+
     it('exits non-zero without --report', async () => {
       const res = await runMain('garden');
       expect(res.exited).toBe(true);
