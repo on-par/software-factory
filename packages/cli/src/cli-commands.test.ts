@@ -168,6 +168,7 @@ function defaultOctokit() {
       },
       git: { deleteRef: vi.fn(async () => ({})) },
       checks: { listForRef: vi.fn(async () => ({ data: { check_runs: [] } })) },
+      search: { issuesAndPullRequests: vi.fn(async () => ({ data: { items: [] } })) },
     },
     graphql: vi.fn(async (query: string) =>
       query.trimStart().startsWith('query')
@@ -1706,7 +1707,7 @@ bash scripts/verify.sh
 
       const emptyDoc = { since: '14d', maxClusters: 10, clusters: [] };
 
-      const guardSideEffects = () => {
+      const guardSideEffects = (opts: { searchAllowed: boolean }) => {
         const octokitFactory = vi.fn(() => h.octokit);
         ops.octokit = octokitFactory;
         const fetchFn = vi.fn(async () => {
@@ -1714,15 +1715,21 @@ bash scripts/verify.sh
         });
         vi.stubGlobal('fetch', fetchFn);
         return () => {
-          expect(octokitFactory).not.toHaveBeenCalled();
           expect(fetchFn).not.toHaveBeenCalled();
           const cmds = [...ops.exec.mock.calls, ...ops.execSync.mock.calls].map((c) => String(c[0]));
-          expect(cmds.filter((c) => /(^|\s)gh\s/.test(c))).toEqual([]);
+          const ghCmds = cmds.filter((c) => /(^|\s)gh\s/.test(c));
+          if (opts.searchAllowed) {
+            expect(h.octokit.rest.search.issuesAndPullRequests).toHaveBeenCalled();
+            for (const c of ghCmds) expect(c).toMatch(/gh (repo view|auth token)/);
+          } else {
+            expect(octokitFactory).not.toHaveBeenCalled();
+            expect(ghCmds).toEqual([]);
+          }
           for (const fn of Object.values(h.octokit.rest.issues)) expect(fn).not.toHaveBeenCalled();
         };
       };
 
-      it('makes no network call and creates no GitHub issue, label or comment', async () => {
+      it('only reads: searches GitHub but creates no issue, label or comment', async () => {
         writeFileSync(paths().events, `${[parkLine('1', hoursAgo(2)), parkLine('2', hoursAgo(1))].join('\n')}\n`);
         const argvs = [
           ['garden', '--report'],
@@ -1730,11 +1737,19 @@ bash scripts/verify.sh
           ['garden', '--report', '--out', join(h.repoRoot, 'r.md')],
         ];
         for (const argv of argvs) {
-          const check = guardSideEffects();
+          const check = guardSideEffects({ searchAllowed: true });
           const res = await runMain(...argv);
           expect(res.exited).toBe(false);
           check();
         }
+      });
+
+      it('empty input makes no network call, creates no octokit and runs no gh', async () => {
+        writeFileSync(paths().events, '');
+        const check = guardSideEffects({ searchAllowed: false });
+        const res = await runMain('garden', '--report');
+        expect(res.exited).toBe(false);
+        check();
       });
 
       it('an empty events file prints no clusters and exits 0', async () => {
@@ -1772,6 +1787,44 @@ bash scripts/verify.sh
         const res = await runMain('garden', '--report', '--json', '--out', out);
         expect(res.exited).toBe(false);
         expect(JSON.parse(readFileSync(out, 'utf8'))).toEqual(emptyDoc);
+      });
+    });
+
+    describe('tracked/new annotation (#2102)', () => {
+      const writeEvents = () => writeFileSync(paths().events, `${parkLine('1', hoursAgo(2))}\n`);
+
+      it('annotates a cluster as tracked when an open issue carries a garden marker', async () => {
+        writeEvents();
+        h.octokit.rest.search.issuesAndPullRequests.mockImplementation((async () => ({
+          data: { items: [{ number: 31, state: 'open', body: '<!-- garden:tests|boom -->' }] },
+        })) as any);
+        await runMain('garden', '--report');
+        expect(logged()).toContain('- tracked: #31');
+      });
+
+      it('annotates a cluster as new when nothing matches', async () => {
+        writeEvents();
+        await runMain('garden', '--report');
+        expect(logged()).toContain('- new');
+      });
+
+      it('--json clusters carry tracking', async () => {
+        writeEvents();
+        await runMain('garden', '--report', '--json');
+        const doc = JSON.parse(logged());
+        expect(doc.clusters.length).toBeGreaterThan(0);
+        for (const c of doc.clusters) expect(c.tracking).toEqual({ status: 'new' });
+      });
+
+      it('renders unannotated and exits 0 when the search fails', async () => {
+        writeEvents();
+        h.octokit.rest.search.issuesAndPullRequests.mockRejectedValue(new Error('rate limited'));
+        const res = await runMain('garden', '--report');
+        expect(res.exited).toBe(false);
+        expect(logged()).toContain('### 1.');
+        expect(logged()).not.toContain('- new');
+        expect(logged()).not.toContain('- tracked');
+        expect(errored()).toContain('issue search unavailable');
       });
     });
 

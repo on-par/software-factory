@@ -13,6 +13,9 @@ export interface HarvestedEvent {
 
 export type GardenDimension = 'signature' | 'park-reason' | 'checker' | 'human';
 
+/** Whether an open issue already tracks a cluster (#2102). */
+export type GardenTracking = { status: 'tracked'; issue: number } | { status: 'new' };
+
 export interface GardenCluster {
   dimension: GardenDimension;
   /** The cluster key: CHECK failure signature, park event kind, checker name or human-* event kind, depending on `dimension`. */
@@ -26,7 +29,11 @@ export interface GardenCluster {
   samples: string[];
   /** Union of checkFailure.failingChecks across the cluster, sorted. */
   failingChecks: string[];
+  /** Set by dedupGardenClusters; absent when dedup did not run. */
+  tracking?: GardenTracking;
 }
+
+const trackingLine = (t: GardenTracking): string => (t.status === 'tracked' ? `- tracked: #${t.issue}` : '- new');
 
 const DEFAULT_GARDEN_SAMPLE_LIMIT = 5;
 
@@ -190,6 +197,7 @@ export function renderGardenReport(clusters: readonly GardenCluster[]): string[]
       lines.push(
         `### ${i + 1}. ${codeSpan(c.key)}`,
         '',
+        ...(c.tracking ? [trackingLine(c.tracking)] : []),
         `- count: ${c.count}`,
         `- distinct issues: ${c.issues.length} (${c.issues.map((n) => `#${n}`).join(', ')})`,
         `- first seen: ${c.firstSeen}`,
