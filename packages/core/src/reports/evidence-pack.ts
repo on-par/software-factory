@@ -9,13 +9,12 @@ import { readIssueEvents } from './local-run.js';
 
 const REWORK_EVENT_TYPES = new Set(['rework', 'check', 'ship', 'ready']);
 const RESULT_EMOJI: Record<string, string> = { PASS: '✅', FAIL: '❌', SKIP: '⚪' };
-const SPEC_SUMMARY_LIMIT = 600;
+const DESIGN_CONTRACT_HEADINGS = ['Behavior contract', 'Verification plan'];
 
 export interface EvidencePackRenderInput {
   issue: number;
   checkSummary?: CheckSummary;
   reworkRounds?: number;
-  specSummary?: string;
   designMarkdown?: string;
   events: FactoryEvent[];
   logFiles: string[];
@@ -35,7 +34,7 @@ export interface EvidencePackGatherInput {
 }
 
 export function renderEvidencePack(input: EvidencePackRenderInput): string {
-  const { checkSummary, reworkRounds, specSummary, designMarkdown, events, logFiles, reviewRouting } = input;
+  const { checkSummary, reworkRounds, designMarkdown, events, logFiles, reviewRouting } = input;
 
   const summaryParts = [
     checkSummary
@@ -70,8 +69,10 @@ export function renderEvidencePack(input: EvidencePackRenderInput): string {
         : '- No checker results recorded.',
     ),
     ...(reviewRouting ? [section('Review routing', renderReviewRouting(reviewRouting))] : []),
-    section('Frozen spec', specSummary ?? '- Spec summary unavailable.'),
-    section('Design artifact', designMarkdown ?? '- No design artifact recorded.'),
+    section(
+      'Design artifact',
+      designMarkdown === undefined ? '- No design artifact recorded.' : extractDesignContract(designMarkdown),
+    ),
     section(
       'Rework & verification',
       [
@@ -83,16 +84,10 @@ export function renderEvidencePack(input: EvidencePackRenderInput): string {
         .join('\n'),
     ),
     section(
-      'Event timeline',
-      events.length > 0
-        ? events.map((event) => `- ${event.ts} ${event.type}: ${event.msg}`).join('\n')
-        : '- No events recorded for this run window.',
-    ),
-    section(
       'Logs',
       logFiles.length > 0
         ? logFiles.map((file) => `- \`.factory/logs/${file}\``).join('\n')
-        : '- No per-issue log files found; see the event timeline above.',
+        : '- No per-issue log files found.',
     ),
   ].join('\n');
 }
@@ -100,7 +95,6 @@ export function renderEvidencePack(input: EvidencePackRenderInput): string {
 export function gatherEvidencePack(input: EvidencePackGatherInput): string {
   const { issue, checkSummary, reworkRounds, specPath, eventsFile, startedAt, logsDir } = input;
 
-  const specSummary = readSpecSummary(specPath);
   const designMarkdown = readDesignMarkdown(specPath);
   const events = eventsFile && startedAt ? readIssueEvents(eventsFile, issue, startedAt) : [];
   const logFiles = readLogFiles(logsDir, issue);
@@ -109,7 +103,6 @@ export function gatherEvidencePack(input: EvidencePackGatherInput): string {
     issue,
     checkSummary,
     reworkRounds,
-    specSummary,
     designMarkdown,
     events,
     logFiles,
@@ -163,18 +156,12 @@ function section(title: string, body: string): string {
   return [`<details>`, `<summary>${title}</summary>`, '', body, '', `</details>`, ''].join('\n');
 }
 
-function readSpecSummary(specPath?: string): string | undefined {
-  if (!specPath) return undefined;
-  try {
-    if (!existsSync(specPath)) return undefined;
-    const raw = readFileSync(specPath, 'utf-8');
-    const body = raw.replace(/^---\n[\s\S]*?\n---\n/, '');
-    const goalMatch = body.match(/## Goal\n([\s\S]*?)(?:\n## |$)/);
-    const excerpt = goalMatch ? goalMatch[1] : body.slice(0, SPEC_SUMMARY_LIMIT);
-    return truncate(excerpt.trim(), SPEC_SUMMARY_LIMIT);
-  } catch {
-    return undefined;
-  }
+function extractDesignContract(markdown: string): string {
+  const parts = DESIGN_CONTRACT_HEADINGS.flatMap((heading) => {
+    const match = markdown.match(new RegExp(`^### ${heading}\\n([\\s\\S]*?)(?=^#{2,3} |(?![\\s\\S]))`, 'm'));
+    return match ? [`### ${heading}\n\n${match[1].trim()}`] : [];
+  });
+  return parts.length > 0 ? parts.join('\n\n') : '- Design artifact has no Behavior contract or Verification plan.';
 }
 
 function readDesignMarkdown(specPath?: string): string | undefined {
