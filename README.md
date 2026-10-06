@@ -32,7 +32,7 @@ packages/
 └── repo-context/  @on-par/repo-context     — read-only repo reader port (zero deps)
 ```
 
-Private workspaces (server, dashboard, product, scbench-adapter) also live here but are not published. For the dependency graph and per-package detail, see [docs/architecture.md](docs/architecture.md). For contributor rules, see [AGENTS.md](AGENTS.md).
+Private workspaces (server, dashboard, product, scbench-adapter) also live here but are not published. For the dependency graph and per-package detail, see [docs/architecture.md](docs/architecture.md). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md) and the rules in [AGENTS.md](AGENTS.md).
 
 ## Quick Start (5 minutes)
 
@@ -253,6 +253,10 @@ runs are an explicit human opt-in outside the factory, or
 **What isn't published:** `packages/dashboard` (web dashboard, Vite + React walking skeleton), `packages/product` (the proposer: brain-dump to engineering-ready issues), `packages/server` and `packages/scbench-adapter` (SlopCodeBench adapter) live in this monorepo as private workspaces and are not published to npm. A hosted multi-tenant control plane is not part of this codebase. `packages/server` is a real, narrow local server — its only route is `GET /events`, an SSE relay of the lane lifecycle bus, unauthenticated and loopback-only.
 
 **Safety note:** to run unattended, the factory invokes agent CLIs with permission checks disabled — `claude -p ... --dangerously-skip-permissions` and `codex exec --sandbox workspace-write --ask-for-approval never`. Every build runs inside an isolated git worktree (created as a sibling of your repo under the `factory/` branch prefix; override per command with `--branch-prefix`), never in your main checkout. The factory defaults to review mode: pipelines end at a green, ready-for-review PR and merging stays with you unless you explicitly opt in with `FACTORY_MERGE=1`. Admin bypass is separate: set `FACTORY_MERGE_ADMIN=1` only when the active GitHub token should use administrator privileges to merge through unmet requirements. Only run the factory against repos where you accept agent-authored code executing in that worktree (builds run tests, install dependencies, etc.).
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the verify gate, how to try one issue against a throwaway repo, and the factory-task issue template.
 
 ## License
 
