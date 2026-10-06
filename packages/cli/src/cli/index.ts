@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import { exec as execCb, execSync, type StdioOptions } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { arch, hostname as osHostname, release, platform, userInfo } from 'node:os';
 import { basename, dirname, relative, resolve } from 'node:path';
@@ -269,6 +269,11 @@ import {
 import { type QueueReader, runTui } from '@on-par/factory-tui';
 import { Command } from 'commander';
 import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
+import {
+  cmdClassifierBacktest,
+  ClassifierBacktestInputError,
+  type ClassifierBacktestOptions,
+} from './classifier-backtest.js';
 import { runQueueClear } from './queue-clear.js';
 import { parseResetIssues, runReset } from './reset.js';
 import {
@@ -1289,6 +1294,49 @@ async function cmdClassifierReport(opts: { json?: boolean } = {}) {
     return;
   }
   for (const line of formatClassifierReport(report)) console.log(line);
+}
+
+async function cmdClassifierBacktestEntry(opts: ClassifierBacktestOptions) {
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+  const [owner, repo] = (await getGitHubRepo()).split('/');
+  const repoConfig = configLoaders.loadRepoConfig(repoRoot);
+  const effective = resolveEffectiveConfig(repoConfig);
+  const router = new coreOps.ModelRouter(
+    applyRepoConfig(configLoaders.loadModelsConfig(), repoConfig),
+    configLoaders.loadRoutesConfig(),
+    false,
+    undefined,
+    effective.allowExperimental,
+    effective.localOnly,
+  );
+  try {
+    await cmdClassifierBacktest(
+      { ...opts, branchPrefix },
+      {
+        repoRoot,
+        paths,
+        owner,
+        repo,
+        octokit: getOctokit(),
+        router,
+        rules: resolveReviewFloorRules(repoConfig),
+        modelPin: repoConfig?.models?.pins?.classifier,
+        windowDays: resolveDefectWindowDays(configLoaders.loadFactoryConfigForRepo(paths.config)),
+        exec: (cmd) => shellOps.exec(cmd, { cwd: repoRoot }),
+        readFile: (path) => readFileSync(path, 'utf-8'),
+        appendFile: (path, text) => appendFileSync(path, text),
+        ensureDir,
+        readEvents: (path) => (existsSync(path) ? readEvents(path) : []),
+        now: () => new Date().toISOString(),
+        log: (line) => console.log(line),
+      },
+    );
+  } catch (err) {
+    if (err instanceof ClassifierBacktestInputError) throw new CliExitError(err.message, 2);
+    throw err;
+  }
 }
 
 async function cmdGarden(
@@ -5657,7 +5705,9 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
       await cmdKpis(opts);
     });
 
-  const classifierCmd = program.command('classifier').description('Inspect the shadow PR classifier track record');
+  const classifierCmd = program
+    .command('classifier')
+    .description('Inspect or backtest the shadow PR classifier track record');
   classifierCmd
     .command('report')
     .description(
@@ -5665,6 +5715,19 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     )
     .option('--json', 'Print one JSON object with the same numbers')
     .action((opts: { json?: boolean }) => cmdClassifierReport(opts));
+  classifierCmd
+    .command('backtest')
+    .description('Replay the floor and shadow classifier over merged factory PRs and print the outcome report')
+    .requiredOption('--since <date>', 'Only PRs merged on or after this date (YYYY-MM-DD)')
+    .option('--limit <n>', 'Classify at most N PRs (oldest merge first)')
+    .option(
+      '--labels <file>',
+      'CSV of hand labels `pr,class` (class: defect|clean|gated) that override heuristic outcomes',
+    )
+    .option('--max-cost <usd>', 'Stop before the next PR once estimated model spend reaches this many USD')
+    .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
+    .option('--json', 'Print one JSON object instead of the table')
+    .action((opts: ClassifierBacktestOptions) => cmdClassifierBacktestEntry(opts));
 
   program
     .command('garden')

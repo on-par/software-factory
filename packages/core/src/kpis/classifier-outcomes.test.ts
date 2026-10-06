@@ -6,6 +6,7 @@ import type { FactoryEvent } from '../types/index.js';
 import type { ClassifierOutcomeRecord } from './classifier-outcomes.js';
 import {
   classifierOutcomeBucket,
+  decideVerdict,
   formatClassifierReport,
   joinClassifierOutcomes,
   mergeClassifierOutcomes,
@@ -259,5 +260,41 @@ describe('summarizeClassifierOutcomes / formatClassifierReport (#1727)', () => {
     expect(formatClassifierReport(report).join('\n')).toContain(
       'Model vs floor: stricter 1 (33.3%), equal 1 (33.3%), looser 1 (33.3%); no floor 1',
     );
+  });
+});
+
+describe('decideVerdict', () => {
+  const closed = {
+    humanEdited: false,
+    humanAbandoned: false,
+    merged: true,
+    defectWindowClosed: true,
+    defectFired: false,
+  };
+
+  it('is pending until merged and the window closes', () => {
+    expect(decideVerdict('A', { ...closed, defectWindowClosed: false })).toEqual({
+      verdict: 'pending',
+      slipped: false,
+    });
+    expect(decideVerdict('B', { ...closed, merged: false })).toEqual({ verdict: 'pending', slipped: false });
+  });
+
+  it('marks an A that met a defect as slipped', () => {
+    expect(decideVerdict('A', { ...closed, defectFired: true })).toEqual({ verdict: 'disagree', slipped: true });
+    expect(decideVerdict('C', { ...closed, defectFired: true })).toEqual({ verdict: 'agree', slipped: false });
+  });
+
+  it('treats human edits and abandons as evidence for escalation', () => {
+    expect(decideVerdict('A', { ...closed, humanEdited: true })).toEqual({ verdict: 'disagree', slipped: false });
+    expect(decideVerdict('B', { ...closed, humanAbandoned: true, merged: false })).toEqual({
+      verdict: 'agree',
+      slipped: false,
+    });
+  });
+
+  it('agrees with A on a clean merge', () => {
+    expect(decideVerdict('A', closed)).toEqual({ verdict: 'agree', slipped: false });
+    expect(decideVerdict('B', closed)).toEqual({ verdict: 'disagree', slipped: false });
   });
 });

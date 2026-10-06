@@ -449,7 +449,14 @@ const INTERNAL_API_KEYS = [
   'classifyPrShadow',
   'parseClassifierOutput',
   'toClassificationRecord',
+  // PR classifier backtest (#1728)
+  'backtestFileName',
+  'buildBacktestRecord',
+  'parseBacktestLabels',
+  'runClassifierBacktest',
+  'selectBacktestPrs',
   // PR classifier routing (#1724)
+  'classifiedRecords',
   'classifierGateReason',
   'parseNumstat',
   'readReviewFloorChanges',

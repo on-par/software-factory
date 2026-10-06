@@ -576,6 +576,23 @@ export {
   toClassificationRecord,
 } from './review/classifier.js';
 
+// PR classifier backtest (#1728)
+export type {
+  BacktestHandLabel,
+  BacktestOutcomeLabel,
+  BacktestPorts,
+  BacktestRecord,
+  BacktestResult,
+} from './review/backtest.js';
+export {
+  backtestFileName,
+  classifiedRecords,
+  buildBacktestRecord,
+  parseBacktestLabels,
+  runClassifierBacktest,
+  selectBacktestPrs,
+} from './review/backtest.js';
+
 // PR classifier routing (#1724)
 export type { ReviewRouting } from './review/routing.js';
 export { classifierGateReason, parseNumstat, readReviewFloorChanges, resolveReviewRouting } from './review/routing.js';
