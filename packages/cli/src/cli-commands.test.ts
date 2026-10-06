@@ -33,7 +33,7 @@ const h = vi.hoisted(() => {
     reapedContainers: [] as Array<{ id: string; name: string; removed: boolean; detail: string }>,
     orphanVmNames: [] as string[],
     reapedVms: [] as Array<{ name: string; removed: boolean; detail: string }>,
-    // octokit instance returned by `new Octokit()`
+    // GitHub client injected through CliDeps.octokit
     octokit: {} as any,
     // configurable core behaviour
     constitutionResolve: (_worktree: string, _product?: string): any => null,
@@ -80,23 +80,6 @@ const h = vi.hoisted(() => {
     }>,
     setupWorktreeImpl: async (_repoRoot: string, _branch: string, _worktree: string, _startPoint?: string) => {},
   };
-});
-
-// ---------------------------------------------------------------------------
-// Module mocks (hoisted above imports by vitest)
-// ---------------------------------------------------------------------------
-vi.mock('@octokit/rest', () => {
-  // createFactoryOctokit (packages/cli/src/cli/octokit.ts) calls Octokit.plugin(...) at module load
-  // time to attach retry/throttling — the double must expose it as a static too.
-  class Octokit {
-    constructor() {
-      return h.octokit;
-    }
-    static plugin(): typeof Octokit {
-      return Octokit;
-    }
-  }
-  return { Octokit };
 });
 
 import { microVmName } from '@on-par/factory-core/internal';
@@ -256,6 +239,7 @@ function makeInternalFakes() {
     ),
     exec: vi.fn(async (cmd: string) => ({ stdout: h.execImpl(cmd), stderr: '' })),
     execSync: vi.fn((cmd: string) => h.execSyncImpl(cmd)),
+    octokit: () => h.octokit,
   } satisfies Pick<
     CliDeps,
     | 'watchChecks'
@@ -271,6 +255,7 @@ function makeInternalFakes() {
     | 'formatGcReport'
     | 'exec'
     | 'execSync'
+    | 'octokit'
   >;
 }
 /** Fresh fakes per test, spread into every main/cmdLand/shipIssue call. */
@@ -4806,6 +4791,30 @@ describe('shipIssue (direct)', () => {
     expect(defaultGet).not.toHaveBeenCalled();
   });
 
+  it('main() routes deps.octokit to GitHub-backed commands', async () => {
+    const fake = defaultOctokit();
+    fake.rest.pulls.list = vi.fn(async () => ({ data: [] }));
+    const factory = vi.fn(() => fake as never);
+    const defaultList = h.octokit.rest.pulls.list;
+
+    await runMainWith({ octokit: factory }, 'land', '5');
+
+    expect(factory).toHaveBeenCalled();
+    expect(fake.rest.pulls.list).toHaveBeenCalled();
+    expect(defaultList).not.toHaveBeenCalled();
+  });
+
+  it('cmdLand uses an injected octokit factory', async () => {
+    const fake = defaultOctokit();
+    fake.rest.pulls.list = vi.fn(async () => ({ data: [] }));
+    const factory = vi.fn(() => fake as never);
+
+    await expect(cmdLand(5, {}, { octokit: factory })).rejects.toMatchObject({ code: 1 });
+
+    expect(factory).toHaveBeenCalled();
+    expect(fake.rest.pulls.list).toHaveBeenCalled();
+  });
+
   it('uses injected resolveTimeouts, resolveSkipCI and resolveEffectiveModelPins', async () => {
     const timeouts = vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1 }));
     const skip = vi.fn(() => false);
@@ -4857,7 +4866,7 @@ describe('shipIssue (direct)', () => {
     expect(coreFakes.ModelRouter.mock.calls.at(-1)?.[1]).toMatchObject(routesValue);
   });
 
-  it('falls back to the default octokit factory when none is injected', async () => {
+  it('uses the h.octokit client injected through the shared ops fakes', async () => {
     await shipIssue(5, {}, ctx());
     expect(h.octokit.rest.issues.get).toHaveBeenCalled();
   });
