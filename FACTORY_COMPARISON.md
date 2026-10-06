@@ -1,5 +1,7 @@
 # Software Factory: bash `factory` vs. the TypeScript monorepo
 
+> **Historical snapshot (2026-07-10).** This comparison is kept for context only and does not describe the current factory. See [README.md](./README.md) for current status.
+
 _Analysis date: 2026-07-10_
 
 A comparison of the two implementations of the software factory, and a recommendation for turning it into a productized / open-source project.

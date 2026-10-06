@@ -2,8 +2,6 @@
 // packages/product/src/cli.ts — CLI entry point
 
 import { main } from './cli/program.js';
+import { runEntry } from './entry.js';
 
-main().catch((err) => {
-  console.error(err.message);
-  process.exit(1);
-});
+void runEntry(main);

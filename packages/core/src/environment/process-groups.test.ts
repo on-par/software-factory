@@ -5,7 +5,12 @@ import { join } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { defaultIsProcessGroupAlive, killProcessGroup, ProcessGroupTracker } from './process-groups.js';
+import {
+  defaultIsProcessGroupAlive,
+  killProcessGroup,
+  ProcessGroupTracker,
+  type TaskkillResult,
+} from './process-groups.js';
 
 const noopSleep = async () => {};
 
@@ -47,6 +52,131 @@ describe('defaultIsProcessGroupAlive', () => {
     } finally {
       process.kill = original;
     }
+  });
+});
+
+describe('defaultIsProcessGroupAlive platform probe', () => {
+  it.each([
+    ['win32', 123],
+    ['linux', -123],
+  ] as const)('probes the right target on %s', (platform, expected) => {
+    const killFn = vi.fn();
+    const original = process.kill;
+    (process as any).kill = killFn;
+    try {
+      expect(defaultIsProcessGroupAlive(123, platform)).toBe(true);
+    } finally {
+      process.kill = original;
+    }
+    expect(killFn).toHaveBeenCalledWith(expected, 0);
+  });
+});
+
+describe('killProcessGroup on win32 (injected platform + taskkill)', () => {
+  const ok: TaskkillResult = { exitCode: 0, stdout: '', stderr: '' };
+  const makeTaskkill = (r: TaskkillResult = ok) => vi.fn(async (_args: readonly string[]) => r);
+
+  it('runs graceful then forced taskkill and never calls killFn', async () => {
+    const taskkillFn = makeTaskkill();
+    const killFn = vi.fn();
+    const outcome = await killProcessGroup(42, {
+      platform: 'win32',
+      taskkillFn,
+      killFn,
+      isAliveFn: () => true,
+      sleepFn: noopSleep,
+      graceMs: 0,
+    });
+    expect(taskkillFn.mock.calls.map((c) => c[0])).toEqual([
+      ['/T', '/PID', '42'],
+      ['/T', '/F', '/PID', '42'],
+    ]);
+    expect(killFn).not.toHaveBeenCalled();
+    expect(outcome).toEqual({ pgid: 42, terminated: false, forced: true });
+  });
+
+  it('stops after the graceful taskkill when the root exits', async () => {
+    const taskkillFn = makeTaskkill();
+    const outcome = await killProcessGroup(42, {
+      platform: 'win32',
+      taskkillFn,
+      isAliveFn: () => false,
+      sleepFn: noopSleep,
+      graceMs: 100,
+    });
+    expect(taskkillFn).toHaveBeenCalledTimes(1);
+    expect(taskkillFn).toHaveBeenCalledWith(['/T', '/PID', '42']);
+    expect(outcome).toEqual({ pgid: 42, terminated: true, forced: false });
+  });
+
+  it.each([
+    ['exit 128', { exitCode: 128, stdout: '', stderr: '' }],
+    ['not found text', { exitCode: 1, stdout: 'ERROR: The process "42" not found.', stderr: '' }],
+  ])('maps %s to dead', async (_name, result) => {
+    const taskkillFn = makeTaskkill(result);
+    const outcome = await killProcessGroup(42, { platform: 'win32', taskkillFn, isAliveFn: () => true });
+    expect(outcome).toEqual({ pgid: 42, terminated: true, forced: false });
+    expect(taskkillFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('maps Access is denied to not-ours', async () => {
+    const taskkillFn = makeTaskkill({ exitCode: 1, stdout: '', stderr: 'ERROR: Access is denied.' });
+    const outcome = await killProcessGroup(42, { platform: 'win32', taskkillFn, isAliveFn: () => true });
+    expect(outcome).toEqual({ pgid: 42, terminated: false, forced: false });
+  });
+
+  it('resolves when taskkillFn rejects', async () => {
+    const taskkillFn = vi.fn(async () => {
+      throw new Error('boom');
+    });
+    const outcome = await killProcessGroup(42, {
+      platform: 'win32',
+      taskkillFn,
+      isAliveFn: () => false,
+      sleepFn: noopSleep,
+      graceMs: 0,
+    });
+    expect(outcome.terminated).toBe(true);
+  });
+
+  it('escalates to /F when graceful taskkill reports it can only terminate forcefully', async () => {
+    const taskkillFn = makeTaskkill({ exitCode: 1, stdout: '', stderr: 'can only be terminated forcefully' });
+    await killProcessGroup(42, {
+      platform: 'win32',
+      taskkillFn,
+      isAliveFn: () => true,
+      sleepFn: noopSleep,
+      graceMs: 0,
+    });
+    expect(taskkillFn).toHaveBeenCalledTimes(2);
+    expect(taskkillFn).toHaveBeenLastCalledWith(['/T', '/F', '/PID', '42']);
+  });
+
+  it.each(['darwin', 'linux'] as const)('uses the POSIX signal path on %s', async (platform) => {
+    const killFn = vi.fn();
+    const taskkillFn = makeTaskkill();
+    await killProcessGroup(42, { platform, killFn, taskkillFn, isAliveFn: () => true, sleepFn: noopSleep, graceMs: 0 });
+    expect(killFn.mock.calls).toEqual([
+      [-42, 'SIGTERM'],
+      [-42, 'SIGKILL'],
+    ]);
+    expect(taskkillFn).not.toHaveBeenCalled();
+  });
+
+  it('ProcessGroupTracker.killAll taskkills each live pid', async () => {
+    const tracker = new ProcessGroupTracker();
+    tracker.track(10);
+    tracker.track(11);
+    const taskkillFn = makeTaskkill();
+    await tracker.killAll({
+      platform: 'win32',
+      taskkillFn,
+      isAliveFn: () => true,
+      sleepFn: noopSleep,
+      graceMs: 0,
+    });
+    const pids = taskkillFn.mock.calls.filter((c) => !c[0].includes('/F')).map((c) => c[0][2]);
+    expect(pids.sort()).toEqual(['10', '11']);
   });
 });
 

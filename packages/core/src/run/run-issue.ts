@@ -5,7 +5,8 @@
 //   2. the per-issue budget is asserted after PLAN, BUILD, and CHECK (parks 'fail' on breach).
 //   3. the acquired Environment is released exactly once on every exit path.
 //   4. a failed environment lease degrades (appPort undefined) rather than parking the run.
-//   5. exactly one terminal event sequence is emitted per run, matching the returned RunOutcome.
+//   5. exactly one terminal event sequence is emitted per run, matching the returned RunOutcome
+//      (including the non-park `released` exit for an environment-caused CHECK failure, #1928).
 //
 // Path-bound CLI concerns (Octokit, worktree/environment provisioning, the events sink,
 // approval/steering, and reporting hooks) are injected as ports so this file stays free of
@@ -17,7 +18,7 @@ import type { Octokit } from '@octokit/rest';
 
 import type { ApprovalGate } from '../approvals/index.js';
 import { buildPhase as buildPhaseDefault } from '../phases/build.js';
-import { checkPhase as checkPhaseDefault } from '../phases/check.js';
+import { checkPhase as checkPhaseDefault, renderEnvironmentReleaseComment } from '../phases/check.js';
 import { planPhase as planPhaseDefault } from '../phases/plan.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
 import type { ReviewFloorPathChange, ReviewFloorRuleSet } from '../review/floor.js';
@@ -95,6 +96,8 @@ export interface RunRequest {
    *  shipPhase's own surface already takes plain path strings, not a path-resolution port). */
   eventsFile?: string;
   logsDir?: string;
+  /** state/baseline-cache.json (#1926), forwarded to checkPhase. */
+  baselineCachePath?: string;
 }
 
 type LogFn = (
@@ -591,12 +594,43 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       laneId: request.lane,
       onActivity: ports.onActivity,
       logsDir: request.logsDir,
+      baselineCachePath: request.baselineCachePath,
     });
     checkSummary = check.summary;
     reworkRounds = check.reworkRounds;
     const checkBudget = await assertBudget('CHECK');
     if (checkBudget) return checkBudget;
     if (!check.passed) {
+      if (check.environment) {
+        const env = check.environment;
+        if (!request.localOnly) {
+          const [owner, repoName] = request.repo.split('/');
+          try {
+            await ports.octokit.rest.issues.createComment({
+              owner,
+              repo: repoName,
+              issue_number: request.issue,
+              body: renderEnvironmentReleaseComment(env),
+            });
+          } catch (err) {
+            log('environment_warning', `could not post the environment-failure comment: ${errorMessage(err)}`);
+          }
+        }
+        log(
+          'environment-released',
+          `every failing checker (${env.failingChecks.join(', ')}) also fails on base ${env.baseSha.slice(0, 8)} — no rework, releasing #${request.issue} to queued`,
+        );
+        return {
+          state: 'released',
+          reason: 'environment',
+          route,
+          branch: request.branch,
+          reworkRounds: 0,
+          baseSha: env.baseSha,
+          failingChecks: env.failingChecks,
+          ...(check.failureSignature !== undefined ? { failureSignature: check.failureSignature } : {}),
+        };
+      }
       const checkFailure =
         check.failureSignature !== undefined
           ? {

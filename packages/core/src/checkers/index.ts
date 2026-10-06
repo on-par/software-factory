@@ -597,11 +597,13 @@ async function touchActivity(ctx: CheckerContext): Promise<void> {
   }
 }
 
+/** `only` restricts the run to these checker names (the baseline re-run, #1925). Undefined runs every checker. */
 export async function runAllCheckers(
   ctx: CheckerContext,
   router: ModelRouter,
   constitution: Constitution | null,
   customCheckerTimeoutSeconds?: number,
+  only?: readonly string[],
 ): Promise<CheckSummary> {
   const probe = ctx.probe ?? (await (ctx.probeWorktree ?? probeWorktree)(ctx.worktree));
 
@@ -618,6 +620,7 @@ export async function runAllCheckers(
 
   const results: CheckerOutput[] = [];
   for (const checker of buildCheckers(constitution)) {
+    if (only !== undefined && !only.includes(checker.name)) continue;
     await touchActivity(ctx);
     ctx.log?.('checker_started', `checker ${checker.name} started`);
     const startedAt = Date.now();

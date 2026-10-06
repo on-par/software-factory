@@ -2,11 +2,9 @@ import type * as ChildProcess from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 import * as FactoryCore from '@on-par/factory-core';
-import type * as FactoryCoreInternal from '@on-par/factory-core/internal';
-import type * as DaemonModule from './cli/daemon.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
@@ -16,8 +14,14 @@ const h = vi.hoisted(() => {
   return {
     repoRoot: '',
     constitutionsDir: '',
+    // daemon-control seam (CliDeps.daemon)
+    daemonHome: '',
+    daemonPlatform: 'darwin' as NodeJS.Platform,
+    daemonExecCalls: [] as Array<{ cmd: string; args: string[] }>,
+    daemonExecImpl: (_cmd: string, _args: string[]) => ({ code: 0, stdout: '', stderr: '' }),
+    daemonOut: [] as string[],
     ghRepo: 'on-par/software-factory',
-    // child_process shims
+    // shell seam (CliDeps.exec / execSync)
     execImpl: (_cmd: string): string => '',
     execSyncImpl: (_cmd: string): string => {
       throw new Error('execSync not stubbed');
@@ -29,7 +33,7 @@ const h = vi.hoisted(() => {
     reapedContainers: [] as Array<{ id: string; name: string; removed: boolean; detail: string }>,
     orphanVmNames: [] as string[],
     reapedVms: [] as Array<{ name: string; removed: boolean; detail: string }>,
-    // octokit instance returned by `new Octokit()`
+    // GitHub client injected through CliDeps.octokit
     octokit: {} as any,
     // configurable core behaviour
     constitutionResolve: (_worktree: string, _product?: string): any => null,
@@ -78,240 +82,25 @@ const h = vi.hoisted(() => {
   };
 });
 
-// ---------------------------------------------------------------------------
-// Module mocks (hoisted above imports by vitest)
-// ---------------------------------------------------------------------------
-vi.mock('node:child_process', () => {
-  const exec = (cmd: string, optsOrCb: any, maybeCb?: any) => {
-    const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
-    try {
-      const stdout = h.execImpl(cmd);
-      cb(null, { stdout, stderr: '' });
-    } catch (err) {
-      cb(err);
-    }
-  };
-  const execSync = (cmd: string) => h.execSyncImpl(cmd);
-  return { exec, execSync, default: { exec, execSync } };
-});
+import { microVmName } from '@on-par/factory-core/internal';
 
-vi.mock('@octokit/rest', () => {
-  // createFactoryOctokit (packages/cli/src/cli/octokit.ts) calls Octokit.plugin(...) at module load
-  // time to attach retry/throttling — the double must expose it as a static too.
-  class Octokit {
-    constructor() {
-      return h.octokit;
-    }
-    static plugin(): typeof Octokit {
-      return Octokit;
-    }
-  }
-  return { Octokit };
-});
-
-vi.mock('@on-par/factory-tui', () => ({
-  runTui: vi.fn(
-    async (opts: {
-      eventsFile: string;
-      repo?: string;
-      stopFile?: string;
-      queueReader?: {
-        source: string;
-        read: () => Promise<FactoryCore.QueueSnapshot> | FactoryCore.QueueSnapshot;
-        pollMs?: number;
-      };
-      costsFile?: string;
-      steeringDir?: string;
-      runsDir?: string;
-    }) => {
-      h.runTuiCalls.push(opts);
-    },
-  ),
-}));
-
-vi.mock('@on-par/factory-core', async (importOriginal) => {
-  const actual = await importOriginal<typeof FactoryCore>();
-
-  // Phases. shipIssue no longer sequences PLAN->BUILD->CHECK->SHIP itself (#675) — it
-  // builds ports and calls the real runIssue in @on-par/factory-core, which now takes
-  // planPhase/buildPhase/checkPhase/shipPhase as overridable ports (ADR-0004). So this
-  // double only stubs the four phase functions and lets the real runIssue drive
-  // sequencing, the breaker, budget assertions, and constitution logging.
-  const planPhaseMock = vi.fn(async (opts: any) => {
-    if (h.triggerPlanProviderFailure) await opts.onProviderFailure?.(h.triggerPlanProviderFailure);
-    return h.planResult;
-  });
-  const buildPhaseMock = vi.fn(async (_opts: any) => h.buildResult);
-  const checkPhaseMock = vi.fn(async (opts: any) => {
-    for (const s of h.checkResult.summary.results.filter((r: any) => r.result === 'SKIP')) {
-      opts.log?.('check', `SKIPPED: ${s.checker} — ${s.details}`);
-    }
-    for (let i = 0; i < (h.checkResult.reworkRounds ?? 0); i++) {
-      opts.log?.('rework', `rework round ${i + 1}`);
-    }
-    h.costSinkCallback?.({ task: 'build', model: 'claude-model', inputTokens: 10, outputTokens: 5, cost: 0.02 });
-    return h.checkResult;
-  });
-  const shipPhaseMock = vi.fn(async (_opts: any) => h.shipResult);
-
-  return {
-    ...actual,
-    // Config loaders — return inert values.
-    loadModelsConfig: vi.fn(() => ({ models: {}, tiers: {} }) as any),
-    loadRoutesConfig: vi.fn(() => ({}) as any),
-    loadFactoryConfigForRepo: vi.fn(() => h.factoryConfig),
-    loadRepoConfig: vi.fn((repoRoot: string, stateRoot?: string) => actual.loadRepoConfig(repoRoot, stateRoot)),
-    resolveTimeouts: vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1 })),
-    resolveSkipCI: vi.fn(() => false),
-    getConstitutionsDir: vi.fn(() => h.constitutionsDir),
-    resolveEffectiveModelPins: vi.fn(() => ({
-      plan: h.modelOverrides.plan,
-      planFallback: h.modelOverrides.planFallback,
-      build: h.modelOverrides.build,
-      buildFallback: h.modelOverrides.buildFallback,
-      sources: {},
-    })),
-    isCommandAvailable: vi.fn((cmd: string) => {
-      if (cmd === 'docker') return h.dockerAvailable ?? false;
-      if (cmd === 'sbx') return h.sbxAvailable ?? false;
-      return h.claudeAvailable ?? true;
-    }),
-    defaultFindPortListeners: vi.fn(async () => h.portListeners),
-    reapOrphanProcesses: vi.fn(async (opts: any) => {
-      for (const e of h.orphanEvents) opts.onEvent?.(e);
-      return h.orphanEvents;
-    }),
-    // Router / loaders as light stubs.
-    ModelRouter: vi.fn(function () {
-      return {
-        resolve: (route: string) => h.routerResolve(route),
-        resolveAll: (_route: string) => [],
-        registryRef: {
-          getClaudeFlag: () => '--flag',
-          getModelsInTier: () => ['m'],
-          get: (id: string) => (h.modelProviders[id] ? { provider: h.modelProviders[id] } : undefined),
-          getHarnessId: (id: string) => (h.modelProviders[id] === 'anthropic' ? 'claude-cli' : 'codex-cli'),
-          isCodexModel: (id: string) => h.modelProviders[id] === 'openai',
-        },
-        setCostSink: vi.fn((sink: (entry: any) => void) => {
-          h.costSinkCallback = sink;
-        }),
-      };
-    }),
-    ConstitutionLoader: vi.fn(function () {
-      return {
-        listProducts: () => ['alpha', 'beta'],
-        resolve: (worktree: string, product?: string) => h.constitutionResolve(worktree, product),
-      };
-    }),
-    ModelRegistry: vi.fn(function () {
-      return {
-        list: () => ['claude-model'],
-        getTiers: () => ['worker'],
-        estimateCost: () => 1.23,
-        isExperimental: () => false,
-        isAvailable: () => true,
-        getModelsInTier: () => ['claude-model'],
-      };
-    }),
-    // Phases are stubbed here; the real runIssue (from `actual`) sequences them (#675).
-    planPhase: planPhaseMock,
-    buildPhase: buildPhaseMock,
-    checkPhase: checkPhaseMock,
-    shipPhase: shipPhaseMock,
-    runIssue: actual.runIssue,
-    // Usage / reports.
-    estimateTrailingSpend: vi.fn(() => h.trailingSpend),
-    formatUsageReport: vi.fn(() => 'USAGE REPORT'),
-    watchUsage: vi.fn(async () => {}),
-    fetchSubscriptionUsage: vi.fn(async () => h.subscriptionUsage),
-    diagnoseModels: vi.fn(() => h.diagnoses),
-    writeLocalRunReport: vi.fn(async () => ({ path: '/tmp/report.md' })),
-    diagnoseModelsDefault: undefined,
-  };
-});
-
-vi.mock('@on-par/factory-core/internal', async (importOriginal) => {
-  const actual = await importOriginal<typeof FactoryCoreInternal>();
-  return {
-    ...actual,
-    watchChecks: vi.fn(async () => 'success'),
-    createLocalSmallDryRun: vi.fn(async () => ({ planPath: '/tmp/plan.md', contextPath: '/tmp/ctx.md' })),
-    // Cost.
-    readCosts: vi.fn(() => h.costs),
-    // Git / worktree side-effects — no-ops.
-    setupWorktree: vi.fn(async (...args: [string, string, string, string?]) => h.setupWorktreeImpl(...args)),
-    cleanupWorktree: vi.fn(async () => {}),
-    gitFetch: vi.fn(async () => {}),
-    withGitLock: vi.fn(async (_root: string, fn: () => Promise<unknown>) => fn()),
-    withFileLock: vi.fn(async (_lock: string, fn: () => Promise<unknown>, _opts?: unknown) => fn()),
-    ensureDir: vi.fn((p: string) => mkdirSync(p, { recursive: true })),
-    // Worktree GC.
-    sweepWorktrees: vi.fn(async () => h.gcReport),
-    // Stale claim reap.
-    releaseStaleClaims: vi.fn(async () => h.staleClaims),
-    // Green-and-ready PR report.
-    findUnmergedGreenPrs: vi.fn(async () => h.greenPrs),
-    // Orphan container/microVM scan + reap (#1527).
-    listOrphanContainers: vi.fn(async () => h.orphanContainers),
-    reapOrphanContainers: vi.fn(async () => h.reapedContainers),
-    listMicroVms: vi.fn(async () => h.orphanVmNames),
-    reapOrphanMicroVm: vi.fn(
-      async (name: string) =>
-        h.reapedVms.find((r) => r.name === name) ?? { name, removed: true, detail: `sbx rm --force ${name} ok` },
-    ),
-    formatGcReport: vi.fn(
-      (report: any) =>
-        `GC_REPORT:${report.dryRun ? 'dry' : 'real'}:removed=${report.removed.length}:kept=${report.kept}`,
-    ),
-  };
-});
-
-// The daemon-control commands shell out to the real launchctl by default, so the
-// wiring tests stub them; DaemonCtlError stays real for the CliExitError mapping.
-vi.mock('./cli/daemon.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof DaemonModule>();
-  return {
-    ...actual,
-    cmdDaemonStart: vi.fn(async () => {}),
-    cmdDaemonStop: vi.fn(async () => {}),
-    cmdDaemonStatus: vi.fn(async () => {}),
-    cmdDaemonLogs: vi.fn(async () => {}),
-  };
-});
-
-import {
-  cleanupWorktree,
-  formatGcReport,
-  listMicroVms,
-  listOrphanContainers,
-  microVmName,
-  reapOrphanContainers,
-  reapOrphanMicroVm,
-  releaseStaleClaims,
-  setupWorktree,
-  sweepWorktrees,
-  watchChecks,
-  withFileLock,
-  withGitLock,
-} from '@on-par/factory-core/internal';
-
-import { cmdDaemonLogs, cmdDaemonStart, cmdDaemonStatus, cmdDaemonStop, DaemonCtlError } from './cli/daemon.js';
+import { FACTORYD_LABEL, factorydFiles, type DaemonCtlDeps } from './cli/daemon.js';
 import { HELP_GROUPS, OTHER_GROUP } from './cli/help-groups.js';
 
 import {
   buildInitConfig,
+  type CliDeps,
   CliExitError,
   cmdConstitution,
-  cmdLand,
-  cmdUsage,
+  cmdLand as cliCmdLand,
+  cmdUsage as cliCmdUsage,
   formatInitReachability,
   IssueDecomposedError,
   LaneParkError,
   IssueSkippedError,
   main,
   parseIssueArg,
-  shipIssue,
+  shipIssue as cliShipIssue,
 } from './cli/index.js';
 
 // ---------------------------------------------------------------------------
@@ -352,6 +141,8 @@ function paths() {
     classifierOutcomes: join(state, 'classifier-outcomes.jsonl'),
     breaker: join(state, 'breaker.json'),
     runFlags: join(state, 'run-flags.json'),
+    mergeLock: join(state, 'merge.lock'),
+    gitLock: join(state, 'git.lock'),
     config: join(root, 'config.json'),
     constitution: join(root, 'constitution.md'),
     gitignore: join(root, '.gitignore'),
@@ -372,6 +163,7 @@ function defaultOctokit() {
             ? { data: [{ number: 77, head: { ref: 'ship-it/5-fix-the-bug' }, body: 'Closes #5' }] }
             : { data: [] },
         ),
+        get: vi.fn(async () => ({ data: { head: { sha: 'abc123' } } })),
         merge: vi.fn(async () => ({})),
       },
       git: { deleteRef: vi.fn(async () => ({})) },
@@ -385,10 +177,244 @@ function defaultOctokit() {
   };
 }
 
+/** Inert config loaders injected through the CliDeps seams (#2064, #2065). */
+const inertConfigLoaders: Pick<
+  CliDeps,
+  | 'loadModelsConfig'
+  | 'loadRoutesConfig'
+  | 'loadFactoryConfigForRepo'
+  | 'resolveTimeouts'
+  | 'resolveSkipCI'
+  | 'getConstitutionsDir'
+  | 'resolveEffectiveModelPins'
+> = {
+  loadModelsConfig: () => ({ models: {}, tiers: {} }) as never,
+  loadRoutesConfig: () => ({}) as never,
+  // Lazy: per-test h.factoryConfig mutations are observed.
+  loadFactoryConfigForRepo: () => h.factoryConfig,
+  resolveTimeouts: () => ({ plan: 1, build: 1, check: 1, approval: 1 }),
+  resolveSkipCI: () => false,
+  // Lazy: per-test h.constitutionsDir / h.modelOverrides mutations are observed.
+  getConstitutionsDir: vi.fn(() => h.constitutionsDir),
+  resolveEffectiveModelPins: vi.fn(() => ({
+    plan: h.modelOverrides.plan,
+    planFallback: h.modelOverrides.planFallback,
+    build: h.modelOverrides.build,
+    buildFallback: h.modelOverrides.buildFallback,
+    sources: {},
+  })) as never,
+};
+
+/** Git side-effect doubles injected through the CliDeps seams (#2019). setupWorktree delegates to h.setupWorktreeImpl. */
+const setupWorktree = vi.fn(async (...args: Parameters<NonNullable<CliDeps['setupWorktree']>>) => {
+  await h.setupWorktreeImpl(args[0], args[1], args[2], args[3]);
+  return undefined as never;
+});
+const cleanupWorktree = vi.fn(async (..._args: Parameters<NonNullable<CliDeps['cleanupWorktree']>>) => {});
+const gitFetch = vi.fn(async (_repoRoot: string) => {});
+const inertGitOps: Pick<CliDeps, 'setupWorktree' | 'cleanupWorktree' | 'gitFetch'> = {
+  setupWorktree,
+  cleanupWorktree,
+  gitFetch,
+};
+
+function makeInternalFakes() {
+  return {
+    watchChecks: vi.fn(async () => 'success') as any,
+    createLocalSmallDryRun: vi.fn(async () => ({ planPath: '/tmp/plan.md', contextPath: '/tmp/ctx.md' })) as any,
+    readCosts: vi.fn(() => h.costs) as any,
+    sweepWorktrees: vi.fn(async () => h.gcReport) as any,
+    releaseStaleClaims: vi.fn(async () => h.staleClaims) as any,
+    findUnmergedGreenPrs: vi.fn(async () => h.greenPrs) as any,
+    listOrphanContainers: vi.fn(async () => h.orphanContainers) as any,
+    reapOrphanContainers: vi.fn(async () => h.reapedContainers) as any,
+    listMicroVms: vi.fn(async () => h.orphanVmNames),
+    reapOrphanMicroVm: vi.fn(
+      async (name: string) =>
+        h.reapedVms.find((r) => r.name === name) ?? { name, removed: true, detail: `sbx rm --force ${name} ok` },
+    ) as any,
+    formatGcReport: vi.fn(
+      (report: any) =>
+        `GC_REPORT:${report.dryRun ? 'dry' : 'real'}:removed=${report.removed.length}:kept=${report.kept}`,
+    ),
+    exec: vi.fn(async (cmd: string) => ({ stdout: h.execImpl(cmd), stderr: '' })),
+    execSync: vi.fn((cmd: string) => h.execSyncImpl(cmd)),
+    octokit: () => h.octokit,
+  } satisfies Pick<
+    CliDeps,
+    | 'watchChecks'
+    | 'createLocalSmallDryRun'
+    | 'readCosts'
+    | 'sweepWorktrees'
+    | 'releaseStaleClaims'
+    | 'findUnmergedGreenPrs'
+    | 'listOrphanContainers'
+    | 'reapOrphanContainers'
+    | 'listMicroVms'
+    | 'reapOrphanMicroVm'
+    | 'formatGcReport'
+    | 'exec'
+    | 'execSync'
+    | 'octokit'
+  >;
+}
+/** Fresh fakes per test, spread into every main/cmdLand/shipIssue call. */
+let ops = makeInternalFakes();
+
+function makeCoreFakes() {
+  return {
+    isCommandAvailable: vi.fn((cmd: string) => {
+      if (cmd === 'docker') return h.dockerAvailable ?? false;
+      if (cmd === 'sbx') return h.sbxAvailable ?? false;
+      return h.claudeAvailable ?? true;
+    }),
+    defaultFindPortListeners: vi.fn(async () => h.portListeners) as any,
+    reapOrphanProcesses: vi.fn(async (opts: any) => {
+      for (const e of h.orphanEvents) opts.onEvent?.(e);
+      return h.orphanEvents;
+    }) as any,
+    // Router / loaders as light stubs.
+    ModelRouter: vi.fn(function () {
+      return {
+        resolve: (route: string) => h.routerResolve(route),
+        resolveAll: (_route: string) => [],
+        registryRef: {
+          getClaudeFlag: () => '--flag',
+          getModelsInTier: () => ['m'],
+          get: (id: string) => (h.modelProviders[id] ? { provider: h.modelProviders[id] } : undefined),
+          getHarnessId: (id: string) => (h.modelProviders[id] === 'anthropic' ? 'claude-cli' : 'codex-cli'),
+          isCodexModel: (id: string) => h.modelProviders[id] === 'openai',
+        },
+        setCostSink: vi.fn((sink: (entry: any) => void) => {
+          h.costSinkCallback = sink;
+        }),
+      };
+    }) as any,
+    ConstitutionLoader: vi.fn(function () {
+      return {
+        listProducts: () => ['alpha', 'beta'],
+        resolve: (worktree: string, product?: string) => h.constitutionResolve(worktree, product),
+      };
+    }) as any,
+    ModelRegistry: vi.fn(function () {
+      return {
+        list: () => ['claude-model'],
+        getTiers: () => ['worker'],
+        estimateCost: () => 1.23,
+        isExperimental: () => false,
+        isAvailable: () => true,
+        getModelsInTier: () => ['claude-model'],
+      };
+    }) as any,
+    // Usage / reports.
+    estimateTrailingSpend: vi.fn(() => h.trailingSpend) as any,
+    formatUsageReport: vi.fn(() => 'USAGE REPORT'),
+    watchUsage: vi.fn(async () => {}) as any,
+    fetchSubscriptionUsage: vi.fn(async () => h.subscriptionUsage) as any,
+    diagnoseModels: vi.fn(() => h.diagnoses) as any,
+    writeLocalRunReport: vi.fn(async () => ({ path: '/tmp/report.md' })) as any,
+  } satisfies Pick<
+    CliDeps,
+    | 'ModelRouter'
+    | 'ConstitutionLoader'
+    | 'ModelRegistry'
+    | 'isCommandAvailable'
+    | 'defaultFindPortListeners'
+    | 'reapOrphanProcesses'
+    | 'estimateTrailingSpend'
+    | 'formatUsageReport'
+    | 'watchUsage'
+    | 'fetchSubscriptionUsage'
+    | 'diagnoseModels'
+    | 'writeLocalRunReport'
+  >;
+}
+/** Fresh fakes per test, spread into every main/shipIssue call. */
+let coreFakes = makeCoreFakes();
+
+/**
+ * Phase doubles. shipIssue builds ports and calls the real runIssue in @on-par/factory-core, which sequences
+ * PLAN->BUILD->CHECK->SHIP, the breaker, budget assertions and constitution logging (#675). Only the four
+ * phase functions are doubled, and they reach RunPorts through CliDeps phase overrides (ADR-0004).
+ */
+function makePhaseFakes() {
+  return {
+    planPhase: vi.fn<NonNullable<CliDeps['planPhase']>>(async (opts) => {
+      if (h.triggerPlanProviderFailure) await opts.onProviderFailure?.(h.triggerPlanProviderFailure);
+      return h.planResult;
+    }),
+    buildPhase: vi.fn<NonNullable<CliDeps['buildPhase']>>(async (_opts) => h.buildResult),
+    checkPhase: vi.fn<NonNullable<CliDeps['checkPhase']>>(async (opts) => {
+      for (const s of h.checkResult.summary.results.filter((r: any) => r.result === 'SKIP')) {
+        opts.log?.('check', `SKIPPED: ${s.checker} — ${s.details}`);
+      }
+      for (let i = 0; i < (h.checkResult.reworkRounds ?? 0); i++) {
+        opts.log?.('rework', `rework round ${i + 1}`);
+      }
+      h.costSinkCallback?.({ task: 'build', model: 'claude-model', inputTokens: 10, outputTokens: 5, cost: 0.02 });
+      return h.checkResult;
+    }),
+    shipPhase: vi.fn<NonNullable<CliDeps['shipPhase']>>(async (_opts) => h.shipResult),
+  } satisfies Pick<CliDeps, 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase'>;
+}
+/** Fresh phase doubles per test, spread into every main/shipIssue call (CliDeps phase overrides). */
+let phases = makePhaseFakes();
+
+/** Direct shipIssue calls get the inert models/routes loaders unless a test passes its own. */
+function shipIssue(...[issueNum, opts, ctx, deps]: Parameters<typeof cliShipIssue>) {
+  return cliShipIssue(issueNum, opts, ctx, {
+    ...inertConfigLoaders,
+    ...inertGitOps,
+    ...coreFakes,
+    ...ops,
+    ...phases,
+    ...deps,
+  });
+}
+
+/** Direct cmdUsage calls get shell + core fakes so they never run real git/subscription ops. */
+function cmdUsage(deps: Parameters<typeof cliCmdUsage>[0] = {}) {
+  return cliCmdUsage({ ...ops, ...coreFakes, ...deps });
+}
+
+/** Direct cmdLand calls get the inert loaders (incl. h.factoryConfig) unless a test passes its own. */
+function cmdLand(...[issueNum, opts, deps]: Parameters<typeof cliCmdLand>) {
+  return cliCmdLand(issueNum, opts, { ...inertConfigLoaders, ...inertGitOps, ...ops, ...phases, ...deps });
+}
+
+const recordingRunTui: NonNullable<CliDeps['runTui']> = async (opts) => {
+  h.runTuiCalls.push(opts);
+};
+
+function daemonDeps(): DaemonCtlDeps {
+  return {
+    exec: async (cmd, args) => {
+      h.daemonExecCalls.push({ cmd, args });
+      return h.daemonExecImpl(cmd, args);
+    },
+    home: h.daemonHome,
+    uid: 501,
+    platform: h.daemonPlatform,
+    out: { write: (s: string) => h.daemonOut.push(s) },
+    nodePath: '/usr/local/bin/node',
+    cliScriptPath: '/opt/factory/cli.js',
+    registryFile: join(h.daemonHome, '.factory', 'registry.json'),
+    pollMs: 10,
+  };
+}
+
 async function runMain(...args: string[]) {
   process.argv = ['node', 'factory', ...args];
+  return runMainWith({ daemon: daemonDeps(), runTui: recordingRunTui }, ...args);
+}
+
+async function runMainWith(deps: CliDeps | undefined, ...args: string[]) {
+  return runMainRaw({ ...inertConfigLoaders, ...deps }, ...args);
+}
+
+async function runMainRaw(deps: CliDeps | undefined, ...args: string[]) {
   try {
-    await main();
+    await main(['node', 'factory', ...args], { ...inertGitOps, ...coreFakes, ...ops, ...phases, ...deps });
   } catch (err) {
     if (err instanceof ExitError) return { exited: true as const, code: err.code };
     throw err;
@@ -399,8 +425,16 @@ async function runMain(...args: string[]) {
 }
 
 beforeEach(() => {
+  ops = makeInternalFakes();
+  coreFakes = makeCoreFakes();
+  phases = makePhaseFakes();
   h.repoRoot = mkdtempSync(join(tmpdir(), 'factory-cli-'));
   h.constitutionsDir = mkdtempSync(join(tmpdir(), 'factory-const-'));
+  h.daemonHome = mkdtempSync(join(tmpdir(), 'factory-daemon-home-'));
+  h.daemonPlatform = 'darwin';
+  h.daemonExecCalls = [];
+  h.daemonExecImpl = () => ({ code: 0, stdout: '', stderr: '' });
+  h.daemonOut = [];
   mkdirSync(join(h.repoRoot, '.git', 'info'), { recursive: true });
   mkdirSync(paths().state, { recursive: true });
   mkdirSync(paths().plans, { recursive: true });
@@ -496,6 +530,7 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(h.repoRoot, { recursive: true, force: true });
   rmSync(h.constitutionsDir, { recursive: true, force: true });
+  rmSync(h.daemonHome, { recursive: true, force: true });
   for (const [k, v] of Object.entries(savedEnv)) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
@@ -830,6 +865,57 @@ describe('cli commands (via main dispatch)', () => {
   });
 
   describe('models', () => {
+    it('uses an injected loadModelsConfig instead of the factory-core loader', async () => {
+      const config = { models: { 'distinctive-model-2063': {} }, tiers: {} };
+      const stub = vi.fn(() => config as never);
+
+      await runMainWith({ daemon: daemonDeps(), runTui: recordingRunTui, loadModelsConfig: stub }, 'models');
+
+      expect(stub).toHaveBeenCalled();
+      expect(coreFakes.ModelRegistry.mock.calls.at(-1)?.[0]).toMatchObject({
+        models: { 'distinctive-model-2063': {} },
+      });
+    });
+
+    it('uses the factory-core loadModelsConfig when none is injected', async () => {
+      await runMainRaw({ daemon: daemonDeps(), runTui: recordingRunTui }, 'models');
+      const arg = coreFakes.ModelRegistry.mock.calls.at(-1)?.[0] as { models: object };
+      expect(Object.keys(arg.models).length).toBeGreaterThan(0);
+    });
+
+    it('restores the default loaders after main() returns', async () => {
+      const stub = vi.fn((repoRoot: string, stateRoot?: string) => FactoryCore.loadRepoConfig(repoRoot, stateRoot));
+      await runMainWith({ daemon: daemonDeps(), runTui: recordingRunTui, loadRepoConfig: stub as never }, 'models');
+      const stubCalls = stub.mock.calls.length;
+
+      await shipIssue(5, {}, { repoRoot: h.repoRoot, ghRepo: h.ghRepo });
+
+      expect(stub.mock.calls.length).toBe(stubCalls);
+    });
+
+    it('restores the default phases after main() returns', async () => {
+      const stub = vi.fn(async () => h.planResult) as never;
+      await runMainWith({ daemon: daemonDeps(), runTui: recordingRunTui, planPhase: stub }, 'models');
+
+      await shipIssue(5, {}, { repoRoot: h.repoRoot, ghRepo: h.ghRepo });
+
+      expect(stub).not.toHaveBeenCalled();
+      expect(phases.planPhase).toHaveBeenCalled();
+    });
+
+    it('routes constitution --product through an injected getConstitutionsDir', async () => {
+      writeFileSync(join(h.constitutionsDir, 'alpha.md'), '# alpha');
+      const stub = vi.fn(() => h.constitutionsDir);
+      await runMainWith(
+        { daemon: daemonDeps(), runTui: recordingRunTui, getConstitutionsDir: stub },
+        'constitution',
+        '--product',
+        'alpha',
+      );
+      expect(stub).toHaveBeenCalled();
+      expect(inertConfigLoaders.getConstitutionsDir).not.toHaveBeenCalled();
+    });
+
     it('lists models, costs, and tiers', async () => {
       await runMain('models');
       const out = logged();
@@ -863,6 +949,22 @@ describe('cli commands (via main dispatch)', () => {
       h.costs = [];
       await runMain('cost');
       expect(logged()).toContain('no cost data yet');
+    });
+
+    it('uses a readCosts override passed through main deps', async () => {
+      h.costs = [{ model: 'shared', cost: 1 }];
+      await runMainWith(
+        { readCosts: () => [{ issue: '9', task: 'plan', model: 'override-model', cost: 1 }] as any },
+        'cost',
+      );
+      const out = logged();
+      expect(out).toContain('override-model');
+      expect(out).not.toContain('shared');
+    });
+
+    it('uses a formatUsageReport override passed through main deps', async () => {
+      await runMainWith({ formatUsageReport: () => 'OVERRIDE USAGE' } as any, 'usage');
+      expect(logged()).toContain('OVERRIDE USAGE');
     });
 
     it('aggregates costs by model with a grand total', async () => {
@@ -1286,6 +1388,61 @@ bash scripts/verify.sh
     });
   });
 
+  describe('filing preview (#1858)', () => {
+    it('resolves the factory commit through the injected exec seam, not node:child_process (#2014)', async () => {
+      // h.repoRoot doubles as the factory checkout: the shell fake answers every
+      // `git rev-parse --show-toplevel` with it, so resolveFactoryCheckoutCommit
+      // finds the CLI package.json there and then asks the seam for HEAD.
+      mkdirSync(join(h.repoRoot, 'packages', 'cli'), { recursive: true });
+      writeFileSync(
+        join(h.repoRoot, 'packages', 'cli', 'package.json'),
+        JSON.stringify({ name: '@on-par/factory-cli' }),
+      );
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse --show-toplevel')) return h.repoRoot;
+        if (cmd.includes('rev-parse HEAD')) return 'c0ffee2014\n';
+        if (cmd.includes('gh repo view')) return h.ghRepo;
+        return '';
+      };
+      writeFileSync(
+        paths().events,
+        JSON.stringify({
+          ts: '2026-01-01T00:00:00Z',
+          type: 'park',
+          issue: '77',
+          fingerprint: 'fp-2014-shell-seam',
+          evidence: {
+            issue: '77',
+            phase: 'build',
+            model: 'claude-sonnet',
+            reason: 'unknown',
+            component: 'claude',
+            origin: 'factory-internal',
+            eventExcerpt: 'Error: boom',
+            logPath: '/tmp/x.log',
+          },
+        }) + '\n',
+      );
+      const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+      const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      try {
+        const res = await runMain('filing', 'preview', 'fp-2014-shell-seam');
+        expect(res.exited).toBe(false);
+        const written = out.mock.calls.map((c) => String(c[0])).join('');
+        expect(written).toContain('fp:fp-2014-shell-seam');
+        expect(written).toContain('c0ffee2014');
+        expect(ops.exec).toHaveBeenCalledWith(
+          'git rev-parse HEAD',
+          expect.objectContaining({ cwd: expect.any(String) }),
+        );
+        expect(err.mock.calls.map((c) => String(c[0])).join('')).toContain('Preview only — nothing was sent.');
+      } finally {
+        out.mockRestore();
+        err.mockRestore();
+      }
+    });
+  });
+
   describe('classifier report (#1727)', () => {
     const outRec = (prNumber: number, o: Record<string, unknown> = {}) => ({
       issue: String(prNumber),
@@ -1563,6 +1720,21 @@ bash scripts/verify.sh
   });
 
   describe('tui', () => {
+    it('uses an injected deps.runTui instead of the real one, and the explicit argv wins over process.argv', async () => {
+      const fake = vi.fn(async () => {});
+      process.argv = ['node', 'factory'];
+      const res = await runMainWith({ runTui: fake }, 'tui');
+      expect(res.exited).toBe(false);
+      expect(fake).toHaveBeenCalledTimes(1);
+      expect(fake).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventsFile: expect.stringMatching(/\.factory[\\/]state[\\/]events\.ndjson$/),
+          repo: h.ghRepo,
+        }),
+      );
+      expect(h.runTuiCalls).toHaveLength(0);
+    });
+
     it('calls runTui with the events file, detected repo, and a GitHub-backed queue reader by default', async () => {
       const res = await runMain('tui');
       expect(res.exited).toBe(false);
@@ -2232,6 +2404,17 @@ bash scripts/verify.sh
       expect(logged()).toContain('STOP set');
     });
 
+    it('stop routes git rev-parse through the injected exec seam', async () => {
+      const commands: string[] = [];
+      const recordingExec = async (cmd: string) => {
+        commands.push(cmd);
+        return { stdout: `${h.repoRoot}\n`, stderr: '' };
+      };
+      await runMainWith({ exec: recordingExec }, 'stop');
+      expect(commands).toContain('git rev-parse --show-toplevel');
+      expect(existsSync(paths().stop)).toBe(true);
+    });
+
     it('resume removes an existing STOP file', async () => {
       writeFileSync(paths().stop, '');
       await runMain('resume');
@@ -2294,11 +2477,11 @@ bash scripts/verify.sh
       writeFileSync(paths().queue, '# header\napp 1\n');
       const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
-      expect(sweepWorktrees).toHaveBeenCalledWith(
+      expect(ops.sweepWorktrees).toHaveBeenCalledWith(
         expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7, repo: h.ghRepo }),
         expect.objectContaining({ octokit: expect.anything() }),
       );
-      expect(formatGcReport).toHaveBeenCalled();
+      expect(ops.formatGcReport).toHaveBeenCalled();
     });
 
     it('does not run worktree gc when worktree.autoGcOnRun is false', async () => {
@@ -2309,7 +2492,7 @@ bash scripts/verify.sh
       writeFileSync(paths().queue, '# header\napp 1\n');
       const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
-      expect(sweepWorktrees).not.toHaveBeenCalled();
+      expect(ops.sweepWorktrees).not.toHaveBeenCalled();
     });
 
     it('proceeds with the run even when worktree gc rejects', async () => {
@@ -2317,7 +2500,7 @@ bash scripts/verify.sh
         merge: { auto: false, comment: '' },
         worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: true },
       };
-      (sweepWorktrees as any).mockRejectedValueOnce(new Error('gc boom'));
+      ops.sweepWorktrees.mockRejectedValueOnce(new Error('gc boom'));
       writeFileSync(paths().queue, '# header\napp 1\n');
       const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
@@ -2350,8 +2533,7 @@ bash scripts/verify.sh
     });
 
     it('logs a warn event without crashing the run when the usage watchdog rejects', async () => {
-      const core = await import('@on-par/factory-core');
-      vi.mocked(core.watchUsage).mockRejectedValueOnce(new Error('watchdog exploded'));
+      coreFakes.watchUsage.mockRejectedValueOnce(new Error('watchdog exploded'));
       writeFileSync(paths().queue, 'app 1\n');
       const res = await runMain('run', '--local-queue');
       expect(res.exited).toBe(false);
@@ -2472,9 +2654,7 @@ bash scripts/verify.sh
       writeFileSync(paths().queue, '# header\n');
       const res = await runMain('run', '--local-queue', '--usage-threshold', '0.7', '--usage-poll', '15');
       expect(res.exited).toBe(false);
-      expect(vi.mocked(FactoryCore.watchUsage)).toHaveBeenCalledWith(
-        expect.objectContaining({ stopAt: 0.7, pollMs: 15_000 }),
-      );
+      expect(coreFakes.watchUsage).toHaveBeenCalledWith(expect.objectContaining({ stopAt: 0.7, pollMs: 15_000 }));
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('flag: --usage-threshold');
       expect(events).toContain('flag: --usage-poll');
@@ -2671,27 +2851,66 @@ bash scripts/verify.sh
       expect(logged()).not.toContain('listening on');
     });
 
-    it.each([
-      ['start', cmdDaemonStart],
-      ['stop', cmdDaemonStop],
-      ['status', cmdDaemonStatus],
-    ])('daemon %s dispatches to its launchctl wrapper', async (verb, cmd) => {
-      const res = await runMain('daemon', verb);
+    const bootout = { cmd: 'launchctl', args: ['bootout', `gui/501/${FACTORYD_LABEL}`] };
+    const print = { cmd: 'launchctl', args: ['print', `gui/501/${FACTORYD_LABEL}`] };
+
+    it('daemon start installs the plist and bootstraps it through launchctl', async () => {
+      const { plistPath } = factorydFiles(h.daemonHome);
+      const res = await runMain('daemon', 'start');
       expect(res.exited).toBe(false);
-      expect(cmd).toHaveBeenCalledTimes(1);
+      expect(h.daemonExecCalls).toEqual([
+        bootout,
+        { cmd: 'launchctl', args: ['bootstrap', 'gui/501', plistPath] },
+        print,
+      ]);
+      expect(existsSync(plistPath)).toBe(true);
+      expect(readFileSync(plistPath, 'utf-8')).toContain('/opt/factory/cli.js');
+      expect(h.daemonOut.join('')).toContain('factoryd: installed');
     });
 
-    it('daemon logs passes --follow and --lines through', async () => {
+    it('daemon stop boots the agent out through launchctl', async () => {
+      const res = await runMain('daemon', 'stop');
+      expect(res.exited).toBe(false);
+      expect(h.daemonExecCalls).toEqual([bootout]);
+      expect(h.daemonOut.join('')).toContain('factoryd: stopped');
+    });
+
+    it('daemon status reports the pid and uptime of the running agent', async () => {
+      h.daemonExecImpl = (cmd) =>
+        cmd === 'launchctl'
+          ? { code: 0, stdout: '\tpid = 4242\n', stderr: '' }
+          : { code: 0, stdout: '01:02\n', stderr: '' };
+      const res = await runMain('daemon', 'status');
+      expect(res.exited).toBe(false);
+      expect(h.daemonExecCalls).toEqual([print, { cmd: 'ps', args: ['-o', 'etime=', '-p', '4242'] }]);
+      const out = h.daemonOut.join('');
+      expect(out).toContain('factoryd: running (pid 4242, uptime 01:02)');
+      expect(out).toContain('attached repos: none');
+    });
+
+    it('daemon logs -n prints the last N lines of the log', async () => {
+      const { logPath } = factorydFiles(h.daemonHome);
+      mkdirSync(dirname(logPath), { recursive: true });
+      writeFileSync(logPath, Array.from({ length: 10 }, (_, i) => `line${i + 1}\n`).join(''));
+      const res = await runMain('daemon', 'logs', '-n', '3');
+      expect(res.exited).toBe(false);
+      expect(h.daemonOut.join('')).toBe('line8\nline9\nline10\n');
+      expect(h.daemonExecCalls).toEqual([]);
+    });
+
+    it('daemon logs -f returns early when no log exists yet', async () => {
+      // Never create a log file here: follow mode would then block on SIGINT.
       const res = await runMain('daemon', 'logs', '-f', '-n', '7');
       expect(res.exited).toBe(false);
-      expect(cmdDaemonLogs).toHaveBeenCalledWith(expect.objectContaining({ follow: true, lines: '7' }));
+      expect(h.daemonOut.join('')).toContain('no daemon log yet');
     });
 
     it('maps DaemonCtlError onto the CLI exit code', async () => {
-      vi.mocked(cmdDaemonStatus).mockRejectedValueOnce(new DaemonCtlError('requires macOS launchd', 2));
+      h.daemonPlatform = 'linux';
       const res = await runMain('daemon', 'status');
       expect(res.exited).toBe(true);
       expect(res.code).toBe(2);
+      expect(h.daemonExecCalls).toEqual([]);
     });
 
     it('refuses to start when a live daemon holds the pid file, leaving it untouched', async () => {
@@ -2736,26 +2955,34 @@ bash scripts/verify.sh
   describe('worktree gc', () => {
     it('dry-run calls sweepWorktrees with dryRun: true and takes no lock', async () => {
       h.gcReport = { removed: [], kept: 3, dryRun: true };
+      const lockHeld: boolean[] = [];
+      ops.sweepWorktrees.mockImplementationOnce(async () => {
+        lockHeld.push(existsSync(paths().gitLock));
+        return h.gcReport;
+      });
       const res = await runMain('worktree', 'gc', '--dry-run');
       expect(res.exited).toBe(false);
-      expect(sweepWorktrees).toHaveBeenCalledWith(
+      expect(ops.sweepWorktrees).toHaveBeenCalledWith(
         expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7, dryRun: true }),
         expect.anything(),
       );
-      expect(withGitLock).not.toHaveBeenCalled();
+      expect(lockHeld).toEqual([false]);
       expect(logged()).toContain('GC_REPORT:dry:removed=0:kept=3');
     });
 
     it('--ttl-days overrides the config default', async () => {
       const res = await runMain('worktree', 'gc', '--ttl-days', '3');
       expect(res.exited).toBe(false);
-      expect(sweepWorktrees).toHaveBeenCalledWith(expect.objectContaining({ ttlDays: 3 }), expect.anything());
+      expect(ops.sweepWorktrees).toHaveBeenCalledWith(expect.objectContaining({ ttlDays: 3 }), expect.anything());
     });
 
     it('--branch-prefix sf is passed to sweepWorktrees', async () => {
       const res = await runMain('worktree', 'gc', '--branch-prefix', 'sf');
       expect(res.exited).toBe(false);
-      expect(sweepWorktrees).toHaveBeenCalledWith(expect.objectContaining({ branchPrefix: 'sf' }), expect.anything());
+      expect(ops.sweepWorktrees).toHaveBeenCalledWith(
+        expect.objectContaining({ branchPrefix: 'sf' }),
+        expect.anything(),
+      );
     });
 
     it('exits 2 when --branch-prefix has no letters or digits', async () => {
@@ -2773,20 +3000,31 @@ bash scripts/verify.sh
 
   describe('reset', () => {
     it('prints one summary line per issue and exits 0 when nothing is found', async () => {
-      h.execImpl = (cmd: string) => (cmd.includes('rev-parse') ? h.repoRoot : '');
+      const lockHeld: boolean[] = [];
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        lockHeld.push(existsSync(paths().gitLock));
+        return '';
+      };
       const res = await runMain('reset', '555', '556');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('#555: nothing to reset');
       expect(logged()).toContain('#556: nothing to reset');
-      expect(withGitLock).toHaveBeenCalled();
+      expect(lockHeld).toContain(true);
     });
 
     it('--dry-run previews without taking the git lock', async () => {
-      h.execImpl = (cmd: string) => (cmd.includes('rev-parse') ? h.repoRoot : '');
+      const lockHeld: boolean[] = [];
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        lockHeld.push(existsSync(paths().gitLock));
+        return '';
+      };
       const res = await runMain('reset', '555', '--dry-run');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('#555 (dry run): nothing to reset');
-      expect(withGitLock).not.toHaveBeenCalled();
+      expect(lockHeld.length).toBeGreaterThan(0);
+      expect(lockHeld.every((held) => !held)).toBe(true);
     });
 
     it('runs the dirty probe through exec and keeps a dirty worktree (#1789)', async () => {
@@ -2899,9 +3137,7 @@ bash scripts/verify.sh
         '15',
       );
       expect(res.exited).toBe(false);
-      expect(vi.mocked(FactoryCore.watchUsage)).toHaveBeenCalledWith(
-        expect.objectContaining({ stopAt: 0.7, pollMs: 15_000 }),
-      );
+      expect(coreFakes.watchUsage).toHaveBeenCalledWith(expect.objectContaining({ stopAt: 0.7, pollMs: 15_000 }));
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('flag: --usage-threshold');
       expect(events).toContain('flag: --usage-poll');
@@ -3077,6 +3313,11 @@ bash scripts/verify.sh
       expect(errored()).toContain('rate limited');
     });
 
+    it("routes landIssue's fetch through the injected gitFetch (#2019)", async () => {
+      await runMain('land', '5');
+      expect(gitFetch).toHaveBeenCalledWith(h.repoRoot);
+    });
+
     it('wraps a post-merge cleanup failure as a code-5 CliExitError', async () => {
       vi.mocked(cleanupWorktree).mockRejectedValueOnce(new Error('rm -rf failed'));
       const res = await runMain('land', '5');
@@ -3096,48 +3337,31 @@ bash scripts/verify.sh
     });
 
     it('scopes the git/merge locks to mutations, not the CI watch (#645)', async () => {
-      const trace: string[] = [];
-      let mergeLockAcquisitions = 0;
-      vi.mocked(withGitLock).mockImplementation(async (_root: any, fn: any) => {
-        trace.push('git-lock:acquire');
-        try {
-          return await fn();
-        } finally {
-          trace.push('git-lock:release');
-        }
-      });
-      vi.mocked(withFileLock).mockImplementation(async (lock: any, fn: any) => {
-        const isMerge = String(lock).endsWith('merge.lock');
-        if (isMerge) mergeLockAcquisitions++;
-        trace.push(`file-lock:acquire:${isMerge ? 'merge' : 'git'}`);
-        try {
-          return await fn();
-        } finally {
-          trace.push('file-lock:release');
-        }
-      });
-      vi.mocked(watchChecks).mockImplementation(async () => {
-        trace.push('watch');
+      const watched: string[] = [];
+      const mergeLockHeld: boolean[] = [];
+      ops.watchChecks.mockImplementation(async () => {
+        watched.push(`merge=${existsSync(paths().mergeLock)}:git=${existsSync(paths().gitLock)}`);
         return 'success' as const;
       });
+      cleanupWorktree.mockImplementationOnce(async () => {
+        mergeLockHeld.push(existsSync(paths().mergeLock));
+      });
+      const merge = h.octokit.rest.pulls.merge;
+      h.octokit.rest.pulls.merge = vi.fn(async (...args: unknown[]) => {
+        mergeLockHeld.push(existsSync(paths().mergeLock));
+        return (merge as any)(...args);
+      }) as never;
 
       try {
         const res = await runMain('land', '5');
         expect(res.exited).toBe(false);
 
-        let depth = 0;
-        for (const entry of trace) {
-          if (entry === 'git-lock:acquire') depth++;
-          else if (entry === 'git-lock:release') depth--;
-          else if (entry === 'watch') expect(depth).toBe(0);
-        }
-        expect(mergeLockAcquisitions).toBeGreaterThanOrEqual(2);
+        expect(watched.length).toBeGreaterThan(0);
+        expect(watched.every((w) => w === 'merge=false:git=false')).toBe(true);
+        expect(mergeLockHeld.length).toBeGreaterThanOrEqual(2);
+        expect(mergeLockHeld.every(Boolean)).toBe(true);
       } finally {
-        vi.mocked(withGitLock).mockImplementation(async (_root: string, fn: () => Promise<unknown>) => fn());
-        vi.mocked(withFileLock).mockImplementation(async (_lock: string, fn: () => Promise<unknown>, _opts?: unknown) =>
-          fn(),
-        );
-        vi.mocked(watchChecks).mockImplementation(async () => 'success');
+        ops.watchChecks.mockImplementation(async () => 'success');
       }
     });
   });
@@ -3186,17 +3410,17 @@ bash scripts/verify.sh
       h.factoryConfig = { ...h.factoryConfig, worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: true } };
       const res = await runMain('ship', '5');
       expect(res.exited).toBe(false);
-      expect(sweepWorktrees).toHaveBeenCalledWith(
+      expect(ops.sweepWorktrees).toHaveBeenCalledWith(
         expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7, repo: h.ghRepo }),
         expect.objectContaining({ octokit: expect.anything() }),
       );
-      expect(formatGcReport).toHaveBeenCalled();
+      expect(ops.formatGcReport).toHaveBeenCalled();
     });
 
     it('does not run worktree gc when worktree.autoGcOnRun is false (#1756)', async () => {
       const res = await runMain('ship', '5');
       expect(res.exited).toBe(false);
-      expect(sweepWorktrees).not.toHaveBeenCalled();
+      expect(ops.sweepWorktrees).not.toHaveBeenCalled();
     });
 
     it('names the branch with the default factory prefix when --branch-prefix is omitted', async () => {
@@ -3221,11 +3445,10 @@ bash scripts/verify.sh
     });
 
     it('exits 2 before any phase runs when --branch-prefix has no letters or digits', async () => {
-      const core = await import('@on-par/factory-core');
       const res = await runMain('ship', '5', '--branch-prefix', '!!!');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('--branch-prefix');
-      expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
+      expect(phases.planPhase).not.toHaveBeenCalled();
     });
     it('ships an issue through all phases and prints the ready PR', async () => {
       const res = await runMain('ship', '5');
@@ -3314,26 +3537,23 @@ bash scripts/verify.sh
     });
 
     it('reaches shipPhase without an approval gate when --interactive is not passed', async () => {
-      const core = await import('@on-par/factory-core');
       const res = await runMain('ship', '5');
       expect(res.exited).toBe(false);
-      const call = vi.mocked(core.shipPhase).mock.calls.at(-1)?.[0] as any;
+      const call = phases.shipPhase.mock.calls.at(-1)?.[0] as any;
       expect(call.approvalGate).toBeUndefined();
     });
 
     it('passes an approval gate to shipPhase when --interactive is set', async () => {
-      const core = await import('@on-par/factory-core');
       const res = await runMain('ship', '5', '--interactive');
       expect(res.exited).toBe(false);
-      const call = vi.mocked(core.shipPhase).mock.calls.at(-1)?.[0] as any;
+      const call = phases.shipPhase.mock.calls.at(-1)?.[0] as any;
       expect(typeof call.approvalGate).toBe('function');
     });
 
     it('reaches planPhase without an approval gate when --approve-plan is not passed', async () => {
-      const core = await import('@on-par/factory-core');
       const res = await runMain('ship', '5');
       expect(res.exited).toBe(false);
-      const call = vi.mocked(core.planPhase).mock.calls.at(-1)?.[0] as any;
+      const call = phases.planPhase.mock.calls.at(-1)?.[0] as any;
       expect(call.approvalGate).toBeUndefined();
       expect(call.enforceReadiness).toBe(true);
       expect(call.enforceSizeGate).toBe(true);
@@ -3341,24 +3561,22 @@ bash scripts/verify.sh
     });
 
     it('passes an approval gate and drainSteering to planPhase when --approve-plan is set', async () => {
-      const core = await import('@on-par/factory-core');
       const res = await runMain('ship', '5', '--approve-plan');
       expect(res.exited).toBe(false);
-      const call = vi.mocked(core.planPhase).mock.calls.at(-1)?.[0] as any;
+      const call = phases.planPhase.mock.calls.at(-1)?.[0] as any;
       expect(typeof call.approvalGate).toBe('function');
       expect(typeof call.drainSteering).toBe('function');
     });
 
     it('exits 2 with the missing-claude message and never invokes the phase mocks when claude is unavailable', async () => {
       h.claudeAvailable = false;
-      const core = await import('@on-par/factory-core');
       const res = await runMain('ship', '42');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('claude CLI not found — install Claude Code first:');
-      expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
-      expect(vi.mocked(core.buildPhase)).not.toHaveBeenCalled();
-      expect(vi.mocked(core.checkPhase)).not.toHaveBeenCalled();
-      expect(vi.mocked(core.shipPhase)).not.toHaveBeenCalled();
+      expect(phases.planPhase).not.toHaveBeenCalled();
+      expect(phases.buildPhase).not.toHaveBeenCalled();
+      expect(phases.checkPhase).not.toHaveBeenCalled();
+      expect(phases.shipPhase).not.toHaveBeenCalled();
     });
 
     it('exits 2 with the not-initialized message when .factory/ is missing', async () => {
@@ -3436,17 +3654,17 @@ bash scripts/verify.sh
       h.factoryConfig = { ...h.factoryConfig, worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: true } };
       const res = await runMain('run-issue', '5');
       expect(res.exited).toBe(false);
-      expect(sweepWorktrees).toHaveBeenCalledWith(
+      expect(ops.sweepWorktrees).toHaveBeenCalledWith(
         expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7, repo: h.ghRepo }),
         expect.objectContaining({ octokit: expect.anything() }),
       );
-      expect(formatGcReport).toHaveBeenCalled();
+      expect(ops.formatGcReport).toHaveBeenCalled();
     });
 
     it('does not run worktree gc when worktree.autoGcOnRun is false (#1756)', async () => {
       const res = await runMain('run-issue', '5');
       expect(res.exited).toBe(false);
-      expect(sweepWorktrees).not.toHaveBeenCalled();
+      expect(ops.sweepWorktrees).not.toHaveBeenCalled();
     });
 
     it('--help lists --run-children with its one-line description (#1750)', async () => {
@@ -3489,27 +3707,25 @@ bash scripts/verify.sh
       expect(calls[0][1]).toContain('-factory-sf-');
     });
     it('names the child issues and suggests --run-children when the size gate decomposes the issue', async () => {
-      const core = await import('@on-par/factory-core');
       h.planResult = { ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: [10, 11] } };
       const res = await runMain('run-issue', '5');
       expect(res).toMatchObject({ exited: true, code: 1 });
       expect(errored()).toContain('#10');
       expect(errored()).toContain('#11');
       expect(errored()).toContain('--run-children');
-      expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(core.buildPhase)).not.toHaveBeenCalled();
-      expect(vi.mocked(core.shipPhase)).not.toHaveBeenCalled();
+      expect(phases.planPhase).toHaveBeenCalledTimes(1);
+      expect(phases.buildPhase).not.toHaveBeenCalled();
+      expect(phases.shipPhase).not.toHaveBeenCalled();
     });
 
     it('accepts --run-children and ships a non-decomposed issue exactly as without it', async () => {
-      const core = await import('@on-par/factory-core');
       const res = await runMain('run-issue', '5', '--run-children');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('PR #99 ready for review');
-      expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(core.buildPhase)).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(core.checkPhase)).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(core.shipPhase)).toHaveBeenCalledTimes(1);
+      expect(phases.planPhase).toHaveBeenCalledTimes(1);
+      expect(phases.buildPhase).toHaveBeenCalledTimes(1);
+      expect(phases.checkPhase).toHaveBeenCalledTimes(1);
+      expect(phases.shipPhase).toHaveBeenCalledTimes(1);
     });
 
     describe('--run-children', () => {
@@ -3517,7 +3733,6 @@ bash scripts/verify.sh
         ({ ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: children } }) as any;
 
       it('runs children in order, prints the summary, takes no labels/merge, and holds the lock', async () => {
-        const core = await import('@on-par/factory-core');
         const { existsSync } = await import('node:fs');
         const lockPath = join(paths().state, 'run.lock');
         writeFileSync(paths().queue, 'app 7\n');
@@ -3526,11 +3741,11 @@ bash scripts/verify.sh
           lockSeen.push(existsSync(lockPath));
           return h.planResult;
         };
-        vi.mocked(core.planPhase)
+        phases.planPhase
           .mockImplementationOnce(async () => decompose([10, 11]))
           .mockImplementationOnce(recordLock)
           .mockImplementationOnce(recordLock);
-        vi.mocked(core.shipPhase)
+        phases.shipPhase
           .mockResolvedValueOnce({ ok: true, prNumber: 101 } as any)
           .mockResolvedValueOnce({ ok: true, prNumber: 102 } as any);
         h.octokit.rest.issues.addLabels = vi.fn(async () => ({}));
@@ -3540,10 +3755,10 @@ bash scripts/verify.sh
         expect(res.exited).toBe(false);
         const issues = h.octokit.rest.issues.get.mock.calls.map((c: any[]) => c[0].issue_number);
         expect(issues.slice(0, 3)).toEqual([5, 10, 11]);
-        expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(3);
-        expect(vi.mocked(core.buildPhase)).toHaveBeenCalledTimes(2);
-        expect(vi.mocked(core.checkPhase)).toHaveBeenCalledTimes(2);
-        expect(vi.mocked(core.shipPhase)).toHaveBeenCalledTimes(2);
+        expect(phases.planPhase).toHaveBeenCalledTimes(3);
+        expect(phases.buildPhase).toHaveBeenCalledTimes(2);
+        expect(phases.checkPhase).toHaveBeenCalledTimes(2);
+        expect(phases.shipPhase).toHaveBeenCalledTimes(2);
         expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
         expect(h.octokit.rest.pulls.merge).not.toHaveBeenCalled();
         expect(readFileSync(paths().queue, 'utf-8')).toBe('app 7\n');
@@ -3555,9 +3770,8 @@ bash scripts/verify.sh
       });
 
       it('continues past a failed child and exits 1', async () => {
-        const core = await import('@on-par/factory-core');
-        vi.mocked(core.planPhase).mockImplementationOnce(async () => decompose([10, 11, 12]));
-        vi.mocked(core.shipPhase)
+        phases.planPhase.mockImplementationOnce(async () => decompose([10, 11, 12]));
+        phases.shipPhase
           .mockResolvedValueOnce({ ok: true, prNumber: 101 } as any)
           .mockResolvedValueOnce({ ok: false } as any)
           .mockResolvedValueOnce({ ok: true, prNumber: 112 } as any);
@@ -3566,15 +3780,14 @@ bash scripts/verify.sh
         expect(logged()).toContain('#11 → failed');
         expect(logged()).toContain('#12 → PR #112 ready for review');
         expect(logged()).toContain('2/3 children ready for review');
-        expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(4);
+        expect(phases.planPhase).toHaveBeenCalledTimes(4);
       });
 
       it('an escalated child does not stop later children', async () => {
-        const core = await import('@on-par/factory-core');
-        vi.mocked(core.planPhase)
+        phases.planPhase
           .mockImplementationOnce(async () => decompose([10, 11]))
           .mockImplementationOnce(async () => ({ ok: false, route: 'claude', escalate: 'needs human' }) as any);
-        vi.mocked(core.shipPhase).mockResolvedValueOnce({ ok: true, prNumber: 111 } as any);
+        phases.shipPhase.mockResolvedValueOnce({ ok: true, prNumber: 111 } as any);
         const res = await runMain('run-issue', '5', '--run-children');
         expect(res).toMatchObject({ exited: true, code: 1 });
         expect(logged()).toContain('#10 → failed');
@@ -3582,28 +3795,26 @@ bash scripts/verify.sh
       });
 
       it('stops starting children once .factory/STOP appears, and leaves STOP in place', async () => {
-        const core = await import('@on-par/factory-core');
         const stopPath = join(paths().state, 'STOP');
-        vi.mocked(core.planPhase).mockImplementationOnce(async () => decompose([10, 11]));
-        vi.mocked(core.shipPhase).mockImplementationOnce(async () => {
+        phases.planPhase.mockImplementationOnce(async () => decompose([10, 11]));
+        phases.shipPhase.mockImplementationOnce(async () => {
           writeFileSync(stopPath, '');
           return { ok: true, prNumber: 110 } as any;
         });
         const res = await runMain('run-issue', '5', '--run-children');
         expect(res).toMatchObject({ exited: true, code: 1 });
-        expect(vi.mocked(core.shipPhase)).toHaveBeenCalledTimes(1);
-        expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(2);
+        expect(phases.shipPhase).toHaveBeenCalledTimes(1);
+        expect(phases.planPhase).toHaveBeenCalledTimes(2);
         expect(logged()).toContain('#10 → PR #110 ready for review');
         expect(logged()).toContain('#11 → not run: .factory/STOP present');
         expect(readFileSync(stopPath, 'utf-8')).toBe('');
       });
 
       it('runs a nested decomposition in place of the child, before later siblings', async () => {
-        const core = await import('@on-par/factory-core');
-        vi.mocked(core.planPhase)
+        phases.planPhase
           .mockImplementationOnce(async () => decompose([10, 11]))
           .mockImplementationOnce(async () => decompose([20, 21]));
-        vi.mocked(core.shipPhase)
+        phases.shipPhase
           .mockResolvedValueOnce({ ok: true, prNumber: 120 } as any)
           .mockResolvedValueOnce({ ok: true, prNumber: 121 } as any)
           .mockResolvedValueOnce({ ok: true, prNumber: 111 } as any);
@@ -3611,8 +3822,8 @@ bash scripts/verify.sh
         expect(res.exited).toBe(false);
         const issues = h.octokit.rest.issues.get.mock.calls.map((c: any[]) => c[0].issue_number);
         expect(issues.slice(0, 5)).toEqual([5, 10, 20, 21, 11]);
-        expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(5);
-        expect(vi.mocked(core.shipPhase)).toHaveBeenCalledTimes(3);
+        expect(phases.planPhase).toHaveBeenCalledTimes(5);
+        expect(phases.shipPhase).toHaveBeenCalledTimes(3);
         expect(logged()).toContain('#10 → decomposed into #20, #21');
         expect(logged()).toContain('3/3 children ready for review');
       });
@@ -3626,22 +3837,20 @@ bash scripts/verify.sh
       };
 
       it('skips a closed child, keeps going, and exits 0', async () => {
-        const core = await import('@on-par/factory-core');
-        vi.mocked(core.planPhase).mockImplementationOnce(async () => decompose([10, 11]));
-        vi.mocked(core.shipPhase).mockResolvedValueOnce({ ok: true, prNumber: 111 } as any);
+        phases.planPhase.mockImplementationOnce(async () => decompose([10, 11]));
+        phases.shipPhase.mockResolvedValueOnce({ ok: true, prNumber: 111 } as any);
         closeIssue10();
         const res = await runMain('run-issue', '5', '--run-children');
         expect(res.exited).toBe(false);
-        expect(vi.mocked(core.shipPhase)).toHaveBeenCalledTimes(1);
+        expect(phases.shipPhase).toHaveBeenCalledTimes(1);
         expect(logged()).toContain('#10 → skipped:');
         expect(logged()).toContain('#11 → PR #111 ready for review');
         expect(logged()).toContain('1/2 children ready for review, 1 skipped');
       });
 
       it('still exits 1 when a child after a skipped one fails', async () => {
-        const core = await import('@on-par/factory-core');
-        vi.mocked(core.planPhase).mockImplementationOnce(async () => decompose([10, 11]));
-        vi.mocked(core.shipPhase).mockResolvedValueOnce({ ok: false } as any);
+        phases.planPhase.mockImplementationOnce(async () => decompose([10, 11]));
+        phases.shipPhase.mockResolvedValueOnce({ ok: false } as any);
         closeIssue10();
         const res = await runMain('run-issue', '5', '--run-children');
         expect(res).toMatchObject({ exited: true, code: 1 });
@@ -3650,8 +3859,7 @@ bash scripts/verify.sh
       });
 
       it('records a child that cannot be resolved as failed', async () => {
-        const core = await import('@on-par/factory-core');
-        vi.mocked(core.planPhase).mockImplementationOnce(async () => decompose([10]));
+        phases.planPhase.mockImplementationOnce(async () => decompose([10]));
         const get = h.octokit.rest.issues.get;
         h.octokit.rest.issues.get = vi.fn(async (args: any) => {
           if (args.issue_number === 10) throw new Error('Not Found');
@@ -3664,15 +3872,14 @@ bash scripts/verify.sh
     });
 
     it('resolves the issue through the canonical work-request seam and ships it through all phases', async () => {
-      const core = await import('@on-par/factory-core');
       const res = await runMain('run-issue', '5');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('PR #99 ready for review');
       expect(logged()).toContain(`github-issue:${h.ghRepo}#5`);
-      expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(core.buildPhase)).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(core.checkPhase)).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(core.shipPhase)).toHaveBeenCalledTimes(1);
+      expect(phases.planPhase).toHaveBeenCalledTimes(1);
+      expect(phases.buildPhase).toHaveBeenCalledTimes(1);
+      expect(phases.checkPhase).toHaveBeenCalledTimes(1);
+      expect(phases.shipPhase).toHaveBeenCalledTimes(1);
       expect(h.octokit.rest.issues.get).toHaveBeenCalledWith(expect.objectContaining({ issue_number: 5 }));
     });
 
@@ -3694,14 +3901,12 @@ bash scripts/verify.sh
     });
 
     it('rejects a non-numeric identifier before any work', async () => {
-      const core = await import('@on-par/factory-core');
-      const { setupWorktree } = await import('@on-par/factory-core/internal');
       const res = await runMain('run-issue', 'abc');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('invalid issue argument');
       expect(vi.mocked(setupWorktree)).not.toHaveBeenCalled();
-      expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
-      expect(vi.mocked(core.shipPhase)).not.toHaveBeenCalled();
+      expect(phases.planPhase).not.toHaveBeenCalled();
+      expect(phases.shipPhase).not.toHaveBeenCalled();
       expect(h.octokit.rest.issues.get).not.toHaveBeenCalled();
     });
 
@@ -3712,8 +3917,6 @@ bash scripts/verify.sh
     });
 
     it('fails pre-flight with exit 2 when the issue is unreachable — no worktree, no PR', async () => {
-      const core = await import('@on-par/factory-core');
-      const { setupWorktree } = await import('@on-par/factory-core/internal');
       h.octokit.rest.issues.get = vi.fn(async () => {
         throw new Error('Not Found');
       });
@@ -3722,8 +3925,8 @@ bash scripts/verify.sh
       expect(errored()).toContain('could not resolve issue #5');
       expect(errored()).toContain('no worktree or PR was created');
       expect(vi.mocked(setupWorktree)).not.toHaveBeenCalled();
-      expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
-      expect(vi.mocked(core.shipPhase)).not.toHaveBeenCalled();
+      expect(phases.planPhase).not.toHaveBeenCalled();
+      expect(phases.shipPhase).not.toHaveBeenCalled();
     });
 
     it('maps a pipeline failure to exit 1, not a pre-flight error', async () => {
@@ -3739,14 +3942,13 @@ bash scripts/verify.sh
 
     it('exits 2 with the missing-claude message and never invokes the phase mocks when claude is unavailable', async () => {
       h.claudeAvailable = false;
-      const core = await import('@on-par/factory-core');
       const res = await runMain('run-issue', '5');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('claude CLI not found — install Claude Code first:');
-      expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
-      expect(vi.mocked(core.buildPhase)).not.toHaveBeenCalled();
-      expect(vi.mocked(core.checkPhase)).not.toHaveBeenCalled();
-      expect(vi.mocked(core.shipPhase)).not.toHaveBeenCalled();
+      expect(phases.planPhase).not.toHaveBeenCalled();
+      expect(phases.buildPhase).not.toHaveBeenCalled();
+      expect(phases.checkPhase).not.toHaveBeenCalled();
+      expect(phases.shipPhase).not.toHaveBeenCalled();
     });
 
     it('exits 2 with the not-initialized message when .factory/ is missing', async () => {
@@ -3757,7 +3959,6 @@ bash scripts/verify.sh
     });
 
     it('reports invalid work-request input as a pre-flight error, not a generic resolve failure', async () => {
-      const core = await import('@on-par/factory-core');
       h.execImpl = (cmd: string) => {
         if (cmd.includes('rev-parse')) return h.repoRoot;
         if (cmd.includes('gh repo view')) return 'not-a-valid-repo-slug';
@@ -3766,8 +3967,8 @@ bash scripts/verify.sh
       const res = await runMain('run-issue', '5');
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('invalid input for work-request source');
-      expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
-      expect(vi.mocked(core.shipPhase)).not.toHaveBeenCalled();
+      expect(phases.planPhase).not.toHaveBeenCalled();
+      expect(phases.shipPhase).not.toHaveBeenCalled();
     });
 
     it('logs a human-restarted event when a prior run for the issue was parked', async () => {
@@ -3837,8 +4038,6 @@ Please add a widget that does the thing.
     });
 
     it('resolves the brief through the canonical work-request seam and ships it through all phases', async () => {
-      const core = await import('@on-par/factory-core');
-      const { setupWorktree } = await import('@on-par/factory-core/internal');
       const briefPath = writeBrief();
       const digest = createHash('sha256').update(VALID_BRIEF).digest('hex');
 
@@ -3847,20 +4046,20 @@ Please add a widget that does the thing.
       expect(res.exited).toBe(false);
       expect(logged()).toContain('PR #99 ready for review');
       expect(logged()).toContain('local-brief:');
-      expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(core.buildPhase)).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(core.checkPhase)).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(core.shipPhase)).toHaveBeenCalledTimes(1);
+      expect(phases.planPhase).toHaveBeenCalledTimes(1);
+      expect(phases.buildPhase).toHaveBeenCalledTimes(1);
+      expect(phases.checkPhase).toHaveBeenCalledTimes(1);
+      expect(phases.shipPhase).toHaveBeenCalledTimes(1);
       expect(h.octokit.rest.issues.get).not.toHaveBeenCalled();
       expect(vi.mocked(setupWorktree)).toHaveBeenCalled();
 
-      const planArgs = vi.mocked(core.planPhase).mock.calls.at(-1)?.[0] as any;
+      const planArgs = phases.planPhase.mock.calls.at(-1)?.[0] as any;
       expect(planArgs.workSource).toEqual({ kind: 'local-brief', params: { path: briefPath } });
 
-      const buildArgs = vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0] as any;
+      const buildArgs = phases.buildPhase.mock.calls.at(-1)?.[0] as any;
       expect(buildArgs.disablePublish).toBeFalsy();
 
-      const shipArgs = vi.mocked(core.shipPhase).mock.calls.at(-1)?.[0] as any;
+      const shipArgs = phases.shipPhase.mock.calls.at(-1)?.[0] as any;
       expect(shipArgs.work).toMatchObject({ kind: 'local-brief' });
 
       const events = readFileSync(paths().events, 'utf-8');
@@ -3882,8 +4081,6 @@ Please add a widget that does the thing.
     });
 
     it('fails pre-flight with exit 2 on a malformed brief — no worktree, no BUILD', async () => {
-      const core = await import('@on-par/factory-core');
-      const { setupWorktree } = await import('@on-par/factory-core/internal');
       const briefPath = writeBrief('# Add a widget\n\nPlease add a widget that does the thing.\n');
 
       const res = await runMain('run-brief', briefPath);
@@ -3891,13 +4088,11 @@ Please add a widget that does the thing.
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('no acceptance criteria');
       expect(vi.mocked(setupWorktree)).not.toHaveBeenCalled();
-      expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
-      expect(vi.mocked(core.buildPhase)).not.toHaveBeenCalled();
+      expect(phases.planPhase).not.toHaveBeenCalled();
+      expect(phases.buildPhase).not.toHaveBeenCalled();
     });
 
     it('fails pre-flight with exit 2 when the brief file is missing — no worktree, no PR', async () => {
-      const core = await import('@on-par/factory-core');
-      const { setupWorktree } = await import('@on-par/factory-core/internal');
       const briefPath = join(h.repoRoot, 'does-not-exist.md');
 
       const res = await runMain('run-brief', briefPath);
@@ -3906,22 +4101,21 @@ Please add a widget that does the thing.
       expect(errored()).toContain('could not resolve brief');
       expect(errored()).toContain('no worktree or PR was created');
       expect(vi.mocked(setupWorktree)).not.toHaveBeenCalled();
-      expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
+      expect(phases.planPhase).not.toHaveBeenCalled();
     });
 
     it('exits 2 with the missing-claude message and never invokes the phase mocks when claude is unavailable', async () => {
       h.claudeAvailable = false;
-      const core = await import('@on-par/factory-core');
       const briefPath = writeBrief();
 
       const res = await runMain('run-brief', briefPath);
 
       expect(res).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('claude CLI not found — install Claude Code first:');
-      expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
-      expect(vi.mocked(core.buildPhase)).not.toHaveBeenCalled();
-      expect(vi.mocked(core.checkPhase)).not.toHaveBeenCalled();
-      expect(vi.mocked(core.shipPhase)).not.toHaveBeenCalled();
+      expect(phases.planPhase).not.toHaveBeenCalled();
+      expect(phases.buildPhase).not.toHaveBeenCalled();
+      expect(phases.checkPhase).not.toHaveBeenCalled();
+      expect(phases.shipPhase).not.toHaveBeenCalled();
     });
 
     it('exits 2 with the not-initialized message when .factory/ is missing', async () => {
@@ -3975,8 +4169,6 @@ Please add a widget that does the thing.
 
     describe('--workspace (local-only)', () => {
       it('runs PLAN/BUILD/CHECK in the caller workspace, disables publish, and skips SHIP', async () => {
-        const core = await import('@on-par/factory-core');
-        const { setupWorktree } = await import('@on-par/factory-core/internal');
         const ws = writeWorkspace();
         const briefPath = writeBrief();
 
@@ -3986,17 +4178,17 @@ Please add a widget that does the thing.
         expect(logged()).toContain('Local-only run complete');
         expect(logged()).toContain('publishing disabled');
         expect(vi.mocked(setupWorktree)).not.toHaveBeenCalled();
-        expect(vi.mocked(core.shipPhase)).not.toHaveBeenCalled();
+        expect(phases.shipPhase).not.toHaveBeenCalled();
 
-        expect(vi.mocked(core.planPhase)).toHaveBeenCalledTimes(1);
-        expect(vi.mocked(core.buildPhase)).toHaveBeenCalledTimes(1);
-        expect(vi.mocked(core.checkPhase)).toHaveBeenCalledTimes(1);
-        expect(vi.mocked(core.planPhase).mock.calls.at(-1)?.[0]).toMatchObject({ worktree: ws });
-        expect(vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0]).toMatchObject({
+        expect(phases.planPhase).toHaveBeenCalledTimes(1);
+        expect(phases.buildPhase).toHaveBeenCalledTimes(1);
+        expect(phases.checkPhase).toHaveBeenCalledTimes(1);
+        expect(phases.planPhase.mock.calls.at(-1)?.[0]).toMatchObject({ worktree: ws });
+        expect(phases.buildPhase.mock.calls.at(-1)?.[0]).toMatchObject({
           worktree: ws,
           disablePublish: true,
         });
-        expect(vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0]).toMatchObject({ worktree: ws });
+        expect(phases.checkPhase.mock.calls.at(-1)?.[0]).toMatchObject({ worktree: ws });
 
         expect(h.octokit.rest.issues.get).not.toHaveBeenCalled();
 
@@ -4032,8 +4224,6 @@ Please add a widget that does the thing.
       });
 
       it('exits 2 before any pipeline call when the workspace is missing', async () => {
-        const core = await import('@on-par/factory-core');
-        const { setupWorktree } = await import('@on-par/factory-core/internal');
         const missing = join(tmpdir(), 'factory-ws-does-not-exist-xyz');
         const briefPath = writeBrief();
 
@@ -4042,13 +4232,11 @@ Please add a widget that does the thing.
         expect(res).toEqual({ exited: true, code: 2 });
         expect(errored()).toContain('invalid local-only workspace');
         expect(vi.mocked(setupWorktree)).not.toHaveBeenCalled();
-        expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
-        expect(vi.mocked(core.buildPhase)).not.toHaveBeenCalled();
+        expect(phases.planPhase).not.toHaveBeenCalled();
+        expect(phases.buildPhase).not.toHaveBeenCalled();
       });
 
       it('exits 2 before any pipeline call when the workspace has no .git', async () => {
-        const core = await import('@on-par/factory-core');
-        const { setupWorktree } = await import('@on-par/factory-core/internal');
         const ws = mkdtempSync(join(tmpdir(), 'factory-ws-'));
         workspaceDirs.push(ws);
         const briefPath = writeBrief();
@@ -4058,7 +4246,7 @@ Please add a widget that does the thing.
         expect(res).toEqual({ exited: true, code: 2 });
         expect(errored()).toContain('not an initialized git repository');
         expect(vi.mocked(setupWorktree)).not.toHaveBeenCalled();
-        expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
+        expect(phases.planPhase).not.toHaveBeenCalled();
       });
     });
 
@@ -4126,8 +4314,6 @@ Please add a widget that does the thing.
       });
 
       it('exits 2 with --artifacts requires --workspace when --workspace is absent', async () => {
-        const core = await import('@on-par/factory-core');
-        const { setupWorktree } = await import('@on-par/factory-core/internal');
         const artDir = writeArtifactsDir();
         const briefPath = writeBrief();
 
@@ -4136,11 +4322,10 @@ Please add a widget that does the thing.
         expect(res).toEqual({ exited: true, code: 2 });
         expect(errored()).toContain('--artifacts requires --workspace');
         expect(vi.mocked(setupWorktree)).not.toHaveBeenCalled();
-        expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
+        expect(phases.planPhase).not.toHaveBeenCalled();
       });
 
       it('exits 2 with invalid artifacts directory when the path is a regular file', async () => {
-        const core = await import('@on-par/factory-core');
         const ws = writeWorkspace();
         const briefPath = writeBrief();
         const notADir = join(h.repoRoot, 'artifacts-file');
@@ -4150,7 +4335,7 @@ Please add a widget that does the thing.
 
         expect(res).toEqual({ exited: true, code: 2 });
         expect(errored()).toContain('invalid artifacts directory');
-        expect(vi.mocked(core.planPhase)).not.toHaveBeenCalled();
+        expect(phases.planPhase).not.toHaveBeenCalled();
       });
 
       it('writes no manifest for normal runs (no --artifacts)', async () => {
@@ -4184,6 +4369,32 @@ Please add a widget that does the thing.
       const res = await runMain('doctor');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('== factory doctor ==');
+    });
+
+    it('probes the sandbox runtime through the injected execSync seam, not node:child_process (#2014)', async () => {
+      h.claudeAvailable = true;
+      const base = h.execSyncImpl;
+      h.execSyncImpl = (cmd: string) => {
+        if (cmd.includes('command -v sandbox-exec') || cmd.includes('command -v firejail')) {
+          throw new Error('not on PATH');
+        }
+        return base(cmd);
+      };
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('skipped — no sandbox runtime (sandbox-exec/firejail) on this host');
+      expect(ops.execSync).toHaveBeenCalledWith(
+        expect.stringMatching(/^command -v (sandbox-exec|firejail) /),
+        expect.anything(),
+      );
+    });
+
+    it('skips the sandboxed claude probe when sandbox is disabled by config', async () => {
+      h.claudeAvailable = true;
+      h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, enabled: false } };
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('skipped — sandbox disabled by config or FACTORY_SANDBOX');
     });
 
     it('reports .factory/STOP presence as an explicit, non-failing row', async () => {
@@ -4345,7 +4556,7 @@ Please add a widget that does the thing.
 
       const res = await runMain('doctor', '--reconcile');
       expect(res.exited).toBe(false);
-      expect(sweepWorktrees).toHaveBeenCalledWith(
+      expect(ops.sweepWorktrees).toHaveBeenCalledWith(
         expect.objectContaining({ repoRoot: h.repoRoot, ttlDays: 7 }),
         expect.anything(),
       );
@@ -4357,12 +4568,12 @@ Please add a widget that does the thing.
       h.claudeAvailable = true;
       const res = await runMain('doctor');
       expect(res.exited).toBe(false);
-      expect(sweepWorktrees).not.toHaveBeenCalled();
+      expect(ops.sweepWorktrees).not.toHaveBeenCalled();
     });
 
     it('--reconcile survives a failing worktree sweep', async () => {
       h.claudeAvailable = true;
-      (sweepWorktrees as any).mockRejectedValueOnce(new Error('gc boom'));
+      ops.sweepWorktrees.mockRejectedValueOnce(new Error('gc boom'));
       const res = await runMain('doctor', '--reconcile');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('reconcile: worktree sweep failed');
@@ -4383,12 +4594,12 @@ Please add a widget that does the thing.
       h.claudeAvailable = true;
       const res = await runMain('doctor');
       expect(res.exited).toBe(false);
-      expect(releaseStaleClaims).not.toHaveBeenCalled();
+      expect(ops.releaseStaleClaims).not.toHaveBeenCalled();
     });
 
     it('--reconcile survives a rejected releaseStaleClaims', async () => {
       h.claudeAvailable = true;
-      (releaseStaleClaims as any).mockRejectedValueOnce(new Error('claims boom'));
+      ops.releaseStaleClaims.mockRejectedValueOnce(new Error('claims boom'));
       const res = await runMain('doctor', '--reconcile');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('reconcile: stale claim release failed');
@@ -4407,7 +4618,7 @@ Please add a widget that does the thing.
       };
       await runMain('doctor', '--reconcile');
       expect(logged()).toContain('reconcile: skipping stale claims — no GitHub repo or token');
-      expect(releaseStaleClaims).not.toHaveBeenCalled();
+      expect(ops.releaseStaleClaims).not.toHaveBeenCalled();
     });
 
     it('reports a green-and-ready PR with its owning issue', async () => {
@@ -4434,8 +4645,8 @@ Please add a widget that does the thing.
 
       const res = await runMain('doctor');
       expect(res.exited).toBe(false);
-      expect(listOrphanContainers).not.toHaveBeenCalled();
-      expect(listMicroVms).not.toHaveBeenCalled();
+      expect(ops.listOrphanContainers).not.toHaveBeenCalled();
+      expect(ops.listMicroVms).not.toHaveBeenCalled();
       expect(logged()).toContain('no orphan sf-job-*/factory.managed containers');
       expect(logged()).toContain('no orphan factory-* sbx VMs');
     });
@@ -4459,7 +4670,7 @@ Please add a widget that does the thing.
 
       const res = await runMain('doctor', '--reconcile');
       expect(res).toEqual({ exited: true, code: 1 });
-      expect(reapOrphanContainers).toHaveBeenCalledWith(h.orphanContainers);
+      expect(ops.reapOrphanContainers).toHaveBeenCalledWith(h.orphanContainers);
       expect(logged()).toContain('reconcile: removed container sf-job-1');
     });
 
@@ -4470,7 +4681,7 @@ Please add a widget that does the thing.
 
       const res = await runMain('doctor');
       expect(res).toEqual({ exited: true, code: 1 });
-      expect(reapOrphanContainers).not.toHaveBeenCalled();
+      expect(ops.reapOrphanContainers).not.toHaveBeenCalled();
     });
 
     it('fails doctor and reports a factory-* sbx VM with no active lane as an orphan', async () => {
@@ -4520,7 +4731,7 @@ Please add a widget that does the thing.
 
       const res = await runMain('doctor', '--reconcile');
       expect(res).toEqual({ exited: true, code: 1 });
-      expect(reapOrphanMicroVm).toHaveBeenCalledWith('factory-abc123');
+      expect(ops.reapOrphanMicroVm).toHaveBeenCalledWith('factory-abc123');
       expect(logged()).toContain('reconcile: removed sbx VM factory-abc123 (sbx rm --force)');
     });
 
@@ -4531,7 +4742,7 @@ Please add a widget that does the thing.
 
       const res = await runMain('doctor');
       expect(res).toEqual({ exited: true, code: 1 });
-      expect(reapOrphanMicroVm).not.toHaveBeenCalled();
+      expect(ops.reapOrphanMicroVm).not.toHaveBeenCalled();
     });
   });
 
@@ -4565,6 +4776,137 @@ Please add a widget that does the thing.
 describe('shipIssue (direct)', () => {
   const ctx = () => ({ repoRoot: h.repoRoot, ghRepo: h.ghRepo });
 
+  it('uses an injected setupWorktree over the default git ops (#2019)', async () => {
+    const custom = vi.fn(async (..._args: Parameters<NonNullable<CliDeps['setupWorktree']>>) => undefined as never);
+    await shipIssue(5, {}, ctx(), { setupWorktree: custom });
+    expect(custom.mock.calls[0]?.slice(0, 3)).toEqual([h.repoRoot, expect.any(String), expect.any(String)]);
+    expect(setupWorktree).not.toHaveBeenCalled();
+  });
+
+  it('uses the injected octokit factory instead of the default client', async () => {
+    const fake = defaultOctokit();
+    const factory = vi.fn(() => fake as never);
+    const defaultGet = h.octokit.rest.issues.get;
+
+    await shipIssue(5, {}, ctx(), { octokit: factory });
+
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(fake.rest.issues.get).toHaveBeenCalled();
+    expect(defaultGet).not.toHaveBeenCalled();
+  });
+
+  it('main() routes deps.octokit to GitHub-backed commands', async () => {
+    const fake = defaultOctokit();
+    fake.rest.pulls.list = vi.fn(async () => ({ data: [] }));
+    const factory = vi.fn(() => fake as never);
+    const defaultList = h.octokit.rest.pulls.list;
+
+    await runMainWith({ octokit: factory }, 'land', '5');
+
+    expect(factory).toHaveBeenCalled();
+    expect(fake.rest.pulls.list).toHaveBeenCalled();
+    expect(defaultList).not.toHaveBeenCalled();
+  });
+
+  it('cmdLand uses an injected octokit factory', async () => {
+    const fake = defaultOctokit();
+    fake.rest.pulls.list = vi.fn(async () => ({ data: [] }));
+    const factory = vi.fn(() => fake as never);
+
+    await expect(cmdLand(5, {}, { octokit: factory })).rejects.toMatchObject({ code: 1 });
+
+    expect(factory).toHaveBeenCalled();
+    expect(fake.rest.pulls.list).toHaveBeenCalled();
+  });
+
+  it('uses injected resolveTimeouts, resolveSkipCI and resolveEffectiveModelPins', async () => {
+    const timeouts = vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1 }));
+    const skip = vi.fn(() => false);
+    const pins = vi.fn(() => ({
+      plan: undefined,
+      planFallback: undefined,
+      build: undefined,
+      buildFallback: undefined,
+      sources: {},
+    }));
+
+    await shipIssue(5, {}, ctx(), {
+      resolveTimeouts: timeouts as never,
+      resolveSkipCI: skip,
+      resolveEffectiveModelPins: pins as never,
+    });
+
+    expect(timeouts).toHaveBeenCalledWith(h.factoryConfig);
+    expect(skip).toHaveBeenCalledWith(h.factoryConfig);
+    expect(pins).toHaveBeenCalled();
+    expect(inertConfigLoaders.resolveEffectiveModelPins).not.toHaveBeenCalled();
+  });
+
+  it('uses injected loadFactoryConfigForRepo and loadRepoConfig', async () => {
+    const repoValue = FactoryCore.loadRepoConfig(h.repoRoot);
+    const factoryConfig = vi.fn(() => h.factoryConfig);
+    const repoConfig = vi.fn(() => repoValue);
+
+    await shipIssue(5, {}, ctx(), {
+      loadFactoryConfigForRepo: factoryConfig as never,
+      loadRepoConfig: repoConfig as never,
+    });
+
+    expect(factoryConfig).toHaveBeenCalledWith(expect.stringMatching(/\.factory\/config\.(json|yaml)$/));
+    expect(repoConfig).toHaveBeenCalledWith(h.repoRoot, paths().root);
+  });
+
+  it('uses an injected loadModelsConfig and loadRoutesConfig', async () => {
+    const modelsValue = { models: { 'distinctive-model-2064': {} }, tiers: {} };
+    const routesValue = { 'distinctive-route-2064': {} };
+    const models = vi.fn(() => modelsValue as never);
+    const routes = vi.fn(() => routesValue as never);
+
+    await shipIssue(5, {}, ctx(), { loadModelsConfig: models, loadRoutesConfig: routes });
+
+    expect(models).toHaveBeenCalled();
+    expect(routes).toHaveBeenCalled();
+    expect(coreFakes.ModelRouter.mock.calls.at(-1)?.[0]).toMatchObject(modelsValue);
+    expect(coreFakes.ModelRouter.mock.calls.at(-1)?.[1]).toMatchObject(routesValue);
+  });
+
+  it('uses the h.octokit client injected through the shared ops fakes', async () => {
+    await shipIssue(5, {}, ctx());
+    expect(h.octokit.rest.issues.get).toHaveBeenCalled();
+  });
+
+  it('forwards an injected shipPhase override into RunPorts instead of the default', async () => {
+    const ship = vi.fn(async () => h.shipResult);
+
+    await shipIssue(5, {}, ctx(), { shipPhase: ship as never });
+
+    expect(ship).toHaveBeenCalledTimes(1);
+    expect(phases.shipPhase).not.toHaveBeenCalled();
+  });
+
+  it('drives the deps-builder phase doubles when the test passes no override', async () => {
+    await shipIssue(5, {}, ctx());
+    expect(phases.planPhase).toHaveBeenCalled();
+    expect(phases.shipPhase).toHaveBeenCalled();
+    await expect(phases.planPhase.mock.results[0]?.value).resolves.toBe(h.planResult);
+  });
+
+  it('main() forwards phase overrides to the shipIssue it runs', async () => {
+    const customPlan = vi.fn(async (_opts) => h.planResult);
+    await runMainWith({ planPhase: customPlan as never }, 'ship', '5');
+    expect(customPlan).toHaveBeenCalled();
+    expect(phases.planPhase).not.toHaveBeenCalled();
+  });
+
+  it('restores the default phases after main() returns', async () => {
+    const customShip = vi.fn(async (_opts) => h.shipResult);
+    await runMainWith({ shipPhase: customShip as never }, 'ship', '5');
+    const calls = customShip.mock.calls.length;
+    await shipIssue(5, {}, ctx());
+    expect(customShip).toHaveBeenCalledTimes(calls);
+    expect(phases.shipPhase).toHaveBeenCalled();
+  });
+
   it('uses the branchPrefix override for the branch name', async () => {
     expect(await shipIssue(5, { branchPrefix: 'sf' }, ctx())).toBe('sf/5-fix-the-bug');
   });
@@ -4578,21 +4920,20 @@ describe('shipIssue (direct)', () => {
   });
 
   it('loads the committed repo config from paths.root, not paths.state', async () => {
-    const core = await import('@on-par/factory-core');
-    await shipIssue(5, {}, ctx());
-    expect(vi.mocked(core.loadRepoConfig)).toHaveBeenCalledWith(h.repoRoot, paths().root);
+    const spy = vi.fn(FactoryCore.loadRepoConfig);
+    await shipIssue(5, {}, ctx(), { loadRepoConfig: spy as never });
+    expect(spy).toHaveBeenCalledWith(h.repoRoot, paths().root);
   });
 
   it('keeps a claude-cli build pin on the claude route when PLAN picks codex (#1367)', async () => {
-    const core = await import('@on-par/factory-core');
     h.modelOverrides = { build: 'claude-sonnet-5' };
     h.modelProviders = { 'claude-sonnet-5': 'anthropic' };
     h.planResult = { ok: true, route: 'codex' };
 
     await shipIssue(5, {}, ctx());
 
-    expect(vi.mocked(core.planPhase).mock.calls.at(-1)?.[0]).toMatchObject({ preferredRoute: 'claude' });
-    expect(vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0]).toMatchObject({
+    expect(phases.planPhase.mock.calls.at(-1)?.[0]).toMatchObject({ preferredRoute: 'claude' });
+    expect(phases.buildPhase.mock.calls.at(-1)?.[0]).toMatchObject({
       route: 'claude',
       modelOverride: 'claude-sonnet-5',
     });
@@ -4603,11 +4944,11 @@ describe('shipIssue (direct)', () => {
   });
 
   it('reads providers flags from .factory/config.json (no symlink needed)', async () => {
-    const core = await import('@on-par/factory-core');
     mkdirSync(paths().root, { recursive: true });
     writeFileSync(paths().config, JSON.stringify({ version: 1, providers: { ollama: false } }));
-    await shipIssue(5, {}, ctx());
-    expect(vi.mocked(core.loadRepoConfig).mock.results.at(-1)?.value).toEqual({
+    const spy = vi.fn(FactoryCore.loadRepoConfig);
+    await shipIssue(5, {}, ctx(), { loadRepoConfig: spy as never });
+    expect(spy.mock.results.at(-1)?.value).toEqual({
       version: 2,
       providers: { ollama: false },
     });
@@ -4655,7 +4996,7 @@ describe('shipIssue (direct)', () => {
 
     h.triggerPlanProviderFailure = null;
     await shipIssue(6, {}, ctx());
-    expect(vi.mocked(FactoryCore.planPhase).mock.calls.at(-1)?.[0]).toMatchObject({ modelOverride: 'gpt-plan' });
+    expect(phases.planPhase.mock.calls.at(-1)?.[0]).toMatchObject({ modelOverride: 'gpt-plan' });
   });
 
   it('cools down a weekly-usage-cap provider for the reported reset time, not the flat default', async () => {
@@ -4688,7 +5029,7 @@ describe('shipIssue (direct)', () => {
 
     await shipIssue(5, {}, ctx());
 
-    expect(vi.mocked(FactoryCore.buildPhase).mock.calls.at(-1)?.[0]).toMatchObject({
+    expect(phases.buildPhase.mock.calls.at(-1)?.[0]).toMatchObject({
       route: 'codex',
       modelOverride: 'gpt-build',
       codexFallbackModel: 'gpt-build',
@@ -4801,32 +5142,28 @@ describe('shipIssue (direct)', () => {
   });
 
   it('does not construct an approval gate when interactive is not requested', async () => {
-    const core = await import('@on-par/factory-core');
     await shipIssue(5, {}, ctx());
-    const call = vi.mocked(core.shipPhase).mock.calls.at(-1)?.[0] as any;
+    const call = phases.shipPhase.mock.calls.at(-1)?.[0] as any;
     expect(call.approvalGate).toBeUndefined();
     expect(call.checkSummary).toBe(h.checkResult.summary);
   });
 
   it('constructs an approval gate when interactive:true is passed', async () => {
-    const core = await import('@on-par/factory-core');
     await shipIssue(5, { interactive: true }, ctx());
-    const call = vi.mocked(core.shipPhase).mock.calls.at(-1)?.[0] as any;
+    const call = phases.shipPhase.mock.calls.at(-1)?.[0] as any;
     expect(typeof call.approvalGate).toBe('function');
   });
 
   it('does not construct a plan approval gate when approvePlan is not requested', async () => {
-    const core = await import('@on-par/factory-core');
     await shipIssue(5, {}, ctx());
-    const call = vi.mocked(core.planPhase).mock.calls.at(-1)?.[0] as any;
+    const call = phases.planPhase.mock.calls.at(-1)?.[0] as any;
     expect(call.approvalGate).toBeUndefined();
     expect(call.drainSteering).toBeUndefined();
   });
 
   it('constructs a plan approval gate when approvePlan:true is passed', async () => {
-    const core = await import('@on-par/factory-core');
     await shipIssue(5, { approvePlan: true }, ctx());
-    const call = vi.mocked(core.planPhase).mock.calls.at(-1)?.[0] as any;
+    const call = phases.planPhase.mock.calls.at(-1)?.[0] as any;
     expect(typeof call.approvalGate).toBe('function');
     expect(typeof call.drainSteering).toBe('function');
 
@@ -4842,19 +5179,17 @@ describe('shipIssue (direct)', () => {
   });
 
   it('passes an onPgid callback to buildPhase and checkPhase', async () => {
-    const core = await import('@on-par/factory-core');
     await shipIssue(5, {}, ctx());
-    const buildCall = vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0] as any;
-    const checkCall = vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0] as any;
+    const buildCall = phases.buildPhase.mock.calls.at(-1)?.[0] as any;
+    const checkCall = phases.checkPhase.mock.calls.at(-1)?.[0] as any;
     expect(typeof buildCall.onPgid).toBe('function');
     expect(typeof checkCall.onPgid).toBe('function');
   });
 
   it('passes an onActivity callback to checkPhase that bumps the persisted phase snapshot heartbeat (#1326)', async () => {
-    const core = await import('@on-par/factory-core');
     await shipIssue(5, {}, ctx());
 
-    const checkCall = vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0] as any;
+    const checkCall = phases.checkPhase.mock.calls.at(-1)?.[0] as any;
     expect(typeof checkCall.onActivity).toBe('function');
 
     const snapshotFile = join(paths().state, 'runs', 'issue-5.phase.json');
@@ -4869,10 +5204,9 @@ describe('shipIssue (direct)', () => {
   });
 
   it('updates the persisted phase snapshot lastEvent on every logged event (#1327)', async () => {
-    const core = await import('@on-par/factory-core');
     await shipIssue(5, {}, ctx());
 
-    const checkCall = vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0] as any;
+    const checkCall = phases.checkPhase.mock.calls.at(-1)?.[0] as any;
     expect(typeof checkCall.log).toBe('function');
 
     const snapshotFile = join(paths().state, 'runs', 'issue-5.phase.json');
@@ -4885,8 +5219,7 @@ describe('shipIssue (direct)', () => {
   });
 
   it('tracks a pgid reported through onPgid and sweeps it before releasing the lease, without crashing the run', async () => {
-    const core = await import('@on-par/factory-core');
-    vi.mocked(core.buildPhase).mockImplementationOnce(async (opts: any) => {
+    phases.buildPhase.mockImplementationOnce(async (opts) => {
       // An already-dead pgid: exercises the track -> killAll path without touching a real process group.
       opts.onPgid?.(999999999);
       return h.buildResult;
@@ -4981,7 +5314,6 @@ describe('shipIssue (direct)', () => {
   });
 
   it('logs environment_lease_failed when the conflict probe itself rejects and the range is exhausted', async () => {
-    const core = await import('@on-par/factory-core');
     const net = await import('node:net');
     const server = net.createServer();
     await new Promise<void>((resolve) => server.listen({ port: 0, host: '127.0.0.1' }, resolve));
@@ -4991,7 +5323,7 @@ describe('shipIssue (direct)', () => {
       ...h.factoryConfig,
       environment: { ports: { enabled: true, range: [busyPort, busyPort] } },
     };
-    vi.mocked(core.defaultFindPortListeners).mockRejectedValueOnce(new Error('lsof unavailable'));
+    coreFakes.defaultFindPortListeners.mockRejectedValueOnce(new Error('lsof unavailable'));
 
     try {
       await shipIssue(5, {}, ctx());
@@ -5059,9 +5391,8 @@ describe('shipIssue (direct)', () => {
   it('writes a local-only run report on success when FACTORY_LOCAL_ONLY=1', async () => {
     trackEnv('FACTORY_LOCAL_ONLY');
     process.env.FACTORY_LOCAL_ONLY = '1';
-    const core = await import('@on-par/factory-core');
     await shipIssue(5, {}, ctx());
-    expect(vi.mocked(core.writeLocalRunReport)).toHaveBeenCalled();
+    expect(coreFakes.writeLocalRunReport).toHaveBeenCalled();
     expect(logged()).toContain('local-only report');
   });
 
@@ -5074,9 +5405,8 @@ describe('shipIssue (direct)', () => {
       reworkRounds: 0,
       failureSignature: 'sig-1',
     };
-    const core = await import('@on-par/factory-core');
     await expect(shipIssue(5, {}, ctx())).rejects.toBeTruthy();
-    const report = vi.mocked(core.writeLocalRunReport).mock.calls.at(-1)?.[0] as any;
+    const report = coreFakes.writeLocalRunReport.mock.calls.at(-1)?.[0] as any;
     expect(report.outcome).toBe('failed');
   });
 
@@ -5092,7 +5422,7 @@ describe('shipIssue (direct)', () => {
     await shipIssue(5, {}, ctx());
     const events = readFileSync(paths().events, 'utf-8');
     // createMicroVm (not the CLI) owns the outcome-driven 'sandbox'/'sandbox-unavailable'
-    // events; setupWorktree is mocked here, so neither fires — the CLI must not log a
+    // events; setupWorktree is an injected double here, so neither fires — the CLI must not log a
     // premature "active" event before the microVM actually exists.
     expect(events).not.toContain('docker-sandbox microVM active for lane');
     expect(vi.mocked(setupWorktree).mock.calls.at(-1)?.[4]).toEqual(
@@ -5152,9 +5482,7 @@ describe('shipIssue (direct)', () => {
   });
 
   it('logs skip-ci when FACTORY_SKIP_CI resolves to true', async () => {
-    const core = await import('@on-par/factory-core');
-    vi.mocked(core.resolveSkipCI).mockReturnValueOnce(true);
-    await shipIssue(5, {}, ctx());
+    await shipIssue(5, {}, ctx(), { resolveSkipCI: () => true });
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('skip-ci');
     expect(events).toContain('skipping CI watch');
@@ -5163,8 +5491,7 @@ describe('shipIssue (direct)', () => {
   it('logs unconsumed steering when interactive leftover messages remain after ship', async () => {
     // Queue a fresh steering message as a side effect of shipPhase — after the
     // build-time drain but before shipIssue's post-ship leftover check.
-    const core = await import('@on-par/factory-core');
-    vi.mocked(core.shipPhase).mockImplementationOnce(async () => {
+    phases.shipPhase.mockImplementationOnce(async () => {
       mkdirSync(paths().steering, { recursive: true });
       writeFileSync(
         join(paths().steering, 'issue-5.ndjson'),
@@ -5188,11 +5515,10 @@ describe('shipIssue (direct)', () => {
 
     it('drains queued steering into buildPhase and logs steering_applied when interactive', async () => {
       writeQueuedSteering();
-      const core = await import('@on-par/factory-core');
 
       await shipIssue(5, { interactive: true }, ctx());
 
-      const buildCall = vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0] as any;
+      const buildCall = phases.buildPhase.mock.calls.at(-1)?.[0] as any;
       expect(buildCall.steering.messages).toEqual([
         { id: 'steer-1', issue: 5, text: 'prefer approach B', queuedAt: '2026-01-01T00:00:00.000Z' },
       ]);
@@ -5202,11 +5528,9 @@ describe('shipIssue (direct)', () => {
     });
 
     it('passes a drainSteering callback to checkPhase that drains the same issue steering queue', async () => {
-      const core = await import('@on-par/factory-core');
-
       await shipIssue(5, { interactive: true }, ctx());
 
-      const checkCall = vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0] as any;
+      const checkCall = phases.checkPhase.mock.calls.at(-1)?.[0] as any;
       expect(typeof checkCall.drainSteering).toBe('function');
 
       mkdirSync(paths().steering, { recursive: true });
@@ -5223,13 +5547,12 @@ describe('shipIssue (direct)', () => {
 
     it('does not drain steering, and passes steering: undefined, when not interactive', async () => {
       writeQueuedSteering();
-      const core = await import('@on-par/factory-core');
 
       await shipIssue(5, {}, ctx());
 
-      const buildCall = vi.mocked(core.buildPhase).mock.calls.at(-1)?.[0] as any;
+      const buildCall = phases.buildPhase.mock.calls.at(-1)?.[0] as any;
       expect(buildCall.steering).toBeUndefined();
-      const checkCall = vi.mocked(core.checkPhase).mock.calls.at(-1)?.[0] as any;
+      const checkCall = phases.checkPhase.mock.calls.at(-1)?.[0] as any;
       expect(checkCall.drainSteering).toBeUndefined();
       expect(existsSync(join(paths().steering, 'issue-5.ndjson'))).toBe(true);
       const events = readFileSync(paths().events, 'utf-8');
@@ -5254,7 +5577,7 @@ describe('CliExitError (direct command invocation)', () => {
   });
 
   it('cmdConstitution({}) rejects with code 2 and the usage message', async () => {
-    await expect(cmdConstitution({})).rejects.toMatchObject({
+    await expect(cmdConstitution({}, coreFakes)).rejects.toMatchObject({
       name: 'CliExitError',
       code: 2,
       message: expect.stringContaining('usage: factory constitution'),
@@ -5263,7 +5586,7 @@ describe('CliExitError (direct command invocation)', () => {
   });
 
   it("cmdConstitution({ product: 'nope' }) rejects with code 1 and the not-found message", async () => {
-    await expect(cmdConstitution({ product: 'nope' })).rejects.toMatchObject({
+    await expect(cmdConstitution({ product: 'nope' }, coreFakes)).rejects.toMatchObject({
       name: 'CliExitError',
       code: 1,
       message: expect.stringContaining("No constitution 'nope'"),
@@ -5274,7 +5597,7 @@ describe('CliExitError (direct command invocation)', () => {
   it('cmdUsage() rejects with code 2 when FACTORY_USAGE_CAP is invalid', async () => {
     trackEnv('FACTORY_USAGE_CAP');
     process.env.FACTORY_USAGE_CAP = '-5';
-    await expect(cmdUsage()).rejects.toMatchObject({
+    await expect(cmdUsage(coreFakes)).rejects.toMatchObject({
       name: 'CliExitError',
       code: 2,
       message: expect.stringContaining('FACTORY_USAGE_CAP'),
@@ -5284,7 +5607,7 @@ describe('CliExitError (direct command invocation)', () => {
 
   it('cmdUsage() prints the real subscription usage plus the heuristic comparison when the subscription signal is available', async () => {
     h.subscriptionUsage = { fiveHourUtilization: 42, fiveHourResetsAt: '2026-07-15T18:00:00Z' };
-    await cmdUsage();
+    await cmdUsage(coreFakes);
     const logged = logSpy.mock.calls.map((c: any[]) => c[0]).join('\n');
     expect(logged).toContain('5h subscription usage: 42% of plan limit, resets 2026-07-15T18:00:00Z');
     expect(logged).toContain('heuristic list-price estimate: USAGE REPORT');
@@ -5292,7 +5615,7 @@ describe('CliExitError (direct command invocation)', () => {
 
   it('cmdUsage() falls back to the heuristic with a warning when the subscription signal is unavailable', async () => {
     h.subscriptionUsage = null;
-    await cmdUsage();
+    await cmdUsage(coreFakes);
     const logged = logSpy.mock.calls.map((c: any[]) => c[0]).join('\n');
     expect(logged).toContain('real subscription usage unavailable');
     expect(logged).toContain('USAGE REPORT');
@@ -5308,6 +5631,17 @@ describe('CliExitError (direct command invocation)', () => {
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
+  it('cmdLand uses an injected loadFactoryConfigForRepo', async () => {
+    h.octokit.rest.pulls.list = vi.fn(async () => ({ data: [] }));
+    const load = vi.fn(() => h.factoryConfig);
+    await expect(
+      cliCmdLand(5, {}, { ...inertConfigLoaders, ...inertGitOps, ...ops, loadFactoryConfigForRepo: load }),
+    ).rejects.toMatchObject({
+      code: 1,
+    });
+    expect(load).toHaveBeenCalledWith(expect.stringMatching(/\.factory\/config\.(json|yaml)$/));
+  });
+
   describe('cmdLand no-auto-merge gate (#1720)', () => {
     const labelsFor = (gated: number[]) =>
       vi.fn(async ({ issue_number }: { issue_number: number }) => ({
@@ -5321,7 +5655,7 @@ describe('CliExitError (direct command invocation)', () => {
 
     it('refuses with code 4 when the issue carries the gate label', async () => {
       h.octokit.rest.issues.listLabelsOnIssue = labelsFor([5]);
-      vi.mocked(watchChecks).mockResolvedValue('success');
+      ops.watchChecks.mockResolvedValue('success');
       await expect(cmdLand(5)).rejects.toMatchObject({
         name: 'CliExitError',
         code: 4,
@@ -5356,7 +5690,7 @@ describe('CliExitError (direct command invocation)', () => {
 
     it('--allow-gated merges past the gate with an AUDIT line and a merge-gated-override event', async () => {
       h.octokit.rest.issues.listLabelsOnIssue = labelsFor([5]);
-      vi.mocked(watchChecks).mockResolvedValue('success');
+      ops.watchChecks.mockResolvedValue('success');
       await expect(cmdLand(5, { allowGated: true })).resolves.toBeUndefined();
       expect(h.octokit.rest.pulls.merge).toHaveBeenCalled();
       expect(logged()).toMatch(/^AUDIT .*#5/m);
@@ -5384,7 +5718,7 @@ describe('CliExitError (direct command invocation)', () => {
     h.setupWorktreeImpl = async (_repoRoot, _branch, path) => {
       mkdirSync(path, { recursive: true });
     };
-    vi.mocked(watchChecks).mockResolvedValue('success');
+    ops.watchChecks.mockResolvedValue('success');
 
     try {
       await expect(cmdLand(5)).resolves.toBeUndefined();
@@ -5398,12 +5732,13 @@ describe('CliExitError (direct command invocation)', () => {
       );
       expect(commands).toContain('git rebase origin/main');
       expect(commands).toContain("git push --force-with-lease origin 'contributor/adopted-pr'");
-      expect(watchChecks).toHaveBeenCalledTimes(2);
+      expect(ops.watchChecks).toHaveBeenCalledTimes(2);
       expect(h.octokit.rest.pulls.merge).toHaveBeenCalledWith({
         owner: 'on-par',
         repo: 'software-factory',
         pull_number: 77,
         merge_method: 'squash',
+        sha: 'abc123',
       });
     } finally {
       rmSync(worktree, { recursive: true, force: true });
@@ -5442,7 +5777,7 @@ describe('CliExitError (direct command invocation)', () => {
   });
 
   it('cmdLand(5) resolves cleanly and leaves the PR open when CI reports a confirmed failure (regression: owner/example-app#707 merged with a failing e2e check)', async () => {
-    vi.mocked(watchChecks).mockResolvedValueOnce('failure');
+    ops.watchChecks.mockResolvedValueOnce('failure');
 
     await expect(cmdLand(5)).resolves.toBeUndefined();
 
@@ -5459,7 +5794,7 @@ describe('CliExitError (direct command invocation)', () => {
   });
 
   it('cmdLand(5) resolves cleanly and leaves the PR open when CI never reaches a green verdict (timeout)', async () => {
-    vi.mocked(watchChecks).mockResolvedValueOnce('timeout');
+    ops.watchChecks.mockResolvedValueOnce('timeout');
 
     await expect(cmdLand(5)).resolves.toBeUndefined();
 

@@ -27,7 +27,6 @@ import {
   logCost,
   logEvent,
   readCosts,
-  readJsonIfExists,
   reapLaneWorktree,
   setupWorktree,
   shellEscape,
@@ -489,20 +488,6 @@ describe('utils', () => {
     ensureDir(path);
     expect(existsSync(path)).toBe(true);
     expect(() => ensureDir(path)).not.toThrow();
-  });
-
-  it('reads JSON files with a fallback for missing or invalid files', async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), 'factory-json-'));
-    const jsonFile = join(tmpDir, 'data.json');
-    const invalidFile = join(tmpDir, 'invalid.json');
-    const fallback = { ok: false };
-
-    writeFileSync(jsonFile, JSON.stringify({ ok: true, count: 2 }));
-    expect(readJsonIfExists(jsonFile, fallback)).toEqual({ ok: true, count: 2 });
-    expect(readJsonIfExists(join(tmpDir, 'missing.json'), fallback)).toBe(fallback);
-
-    writeFileSync(invalidFile, 'not json{');
-    expect(readJsonIfExists(invalidFile, fallback)).toBe(fallback);
   });
 });
 
