@@ -337,7 +337,7 @@ import { ensureFactoryExcluded, writeSampleQueue } from './init-files.js';
 import { cmdLogs } from './logs.js';
 import { applyHelpGroups } from './help-groups.js';
 import { mergeScopeNotice } from './merge-scope.js';
-import { createFactoryOctokit } from './octokit.js';
+import { createFactoryOctokit, formatDeprecation, type FactoryOctokitOptions } from './octokit.js';
 import { DeepCheckError, createDeepModelRunner, runIssueCheck, type DeepCheckModelRunner } from './ready-check.js';
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
 import { readRunFlagOverrides, writeRunFlagOverrides } from './run-flags.js';
@@ -623,8 +623,8 @@ function resolveGitHubToken(shell: ShellOps = shellOps): string | undefined {
 /** Octokit factory for the current main() or cmdLand invocation (CliDeps.octokit); unset outside them. */
 let octokitFactory: (() => Octokit) | undefined;
 
-function getOctokit(shell: ShellOps = shellOps): Octokit {
-  return octokitFactory ? octokitFactory() : createFactoryOctokit(resolveGitHubToken(shell));
+function getOctokit(shell: ShellOps = shellOps, options?: FactoryOctokitOptions): Octokit {
+  return octokitFactory ? octokitFactory() : createFactoryOctokit(resolveGitHubToken(shell), options);
 }
 
 export function errorDetail(err: unknown): string {
@@ -2044,7 +2044,15 @@ export async function shipIssue(
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot(shell));
   const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo(shell));
   const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
-  const octokit = (deps.octokit ?? (() => getOctokit(shell)))();
+  // GitHub REST deprecations seen on this run's client become one warn event per route (#2218).
+  const octokit = (
+    deps.octokit ??
+    (() =>
+      getOctokit(shell, {
+        log: (d) =>
+          logEvent(paths.events, 'github_api_deprecated', issueNum, formatDeprecation(d), { lane: ctx?.lane }),
+      }))
+  )();
   const [ghOwner, ghName] = ghRepo.split('/');
 
   const repoConfig = loaders.loadRepoConfig(repoRoot, paths.root);

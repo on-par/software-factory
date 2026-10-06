@@ -66,6 +66,7 @@ export type EventKind =
   | 'fail'
   | 'failover'
   | 'fast_path'
+  | 'github_api_deprecated'
   | 'held'
   | 'human-abandoned'
   | 'human-approved'
@@ -273,6 +274,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   fail: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   failover: { severity: 'info', isPark: false, isTerminal: false },
   fast_path: { severity: 'info', isPark: false, isTerminal: false },
+  // A GitHub REST call answered with a Deprecation header (#2218); logged once per route per run.
+  github_api_deprecated: { severity: 'warn', isPark: false, isTerminal: false },
   // A lane parked on the exact same checker-failure signature it parked on in
   // a prior run (ReworkHistory, #740) — distinct from 'escalate'/'fail' so a
   // watchdog or human scanning events.ndjson can tell "already tried and
