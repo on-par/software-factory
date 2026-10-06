@@ -656,7 +656,10 @@ export type {
   SliceState,
 } from './readiness/slice-plan.js';
 export {
-  MAX_SLICES,
+  DEFAULT_MAX_SLICES,
+  SLICE_CAP_CEILING,
+  overCapReason,
+  sliceCapExceeded,
   SLICE_PLAN_MARKER,
   currentSlice,
   parseSlicePlanComment,

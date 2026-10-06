@@ -1382,11 +1382,13 @@ npm run test`;
     };
 
     // A plan comment as the factory would have written it; `inScope` lets a test make slice 1 oversized.
-    const planComment = (opts: { merged?: number[]; inScope?: string[] } = {}) => {
+    const planComment = (opts: { merged?: number[]; inScope?: string[]; count?: number } = {}) => {
+      const count = opts.count ?? 2;
+      const stories = Array.from({ length: count }, (_, i) => storyJson(i + 1));
       const parsed = parseDecompositionOutput(
         JSON.stringify({
-          epic: { title: 'Epic', why: 'why', doneWhen: ['done'], children: ['Story 1', 'Story 2'] },
-          stories: [storyJson(1), storyJson(2)],
+          epic: { title: 'Epic', why: 'why', doneWhen: ['done'], children: stories.map((st) => st.title) },
+          stories,
         }),
       );
       if (!parsed.ok) throw new Error(parsed.reason);
@@ -1396,7 +1398,10 @@ npm run test`;
       if (opts.inScope) {
         plan = {
           ...plan,
-          slices: [{ ...plan.slices[0], story: { ...plan.slices[0].story, inScope: opts.inScope } }, plan.slices[1]],
+          slices: [
+            { ...plan.slices[0], story: { ...plan.slices[0].story, inScope: opts.inScope } },
+            ...plan.slices.slice(1),
+          ],
         };
       }
       for (const index of opts.merged ?? []) plan = withSliceState(plan, index, 'merged');
@@ -1405,6 +1410,7 @@ npm run test`;
 
     async function run(opts: {
       decompose?: string[];
+      maxSlices?: number;
       comments?: { id: number; user: { id: number }; body: string }[];
     }) {
       const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
@@ -1446,6 +1452,7 @@ npm run test`;
         } as any,
         log: (type) => events.push(type),
         sizeGateMode: 'slice',
+        maxSlices: opts.maxSlices,
       });
       return { result, stub, events, createComment, create, update };
     }
@@ -1503,17 +1510,47 @@ npm run test`;
       expect(events).toContain('size-gate-escalated');
     });
 
-    it('AC4a: more than 5 slices falls back to file mode from the same decomposition', async () => {
-      const { result, stub, events, createComment, create } = await run({ decompose: [decompositionOf(6)] });
+    it('AC4a: more than the cap records the slice plan, files nothing and parks naming --max-slices', async () => {
+      const { result, stub, events, createComment, create } = await run({
+        decompose: [decompositionOf(6)],
+        maxSlices: 5,
+      });
 
       expect(result.ok).toBe(false);
       expect(stub.calls.map((call) => call.task)).toEqual(['decompose']);
+      expect(create).not.toHaveBeenCalled();
       expect(createComment).toHaveBeenCalledTimes(1);
-      expect(createComment.mock.calls[0][0].body).toContain('## Proposed epic');
-      expect(create).toHaveBeenCalledTimes(6);
-      expect(result.decomposed?.childIssues).toEqual([701, 701, 701, 701, 701, 701]);
-      expect(result.escalate).toMatch(/^slice plan has 6 slices/);
+      const body = createComment.mock.calls[0][0].body as string;
+      expect(body).toContain('<!-- factory:slice-plan v1 -->');
+      expect(body).not.toContain('## Proposed epic');
+      expect(body.match(/^- \[ \] \d+\/6\./gm)).toHaveLength(6);
+      expect(result.decomposed).toBeUndefined();
+      expect(result.escalate).toContain('6 slices');
+      expect(result.escalate).toContain('cap 5');
+      expect(result.escalate).toContain('--max-slices 6');
       expect(events).toContain('size-gate-escalated');
+    });
+
+    it('a raised cap reuses the recorded plan without decomposing', async () => {
+      const { result, stub, createComment } = await run({
+        comments: [{ id: 1, user: { id: BOT }, body: planComment({ count: 6 }) }],
+        maxSlices: 6,
+      });
+      expect(result.ok).toBe(true);
+      expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
+      expect(planPrompt(stub)).toContain('Problem for slice 1');
+      expect(result.slice?.plan.slices).toHaveLength(6);
+      expect(createComment).not.toHaveBeenCalled();
+    });
+
+    it('a started plan ignores the cap', async () => {
+      const { result, stub } = await run({
+        comments: [{ id: 1, user: { id: BOT }, body: planComment({ count: 6, merged: [1] }) }],
+        maxSlices: 5,
+      });
+      expect(result.ok).toBe(true);
+      expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
+      expect(planPrompt(stub)).toContain('Problem for slice 2');
     });
 
     it('AC4b: parks without any model call when the trusted marker comment is unreadable', async () => {
@@ -1537,6 +1574,7 @@ npm run test`;
         decompose?: string[];
         comments?: { id: number; user: { id: number }; body: string }[];
         listCommentsError?: Error;
+        maxSlices?: number;
       }) {
         const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
         tempDirs.add(worktree);
@@ -1579,6 +1617,7 @@ npm run test`;
           } as any,
           log: (type) => events.push(type),
           sizeGateMode: 'slice',
+          maxSlices: opts.maxSlices,
         });
         return { result, stub, events, createComment, updateComment, create };
       }
@@ -1612,18 +1651,21 @@ npm run test`;
         expect(events).toContain('size-gate-escalated');
       });
 
-      it('falls back to the file-mode park when the decomposition has more than 5 slices', async () => {
-        const { result, createComment, create } = await runPostPlan({ decompose: [decompositionOf(6)] });
+      it('records the slice plan and parks (no proposal, no issues) when the decomposition is over the cap', async () => {
+        const { result, createComment, create, events } = await runPostPlan({
+          decompose: [decompositionOf(6)],
+          maxSlices: 5,
+        });
 
         expect(result.ok).toBe(false);
         expect(result.sliced).toBeUndefined();
-        expect(result.escalate).toMatch(
-          /^slice plan has 6 slices \(more than 5\) — plan scope exceeds the bounded-build budget/,
-        );
+        expect(result.escalate).toContain('6 slices');
+        expect(result.escalate).toContain('--max-slices 6');
         expect(create).not.toHaveBeenCalled();
-        for (const call of createComment.mock.calls) {
-          expect(call[0].body).not.toContain('<!-- factory:slice-plan v1 -->');
-        }
+        expect(createComment).toHaveBeenCalledTimes(1);
+        expect(createComment.mock.calls[0][0].body).toContain('<!-- factory:slice-plan v1 -->');
+        expect(createComment.mock.calls[0][0].body).not.toContain('## Proposed epic');
+        expect(events).toContain('size-gate-escalated');
       });
 
       it('parks with the gate reason when the slice plan lookup fails', async () => {

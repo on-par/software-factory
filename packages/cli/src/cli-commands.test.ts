@@ -4133,6 +4133,29 @@ bash scripts/verify.sh
         expect(phases.planPhase.mock.calls.at(-1)?.[0].sizeGateMode).toBe('slice');
       });
 
+      it('--max-slices 6 passes maxSlices 6 to planPhase (ADR-0156)', async () => {
+        await runMain('run-issue', '5', '--size-gate', 'slice', '--max-slices', '6');
+        expect(phases.planPhase.mock.calls.at(-1)?.[0].maxSlices).toBe(6);
+      });
+
+      it('sizeGate.maxSlices in the config is used when the flag is absent', async () => {
+        h.factoryConfig = { ...h.factoryConfig, sizeGate: { mode: 'slice', maxSlices: 7 } };
+        await runMain('run-issue', '5');
+        expect(phases.planPhase.mock.calls.at(-1)?.[0].maxSlices).toBe(7);
+      });
+
+      it('defaults maxSlices to 10 with neither flag nor config', async () => {
+        await runMain('run-issue', '5');
+        expect(phases.planPhase.mock.calls.at(-1)?.[0].maxSlices).toBe(10);
+      });
+
+      it.each(['0', '21', '2.5', 'abc', ''])('rejects --max-slices %j with exit 2 before planning', async (value) => {
+        const res = await runMain('run-issue', '5', '--max-slices', value);
+        expect(res).toMatchObject({ exited: true, code: 2 });
+        expect(errored()).toContain('--max-slices');
+        expect(phases.planPhase).not.toHaveBeenCalled();
+      });
+
       it('rejects an unknown mode with exit 2 before planning', async () => {
         const res = await runMain('run-issue', '5', '--size-gate', 'bogus');
         expect(res).toMatchObject({ exited: true, code: 2 });
@@ -4175,7 +4198,7 @@ bash scripts/verify.sh
       expect(res.exited).toBe(true);
       const text = written.join('').replace(/\s+/g, ' ');
       expect(text).toContain('--run-children');
-      expect(text).toContain('When the size gate decomposes the issue, run the child issues it filed');
+      expect(text).toContain('File mode only: when the size gate files child issues, run them');
     });
 
     it('names the branch with the default factory prefix when --branch-prefix is omitted', async () => {

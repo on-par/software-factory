@@ -263,6 +263,11 @@ describe('runIssue — size gate mode (#2048)', () => {
     expect(vi.mocked(planPhase).mock.calls[0][0].enforceSizeGate).toBe(expected);
     expect(vi.mocked(planPhase).mock.calls[0][0].sizeGateMode).toBe(mode);
   });
+
+  it('passes maxSlices through to planPhase (ADR-0156)', async () => {
+    await runIssue(baseRequest({ sizeGateMode: 'slice', maxSlices: 7 }), basePolicy(), basePorts());
+    expect(vi.mocked(planPhase).mock.calls[0][0].maxSlices).toBe(7);
+  });
 });
 
 describe('runIssue — slice shipping (ADR-0147)', () => {

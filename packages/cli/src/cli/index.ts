@@ -137,6 +137,8 @@ import {
   resolveBuildPublish,
   resolveSizeGateMode,
   parseSizeGateMode,
+  parseMaxSlices,
+  resolveSizeGateMaxSlices,
   SIZE_GATE_MODES,
   type SizeGateMode,
   resolveDesignRegressionBlock,
@@ -948,6 +950,15 @@ function sizeGateOrExit(raw: string | undefined): SizeGateMode | undefined {
     throw new CliExitError(`factory: invalid --size-gate '${raw}' — expected one of: ${SIZE_GATE_MODES.join(', ')}`, 2);
   }
   return mode;
+}
+
+function maxSlicesOrExit(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const n = parseMaxSlices(raw);
+  if (n === undefined) {
+    throw new CliExitError(`factory: invalid --max-slices '${raw}' — expected a whole number from 1 to 20`, 2);
+  }
+  return n;
 }
 
 /** Deterministic run number for a brief, derived from its content digest.
@@ -1988,6 +1999,8 @@ export async function shipIssue(
     branchPrefix?: string;
     /** `run-issue --size-gate` (ADR-0147); undefined defers to sizeGate.mode in the config. */
     sizeGate?: SizeGateMode;
+    /** run-issue --max-slices (ADR-0156); undefined defers to sizeGate.maxSlices. */
+    maxSlices?: number;
     /** `--pr-classifier` / `--no-pr-classifier` (#1724); undefined defers to config/env. */
     prClassifier?: boolean;
   },
@@ -2089,6 +2102,7 @@ export async function shipIssue(
     } satisfies GithubIssueParams));
   const issueTitle = work.title;
   const sizeGateMode = opts.sizeGate ?? resolveSizeGateMode(factoryConfig);
+  const maxSlices = opts.maxSlices ?? resolveSizeGateMaxSlices(factoryConfig);
   // ADR-0147: slice k >= 2 builds on its own branch, so read the slice plan before the worktree exists.
   let sliceIndex: number | undefined;
   if (sizeGateMode === 'slice' && !ctx?.localOnly && work.kind === GITHUB_ISSUE_SOURCE) {
@@ -2289,6 +2303,7 @@ export async function shipIssue(
     blockUnresolvedRegressions: resolveDesignRegressionBlock(factoryConfig),
     publishFromBuild: resolveBuildPublish(factoryConfig),
     sizeGateMode,
+    maxSlices,
     prClassifier: classifierPolicy.enabled
       ? {
           rules: resolveReviewFloorRules(repoConfig),
@@ -2670,6 +2685,7 @@ async function cmdRunIssue(
     branchPrefix?: string;
     runChildren?: boolean;
     sizeGate?: string;
+    maxSlices?: string;
   },
 ) {
   if (!coreOps.isCommandAvailable('claude')) {
@@ -2681,9 +2697,10 @@ async function cmdRunIssue(
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
 
-  const { runChildren, sizeGate: rawSizeGate, ...shipOpts } = opts;
+  const { runChildren, sizeGate: rawSizeGate, maxSlices: rawMaxSlices, ...shipOpts } = opts;
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const sizeGate = sizeGateOrExit(rawSizeGate);
+  const maxSlices = maxSlicesOrExit(rawMaxSlices);
 
   await withRepoRunLock(paths, 'factory run-issue', async () => {
     const ghRepo = await getGitHubRepo();
@@ -2717,14 +2734,18 @@ async function cmdRunIssue(
     }
 
     try {
-      await shipIssue(issueNum, { ...shipOpts, branchPrefix, sizeGate }, { repoRoot, ghRepo, workRequest: work });
+      await shipIssue(
+        issueNum,
+        { ...shipOpts, branchPrefix, sizeGate, maxSlices },
+        { repoRoot, ghRepo, workRequest: work },
+      );
     } catch (err: any) {
       if (err instanceof IssueSkippedError) return;
       if (err instanceof IssueDecomposedError && runChildren) {
         await runDecomposedChildren(
           issueNum,
           err.childIssues,
-          { ...shipOpts, branchPrefix, sizeGate },
+          { ...shipOpts, branchPrefix, sizeGate, maxSlices },
           { repoRoot, ghRepo, workSources },
         );
         return;
@@ -6017,10 +6038,17 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('--approve-plan', 'Pause after PLAN freezes the spec and wait for approval before BUILD')
     .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
-    .option('--run-children', 'When the size gate decomposes the issue, run the child issues it filed')
+    .option(
+      '--run-children',
+      'File mode only: when the size gate files child issues, run them (slice mode never files issues)',
+    )
     .option(
       '--size-gate <mode>',
-      'Size gate mode for this run: file (file child issues / park), slice (ship as sequential slice PRs) or off (skip both gates); beats sizeGate.mode in the config',
+      'Size gate mode for this run: file (file child issues / park), slice (ship as sequential slice PRs under the same issue; never files issues) or off (skip both gates); beats sizeGate.mode in the config',
+    )
+    .option(
+      '--max-slices <count>',
+      'Slice mode: most slices a not-yet-started slice plan may have (1-20); an over-cap plan is recorded and parks; beats sizeGate.maxSlices (default 10)',
     )
     .action(async (issueNum, opts) => {
       await cmdRunIssue(parseIssueArg(issueNum), opts);
