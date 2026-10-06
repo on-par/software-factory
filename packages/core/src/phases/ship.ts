@@ -73,6 +73,8 @@ async function shipPhaseImpl(opts: {
   /** The run's resolved work request; when its kind is not 'github-issue', the PR
    *  title/body come from it instead of fetching the (nonexistent) issue (#507). */
   work?: Pick<WorkRequest, 'id' | 'kind' | 'title'>;
+  /** The ADR-0147 slice this run ships; titles the PR `slice k/n` and only the final slice closes the issue. */
+  slice?: { index: number; count: number };
   /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
   laneId?: string;
   /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
@@ -250,9 +252,18 @@ async function shipPhaseImpl(opts: {
     // Get diff stats (reuse the approval gate's diff stat when already computed)
     const stat = diffStat ?? (await computeDiffStat(run, worktree));
 
+    const slice = inlineWork ? undefined : opts.slice;
+    const finalSlice = !slice || slice.index >= slice.count;
     const summaryLine = inlineWork
       ? `Implements local brief \`${inlineWork.id}\`. Built by the Software Factory (PLAN → BUILD → CHECK → SHIP).`
-      : `Implements #${issue}. Built by the Software Factory (PLAN → BUILD → CHECK → SHIP).`;
+      : slice
+        ? `Implements slice ${slice.index}/${slice.count} of #${issue}. Built by the Software Factory (PLAN → BUILD → CHECK → SHIP).`
+        : `Implements #${issue}. Built by the Software Factory (PLAN → BUILD → CHECK → SHIP).`;
+    const prTitle = inlineWork
+      ? title
+      : slice
+        ? `${title} — slice ${slice.index}/${slice.count} (#${issue})`
+        : `${title} (#${issue})`;
 
     // Create PR
     try {
@@ -261,14 +272,15 @@ async function shipPhaseImpl(opts: {
         repo: repoName,
         head: branch,
         base: 'main',
-        title: inlineWork ? title : `${title} (#${issue})`,
+        title: prTitle,
         draft: true,
         body: renderPrBody({
           summaryLine,
           specBody: await readSpecBody(opts.specPath),
           diffStat: stat,
           checkSummary,
-          closes: inlineWork ? undefined : issue,
+          closes: inlineWork || !finalSlice ? undefined : issue,
+          partOf: !inlineWork && !finalSlice ? issue : undefined,
         }),
       });
 
