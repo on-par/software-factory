@@ -160,6 +160,24 @@ describe('runClassifierBacktest', () => {
     expect(await collect!('/repo')).toMatchObject({ text: '', skipReason: 'merge diff unavailable: boom' });
   });
 
+  it('skips the diff with a reason when the issue fetch fails', async () => {
+    let collect: NonNullable<NonNullable<Parameters<typeof classifyPrShadow>[1]>['collectDiff']> | undefined;
+    const classify = (async (_i: unknown, d: Parameters<typeof classifyPrShadow>[1]) => {
+      collect = d!.collectDiff;
+      return verdict();
+    }) as typeof classifyPrShadow;
+    await run(
+      [src(5, '2026-08-01T00:00:00.000Z')],
+      ports({
+        classify,
+        getIssue: async () => {
+          throw new Error('rate limited');
+        },
+      }),
+    );
+    expect(await collect!('/repo')).toMatchObject({ text: '', skipReason: 'issue unavailable: rate limited' });
+  });
+
   it('stops at the cost budget', async () => {
     const sources = Array.from({ length: 10 }, (_, i) => src(100 + i, '2026-08-01T00:00:00.000Z'));
     const res = await run(sources, ports(), { maxCostUsd: 1 });

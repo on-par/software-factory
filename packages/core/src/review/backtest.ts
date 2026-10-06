@@ -195,7 +195,13 @@ export async function runClassifierBacktest(
       // fail closed, like resolveReviewRouting
     }
 
-    const issue = await ports.getIssue(Number(source.issue)).catch(() => ({ title: '', body: '' }));
+    let issue = { title: '', body: '' };
+    let issueError: string | null = null;
+    try {
+      issue = await ports.getIssue(Number(source.issue));
+    } catch (err) {
+      issueError = `issue unavailable: ${errorMessage(err).slice(0, 200)}`;
+    }
     const verdict = await (ports.classify ?? classifyPrShadow)(
       {
         worktree: ports.worktree,
@@ -210,6 +216,7 @@ export async function runClassifierBacktest(
       },
       {
         collectDiff: async () => {
+          if (issueError) return { text: '', baseRef: null, truncated: false, skipReason: issueError };
           const baseRef = `${sha}^1`;
           try {
             const text = await ports.diff(sha);
@@ -250,6 +257,10 @@ export async function runClassifierBacktest(
     ports.onRecord?.(record);
   }
   return result;
+}
+
+export function classifiedRecords(result: BacktestResult): (BacktestRecord & { modelClass: ReviewClass })[] {
+  return result.records.filter((r): r is BacktestRecord & { modelClass: ReviewClass } => r.modelClass !== null);
 }
 
 export function backtestFileName(now: string): string {

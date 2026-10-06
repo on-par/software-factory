@@ -10,7 +10,6 @@ import {
   mergedPrRefs,
   reconstructHumanEvents,
   summarizeClassifierOutcomes,
-  type ClassifierOutcomeRecord,
   type DefectSourceClient,
   type FactoryEvent,
   type getFactoryPaths,
@@ -19,6 +18,7 @@ import {
 } from '@on-par/factory-core';
 import {
   backtestFileName,
+  classifiedRecords,
   parseBacktestLabels,
   runClassifierBacktest,
   selectBacktestPrs,
@@ -164,9 +164,7 @@ export async function cmdClassifierBacktest(
     deps.log(`covered ${covered} of ${result.candidates} PRs (${spent}${unpriced})`);
   }
 
-  const report = summarizeClassifierOutcomes(
-    result.records.filter((r) => r.modelClass !== null) as ClassifierOutcomeRecord[],
-  );
+  const report = summarizeClassifierOutcomes(classifiedRecords(result));
   if (opts.json) {
     deps.log(
       JSON.stringify({

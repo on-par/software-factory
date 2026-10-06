@@ -571,6 +571,7 @@ export type {
 } from './review/backtest.js';
 export {
   backtestFileName,
+  classifiedRecords,
   buildBacktestRecord,
   parseBacktestLabels,
   runClassifierBacktest,
