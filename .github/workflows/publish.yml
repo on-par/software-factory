@@ -17,6 +17,8 @@ jobs:
         run: bash scripts/verify.sh
       - name: Quickstart smoke
         run: bash scripts/quickstart-smoke.sh
+      - name: Publish dry-run (lists every package that will publish)
+        run: bash scripts/publish-workspaces.sh --dry-run
       - name: Check v1.0 blockers (#195, #151)
         id: gate
         env: { GH_TOKEN: '${{ github.token }}' }
@@ -34,4 +36,4 @@ jobs:
       - name: Publish to npm
         if: steps.gate.outputs.allowed == 'true'
         env: { NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}' }
-        run: npm publish --workspace @on-par/factory-config --workspace @on-par/factory-core --workspace @on-par/factory-cli
+        run: bash scripts/publish-workspaces.sh
