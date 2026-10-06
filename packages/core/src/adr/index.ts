@@ -1,5 +1,5 @@
 // src/adr/index.ts — reads the checkout's ADRs through a RepoContextReader and renders
-// the Accepted ones as binding design constraints for the PLAN prompt (#481).
+// the Accepted (or status-less) ones as binding design constraints for the PLAN prompt (#481).
 import { formatAdrNumber, normalizeStatus, tryParseAdr } from '@on-par/adr-kit';
 import type { RepoContextReader } from '@on-par/repo-context';
 
@@ -18,8 +18,10 @@ export interface ActiveAdr {
   /** undefined when neither the H1 nor the filename carries a number. */
   number: number | undefined;
   title: string;
-  /** Raw status text as written, e.g. 'Accepted'. */
+  /** Raw status text as written, e.g. 'Accepted'; '' when the ADR has no status. */
   status: string;
+  /** true when the ADR has no status line; it is treated as Accepted (#2217). Absent otherwise. */
+  statusless?: true;
   date: string;
   /** Repo-root-relative path, e.g. 'docs/adr/0004-narrow-public-core-api.md'. */
   path: string;
@@ -30,7 +32,7 @@ export type AdrSkipReason = 'unparsable' | 'inactive';
 
 export interface AdrContext {
   dir: string;
-  /** Most recent Accepted ADRs, displayed ascending by number (unnumbered last), then by path. */
+  /** Most recent Accepted (or status-less) ADRs, displayed ascending by number (unnumbered last), then by path. */
   active: ActiveAdr[];
   skipped: { path: string; reason: AdrSkipReason }[];
   /** Candidate ADR files seen in `dir`. */
@@ -74,7 +76,8 @@ export async function readAdrContext(
       continue;
     }
 
-    if (normalizeStatus(result.adr.status) !== 'Accepted') {
+    const statusless = result.adr.status.trim() === '';
+    if (!statusless && normalizeStatus(result.adr.status) !== 'Accepted') {
       skipped.push({ path: entry.path, reason: 'inactive' });
       continue;
     }
@@ -84,6 +87,7 @@ export async function readAdrContext(
       number: result.adr.number,
       title: result.adr.title,
       status: result.adr.status,
+      ...(statusless ? { statusless: true as const } : {}),
       date: result.adr.date,
       path: entry.path,
       decision: result.adr.decision,
@@ -161,8 +165,9 @@ export function renderAdrConstraints(ctx: AdrContext, opts?: { maxDecisionChars?
   ];
 
   for (const adr of ctx.active) {
+    const statusText = adr.statusless ? 'no status, treated as Accepted' : `Accepted, ${adr.date}`;
     lines.push(
-      `- ${adrLabel(adr)} — ${adr.title} (Accepted, ${adr.date}) — ${adr.path}`,
+      `- ${adrLabel(adr)} — ${adr.title} (${statusText}) — ${adr.path}`,
       `  Decision: ${condense(adr.decision, maxDecisionChars)}`,
     );
   }
