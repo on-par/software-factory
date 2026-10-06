@@ -36,7 +36,8 @@ import { captureDiffBase } from '../checkers/design-smells.js';
 import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings } from '../config/index.js';
 import { type EffectiveModelPins, routeForBuildModel } from '../config/repo.js';
-import type { EventKind } from '../events/kinds.js';
+import type { EventKind, StewardTriggeredPayload } from '../events/kinds.js';
+import { detectStuck } from '../steward/detect.js';
 import { describeDotnetEnv, dotnetEnvReport } from '../environment/dotnet.js';
 import { ProcessGroupTracker } from '../environment/process-groups.js';
 import type { ModelRouter } from '../router/index.js';
@@ -86,6 +87,8 @@ export interface RunRequest {
   blockUnresolvedRegressions?: boolean;
   /** build.publishFromBuild resolved (#1867); undefined = off (commit-only BUILD on every route). */
   publishFromBuild?: boolean;
+  /** steward.enabled resolved (#2086); undefined = off (no steward-triggered event). */
+  stewardEnabled?: boolean;
   prClassifier?: { rules: ReviewFloorRuleSet; gateLabel: string; modelPin?: string };
   timeouts: { plan: number; build: number; check: number; approval: number };
   modelPins: EffectiveModelPins;
@@ -117,6 +120,7 @@ type LogFn = (
     readiness?: ReadinessInfo;
     prClassification?: PrClassificationRecord;
     checkFailure?: CheckFailureInfo;
+    stewardTriggered?: StewardTriggeredPayload;
   },
 ) => void;
 
@@ -303,7 +307,25 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       log('stuck', `run exceeded its phase timeout without progressing — ${message}`);
     }
     await writeReports(reportOutcomeFor(reason), reason, message);
-    return { state: 'parked', reason, route, branch: request.branch, reworkRounds, ...checkFailure };
+    const outcome: RunOutcome = {
+      state: 'parked',
+      reason,
+      route,
+      branch: request.branch,
+      reworkRounds,
+      ...checkFailure,
+    };
+    if (request.stewardEnabled === true) {
+      const stuck = detectStuck(outcome);
+      if (stuck) {
+        log(
+          'steward-triggered',
+          `stuck run picked up for the steward: ${stuck.trigger}${stuck.failureSignature ? ` (signature ${stuck.failureSignature})` : ''}`,
+          { stewardTriggered: stuck },
+        );
+      }
+    }
+    return outcome;
   };
 
   const assertBudget = async (phase: string): Promise<RunOutcome | undefined> => {

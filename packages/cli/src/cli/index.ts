@@ -32,6 +32,7 @@ import type {
   ModelDiagnosis,
   PrSource,
   LanePausedPayload,
+  StewardTriggeredPayload,
   ParkReason,
   QueueDiagnostic,
   ReadinessInfo,
@@ -1984,6 +1985,7 @@ export async function shipIssue(
         readiness?: ReadinessInfo;
         prClassification?: PrClassificationRecord;
         checkFailure?: CheckFailureInfo;
+        stewardTriggered?: StewardTriggeredPayload;
       },
     ) => {
       if (TERMINAL_EVENT_KINDS.has(type)) terminalMessage = msg;
