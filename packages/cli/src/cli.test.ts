@@ -52,6 +52,7 @@ import {
   planRunLanes,
   tuiQueueReader,
   preflightQueuedIssue,
+  HELP_FOOTER_TEXT,
   PREREQUISITES_TEXT,
   prLookupFailure,
   readActiveProduct,
@@ -5012,6 +5013,14 @@ More prose here.
       expect(PREREQUISITES_TEXT).toMatch(/Claude/);
       expect(PREREQUISITES_TEXT).toMatch(/gh auth/);
       expect(PREREQUISITES_TEXT).toMatch(/GITHUB_TOKEN/);
+    });
+
+    it('HELP_FOOTER_TEXT points at the config reference, per-command help, and the docs', () => {
+      expect(HELP_FOOTER_TEXT).toContain('Common environment variables:');
+      expect(HELP_FOOTER_TEXT).toContain('FACTORY_MERGE=1');
+      expect(HELP_FOOTER_TEXT).toContain('docs/config.example.yaml');
+      expect(HELP_FOOTER_TEXT).toContain('factory <command> --help');
+      expect(HELP_FOOTER_TEXT).toContain('https://github.com/on-par/software-factory#readme');
     });
 
     it('pins the publish-critical fields of package.json', () => {
