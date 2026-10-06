@@ -148,6 +148,16 @@ export function sanitizeProxyHeaders(
   return out;
 }
 
+/** Write allowlisted headers onto a ServerResponse using literal header names only. */
+function applySanitizedHeaders(res: http.ServerResponse, headers: http.IncomingHttpHeaders): void {
+  for (const name of FORWARDABLE_HEADERS) {
+    if (HOP_BY_HOP.has(name)) continue;
+    const value = headers[name];
+    if (value === undefined) continue;
+    res.setHeader(name, value);
+  }
+}
+
 export function startEgressProxy(opts: EgressProxyOptions): Promise<EgressProxy> {
   const bindHost = opts.bindHost ?? '127.0.0.1';
   const seen = new Set<string>();
@@ -225,7 +235,10 @@ export function startEgressProxy(opts: EgressProxyOptions): Promise<EgressProxy>
     });
     upstream.on('socket', track);
     upstream.on('response', (up) => {
-      res.writeHead(up.statusCode ?? 502, sanitizeProxyHeaders(up.headers));
+      // Copy allowlisted headers with literal names only — never pass a remote
+      // headers object to writeHead (CodeQL js/remote-property-injection).
+      res.statusCode = up.statusCode ?? 502;
+      applySanitizedHeaders(res, up.headers);
       up.pipe(res);
       up.on('error', () => res.destroy());
     });

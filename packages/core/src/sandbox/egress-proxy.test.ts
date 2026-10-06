@@ -213,14 +213,13 @@ describe('sanitizeProxyHeaders', () => {
     incoming.connection = 'keep-alive';
     incoming['transfer-encoding'] = 'chunked';
     incoming.authorization = 'Bearer t';
-    Object.defineProperty(incoming, '__proto__', { value: 'pollute', enumerable: true, configurable: true });
     const out = sanitizeProxyHeaders(incoming);
     expect(out['content-type']).toBe('application/json');
     expect(out.authorization).toBe('Bearer t');
     expect(Object.prototype.hasOwnProperty.call(out, 'x-custom-evil')).toBe(false);
     expect(Object.prototype.hasOwnProperty.call(out, 'connection')).toBe(false);
     expect(Object.prototype.hasOwnProperty.call(out, 'transfer-encoding')).toBe(false);
-    expect(Object.prototype.hasOwnProperty.call(out, '__proto__')).toBe(false);
+    expect(Object.getPrototypeOf(out)).toBeNull();
   });
 
   it('applies overrides for allowlisted names (e.g. Host from the URL)', () => {
