@@ -170,7 +170,7 @@ export async function fetchHumanEventSources(
   client: HumanSourceClient,
   owner: string,
   repo: string,
-  issues: ReadonlySet<string>,
+  issues: ReadonlySet<string> | null,
   branchPrefix?: string,
 ): Promise<PrSource[]> {
   const prs: any[] = [];
@@ -190,7 +190,7 @@ export async function fetchHumanEventSources(
 
   const matched = prs
     .map((pr) => ({ pr, issue: factoryBranchIssue(pr.head?.ref ?? '', branchPrefix) }))
-    .filter(({ issue }) => issue !== null && issues.has(String(issue)));
+    .filter(({ issue }) => issue !== null && (issues === null || issues.has(String(issue))));
 
   return Promise.all(
     matched.map(async ({ pr, issue: issueNum }) => {

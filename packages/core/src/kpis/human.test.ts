@@ -240,6 +240,22 @@ describe('fetchHumanEventSources', () => {
     expect(sources.map((s) => s.issue).sort()).toEqual(['1', '2']);
   });
 
+  it('returns every factory-branch PR when the issue filter is null', async () => {
+    const client = makeClient({
+      list: vi.fn().mockResolvedValue({
+        data: [
+          { number: 1, head: { ref: 'factory/1-a' }, state: 'open', merged_at: null, closed_at: null },
+          { number: 2, head: { ref: 'ship-it/2-b' }, state: 'open', merged_at: null, closed_at: null },
+          { number: 3, head: { ref: 'other/3-c' }, state: 'open', merged_at: null, closed_at: null },
+        ],
+      }),
+    });
+
+    const sources = await fetchHumanEventSources(client, 'owner', 'repo', null, 'factory');
+
+    expect(sources.map((s) => s.issue).sort()).toEqual(['1', '2']);
+  });
+
   it('filters to ship-it/<n>- branches within the issue set', async () => {
     const client = makeClient({
       list: vi.fn().mockResolvedValue({

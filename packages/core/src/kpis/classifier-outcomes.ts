@@ -43,7 +43,10 @@ interface OutcomeFacts {
   defectFired: boolean;
 }
 
-function decideVerdict(cls: ReviewClass, facts: OutcomeFacts): { verdict: ClassifierOutcomeVerdict; slipped: boolean } {
+export function decideVerdict(
+  cls: ReviewClass,
+  facts: OutcomeFacts,
+): { verdict: ClassifierOutcomeVerdict; slipped: boolean } {
   const escalated = cls === 'A';
   if (facts.humanAbandoned && !facts.merged) {
     return { verdict: escalated ? 'disagree' : 'agree', slipped: false };

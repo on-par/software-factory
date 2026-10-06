@@ -1512,6 +1512,38 @@ bash scripts/verify.sh
     });
   });
 
+  describe('classifier backtest (#1728)', () => {
+    async function captureOutput(...args: string[]) {
+      const outWrite = process.stdout.write.bind(process.stdout);
+      const errWrite = process.stderr.write.bind(process.stderr);
+      const written: string[] = [];
+      const sink = ((chunk: unknown) => {
+        written.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write;
+      process.stdout.write = sink;
+      process.stderr.write = sink;
+      try {
+        const res = await runMain(...args);
+        return { res, text: `${written.join('')}\n${errored()}`.replace(/\s+/g, ' ') };
+      } finally {
+        process.stdout.write = outWrite;
+        process.stderr.write = errWrite;
+      }
+    }
+
+    it('requires --since', async () => {
+      const { res, text } = await captureOutput('classifier', 'backtest');
+      expect(res.exited).toBe(true);
+      expect(text).toContain("required option '--since <date>' not specified");
+    });
+
+    it('is listed under classifier --help', async () => {
+      const { text } = await captureOutput('classifier', '--help');
+      expect(text).toContain('backtest');
+    });
+  });
+
   describe('kpis', () => {
     it('renders a report and trend, and records a snapshot on each run', async () => {
       writeFileSync(
