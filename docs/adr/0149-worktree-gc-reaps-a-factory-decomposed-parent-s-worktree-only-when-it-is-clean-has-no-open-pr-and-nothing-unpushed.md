@@ -1,4 +1,4 @@
-# ADR-0121: worktree-gc reaps a `factory:decomposed` parent's worktree only when it is clean, has no open PR and nothing unpushed
+# ADR-0149: worktree-gc reaps a `factory:decomposed` parent's worktree only when it is clean, has no open PR and nothing unpushed
 
 - Status: Accepted
 - Date: 2026-10-01

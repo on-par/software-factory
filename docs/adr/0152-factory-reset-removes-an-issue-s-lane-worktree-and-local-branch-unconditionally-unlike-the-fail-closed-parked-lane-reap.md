@@ -1,4 +1,4 @@
-# ADR-0124: factory reset removes an issue's lane worktree and local branch unconditionally, unlike the fail-closed parked-lane reap
+# ADR-0152: factory reset removes an issue's lane worktree and local branch unconditionally, unlike the fail-closed parked-lane reap
 
 - Status: Superseded (by the ADR recorded for issue #1789: reset keeps dirty or unpushed worktrees and branches unless --force)
 - Date: 2026-10-01

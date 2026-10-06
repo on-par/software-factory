@@ -4,6 +4,7 @@ import {
   adrFilename,
   adrNumberFromFilename,
   adrSlug,
+  findDuplicateAdrNumbers,
   formatAdrNumber,
   nextAdrNumber,
   nextAdrNumberFromFilenames,
@@ -91,5 +92,34 @@ describe('adrFilename', () => {
 
   it('honors a custom width', () => {
     expect(adrFilename(5, 'Use X', 2)).toBe('05-use-x.md');
+  });
+});
+
+describe('findDuplicateAdrNumbers', () => {
+  it('returns [] for unique numbers', () => {
+    expect(findDuplicateAdrNumbers(['0001-a.md', '0002-b.md'])).toEqual([]);
+  });
+
+  it('returns [] for empty input', () => {
+    expect(findDuplicateAdrNumbers([])).toEqual([]);
+  });
+
+  it('reports one pair with sorted filenames', () => {
+    expect(findDuplicateAdrNumbers(['0002-b.md', '0001-a.md', '0002-a.md'])).toEqual([
+      { number: 2, filenames: ['0002-a.md', '0002-b.md'] },
+    ]);
+  });
+
+  it('reports multiple groups sorted by number', () => {
+    expect(
+      findDuplicateAdrNumbers(['0005-z.md', '0003-b.md', '0005-a.md', '0003-a.md', '0005-m.md', '0004-x.md']),
+    ).toEqual([
+      { number: 3, filenames: ['0003-a.md', '0003-b.md'] },
+      { number: 5, filenames: ['0005-a.md', '0005-m.md', '0005-z.md'] },
+    ]);
+  });
+
+  it('ignores names without an ADR number', () => {
+    expect(findDuplicateAdrNumbers(['README.md', 'README.md', '0001-a.md'])).toEqual([]);
   });
 });

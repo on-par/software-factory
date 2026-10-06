@@ -21,6 +21,27 @@ export function nextAdrNumberFromFilenames(filenames: readonly string[]): number
   return nextAdrNumber(numbers);
 }
 
+export interface AdrNumberDuplicate {
+  number: number;
+  /** Filenames sharing `number`, sorted ascending. */
+  filenames: string[];
+}
+
+export function findDuplicateAdrNumbers(filenames: readonly string[]): AdrNumberDuplicate[] {
+  const groups = new Map<number, string[]>();
+  for (const filename of filenames) {
+    const value = adrNumberFromFilename(filename);
+    if (value === undefined) continue;
+    const group = groups.get(value);
+    if (group) group.push(filename);
+    else groups.set(value, [filename]);
+  }
+  return [...groups.entries()]
+    .filter(([, group]) => group.length > 1)
+    .map(([value, group]) => ({ number: value, filenames: [...group].sort() }))
+    .sort((a, b) => a.number - b.number);
+}
+
 export function adrSlug(title: string): string {
   const dashed = title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   let start = 0;

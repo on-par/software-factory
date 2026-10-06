@@ -1,4 +1,4 @@
-# ADR-0144: The stuck-run steward examines only runs parked as fail after 3 rework rounds or ci-failed with the PR open, and never environment, budget, held, timeout or conflict
+# ADR-0155: The stuck-run steward examines only runs parked as fail after 3 rework rounds or ci-failed with the PR open, and never environment, budget, held, timeout or conflict
 
 - Status: Accepted
 - Date: 2026-10-05

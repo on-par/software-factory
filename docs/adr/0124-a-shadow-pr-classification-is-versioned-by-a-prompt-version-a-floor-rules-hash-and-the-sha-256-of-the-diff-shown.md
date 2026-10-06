@@ -17,4 +17,4 @@ Positive: evidence can be partitioned exactly by (model, prompt, policy). A poli
 
 Negative: rule edits that do not change behavior (reordering, a cosmetic id rename) still mint a new policy version and reset a streak. The prompt version depends on authors remembering to bump it. Reviewers must check this on any classifier prompt edit, and that edit is class C under the floor anyway.
 
-References: ADR-0121, ADR-0122, ADR-0123, issue #1725.
+References: ADR-0121, ADR-0151, ADR-0123, issue #1725.

@@ -398,9 +398,9 @@ const StewardSectionSchema = z
     enabled: z
       .boolean()
       .default(false)
-      .describe('Run the stuck-run steward on parked runs that match an ADR-0144 trigger. Off unless set to true.'),
+      .describe('Run the stuck-run steward on parked runs that match an ADR-0155 trigger. Off unless set to true.'),
   })
-  .describe('Stuck-run steward (ADR-0144). Disabled by default.');
+  .describe('Stuck-run steward (ADR-0155). Disabled by default.');
 
 // ---------- Top-level v2 schema ----------
 
