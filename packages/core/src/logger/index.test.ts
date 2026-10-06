@@ -125,6 +125,20 @@ describe('createLogger', () => {
     expect(without).not.toHaveProperty('lanePaused');
   });
 
+  it('includes checkFailure only when passed as extra (#2083)', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+    const logger = createLogger(eventsFile, { lane: 'app' }, { out: { write: () => {} } });
+    const checkFailure = { signature: 'sig-A', failingChecks: ['lint'] };
+
+    logger.warn('fail', 'parked', { checkFailure });
+    logger.warn('fail', 'again');
+
+    const [withPayload, without] = readEvents(eventsFile);
+    expect(withPayload.checkFailure).toEqual(checkFailure);
+    expect(without).not.toHaveProperty('checkFailure');
+  });
+
   it('includes actor only when passed as extra', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
     const eventsFile = join(tmpDir, 'events.ndjson');
