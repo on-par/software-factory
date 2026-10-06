@@ -31,6 +31,7 @@ describe('zero-config: { version: 2 }', () => {
     const cfg = parseV2Config({ version: 2 });
 
     expect(cfg.version).toBe(2);
+    expect(cfg.steward).toEqual({ enabled: false });
 
     // models
     expect(cfg.models.registry).toEqual({});
@@ -253,6 +254,7 @@ describe('full v2 config', () => {
       },
     },
     constitution: { path: 'docs/constitution.md' },
+    steward: { enabled: true },
     notifications: { on_ship: false, on_fail: true },
   };
 
@@ -334,11 +336,29 @@ describe('JSON Schema generation', () => {
   });
 });
 
+describe('steward section', () => {
+  it('defaults steward.enabled to false', () => {
+    expect(parseV2Config({ version: 2 }).steward).toEqual({ enabled: false });
+  });
+
+  it('defaults steward.enabled to false when the section is present but empty', () => {
+    expect(parseV2Config({ version: 2, steward: {} }).steward.enabled).toBe(false);
+  });
+
+  it('accepts an explicit steward.enabled: true', () => {
+    expect(parseV2Config({ version: 2, steward: { enabled: true } }).steward.enabled).toBe(true);
+  });
+
+  it('rejects a non-boolean steward.enabled', () => {
+    expect(() => parseV2Config({ version: 2, steward: { enabled: 'yes' } })).toThrow(/steward\.enabled/);
+  });
+});
+
 describe('exported schema shape', () => {
   it('exposes the top-level sections the issue enumerates', () => {
     const configSections = factoryConfigV2JsonSchema().properties as Record<string, unknown>;
     expect(Object.keys(configSections).sort()).toEqual(
-      ['budget', 'constitution', 'intake', 'models', 'notifications', 'routes', 'run', 'version'].sort(),
+      ['budget', 'constitution', 'intake', 'models', 'notifications', 'routes', 'run', 'steward', 'version'].sort(),
     );
   });
 });
