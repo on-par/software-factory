@@ -39,6 +39,12 @@ export interface RouteDefaults {
   tier: string;
   description: string;
   requires?: string;
+  /** Pinned model-registry key (a key of defaultModelsConfig.models) used instead of resolving the tier. An exact ID, never an alias. */
+  model?: string;
+  /** Explicit tool allow-list for the route's model call. An empty array means tool-less: no file, shell or network tools. */
+  allowedTools?: string[];
+  /** Output contract for the route's model call. 'json' means the model must return exactly one JSON object. */
+  output?: 'json';
 }
 
 export interface RoutesDefaults {
@@ -576,6 +582,14 @@ export const defaultRoutesConfig: RoutesDefaults = {
     classify_pr: {
       tier: 'checker',
       description: 'PR classifier: escalate-only review class (A/B/C) from the diff (ADR-0121)',
+    },
+    steward: {
+      tier: 'boss',
+      description:
+        'Stuck-run steward (ADR-0144): one tool-less call over the sanitized packet, returning one JSON verdict',
+      model: 'claude-opus-5',
+      allowedTools: [],
+      output: 'json',
     },
     dispute_resolution: {
       tier: 'boss',
