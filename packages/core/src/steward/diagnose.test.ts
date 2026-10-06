@@ -5,20 +5,24 @@ import { defaultRoutesConfig } from '@on-par/factory-config';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ZodError } from 'zod';
 import {
+  STEWARD_COST_TASK,
   STEWARD_ERROR_DETAIL_CHARS,
   STEWARD_PACKET_DATA_NOTICE,
   STEWARD_VERDICT_CATEGORIES,
   STEWARD_VERDICT_FILE,
   StewardVerdictSchema,
   applyEscalation,
+  buildStewardCostEntry,
   buildStewardPrompt,
   diagnoseStewardPacket,
   findUncitedExcerpt,
   parseStewardVerdict,
   writeStewardVerdict,
 } from './diagnose.js';
-import type { StewardModelCall, StewardRouteConfig, StewardVerdictRecord } from './diagnose.js';
+import type { StewardModelCall, StewardModelReply, StewardRouteConfig, StewardVerdictRecord } from './diagnose.js';
 import type { StewardPacket } from './packet.js';
+import { readCosts } from '../utils/index.js';
+import type { HarnessUsage } from '../harness/index.js';
 
 function validVerdict(): Record<string, unknown> {
   return {
@@ -157,12 +161,19 @@ describe('diagnoseStewardPacket', () => {
   async function readVerdict(dir: string): Promise<Record<string, unknown>> {
     return JSON.parse(await readFile(join(dir, STEWARD_VERDICT_FILE), 'utf-8'));
   }
-  const replying = (reply: unknown) =>
-    vi.fn(async (_call: StewardModelCall) => (typeof reply === 'string' ? reply : JSON.stringify(reply)));
+  const replying = (reply: unknown, usage?: HarnessUsage) =>
+    vi.fn(async (_call: StewardModelCall): Promise<StewardModelReply> => ({
+      text: typeof reply === 'string' ? reply : JSON.stringify(reply),
+      ...(usage ? { usage } : {}),
+    }));
+  const costsFileIn = (dir: string) => join(dir, 'costs.jsonl');
 
   it('writes a confident verdict and preserves nextStep', async () => {
     const dir = await tmp();
-    const record = await diagnoseStewardPacket(dir, fixturePacket(), { invoke: replying(validVerdict()) });
+    const record = await diagnoseStewardPacket(dir, fixturePacket(), {
+      invoke: replying(validVerdict()),
+      costsFile: costsFileIn(dir),
+    });
     const file = await readVerdict(dir);
     expect(file).toMatchObject({
       escalate: false,
@@ -174,7 +185,10 @@ describe('diagnoseStewardPacket', () => {
 
   it('escalates low confidence', async () => {
     const dir = await tmp();
-    await diagnoseStewardPacket(dir, fixturePacket(), { invoke: replying({ ...validVerdict(), confidence: 0.5 }) });
+    await diagnoseStewardPacket(dir, fixturePacket(), {
+      invoke: replying({ ...validVerdict(), confidence: 0.5 }),
+      costsFile: costsFileIn(dir),
+    });
     expect(await readVerdict(dir)).toMatchObject({ escalate: true, reason: 'low-confidence' });
   });
 
@@ -190,7 +204,7 @@ describe('diagnoseStewardPacket', () => {
   ];
   it.each(invalid)('fails closed on %s', async (_n, reply, errorKind) => {
     const dir = await tmp();
-    await diagnoseStewardPacket(dir, fixturePacket(), { invoke: replying(reply) });
+    await diagnoseStewardPacket(dir, fixturePacket(), { invoke: replying(reply), costsFile: costsFileIn(dir) });
     expect(await readVerdict(dir)).toMatchObject({ escalate: true, reason: 'steward-error', confidence: 0, errorKind });
   });
 
@@ -201,6 +215,7 @@ describe('diagnoseStewardPacket', () => {
     const dir = await tmp();
     await diagnoseStewardPacket(dir, fixturePacket(), {
       invoke: replying({ ...validVerdict(), citations: [citation] }),
+      costsFile: costsFileIn(dir),
     });
     expect(await readVerdict(dir)).toMatchObject({
       escalate: true,
@@ -214,7 +229,7 @@ describe('diagnoseStewardPacket', () => {
     const invoke = vi.fn(async () => {
       throw failure;
     });
-    const record = await diagnoseStewardPacket(dir, fixturePacket(), { invoke });
+    const record = await diagnoseStewardPacket(dir, fixturePacket(), { invoke, costsFile: costsFileIn(dir) });
     expect(record).toMatchObject({ reason: 'steward-error', errorKind: 'model-error' });
     expect(await readVerdict(dir)).toMatchObject({ escalate: true, errorKind: 'model-error' });
   });
@@ -224,14 +239,14 @@ describe('diagnoseStewardPacket', () => {
     const invoke = vi.fn(async () => {
       throw new Error('x'.repeat(2000));
     });
-    const record = await diagnoseStewardPacket(dir, fixturePacket(), { invoke });
+    const record = await diagnoseStewardPacket(dir, fixturePacket(), { invoke, costsFile: costsFileIn(dir) });
     expect(record.reason === 'steward-error' && record.detail.length).toBe(STEWARD_ERROR_DETAIL_CHARS);
   });
 
   it('makes one tool-less, data-framed call on the pinned route', async () => {
     const dir = await tmp();
     const invoke = replying(validVerdict());
-    await diagnoseStewardPacket(dir, fixturePacket(), { invoke });
+    await diagnoseStewardPacket(dir, fixturePacket(), { invoke, costsFile: costsFileIn(dir) });
     expect(invoke).toHaveBeenCalledTimes(1);
     const call = invoke.mock.calls[0][0];
     expect(call).toMatchObject({
@@ -251,9 +266,92 @@ describe('diagnoseStewardPacket', () => {
   ])('refuses a misconfigured route (%s) without calling the model', async (_n, route) => {
     const dir = await tmp();
     const invoke = replying(validVerdict());
-    await diagnoseStewardPacket(dir, fixturePacket(), { invoke, route });
+    await diagnoseStewardPacket(dir, fixturePacket(), { invoke, route, costsFile: costsFileIn(dir) });
     expect(invoke).not.toHaveBeenCalled();
     expect(await readVerdict(dir)).toMatchObject({ reason: 'steward-error', errorKind: 'route-misconfigured' });
+    expect(readCosts(costsFileIn(dir))).toEqual([]);
+  });
+
+  it('records a steward cost row with the reported usage', async () => {
+    const dir = await tmp();
+    const usage = { inputTokens: 1200, outputTokens: 300, cacheReadTokens: 800, costUsd: 0.0123, durationMs: 4000 };
+    await diagnoseStewardPacket(dir, fixturePacket(), {
+      invoke: replying(validVerdict(), usage),
+      costsFile: costsFileIn(dir),
+    });
+    const rows = readCosts(costsFileIn(dir));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      task: 'steward',
+      model: defaultRoutesConfig.routes.steward.model,
+      issue: String(fixturePacket().issue.number),
+      inputTokens: 1200,
+      outputTokens: 300,
+      cacheReadTokens: 800,
+      durationMs: 4000,
+      cost: 0.0123,
+      estimated: false,
+    });
+    expect(rows[0]).not.toHaveProperty('unpriced');
+    expect(typeof rows[0].ts).toBe('string');
+  });
+
+  it('records a row even when the reply is invalid JSON', async () => {
+    const dir = await tmp();
+    await diagnoseStewardPacket(dir, fixturePacket(), { invoke: replying('not json'), costsFile: costsFileIn(dir) });
+    const rows = readCosts(costsFileIn(dir));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ task: 'steward', estimated: true });
+  });
+
+  it('records no row when invoke throws', async () => {
+    const dir = await tmp();
+    const invoke = vi.fn(async (): Promise<StewardModelReply> => {
+      throw new Error('boom');
+    });
+    await diagnoseStewardPacket(dir, fixturePacket(), { invoke, costsFile: costsFileIn(dir) });
+    expect(readCosts(costsFileIn(dir))).toEqual([]);
+  });
+});
+
+describe('buildStewardCostEntry', () => {
+  const model = defaultRoutesConfig.routes.steward.model as string;
+
+  it('estimates tokens and prices with the registry when no usage is reported', () => {
+    const entry = buildStewardCostEntry(model, 7, 'a'.repeat(41), { text: 'b'.repeat(8) });
+    expect(entry).toMatchObject({
+      issue: '7',
+      task: STEWARD_COST_TASK,
+      model,
+      inputTokens: 11,
+      outputTokens: 2,
+      estimated: true,
+    });
+    expect(typeof entry.cost).toBe('number');
+    expect(entry).not.toHaveProperty('unpriced');
+  });
+
+  it('marks an unknown model without costUsd as unpriced', () => {
+    const entry = buildStewardCostEntry('no-such-model', 7, 'p', { text: 'r' });
+    expect(entry).toMatchObject({ cost: null, unpriced: true });
+  });
+
+  it('omits optional usage fields when undefined', () => {
+    const entry = buildStewardCostEntry(model, 7, 'p', {
+      text: 'r',
+      usage: { inputTokens: 1, outputTokens: 2, costUsd: 0.5 },
+    });
+    expect(entry.estimated).toBe(false);
+    for (const key of [
+      'rawInputTokens',
+      'cacheReadTokens',
+      'cacheCreationTokens',
+      'numTurns',
+      'durationMs',
+      'durationApiMs',
+    ]) {
+      expect(entry).not.toHaveProperty(key);
+    }
   });
 });
 

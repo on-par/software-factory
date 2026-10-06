@@ -1,9 +1,14 @@
-// src/steward/diagnose.ts — steward verdict schema with confidence-based escalation, and the fail-closed tool-less diagnose call (#2110, #2112, ADR-0144)
+// src/steward/diagnose.ts — steward verdict schema with confidence-based escalation, and the fail-closed tool-less diagnose call, and its cost attribution (#2110, #2112, #2113, ADR-0144)
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { defaultRoutesConfig } from '@on-par/factory-config';
 import type { RouteDefaults } from '@on-par/factory-config';
 import { z, ZodError } from 'zod';
+import { loadModelsConfig } from '../config/index.js';
+import type { HarnessUsage } from '../harness/index.js';
+import { ModelRegistry } from '../models/index.js';
+import type { CostEntry } from '../types/index.js';
+import { logCost } from '../utils/index.js';
 import type { StewardPacket } from './packet.js';
 
 /** Confidence below this value escalates the verdict. Fixed by ADR-0144; not a config value. */
@@ -89,8 +94,17 @@ export interface StewardModelCall {
   output: 'json';
 }
 
-/** Makes the single model call and resolves with the raw reply text. */
-export type StewardModelInvoker = (call: StewardModelCall) => Promise<string>;
+/** costs.jsonl task name for steward model calls (#2113). */
+export const STEWARD_COST_TASK = 'steward';
+
+/** The model call's reply text and the usage the provider reported, when it reported any. */
+export interface StewardModelReply {
+  text: string;
+  usage?: HarnessUsage;
+}
+
+/** Makes the single model call and resolves with the raw reply text and reported usage. */
+export type StewardModelInvoker = (call: StewardModelCall) => Promise<StewardModelReply>;
 
 export type StewardErrorKind =
   'model-error' | 'invalid-json' | 'schema-violation' | 'citation-not-in-packet' | 'route-misconfigured';
@@ -112,6 +126,8 @@ export interface DiagnoseStewardOptions {
   invoke: StewardModelInvoker;
   /** Default: defaultRoutesConfig.routes.steward. */
   route?: StewardRouteConfig;
+  /** costs.jsonl path; one task 'steward' row is appended per completed model call (#2113). */
+  costsFile: string;
 }
 
 /** Pure: the steward prompt. The packet is embedded as JSON with every `<` escaped so packet text cannot close the data block. */
@@ -168,29 +184,63 @@ function stewardError(errorKind: StewardErrorKind, detail: string): StewardError
   };
 }
 
+function estimate(text: string): number {
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+
+/** Pure: the costs.jsonl row for one steward model call. Mirrors ModelRouter.recordCost. */
+export function buildStewardCostEntry(
+  model: string,
+  issue: number,
+  prompt: string,
+  reply: StewardModelReply,
+): Omit<CostEntry, 'ts'> {
+  const usage = reply.usage;
+  const inputTokens = usage?.inputTokens ?? estimate(prompt);
+  const outputTokens = usage?.outputTokens ?? estimate(reply.text);
+  const cost = usage?.costUsd ?? new ModelRegistry(loadModelsConfig()).estimateCost(model, inputTokens, outputTokens);
+  return {
+    issue: String(issue),
+    task: STEWARD_COST_TASK,
+    model,
+    inputTokens,
+    outputTokens,
+    cost,
+    ...(cost === null ? { unpriced: true } : {}),
+    estimated: usage === undefined,
+    ...(usage?.rawInputTokens !== undefined ? { rawInputTokens: usage.rawInputTokens } : {}),
+    ...(usage?.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),
+    ...(usage?.cacheCreationTokens !== undefined ? { cacheCreationTokens: usage.cacheCreationTokens } : {}),
+    ...(usage?.numTurns !== undefined ? { numTurns: usage.numTurns } : {}),
+    ...(usage?.durationMs !== undefined ? { durationMs: usage.durationMs } : {}),
+    ...(usage?.durationApiMs !== undefined ? { durationApiMs: usage.durationApiMs } : {}),
+  };
+}
+
 async function runDiagnosis(
   model: string,
   packet: StewardPacket,
   invoke: StewardModelInvoker,
-): Promise<StewardVerdictRecord> {
-  let raw: string;
+): Promise<{ record: StewardVerdictRecord; prompt: string; reply?: StewardModelReply }> {
+  const prompt = buildStewardPrompt(packet);
+  let reply: StewardModelReply;
   try {
-    raw = await invoke({
+    reply = await invoke({
       route: 'steward',
       model,
-      prompt: buildStewardPrompt(packet),
+      prompt,
       allowedTools: [],
       output: 'json',
     });
   } catch (err) {
-    return stewardError('model-error', err instanceof Error ? err.message : String(err));
+    return { record: stewardError('model-error', err instanceof Error ? err.message : String(err)), prompt };
   }
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw.trim());
+    parsed = JSON.parse(reply.text.trim());
   } catch {
-    return stewardError('invalid-json', 'reply is not a single JSON object');
+    return { record: stewardError('invalid-json', 'reply is not a single JSON object'), prompt, reply };
   }
 
   let verdict: EscalatedStewardVerdict;
@@ -201,19 +251,24 @@ async function runDiagnosis(
       err instanceof ZodError
         ? err.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')
         : 'reply failed schema validation';
-    return stewardError('schema-violation', detail);
+    return { record: stewardError('schema-violation', detail), prompt, reply };
   }
 
   const uncited = findUncitedExcerpt(verdict, packet);
   if (uncited) {
-    return stewardError('citation-not-in-packet', `citation excerpt not found in packet field ${uncited.field}`);
+    return {
+      record: stewardError('citation-not-in-packet', `citation excerpt not found in packet field ${uncited.field}`),
+      prompt,
+      reply,
+    };
   }
-  return { ...verdict, reason: verdict.escalate ? 'low-confidence' : 'confident' };
+  return { record: { ...verdict, reason: verdict.escalate ? 'low-confidence' : 'confident' }, prompt, reply };
 }
 
 /**
- * One tool-less steward model call over the packet, validated and written to `steward-verdict.json`.
- * Any failure fails closed to a `steward-error` escalation; rejects only if the file write fails.
+ * One tool-less steward model call over the packet, validated and written to `steward-verdict.json`,
+ * then one `task: 'steward'` cost row is appended to `costsFile` when the model replied.
+ * Any model failure fails closed to a `steward-error` escalation; rejects only if a file write fails.
  */
 export async function diagnoseStewardPacket(
   runDir: string,
@@ -221,10 +276,17 @@ export async function diagnoseStewardPacket(
   options: DiagnoseStewardOptions,
 ): Promise<StewardVerdictRecord> {
   const route: StewardRouteConfig | undefined = options.route ?? defaultRoutesConfig.routes.steward;
-  const record =
+  const result =
     !route?.model || !Array.isArray(route.allowedTools) || route.allowedTools.length > 0
-      ? stewardError('route-misconfigured', 'steward route must pin a model and allow no tools')
+      ? {
+          record: stewardError('route-misconfigured', 'steward route must pin a model and allow no tools'),
+          prompt: '',
+          reply: undefined,
+        }
       : await runDiagnosis(route.model, packet, options.invoke);
-  await writeStewardVerdict(runDir, record);
-  return record;
+  await writeStewardVerdict(runDir, result.record);
+  if (result.reply && route?.model) {
+    logCost(options.costsFile, buildStewardCostEntry(route.model, packet.issue.number, result.prompt, result.reply));
+  }
+  return result.record;
 }
