@@ -8,6 +8,7 @@ import {
   dedupGardenClusters,
   findGardenTrackingIssue,
   gardenClusterFingerprint,
+  filterGardenOnlyNew,
   gardenKeyMarker,
   markGardenTrackingUnknown,
 } from './dedup.js';
@@ -189,5 +190,36 @@ describe('markGardenTrackingUnknown', () => {
 
   it('returns an empty list for empty input', () => {
     expect(markGardenTrackingUnknown([])).toEqual([]);
+  });
+});
+
+describe('filterGardenOnlyNew (#2104)', () => {
+  const withTracking = (key: string, tracking?: GardenCluster['tracking']): GardenCluster => ({
+    ...cluster(key),
+    ...(tracking ? { tracking } : {}),
+  });
+
+  it('omits tracked clusters', () => {
+    expect(filterGardenOnlyNew([withTracking('a', { status: 'tracked', issue: 7 })])).toEqual([]);
+  });
+
+  it('keeps new, unknown and unannotated clusters', () => {
+    const list = [withTracking('a', { status: 'new' }), withTracking('b', { status: 'unknown' }), withTracking('c')];
+    expect(filterGardenOnlyNew(list)).toEqual(list);
+  });
+
+  it('keeps survivor order and does not mutate the input', () => {
+    const list = [
+      withTracking('a', { status: 'new' }),
+      withTracking('b', { status: 'tracked', issue: 7 }),
+      withTracking('c', { status: 'unknown' }),
+    ];
+    const snapshot = [...list];
+    expect(filterGardenOnlyNew(list).map((c) => c.key)).toEqual(['a', 'c']);
+    expect(list).toEqual(snapshot);
+  });
+
+  it('returns [] for an empty list', () => {
+    expect(filterGardenOnlyNew([])).toEqual([]);
   });
 });

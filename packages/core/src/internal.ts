@@ -26,6 +26,7 @@ export {
 // Garden dedup (#2102)
 export {
   dedupGardenClusters,
+  filterGardenOnlyNew,
   findGardenTrackingIssue,
   gardenClusterFingerprint,
   gardenKeyMarker,

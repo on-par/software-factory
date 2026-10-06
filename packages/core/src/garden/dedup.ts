@@ -1,4 +1,4 @@
-// src/garden/dedup.ts — Read-only dedup of garden clusters against open issues via GitHub search (#2102); search failures degrade to tracking unknown (#2103)
+// src/garden/dedup.ts — Read-only dedup of garden clusters against open issues via GitHub search (#2102); search failures degrade to tracking unknown (#2103); --only-new filter (#2104)
 
 import { createHash } from 'node:crypto';
 
@@ -42,6 +42,11 @@ export function findGardenTrackingIssue(
 /** Every cluster with tracking unknown — used when the open-issue search cannot run (#2103). */
 export function markGardenTrackingUnknown(clusters: readonly GardenCluster[]): GardenCluster[] {
   return clusters.map((c) => ({ ...c, tracking: { status: 'unknown' } }));
+}
+
+/** Drops clusters an open issue already tracks (--only-new, #2104); new, unknown and unannotated clusters stay. */
+export function filterGardenOnlyNew(clusters: readonly GardenCluster[]): GardenCluster[] {
+  return clusters.filter((c) => c.tracking?.status !== 'tracked');
 }
 
 export async function dedupGardenClusters(
