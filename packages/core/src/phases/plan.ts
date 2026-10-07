@@ -117,6 +117,20 @@ ${constitutionCtx ? '5. The constitution above defines the standards for this pr
    flag turns off (defaults, config files, or behavior the implicit call had) as behaviorDelta rows.
    Any behaviorDelta row with verdict worse or unknown must be fixed in the approach or
    also listed in openQuestions. For any other change, omit these three keys.
+7. EVIDENCE PLAN. Decide what evidence will prove each acceptance criterion in the issue.
+   Write one evidencePlan entry per acceptance criterion. Its claim restates that criterion.
+   Each entry has a kind, and each kind has required fields:
+   - fail-to-pass-test: claim, test — a test (file path plus test name) that fails before
+     the change and passes after it.
+   - command: claim, command, passWhen — an exact command and what a pass looks like.
+   - screenshot: claim, route — the concrete app route or page to capture.
+   - none: claim, reason — why no evidence can honestly prove this criterion.
+   Choosing a kind:
+   - Prefer fail-to-pass-test for any behavior change.
+   - Use screenshot only for a user-visible UI change with a concrete route to capture.
+   - Use none with a reason instead of weak proof. A command that only shows the code
+     compiles, or a test that would pass without the change, is weak proof.
+   If the issue lists no acceptance criteria, write one entry per behaviorContract item.
 
 Write EXACTLY ONE file, at ${specPath}, in this shape:
 ---
@@ -150,6 +164,20 @@ design:
       passWhen: <what a pass looks like>
   riskBlastRadius: <what breaks if this is wrong>
   openQuestions: []   # anything you could not resolve; empty list if none
+  evidencePlan:   # one entry per acceptance criterion — see step 7
+    - kind: fail-to-pass-test
+      claim: <acceptance criterion this proves>
+      test: <test file path and test name that fails before and passes after>
+    - kind: command
+      claim: <acceptance criterion>
+      command: <exact command>
+      passWhen: <what a pass looks like>
+    - kind: screenshot
+      claim: <user-visible acceptance criterion>
+      route: <concrete route, e.g. /settings>
+    - kind: none
+      claim: <acceptance criterion>
+      reason: <why no honest evidence exists>
   edgeInputs:     # OPTIONAL — required by step 6 for dispatch/default-branch/external-flag changes
     - <input that reaches the default/fallthrough branch>
   behaviorDelta:  # OPTIONAL — required by step 6
