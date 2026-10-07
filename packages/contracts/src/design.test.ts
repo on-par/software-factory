@@ -225,3 +225,61 @@ describe('design string-list coercion (#2216)', () => {
     expect(findCoercedDesignItems({ edgeInputs: 'x', externalLists: [null, { gaps: 'x' }] })).toEqual([]);
   });
 });
+
+describe('evidencePlan', () => {
+  const allKinds = [
+    { kind: 'fail-to-pass-test' as const, claim: 'a', test: 'x.test.ts' },
+    { kind: 'command' as const, claim: 'b', command: 'npm test', passWhen: 'exits 0' },
+    { kind: 'screenshot' as const, claim: 'c', route: '/home' },
+    { kind: 'none' as const, claim: 'd', reason: 'docs only' },
+  ];
+  const paths = (evidencePlan: unknown) => {
+    const r = DesignArtifactSchema.safeParse({ ...validDesign, evidencePlan });
+    return r.success ? null : r.error.issues.map((i) => i.path.join('.'));
+  };
+
+  it('accepts each kind and round-trips', () => {
+    const r = DesignArtifactSchema.safeParse({ ...validDesign, evidencePlan: allKinds });
+    expect(r.success).toBe(true);
+    expect(r.data?.evidencePlan).toHaveLength(4);
+    expect(r.data?.evidencePlan).toEqual(allKinds);
+    const back = deserialize(
+      DesignArtifactSchema,
+      serialize(DesignArtifactSchema, { ...validDesign, evidencePlan: allKinds }),
+    );
+    expect(back.evidencePlan).toEqual(allKinds);
+  });
+
+  it('rejects a screenshot entry with no route', () => {
+    expect(paths([{ kind: 'screenshot', claim: 'x' }])).toContain('evidencePlan.0.route');
+  });
+
+  it.each([
+    [{ kind: 'fail-to-pass-test', claim: 'x' }, 'evidencePlan.0.test'],
+    [{ kind: 'command', claim: 'x', command: 'c' }, 'evidencePlan.0.passWhen'],
+    [{ kind: 'command', claim: 'x', passWhen: 'p' }, 'evidencePlan.0.command'],
+    [{ kind: 'none', claim: 'x' }, 'evidencePlan.0.reason'],
+    [{ kind: 'screenshot', route: '/a' }, 'evidencePlan.0.claim'],
+    [{ kind: 'screenshot', claim: 'x', route: '' }, 'evidencePlan.0.route'],
+  ])('rejects %j', (entry, path) => {
+    expect(paths([entry])).toContain(path);
+  });
+
+  it('reports the index of the invalid entry', () => {
+    expect(paths([allKinds[0], { kind: 'screenshot', claim: 'x' }])).toContain('evidencePlan.1.route');
+  });
+
+  it('rejects an unknown kind', () => {
+    const p = paths([{ kind: 'video', claim: 'x' }]);
+    expect(p?.some((x) => x.startsWith('evidencePlan.0.kind'))).toBe(true);
+  });
+
+  it('is optional and tolerates null', () => {
+    const none = DesignArtifactSchema.safeParse(validDesign);
+    expect(none.success).toBe(true);
+    expect(none.data?.evidencePlan).toBeUndefined();
+    const nul = DesignArtifactSchema.safeParse({ ...validDesign, evidencePlan: null });
+    expect(nul.success).toBe(true);
+    expect(nul.data?.evidencePlan).toBeUndefined();
+  });
+});
