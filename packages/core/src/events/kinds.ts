@@ -209,7 +209,7 @@ export interface LanePausedPayload {
 }
 
 /** Payload of a `steward-triggered` event (#2084): `detectStuck` classified a parked run as
- *  stuck per ADR-0155. Emitted after the run's own park event, so it is not itself a park. */
+ *  stuck per ADR-0155. Emitted after the run's own park event and before the park's reports, so it is not itself a park. */
 export interface StewardTriggeredPayload {
   /** Which ADR-0155 trigger matched. */
   trigger: StuckTrigger;

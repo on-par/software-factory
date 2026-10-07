@@ -1,5 +1,5 @@
 import { execFile as execFileCb } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,6 +19,8 @@ import { DEFAULT_REVIEW_FLOOR_RULES } from '../review/floor.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import type { CheckSummary, Constitution, DesignArtifact } from '../types/index.js';
+import type { StewardCommentGitHubClient, StewardIssueComment } from '../steward/comment.js';
+import type { RunStewardPorts } from '../steward/run.js';
 import type { WorkRequest } from '../work/index.js';
 import { LaneFileGuard } from './lane-file-guard.js';
 import type { RunPolicy } from './policy.js';
@@ -752,6 +754,129 @@ describe('runIssue — steward-triggered event (#2086)', () => {
     expect(on.writeLocalRunReport.mock.calls).toEqual(off.writeLocalRunReport.mock.calls);
     expect(on.writeBenchmarkArtifacts.mock.calls).toEqual(off.writeBenchmarkArtifacts.mock.calls);
     expect(on.touched.mock.calls).toEqual(off.touched.mock.calls);
+  });
+});
+
+describe('runIssue — steward park path (#2124)', () => {
+  const CHECK_EXHAUSTED: CheckPhaseResult = {
+    passed: false,
+    summary: { ...CHECK_SUMMARY, results: [{ checker: 'tests', result: 'FAIL', details: 'nope' }] },
+    reworkRounds: 3,
+    failureSignature: 'sig-1',
+  };
+  let runDir: string;
+  beforeEach(() => {
+    runDir = mkdtempSync(join(tmpdir(), 'steward-park-'));
+  });
+  afterEach(() => {
+    rmSync(runDir, { recursive: true, force: true });
+  });
+
+  const stewardRig = (order: string[] = []) => {
+    const comments: StewardIssueComment[] = [];
+    const client: StewardCommentGitHubClient = {
+      listIssueComments: vi.fn(async () => comments.map((c) => ({ ...c }))),
+      createIssueComment: vi.fn(async ({ body }) => {
+        order.push('createIssueComment');
+        comments.push({ id: comments.length + 1, body });
+        return { id: comments.length };
+      }),
+      updateIssueComment: vi.fn(async () => {}),
+    };
+    const invoke = vi.fn(async () => {
+      order.push('invoke');
+      return {
+        text: JSON.stringify({
+          diagnosis: 'Stale fixture.',
+          category: 'test',
+          nextStep: 'Refresh it.',
+          confidence: 0.95,
+          citations: [{ field: 'issue', excerpt: 'Fix the thing' }],
+        }),
+      };
+    });
+    const steward: RunStewardPorts = { runDir, costsFile: join(runDir, 'costs.jsonl'), invoke, comments: client };
+    return { comments, client, invoke, steward };
+  };
+  const stewardFiles = () => ['steward-packet.json', 'steward-verdict.json'].filter((f) => existsSync(join(runDir, f)));
+
+  it('posts one comment for a stuck run and leaves the outcome unchanged', async () => {
+    vi.mocked(checkPhase).mockResolvedValue(CHECK_EXHAUSTED);
+    const off = await runIssue(baseRequest(), basePolicy(), basePorts());
+    const rig = stewardRig();
+    const on = await runIssue(baseRequest({ stewardEnabled: true }), basePolicy(), basePorts({ steward: rig.steward }));
+    expect(rig.comments).toHaveLength(1);
+    expect(rig.client.createIssueComment).toHaveBeenCalledWith(expect.objectContaining({ issue_number: 1 }));
+    expect(on).toMatchObject({ state: 'parked', reason: 'fail', failureSignature: 'sig-1' });
+    expect(on).toEqual(off);
+  });
+
+  it('finishes the steward before the park is reported', async () => {
+    vi.mocked(checkPhase).mockResolvedValue(CHECK_EXHAUSTED);
+    const order: string[] = [];
+    const rig = stewardRig(order);
+    const log = vi.fn((type: string) => {
+      order.push(type);
+    });
+    await runIssue(
+      baseRequest({ stewardEnabled: true }),
+      basePolicy(),
+      basePorts({
+        events: () => log,
+        steward: rig.steward,
+        writeLocalRunReport: vi.fn(async () => {
+          order.push('writeLocalRunReport');
+          return '/tmp/report.md';
+        }),
+        writeBenchmarkArtifacts: vi.fn(async () => {
+          order.push('writeBenchmarkArtifacts');
+        }),
+      }),
+    );
+    const at = (name: string) => order.indexOf(name);
+    expect(at('fail')).toBeGreaterThanOrEqual(0);
+    expect(at('fail')).toBeLessThan(at('steward-triggered'));
+    expect(at('steward-triggered')).toBeLessThan(at('invoke'));
+    expect(at('invoke')).toBeLessThan(at('createIssueComment'));
+    expect(at('createIssueComment')).toBeLessThan(at('writeLocalRunReport'));
+    expect(at('writeLocalRunReport')).toBeLessThan(at('writeBenchmarkArtifacts'));
+    expect(rig.comments).toHaveLength(1);
+  });
+
+  it('is inert when the steward is disabled', async () => {
+    vi.mocked(checkPhase).mockResolvedValue(CHECK_EXHAUSTED);
+    for (const req of [baseRequest(), baseRequest({ stewardEnabled: false })]) {
+      const rig = stewardRig();
+      const log = vi.fn();
+      const outcome = await runIssue(req, basePolicy(), basePorts({ events: () => log, steward: rig.steward }));
+      expect(rig.invoke).not.toHaveBeenCalled();
+      expect(rig.client.listIssueComments).not.toHaveBeenCalled();
+      expect(rig.client.createIssueComment).not.toHaveBeenCalled();
+      expect(stewardFiles()).toEqual([]);
+      expect(log.mock.calls.filter((c) => c[0] === 'steward-triggered')).toHaveLength(0);
+      expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
+    }
+  });
+
+  it('does not touch the steward on a healthy run', async () => {
+    const rig = stewardRig();
+    const log = vi.fn();
+    await runIssue(
+      baseRequest({ stewardEnabled: true }),
+      basePolicy(),
+      basePorts({ events: () => log, steward: rig.steward }),
+    );
+    expect(log.mock.calls.filter((c) => c[0] === 'steward-triggered')).toHaveLength(0);
+    expect(rig.invoke).not.toHaveBeenCalled();
+    expect(rig.client.createIssueComment).not.toHaveBeenCalled();
+    expect(stewardFiles()).toEqual([]);
+  });
+
+  it('does not invoke the steward for a non-trigger park', async () => {
+    vi.mocked(checkPhase).mockResolvedValue({ ...CHECK_EXHAUSTED, reworkRounds: 1 });
+    const rig = stewardRig();
+    await runIssue(baseRequest({ stewardEnabled: true }), basePolicy(), basePorts({ steward: rig.steward }));
+    expect(rig.invoke).not.toHaveBeenCalled();
   });
 });
 
