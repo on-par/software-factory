@@ -72,6 +72,42 @@ export const ExternalListSchema = z.object({
   gaps: z.array(stringListItem),
 });
 
+// Evidence per claim (#2257). Each kind requires its own field: fail-to-pass-test needs
+// `test`, command needs `command` + `passWhen`, screenshot needs `route`, none needs `reason`.
+export const EvidenceKindSchema = z.enum(['fail-to-pass-test', 'command', 'screenshot', 'none']);
+
+export const FailToPassTestEvidenceSchema = z.object({
+  kind: z.literal('fail-to-pass-test'),
+  claim: z.string().min(1),
+  test: z.string().min(1),
+});
+
+export const CommandEvidenceSchema = z.object({
+  kind: z.literal('command'),
+  claim: z.string().min(1),
+  command: z.string().min(1),
+  passWhen: z.string().min(1),
+});
+
+export const ScreenshotEvidenceSchema = z.object({
+  kind: z.literal('screenshot'),
+  claim: z.string().min(1),
+  route: z.string().min(1),
+});
+
+export const NoEvidenceSchema = z.object({
+  kind: z.literal('none'),
+  claim: z.string().min(1),
+  reason: z.string().min(1),
+});
+
+export const EvidencePlanEntrySchema = z.discriminatedUnion('kind', [
+  FailToPassTestEvidenceSchema,
+  CommandEvidenceSchema,
+  ScreenshotEvidenceSchema,
+  NoEvidenceSchema,
+]);
+
 // A bare YAML key parses to null, which must not fail the whole parse; and unlike
 // targetTypes the key stays optional in the inferred type (no [] default injected).
 const optionalList = <T extends z.ZodType>(item: T) => z.preprocess((v) => v ?? undefined, z.array(item).optional());
@@ -102,6 +138,7 @@ export const DesignArtifactSchema = z.object({
   edgeInputs: optionalList(stringListItem),
   behaviorDelta: optionalList(BehaviorDeltaRowSchema),
   externalLists: optionalList(ExternalListSchema),
+  evidencePlan: optionalList(EvidencePlanEntrySchema),
 });
 
 export type VerificationStep = z.infer<typeof VerificationStepSchema>;
@@ -113,6 +150,12 @@ export type CallEdge = z.infer<typeof CallEdgeSchema>;
 export type BehaviorVerdict = z.infer<typeof BehaviorVerdictSchema>;
 export type BehaviorDeltaRow = z.infer<typeof BehaviorDeltaRowSchema>;
 export type ExternalList = z.infer<typeof ExternalListSchema>;
+export type EvidenceKind = z.infer<typeof EvidenceKindSchema>;
+export type FailToPassTestEvidence = z.infer<typeof FailToPassTestEvidenceSchema>;
+export type CommandEvidence = z.infer<typeof CommandEvidenceSchema>;
+export type ScreenshotEvidence = z.infer<typeof ScreenshotEvidenceSchema>;
+export type NoEvidence = z.infer<typeof NoEvidenceSchema>;
+export type EvidencePlanEntry = z.infer<typeof EvidencePlanEntrySchema>;
 export type DesignArtifact = z.infer<typeof DesignArtifactSchema>;
 
 const STRING_LIST_FIELDS = ['interfacesTouched', 'behaviorContract', 'openQuestions', 'edgeInputs'] as const;

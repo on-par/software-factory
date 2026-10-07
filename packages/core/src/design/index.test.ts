@@ -97,6 +97,26 @@ describe('parseDesignArtifact', () => {
     expect(parsed?.approach.rejected).toEqual([]);
   });
 
+  it('reports a bad evidencePlan entry with its index and field', () => {
+    const { artifact: parsed, errors } = parseDesignArtifact({
+      design: { ...validDesign, evidencePlan: [{ kind: 'screenshot', claim: 'x' }] },
+    });
+    expect(parsed).toBeNull();
+    expect(errors.some((e) => e.startsWith('evidencePlan.0.route'))).toBe(true);
+  });
+
+  it('accepts a valid evidencePlan', () => {
+    const evidencePlan = [
+      { kind: 'fail-to-pass-test' as const, claim: 'a', test: 'x.test.ts' },
+      { kind: 'command' as const, claim: 'b', command: 'npm test', passWhen: 'exits 0' },
+      { kind: 'screenshot' as const, claim: 'c', route: '/home' },
+      { kind: 'none' as const, claim: 'd', reason: 'docs only' },
+    ];
+    const { artifact: parsed, errors } = parseDesignArtifact({ design: { ...validDesign, evidencePlan } });
+    expect(errors).toEqual([]);
+    expect(parsed?.evidencePlan).toHaveLength(4);
+  });
+
   it('returns null for non-object frontmatter', () => {
     const { artifact: parsed, errors } = parseDesignArtifact(null);
     expect(parsed).toBeNull();
