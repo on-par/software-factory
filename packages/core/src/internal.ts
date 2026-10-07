@@ -115,8 +115,8 @@ export {
 // Config
 export { resolveFilingPolicy, resolvePrClassifierPolicy } from './config/index.js';
 export type { EffectivePrClassifierPolicy } from './config/index.js';
-export type { EffectiveConfig } from './config/repo.js';
-export { resolveEffectiveConfig, resolveReviewFloorRules } from './config/repo.js';
+export type { EffectiveConfig, TrustTier } from './config/repo.js';
+export { resolveEffectiveConfig, resolveReviewFloorRules, resolveTrustTier } from './config/repo.js';
 export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix } from './config/index.js';
 export { FACTORY_RUNTIME_CONFIG_KEYS } from './config/index.js';
 export { isTrustedApprover, createOctokitCollaboratorPermissionClient } from './queue/approval.js';

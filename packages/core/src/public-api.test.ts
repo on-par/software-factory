@@ -468,6 +468,7 @@ const INTERNAL_API_KEYS = [
   'resolveFilingPolicy',
   'resolvePrClassifierPolicy',
   'resolveReviewFloorRules',
+  'resolveTrustTier',
   // PR classifier shadow verdict (#1725)
   'buildClassifierPrompt',
   'changedPathsFromDiff',

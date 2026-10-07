@@ -92,6 +92,8 @@ version: 2
   # autoEligible: ["<path prefix or glob>"]
   # Total added+removed lines above which the floor is at least B.
   # maxDiffLines: 500
+  # Merge trust tier for this repo (ADR-0144). Unset: T0, a human merges every PR.
+  # trustTier: T0
 # Merge policy. `factory run` and `supervise` read `auto`; `factory land` reads `admin`. `factory
 # ship` and `run-issue` always stop at a ready-for-review PR.
 # run:

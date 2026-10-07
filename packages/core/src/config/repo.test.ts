@@ -22,6 +22,7 @@ import {
   resolveEfficiencyPolicy,
   resolveLaneBreakerThreshold,
   resolveReviewFloorRules,
+  resolveTrustTier,
   resolveUsageCap,
   resolveWatchdogPolicy,
   routeForBuildModel,
@@ -991,6 +992,30 @@ it('shows scalar and task-specific effort overrides in factory status', () => {
   const lines = describeEffectiveConfig({ router, repo, env: {}, repoConfigPath: '.factory/config.json' });
   expect(lines).toContain('Effort gpt-model-a: {"plan":"high"} (.factory/config.json)');
   expect(lines).toContain('Effort claude-model: "low" (.factory/config.json)');
+});
+
+describe('classifier.trustTier (#2131)', () => {
+  it('defaults to T0 without a config, classifier section or trustTier key', async () => {
+    expect(resolveTrustTier(null)).toBe('T0');
+    expect(resolveTrustTier({ version: 2 })).toBe('T0');
+    const root = await tempRepoRoot();
+    await writeRepoConfig(root, { version: 2, classifier: { maxDiffLines: 50 } });
+    expect(resolveTrustTier(loadRepoConfig(root))).toBe('T0');
+  });
+
+  it.each(['T0', 'T1', 'T2'] as const)('loads trustTier %s and leaves the floor rules alone', async (tier) => {
+    const root = await tempRepoRoot();
+    await writeRepoConfig(root, { version: 2, classifier: { trustTier: tier } });
+    const repo = loadRepoConfig(root);
+    expect(resolveTrustTier(repo)).toBe(tier);
+    expect(resolveReviewFloorRules(repo)).toBe(DEFAULT_REVIEW_FLOOR_RULES);
+  });
+
+  it.each(['T3', 't1', '', 1])('rejects trustTier %j naming the key', async (value) => {
+    const root = await tempRepoRoot();
+    await writeRepoConfig(root, { version: 2, classifier: { trustTier: value } });
+    expect(() => loadRepoConfig(root)).toThrow(/classifier\.trustTier/);
+  });
 });
 
 describe('classifier config (#1723)', () => {
