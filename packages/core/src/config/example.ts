@@ -211,6 +211,7 @@ function modelNamespace(): Node[] {
         unset('alwaysHuman', doc('classifier', 'alwaysHuman'), '["<path prefix or glob>"]'),
         unset('autoEligible', doc('classifier', 'autoEligible'), '["<path prefix or glob>"]'),
         unset('maxDiffLines', doc('classifier', 'maxDiffLines'), DEFAULT_REVIEW_FLOOR_RULES.maxLines),
+        unset('trustTier', doc('classifier', 'trustTier'), 'T0'),
       ],
     },
   ];

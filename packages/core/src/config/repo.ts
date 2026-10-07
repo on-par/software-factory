@@ -203,6 +203,10 @@ export const RepoFactoryConfigV2Schema = z
           .positive()
           .optional()
           .describe('Total added+removed lines above which the floor is at least B.'),
+        trustTier: z
+          .enum(['T0', 'T1', 'T2'])
+          .optional()
+          .describe('Merge trust tier for this repo (ADR-0144). Unset: T0, a human merges every PR.'),
       })
       .strict()
       .optional()
@@ -885,4 +889,11 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
 /** Review floor rules for this repo: the classifier section merged onto the packaged rules (#1723). */
 export function resolveReviewFloorRules(repo: RepoFactoryConfig | null): ReviewFloorRuleSet {
   return applyReviewFloorOverrides(repo?.classifier);
+}
+
+export type TrustTier = 'T0' | 'T1' | 'T2';
+
+/** Effective merge trust tier for this repo (ADR-0144, #2131): classifier.trustTier, else T0. */
+export function resolveTrustTier(repo: RepoFactoryConfig | null): TrustTier {
+  return repo?.classifier?.trustTier ?? 'T0';
 }
