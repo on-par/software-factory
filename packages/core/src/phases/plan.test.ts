@@ -108,6 +108,37 @@ describe('buildPlanPrompt', () => {
     }
   });
 
+  it('asks for one evidencePlan entry per acceptance criterion (#2259)', () => {
+    const prompt = riskyPrompt();
+    expect(prompt).toMatch(/one evidencePlan entry per\s+acceptance criterion/);
+    expect(prompt).toContain('evidencePlan:');
+  });
+
+  it('describes all four evidence kinds with their required fields (#2259)', () => {
+    const prompt = riskyPrompt();
+    for (const s of [
+      'kind: fail-to-pass-test',
+      'kind: command',
+      'kind: screenshot',
+      'kind: none',
+      'claim:',
+      'test:',
+      'command:',
+      'passWhen:',
+      'route:',
+      'reason:',
+    ]) {
+      expect(prompt).toContain(s);
+    }
+  });
+
+  it('prefers fail-to-pass-test, limits screenshot to UI routes, and prefers none over weak proof (#2259)', () => {
+    const prompt = riskyPrompt();
+    expect(prompt).toMatch(/Prefer fail-to-pass-test for any\s+behavior change/);
+    expect(prompt).toMatch(/screenshot only for a\s+user-visible UI change with a\s+concrete route/);
+    expect(prompt).toMatch(/none with a reason instead of\s+weak proof/);
+  });
+
   it('asks what each new explicit flag turns off', () => {
     expect(riskyPrompt()).toMatch(/what each new explicit\s+flag turns off/);
   });
