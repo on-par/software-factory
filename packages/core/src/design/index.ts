@@ -8,7 +8,7 @@ import { DesignArtifactSchema, findCoercedDesignItems } from '@on-par/contracts'
 
 import { specPaths } from '../spec/index.js';
 import type { DesignArtifact } from '../types/index.js';
-import type { BehaviorDeltaRow } from '@on-par/contracts';
+import type { BehaviorDeltaRow, EvidencePlanEntry } from '@on-par/contracts';
 
 export { DesignArtifactSchema };
 
@@ -36,11 +36,28 @@ function bulletList(items: string[]): string {
   return items.length > 0 ? items.join('\n') : '_None recorded._';
 }
 
+function renderEvidenceEntry(entry: EvidencePlanEntry): string {
+  switch (entry.kind) {
+    case 'fail-to-pass-test':
+      return `- ${entry.claim} — fail-to-pass test: \`${entry.test}\``;
+    case 'command':
+      return `- ${entry.claim} — command: \`${entry.command}\` — pass when: ${entry.passWhen}`;
+    case 'screenshot':
+      return `- ${entry.claim} — screenshot: ${entry.route}`;
+    case 'none':
+      return `- ${entry.claim} — no evidence: ${entry.reason}`;
+  }
+}
+
 export function renderDesignArtifact(artifact: DesignArtifact, issue: number): string {
   const rejectedList =
     artifact.approach.rejected.length > 0
       ? artifact.approach.rejected.map((r) => `- **${r.option}** — ${r.reason}`).join('\n')
       : '_None recorded._';
+
+  const evidencePlan = artifact.evidencePlan ?? [];
+  const evidenceSection =
+    evidencePlan.length > 0 ? ['### Evidence plan', '', evidencePlan.map(renderEvidenceEntry).join('\n'), ''] : [];
 
   const openQuestionsBody =
     artifact.openQuestions.length > 0
@@ -90,6 +107,7 @@ export function renderDesignArtifact(artifact: DesignArtifact, issue: number): s
     '',
     artifact.verificationPlan.map((v) => `- \`${v.command}\` — pass when: ${v.passWhen}`).join('\n'),
     '',
+    ...evidenceSection,
     '### Risk / blast radius',
     '',
     artifact.riskBlastRadius,
@@ -103,12 +121,15 @@ export function renderDesignArtifact(artifact: DesignArtifact, issue: number): s
 
 /**
  * Compact grounding block BUILD injects into the worker prompt (#480). Returns
- * '' when the artifact carries none of the deepened design fields, so a
+ * '' when the artifact carries none of the deepened design fields (including evidencePlan), so a
  * pre-#480 artifact adds nothing to the prompt.
  */
 export function renderDesignGrounding(artifact: DesignArtifact): string {
   const { targetTypes, signatures, callGraph } = artifact;
-  if (targetTypes.length === 0 && signatures.length === 0 && callGraph.length === 0) return '';
+  const evidencePlan = artifact.evidencePlan ?? [];
+  if (targetTypes.length === 0 && signatures.length === 0 && callGraph.length === 0 && evidencePlan.length === 0) {
+    return '';
+  }
 
   const lines: string[] = ['## Design grounding (from the frozen PLAN artifact)'];
 
@@ -123,6 +144,11 @@ export function renderDesignGrounding(artifact: DesignArtifact): string {
   if (callGraph.length > 0) {
     lines.push('', 'Call graph sketch:', '');
     lines.push(...callGraph.map((e) => `- ${e.from} → ${e.to}${e.note ? ` — ${e.note}` : ''}`));
+  }
+
+  if (evidencePlan.length > 0) {
+    lines.push('', 'Evidence plan — the evidence each claim needs (write these tests):', '');
+    lines.push(...evidencePlan.map(renderEvidenceEntry));
   }
 
   lines.push(
