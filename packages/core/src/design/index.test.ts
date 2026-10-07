@@ -39,6 +39,13 @@ const validDesign = {
 
 const artifact: DesignArtifact = validDesign;
 
+const evidencePlan = [
+  { kind: 'fail-to-pass-test' as const, claim: 'renders the plan', test: 'packages/core/src/design/index.test.ts' },
+  { kind: 'command' as const, claim: 'suite green', command: 'npm test', passWhen: 'exits 0' },
+  { kind: 'screenshot' as const, claim: 'home looks right', route: '/home' },
+  { kind: 'none' as const, claim: 'docs tweak', reason: 'docs only' },
+];
+
 const tempDirs = new Set<string>();
 
 afterEach(async () => {
@@ -180,9 +187,52 @@ describe('renderDesignArtifact', () => {
     const noneRecordedCount = md.split('_None recorded._').length - 1;
     expect(noneRecordedCount).toBeGreaterThanOrEqual(3);
   });
+
+  it('renders an Evidence plan section naming each claim and its detail', () => {
+    const md = renderDesignArtifact({ ...artifact, evidencePlan }, 422);
+
+    expect(md).toContain('### Evidence plan');
+    expect(md).toContain('- renders the plan — fail-to-pass test: `packages/core/src/design/index.test.ts`');
+    expect(md).toContain('- suite green — command: `npm test` — pass when: exits 0');
+    expect(md).toContain('- home looks right — screenshot: /home');
+    expect(md).toContain('- docs tweak — no evidence: docs only');
+    expect(md.indexOf('### Evidence plan')).toBeGreaterThan(md.indexOf('### Verification plan'));
+    expect(md.indexOf('### Evidence plan')).toBeLessThan(md.indexOf('### Risk / blast radius'));
+  });
+
+  it('omits the Evidence plan section without a plan', () => {
+    expect(renderDesignArtifact(artifact, 422)).not.toContain('Evidence plan');
+    expect(renderDesignArtifact({ ...artifact, evidencePlan: [] }, 422)).not.toContain('Evidence plan');
+  });
 });
 
 describe('renderDesignGrounding', () => {
+  it('includes the evidence plan for BUILD', () => {
+    const grounding = renderDesignGrounding({ ...artifact, evidencePlan });
+
+    expect(grounding).toContain('Evidence plan');
+    expect(grounding).toContain('- renders the plan — fail-to-pass test: `packages/core/src/design/index.test.ts`');
+  });
+
+  it('renders grounding when evidencePlan is the only deepened field', () => {
+    const grounding = renderDesignGrounding({
+      ...artifact,
+      targetTypes: [],
+      signatures: [],
+      callGraph: [],
+      evidencePlan,
+    });
+
+    expect(grounding).not.toBe('');
+    expect(grounding).toContain('## Design grounding');
+    expect(grounding).toContain('Evidence plan');
+    expect(grounding).not.toContain('Target types —');
+  });
+
+  it('omits the evidence block without a plan', () => {
+    expect(renderDesignGrounding(artifact)).not.toContain('Evidence plan');
+  });
+
   it('returns "" when targetTypes, signatures, and callGraph are all empty', () => {
     const shallow: DesignArtifact = { ...artifact, targetTypes: [], signatures: [], callGraph: [] };
     expect(renderDesignGrounding(shallow)).toBe('');
