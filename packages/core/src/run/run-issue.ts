@@ -44,6 +44,7 @@ import type { AutoFailoverSettings, SizeGateMode } from '../config/index.js';
 import { type EffectiveModelPins, routeForBuildModel } from '../config/repo.js';
 import type { EventKind, StewardTriggeredPayload } from '../events/kinds.js';
 import { detectStuck } from '../steward/detect.js';
+import { runSteward, type RunStewardPorts } from '../steward/run.js';
 import { describeDotnetEnv, dotnetEnvReport } from '../environment/dotnet.js';
 import { ProcessGroupTracker } from '../environment/process-groups.js';
 import type { ModelRouter } from '../router/index.js';
@@ -150,6 +151,9 @@ interface RunReportInfo {
  *  layout, approvals/steering directories, report/artifact destinations) are the caller's
  *  responsibility to wire — runIssue only calls the closures it is handed. */
 export interface RunPorts {
+  /** Stuck-run steward seams (#2124). Used only when request.stewardEnabled is true and detectStuck fires
+   *  on the park; absent → only the steward-triggered event is logged (#2086). */
+  steward?: RunStewardPorts;
   router: ModelRouter;
   /** Shadow classifier model call (#1725). Defaults to classifyPrShadow. */
   classifyPr?: (input: PrShadowInput) => Promise<PrShadowVerdict>;
@@ -316,7 +320,6 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     if (reason === 'timeout') {
       log('stuck', `run exceeded its phase timeout without progressing — ${message}`);
     }
-    await writeReports(reportOutcomeFor(reason), reason, message);
     const outcome: RunOutcome = {
       state: 'parked',
       reason,
@@ -325,6 +328,8 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       reworkRounds,
       ...checkFailure,
     };
+    // The steward runs after the park event and before the reports and the return, so it finishes
+    // before the CLI raises LaneParkError or pauses the lane (#2124).
     if (request.stewardEnabled === true) {
       const stuck = detectStuck(outcome);
       if (stuck) {
@@ -333,8 +338,21 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
           `stuck run picked up for the steward: ${stuck.trigger}${stuck.failureSignature ? ` (signature ${stuck.failureSignature})` : ''}`,
           { stewardTriggered: stuck },
         );
+        if (ports.steward) {
+          await runSteward(
+            {
+              runId,
+              repo: request.repo,
+              issue: { number: request.issue, title: request.work.title, body: request.work.brief },
+              stuck,
+              planPath: request.specPath,
+            },
+            ports.steward,
+          );
+        }
       }
     }
+    await writeReports(reportOutcomeFor(reason), reason, message);
     return outcome;
   };
 
