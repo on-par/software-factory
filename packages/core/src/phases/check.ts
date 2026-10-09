@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import { BaselineCache } from '../checkers/baseline-cache.js';
 import { type BaselineReport, extractFailingTestNames, runBaselineCheckers } from '../checkers/baseline.js';
+import { type FlakeRerun, rerunTestsChecker } from '../checkers/flaky-rerun.js';
 import {
   type CheckerContext,
   probeWorktree,
@@ -64,6 +65,8 @@ export interface CheckPhaseResult {
   /** Set when every round-1 failing checker also fails on the base SHA (#1928): no rework
    *  ran (`reworkRounds` is 0) and the caller releases the issue instead of parking it. */
   environment?: EnvironmentFailure;
+  /** Shadow-mode serial re-run of the failing tests checker on an environment failure (#2301); absent when tests did not fail or the cause is not environment. Does not change the park. */
+  flakeRerun?: FlakeRerun;
 }
 
 export const MAX_REWORK_ROUNDS = 3;
@@ -330,6 +333,8 @@ async function checkPhaseImpl(opts: {
   runBaseline?: typeof runBaselineCheckers;
   /** Injection seam for tests; defaults to runAllCheckers (#2238). */
   runCheckers?: typeof runAllCheckers;
+  /** Injection seam for the flaky re-run command only (#2301); defaults to ctx.runCommand / runVerificationCommand. */
+  runCommand?: CheckerContext['runCommand'];
 }): Promise<CheckPhaseResult> {
   const {
     issue,
@@ -358,6 +363,7 @@ async function checkPhaseImpl(opts: {
     baselineCachePath,
     runBaseline,
     runCheckers,
+    runCommand,
   } = opts;
   const roundLogDir = (round: number): string | undefined =>
     logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, `check-r${round}`);
@@ -459,6 +465,16 @@ async function checkPhaseImpl(opts: {
       'check',
       `environment failure on base ${baseline.baseSha.slice(0, 8)} (${environment.failingChecks.join(', ')}) — skipping rework`,
     );
+    const testsFail = summary.results.find((r) => r.checker === 'tests' && r.result === 'FAIL');
+    let flakeRerun: FlakeRerun | undefined;
+    if (testsFail) {
+      flakeRerun = await rerunTestsChecker({ ...ctx, runCommand: runCommand ?? ctx.runCommand }, testsFail.details);
+      log(
+        'check',
+        `flaky re-run: ${flakeRerun.verdict} (${flakeRerun.mode}, ${flakeRerun.tests.length} tests)` +
+          (flakeRerun.reason ? ` — ${flakeRerun.reason}` : ''),
+      );
+    }
     logFailures(summary);
     return {
       passed: false,
@@ -467,6 +483,7 @@ async function checkPhaseImpl(opts: {
       failureSignature: failureSignature(summary),
       baseline,
       environment,
+      ...(flakeRerun ? { flakeRerun } : {}),
     };
   }
 
