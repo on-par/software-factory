@@ -65,7 +65,7 @@ export interface CheckPhaseResult {
   /** Set when every round-1 failing checker also fails on the base SHA (#1928): no rework
    *  ran (`reworkRounds` is 0) and the caller releases the issue instead of parking it. */
   environment?: EnvironmentFailure;
-  /** Shadow-mode serial re-run of the failing tests checker on an environment failure (#2301); absent when tests did not fail or the cause is not environment. Does not change the park. */
+  /** Serial re-run of the failing tests checker on an environment failure (#2301, #2302). On 'passed', tests counts as PASS in summary and the run continues unless another checker still fails on base; absent when tests did not fail or the cause is not environment. */
   flakeRerun?: FlakeRerun;
 }
 
@@ -264,6 +264,22 @@ export function stuckSignature(summary: CheckSummary, excluded: ReadonlySet<stri
   return failureSignature(target.failures > 0 ? target : summary);
 }
 
+/** The summary with the tests FAIL replaced by a PASS after a passing serial re-run (#2302). */
+export function markTestsFlaky(summary: CheckSummary, rerun: FlakeRerun): CheckSummary {
+  const names = rerun.tests.length > 0 ? rerun.tests.join(', ') : 'full suite';
+  const results = summary.results.map((r) =>
+    r.checker === 'tests' && r.result === 'FAIL'
+      ? { checker: r.checker, result: 'PASS' as const, details: `re-run passed; flaky: ${names}` }
+      : r,
+  );
+  return {
+    ...summary,
+    results,
+    failures: results.filter((r) => r.result === 'FAIL').length,
+    passes: results.filter((r) => r.result === 'PASS').length,
+  };
+}
+
 export async function checkPhase(opts: Parameters<typeof checkPhaseImpl>[0]): Promise<CheckPhaseResult> {
   return withLifecycle(
     {
@@ -450,8 +466,30 @@ async function checkPhaseImpl(opts: {
   }
 
   // Decided before the rework loop from the single pre-loop baseline (#1927).
-  const environmentCause = isEnvironmentFailure(summary, baseline);
+  let environmentCause = isEnvironmentFailure(summary, baseline);
   if (environmentCause) log('check', 'every failing checker also fails on base — rework cause=environment');
+
+  // Serial re-run (#2301): a tests failure that passes alone is flaky; act on it (#2302).
+  let flakeRerun: FlakeRerun | undefined;
+  if (environmentCause) {
+    const testsFail = summary.results.find((r) => r.checker === 'tests' && r.result === 'FAIL');
+    if (testsFail) {
+      flakeRerun = await rerunTestsChecker({ ...ctx, runCommand: runCommand ?? ctx.runCommand }, testsFail.details);
+      log(
+        'check',
+        `flaky re-run: ${flakeRerun.verdict} (${flakeRerun.mode}, ${flakeRerun.tests.length} tests)` +
+          (flakeRerun.reason ? ` — ${flakeRerun.reason}` : ''),
+      );
+      if (flakeRerun.verdict === 'passed') {
+        summary = markTestsFlaky(summary, flakeRerun);
+        environmentCause = isEnvironmentFailure(summary, baseline);
+        log(
+          'check',
+          `tests passed on serial re-run — flaky, treating tests as PASS${environmentCause ? '' : '; continuing'}`,
+        );
+      }
+    }
+  }
 
   // Environment cause (#1928): the lane cannot fix a broken base, so skip rework and the
   // held check; the caller releases the issue and pauses the lane.
@@ -465,16 +503,6 @@ async function checkPhaseImpl(opts: {
       'check',
       `environment failure on base ${baseline.baseSha.slice(0, 8)} (${environment.failingChecks.join(', ')}) — skipping rework`,
     );
-    const testsFail = summary.results.find((r) => r.checker === 'tests' && r.result === 'FAIL');
-    let flakeRerun: FlakeRerun | undefined;
-    if (testsFail) {
-      flakeRerun = await rerunTestsChecker({ ...ctx, runCommand: runCommand ?? ctx.runCommand }, testsFail.details);
-      log(
-        'check',
-        `flaky re-run: ${flakeRerun.verdict} (${flakeRerun.mode}, ${flakeRerun.tests.length} tests)` +
-          (flakeRerun.reason ? ` — ${flakeRerun.reason}` : ''),
-      );
-    }
     logFailures(summary);
     return {
       passed: false,
@@ -631,6 +659,7 @@ async function checkPhaseImpl(opts: {
     stuck,
     failureSignature: summary.failures > 0 ? stuckSignature(summary, baseFailing) : undefined,
     ...(baseline ? { baseline } : {}),
+    ...(flakeRerun ? { flakeRerun } : {}),
   };
 }
 

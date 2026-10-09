@@ -210,6 +210,26 @@ describe('utils', () => {
     expect(JSON.parse(lines[1])).not.toHaveProperty('stewardTriggered');
   });
 
+  it('writes flakyTests onto the line only when passed (#2302)', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+    const flakyTests = {
+      sha: 'abc1234567',
+      checker: 'tests' as const,
+      mode: 'targeted' as const,
+      tests: ['adds'],
+      verdict: 'passed' as const,
+      logPath: '/l/flaky-rerun-tests.log',
+    };
+
+    logEvent(eventsFile, 'flaky_tests', 7, 'flaky', { flakyTests });
+    logEvent(eventsFile, 'flaky_tests', 7, 'again');
+
+    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
+    expect(JSON.parse(lines[0])).toMatchObject({ type: 'flaky_tests', issue: '7', flakyTests });
+    expect(JSON.parse(lines[1])).not.toHaveProperty('flakyTests');
+  });
+
   it('logs a structured failoverReason when extra is provided', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-events-'));
     const eventsFile = join(tmpDir, 'events.ndjson');

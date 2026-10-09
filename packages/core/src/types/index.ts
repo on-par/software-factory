@@ -1,6 +1,6 @@
 // src/types/index.ts — Core type definitions for the Software Factory
 
-import type { EventKind, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
+import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
 
 // ---------- Models ----------
@@ -296,6 +296,8 @@ export interface FactoryEvent {
   lanePaused?: LanePausedPayload;
   /** Trigger details on a steward-triggered event (#2086). */
   stewardTriggered?: StewardTriggeredPayload;
+  /** Re-run verdict on a flaky_tests event (#2302). */
+  flakyTests?: FlakyTestsPayload;
   /** CHECK failure signature behind a park event (#2083). */
   checkFailure?: CheckFailureInfo;
   model?: string;

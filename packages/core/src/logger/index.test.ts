@@ -139,6 +139,26 @@ describe('createLogger', () => {
     expect(without).not.toHaveProperty('stewardTriggered');
   });
 
+  it('includes flakyTests only when passed as extra (#2302)', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
+    const eventsFile = join(tmpDir, 'events.ndjson');
+    const logger = createLogger(eventsFile, {}, { out: { write: () => {} } });
+    const flakyTests = {
+      sha: 'abc',
+      checker: 'tests' as const,
+      mode: 'full' as const,
+      tests: [],
+      verdict: 'passed' as const,
+    };
+
+    logger.info('flaky_tests', 'flaky', { flakyTests });
+    logger.info('flaky_tests', 'again');
+
+    const [withPayload, without] = readEvents(eventsFile);
+    expect(withPayload.flakyTests).toEqual(flakyTests);
+    expect(without).not.toHaveProperty('flakyTests');
+  });
+
   it('includes checkFailure only when passed as extra (#2083)', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
     const eventsFile = join(tmpDir, 'events.ndjson');
