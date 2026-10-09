@@ -509,7 +509,22 @@ beforeEach(() => {
     'FACTORY_FAILOVER_MODEL',
     'GITHUB_TOKEN',
     'GH_TOKEN',
+    'TMUX',
+    'ANTHROPIC_API_KEY',
+    'CLAUDE_CONFIG_DIR',
+    'CLAUDE_SECURESTORAGE_CONFIG_DIR',
   ].forEach((k) => trackEnv(k));
+  // `factory run` and `factory supervise` probe the macOS login keychain before
+  // claiming work, and abort when the probe fails inside tmux (#1014). The probe's
+  // outcome depends on these ambient variables, so a suite launched from a tmux
+  // pane on the Mini (the factory's own lanes, or a developer shell) aborted every
+  // run/supervise test while the same suite passed on Linux CI and outside tmux.
+  // The keychain preflight tests set them explicitly; everything else must not
+  // inherit them from the host.
+  delete process.env.TMUX;
+  delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.CLAUDE_CONFIG_DIR;
+  delete process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
   delete process.env.FACTORY_LOCAL_ONLY;
   delete process.env.FACTORY_MERGE;
   delete process.env.FACTORY_MERGE_ADMIN;
