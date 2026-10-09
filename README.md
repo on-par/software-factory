@@ -125,6 +125,7 @@ factory check <N> [--json]          Read-only pre-flight: missing fields, and wh
 
 # Observe
 factory status                      Show active runs, the GitHub queue, provider health, and recent events
+factory status --json               One JSON object: STOP flag, provider breaker, active claims (--kpis ignored)
 factory logs [--follow]             Print pipeline events
 factory cost                        Show recorded model spend by model
 factory usage                       Report 5-hour subscription usage
