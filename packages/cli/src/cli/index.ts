@@ -62,6 +62,7 @@ import {
   aggregateCosts,
   appendKpiHistoryLine,
   applyRepoConfig,
+  createLogger,
   buildPhase,
   checkPhase,
   clearProxyState,
@@ -297,6 +298,7 @@ import { buildCostJson } from './cost-json.js';
 import { buildQueueListJson } from './queue-list.js';
 import { buildRunsJson, parseRunsLimit } from './runs.js';
 import { buildStatusJson } from './status-json.js';
+import { buildStopResumeJson } from './stop-resume-json.js';
 import { buildUsageJson } from './usage-json.js';
 import { parseResetIssues, runReset } from './reset.js';
 import {
@@ -5899,6 +5901,54 @@ export interface CliDeps {
   writeLocalRunReport?: typeof writeLocalRunReport;
 }
 
+/** Appends one event to the events log without echoing it to stdout (stop/resume --json must print only JSON). */
+function logEventQuietly(eventsFile: string, type: EventKind, msg: string): void {
+  createLogger(eventsFile, { issue: '-' }, { out: { write: () => true } }).warn(type, msg);
+}
+
+export async function cmdStop(opts: { json?: boolean } = {}): Promise<void> {
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+  const repo = opts.json ? await getGitHubRepo() : undefined;
+  const before = existsSync(paths.stop);
+  ensureDir(paths.state);
+  writeFileSync(paths.stop, '');
+  const after = existsSync(paths.stop);
+  logEventQuietly(
+    paths.events,
+    'stop-file-set',
+    before ? 'factory stop: STOP already set (no-op)' : 'factory stop: STOP set — lanes halt between issues',
+  );
+  if (opts.json) {
+    console.log(JSON.stringify(buildStopResumeJson({ action: 'stop', repo: repo!, before, after })));
+    return;
+  }
+  console.log('STOP set — lanes halt between issues');
+}
+
+export async function cmdResume(opts: { json?: boolean } = {}): Promise<void> {
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+  const repo = opts.json ? await getGitHubRepo() : undefined;
+  const before = existsSync(paths.stop);
+  if (before) {
+    await import('node:fs/promises').then((fs) => fs.unlink(paths.stop));
+  }
+  const after = existsSync(paths.stop);
+  if (existsSync(paths.root)) {
+    logEventQuietly(
+      paths.events,
+      'stop-file-cleared',
+      before ? 'factory resume: STOP cleared' : 'factory resume: STOP was not set (no-op)',
+    );
+  }
+  if (opts.json) {
+    console.log(JSON.stringify(buildStopResumeJson({ action: 'resume', repo: repo!, before, after })));
+    return;
+  }
+  console.log('STOP cleared');
+}
+
 // ---------- main ----------
 
 export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
@@ -6465,25 +6515,14 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
   program
     .command('stop')
     .description('Tell running lanes to halt after their current issue')
-    .action(async () => {
-      const repoRoot = await getRepoRoot();
-      const paths = getFactoryPaths(repoRoot);
-      ensureDir(paths.state);
-      writeFileSync(paths.stop, '');
-      console.log('STOP set — lanes halt between issues');
-    });
+    .option('--json', 'Print one JSON object (schemaVersion 1): action, repo, stopFlag before/after')
+    .action((opts: { json?: boolean }) => cmdStop(opts));
 
   program
     .command('resume')
     .description('Clear a stop so lanes pick up new issues again')
-    .action(async () => {
-      const repoRoot = await getRepoRoot();
-      const paths = getFactoryPaths(repoRoot);
-      if (existsSync(paths.stop)) {
-        await import('node:fs/promises').then((fs) => fs.unlink(paths.stop));
-      }
-      console.log('STOP cleared');
-    });
+    .option('--json', 'Print one JSON object (schemaVersion 1): action, repo, stopFlag before/after')
+    .action((opts: { json?: boolean }) => cmdResume(opts));
 
   applyHelpGroups(program);
 
