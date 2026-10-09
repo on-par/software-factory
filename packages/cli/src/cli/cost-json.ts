@@ -42,8 +42,7 @@ export function buildCostJson(entries: CostEntry[], issue?: string): CostJson {
     { tasks: number; inputTokens: number; outputTokens: number; sum: number; priced: number; unpriced: number }
   >();
   for (const e of filtered) {
-    const unpriced = e.unpriced === true || e.cost === null || e.cost === undefined;
-    const cost = unpriced ? null : (e.cost as number);
+    const cost = e.unpriced === true || e.cost == null ? null : e.cost;
     const inputTokens = e.inputTokens ?? 0;
     const outputTokens = e.outputTokens ?? 0;
     rows.push({
