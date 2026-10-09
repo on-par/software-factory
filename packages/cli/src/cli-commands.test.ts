@@ -955,6 +955,59 @@ describe('cli commands (via main dispatch)', () => {
       expect(logged()).toContain('no cost data yet');
     });
 
+    it('--json prints one JSON line with unpriced rows as null', async () => {
+      h.costs = [
+        { ts: 't', issue: '296', task: 'plan', model: 'a', inputTokens: 1, outputTokens: 2, cost: 1 },
+        { ts: 't', issue: '297', task: 'build', model: 'b', cost: null, unpriced: true },
+      ];
+      const res = await runMain('cost', '--json');
+      expect(res.exited).toBe(false);
+      const out = logged().trim();
+      expect(out.split('\n')).toHaveLength(1);
+      const json = JSON.parse(out);
+      expect(json.schemaVersion).toBe(1);
+      expect(json.total).toEqual({ cost: 1, unpricedCount: 1 });
+      expect(json.rows[1].cost).toBeNull();
+    });
+
+    it('--json --issue keeps only that issue', async () => {
+      h.costs = [
+        { issue: '296', task: 'plan', model: 'a', cost: 1 },
+        { issue: '297', task: 'plan', model: 'b', cost: 2 },
+      ];
+      await runMain('cost', '--json', '--issue', '296');
+      const json = JSON.parse(logged());
+      expect(json.rows).toHaveLength(1);
+      expect(json.rows[0].issue).toBe('296');
+      expect(json.total).toEqual({ cost: 1, unpricedCount: 0 });
+    });
+
+    it('--json with no costs prints empty JSON, not the text message', async () => {
+      h.costs = [];
+      await runMain('cost', '--json');
+      expect(JSON.parse(logged())).toEqual({
+        schemaVersion: 1,
+        rows: [],
+        perModel: [],
+        total: { cost: 0, unpricedCount: 0 },
+      });
+    });
+
+    it('--json exits 1 when reading costs throws', async () => {
+      const res = await runMainWith(
+        {
+          readCosts: () => {
+            throw new Error('boom');
+          },
+        },
+        'cost',
+        '--json',
+      );
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('factory: cost failed');
+      expect(logged()).toBe('');
+    });
+
     it('uses a readCosts override passed through main deps', async () => {
       h.costs = [{ model: 'shared', cost: 1 }];
       await runMainWith(
