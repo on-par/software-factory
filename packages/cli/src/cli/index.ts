@@ -3,7 +3,16 @@ import { fileURLToPath } from 'node:url';
 
 import { exec as execCb, execSync, type StdioOptions } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import { arch, hostname as osHostname, release, platform, userInfo } from 'node:os';
 import { basename, dirname, relative, resolve } from 'node:path';
@@ -62,7 +71,6 @@ import {
   aggregateCosts,
   appendKpiHistoryLine,
   applyRepoConfig,
-  createLogger,
   buildPhase,
   checkPhase,
   clearProxyState,
@@ -5985,14 +5993,35 @@ function logEventQuietly(eventsFile: string, type: EventKind, msg: string): void
   createLogger(eventsFile, { issue: '-' }, { out: { write: () => true } }).warn(type, msg);
 }
 
+/** Creates the STOP file in one exclusive open (no check-then-write race). Returns false when it already existed. */
+function createStopFile(stopFile: string): boolean {
+  try {
+    writeFileSync(stopFile, '', { flag: 'wx' });
+    return true;
+  } catch (err: any) {
+    if (err?.code === 'EEXIST') return false;
+    throw err;
+  }
+}
+
+/** Removes the STOP file in one unlink (no check-then-unlink race). Returns false when it was not there. */
+function removeStopFile(stopFile: string): boolean {
+  try {
+    unlinkSync(stopFile);
+    return true;
+  } catch (err: any) {
+    if (err?.code === 'ENOENT') return false;
+    throw err;
+  }
+}
+
 export async function cmdStop(opts: { json?: boolean } = {}): Promise<void> {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const json = opts.json ? { repo: await getGitHubRepo() } : undefined;
-  const before = existsSync(paths.stop);
   ensureDir(paths.state);
-  writeFileSync(paths.stop, '');
-  const after = existsSync(paths.stop);
+  const before = !createStopFile(paths.stop);
+  const after = true;
   logEventQuietly(
     paths.events,
     'stop-file-set',
@@ -6009,11 +6038,8 @@ export async function cmdResume(opts: { json?: boolean } = {}): Promise<void> {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const json = opts.json ? { repo: await getGitHubRepo() } : undefined;
-  const before = existsSync(paths.stop);
-  if (before) {
-    await import('node:fs/promises').then((fs) => fs.unlink(paths.stop));
-  }
-  const after = existsSync(paths.stop);
+  const before = removeStopFile(paths.stop);
+  const after = false;
   if (existsSync(paths.root)) {
     logEventQuietly(
       paths.events,

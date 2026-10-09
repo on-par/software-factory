@@ -3420,6 +3420,19 @@ bash scripts/verify.sh
       expect(JSON.parse(logged())).toMatchObject({ action: 'resume', stopFlag: { before: true, after: false } });
     });
 
+    it('stop leaves an existing STOP file untouched (exclusive create, no rewrite)', async () => {
+      writeFileSync(paths().stop, 'set by lane');
+      await runMain('stop', '--json');
+      expect(readFileSync(paths().stop, 'utf-8')).toBe('set by lane');
+      expect(JSON.parse(logged())).toMatchObject({ stopFlag: { before: true, after: true } });
+    });
+
+    it('resume surfaces unlink errors other than a missing STOP file', async () => {
+      mkdirSync(join(paths().stop, 'nested'), { recursive: true });
+      await expect(runMain('resume', '--json')).rejects.toMatchObject({ code: expect.stringMatching(/^E/) });
+      expect(existsSync(paths().stop)).toBe(true);
+    });
+
     it('resume --json is ok when STOP was not set', async () => {
       await runMain('resume', '--json');
       expect(JSON.parse(logged())).toMatchObject({ ok: true, stopFlag: { before: false, after: false } });
