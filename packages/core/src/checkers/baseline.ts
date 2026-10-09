@@ -74,6 +74,8 @@ export function extractFailingTestNames(details: string): string[] {
     .split(/\r?\n/)
     .flatMap(
       (line) =>
+        // pytest short summary: "FAILED tests/x.py::test_a - AssertionError" → the node id
+        line.match(/\bFAILED\s+(\S+::\S+)/)?.[1] ??
         line.match(/(?:\bFAIL|[×✕●])\s+(.+)/)?.[1] ??
         line.match(/\bnot ok \d+\s*-\s*(.+)/i)?.[1] ??
         // .NET Microsoft.Testing.Platform: "failed Namespace.Class.Test (46ms)"

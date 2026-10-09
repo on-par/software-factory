@@ -86,6 +86,14 @@ describe('extractFailingTestNames', () => {
     expect(extractFailingTestNames(details)).toEqual(['a.test.ts > one', 'two', 'three', 'Ns.Class.Test']);
     expect(extractFailingTestNames('npm ERR! something')).toEqual([]);
   });
+
+  it('parses pytest FAILED node ids, with or without the checker-label prefix', () => {
+    const details = [
+      'pytest failed: FAILED tests/x.py::test_a - AssertionError',
+      'FAILED tests/y.py::test_b[1-2] - boom',
+    ].join('\n');
+    expect(extractFailingTestNames(details)).toEqual(['tests/x.py::test_a', 'tests/y.py::test_b[1-2]']);
+  });
 });
 
 describe('compareBaseline', () => {
