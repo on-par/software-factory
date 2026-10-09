@@ -42,6 +42,7 @@ import type {
   PrSource,
   LanePausedPayload,
   StewardTriggeredPayload,
+  FlakyTestsPayload,
   ParkReason,
   QueueDiagnostic,
   ReadinessInfo,
@@ -2238,6 +2239,7 @@ export async function shipIssue(
         prClassification?: PrClassificationRecord;
         checkFailure?: CheckFailureInfo;
         stewardTriggered?: StewardTriggeredPayload;
+        flakyTests?: FlakyTestsPayload;
       },
     ) => {
       if (TERMINAL_EVENT_KINDS.has(type)) terminalMessage = msg;

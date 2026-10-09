@@ -22,6 +22,7 @@ import {
   excludeBaseFailing,
   environmentLogPaths,
   isEnvironmentFailure,
+  markTestsFlaky,
   LENS_REVIEW_CHECKER,
   lensShowstopperRefs,
   remainingShowstoppers,
@@ -2405,7 +2406,7 @@ describe('checkPhase tests timeout (#2299)', () => {
   });
 });
 
-describe('flaky re-run in shadow mode (#2301)', () => {
+describe('flaky re-run verdict (#2301, #2302)', () => {
   const dirs: string[] = [];
   afterEach(async () => {
     await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
@@ -2463,24 +2464,40 @@ describe('flaky re-run in shadow mode (#2301)', () => {
     return { result, logs };
   };
 
-  it('logs a passing re-run and still parks as environment', async () => {
+  it('continues when the only base-red checker is flaky', async () => {
     const fake = vi.fn(async (_argv: readonly string[]) => okResult);
     const { result, logs } = await run(['tests'], 'fails-on-base', fake);
     expect(fake).toHaveBeenCalledTimes(1);
     expect(fake.mock.calls[0]?.[0]).toEqual(['npm', 'test', '--', '-t', 'adds', '--no-file-parallelism']);
     expect((fake.mock.calls[0] as unknown[])[1]).toMatchObject({ timeoutMs: 600_000 });
     expect(result.flakeRerun?.verdict).toBe('passed');
-    expect(result.environment).toBeDefined();
-    expect(result.passed).toBe(false);
+    expect(result.environment).toBeUndefined();
+    expect(result.passed).toBe(true);
+    expect(result.summary.failures).toBe(0);
+    expect(result.summary.results.find((r) => r.checker === 'tests')).toMatchObject({
+      result: 'PASS',
+      details: 're-run passed; flaky: adds',
+    });
     expect(result.reworkRounds).toBe(0);
     expect(logs).toContain('flaky re-run: passed (targeted, 1 tests)');
+  });
+
+  it('keeps the environment release without tests when lint is also base-red', async () => {
+    const fake = vi.fn(async (_argv: readonly string[]) => okResult);
+    const { result } = await run(['tests', 'lint'], 'fails-on-base', fake);
+    expect(fake).toHaveBeenCalledTimes(1);
+    expect(result.passed).toBe(false);
+    expect(result.environment?.failingChecks).toEqual(['lint']);
+    expect(result.failureSignature).not.toContain('tests:');
+    expect(result.flakeRerun?.verdict).toBe('passed');
   });
 
   it('reports reproduced', async () => {
     const fake = vi.fn(async () => ({ ...okResult, exitCode: 1, ok: false }));
     const { result } = await run(['tests'], 'fails-on-base', fake);
     expect(result.flakeRerun?.verdict).toBe('reproduced');
-    expect(result.environment).toBeDefined();
+    expect(result.environment?.failingChecks).toEqual(['tests']);
+    expect(result.summary.results[0]?.result).toBe('FAIL');
   });
 
   it('reports not-run when the command throws', async () => {
@@ -2489,7 +2506,8 @@ describe('flaky re-run in shadow mode (#2301)', () => {
     });
     const { result, logs } = await run(['tests'], 'fails-on-base', fake);
     expect(result.flakeRerun).toMatchObject({ verdict: 'not-run', reason: expect.stringContaining('spawn ENOENT') });
-    expect(result.environment).toBeDefined();
+    expect(result.environment?.failingChecks).toEqual(['tests']);
+    expect(result.summary.results[0]?.result).toBe('FAIL');
     expect(logs.some((l) => l.startsWith('flaky re-run: not-run') && l.includes('spawn ENOENT'))).toBe(true);
   });
 
@@ -2506,5 +2524,36 @@ describe('flaky re-run in shadow mode (#2301)', () => {
     const { result } = await run(['tests'], 'clean-on-base', fake, { maxReworkRounds: 0 });
     expect(fake).not.toHaveBeenCalled();
     expect(result.flakeRerun).toBeUndefined();
+  });
+});
+
+describe('markTestsFlaky (#2302)', () => {
+  const base: CheckSummary = {
+    results: [
+      { checker: 'tests', result: 'FAIL', details: 'x' },
+      { checker: 'lint', result: 'FAIL', details: 'y' },
+      { checker: 'types', result: 'PASS', details: 'z' },
+    ],
+    failures: 2,
+    passes: 1,
+    skips: 3,
+    total: 6,
+  };
+
+  it('joins targeted names, recomputes counts and preserves other fields', () => {
+    const out = markTestsFlaky(base, { verdict: 'passed', mode: 'targeted', tests: ['a', 'b'] });
+    expect(out.results[0]).toEqual({ checker: 'tests', result: 'PASS', details: 're-run passed; flaky: a, b' });
+    expect(out.results[1]).toBe(base.results[1]);
+    expect(out.failures).toBe(1);
+    expect(out.passes).toBe(2);
+    expect(out.skips).toBe(3);
+    expect(out.total).toBe(6);
+  });
+
+  it('falls back to full suite and leaves a non-FAIL tests result alone', () => {
+    const out = markTestsFlaky(base, { verdict: 'passed', mode: 'full', tests: [] });
+    expect(out.results[0]?.details).toBe('re-run passed; flaky: full suite');
+    const passing: CheckSummary = { ...base, results: [{ checker: 'tests', result: 'PASS', details: 'ok' }] };
+    expect(markTestsFlaky(passing, { verdict: 'passed', mode: 'full', tests: [] }).results[0]?.details).toBe('ok');
   });
 });

@@ -6,7 +6,7 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-import type { EventKind, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
+import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
 import type {
   CheckFailureInfo,
   EvidencePack,
@@ -38,6 +38,7 @@ export interface LogExtra {
   queueReprioritization?: QueueReprioritizationRecord;
   lanePaused?: LanePausedPayload;
   stewardTriggered?: StewardTriggeredPayload;
+  flakyTests?: FlakyTestsPayload;
   checkFailure?: CheckFailureInfo;
   actor?: string;
   model?: string;
@@ -112,6 +113,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.queueReprioritization !== undefined ? { queueReprioritization: extra.queueReprioritization } : {}),
       ...(extra?.lanePaused ? { lanePaused: extra.lanePaused } : {}),
       ...(extra?.stewardTriggered ? { stewardTriggered: extra.stewardTriggered } : {}),
+      ...(extra?.flakyTests ? { flakyTests: extra.flakyTests } : {}),
       ...(extra?.checkFailure ? { checkFailure: extra.checkFailure } : {}),
       ...(extra?.model ? { model: extra.model } : {}),
       ...(extra?.tokens ? { tokens: extra.tokens } : {}),

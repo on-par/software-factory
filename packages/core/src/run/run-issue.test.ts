@@ -1608,3 +1608,71 @@ describe('runIssue — environment release (#1928)', () => {
     expect(kinds(log)).toContain('environment_warning');
   });
 });
+
+describe('runIssue — flaky_tests event (#2302)', () => {
+  const ENV = { baseSha: 'abc1234567890def', failingChecks: ['tests'], logPaths: [] as string[] };
+  const baseline = { baseSha: 'abc1234567', checkers: [] };
+  const arrange = (check: CheckPhaseResult) => {
+    vi.mocked(checkPhase).mockResolvedValue(check);
+    const log = vi.fn();
+    const ports = basePorts({
+      events: () => log,
+      octokit: { rest: { issues: { createComment: vi.fn().mockResolvedValue({}) } } } as never,
+    });
+    return { log, run: () => runIssue(baseRequest(), basePolicy(), ports) };
+  };
+  const flakyCalls = (log: ReturnType<typeof vi.fn>) => log.mock.calls.filter((c) => c[0] === 'flaky_tests');
+  const envResult = (flakeRerun?: CheckPhaseResult['flakeRerun'], withBaseline = true): CheckPhaseResult => ({
+    passed: false,
+    summary: CHECK_SUMMARY,
+    reworkRounds: 0,
+    environment: ENV,
+    failureSignature: 'sig',
+    ...(withBaseline ? { baseline } : {}),
+    ...(flakeRerun ? { flakeRerun } : {}),
+  });
+
+  it('records a passed verdict and continues', async () => {
+    const { log, run } = arrange({
+      ...CHECK_OK,
+      baseline,
+      flakeRerun: { verdict: 'passed', mode: 'targeted', tests: ['adds'], logPath: '/l/flaky-rerun-tests.log' },
+    });
+    const outcome = await run();
+    expect(flakyCalls(log)).toHaveLength(1);
+    expect(flakyCalls(log)[0]?.[2]).toEqual({
+      flakyTests: {
+        sha: 'abc1234567',
+        checker: 'tests',
+        mode: 'targeted',
+        tests: ['adds'],
+        verdict: 'passed',
+        logPath: '/l/flaky-rerun-tests.log',
+      },
+    });
+    expect(outcome.state).not.toBe('parked');
+    expect(outcome.state).not.toBe('released');
+  });
+
+  it('records a reproduced verdict and still releases', async () => {
+    const { log, run } = arrange(envResult({ verdict: 'reproduced', mode: 'full', tests: [] }));
+    const outcome = await run();
+    expect(outcome).toMatchObject({ state: 'released', reason: 'environment' });
+    expect(flakyCalls(log)).toHaveLength(1);
+    const payload = flakyCalls(log)[0]?.[2].flakyTests;
+    expect(payload).toMatchObject({ verdict: 'reproduced', mode: 'full', tests: [] });
+    expect(payload).not.toHaveProperty('logPath');
+  });
+
+  it('records nothing for not-run', async () => {
+    const { log, run } = arrange(envResult({ verdict: 'not-run', mode: 'full', tests: [] }));
+    expect(await run()).toMatchObject({ state: 'released', reason: 'environment' });
+    expect(flakyCalls(log)).toHaveLength(0);
+  });
+
+  it('records nothing without a baseline', async () => {
+    const { log, run } = arrange(envResult({ verdict: 'passed', mode: 'full', tests: [] }, false));
+    await run();
+    expect(flakyCalls(log)).toHaveLength(0);
+  });
+});

@@ -30,6 +30,10 @@ describe('EVENT_TRAITS', () => {
     }
   });
 
+  it('classifies flaky_tests as non-park evidence (#2302)', () => {
+    expect(EVENT_TRAITS.flaky_tests).toEqual({ severity: 'info', isPark: false, isTerminal: false });
+  });
+
   it('classifies stop-file-set as a non-terminal, non-park warning', () => {
     expect(EVENT_TRAITS['stop-file-set']).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
   });

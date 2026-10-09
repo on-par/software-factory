@@ -42,7 +42,7 @@ import { captureDiffBase } from '../checkers/design-smells.js';
 import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings, SizeGateMode } from '../config/index.js';
 import { type EffectiveModelPins, routeForBuildModel } from '../config/repo.js';
-import type { EventKind, StewardTriggeredPayload } from '../events/kinds.js';
+import type { EventKind, FlakyTestsPayload, StewardTriggeredPayload } from '../events/kinds.js';
 import { detectStuck } from '../steward/detect.js';
 import { runSteward, type RunStewardPorts } from '../steward/run.js';
 import { describeDotnetEnv, dotnetEnvReport } from '../environment/dotnet.js';
@@ -132,6 +132,7 @@ type LogFn = (
     prClassification?: PrClassificationRecord;
     checkFailure?: CheckFailureInfo;
     stewardTriggered?: StewardTriggeredPayload;
+    flakyTests?: FlakyTestsPayload;
   },
 ) => void;
 
@@ -670,6 +671,23 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     });
     checkSummary = check.summary;
     reworkRounds = check.reworkRounds;
+    const flake = check.flakeRerun;
+    if (flake && flake.verdict !== 'not-run' && check.baseline) {
+      log(
+        'flaky_tests',
+        `tests re-run ${flake.verdict} on base ${check.baseline.baseSha.slice(0, 8)} (${flake.mode}${flake.tests.length > 0 ? `: ${flake.tests.join(', ')}` : ''})`,
+        {
+          flakyTests: {
+            sha: check.baseline.baseSha,
+            checker: 'tests',
+            mode: flake.mode,
+            tests: flake.tests,
+            verdict: flake.verdict,
+            ...(flake.logPath !== undefined ? { logPath: flake.logPath } : {}),
+          },
+        },
+      );
+    }
     const checkBudget = await assertBudget('CHECK');
     if (checkBudget) return checkBudget;
     if (!check.passed) {

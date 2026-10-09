@@ -68,6 +68,7 @@ export type EventKind =
   | 'fail'
   | 'failover'
   | 'fast_path'
+  | 'flaky_tests'
   | 'github_api_deprecated'
   | 'held'
   | 'human-abandoned'
@@ -220,6 +221,19 @@ export interface StewardTriggeredPayload {
   failureSignature?: string;
 }
 
+/** Payload of a `flaky_tests` event (#2302): CHECK's serial re-run of the base-red tests checker. */
+export interface FlakyTestsPayload {
+  /** Base SHA the tests checker also failed on. */
+  sha: string;
+  checker: 'tests';
+  mode: 'targeted' | 'full';
+  /** Re-run test names; [] for a full re-run. */
+  tests: string[];
+  verdict: 'passed' | 'reproduced';
+  /** Full-output log of the re-run, when written. */
+  logPath?: string;
+}
+
 /** Every existing `EventKind`, classified once. New kinds must be added here —
  *  omitting one is a compile error, which is the point (#663). */
 export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
@@ -281,6 +295,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   fail: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   failover: { severity: 'info', isPark: false, isTerminal: false },
   fast_path: { severity: 'info', isPark: false, isTerminal: false },
+  // CHECK's serial re-run verdict for a base-red tests checker (#2302); evidence only, not a park.
+  flaky_tests: { severity: 'info', isPark: false, isTerminal: false },
   // A GitHub REST call answered with a Deprecation header (#2218); logged once per route per run.
   github_api_deprecated: { severity: 'warn', isPark: false, isTerminal: false },
   // A lane parked on the exact same checker-failure signature it parked on in
