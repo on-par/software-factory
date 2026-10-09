@@ -296,6 +296,7 @@ import { runQueueClear } from './queue-clear.js';
 import { buildCostJson } from './cost-json.js';
 import { buildQueueListJson } from './queue-list.js';
 import { buildRunsJson, parseRunsLimit } from './runs.js';
+import { buildUsageJson } from './usage-json.js';
 import { parseResetIssues, runReset } from './reset.js';
 import {
   cmdDaemonLogs,
@@ -1563,6 +1564,7 @@ export function usageWatchSourceLabel(source: WatchdogPolicySource, watch: boole
 
 export async function cmdUsage(
   deps: Pick<CliDeps, ShellOpKey | 'fetchSubscriptionUsage' | 'estimateTrailingSpend' | 'formatUsageReport'> = {},
+  opts: { json?: boolean } = {},
 ) {
   const ops = resolveCoreOps(deps);
   const repoRoot = await getRepoRoot(resolveShellOps(deps));
@@ -1571,6 +1573,19 @@ export async function cmdUsage(
     knobs = resolveUsageKnobs(process.env, configLoaders.loadRepoConfig(repoRoot));
   } catch (err: any) {
     throw new CliExitError(`factory: ${err.message}`, 2);
+  }
+
+  if (opts.json) {
+    const subscription = await ops.fetchSubscriptionUsage();
+    let estimate: number | null;
+    try {
+      const spend = ops.estimateTrailingSpend();
+      estimate = Number.isFinite(spend) ? spend : null;
+    } catch {
+      estimate = null;
+    }
+    console.log(JSON.stringify(buildUsageJson(subscription, estimate, knobs.cap)));
+    return;
   }
 
   const subscriptionPromise = ops.fetchSubscriptionUsage();
@@ -5943,7 +5958,8 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
   program
     .command('usage')
     .description('Report 5-hour subscription usage (falls back to a list-price estimate)')
-    .action(() => cmdUsage());
+    .option('--json', 'Print one JSON object (schemaVersion 1) instead of text')
+    .action((opts: { json?: boolean }) => cmdUsage({}, opts));
 
   program
     .command('status')
