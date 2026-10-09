@@ -1187,6 +1187,66 @@ bash scripts/verify.sh
   });
 
   describe('status', () => {
+    describe('--json', () => {
+      it('reports stop:true and nothing but JSON on stdout', async () => {
+        writeFileSync(paths().stop, '');
+        await runMain('status', '--json');
+        const out = logged();
+        expect(out).not.toContain('== Active ==');
+        const json = JSON.parse(out);
+        expect(json.schemaVersion).toBe(1);
+        expect(json.stop).toBe(true);
+      });
+
+      it('lists a fresh active claim', async () => {
+        writeFileSync(paths().queue, 'app 1\n');
+        await FactoryCore.writePhaseSnapshot(FactoryCore.phaseSnapshotFile(paths().runs, 1), {
+          issue: 1,
+          phase: 'build',
+          updatedAt: new Date().toISOString(),
+          lastActivityAt: new Date().toISOString(),
+        });
+        await runMain('status', '--json');
+        const json = JSON.parse(logged());
+        expect(json.active).toHaveLength(1);
+        expect(json.active[0]).toMatchObject({ lane: 'app', issue: 1, phase: 'build' });
+        expect(typeof json.active[0].ageSec).toBe('number');
+      });
+
+      it('reports an open provider breaker', async () => {
+        writeFileSync(
+          paths().breaker,
+          JSON.stringify({
+            version: 1,
+            providers: {
+              openai: { reason: 'usage_cap', openedAt: new Date().toISOString(), cooldownMs: 1_800_000 },
+            },
+          }),
+        );
+        await runMain('status', '--json');
+        const json = JSON.parse(logged());
+        expect(json.breaker.open).toBe(true);
+        expect(json.breaker.providers[0].provider).toBe('openai');
+      });
+
+      it('ignores --kpis', async () => {
+        await runMain('status', '--json');
+        const plain = logged();
+        await runMain('status', '--json', '--kpis');
+        const both = logged().slice(plain.length);
+        expect(both).not.toContain('Effective config');
+        expect(JSON.parse(both)).toEqual(JSON.parse(plain));
+      });
+
+      it('exits 2 with an error on stderr when .factory is missing', async () => {
+        rmSync(paths().root, { recursive: true, force: true });
+        const result = await runMain('status', '--json');
+        expect(result).toEqual({ exited: true, code: 2 });
+        expect(errored()).toContain('factory not initialized');
+        expect(logged()).toBe('');
+      });
+    });
+
     it('prints product, models, queue, events, and STOP state', async () => {
       writeFileSync(paths().product, 'alpha\n');
       writeFileSync(paths().queue, '# comment\napp 1\napp 2\n');
