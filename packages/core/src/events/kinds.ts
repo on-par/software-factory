@@ -79,6 +79,7 @@ export type EventKind =
   | 'ingest_file_overlap_held'
   | 'ingested'
   | 'issue-title'
+  | 'issue_unparked'
   | 'kpi-snapshot'
   | 'land'
   | 'landed'
@@ -109,6 +110,7 @@ export type EventKind =
   | 'plan_rejected'
   | 'post-merge-defect'
   | 'queue_admission_conflict'
+  | 'queue_added'
   | 'queue_reprioritized'
   | 'queue_rationale_comment_failed'
   | 'project_queue_refresh_failed'
@@ -295,6 +297,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   ingest_file_overlap_held: { severity: 'warn', isPark: false, isTerminal: false },
   ingested: { severity: 'info', isPark: false, isTerminal: false },
   'issue-title': { severity: 'info', isPark: false, isTerminal: false },
+  issue_unparked: { severity: 'info', isPark: false, isTerminal: false },
   'kpi-snapshot': { severity: 'info', isPark: false, isTerminal: false },
   land: { severity: 'info', isPark: false, isTerminal: false },
   landed: { severity: 'info', isPark: false, isTerminal: true, laneStatus: 'merged' },
@@ -327,6 +330,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   plan_redirect: { severity: 'info', isPark: false, isTerminal: false },
   plan_rejected: { severity: 'info', isPark: false, isTerminal: false },
   'post-merge-defect': { severity: 'info', isPark: false, isTerminal: false },
+  queue_added: { severity: 'info', isPark: false, isTerminal: false },
   queue_admission_conflict: { severity: 'warn', isPark: false, isTerminal: false },
   queue_reprioritized: { severity: 'info', isPark: false, isTerminal: false },
   queue_rationale_comment_failed: { severity: 'warn', isPark: false, isTerminal: false },

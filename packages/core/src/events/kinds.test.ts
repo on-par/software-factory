@@ -41,6 +41,10 @@ describe('EVENT_TRAITS', () => {
 });
 
 describe('eventTraitsFor', () => {
+  it('treats issue_unparked as a non-park info event', () => {
+    expect(eventTraitsFor('issue_unparked')).toEqual({ severity: 'info', isPark: false, isTerminal: false });
+  });
+
   it('classifies github_api_deprecated as a non-park warning', () => {
     expect(eventTraitsFor('github_api_deprecated')).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
   });

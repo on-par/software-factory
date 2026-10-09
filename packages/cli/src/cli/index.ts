@@ -71,6 +71,7 @@ import {
   ConstitutionLoader,
   createDefaultWorkSourceRegistry,
   createFileApprovalGate,
+  createLogger,
   createLaneProxy,
   defaultFindPortListeners,
   describeEffectiveConfig,
@@ -295,7 +296,9 @@ import {
 } from './classifier-backtest.js';
 import { runQueueClear } from './queue-clear.js';
 import { buildCostJson } from './cost-json.js';
+import { buildQueueAddJson } from './queue-add-json.js';
 import { buildQueueListJson } from './queue-list.js';
+import { runUnpark, UnparkError, type UnparkJson } from './unpark.js';
 import { buildRunsJson, parseRunsLimit } from './runs.js';
 import { buildStatusJson } from './status-json.js';
 import { buildStopResumeJson } from './stop-resume-json.js';
@@ -3702,7 +3705,60 @@ export async function cmdQueueMigrate(opts: { file?: string; dryRun?: boolean } 
   console.log(styleText('green', `queue migrated — ${entries.length} issue(s) labelled from ${queueFile}`));
 }
 
-export async function cmdQueueAdd(lane: string, issueArgs: string[]): Promise<void> {
+/** Append one `queue_added` event for newly queued issues; the silent sink keeps stdout untouched. */
+async function recordQueueAdded(lane: string, results: readonly EnqueueResult[]): Promise<void> {
+  const queued = results.filter((r) => r.outcome === 'queued');
+  if (queued.length === 0) return;
+  try {
+    const eventsFile = getFactoryPaths(await getRepoRoot()).events;
+    const summary = queued.map((r) => `#${r.issue} (order ${r.position})`).join(', ');
+    createLogger(eventsFile, { lane }, { out: { write: () => true } }).info(
+      'queue_added',
+      `${lane}: ${summary} queued`,
+    );
+  } catch (err) {
+    console.error(styleText('yellow', `factory: queue add event not recorded — ${errorDetail(err)}`));
+  }
+}
+
+/** Append one `issue_unparked` event; the silent sink keeps stdout untouched. */
+async function recordIssueUnparked(result: UnparkJson): Promise<void> {
+  try {
+    const eventsFile = getFactoryPaths(await getRepoRoot()).events;
+    createLogger(eventsFile, { lane: result.lane, issue: result.issue }, { out: { write: () => true } }).info(
+      'issue_unparked',
+      `#${result.issue} unparked → ${result.lane} (order ${result.order})`,
+    );
+  } catch (err) {
+    console.error(styleText('yellow', `factory: unpark event not recorded — ${errorDetail(err)}`));
+  }
+}
+
+export async function cmdUnpark(issueArg: string, opts: { lane?: string; json?: boolean } = {}): Promise<void> {
+  const issue = parseIssueArg(issueArg);
+  let result: UnparkJson;
+  try {
+    const [owner, repo] = (await getGitHubRepo()).split('/');
+    result = await runUnpark({
+      client: createOctokitQueueClient(getOctokit()),
+      owner,
+      repo,
+      issue,
+      ...(opts.lane === undefined ? {} : { lane: opts.lane }),
+    });
+  } catch (err) {
+    const code = err instanceof UnparkError ? err.code : 'unpark-failed';
+    throw new CliExitError(`factory: unpark #${issue} [${code}] — ${errorDetail(err)}`, 1);
+  }
+  await recordIssueUnparked(result);
+  if (opts.json) {
+    console.log(JSON.stringify(result));
+    return;
+  }
+  console.log(styleText('green', `#${issue} unparked → lane ${result.lane}, position ${result.order}`));
+}
+
+export async function cmdQueueAdd(lane: string, issueArgs: string[], opts: { json?: boolean } = {}): Promise<void> {
   // Validate + dedupe BEFORE any GitHub call. parseIssueArg throws CliExitError(2) on bad input.
   const seen = new Set<number>();
   const issues: number[] = [];
@@ -3714,9 +3770,32 @@ export async function cmdQueueAdd(lane: string, issueArgs: string[]): Promise<vo
     }
   }
 
-  const [owner, repo] = (await getGitHubRepo()).split('/');
-  const queue = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
-  const results: EnqueueResult[] = await queue.enqueue(lane, issues);
+  const enqueueAll = async (): Promise<EnqueueResult[]> => {
+    const [owner, repo] = (await getGitHubRepo()).split('/');
+    const queue = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
+    return queue.enqueue(lane, issues);
+  };
+  let results: EnqueueResult[];
+  if (opts.json) {
+    try {
+      results = await enqueueAll();
+    } catch (err) {
+      throw new CliExitError(`factory: queue add failed — ${errorDetail(err)}`, 1);
+    }
+  } else {
+    results = await enqueueAll();
+  }
+
+  await recordQueueAdded(lane, results);
+
+  if (opts.json) {
+    console.log(JSON.stringify(buildQueueAddJson(lane, results)));
+    const failedJson = results.filter((r) => r.outcome === 'failed');
+    if (failedJson.length > 0) {
+      throw new CliExitError(`factory: ${failedJson.length} issue(s) failed to queue`, 1);
+    }
+    return;
+  }
 
   for (const r of results) {
     if (r.outcome === 'queued') {
@@ -6157,6 +6236,20 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
       await cmdTriageAccept(opts);
     });
 
+  program
+    .command('unpark <issue>')
+    .description(
+      'Unpark a factory:parked issue: remove factory:parked and re-queue it in its lane with a fresh order label (same path as `queue add`)',
+    )
+    .option('--lane <lane>', "Lane to re-queue into (default: the issue's existing factory:lane:* label)")
+    .option(
+      '--json',
+      'Print one JSON object (schemaVersion 1): ok, action, issue, lane, order, labelsBefore, labelsAfter',
+    )
+    .action(async (issue: string, opts: { lane?: string; json?: boolean }) => {
+      await cmdUnpark(issue, opts);
+    });
+
   const queue = program
     .command('queue')
     .description('Manage the GitHub-label work queue (list, add, clear, reconcile, migrate)');
@@ -6171,8 +6264,12 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .description(
       'Queue explicit GitHub issues into a lane — applies factory:queued + factory:lane:<lane> (and an order label), creating any missing factory labels idempotently',
     )
-    .action(async (lane: string, issues: string[]) => {
-      await cmdQueueAdd(lane, issues);
+    .option(
+      '--json',
+      'Print one JSON object (schemaVersion 1): ok, action, lane, issues[{number, outcome, order, labelsAdded}], labelsCreated',
+    )
+    .action(async (lane: string, issues: string[], opts: { json?: boolean }) => {
+      await cmdQueueAdd(lane, issues, opts);
     });
   queue
     .command('reconcile')

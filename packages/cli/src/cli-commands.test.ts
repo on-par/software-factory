@@ -2785,6 +2785,160 @@ bash scripts/verify.sh
       expect(h.octokit.rest.issues.createLabel).not.toHaveBeenCalled();
       expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
     });
+
+    it('--json prints exactly one JSON object with orders and created labels', async () => {
+      const res = await runMain('queue', 'add', 'ops', '1', '2', '--json');
+
+      expect(res.exited).toBe(false);
+      expect(logged().trim().split('\n')).toHaveLength(1);
+      const json = JSON.parse(logged());
+      expect(json.ok).toBe(true);
+      expect(json.issues.map((i: any) => [i.number, i.order])).toEqual([
+        [1, 1],
+        [2, 2],
+      ]);
+      expect(json.labelsCreated).toEqual(
+        expect.arrayContaining(['factory:queued', 'factory:lane:ops', 'factory:order:1']),
+      );
+    });
+
+    it('--json reports an already-queued issue with its order and no writes', async () => {
+      h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async ({ issue_number }: any) => ({
+        data: issue_number === 1 ? [{ name: 'factory:order:5' }] : [],
+      }));
+
+      await runMain('queue', 'add', 'ops', '1', '2', '--json');
+
+      const json = JSON.parse(logged());
+      expect(json.issues[0]).toEqual({ number: 1, outcome: 'already-queued', order: 5, labelsAdded: [] });
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenCalledTimes(1);
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenCalledWith(expect.objectContaining({ issue_number: 2 }));
+    });
+
+    it('--json reports no created labels when they already exist (422)', async () => {
+      h.octokit.rest.issues.createLabel = vi.fn(async () => {
+        throw { status: 422 };
+      });
+
+      await runMain('queue', 'add', 'ops', '1', '--json');
+
+      expect(JSON.parse(logged()).labelsCreated).toEqual([]);
+    });
+
+    it('--json prints ok:false and exits 1 on a partial failure', async () => {
+      h.octokit.rest.issues.addLabels = vi.fn(async ({ issue_number }: any) => {
+        if (issue_number === 10) throw new Error('label API down');
+        return {};
+      });
+
+      const res = await runMain('queue', 'add', 'daw', '10', '11', '--json');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(logged().trim().split('\n')).toHaveLength(1);
+      expect(JSON.parse(logged()).ok).toBe(false);
+      expect(errored()).toContain('failed to queue');
+    });
+
+    it('--json exits 1 with empty stdout when the lane listing throws', async () => {
+      h.octokit.rest.issues.listForRepo = vi.fn(async () => {
+        throw new Error('api down');
+      });
+
+      const res = await runMain('queue', 'add', 'ops', '1', '--json');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(logged()).toBe('');
+      expect(errored()).toContain('queue add failed');
+    });
+
+    it('text mode prints only the per-issue lines (no event echo)', async () => {
+      await runMain('queue', 'add', 'daw', '10', '11');
+
+      expect(logged().split('\n').filter(Boolean)).toHaveLength(2);
+      expect(logged()).not.toContain('queue_added');
+    });
+
+    it('records a queue_added event only when something was queued', async () => {
+      await runMain('queue', 'add', 'ops', '1', '--json');
+      expect(readFileSync(paths().events, 'utf-8')).toContain('"type":"queue_added"');
+
+      rmSync(paths().events, { force: true });
+      h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async () => ({ data: [{ name: 'factory:order:1' }] }));
+      await runMain('queue', 'add', 'ops', '1', '--json');
+      expect(existsSync(paths().events)).toBe(false);
+    });
+  });
+
+  describe('unpark', () => {
+    let labels: string[];
+    beforeEach(() => {
+      labels = ['factory:parked', 'factory:lane:ops'];
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) return h.ghRepo;
+        return '';
+      };
+      h.octokit.rest.issues.createLabel = vi.fn(async () => ({}));
+      h.octokit.rest.issues.addLabels = vi.fn(async ({ labels: add }: any) => {
+        labels.push(...add.filter((l: string) => !labels.includes(l)));
+        return {};
+      });
+      h.octokit.rest.issues.removeLabel = vi.fn(async ({ name }: any) => {
+        labels = labels.filter((l) => l !== name);
+        return {};
+      });
+      h.octokit.rest.issues.listForRepo = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async () => ({ data: labels.map((name) => ({ name })) }));
+    });
+
+    it('--json re-queues a parked issue and prints one object', async () => {
+      const res = await runMain('unpark', '12', '--json');
+
+      expect(res.exited).toBe(false);
+      expect(logged().trim().split('\n')).toHaveLength(1);
+      const json = JSON.parse(logged());
+      expect(json).toMatchObject({ schemaVersion: 1, action: 'unpark', issue: 12, lane: 'ops', order: 1 });
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenCalledWith(
+        expect.objectContaining({ labels: expect.arrayContaining(['factory:order:1']) }),
+      );
+      expect(h.octokit.rest.issues.removeLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'factory:parked' }),
+      );
+    });
+
+    it('text mode prints the position line', async () => {
+      await runMain('unpark', '12');
+      expect(logged()).toContain('#12 unparked → lane ops, position 1');
+    });
+
+    it('fails with [not-parked], empty stdout and no event when not parked', async () => {
+      labels = ['factory:lane:ops'];
+      const res = await runMain('unpark', '12', '--json');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(logged()).toBe('');
+      expect(errored()).toContain('[not-parked]');
+      expect(existsSync(paths().events)).toBe(false);
+    });
+
+    it('fails with [lane-required] when no lane label and no --lane', async () => {
+      labels = ['factory:parked'];
+      const res = await runMain('unpark', '12');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('[lane-required]');
+    });
+
+    it('records an issue_unparked event on success', async () => {
+      await runMain('unpark', '12', '--json');
+      expect(readFileSync(paths().events, 'utf-8')).toContain('"type":"issue_unparked"');
+    });
+
+    it('exits 2 for an invalid issue argument', async () => {
+      const res = await runMain('unpark', 'abc');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
   });
 
   describe('queue reconcile', () => {

@@ -934,8 +934,20 @@ describe('enqueue', () => {
     const results = await queue.enqueue('daw', [10, 11]);
 
     expect(results).toEqual([
-      { issue: 10, outcome: 'queued', position: 3 },
-      { issue: 11, outcome: 'queued', position: 4 },
+      {
+        issue: 10,
+        outcome: 'queued',
+        position: 3,
+        labelsAdded: [QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(3)],
+        labelsCreated: [],
+      },
+      {
+        issue: 11,
+        outcome: 'queued',
+        position: 4,
+        labelsAdded: [QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(4)],
+        labelsCreated: [],
+      },
     ]);
     expect(state.get(10)).toEqual(new Set([QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(3)]));
     expect(state.get(11)).toEqual(new Set([QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(4)]));
@@ -948,7 +960,15 @@ describe('enqueue', () => {
 
     const results = await queue.enqueue('docs', [5]);
 
-    expect(results).toEqual([{ issue: 5, outcome: 'queued', position: 1 }]);
+    expect(results).toEqual([
+      {
+        issue: 5,
+        outcome: 'queued',
+        position: 1,
+        labelsAdded: [QUEUED_LABEL, laneLabel('docs'), queueOrderLabel(1)],
+        labelsCreated: [],
+      },
+    ]);
   });
 
   it('skips an already-ordered issue and leaves its labels unchanged', async () => {
@@ -959,8 +979,34 @@ describe('enqueue', () => {
 
     const results = await queue.enqueue('daw', [7]);
 
-    expect(results).toEqual([{ issue: 7, outcome: 'already-queued' }]);
+    expect(results).toEqual([{ issue: 7, outcome: 'already-queued', position: 1, labelsAdded: [], labelsCreated: [] }]);
     expect(state.get(7)).toEqual(new Set([QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(1)]));
+  });
+
+  it('omits position for a malformed existing order label', async () => {
+    const { client } = createFakeStore([{ number: 7, labels: ['factory:order:abc'] }]);
+    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    expect(await queue.enqueue('daw', [7])).toEqual([
+      { issue: 7, outcome: 'already-queued', labelsAdded: [], labelsCreated: [] },
+    ]);
+  });
+
+  it('reports labelsCreated only for labels ensureLabel created, and labelsAdded excluding present labels', async () => {
+    const { client } = createFakeStore([{ number: 1, labels: [QUEUED_LABEL] }]);
+    const wrapped: QueueGitHubClient = {
+      ...client,
+      async ensureLabel(input) {
+        await client.ensureLabel(input);
+        return input.name !== QUEUED_LABEL;
+      },
+    };
+    const queue = createGithubQueue({ client: wrapped, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+
+    const [result] = await queue.enqueue('daw', [1]);
+
+    expect(result?.labelsCreated).toEqual([laneLabel('daw'), queueOrderLabel(1)]);
+    expect(result?.labelsAdded).toEqual([laneLabel('daw'), queueOrderLabel(1)]);
   });
 
   it('creates every label via ensureLabel before applying it with addLabels', async () => {
@@ -990,7 +1036,13 @@ describe('enqueue', () => {
 
     expect(results).toEqual([
       { issue: 99, outcome: 'failed', detail: 'boom' },
-      { issue: 100, outcome: 'queued', position: 1 },
+      {
+        issue: 100,
+        outcome: 'queued',
+        position: 1,
+        labelsAdded: [QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(1)],
+        labelsCreated: [],
+      },
     ]);
     expect(state.get(100)).toEqual(new Set([QUEUED_LABEL, laneLabel('daw'), queueOrderLabel(1)]));
   });
@@ -1134,6 +1186,15 @@ describe('createOctokitQueueClient', () => {
     expect(captured).toEqual({ owner: 'o', repo: 'r', name: 'factory:queued', color: '0e8a16', description: 'desc' });
   });
 
+  it('ensureLabel resolves true on create', async () => {
+    const octokit: any = { rest: { issues: { createLabel: async () => ({}) } } };
+    const client = createOctokitQueueClient(octokit);
+
+    await expect(
+      client.ensureLabel({ owner: 'o', repo: 'r', name: 'factory:queued', color: '0e8a16', description: 'desc' }),
+    ).resolves.toBe(true);
+  });
+
   it('ensureLabel swallows an already-exists (422) error', async () => {
     const octokit: any = {
       rest: {
@@ -1149,7 +1210,7 @@ describe('createOctokitQueueClient', () => {
 
     await expect(
       client.ensureLabel({ owner: 'o', repo: 'r', name: 'factory:queued', color: '0e8a16', description: 'desc' }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(false);
   });
 
   it('ensureLabel rethrows a non-422 error', async () => {
