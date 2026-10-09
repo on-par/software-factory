@@ -142,8 +142,8 @@ export interface QueueGitHubClient {
   getIssueLabels(input: { owner: string; repo: string; issue_number: number }): Promise<string[]>;
   addLabels(input: { owner: string; repo: string; issue_number: number; labels: string[] }): Promise<void>;
   removeLabel(input: { owner: string; repo: string; issue_number: number; name: string }): Promise<void>;
-  /** Create the label if missing. Must be idempotent — an already-existing label is not an error. */
-  ensureLabel(input: { owner: string; repo: string } & QueueLabelSpec): Promise<void>;
+  /** Create the label if missing. Must be idempotent — an already-existing label is not an error. Resolves `true` when it created the label, `false`/undefined when it already existed. */
+  ensureLabel(input: { owner: string; repo: string } & QueueLabelSpec): Promise<boolean | void>;
 }
 
 function labelExistsError(err: unknown): boolean {
@@ -311,8 +311,9 @@ export function createOctokitQueueClient(octokit: Octokit): QueueGitHubClient {
     async ensureLabel({ owner, repo, name, color, description }) {
       try {
         await octokit.rest.issues.createLabel({ owner, repo, name, color, description });
+        return true;
       } catch (err) {
-        if (labelExistsError(err)) return;
+        if (labelExistsError(err)) return false;
         throw err;
       }
     },
@@ -326,8 +327,12 @@ export type EnqueueOutcome = 'queued' | 'already-queued' | 'failed';
 export interface EnqueueResult {
   issue: number;
   outcome: EnqueueOutcome;
-  /** One-based order position assigned; set only when outcome === 'queued'. */
+  /** One-based order position: assigned when `queued`, read from the existing `factory:order:<n>` label when `already-queued` (unset if unparsable). */
   position?: number;
+  /** Labels this call newly put on the issue; `[]` for already-queued. */
+  labelsAdded?: string[];
+  /** Repo labels this call created while queueing this issue (ensureLabel returned true). */
+  labelsCreated?: string[];
   /** Failure detail; set only when outcome === 'failed'. */
   detail?: string;
 }
@@ -585,7 +590,15 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
       try {
         const current = await client.getIssueLabels({ owner, repo, issue_number: issue });
         if (current.some((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX))) {
-          results.push({ issue, outcome: 'already-queued' });
+          const orderLabel = current.find((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX)) ?? '';
+          const existing = Number(orderLabel.slice(QUEUE_ORDER_LABEL_PREFIX.length));
+          results.push({
+            issue,
+            outcome: 'already-queued',
+            ...(Number.isSafeInteger(existing) && existing > 0 ? { position: existing } : {}),
+            labelsAdded: [],
+            labelsCreated: [],
+          });
           continue;
         }
         const specs: QueueLabelSpec[] = [
@@ -593,11 +606,18 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
           { name: routeLabel, color: LANE_LABEL_COLOR, description: `Routed to factory lane ${lane}` },
           queueOrderLabelSpec(next),
         ];
+        const created: string[] = [];
         for (const spec of specs) {
-          await client.ensureLabel({ owner, repo, ...spec });
+          if ((await client.ensureLabel({ owner, repo, ...spec })) === true) created.push(spec.name);
         }
         await client.addLabels({ owner, repo, issue_number: issue, labels: specs.map((s) => s.name) });
-        results.push({ issue, outcome: 'queued', position: next });
+        results.push({
+          issue,
+          outcome: 'queued',
+          position: next,
+          labelsAdded: specs.map((s) => s.name).filter((name) => !current.includes(name)),
+          labelsCreated: created,
+        });
         next += 1;
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);

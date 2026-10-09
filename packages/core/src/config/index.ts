@@ -101,6 +101,7 @@ const FactoryConfigSchema = z.object({
     check_seconds: z.number(),
     merge_poll_seconds: z.number(),
     approval_seconds: z.number().default(1800),
+    tests_seconds: z.number().default(300),
   }),
   merge: z.object({ auto: z.boolean(), admin: z.boolean().default(false), comment: z.string() }),
   /** `run.merge.*` mirrors FactoryConfigV2Schema's `run.merge` naming and, when present,
@@ -404,7 +405,7 @@ export function loadFactoryConfigForRepo(configPath: string): FactoryConfig {
 export function resolveTimeouts(
   config: FactoryConfig,
   env: NodeJS.ProcessEnv = process.env,
-): { plan: number; build: number; check: number; approval: number } {
+): { plan: number; build: number; check: number; approval: number; tests: number } {
   const fromEnv = (v?: string) => {
     const n = Number(v);
     return Number.isFinite(n) && n > 0 ? n : undefined;
@@ -415,6 +416,7 @@ export function resolveTimeouts(
     build: fromEnv(env.FACTORY_BUILD_TIMEOUT) ?? config.timeouts.build_seconds ?? 7200,
     check: fromEnv(env.FACTORY_CHECK_TIMEOUT) ?? config.timeouts.check_seconds ?? 1800,
     approval: fromEnv(env.FACTORY_APPROVAL_TIMEOUT) ?? config.timeouts.approval_seconds ?? 1800,
+    tests: fromEnv(env.FACTORY_TESTS_TIMEOUT) ?? config.timeouts.tests_seconds ?? 300,
   };
 }
 

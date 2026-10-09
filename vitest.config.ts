@@ -31,6 +31,20 @@ export default defineConfig({
     // files serial so the required full-suite check stays within CI's heap
     // limit instead of loading several instrumented workspace graphs at once.
     fileParallelism: false,
+    // Many unit suites spawn real subprocesses (git init/clone/push/worktree,
+    // shells, CLIs) against throwaway temp repos. Each such test takes ~0.3-0.5s
+    // on an idle machine, but the factory runs this suite (via verify.sh) on a
+    // shared Mac Mini that is routinely at load average 80-200 on 10 cores, where
+    // the same tests stretch to 1-5s+ and vitest's 5s default deadline fails
+    // them at random. That flake reported main as red at 9024b07 and parked
+    // #2269 on "base-red" (Gate 0). It is CPU and process-spawn starvation, not
+    // a hang or a race: the slowdown is uniform across every git-backed test, a
+    // test that times out keeps running and finishes on its own, and the
+    // failing set changes from run to run. 30s keeps a real hang failing fast
+    // while giving loaded hosts ~6x headroom. Hooks get the same budget because
+    // their cleanup (git worktree remove, rm -rf of temp repos) is the same work.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     // Discover tests across all workspaces in one run so coverage aggregates.
     // scripts/ helpers with logic carry colocated tests too.
     include: integrationOnly
@@ -86,7 +100,7 @@ export default defineConfig({
         // branches: measured 88.72 on main both with and without the integration
         // suites — this floor was already unmet before #755 touched anything, and
         // moving the integration suites to nightly does not change any metric here.
-        'packages/cli/src/**/*.{ts,tsx}': { lines: 97, functions: 91, branches: 89, statements: 97 },
+        'packages/cli/src/**/*.{ts,tsx}': { lines: 97, functions: 91, branches: 90, statements: 97 },
         'packages/dashboard/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
         'packages/product/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 98, statements: 99 },
         'packages/server/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },

@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-08-19
+- Amended by: [ADR-0159](0159-remote-read-access-goes-through-an-out-of-repo-read-only-bridge-and-factoryd-stays-loopback-only.md) (remote reads go only through an out-of-repo read-only bridge; factoryd stays loopback-only)
 
 ## Context
 

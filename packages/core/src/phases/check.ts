@@ -291,6 +291,8 @@ async function checkPhaseImpl(opts: {
   maxReworkRounds?: number;
   buildTimeoutSeconds?: number;
   checkTimeoutSeconds?: number;
+  /** Timeout for the tests checker command (`timeouts.tests_seconds`, #2299). */
+  testsTimeoutSeconds?: number;
   sandbox?: SandboxPolicy;
   drainSteering?: () => ConsumedSteering;
   appPort?: number;
@@ -340,6 +342,7 @@ async function checkPhaseImpl(opts: {
     maxReworkRounds = MAX_REWORK_ROUNDS,
     buildTimeoutSeconds,
     checkTimeoutSeconds,
+    testsTimeoutSeconds,
     sandbox,
     drainSteering,
     appPort,
@@ -385,6 +388,7 @@ async function checkPhaseImpl(opts: {
     log,
     onActivity,
     outputLogDir: roundLogDir(0),
+    testsTimeoutSeconds,
   };
 
   if (appPort === undefined) {

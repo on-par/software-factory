@@ -196,7 +196,7 @@ const inertConfigLoaders: Pick<
   loadRoutesConfig: () => ({}) as never,
   // Lazy: per-test h.factoryConfig mutations are observed.
   loadFactoryConfigForRepo: () => h.factoryConfig,
-  resolveTimeouts: () => ({ plan: 1, build: 1, check: 1, approval: 1 }),
+  resolveTimeouts: () => ({ plan: 1, build: 1, check: 1, approval: 1, tests: 1 }),
   resolveSkipCI: () => false,
   // Lazy: per-test h.constitutionsDir / h.modelOverrides mutations are observed.
   getConstitutionsDir: vi.fn(() => h.constitutionsDir),
@@ -509,7 +509,22 @@ beforeEach(() => {
     'FACTORY_FAILOVER_MODEL',
     'GITHUB_TOKEN',
     'GH_TOKEN',
+    'TMUX',
+    'ANTHROPIC_API_KEY',
+    'CLAUDE_CONFIG_DIR',
+    'CLAUDE_SECURESTORAGE_CONFIG_DIR',
   ].forEach((k) => trackEnv(k));
+  // `factory run` and `factory supervise` probe the macOS login keychain before
+  // claiming work, and abort when the probe fails inside tmux (#1014). The probe's
+  // outcome depends on these ambient variables, so a suite launched from a tmux
+  // pane on the Mini (the factory's own lanes, or a developer shell) aborted every
+  // run/supervise test while the same suite passed on Linux CI and outside tmux.
+  // The keychain preflight tests set them explicitly; everything else must not
+  // inherit them from the host.
+  delete process.env.TMUX;
+  delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.CLAUDE_CONFIG_DIR;
+  delete process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
   delete process.env.FACTORY_LOCAL_ONLY;
   delete process.env.FACTORY_MERGE;
   delete process.env.FACTORY_MERGE_ADMIN;
@@ -955,6 +970,59 @@ describe('cli commands (via main dispatch)', () => {
       expect(logged()).toContain('no cost data yet');
     });
 
+    it('--json prints one JSON line with unpriced rows as null', async () => {
+      h.costs = [
+        { ts: 't', issue: '296', task: 'plan', model: 'a', inputTokens: 1, outputTokens: 2, cost: 1 },
+        { ts: 't', issue: '297', task: 'build', model: 'b', cost: null, unpriced: true },
+      ];
+      const res = await runMain('cost', '--json');
+      expect(res.exited).toBe(false);
+      const out = logged().trim();
+      expect(out.split('\n')).toHaveLength(1);
+      const json = JSON.parse(out);
+      expect(json.schemaVersion).toBe(1);
+      expect(json.total).toEqual({ cost: 1, unpricedCount: 1 });
+      expect(json.rows[1].cost).toBeNull();
+    });
+
+    it('--json --issue keeps only that issue', async () => {
+      h.costs = [
+        { issue: '296', task: 'plan', model: 'a', cost: 1 },
+        { issue: '297', task: 'plan', model: 'b', cost: 2 },
+      ];
+      await runMain('cost', '--json', '--issue', '296');
+      const json = JSON.parse(logged());
+      expect(json.rows).toHaveLength(1);
+      expect(json.rows[0].issue).toBe('296');
+      expect(json.total).toEqual({ cost: 1, unpricedCount: 0 });
+    });
+
+    it('--json with no costs prints empty JSON, not the text message', async () => {
+      h.costs = [];
+      await runMain('cost', '--json');
+      expect(JSON.parse(logged())).toEqual({
+        schemaVersion: 1,
+        rows: [],
+        perModel: [],
+        total: { cost: 0, unpricedCount: 0 },
+      });
+    });
+
+    it('--json exits 1 when reading costs throws', async () => {
+      const res = await runMainWith(
+        {
+          readCosts: () => {
+            throw new Error('boom');
+          },
+        },
+        'cost',
+        '--json',
+      );
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('factory: cost failed');
+      expect(logged()).toBe('');
+    });
+
     it('uses a readCosts override passed through main deps', async () => {
       h.costs = [{ model: 'shared', cost: 1 }];
       await runMainWith(
@@ -1187,6 +1255,66 @@ bash scripts/verify.sh
   });
 
   describe('status', () => {
+    describe('--json', () => {
+      it('reports stop:true and nothing but JSON on stdout', async () => {
+        writeFileSync(paths().stop, '');
+        await runMain('status', '--json');
+        const out = logged();
+        expect(out).not.toContain('== Active ==');
+        const json = JSON.parse(out);
+        expect(json.schemaVersion).toBe(1);
+        expect(json.stop).toBe(true);
+      });
+
+      it('lists a fresh active claim', async () => {
+        writeFileSync(paths().queue, 'app 1\n');
+        await FactoryCore.writePhaseSnapshot(FactoryCore.phaseSnapshotFile(paths().runs, 1), {
+          issue: 1,
+          phase: 'build',
+          updatedAt: new Date().toISOString(),
+          lastActivityAt: new Date().toISOString(),
+        });
+        await runMain('status', '--json');
+        const json = JSON.parse(logged());
+        expect(json.active).toHaveLength(1);
+        expect(json.active[0]).toMatchObject({ lane: 'app', issue: 1, phase: 'build' });
+        expect(typeof json.active[0].ageSec).toBe('number');
+      });
+
+      it('reports an open provider breaker', async () => {
+        writeFileSync(
+          paths().breaker,
+          JSON.stringify({
+            version: 1,
+            providers: {
+              openai: { reason: 'usage_cap', openedAt: new Date().toISOString(), cooldownMs: 1_800_000 },
+            },
+          }),
+        );
+        await runMain('status', '--json');
+        const json = JSON.parse(logged());
+        expect(json.breaker.open).toBe(true);
+        expect(json.breaker.providers[0].provider).toBe('openai');
+      });
+
+      it('ignores --kpis', async () => {
+        await runMain('status', '--json');
+        const plain = logged();
+        await runMain('status', '--json', '--kpis');
+        const both = logged().slice(plain.length);
+        expect(both).not.toContain('Effective config');
+        expect(JSON.parse(both)).toEqual(JSON.parse(plain));
+      });
+
+      it('exits 2 with an error on stderr when .factory is missing', async () => {
+        rmSync(paths().root, { recursive: true, force: true });
+        const result = await runMain('status', '--json');
+        expect(result).toEqual({ exited: true, code: 2 });
+        expect(errored()).toContain('factory not initialized');
+        expect(logged()).toBe('');
+      });
+    });
+
     it('prints product, models, queue, events, and STOP state', async () => {
       writeFileSync(paths().product, 'alpha\n');
       writeFileSync(paths().queue, '# comment\napp 1\napp 2\n');
@@ -2657,6 +2785,160 @@ bash scripts/verify.sh
       expect(h.octokit.rest.issues.createLabel).not.toHaveBeenCalled();
       expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
     });
+
+    it('--json prints exactly one JSON object with orders and created labels', async () => {
+      const res = await runMain('queue', 'add', 'ops', '1', '2', '--json');
+
+      expect(res.exited).toBe(false);
+      expect(logged().trim().split('\n')).toHaveLength(1);
+      const json = JSON.parse(logged());
+      expect(json.ok).toBe(true);
+      expect(json.issues.map((i: any) => [i.number, i.order])).toEqual([
+        [1, 1],
+        [2, 2],
+      ]);
+      expect(json.labelsCreated).toEqual(
+        expect.arrayContaining(['factory:queued', 'factory:lane:ops', 'factory:order:1']),
+      );
+    });
+
+    it('--json reports an already-queued issue with its order and no writes', async () => {
+      h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async ({ issue_number }: any) => ({
+        data: issue_number === 1 ? [{ name: 'factory:order:5' }] : [],
+      }));
+
+      await runMain('queue', 'add', 'ops', '1', '2', '--json');
+
+      const json = JSON.parse(logged());
+      expect(json.issues[0]).toEqual({ number: 1, outcome: 'already-queued', order: 5, labelsAdded: [] });
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenCalledTimes(1);
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenCalledWith(expect.objectContaining({ issue_number: 2 }));
+    });
+
+    it('--json reports no created labels when they already exist (422)', async () => {
+      h.octokit.rest.issues.createLabel = vi.fn(async () => {
+        throw { status: 422 };
+      });
+
+      await runMain('queue', 'add', 'ops', '1', '--json');
+
+      expect(JSON.parse(logged()).labelsCreated).toEqual([]);
+    });
+
+    it('--json prints ok:false and exits 1 on a partial failure', async () => {
+      h.octokit.rest.issues.addLabels = vi.fn(async ({ issue_number }: any) => {
+        if (issue_number === 10) throw new Error('label API down');
+        return {};
+      });
+
+      const res = await runMain('queue', 'add', 'daw', '10', '11', '--json');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(logged().trim().split('\n')).toHaveLength(1);
+      expect(JSON.parse(logged()).ok).toBe(false);
+      expect(errored()).toContain('failed to queue');
+    });
+
+    it('--json exits 1 with empty stdout when the lane listing throws', async () => {
+      h.octokit.rest.issues.listForRepo = vi.fn(async () => {
+        throw new Error('api down');
+      });
+
+      const res = await runMain('queue', 'add', 'ops', '1', '--json');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(logged()).toBe('');
+      expect(errored()).toContain('queue add failed');
+    });
+
+    it('text mode prints only the per-issue lines (no event echo)', async () => {
+      await runMain('queue', 'add', 'daw', '10', '11');
+
+      expect(logged().split('\n').filter(Boolean)).toHaveLength(2);
+      expect(logged()).not.toContain('queue_added');
+    });
+
+    it('records a queue_added event only when something was queued', async () => {
+      await runMain('queue', 'add', 'ops', '1', '--json');
+      expect(readFileSync(paths().events, 'utf-8')).toContain('"type":"queue_added"');
+
+      rmSync(paths().events, { force: true });
+      h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async () => ({ data: [{ name: 'factory:order:1' }] }));
+      await runMain('queue', 'add', 'ops', '1', '--json');
+      expect(existsSync(paths().events)).toBe(false);
+    });
+  });
+
+  describe('unpark', () => {
+    let labels: string[];
+    beforeEach(() => {
+      labels = ['factory:parked', 'factory:lane:ops'];
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) return h.ghRepo;
+        return '';
+      };
+      h.octokit.rest.issues.createLabel = vi.fn(async () => ({}));
+      h.octokit.rest.issues.addLabels = vi.fn(async ({ labels: add }: any) => {
+        labels.push(...add.filter((l: string) => !labels.includes(l)));
+        return {};
+      });
+      h.octokit.rest.issues.removeLabel = vi.fn(async ({ name }: any) => {
+        labels = labels.filter((l) => l !== name);
+        return {};
+      });
+      h.octokit.rest.issues.listForRepo = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async () => ({ data: labels.map((name) => ({ name })) }));
+    });
+
+    it('--json re-queues a parked issue and prints one object', async () => {
+      const res = await runMain('unpark', '12', '--json');
+
+      expect(res.exited).toBe(false);
+      expect(logged().trim().split('\n')).toHaveLength(1);
+      const json = JSON.parse(logged());
+      expect(json).toMatchObject({ schemaVersion: 1, action: 'unpark', issue: 12, lane: 'ops', order: 1 });
+      expect(h.octokit.rest.issues.addLabels).toHaveBeenCalledWith(
+        expect.objectContaining({ labels: expect.arrayContaining(['factory:order:1']) }),
+      );
+      expect(h.octokit.rest.issues.removeLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'factory:parked' }),
+      );
+    });
+
+    it('text mode prints the position line', async () => {
+      await runMain('unpark', '12');
+      expect(logged()).toContain('#12 unparked → lane ops, position 1');
+    });
+
+    it('fails with [not-parked], empty stdout and no event when not parked', async () => {
+      labels = ['factory:lane:ops'];
+      const res = await runMain('unpark', '12', '--json');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(logged()).toBe('');
+      expect(errored()).toContain('[not-parked]');
+      expect(existsSync(paths().events)).toBe(false);
+    });
+
+    it('fails with [lane-required] when no lane label and no --lane', async () => {
+      labels = ['factory:parked'];
+      const res = await runMain('unpark', '12');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('[lane-required]');
+    });
+
+    it('records an issue_unparked event on success', async () => {
+      await runMain('unpark', '12', '--json');
+      expect(readFileSync(paths().events, 'utf-8')).toContain('"type":"issue_unparked"');
+    });
+
+    it('exits 2 for an invalid issue argument', async () => {
+      const res = await runMain('unpark', 'abc');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+    });
   });
 
   describe('queue reconcile', () => {
@@ -3145,6 +3427,97 @@ bash scripts/verify.sh
     it('resume is a no-op when there is no STOP file', async () => {
       await runMain('resume');
       expect(logged()).toContain('STOP cleared');
+    });
+
+    it('text output is byte-identical without --json', async () => {
+      await runMain('stop');
+      expect(logged()).toBe('STOP set — lanes halt between issues');
+    });
+
+    it('resume text output is byte-identical without --json', async () => {
+      await runMain('resume');
+      expect(logged()).toBe('STOP cleared');
+    });
+
+    it('stop --json prints one JSON object when not stopped', async () => {
+      await runMain('stop', '--json');
+      expect(existsSync(paths().stop)).toBe(true);
+      expect(logged().split('\n')).toHaveLength(1);
+      expect(JSON.parse(logged())).toEqual({
+        schemaVersion: 1,
+        ok: true,
+        action: 'stop',
+        repo: h.ghRepo,
+        stopFlag: { before: false, after: true },
+      });
+    });
+
+    it('stop --json is idempotent when already stopped', async () => {
+      writeFileSync(paths().stop, '');
+      await runMain('stop', '--json');
+      expect(existsSync(paths().stop)).toBe(true);
+      expect(JSON.parse(logged())).toMatchObject({ ok: true, stopFlag: { before: true, after: true } });
+    });
+
+    it('resume --json reports before/after with and without STOP', async () => {
+      writeFileSync(paths().stop, '');
+      await runMain('resume', '--json');
+      expect(existsSync(paths().stop)).toBe(false);
+      expect(JSON.parse(logged())).toMatchObject({ action: 'resume', stopFlag: { before: true, after: false } });
+    });
+
+    it('stop leaves an existing STOP file untouched (exclusive create, no rewrite)', async () => {
+      writeFileSync(paths().stop, 'set by lane');
+      await runMain('stop', '--json');
+      expect(readFileSync(paths().stop, 'utf-8')).toBe('set by lane');
+      expect(JSON.parse(logged())).toMatchObject({ stopFlag: { before: true, after: true } });
+    });
+
+    it('resume surfaces unlink errors other than a missing STOP file', async () => {
+      mkdirSync(join(paths().stop, 'nested'), { recursive: true });
+      await expect(runMain('resume', '--json')).rejects.toMatchObject({ code: expect.stringMatching(/^E/) });
+      expect(existsSync(paths().stop)).toBe(true);
+    });
+
+    it('resume --json is ok when STOP was not set', async () => {
+      await runMain('resume', '--json');
+      expect(JSON.parse(logged())).toMatchObject({ ok: true, stopFlag: { before: false, after: false } });
+    });
+
+    it('stop --json has the same shape as the golden fixture', async () => {
+      await runMain('stop', '--json');
+      const golden = JSON.parse(
+        readFileSync(new URL('./__fixtures__/stop-resume-json/stop.json', import.meta.url), 'utf-8'),
+      ) as { stopFlag: object };
+      const out = JSON.parse(logged()) as { stopFlag: object };
+      expect(Object.keys(out)).toEqual(Object.keys(golden));
+      expect(Object.keys(out.stopFlag)).toEqual(Object.keys(golden.stopFlag));
+    });
+
+    it('records stop-file-set / stop-file-cleared events without echoing them', async () => {
+      const types = () =>
+        readFileSync(paths().events, 'utf-8')
+          .split('\n')
+          .filter(Boolean)
+          .map((l) => (JSON.parse(l) as { type: string }).type);
+      await runMain('stop');
+      expect(types()).toEqual(['stop-file-set']);
+      expect(logged()).toBe('STOP set — lanes halt between issues');
+      await runMain('resume');
+      expect(types()).toEqual(['stop-file-set', 'stop-file-cleared']);
+    });
+
+    it('stop --json fails with exit 2 and writes nothing when repo lookup fails', async () => {
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) throw new Error('gh not authenticated');
+        return '';
+      };
+      const res = await runMain('stop', '--json');
+      expect(res).toMatchObject({ exited: true, code: 2 });
+      expect(errored()).toContain('no GitHub remote detected');
+      expect(logged()).toBe('');
+      expect(existsSync(paths().stop)).toBe(false);
     });
   });
 
@@ -5748,7 +6121,7 @@ describe('shipIssue (direct)', () => {
   });
 
   it('uses injected resolveTimeouts, resolveSkipCI and resolveEffectiveModelPins', async () => {
-    const timeouts = vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1 }));
+    const timeouts = vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1, tests: 1 }));
     const skip = vi.fn(() => false);
     const pins = vi.fn(() => ({
       plan: undefined,

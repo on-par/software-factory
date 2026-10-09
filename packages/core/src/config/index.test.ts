@@ -1653,13 +1653,13 @@ describe('resolveTimeouts', () => {
   it('preserves defaults and ignores invalid env values', () => {
     const config = loadFactoryConfig();
 
-    expect(resolveTimeouts(config, {})).toEqual({ plan: 1800, build: 7200, check: 1800, approval: 1800 });
+    expect(resolveTimeouts(config, {})).toEqual({ plan: 1800, build: 7200, check: 1800, approval: 1800, tests: 300 });
     expect(
       resolveTimeouts(config, {
         FACTORY_PLAN_TIMEOUT: 'abc',
         FACTORY_CHECK_TIMEOUT: '',
       }),
-    ).toEqual({ plan: 1800, build: 7200, check: 1800, approval: 1800 });
+    ).toEqual({ plan: 1800, build: 7200, check: 1800, approval: 1800, tests: 300 });
   });
 
   it('honors approval_seconds from config', () => {
@@ -1675,6 +1675,26 @@ describe('resolveTimeouts', () => {
     ).toBe(900);
   });
 
+  it('defaults the tests checker timeout to 300 seconds', () => {
+    expect(loadFactoryConfig().timeouts.tests_seconds).toBe(300);
+    expect(resolveTimeouts(loadFactoryConfig(), {}).tests).toBe(300);
+  });
+
+  it('honors tests_seconds from config', () => {
+    const config = loadFactoryConfig();
+    expect(resolveTimeouts({ ...config, timeouts: { ...config.timeouts, tests_seconds: 1200 } }, {}).tests).toBe(1200);
+  });
+
+  it('lets FACTORY_TESTS_TIMEOUT override config', () => {
+    const config = loadFactoryConfig();
+    expect(
+      resolveTimeouts(
+        { ...config, timeouts: { ...config.timeouts, tests_seconds: 1200 } },
+        { FACTORY_TESTS_TIMEOUT: '900' },
+      ).tests,
+    ).toBe(900);
+  });
+
   it('lets FACTORY_APPROVAL_TIMEOUT override config', () => {
     const config = loadFactoryConfig();
     expect(resolveTimeouts(config, { FACTORY_APPROVAL_TIMEOUT: '60' }).approval).toBe(60);
@@ -1684,7 +1704,13 @@ describe('resolveTimeouts', () => {
     const config = loadFactoryConfig();
     const emptyTimeouts = { ...config, timeouts: {} as typeof config.timeouts };
 
-    expect(resolveTimeouts(emptyTimeouts, {})).toEqual({ plan: 1800, build: 7200, check: 1800, approval: 1800 });
+    expect(resolveTimeouts(emptyTimeouts, {})).toEqual({
+      plan: 1800,
+      build: 7200,
+      check: 1800,
+      approval: 1800,
+      tests: 300,
+    });
   });
 
   it('reads from process.env when no env argument is passed', () => {

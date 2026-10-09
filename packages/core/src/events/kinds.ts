@@ -79,6 +79,7 @@ export type EventKind =
   | 'ingest_file_overlap_held'
   | 'ingested'
   | 'issue-title'
+  | 'issue_unparked'
   | 'kpi-snapshot'
   | 'land'
   | 'landed'
@@ -109,6 +110,7 @@ export type EventKind =
   | 'plan_rejected'
   | 'post-merge-defect'
   | 'queue_admission_conflict'
+  | 'queue_added'
   | 'queue_reprioritized'
   | 'queue_rationale_comment_failed'
   | 'project_queue_refresh_failed'
@@ -147,6 +149,7 @@ export type EventKind =
   | 'steering_applied'
   | 'steering_unconsumed'
   | 'stop-file-cleared'
+  | 'stop-file-set'
   | 'stopped'
   | 'stuck'
   | 'supervisor-done'
@@ -294,6 +297,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   ingest_file_overlap_held: { severity: 'warn', isPark: false, isTerminal: false },
   ingested: { severity: 'info', isPark: false, isTerminal: false },
   'issue-title': { severity: 'info', isPark: false, isTerminal: false },
+  issue_unparked: { severity: 'info', isPark: false, isTerminal: false },
   'kpi-snapshot': { severity: 'info', isPark: false, isTerminal: false },
   land: { severity: 'info', isPark: false, isTerminal: false },
   landed: { severity: 'info', isPark: false, isTerminal: true, laneStatus: 'merged' },
@@ -326,6 +330,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   plan_redirect: { severity: 'info', isPark: false, isTerminal: false },
   plan_rejected: { severity: 'info', isPark: false, isTerminal: false },
   'post-merge-defect': { severity: 'info', isPark: false, isTerminal: false },
+  queue_added: { severity: 'info', isPark: false, isTerminal: false },
   queue_admission_conflict: { severity: 'warn', isPark: false, isTerminal: false },
   queue_reprioritized: { severity: 'info', isPark: false, isTerminal: false },
   queue_rationale_comment_failed: { severity: 'warn', isPark: false, isTerminal: false },
@@ -370,6 +375,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   steering_applied: { severity: 'info', isPark: false, isTerminal: false },
   steering_unconsumed: { severity: 'info', isPark: false, isTerminal: false },
   'stop-file-cleared': { severity: 'warn', isPark: false, isTerminal: false },
+  'stop-file-set': { severity: 'warn', isPark: false, isTerminal: false },
   stopped: { severity: 'warn', isPark: false, isTerminal: true, laneStatus: 'stopped' },
   stuck: { severity: 'warn', isPark: true, isTerminal: false },
   'supervisor-done': { severity: 'info', isPark: false, isTerminal: false },

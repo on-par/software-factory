@@ -51,4 +51,24 @@ describe('createSimWorkspace', () => {
       await ws.dispose();
     }
   });
+  it('gives every workspace its own origin, so a push in one never reaches another', async () => {
+    const a = await createSimWorkspace();
+    const b = await createSimWorkspace();
+    try {
+      const { stdout: urlA } = await exec('git remote get-url origin', { cwd: a.repoRoot });
+      const { stdout: urlB } = await exec('git remote get-url origin', { cwd: b.repoRoot });
+      expect(urlA.trim()).toBe(a.origin);
+      expect(urlB.trim()).toBe(b.origin);
+
+      await writeFile(`${a.repoRoot}/only-a.txt`, 'a\n');
+      await simCommitAll(a.repoRoot, 'feat: only in a');
+      await exec('git push origin HEAD:refs/heads/only-a', { cwd: a.repoRoot });
+
+      await expect(exec(`git -C '${a.origin}' rev-parse --verify refs/heads/only-a`)).resolves.toBeTruthy();
+      await expect(exec(`git -C '${b.origin}' rev-parse --verify refs/heads/only-a`)).rejects.toThrow();
+      expect(existsSync(`${b.repoRoot}/only-a.txt`)).toBe(false);
+    } finally {
+      await Promise.all([a.dispose(), b.dispose()]);
+    }
+  });
 });

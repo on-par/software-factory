@@ -111,6 +111,7 @@ factory run                         Claim queued issues and ship them, lanes in 
 factory supervise [--now]           Unattended loop: wait for usage headroom, run the queue, repeat until it is empty
 factory land <N>                    Squash-merge the issue's open PR once CI is green, then remove its worktree
 factory stop / factory resume       Halt lanes after their current issue / clear the stop
+factory stop|resume --json         One JSON object: action, repo, stopFlag {before, after}; idempotent
 
 # Setup
 factory init                        Set up .factory/ in this repo and check model reachability
@@ -125,6 +126,7 @@ factory check <N> [--json]          Read-only pre-flight: missing fields, and wh
 
 # Observe
 factory status                      Show active runs, the GitHub queue, provider health, and recent events
+factory status --json               One JSON object: STOP flag, provider breaker, active claims (--kpis ignored)
 factory logs [--follow]             Print pipeline events
 factory cost                        Show recorded model spend by model
 factory usage                       Report 5-hour subscription usage

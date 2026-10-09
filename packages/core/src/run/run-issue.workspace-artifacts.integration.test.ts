@@ -150,7 +150,7 @@ describe('runIssue — workspace artifacts integration (#1213)', () => {
       startedAt: new Date().toISOString(),
       localOnly: true,
       options: { interactive: false, autoRework: true, approvePlan: false, sandboxDisabled: false },
-      timeouts: { plan: 60, build: 60, check: 60, approval: 60 },
+      timeouts: { plan: 60, build: 60, check: 60, approval: 60, tests: 60 },
       modelPins: { sources: {} },
       codexDisabled: false,
       skipCI: false,

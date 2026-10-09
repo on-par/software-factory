@@ -67,6 +67,8 @@ export interface CheckerContext {
    *  checkPhase per round. The FAIL details carry only a bounded summary plus this
    *  log's path, so the rework worker and a human can read what the cap cut. */
   outputLogDir?: string;
+  /** Timeout for the tests checker command, in seconds (`timeouts.tests_seconds`, #2299). Defaults to 300. */
+  testsTimeoutSeconds?: number;
 }
 
 export type CheckerFn = (ctx: CheckerContext) => Promise<CheckerOutput>;
@@ -263,13 +265,24 @@ async function commandFailureDetails(
   return logPath ? `${label} failed: ${summary}\nfull output: ${logPath}` : `${label} failed: ${summary}`;
 }
 
+const DEFAULT_TESTS_TIMEOUT_SECONDS = 300;
+
 export const testsChecker: CheckerFn = async (ctx) => {
   try {
     const run = ctx.runCommand ?? runCommand;
+    const timeoutSeconds = ctx.testsTimeoutSeconds ?? DEFAULT_TESTS_TIMEOUT_SECONDS;
+    const timeoutMs = timeoutSeconds * 1000;
+    // A kill at the timeout must never read as a real test failure (#2299): lead with it.
+    const describeFailure = (r: CommandResult): string => {
+      const evidence = describeTestFailure(r, 500);
+      if (!r.timedOut) return evidence;
+      const head = `timed out after ${timeoutSeconds}s (raise timeouts.tests_seconds or FACTORY_TESTS_TIMEOUT)`;
+      return evidence === 'timed out' ? head : `${head}\n${evidence}`;
+    };
     if (await fileExists(join(ctx.worktree, 'scripts/verify.sh'))) {
       const r = await run(['bash', 'scripts/verify.sh', '--no-e2e'], {
         cwd: ctx.worktree,
-        timeoutMs: 300_000,
+        timeoutMs,
         env: ctx.env,
         onPgid: ctx.onPgid,
       });
@@ -277,7 +290,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
       return {
         checker: 'tests',
         result: 'FAIL',
-        details: await commandFailureDetails(ctx, 'tests', 'verify.sh', r, describeTestFailure(r, 500)),
+        details: await commandFailureDetails(ctx, 'tests', 'verify.sh', r, describeFailure(r)),
       };
     }
 
@@ -285,7 +298,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
     if (pkg?.scripts?.test) {
       const r = await run(['npm', 'test'], {
         cwd: ctx.worktree,
-        timeoutMs: 300_000,
+        timeoutMs,
         env: ctx.env,
         onPgid: ctx.onPgid,
       });
@@ -293,7 +306,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
       return {
         checker: 'tests',
         result: 'FAIL',
-        details: await commandFailureDetails(ctx, 'tests', 'npm test', r, describeTestFailure(r, 500)),
+        details: await commandFailureDetails(ctx, 'tests', 'npm test', r, describeFailure(r)),
       };
     }
 
@@ -304,7 +317,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
         : ['python3', '-m', 'pytest'];
       const r = await run(pytestArgv, {
         cwd: ctx.worktree,
-        timeoutMs: 300_000,
+        timeoutMs,
         env: ctx.env,
         onPgid: ctx.onPgid,
       });
@@ -313,7 +326,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
       return {
         checker: 'tests',
         result: 'FAIL',
-        details: await commandFailureDetails(ctx, 'tests', 'pytest', r, describeTestFailure(r, 500)),
+        details: await commandFailureDetails(ctx, 'tests', 'pytest', r, describeFailure(r)),
       };
     }
 
