@@ -675,3 +675,7 @@ export { resolveSliceGate } from './readiness/slice-gate.js';
 export { publishDecomposition } from './readiness/decompose.js';
 export type { ReadinessGapCriterion, ReadinessGapReport } from './readiness/enrich.js';
 export { buildReadinessGapPrompt, parseReadinessGapOutput } from './readiness/enrich.js';
+
+// Persisted per-issue run state (#972, #2271)
+export type { IssueRunState, RunStatus } from './types/index.js';
+export { readIssueRunState } from './run/state.js';
