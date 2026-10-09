@@ -296,6 +296,7 @@ import { runQueueClear } from './queue-clear.js';
 import { buildCostJson } from './cost-json.js';
 import { buildQueueListJson } from './queue-list.js';
 import { buildRunsJson, parseRunsLimit } from './runs.js';
+import { buildStatusJson } from './status-json.js';
 import { buildUsageJson } from './usage-json.js';
 import { parseResetIssues, runReset } from './reset.js';
 import {
@@ -1624,7 +1625,33 @@ function formatClaimAge(lastActivityAt: string, now: number): string {
   return minutes < 1 ? '<1m' : `${minutes}m`;
 }
 
-export async function cmdStatus(opts: { kpis?: boolean } = {}) {
+export async function cmdStatus(opts: { kpis?: boolean; json?: boolean } = {}) {
+  if (opts.json) {
+    // `--kpis` is deliberately ignored here: the JSON shape is fixed (#1101).
+    const repoRoot = await getRepoRoot();
+    const paths = getFactoryPaths(repoRoot);
+    if (!existsSync(paths.root)) throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
+    const ghRepo = await getGitHubRepo();
+    let active: Awaited<ReturnType<typeof partitionLocalQueueByActivity>>['active'] = [];
+    if (existsSync(paths.queue)) {
+      const { entries, diagnostics } = parseQueue(readFileSync(paths.queue, 'utf-8'));
+      if (entries.length > 0) ({ active } = await partitionLocalQueueByActivity(entries, paths.runs));
+      warnQueueDiagnostics(diagnostics);
+    }
+    console.log(
+      JSON.stringify(
+        buildStatusJson({
+          repo: ghRepo,
+          product: readActiveProduct(paths.product) ?? null,
+          stop: existsSync(paths.stop),
+          breakers: await new ProviderBreaker(paths.breaker).list(),
+          active,
+          now: Date.now(),
+        }),
+      ),
+    );
+    return;
+  }
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
@@ -5965,7 +5992,11 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .command('status')
     .description('Show active runs, the GitHub queue, provider health, and recent events')
     .option('--kpis', 'Also show the full health KPIs and the effective config')
-    .action((opts: { kpis?: boolean }) => cmdStatus(opts));
+    .option(
+      '--json',
+      'Print one JSON object (schemaVersion 1): repo, product, stop, breaker, active claims; --kpis is ignored',
+    )
+    .action((opts: { kpis?: boolean; json?: boolean }) => cmdStatus(opts));
 
   program
     .command('runs')
