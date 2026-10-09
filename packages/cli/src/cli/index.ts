@@ -293,6 +293,7 @@ import {
   type ClassifierBacktestOptions,
 } from './classifier-backtest.js';
 import { runQueueClear } from './queue-clear.js';
+import { buildQueueListJson } from './queue-list.js';
 import { parseResetIssues, runReset } from './reset.js';
 import {
   cmdDaemonLogs,
@@ -3693,6 +3694,18 @@ export async function cmdQueueReconcile(opts: { lane?: string } = {}): Promise<v
   }
 }
 
+export async function cmdQueueList(opts: { json?: boolean; lane?: string } = {}): Promise<void> {
+  if (!opts.json) throw new CliExitError('factory: queue list requires --json', 2);
+  const [owner, repo] = (await getGitHubRepo()).split('/');
+  let snapshot: Awaited<ReturnType<typeof readGithubQueueSnapshot>>;
+  try {
+    snapshot = await readGithubQueueSnapshot({ client: createOctokitQueueClient(getOctokit()), owner, repo });
+  } catch (err) {
+    throw new CliExitError(`factory: queue list failed — ${errorDetail(err)}`, 1);
+  }
+  console.log(JSON.stringify(buildQueueListJson(snapshot, opts.lane)));
+}
+
 export async function cmdQueueClear(opts: { dryRun?: boolean; yes?: boolean; lane?: string } = {}): Promise<void> {
   const [owner, repo] = (await getGitHubRepo()).split('/');
   const queue = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
@@ -6008,7 +6021,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
 
   const queue = program
     .command('queue')
-    .description('Manage the GitHub-label work queue (add, clear, reconcile, migrate)');
+    .description('Manage the GitHub-label work queue (list, add, clear, reconcile, migrate)');
   queue
     .command('migrate')
     .description('Copy valid .factory/queue lane order into GitHub issue labels')
@@ -6031,6 +6044,14 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('--lane <lane>', 'Only reconcile one lane')
     .action(async (opts: { lane?: string }) => {
       await cmdQueueReconcile(opts);
+    });
+  queue
+    .command('list')
+    .description('Print queued, in-progress and parked GitHub-queue issues per lane as one JSON object (read-only)')
+    .option('--json', 'Print one JSON object (schemaVersion 1) — required')
+    .option('--lane <lane>', 'Only list this lane (factory:lane:<lane>)')
+    .action(async (opts: { json?: boolean; lane?: string }) => {
+      await cmdQueueList(opts);
     });
   queue
     .command('clear')
