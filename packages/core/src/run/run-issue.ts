@@ -101,7 +101,7 @@ export interface RunRequest {
   /** steward.enabled resolved (#2086); undefined = off (no steward-triggered event). */
   stewardEnabled?: boolean;
   prClassifier?: { rules: ReviewFloorRuleSet; gateLabel: string; modelPin?: string };
-  timeouts: { plan: number; build: number; check: number; approval: number };
+  timeouts: { plan: number; build: number; check: number; approval: number; tests: number };
   modelPins: EffectiveModelPins;
   codexDisabled: boolean;
   skipCI: boolean;
@@ -653,6 +653,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       maxReworkRounds: request.efficiency.maxReworkRounds,
       buildTimeoutSeconds: request.timeouts.build,
       checkTimeoutSeconds: request.timeouts.check,
+      testsTimeoutSeconds: request.timeouts.tests,
       sandbox: request.sandboxPolicy,
       drainSteering: request.options.interactive ? ports.drainSteering : undefined,
       appPort,

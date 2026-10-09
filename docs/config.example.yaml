@@ -106,14 +106,16 @@ version: 2
     # Hold PRs whose review floor is B or C (or cannot be computed) for a human by applying
     # no-auto-merge. Unset: FACTORY_PR_CLASSIFIER=1. --pr-classifier / --no-pr-classifier beat all.
     # classifier: false
-# Phase timeouts in seconds. FACTORY_PLAN_TIMEOUT, FACTORY_BUILD_TIMEOUT, FACTORY_CHECK_TIMEOUT and
-# FACTORY_APPROVAL_TIMEOUT beat these values.
+# Phase timeouts in seconds. tests_seconds caps the tests checker command (scripts/verify.sh, npm
+# test or pytest). FACTORY_PLAN_TIMEOUT, FACTORY_BUILD_TIMEOUT, FACTORY_CHECK_TIMEOUT,
+# FACTORY_APPROVAL_TIMEOUT and FACTORY_TESTS_TIMEOUT beat these values.
 timeouts:
   plan_seconds: 1800
   build_seconds: 7200
   check_seconds: 1800
   merge_poll_seconds: 120
   approval_seconds: 1800
+  tests_seconds: 300
 # OPTIONAL pre-code gate: when true (or --approve-plan / FACTORY_APPROVE_PLAN=1), PLAN pauses after
 # freezing the spec and waits for operator approval before BUILD. Default off keeps unattended
 # auto-plan. Independent of the SHIP/auto-merge gate.

@@ -57,7 +57,7 @@ function baseRequest(overrides: Partial<RunRequest> = {}): RunRequest {
     work: WORK,
     startedAt: '2026-01-01T00:00:00.000Z',
     options: { interactive: false, autoRework: true, approvePlan: false, sandboxDisabled: false },
-    timeouts: { plan: 60, build: 60, check: 60, approval: 60 },
+    timeouts: { plan: 60, build: 60, check: 60, approval: 60, tests: 60 },
     modelPins: { sources: {} },
     codexDisabled: false,
     skipCI: false,
