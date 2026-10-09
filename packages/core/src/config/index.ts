@@ -707,6 +707,7 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string) {
     breaker: resolve(state, 'breaker.json'),
     reworkHistory: resolve(state, 'rework-history.json'),
     baselineCache: resolve(state, 'baseline-cache.json'),
+    flakyLedger: resolve(state, 'flaky-tests.json'),
     laneFiles: resolve(state, 'lane-files.json'),
     /** Per-invocation CLI flag overrides recorded by `factory run` so a separate
      *  `factory status` process can attribute the policy to the flag (#1400). */

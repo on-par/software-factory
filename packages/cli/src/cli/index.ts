@@ -2410,6 +2410,7 @@ export async function shipIssue(
     eventsFile: paths.events,
     logsDir: paths.logs,
     baselineCachePath: paths.baselineCache,
+    flakyLedgerPath: paths.flakyLedger,
   };
 
   const ports: RunPorts = {
