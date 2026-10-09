@@ -2922,6 +2922,52 @@ bash scripts/verify.sh
       expect(errored()).toContain('invalid --limit');
       expect(logged()).toBe('');
     });
+
+    it('--diffstat exits 1 when the issue has no run', async () => {
+      const res = await runMain('runs', '--json', '--diffstat', '99');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('no run for issue #99');
+      expect(logged()).toBe('');
+    });
+
+    it('--diffstat exits 2 on an invalid issue', async () => {
+      const res = await runMain('runs', '--json', '--diffstat', 'abc');
+
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('invalid --diffstat');
+      expect(logged()).toBe('');
+    });
+
+    it('--diffstat exits 2 without --json', async () => {
+      const res = await runMain('runs', '--diffstat', '5');
+
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('requires --json');
+    });
+
+    it('--diffstat exits 2 when combined with --limit', async () => {
+      const res = await runMain('runs', '--json', '--diffstat', '5', '--limit', '2');
+
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('cannot be combined');
+    });
+
+    it('--diffstat prints files null with reason no-branch for an empty branch', async () => {
+      mkdirSync(runsDir(), { recursive: true });
+      writeFileSync(
+        join(runsDir(), 'issue-5.json'),
+        JSON.stringify({ issue: 5, lane: 'daw', branch: '', updatedAt: '2026-01-01T00:00:00Z' }),
+      );
+
+      const res = await runMain('runs', '--json', '--diffstat', '5');
+
+      expect(res).toEqual({ exited: false, code: undefined });
+      const out = JSON.parse(logged()) as { files: unknown; reason: string; base: unknown };
+      expect(out.files).toBeNull();
+      expect(out.reason).toBe('no-branch');
+      expect(typeof out.base).toBe('string');
+    });
   });
 
   describe('queue clear', () => {
