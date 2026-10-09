@@ -2376,3 +2376,31 @@ function makeRouter(): { router: ModelRouter; stub: StubModelExecutor } {
   const stub = new StubModelExecutor({ defaultOutput: 'rework complete' });
   return { router: new ModelRouter(models, routes, false, stub), stub };
 }
+
+describe('checkPhase tests timeout (#2299)', () => {
+  it('threads testsTimeoutSeconds into the checker context', async () => {
+    const worktree = await makeWorktreeWithFiles(2299, {});
+    const { router } = makeRouter();
+    let seen: number | undefined;
+    await checkPhase({
+      issue: 2299,
+      worktree,
+      specPath: join(worktree, 'issue-2299.md'),
+      router,
+      constitution: null,
+      log: () => {},
+      testsTimeoutSeconds: 1200,
+      runCheckers: async (ctx) => {
+        seen = ctx.testsTimeoutSeconds;
+        return {
+          failures: 0,
+          passes: 1,
+          skips: 0,
+          total: 1,
+          results: [{ checker: 'tests', result: 'PASS', details: 'ok' }],
+        };
+      },
+    });
+    expect(seen).toBe(1200);
+  });
+});

@@ -286,6 +286,56 @@ describe('testsChecker', () => {
     expect(result.details).toContain('pytest');
   });
 
+  describe('timeout (#2299)', () => {
+    function timingRunner(result: Partial<CommandResult>) {
+      const timeouts: (number | undefined)[] = [];
+      const run = async (argv: readonly string[], opts?: { timeoutMs?: number }) => {
+        timeouts.push(opts?.timeoutMs);
+        return stubRunner(result).run(argv);
+      };
+      return { run, timeouts };
+    }
+
+    it('defaults the tests command timeout to 300s', async () => {
+      const worktree = await makeWorktree({ 'scripts/verify.sh': '#!/bin/bash\n' });
+      const { run, timeouts } = timingRunner({ ok: true, exitCode: 0 });
+
+      await testsChecker({ ...makeContext(worktree), runCommand: run });
+
+      expect(timeouts).toEqual([300_000]);
+    });
+
+    it('uses testsTimeoutSeconds from the context', async () => {
+      const worktree = await makeWorktree({ 'pytest.ini': '[pytest]\n' });
+      const { run, timeouts } = timingRunner({ ok: true, exitCode: 0 });
+
+      await testsChecker({ ...makeContext(worktree), testsTimeoutSeconds: 1200, runCommand: run });
+
+      expect(timeouts).toEqual([1_200_000]);
+    });
+
+    it('says the command timed out and after how long', async () => {
+      const worktree = await makeWorktree({ 'scripts/verify.sh': '#!/bin/bash\n' });
+      const { run } = timingRunner({ ok: false, exitCode: -1, killed: true, timedOut: true });
+
+      const result = await testsChecker({ ...makeContext(worktree), testsTimeoutSeconds: 600, runCommand: run });
+
+      expect(result.result).toBe('FAIL');
+      expect(result.details).toBe(
+        'verify.sh failed: timed out after 600s (raise timeouts.tests_seconds or FACTORY_TESTS_TIMEOUT)',
+      );
+    });
+
+    it('keeps the partial output after the timeout line', async () => {
+      const worktree = await makeWorktree({ 'package.json': JSON.stringify({ scripts: { test: 'vitest' } }) });
+      const { run } = timingRunner({ ok: false, exitCode: 1, timedOut: true, stdout: 'building mac target…' });
+
+      const result = await testsChecker({ ...makeContext(worktree), runCommand: run });
+
+      expect(result.details).toMatch(/^npm test failed: timed out after 300s .*\nbuilding mac target…$/);
+    });
+  });
+
   it('fails closed when the pytest surface exists but pytest cannot run', async () => {
     const worktree = await makeWorktree({ 'pytest.ini': '[pytest]\n' });
     const { run, calls } = stubRunner({ ok: false, exitCode: 1, stderr: '/usr/bin/python3: No module named pytest' });

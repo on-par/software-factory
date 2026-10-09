@@ -59,8 +59,9 @@ const RUNTIME_NOTES: Record<string, string> = {
     'maxSlices (1-20, default 10) caps a slice plan that has not started: an over-cap plan is recorded and parks, and `--max-slices <n>` beats it for one run. ' +
     '`factory run-issue --size-gate <mode>` beats mode for one run.',
   timeouts:
-    'Phase timeouts in seconds. FACTORY_PLAN_TIMEOUT, FACTORY_BUILD_TIMEOUT, FACTORY_CHECK_TIMEOUT and ' +
-    'FACTORY_APPROVAL_TIMEOUT beat these values.',
+    'Phase timeouts in seconds. tests_seconds caps the tests checker command (scripts/verify.sh, npm test or pytest). ' +
+    'FACTORY_PLAN_TIMEOUT, FACTORY_BUILD_TIMEOUT, FACTORY_CHECK_TIMEOUT, FACTORY_APPROVAL_TIMEOUT and ' +
+    'FACTORY_TESTS_TIMEOUT beat these values.',
   environment: 'Per-lane runtime environment.',
   'environment.processGroups': "Grace period in ms between SIGTERM and SIGKILL when a lane's process group is swept.",
   workspace: 'Lane workspace backend: "host" (git worktrees) or "disposable-docker" (a managed container per lane).',

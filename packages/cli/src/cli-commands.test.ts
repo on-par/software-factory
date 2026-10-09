@@ -196,7 +196,7 @@ const inertConfigLoaders: Pick<
   loadRoutesConfig: () => ({}) as never,
   // Lazy: per-test h.factoryConfig mutations are observed.
   loadFactoryConfigForRepo: () => h.factoryConfig,
-  resolveTimeouts: () => ({ plan: 1, build: 1, check: 1, approval: 1 }),
+  resolveTimeouts: () => ({ plan: 1, build: 1, check: 1, approval: 1, tests: 1 }),
   resolveSkipCI: () => false,
   // Lazy: per-test h.constitutionsDir / h.modelOverrides mutations are observed.
   getConstitutionsDir: vi.fn(() => h.constitutionsDir),
@@ -6075,7 +6075,7 @@ describe('shipIssue (direct)', () => {
   });
 
   it('uses injected resolveTimeouts, resolveSkipCI and resolveEffectiveModelPins', async () => {
-    const timeouts = vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1 }));
+    const timeouts = vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1, tests: 1 }));
     const skip = vi.fn(() => false);
     const pins = vi.fn(() => ({
       plan: undefined,
