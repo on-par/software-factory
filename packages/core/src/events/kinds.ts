@@ -79,6 +79,7 @@ export type EventKind =
   | 'ingest_file_overlap_held'
   | 'ingested'
   | 'issue-title'
+  | 'issue_unparked'
   | 'kpi-snapshot'
   | 'land'
   | 'landed'
@@ -295,6 +296,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   ingest_file_overlap_held: { severity: 'warn', isPark: false, isTerminal: false },
   ingested: { severity: 'info', isPark: false, isTerminal: false },
   'issue-title': { severity: 'info', isPark: false, isTerminal: false },
+  issue_unparked: { severity: 'info', isPark: false, isTerminal: false },
   'kpi-snapshot': { severity: 'info', isPark: false, isTerminal: false },
   land: { severity: 'info', isPark: false, isTerminal: false },
   landed: { severity: 'info', isPark: false, isTerminal: true, laneStatus: 'merged' },
