@@ -308,6 +308,7 @@ import { buildQueueAddJson } from './queue-add-json.js';
 import { buildQueueListJson } from './queue-list.js';
 import { runUnpark, UnparkError, type UnparkJson } from './unpark.js';
 import { buildRunsJson, parseRunsLimit } from './runs.js';
+import { buildRunDiffstatJson, NoRunError, parseDiffstatIssue, type RunDiffstatJson } from './runs-diffstat.js';
 import { buildStatusJson } from './status-json.js';
 import { buildStopResumeJson } from './stop-resume-json.js';
 import { buildUsageJson } from './usage-json.js';
@@ -3849,8 +3850,29 @@ export async function cmdQueueList(opts: { json?: boolean; lane?: string } = {})
   console.log(JSON.stringify(buildQueueListJson(snapshot, opts.lane)));
 }
 
-export async function cmdRuns(opts: { json?: boolean; limit?: string } = {}): Promise<void> {
+export async function cmdRuns(opts: { json?: boolean; limit?: string; diffstat?: string } = {}): Promise<void> {
   if (!opts.json) throw new CliExitError('factory: runs requires --json', 2);
+  if (opts.diffstat !== undefined) {
+    if (opts.limit !== undefined) {
+      throw new CliExitError('factory: runs — --diffstat and --limit cannot be combined', 2);
+    }
+    let issue: number;
+    try {
+      issue = parseDiffstatIssue(opts.diffstat);
+    } catch (err) {
+      throw new CliExitError(`factory: runs — ${errorDetail(err)}`, 2);
+    }
+    const repoRoot = await getRepoRoot();
+    let out: RunDiffstatJson;
+    try {
+      out = await buildRunDiffstatJson({ runsDir: getFactoryPaths(repoRoot).runs, repoRoot, issue });
+    } catch (err) {
+      if (err instanceof NoRunError) throw new CliExitError(`factory: runs — ${err.message}`, 1);
+      throw new CliExitError(`factory: runs failed — ${errorDetail(err)}`, 1);
+    }
+    console.log(JSON.stringify(out));
+    return;
+  }
   let limit: number;
   try {
     limit = parseRunsLimit(opts.limit);
@@ -6158,7 +6180,11 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .description('Print per-issue run state from the local runs directory as one JSON object, newest first (read-only)')
     .option('--json', 'Print one JSON object (schemaVersion 1) — required')
     .option('--limit <n>', 'Show at most N runs (default 50)')
-    .action(async (opts: { json?: boolean; limit?: string }) => {
+    .option(
+      '--diffstat <issue>',
+      "Print per-file added/deleted line counts for one issue's run branch vs origin/<default branch>",
+    )
+    .action(async (opts: { json?: boolean; limit?: string; diffstat?: string }) => {
       await cmdRuns(opts);
     });
 
