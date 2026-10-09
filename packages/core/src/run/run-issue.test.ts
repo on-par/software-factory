@@ -1,6 +1,6 @@
 import { execFile as execFileCb } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -1674,5 +1674,149 @@ describe('runIssue — flaky_tests event (#2302)', () => {
     const { log, run } = arrange(envResult({ verdict: 'passed', mode: 'full', tests: [] }, false));
     await run();
     expect(flakyCalls(log)).toHaveLength(0);
+  });
+});
+
+describe('runIssue — flaky ledger and issue filing (#2303)', () => {
+  const baseline = { baseSha: 'abc1234567890def', checkers: [] };
+  let dir: string;
+  let ledger: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'factory-flaky-run-'));
+    ledger = join(dir, 'state', 'flaky-tests.json');
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  const seed = (runs: string[], issue: number | null = null) =>
+    mkdir(join(dir, 'state'), { recursive: true }).then(() =>
+      writeFile(ledger, JSON.stringify({ adds: { runs, lastSeen: '2026-01-01T00:00:00.000Z', issue } })),
+    );
+  const readLedger = async () =>
+    JSON.parse(await readFile(ledger, 'utf-8')) as Record<string, { runs: string[]; issue: number | null }>;
+  const flake = (over: Partial<NonNullable<CheckPhaseResult['flakeRerun']>> = {}): CheckPhaseResult => ({
+    ...CHECK_OK,
+    baseline,
+    flakeRerun: { verdict: 'passed', mode: 'targeted', tests: ['adds'], logPath: '/l/flaky-rerun-tests.log', ...over },
+  });
+  const arrange = (
+    check: CheckPhaseResult,
+    req: Partial<RunRequest> = {},
+    create = vi.fn().mockResolvedValue({ data: { number: 77 } }),
+    createComment = vi.fn().mockResolvedValue({}),
+  ) => {
+    vi.mocked(checkPhase).mockResolvedValue(check);
+    const log = vi.fn();
+    const ports = basePorts({ events: () => log, octokit: { rest: { issues: { create, createComment } } } as never });
+    return {
+      log,
+      create,
+      createComment,
+      run: () => runIssue(baseRequest({ flakyLedgerPath: ledger, issue: 9, ...req }), basePolicy(), ports),
+    };
+  };
+  const messages = (log: ReturnType<typeof vi.fn>, kind: string) =>
+    log.mock.calls.filter((c) => c[0] === kind).map((c) => String(c[1]));
+
+  it('does not file below the threshold', async () => {
+    await seed(['1@abcdef12']);
+    const { run, create, createComment } = arrange(flake());
+    await run();
+    expect((await readLedger()).adds).toMatchObject({ runs: ['1@abcdef12', '9@abc12345'] });
+    expect(create).not.toHaveBeenCalled();
+    expect(createComment).not.toHaveBeenCalled();
+  });
+
+  it('creates one issue at 3 runs and stores its number', async () => {
+    await seed(['1@abcdef12', '2@abcdef12']);
+    const { run, create, createComment } = arrange(flake());
+    await run();
+    expect(create).toHaveBeenCalledTimes(1);
+    const arg = create.mock.calls[0]?.[0];
+    expect(arg).toMatchObject({ title: 'flaky: adds', labels: ['bug', 'testing'] });
+    expect(arg.body).toContain('abc12345');
+    expect(arg.body).toContain('#1 on base abcdef12');
+    expect(arg.body).toContain('/l/flaky-rerun-tests.log');
+    expect((await readLedger()).adds).toMatchObject({ issue: 77 });
+    expect(createComment).not.toHaveBeenCalled();
+  });
+
+  it('comments on the stored issue once filed', async () => {
+    await seed(['1@abcdef12', '2@abcdef12'], 55);
+    const { run, create, createComment } = arrange(flake());
+    await run();
+    expect(createComment).toHaveBeenCalledTimes(1);
+    expect(createComment.mock.calls[0]?.[0]).toMatchObject({ issue_number: 55 });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('formats a run key without an @ as-is and omits the log path when absent', async () => {
+    await seed(['legacy', '2@abcdef12']);
+    const { run, create } = arrange(flake({ logPath: undefined }));
+    await run();
+    const body = create.mock.calls[0]?.[0].body as string;
+    expect(body).toContain('- legacy');
+    expect(body).not.toContain('Re-run log');
+  });
+
+  it('comment omits the log path when absent', async () => {
+    await seed(['1@abcdef12', '2@abcdef12'], 55);
+    const { run, createComment } = arrange(flake({ logPath: undefined }));
+    await run();
+    expect(createComment.mock.calls[0]?.[0].body).not.toContain('Re-run log');
+  });
+
+  it('localOnly updates the ledger but makes no octokit call', async () => {
+    await seed(['1@abcdef12', '2@abcdef12']);
+    const { run, create, createComment, log } = arrange(flake(), { localOnly: true });
+    await run();
+    expect(create).not.toHaveBeenCalled();
+    expect(createComment).not.toHaveBeenCalled();
+    expect((await readLedger()).adds).toMatchObject({ issue: null });
+    expect((await readLedger()).adds.runs).toHaveLength(3);
+    expect(messages(log, 'flaky_tests').some((m) => m.includes('local-only'))).toBe(true);
+  });
+
+  it('logs and continues when issues.create rejects', async () => {
+    await seed(['1@abcdef12', '2@abcdef12']);
+    const { run, log } = arrange(flake(), {}, vi.fn().mockRejectedValue(new Error('boom')));
+    const outcome = await run();
+    expect(outcome.state).not.toBe('parked');
+    expect(outcome.state).not.toBe('released');
+    expect(messages(log, 'environment_warning').some((m) => m.includes('boom'))).toBe(true);
+    expect((await readLedger()).adds).toMatchObject({ issue: null });
+  });
+
+  it('logs and continues when issues.createComment rejects', async () => {
+    await seed(['1@abcdef12', '2@abcdef12'], 55);
+    const { run, log } = arrange(flake(), {}, undefined, vi.fn().mockRejectedValue(new Error('nope')));
+    const outcome = await run();
+    expect(outcome.state).not.toBe('parked');
+    expect(messages(log, 'environment_warning').some((m) => m.includes('nope'))).toBe(true);
+  });
+
+  it('logs and files nothing when the ledger cannot be written', async () => {
+    const blocker = join(dir, 'blocker');
+    await writeFile(blocker, 'x');
+    const { run, log, create, createComment } = arrange(flake(), { flakyLedgerPath: join(blocker, 'f.json') });
+    const outcome = await run();
+    expect(outcome.state).not.toBe('parked');
+    expect(messages(log, 'environment_warning').some((m) => m.includes('flaky-test ledger'))).toBe(true);
+    expect(create).not.toHaveBeenCalled();
+    expect(createComment).not.toHaveBeenCalled();
+  });
+
+  it('records nothing without a ledger path, for reproduced, or for full mode without names', async () => {
+    await arrange(flake(), { flakyLedgerPath: undefined }).run();
+    await arrange({
+      passed: false,
+      summary: CHECK_SUMMARY,
+      reworkRounds: 0,
+      baseline,
+      flakeRerun: { verdict: 'reproduced', mode: 'targeted', tests: ['adds'] },
+    }).run();
+    await arrange(flake({ mode: 'full', tests: [] })).run();
+    expect(existsSync(ledger)).toBe(false);
   });
 });

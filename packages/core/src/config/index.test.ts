@@ -98,6 +98,7 @@ describe('getFactoryPaths', () => {
       breaker: resolve(state, 'breaker.json'),
       reworkHistory: resolve(state, 'rework-history.json'),
       baselineCache: resolve(state, 'baseline-cache.json'),
+      flakyLedger: resolve(state, 'flaky-tests.json'),
       laneFiles: resolve(state, 'lane-files.json'),
       runFlags: resolve(state, 'run-flags.json'),
     };
@@ -158,6 +159,7 @@ describe('getFactoryPaths', () => {
       'breaker',
       'reworkHistory',
       'baselineCache',
+      'flakyLedger',
       'laneFiles',
       'runFlags',
       'mergeLock',
