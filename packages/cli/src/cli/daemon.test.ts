@@ -17,6 +17,7 @@ import {
   FACTORYD_LABEL,
   factorydFiles,
   lastLines,
+  parseEtime,
   parseLaunchctlPid,
   renderFactorydPlist,
   resolveFactorydConfig,
@@ -279,7 +280,107 @@ describe('daemon control commands', () => {
     });
   });
 
+  describe('parseEtime', () => {
+    it.each([
+      ['01:02', 62],
+      ['02:03:04', 7384],
+      ['02-11:22:33', 213753],
+      ['  05:00\n', 300],
+    ])('parses %j as %d seconds', (input, secs) => {
+      expect(parseEtime(input)).toBe(secs);
+    });
+
+    it.each(['', 'abc', '1:2:3:4', '1-02:03'])('returns null for %j', (input) => {
+      expect(parseEtime(input)).toBeNull();
+    });
+  });
+
   describe('cmdDaemonStatus', () => {
+    describe('--json', () => {
+      it('running with a populated registry prints one JSON object', async () => {
+        const { exec, calls } = makeFakeExec({
+          print: { code: 0, stdout: PRINT_RUNNING.replace('pid = 123', 'pid = 42') },
+          ps: { code: 0, stdout: '   02-11:22:33\n' },
+        });
+        const { out, text } = makeOut();
+        const registryFile = join(home, '.factory', 'registry.json');
+        mkdirSync(join(home, '.factory'), { recursive: true });
+        writeFileSync(
+          registryFile,
+          JSON.stringify({
+            version: 1,
+            repos: {
+              'on-par/software-factory': { path: '/tmp/sf', attachedAt: '2026-01-01T00:00:00.000Z', state: 'active' },
+              'on-par/other': { path: '/tmp/other', attachedAt: '2026-01-01T00:00:00.000Z', state: 'paused' },
+            },
+          }),
+        );
+
+        await cmdDaemonStatus({ ...baseDeps(exec, out), registryFile }, { json: true });
+        expect(text().endsWith('\n')).toBe(true);
+        expect(text().split('\n')).toHaveLength(2);
+        expect(JSON.parse(text())).toEqual({
+          schemaVersion: 1,
+          running: true,
+          pid: 42,
+          uptimeSec: 213753,
+          plistInstalled: false,
+          repos: [
+            { slug: 'on-par/other', checkoutPath: '/tmp/other', state: 'paused' },
+            { slug: 'on-par/software-factory', checkoutPath: '/tmp/sf', state: 'active' },
+          ],
+        });
+        expect(process.exitCode).toBeUndefined();
+        expect(calls.map((c) => c.cmd)).toEqual(['launchctl', 'ps']);
+        expect(calls[1]).toEqual({ cmd: 'ps', args: ['-o', 'etime=', '-p', '42'] });
+      });
+
+      it('not loaded → running false, exit 1, only the print call', async () => {
+        const { exec, calls } = makeFakeExec({ print: { code: 113 } });
+        const { out, text } = makeOut();
+        await cmdDaemonStatus(baseDeps(exec, out), { json: true });
+        expect(JSON.parse(text())).toMatchObject({ running: false, pid: null, uptimeSec: null, repos: [] });
+        expect(process.exitCode).toBe(1);
+        expect(calls).toHaveLength(1);
+      });
+
+      it('loaded but not running → running false, exit 1, no ps call', async () => {
+        const { exec, calls } = makeFakeExec({ print: { code: 0, stdout: 'state = waiting' } });
+        const { out, text } = makeOut();
+        await cmdDaemonStatus(baseDeps(exec, out), { json: true });
+        expect(JSON.parse(text())).toMatchObject({ running: false, pid: null, uptimeSec: null });
+        expect(process.exitCode).toBe(1);
+        expect(calls.map((c) => c.cmd)).toEqual(['launchctl']);
+      });
+
+      it('missing registry file → repos []', async () => {
+        const { exec } = makeFakeExec({ print: { code: 113 } });
+        const { out, text } = makeOut();
+        await cmdDaemonStatus(baseDeps(exec, out), { json: true });
+        expect(JSON.parse(text()).repos).toEqual([]);
+      });
+
+      it('plist present on disk → plistInstalled true', async () => {
+        const { exec } = makeFakeExec({ print: { code: 113 } });
+        const { out, text } = makeOut();
+        const { launchAgentsDir, plistPath } = factorydFiles(home);
+        mkdirSync(launchAgentsDir, { recursive: true });
+        writeFileSync(plistPath, 'x');
+        await cmdDaemonStatus(baseDeps(exec, out), { json: true });
+        expect(JSON.parse(text()).plistInstalled).toBe(true);
+      });
+
+      it('ps prints nothing → running true with null uptimeSec', async () => {
+        const { exec } = makeFakeExec({
+          print: { code: 0, stdout: PRINT_RUNNING },
+          ps: { code: 1, stdout: '' },
+        });
+        const { out, text } = makeOut();
+        await cmdDaemonStatus(baseDeps(exec, out), { json: true });
+        expect(JSON.parse(text())).toMatchObject({ running: true, uptimeSec: null });
+      });
+    });
+
     it('reports pid + uptime via ps and lists attached repos from the registry', async () => {
       const { exec, calls } = makeFakeExec({
         print: { code: 0, stdout: PRINT_RUNNING.replace('pid = 123', 'pid = 42') },
@@ -449,6 +550,18 @@ describe('daemon control commands', () => {
       expect((err as DaemonCtlError).code).toBe(2);
       expect((err as DaemonCtlError).message).toContain('requires macOS launchd');
       expect(calls).toEqual([]);
+    });
+
+    it('daemon status --json throws DaemonCtlError(2) off macOS with empty stdout', async () => {
+      const { exec, calls } = makeFakeExec();
+      const { out, text } = makeOut();
+      const err = await cmdDaemonStatus({ ...baseDeps(exec, out), platform: 'linux' }, { json: true }).catch(
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(DaemonCtlError);
+      expect((err as DaemonCtlError).code).toBe(2);
+      expect(calls).toEqual([]);
+      expect(text()).toBe('');
     });
 
     it('daemon logs still works off macOS (it only reads a file)', async () => {

@@ -17,7 +17,13 @@ import {
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { DEFAULT_FACTORYD_PORT, defaultRegistryPath, listRepos, loadRegistry } from '@on-par/factory-core/internal';
+import {
+  DEFAULT_FACTORYD_PORT,
+  defaultRegistryPath,
+  listRepos,
+  loadRegistry,
+  type RepoState,
+} from '@on-par/factory-core/internal';
 
 export const FACTORYD_LABEL = 'com.onpar.factoryd';
 
@@ -128,6 +134,25 @@ export function renderFactorydPlist(opts: { nodePath: string; cliScriptPath: str
 }
 
 /** Extracts the running pid from `launchctl print gui/<uid>/<label>` output. */
+/** `factory daemon status --json` payload (#2267). Additive changes only; bump schemaVersion on a breaking change. */
+export interface DaemonStatusJson {
+  schemaVersion: 1;
+  running: boolean;
+  pid: number | null;
+  uptimeSec: number | null;
+  plistInstalled: boolean;
+  repos: Array<{ slug: string; checkoutPath: string; state: RepoState }>;
+}
+
+/** ps `etime` ([[dd-]hh:]mm:ss) → whole seconds; null when empty or malformed. */
+export function parseEtime(etime: string): number | null {
+  const m = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(etime.trim());
+  if (!m) return null;
+  const [, dd, hh, mm, ss] = m;
+  if (dd !== undefined && hh === undefined) return null;
+  return ((Number(dd ?? 0) * 24 + Number(hh ?? 0)) * 60 + Number(mm)) * 60 + Number(ss);
+}
+
 export function parseLaunchctlPid(printOutput: string): number | null {
   const m = /^\s*pid\s*=\s*(\d+)\s*$/m.exec(printOutput);
   return m ? Number(m[1]) : null;
@@ -230,11 +255,34 @@ export async function cmdDaemonStop(deps: DaemonCtlDeps = {}): Promise<void> {
 }
 
 /** Report running/not-loaded, pid + uptime, plist install state, and the
- *  attached repos from the registry. Exit code 0 when running, 1 when not. */
-export async function cmdDaemonStatus(deps: DaemonCtlDeps = {}): Promise<void> {
+ *  attached repos from the registry. Exit code 0 when running, 1 when not.
+ *  With `opts.json`, print one DaemonStatusJson object instead of text. */
+export async function cmdDaemonStatus(deps: DaemonCtlDeps = {}, opts: { json?: boolean } = {}): Promise<void> {
   const d = resolveDeps(deps);
   requireDarwin(d.platform);
   const { plistPath, logPath } = factorydFiles(d.home);
+
+  if (opts.json) {
+    const printed = await d.exec('launchctl', ['print', `gui/${d.uid}/${FACTORYD_LABEL}`]);
+    const pid = printed.code === 0 ? parseLaunchctlPid(printed.stdout) : null;
+    const uptimeSec =
+      pid === null ? null : parseEtime((await d.exec('ps', ['-o', 'etime=', '-p', String(pid)])).stdout);
+    const payload: DaemonStatusJson = {
+      schemaVersion: 1,
+      running: pid !== null,
+      pid,
+      uptimeSec,
+      plistInstalled: existsSync(plistPath),
+      repos: listRepos(await loadRegistry(d.registryFile)).map((r) => ({
+        slug: r.slug,
+        checkoutPath: r.path,
+        state: r.state,
+      })),
+    };
+    d.out.write(`${JSON.stringify(payload)}\n`);
+    if (pid === null) process.exitCode = 1;
+    return;
+  }
 
   const print = await d.exec('launchctl', ['print', `gui/${d.uid}/${FACTORYD_LABEL}`]);
   if (print.code !== 0) {
