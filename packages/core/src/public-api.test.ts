@@ -325,6 +325,8 @@ const PUBLIC_API_KEYS = [
 ];
 
 const INTERNAL_API_KEYS = [
+  // Persisted per-issue run state (#2271)
+  'readIssueRunState',
   // Garden harvest (#2083)
   'DEFAULT_GARDEN_MAX_CLUSTERS',
   'DEFAULT_GARDEN_SINCE',

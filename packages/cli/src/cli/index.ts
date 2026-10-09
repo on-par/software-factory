@@ -294,6 +294,7 @@ import {
 } from './classifier-backtest.js';
 import { runQueueClear } from './queue-clear.js';
 import { buildQueueListJson } from './queue-list.js';
+import { buildRunsJson, parseRunsLimit } from './runs.js';
 import { parseResetIssues, runReset } from './reset.js';
 import {
   cmdDaemonLogs,
@@ -3706,6 +3707,25 @@ export async function cmdQueueList(opts: { json?: boolean; lane?: string } = {})
   console.log(JSON.stringify(buildQueueListJson(snapshot, opts.lane)));
 }
 
+export async function cmdRuns(opts: { json?: boolean; limit?: string } = {}): Promise<void> {
+  if (!opts.json) throw new CliExitError('factory: runs requires --json', 2);
+  let limit: number;
+  try {
+    limit = parseRunsLimit(opts.limit);
+  } catch (err) {
+    throw new CliExitError(`factory: runs — ${errorDetail(err)}`, 2);
+  }
+  const paths = getFactoryPaths(await getRepoRoot());
+  let result: Awaited<ReturnType<typeof buildRunsJson>>;
+  try {
+    result = await buildRunsJson(paths.runs, { limit });
+  } catch (err) {
+    throw new CliExitError(`factory: runs failed — ${errorDetail(err)}`, 1);
+  }
+  for (const note of result.skipped) console.error(note);
+  console.log(JSON.stringify(result.json));
+}
+
 export async function cmdQueueClear(opts: { dryRun?: boolean; yes?: boolean; lane?: string } = {}): Promise<void> {
   const [owner, repo] = (await getGitHubRepo()).split('/');
   const queue = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
@@ -5918,6 +5938,15 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .description('Show active runs, the GitHub queue, provider health, and recent events')
     .option('--kpis', 'Also show the full health KPIs and the effective config')
     .action((opts: { kpis?: boolean }) => cmdStatus(opts));
+
+  program
+    .command('runs')
+    .description('Print per-issue run state from the local runs directory as one JSON object, newest first (read-only)')
+    .option('--json', 'Print one JSON object (schemaVersion 1) — required')
+    .option('--limit <n>', 'Show at most N runs (default 50)')
+    .action(async (opts: { json?: boolean; limit?: string }) => {
+      await cmdRuns(opts);
+    });
 
   program
     .command('kpis')
