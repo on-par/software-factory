@@ -5909,7 +5909,7 @@ function logEventQuietly(eventsFile: string, type: EventKind, msg: string): void
 export async function cmdStop(opts: { json?: boolean } = {}): Promise<void> {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const repo = opts.json ? await getGitHubRepo() : undefined;
+  const json = opts.json ? { repo: await getGitHubRepo() } : undefined;
   const before = existsSync(paths.stop);
   ensureDir(paths.state);
   writeFileSync(paths.stop, '');
@@ -5919,8 +5919,8 @@ export async function cmdStop(opts: { json?: boolean } = {}): Promise<void> {
     'stop-file-set',
     before ? 'factory stop: STOP already set (no-op)' : 'factory stop: STOP set — lanes halt between issues',
   );
-  if (opts.json) {
-    console.log(JSON.stringify(buildStopResumeJson({ action: 'stop', repo: repo!, before, after })));
+  if (json) {
+    console.log(JSON.stringify(buildStopResumeJson({ action: 'stop', repo: json.repo, before, after })));
     return;
   }
   console.log('STOP set — lanes halt between issues');
@@ -5929,7 +5929,7 @@ export async function cmdStop(opts: { json?: boolean } = {}): Promise<void> {
 export async function cmdResume(opts: { json?: boolean } = {}): Promise<void> {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const repo = opts.json ? await getGitHubRepo() : undefined;
+  const json = opts.json ? { repo: await getGitHubRepo() } : undefined;
   const before = existsSync(paths.stop);
   if (before) {
     await import('node:fs/promises').then((fs) => fs.unlink(paths.stop));
@@ -5942,8 +5942,8 @@ export async function cmdResume(opts: { json?: boolean } = {}): Promise<void> {
       before ? 'factory resume: STOP cleared' : 'factory resume: STOP was not set (no-op)',
     );
   }
-  if (opts.json) {
-    console.log(JSON.stringify(buildStopResumeJson({ action: 'resume', repo: repo!, before, after })));
+  if (json) {
+    console.log(JSON.stringify(buildStopResumeJson({ action: 'resume', repo: json.repo, before, after })));
     return;
   }
   console.log('STOP cleared');
