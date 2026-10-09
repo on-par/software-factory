@@ -149,6 +149,7 @@ export type EventKind =
   | 'steering_applied'
   | 'steering_unconsumed'
   | 'stop-file-cleared'
+  | 'stop-file-set'
   | 'stopped'
   | 'stuck'
   | 'supervisor-done'
@@ -374,6 +375,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   steering_applied: { severity: 'info', isPark: false, isTerminal: false },
   steering_unconsumed: { severity: 'info', isPark: false, isTerminal: false },
   'stop-file-cleared': { severity: 'warn', isPark: false, isTerminal: false },
+  'stop-file-set': { severity: 'warn', isPark: false, isTerminal: false },
   stopped: { severity: 'warn', isPark: false, isTerminal: true, laneStatus: 'stopped' },
   stuck: { severity: 'warn', isPark: true, isTerminal: false },
   'supervisor-done': { severity: 'info', isPark: false, isTerminal: false },
