@@ -30,6 +30,10 @@ describe('EVENT_TRAITS', () => {
     }
   });
 
+  it('classifies stop-file-set as a non-terminal, non-park warning', () => {
+    expect(EVENT_TRAITS['stop-file-set']).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
+  });
+
   it('has no duplicate keys (every kind classified exactly once)', () => {
     const keys = Object.keys(EVENT_TRAITS);
     expect(new Set(keys).size).toBe(keys.length);

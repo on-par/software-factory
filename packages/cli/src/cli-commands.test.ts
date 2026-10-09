@@ -196,7 +196,7 @@ const inertConfigLoaders: Pick<
   loadRoutesConfig: () => ({}) as never,
   // Lazy: per-test h.factoryConfig mutations are observed.
   loadFactoryConfigForRepo: () => h.factoryConfig,
-  resolveTimeouts: () => ({ plan: 1, build: 1, check: 1, approval: 1 }),
+  resolveTimeouts: () => ({ plan: 1, build: 1, check: 1, approval: 1, tests: 1 }),
   resolveSkipCI: () => false,
   // Lazy: per-test h.constitutionsDir / h.modelOverrides mutations are observed.
   getConstitutionsDir: vi.fn(() => h.constitutionsDir),
@@ -3204,6 +3204,52 @@ bash scripts/verify.sh
       expect(errored()).toContain('invalid --limit');
       expect(logged()).toBe('');
     });
+
+    it('--diffstat exits 1 when the issue has no run', async () => {
+      const res = await runMain('runs', '--json', '--diffstat', '99');
+
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('no run for issue #99');
+      expect(logged()).toBe('');
+    });
+
+    it('--diffstat exits 2 on an invalid issue', async () => {
+      const res = await runMain('runs', '--json', '--diffstat', 'abc');
+
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('invalid --diffstat');
+      expect(logged()).toBe('');
+    });
+
+    it('--diffstat exits 2 without --json', async () => {
+      const res = await runMain('runs', '--diffstat', '5');
+
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('requires --json');
+    });
+
+    it('--diffstat exits 2 when combined with --limit', async () => {
+      const res = await runMain('runs', '--json', '--diffstat', '5', '--limit', '2');
+
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('cannot be combined');
+    });
+
+    it('--diffstat prints files null with reason no-branch for an empty branch', async () => {
+      mkdirSync(runsDir(), { recursive: true });
+      writeFileSync(
+        join(runsDir(), 'issue-5.json'),
+        JSON.stringify({ issue: 5, lane: 'daw', branch: '', updatedAt: '2026-01-01T00:00:00Z' }),
+      );
+
+      const res = await runMain('runs', '--json', '--diffstat', '5');
+
+      expect(res).toEqual({ exited: false, code: undefined });
+      const out = JSON.parse(logged()) as { files: unknown; reason: string; base: unknown };
+      expect(out.files).toBeNull();
+      expect(out.reason).toBe('no-branch');
+      expect(typeof out.base).toBe('string');
+    });
   });
 
   describe('queue clear', () => {
@@ -3381,6 +3427,97 @@ bash scripts/verify.sh
     it('resume is a no-op when there is no STOP file', async () => {
       await runMain('resume');
       expect(logged()).toContain('STOP cleared');
+    });
+
+    it('text output is byte-identical without --json', async () => {
+      await runMain('stop');
+      expect(logged()).toBe('STOP set — lanes halt between issues');
+    });
+
+    it('resume text output is byte-identical without --json', async () => {
+      await runMain('resume');
+      expect(logged()).toBe('STOP cleared');
+    });
+
+    it('stop --json prints one JSON object when not stopped', async () => {
+      await runMain('stop', '--json');
+      expect(existsSync(paths().stop)).toBe(true);
+      expect(logged().split('\n')).toHaveLength(1);
+      expect(JSON.parse(logged())).toEqual({
+        schemaVersion: 1,
+        ok: true,
+        action: 'stop',
+        repo: h.ghRepo,
+        stopFlag: { before: false, after: true },
+      });
+    });
+
+    it('stop --json is idempotent when already stopped', async () => {
+      writeFileSync(paths().stop, '');
+      await runMain('stop', '--json');
+      expect(existsSync(paths().stop)).toBe(true);
+      expect(JSON.parse(logged())).toMatchObject({ ok: true, stopFlag: { before: true, after: true } });
+    });
+
+    it('resume --json reports before/after with and without STOP', async () => {
+      writeFileSync(paths().stop, '');
+      await runMain('resume', '--json');
+      expect(existsSync(paths().stop)).toBe(false);
+      expect(JSON.parse(logged())).toMatchObject({ action: 'resume', stopFlag: { before: true, after: false } });
+    });
+
+    it('stop leaves an existing STOP file untouched (exclusive create, no rewrite)', async () => {
+      writeFileSync(paths().stop, 'set by lane');
+      await runMain('stop', '--json');
+      expect(readFileSync(paths().stop, 'utf-8')).toBe('set by lane');
+      expect(JSON.parse(logged())).toMatchObject({ stopFlag: { before: true, after: true } });
+    });
+
+    it('resume surfaces unlink errors other than a missing STOP file', async () => {
+      mkdirSync(join(paths().stop, 'nested'), { recursive: true });
+      await expect(runMain('resume', '--json')).rejects.toMatchObject({ code: expect.stringMatching(/^E/) });
+      expect(existsSync(paths().stop)).toBe(true);
+    });
+
+    it('resume --json is ok when STOP was not set', async () => {
+      await runMain('resume', '--json');
+      expect(JSON.parse(logged())).toMatchObject({ ok: true, stopFlag: { before: false, after: false } });
+    });
+
+    it('stop --json has the same shape as the golden fixture', async () => {
+      await runMain('stop', '--json');
+      const golden = JSON.parse(
+        readFileSync(new URL('./__fixtures__/stop-resume-json/stop.json', import.meta.url), 'utf-8'),
+      ) as { stopFlag: object };
+      const out = JSON.parse(logged()) as { stopFlag: object };
+      expect(Object.keys(out)).toEqual(Object.keys(golden));
+      expect(Object.keys(out.stopFlag)).toEqual(Object.keys(golden.stopFlag));
+    });
+
+    it('records stop-file-set / stop-file-cleared events without echoing them', async () => {
+      const types = () =>
+        readFileSync(paths().events, 'utf-8')
+          .split('\n')
+          .filter(Boolean)
+          .map((l) => (JSON.parse(l) as { type: string }).type);
+      await runMain('stop');
+      expect(types()).toEqual(['stop-file-set']);
+      expect(logged()).toBe('STOP set — lanes halt between issues');
+      await runMain('resume');
+      expect(types()).toEqual(['stop-file-set', 'stop-file-cleared']);
+    });
+
+    it('stop --json fails with exit 2 and writes nothing when repo lookup fails', async () => {
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) throw new Error('gh not authenticated');
+        return '';
+      };
+      const res = await runMain('stop', '--json');
+      expect(res).toMatchObject({ exited: true, code: 2 });
+      expect(errored()).toContain('no GitHub remote detected');
+      expect(logged()).toBe('');
+      expect(existsSync(paths().stop)).toBe(false);
     });
   });
 
@@ -5984,7 +6121,7 @@ describe('shipIssue (direct)', () => {
   });
 
   it('uses injected resolveTimeouts, resolveSkipCI and resolveEffectiveModelPins', async () => {
-    const timeouts = vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1 }));
+    const timeouts = vi.fn(() => ({ plan: 1, build: 1, check: 1, approval: 1, tests: 1 }));
     const skip = vi.fn(() => false);
     const pins = vi.fn(() => ({
       plan: undefined,

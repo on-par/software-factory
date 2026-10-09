@@ -67,6 +67,8 @@ export interface CheckerContext {
    *  checkPhase per round. The FAIL details carry only a bounded summary plus this
    *  log's path, so the rework worker and a human can read what the cap cut. */
   outputLogDir?: string;
+  /** Timeout for the tests checker command, in seconds (`timeouts.tests_seconds`, #2299). Defaults to 300. */
+  testsTimeoutSeconds?: number;
 }
 
 export type CheckerFn = (ctx: CheckerContext) => Promise<CheckerOutput>;
@@ -279,15 +281,14 @@ export async function resolveTestsCommand(ctx: CheckerContext): Promise<TestsCom
   const pkg = await getPackageJson(ctx);
   if (pkg?.scripts?.test) return { runner: 'npm', argv: ['npm', 'test'], label: 'npm test' };
   const pythonSurface = ctx.probe?.pythonTestSurface ?? (await detectPythonTestSurface(ctx.worktree));
-  if (pythonSurface.present)
-    return {
-      runner: 'pytest',
-      argv: pythonSurface.sources.includes('.factory/tests/')
-        ? ['python3', '-m', 'pytest', '.factory/tests']
-        : ['python3', '-m', 'pytest'],
-      label: 'pytest',
-    };
-  return { runner: 'none', argv: [], label: '' };
+  if (!pythonSurface.present) return { runner: 'none', argv: [], label: '' };
+  return {
+    runner: 'pytest',
+    argv: pythonSurface.sources.includes('.factory/tests/')
+      ? ['python3', '-m', 'pytest', '.factory/tests']
+      : ['python3', '-m', 'pytest'],
+    label: 'pytest',
+  };
 }
 
 const TESTS_PASS_DETAILS = {
@@ -296,14 +297,25 @@ const TESTS_PASS_DETAILS = {
   pytest: 'python3 -m pytest: OK',
 } as const;
 
+const DEFAULT_TESTS_TIMEOUT_SECONDS = 300;
+
 export const testsChecker: CheckerFn = async (ctx) => {
   try {
     const run = ctx.runCommand ?? runCommand;
+    const timeoutSeconds = ctx.testsTimeoutSeconds ?? DEFAULT_TESTS_TIMEOUT_SECONDS;
+    const timeoutMs = timeoutSeconds * 1000;
+    // A kill at the timeout must never read as a real test failure (#2299): lead with it.
+    const describeFailure = (r: CommandResult): string => {
+      const evidence = describeTestFailure(r, 500);
+      if (!r.timedOut) return evidence;
+      const head = `timed out after ${timeoutSeconds}s (raise timeouts.tests_seconds or FACTORY_TESTS_TIMEOUT)`;
+      return evidence === 'timed out' ? head : `${head}\n${evidence}`;
+    };
     const cmd = await resolveTestsCommand(ctx);
     if (cmd.runner !== 'none') {
       const r = await run(cmd.argv, {
         cwd: ctx.worktree,
-        timeoutMs: 300_000,
+        timeoutMs,
         env: ctx.env,
         onPgid: ctx.onPgid,
       });
@@ -312,7 +324,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
       return {
         checker: 'tests',
         result: 'FAIL',
-        details: await commandFailureDetails(ctx, 'tests', cmd.label, r, describeTestFailure(r, 500)),
+        details: await commandFailureDetails(ctx, 'tests', cmd.label, r, describeFailure(r)),
       };
     }
 

@@ -3,7 +3,16 @@ import { fileURLToPath } from 'node:url';
 
 import { exec as execCb, execSync, type StdioOptions } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import { arch, hostname as osHostname, release, platform, userInfo } from 'node:os';
 import { basename, dirname, relative, resolve } from 'node:path';
@@ -299,7 +308,9 @@ import { buildQueueAddJson } from './queue-add-json.js';
 import { buildQueueListJson } from './queue-list.js';
 import { runUnpark, UnparkError, type UnparkJson } from './unpark.js';
 import { buildRunsJson, parseRunsLimit } from './runs.js';
+import { buildRunDiffstatJson, NoRunError, parseDiffstatIssue, type RunDiffstatJson } from './runs-diffstat.js';
 import { buildStatusJson } from './status-json.js';
+import { buildStopResumeJson } from './stop-resume-json.js';
 import { buildUsageJson } from './usage-json.js';
 import { parseResetIssues, runReset } from './reset.js';
 import {
@@ -3839,8 +3850,29 @@ export async function cmdQueueList(opts: { json?: boolean; lane?: string } = {})
   console.log(JSON.stringify(buildQueueListJson(snapshot, opts.lane)));
 }
 
-export async function cmdRuns(opts: { json?: boolean; limit?: string } = {}): Promise<void> {
+export async function cmdRuns(opts: { json?: boolean; limit?: string; diffstat?: string } = {}): Promise<void> {
   if (!opts.json) throw new CliExitError('factory: runs requires --json', 2);
+  if (opts.diffstat !== undefined) {
+    if (opts.limit !== undefined) {
+      throw new CliExitError('factory: runs — --diffstat and --limit cannot be combined', 2);
+    }
+    let issue: number;
+    try {
+      issue = parseDiffstatIssue(opts.diffstat);
+    } catch (err) {
+      throw new CliExitError(`factory: runs — ${errorDetail(err)}`, 2);
+    }
+    const repoRoot = await getRepoRoot();
+    let out: RunDiffstatJson;
+    try {
+      out = await buildRunDiffstatJson({ runsDir: getFactoryPaths(repoRoot).runs, repoRoot, issue });
+    } catch (err) {
+      if (err instanceof NoRunError) throw new CliExitError(`factory: runs — ${err.message}`, 1);
+      throw new CliExitError(`factory: runs failed — ${errorDetail(err)}`, 1);
+    }
+    console.log(JSON.stringify(out));
+    return;
+  }
   let limit: number;
   try {
     limit = parseRunsLimit(opts.limit);
@@ -5978,6 +6010,72 @@ export interface CliDeps {
   writeLocalRunReport?: typeof writeLocalRunReport;
 }
 
+/** Appends one event to the events log without echoing it to stdout (stop/resume --json must print only JSON). */
+function logEventQuietly(eventsFile: string, type: EventKind, msg: string): void {
+  createLogger(eventsFile, { issue: '-' }, { out: { write: () => true } }).warn(type, msg);
+}
+
+/** Creates the STOP file in one exclusive open (no check-then-write race). Returns false when it already existed. */
+function createStopFile(stopFile: string): boolean {
+  try {
+    writeFileSync(stopFile, '', { flag: 'wx' });
+    return true;
+  } catch (err: any) {
+    if (err?.code === 'EEXIST') return false;
+    throw err;
+  }
+}
+
+/** Removes the STOP file in one unlink (no check-then-unlink race). Returns false when it was not there. */
+function removeStopFile(stopFile: string): boolean {
+  try {
+    unlinkSync(stopFile);
+    return true;
+  } catch (err: any) {
+    if (err?.code === 'ENOENT') return false;
+    throw err;
+  }
+}
+
+export async function cmdStop(opts: { json?: boolean } = {}): Promise<void> {
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+  const json = opts.json ? { repo: await getGitHubRepo() } : undefined;
+  ensureDir(paths.state);
+  const before = !createStopFile(paths.stop);
+  const after = true;
+  logEventQuietly(
+    paths.events,
+    'stop-file-set',
+    before ? 'factory stop: STOP already set (no-op)' : 'factory stop: STOP set — lanes halt between issues',
+  );
+  if (json) {
+    console.log(JSON.stringify(buildStopResumeJson({ action: 'stop', repo: json.repo, before, after })));
+    return;
+  }
+  console.log('STOP set — lanes halt between issues');
+}
+
+export async function cmdResume(opts: { json?: boolean } = {}): Promise<void> {
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+  const json = opts.json ? { repo: await getGitHubRepo() } : undefined;
+  const before = removeStopFile(paths.stop);
+  const after = false;
+  if (existsSync(paths.root)) {
+    logEventQuietly(
+      paths.events,
+      'stop-file-cleared',
+      before ? 'factory resume: STOP cleared' : 'factory resume: STOP was not set (no-op)',
+    );
+  }
+  if (json) {
+    console.log(JSON.stringify(buildStopResumeJson({ action: 'resume', repo: json.repo, before, after })));
+    return;
+  }
+  console.log('STOP cleared');
+}
+
 // ---------- main ----------
 
 export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
@@ -6082,7 +6180,11 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .description('Print per-issue run state from the local runs directory as one JSON object, newest first (read-only)')
     .option('--json', 'Print one JSON object (schemaVersion 1) — required')
     .option('--limit <n>', 'Show at most N runs (default 50)')
-    .action(async (opts: { json?: boolean; limit?: string }) => {
+    .option(
+      '--diffstat <issue>',
+      "Print per-file added/deleted line counts for one issue's run branch vs origin/<default branch>",
+    )
+    .action(async (opts: { json?: boolean; limit?: string; diffstat?: string }) => {
       await cmdRuns(opts);
     });
 
@@ -6562,25 +6664,14 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
   program
     .command('stop')
     .description('Tell running lanes to halt after their current issue')
-    .action(async () => {
-      const repoRoot = await getRepoRoot();
-      const paths = getFactoryPaths(repoRoot);
-      ensureDir(paths.state);
-      writeFileSync(paths.stop, '');
-      console.log('STOP set — lanes halt between issues');
-    });
+    .option('--json', 'Print one JSON object (schemaVersion 1): action, repo, stopFlag before/after')
+    .action((opts: { json?: boolean }) => cmdStop(opts));
 
   program
     .command('resume')
     .description('Clear a stop so lanes pick up new issues again')
-    .action(async () => {
-      const repoRoot = await getRepoRoot();
-      const paths = getFactoryPaths(repoRoot);
-      if (existsSync(paths.stop)) {
-        await import('node:fs/promises').then((fs) => fs.unlink(paths.stop));
-      }
-      console.log('STOP cleared');
-    });
+    .option('--json', 'Print one JSON object (schemaVersion 1): action, repo, stopFlag before/after')
+    .action((opts: { json?: boolean }) => cmdResume(opts));
 
   applyHelpGroups(program);
 

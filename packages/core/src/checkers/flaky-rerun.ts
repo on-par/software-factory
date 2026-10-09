@@ -18,8 +18,8 @@ function full(cmd: TestsCommand): RerunPlan {
 }
 
 function testNamePattern(name: string): string {
-  const last = name.split(' > ').pop() ?? name;
-  return last
+  return name
+    .replace(/^.* > /, '')
     .replace(/\s+\d+(?:\.\d+)?ms$/, '')
     .trim()
     .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

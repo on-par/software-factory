@@ -162,6 +162,10 @@ const TimeoutsSchema = z
     check_seconds: z.number().default(1800).describe('CHECK phase timeout in seconds.'),
     merge_poll_seconds: z.number().default(120).describe('Interval in seconds between merge-readiness polls.'),
     approval_seconds: z.number().default(1800).describe('How long to wait for operator approval before timing out.'),
+    tests_seconds: z
+      .number()
+      .default(300)
+      .describe('Timeout in seconds for the tests checker command (verify.sh, npm test, pytest).'),
   })
   .describe('Per-phase timeouts.');
 

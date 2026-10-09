@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "action": "stop",
+  "repo": "on-par/example",
+  "stopFlag": {
+    "before": false,
+    "after": true
+  }
+}
