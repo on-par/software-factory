@@ -1,7 +1,15 @@
-// src/checkers/flaky-rerun.ts — pure plan for a serial re-run of a failing tests checker (#2291)
+// src/checkers/flaky-rerun.ts — serial re-run of a failing tests checker (#2291, #2301)
 import { extractFailingTestNames } from './baseline.js';
-import type { TestsCommand } from './index.js';
+import type { CommandResult } from '../utils/command-runner.js';
+import {
+  type CheckerContext,
+  getPackageJson,
+  resolveTestsCommand,
+  type TestsCommand,
+  writeCommandLog,
+} from './index.js';
 import type { PackageJson } from './probe.js';
+import { runVerificationCommand } from './run-command.js';
 
 export const RERUN_TIMEOUT_MS = 600_000;
 
@@ -45,4 +53,46 @@ export function buildRerunPlan(cmd: TestsCommand, pkg: PackageJson | null, detai
     };
   }
   return full(cmd);
+}
+
+export interface FlakeRerun {
+  verdict: 'passed' | 'reproduced' | 'not-run';
+  mode: RerunPlan['mode'];
+  /** RerunPlan.tests: [] for a full re-run. */
+  tests: string[];
+  /** Full-output log (<outputLogDir>/flaky-rerun-tests.log); absent when no outputLogDir or the write failed. */
+  logPath?: string;
+  /** Why the verdict is not-run. */
+  reason?: string;
+}
+
+export async function rerunFailingTests({ ctx, plan }: { ctx: CheckerContext; plan: RerunPlan }): Promise<FlakeRerun> {
+  const base = { mode: plan.mode, tests: plan.tests };
+  if (plan.argv.length === 0) return { ...base, verdict: 'not-run', reason: 'no tests command' };
+  let r: CommandResult;
+  try {
+    r = await (ctx.runCommand ?? runVerificationCommand)(plan.argv, {
+      cwd: ctx.worktree,
+      timeoutMs: plan.timeoutMs,
+      env: ctx.env,
+      onPgid: ctx.onPgid,
+    });
+  } catch (e: any) {
+    return { ...base, verdict: 'not-run', reason: String(e?.message ?? e).slice(0, 300) };
+  }
+  const logPath = (await writeCommandLog(ctx, 'flaky-rerun-tests', r)) ?? undefined;
+  const withLog = logPath === undefined ? base : { ...base, logPath };
+  if (r.timedOut) return { ...withLog, verdict: 'not-run', reason: `timed out after ${plan.timeoutMs / 1000}s` };
+  return { ...withLog, verdict: r.ok ? 'passed' : 'reproduced' };
+}
+
+/** Resolve + plan + run for the failing `tests` checker; never throws (#2301). */
+export async function rerunTestsChecker(ctx: CheckerContext, details: string): Promise<FlakeRerun> {
+  try {
+    const cmd = await resolveTestsCommand(ctx);
+    const plan = buildRerunPlan(cmd, await getPackageJson(ctx), details);
+    return await rerunFailingTests({ ctx, plan });
+  } catch (e: any) {
+    return { verdict: 'not-run', mode: 'full', tests: [], reason: String(e?.message ?? e).slice(0, 300) };
+  }
 }

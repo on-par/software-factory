@@ -228,7 +228,7 @@ function describeTestFailure(r: CommandResult, maxChars: number): string {
 /** Writes a failed command's full stdout/stderr under ctx.outputLogDir. Returns the path,
  *  or null when no log dir is set or the write fails — the log is a diagnostic side
  *  channel and must never change a checker's verdict. */
-async function writeCommandLog(ctx: CheckerContext, name: string, r: CommandResult): Promise<string | null> {
+export async function writeCommandLog(ctx: CheckerContext, name: string, r: CommandResult): Promise<string | null> {
   if (!ctx.outputLogDir) return null;
   const path = join(ctx.outputLogDir, `${name.replace(/[^A-Za-z0-9.]+/g, '-')}.log`);
   try {
@@ -696,7 +696,7 @@ async function loadPackageJson(worktree: string): Promise<PackageJson | null> {
   return JSON.parse(raw) as PackageJson;
 }
 
-async function getPackageJson(ctx: CheckerContext): Promise<PackageJson | null> {
+export async function getPackageJson(ctx: CheckerContext): Promise<PackageJson | null> {
   if (ctx.packageJson !== undefined) return ctx.packageJson;
   const p = ctx.probe?.packageJson;
   if (p) {

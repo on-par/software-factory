@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { LaneLifecycleEventSchema } from '@on-par/contracts';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createLifecycleBus } from '../bus/index.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
@@ -2402,5 +2402,109 @@ describe('checkPhase tests timeout (#2299)', () => {
       },
     });
     expect(seen).toBe(1200);
+  });
+});
+
+describe('flaky re-run in shadow mode (#2301)', () => {
+  const dirs: string[] = [];
+  afterEach(async () => {
+    await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+  });
+  const okResult = {
+    command: ['npm', 'test'],
+    stdout: '',
+    stderr: '',
+    exitCode: 0,
+    killed: false,
+    timedOut: false,
+    ok: true,
+  };
+  const summaryOf = (...checkers: string[]): CheckSummary => ({
+    results: checkers.map((checker) => ({ checker, result: 'FAIL' as const, details: ' × suite > adds' })),
+    failures: checkers.length,
+    passes: 0,
+    skips: 0,
+    total: checkers.length,
+  });
+
+  const run = async (
+    checkers: string[],
+    verdict: 'fails-on-base' | 'clean-on-base',
+    runCommand: ReturnType<typeof vi.fn>,
+    extra: { maxReworkRounds?: number } = {},
+  ) => {
+    const worktree = await mkdtemp(join(tmpdir(), 'check-flaky-'));
+    dirs.push(worktree);
+    await writeFile(join(worktree, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run' } }));
+    const { router } = makeRouter();
+    const logs: string[] = [];
+    const result = await checkPhase({
+      issue: 5,
+      worktree,
+      specPath: join(worktree, 'spec.md'),
+      router,
+      constitution: null,
+      diffBase: 'abc1234567',
+      maxReworkRounds: 1,
+      ...extra,
+      log: (_t, msg) => {
+        logs.push(msg);
+      },
+      runCheckers: async () => summaryOf(...checkers),
+      runBaseline: async (o) =>
+        ({
+          baseSha: o.baseSha,
+          checkers: o.failing
+            .filter((r) => r.result === 'FAIL')
+            .map((r) => ({ checker: r.checker, verdict, baseResult: 'FAIL' })),
+        }) as BaselineReport,
+      runCommand: runCommand as never,
+    });
+    return { result, logs };
+  };
+
+  it('logs a passing re-run and still parks as environment', async () => {
+    const fake = vi.fn(async (_argv: readonly string[]) => okResult);
+    const { result, logs } = await run(['tests'], 'fails-on-base', fake);
+    expect(fake).toHaveBeenCalledTimes(1);
+    expect(fake.mock.calls[0]?.[0]).toEqual(['npm', 'test', '--', '-t', 'adds', '--no-file-parallelism']);
+    expect((fake.mock.calls[0] as unknown[])[1]).toMatchObject({ timeoutMs: 600_000 });
+    expect(result.flakeRerun?.verdict).toBe('passed');
+    expect(result.environment).toBeDefined();
+    expect(result.passed).toBe(false);
+    expect(result.reworkRounds).toBe(0);
+    expect(logs).toContain('flaky re-run: passed (targeted, 1 tests)');
+  });
+
+  it('reports reproduced', async () => {
+    const fake = vi.fn(async () => ({ ...okResult, exitCode: 1, ok: false }));
+    const { result } = await run(['tests'], 'fails-on-base', fake);
+    expect(result.flakeRerun?.verdict).toBe('reproduced');
+    expect(result.environment).toBeDefined();
+  });
+
+  it('reports not-run when the command throws', async () => {
+    const fake = vi.fn(async () => {
+      throw new Error('spawn ENOENT');
+    });
+    const { result, logs } = await run(['tests'], 'fails-on-base', fake);
+    expect(result.flakeRerun).toMatchObject({ verdict: 'not-run', reason: expect.stringContaining('spawn ENOENT') });
+    expect(result.environment).toBeDefined();
+    expect(logs.some((l) => l.startsWith('flaky re-run: not-run') && l.includes('spawn ENOENT'))).toBe(true);
+  });
+
+  it('skips the re-run when tests is not failing', async () => {
+    const fake = vi.fn(async () => okResult);
+    const { result } = await run(['lint'], 'fails-on-base', fake);
+    expect(fake).not.toHaveBeenCalled();
+    expect(result.flakeRerun).toBeUndefined();
+    expect(result.environment).toBeDefined();
+  });
+
+  it('skips the re-run when the cause is not environment', async () => {
+    const fake = vi.fn(async () => okResult);
+    const { result } = await run(['tests'], 'clean-on-base', fake, { maxReworkRounds: 0 });
+    expect(fake).not.toHaveBeenCalled();
+    expect(result.flakeRerun).toBeUndefined();
   });
 });
