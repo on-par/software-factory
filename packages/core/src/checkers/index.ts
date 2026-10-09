@@ -265,6 +265,38 @@ async function commandFailureDetails(
   return logPath ? `${label} failed: ${summary}\nfull output: ${logPath}` : `${label} failed: ${summary}`;
 }
 
+export type TestsRunner = 'verify' | 'npm' | 'pytest' | 'none';
+
+/** The command the `tests` checker runs for a worktree; argv is [] when runner is 'none'. */
+export interface TestsCommand {
+  runner: TestsRunner;
+  argv: string[];
+  /** Label used in FAIL details and the output-log name (`verify.sh`, `npm test`, `pytest`, `''` for none). */
+  label: string;
+}
+
+export async function resolveTestsCommand(ctx: CheckerContext): Promise<TestsCommand> {
+  if (await fileExists(join(ctx.worktree, 'scripts/verify.sh')))
+    return { runner: 'verify', argv: ['bash', 'scripts/verify.sh', '--no-e2e'], label: 'verify.sh' };
+  const pkg = await getPackageJson(ctx);
+  if (pkg?.scripts?.test) return { runner: 'npm', argv: ['npm', 'test'], label: 'npm test' };
+  const pythonSurface = ctx.probe?.pythonTestSurface ?? (await detectPythonTestSurface(ctx.worktree));
+  if (!pythonSurface.present) return { runner: 'none', argv: [], label: '' };
+  return {
+    runner: 'pytest',
+    argv: pythonSurface.sources.includes('.factory/tests/')
+      ? ['python3', '-m', 'pytest', '.factory/tests']
+      : ['python3', '-m', 'pytest'],
+    label: 'pytest',
+  };
+}
+
+const TESTS_PASS_DETAILS = {
+  verify: 'scripts/verify.sh: OK',
+  npm: 'npm test: OK',
+  pytest: 'python3 -m pytest: OK',
+} as const;
+
 const DEFAULT_TESTS_TIMEOUT_SECONDS = 300;
 
 export const testsChecker: CheckerFn = async (ctx) => {
@@ -279,54 +311,20 @@ export const testsChecker: CheckerFn = async (ctx) => {
       const head = `timed out after ${timeoutSeconds}s (raise timeouts.tests_seconds or FACTORY_TESTS_TIMEOUT)`;
       return evidence === 'timed out' ? head : `${head}\n${evidence}`;
     };
-    if (await fileExists(join(ctx.worktree, 'scripts/verify.sh'))) {
-      const r = await run(['bash', 'scripts/verify.sh', '--no-e2e'], {
+    const cmd = await resolveTestsCommand(ctx);
+    if (cmd.runner !== 'none') {
+      const r = await run(cmd.argv, {
         cwd: ctx.worktree,
         timeoutMs,
         env: ctx.env,
         onPgid: ctx.onPgid,
       });
-      if (r.ok) return { checker: 'tests', result: 'PASS', details: 'scripts/verify.sh: OK' };
+      if (r.ok) return { checker: 'tests', result: 'PASS', details: TESTS_PASS_DETAILS[cmd.runner] };
+      // For pytest, fail closed: a surface that cannot run (pytest missing, import error) is FAIL, never SKIP
       return {
         checker: 'tests',
         result: 'FAIL',
-        details: await commandFailureDetails(ctx, 'tests', 'verify.sh', r, describeFailure(r)),
-      };
-    }
-
-    const pkg = await getPackageJson(ctx);
-    if (pkg?.scripts?.test) {
-      const r = await run(['npm', 'test'], {
-        cwd: ctx.worktree,
-        timeoutMs,
-        env: ctx.env,
-        onPgid: ctx.onPgid,
-      });
-      if (r.ok) return { checker: 'tests', result: 'PASS', details: 'npm test: OK' };
-      return {
-        checker: 'tests',
-        result: 'FAIL',
-        details: await commandFailureDetails(ctx, 'tests', 'npm test', r, describeFailure(r)),
-      };
-    }
-
-    const pythonSurface = ctx.probe?.pythonTestSurface ?? (await detectPythonTestSurface(ctx.worktree));
-    if (pythonSurface.present) {
-      const pytestArgv = pythonSurface.sources.includes('.factory/tests/')
-        ? ['python3', '-m', 'pytest', '.factory/tests']
-        : ['python3', '-m', 'pytest'];
-      const r = await run(pytestArgv, {
-        cwd: ctx.worktree,
-        timeoutMs,
-        env: ctx.env,
-        onPgid: ctx.onPgid,
-      });
-      if (r.ok) return { checker: 'tests', result: 'PASS', details: 'python3 -m pytest: OK' };
-      // Fail closed: a surface that cannot run (pytest missing, import error) is FAIL, never SKIP
-      return {
-        checker: 'tests',
-        result: 'FAIL',
-        details: await commandFailureDetails(ctx, 'tests', 'pytest', r, describeFailure(r)),
+        details: await commandFailureDetails(ctx, 'tests', cmd.label, r, describeFailure(r)),
       };
     }
 

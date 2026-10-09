@@ -19,6 +19,7 @@ import {
   fileExists,
   linksChecker,
   renderCheckerFindings,
+  resolveTestsCommand,
   lintChecker,
   runAllCheckers,
   runCustomChecker,
@@ -26,6 +27,7 @@ import {
   testsChecker,
   type WorktreeProbe,
 } from './index.js';
+import type { PythonTestSurfaceSource } from './probe.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -685,6 +687,59 @@ assert.ok(process.env.PATH);
     const result = await testsChecker({ ...makeContext(worktree), env: LANE_ENV });
 
     expect(result.result).toBe('PASS');
+  });
+});
+
+describe('resolveTestsCommand', () => {
+  const probeWith = (sources: PythonTestSurfaceSource[] | null): WorktreeProbe => ({
+    packageJson: { status: 'loaded', value: { scripts: {} } },
+    htmlFiles: [],
+    playwrightConfigFiles: [],
+    playwrightConfigContents: {},
+    scripts: {},
+    pythonTestSurface: { present: sources !== null, sources: sources ?? [] },
+  });
+
+  it('prefers scripts/verify.sh', async () => {
+    const worktree = await makeWorktree({
+      'scripts/verify.sh': '#!/bin/sh\n',
+      'package.json': JSON.stringify({ scripts: { test: 'vitest' } }),
+    });
+    expect(await resolveTestsCommand(makeContext(worktree))).toEqual({
+      runner: 'verify',
+      argv: ['bash', 'scripts/verify.sh', '--no-e2e'],
+      label: 'verify.sh',
+    });
+  });
+
+  it('uses npm test when package.json has a test script', async () => {
+    const worktree = await makeWorktree({ 'package.json': JSON.stringify({ scripts: { test: 'vitest' } }) });
+    expect(await resolveTestsCommand(makeContext(worktree))).toEqual({
+      runner: 'npm',
+      argv: ['npm', 'test'],
+      label: 'npm test',
+    });
+  });
+
+  it('uses pytest with .factory/tests when present, else bare pytest', async () => {
+    const worktree = await makeWorktree();
+    const withDir = await resolveTestsCommand({ ...makeContext(worktree), probe: probeWith(['.factory/tests/']) });
+    expect(withDir).toEqual({
+      runner: 'pytest',
+      argv: ['python3', '-m', 'pytest', '.factory/tests'],
+      label: 'pytest',
+    });
+    const bare = await resolveTestsCommand({ ...makeContext(worktree), probe: probeWith(['pytest.ini']) });
+    expect(bare.argv).toEqual(['python3', '-m', 'pytest']);
+  });
+
+  it('returns none when there is no surface', async () => {
+    const worktree = await makeWorktree();
+    expect(await resolveTestsCommand({ ...makeContext(worktree), probe: probeWith(null) })).toEqual({
+      runner: 'none',
+      argv: [],
+      label: '',
+    });
   });
 });
 
