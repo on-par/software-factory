@@ -3355,6 +3355,32 @@ bash scripts/verify.sh
       expect(out).toContain('attached repos: none');
     });
 
+    it('daemon status --json prints one JSON object for the running agent', async () => {
+      h.daemonExecImpl = (cmd) =>
+        cmd === 'launchctl'
+          ? { code: 0, stdout: '\tpid = 4242\n', stderr: '' }
+          : { code: 0, stdout: '01:02\n', stderr: '' };
+      const res = await runMain('daemon', 'status', '--json');
+      expect(res.exited).toBe(false);
+      expect(JSON.parse(h.daemonOut.join(''))).toEqual({
+        schemaVersion: 1,
+        running: true,
+        pid: 4242,
+        uptimeSec: 62,
+        plistInstalled: false,
+        repos: [],
+      });
+    });
+
+    it('daemon status --json on linux exits 2 with nothing on stdout', async () => {
+      h.daemonPlatform = 'linux';
+      const res = await runMain('daemon', 'status', '--json');
+      expect(res.exited).toBe(true);
+      expect(res.code).toBe(2);
+      expect(h.daemonOut).toEqual([]);
+      expect(errored()).toContain('requires macOS launchd');
+    });
+
     it('daemon logs -n prints the last N lines of the log', async () => {
       const { logPath } = factorydFiles(h.daemonHome);
       mkdirSync(dirname(logPath), { recursive: true });

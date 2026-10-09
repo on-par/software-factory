@@ -6297,7 +6297,8 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
   daemonCmd
     .command('status')
     .description('Report factoryd pid, uptime, and attached repos')
-    .action(() => daemonCtl(() => cmdDaemonStatus(deps.daemon)));
+    .option('--json', 'Print one JSON object (schemaVersion 1) instead of text')
+    .action((opts: { json?: boolean }) => daemonCtl(() => cmdDaemonStatus(deps.daemon, { json: opts.json })));
   daemonCmd
     .command('logs')
     .description('Print or tail ~/.factory/daemon.log')

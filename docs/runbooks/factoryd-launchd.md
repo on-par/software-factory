@@ -25,6 +25,7 @@ Re-run it after moving or upgrading the CLI in place — the recorded paths go s
 
 - `factory daemon status` — pid, uptime, plist install state, and each attached repo
   (slug + state) from `~/.factory/registry.json`. Exit 0 when running, 1 when not.
+- `factory daemon status --json` — prints one JSON object (schemaVersion 1) for tools
 - `factory daemon logs [-n N] [-f]` — last N lines (default 100) of
   `~/.factory/daemon.log`; `-f` keeps tailing.
 - `factory daemon stop` — unloads the agent (launchd stops relaunching). The plist
