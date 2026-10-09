@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "action": "queue-add",
+  "lane": "ops",
+  "issues": [
+    {
+      "number": 1,
+      "outcome": "queued",
+      "order": 3,
+      "labelsAdded": ["factory:queued", "factory:lane:ops", "factory:order:3"]
+    },
+    {
+      "number": 2,
+      "outcome": "queued",
+      "order": 4,
+      "labelsAdded": ["factory:queued", "factory:lane:ops", "factory:order:4"]
+    },
+    {
+      "number": 3,
+      "outcome": "already-queued",
+      "order": 1,
+      "labelsAdded": []
+    }
+  ],
+  "labelsCreated": ["factory:order:3", "factory:order:4"]
+}
