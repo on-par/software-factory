@@ -293,6 +293,7 @@ import {
   type ClassifierBacktestOptions,
 } from './classifier-backtest.js';
 import { runQueueClear } from './queue-clear.js';
+import { buildCostJson } from './cost-json.js';
 import { buildQueueListJson } from './queue-list.js';
 import { buildRunsJson, parseRunsLimit } from './runs.js';
 import { parseResetIssues, runReset } from './reset.js';
@@ -1157,9 +1158,19 @@ async function cmdModels(opts: { doctor?: boolean } = {}) {
   }
 }
 
-async function cmdCost(opts: { issue?: string } = {}) {
+async function cmdCost(opts: { issue?: string; json?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
+  if (opts.json) {
+    let jsonCosts: ReturnType<typeof internalOps.readCosts>;
+    try {
+      jsonCosts = internalOps.readCosts(paths.costs);
+    } catch (err) {
+      throw new CliExitError(`factory: cost failed — ${errorDetail(err)}`, 1);
+    }
+    console.log(JSON.stringify(buildCostJson(jsonCosts, opts.issue)));
+    return;
+  }
   const costs = internalOps.readCosts(paths.costs);
 
   if (opts.issue) {
@@ -5926,7 +5937,8 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .command('cost')
     .description('Show recorded model spend by model (--issue for one issue)')
     .option('--issue <number>', 'Show per-entry detail for one issue')
-    .action((opts: { issue?: string }) => cmdCost(opts));
+    .option('--json', 'Print one JSON object (schemaVersion 1): rows, perModel, total; unpriced cost is null')
+    .action((opts: { issue?: string; json?: boolean }) => cmdCost(opts));
 
   program
     .command('usage')
