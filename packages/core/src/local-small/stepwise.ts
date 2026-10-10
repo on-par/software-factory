@@ -3,11 +3,17 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
+import { childProcessEnv } from '../utils/github-credentials.js';
+
 const exec = promisify(execCb);
 type PatchRun = (
   command: string,
   options: { cwd: string; timeout: number; maxBuffer: number },
 ) => Promise<{ stdout: string; stderr: string }>;
+
+/** The model-proposed verify command runs without the factory's GitHub credentials. */
+const runVerifyCommand: PatchRun = (command, options) =>
+  exec(command, { ...options, env: childProcessEnv(process.env, undefined) });
 
 export interface LocalSmallLimits {
   maxSteps: number;
@@ -180,7 +186,7 @@ export async function applyLocalSmallPatchStep(input: LocalSmallPatchStepInput):
   }
 
   try {
-    await (input.run ?? exec)(proposal.verifyCommand, {
+    await (input.run ?? runVerifyCommand)(proposal.verifyCommand, {
       cwd: input.repoRoot,
       timeout: 120_000,
       maxBuffer: 1024 * 1024,

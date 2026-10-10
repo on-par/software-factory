@@ -3,7 +3,10 @@ import { spawn } from 'node:child_process';
 
 import { execa } from 'execa';
 
+import { basename } from 'node:path';
+
 import { killProcessGroup } from '../environment/process-groups.js';
+import { childProcessEnv, redactGitHubCredentials } from './github-credentials.js';
 import { spawnSupervisedCommand } from './supervised-exec.js';
 
 export interface RunCommandOptions {
@@ -23,6 +26,11 @@ export interface RunCommandOptions {
   platform?: NodeJS.Platform;
   /** Test seam; defaults to `killProcessGroup`. */
   killGroup?: typeof killProcessGroup;
+  /** Pass the parent's GitHub credentials (GITHUB_TOKEN, GH_TOKEN, …) to the
+   *  child. Defaults to true only when argv[0] is `gh` or `git` (the factory's
+   *  own GitHub calls); every other command — checkers running agent-written
+   *  code, repo scripts — gets an environment without them. */
+  githubAuth?: boolean;
 }
 
 export interface CommandResult {
@@ -52,18 +60,21 @@ const DEFAULT_MAX_BUFFER = 1000 * 1000 * 100;
  *  process groups and `child.kill()` ends only the root (after which taskkill
  *  can't find the tree), so timeout/maxBuffer kills start the `taskkill /T`
  *  tree kill while the root is alive and the sweep reuses it. */
-async function runCommandDetached(argv: readonly string[], options: RunCommandOptions): Promise<CommandResult> {
+async function runCommandDetached(
+  argv: readonly string[],
+  options: RunCommandOptions,
+  env: NodeJS.ProcessEnv,
+): Promise<CommandResult> {
   const maxBuffer = options.maxBuffer ?? DEFAULT_MAX_BUFFER;
   const platform = options.platform ?? process.platform;
   const killGroup = options.killGroup ?? killProcessGroup;
   const win32 = platform === 'win32';
-  const env = { ...process.env, ...options.env };
   const ownershipFile = env.FACTORY_DAEMON_GROUPS_FILE;
   const child = ownershipFile
     ? spawnSupervisedCommand(argv, { cwd: options.cwd, env, ownershipFile })
     : spawn(argv[0], argv.slice(1), {
         cwd: options.cwd,
-        env: options.env ? env : undefined,
+        env,
         detached: !win32,
         shell: false,
       });
@@ -163,16 +174,37 @@ export async function runCommand(argv: readonly string[], options: RunCommandOpt
     throw new TypeError('runCommand: argv must be non-empty and argv[0] must not be blank');
   }
 
-  if (options.onPgid) {
-    return runCommandDetached(argv, options);
-  }
+  const githubAuth = options.githubAuth ?? isGitHubClient(argv[0]);
+  const env = childProcessEnv(process.env, options.env, { githubAuth });
 
+  const result = options.onPgid
+    ? await runCommandDetached(argv, options, env)
+    : await runCommandAttached(argv, options, env);
+  if (result.ok) return result;
+  return {
+    ...result,
+    stdout: redactGitHubCredentials(result.stdout),
+    stderr: redactGitHubCredentials(result.stderr),
+  };
+}
+
+/** `gh` and `git` are the only binaries that get GitHub credentials by default. */
+function isGitHubClient(bin: string): boolean {
+  const name = basename(bin.trim());
+  return name === 'gh' || name === 'git';
+}
+
+async function runCommandAttached(
+  argv: readonly string[],
+  options: RunCommandOptions,
+  env: NodeJS.ProcessEnv,
+): Promise<CommandResult> {
   const r = await execa(argv[0], argv.slice(1), {
     cwd: options.cwd,
     timeout: options.timeoutMs,
     maxBuffer: options.maxBuffer,
-    env: options.env,
-    extendEnv: true,
+    env,
+    extendEnv: false,
     reject: false,
     all: false,
   });

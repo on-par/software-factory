@@ -67,6 +67,9 @@ describe('createDockerEngine.prepareWorkspace', () => {
       `git clone --depth 1 'https://github.com/owner/example-app.git' '${join(workspace.hostPath, 'repo')}'`,
     );
     expect(calls[1]?.cmd).toBe(`git -C '${join(workspace.hostPath, 'repo')}' rev-parse HEAD`);
+    // Only the clone authenticates to GitHub; nothing else inherits the factory's credentials.
+    expect(calls[0]?.opts).toEqual({ githubAuth: true });
+    expect(calls[1]?.opts).toEqual({});
     expect(workspace.clone).toEqual({ ok: true, commit: 'abc123' });
     expect(workspace.containerRepoPath).toBe('/workspace/repo');
   });

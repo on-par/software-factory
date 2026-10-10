@@ -79,7 +79,7 @@ export function createDockerEngine(options: DockerEngineOptions): ContainerEngin
       const cloneUrl = credential ? credential.remoteUrl : cloneUrlFor(repoSlug);
       let clone: CloneOutcome;
       try {
-        await exec(`git clone --depth 1 ${quote(cloneUrl)} ${quote(repoPath)}`, {});
+        await exec(`git clone --depth 1 ${quote(cloneUrl)} ${quote(repoPath)}`, { githubAuth: true });
         if (credential) {
           const credentialFile = join(dir, basename(credential.containerCredentialPath));
           await writeFile(credentialFile, `${credential.credentialLine}\n`, 'utf-8');
@@ -201,9 +201,9 @@ export function createDockerEngine(options: DockerEngineOptions): ContainerEngin
       const tempDir = await mkdtemp(join(options.rootDir ?? tmpdir(), 'sf-lane-'));
       let clone: CloneOutcome;
       try {
-        await exec(`git clone --depth 1 ${quote(cloneUrlFor(repoSlug))} ${quote(tempDir)}`, {});
+        await exec(`git clone --depth 1 ${quote(cloneUrlFor(repoSlug))} ${quote(tempDir)}`, { githubAuth: true });
         if (ref !== undefined) {
-          await exec(`git -C ${quote(tempDir)} fetch --depth 1 origin ${quote(ref)}`, {});
+          await exec(`git -C ${quote(tempDir)} fetch --depth 1 origin ${quote(ref)}`, { githubAuth: true });
           await exec(`git -C ${quote(tempDir)} checkout --detach FETCH_HEAD`, {});
         }
         const { stdout } = await exec(`git -C ${quote(tempDir)} rev-parse HEAD`, {});

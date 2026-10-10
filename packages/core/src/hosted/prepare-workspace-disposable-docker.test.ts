@@ -13,12 +13,13 @@ const execFileAsync = promisify(execFile);
 
 interface ExecCall {
   cmd: string;
+  opts?: Parameters<ExecFn>[1];
 }
 
 function fakeExec(script: (call: ExecCall) => { stdout: string; stderr: string }) {
   const calls: ExecCall[] = [];
-  const exec: ExecFn = async (cmd) => {
-    calls.push({ cmd });
+  const exec: ExecFn = async (cmd, opts) => {
+    calls.push({ cmd, opts });
     return script({ cmd });
   };
   return { exec, calls };
@@ -117,6 +118,10 @@ describe('createDockerEngine.prepareLaneWorkspace (#1536)', () => {
     expect(fetchIdx).toBeGreaterThan(0);
     expect(checkoutIdx).toBeGreaterThan(fetchIdx);
     expect(revParseIdx).toBeGreaterThan(checkoutIdx);
+    // Clone and fetch authenticate to GitHub; checkout/rev-parse get no credentials.
+    expect(calls[0]?.opts).toEqual({ githubAuth: true });
+    expect(calls[fetchIdx]?.opts).toEqual({ githubAuth: true });
+    expect(calls[checkoutIdx]?.opts).toEqual({});
     expect(workspace.clone).toEqual({ ok: true, commit: 'cafef00d' });
     expect(await readdir(root)).toEqual([]);
   });

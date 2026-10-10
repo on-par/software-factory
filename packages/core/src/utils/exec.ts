@@ -3,6 +3,7 @@
 import { exec as execCb, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { childProcessEnv, redactExecError } from './github-credentials.js';
 import { spawnSupervisedCommand } from './supervised-exec.js';
 import { killProcessGroup } from '../environment/process-groups.js';
 
@@ -23,6 +24,11 @@ export type ExecFn = (
     onPgid?: (pgid: number) => void;
     /** Grace period before SIGKILL when sweeping the group after a timeout. */
     killGraceMs?: number;
+    /** Pass the parent's GitHub credentials (GITHUB_TOKEN, GH_TOKEN, …) through
+     *  to the child. Off by default: agent CLIs and the commands they or a
+     *  repo define never see them. Set only on the factory's own gh/git calls
+     *  that need to authenticate. */
+    githubAuth?: boolean;
   },
 ) => Promise<{ stdout: string; stderr: string }>;
 
@@ -48,14 +54,14 @@ interface ChildResult {
  *  direct child and settle immediately, independent of pipe state. */
 function execDetached(
   cmd: string,
-  opts: { cwd?: string; timeoutMs?: number; maxBuffer?: number; env?: Record<string, string> },
+  opts: { cwd?: string; timeoutMs?: number; maxBuffer?: number; env: NodeJS.ProcessEnv },
 ): Promise<ChildResult> & { child: ReturnType<typeof spawn> } {
   const maxBuffer = opts.maxBuffer ?? DEFAULT_MAX_BUFFER;
-  const env = { ...process.env, ...opts.env };
+  const env = opts.env;
   const ownershipFile = env.FACTORY_DAEMON_GROUPS_FILE;
   const child = ownershipFile
     ? spawnSupervisedCommand(cmd, { cwd: opts.cwd, env, ownershipFile })
-    : spawn(cmd, { shell: true, detached: true, cwd: opts.cwd, env: opts.env ? env : undefined });
+    : spawn(cmd, { shell: true, detached: true, cwd: opts.cwd, env });
 
   let stdoutLen = 0;
   let stderrLen = 0;
@@ -138,6 +144,9 @@ function execDetached(
 /** Sole adapter from the factory's ms-explicit exec options onto node's
  *  child_process `timeout` option (also milliseconds). `opts.env` (e.g. a
  *  lane's leased PORT) is merged over the parent env, never replacing it.
+ *  GitHub credentials are stripped from the child env unless
+ *  `opts.githubAuth` is set, and a rejection has any GitHub credential
+ *  masked in its message/cmd/stdout/stderr before it propagates.
  *  When `opts.onPgid` is set, the child is spawned `detached: true` (leads
  *  its own process group) and, on a timeout/signal rejection, the whole
  *  group is swept via `killProcessGroup` before the original error rethrows —
@@ -145,20 +154,25 @@ function execDetached(
  *  `onPgid`, behavior is byte-for-byte unchanged from before this option
  *  existed. */
 export const defaultExecFn: ExecFn = async (cmd, opts) => {
+  const env = childProcessEnv(process.env, opts.env, { githubAuth: opts.githubAuth });
   if (!opts.onPgid) {
-    return exec(cmd, {
-      cwd: opts.cwd,
-      timeout: opts.timeoutMs,
-      maxBuffer: opts.maxBuffer,
-      ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
-    });
+    try {
+      return await exec(cmd, {
+        cwd: opts.cwd,
+        timeout: opts.timeoutMs,
+        maxBuffer: opts.maxBuffer,
+        env,
+      });
+    } catch (err) {
+      throw redactExecError(err);
+    }
   }
 
   const child = execDetached(cmd, {
     cwd: opts.cwd,
     timeoutMs: opts.timeoutMs,
     maxBuffer: opts.maxBuffer,
-    env: opts.env,
+    env,
   });
 
   const pid = child.child.pid;
@@ -170,6 +184,6 @@ export const defaultExecFn: ExecFn = async (cmd, opts) => {
     if ((err?.killed || err?.signal) && pid !== undefined) {
       await killProcessGroup(pid, { graceMs: opts.killGraceMs });
     }
-    throw err;
+    throw redactExecError(err);
   }
 };
