@@ -20,3 +20,14 @@ All notable changes to this project are documented in this file.
 - Removed the bundled `camp-somewhere-cli` constitution. This was a breaking
   change for anyone relying on the bundled constitution for that product; seed
   your own repo's constitution instead with `factory constitution --init <product>`.
+
+### Packaging
+
+- Every published `@on-par/*` tarball now carries a README and the MIT
+  LICENSE, and ships `dist/` only: no test files, no `src/`, no
+  `.tsbuildinfo`, and no `factory-core` test-support kit (#2336).
+  `@on-par/factory-config` now bundles its constitution markdown under
+  `dist/constitutions/` (the `./constitutions/*` export points there).
+  `@on-par/factory-core/testing` stays the documented home for test doubles.
+- `npm pack` (and so `npm publish`) fails when a package has no built `dist/`,
+  instead of producing a tarball that holds only `package.json`.

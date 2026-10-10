@@ -11,11 +11,14 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
-    "./constitutions/*": "./src/constitutions/*"
+    "./constitutions/*": {
+      "development": "./src/constitutions/*",
+      "default": "./dist/constitutions/*"
+    }
   },
   "files": [
     "dist",
-    "src"
+    "!dist/.tsbuildinfo"
   ],
   "publishConfig": {
     "access": "public"
@@ -33,10 +36,12 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && npm run copy-assets",
+    "copy-assets": "rm -rf dist/constitutions && cp -R src/constitutions dist/constitutions",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "prepack": "node ../../scripts/pack-hygiene-cli.ts prepack"
   },
   "license": "MIT",
   "devDependencies": {

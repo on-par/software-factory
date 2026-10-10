@@ -10,14 +10,14 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
- * Resolve a config file path from this package's `src/` directory.
- * Works both in dev (from src/) and after build (from dist/ → ../src/).
+ * Resolve a config file shipped by this package. The constitution markdown lives
+ * in src/ and the build copies it next to the compiled code (dist/constitutions,
+ * see the `copy-assets` script), so the file sits beside this module both in dev
+ * (src/index.ts under tsx/vitest) and after build (dist/index.js). The published
+ * tarball carries dist/ only (#2336).
  */
 export function resolveConfigPath(filename: string): string {
-  // After build, this file is at dist/index.js; config files are in ../src/
-  // In dev (tsx), this file is at src/index.ts; config files are in ./
-  const base = __dirname.endsWith('dist') ? resolve(__dirname, '..', 'src') : __dirname;
-  return resolve(base, filename);
+  return resolve(__dirname, filename);
 }
 
 /** Directory containing constitution markdown files */

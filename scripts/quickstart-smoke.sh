@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Quickstart smoke test: packs the workspaces named in scripts/publish-workspaces.txt (the
-# same list publish.yml publishes) into tarballs, installs them into a
+# same list publish.yml publishes) into tarballs, checks each tarball's file list
+# (scripts/pack-hygiene.ts: README, LICENSE, dist/ only, no test files), installs them into a
 # fresh project (as npm would from the registry), and verifies
 # `factory --version`, `factory --help`, and `factory init` work.
 #
@@ -26,7 +27,9 @@ while IFS= read -r line || [ -n "$line" ]; do
   [ -n "$line" ] && WS_ARGS+=(--workspace "$line")
 done <"$ROOT/scripts/publish-workspaces.txt"
 
-(cd "$ROOT" && npm pack "${WS_ARGS[@]}" --pack-destination "$PACKDIR")
+# Lifecycle banners (prepack) go to stderr, so stdout is the pack JSON alone.
+(cd "$ROOT" && npm pack "${WS_ARGS[@]}" --json --pack-destination "$PACKDIR") >"$PACKDIR/pack.json"
+node "$ROOT/scripts/pack-hygiene-cli.ts" verify "$PACKDIR/pack.json" "$ROOT/scripts/publish-workspaces.txt"
 
 ADR_KIT_TGZ=("$PACKDIR"/on-par-adr-kit-*.tgz)
 CONTRACTS_TGZ=("$PACKDIR"/on-par-contracts-*.tgz)
