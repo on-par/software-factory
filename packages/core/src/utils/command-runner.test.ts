@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -278,5 +278,92 @@ describe('describeCommandFailure', () => {
     });
 
     expect(details).toBe('exit code 7');
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('runCommand GitHub credential isolation', () => {
+  const TOKEN = 'ghp_runnerTokenValue0123456789';
+  const PRINT_GITHUB_VARS =
+    'console.log(Object.keys(process.env).filter((k) => /^(GITHUB_TOKEN|GH_TOKEN|GITHUB_PAT)$/.test(k)).sort().join(",") + "|" + typeof process.env.PATH)';
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  function stubGitHubCredentials(): void {
+    vi.stubEnv('GITHUB_TOKEN', TOKEN);
+    vi.stubEnv('GH_TOKEN', 'gh-token-opaque-value');
+    vi.stubEnv('GITHUB_PAT', 'github-pat-opaque-value');
+  }
+
+  /** A stand-in binary named `name` that prints which GitHub credential vars it received. */
+  async function fakeBinary(name: string): Promise<string> {
+    const dir = await makeTmpDir();
+    const bin = join(dir, name);
+    await writeFile(bin, `#!/bin/sh\nexec "${process.execPath}" -e '${PRINT_GITHUB_VARS}'\n`);
+    await chmod(bin, 0o755);
+    return bin;
+  }
+
+  it('strips GitHub credentials from non-gh/git commands (checkers, agent-written code)', async () => {
+    stubGitHubCredentials();
+
+    const result = await runCommand([process.execPath, '-e', PRINT_GITHUB_VARS], { env: { GH_TOKEN: 'explicit' } });
+
+    expect(result.stdout.trim()).toBe('|string');
+  });
+
+  it('strips them on the detached (onPgid) path too', async () => {
+    stubGitHubCredentials();
+
+    const result = await runCommand([process.execPath, '-e', PRINT_GITHUB_VARS], { onPgid: () => {} });
+
+    expect(result.stdout.trim()).toBe('|string');
+  });
+
+  it.each(['gh', 'git'])("passes them to the factory's own %s calls", async (name) => {
+    stubGitHubCredentials();
+
+    const attached = await runCommand([await fakeBinary(name)]);
+    const detached = await runCommand([await fakeBinary(name)], { onPgid: () => {} });
+
+    expect(attached.stdout.trim()).toBe('GH_TOKEN,GITHUB_PAT,GITHUB_TOKEN|string');
+    expect(detached.stdout.trim()).toBe('GH_TOKEN,GITHUB_PAT,GITHUB_TOKEN|string');
+  });
+
+  it('honors an explicit githubAuth override in either direction', async () => {
+    stubGitHubCredentials();
+
+    const gitWithout = await runCommand([await fakeBinary('git')], { githubAuth: false });
+    const nodeWith = await runCommand([process.execPath, '-e', PRINT_GITHUB_VARS], { githubAuth: true });
+
+    expect(gitWithout.stdout.trim()).toBe('|string');
+    expect(nodeWith.stdout.trim()).toBe('GH_TOKEN,GITHUB_PAT,GITHUB_TOKEN|string');
+  });
+
+  it('keeps explicit undefined env entries as deletions', async () => {
+    vi.stubEnv('FACTORY_RUN_CONFIG_JSON', '{}');
+
+    const result = await runCommand(
+      [process.execPath, '-e', 'console.log(typeof process.env.FACTORY_RUN_CONFIG_JSON)'],
+      {
+        env: { FACTORY_RUN_CONFIG_JSON: undefined },
+      },
+    );
+
+    expect(result.stdout.trim()).toBe('undefined');
+  });
+
+  it("redacts GitHub credentials from a failed command's stdout and stderr", async () => {
+    stubGitHubCredentials();
+
+    const result = await runCommand(
+      [process.execPath, '-e', `console.log("${TOKEN}"); console.error("gh-token-opaque-value"); process.exit(2)`],
+      { githubAuth: true },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.stdout.trim()).toBe('[redacted]');
+    expect(result.stderr.trim()).toBe('[redacted]');
   });
 });

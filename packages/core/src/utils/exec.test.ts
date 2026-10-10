@@ -2,7 +2,7 @@ import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { defaultExecFn } from './exec.js';
 
@@ -103,6 +103,89 @@ describe('defaultExecFn', () => {
     it('does not spawn detached when onPgid is absent (unchanged behavior)', async () => {
       const { stdout } = await defaultExecFn('echo hi', { timeoutMs: 1000 });
       expect(stdout).toContain('hi');
+    });
+  });
+});
+
+describe('defaultExecFn GitHub credential isolation', () => {
+  const TOKEN = 'ghp_parentTokenValue0123456789';
+  const PRINT_GITHUB_VARS =
+    "node -p \"Object.keys(process.env).filter((k) => /^(GITHUB_TOKEN|GH_TOKEN|GITHUB_PAT|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN)$/.test(k)).sort().join(',') + '|' + typeof process.env.PATH\"";
+
+  function stubGitHubCredentials(): void {
+    vi.stubEnv('GITHUB_TOKEN', TOKEN);
+    vi.stubEnv('GH_TOKEN', 'gh-token-opaque-value');
+    vi.stubEnv('GITHUB_PAT', 'github-pat-opaque-value');
+    vi.stubEnv('GH_ENTERPRISE_TOKEN', 'gh-enterprise-opaque');
+    vi.stubEnv('GITHUB_ENTERPRISE_TOKEN', 'github-enterprise-opaque');
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('never hands GitHub credentials to a child by default (agent CLI path), with or without opts.env', async () => {
+    stubGitHubCredentials();
+
+    expect((await defaultExecFn(PRINT_GITHUB_VARS, {})).stdout.trim()).toBe('|string');
+    expect((await defaultExecFn(PRINT_GITHUB_VARS, { env: { PORT: '3142' } })).stdout.trim()).toBe('|string');
+  });
+
+  it('strips a credential even when it is passed explicitly in opts.env', async () => {
+    const { stdout } = await defaultExecFn(PRINT_GITHUB_VARS, { env: { GITHUB_TOKEN: 'explicit-token-value' } });
+
+    expect(stdout.trim()).toBe('|string');
+  });
+
+  it('passes the credentials through only when the call opts into githubAuth (gh/git)', async () => {
+    stubGitHubCredentials();
+
+    const { stdout } = await defaultExecFn(PRINT_GITHUB_VARS, { githubAuth: true });
+
+    expect(stdout.trim()).toBe('GH_ENTERPRISE_TOKEN,GH_TOKEN,GITHUB_ENTERPRISE_TOKEN,GITHUB_PAT,GITHUB_TOKEN|string');
+  });
+
+  it("redacts GitHub credentials from a rejected command's message, cmd and stderr", async () => {
+    stubGitHubCredentials();
+
+    const err: any = await defaultExecFn(`echo "auth ${TOKEN} gh-token-opaque-value" >&2; exit 3 # ${TOKEN}`, {
+      githubAuth: true,
+    }).catch((e) => e);
+
+    expect(err.code).toBe(3);
+    for (const text of [err.message, err.cmd, err.stderr, err.stack]) {
+      expect(text).not.toContain(TOKEN);
+      expect(text).not.toContain('gh-token-opaque-value');
+    }
+    expect(err.stderr).toContain('auth [redacted] [redacted]');
+  });
+
+  describe.skipIf(process.platform === 'win32')('onPgid (detached) path', () => {
+    it('strips GitHub credentials from the detached child too', async () => {
+      stubGitHubCredentials();
+
+      const { stdout } = await defaultExecFn(PRINT_GITHUB_VARS, { onPgid: () => {} });
+
+      expect(stdout.trim()).toBe('|string');
+    });
+
+    it('passes them on the detached path only with githubAuth', async () => {
+      stubGitHubCredentials();
+
+      const { stdout } = await defaultExecFn(PRINT_GITHUB_VARS, { onPgid: () => {}, githubAuth: true });
+
+      expect(stdout.trim()).toBe('GH_ENTERPRISE_TOKEN,GH_TOKEN,GITHUB_ENTERPRISE_TOKEN,GITHUB_PAT,GITHUB_TOKEN|string');
+    });
+
+    it('redacts the detached rejection message and stderr', async () => {
+      stubGitHubCredentials();
+
+      const err: any = await defaultExecFn(`echo "${TOKEN}" >&2; exit 4`, { onPgid: () => {} }).catch((e) => e);
+
+      expect(err.code).toBe(4);
+      expect(err.message).not.toContain(TOKEN);
+      expect(err.cmd).not.toContain(TOKEN);
+      expect(err.stderr.trim()).toBe('[redacted]');
     });
   });
 });

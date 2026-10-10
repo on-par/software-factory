@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { applyLocalSmallPatchStep, createLocalSmallDryRun } from './stepwise.js';
 
@@ -92,6 +92,34 @@ describe('local-small schema-bound patch step', () => {
       tmpDir = undefined;
     }
   });
+
+  it.skipIf(process.platform === 'win32')(
+    "runs the model-proposed verify command without the factory's GitHub credentials",
+    async () => {
+      tmpDir = await mkdtemp(join(tmpdir(), 'factory-stepwise-'));
+      const repoRoot = join(tmpDir, 'repo');
+      await mkdir(join(repoRoot, 'src'), { recursive: true });
+      writeFileSync(join(repoRoot, 'src', 'app.ts'), 'export const value = 1;\n');
+      vi.stubEnv('GITHUB_TOKEN', 'ghp_stepwiseTokenValue0123456789');
+      vi.stubEnv('GH_TOKEN', 'gh-token-opaque-value');
+      try {
+        const result = await applyLocalSmallPatchStep({
+          repoRoot,
+          contextPack: contextPackFor(['src/app.ts']),
+          proposal: {
+            stepId: 'schema-bound-change',
+            summary: 'Update exported value',
+            changes: [{ file: 'src/app.ts', find: 'value = 1', replace: 'value = 2' }],
+            verifyCommand: 'test -z "$GITHUB_TOKEN" && test -z "$GH_TOKEN" && test -n "$PATH"',
+          },
+        });
+
+        expect(result.status).toBe('success');
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    },
+  );
 
   it('validates, applies one constrained patch, and runs verification', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-stepwise-'));
