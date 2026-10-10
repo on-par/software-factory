@@ -132,3 +132,5 @@ jobs:
         run: bash scripts/ruleset-copilot-review.test.sh
       - name: publish-workspaces guard
         run: bash scripts/publish-workspaces.test.sh
+      - name: publish-release unit test
+        run: bash scripts/publish-release.test.sh

@@ -55,7 +55,8 @@ list.forEach((name, i) => {
 
 # (c) consumers use the list
 grep -q 'bash scripts/publish-workspaces.sh --dry-run' "$PUBLISH_YML" || fail "publish.yml lacks the dry-run step"
-grep -qE 'bash scripts/publish-workspaces.sh$' "$PUBLISH_YML" || fail "publish.yml lacks the real publish step"
+grep -qE 'run: bash scripts/publish-release.sh$' "$PUBLISH_YML" || fail "publish.yml lacks the real publish step"
+grep -qE '^bash scripts/publish-workspaces.sh \|\|' "$ROOT/scripts/publish-release.sh" || fail "publish-release.sh does not run the publish loop"
 if grep -q -- '--workspace' "$PUBLISH_YML"; then fail "publish.yml hard-codes --workspace"; fi
 grep -q 'publish-workspaces.txt' "$SMOKE" || fail "quickstart-smoke.sh does not read the list"
 if grep -q -- '--workspace @on-par/' "$SMOKE"; then fail "quickstart-smoke.sh hard-codes workspaces"; fi

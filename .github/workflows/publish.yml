@@ -2,6 +2,12 @@ name: Publish
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run: pack and list every package, publish nothing'
+        type: boolean
+        default: true
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -19,21 +25,13 @@ jobs:
         run: bash scripts/quickstart-smoke.sh
       - name: Publish dry-run (lists every package that will publish)
         run: bash scripts/publish-workspaces.sh --dry-run
-      - name: Check v1.0 blockers (#195, #151)
-        id: gate
-        env: { GH_TOKEN: '${{ github.token }}' }
-        run: |
-          ok=true
-          for n in 195 151; do
-            state="$(gh issue view "$n" --repo "$GITHUB_REPOSITORY" --json state -q .state)"
-            echo "issue #$n: $state"
-            [ "$state" = "CLOSED" ] || ok=false
-          done
-          echo "allowed=$ok" >> "$GITHUB_OUTPUT"
-      - name: Skip publish
-        if: steps.gate.outputs.allowed != 'true'
-        run: echo "v1.0 blockers not yet resolved — skipping publish"
+      # #2335: one step gates on the v1.0 blockers (#195, #151) and publishes. Every path
+      # writes `PUBLISHED <list>` or `NOT PUBLISHED: <reason>` to the job summary and sets
+      # `published=true|false`. Anything but a dry run that does not publish fails the job.
       - name: Publish to npm
-        if: steps.gate.outputs.allowed == 'true'
-        env: { NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}' }
-        run: bash scripts/publish-workspaces.sh
+        id: publish
+        env:
+          GH_TOKEN: '${{ github.token }}'
+          NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}'
+          PUBLISH_DRY_RUN: '${{ inputs.dry_run }}'
+        run: bash scripts/publish-release.sh
