@@ -2153,6 +2153,47 @@ describe('cli', () => {
       ]);
     });
 
+    it('logs ci-rescued and merges when an infra failure reruns green', async () => {
+      vi.useFakeTimers();
+      try {
+        const calls: any[] = [];
+        const octokit = cleanOctokit(async (args) => calls.push(['merge', args.sha]), calls);
+        octokit.rest.checks = {
+          listForRef: async () => ({
+            data: { check_runs: [{ id: 9, head_sha: 'abc123', status: 'completed', conclusion: 'failure' }] },
+          }),
+        };
+        octokit.rest.actions = {
+          getJobForWorkflowRun: async () => ({
+            data: { conclusion: 'failure', runner_id: 42, runner_name: 'r', steps: [], run_id: 7, run_attempt: 1 },
+          }),
+        };
+        const outcomes = ['failure', 'success'] as const;
+        let watchCalls = 0;
+
+        const landed = landOpenPullRequest({
+          ...baseOpts,
+          octokit,
+          log: (type, msg) => calls.push(['log', type, msg]),
+          watch: async () => outcomes[watchCalls++],
+          rerun: async (argv) => {
+            calls.push(['rerun', [...argv]]);
+            return { ok: true };
+          },
+        });
+        await vi.advanceTimersByTimeAsync(60_000);
+        await landed;
+
+        expect(calls.filter((c) => c[0] === 'rerun')).toEqual([
+          ['rerun', ['gh', 'run', 'rerun', '7', '--failed', '--repo', 'on-par/software-factory']],
+        ]);
+        expect(calls.some((c) => c[0] === 'log' && c[1] === 'ci-rescued')).toBe(true);
+        expect(calls).toContainEqual(['merge', 'abc123']);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('surfaces a 409 head-moved merge refusal as CI-unverified without retrying', async () => {
       const calls: any[] = [];
       let mergeCalls = 0;

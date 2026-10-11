@@ -1,5 +1,6 @@
 // src/utils/ci-watch.ts — shared CI watcher with exponential backoff
 import type { Octokit } from '@octokit/rest';
+import { runCommand } from './command-runner.js';
 
 /** watchChecks reports exactly one of three outcomes: 'success' (every check run passed and the
  *  set was final — see `settleMs` / `minChecks`), 'failure' (a completed check run reported a
@@ -57,6 +58,9 @@ export interface CiJobStepLike {
 /** Structural subset of a GitHub Actions workflow job — only the fields the classifier reads. */
 export interface CiJobLike {
   conclusion?: string | null;
+  run_id?: number | null;
+  run_attempt?: number | null;
+  head_sha?: string | null;
   runner_id?: number | null;
   runner_name?: string | null;
   steps?: CiJobStepLike[] | null;
@@ -90,7 +94,7 @@ const DEFAULT_MAX_POLL_ERRORS = 3;
 const DEFAULT_SETTLE_MS = 30_000;
 const DEFAULT_MIN_CHECKS = 0;
 
-type CheckRunLike = { status?: string | null; conclusion?: string | null };
+type CheckRunLike = { id?: number; head_sha?: string | null; status?: string | null; conclusion?: string | null };
 
 async function listAllCheckRuns(
   octokit: Octokit,
@@ -165,4 +169,77 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
     interval = Math.min(interval * 2, maxIntervalMs);
   }
   return 'timeout';
+}
+
+/** One-shot rerun budget keyed by PR head SHA: a SHA in the set is never rerun again. */
+export type CiRerunBudget = Set<string>;
+
+export interface CiRescue {
+  headSha: string;
+  runIds: number[];
+}
+
+export interface InfraRerunWatchOptions extends WatchChecksOptions {
+  /** The watcher to wrap; default watchChecks. */
+  watch?: (opts: WatchChecksOptions) => Promise<CiOutcome>;
+  /** Runs the gh rerun argv; default runCommand. */
+  rerun?: (argv: readonly string[]) => Promise<{ ok: boolean }>;
+  /** Default: a module-level Set shared by every call in this process. */
+  rerunBudget?: CiRerunBudget;
+  /** Called once when the post-rerun watch is green. */
+  onRescued?: (rescue: CiRescue) => void;
+}
+
+const DEFAULT_RERUN_BUDGET: CiRerunBudget = new Set();
+
+/** watchChecks plus a one-shot rescue for infrastructure failures (#2365). When the watch ends
+ *  'failure' and every failed check run maps to an Actions job that classifyCiFailure calls
+ *  'infra', the failed jobs are rerun once (`gh run rerun <run> --failed`) and CI is watched
+ *  again. Budget: one rerun per head SHA (in-process Set) and never for a job already on
+ *  run_attempt > 1, so there is no second rerun and no loop. Fails closed: any non-infra job,
+ *  non-Actions check run, missing field or API error returns 'failure' unchanged. Never rejects. */
+export async function watchChecksWithInfraRerun(opts: InfraRerunWatchOptions): Promise<CiOutcome> {
+  const { watch = watchChecks, rerun = runCommand, rerunBudget = DEFAULT_RERUN_BUDGET, onRescued, ...watchOpts } = opts;
+  const {
+    octokit,
+    owner,
+    repo,
+    ref,
+    initialIntervalMs = 15_000,
+    perPage = DEFAULT_PER_PAGE,
+    maxPages = DEFAULT_MAX_PAGES,
+    sleep = (ms) => new Promise<void>((r) => setTimeout(r, ms)),
+  } = watchOpts;
+
+  const first = await watch(watchOpts);
+  if (first !== 'failure') return first;
+
+  try {
+    const runs = await listAllCheckRuns(octokit, owner, repo, ref, perPage, maxPages);
+    const failed = runs.filter((r) => r.status === 'completed' && !isPassingConclusion(r.conclusion));
+    if (failed.length === 0) return 'failure';
+    const jobs: CiJobLike[] = [];
+    for (const run of failed) {
+      if (typeof run.id !== 'number') return 'failure';
+      const { data: job } = await octokit.rest.actions.getJobForWorkflowRun({ owner, repo, job_id: run.id });
+      if (classifyCiFailure(job) !== 'infra') return 'failure';
+      jobs.push(job);
+    }
+    const headSha = failed[0].head_sha ?? jobs[0].head_sha;
+    if (!headSha) return 'failure';
+    if (rerunBudget.has(headSha) || jobs.some((j) => (j.run_attempt ?? 1) > 1)) return 'failure';
+    const runIds = [...new Set(jobs.map((j) => j.run_id).filter((id): id is number => typeof id === 'number'))];
+    if (runIds.length === 0) return 'failure';
+    rerunBudget.add(headSha);
+    for (const runId of runIds) {
+      const r = await rerun(['gh', 'run', 'rerun', String(runId), '--failed', '--repo', `${owner}/${repo}`]);
+      if (!r.ok) return 'failure';
+    }
+    await sleep(initialIntervalMs);
+    const second = await watch(watchOpts);
+    if (second === 'success') onRescued?.({ headSha, runIds });
+    return second;
+  } catch {
+    return 'failure';
+  }
 }

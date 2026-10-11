@@ -14,7 +14,7 @@ import { renderPrBody } from '../reports/pr-body.js';
 import type { ReviewRouting } from '../review/routing.js';
 import { readSpec } from '../spec/index.js';
 import type { CheckSummary } from '../types/index.js';
-import { type CiOutcome, watchChecks } from '../utils/ci-watch.js';
+import { type CiOutcome, watchChecksWithInfraRerun } from '../utils/ci-watch.js';
 import { shellEscape } from '../utils/index.js';
 import { GITHUB_ISSUE_SOURCE } from '../work/github-issue.js';
 import type { WorkRequest } from '../work/index.js';
@@ -330,7 +330,17 @@ async function shipPhaseImpl(opts: {
   if (watchCI) {
     log('ship', `Watching CI for PR #${prNumber}`);
     try {
-      ciOutcome = await watchChecks({ octokit, owner, repo: repoName, ref: branch });
+      ciOutcome = await watchChecksWithInfraRerun({
+        octokit,
+        owner,
+        repo: repoName,
+        ref: branch,
+        onRescued: ({ headSha, runIds }) =>
+          log(
+            'ci-rescued',
+            `CI rescued for PR #${prNumber}: reran infra-failed run(s) ${runIds.join(', ')} on ${headSha.slice(0, 12)} once and the re-watch is green`,
+          ),
+      });
       if (ciOutcome === 'success') log('ship', `CI green for PR #${prNumber}`);
       else if (ciOutcome === 'failure') {
         const reason = `CI failed for PR #${prNumber}`;

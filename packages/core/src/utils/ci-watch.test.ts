@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { classifyCiFailure, watchChecks } from './ci-watch.js';
+import { classifyCiFailure, watchChecks, watchChecksWithInfraRerun } from './ci-watch.js';
 
 function scriptChecks(sequence: any[][]) {
   let i = 0;
@@ -572,5 +572,209 @@ describe('classifyCiFailure', () => {
   it('does not treat a named runner as unassigned', () => {
     const job = { ...realTestFailureJob, runner_id: null, runner_name: 'self-hosted-1' };
     expect(classifyCiFailure(job)).toBe('non-infra');
+  });
+});
+
+describe('watchChecksWithInfraRerun', () => {
+  const ids = { run_id: 7, run_attempt: 1, head_sha: 'abc123' };
+  const zeroStepsJob = { ...ids, conclusion: 'failure', runner_id: 42, runner_name: 'GitHub Actions 42', steps: [] };
+  const noRunnerJob = { ...ids, conclusion: 'failure', runner_id: null, runner_name: null, steps: [] };
+  const cancelledBeforeStartJob = {
+    ...ids,
+    conclusion: 'cancelled',
+    runner_id: 42,
+    runner_name: 'GitHub Actions 42',
+    steps: [{ status: 'queued', started_at: null }],
+  };
+  const realTestFailureJob = {
+    ...ids,
+    conclusion: 'failure',
+    runner_id: 42,
+    runner_name: 'GitHub Actions 42',
+    steps: [{ name: 'Run tests', status: 'completed', conclusion: 'failure', started_at: '2026-10-01T00:01:00Z' }],
+  };
+  const failedRun = (id: number, extra: Record<string, unknown> = {}) => ({
+    id,
+    head_sha: 'abc123',
+    status: 'completed',
+    conclusion: 'failure',
+    ...extra,
+  });
+
+  function setup(opts: {
+    outcomes?: Array<'success' | 'failure' | 'timeout'>;
+    runs?: any[];
+    jobs?: Record<number, any>;
+    listThrows?: boolean;
+    jobThrows?: boolean;
+    rerunOk?: boolean;
+    budget?: Set<string>;
+    useDefaultBudget?: boolean;
+  }) {
+    const outcomes = opts.outcomes ?? ['failure', 'success'];
+    const reruns: string[][] = [];
+    const rescues: any[] = [];
+    let watchCalls = 0;
+    let listCalls = 0;
+    const octokit: any = {
+      rest: {
+        checks: {
+          listForRef: async () => {
+            listCalls++;
+            if (opts.listThrows) throw new Error('list boom');
+            return { data: { check_runs: opts.runs ?? [failedRun(1)] } };
+          },
+        },
+        actions: {
+          getJobForWorkflowRun: async ({ job_id }: any) => {
+            if (opts.jobThrows) throw new Error('404');
+            return { data: (opts.jobs ?? { 1: zeroStepsJob })[job_id] };
+          },
+        },
+      },
+    };
+    const call = (extra: Record<string, unknown> = {}) =>
+      watchChecksWithInfraRerun({
+        octokit,
+        owner: 'o',
+        repo: 'r',
+        ref: 'abc123',
+        watch: async () => outcomes[Math.min(watchCalls++, outcomes.length - 1)],
+        rerun: async (argv) => {
+          reruns.push([...argv]);
+          return { ok: opts.rerunOk ?? true };
+        },
+        ...(opts.useDefaultBudget ? {} : { rerunBudget: opts.budget ?? new Set<string>() }),
+        sleep: async () => {},
+        onRescued: (r) => rescues.push(r),
+        ...extra,
+      });
+    return { call, reruns, rescues, watchCalls: () => watchCalls, listCalls: () => listCalls };
+  }
+
+  it('reruns a zero-steps infra failure once and reports ci-rescued when the re-watch is green', async () => {
+    const t = setup({});
+    expect(await t.call()).toBe('success');
+    expect(t.reruns).toEqual([['gh', 'run', 'rerun', '7', '--failed', '--repo', 'o/r']]);
+    expect(t.rescues).toEqual([{ headSha: 'abc123', runIds: [7] }]);
+    expect(t.watchCalls()).toBe(2);
+  });
+
+  it('reruns a no-runner-assigned infra failure once', async () => {
+    const t = setup({ jobs: { 1: noRunnerJob } });
+    await t.call();
+    expect(t.reruns).toHaveLength(1);
+  });
+
+  it('reruns a job cancelled before start once', async () => {
+    const t = setup({ jobs: { 1: cancelledBeforeStartJob } });
+    await t.call();
+    expect(t.reruns).toHaveLength(1);
+  });
+
+  it('does not rerun a real test failure', async () => {
+    const t = setup({ jobs: { 1: realTestFailureJob } });
+    expect(await t.call()).toBe('failure');
+    expect(t.reruns).toHaveLength(0);
+    expect(t.rescues).toHaveLength(0);
+    expect(t.watchCalls()).toBe(1);
+  });
+
+  it('never reruns the same head SHA twice', async () => {
+    const t = setup({ outcomes: ['failure', 'failure', 'failure'] });
+    const budget = new Set<string>();
+    expect(await t.call({ rerunBudget: budget })).toBe('failure');
+    expect(await t.call({ rerunBudget: budget })).toBe('failure');
+    expect(t.reruns).toHaveLength(1);
+    expect(t.watchCalls()).toBe(3);
+  });
+
+  it('does not rerun a job already on run_attempt 2', async () => {
+    const t = setup({ jobs: { 1: { ...zeroStepsJob, run_attempt: 2 } } });
+    expect(await t.call()).toBe('failure');
+    expect(t.reruns).toHaveLength(0);
+  });
+
+  it('returns the re-watch outcome when the rerun does not go green', async () => {
+    const t = setup({ outcomes: ['failure', 'failure'] });
+    expect(await t.call()).toBe('failure');
+    expect(t.reruns).toHaveLength(1);
+    expect(t.rescues).toHaveLength(0);
+    expect(t.watchCalls()).toBe(2);
+  });
+
+  it('does not rerun a mixed infra + real failure', async () => {
+    const t = setup({ runs: [failedRun(1), failedRun(2)], jobs: { 1: zeroStepsJob, 2: realTestFailureJob } });
+    expect(await t.call()).toBe('failure');
+    expect(t.reruns).toHaveLength(0);
+  });
+
+  it('passes success and timeout through without listing check runs', async () => {
+    for (const outcome of ['success', 'timeout'] as const) {
+      const t = setup({ outcomes: [outcome] });
+      expect(await t.call()).toBe(outcome);
+      expect(t.listCalls()).toBe(0);
+    }
+  });
+
+  describe('fails closed with no rerun', () => {
+    const cases: Array<[string, Parameters<typeof setup>[0]]> = [
+      ['listForRef throws', { listThrows: true }],
+      ['getJobForWorkflowRun throws', { jobThrows: true }],
+      ['no failed run in the re-list', { runs: [{ id: 1, status: 'completed', conclusion: 'success' }] }],
+      ['a failed run has no id', { runs: [{ head_sha: 'abc123', status: 'completed', conclusion: 'failure' }] }],
+      [
+        'no head_sha anywhere',
+        { runs: [failedRun(1, { head_sha: undefined })], jobs: { 1: { ...zeroStepsJob, head_sha: undefined } } },
+      ],
+      ['job has no run_id', { jobs: { 1: { ...zeroStepsJob, run_id: undefined } } }],
+    ];
+    for (const [name, o] of cases) {
+      it(name, async () => {
+        const t = setup(o);
+        expect(await t.call()).toBe('failure');
+        expect(t.reruns).toHaveLength(0);
+      });
+    }
+
+    it('rerun returns ok false (the SHA stays in the budget)', async () => {
+      const budget = new Set<string>();
+      const t = setup({ rerunOk: false, budget });
+      expect(await t.call()).toBe('failure');
+      expect(t.reruns).toHaveLength(1);
+      expect(budget.has('abc123')).toBe(true);
+      expect(t.watchCalls()).toBe(1);
+    });
+  });
+
+  it('falls back to the job head_sha when the check run has none', async () => {
+    const t = setup({ runs: [failedRun(1, { head_sha: undefined })] });
+    expect(await t.call()).toBe('success');
+    expect(t.rescues[0].headSha).toBe('abc123');
+  });
+
+  it('dedupes two infra jobs in the same run to one rerun call', async () => {
+    const t = setup({ runs: [failedRun(1), failedRun(2)], jobs: { 1: zeroStepsJob, 2: noRunnerJob } });
+    await t.call();
+    expect(t.reruns).toHaveLength(1);
+  });
+
+  it('reruns each distinct failed run', async () => {
+    const t = setup({
+      runs: [failedRun(1), failedRun(2)],
+      jobs: { 1: zeroStepsJob, 2: { ...noRunnerJob, run_id: 8 } },
+    });
+    await t.call();
+    expect(t.reruns.map((a) => a[3])).toEqual(['7', '8']);
+  });
+
+  it('uses the shared default budget when none is passed', async () => {
+    const sha = 'unique-default-budget-sha';
+    const jobs = { 1: { ...zeroStepsJob, head_sha: sha } };
+    const runs = [failedRun(1, { head_sha: sha })];
+    const t = setup({ jobs, runs, useDefaultBudget: true, outcomes: ['failure', 'failure', 'failure'] });
+    await t.call();
+    await t.call();
+    expect(t.reruns).toHaveLength(1);
   });
 });

@@ -213,8 +213,17 @@ export { defaultTranscriptRoots, priceFor, TRAILING_WINDOW_MS } from './usage/in
 export { readClaudeAccessToken } from './usage/subscription.js';
 
 // Utils
-export type { CiFailureClass, CiJobLike, CiJobStepLike, CiOutcome, WatchChecksOptions } from './utils/ci-watch.js';
-export { classifyCiFailure, watchChecks, isPassingConclusion } from './utils/ci-watch.js';
+export type {
+  CiFailureClass,
+  CiJobLike,
+  CiJobStepLike,
+  CiOutcome,
+  CiRerunBudget,
+  CiRescue,
+  InfraRerunWatchOptions,
+  WatchChecksOptions,
+} from './utils/ci-watch.js';
+export { classifyCiFailure, watchChecks, watchChecksWithInfraRerun, isPassingConclusion } from './utils/ci-watch.js';
 export type { CommandResult, RunCommandOptions } from './utils/command-runner.js';
 export { describeCommandFailure, runCommand } from './utils/command-runner.js';
 export type { CoverageMetrics, RatchetCheckResult, RatchetDrift } from './utils/coverage-ratchet.js';
