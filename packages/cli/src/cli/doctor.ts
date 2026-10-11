@@ -2,6 +2,8 @@
 
 import { resolve } from 'node:path';
 
+import { detectSandboxRuntime } from '@on-par/factory-core';
+
 import { MIN_NODE_MAJOR } from '../node-version.js';
 import { CLAUDE_CODE_URL, GITHUB_TOKENS_URL } from './first-run.js';
 
@@ -21,7 +23,28 @@ export interface DoctorEnvProbes {
   /** Run a command, return trimmed stdout, or null if it fails. */
   tryExec: (cmd: string) => string | null;
   pathExists: (p: string) => boolean;
+  /** Host platform; defaults to process.platform. */
+  platform?: NodeJS.Platform;
   distFreshness?: () => { fresh: boolean; detail: string };
+}
+
+export const NOT_IN_REPO_HINT = 'cd into your repo, then run factory doctor again';
+
+export function hasSandboxRuntime(platform: NodeJS.Platform, commandAvailable: (cmd: string) => boolean): boolean {
+  return detectSandboxRuntime(platform, commandAvailable) !== 'none';
+}
+
+/** Reason the sandboxed claude auth probe is skipped before a sandbox policy is resolved,
+ *  or null when cmdDoctor should resolve the policy as before (#2383). */
+export function sandboxAuthSkipDetail(opts: {
+  runtimeAvailable: boolean;
+  hostOk: boolean;
+  inRepo: boolean;
+}): string | null {
+  if (!opts.runtimeAvailable) return 'skipped — no sandbox runtime (sandbox-exec/firejail) on this host';
+  if (!opts.hostOk) return 'skipped — host claude auth was not verified';
+  if (!opts.inRepo) return `skipped — not inside a git repository; ${NOT_IN_REPO_HINT}`;
+  return null;
 }
 
 export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
@@ -35,10 +58,25 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
       : {
           name: 'git repository',
           ok: false,
-          detail: 'not inside a git repository',
-          fix: 'run factory inside a git repo (`git init` or clone one)',
+          optional: true,
+          detail: 'not inside a git repository — repo checks skipped',
+          fix: NOT_IN_REPO_HINT,
         },
   );
+
+  const userName = tryExec('git config user.name');
+  const userEmail = tryExec('git config user.email');
+  if (userName && userEmail) {
+    checks.push({ name: 'git identity', ok: true, detail: `${userName} <${userEmail}>` });
+  } else {
+    const missing = [!userName && 'user.name', !userEmail && 'user.email'].filter(Boolean).join(' and ');
+    checks.push({
+      name: 'git identity',
+      ok: false,
+      detail: `${missing} not set`,
+      fix: 'git config --global user.name "Your Name" && git config --global user.email you@example.com',
+    });
+  }
 
   checks.push(
     commandAvailable('claude')
@@ -103,7 +141,7 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
       name: 'git worktree clean',
       ok: false,
       optional: true,
-      detail: 'skipped — not a git repository',
+      detail: `skipped — not a git repository; ${NOT_IN_REPO_HINT}`,
     });
   } else if (tryExec('git status --porcelain') === '') {
     checks.push({ name: 'git worktree clean', ok: true, detail: 'clean' });
@@ -117,9 +155,18 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
     });
   }
 
+  const sandboxRuntime = detectSandboxRuntime(probes.platform ?? process.platform, commandAvailable);
   checks.push(
     commandAvailable('codex')
-      ? { name: 'codex sandbox', ok: true, optional: true, detail: 'codex CLI found (sandboxed builds available)' }
+      ? {
+          name: 'codex sandbox',
+          ok: true,
+          optional: true,
+          detail:
+            sandboxRuntime === 'none'
+              ? 'codex CLI found — no sandbox runtime, so codex runs with danger-full-access'
+              : 'codex CLI found (sandboxed builds available)',
+        }
       : {
           name: 'codex sandbox',
           ok: false,
@@ -129,12 +176,24 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
         },
   );
 
+  checks.push(
+    sandboxRuntime !== 'none'
+      ? { name: 'sandbox runtime', ok: true, optional: true, detail: `${sandboxRuntime} found` }
+      : {
+          name: 'sandbox runtime',
+          ok: false,
+          optional: true,
+          detail: 'no sandbox-exec (macOS) or firejail (Linux) on PATH — agents will run uncontained',
+          fix: 'install firejail (Linux) or run on macOS; see README Safety',
+        },
+  );
+
   if (repoRoot === null) {
     checks.push({
       name: '.factory initialized',
       ok: false,
       optional: true,
-      detail: 'skipped — not a git repository',
+      detail: `skipped — not a git repository; ${NOT_IN_REPO_HINT}`,
     });
   } else if (pathExists(resolve(repoRoot, '.factory'))) {
     checks.push({ name: '.factory initialized', ok: true, optional: true, detail: '.factory/ present' });
