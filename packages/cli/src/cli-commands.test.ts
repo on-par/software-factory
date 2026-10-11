@@ -4018,7 +4018,7 @@ bash scripts/verify.sh
       expect(readFileSync(logFile, 'utf-8')).toContain(`factoryd: listening on 127.0.0.1:${boundPort}`);
     });
 
-    it('daemon run --help lists --auto-update with its default of off', async () => {
+    it('daemon run --help lists --update-mode and the deprecated --auto-update', async () => {
       const originalWrite = process.stdout.write.bind(process.stdout);
       const written: string[] = [];
       process.stdout.write = ((chunk: unknown) => {
@@ -4035,8 +4035,10 @@ bash scripts/verify.sh
 
       expect(res.exited).toBe(true);
       const text = written.join('').replace(/\s+/g, ' ');
+      expect(text).toContain('--update-mode');
+      expect(text).toContain('manual, stable');
       expect(text).toContain('--auto-update');
-      expect(text).toContain('Opt in to automatic factoryd self-update (default: off)');
+      expect(text).toContain('Deprecated');
     });
 
     it('accepts --auto-update and starts and stops exactly like the default run', async () => {
@@ -4057,6 +4059,14 @@ bash scripts/verify.sh
 
     it('exits with code 2 on an invalid --port and never binds', async () => {
       const res = await runMain('daemon', 'run', '--port', 'abc');
+      expect(res.exited).toBe(true);
+      expect(res.code).toBe(2);
+      expect(logged()).not.toContain('listening on');
+    });
+
+    it('exits with code 2 on --update-mode nightly and lists the valid modes', async () => {
+      const registryFile = join(paths().state, 'registry.json');
+      const res = await runMain('daemon', 'run', '--update-mode', 'nightly', '--registry', registryFile);
       expect(res.exited).toBe(true);
       expect(res.code).toBe(2);
       expect(logged()).not.toContain('listening on');

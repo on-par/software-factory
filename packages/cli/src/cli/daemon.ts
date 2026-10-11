@@ -15,7 +15,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, join, sep } from 'node:path';
 
 import {
   DEFAULT_FACTORYD_PORT,
@@ -74,28 +75,165 @@ export function factorydFiles(home: string): { launchAgentsDir: string; plistPat
   };
 }
 
+export const UPDATE_MODES = ['manual', 'stable', 'prerelease'] as const;
+export type UpdateMode = (typeof UPDATE_MODES)[number];
+export type UpdateChannel = 'latest' | 'next';
+
+/** The single mode → npm dist-tag mapping (#2246). */
+export function updateChannel(mode: UpdateMode): UpdateChannel | null {
+  switch (mode) {
+    case 'stable':
+      return 'latest';
+    case 'prerelease':
+      return 'next';
+    case 'manual':
+      return null;
+  }
+}
+
+/** Exact, case-sensitive parse of an update mode. Throws DaemonCtlError (code 2). */
+export function parseUpdateMode(value: string, source: string): UpdateMode {
+  if ((UPDATE_MODES as readonly string[]).includes(value)) return value as UpdateMode;
+  throw new DaemonCtlError(`invalid ${source} "${value}" — expected one of ${UPDATE_MODES.join(', ')}`, 2);
+}
+
+export type InstallKind = 'npm-global' | 'source' | 'unknown';
+export interface InstallInfo {
+  kind: InstallKind;
+  prefix: string;
+  version: string;
+}
+export interface DetectInstallDeps {
+  execPath?: string;
+  cliPath?: string;
+  env?: NodeJS.ProcessEnv;
+  version?: string;
+  exists?: (p: string) => boolean;
+}
+
+function defaultCliPath(): string {
+  try {
+    return realpathSync(process.argv[1] ?? '');
+  } catch {
+    return '';
+  }
+}
+
+/** Classifies the running cli.js as npm-global, source or unknown (#2246). Pure
+ *  apart from the injectable fs probe; never spawns npm or git. */
+export function detectInstall(deps: DetectInstallDeps = {}): InstallInfo {
+  const execPath = deps.execPath ?? process.execPath;
+  const cliPath = deps.cliPath ?? defaultCliPath();
+  const env = deps.env ?? process.env;
+  const version = deps.version ?? (createRequire(import.meta.url)('../../package.json') as { version: string }).version;
+  const exists = deps.exists ?? existsSync;
+  const prefix = dirname(dirname(execPath));
+  const info = (kind: InstallKind): InstallInfo => ({ kind, prefix, version });
+  if (env.FACTORY_FROM_SOURCE === '1') return info('source');
+  const pkgDir = join(prefix, 'lib', 'node_modules', '@on-par', 'factory-cli');
+  if (cliPath.startsWith(pkgDir + sep)) return info('npm-global');
+  if (cliPath !== '') {
+    let dir = dirname(cliPath);
+    for (;;) {
+      if (exists(join(dir, '.git'))) return info('source');
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  return info('unknown');
+}
+
+/** Optional daemon-scoped config file (<registry dir>/daemon.json). */
+export interface DaemonFileConfig {
+  autoUpdate?: { mode?: string; checkIntervalMinutes?: unknown; drainTimeoutMinutes?: unknown };
+}
+
+/** Reads daemon.json. A missing file is `{}`; malformed structure throws DaemonCtlError (code 2). */
+export function loadDaemonFileConfig(file: string): DaemonFileConfig {
+  if (!existsSync(file)) return {};
+  const fail = (reason: string) => new DaemonCtlError(`invalid daemon config ${file}: ${reason}`, 2);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (err) {
+    throw fail(err instanceof Error ? err.message : String(err));
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw fail('expected a JSON object');
+  const autoUpdate = (parsed as { autoUpdate?: unknown }).autoUpdate;
+  if (
+    autoUpdate !== undefined &&
+    (typeof autoUpdate !== 'object' || autoUpdate === null || Array.isArray(autoUpdate))
+  ) {
+    throw fail('autoUpdate must be an object');
+  }
+  return parsed as DaemonFileConfig;
+}
+
+export interface ResolvedAutoUpdate {
+  /** Effective mode (after the source/unknown downgrade). */
+  mode: UpdateMode;
+  /** Mode requested before the downgrade. */
+  requestedMode: UpdateMode;
+  channel: UpdateChannel | null;
+  checkIntervalMinutes: number;
+  drainTimeoutMinutes: number;
+}
+
 /** Resolved options for the foreground `factory daemon run` process. */
 export interface FactorydConfig {
   /** Registry file served (default ~/.factory/registry.json). */
   registryFile: string;
   /** Port to bind on 127.0.0.1 (default DEFAULT_FACTORYD_PORT). */
   port: number;
-  /** Opt-in auto-update (#2128). Off unless --auto-update was passed; nothing acts on it yet. */
-  autoUpdate: boolean;
+  /** Resolved self-update setting (#2246). Nothing acts on it yet; the registry query, install and restart come in later #1936 issues. */
+  autoUpdate: ResolvedAutoUpdate;
+  install: InstallInfo;
+  /** One-time startup notices (deprecation, downgrade); cmdFactoryd logs each once. */
+  notices: string[];
+}
+
+function positiveInt(value: unknown, fallback: number, name: string): number {
+  if (value === undefined) return fallback;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+    throw new DaemonCtlError(`invalid ${name} "${String(value)}" — expected a positive integer`, 2);
+  }
+  return value;
 }
 
 /** Resolves `factory daemon run` options into a FactorydConfig. Throws
- *  DaemonCtlError (code 2) on an invalid --port. */
-export function resolveFactorydConfig(opts: {
-  port?: string;
-  registry?: string;
-  autoUpdate?: boolean;
-}): FactorydConfig {
+ *  DaemonCtlError (code 2) on an invalid --port, --update-mode or daemon.json value. */
+export function resolveFactorydConfig(
+  opts: { port?: string; registry?: string; updateMode?: string; autoUpdate?: boolean },
+  deps: { install?: InstallInfo; fileConfig?: DaemonFileConfig } = {},
+): FactorydConfig {
   const port = opts.port === undefined ? DEFAULT_FACTORYD_PORT : Number(opts.port);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new DaemonCtlError(`invalid --port "${opts.port}" — expected an integer 0-65535`, 2);
   }
-  return { registryFile: opts.registry ?? defaultRegistryPath(), port, autoUpdate: opts.autoUpdate === true };
+  const install = deps.install ?? detectInstall();
+  const fileAutoUpdate = (deps.fileConfig ?? {}).autoUpdate;
+  const notices: string[] = [];
+  if (opts.autoUpdate === true) notices.push('--auto-update is deprecated; use --update-mode stable');
+  let requested: UpdateMode;
+  if (opts.updateMode !== undefined) requested = parseUpdateMode(opts.updateMode, '--update-mode');
+  else if (opts.autoUpdate === true) requested = 'stable';
+  else if (fileAutoUpdate?.mode !== undefined) {
+    requested = parseUpdateMode(String(fileAutoUpdate.mode), 'autoUpdate.mode in daemon.json');
+  } else requested = install.kind === 'npm-global' ? 'stable' : 'manual';
+  let mode = requested;
+  if (install.kind !== 'npm-global' && requested !== 'manual') {
+    notices.push(`update mode ${requested} needs an npm install; staying manual`);
+    mode = 'manual';
+  }
+  const autoUpdate: ResolvedAutoUpdate = {
+    mode,
+    requestedMode: requested,
+    channel: updateChannel(mode),
+    checkIntervalMinutes: positiveInt(fileAutoUpdate?.checkIntervalMinutes, 30, 'autoUpdate.checkIntervalMinutes'),
+    drainTimeoutMinutes: positiveInt(fileAutoUpdate?.drainTimeoutMinutes, 60, 'autoUpdate.drainTimeoutMinutes'),
+  };
+  return { registryFile: opts.registry ?? defaultRegistryPath(), port, autoUpdate, install, notices };
 }
 
 function xmlEscape(s: string): string {

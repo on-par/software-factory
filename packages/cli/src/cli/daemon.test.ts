@@ -19,10 +19,14 @@ import {
   lastLines,
   parseEtime,
   parseLaunchctlPid,
+  detectInstall,
+  loadDaemonFileConfig,
+  parseUpdateMode,
   renderFactorydPlist,
   resolveFactorydConfig,
+  updateChannel,
 } from './daemon.js';
-import type { DaemonCtlDeps, LaunchctlExec } from './daemon.js';
+import type { DaemonCtlDeps, InstallInfo, LaunchctlExec } from './daemon.js';
 
 interface ExecCall {
   cmd: string;
@@ -77,24 +81,27 @@ describe('factorydFiles', () => {
   });
 });
 
+const npm: InstallInfo = { kind: 'npm-global', prefix: '/p', version: '1.0.0' };
+const src: InstallInfo = { kind: 'source', prefix: '/p', version: '1.0.0' };
+const unknown: InstallInfo = { kind: 'unknown', prefix: '/p', version: '1.0.0' };
+
 describe('resolveFactorydConfig', () => {
   const registry = '/tmp/r.json';
 
-  it('defaults auto-update to off', () => {
-    expect(resolveFactorydConfig({ registry })).toEqual({
+  it('returns the registry, port, install and a resolved autoUpdate block', () => {
+    const install: InstallInfo = { kind: 'unknown', prefix: '/p', version: '1.0.0' };
+    expect(resolveFactorydConfig({ registry }, { install })).toEqual({
       registryFile: registry,
       port: DEFAULT_FACTORYD_PORT,
-      autoUpdate: false,
-    });
-    expect(resolveFactorydConfig({ registry, autoUpdate: undefined }).autoUpdate).toBe(false);
-    expect(resolveFactorydConfig({ registry, autoUpdate: false }).autoUpdate).toBe(false);
-  });
-
-  it('opts in with autoUpdate: true and changes nothing else', () => {
-    expect(resolveFactorydConfig({ registry, autoUpdate: true })).toEqual({
-      registryFile: registry,
-      port: DEFAULT_FACTORYD_PORT,
-      autoUpdate: true,
+      autoUpdate: {
+        mode: 'manual',
+        requestedMode: 'manual',
+        channel: null,
+        checkIntervalMinutes: 30,
+        drainTimeoutMinutes: 60,
+      },
+      install,
+      notices: [],
     });
   });
 
@@ -106,7 +113,7 @@ describe('resolveFactorydConfig', () => {
   it.each(['abc', '-1', '65536', '1.5'])('rejects invalid port %s with code 2', (port) => {
     let caught: unknown;
     try {
-      resolveFactorydConfig({ registry, port });
+      resolveFactorydConfig({ registry, port }, { install: npm });
     } catch (err) {
       caught = err;
     }
@@ -117,6 +124,229 @@ describe('resolveFactorydConfig', () => {
 
   it('falls back to the default registry path', () => {
     expect(resolveFactorydConfig({}).registryFile).toBe(defaultRegistryPath());
+  });
+});
+
+function codeOf(fn: () => unknown): { code: number; message: string } {
+  try {
+    fn();
+  } catch (err) {
+    expect(err).toBeInstanceOf(DaemonCtlError);
+    return { code: (err as DaemonCtlError).code, message: (err as DaemonCtlError).message };
+  }
+  throw new Error('expected DaemonCtlError');
+}
+
+describe('updateChannel', () => {
+  it('maps modes to dist-tags', () => {
+    expect(updateChannel('stable')).toBe('latest');
+    expect(updateChannel('prerelease')).toBe('next');
+    expect(updateChannel('manual')).toBeNull();
+  });
+});
+
+describe('parseUpdateMode', () => {
+  it.each(['manual', 'stable', 'prerelease'] as const)('accepts %s', (m) => {
+    expect(parseUpdateMode(m, '--update-mode')).toBe(m);
+  });
+
+  it.each(['nightly', '', 'STABLE', ' stable '])('rejects %j with DaemonCtlError code 2', (v) => {
+    const res = codeOf(() => parseUpdateMode(v, '--update-mode'));
+    expect(res.code).toBe(2);
+    expect(res.message).toContain('manual, stable, prerelease');
+    expect(res.message).toContain(`"${v}"`);
+  });
+});
+
+describe('detectInstall', () => {
+  const execPath = '/opt/node/bin/node';
+  const npmCli = '/opt/node/lib/node_modules/@on-par/factory-cli/dist/cli.js';
+  const no = () => false;
+
+  it('classifies cli.js under <prefix>/lib/node_modules/@on-par/factory-cli as npm-global', () => {
+    expect(detectInstall({ execPath, cliPath: npmCli, env: {}, version: '9.9.9', exists: no })).toEqual({
+      kind: 'npm-global',
+      prefix: '/opt/node',
+      version: '9.9.9',
+    });
+  });
+
+  it('FACTORY_FROM_SOURCE=1 is source', () => {
+    const res = detectInstall({
+      execPath,
+      cliPath: npmCli,
+      env: { FACTORY_FROM_SOURCE: '1' },
+      version: '1',
+      exists: no,
+    });
+    expect(res.kind).toBe('source');
+  });
+
+  it.each(['0', 'true', ''])('FACTORY_FROM_SOURCE=%j does not count', (v) => {
+    const res = detectInstall({ execPath, cliPath: npmCli, env: { FACTORY_FROM_SOURCE: v }, version: '1', exists: no });
+    expect(res.kind).toBe('npm-global');
+  });
+
+  it('a .git above cliPath is source', () => {
+    const res = detectInstall({
+      execPath,
+      cliPath: '/src/sf/packages/cli/dist/cli.js',
+      env: {},
+      version: '1',
+      exists: (p) => p === '/src/sf/.git',
+    });
+    expect(res.kind).toBe('source');
+  });
+
+  it('is unknown without a .git', () => {
+    const res = detectInstall({
+      execPath,
+      cliPath: '/src/sf/packages/cli/dist/cli.js',
+      env: {},
+      version: '1',
+      exists: no,
+    });
+    expect(res.kind).toBe('unknown');
+  });
+
+  it('does not match a sibling package', () => {
+    const res = detectInstall({
+      execPath,
+      cliPath: '/opt/node/lib/node_modules/@on-par/factory-cli-extra/dist/cli.js',
+      env: {},
+      version: '1',
+      exists: no,
+    });
+    expect(res.kind).toBe('unknown');
+  });
+
+  it('an empty cliPath is unknown', () => {
+    expect(detectInstall({ execPath, cliPath: '', env: {}, version: '1', exists: () => true }).kind).toBe('unknown');
+  });
+
+  it('defaults read the real process without throwing', () => {
+    const res = detectInstall();
+    expect(['npm-global', 'source', 'unknown']).toContain(res.kind);
+    expect(res.version).toMatch(/\d/);
+  });
+});
+
+describe('loadDaemonFileConfig', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'daemon-cfg-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('returns {} for a missing file', () => {
+    expect(loadDaemonFileConfig(join(dir, 'daemon.json'))).toEqual({});
+  });
+
+  it('parses a valid file', () => {
+    const file = join(dir, 'daemon.json');
+    writeFileSync(file, JSON.stringify({ autoUpdate: { mode: 'prerelease', checkIntervalMinutes: 5 } }));
+    expect(loadDaemonFileConfig(file)).toEqual({ autoUpdate: { mode: 'prerelease', checkIntervalMinutes: 5 } });
+  });
+
+  it.each(['{nope', '[]', 'null', '{"autoUpdate":5}', '{"autoUpdate":[]}'])('rejects %s with code 2', (body) => {
+    const file = join(dir, 'daemon.json');
+    writeFileSync(file, body);
+    const res = codeOf(() => loadDaemonFileConfig(file));
+    expect(res.code).toBe(2);
+    expect(res.message).toContain(`invalid daemon config ${file}`);
+  });
+});
+
+describe('resolveFactorydConfig update mode', () => {
+  const registry = '/tmp/r.json';
+  const resolve = (
+    opts: { updateMode?: string; autoUpdate?: boolean },
+    install: InstallInfo,
+    fileConfig?: Parameters<typeof resolveFactorydConfig>[1] extends infer D
+      ? D extends { fileConfig?: infer F }
+        ? F
+        : never
+      : never,
+  ) => resolveFactorydConfig({ registry, ...opts }, { install, fileConfig });
+
+  it('defaults to stable/latest on an npm-global install', () => {
+    const c = resolve({}, npm);
+    expect(c.autoUpdate).toMatchObject({
+      mode: 'stable',
+      channel: 'latest',
+      checkIntervalMinutes: 30,
+      drainTimeoutMinutes: 60,
+    });
+    expect(c.notices).toEqual([]);
+  });
+
+  it.each([src, unknown])('defaults to manual with no notice on a $kind install', (install) => {
+    const c = resolve({}, install);
+    expect(c.autoUpdate.mode).toBe('manual');
+    expect(c.autoUpdate.channel).toBeNull();
+    expect(c.notices).toEqual([]);
+  });
+
+  it('downgrades a requested stable to manual on a source install with exactly one notice', () => {
+    const c = resolve({ updateMode: 'stable' }, src);
+    expect(c.notices).toEqual(['update mode stable needs an npm install; staying manual']);
+    expect(c.autoUpdate).toMatchObject({ mode: 'manual', requestedMode: 'stable', channel: null });
+  });
+
+  it('downgrades prerelease, including one that comes from daemon.json', () => {
+    expect(resolve({ updateMode: 'prerelease' }, unknown).notices).toEqual([
+      'update mode prerelease needs an npm install; staying manual',
+    ]);
+    const c = resolve({}, src, { autoUpdate: { mode: 'stable' } });
+    expect(c.notices).toEqual(['update mode stable needs an npm install; staying manual']);
+    expect(c.autoUpdate.mode).toBe('manual');
+  });
+
+  it('honours manual from the flag and from daemon.json on an npm-global install', () => {
+    expect(resolve({ updateMode: 'manual' }, npm).autoUpdate).toMatchObject({ mode: 'manual', channel: null });
+    expect(resolve({}, npm, { autoUpdate: { mode: 'manual' } }).autoUpdate.mode).toBe('manual');
+  });
+
+  it('treats --auto-update as stable with exactly one deprecation notice', () => {
+    const c = resolve({ autoUpdate: true }, npm);
+    expect(c.autoUpdate.mode).toBe('stable');
+    expect(c.notices).toEqual(['--auto-update is deprecated; use --update-mode stable']);
+  });
+
+  it('--update-mode wins over --auto-update, which still prints the notice', () => {
+    const c = resolve({ updateMode: 'prerelease', autoUpdate: true }, npm);
+    expect(c.autoUpdate).toMatchObject({ mode: 'prerelease', channel: 'next' });
+    expect(c.notices).toEqual(['--auto-update is deprecated; use --update-mode stable']);
+  });
+
+  it('--auto-update beats daemon.json; --update-mode beats daemon.json', () => {
+    expect(resolve({ autoUpdate: true }, npm, { autoUpdate: { mode: 'manual' } }).autoUpdate.mode).toBe('stable');
+    expect(resolve({ updateMode: 'stable' }, npm, { autoUpdate: { mode: 'manual' } }).autoUpdate.mode).toBe('stable');
+  });
+
+  it('daemon.json can request prerelease on npm-global', () => {
+    expect(resolve({}, npm, { autoUpdate: { mode: 'prerelease' } }).autoUpdate.channel).toBe('next');
+  });
+
+  it('daemon.json intervals override the defaults', () => {
+    const c = resolve({}, npm, { autoUpdate: { checkIntervalMinutes: 5, drainTimeoutMinutes: 7 } });
+    expect(c.autoUpdate).toMatchObject({ checkIntervalMinutes: 5, drainTimeoutMinutes: 7 });
+  });
+
+  it.each([0, -1, 1.5, '30'])('rejects interval %j with code 2', (v) => {
+    expect(codeOf(() => resolve({}, npm, { autoUpdate: { checkIntervalMinutes: v } })).code).toBe(2);
+    const res = codeOf(() => resolve({}, npm, { autoUpdate: { drainTimeoutMinutes: v } }));
+    expect(res.code).toBe(2);
+    expect(res.message).toContain('expected a positive integer');
+  });
+
+  it('rejects a bad daemon.json mode and --update-mode nightly with code 2', () => {
+    expect(codeOf(() => resolve({}, npm, { autoUpdate: { mode: 'nightly' } })).message).toContain('autoUpdate.mode');
+    const res = codeOf(() => resolve({ updateMode: 'nightly' }, npm));
+    expect(res.code).toBe(2);
+    expect(res.message).toContain('manual, stable, prerelease');
   });
 });
 
