@@ -67,3 +67,5 @@ Port leases are shared through `port-leases/` beside the registry. Stop or drain
 active work before upgrading: restart retains unfinished runs as interrupted and
 never implicitly replays them. Inspect retained worktrees and PRs before retrying
 with a new run ID; worktree cleanup is manual.
+
+See [state-root.md](./state-root.md) for keeping state and config outside the checkout.

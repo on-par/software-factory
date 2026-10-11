@@ -24,6 +24,7 @@ export interface AttachRepoDeps {
   readOrigin?: (dir: string) => Promise<string | null>;
   fileExists?: (file: string) => Promise<boolean>;
   now?: () => Date;
+  home?: string;
 }
 
 export async function attachRepo(
@@ -31,13 +32,20 @@ export async function attachRepo(
   body: unknown,
   deps: AttachRepoDeps = {},
 ): Promise<AttachRepoResult> {
-  const validation = await validateCheckout(body, deps satisfies CheckoutValidationDeps);
+  const registry = await loadRegistry(registryFile);
+  const slugKey = (body as { repo?: unknown } | null)?.repo;
+  const existingStateRoot = typeof slugKey === 'string' ? registry.repos[slugKey]?.stateRoot : undefined;
+  const validation = await validateCheckout(body, deps satisfies CheckoutValidationDeps, existingStateRoot);
   if (!validation.ok) return { ok: false, reason: validation.reason, detail: validation.detail };
 
-  const { repo, dir } = validation.checkout;
+  const { repo, dir, stateRoot } = validation.checkout;
   const attachedAt = (deps.now?.() ?? new Date()).toISOString();
-  const entry = { path: dir, attachedAt, state: 'active' as const };
-  const registry = await loadRegistry(registryFile);
+  const entry = {
+    path: dir,
+    ...(stateRoot ? { stateRoot } : {}),
+    attachedAt,
+    state: 'active' as const,
+  };
   await writeRegistry(registryFile, upsertRepo(registry, repo, entry));
 
   return { ok: true, entry: { slug: repo, ...entry } };

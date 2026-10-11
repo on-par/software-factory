@@ -24,6 +24,7 @@ import type { Octokit } from '@octokit/rest';
 import type { EventKind } from '../events/kinds.js';
 import { CLAIMED_BY_LABEL_PREFIX, DECOMPOSED_LABEL, PARKED_LABEL } from '../queue/github-queue.js';
 import { findStaleClaims } from '../queue/stale-claims.js';
+import { getFactoryPaths } from '../config/index.js';
 import { factoryBranchPrefixes, shellEscape } from './index.js';
 import { removeMicroVm, type WorktreeSandbox } from './microvm.js';
 
@@ -200,10 +201,10 @@ const BRANCH_REAPABLE_REASONS: ReadonlySet<GcReason> = new Set<GcReason>(['merge
  *  signals (#1355) that carry no merge/ancestry proof, unlike every other `GcReason`. */
 const QUARANTINE_REASONS: ReadonlySet<GcReason> = new Set<GcReason>(['issue-not-found', 'no-active-claim']);
 
-/** Where a quarantined worktree lands: `<repoRoot>/.factory/state/quarantine/`, matching every
- *  other runtime path's home under `.factory/state/` (see `getFactoryPaths`). */
+/** Where a quarantined worktree lands: `<state>/quarantine/`, matching every other runtime
+ *  path's home under the resolved state dir (see `getFactoryPaths`). */
 function quarantineRoot(repoRoot: string): string {
-  return join(repoRoot, '.factory', 'state', 'quarantine');
+  return join(getFactoryPaths(repoRoot).state, 'quarantine');
 }
 
 /** The destination for a quarantined worktree: its own basename under `quarantineDir`, unless

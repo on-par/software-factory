@@ -8,6 +8,7 @@
 import { stat } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 
+import { resolveStateRoot } from '../config/state-root.js';
 import { runCommand } from '../utils/command-runner.js';
 import { parseRemoteSlug } from './remote-slug.js';
 
@@ -23,8 +24,10 @@ export interface ValidatedCheckout {
   dir: string;
   /** The `owner/name` parsed from the checkout's git origin remote. */
   originSlug: string;
-  /** Absolute path of the `.factory/config.json` that was found. */
-  configFile: string;
+  /** Absolute path of the in-checkout `.factory/config.json`, or null when absent under a state root. */
+  configFile: string | null;
+  /** The resolved external state root, when one is in effect (from the request or the registry entry). */
+  stateRoot?: string;
 }
 
 export type CheckoutValidationResult =
@@ -35,6 +38,8 @@ export type CheckoutValidationResult =
 export interface CheckoutValidationDeps {
   readOrigin?: (dir: string) => Promise<string | null>;
   fileExists?: (file: string) => Promise<boolean>;
+  /** Home directory used to resolve a `stateRoot` of `auto`. */
+  home?: string;
 }
 
 const SLUG_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
@@ -55,11 +60,11 @@ async function defaultFileExists(file: string): Promise<boolean> {
 
 export function parseCheckoutRequest(
   body: unknown,
-): { ok: true; request: { repo: string; path: string } } | { ok: false; detail: string } {
+): { ok: true; request: { repo: string; path: string; stateRoot?: string } } | { ok: false; detail: string } {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return { ok: false, detail: 'expected { repo: "owner/name", path: "/abs/path" }' };
   }
-  const { repo, path } = body as { repo?: unknown; path?: unknown };
+  const { repo, path, stateRoot } = body as { repo?: unknown; path?: unknown; stateRoot?: unknown };
   if (typeof repo !== 'string' || typeof path !== 'string') {
     return { ok: false, detail: 'expected { repo: "owner/name", path: "/abs/path" }' };
   }
@@ -69,6 +74,12 @@ export function parseCheckoutRequest(
   if (!isAbsolute(path)) {
     return { ok: false, detail: 'path must be absolute' };
   }
+  if (stateRoot !== undefined) {
+    if (typeof stateRoot !== 'string' || !(isAbsolute(stateRoot) || stateRoot.trim().toLowerCase() === 'auto')) {
+      return { ok: false, detail: 'stateRoot must be an absolute path or "auto"' };
+    }
+    return { ok: true, request: { repo, path, stateRoot } };
+  }
   return { ok: true, request: { repo, path } };
 }
 
@@ -76,6 +87,7 @@ export function parseCheckoutRequest(
 export async function validateCheckout(
   body: unknown,
   deps: CheckoutValidationDeps = {},
+  existingStateRoot?: string,
 ): Promise<CheckoutValidationResult> {
   const parsed = parseCheckoutRequest(body);
   if (!parsed.ok) {
@@ -102,11 +114,24 @@ export async function validateCheckout(
     return { ok: false, reason: 'origin-mismatch', detail: `origin is ${slug}, not ${request.repo}` };
   }
 
-  const configFile = join(dir, '.factory', 'config.json');
-  const hasConfig = await (deps.fileExists ?? defaultFileExists)(configFile);
-  if (!hasConfig) {
-    return { ok: false, reason: 'missing-factory-config', detail: `${configFile} not found` };
+  const stateRoot =
+    request.stateRoot !== undefined
+      ? resolveStateRoot(request.stateRoot, { repoRoot: dir, home: deps.home, resolveSlug: () => slug })
+      : existingStateRoot;
+  const inCheckoutConfig = join(dir, '.factory', 'config.json');
+  const hasConfig = await (deps.fileExists ?? defaultFileExists)(inCheckoutConfig);
+  if (!hasConfig && stateRoot === undefined) {
+    return { ok: false, reason: 'missing-factory-config', detail: `${inCheckoutConfig} not found` };
   }
 
-  return { ok: true, checkout: { repo: request.repo, dir, originSlug: slug, configFile } };
+  return {
+    ok: true,
+    checkout: {
+      repo: request.repo,
+      dir,
+      originSlug: slug,
+      configFile: hasConfig ? inCheckoutConfig : null,
+      ...(stateRoot !== undefined ? { stateRoot } : {}),
+    },
+  };
 }

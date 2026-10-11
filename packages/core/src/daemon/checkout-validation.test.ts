@@ -207,3 +207,53 @@ describe('readOriginUrl', () => {
     await expect(readOriginUrl(dir)).resolves.toBeNull();
   });
 });
+
+describe('validateCheckout with a stateRoot', () => {
+  const readOrigin = async () => 'git@github.com:on-par/software-factory.git';
+  const base = { repo: 'on-par/software-factory', path: '/tmp/some-checkout' };
+
+  it('accepts a body stateRoot with no in-checkout config', async () => {
+    await expect(
+      validateCheckout({ ...base, stateRoot: '/ext/root' }, { readOrigin, fileExists: async () => false }),
+    ).resolves.toEqual({
+      ok: true,
+      checkout: {
+        repo: base.repo,
+        dir: base.path,
+        originSlug: base.repo,
+        configFile: null,
+        stateRoot: '/ext/root',
+      },
+    });
+  });
+
+  it('resolves auto with deps.home', async () => {
+    const r = await validateCheckout(
+      { ...base, stateRoot: 'auto' },
+      { readOrigin, fileExists: async () => false, home: '/h' },
+    );
+    expect(r.ok && r.checkout.stateRoot).toBe(join('/h', '.factory', 'on-par', 'software-factory'));
+  });
+
+  it('rejects an invalid stateRoot as invalid-request', async () => {
+    for (const stateRoot of ['rel/path', '', 5]) {
+      await expect(validateCheckout({ ...base, stateRoot }, { readOrigin })).resolves.toMatchObject({
+        ok: false,
+        reason: 'invalid-request',
+        detail: 'stateRoot must be an absolute path or "auto"',
+      });
+    }
+  });
+
+  it('existingStateRoot skips the config check', async () => {
+    const r = await validateCheckout(base, { readOrigin, fileExists: async () => false }, '/existing');
+    expect(r).toMatchObject({ ok: true, checkout: { configFile: null, stateRoot: '/existing' } });
+  });
+
+  it('still fails missing-factory-config with no stateRoot', async () => {
+    await expect(validateCheckout(base, { readOrigin, fileExists: async () => false })).resolves.toMatchObject({
+      ok: false,
+      reason: 'missing-factory-config',
+    });
+  });
+});
