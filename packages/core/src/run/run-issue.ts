@@ -997,7 +997,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       slice: plan.slice ? { index: plan.slice.index, count: plan.slice.plan.slices.length } : undefined,
     });
     if (!ship.ok) {
-      const reason: ParkReason = ship.denied ? 'escalate' : 'fail';
+      const reason: ParkReason = ship.denied ? 'escalate' : ship.ciOutcome === 'infra-failure' ? 'ci-infra' : 'fail';
       const message = ship.denied
         ? `ship denied: ${ship.deniedReason}`
         : ship.reason

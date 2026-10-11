@@ -32,7 +32,9 @@ export type EventKind =
   | 'checker_completed'
   | 'checker_started'
   | 'ci-failed'
+  | 'ci-infra'
   | 'ci-rescued'
+  | 'ci-rescue-failed'
   | 'conflict'
   | 'constitution'
   | 'decompose_comment_posted'
@@ -262,6 +264,10 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   // An infra-classified CI failure was rerun once and the re-watch went green (#2365). Not a park.
   'ci-rescued': { severity: 'info', isPark: false, isTerminal: false },
   'ci-failed': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
+  // A PR whose one infra rerun also failed for infra on the same SHA (#2366). Parks; not an ADR-0155 steward trigger.
+  'ci-infra': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
+  // The one-shot infra rerun (#2365) did not go green (#2366). Not a park.
+  'ci-rescue-failed': { severity: 'warn', isPark: false, isTerminal: false },
   conflict: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   constitution: { severity: 'info', isPark: false, isTerminal: false },
   decompose_comment_posted: { severity: 'info', isPark: false, isTerminal: false },

@@ -719,6 +719,35 @@ describe('runIssue — steward-triggered event (#2086)', () => {
     expect(calls[0][2].stewardTriggered.trigger).toBe('ship-failed');
   });
 
+  it('does not trigger the steward for a ci-infra park from a repeated infra failure', async () => {
+    vi.mocked(shipPhase).mockResolvedValue({
+      ok: false,
+      prNumber: 9,
+      reason: 'CI failed again for infrastructure reasons for PR #9 after one rerun',
+      ciOutcome: 'infra-failure',
+    });
+    const log = vi.fn();
+    const outcome = await runIssue(
+      baseRequest({ stewardEnabled: true }),
+      basePolicy(),
+      basePorts({ events: () => log }),
+    );
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'ci-infra' });
+    expect(log.mock.calls.map((c) => c[0])).toContain('ci-infra');
+    expect(stewardCalls(log)).toHaveLength(0);
+  });
+
+  it('still parks a ship failure with ciOutcome failure as fail', async () => {
+    vi.mocked(shipPhase).mockResolvedValue({
+      ok: false,
+      prNumber: 9,
+      reason: 'CI failed for PR #9',
+      ciOutcome: 'failure',
+    });
+    const outcome = await runIssue(baseRequest({ stewardEnabled: true }), basePolicy(), basePorts());
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
+  });
+
   it('logs nothing for non-trigger parks', async () => {
     const log = vi.fn();
     vi.mocked(checkPhase).mockResolvedValue({ ...CHECK_EXHAUSTED, reworkRounds: 1 });

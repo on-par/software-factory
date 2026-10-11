@@ -188,6 +188,7 @@ import {
 } from '@on-par/factory-core';
 import type {
   CiOutcome,
+  InfraRerunOutcome,
   EnqueueResult,
   GardenCluster,
   GithubQueue,
@@ -2243,6 +2244,7 @@ export async function shipIssue(
     'held',
     'conflict',
     'ci-failed',
+    'ci-infra',
     'timeout',
   ]);
   let terminalMessage: string | undefined;
@@ -5159,6 +5161,13 @@ export class CiFailedError extends Error {
  *  exactly like "we know it's red": never merge. */
 export class CiUnverifiedError extends CiFailedError {}
 
+/** Thrown when the one infra rerun (#2365) also failed for infrastructure reasons on the same head SHA (#2366).
+ *  A CiFailedError subclass so every guard still leaves the PR open and unmerged, but it parks as
+ *  'ci-infra', which the ADR-0155 steward skips. */
+export class CiInfraError extends CiFailedError {
+  override readonly parkReason: ParkReason = 'ci-infra';
+}
+
 const MAX_MERGE_ATTEMPTS = 5;
 const MERGE_RETRY_BASE_MS = 5_000;
 
@@ -5295,7 +5304,7 @@ export async function landOpenPullRequest(opts: {
    *  merge can be pinned to exactly the commit CI verified. */
   const watchCi = async (): Promise<string> => {
     let headSha: string;
-    let outcome: CiOutcome;
+    let outcome: InfraRerunOutcome;
     try {
       const { data: pr } = await octokit.rest.pulls.get({ owner, repo: repoName, pull_number: prNumber });
       headSha = pr.head.sha;
@@ -5311,6 +5320,11 @@ export async function landOpenPullRequest(opts: {
             'ci-rescued',
             `CI rescued for PR #${prNumber} on ${branch}: reran infra-failed run(s) ${runIds.join(', ')} once and the re-watch is green`,
           ),
+        onRescueFailed: ({ runIds, outcome: failedOutcome }) =>
+          log(
+            'ci-rescue-failed',
+            `CI rescue failed for PR #${prNumber} on ${branch}: reran infra-failed run(s) ${runIds.join(', ')} once and the re-watch ended ${failedOutcome}`,
+          ),
       });
     } catch (err) {
       const msg = `CI watch for ${branch} failed: ${errorDetail(err)} — refusing to merge without a green verdict`;
@@ -5318,6 +5332,11 @@ export async function landOpenPullRequest(opts: {
       throw new CiUnverifiedError(msg, prNumber);
     }
     if (outcome === 'success') return headSha;
+    if (outcome === 'infra-failure') {
+      const msg = `CI failed again for infrastructure reasons for PR #${prNumber} on ${branch} after one rerun — parked as ci-infra, not merged`;
+      log('ci-infra', msg);
+      throw new CiInfraError(msg, prNumber);
+    }
     if (outcome === 'failure') {
       const msg = `CI failed for PR #${prNumber} on ${branch} — refusing to merge with a failing check`;
       log('ci-failed', msg);
