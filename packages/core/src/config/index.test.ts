@@ -33,6 +33,7 @@ import {
   parseSizeGateMode,
   resolveDesignRegressionBlock,
   resolvePlanApproval,
+  resolveReadinessUpdateIssueBody,
   resolveProcessGroupGraceMs,
   resolveSkipCI,
   resolveTimeouts,
@@ -1797,6 +1798,28 @@ describe('resolveDesignRegressionBlock', () => {
   it('falls back to config when env is unset', () => {
     const on = { ...config, design: { blockUnresolvedRegressions: true } };
     expect(resolveDesignRegressionBlock(on, {})).toBe(true);
+  });
+});
+
+describe('resolveReadinessUpdateIssueBody', () => {
+  const config = loadFactoryConfig();
+
+  it('defaults to true from the shipped config', () => {
+    expect(resolveReadinessUpdateIssueBody(config, {})).toBe(true);
+  });
+
+  it('FACTORY_READINESS_UPDATE_BODY=0 wins over config true', () => {
+    expect(resolveReadinessUpdateIssueBody(config, { FACTORY_READINESS_UPDATE_BODY: '0' })).toBe(false);
+  });
+
+  it('FACTORY_READINESS_UPDATE_BODY=1 wins over config false', () => {
+    const off = { ...config, readiness: { updateIssueBody: false } };
+    expect(resolveReadinessUpdateIssueBody(off, { FACTORY_READINESS_UPDATE_BODY: '1' })).toBe(true);
+  });
+
+  it('falls back to config when env is unset', () => {
+    const off = { ...config, readiness: { updateIssueBody: false } };
+    expect(resolveReadinessUpdateIssueBody(off, {})).toBe(false);
   });
 });
 

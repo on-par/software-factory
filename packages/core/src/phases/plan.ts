@@ -17,6 +17,8 @@ import type { EventKind } from '../events/kinds.js';
 import {
   buildReadinessEnrichmentPrompt,
   buildReadinessEnrichmentRetryPrompt,
+  composeEnrichedIssueBody,
+  stripEnrichedBlock,
   type ReadinessEnrichmentRetryContext,
 } from '../readiness/enrich.js';
 import type { SizeGateMode } from '../config/index.js';
@@ -34,6 +36,13 @@ import { escalationLine, isEscalation } from '../utils/index.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE, wrapUntrustedIssueBody } from '../utils/untrusted-input.js';
 import { GITHUB_ISSUE_SOURCE, type GithubIssueParams } from '../work/github-issue.js';
 import { createDefaultWorkSourceRegistry, type WorkRequestSourceKind, type WorkSourceRegistry } from '../work/index.js';
+
+/**
+ * REST API version pinned on the readiness-enrichment issues.update call (#2385). GitHub serves 2022-11-28 when no
+ * header is sent; it is deprecated (sunset 2028-03-10). Scoped to this call because 2026-03-10 has breaking changes
+ * on other endpoints (e.g. merge_commit_sha, singular assignee).
+ */
+const GITHUB_ISSUE_UPDATE_API_VERSION = '2026-03-10';
 
 export interface PlanResult {
   ok: boolean;
@@ -317,6 +326,8 @@ async function planPhaseImpl(opts: {
   maxSlices?: number;
   /** Stop PLAN before BUILD when a worse/unknown behaviorDelta row is not in openQuestions (#1819). Default false = log only. */
   blockUnresolvedRegressions?: boolean;
+  /** readiness.updateIssueBody resolved (#2385); false = enrich in memory only, never write the issue body. Default true. */
+  updateIssueBodyOnEnrich?: boolean;
   /** Local-only mode: force the route to codex so builds use a local harness. */
   localOnly?: boolean;
   /** Repo config pins the build route (`.factory/config.json` → `route`). Forced
@@ -373,6 +384,7 @@ async function planPhaseImpl(opts: {
   ) {
     const params = source.params as GithubIssueParams;
     const [owner, name] = params.repo.split('/');
+    const updateIssueBody = opts.updateIssueBodyOnEnrich ?? true;
     const maxEnrichmentAttempts = 2; // one initial call + one retry with the missing headings named (#816)
     log('readiness_enrichment_started', `enriching incomplete factory-task issue #${params.issue}`);
     try {
@@ -381,7 +393,7 @@ async function planPhaseImpl(opts: {
       let lastReason = '';
       let enriched = false;
       for (let attempt = 1; attempt <= maxEnrichmentAttempts; attempt++) {
-        const input = { title: issueTitle, body: issueBody, missing: readiness.missing };
+        const input = { title: issueTitle, body: stripEnrichedBlock(issueBody), missing: readiness.missing };
         const prompt =
           previous === null
             ? buildReadinessEnrichmentPrompt(input)
@@ -394,12 +406,23 @@ async function planPhaseImpl(opts: {
         lastModel = enrichment.model;
         const candidate = scoreIssueReadiness({ title: issueTitle, body: enrichment.output });
         if (candidate.template === 'factory-task' && candidate.pass) {
-          await octokit.rest.issues.update({ owner, repo: name, issue_number: params.issue, body: enrichment.output });
-          issueBody = enrichment.output;
+          const composed = composeEnrichedIssueBody(issueBody, enrichment.output);
+          if (updateIssueBody) {
+            await octokit.rest.issues.update({
+              owner,
+              repo: name,
+              issue_number: params.issue,
+              body: composed,
+              headers: { 'X-GitHub-Api-Version': GITHUB_ISSUE_UPDATE_API_VERSION },
+            });
+          }
+          issueBody = composed;
           readiness = candidate;
           log(
             'readiness_enrichment_succeeded',
-            `enriched factory-task issue #${params.issue} with ${enrichment.model}`,
+            updateIssueBody
+              ? `enriched factory-task issue #${params.issue} with ${enrichment.model}; updated the GitHub issue body (original text kept, enriched sections added under <!-- factory:enriched -->). To keep enrichment in memory only, set readiness.updateIssueBody: false in .factory/config.yaml or FACTORY_READINESS_UPDATE_BODY=0`
+              : `enriched factory-task issue #${params.issue} with ${enrichment.model} in memory only; GitHub issue body left unchanged (readiness.updateIssueBody: false / FACTORY_READINESS_UPDATE_BODY=0)`,
             {
               model: enrichment.model,
             },

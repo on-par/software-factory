@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createLifecycleBus } from '../bus/index.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { composeEnrichedIssueBody } from '../readiness/enrich.js';
 import { parseDecompositionOutput } from '../readiness/decompose.js';
 import { renderSlicePlanComment, slicePlanFromDecomposition, withSliceState } from '../readiness/slice-plan.js';
 import { ModelRouter } from '../router/index.js';
@@ -457,12 +458,108 @@ npm run test`;
     });
 
     expect(result.ok).toBe(true);
-    expect(updatedBodies).toEqual([completeBody]);
+    expect(updatedBodies).toEqual([composeEnrichedIssueBody('', completeBody)]);
     expect(stub.calls.map((call) => call.task)).toEqual(['readiness_enrich', 'plan']);
     expect(costs.map((entry) => entry.task)).toEqual(['readiness_enrich', 'plan']);
     expect(readinessEvents).toEqual([
       { readiness: { template: 'factory-task', score: 1, pass: true, missing: [], sizeOk: true } },
     ]);
+  });
+
+  describe('readiness enrichment write-back (#2385)', () => {
+    const START = '<!-- factory:enriched -->';
+    const completeBody = `## Problem statement
+The import queue stalls.
+
+## In scope
+Repair queue processing.
+
+## Out of scope
+Changing the queue API.
+
+## Acceptance criteria
+- [ ] Queued imports complete.
+
+## Verification
+npm run test`;
+
+    async function run(opts: { original: string; updateIssueBodyOnEnrich?: boolean; enrichOutput?: string }) {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const updates: any[] = [];
+      const logs: { type: string; msg: string }[] = [];
+      const stub = new StubModelExecutor({
+        scripts: {
+          readiness_enrich: [{ output: opts.enrichOutput ?? completeBody }],
+          plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: {
+          issues: {
+            get: async () => ({ data: { title: 'Repair import queue', body: opts.original } }),
+            update: async (args: unknown) => updates.push(args),
+          },
+        },
+      };
+      const result = await planPhase({
+        issue: 492,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath: join(worktree, 'issue-492.md'),
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => logs.push({ type, msg }),
+        enforceReadiness: true,
+        updateIssueBodyOnEnrich: opts.updateIssueBodyOnEnrich,
+      });
+      return { result, updates, logs, stub };
+    }
+
+    it('keeps the original issue body verbatim above one factory:enriched block when enriching', async () => {
+      const original = 'Imports stall when the queue is full.\n';
+      const { updates } = await run({ original });
+      expect(updates).toHaveLength(1);
+      expect(updates[0].body.startsWith(original)).toBe(true);
+      expect(updates[0].body.split(START)).toHaveLength(2);
+    });
+
+    it('re-enriching an already enriched issue leaves exactly one factory:enriched block', async () => {
+      const original = 'Imports stall when the queue is full.';
+      const old = composeEnrichedIssueBody(original, 'OLD SECTIONS without headings');
+      const { updates } = await run({ original: old });
+      expect(updates).toHaveLength(1);
+      expect(updates[0].body.startsWith(original)).toBe(true);
+      expect(updates[0].body.split(START)).toHaveLength(2);
+      expect(updates[0].body).not.toContain('OLD SECTIONS');
+    });
+
+    it('does not update the GitHub issue body when updateIssueBodyOnEnrich is false but still plans with the enriched text', async () => {
+      const { result, updates, stub, logs } = await run({
+        original: 'Imports stall.',
+        updateIssueBodyOnEnrich: false,
+      });
+      expect(updates).toHaveLength(0);
+      expect(result.ok).toBe(true);
+      expect(stub.calls.map((c) => c.task)).toEqual(['readiness_enrich', 'plan']);
+      expect(stub.calls[1].prompt).toContain('Queued imports complete.');
+      expect(logs.find((l) => l.type === 'readiness_enrichment_succeeded')?.msg).toContain('left unchanged');
+    });
+
+    it('readiness_enrichment_succeeded says the GitHub issue body was updated and names the opt-out', async () => {
+      const { logs } = await run({ original: 'Imports stall.' });
+      const msg = logs.find((l) => l.type === 'readiness_enrichment_succeeded')?.msg ?? '';
+      expect(msg).toContain('updated the GitHub issue body');
+      expect(msg).toContain('readiness.updateIssueBody: false');
+      expect(msg).toContain('FACTORY_READINESS_UPDATE_BODY=0');
+    });
+
+    it('pins X-GitHub-Api-Version 2026-03-10 on the enrichment issues.update call', async () => {
+      const { updates } = await run({ original: 'Imports stall.' });
+      expect(updates[0].headers['X-GitHub-Api-Version']).toBe('2026-03-10');
+    });
   });
 
   it('retries enrichment naming the missing heading(s) and succeeds without parking', async () => {
@@ -518,7 +615,7 @@ npm run test`;
     expect(stub.calls.map((call) => call.task)).toEqual(['readiness_enrich', 'readiness_enrich', 'plan']);
     expect(stub.calls[1].prompt).toContain('Still missing: Out of scope');
     expect(stub.calls[1].prompt).toContain(incompleteBody);
-    expect(updatedBodies).toEqual([completeBody]);
+    expect(updatedBodies).toEqual([composeEnrichedIssueBody('', completeBody)]);
   });
 
   it('escalates only after enrichment retries are exhausted', async () => {

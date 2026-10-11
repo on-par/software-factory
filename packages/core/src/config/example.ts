@@ -49,6 +49,10 @@ const RUNTIME_NOTES: Record<string, string> = {
     'Design-artifact gates at PLAN. blockUnresolvedRegressions: true stops PLAN before BUILD when a worse/unknown ' +
     'behaviorDelta row is not in openQuestions (default false logs design_regression_unresolved only). ' +
     'FACTORY_DESIGN_BLOCK_REGRESSIONS=1/0 beats it.',
+  readiness:
+    'PLAN readiness enrichment for incomplete factory-task issues. updateIssueBody: true (default) writes the ' +
+    'enriched sections back to the GitHub issue under a <!-- factory:enriched --> block, below the original text, ' +
+    'which is kept verbatim; false keeps enrichment in memory only. FACTORY_READINESS_UPDATE_BODY=1/0 beats it.',
   build:
     'BUILD policy. publishFromBuild: true lets the claude BUILD worker push, open a PR and wait for CI before ' +
     'CHECK (the old behavior). Default false keeps BUILD commit-only on every route; SHIP pushes and opens the PR ' +
@@ -271,6 +275,7 @@ function runtimeNamespace(): Node[] {
     section('timeouts'),
     section('plan_approval'),
     section('design'),
+    section('readiness'),
     section('build'),
     section('sizeGate'),
     section('ci'),

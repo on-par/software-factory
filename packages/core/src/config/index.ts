@@ -154,6 +154,7 @@ const FactoryConfigSchema = z.object({
   design: z
     .object({ blockUnresolvedRegressions: z.boolean().default(false) })
     .default({ blockUnresolvedRegressions: false }),
+  readiness: z.object({ updateIssueBody: z.boolean().default(true) }).default({ updateIssueBody: true }),
   build: z.object({ publishFromBuild: z.boolean().default(false) }).default({ publishFromBuild: false }),
   // Plain string on purpose: an unknown mode must load and resolve to `file`, not throw.
   sizeGate: z
@@ -330,6 +331,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'sweep',
   'plan_approval',
   'design',
+  'readiness',
   'build',
   'sizeGate',
   'kpis',
@@ -470,6 +472,10 @@ export function resolveDesignRegressionBlock(config: FactoryConfig, env: NodeJS.
     'FACTORY_DESIGN_BLOCK_REGRESSIONS',
     config.design?.blockUnresolvedRegressions ?? false,
   );
+}
+
+export function resolveReadinessUpdateIssueBody(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
+  return resolveEnabledFlag(env, 'FACTORY_READINESS_UPDATE_BODY', config.readiness?.updateIssueBody ?? true);
 }
 
 export function resolvePlanApproval(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
