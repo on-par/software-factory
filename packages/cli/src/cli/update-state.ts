@@ -15,6 +15,8 @@ export interface UpdateLastResult {
 export interface UpdateDraining {
   since: string;
   target: string;
+  /** STOP files the daemon created for this drain (#1939); removed at startup after a crash. */
+  stopFiles?: string[];
 }
 
 /** On-disk shape of <daemon state dir>/update-state.json (#2129). */
@@ -60,7 +62,11 @@ function parseLastResult(value: unknown): UpdateLastResult | null {
 function parseDraining(value: unknown): UpdateDraining | null {
   if (!isRecord(value)) return null;
   if (typeof value.since !== 'string' || typeof value.target !== 'string') return null;
-  return { since: value.since, target: value.target };
+  const draining: UpdateDraining = { since: value.since, target: value.target };
+  if (Array.isArray(value.stopFiles) && value.stopFiles.every((f) => typeof f === 'string')) {
+    draining.stopFiles = value.stopFiles as string[];
+  }
+  return draining;
 }
 
 /** Tolerant reader: a missing or invalid file is `null`; never throws. */
