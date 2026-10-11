@@ -1,4 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { exec, execSync } from 'node:child_process';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
+
+import { ConstitutionLoader, getConstitutionsDir } from '@on-par/factory-core';
+import { laneWorktreePath, setupWorktree } from '@on-par/factory-core/internal';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   DOCS_URL,
@@ -7,6 +15,9 @@ import {
   missingTokenMessage,
   notInitializedMessage,
 } from './first-run.js';
+import { main } from './index.js';
+
+const execAsync = promisify(exec);
 
 describe('formatOverview', () => {
   it('matches the frozen copy', () => {
@@ -83,4 +94,69 @@ describe('notInitializedMessage', () => {
   it('contains the acceptance-criteria substring verbatim', () => {
     expect(notInitializedMessage()).toContain('factory not initialized — run `factory init` first');
   });
+});
+
+describe('factory init → lane worktree constitution (integration)', () => {
+  let root: string;
+  let repo: string;
+  let savedStateRoot: string | undefined;
+
+  const sh = (cmd: string, cwd: string = repo): string => execSync(cmd, { cwd, encoding: 'utf-8', stdio: 'pipe' });
+
+  beforeEach(() => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'first-run-constitution-')));
+    repo = join(root, 'widget');
+    mkdirSync(repo);
+    sh(
+      'git init -q -b main && git config user.email t@t && git config user.name t && echo x > a.txt && git add a.txt && git commit -q -m init',
+    );
+    sh(`git init -q --bare '${join(root, 'origin.git')}'`);
+    sh(`git remote add origin '${join(root, 'origin.git')}' && git push -q origin main`);
+    savedStateRoot = process.env.FACTORY_STATE_ROOT;
+    delete process.env.FACTORY_STATE_ROOT;
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (savedStateRoot === undefined) delete process.env.FACTORY_STATE_ROOT;
+    else process.env.FACTORY_STATE_ROOT = savedStateRoot;
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('resolves the edited .factory/constitution.md from the main checkout for a ship-style lane worktree', async () => {
+    await main(['node', 'factory', 'init'], {
+      exec: async (cmd, opts) => {
+        const { stdout, stderr } = await execAsync(cmd, {
+          cwd: opts?.cwd ?? repo,
+          timeout: opts?.timeout,
+          encoding: 'utf-8',
+        });
+        return { stdout: String(stdout), stderr: String(stderr) };
+      },
+    });
+    expect(existsSync(join(repo, '.factory/constitution.md'))).toBe(true);
+    expect(readFileSync(join(repo, '.git/info/exclude'), 'utf-8')).toContain('.factory/');
+
+    const marker = 'FACTORY-2413-MARKER-' + Date.now();
+    appendFileSync(join(repo, '.factory/constitution.md'), '\n\n' + marker + '\n');
+
+    const worktree = laneWorktreePath({
+      repoRoot: repo,
+      parent: join(root, 'worktrees'),
+      repo: 'acme/widget',
+      issue: 2413,
+      prefix: 'factory',
+    });
+    await setupWorktree(repo, 'factory/2413-marker', worktree, 'origin/main');
+    // .factory/ is git-excluded, so the lane worktree never contains the file.
+    expect(existsSync(join(worktree, '.factory/constitution.md'))).toBe(false);
+
+    const resolved = new ConstitutionLoader().resolve(worktree, 'example-data-app', undefined, repo);
+    expect(resolved).not.toBeNull();
+    expect(resolved!.body).toContain(marker);
+    expect(resolved!.path).toBe(join(repo, '.factory', 'constitution.md'));
+    expect(resolved!.path.startsWith(getConstitutionsDir())).toBe(false);
+  }, 30_000);
 });
