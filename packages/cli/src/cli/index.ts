@@ -368,7 +368,14 @@ import { mergeScopeNotice } from './merge-scope.js';
 import { createFactoryOctokit, formatDeprecation, type FactoryOctokitOptions } from './octokit.js';
 import { DeepCheckError, createDeepModelRunner, runIssueCheck, type DeepCheckModelRunner } from './ready-check.js';
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
-import { type BaseHoldDecision, createBaseHoldGate, formatBaseHoldCleared, writeBaseHold } from './base-hold.js';
+import {
+  type BaseHoldDecision,
+  createBaseHoldGate,
+  formatBaseHoldCleared,
+  formatBaseHoldStatus,
+  readBaseHold,
+  writeBaseHold,
+} from './base-hold.js';
 import { readRunFlagOverrides, writeRunFlagOverrides } from './run-flags.js';
 import { distFreshnessProbe, runStalenessGuard } from './staleness.js';
 import { readStopFileStatus, stopSentinelCheck, stopSentinelRunSkipMessage } from './stop-sentinel.js';
@@ -1716,6 +1723,12 @@ export async function cmdStatus(opts: { kpis?: boolean; json?: boolean } = {}) {
     warnQueueDiagnostics(diagnostics);
   } else {
     console.log('  (no queue file)');
+  }
+
+  const baseHold = readBaseHold(paths.baseHold);
+  if (baseHold !== null && baseHold.repo === ghRepo) {
+    console.log(styleText('bold', '\n== Base hold =='));
+    for (const line of formatBaseHoldStatus(baseHold)) console.log(line);
   }
 
   console.log(styleText('bold', '\n== Queue =='));

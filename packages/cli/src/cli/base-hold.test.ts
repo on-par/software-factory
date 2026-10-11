@@ -10,6 +10,7 @@ import {
   createBaseHoldGate,
   deleteBaseHold,
   evaluateBaseHold,
+  formatBaseHoldStatus,
   isGreenCheckRunSet,
   parseLsRemoteSha,
   readBaseHold,
@@ -82,6 +83,21 @@ describe('base-hold', () => {
     expect(existsSync(file)).toBe(false);
     expect(readBaseHold(file)).toBeNull();
     expect(() => deleteBaseHold(file)).not.toThrow();
+  });
+});
+
+describe('formatBaseHoldStatus (#2351)', () => {
+  it('lists repo, full baseSha, failing checks and since', () => {
+    expect(formatBaseHoldStatus(hold)).toEqual([
+      '  repo: on-par/software-factory',
+      '  baseSha: abc1234567890def',
+      '  failingChecks: tests, lint',
+      '  since: 2026-01-01T00:00:00.000Z',
+    ]);
+  });
+
+  it('renders (none recorded) when no checks failed', () => {
+    expect(formatBaseHoldStatus({ ...hold, failingChecks: [] })).toContain('  failingChecks: (none recorded)');
   });
 });
 
