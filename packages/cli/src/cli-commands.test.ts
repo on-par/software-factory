@@ -1336,6 +1336,60 @@ bash scripts/verify.sh
       });
     });
 
+    describe('update state (#2129)', () => {
+      let home: string;
+      beforeEach(() => {
+        home = mkdtempSync(join(tmpdir(), 'factory-update-home-'));
+        vi.stubEnv('HOME', home);
+      });
+      afterEach(() => {
+        vi.unstubAllEnvs();
+        rmSync(home, { recursive: true, force: true });
+      });
+      const writeState = (extra: Record<string, unknown> = {}): void => {
+        mkdirSync(join(home, '.factory'), { recursive: true });
+        writeFileSync(
+          join(home, '.factory', 'update-state.json'),
+          JSON.stringify({
+            schemaVersion: 1,
+            mode: 'stable',
+            channel: 'latest',
+            installKind: 'npm-global',
+            current: '0.9.0',
+            available: '0.9.1',
+            ...extra,
+          }),
+        );
+      };
+
+      it('status --json reports the factoryd update state from update-state.json (#2129)', async () => {
+        writeState();
+        await runMain('status', '--json');
+        expect(JSON.parse(logged()).update).toMatchObject({
+          mode: 'stable',
+          channel: 'latest',
+          installKind: 'npm-global',
+          current: '0.9.0',
+          available: '0.9.1',
+        });
+      });
+
+      it('status --json reports update null without a state file', async () => {
+        await runMain('status', '--json');
+        expect(JSON.parse(logged()).update).toBeNull();
+      });
+
+      it('status prints the last update result line (#2129)', async () => {
+        writeState({ lastResult: { at: '2026-10-01T00:00:00.000Z', version: '0.9.1', outcome: 'rolled-back' } });
+        await runMain('status');
+        const line = logged()
+          .split('\n')
+          .find((l) => l.includes('factory 0.9.0'));
+        expect(line).toContain('0.9.1');
+        expect(line).toContain('rolled back');
+      });
+    });
+
     describe('--json', () => {
       it('reports stop:true and nothing but JSON on stdout', async () => {
         writeFileSync(paths().stop, '');

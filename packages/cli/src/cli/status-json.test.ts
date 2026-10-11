@@ -13,6 +13,7 @@ describe('buildStatusJson', () => {
         { provider: 'openai', reason: 'usage_cap', openedAt: '2026-01-01T00:00:00.000Z', remainingMs: 90_500 },
       ],
       active: [{ lane: 'app', issue: 7, phase: 'build', lastActivityAt: new Date(now - 125_000).toISOString() }],
+      update: null,
       now,
     });
     expect(out).toEqual({
@@ -27,12 +28,21 @@ describe('buildStatusJson', () => {
         ],
       },
       active: [{ lane: 'app', issue: 7, phase: 'build', ageSec: 125 }],
+      update: null,
     });
-    expect(Object.keys(out)).toEqual(['schemaVersion', 'repo', 'product', 'stop', 'breaker', 'active']);
+    expect(Object.keys(out)).toEqual(['schemaVersion', 'repo', 'product', 'stop', 'breaker', 'active', 'update']);
   });
 
   it('reports closed breaker, no claims and null product', () => {
-    const out = buildStatusJson({ repo: 'o/r', product: null, stop: false, breakers: [], active: [], now });
+    const out = buildStatusJson({
+      repo: 'o/r',
+      product: null,
+      stop: false,
+      breakers: [],
+      active: [],
+      update: null,
+      now,
+    });
     expect(out.breaker).toEqual({ open: false, providers: [] });
     expect(out.active).toEqual([]);
     expect(out.product).toBeNull();
@@ -49,8 +59,25 @@ describe('buildStatusJson', () => {
         { lane: 'a', issue: 1, phase: 'build', lastActivityAt: new Date(now + 60_000).toISOString() },
         { lane: 'b', issue: 2, phase: 'build', lastActivityAt: 'garbage' },
       ],
+      update: null,
       now,
     });
     expect(out.active.map((r) => r.ageSec)).toEqual([0, 0]);
+  });
+
+  it('copies a populated update object through', () => {
+    const update = {
+      mode: 'stable' as const,
+      channel: 'latest' as const,
+      installKind: 'npm-global' as const,
+      current: '0.9.0',
+      available: '0.9.1',
+      lastCheckAt: null,
+      lastResult: null,
+      draining: null,
+    };
+    expect(
+      buildStatusJson({ repo: 'o/r', product: null, stop: false, breakers: [], active: [], update, now }).update,
+    ).toEqual(update);
   });
 });
