@@ -37,4 +37,29 @@ describe('runEntry', () => {
 
     expect(main).toHaveBeenCalledTimes(1);
   });
+
+  it('refuses to start on a Node major below the minimum without calling main', async () => {
+    const io = recordingIo();
+    const main = vi.fn(async () => {});
+
+    await runEntry(main, io, 'v20.11.1');
+
+    expect(main).not.toHaveBeenCalled();
+    expect(io.error).toHaveBeenCalledTimes(1);
+    expect(io.error.mock.calls[0][0]).toContain('needs Node.js 24 or newer (found v20.11.1)');
+    expect(io.error.mock.calls[0][0]).toContain('nvm install 24');
+    expect(io.exit).toHaveBeenCalledWith(1);
+    expect(io.error.mock.invocationCallOrder[0]).toBeLessThan(io.exit.mock.invocationCallOrder[0]);
+  });
+
+  it('runs main at the minimum version', async () => {
+    const io = recordingIo();
+    const main = vi.fn(async () => {});
+
+    await runEntry(main, io, 'v24.0.0');
+
+    expect(main).toHaveBeenCalledTimes(1);
+    expect(io.error).not.toHaveBeenCalled();
+    expect(io.exit).not.toHaveBeenCalled();
+  });
 });
