@@ -10,8 +10,9 @@ import { HarnessError } from '../harness/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import type { CostEntry } from '../types/index.js';
 import { aggregateCosts, readCostsFile } from '../usage/index.js';
-import type { ExecFn, ModelExecutorContext } from './index.js';
+import type { ExecFn, FetchFn, ModelExecutorContext } from './index.js';
 import { failoversFrom, ModelExecutorError, ModelRouter, ModelRouterError } from './index.js';
+import { probeOllama, resetOllamaProbeCache } from './ollama-probe.js';
 import { StubModelExecutor } from './stub.js';
 
 const models: ModelsConfig = {
@@ -1450,5 +1451,114 @@ describe('default Codex GPT phase profiles (#529)', () => {
     const result = await router.run('build_codex', 'do it', { modelOverride: 'gpt-5.6-sol' });
 
     expect(result.model).toBe('gpt-5.6-sol');
+  });
+});
+
+const okResponse = {
+  ok: true,
+  status: 200,
+  statusText: 'OK',
+  text: async () => '',
+  json: async () => ({}),
+};
+
+describe('Ollama reachability probe', () => {
+  beforeEach(resetOllamaProbeCache);
+
+  const def = (provider: 'ollama' | 'anthropic'): ModelsConfig['models'][string] => ({
+    provider,
+    tier: 'boss',
+    costPerMtokInput: 0,
+    costPerMtokOutput: 0,
+    contextWindow: 1000,
+    capabilities: [],
+    envKey: null,
+  });
+  const ollamaModels: ModelsConfig = {
+    ...models,
+    models: { 'qwen2.5-coder:14b': def('ollama'), 'claude-sonnet-5': def('anthropic') },
+    tiers: { boss: ['qwen2.5-coder:14b', 'claude-sonnet-5'] },
+  };
+  const claudeOnly: ModelsConfig = {
+    ...models,
+    models: { 'claude-sonnet-5': def('anthropic') },
+    tiers: { boss: ['claude-sonnet-5'] },
+  };
+
+  const setup = (fetchStub: FetchFn, withProbe = true) => {
+    const runModel = vi.fn(async () => 'OK');
+    const executor = withProbe ? { runModel, probeOllama: () => probeOllama(fetchStub) } : { runModel };
+    return { runModel, executor };
+  };
+  const down = () =>
+    vi.fn<FetchFn>(async () => {
+      throw new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } });
+    });
+  const up = () => vi.fn<FetchFn>(async () => okResponse);
+
+  it('skips Ollama models with one log line when the Ollama probe fails', async () => {
+    const { runModel, executor } = setup(down());
+    const router = new ModelRouter(ollamaModels, routes, false, executor);
+    const logs: string[] = [];
+
+    const result = await router.run('plan', 'p', { onLog: (m) => logs.push(m) });
+
+    expect(result.model).toBe('claude-sonnet-5');
+    expect(logs.filter((l) => l.startsWith('Trying qwen'))).toEqual([]);
+    expect(
+      logs.filter((l) => l.startsWith('Skipping Ollama models: http://127.0.0.1:11434 unreachable (')),
+    ).toHaveLength(1);
+    expect(runModel.mock.calls.some((c) => (c as unknown[])[0] === 'qwen2.5-coder:14b')).toBe(false);
+  });
+
+  it('probes Ollama once across two routed tasks', async () => {
+    const fetchStub = down();
+    const { executor } = setup(fetchStub);
+    const logs: string[] = [];
+    const onLog = (m: string) => logs.push(m);
+
+    await new ModelRouter(ollamaModels, routes, false, executor).run('plan', 'p', { onLog });
+    await new ModelRouter(ollamaModels, routes, false, executor).run('plan', 'p', { onLog });
+
+    expect(fetchStub).toHaveBeenCalledTimes(1);
+    expect(logs.filter((l) => l.startsWith('Skipping Ollama models'))).toHaveLength(1);
+  });
+
+  it('keeps Ollama-first ordering when the Ollama probe succeeds', async () => {
+    const { executor } = setup(up());
+    const logs: string[] = [];
+
+    await new ModelRouter(ollamaModels, routes, false, executor).run('plan', 'p', { onLog: (m) => logs.push(m) });
+
+    expect(logs.find((l) => l.startsWith('Trying'))).toContain('qwen2.5-coder:14b');
+    expect(logs.some((l) => l.startsWith('Skipping Ollama'))).toBe(false);
+  });
+
+  it('does not probe when the executor has no probeOllama', async () => {
+    const { runModel, executor } = setup(down(), false);
+    const result = await new ModelRouter(ollamaModels, routes, false, executor).run('plan', 'p');
+    expect(result.model).toBe('qwen2.5-coder:14b');
+    expect(runModel).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws unavailable naming the endpoint when every model is Ollama and unreachable', async () => {
+    const { executor } = setup(down());
+    const router = new ModelRouter(ollamaModels, routes, false, executor);
+
+    const err = await router
+      .run('plan', 'p', { modelOverride: 'qwen2.5-coder:14b', modelFallbacks: [] })
+      .catch((e) => e);
+
+    expect(err).toBeInstanceOf(ModelRouterError);
+    expect(err.reason).toBe('unavailable');
+    expect(err.message).toContain('http://127.0.0.1:11434');
+    expect(err.attempts).toEqual([]);
+  });
+
+  it('does not probe for chains with no Ollama model', async () => {
+    const fetchStub = down();
+    const { executor } = setup(fetchStub);
+    await new ModelRouter(claudeOnly, routes, false, executor).run('plan', 'p');
+    expect(fetchStub).not.toHaveBeenCalled();
   });
 });

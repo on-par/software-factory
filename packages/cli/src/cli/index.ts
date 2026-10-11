@@ -3616,8 +3616,12 @@ async function cmdTriage(opts: { product?: string }) {
     effective.allowExperimental,
     effective.localOnly,
   );
-  const model = router.resolve('triage') ?? 'claude-sonnet-5';
-  const flag = router.registryRef.getClaudeFlag(model);
+  // Triage always runs `claude -p`, so only claude-cli models with a flag are runnable.
+  const registry = router.registryRef;
+  const resolved = router.resolveAll('triage');
+  const candidates = resolved.length > 0 ? resolved : ['claude-sonnet-5'];
+  const model = candidates.find((m) => registry.getHarnessId(m) === 'claude-cli' && registry.getClaudeFlag(m));
+  const flag = model ? registry.getClaudeFlag(model) : undefined;
 
   const constitutionNote = product ? `Active constitution: ${product}.` : '';
   const prompt = `Triage the open GitHub issues of ${ghRepo} for an autonomous software factory.
@@ -3629,7 +3633,7 @@ Write ONLY the queue to ${paths.queueProposed} in format '<lane> <issue#>', with
 explaining exclusions.`;
 
   let plannerError: unknown;
-  logEvent(paths.events, 'triage', '-', `Triaging ${ghRepo} with ${model}`);
+  logEvent(paths.events, 'triage', '-', `Triaging ${ghRepo} with ${flag ?? 'claude default model'}`);
   await shellOps
     .exec(
       `claude -p ${shellEscape(prompt)} ${flag ? `--model ${flag}` : ''} --allowedTools "Bash(gh issue:*)" "Bash(gh repo:*)" Read Glob Grep Write`,

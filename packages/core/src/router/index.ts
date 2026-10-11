@@ -21,9 +21,11 @@ import { defaultExecFn } from '../utils/exec.js';
 import { shellEscape } from '../utils/index.js';
 import { extractFailoverReason, ModelExecutorError, ModelRouterError, type RouterAttempt } from './executor-error.js';
 import { describeFailureDetail } from './failure-detail.js';
+import { claimOllamaSkipNotice, type OllamaProbeResult, probeOllama } from './ollama-probe.js';
 import { captureWorktreeState, resetWorktreeState } from './worktree-state.js';
 
 export type { ExecFn } from '../utils/exec.js';
+export type { OllamaProbeResult } from './ollama-probe.js';
 export { ModelExecutorError, ModelRouterError } from './executor-error.js';
 
 const PROVIDER_LEVEL_FAILURES = new Set<FailoverReason>(['usage_cap', 'rate_limit', 'timeout', 'unavailable']);
@@ -113,6 +115,8 @@ export interface ModelExecutorContext {
  *  reason 'empty_response', never as a resolved empty string. */
 export interface ModelExecutor {
   runModel(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string>;
+  /** Optional: report whether the Ollama endpoint answers. Executors that omit it never have Ollama models skipped. */
+  probeOllama?(): Promise<OllamaProbeResult>;
 }
 
 /** A dispatch-map entry in CliModelExecutor: runs one model through one harness.
@@ -134,7 +138,7 @@ export class CliModelExecutor implements ModelExecutor {
 
   constructor(
     private execFn: ExecFn = defaultExecFn,
-    fetchFn: FetchFn = globalThis.fetch,
+    private fetchFn: FetchFn = globalThis.fetch,
     harnessOverrides: Record<string, ExecutorHarness> = {},
   ) {
     this.claudeHarness = new ClaudeCliHarness(execFn);
@@ -161,6 +165,10 @@ export class CliModelExecutor implements ModelExecutor {
    *  cli-executor.test.ts fails on any drift in either direction. */
   supportedHarnessIds(): string[] {
     return Object.keys(this.harnesses);
+  }
+
+  probeOllama(): Promise<OllamaProbeResult> {
+    return probeOllama(this.fetchFn);
   }
 
   /** Run a single model via the harness declared (or inferred) for it in the registry. */
@@ -673,8 +681,21 @@ export class ModelRouter {
       ? await captureWorktreeState(this.gitExecFn, worktree, onLog)
       : null;
 
+    let ollamaProbe: OllamaProbeResult | undefined;
+    let skippedForOllama = false;
+
     for (const model of models) {
       const modelProvider = this.registry.get(model)?.provider;
+      if (modelProvider === 'ollama' && this.executor.probeOllama) {
+        ollamaProbe ??= await this.executor.probeOllama();
+        if (!ollamaProbe.reachable) {
+          if (claimOllamaSkipNotice()) {
+            onLog(`Skipping Ollama models: ${ollamaProbe.endpoint} unreachable (${ollamaProbe.reason})`);
+          }
+          skippedForOllama = true;
+          continue;
+        }
+      }
       if (modelProvider && blockedProviders.has(modelProvider)) {
         onLog(`Skipping ${model} for ${task}: provider ${modelProvider} is on cooldown`);
         continue;
@@ -842,6 +863,14 @@ export class ModelRouter {
         }
         break;
       }
+    }
+
+    if (attempts.length === 0 && skippedForOllama && ollamaProbe && !ollamaProbe.reachable) {
+      throw new ModelRouterError(
+        `No reachable models for task '${task}': Ollama at ${ollamaProbe.endpoint} unreachable (${ollamaProbe.reason})`,
+        'unavailable',
+        attempts,
+      );
     }
 
     const summary = attempts.map((a) => `${a.model}(${a.reason}${a.detail ? `: ${a.detail}` : ''})`).join(', ');
