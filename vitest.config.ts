@@ -55,7 +55,9 @@ export default defineConfig({
       provider: 'v8',
       // 'text' prints the per-file table; 'text-summary' prints the totals line.
       reporter: ['text', 'text-summary', 'html', 'json-summary', 'lcov', 'cobertura'],
-      include: ['packages/*/src/**/*.{ts,tsx}'],
+      // scripts/pack-hygiene.ts is the tarball guard behind every package's prepack and
+      // the quickstart pack check (#2336); its bin shim (pack-hygiene-cli.ts) stays out.
+      include: ['packages/*/src/**/*.{ts,tsx}', 'scripts/pack-hygiene.ts'],
       exclude: [
         ...configDefaults.coverage.exclude,
         '**/*.test.{ts,tsx}',
@@ -93,7 +95,7 @@ export default defineConfig({
         // rebaselines the V8 mapping results, so these values are reset once
         // here and remain a non-decreasing guard afterwards.
         'packages/adr-kit/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 92, statements: 98 },
-        'packages/config/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 49, statements: 99 },
+        'packages/config/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 100, statements: 99 },
         'packages/contracts/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
         'packages/repo-context/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 98, statements: 99 },
         'packages/core/src/**/*.{ts,tsx}': { lines: 97, functions: 96, branches: 88.9, statements: 96 },
@@ -105,6 +107,7 @@ export default defineConfig({
         'packages/product/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 98, statements: 99 },
         'packages/server/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
         'packages/scbench-adapter/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 96, statements: 98 },
+        'scripts/pack-hygiene.ts': { lines: 100, functions: 100, branches: 100, statements: 100 },
       },
     },
   },

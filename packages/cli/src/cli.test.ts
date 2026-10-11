@@ -5334,7 +5334,7 @@ More prose here.
 
     it('pins the publish-critical fields of package.json', () => {
       const cliPkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf-8'));
-      expect(cliPkg.files).toEqual(['dist']);
+      expect(cliPkg.files).toEqual(['dist', '!dist/.tsbuildinfo']);
       expect(cliPkg.publishConfig.access).toBe('public');
       expect(cliPkg.bin.factory).toBe('dist/cli.js');
       expect(typeof cliPkg.version).toBe('string');

@@ -28,7 +28,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/.tsbuildinfo"
   ],
   "publishConfig": {
     "access": "public"
@@ -49,7 +50,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "prepack": "node ../../scripts/pack-hygiene-cli.ts prepack"
   },
   "dependencies": {
     "@on-par/adr-kit": "^2.0.0",

@@ -11,7 +11,7 @@
     "qs": "6.16.0"
   },
   "scripts": {
-    "build": "tsc -b && npm run build --workspace @on-par/factory-dashboard",
+    "build": "tsc -b && npm run copy-assets --workspace @on-par/factory-config && npm run build --workspace @on-par/factory-dashboard",
     "dev": "npm run dev --workspace @on-par/factory-cli",
     "lint": "oxlint --type-aware --deny-warnings .",
     "typecheck": "tsc -b && npm run typecheck --workspaces",
