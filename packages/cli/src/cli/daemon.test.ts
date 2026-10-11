@@ -2,12 +2,21 @@
 
 import { mkdtempSync, appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import http from 'node:http';
 import { join } from 'node:path';
 
-import { DEFAULT_FACTORYD_PORT, defaultRegistryPath } from '@on-par/factory-core/internal';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  createFactorydServer,
+  DEFAULT_FACTORYD_PORT,
+  defaultRegistryPath,
+  listRepos,
+  loadRegistry,
+} from '@on-par/factory-core/internal';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  cmdDaemonAttach,
+  cmdDaemonDetach,
   cmdDaemonLogs,
   cmdDaemonStart,
   cmdDaemonStatus,
@@ -21,6 +30,7 @@ import {
   parseLaunchctlPid,
   renderFactorydPlist,
   resolveFactorydConfig,
+  resolveFactorydPort,
 } from './daemon.js';
 import type { DaemonCtlDeps, LaunchctlExec } from './daemon.js';
 
@@ -571,6 +581,300 @@ describe('daemon control commands', () => {
       const { out, text } = makeOut();
       await cmdDaemonLogs({}, { home, out, platform: 'linux' });
       expect(text()).toBe('hello\n');
+    });
+  });
+});
+
+describe('resolveFactorydPort', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'daemon-port-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('prefers the flag, then the port file, then the default', () => {
+    const f = join(dir, 'daemon.port');
+    writeFileSync(f, JSON.stringify({ port: 9001 }));
+    expect(resolveFactorydPort('1234', f)).toBe(1234);
+    expect(resolveFactorydPort(undefined, f)).toBe(9001);
+  });
+
+  it('falls back to the default for a missing, garbage or out-of-range port file', () => {
+    const f = join(dir, 'daemon.port');
+    expect(resolveFactorydPort(undefined, f)).toBe(DEFAULT_FACTORYD_PORT);
+    writeFileSync(f, 'nope');
+    expect(resolveFactorydPort(undefined, f)).toBe(DEFAULT_FACTORYD_PORT);
+    writeFileSync(f, JSON.stringify({ port: 70000 }));
+    expect(resolveFactorydPort(undefined, f)).toBe(DEFAULT_FACTORYD_PORT);
+  });
+
+  it.each(['abc', '-1', '70000', '1.5', ''])('rejects invalid flag %j with code 2', (v) => {
+    expect(() => resolveFactorydPort(v, join(dir, 'x'))).toThrow(DaemonCtlError);
+    try {
+      resolveFactorydPort(v, join(dir, 'x'));
+    } catch (e) {
+      expect((e as DaemonCtlError).code).toBe(2);
+    }
+  });
+});
+
+describe('cmdDaemonAttach / cmdDaemonDetach', () => {
+  let dir: string;
+  let registryFile: string;
+  let checkoutDir: string;
+  let servers: Array<{ stop(): Promise<void> }> = [];
+  const ORIGIN = 'git@github.com:acme/widget.git';
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'daemon-attach-'));
+    registryFile = join(dir, 'registry.json');
+    checkoutDir = join(dir, 'checkout');
+    mkdirSync(checkoutDir, { recursive: true });
+  });
+  afterEach(async () => {
+    await Promise.all(servers.map((s) => s.stop()));
+    servers = [];
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function startDaemon(fileExists = true): Promise<number> {
+    const server = createFactorydServer({
+      registryFile,
+      port: 0,
+      log: () => {},
+      detachDeps: { pollIntervalMs: 5 },
+      attachDeps: { readOrigin: async () => ORIGIN, fileExists: async () => fileExists },
+    });
+    servers.push(server);
+    return server.start();
+  }
+
+  function deps(extra: DaemonCtlDeps = {}): { deps: DaemonCtlDeps; text: () => string; errText: () => string } {
+    const o = makeOut();
+    const e = makeOut();
+    return {
+      deps: { registryFile, stateDir: dir, readOrigin: async () => ORIGIN, out: o.out, err: e.out, ...extra },
+      text: o.text,
+      errText: e.text,
+    };
+  }
+
+  function eventLines(): string[] {
+    const f = join(checkoutDir, '.factory', 'state', 'events.ndjson');
+    return existsSync(f) ? readFileSync(f, 'utf-8').trim().split('\n') : [];
+  }
+
+  async function rejection(p: Promise<void>): Promise<DaemonCtlError> {
+    const e = await p.then(
+      () => undefined,
+      (x: unknown) => x,
+    );
+    expect(e).toBeInstanceOf(DaemonCtlError);
+    return e as DaemonCtlError;
+  }
+
+  /** A plain server answering every request with a fixed status/body. */
+  async function stubServer(status: number, body?: string): Promise<number> {
+    const srv = http.createServer((_req, res) => {
+      res.writeHead(status, { 'content-type': 'application/json' });
+      res.end(body);
+    });
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+    servers.push({ stop: () => new Promise<void>((r) => srv.close(() => r())) });
+    return (srv.address() as { port: number }).port;
+  }
+
+  async function freePort(): Promise<number> {
+    const srv = http.createServer();
+    await new Promise<void>((r) => srv.listen(0, '127.0.0.1', r));
+    const port = (srv.address() as { port: number }).port;
+    await new Promise<void>((r) => srv.close(() => r()));
+    return port;
+  }
+
+  describe('cmdDaemonAttach', () => {
+    it('attaches through a live factoryd and daemon status --json lists the repo', async () => {
+      const port = await startDaemon();
+      mkdirSync(join(checkoutDir, '.factory'), { recursive: true });
+      const d = deps();
+      await cmdDaemonAttach({ path: checkoutDir, port: String(port), json: true }, d.deps);
+      expect(d.text()).toBe('{"schemaVersion":1,"ok":true,"action":"attach","repo":"acme/widget"}\n');
+
+      const { exec } = makeFakeExec({ print: { code: 1 } });
+      const status = makeOut();
+      await cmdDaemonStatus({ platform: 'darwin', exec, registryFile, out: status.out, home: dir }, { json: true });
+      expect(JSON.parse(status.text()).repos.map((r: { slug: string }) => r.slug)).toContain('acme/widget');
+      const lines = eventLines();
+      expect(lines).toHaveLength(1);
+      expect(JSON.parse(lines[0] as string).type).toBe('repo-attached');
+      process.exitCode = undefined;
+    });
+
+    it('prints the text success line and skips the event when the state root is missing', async () => {
+      const port = await startDaemon();
+      const d = deps();
+      await cmdDaemonAttach({ path: checkoutDir, port: String(port) }, d.deps);
+      expect(d.text()).toBe(`factoryd: attached acme/widget (${checkoutDir})\n`);
+      expect(eventLines()).toEqual([]);
+    });
+
+    it('reports ok:false reason missing-factory-config with exit 1 and the detail on stderr', async () => {
+      const port = await startDaemon(false);
+      const d = deps();
+      const err = await rejection(cmdDaemonAttach({ path: checkoutDir, port: String(port), json: true }, d.deps));
+      expect(err.code).toBe(1);
+      expect(err.message.length).toBeGreaterThan(0);
+      expect(JSON.parse(d.text())).toEqual({
+        schemaVersion: 1,
+        ok: false,
+        action: 'attach',
+        repo: 'acme/widget',
+        reason: 'missing-factory-config',
+      });
+      expect(existsSync(registryFile)).toBe(false);
+    });
+
+    it('prints nothing on stdout for a text-mode failure', async () => {
+      const port = await startDaemon(false);
+      const d = deps();
+      await rejection(cmdDaemonAttach({ path: checkoutDir, port: String(port) }, d.deps));
+      expect(d.text()).toBe('');
+    });
+
+    it('reports daemon-unreachable and throws DaemonCtlError code 1 when nothing listens on the port', async () => {
+      const port = await freePort();
+      const d = deps();
+      const err = await rejection(cmdDaemonAttach({ path: checkoutDir, port: String(port), json: true }, d.deps));
+      expect(err.code).toBe(1);
+      expect(err.message).toContain(`http://127.0.0.1:${port}`);
+      expect(JSON.parse(d.text()).reason).toBe('daemon-unreachable');
+    });
+
+    it('treats a rejecting fetch as daemon-unreachable', async () => {
+      const d = deps({ fetch: () => Promise.reject(new TypeError('fetch failed')) });
+      const err = await rejection(cmdDaemonAttach({ path: checkoutDir, port: '1', json: true }, d.deps));
+      expect(err.code).toBe(1);
+      expect(JSON.parse(d.text()).reason).toBe('daemon-unreachable');
+    });
+
+    it('passes an unknown reason through and maps a missing one to unknown-failure', async () => {
+      const p1 = await stubServer(400, JSON.stringify({ error: 'x', reason: 'future-code' }));
+      const d1 = deps();
+      const e1 = await rejection(cmdDaemonAttach({ path: checkoutDir, port: String(p1), json: true }, d1.deps));
+      expect(e1.message).toBe('x');
+      expect(JSON.parse(d1.text()).reason).toBe('future-code');
+
+      const p2 = await stubServer(500);
+      const d2 = deps();
+      const e2 = await rejection(cmdDaemonAttach({ path: checkoutDir, port: String(p2), json: true }, d2.deps));
+      expect(e2.message).toBe('HTTP 500');
+      expect(JSON.parse(d2.text()).reason).toBe('unknown-failure');
+    });
+
+    it('reports not-a-git-checkout with a null repo and makes no HTTP call when there is no origin', async () => {
+      let calls = 0;
+      const d = deps({
+        readOrigin: async () => null,
+        fetch: () => {
+          calls++;
+          return Promise.reject(new Error('unexpected'));
+        },
+      });
+      const err = await rejection(cmdDaemonAttach({ path: checkoutDir, json: true }, d.deps));
+      expect(err.code).toBe(1);
+      expect(calls).toBe(0);
+      expect(JSON.parse(d.text())).toMatchObject({ ok: false, repo: null, reason: 'not-a-git-checkout' });
+    });
+
+    it('throws code 2 for an invalid --port before any I/O', async () => {
+      const d = deps();
+      const err = await rejection(cmdDaemonAttach({ port: 'zzz' }, d.deps));
+      expect(err.code).toBe(2);
+    });
+
+    it('warns on stderr but succeeds when the event cannot be written', async () => {
+      const port = await startDaemon();
+      mkdirSync(join(checkoutDir, '.factory'), { recursive: true });
+      writeFileSync(join(checkoutDir, '.factory', 'state'), 'a file, not a dir');
+      const d = deps();
+      await cmdDaemonAttach({ path: checkoutDir, port: String(port), json: true }, d.deps);
+      expect(JSON.parse(d.text()).ok).toBe(true);
+      expect(d.errText()).toContain('could not record repo-attached');
+    });
+
+    it('reads the port from daemon.port when --port is absent', async () => {
+      const port = await startDaemon();
+      writeFileSync(join(dir, 'daemon.port'), JSON.stringify({ port }));
+      const d = deps();
+      await cmdDaemonAttach({ path: checkoutDir, json: true }, d.deps);
+      expect(JSON.parse(d.text()).ok).toBe(true);
+    });
+  });
+
+  describe('cmdDaemonDetach', () => {
+    it('detaches an attached repo, is idempotent, and appends repo-detached events', async () => {
+      const port = await startDaemon();
+      mkdirSync(join(checkoutDir, '.factory'), { recursive: true });
+      const a = deps();
+      await cmdDaemonAttach({ path: checkoutDir, port: String(port), json: true }, a.deps);
+
+      const first = deps();
+      await cmdDaemonDetach('acme/widget', { port: String(port), json: true }, first.deps);
+      expect(JSON.parse(first.text())).toEqual({ schemaVersion: 1, ok: true, action: 'detach', repo: 'acme/widget' });
+      // A 202 drains in the background and rewrites the registry; let it settle before repeating.
+      await vi.waitFor(async () => {
+        expect(listRepos(await loadRegistry(registryFile)).find((r) => r.slug === 'acme/widget')?.state).toBe(
+          'detached',
+        );
+      });
+      const again = deps();
+      await cmdDaemonDetach('acme/widget', { port: String(port), json: true }, again.deps);
+      expect(JSON.parse(again.text()).ok).toBe(true);
+
+      const types = eventLines().map((l) => JSON.parse(l).type);
+      expect(types).toEqual(['repo-attached', 'repo-detached', 'repo-detached']);
+    });
+
+    it('prints the text lines for 200 and 202', async () => {
+      const p200 = await stubServer(200, '{}');
+      const d1 = deps();
+      await cmdDaemonDetach('acme/widget', { port: String(p200) }, d1.deps);
+      expect(d1.text()).toBe('factoryd: detached acme/widget\n');
+      const p202 = await stubServer(202, '{}');
+      const d2 = deps();
+      await cmdDaemonDetach('acme/widget', { port: String(p202) }, d2.deps);
+      expect(d2.text()).toBe('factoryd: detaching acme/widget (draining in-flight lanes)\n');
+    });
+
+    it('reports unknown-repo with code 1 for an unattached slug', async () => {
+      const port = await startDaemon();
+      const d = deps();
+      const err = await rejection(cmdDaemonDetach('acme/nope', { port: String(port), json: true }, d.deps));
+      expect(err.code).toBe(1);
+      expect(JSON.parse(d.text()).reason).toBe('unknown-repo');
+    });
+
+    it('reports daemon-unreachable when nothing listens', async () => {
+      const port = await freePort();
+      const d = deps();
+      const err = await rejection(cmdDaemonDetach('acme/widget', { port: String(port), json: true }, d.deps));
+      expect(err.code).toBe(1);
+      expect(JSON.parse(d.text()).reason).toBe('daemon-unreachable');
+    });
+
+    it('rejects a malformed slug with invalid-request, code 2 and no fetch', async () => {
+      let calls = 0;
+      const fetchSpy = (() => {
+        calls++;
+        return Promise.reject(new Error('unexpected'));
+      }) as typeof globalThis.fetch;
+      for (const slug of ['', 'noslash', 'a/b/c', 'a/ b']) {
+        const d = deps({ fetch: fetchSpy });
+        const err = await rejection(cmdDaemonDetach(slug, { json: true }, d.deps));
+        expect(err.code).toBe(2);
+        expect(JSON.parse(d.text()).reason).toBe('invalid-request');
+      }
+      expect(calls).toBe(0);
     });
   });
 });

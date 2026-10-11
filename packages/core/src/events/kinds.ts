@@ -126,6 +126,8 @@ export type EventKind =
   | 'ready'
   | 'recovered'
   | 'remote-branch-preexisting'
+  | 'repo-attached'
+  | 'repo-detached'
   | 'resource_limit'
   | 'resume-approved'
   | 'resumed'
@@ -362,6 +364,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   ready: { severity: 'info', isPark: false, isTerminal: true, laneStatus: 'ready' },
   recovered: { severity: 'info', isPark: false, isTerminal: false },
   'remote-branch-preexisting': { severity: 'info', isPark: false, isTerminal: false },
+  'repo-attached': { severity: 'info', isPark: false, isTerminal: false },
+  'repo-detached': { severity: 'info', isPark: false, isTerminal: false },
   resource_limit: { severity: 'warn', isPark: false, isTerminal: false },
   'resume-approved': { severity: 'info', isPark: false, isTerminal: false },
   resumed: { severity: 'info', isPark: false, isTerminal: false },

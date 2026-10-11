@@ -316,6 +316,8 @@ import { buildStopResumeJson } from './stop-resume-json.js';
 import { buildUsageJson } from './usage-json.js';
 import { parseResetIssues, runReset } from './reset.js';
 import {
+  cmdDaemonAttach,
+  cmdDaemonDetach,
   cmdDaemonLogs,
   cmdDaemonStart,
   cmdDaemonStatus,
@@ -6665,6 +6667,23 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .description('Report factoryd pid, uptime, and attached repos')
     .option('--json', 'Print one JSON object (schemaVersion 1) instead of text')
     .action((opts: { json?: boolean }) => daemonCtl(() => cmdDaemonStatus(deps.daemon, { json: opts.json })));
+  daemonCmd
+    .command('attach')
+    .description('Attach a checkout to factoryd (POST /repos); defaults to the cwd and its origin slug')
+    .option('--path <dir>', 'Checkout to attach (default: the current directory)')
+    .option('--port <n>', 'factoryd port (default: daemon.port, else 8787)')
+    .option('--json', 'Print one JSON object (schemaVersion 1) instead of text')
+    .action((opts: { path?: string; port?: string; json?: boolean }) =>
+      daemonCtl(() => cmdDaemonAttach(opts, deps.daemon)),
+    );
+  daemonCmd
+    .command('detach <owner/name>')
+    .description('Detach a repo from factoryd (DELETE /repos/<owner>/<name>)')
+    .option('--port <n>', 'factoryd port (default: daemon.port, else 8787)')
+    .option('--json', 'Print one JSON object (schemaVersion 1) instead of text')
+    .action((slug: string, opts: { port?: string; json?: boolean }) =>
+      daemonCtl(() => cmdDaemonDetach(slug, opts, deps.daemon)),
+    );
   daemonCmd
     .command('logs')
     .description('Print or tail ~/.factory/daemon.log')

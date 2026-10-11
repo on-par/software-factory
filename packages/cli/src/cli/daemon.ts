@@ -15,15 +15,21 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
+import { createLogger, getFactoryPaths } from '@on-par/factory-core';
 import {
+  daemonRuntimePaths,
   DEFAULT_FACTORYD_PORT,
   defaultRegistryPath,
   listRepos,
   loadRegistry,
+  parseRemoteSlug,
+  readOriginUrl,
   type RepoState,
 } from '@on-par/factory-core/internal';
+
+import { buildDaemonRepoJson } from './daemon-repo-json.js';
 
 export const FACTORYD_LABEL = 'com.onpar.factoryd';
 
@@ -62,6 +68,16 @@ export interface DaemonCtlDeps {
   registryFile?: string;
   /** Follow-mode poll interval; tests pass ~10. Default 250. */
   pollMs?: number;
+  /** HTTP client for the factoryd routes (attach/detach). Default globalThis.fetch. */
+  fetch?: typeof globalThis.fetch;
+  /** Daemon state dir holding daemon.port. Default dirname(registryFile). */
+  stateDir?: string;
+  /** Default process.cwd(). */
+  cwd?: string;
+  /** Origin remote URL of a checkout. Default core's readOriginUrl. */
+  readOrigin?: (dir: string) => Promise<string | null>;
+  /** Default process.stderr. */
+  err?: { write(s: string): unknown };
 }
 
 /** Where a given home directory keeps the LaunchAgent plist and the daemon log. */
@@ -188,9 +204,15 @@ interface ResolvedDeps {
   cliScriptPath: string;
   registryFile: string;
   pollMs: number;
+  fetch: typeof globalThis.fetch;
+  stateDir: string;
+  cwd: string;
+  readOrigin: (dir: string) => Promise<string | null>;
+  err: { write(s: string): unknown };
 }
 
 function resolveDeps(deps: DaemonCtlDeps): ResolvedDeps {
+  const registryFile = deps.registryFile ?? defaultRegistryPath();
   return {
     exec: deps.exec ?? defaultExec(),
     home: deps.home ?? homedir(),
@@ -199,8 +221,13 @@ function resolveDeps(deps: DaemonCtlDeps): ResolvedDeps {
     out: deps.out ?? process.stdout,
     nodePath: deps.nodePath ?? process.execPath,
     cliScriptPath: deps.cliScriptPath ?? realpathSync(process.argv[1] ?? ''),
-    registryFile: deps.registryFile ?? defaultRegistryPath(),
+    registryFile,
     pollMs: deps.pollMs ?? 250,
+    fetch: deps.fetch ?? globalThis.fetch,
+    stateDir: deps.stateDir ?? dirname(registryFile),
+    cwd: deps.cwd ?? process.cwd(),
+    readOrigin: deps.readOrigin ?? readOriginUrl,
+    err: deps.err ?? process.stderr,
   };
 }
 
@@ -377,4 +404,163 @@ export async function cmdDaemonLogs(
     process.once('SIGTERM', done);
   });
   clearInterval(poll);
+}
+
+/** Port for the factoryd HTTP routes: --port, else the `port` factoryd recorded in
+ *  daemon.port, else DEFAULT_FACTORYD_PORT. Throws DaemonCtlError (code 2) on an invalid flag. */
+export function resolveFactorydPort(flag: string | undefined, portFile: string): number {
+  if (flag !== undefined) {
+    const port = Number(flag);
+    if (flag.trim() === '' || !Number.isInteger(port) || port < 0 || port > 65535) {
+      throw new DaemonCtlError(`invalid --port "${flag}" — expected an integer 0-65535`, 2);
+    }
+    return port;
+  }
+  try {
+    const port = (JSON.parse(readFileSync(portFile, 'utf-8')) as { port?: unknown }).port;
+    if (typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535) return port;
+  } catch {
+    // missing or unparsable — fall through to the default
+  }
+  return DEFAULT_FACTORYD_PORT;
+}
+
+type FactorydReply = { kind: 'unreachable' } | { kind: 'response'; status: number; json: unknown };
+
+async function callFactoryd(
+  d: ResolvedDeps,
+  method: 'POST' | 'DELETE',
+  url: string,
+  body?: unknown,
+): Promise<FactorydReply> {
+  try {
+    const res = await d.fetch(url, {
+      method,
+      ...(body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(5000),
+    });
+    let json: unknown = null;
+    try {
+      json = await res.json();
+    } catch {
+      json = null;
+    }
+    return { kind: 'response', status: res.status, json };
+  } catch {
+    return { kind: 'unreachable' };
+  }
+}
+
+function failReason(status: number, json: unknown): { reason: string; detail: string } {
+  const obj = json !== null && typeof json === 'object' ? (json as { reason?: unknown; error?: unknown }) : {};
+  return {
+    reason: typeof obj.reason === 'string' && obj.reason !== '' ? obj.reason : 'unknown-failure',
+    detail: typeof obj.error === 'string' && obj.error !== '' ? obj.error : `HTTP ${status}`,
+  };
+}
+
+/** Appends one pipeline event to the repo's events log. Best-effort: only when its
+ *  state root exists, quiet on stdout, and never throws (warns on stderr). */
+function emitRepoEvent(d: ResolvedDeps, kind: 'repo-attached' | 'repo-detached', json: unknown, msg: string): void {
+  try {
+    const entry = (json as { repo?: { path?: unknown; stateRoot?: unknown } } | null)?.repo;
+    if (!entry || typeof entry.path !== 'string') return;
+    const paths = getFactoryPaths(entry.path, typeof entry.stateRoot === 'string' ? entry.stateRoot : undefined);
+    if (!existsSync(paths.root)) return;
+    mkdirSync(paths.state, { recursive: true });
+    createLogger(paths.events, { issue: '-' }, { out: { write: () => true } }).info(kind, msg);
+  } catch (err) {
+    d.err.write(`factoryd: could not record ${kind} event: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
+}
+
+function finishRepoCommand(
+  d: ResolvedDeps,
+  json: boolean | undefined,
+  payload: { action: 'attach' | 'detach'; repo: string | null; ok: boolean; reason?: string },
+  text: string,
+  failure?: { detail: string; code: number },
+): void {
+  if (json) d.out.write(`${JSON.stringify(buildDaemonRepoJson(payload))}\n`);
+  else if (!failure) d.out.write(text);
+  if (failure) throw new DaemonCtlError(failure.detail, failure.code);
+}
+
+/** `factory daemon attach`: POST /repos for the checkout at --path (default cwd). */
+export async function cmdDaemonAttach(
+  opts: { path?: string; port?: string; json?: boolean },
+  deps: DaemonCtlDeps = {},
+): Promise<void> {
+  const d = resolveDeps(deps);
+  const dir = resolve(d.cwd, opts.path ?? '.');
+  const port = resolveFactorydPort(opts.port, daemonRuntimePaths(d.stateDir).portFile);
+  const origin = await d.readOrigin(dir);
+  const slug = origin ? parseRemoteSlug(origin) : null;
+  if (!slug) {
+    finishRepoCommand(d, opts.json, { action: 'attach', repo: null, ok: false, reason: 'not-a-git-checkout' }, '', {
+      detail: `${dir} has no origin remote that parses to owner/name`,
+      code: 1,
+    });
+    return;
+  }
+  const base = `http://127.0.0.1:${port}`;
+  const reply = await callFactoryd(d, 'POST', `${base}/repos`, { repo: slug, path: dir });
+  if (reply.kind === 'unreachable') {
+    finishRepoCommand(d, opts.json, { action: 'attach', repo: slug, ok: false, reason: 'daemon-unreachable' }, '', {
+      detail: `factoryd is not reachable at ${base} — start it with \`factory daemon start\` or \`factory daemon run\``,
+      code: 1,
+    });
+    return;
+  }
+  if (reply.status < 200 || reply.status >= 300) {
+    const { reason, detail } = failReason(reply.status, reply.json);
+    finishRepoCommand(d, opts.json, { action: 'attach', repo: slug, ok: false, reason }, '', { detail, code: 1 });
+    return;
+  }
+  emitRepoEvent(d, 'repo-attached', reply.json, `factory daemon attach: ${slug} attached (${dir})`);
+  finishRepoCommand(d, opts.json, { action: 'attach', repo: slug, ok: true }, `factoryd: attached ${slug} (${dir})\n`);
+}
+
+/** `factory daemon detach <owner/name>`: DELETE /repos/<owner>/<name>. */
+export async function cmdDaemonDetach(
+  slug: string,
+  opts: { port?: string; json?: boolean },
+  deps: DaemonCtlDeps = {},
+): Promise<void> {
+  const d = resolveDeps(deps);
+  const port = resolveFactorydPort(opts.port, daemonRuntimePaths(d.stateDir).portFile);
+  if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(slug)) {
+    finishRepoCommand(d, opts.json, { action: 'detach', repo: slug, ok: false, reason: 'invalid-request' }, '', {
+      detail: `invalid repo "${slug}" — expected owner/name`,
+      code: 2,
+    });
+    return;
+  }
+  const [owner = '', name = ''] = slug.split('/');
+  const base = `http://127.0.0.1:${port}`;
+  const reply = await callFactoryd(
+    d,
+    'DELETE',
+    `${base}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
+  );
+  if (reply.kind === 'unreachable') {
+    finishRepoCommand(d, opts.json, { action: 'detach', repo: slug, ok: false, reason: 'daemon-unreachable' }, '', {
+      detail: `factoryd is not reachable at ${base} — start it with \`factory daemon start\` or \`factory daemon run\``,
+      code: 1,
+    });
+    return;
+  }
+  if (reply.status !== 200 && reply.status !== 202) {
+    const { reason, detail } = failReason(reply.status, reply.json);
+    finishRepoCommand(d, opts.json, { action: 'detach', repo: slug, ok: false, reason }, '', { detail, code: 1 });
+    return;
+  }
+  const draining = reply.status === 202;
+  emitRepoEvent(d, 'repo-detached', reply.json, `factory daemon detach: ${slug} ${draining ? 'draining' : 'detached'}`);
+  finishRepoCommand(
+    d,
+    opts.json,
+    { action: 'detach', repo: slug, ok: true },
+    draining ? `factoryd: detaching ${slug} (draining in-flight lanes)\n` : `factoryd: detached ${slug}\n`,
+  );
 }

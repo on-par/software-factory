@@ -193,6 +193,15 @@ describe('phase/checker timing event classification (#1321)', () => {
   });
 });
 
+describe('repo attach/detach event classification (#2280)', () => {
+  it('is info severity, not park, not terminal for both kinds', () => {
+    for (const kind of ['repo-attached', 'repo-detached'] as const) {
+      expect(EVENT_TRAITS[kind], kind).toEqual({ severity: 'info', isPark: false, isTerminal: false });
+      expect(isParkKind(kind), kind).toBe(false);
+    }
+  });
+});
+
 describe('skipped-already-closed classification (#681)', () => {
   it('is info severity, not park, terminal', () => {
     expect(EVENT_TRAITS['skipped-already-closed']).toEqual({ severity: 'info', isPark: false, isTerminal: true });
