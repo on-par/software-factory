@@ -19,6 +19,7 @@ Install or update with `npm install -g @on-par/factory-cli@latest`.
   README that npm shows, CONTRIBUTING.md and SECURITY.md match it (#2377,
   #2352, #2374).
 - `@on-par/factory-cli` has a new npm description and keywords (#2377).
+- Both READMEs open with a short GIF of a factory run (#2379).
 - The footer the factory adds to its PR bodies now says "On PAR Dev's
   Software Factory" (#2377).
 - KPIs count landed and admin-merged factory PRs as merges (#2373).
