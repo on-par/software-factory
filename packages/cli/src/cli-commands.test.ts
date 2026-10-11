@@ -99,6 +99,7 @@ import {
   IssueDecomposedError,
   LaneParkError,
   IssueSkippedError,
+  LaneEnvironmentPauseError,
   main,
   parseIssueArg,
   shipIssue as cliShipIssue,
@@ -360,7 +361,12 @@ function makePhaseFakes() {
       return h.checkResult;
     }),
     shipPhase: vi.fn<NonNullable<CliDeps['shipPhase']>>(async (_opts) => h.shipResult),
-  } satisfies Pick<CliDeps, 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase'>;
+    checkBaseHealth: vi.fn<NonNullable<CliDeps['checkBaseHealth']>>(async () => ({
+      kind: 'skipped' as const,
+      failingChecks: [],
+      cached: false,
+    })),
+  } satisfies Pick<CliDeps, 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase' | 'checkBaseHealth'>;
 }
 /** Fresh phase doubles per test, spread into every main/shipIssue call (CliDeps phase overrides). */
 let phases = makePhaseFakes();
@@ -923,6 +929,25 @@ describe('cli commands (via main dispatch)', () => {
 
       expect(stub).not.toHaveBeenCalled();
       expect(phases.planPhase).toHaveBeenCalled();
+    });
+
+    it('red base from the pre-PLAN health check throws LaneEnvironmentPauseError before planPhase', async () => {
+      const baseSha = 'a'.repeat(40);
+      const red = vi.fn<NonNullable<CliDeps['checkBaseHealth']>>(async () => ({
+        kind: 'red' as const,
+        baseSha,
+        failingChecks: ['tests'],
+        cached: false,
+      }));
+
+      const err = await shipIssue(5, {}, { repoRoot: h.repoRoot, ghRepo: h.ghRepo }, { checkBaseHealth: red }).catch(
+        (e: unknown) => e,
+      );
+
+      expect(err).toBeInstanceOf(LaneEnvironmentPauseError);
+      expect((err as LaneEnvironmentPauseError).baseSha).toBe(baseSha);
+      expect((err as LaneEnvironmentPauseError).failingChecks).toEqual(['tests']);
+      expect(phases.planPhase).not.toHaveBeenCalled();
     });
 
     it('routes constitution --product through an injected getConstitutionsDir', async () => {
