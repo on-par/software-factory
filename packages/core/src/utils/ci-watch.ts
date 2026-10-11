@@ -2,11 +2,31 @@
 import type { Octokit } from '@octokit/rest';
 import { runCommand } from './command-runner.js';
 
-/** watchChecks reports exactly one of three outcomes: 'success' (every check run passed and the
+/** watchChecks reports exactly one of four outcomes: 'success' (every check run passed and the
  *  set was final — see `settleMs` / `minChecks`), 'failure' (a completed check run reported a
- *  non-passing conclusion), or 'timeout' (no verdict was reached — the deadline elapsed, no check
- *  runs ever registered, or repeated API failures exhausted the retry budget). It never rejects. */
-export type CiOutcome = 'success' | 'failure' | 'timeout';
+ *  non-passing conclusion), 'timeout' (no verdict was reached — the deadline elapsed, no check
+ *  runs ever registered, or repeated API failures exhausted the retry budget), or 'no-checks'
+ *  (returned only when `noChecksGraceMs` > 0 and, once the grace period has passed, the ref has
+ *  zero check runs and zero commit statuses). It never rejects. */
+export type CiOutcome = 'success' | 'failure' | 'timeout' | 'no-checks';
+
+export const DEFAULT_CI_DEADLINE_MS = 600_000;
+export const DEFAULT_CI_NO_CHECKS_GRACE_MS = 90_000;
+
+/** Snapshot passed to `onProgress` while check runs are pending. */
+export interface CiWatchProgress {
+  total: number;
+  completed: number;
+  pending: number;
+  elapsedMs: number;
+  remainingMs: number;
+}
+
+/** Passed to `onNoChecks` when the watch ends 'no-checks'. */
+export interface CiNoChecksInfo {
+  sha: string;
+  waitedMs: number;
+}
 
 export interface WatchChecksOptions {
   octokit: Octokit;
@@ -26,6 +46,17 @@ export interface WatchChecksOptions {
   /** How long the observed check-run count must stay unchanged before a complete all-passing set
    *  counts as final, when no minChecks is declared. Default 30_000. */
   settleMs?: number;
+  /** Once this long has passed since the watch started, a successful poll that sees zero check
+   *  runs and a combined commit status with zero statuses ends the watch 'no-checks' (#2386).
+   *  Default 0, which disables the early exit. */
+  noChecksGraceMs?: number;
+  /** Minimum gap between onProgress calls. Default 60_000. */
+  progressIntervalMs?: number;
+  /** Called after a successful poll that sees at least one check run and does not end the watch,
+   *  at most once per progressIntervalMs. */
+  onProgress?: (p: CiWatchProgress) => void;
+  /** Called once, just before the watch returns 'no-checks'. */
+  onNoChecks?: (info: CiNoChecksInfo) => void;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 }
@@ -93,6 +124,31 @@ const DEFAULT_MAX_PAGES = 10;
 const DEFAULT_MAX_POLL_ERRORS = 3;
 const DEFAULT_SETTLE_MS = 30_000;
 const DEFAULT_MIN_CHECKS = 0;
+const DEFAULT_PROGRESS_INTERVAL_MS = 60_000;
+
+/** Grace before a watch gives up on a ref with no check runs and no statuses: the
+ *  FACTORY_CI_NO_CHECKS_GRACE_SECONDS env var (a finite number >= 0; 0 disables), else 90 s. */
+export function resolveCiNoChecksGraceMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.FACTORY_CI_NO_CHECKS_GRACE_SECONDS?.trim();
+  if (!raw) return DEFAULT_CI_NO_CHECKS_GRACE_MS;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 1000) : DEFAULT_CI_NO_CHECKS_GRACE_MS;
+}
+
+/** Commit-status count and resolved SHA for a ref, or null when it cannot be determined. */
+async function commitStatusCount(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  ref: string,
+): Promise<{ total: number; sha: string } | null> {
+  try {
+    const { data } = await octokit.rest.repos.getCombinedStatusForRef({ owner, repo, ref, per_page: 1 });
+    return { total: data.total_count ?? data.statuses?.length ?? 0, sha: data.sha ?? ref };
+  } catch {
+    return null;
+  }
+}
 
 type CheckRunLike = { id?: number; head_sha?: string | null; status?: string | null; conclusion?: string | null };
 
@@ -120,7 +176,7 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
     owner,
     repo,
     ref,
-    deadlineMs = 600_000,
+    deadlineMs = DEFAULT_CI_DEADLINE_MS,
     initialIntervalMs = 15_000,
     maxIntervalMs = 60_000,
     perPage = DEFAULT_PER_PAGE,
@@ -128,11 +184,17 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
     maxPollErrors = DEFAULT_MAX_POLL_ERRORS,
     minChecks = DEFAULT_MIN_CHECKS,
     settleMs = DEFAULT_SETTLE_MS,
+    noChecksGraceMs = 0,
+    progressIntervalMs = DEFAULT_PROGRESS_INTERVAL_MS,
+    onProgress,
+    onNoChecks,
     sleep = (ms) => new Promise<void>((r) => setTimeout(r, ms)),
     now = () => Date.now(),
   } = opts;
 
-  const deadline = now() + deadlineMs;
+  const startedAt = now();
+  const deadline = startedAt + deadlineMs;
+  let lastProgressAt: number | undefined;
   let interval = initialIntervalMs;
   let consecutiveErrors = 0;
   // GitHub's check-run set for a ref grows as workflows register, so a snapshot in which every
@@ -148,6 +210,16 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
         stableCount = runs.length;
         stableSince = now();
       }
+      if (runs.length === 0 && noChecksGraceMs > 0 && now() - startedAt >= noChecksGraceMs) {
+        // Unknown (null) keeps polling; it is not a poll error.
+        const statuses = await commitStatusCount(octokit, owner, repo, ref);
+        if (statuses && statuses.total === 0) {
+          try {
+            onNoChecks?.({ sha: statuses.sha, waitedMs: now() - startedAt });
+          } catch {}
+          return 'no-checks';
+        }
+      }
       if (runs.length > 0 && runs.every((r) => r.status === 'completed')) {
         // Fail closed: only an explicitly passing conclusion counts as green. `cancelled`,
         // `timed_out`, `action_required`, `stale`, a null conclusion on a completed run, and any
@@ -158,6 +230,23 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
         if (!allPassed) return 'failure';
         const setIsFinal = minChecks > 0 ? runs.length >= minChecks : now() - stableSince >= settleMs;
         if (setIsFinal) return 'success';
+      }
+      if (
+        runs.length > 0 &&
+        onProgress &&
+        (lastProgressAt === undefined || now() - lastProgressAt >= progressIntervalMs)
+      ) {
+        const completed = runs.filter((r) => r.status === 'completed').length;
+        lastProgressAt = now();
+        try {
+          onProgress({
+            total: runs.length,
+            completed,
+            pending: runs.length - completed,
+            elapsedMs: now() - startedAt,
+            remainingMs: Math.max(0, deadline - now()),
+          });
+        } catch {}
       }
     } catch {
       // A failed poll observes nothing this iteration rather than aborting the watch; give up

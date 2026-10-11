@@ -1141,6 +1141,76 @@ describe('shipPhase CI watch', () => {
     }
   });
 
+  describe('CI wait visibility (#2386)', () => {
+    async function runShip(sequence: any[][], extra: { statusTotal?: number; ciNoChecksGraceMs?: number } = {}) {
+      const { octokit } = createWatchOctokit(sequence);
+      (octokit as any).rest.repos = {
+        getCombinedStatusForRef: async () => ({
+          data: { total_count: extra.statusTotal ?? 0, statuses: [], sha: 'deadbeef' },
+        }),
+      };
+      const logs: Array<[string, string]> = [];
+      vi.useFakeTimers();
+      try {
+        const start = Date.now();
+        const promise = shipPhase({
+          issue: 123,
+          repo: 'on-par/software-factory',
+          worktree: '/repo-factory-123',
+          branch: 'ship-it/123-ci-poll',
+          octokit: octokit as any,
+          watchCI: true,
+          ciNoChecksGraceMs: extra.ciNoChecksGraceMs ?? 90_000,
+          log: (type, msg) => logs.push([type, msg]),
+          run: async () => ({ stdout: '' }),
+        });
+        await vi.runAllTimersAsync();
+        const result = await promise;
+        return { result, logs, elapsed: Date.now() - start };
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+
+    it('logs no CI checks and marks ready within the grace period plus one poll when the PR head has no checks or statuses', async () => {
+      const { result, logs, elapsed } = await runShip([[]]);
+
+      expect(result).toEqual({ ok: true, prNumber: 123, ciOutcome: 'no-checks' });
+      expect(logs).toContainEqual([
+        'ship',
+        'no CI checks found on on-par/software-factory for deadbeef; skipping CI wait',
+      ]);
+      expect(logs).toContainEqual(['ready', 'PR #123 ready for review (CI skipped: no checks found)']);
+      expect(elapsed).toBeLessThanOrEqual(90_000 + 60_000);
+    });
+
+    it('logs a CI timeout line and still marks the PR ready', async () => {
+      const { result, logs } = await runShip([pending]);
+
+      expect(result).toEqual({ ok: true, prNumber: 123, ciOutcome: 'timeout' });
+      expect(logs).toContainEqual(['ship', 'CI did not finish within 10 min; marking PR ready anyway']);
+      expect(logs).toContainEqual(['ready', 'PR #123 ready for review']);
+      expect(logs.some(([type]) => type === 'timeout')).toBe(false);
+    });
+
+    it('logs throttled CI progress with minutes left while checks are pending', async () => {
+      const { logs } = await runShip([pending]);
+
+      const lines = logs.filter(
+        ([type, msg]) =>
+          type === 'ship' && /CI for PR #123: 1 pending, 0\/1 completed, \d+ min left before the CI timeout/.test(msg),
+      );
+      expect(lines.length).toBeGreaterThanOrEqual(1);
+      expect(lines.length).toBeLessThanOrEqual(11);
+    });
+
+    it('ciNoChecksGraceMs: 0 disables the early exit', async () => {
+      const { result } = await runShip([[]], { ciNoChecksGraceMs: 0 });
+
+      expect(result).toMatchObject({ ok: true, ciOutcome: 'timeout' });
+    });
+  });
+
   it('still logs ready when watching CI throws on every poll (fail-closed retry exhausts as timeout, never rejects)', async () => {
     const { octokit } = createWatchOctokit([allSuccess]);
     octokit.rest.checks.listForRef = async () => {

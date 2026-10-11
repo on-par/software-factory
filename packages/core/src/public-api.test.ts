@@ -328,6 +328,9 @@ const PUBLIC_API_KEYS = [
 ];
 
 const INTERNAL_API_KEYS = [
+  'DEFAULT_CI_DEADLINE_MS',
+  'DEFAULT_CI_NO_CHECKS_GRACE_MS',
+  'resolveCiNoChecksGraceMs',
   // Pre-PLAN base health (#2339)
   'BASE_HEALTH_CHECKERS',
   'checkBaseHealth',
