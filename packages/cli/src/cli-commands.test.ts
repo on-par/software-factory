@@ -5838,6 +5838,8 @@ Please add a widget that does the thing.
       h.execSyncImpl = (cmd: string) => {
         if (cmd.includes('rev-parse')) return h.repoRoot;
         if (cmd.includes('status --porcelain')) return '';
+        if (cmd.includes('git config user.name')) return 'Test User';
+        if (cmd.includes('git config user.email')) return 'test@example.com';
         if (cmd.includes('gh auth token')) return 'gho_token';
         if (cmd.includes('gh auth status')) return 'Logged in';
         return '';
@@ -5886,6 +5888,18 @@ Please add a widget that does the thing.
       expect(logged()).toContain('.factory/STOP present');
     });
 
+    it('exits 0 outside a git repo and prints the cd hint', async () => {
+      h.claudeAvailable = true;
+      const base = h.execSyncImpl;
+      h.execSyncImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) throw new Error('not a git repository');
+        return base(cmd);
+      };
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('cd into your repo, then run factory doctor again');
+    });
+
     it('exits 1 when claude is unavailable', async () => {
       h.claudeAvailable = false;
       const res = await runMain('doctor');
@@ -5897,6 +5911,8 @@ Please add a widget that does the thing.
       h.execSyncImpl = (cmd: string) => {
         if (cmd.includes('rev-parse')) return h.repoRoot;
         if (cmd.includes('status --porcelain')) return '';
+        if (cmd.includes('git config user.name')) return 'Test User';
+        if (cmd.includes('git config user.email')) return 'test@example.com';
         if (cmd.includes('gh auth token')) return 'gho_token';
         if (cmd.includes('gh auth status')) throw new Error('not logged in');
         return '';

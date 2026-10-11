@@ -361,6 +361,7 @@ import {
   formatReconcileReport,
   formatWorktreeReconcileReport,
   type GreenPrScanResult,
+  hasSandboxRuntime,
   leaseChecks,
   keychainPreflightError,
   type KeychainProbeStatus,
@@ -368,6 +369,7 @@ import {
   orphanContainerChecks,
   orphanMicroVmChecks,
   runDoctorChecks,
+  sandboxAuthSkipDetail,
   sandboxClaudeAuthChecks,
   unmergedGreenPrChecks,
   type UnmergedGreenPrRow,
@@ -6013,15 +6015,19 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
 
   let sandboxed: ClaudeAuthProbe = 'skipped';
   let sandboxDetail = 'skipped — host claude auth was not verified';
-  if (host === 'ok') {
-    const policy =
-      repoRoot === null
-        ? undefined
-        : resolveSandboxPolicy(configLoaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox, {
-            worktree: repoRoot,
-            repoRoot,
-            isAvailable: (cmd) => isCommandAvailableViaShell(shellOps, cmd),
-          });
+  const runtimeAvailable = hasSandboxRuntime(process.platform, (cmd) => isCommandAvailableViaShell(shellOps, cmd));
+  const skip = sandboxAuthSkipDetail({ runtimeAvailable, hostOk: host === 'ok', inRepo: repoRoot !== null });
+  if (skip !== null) {
+    sandboxDetail = skip;
+  } else if (repoRoot !== null) {
+    const policy = resolveSandboxPolicy(
+      configLoaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox,
+      {
+        worktree: repoRoot,
+        repoRoot,
+        isAvailable: (cmd) => isCommandAvailableViaShell(shellOps, cmd),
+      },
+    );
     if (!policy) {
       sandboxDetail = 'skipped — sandbox disabled by config or FACTORY_SANDBOX';
     } else if (policy.runtime === 'none') {

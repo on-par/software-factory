@@ -17,10 +17,12 @@ import {
   leaseChecks,
   keychainPreflightError,
   type LeaseHealthRow,
+  NOT_IN_REPO_HINT,
   orphanContainerChecks,
   orphanMicroVmChecks,
   type ReapRow,
   runDoctorChecks,
+  sandboxAuthSkipDetail,
   sandboxClaudeAuthChecks,
   unmergedGreenPrChecks,
 } from './doctor.js';
@@ -32,21 +34,31 @@ function probes(overrides: Partial<DoctorEnvProbes> = {}): DoctorEnvProbes {
     tryExec: (cmd: string) => {
       if (cmd.includes('git rev-parse')) return '/repo';
       if (cmd.includes('git status --porcelain')) return '';
+      if (cmd.includes('git config user.name')) return 'Test User';
+      if (cmd.includes('git config user.email')) return 'test@example.com';
       if (cmd.includes('gh auth token')) return 'gho_token';
       if (cmd.includes('gh auth status')) return 'Logged in';
       return '';
     },
     pathExists: () => true,
+    platform: 'darwin',
     ...overrides,
   };
 }
 
 describe('runDoctorChecks', () => {
-  it('all-green: 8 checks, every ok true, doctorFailed false', () => {
+  it('fully configured repo: 10 checks all ok, pre-existing rows unchanged, doctorFailed false', () => {
     const checks = runDoctorChecks(probes());
-    expect(checks).toHaveLength(8);
+    expect(checks).toHaveLength(10);
     expect(checks.every((c) => c.ok)).toBe(true);
     expect(doctorFailed(checks)).toBe(false);
+    const byName = (n: string) => checks.find((c) => c.name === n)!;
+    expect(byName('git repository').detail).toBe('/repo');
+    expect(byName('codex sandbox').detail).toBe('codex CLI found (sandboxed builds available)');
+    expect(byName('git worktree clean').detail).toBe('clean');
+    expect(byName('.factory initialized').detail).toBe('.factory/ present');
+    expect(byName('git identity').detail).toBe('Test User <test@example.com>');
+    expect(byName('sandbox runtime').detail).toBe('sandbox-exec found');
   });
 
   it('claude CLI missing fails with the Claude Code fix', () => {
@@ -106,11 +118,13 @@ describe('runDoctorChecks', () => {
     expect(token.fix).toContain('create a token at https://github.com/settings/tokens');
   });
 
-  it('when git rev-parse fails, git worktree clean and .factory initialized skip/fail and doctorFailed is true', () => {
+  it('outside a git repo, repo checks are skipped with the cd hint and doctorFailed is false', () => {
     const checks = runDoctorChecks(
       probes({
         tryExec: (cmd) => {
           if (cmd.includes('git rev-parse')) return null;
+          if (cmd.includes('git config user.name')) return 'Test User';
+          if (cmd.includes('git config user.email')) return 'test@example.com';
           if (cmd.includes('gh auth token')) return 'gho_token';
           if (cmd.includes('gh auth status')) return 'Logged in';
           return '';
@@ -122,11 +136,55 @@ describe('runDoctorChecks', () => {
     const factoryInit = checks.find((c) => c.name === '.factory initialized')!;
 
     expect(git.ok).toBe(false);
-    expect(worktree.ok).toBe(false);
+    expect(git.optional).toBe(true);
+    expect(git.fix).toBe(NOT_IN_REPO_HINT);
     expect(worktree.optional).toBe(true);
-    expect(factoryInit.ok).toBe(false);
+    expect(worktree.detail).toContain(NOT_IN_REPO_HINT);
     expect(factoryInit.optional).toBe(true);
+    expect(factoryInit.detail).toContain(NOT_IN_REPO_HINT);
+    expect(doctorFailed(checks)).toBe(false);
+    expect(formatDoctorChecks(checks)).toContain('cd into your repo, then run factory doctor again');
+  });
+
+  it('git identity fails with the git config --global fix when user.email is unset', () => {
+    const exec = (email: string | null, name: string | null) => (cmd: string) => {
+      if (cmd.includes('git rev-parse')) return '/repo';
+      if (cmd.includes('git config user.name')) return name;
+      if (cmd.includes('git config user.email')) return email;
+      return '';
+    };
+    const checks = runDoctorChecks(probes({ tryExec: exec(null, 'Test User') }));
+    const identity = checks.find((c) => c.name === 'git identity')!;
+    expect(identity.ok).toBe(false);
+    expect(identity.optional).toBeUndefined();
+    expect(identity.detail).toBe('user.email not set');
+    expect(identity.fix).toBe(
+      'git config --global user.name "Your Name" && git config --global user.email you@example.com',
+    );
     expect(doctorFailed(checks)).toBe(true);
+
+    const both = runDoctorChecks(probes({ tryExec: exec('', '') }));
+    expect(both.find((c) => c.name === 'git identity')!.detail).toBe('user.name and user.email not set');
+  });
+
+  it('no sandbox runtime warns uncontained and codex says danger-full-access', () => {
+    const checks = runDoctorChecks(probes({ platform: 'linux', commandAvailable: (c) => c !== 'firejail' }));
+    const runtime = checks.find((c) => c.name === 'sandbox runtime')!;
+    expect(runtime.ok).toBe(false);
+    expect(runtime.optional).toBe(true);
+    expect(runtime.detail).toContain('uncontained');
+    expect(runtime.fix).toContain('firejail');
+    const codex = checks.find((c) => c.name === 'codex sandbox')!;
+    expect(codex.detail).toContain('danger-full-access');
+    expect(codex.detail).not.toContain('sandboxed builds available');
+    expect(doctorFailed(checks)).toBe(false);
+  });
+
+  it('win32 has no sandbox runtime and warns', () => {
+    const checks = runDoctorChecks(probes({ platform: 'win32' }));
+    const runtime = checks.find((c) => c.name === 'sandbox runtime')!;
+    expect(runtime.ok).toBe(false);
+    expect(runtime.optional).toBe(true);
   });
 
   it('a dirty tree marks git worktree clean as an optional failure that does not fail doctor', () => {
@@ -135,6 +193,8 @@ describe('runDoctorChecks', () => {
         tryExec: (cmd) => {
           if (cmd.includes('git rev-parse')) return '/repo';
           if (cmd.includes('git status --porcelain')) return ' M file';
+          if (cmd.includes('git config user.name')) return 'Test User';
+          if (cmd.includes('git config user.email')) return 'test@example.com';
           if (cmd.includes('gh auth token')) return 'gho_token';
           if (cmd.includes('gh auth status')) return 'Logged in';
           return '';
@@ -172,6 +232,21 @@ describe('runDoctorChecks', () => {
     expect(codex.ok).toBe(false);
     expect(codex.optional).toBe(true);
     expect(doctorFailed(checks)).toBe(false);
+  });
+});
+
+describe('sandboxAuthSkipDetail', () => {
+  it('names no sandbox runtime / not inside a git repository', () => {
+    const noRuntime = 'skipped — no sandbox runtime (sandbox-exec/firejail) on this host';
+    expect(sandboxAuthSkipDetail({ runtimeAvailable: false, hostOk: true, inRepo: true })).toBe(noRuntime);
+    expect(sandboxAuthSkipDetail({ runtimeAvailable: false, hostOk: false, inRepo: false })).toBe(noRuntime);
+    expect(sandboxAuthSkipDetail({ runtimeAvailable: true, hostOk: false, inRepo: true })).toBe(
+      'skipped — host claude auth was not verified',
+    );
+    expect(sandboxAuthSkipDetail({ runtimeAvailable: true, hostOk: true, inRepo: false })).toBe(
+      `skipped — not inside a git repository; ${NOT_IN_REPO_HINT}`,
+    );
+    expect(sandboxAuthSkipDetail({ runtimeAvailable: true, hostOk: true, inRepo: true })).toBeNull();
   });
 });
 
