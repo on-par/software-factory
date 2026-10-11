@@ -23,11 +23,12 @@ jobs:
         run: bash scripts/verify.sh
       - name: Quickstart smoke
         run: bash scripts/quickstart-smoke.sh
-      - name: Publish dry-run (lists every package that will publish)
-        run: bash scripts/publish-workspaces.sh --dry-run
       # #2335: one step gates on the v1.0 blockers (#195, #151) and publishes. Every path
       # writes `PUBLISHED <list>` or `NOT PUBLISHED: <reason>` to the job summary and sets
       # `published=true|false`. Anything but a dry run that does not publish fails the job.
+      # #2244: the version and dist-tag come from the tag name: vX.Y.Z-next.N publishes
+      # X.Y.Z-next.N to `next`, vX.Y.Z publishes X.Y.Z to `latest`. The step dry-runs
+      # every package (with exact internal pins) before the real publish.
       - name: Publish to npm
         id: publish
         env:

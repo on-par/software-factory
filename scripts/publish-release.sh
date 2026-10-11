@@ -2,11 +2,18 @@
 # Runs the "Publish to npm" step of publish.yml (#2335). A skipped or failed publish
 # can never show green: every path ends with exactly one job-summary line and a
 # `published=true|false` step output.
-#   PUBLISHED <name@version ...>   all packages in scripts/publish-workspaces.txt went out
+#   PUBLISHED <name@version ...>   all packages in scripts/publish-workspaces.txt are out
 #   NOT PUBLISHED: <reason>        anything else; the step fails unless it was a dry run
 #
+# The version and npm dist-tag come from the tag name (#2244):
+#   vX.Y.Z-next.N  ->  version X.Y.Z-next.N, --tag next
+#   vX.Y.Z         ->  version X.Y.Z,        --tag latest
+# set-release-version.sh writes that version into the packages (never committed), then
+# publish-workspaces.sh dry-runs and publishes. A dry run on a non-tag ref uses the
+# checked-out version.
+#
 # Env:
-#   PUBLISH_DRY_RUN=true   run `publish-workspaces.sh --dry-run` only (green, never publishes)
+#   PUBLISH_DRY_RUN=true   dry-run only (green, never publishes)
 #   GITHUB_REF             must be refs/tags/v* for a real publish
 #   PUBLISH_BLOCKERS       issue numbers that must be CLOSED before a real publish
 #                          (default "195 151", the v1.0 blockers)
@@ -33,16 +40,31 @@ not_published() {
   exit "$2"
 }
 
-if [ "${PUBLISH_DRY_RUN:-}" = "true" ]; then
-  bash scripts/publish-workspaces.sh --dry-run || not_published "dry-run failed" 1
-  not_published "dry-run, not published" 0
-fi
+dry_run=false
+[ "${PUBLISH_DRY_RUN:-}" != "true" ] || dry_run=true
 
 ref="${GITHUB_REF:-}"
 case "$ref" in
-  refs/tags/v*) ;;
-  *) not_published "${ref:-no ref} is not a release tag (refs/tags/v*)" 1 ;;
+  refs/tags/v*)
+    tag="${ref#refs/tags/}"
+    [[ "$tag" =~ ^v((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-next\.(0|[1-9][0-9]*))?)$ ]] ||
+      not_published "tag $tag does not parse as vX.Y.Z or vX.Y.Z-next.N" 1
+    version="${BASH_REMATCH[1]}"
+    bash scripts/set-release-version.sh "$version" || not_published "could not set the package versions to $version" 1
+    ;;
+  *)
+    [ "$dry_run" = true ] || not_published "${ref:-no ref} is not a release tag (refs/tags/v*)" 1
+    version="$(bash scripts/set-release-version.sh --current)" ||
+      not_published "the packages are not at one version" 1
+    ;;
 esac
+case "$version" in
+  *-*) channel=next ;;
+  *) channel=latest ;;
+esac
+
+bash scripts/publish-workspaces.sh --tag "$channel" --dry-run || not_published "dry-run failed" 1
+[ "$dry_run" = false ] || not_published "dry-run, not published" 0
 
 open=""
 for n in ${PUBLISH_BLOCKERS-195 151}; do
@@ -53,28 +75,15 @@ for n in ${PUBLISH_BLOCKERS-195 151}; do
 done
 [ -z "$open" ] || not_published "v1.0 blockers still open:$open" 1
 
-bash scripts/publish-workspaces.sh ||
-  not_published "npm publish failed; packages before the failing one in scripts/publish-workspaces.txt may already be on the registry" 1
+bash scripts/publish-workspaces.sh --tag "$channel" ||
+  not_published "npm publish failed; packages before the failing one in scripts/publish-workspaces.txt may already be on the registry (a rerun skips them)" 1
 
-# name@version for every package in the list, read from its packages/*/package.json.
-published="$(node -e '
-const fs = require("fs");
-const path = require("path");
-const versions = {};
-for (const d of fs.readdirSync("packages")) {
-  const f = path.join("packages", d, "package.json");
-  if (!fs.existsSync(f)) continue;
-  const j = JSON.parse(fs.readFileSync(f, "utf8"));
-  versions[j.name] = j.version;
-}
-const out = fs.readFileSync("scripts/publish-workspaces.txt", "utf8")
-  .split("\n").map((l) => l.trim()).filter(Boolean)
-  .map((n) => {
-    if (!versions[n]) throw new Error("no package.json version for " + n);
-    return n + "@" + versions[n];
-  });
-process.stdout.write(out.join(" "));
-')" || not_published "npm publish succeeded but the package versions could not be read" 1
+published=""
+while IFS= read -r name || [ -n "$name" ]; do
+  name="${name//$'\r'/}"
+  name="${name//[[:space:]]/}"
+  [ -z "$name" ] || published="$published $name@$version"
+done <scripts/publish-workspaces.txt
 
-summary "PUBLISHED $published"
+summary "PUBLISHED$published (--tag $channel)"
 set_output true

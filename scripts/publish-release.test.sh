@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Tests scripts/publish-release.sh (#2335): a skipped or failed publish can never show
-# green. Each case runs the script in a scratch copy of the repo's publish files with stub
-# `npm` and `gh` on PATH, and checks the exit code, the job-summary line and the
-# `published=` step output. Together the cases cover every branch of the script.
+# Tests scripts/publish-release.sh (#2335, #2244): a skipped or failed publish can never
+# show green, and the tag name picks the version and dist-tag. Each case runs the script
+# in a fresh scratch copy of the repo's publish files with stub `npm` and `gh` on PATH,
+# and checks the exit code, the job-summary line, the `published=` step output and the
+# npm calls. Together the cases cover every branch of the script.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -18,27 +19,37 @@ fail() {
   exit 1
 }
 
-# Scratch repo: the real scripts, list and package.json files, nothing else.
 REPO="$WORK/repo"
-mkdir -p "$REPO/scripts" "$REPO/packages"
-cp "$ROOT/scripts/publish-release.sh" "$ROOT/scripts/publish-workspaces.sh" "$ROOT/scripts/publish-workspaces.txt" "$REPO/scripts/"
-for f in "$ROOT"/packages/*/package.json; do
-  d="$(basename "$(dirname "$f")")"
-  mkdir -p "$REPO/packages/$d"
-  cp "$f" "$REPO/packages/$d/package.json"
-done
-
-# A directory with no package.json (e.g. a leftover build dir) is skipped, not fatal.
-mkdir -p "$REPO/packages/no-manifest"
+# fresh_repo: the real publish scripts, list and package.json files, nothing else.
+fresh_repo() {
+  rm -rf "$REPO"
+  mkdir -p "$REPO/scripts" "$REPO/packages"
+  cp "$ROOT/scripts/publish-release.sh" "$ROOT/scripts/publish-workspaces.sh" \
+    "$ROOT/scripts/set-release-version.sh" "$ROOT/scripts/publish-workspaces.txt" "$REPO/scripts/"
+  local f d
+  for f in "$ROOT"/packages/*/package.json; do
+    d="$(basename "$(dirname "$f")")"
+    mkdir -p "$REPO/packages/$d"
+    cp "$f" "$REPO/packages/$d/package.json"
+  done
+}
+# drift: puts one published package a version ahead of the rest.
+drift() {
+  node -e 'const fs=require("fs");const f=process.argv[1];const j=JSON.parse(fs.readFileSync(f,"utf8"));j.version="9.9.9";fs.writeFileSync(f,JSON.stringify(j,null,2)+"\n")' "$REPO/packages/tui/package.json"
+}
 
 BINDIR="$WORK/bin"
 mkdir -p "$BINDIR"
 export NPM_CALL_LOG="$WORK/npm-calls.log"
 export GH_CALL_LOG="$WORK/gh-calls.log"
+# Stub npm: logs calls; `npm view` 404s (nothing on the registry); NPM_FAIL_ON fails a
+# call containing it, NPM_FAIL_EXACT a call equal to it.
 cat >"$BINDIR/npm" <<'STUB'
 #!/usr/bin/env bash
 echo "$@" >>"$NPM_CALL_LOG"
 [ -z "${NPM_FAIL_ON:-}" ] || case "$*" in *"$NPM_FAIL_ON"*) exit 1 ;; esac
+[ "$*" != "${NPM_FAIL_EXACT:-}" ] || exit 1
+[ "$1" != view ] || exit 1
 exit 0
 STUB
 # gh issue view N ... -> the state named by GH_STATE_<N> (default CLOSED); GH_FAIL=1 errors.
@@ -56,11 +67,22 @@ NAMES=()
 while IFS= read -r line || [ -n "$line" ]; do
   line="${line//$'\r'/}"
   [ -n "${line// /}" ] && NAMES+=("$line")
-done <"$REPO/scripts/publish-workspaces.txt"
+done <"$ROOT/scripts/publish-workspaces.txt"
+[ "${#NAMES[@]}" = 7 ] || fail "expected 7 published packages, list has ${#NAMES[@]}"
+fresh_repo
+CURRENT="$(bash "$REPO/scripts/set-release-version.sh" --current)"
 
-# run <expected exit> [VAR=value ...]: runs the script with a fresh summary/output/log.
+# published_list <version>: the PUBLISHED payload for every package at <version>.
+published_list() {
+  local out="" n
+  for n in "${NAMES[@]}"; do out="$out $n@$1"; done
+  echo "$out"
+}
+
 SUMMARY="$WORK/summary.md"
 OUTPUT="$WORK/output.txt"
+# run <expected exit> [VAR=value ...]: runs the script with a fresh summary/output/logs.
+# Call fresh_repo (and optionally drift) first.
 run() {
   local want="$1"
   shift
@@ -69,7 +91,7 @@ run() {
   : >"$NPM_CALL_LOG"
   : >"$GH_CALL_LOG"
   local got=0
-  env -u PUBLISH_DRY_RUN -u GITHUB_REF -u PUBLISH_BLOCKERS -u NPM_FAIL_ON -u GH_FAIL \
+  env -u PUBLISH_DRY_RUN -u GITHUB_REF -u PUBLISH_BLOCKERS -u NPM_FAIL_ON -u NPM_FAIL_EXACT -u GH_FAIL \
     GITHUB_STEP_SUMMARY="$SUMMARY" GITHUB_OUTPUT="$OUTPUT" GITHUB_REPOSITORY=on-par/software-factory \
     "$@" bash "$REPO/scripts/publish-release.sh" >"$WORK/stdout.txt" 2>&1 || got=$?
   [ "$got" = "$want" ] || { cat "$WORK/stdout.txt" >&2; fail "${CASE}: exit $got, want $want"; }
@@ -80,94 +102,131 @@ expect_summary() {
 expect_output() {
   [ "$(cat "$OUTPUT")" = "published=$1" ] || fail "${CASE}: output was '$(cat "$OUTPUT")', want 'published=$1'"
 }
-expect_npm_calls() {
-  [ "$(wc -l <"$NPM_CALL_LOG" | tr -d ' ')" = "$1" ] || fail "${CASE}: $(wc -l <"$NPM_CALL_LOG" | tr -d ' ') npm calls, want $1"
+# expect_publishes <count> <suffix>: exactly <count> publish calls, each ending in <suffix>.
+expect_publishes() {
+  local calls
+  calls="$(grep '^publish ' "$NPM_CALL_LOG" || true)"
+  [ "$(grep -c . <<<"$calls" || true)" = "$1" ] || fail "${CASE}: publish calls were: $calls"
+  [ "$1" = 0 ] || [ "$(grep -cE -- "$2\$" <<<"$calls")" = "$1" ] || fail "${CASE}: publish calls not ending '$2': $calls"
 }
 
-CASE="dry run"
-run 0 PUBLISH_DRY_RUN=true GITHUB_REF=refs/tags/v0.9.0
+CASE="dry run on a branch uses the checked-out version"
+fresh_repo
+run 0 PUBLISH_DRY_RUN=true GITHUB_REF=refs/heads/main
 expect_summary "NOT PUBLISHED: dry-run, not published"
 expect_output false
-expect_npm_calls "${#NAMES[@]}"
-if grep -qv -- '--dry-run$' "$NPM_CALL_LOG"; then fail "$CASE: a call without --dry-run"; fi
+expect_publishes 7 "--tag latest --dry-run"
 [ ! -s "$GH_CALL_LOG" ] || fail "$CASE: dry run checked the blockers"
 
+CASE="dry run on a next tag routes to next at the tag version"
+fresh_repo
+run 0 PUBLISH_DRY_RUN=true GITHUB_REF=refs/tags/v0.9.0-next.3
+expect_summary "NOT PUBLISHED: dry-run, not published"
+expect_publishes 7 "--tag next --dry-run"
+[ "$(grep -c '^view @on-par/.*@0.9.0-next.3 version$' "$NPM_CALL_LOG")" = 7 ] || fail "$CASE: registry checks were not at 0.9.0-next.3"
+grep -q '"@on-par/factory-core": "0.9.0-next.3"' "$REPO/packages/cli/package.json" || fail "$CASE: cli's core pin is not exact"
+
 CASE="dry run fails"
+fresh_repo
 run 1 PUBLISH_DRY_RUN=true NPM_FAIL_ON=@on-par/contracts
 expect_summary "NOT PUBLISHED: dry-run failed"
 expect_output false
 
+CASE="dry run with packages out of lockstep"
+fresh_repo
+drift
+run 1 PUBLISH_DRY_RUN=true
+expect_summary "NOT PUBLISHED: the packages are not at one version"
+expect_publishes 0
+
 CASE="no ref"
+fresh_repo
 run 1
 expect_summary "NOT PUBLISHED: no ref is not a release tag (refs/tags/v*)"
 expect_output false
-expect_npm_calls 0
+[ ! -s "$NPM_CALL_LOG" ] || fail "$CASE: npm was called"
 
 CASE="branch ref"
+fresh_repo
 run 1 PUBLISH_DRY_RUN=false GITHUB_REF=refs/heads/main
 expect_summary "NOT PUBLISHED: refs/heads/main is not a release tag (refs/tags/v*)"
 expect_output false
-expect_npm_calls 0
+
+for tag in v1.0 v0.9.0-rc.1 v0.9.0-next.01 v0.9.0.1 vnext; do
+  CASE="tag $tag does not parse"
+  fresh_repo
+  run 1 GITHUB_REF="refs/tags/$tag"
+  expect_summary "NOT PUBLISHED: tag $tag does not parse as vX.Y.Z or vX.Y.Z-next.N"
+  expect_output false
+  [ ! -s "$NPM_CALL_LOG" ] || fail "$CASE: npm was called"
+done
+
+CASE="tag with packages out of lockstep"
+fresh_repo
+drift
+run 1 GITHUB_REF=refs/tags/v0.9.0
+expect_summary "NOT PUBLISHED: could not set the package versions to 0.9.0"
+[ ! -s "$NPM_CALL_LOG" ] || fail "$CASE: npm was called"
 
 CASE="blocker lookup fails"
+fresh_repo
 run 1 GITHUB_REF=refs/tags/v0.9.0 GH_FAIL=1
 expect_summary "NOT PUBLISHED: could not read the state of blocker #195"
 expect_output false
-expect_npm_calls 0
+expect_publishes 7 "--dry-run"
 
 CASE="closed gate"
+fresh_repo
 run 1 GITHUB_REF=refs/tags/v0.9.0 GH_STATE_151=OPEN
 expect_summary "NOT PUBLISHED: v1.0 blockers still open: #151"
 expect_output false
-expect_npm_calls 0
+expect_publishes 7 "--dry-run"
 [ "$(cat "$GH_CALL_LOG")" = "issue view 195 --repo on-par/software-factory --json state -q .state
 issue view 151 --repo on-par/software-factory --json state -q .state" ] || fail "$CASE: gh calls were $(cat "$GH_CALL_LOG")"
 
 CASE="closed gate, every blocker named"
+fresh_repo
 run 1 GITHUB_REF=refs/tags/v0.9.0 PUBLISH_BLOCKERS="7 8" GH_STATE_7=OPEN GH_STATE_8=OPEN
 expect_summary "NOT PUBLISHED: v1.0 blockers still open: #7 #8"
 
 CASE="publish fails"
-run 1 GITHUB_REF=refs/tags/v0.9.0 NPM_FAIL_ON=@on-par/factory-core
-expect_summary "NOT PUBLISHED: npm publish failed; packages before the failing one in scripts/publish-workspaces.txt may already be on the registry"
+fresh_repo
+run 1 GITHUB_REF=refs/tags/v0.9.0 NPM_FAIL_EXACT="publish --workspace @on-par/factory-core --tag latest"
+expect_summary "NOT PUBLISHED: npm publish failed; packages before the failing one in scripts/publish-workspaces.txt may already be on the registry (a rerun skips them)"
 expect_output false
 
-# Every package at its version, in list order.
-want="PUBLISHED"
-for name in "${NAMES[@]}"; do
-  version="$(node -e 'const fs=require("fs");for(const d of fs.readdirSync(process.argv[1])){const f=process.argv[1]+"/"+d+"/package.json";if(!fs.existsSync(f))continue;const j=JSON.parse(fs.readFileSync(f,"utf8"));if(j.name===process.argv[2])process.stdout.write(j.version)}' "$REPO/packages" "$name")"
-  [ -n "$version" ] || fail "no version for $name"
-  want="$want $name@$version"
-done
-
-CASE="publish succeeds"
+CASE="stable tag publishes all 7 to latest"
+fresh_repo
 run 0 GITHUB_REF=refs/tags/v0.9.0
-expect_summary "$want"
+expect_summary "PUBLISHED$(published_list 0.9.0) (--tag latest)"
 expect_output true
-expect_npm_calls "${#NAMES[@]}"
-i=0
-while IFS= read -r call; do
-  [ "$call" = "publish --workspace ${NAMES[$i]}" ] || fail "$CASE: call $i was '$call'"
-  i=$((i + 1))
-done <"$NPM_CALL_LOG"
-[ "${#NAMES[@]}" = 7 ] || fail "expected 7 published packages, list has ${#NAMES[@]}"
+calls="$(grep '^publish ' "$NPM_CALL_LOG")"
+want=""
+for n in "${NAMES[@]}"; do want="${want}publish --workspace $n --tag latest --dry-run"$'\n'; done
+for n in "${NAMES[@]}"; do want="${want}publish --workspace $n --tag latest"$'\n'; done
+[ "$calls" = "${want%$'\n'}" ] || fail "$CASE: publish calls were: $calls"
 
-CASE="gate removed (no blockers)"
-run 0 GITHUB_REF=refs/tags/v0.9.0 PUBLISH_BLOCKERS=
-expect_summary "$want"
+CASE="next tag publishes all 7 to next at the tag version"
+fresh_repo
+run 0 GITHUB_REF=refs/tags/v0.9.0-next.3
+expect_summary "PUBLISHED$(published_list 0.9.0-next.3) (--tag next)"
+expect_output true
+expect_publishes 14 "--tag next( --dry-run)?"
+
+CASE="gate removed (no blockers), list with CRLF and blank lines"
+fresh_repo
+{ printf '\n'; for n in "${NAMES[@]}"; do printf '%s\r\n\n' "$n"; done; } >"$REPO/scripts/publish-workspaces.txt"
+run 0 GITHUB_REF=refs/tags/v$CURRENT PUBLISH_BLOCKERS=
+expect_summary "PUBLISHED$(published_list "$CURRENT") (--tag latest)"
 [ ! -s "$GH_CALL_LOG" ] || fail "$CASE: checked blockers"
 
 CASE="no GITHUB_OUTPUT or GITHUB_STEP_SUMMARY"
+fresh_repo
 : >"$SUMMARY"
 : >"$OUTPUT"
-out="$(env -u GITHUB_OUTPUT -u GITHUB_STEP_SUMMARY GITHUB_REF=refs/tags/v0.9.0 bash "$REPO/scripts/publish-release.sh")"
-[ "$(printf '%s\n' "$out" | tail -n 1)" = "$want" ] || fail "$CASE: stdout ended '$out'"
+out="$(env -u GITHUB_OUTPUT -u GITHUB_STEP_SUMMARY -u PUBLISH_DRY_RUN -u PUBLISH_BLOCKERS -u NPM_FAIL_ON -u NPM_FAIL_EXACT -u GH_FAIL \
+  GITHUB_REF=refs/tags/v0.9.0 bash "$REPO/scripts/publish-release.sh")"
+[ "$(printf '%s\n' "$out" | tail -n 1)" = "PUBLISHED$(published_list 0.9.0) (--tag latest)" ] || fail "$CASE: stdout ended '$out'"
 [ ! -s "$SUMMARY" ] && [ ! -s "$OUTPUT" ] || fail "$CASE: wrote a file"
-
-CASE="package version unreadable"
-echo "@on-par/not-a-package" >>"$REPO/scripts/publish-workspaces.txt"
-run 1 GITHUB_REF=refs/tags/v0.9.0
-expect_summary "NOT PUBLISHED: npm publish succeeded but the package versions could not be read"
-expect_output false
 
 echo "publish-release test OK"
