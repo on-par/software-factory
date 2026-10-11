@@ -325,6 +325,7 @@ import {
   type DaemonCtlDeps,
   type FactorydConfig,
 } from './daemon.js';
+import { cmdRunnerInstall, cmdRunnerList, cmdRunnerUninstall } from './runner.js';
 import {
   analyzeEventLog,
   type ClaudeAuthProbe,
@@ -6688,6 +6689,34 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('-f, --follow', 'Keep tailing')
     .option('-n, --lines <n>', 'Lines to print first (default 100)')
     .action((opts: { follow?: boolean; lines?: string }) => daemonCtl(() => cmdDaemonLogs(opts, deps.daemon)));
+  const runnerCmd = daemonCmd
+    .command('runner')
+    .description('Install, remove, or list per-repo factory runner LaunchAgents (macOS only)');
+  runnerCmd
+    .command('install')
+    .description('Install a com.onpar.factory-<label> LaunchAgent that loops `factory run` in this checkout')
+    .option('--label <name>', 'Runner name (default: checkout directory name)')
+    .option('--env <KEY=VALUE>', 'Extra env for the runner (repeatable)', (v: string, prev: string[] | undefined) => [
+      ...(prev ?? []),
+      v,
+    ])
+    .option('--json', 'Print {ok, label, plist, script}')
+    .action((opts: { label?: string; env?: string[]; json?: boolean }) =>
+      daemonCtl(async () => cmdRunnerInstall(await getRepoRoot(), opts, deps.daemon)),
+    );
+  runnerCmd
+    .command('uninstall')
+    .description('Unload and remove a runner installed by `factory daemon runner install`')
+    .option('--label <name>', 'Runner name (default: checkout directory name)')
+    .option('--json', 'Print {ok, label, plist, script}')
+    .action((opts: { label?: string; json?: boolean }) =>
+      daemonCtl(async () => cmdRunnerUninstall(await getRepoRoot(), opts, deps.daemon)),
+    );
+  runnerCmd
+    .command('list')
+    .description('List runners installed by `factory daemon runner install`')
+    .option('--json', 'Print one JSON object (schemaVersion 1) instead of text')
+    .action((opts: { json?: boolean }) => daemonCtl(() => cmdRunnerList(opts, deps.daemon)));
 
   const worktreeCmd = program.command('worktree').description('Clean up stale factory worktrees (gc)');
   worktreeCmd

@@ -62,6 +62,8 @@ export interface DaemonCtlDeps {
   registryFile?: string;
   /** Follow-mode poll interval; tests pass ~10. Default 250. */
   pollMs?: number;
+  /** Default process.env. */
+  env?: NodeJS.ProcessEnv;
 }
 
 /** Where a given home directory keeps the LaunchAgent plist and the daemon log. */
@@ -98,7 +100,7 @@ export function resolveFactorydConfig(opts: {
   return { registryFile: opts.registry ?? defaultRegistryPath(), port, autoUpdate: opts.autoUpdate === true };
 }
 
-function xmlEscape(s: string): string {
+export function xmlEscape(s: string): string {
   return s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
@@ -188,9 +190,10 @@ interface ResolvedDeps {
   cliScriptPath: string;
   registryFile: string;
   pollMs: number;
+  env: NodeJS.ProcessEnv;
 }
 
-function resolveDeps(deps: DaemonCtlDeps): ResolvedDeps {
+export function resolveDeps(deps: DaemonCtlDeps): ResolvedDeps {
   return {
     exec: deps.exec ?? defaultExec(),
     home: deps.home ?? homedir(),
@@ -201,12 +204,13 @@ function resolveDeps(deps: DaemonCtlDeps): ResolvedDeps {
     cliScriptPath: deps.cliScriptPath ?? realpathSync(process.argv[1] ?? ''),
     registryFile: deps.registryFile ?? defaultRegistryPath(),
     pollMs: deps.pollMs ?? 250,
+    env: deps.env ?? process.env,
   };
 }
 
-function requireDarwin(platform: NodeJS.Platform): void {
+export function requireDarwin(platform: NodeJS.Platform, what = 'factory daemon start|stop|status'): void {
   if (platform !== 'darwin') {
-    throw new DaemonCtlError('factory daemon start|stop|status requires macOS launchd', 2);
+    throw new DaemonCtlError(`${what} requires macOS launchd`, 2);
   }
 }
 

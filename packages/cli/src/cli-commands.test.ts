@@ -4091,6 +4091,29 @@ bash scripts/verify.sh
       });
     });
 
+    it('daemon runner install --json prints {ok, label, plist, script}', async () => {
+      const res = await runMain('daemon', 'runner', 'install', '--label', 't', '--env', 'A=1', '--json');
+      expect(res.exited).toBe(false);
+      const out = JSON.parse(h.daemonOut.join(''));
+      expect(out.ok).toBe(true);
+      expect(out.label).toBe('com.onpar.factory-t');
+      expect(out.plist).toMatch(/com\.onpar\.factory-t\.plist$/);
+      expect(out.script).toMatch(/factory-t-run\.sh$/);
+      expect(h.daemonExecCalls.map((c) => c.args[0])).toEqual(['bootout', 'bootstrap', 'print']);
+    });
+
+    it('daemon runner list --json prints {schemaVersion, runners}', async () => {
+      const res = await runMain('daemon', 'runner', 'list', '--json');
+      expect(res.exited).toBe(false);
+      expect(JSON.parse(h.daemonOut.join(''))).toEqual({ schemaVersion: 1, runners: [] });
+    });
+
+    it('daemon runner uninstall without a manifest exits 1', async () => {
+      const res = await runMain('daemon', 'runner', 'uninstall', '--label', 'nope');
+      expect(res.exited).toBe(true);
+      expect(res.code).toBe(1);
+    });
+
     it('daemon status --json on linux exits 2 with nothing on stdout', async () => {
       h.daemonPlatform = 'linux';
       const res = await runMain('daemon', 'status', '--json');
