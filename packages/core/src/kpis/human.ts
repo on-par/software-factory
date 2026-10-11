@@ -1,7 +1,7 @@
 // src/kpis/human.ts — Reconstruct explicit human-intervention events (#420)
 
 import { isParkKind } from '../events/kinds.js';
-import { factoryBranchIssue } from '../utils/index.js';
+import { branchPrefixSlug, factoryBranchIssue, LEGACY_BRANCH_PREFIX } from '../utils/index.js';
 import type { FactoryEvent, HumanEventType } from '../types/index.js';
 
 export const HUMAN_EVENT_TYPES: ReadonlySet<string> = new Set<HumanEventType>([
@@ -166,13 +166,48 @@ export interface HumanSourceClient {
   };
 }
 
+/** Branch prefix used by factory runs since #1714, recognised for KPIs whatever the configured prefix (#2342). */
+const FACTORY_BRANCH_PREFIX = 'factory';
+
+/** Prefixes whose PRs count as factory PRs for KPI reconstruction: configured slug, `factory`, legacy `ship-it`, deduped, in that order (#2342). */
+export function kpiBranchPrefixes(configured?: string): string[] {
+  return [...new Set([branchPrefixSlug(configured), FACTORY_BRANCH_PREFIX, LEGACY_BRANCH_PREFIX])];
+}
+
+export interface KpiReconstruction {
+  /** Local events plus reconstructed human-* events; the local events alone when partial. */
+  events: FactoryEvent[];
+  sources: PrSource[];
+  /** true when the GitHub fetch failed and events are the local log only. */
+  partial: boolean;
+  /** Error message when partial, else null. */
+  error: string | null;
+}
+
+export async function reconstructKpiEvents(
+  events: FactoryEvent[],
+  fetchSources: (issues: ReadonlySet<string>) => Promise<PrSource[]>,
+): Promise<KpiReconstruction> {
+  const issues = new Set(events.map((e) => e.issue).filter((i) => /^\d+$/.test(i)));
+  try {
+    const sources = await fetchSources(issues);
+    return { events: [...events, ...reconstructHumanEvents(sources, events)], sources, partial: false, error: null };
+  } catch (err: any) {
+    return { events, sources: [], partial: true, error: err?.message ?? String(err) };
+  }
+}
+
 export async function fetchHumanEventSources(
   client: HumanSourceClient,
   owner: string,
   repo: string,
   issues: ReadonlySet<string> | null,
-  branchPrefix?: string,
+  branchPrefixes?: string | readonly string[],
 ): Promise<PrSource[]> {
+  const prefixes =
+    typeof branchPrefixes === 'object' && branchPrefixes.length > 0
+      ? branchPrefixes
+      : kpiBranchPrefixes(typeof branchPrefixes === 'string' ? branchPrefixes : undefined);
   const prs: any[] = [];
   for (let page = 1; page <= 3; page++) {
     const { data } = await client.rest.pulls.list({
@@ -189,7 +224,10 @@ export async function fetchHumanEventSources(
   }
 
   const matched = prs
-    .map((pr) => ({ pr, issue: factoryBranchIssue(pr.head?.ref ?? '', branchPrefix) }))
+    .map((pr) => ({
+      pr,
+      issue: prefixes.reduce<number | null>((found, p) => found ?? factoryBranchIssue(pr.head?.ref ?? '', p), null),
+    }))
     .filter(({ issue }) => issue !== null && (issues === null || issues.has(String(issue))));
 
   return Promise.all(

@@ -3,6 +3,11 @@
 import type { CostEntry, FactoryEvent, ReadinessInfo, ReworkCauseTag, RetryCause } from '../types/index.js';
 import { isHumanEvent } from './human.js';
 
+/** A factory-seen merge (`merged`, `landed`) or a reconstructed human merge (#2342). */
+function isMergeEvent(event: FactoryEvent): boolean {
+  return event.type === 'merged' || event.type === 'landed' || event.type === 'human-merged';
+}
+
 export type {
   ClassifierClassStats,
   ClassifierOutcomeBucket,
@@ -18,13 +23,15 @@ export {
   parseClassifierOutcomes,
   summarizeClassifierOutcomes,
 } from './classifier-outcomes.js';
-export type { CommitSource, HumanSourceClient, PrSource } from './human.js';
+export type { CommitSource, HumanSourceClient, KpiReconstruction, PrSource } from './human.js';
 export {
   fetchHumanEventSources,
   hasUnresolvedPark,
   HUMAN_EVENT_TYPES,
   isHumanEvent,
+  kpiBranchPrefixes,
   reconstructHumanEvents,
+  reconstructKpiEvents,
 } from './human.js';
 export type {
   DefectSourceClient,
@@ -366,7 +373,7 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
       skipped: false,
     };
 
-    if (event.type === 'merged' || event.type === 'human-merged') stats.merged = true;
+    if (isMergeEvent(event)) stats.merged = true;
     if (event.type === 'skipped-already-closed') stats.skipped = true;
     if (event.type === 'rework' || event.rework) stats.reworked = true;
     if (reworkCauseTagOf(event) === 'merge-conflict') stats.collisionReworked = true;
@@ -386,7 +393,7 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     const ts = Date.parse(event.ts);
     if (!Number.isNaN(ts)) {
       if (stats.firstTs === null || ts < stats.firstTs) stats.firstTs = ts;
-      if ((event.type === 'merged' || event.type === 'human-merged') && stats.mergedTs === null) stats.mergedTs = ts;
+      if (isMergeEvent(event) && stats.mergedTs === null) stats.mergedTs = ts;
       if (event.phase) {
         if (stats.firstPhaseTs === null || ts < stats.firstPhaseTs) stats.firstPhaseTs = ts;
         const window = stats.phaseWindows.get(event.phase);
@@ -716,6 +723,9 @@ export interface KpiHistoryRecord {
   commitSha?: string | null;
   /** Resolved tier → ranked model list at snapshot time. Absent in legacy rows. */
   models?: Record<string, string[]>;
+  /** true when GitHub human-event reconstruction failed and the snapshot was computed from the local log only (#2342).
+   *  Absent when reconstruction succeeded and in legacy rows. */
+  partial?: boolean;
   /** Mean issue readiness score at snapshot time; null when no runs were scored. Absent in legacy rows. */
   meanReadinessScore?: number | null;
   /** Share of runs the INVEST size gate flagged as too big at snapshot time (#608).
@@ -775,7 +785,7 @@ export interface KpiHistoryRecord {
 export function kpisToHistoryRecord(
   kpis: HealthKpis,
   date: string,
-  meta: { commitSha?: string | null; models?: Record<string, string[]> } = {},
+  meta: { commitSha?: string | null; models?: Record<string, string[]>; partial?: boolean } = {},
 ): KpiHistoryRecord {
   return {
     date,
@@ -810,6 +820,7 @@ export function kpisToHistoryRecord(
     ...(meta.commitSha !== undefined ? { commitSha: meta.commitSha } : {}),
     ...(meta.models !== undefined ? { models: meta.models } : {}),
     ...(kpis.meanReadinessScore !== undefined ? { meanReadinessScore: kpis.meanReadinessScore } : {}),
+    ...(meta.partial ? { partial: true } : {}),
   };
 }
 

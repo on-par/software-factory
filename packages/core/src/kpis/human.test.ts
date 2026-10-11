@@ -6,8 +6,10 @@ import {
   hasUnresolvedPark,
   HUMAN_EVENT_TYPES,
   isHumanEvent,
+  kpiBranchPrefixes,
   type PrSource,
   reconstructHumanEvents,
+  reconstructKpiEvents,
 } from './human.js';
 
 function event(overrides: Partial<FactoryEvent> = {}): FactoryEvent {
@@ -358,5 +360,72 @@ describe('fetchHumanEventSources', () => {
     await fetchHumanEventSources(client, 'owner', 'repo', new Set(['1']));
 
     expect(listMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('kpiBranchPrefixes (#2342)', () => {
+  it('returns the configured slug, factory and ship-it, deduped', () => {
+    expect(kpiBranchPrefixes()).toEqual(['ship-it', 'factory']);
+    expect(kpiBranchPrefixes('factory')).toEqual(['factory', 'ship-it']);
+    expect(kpiBranchPrefixes('sf')).toEqual(['sf', 'factory', 'ship-it']);
+  });
+});
+
+describe('fetchHumanEventSources prefix matching (#2342)', () => {
+  const pr = (number: number, ref: string | undefined) => ({
+    number,
+    head: ref === undefined ? undefined : { ref },
+    state: 'open',
+    merged_at: null,
+    closed_at: null,
+  });
+  const makeClient = () => ({
+    rest: {
+      pulls: {
+        list: vi.fn().mockResolvedValue({
+          data: [pr(1, 'factory/1-a'), pr(2, 'ship-it/2-b'), pr(3, 'sf/3-c'), pr(4, 'feature/4-d'), pr(5, undefined)],
+        }),
+        get: vi.fn().mockResolvedValue({ data: { merged_by: null } }),
+        listCommits: vi.fn().mockResolvedValue({ data: [] }),
+        listReviews: vi.fn().mockResolvedValue({ data: [] }),
+      },
+    },
+  });
+  const issuesFor = async (prefixes?: string | readonly string[]) =>
+    (await fetchHumanEventSources(makeClient(), 'o', 'r', null, prefixes)).map((s) => s.issue).sort();
+
+  it('fetchHumanEventSources matches factory/, ship-it/ and the configured prefix (#2342)', async () => {
+    expect(await issuesFor('sf')).toEqual(['1', '2', '3']);
+    expect(await issuesFor()).toEqual(['1', '2']);
+    expect(await issuesFor([])).toEqual(['1', '2']);
+    expect(await issuesFor(['sf'])).toEqual(['2', '3']);
+  });
+});
+
+describe('reconstructKpiEvents (#2342)', () => {
+  it('merges reconstructed human events and passes only numeric issues to the fetcher', async () => {
+    const events = [event({ issue: '1' }), event({ issue: 'all' })];
+    const fetchSources = vi
+      .fn()
+      .mockResolvedValue([prSource({ issue: '1', mergedAt: '2026-07-21T00:00:00.000Z', mergedBy: 'bob' })]);
+    const res = await reconstructKpiEvents(events, fetchSources);
+    expect(fetchSources).toHaveBeenCalledWith(new Set(['1']));
+    expect(res.partial).toBe(false);
+    expect(res.error).toBeNull();
+    expect(res.sources).toHaveLength(1);
+    expect(res.events.some((e) => e.type === 'human-merged')).toBe(true);
+  });
+
+  it('returns the local events and partial:true when the fetch fails', async () => {
+    const events = [event()];
+    const res = await reconstructKpiEvents(events, () => Promise.reject(new Error('boom')));
+    expect(res).toEqual({ events, sources: [], partial: true, error: 'boom' });
+  });
+
+  it('stringifies a non-Error rejection', async () => {
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+    const res = await reconstructKpiEvents([], () => Promise.reject('nope'));
+    expect(res.partial).toBe(true);
+    expect(res.error).toBe('nope');
   });
 });
