@@ -213,6 +213,7 @@ import type {
 } from '@on-par/factory-core/internal';
 import {
   acquirePidFile,
+  createPlanReuseStore,
   checkBaseHealth,
   currentSlice,
   egressSummaryMessage,
@@ -2470,6 +2471,7 @@ export async function shipIssue(
     resolveBaseUrl,
     getIssueSpend: () => issueSpend,
     breaker,
+    planReuse: ctx?.localOnly ? undefined : createPlanReuseStore(specPath),
     planPhase: phases.planPhase,
     buildPhase: phases.buildPhase,
     checkPhase: phases.checkPhase,

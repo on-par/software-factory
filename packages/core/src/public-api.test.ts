@@ -332,6 +332,9 @@ const INTERNAL_API_KEYS = [
   'checkBaseHealth',
   // Persisted per-issue run state (#2271)
   'readIssueRunState',
+  'createPlanReuseStore',
+  'issueBodyHash',
+  'planReusePath',
   // Garden harvest (#2083)
   'DEFAULT_GARDEN_MAX_CLUSTERS',
   'DEFAULT_GARDEN_SINCE',
