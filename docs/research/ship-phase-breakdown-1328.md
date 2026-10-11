@@ -47,7 +47,7 @@ This note records a real reproduction of the fixed pipeline and what it shows.
 
 ## Reproduction
 
-Machine: `Darwin Patricks-Mac-mini 25.6.0` (arm64), Node `v26.6.0`. Run from
+Machine: `Darwin <host> 25.6.0` (arm64), Node `v26.6.0`. Run from
 this checkout at `99b81ab` plus the above changes:
 
 ```

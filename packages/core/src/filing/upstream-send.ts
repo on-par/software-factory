@@ -6,7 +6,6 @@ import { dirname, join } from 'node:path';
 import type { FactoryLogger } from '../logger/index.js';
 import {
   type CandidateIssue,
-  DEFAULT_INTERNAL_REPO,
   type FilingGitHubClient,
   findIssueByMarker,
   renderUpstreamOccurrenceComment,
@@ -25,7 +24,7 @@ export function defaultUpstreamLedgerPath(home?: string): string {
 export interface UpstreamOutboxEntry {
   version: 1;
   fingerprint: string;
-  /** Target factory repo, e.g. on-par/software-factory. */
+  /** Target repo (owner/name) the report was meant for. */
   repo: string;
   title: string;
   body: string;
@@ -43,6 +42,7 @@ export interface UpstreamSendInput {
   reports: readonly PendingUpstreamReport[];
   /** Client built from the run's GitHub auth; null when no auth was resolved. */
   client: Pick<FilingGitHubClient, 'createIssue' | 'searchIssues' | 'commentIssue'> | null;
+  /** Target repo as owner/name. There is no built-in default: when it is missing or malformed every report is skipped with reason 'no-target-repo'. */
   repo?: string;
   policy: Pick<FilingPolicy, 'enabled' | 'maxPerRun' | 'maxPerDay'>;
   ledgerFile?: string;
@@ -119,7 +119,7 @@ async function saveLedger(file: string, ledger: FilingLedger): Promise<void> {
 
 export async function sendUpstreamReports(input: UpstreamSendInput): Promise<UpstreamSendResult[]> {
   const now = input.now ?? (() => new Date());
-  const repo = input.repo ?? DEFAULT_INTERNAL_REPO;
+  const repo = input.repo?.trim() ?? '';
   const [owner = '', name = ''] = repo.split('/');
   const { logger, client, policy } = input;
   const ledgerFile = input.ledgerFile ?? defaultUpstreamLedgerPath();
@@ -133,6 +133,10 @@ export async function sendUpstreamReports(input: UpstreamSendInput): Promise<Ups
 
   if (!policy.enabled) {
     for (const { fingerprint } of input.reports) skip(fingerprint, 'filing-disabled');
+    return results;
+  }
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) {
+    for (const { fingerprint } of input.reports) skip(fingerprint, 'no-target-repo');
     return results;
   }
 

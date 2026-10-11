@@ -54,5 +54,5 @@ expectations will still be missed by design, and that is accepted.
 
 ## References
 
-- [Issue #1184: learn from cfgpipe checkpoint_4 miss](https://github.com/patrob/software-factory/issues/1184)
+- [Issue #1184: learn from cfgpipe checkpoint_4 miss](https://github.com/on-par/software-factory/issues/1184)
 - [ADR-0008: problem inputs come from a pinned scb-problems revision](0008-slopcodebench-problem-inputs-come-from-a-pinned-scb-problems-revision-injected-via-scbench-problems-path.md)

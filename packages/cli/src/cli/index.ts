@@ -289,6 +289,7 @@ import {
   RunLockHeldError,
   runOvernightQueue,
   findOpenPR,
+  parseRemoteSlug,
   setupWorktree,
   shellEscape,
   shouldProxyEgress,
@@ -386,7 +387,7 @@ import { cmdHostedSmoke } from './hosted.js';
 import { cmdHostedQueue } from './hosted-queue.js';
 import { cmdHostedRunner } from './hosted-runner.js';
 import { resolveFactoryCheckoutCommit, runFilingPreview } from './filing.js';
-import { buildFeedbackDeps, type FeedbackDeps, runFeedback } from './feedback.js';
+import { buildFeedbackDeps, type FeedbackDeps, resolveFeedbackRepo, runFeedback } from './feedback.js';
 import { ensureFactoryExcluded, writeSampleQueue } from './init-files.js';
 import { cmdLogs } from './logs.js';
 import { applyHelpGroups } from './help-groups.js';
@@ -968,10 +969,40 @@ export async function runFeedbackCommand(
   }
 }
 
-export async function cmdFeedback(prUrl: string, opts: { note?: string; branchPrefix?: string }): Promise<void> {
+/** owner/name of the checkout's origin remote, or null when there is none or it is not a GitHub remote. Never throws. */
+export async function readOriginSlug(shell: ShellOps = shellOps): Promise<string | null> {
+  try {
+    const { stdout } = await shell.exec('git remote get-url origin');
+    return parseRemoteSlug(stdout.trim());
+  } catch {
+    return null;
+  }
+}
+
+export async function cmdFeedback(
+  prUrl: string,
+  opts: { note?: string; branchPrefix?: string; repo?: string; includeLocalPaths?: boolean },
+): Promise<void> {
   const paths = getFactoryPaths(await getRepoRoot());
   const prefix = opts.branchPrefix === undefined ? resolveBranchPrefix() : branchPrefixOrExit(opts.branchPrefix);
-  await runFeedbackCommand(prUrl, opts, buildFeedbackDeps(getOctokit(), paths, prefix, createOctokitFilingClient));
+  let repo: string | undefined;
+  try {
+    repo = resolveFeedbackRepo({
+      flag: opts.repo,
+      config: configLoaders.loadFactoryConfigForRepo(paths.config).filing.repo,
+      remote: await readOriginSlug(),
+    });
+  } catch (err) {
+    throw new CliExitError(err instanceof Error ? err.message : String(err), 2);
+  }
+  await runFeedbackCommand(
+    prUrl,
+    opts,
+    buildFeedbackDeps(getOctokit(), paths, prefix, createOctokitFilingClient, {
+      repo,
+      shareLocal: opts.includeLocalPaths === true,
+    }),
+  );
 }
 
 async function resolveFactoryCommit(): Promise<string | null> {
@@ -6482,6 +6513,8 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .command('feedback <pr-url>')
     .description("File one factory issue (bug, factory:needs-triage) from a PR's human review findings")
     .option('--note <text>', 'Use this as the issue title instead of the first finding')
+    .option('--repo <owner/name>', 'Repo to file the issue in (default: filing.repo, then the origin remote)')
+    .option('--include-local-paths', 'Include this host name and local design/log paths in the issue')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
     .action(cmdFeedback);
 

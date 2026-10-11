@@ -64,8 +64,8 @@ safe from the code alone.
 
 ## References
 
-- [Issue #1214: ADR: define the diff base for workspace runs](https://github.com/patrob/software-factory/issues/1214)
-- [Issue #1210 / PR #1230: capture run-start HEAD once in runIssue for localOnly diffBase](https://github.com/patrob/software-factory/pull/1230)
-- [Issue #1212 / PR #1216: designSmellsChecker critiques the workspace diff via the captured run-start base](https://github.com/patrob/software-factory/pull/1216)
+- [Issue #1214: ADR: define the diff base for workspace runs](https://github.com/on-par/software-factory/issues/1214)
+- [Issue #1210 / PR #1230: capture run-start HEAD once in runIssue for localOnly diffBase](https://github.com/on-par/software-factory/pull/1230)
+- [Issue #1212 / PR #1216: designSmellsChecker critiques the workspace diff via the captured run-start base](https://github.com/on-par/software-factory/pull/1216)
 - [ADR-0071 SCBench rework is a bounded adapter re-invocation of run-brief, not a core pipeline hook](0071-scbench-rework-is-a-bounded-adapter-re-invocation-of-run-brief-not-a-core-pipeline-hook.md)
 - [Issue #1214](https://github.com/on-par/software-factory/issues/1214)

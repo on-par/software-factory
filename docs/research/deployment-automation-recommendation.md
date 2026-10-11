@@ -7,7 +7,7 @@ Date: 2026-08-14
 This is the #628 discovery document that settles the approach the factory uses to
 deploy factory-built apps to a cloud provider. It consumes the four landed
 inputs — the #624 deployment-automation audit
-(`docs/research/deployment-automation-audit.md`), the #625 AWS research
+(#624 audit, unpublished), the #625 AWS research
 (`docs/research/aws-deployment-automation.md`), the #626 Azure research
 (`docs/research/azure-deployment-automation.md`), and the #627 provisioning
 guardrails (`docs/research/cloud-provisioning-guardrails.md`, ADR-0025/0026) —
@@ -43,13 +43,13 @@ re-derive it.
 - **#624 — the audit: three patterns to reuse, not re-derive.** Every audited
   on-par pipeline already contains a working answer to "who holds the secret,
   who approves the action, and what it costs" — credential handoff
-  (`deployment-automation-audit.md`, "Credential handoff"), plan-then-approve
+  (#624 audit, unpublished, "Credential handoff"), plan-then-approve
   (draft-then-promote, confirmation prompts, fail-closed signing gates;
-  `deployment-automation-audit.md`, "Plan-then-approve"), and cost awareness
-  (ADR-0020 KPIs, deferral lists; `deployment-automation-audit.md`,
+  #624 audit, unpublished, "Plan-then-approve"), and cost awareness
+  (ADR-0020 KPIs, deferral lists; #624 audit, unpublished,
   "Cost awareness"). The audit's finding: the deployment design should reuse
   these three patterns, not re-derive them
-  (`deployment-automation-audit.md:373-380`).
+  (#624 audit, unpublished).
 - **#625 — AWS: IaC over raw `aws` CLI; Terraform named the multi-cloud
   fallback.** Raw `aws` CLI fails state tracking, drift detection, planning,
   and idempotency (`aws-deployment-automation.md:55-81`). For an AWS-only story
@@ -306,7 +306,7 @@ implementation commits to a mechanism.
   https://developer.hashicorp.com/terraform/language/state
 - Pulumi — state and backends (Pulumi Cloud / self-hosted):
   https://www.pulumi.com/docs/concepts/state/
-- #624 — `docs/research/deployment-automation-audit.md` (the three reusable
+- #624 — #624 audit, unpublished (the three reusable
   patterns: credential handoff, plan-then-approve, cost awareness).
 - #625 — `docs/research/aws-deployment-automation.md` (IaC over raw `aws` CLI;
   CDK for the AWS-only story; Terraform/Pulumi named the multi-cloud fallback;

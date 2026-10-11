@@ -99,8 +99,8 @@ _None._
 - 2026-10-06T14:16:25.709Z model-override: build model pinned to claude-sonnet-5-5 (.factory/config.json)
 - 2026-10-06T14:16:25.713Z sandbox-degraded: host-level egress filtering unavailable in v1; intended allowlist: api.anthropic.com, github.com
 - 2026-10-06T14:16:27.302Z worktree-base: created from origin/main @ 47c4fbc6b15605f70a13b9082f0047bd6fd2c112
-- 2026-10-06T14:16:27.303Z worktree: Worktree ready at /Users/moltbot/.factory/worktrees/on-par/software-factory/software-factory-factory-factory-2149
-- 2026-10-06T14:16:27.304Z environment_lease: leased port 3101 for worktree /Users/moltbot/.factory/worktrees/on-par/software-factory/software-factory-factory-factory-2149
+- 2026-10-06T14:16:27.303Z worktree: Worktree ready at /Users/dev/.factory/worktrees/on-par/software-factory/software-factory-factory-factory-2149
+- 2026-10-06T14:16:27.304Z environment_lease: leased port 3101 for worktree /Users/dev/.factory/worktrees/on-par/software-factory/software-factory-factory-factory-2149
 - 2026-10-06T14:16:27.305Z constitution: Standards from repo instruction files
 - 2026-10-06T14:16:27.306Z model-override: build route derived from pinned build model claude-sonnet-5-5 → claude
 - 2026-10-06T14:16:27.306Z phase_started: plan started

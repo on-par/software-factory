@@ -11,7 +11,7 @@ export const MAX_IN_SCOPE_ITEMS = 5;
 export const MAX_ACCEPTANCE_CRITERIA_ITEMS = 5;
 
 /**
- * Build-scope budget (Patrick, 2026-08-15): a plan whose design artifact declares
+ * Build-scope budget (2026-08-15): a plan whose design artifact declares
  * more surface than this is too big for one bounded BUILD pass — deepseek/openccode
  * builds can run 30-40 min on mega-slices. Park for decomposition instead of
  * handing the worker a long churn. These are deliberately tight: a healthy slice

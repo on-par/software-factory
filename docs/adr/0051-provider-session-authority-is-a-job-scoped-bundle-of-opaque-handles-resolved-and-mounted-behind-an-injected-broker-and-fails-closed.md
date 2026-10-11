@@ -41,6 +41,6 @@ must be extended (a contract change) to support a new provider kind.
 
 ## References
 
-- [ADR-0049 — hosted-exec container execution runs behind an injected ContainerEngine port](docs/adr/0049-hosted-exec-container-execution-runs-behind-an-injected-containerengine-port.md)
-- [ADR-0047 — hosted execution flag + contract in @on-par/contracts](docs/adr/0047-hosted-execution-is-gated-behind-an-off-by-default-env-flag-and-its-contract-lives-in-on-par-contracts.md)
+- [ADR-0049 — hosted-exec container execution runs behind an injected ContainerEngine port](0049-hosted-exec-container-execution-runs-behind-an-injected-containerengine-port.md)
+- [ADR-0047 — hosted execution flag + contract in @on-par/contracts](0047-hosted-execution-is-gated-behind-an-off-by-default-env-flag-and-its-contract-lives-in-on-par-contracts.md)
 - [Issue #906](https://github.com/on-par/software-factory/issues/906)

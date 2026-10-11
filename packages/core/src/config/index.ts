@@ -206,6 +206,10 @@ const FactoryConfigSchema = z.object({
       maxPerDay: z.number().int().positive().default(20),
       selfFixLabel: z.string().default('no-auto-merge'),
       bugLabels: z.array(z.string()).default(['bug']),
+      repo: z
+        .string()
+        .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'filing.repo must be owner/name')
+        .optional(),
       sensitivePaths: z
         .array(z.string())
         .default(['packages/core/', 'packages/config/', 'packages/cli/', 'scripts/', '.github/']),

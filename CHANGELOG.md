@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- `factory feedback` files its issue in your own repo: `--repo owner/name`,
+  then the new `filing.repo` config key, then the checkout's `origin` remote.
+  It no longer falls back to on-par/software-factory; with no repo it stops
+  with a clear error. The issue leaves out your host name and local design and
+  log paths unless you pass `--include-local-paths`.
+- Upstream factory reports have no built-in target repo either. Without an
+  explicit repo they are skipped with reason `no-target-repo`.
+- Removed internal operations notes from the docs.
+
 ## 0.9.1
 
 Docs and metadata refresh for the npm page, plus the factory changes merged

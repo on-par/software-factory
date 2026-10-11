@@ -47,5 +47,5 @@ PR's provenance is not something the scan tries to infer.
 ## References
 
 - [#980 — factory: no run-lifecycle reaping](https://github.com/on-par/software-factory/issues/980)
-- [ADR-0014 — CI merge gate fails closed on non-allow-listed check conclusions](docs/adr/0014-ci-merge-gate-fails-closed-on-non-allow-listed-check-conclusions.md)
+- [ADR-0014 — CI merge gate fails closed on non-allow-listed check conclusions](0014-ci-merge-gate-fails-closed-on-non-allow-listed-check-conclusions.md)
 - [Issue #1000](https://github.com/on-par/software-factory/issues/1000)

@@ -197,7 +197,7 @@ Success means:
 - Invalid repos fail closed with a clear fix.
 
 Context:
-- Requested by Patrick in #software-factory on 2026-09-12.
+- Requested by a maintainer in #software-factory on 2026-09-12.
 `;
     const result = scoreIssueReadiness({
       title: 'Epic: Factory app repo onboarding parity across devices',

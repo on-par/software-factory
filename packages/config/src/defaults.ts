@@ -102,6 +102,8 @@ export interface FactoryDefaults {
     selfFixLabel: string;
     bugLabels: string[];
     sensitivePaths: string[];
+    /** Repo (owner/name) that `factory feedback` files issues in. Unset: the checkout origin remote; no built-in default. */
+    repo?: string;
     comment?: string;
   };
   ingest: { enabled: boolean; label: string; lane: string; maxPerCycle: number; comment?: string };
@@ -419,7 +421,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       providerModel: 'anthropic/claude-sonnet-5',
       experimental: true,
     },
-    /** Added 2026-08-12 per Patrick's OpenCode Go subscription (OPENCODE_API_KEY env var). Served via OpenCode Go (https://opencode.ai/zen/go/v1) — distinct provider from OpenCode Zen (opencode/... prefix, pay-per-use, $0 balance when this was set up; do not confuse the two, same env var backs both). Confirmed working live: `opencode run --model opencode-go/deepseek-v4-flash "..."` returns real output. opt in with FACTORY_EXPERIMENTAL=1. */
+    /** Added 2026-08-12 for OpenCode Go subscriptions (OPENCODE_API_KEY env var). Served via OpenCode Go (https://opencode.ai/zen/go/v1), a distinct provider from OpenCode Zen (opencode/... prefix, pay-per-use; do not confuse the two, the same env var backs both). Confirmed working live: `opencode run --model opencode-go/deepseek-v4-flash "..."` returns real output. opt in with FACTORY_EXPERIMENTAL=1. */
     'opencode-deepseek-v4-flash': {
       provider: 'custom',
       tier: ['worker'],

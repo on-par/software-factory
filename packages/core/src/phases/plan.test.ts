@@ -2166,7 +2166,7 @@ npm run test`;
         '---',
         'Blocked: sandbox policy prevents writing the required file outside this worktree:',
         '',
-        '`/Users/moltbot/repos/on-par/software-factory/.factory/plans/issue-844.md`',
+        '`/Users/dev/repos/example/app/.factory/plans/issue-844.md`',
         '',
         'No files were changed.',
         '',

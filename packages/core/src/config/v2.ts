@@ -369,6 +369,13 @@ const IntakeSectionSchema = z
           .default('no-auto-merge')
           .describe('Label applied to factory-internal bugs so the merge path requires human approval.'),
         bugLabels: z.array(z.string()).default(['bug']).describe('Labels applied to filed bugs.'),
+        repo: z
+          .string()
+          .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'filing.repo must be owner/name')
+          .optional()
+          .describe(
+            'Repo (owner/name) that `factory feedback` files issues in. Unset: the checkout origin remote. There is no built-in default.',
+          ),
         sensitivePaths: z
           .array(z.string())
           .default(['packages/core/', 'packages/config/', 'packages/cli/', 'scripts/', '.github/'])

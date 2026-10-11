@@ -13,7 +13,7 @@ row. A parked or failed run is an explicit valid deliverable per the issue — t
 point is to replace guessing with a real, evidenced baseline that names the next
 harness change.
 
-Machine: `Darwin Patricks-Mac-mini.attlocal.net 25.5.0` (macOS 26.5.2, arm64),
+Machine: `Darwin <host> 25.5.0` (macOS 26.5.2, arm64),
 Node v24.14.0.
 
 `ollama list` (abridged to models relevant to `models.json`):

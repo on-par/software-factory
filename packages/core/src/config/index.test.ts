@@ -742,6 +742,19 @@ describe('loadFactoryConfigForRepo', () => {
     expect(loadFactoryConfigForRepo(path)).toEqual(loadFactoryConfig());
   });
 
+  it('has no default filing.repo and accepts an owner/name override', async () => {
+    expect(loadFactoryConfig().filing.repo).toBeUndefined();
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ filing: { repo: 'acme/tools' } }));
+    expect(loadFactoryConfigForRepo(path).filing.repo).toBe('acme/tools');
+  });
+
+  it('rejects a filing.repo that is not owner/name', async () => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ filing: { repo: 'nope' } }));
+    expect(() => loadFactoryConfigForRepo(path)).toThrow(/owner\/name/);
+  });
+
   it('merges a mixed file: worktree.gcTtlDays overrides while worktree.parent stays default', async () => {
     const path = join(dir, 'config.json');
     await writeFile(

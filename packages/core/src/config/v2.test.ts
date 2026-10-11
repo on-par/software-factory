@@ -275,6 +275,14 @@ describe('full v2 config', () => {
 });
 
 describe('validation errors', () => {
+  it('accepts an owner/name intake.filing.repo and rejects anything else', () => {
+    expect(parseV2Config({ version: 2, intake: { filing: { repo: 'acme/tools' } } }).intake.filing.repo).toBe(
+      'acme/tools',
+    );
+    expect(parseV2Config({ version: 2 }).intake.filing.repo).toBeUndefined();
+    expect(() => parseV2Config({ version: 2, intake: { filing: { repo: 'nope' } } })).toThrow(/owner\/name/);
+  });
+
   it('rejects a wrong version', () => {
     expect(() => parseV2Config({ version: 1 })).toThrow(/version/);
   });

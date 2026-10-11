@@ -712,9 +712,8 @@ async function planPhaseImpl(opts: {
 
       // Build-scope gate: a plan whose declared surface is large enough to take
       // ~40 min of agent churn is a planning failure, not a build problem.
-      // Decompose the issue instead of handing a mega-slice to BUILD (Patrick,
-      // 2026-08-15: "40 minutes is too long... fix the planning part to detect
-      // complexity and reduce the time the build needs to work").
+      // Decompose the issue instead of handing a mega-slice to BUILD: detect
+      // complexity at planning time and keep each build pass short (2026-08-15).
       if (
         enforceSizeGate &&
         source.kind === GITHUB_ISSUE_SOURCE &&

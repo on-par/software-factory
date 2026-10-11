@@ -38,6 +38,6 @@ wedged runner is only reclaimed on the next lease expiry or watchdog sweep, not 
 
 ## References
 
-- [ADR-0048 — hosted job store is an in-memory, clock-injected control-plane store with fixed idempotency check ordering](docs/adr/0048-hosted-job-store-is-an-in-memory-clock-injected-control-plane-store-with-fixed-idempotency-check-ordering.md)
-- [ADR-0049 — hosted-exec container execution runs behind an injected ContainerEngine port](docs/adr/0049-hosted-exec-container-execution-runs-behind-an-injected-containerengine-port.md)
+- [ADR-0048 — hosted job store is an in-memory, clock-injected control-plane store with fixed idempotency check ordering](0048-hosted-job-store-is-an-in-memory-clock-injected-control-plane-store-with-fixed-idempotency-check-ordering.md)
+- [ADR-0049 — hosted-exec container execution runs behind an injected ContainerEngine port](0049-hosted-exec-container-execution-runs-behind-an-injected-containerengine-port.md)
 - [Issue #903](https://github.com/on-par/software-factory/issues/903)

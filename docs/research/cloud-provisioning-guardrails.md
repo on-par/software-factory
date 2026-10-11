@@ -6,7 +6,7 @@ Date: 2026-08-14
 
 This is the #627 guardrails **design** document: the specification the follow-up
 provisioning implementation builds against. It is the direct follow-up to the
-landed #624 audit (`docs/research/deployment-automation-audit.md`), the #625 AWS
+landed #624 audit (#624 audit, unpublished), the #625 AWS
 research (`docs/research/aws-deployment-automation.md`), and the #626 Azure
 research (`docs/research/azure-deployment-automation.md`) — those three are its
 inputs, and their action catalog is what this document classifies. It specifies
@@ -84,7 +84,7 @@ breaking:
   first-class KPI (ADR-0020) via `.factory/costs.jsonl`, resolved as part of the
   `.factory` state paths in `packages/core/src/config/index.ts:388-413`
   (costs.jsonl at index.ts:403), with per-model price fields in
-  `packages/config/src/models.json` (`deployment-automation-audit.md:280-286`).
+  `packages/config/src/models.json` (#624 audit, unpublished).
   This machinery is the calibration input for the ceiling values below.
 
 ## Cost ceilings per provisioning action
@@ -167,7 +167,7 @@ deploying (ADR-0020, `.factory/costs.jsonl` at
 being provisioned sets the order of magnitude for its provisioning ceiling; a
 ceiling set far above measured reality is a ceiling that never bites, and one
 set below it blocks the provisioning story the #625/#626 docs set up. The
-measurement machinery exists (`deployment-automation-audit.md:280-286`); the
+measurement machinery exists (#624 audit, unpublished); the
 follow-up story turns its numbers into ceiling defaults.
 
 ## The mandatory plan-then-approve gate
@@ -208,9 +208,9 @@ with a plan surface, not raw CLI.
 pipelines; it is the pattern the audit already documented, applied to
 provisioning. App Store Connect app-record creation and app-specific-password
 generation stayed human-gated even in otherwise automated flows
-(`deployment-automation-audit.md`, playlift human-gated steps and sound-buddy
+(#624 audit, unpublished, playlift human-gated steps and sound-buddy
 human-gated steps); sound-buddy's release is draft-then-promote plus a
-confirmation prompt before any publish (`deployment-automation-audit.md`,
+confirmation prompt before any publish (#624 audit, unpublished,
 sound-buddy Patterns observed); and ADR-0005 already holds that any factory
 self-fix touching security is human-gated (`docs/adr/0005-autonomous-factory-loops.md`,
 Consequences). Provisioning actions are the cloud version of those gates.
@@ -308,7 +308,7 @@ to a mechanism.
   group): https://learn.microsoft.com/en-us/azure/cost-management-billing/manage/cost-management-budget-scenario
 - Azure — Azure Policy overview (`Deny` effects block non-compliant creates and
   updates): https://learn.microsoft.com/en-us/azure/governance/policy/overview
-- #624 — `docs/research/deployment-automation-audit.md` (human-gated-step
+- #624 — #624 audit, unpublished (human-gated-step
   precedent: playlift / sound-buddy; cost-KPI machinery).
 - #625 — `docs/research/aws-deployment-automation.md` (IaC vs. raw `aws` CLI;
   `cdk diff` / change sets; credential scoping; minimal deploy story).

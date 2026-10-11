@@ -1,5 +1,7 @@
 // packages/cli/src/cli/feedback.ts — `factory feedback <pr-url>`: file a human review's findings as one factory issue (#1851).
 // Each review body is sanitized on its own (stripHiddenContent) before it reaches the title or body (#1852).
+// The issue goes to the operator's own repo (--repo, then filing.repo, then the checkout's origin remote); there is
+// no built-in fallback repo. The host name and local paths stay out of the issue unless --include-local-paths is set.
 
 import { createHash } from 'node:crypto';
 import { hostname } from 'node:os';
@@ -48,7 +50,38 @@ export interface FeedbackDeps {
   branchPrefix?: string;
   now: () => Date;
   host?: string;
-  internalRepo?: string;
+  /** Repo (owner/name) the feedback issue is filed in. Required: there is no built-in default. */
+  repo?: string;
+  /** true: include the host name and local design/log paths in the issue (default false). */
+  shareLocal?: boolean;
+}
+
+const REPO_SLUG_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+export const FEEDBACK_NO_REPO_MESSAGE =
+  "factory feedback: can't tell which repo to file the issue in; pass --repo owner/name, set filing.repo in the factory config, or run it in a checkout with an origin remote";
+
+/**
+ * Pick the feedback target: the --repo flag, then the filing.repo config key, then the checkout's origin remote.
+ * Returns undefined when none is set; an explicit flag or config value that is not owner/name is an error.
+ */
+export function resolveFeedbackRepo(input: {
+  flag?: string;
+  config?: string;
+  remote?: string | null;
+}): string | undefined {
+  const explicit: Array<[string, string | undefined]> = [
+    ['--repo', input.flag],
+    ['filing.repo', input.config],
+  ];
+  for (const [source, raw] of explicit) {
+    const value = raw?.trim();
+    if (!value) continue;
+    if (!REPO_SLUG_RE.test(value)) throw new Error(`factory feedback: ${source} must be owner/name, got "${value}"`);
+    return value;
+  }
+  const remote = input.remote?.trim();
+  return remote && REPO_SLUG_RE.test(remote) ? remote : undefined;
 }
 
 const PR_URL_RE = /^https?:\/\/github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)(?:[/?#].*)?$/;
@@ -127,6 +160,9 @@ function runWindow(
 
 export async function runFeedback(prUrl: string, opts: { note?: string }, deps: FeedbackDeps): Promise<FileBugResult> {
   const pr = parseFeedbackPrUrl(prUrl);
+  const target = deps.repo?.trim();
+  if (!target || !REPO_SLUG_RE.test(target)) throw new Error(FEEDBACK_NO_REPO_MESSAGE);
+  const shareLocal = deps.shareLocal === true;
   const pull = await deps.github.getPull(pr);
   const findings = await collectReviewFindings(deps.github, pr);
   const title = buildFeedbackTitle(findings, opts.note);
@@ -136,6 +172,7 @@ export async function runFeedback(prUrl: string, opts: { note?: string }, deps: 
   const designPath = issue === null ? undefined : join(deps.paths.plans, `issue-${issue}.md`);
   const logPath = issue === null ? deps.paths.logs : join(deps.paths.logs, String(issue));
   const host = deps.host ?? hostname();
+  const notShared = 'kept on the operator machine (not shared; pass --include-local-paths to share it)';
 
   const lines = [
     `Human review of ${pr.url} found factory defects the run did not catch.`,
@@ -145,9 +182,11 @@ export async function runFeedback(prUrl: string, opts: { note?: string }, deps: 
     `- Run events: ${
       window?.count
         ? `${window.count} between ${window.first} and ${window.last}`
-        : `none found in ${deps.paths.events}`
+        : shareLocal
+          ? `none found in ${deps.paths.events}`
+          : 'none found locally'
     }`,
-    `- Design artifact: ${designPath ? `${host}:${designPath}` : 'unknown'}`,
+    `- Design artifact: ${designPath ? (shareLocal ? `${host}:${designPath}` : notShared) : 'unknown'}`,
     `- Findings: ${findings.length}`,
   ];
   const note = opts.note?.trim();
@@ -179,7 +218,8 @@ export async function runFeedback(prUrl: string, opts: { note?: string }, deps: 
     title,
     problem: lines.join('\n'),
     host: deps.host,
-    internalRepo: deps.internalRepo,
+    shareLocation: shareLocal,
+    internalRepo: target,
   });
 }
 
@@ -229,8 +269,11 @@ export function buildFeedbackDeps(
   paths: { events: string; plans: string; logs: string },
   branchPrefix: string,
   createFilingClient: (octokit: Octokit) => FilingGitHubClient,
+  options: { repo?: string; shareLocal?: boolean } = {},
 ): FeedbackDeps {
   return {
+    repo: options.repo,
+    shareLocal: options.shareLocal === true,
     github: createOctokitFeedbackClient(octokit),
     filing: createFilingClient(octokit),
     paths: { events: paths.events, plans: paths.plans, logs: paths.logs },

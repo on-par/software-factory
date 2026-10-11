@@ -446,7 +446,6 @@ const INTERNAL_API_KEYS = [
   // Auto-file a fingerprinted bug (#373)
   'createOctokitFilingClient',
   'DEFAULT_BUG_LABELS',
-  'DEFAULT_INTERNAL_REPO',
   'fileBug',
   'findIssueByMarker',
   'findMatchingIssue',

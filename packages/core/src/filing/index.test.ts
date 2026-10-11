@@ -10,7 +10,6 @@ import { findIssueByMarker, renderUpstreamOccurrenceComment } from './index.js';
 import {
   capEvidenceExcerpt,
   createOctokitFilingClient,
-  DEFAULT_INTERNAL_REPO,
   fileBug,
   findMatchingIssue,
   fingerprintMarker,
@@ -70,8 +69,13 @@ function makeFakeClient(seedIssues: CandidateIssue[]) {
 }
 
 describe('resolveTargetRepo', () => {
-  it('routes factory-internal faults to the internal repo', () => {
-    expect(resolveTargetRepo(makeEvidence({ origin: 'factory-internal' }))).toBe(DEFAULT_INTERNAL_REPO);
+  it('refuses to route a factory-internal fault without an explicit repo (no built-in default)', () => {
+    expect(() => resolveTargetRepo(makeEvidence({ origin: 'factory-internal' }))).toThrow(/no target repo/);
+    expect(() => resolveTargetRepo(makeEvidence({ origin: 'factory-internal' }), '  ')).toThrow(/no target repo/);
+  });
+
+  it('trims an explicit internal repo', () => {
+    expect(resolveTargetRepo(makeEvidence({ origin: 'factory-internal' }), ' acme/tools ')).toBe('acme/tools');
   });
 
   it('routes product faults to the evidence repo', () => {
@@ -207,6 +211,31 @@ describe('evidence caps (#1842)', () => {
 
   it('defaults the host to os.hostname()', () => {
     expect(renderBugBody(makeEvidence(), 'ff_abc123', 1)).toContain(`- Log: ${hostname()}:/logs/run-1.ndjson`);
+  });
+
+  it('omits the host and log path when shareLocation is false', () => {
+    const body = renderBugBody(makeEvidence(), 'ff_abc123', 1, { host: 'build-box', shareLocation: false });
+    expect(body).toContain('- Log: kept on the originating machine (not shared)');
+    expect(body).not.toContain('build-box');
+    expect(body).not.toContain('/logs/run-1.ndjson');
+    expect(body).not.toContain(hostname());
+  });
+
+  it('omits the location from the truncation note when shareLocation is false', () => {
+    const body = renderBugBody(makeEvidence({ eventExcerpt: 'x'.repeat(500) }), 'ff_abc123', 1, {
+      host: 'build-box',
+      shareLocation: false,
+      caps: { maxExcerptChars: 50, maxBodyChars: 100000 },
+    });
+    expect(body).toContain('The full raw log stays on the originating machine._');
+    expect(body).not.toContain('build-box');
+  });
+
+  it('fileBug passes shareLocation through', async () => {
+    const { client, created } = makeFakeClient([]);
+    await fileBug(client, { fingerprinted: makeFingerprinted(), now: clock, host: 'build-box', shareLocation: false });
+    expect(created[0].body).not.toContain('build-box');
+    expect(created[0].body).not.toContain('/logs/run-1.ndjson');
   });
 
   it('falls back when the host is empty after stripping', () => {
@@ -352,15 +381,12 @@ describe('fileBug', () => {
     expect(commented[0].body).toContain('Recurrence #2');
   });
 
-  it('routes the create path to the internal repo for a factory-internal fault', async () => {
+  it('files nothing for a factory-internal fault with no explicit repo', async () => {
     const fingerprinted = makeFingerprinted({ origin: 'factory-internal' });
     const { client, created } = makeFakeClient([]);
 
-    const result = await fileBug(client, { fingerprinted, now: clock });
-
-    expect(result.repo).toBe(DEFAULT_INTERNAL_REPO);
-    expect(created[0].owner).toBe('on-par');
-    expect(created[0].repo).toBe('software-factory');
+    await expect(fileBug(client, { fingerprinted, now: clock })).rejects.toThrow(/no target repo/);
+    expect(created).toHaveLength(0);
   });
 
   it('routes the create path to the product repo for a product fault', async () => {

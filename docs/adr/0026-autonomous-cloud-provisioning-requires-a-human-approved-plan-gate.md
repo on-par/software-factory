@@ -57,7 +57,7 @@ left undecided; the gate applies regardless of which is chosen.
 - [docs/research/cloud-provisioning-guardrails.md (#627, this PR)](../../docs/research/cloud-provisioning-guardrails.md)
 - [docs/research/aws-deployment-automation.md (#625)](../../docs/research/aws-deployment-automation.md)
 - [docs/research/azure-deployment-automation.md (#626)](../../docs/research/azure-deployment-automation.md)
-- [docs/research/deployment-automation-audit.md (#624)](../../docs/research/deployment-automation-audit.md)
+- Deployment automation audit (#624, not published)
 - [packages/core/src/approvals/index.ts (ApprovalGate seam)](../../packages/core/src/approvals/index.ts)
 - [ADR-0020 (cost KPIs)](0020-cost-kpis-are-scored-on-cost-bearing-cohorts-and-absent-cost-data-is-unknown-never-zero.md)
 - [Issue #627](https://github.com/on-par/software-factory/issues/627)

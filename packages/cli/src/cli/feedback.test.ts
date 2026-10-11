@@ -16,8 +16,10 @@ import {
   collectReviewFindings,
   FEEDBACK_LABELS,
   createOctokitFeedbackClient,
+  FEEDBACK_NO_REPO_MESSAGE,
   type FeedbackGitHubClient,
   parseFeedbackPrUrl,
+  resolveFeedbackRepo,
   runFeedback,
 } from './feedback.js';
 
@@ -83,6 +85,8 @@ function setup(opts: { headRef?: string; reviews?: any[]; comments?: any[] } = {
     branchPrefix: 'ship-it',
     now,
     host: 'box',
+    repo: 'acme/widgets' as string | undefined,
+    shareLocal: true as boolean | undefined,
   };
   return { deps, created, github };
 }
@@ -134,13 +138,14 @@ describe('buildFeedbackTitle', () => {
 });
 
 describe('runFeedback', () => {
-  it('files one bug + needs-triage issue in the factory repo', async () => {
+  it('files one bug + needs-triage issue in the configured repo', async () => {
     const { deps, created } = setup();
     const result = await runFeedback(PR, {}, deps);
     expect(result.action).toBe('created');
+    expect(result.repo).toBe('acme/widgets');
     expect(created).toHaveLength(1);
     const c = created[0];
-    expect(`${c.owner}/${c.repo}`).toBe('on-par/software-factory');
+    expect(`${c.owner}/${c.repo}`).toBe('acme/widgets');
     expect(c.labels).toEqual(['bug', 'factory:needs-triage']);
     expect(c.title).toBe('[feedback] Missing regression test');
     for (const s of [
@@ -155,6 +160,41 @@ describe('runFeedback', () => {
       expect(c.body).toContain(s);
     }
     expect(c.body).not.toContain('2026-07-05');
+  });
+
+  it('never falls back to a built-in repo: no repo means a clear error and nothing filed', async () => {
+    for (const repo of [undefined, '', 'not-a-slug']) {
+      const { deps, created } = setup();
+      deps.repo = repo;
+      let called = false;
+      deps.github.getPull = async () => {
+        called = true;
+        throw new Error('network');
+      };
+      await expect(runFeedback(PR, {}, deps)).rejects.toThrow(FEEDBACK_NO_REPO_MESSAGE);
+      expect(called).toBe(false);
+      expect(created).toHaveLength(0);
+    }
+  });
+
+  it('leaves out the host name and local paths unless the user opts in', async () => {
+    const { deps, created } = setup();
+    deps.shareLocal = undefined;
+    await runFeedback(PR, {}, deps);
+    const body: string = created[0].body;
+    expect(body).not.toContain('box:');
+    expect(body).not.toContain('/s/plans');
+    expect(body).not.toContain('/s/logs');
+    expect(body).toContain('Design artifact: kept on the operator machine (not shared');
+    expect(body).toContain('- Log: kept on the originating machine (not shared)');
+  });
+
+  it('says "none found locally" without the events path when not sharing', async () => {
+    const { deps, created } = setup({ headRef: 'feature/x' });
+    deps.shareLocal = false;
+    await runFeedback(PR, {}, deps);
+    expect(created[0].body).toContain('Run events: none found locally');
+    expect(created[0].body).not.toContain(deps.paths.events);
   });
 
   it('uses --note as the title', async () => {
@@ -231,7 +271,33 @@ describe('createOctokitFeedbackClient', () => {
   });
 });
 
+describe('resolveFeedbackRepo', () => {
+  it('prefers --repo, then filing.repo, then the origin remote', () => {
+    expect(resolveFeedbackRepo({ flag: ' a/b ', config: 'c/d', remote: 'e/f' })).toBe('a/b');
+    expect(resolveFeedbackRepo({ flag: '  ', config: 'c/d', remote: 'e/f' })).toBe('c/d');
+    expect(resolveFeedbackRepo({ config: undefined, remote: 'e/f' })).toBe('e/f');
+  });
+  it('returns undefined when nothing names a repo', () => {
+    expect(resolveFeedbackRepo({})).toBeUndefined();
+    expect(resolveFeedbackRepo({ remote: null })).toBeUndefined();
+    expect(resolveFeedbackRepo({ remote: 'garbage' })).toBeUndefined();
+  });
+  it('rejects a malformed explicit value', () => {
+    expect(() => resolveFeedbackRepo({ flag: 'nope' })).toThrow(/--repo must be owner\/name/);
+    expect(() => resolveFeedbackRepo({ config: 'a/b/c' })).toThrow(/filing.repo must be owner\/name/);
+  });
+});
+
 describe('buildFeedbackDeps', () => {
+  it('passes the target repo and the opt-in through', () => {
+    const d = buildFeedbackDeps({} as any, { events: 'e', plans: 'p', logs: 'l' }, 'ship-it', () => ({}) as any, {
+      repo: 'acme/widgets',
+      shareLocal: true,
+    });
+    expect(d.repo).toBe('acme/widgets');
+    expect(d.shareLocal).toBe(true);
+  });
+
   it('wires clients, paths and prefix', () => {
     const octokit: any = {};
     const filing: any = { tag: 'filing' };
@@ -244,6 +310,8 @@ describe('buildFeedbackDeps', () => {
     expect(d.filing).toBe(filing);
     expect(d.paths).toEqual({ events: 'e', plans: 'p', logs: 'l' });
     expect(d.branchPrefix).toBe('ship-it');
+    expect(d.repo).toBeUndefined();
+    expect(d.shareLocal).toBe(false);
     expect(d.now()).toBeInstanceOf(Date);
     expect(typeof d.github.getPull).toBe('function');
   });

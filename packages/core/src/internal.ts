@@ -56,7 +56,6 @@ export type {
 export {
   createOctokitFilingClient,
   DEFAULT_BUG_LABELS,
-  DEFAULT_INTERNAL_REPO,
   fileBug,
   findIssueByMarker,
   findMatchingIssue,
