@@ -37,7 +37,12 @@ const h = vi.hoisted(() => {
     // GitHub client injected through CliDeps.octokit
     octokit: {} as any,
     // configurable core behaviour
-    constitutionResolve: (_worktree: string, _product?: string): any => null,
+    constitutionResolve: (
+      _worktree: string,
+      _product?: string,
+      _constitutionPath?: string,
+      _mainCheckoutDir?: string,
+    ): any => null,
     modelOverrides: {} as Record<string, string>,
     modelProviders: {} as Record<string, string>,
     triageCandidates: [] as string[],
@@ -300,7 +305,7 @@ function makeCoreFakes() {
     ConstitutionLoader: vi.fn(function () {
       return {
         listProducts: () => ['alpha', 'beta'],
-        resolve: (worktree: string, product?: string) => h.constitutionResolve(worktree, product),
+        resolve: (...args: any[]) => (h.constitutionResolve as (...a: any[]) => any)(...args),
       };
     }) as any,
     ModelRegistry: vi.fn(function () {
@@ -6620,6 +6625,16 @@ describe('shipIssue (direct)', () => {
     await shipIssue(5, { product: 'alpha' }, ctx());
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain('Standards from repo instruction files');
+  });
+
+  it('passes the main checkout as the constitution source', async () => {
+    const resolveSpy = vi.fn((..._args: any[]): any => null);
+    h.constitutionResolve = resolveSpy;
+    await shipIssue(5, {}, ctx());
+    expect(resolveSpy).toHaveBeenCalledTimes(1);
+    const args = resolveSpy.mock.calls[0]!;
+    expect(args[3]).toBe(h.repoRoot);
+    expect(args[0]).not.toBe(h.repoRoot);
   });
 
   it('logs bundled standards source when a bundled constitution resolves', async () => {

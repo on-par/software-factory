@@ -2519,7 +2519,13 @@ export async function shipIssue(
     resolveConstitution: () =>
       // Resolved once here — runIssue calls this exactly once and reuses the value for
       // every phase, so the build worker can never author the standards it is graded by.
-      constitutionLoader.resolve(worktree, product, factoryConfig.paths?.constitution, repoRoot),
+      // A local-only workspace is caller-provided, not a checkout of repoRoot, so it keeps its own constitution.
+      constitutionLoader.resolve(
+        worktree,
+        product,
+        factoryConfig.paths?.constitution,
+        ctx?.localOnly ? undefined : repoRoot,
+      ),
     createApprovalGate: () => createFileApprovalGate({ dir: paths.approvals, timeoutMs: timeouts.approval * 1000 }),
     drainSteering: () => drainSteering(paths.steering, issueNum, worktree),
     reworkHistory,
