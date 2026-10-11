@@ -30,6 +30,10 @@ describe('EVENT_TRAITS', () => {
     }
   });
 
+  it('classifies base-hold-cleared as non-park info (#2350)', () => {
+    expect(EVENT_TRAITS['base-hold-cleared']).toEqual({ severity: 'info', isPark: false, isTerminal: false });
+  });
+
   it('classifies flaky_tests as non-park evidence (#2302)', () => {
     expect(EVENT_TRAITS.flaky_tests).toEqual({ severity: 'info', isPark: false, isTerminal: false });
   });
