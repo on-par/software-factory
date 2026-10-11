@@ -27,12 +27,14 @@ import type {
   EnvironmentProxySettings,
   EventKind,
   FactoryConfig,
+  FactoryEvent,
   FailoverReason,
   FailurePhase,
   GithubIssueParams,
   HealthKpis,
   IngestSettings,
   KpiHistoryRecord,
+  KpiReconstruction,
   LaneProxy,
   LeaseHealth,
   LocalBriefParams,
@@ -103,6 +105,7 @@ import {
   inspectPortLeases,
   isCommandAvailable,
   isProxyRunning,
+  kpiBranchPrefixes,
   kpisToHistoryRecord,
   laneBaseUrl,
   laneEnv,
@@ -137,7 +140,7 @@ import {
   readUsage,
   reapOrphanProcesses,
   reapStalePortLeases,
-  reconstructHumanEvents,
+  reconstructKpiEvents,
   recordLeasePgid,
   releasePortLease,
   renderKpiReport,
@@ -1326,14 +1329,38 @@ function readTextFileOrEmpty(path: string): string {
   }
 }
 
+/** Local events plus human-* events reconstructed from GitHub; warns and marks the result partial when the fetch fails (#2342). */
+async function reconstructHumanEventsForKpis(
+  events: FactoryEvent[],
+  branchPrefix: string,
+): Promise<KpiReconstruction & { owner: string; repoName: string }> {
+  let owner = '';
+  let repoName = '';
+  const recon = await reconstructKpiEvents(events, async (issues) => {
+    [owner, repoName] = (await getGitHubRepo()).split('/');
+    return fetchHumanEventSources(getOctokit(), owner, repoName, issues, kpiBranchPrefixes(branchPrefix));
+  });
+  if (recon.partial) {
+    console.error(
+      styleText(
+        'yellow',
+        `factory: GitHub human-event reconstruction failed (${recon.error}) — KPI snapshot marked partial (local log only)`,
+      ),
+    );
+  }
+  return { ...recon, owner, repoName };
+}
+
 async function appendKpiSnapshot(
   paths: ReturnType<typeof getFactoryPaths>,
   repoRoot: string,
   kpis: HealthKpis,
+  opts: { partial?: boolean } = {},
 ): Promise<{ record: KpiHistoryRecord; history: KpiHistoryRecord[] }> {
   const record = kpisToHistoryRecord(kpis, new Date().toISOString().slice(0, 10), {
     commitSha: await currentCommitSha(),
     models: resolvedModelTiers(repoRoot, paths.root),
+    partial: opts.partial,
   });
   const updated = appendKpiHistoryLine(readTextFileOrEmpty(paths.kpiHistory), record);
   ensureDir(paths.state);
@@ -1481,24 +1508,10 @@ async function cmdKpis(opts: { branchPrefix?: string } = {}) {
   const events = existsSync(paths.events) ? readEvents(paths.events) : [];
   const costs = existsSync(paths.costs) ? internalOps.readCosts(paths.costs) : [];
 
-  let allEvents = events;
-  let prSources: PrSource[] = [];
-  let owner = '';
-  let repoName = '';
-  try {
-    const ghRepo = await getGitHubRepo();
-    [owner, repoName] = ghRepo.split('/');
-    const issues = new Set(events.map((e) => e.issue).filter((i) => /^\d+$/.test(i)));
-    prSources = await fetchHumanEventSources(getOctokit(), owner, repoName, issues, branchPrefix);
-    allEvents = [...events, ...reconstructHumanEvents(prSources, events)];
-  } catch (err: any) {
-    console.error(
-      styleText(
-        'yellow',
-        `factory: GitHub human-event reconstruction unavailable (${err?.message ?? err}) — KPIs use the local log only`,
-      ),
-    );
-  }
+  const recon = await reconstructHumanEventsForKpis(events, branchPrefix);
+  let allEvents = recon.events;
+  const prSources = recon.sources;
+  const { owner, repoName } = recon;
 
   if (prSources.length > 0) {
     try {
@@ -1526,7 +1539,7 @@ async function cmdKpis(opts: { branchPrefix?: string } = {}) {
 
   let history: KpiHistoryRecord[];
   try {
-    ({ history } = await appendKpiSnapshot(paths, repoRoot, kpis));
+    ({ history } = await appendKpiSnapshot(paths, repoRoot, kpis, { partial: recon.partial }));
   } catch (err: any) {
     console.error(
       styleText(
@@ -4324,8 +4337,17 @@ async function cmdRun(
       try {
         const events = existsSync(paths.events) ? readEvents(paths.events) : [];
         const costs = existsSync(paths.costs) ? internalOps.readCosts(paths.costs) : [];
-        const kpis = computeHealthKpis(events, costs);
-        await appendKpiSnapshot(paths, repoRoot, kpis);
+        const recon = await reconstructHumanEventsForKpis(events, branchPrefix);
+        const kpis = computeHealthKpis(recon.events, costs);
+        await appendKpiSnapshot(paths, repoRoot, kpis, { partial: recon.partial });
+        if (recon.partial) {
+          logEvent(
+            paths.events,
+            'warn',
+            'all',
+            `kpi snapshot partial: GitHub human-event reconstruction failed: ${recon.error}`,
+          );
+        }
         logEvent(paths.events, 'kpi-snapshot', 'all', `KPI snapshot appended to ${paths.kpiHistory}`);
       } catch (err: any) {
         logEvent(paths.events, 'warn', 'all', `kpi snapshot failed: ${err.message}`);
