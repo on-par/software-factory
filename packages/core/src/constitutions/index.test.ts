@@ -317,11 +317,47 @@ describe('ConstitutionLoader repo-first resolution', () => {
       expect(loader.resolve(repoDir)).toBeNull();
     });
 
-    it('a worktree instance still wins over the main checkout file', async () => {
+    const writeWorktreeInstance = async () => {
       await mkdir(join(repoDir, '.factory'), { recursive: true });
       await writeFile(join(repoDir, DEFAULT_REPO_CONSTITUTION_PATH), '---\nproduct: wt\n---\nWorktree standards.');
+    };
+
+    it('loads the main checkout constitution over a worktree-authored one and the bundled product', async () => {
+      await writeFile(join(bundledDir, 'acme-app.md'), BUNDLED);
+      await writeWorktreeInstance();
+
+      const c = loader.resolve(repoDir, 'acme-app', undefined, mainDir);
+      expect(c!.body).toContain('Main checkout standards.');
+      expect(c!.body).not.toContain('Worktree standards.');
+      expect(c!.body).not.toContain('Bundled standards body.');
+      expect(c!.path).toBe(join(mainDir, DEFAULT_REPO_CONSTITUTION_PATH));
+      expect(c!.checkers).toEqual(['main_check']);
+    });
+
+    it('with no product, loads the main checkout constitution even when the worktree has its own', async () => {
+      await writeWorktreeInstance();
 
       const c = loader.resolve(repoDir, undefined, undefined, mainDir);
+      expect(c!.body).toContain('Main checkout standards.');
+      expect(c!.body).not.toContain('Worktree standards.');
+      expect(c!.path).toBe(join(mainDir, DEFAULT_REPO_CONSTITUTION_PATH));
+    });
+
+    it('ignores a worktree-authored constitution and falls back to the bundled product when the main checkout has none', async () => {
+      await rm(join(mainDir, DEFAULT_REPO_CONSTITUTION_PATH));
+      await writeWorktreeInstance();
+      await writeFile(join(bundledDir, 'acme-app.md'), BUNDLED);
+
+      const c = loader.resolve(repoDir, 'acme-app', undefined, mainDir);
+      expect(c!.body).toContain('Bundled standards body.');
+      expect(c!.body).not.toContain('Worktree standards.');
+      expect(loader.resolve(repoDir, undefined, undefined, mainDir)).toBeNull();
+    });
+
+    it('without a main checkout, still reads the repoDir instance', async () => {
+      await writeWorktreeInstance();
+
+      const c = loader.resolve(repoDir);
       expect(c!.body).toContain('Worktree standards.');
       expect(c!.path).toBe(join(repoDir, DEFAULT_REPO_CONSTITUTION_PATH));
     });
