@@ -1,7 +1,8 @@
 // packages/cli/src/cli/base-hold.ts — base hold persisted when a lane pauses on a broken
 // base SHA (#2348), so a restarted supervisor remembers the pause. #2349 reads it back as the
 // claim gate: no claiming while origin/main is still at the held SHA and its CI is not green.
-// #2350 clears the hold once origin/main moves or its CI goes green.
+// #2350 clears the hold once origin/main moves or its CI goes green. #2351 reads it for
+// `factory status`.
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -74,6 +75,12 @@ export function formatBaseHoldCleared(c: BaseHoldCleared): string {
   return c.reason === 'sha-changed'
     ? `base hold on ${held} cleared (reason: sha-changed): origin/main moved to ${now}`
     : `base hold on ${held} cleared (reason: ci-green): main CI on ${now} is green`;
+}
+
+/** `factory status` lines for an active hold (#2351). */
+export function formatBaseHoldStatus(hold: BaseHold): string[] {
+  const checks = hold.failingChecks.length > 0 ? hold.failingChecks.join(', ') : '(none recorded)';
+  return [`  repo: ${hold.repo}`, `  baseSha: ${hold.baseSha}`, `  failingChecks: ${checks}`, `  since: ${hold.since}`];
 }
 
 export type BaseHoldDecision = { kind: 'claim' } | { kind: 'hold'; hold: BaseHold };

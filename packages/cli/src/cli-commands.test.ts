@@ -141,6 +141,7 @@ function paths() {
     kpiHistory: join(state, 'kpi-history.jsonl'),
     classifierOutcomes: join(state, 'classifier-outcomes.jsonl'),
     breaker: join(state, 'breaker.json'),
+    baseHold: join(state, 'base-hold.json'),
     runFlags: join(state, 'run-flags.json'),
     mergeLock: join(state, 'merge.lock'),
     gitLock: join(state, 'git.lock'),
@@ -1257,6 +1258,59 @@ bash scripts/verify.sh
   });
 
   describe('status', () => {
+    describe('base hold (#2351)', () => {
+      const writeHold = (repo: string): void => {
+        mkdirSync(dirname(paths().baseHold), { recursive: true });
+        writeFileSync(
+          paths().baseHold,
+          JSON.stringify({
+            repo,
+            baseSha: 'a'.repeat(40),
+            failingChecks: ['tests', 'lint'],
+            since: '2026-10-01T00:00:00.000Z',
+          }),
+        );
+      };
+
+      it('shows the active base hold with repo, baseSha, failing checks and since (#2351)', async () => {
+        writeHold(h.ghRepo);
+        await runMain('status');
+        const out = logged();
+        expect(out).toContain('== Base hold ==');
+        expect(out).toContain(`repo: ${h.ghRepo}`);
+        expect(out).toContain(`baseSha: ${'a'.repeat(40)}`);
+        expect(out).toContain('failingChecks: tests, lint');
+        expect(out).toContain('since: 2026-10-01T00:00:00.000Z');
+        expect(out.indexOf('== Active ==')).toBeLessThan(out.indexOf('== Base hold =='));
+        expect(out.indexOf('== Base hold ==')).toBeLessThan(out.indexOf('== Queue =='));
+        expect(existsSync(paths().baseHold)).toBe(true);
+      });
+
+      it('omits the base hold section when no hold file exists (#2351)', async () => {
+        await runMain('status');
+        expect(logged()).not.toContain('Base hold');
+      });
+
+      it('prints no base hold section for a hold on another repo (#2351)', async () => {
+        writeHold('someone/else');
+        await runMain('status');
+        expect(logged()).not.toContain('Base hold');
+      });
+
+      it('prints no base hold section for a malformed hold file (#2351)', async () => {
+        mkdirSync(dirname(paths().baseHold), { recursive: true });
+        writeFileSync(paths().baseHold, 'not json');
+        await runMain('status');
+        expect(logged()).not.toContain('Base hold');
+      });
+
+      it('`status --json` is unchanged by a base hold (#2351)', async () => {
+        writeHold(h.ghRepo);
+        await runMain('status', '--json');
+        expect(JSON.parse(logged())).not.toHaveProperty('baseHold');
+      });
+    });
+
     describe('--json', () => {
       it('reports stop:true and nothing but JSON on stdout', async () => {
         writeFileSync(paths().stop, '');
