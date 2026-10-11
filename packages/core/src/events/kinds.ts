@@ -110,6 +110,7 @@ export type EventKind =
   | 'phase_started'
   | 'plan'
   | 'plan_approval_granted'
+  | 'plan_reused'
   | 'plan_approval_requested'
   | 'plan_redirect'
   | 'plan_rejected'
@@ -354,6 +355,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   phase_started: { severity: 'info', isPark: false, isTerminal: false },
   plan: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
   plan_approval_granted: { severity: 'info', isPark: false, isTerminal: false },
+  plan_reused: { severity: 'info', isPark: false, isTerminal: false },
   plan_approval_requested: { severity: 'info', isPark: false, isTerminal: false },
   plan_redirect: { severity: 'info', isPark: false, isTerminal: false },
   plan_rejected: { severity: 'info', isPark: false, isTerminal: false },

@@ -40,6 +40,22 @@ All live in `dirname(registry)` — `~/.factory/` by default (#1177, ADR-0076):
   proceed on its own; the message only appears while the recorded pid is
   alive. Removing `daemon.pid` by hand is the escape hatch of last resort.
 
+## Checking for updates
+
+`factory self-update --check [--json] [--update-mode stable|prerelease]` is
+read-only: it compares the running version with the npm dist-tags of
+`@on-par/factory-cli` and installs nothing. `--json` prints one object:
+`installKind`, `prefix`, `channel` (`latest`/`next`), `current`, `candidate`,
+`updateAvailable`, `applies`, `error`.
+
+- Exit codes: `0` up to date, `10` update available, `1` error, `2` bad usage.
+- `stable` only looks at `latest` and never offers a prerelease version;
+  `prerelease` takes the highest of `next` and `latest`.
+- A registry or network failure sets `error`, forces `updateAvailable: false`
+  and exits 1; it never reports an update.
+- `applies` is `true` only for an npm-global install; a source install still
+  gets the report but with `applies: false`.
+
 ## Next slices (#764)
 
 launchd packaging and `factory daemon start|stop|status|logs` verbs are

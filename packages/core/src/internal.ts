@@ -691,6 +691,8 @@ export { buildReadinessGapPrompt, parseReadinessGapOutput } from './readiness/en
 // Persisted per-issue run state (#972, #2271)
 export type { IssueRunState, RunStatus } from './types/index.js';
 export { readIssueRunState } from './run/state.js';
+export { createPlanReuseStore, issueBodyHash, planReusePath } from './run/resume-context.js';
+export type { PlanReuseRecord, PlanReuseStore } from './run/resume-context.js';
 
 // Pre-PLAN base health (#2339)
 export { BASE_HEALTH_CHECKERS, checkBaseHealth } from './checkers/base-health.js';

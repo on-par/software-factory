@@ -213,6 +213,7 @@ import type {
 } from '@on-par/factory-core/internal';
 import {
   acquirePidFile,
+  createPlanReuseStore,
   checkBaseHealth,
   currentSlice,
   egressSummaryMessage,
@@ -346,6 +347,7 @@ import {
   type DaemonCtlDeps,
   type FactorydConfig,
 } from './daemon.js';
+import { cmdSelfUpdateCheck, type SelfUpdateDeps } from './self-update.js';
 import {
   analyzeEventLog,
   type ClaudeAuthProbe,
@@ -2473,6 +2475,7 @@ export async function shipIssue(
     resolveBaseUrl,
     getIssueSpend: () => issueSpend,
     breaker,
+    planReuse: ctx?.localOnly ? undefined : createPlanReuseStore(specPath),
     planPhase: phases.planPhase,
     buildPhase: phases.buildPhase,
     checkPhase: phases.checkPhase,
@@ -6146,6 +6149,8 @@ export interface CliDeps {
   execSync?: ShellExecSync;
   /** Passed to the `factory daemon start|stop|status|logs` wrappers. */
   daemon?: DaemonCtlDeps;
+  /** Passed to `factory self-update --check` (registry fetch, install detection, stdout). */
+  selfUpdate?: SelfUpdateDeps;
   /** Replaces the TUI entry point used by `factory tui`. */
   runTui?: typeof runTui;
   /** Builds the GitHub client for every CLI GitHub call (shipIssue, land, queue, triage, …). Defaults to createFactoryOctokit with the resolved token. */
@@ -6796,7 +6801,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .action((opts: { port?: string; registry?: string; updateMode?: string; autoUpdate?: boolean }) =>
       cmdFactoryd(opts),
     );
-  const daemonCtl = (fn: () => Promise<void>) =>
+  const daemonCtl = <T>(fn: () => Promise<T>) =>
     fn().catch((err: unknown) => {
       if (err instanceof DaemonCtlError) throw new CliExitError(err.message, err.code);
       throw err;
@@ -6820,6 +6825,17 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('-f, --follow', 'Keep tailing')
     .option('-n, --lines <n>', 'Lines to print first (default 100)')
     .action((opts: { follow?: boolean; lines?: string }) => daemonCtl(() => cmdDaemonLogs(opts, deps.daemon)));
+
+  program
+    .command('self-update')
+    .description('Check npm for a newer factory release (read-only; nothing is installed)')
+    .option('--check', 'Compare the running version with the npm dist-tag (required)')
+    .option('--json', 'Print one JSON object instead of text')
+    .option('--update-mode <mode>', 'Channel to check: stable (npm latest, default) or prerelease (npm next)')
+    .action(async (opts: { check?: boolean; json?: boolean; updateMode?: string }) => {
+      if (opts.check !== true) throw new CliExitError('factory self-update: only --check is supported', 2);
+      process.exitCode = await daemonCtl(() => cmdSelfUpdateCheck(opts, deps.selfUpdate));
+    });
 
   const worktreeCmd = program.command('worktree').description('Clean up stale factory worktrees (gc)');
   worktreeCmd
