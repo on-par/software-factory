@@ -44,6 +44,46 @@ export function isPassingConclusion(conclusion: string | null | undefined): bool
   return PASSING_CONCLUSIONS.has(conclusion ?? '');
 }
 
+/** Whether a failed CI job failed for infrastructure reasons ('infra') or any other reason
+ *  ('non-infra'), including real test failures. */
+export type CiFailureClass = 'infra' | 'non-infra';
+
+/** Structural subset of a GitHub Actions workflow-job step (actions.listJobsForWorkflowRun). */
+export interface CiJobStepLike {
+  status?: string | null;
+  started_at?: string | null;
+}
+
+/** Structural subset of a GitHub Actions workflow job — only the fields the classifier reads. */
+export interface CiJobLike {
+  conclusion?: string | null;
+  runner_id?: number | null;
+  runner_name?: string | null;
+  steps?: CiJobStepLike[] | null;
+}
+
+function stepStarted(step: CiJobStepLike): boolean {
+  return step.status === 'in_progress' || step.status === 'completed' || !!step.started_at;
+}
+
+/** Classify a CI job as an infrastructure failure or not. Pure; rules run in order:
+ *  1. a passing conclusion is never infra;
+ *  2. no runner assigned (`runner_id` null/0 and no `runner_name`) is infra;
+ *  3. a present-but-empty `steps` array (zero steps ran) is infra;
+ *  4. a `cancelled` job whose steps never started is infra;
+ *  5. anything else is 'non-infra'.
+ *  Fails closed: missing (undefined) fields are unknown, never an infra signal, so a real test
+ *  failure is not mislabelled. */
+export function classifyCiFailure(job: CiJobLike): CiFailureClass {
+  if (isPassingConclusion(job.conclusion)) return 'non-infra';
+  if ((job.runner_id === null || job.runner_id === 0) && !job.runner_name) return 'infra';
+  if (Array.isArray(job.steps) && job.steps.length === 0) return 'infra';
+  if (job.conclusion === 'cancelled' && Array.isArray(job.steps) && job.steps.every((s) => !stepStarted(s))) {
+    return 'infra';
+  }
+  return 'non-infra';
+}
+
 const DEFAULT_PER_PAGE = 100;
 const DEFAULT_MAX_PAGES = 10;
 const DEFAULT_MAX_POLL_ERRORS = 3;

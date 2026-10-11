@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { watchChecks } from './ci-watch.js';
+import { classifyCiFailure, watchChecks } from './ci-watch.js';
 
 function scriptChecks(sequence: any[][]) {
   let i = 0;
@@ -504,5 +504,73 @@ describe('watchChecks', () => {
 
     expect(outcome).toBe('failure');
     expect(sleeps).toEqual([]);
+  });
+});
+
+describe('classifyCiFailure', () => {
+  const noRunnerJob = { conclusion: 'failure', runner_id: null, runner_name: null, steps: [] };
+  const cancelledBeforeStartJob = {
+    conclusion: 'cancelled',
+    runner_id: 42,
+    runner_name: 'GitHub Actions 42',
+    steps: [{ status: 'queued', started_at: null }],
+  };
+  const zeroStepsJob = { conclusion: 'failure', runner_id: 42, runner_name: 'GitHub Actions 42', steps: [] };
+  const realTestFailureJob = {
+    conclusion: 'failure',
+    runner_id: 42,
+    runner_name: 'GitHub Actions 42',
+    steps: [
+      { name: 'Set up job', status: 'completed', conclusion: 'success', started_at: '2026-10-01T00:00:00Z' },
+      { name: 'Run tests', status: 'completed', conclusion: 'failure', started_at: '2026-10-01T00:01:00Z' },
+    ],
+  };
+
+  it('classifies a failed job with no runner assigned as infra', () => {
+    expect(classifyCiFailure(noRunnerJob)).toBe('infra');
+    expect(classifyCiFailure({ conclusion: 'failure', runner_id: 0, runner_name: '', steps: undefined })).toBe('infra');
+  });
+
+  it('classifies a job cancelled before any step started as infra', () => {
+    expect(classifyCiFailure(cancelledBeforeStartJob)).toBe('infra');
+  });
+
+  it('classifies a failed job that ran zero steps as infra', () => {
+    expect(classifyCiFailure(zeroStepsJob)).toBe('infra');
+  });
+
+  it('classifies a real test failure as non-infra', () => {
+    expect(classifyCiFailure(realTestFailureJob)).toBe('non-infra');
+  });
+
+  it('classifies a job cancelled mid-run as non-infra', () => {
+    const job = {
+      ...cancelledBeforeStartJob,
+      steps: [
+        { status: 'completed', started_at: '2026-10-01T00:00:00Z' },
+        { status: 'in_progress', started_at: null },
+      ],
+    };
+    expect(classifyCiFailure(job)).toBe('non-infra');
+  });
+
+  it('treats a queued step with a started_at as started', () => {
+    const job = { ...cancelledBeforeStartJob, steps: [{ status: 'queued', started_at: '2026-10-01T00:00:00Z' }] };
+    expect(classifyCiFailure(job)).toBe('non-infra');
+  });
+
+  it('never classifies a passing conclusion as infra', () => {
+    expect(classifyCiFailure({ ...noRunnerJob, conclusion: 'success' })).toBe('non-infra');
+    expect(classifyCiFailure({ ...noRunnerJob, conclusion: 'skipped' })).toBe('non-infra');
+  });
+
+  it('fails closed on missing fields', () => {
+    expect(classifyCiFailure({ conclusion: 'failure' })).toBe('non-infra');
+    expect(classifyCiFailure({ conclusion: 'cancelled', runner_id: 42, steps: undefined })).toBe('non-infra');
+  });
+
+  it('does not treat a named runner as unassigned', () => {
+    const job = { ...realTestFailureJob, runner_id: null, runner_name: 'self-hosted-1' };
+    expect(classifyCiFailure(job)).toBe('non-infra');
   });
 });
