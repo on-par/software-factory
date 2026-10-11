@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { CostEntry, FactoryEvent } from '../types/index.js';
+import { reconstructHumanEvents, type PrSource } from './human.js';
 import {
   appendKpiHistoryLine,
   computeHealthKpis,
@@ -1578,5 +1579,42 @@ describe('KPI drift detection (#613)', () => {
 
     const strict = computeKpiDrift(records, { windowSize: 5, thresholdRatio: 0.1 });
     expect(strict.reworkRate.drift).toBe(true);
+  });
+});
+
+describe('landed and admin merges (#2342)', () => {
+  it('counts merged, landed and reconstructed admin merges together (5 + 2 + 11 = 18) (#2342)', () => {
+    const events: FactoryEvent[] = [];
+    const sources: PrSource[] = [];
+    for (let n = 1; n <= 18; n++) {
+      const issue = String(n);
+      events.push(event({ issue, type: 'plan', ts: at(n) }));
+      if (n <= 5) events.push(event({ issue, type: 'merged', ts: at(100 + n) }));
+      else if (n <= 7) events.push(event({ issue, type: 'landed', ts: at(100 + n) }));
+      else
+        sources.push({
+          issue,
+          prNumber: n,
+          commits: [],
+          approvals: [],
+          mergedAt: at(100 + n),
+          mergedBy: 'patrob',
+          closedAt: null,
+        });
+    }
+    const kpis = computeHealthKpis([...events, ...reconstructHumanEvents(sources, events)], []);
+    expect(kpis.merged).toBe(18);
+  });
+
+  it('gives a landed-only issue a cycle time', () => {
+    const kpis = computeHealthKpis([event({ type: 'plan', ts: at(0) }), event({ type: 'landed', ts: at(60) })], []);
+    expect(kpis.merged).toBe(1);
+    expect(kpis.medianCycleTimeMs).toBe(60_000);
+  });
+
+  it('writes partial:true only when the snapshot is partial', () => {
+    const kpis = computeHealthKpis([event({ type: 'plan' })], []);
+    expect(kpisToHistoryRecord(kpis, '2026-08-10', { partial: true }).partial).toBe(true);
+    expect(kpisToHistoryRecord(kpis, '2026-08-10')).not.toHaveProperty('partial');
   });
 });

@@ -1051,7 +1051,60 @@ describe('shipPhase CI watch', () => {
       expect(logs).not.toContainEqual(['ready', 'PR #123 ready for review']);
       expect(calls.some(([name]) => name === 'pulls.get')).toBe(false);
       expect(calls.some(([name]) => name === 'graphql')).toBe(false);
-      expect(callCount()).toBe(2);
+      expect(callCount()).toBe(3); // 2 watch polls + 1 re-list by the infra-rerun rescue check (#2365)
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('parks as infra-failure and logs ci-rescue-failed when the one rerun also fails for infra', async () => {
+    const sha = 'ship-infra-sha-2366';
+    const infraRun = { id: 9, head_sha: sha, status: 'completed', conclusion: 'failure' };
+    const { octokit } = createWatchOctokit([[infraRun]]);
+    (octokit.rest as any).actions = {
+      getJobForWorkflowRun: async () => ({
+        data: {
+          conclusion: 'failure',
+          runner_id: 42,
+          runner_name: 'r',
+          steps: [],
+          run_id: 7,
+          run_attempt: 1,
+          head_sha: sha,
+        },
+      }),
+    };
+    const rerunCalls: string[][] = [];
+    const logs: Array<[string, string]> = [];
+
+    vi.useFakeTimers();
+    try {
+      const promise = shipPhase({
+        issue: 123,
+        repo: 'on-par/software-factory',
+        worktree: '/repo-factory-123',
+        branch: 'ship-it/123-ci-poll',
+        octokit: octokit as any,
+        watchCI: true,
+        log: (type, msg) => logs.push([type, msg]),
+        run: async () => ({ stdout: '' }),
+        rerun: async (argv) => {
+          rerunCalls.push([...argv]);
+          return { ok: true };
+        },
+      });
+      await vi.runAllTimersAsync();
+      const result = await promise;
+
+      expect(result).toEqual({
+        ok: false,
+        prNumber: 123,
+        reason: 'CI failed again for infrastructure reasons for PR #123 after one rerun',
+        ciOutcome: 'infra-failure',
+      });
+      expect(rerunCalls).toHaveLength(1);
+      expect(logs.some(([type]) => type === 'ci-rescue-failed')).toBe(true);
+      expect(logs).not.toContainEqual(['ready', 'PR #123 ready for review']);
     } finally {
       vi.useRealTimers();
     }

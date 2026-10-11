@@ -14,7 +14,7 @@ import { renderPrBody } from '../reports/pr-body.js';
 import type { ReviewRouting } from '../review/routing.js';
 import { readSpec } from '../spec/index.js';
 import type { CheckSummary } from '../types/index.js';
-import { type CiOutcome, watchChecks } from '../utils/ci-watch.js';
+import { type InfraRerunOutcome, watchChecksWithInfraRerun } from '../utils/ci-watch.js';
 import { shellEscape } from '../utils/index.js';
 import { GITHUB_ISSUE_SOURCE } from '../work/github-issue.js';
 import type { WorkRequest } from '../work/index.js';
@@ -28,7 +28,7 @@ export interface ShipResult {
   denied?: boolean;
   deniedReason?: string;
   reason?: string;
-  ciOutcome?: CiOutcome;
+  ciOutcome?: InfraRerunOutcome;
   /** True when the branch's content had already landed on main (e.g. a retry after a
    *  squash merge) — nothing was pushed and no PR was created (#520). */
   alreadyDelivered?: boolean;
@@ -62,6 +62,8 @@ async function shipPhaseImpl(opts: {
   watchCI?: boolean;
   log: (type: EventKind, msg: string) => void;
   run?: CommandRunner;
+  /** Runs the gh rerun argv for the CI infra rescue (#2365); default runCommand. */
+  rerun?: (argv: readonly string[]) => Promise<{ ok: boolean }>;
   approvalGate?: ApprovalGate;
   checkSummary?: CheckSummary;
   specPath?: string;
@@ -84,7 +86,19 @@ async function shipPhaseImpl(opts: {
    *  replaces that stale head under a lease on this SHA, and fails closed if the remote moved (#1869). */
   recordedRemoteSha?: string;
 }): Promise<ShipResult> {
-  const { issue, repo, worktree, branch, octokit, watchCI = true, log, run = exec, approvalGate, checkSummary } = opts;
+  const {
+    issue,
+    repo,
+    worktree,
+    branch,
+    octokit,
+    watchCI = true,
+    log,
+    run = exec,
+    rerun,
+    approvalGate,
+    checkSummary,
+  } = opts;
   const [owner, repoName] = repo.split('/');
 
   let diffStat: string | undefined;
@@ -324,16 +338,36 @@ async function shipPhaseImpl(opts: {
     log('evidence', `posted evidence pack to PR #${prNumber}`);
   } catch {}
 
-  let ciOutcome: CiOutcome | undefined;
+  let ciOutcome: InfraRerunOutcome | undefined;
 
   // Watch CI (best-effort)
   if (watchCI) {
     log('ship', `Watching CI for PR #${prNumber}`);
     try {
-      ciOutcome = await watchChecks({ octokit, owner, repo: repoName, ref: branch });
+      ciOutcome = await watchChecksWithInfraRerun({
+        octokit,
+        owner,
+        repo: repoName,
+        ref: branch,
+        rerun,
+        onRescued: ({ headSha, runIds }) =>
+          log(
+            'ci-rescued',
+            `CI rescued for PR #${prNumber}: reran infra-failed run(s) ${runIds.join(', ')} on ${headSha.slice(0, 12)} once and the re-watch is green`,
+          ),
+        onRescueFailed: ({ headSha, runIds, outcome }) =>
+          log(
+            'ci-rescue-failed',
+            `CI rescue failed for PR #${prNumber}: reran infra-failed run(s) ${runIds.join(', ')} on ${headSha.slice(0, 12)} once and the re-watch ended ${outcome}`,
+          ),
+      });
       if (ciOutcome === 'success') log('ship', `CI green for PR #${prNumber}`);
       else if (ciOutcome === 'failure') {
         const reason = `CI failed for PR #${prNumber}`;
+        log('ship', reason);
+        return { ok: false, prNumber, reason, ciOutcome };
+      } else if (ciOutcome === 'infra-failure') {
+        const reason = `CI failed again for infrastructure reasons for PR #${prNumber} after one rerun`;
         log('ship', reason);
         return { ok: false, prNumber, reason, ciOutcome };
       }

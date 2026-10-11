@@ -25,6 +25,8 @@ import type { WorkRequest } from '../work/index.js';
 import { LaneFileGuard } from './lane-file-guard.js';
 import type { RunPolicy } from './policy.js';
 import type { Environment, Workspace } from './ports.js';
+import { createPlanReuseStore, issueBodyHash, type PlanReuseStore } from './resume-context.js';
+import { writeSpec } from '../spec/index.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
 const planPhase = vi.fn<typeof realPlanPhase>();
@@ -717,6 +719,35 @@ describe('runIssue — steward-triggered event (#2086)', () => {
     const calls = stewardCalls(log);
     expect(calls).toHaveLength(1);
     expect(calls[0][2].stewardTriggered.trigger).toBe('ship-failed');
+  });
+
+  it('does not trigger the steward for a ci-infra park from a repeated infra failure', async () => {
+    vi.mocked(shipPhase).mockResolvedValue({
+      ok: false,
+      prNumber: 9,
+      reason: 'CI failed again for infrastructure reasons for PR #9 after one rerun',
+      ciOutcome: 'infra-failure',
+    });
+    const log = vi.fn();
+    const outcome = await runIssue(
+      baseRequest({ stewardEnabled: true }),
+      basePolicy(),
+      basePorts({ events: () => log }),
+    );
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'ci-infra' });
+    expect(log.mock.calls.map((c) => c[0])).toContain('ci-infra');
+    expect(stewardCalls(log)).toHaveLength(0);
+  });
+
+  it('still parks a ship failure with ciOutcome failure as fail', async () => {
+    vi.mocked(shipPhase).mockResolvedValue({
+      ok: false,
+      prNumber: 9,
+      reason: 'CI failed for PR #9',
+      ciOutcome: 'failure',
+    });
+    const outcome = await runIssue(baseRequest({ stewardEnabled: true }), basePolicy(), basePorts());
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
   });
 
   it('logs nothing for non-trigger parks', async () => {
@@ -1887,6 +1918,130 @@ describe('runIssue — pre-PLAN base health (#2339)', () => {
       worktree: '/tmp/wt',
       cachePath: '/tmp/cache.json',
       timeoutSeconds: 60,
+    });
+  });
+});
+
+describe('runIssue — plan reuse after environment release (#2340)', () => {
+  const ENV = { baseSha: 'abc1234567890def', failingChecks: ['tests'], logPaths: [] as string[] };
+  const ENV_FAIL: CheckPhaseResult = { passed: false, summary: CHECK_SUMMARY, reworkRounds: 0, environment: ENV };
+  const REUSED: PlanResult = { ...PLAN_OK, route: 'claude', model: 'plan-reused' };
+  const fakeStore = (hit: PlanResult | null = null) => ({
+    load: vi.fn<PlanReuseStore['load']>().mockResolvedValue(hit),
+    record: vi.fn<PlanReuseStore['record']>().mockResolvedValue(undefined),
+    clear: vi.fn<PlanReuseStore['clear']>().mockResolvedValue(undefined),
+  });
+  const kinds = (log: ReturnType<typeof vi.fn>) => log.mock.calls.map((c) => c[0]);
+
+  it('reuses the frozen spec and skips planPhase when the body hash is unchanged', async () => {
+    const planReuse = fakeStore(REUSED);
+    const router = fakeRouter();
+    const run = vi.spyOn(router, 'run');
+    const log = vi.fn();
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ router, planReuse, events: () => log }));
+    expect(outcome.state).toBe('ready');
+    expect(planReuse.load).toHaveBeenCalledWith(issueBodyHash(WORK.brief));
+    expect(planPhase).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+    expect(kinds(log)).toContain('plan_reused');
+    expect(planReuse.clear).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(buildPhase).mock.calls[0][0]).toMatchObject({ route: 'claude' });
+  });
+
+  it('re-plans and clears the record when the body was edited', async () => {
+    const planReuse = fakeStore(null);
+    const log = vi.fn();
+    await runIssue(baseRequest(), basePolicy(), basePorts({ planReuse, events: () => log }));
+    expect(planPhase).toHaveBeenCalledTimes(1);
+    expect(planReuse.clear).toHaveBeenCalledTimes(1);
+    expect(kinds(log)).not.toContain('plan_reused');
+  });
+
+  it('plans as before with no planReuse port', async () => {
+    await runIssue(baseRequest(), basePolicy(), basePorts());
+    expect(planPhase).toHaveBeenCalledTimes(1);
+  });
+
+  it('records the body hash on a CHECK environment release', async () => {
+    vi.mocked(checkPhase).mockResolvedValue(ENV_FAIL);
+    const planReuse = fakeStore();
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ planReuse }));
+    expect(outcome.state).toBe('released');
+    expect(planReuse.record).toHaveBeenCalledWith(
+      expect.objectContaining({ bodyHash: issueBodyHash(WORK.brief), baseSha: ENV.baseSha, route: PLAN_OK.route }),
+    );
+  });
+
+  it('does not record for a slice plan', async () => {
+    vi.mocked(checkPhase).mockResolvedValue(ENV_FAIL);
+    vi.mocked(planPhase).mockResolvedValue({
+      ...PLAN_OK,
+      slice: { plan: {} as SlicePlan, index: 1 },
+    });
+    const planReuse = fakeStore();
+    await runIssue(baseRequest(), basePolicy(), basePorts({ planReuse }));
+    expect(planReuse.record).not.toHaveBeenCalled();
+  });
+
+  it('does not record on a non-environment park', async () => {
+    vi.mocked(checkPhase).mockResolvedValue({ passed: false, summary: CHECK_SUMMARY, reworkRounds: 0 });
+    const planReuse = fakeStore();
+    await runIssue(baseRequest(), basePolicy(), basePorts({ planReuse }));
+    expect(planReuse.record).not.toHaveBeenCalled();
+  });
+
+  it('a pre-PLAN base-health release neither loads nor clears', async () => {
+    const planReuse = fakeStore();
+    const checkBaseHealth = vi.fn<NonNullable<RunPorts['checkBaseHealth']>>().mockResolvedValue({
+      kind: 'red',
+      baseSha: 'a'.repeat(40),
+      failingChecks: ['tests'],
+      cached: false,
+    });
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ planReuse, checkBaseHealth }));
+    expect(outcome.state).toBe('released');
+    expect(planReuse.load).not.toHaveBeenCalled();
+    expect(planReuse.clear).not.toHaveBeenCalled();
+  });
+
+  it.each(['load', 'clear', 'record'] as const)(
+    'a failing %s is a warning and never changes the outcome',
+    async (op) => {
+      vi.mocked(checkPhase).mockResolvedValue(ENV_FAIL);
+      const planReuse = fakeStore();
+      planReuse[op].mockRejectedValue(new Error('disk'));
+      const log = vi.fn();
+      const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ planReuse, events: () => log }));
+      expect(outcome.state).toBe('released');
+      expect(planPhase).toHaveBeenCalledTimes(1);
+      expect(kinds(log)).toContain('environment_warning');
+    },
+  );
+
+  describe('with a real store', () => {
+    let dir: string;
+    beforeEach(async () => {
+      dir = await mkdtemp(join(tmpdir(), 'plan-reuse-'));
+    });
+    afterEach(() => rm(dir, { recursive: true, force: true }));
+
+    it('reuses on an unchanged brief and re-plans after an edit', async () => {
+      const specPath = join(dir, 'issue-1.md');
+      vi.mocked(planPhase).mockImplementation(async () => {
+        await writeSpec(specPath, { body: '# spec', data: { route: 'codex' } });
+        return { ...PLAN_OK, specPath };
+      });
+      vi.mocked(checkPhase).mockResolvedValue(ENV_FAIL);
+      const planReuse = createPlanReuseStore(specPath);
+      const go = (brief: string) =>
+        runIssue(baseRequest({ specPath, work: { ...WORK, brief } }), basePolicy(), basePorts({ planReuse }));
+
+      expect((await go('body')).state).toBe('released');
+      expect(planPhase).toHaveBeenCalledTimes(1);
+      expect((await go('body')).state).toBe('released');
+      expect(planPhase).toHaveBeenCalledTimes(1);
+      expect((await go('body edited')).state).toBe('released');
+      expect(planPhase).toHaveBeenCalledTimes(2);
     });
   });
 });

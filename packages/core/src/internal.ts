@@ -213,8 +213,19 @@ export { defaultTranscriptRoots, priceFor, TRAILING_WINDOW_MS } from './usage/in
 export { readClaudeAccessToken } from './usage/subscription.js';
 
 // Utils
-export type { CiOutcome, WatchChecksOptions } from './utils/ci-watch.js';
-export { watchChecks, isPassingConclusion } from './utils/ci-watch.js';
+export type {
+  CiFailureClass,
+  CiJobLike,
+  CiJobStepLike,
+  CiOutcome,
+  CiRerunBudget,
+  CiRescue,
+  CiRescueFailure,
+  InfraRerunOutcome,
+  InfraRerunWatchOptions,
+  WatchChecksOptions,
+} from './utils/ci-watch.js';
+export { classifyCiFailure, watchChecks, watchChecksWithInfraRerun, isPassingConclusion } from './utils/ci-watch.js';
 export type { CommandResult, RunCommandOptions } from './utils/command-runner.js';
 export { describeCommandFailure, runCommand } from './utils/command-runner.js';
 export type { CoverageMetrics, RatchetCheckResult, RatchetDrift } from './utils/coverage-ratchet.js';
@@ -680,6 +691,8 @@ export { buildReadinessGapPrompt, parseReadinessGapOutput } from './readiness/en
 // Persisted per-issue run state (#972, #2271)
 export type { IssueRunState, RunStatus } from './types/index.js';
 export { readIssueRunState } from './run/state.js';
+export { createPlanReuseStore, issueBodyHash, planReusePath } from './run/resume-context.js';
+export type { PlanReuseRecord, PlanReuseStore } from './run/resume-context.js';
 
 // Pre-PLAN base health (#2339)
 export { BASE_HEALTH_CHECKERS, checkBaseHealth } from './checkers/base-health.js';

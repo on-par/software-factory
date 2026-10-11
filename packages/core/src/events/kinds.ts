@@ -32,6 +32,9 @@ export type EventKind =
   | 'checker_completed'
   | 'checker_started'
   | 'ci-failed'
+  | 'ci-infra'
+  | 'ci-rescued'
+  | 'ci-rescue-failed'
   | 'conflict'
   | 'constitution'
   | 'decompose_comment_posted'
@@ -107,6 +110,7 @@ export type EventKind =
   | 'phase_started'
   | 'plan'
   | 'plan_approval_granted'
+  | 'plan_reused'
   | 'plan_approval_requested'
   | 'plan_redirect'
   | 'plan_rejected'
@@ -258,7 +262,13 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   check: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
   checker_completed: { severity: 'info', isPark: false, isTerminal: false },
   checker_started: { severity: 'info', isPark: false, isTerminal: false },
+  // An infra-classified CI failure was rerun once and the re-watch went green (#2365). Not a park.
+  'ci-rescued': { severity: 'info', isPark: false, isTerminal: false },
   'ci-failed': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
+  // A PR whose one infra rerun also failed for infra on the same SHA (#2366). Parks; not an ADR-0155 steward trigger.
+  'ci-infra': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
+  // The one-shot infra rerun (#2365) did not go green (#2366). Not a park.
+  'ci-rescue-failed': { severity: 'warn', isPark: false, isTerminal: false },
   conflict: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   constitution: { severity: 'info', isPark: false, isTerminal: false },
   decompose_comment_posted: { severity: 'info', isPark: false, isTerminal: false },
@@ -345,6 +355,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   phase_started: { severity: 'info', isPark: false, isTerminal: false },
   plan: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
   plan_approval_granted: { severity: 'info', isPark: false, isTerminal: false },
+  plan_reused: { severity: 'info', isPark: false, isTerminal: false },
   plan_approval_requested: { severity: 'info', isPark: false, isTerminal: false },
   plan_redirect: { severity: 'info', isPark: false, isTerminal: false },
   plan_rejected: { severity: 'info', isPark: false, isTerminal: false },

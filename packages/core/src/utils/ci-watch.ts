@@ -1,5 +1,6 @@
 // src/utils/ci-watch.ts — shared CI watcher with exponential backoff
 import type { Octokit } from '@octokit/rest';
+import { runCommand } from './command-runner.js';
 
 /** watchChecks reports exactly one of three outcomes: 'success' (every check run passed and the
  *  set was final — see `settleMs` / `minChecks`), 'failure' (a completed check run reported a
@@ -44,13 +45,56 @@ export function isPassingConclusion(conclusion: string | null | undefined): bool
   return PASSING_CONCLUSIONS.has(conclusion ?? '');
 }
 
+/** Whether a failed CI job failed for infrastructure reasons ('infra') or any other reason
+ *  ('non-infra'), including real test failures. */
+export type CiFailureClass = 'infra' | 'non-infra';
+
+/** Structural subset of a GitHub Actions workflow-job step (actions.listJobsForWorkflowRun). */
+export interface CiJobStepLike {
+  status?: string | null;
+  started_at?: string | null;
+}
+
+/** Structural subset of a GitHub Actions workflow job — only the fields the classifier reads. */
+export interface CiJobLike {
+  conclusion?: string | null;
+  run_id?: number | null;
+  run_attempt?: number | null;
+  head_sha?: string | null;
+  runner_id?: number | null;
+  runner_name?: string | null;
+  steps?: CiJobStepLike[] | null;
+}
+
+function stepStarted(step: CiJobStepLike): boolean {
+  return step.status === 'in_progress' || step.status === 'completed' || !!step.started_at;
+}
+
+/** Classify a CI job as an infrastructure failure or not. Pure; rules run in order:
+ *  1. a passing conclusion is never infra;
+ *  2. no runner assigned (`runner_id` null/0 and no `runner_name`) is infra;
+ *  3. a present-but-empty `steps` array (zero steps ran) is infra;
+ *  4. a `cancelled` job whose steps never started is infra;
+ *  5. anything else is 'non-infra'.
+ *  Fails closed: missing (undefined) fields are unknown, never an infra signal, so a real test
+ *  failure is not mislabelled. */
+export function classifyCiFailure(job: CiJobLike): CiFailureClass {
+  if (isPassingConclusion(job.conclusion)) return 'non-infra';
+  if ((job.runner_id === null || job.runner_id === 0) && !job.runner_name) return 'infra';
+  if (Array.isArray(job.steps) && job.steps.length === 0) return 'infra';
+  if (job.conclusion === 'cancelled' && Array.isArray(job.steps) && job.steps.every((s) => !stepStarted(s))) {
+    return 'infra';
+  }
+  return 'non-infra';
+}
+
 const DEFAULT_PER_PAGE = 100;
 const DEFAULT_MAX_PAGES = 10;
 const DEFAULT_MAX_POLL_ERRORS = 3;
 const DEFAULT_SETTLE_MS = 30_000;
 const DEFAULT_MIN_CHECKS = 0;
 
-type CheckRunLike = { status?: string | null; conclusion?: string | null };
+type CheckRunLike = { id?: number; head_sha?: string | null; status?: string | null; conclusion?: string | null };
 
 async function listAllCheckRuns(
   octokit: Octokit,
@@ -125,4 +169,130 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
     interval = Math.min(interval * 2, maxIntervalMs);
   }
   return 'timeout';
+}
+
+/** One-shot rerun budget keyed by PR head SHA: a SHA in the set is never rerun again. */
+export type CiRerunBudget = Set<string>;
+
+export interface CiRescue {
+  headSha: string;
+  runIds: number[];
+}
+
+/** watchChecksWithInfraRerun's verdict: a CiOutcome, or 'infra-failure' when the one rerun
+ *  also failed and every failed run is still infra on the same head SHA (#2366). */
+export type InfraRerunOutcome = CiOutcome | 'infra-failure';
+
+export interface CiRescueFailure extends CiRescue {
+  outcome: Exclude<InfraRerunOutcome, 'success'>;
+}
+
+export interface InfraRerunWatchOptions extends WatchChecksOptions {
+  /** The watcher to wrap; default watchChecks. */
+  watch?: (opts: WatchChecksOptions) => Promise<CiOutcome>;
+  /** Runs the gh rerun argv; default runCommand. */
+  rerun?: (argv: readonly string[]) => Promise<{ ok: boolean }>;
+  /** Default: a module-level Set shared by every call in this process. */
+  rerunBudget?: CiRerunBudget;
+  /** Called once when the post-rerun watch is green. */
+  onRescued?: (rescue: CiRescue) => void;
+  /** Called once when a rerun was issued in this call and the final verdict is not success. */
+  onRescueFailed?: (failure: CiRescueFailure) => void;
+}
+
+const DEFAULT_RERUN_BUDGET: CiRerunBudget = new Set();
+
+/** Lists the failed check runs for a ref and fetches each Actions job. Returns null on any
+ *  non-infra job, missing numeric id, zero failed runs or missing head SHA. May throw. */
+async function infraFailedJobs(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  ref: string,
+  perPage: number,
+  maxPages: number,
+): Promise<{ headSha: string; jobs: CiJobLike[] } | null> {
+  const runs = await listAllCheckRuns(octokit, owner, repo, ref, perPage, maxPages);
+  const failed = runs.filter((r) => r.status === 'completed' && !isPassingConclusion(r.conclusion));
+  if (failed.length === 0) return null;
+  const jobs: CiJobLike[] = [];
+  for (const run of failed) {
+    if (typeof run.id !== 'number') return null;
+    const { data: job } = await octokit.rest.actions.getJobForWorkflowRun({ owner, repo, job_id: run.id });
+    if (classifyCiFailure(job) !== 'infra') return null;
+    jobs.push(job);
+  }
+  const headSha = failed[0].head_sha ?? jobs[0].head_sha;
+  if (!headSha) return null;
+  return { headSha, jobs };
+}
+
+/** watchChecks plus a one-shot rescue for infrastructure failures (#2365). When the watch ends
+ *  'failure' and every failed check run maps to an Actions job that classifyCiFailure calls
+ *  'infra', the failed jobs are rerun once (`gh run rerun <run> --failed`) and CI is watched
+ *  again. Budget: one rerun per head SHA (in-process Set) and never for a job already on
+ *  run_attempt > 1, so there is no second rerun and no loop. Fails closed: any non-infra job,
+ *  non-Actions check run, missing field or API error returns 'failure' unchanged. Never rejects.
+ *  When the re-watch also fails, the failed runs are classified again: all still infra on the
+ *  same head SHA returns 'infra-failure' (#2366), anything else 'failure'. onRescueFailed fires
+ *  once whenever a rerun budget was spent in this call and the final verdict is not success. */
+export async function watchChecksWithInfraRerun(opts: InfraRerunWatchOptions): Promise<InfraRerunOutcome> {
+  const {
+    watch = watchChecks,
+    rerun = runCommand,
+    rerunBudget = DEFAULT_RERUN_BUDGET,
+    onRescued,
+    onRescueFailed,
+    ...watchOpts
+  } = opts;
+  const {
+    octokit,
+    owner,
+    repo,
+    ref,
+    initialIntervalMs = 15_000,
+    perPage = DEFAULT_PER_PAGE,
+    maxPages = DEFAULT_MAX_PAGES,
+    sleep = (ms) => new Promise<void>((r) => setTimeout(r, ms)),
+  } = watchOpts;
+
+  const first = await watch(watchOpts);
+  if (first !== 'failure') return first;
+
+  let rescue: CiRescue | undefined;
+  let result: InfraRerunOutcome;
+  try {
+    const found = await infraFailedJobs(octokit, owner, repo, ref, perPage, maxPages);
+    if (!found) return 'failure';
+    const { headSha, jobs } = found;
+    if (rerunBudget.has(headSha) || jobs.some((j) => (j.run_attempt ?? 1) > 1)) return 'failure';
+    const runIds = [...new Set(jobs.map((j) => j.run_id).filter((id): id is number => typeof id === 'number'))];
+    if (runIds.length === 0) return 'failure';
+    rerunBudget.add(headSha);
+    rescue = { headSha, runIds };
+    result = 'failure';
+    let rerunOk = true;
+    for (const runId of runIds) {
+      const r = await rerun(['gh', 'run', 'rerun', String(runId), '--failed', '--repo', `${owner}/${repo}`]);
+      if (!r.ok) {
+        rerunOk = false;
+        break;
+      }
+    }
+    if (rerunOk) {
+      await sleep(initialIntervalMs);
+      result = await watch(watchOpts);
+      if (result === 'failure') {
+        const again = await infraFailedJobs(octokit, owner, repo, ref, perPage, maxPages);
+        if (again && again.headSha === headSha) result = 'infra-failure';
+      }
+    }
+  } catch {
+    result = 'failure';
+  }
+  if (rescue) {
+    if (result === 'success') onRescued?.(rescue);
+    else onRescueFailed?.({ ...rescue, outcome: result });
+  }
+  return result;
 }

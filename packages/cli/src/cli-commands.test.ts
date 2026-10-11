@@ -1369,6 +1369,60 @@ bash scripts/verify.sh
       });
     });
 
+    describe('update state (#2129)', () => {
+      let home: string;
+      beforeEach(() => {
+        home = mkdtempSync(join(tmpdir(), 'factory-update-home-'));
+        vi.stubEnv('HOME', home);
+      });
+      afterEach(() => {
+        vi.unstubAllEnvs();
+        rmSync(home, { recursive: true, force: true });
+      });
+      const writeState = (extra: Record<string, unknown> = {}): void => {
+        mkdirSync(join(home, '.factory'), { recursive: true });
+        writeFileSync(
+          join(home, '.factory', 'update-state.json'),
+          JSON.stringify({
+            schemaVersion: 1,
+            mode: 'stable',
+            channel: 'latest',
+            installKind: 'npm-global',
+            current: '0.9.0',
+            available: '0.9.1',
+            ...extra,
+          }),
+        );
+      };
+
+      it('status --json reports the factoryd update state from update-state.json (#2129)', async () => {
+        writeState();
+        await runMain('status', '--json');
+        expect(JSON.parse(logged()).update).toMatchObject({
+          mode: 'stable',
+          channel: 'latest',
+          installKind: 'npm-global',
+          current: '0.9.0',
+          available: '0.9.1',
+        });
+      });
+
+      it('status --json reports update null without a state file', async () => {
+        await runMain('status', '--json');
+        expect(JSON.parse(logged()).update).toBeNull();
+      });
+
+      it('status prints the last update result line (#2129)', async () => {
+        writeState({ lastResult: { at: '2026-10-01T00:00:00.000Z', version: '0.9.1', outcome: 'rolled-back' } });
+        await runMain('status');
+        const line = logged()
+          .split('\n')
+          .find((l) => l.includes('factory 0.9.0'));
+        expect(line).toContain('0.9.1');
+        expect(line).toContain('rolled back');
+      });
+    });
+
     describe('--json', () => {
       it('reports stop:true and nothing but JSON on stdout', async () => {
         writeFileSync(paths().stop, '');
@@ -2237,9 +2291,25 @@ bash scripts/verify.sh
       const firstRecord = JSON.parse(historyLines(readFileSync(paths().kpiHistory, 'utf-8'))[0]);
       expect(firstRecord.commitSha).toBe('deadbeef');
       expect(firstRecord.models).toEqual({});
+      expect(firstRecord).not.toHaveProperty('partial');
 
       await runMain('kpis');
       expect(historyLines(readFileSync(paths().kpiHistory, 'utf-8'))).toHaveLength(2);
+    });
+
+    it('a GitHub failure during reconstruction marks the snapshot partial and warns (#2342)', async () => {
+      writeFileSync(paths().events, JSON.stringify({ type: 'issue-title', issue: '1', msg: 'title' }));
+      writeFileSync(paths().costs, '');
+      h.octokit.rest.pulls.list = vi.fn(async () => {
+        throw new Error('rate limited');
+      });
+
+      await runMain('kpis');
+      expect(errored()).toContain('human-event reconstruction failed');
+      expect(errored()).toContain('rate limited');
+      expect(errored()).toContain('marked partial');
+      const record = JSON.parse(readFileSync(paths().kpiHistory, 'utf-8').trim().split('\n')[0]);
+      expect(record.partial).toBe(true);
     });
 
     it('still renders the report when the KPI snapshot fails (e.g. a malformed repo tier config)', async () => {
@@ -3769,6 +3839,50 @@ bash scripts/verify.sh
 
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('kpi-snapshot');
+    });
+
+    it('run: the post-run KPI snapshot counts an admin-merged PR reconstructed from GitHub (#2342)', async () => {
+      writeFileSync(paths().queue, 'app 1\n');
+      h.octokit.rest.pulls.list = vi.fn(async ({ state }: any) =>
+        state === 'all'
+          ? {
+              data: [
+                {
+                  number: 5,
+                  head: { ref: 'factory/1-fix-it' },
+                  state: 'closed',
+                  merged_at: new Date().toISOString(),
+                  closed_at: null,
+                },
+              ],
+            }
+          : { data: [] },
+      );
+      h.octokit.rest.pulls.listCommits = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.pulls.listReviews = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.pulls.get = vi.fn(async () => ({ data: { merged_by: { login: 'patrob' } } }));
+      const res = await runMain('run', '--local-queue');
+      expect(res.exited).toBe(false);
+
+      const record = JSON.parse(readFileSync(paths().kpiHistory, 'utf-8').trim().split('\n')[0]);
+      expect(record.mergeRate).toBeGreaterThan(0);
+      expect(record).not.toHaveProperty('partial');
+    });
+
+    it('run: a GitHub failure during the post-run reconstruction marks the snapshot partial (#2342)', async () => {
+      writeFileSync(paths().queue, 'app 1\n');
+      h.octokit.rest.pulls.list = vi.fn(async ({ state }: any) => {
+        if (state === 'all') throw new Error('boom');
+        return { data: [] };
+      });
+      const res = await runMain('run', '--local-queue');
+      expect(res.exited).toBe(false);
+
+      const record = JSON.parse(readFileSync(paths().kpiHistory, 'utf-8').trim().split('\n')[0]);
+      expect(record.partial).toBe(true);
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('kpi snapshot partial');
+      expect(events).toContain('run-done');
     });
 
     it('appends a second KPI snapshot on a second run', async () => {

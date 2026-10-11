@@ -30,6 +30,7 @@ Re-run it after moving or upgrading the CLI in place — the recorded paths go s
   `~/.factory/daemon.log`; `-f` keeps tailing.
 - `factory daemon stop` — unloads the agent (launchd stops relaunching). The plist
   stays on disk; `factory daemon start` re-enables it.
+- Updates, rollback and exit code 75: see [../ops/updating.md](../ops/updating.md).
 
 ## Incremental migration: daemon + cron coexistence
 
