@@ -37,6 +37,10 @@ describe('detectStuck', () => {
     expect(detectStuck({ state: 'parked', reason: 'ci-failed' })).toEqual({ trigger: 'ship-failed' });
   });
 
+  it('still triggers ship-failed for ci-failed with the same fields as a ci-infra park', () => {
+    expect(detectStuck({ state: 'parked', reason: 'ci-failed', prNumber: 5 })).toEqual({ trigger: 'ship-failed' });
+  });
+
   it('carries the failureSignature on ship-failed when present', () => {
     expect(detectStuck({ state: 'parked', reason: 'ci-failed', failureSignature: 'sig-ci' })).toEqual({
       trigger: 'ship-failed',
@@ -60,6 +64,7 @@ describe('detectStuck', () => {
     ],
     ['escalated', { state: 'escalated', reason: 'needs human' }],
     ['parked timeout', { state: 'parked', reason: 'timeout' }],
+    ['parked ci-infra', { state: 'parked', reason: 'ci-infra', prNumber: 5 }],
     ['parked conflict', { state: 'parked', reason: 'conflict' }],
     ['parked held', { state: 'parked', reason: 'held', reworkRounds: 3, failureSignature: 'sig' }],
     ['parked escalate', { state: 'parked', reason: 'escalate', reworkRounds: 3, failureSignature: 'sig' }],

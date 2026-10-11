@@ -14,9 +14,12 @@ export interface StuckDetection {
  *
  *  `check-exhausted` requires a `failureSignature` because only runIssue's CHECK-fail path
  *  attaches one. Budget parks (`assertBudget`) and ship-phase failures also park `fail` but
- *  carry none, and ADR-0155 excludes budget parks. */
+ *  carry none, and ADR-0155 excludes budget parks.
+ *  `ci-infra` parks are non-triggers: the change did not break CI. */
 export function detectStuck(outcome: RunOutcome, reworkBudget: number = MAX_REWORK_ROUNDS): StuckDetection | null {
   if (outcome.state !== 'parked') return null;
+  // ci-infra: the one infra rerun also failed for infra (#2366). Like an environment release, the change is not at fault.
+  if (outcome.reason === 'ci-infra') return null;
   const signature = outcome.failureSignature ? outcome.failureSignature : undefined;
   if (outcome.reason === 'ci-failed') {
     return signature ? { trigger: 'ship-failed', failureSignature: signature } : { trigger: 'ship-failed' };

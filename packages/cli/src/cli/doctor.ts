@@ -2,6 +2,7 @@
 
 import { resolve } from 'node:path';
 
+import { MIN_NODE_MAJOR } from '../node-version.js';
 import { CLAUDE_CODE_URL, GITHUB_TOKENS_URL } from './first-run.js';
 
 export interface DoctorCheck {
@@ -93,7 +94,7 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
           name: 'npm',
           ok: false,
           detail: 'not found on PATH',
-          fix: 'install Node.js >= 20 (which ships npm): https://nodejs.org',
+          fix: `install Node.js >= ${MIN_NODE_MAJOR} (which ships npm): https://nodejs.org`,
         },
   );
 

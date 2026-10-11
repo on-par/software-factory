@@ -266,6 +266,7 @@ const PUBLIC_API_KEYS = [
   'joinClassifierOutcomes',
   'KPI_DRIFT_THRESHOLD_RATIO',
   'KPI_DRIFT_WINDOW_SIZE',
+  'kpiBranchPrefixes',
   'kpisToHistoryRecord',
   'mergeClassifierOutcomes',
   'mergedPrRefs',
@@ -273,6 +274,7 @@ const PUBLIC_API_KEYS = [
   'summarizeClassifierOutcomes',
   'parseKpiHistory',
   'reconstructHumanEvents',
+  'reconstructKpiEvents',
   'renderKpiDriftLine',
   'renderKpiReport',
   'renderKpiTrend',
@@ -325,8 +327,14 @@ const PUBLIC_API_KEYS = [
 ];
 
 const INTERNAL_API_KEYS = [
+  // Pre-PLAN base health (#2339)
+  'BASE_HEALTH_CHECKERS',
+  'checkBaseHealth',
   // Persisted per-issue run state (#2271)
   'readIssueRunState',
+  'createPlanReuseStore',
+  'issueBodyHash',
+  'planReusePath',
   // Garden harvest (#2083)
   'DEFAULT_GARDEN_MAX_CLUSTERS',
   'DEFAULT_GARDEN_SINCE',
@@ -640,7 +648,9 @@ const INTERNAL_API_KEYS = [
   'startEgressProxy',
   'egressSummaryMessage',
   'shouldProxyEgress',
+  'classifyCiFailure',
   'watchChecks',
+  'watchChecksWithInfraRerun',
   'isPassingConclusion',
   'describeCommandFailure',
   'runCommand',
@@ -779,6 +789,7 @@ const KPIS_API_KEYS = [
   'joinClassifierOutcomes',
   'KPI_DRIFT_THRESHOLD_RATIO',
   'KPI_DRIFT_WINDOW_SIZE',
+  'kpiBranchPrefixes',
   'kpisToHistoryRecord',
   'mergeClassifierOutcomes',
   'mergedPrRefs',
@@ -786,6 +797,7 @@ const KPIS_API_KEYS = [
   'summarizeClassifierOutcomes',
   'parseKpiHistory',
   'reconstructHumanEvents',
+  'reconstructKpiEvents',
   'renderKpiDriftLine',
   'renderKpiReport',
   'renderKpiTrend',

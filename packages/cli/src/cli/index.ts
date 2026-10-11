@@ -15,7 +15,7 @@ import {
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { arch, hostname as osHostname, release, platform, userInfo } from 'node:os';
-import { basename, dirname, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { promisify, styleText } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
@@ -27,12 +27,14 @@ import type {
   EnvironmentProxySettings,
   EventKind,
   FactoryConfig,
+  FactoryEvent,
   FailoverReason,
   FailurePhase,
   GithubIssueParams,
   HealthKpis,
   IngestSettings,
   KpiHistoryRecord,
+  KpiReconstruction,
   LaneProxy,
   LeaseHealth,
   LocalBriefParams,
@@ -103,6 +105,7 @@ import {
   inspectPortLeases,
   isCommandAvailable,
   isProxyRunning,
+  kpiBranchPrefixes,
   kpisToHistoryRecord,
   laneBaseUrl,
   laneEnv,
@@ -137,7 +140,7 @@ import {
   readUsage,
   reapOrphanProcesses,
   reapStalePortLeases,
-  reconstructHumanEvents,
+  reconstructKpiEvents,
   recordLeasePgid,
   releasePortLease,
   renderKpiReport,
@@ -188,6 +191,7 @@ import {
 } from '@on-par/factory-core';
 import type {
   CiOutcome,
+  InfraRerunOutcome,
   EnqueueResult,
   GardenCluster,
   GithubQueue,
@@ -209,6 +213,8 @@ import type {
 } from '@on-par/factory-core/internal';
 import {
   acquirePidFile,
+  createPlanReuseStore,
+  checkBaseHealth,
   currentSlice,
   egressSummaryMessage,
   findSlicePlanComment,
@@ -251,6 +257,7 @@ import {
   createOctokitQueueClient,
   daemonRuntimePaths,
   DEFAULT_FACTORYD_PORT,
+  defaultRegistryPath,
   ensureDir,
   FACTORY_RUNTIME_CONFIG_KEYS,
   findUnmergedGreenPrs,
@@ -288,6 +295,7 @@ import {
   startEgressProxy,
   sweepWorktrees,
   watchChecks,
+  watchChecksWithInfraRerun,
   withAdmissionGuard,
   withFileLock,
   withGitLock,
@@ -312,6 +320,15 @@ import { runUnpark, UnparkError, type UnparkJson } from './unpark.js';
 import { buildRunsJson, parseRunsLimit } from './runs.js';
 import { buildRunDiffstatJson, NoRunError, parseDiffstatIssue, type RunDiffstatJson } from './runs-diffstat.js';
 import { buildStatusJson } from './status-json.js';
+import {
+  buildStatusUpdateJson,
+  formatUpdateStartupLine,
+  formatUpdateStatusLine,
+  initialUpdateState,
+  readUpdateState,
+  updateStatePath,
+  writeUpdateState,
+} from './update-state.js';
 import { buildStopResumeJson } from './stop-resume-json.js';
 import { buildUsageJson } from './usage-json.js';
 import { parseResetIssues, runReset } from './reset.js';
@@ -320,12 +337,18 @@ import {
   cmdDaemonStart,
   cmdDaemonStatus,
   cmdDaemonStop,
+  createAutoUpdateDeps,
   DaemonCtlError,
+  detectInstall,
+  loadDaemonFileConfig,
+  recoverStaleDrain,
   resolveFactorydConfig,
+  runAutoUpdateLoop,
   type DaemonCtlDeps,
   type FactorydConfig,
 } from './daemon.js';
 import { cmdRunnerInstall, cmdRunnerList, cmdRunnerUninstall } from './runner.js';
+import { checkForUpdate, cmdSelfUpdateCheck, type SelfUpdateDeps } from './self-update.js';
 import {
   analyzeEventLog,
   type ClaudeAuthProbe,
@@ -1321,14 +1344,38 @@ function readTextFileOrEmpty(path: string): string {
   }
 }
 
+/** Local events plus human-* events reconstructed from GitHub; warns and marks the result partial when the fetch fails (#2342). */
+async function reconstructHumanEventsForKpis(
+  events: FactoryEvent[],
+  branchPrefix: string,
+): Promise<KpiReconstruction & { owner: string; repoName: string }> {
+  let owner = '';
+  let repoName = '';
+  const recon = await reconstructKpiEvents(events, async (issues) => {
+    [owner, repoName] = (await getGitHubRepo()).split('/');
+    return fetchHumanEventSources(getOctokit(), owner, repoName, issues, kpiBranchPrefixes(branchPrefix));
+  });
+  if (recon.partial) {
+    console.error(
+      styleText(
+        'yellow',
+        `factory: GitHub human-event reconstruction failed (${recon.error}) — KPI snapshot marked partial (local log only)`,
+      ),
+    );
+  }
+  return { ...recon, owner, repoName };
+}
+
 async function appendKpiSnapshot(
   paths: ReturnType<typeof getFactoryPaths>,
   repoRoot: string,
   kpis: HealthKpis,
+  opts: { partial?: boolean } = {},
 ): Promise<{ record: KpiHistoryRecord; history: KpiHistoryRecord[] }> {
   const record = kpisToHistoryRecord(kpis, new Date().toISOString().slice(0, 10), {
     commitSha: await currentCommitSha(),
     models: resolvedModelTiers(repoRoot, paths.root),
+    partial: opts.partial,
   });
   const updated = appendKpiHistoryLine(readTextFileOrEmpty(paths.kpiHistory), record);
   ensureDir(paths.state);
@@ -1476,24 +1523,10 @@ async function cmdKpis(opts: { branchPrefix?: string } = {}) {
   const events = existsSync(paths.events) ? readEvents(paths.events) : [];
   const costs = existsSync(paths.costs) ? internalOps.readCosts(paths.costs) : [];
 
-  let allEvents = events;
-  let prSources: PrSource[] = [];
-  let owner = '';
-  let repoName = '';
-  try {
-    const ghRepo = await getGitHubRepo();
-    [owner, repoName] = ghRepo.split('/');
-    const issues = new Set(events.map((e) => e.issue).filter((i) => /^\d+$/.test(i)));
-    prSources = await fetchHumanEventSources(getOctokit(), owner, repoName, issues, branchPrefix);
-    allEvents = [...events, ...reconstructHumanEvents(prSources, events)];
-  } catch (err: any) {
-    console.error(
-      styleText(
-        'yellow',
-        `factory: GitHub human-event reconstruction unavailable (${err?.message ?? err}) — KPIs use the local log only`,
-      ),
-    );
-  }
+  const recon = await reconstructHumanEventsForKpis(events, branchPrefix);
+  let allEvents = recon.events;
+  const prSources = recon.sources;
+  const { owner, repoName } = recon;
 
   if (prSources.length > 0) {
     try {
@@ -1521,7 +1554,7 @@ async function cmdKpis(opts: { branchPrefix?: string } = {}) {
 
   let history: KpiHistoryRecord[];
   try {
-    ({ history } = await appendKpiSnapshot(paths, repoRoot, kpis));
+    ({ history } = await appendKpiSnapshot(paths, repoRoot, kpis, { partial: recon.partial }));
   } catch (err: any) {
     console.error(
       styleText(
@@ -1671,6 +1704,7 @@ export async function cmdStatus(opts: { kpis?: boolean; json?: boolean } = {}) {
           stop: existsSync(paths.stop),
           breakers: await new ProviderBreaker(paths.breaker).list(),
           active,
+          update: buildStatusUpdateJson(readUpdateState(updateStatePath(daemonRuntimePaths().dir))),
           now: Date.now(),
         }),
       ),
@@ -1757,6 +1791,8 @@ export async function cmdStatus(opts: { kpis?: boolean; json?: boolean } = {}) {
   }
 
   console.log(styleText('bold', '\n== Health =='));
+  const update = buildStatusUpdateJson(readUpdateState(updateStatePath(daemonRuntimePaths().dir)));
+  console.log(`  ${formatUpdateStatusLine(update)}`);
 
   if (opts.kpis) {
     console.log(styleText('bold', '\n  Effective config:'));
@@ -2123,6 +2159,7 @@ export async function shipIssue(
     | 'buildPhase'
     | 'checkPhase'
     | 'shipPhase'
+    | 'checkBaseHealth'
     | ConfigLoaderKey
     | GitOpKey
     | ShellOpKey
@@ -2238,6 +2275,7 @@ export async function shipIssue(
     'held',
     'conflict',
     'ci-failed',
+    'ci-infra',
     'timeout',
   ]);
   let terminalMessage: string | undefined;
@@ -2438,10 +2476,12 @@ export async function shipIssue(
     resolveBaseUrl,
     getIssueSpend: () => issueSpend,
     breaker,
+    planReuse: ctx?.localOnly ? undefined : createPlanReuseStore(specPath),
     planPhase: phases.planPhase,
     buildPhase: phases.buildPhase,
     checkPhase: phases.checkPhase,
     shipPhase: phases.shipPhase,
+    checkBaseHealth: deps.checkBaseHealth ?? checkBaseHealth,
     resolveConstitution: () =>
       // Resolved once here — runIssue calls this exactly once and reuses the value for
       // every phase, so the build worker can never author the standards it is graded by.
@@ -4035,10 +4075,17 @@ async function cmdProxy() {
  *  next to the registry file — daemon.pid single-instance guard, daemon.port
  *  bound-address record, daemon.log append sink (#1177). `factory daemon
  *  start|stop|status|logs` wrap this process in a launchd LaunchAgent (#1179). */
-async function cmdFactoryd(opts: { port?: string; registry?: string; autoUpdate?: boolean }): Promise<void> {
+async function cmdFactoryd(opts: {
+  port?: string;
+  registry?: string;
+  updateMode?: string;
+  autoUpdate?: boolean;
+}): Promise<void> {
   let config: FactorydConfig;
   try {
-    config = resolveFactorydConfig(opts);
+    const registryFile = opts.registry ?? defaultRegistryPath();
+    const fileConfig = loadDaemonFileConfig(join(dirname(registryFile), 'daemon.json'));
+    config = resolveFactorydConfig({ ...opts, registry: registryFile }, { install: detectInstall(), fileConfig });
   } catch (err) {
     if (err instanceof DaemonCtlError) throw new CliExitError(err.message, err.code);
     throw err;
@@ -4059,6 +4106,26 @@ async function cmdFactoryd(opts: { port?: string; registry?: string; autoUpdate?
     logSink(line);
   };
   if (acquired.stalePid !== null) log(`removed stale pid file (pid ${acquired.stalePid})`);
+  for (const notice of config.notices) log(notice);
+  const updateFile = updateStatePath(runtime.dir);
+  const previousUpdate = readUpdateState(updateFile);
+  for (const stop of recoverStaleDrain(previousUpdate, (file) => {
+    try {
+      unlinkSync(file);
+      return true;
+    } catch {
+      return false;
+    }
+  })) {
+    log(`update: removed stale STOP ${stop}`);
+  }
+  const updateState = initialUpdateState(config, previousUpdate);
+  try {
+    writeUpdateState(updateFile, updateState);
+  } catch (err) {
+    log(`could not write ${updateFile}: ${errorDetail(err)}`);
+  }
+  log(formatUpdateStartupLine(updateState));
 
   const runRuntime = await createRunRuntime({
     registryFile,
@@ -4071,6 +4138,8 @@ async function cmdFactoryd(opts: { port?: string; registry?: string; autoUpdate?
   const banner = [
     `factoryd: listening on 127.0.0.1:${boundPort}`,
     `  registry: ${registryFile}`,
+    `  update mode: ${config.autoUpdate.mode} (channel ${config.autoUpdate.channel ?? 'none'}, install ${config.install.kind})`,
+    `  update state: ${updateFile}`,
     `  pid file: ${runtime.pidFile} (pid ${process.pid})`,
     `  port file: ${runtime.portFile}`,
     `  log file: ${runtime.logFile}`,
@@ -4081,8 +4150,26 @@ async function cmdFactoryd(opts: { port?: string; registry?: string; autoUpdate?
   for (const line of banner.slice(1)) console.log(line);
   for (const line of banner) logSink(line);
 
+  let shuttingDown = false;
+  void runAutoUpdateLoop(config, {
+    ...createAutoUpdateDeps({
+      registryFile,
+      stateFile: updateFile,
+      cliEntrypoint: fileURLToPath(new URL('../cli.js', import.meta.url)),
+      check: () => checkForUpdate(config.autoUpdate.mode === 'prerelease' ? 'prerelease' : 'stable'),
+      runRuntime,
+      log,
+      exit: async (code) => {
+        await daemon.stop().catch(() => {});
+        await releaseRuntimeFiles(runtime);
+        process.exit(code);
+      },
+    }),
+    stopped: () => shuttingDown,
+  });
   await new Promise<void>((resolveShutdown) => {
     const shutdown = () => {
+      shuttingDown = true;
       void daemon
         .stop()
         .catch(() => {})
@@ -4307,8 +4394,17 @@ async function cmdRun(
       try {
         const events = existsSync(paths.events) ? readEvents(paths.events) : [];
         const costs = existsSync(paths.costs) ? internalOps.readCosts(paths.costs) : [];
-        const kpis = computeHealthKpis(events, costs);
-        await appendKpiSnapshot(paths, repoRoot, kpis);
+        const recon = await reconstructHumanEventsForKpis(events, branchPrefix);
+        const kpis = computeHealthKpis(recon.events, costs);
+        await appendKpiSnapshot(paths, repoRoot, kpis, { partial: recon.partial });
+        if (recon.partial) {
+          logEvent(
+            paths.events,
+            'warn',
+            'all',
+            `kpi snapshot partial: GitHub human-event reconstruction failed: ${recon.error}`,
+          );
+        }
         logEvent(paths.events, 'kpi-snapshot', 'all', `KPI snapshot appended to ${paths.kpiHistory}`);
       } catch (err: any) {
         logEvent(paths.events, 'warn', 'all', `kpi snapshot failed: ${err.message}`);
@@ -5144,6 +5240,13 @@ export class CiFailedError extends Error {
  *  exactly like "we know it's red": never merge. */
 export class CiUnverifiedError extends CiFailedError {}
 
+/** Thrown when the one infra rerun (#2365) also failed for infrastructure reasons on the same head SHA (#2366).
+ *  A CiFailedError subclass so every guard still leaves the PR open and unmerged, but it parks as
+ *  'ci-infra', which the ADR-0155 steward skips. */
+export class CiInfraError extends CiFailedError {
+  override readonly parkReason: ParkReason = 'ci-infra';
+}
+
 const MAX_MERGE_ATTEMPTS = 5;
 const MERGE_RETRY_BASE_MS = 5_000;
 
@@ -5251,6 +5354,7 @@ export async function landOpenPullRequest(opts: {
   skipCI?: boolean;
   adminMerge?: boolean;
   watch?: (opts: WatchChecksOptions) => Promise<CiOutcome>;
+  rerun?: (argv: readonly string[]) => Promise<{ ok: boolean }>;
   withLock?: LandLock;
   /** Materializes an adopted branch only after its locked state re-read confirms it needs rebasing. */
   ensureWorktree?: () => Promise<void>;
@@ -5270,6 +5374,7 @@ export async function landOpenPullRequest(opts: {
     skipCI = false,
     adminMerge = process.env.FACTORY_MERGE_ADMIN === '1',
     watch = internalOps.watchChecks,
+    rerun,
     withLock = (fn) => fn(),
     ensureWorktree,
   } = opts;
@@ -5278,17 +5383,39 @@ export async function landOpenPullRequest(opts: {
    *  merge can be pinned to exactly the commit CI verified. */
   const watchCi = async (): Promise<string> => {
     let headSha: string;
-    let outcome: CiOutcome;
+    let outcome: InfraRerunOutcome;
     try {
       const { data: pr } = await octokit.rest.pulls.get({ owner, repo: repoName, pull_number: prNumber });
       headSha = pr.head.sha;
-      outcome = await watch({ octokit, owner, repo: repoName, ref: headSha });
+      outcome = await watchChecksWithInfraRerun({
+        octokit,
+        owner,
+        repo: repoName,
+        ref: headSha,
+        watch,
+        rerun,
+        onRescued: ({ runIds }) =>
+          log(
+            'ci-rescued',
+            `CI rescued for PR #${prNumber} on ${branch}: reran infra-failed run(s) ${runIds.join(', ')} once and the re-watch is green`,
+          ),
+        onRescueFailed: ({ runIds, outcome: failedOutcome }) =>
+          log(
+            'ci-rescue-failed',
+            `CI rescue failed for PR #${prNumber} on ${branch}: reran infra-failed run(s) ${runIds.join(', ')} once and the re-watch ended ${failedOutcome}`,
+          ),
+      });
     } catch (err) {
       const msg = `CI watch for ${branch} failed: ${errorDetail(err)} — refusing to merge without a green verdict`;
       log('ci-failed', msg);
       throw new CiUnverifiedError(msg, prNumber);
     }
     if (outcome === 'success') return headSha;
+    if (outcome === 'infra-failure') {
+      const msg = `CI failed again for infrastructure reasons for PR #${prNumber} on ${branch} after one rerun — parked as ci-infra, not merged`;
+      log('ci-infra', msg);
+      throw new CiInfraError(msg, prNumber);
+    }
     if (outcome === 'failure') {
       const msg = `CI failed for PR #${prNumber} on ${branch} — refusing to merge with a failing check`;
       log('ci-failed', msg);
@@ -6023,6 +6150,8 @@ export interface CliDeps {
   execSync?: ShellExecSync;
   /** Passed to the `factory daemon start|stop|status|logs` wrappers. */
   daemon?: DaemonCtlDeps;
+  /** Passed to `factory self-update --check` (registry fetch, install detection, stdout). */
+  selfUpdate?: SelfUpdateDeps;
   /** Replaces the TUI entry point used by `factory tui`. */
   runTui?: typeof runTui;
   /** Builds the GitHub client for every CLI GitHub call (shipIssue, land, queue, triage, …). Defaults to createFactoryOctokit with the resolved token. */
@@ -6032,6 +6161,8 @@ export interface CliDeps {
   buildPhase?: RunPorts['buildPhase'];
   checkPhase?: RunPorts['checkPhase'];
   shipPhase?: RunPorts['shipPhase'];
+  /** Pre-PLAN base health check (#2339) forwarded into RunPorts by shipIssue. Defaults to the factory-core checkBaseHealth. */
+  checkBaseHealth?: RunPorts['checkBaseHealth'];
   /** Config loaders and resolvers. Each defaults to the factory-core export of the same name. */
   loadModelsConfig?: typeof loadModelsConfig;
   loadRoutesConfig?: typeof loadRoutesConfig;
@@ -6247,7 +6378,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('--kpis', 'Also show the full health KPIs and the effective config')
     .option(
       '--json',
-      'Print one JSON object (schemaVersion 1): repo, product, stop, breaker, active claims; --kpis is ignored',
+      'Print one JSON object (schemaVersion 1): repo, product, stop, breaker, active claims, update; --kpis is ignored',
     )
     .action((opts: { kpis?: boolean; json?: boolean }) => cmdStatus(opts));
 
@@ -6663,9 +6794,15 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .description('Run factoryd in the foreground: a localhost-only HTTP API over the repo registry')
     .option('--port <n>', `Port to bind on 127.0.0.1 (default ${DEFAULT_FACTORYD_PORT})`)
     .option('--registry <file>', 'Registry file to serve (default ~/.factory/registry.json)')
-    .option('--auto-update', 'Opt in to automatic factoryd self-update (default: off)')
-    .action((opts: { port?: string; registry?: string; autoUpdate?: boolean }) => cmdFactoryd(opts));
-  const daemonCtl = (fn: () => Promise<void>) =>
+    .option(
+      '--update-mode <mode>',
+      'Self-update channel: manual, stable (npm latest) or prerelease (npm next) (default: stable on npm installs, manual otherwise)',
+    )
+    .option('--auto-update', 'Deprecated: same as --update-mode stable')
+    .action((opts: { port?: string; registry?: string; updateMode?: string; autoUpdate?: boolean }) =>
+      cmdFactoryd(opts),
+    );
+  const daemonCtl = <T>(fn: () => Promise<T>) =>
     fn().catch((err: unknown) => {
       if (err instanceof DaemonCtlError) throw new CliExitError(err.message, err.code);
       throw err;
@@ -6717,6 +6854,17 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .description('List runners installed by `factory daemon runner install`')
     .option('--json', 'Print one JSON object (schemaVersion 1) instead of text')
     .action((opts: { json?: boolean }) => daemonCtl(() => cmdRunnerList(opts, deps.daemon)));
+
+  program
+    .command('self-update')
+    .description('Check npm for a newer factory release (read-only; nothing is installed)')
+    .option('--check', 'Compare the running version with the npm dist-tag (required)')
+    .option('--json', 'Print one JSON object instead of text')
+    .option('--update-mode <mode>', 'Channel to check: stable (npm latest, default) or prerelease (npm next)')
+    .action(async (opts: { check?: boolean; json?: boolean; updateMode?: string }) => {
+      if (opts.check !== true) throw new CliExitError('factory self-update: only --check is supported', 2);
+      process.exitCode = await daemonCtl(() => cmdSelfUpdateCheck(opts, deps.selfUpdate));
+    });
 
   const worktreeCmd = program.command('worktree').description('Clean up stale factory worktrees (gc)');
   worktreeCmd

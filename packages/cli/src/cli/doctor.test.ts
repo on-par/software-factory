@@ -158,6 +158,14 @@ describe('runDoctorChecks', () => {
     expect(doctorFailed(checks)).toBe(false);
   });
 
+  it('npm missing gives the Node.js >= 24 fix', () => {
+    const checks = runDoctorChecks(probes({ commandAvailable: (cmd) => cmd !== 'npm' }));
+    const npm = checks.find((c) => c.name === 'npm')!;
+    expect(npm.ok).toBe(false);
+    expect(npm.fix).toContain('Node.js >= 24');
+    expect(npm.fix).not.toContain('20');
+  });
+
   it('codex missing is an optional failure only', () => {
     const checks = runDoctorChecks(probes({ commandAvailable: (cmd) => cmd !== 'codex' }));
     const codex = checks.find((c) => c.name === 'codex sandbox')!;

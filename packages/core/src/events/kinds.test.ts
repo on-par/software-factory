@@ -34,6 +34,22 @@ describe('EVENT_TRAITS', () => {
     expect(EVENT_TRAITS['base-hold-cleared']).toEqual({ severity: 'info', isPark: false, isTerminal: false });
   });
 
+  it('classifies ci-rescued as non-park info (#2365)', () => {
+    expect(EVENT_TRAITS['ci-rescued']).toEqual({ severity: 'info', isPark: false, isTerminal: false });
+  });
+
+  it('classifies ci-infra as a failed park and ci-rescue-failed as a non-park warning (#2366)', () => {
+    expect(EVENT_TRAITS['ci-infra']).toEqual({
+      severity: 'error',
+      isPark: true,
+      isTerminal: true,
+      laneStatus: 'failed',
+    });
+    expect(EVENT_TRAITS['ci-rescue-failed']).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
+    expect(isParkKind('ci-infra')).toBe(true);
+    expect(isParkKind('ci-rescue-failed')).toBe(false);
+  });
+
   it('classifies flaky_tests as non-park evidence (#2302)', () => {
     expect(EVENT_TRAITS.flaky_tests).toEqual({ severity: 'info', isPark: false, isTerminal: false });
   });

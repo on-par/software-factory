@@ -12,18 +12,32 @@ import {
   readFileSync,
   readSync,
   realpathSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, join, sep } from 'node:path';
 
 import {
   DEFAULT_FACTORYD_PORT,
   defaultRegistryPath,
   listRepos,
   loadRegistry,
+  readRunLockHolder,
   type RepoState,
+  type RunRuntime,
 } from '@on-par/factory-core/internal';
+import { defaultIsPidAlive, getFactoryPaths } from '@on-par/factory-core';
+
+import {
+  initialUpdateState,
+  readUpdateState,
+  recordUpdateCheck,
+  writeUpdateState,
+  type UpdateLastResult,
+  type UpdateState,
+} from './update-state.js';
 
 export const FACTORYD_LABEL = 'com.onpar.factoryd';
 
@@ -76,28 +90,165 @@ export function factorydFiles(home: string): { launchAgentsDir: string; plistPat
   };
 }
 
+export const UPDATE_MODES = ['manual', 'stable', 'prerelease'] as const;
+export type UpdateMode = (typeof UPDATE_MODES)[number];
+export type UpdateChannel = 'latest' | 'next';
+
+/** The single mode → npm dist-tag mapping (#2246). */
+export function updateChannel(mode: UpdateMode): UpdateChannel | null {
+  switch (mode) {
+    case 'stable':
+      return 'latest';
+    case 'prerelease':
+      return 'next';
+    case 'manual':
+      return null;
+  }
+}
+
+/** Exact, case-sensitive parse of an update mode. Throws DaemonCtlError (code 2). */
+export function parseUpdateMode(value: string, source: string): UpdateMode {
+  if ((UPDATE_MODES as readonly string[]).includes(value)) return value as UpdateMode;
+  throw new DaemonCtlError(`invalid ${source} "${value}" — expected one of ${UPDATE_MODES.join(', ')}`, 2);
+}
+
+export type InstallKind = 'npm-global' | 'source' | 'unknown';
+export interface InstallInfo {
+  kind: InstallKind;
+  prefix: string;
+  version: string;
+}
+export interface DetectInstallDeps {
+  execPath?: string;
+  cliPath?: string;
+  env?: NodeJS.ProcessEnv;
+  version?: string;
+  exists?: (p: string) => boolean;
+}
+
+function defaultCliPath(): string {
+  try {
+    return realpathSync(process.argv[1] ?? '');
+  } catch {
+    return '';
+  }
+}
+
+/** Classifies the running cli.js as npm-global, source or unknown (#2246). Pure
+ *  apart from the injectable fs probe; never spawns npm or git. */
+export function detectInstall(deps: DetectInstallDeps = {}): InstallInfo {
+  const execPath = deps.execPath ?? process.execPath;
+  const cliPath = deps.cliPath ?? defaultCliPath();
+  const env = deps.env ?? process.env;
+  const version = deps.version ?? (createRequire(import.meta.url)('../../package.json') as { version: string }).version;
+  const exists = deps.exists ?? existsSync;
+  const prefix = dirname(dirname(execPath));
+  const info = (kind: InstallKind): InstallInfo => ({ kind, prefix, version });
+  if (env.FACTORY_FROM_SOURCE === '1') return info('source');
+  const pkgDir = join(prefix, 'lib', 'node_modules', '@on-par', 'factory-cli');
+  if (cliPath.startsWith(pkgDir + sep)) return info('npm-global');
+  if (cliPath !== '') {
+    let dir = dirname(cliPath);
+    for (;;) {
+      if (exists(join(dir, '.git'))) return info('source');
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  return info('unknown');
+}
+
+/** Optional daemon-scoped config file (<registry dir>/daemon.json). */
+export interface DaemonFileConfig {
+  autoUpdate?: { mode?: string; checkIntervalMinutes?: unknown; drainTimeoutMinutes?: unknown };
+}
+
+/** Reads daemon.json. A missing file is `{}`; malformed structure throws DaemonCtlError (code 2). */
+export function loadDaemonFileConfig(file: string): DaemonFileConfig {
+  if (!existsSync(file)) return {};
+  const fail = (reason: string) => new DaemonCtlError(`invalid daemon config ${file}: ${reason}`, 2);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (err) {
+    throw fail(err instanceof Error ? err.message : String(err));
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw fail('expected a JSON object');
+  const autoUpdate = (parsed as { autoUpdate?: unknown }).autoUpdate;
+  if (
+    autoUpdate !== undefined &&
+    (typeof autoUpdate !== 'object' || autoUpdate === null || Array.isArray(autoUpdate))
+  ) {
+    throw fail('autoUpdate must be an object');
+  }
+  return parsed as DaemonFileConfig;
+}
+
+export interface ResolvedAutoUpdate {
+  /** Effective mode (after the source/unknown downgrade). */
+  mode: UpdateMode;
+  /** Mode requested before the downgrade. */
+  requestedMode: UpdateMode;
+  channel: UpdateChannel | null;
+  checkIntervalMinutes: number;
+  drainTimeoutMinutes: number;
+}
+
 /** Resolved options for the foreground `factory daemon run` process. */
 export interface FactorydConfig {
   /** Registry file served (default ~/.factory/registry.json). */
   registryFile: string;
   /** Port to bind on 127.0.0.1 (default DEFAULT_FACTORYD_PORT). */
   port: number;
-  /** Opt-in auto-update (#2128). Off unless --auto-update was passed; nothing acts on it yet. */
-  autoUpdate: boolean;
+  /** Resolved self-update setting (#2246). runAutoUpdateLoop acts on it (#1939). */
+  autoUpdate: ResolvedAutoUpdate;
+  install: InstallInfo;
+  /** One-time startup notices (deprecation, downgrade); cmdFactoryd logs each once. */
+  notices: string[];
+}
+
+function positiveInt(value: unknown, fallback: number, name: string): number {
+  if (value === undefined) return fallback;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+    throw new DaemonCtlError(`invalid ${name} "${String(value)}" — expected a positive integer`, 2);
+  }
+  return value;
 }
 
 /** Resolves `factory daemon run` options into a FactorydConfig. Throws
- *  DaemonCtlError (code 2) on an invalid --port. */
-export function resolveFactorydConfig(opts: {
-  port?: string;
-  registry?: string;
-  autoUpdate?: boolean;
-}): FactorydConfig {
+ *  DaemonCtlError (code 2) on an invalid --port, --update-mode or daemon.json value. */
+export function resolveFactorydConfig(
+  opts: { port?: string; registry?: string; updateMode?: string; autoUpdate?: boolean },
+  deps: { install?: InstallInfo; fileConfig?: DaemonFileConfig } = {},
+): FactorydConfig {
   const port = opts.port === undefined ? DEFAULT_FACTORYD_PORT : Number(opts.port);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new DaemonCtlError(`invalid --port "${opts.port}" — expected an integer 0-65535`, 2);
   }
-  return { registryFile: opts.registry ?? defaultRegistryPath(), port, autoUpdate: opts.autoUpdate === true };
+  const install = deps.install ?? detectInstall();
+  const fileAutoUpdate = (deps.fileConfig ?? {}).autoUpdate;
+  const notices: string[] = [];
+  if (opts.autoUpdate === true) notices.push('--auto-update is deprecated; use --update-mode stable');
+  let requested: UpdateMode;
+  if (opts.updateMode !== undefined) requested = parseUpdateMode(opts.updateMode, '--update-mode');
+  else if (opts.autoUpdate === true) requested = 'stable';
+  else if (fileAutoUpdate?.mode !== undefined) {
+    requested = parseUpdateMode(String(fileAutoUpdate.mode), 'autoUpdate.mode in daemon.json');
+  } else requested = install.kind === 'npm-global' ? 'stable' : 'manual';
+  let mode = requested;
+  if (install.kind !== 'npm-global' && requested !== 'manual') {
+    notices.push(`update mode ${requested} needs an npm install; staying manual`);
+    mode = 'manual';
+  }
+  const autoUpdate: ResolvedAutoUpdate = {
+    mode,
+    requestedMode: requested,
+    channel: updateChannel(mode),
+    checkIntervalMinutes: positiveInt(fileAutoUpdate?.checkIntervalMinutes, 30, 'autoUpdate.checkIntervalMinutes'),
+    drainTimeoutMinutes: positiveInt(fileAutoUpdate?.drainTimeoutMinutes, 60, 'autoUpdate.drainTimeoutMinutes'),
+  };
+  return { registryFile: opts.registry ?? defaultRegistryPath(), port, autoUpdate, install, notices };
 }
 
 export function xmlEscape(s: string): string {
@@ -381,4 +532,290 @@ export async function cmdDaemonLogs(
     process.once('SIGTERM', done);
   });
   clearInterval(poll);
+}
+
+// ── auto-update loop (#1939) ────────────────────────────────────────────────
+
+/** Exit code that makes launchd KeepAlive / systemd Restart=always relaunch factoryd. */
+export const AUTO_UPDATE_RESTART_EXIT_CODE = 75;
+/** `factory self-update` exit code for "a run is active, refusing to apply". */
+export const AUTO_UPDATE_BUSY_EXIT_CODE = 3;
+
+export interface AutoUpdateCheck {
+  candidate: string | null;
+  updateAvailable: boolean;
+  error: string | null;
+}
+export interface AutoUpdateApplyResult {
+  code: number;
+  rolledBack: boolean;
+  error: string | null;
+}
+export type AutoUpdateOutcome =
+  'manual' | 'check-error' | 'no-update' | 'skipped-failed-version' | 'drain-timeout' | 'busy' | 'failed' | 'updated';
+
+export interface AutoUpdateDeps {
+  stateFile: string;
+  check(): Promise<AutoUpdateCheck>;
+  apply(version: string): Promise<AutoUpdateApplyResult>;
+  /** Slugs/labels with an active run; empty = drained. */
+  activeRuns(): Promise<string[]>;
+  /** Exclusively creates STOP in every attached repo; returns only the paths it created. */
+  writeStops(): Promise<string[]>;
+  clearStops(files: string[]): Promise<void>;
+  /** Epoch ms. */
+  now(): number;
+  sleep(ms: number): Promise<void>;
+  log(line: string): void;
+  exit(code: number): Promise<void> | void;
+  /** Loop guard; default () => false. */
+  stopped?(): boolean;
+  /** Drain poll interval; default 30_000. */
+  drainPollMs?: number;
+}
+
+type AutoUpdateConfig = Pick<FactorydConfig, 'autoUpdate' | 'install'>;
+
+/** True only for an error-free, newer candidate; prereleases are ignored in stable mode. */
+export function isUpdateCandidate(
+  check: AutoUpdateCheck,
+  mode: UpdateMode,
+  current: string,
+): check is AutoUpdateCheck & { candidate: string } {
+  if (check.error !== null || !check.updateAvailable) return false;
+  if (typeof check.candidate !== 'string' || check.candidate === '') return false;
+  if (check.candidate === current) return false;
+  if (mode === 'stable' && check.candidate.includes('-')) return false;
+  return true;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** One check → drain → apply pass. Never throws; never applies while a run is active. */
+export async function runAutoUpdateCycle(config: AutoUpdateConfig, deps: AutoUpdateDeps): Promise<AutoUpdateOutcome> {
+  const { mode, drainTimeoutMinutes } = config.autoUpdate;
+  if (mode === 'manual') return 'manual';
+  const iso = () => new Date(deps.now()).toISOString();
+  const safeWrite = (state: UpdateState) => {
+    try {
+      writeUpdateState(deps.stateFile, state);
+    } catch (err) {
+      deps.log(`could not write ${deps.stateFile}: ${errorMessage(err)}`);
+    }
+  };
+
+  let check: AutoUpdateCheck;
+  try {
+    check = await deps.check();
+  } catch (err) {
+    check = { candidate: null, updateAvailable: false, error: errorMessage(err) };
+  }
+  if (readUpdateState(deps.stateFile) === null) safeWrite(initialUpdateState(config, null));
+
+  const eligible = isUpdateCandidate(check, mode, config.install.version);
+  const candidate = eligible ? check.candidate : null;
+  try {
+    recordUpdateCheck(deps.stateFile, { at: iso(), available: candidate }, deps.log);
+  } catch (err) {
+    deps.log(`could not write ${deps.stateFile}: ${errorMessage(err)}`);
+  }
+  if (check.error !== null) {
+    deps.log(`update check failed: ${check.error}`);
+    return 'check-error';
+  }
+  if (candidate === null) return 'no-update';
+
+  const state = readUpdateState(deps.stateFile) ?? initialUpdateState(config, null);
+  const last = state.lastResult;
+  if (last?.version === candidate && (last.outcome === 'failed' || last.outcome === 'rolled-back')) {
+    deps.log(`update: skipping ${candidate} — previous attempt ${last.outcome}; waiting for a newer release`);
+    return 'skipped-failed-version';
+  }
+
+  const finish = (result: Omit<UpdateLastResult, 'at' | 'version'>, extra: Partial<UpdateState> = {}) => {
+    const latest = readUpdateState(deps.stateFile) ?? state;
+    safeWrite({
+      ...latest,
+      ...extra,
+      lastResult: { at: iso(), version: candidate, ...result },
+      draining: null,
+    });
+  };
+
+  let stopFiles: string[] = [];
+  try {
+    stopFiles = await deps.writeStops();
+    safeWrite({
+      ...(readUpdateState(deps.stateFile) ?? state),
+      draining: { since: iso(), target: candidate, stopFiles },
+    });
+    deps.log(`update: draining for ${candidate} (STOP set in ${stopFiles.length} repo(s))`);
+    const deadline = deps.now() + drainTimeoutMinutes * 60_000;
+    const pollMs = deps.drainPollMs ?? 30_000;
+    for (;;) {
+      const active = await deps.activeRuns();
+      if (active.length === 0) break;
+      if (deps.now() >= deadline) {
+        const error = `drain timed out after ${drainTimeoutMinutes} min (active: ${active.join(', ')})`;
+        finish({ outcome: 'skipped', error });
+        deps.log(`update: ${error}; will retry next interval`);
+        return 'drain-timeout';
+      }
+      await deps.sleep(pollMs);
+    }
+
+    let res: AutoUpdateApplyResult;
+    try {
+      res = await deps.apply(candidate);
+    } catch (err) {
+      res = { code: 1, rolledBack: false, error: errorMessage(err) };
+    }
+    if (res.code === 0) {
+      finish({ outcome: 'updated' }, { available: null });
+      deps.log(`update: updated to ${candidate}; restarting`);
+      return 'updated';
+    }
+    if (res.code === AUTO_UPDATE_BUSY_EXIT_CODE) {
+      const error = 'apply refused: a run is active';
+      finish({ outcome: 'skipped', error });
+      deps.log(`update: ${error}; will retry next interval`);
+      return 'busy';
+    }
+    const outcome = res.rolledBack ? 'rolled-back' : 'failed';
+    const error = res.error ?? `exit ${res.code}`;
+    finish({ outcome, error });
+    deps.log(`update: ${candidate} ${outcome} (${error})`);
+    return 'failed';
+  } finally {
+    try {
+      await deps.clearStops(stopFiles);
+    } catch (err) {
+      deps.log(`update: could not clear STOP files: ${errorMessage(err)}`);
+    }
+  }
+}
+
+/** Sleeps the check interval, runs a cycle, and exits 75 after a successful update. */
+export async function runAutoUpdateLoop(config: AutoUpdateConfig, deps: AutoUpdateDeps): Promise<void> {
+  if (config.autoUpdate.mode === 'manual') return;
+  while (!deps.stopped?.()) {
+    await deps.sleep(config.autoUpdate.checkIntervalMinutes * 60_000);
+    if (deps.stopped?.()) return;
+    try {
+      const outcome = await runAutoUpdateCycle(config, deps);
+      if (outcome === 'updated') {
+        await deps.exit(AUTO_UPDATE_RESTART_EXIT_CODE);
+        return;
+      }
+    } catch (err) {
+      deps.log(`update cycle failed: ${errorMessage(err)}`);
+    }
+  }
+}
+
+/** Removes STOP files a previous (crashed) drain left behind; returns the paths removed. */
+export function recoverStaleDrain(previous: UpdateState | null, removeStop: (file: string) => boolean): string[] {
+  const removed: string[] = [];
+  for (const file of previous?.draining?.stopFiles ?? []) {
+    try {
+      if (removeStop(file)) removed.push(file);
+    } catch {
+      // best effort
+    }
+  }
+  return removed;
+}
+
+function parseLastJsonLine(stdout: string): Record<string, unknown> | null {
+  const line = lastLines(stdout.trimEnd(), 1)[0];
+  if (!line) return null;
+  try {
+    const parsed: unknown = JSON.parse(line);
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function lastStderrLine(stderr: string): string | null {
+  return lastLines(stderr.trimEnd(), 1)[0] || null;
+}
+
+/** Production deps: checks via the injected `check`, applies via `factory self-update --to`, detects activity from the run runtime and run locks. */
+export function createAutoUpdateDeps(opts: {
+  registryFile: string;
+  stateFile: string;
+  cliEntrypoint: string;
+  /** Registry check; cmdFactoryd passes `checkForUpdate` from self-update.ts (#2354). */
+  check: () => Promise<AutoUpdateCheck>;
+  runRuntime: Pick<RunRuntime, 'list'>;
+  log: (line: string) => void;
+  exit: (code: number) => Promise<void> | void;
+}): AutoUpdateDeps {
+  const exec = defaultExec();
+  const attached = async () => listRepos(await loadRegistry(opts.registryFile)).filter((e) => e.state !== 'detached');
+  return {
+    stateFile: opts.stateFile,
+    check: opts.check,
+    async apply(version) {
+      const r = await exec(process.execPath, [opts.cliEntrypoint, 'self-update', '--to', version, '--json']);
+      const json = parseLastJsonLine(r.stdout);
+      const error =
+        (typeof json?.error === 'string' && json.error !== '' ? json.error : null) ??
+        lastStderrLine(r.stderr) ??
+        (r.code === 0 ? null : `exit ${r.code}`);
+      return {
+        code: r.code,
+        rolledBack: json?.rolledBack === true || json?.outcome === 'rolled-back',
+        error,
+      };
+    },
+    async activeRuns() {
+      const active = opts.runRuntime
+        .list()
+        .filter((r) => r.status === 'queued' || r.status === 'running')
+        .map((r) => `daemon:${r.repo}#${r.issue}`);
+      for (const e of await attached()) {
+        const holder = readRunLockHolder(getFactoryPaths(e.path, e.stateRoot).runLock);
+        if (holder && defaultIsPidAlive(holder.pid)) active.push(e.slug);
+      }
+      return active;
+    },
+    async writeStops() {
+      const created: string[] = [];
+      for (const e of await attached()) {
+        const stop = getFactoryPaths(e.path, e.stateRoot).stop;
+        try {
+          mkdirSync(dirname(stop), { recursive: true });
+          writeFileSync(stop, '', { flag: 'wx' });
+          created.push(stop);
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
+            opts.log(`update: could not write STOP for ${e.slug}: ${errorMessage(err)}`);
+          }
+        }
+      }
+      return created;
+    },
+    async clearStops(files) {
+      for (const f of files) {
+        try {
+          unlinkSync(f);
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+        }
+      }
+    },
+    now: Date.now,
+    sleep: (ms) =>
+      new Promise((res) => {
+        setTimeout(res, ms).unref();
+      }),
+    log: opts.log,
+    exit: opts.exit,
+  };
 }

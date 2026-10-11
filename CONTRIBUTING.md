@@ -1,15 +1,22 @@
-# Contributing to Software Factory
+# Contributing to On PAR Dev's Software Factory
 
 Thanks for helping. This page is the short version. The project rules live in [AGENTS.md](AGENTS.md), and the architecture overview is in [docs/architecture.md](docs/architecture.md).
 
 ## Set up
 
-You need Node.js ≥ 24, `git`, and an authenticated `gh` CLI. From a clone:
+You need Node.js ≥ 24, `git`, Claude Code (`claude`) installed and signed in, and the GitHub CLI signed in with `gh auth login`. Most users install the published CLI with `npm install -g @on-par/factory-cli` (see the [README](README.md)). To work on the factory itself, install it from a clone:
 
 ```bash
+git clone https://github.com/on-par/software-factory
+cd software-factory
 npm install
 npm run build
+npm link --workspace @on-par/factory-cli   # puts your local `factory` on your PATH
+factory --version
+factory doctor
 ```
+
+To go back to the published package, run `npm unlink -g @on-par/factory-cli` and then `npm install -g @on-par/factory-cli`.
 
 ## The verify gate
 
@@ -41,7 +48,7 @@ factory doctor
 factory run-issue <N>    # PLAN → BUILD → CHECK → SHIP for that one issue
 ```
 
-The run works in an isolated git worktree and ends at a ready-for-review PR. It never merges unless you opt in with `FACTORY_MERGE=1`, so review the PR yourself. Agents run with permission prompts disabled (see "Open-Core Boundary & Safety" in the [README](README.md)), which is why you should use a throwaway repo.
+The run works in an isolated git worktree and ends at a ready-for-review PR. `factory run-issue` never merges, even with `FACTORY_MERGE=1`, so review the PR yourself. Agents run with permission prompts disabled (see [Safety](README.md#safety) in the README), which is why you should use a throwaway repo.
 
 ## Filing work for the factory
 

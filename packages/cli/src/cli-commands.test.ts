@@ -99,6 +99,7 @@ import {
   IssueDecomposedError,
   LaneParkError,
   IssueSkippedError,
+  LaneEnvironmentPauseError,
   main,
   parseIssueArg,
   shipIssue as cliShipIssue,
@@ -360,7 +361,12 @@ function makePhaseFakes() {
       return h.checkResult;
     }),
     shipPhase: vi.fn<NonNullable<CliDeps['shipPhase']>>(async (_opts) => h.shipResult),
-  } satisfies Pick<CliDeps, 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase'>;
+    checkBaseHealth: vi.fn<NonNullable<CliDeps['checkBaseHealth']>>(async () => ({
+      kind: 'skipped' as const,
+      failingChecks: [],
+      cached: false,
+    })),
+  } satisfies Pick<CliDeps, 'planPhase' | 'buildPhase' | 'checkPhase' | 'shipPhase' | 'checkBaseHealth'>;
 }
 /** Fresh phase doubles per test, spread into every main/shipIssue call (CliDeps phase overrides). */
 let phases = makePhaseFakes();
@@ -570,6 +576,39 @@ function errored(): string {
 }
 
 // ===========================================================================
+describe('self-update', () => {
+  const install = {
+    version: '0.9.0',
+    env: {},
+    execPath: '/usr/local/bin/node',
+    cliPath: '/usr/local/lib/node_modules/@on-par/factory-cli/dist/cli.js',
+    exists: () => false,
+  };
+
+  it('--check --json prints the result and exits 10 when an update is available', async () => {
+    const out: string[] = [];
+    const res = await runMainWith(
+      {
+        selfUpdate: {
+          fetch: async () => ({ status: 200, body: '{"latest":"0.9.1"}' }),
+          install,
+          out: { write: (s: string) => out.push(s) },
+        },
+      },
+      'self-update',
+      '--check',
+      '--json',
+    );
+    expect(res.code).toBe(10);
+    expect(JSON.parse(out.join(''))).toMatchObject({ updateAvailable: true, candidate: '0.9.1' });
+  });
+
+  it('exits 2 without --check', async () => {
+    const res = await runMain('self-update');
+    expect(res.code).toBe(2);
+  });
+});
+
 describe('cli commands (via main dispatch)', () => {
   describe('overview (bare factory)', () => {
     it('prints the designed overview and does not call process.exit', async () => {
@@ -923,6 +962,25 @@ describe('cli commands (via main dispatch)', () => {
 
       expect(stub).not.toHaveBeenCalled();
       expect(phases.planPhase).toHaveBeenCalled();
+    });
+
+    it('red base from the pre-PLAN health check throws LaneEnvironmentPauseError before planPhase', async () => {
+      const baseSha = 'a'.repeat(40);
+      const red = vi.fn<NonNullable<CliDeps['checkBaseHealth']>>(async () => ({
+        kind: 'red' as const,
+        baseSha,
+        failingChecks: ['tests'],
+        cached: false,
+      }));
+
+      const err = await shipIssue(5, {}, { repoRoot: h.repoRoot, ghRepo: h.ghRepo }, { checkBaseHealth: red }).catch(
+        (e: unknown) => e,
+      );
+
+      expect(err).toBeInstanceOf(LaneEnvironmentPauseError);
+      expect((err as LaneEnvironmentPauseError).baseSha).toBe(baseSha);
+      expect((err as LaneEnvironmentPauseError).failingChecks).toEqual(['tests']);
+      expect(phases.planPhase).not.toHaveBeenCalled();
     });
 
     it('routes constitution --product through an injected getConstitutionsDir', async () => {
@@ -1308,6 +1366,60 @@ bash scripts/verify.sh
         writeHold(h.ghRepo);
         await runMain('status', '--json');
         expect(JSON.parse(logged())).not.toHaveProperty('baseHold');
+      });
+    });
+
+    describe('update state (#2129)', () => {
+      let home: string;
+      beforeEach(() => {
+        home = mkdtempSync(join(tmpdir(), 'factory-update-home-'));
+        vi.stubEnv('HOME', home);
+      });
+      afterEach(() => {
+        vi.unstubAllEnvs();
+        rmSync(home, { recursive: true, force: true });
+      });
+      const writeState = (extra: Record<string, unknown> = {}): void => {
+        mkdirSync(join(home, '.factory'), { recursive: true });
+        writeFileSync(
+          join(home, '.factory', 'update-state.json'),
+          JSON.stringify({
+            schemaVersion: 1,
+            mode: 'stable',
+            channel: 'latest',
+            installKind: 'npm-global',
+            current: '0.9.0',
+            available: '0.9.1',
+            ...extra,
+          }),
+        );
+      };
+
+      it('status --json reports the factoryd update state from update-state.json (#2129)', async () => {
+        writeState();
+        await runMain('status', '--json');
+        expect(JSON.parse(logged()).update).toMatchObject({
+          mode: 'stable',
+          channel: 'latest',
+          installKind: 'npm-global',
+          current: '0.9.0',
+          available: '0.9.1',
+        });
+      });
+
+      it('status --json reports update null without a state file', async () => {
+        await runMain('status', '--json');
+        expect(JSON.parse(logged()).update).toBeNull();
+      });
+
+      it('status prints the last update result line (#2129)', async () => {
+        writeState({ lastResult: { at: '2026-10-01T00:00:00.000Z', version: '0.9.1', outcome: 'rolled-back' } });
+        await runMain('status');
+        const line = logged()
+          .split('\n')
+          .find((l) => l.includes('factory 0.9.0'));
+        expect(line).toContain('0.9.1');
+        expect(line).toContain('rolled back');
       });
     });
 
@@ -2179,9 +2291,25 @@ bash scripts/verify.sh
       const firstRecord = JSON.parse(historyLines(readFileSync(paths().kpiHistory, 'utf-8'))[0]);
       expect(firstRecord.commitSha).toBe('deadbeef');
       expect(firstRecord.models).toEqual({});
+      expect(firstRecord).not.toHaveProperty('partial');
 
       await runMain('kpis');
       expect(historyLines(readFileSync(paths().kpiHistory, 'utf-8'))).toHaveLength(2);
+    });
+
+    it('a GitHub failure during reconstruction marks the snapshot partial and warns (#2342)', async () => {
+      writeFileSync(paths().events, JSON.stringify({ type: 'issue-title', issue: '1', msg: 'title' }));
+      writeFileSync(paths().costs, '');
+      h.octokit.rest.pulls.list = vi.fn(async () => {
+        throw new Error('rate limited');
+      });
+
+      await runMain('kpis');
+      expect(errored()).toContain('human-event reconstruction failed');
+      expect(errored()).toContain('rate limited');
+      expect(errored()).toContain('marked partial');
+      const record = JSON.parse(readFileSync(paths().kpiHistory, 'utf-8').trim().split('\n')[0]);
+      expect(record.partial).toBe(true);
     });
 
     it('still renders the report when the KPI snapshot fails (e.g. a malformed repo tier config)', async () => {
@@ -3713,6 +3841,50 @@ bash scripts/verify.sh
       expect(events).toContain('kpi-snapshot');
     });
 
+    it('run: the post-run KPI snapshot counts an admin-merged PR reconstructed from GitHub (#2342)', async () => {
+      writeFileSync(paths().queue, 'app 1\n');
+      h.octokit.rest.pulls.list = vi.fn(async ({ state }: any) =>
+        state === 'all'
+          ? {
+              data: [
+                {
+                  number: 5,
+                  head: { ref: 'factory/1-fix-it' },
+                  state: 'closed',
+                  merged_at: new Date().toISOString(),
+                  closed_at: null,
+                },
+              ],
+            }
+          : { data: [] },
+      );
+      h.octokit.rest.pulls.listCommits = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.pulls.listReviews = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.pulls.get = vi.fn(async () => ({ data: { merged_by: { login: 'patrob' } } }));
+      const res = await runMain('run', '--local-queue');
+      expect(res.exited).toBe(false);
+
+      const record = JSON.parse(readFileSync(paths().kpiHistory, 'utf-8').trim().split('\n')[0]);
+      expect(record.mergeRate).toBeGreaterThan(0);
+      expect(record).not.toHaveProperty('partial');
+    });
+
+    it('run: a GitHub failure during the post-run reconstruction marks the snapshot partial (#2342)', async () => {
+      writeFileSync(paths().queue, 'app 1\n');
+      h.octokit.rest.pulls.list = vi.fn(async ({ state }: any) => {
+        if (state === 'all') throw new Error('boom');
+        return { data: [] };
+      });
+      const res = await runMain('run', '--local-queue');
+      expect(res.exited).toBe(false);
+
+      const record = JSON.parse(readFileSync(paths().kpiHistory, 'utf-8').trim().split('\n')[0]);
+      expect(record.partial).toBe(true);
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('kpi snapshot partial');
+      expect(events).toContain('run-done');
+    });
+
     it('appends a second KPI snapshot on a second run', async () => {
       writeFileSync(paths().queue, 'app 1\n');
       await runMain('run', '--local-queue');
@@ -3993,7 +4165,7 @@ bash scripts/verify.sh
       expect(readFileSync(logFile, 'utf-8')).toContain(`factoryd: listening on 127.0.0.1:${boundPort}`);
     });
 
-    it('daemon run --help lists --auto-update with its default of off', async () => {
+    it('daemon run --help lists --update-mode and the deprecated --auto-update', async () => {
       const originalWrite = process.stdout.write.bind(process.stdout);
       const written: string[] = [];
       process.stdout.write = ((chunk: unknown) => {
@@ -4010,8 +4182,10 @@ bash scripts/verify.sh
 
       expect(res.exited).toBe(true);
       const text = written.join('').replace(/\s+/g, ' ');
+      expect(text).toContain('--update-mode');
+      expect(text).toContain('manual, stable');
       expect(text).toContain('--auto-update');
-      expect(text).toContain('Opt in to automatic factoryd self-update (default: off)');
+      expect(text).toContain('Deprecated');
     });
 
     it('accepts --auto-update and starts and stops exactly like the default run', async () => {
@@ -4032,6 +4206,14 @@ bash scripts/verify.sh
 
     it('exits with code 2 on an invalid --port and never binds', async () => {
       const res = await runMain('daemon', 'run', '--port', 'abc');
+      expect(res.exited).toBe(true);
+      expect(res.code).toBe(2);
+      expect(logged()).not.toContain('listening on');
+    });
+
+    it('exits with code 2 on --update-mode nightly and lists the valid modes', async () => {
+      const registryFile = join(paths().state, 'registry.json');
+      const res = await runMain('daemon', 'run', '--update-mode', 'nightly', '--registry', registryFile);
       expect(res.exited).toBe(true);
       expect(res.code).toBe(2);
       expect(logged()).not.toContain('listening on');

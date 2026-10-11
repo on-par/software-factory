@@ -7,6 +7,7 @@
 //   4. a failed environment lease degrades (appPort undefined) rather than parking the run.
 //   5. exactly one terminal event sequence is emitted per run, matching the returned RunOutcome
 //      (including the non-park `released` exit for an environment-caused CHECK failure, #1928).
+// PLAN may be skipped by the planReuse port after an environment release (#2340).
 //
 // Path-bound CLI concerns (Octokit, worktree/environment provisioning, the events sink,
 // approval/steering, and reporting hooks) are injected as ports so this file stays free of
@@ -17,6 +18,8 @@ import { randomUUID } from 'node:crypto';
 import type { Octokit } from '@octokit/rest';
 
 import type { ApprovalGate } from '../approvals/index.js';
+import type { checkBaseHealth } from '../checkers/base-health.js';
+import { laneEnv } from '../environment/index.js';
 import { buildPhase as buildPhaseDefault } from '../phases/build.js';
 import {
   checkPhase as checkPhaseDefault,
@@ -65,6 +68,7 @@ import type { LaneFileGuard } from './lane-file-guard.js';
 import { touchedFilesFrom } from './lane-file-guard.js';
 import { parkReasonFor, type BuildRoute, type ParkReason, type RunOutcome } from './outcome.js';
 import type { RunPolicy } from './policy.js';
+import { issueBodyHash, type PlanReuseStore } from './resume-context.js';
 import type { Environment, Workspace } from './ports.js';
 
 /** Everything one run needs decided, as a plain resolved value — the CLI adapter
@@ -207,6 +211,10 @@ export interface RunPorts {
   buildPhase?: typeof buildPhaseDefault;
   checkPhase?: typeof checkPhaseDefault;
   shipPhase?: typeof shipPhaseDefault;
+  /** Pre-PLAN health check of origin/main (#2339). Absent = skipped (existing callers/tests unchanged). */
+  checkBaseHealth?: typeof checkBaseHealth;
+  /** Frozen-plan reuse after an environment release (#2340). Absent = always plan (existing callers/tests unchanged). */
+  planReuse?: PlanReuseStore;
   /** Reads the PR's path changes for the classifier (#1724). Defaults to the git-backed reader. */
   readReviewFloorChanges?: (worktree: string, fallbackBaseRef?: string) => Promise<ReviewFloorPathChange[]>;
 }
@@ -520,6 +528,39 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       log('constitution', 'No standards found (no repo instruction files, no constitution) — proceeding without');
     }
 
+    // Pre-PLAN base health (#2339): a red origin/main releases the issue before any model spend;
+    // the CLI turns `released` into LaneEnvironmentPauseError, whose runLane branch writes the base hold.
+    if (ports.checkBaseHealth && !request.localOnly) {
+      const health = await ports
+        .checkBaseHealth({
+          worktree: ports.workspace.path,
+          constitution,
+          router: ports.router,
+          env: laneEnv(appPort, process.env, appBaseUrl, ports.workspace.path, runId),
+          cachePath: request.baselineCachePath,
+          timeoutSeconds: request.timeouts.check,
+          log: (type, msg) => log(type, msg),
+        })
+        .catch((err): undefined => {
+          log('environment_warning', `base health check failed: ${errorMessage(err)} — continuing to PLAN`);
+          return undefined;
+        });
+      if (health?.kind === 'red' && health.baseSha !== undefined) {
+        log(
+          'environment-released',
+          `origin/main ${health.baseSha.slice(0, 8)} fails ${health.failingChecks.join(', ')} before PLAN — no model calls, releasing #${request.issue} to queued`,
+        );
+        return {
+          state: 'released',
+          reason: 'environment',
+          branch: request.branch,
+          reworkRounds: 0,
+          baseSha: health.baseSha,
+          failingChecks: health.failingChecks,
+        };
+      }
+    }
+
     // Run-start HEAD (#1210): captured exactly once, before PLAN, for local-only
     // workspace runs — there is no remote to diff against, and every rework round
     // inside CHECK must diff against this same base rather than a moving target.
@@ -554,37 +595,60 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       log('model-override', `build route derived from pinned build model ${request.modelPins.build} → ${derivedRoute}`);
     }
 
-    const plan = await planPhase({
-      issue: request.issue,
-      repo: request.repo,
-      worktree: ports.workspace.path,
-      specPath: request.specPath,
-      constitution,
-      router: ports.router,
-      octokit: ports.octokit,
-      log: ports.events('plan'),
-      timeoutSeconds: request.timeouts.plan,
-      modelOverride: planModel,
-      modelFallbacks:
-        planModel === request.modelPins.plan && request.modelPins.planFallback
-          ? [request.modelPins.planFallback]
-          : undefined,
-      onProviderFailure: rememberProviderFailure,
-      branch: request.branch,
-      approvalGate: request.options.approvePlan ? ports.createApprovalGate?.() : undefined,
-      drainSteering: request.options.approvePlan ? ports.drainSteering : undefined,
-      codexDisabled: request.codexDisabled,
-      localOnly: request.localOnly,
-      laneId: request.lane,
-      workSource: request.workSource,
-      enforceReadiness: true,
-      fastPath: request.efficiency.fastPath,
-      enforceSizeGate: (request.sizeGateMode ?? 'file') !== 'off',
-      sizeGateMode: request.sizeGateMode,
-      maxSlices: request.maxSlices,
-      blockUnresolvedRegressions: request.blockUnresolvedRegressions,
-      preferredRoute: pinnedRoute,
-    });
+    const reusablePlan = async () => {
+      if (!ports.planReuse) return null;
+      let hit: Awaited<ReturnType<PlanReuseStore['load']>> = null;
+      try {
+        hit = await ports.planReuse.load(issueBodyHash(request.work.brief));
+      } catch (err) {
+        log('environment_warning', `could not read the plan-reuse record: ${errorMessage(err)} — planning`);
+      }
+      try {
+        await ports.planReuse.clear();
+      } catch (err) {
+        log('environment_warning', `could not clear the plan-reuse record: ${errorMessage(err)}`);
+      }
+      if (hit) {
+        ports.events('plan')(
+          'plan_reused',
+          `reusing frozen plan ${request.specPath} for #${request.issue} — body unchanged since the environment release, no PLAN model call`,
+        );
+      }
+      return hit;
+    };
+    const plan =
+      (await reusablePlan()) ??
+      (await planPhase({
+        issue: request.issue,
+        repo: request.repo,
+        worktree: ports.workspace.path,
+        specPath: request.specPath,
+        constitution,
+        router: ports.router,
+        octokit: ports.octokit,
+        log: ports.events('plan'),
+        timeoutSeconds: request.timeouts.plan,
+        modelOverride: planModel,
+        modelFallbacks:
+          planModel === request.modelPins.plan && request.modelPins.planFallback
+            ? [request.modelPins.planFallback]
+            : undefined,
+        onProviderFailure: rememberProviderFailure,
+        branch: request.branch,
+        approvalGate: request.options.approvePlan ? ports.createApprovalGate?.() : undefined,
+        drainSteering: request.options.approvePlan ? ports.drainSteering : undefined,
+        codexDisabled: request.codexDisabled,
+        localOnly: request.localOnly,
+        laneId: request.lane,
+        workSource: request.workSource,
+        enforceReadiness: true,
+        fastPath: request.efficiency.fastPath,
+        enforceSizeGate: (request.sizeGateMode ?? 'file') !== 'off',
+        sizeGateMode: request.sizeGateMode,
+        maxSlices: request.maxSlices,
+        blockUnresolvedRegressions: request.blockUnresolvedRegressions,
+        preferredRoute: pinnedRoute,
+      }));
     route = plan.route;
     if (!plan.ok) {
       const decomposedChildren = plan.decomposed?.childIssues ?? [];
@@ -801,6 +865,18 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
           'environment-released',
           `every failing checker (${env.failingChecks.join(', ')}) also fails on base ${env.baseSha.slice(0, 8)} — no rework, releasing #${request.issue} to queued`,
         );
+        if (ports.planReuse && !plan.slice) {
+          try {
+            await ports.planReuse.record({
+              bodyHash: issueBodyHash(request.work.brief),
+              baseSha: env.baseSha,
+              route: plan.route,
+              releasedAt: new Date().toISOString(),
+            });
+          } catch (err) {
+            log('environment_warning', `could not record the plan-reuse record: ${errorMessage(err)}`);
+          }
+        }
         return {
           state: 'released',
           reason: 'environment',
@@ -960,7 +1036,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       slice: plan.slice ? { index: plan.slice.index, count: plan.slice.plan.slices.length } : undefined,
     });
     if (!ship.ok) {
-      const reason: ParkReason = ship.denied ? 'escalate' : 'fail';
+      const reason: ParkReason = ship.denied ? 'escalate' : ship.ciOutcome === 'infra-failure' ? 'ci-infra' : 'fail';
       const message = ship.denied
         ? `ship denied: ${ship.deniedReason}`
         : ship.reason

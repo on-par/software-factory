@@ -121,7 +121,7 @@ describe('renderPrBody', () => {
 
     for (const body of [full, bare]) {
       const lines = body.split('\n');
-      expect(lines.at(-1)).toBe('This PR made possible by Software Factory.');
+      expect(lines.at(-1)).toBe("This PR made possible by On PAR Dev's Software Factory.");
       expect(lines.slice(0, -1).some((l) => l.includes('Software Factory'))).toBe(false);
     }
   });

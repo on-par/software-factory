@@ -1,4 +1,5 @@
 import type { ActiveQueueClaim } from '@on-par/factory-core';
+import type { StatusUpdateJson } from './update-state.js';
 
 /** One open provider in `factory status --json` (#1101). */
 export interface StatusBreakerProviderJson {
@@ -31,6 +32,8 @@ export interface StatusJson {
   stop: boolean;
   breaker: StatusBreakerJson;
   active: StatusActiveRowJson[];
+  /** factoryd self-update state (#2129, additive); null when no readable update-state.json exists. */
+  update: StatusUpdateJson | null;
 }
 
 /** Builds the `factory status --json` payload. An unparsable `lastActivityAt` reports `ageSec: 0`, never NaN. */
@@ -40,6 +43,7 @@ export function buildStatusJson(input: {
   stop: boolean;
   breakers: ReadonlyArray<{ provider: string; reason: string; openedAt: string; remainingMs: number }>;
   active: ReadonlyArray<Pick<ActiveQueueClaim, 'lane' | 'issue' | 'phase' | 'lastActivityAt'>>;
+  update: StatusUpdateJson | null;
   now: number;
 }): StatusJson {
   const providers = input.breakers.map((b) => ({
@@ -59,5 +63,6 @@ export function buildStatusJson(input: {
     stop: input.stop,
     breaker: { open: providers.length > 0, providers },
     active,
+    update: input.update,
   };
 }
