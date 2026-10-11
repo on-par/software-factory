@@ -3,12 +3,13 @@ import { mkdtemp, rm, writeFile as realWriteFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { HarnessError, KNOWN_HARNESS_IDS } from '../harness/index.js';
 import { ModelRegistry } from '../models/index.js';
 import { CliModelExecutor } from './index.js';
+import { resetOllamaProbeCache } from './ollama-probe.js';
 
 const modelsConfig: ModelsConfig = {
   version: 1,
@@ -1446,5 +1447,24 @@ describe('CliModelExecutor shared empty-response propagation', () => {
       .catch((e) => e);
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('empty_response');
+  });
+
+  describe('probeOllama', () => {
+    beforeEach(resetOllamaProbeCache);
+
+    it('uses the injected fetchFn to GET /api/version', async () => {
+      const urls: string[] = [];
+      const fetchFn = async (input: string) => {
+        urls.push(input);
+        return { ok: true, status: 200 } as any;
+      };
+      const executor = new CliModelExecutor(recordingExec().fn, fetchFn);
+
+      const result = await executor.probeOllama();
+
+      expect(result.reachable).toBe(true);
+      expect(urls).toHaveLength(1);
+      expect(urls[0]).toMatch(/\/api\/version$/);
+    });
   });
 });

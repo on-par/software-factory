@@ -40,6 +40,7 @@ const h = vi.hoisted(() => {
     constitutionResolve: (_worktree: string, _product?: string): any => null,
     modelOverrides: {} as Record<string, string>,
     modelProviders: {} as Record<string, string>,
+    triageCandidates: [] as string[],
     triggerPlanProviderFailure: null as { provider: string; reason: any; detail?: string } | null,
     planResult: { ok: true, route: 'claude' } as any,
     buildResult: { ok: true } as any,
@@ -283,7 +284,7 @@ function makeCoreFakes() {
     ModelRouter: vi.fn(function () {
       return {
         resolve: (route: string) => h.routerResolve(route),
-        resolveAll: (_route: string) => [],
+        resolveAll: (_route: string) => h.triageCandidates,
         registryRef: {
           getClaudeFlag: () => '--flag',
           getModelsInTier: () => ['m'],
@@ -462,6 +463,7 @@ beforeEach(() => {
   h.constitutionResolve = () => null;
   h.modelOverrides = {};
   h.modelProviders = {};
+  h.triageCandidates = [];
   h.triggerPlanProviderFailure = null;
   h.planResult = { ok: true, route: 'claude' };
   h.buildResult = { ok: true };
@@ -2670,6 +2672,28 @@ bash scripts/verify.sh
       const out = logged();
       expect(out).toContain('app 5');
       expect(out).toContain('factory triage accept');
+    });
+
+    it('logs the Claude model it passes via --model, not the Ollama tier head', async () => {
+      h.modelProviders = { 'qwen2.5-coder:14b': 'ollama', 'claude-sonnet-5': 'anthropic' };
+      h.triageCandidates = ['qwen2.5-coder:14b', 'claude-sonnet-5'];
+      let claudeCmd = '';
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) return h.ghRepo;
+        if (cmd.includes('claude -p')) {
+          claudeCmd = cmd;
+          writeFileSync(paths().queueProposed, 'app 5\n');
+          return '';
+        }
+        return '';
+      };
+      await runMain('triage');
+      const flag = /--model (\S+)/.exec(claudeCmd)?.[1];
+      expect(flag).toBeTruthy();
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain(`Triaging ${h.ghRepo} with ${flag}`);
+      expect(events).not.toContain('qwen2.5-coder:14b');
     });
 
     it('exits 1 when triage produces no proposal', async () => {

@@ -334,6 +334,7 @@ export type {
   FailoverReason,
   ModelExecutor,
   ModelExecutorContext,
+  OllamaProbeResult,
   RouterResult,
   SleepFn,
 } from './router/index.js';
