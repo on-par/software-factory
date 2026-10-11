@@ -98,6 +98,22 @@ version: 2
 
 Every other key is optional. [`docs/config.example.yaml`](docs/config.example.yaml) lists each key the factory reads, with its default and what it does. It is generated from the config schemas (`npm run config-example`) and a test fails when it drifts, so it matches the code. Copy only the keys you want to change (comments included) into `.factory/config.yaml`; `.factory/config.json` is still read for existing repos, and `factory migrate --to-yaml` converts it. `factory status --kpis` prints the effective config.
 
+## Updating
+
+factoryd installed with npm (`npm i -g @on-par/factory-cli`) auto-updates to stable releases by default: the npm dist-tag `latest` only, never `next` unless you pick `--update-mode prerelease`. Source checkouts and `FACTORY_FROM_SOURCE=1` always stay manual. To opt out:
+
+```sh
+factory factoryd --update-mode manual
+# or in ~/.factory/daemon.json:
+# {"autoUpdate": {"mode": "manual"}}
+```
+
+`factory status --json` shows the update state in its `update` object. To check or update by hand, use `factory self-update --check` and `factory self-update`.
+
+> **Not shipped yet.** `factory self-update` is tracked in #2354 / #2355, and the drain/restart loop in #1939.
+
+See [docs/ops/updating.md](docs/ops/updating.md) for the update cycle, rollback and machine notes.
+
 ## CLI Commands
 
 The most-used commands, by the group `factory --help` lists them under. Run `factory --help` for the full, current list.
