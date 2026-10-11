@@ -44,4 +44,5 @@ bash scripts/repo-issue-optics.test.sh
 bash scripts/ruleset-copilot-review.test.sh
 bash scripts/triage-factory-report.test.sh
 bash scripts/publish-workspaces.test.sh
+bash scripts/publish-release.test.sh
 bash scripts/launchd/install-sweep-plist.test.sh

@@ -15,6 +15,15 @@ All notable changes to this project are documented in this file.
   repo's build or test command needed `GITHUB_TOKEN`, it no longer gets it from
   the factory's environment.
 
+### Fixed
+
+- The `Publish` workflow can no longer go green without publishing. When the
+  v1.0 blockers are open, the ref is not a `v*` tag, or `npm publish` fails,
+  the job fails. Every run writes `PUBLISHED <name@version ...>` or
+  `NOT PUBLISHED: <reason>` to the job summary and sets the step output
+  `published=true|false`. A manual run (`workflow_dispatch`, dry run by
+  default) packs every package and reports `dry-run, not published` (#2335).
+
 ### Removed
 
 - Removed the bundled `camp-somewhere-cli` constitution. This was a breaking
