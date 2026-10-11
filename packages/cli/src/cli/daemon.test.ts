@@ -4,6 +4,7 @@ import { mkdtempSync, appendFileSync, existsSync, mkdirSync, readFileSync, rmSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { getFactoryPaths } from '@on-par/factory-core';
 import { DEFAULT_FACTORYD_PORT, defaultRegistryPath, type RunRuntime } from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -874,9 +875,13 @@ describe('auto-update (#1939)', () => {
       }),
       writeStops: vi.fn(async () => {
         stopCalls++;
-        if (existsSync(stop)) return [];
         mkdirSync(join(dir, 'repo'), { recursive: true });
-        writeFileSync(stop, '');
+        try {
+          writeFileSync(stop, '', { flag: 'wx' });
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code === 'EEXIST') return [];
+          throw err;
+        }
         return [stop];
       }),
       clearStops: vi.fn(async (files: string[]) => {
@@ -1069,9 +1074,9 @@ describe('auto-update (#1939)', () => {
   });
 
   describe('createAutoUpdateDeps', () => {
-    it('writes and clears STOP exclusively and reports run-runtime activity', async () => {
+    function setup(over: { entrypoint?: string; runs?: ReturnType<RunRuntime['list']> } = {}) {
       const repo = join(dir, 'checkout');
-      mkdirSync(repo);
+      mkdirSync(repo, { recursive: true });
       const registryFile = join(dir, 'registry.json');
       writeFileSync(
         registryFile,
@@ -1083,20 +1088,36 @@ describe('auto-update (#1939)', () => {
           },
         }),
       );
+      const logs: string[] = [];
+      const check = vi.fn(async () => ok('0.9.1'));
       const deps = createAutoUpdateDeps({
         registryFile,
         stateFile: join(dir, 'update-state.json'),
-        cliEntrypoint: '/nonexistent/cli.js',
-        mode: 'stable',
-        runRuntime: {
-          list: () =>
-            [
-              { repo: 'acme/app', issue: 7, status: 'running' },
-              { repo: 'acme/app', issue: 8, status: 'succeeded' },
-            ] as ReturnType<RunRuntime['list']>,
-        },
-        log: () => {},
+        cliEntrypoint: over.entrypoint ?? '/nonexistent/cli.js',
+        check,
+        runRuntime: { list: () => over.runs ?? [] },
+        log: (l) => logs.push(l),
         exit: () => {},
+      });
+      return { deps, repo, logs, check };
+    }
+
+    /** A stand-in CLI entrypoint: prints `stdout`, writes `stderr`, exits `code`. */
+    function fakeCli(stdout: string, code: number, stderr = ''): string {
+      const file = join(dir, `cli-${code}-${stdout.length}-${stderr.length}.mjs`);
+      writeFileSync(
+        file,
+        `process.stdout.write(${JSON.stringify(stdout)});process.stderr.write(${JSON.stringify(stderr)});process.exit(${code});`,
+      );
+      return file;
+    }
+
+    it('writes and clears STOP exclusively and reports run-runtime activity', async () => {
+      const { deps, check } = setup({
+        runs: [
+          { repo: 'acme/app', issue: 7, status: 'running' },
+          { repo: 'acme/app', issue: 8, status: 'succeeded' },
+        ] as ReturnType<RunRuntime['list']>,
       });
       expect(await deps.activeRuns()).toEqual(['daemon:acme/app#7']);
       const first = await deps.writeStops();
@@ -1106,11 +1127,53 @@ describe('auto-update (#1939)', () => {
       await deps.clearStops(first);
       await deps.clearStops(first);
       expect(existsSync(first[0] as string)).toBe(false);
-      const check = await deps.check();
-      expect(check.error).toContain('self-update --check failed');
+      expect(await deps.check()).toEqual(ok('0.9.1'));
+      expect(check).toHaveBeenCalledOnce();
       expect((await deps.apply('0.9.1')).code).not.toBe(0);
       await deps.sleep(1);
       expect(deps.now()).toBeGreaterThan(0);
+    });
+
+    it('counts a repo whose run lock is held by a live pid as active', async () => {
+      const { deps, repo } = setup();
+      const lock = getFactoryPaths(repo).runLock;
+      mkdirSync(lock, { recursive: true });
+      writeFileSync(join(lock, 'pid'), String(process.pid));
+      expect(await deps.activeRuns()).toEqual(['acme/app']);
+    });
+
+    it('logs a STOP it cannot write and keeps going', async () => {
+      const { deps, repo, logs } = setup();
+      rmSync(repo, { recursive: true });
+      writeFileSync(repo, '');
+      expect(await deps.writeStops()).toEqual([]);
+      expect(logs.some((l) => l.startsWith('update: could not write STOP for acme/app'))).toBe(true);
+    });
+
+    it('rethrows a clearStops failure other than ENOENT', async () => {
+      const { deps } = setup();
+      const notAFile = join(dir, 'a-dir');
+      mkdirSync(notAFile);
+      await expect(deps.clearStops([notAFile])).rejects.toThrow();
+    });
+
+    it('apply reports success from `self-update --to --json`', async () => {
+      const entrypoint = fakeCli(`noise\n${JSON.stringify({ outcome: 'updated' })}\n`, 0);
+      const { deps } = setup({ entrypoint });
+      expect(await deps.apply('0.9.1')).toEqual({ code: 0, rolledBack: false, error: null });
+    });
+
+    it('apply surfaces a rolled-back outcome and its JSON error', async () => {
+      const entrypoint = fakeCli(JSON.stringify({ outcome: 'rolled-back', error: 'doctor failed' }), 1, 'ignored\n');
+      const { deps } = setup({ entrypoint });
+      expect(await deps.apply('0.9.1')).toEqual({ code: 1, rolledBack: true, error: 'doctor failed' });
+    });
+
+    it('apply falls back to the last stderr line, then the exit code', async () => {
+      const withStderr = setup({ entrypoint: fakeCli('[1,2]', 4, 'first\nnpm ERR! boom\n') });
+      expect(await withStderr.deps.apply('0.9.1')).toEqual({ code: 4, rolledBack: false, error: 'npm ERR! boom' });
+      const bare = setup({ entrypoint: fakeCli('not json', 5) });
+      expect(await bare.deps.apply('0.9.1')).toEqual({ code: 5, rolledBack: false, error: 'exit 5' });
     });
   });
 });

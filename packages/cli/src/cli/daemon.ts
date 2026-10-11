@@ -741,12 +741,13 @@ function lastStderrLine(stderr: string): string | null {
   return lastLines(stderr.trimEnd(), 1)[0] || null;
 }
 
-/** Production deps: shells out to `factory self-update`, detects activity from the run runtime and run locks. */
+/** Production deps: checks via the injected `check`, applies via `factory self-update --to`, detects activity from the run runtime and run locks. */
 export function createAutoUpdateDeps(opts: {
   registryFile: string;
   stateFile: string;
   cliEntrypoint: string;
-  mode: UpdateMode;
+  /** Registry check; cmdFactoryd passes `checkForUpdate` from self-update.ts (#2354). */
+  check: () => Promise<AutoUpdateCheck>;
   runRuntime: Pick<RunRuntime, 'list'>;
   log: (line: string) => void;
   exit: (code: number) => Promise<void> | void;
@@ -755,29 +756,7 @@ export function createAutoUpdateDeps(opts: {
   const attached = async () => listRepos(await loadRegistry(opts.registryFile)).filter((e) => e.state !== 'detached');
   return {
     stateFile: opts.stateFile,
-    async check() {
-      const r = await exec(process.execPath, [
-        opts.cliEntrypoint,
-        'self-update',
-        '--check',
-        '--json',
-        '--update-mode',
-        opts.mode,
-      ]);
-      const json = parseLastJsonLine(r.stdout);
-      if (!json) {
-        return {
-          candidate: null,
-          updateAvailable: false,
-          error: `self-update --check failed (exit ${r.code}): ${lastStderrLine(r.stderr) ?? 'no output'}`,
-        };
-      }
-      return {
-        candidate: typeof json.candidate === 'string' ? json.candidate : null,
-        updateAvailable: json.updateAvailable === true,
-        error: typeof json.error === 'string' && json.error !== '' ? json.error : null,
-      };
-    },
+    check: opts.check,
     async apply(version) {
       const r = await exec(process.execPath, [opts.cliEntrypoint, 'self-update', '--to', version, '--json']);
       const json = parseLastJsonLine(r.stdout);

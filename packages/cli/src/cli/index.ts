@@ -347,7 +347,7 @@ import {
   type DaemonCtlDeps,
   type FactorydConfig,
 } from './daemon.js';
-import { cmdSelfUpdateCheck, type SelfUpdateDeps } from './self-update.js';
+import { checkForUpdate, cmdSelfUpdateCheck, type SelfUpdateDeps } from './self-update.js';
 import {
   analyzeEventLog,
   type ClaudeAuthProbe,
@@ -4155,7 +4155,7 @@ async function cmdFactoryd(opts: {
       registryFile,
       stateFile: updateFile,
       cliEntrypoint: fileURLToPath(new URL('../cli.js', import.meta.url)),
-      mode: config.autoUpdate.mode,
+      check: () => checkForUpdate(config.autoUpdate.mode === 'prerelease' ? 'prerelease' : 'stable'),
       runRuntime,
       log,
       exit: async (code) => {
