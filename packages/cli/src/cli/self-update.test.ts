@@ -1,5 +1,8 @@
 // packages/cli/src/cli/self-update.test.ts — factory self-update --check (#2354)
-import { describe, expect, it } from 'vitest';
+import { EventEmitter } from 'node:events';
+import { Agent } from 'node:https';
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DaemonCtlError } from './daemon.js';
 import {
@@ -8,8 +11,11 @@ import {
   compareSemver,
   fetchDistTags,
   formatUpdateCheck,
+  httpsRegistryFetch,
   parseSemver,
   selectCandidate,
+  type HttpsRequest,
+  type HttpsResponse,
   type RegistryFetch,
   type SelfUpdateDeps,
 } from './self-update.js';
@@ -223,5 +229,99 @@ describe('formatUpdateCheck', () => {
       },
     });
     expect(failed.error).toBe('boom');
+  });
+});
+
+/**
+ * A fake node:https `request`: records each call, then hands the response to `reply` once
+ * `end()` is called. Like node, an aborted `signal` destroys the request with an AbortError.
+ */
+function fakeHttps(reply: (res: EventEmitter & HttpsResponse, req: EventEmitter) => void) {
+  const calls: { url: string; options: Parameters<HttpsRequest>[1] }[] = [];
+  const requestImpl: HttpsRequest = (url, options, onResponse) => {
+    calls.push({ url, options });
+    const req = new EventEmitter();
+    options.signal?.addEventListener('abort', () =>
+      req.emit('error', Object.assign(new Error('The operation was aborted'), { name: 'AbortError' })),
+    );
+    return Object.assign(req, {
+      end: () =>
+        setImmediate(() => {
+          const res: EventEmitter & HttpsResponse = new EventEmitter();
+          onResponse(res);
+          reply(res, req);
+        }),
+    });
+  };
+  return { calls, fetch: httpsRegistryFetch(requestImpl) };
+}
+
+/** Replies with `status` and streams `body` in two chunks so reassembly is exercised. */
+const respond = (status: number | undefined, body: string) => (res: EventEmitter & HttpsResponse) => {
+  res.statusCode = status;
+  const mid = Math.floor(body.length / 2);
+  res.emit('data', Buffer.from(body.slice(0, mid)));
+  res.emit('data', Buffer.from(body.slice(mid)));
+  res.emit('end');
+};
+
+describe('httpsRegistryFetch', () => {
+  it('GETs JSON through a proxy-aware agent with a timeout signal and reassembles a chunked body', async () => {
+    const https = fakeHttps(respond(200, JSON.stringify({ latest: '0.9.1', next: '1.0.0-alpha.1' })));
+    const { deps, out } = setup('0.9.0', https.fetch);
+    expect(await cmdSelfUpdateCheck({ json: true }, { ...deps, registry: 'https://r.example/' })).toBe(10);
+    expect(JSON.parse(out.join(''))).toMatchObject({ candidate: '0.9.1', updateAvailable: true, error: null });
+    expect(https.calls).toHaveLength(1);
+    const { url, options } = https.calls[0]!;
+    expect(url).toBe('https://r.example/-/package/%40on-par%2Ffactory-cli/dist-tags');
+    expect(options).toMatchObject({ method: 'GET', headers: { accept: 'application/json' } });
+    expect(options.agent).toBeInstanceOf(Agent);
+    expect(options.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('resolves non-2xx statuses (a missing status as 0) for fetchDistTags to reject', async () => {
+    expect(await fakeHttps(respond(404, 'nope')).fetch('https://r.example/x', { timeoutMs: 1000 })).toEqual({
+      status: 404,
+      body: 'nope',
+    });
+    const noStatus = fakeHttps(respond(undefined, ''));
+    await expect(fetchDistTags(noStatus.fetch)).rejects.toThrow('registry returned HTTP 0');
+  });
+
+  it('rejects on request and response stream errors', async () => {
+    const dns = fakeHttps((_res, req) => req.emit('error', new Error('getaddrinfo ENOTFOUND r.example')));
+    await expect(fetchDistTags(dns.fetch)).rejects.toThrow('ENOTFOUND');
+    const hangUp = fakeHttps((res) => {
+      res.statusCode = 200;
+      res.emit('data', Buffer.from('{"lat'));
+      res.emit('error', new Error('socket hang up'));
+    });
+    await expect(fetchDistTags(hangUp.fetch)).rejects.toThrow('socket hang up');
+  });
+
+  it('aborts a stalled request after timeoutMs and reports it as a timeout', async () => {
+    const stalled = fakeHttps((res) => {
+      res.statusCode = 200; // headers arrive, the body never does
+    });
+    const { deps, out } = setup('0.9.0', stalled.fetch);
+    expect(await cmdSelfUpdateCheck({ json: true }, { ...deps, timeoutMs: 5 })).toBe(1);
+    expect(JSON.parse(out.join(''))).toMatchObject({
+      candidate: null,
+      updateAvailable: false,
+      error: 'registry request timed out after 5 ms',
+    });
+  });
+});
+
+describe('cmdSelfUpdateCheck default output', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('writes the human line to process.stdout when no writer is injected', async () => {
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const { deps } = setup('0.9.0', tagsFetch({ latest: '0.9.0' }));
+    expect(await cmdSelfUpdateCheck({}, { ...deps, out: undefined })).toBe(0);
+    expect(write).toHaveBeenCalledWith('factory 0.9.0 is up to date on latest\n');
   });
 });

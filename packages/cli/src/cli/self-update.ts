@@ -1,5 +1,5 @@
 // packages/cli/src/cli/self-update.ts — factory self-update --check (#2354)
-import { Agent, request } from 'node:https';
+import { Agent, request, type RequestOptions } from 'node:https';
 import {
   DaemonCtlError,
   detectInstall,
@@ -96,23 +96,41 @@ export function selectCandidate(distTags: Record<string, string>, mode: 'stable'
   return best;
 }
 
-const httpsGet: RegistryFetch = (url, { timeoutMs }) =>
-  new Promise((resolve, reject) => {
-    // proxyEnv exists from Node 24.5; older @types/node lacks it on AgentOptions.
-    const agent = new Agent({ proxyEnv: process.env } as ConstructorParameters<typeof Agent>[0]);
-    const req = request(
-      url,
-      { method: 'GET', headers: { accept: 'application/json' }, agent, signal: AbortSignal.timeout(timeoutMs) },
-      (res) => {
-        const chunks: Buffer[] = [];
-        res.on('data', (c: Buffer) => chunks.push(c));
-        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') }));
-        res.on('error', reject);
-      },
-    );
-    req.on('error', reject);
-    req.end();
-  });
+/** The response surface `httpsRegistryFetch` reads; node's IncomingMessage satisfies it. */
+export interface HttpsResponse {
+  statusCode?: number;
+  on(event: 'data', fn: (chunk: Buffer) => void): unknown;
+  on(event: 'end', fn: () => void): unknown;
+  on(event: 'error', fn: (err: Error) => void): unknown;
+}
+
+/** The slice of node:https `request` that `httpsRegistryFetch` uses. */
+export type HttpsRequest = (
+  url: string,
+  options: RequestOptions,
+  onResponse: (res: HttpsResponse) => void,
+) => { on(event: 'error', fn: (err: Error) => void): unknown; end(): unknown };
+
+/** A RegistryFetch over node:https that honours HTTPS_PROXY/NO_PROXY and aborts after `timeoutMs`. */
+export function httpsRegistryFetch(requestImpl: HttpsRequest = request): RegistryFetch {
+  return (url, { timeoutMs }) =>
+    new Promise((resolve, reject) => {
+      // proxyEnv exists from Node 24.5; older @types/node lacks it on AgentOptions.
+      const agent = new Agent({ proxyEnv: process.env } as ConstructorParameters<typeof Agent>[0]);
+      const req = requestImpl(
+        url,
+        { method: 'GET', headers: { accept: 'application/json' }, agent, signal: AbortSignal.timeout(timeoutMs) },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c: Buffer) => chunks.push(c));
+          res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') }));
+          res.on('error', reject);
+        },
+      );
+      req.on('error', reject);
+      req.end();
+    });
+}
 
 export async function fetchDistTags(
   fetchImpl: RegistryFetch,
@@ -162,7 +180,10 @@ export async function checkForUpdate(
     applies: install.kind === 'npm-global',
   };
   try {
-    const tags = await fetchDistTags(deps.fetch ?? httpsGet, { registry: deps.registry, timeoutMs: deps.timeoutMs });
+    const tags = await fetchDistTags(deps.fetch ?? httpsRegistryFetch(), {
+      registry: deps.registry,
+      timeoutMs: deps.timeoutMs,
+    });
     const candidate = selectCandidate(tags, mode);
     const updateAvailable = candidate !== null && compareSemver(candidate, install.version) > 0;
     return { ...base, candidate, updateAvailable, error: null };
