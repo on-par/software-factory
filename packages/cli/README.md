@@ -18,7 +18,7 @@ Requires Node.js >= 24, `git`, Claude Code (`claude`) installed and signed in, a
 
 ## Safety
 
-Agents run with their permission prompts off (Claude Code with `--permission-mode bypassPermissions`, Codex with `approval_policy=never`) in a separate git worktree, with your permissions and your GitHub token. Only point the factory at repos and issues you trust. It never merges unless you turn auto-merge on (`FACTORY_MERGE=1`, `run.merge.auto: true`, or `--auto-merge`; the default is off) or run `factory land`. Details are in the [Safety section](https://github.com/on-par/software-factory#safety) and [SECURITY.md](https://github.com/on-par/software-factory/blob/main/SECURITY.md).
+Agents run with their permission prompts off (Claude Code with `--permission-mode bypassPermissions`, Codex with `approval_policy=never`) in a separate git worktree, with your permissions and your GitHub token. Only point the factory at repos and issues you trust. It never merges by default: `factory run` and `factory supervise` merge only if you turn auto-merge on (`FACTORY_MERGE=1`, `run.merge.auto: true`, or `--auto-merge`), and `factory land` merges when you run it. Details are in the [Safety section](https://github.com/on-par/software-factory#safety) and [SECURITY.md](https://github.com/on-par/software-factory/blob/main/SECURITY.md).
 
 ## Updating
 
@@ -30,7 +30,7 @@ Automatic updates are planned: [#2354](https://github.com/on-par/software-factor
 
 ## Documentation
 
-- [README and Quick Start](https://github.com/on-par/software-factory#readme)
+- [README and quick start](https://github.com/on-par/software-factory#readme)
 - [Architecture and package graph](https://github.com/on-par/software-factory/blob/main/docs/architecture.md)
 - [Changelog](https://github.com/on-par/software-factory/blob/main/CHANGELOG.md)
 

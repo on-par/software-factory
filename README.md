@@ -8,20 +8,20 @@ For an example of its output, see [#2288](https://github.com/on-par/software-fac
 
 ## Status
 
-What works today (statuses reflect the actual code, not the roadmap):
+What works today (this table matches the code on main):
 
-| Feature                                               | Status     | Notes                                                                                                                                                                           |
-| ----------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `factory ship` pipeline (PLAN → BUILD → CHECK → SHIP) | ✅ Working | Covered by an end-to-end pipeline integration test                                                                                                                              |
-| `factory triage` (queue from open issues)             | ✅ Working |                                                                                                                                                                                 |
-| `factory run` (parallel lanes)                        | ✅ Working | Merges are serialized per lane via a merge-wait step                                                                                                                            |
-| `factory land` / auto-merge                           | ✅ Working | Auto-merge is **off by default** (`merge.auto: false`); set `FACTORY_MERGE=1` to enable autonomous squash-merge; add `FACTORY_MERGE_ADMIN=1` only when admin bypass is intended |
-| `factory supervise` (multi-window unattended runs)    | ✅ Working | Waits for usage headroom, runs the queue, repeats until drained                                                                                                                 |
-| Cost tracking (`factory cost`)                        | ✅ Working | Per-task tokens and cost logged to `.factory/costs.jsonl`                                                                                                                       |
+| Feature                                               | Status     | Notes                                                                                                            |
+| ----------------------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------- |
+| `factory ship` pipeline (PLAN → BUILD → CHECK → SHIP) | ✅ Working | Covered by an end-to-end pipeline integration test                                                               |
+| `factory triage` (queue from open issues)             | ✅ Working |                                                                                                                  |
+| `factory run` (parallel lanes)                        | ✅ Working | Merges are serialized per lane via a merge-wait step                                                             |
+| `factory land` / auto-merge                           | ✅ Working | Off by default. Turn on with `FACTORY_MERGE=1`, `run.merge.auto: true` or `--auto-merge`; see [Safety](#safety). |
+| `factory supervise` (multi-window unattended runs)    | ✅ Working | Waits for usage headroom, runs the queue, repeats until drained                                                  |
+| Cost tracking (`factory cost`)                        | ✅ Working | Per-task tokens and cost logged to `.factory/costs.jsonl`                                                        |
 
 The full matrix, including model harnesses, prompt evals, the server, and experimental local (Ollama) models, is in [docs/status.md](docs/status.md).
 
-## Monorepo Structure
+## Monorepo structure
 
 An npm-workspaces monorepo. The published packages:
 
@@ -38,7 +38,7 @@ packages/
 
 Private workspaces (server, dashboard, product, scbench-adapter) also live here but are not published. For the dependency graph and per-package detail, see [docs/architecture.md](docs/architecture.md). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md) and the rules in [AGENTS.md](AGENTS.md).
 
-## Quick Start (5 minutes)
+## Quick start
 
 **Prerequisites**
 
@@ -60,7 +60,7 @@ To run unattended, the factory starts agent CLIs with their permission prompts t
 
 Each build runs in a separate git worktree (a sibling of your repo on a `factory/` branch; change the prefix with `--branch-prefix`), never in your main checkout. Where available, agent runs are wrapped in an OS sandbox (`sandbox-exec` on macOS, `firejail` on Linux). The agents still run as you, with your file permissions and your GitHub token, and builds run the target repo's tests and install its dependencies. Only point the factory at repos and issues you trust.
 
-The factory never merges by default. `factory ship` and `factory run-issue` always stop at a ready-for-review PR. `factory run` and `factory supervise` squash-merge only when auto-merge is on: `FACTORY_MERGE=1` in the environment, `run.merge.auto: true` (or the legacy `merge.auto: true`) in `.factory/config.yaml`, or `--auto-merge` on the command. The default is off (`merge.auto: false`), and `--no-auto-merge` or `run.merge.auto: false` keep it off even when `FACTORY_MERGE=1` is set. `factory land <N>` merges one PR because you asked it to. Admin bypass is separate: `FACTORY_MERGE_ADMIN=1` lets the active GitHub token use administrator privileges to merge through unmet requirements, so set it only when you intend that.
+The factory never merges by default. `factory ship` and `factory run-issue` never merge; they stop at the PR, which is marked ready for review once CI passes. `factory run` and `factory supervise` merge only if you turn auto-merge on (`FACTORY_MERGE=1`, `run.merge.auto: true`, or `--auto-merge`). `FACTORY_MERGE_ADMIN=1` lets the token merge through unmet branch protection; use it only on purpose. Full rules: [docs/config.example.yaml](docs/config.example.yaml).
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
@@ -121,7 +121,7 @@ npm install -g @on-par/factory-cli@latest
 
 Automatic updates are planned: #2354, #2355. The version check (`factory self-update --check`, #2354) is merged on `main` but is not in the 0.9.0 release on npm; the installer (#2355) and the daemon update loop (#1939) are still open. The planned design is in [docs/ops/updating.md](docs/ops/updating.md).
 
-## CLI Commands
+## CLI commands
 
 The most-used commands, by the group `factory --help` lists them under. Run `factory --help` for the full, current list.
 
@@ -181,9 +181,9 @@ Exit codes: `0` when every child reached ready-for-review, was skipped as closed
 | `npm run sandbox-ab-report -- [--costs <file>] [--events <file>]` | Docker-sandbox vs baseline A/B comparison over `.factory/costs.jsonl` and `.factory/events.ndjson` (defaults from `getFactoryPaths`), with a go/no-go recommendation (#656).                                                                 | On demand                                                                 |
 | `npm run mutation`                                                | Stryker mutation testing (`stryker.conf.json`).                                                                                                                                                                                              | On demand only. Not part of `scripts/verify.sh` and not run by CI (#805). |
 
-The commit gate is `bash scripts/verify.sh` (see the verify skill).
+The commit gate is `bash scripts/verify.sh` (see [.claude/skills/verify/SKILL.md](.claude/skills/verify/SKILL.md)).
 
-## Model Routing
+## Model routing
 
 Each task type maps to a tier of models in `packages/config/src/defaults.ts`. The router tries free local models first (experimental; see [docs/status.md](docs/status.md)), then cloud models, and fails over to the next model on rate limits, usage caps, timeouts, or errors. Effort levels can be set per model and task in `.factory/config.yaml`. Run `factory models --doctor` to see which models and provider CLIs are reachable. Tier order, effort settings, harnesses, and failover triggers are documented in [docs/models.md](docs/models.md).
 
@@ -198,10 +198,9 @@ The bundled files below are only templates and worked examples used to seed a ne
 - `packages/config/src/constitutions/example-client-delivery.md`: Client delivery (client brand adherence, tech spec)
 - `packages/config/src/constitutions/_template.md`: Template for new products
 
-### Lane environment (parallel e2e)
+## Lane environment (parallel e2e)
 
-Each lane leases a port from `.factory/ports.json` and every build/check
-command it runs (workers, `npm test`, lint, custom checkers) inherits:
+Each lane leases a port from `.factory/ports.json` and every build/check command it runs (workers, `npm test`, lint, custom checkers) inherits:
 
 | Variable              | Example                 |
 | --------------------- | ----------------------- |
@@ -211,23 +210,15 @@ command it runs (workers, `npm test`, lint, custom checkers) inherits:
 | `FACTORY_HEADLESS`    | `1`                     |
 | `PLAYWRIGHT_HEADLESS` | `1`                     |
 
-Product e2e suites should boot their app on `PORT` (strict-port) and point
-their test runner's base URL at `FACTORY_BASE_URL`. The constitution
-template scaffolds the full Playwright reference contract. When port
-leasing is disabled, checks still run but a `environment_warning` event
-flags the collision risk for app-testing worktrees. Factory-managed runs
-are headless by default: e2e configs must honor `FACTORY_HEADLESS` (headed
-runs are an explicit human opt-in outside the factory, or
-`FACTORY_HEADLESS=0`); unlike the port vars, `FACTORY_HEADLESS` and
-`PLAYWRIGHT_HEADLESS` are injected even when no port lease is configured.
+Product e2e suites should boot their app on `PORT` (strict-port) and point their test runner's base URL at `FACTORY_BASE_URL`. The constitution template scaffolds the full Playwright reference contract. When port leasing is disabled, checks still run but an `environment_warning` event flags the collision risk for app-testing worktrees. Factory-managed runs are headless by default, so e2e configs must honor `FACTORY_HEADLESS`. To run headed, set `FACTORY_HEADLESS=0` or run outside the factory. Unlike the port variables, `FACTORY_HEADLESS` and `PLAYWRIGHT_HEADLESS` are set even when no port lease is configured.
 
-## Open-Core Boundary
+## Open-core boundary
 
 **What's OSS (this repo):** `packages/cli`, `packages/core`, and `packages/config` are the open-source core. The full local pipeline (router, constitutions, checkers, phases) runs from this repo alone, MIT-licensed.
 
-**What isn't published:** `packages/dashboard` (web dashboard, Vite + React walking skeleton), `packages/product` (the proposer: brain-dump to engineering-ready issues), `packages/server` and `packages/scbench-adapter` (SlopCodeBench adapter) live in this monorepo as private workspaces and are not published to npm. A hosted multi-tenant control plane is not part of this codebase. `packages/server` is a real, narrow local server. Its only route is `GET /events`, an SSE relay of the lane lifecycle bus, unauthenticated and loopback-only.
+**What isn't published:** `packages/dashboard` (web dashboard, Vite + React walking skeleton), `packages/product` (the proposer: brain-dump to engineering-ready issues), `packages/server` and `packages/scbench-adapter` (SlopCodeBench adapter) live in this monorepo as private workspaces and are not published to npm. A hosted multi-tenant control plane is not part of this codebase. `packages/server` is a small local server. Its only route is `GET /events`, an SSE relay of the lane lifecycle bus, unauthenticated and loopback-only.
 
-For the safety note (agent permissions, worktrees, and when the factory merges), see [Safety](#safety) under Quick Start.
+For the safety note (agent permissions, worktrees, and when the factory merges), see [Safety](#safety) under Quick start.
 
 ## Contributing
 
