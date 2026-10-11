@@ -15,7 +15,7 @@ import {
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { arch, hostname as osHostname, release, platform, userInfo } from 'node:os';
-import { basename, dirname, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { promisify, styleText } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
@@ -252,6 +252,7 @@ import {
   createOctokitQueueClient,
   daemonRuntimePaths,
   DEFAULT_FACTORYD_PORT,
+  defaultRegistryPath,
   ensureDir,
   FACTORY_RUNTIME_CONFIG_KEYS,
   findUnmergedGreenPrs,
@@ -322,6 +323,8 @@ import {
   cmdDaemonStatus,
   cmdDaemonStop,
   DaemonCtlError,
+  detectInstall,
+  loadDaemonFileConfig,
   resolveFactorydConfig,
   type DaemonCtlDeps,
   type FactorydConfig,
@@ -4037,10 +4040,17 @@ async function cmdProxy() {
  *  next to the registry file — daemon.pid single-instance guard, daemon.port
  *  bound-address record, daemon.log append sink (#1177). `factory daemon
  *  start|stop|status|logs` wrap this process in a launchd LaunchAgent (#1179). */
-async function cmdFactoryd(opts: { port?: string; registry?: string; autoUpdate?: boolean }): Promise<void> {
+async function cmdFactoryd(opts: {
+  port?: string;
+  registry?: string;
+  updateMode?: string;
+  autoUpdate?: boolean;
+}): Promise<void> {
   let config: FactorydConfig;
   try {
-    config = resolveFactorydConfig(opts);
+    const registryFile = opts.registry ?? defaultRegistryPath();
+    const fileConfig = loadDaemonFileConfig(join(dirname(registryFile), 'daemon.json'));
+    config = resolveFactorydConfig({ ...opts, registry: registryFile }, { install: detectInstall(), fileConfig });
   } catch (err) {
     if (err instanceof DaemonCtlError) throw new CliExitError(err.message, err.code);
     throw err;
@@ -4061,6 +4071,7 @@ async function cmdFactoryd(opts: { port?: string; registry?: string; autoUpdate?
     logSink(line);
   };
   if (acquired.stalePid !== null) log(`removed stale pid file (pid ${acquired.stalePid})`);
+  for (const notice of config.notices) log(notice);
 
   const runRuntime = await createRunRuntime({
     registryFile,
@@ -4073,6 +4084,7 @@ async function cmdFactoryd(opts: { port?: string; registry?: string; autoUpdate?
   const banner = [
     `factoryd: listening on 127.0.0.1:${boundPort}`,
     `  registry: ${registryFile}`,
+    `  update mode: ${config.autoUpdate.mode} (channel ${config.autoUpdate.channel ?? 'none'}, install ${config.install.kind})`,
     `  pid file: ${runtime.pidFile} (pid ${process.pid})`,
     `  port file: ${runtime.portFile}`,
     `  log file: ${runtime.logFile}`,
@@ -6667,8 +6679,14 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .description('Run factoryd in the foreground: a localhost-only HTTP API over the repo registry')
     .option('--port <n>', `Port to bind on 127.0.0.1 (default ${DEFAULT_FACTORYD_PORT})`)
     .option('--registry <file>', 'Registry file to serve (default ~/.factory/registry.json)')
-    .option('--auto-update', 'Opt in to automatic factoryd self-update (default: off)')
-    .action((opts: { port?: string; registry?: string; autoUpdate?: boolean }) => cmdFactoryd(opts));
+    .option(
+      '--update-mode <mode>',
+      'Self-update channel: manual, stable (npm latest) or prerelease (npm next) (default: stable on npm installs, manual otherwise)',
+    )
+    .option('--auto-update', 'Deprecated: same as --update-mode stable')
+    .action((opts: { port?: string; registry?: string; updateMode?: string; autoUpdate?: boolean }) =>
+      cmdFactoryd(opts),
+    );
   const daemonCtl = (fn: () => Promise<void>) =>
     fn().catch((err: unknown) => {
       if (err instanceof DaemonCtlError) throw new CliExitError(err.message, err.code);
