@@ -43,4 +43,4 @@ single-file disposable workspace but would need revisiting for richer secret set
 ## References
 
 - [Issue](https://github.com/on-par/software-factory/issues/901)
-- [ADR-0001 boss-worker-checker pipeline (per-issue isolation)](docs/adr/0001-boss-worker-checker-pipeline.md)
+- [ADR-0001 boss-worker-checker pipeline (per-issue isolation)](0001-boss-worker-checker-pipeline.md)

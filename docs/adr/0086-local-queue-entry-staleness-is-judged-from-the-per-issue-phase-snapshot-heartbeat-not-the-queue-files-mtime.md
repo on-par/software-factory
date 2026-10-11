@@ -9,8 +9,8 @@
 parsed from `.factory/state/queue` as if it were live, in-progress work. The
 queue file, however, is never dequeued as entries are processed (#1342's
 acceptance criteria require it to stay untouched), so an idle or crashed
-local run left old entries sitting in the file indefinitely — an idle Mini
-run on 2026-09-09 rendered ~60 of them as apparently in-progress backlog.
+local run left old entries sitting in the file indefinitely. An idle operator
+machine's run on 2026-09-09 rendered ~60 of them as apparently in-progress backlog.
 
 The obvious cheap signal, the queue file's own mtime, does not work: the
 mtime is one timestamp shared across every entry in the file, and it gets

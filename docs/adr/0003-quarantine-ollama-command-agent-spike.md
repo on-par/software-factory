@@ -14,7 +14,7 @@ config: `codexFlag` is consumed only by the `codex-cli` harness
 `provider: ollama` + `codex: true` (`ModelRegistry.getHarnessId`,
 `packages/core/src/models/index.ts`) dispatches to the native
 `ollama-command-agent` loop — `codex exec --local-provider` is never invoked.
-Meanwhile `docs/research/small-model-factory-harness.md` concluded the
+Meanwhile the small-model factory harness research (an internal note) concluded the
 durable design for small local models is a stepwise patch harness (issues
 #170/#171, epic #163), not a command-agent loop, and the first local-only
 comparison run failed in BUILD. Left unmarked, the spike reads like the

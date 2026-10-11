@@ -30,15 +30,14 @@ Several later ADRs build on that rule. They are local-only app and API decisions
   registry read, not a lane-stream projection.
 
 A planned read-only native iOS client (epic [#2266](https://github.com/on-par/software-factory/issues/2266)) needs
-daemon, queue, runs, cost, usage and log data from outside the Mini. We must not widen factoryd to serve it.
+daemon, queue, runs, cost, usage and log data from outside the factory host. We must not widen factoryd to serve it.
 
 ## Decision
 
 factoryd's HTTP API on `:8787` stays loopback-only. It is never tunneled or proxied.
 
-Remote reads go only through a separate read-only bridge. The bridge lives outside this repo, in on-par/ship-it
-(`Packages/FactoryBridge`). It binds `127.0.0.1:8788`, serves a GET-only allowlist, and runs fixed commands. Each one
-runs with `--json`:
+Remote reads go only through a separate read-only bridge. The bridge lives outside this repo. It binds to loopback
+on its own port, serves a GET-only allowlist, and runs fixed commands. Each one runs with `--json`:
 
 - `factory daemon status`
 - `factory status`
@@ -49,9 +48,9 @@ runs with `--json`:
 - `factory runs --diffstat`
 - `factory logs`
 
-The bridge is reachable only through Cloudflare Tunnel `ship-it-zglihd.onpardev.com`, behind Cloudflare Access with a
-service-token policy. cloudflared enforces Access at the origin. The bridge also validates the Access JWT itself and
-fails closed.
+The bridge is reachable only through an authenticated tunnel, behind an identity-aware access policy that requires a
+service token. The tunnel enforces that policy at the origin. The bridge also validates the access token (a signed JWT)
+itself and fails closed.
 
 The bridge never proxies factoryd routes. That includes the routes covered by ADR-0094 to ADR-0101, which stay
 local-only and unchanged.
@@ -67,14 +66,16 @@ bridge.
 
 This amends ADR-0034. It does not supersede it. ADR-0034 says a remote-access story supersedes it unless it lands real
 authentication. Here factoryd's binding and its no-auth-check rule stay exactly as they are. The remote surface is a
-different process with real authentication: Cloudflare Access plus JWT validation at the bridge, which fails closed.
+different process with real authentication: the tunnel's access policy plus JWT validation at the bridge, which fails
+closed.
 So ADR-0034's condition is met outside factoryd.
 
 ## Consequences
 
 - factoryd and its authorization model do not change.
 - Write actions stay local-only.
-- A second process must be deployed and kept in sync with the CLI. ship-it contract CI covers drift.
+- A second process must be deployed and kept in sync with the CLI. Contract tests in the bridge's own repo cover
+  drift against the `--json` outputs.
 - Any write route over a remote surface needs a new ADR with a real authentication design.
 
 ## References
@@ -97,7 +98,3 @@ So ADR-0034's condition is met outside factoryd.
   [#2272](https://github.com/on-par/software-factory/issues/2272),
   [#2273](https://github.com/on-par/software-factory/issues/2273),
   [#1101](https://github.com/on-par/software-factory/issues/1101)
-- ship-it issues: [#1](https://github.com/on-par/ship-it/issues/1),
-  [#13](https://github.com/on-par/ship-it/issues/13), [#14](https://github.com/on-par/ship-it/issues/14),
-  [#15](https://github.com/on-par/ship-it/issues/15), [#16](https://github.com/on-par/ship-it/issues/16),
-  [#17](https://github.com/on-par/ship-it/issues/17)

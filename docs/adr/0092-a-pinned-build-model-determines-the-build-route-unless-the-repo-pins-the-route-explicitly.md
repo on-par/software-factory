@@ -17,7 +17,7 @@ build pin whose harness did not match the chosen route, logging
 That made the two pins interact in a way operators do not expect: pinning
 `models.build: claude-sonnet-5` with `providers.openai: false` still let
 PLAN pick `codex`, the pin was discarded, and BUILD ran on a GPT worker
-(on-par/sound-buddy #1392, 2026-09-10; software-factory #1367). The plan
+(a downstream product repo, 2026-09-10; software-factory #1367). The plan
 prompt only taught the boss to honor opencode-harness pins.
 
 ## Decision

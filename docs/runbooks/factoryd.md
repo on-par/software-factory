@@ -4,7 +4,7 @@ factoryd is the single long-running, **user-scoped** factory daemon: a
 loopback-only HTTP API over the repo registry (`~/.factory/registry.json`,
 epic #761). It is one process per user with many repos attached to it —
 distinct from the per-repo `factory run` / `factory supervise` processes (and
-the per-repo LaunchAgent supervisors already on the Mini), whose state lives in
+any per-repo LaunchAgent supervisors on the host), whose state lives in
 each checkout's `.factory/` directory.
 
 ## Starting it

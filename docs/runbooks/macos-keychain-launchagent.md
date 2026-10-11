@@ -1,6 +1,6 @@
 # macOS Claude keychain access with a LaunchAgent
 
-Reference: #1014. This is the Mini factory operations path for Claude Max workers on macOS.
+Reference: #1014. This is the operations path for running factory workers on a Claude Max subscription under a macOS LaunchAgent.
 
 ## Symptom
 

@@ -45,4 +45,4 @@ to confirm it.
 ## References
 
 - [Issue](https://github.com/on-par/software-factory/issues/899)
-- [ADR-0002 — structured logging via the event log (additive event kinds)](docs/adr/0002-structured-logging-via-event-log.md)
+- [ADR-0002 — structured logging via the event log (additive event kinds)](0002-structured-logging-via-event-log.md)

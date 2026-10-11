@@ -14,7 +14,7 @@ still wired to the local file only — `cmdTui` passed `queueFile` /
 `readQueue()` every two seconds. On a checkout with a stale queue file the
 tab listed dozens of old lines while the factory was actually claiming from
 GitHub, so an operator watching the TUI could not tell what was really
-claimable (#1362; the Mini 2026-09-09 scenario in #1339).
+claimable (#1362; the 2026-09-09 scenario in #1339).
 
 The TUI package deliberately depends only on `@on-par/factory-core`, `ink`
 and `react` — it has never imported octokit — and ADR-0067 fixes the

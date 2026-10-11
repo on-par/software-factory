@@ -17,8 +17,8 @@ Positive: no execution-time ceiling (only factory.json timeouts apply, so a 2-ho
 
 ## References
 
-- [docs/research/sandbox-tech-comparison.md (#619)](docs/research/sandbox-tech-comparison.md)
-- [docs/research/hosting-comparison.md (#620)](docs/research/hosting-comparison.md)
-- [docs/research/hosted-credentials.md (#621)](docs/research/hosted-credentials.md)
-- [docs/research/sandbox-posture-audit.md (#618)](docs/research/sandbox-posture-audit.md)
+- [docs/research/sandbox-tech-comparison.md (#619)](../research/sandbox-tech-comparison.md)
+- [docs/research/hosting-comparison.md (#620)](../research/hosting-comparison.md)
+- [docs/research/hosted-credentials.md (#621)](../research/hosted-credentials.md)
+- Sandbox posture audit (#618, internal note, not published)
 - [Issue](https://github.com/on-par/software-factory/issues/622)

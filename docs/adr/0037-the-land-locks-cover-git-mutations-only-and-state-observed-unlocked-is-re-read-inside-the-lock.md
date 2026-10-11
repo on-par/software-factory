@@ -51,4 +51,4 @@ critical section, after a state re-read) or a wait (outside every lock).
 ## References
 
 - [Issue #645 — landIssue holds the process-wide git lock across a 10-20 minute CI watch](https://github.com/on-par/software-factory/issues/645)
-- [ADR-0009 — Stealing a stale file lock is fenced by a sibling steal-arbiter directory](docs/adr/0009-fenced-steal-of-stale-file-locks.md)
+- [ADR-0009 — Stealing a stale file lock is fenced by a sibling steal-arbiter directory](0009-fenced-steal-of-stale-file-locks.md)

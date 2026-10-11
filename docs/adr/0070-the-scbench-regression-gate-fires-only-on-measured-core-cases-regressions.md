@@ -46,5 +46,5 @@ jump the delta far past a small threshold.
 
 ## References
 
-- [ADR-0007 — baseline correctness derives only from retained native SCBench evidence](docs/adr/0007-slopcodebench-baseline-correctness-derives-only-from-retained-native-scbench-evidence.md)
+- [ADR-0007 — baseline correctness derives only from retained native SCBench evidence](0007-slopcodebench-baseline-correctness-derives-only-from-retained-native-scbench-evidence.md)
 - [Issue #1135](https://github.com/on-par/software-factory/issues/1135)

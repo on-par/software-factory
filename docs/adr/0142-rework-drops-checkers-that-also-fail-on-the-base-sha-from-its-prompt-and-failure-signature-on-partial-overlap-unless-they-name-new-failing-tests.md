@@ -41,6 +41,6 @@ cannot parse is treated as base-only.
 
 ## References
 
-- [ADR-0141: environment rework cause](docs/adr/0141-a-rework-round-is-classified-as-environment-when-every-round-1-failing-checker-also-fails-on-the-base-sha-decided-before-the-rework-loop.md)
-- [ADR-0139: lane breaker on failure signature](docs/adr/0139-a-lane-pauses-after-consecutive-parks-with-the-same-failure-signature-and-pausing-only-stops-claiming.md)
+- [ADR-0141: environment rework cause](0141-a-rework-round-is-classified-as-environment-when-every-round-1-failing-checker-also-fails-on-the-base-sha-decided-before-the-rework-loop.md)
+- [ADR-0139: lane breaker on failure signature](0139-a-lane-pauses-after-consecutive-parks-with-the-same-failure-signature-and-pausing-only-stops-claiming.md)
 - [Issue #1929](https://github.com/on-par/software-factory/issues/1929)

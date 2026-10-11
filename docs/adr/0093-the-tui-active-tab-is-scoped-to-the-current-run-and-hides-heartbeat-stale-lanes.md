@@ -10,7 +10,7 @@ from the beginning through `reduceDashboard` (ADR-0002 makes the event log
 the single source). A lane left `running` / `ready` / `waiting-merge` only
 on a terminal event the run itself logged. Two consequences on any
 long-lived checkout (#1369): the log accumulates every run ever made (161
-on the Mini's factory-app checkout) and `run-done` never dropped the
+on one long-lived checkout) and `run-done` never dropped the
 finished run's lanes; and a PR merged outside the run — by the auto-merge
 sweep, `factory land`, or a person — logs no `landed` event, so its lane
 sat at "waiting to merge" for days. A run killed mid-issue left `running`

@@ -16,7 +16,7 @@ database) and lasting security exposure (an over-permissive IAM role, a
 publicly-exposed resource) that keeps costing money after the agent has moved
 on. The #624 audit documented the precedent in this org's own pipelines: App
 Store Connect app-record creation and app-specific-password generation stayed
-human-gated even in otherwise fully autonomous pipelines, and sound-buddy's
+human-gated even in otherwise fully autonomous pipelines, and one app's
 release used draft-then-promote plus a confirmation prompt before any publish.
 The factory already owns the enforcement machinery this decision reuses: an
 `ApprovalGate` seam with a `plan` approval kind and fail-safe deny on timeout
@@ -63,9 +63,9 @@ deliberately left undecided; the gate applies regardless of which is chosen.
 
 ## References
 
-- [docs/research/cloud-provisioning-guardrails.md (#627, this PR)](../../docs/research/cloud-provisioning-guardrails.md)
+- Cloud provisioning guardrails research (#627, internal note, not published)
 - [docs/research/aws-deployment-automation.md (#625)](../../docs/research/aws-deployment-automation.md)
 - [docs/research/azure-deployment-automation.md (#626)](../../docs/research/azure-deployment-automation.md)
-- [docs/research/deployment-automation-audit.md (#624)](../../docs/research/deployment-automation-audit.md)
+- Deployment automation audit (#624, internal note, not published)
 - [packages/core/src/approvals/index.ts (ApprovalGate seam)](../../packages/core/src/approvals/index.ts)
 - [ADR-0020 (cost KPIs)](0020-cost-kpis-are-scored-on-cost-bearing-cohorts-and-absent-cost-data-is-unknown-never-zero.md)
