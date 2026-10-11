@@ -17,6 +17,8 @@ import { randomUUID } from 'node:crypto';
 import type { Octokit } from '@octokit/rest';
 
 import type { ApprovalGate } from '../approvals/index.js';
+import type { checkBaseHealth } from '../checkers/base-health.js';
+import { laneEnv } from '../environment/index.js';
 import { buildPhase as buildPhaseDefault } from '../phases/build.js';
 import {
   checkPhase as checkPhaseDefault,
@@ -207,6 +209,8 @@ export interface RunPorts {
   buildPhase?: typeof buildPhaseDefault;
   checkPhase?: typeof checkPhaseDefault;
   shipPhase?: typeof shipPhaseDefault;
+  /** Pre-PLAN health check of origin/main (#2339). Absent = skipped (existing callers/tests unchanged). */
+  checkBaseHealth?: typeof checkBaseHealth;
   /** Reads the PR's path changes for the classifier (#1724). Defaults to the git-backed reader. */
   readReviewFloorChanges?: (worktree: string, fallbackBaseRef?: string) => Promise<ReviewFloorPathChange[]>;
 }
@@ -518,6 +522,39 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       );
     } else {
       log('constitution', 'No standards found (no repo instruction files, no constitution) — proceeding without');
+    }
+
+    // Pre-PLAN base health (#2339): a red origin/main releases the issue before any model spend;
+    // the CLI turns `released` into LaneEnvironmentPauseError, whose runLane branch writes the base hold.
+    if (ports.checkBaseHealth && !request.localOnly) {
+      const health = await ports
+        .checkBaseHealth({
+          worktree: ports.workspace.path,
+          constitution,
+          router: ports.router,
+          env: laneEnv(appPort, process.env, appBaseUrl, ports.workspace.path, runId),
+          cachePath: request.baselineCachePath,
+          timeoutSeconds: request.timeouts.check,
+          log: (type, msg) => log(type, msg),
+        })
+        .catch((err): undefined => {
+          log('environment_warning', `base health check failed: ${errorMessage(err)} — continuing to PLAN`);
+          return undefined;
+        });
+      if (health?.kind === 'red' && health.baseSha !== undefined) {
+        log(
+          'environment-released',
+          `origin/main ${health.baseSha.slice(0, 8)} fails ${health.failingChecks.join(', ')} before PLAN — no model calls, releasing #${request.issue} to queued`,
+        );
+        return {
+          state: 'released',
+          reason: 'environment',
+          branch: request.branch,
+          reworkRounds: 0,
+          baseSha: health.baseSha,
+          failingChecks: health.failingChecks,
+        };
+      }
     }
 
     // Run-start HEAD (#1210): captured exactly once, before PLAN, for local-only

@@ -325,6 +325,9 @@ const PUBLIC_API_KEYS = [
 ];
 
 const INTERNAL_API_KEYS = [
+  // Pre-PLAN base health (#2339)
+  'BASE_HEALTH_CHECKERS',
+  'checkBaseHealth',
   // Persisted per-issue run state (#2271)
   'readIssueRunState',
   // Garden harvest (#2083)

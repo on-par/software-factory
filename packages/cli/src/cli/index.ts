@@ -209,6 +209,7 @@ import type {
 } from '@on-par/factory-core/internal';
 import {
   acquirePidFile,
+  checkBaseHealth,
   currentSlice,
   egressSummaryMessage,
   findSlicePlanComment,
@@ -2122,6 +2123,7 @@ export async function shipIssue(
     | 'buildPhase'
     | 'checkPhase'
     | 'shipPhase'
+    | 'checkBaseHealth'
     | ConfigLoaderKey
     | GitOpKey
     | ShellOpKey
@@ -2441,6 +2443,7 @@ export async function shipIssue(
     buildPhase: phases.buildPhase,
     checkPhase: phases.checkPhase,
     shipPhase: phases.shipPhase,
+    checkBaseHealth: deps.checkBaseHealth ?? checkBaseHealth,
     resolveConstitution: () =>
       // Resolved once here — runIssue calls this exactly once and reuses the value for
       // every phase, so the build worker can never author the standards it is graded by.
@@ -6031,6 +6034,8 @@ export interface CliDeps {
   buildPhase?: RunPorts['buildPhase'];
   checkPhase?: RunPorts['checkPhase'];
   shipPhase?: RunPorts['shipPhase'];
+  /** Pre-PLAN base health check (#2339) forwarded into RunPorts by shipIssue. Defaults to the factory-core checkBaseHealth. */
+  checkBaseHealth?: RunPorts['checkBaseHealth'];
   /** Config loaders and resolvers. Each defaults to the factory-core export of the same name. */
   loadModelsConfig?: typeof loadModelsConfig;
   loadRoutesConfig?: typeof loadRoutesConfig;

@@ -1,0 +1,205 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
+
+import type { EventKind } from '../events/kinds.js';
+import type { ModelRouter } from '../router/index.js';
+import type { CommandResult } from '../utils/command-runner.js';
+import type { BaselineCheckerComparison, BaselineReport, runBaselineCheckers } from './baseline.js';
+import { BASE_HEALTH_CHECKERS, checkBaseHealth, type BaseHealthOptions } from './base-health.js';
+
+const SHA = 'b'.repeat(40);
+const router = {} as ModelRouter;
+
+function cmd(stdout: string, exitCode = 0): CommandResult {
+  return { command: [], stdout, stderr: '', exitCode, killed: false, timedOut: false, ok: exitCode === 0 };
+}
+
+const revParse = (stdout = `${SHA}\n`, exitCode = 0) => vi.fn(async () => cmd(stdout, exitCode));
+
+function report(
+  verdicts: Partial<Record<string, BaselineCheckerComparison['verdict']>>,
+  cached = false,
+): BaselineReport {
+  return {
+    baseSha: SHA,
+    checkers: BASE_HEALTH_CHECKERS.map((checker) => ({
+      checker,
+      verdict: verdicts[checker] ?? 'clean-on-base',
+      ...(cached ? { cached: true } : {}),
+    })),
+  };
+}
+
+let memo: Map<string, Promise<BaselineReport>>;
+let log: Mock<(type: EventKind, msg: string) => void>;
+
+beforeEach(() => {
+  memo = new Map();
+  log = vi.fn<(type: EventKind, msg: string) => void>();
+});
+
+function opts(deps: NonNullable<BaseHealthOptions['deps']>, extra: Partial<BaseHealthOptions> = {}): BaseHealthOptions {
+  return {
+    worktree: '/tmp/wt',
+    constitution: null,
+    router,
+    env: { A: '1' },
+    log,
+    ...extra,
+    deps: { memo, runCommand: revParse(), ...deps },
+  };
+}
+
+const messages = () => log.mock.calls.map((c) => String(c[1]));
+
+describe('checkBaseHealth', () => {
+  it('green: runs the three synthetic FAIL checkers on the resolved SHA', async () => {
+    const runBaseline = vi.fn<typeof runBaselineCheckers>(async () => report({}));
+    const res = await checkBaseHealth(opts({ runBaseline }));
+    expect(res).toEqual({ kind: 'green', baseSha: SHA, failingChecks: [], cached: false });
+    const arg = runBaseline.mock.calls[0][0];
+    expect(arg.baseSha).toBe(SHA);
+    expect(arg.failing).toEqual(BASE_HEALTH_CHECKERS.map((checker) => ({ checker, result: 'FAIL', details: '' })));
+  });
+
+  it('red: names the checkers that fail on base', async () => {
+    const runBaseline = vi.fn<typeof runBaselineCheckers>(async () => report({ tests: 'fails-on-base' }));
+    const res = await checkBaseHealth(opts({ runBaseline }));
+    expect(res).toMatchObject({ kind: 'red', failingChecks: ['tests'], baseSha: SHA });
+    expect(messages().some((m) => m.includes('is red (tests)'))).toBe(true);
+  });
+
+  it.each([
+    ['non-zero exit', revParse('', 128)],
+    ['malformed stdout', revParse('not-a-sha')],
+    [
+      'a throw',
+      vi.fn(async () => {
+        throw new Error('spawn');
+      }),
+    ],
+  ])('skips when rev-parse fails (%s)', async (_n, runCommand) => {
+    const runBaseline = vi.fn<typeof runBaselineCheckers>();
+    const res = await checkBaseHealth(opts({ runBaseline, runCommand }));
+    expect(res).toMatchObject({ kind: 'skipped', failingChecks: [], cached: false });
+    expect(runBaseline).not.toHaveBeenCalled();
+  });
+
+  it('skips on report.error and re-runs on the next call', async () => {
+    const runBaseline = vi.fn<typeof runBaselineCheckers>(async () => ({
+      baseSha: SHA,
+      checkers: [],
+      error: 'wt failed',
+    }));
+    const res = await checkBaseHealth(opts({ runBaseline }));
+    expect(res).toMatchObject({ kind: 'skipped', baseSha: SHA, reason: 'wt failed' });
+    expect(log.mock.calls.some((c) => c[0] === 'environment_warning')).toBe(true);
+    await checkBaseHealth(opts({ runBaseline }));
+    expect(runBaseline).toHaveBeenCalledTimes(2);
+  });
+
+  it('skips on a rejected baseline run and drops the memo key', async () => {
+    const runBaseline = vi.fn<typeof runBaselineCheckers>(async () => {
+      throw new Error('kaboom');
+    });
+    const res = await checkBaseHealth(opts({ runBaseline }));
+    expect(res).toMatchObject({ kind: 'skipped', reason: 'kaboom' });
+    expect(memo.size).toBe(0);
+  });
+
+  it('skips on a non-Error rejection', async () => {
+    const runBaseline = vi.fn<typeof runBaselineCheckers>(() => Promise.reject('plain'));
+    const res = await checkBaseHealth(opts({ runBaseline }));
+    expect(res.reason).toBe('plain');
+  });
+
+  it('two lanes on the same base SHA run the baseline checkers once', async () => {
+    let release!: (r: BaselineReport) => void;
+    const runBaseline = vi.fn<typeof runBaselineCheckers>(
+      () => new Promise<BaselineReport>((resolve) => (release = resolve)),
+    );
+    const log2 = vi.fn<(type: EventKind, msg: string) => void>();
+    const first = checkBaseHealth(opts({ runBaseline }));
+    const second = checkBaseHealth(opts({ runBaseline }, { log: log2 }));
+    await vi.waitFor(() => expect(release).toBeDefined());
+    release(report({ lint: 'fails-on-base' }));
+    const [a, b] = await Promise.all([first, second]);
+    expect(runBaseline).toHaveBeenCalledTimes(1);
+    expect(a).toMatchObject({ kind: 'red', cached: false });
+    expect(b).toMatchObject({ kind: 'red', cached: true, failingChecks: ['lint'] });
+    expect(log2.mock.calls.some((c) => String(c[1]).startsWith('base health: cache hit'))).toBe(true);
+  });
+
+  it('logs base health: cache hit when the result is reused', async () => {
+    const runBaseline = vi.fn<typeof runBaselineCheckers>(async () => report({}, true));
+    const res = await checkBaseHealth(opts({ runBaseline }));
+    expect(res.cached).toBe(true);
+    expect(messages().some((m) => m.startsWith('base health: cache hit'))).toBe(true);
+  });
+
+  it('does not log a cache hit when nothing was reused', async () => {
+    await checkBaseHealth(opts({ runBaseline: vi.fn<typeof runBaselineCheckers>(async () => report({})) }));
+    expect(messages().some((m) => m.startsWith('base health: cache hit'))).toBe(false);
+  });
+
+  it('passes cache: undefined without a cachePath and a BaselineCache with one', async () => {
+    const runBaseline = vi.fn<typeof runBaselineCheckers>(async () => report({}));
+    await checkBaseHealth(opts({ runBaseline }));
+    expect(runBaseline.mock.calls[0][0].cache).toBeUndefined();
+    await checkBaseHealth(opts({ runBaseline }, { cachePath: '/tmp/x/cache.json', env: { B: '2' } }));
+    expect(runBaseline.mock.calls[1][0].cache).toBeDefined();
+  });
+
+  it('uses the real runCommand and module memo by default (non-git dir → skipped)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'base-health-'));
+    try {
+      const res = await checkBaseHealth({ worktree: dir, constitution: null, router, env: {}, log });
+      expect(res.kind).toBe('skipped');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('never throws: an unexpected error returns skipped', async () => {
+    log.mockImplementationOnce(() => {
+      throw new Error('log broke');
+    });
+    const res = await checkBaseHealth(opts({ runCommand: revParse('', 1) }));
+    expect(res).toMatchObject({ kind: 'skipped', reason: 'log broke' });
+  });
+
+  it('a second lane reuses the file-cached base result', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'base-health-cache-'));
+    try {
+      const runCheckers = vi.fn(async () => ({
+        failures: 1,
+        passes: 2,
+        skips: 0,
+        total: 3,
+        results: [
+          { checker: 'compile', result: 'PASS' as const, details: '' },
+          { checker: 'lint', result: 'PASS' as const, details: '' },
+          { checker: 'tests', result: 'FAIL' as const, details: 'x' },
+        ],
+      }));
+      const baselineDeps = {
+        runCommand: vi.fn(async () => cmd('')),
+        runCheckers: runCheckers as never,
+        makeTempDir: () => mkdtemp(join(dir, 'p-')),
+      };
+      const cachePath = join(dir, 'baseline-cache.json');
+      const first = await checkBaseHealth(opts({ baselineDeps, memo: new Map() }, { cachePath }));
+      const second = await checkBaseHealth(opts({ baselineDeps, memo: new Map() }, { cachePath }));
+      expect(runCheckers).toHaveBeenCalledTimes(1);
+      expect(first).toMatchObject({ kind: 'red', failingChecks: ['tests'], cached: false });
+      expect(second).toMatchObject({ kind: 'red', failingChecks: ['tests'], cached: true });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+afterEach(() => vi.restoreAllMocks());

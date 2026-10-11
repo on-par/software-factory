@@ -1820,3 +1820,73 @@ describe('runIssue — flaky ledger and issue filing (#2303)', () => {
     expect(existsSync(ledger)).toBe(false);
   });
 });
+
+describe('runIssue — pre-PLAN base health (#2339)', () => {
+  const BASE = 'a'.repeat(40);
+  const health = (kind: 'green' | 'red' | 'skipped') =>
+    vi.fn<NonNullable<RunPorts['checkBaseHealth']>>().mockResolvedValue({
+      kind,
+      ...(kind === 'skipped' ? {} : { baseSha: BASE }),
+      failingChecks: kind === 'red' ? ['tests'] : [],
+      cached: false,
+    });
+
+  it('red base before PLAN releases with zero model calls and never enters PLAN', async () => {
+    const router = fakeRouter();
+    const run = vi.spyOn(router, 'run');
+    const recordPhase = vi.fn().mockResolvedValue(undefined);
+    const log = vi.fn();
+    const outcome = await runIssue(
+      baseRequest(),
+      basePolicy(),
+      basePorts({ router, recordPhase, events: () => log, checkBaseHealth: health('red') }),
+    );
+
+    expect(outcome).toMatchObject({
+      state: 'released',
+      reason: 'environment',
+      baseSha: BASE,
+      failingChecks: ['tests'],
+      reworkRounds: 0,
+    });
+    for (const phase of [planPhase, buildPhase, checkPhase, shipPhase]) expect(phase).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+    expect(recordPhase).not.toHaveBeenCalledWith('plan');
+    expect(log.mock.calls.map((c) => c[0])).toContain('environment-released');
+  });
+
+  it.each(['green', 'skipped'] as const)('a %s base proceeds to PLAN', async (kind) => {
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ checkBaseHealth: health(kind) }));
+    expect(outcome.state).toBe('ready');
+    expect(planPhase).toHaveBeenCalledTimes(1);
+  });
+
+  it('a thrown port logs environment_warning and proceeds to PLAN', async () => {
+    const log = vi.fn();
+    const checkBaseHealth = vi.fn().mockRejectedValue(new Error('boom'));
+    await runIssue(baseRequest(), basePolicy(), basePorts({ events: () => log, checkBaseHealth }));
+    expect(log.mock.calls.map((c) => c[0])).toContain('environment_warning');
+    expect(planPhase).toHaveBeenCalledTimes(1);
+  });
+
+  it('an absent port proceeds to PLAN', async () => {
+    await runIssue(baseRequest(), basePolicy(), basePorts());
+    expect(planPhase).toHaveBeenCalledTimes(1);
+  });
+
+  it('never calls the port for a local-only run', async () => {
+    const checkBaseHealth = health('red');
+    await runIssue(baseRequest({ localOnly: true }), basePolicy(), basePorts({ checkBaseHealth }));
+    expect(checkBaseHealth).not.toHaveBeenCalled();
+  });
+
+  it('passes the baseline cache path and lane worktree to the port', async () => {
+    const checkBaseHealth = health('green');
+    await runIssue(baseRequest({ baselineCachePath: '/tmp/cache.json' }), basePolicy(), basePorts({ checkBaseHealth }));
+    expect(checkBaseHealth.mock.calls[0][0]).toMatchObject({
+      worktree: '/tmp/wt',
+      cachePath: '/tmp/cache.json',
+      timeoutSeconds: 60,
+    });
+  });
+});
