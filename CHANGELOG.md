@@ -4,16 +4,41 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.9.2
+
+Public-repo cleanup and first-run reliability fixes. All seven published
+`@on-par` packages move to 0.9.2 in lockstep. Install or update with
+`npm install -g @on-par/factory-cli@latest`.
+
 ### Changed
 
 - `factory feedback` files its issue in your own repo: `--repo owner/name`,
   then the new `filing.repo` config key, then the checkout's `origin` remote.
   It no longer falls back to on-par/software-factory; with no repo it stops
   with a clear error. The issue leaves out your host name and local design and
-  log paths unless you pass `--include-local-paths`.
+  log paths unless you pass `--include-local-paths` (#2398).
 - Upstream factory reports have no built-in target repo either. Without an
-  explicit repo they are skipped with reason `no-target-repo`.
-- Removed internal operations notes from the docs.
+  explicit repo they are skipped with reason `no-target-repo` (#2398).
+- Public-repo cleanup: removed internal operations notes and research from
+  the docs and fixed broken doc links (#2398).
+- The CLI refuses to start on Node below 24 with a clear message, before it
+  loads `node:sqlite` (#2390).
+- `factory doctor` runs outside a repo, checks your git identity, and warns
+  when no sandbox runtime is available (#2391).
+- Readiness keeps the original issue body when enriching it and adds an
+  opt-out (#2395).
+
+### Added
+
+- factoryd checks for updates every 30 minutes, drains, self-updates and
+  restarts via launchd, and skips versions that failed (#2375).
+
+### Fixed
+
+- The model router skips Ollama models when Ollama is unreachable, and triage
+  logs the model it actually runs (#2394).
+- `factory ship` detects a repo with no CI checks early and logs CI wait
+  progress (#2396).
 
 ## 0.9.1
 

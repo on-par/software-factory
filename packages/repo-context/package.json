@@ -1,6 +1,6 @@
 {
   "name": "@on-par/repo-context",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "Read-only repo reader behind a stable interface: GitHub contents-API and in-memory implementations.",
   "type": "module",
   "main": "dist/index.js",
