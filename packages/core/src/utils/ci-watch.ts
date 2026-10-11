@@ -179,6 +179,14 @@ export interface CiRescue {
   runIds: number[];
 }
 
+/** watchChecksWithInfraRerun's verdict: a CiOutcome, or 'infra-failure' when the one rerun
+ *  also failed and every failed run is still infra on the same head SHA (#2366). */
+export type InfraRerunOutcome = CiOutcome | 'infra-failure';
+
+export interface CiRescueFailure extends CiRescue {
+  outcome: Exclude<InfraRerunOutcome, 'success'>;
+}
+
 export interface InfraRerunWatchOptions extends WatchChecksOptions {
   /** The watcher to wrap; default watchChecks. */
   watch?: (opts: WatchChecksOptions) => Promise<CiOutcome>;
@@ -188,18 +196,55 @@ export interface InfraRerunWatchOptions extends WatchChecksOptions {
   rerunBudget?: CiRerunBudget;
   /** Called once when the post-rerun watch is green. */
   onRescued?: (rescue: CiRescue) => void;
+  /** Called once when a rerun was issued in this call and the final verdict is not success. */
+  onRescueFailed?: (failure: CiRescueFailure) => void;
 }
 
 const DEFAULT_RERUN_BUDGET: CiRerunBudget = new Set();
+
+/** Lists the failed check runs for a ref and fetches each Actions job. Returns null on any
+ *  non-infra job, missing numeric id, zero failed runs or missing head SHA. May throw. */
+async function infraFailedJobs(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  ref: string,
+  perPage: number,
+  maxPages: number,
+): Promise<{ headSha: string; jobs: CiJobLike[] } | null> {
+  const runs = await listAllCheckRuns(octokit, owner, repo, ref, perPage, maxPages);
+  const failed = runs.filter((r) => r.status === 'completed' && !isPassingConclusion(r.conclusion));
+  if (failed.length === 0) return null;
+  const jobs: CiJobLike[] = [];
+  for (const run of failed) {
+    if (typeof run.id !== 'number') return null;
+    const { data: job } = await octokit.rest.actions.getJobForWorkflowRun({ owner, repo, job_id: run.id });
+    if (classifyCiFailure(job) !== 'infra') return null;
+    jobs.push(job);
+  }
+  const headSha = failed[0].head_sha ?? jobs[0].head_sha;
+  if (!headSha) return null;
+  return { headSha, jobs };
+}
 
 /** watchChecks plus a one-shot rescue for infrastructure failures (#2365). When the watch ends
  *  'failure' and every failed check run maps to an Actions job that classifyCiFailure calls
  *  'infra', the failed jobs are rerun once (`gh run rerun <run> --failed`) and CI is watched
  *  again. Budget: one rerun per head SHA (in-process Set) and never for a job already on
  *  run_attempt > 1, so there is no second rerun and no loop. Fails closed: any non-infra job,
- *  non-Actions check run, missing field or API error returns 'failure' unchanged. Never rejects. */
-export async function watchChecksWithInfraRerun(opts: InfraRerunWatchOptions): Promise<CiOutcome> {
-  const { watch = watchChecks, rerun = runCommand, rerunBudget = DEFAULT_RERUN_BUDGET, onRescued, ...watchOpts } = opts;
+ *  non-Actions check run, missing field or API error returns 'failure' unchanged. Never rejects.
+ *  When the re-watch also fails, the failed runs are classified again: all still infra on the
+ *  same head SHA returns 'infra-failure' (#2366), anything else 'failure'. onRescueFailed fires
+ *  once whenever a rerun budget was spent in this call and the final verdict is not success. */
+export async function watchChecksWithInfraRerun(opts: InfraRerunWatchOptions): Promise<InfraRerunOutcome> {
+  const {
+    watch = watchChecks,
+    rerun = runCommand,
+    rerunBudget = DEFAULT_RERUN_BUDGET,
+    onRescued,
+    onRescueFailed,
+    ...watchOpts
+  } = opts;
   const {
     octokit,
     owner,
@@ -214,32 +259,40 @@ export async function watchChecksWithInfraRerun(opts: InfraRerunWatchOptions): P
   const first = await watch(watchOpts);
   if (first !== 'failure') return first;
 
+  let rescue: CiRescue | undefined;
+  let result: InfraRerunOutcome;
   try {
-    const runs = await listAllCheckRuns(octokit, owner, repo, ref, perPage, maxPages);
-    const failed = runs.filter((r) => r.status === 'completed' && !isPassingConclusion(r.conclusion));
-    if (failed.length === 0) return 'failure';
-    const jobs: CiJobLike[] = [];
-    for (const run of failed) {
-      if (typeof run.id !== 'number') return 'failure';
-      const { data: job } = await octokit.rest.actions.getJobForWorkflowRun({ owner, repo, job_id: run.id });
-      if (classifyCiFailure(job) !== 'infra') return 'failure';
-      jobs.push(job);
-    }
-    const headSha = failed[0].head_sha ?? jobs[0].head_sha;
-    if (!headSha) return 'failure';
+    const found = await infraFailedJobs(octokit, owner, repo, ref, perPage, maxPages);
+    if (!found) return 'failure';
+    const { headSha, jobs } = found;
     if (rerunBudget.has(headSha) || jobs.some((j) => (j.run_attempt ?? 1) > 1)) return 'failure';
     const runIds = [...new Set(jobs.map((j) => j.run_id).filter((id): id is number => typeof id === 'number'))];
     if (runIds.length === 0) return 'failure';
     rerunBudget.add(headSha);
+    rescue = { headSha, runIds };
+    result = 'failure';
+    let rerunOk = true;
     for (const runId of runIds) {
       const r = await rerun(['gh', 'run', 'rerun', String(runId), '--failed', '--repo', `${owner}/${repo}`]);
-      if (!r.ok) return 'failure';
+      if (!r.ok) {
+        rerunOk = false;
+        break;
+      }
     }
-    await sleep(initialIntervalMs);
-    const second = await watch(watchOpts);
-    if (second === 'success') onRescued?.({ headSha, runIds });
-    return second;
+    if (rerunOk) {
+      await sleep(initialIntervalMs);
+      result = await watch(watchOpts);
+      if (result === 'failure') {
+        const again = await infraFailedJobs(octokit, owner, repo, ref, perPage, maxPages);
+        if (again && again.headSha === headSha) result = 'infra-failure';
+      }
+    }
   } catch {
-    return 'failure';
+    result = 'failure';
   }
+  if (rescue) {
+    if (result === 'success') onRescued?.(rescue);
+    else onRescueFailed?.({ ...rescue, outcome: result });
+  }
+  return result;
 }

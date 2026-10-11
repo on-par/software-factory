@@ -20,6 +20,7 @@ import {
   assertValidProduct,
   AwaitingReviewError,
   CiFailedError,
+  CiInfraError,
   CiUnverifiedError,
   CliExitError,
   createQueuePreflightOps,
@@ -2189,6 +2190,60 @@ describe('cli', () => {
         ]);
         expect(calls.some((c) => c[0] === 'log' && c[1] === 'ci-rescued')).toBe(true);
         expect(calls).toContainEqual(['merge', 'abc123']);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('parks as ci-infra and logs ci-rescue-failed when the infra rerun also fails', async () => {
+      vi.useFakeTimers();
+      try {
+        const calls: any[] = [];
+        const octokit = cleanOctokit(async (args) => calls.push(['merge', args.sha]), calls);
+        // The module-level rerun budget is shared across tests, so this SHA must be unique to this one.
+        octokit.rest.checks = {
+          listForRef: async () => ({
+            data: { check_runs: [{ id: 9, head_sha: 'infra-sha-2366', status: 'completed', conclusion: 'failure' }] },
+          }),
+        };
+        octokit.rest.actions = {
+          getJobForWorkflowRun: async () => ({
+            data: {
+              conclusion: 'failure',
+              runner_id: 42,
+              runner_name: 'r',
+              steps: [],
+              run_id: 7,
+              run_attempt: 1,
+              head_sha: 'infra-sha-2366',
+            },
+          }),
+        };
+        const outcomes = ['failure', 'failure'] as const;
+        let watchCalls = 0;
+
+        const landed = landOpenPullRequest({
+          ...baseOpts,
+          octokit,
+          log: (type, msg) => calls.push(['log', type, msg]),
+          watch: async () => outcomes[watchCalls++],
+          rerun: async (argv) => {
+            calls.push(['rerun', [...argv]]);
+            return { ok: true };
+          },
+        }).catch((e: unknown) => e);
+        await vi.advanceTimersByTimeAsync(60_000);
+        const err = await landed;
+
+        expect(err).toBeInstanceOf(CiInfraError);
+        expect(err).toBeInstanceOf(CiFailedError);
+        expect(parkReasonFor(err)).toBe('ci-infra');
+        expect(calls.filter((c) => c[0] === 'rerun')).toHaveLength(1);
+        const logTypes = calls.filter((c) => c[0] === 'log').map((c) => c[1]);
+        expect(logTypes).toContain('ci-rescue-failed');
+        expect(logTypes).toContain('ci-infra');
+        expect(logTypes).not.toContain('ci-failed');
+        expect(calls.some((c) => c[0] === 'merge')).toBe(false);
       } finally {
         vi.useRealTimers();
       }

@@ -604,6 +604,9 @@ describe('watchChecksWithInfraRerun', () => {
   function setup(opts: {
     outcomes?: Array<'success' | 'failure' | 'timeout'>;
     runs?: any[];
+    runsByCall?: any[][];
+    listThrowsOnCall?: number;
+    jobsByCall?: Array<Record<number, any>>;
     jobs?: Record<number, any>;
     listThrows?: boolean;
     jobThrows?: boolean;
@@ -614,21 +617,25 @@ describe('watchChecksWithInfraRerun', () => {
     const outcomes = opts.outcomes ?? ['failure', 'success'];
     const reruns: string[][] = [];
     const rescues: any[] = [];
+    const rescueFailures: any[] = [];
     let watchCalls = 0;
     let listCalls = 0;
+    let jobCalls = 0;
     const octokit: any = {
       rest: {
         checks: {
           listForRef: async () => {
             listCalls++;
-            if (opts.listThrows) throw new Error('list boom');
-            return { data: { check_runs: opts.runs ?? [failedRun(1)] } };
+            if (opts.listThrows || opts.listThrowsOnCall === listCalls) throw new Error('list boom');
+            const runs = opts.runsByCall?.[listCalls - 1] ?? opts.runs ?? [failedRun(1)];
+            return { data: { check_runs: runs } };
           },
         },
         actions: {
           getJobForWorkflowRun: async ({ job_id }: any) => {
             if (opts.jobThrows) throw new Error('404');
-            return { data: (opts.jobs ?? { 1: zeroStepsJob })[job_id] };
+            const jobs = opts.jobsByCall?.[jobCalls++] ?? opts.jobs ?? { 1: zeroStepsJob };
+            return { data: jobs[job_id] };
           },
         },
       },
@@ -647,9 +654,10 @@ describe('watchChecksWithInfraRerun', () => {
         ...(opts.useDefaultBudget ? {} : { rerunBudget: opts.budget ?? new Set<string>() }),
         sleep: async () => {},
         onRescued: (r) => rescues.push(r),
+        onRescueFailed: (f) => rescueFailures.push(f),
         ...extra,
       });
-    return { call, reruns, rescues, watchCalls: () => watchCalls, listCalls: () => listCalls };
+    return { call, reruns, rescues, rescueFailures, watchCalls: () => watchCalls, listCalls: () => listCalls };
   }
 
   it('reruns a zero-steps infra failure once and reports ci-rescued when the re-watch is green', async () => {
@@ -683,9 +691,10 @@ describe('watchChecksWithInfraRerun', () => {
   it('never reruns the same head SHA twice', async () => {
     const t = setup({ outcomes: ['failure', 'failure', 'failure'] });
     const budget = new Set<string>();
-    expect(await t.call({ rerunBudget: budget })).toBe('failure');
+    expect(await t.call({ rerunBudget: budget })).toBe('infra-failure');
     expect(await t.call({ rerunBudget: budget })).toBe('failure');
     expect(t.reruns).toHaveLength(1);
+    expect(t.rescueFailures).toHaveLength(1);
     expect(t.watchCalls()).toBe(3);
   });
 
@@ -693,14 +702,48 @@ describe('watchChecksWithInfraRerun', () => {
     const t = setup({ jobs: { 1: { ...zeroStepsJob, run_attempt: 2 } } });
     expect(await t.call()).toBe('failure');
     expect(t.reruns).toHaveLength(0);
+    expect(t.rescueFailures).toHaveLength(0);
   });
 
-  it('returns the re-watch outcome when the rerun does not go green', async () => {
+  it('returns infra-failure and reports ci-rescue-failed when the rerun also fails for infra on the same SHA', async () => {
     const t = setup({ outcomes: ['failure', 'failure'] });
-    expect(await t.call()).toBe('failure');
+    expect(await t.call()).toBe('infra-failure');
     expect(t.reruns).toHaveLength(1);
+    expect(t.rescueFailures).toEqual([{ headSha: 'abc123', runIds: [7], outcome: 'infra-failure' }]);
     expect(t.rescues).toHaveLength(0);
     expect(t.watchCalls()).toBe(2);
+  });
+
+  it('returns failure when the post-rerun failure is on a different head SHA', async () => {
+    const t = setup({
+      outcomes: ['failure', 'failure'],
+      runsByCall: [[failedRun(1)], [failedRun(1, { head_sha: 'def456' })]],
+    });
+    expect(await t.call()).toBe('failure');
+    expect(t.rescueFailures[0].outcome).toBe('failure');
+    expect(t.reruns).toHaveLength(1);
+  });
+
+  it('returns failure when the post-rerun failure includes a real test failure', async () => {
+    const t = setup({
+      outcomes: ['failure', 'failure'],
+      jobsByCall: [{ 1: zeroStepsJob }, { 1: realTestFailureJob }],
+    });
+    expect(await t.call()).toBe('failure');
+    expect(t.rescueFailures).toEqual([{ headSha: 'abc123', runIds: [7], outcome: 'failure' }]);
+    expect(t.reruns).toHaveLength(1);
+  });
+
+  it('passes a post-rerun timeout through and reports it', async () => {
+    const t = setup({ outcomes: ['failure', 'timeout'] });
+    expect(await t.call()).toBe('timeout');
+    expect(t.rescueFailures).toEqual([{ headSha: 'abc123', runIds: [7], outcome: 'timeout' }]);
+  });
+
+  it('returns failure and reports once when the post-rerun re-list throws', async () => {
+    const t = setup({ outcomes: ['failure', 'failure'], listThrowsOnCall: 2 });
+    expect(await t.call()).toBe('failure');
+    expect(t.rescueFailures).toEqual([{ headSha: 'abc123', runIds: [7], outcome: 'failure' }]);
   });
 
   it('does not rerun a mixed infra + real failure', async () => {
@@ -734,6 +777,7 @@ describe('watchChecksWithInfraRerun', () => {
         const t = setup(o);
         expect(await t.call()).toBe('failure');
         expect(t.reruns).toHaveLength(0);
+        expect(t.rescueFailures).toHaveLength(0);
       });
     }
 
@@ -744,6 +788,7 @@ describe('watchChecksWithInfraRerun', () => {
       expect(t.reruns).toHaveLength(1);
       expect(budget.has('abc123')).toBe(true);
       expect(t.watchCalls()).toBe(1);
+      expect(t.rescueFailures).toEqual([{ headSha: 'abc123', runIds: [7], outcome: 'failure' }]);
     });
   });
 

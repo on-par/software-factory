@@ -220,6 +220,8 @@ export type {
   CiOutcome,
   CiRerunBudget,
   CiRescue,
+  CiRescueFailure,
+  InfraRerunOutcome,
   InfraRerunWatchOptions,
   WatchChecksOptions,
 } from './utils/ci-watch.js';
