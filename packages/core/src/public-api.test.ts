@@ -39,6 +39,7 @@ const PUBLIC_API_KEYS = [
   'resolveSizeGateMaxSlices',
   'SIZE_GATE_MODES',
   'resolveDesignRegressionBlock',
+  'resolveReadinessUpdateIssueBody',
   'resolvePlanApproval',
   'resolveProcessGroupGraceMs',
   'resolveSkipCI',

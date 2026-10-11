@@ -41,6 +41,7 @@ export {
   resolveSizeGateMaxSlices,
   SIZE_GATE_MODES,
   resolveDesignRegressionBlock,
+  resolveReadinessUpdateIssueBody,
   resolveEnvironmentProxy,
   resolveIngestConfig,
   resolveMergePolicy,
