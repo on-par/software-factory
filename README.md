@@ -1,10 +1,14 @@
-# Software Factory
+# On PAR Dev's Software Factory
 
-A multi-agent software factory that ships verified work autonomously. Built in TypeScript/Node.js with the **boss-worker-checker** orchestration pattern, **model routing** that tries free local models first and fails over across providers automatically, per-task **cost tracking** (`factory cost`), and per-product **constitutions**.
+On PAR Dev's Software Factory is a local CLI that takes a GitHub issue through plan, build and check with AI agents, then opens a ready-for-review PR. You decide what merges.
+
+Built in TypeScript. Routes work across Claude and Codex, with experimental local models through Ollama, and logs cost per task.
+
+For an example of its output, see [#2288](https://github.com/on-par/software-factory/pull/2288): the factory planned and built issue #2269 (`factory cost --json`), ran its checkers (7 pass, 1 rework round), opened the PR with an evidence pack comment, and CI passed. Merging was a separate step.
 
 ## Status
 
-Honest snapshot of what works today vs. what is experimental. Statuses reflect the actual code, not the roadmap.
+What works today (statuses reflect the actual code, not the roadmap):
 
 | Feature                                               | Status     | Notes                                                                                                                                                                           |
 | ----------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -15,21 +19,21 @@ Honest snapshot of what works today vs. what is experimental. Statuses reflect t
 | `factory supervise` (multi-window unattended runs)    | ✅ Working | Waits for usage headroom, runs the queue, repeats until drained                                                                                                                 |
 | Cost tracking (`factory cost`)                        | ✅ Working | Per-task tokens and cost logged to `.factory/costs.jsonl`                                                                                                                       |
 
-Full matrix — including model harnesses, prompt evals, the server, and experimental local/Ollama models — is in [docs/status.md](docs/status.md).
+The full matrix, including model harnesses, prompt evals, the server, and experimental local (Ollama) models, is in [docs/status.md](docs/status.md).
 
 ## Monorepo Structure
 
-An npm-workspaces monorepo. The Wave-1 publish packages:
+An npm-workspaces monorepo. The published packages:
 
 ```
 packages/
-├── cli/           @on-par/factory-cli      — the `factory` command
-├── core/          @on-par/factory-core     — engine: router, phases, checkers
-├── config/        @on-par/factory-config   — typed defaults + constitutions (zero deps)
-├── contracts/     @on-par/contracts        — shared zod schemas (Issue/Epic/Story/Design)
-├── tui/           @on-par/factory-tui      — read-only Ink TUI for a live run
-├── adr-kit/       @on-par/adr-kit          — pure ADR kernel (zero deps)
-└── repo-context/  @on-par/repo-context     — read-only repo reader port (zero deps)
+├── cli/           @on-par/factory-cli      the `factory` command
+├── core/          @on-par/factory-core     engine: router, phases, checkers
+├── config/        @on-par/factory-config   typed defaults + constitutions (zero deps)
+├── contracts/     @on-par/contracts        shared zod schemas (Issue/Epic/Story/Design)
+├── tui/           @on-par/factory-tui      read-only Ink TUI for a live run
+├── adr-kit/       @on-par/adr-kit          pure ADR kernel (zero deps)
+└── repo-context/  @on-par/repo-context     read-only repo reader port (zero deps)
 ```
 
 Private workspaces (server, dashboard, product, scbench-adapter) also live here but are not published. For the dependency graph and per-package detail, see [docs/architecture.md](docs/architecture.md). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md) and the rules in [AGENTS.md](AGENTS.md).
@@ -38,55 +42,66 @@ Private workspaces (server, dashboard, product, scbench-adapter) also live here 
 
 **Prerequisites**
 
-- Node.js ≥ 24 (the `engines.node` field in the root and `packages/cli` `package.json`)
-- `git` and the GitHub CLI `gh`, authenticated (`gh auth login`) — the factory uses `gh repo view` to detect your repo and polls CI checks via the GitHub API when landing
-- Claude Code CLI (`claude`) on PATH — the TRIAGE phase shells out to `claude -p`, and Claude models in every tier dispatch through it
-- Optional: OpenAI Codex CLI (`codex`) for cheap worker builds, and `ollama` for free local worker models
+- Node.js ≥ 24 (the `engines.node` field in `packages/cli/package.json`)
+- `git`
+- Claude Code (`claude`) installed, on your PATH, and signed in. The TRIAGE phase shells out to `claude -p`, and Claude models in every tier run through it.
+- The GitHub CLI `gh`, signed in with `gh auth login`. The factory uses `gh repo view` to detect your repo.
+- A GitHub token. The factory reads `GITHUB_TOKEN`, then `GH_TOKEN`, and falls back to `gh auth token` when neither is set, so `gh auth login` is usually enough.
+- Optional: the OpenAI Codex CLI (`codex`) for worker builds, and `ollama` for experimental local models.
 
-**Step 1 — Install from source**
+Run `factory doctor` after installing (Step 1) to check all of this.
 
-The `@on-par/*` packages are not on npm yet, so install the CLI from a clone:
+### Safety
+
+To run unattended, the factory starts agent CLIs with their permission prompts turned off:
+
+- Claude Code runs as `claude -p ... --permission-mode bypassPermissions` (the same mode as `--dangerously-skip-permissions`).
+- Codex runs as `codex exec ... -c approval_policy=never`, with `--sandbox workspace-write` inside an OS sandbox, or `--sandbox danger-full-access` when no OS sandbox is available.
+
+Each build runs in a separate git worktree (a sibling of your repo on a `factory/` branch; change the prefix with `--branch-prefix`), never in your main checkout. Where available, agent runs are wrapped in an OS sandbox (`sandbox-exec` on macOS, `firejail` on Linux). The agents still run as you, with your file permissions and your GitHub token, and builds run the target repo's tests and install its dependencies. Only point the factory at repos and issues you trust.
+
+The factory never merges by default. `factory ship` and `factory run-issue` always stop at a ready-for-review PR. `factory run` and `factory supervise` squash-merge only when auto-merge is on: `FACTORY_MERGE=1` in the environment, `run.merge.auto: true` (or the legacy `merge.auto: true`) in `.factory/config.yaml`, or `--auto-merge` on the command. The default is off (`merge.auto: false`), and `--no-auto-merge` or `run.merge.auto: false` keep it off even when `FACTORY_MERGE=1` is set. `factory land <N>` merges one PR because you asked it to. Admin bypass is separate: `FACTORY_MERGE_ADMIN=1` lets the active GitHub token use administrator privileges to merge through unmet requirements, so set it only when you intend that.
+
+To report a vulnerability, see [SECURITY.md](SECURITY.md).
+
+**Step 1: Install**
 
 ```bash
-git clone https://github.com/on-par/software-factory
-cd software-factory
-npm install
-npm run build
-npm link --workspace @on-par/factory-cli   # puts `factory` on your PATH
+npm install -g @on-par/factory-cli
 factory --version
+factory doctor
 ```
 
-> **Global npm install is not available yet.** No `@on-par/*` package is published to npm, so `npm install -g @on-par/factory-cli` returns a 404 until a real publish happens. Use the clone install above. Tracking: the `next` pre-release channel in #2243 / #2244, the `latest` (stable) promote in #1974, and the public-docs Wave-1 cleanup in #1566.
+`factory doctor` checks git, `claude`, `gh` auth, the GitHub token, npm and the sandbox, and prints a fix for anything missing. To run from a clone instead, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-**Step 2 — Point it at your repo**
+**Step 2: Point it at your repo**
 
 ```bash
 cd /path/to/your/repo        # any git repo with a GitHub remote and open issues
-export GITHUB_TOKEN=$(gh auth token)   # the factory opens PRs via the GitHub API
 factory init                 # creates .factory/ (config.yaml, constitution.md, state/)
 ```
 
-**Step 3 — Pick a constitution**
+**Step 3: Pick a constitution**
 
 ```bash
 factory constitution --list                    # see available product constitutions
 factory constitution --product example-marketing-site
 ```
 
-**Step 4 — Triage the backlog**
+**Step 4: Triage the backlog**
 
 ```bash
-factory triage               # proposes .factory/queue.proposed from your open issues — review it, then:
+factory triage               # proposes .factory/queue.proposed from your open issues; review it, then:
 factory triage accept        # validates the proposal and promotes it to .factory/queue
 ```
 
-**Step 5 — Ship your first issue**
+**Step 5: Ship your first issue**
 
 ```bash
 factory ship 42              # PLAN → BUILD → CHECK → SHIP one issue (use an issue number from your repo)
 ```
 
-`factory ship` ends at a green, ready-for-review PR that closes the issue (it prints `✅ Issue #N → PR #M ready for review`); merging stays with you — review the PR and merge it, or run `factory land <N>` to squash-merge and clean up the worktree. To process the whole triaged queue in parallel lanes instead, run `factory run` (after accepting a triage proposal with `factory triage accept`). `FACTORY_MERGE` / `FACTORY_MERGE_ADMIN` apply to `factory run` and `factory land` only — `factory ship` warns and ignores them.
+`factory ship` ends at a green, ready-for-review PR that closes the issue (it prints `✅ Issue #N → PR #M ready for review`). Merging stays with you: review the PR and merge it, or run `factory land <N>` to squash-merge and clean up the worktree. To process the whole triaged queue in parallel lanes instead, run `factory run` (after accepting a triage proposal with `factory triage accept`). `FACTORY_MERGE` and `FACTORY_MERGE_ADMIN` apply to `factory run`, `factory supervise` and `factory land` only; `factory ship` warns and ignores them.
 
 ## Configuration
 
@@ -100,19 +115,11 @@ Every other key is optional. [`docs/config.example.yaml`](docs/config.example.ya
 
 ## Updating
 
-factoryd installed with npm (`npm i -g @on-par/factory-cli`) auto-updates to stable releases by default: the npm dist-tag `latest` only, never `next` unless you pick `--update-mode prerelease`. Source checkouts and `FACTORY_FROM_SOURCE=1` always stay manual. To opt out:
-
-```sh
-factory factoryd --update-mode manual
-# or in ~/.factory/daemon.json:
-# {"autoUpdate": {"mode": "manual"}}
+```bash
+npm install -g @on-par/factory-cli@latest
 ```
 
-`factory status --json` shows the update state in its `update` object. To check or update by hand, use `factory self-update --check` and `factory self-update`.
-
-> **Not shipped yet.** `factory self-update` is tracked in #2354 / #2355, and the drain/restart loop in #1939.
-
-See [docs/ops/updating.md](docs/ops/updating.md) for the update cycle, rollback and machine notes.
+Automatic updates are planned: #2354, #2355. The version check (`factory self-update --check`, #2354) is merged on `main` but is not in the 0.9.0 release on npm; the installer (#2355) and the daemon update loop (#1939) are still open. The planned design is in [docs/ops/updating.md](docs/ops/updating.md).
 
 ## CLI Commands
 
@@ -178,18 +185,18 @@ The commit gate is `bash scripts/verify.sh` (see the verify skill).
 
 ## Model Routing
 
-Each task type maps to a tier of models in `packages/config/src/defaults.ts`. The router tries free local models first, then cloud models, and fails over to the next model on rate limits, usage caps, timeouts, or errors. Effort levels can be set per model and task in `.factory/config.yaml`. Run `factory models --doctor` to see which models and provider CLIs are reachable. Tier order, effort settings, harnesses, and failover triggers are documented in [docs/models.md](docs/models.md).
+Each task type maps to a tier of models in `packages/config/src/defaults.ts`. The router tries free local models first (experimental; see [docs/status.md](docs/status.md)), then cloud models, and fails over to the next model on rate limits, usage caps, timeouts, or errors. Effort levels can be set per model and task in `.factory/config.yaml`. Run `factory models --doctor` to see which models and provider CLIs are reachable. Tier order, effort settings, harnesses, and failover triggers are documented in [docs/models.md](docs/models.md).
 
 ## Constitutions
 
-A constitution is a written standard that defines "done right" for a product. Every build round is tested against it. The source of truth for a real product is `.factory/constitution.md` in the **target repo** — `factory init`, `factory constitution --init`, and `factory constitution --product <name>` all read from and write to that path, never to a file bundled with the factory itself.
+A constitution is a written standard that defines "done right" for a product. Every build round is tested against it. The source of truth for a real product is `.factory/constitution.md` in the **target repo**. `factory init`, `factory constitution --init`, and `factory constitution --product <name>` all read from and write to that path, never to a file bundled with the factory itself.
 
 The bundled files below are only templates and worked examples used to seed a new `.factory/constitution.md` (via `factory constitution --product <name>`):
 
-- `packages/config/src/constitutions/example-marketing-site.md` — Static site generation (brand, WCAG 2.2 AA, SEO, links)
-- `packages/config/src/constitutions/example-data-app.md` — Data analysis (data integrity, report validation)
-- `packages/config/src/constitutions/example-client-delivery.md` — Client delivery (client brand adherence, tech spec)
-- `packages/config/src/constitutions/_template.md` — Template for new products
+- `packages/config/src/constitutions/example-marketing-site.md`: Static site generation (brand, WCAG 2.2 AA, SEO, links)
+- `packages/config/src/constitutions/example-data-app.md`: Data analysis (data integrity, report validation)
+- `packages/config/src/constitutions/example-client-delivery.md`: Client delivery (client brand adherence, tech spec)
+- `packages/config/src/constitutions/_template.md`: Template for new products
 
 ### Lane environment (parallel e2e)
 
@@ -205,29 +212,29 @@ command it runs (workers, `npm test`, lint, custom checkers) inherits:
 | `PLAYWRIGHT_HEADLESS` | `1`                     |
 
 Product e2e suites should boot their app on `PORT` (strict-port) and point
-their test runner's base URL at `FACTORY_BASE_URL` — the constitution
+their test runner's base URL at `FACTORY_BASE_URL`. The constitution
 template scaffolds the full Playwright reference contract. When port
 leasing is disabled, checks still run but a `environment_warning` event
 flags the collision risk for app-testing worktrees. Factory-managed runs
-are headless by default — e2e configs must honor `FACTORY_HEADLESS` (headed
+are headless by default: e2e configs must honor `FACTORY_HEADLESS` (headed
 runs are an explicit human opt-in outside the factory, or
 `FACTORY_HEADLESS=0`); unlike the port vars, `FACTORY_HEADLESS` and
 `PLAYWRIGHT_HEADLESS` are injected even when no port lease is configured.
 
-## Open-Core Boundary & Safety
+## Open-Core Boundary
 
-**What's OSS (this repo):** `packages/cli`, `packages/core`, and `packages/config` are the open-source core — the full local pipeline (router, constitutions, checkers, phases) runs from this repo alone, MIT-licensed.
+**What's OSS (this repo):** `packages/cli`, `packages/core`, and `packages/config` are the open-source core. The full local pipeline (router, constitutions, checkers, phases) runs from this repo alone, MIT-licensed.
 
-**What isn't published:** `packages/dashboard` (web dashboard, Vite + React walking skeleton), `packages/product` (the proposer: brain-dump to engineering-ready issues), `packages/server` and `packages/scbench-adapter` (SlopCodeBench adapter) live in this monorepo as private workspaces and are not published to npm. A hosted multi-tenant control plane is not part of this codebase. `packages/server` is a real, narrow local server — its only route is `GET /events`, an SSE relay of the lane lifecycle bus, unauthenticated and loopback-only.
+**What isn't published:** `packages/dashboard` (web dashboard, Vite + React walking skeleton), `packages/product` (the proposer: brain-dump to engineering-ready issues), `packages/server` and `packages/scbench-adapter` (SlopCodeBench adapter) live in this monorepo as private workspaces and are not published to npm. A hosted multi-tenant control plane is not part of this codebase. `packages/server` is a real, narrow local server. Its only route is `GET /events`, an SSE relay of the lane lifecycle bus, unauthenticated and loopback-only.
 
-**Safety note:** to run unattended, the factory invokes agent CLIs with permission checks disabled — `claude -p ... --dangerously-skip-permissions` and `codex exec --sandbox workspace-write --ask-for-approval never`. Every build runs inside an isolated git worktree (created as a sibling of your repo under the `factory/` branch prefix; override per command with `--branch-prefix`), never in your main checkout. The factory defaults to review mode: pipelines end at a green, ready-for-review PR and merging stays with you unless you explicitly opt in with `FACTORY_MERGE=1`. Admin bypass is separate: set `FACTORY_MERGE_ADMIN=1` only when the active GitHub token should use administrator privileges to merge through unmet requirements. Only run the factory against repos where you accept agent-authored code executing in that worktree (builds run tests, install dependencies, etc.). To report a vulnerability, see [SECURITY.md](SECURITY.md).
+For the safety note (agent permissions, worktrees, and when the factory merges), see [Safety](#safety) under Quick Start.
 
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the verify gate, how to try one issue against a throwaway repo, and the factory-task issue template.
 
-Security issues: see [SECURITY.md](SECURITY.md) — please report privately, not as a public issue.
+Security issues: see [SECURITY.md](SECURITY.md). Please report privately, not as a public issue.
 
 ## License
 
-MIT — On PAR Dev
+MIT, On PAR Dev
