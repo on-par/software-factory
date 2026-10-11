@@ -71,7 +71,7 @@ export default defineConfig({
         'packages/dashboard/src/main.tsx',
         // Product bin shim — a single runEntry(main) call; runEntry is covered by entry.test.ts.
         'packages/product/src/cli.ts',
-        // CLI bin shim — a single runEntry(main) call; runEntry is covered by entry.test.ts.
+        // CLI bin shim — a single runEntry(loader) call; runEntry is covered by entry.test.ts.
         'packages/cli/src/cli.ts',
         // scbench-adapter bin shim — a single runEntry(main) call; runEntry is covered by entry.test.ts.
         'packages/scbench-adapter/src/cli.ts',
