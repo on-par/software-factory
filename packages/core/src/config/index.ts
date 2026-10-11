@@ -16,6 +16,7 @@ import {
 } from '@on-par/factory-config';
 import { z } from 'zod';
 import { readRepoConfigFile, resolveRepoConfigPath } from './repo-config-file.js';
+import { resolveStateRoot, STATE_ROOT_ENV } from './state-root.js';
 import { DEFAULT_MAX_SLICES, SLICE_CAP_CEILING } from '../readiness/slice-plan.js';
 import { runConfigSource } from './run-config-source.js';
 
@@ -672,12 +673,16 @@ export function resolveFilingPolicy(config: FactoryConfig): FilingPolicy {
 
 // ---------- Factory state paths ----------
 
-/** `root` (`.factory/`, or an explicit `stateRoot` override) holds only the committed
+/** `root` holds only the committed
  *  inputs — the repo config file (`config.yaml`/`config.yml`/`config.json`), plus the CLI-written `constitution.md`/`.gitignore` — so a
  *  consumer repo can gitignore just `state/` and keep those three files tracked. Every
- *  other runtime path resolves under `<root>/state/`. */
-export function getFactoryPaths(repoRoot: string, stateRoot?: string) {
-  const root = stateRoot === undefined ? resolve(repoRoot, '.factory') : resolve(stateRoot);
+ *  other runtime path resolves under `<root>/state/`. The root is the explicit `stateRoot`
+ *  argument, else `FACTORY_STATE_ROOT` (see `resolveStateRoot`), else `<repoRoot>/.factory`. */
+export function getFactoryPaths(repoRoot: string, stateRoot?: string, env: NodeJS.ProcessEnv = process.env) {
+  const root =
+    stateRoot !== undefined
+      ? resolve(stateRoot)
+      : (resolveStateRoot(env[STATE_ROOT_ENV], { repoRoot }) ?? resolve(repoRoot, '.factory'));
   const state = resolve(root, 'state');
   return {
     root,

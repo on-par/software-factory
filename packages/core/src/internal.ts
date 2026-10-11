@@ -113,6 +113,7 @@ export {
 } from './filing/policy.js';
 
 // Config
+export { resolveStateRoot, STATE_ROOT_ENV } from './config/state-root.js';
 export { resolveFilingPolicy, resolvePrClassifierPolicy } from './config/index.js';
 export type { EffectivePrClassifierPolicy } from './config/index.js';
 export type { EffectiveConfig, TrustTier } from './config/repo.js';

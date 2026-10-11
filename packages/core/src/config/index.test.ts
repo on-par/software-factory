@@ -1,9 +1,12 @@
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+import { execa } from 'execa';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { clearRepoSlugCache } from '../logger/repo-slug.js';
 import {
   getConstitutionsDir,
   getFactoryPaths,
@@ -108,6 +111,36 @@ describe('getFactoryPaths', () => {
   it('uses the repository-local state root by default', () => {
     const repoRoot = '/tmp/some-repo';
     expect(getFactoryPaths(repoRoot)).toEqual(expectedPaths(resolve(repoRoot, '.factory')));
+  });
+
+  describe('FACTORY_STATE_ROOT', () => {
+    it('FACTORY_STATE_ROOT=auto roots every path under <home>/.factory/<owner>/<name> and none under the checkout', async () => {
+      const repoRoot = await mkdtemp(join(tmpdir(), 'factory-state-root-auto-'));
+      try {
+        await execa('git', ['init'], { cwd: repoRoot });
+        await execa('git', ['remote', 'add', 'origin', 'git@github.com:o/n.git'], { cwd: repoRoot });
+        clearRepoSlugCache();
+        const paths = getFactoryPaths(repoRoot, undefined, { FACTORY_STATE_ROOT: 'auto' });
+        expect(paths.root).toBe(join(homedir(), '.factory', 'o', 'n'));
+        for (const p of Object.values(paths)) expect(p.startsWith(repoRoot)).toBe(false);
+        expect(existsSync(join(repoRoot, '.factory'))).toBe(false);
+      } finally {
+        clearRepoSlugCache();
+        await rm(repoRoot, { recursive: true, force: true });
+      }
+    });
+
+    it('explicit stateRoot beats env', () => {
+      expect(getFactoryPaths('/r', '/explicit', { FACTORY_STATE_ROOT: '/env' }).root).toBe('/explicit');
+    });
+
+    it('uses an absolute env value', () => {
+      expect(getFactoryPaths('/r', undefined, { FACTORY_STATE_ROOT: '/env' }).root).toBe('/env');
+    });
+
+    it('blank FACTORY_STATE_ROOT is treated as unset', () => {
+      expect(getFactoryPaths('/r', undefined, { FACTORY_STATE_ROOT: '  ' }).root).toBe(resolve('/r', '.factory'));
+    });
   });
 
   it('keeps standalone queue, event, plan, and report artifacts beneath the checkout-local .factory/state directory', async () => {

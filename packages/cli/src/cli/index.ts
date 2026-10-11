@@ -304,6 +304,7 @@ import {
   type ClassifierBacktestOptions,
 } from './classifier-backtest.js';
 import { runQueueClear } from './queue-clear.js';
+import { applyStateRootOption } from './state-root.js';
 import { buildCostJson } from './cost-json.js';
 import { buildQueueAddJson } from './queue-add-json.js';
 import { buildQueueListJson } from './queue-list.js';
@@ -6146,7 +6147,21 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .description('Multi-agent software factory with boss-worker-checker orchestration')
     .version(getCliVersion())
     .addHelpText('before', PREREQUISITES_TEXT)
-    .addHelpText('after', HELP_FOOTER_TEXT);
+    .addHelpText('after', HELP_FOOTER_TEXT)
+    .option(
+      '--state-root <path>',
+      'Keep factory state and config outside the checkout: an absolute path, ~/..., or "auto" (~/.factory/<owner>/<name>); env FACTORY_STATE_ROOT',
+    );
+
+  program.hook('preAction', async () => {
+    const flag = program.opts<{ stateRoot?: string }>().stateRoot;
+    if (flag === undefined && !process.env.FACTORY_STATE_ROOT?.trim()) return;
+    try {
+      applyStateRootOption(flag, await getRepoRoot());
+    } catch (e) {
+      throw new CliExitError(`factory: ${(e as Error).message}`, 2);
+    }
+  });
 
   program
     .command('init')

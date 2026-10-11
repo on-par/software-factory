@@ -292,3 +292,35 @@ describe('attachRepo', () => {
     });
   });
 });
+
+describe('attachRepo with a stateRoot', () => {
+  const deps = {
+    readOrigin: async () => 'git@github.com:on-par/software-factory.git',
+    fileExists: async () => false,
+    now: () => new Date('2026-01-01T00:00:00Z'),
+  };
+
+  it('attachRepo accepts a checkout with no .factory/config.json when the body carries stateRoot, and writes stateRoot to the registry', async () => {
+    const dir = await tmpDir();
+    const registryFile = join(await tmpDir(), 'registry.json');
+    const result = await attachRepo(
+      registryFile,
+      { repo: 'on-par/software-factory', path: dir, stateRoot: '/ext/root' },
+      deps,
+    );
+    expect(result.ok).toBe(true);
+    const registry = await loadRegistry(registryFile);
+    expect(registry.repos['on-par/software-factory']?.stateRoot).toBe('/ext/root');
+  });
+
+  it('a re-attach preserves an existing entry stateRoot', async () => {
+    const dir = await tmpDir();
+    const registryFile = join(await tmpDir(), 'registry.json');
+    const body = { repo: 'on-par/software-factory', path: dir };
+    await attachRepo(registryFile, { ...body, stateRoot: '/ext/root' }, deps);
+    const again = await attachRepo(registryFile, body, deps);
+    expect(again.ok).toBe(true);
+    const registry = await loadRegistry(registryFile);
+    expect(registry.repos['on-par/software-factory']?.stateRoot).toBe('/ext/root');
+  });
+});
