@@ -4,8 +4,8 @@ import { mkdtempSync, appendFileSync, existsSync, mkdirSync, readFileSync, rmSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { DEFAULT_FACTORYD_PORT, defaultRegistryPath } from '@on-par/factory-core/internal';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { DEFAULT_FACTORYD_PORT, defaultRegistryPath, type RunRuntime } from '@on-par/factory-core/internal';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   cmdDaemonLogs,
@@ -20,13 +20,26 @@ import {
   parseEtime,
   parseLaunchctlPid,
   detectInstall,
+  isUpdateCandidate,
   loadDaemonFileConfig,
+  recoverStaleDrain,
+  runAutoUpdateCycle,
+  runAutoUpdateLoop,
+  createAutoUpdateDeps,
   parseUpdateMode,
   renderFactorydPlist,
   resolveFactorydConfig,
   updateChannel,
 } from './daemon.js';
-import type { DaemonCtlDeps, InstallInfo, LaunchctlExec } from './daemon.js';
+import type {
+  AutoUpdateApplyResult,
+  AutoUpdateCheck,
+  AutoUpdateDeps,
+  DaemonCtlDeps,
+  InstallInfo,
+  LaunchctlExec,
+} from './daemon.js';
+import { initialUpdateState, readUpdateState, writeUpdateState, type UpdateState } from './update-state.js';
 
 interface ExecCall {
   cmd: string;
@@ -801,6 +814,303 @@ describe('daemon control commands', () => {
       const { out, text } = makeOut();
       await cmdDaemonLogs({}, { home, out, platform: 'linux' });
       expect(text()).toBe('hello\n');
+    });
+  });
+});
+
+describe('auto-update (#1939)', () => {
+  let dir: string;
+  let stop: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'auto-update-'));
+    stop = join(dir, 'repo', 'STOP');
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const cfg = (mode: 'manual' | 'stable' | 'prerelease', version = '0.9.0') => ({
+    autoUpdate: {
+      mode,
+      requestedMode: mode,
+      channel: mode === 'manual' ? null : mode === 'stable' ? ('latest' as const) : ('next' as const),
+      checkIntervalMinutes: 30,
+      drainTimeoutMinutes: 60,
+    },
+    install: { kind: 'npm-global' as const, version, prefix: '/usr/local' } as InstallInfo,
+  });
+  const ok = (candidate: string): AutoUpdateCheck => ({ candidate, updateAvailable: true, error: null });
+
+  function fakeDeps(
+    config: ReturnType<typeof cfg>,
+    over: {
+      checks?: AutoUpdateCheck[];
+      applies?: AutoUpdateApplyResult[];
+      activeUntilPoll?: number;
+      cycles?: number;
+    } = {},
+  ) {
+    let t = Date.parse('2026-01-01T00:00:00Z');
+    const start = t;
+    const checks = [...(over.checks ?? [])];
+    const applies = [...(over.applies ?? [{ code: 0, rolledBack: false, error: null }])];
+    const applied: string[] = [];
+    const sleeps: number[] = [];
+    const exits: number[] = [];
+    const logs: string[] = [];
+    let polls = 0;
+    let stopCalls = 0;
+    let cycles = 0;
+    const stateFile = join(dir, 'update-state.json');
+    writeUpdateState(stateFile, initialUpdateState(config, null));
+    const deps: AutoUpdateDeps = {
+      stateFile,
+      check: vi.fn(async () => checks.shift() ?? ok('0.9.0')),
+      apply: vi.fn(async (v: string) => {
+        applied.push(v);
+        return applies.shift() ?? { code: 0, rolledBack: false, error: null };
+      }),
+      activeRuns: vi.fn(async () => {
+        polls++;
+        return polls <= (over.activeUntilPoll ?? 0) ? ['acme/app'] : [];
+      }),
+      writeStops: vi.fn(async () => {
+        stopCalls++;
+        if (existsSync(stop)) return [];
+        mkdirSync(join(dir, 'repo'), { recursive: true });
+        writeFileSync(stop, '');
+        return [stop];
+      }),
+      clearStops: vi.fn(async (files: string[]) => {
+        for (const f of files) rmSync(f, { force: true });
+      }),
+      now: () => t,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+        t += ms;
+        if (ms === config.autoUpdate.checkIntervalMinutes * 60_000) cycles++;
+      },
+      log: (l) => logs.push(l),
+      exit: (c) => {
+        exits.push(c);
+      },
+      stopped: () => cycles > (over.cycles ?? 1),
+    };
+    return { deps, applied, sleeps, exits, logs, stateFile, elapsed: () => t - start, stopCalls: () => stopCalls };
+  }
+
+  describe('isUpdateCandidate', () => {
+    it.each([
+      [{ candidate: '0.9.1', updateAvailable: true, error: null }, 'stable', true],
+      [{ candidate: '0.9.1', updateAvailable: false, error: null }, 'stable', false],
+      [{ candidate: '0.9.1', updateAvailable: true, error: 'boom' }, 'stable', false],
+      [{ candidate: null, updateAvailable: true, error: null }, 'stable', false],
+      [{ candidate: '', updateAvailable: true, error: null }, 'stable', false],
+      [{ candidate: '0.9.0', updateAvailable: true, error: null }, 'stable', false],
+      [{ candidate: '0.9.1-next.0', updateAvailable: true, error: null }, 'stable', false],
+      [{ candidate: '0.9.1-next.0', updateAvailable: true, error: null }, 'prerelease', true],
+    ] as const)('%j in %s → %s', (check, mode, expected) => {
+      expect(isUpdateCandidate(check, mode, '0.9.0')).toBe(expected);
+    });
+  });
+
+  describe('runAutoUpdateCycle', () => {
+    it('never applies while a run is active and records skipped after the drain timeout', async () => {
+      const config = cfg('stable');
+      const f = fakeDeps(config, { checks: [ok('0.9.1')] });
+      vi.mocked(f.deps.activeRuns).mockResolvedValue(['acme/app']);
+      expect(await runAutoUpdateCycle(config, f.deps)).toBe('drain-timeout');
+      expect(f.deps.apply).not.toHaveBeenCalled();
+      expect(existsSync(stop)).toBe(false);
+      const state = readUpdateState(f.stateFile);
+      expect(state?.lastResult).toMatchObject({ outcome: 'skipped', version: '0.9.1' });
+      expect(state?.lastResult?.error).toContain('drain timed out after 60 min');
+      expect(state?.draining).toBeNull();
+      expect(f.elapsed()).toBeGreaterThanOrEqual(60 * 60_000);
+    });
+
+    it('ignores a prerelease candidate in stable mode', async () => {
+      const config = cfg('stable');
+      const f = fakeDeps(config, { checks: [ok('0.9.1-next.0')] });
+      expect(await runAutoUpdateCycle(config, f.deps)).toBe('no-update');
+      expect(f.deps.writeStops).not.toHaveBeenCalled();
+      const state = readUpdateState(f.stateFile);
+      expect(state?.available).toBeNull();
+      expect(state?.lastCheckAt).not.toBeNull();
+    });
+
+    it('returns manual without touching any dep', async () => {
+      const config = cfg('manual');
+      const f = fakeDeps(config);
+      expect(await runAutoUpdateCycle(config, f.deps)).toBe('manual');
+      for (const dep of [f.deps.check, f.deps.activeRuns, f.deps.writeStops, f.deps.apply]) {
+        expect(dep).not.toHaveBeenCalled();
+      }
+    });
+
+    it('records a check error and starts no drain', async () => {
+      const config = cfg('stable');
+      const f = fakeDeps(config, { checks: [{ candidate: null, updateAvailable: false, error: 'registry down' }] });
+      expect(await runAutoUpdateCycle(config, f.deps)).toBe('check-error');
+      expect(f.logs.some((l) => l.includes('update check failed: registry down'))).toBe(true);
+      expect(readUpdateState(f.stateFile)?.lastCheckAt).not.toBeNull();
+      expect(f.deps.writeStops).not.toHaveBeenCalled();
+    });
+
+    it('turns a throwing check into a check error and creates a missing state file', async () => {
+      const config = cfg('stable');
+      const f = fakeDeps(config);
+      rmSync(f.stateFile);
+      vi.mocked(f.deps.check).mockRejectedValue(new Error('spawn failed'));
+      expect(await runAutoUpdateCycle(config, f.deps)).toBe('check-error');
+      expect(readUpdateState(f.stateFile)).not.toBeNull();
+    });
+
+    it('does not remove a STOP that existed before the drain', async () => {
+      const config = cfg('stable');
+      const f = fakeDeps(config, { checks: [ok('0.9.1')] });
+      mkdirSync(join(dir, 'repo'), { recursive: true });
+      writeFileSync(stop, '');
+      expect(await runAutoUpdateCycle(config, f.deps)).toBe('updated');
+      expect(existsSync(stop)).toBe(true);
+    });
+
+    it('records skipped on a busy refusal and keeps the version eligible', async () => {
+      const config = cfg('stable');
+      const f = fakeDeps(config, {
+        checks: [ok('0.9.1'), ok('0.9.1')],
+        applies: [{ code: 3, rolledBack: false, error: null }],
+      });
+      expect(await runAutoUpdateCycle(config, f.deps)).toBe('busy');
+      expect(readUpdateState(f.stateFile)?.lastResult).toMatchObject({ outcome: 'skipped' });
+      expect(await runAutoUpdateCycle(config, f.deps)).toBe('updated');
+      expect(f.applied).toEqual(['0.9.1', '0.9.1']);
+    });
+
+    it('records rolled-back, and failed when apply throws', async () => {
+      const config = cfg('stable');
+      const f = fakeDeps(config, {
+        checks: [ok('0.9.1'), ok('0.9.2')],
+        applies: [{ code: 1, rolledBack: true, error: 'doctor failed' }],
+      });
+      expect(await runAutoUpdateCycle(config, f.deps)).toBe('failed');
+      expect(readUpdateState(f.stateFile)?.lastResult).toMatchObject({
+        outcome: 'rolled-back',
+        error: 'doctor failed',
+      });
+      vi.mocked(f.deps.apply).mockRejectedValue(new Error('spawn'));
+      expect(await runAutoUpdateCycle(config, f.deps)).toBe('failed');
+      expect(readUpdateState(f.stateFile)?.lastResult).toMatchObject({ outcome: 'failed', error: 'spawn' });
+      expect(existsSync(stop)).toBe(false);
+    });
+  });
+
+  describe('runAutoUpdateLoop', () => {
+    it('drains, applies the candidate once after the active run finishes, clears STOP and exits 75', async () => {
+      const config = cfg('stable');
+      const f = fakeDeps(config, { checks: [ok('0.9.1')], activeUntilPoll: 2 });
+      await runAutoUpdateLoop(config, f.deps);
+      expect(f.applied).toEqual(['0.9.1']);
+      expect(existsSync(stop)).toBe(false);
+      expect(f.exits).toEqual([75]);
+      expect(f.sleeps[0]).toBe(30 * 60_000);
+      const state = readUpdateState(f.stateFile);
+      expect(state?.lastResult).toMatchObject({ outcome: 'updated', version: '0.9.1' });
+      expect(state?.draining).toBeNull();
+    });
+
+    it('does not retry a failed version and drains again for a newer one', async () => {
+      const config = cfg('stable');
+      const f = fakeDeps(config, {
+        checks: [ok('0.9.1'), ok('0.9.1'), ok('0.9.2')],
+        applies: [
+          { code: 1, rolledBack: false, error: 'install failed' },
+          { code: 0, rolledBack: false, error: null },
+        ],
+        cycles: 3,
+      });
+      await runAutoUpdateLoop(config, f.deps);
+      expect(f.applied).toEqual(['0.9.1', '0.9.2']);
+      expect(f.stopCalls()).toBe(2);
+      expect(f.exits).toEqual([75]);
+    });
+
+    it('manual mode never checks or writes STOP', async () => {
+      const config = cfg('manual');
+      const f = fakeDeps(config, { cycles: 3 });
+      await runAutoUpdateLoop(config, f.deps);
+      expect(f.deps.check).not.toHaveBeenCalled();
+      expect(f.deps.activeRuns).not.toHaveBeenCalled();
+      expect(f.deps.writeStops).not.toHaveBeenCalled();
+      expect(existsSync(stop)).toBe(false);
+    });
+
+    it('keeps running when a cycle throws', async () => {
+      const config = cfg('stable');
+      const f = fakeDeps(config, { cycles: 2 });
+      vi.mocked(f.deps.check).mockResolvedValue(ok('0.9.1'));
+      vi.mocked(f.deps.writeStops).mockRejectedValue(new Error('disk'));
+      await runAutoUpdateLoop(config, f.deps);
+      expect(f.logs.filter((l) => l.includes('update cycle failed: disk'))).toHaveLength(2);
+    });
+  });
+
+  describe('recoverStaleDrain', () => {
+    it('removes the listed files, swallowing errors', () => {
+      const prev = {
+        ...initialUpdateState(cfg('stable'), null),
+        draining: { since: 's', target: '0.9.1', stopFiles: ['/a', '/b', '/c'] },
+      } satisfies UpdateState;
+      const removed = recoverStaleDrain(prev, (f) => {
+        if (f === '/b') throw new Error('nope');
+        return f === '/a';
+      });
+      expect(removed).toEqual(['/a']);
+      expect(recoverStaleDrain(null, () => true)).toEqual([]);
+    });
+  });
+
+  describe('createAutoUpdateDeps', () => {
+    it('writes and clears STOP exclusively and reports run-runtime activity', async () => {
+      const repo = join(dir, 'checkout');
+      mkdirSync(repo);
+      const registryFile = join(dir, 'registry.json');
+      writeFileSync(
+        registryFile,
+        JSON.stringify({
+          version: 1,
+          repos: {
+            'acme/app': { path: repo, attachedAt: 'x', state: 'active' },
+            'acme/gone': { path: join(dir, 'gone'), attachedAt: 'x', state: 'detached' },
+          },
+        }),
+      );
+      const deps = createAutoUpdateDeps({
+        registryFile,
+        stateFile: join(dir, 'update-state.json'),
+        cliEntrypoint: '/nonexistent/cli.js',
+        mode: 'stable',
+        runRuntime: {
+          list: () =>
+            [
+              { repo: 'acme/app', issue: 7, status: 'running' },
+              { repo: 'acme/app', issue: 8, status: 'succeeded' },
+            ] as ReturnType<RunRuntime['list']>,
+        },
+        log: () => {},
+        exit: () => {},
+      });
+      expect(await deps.activeRuns()).toEqual(['daemon:acme/app#7']);
+      const first = await deps.writeStops();
+      expect(first).toHaveLength(1);
+      expect(existsSync(first[0] as string)).toBe(true);
+      expect(await deps.writeStops()).toEqual([]);
+      await deps.clearStops(first);
+      await deps.clearStops(first);
+      expect(existsSync(first[0] as string)).toBe(false);
+      const check = await deps.check();
+      expect(check.error).toContain('self-update --check failed');
+      expect((await deps.apply('0.9.1')).code).not.toBe(0);
+      await deps.sleep(1);
+      expect(deps.now()).toBeGreaterThan(0);
     });
   });
 });

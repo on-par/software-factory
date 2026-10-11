@@ -72,6 +72,16 @@ describe('readUpdateState', () => {
   });
 });
 
+describe('draining.stopFiles', () => {
+  it('round-trips and drops a non-array value', () => {
+    const draining = { since: 's', target: '0.9.1', stopFiles: ['/a/STOP', '/b/STOP'] };
+    writeUpdateState(file, state({ draining }));
+    expect(readUpdateState(file)?.draining).toEqual(draining);
+    writeFileSync(file, JSON.stringify({ ...state(), draining: { since: 's', target: '0.9.1', stopFiles: 'x' } }));
+    expect(readUpdateState(file)?.draining).toEqual({ since: 's', target: '0.9.1' });
+  });
+});
+
 describe('writeUpdateState', () => {
   it('round-trips and leaves no tmp file', () => {
     const s = state({ available: '0.9.1', draining: { since: 's', target: '0.9.1' } });

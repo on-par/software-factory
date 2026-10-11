@@ -567,7 +567,7 @@ export {
 export { wrapCommandInSandbox, shouldProxyEgress } from './sandbox/index.js';
 export { startEgressProxy, egressSummaryMessage, type EgressProxy } from './sandbox/egress-proxy.js';
 
-export { createRunRuntime } from './daemon/run-runtime.js';
+export { createRunRuntime, type RunRuntime } from './daemon/run-runtime.js';
 export { findOpenPR, type PrLookup } from './phases/ship.js';
 export { createShipExecutor } from './daemon/ship-executor.js';
 

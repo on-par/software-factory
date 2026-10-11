@@ -336,10 +336,13 @@ import {
   cmdDaemonStart,
   cmdDaemonStatus,
   cmdDaemonStop,
+  createAutoUpdateDeps,
   DaemonCtlError,
   detectInstall,
   loadDaemonFileConfig,
+  recoverStaleDrain,
   resolveFactorydConfig,
+  runAutoUpdateLoop,
   type DaemonCtlDeps,
   type FactorydConfig,
 } from './daemon.js';
@@ -4101,7 +4104,18 @@ async function cmdFactoryd(opts: {
   if (acquired.stalePid !== null) log(`removed stale pid file (pid ${acquired.stalePid})`);
   for (const notice of config.notices) log(notice);
   const updateFile = updateStatePath(runtime.dir);
-  const updateState = initialUpdateState(config, readUpdateState(updateFile));
+  const previousUpdate = readUpdateState(updateFile);
+  for (const stop of recoverStaleDrain(previousUpdate, (file) => {
+    try {
+      unlinkSync(file);
+      return true;
+    } catch {
+      return false;
+    }
+  })) {
+    log(`update: removed stale STOP ${stop}`);
+  }
+  const updateState = initialUpdateState(config, previousUpdate);
   try {
     writeUpdateState(updateFile, updateState);
   } catch (err) {
@@ -4132,8 +4146,26 @@ async function cmdFactoryd(opts: {
   for (const line of banner.slice(1)) console.log(line);
   for (const line of banner) logSink(line);
 
+  let shuttingDown = false;
+  void runAutoUpdateLoop(config, {
+    ...createAutoUpdateDeps({
+      registryFile,
+      stateFile: updateFile,
+      cliEntrypoint: fileURLToPath(new URL('../cli.js', import.meta.url)),
+      mode: config.autoUpdate.mode,
+      runRuntime,
+      log,
+      exit: async (code) => {
+        await daemon.stop().catch(() => {});
+        await releaseRuntimeFiles(runtime);
+        process.exit(code);
+      },
+    }),
+    stopped: () => shuttingDown,
+  });
   await new Promise<void>((resolveShutdown) => {
     const shutdown = () => {
+      shuttingDown = true;
       void daemon
         .stop()
         .catch(() => {})

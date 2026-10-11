@@ -12,6 +12,7 @@ import {
   readFileSync,
   readSync,
   realpathSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
@@ -23,8 +24,20 @@ import {
   defaultRegistryPath,
   listRepos,
   loadRegistry,
+  readRunLockHolder,
   type RepoState,
+  type RunRuntime,
 } from '@on-par/factory-core/internal';
+import { defaultIsPidAlive, getFactoryPaths } from '@on-par/factory-core';
+
+import {
+  initialUpdateState,
+  readUpdateState,
+  recordUpdateCheck,
+  writeUpdateState,
+  type UpdateLastResult,
+  type UpdateState,
+} from './update-state.js';
 
 export const FACTORYD_LABEL = 'com.onpar.factoryd';
 
@@ -186,7 +199,7 @@ export interface FactorydConfig {
   registryFile: string;
   /** Port to bind on 127.0.0.1 (default DEFAULT_FACTORYD_PORT). */
   port: number;
-  /** Resolved self-update setting (#2246). Nothing acts on it yet; the registry query, install and restart come in later #1936 issues. */
+  /** Resolved self-update setting (#2246). runAutoUpdateLoop acts on it (#1939). */
   autoUpdate: ResolvedAutoUpdate;
   install: InstallInfo;
   /** One-time startup notices (deprecation, downgrade); cmdFactoryd logs each once. */
@@ -515,4 +528,311 @@ export async function cmdDaemonLogs(
     process.once('SIGTERM', done);
   });
   clearInterval(poll);
+}
+
+// ── auto-update loop (#1939) ────────────────────────────────────────────────
+
+/** Exit code that makes launchd KeepAlive / systemd Restart=always relaunch factoryd. */
+export const AUTO_UPDATE_RESTART_EXIT_CODE = 75;
+/** `factory self-update` exit code for "a run is active, refusing to apply". */
+export const AUTO_UPDATE_BUSY_EXIT_CODE = 3;
+
+export interface AutoUpdateCheck {
+  candidate: string | null;
+  updateAvailable: boolean;
+  error: string | null;
+}
+export interface AutoUpdateApplyResult {
+  code: number;
+  rolledBack: boolean;
+  error: string | null;
+}
+export type AutoUpdateOutcome =
+  'manual' | 'check-error' | 'no-update' | 'skipped-failed-version' | 'drain-timeout' | 'busy' | 'failed' | 'updated';
+
+export interface AutoUpdateDeps {
+  stateFile: string;
+  check(): Promise<AutoUpdateCheck>;
+  apply(version: string): Promise<AutoUpdateApplyResult>;
+  /** Slugs/labels with an active run; empty = drained. */
+  activeRuns(): Promise<string[]>;
+  /** Exclusively creates STOP in every attached repo; returns only the paths it created. */
+  writeStops(): Promise<string[]>;
+  clearStops(files: string[]): Promise<void>;
+  /** Epoch ms. */
+  now(): number;
+  sleep(ms: number): Promise<void>;
+  log(line: string): void;
+  exit(code: number): Promise<void> | void;
+  /** Loop guard; default () => false. */
+  stopped?(): boolean;
+  /** Drain poll interval; default 30_000. */
+  drainPollMs?: number;
+}
+
+type AutoUpdateConfig = Pick<FactorydConfig, 'autoUpdate' | 'install'>;
+
+/** True only for an error-free, newer candidate; prereleases are ignored in stable mode. */
+export function isUpdateCandidate(
+  check: AutoUpdateCheck,
+  mode: UpdateMode,
+  current: string,
+): check is AutoUpdateCheck & { candidate: string } {
+  if (check.error !== null || !check.updateAvailable) return false;
+  if (typeof check.candidate !== 'string' || check.candidate === '') return false;
+  if (check.candidate === current) return false;
+  if (mode === 'stable' && check.candidate.includes('-')) return false;
+  return true;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** One check → drain → apply pass. Never throws; never applies while a run is active. */
+export async function runAutoUpdateCycle(config: AutoUpdateConfig, deps: AutoUpdateDeps): Promise<AutoUpdateOutcome> {
+  const { mode, drainTimeoutMinutes } = config.autoUpdate;
+  if (mode === 'manual') return 'manual';
+  const iso = () => new Date(deps.now()).toISOString();
+  const safeWrite = (state: UpdateState) => {
+    try {
+      writeUpdateState(deps.stateFile, state);
+    } catch (err) {
+      deps.log(`could not write ${deps.stateFile}: ${errorMessage(err)}`);
+    }
+  };
+
+  let check: AutoUpdateCheck;
+  try {
+    check = await deps.check();
+  } catch (err) {
+    check = { candidate: null, updateAvailable: false, error: errorMessage(err) };
+  }
+  if (readUpdateState(deps.stateFile) === null) safeWrite(initialUpdateState(config, null));
+
+  const eligible = isUpdateCandidate(check, mode, config.install.version);
+  const candidate = eligible ? check.candidate : null;
+  try {
+    recordUpdateCheck(deps.stateFile, { at: iso(), available: candidate }, deps.log);
+  } catch (err) {
+    deps.log(`could not write ${deps.stateFile}: ${errorMessage(err)}`);
+  }
+  if (check.error !== null) {
+    deps.log(`update check failed: ${check.error}`);
+    return 'check-error';
+  }
+  if (candidate === null) return 'no-update';
+
+  const state = readUpdateState(deps.stateFile) ?? initialUpdateState(config, null);
+  const last = state.lastResult;
+  if (last?.version === candidate && (last.outcome === 'failed' || last.outcome === 'rolled-back')) {
+    deps.log(`update: skipping ${candidate} — previous attempt ${last.outcome}; waiting for a newer release`);
+    return 'skipped-failed-version';
+  }
+
+  const finish = (result: Omit<UpdateLastResult, 'at' | 'version'>, extra: Partial<UpdateState> = {}) => {
+    const latest = readUpdateState(deps.stateFile) ?? state;
+    safeWrite({
+      ...latest,
+      ...extra,
+      lastResult: { at: iso(), version: candidate, ...result },
+      draining: null,
+    });
+  };
+
+  let stopFiles: string[] = [];
+  try {
+    stopFiles = await deps.writeStops();
+    safeWrite({
+      ...(readUpdateState(deps.stateFile) ?? state),
+      draining: { since: iso(), target: candidate, stopFiles },
+    });
+    deps.log(`update: draining for ${candidate} (STOP set in ${stopFiles.length} repo(s))`);
+    const deadline = deps.now() + drainTimeoutMinutes * 60_000;
+    const pollMs = deps.drainPollMs ?? 30_000;
+    for (;;) {
+      const active = await deps.activeRuns();
+      if (active.length === 0) break;
+      if (deps.now() >= deadline) {
+        const error = `drain timed out after ${drainTimeoutMinutes} min (active: ${active.join(', ')})`;
+        finish({ outcome: 'skipped', error });
+        deps.log(`update: ${error}; will retry next interval`);
+        return 'drain-timeout';
+      }
+      await deps.sleep(pollMs);
+    }
+
+    let res: AutoUpdateApplyResult;
+    try {
+      res = await deps.apply(candidate);
+    } catch (err) {
+      res = { code: 1, rolledBack: false, error: errorMessage(err) };
+    }
+    if (res.code === 0) {
+      finish({ outcome: 'updated' }, { available: null });
+      deps.log(`update: updated to ${candidate}; restarting`);
+      return 'updated';
+    }
+    if (res.code === AUTO_UPDATE_BUSY_EXIT_CODE) {
+      const error = 'apply refused: a run is active';
+      finish({ outcome: 'skipped', error });
+      deps.log(`update: ${error}; will retry next interval`);
+      return 'busy';
+    }
+    const outcome = res.rolledBack ? 'rolled-back' : 'failed';
+    const error = res.error ?? `exit ${res.code}`;
+    finish({ outcome, error });
+    deps.log(`update: ${candidate} ${outcome} (${error})`);
+    return 'failed';
+  } finally {
+    try {
+      await deps.clearStops(stopFiles);
+    } catch (err) {
+      deps.log(`update: could not clear STOP files: ${errorMessage(err)}`);
+    }
+  }
+}
+
+/** Sleeps the check interval, runs a cycle, and exits 75 after a successful update. */
+export async function runAutoUpdateLoop(config: AutoUpdateConfig, deps: AutoUpdateDeps): Promise<void> {
+  if (config.autoUpdate.mode === 'manual') return;
+  while (!deps.stopped?.()) {
+    await deps.sleep(config.autoUpdate.checkIntervalMinutes * 60_000);
+    if (deps.stopped?.()) return;
+    try {
+      const outcome = await runAutoUpdateCycle(config, deps);
+      if (outcome === 'updated') {
+        await deps.exit(AUTO_UPDATE_RESTART_EXIT_CODE);
+        return;
+      }
+    } catch (err) {
+      deps.log(`update cycle failed: ${errorMessage(err)}`);
+    }
+  }
+}
+
+/** Removes STOP files a previous (crashed) drain left behind; returns the paths removed. */
+export function recoverStaleDrain(previous: UpdateState | null, removeStop: (file: string) => boolean): string[] {
+  const removed: string[] = [];
+  for (const file of previous?.draining?.stopFiles ?? []) {
+    try {
+      if (removeStop(file)) removed.push(file);
+    } catch {
+      // best effort
+    }
+  }
+  return removed;
+}
+
+function parseLastJsonLine(stdout: string): Record<string, unknown> | null {
+  const line = lastLines(stdout.trimEnd(), 1)[0];
+  if (!line) return null;
+  try {
+    const parsed: unknown = JSON.parse(line);
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function lastStderrLine(stderr: string): string | null {
+  return lastLines(stderr.trimEnd(), 1)[0] || null;
+}
+
+/** Production deps: shells out to `factory self-update`, detects activity from the run runtime and run locks. */
+export function createAutoUpdateDeps(opts: {
+  registryFile: string;
+  stateFile: string;
+  cliEntrypoint: string;
+  mode: UpdateMode;
+  runRuntime: Pick<RunRuntime, 'list'>;
+  log: (line: string) => void;
+  exit: (code: number) => Promise<void> | void;
+}): AutoUpdateDeps {
+  const exec = defaultExec();
+  const attached = async () => listRepos(await loadRegistry(opts.registryFile)).filter((e) => e.state !== 'detached');
+  return {
+    stateFile: opts.stateFile,
+    async check() {
+      const r = await exec(process.execPath, [
+        opts.cliEntrypoint,
+        'self-update',
+        '--check',
+        '--json',
+        '--update-mode',
+        opts.mode,
+      ]);
+      const json = parseLastJsonLine(r.stdout);
+      if (!json) {
+        return {
+          candidate: null,
+          updateAvailable: false,
+          error: `self-update --check failed (exit ${r.code}): ${lastStderrLine(r.stderr) ?? 'no output'}`,
+        };
+      }
+      return {
+        candidate: typeof json.candidate === 'string' ? json.candidate : null,
+        updateAvailable: json.updateAvailable === true,
+        error: typeof json.error === 'string' && json.error !== '' ? json.error : null,
+      };
+    },
+    async apply(version) {
+      const r = await exec(process.execPath, [opts.cliEntrypoint, 'self-update', '--to', version, '--json']);
+      const json = parseLastJsonLine(r.stdout);
+      const error =
+        (typeof json?.error === 'string' && json.error !== '' ? json.error : null) ??
+        lastStderrLine(r.stderr) ??
+        (r.code === 0 ? null : `exit ${r.code}`);
+      return {
+        code: r.code,
+        rolledBack: json?.rolledBack === true || json?.outcome === 'rolled-back',
+        error,
+      };
+    },
+    async activeRuns() {
+      const active = opts.runRuntime
+        .list()
+        .filter((r) => r.status === 'queued' || r.status === 'running')
+        .map((r) => `daemon:${r.repo}#${r.issue}`);
+      for (const e of await attached()) {
+        const holder = readRunLockHolder(getFactoryPaths(e.path, e.stateRoot).runLock);
+        if (holder && defaultIsPidAlive(holder.pid)) active.push(e.slug);
+      }
+      return active;
+    },
+    async writeStops() {
+      const created: string[] = [];
+      for (const e of await attached()) {
+        const stop = getFactoryPaths(e.path, e.stateRoot).stop;
+        try {
+          mkdirSync(dirname(stop), { recursive: true });
+          writeFileSync(stop, '', { flag: 'wx' });
+          created.push(stop);
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
+            opts.log(`update: could not write STOP for ${e.slug}: ${errorMessage(err)}`);
+          }
+        }
+      }
+      return created;
+    },
+    async clearStops(files) {
+      for (const f of files) {
+        try {
+          unlinkSync(f);
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+        }
+      }
+    },
+    now: Date.now,
+    sleep: (ms) =>
+      new Promise((res) => {
+        setTimeout(res, ms).unref();
+      }),
+    log: opts.log,
+    exit: opts.exit,
+  };
 }
