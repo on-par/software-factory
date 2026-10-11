@@ -9,7 +9,7 @@ const WHAT_CHANGED_LIMIT = 600;
 const WHAT_CHANGED_SENTENCES = 3;
 
 /** Fixed last line of every PR body. */
-export const PR_BODY_FOOTER = 'This PR made possible by Software Factory.';
+export const PR_BODY_FOOTER = "This PR made possible by On PAR Dev's Software Factory.";
 
 export interface PrBodyInput {
   /** One line naming the work item, e.g. "Implements #23.". */

@@ -21,7 +21,7 @@ Fixes land on `main`. Only the latest `main` is supported.
 
 ## Elevated agent permissions
 
-To run unattended, the factory invokes agent CLIs with permission checks disabled, for example `claude -p ... --dangerously-skip-permissions` and `codex exec --sandbox workspace-write --ask-for-approval never`. Other harnesses also run unattended.
+To run unattended, the factory invokes agent CLIs with permission checks disabled, for example `claude -p ... --permission-mode bypassPermissions` (the same mode as `--dangerously-skip-permissions`) and `codex exec ... -c approval_policy=never`, with `--sandbox workspace-write` inside an OS sandbox or `--sandbox danger-full-access` when no OS sandbox is available. Other harnesses also run unattended.
 
 Every build runs inside an isolated git worktree, never in your main checkout. Agent-authored code (tests, dependency installs, scripts) still executes there with your user's privileges and whatever credentials are in the environment, such as `GITHUB_TOKEN`.
 
