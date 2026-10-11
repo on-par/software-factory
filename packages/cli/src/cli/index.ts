@@ -368,7 +368,7 @@ import { mergeScopeNotice } from './merge-scope.js';
 import { createFactoryOctokit, formatDeprecation, type FactoryOctokitOptions } from './octokit.js';
 import { DeepCheckError, createDeepModelRunner, runIssueCheck, type DeepCheckModelRunner } from './ready-check.js';
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
-import { type BaseHoldDecision, createBaseHoldGate, writeBaseHold } from './base-hold.js';
+import { type BaseHoldDecision, createBaseHoldGate, formatBaseHoldCleared, writeBaseHold } from './base-hold.js';
 import { readRunFlagOverrides, writeRunFlagOverrides } from './run-flags.js';
 import { distFreshnessProbe, runStalenessGuard } from './staleness.js';
 import { readStopFileStatus, stopSentinelCheck, stopSentinelRunSkipMessage } from './stop-sentinel.js';
@@ -4247,6 +4247,10 @@ async function cmdRun(
                 : createBaseHoldGate({
                     file: paths.baseHold,
                     repo: ghRepo,
+                    onCleared: (c) =>
+                      logEvent(paths.events, 'base-hold-cleared', planned.lane, formatBaseHoldCleared(c), {
+                        lane: planned.lane,
+                      }),
                     git: (cmd) => shellOps.exec(cmd, { cwd: repoRoot }).then((r) => r.stdout),
                     listCheckRuns: (ref) => {
                       const [owner, repoName] = ghRepo.split('/');

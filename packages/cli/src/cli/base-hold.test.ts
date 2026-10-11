@@ -196,7 +196,7 @@ describe('base hold gate (#2349)', () => {
         listCheckRuns,
       });
       expect(await gate()).toEqual({ kind: 'claim' });
-      expect(existsSync(file)).toBe(true);
+      expect(existsSync(file)).toBe(false);
       expect(listCheckRuns).toHaveBeenCalledTimes(0);
     });
 
@@ -211,7 +211,7 @@ describe('base hold gate (#2349)', () => {
       });
       expect(await gate()).toEqual({ kind: 'claim' });
       expect(listCheckRuns).toHaveBeenCalledWith(SHA_HELD);
-      expect(existsSync(file)).toBe(true);
+      expect(existsSync(file)).toBe(false);
     });
 
     it('holds when the held SHA is unchanged and CI is failing', async () => {
