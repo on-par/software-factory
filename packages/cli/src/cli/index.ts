@@ -316,6 +316,15 @@ import { runUnpark, UnparkError, type UnparkJson } from './unpark.js';
 import { buildRunsJson, parseRunsLimit } from './runs.js';
 import { buildRunDiffstatJson, NoRunError, parseDiffstatIssue, type RunDiffstatJson } from './runs-diffstat.js';
 import { buildStatusJson } from './status-json.js';
+import {
+  buildStatusUpdateJson,
+  formatUpdateStartupLine,
+  formatUpdateStatusLine,
+  initialUpdateState,
+  readUpdateState,
+  updateStatePath,
+  writeUpdateState,
+} from './update-state.js';
 import { buildStopResumeJson } from './stop-resume-json.js';
 import { buildUsageJson } from './usage-json.js';
 import { parseResetIssues, runReset } from './reset.js';
@@ -1676,6 +1685,7 @@ export async function cmdStatus(opts: { kpis?: boolean; json?: boolean } = {}) {
           stop: existsSync(paths.stop),
           breakers: await new ProviderBreaker(paths.breaker).list(),
           active,
+          update: buildStatusUpdateJson(readUpdateState(updateStatePath(daemonRuntimePaths().dir))),
           now: Date.now(),
         }),
       ),
@@ -1762,6 +1772,8 @@ export async function cmdStatus(opts: { kpis?: boolean; json?: boolean } = {}) {
   }
 
   console.log(styleText('bold', '\n== Health =='));
+  const update = buildStatusUpdateJson(readUpdateState(updateStatePath(daemonRuntimePaths().dir)));
+  console.log(`  ${formatUpdateStatusLine(update)}`);
 
   if (opts.kpis) {
     console.log(styleText('bold', '\n  Effective config:'));
@@ -4075,6 +4087,14 @@ async function cmdFactoryd(opts: {
   };
   if (acquired.stalePid !== null) log(`removed stale pid file (pid ${acquired.stalePid})`);
   for (const notice of config.notices) log(notice);
+  const updateFile = updateStatePath(runtime.dir);
+  const updateState = initialUpdateState(config, readUpdateState(updateFile));
+  try {
+    writeUpdateState(updateFile, updateState);
+  } catch (err) {
+    log(`could not write ${updateFile}: ${errorDetail(err)}`);
+  }
+  log(formatUpdateStartupLine(updateState));
 
   const runRuntime = await createRunRuntime({
     registryFile,
@@ -4088,6 +4108,7 @@ async function cmdFactoryd(opts: {
     `factoryd: listening on 127.0.0.1:${boundPort}`,
     `  registry: ${registryFile}`,
     `  update mode: ${config.autoUpdate.mode} (channel ${config.autoUpdate.channel ?? 'none'}, install ${config.install.kind})`,
+    `  update state: ${updateFile}`,
     `  pid file: ${runtime.pidFile} (pid ${process.pid})`,
     `  port file: ${runtime.portFile}`,
     `  log file: ${runtime.logFile}`,
@@ -6297,7 +6318,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .option('--kpis', 'Also show the full health KPIs and the effective config')
     .option(
       '--json',
-      'Print one JSON object (schemaVersion 1): repo, product, stop, breaker, active claims; --kpis is ignored',
+      'Print one JSON object (schemaVersion 1): repo, product, stop, breaker, active claims, update; --kpis is ignored',
     )
     .action((opts: { kpis?: boolean; json?: boolean }) => cmdStatus(opts));
 
