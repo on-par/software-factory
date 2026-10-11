@@ -711,9 +711,9 @@ export function formatInitReachability(diagnoses: ModelDiagnosis[]): string {
 
 async function cmdInit(opts: { force?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
+  // init itself never calls GitHub, so a missing token is a warning here; ship/run still need one.
   if (!hasGitHubToken()) {
-    console.error(styleText('red', `factory: ${missingTokenMessage()}`));
-    process.exit(2);
+    console.error(styleText('yellow', `factory: warning: ${missingTokenMessage()}`));
   }
   const paths = getFactoryPaths(repoRoot);
   ensureDir(paths.root);

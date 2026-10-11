@@ -4,6 +4,14 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- `factory init` no longer exits 2 when no GitHub token is available; it
+  prints a warning and initializes `.factory/` anyway, since init never calls
+  GitHub (`factory ship`/`run` still need a token). The `Publish` workflow's
+  Quickstart smoke step now gets `GH_TOKEN`, like `ci.yml`'s job, so the v0.9.0
+  publish no longer stops there.
+
 ## 0.9.0
 
 First npm release of the seven `@on-par` packages (`adr-kit`, `contracts`,

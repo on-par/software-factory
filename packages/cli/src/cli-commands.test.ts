@@ -606,7 +606,7 @@ describe('cli commands (via main dispatch)', () => {
       expect(readFileSync(paths().queue, 'utf-8')).toBe('app 1\n');
     });
 
-    it('exits 2 with the missing-token message when no token source is available', async () => {
+    it('warns with the missing-token message but still initializes when no token source is available', async () => {
       delete process.env.GITHUB_TOKEN;
       delete process.env.GH_TOKEN;
       h.execSyncImpl = (cmd: string) => {
@@ -614,8 +614,10 @@ describe('cli commands (via main dispatch)', () => {
         return '';
       };
       const res = await runMain('init');
-      expect(res).toEqual({ exited: true, code: 2 });
-      expect(errored()).toContain('GITHUB_TOKEN not set — create a token at');
+      expect(res.exited).toBe(false);
+      expect(errored()).toContain('factory: warning: GITHUB_TOKEN not set — create a token at');
+      expect(existsSync(paths().queue)).toBe(true);
+      expect(logged()).toContain('Initialized');
     });
 
     it('succeeds when GH_TOKEN is set even without GITHUB_TOKEN', async () => {
