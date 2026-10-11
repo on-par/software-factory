@@ -80,6 +80,7 @@ import {
   waitForMerge,
   withRepoRunLock,
 } from './cli/index.js';
+import { readBaseHold } from './cli/base-hold.js';
 
 describe('cli', () => {
   const originalFactoryMerge = process.env.FACTORY_MERGE;
@@ -4003,15 +4004,27 @@ describe('cli', () => {
     });
 
     describe('environment pause (#1928)', () => {
-      it.each([0, undefined])(
-        'releases the issue to queued and pauses the lane (threshold %s)',
-        async (laneBreakerThreshold) => {
-          const shipped: number[] = [];
-          const events: any[] = [];
-          const released: any[] = [];
-          const queue = [1, 2];
-          const claimNext = vi.fn(async () => buildClaim(queue.shift()));
-          await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+      let holdDir: string;
+      beforeEach(async () => {
+        holdDir = await mkdtemp(join(tmpdir(), 'factory-env-pause-'));
+      });
+      afterEach(async () => {
+        await rm(holdDir, { recursive: true, force: true });
+      });
+
+      const runPause = async (baseHold: string, laneBreakerThreshold?: number) => {
+        const shipped: number[] = [];
+        const events: any[] = [];
+        const released: any[] = [];
+        const queue = [1, 2];
+        const claimNext = vi.fn(async () => buildClaim(queue.shift()));
+        await runLane(
+          'app',
+          [],
+          '/repo',
+          'on-par/software-factory',
+          { ...paths, baseHold },
+          {
             claimNext,
             ship: async (issue: number) => {
               shipped.push(issue);
@@ -4030,26 +4043,48 @@ describe('cli', () => {
               events.push(args);
             }) as any,
             laneBreakerThreshold,
-          });
+          },
+        );
 
-          const of = (kind: string) => events.filter((e) => e[1] === kind);
-          expect(shipped).toEqual([1]);
-          expect(released).toEqual([[1, 'queued']]);
-          expect(of('parked')).toHaveLength(0);
-          expect(of('lane-done')).toHaveLength(0);
-          expect(claimNext).toHaveBeenCalledTimes(1);
-          expect(of('lane-paused')).toHaveLength(1);
-          expect(of('lane-paused')[0][4].lanePaused).toEqual({
-            lane: 'app',
-            signature: 'sig',
-            failingChecks: ['tests'],
-            firstIssue: 1,
-            secondIssue: 1,
-            cause: 'environment',
+        const of = (kind: string) => events.filter((e) => e[1] === kind);
+        expect(shipped).toEqual([1]);
+        expect(released).toEqual([[1, 'queued']]);
+        expect(of('parked')).toHaveLength(0);
+        expect(of('lane-done')).toHaveLength(0);
+        expect(claimNext).toHaveBeenCalledTimes(1);
+        expect(of('lane-paused')).toHaveLength(1);
+        expect(of('lane-paused')[0][4].lanePaused).toEqual({
+          lane: 'app',
+          signature: 'sig',
+          failingChecks: ['tests'],
+          firstIssue: 1,
+          secondIssue: 1,
+          cause: 'environment',
+          baseSha: 'abc1234567890def',
+        });
+      };
+
+      it.each([0, undefined])(
+        'releases the issue to queued and pauses the lane (threshold %s)',
+        async (laneBreakerThreshold) => {
+          const holdFile = join(holdDir, 'state', 'base-hold.json');
+          await runPause(holdFile, laneBreakerThreshold);
+
+          const hold = readBaseHold(holdFile);
+          expect(hold).toEqual({
+            repo: 'on-par/software-factory',
             baseSha: 'abc1234567890def',
+            failingChecks: ['tests'],
+            since: expect.any(String),
           });
+          expect(Number.isNaN(Date.parse(hold!.since))).toBe(false);
         },
       );
+
+      it('still releases and pauses when the hold write fails', async () => {
+        await writeFile(join(holdDir, 'file'), 'not a dir');
+        await runPause(join(holdDir, 'file', 'base-hold.json'));
+      });
     });
 
     it('reaps the parked worktree exactly once when ship throws a LaneParkError', async () => {

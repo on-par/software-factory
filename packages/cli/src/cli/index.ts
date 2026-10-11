@@ -367,6 +367,7 @@ import { mergeScopeNotice } from './merge-scope.js';
 import { createFactoryOctokit, formatDeprecation, type FactoryOctokitOptions } from './octokit.js';
 import { DeepCheckError, createDeepModelRunner, runIssueCheck, type DeepCheckModelRunner } from './ready-check.js';
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
+import { writeBaseHold } from './base-hold.js';
 import { readRunFlagOverrides, writeRunFlagOverrides } from './run-flags.js';
 import { distFreshnessProbe, runStalenessGuard } from './staleness.js';
 import { readStopFileStatus, stopSentinelCheck, stopSentinelRunSkipMessage } from './stop-sentinel.js';
@@ -4834,6 +4835,16 @@ export async function runLane(
         streak = null;
         await reapWorktree(issue).catch(() => {});
         await settle(issue, 'queued');
+        // Persist the hold so a restarted supervisor remembers the broken base (#2348);
+        // best-effort, never allowed to change lane flow.
+        try {
+          writeBaseHold(paths.baseHold, {
+            repo: ghRepo,
+            baseSha: err.baseSha,
+            failingChecks: err.failingChecks,
+            since: new Date().toISOString(),
+          });
+        } catch {}
         const payload: LanePausedPayload = {
           lane,
           signature: err.failureSignature ?? '',
