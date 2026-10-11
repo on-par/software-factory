@@ -1051,7 +1051,7 @@ describe('shipPhase CI watch', () => {
       expect(logs).not.toContainEqual(['ready', 'PR #123 ready for review']);
       expect(calls.some(([name]) => name === 'pulls.get')).toBe(false);
       expect(calls.some(([name]) => name === 'graphql')).toBe(false);
-      expect(callCount()).toBe(2);
+      expect(callCount()).toBe(3); // 2 watch polls + 1 re-list by the infra-rerun rescue check (#2365)
     } finally {
       vi.useRealTimers();
     }

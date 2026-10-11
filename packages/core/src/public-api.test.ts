@@ -645,6 +645,7 @@ const INTERNAL_API_KEYS = [
   'shouldProxyEgress',
   'classifyCiFailure',
   'watchChecks',
+  'watchChecksWithInfraRerun',
   'isPassingConclusion',
   'describeCommandFailure',
   'runCommand',

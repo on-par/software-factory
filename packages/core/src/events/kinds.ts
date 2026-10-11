@@ -32,6 +32,7 @@ export type EventKind =
   | 'checker_completed'
   | 'checker_started'
   | 'ci-failed'
+  | 'ci-rescued'
   | 'conflict'
   | 'constitution'
   | 'decompose_comment_posted'
@@ -258,6 +259,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   check: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
   checker_completed: { severity: 'info', isPark: false, isTerminal: false },
   checker_started: { severity: 'info', isPark: false, isTerminal: false },
+  // An infra-classified CI failure was rerun once and the re-watch went green (#2365). Not a park.
+  'ci-rescued': { severity: 'info', isPark: false, isTerminal: false },
   'ci-failed': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   conflict: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   constitution: { severity: 'info', isPark: false, isTerminal: false },

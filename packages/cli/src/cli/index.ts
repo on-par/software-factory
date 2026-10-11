@@ -290,6 +290,7 @@ import {
   startEgressProxy,
   sweepWorktrees,
   watchChecks,
+  watchChecksWithInfraRerun,
   withAdmissionGuard,
   withFileLock,
   withGitLock,
@@ -5265,6 +5266,7 @@ export async function landOpenPullRequest(opts: {
   skipCI?: boolean;
   adminMerge?: boolean;
   watch?: (opts: WatchChecksOptions) => Promise<CiOutcome>;
+  rerun?: (argv: readonly string[]) => Promise<{ ok: boolean }>;
   withLock?: LandLock;
   /** Materializes an adopted branch only after its locked state re-read confirms it needs rebasing. */
   ensureWorktree?: () => Promise<void>;
@@ -5284,6 +5286,7 @@ export async function landOpenPullRequest(opts: {
     skipCI = false,
     adminMerge = process.env.FACTORY_MERGE_ADMIN === '1',
     watch = internalOps.watchChecks,
+    rerun,
     withLock = (fn) => fn(),
     ensureWorktree,
   } = opts;
@@ -5296,7 +5299,19 @@ export async function landOpenPullRequest(opts: {
     try {
       const { data: pr } = await octokit.rest.pulls.get({ owner, repo: repoName, pull_number: prNumber });
       headSha = pr.head.sha;
-      outcome = await watch({ octokit, owner, repo: repoName, ref: headSha });
+      outcome = await watchChecksWithInfraRerun({
+        octokit,
+        owner,
+        repo: repoName,
+        ref: headSha,
+        watch,
+        rerun,
+        onRescued: ({ runIds }) =>
+          log(
+            'ci-rescued',
+            `CI rescued for PR #${prNumber} on ${branch}: reran infra-failed run(s) ${runIds.join(', ')} once and the re-watch is green`,
+          ),
+      });
     } catch (err) {
       const msg = `CI watch for ${branch} failed: ${errorDetail(err)} — refusing to merge without a green verdict`;
       log('ci-failed', msg);
