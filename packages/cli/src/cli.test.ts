@@ -80,7 +80,7 @@ import {
   waitForMerge,
   withRepoRunLock,
 } from './cli/index.js';
-import { readBaseHold } from './cli/base-hold.js';
+import { type BaseHold, createBaseHoldGate, readBaseHold } from './cli/base-hold.js';
 
 describe('cli', () => {
   const originalFactoryMerge = process.env.FACTORY_MERGE;
@@ -4003,6 +4003,66 @@ describe('cli', () => {
       });
     });
 
+    describe('base hold claim gate (#2349)', () => {
+      const hold: BaseHold = {
+        repo: 'on-par/software-factory',
+        baseSha: 'b'.repeat(40),
+        failingChecks: ['tests', 'lint'],
+        since: '2026-01-01T00:00:00.000Z',
+      };
+      const gateRun = async (baseHoldGate: () => Promise<any>, issues: number[] = [], queue: number[] = [1]) => {
+        const shipped: number[] = [];
+        const events: any[] = [];
+        const claimNext = vi.fn(async () => buildClaim(queue.shift()));
+        await runLane('app', issues, '/repo', 'on-par/software-factory', paths, {
+          claimNext,
+          ship: async (issue: number) => {
+            shipped.push(issue);
+            return 'merged';
+          },
+          waitMerge: async () => {},
+          pathExists: () => false,
+          emitEvent: ((...args: any[]) => {
+            events.push(args);
+          }) as any,
+          baseHoldGate,
+        });
+        return { shipped, events, claimNext };
+      };
+
+      it('does not claim while the hold matches origin/main and CI is not green', async () => {
+        const r = await gateRun(async () => ({ kind: 'hold', hold }));
+        expect(r.claimNext).toHaveBeenCalledTimes(0);
+        const warns = r.events.filter((e) => e[1] === 'warn');
+        expect(warns).toHaveLength(1);
+        expect(warns[0][3]).toContain('not claiming');
+        expect(warns[0][3]).toContain('bbbbbbbb');
+        expect(r.events.filter((e) => e[1] === 'lane-done')).toHaveLength(0);
+      });
+
+      it('claims normally when the gate returns claim', async () => {
+        const r = await gateRun(async () => ({ kind: 'claim' }));
+        expect(r.claimNext).toHaveBeenCalled();
+        expect(r.shipped).toEqual([1]);
+      });
+
+      it('claims when the gate throws', async () => {
+        const r = await gateRun(async () => {
+          throw new Error('boom');
+        });
+        expect(r.claimNext).toHaveBeenCalled();
+        expect(r.shipped).toEqual([1]);
+      });
+
+      it('does not gate seeded local issues', async () => {
+        const gate = vi.fn(async () => ({ kind: 'hold', hold }));
+        const r = await gateRun(gate, [1], []);
+        expect(r.shipped).toEqual([1]);
+        expect(gate).toHaveBeenCalledTimes(1); // only once the seeded issues are exhausted
+        expect(r.claimNext).toHaveBeenCalledTimes(0);
+      });
+    });
+
     describe('environment pause (#1928)', () => {
       let holdDir: string;
       beforeEach(async () => {
@@ -4084,6 +4144,72 @@ describe('cli', () => {
       it('still releases and pauses when the hold write fails', async () => {
         await writeFile(join(holdDir, 'file'), 'not a dir');
         await runPause(join(holdDir, 'file', 'base-hold.json'));
+      });
+
+      const SHA40 = 'a'.repeat(40);
+      // One supervisor poll: a fresh runLane with a fresh claimNext, sharing the on-disk hold.
+      const poll = async (
+        baseHold: string,
+        queue: number[],
+        gitOut: string,
+        laneDeps: Record<string, unknown> = {},
+      ) => {
+        const shipped: number[] = [];
+        const claimNext = vi.fn(async () => buildClaim(queue.shift()));
+        await runLane(
+          'app',
+          [],
+          '/repo',
+          'on-par/software-factory',
+          { ...paths, baseHold },
+          {
+            claimNext,
+            ship: async (issue: number) => {
+              shipped.push(issue);
+              throw new LaneEnvironmentPauseError('base broken', {
+                baseSha: SHA40,
+                failingChecks: ['tests'],
+                failureSignature: 'sig',
+              });
+            },
+            waitMerge: async () => {},
+            releaseIssue: async () => {},
+            pathExists: () => false,
+            emitEvent: (() => {}) as any,
+            baseHoldGate: createBaseHoldGate({
+              file: baseHold,
+              repo: 'on-par/software-factory',
+              git: async () => gitOut,
+              listCheckRuns: async () => [{ status: 'completed', conclusion: 'failure' }],
+            }),
+            ...laneDeps,
+          },
+        );
+        return { shipped, claimNext };
+      };
+
+      it('a restarted lane does not re-claim after LaneEnvironmentPauseError while origin/main is unchanged', async () => {
+        const holdFile = join(holdDir, 'state', 'base-hold.json');
+        const queue = [1, 2];
+        const gitOut = `${SHA40}\trefs/heads/main\n`;
+        const first = await poll(holdFile, queue, gitOut);
+        expect(first.shipped).toEqual([1]);
+        expect(readBaseHold(holdFile)?.baseSha).toBe(SHA40);
+
+        const second = await poll(holdFile, queue, gitOut);
+        expect(second.claimNext).toHaveBeenCalledTimes(0);
+        expect(second.shipped).toEqual([]);
+      });
+
+      it('cycles an issue at most once per base SHA across repeated polls', async () => {
+        const holdFile = join(holdDir, 'state', 'base-hold.json');
+        const queue = [1, 2];
+        const gitOut = `${SHA40}\trefs/heads/main\n`;
+        const runs = [await poll(holdFile, queue, gitOut)];
+        for (let n = 0; n < 3; n++) runs.push(await poll(holdFile, queue, gitOut));
+
+        expect(runs.flatMap((r) => r.shipped)).toEqual([1]);
+        expect(runs.reduce((total, r) => total + r.claimNext.mock.calls.length, 0)).toBe(1);
       });
     });
 

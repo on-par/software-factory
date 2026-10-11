@@ -367,7 +367,7 @@ import { mergeScopeNotice } from './merge-scope.js';
 import { createFactoryOctokit, formatDeprecation, type FactoryOctokitOptions } from './octokit.js';
 import { DeepCheckError, createDeepModelRunner, runIssueCheck, type DeepCheckModelRunner } from './ready-check.js';
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
-import { writeBaseHold } from './base-hold.js';
+import { type BaseHoldDecision, createBaseHoldGate, writeBaseHold } from './base-hold.js';
 import { readRunFlagOverrides, writeRunFlagOverrides } from './run-flags.js';
 import { distFreshnessProbe, runStalenessGuard } from './staleness.js';
 import { readStopFileStatus, stopSentinelCheck, stopSentinelRunSkipMessage } from './stop-sentinel.js';
@@ -4240,6 +4240,18 @@ async function cmdRun(
           runLane(planned.lane, planned.issues, repoRoot, ghRepo, paths, {
             ...planned.deps,
             laneBreakerThreshold,
+            baseHoldGate:
+              opts.localQueue === true
+                ? undefined
+                : createBaseHoldGate({
+                    file: paths.baseHold,
+                    repo: ghRepo,
+                    git: (cmd) => shellOps.exec(cmd, { cwd: repoRoot }).then((r) => r.stdout),
+                    listCheckRuns: (ref) => {
+                      const [owner, repoName] = ghRepo.split('/');
+                      return createOctokitGreenPrClient(getOctokit()).listCheckRuns({ owner, repo: repoName, ref });
+                    },
+                  }),
             commentIssue: async (issue, body) => {
               const [owner, repoName] = ghRepo.split('/');
               await getOctokit().rest.issues.createComment({ owner, repo: repoName, issue_number: issue, body });
@@ -4466,6 +4478,9 @@ type RunLaneDeps = {
   /** Number of issues still claimable on this lane's remote queue (#1222). Absent for
    *  static local lanes, whose pending list is the whole truth. */
   countRemaining?: () => Promise<number>;
+  /** Base-hold claim gate (#2349): consulted before every remote claim; 'hold' stops the lane
+   *  without claiming. Absent = always claim (local lanes, injected-deps callers, tests). */
+  baseHoldGate?: () => Promise<BaseHoldDecision>;
 };
 
 export interface PlannedLane {
@@ -4704,6 +4719,7 @@ export async function runLane(
     reapWorktree = async () => {},
     sweepFinished = async () => {},
     countRemaining,
+    baseHoldGate,
     laneBreakerThreshold = 0,
     commentIssue = async () => {},
   } = deps;
@@ -4736,6 +4752,19 @@ export async function runLane(
   };
   for (let i = 0; ; i++) {
     if (i >= pending.length) {
+      // A persisted base hold on the unchanged origin/main SHA means the base is still broken
+      // (#2349): claiming would just cycle an issue again, so stop this lane without claiming.
+      const gate = baseHoldGate ? await baseHoldGate().catch((): BaseHoldDecision => ({ kind: 'claim' })) : null;
+      if (gate?.kind === 'hold') {
+        emitEvent(
+          paths.events,
+          'warn',
+          lane,
+          `lane '${lane}' not claiming: base hold on ${gate.hold.baseSha.slice(0, 8)} (${gate.hold.failingChecks.join(', ')}) — origin/main unchanged and its CI is not green`,
+          { lane },
+        );
+        return;
+      }
       const claimed = await claimNext();
       if (claimed === null) break;
       seen.add(claimed.issue);

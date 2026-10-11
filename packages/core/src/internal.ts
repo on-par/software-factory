@@ -213,7 +213,7 @@ export { readClaudeAccessToken } from './usage/subscription.js';
 
 // Utils
 export type { CiOutcome, WatchChecksOptions } from './utils/ci-watch.js';
-export { watchChecks } from './utils/ci-watch.js';
+export { watchChecks, isPassingConclusion } from './utils/ci-watch.js';
 export type { CommandResult, RunCommandOptions } from './utils/command-runner.js';
 export { describeCommandFailure, runCommand } from './utils/command-runner.js';
 export type { CoverageMetrics, RatchetCheckResult, RatchetDrift } from './utils/coverage-ratchet.js';

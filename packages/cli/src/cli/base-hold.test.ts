@@ -3,9 +3,18 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { type BaseHold, deleteBaseHold, readBaseHold, writeBaseHold } from './base-hold.js';
+import {
+  type BaseHold,
+  createBaseHoldGate,
+  deleteBaseHold,
+  evaluateBaseHold,
+  isGreenCheckRunSet,
+  parseLsRemoteSha,
+  readBaseHold,
+  writeBaseHold,
+} from './base-hold.js';
 
 const hold: BaseHold = {
   repo: 'on-par/software-factory',
@@ -73,5 +82,149 @@ describe('base-hold', () => {
     expect(existsSync(file)).toBe(false);
     expect(readBaseHold(file)).toBeNull();
     expect(() => deleteBaseHold(file)).not.toThrow();
+  });
+});
+
+const SHA_HELD = 'a'.repeat(40);
+const SHA_NEW = 'b'.repeat(40);
+const gateHold: BaseHold = { ...hold, baseSha: SHA_HELD };
+
+describe('base hold gate (#2349)', () => {
+  let dir: string;
+  let file: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'factory-base-hold-gate-'));
+    file = join(dir, 'state', 'base-hold.json');
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  describe('evaluateBaseHold', () => {
+    const mkDeps = (sha: string | null | Error = SHA_HELD, green: boolean | Error = false) => ({
+      currentBaseSha: vi.fn(async () => {
+        if (sha instanceof Error) throw sha;
+        return sha;
+      }),
+      baseCiGreen: vi.fn(async () => {
+        if (green instanceof Error) throw green;
+        return green;
+      }),
+    });
+
+    it('claims with no hold file and calls no dep', async () => {
+      const deps = mkDeps();
+      expect(await evaluateBaseHold(file, hold.repo, deps)).toEqual({ kind: 'claim' });
+      expect(deps.currentBaseSha).toHaveBeenCalledTimes(0);
+      expect(deps.baseCiGreen).toHaveBeenCalledTimes(0);
+    });
+
+    it('claims for a hold on another repo and calls no dep', async () => {
+      writeBaseHold(file, gateHold);
+      const deps = mkDeps();
+      expect(await evaluateBaseHold(file, 'other/repo', deps)).toEqual({ kind: 'claim' });
+      expect(deps.currentBaseSha).toHaveBeenCalledTimes(0);
+      expect(deps.baseCiGreen).toHaveBeenCalledTimes(0);
+    });
+
+    it('holds on the same SHA with CI not green', async () => {
+      writeBaseHold(file, gateHold);
+      expect(await evaluateBaseHold(file, hold.repo, mkDeps())).toEqual({ kind: 'hold', hold: gateHold });
+    });
+
+    it('claims when the current SHA is null or the lookup throws', async () => {
+      writeBaseHold(file, gateHold);
+      expect(await evaluateBaseHold(file, hold.repo, mkDeps(null))).toEqual({ kind: 'claim' });
+      expect(await evaluateBaseHold(file, hold.repo, mkDeps(new Error('offline')))).toEqual({ kind: 'claim' });
+    });
+
+    it('holds when the CI lookup throws', async () => {
+      writeBaseHold(file, gateHold);
+      expect(await evaluateBaseHold(file, hold.repo, mkDeps(SHA_HELD, new Error('api')))).toEqual({
+        kind: 'hold',
+        hold: gateHold,
+      });
+    });
+  });
+
+  describe('isGreenCheckRunSet', () => {
+    it('is false for an empty set', () => {
+      expect(isGreenCheckRunSet([])).toBe(false);
+    });
+
+    it('is false for a run that is not completed', () => {
+      expect(isGreenCheckRunSet([{ status: 'in_progress', conclusion: null }])).toBe(false);
+    });
+
+    it.each(['failure', 'cancelled', null])('is false for conclusion %s', (conclusion) => {
+      expect(isGreenCheckRunSet([{ status: 'completed', conclusion }])).toBe(false);
+    });
+
+    it('is true when every run completed with a passing conclusion', () => {
+      expect(
+        isGreenCheckRunSet([
+          { status: 'completed', conclusion: 'success' },
+          { status: 'completed', conclusion: 'neutral' },
+          { status: 'completed', conclusion: 'skipped' },
+        ]),
+      ).toBe(true);
+    });
+  });
+
+  describe('parseLsRemoteSha', () => {
+    it('parses a valid ls-remote line', () => {
+      expect(parseLsRemoteSha(`${SHA_HELD}\trefs/heads/main\n`)).toBe(SHA_HELD);
+    });
+
+    it('returns null for empty or garbage output', () => {
+      expect(parseLsRemoteSha('')).toBeNull();
+      expect(parseLsRemoteSha('\n\n')).toBeNull();
+      expect(parseLsRemoteSha('fatal: not a repo')).toBeNull();
+    });
+  });
+
+  describe('createBaseHoldGate', () => {
+    it('claims when origin/main moved off the held SHA', async () => {
+      writeBaseHold(file, gateHold);
+      const listCheckRuns = vi.fn(async () => []);
+      const gate = createBaseHoldGate({
+        file,
+        repo: hold.repo,
+        git: async () => `${SHA_NEW}\trefs/heads/main\n`,
+        listCheckRuns,
+      });
+      expect(await gate()).toEqual({ kind: 'claim' });
+      expect(existsSync(file)).toBe(true);
+      expect(listCheckRuns).toHaveBeenCalledTimes(0);
+    });
+
+    it('claims when the held SHA is unchanged but its CI is green', async () => {
+      writeBaseHold(file, gateHold);
+      const listCheckRuns = vi.fn(async () => [{ status: 'completed', conclusion: 'success' }]);
+      const gate = createBaseHoldGate({
+        file,
+        repo: hold.repo,
+        git: async () => `${SHA_HELD}\trefs/heads/main\n`,
+        listCheckRuns,
+      });
+      expect(await gate()).toEqual({ kind: 'claim' });
+      expect(listCheckRuns).toHaveBeenCalledWith(SHA_HELD);
+      expect(existsSync(file)).toBe(true);
+    });
+
+    it('holds when the held SHA is unchanged and CI is failing', async () => {
+      writeBaseHold(file, gateHold);
+      const git = vi.fn(async () => `${SHA_HELD}\trefs/heads/main\n`);
+      const gate = createBaseHoldGate({
+        file,
+        repo: hold.repo,
+        git,
+        listCheckRuns: async () => [{ status: 'completed', conclusion: 'failure' }],
+      });
+      expect(await gate()).toEqual({ kind: 'hold', hold: gateHold });
+      expect(git).toHaveBeenCalledWith('git ls-remote origin refs/heads/main');
+    });
   });
 });

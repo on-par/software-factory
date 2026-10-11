@@ -639,6 +639,7 @@ const INTERNAL_API_KEYS = [
   'egressSummaryMessage',
   'shouldProxyEgress',
   'watchChecks',
+  'isPassingConclusion',
   'describeCommandFailure',
   'runCommand',
   'withFileLock',
