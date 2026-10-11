@@ -1,7 +1,15 @@
 {
   "name": "@on-par/factory-cli",
-  "version": "0.9.0",
-  "description": "CLI for the Software Factory — ships verified GitHub issues via boss-worker-checker orchestration.",
+  "version": "0.9.1",
+  "description": "On PAR Dev's Software Factory CLI: takes a GitHub issue through plan, build and check with AI agents, then opens a ready-for-review PR.",
+  "keywords": [
+    "ai-agents",
+    "github",
+    "cli",
+    "claude-code",
+    "pull-requests",
+    "automation"
+  ],
   "type": "module",
   "main": "dist/cli.js",
   "bin": {
@@ -39,8 +47,8 @@
     "@octokit/plugin-retry": "^8.1.1",
     "@octokit/plugin-throttling": "^11.0.5",
     "@octokit/rest": "^22.0.0",
-    "@on-par/factory-core": "^0.9.0",
-    "@on-par/factory-tui": "^0.9.0",
+    "@on-par/factory-core": "^0.9.1",
+    "@on-par/factory-tui": "^0.9.1",
     "commander": "^15.0.0"
   },
   "license": "MIT",

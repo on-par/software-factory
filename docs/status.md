@@ -1,6 +1,6 @@
 # Status
 
-Honest snapshot of what works today vs. what is experimental. Statuses reflect the actual code, not the roadmap.
+What works today and what is experimental.
 
 | Feature                                               | Status          | Notes                                                                                                                                                                           |
 | ----------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
