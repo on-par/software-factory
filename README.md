@@ -56,7 +56,7 @@ npm link --workspace @on-par/factory-cli   # puts `factory` on your PATH
 factory --version
 ```
 
-> **Global npm install is not available yet.** `npm install -g @on-par/factory-cli` will work once the Wave-1 publish lands (epic #1566, blocked on #1560). Until then it returns a 404, so use the clone install above.
+> **Global npm install is not available yet.** No `@on-par/*` package is published to npm, so `npm install -g @on-par/factory-cli` returns a 404 until a real publish happens. Use the clone install above. Tracking: the `next` pre-release channel in #2243 / #2244, the `latest` (stable) promote in #1974, and the public-docs Wave-1 cleanup in #1566.
 
 **Step 2 — Point it at your repo**
 
