@@ -14,7 +14,12 @@ import { renderPrBody } from '../reports/pr-body.js';
 import type { ReviewRouting } from '../review/routing.js';
 import { readSpec } from '../spec/index.js';
 import type { CheckSummary } from '../types/index.js';
-import { type InfraRerunOutcome, watchChecksWithInfraRerun } from '../utils/ci-watch.js';
+import {
+  DEFAULT_CI_DEADLINE_MS,
+  type InfraRerunOutcome,
+  resolveCiNoChecksGraceMs,
+  watchChecksWithInfraRerun,
+} from '../utils/ci-watch.js';
 import { shellEscape } from '../utils/index.js';
 import { GITHUB_ISSUE_SOURCE } from '../work/github-issue.js';
 import type { WorkRequest } from '../work/index.js';
@@ -64,6 +69,8 @@ async function shipPhaseImpl(opts: {
   run?: CommandRunner;
   /** Runs the gh rerun argv for the CI infra rescue (#2365); default runCommand. */
   rerun?: (argv: readonly string[]) => Promise<{ ok: boolean }>;
+  /** Grace before ship stops watching a PR head with no check runs and no statuses (#2386); default resolveCiNoChecksGraceMs(), 0 disables. */
+  ciNoChecksGraceMs?: number;
   approvalGate?: ApprovalGate;
   checkSummary?: CheckSummary;
   specPath?: string;
@@ -350,6 +357,14 @@ async function shipPhaseImpl(opts: {
         repo: repoName,
         ref: branch,
         rerun,
+        deadlineMs: DEFAULT_CI_DEADLINE_MS,
+        noChecksGraceMs: opts.ciNoChecksGraceMs ?? resolveCiNoChecksGraceMs(),
+        onProgress: ({ total, completed, pending, remainingMs }) =>
+          log(
+            'ship',
+            `CI for PR #${prNumber}: ${pending} pending, ${completed}/${total} completed, ${Math.ceil(remainingMs / 60_000)} min left before the CI timeout`,
+          ),
+        onNoChecks: ({ sha }) => log('ship', `no CI checks found on ${repo} for ${sha}; skipping CI wait`),
         onRescued: ({ headSha, runIds }) =>
           log(
             'ci-rescued',
@@ -370,8 +385,10 @@ async function shipPhaseImpl(opts: {
         const reason = `CI failed again for infrastructure reasons for PR #${prNumber} after one rerun`;
         log('ship', reason);
         return { ok: false, prNumber, reason, ciOutcome };
+      } else if (ciOutcome === 'timeout') {
+        // Log type must stay 'ship': 'timeout' is a terminal event kind in the CLI.
+        log('ship', `CI did not finish within ${DEFAULT_CI_DEADLINE_MS / 60_000} min; marking PR ready anyway`);
       }
-      // outcome === 'timeout': no log, proceed to ready (unchanged best-effort behavior)
     } catch {}
   }
 
@@ -391,7 +408,12 @@ async function shipPhaseImpl(opts: {
     }
   } catch {}
 
-  log('ready', `PR #${prNumber} ready for review`);
+  log(
+    'ready',
+    ciOutcome === 'no-checks'
+      ? `PR #${prNumber} ready for review (CI skipped: no checks found)`
+      : `PR #${prNumber} ready for review`,
+  );
   return ciOutcome === undefined ? { ok: true, prNumber } : { ok: true, prNumber, ciOutcome };
 }
 
