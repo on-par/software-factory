@@ -281,6 +281,59 @@ describe('ConstitutionLoader repo-first resolution', () => {
       expect(() => loader.resolve(repoDir, 'no-such-product')).toThrow(/No constitution for 'no-such-product'/);
     });
   });
+
+  describe('resolve() main checkout fallback', () => {
+    let mainDir: string;
+
+    beforeEach(async () => {
+      mainDir = await mkdtemp(join(tmpdir(), 'main-'));
+      await mkdir(join(mainDir, '.factory'), { recursive: true });
+      await writeFile(
+        join(mainDir, DEFAULT_REPO_CONSTITUTION_PATH),
+        '---\nproduct: main-instance\ncheckers: [main_check]\n---\nMain checkout standards.',
+      );
+    });
+
+    afterEach(async () => {
+      await rm(mainDir, { recursive: true, force: true });
+    });
+
+    it('prefers the main checkout constitution over the bundled product file when the worktree has none', async () => {
+      await writeFile(join(bundledDir, 'acme-app.md'), BUNDLED);
+
+      const c = loader.resolve(repoDir, 'acme-app', undefined, mainDir);
+      expect(c).not.toBeNull();
+      expect(c!.body).toContain('Main checkout standards.');
+      expect(c!.body).not.toContain('Bundled standards body.');
+      expect(c!.path).toBe(join(mainDir, DEFAULT_REPO_CONSTITUTION_PATH));
+      expect(c!.checkers).toEqual(['main_check']);
+    });
+
+    it('returns the main checkout constitution instead of null when no product is active', () => {
+      const c = loader.resolve(repoDir, undefined, undefined, mainDir);
+      expect(c).not.toBeNull();
+      expect(c!.body).toContain('Main checkout standards.');
+      expect(c!.path).toBe(join(mainDir, DEFAULT_REPO_CONSTITUTION_PATH));
+      expect(loader.resolve(repoDir)).toBeNull();
+    });
+
+    it('a worktree instance still wins over the main checkout file', async () => {
+      await mkdir(join(repoDir, '.factory'), { recursive: true });
+      await writeFile(join(repoDir, DEFAULT_REPO_CONSTITUTION_PATH), '---\nproduct: wt\n---\nWorktree standards.');
+
+      const c = loader.resolve(repoDir, undefined, undefined, mainDir);
+      expect(c!.body).toContain('Worktree standards.');
+      expect(c!.path).toBe(join(repoDir, DEFAULT_REPO_CONSTITUTION_PATH));
+    });
+
+    it('falls through an empty main checkout file to the bundled product', async () => {
+      await writeFile(join(bundledDir, 'acme-app.md'), BUNDLED);
+      await writeFile(join(mainDir, DEFAULT_REPO_CONSTITUTION_PATH), '   \n');
+
+      const c = loader.resolve(repoDir, 'acme-app', undefined, mainDir);
+      expect(c!.body).toContain('Bundled standards body.');
+    });
+  });
 });
 
 describe('ConstitutionLoader.resolveForReview (#1673)', () => {

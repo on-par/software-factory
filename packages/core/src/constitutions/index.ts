@@ -164,6 +164,9 @@ export class ConstitutionLoader {
    * - A committed repo constitution instance (`.factory/constitution.md` by
    *   default) takes the "bundled" slot when present, preferring it over the
    *   package `--product` lookup — the repo instance is authoritative.
+   * - When the worktree has no instance, the main checkout's instance
+   *   (`mainCheckoutDir`) is used: `.factory/` is git-excluded, so it is
+   *   never present in a fresh worktree.
    * - A configured product whose bundled file is missing throws (fail fast:
    *   an unattended run must not silently drop the standards it was given) —
    *   but only when no repo constitution instance exists.
@@ -173,8 +176,11 @@ export class ConstitutionLoader {
     repoDir: string,
     product?: string,
     constitutionPath: string = DEFAULT_REPO_CONSTITUTION_PATH,
+    mainCheckoutDir?: string,
   ): Constitution | null {
-    const repoConstitution = this.loadRepoConstitution(repoDir, constitutionPath);
+    const repoConstitution =
+      this.loadRepoConstitution(repoDir, constitutionPath) ??
+      (mainCheckoutDir ? this.loadRepoConstitution(mainCheckoutDir, constitutionPath) : null);
     const bundled = repoConstitution ?? (product ? this.load(product) : null);
     const fromRepo = this.loadFromRepo(repoDir);
     if (fromRepo && bundled) {
