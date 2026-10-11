@@ -67,9 +67,9 @@ spike supersedes this ADR.
 
 ## References
 
-- [docs/research/sandbox-tech-comparison.md (#619)](sandbox-tech-comparison.md)
-- [docs/research/hosting-comparison.md (#620)](hosting-comparison.md)
-- [docs/research/hosted-credentials.md (#621)](hosted-credentials.md)
-- [docs/research/sandbox-posture-audit.md (#618)](sandbox-posture-audit.md)
+- [docs/research/sandbox-tech-comparison.md (#619)](../research/sandbox-tech-comparison.md)
+- [docs/research/hosting-comparison.md (#620)](../research/hosting-comparison.md)
+- [docs/research/hosted-credentials.md (#621)](../research/hosted-credentials.md)
+- [docs/research/sandbox-posture-audit.md (#618)](../research/sandbox-posture-audit.md)
 - [docs/research/hosted-sandbox-recommendation.md (#622)](../research/hosted-sandbox-recommendation.md)
 - [Issue #622](https://github.com/on-par/software-factory/issues/622)

@@ -9,8 +9,6 @@ import type { Octokit } from '@octokit/rest';
 import type { EvidencePack, FailoverReason, FingerprintedFailure } from '../types/index.js';
 import { fenceExcerpt, sanitizeEvidence, stripHiddenContent } from './sanitize.js';
 
-/** Where factory-internal faults are filed when origin === 'factory-internal'. */
-export const DEFAULT_INTERNAL_REPO = 'on-par/software-factory';
 export const DEFAULT_BUG_LABELS = ['bug'] as const;
 
 /** Hidden dedup marker embedded in every filed bug's body. */
@@ -57,6 +55,8 @@ export interface FileBugInput {
   labels?: readonly string[];
   /** Host that holds the raw log, printed as host:path (default: os.hostname()). */
   host?: string;
+  /** false: never print the host or the raw log path; the issue only says the log stays on the originating machine (default true). */
+  shareLocation?: boolean;
   /** Evidence size caps (default: defaultEvidenceCaps). */
   caps?: EvidenceCaps;
   /** Overrides the default "[factory] <reason> in <phase> (<component>)" title. Sanitized. */
@@ -73,9 +73,20 @@ export interface FileBugResult {
   occurrences: number;
 }
 
-/** Repo routing (pure, exported for direct test). */
-export function resolveTargetRepo(evidence: EvidencePack, internalRepo = DEFAULT_INTERNAL_REPO): string {
-  return evidence.origin === 'factory-internal' ? internalRepo : evidence.repo;
+/**
+ * Repo routing (pure, exported for direct test). A factory-internal fault goes to the explicitly
+ * configured `internalRepo`; there is deliberately no built-in default, so a fault is never filed
+ * on a repo the operator did not choose.
+ */
+export function resolveTargetRepo(evidence: EvidencePack, internalRepo?: string): string {
+  if (evidence.origin !== 'factory-internal') return evidence.repo;
+  const target = internalRepo?.trim();
+  if (!target) {
+    throw new Error(
+      'filing: no target repo for a factory-internal report; pass the repo explicitly (e.g. --repo owner/name or filing.repo)',
+    );
+  }
+  return target;
 }
 
 /** Dedup match (pure, exported). */
@@ -120,6 +131,8 @@ export interface EvidenceCaps {
 export interface RenderBugBodyOptions {
   /** Host that holds the raw log (default: os.hostname()). */
   host?: string;
+  /** false: omit the host and the raw log path from the body (default true). */
+  shareLocation?: boolean;
   /** Size caps (default: defaultEvidenceCaps from @on-par/factory-config). */
   caps?: EvidenceCaps;
   /** Overrides the default "## Problem" paragraph (sanitized; empty falls back to default). */
@@ -148,12 +161,13 @@ function composeBody(
   evidence: EvidencePack,
   fingerprint: string,
   occurrences: number,
-  pointer: string,
+  pointer: string | undefined,
   excerpt: CappedExcerpt,
   problem: string | undefined,
 ): string {
+  const where = pointer === undefined ? '' : ` at \`${pointer}\``;
   const note = excerpt.truncated
-    ? `\n\n_Evidence truncated: showing the first ${excerpt.shownChars} of ${excerpt.totalChars} characters. The full raw log stays on the originating machine at \`${pointer}\`._`
+    ? `\n\n_Evidence truncated: showing the first ${excerpt.shownChars} of ${excerpt.totalChars} characters. The full raw log stays on the originating machine${where}._`
     : '';
   const problemText = problem?.trim()
     ? problem.trim()
@@ -167,7 +181,7 @@ ${problemText}
 - Phase / component: ${evidence.phase} / ${evidence.component}
 - Model: ${evidence.model}
 - Classified reason: ${evidence.reason}
-- Log: ${pointer}
+- Log: ${pointer ?? 'kept on the originating machine (not shared)'}
 
 ${fenceExcerpt(excerpt.text)}${note}
 
@@ -189,9 +203,11 @@ export function renderBugBody(
   occurrences = 1,
   options: RenderBugBodyOptions = {},
 ): string {
-  const host = stripHiddenContent(options.host ?? hostname()) || 'unknown-host';
   const caps = options.caps ?? defaultEvidenceCaps;
-  const pointer = `${host}:${evidence.logPath}`;
+  const pointer =
+    options.shareLocation === false
+      ? undefined
+      : `${stripHiddenContent(options.host ?? hostname()) || 'unknown-host'}:${evidence.logPath}`;
   const problem = options.problem === undefined ? undefined : stripHiddenContent(options.problem);
   let budget = caps.maxExcerptChars;
   let body = composeBody(
@@ -259,7 +275,12 @@ export async function fileBug(client: FilingGitHubClient, input: FileBugInput): 
     owner,
     repo,
     title,
-    body: renderBugBody(evidence, fingerprint, 1, { host: input.host, caps: input.caps, problem: input.problem }),
+    body: renderBugBody(evidence, fingerprint, 1, {
+      host: input.host,
+      shareLocation: input.shareLocation,
+      caps: input.caps,
+      problem: input.problem,
+    }),
     labels,
   });
   return { action: 'created', repo: target, issueNumber: number, fingerprint, occurrences: 1 };

@@ -9,7 +9,7 @@ automated, agent-driven Azure provisioning (raw `az` CLI scripting vs. an IaC
 layer), recommends a compute target for factory-built apps, designs
 service-principal credential scoping for a provisioning agent, and bounds the
 minimal "deploy this app to Azure" story. It is sequenced after the **#624**
-deployment-automation audit (`docs/research/deployment-automation-audit.md`,
+deployment-automation audit (#624 audit, unpublished,
 already landed) and runs **in parallel with the #625 AWS track**
 (`docs/research/aws-deployment-automation.md`, already landed), mirroring that
 document's structure section for section with Azure-specific facts substituted.
@@ -353,7 +353,7 @@ volatile source here.
   (`docs/adr/0023-hosted-execution-on-vps-docker-with-stock-docker-sandboxing-and-github-app-installation-tokens.md`),
   ADR-0009 (`docs/adr/0009-fenced-steal-of-stale-file-locks.md`, locking
   philosophy referenced for Terraform state backends), and the sequencing docs
-  `docs/research/deployment-automation-audit.md` (#624) and
+  #624 audit, unpublished (#624) and
   `docs/research/aws-deployment-automation.md` (#625 — AWS-specific findings are
   referenced here, not duplicated) — all cited by file:line in the body of this
   document.

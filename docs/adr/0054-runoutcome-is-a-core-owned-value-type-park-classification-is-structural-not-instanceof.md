@@ -39,4 +39,4 @@ until story 5.
 ## References
 
 - [Issue](https://github.com/on-par/software-factory/issues/672)
-- [ADR-0004 — A narrow public API for @on-par/factory-core](docs/adr/0004-narrow-public-core-api.md)
+- [ADR-0004 — A narrow public API for @on-par/factory-core](0004-narrow-public-core-api.md)

@@ -43,4 +43,4 @@ out-of-CI integration concern (consistent with ADR-0049).
 ## References
 
 - [Issue #900](https://github.com/on-par/software-factory/issues/900)
-- [ADR-0049 — container execution behind an injected ContainerEngine port](docs/adr/0049-hosted-exec-container-execution-runs-behind-an-injected-containerengine-port.md)
+- [ADR-0049 — container execution behind an injected ContainerEngine port](0049-hosted-exec-container-execution-runs-behind-an-injected-containerengine-port.md)

@@ -221,7 +221,7 @@ profile recommendation: `local-small`, `workhorse`, or `escalate`.
 `StepPlan`
 : A structured artifact committed to the worktree or temp dir. It contains tiny
 deliverable steps, acceptance criteria per step, expected files, verification
-command, and escalation conditions. This is the Markdown/JSON bridge Patrick
+command, and escalation conditions. This is the Markdown/JSON bridge the maintainer
 described.
 
 `ContextPackBuilder`
@@ -416,9 +416,8 @@ hard dependency.
 - Host verification (2026-07-13): `ollama list` confirms `qwen2.5-coder:14b`,
   `qwen3.5:9b`, `qwen3:8b`, `gemma4:12b`, `nomic-embed-text:latest` present;
   `codex-cli 0.144.3 --help` confirms `--oss` / `--local-provider`.
-- Session notes: `~/.openclaw/workspace-beckett/memory/2026-07-13.md` and
-  `2026-07-13-1401.md` (16 GB tuning guidance; T7 `OLLAMA_MODELS`
-  startup-order issue).
+- Operator session notes from 2026-07-13 (not published): 16 GB tuning guidance
+  and the T7 `OLLAMA_MODELS` startup-order issue.
 - Ollama API docs: https://github.com/ollama/ollama/blob/main/docs/api.md
   (moving to https://docs.ollama.com/api).
 - Ollama launch / Claude Code integration:

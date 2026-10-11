@@ -33,6 +33,6 @@ removed later, this ADR loses its one exception and ADR-0136 should be supersede
 
 ## References
 
-- [ADR-0136 (BUILD commit-only by default, publishFromBuild opt-in)](docs/adr/0136-build-is-commit-only-on-every-route-by-default-and-only-build-publishfrombuild-lets-the-claude-route-push-and-open-a-pr-before-check.md)
-- [ADR-0137 (SHIP lease-pinned force push)](docs/adr/0137-ship-force-pushes-a-lane-branch-only-under-a-lease-pinned-to-the-remote-sha-recorded-at-worktree-creation.md)
+- [ADR-0136 (BUILD commit-only by default, publishFromBuild opt-in)](0136-build-is-commit-only-on-every-route-by-default-and-only-build-publishfrombuild-lets-the-claude-route-push-and-open-a-pr-before-check.md)
+- [ADR-0137 (SHIP lease-pinned force push)](0137-ship-force-pushes-a-lane-branch-only-under-a-lease-pinned-to-the-remote-sha-recorded-at-worktree-creation.md)
 - [Issue](https://github.com/on-par/software-factory/issues/1870)

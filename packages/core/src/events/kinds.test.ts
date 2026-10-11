@@ -139,8 +139,8 @@ describe('laneStatusOf', () => {
 
   // A lane that self-parks on ambiguity (an oversized issue, a conflicting PR, a
   // decision it can't make alone) stopped safely, not because anything broke — it
-  // must read differently from a real error in the TUI (Patrick, 2026-08-20: "if
-  // it's parked then we want to use the word park").
+  // must read differently from a real error in the TUI, so it uses the word
+  // "parked" (2026-08-20).
   it('maps self-parked kinds to parked, distinct from a genuine failure', () => {
     for (const kind of ['escalate', 'parked', 'held']) {
       expect(laneStatusOf(kind), kind).toBe('parked');

@@ -49,5 +49,5 @@ only rule that removes without merge evidence.
 
 ## References
 
-- [Issue #713: hasPriorPushEvidence gate never fires for the plain-push SHIP path](https://github.com/patrob/software-factory/issues/713)
+- [Issue #713: hasPriorPushEvidence gate never fires for the plain-push SHIP path](https://github.com/on-par/software-factory/issues/713)
 - [Issue #713](https://github.com/on-par/software-factory/issues/713)

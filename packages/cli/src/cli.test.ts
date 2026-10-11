@@ -38,6 +38,7 @@ import {
   isPermanentMergeCheckError,
   cmdFeedback,
   cmdFilingPreview,
+  readOriginSlug,
   runFeedbackCommand,
   IssueDecomposedError,
   IssueSkippedError,
@@ -5913,13 +5914,43 @@ describe('runFeedbackCommand (#1851)', () => {
     paths: { events: '/nowhere/events', plans: '/p', logs: '/l' },
     now: () => new Date(0),
     host: 'h',
+    repo: 'acme/tools',
     ...over,
   });
 
   it('prints the filed issue', async () => {
     const lines: string[] = [];
     await runFeedbackCommand('https://github.com/o/r/pull/1', { note: 'gap' }, deps(), (l) => lines.push(l));
-    expect(lines).toEqual(['Filed on-par/software-factory#9']);
+    expect(lines).toEqual(['Filed acme/tools#9']);
+  });
+
+  it('maps a missing target repo to exit 2', async () => {
+    await expect(
+      runFeedbackCommand('https://github.com/o/r/pull/1', { note: 'gap' }, deps({ repo: undefined })),
+    ).rejects.toMatchObject({ code: 2 });
+  });
+
+  it('cmdFeedback rejects a malformed --repo with exit 2', async () => {
+    vi.stubEnv('GITHUB_TOKEN', 'ghp_test');
+    try {
+      await expect(cmdFeedback('https://github.com/o/r/pull/1', { repo: 'nope' })).rejects.toMatchObject({
+        code: 2,
+        message: expect.stringContaining('--repo must be owner/name'),
+      });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('readOriginSlug parses the origin remote and never throws', async () => {
+    const ok: any = { exec: async () => ({ stdout: 'git@github.com:acme/tools.git\n' }) };
+    expect(await readOriginSlug(ok)).toBe('acme/tools');
+    const fail: any = {
+      exec: async () => {
+        throw new Error('no origin');
+      },
+    };
+    expect(await readOriginSlug(fail)).toBeNull();
   });
 
   it('maps validation errors to exit 2', async () => {

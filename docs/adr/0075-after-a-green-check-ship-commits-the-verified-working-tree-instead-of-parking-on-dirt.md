@@ -38,5 +38,5 @@ SHIP, is the boundary for what counts as build residue.
 
 ## References
 
-- [Issue #1172](https://github.com/patrob/software-factory/issues/1172)
+- [Issue #1172](https://github.com/on-par/software-factory/issues/1172)
 - [Issue #1172](https://github.com/on-par/software-factory/issues/1172)

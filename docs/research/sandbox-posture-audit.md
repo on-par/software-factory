@@ -145,7 +145,7 @@ contains the agent.
 Source of truth: the production event sink at
 `<repoRoot>/.factory/events.ndjson` (`getFactoryPaths`,
 packages/core/src/config/index.ts:373-379; `events` at index.ts:379). For this
-repo that is `/Users/moltbot/repos/on-par/software-factory/.factory/events.ndjson`
+repo that is `/Users/dev/repos/on-par/software-factory/.factory/events.ndjson`
 (not committed). The `sandbox*` event kinds are registered in
 packages/core/src/events/kinds.ts:104-108.
 
@@ -169,7 +169,7 @@ Coarse filter, then parse (the sink also contains non-JSON supervisor console
 prints; see the caveat below):
 
 ```bash
-rg '"type":"sandbox' /Users/moltbot/repos/on-par/software-factory/.factory/events.ndjson
+rg '"type":"sandbox' /Users/dev/repos/on-par/software-factory/.factory/events.ndjson
 ```
 
 Full window extraction and bucketing:
@@ -177,7 +177,7 @@ Full window extraction and bucketing:
 ```bash
 python3 - <<'EOF'
 import json, collections
-path = "/Users/moltbot/repos/on-par/software-factory/.factory/events.ndjson"
+path = "/Users/dev/repos/on-par/software-factory/.factory/events.ndjson"
 kinds = {"sandbox", "sandbox-degraded", "sandbox-unavailable",
          "sandbox-disabled", "sandbox_violation", "resource_limit"}
 start, end = "2026-08-13T00:00:00Z", "2026-08-14T23:59:59Z"

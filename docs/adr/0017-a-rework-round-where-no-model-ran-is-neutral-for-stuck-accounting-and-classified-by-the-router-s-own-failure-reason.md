@@ -59,4 +59,4 @@ router call sites now handle failure differently until that one is addressed sep
 ## References
 
 - [Issue #642 — CHECK rework swallows router failure](https://github.com/on-par/software-factory/issues/642)
-- [ADR-0014 — CI merge gate fails closed on non-allow-listed check conclusions](docs/adr/0014-ci-merge-gate-fails-closed-on-non-allow-listed-check-conclusions.md)
+- [ADR-0014 — CI merge gate fails closed on non-allow-listed check conclusions](0014-ci-merge-gate-fails-closed-on-non-allow-listed-check-conclusions.md)

@@ -58,7 +58,7 @@ beforeEach(async () => {
 });
 
 function base(over: Record<string, unknown> = {}) {
-  return { ledgerFile, outboxDir, logger, now: day1, policy, ...over };
+  return { ledgerFile, outboxDir, logger, now: day1, policy, repo: 'acme/factory', ...over };
 }
 
 interface CreateArg {
@@ -76,14 +76,28 @@ const okClient = () => ({
 });
 
 describe('sendUpstreamReports', () => {
+  it.each([undefined, '', 'not-a-slug', 'a/b/c'])(
+    'skips every report with no-target-repo when repo is %j (no built-in default)',
+    async (repo) => {
+      const client = okClient();
+      const res = await sendUpstreamReports({ ...base({ repo }), reports: [pending('a'), pending('b')], client });
+      expect(res).toEqual([
+        { fingerprint: 'a', outcome: 'skipped', reason: 'no-target-repo' },
+        { fingerprint: 'b', outcome: 'skipped', reason: 'no-target-repo' },
+      ]);
+      expect(client.createIssue).not.toHaveBeenCalled();
+      expect(client.searchIssues).not.toHaveBeenCalled();
+    },
+  );
+
   it('creates one issue with no labels', async () => {
     const client = okClient();
     const res = await sendUpstreamReports({ ...base(), reports: [pending('ff_1')], client });
     expect(res).toEqual([{ fingerprint: 'ff_1', outcome: 'created', issueNumber: 7 }]);
     expect(client.createIssue).toHaveBeenCalledTimes(1);
     const arg = client.createIssue.mock.calls[0]?.[0] as CreateArg;
-    expect(arg.owner).toBe('on-par');
-    expect(arg.repo).toBe('software-factory');
+    expect(arg.owner).toBe('acme');
+    expect(arg.repo).toBe('factory');
     expect(arg.title.startsWith('[factory-report]')).toBe(true);
     expect(arg.body).toContain(upstreamReportMarker('ff_1'));
     expect(arg.labels).toEqual([]);
@@ -184,11 +198,12 @@ describe('sendUpstreamReports', () => {
     expect(logs.find((l) => l.type === 'upstream_report_outboxed')?.msg).toContain('outbox write failed');
   });
 
-  it('works without a logger and with default repo/paths helpers', async () => {
+  it('works without a logger and with the default paths helpers', async () => {
     const res = await sendUpstreamReports({
       reports: [pending('a')],
       client: okClient(),
       policy,
+      repo: 'acme/factory',
       ledgerFile,
       outboxDir,
     });
@@ -218,7 +233,7 @@ describe('writeUpstreamOutbox', () => {
     const path = await writeUpstreamOutbox(outboxDir, {
       version: 1,
       fingerprint: '../x',
-      repo: 'on-par/software-factory',
+      repo: 'acme/factory',
       title: 't',
       body: 'b',
       reason: 'r',
@@ -240,7 +255,7 @@ describe('writeUpstreamOutbox', () => {
       client.searchIssues.mockResolvedValue([existing('ff_1')]);
       const res = await sendUpstreamReports({ ...base(), reports: [pending('ff_1')], client });
       expect(res).toEqual([{ fingerprint: 'ff_1', outcome: 'bumped', issueNumber: 42 }]);
-      expect(client.searchIssues).toHaveBeenCalledWith({ owner: 'on-par', repo: 'software-factory', text: 'ff_1' });
+      expect(client.searchIssues).toHaveBeenCalledWith({ owner: 'acme', repo: 'factory', text: 'ff_1' });
       expect(client.commentIssue).toHaveBeenCalledTimes(1);
       expect(client.commentIssue.mock.calls[0]?.[0]).toMatchObject({ issue_number: 42 });
       expect(client.createIssue).not.toHaveBeenCalled();

@@ -44,4 +44,4 @@ persistence across process restarts.
 ## References
 
 - [Issue](https://github.com/on-par/software-factory/issues/897)
-- [ADR-0004 — narrow public core API](docs/adr/0004-narrow-public-core-api.md)
+- [ADR-0004 — narrow public core API](0004-narrow-public-core-api.md)

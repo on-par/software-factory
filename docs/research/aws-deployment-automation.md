@@ -9,7 +9,7 @@ automated, agent-driven AWS provisioning (raw `aws` CLI scripting vs. an IaC
 layer), recommends a compute target for factory-built apps, designs IAM
 credential scoping for a provisioning agent, and bounds the minimal "deploy this
 app to AWS" story. It is sequenced after the **#624** deployment-automation audit
-(`docs/research/deployment-automation-audit.md`, already landed) and runs **in
+(#624 audit, unpublished, already landed) and runs **in
 parallel with the Azure track**, mirroring how #620 deferred its pick and #622
 later made it. It is a **discovery artifact, not a design**: it recommends a
 direction **relative to today's baseline** (ad hoc CLI), makes no final
@@ -286,6 +286,6 @@ volatile source here.
   index.ts:299-305), `packages/core/src/harness/index.ts` (HarnessRequest.env
   harness/index.ts:45-46), ADR-0023
   (`docs/adr/0023-hosted-execution-on-vps-docker-with-stock-docker-sandboxing-and-github-app-installation-tokens.md`),
-  and the sequencing docs `docs/research/deployment-automation-audit.md` (#624)
+  and the sequencing docs #624 audit, unpublished (#624)
   and `docs/research/hosted-credentials.md` (#621) — all cited by file:line in
   the body of this document.
