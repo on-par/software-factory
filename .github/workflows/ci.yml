@@ -134,3 +134,5 @@ jobs:
         run: bash scripts/publish-workspaces.test.sh
       - name: publish-release unit test
         run: bash scripts/publish-release.test.sh
+      - name: set-release-version unit test
+        run: bash scripts/set-release-version.test.sh

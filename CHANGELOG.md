@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.9.0
+
+First npm release of the seven `@on-par` packages (`adr-kit`, `contracts`,
+`repo-context`, `factory-config`, `factory-core`, `factory-tui`,
+`factory-cli`). Versioning restarts at 0.9.0; nothing was published before,
+and 1.0 follows once the release is proven.
+
+### Changed
+
+- Every workspace is now at version 0.9.0 (was 2.0.0), with `^0.9.0` ranges
+  between the `@on-par` packages. `factory --version` prints 0.9.0 (#2244).
+- The `Publish` workflow takes its version and npm dist-tag from the tag name:
+  `vX.Y.Z-next.N` publishes `X.Y.Z-next.N` to `next`, `vX.Y.Z` publishes
+  `X.Y.Z` to `latest`, and any other tag fails. `scripts/set-release-version.sh`
+  sets the seven packages to one version with exact internal pins (and fails,
+  naming the package, when they are not in lockstep).
+  `scripts/publish-workspaces.sh --tag next|latest` refuses the wrong channel
+  for the version and skips packages already on the registry, so a
+  half-finished publish can be rerun (#2244).
+
 ### Security
 
 - Agent CLI child processes (claude, codex, opencode), the commands they

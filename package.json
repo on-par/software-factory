@@ -1,6 +1,6 @@
 {
   "name": "@on-par/software-factory",
-  "version": "2.0.0",
+  "version": "0.9.0",
   "private": true,
   "description": "Multi-agent software factory monorepo — boss-worker-checker orchestration with multi-provider model routing and per-product constitutions.",
   "type": "module",
