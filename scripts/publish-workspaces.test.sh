@@ -60,6 +60,10 @@ grep -qE 'run: bash scripts/publish-release.sh$' "$PUBLISH_YML" || fail "publish
 grep -qE '^bash scripts/publish-workspaces.sh --tag "\$channel" --dry-run ' "$ROOT/scripts/publish-release.sh" || fail "publish-release.sh lacks the dry-run"
 grep -qE '^bash scripts/publish-workspaces.sh --tag "\$channel" \|\|' "$ROOT/scripts/publish-release.sh" || fail "publish-release.sh does not run the publish loop"
 if grep -q -- '--workspace' "$PUBLISH_YML"; then fail "publish.yml hard-codes --workspace"; fi
+# publish.yml's Quickstart smoke step gets a GitHub token, like ci.yml's job does.
+smoke_step="$(awk '/- name: Quickstart smoke/{on=1;print;next} on&&/^      - /{on=0} on' "$PUBLISH_YML")"
+grep -q 'run: bash scripts/quickstart-smoke.sh' <<<"$smoke_step" || fail "publish.yml's Quickstart smoke step does not run quickstart-smoke.sh"
+grep -q "GH_TOKEN: '\${{ github.token }}'" <<<"$smoke_step" || fail "publish.yml's Quickstart smoke step has no GH_TOKEN"
 grep -q 'publish-workspaces.txt' "$SMOKE" || fail "quickstart-smoke.sh does not read the list"
 if grep -q -- '--workspace @on-par/' "$SMOKE"; then fail "quickstart-smoke.sh hard-codes workspaces"; fi
 
