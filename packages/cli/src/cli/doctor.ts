@@ -18,6 +18,8 @@ export interface DoctorCheck {
   optional?: boolean;
   /** Setup section the row renders under (#2555); unsectioned rows render first. */
   section?: string;
+  /** Exactly one shell command to run next (#2557); rendered as the last line of a non-ok row. */
+  next?: string;
 }
 
 export interface DoctorExecOptions {
@@ -39,6 +41,9 @@ export interface DoctorEnvProbes {
   /** Stored Codex ChatGPT session state (#2509), read locally; never refreshes. */
   codexSessionState?: () => 'ok' | 'refresh-pending' | 'unusable' | 'unknown';
 }
+
+/** Repo wired-up rows, sectioned only inside a git repo (#2557). */
+export const REPO_SECTION = 'Repo';
 
 export const NOT_IN_REPO_HINT = 'cd into your repo, then run factory doctor again';
 
@@ -125,6 +130,7 @@ export function gitAuthCheck(
       ok: false,
       detail: 'git could not authenticate to origin non-interactively (prompting disabled)',
       fix: GIT_AUTH_FIX,
+      next: 'gh auth setup-git',
     };
   }
   return { name: GIT_AUTH_CHECK, ok: true, detail: 'git can authenticate to origin non-interactively' };
@@ -187,6 +193,7 @@ export function agentCliChecks(
           ok: false,
           detail: 'no coding agent CLI on PATH (claude, codex or opencode)',
           fix: `install Claude Code (${CLAUDE_CODE_URL}) or the Codex CLI (${CODEX_CLI_URL})`,
+          next: HARNESS_SETUP[0]!.install,
         },
   ];
   checks.push(...harnessInstallChecks(commandAvailable, tryExec));
@@ -202,6 +209,7 @@ export function agentCliChecks(
             detail:
               'ChatGPT session in auth.json is unusable (unreadable, or no valid access token and no refresh token)',
             fix: CODEX_LOGIN_FIX,
+            next: 'codex login',
           }
         : session === 'refresh-pending'
           ? {
@@ -226,6 +234,7 @@ export function agentCliChecks(
                 optional: found.length > 1,
                 detail: 'codex CLI installed but not logged in',
                 fix: CODEX_LOGIN_FIX,
+                next: 'codex login',
               },
     );
   }
@@ -249,20 +258,25 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
         },
   );
 
+  const repoSection = repoRoot === null ? {} : { section: REPO_SECTION };
+
   if (repoRoot === null) {
     checks.push({ name: 'git identity', ok: false, optional: true, detail: NOT_IN_REPO_SKIP_DETAIL });
   } else {
     const userName = tryExec('git config user.name');
     const userEmail = tryExec('git config user.email');
     if (userName && userEmail) {
-      checks.push({ name: 'git identity', ok: true, detail: `${userName} <${userEmail}>` });
+      checks.push({ name: 'git identity', ok: true, detail: `${userName} <${userEmail}>`, ...repoSection });
     } else {
       const missing = [!userName && 'user.name', !userEmail && 'user.email'].filter(Boolean).join(' and ');
       checks.push({
         name: 'git identity',
         ok: false,
         detail: `${missing} not set`,
-        fix: 'git config --global user.name "Your Name" && git config --global user.email you@example.com',
+        next: !userName
+          ? 'git config --global user.name "Your Name"'
+          : 'git config --global user.email you@example.com',
+        ...repoSection,
       });
     }
   }
@@ -274,20 +288,21 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
       name: 'gh auth',
       ok: false,
       detail: 'gh CLI not found on PATH',
-      fix: 'install GitHub CLI and run `gh auth login`',
+      fix: 'install GitHub CLI: https://cli.github.com',
+      next: 'gh auth login',
     });
   } else if (tryExec('gh auth status') === null) {
     checks.push({
       name: 'gh auth',
       ok: false,
       detail: 'gh is not authenticated',
-      fix: 'install GitHub CLI and run `gh auth login`',
+      next: 'gh auth login',
     });
   } else {
     checks.push({ name: 'gh auth', ok: true, detail: 'authenticated' });
   }
 
-  checks.push(gitAuthCheck(repoRoot, tryExec));
+  checks.push({ ...gitAuthCheck(repoRoot, tryExec), ...repoSection });
 
   if (envPresent('GITHUB_TOKEN')) {
     checks.push({ name: 'GitHub token', ok: true, detail: 'GITHUB_TOKEN set' });
@@ -303,6 +318,7 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
         ok: false,
         detail: 'no GITHUB_TOKEN, GH_TOKEN, or gh auth token',
         fix: `create a token at ${GITHUB_TOKENS_URL} and export it`,
+        next: 'gh auth login',
       });
     }
   }
@@ -326,7 +342,7 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
       detail: NOT_IN_REPO_SKIP_DETAIL,
     });
   } else if (tryExec('git status --porcelain') === '') {
-    checks.push({ name: 'git worktree clean', ok: true, detail: 'clean' });
+    checks.push({ name: 'git worktree clean', ok: true, detail: 'clean', ...repoSection });
   } else {
     checks.push({
       name: 'git worktree clean',
@@ -334,6 +350,7 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
       optional: true,
       detail: 'uncommitted changes present',
       fix: 'commit or stash changes before running the factory',
+      ...repoSection,
     });
   }
 
@@ -378,14 +395,14 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
       detail: NOT_IN_REPO_SKIP_DETAIL,
     });
   } else if (pathExists(resolve(repoRoot, '.factory'))) {
-    checks.push({ name: '.factory initialized', ok: true, optional: true, detail: '.factory/ present' });
+    checks.push({ name: '.factory initialized', ok: true, detail: '.factory/ present', ...repoSection });
   } else {
     checks.push({
       name: '.factory initialized',
       ok: false,
-      optional: true,
       detail: '.factory/ missing',
-      fix: 'run `factory init`',
+      next: 'factory init',
+      ...repoSection,
     });
   }
 
@@ -399,6 +416,7 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
             ok: false,
             detail,
             fix: "run 'npm run build' at the monorepo root",
+            next: 'npm run build',
           },
     );
   }
@@ -443,6 +461,9 @@ export function formatDoctorChecks(checks: DoctorCheck[], opts: { inRepo?: boole
     lines.push(`  ${icon} ${check.name} — ${check.detail}`);
     if (!check.ok && check.fix) {
       lines.push(`       fix: ${check.fix}`);
+    }
+    if (!check.ok && check.next) {
+      lines.push(`       next: ${check.next}`);
     }
   }
 
