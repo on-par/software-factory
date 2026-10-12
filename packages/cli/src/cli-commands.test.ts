@@ -312,6 +312,7 @@ function makeCoreFakes() {
         setCostSink: vi.fn((sink: (entry: any) => void) => {
           h.costSinkCallback = sink;
         }),
+        skipMissingHarnessClis: vi.fn(),
       };
     }) as any,
     ConstitutionLoader: vi.fn(function () {

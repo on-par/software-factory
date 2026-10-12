@@ -71,10 +71,38 @@ export interface PlanPromptOpts {
   specPath: string;
   constitutionCtx: string;
   adrCtx?: string;
+  /** Build routes with at least one runnable model on this machine. Empty or omitted = all. */
+  runnableRoutes?: readonly BuildRouteName[];
+}
+
+export type BuildRouteName = 'codex' | 'claude' | 'opencode';
+
+/** Order PLAN falls back through when its chosen route cannot run here. */
+const ROUTE_FALLBACK_ORDER: readonly BuildRouteName[] = ['claude', 'codex', 'opencode'];
+
+/** Build routes whose task resolves to at least one runnable model, in fallback order.
+ *  Returns [] when the router cannot answer, which callers treat as "no restriction". */
+export function runnableBuildRoutes(router: Pick<ModelRouter, 'resolveAll'>): BuildRouteName[] {
+  try {
+    return ROUTE_FALLBACK_ORDER.filter((route) => router.resolveAll(`build_${route}`).length > 0);
+  } catch {
+    return [];
+  }
+}
+
+/** The route PLAN should use when it chose none, or chose one that cannot run here. */
+export function defaultBuildRoute(runnable: readonly BuildRouteName[]): BuildRouteName {
+  return runnable[0] ?? 'claude';
 }
 
 export function buildPlanPrompt(opts: PlanPromptOpts): string {
   const { issue, issueTitle, issueBody, specPath, constitutionCtx, adrCtx } = opts;
+  const runnable = opts.runnableRoutes ?? [];
+  const fallbackRoute = defaultBuildRoute(runnable);
+  const runnableNote =
+    runnable.length > 0 && runnable.length < ROUTE_FALLBACK_ORDER.length
+      ? `\n   Only these routes can run on this machine: ${runnable.join(', ')}. Choose one of them.`
+      : '';
 
   return `You are the PLAN phase of a multi-agent software factory for issue #${issue}.
 Do NOT implement anything. You are already inside the isolated worktree (cwd).
@@ -103,7 +131,7 @@ Steps:
    - route: opencode — when the repo's pinned build worker is an opencode-harness model
      (e.g. opencode-deepseek-v4-flash in .factory/config.json); bounded mechanical work
    A pinned build worker's harness always wins over your judgment: the factory forces the
-   route to match it after PLAN. Default to route: claude when genuinely unsure.
+   route to match it after PLAN. Default to route: ${fallbackRoute} when genuinely unsure.${runnableNote}
 4. RIGHT-SIZE THE SLICE. A single BUILD pass must be bounded: aim for roughly
    5-15 minutes of agent work, a handful of files, at most ~6 target types /
    ~8 signatures / ~10 call edges in the design block. If the issue genuinely
@@ -601,10 +629,11 @@ async function planPhaseImpl(opts: {
 
   let steering: ConsumedSteering | undefined;
   let replans = 0;
+  const runnableRoutes = runnableBuildRoutes(router);
 
   while (true) {
     const prompt = applySteering(
-      buildPlanPrompt({ issue, issueTitle, issueBody, specPath, constitutionCtx, adrCtx }),
+      buildPlanPrompt({ issue, issueTitle, issueBody, specPath, constitutionCtx, adrCtx, runnableRoutes }),
       steering,
     );
 
@@ -653,7 +682,7 @@ async function planPhaseImpl(opts: {
 
     // Read route from spec frontmatter (single normalization site: parseSpec)
     const parsed = await readSpec(specPath);
-    let route: 'codex' | 'claude' | 'opencode' = parsed.route ?? 'claude';
+    let route: 'codex' | 'claude' | 'opencode' = parsed.route ?? defaultBuildRoute(runnableRoutes);
 
     if (localOnly && route !== 'codex') {
       log('warn', 'local-only mode requires a local Codex harness — forcing route to codex');
@@ -667,6 +696,13 @@ async function planPhaseImpl(opts: {
       // Keep the persisted spec's frontmatter in sync with the actual route,
       // since it's the frozen artifact downstream consumers (eval scoring, PR review) read.
       await updateSpecRoute(specPath, 'claude', 'codex-disabled');
+    }
+
+    if (runnableRoutes.length > 0 && !runnableRoutes.includes(route)) {
+      const next = defaultBuildRoute(runnableRoutes);
+      log('model-override', `route ${route} has no runnable model on this machine, rerouting to ${next}`);
+      route = next;
+      await updateSpecRoute(specPath, next, 'route-unavailable');
     }
 
     if (opts.preferredRoute && route !== opts.preferredRoute) {

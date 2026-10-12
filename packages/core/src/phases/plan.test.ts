@@ -15,7 +15,7 @@ import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE } from '../utils/untrusted-input.js';
 import { UnsupportedWorkSourceError, WorkSourceRegistry } from '../work/index.js';
-import { buildPlanPrompt, planPhase } from './plan.js';
+import { buildPlanPrompt, defaultBuildRoute, planPhase, runnableBuildRoutes } from './plan.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -2282,6 +2282,51 @@ npm run test`;
       expect(persisted).not.toContain('route: claude');
     });
 
+    it('reroutes a claude spec to codex when only codex can run on this machine (#2406)', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-80.md');
+      const stub = new StubModelExecutor({
+        scripts: { plan: [{ output: '---\nroute: claude\n---\n# Spec\n' }] },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      vi.spyOn(router, 'resolveAll').mockImplementation((task: string) =>
+        task === 'build_claude' || task === 'build_opencode' ? [] : ['stub-model'],
+      );
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'Codex only', body: 'Do it.' } }) } },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+      const prompts: string[] = [];
+      const run = router.run.bind(router);
+      vi.spyOn(router, 'run').mockImplementation(async (task, prompt, o) => {
+        prompts.push(prompt);
+        return run(task, prompt, o);
+      });
+
+      const result = await planPhase({
+        issue: 80,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => {
+          logs.push({ type, msg });
+        },
+      });
+
+      expect(result.route).toBe('codex');
+      expect(logs).toContainEqual({
+        type: 'model-override',
+        msg: 'route claude has no runnable model on this machine, rerouting to codex',
+      });
+      expect(await readFile(specPath, 'utf-8')).toContain('route: codex');
+      expect(prompts[0]).toContain('Only these routes can run on this machine: codex.');
+      expect(prompts[0]).toContain('Default to route: codex when genuinely unsure.');
+    });
+
     it('forces route to claude and logs a warn when codex is disabled', async () => {
       const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
       tempDirs.add(worktree);
@@ -3275,5 +3320,37 @@ npm run test`;
       expect(received.map((e) => e.status)).toEqual(['started', 'failed']);
       expect(received[1].detail.length).toBeGreaterThan(0);
     });
+  });
+});
+
+describe('runnableBuildRoutes / defaultBuildRoute', () => {
+  it('lists routes with runnable models in fallback order', () => {
+    const router = { resolveAll: (task: string) => (task === 'build_codex' ? ['m'] : []) };
+    expect(runnableBuildRoutes(router as any)).toEqual(['codex']);
+  });
+  it('returns [] when the router cannot answer', () => {
+    expect(
+      runnableBuildRoutes({
+        resolveAll: () => {
+          throw new Error('nope');
+        },
+      } as any),
+    ).toEqual([]);
+  });
+  it('defaults to claude when nothing is known, else the first runnable route', () => {
+    expect(defaultBuildRoute([])).toBe('claude');
+    expect(defaultBuildRoute(['codex', 'opencode'])).toBe('codex');
+  });
+  it('keeps the prompt default at claude when every route can run', () => {
+    const prompt = buildPlanPrompt({
+      issue: 1,
+      issueTitle: 't',
+      issueBody: 'b',
+      specPath: '/s.md',
+      constitutionCtx: '',
+      runnableRoutes: ['claude', 'codex', 'opencode'],
+    });
+    expect(prompt).toContain('Default to route: claude when genuinely unsure.');
+    expect(prompt).not.toContain('Only these routes can run');
   });
 });

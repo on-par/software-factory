@@ -106,7 +106,7 @@ describe('shipped defaults', () => {
     expect(defaultModelsConfig.tiers.boss).toHaveLength(8);
     expect(defaultModelsConfig.tiers.worker).toHaveLength(13);
     expect(defaultModelsConfig.tiers.checker).toHaveLength(8);
-    expect(defaultModelsConfig.tiers.triage).toHaveLength(3);
+    expect(defaultModelsConfig.tiers.triage).toHaveLength(4);
   });
 
   it('preserves tier order invariants the router depends on', () => {
