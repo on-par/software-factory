@@ -7,6 +7,18 @@ import { describe, expect, it } from 'vitest';
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const GUIDE = 'docs/agents.md';
 const PROVIDERS = ['Claude Code', 'Codex', 'OpenCode'] as const;
+const MATRIX_COLUMNS = [
+  'Agent',
+  'Harness id',
+  'Install and auth',
+  'Phases',
+  'Sandbox',
+  'Usage and cost',
+  'Rate-limit classification',
+  'CI coverage',
+  'Status',
+];
+const STATUSES = ['supported', 'experimental', 'planned'];
 const STEPS: ReadonlyArray<{ step: string; test: (s: string) => boolean }> = [
   { step: 'install', test: (s) => /\binstall/i.test(s) },
   { step: 'log in', test: (s) => /\blog\s?in\b|\bsign(ed)?\s?in\b/i.test(s) },
@@ -163,5 +175,32 @@ describe('docs/agents.md supported agents guide', () => {
 
   it.skipIf(isPlaceholder)('has a matrix row for every catalog harness id and complete provider sections', () => {
     expect(agentsGuideProblems(guideText, KNOWN_HARNESS_IDS, label)).toEqual([]);
+  });
+
+  it.skipIf(isPlaceholder)('matrix has every column filled and a valid status in every row', () => {
+    const lines = (guideText ?? '').split('\n');
+    const problems: string[] = [];
+    const start = lines.findIndex((l) => l.trim().startsWith('|') && cellsOf(l).some((c) => /^harness id$/i.test(c)));
+    const table: string[] = [];
+    for (let i = start; start >= 0 && i < lines.length && (lines[i] ?? '').trim().startsWith('|'); i++)
+      table.push(lines[i] ?? '');
+    const header = cellsOf(table[0] ?? '');
+    for (const col of MATRIX_COLUMNS)
+      if (!header.some((c) => c.toLowerCase() === col.toLowerCase())) problems.push(`matrix has no ${col} column`);
+    const statusCol = header.findIndex((c) => /^status$/i.test(c));
+    for (const row of table.slice(1).map(cellsOf)) {
+      if (row.every((c) => /^:?-+:?$/.test(c))) continue;
+      const id = row[header.findIndex((c) => /^harness id$/i.test(c))] ?? row[0] ?? '?';
+      if (row.length !== header.length) problems.push(`row ${id} has ${row.length} cells, expected ${header.length}`);
+      if (row.some((c) => c === '')) problems.push(`row ${id} has an empty cell`);
+      const status = (row[statusCol] ?? '').replace(/`/g, '').toLowerCase();
+      if (!STATUSES.includes(status)) problems.push(`row ${id} has invalid status "${status}"`);
+    }
+    for (const provider of PROVIDERS) {
+      const section = providerSection(lines, provider);
+      if (section !== undefined && !/version tested/i.test(section))
+        problems.push(`${provider} section has no version tested`);
+    }
+    expect(problems).toEqual([]);
   });
 });
