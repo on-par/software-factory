@@ -40,7 +40,7 @@ route: claude
 ### Verify with `factory doctor`
 
 Run `factory doctor` in the repo. Look for a `coding agent` line showing `claude` found, plus
-the `Claude Code` section with `claude installed` (it shows the CLI version), and `claude auth (host)`.
+the `Claude Code` section with `claude installed` (it shows the CLI version), and `claude signed in` (local login evidence only, no model call; run `factory doctor --probe-inference` to also send one real `claude -p` prompt).
 
 Version tested: 2.1.296 (Claude Code)
 
@@ -65,7 +65,7 @@ route: codex
 ### Verify with `factory doctor`
 
 Run `factory doctor` in the repo. Look for the `Codex` section with `codex installed` (it shows the CLI
-version), the `codex auth` line (it names the sign-in method) and `codex sandbox`.
+version), the `codex signed in` line (it names the sign-in method) and `codex sandbox`.
 
 Version tested: codex-cli 0.155.1
 
@@ -93,7 +93,7 @@ route: opencode
 ### Verify with `factory doctor`
 
 Run `factory doctor` in the repo. The `coding agent` line lists `opencode`, and the `OpenCode` section
-shows `opencode installed`. `factory models --doctor` probes OpenCode reachability.
+shows `opencode installed` and `opencode signed in`. `factory models --doctor` probes OpenCode reachability.
 
 Version tested: 1.18.28
 

@@ -38,6 +38,10 @@ export interface DoctorEnvProbes {
   distFreshness?: () => { fresh: boolean; detail: string };
   /** Stored Codex ChatGPT session state (#2509), read locally; never refreshes. */
   codexSessionState?: () => 'ok' | 'refresh-pending' | 'unusable' | 'unknown';
+  /** Whether a stored Claude Code login exists (#2556); reads local state only, never runs inference. */
+  claudeLoggedIn?: () => boolean;
+  /** Whether a stored opencode auth login exists (#2556); reads local state only, never runs inference. */
+  opencodeLoggedIn?: () => boolean;
 }
 
 export const NOT_IN_REPO_HINT = 'cd into your repo, then run factory doctor again';
@@ -73,9 +77,6 @@ export function codexAuthMethod(statusOutput: string | null): string | null {
   if (text.includes('access token')) return 'access token';
   return 'unknown method';
 }
-
-const CODEX_LOGIN_FIX =
-  'run `codex login` (Sign in with ChatGPT, for Plus or Pro plans), `codex login --with-api-key` (API billing), or `codex login --device-auth` on a headless machine';
 
 const GIT_AUTH_CHECK = 'git auth';
 
@@ -134,13 +135,35 @@ export interface HarnessSetup {
   section: string;
   cli: string;
   install: string;
+  /** Exact command that signs the harness in (#2556). */
+  login: string;
+  /** Env vars that count as sign-in evidence (#2556). */
+  envKeys: readonly string[];
 }
 
 /** One doctor section per built-in harness (#2555), in display order. */
 export const HARNESS_SETUP: readonly HarnessSetup[] = [
-  { section: 'Claude Code', cli: 'claude', install: 'npm install -g @anthropic-ai/claude-code' },
-  { section: 'Codex', cli: 'codex', install: 'npm install -g @openai/codex' },
-  { section: 'OpenCode', cli: 'opencode', install: 'npm install -g opencode-ai' },
+  {
+    section: 'Claude Code',
+    cli: 'claude',
+    install: 'npm install -g @anthropic-ai/claude-code',
+    login: 'claude then /login',
+    envKeys: ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'],
+  },
+  {
+    section: 'Codex',
+    cli: 'codex',
+    install: 'npm install -g @openai/codex',
+    login: 'codex login',
+    envKeys: ['CODEX_API_KEY'],
+  },
+  {
+    section: 'OpenCode',
+    cli: 'opencode',
+    install: 'npm install -g opencode-ai',
+    login: 'opencode auth login',
+    envKeys: ['OPENCODE_API_KEY'],
+  },
 ];
 
 /** One optional `<cli> installed` row per harness, with the CLI version when found and the install command when not (#2555). */
@@ -171,13 +194,95 @@ export function harnessInstallChecks(
   });
 }
 
+const SIGN_IN_EVIDENCE: Readonly<Record<string, string>> = {
+  claude: 'no ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN or stored login',
+  codex:
+    'no CODEX_API_KEY or codex login; API billing: codex login --with-api-key; headless: codex login --device-auth',
+  opencode: 'no OPENCODE_API_KEY or stored auth login',
+};
+
+function safe(fn: (() => boolean) | undefined): boolean {
+  if (!fn) return false;
+  try {
+    return fn();
+  } catch {
+    return false;
+  }
+}
+
+/** One `<cli> signed in` row per harness (#2556), judged only from local evidence: an env key,
+ *  stored credentials, or `codex login status`. Never runs inference and never prints a secret. */
+export function harnessSignInChecks(probes: DoctorEnvProbes): DoctorCheck[] {
+  const { commandAvailable, envPresent, tryExec } = probes;
+  const found = availableAgentClis(commandAvailable);
+  return HARNESS_SETUP.map(({ section, cli, login, envKeys }): DoctorCheck => {
+    const name = `${cli} signed in`;
+    if (!commandAvailable(cli)) {
+      return { name, section, ok: true, optional: true, detail: `skipped — ${cli} not installed` };
+    }
+    const fix = `sign in to ${section}: ${login}`;
+    if (cli === 'codex') {
+      const key = envKeys.find((k) => envPresent(k));
+      if (key) return { name, section, ok: true, detail: `signed in (${key} set)` };
+      const method = codexAuthMethod(tryExec('codex login status 2>&1'));
+      const session = method === 'ChatGPT' ? (probes.codexSessionState?.() ?? 'unknown') : 'unknown';
+      if (session === 'unusable') {
+        return {
+          name,
+          section,
+          ok: false,
+          optional: found.length > 1,
+          detail:
+            'ChatGPT session in auth.json is unusable (unreadable, or no valid access token and no refresh token)',
+          fix,
+        };
+      }
+      if (session === 'refresh-pending') {
+        return {
+          name,
+          section,
+          ok: true,
+          detail:
+            'logged in with ChatGPT; access token expired, codex refreshes it on the next run (run `codex login` if that run fails with 401)',
+        };
+      }
+      if (method) {
+        return {
+          name,
+          section,
+          ok: true,
+          detail:
+            method === 'ChatGPT'
+              ? 'logged in with ChatGPT; runs draw on your ChatGPT plan limits (manage usage in ChatGPT settings)'
+              : `logged in with ${method}`,
+        };
+      }
+    } else {
+      const key = envKeys.find((k) => envPresent(k));
+      if (key) return { name, section, ok: true, detail: `signed in (${key} set)` };
+      if (cli === 'claude' && safe(probes.claudeLoggedIn)) {
+        return { name, section, ok: true, detail: 'signed in (stored Claude Code login found)' };
+      }
+      if (cli === 'opencode' && safe(probes.opencodeLoggedIn)) {
+        return { name, section, ok: true, detail: 'signed in (stored opencode auth login found)' };
+      }
+    }
+    return {
+      name,
+      section,
+      ok: false,
+      // Required only when this is the sole agent: then nothing else can run.
+      optional: found.length > 1,
+      detail: `unverified — no sign-in evidence (${SIGN_IN_EVIDENCE[cli]})`,
+      fix,
+    };
+  });
+}
+
 /** Coding agent prerequisites: at least one agent CLI is required; each CLI is then reported
- *  on its own optional line, with Codex sign-in reported separately from installation (#1269, #2422, #2555). */
-export function agentCliChecks(
-  commandAvailable: (cmd: string) => boolean,
-  tryExec: (cmd: string) => string | null,
-  codexSessionState: () => 'ok' | 'refresh-pending' | 'unusable' | 'unknown' = () => 'unknown',
-): DoctorCheck[] {
+ *  on its own optional line, with sign-in reported separately from installation (#1269, #2422, #2555, #2556). */
+export function agentCliChecks(probes: DoctorEnvProbes): DoctorCheck[] {
+  const { commandAvailable, tryExec } = probes;
   const found = availableAgentClis(commandAvailable);
   const checks: DoctorCheck[] = [
     found.length > 0
@@ -190,45 +295,7 @@ export function agentCliChecks(
         },
   ];
   checks.push(...harnessInstallChecks(commandAvailable, tryExec));
-  if (found.includes('codex')) {
-    const method = codexAuthMethod(tryExec('codex login status 2>&1'));
-    const session = method === 'ChatGPT' ? codexSessionState() : 'unknown';
-    checks.push(
-      session === 'unusable'
-        ? {
-            name: 'codex auth',
-            ok: false,
-            optional: found.length > 1,
-            detail:
-              'ChatGPT session in auth.json is unusable (unreadable, or no valid access token and no refresh token)',
-            fix: CODEX_LOGIN_FIX,
-          }
-        : session === 'refresh-pending'
-          ? {
-              name: 'codex auth',
-              ok: true,
-              detail:
-                'logged in with ChatGPT; access token expired, codex refreshes it on the next run (run `codex login` if that run fails with 401)',
-            }
-          : method
-            ? {
-                name: 'codex auth',
-                ok: true,
-                detail:
-                  method === 'ChatGPT'
-                    ? 'logged in with ChatGPT; runs draw on your ChatGPT plan limits (manage usage in ChatGPT settings)'
-                    : `logged in with ${method}`,
-              }
-            : {
-                name: 'codex auth',
-                // Required only when codex is the sole agent: then nothing else can run.
-                ok: false,
-                optional: found.length > 1,
-                detail: 'codex CLI installed but not logged in',
-                fix: CODEX_LOGIN_FIX,
-              },
-    );
-  }
+  checks.push(...harnessSignInChecks(probes));
   return checks;
 }
 
@@ -267,7 +334,7 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
     }
   }
 
-  checks.push(...agentCliChecks(commandAvailable, tryExec, probes.codexSessionState));
+  checks.push(...agentCliChecks(probes));
 
   if (!commandAvailable('gh')) {
     checks.push({
@@ -577,11 +644,11 @@ export function sandboxClaudeAuthChecks(result: ClaudeAuthProbeResult): DoctorCh
   return [host, sandboxed];
 }
 
-const AGENT_AUTH_CHECKS = new Set(['codex auth', HOST_AUTH_CHECK]);
+const AGENT_AUTH_CHECKS = new Set([...HARNESS_SETUP.map(({ cli }) => `${cli} signed in`), HOST_AUTH_CHECK]);
 
 /** #2496: doctor fails on agent sign-in only when no installed agent is signed in. A logged-out
  *  agent is a warning while another one is signed in, and a hard failure when none is. Skipped
- *  probes (optional passes, e.g. claude not on PATH) never count as signed in. */
+ *  probes (optional passes, e.g. a `<cli> signed in` row for a CLI not on PATH) never count as signed in. */
 export function reconcileAgentAuthChecks(checks: DoctorCheck[]): DoctorCheck[] {
   const auth = checks.filter((c) => AGENT_AUTH_CHECKS.has(c.name));
   const anySignedIn = auth.some((c) => c.ok && c.optional !== true);

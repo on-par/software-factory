@@ -66,7 +66,7 @@ Install the Codex CLI and sign in once:
 - `codex login --with-api-key` uses API billing instead, which suits automation and CI.
 - `codex login --device-auth` signs in on a headless machine.
 
-`factory doctor` shows a `codex auth` line with the sign-in method. Models whose CLI is not installed are skipped, so on a machine with only Codex every phase runs on Codex models and PLAN picks the codex build route. With both CLIs installed, pin a phase in `.factory/config.json` (`models.pins.plan`, `build`, `checker`, `triage`), set `route`, or reorder `tiers`; `factory triage --model <id>` picks the triage model for one run. See [docs/models.md](docs/models.md).
+`factory doctor` shows a `codex signed in` line with the sign-in method. Models whose CLI is not installed are skipped, so on a machine with only Codex every phase runs on Codex models and PLAN picks the codex build route. With both CLIs installed, pin a phase in `.factory/config.json` (`models.pins.plan`, `build`, `checker`, `triage`), set `route`, or reorder `tiers`; `factory triage --model <id>` picks the triage model for one run. See [docs/models.md](docs/models.md).
 
 ### Safety
 

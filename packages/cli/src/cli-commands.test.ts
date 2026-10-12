@@ -6220,6 +6220,14 @@ Please add a widget that does the thing.
     beforeEach(() => {
       // Never read the real ~/.codex/auth.json from doctor tests (#2509).
       vi.stubEnv('CODEX_HOME', join(h.repoRoot, 'no-codex-home'));
+      // Keep real credentials out of the sign-in evidence checks (#2556).
+      mkdirSync(join(h.repoRoot, 'no-claude-config'), { recursive: true });
+      mkdirSync(join(h.repoRoot, 'no-xdg-data'), { recursive: true });
+      vi.stubEnv('CLAUDE_CONFIG_DIR', join(h.repoRoot, 'no-claude-config'));
+      vi.stubEnv('XDG_DATA_HOME', join(h.repoRoot, 'no-xdg-data'));
+      for (const key of ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'CODEX_API_KEY', 'OPENCODE_API_KEY']) {
+        vi.stubEnv(key, '');
+      }
       h.execSyncImpl = (cmd: string) => {
         if (cmd.includes('rev-parse')) return h.repoRoot;
         if (cmd.includes('status --porcelain')) return '';
@@ -6236,11 +6244,13 @@ Please add a widget that does the thing.
 
     describe('agent sign-in (#2496)', () => {
       const withAuth = (claudeOk: boolean, codexOk: boolean) => {
+        // Claude sign-in comes from local evidence (#2556), never from `claude -p`.
+        if (claudeOk) writeFileSync(join(h.repoRoot, 'no-claude-config', '.credentials.json'), '{}');
         const base = h.execSyncImpl;
         h.execSyncImpl = (cmd: string) => {
-          if (cmd.startsWith('claude -p')) {
-            if (!claudeOk) throw new Error('Not logged in');
-            return 'ok';
+          if (cmd.includes('find-generic-password')) {
+            if (!claudeOk) throw new Error('not found');
+            return '';
           }
           if (cmd.startsWith('codex login status')) return codexOk ? 'Logged in using ChatGPT' : 'Not logged in';
           return base(cmd);
@@ -6287,6 +6297,37 @@ Please add a widget that does the thing.
         withAuth(false, false);
         const res = await runMain('doctor');
         expect(res.exited).toBeTruthy();
+      });
+    });
+
+    describe('harness sign-in (#2556)', () => {
+      const INFERENCE = /^(claude\s+(-p|--print)|codex\s+exec|opencode\s+run)\b/;
+
+      it('never runs an inference command for any of the three harnesses', async () => {
+        h.claudeAvailable = true;
+        const recorded: string[] = [];
+        const base = h.execSyncImpl;
+        h.execSyncImpl = (cmd: string) => {
+          recorded.push(cmd);
+          return base(cmd);
+        };
+        await runMain('doctor');
+        expect(recorded.filter((c) => INFERENCE.test(c))).toEqual([]);
+        expect(logged()).toContain('claude signed in');
+        expect(logged()).not.toContain('claude auth (host)');
+      });
+
+      it('runs the claude -p probe only with --probe-inference', async () => {
+        h.claudeAvailable = true;
+        const recorded: string[] = [];
+        const base = h.execSyncImpl;
+        h.execSyncImpl = (cmd: string) => {
+          recorded.push(cmd);
+          return base(cmd);
+        };
+        await runMain('doctor', '--probe-inference');
+        expect(recorded.some((c) => c.startsWith('claude -p'))).toBe(true);
+        expect(logged()).toContain('claude auth (host)');
       });
     });
 
@@ -6367,7 +6408,7 @@ Please add a widget that does the thing.
         }
         return base(cmd);
       };
-      const res = await runMain('doctor');
+      const res = await runMain('doctor', '--probe-inference');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('skipped — no sandbox runtime (sandbox-exec/firejail) on this host');
       expect(ops.execSync).toHaveBeenCalledWith(
@@ -6379,7 +6420,7 @@ Please add a widget that does the thing.
     it('skips the sandboxed claude probe when sandbox is disabled by config', async () => {
       h.claudeAvailable = true;
       h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, enabled: false } };
-      const res = await runMain('doctor');
+      const res = await runMain('doctor', '--probe-inference');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('skipped — sandbox disabled by config or FACTORY_SANDBOX');
     });
