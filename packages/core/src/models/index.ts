@@ -7,6 +7,7 @@ import type { ModelsConfig } from '../config/index.js';
 import { HARNESS_CATALOG, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
 import type { ModelDefinition, ModelTier } from '../types/index.js';
 import { hasClaudeLoginEvidence } from '../utils/claude-config.js';
+import { hasCodexLoginEvidence } from '../utils/codex-config.js';
 
 export class ModelRegistry {
   constructor(private config: ModelsConfig) {
@@ -185,6 +186,9 @@ export interface DoctorProbes {
   /** Non-inference evidence that the claude CLI is logged in (keychain entry / credentials file /
    *  CLAUDE_CODE_OAUTH_TOKEN). Default: hasClaudeLoginEvidence(). Never runs `claude -p`. */
   claudeLoggedIn?: () => boolean;
+  /** Non-inference evidence that the codex CLI is logged in (`codex login status` exit 0 /
+   *  CODEX_API_KEY). Default: hasCodexLoginEvidence(). Never runs `codex exec`. */
+  codexLoggedIn?: () => boolean;
 }
 
 export interface ModelDiagnosis {
@@ -234,6 +238,18 @@ export function diagnoseModels(
     }
     return claudeLoggedInCache;
   };
+  const codexLoggedInProbe = probes.codexLoggedIn ?? (() => hasCodexLoginEvidence());
+  let codexLoggedInCache: boolean | undefined;
+  const codexLoggedIn = (): boolean => {
+    if (codexLoggedInCache === undefined) {
+      try {
+        codexLoggedInCache = codexLoggedInProbe();
+      } catch {
+        codexLoggedInCache = false;
+      }
+    }
+    return codexLoggedInCache;
+  };
 
   return registry.list().map((m) => {
     const def = registry.get(m)!;
@@ -258,10 +274,14 @@ export function diagnoseModels(
         if (!commandAvailable(probe.command)) {
           reason = `${probe.command} CLI not found on PATH`;
         } else if (probe.auth === 'cli') {
-          // CLI carries its own (OAuth-based) auth — a missing API key doesn't make
-          // the model unreachable for doctor purposes (preserves the old codex note).
-          reachable = true;
-          reason = `ok (${probe.okLabel})`;
+          // CLI carries its own (OAuth-based) auth — a missing API key doesn't block, but the
+          // CLI must show login evidence (#2418).
+          if (probe.command === 'codex' && !codexLoggedIn()) {
+            reason = `${probe.okLabel} installed but not logged in — run \`codex login\` (or set CODEX_API_KEY)`;
+          } else {
+            reachable = true;
+            reason = `ok (${probe.okLabel})`;
+          }
         } else if (probe.selfAuth?.providers.includes(def.provider)) {
           const key = def.envKey ?? probe.selfAuth.defaultEnvKey;
           if (envPresent(key)) {

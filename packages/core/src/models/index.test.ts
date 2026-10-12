@@ -447,10 +447,62 @@ describe('diagnoseModels', () => {
   it('marks a codex model reachable when codex is present, even without the env key', () => {
     const d = diagnosisFor('codex-model', {
       commandAvailable: (cmd) => cmd === 'codex',
+      codexLoggedIn: () => true,
       envPresent: () => false,
     });
     expect(d.reachable).toBe(true);
     expect(d.reason).toBe('ok (codex CLI)');
+  });
+
+  it('marks a codex model unreachable with a codex login reason when the CLI is installed but not logged in', () => {
+    const d = diagnosisFor('codex-model', {
+      commandAvailable: (c) => c === 'codex',
+      envPresent: () => false,
+      codexLoggedIn: () => false,
+    });
+    expect(d.reachable).toBe(false);
+    expect(d.reason).toContain('`codex login`');
+  });
+
+  it('keeps a codex model reachable when the codex CLI is logged in (consults the login probe)', () => {
+    const codexLoggedIn = vi.fn(() => true);
+    const d = diagnosisFor('codex-model', {
+      commandAvailable: (c) => c === 'codex',
+      envPresent: () => false,
+      codexLoggedIn,
+    });
+    expect(d.reachable).toBe(true);
+    expect(d.reason).toBe('ok (codex CLI)');
+    expect(codexLoggedIn).toHaveBeenCalled();
+  });
+
+  it('does not consult the codex login probe when codex is missing from PATH', () => {
+    const codexLoggedIn = vi.fn(() => true);
+    const d = diagnosisFor('codex-model', { commandAvailable: () => false, envPresent: () => false, codexLoggedIn });
+    expect(d.reason).toBe('codex CLI not found on PATH');
+    expect(codexLoggedIn).not.toHaveBeenCalled();
+  });
+
+  it('calls the codex login probe at most once per diagnoseModels call', () => {
+    const codexLoggedIn = vi.fn(() => true);
+    diagnoseModels(
+      new ModelRegistry(doctorConfig),
+      { commandAvailable: (c) => c === 'codex', envPresent: () => false, codexLoggedIn },
+      true,
+    );
+    expect(codexLoggedIn).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a throwing codex login probe as not logged in', () => {
+    const d = diagnosisFor('codex-model', {
+      commandAvailable: (c) => c === 'codex',
+      envPresent: () => false,
+      codexLoggedIn: () => {
+        throw new Error('boom');
+      },
+    });
+    expect(d.reachable).toBe(false);
+    expect(d.reason).toContain('`codex login`');
   });
 
   it('marks an anthropic model unreachable when the claude CLI is missing', () => {
@@ -602,6 +654,7 @@ describe('diagnoseModels', () => {
       registry,
       {
         commandAvailable: () => true,
+        codexLoggedIn: () => true,
         envPresent: () => true,
         ollamaModelPresent: () => true,
       },
@@ -642,6 +695,7 @@ describe('diagnoseModels', () => {
   it('gates an experimental model by default, mentioning the opt-in env var', () => {
     const d = diagnosisFor('experimental-model', {
       commandAvailable: () => true,
+      codexLoggedIn: () => true,
       envPresent: () => true,
     });
     expect(d.reachable).toBe(false);
@@ -653,6 +707,7 @@ describe('diagnoseModels', () => {
       'experimental-model',
       {
         commandAvailable: () => true,
+        codexLoggedIn: () => true,
         envPresent: () => true,
       },
       true,
@@ -691,6 +746,7 @@ describe('diagnoseModels', () => {
       'declared-codex-over-ollama-model',
       {
         commandAvailable: (cmd) => cmd === 'codex',
+        codexLoggedIn: () => true,
         envPresent: () => false,
       },
       true,
@@ -914,9 +970,11 @@ describe('diagnoseModels', () => {
       },
     };
     const registry = new ModelRegistry(unknownHarnessConfig);
-    const d = diagnoseModels(registry, { commandAvailable: () => true, envPresent: () => true }, true).find(
-      (x) => x.model === 'bogus-harness-model',
-    )!;
+    const d = diagnoseModels(
+      registry,
+      { commandAvailable: () => true, envPresent: () => true, codexLoggedIn: () => true },
+      true,
+    ).find((x) => x.model === 'bogus-harness-model')!;
     expect(d.reachable).toBe(false);
     expect(d.reason).toMatch(/^unknown harness 'bogus'/);
   });
