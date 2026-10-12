@@ -2,26 +2,50 @@ name: Publish
 on:
   push:
     tags: ['v*']
+  # #2245: every green CI run on a push to main publishes an alpha pre-release to `next`.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       dry_run:
         description: 'Dry run: pack and list every package, publish nothing'
         type: boolean
         default: true
+# Pre-releases run one at a time; a newer pending run replaces an older pending one, and
+# run_number keeps the versions increasing.
+concurrency:
+  group: publish-${{ github.event_name == 'workflow_run' && 'prerelease' || github.ref }}
+  cancel-in-progress: false
 jobs:
   publish:
+    # A red, cancelled or pull-request CI run never publishes.
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     permissions: { contents: read, issues: read }
     steps:
       - uses: actions/checkout@v7
+        with:
+          # workflow_run: the exact commit CI passed on, plus its parent for the skip check.
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: ${{ github.event_name == 'workflow_run' && 2 || 1 }}
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
           registry-url: 'https://registry.npmjs.org'
+      # #2245: skip a merge that touches no published package, else pick
+      # <next patch>-alpha.<run_number>. Writes the reason or version to the job summary.
+      - name: Plan pre-release
+        id: plan
+        if: github.event_name == 'workflow_run'
+        run: bash scripts/prerelease-plan.sh "${{ github.run_number }}"
       - name: Verify
+        if: github.event_name != 'workflow_run' || steps.plan.outputs.version != ''
         run: bash scripts/verify.sh
       - name: Quickstart smoke
+        if: github.event_name != 'workflow_run' || steps.plan.outputs.version != ''
         # Same env as ci.yml's quickstart-smoke job: the packed CLI runs `factory init`.
         env: { GH_TOKEN: '${{ github.token }}' }
         run: bash scripts/quickstart-smoke.sh
@@ -31,10 +55,13 @@ jobs:
       # #2244: the version and dist-tag come from the tag name: vX.Y.Z-next.N publishes
       # X.Y.Z-next.N to `next`, vX.Y.Z publishes X.Y.Z to `latest`. The step dry-runs
       # every package (with exact internal pins) before the real publish.
+      # #2245: on workflow_run the planned X.Y.Z-alpha.N goes to `next`; `latest` never moves.
       - name: Publish to npm
         id: publish
+        if: github.event_name != 'workflow_run' || steps.plan.outputs.version != ''
         env:
           GH_TOKEN: '${{ github.token }}'
           NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}'
           PUBLISH_DRY_RUN: '${{ inputs.dry_run }}'
+          PUBLISH_PRERELEASE_VERSION: '${{ steps.plan.outputs.version }}'
         run: bash scripts/publish-release.sh

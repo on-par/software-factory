@@ -91,7 +91,7 @@ run() {
   : >"$NPM_CALL_LOG"
   : >"$GH_CALL_LOG"
   local got=0
-  env -u PUBLISH_DRY_RUN -u GITHUB_REF -u PUBLISH_BLOCKERS -u NPM_FAIL_ON -u NPM_FAIL_EXACT -u GH_FAIL \
+  env -u PUBLISH_DRY_RUN -u PUBLISH_PRERELEASE_VERSION -u GITHUB_REF -u PUBLISH_BLOCKERS -u NPM_FAIL_ON -u NPM_FAIL_EXACT -u GH_FAIL \
     GITHUB_STEP_SUMMARY="$SUMMARY" GITHUB_OUTPUT="$OUTPUT" GITHUB_REPOSITORY=on-par/software-factory \
     "$@" bash "$REPO/scripts/publish-release.sh" >"$WORK/stdout.txt" 2>&1 || got=$?
   [ "$got" = "$want" ] || { cat "$WORK/stdout.txt" >&2; fail "${CASE}: exit $got, want $want"; }
@@ -152,11 +152,11 @@ run 1 PUBLISH_DRY_RUN=false GITHUB_REF=refs/heads/main
 expect_summary "NOT PUBLISHED: refs/heads/main is not a release tag (refs/tags/v*)"
 expect_output false
 
-for tag in v1.0 v0.9.0-rc.1 v0.9.0-next.01 v0.9.0.1 vnext; do
+for tag in v1.0 v0.9.0-rc.1 v0.9.0-next.01 v0.9.0-alpha.01 v0.9.0.1 vnext; do
   CASE="tag $tag does not parse"
   fresh_repo
   run 1 GITHUB_REF="refs/tags/$tag"
-  expect_summary "NOT PUBLISHED: tag $tag does not parse as vX.Y.Z or vX.Y.Z-next.N"
+  expect_summary "NOT PUBLISHED: tag $tag does not parse as vX.Y.Z or vX.Y.Z-next.N or vX.Y.Z-alpha.N"
   expect_output false
   [ ! -s "$NPM_CALL_LOG" ] || fail "$CASE: npm was called"
 done
@@ -212,6 +212,28 @@ run 0 GITHUB_REF=refs/tags/v0.9.0-next.3
 expect_summary "PUBLISHED$(published_list 0.9.0-next.3) (--tag next)"
 expect_output true
 expect_publishes 14 "--tag next( --dry-run)?"
+
+CASE="alpha tag publishes all 7 to next"
+fresh_repo
+run 0 GITHUB_REF=refs/tags/v0.9.5-alpha.12
+expect_summary "PUBLISHED$(published_list 0.9.5-alpha.12) (--tag next)"
+expect_publishes 14 "--tag next( --dry-run)?"
+
+CASE="pre-release version wins over a branch ref and goes to next"
+fresh_repo
+run 0 GITHUB_REF=refs/heads/main PUBLISH_PRERELEASE_VERSION=0.9.5-alpha.57
+expect_summary "PUBLISHED$(published_list 0.9.5-alpha.57) (--tag next)"
+expect_output true
+expect_publishes 14 "--tag next( --dry-run)?"
+grep -q '"version": "0.9.5-alpha.57"' "$REPO/packages/cli/package.json" || fail "$CASE: cli version not set"
+
+for pre in 0.9.5 0.9.5-next.1 0.9.5-alpha.01 v0.9.5-alpha.1; do
+  CASE="pre-release version $pre does not parse"
+  fresh_repo
+  run 1 GITHUB_REF=refs/heads/main PUBLISH_PRERELEASE_VERSION="$pre"
+  expect_summary "NOT PUBLISHED: pre-release version $pre does not parse as X.Y.Z-alpha.N"
+  [ ! -s "$NPM_CALL_LOG" ] || fail "$CASE: npm was called"
+done
 
 CASE="gate removed (no blockers), list with CRLF and blank lines"
 fresh_repo
