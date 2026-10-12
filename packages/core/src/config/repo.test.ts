@@ -24,6 +24,7 @@ import {
   resolveReviewFloorRules,
   resolveTrustTier,
   resolveUsageCap,
+  RepoFactoryConfigV2Schema,
   resolveWatchdogPolicy,
   routeForBuildModel,
 } from './repo.js';
@@ -1055,5 +1056,100 @@ describe('classifier config (#1723)', () => {
   it('the packaged classify_pr route is on the checker tier', async () => {
     const { defaultRoutesConfig } = await import('@on-par/factory-config');
     expect(defaultRoutesConfig.routes.classify_pr?.tier).toBe('checker');
+  });
+});
+
+describe('repo models.registry (#2440)', () => {
+  const custom = baseModel({ provider: 'custom', tier: 'worker', harness: 'opencode', providerModel: 'deepseek/x' });
+  const withRegistry = (extra: Record<string, unknown> = {}) =>
+    ({ version: 2, models: { registry: { 'my-opencode-model': custom }, ...extra } }) as NonNullable<
+      Parameters<typeof applyRepoConfig>[1]
+    >;
+
+  it('loads a repo-registered model and dispatches plan, build and checker to it', () => {
+    const repo = {
+      version: 2,
+      models: {
+        registry: { 'my-opencode-model': custom },
+        pins: { plan: 'my-opencode-model', build: 'my-opencode-model', checker: 'my-opencode-model' },
+      },
+    } as const;
+    expect(RepoFactoryConfigV2Schema.safeParse(repo).success).toBe(true);
+    const merged = applyRepoConfig(models, repo);
+    const registry = new ModelRegistry(merged);
+    expect(resolveEffectiveModelPins(registry, repo, {})).toEqual({
+      plan: 'my-opencode-model',
+      build: 'my-opencode-model',
+      sources: { plan: 'repo', build: 'repo' },
+    });
+    const router = new ModelRouter(merged, routes, false, new StubModelExecutor({ scripts: {} }));
+    expect(router.resolve('check_tests')).toBe('my-opencode-model');
+    expect(routeForBuildModel(registry, 'my-opencode-model')).toBe('opencode');
+  });
+
+  it('accepts a repo-registered model in a tier override', () => {
+    const merged = applyRepoConfig(models, {
+      ...withRegistry(),
+      tiers: { worker: ['my-opencode-model', 'gpt-model-a'] },
+    });
+    expect(merged.tiers.worker).toEqual(['my-opencode-model', 'gpt-model-a']);
+    expect(merged.models['my-opencode-model']).toBeDefined();
+  });
+
+  it('applies packaged, then repo registry, then tiers, then pins', () => {
+    const redefined = baseModel({ tier: 'checker', provider: 'anthropic', contextWindow: 4242 });
+    const merged = applyRepoConfig(models, {
+      version: 2,
+      models: {
+        registry: { 'my-opencode-model': custom, 'checker-model': redefined },
+        pins: { checker: 'my-opencode-model' },
+      },
+      tiers: { worker: ['my-opencode-model'], checker: ['gpt-model-b'] },
+    });
+    expect(merged.models['claude-model']).toBeDefined();
+    expect(merged.tiers.worker).toEqual(['my-opencode-model']);
+    expect(merged.tiers.checker).toEqual(['my-opencode-model']);
+    expect(merged.models['checker-model']?.contextWindow).toBe(4242);
+
+    const openai = baseModel({ provider: 'openai', tier: 'worker' });
+    const stripped = applyRepoConfig(models, {
+      version: 2,
+      models: { registry: { 'my-openai-model': openai } },
+      tiers: { worker: ['my-openai-model', 'claude-model'] },
+      providers: { openai: false },
+    });
+    expect(stripped.tiers.worker).toEqual(['claude-model']);
+  });
+
+  it('still rejects an id in neither registry, naming it', () => {
+    expect(() => applyRepoConfig(models, { ...withRegistry(), tiers: { worker: ['no-such-model'] } })).toThrow(
+      /no-such-model/,
+    );
+    expect(() => applyRepoConfig(models, withRegistry({ pins: { checker: 'no-such-model' } }))).toThrow(
+      /checker.*no-such-model/s,
+    );
+    const registry = new ModelRegistry(applyRepoConfig(models, withRegistry()));
+    expect(() =>
+      resolveEffectiveModelPins(registry, { version: 2, models: { pins: { plan: 'no-such-model' } } }, {}),
+    ).toThrow(/no-such-model/);
+  });
+
+  it('rejects a repo-registered model with an unknown harness', () => {
+    const repo = { version: 2, models: { registry: { 'my-opencode-model': { ...custom, harness: 'nope' } } } } as const;
+    expect(() => applyRepoConfig(models, repo)).toThrow(/models\.registry\.my-opencode-model.*nope/s);
+  });
+
+  it('rejects a registry entry with an unknown key', () => {
+    const result = RepoFactoryConfigV2Schema.safeParse({
+      version: 2,
+      models: { registry: { 'my-opencode-model': { ...custom, bogus: 1 } } },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('does not mutate the input when merging a registry', () => {
+    const snapshot = structuredClone(models);
+    applyRepoConfig(models, withRegistry({ pins: { checker: 'my-opencode-model' } }));
+    expect(models).toEqual(snapshot);
   });
 });
