@@ -24,6 +24,10 @@ describe('HARNESS_CATALOG', () => {
     );
   });
 
+  it('probes opencode as a command harness whose CLI carries its own auth', () => {
+    expect(HARNESS_CATALOG.opencode.probe).toMatchObject({ kind: 'command', command: 'opencode', auth: 'cli' });
+  });
+
   it('isAgenticHarness reports true for agentic harnesses and false otherwise', () => {
     expect(isAgenticHarness('claude-cli')).toBe(true);
     expect(isAgenticHarness('ollama-http')).toBe(false);

@@ -42,7 +42,7 @@ These are transport options, not a guarantee that every model supports every lev
 
 Native references: [Codex configuration](https://learn.chatgpt.com/docs/config-file/config-reference), [Claude effort](https://code.claude.com/docs/en/model-config#adjust-effort-level), [OpenCode variants](https://opencode.ai/docs/cli/#run), [Ollama thinking](https://docs.ollama.com/capabilities/thinking). Test the factory wiring without credentials or model calls with `npx vitest run packages/core/src/harness/effort.test.ts`.
 
-Every model declares a **harness** — the provider adapter that executes it: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, or `opencode`. Build tasks require an agentic (file-editing) harness; prompt-only harnesses like `ollama-http` are rejected for builds. Per-task tokens and cost are logged to `.factory/costs.jsonl` (`factory cost` to inspect).
+Every model declares a **harness** — the provider adapter that executes it: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, or `opencode`. Build tasks require an agentic (file-editing) harness; prompt-only harnesses like `ollama-http` are rejected for builds. OpenCode models are reachable when the opencode CLI is logged in (`opencode auth login`); `OPENCODE_API_KEY` is an optional override. Per-task tokens and cost are logged to `.factory/costs.jsonl` (`factory cost` to inspect).
 
 What a harness receives, must return and how its failures are classified is specified in [harness-contract.md](./harness-contract.md).
 

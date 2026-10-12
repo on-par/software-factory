@@ -858,6 +858,20 @@ describe('diagnoseModels', () => {
     expect(d.reason).toBe('ok (opencode CLI)');
   });
 
+  it('marks an opencode model with an envKey reachable via CLI login when the key is unset', () => {
+    const registry = new ModelRegistry({
+      ...doctorConfig,
+      models: { 'oc-keyed': { ...doctorConfig.models['opencode-model'], envKey: 'OPENCODE_API_KEY' } },
+    });
+    const [d] = diagnoseModels(
+      registry,
+      { commandAvailable: (cmd) => cmd === 'opencode', envPresent: () => false, opencodeLoggedIn: () => true },
+      true,
+    );
+    expect(d.reachable).toBe(true);
+    expect(d.reason).toBe('ok (opencode CLI auth; OPENCODE_API_KEY not set)');
+  });
+
   it('probes by declared harness even when legacy fields say ollama: reachable via codex CLI', () => {
     const d = diagnosisFor(
       'declared-codex-over-ollama-model',

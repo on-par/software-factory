@@ -8,6 +8,7 @@ import { HARNESS_CATALOG, isAgenticHarness, KNOWN_HARNESS_IDS } from '../harness
 import type { ModelDefinition, ModelTier } from '../types/index.js';
 import { hasClaudeLoginEvidence } from '../utils/claude-config.js';
 import { hasCodexLoginEvidence } from '../utils/codex-config.js';
+import { hasOpencodeLoginEvidence } from '../utils/opencode-config.js';
 
 export class ModelRegistry {
   constructor(private config: ModelsConfig) {
@@ -256,6 +257,9 @@ export interface DoctorProbes {
   /** Non-inference evidence that the codex CLI is logged in (`codex login status` exit 0 /
    *  CODEX_API_KEY). Default: hasCodexLoginEvidence(). Never runs `codex exec`. */
   codexLoggedIn?: () => boolean;
+  /** Non-inference evidence that the opencode CLI is logged in (stored credentials in opencode's
+   *  auth.json). Default: hasOpencodeLoginEvidence(). Never runs `opencode run`. */
+  opencodeLoggedIn?: () => boolean;
   /** Runs a declared harness `probe` command; returns null on exit 0, else a failure detail.
    *  Default: runHarnessProbe. */
   harnessProbe?: (cmd: string) => string | null;
@@ -324,6 +328,18 @@ export function diagnoseModels(
     }
     return codexLoggedInCache;
   };
+  const opencodeLoggedInProbe = probes.opencodeLoggedIn ?? (() => hasOpencodeLoginEvidence());
+  let opencodeLoggedInCache: boolean | undefined;
+  const opencodeLoggedIn = (): boolean => {
+    if (opencodeLoggedInCache === undefined) {
+      try {
+        opencodeLoggedInCache = opencodeLoggedInProbe();
+      } catch {
+        opencodeLoggedInCache = false;
+      }
+    }
+    return opencodeLoggedInCache;
+  };
 
   let declaredProbes: Map<string, DeclaredHarnessProbe> | undefined;
   const declaredProbe = (id: string): DeclaredHarnessProbe | undefined => {
@@ -370,10 +386,19 @@ export function diagnoseModels(
           reason = `${probe.command} CLI not found on PATH`;
         } else if (probe.auth === 'cli') {
           // CLI carries its own (OAuth-based) auth — a missing API key doesn't block, but the
-          // CLI must show login evidence (#2418).
+          // CLI must show login evidence (#2418). For opencode the envKey is an optional override (#2461).
           if (probe.command === 'codex' && !codexLoggedIn()) {
             unverified = true;
             reason = `${UNVERIFIED_PREFIX}${probe.okLabel} installed but not logged in — run \`codex login\` (or set CODEX_API_KEY)`;
+          } else if (probe.command === 'opencode' && def.envKey && !envPresent(def.envKey)) {
+            // OPENCODE_API_KEY is an optional override; a CLI login substitutes for it (#2461).
+            if (opencodeLoggedIn()) {
+              reachable = true;
+              reason = `ok (${probe.okLabel} auth; ${def.envKey} not set)`;
+            } else {
+              unverified = true;
+              reason = `${UNVERIFIED_PREFIX}${probe.okLabel} installed but not logged in and ${def.envKey} not set — run \`opencode auth login\` or export ${def.envKey}`;
+            }
           } else {
             reachable = true;
             reason = `ok (${probe.okLabel})`;

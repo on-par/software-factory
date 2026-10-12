@@ -9,7 +9,7 @@ export type HarnessProbe =
       /** Human label used in doctor reasons, e.g. 'claude CLI'. */
       okLabel: string;
       /** 'cli' = the harness CLI carries its own auth; a missing envKey never blocks, but the CLI must
-       *  show login evidence (codex: `codex login status`). */
+       *  show login evidence (codex: `codex login status`; opencode: stored credentials in auth.json). */
       auth: 'env-key' | 'cli';
       /** Providers whose CLI login substitutes for the env key (reachable when the CLI shows login evidence). */
       selfAuth?: { providers: string[]; defaultEnvKey: string };
@@ -49,7 +49,7 @@ const CATALOG_ENTRIES: HarnessCatalogEntry[] = [
   {
     id: 'opencode',
     agentic: true,
-    probe: { kind: 'command', command: 'opencode', okLabel: 'opencode CLI', auth: 'env-key' },
+    probe: { kind: 'command', command: 'opencode', okLabel: 'opencode CLI', auth: 'cli' },
   },
   { id: 'ollama-agentic', agentic: true, probe: { kind: 'ollama', okLabel: 'ollama agentic' } },
   // Local command-loop worker (runOllamaCommandAgent). Not yet extracted into a
