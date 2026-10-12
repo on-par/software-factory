@@ -8,6 +8,7 @@
 //   5. exactly one terminal event sequence is emitted per run, matching the returned RunOutcome
 //      (including the non-park `released` exit for an environment-caused CHECK failure, #1928).
 // PLAN may be skipped by the planReuse port after an environment release (#2340).
+// A config preflight (#2586) rejects unfilled template tokens before base health and PLAN.
 //
 // Path-bound CLI concerns (Octokit, worktree/environment provisioning, the events sink,
 // approval/steering, and reporting hooks) are injected as ports so this file stays free of
@@ -27,6 +28,7 @@ import {
   renderEnvironmentReleaseComment,
 } from '../phases/check.js';
 import { describeConstitutionSource } from '../constitutions/index.js';
+import { preflightConfigTokens } from '../config/template-tokens.js';
 import { planPhase as planPhaseDefault } from '../phases/plan.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
 import { upsertSlicePlanComment } from '../readiness/slice-plan-github.js';
@@ -127,6 +129,8 @@ export interface RunRequest {
   logsDir?: string;
   /** state/baseline-cache.json (#1926), forwarded to checkPhase. */
   baselineCachePath?: string;
+  /** The repo config file (`.factory/config.yaml|yml|json`) to scan in the pre-PLAN template-token preflight (#2586); undefined = constitution only. */
+  repoConfigFile?: { absPath: string; relPath: string };
   /** state/flaky-tests.json (#2303); undefined = no flake ledger or filing. */
   flakyLedgerPath?: string;
 }
@@ -521,6 +525,15 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     // later would let the build worker author the standards it is graded by.
     const constitution = ports.resolveConstitution();
     log('constitution', describeConstitutionSource(constitution, request.product));
+
+    // Pre-PLAN config preflight (#2586): unfilled scaffold tokens park the run before any model call or subprocess.
+    const tokenFindings = preflightConfigTokens({ constitution, configFile: request.repoConfigFile });
+    if (tokenFindings.length > 0) {
+      return terminalParked(
+        'fail',
+        `config preflight failed before PLAN:\n${tokenFindings.map((f) => f.message).join('\n')}`,
+      );
+    }
 
     // Pre-PLAN base health (#2339): a red origin/main releases the issue before any model spend;
     // the CLI turns `released` into LaneEnvironmentPauseError, whose runLane branch writes the base hold.
