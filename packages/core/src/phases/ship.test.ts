@@ -181,7 +181,8 @@ describe('shipPhase self-healing', () => {
     expect(issueCreate.body).not.toContain('PLAN → BUILD → CHECK → SHIP');
     expect(calls).toContainEqual(['pulls.get', { owner: 'on-par', repo: 'software-factory', pull_number: 123 }]);
     expect(calls).toContainEqual(['graphql', expect.stringContaining('markPullRequestReadyForReview'), { id: 'PR_1' }]);
-    expect(logs).toContainEqual(['recovered', 'opened PR #123 for committed work on ship-it/23-self-heal']);
+    expect(logs).toContainEqual(['pr_opened', 'opened PR #123 for committed work on ship-it/23-self-heal']);
+    expect(logs.map(([type]) => type)).not.toContain('recovered');
   });
 
   it.each([
@@ -451,6 +452,7 @@ describe('shipPhase self-healing', () => {
     expect(result).toEqual({ ok: false });
     expect(logs.map(([type]) => type)).not.toContain('ready');
     expect(logs.map(([type]) => type)).not.toContain('recovered');
+    expect(logs.map(([type]) => type)).not.toContain('pr_opened');
     expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
     expect(calls).not.toContainEqual(['issues.createComment', expect.anything()]);
     expect(calls).not.toContainEqual(['pulls.get', expect.anything()]);

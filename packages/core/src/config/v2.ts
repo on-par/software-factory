@@ -428,7 +428,7 @@ export const FactoryConfigV2Schema = z
     notifications: NotificationsSectionSchema,
   })
   .describe(
-    'Unified Software Factory configuration (v2). Every section is optional with defaults; ' +
+    "Unified On PAR Dev's Software Factory configuration (v2). Every section is optional with defaults; " +
       'a `.factory/config.json` of `{"version": 2}` is a complete, valid config.',
   );
 

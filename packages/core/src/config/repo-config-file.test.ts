@@ -20,6 +20,11 @@ const YAML_TEXT = '# why we pin\nversion: 2\nmerge:\n  auto: true # human-free\n
 const EXPECTED = { version: 2, merge: { auto: true } };
 
 describe('repo-config-file', () => {
+  it("REPO_CONFIG_YAML_HEADER names On PAR Dev's Software Factory", () => {
+    expect(REPO_CONFIG_YAML_HEADER.startsWith("# On PAR Dev's Software Factory repo config.")).toBe(true);
+    expect(REPO_CONFIG_YAML_HEADER).not.toContain('—');
+  });
+
   let root: string;
   let factory: string;
   const write = (name: string, text: string): string => {
@@ -150,6 +155,7 @@ describe('repo-config-file', () => {
       const yamlPath = join(factory, 'config.yaml');
       expect(readRepoConfigFile(yamlPath)).toEqual(EXPECTED);
       expect(readFileSync(yamlPath, 'utf-8').startsWith(REPO_CONFIG_YAML_HEADER)).toBe(true);
+      expect(readFileSync(yamlPath, 'utf-8').startsWith("# On PAR Dev's Software Factory repo config.")).toBe(true);
     });
     it('dry run writes nothing', () => {
       write('config.json', json);
