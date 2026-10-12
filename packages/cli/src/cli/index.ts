@@ -823,7 +823,9 @@ async function cmdInit(opts: { force?: boolean } = {}) {
   }
 
   console.log(styleText('green', `Initialized ${paths.root}`));
-  console.log(`Next: factory constitution --product <name>, then factory triage`);
+  console.log(
+    'Next: factory doctor, then factory triage (optional: factory constitution --product <name> to swap the default constitution)',
+  );
 }
 
 /** Rewrite a checkout's legacy `.factory/` inputs and runtime files to the v2
