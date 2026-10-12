@@ -1,5 +1,6 @@
 // src/checkers/baseline.ts — re-run round-1 failing checkers on the base SHA in a temporary worktree (#1925)
 
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -121,6 +122,24 @@ export function compareBaseline(
   return comparisons;
 }
 
+/** Frozen installs by lockfile, first match wins (#2576). A fresh `git worktree add` has no
+ *  node_modules, so without this `compile` on base fails with "tsc: command not found". */
+const JS_INSTALL_COMMANDS: ReadonlyArray<{ lockfile: string; argv: readonly string[] }> = [
+  { lockfile: 'pnpm-lock.yaml', argv: ['pnpm', 'install', '--frozen-lockfile'] },
+  { lockfile: 'yarn.lock', argv: ['yarn', 'install', '--frozen-lockfile'] },
+  { lockfile: 'bun.lock', argv: ['bun', 'install', '--frozen-lockfile'] },
+  { lockfile: 'bun.lockb', argv: ['bun', 'install', '--frozen-lockfile'] },
+  { lockfile: 'package-lock.json', argv: ['npm', 'ci', '--no-audit', '--no-fund'] },
+];
+const BASE_INSTALL_TIMEOUT_MS = 10 * 60_000;
+
+/** The dependency install the base worktree needs before its checkers run; null when it is not a JS package. */
+export function baseInstallCommand(worktree: string): readonly string[] | null {
+  if (!existsSync(join(worktree, 'package.json'))) return null;
+  const match = JS_INSTALL_COMMANDS.find((c) => existsSync(join(worktree, c.lockfile)));
+  return match?.argv ?? ['npm', 'install', '--no-audit', '--no-fund', '--no-package-lock'];
+}
+
 export async function runBaselineCheckers(opts: BaselineOptions): Promise<BaselineReport> {
   const {
     baseSha,
@@ -176,6 +195,18 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
   }
 
   try {
+    const install = baseInstallCommand(baseWorktree);
+    if (install !== null) {
+      const r = await run(install, { cwd: baseWorktree, env: ctx.env, timeoutMs: BASE_INSTALL_TIMEOUT_MS });
+      // An install failure says nothing about the base's code: report an error (base health skips) and cache nothing.
+      if (r.exitCode !== 0) {
+        return {
+          baseSha,
+          checkers: markCached(compareBaseline(failing, cachedOutputs), cachedNames),
+          error: `base dependency install failed (${install.join(' ')}): ${(r.stderr || r.stdout).trim().slice(-300)}`,
+        };
+      }
+    }
     const summary = await runCheckers(
       { ...ctx, worktree: baseWorktree, probe: undefined, diffBase: baseSha },
       router,

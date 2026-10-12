@@ -11,7 +11,7 @@ import type { ModelRouter } from '../router/index.js';
 import type { CheckerOutput } from '../types/index.js';
 import { runCommand } from '../utils/command-runner.js';
 import { BaselineCache, hashBaselineEnv } from './baseline-cache.js';
-import { compareBaseline, extractFailingTestNames, runBaselineCheckers } from './baseline.js';
+import { baseInstallCommand, compareBaseline, extractFailingTestNames, runBaselineCheckers } from './baseline.js';
 import { type CheckerContext, type runAllCheckers, summarizeCheckerOutputs } from './index.js';
 
 const execFile = promisify(execFileCb);
@@ -93,6 +93,53 @@ describe('extractFailingTestNames', () => {
       'FAILED tests/y.py::test_b[1-2] - boom',
     ].join('\n');
     expect(extractFailingTestNames(details)).toEqual(['tests/x.py::test_a', 'tests/y.py::test_b[1-2]']);
+  });
+});
+
+describe('baseInstallCommand', () => {
+  async function dirWith(...files: string[]): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'baseline-install-'));
+    tempDirs.add(dir);
+    for (const f of files) await writeFile(join(dir, f), '');
+    return dir;
+  }
+
+  it('is null without package.json', async () => {
+    expect(baseInstallCommand(await dirWith('pyproject.toml'))).toBeNull();
+  });
+
+  it('picks the frozen install for the lockfile', async () => {
+    expect(baseInstallCommand(await dirWith('package.json', 'package-lock.json'))).toEqual([
+      'npm',
+      'ci',
+      '--no-audit',
+      '--no-fund',
+    ]);
+    expect(baseInstallCommand(await dirWith('package.json', 'pnpm-lock.yaml'))).toEqual([
+      'pnpm',
+      'install',
+      '--frozen-lockfile',
+    ]);
+    expect(baseInstallCommand(await dirWith('package.json', 'yarn.lock'))).toEqual([
+      'yarn',
+      'install',
+      '--frozen-lockfile',
+    ]);
+    expect(baseInstallCommand(await dirWith('package.json', 'bun.lockb'))).toEqual([
+      'bun',
+      'install',
+      '--frozen-lockfile',
+    ]);
+  });
+
+  it('falls back to npm install without writing a lockfile', async () => {
+    expect(baseInstallCommand(await dirWith('package.json'))).toEqual([
+      'npm',
+      'install',
+      '--no-audit',
+      '--no-fund',
+      '--no-package-lock',
+    ]);
   });
 });
 
@@ -217,6 +264,95 @@ describe('runBaselineCheckers', () => {
     expect(touched).toBe(false);
     expect(report.checkers.map((c) => c.verdict)).toEqual(['not-run']);
   });
+  describe('dependency install (#2576)', () => {
+    /** Repo whose base commit is an npm package with a lockfile. */
+    async function makeJsRepo(): Promise<{ repo: string; sha: string }> {
+      const repo = await mkdtemp(join(tmpdir(), 'baseline-js-'));
+      tempDirs.add(repo);
+      await git(repo, 'init', '--initial-branch=main');
+      await git(repo, 'config', 'user.email', 'tests@example.com');
+      await git(repo, 'config', 'user.name', 'Tests');
+      await writeFile(join(repo, 'package.json'), '{"name":"x","version":"1.0.0"}');
+      await writeFile(join(repo, 'package-lock.json'), '{"lockfileVersion":3}');
+      await git(repo, 'add', '.');
+      await git(repo, 'commit', '-m', 'A');
+      return { repo, sha: await git(repo, 'rev-parse', 'HEAD') };
+    }
+
+    /** Real git; any other command is recorded and answered with `exitCode`. */
+    function stubInstall(exitCode: number) {
+      const installs: Array<{ argv: string[]; cwd?: string; env?: NodeJS.ProcessEnv }> = [];
+      const order: string[] = [];
+      const runCommandStub = (async (argv, options) => {
+        if (argv[0] === 'git') return runCommand(argv, options);
+        installs.push({ argv: [...argv], cwd: options?.cwd, env: options?.env });
+        order.push('install');
+        return {
+          command: argv,
+          stdout: '',
+          stderr: exitCode === 0 ? '' : 'npm ERR! network',
+          exitCode,
+          killed: false,
+          timedOut: false,
+        };
+      }) as typeof runCommand;
+      return { installs, order, runCommandStub };
+    }
+
+    it('runs npm ci in the base worktree, with the lane env, before any checker', async () => {
+      const { repo, sha } = await makeJsRepo();
+      const { installs, order, runCommandStub } = stubInstall(0);
+      let checkedIn = '';
+      const { env, opts } = makeOpts(repo, sha, {
+        deps: {
+          runCommand: runCommandStub,
+          runCheckers: (async (ctx: CheckerContext) => {
+            order.push('checkers');
+            checkedIn = ctx.worktree;
+            return summarizeCheckerOutputs([out('tests', 'PASS')]);
+          }) as typeof runAllCheckers,
+        },
+      });
+
+      const report = await runBaselineCheckers(opts);
+
+      expect(report.error).toBeUndefined();
+      expect(order).toEqual(['install', 'checkers']);
+      expect(installs[0].argv).toEqual(['npm', 'ci', '--no-audit', '--no-fund']);
+      expect(installs[0].cwd).toBe(checkedIn);
+      expect(installs[0].env).toBe(env);
+    });
+
+    it('reports an error, runs no checker and caches nothing when the install fails', async () => {
+      const { repo, sha } = await makeJsRepo();
+      const { runCommandStub } = stubInstall(1);
+      const dir = await mkdtemp(join(tmpdir(), 'baseline-cache-'));
+      tempDirs.add(dir);
+      const file = join(dir, 'baseline-cache.json');
+      let ran = false;
+      let parent = '';
+      const { opts } = makeOpts(repo, sha, {
+        cache: new BaselineCache(file),
+        deps: {
+          runCommand: runCommandStub,
+          makeTempDir: async () => (parent = await mkdtemp(join(tmpdir(), 'factory-baseline-'))),
+          runCheckers: (async () => {
+            ran = true;
+            return summarizeCheckerOutputs([]);
+          }) as typeof runAllCheckers,
+        },
+      });
+
+      const report = await runBaselineCheckers(opts);
+
+      expect(report.error).toMatch(/^base dependency install failed \(npm ci --no-audit --no-fund\): npm ERR! network/);
+      expect(ran).toBe(false);
+      expect(existsSync(file)).toBe(false);
+      expect(existsSync(parent)).toBe(false);
+      expect(await worktreeList(repo)).toHaveLength(1);
+    });
+  });
+
   describe('cache (#1926)', () => {
     const cacheFilePath = async () => {
       const dir = await mkdtemp(join(tmpdir(), 'baseline-cache-'));
