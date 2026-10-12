@@ -6,6 +6,7 @@ import { ModelEffortsSchema, supportsEffort } from '../config/effort.js';
 import type { ModelsConfig } from '../config/index.js';
 import { HARNESS_CATALOG, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
 import type { ModelDefinition, ModelTier } from '../types/index.js';
+import { hasClaudeLoginEvidence } from '../utils/claude-config.js';
 
 export class ModelRegistry {
   constructor(private config: ModelsConfig) {
@@ -181,6 +182,9 @@ export interface DoctorProbes {
   ollamaModelPresent?: (model: string) => boolean;
   /** Base URL the Ollama-family harnesses will actually hit (OLLAMA_BASE_URL). */
   ollamaBaseUrl?: () => string | undefined;
+  /** Non-inference evidence that the claude CLI is logged in (keychain entry / credentials file /
+   *  CLAUDE_CODE_OAUTH_TOKEN). Default: hasClaudeLoginEvidence(). Never runs `claude -p`. */
+  claudeLoggedIn?: () => boolean;
 }
 
 export interface ModelDiagnosis {
@@ -218,6 +222,18 @@ export function diagnoseModels(
   const envPresent = probes.envPresent ?? ((key: string) => !!process.env[key]);
   const ollamaModelPresent = probes.ollamaModelPresent;
   const ollamaBaseUrl = probes.ollamaBaseUrl ?? (() => process.env.OLLAMA_BASE_URL);
+  const claudeLoggedInProbe = probes.claudeLoggedIn ?? (() => hasClaudeLoginEvidence());
+  let claudeLoggedInCache: boolean | undefined;
+  const claudeLoggedIn = (): boolean => {
+    if (claudeLoggedInCache === undefined) {
+      try {
+        claudeLoggedInCache = claudeLoggedInProbe();
+      } catch {
+        claudeLoggedInCache = false;
+      }
+    }
+    return claudeLoggedInCache;
+  };
 
   return registry.list().map((m) => {
     const def = registry.get(m)!;
@@ -248,8 +264,15 @@ export function diagnoseModels(
           reason = `ok (${probe.okLabel})`;
         } else if (probe.selfAuth?.providers.includes(def.provider)) {
           const key = def.envKey ?? probe.selfAuth.defaultEnvKey;
-          reachable = true;
-          reason = envPresent(key) ? `ok (${probe.okLabel})` : `ok (${probe.okLabel} auth; ${key} not set)`;
+          if (envPresent(key)) {
+            reachable = true;
+            reason = `ok (${probe.okLabel})`;
+          } else if (claudeLoggedIn()) {
+            reachable = true;
+            reason = `ok (${probe.okLabel} auth; ${key} not set)`;
+          } else {
+            reason = `${probe.okLabel} installed but not logged in and ${key} not set — run \`claude /login\` or export ${key} (on macOS, also check the login keychain is readable from this context)`;
+          }
         } else if (def.envKey && !envPresent(def.envKey)) {
           reason = `${def.envKey} not set`;
         } else {

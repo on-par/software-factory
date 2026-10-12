@@ -463,9 +463,82 @@ describe('diagnoseModels', () => {
     const d = diagnosisFor('anthropic-model', {
       commandAvailable: (cmd) => cmd === 'claude',
       envPresent: () => false,
+      claudeLoggedIn: () => true,
     });
     expect(d.reachable).toBe(true);
     expect(d.reason).toBe('ok (claude CLI auth; ANTHROPIC_API_KEY not set)');
+  });
+
+  const claudeOpusConfig = (): ModelsConfig => ({
+    ...doctorConfig,
+    models: {
+      ...doctorConfig.models,
+      'claude-opus-5': {
+        provider: 'anthropic',
+        tier: 'boss',
+        costPerMtokInput: 0,
+        costPerMtokOutput: 0,
+        contextWindow: 1000,
+        capabilities: [],
+        envKey: null,
+      },
+    },
+    tiers: { ...doctorConfig.tiers, boss: [...doctorConfig.tiers.boss, 'claude-opus-5'] },
+  });
+  const opusDiagnosis = (probes: Parameters<typeof diagnoseModels>[1]) =>
+    diagnoseModels(new ModelRegistry(claudeOpusConfig()), probes, true).find((x) => x.model === 'claude-opus-5')!;
+
+  it('marks a Claude model unreachable with a claude /login reason when the CLI is installed but not logged in', () => {
+    const probes = {
+      commandAvailable: (c: string) => c === 'claude',
+      envPresent: () => false,
+      claudeLoggedIn: () => false,
+    };
+    const d = diagnosisFor('anthropic-model', probes);
+    expect(d.reachable).toBe(false);
+    expect(d.reason).toContain('`claude /login`');
+    expect(d.reason).toContain('ANTHROPIC_API_KEY');
+    const opus = opusDiagnosis(probes);
+    expect(opus.reachable).toBe(false);
+    expect(opus.reason).toContain('`claude /login`');
+  });
+
+  it('keeps a Claude model reachable when the CLI is logged in and no API key is set', () => {
+    const claudeLoggedIn = vi.fn(() => true);
+    const d = opusDiagnosis({ commandAvailable: (c) => c === 'claude', envPresent: () => false, claudeLoggedIn });
+    expect(d.reachable).toBe(true);
+    expect(claudeLoggedIn).toHaveBeenCalled();
+  });
+
+  it('keeps a Claude model reachable via ANTHROPIC_API_KEY without consulting the login probe', () => {
+    const claudeLoggedIn = vi.fn(() => false);
+    const d = opusDiagnosis({ commandAvailable: (c) => c === 'claude', envPresent: () => true, claudeLoggedIn });
+    expect(d.reachable).toBe(true);
+    expect(d.reason).toBe('ok (claude CLI)');
+    expect(claudeLoggedIn).not.toHaveBeenCalled();
+  });
+
+  it('calls the login probe at most once per diagnoseModels call', () => {
+    const claudeLoggedIn = vi.fn(() => true);
+    const ds = diagnoseModels(
+      new ModelRegistry(claudeOpusConfig()),
+      { commandAvailable: (c) => c === 'claude', envPresent: () => false, claudeLoggedIn },
+      true,
+    ).filter((x) => x.provider === 'anthropic');
+    expect(ds.length).toBeGreaterThan(1);
+    expect(claudeLoggedIn).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a throwing login probe as not logged in', () => {
+    const d = opusDiagnosis({
+      commandAvailable: (c) => c === 'claude',
+      envPresent: () => false,
+      claudeLoggedIn: () => {
+        throw new Error('boom');
+      },
+    });
+    expect(d.reachable).toBe(false);
+    expect(d.reason).toContain('`claude /login`');
   });
 
   it('marks an ollama model unreachable when ollama is missing, even with claude present', () => {
@@ -771,7 +844,11 @@ describe('diagnoseModels', () => {
   });
 
   it('marks a self-auth model reachable via API key when the env key is present', () => {
-    const d = diagnosisFor('anthropic-model', { commandAvailable: (cmd) => cmd === 'claude', envPresent: () => true });
+    const d = diagnosisFor('anthropic-model', {
+      commandAvailable: (cmd) => cmd === 'claude',
+      envPresent: () => true,
+      claudeLoggedIn: () => false,
+    });
     expect(d.reachable).toBe(true);
     expect(d.reason).toBe('ok (claude CLI)');
   });
@@ -796,7 +873,11 @@ describe('diagnoseModels', () => {
     const registry = new ModelRegistry(noKeyConfig);
     const d = diagnoseModels(
       registry,
-      { commandAvailable: (cmd) => cmd === 'claude', envPresent: (key) => key === 'ANTHROPIC_API_KEY' },
+      {
+        commandAvailable: (cmd) => cmd === 'claude',
+        envPresent: (key) => key === 'ANTHROPIC_API_KEY',
+        claudeLoggedIn: () => false,
+      },
       true,
     ).find((x) => x.model === 'anthropic-no-key-model')!;
     expect(d.reachable).toBe(true);
