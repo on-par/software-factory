@@ -35,7 +35,7 @@ A `CodingHarness` has three members:
 
 Every failure must reject with `HarnessError(message, reason, details)`. The message must be non-empty (the contract kit checks this). `details` may carry `exitCode`, `stderr`, `stdout`, `diagnostic`, `code`, `signal` and `killed`.
 
-`reason` is one of the 11 `HarnessFailureReason` values below. `classifyFailure(stderr, exitCode)` maps provider output to a reason; the patterns are matched case-insensitively and in the order listed here.
+`reason` is one of the 11 `HarnessFailureReason` values below. `classifyFailure(stderr, exitCode)` maps provider output to a reason; the patterns are matched case-insensitively and in the order listed here. A declared `command` harness can select the reason itself with `errorPatterns` (see [models.md](./models.md)); a timeout still wins.
 
 | Reason           | Meaning                                  | Detected by `classifyFailure`                                                                                                                   | Retryable |
 | ---------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------- |

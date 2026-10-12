@@ -10,7 +10,7 @@ import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { shellEscape } from '../utils/index.js';
 import { classifyFailure } from './classify.js';
-import type { CodingHarness, HarnessRequest, HarnessResult } from './index.js';
+import type { CodingHarness, HarnessFailureReason, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
 import { HarnessError } from './index.js';
 
 /**
@@ -64,6 +64,73 @@ export function extractJsonlLastMessage(stdout: string): string {
   return '';
 }
 
+/**
+ * Failure reason selected by a declaration's `errorPatterns`, or undefined when none match.
+ * Patterns are tested case-insensitively (as classifyFailure does), stderr before stdout.
+ * Record form: the first matching entry in declaration order returns its key. Array form:
+ * the first match is classified by classifyFailure, with 'unknown' mapped to 'error'.
+ */
+export function matchErrorPattern(
+  patterns: HarnessDeclaration['errorPatterns'],
+  stderr: string,
+  stdout: string,
+): HarnessFailureReason | undefined {
+  if (!patterns) return undefined;
+  const texts = [typeof stderr === 'string' ? stderr : '', typeof stdout === 'string' ? stdout : ''];
+  if (Array.isArray(patterns)) {
+    for (const source of patterns) {
+      const re = new RegExp(source, 'i');
+      for (const text of texts) {
+        const match = re.exec(text);
+        if (match) {
+          const reason = classifyFailure(match[0], 1);
+          return reason === 'unknown' ? 'error' : reason;
+        }
+      }
+    }
+    return undefined;
+  }
+  for (const [reason, source] of Object.entries(patterns)) {
+    const re = new RegExp(source, 'i');
+    if (texts.some((text) => re.test(text))) return reason as HarnessFailureReason;
+  }
+  return undefined;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Sum input_tokens/output_tokens over stdout JSON lines carrying both as finite numbers,
+ * top-level or under a `usage` object. Undefined when no line qualifies; never throws.
+ */
+export function parseJsonlUsage(stdout: string): HarnessUsage | undefined {
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let found = false;
+  for (const raw of stdout.split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    let obj: unknown;
+    try {
+      obj = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!isPlainObject(obj)) continue;
+    const u = isPlainObject(obj.usage) ? obj.usage : obj;
+    const input = u.input_tokens;
+    const output = u.output_tokens;
+    if (typeof input !== 'number' || typeof output !== 'number') continue;
+    if (!Number.isFinite(input) || !Number.isFinite(output)) continue;
+    inputTokens += input;
+    outputTokens += output;
+    found = true;
+  }
+  return found ? { inputTokens, outputTokens } : undefined;
+}
+
 /** Runs a user-declared agent CLI (models config `harnesses:`) with cwd = worktree. */
 export class CommandHarness implements CodingHarness {
   readonly agentic: boolean;
@@ -107,7 +174,10 @@ export class CommandHarness implements CodingHarness {
           onPgid,
         }));
       } catch (err: any) {
-        const reason = err.killed ? 'timeout' : classifyFailure(err.stderr ?? '', err.code ?? 1);
+        const reason = err.killed
+          ? 'timeout'
+          : (matchErrorPattern(this.declaration.errorPatterns, err.stderr ?? '', err.stdout ?? '') ??
+            classifyFailure(err.stderr ?? '', err.code ?? 1));
         throw new HarnessError(err.message ?? String(err), reason, {
           exitCode: typeof err.code === 'number' ? err.code : undefined,
           stderr: err.stderr,
@@ -127,7 +197,8 @@ export class CommandHarness implements CodingHarness {
       if (output.trim().length === 0) {
         throw new HarnessError(`${this.id} command returned empty output`, 'empty_response', { exitCode: 0 });
       }
-      return { output };
+      const usage = this.declaration.usage === 'jsonl' ? parseJsonlUsage(stdout) : undefined;
+      return { output, ...(usage ? { usage } : {}) };
     } finally {
       await rm(dir, { recursive: true, force: true }).catch(() => {});
     }

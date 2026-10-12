@@ -22,6 +22,7 @@ import { runConfigSource } from './run-config-source.js';
 
 import type { FilingPolicy } from '../filing/policy.js';
 import { KNOWN_HARNESS_IDS } from '../harness/catalog.js';
+import type { HarnessFailureReason } from '../harness/index.js';
 import type { FailoverReason } from '../types/index.js';
 
 import { ModelEffortsSchema } from './effort.js';
@@ -49,6 +50,21 @@ export const HARNESS_PROMPT_MODES = ['stdin', 'file', 'arg'] as const;
 export const HARNESS_OUTPUT_MODES = ['stdout', 'file:{outFile}', 'jsonl-last-message'] as const;
 export const HARNESS_USAGE_MODES = ['none', 'jsonl'] as const;
 
+/** Failure reasons an `errorPatterns` record key may select (mirrors FailoverReason). */
+export const HARNESS_ERROR_PATTERN_REASONS = [
+  'rate_limit',
+  'usage_cap',
+  'timeout',
+  'error',
+  'empty_response',
+  'unavailable',
+  'local_auth',
+  'schema_invalid',
+  'apply_failed',
+  'verify_failed',
+  'unknown',
+] as const satisfies readonly HarnessFailureReason[];
+
 function isValidRegExp(source: string): boolean {
   try {
     new RegExp(source);
@@ -57,6 +73,8 @@ function isValidRegExp(source: string): boolean {
     return false;
   }
 }
+
+const RegexString = z.string().refine(isValidRegExp, 'errorPatterns entries must be valid regular expressions');
 
 const HarnessDeclarationSchema = z
   .object({
@@ -72,7 +90,9 @@ const HarnessDeclarationSchema = z
       error: `usage must be one of: ${HARNESS_USAGE_MODES.join(', ')}`,
     }),
     errorPatterns: z
-      .array(z.string().refine(isValidRegExp, 'errorPatterns entries must be valid regular expressions'))
+      .union([z.partialRecord(z.enum(HARNESS_ERROR_PATTERN_REASONS), RegexString), z.array(RegexString)], {
+        error: `errorPatterns must map a failure reason (${HARNESS_ERROR_PATTERN_REASONS.join(', ')}) to a regex, or be a list of regexes`,
+      })
       .optional(),
     probe: z.string().min(1, 'probe must not be empty').optional(),
   })
