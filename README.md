@@ -19,7 +19,7 @@ What works today (this table matches the code on main):
 | `factory run` (parallel lanes)                        | ✅ Working | Merges are serialized per lane via a merge-wait step                                                             |
 | `factory land` / auto-merge                           | ✅ Working | Off by default. Turn on with `FACTORY_MERGE=1`, `run.merge.auto: true` or `--auto-merge`; see [Safety](#safety). |
 | `factory supervise` (multi-window unattended runs)    | ✅ Working | Waits for usage headroom, runs the queue, repeats until drained                                                  |
-| Cost tracking (`factory cost`)                        | ✅ Working | Per-task tokens and cost logged to `.factory/costs.jsonl`                                                        |
+| Cost tracking (`factory cost`)                        | ✅ Working | Per-task tokens and cost logged to `.factory/state/costs.jsonl`                                                  |
 
 The full matrix, including model harnesses, prompt evals, the server, and experimental local (Ollama) models, is in [docs/status.md](docs/status.md).
 
@@ -49,7 +49,7 @@ Private workspaces (server, dashboard, product, scbench-adapter) also live here 
 - Claude Code (`claude`) installed, on your PATH, and signed in. The TRIAGE phase shells out to `claude -p`, and Claude models in every tier run through it.
 - The GitHub CLI `gh`, signed in with `gh auth login`. The factory uses `gh repo view` to detect your repo.
 - A GitHub token. The factory reads `GITHUB_TOKEN`, then `GH_TOKEN`, and falls back to `gh auth token` when neither is set, so `gh auth login` is usually enough.
-- Optional: the OpenAI Codex CLI (`codex`) for worker builds, and `ollama` for experimental local models.
+- Optional: the OpenAI Codex CLI (`codex`) for worker builds, and `ollama` for experimental local models. When Ollama is not running, the factory skips local models and says so once in the log.
 
 Run `factory doctor` after installing (Step 1) to check all of this.
 
@@ -60,7 +60,7 @@ To run unattended, the factory starts agent CLIs with their permission prompts t
 - Claude Code runs as `claude -p ... --permission-mode bypassPermissions` (the same mode as `--dangerously-skip-permissions`).
 - Codex runs as `codex exec ... -c approval_policy=never`, with `--sandbox workspace-write` inside an OS sandbox, or `--sandbox danger-full-access` when no OS sandbox is available.
 
-Each build runs in a separate git worktree (a sibling of your repo on a `factory/` branch; change the prefix with `--branch-prefix`), never in your main checkout. Where available, agent runs are wrapped in an OS sandbox (`sandbox-exec` on macOS, `firejail` on Linux). The agents still run as you, with your file permissions and your GitHub token, and builds run the target repo's tests and install its dependencies. Only point the factory at repos and issues you trust.
+Each build runs in a separate git worktree (under `~/.factory/worktrees/<owner>/<repo>/` on a `factory/` branch; set `worktree.parent` to move it and `--branch-prefix` to change the prefix), never in your main checkout. Where available, agent runs are wrapped in an OS sandbox (`sandbox-exec` on macOS, `firejail` on Linux). `factory doctor` warns when no sandbox runtime is found. The agents still run as you, with your file permissions and your GitHub token, and builds run the target repo's tests and install its dependencies. Only point the factory at repos and issues you trust.
 
 The factory never merges by default. `factory ship` and `factory run-issue` never merge; they stop at the PR, which is marked ready for review once CI passes. `factory run` and `factory supervise` merge only if you turn auto-merge on (`FACTORY_MERGE=1`, `run.merge.auto: true`, or `--auto-merge`). `FACTORY_MERGE_ADMIN=1` lets the token merge through unmet branch protection; use it only on purpose. Full rules: [docs/config.example.yaml](docs/config.example.yaml).
 
@@ -69,32 +69,37 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 **Step 1: Install**
 
 ```bash
-npm install -g @on-par/factory-cli
+npm install -g @on-par/factory-cli   # Requires Node.js 24 or newer
 factory --version
 factory doctor
 ```
 
-`factory doctor` checks git, `claude`, `gh` auth, the GitHub token, npm and the sandbox, and prints a fix for anything missing. To run from a clone instead, see [CONTRIBUTING.md](CONTRIBUTING.md).
+Older Node versions are refused with a clear message. `factory doctor` checks git, your git identity (`user.name` and `user.email`, which commits need), `claude`, `gh` auth, the GitHub token, npm and the sandbox, and prints a fix for anything missing. It works from any directory, including outside a repo. To run from a clone instead, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 **Step 2: Point it at your repo**
 
 ```bash
 cd /path/to/your/repo        # any git repo with a GitHub remote and open issues
-factory init                 # creates .factory/ (config.yaml, constitution.md, state/)
+factory init                 # creates .factory/ (config.yaml, constitution.md, .gitignore, state/)
 ```
 
-**Step 3: Pick a constitution**
+`factory init` seeds `.factory/constitution.md` from the bundled `default-code` constitution and adds `.factory/` to `.git/info/exclude`. So `.factory/` is local to this clone. It is not committed and does not travel with the repo, so copy it yourself to another machine or clone. Every run reads `.factory/constitution.md` from this main checkout, including builds that run in a lane worktree.
+
+**Step 3 (optional): Pick a different constitution**
 
 ```bash
-factory constitution --list                    # see available product constitutions
+factory constitution --list                    # bundled constitutions and their checkers
+factory constitution --checkers                # every built-in checker, one line each
 factory constitution --product example-marketing-site
 ```
+
+The `default-code` scaffold works as is. `--product` replaces the scaffold without `--force` while it is still untouched. Once you edit `.factory/constitution.md`, `--product` refuses, and only `--force` overwrites it.
 
 **Step 4: Triage the backlog**
 
 ```bash
-factory triage               # proposes .factory/queue.proposed from your open issues; review it, then:
-factory triage accept        # validates the proposal and promotes it to .factory/queue
+factory triage               # proposes .factory/state/queue.proposed from your open issues; review it, then:
+factory triage accept        # validates the proposal and promotes it to .factory/state/queue
 ```
 
 **Step 5: Ship your first issue**
@@ -102,6 +107,8 @@ factory triage accept        # validates the proposal and promotes it to .factor
 ```bash
 factory ship 42              # PLAN → BUILD → CHECK → SHIP one issue (use an issue number from your repo)
 ```
+
+While SHIP waits for CI, it logs progress. On a repo with no CI checks, it waits about 90 s, logs `no CI checks found`, and marks the PR ready (`FACTORY_CI_NO_CHECKS_GRACE_SECONDS` tunes the wait). When PLAN enriches an incomplete issue, it keeps your text and appends a `factory:enriched` section. Set `readiness.updateIssueBody: false` in `.factory/config.yaml` to keep enrichment out of the issue.
 
 `factory ship` ends at a green, ready-for-review PR that closes the issue (it prints `✅ Issue #N → PR #M ready for review`). Merging stays with you: review the PR and merge it, or run `factory land <N>` to squash-merge and clean up the worktree. To process the whole triaged queue in parallel lanes instead, run `factory run` (after accepting a triage proposal with `factory triage accept`). `FACTORY_MERGE` and `FACTORY_MERGE_ADMIN` apply to `factory run`, `factory supervise` and `factory land` only; `factory ship` warns and ignores them.
 
@@ -142,10 +149,11 @@ factory stop|resume --json         One JSON object: action, repo, stopFlag {befo
 factory init                        Set up .factory/ in this repo and check model reachability
 factory doctor                      Check your environment (git, claude, gh auth, GitHub token, npm, sandbox)
 factory constitution --product <p>  Seed .factory/constitution.md from a bundled example constitution
+factory constitution --checkers     List every built-in checker
 factory models [--doctor]           List models with tiers, cost, and availability; --doctor probes provider CLIs
 
 # Queue
-factory triage [--product <p>]      Have a model propose a queue into .factory/queue.proposed
+factory triage [--product <p>]      Have a model propose a queue into .factory/state/queue.proposed
 factory queue add <lane> <N...>     Queue GitHub issues into a lane (factory:queued labels)
 factory check <N> [--json]          Read-only pre-flight: missing fields, and whether the size gate runs it as-is or would split it (alias: ready)
 
@@ -167,7 +175,7 @@ When the size gate decides an issue is too big, it files child issues and stops 
 - **Nested splits.** If a child is decomposed again, its new children replace it and run before the remaining siblings. No issue runs twice.
 - **Closed children** are skipped.
 - **Failures don't stop the run.** A child that fails or escalates is recorded, and the next child still runs.
-- **`.factory/STOP`** is checked before each child starts. Once it is present, no further child starts, and the file is left in place (ADR-0111). A child already running finishes.
+- **`.factory/state/STOP`** is checked before each child starts. Once it is present, no further child starts, and the file is left in place (ADR-0111). A child already running finishes.
 - **Summary.** At the end, `run-issue` prints one line per child: its PR, or why it failed, was skipped, or did not run.
 - **No labels, no merge.** Like `ship`, it never touches the queue's `factory:*` labels and never merges. Each successful child ends at its own ready-for-review PR.
 
@@ -180,7 +188,7 @@ Exit codes: `0` when every child reached ready-for-review, was skipped as closed
 | `npm run test`                                                    | Vitest with coverage thresholds (the full-suite gate).                                                                                                                                                                                       | `verify.sh` (full path), CI                                               |
 | `npm run test:integration`                                        | Pipeline integration suites.                                                                                                                                                                                                                 | Nightly workflow, on demand                                               |
 | `npm run sim-monte-carlo -- [options]`                            | Headless simulator Monte Carlo runs: synthetic issues through fake PLAN→BUILD→CHECK→SHIP, no model or GitHub calls. Prints shipped/parked/escalated rates and exits 1 on a breached `--max-*-rate` threshold. `-- --help` lists the options. | On demand                                                                 |
-| `npm run sandbox-ab-report -- [--costs <file>] [--events <file>]` | Docker-sandbox vs baseline A/B comparison over `.factory/costs.jsonl` and `.factory/events.ndjson` (defaults from `getFactoryPaths`), with a go/no-go recommendation (#656).                                                                 | On demand                                                                 |
+| `npm run sandbox-ab-report -- [--costs <file>] [--events <file>]` | Docker-sandbox vs baseline A/B comparison over `.factory/state/costs.jsonl` and `.factory/state/events.ndjson` (defaults from `getFactoryPaths`), with a go/no-go recommendation (#656).                                                     | On demand                                                                 |
 | `npm run mutation`                                                | Stryker mutation testing (`stryker.conf.json`).                                                                                                                                                                                              | On demand only. Not part of `scripts/verify.sh` and not run by CI (#805). |
 
 The commit gate is `bash scripts/verify.sh` (see [.claude/skills/verify/SKILL.md](.claude/skills/verify/SKILL.md)).
@@ -191,9 +199,9 @@ Each task type maps to a tier of models in `packages/config/src/defaults.ts`. Th
 
 ## Constitutions
 
-A constitution is a written standard that defines "done right" for a product. Every build round is tested against it. The source of truth for a real product is `.factory/constitution.md` in the **target repo**. `factory init`, `factory constitution --init`, and `factory constitution --product <name>` all read from and write to that path, never to a file bundled with the factory itself.
+A constitution is a written standard that defines "done right" for a product. Every build round is tested against it. The source of truth for a real product is `.factory/constitution.md` in the **target repo**. `factory init` seeds the bundled `default-code` constitution. `factory init`, `factory constitution --init`, and `factory constitution --product <name>` all read from and write to that path, never to a file bundled with the factory itself.
 
-The bundled files below are only templates and worked examples used to seed a new `.factory/constitution.md` (via `factory constitution --product <name>`):
+The bundled files below are only templates and worked examples used to seed a new `.factory/constitution.md` (via `factory constitution --product <name>`). `factory constitution --checkers` lists the built-in checkers:
 
 - `packages/config/src/constitutions/example-marketing-site.md`: Static site generation (brand, WCAG 2.2 AA, SEO, links)
 - `packages/config/src/constitutions/example-data-app.md`: Data analysis (data integrity, report validation)
@@ -202,7 +210,7 @@ The bundled files below are only templates and worked examples used to seed a ne
 
 ## Lane environment (parallel e2e)
 
-Each lane leases a port from `.factory/ports.json` and every build/check command it runs (workers, `npm test`, lint, custom checkers) inherits:
+Each lane leases a port from `.factory/state/ports.json` and every build/check command it runs (workers, `npm test`, lint, custom checkers) inherits:
 
 | Variable              | Example                 |
 | --------------------- | ----------------------- |

@@ -11,16 +11,18 @@ Built in TypeScript. Routes work across Claude and Codex, with experimental loca
 ## Install
 
 ```bash
-npm install -g @on-par/factory-cli
+npm install -g @on-par/factory-cli   # Requires Node.js 24 or newer
 factory --version
 factory doctor
 ```
 
-Requires Node.js >= 24, `git`, Claude Code (`claude`) installed and signed in, and the GitHub CLI signed in with `gh auth login`. The factory reads `GITHUB_TOKEN`, then `GH_TOKEN`, and falls back to `gh auth token`. `factory doctor` checks all of this and prints a fix for anything missing.
+Also requires `git`, Claude Code (`claude`) installed and signed in, and the GitHub CLI signed in with `gh auth login`. The factory reads `GITHUB_TOKEN`, then `GH_TOKEN`, and falls back to `gh auth token`. `factory doctor` checks all of this and prints a fix for anything missing. It also checks your git identity and the sandbox runtime, and it runs outside a repo.
+
+`factory init` creates a local-only `.factory/` (git-excluded) with a `default-code` constitution. See the main README quick start.
 
 ## Safety
 
-Agents run with their permission prompts off (Claude Code with `--permission-mode bypassPermissions`, Codex with `approval_policy=never`) in a separate git worktree, with your permissions and your GitHub token. Only point the factory at repos and issues you trust. It never merges by default: `factory run` and `factory supervise` merge only if you turn auto-merge on (`FACTORY_MERGE=1`, `run.merge.auto: true`, or `--auto-merge`), and `factory land` merges when you run it. Details are in the [Safety section](https://github.com/on-par/software-factory#safety) and [SECURITY.md](https://github.com/on-par/software-factory/blob/main/SECURITY.md).
+Agents run with their permission prompts off (Claude Code with `--permission-mode bypassPermissions`, Codex with `approval_policy=never`) in a separate git worktree under `~/.factory/worktrees/<owner>/<repo>/`, with your permissions and your GitHub token. Only point the factory at repos and issues you trust. It never merges by default: `factory run` and `factory supervise` merge only if you turn auto-merge on (`FACTORY_MERGE=1`, `run.merge.auto: true`, or `--auto-merge`), and `factory land` merges when you run it. Details are in the [Safety section](https://github.com/on-par/software-factory#safety) and [SECURITY.md](https://github.com/on-par/software-factory/blob/main/SECURITY.md).
 
 ## Updating
 
