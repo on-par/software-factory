@@ -15,6 +15,7 @@ import {
   formatMicroVmReconcileReport,
   formatReconcileReport,
   formatWorktreeReconcileReport,
+  GIT_AUTH_FIX,
   GIT_AUTH_PROBE_CMD,
   GIT_AUTH_PROBE_TIMEOUT_MS,
   gitAuthCheck,
@@ -115,6 +116,9 @@ describe('gitAuthCheck', () => {
     expect(check.optional).toBeUndefined();
     expect(check.detail).not.toContain('tok');
     expect(check.detail).not.toContain('github.com');
+    expect(check.fix).toBe(GIT_AUTH_FIX);
+    expect(check.fix).toContain('gh auth setup-git');
+    expect(formatDoctorChecks([check])).toContain('fix: ' + GIT_AUTH_FIX);
 
     const base = probes();
     const checks = runDoctorChecks(
@@ -122,6 +126,20 @@ describe('gitAuthCheck', () => {
     );
     expect(checks.find((c) => c.name === 'git auth')).toMatchObject({ ok: false });
     expect(doctorFailed(checks)).toBe(true);
+  });
+
+  it('shows the gh auth setup-git fix only on failure, never on pass or skip', () => {
+    const passing = gitAuthCheck('/repo', (cmd) =>
+      cmd.includes('ls-remote') ? 'abc\tHEAD' : 'https://github.com/o/r.git',
+    );
+    const notInRepo = gitAuthCheck(null, () => null);
+    const noOrigin = gitAuthCheck('/repo', () => null);
+    for (const check of [passing, notInRepo, noOrigin]) {
+      expect(check.fix).toBeUndefined();
+      expect(formatDoctorChecks([check])).not.toContain('gh auth setup-git');
+    }
+    const failing = gitAuthCheck('/repo', (cmd) => (cmd.includes('ls-remote') ? null : 'https://github.com/o/r.git'));
+    expect(formatDoctorChecks([failing])).toContain('gh auth setup-git');
   });
 
   it('runs the probe with prompting disabled and a bounded timeout', () => {

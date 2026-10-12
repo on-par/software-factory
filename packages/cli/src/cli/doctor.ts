@@ -88,6 +88,9 @@ export const GIT_AUTH_PROBE_ENV: Readonly<Record<string, string>> = {
 /** Bounds the probe, e.g. an ssh key passphrase prompt that waits on /dev/tty. */
 export const GIT_AUTH_PROBE_TIMEOUT_MS = 15_000;
 
+/** Remedy shown only when the git-auth probe fails: wires git's credential helper to gh. */
+export const GIT_AUTH_FIX = 'run `gh auth setup-git` so git uses your gh credentials, then re-run `factory doctor`';
+
 /** Git-auth check (#2482, #2483): skipped, never failing, outside a git repository or without
  *  an origin remote. Otherwise runs a non-interactive `git ls-remote` against origin and fails
  *  when it cannot authenticate. The detail never echoes the origin URL, which may hold a token. */
@@ -114,6 +117,7 @@ export function gitAuthCheck(
       name: GIT_AUTH_CHECK,
       ok: false,
       detail: 'git could not authenticate to origin non-interactively (prompting disabled)',
+      fix: GIT_AUTH_FIX,
     };
   }
   return { name: GIT_AUTH_CHECK, ok: true, detail: 'git can authenticate to origin non-interactively' };
