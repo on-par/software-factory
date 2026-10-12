@@ -313,6 +313,7 @@ import {
   buildTriagePrompt,
   normalizeTriageQueue,
   parseTriageCandidates,
+  codexChatgptSessionExpired,
 } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
 import { Command } from 'commander';
@@ -6140,6 +6141,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     },
     pathExists: existsSync,
     distFreshness: distFreshnessProbe(import.meta.url),
+    codexSessionExpired: () => codexChatgptSessionExpired(),
   });
 
   let repoRoot: string | null;

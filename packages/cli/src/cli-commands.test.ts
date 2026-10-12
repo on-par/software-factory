@@ -6187,6 +6187,8 @@ Please add a widget that does the thing.
 
   describe('doctor', () => {
     beforeEach(() => {
+      // Never read the real ~/.codex/auth.json from doctor tests (#2509).
+      vi.stubEnv('CODEX_HOME', join(h.repoRoot, 'no-codex-home'));
       h.execSyncImpl = (cmd: string) => {
         if (cmd.includes('rev-parse')) return h.repoRoot;
         if (cmd.includes('status --porcelain')) return '';
@@ -6196,6 +6198,9 @@ Please add a widget that does the thing.
         if (cmd.includes('gh auth status')) return 'Logged in';
         return '';
       };
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
     });
 
     describe('agent sign-in (#2496)', () => {
@@ -6217,6 +6222,20 @@ Please add a widget that does the thing.
         const res = await runMain('doctor');
         expect(res.exited).toBe(false);
         expect(logged()).toContain('another agent is signed in');
+      });
+
+      it('fails when codex holds an expired ChatGPT session and claude is logged out (#2509)', async () => {
+        h.claudeAvailable = true;
+        withAuth(false, true);
+        const codexHome = join(h.repoRoot, 'expired-codex-home');
+        mkdirSync(codexHome, { recursive: true });
+        const exp = Math.floor(Date.now() / 1000) - 3600;
+        const token = `h.${Buffer.from(JSON.stringify({ exp })).toString('base64url')}.s`;
+        writeFileSync(join(codexHome, 'auth.json'), JSON.stringify({ tokens: { access_token: token } }));
+        vi.stubEnv('CODEX_HOME', codexHome);
+        const res = await runMain('doctor');
+        expect(res.exited).toBeTruthy();
+        expect(logged()).toContain('ChatGPT session token has expired');
       });
 
       it('fails when every installed agent is logged out', async () => {

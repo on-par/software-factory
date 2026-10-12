@@ -34,6 +34,9 @@ export interface DoctorEnvProbes {
   /** Host platform; defaults to process.platform. */
   platform?: NodeJS.Platform;
   distFreshness?: () => { fresh: boolean; detail: string };
+  /** True when codex is signed in with ChatGPT but the stored access token has expired, so the
+   *  next run must refresh it and may be rejected (#2509). Read locally; never refreshes. */
+  codexSessionExpired?: () => boolean;
 }
 
 export const NOT_IN_REPO_HINT = 'cd into your repo, then run factory doctor again';
@@ -128,6 +131,7 @@ export function gitAuthCheck(
 export function agentCliChecks(
   commandAvailable: (cmd: string) => boolean,
   tryExec: (cmd: string) => string | null,
+  codexSessionExpired: () => boolean = () => false,
 ): DoctorCheck[] {
   const found = availableAgentClis(commandAvailable);
   const checks: DoctorCheck[] = [
@@ -153,24 +157,34 @@ export function agentCliChecks(
   );
   if (found.includes('codex')) {
     const method = codexAuthMethod(tryExec('codex login status 2>&1'));
+    const expired = method === 'ChatGPT' && codexSessionExpired();
     checks.push(
-      method
+      expired
         ? {
             name: 'codex auth',
-            ok: true,
-            detail:
-              method === 'ChatGPT'
-                ? 'logged in with ChatGPT; runs draw on your ChatGPT plan limits (manage usage in ChatGPT settings)'
-                : `logged in with ${method}`,
-          }
-        : {
-            name: 'codex auth',
-            // Required only when codex is the sole agent: then nothing else can run.
             ok: false,
             optional: found.length > 1,
-            detail: 'codex CLI installed but not logged in',
+            detail:
+              'ChatGPT session token has expired; the next run must refresh it and a used or revoked refresh token is rejected (doctor does not refresh, so it never rotates the token)',
             fix: CODEX_LOGIN_FIX,
-          },
+          }
+        : method
+          ? {
+              name: 'codex auth',
+              ok: true,
+              detail:
+                method === 'ChatGPT'
+                  ? 'logged in with ChatGPT; runs draw on your ChatGPT plan limits (manage usage in ChatGPT settings)'
+                  : `logged in with ${method}`,
+            }
+          : {
+              name: 'codex auth',
+              // Required only when codex is the sole agent: then nothing else can run.
+              ok: false,
+              optional: found.length > 1,
+              detail: 'codex CLI installed but not logged in',
+              fix: CODEX_LOGIN_FIX,
+            },
     );
   }
   return checks;
@@ -207,7 +221,7 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
     });
   }
 
-  checks.push(...agentCliChecks(commandAvailable, tryExec));
+  checks.push(...agentCliChecks(commandAvailable, tryExec, probes.codexSessionExpired));
 
   if (!commandAvailable('gh')) {
     checks.push({
