@@ -15,6 +15,8 @@ import {
   formatMicroVmReconcileReport,
   formatReconcileReport,
   formatWorktreeReconcileReport,
+  GIT_AUTH_PROBE_CMD,
+  GIT_AUTH_PROBE_TIMEOUT_MS,
   gitAuthCheck,
   type GreenPrScanResult,
   leaseChecks,
@@ -60,6 +62,7 @@ describe('gitAuthCheck', () => {
     expect(check.detail).toMatch(/^skipped — not inside a git repository/);
     expect(check.detail).toContain(NOT_IN_REPO_HINT);
     expect(tryExecSpy.mock.calls.some(([cmd]) => cmd.includes('git remote'))).toBe(false);
+    expect(tryExecSpy.mock.calls.some(([cmd]) => cmd.includes('ls-remote'))).toBe(false);
 
     const base = probes();
     const checks = runDoctorChecks(
@@ -73,12 +76,14 @@ describe('gitAuthCheck', () => {
 
   it('in a repo with no origin remote, git auth is skipped with a reason and does not fail doctor', () => {
     for (const result of [null, '']) {
-      expect(gitAuthCheck('/repo', () => result)).toEqual({
+      const spy = vi.fn((_cmd: string): string | null => result);
+      expect(gitAuthCheck('/repo', spy)).toEqual({
         name: 'git auth',
         ok: true,
         optional: true,
         detail: 'skipped — no origin remote configured',
       });
+      expect(spy.mock.calls.some(([cmd]) => cmd.includes('ls-remote'))).toBe(false);
     }
 
     const base = probes();
@@ -90,11 +95,54 @@ describe('gitAuthCheck', () => {
     expect(doctorFailed(checks)).toBe(false);
   });
 
-  it('with an origin remote, git auth is a non-failing placeholder that never echoes the URL', () => {
-    const check = gitAuthCheck('/repo', () => 'https://user:tok@github.com/o/r.git');
-    expect(check).toMatchObject({ ok: true, optional: true });
+  it('with an origin remote, git auth passes when the non-interactive ls-remote probe succeeds', () => {
+    for (const probeOut of ['abc123\tHEAD', '']) {
+      const check = gitAuthCheck('/repo', (cmd) =>
+        cmd.includes('ls-remote') ? probeOut : 'https://user:tok@github.com/o/r.git',
+      );
+      expect(check).toMatchObject({ name: 'git auth', ok: true });
+      expect(check.optional).toBeUndefined();
+      expect(check.detail).not.toContain('tok');
+      expect(check.detail).not.toContain('github.com');
+    }
+  });
+
+  it('with an origin remote, git auth fails doctor when the ls-remote probe fails', () => {
+    const check = gitAuthCheck('/repo', (cmd) =>
+      cmd.includes('ls-remote') ? null : 'https://user:tok@github.com/o/r.git',
+    );
+    expect(check).toMatchObject({ name: 'git auth', ok: false });
+    expect(check.optional).toBeUndefined();
     expect(check.detail).not.toContain('tok');
     expect(check.detail).not.toContain('github.com');
+
+    const base = probes();
+    const checks = runDoctorChecks(
+      probes({ tryExec: (cmd, opts) => (cmd.includes('ls-remote') ? null : base.tryExec(cmd, opts)) }),
+    );
+    expect(checks.find((c) => c.name === 'git auth')).toMatchObject({ ok: false });
+    expect(doctorFailed(checks)).toBe(true);
+  });
+
+  it('runs the probe with prompting disabled and a bounded timeout', () => {
+    const spy = vi.fn((cmd: string, _opts?: unknown): string | null =>
+      cmd.includes('get-url') ? 'https://github.com/o/r.git' : '',
+    );
+    gitAuthCheck('/repo', spy);
+    const call = spy.mock.calls.find(([cmd]) => cmd.includes('ls-remote'))!;
+    const opts = call[1] as { env: Record<string, string>; timeoutMs: number };
+    expect(call[0]).toBe(GIT_AUTH_PROBE_CMD);
+    expect(call[0]).toContain('credential.interactive=never');
+    expect(call[0]).toContain('core.askPass=');
+    expect(opts.env).toMatchObject({
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_ASKPASS: '',
+      SSH_ASKPASS: '',
+      GCM_INTERACTIVE: 'never',
+    });
+    expect(opts.timeoutMs).toBe(GIT_AUTH_PROBE_TIMEOUT_MS);
+    expect(opts.timeoutMs).toBeGreaterThan(0);
+    expect(opts.timeoutMs).toBeLessThanOrEqual(30_000);
   });
 });
 
@@ -106,7 +154,7 @@ describe('runDoctorChecks', () => {
     expect(doctorFailed(checks)).toBe(false);
     const byName = (n: string) => checks.find((c) => c.name === n)!;
     expect(byName('git repository').detail).toBe('/repo');
-    expect(byName('git auth')).toMatchObject({ ok: true, optional: true });
+    expect(byName('git auth')).toMatchObject({ ok: true });
     expect(byName('git auth').detail).not.toContain('github.com');
     expect(byName('codex sandbox').detail).toBe('codex CLI found (sandboxed builds available)');
     expect(byName('git worktree clean').detail).toBe('clean');

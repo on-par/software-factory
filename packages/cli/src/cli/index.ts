@@ -533,7 +533,10 @@ export type ShellExec = (
   command: string,
   options?: { cwd?: string; timeout?: number },
 ) => Promise<{ stdout: string; stderr: string }>;
-export type ShellExecSync = (command: string, options?: { timeout?: number; stdio?: StdioOptions }) => string;
+export type ShellExecSync = (
+  command: string,
+  options?: { timeout?: number; stdio?: StdioOptions; env?: NodeJS.ProcessEnv },
+) => string;
 
 type ShellOpKey = 'exec' | 'execSync';
 type ShellOps = Required<Pick<CliDeps, ShellOpKey>>;
@@ -6117,9 +6120,15 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
   const checks = runDoctorChecks({
     commandAvailable: coreOps.isCommandAvailable,
     envPresent: (key) => !!process.env[key],
-    tryExec: (cmd) => {
+    tryExec: (cmd, opts) => {
       try {
-        return shellOps.execSync(cmd, { timeout: 10_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        return shellOps
+          .execSync(cmd, {
+            timeout: opts?.timeoutMs ?? 10_000,
+            stdio: ['ignore', 'pipe', 'ignore'],
+            ...(opts?.env ? { env: { ...process.env, ...opts.env } } : {}),
+          })
+          .trim();
       } catch {
         return null;
       }
