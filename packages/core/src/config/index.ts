@@ -45,6 +45,41 @@ const ModelDefSchema = z.object({
   experimental: z.boolean().optional(),
 });
 
+export const HARNESS_PROMPT_MODES = ['stdin', 'file', 'arg'] as const;
+export const HARNESS_OUTPUT_MODES = ['stdout', 'file:{outFile}', 'jsonl-last-message'] as const;
+export const HARNESS_USAGE_MODES = ['none', 'jsonl'] as const;
+
+function isValidRegExp(source: string): boolean {
+  try {
+    new RegExp(source);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const HarnessDeclarationSchema = z
+  .object({
+    command: z.string({ error: 'command is required (the CLI to run)' }).min(1, 'command must not be empty'),
+    prompt: z.enum(HARNESS_PROMPT_MODES, {
+      error: `prompt must be one of: ${HARNESS_PROMPT_MODES.join(', ')}`,
+    }),
+    output: z.enum(HARNESS_OUTPUT_MODES, {
+      error: `output must be one of: ${HARNESS_OUTPUT_MODES.join(', ')}`,
+    }),
+    agentic: z.boolean({ error: 'agentic must be true or false' }),
+    usage: z.enum(HARNESS_USAGE_MODES, {
+      error: `usage must be one of: ${HARNESS_USAGE_MODES.join(', ')}`,
+    }),
+    errorPatterns: z
+      .array(z.string().refine(isValidRegExp, 'errorPatterns entries must be valid regular expressions'))
+      .optional(),
+    probe: z.string().min(1, 'probe must not be empty').optional(),
+  })
+  .strict();
+
+export type HarnessDeclaration = z.infer<typeof HarnessDeclarationSchema>;
+
 const ModelsConfigSchema = z
   .object({
     version: z.number(),
@@ -58,14 +93,26 @@ const ModelsConfigSchema = z
       escalateAfterTierExhausted: z.boolean(),
     }),
     routingRules: z.record(z.string(), z.unknown()).default({}),
+    harnesses: z.record(z.string(), HarnessDeclarationSchema).default({}),
   })
   .superRefine((config, ctx) => {
+    const declared = Object.keys(config.harnesses);
+    for (const id of declared) {
+      if (KNOWN_HARNESS_IDS.includes(id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['harnesses', id],
+          message: `Harness '${id}' is built in and cannot be redeclared under harnesses`,
+        });
+      }
+    }
+    const valid = [...KNOWN_HARNESS_IDS, ...declared.filter((id) => !KNOWN_HARNESS_IDS.includes(id))];
     for (const [name, def] of Object.entries(config.models)) {
-      if (def.harness !== undefined && !KNOWN_HARNESS_IDS.includes(def.harness)) {
+      if (def.harness !== undefined && !valid.includes(def.harness)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['models', name, 'harness'],
-          message: `Model '${name}' declares unknown harness '${def.harness}' (known harnesses: ${KNOWN_HARNESS_IDS.join(', ')})`,
+          message: `Model '${name}' declares unknown harness '${def.harness}' (valid harnesses: ${valid.join(', ')}; declare custom ones under 'harnesses')`,
         });
       }
     }
@@ -296,7 +343,11 @@ const FactoryConfigSchema = z.object({
 
 // ---------- Types ----------
 
-export type ModelsConfig = z.infer<typeof ModelsConfigSchema>;
+// `harnesses` is always present on a parsed config but optional to construct, so
+// hand-built configs (tests, sims) need not spell out an empty section.
+export type ModelsConfig = Omit<z.infer<typeof ModelsConfigSchema>, 'harnesses'> & {
+  harnesses?: Record<string, HarnessDeclaration>;
+};
 export type RoutesConfig = z.infer<typeof RoutesConfigSchema>;
 export type FactoryConfig = z.infer<typeof FactoryConfigSchema>;
 

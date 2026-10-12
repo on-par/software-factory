@@ -52,7 +52,11 @@ function baseModelDef(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function writeModelsConfig(dir: string, harness?: string) {
+function validDecl(overrides: Record<string, unknown> = {}) {
+  return { command: 'my-agent', prompt: 'stdin', output: 'stdout', agentic: true, usage: 'none', ...overrides };
+}
+
+function writeModelsConfig(dir: string, harness?: string, harnesses?: Record<string, unknown>) {
   const config = {
     version: 1,
     models: {
@@ -66,6 +70,7 @@ function writeModelsConfig(dir: string, harness?: string) {
       escalateAfterTierExhausted: true,
     },
     routingRules: {},
+    ...(harnesses !== undefined ? { harnesses } : {}),
   };
   const path = join(dir, 'models.json');
   return writeFile(path, JSON.stringify(config)).then(() => path);
@@ -302,6 +307,67 @@ describe('loadModelsConfig', () => {
     const path = await writeModelsConfig(tmpDir);
 
     expect(() => loadModelsConfig(path)).not.toThrow();
+  });
+
+  it('accepts a model whose harness is declared under harnesses', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-models-config-'));
+    const path = await writeModelsConfig(tmpDir, 'my-agent', { 'my-agent': validDecl() });
+    expect(loadModelsConfig(path).harnesses?.['my-agent']?.command).toBe('my-agent');
+
+    const full = await writeModelsConfig(tmpDir, 'my-agent', {
+      'my-agent': validDecl({
+        output: 'file:{outFile}',
+        usage: 'jsonl',
+        errorPatterns: ['rate limit'],
+        probe: 'my-agent --version',
+      }),
+    });
+    expect(() => loadModelsConfig(full)).not.toThrow();
+  });
+
+  it('rejects an undeclared harness id, naming it and listing built-in and declared ids', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-models-config-'));
+    const path = await writeModelsConfig(tmpDir, 'other-agent', { 'my-agent': validDecl() });
+    expect(() => loadModelsConfig(path)).toThrow(/other-agent/);
+    expect(() => loadModelsConfig(path)).toThrow(/claude-cli/);
+    expect(() => loadModelsConfig(path)).toThrow(/my-agent/);
+  });
+
+  it.each([
+    ['command', { command: undefined }],
+    ['prompt', { prompt: 'pipe' }],
+    ['output', { output: 'xml' }],
+  ])('rejects a harness declaration with a bad %s, naming the field', async (field, override) => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-models-config-'));
+    const path = await writeModelsConfig(tmpDir, undefined, {
+      'my-agent': validDecl(override),
+    });
+    expect(() => loadModelsConfig(path)).toThrow(new RegExp(field));
+    expect(() => loadModelsConfig(path)).toThrow(/my-agent/);
+  });
+
+  it('rejects a declaration that redeclares a built-in harness id', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-models-config-'));
+    const path = await writeModelsConfig(tmpDir, undefined, { 'claude-cli': validDecl() });
+    expect(() => loadModelsConfig(path)).toThrow(/claude-cli.*built in/s);
+  });
+
+  it('rejects an unknown key in a harness declaration', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-models-config-'));
+    const path = await writeModelsConfig(tmpDir, undefined, { 'my-agent': validDecl({ foo: 1 }) });
+    expect(() => loadModelsConfig(path)).toThrow();
+  });
+
+  it('rejects an invalid errorPatterns regex', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-models-config-'));
+    const path = await writeModelsConfig(tmpDir, undefined, {
+      'my-agent': validDecl({ errorPatterns: ['('] }),
+    });
+    expect(() => loadModelsConfig(path)).toThrow(/errorPatterns/);
+  });
+
+  it('defaults harnesses to {} when absent', () => {
+    expect(loadModelsConfig().harnesses).toEqual({});
   });
 
   it('lists every model referenced by a tier in the models map', () => {
