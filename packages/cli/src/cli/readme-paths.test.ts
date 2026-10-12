@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getFactoryPaths } from '@on-par/factory-core';
@@ -58,5 +58,26 @@ describe('README .factory paths', () => {
 
   it('finds at least one .factory path in README.md', () => {
     expect(extract(read('README.md')).length).toBeGreaterThan(0);
+  });
+});
+
+describe('CLI README provider setup pointer', () => {
+  const cliReadme = read('packages/cli/README.md');
+  const start = cliReadme.indexOf('Also requires');
+  const end = cliReadme.indexOf('## Safety', start);
+  const prereqs = start >= 0 && end > start ? cliReadme.slice(start, end) : '';
+  const links = [...prereqs.matchAll(/\]\(([^)\s]*agents\.md)\)/g)].map((m) => m[1]);
+  const PREFIX = 'https://github.com/on-par/software-factory/blob/main/';
+
+  it('prerequisites have exactly one link to the provider setup guide', () => {
+    expect(prereqs).not.toBe('');
+    expect(links).toEqual([`${PREFIX}docs/agents.md`]);
+    expect(prereqs).not.toMatch(/^#{2,} /m);
+  });
+
+  it('the provider setup link resolves to an existing file in the repo', () => {
+    const target = links[0] ?? '';
+    expect(target.startsWith(PREFIX)).toBe(true);
+    expect(existsSync(join(repoRoot, target.slice(PREFIX.length)))).toBe(true);
   });
 });
