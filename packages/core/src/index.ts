@@ -641,11 +641,3 @@ export { fetchSubscriptionUsage } from './usage/subscription.js';
 
 // Types
 export type * from './types/index.js';
-export {
-  buildTriagePrompt,
-  normalizeTriageQueue,
-  parseTriageCandidates,
-  TRIAGE_BODY_MAX_CHARS,
-  truncateTriageBody,
-  type TriageCandidate,
-} from './triage/index.js';

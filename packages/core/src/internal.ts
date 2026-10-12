@@ -160,6 +160,7 @@ export { CliModelExecutor } from './router/index.js';
 // Phase helpers
 export type { PlanPromptOpts } from './phases/plan.js';
 export { buildPlanPrompt } from './phases/plan.js';
+export { buildTriagePrompt, normalizeTriageQueue, parseTriageCandidates } from './triage/index.js';
 
 // Board-constrained local lane dispatch (#848)
 export type {

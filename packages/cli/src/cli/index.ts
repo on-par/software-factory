@@ -131,9 +131,6 @@ import {
   mergedPrRefs,
   ModelRegistry,
   ModelRouter,
-  normalizeTriageQueue,
-  parseTriageCandidates,
-  buildTriagePrompt,
   parkReasonFor,
   parseKpiHistory,
   parseQueue,
@@ -313,6 +310,9 @@ import {
   withRunLock,
   wrapCommandInSandbox,
   writePortFile,
+  buildTriagePrompt,
+  normalizeTriageQueue,
+  parseTriageCandidates,
 } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
 import { Command } from 'commander';
