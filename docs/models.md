@@ -44,6 +44,8 @@ Native references: [Codex configuration](https://learn.chatgpt.com/docs/config-f
 
 Every model declares a **harness** — the provider adapter that executes it: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, or `opencode`. Build tasks require an agentic (file-editing) harness; prompt-only harnesses like `ollama-http` are rejected for builds. Per-task tokens and cost are logged to `.factory/costs.jsonl` (`factory cost` to inspect).
 
+What a harness receives, must return and how its failures are classified is specified in [harness-contract.md](./harness-contract.md).
+
 ## Failover Triggers
 
 | Trigger                     | Behavior                                   |
