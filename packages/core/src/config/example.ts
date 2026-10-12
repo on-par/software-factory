@@ -168,6 +168,28 @@ function modelNamespace(): Node[] {
       kind: 'object',
       key: 'models',
       children: [
+        {
+          kind: 'object',
+          key: 'registry',
+          doc: doc('models', 'registry'),
+          children: [
+            {
+              kind: 'object',
+              key: 'my-opencode-model',
+              children: [
+                unset('provider', undefined, '"custom"'),
+                unset('tier', undefined, ['worker']),
+                unset('costPerMtokInput', undefined, 0),
+                unset('costPerMtokOutput', undefined, 0),
+                unset('contextWindow', undefined, 200000),
+                unset('capabilities', undefined, ['implementation']),
+                unset('envKey', undefined, null),
+                unset('harness', undefined, '"opencode"'),
+                unset('providerModel', undefined, '"<provider>/<model>"'),
+              ],
+            },
+          ],
+        },
         unset('efforts', doc('models', 'efforts'), '{ "<model id>": "<effort>" }'),
         {
           kind: 'object',
