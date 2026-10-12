@@ -32,6 +32,7 @@ import {
   sandboxAuthSkipDetail,
   sandboxClaudeAuthChecks,
   unmergedGreenPrChecks,
+  reconcileAgentAuthChecks,
 } from './doctor.js';
 
 function probes(overrides: Partial<DoctorEnvProbes> = {}): DoctorEnvProbes {
@@ -1070,5 +1071,33 @@ describe('modelsRegistryChecks', () => {
     const rows = modelsRegistryChecks(cfg, { a: { harness: 'opencode' }, b: {}, c: { harness: 'nope' } }, valid);
     expect(rows).toHaveLength(2);
     expect(rows.some((r) => r.ok)).toBe(false);
+  });
+});
+
+describe('reconcileAgentAuthChecks (#2496)', () => {
+  const claudeFailed = { name: 'claude auth (host)', ok: false, detail: 'claude -p failed on the host' };
+  const claudeSkipped = { name: 'claude auth (host)', ok: true, optional: true, detail: 'skipped' };
+  const codexOk = { name: 'codex auth', ok: true, detail: 'logged in with ChatGPT' };
+  const codexFailed = {
+    name: 'codex auth',
+    ok: false,
+    optional: true,
+    detail: 'codex CLI installed but not logged in',
+  };
+
+  it('downgrades a logged-out agent to a warning while another is signed in', () => {
+    const out = reconcileAgentAuthChecks([codexOk, claudeFailed]);
+    expect(out[1]).toMatchObject({ ok: false, optional: true });
+  });
+
+  it('makes every logged-out agent a failure when none is signed in', () => {
+    const out = reconcileAgentAuthChecks([codexFailed, claudeFailed]);
+    expect(out.every((c) => c.optional === false)).toBe(true);
+  });
+
+  it('does not count a skipped probe as signed in', () => {
+    const out = reconcileAgentAuthChecks([codexFailed, claudeSkipped]);
+    expect(out[0]).toMatchObject({ ok: false, optional: false });
+    expect(out[1]).toBe(claudeSkipped);
   });
 });

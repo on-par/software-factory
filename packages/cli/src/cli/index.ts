@@ -383,6 +383,7 @@ import {
   orphanMicroVmChecks,
   runDoctorChecks,
   sandboxAuthSkipDetail,
+  reconcileAgentAuthChecks,
   sandboxClaudeAuthChecks,
   unmergedGreenPrChecks,
   type UnmergedGreenPrRow,
@@ -6199,6 +6200,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
 
   checks.push(claudeKeychainCheck(probeClaudeKeychain()));
   checks.push(...sandboxClaudeAuthChecks({ host, sandboxed, hostDetail, sandboxDetail }));
+  checks.splice(0, checks.length, ...reconcileAgentAuthChecks(checks));
 
   if (repoRoot !== null) {
     const paths = getFactoryPaths(repoRoot);

@@ -6187,6 +6187,35 @@ Please add a widget that does the thing.
       };
     });
 
+    describe('agent sign-in (#2496)', () => {
+      const withAuth = (claudeOk: boolean, codexOk: boolean) => {
+        const base = h.execSyncImpl;
+        h.execSyncImpl = (cmd: string, ...rest: any[]) => {
+          if (cmd.startsWith('claude -p')) {
+            if (!claudeOk) throw new Error('Not logged in');
+            return 'ok';
+          }
+          if (cmd.startsWith('codex login status')) return codexOk ? 'Logged in using ChatGPT' : 'Not logged in';
+          return base(cmd, ...rest);
+        };
+      };
+
+      it('passes with a warning when claude is logged out but codex is signed in', async () => {
+        h.claudeAvailable = true;
+        withAuth(false, true);
+        const res = await runMain('doctor');
+        expect(res.exited).toBe(false);
+        expect(logged()).toContain('another agent is signed in');
+      });
+
+      it('fails when every installed agent is logged out', async () => {
+        h.claudeAvailable = true;
+        withAuth(false, false);
+        const res = await runMain('doctor');
+        expect(res.exited).toBeTruthy();
+      });
+    });
+
     it('prints the report and does not exit when the environment is all green', async () => {
       h.claudeAvailable = true;
       const res = await runMain('doctor');
