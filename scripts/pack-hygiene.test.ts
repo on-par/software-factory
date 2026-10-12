@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -210,6 +210,23 @@ describe('npm pack end to end', () => {
       { cwd: ROOT, encoding: 'utf8' },
     );
     expect(verifyPack(parsePackJson(out), names)).toEqual([]);
+  });
+
+  it('every published workspace packs a package.json with engines.node >=24.0.0', () => {
+    const names = parseWorkspaceList(readFileSync(PUBLISH_LIST, 'utf8'));
+    const out = execFileSync(
+      'npm',
+      ['pack', '--json', '--ignore-scripts', '--pack-destination', dir, ...names.flatMap((n) => ['--workspace', n])],
+      { cwd: ROOT, encoding: 'utf8' },
+    );
+    const packed = JSON.parse(out) as { name: string; filename: string }[];
+    expect(packed.map((p) => p.name).sort()).toEqual([...names].sort());
+    for (const { name, filename } of packed) {
+      const manifest = JSON.parse(
+        execFileSync('tar', ['-xzOf', join(dir, basename(filename)), 'package/package.json'], { encoding: 'utf8' }),
+      ) as { engines?: { node?: string } };
+      expect(manifest.engines?.node, `${name} packed package.json engines.node`).toBe('>=24.0.0');
+    }
   });
 
   it("every published package's LICENSE matches the repo root LICENSE", () => {
