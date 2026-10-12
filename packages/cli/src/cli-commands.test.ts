@@ -13,7 +13,7 @@ import {
 } from 'node:fs';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 
 import * as FactoryCore from '@on-par/factory-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1174,6 +1174,18 @@ describe('cli commands (via main dispatch)', () => {
       expect(err).toBeInstanceOf(LaneEnvironmentPauseError);
       expect((err as LaneEnvironmentPauseError).baseSha).toBe(baseSha);
       expect((err as LaneEnvironmentPauseError).failingChecks).toEqual(['tests']);
+      expect(phases.planPhase).not.toHaveBeenCalled();
+    });
+
+    it('a .factory/config template token parks the run before planPhase with file:line', async () => {
+      mkdirSync(dirname(paths().config), { recursive: true });
+      writeFileSync(paths().config, '{\n  "version": 2,\n  "models": { "pins": { "build": "<owner-name>" } }\n}\n');
+
+      const err = await shipIssue(5, {}, { repoRoot: h.repoRoot, ghRepo: h.ghRepo }).catch((e: unknown) => e);
+
+      expect((err as Error).message).toContain(
+        `${relative(h.repoRoot, paths().config)}:3: unfilled template token '<owner-name>'`,
+      );
       expect(phases.planPhase).not.toHaveBeenCalled();
     });
 

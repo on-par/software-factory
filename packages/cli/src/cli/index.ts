@@ -16,7 +16,7 @@ import {
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { arch, hostname as osHostname, release, platform, userInfo } from 'node:os';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { promisify, styleText } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
@@ -455,6 +455,12 @@ const DEFAULT_CONFIG_LOADERS: ConfigLoaders = {
 let configLoaders: ConfigLoaders = DEFAULT_CONFIG_LOADERS;
 
 /** Per-field `??` so an explicit `undefined` override falls back instead of replacing the default. */
+/** Display path for the repo config file in preflight messages: repo-relative, or absolute when the state root lives outside the repo (#2586). */
+function repoConfigFileFor(repoRoot: string, absPath: string): { absPath: string; relPath: string } {
+  const rel = relative(repoRoot, absPath);
+  return { absPath, relPath: rel === '' || rel.startsWith('..') || isAbsolute(rel) ? absPath : rel };
+}
+
 function resolveConfigLoaders(overrides: Partial<ConfigLoaders>, base: ConfigLoaders = configLoaders): ConfigLoaders {
   return {
     loadModelsConfig: overrides.loadModelsConfig ?? base.loadModelsConfig,
@@ -2630,6 +2636,7 @@ export async function shipIssue(
     eventsFile: paths.events,
     logsDir: paths.logs,
     baselineCachePath: paths.baselineCache,
+    repoConfigFile: repoConfigFileFor(repoRoot, paths.config),
     flakyLedgerPath: paths.flakyLedger,
   };
 

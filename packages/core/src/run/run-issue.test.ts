@@ -27,6 +27,7 @@ import type { RunPolicy } from './policy.js';
 import type { Environment, Workspace } from './ports.js';
 import { createPlanReuseStore, issueBodyHash, type PlanReuseStore } from './resume-context.js';
 import { writeSpec } from '../spec/index.js';
+import { preflightConfigTokens } from '../config/template-tokens.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
 const planPhase = vi.fn<typeof realPlanPhase>();
@@ -258,7 +259,11 @@ describe('runIssue — constitution checker preflight (#2585)', () => {
   });
 
   it('reaches PLAN when every checker is a built-in or custom_*', async () => {
-    const { dir, constitution } = setup(['compile', 'custom_docs']);
+    // File must not retain scaffold tokens — token preflight (#2586) parks those before PLAN.
+    const { dir, constitution } = setup(
+      ['compile', 'custom_docs'],
+      '---\nproduct: acme\nversion: 1\ncheckers:\n  - compile\n  - custom_docs\n---\nbody',
+    );
     try {
       const outcome = await runIssue(
         baseRequest(),
@@ -2161,5 +2166,82 @@ describe('runIssue — plan reuse after environment release (#2340)', () => {
       expect((await go('body edited')).state).toBe('released');
       expect(planPhase).toHaveBeenCalledTimes(2);
     });
+  });
+});
+
+describe('runIssue — config template-token preflight (#2586)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'token-preflight-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const constitutionAt = (absPath: string): Constitution => ({
+    source: 'repo',
+    product: 'acme',
+    version: 1,
+    checkers: [],
+    body: 'stds',
+    path: absPath,
+    requireTests: true,
+    repoInstance: { relPath: '.factory/constitution.md', absPath },
+  });
+  const CLEAN_CONSTITUTION = '---\nproduct: acme\n---\n<One paragraph>\n';
+
+  async function expectParked(constitutionText: string, configText: string | undefined, expected: string) {
+    const constitutionPath = join(dir, 'constitution.md');
+    writeFileSync(constitutionPath, constitutionText);
+    const configPath = join(dir, 'config.yaml');
+    if (configText !== undefined) writeFileSync(configPath, configText);
+    const router = fakeRouter();
+    const run = vi.spyOn(router, 'run');
+    const recordPhase = vi.fn().mockResolvedValue(undefined);
+    const events = vi.fn();
+    const checkBaseHealth = vi.fn();
+    const outcome = await runIssue(
+      baseRequest({ repoConfigFile: { absPath: configPath, relPath: '.factory/config.yaml' } }),
+      basePolicy(),
+      basePorts({
+        router,
+        recordPhase,
+        events: () => events,
+        checkBaseHealth,
+        resolveConstitution: () => constitutionAt(constitutionPath),
+      }),
+    );
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
+    for (const phase of [planPhase, buildPhase, checkPhase, shipPhase]) expect(phase).not.toHaveBeenCalled();
+    expect(checkBaseHealth).not.toHaveBeenCalled();
+    expect(run).not.toHaveBeenCalled();
+    expect(recordPhase).not.toHaveBeenCalledWith('plan');
+    expect(events).toHaveBeenCalledWith('fail', expect.stringContaining(expected), undefined);
+  }
+
+  it('parks before PLAN with file:line when the constitution frontmatter has an unfilled token', async () => {
+    await expectParked(
+      '---\nproduct: acme\nname: <project-name>\n---\nbody\n',
+      undefined,
+      ".factory/constitution.md:3: unfilled template token '<project-name>'",
+    );
+  });
+
+  it('parks before PLAN with file:line when config.yaml has an unfilled token', async () => {
+    await expectParked(CLEAN_CONSTITUTION, 'models:\n  pins:\n    build: <model id>\n', '.factory/config.yaml:3');
+  });
+
+  it('clean constitution frontmatter and config.yaml proceed to PLAN', async () => {
+    const constitutionPath = join(dir, 'constitution.md');
+    const configPath = join(dir, 'config.yaml');
+    writeFileSync(constitutionPath, CLEAN_CONSTITUTION);
+    writeFileSync(configPath, 'models:\n  pins: {}\n');
+    const configFile = { absPath: configPath, relPath: '.factory/config.yaml' };
+    expect(preflightConfigTokens({ constitution: constitutionAt(constitutionPath), configFile })).toEqual([]);
+    const outcome = await runIssue(
+      baseRequest({ repoConfigFile: configFile }),
+      basePolicy(),
+      basePorts({ resolveConstitution: () => constitutionAt(constitutionPath) }),
+    );
+    expect(outcome.state).toBe('ready');
+    expect(planPhase).toHaveBeenCalledTimes(1);
   });
 });
