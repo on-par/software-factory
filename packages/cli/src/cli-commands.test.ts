@@ -1664,6 +1664,25 @@ bash scripts/verify.sh
       expect(errored()).not.toContain('no GitHub remote detected');
     });
 
+    it('status exits 2 saying the token was rejected and naming the repo scope when gh reports bad credentials (#2593)', async () => {
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) {
+          throw Object.assign(new Error('Command failed: gh repo view'), {
+            stderr:
+              'HTTP 401: Bad credentials (https://api.github.com/graphql)\nTry authenticating with:  gh auth login\n',
+          });
+        }
+        return '';
+      };
+      const res = await runMain('status');
+      expect(res).toMatchObject({ exited: true, code: 2 });
+      expect(errored()).toContain('rejected the token');
+      expect(errored()).toContain('`repo` scope');
+      expect(errored()).not.toContain('no GitHub remote detected');
+      expect(errored()).not.toContain('gh is not authenticated');
+    });
+
     describe('base hold (#2351)', () => {
       const writeHold = (repo: string): void => {
         mkdirSync(dirname(paths().baseHold), { recursive: true });
@@ -8159,5 +8178,16 @@ describe('ghRepoViewFailureMessage (#2592)', () => {
     expect(msg).toContain('gh is not authenticated');
     expect(msg).toContain('`gh auth login`');
     expect(msg).not.toContain('no GitHub remote detected');
+  });
+
+  it.each([
+    'HTTP 401: Bad credentials (https://api.github.com/graphql)\nTry authenticating with:  gh auth login',
+    'non-200 OK status code: 401 Unauthorized body: ...',
+  ])('says the token was rejected and names the repo scope for %j', (stderr) => {
+    const msg = ghRepoViewFailureMessage(stderr);
+    expect(msg).toContain('rejected the token');
+    expect(msg).toContain('`repo` scope');
+    expect(msg).not.toContain('no GitHub remote detected');
+    expect(msg).not.toContain('gh is not authenticated');
   });
 });
