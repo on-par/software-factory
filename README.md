@@ -100,10 +100,9 @@ factory init                 # creates .factory/ (config.yaml, constitution.md, 
 ```bash
 factory constitution --list                    # bundled constitutions and their checkers
 factory constitution --checkers                # every built-in checker, one line each
-factory constitution --product example-marketing-site
 ```
 
-The `default-code` scaffold works as is. `--product` replaces the scaffold without `--force` while it is still untouched. Once you edit `.factory/constitution.md`, `--product` refuses, and only `--force` overwrites it.
+For a code repo, skip this step. The `default-code` scaffold works as is. `--product` replaces the scaffold without `--force` while it is still untouched. Once you edit `.factory/constitution.md`, `--product` refuses, and only `--force` overwrites it.
 
 **Step 4: Triage the backlog**
 
