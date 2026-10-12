@@ -8,12 +8,94 @@ import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { shellEscape } from '../utils/index.js';
 import { classifyFailure } from './classify.js';
-import type { CodingHarness, HarnessRequest, HarnessResult } from './index.js';
+import type { CodingHarness, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
 import { HarnessError } from './index.js';
 
 export type OpenCodeExecFn = ExecFn;
 
-/** Runs a model via the OpenCode CLI: opencode run --auto [--model <provider/model>] [--variant <effort>] < prompt-file, executed with cwd = worktree. */
+export interface ParsedOpenCodeJson {
+  /** Assistant `text` parts, trimmed, non-empty, joined by a blank line. */
+  text: string;
+  /** Summed `step_finish` usage; undefined when no step reported numeric tokens. */
+  usage?: HarnessUsage;
+  /** Messages from `error` events, newline-joined; '' when none. */
+  errorText: string;
+}
+
+const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+
+/** Parses `opencode run --format json` NDJSON. Returns undefined when stdout has no
+ *  OpenCode event lines (an object with a string `type`), so callers fall back to raw
+ *  stdout. Tolerant by design: malformed lines, unknown event types and bad counts are
+ *  skipped. Usage capture must never fail a run (#2462). */
+export function parseOpenCodeJson(stdout: string): ParsedOpenCodeJson | undefined {
+  const texts: string[] = [];
+  const errors: string[] = [];
+  let sawEvent = false;
+  let sawUsage = false;
+  let numTurns = 0;
+  let input = 0;
+  let output = 0;
+  let reasoning = 0;
+  let cacheRead = 0;
+  let cacheWrite = 0;
+  let cost = 0;
+
+  for (const raw of stdout.split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    let event: any;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!event || typeof event !== 'object' || Array.isArray(event) || typeof event.type !== 'string') continue;
+    sawEvent = true;
+
+    if (event.type === 'text') {
+      const text = event.part?.text;
+      if (typeof text === 'string' && text.trim().length > 0) texts.push(text.trim());
+    } else if (event.type === 'step_finish') {
+      const tokens = event.part?.tokens;
+      if (!tokens || !Number.isFinite(tokens.input) || !Number.isFinite(tokens.output)) continue;
+      sawUsage = true;
+      numTurns++;
+      input += tokens.input;
+      output += tokens.output;
+      reasoning += num(tokens.reasoning);
+      cacheRead += num(tokens.cache?.read);
+      cacheWrite += num(tokens.cache?.write);
+      cost += num(event.part?.cost);
+    } else if (event.type === 'error') {
+      const message = event.error?.data?.message;
+      const name = event.error?.name;
+      if (typeof message === 'string') errors.push(message);
+      else if (typeof name === 'string') errors.push(name);
+    }
+  }
+
+  if (!sawEvent) return undefined;
+  return {
+    text: texts.join('\n\n'),
+    errorText: errors.join('\n'),
+    ...(sawUsage
+      ? {
+          usage: {
+            inputTokens: input + cacheRead + cacheWrite,
+            outputTokens: output + reasoning,
+            rawInputTokens: input,
+            cacheReadTokens: cacheRead,
+            cacheCreationTokens: cacheWrite,
+            numTurns,
+            ...(cost > 0 ? { costUsd: cost } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+/** Runs a model via the OpenCode CLI: opencode run --auto --format json [--model <provider/model>] [--variant <effort>] < prompt-file, executed with cwd = worktree. */
 export class OpenCodeHarness implements CodingHarness {
   readonly id = 'opencode';
   readonly agentic = true;
@@ -52,19 +134,25 @@ export class OpenCodeHarness implements CodingHarness {
         // and a file redirect still closes stdin at EOF: opencode run otherwise
         // blocks on a pipe stdin (execDetached never closes child.stdin), hanging
         // every call until the phase timeout.
+        // `--format json` emits NDJSON events so the harness can drop tool chatter
+        // and read token usage from `step_finish` events.
         await writeFile(promptPath, attemptPrompt, 'utf8');
-        const cmd = `opencode run --auto ${modelArg}${effortArg} < ${shellEscape(promptPath)}`;
+        const cmd = `opencode run --auto --format json ${modelArg}${effortArg} < ${shellEscape(promptPath)}`;
 
         try {
           ({ stdout } = await this.execFn(cmd, {
             cwd: worktree,
             timeoutMs: timeoutSeconds * 1000,
-            maxBuffer: 10 * 1024 * 1024,
+            // JSON `tool_use` events carry full tool output.
+            maxBuffer: 64 * 1024 * 1024,
             env,
             onPgid,
           }));
         } catch (err: any) {
-          const reason = err.killed ? 'timeout' : classifyFailure(err.stderr ?? '', err.code ?? 1);
+          // Under --format json, session errors arrive as stdout `error` events.
+          const jsonErr = typeof err.stdout === 'string' ? (parseOpenCodeJson(err.stdout)?.errorText ?? '') : '';
+          const classifyText = [err.stderr ?? '', jsonErr].filter(Boolean).join('\n');
+          const reason = err.killed ? 'timeout' : classifyFailure(classifyText, err.code ?? 1);
           throw new HarnessError(err.message ?? String(err), reason, {
             exitCode: typeof err.code === 'number' ? err.code : undefined,
             stderr: err.stderr,
@@ -74,7 +162,9 @@ export class OpenCodeHarness implements CodingHarness {
           });
         }
 
-        if (stdout.trim().length > 0) return { output: stdout };
+        const parsed = parseOpenCodeJson(stdout);
+        const output = parsed ? parsed.text : stdout;
+        if (output.trim().length > 0) return { output, ...(parsed?.usage ? { usage: parsed.usage } : {}) };
       }
 
       throw new HarnessError(`opencode CLI returned empty output (${MAX_ATTEMPTS} attempts)`, 'empty_response', {
