@@ -1295,6 +1295,78 @@ describe('CliModelExecutor', () => {
   });
 });
 
+describe('CliModelExecutor declared command harness', () => {
+  const declaration = {
+    command: 'my-agent --model {model} --cd {worktree}',
+    prompt: 'arg',
+    output: 'stdout',
+    agentic: true,
+    usage: 'none',
+  } as const;
+  const base = {
+    provider: 'custom' as const,
+    tier: 'boss',
+    costPerMtokInput: 0,
+    costPerMtokOutput: 0,
+    contextWindow: 1000,
+    capabilities: [],
+    envKey: null,
+    codex: true,
+  };
+  const declaredRegistry = (harnesses: ModelsConfig['harnesses']) =>
+    new ModelRegistry({
+      ...modelsConfig,
+      models: {
+        mine: { ...base, harness: 'my-agent', providerModel: 'prov/model' },
+        chat: { ...base, harness: 'chat-agent' },
+        bare: { ...base, harness: 'command' },
+      },
+      tiers: { boss: ['mine', 'chat', 'bare'] },
+      harnesses,
+    });
+
+  it('dispatches a declared id to the command harness with the substituted command and cwd', async () => {
+    const rec = recordingExec({ stdout: 'AGENT OUTPUT' });
+    const executor = new CliModelExecutor(rec.fn);
+    const out = await executor.runModel('mine', 'do it', {
+      worktree,
+      timeoutSeconds,
+      task: 'build_codex',
+      registry: declaredRegistry({ 'my-agent': declaration }),
+      routesConfig,
+    });
+    expect(out).toBe('AGENT OUTPUT');
+    expect(rec.calls[0].cmd).toBe(`my-agent --model 'prov/model' --cd '${worktree}' 'do it' < /dev/null`);
+    expect(rec.calls[0].opts.cwd).toBe(worktree);
+  });
+
+  it('rejects a declared non-agentic harness for a build task', async () => {
+    const executor = new CliModelExecutor(recordingExec().fn);
+    await expect(
+      executor.runModel('chat', 'x', {
+        worktree,
+        timeoutSeconds,
+        task: 'build_codex',
+        registry: declaredRegistry({ 'chat-agent': { ...declaration, agentic: false } }),
+        routesConfig,
+      }),
+    ).rejects.toThrow(/non-agentic harness 'chat-agent'/);
+  });
+
+  it("throws a clear error for harness 'command' with no declaration", async () => {
+    const executor = new CliModelExecutor(recordingExec().fn);
+    await expect(
+      executor.runModel('bare', 'x', {
+        worktree,
+        timeoutSeconds,
+        task: 'plan',
+        registry: declaredRegistry({ 'my-agent': declaration }),
+        routesConfig,
+      }),
+    ).rejects.toThrow(/command harness, which needs a matching entry under 'harnesses'/);
+  });
+});
+
 describe('CliModelExecutor harness injection', () => {
   it('lets an injected harness handle the run for its id', async () => {
     const rec = recordingExec({ stdout: 'REAL CLAUDE' });

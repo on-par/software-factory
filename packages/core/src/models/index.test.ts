@@ -37,6 +37,43 @@ const config: ModelsConfig = {
   routingRules: {},
 };
 
+describe('ModelRegistry harness declarations', () => {
+  const declaration = {
+    command: 'my-agent {model}',
+    prompt: 'stdin',
+    output: 'stdout',
+    agentic: true,
+    usage: 'none',
+  } as const;
+  const withHarnesses = (harnesses: ModelsConfig['harnesses']) => new ModelRegistry({ ...config, harnesses });
+
+  it('returns a declared harness and treats it as agentic per its declaration', () => {
+    const registry = withHarnesses({ 'my-agent': declaration, 'chat-only': { ...declaration, agentic: false } });
+    expect(registry.getHarnessDeclaration('my-agent')).toEqual(declaration);
+    expect(registry.isAgenticHarnessId('my-agent')).toBe(true);
+    expect(registry.isAgenticHarnessId('chat-only')).toBe(false);
+  });
+
+  it('returns undefined for undeclared ids, including prototype keys', () => {
+    const registry = withHarnesses({ 'my-agent': declaration });
+    expect(registry.getHarnessDeclaration('nope')).toBeUndefined();
+    expect(registry.getHarnessDeclaration('toString')).toBeUndefined();
+    expect(registry.isAgenticHarnessId('nope')).toBe(false);
+  });
+
+  it('tolerates a config with harnesses undefined', () => {
+    const registry = new ModelRegistry(config);
+    expect(registry.getHarnessDeclaration('my-agent')).toBeUndefined();
+    expect(registry.isAgenticHarnessId('my-agent')).toBe(false);
+  });
+
+  it('keeps built-in agentic semantics', () => {
+    const registry = new ModelRegistry(config);
+    expect(registry.isAgenticHarnessId('claude-cli')).toBe(true);
+    expect(registry.isAgenticHarnessId('ollama-http')).toBe(false);
+  });
+});
+
 describe('ModelRegistry', () => {
   it('excludes experimental models by default, even when listed first', () => {
     const registry = new ModelRegistry(config);

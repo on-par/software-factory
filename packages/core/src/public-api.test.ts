@@ -526,6 +526,8 @@ const INTERNAL_API_KEYS = [
   'classifyFailure',
   'ClaudeCliHarness',
   'CodexCliHarness',
+  'buildHarnessCommand',
+  'CommandHarness',
   'isAgenticHarness',
   'isRetryableFailure',
   'NON_RETRYABLE_FAILURE_REASONS',
