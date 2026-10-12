@@ -5,6 +5,7 @@ import {
   type ClaudeAuthProbeResult,
   claudeKeychainCheck,
   type DoctorEnvProbes,
+  declaredHarnessChecks,
   doctorFailed,
   eventLogCheck,
   formatContainerReconcileReport,
@@ -791,5 +792,44 @@ describe('formatMicroVmReconcileReport', () => {
     expect(formatMicroVmReconcileReport(rows)).toBe(
       'reconcile: failed to remove sbx VM factory-abc123 — sbx rm --force factory-abc123 failed: not found',
     );
+  });
+});
+
+describe('declaredHarnessChecks', () => {
+  it('reports a passing probe as an ok check', () => {
+    const [check] = declaredHarnessChecks([
+      { harness: 'my-agent', probe: 'my-agent --version', status: 'available', detail: '' },
+    ]);
+    expect(check).toEqual({ name: 'harness my-agent', ok: true, detail: 'available (probe: my-agent --version)' });
+  });
+
+  it('reports a failing probe as a non-optional failed check with the failure and a fix', () => {
+    const checks = declaredHarnessChecks([
+      { harness: 'my-agent', probe: 'my-agent --version', status: 'unavailable', detail: 'exit 127: not found' },
+    ]);
+    expect(checks[0]).toMatchObject({
+      name: 'harness my-agent',
+      ok: false,
+      detail: 'unavailable — probe `my-agent --version` failed: exit 127: not found',
+    });
+    expect(checks[0].optional).toBeUndefined();
+    expect(checks[0].fix).toContain('probe');
+    expect(doctorFailed(checks)).toBe(true);
+  });
+
+  it('reports a harness without a probe as an optional unverified check', () => {
+    const checks = declaredHarnessChecks([{ harness: 'my-agent', status: 'unverified', detail: '' }]);
+    expect(checks[0]).toMatchObject({
+      name: 'harness my-agent',
+      ok: false,
+      optional: true,
+      detail: 'unverified — no probe configured',
+    });
+    expect(checks[0].fix).toContain('probe');
+    expect(doctorFailed(checks)).toBe(false);
+  });
+
+  it('returns no checks for no declared harnesses', () => {
+    expect(declaredHarnessChecks([])).toEqual([]);
   });
 });

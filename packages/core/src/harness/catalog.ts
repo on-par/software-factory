@@ -60,8 +60,9 @@ const CATALOG_ENTRIES: HarnessCatalogEntry[] = [
     agentic: true,
     probe: { kind: 'ollama', okLabel: 'ollama native command agent' },
   },
-  // Generic adapter that user-declared `harnesses:` ids dispatch to. Doctor
-  // probing of the declared command comes in a later slice; this probe is a placeholder.
+  // Generic adapter that user-declared `harnesses:` ids dispatch to. Declared ids are probed
+  // through their own `probe` by probeDeclaredHarnesses; this entry is used only when a model
+  // names `command` directly.
   {
     id: 'command',
     agentic: true,

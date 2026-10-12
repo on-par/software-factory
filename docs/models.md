@@ -86,6 +86,7 @@ Add a `harnesses` section to the models config to name your own agent CLI, then 
 - `errorPatterns` maps a failure reason (`rate_limit`, `usage_cap`, `timeout`, `error`, `empty_response`, `unavailable`, `local_auth`, `schema_invalid`, `apply_failed`, `verify_failed` or `unknown`) to a regular expression. Patterns are tested case-insensitively against stderr, then stdout, in declaration order, and only when the command exits non-zero; the first match selects the reason. A timeout always wins. A plain list of regular expressions is also accepted: a match is classified by the built-in rules (an unrecognised match becomes `error`).
 - `errorPatterns` and `probe` (a command; exit 0 means reachable) are optional.
 - Ids of built-in harnesses cannot be redeclared.
+- `factory doctor` and `factory models --doctor` run `probe` and report the harness as available (exit 0) or unavailable (with the failure). With no `probe`, the harness is reported as unverified, which is a warning and not a failure.
 
 The factory runs the declared command through the built-in `command` harness, in the lane worktree:
 

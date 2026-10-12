@@ -169,6 +169,8 @@ const PUBLIC_API_KEYS = [
   'lifecycleBus',
   // Models
   'diagnoseModels',
+  'probeDeclaredHarnesses',
+  'runHarnessProbe',
   'isCommandAvailable',
   'ModelRegistry',
   'resolveModelOverrides',

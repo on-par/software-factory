@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { HarnessDeclaration } from '../config/index.js';
+import { wrapCommandInSandbox } from '../sandbox/index.js';
 import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { shellEscape } from '../utils/index.js';
@@ -142,9 +143,8 @@ export class CommandHarness implements CodingHarness {
     this.agentic = declaration.agentic;
   }
 
-  // request.sandbox is ignored: sandbox wrapping of declared commands is a later slice.
   async run(request: HarnessRequest): Promise<HarnessResult> {
-    const { model, prompt, worktree, timeoutSeconds, registry, env, onPgid } = request;
+    const { model, prompt, worktree, timeoutSeconds, registry, sandbox, env, onPgid } = request;
     const dir = await mkdtemp(join(tmpdir(), 'factory-command-'));
     try {
       const promptPath = join(dir, 'prompt.txt');
@@ -162,10 +162,11 @@ export class CommandHarness implements CodingHarness {
           : this.declaration.prompt === 'file'
             ? `${base} ${shellEscape(promptPath)} < /dev/null`
             : `${base} < ${shellEscape(promptPath)}`;
+      const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
 
       let stdout: string;
       try {
-        ({ stdout } = await this.execFn(cmd, {
+        ({ stdout } = await this.execFn(finalCmd, {
           cwd: worktree,
           timeoutMs: timeoutSeconds * 1000,
           maxBuffer: 10 * 1024 * 1024,
