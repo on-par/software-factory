@@ -56,7 +56,7 @@ function codexOnlyModels(): ModelsConfig {
       escalateAfterTierExhausted: true,
     },
     routingRules: {},
-  } as unknown as ModelsConfig;
+  };
 }
 
 // Fake codex: answers PLAN with a spec that asks for the claude route, makes the first BUILD
