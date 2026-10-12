@@ -19,6 +19,7 @@ import {
   fileExists,
   linksChecker,
   renderCheckerFindings,
+  requireRunnableChecker,
   resolveTestsCommand,
   lintChecker,
   listBuiltInCheckers,
@@ -1552,5 +1553,45 @@ describe('regression_hunt output (#1839)', () => {
     expect(line).toContain('reproduced');
     expect(line).toContain(`${'e'.repeat(300)}…`);
     expect(line).not.toContain('\n');
+  });
+});
+
+describe('requireRunnableChecker (#2493)', () => {
+  const constitution = (optional: string[] = []) => ({
+    product: 'default-code',
+    version: 1,
+    checkers: ['design_smells'],
+    optionalCheckers: optional,
+    body: '',
+    path: '/c.md',
+    source: 'bundled' as const,
+  });
+  const unavailable = {
+    checker: 'design_smells',
+    result: 'SKIP' as const,
+    unavailable: true,
+    details: "design critic unavailable: All models failed for task 'check_design'",
+  };
+
+  it('fails a required check that no model could run and warns about the environment', () => {
+    const logs: Array<[string, string]> = [];
+    const out = requireRunnableChecker(unavailable, constitution(), (type, msg) => logs.push([type, msg]));
+    expect(out.result).toBe('FAIL');
+    expect(out.details).toContain('required check could not run');
+    expect(logs).toEqual([
+      ['environment_warning', expect.stringContaining('required check design_smells could not run')],
+    ]);
+  });
+
+  it('lets an optional check skip', () => {
+    expect(requireRunnableChecker(unavailable, constitution(['design_smells'])).result).toBe('SKIP');
+  });
+
+  it('leaves checks outside the constitution, ordinary skips and passes alone', () => {
+    expect(requireRunnableChecker(unavailable, null).result).toBe('SKIP');
+    expect(requireRunnableChecker({ ...unavailable, unavailable: undefined }, constitution()).result).toBe('SKIP');
+    expect(
+      requireRunnableChecker({ checker: 'design_smells', result: 'PASS', details: '' }, constitution()).result,
+    ).toBe('PASS');
   });
 });

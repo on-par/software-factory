@@ -226,7 +226,8 @@ async function buildPhaseImpl(opts: {
       reason === 'rate_limit' ||
       reason === 'timeout' ||
       reason === 'unavailable' ||
-      reason === 'local_auth';
+      reason === 'local_auth' ||
+      reason === 'cli_missing';
     // Only swap when we actually ran the codex route and it was exhausted on a
     // quota reason. The router only throws after trying every eligible codex
     // worker, so reaching here already means "no Codex-harness worker remains".

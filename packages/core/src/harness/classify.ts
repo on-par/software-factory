@@ -6,6 +6,7 @@ import type { HarnessFailureReason } from './index.js';
 export function classifyFailure(stderr: string, exitCode: number): HarnessFailureReason {
   if (exitCode === 124) return 'timeout';
   const text = stderr.toLowerCase();
+  if (exitCode === 127 || /\benoent\b|command not found|: not found\b/.test(text)) return 'cli_missing';
   if (/failed to authenticate|oauth session expired|could not be refreshed|please (run )?\/?login/.test(text))
     return 'local_auth';
   // Codex/ChatGPT limit patterns below target Codex CLI (ChatGPT plan/usage-cap) output.

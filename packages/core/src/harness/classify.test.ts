@@ -54,3 +54,15 @@ describe('classifyFailure', () => {
     expect(result).not.toBe('rate_limit');
   });
 });
+
+describe('classifyFailure cli_missing (#2493)', () => {
+  it('classifies exit 127 and command-not-found output as cli_missing', () => {
+    expect(classifyFailure('', 127)).toBe('cli_missing');
+    expect(classifyFailure('/bin/sh: 1: codex: not found', 1)).toBe('cli_missing');
+    expect(classifyFailure('bash: codex: command not found', 1)).toBe('cli_missing');
+    expect(classifyFailure('spawn codex ENOENT', 1)).toBe('cli_missing');
+  });
+  it('keeps unrelated failures as before', () => {
+    expect(classifyFailure('file not found in diff', 1)).not.toBe('cli_missing');
+  });
+});

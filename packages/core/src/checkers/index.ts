@@ -646,6 +646,24 @@ async function touchActivity(ctx: CheckerContext): Promise<void> {
   }
 }
 
+/** A constitution checker that no model could run fails the phase instead of skipping, so a PR is
+ *  never marked ready without its required checks (#2493). `optionalCheckers` opts a checker out. */
+export function requireRunnableChecker(
+  output: CheckerOutput,
+  constitution: Constitution | null,
+  log?: CheckerContext['log'],
+): CheckerOutput {
+  if (output.result !== 'SKIP' || output.unavailable !== true) return output;
+  const name = output.checker;
+  if (!constitution?.checkers.includes(name) || constitution.optionalCheckers?.includes(name)) return output;
+  log?.('environment_warning', `required check ${name} could not run: ${output.details}`);
+  return {
+    ...output,
+    result: 'FAIL',
+    details: `required check could not run (no model available; add it to optionalCheckers to allow skipping): ${output.details}`,
+  };
+}
+
 /** `only` restricts the run to these checker names (the baseline re-run, #1925). Undefined runs every checker. */
 export async function runAllCheckers(
   ctx: CheckerContext,
@@ -684,6 +702,7 @@ export async function runAllCheckers(
         details: `checker crashed: ${(e?.message ?? String(e)).slice(0, 500)}`,
       };
     }
+    output = requireRunnableChecker(output, constitution, ctx.log);
     ctx.log?.('checker_completed', `checker ${checker.name} completed (${output.result})`, {
       durationMs: Date.now() - startedAt,
     });

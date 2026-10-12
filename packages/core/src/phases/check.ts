@@ -78,7 +78,14 @@ export const LENS_REVIEW_CHECKER = 'lens_review';
 const STUCK_THRESHOLD = 2;
 
 /** Provider/CI-level reasons that point away from a factory fault. */
-const EXTERNAL_REASONS = new Set<FailoverReason>(['rate_limit', 'usage_cap', 'timeout', 'unavailable', 'local_auth']);
+const EXTERNAL_REASONS = new Set<FailoverReason>([
+  'rate_limit',
+  'usage_cap',
+  'timeout',
+  'unavailable',
+  'local_auth',
+  'cli_missing',
+]);
 
 /** Deterministic signature of the failing checks: name + volatility-stripped detail. */
 function failureSignature(summary: CheckSummary): string {

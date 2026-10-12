@@ -14,6 +14,7 @@ const HARNESS_FAILURE_REASONS: HarnessFailureReason[] = [
   'empty_response',
   'unavailable',
   'local_auth',
+  'cli_missing',
   'schema_invalid',
   'apply_failed',
   'verify_failed',

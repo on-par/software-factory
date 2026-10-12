@@ -431,6 +431,7 @@ export async function designSmellsChecker(
     return {
       checker: DESIGN_SMELLS_CHECKER,
       result: 'SKIP',
+      unavailable: true,
       details: `design critic unavailable: ${(e?.stderr || e?.message || String(e)).slice(0, 300)}`,
     };
   }

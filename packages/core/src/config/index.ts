@@ -59,6 +59,7 @@ export const HARNESS_ERROR_PATTERN_REASONS = [
   'empty_response',
   'unavailable',
   'local_auth',
+  'cli_missing',
   'schema_invalid',
   'apply_failed',
   'verify_failed',
