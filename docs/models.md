@@ -84,6 +84,7 @@ Add a `harnesses` section to the models config to name your own agent CLI, then 
 - `usage`: `none` or `jsonl`.
 - `errorPatterns` (regular expressions) and `probe` (a command; exit 0 means reachable) are optional.
 - Ids of built-in harnesses cannot be redeclared.
+- `factory doctor` and `factory models --doctor` run `probe` and report the harness as available (exit 0) or unavailable (with the failure). With no `probe`, the harness is reported as unverified, which is a warning and not a failure.
 
 The factory runs the declared command through the built-in `command` harness, in the lane worktree:
 

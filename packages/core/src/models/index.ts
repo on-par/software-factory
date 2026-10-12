@@ -67,6 +67,11 @@ export class ModelRegistry {
       : undefined;
   }
 
+  /** Ids declared under the config's `harnesses`. */
+  listDeclaredHarnesses(): string[] {
+    return Object.keys(this.config.harnesses ?? {});
+  }
+
   /** True for agentic built-in harness ids and for declared ids whose declaration says `agentic`. */
   isAgenticHarnessId(harnessId: string): boolean {
     return isAgenticHarness(harnessId) || this.getHarnessDeclaration(harnessId)?.agentic === true;
@@ -189,6 +194,56 @@ export function isCommandAvailable(cmd: string): boolean {
   }
 }
 
+const HARNESS_PROBE_TIMEOUT_MS = 10_000;
+
+/** Run a declared harness probe command. Returns null on exit 0, else a one-line failure detail. */
+export function runHarnessProbe(cmd: string): string | null {
+  try {
+    execSync(cmd, { stdio: 'pipe', shell: '/bin/bash', timeout: HARNESS_PROBE_TIMEOUT_MS });
+    return null;
+  } catch (e) {
+    const err = e as { status?: number | null; signal?: string | null; code?: string; stderr?: Buffer | string };
+    if (err.signal === 'SIGTERM' || err.code === 'ETIMEDOUT')
+      return `timed out after ${HARNESS_PROBE_TIMEOUT_MS / 1000}s`;
+    const firstLine = (err.stderr?.toString() ?? '')
+      .split('\n')
+      .map((l) => l.trim())
+      .find((l) => l !== '');
+    return `exit ${err.status ?? '?'}${firstLine ? `: ${firstLine}` : ''}`;
+  }
+}
+
+export type HarnessProbeStatus = 'available' | 'unavailable' | 'unverified';
+
+export interface DeclaredHarnessProbe {
+  harness: string;
+  /** The declared probe command; undefined when none is configured. */
+  probe?: string;
+  status: HarnessProbeStatus;
+  /** Failure detail for 'unavailable'; empty otherwise. */
+  detail: string;
+}
+
+/** Probe every harness declared under the config's `harnesses`, each at most once. */
+export function probeDeclaredHarnesses(
+  registry: ModelRegistry,
+  runProbe: (cmd: string) => string | null = runHarnessProbe,
+): DeclaredHarnessProbe[] {
+  return registry.listDeclaredHarnesses().map((harness) => {
+    const probe = registry.getHarnessDeclaration(harness)?.probe;
+    if (!probe) return { harness, status: 'unverified', detail: '' };
+    let failure: string | null;
+    try {
+      failure = runProbe(probe);
+    } catch (e) {
+      failure = e instanceof Error ? e.message : String(e);
+    }
+    return failure === null
+      ? { harness, probe, status: 'available', detail: '' }
+      : { harness, probe, status: 'unavailable', detail: failure };
+  });
+}
+
 export interface DoctorProbes {
   commandAvailable?: (cmd: string) => boolean;
   envPresent?: (key: string) => boolean;
@@ -201,6 +256,9 @@ export interface DoctorProbes {
   /** Non-inference evidence that the codex CLI is logged in (`codex login status` exit 0 /
    *  CODEX_API_KEY). Default: hasCodexLoginEvidence(). Never runs `codex exec`. */
   codexLoggedIn?: () => boolean;
+  /** Runs a declared harness `probe` command; returns null on exit 0, else a failure detail.
+   *  Default: runHarnessProbe. */
+  harnessProbe?: (cmd: string) => string | null;
 }
 
 export interface ModelDiagnosis {
@@ -267,6 +325,14 @@ export function diagnoseModels(
     return codexLoggedInCache;
   };
 
+  let declaredProbes: Map<string, DeclaredHarnessProbe> | undefined;
+  const declaredProbe = (id: string): DeclaredHarnessProbe | undefined => {
+    declaredProbes ??= new Map(
+      probeDeclaredHarnesses(registry, probes.harnessProbe ?? runHarnessProbe).map((p) => [p.harness, p]),
+    );
+    return declaredProbes.get(id);
+  };
+
   return registry.list().map((m) => {
     const def = registry.get(m)!;
     const experimental = registry.isExperimental(m);
@@ -284,7 +350,19 @@ export function diagnoseModels(
     } else {
       const harnessId = registry.getHarnessId(m);
       const entry = harnessId ? HARNESS_CATALOG[harnessId] : undefined;
-      if (!entry) {
+      const declared =
+        !entry && harnessId && registry.getHarnessDeclaration(harnessId) ? declaredProbe(harnessId) : undefined;
+      if (declared) {
+        if (declared.status === 'available') {
+          reachable = true;
+          reason = `ok (harness '${declared.harness}' probe passed)`;
+        } else if (declared.status === 'unavailable') {
+          reason = `harness '${declared.harness}' probe failed — ${declared.detail}`;
+        } else {
+          unverified = true;
+          reason = `unverified — harness '${declared.harness}' has no probe configured`;
+        }
+      } else if (!entry) {
         reason = `unknown harness '${harnessId ?? 'none'}' — declare a 'harness' from: ${KNOWN_HARNESS_IDS.join(', ')}`;
       } else if (entry.probe.kind === 'command') {
         const probe = entry.probe;

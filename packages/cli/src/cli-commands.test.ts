@@ -63,6 +63,7 @@ const h = vi.hoisted(() => {
     portListeners: [] as any[],
     shipResult: { ok: true, prNumber: 99 } as any,
     diagnoses: [] as any[],
+    harnessProbes: [] as any[],
     costs: [] as any[],
     costSinkCallback: undefined as ((entry: any) => void) | undefined,
     trailingSpend: 10,
@@ -336,6 +337,7 @@ function makeCoreFakes() {
     watchUsage: vi.fn(async () => {}) as any,
     fetchSubscriptionUsage: vi.fn(async () => h.subscriptionUsage) as any,
     diagnoseModels: vi.fn(() => h.diagnoses) as any,
+    probeDeclaredHarnesses: vi.fn(() => h.harnessProbes) as any,
     writeLocalRunReport: vi.fn(async () => ({ path: '/tmp/report.md' })) as any,
   } satisfies Pick<
     CliDeps,
@@ -350,6 +352,7 @@ function makeCoreFakes() {
     | 'watchUsage'
     | 'fetchSubscriptionUsage'
     | 'diagnoseModels'
+    | 'probeDeclaredHarnesses'
     | 'writeLocalRunReport'
   >;
 }
@@ -487,6 +490,7 @@ beforeEach(() => {
   h.checkResult = { passed: true, summary: { results: [], failures: 0 }, reworkRounds: 0 };
   h.shipResult = { ok: true, prNumber: 99 };
   h.diagnoses = [];
+  h.harnessProbes = [];
   h.costs = [];
   h.trailingSpend = 10;
   h.subscriptionUsage = null;
@@ -6083,6 +6087,22 @@ Please add a widget that does the thing.
       const res = await runMain('doctor');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('== factory doctor ==');
+    });
+
+    it('reports a declared harness whose probe passes as available', async () => {
+      h.claudeAvailable = true;
+      h.harnessProbes = [{ harness: 'my-agent', probe: 'my-agent --version', status: 'available', detail: '' }];
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('harness my-agent — available (probe: my-agent --version)');
+    });
+
+    it('reports a declared harness without a probe as unverified without failing doctor', async () => {
+      h.claudeAvailable = true;
+      h.harnessProbes = [{ harness: 'my-agent', status: 'unverified', detail: '' }];
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('unverified — no probe configured');
     });
 
     it('probes the sandbox runtime through the injected execSync seam, not node:child_process (#2014)', async () => {

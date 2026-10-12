@@ -326,8 +326,21 @@ export type {
 export { createLifecycleBus, lifecycleBus } from './bus/index.js';
 
 // Models
-export type { DoctorProbes, ModelDiagnosis, ModelOverrides } from './models/index.js';
-export { diagnoseModels, isCommandAvailable, ModelRegistry, resolveModelOverrides } from './models/index.js';
+export type {
+  DeclaredHarnessProbe,
+  DoctorProbes,
+  HarnessProbeStatus,
+  ModelDiagnosis,
+  ModelOverrides,
+} from './models/index.js';
+export {
+  diagnoseModels,
+  isCommandAvailable,
+  ModelRegistry,
+  probeDeclaredHarnesses,
+  resolveModelOverrides,
+  runHarnessProbe,
+} from './models/index.js';
 
 // Router
 export type {
