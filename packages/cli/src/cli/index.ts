@@ -694,10 +694,12 @@ async function getRepoRoot(shell: ShellOps = shellOps): Promise<string> {
 
 const GH_UNAUTHENTICATED = /gh auth login|not logged in/i;
 const GH_TOKEN_REJECTED = /bad credentials|HTTP 401|401 Unauthorized/i;
+const GH_NO_GITHUB_REMOTE = /no git remotes found|point to a known GitHub host/i;
 
 /**
  * CliExitError message for a failed `gh repo view`; names a rejected token and its `repo` scope when gh reports a 401 (#2593),
  * and gh auth when gh's stderr says it is logged out (#2592). The 401 check runs first because gh's 401 output also says "gh auth login".
+ * gh's known-host remote error is checked before the auth pattern because it also names `gh auth login` (#2594).
  */
 export function ghRepoViewFailureMessage(stderr: string | undefined): string {
   const detail = stderr
@@ -707,6 +709,9 @@ export function ghRepoViewFailureMessage(stderr: string | undefined): string {
     ?.trim();
   if (stderr && GH_TOKEN_REJECTED.test(stderr)) {
     return `factory: GitHub rejected the token (GH_TOKEN/GITHUB_TOKEN); use a token with the \`repo\` scope${detail ? ` (gh repo view failed: ${detail})` : ''}`;
+  }
+  if (stderr && GH_NO_GITHUB_REMOTE.test(stderr)) {
+    return 'factory: no GitHub remote detected (gh repo view failed)';
   }
   if (stderr && GH_UNAUTHENTICATED.test(stderr)) {
     return `factory: gh is not authenticated, run \`gh auth login\`${detail ? ` (gh repo view failed: ${detail})` : ''}`;

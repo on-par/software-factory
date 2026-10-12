@@ -1683,6 +1683,24 @@ bash scripts/verify.sh
       expect(errored()).not.toContain('gh is not authenticated');
     });
 
+    it('status exits 2 with the no GitHub remote wording when no remote points to github.com (#2594)', async () => {
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) {
+          throw Object.assign(new Error('Command failed: gh repo view'), {
+            stderr:
+              'none of the git remotes configured for this repository point to a known GitHub host. To tell gh about a new GitHub host, please use `gh auth login`\n',
+          });
+        }
+        return '';
+      };
+      const res = await runMain('status');
+      expect(res).toMatchObject({ exited: true, code: 2 });
+      expect(errored()).toContain('no GitHub remote detected');
+      expect(errored()).not.toContain('gh is not authenticated');
+      expect(errored()).not.toContain('rejected the token');
+    });
+
     describe('base hold (#2351)', () => {
       const writeHold = (repo: string): void => {
         mkdirSync(dirname(paths().baseHold), { recursive: true });
@@ -8169,6 +8187,14 @@ describe('factory --help layout', () => {
 describe('ghRepoViewFailureMessage (#2592)', () => {
   it.each([undefined, '', 'no git remotes found'])('keeps the no-remote message for %j', (stderr) => {
     expect(ghRepoViewFailureMessage(stderr)).toBe('factory: no GitHub remote detected (gh repo view failed)');
+  });
+
+  it('keeps the no-remote message when no remote points to a known GitHub host (#2594)', () => {
+    const msg = ghRepoViewFailureMessage(
+      'none of the git remotes configured for this repository point to a known GitHub host. To tell gh about a new GitHub host, please use `gh auth login`\n',
+    );
+    expect(msg).toBe('factory: no GitHub remote detected (gh repo view failed)');
+    expect(msg).not.toContain('gh is not authenticated');
   });
 
   it('names gh authentication when gh says it is logged out', () => {
