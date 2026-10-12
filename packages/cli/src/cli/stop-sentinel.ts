@@ -5,6 +5,8 @@
 import { existsSync, statSync } from 'node:fs';
 import type { DoctorCheck } from './doctor.js';
 
+const STOP_FILE_LABEL = '.factory/state/STOP';
+
 export interface StopFileDeps {
   pathExists: (p: string) => boolean;
   statMtimeMs: (p: string) => number;
@@ -58,14 +60,14 @@ export function stopSentinelCheck(status: StopSentinelStatus): DoctorCheck {
     return {
       name: 'STOP sentinel',
       ok: true,
-      detail: '.factory/STOP not present — factory run will claim work normally',
+      detail: `${STOP_FILE_LABEL} not present — factory run will claim work normally`,
     };
   }
   return {
     name: 'STOP sentinel',
     ok: false,
     optional: true,
-    detail: `.factory/STOP present (age ${formatStopFileAge(status.ageMs)}, written ${status.writtenAt}) — repo is intentionally paused`,
-    fix: 'rm .factory/STOP, or run `factory resume`, to let factory run claim work again',
+    detail: `${STOP_FILE_LABEL} present (age ${formatStopFileAge(status.ageMs)}, written ${status.writtenAt}) — repo is intentionally paused`,
+    fix: `rm ${STOP_FILE_LABEL}, or run \`factory resume\`, to let factory run claim work again`,
   };
 }
