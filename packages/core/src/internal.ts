@@ -715,3 +715,6 @@ export type { PlanReuseRecord, PlanReuseStore } from './run/resume-context.js';
 // Pre-PLAN base health (#2339)
 export { BASE_HEALTH_CHECKERS, checkBaseHealth } from './checkers/base-health.js';
 export type { BaseHealthOptions, BaseHealthResult } from './checkers/base-health.js';
+
+// Codex ChatGPT session freshness for doctor (#2509)
+export { codexChatgptSessionExpired } from './utils/codex-config.js';
