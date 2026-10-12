@@ -336,7 +336,7 @@ const INTERNAL_API_KEYS = [
   // Pre-PLAN base health (#2339)
   'BASE_HEALTH_CHECKERS',
   'checkBaseHealth',
-  'codexChatgptSessionExpired',
+  'codexChatgptSessionState',
   // Persisted per-issue run state (#2271)
   'readIssueRunState',
   'createPlanReuseStore',

@@ -221,20 +221,35 @@ describe('runDoctorChecks', () => {
     expect(doctorFailed(checks)).toBe(true);
   });
 
-  it('a ChatGPT login with an expired session token is not passing and names codex login (#2509)', () => {
+  it('an expired access token with a refresh token passes codex auth on a codex-only machine (#2509)', () => {
     const checks = runDoctorChecks(
-      probes({ commandAvailable: (cmd) => cmd !== 'claude' && cmd !== 'opencode', codexSessionExpired: () => true }),
+      probes({
+        commandAvailable: (cmd) => cmd !== 'claude' && cmd !== 'opencode',
+        codexSessionState: () => 'refresh-pending',
+      }),
+    );
+    const auth = checks.find((c) => c.name === 'codex auth')!;
+    expect(auth.ok).toBe(true);
+    expect(auth.detail).toContain('refreshes it on the next run');
+    expect(doctorFailed(checks)).toBe(false);
+  });
+
+  it('an unusable ChatGPT session is not passing and names codex login (#2509)', () => {
+    const checks = runDoctorChecks(
+      probes({
+        commandAvailable: (cmd) => cmd !== 'claude' && cmd !== 'opencode',
+        codexSessionState: () => 'unusable',
+      }),
     );
     const auth = checks.find((c) => c.name === 'codex auth')!;
     expect(auth.ok).toBe(false);
-    expect(auth.detail).toContain('expired');
     expect(auth.fix).toContain('codex login');
     expect(doctorFailed(checks)).toBe(true);
   });
 
-  it('a revoked codex session plus a logged-out claude fails doctor (#2509)', () => {
+  it('an unusable codex session plus a logged-out claude fails doctor (#2509)', () => {
     const checks = reconcileAgentAuthChecks([
-      ...runDoctorChecks(probes({ codexSessionExpired: () => true })),
+      ...runDoctorChecks(probes({ codexSessionState: () => 'unusable' })),
       { name: 'claude auth (host)', ok: false, detail: 'claude -p failed on the host' },
     ]);
     expect(checks.find((c) => c.name === 'codex auth')).toMatchObject({ ok: false, optional: false });

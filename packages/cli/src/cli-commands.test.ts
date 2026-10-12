@@ -6255,18 +6255,31 @@ Please add a widget that does the thing.
         expect(logged()).toContain('another agent is signed in');
       });
 
-      it('fails when codex holds an expired ChatGPT session and claude is logged out (#2509)', async () => {
+      const writeCodexHome = (name: string, tokens: Record<string, string>) => {
+        const codexHome = join(h.repoRoot, name);
+        mkdirSync(codexHome, { recursive: true });
+        writeFileSync(join(codexHome, 'auth.json'), JSON.stringify({ OPENAI_API_KEY: null, tokens }));
+        vi.stubEnv('CODEX_HOME', codexHome);
+      };
+      const expiredJwt = () =>
+        `h.${Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) - 3600 })).toString('base64url')}.s`;
+
+      it('passes codex auth for an expired access token with a refresh token (#2509)', async () => {
         h.claudeAvailable = true;
         withAuth(false, true);
-        const codexHome = join(h.repoRoot, 'expired-codex-home');
-        mkdirSync(codexHome, { recursive: true });
-        const exp = Math.floor(Date.now() / 1000) - 3600;
-        const token = `h.${Buffer.from(JSON.stringify({ exp })).toString('base64url')}.s`;
-        writeFileSync(join(codexHome, 'auth.json'), JSON.stringify({ tokens: { access_token: token } }));
-        vi.stubEnv('CODEX_HOME', codexHome);
+        writeCodexHome('refreshable-codex-home', { access_token: expiredJwt(), refresh_token: 'dummy' });
+        const res = await runMain('doctor');
+        expect(res.exited).toBe(false);
+        expect(logged()).toContain('codex refreshes it on the next run');
+      });
+
+      it('fails when codex holds an unusable ChatGPT session and claude is logged out (#2509)', async () => {
+        h.claudeAvailable = true;
+        withAuth(false, true);
+        writeCodexHome('unusable-codex-home', { access_token: expiredJwt() });
         const res = await runMain('doctor');
         expect(res.exited).toBeTruthy();
-        expect(logged()).toContain('ChatGPT session token has expired');
+        expect(logged()).toContain('ChatGPT session in auth.json is unusable');
       });
 
       it('fails when every installed agent is logged out', async () => {
