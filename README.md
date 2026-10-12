@@ -46,8 +46,7 @@ Private workspaces (server, dashboard, product, scbench-adapter) also live here 
 
 - Node.js ≥ 24 (the `engines.node` field in `packages/cli/package.json`)
 - `git`
-- At least one coding agent CLI on your PATH and signed in: Claude Code (`claude`) or the OpenAI Codex CLI (`codex`). Either one alone runs the whole loop (triage, PLAN, BUILD, CHECK and SHIP). With both installed, the factory can use either for any phase (see [Use Codex](#use-codex)).
-- Provider setup for Claude Code, Codex and OpenCode: see [docs/agents.md](docs/agents.md).
+- One supported coding agent CLI (see [docs/agents.md](docs/agents.md)), on your PATH and signed in. Any one of them runs the whole loop (triage, PLAN, BUILD, CHECK and SHIP).
 - The GitHub CLI `gh`, signed in with `gh auth login`. The factory uses `gh repo view` to detect your repo.
 - A GitHub token. The factory reads `GITHUB_TOKEN`, then `GH_TOKEN`, and falls back to `gh auth token` when neither is set, so `gh auth login` is usually enough.
 - Optional: `ollama` for experimental local models. When Ollama is not running, the factory skips local models and says so once in the log.
@@ -90,7 +89,7 @@ factory --version
 factory doctor
 ```
 
-Older Node versions are refused with a clear message. `factory doctor` checks git, your git identity (`user.name` and `user.email`, which commits need), `claude`, `gh` auth, the GitHub token, npm and the sandbox, and prints a fix for anything missing. It works from any directory, including outside a repo. To run from a clone instead, see [CONTRIBUTING.md](CONTRIBUTING.md).
+Older Node versions are refused with a clear message. `factory doctor` checks git, your git identity (`user.name` and `user.email`, which commits need), your coding agent CLI, `gh` auth, the GitHub token, npm and the sandbox, and prints a fix for anything missing. It works from any directory, including outside a repo. To run from a clone instead, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 **Step 2: Point it at your repo**
 
@@ -162,7 +161,7 @@ factory stop|resume --json         One JSON object: action, repo, stopFlag {befo
 
 # Setup
 factory init                        Set up .factory/ in this repo and check model reachability
-factory doctor                      Check your environment (git, claude, gh auth, GitHub token, npm, sandbox)
+factory doctor                      Check your environment (git, coding agent CLI, gh auth, GitHub token, npm, sandbox)
 factory constitution --product <p>  Seed .factory/constitution.md from a bundled example constitution
 factory constitution --checkers     List every built-in checker
 factory models [--doctor]           List models with tiers, cost, and availability; --doctor probes provider CLIs

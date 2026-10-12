@@ -21,4 +21,4 @@ What works today and what is experimental.
 | Constitutions + checker rework loop                   | ✅ Working      | Up to 3 rework rounds with dispute resolution                                                                                                                                   |
 | Server (`packages/server`)                            | ✅ Working      | Loopback `GET /events` relays the lane lifecycle bus as SSE, `Last-Event-ID` resume via a bounded replay ring — no auth, no control endpoints yet                               |
 
-See the [README](../README.md) for Quick Start.
+See the [README](../README.md) for Quick Start, and [agents.md](agents.md) for the supported coding agent CLIs.

@@ -2,6 +2,8 @@
 
 Run `factory models` to list models with tiers, cost and availability, and `factory models --doctor` to probe provider CLIs.
 
+Which coding agent CLIs the factory supports, and how to install and sign in to each, is in [agents.md](agents.md).
+
 Each task type maps to a tier, and each tier is a hand-ordered priority list in `defaults.ts` — free local models first, then cloud models ranked by capability. The router takes the first available model in the list; when a model hits a usage limit, rate limit, or error, it automatically fails over to the next one. (`defaults.ts` is the source of truth; the snapshot below can drift.)
 
 | Tier    | Priority order (experimental models excluded)                                                                                              | Cloud cost $/M output | Use                     |

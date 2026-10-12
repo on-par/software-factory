@@ -16,9 +16,7 @@ factory --version
 factory doctor
 ```
 
-Also requires `git`, a signed-in coding agent CLI (Claude Code `claude` or the Codex CLI `codex`; either one is enough), and the GitHub CLI signed in with `gh auth login`. The factory reads `GITHUB_TOKEN`, then `GH_TOKEN`, and falls back to `gh auth token`. `factory doctor` checks all of this and prints a fix for anything missing. It also checks your git identity and the sandbox runtime, and it runs outside a repo.
-
-Provider setup for Claude Code, Codex and OpenCode: see the [coding agent setup guide](https://github.com/on-par/software-factory/blob/main/docs/agents.md).
+Also requires `git`, one supported coding agent CLI (see [docs/agents.md](https://github.com/on-par/software-factory/blob/main/docs/agents.md)), signed in, and the GitHub CLI signed in with `gh auth login`. The factory reads `GITHUB_TOKEN`, then `GH_TOKEN`, and falls back to `gh auth token`. `factory doctor` checks all of this and prints a fix for anything missing. It also checks your git identity and the sandbox runtime, and it runs outside a repo.
 
 `factory init` creates a local-only `.factory/` (git-excluded) with a `default-code` constitution. See the main README quick start.
 
