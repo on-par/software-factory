@@ -8,6 +8,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { connect } from 'node:net';
@@ -6228,6 +6229,8 @@ Please add a widget that does the thing.
       for (const key of ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'CODEX_API_KEY', 'OPENCODE_API_KEY']) {
         vi.stubEnv(key, '');
       }
+      // Green doctor tests need at least one signed-in agent (#2556); agent sign-in cases override via withAuth.
+      writeFileSync(join(h.repoRoot, 'no-claude-config', '.credentials.json'), '{}');
       h.execSyncImpl = (cmd: string) => {
         if (cmd.includes('rev-parse')) return h.repoRoot;
         if (cmd.includes('status --porcelain')) return '';
@@ -6245,7 +6248,9 @@ Please add a widget that does the thing.
     describe('agent sign-in (#2496)', () => {
       const withAuth = (claudeOk: boolean, codexOk: boolean) => {
         // Claude sign-in comes from local evidence (#2556), never from `claude -p`.
-        if (claudeOk) writeFileSync(join(h.repoRoot, 'no-claude-config', '.credentials.json'), '{}');
+        const credPath = join(h.repoRoot, 'no-claude-config', '.credentials.json');
+        if (claudeOk) writeFileSync(credPath, '{}');
+        else if (existsSync(credPath)) unlinkSync(credPath);
         const base = h.execSyncImpl;
         h.execSyncImpl = (cmd: string) => {
           if (cmd.includes('find-generic-password')) {

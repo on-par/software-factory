@@ -1405,7 +1405,7 @@ describe('harness sign-in (#2556)', () => {
     const claude = checks.find((c) => c.name === 'claude signed in')!;
     const opencode = checks.find((c) => c.name === 'opencode signed in')!;
     expect(claude.detail).toMatch(/^unverified/);
-    expect(claude.fix).toMatch(/claude then \/login$/);
+    expect(claude.fix).toMatch(/claude \/login$/);
     expect(opencode.detail).toMatch(/^unverified/);
     expect(opencode.fix).toMatch(/opencode auth login$/);
   });
