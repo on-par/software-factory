@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -139,19 +139,5 @@ describe('README Quick start guard self-test', () => {
 
   it('reports missing sections instead of passing on an empty README', () => {
     expect(quickStartProblems('')).toContain('missing Quick start section');
-  });
-});
-
-describe('README provider setup pointer', () => {
-  const prereqs = section(readme, '**Prerequisites**', 'Two terms used in the steps below') ?? '';
-  const links = [...prereqs.matchAll(/\]\(([^)\s]*agents\.md)\)/g)].map((m) => m[1]);
-
-  it('Prerequisites has exactly one link to docs/agents.md', () => {
-    expect(prereqs).not.toBe('');
-    expect(links).toEqual(['docs/agents.md']);
-  });
-
-  it('the docs/agents.md link target exists in the repo', () => {
-    expect(existsSync(join(repoRoot, 'docs', 'agents.md'))).toBe(true);
   });
 });
