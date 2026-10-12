@@ -7,6 +7,7 @@ import {
   codexAuthMethod,
   type DoctorEnvProbes,
   declaredHarnessChecks,
+  doctorCheckIcon,
   doctorFailed,
   eventLogCheck,
   formatContainerReconcileReport,
@@ -487,12 +488,65 @@ describe('formatDoctorChecks', () => {
         ✅ git repository — /path/to/repo
         ❌ claude CLI — not found on PATH
              fix: install Claude Code first: https://docs.anthropic.com/en/docs/claude-code
-        ❌ codex sandbox — codex CLI not found — codex build routes unavailable
+        ⚠️ codex sandbox — codex CLI not found — codex build routes unavailable
              fix: install the codex CLI, or rely on claude routes
       1 passed, 1 failed, 1 warnings
 
       Model reachability: factory models --doctor"
     `);
+  });
+});
+
+describe('formatDoctorChecks icons', () => {
+  const count = (text: string, needle: string) => text.split(needle).length - 1;
+  const rows = [
+    { name: 'node', ok: true, detail: 'v22' },
+    { name: 'sandbox runtime', ok: false, optional: true, detail: 'not available' },
+    { name: 'codex sandbox', ok: false, optional: true, detail: 'codex CLI not found' },
+    {
+      name: 'git worktree clean',
+      ok: false,
+      optional: true,
+      detail: `skipped — not a git repository; ${NOT_IN_REPO_HINT}`,
+    },
+    {
+      name: '.factory initialized',
+      ok: false,
+      optional: true,
+      detail: `skipped — not a git repository; ${NOT_IN_REPO_HINT}`,
+    },
+  ];
+  const lineOf = (output: string, name: string) => output.split('\n').find((l) => l.includes(name)) ?? '';
+
+  it('renders warnings with ⚠️ and skips with ➖, and no ❌ when 0 failed', () => {
+    const output = formatDoctorChecks(rows);
+    expect(count(output, '❌')).toBe(0);
+    expect(count(output, '⚠️')).toBe(2);
+    expect(count(output, '➖')).toBe(2);
+    expect(output).toContain('0 failed, 4 warnings');
+    for (const name of ['sandbox runtime', 'codex sandbox']) expect(lineOf(output, name)).toContain(`⚠️ ${name}`);
+    for (const name of ['git worktree clean', '.factory initialized'])
+      expect(lineOf(output, name)).toContain(`➖ ${name}`);
+  });
+
+  it('renders ❌ exactly once with 1 failed row alongside warnings and skips', () => {
+    const output = formatDoctorChecks([...rows, { name: 'gh auth', ok: false, detail: 'not logged in' }]);
+    expect(count(output, '❌')).toBe(1);
+    expect(lineOf(output, '❌')).toContain('gh auth');
+    expect(output).toContain('1 failed');
+  });
+
+  it('classifies single rows with doctorCheckIcon', () => {
+    expect(doctorCheckIcon({ name: 'a', ok: true, detail: 'fine' })).toBe('✅');
+    expect(doctorCheckIcon({ name: 'a', ok: true, optional: true, detail: 'skipped — no origin remote' })).toBe('➖');
+    expect(doctorCheckIcon({ name: 'a', ok: false, detail: 'skipped — odd' })).toBe('❌');
+    expect(doctorCheckIcon({ name: 'a', ok: false, optional: true, detail: '' })).toBe('⚠️');
+  });
+
+  it('keeps the ❌ count equal to the summary failed count outside a repo', () => {
+    const output = formatDoctorChecks(runDoctorChecks(probes({ tryExec: () => null })));
+    const failed = Number(/(\d+) failed/.exec(output)![1]);
+    expect(count(output, '❌')).toBe(failed);
   });
 });
 
