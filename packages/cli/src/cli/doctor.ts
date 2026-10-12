@@ -18,11 +18,18 @@ export interface DoctorCheck {
   optional?: boolean;
 }
 
+export interface DoctorExecOptions {
+  /** Extra env vars merged over process.env for this command. */
+  env?: Record<string, string>;
+  /** Kill the command after this many ms; the probe then returns null. */
+  timeoutMs?: number;
+}
+
 export interface DoctorEnvProbes {
   commandAvailable: (cmd: string) => boolean;
   envPresent: (key: string) => boolean;
-  /** Run a command, return trimmed stdout, or null if it fails. */
-  tryExec: (cmd: string) => string | null;
+  /** Run a command, return trimmed stdout, or null if it fails. `opts` adds env vars and a timeout. */
+  tryExec: (cmd: string, opts?: DoctorExecOptions) => string | null;
   pathExists: (p: string) => boolean;
   /** Host platform; defaults to process.platform. */
   platform?: NodeJS.Platform;
@@ -65,9 +72,29 @@ const CODEX_LOGIN_FIX =
 
 const GIT_AUTH_CHECK = 'git auth';
 
-/** Applicability gate for the git-auth check (#2482): skipped, never failing, outside a git
- *  repository or without an origin remote. The authentication probe itself lands separately. */
-export function gitAuthCheck(repoRoot: string | null, tryExec: (cmd: string) => string | null): DoctorCheck {
+/** Non-interactive read-only probe of origin. `credential.interactive=never` turns off Git
+ *  Credential Manager UI and an empty `core.askPass` turns off configured askpass programs;
+ *  stored credentials from any helper still work. */
+export const GIT_AUTH_PROBE_CMD = 'git -c credential.interactive=never -c core.askPass= ls-remote --quiet origin HEAD';
+/** GIT_TERMINAL_PROMPT=0 makes git fail instead of asking on the terminal; empty GIT_ASKPASS
+ *  and SSH_ASKPASS turn off askpass programs and ssh's GUI askpass; GCM_INTERACTIVE=never
+ *  turns off Git Credential Manager prompts. */
+export const GIT_AUTH_PROBE_ENV: Readonly<Record<string, string>> = {
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_ASKPASS: '',
+  SSH_ASKPASS: '',
+  GCM_INTERACTIVE: 'never',
+};
+/** Bounds the probe, e.g. an ssh key passphrase prompt that waits on /dev/tty. */
+export const GIT_AUTH_PROBE_TIMEOUT_MS = 15_000;
+
+/** Git-auth check (#2482, #2483): skipped, never failing, outside a git repository or without
+ *  an origin remote. Otherwise runs a non-interactive `git ls-remote` against origin and fails
+ *  when it cannot authenticate. The detail never echoes the origin URL, which may hold a token. */
+export function gitAuthCheck(
+  repoRoot: string | null,
+  tryExec: (cmd: string, opts?: DoctorExecOptions) => string | null,
+): DoctorCheck {
   if (repoRoot === null) {
     return {
       name: GIT_AUTH_CHECK,
@@ -80,12 +107,16 @@ export function gitAuthCheck(repoRoot: string | null, tryExec: (cmd: string) => 
   if (!origin) {
     return { name: GIT_AUTH_CHECK, ok: true, optional: true, detail: 'skipped — no origin remote configured' };
   }
-  return {
-    name: GIT_AUTH_CHECK,
-    ok: true,
-    optional: true,
-    detail: 'origin remote configured — authentication probe not run yet',
-  };
+  // An empty string is exit 0 with no HEAD ref (an empty repo): still authenticated.
+  const probe = tryExec(GIT_AUTH_PROBE_CMD, { env: { ...GIT_AUTH_PROBE_ENV }, timeoutMs: GIT_AUTH_PROBE_TIMEOUT_MS });
+  if (probe === null) {
+    return {
+      name: GIT_AUTH_CHECK,
+      ok: false,
+      detail: 'git could not authenticate to origin non-interactively (prompting disabled)',
+    };
+  }
+  return { name: GIT_AUTH_CHECK, ok: true, detail: 'git can authenticate to origin non-interactively' };
 }
 
 /** Coding agent prerequisites: at least one agent CLI is required; each CLI is then reported
