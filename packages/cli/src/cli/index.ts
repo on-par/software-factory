@@ -310,6 +310,9 @@ import {
   withRunLock,
   wrapCommandInSandbox,
   writePortFile,
+  buildTriagePrompt,
+  normalizeTriageQueue,
+  parseTriageCandidates,
 } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
 import { Command } from 'commander';
@@ -3729,7 +3732,7 @@ export function prLookupFailure(issueNum: number, branch: string, err: unknown):
   return new LandFailureError(`PR lookup failed for issue #${issueNum} (${branch}): ${errorDetail(err)}`, 5);
 }
 
-async function cmdTriage(opts: { product?: string }) {
+async function cmdTriage(opts: { product?: string; model?: string }) {
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
@@ -3750,46 +3753,39 @@ async function cmdTriage(opts: { product?: string }) {
     effective.allowExperimental,
     effective.localOnly,
   );
-  // Triage always runs `claude -p`, so only claude-cli models with a flag are runnable.
-  const registry = router.registryRef;
-  const resolved = router.resolveAll('triage');
-  const candidates = resolved.length > 0 ? resolved : ['claude-sonnet-5'];
-  const model = candidates.find((m) => registry.getHarnessId(m) === 'claude-cli' && registry.getClaudeFlag(m));
-  const flag = model ? registry.getClaudeFlag(model) : undefined;
-
-  const constitutionNote = product ? `Active constitution: ${product}.` : '';
-  const prompt = `Triage the open GitHub issues of ${ghRepo} for an autonomous software factory.
-${constitutionNote}
-Run: gh issue list --repo ${ghRepo} --state open --limit 100 --json number,title,labels,body
-Read every body. Exclude epics/PRDs/meta, external-account/credential/outreach issues,
-and anything too vague. Group by lane (same-file issues together). Order by dependency then value.
-Write ONLY the queue to ${paths.queueProposed} in format '<lane> <issue#>', with '#' comments
-explaining exclusions.`;
+  router.skipMissingHarnessClis(coreOps.isCommandAvailable);
+  router.setCostSink((entry) => logCost(paths.costs, { ...entry, issue: '-' }));
 
   let plannerError: unknown;
-  logEvent(paths.events, 'triage', '-', `Triaging ${ghRepo} with ${flag ?? 'claude default model'}`);
-  await shellOps
-    .exec(
-      `claude -p ${shellEscape(prompt)} ${flag ? `--model ${flag}` : ''} --allowedTools "Bash(gh issue:*)" "Bash(gh repo:*)" Read Glob Grep Write`,
-    )
-    .catch((err: unknown) => {
-      plannerError = err;
-      logEvent(paths.events, 'warn', '-', `triage planner failed: ${errorDetail(err)}`);
+  let model: string | undefined;
+  try {
+    const { stdout: listed } = await shellOps.exec(
+      `gh issue list --repo ${shellEscape(ghRepo)} --state open --limit 100 --json number,title,labels,body`,
+    );
+    const prompt = buildTriagePrompt({ repo: ghRepo, product, candidates: parseTriageCandidates(listed || '[]') });
+    logEvent(paths.events, 'triage', '-', `Triaging ${ghRepo} via the triage route`);
+    const result = await router.run('triage', prompt, {
+      worktree: repoRoot,
+      timeoutSeconds: 600,
+      ...(opts.model ? { modelOverride: opts.model } : {}),
+      onLog: (msg) => logEvent(paths.events, 'triage', '-', msg),
     });
+    model = result.model;
+    const queue = normalizeTriageQueue(result.output);
+    if (queue) {
+      const header = `# Triage queue (model ${model}${product ? `, constitution ${product}` : ''})\n`;
+      writeFileSync(paths.queueProposed, header + queue);
+    }
+  } catch (err: unknown) {
+    plannerError = err;
+    logEvent(paths.events, 'warn', '-', `triage planner failed: ${errorDetail(err)}`);
+  }
+  if (model) logEvent(paths.events, 'triage', '-', `Triaged ${ghRepo} with ${model}`);
 
   const proposed = existsSync(paths.queueProposed) ? readFileSync(paths.queueProposed, 'utf-8') : '';
   const message = triageProposalMessage(proposed, paths.queueProposed, paths.queue);
   if (message) {
     console.log(message);
-    const validation = validateQueue(proposed);
-    if (!validation.ok) {
-      throw new CliExitError(
-        `factory: triage wrote a proposal that factory triage accept would reject — ${paths.queueProposed} left for review\n` +
-          `${validation.errors.map((e) => `  - ${e}`).join('\n')}\n` +
-          'fix the file and run factory triage accept, or use factory triage accept --force\n',
-        1,
-      );
-    }
   } else {
     throw triageNoProposalError(plannerError);
   }
@@ -6667,6 +6663,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .command('triage')
     .description('Have a model propose a queue from open issues into .factory/queue.proposed')
     .option('--product <name>', 'Product constitution to scope triage')
+    .option('--model <id>', 'Model to triage with (any registered model, Claude or Codex)')
     .action(cmdTriage);
 
   triage

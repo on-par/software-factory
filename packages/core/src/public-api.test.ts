@@ -546,6 +546,10 @@ const INTERNAL_API_KEYS = [
   'CliModelExecutor',
   // Phase helpers
   'buildPlanPrompt',
+  // Triage prompt and queue normalization (#1650)
+  'buildTriagePrompt',
+  'normalizeTriageQueue',
+  'parseTriageCandidates',
   // Local-small harness
   'applyLocalSmallPatchStep',
   'createLocalSmallDryRun',

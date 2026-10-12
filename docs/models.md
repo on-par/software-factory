@@ -9,7 +9,9 @@ Each task type maps to a tier, and each tier is a hand-ordered priority list in 
 | boss    | qwen2.5-coder:14b → gemma4:12b → claude-fable-5 → claude-opus-4-8 → claude-sonnet-5 → gpt-5.6-terra-high                                   | $40 → $25 → $15       | Specs, design, disputes |
 | worker  | codex-ollama-qwen3.5:9b → qwen2.5-coder:14b → qwen3.5:9b → qwen3:8b → gpt-5.6-terra-medium → gpt-5.6-sol → gpt-5.1-codex → claude-sonnet-5 | $10 → $10 → $15       | Implementation          |
 | checker | qwen3.5:9b → gemma4:12b → qwen2.5-coder:14b → qwen3:8b → claude-sonnet-5                                                                   | $15                   | Verification            |
-| triage  | qwen2.5-coder:14b → claude-sonnet-5                                                                                                        | $15                   | Issue triage            |
+| triage  | qwen2.5-coder:14b → claude-sonnet-5 → gpt-5.6-luna-high                                                                                    | $15                   | Issue triage            |
+
+Models whose agent CLI is not on PATH are skipped, so a machine with only the Codex CLI routes every phase (PLAN, BUILD, CHECK, review, triage) to Codex models, and a machine with only Claude Code routes to Claude models. PLAN only picks a build route that can run on the machine and logs a `model-override` line when it reroutes. To send a phase to a specific agent when both are installed, pin it in `.factory/config.json` (`models.pins.plan`, `build`, `checker`, `triage`), set `route`, or reorder `tiers`. `factory triage --model <id>` picks the triage model for one run.
 
 Local Ollama models cost $0 and lead every tier. `FACTORY_LOCAL_ONLY=1` restricts routing to local models entirely. Experimental models (glm-5.2, deepseek-v3, qwen-3.5-coder, gpt-4.1-mini, opencode-sonnet) exist in `defaults.ts` but are only routed when `FACTORY_EXPERIMENTAL=1`.
 

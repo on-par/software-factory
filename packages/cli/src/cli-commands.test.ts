@@ -55,6 +55,9 @@ const h = vi.hoisted(() => {
     modelOverrides: {} as Record<string, string>,
     modelProviders: {} as Record<string, string>,
     triageCandidates: [] as string[],
+    routerRun: (async (_task: string, _prompt: string, _opts?: any) => {
+      throw new Error('router.run not scripted');
+    }) as (task: string, prompt: string, opts?: any) => Promise<{ model: string; output: string }>,
     triggerPlanProviderFailure: null as { provider: string; reason: any; detail?: string } | null,
     planResult: { ok: true, route: 'claude' } as any,
     buildResult: { ok: true } as any,
@@ -313,6 +316,7 @@ function makeCoreFakes() {
           h.costSinkCallback = sink;
         }),
         skipMissingHarnessClis: vi.fn(),
+        run: vi.fn(async (task: string, prompt: string, opts: any) => h.routerRun(task, prompt, opts)),
       };
     }) as any,
     ConstitutionLoader: vi.fn(function () {
@@ -485,6 +489,9 @@ beforeEach(() => {
   h.modelOverrides = {};
   h.modelProviders = {};
   h.triageCandidates = [];
+  h.routerRun = async () => {
+    throw new Error('router.run not scripted');
+  };
   h.triggerPlanProviderFailure = null;
   h.planResult = { ok: true, route: 'claude' };
   h.buildResult = { ok: true };
@@ -2923,86 +2930,56 @@ bash scripts/verify.sh
   });
 
   describe('triage', () => {
-    it('prints the proposed queue with an accept hint', async () => {
+    const ghIssues = JSON.stringify([
+      { number: 5, title: 'Five', labels: [{ name: 'bug' }], body: 'x'.repeat(10_000) },
+      { number: 6, title: 'Six', labels: [], body: 'short' },
+    ]);
+    const execWithIssues = (cmd: string) => {
+      if (cmd.includes('rev-parse')) return h.repoRoot;
+      if (cmd.includes('gh repo view')) return h.ghRepo;
+      if (cmd.includes('gh issue list')) return ghIssues;
+      return '';
+    };
+
+    it('dispatches through the router, never spawns claude -p, and writes a valid proposal (#1650)', async () => {
+      const cmds: string[] = [];
       h.execImpl = (cmd: string) => {
-        if (cmd.includes('rev-parse')) return h.repoRoot;
-        if (cmd.includes('gh repo view')) return h.ghRepo;
-        if (cmd.includes('claude -p')) {
-          writeFileSync(paths().queueProposed, 'app 5\napp 6\n');
-          return '';
-        }
-        return '';
+        cmds.push(cmd);
+        return execWithIssues(cmd);
+      };
+      let seenPrompt = '';
+      h.routerRun = async (task, prompt) => {
+        expect(task).toBe('triage');
+        seenPrompt = prompt;
+        return { model: 'gpt-5.6-luna-high', output: '```\n# header\n\napp 5\napp #6\n```\n' };
       };
       await runMain('triage');
-      const out = logged();
-      expect(out).toContain('app 5');
-      expect(out).toContain('factory triage accept');
+      expect(cmds.some((c) => c.includes('claude -p'))).toBe(false);
+      expect(seenPrompt).toContain('#5: Five [labels: bug]');
+      expect(seenPrompt).not.toContain('x'.repeat(1_500));
+      const proposed = readFileSync(paths().queueProposed, 'utf-8');
+      expect(proposed).toBe('# Triage queue (model gpt-5.6-luna-high)\n# header\napp 5\napp 6\n');
+      expect(logged()).toContain('factory triage accept');
+      expect(readFileSync(paths().events, 'utf-8')).toContain('with gpt-5.6-luna-high');
+      const res = await runMain('triage', 'accept');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('2 issue(s) promoted');
     });
 
-    it('a proposal written by triage is accepted by triage accept', async () => {
-      const rev = (cmd: string) =>
-        cmd.includes('rev-parse') ? h.repoRoot : cmd.includes('gh repo view') ? h.ghRepo : '';
-      h.execImpl = (cmd: string) => {
-        if (cmd.includes('claude -p')) {
-          writeFileSync(
-            paths().queueProposed,
-            '# Triage queue — constitution: default-code\n# c1\n# c2\n# c3\n# c4\n\ngreet 1\n',
-          );
-          return '';
-        }
-        return rev(cmd);
+    it('passes --model to the router as the model override', async () => {
+      h.execImpl = execWithIssues;
+      let seenOpts: any;
+      h.routerRun = async (_task, _prompt, opts) => {
+        seenOpts = opts;
+        return { model: 'gpt-5.6-terra-high', output: 'app 5\n' };
       };
-      const triaged = await runMain('triage');
-      expect(triaged.exited).toBe(false);
-      expect(logged()).toContain('greet 1');
-      h.execImpl = rev;
-      const accepted = await runMain('triage', 'accept');
-      expect(accepted.exited).toBe(false);
-      expect(existsSync(paths().queue)).toBe(true);
-      expect(existsSync(paths().queueProposed)).toBe(false);
-      expect(logged()).toContain('queue accepted');
-    });
-
-    it('exits 1 with the validation errors when the proposal would be rejected by accept', async () => {
-      h.execImpl = (cmd: string) => {
-        if (cmd.includes('rev-parse')) return h.repoRoot;
-        if (cmd.includes('gh repo view')) return h.ghRepo;
-        if (cmd.includes('claude -p')) {
-          writeFileSync(paths().queueProposed, 'app 5\napp notanumber\n');
-          return '';
-        }
-        return '';
-      };
-      const res = await runMain('triage');
-      expect(res).toEqual({ exited: true, code: 1 });
-      expect(errored()).toContain('malformed');
-      expect(errored()).toContain('triage accept');
-      expect(existsSync(paths().queueProposed)).toBe(true);
-    });
-
-    it('logs the Claude model it passes via --model, not the Ollama tier head', async () => {
-      h.modelProviders = { 'qwen2.5-coder:14b': 'ollama', 'claude-sonnet-5': 'anthropic' };
-      h.triageCandidates = ['qwen2.5-coder:14b', 'claude-sonnet-5'];
-      let claudeCmd = '';
-      h.execImpl = (cmd: string) => {
-        if (cmd.includes('rev-parse')) return h.repoRoot;
-        if (cmd.includes('gh repo view')) return h.ghRepo;
-        if (cmd.includes('claude -p')) {
-          claudeCmd = cmd;
-          writeFileSync(paths().queueProposed, 'app 5\n');
-          return '';
-        }
-        return '';
-      };
-      await runMain('triage');
-      const flag = /--model (\S+)/.exec(claudeCmd)?.[1];
-      expect(flag).toBeTruthy();
-      const events = readFileSync(paths().events, 'utf-8');
-      expect(events).toContain(`Triaging ${h.ghRepo} with ${flag}`);
-      expect(events).not.toContain('qwen2.5-coder:14b');
+      await runMain('triage', '--model', 'gpt-5.6-terra-high');
+      expect(seenOpts.modelOverride).toBe('gpt-5.6-terra-high');
     });
 
     it('exits 1 when triage produces no proposal', async () => {
+      h.execImpl = execWithIssues;
+      h.routerRun = async () => ({ model: 'm', output: 'I could not decide.' });
       const res = await runMain('triage');
       expect(res).toEqual({ exited: true, code: 1 });
       expect(errored()).toContain('no proposal');
@@ -3015,19 +2992,16 @@ bash scripts/verify.sh
       expect(errored()).toContain('factory not initialized — run `factory init` first');
     });
 
-    it('logs the planner failure detail and exits 1 with no proposal when the planner exec call fails', async () => {
-      h.execImpl = (cmd: string) => {
-        if (cmd.includes('rev-parse')) return h.repoRoot;
-        if (cmd.includes('gh repo view')) return h.ghRepo;
-        if (cmd.includes('claude -p')) throw new Error('claude crashed');
-        return '';
+    it('logs the planner failure detail and exits 1 with no proposal when the router fails', async () => {
+      h.execImpl = execWithIssues;
+      h.routerRun = async () => {
+        throw new Error('codex crashed');
       };
       const res = await runMain('triage');
       expect(res).toEqual({ exited: true, code: 1 });
       expect(errored()).toContain('no proposal');
-      expect(errored()).toContain('claude crashed');
-      const events = readFileSync(paths().events, 'utf-8');
-      expect(events).toContain('triage planner failed');
+      expect(errored()).toContain('codex crashed');
+      expect(readFileSync(paths().events, 'utf-8')).toContain('triage planner failed');
     });
   });
 
