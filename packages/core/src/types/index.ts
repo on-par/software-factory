@@ -75,6 +75,8 @@ export interface Constitution {
   checkers: string[];
   /** When true, a worktree with no verify/test command FAILs the tests checker instead of SKIPping (frontmatter: requireTests) */
   requireTests?: boolean;
+  /** Constitution checkers allowed to skip when no model can run them (frontmatter: optionalCheckers). */
+  optionalCheckers?: string[];
   body: string;
   path: string;
   /** Where the standards came from: the target repo's own instruction files, or a bundled <product>.md */
@@ -104,6 +106,8 @@ export interface CheckerOutput {
   broken?: number;
   /** Structured findings (regression_hunt); rendered by renderCheckerFindings in the check summary and evidence pack. */
   findings?: RegressionFinding[];
+  /** Set on a SKIP when no model could run the checker; a required checker then fails (#2493). */
+  unavailable?: boolean;
 }
 
 export interface CheckSummary {
@@ -128,6 +132,8 @@ export type FailoverReason =
   | 'empty_response'
   | 'unavailable'
   | 'local_auth'
+  /** The agent CLI could not be started (exit 127, ENOENT, command not found). */
+  | 'cli_missing'
   | 'schema_invalid'
   | 'apply_failed'
   | 'verify_failed'

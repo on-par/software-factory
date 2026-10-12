@@ -686,6 +686,21 @@ describe('designSmellsChecker', () => {
     expect(result.details).toContain('no program-design smells found');
   });
 
+  it('marks the skip unavailable when no model can run the critic (#2493)', async () => {
+    const worktree = await makeWorktree();
+    const router = {
+      run: async () => {
+        throw new Error("All models failed for task 'check_design': gpt-5.6-luna-high(cli_missing)");
+      },
+    } as any;
+    const result = await designSmellsChecker(makeContext(worktree), router, undefined, {
+      collectDiff: async () => cleanDiff,
+      env: {},
+    });
+    expect(result.result).toBe('SKIP');
+    expect(result.unavailable).toBe(true);
+  });
+
   it('skips when FACTORY_DESIGN_SMELLS=0', async () => {
     const worktree = await makeWorktree();
     const { router } = makeRouter('{"checker":"design_smells","result":"PASS","smells":[]}');
