@@ -9,7 +9,13 @@ import type { HarnessDeclaration, ModelsConfig, RoutesConfig } from '../config/i
 import { ModelRegistry } from '../models/index.js';
 import { CliModelExecutor } from '../router/index.js';
 import { shellEscape } from '../utils/index.js';
-import { buildHarnessCommand, CommandHarness, extractJsonlLastMessage } from './command.js';
+import {
+  buildHarnessCommand,
+  CommandHarness,
+  extractJsonlLastMessage,
+  matchErrorPattern,
+  parseJsonlUsage,
+} from './command.js';
 import { codingHarnessContractCases, makeContractRequest } from './contract.js';
 import { HarnessError } from './index.js';
 
@@ -82,6 +88,108 @@ describe('CodingHarness contract: CommandHarness', () => {
     }),
   });
   for (const contractCase of cases) it(contractCase.name, contractCase.run);
+});
+
+describe('CodingHarness contract: CommandHarness with errorPatterns and jsonl usage', () => {
+  const make = (execFn: any) =>
+    new CommandHarness('my-agent', declare({ usage: 'jsonl', errorPatterns: { rate_limit: 'slow down' } }), execFn);
+  const cases = codingHarnessContractCases({
+    success: () => ({
+      harness: make(async () => ({
+        stdout: '{"text":"ok","usage":{"input_tokens":3,"output_tokens":4}}',
+        stderr: '',
+      })),
+    }),
+    timeout: () => ({
+      harness: make(async () => {
+        throw Object.assign(new Error('killed'), { killed: true, stderr: 'slow down' });
+      }),
+    }),
+    emptyOutput: () => ({ harness: make(async () => ({ stdout: '  ', stderr: '' })) }),
+    failure: () => ({
+      harness: make(async () => {
+        throw Object.assign(new Error('boom'), { stderr: 'slow down', code: 1 });
+      }),
+    }),
+  });
+  for (const contractCase of cases) it(contractCase.name, contractCase.run);
+});
+
+describe('CommandHarness errorPatterns and usage', () => {
+  const request = () => makeContractRequest();
+  const failing = (over: Record<string, unknown>) => async () => {
+    throw Object.assign(new Error('boom'), { code: 1, ...over });
+  };
+  const reasonOf = async (decl: Partial<HarnessDeclaration>, execFn: any): Promise<string | undefined> => {
+    try {
+      await new CommandHarness('my-agent', declare(decl), execFn).run(request());
+    } catch (err) {
+      return (err as HarnessError).reason;
+    }
+    return undefined;
+  };
+
+  it('errorPatterns selects the record key as the reason from stderr or stdout', async () => {
+    const patterns = { rate_limit: 'slow down' };
+    expect(await reasonOf({ errorPatterns: patterns }, failing({ stderr: 'HTTP 503 slow down' }))).toBe('rate_limit');
+    expect(await reasonOf({}, failing({ stderr: 'HTTP 503 slow down' }))).toBe('unknown');
+    expect(await reasonOf({ errorPatterns: patterns }, failing({ stderr: '', stdout: 'x SLOW DOWN x' }))).toBe(
+      'rate_limit',
+    );
+    expect(
+      await reasonOf({ errorPatterns: { usage_cap: 'both', rate_limit: 'both' } }, failing({ stderr: 'both' })),
+    ).toBe('usage_cap');
+    expect(await reasonOf({ errorPatterns: patterns }, failing({ stderr: 'rate limit exceeded' }))).toBe('rate_limit');
+    expect(await reasonOf({ errorPatterns: patterns }, failing({ stderr: 'plain failure' }))).toBe('error');
+    const ok = async () => ({ stdout: 'slow down but fine', stderr: '' });
+    expect(await reasonOf({ errorPatterns: patterns }, ok)).toBeUndefined();
+  });
+
+  it('array-form errorPatterns classify the matched text', async () => {
+    expect(await reasonOf({ errorPatterns: ['rate limit'] }, failing({ stderr: '', stdout: 'rate limit hit' }))).toBe(
+      'rate_limit',
+    );
+    expect(await reasonOf({ errorPatterns: ['boom'] }, failing({ stderr: 'boom' }))).toBe('error');
+  });
+
+  it('usage jsonl returns summed input/output tokens; usage none returns no usage', async () => {
+    const stdout = [
+      '{"text":"hello","input_tokens":1,"output_tokens":2}',
+      'not json',
+      '{"type":"noise"}',
+      '{"usage":{"input_tokens":10,"output_tokens":20}}',
+    ].join('\n');
+    const exec = async () => ({ stdout, stderr: '' });
+    const withUsage = await new CommandHarness('a', declare({ usage: 'jsonl' }), exec).run(request());
+    expect(withUsage.usage).toEqual({ inputTokens: 11, outputTokens: 22 });
+    const without = await new CommandHarness('a', declare({ usage: 'none' }), exec).run(request());
+    expect(without.usage).toBeUndefined();
+    expect('usage' in without).toBe(false);
+    const noTokens = await new CommandHarness('a', declare({ usage: 'jsonl' }), async () => ({
+      stdout: 'plain text',
+      stderr: '',
+    })).run(request());
+    expect(noTokens.usage).toBeUndefined();
+  });
+});
+
+describe('parseJsonlUsage', () => {
+  it('ignores non-finite, string and half-present counts', () => {
+    expect(parseJsonlUsage('{"input_tokens":"1","output_tokens":2}')).toBeUndefined();
+    expect(parseJsonlUsage('{"input_tokens":1e999,"output_tokens":2}')).toBeUndefined();
+    expect(parseJsonlUsage('{"input_tokens":1}')).toBeUndefined();
+    expect(parseJsonlUsage('[1,2]\n')).toBeUndefined();
+    expect(parseJsonlUsage('')).toBeUndefined();
+  });
+});
+
+describe('matchErrorPattern', () => {
+  it('returns undefined without patterns, with empty patterns, and for non-string output', () => {
+    expect(matchErrorPattern(undefined, 'a', 'b')).toBeUndefined();
+    expect(matchErrorPattern({}, 'a', 'b')).toBeUndefined();
+    expect(matchErrorPattern([], 'a', 'b')).toBeUndefined();
+    expect(matchErrorPattern({ error: 'a' }, undefined as any, undefined as any)).toBeUndefined();
+  });
 });
 
 describe('buildHarnessCommand', () => {

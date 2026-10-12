@@ -366,6 +366,30 @@ describe('loadModelsConfig', () => {
     expect(() => loadModelsConfig(path)).toThrow(/errorPatterns/);
   });
 
+  it('accepts the record form of errorPatterns', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-models-config-'));
+    const path = await writeModelsConfig(tmpDir, undefined, {
+      'my-agent': validDecl({ errorPatterns: { rate_limit: '429|rate limit' } }),
+    });
+    expect(() => loadModelsConfig(path)).not.toThrow();
+  });
+
+  it('rejects an errorPatterns record with an unknown reason key', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-models-config-'));
+    const path = await writeModelsConfig(tmpDir, undefined, {
+      'my-agent': validDecl({ errorPatterns: { banana: 'x' } }),
+    });
+    expect(() => loadModelsConfig(path)).toThrow(/errorPatterns/);
+  });
+
+  it('rejects an errorPatterns record with an invalid regex', async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'factory-models-config-'));
+    const path = await writeModelsConfig(tmpDir, undefined, {
+      'my-agent': validDecl({ errorPatterns: { rate_limit: '(' } }),
+    });
+    expect(() => loadModelsConfig(path)).toThrow(/errorPatterns/);
+  });
+
   it('defaults harnesses to {} when absent', () => {
     expect(loadModelsConfig().harnesses).toEqual({});
   });
