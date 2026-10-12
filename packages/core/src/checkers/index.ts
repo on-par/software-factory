@@ -607,7 +607,7 @@ export function listBuiltInCheckers(): BuiltInCheckerInfo[] {
   return BUILT_IN_CHECKERS.map(({ name, description }) => ({ name, description }));
 }
 
-const STANDARD_CHECKER_NAMES = BUILT_IN_CHECKERS.map((c) => c.name);
+export const STANDARD_CHECKER_NAMES = BUILT_IN_CHECKERS.map((c) => c.name);
 
 /** Fail closed: a declared standard we can't run must not vanish from the summary. */
 function unknownCheckerOutput(name: string): CheckerOutput {

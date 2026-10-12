@@ -1,5 +1,5 @@
 import { execFile as execFileCb } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -193,6 +193,82 @@ describe('runIssue — invariant 1: constitution resolved exactly once', () => {
       vi.mocked(checkPhase).mock.calls[0],
     ]) {
       expect(call[0].constitution).toBe(constitution);
+    }
+  });
+});
+
+describe('runIssue — constitution checker preflight (#2585)', () => {
+  const raw = '---\nproduct: acme\nversion: 1\ncheckers:\n  - <checker-name>\n  - compile\n---\nbody';
+
+  function setup(checkers: string[], file = raw) {
+    const dir = mkdtempSync(join(tmpdir(), 'preflight-'));
+    mkdirSync(join(dir, '.factory'));
+    const absPath = join(dir, '.factory', 'constitution.md');
+    writeFileSync(absPath, file);
+    const constitution: Constitution = {
+      source: 'bundled',
+      product: 'acme',
+      version: 1,
+      checkers,
+      body: 'stds',
+      path: absPath,
+      requireTests: true,
+      repoInstance: { relPath: '.factory/constitution.md', absPath },
+    };
+    return { dir, constitution };
+  }
+
+  it('escalates before PLAN with a file:line message for a <checker-name> placeholder', async () => {
+    const { dir, constitution } = setup(['<checker-name>', 'compile']);
+    try {
+      const checkBaseHealth = vi.fn();
+      const router = fakeRouter();
+      const outcome = await runIssue(
+        baseRequest(),
+        basePolicy(),
+        basePorts({ router, resolveConstitution: () => constitution, checkBaseHealth }),
+      );
+      expect(outcome.state).toBe('escalated');
+      expect(JSON.stringify(outcome)).toContain(".factory/constitution.md:5: unknown checker '<checker-name>'");
+      expect(JSON.stringify(outcome)).toContain('custom_*');
+      expect(planPhase).not.toHaveBeenCalled();
+      expect(checkBaseHealth).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('escalates before PLAN naming an unknown checker such as typecheck', async () => {
+    const { dir, constitution } = setup(
+      ['typecheck'],
+      '---\nproduct: acme\nversion: 1\ncheckers:\n  - typecheck\n---\nbody',
+    );
+    try {
+      const outcome = await runIssue(
+        { ...baseRequest(), localOnly: true },
+        basePolicy(),
+        basePorts({ resolveConstitution: () => constitution }),
+      );
+      expect(outcome.state).toBe('escalated');
+      expect(JSON.stringify(outcome)).toContain("constitution.md:5: unknown checker 'typecheck'");
+      expect(planPhase).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reaches PLAN when every checker is a built-in or custom_*', async () => {
+    const { dir, constitution } = setup(['compile', 'custom_docs']);
+    try {
+      const outcome = await runIssue(
+        baseRequest(),
+        basePolicy(),
+        basePorts({ resolveConstitution: () => constitution }),
+      );
+      expect(planPhase).toHaveBeenCalledTimes(1);
+      expect(outcome.state).toBe('ready');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

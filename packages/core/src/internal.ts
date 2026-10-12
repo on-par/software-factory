@@ -676,6 +676,8 @@ export {
 } from './constitutions/index.js';
 export type { BuiltInCheckerInfo } from './checkers/index.js';
 export { listBuiltInCheckers } from './checkers/index.js';
+export { findUnknownConstitutionCheckers, formatUnknownCheckerMessage } from './checkers/constitution-preflight.js';
+export type { UnknownConstitutionChecker } from './checkers/constitution-preflight.js';
 
 // Readiness deep check (#1732)
 export type { DecompositionOutput } from './readiness/decompose.js';

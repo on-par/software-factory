@@ -410,6 +410,8 @@ const INTERNAL_API_KEYS = [
   'DEFAULT_CODE_CONSTITUTION',
   'describeConstitutionSource',
   'listBuiltInCheckers',
+  'findUnknownConstitutionCheckers',
+  'formatUnknownCheckerMessage',
   'describePullRequestAccessError',
   'describeReviewConstitutionSource',
   'formatPullRequestReference',
