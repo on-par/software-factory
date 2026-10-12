@@ -494,6 +494,22 @@ export function sandboxClaudeAuthChecks(result: ClaudeAuthProbeResult): DoctorCh
   return [host, sandboxed];
 }
 
+const AGENT_AUTH_CHECKS = new Set(['codex auth', HOST_AUTH_CHECK]);
+
+/** #2496: doctor fails on agent sign-in only when no installed agent is signed in. A logged-out
+ *  agent is a warning while another one is signed in, and a hard failure when none is. Skipped
+ *  probes (optional passes, e.g. claude not on PATH) never count as signed in. */
+export function reconcileAgentAuthChecks(checks: DoctorCheck[]): DoctorCheck[] {
+  const auth = checks.filter((c) => AGENT_AUTH_CHECKS.has(c.name));
+  const anySignedIn = auth.some((c) => c.ok && c.optional !== true);
+  return checks.map((c) => {
+    if (!AGENT_AUTH_CHECKS.has(c.name) || c.ok) return c;
+    return anySignedIn
+      ? { ...c, optional: true, detail: `${c.detail} (another agent is signed in, so runs can still proceed)` }
+      : { ...c, optional: false };
+  });
+}
+
 export interface LeaseHealthRow {
   worktreeId: string;
   branch: string;
