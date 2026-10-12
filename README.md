@@ -47,6 +47,7 @@ Private workspaces (server, dashboard, product, scbench-adapter) also live here 
 - Node.js ≥ 24 (the `engines.node` field in `packages/cli/package.json`)
 - `git`
 - At least one coding agent CLI on your PATH and signed in: Claude Code (`claude`) or the OpenAI Codex CLI (`codex`). Either one alone runs the whole loop (triage, PLAN, BUILD, CHECK and SHIP). With both installed, the factory can use either for any phase (see [Use Codex](#use-codex)).
+- Provider setup for Claude Code, Codex and OpenCode: see [docs/agents.md](docs/agents.md).
 - The GitHub CLI `gh`, signed in with `gh auth login`. The factory uses `gh repo view` to detect your repo.
 - A GitHub token. The factory reads `GITHUB_TOKEN`, then `GH_TOKEN`, and falls back to `gh auth token` when neither is set, so `gh auth login` is usually enough.
 - Optional: `ollama` for experimental local models. When Ollama is not running, the factory skips local models and says so once in the log.
