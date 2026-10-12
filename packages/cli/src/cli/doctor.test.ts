@@ -31,6 +31,7 @@ import {
   orphanContainerChecks,
   orphanMicroVmChecks,
   type ReapRow,
+  REPO_SECTION,
   runDoctorChecks,
   sandboxAuthSkipDetail,
   sandboxClaudeAuthChecks,
@@ -183,6 +184,9 @@ describe('runDoctorChecks', () => {
     expect(byName('.factory initialized').detail).toBe('.factory/ present');
     expect(byName('git identity').detail).toBe('Test User <test@example.com>');
     expect(byName('sandbox runtime').detail).toBe('sandbox-exec found');
+    for (const name of ['.factory initialized', 'git identity', 'git auth', 'git worktree clean']) {
+      expect(byName(name).section).toBe(REPO_SECTION);
+    }
   });
 
   it('claude CLI missing is optional when codex is installed and logged in (#1269)', () => {
@@ -376,13 +380,13 @@ describe('runDoctorChecks', () => {
     expect(identity.ok).toBe(false);
     expect(identity.optional).toBeUndefined();
     expect(identity.detail).toBe('user.email not set');
-    expect(identity.fix).toBe(
-      'git config --global user.name "Your Name" && git config --global user.email you@example.com',
-    );
+    expect(identity.next).toBe('git config --global user.email you@example.com');
+    expect(identity.fix).toBeUndefined();
     expect(doctorFailed(checks)).toBe(true);
 
     const both = runDoctorChecks(probes({ tryExec: exec('', '') }));
     expect(both.find((c) => c.name === 'git identity')!.detail).toBe('user.name and user.email not set');
+    expect(both.find((c) => c.name === 'git identity')!.next).toBe('git config --global user.name "Your Name"');
   });
 
   it('no sandbox runtime warns uncontained and codex says danger-full-access', () => {
@@ -430,10 +434,12 @@ describe('runDoctorChecks', () => {
     const checks = runDoctorChecks(probes({ pathExists: () => false }));
     const factoryInit = checks.find((c) => c.name === '.factory initialized')!;
     expect(factoryInit.ok).toBe(false);
-    expect(factoryInit.optional).toBe(true);
+    expect(factoryInit.optional).toBeUndefined();
     expect(factoryInit.detail).toBe('.factory/ missing');
-    expect(factoryInit.fix).toBe('run `factory init`');
-    expect(doctorFailed(checks)).toBe(false);
+    expect(factoryInit.next).toBe('factory init');
+    expect(factoryInit.fix).toBeUndefined();
+    expect(factoryInit.section).toBe(REPO_SECTION);
+    expect(doctorFailed(checks)).toBe(true);
   });
 
   it('npm missing gives the Node.js >= 24 fix', () => {
@@ -534,6 +540,7 @@ describe('outside a git repo (#2554)', () => {
     expect(out).toContain('Model reachability: skipped — not inside a git repository');
     const fixes = out.split('\n').filter((l) => l.includes('fix:'));
     for (const line of fixes) expect(line).not.toMatch(/factory (models|init|run|queue|triage)\b/);
+    expect(out.split('\n').filter((l) => l.includes('next:'))).toEqual([]);
   });
 
   it('keeps the in-repo trailer unchanged', () => {
@@ -542,6 +549,91 @@ describe('outside a git repo (#2554)', () => {
     expect(formatDoctorChecks(rows, { inRepo: true }).endsWith('Model reachability: factory models --doctor')).toBe(
       true,
     );
+  });
+});
+
+describe('repo checks (#2557)', () => {
+  function rowBlocks(out: string): string[][] {
+    const blocks: string[][] = [];
+    for (const line of out.split('\n')) {
+      if (/^ {2}\S+ /.test(line)) blocks.push([line]);
+      else if (/^ {7}/.test(line) && blocks.length > 0) blocks[blocks.length - 1]!.push(line);
+    }
+    return blocks;
+  }
+
+  it('a repo without .factory fails the Repo section with next command factory init', () => {
+    const checks = runDoctorChecks(probes({ pathExists: () => false }));
+    const lines = formatDoctorChecks(checks, { inRepo: true }).split('\n');
+    expect(lines).toContain('-- Repo --');
+    const i = lines.findIndex((l) => l.includes('.factory initialized'));
+    expect(lines[i]).toContain('❌');
+    expect(lines[i + 1]).toBe('       next: factory init');
+    expect(doctorFailed(checks)).toBe(true);
+  });
+
+  it('gh unauthenticated or missing fails the gh auth row with next command gh auth login', () => {
+    const base = probes();
+    const cases = [
+      probes({ commandAvailable: (c) => c !== 'gh' }),
+      probes({ tryExec: (cmd) => (cmd.includes('gh auth status') ? null : base.tryExec(cmd)) }),
+    ];
+    for (const env of cases) {
+      const checks = runDoctorChecks(env);
+      const row = checks.find((c) => c.name === 'gh auth')!;
+      expect(row.ok).toBe(false);
+      expect(row.next).toBe('gh auth login');
+      const block = rowBlocks(formatDoctorChecks(checks, { inRepo: true })).find((b) => b[0]!.includes('gh auth —'))!;
+      expect(block.at(-1)).toBe('       next: gh auth login');
+    }
+  });
+
+  it('every hard-failing row ends with exactly one next command', () => {
+    const env = probes({
+      commandAvailable: (c) => c === 'codex' || c === 'gh',
+      envPresent: () => false,
+      tryExec: (cmd) => {
+        if (cmd.includes('git rev-parse')) return '/repo';
+        if (cmd.includes('git config user.')) return null;
+        if (cmd.includes('get-url origin')) return 'https://github.com/o/r.git';
+        if (cmd.includes('codex login status')) return 'not logged in';
+        if (cmd.includes('git status --porcelain')) return '';
+        return null;
+      },
+      pathExists: () => false,
+      distFreshness: () => ({ fresh: false, detail: 'stale' }),
+    });
+    const checks = runDoctorChecks(env);
+    const hard = checks.filter((c) => !c.ok && !c.optional && c.name !== 'npm');
+    expect(hard.map((c) => c.name)).toEqual(
+      expect.arrayContaining([
+        'git identity',
+        'git auth',
+        'gh auth',
+        'GitHub token',
+        '.factory initialized',
+        'compiled dist fresh',
+      ]),
+    );
+    const blocks = rowBlocks(formatDoctorChecks(checks, { inRepo: true }));
+    for (const check of hard) {
+      expect(check.next).toBeTruthy();
+      expect(check.next).not.toMatch(/&&|;|\n/);
+      const block = blocks.find((b) => b[0]!.includes(`${check.name} —`))!;
+      expect(block.filter((l) => l.includes('next:'))).toHaveLength(1);
+      expect(block.at(-1)).toBe(`       next: ${check.next}`);
+    }
+  });
+
+  it('Repo section is shown only inside a git repo', () => {
+    expect(formatDoctorChecks(runDoctorChecks(probes()), { inRepo: true })).toContain('-- Repo --');
+    const base = probes();
+    const outside = probes({
+      tryExec: (cmd) => (cmd.includes('git rev-parse') || cmd.includes('git config user.') ? null : base.tryExec(cmd)),
+    });
+    const checks = runDoctorChecks(outside);
+    expect(formatDoctorChecks(checks, { inRepo: false })).not.toContain('-- Repo --');
+    expect(checks.some((c) => c.section === REPO_SECTION || c.next !== undefined)).toBe(false);
   });
 });
 
