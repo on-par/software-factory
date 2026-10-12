@@ -57,6 +57,24 @@ describe('docs/config.example.yaml', () => {
     ).toBe(renderConfigExample());
   });
 
+  it('documents models.registry with a commented example that is valid when uncommented', () => {
+    const text = renderConfigExample();
+    expect(text).toMatch(/^\s*# registry:$/m);
+    expect(text).toMatch(/^\s*# harness: "opencode"$/m);
+    expect(text).toMatch(/^\s*# providerModel: /m);
+    const registryAt = text.indexOf('  # registry:');
+    expect(registryAt).toBeGreaterThan(text.indexOf('# models:'));
+    expect(registryAt).toBeLessThan(text.indexOf('  # efforts:'));
+
+    const lines = text.slice(registryAt).split('\n');
+    const end = lines.findIndex((l, i) => i > 0 && l.trim() !== '' && l.search(/\S/) <= 2);
+    const block = lines.slice(0, end).map((l) => l.replace(/^(\s*)# /, '$1'));
+    const repo = RepoFactoryConfigV2Schema.parse(parse(`version: 2\nmodels:\n${block.join('\n')}`));
+    const merged = applyRepoConfig(loadModelsConfig(), repo).models['my-opencode-model'];
+    expect(merged?.harness).toBe('opencode');
+    expect(merged?.providerModel).toBeDefined();
+  });
+
   it('parses as YAML into a mapping', () => {
     const parsed: unknown = parse(renderConfigExample());
     expect(parsed).not.toBeNull();

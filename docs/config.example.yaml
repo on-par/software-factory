@@ -22,6 +22,20 @@
 #   paths.* other than paths.constitution — accepted; not read at runtime.
 version: 2
 # models:
+  # Repo-declared models: model id -> definition, same fields as a packaged model. Merged over the
+  # packaged registry before tiers and pins, so these ids can be pinned and placed in tiers. Ids
+  # must not reuse a packaged model id.
+  # registry:
+    # my-opencode-model:
+      # provider: "custom"
+      # tier: ["worker"]
+      # costPerMtokInput: 0
+      # costPerMtokOutput: 0
+      # contextWindow: 200000
+      # capabilities: ["implementation"]
+      # envKey: null
+      # harness: "opencode"
+      # providerModel: "<provider>/<model>"
   # Model id -> effort, or task type -> effort. Omitted tasks retain provider/profile defaults.
   # Boolean values are Ollama thinking toggles.
   # efforts: { "<model id>": "<effort>" }
