@@ -7,6 +7,7 @@ import {
   appendFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -293,6 +294,7 @@ import {
   parseRemoteSlug,
   setupWorktree,
   shellEscape,
+  listBuiltInCheckers,
   shouldProxyEgress,
   slugify,
   startEgressProxy,
@@ -784,10 +786,12 @@ async function cmdInit(opts: { force?: boolean } = {}) {
     force,
   );
 
-  // Constitution scaffold: repo directory basename fills <product-name>/<Product>.
-  const repoName = basename(repoRoot);
-  const template = readFileSync(resolve(configLoaders.getConstitutionsDir(), '_template.md'), 'utf-8');
-  writeIfAbsent(constitutionPath, scaffoldConstitution(template, repoName), '.factory/constitution.md', force);
+  // Constitution scaffold: the active product's bundled file, else the default-code constitution.
+  const constitutionsDir = configLoaders.getConstitutionsDir();
+  const active = readActiveProduct(paths.product);
+  const activeFile = active ? resolve(constitutionsDir, `${active}.md`) : undefined;
+  const source = activeFile && existsSync(activeFile) ? activeFile : resolve(constitutionsDir, 'default-code.md');
+  writeIfAbsent(constitutionPath, readFileSync(source, 'utf-8'), '.factory/constitution.md', force);
 
   writeIfAbsent(gitignorePath, 'state/\n', '.factory/.gitignore', force);
 
@@ -1111,9 +1115,44 @@ export function scaffoldConstitution(template: string, product: string): string 
   return skeleton.replaceAll('<product-name>', JSON.stringify(product)).replaceAll('<Product>', display);
 }
 
+/**
+ * True when `existing` is an untouched scaffold: byte-identical (CRLF and trailing whitespace
+ * normalised) to a bundled constitution or to the legacy `_template.md` scaffold for `repoName`.
+ * Exact equality only — an edited file is never treated as a scaffold.
+ */
+export function isUnmodifiedConstitutionScaffold(
+  existing: string,
+  constitutionsDir: string,
+  repoName: string,
+): boolean {
+  const norm = (s: string) => s.replace(/\r\n/g, '\n').trimEnd();
+  const target = norm(existing);
+  if (target === '') return true;
+  let names: string[] = [];
+  try {
+    names = readdirSync(constitutionsDir).filter((f) => f.endsWith('.md') && !f.startsWith('_'));
+  } catch {
+    // unreadable dir: no bundled files to compare against
+  }
+  for (const f of names) {
+    try {
+      if (norm(readFileSync(resolve(constitutionsDir, f), 'utf-8')) === target) return true;
+    } catch {
+      // skip unreadable entries
+    }
+  }
+  try {
+    const template = readFileSync(resolve(constitutionsDir, '_template.md'), 'utf-8');
+    return norm(scaffoldConstitution(template, repoName)) === target;
+  } catch {
+    return false;
+  }
+}
+
 export async function cmdConstitution(
   opts: {
     list?: boolean;
+    checkers?: boolean;
     product?: string;
     init?: string | boolean;
     force?: boolean;
@@ -1150,7 +1189,22 @@ export async function cmdConstitution(
 
   if (opts.list) {
     const products = loader.listProducts();
-    for (const p of products) console.log(`  ${p}`);
+    for (const p of products) {
+      try {
+        const checkers = loader.load(p).checkers.join(', ');
+        console.log(`  ${p} — ${checkers || '(no checkers)'}`);
+      } catch {
+        console.log(`  ${p}`);
+      }
+    }
+    return;
+  }
+
+  if (opts.checkers) {
+    for (const c of listBuiltInCheckers()) console.log(`  ${c.name} — ${c.description}`);
+    console.log(
+      "  custom_<name> — agent-judged checker graded against the constitution body (declare it in the constitution's checkers list)",
+    );
     return;
   }
 
@@ -1163,11 +1217,15 @@ export async function cmdConstitution(
     const paths = getFactoryPaths(repoRoot);
     ensureDir(paths.root);
     const constitutionPath = resolve(paths.root, 'constitution.md');
-    if (existsSync(constitutionPath) && !opts.force) {
+    const constitutionsDir = configLoaders.getConstitutionsDir();
+    const scaffold =
+      existsSync(constitutionPath) &&
+      isUnmodifiedConstitutionScaffold(readFileSync(constitutionPath, 'utf-8'), constitutionsDir, basename(repoRoot));
+    if (existsSync(constitutionPath) && !opts.force && !scaffold) {
       throw new CliExitError('.factory/constitution.md already exists — use --force to overwrite', 1);
     }
-    const content = readFileSync(resolve(configLoaders.getConstitutionsDir(), `${opts.product}.md`), 'utf-8');
-    writeIfAbsent(constitutionPath, content, '.factory/constitution.md', opts.force);
+    const content = readFileSync(resolve(constitutionsDir, `${opts.product}.md`), 'utf-8');
+    writeIfAbsent(constitutionPath, content, '.factory/constitution.md', opts.force || scaffold);
 
     ensureDir(paths.state);
     writeFileSync(paths.product, opts.product);
@@ -1175,7 +1233,7 @@ export async function cmdConstitution(
     return;
   }
 
-  throw new CliExitError('usage: factory constitution --init <product> | --list | --product <name>', 2);
+  throw new CliExitError('usage: factory constitution --init <product> | --list | --checkers | --product <name>', 2);
 }
 
 export function formatDoctorReport(diagnoses: ModelDiagnosis[]): string {
@@ -6398,8 +6456,12 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
       '--init [product]',
       'Write .factory/constitution.md in this repo, scaffolded from the template (an optional name overrides the display name)',
     )
-    .option('--list', 'List available constitutions')
-    .option('--product <name>', 'Seed .factory/constitution.md from the bundled example constitution for <name>')
+    .option('--list', 'List available constitutions with their checkers')
+    .option('--checkers', 'List every built-in checker name with a one-line description')
+    .option(
+      '--product <name>',
+      'Seed .factory/constitution.md from the bundled constitution for <name>; replaces an unmodified scaffold without --force',
+    )
     .option('--force', 'With --init or --product, overwrite an existing .factory/constitution.md')
     .action((opts) => cmdConstitution(opts));
 

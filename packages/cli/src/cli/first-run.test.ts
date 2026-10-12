@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { ConstitutionLoader, getConstitutionsDir } from '@on-par/factory-core';
-import { laneWorktreePath, setupWorktree } from '@on-par/factory-core/internal';
+import { describeConstitutionSource, laneWorktreePath, setupWorktree } from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -158,5 +158,36 @@ describe('factory init → lane worktree constitution (integration)', () => {
     expect(resolved!.body).toContain(marker);
     expect(resolved!.path).toBe(join(repo, '.factory', 'constitution.md'));
     expect(resolved!.path.startsWith(getConstitutionsDir())).toBe(false);
+  }, 30_000);
+
+  it('factory init with no product scaffolds default-code and the lane resolves no custom_* checkers', async () => {
+    await main(['node', 'factory', 'init'], {
+      exec: async (cmd, opts) => {
+        const { stdout, stderr } = await execAsync(cmd, {
+          cwd: opts?.cwd ?? repo,
+          timeout: opts?.timeout,
+          encoding: 'utf-8',
+        });
+        return { stdout: String(stdout), stderr: String(stderr) };
+      },
+    });
+    expect(readFileSync(join(repo, '.factory/constitution.md'), 'utf-8')).toBe(
+      readFileSync(join(getConstitutionsDir(), 'default-code.md'), 'utf-8'),
+    );
+
+    const worktree = laneWorktreePath({
+      repoRoot: repo,
+      parent: join(root, 'worktrees'),
+      repo: 'acme/widget',
+      issue: 2387,
+      prefix: 'factory',
+    });
+    await setupWorktree(repo, 'factory/2387-default-code', worktree, 'origin/main');
+
+    const resolved = new ConstitutionLoader().resolve(worktree, undefined, undefined, repo);
+    expect(resolved).not.toBeNull();
+    expect(resolved!.product).toBe('default-code');
+    expect(resolved!.checkers.some((c) => c.startsWith('custom_'))).toBe(false);
+    expect(describeConstitutionSource(resolved)).toMatch(/^Standards from \.factory\/constitution\.md \(/);
   }, 30_000);
 });

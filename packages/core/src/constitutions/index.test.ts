@@ -9,6 +9,7 @@ import {
   ConstitutionLoader,
   DEFAULT_REPO_CONSTITUTION_PATH,
   DEFAULT_REVIEW_CONSTITUTION,
+  describeConstitutionSource,
   describeReviewConstitutionSource,
   REPO_INSTRUCTION_FILES,
 } from './index.js';
@@ -164,14 +165,14 @@ describe('ConstitutionLoader repo-first resolution', () => {
     expect(loader.resolve(repoDir)).toBeNull();
   });
 
-  it('listProducts() lists bundled product names, filtering non-md, underscore-prefixed, and non-example files', async () => {
+  it('listProducts() lists bundled product names, filtering non-md, underscore-prefixed, and review-only files', async () => {
     await writeFile(join(bundledDir, 'example-alpha.md'), '# Alpha');
     await writeFile(join(bundledDir, 'example-beta.md'), '# Beta');
     await writeFile(join(bundledDir, '_template.md'), '# Template');
     await writeFile(join(bundledDir, 'notes.txt'), 'not a constitution');
-    await writeFile(join(bundledDir, 'acme-cli.md'), '# Not an example');
+    await writeFile(join(bundledDir, `${DEFAULT_REVIEW_CONSTITUTION}.md`), '# Review only');
 
-    expect(loader.listProducts().sort()).toEqual(['example-alpha', 'example-beta']);
+    expect(loader.listProducts()).toEqual(['example-alpha', 'example-beta']);
   });
 
   it('defaults to the real bundled constitutions dir when constructed with no argument', () => {
@@ -179,8 +180,17 @@ describe('ConstitutionLoader repo-first resolution', () => {
     const products = defaultLoader.listProducts();
 
     expect(products.length).toBeGreaterThan(0);
-    expect(products.every((p) => p.startsWith('example-'))).toBe(true);
+    expect(products.every((p) => p.startsWith('example-') || p === 'default-code')).toBe(true);
+    expect(products).toContain('default-code');
     expect(products).not.toContain('acme-cli');
+    expect(products).not.toContain(DEFAULT_REVIEW_CONSTITUTION);
+    expect(products).not.toContain('_template');
+  });
+
+  it('ships a default-code constitution with only built-in checkers', () => {
+    const c = new ConstitutionLoader().load('default-code');
+    expect(c.checkers).toEqual(['worker_output', 'compile', 'tests', 'lint', 'design_smells']);
+    expect(c.checkers.some((n) => n.startsWith('custom_'))).toBe(false);
   });
 
   it('falls back to the filename-derived product when frontmatter omits product', async () => {
@@ -354,6 +364,18 @@ describe('ConstitutionLoader repo-first resolution', () => {
       expect(loader.resolve(repoDir, undefined, undefined, mainDir)).toBeNull();
     });
 
+    it('ignores a worktree .factory/constitution.md and sets repoInstance to the main-checkout path', async () => {
+      await writeWorktreeInstance();
+
+      const c = loader.resolve(repoDir, undefined, undefined, mainDir);
+      expect(c!.body).toContain('Main checkout standards.');
+      expect(c!.repoInstance).toEqual({
+        relPath: DEFAULT_REPO_CONSTITUTION_PATH,
+        absPath: join(mainDir, DEFAULT_REPO_CONSTITUTION_PATH),
+      });
+      expect(c!.repoInstance!.absPath).not.toBe(join(repoDir, DEFAULT_REPO_CONSTITUTION_PATH));
+    });
+
     it('without a main checkout, still reads the repoDir instance', async () => {
       await writeWorktreeInstance();
 
@@ -369,6 +391,64 @@ describe('ConstitutionLoader repo-first resolution', () => {
       const c = loader.resolve(repoDir, 'acme-app', undefined, mainDir);
       expect(c!.body).toContain('Bundled standards body.');
     });
+  });
+});
+
+describe('describeConstitutionSource', () => {
+  let mainDir: string;
+  let worktree: string;
+  let bundledDir: string;
+  let loader: ConstitutionLoader;
+
+  beforeEach(async () => {
+    mainDir = await mkdtemp(join(tmpdir(), 'dcs-main-'));
+    worktree = await mkdtemp(join(tmpdir(), 'dcs-wt-'));
+    bundledDir = await mkdtemp(join(tmpdir(), 'dcs-bundled-'));
+    loader = new ConstitutionLoader(bundledDir);
+    await mkdir(join(mainDir, '.factory'), { recursive: true });
+    await writeFile(join(mainDir, DEFAULT_REPO_CONSTITUTION_PATH), '---\nproduct: inst\n---\nInstance standards.');
+  });
+
+  afterEach(async () => {
+    await Promise.all([mainDir, worktree, bundledDir].map((d) => rm(d, { recursive: true, force: true })));
+  });
+
+  it('describes a null constitution', () => {
+    expect(describeConstitutionSource(null)).toBe(
+      'No standards found (no repo instruction files, no constitution) — proceeding without',
+    );
+  });
+
+  it('names .factory/constitution.md and its absolute path for a main-checkout instance with an empty worktree', () => {
+    const c = loader.resolve(worktree, undefined, undefined, mainDir);
+    expect(describeConstitutionSource(c)).toBe(
+      `Standards from .factory/constitution.md (${join(mainDir, '.factory/constitution.md')})`,
+    );
+  });
+
+  it('adds the merged repo instruction files after the instance', async () => {
+    await writeFile(join(worktree, 'CLAUDE.md'), 'Repo rules.');
+    const c = loader.resolve(worktree, undefined, undefined, mainDir);
+    expect(describeConstitutionSource(c)).toBe(
+      `Standards from .factory/constitution.md (${join(mainDir, '.factory/constitution.md')}), plus repo instruction files (CLAUDE.md)`,
+    );
+  });
+
+  it('keeps the legacy text for repo files without an instance', async () => {
+    await writeFile(join(worktree, 'CLAUDE.md'), 'Repo rules.');
+    const c = loader.resolve(worktree);
+    expect(describeConstitutionSource(c)).toBe('Standards from repo instruction files');
+    expect(describeConstitutionSource(c, 'acme')).toBe(
+      "Standards from repo instruction files (custom checkers from 'acme')",
+    );
+  });
+
+  it('names the product and absolute path for a package-bundled fallback', async () => {
+    await writeFile(join(bundledDir, 'acme-app.md'), BUNDLED);
+    const c = loader.resolve(worktree, 'acme-app');
+    expect(describeConstitutionSource(c, 'acme-app')).toBe(
+      `Standards from bundled constitution 'acme-app' (${join(bundledDir, 'acme-app.md')})`,
+    );
   });
 });
 

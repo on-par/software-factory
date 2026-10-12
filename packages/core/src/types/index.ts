@@ -79,6 +79,8 @@ export interface Constitution {
   path: string;
   /** Where the standards came from: the target repo's own instruction files, or a bundled <product>.md */
   source: 'repo' | 'bundled';
+  /** Set when the standards include a repo constitution instance (.factory/constitution.md by default): its repo-relative and absolute path. */
+  repoInstance?: { relPath: string; absPath: string };
 }
 
 // ---------- Checkers ----------
