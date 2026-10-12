@@ -3781,6 +3781,15 @@ explaining exclusions.`;
   const message = triageProposalMessage(proposed, paths.queueProposed, paths.queue);
   if (message) {
     console.log(message);
+    const validation = validateQueue(proposed);
+    if (!validation.ok) {
+      throw new CliExitError(
+        `factory: triage wrote a proposal that factory triage accept would reject — ${paths.queueProposed} left for review\n` +
+          `${validation.errors.map((e) => `  - ${e}`).join('\n')}\n` +
+          'fix the file and run factory triage accept, or use factory triage accept --force\n',
+        1,
+      );
+    }
   } else {
     throw triageNoProposalError(plannerError);
   }

@@ -34,10 +34,31 @@ describe('validateQueue', () => {
     expect(result.issues).toEqual([5, 6]);
   });
 
-  it('rejects a blank line in the middle', () => {
+  it('accepts a blank line between entries', () => {
     const result = validateQueue('app 5\n\napp 6\n');
+    expect(result.ok).toBe(true);
+    expect(result.issues).toEqual([5, 6]);
+  });
+
+  it('accepts blank lines after the header, after comments, at the start, between entries and at the end', () => {
+    const result = validateQueue(
+      '\n# Triage queue — constitution: default-code\n\n# c1\n# c2\n# c3\n# c4\n\ngreet 1\n\ngreet 2\n\n\n',
+    );
+    expect(result.ok).toBe(true);
+    expect(result.issues).toEqual([1, 2]);
+    expect(result.errors).toEqual([]);
+  });
+
+  it('keeps original line numbers in errors after blank lines', () => {
+    const result = validateQueue('# h\n\napp x\n');
     expect(result.ok).toBe(false);
-    expect(result.errors.some((e) => e.includes('line 2') && e.includes('empty line'))).toBe(true);
+    expect(result.errors.some((e) => e.includes('line 3') && e.includes('malformed'))).toBe(true);
+  });
+
+  it('rejects whitespace-only content', () => {
+    const result = validateQueue('\n  \n\t\n');
+    expect(result.ok).toBe(false);
+    expect(result.errors).toContain('queue has no issue entries');
   });
 
   it('rejects malformed entries', () => {
