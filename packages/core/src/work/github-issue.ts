@@ -24,7 +24,25 @@ export interface WorkIssueClient {
     body: string | null;
     htmlUrl?: string;
     state?: WorkRequestState;
+    /** True when the number belongs to a pull request (GitHub's issues API serves both). */
+    isPullRequest?: boolean;
   }>;
+}
+
+/** The issue a pull request body says it closes, if any ("Closes #12", "fixes #12"). */
+function linkedIssueFromPrBody(body: string | null): number | undefined {
+  const m = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b/i.exec(body ?? '');
+  return m ? Number(m[1]) : undefined;
+}
+
+/** #2492: `ship`/`run-issue` got a pull request number. Raised before any model, worktree or plan call.
+ *  A function (not a subclass) because work/index.ts imports this module (a class here would hit the cycle). */
+function pullRequestNotIssueError(prNumber: number, linkedIssue: number | undefined): InvalidWorkRequestInputError {
+  const err = new InvalidWorkRequestInputError(GITHUB_ISSUE_SOURCE, 'pull request number');
+  err.message =
+    `#${prNumber} is a pull request, not an issue.` +
+    (linkedIssue === undefined ? ' Pass the issue number it closes.' : ` Did you mean issue #${linkedIssue}?`);
+  return err;
 }
 
 export function createOctokitIssueClient(octokit: Octokit): WorkIssueClient {
@@ -36,6 +54,7 @@ export function createOctokitIssueClient(octokit: Octokit): WorkIssueClient {
         body: data.body ?? null,
         htmlUrl: data.html_url,
         state: data.state === 'closed' ? 'closed' : 'open',
+        isPullRequest: data.pull_request != null,
       };
     },
   };
@@ -61,6 +80,9 @@ export function createGithubIssueAdapter(client: WorkIssueClient): WorkSourceAda
 
       const [owner, name] = params.repo.split('/');
       const data = await client.fetchIssue({ owner, repo: name, issue_number: params.issue });
+      if (data.isPullRequest === true) {
+        throw pullRequestNotIssueError(params.issue, linkedIssueFromPrBody(data.body));
+      }
       const brief = data.body ?? '';
 
       return {

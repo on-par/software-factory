@@ -5369,6 +5369,22 @@ bash scripts/verify.sh
   });
 
   describe('run-issue (one-shot)', () => {
+    it.each(['ship', 'run-issue'])(
+      '%s refuses a pull request number before any model or plan call (#2492)',
+      async (cmd) => {
+        h.octokit.rest.issues.get = vi.fn(async () => ({
+          data: { title: 'Add subtract (#1)', body: 'Closes #1', pull_request: { url: 'x' } },
+        }));
+        const routerRun = vi.fn(h.routerRun);
+        h.routerRun = routerRun;
+        const res = await runMain(cmd, '2');
+        expect(res).toEqual({ exited: true, code: 2 });
+        expect(errored()).toContain('#2 is a pull request, not an issue. Did you mean issue #1?');
+        expect(phases.planPhase).not.toHaveBeenCalled();
+        expect(routerRun).not.toHaveBeenCalled();
+      },
+    );
+
     it('runs worktree gc before shipping when worktree.autoGcOnRun is true (#1756)', async () => {
       h.factoryConfig = { ...h.factoryConfig, worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: true } };
       const res = await runMain('run-issue', '5');
