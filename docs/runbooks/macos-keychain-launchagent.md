@@ -69,7 +69,7 @@ launchctl bootout gui/$(id -u)/com.onpar.factory-<repo>
 
 ## Verification
 
-From the same launch context, run `factory doctor` and confirm both `claude keychain (macOS)` and `claude auth (host)` pass. Also run:
+From the same launch context, run `factory doctor --probe-inference` and confirm both `claude keychain (macOS)` and `claude auth (host)` pass. Also run:
 
 ```sh
 claude -p "reply with exactly: ok"

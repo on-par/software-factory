@@ -39,10 +39,12 @@ import {
   reconcileAgentAuthChecks,
 } from './doctor.js';
 
+const SIGN_IN_ENV_KEYS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'CODEX_API_KEY', 'OPENCODE_API_KEY'];
+
 function probes(overrides: Partial<DoctorEnvProbes> = {}): DoctorEnvProbes {
   return {
     commandAvailable: () => true,
-    envPresent: () => true,
+    envPresent: (key) => !SIGN_IN_ENV_KEYS.includes(key),
     tryExec: (cmd: string) => {
       if (cmd.includes('git rev-parse')) return '/repo';
       if (cmd.includes('git status --porcelain')) return '';
@@ -56,6 +58,8 @@ function probes(overrides: Partial<DoctorEnvProbes> = {}): DoctorEnvProbes {
     },
     pathExists: () => true,
     platform: 'darwin',
+    claudeLoggedIn: () => true,
+    opencodeLoggedIn: () => true,
     ...overrides,
   };
 }
@@ -170,9 +174,9 @@ describe('gitAuthCheck', () => {
 });
 
 describe('runDoctorChecks', () => {
-  it('fully configured repo: 15 checks all ok, pre-existing rows unchanged, doctorFailed false', () => {
+  it('fully configured repo: 17 checks all ok, pre-existing rows unchanged, doctorFailed false', () => {
     const checks = runDoctorChecks(probes());
-    expect(checks).toHaveLength(15);
+    expect(checks).toHaveLength(17);
     expect(checks.every((c) => c.ok)).toBe(true);
     expect(doctorFailed(checks)).toBe(false);
     const byName = (n: string) => checks.find((c) => c.name === n)!;
@@ -197,8 +201,8 @@ describe('runDoctorChecks', () => {
     expect(claude.section).toBe('Claude Code');
     expect(claude.fix).toMatch(/npm install -g @anthropic-ai\/claude-code$/);
     expect(checks.find((c) => c.name === 'coding agent')).toMatchObject({ ok: true, detail: 'found codex' });
-    expect(checks.find((c) => c.name === 'codex auth')).toMatchObject({ ok: true });
-    expect(checks.find((c) => c.name === 'codex auth')!.detail).toContain('ChatGPT');
+    expect(checks.find((c) => c.name === 'codex signed in')).toMatchObject({ ok: true });
+    expect(checks.find((c) => c.name === 'codex signed in')!.detail).toContain('ChatGPT');
     expect(doctorFailed(checks)).toBe(false);
   });
 
@@ -208,7 +212,7 @@ describe('runDoctorChecks', () => {
     const agent = checks.find((c) => c.name === 'coding agent')!;
     expect(agent.ok).toBe(false);
     expect(agent.fix).toContain('Codex CLI');
-    expect(checks.find((c) => c.name === 'codex auth')).toBeUndefined();
+    expect(checks.find((c) => c.name === 'codex signed in')!.detail).toMatch(/^skipped/);
     expect(doctorFailed(checks)).toBe(true);
   });
 
@@ -220,12 +224,12 @@ describe('runDoctorChecks', () => {
         tryExec: (cmd) => (cmd.includes('codex login status') ? 'Not logged in' : base.tryExec(cmd)),
       }),
     );
-    const auth = checks.find((c) => c.name === 'codex auth')!;
+    const auth = checks.find((c) => c.name === 'codex signed in')!;
     expect(auth.ok).toBe(false);
     expect(auth.optional).toBe(false);
-    expect(auth.fix).toContain('codex login');
-    expect(auth.fix).toContain('--with-api-key');
-    expect(auth.fix).toContain('--device-auth');
+    expect(auth.fix).toMatch(/codex login$/);
+    expect(auth.detail).toContain('--with-api-key');
+    expect(auth.detail).toContain('--device-auth');
     expect(doctorFailed(checks)).toBe(true);
   });
 
@@ -236,7 +240,7 @@ describe('runDoctorChecks', () => {
         codexSessionState: () => 'refresh-pending',
       }),
     );
-    const auth = checks.find((c) => c.name === 'codex auth')!;
+    const auth = checks.find((c) => c.name === 'codex signed in')!;
     expect(auth.ok).toBe(true);
     expect(auth.detail).toContain('refreshes it on the next run');
     expect(doctorFailed(checks)).toBe(false);
@@ -249,7 +253,7 @@ describe('runDoctorChecks', () => {
         codexSessionState: () => 'unusable',
       }),
     );
-    const auth = checks.find((c) => c.name === 'codex auth')!;
+    const auth = checks.find((c) => c.name === 'codex signed in')!;
     expect(auth.ok).toBe(false);
     expect(auth.fix).toContain('codex login');
     expect(doctorFailed(checks)).toBe(true);
@@ -257,10 +261,12 @@ describe('runDoctorChecks', () => {
 
   it('an unusable codex session plus a logged-out claude fails doctor (#2509)', () => {
     const checks = reconcileAgentAuthChecks([
-      ...runDoctorChecks(probes({ codexSessionState: () => 'unusable' })),
+      ...runDoctorChecks(
+        probes({ codexSessionState: () => 'unusable', claudeLoggedIn: () => false, opencodeLoggedIn: () => false }),
+      ),
       { name: 'claude auth (host)', ok: false, detail: 'claude -p failed on the host' },
     ]);
-    expect(checks.find((c) => c.name === 'codex auth')).toMatchObject({ ok: false, optional: false });
+    expect(checks.find((c) => c.name === 'codex signed in')).toMatchObject({ ok: false, optional: false });
     expect(doctorFailed(checks)).toBe(true);
   });
 
@@ -269,7 +275,7 @@ describe('runDoctorChecks', () => {
     const checks = runDoctorChecks(
       probes({ tryExec: (cmd) => (cmd.includes('codex login status') ? null : base.tryExec(cmd)) }),
     );
-    expect(checks.find((c) => c.name === 'codex auth')).toMatchObject({ ok: false, optional: true });
+    expect(checks.find((c) => c.name === 'codex signed in')).toMatchObject({ ok: false, optional: true });
   });
 
   it('codexAuthMethod maps status text to a fixed label and never echoes it', () => {
@@ -288,7 +294,7 @@ describe('runDoctorChecks', () => {
         tryExec: (cmd) => (cmd.includes('codex login status') ? 'Logged in using an API key' : base.tryExec(cmd)),
       }),
     );
-    expect(checks.find((c) => c.name === 'codex auth')!.detail).toBe('logged in with API key');
+    expect(checks.find((c) => c.name === 'codex signed in')!.detail).toBe('logged in with API key');
   });
 
   it('gh missing on PATH gives a distinct fail detail from gh unauthenticated', () => {
@@ -1343,12 +1349,126 @@ describe('modelsRegistryChecks', () => {
   });
 });
 
+describe('harness sign-in (#2556)', () => {
+  const only =
+    (...clis: string[]) =>
+    (cmd: string) =>
+      clis.includes(cmd);
+  const noEvidence = (overrides: Partial<DoctorEnvProbes> = {}) => {
+    const base = probes();
+    return probes({
+      envPresent: () => false,
+      claudeLoggedIn: () => false,
+      opencodeLoggedIn: () => false,
+      tryExec: (cmd) => (cmd.includes('codex login status') ? 'Not logged in' : base.tryExec(cmd)),
+      ...overrides,
+    });
+  };
+
+  it('codex not logged in: the Codex sign-in row fails and its fix ends with codex login', () => {
+    const checks = reconcileAgentAuthChecks(
+      runDoctorChecks(noEvidence({ commandAvailable: (cmd) => cmd !== 'claude' && cmd !== 'opencode' })),
+    );
+    expect(checks.find((c) => c.name === 'codex signed in')).toMatchObject({
+      section: 'Codex',
+      ok: false,
+      optional: false,
+    });
+    expect(checks.find((c) => c.name === 'codex signed in')!.detail).toMatch(/^unverified/);
+    expect(formatDoctorChecks(checks)).toMatch(/fix: .*codex login$/m);
+    expect(doctorFailed(checks)).toBe(true);
+  });
+
+  it.each([
+    ['claude via stored login', 'claude signed in', { claudeLoggedIn: () => true }, undefined],
+    ['claude via ANTHROPIC_API_KEY', 'claude signed in', {}, 'ANTHROPIC_API_KEY'],
+    [
+      'codex via codex login status',
+      'codex signed in',
+      { tryExec: (c: string) => (c.includes('codex login status') ? 'Logged in using an API key' : '') },
+      undefined,
+    ],
+    ['codex via CODEX_API_KEY', 'codex signed in', {}, 'CODEX_API_KEY'],
+    ['opencode via stored login', 'opencode signed in', { opencodeLoggedIn: () => true }, undefined],
+    ['opencode via OPENCODE_API_KEY', 'opencode signed in', {}, 'OPENCODE_API_KEY'],
+  ] as const)('evidence marks %s signed in', (_label, name, overrides, key) => {
+    const checks = runDoctorChecks(noEvidence({ envPresent: (k) => k === key, ...overrides }));
+    const row = checks.find((c) => c.name === name)!;
+    expect(row.ok).toBe(true);
+    expect(row.optional).toBeUndefined();
+    const out = formatDoctorChecks([row]);
+    expect(out).not.toContain('fix:');
+  });
+
+  it('no evidence shows unverified and the login command for claude and opencode', () => {
+    const checks = runDoctorChecks(noEvidence());
+    const claude = checks.find((c) => c.name === 'claude signed in')!;
+    const opencode = checks.find((c) => c.name === 'opencode signed in')!;
+    expect(claude.detail).toMatch(/^unverified/);
+    expect(claude.fix).toMatch(/claude then \/login$/);
+    expect(opencode.detail).toMatch(/^unverified/);
+    expect(opencode.fix).toMatch(/opencode auth login$/);
+  });
+
+  it('a harness that is not installed gets a skipped signed-in row that does not count as signed in', () => {
+    const checks = reconcileAgentAuthChecks(runDoctorChecks(noEvidence({ commandAvailable: only('codex') })));
+    for (const name of ['claude signed in', 'opencode signed in']) {
+      const row = checks.find((c) => c.name === name)!;
+      expect(row).toMatchObject({ ok: true, optional: true });
+      expect(row.detail).toMatch(/^skipped/);
+    }
+    expect(doctorFailed(checks)).toBe(true);
+  });
+
+  it('makes no inference call for any of the three harnesses', () => {
+    for (const evidence of [true, false]) {
+      const inference = vi.fn();
+      const base = evidence ? probes() : noEvidence();
+      const claudeLoggedIn = vi.fn(() => evidence);
+      const opencodeLoggedIn = vi.fn(() => evidence);
+      const checks = runDoctorChecks({
+        ...base,
+        claudeLoggedIn,
+        opencodeLoggedIn,
+        tryExec: (cmd, opts) => {
+          if (/^(claude\s+(-p|--print)|codex\s+exec|opencode\s+run)\b/.test(cmd)) inference();
+          return base.tryExec(cmd, opts);
+        },
+      });
+      expect(inference).not.toHaveBeenCalled();
+      for (const cli of ['claude', 'codex', 'opencode']) {
+        expect(checks.some((c) => c.name === `${cli} signed in`)).toBe(true);
+      }
+    }
+  });
+
+  it('a throwing stored-login probe counts as no evidence', () => {
+    const checks = runDoctorChecks(
+      noEvidence({
+        claudeLoggedIn: () => {
+          throw new Error('boom');
+        },
+      }),
+    );
+    expect(checks.find((c) => c.name === 'claude signed in')).toMatchObject({ ok: false });
+  });
+
+  it('reconcile downgrades an unverified opencode row when another agent is signed in, else keeps it failing', () => {
+    const unverified = { name: 'opencode signed in', ok: false, optional: false, detail: 'unverified — x' };
+    const signedIn = { name: 'claude signed in', ok: true, detail: 'signed in' };
+    const [down] = reconcileAgentAuthChecks([unverified, signedIn]);
+    expect(down).toMatchObject({ ok: false, optional: true });
+    expect(down!.detail).toContain('another agent is signed in');
+    expect(reconcileAgentAuthChecks([unverified])[0]).toMatchObject({ ok: false, optional: false });
+  });
+});
+
 describe('reconcileAgentAuthChecks (#2496)', () => {
   const claudeFailed = { name: 'claude auth (host)', ok: false, detail: 'claude -p failed on the host' };
   const claudeSkipped = { name: 'claude auth (host)', ok: true, optional: true, detail: 'skipped' };
-  const codexOk = { name: 'codex auth', ok: true, detail: 'logged in with ChatGPT' };
+  const codexOk = { name: 'codex signed in', ok: true, detail: 'logged in with ChatGPT' };
   const codexFailed = {
-    name: 'codex auth',
+    name: 'codex signed in',
     ok: false,
     optional: true,
     detail: 'codex CLI installed but not logged in',
