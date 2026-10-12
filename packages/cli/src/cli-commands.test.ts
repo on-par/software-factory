@@ -6089,6 +6089,51 @@ Please add a widget that does the thing.
       expect(logged()).toContain('== factory doctor ==');
     });
 
+    describe('models.registry', () => {
+      const writeRegistry = (harness?: string) => {
+        mkdirSync(paths().root, { recursive: true });
+        writeFileSync(
+          paths().config,
+          JSON.stringify({
+            version: 2,
+            models: {
+              registry: {
+                'my-model': {
+                  provider: 'custom',
+                  tier: 'worker',
+                  costPerMtokInput: 1,
+                  costPerMtokOutput: 2,
+                  contextWindow: 1000,
+                  capabilities: [],
+                  envKey: null,
+                  providerModel: 'my-model',
+                  ...(harness === undefined ? {} : { harness }),
+                },
+              },
+            },
+          }),
+        );
+      };
+
+      it('fails and names the config path and harness field for a models.registry entry with no harness', async () => {
+        h.claudeAvailable = true;
+        writeRegistry();
+        const res = await runMain('doctor');
+        expect(res.exited).toBeTruthy();
+        expect(logged()).toContain('.factory/config.json');
+        expect(logged()).toContain('models.registry.my-model.harness');
+      });
+
+      it('fails and names the config path and harness field for a models.registry entry with an unknown harness', async () => {
+        h.claudeAvailable = true;
+        writeRegistry('nope');
+        const res = await runMain('doctor');
+        expect(res.exited).toBeTruthy();
+        expect(logged()).toContain('.factory/config.json');
+        expect(logged()).toContain('models.registry.my-model.harness');
+      });
+    });
+
     it('reports a declared harness whose probe passes as available', async () => {
       h.claudeAvailable = true;
       h.harnessProbes = [{ harness: 'my-agent', probe: 'my-agent --version', status: 'available', detail: '' }];

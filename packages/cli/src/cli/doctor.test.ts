@@ -16,6 +16,7 @@ import {
   formatWorktreeReconcileReport,
   type GreenPrScanResult,
   leaseChecks,
+  modelsRegistryChecks,
   keychainPreflightError,
   type LeaseHealthRow,
   NOT_IN_REPO_HINT,
@@ -831,5 +832,67 @@ describe('declaredHarnessChecks', () => {
 
   it('returns no checks for no declared harnesses', () => {
     expect(declaredHarnessChecks([])).toEqual([]);
+  });
+});
+
+describe('modelsRegistryChecks', () => {
+  const cfg = '/repo/.factory/config.json';
+  const valid = ['opencode', 'claude-cli', 'my-agent'];
+
+  it('returns nothing for an undefined or empty registry', () => {
+    expect(modelsRegistryChecks(cfg, undefined, valid)).toEqual([]);
+    expect(modelsRegistryChecks(cfg, {}, valid)).toEqual([]);
+  });
+
+  it('fails an entry with no harness, naming the path and field', () => {
+    const rows = modelsRegistryChecks(cfg, { 'my-model': {} }, valid);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.ok).toBe(false);
+    expect(rows[0]?.optional).toBeUndefined();
+    expect(rows[0]?.detail).toContain(cfg);
+    expect(rows[0]?.detail).toContain('models.registry.my-model.harness');
+    expect(doctorFailed(rows)).toBe(true);
+  });
+
+  it('treats a whitespace-only harness as missing', () => {
+    const rows = modelsRegistryChecks(cfg, { 'my-model': { harness: '   ' } }, valid);
+    expect(rows[0]?.detail).toContain('is missing');
+  });
+
+  it('fails an unknown harness, naming the path, field, value and valid list', () => {
+    const rows = modelsRegistryChecks(cfg, { 'my-model': { harness: 'nope' } }, valid);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.detail).toContain(cfg);
+    expect(rows[0]?.detail).toContain('models.registry.my-model.harness');
+    expect(rows[0]?.detail).toContain("'nope'");
+    expect(rows[0]?.detail).toContain('opencode, claude-cli, my-agent');
+    expect(doctorFailed(rows)).toBe(true);
+  });
+
+  it('treats an exact-case mismatch as unknown', () => {
+    expect(modelsRegistryChecks(cfg, { m: { harness: 'Opencode' } }, valid)[0]?.ok).toBe(false);
+  });
+
+  it('accepts a harness that is only declared', () => {
+    const rows = modelsRegistryChecks(cfg, { m: { harness: 'my-agent' } }, valid);
+    expect(rows.every((r) => r.ok)).toBe(true);
+  });
+
+  it('reports one ok row and no failure when every entry has a known harness', () => {
+    const rows = modelsRegistryChecks(cfg, { a: { harness: 'opencode' }, b: { harness: 'claude-cli' } }, valid);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ name: 'models.registry', ok: true });
+    expect(rows[0]?.detail).toContain('2 entries valid');
+    expect(doctorFailed(rows)).toBe(false);
+  });
+
+  it('uses the singular for one valid entry', () => {
+    expect(modelsRegistryChecks(cfg, { a: { harness: 'opencode' } }, valid)[0]?.detail).toContain('1 entry valid');
+  });
+
+  it('gives one failed row per invalid entry and no ok row for a mixed registry', () => {
+    const rows = modelsRegistryChecks(cfg, { a: { harness: 'opencode' }, b: {}, c: { harness: 'nope' } }, valid);
+    expect(rows).toHaveLength(2);
+    expect(rows.some((r) => r.ok)).toBe(false);
   });
 });
