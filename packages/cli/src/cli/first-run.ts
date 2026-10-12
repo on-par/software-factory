@@ -25,8 +25,18 @@ Docs:                   ${DOCS_URL}
 `;
 }
 
-export function missingClaudeCliMessage(): string {
-  return `claude CLI not found — install Claude Code first: ${CLAUDE_CODE_URL}`;
+export const CODEX_CLI_URL = 'https://developers.openai.com/codex/cli';
+
+/** Coding agent CLIs the factory can drive for PLAN and BUILD. Any one of them is enough. */
+export const AGENT_CLIS = ['claude', 'codex', 'opencode'] as const;
+
+/** Agent CLIs from AGENT_CLIS found on PATH. */
+export function availableAgentClis(commandAvailable: (cmd: string) => boolean): string[] {
+  return AGENT_CLIS.filter((cmd) => commandAvailable(cmd));
+}
+
+export function missingAgentCliMessage(): string {
+  return `no coding agent CLI found on PATH (claude, codex or opencode). Install one: Claude Code (${CLAUDE_CODE_URL}) or the Codex CLI (${CODEX_CLI_URL}), then sign in with \`claude /login\` or \`codex login\``;
 }
 
 export function missingTokenMessage(): string {

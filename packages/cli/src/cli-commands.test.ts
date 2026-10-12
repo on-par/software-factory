@@ -5250,11 +5250,20 @@ bash scripts/verify.sh
       expect(typeof call.drainSteering).toBe('function');
     });
 
-    it('exits 2 with the missing-claude message and never invokes the phase mocks when claude is unavailable', async () => {
+    it('passes the agent prerequisite with only the codex CLI on PATH (#1269)', async () => {
+      coreFakes.isCommandAvailable.mockImplementation((c: string) => c === 'codex' || c === 'git' || c === 'gh');
+      const res = await runMain('ship', '5');
+      expect(errored()).not.toContain('no coding agent CLI');
+      expect(errored()).not.toContain('claude CLI not found');
+      expect(phases.planPhase).toHaveBeenCalled();
+      expect(res.exited === false || res.code !== 2).toBe(true);
+    });
+
+    it('exits 2 with the missing-agent message and never invokes the phase mocks when no agent CLI is available', async () => {
       h.claudeAvailable = false;
       const res = await runMain('ship', '42');
       expect(res).toEqual({ exited: true, code: 2 });
-      expect(errored()).toContain('claude CLI not found — install Claude Code first:');
+      expect(errored()).toContain('no coding agent CLI found on PATH');
       expect(phases.planPhase).not.toHaveBeenCalled();
       expect(phases.buildPhase).not.toHaveBeenCalled();
       expect(phases.checkPhase).not.toHaveBeenCalled();
@@ -5708,11 +5717,11 @@ bash scripts/verify.sh
       expect(errored()).toContain('Run failed for issue #5');
     });
 
-    it('exits 2 with the missing-claude message and never invokes the phase mocks when claude is unavailable', async () => {
+    it('exits 2 with the missing-agent message and never invokes the phase mocks when no agent CLI is available', async () => {
       h.claudeAvailable = false;
       const res = await runMain('run-issue', '5');
       expect(res).toEqual({ exited: true, code: 2 });
-      expect(errored()).toContain('claude CLI not found — install Claude Code first:');
+      expect(errored()).toContain('no coding agent CLI found on PATH');
       expect(phases.planPhase).not.toHaveBeenCalled();
       expect(phases.buildPhase).not.toHaveBeenCalled();
       expect(phases.checkPhase).not.toHaveBeenCalled();
@@ -5872,14 +5881,14 @@ Please add a widget that does the thing.
       expect(phases.planPhase).not.toHaveBeenCalled();
     });
 
-    it('exits 2 with the missing-claude message and never invokes the phase mocks when claude is unavailable', async () => {
+    it('exits 2 with the missing-agent message and never invokes the phase mocks when no agent CLI is available', async () => {
       h.claudeAvailable = false;
       const briefPath = writeBrief();
 
       const res = await runMain('run-brief', briefPath);
 
       expect(res).toEqual({ exited: true, code: 2 });
-      expect(errored()).toContain('claude CLI not found — install Claude Code first:');
+      expect(errored()).toContain('no coding agent CLI found on PATH');
       expect(phases.planPhase).not.toHaveBeenCalled();
       expect(phases.buildPhase).not.toHaveBeenCalled();
       expect(phases.checkPhase).not.toHaveBeenCalled();
