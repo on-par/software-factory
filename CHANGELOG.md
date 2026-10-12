@@ -4,6 +4,45 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.9.3
+
+First-run reliability fixes and the start of agent-neutral command harnesses.
+All seven published `@on-par` packages move to 0.9.3 in lockstep. Install or
+update with `npm install -g @on-par/factory-cli@latest`.
+
+### Added
+
+- Command harnesses: you can declare your own harness ids in config, and the
+  factory runs a configured command harness with safe placeholder
+  substitution inside the sandbox policy. Failures and usage are classified
+  through the contract kit, and the adapter contract is documented (#2428,
+  #2429, #2430, #2431, #2432).
+- `factory doctor` and `factory models --doctor` probe configured command
+  harnesses (#2433).
+- Repos can declare models in `models.registry`; they are loaded and pinned,
+  and redefining a packaged model id has defined, tested behaviour (#2440,
+  #2441).
+- A default code constitution and checker list. Runs use the repo's
+  `.factory/constitution.md` (#2387).
+
+### Changed
+
+- Claude and Codex models count as reachable only with login evidence.
+  Models with no auth evidence are reported as unverified, and `factory init`
+  agrees with `factory doctor` (#2417, #2418, #2419).
+- `factory models` agrees with `factory models --doctor` on provider
+  availability (#2402).
+- README first-run accuracy sweep: state paths, worktrees, the constitution
+  flow and the new checks (#2389).
+- `factory ship` logs a normal PR open as `pr_opened`, not recovered, and the
+  remaining naming now says On PAR Dev's Software Factory (#2388).
+
+### Fixed
+
+- Lane worktree runs resolve the constitution from the main checkout and
+  ignore constitutions authored in a worktree. An integration test proves an
+  edited constitution reaches a lane run (#2411, #2412, #2413).
+
 ## 0.9.2
 
 Public-repo cleanup and first-run reliability fixes. All seven published
