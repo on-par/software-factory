@@ -259,7 +259,11 @@ describe('runIssue — constitution checker preflight (#2585)', () => {
   });
 
   it('reaches PLAN when every checker is a built-in or custom_*', async () => {
-    const { dir, constitution } = setup(['compile', 'custom_docs']);
+    // File must not retain scaffold tokens — token preflight (#2586) parks those before PLAN.
+    const { dir, constitution } = setup(
+      ['compile', 'custom_docs'],
+      '---\nproduct: acme\nversion: 1\ncheckers:\n  - compile\n  - custom_docs\n---\nbody',
+    );
     try {
       const outcome = await runIssue(
         baseRequest(),

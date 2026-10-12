@@ -528,17 +528,10 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     const constitution = ports.resolveConstitution();
     log('constitution', describeConstitutionSource(constitution, request.product));
 
-    // Pre-PLAN config preflight (#2586): unfilled scaffold tokens park the run before any model call or subprocess.
-    const tokenFindings = preflightConfigTokens({ constitution, configFile: request.repoConfigFile });
-    if (tokenFindings.length > 0) {
-      return terminalParked(
-        'fail',
-        `config preflight failed before PLAN:\n${tokenFindings.map((f) => f.message).join('\n')}`,
-      );
-    }
-
     // Pre-PLAN checker-name preflight (#2585): an unknown `checkers:` entry would only fail closed in
     // CHECK, after PLAN and BUILD spent model calls. Read-only, no subprocess, runs for localOnly too.
+    // Runs before token preflight so a `<checker-name>` placeholder gets the checker-specific escalate
+    // message rather than a generic token park (#2586).
     if (constitution?.checkers?.length) {
       const file =
         constitution.repoInstance?.absPath ?? (constitution.source === 'bundled' ? constitution.path : undefined);
@@ -555,6 +548,15 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
         const display = constitution.repoInstance?.relPath ?? constitution.path;
         return terminalEscalated(problems.map((p) => formatUnknownCheckerMessage(display, p)).join('\n'));
       }
+    }
+
+    // Pre-PLAN config preflight (#2586): unfilled scaffold tokens park the run before any model call or subprocess.
+    const tokenFindings = preflightConfigTokens({ constitution, configFile: request.repoConfigFile });
+    if (tokenFindings.length > 0) {
+      return terminalParked(
+        'fail',
+        `config preflight failed before PLAN:\n${tokenFindings.map((f) => f.message).join('\n')}`,
+      );
     }
 
     // Pre-PLAN base health (#2339): a red origin/main releases the issue before any model spend;
