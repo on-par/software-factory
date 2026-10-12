@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   analyzeEventLog,
@@ -15,6 +15,7 @@ import {
   formatMicroVmReconcileReport,
   formatReconcileReport,
   formatWorktreeReconcileReport,
+  gitAuthCheck,
   type GreenPrScanResult,
   leaseChecks,
   modelsRegistryChecks,
@@ -42,6 +43,7 @@ function probes(overrides: Partial<DoctorEnvProbes> = {}): DoctorEnvProbes {
       if (cmd.includes('gh auth token')) return 'gho_token';
       if (cmd.includes('gh auth status')) return 'Logged in';
       if (cmd.includes('codex login status')) return 'Logged in using ChatGPT';
+      if (cmd.includes('git remote get-url origin')) return 'https://github.com/o/r.git';
       return '';
     },
     pathExists: () => true,
@@ -50,14 +52,62 @@ function probes(overrides: Partial<DoctorEnvProbes> = {}): DoctorEnvProbes {
   };
 }
 
+describe('gitAuthCheck', () => {
+  it('outside a git repo, git auth is skipped with a reason and does not fail doctor', () => {
+    const tryExecSpy = vi.fn((_cmd: string): string | null => 'https://github.com/o/r.git');
+    const check = gitAuthCheck(null, tryExecSpy);
+    expect(check).toMatchObject({ name: 'git auth', ok: true, optional: true });
+    expect(check.detail).toMatch(/^skipped — not inside a git repository/);
+    expect(check.detail).toContain(NOT_IN_REPO_HINT);
+    expect(tryExecSpy.mock.calls.some(([cmd]) => cmd.includes('git remote'))).toBe(false);
+
+    const base = probes();
+    const checks = runDoctorChecks(
+      probes({ tryExec: (cmd) => (cmd.includes('git rev-parse') ? null : base.tryExec(cmd)) }),
+    );
+    const row = checks.find((c) => c.name === 'git auth')!;
+    expect(row).toMatchObject({ ok: true, optional: true });
+    expect(row.detail).toMatch(/^skipped — /);
+    expect(doctorFailed(checks)).toBe(false);
+  });
+
+  it('in a repo with no origin remote, git auth is skipped with a reason and does not fail doctor', () => {
+    for (const result of [null, '']) {
+      expect(gitAuthCheck('/repo', () => result)).toEqual({
+        name: 'git auth',
+        ok: true,
+        optional: true,
+        detail: 'skipped — no origin remote configured',
+      });
+    }
+
+    const base = probes();
+    const checks = runDoctorChecks(
+      probes({ tryExec: (cmd) => (cmd.includes('git remote get-url origin') ? null : base.tryExec(cmd)) }),
+    );
+    const row = checks.find((c) => c.name === 'git auth')!;
+    expect(row).toMatchObject({ ok: true, optional: true, detail: 'skipped — no origin remote configured' });
+    expect(doctorFailed(checks)).toBe(false);
+  });
+
+  it('with an origin remote, git auth is a non-failing placeholder that never echoes the URL', () => {
+    const check = gitAuthCheck('/repo', () => 'https://user:tok@github.com/o/r.git');
+    expect(check).toMatchObject({ ok: true, optional: true });
+    expect(check.detail).not.toContain('tok');
+    expect(check.detail).not.toContain('github.com');
+  });
+});
+
 describe('runDoctorChecks', () => {
-  it('fully configured repo: 12 checks all ok, pre-existing rows unchanged, doctorFailed false', () => {
+  it('fully configured repo: 13 checks all ok, pre-existing rows unchanged, doctorFailed false', () => {
     const checks = runDoctorChecks(probes());
-    expect(checks).toHaveLength(12);
+    expect(checks).toHaveLength(13);
     expect(checks.every((c) => c.ok)).toBe(true);
     expect(doctorFailed(checks)).toBe(false);
     const byName = (n: string) => checks.find((c) => c.name === n)!;
     expect(byName('git repository').detail).toBe('/repo');
+    expect(byName('git auth')).toMatchObject({ ok: true, optional: true });
+    expect(byName('git auth').detail).not.toContain('github.com');
     expect(byName('codex sandbox').detail).toBe('codex CLI found (sandboxed builds available)');
     expect(byName('git worktree clean').detail).toBe('clean');
     expect(byName('.factory initialized').detail).toBe('.factory/ present');
