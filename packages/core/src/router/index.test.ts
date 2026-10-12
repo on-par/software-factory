@@ -276,6 +276,18 @@ describe('ModelRouter with StubModelExecutor', () => {
     expect(failures).toEqual([{ provider: 'anthropic', reason: 'usage_cap' }]);
   });
 
+  it('does not retry a model that failed local_auth (#2494)', async () => {
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ fail: 'local_auth' }, { output: 'SAME MODEL AGAIN' }, { output: 'FROM GPT' }] },
+    });
+    const router = new ModelRouter(providerModels, routes, false, stub);
+    const result = await router.run('plan', 'do it', {
+      modelOverride: 'claude-preferred',
+      modelFallbacks: ['gpt-fallback'],
+    });
+    expect(result.attempts.map((a) => a.model)).toEqual(['claude-preferred', 'gpt-fallback']);
+  });
+
   it('does not open provider breaker bookkeeping for local auth failures', async () => {
     const stub = new StubModelExecutor({ scripts: { plan: [{ fail: 'local_auth' }, { output: 'FROM GPT' }] } });
     const router = new ModelRouter(providerModels, routes, false, stub);
