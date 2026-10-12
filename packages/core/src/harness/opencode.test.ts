@@ -445,4 +445,67 @@ describe('parseOpenCodeJson', () => {
     const parsed = parseOpenCodeJson('{"type":"error","error":{"name":"APIError"}}\n{"type":"error","error":{}}');
     expect(parsed?.errorText).toBe('APIError');
   });
+
+  it('appends responseBody and status to errorText', () => {
+    const parsed = parseOpenCodeJson(
+      '{"type":"error","error":{"name":"APIError","data":{"message":"Forbidden","statusCode":403,"responseBody":"usage limit"}}}',
+    );
+    expect(parsed?.errorText).toBe('Forbidden usage limit status 403');
+  });
+
+  it('ignores non-string responseBody and non-numeric statusCode', () => {
+    const parsed = parseOpenCodeJson(
+      '{"type":"error","error":{"data":{"message":"Boom","statusCode":"429","responseBody":{"a":1}}}}',
+    );
+    expect(parsed?.errorText).toBe('Boom');
+  });
+});
+
+const readFixture = (name: string) =>
+  readFileSync(fileURLToPath(new URL(`../__fixtures__/opencode/${name}`, import.meta.url)), 'utf8');
+const capFixture = readFixture('error-usage-cap.jsonl');
+const rateLimitFixture = readFixture('error-rate-limit.jsonl');
+
+describe('OpenCodeHarness recorded error fixtures', () => {
+  const runFailing = (stdout: string) =>
+    new OpenCodeHarness(async () => {
+      throw Object.assign(new Error('boom'), { code: 1, stderr: '', stdout });
+    })
+      .run(makeContractRequest({ model: 'opencode-model', registry }))
+      .catch((e) => e);
+
+  it('classifies the recorded OpenCode Go cap fixture as usage_cap', async () => {
+    const err: any = await runFailing(capFixture);
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('usage_cap');
+  });
+
+  it('classifies the recorded rate-limit fixture as rate_limit', async () => {
+    const err: any = await runFailing(rateLimitFixture);
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('rate_limit');
+  });
+
+  it('classifies a stdout-only error event on exit 0 without the nudge retry', async () => {
+    for (const [fixture, reason] of [
+      [capFixture, 'usage_cap'],
+      [rateLimitFixture, 'rate_limit'],
+    ] as const) {
+      const rec = recordingExec({ stdout: fixture });
+      const err: any = await new OpenCodeHarness(rec.fn)
+        .run(makeContractRequest({ model: 'opencode-model', registry }))
+        .catch((e) => e);
+      expect(err).toBeInstanceOf(HarnessError);
+      expect(err.reason).toBe(reason);
+      expect(rec.calls).toHaveLength(1);
+      expect(err.details.exitCode).toBe(0);
+    }
+  });
+
+  it('returns assistant text even when an error event is present on exit 0', async () => {
+    const textLine = '{"type":"text","sessionID":"ses_fixture","part":{"type":"text","text":"done"}}';
+    const rec = recordingExec({ stdout: `${rateLimitFixture}${textLine}\n` });
+    const result = await new OpenCodeHarness(rec.fn).run(makeContractRequest({ model: 'opencode-model', registry }));
+    expect(result.output).toBe('done');
+  });
 });
