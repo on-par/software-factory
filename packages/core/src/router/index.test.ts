@@ -176,6 +176,70 @@ describe('ModelRouter.skipMissingHarnessClis (#2406)', () => {
   });
 });
 
+describe('readiness_enrich failover to Codex (#2466)', () => {
+  const realModels = loadModelsConfig();
+  const realRoutes = loadRoutesConfig();
+  const harnessOf = (router: ModelRouter, model: string) => router.registryRef.getHarnessId(model);
+
+  function executor(router: () => ModelRouter, calls: string[]) {
+    return {
+      probeOllama: async () => ({
+        reachable: false as const,
+        endpoint: 'http://127.0.0.1:11434',
+        reason: 'ECONNREFUSED',
+      }),
+      runModel: async (model: string) => {
+        calls.push(model);
+        if (harnessOf(router(), model) === 'claude-cli') {
+          throw new HarnessError('Failed to authenticate: OAuth session expired', 'local_auth');
+        }
+        return 'ENRICHED';
+      },
+    };
+  }
+
+  it('fails over from a Claude model with local_auth to a reachable Codex model', async () => {
+    const calls: string[] = [];
+    let router!: ModelRouter;
+    router = new ModelRouter(
+      realModels,
+      realRoutes,
+      false,
+      executor(() => router, calls),
+    );
+    const result = await router.run('readiness_enrich', 'enrich');
+    expect(calls.some((m) => harnessOf(router, m) === 'claude-cli')).toBe(true);
+    expect(harnessOf(router, result.model)).toBe('codex-cli');
+    expect(result.output).toBe('ENRICHED');
+  });
+
+  it('never attempts Claude when only the codex CLI is installed', async () => {
+    const calls: string[] = [];
+    let router!: ModelRouter;
+    router = new ModelRouter(
+      realModels,
+      realRoutes,
+      false,
+      executor(() => router, calls),
+    );
+    router.skipMissingHarnessClis((cmd) => cmd === 'codex');
+    const result = await router.run('readiness_enrich', 'enrich');
+    expect(calls.every((m) => harnessOf(router, m) === 'codex-cli')).toBe(true);
+    expect(result.model).toBe('gpt-5.6-luna-high');
+  });
+
+  it('fails with one error naming the task when no agent CLI is installed', async () => {
+    const router = new ModelRouter(
+      realModels,
+      realRoutes,
+      false,
+      executor(() => router, []),
+    );
+    router.skipMissingHarnessClis(() => false);
+    await expect(router.run('readiness_enrich', 'enrich')).rejects.toThrow(/readiness_enrich/);
+  });
+});
+
 describe('ModelRouter with StubModelExecutor', () => {
   afterEach(() => {
     vi.useRealTimers();
