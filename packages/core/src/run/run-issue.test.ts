@@ -1159,6 +1159,12 @@ describe('runIssue — provider breaker and failover', () => {
     expect(vi.mocked(buildPhase).mock.calls[0][0]).toMatchObject({ route: 'codex', modelOverride: 'gpt-build' });
   });
 
+  it('tells BUILD the worker is not pinned when no build pin is set (#2510)', async () => {
+    vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, route: 'codex' });
+    await runIssue(baseRequest(), basePolicy(), basePorts({}));
+    expect(vi.mocked(buildPhase).mock.calls[0][0].pinnedModel).toBe(false);
+  });
+
   it('ignores an override model incompatible with an explicitly pinned route and logs model_override_ignored', async () => {
     const events: Array<[string, string]> = [];
     const log = vi.fn((type: string, msg: string) => events.push([type, msg]));
@@ -1204,7 +1210,11 @@ describe('runIssue — #1367: a pinned build model determines the build route', 
     await runIssue(request, basePolicy(), basePorts({ router }));
 
     expect(vi.mocked(planPhase).mock.calls[0][0].preferredRoute).toBe('codex');
-    expect(vi.mocked(buildPhase).mock.calls[0][0]).toMatchObject({ route: 'codex', modelOverride: 'gpt-build' });
+    expect(vi.mocked(buildPhase).mock.calls[0][0]).toMatchObject({
+      route: 'codex',
+      modelOverride: 'gpt-build',
+      pinnedModel: true,
+    });
   });
 
   it('does not let a codex pin force the codex route while codex is disabled', async () => {
