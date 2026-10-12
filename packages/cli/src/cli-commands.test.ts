@@ -1217,6 +1217,58 @@ describe('cli commands (via main dispatch)', () => {
         expect([...plain.keys()].sort()).toEqual([...doctor.keys()].sort());
         for (const [model, icon] of plain) expect(doctor.get(model)).toBe(icon);
       });
+
+      describe('repo-defined models (#2443)', () => {
+        const writeRepoModel = () => {
+          mkdirSync(paths().root, { recursive: true });
+          writeFileSync(
+            paths().config,
+            JSON.stringify({
+              version: 2,
+              models: {
+                registry: {
+                  'my-opencode-model': {
+                    provider: 'custom',
+                    tier: 'worker',
+                    costPerMtokInput: 1,
+                    costPerMtokOutput: 2,
+                    contextWindow: 1000,
+                    capabilities: [],
+                    envKey: null,
+                    providerModel: 'my-opencode-model',
+                    harness: 'opencode',
+                  },
+                },
+              },
+            }),
+          );
+        };
+
+        afterEach(() => {
+          rmSync(paths().config, { force: true });
+        });
+
+        it('marks a models.registry model as repo-defined in factory models', async () => {
+          writeRepoModel();
+          await runMainRaw(realDeps(), 'models');
+          const lines = logged().replace(ANSI, '').split('\n');
+          expect(lines.find((l) => l.includes('my-opencode-model tier='))).toContain('[repo-defined]');
+          for (const m of captured!.list().filter((id) => id !== 'my-opencode-model')) {
+            const row = lines.find((l) => l.includes(` ${m} tier=`));
+            expect(row).toBeDefined();
+            expect(row).not.toContain('[repo-defined]');
+          }
+        });
+
+        it('marks a models.registry model as repo-defined in factory models --doctor', async () => {
+          writeRepoModel();
+          await runMainRaw(realDeps(), 'models', '--doctor');
+          process.exitCode = undefined;
+          const lines = logged().replace(ANSI, '').split('\n');
+          expect(lines.find((l) => l.includes('my-opencode-model provider='))).toContain('[repo-defined]');
+          expect(lines.filter((l) => l.includes('[repo-defined]'))).toHaveLength(1);
+        });
+      });
     });
 
     it('doctor prints the report and returns when a worker is reachable', async () => {

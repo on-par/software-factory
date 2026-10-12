@@ -1249,12 +1249,19 @@ export function modelStatusIcon(d: ModelDiagnosis): string {
   return d.reachable ? styleText('green', '✅') : d.unverified ? styleText('yellow', '⚠️') : styleText('red', '❌');
 }
 
-export function formatDoctorReport(diagnoses: ModelDiagnosis[]): string {
+/** Single owner of the `[repo-defined]` marker for models declared in `.factory/config.json` models.registry, shared by `factory models` and `models --doctor` (#2443). */
+export function repoDefinedTag(model: string, repoDefined: ReadonlySet<string>): string {
+  return repoDefined.has(model) ? styleText('cyan', ' [repo-defined]') : '';
+}
+
+export function formatDoctorReport(diagnoses: ModelDiagnosis[], repoDefined: ReadonlySet<string> = new Set()): string {
   const lines = [styleText('bold', '\n== Model Doctor ==')];
   for (const d of diagnoses) {
     const icon = modelStatusIcon(d);
     const tiers = d.tiers.join('/');
-    lines.push(`  ${icon} ${d.model} provider=${d.provider} tier=${tiers} — ${d.reason}`);
+    lines.push(
+      `  ${icon} ${d.model} provider=${d.provider} tier=${tiers} — ${d.reason}${repoDefinedTag(d.model, repoDefined)}`,
+    );
   }
   lines.push(`  ${formatReachabilityCount(diagnoses)}`);
   return lines.join('\n');
@@ -1291,7 +1298,9 @@ export function modelDoctorProbes(): DoctorProbes {
 
 async function cmdModels(opts: { doctor?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
-  const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), configLoaders.loadRepoConfig(repoRoot));
+  const repoConfig = configLoaders.loadRepoConfig(repoRoot);
+  const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), repoConfig);
+  const repoDefined = new Set(Object.keys(repoConfig?.models?.registry ?? {}));
   const registry = new coreOps.ModelRegistry(modelsConfig);
   const allowExperimental = resolveExperimental();
   const localOnly = resolveLocalOnly();
@@ -1299,7 +1308,7 @@ async function cmdModels(opts: { doctor?: boolean } = {}) {
   const diagnoses = coreOps.diagnoseModels(registry, modelDoctorProbes(), allowExperimental, localOnly);
 
   if (opts.doctor) {
-    console.log(formatDoctorReport(diagnoses));
+    console.log(formatDoctorReport(diagnoses, repoDefined));
     if (!hasReachableWorker(diagnoses)) {
       throw new CliExitError('factory: no worker model is reachable — fix the reasons above before running a queue', 1);
     }
@@ -1315,7 +1324,7 @@ async function cmdModels(opts: { doctor?: boolean } = {}) {
     const d = byModel.get(m);
     const avail = d ? modelStatusIcon(d) : styleText('red', '❌');
     const tag = registry.isExperimental(m) ? styleText('yellow', ' [experimental]') : '';
-    console.log(`  ${avail} ${m} tier=${tiers} ${cost}${tag}`);
+    console.log(`  ${avail} ${m} tier=${tiers} ${cost}${tag}${repoDefinedTag(m, repoDefined)}`);
   }
 
   console.log(styleText('bold', '\n== Tiers =='));
