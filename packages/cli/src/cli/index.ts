@@ -2975,6 +2975,8 @@ async function cmdShip(
       return await shipIssue(issueNum, { ...opts, branchPrefix });
     } catch (err: any) {
       if (err instanceof IssueSkippedError) return;
+      // #2492: a pull request number is a usage error, not a failed ship.
+      if (err instanceof InvalidWorkRequestInputError) throw new CliExitError(`factory: ${err.message}`, 2);
       throw new CliExitError(`Ship failed for issue #${issueNum}: ${err.message}`, 1);
     }
   });

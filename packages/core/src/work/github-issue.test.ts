@@ -163,7 +163,13 @@ describe('createOctokitIssueClient', () => {
     const result = await client.fetchIssue({ owner: 'on-par', repo: 'software-factory', issue_number: 505 });
 
     expect(captured).toEqual({ owner: 'on-par', repo: 'software-factory', issue_number: 505 });
-    expect(result).toEqual({ title: 'A title', body: 'A body', htmlUrl: 'https://x', state: 'open' });
+    expect(result).toEqual({
+      title: 'A title',
+      body: 'A body',
+      htmlUrl: 'https://x',
+      state: 'open',
+      isPullRequest: false,
+    });
   });
 
   it('turns a body of undefined into null', async () => {
@@ -209,5 +215,37 @@ describe('createOctokitIssueClient', () => {
     const result = await client.fetchIssue({ owner: 'o', repo: 'r', issue_number: 1 });
 
     expect(result.state).toBe('open');
+  });
+});
+
+describe('pull request numbers (#2492)', () => {
+  it('refuses a pull request and names the issue it closes', async () => {
+    const adapter = createGithubIssueAdapter({
+      fetchIssue: async () => ({ title: 'Add subtract', body: 'Fixes #1', isPullRequest: true }),
+    });
+    const err = await adapter.resolve({ repo: 'o/r', issue: 2 }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(InvalidWorkRequestInputError);
+    expect((err as Error).message).toBe('#2 is a pull request, not an issue. Did you mean issue #1?');
+  });
+
+  it('asks for the issue number when the PR names none', async () => {
+    const adapter = createGithubIssueAdapter({
+      fetchIssue: async () => ({ title: 'Tidy', body: null, isPullRequest: true }),
+    });
+    await expect(adapter.resolve({ repo: 'o/r', issue: 7 })).rejects.toThrow(
+      '#7 is a pull request, not an issue. Pass the issue number it closes.',
+    );
+  });
+
+  it('flags pull_request data from the GitHub API', async () => {
+    const octokit = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 't', body: null, html_url: 'u', state: 'open', pull_request: {} } }),
+        },
+      },
+    };
+    const client = createOctokitIssueClient(octokit as never);
+    expect((await client.fetchIssue({ owner: 'o', repo: 'r', issue_number: 2 })).isPullRequest).toBe(true);
   });
 });
