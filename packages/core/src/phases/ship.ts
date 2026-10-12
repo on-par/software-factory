@@ -80,6 +80,8 @@ async function shipPhaseImpl(opts: {
   reworkRounds?: number;
   /** PR classifier decision (#1724), rendered into the evidence pack. */
   reviewRouting?: ReviewRouting;
+  /** Model pins that were not honored (#2511), rendered into the evidence pack. */
+  pinNotes?: string[];
   /** The run's resolved work request; when its kind is not 'github-issue', the PR
    *  title/body come from it instead of fetching the (nonexistent) issue (#507). */
   work?: Pick<WorkRequest, 'id' | 'kind' | 'title'>;
@@ -340,6 +342,7 @@ async function shipPhaseImpl(opts: {
       startedAt: opts.startedAt,
       logsDir: opts.logsDir,
       reviewRouting: opts.reviewRouting,
+      pinNotes: opts.pinNotes,
     });
     await octokit.rest.issues.createComment({ owner, repo: repoName, issue_number: prNumber, body });
     log('evidence', `posted evidence pack to PR #${prNumber}`);

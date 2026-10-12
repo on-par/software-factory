@@ -1451,6 +1451,7 @@ describe('buildPhase cross-harness failover', () => {
     expect(result.ok).toBe(true);
     expect(result.model).toBe('claude-sonnet-5');
     expect(result.route).toBe('claude');
+    expect(result.failoverReason).toBe('usage_cap');
     expect(stub.calls.map((c) => ({ model: c.model, task: c.task }))).toEqual([
       { model: 'codex-a', task: 'build_codex' },
       { model: 'claude-sonnet-5', task: 'build_claude' },

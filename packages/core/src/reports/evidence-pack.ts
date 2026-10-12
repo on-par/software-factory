@@ -20,6 +20,8 @@ export interface EvidencePackRenderInput {
   logFiles: string[];
   /** PR classifier decision (#1724); the section is omitted when undefined. */
   reviewRouting?: ReviewRouting;
+  /** Model pins that were not honored (#2511); the section is omitted when empty. */
+  pinNotes?: string[];
 }
 
 export interface EvidencePackGatherInput {
@@ -31,10 +33,12 @@ export interface EvidencePackGatherInput {
   startedAt?: string;
   logsDir?: string;
   reviewRouting?: ReviewRouting;
+  /** Model pins that were not honored (#2511); the section is omitted when empty. */
+  pinNotes?: string[];
 }
 
 export function renderEvidencePack(input: EvidencePackRenderInput): string {
-  const { checkSummary, reworkRounds, designMarkdown, events, logFiles, reviewRouting } = input;
+  const { checkSummary, reworkRounds, designMarkdown, events, logFiles, reviewRouting, pinNotes } = input;
 
   const summaryParts = [
     checkSummary
@@ -68,6 +72,9 @@ export function renderEvidencePack(input: EvidencePackRenderInput): string {
             .join('\n')
         : '- No checker results recorded.',
     ),
+    ...(pinNotes && pinNotes.length > 0
+      ? [section('Model pins', pinNotes.map((note) => `- ⚠️ ${note}`).join('\n'))]
+      : []),
     ...(reviewRouting ? [section('Review routing', renderReviewRouting(reviewRouting))] : []),
     section(
       'Design artifact',
@@ -107,6 +114,7 @@ export function gatherEvidencePack(input: EvidencePackGatherInput): string {
     events,
     logFiles,
     reviewRouting: input.reviewRouting,
+    pinNotes: input.pinNotes,
   });
 }
 
