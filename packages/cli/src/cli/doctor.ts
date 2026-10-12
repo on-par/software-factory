@@ -63,6 +63,31 @@ export function codexAuthMethod(statusOutput: string | null): string | null {
 const CODEX_LOGIN_FIX =
   'run `codex login` (Sign in with ChatGPT, for Plus or Pro plans), `codex login --with-api-key` (API billing), or `codex login --device-auth` on a headless machine';
 
+const GIT_AUTH_CHECK = 'git auth';
+
+/** Applicability gate for the git-auth check (#2482): skipped, never failing, outside a git
+ *  repository or without an origin remote. The authentication probe itself lands separately. */
+export function gitAuthCheck(repoRoot: string | null, tryExec: (cmd: string) => string | null): DoctorCheck {
+  if (repoRoot === null) {
+    return {
+      name: GIT_AUTH_CHECK,
+      ok: true,
+      optional: true,
+      detail: `skipped — not inside a git repository; ${NOT_IN_REPO_HINT}`,
+    };
+  }
+  const origin = tryExec('git remote get-url origin');
+  if (!origin) {
+    return { name: GIT_AUTH_CHECK, ok: true, optional: true, detail: 'skipped — no origin remote configured' };
+  }
+  return {
+    name: GIT_AUTH_CHECK,
+    ok: true,
+    optional: true,
+    detail: 'origin remote configured — authentication probe not run yet',
+  };
+}
+
 /** Coding agent prerequisites: at least one agent CLI is required; each CLI is then reported
  *  on its own optional line, with Codex sign-in reported separately from installation (#1269, #2422). */
 export function agentCliChecks(
@@ -166,6 +191,8 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
   } else {
     checks.push({ name: 'gh auth', ok: true, detail: 'authenticated' });
   }
+
+  checks.push(gitAuthCheck(repoRoot, tryExec));
 
   if (envPresent('GITHUB_TOKEN')) {
     checks.push({ name: 'GitHub token', ok: true, detail: 'GITHUB_TOKEN set' });
