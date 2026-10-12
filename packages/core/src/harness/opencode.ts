@@ -1,5 +1,9 @@
 // src/harness/opencode.ts — CodingHarness adapter for the OpenCode CLI.
 
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { shellEscape } from '../utils/index.js';
@@ -9,7 +13,7 @@ import { HarnessError } from './index.js';
 
 export type OpenCodeExecFn = ExecFn;
 
-/** Runs a model via the OpenCode CLI: opencode run [--model <provider/model>] <prompt>, executed with cwd = worktree. */
+/** Runs a model via the OpenCode CLI: opencode run --auto [--model <provider/model>] [--variant <effort>] < prompt-file, executed with cwd = worktree. */
 export class OpenCodeHarness implements CodingHarness {
   readonly id = 'opencode';
   readonly agentic = true;
@@ -31,43 +35,53 @@ export class OpenCodeHarness implements CodingHarness {
       '\n\nIMPORTANT: your final message must contain your complete answer as plain text. Do not end the session on a tool call or with an empty message.';
     const MAX_ATTEMPTS = 2;
 
-    let stdout = '';
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      const attemptPrompt = attempt === 1 ? prompt : prompt + FINAL_MESSAGE_NUDGE;
-      // `--auto`: headless runs auto-REJECT permission prompts (e.g. reading the
-      // frozen spec in .factory/plans/, which is outside the worktree), killing
-      // the session with an empty final message. Auto-approve matches the risk
-      // model of the other engines (claude --dangerously-skip-permissions,
-      // codex --yolo): the factory owns the worktree and reviews the diff.
-      // `< /dev/null`: opencode run blocks awaiting stdin EOF when spawned with a
-      // pipe stdin (execDetached never closes child.stdin), hanging every call
-      // until the phase timeout. Redirecting stdin closes it at spawn.
-      const cmd = `opencode run --auto ${modelArg}${effortArg} ${shellEscape(attemptPrompt)} < /dev/null`;
+    const promptDir = await mkdtemp(join(tmpdir(), 'factory-opencode-prompt-'));
+    const promptPath = join(promptDir, 'prompt.txt');
 
-      try {
-        ({ stdout } = await this.execFn(cmd, {
-          cwd: worktree,
-          timeoutMs: timeoutSeconds * 1000,
-          maxBuffer: 10 * 1024 * 1024,
-          env,
-          onPgid,
-        }));
-      } catch (err: any) {
-        const reason = err.killed ? 'timeout' : classifyFailure(err.stderr ?? '', err.code ?? 1);
-        throw new HarnessError(err.message ?? String(err), reason, {
-          exitCode: typeof err.code === 'number' ? err.code : undefined,
-          stderr: err.stderr,
-          code: typeof err.code === 'string' || typeof err.code === 'number' ? err.code : undefined,
-          signal: typeof err.signal === 'string' ? err.signal : undefined,
-          killed: err.killed === true ? true : undefined,
-        });
+    try {
+      let stdout = '';
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        const attemptPrompt = attempt === 1 ? prompt : prompt + FINAL_MESSAGE_NUDGE;
+        // `--auto`: headless runs auto-REJECT permission prompts (e.g. reading the
+        // frozen spec in .factory/plans/, which is outside the worktree), killing
+        // the session with an empty final message. Auto-approve matches the risk
+        // model of the other engines (claude --dangerously-skip-permissions,
+        // codex --yolo): the factory owns the worktree and reviews the diff.
+        // `< promptPath`: opencode run reads a non-TTY stdin as the message. This
+        // keeps the prompt out of argv so large prompts don't hit ARG_MAX/E2BIG,
+        // and a file redirect still closes stdin at EOF: opencode run otherwise
+        // blocks on a pipe stdin (execDetached never closes child.stdin), hanging
+        // every call until the phase timeout.
+        await writeFile(promptPath, attemptPrompt, 'utf8');
+        const cmd = `opencode run --auto ${modelArg}${effortArg} < ${shellEscape(promptPath)}`;
+
+        try {
+          ({ stdout } = await this.execFn(cmd, {
+            cwd: worktree,
+            timeoutMs: timeoutSeconds * 1000,
+            maxBuffer: 10 * 1024 * 1024,
+            env,
+            onPgid,
+          }));
+        } catch (err: any) {
+          const reason = err.killed ? 'timeout' : classifyFailure(err.stderr ?? '', err.code ?? 1);
+          throw new HarnessError(err.message ?? String(err), reason, {
+            exitCode: typeof err.code === 'number' ? err.code : undefined,
+            stderr: err.stderr,
+            code: typeof err.code === 'string' || typeof err.code === 'number' ? err.code : undefined,
+            signal: typeof err.signal === 'string' ? err.signal : undefined,
+            killed: err.killed === true ? true : undefined,
+          });
+        }
+
+        if (stdout.trim().length > 0) return { output: stdout };
       }
 
-      if (stdout.trim().length > 0) return { output: stdout };
+      throw new HarnessError(`opencode CLI returned empty output (${MAX_ATTEMPTS} attempts)`, 'empty_response', {
+        exitCode: 0,
+      });
+    } finally {
+      await rm(promptDir, { recursive: true, force: true });
     }
-
-    throw new HarnessError(`opencode CLI returned empty output (${MAX_ATTEMPTS} attempts)`, 'empty_response', {
-      exitCode: 0,
-    });
   }
 }
