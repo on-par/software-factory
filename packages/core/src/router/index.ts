@@ -548,6 +548,10 @@ export class ModelRouter {
   private registry: ModelRegistry;
   private costSink?: CostSink;
   private harnessCliAvailable?: (harnessId: string) => boolean;
+  /** Agent CLIs (harness ids) that failed local_auth during this router's run (#2495). One
+   *  router serves one run, so a signed-out CLI is tried once and then skipped by every later
+   *  task, and PLAN stops offering its build route. */
+  private readonly authTripped = new Set<string>();
 
   constructor(
     modelsConfig: ModelsConfig,
@@ -582,6 +586,15 @@ export class ModelRouter {
       }
       return ok;
     };
+  }
+
+  private authKey(model: string): string | undefined {
+    return this.registry.getHarnessId(model) ?? this.registry.get(model)?.provider;
+  }
+
+  private isAuthTripped(model: string): boolean {
+    const key = this.authKey(model);
+    return key !== undefined && this.authTripped.has(key);
   }
 
   /** Register a sink that receives one cost row per successful run(). */
@@ -642,6 +655,7 @@ export class ModelRouter {
     if (harnessCliAvailable) {
       models = models.filter((model) => harnessCliAvailable(this.registry.getHarnessId(model) ?? ''));
     }
+    if (this.authTripped.size > 0) models = models.filter((model) => !this.isAuthTripped(model));
     const requires = this.routesConfig.routes[task]?.requires;
     if (requires === 'codex') {
       models = models.filter((model) => this.registry.isCodexModel(model));
@@ -708,6 +722,13 @@ export class ModelRouter {
       ? [modelOverride, ...modelFallbacks.filter((id) => id !== modelOverride)]
       : this.resolveAll(task);
     if (models.length === 0) {
+      if (this.authTripped.size > 0) {
+        throw new ModelRouterError(
+          `No available models for task '${task}': ${[...this.authTripped].join(', ')} failed sign-in earlier in this run`,
+          'local_auth',
+          [],
+        );
+      }
       throw new Error(`No available models for task '${task}'`);
     }
 
@@ -734,6 +755,10 @@ export class ModelRouter {
           skippedForOllama = true;
           continue;
         }
+      }
+      if (this.isAuthTripped(model)) {
+        onLog(`Skipping ${model} for ${task}: ${this.authKey(model)} failed sign-in earlier in this run`);
+        continue;
       }
       if (modelProvider && blockedProviders.has(modelProvider)) {
         onLog(`Skipping ${model} for ${task}: provider ${modelProvider} is on cooldown`);
@@ -784,6 +809,13 @@ export class ModelRouter {
           };
           attempts.push(detail ? { model, reason, ok: false, detail } : { model, reason, ok: false });
           onLog(`${model} failed (${reason}) on ${task}`);
+          if (reason === 'local_auth') {
+            const key = this.authKey(model);
+            if (key !== undefined && !this.authTripped.has(key)) {
+              this.authTripped.add(key);
+              onLog(`${key} is not signed in; skipping it for the rest of this run`);
+            }
+          }
           if (detail) onLog(`${model} failure detail on ${task}: ${detail}`);
 
           // Deterministic failure — another model cannot plausibly help; do not

@@ -682,7 +682,9 @@ async function planPhaseImpl(opts: {
 
     // Read route from spec frontmatter (single normalization site: parseSpec)
     const parsed = await readSpec(specPath);
-    let route: 'codex' | 'claude' | 'opencode' = parsed.route ?? defaultBuildRoute(runnableRoutes);
+    // Re-read after the PLAN call: a CLI that failed sign-in during PLAN is no longer runnable (#2495).
+    const runnableNow = runnableBuildRoutes(router);
+    let route: 'codex' | 'claude' | 'opencode' = parsed.route ?? defaultBuildRoute(runnableNow);
 
     if (localOnly && route !== 'codex') {
       log('warn', 'local-only mode requires a local Codex harness — forcing route to codex');
@@ -698,8 +700,8 @@ async function planPhaseImpl(opts: {
       await updateSpecRoute(specPath, 'claude', 'codex-disabled');
     }
 
-    if (runnableRoutes.length > 0 && !runnableRoutes.includes(route)) {
-      const next = defaultBuildRoute(runnableRoutes);
+    if (runnableNow.length > 0 && !runnableNow.includes(route)) {
+      const next = defaultBuildRoute(runnableNow);
       log('model-override', `route ${route} has no runnable model on this machine, rerouting to ${next}`);
       route = next;
       await updateSpecRoute(specPath, next, 'route-unavailable');

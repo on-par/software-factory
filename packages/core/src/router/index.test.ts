@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadModelsConfig, loadRoutesConfig, type ModelsConfig, type RoutesConfig } from '../config/index.js';
 import { applyRepoConfig } from '../config/repo.js';
+import { runnableBuildRoutes } from '../phases/plan.js';
 import { HarnessError } from '../harness/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import type { CostEntry } from '../types/index.js';
@@ -211,6 +212,37 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
     expect(calls.some((m) => harnessOf(router, m) === 'claude-cli')).toBe(true);
     expect(harnessOf(router, result.model)).toBe('codex-cli');
     expect(result.output).toBe('ENRICHED');
+  });
+
+  it('tries a signed-out Claude once per run, then skips it and drops its build route (#2495)', async () => {
+    const calls: string[] = [];
+    let router!: ModelRouter;
+    router = new ModelRouter(
+      realModels,
+      realRoutes,
+      false,
+      executor(() => router, calls),
+    );
+    const logs: string[] = [];
+    await router.run('readiness_enrich', 'enrich', { onLog: (m) => logs.push(m) });
+    await router.run('plan', 'plan', { onLog: (m) => logs.push(m) });
+    await router.run('triage', 'triage', { onLog: (m) => logs.push(m) });
+    expect(calls.filter((m) => harnessOf(router, m) === 'claude-cli')).toHaveLength(1);
+    expect(logs).toContain('claude-cli is not signed in; skipping it for the rest of this run');
+    expect(router.resolveAll('build_claude')).toEqual([]);
+    expect(runnableBuildRoutes(router)).toEqual(['codex']);
+  });
+
+  it('fails with local_auth when every model for a task signed out earlier in the run (#2495)', async () => {
+    let router!: ModelRouter;
+    router = new ModelRouter(
+      realModels,
+      realRoutes,
+      false,
+      executor(() => router, []),
+    );
+    await router.run('readiness_enrich', 'enrich');
+    await expect(router.run('build_claude', 'build')).rejects.toMatchObject({ reason: 'local_auth' });
   });
 
   it('never attempts Claude when only the codex CLI is installed', async () => {
