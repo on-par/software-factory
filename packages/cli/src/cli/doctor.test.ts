@@ -550,6 +550,46 @@ describe('formatDoctorChecks icons', () => {
   });
 });
 
+describe('codex-only host: optional claude agent (#2551)', () => {
+  const count = (text: string, needle: string) => text.split(needle).length - 1;
+  const lineOf = (output: string, name: string) => output.split('\n').find((l) => l.includes(name)) ?? '';
+
+  function codexOnlyChecks(opts: { keychainDetail: string; runtimeAvailable: boolean }) {
+    const checks = runDoctorChecks(probes({ commandAvailable: (cmd) => cmd !== 'claude' && cmd !== 'opencode' }));
+    checks.push(claudeKeychainCheck({ status: 'skipped', detail: opts.keychainDetail }));
+    checks.push(
+      ...sandboxClaudeAuthChecks({
+        host: 'skipped',
+        sandboxed: 'skipped',
+        hostDetail: 'skipped — claude CLI not on PATH',
+        sandboxDetail: sandboxAuthSkipDetail({ runtimeAvailable: opts.runtimeAvailable, hostOk: false, inRepo: true })!,
+      }),
+    );
+    return reconcileAgentAuthChecks(checks);
+  }
+
+  const assertNoClaudeFailure = (final: ReturnType<typeof codexOnlyChecks>) => {
+    const output = formatDoctorChecks(final);
+    expect(lineOf(output, 'claude CLI')).toMatch(/(⚠️|➖) claude CLI/);
+    for (const name of ['claude keychain (macOS)', 'claude auth (host)', 'claude auth (sandboxed)'])
+      expect(lineOf(output, name)).toContain(`➖ ${name}`);
+    for (const line of output.split('\n').filter((l) => l.includes('claude'))) expect(line).not.toContain('❌');
+    expect(output).toContain('0 failed');
+    expect(count(output, '❌')).toBe(0);
+    expect(doctorFailed(final)).toBe(false);
+  };
+
+  it('codex-only host: claude rows never show ❌ and the summary says 0 failed', () => {
+    assertNoClaudeFailure(
+      codexOnlyChecks({ keychainDetail: 'skipped — claude CLI not on PATH', runtimeAvailable: true }),
+    );
+  });
+
+  it('codex-only host without a sandbox runtime or macOS: claude rows never show ❌', () => {
+    assertNoClaudeFailure(codexOnlyChecks({ keychainDetail: 'skipped — not macOS', runtimeAvailable: false }));
+  });
+});
+
 describe('runDoctorChecks distFreshness probe', () => {
   it('includes a failing compiled dist fresh check when the probe reports stale, and fails doctor', () => {
     const checks = runDoctorChecks(probes({ distFreshness: () => ({ fresh: false, detail: 'core: stale' }) }));
