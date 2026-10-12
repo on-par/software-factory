@@ -70,7 +70,7 @@ describe('gitAuthCheck', () => {
     const tryExecSpy = vi.fn((_cmd: string): string | null => 'https://github.com/o/r.git');
     const check = gitAuthCheck(null, tryExecSpy);
     expect(check).toMatchObject({ name: 'git auth', ok: true, optional: true });
-    expect(check.detail).toMatch(/^skipped — not inside a git repository/);
+    expect(check.detail).toMatch(/^skipped: not inside a git repository/);
     expect(check.detail).toContain(NOT_IN_REPO_HINT);
     expect(tryExecSpy.mock.calls.some(([cmd]) => cmd.includes('git remote'))).toBe(false);
     expect(tryExecSpy.mock.calls.some(([cmd]) => cmd.includes('ls-remote'))).toBe(false);
@@ -81,7 +81,7 @@ describe('gitAuthCheck', () => {
     );
     const row = checks.find((c) => c.name === 'git auth')!;
     expect(row).toMatchObject({ ok: true, optional: true });
-    expect(row.detail).toMatch(/^skipped — /);
+    expect(row.detail).toMatch(/^skipped: /);
     expect(doctorFailed(checks)).toBe(false);
   });
 
@@ -92,7 +92,7 @@ describe('gitAuthCheck', () => {
         name: 'git auth',
         ok: true,
         optional: true,
-        detail: 'skipped — no origin remote configured',
+        detail: 'skipped: no origin remote configured',
       });
       expect(spy.mock.calls.some(([cmd]) => cmd.includes('ls-remote'))).toBe(false);
     }
@@ -102,7 +102,7 @@ describe('gitAuthCheck', () => {
       probes({ tryExec: (cmd) => (cmd.includes('git remote get-url origin') ? null : base.tryExec(cmd)) }),
     );
     const row = checks.find((c) => c.name === 'git auth')!;
-    expect(row).toMatchObject({ ok: true, optional: true, detail: 'skipped — no origin remote configured' });
+    expect(row).toMatchObject({ ok: true, optional: true, detail: 'skipped: no origin remote configured' });
     expect(doctorFailed(checks)).toBe(false);
   });
 
@@ -468,14 +468,14 @@ describe('runDoctorChecks', () => {
 
 describe('sandboxAuthSkipDetail', () => {
   it('names no sandbox runtime / not inside a git repository', () => {
-    const noRuntime = 'skipped — no sandbox runtime (sandbox-exec/firejail) on this host';
+    const noRuntime = 'skipped: no sandbox runtime (sandbox-exec/firejail) on this host';
     expect(sandboxAuthSkipDetail({ runtimeAvailable: false, hostOk: true, inRepo: true })).toBe(noRuntime);
     expect(sandboxAuthSkipDetail({ runtimeAvailable: false, hostOk: false, inRepo: false })).toBe(noRuntime);
     expect(sandboxAuthSkipDetail({ runtimeAvailable: true, hostOk: false, inRepo: true })).toBe(
-      'skipped — host claude auth was not verified',
+      'skipped: host claude auth was not verified',
     );
     expect(sandboxAuthSkipDetail({ runtimeAvailable: true, hostOk: true, inRepo: false })).toBe(
-      `skipped — not inside a git repository; ${NOT_IN_REPO_HINT}`,
+      `skipped: not inside a git repository; ${NOT_IN_REPO_HINT}`,
     );
     expect(sandboxAuthSkipDetail({ runtimeAvailable: true, hostOk: true, inRepo: true })).toBeNull();
   });
@@ -495,16 +495,16 @@ describe('formatDoctorChecks', () => {
         name: 'codex sandbox',
         ok: false,
         optional: true,
-        detail: 'codex CLI not found — codex build routes unavailable',
+        detail: 'codex CLI not found; codex build routes unavailable',
         fix: 'install the codex CLI, or rely on claude routes',
       },
     ];
     expect(formatDoctorChecks(checks)).toMatchInlineSnapshot(`
       "== factory doctor ==
-        ✅ git repository — /path/to/repo
-        ❌ claude CLI — not found on PATH
+        ✅ git repository - /path/to/repo
+        ❌ claude CLI - not found on PATH
              fix: install Claude Code first: https://docs.anthropic.com/en/docs/claude-code
-        ⚠️ codex sandbox — codex CLI not found — codex build routes unavailable
+        ⚠️ codex sandbox - codex CLI not found; codex build routes unavailable
              fix: install the codex CLI, or rely on claude routes
       1 passed, 1 failed, 1 warnings
 
@@ -528,7 +528,7 @@ describe('outside a git repo (#2554)', () => {
     const checks = runDoctorChecks(env);
     for (const name of ['git identity', 'git worktree clean', '.factory initialized', 'git auth']) {
       const row = checks.find((c) => c.name === name)!;
-      expect(row.detail).toMatch(/^skipped — not inside a git repository/);
+      expect(row.detail).toMatch(/^skipped: not inside a git repository/);
       expect(doctorCheckIcon(row)).toBe('➖');
     }
     const identity = checks.find((c) => c.name === 'git identity')!;
@@ -544,7 +544,7 @@ describe('outside a git repo (#2554)', () => {
   it('prints no repo-bound next command', () => {
     const out = formatDoctorChecks(runDoctorChecks(outsideProbes().env), { inRepo: false });
     expect(out).not.toContain('factory models --doctor');
-    expect(out).toContain('Model reachability: skipped — not inside a git repository');
+    expect(out).toContain('Model reachability: skipped: not inside a git repository');
     const fixes = out.split('\n').filter((l) => l.includes('fix:'));
     for (const line of fixes) expect(line).not.toMatch(/factory (models|init|run|queue|triage)\b/);
     expect(out.split('\n').filter((l) => l.includes('next:'))).toEqual([]);
@@ -590,7 +590,7 @@ describe('repo checks (#2557)', () => {
       const row = checks.find((c) => c.name === 'gh auth')!;
       expect(row.ok).toBe(false);
       expect(row.next).toBe('gh auth login');
-      const block = rowBlocks(formatDoctorChecks(checks, { inRepo: true })).find((b) => b[0]!.includes('gh auth —'))!;
+      const block = rowBlocks(formatDoctorChecks(checks, { inRepo: true })).find((b) => b[0]!.includes('gh auth -'))!;
       expect(block.at(-1)).toBe('       next: gh auth login');
     }
   });
@@ -626,7 +626,7 @@ describe('repo checks (#2557)', () => {
     for (const check of hard) {
       expect(check.next).toBeTruthy();
       expect(check.next).not.toMatch(/&&|;|\n/);
-      const block = blocks.find((b) => b[0]!.includes(`${check.name} —`))!;
+      const block = blocks.find((b) => b[0]!.includes(`${check.name} -`))!;
       expect(block.filter((l) => l.includes('next:'))).toHaveLength(1);
       expect(block.at(-1)).toBe(`       next: ${check.next}`);
     }
@@ -654,13 +654,13 @@ describe('formatDoctorChecks icons', () => {
       name: 'git worktree clean',
       ok: false,
       optional: true,
-      detail: `skipped — not a git repository; ${NOT_IN_REPO_HINT}`,
+      detail: `skipped: not a git repository; ${NOT_IN_REPO_HINT}`,
     },
     {
       name: '.factory initialized',
       ok: false,
       optional: true,
-      detail: `skipped — not a git repository; ${NOT_IN_REPO_HINT}`,
+      detail: `skipped: not a git repository; ${NOT_IN_REPO_HINT}`,
     },
   ];
   const lineOf = (output: string, name: string) => output.split('\n').find((l) => l.includes(name)) ?? '';
@@ -923,7 +923,7 @@ describe('formatClaimReconcileReport', () => {
     const report = formatClaimReconcileReport([
       { issue: 42, expiresAt: 1_700_000_000, released: false, detail: 'boom' },
     ]);
-    expect(report).toBe('reconcile: failed to release issue #42 (lease expired at 1700000000) — boom');
+    expect(report).toBe('reconcile: failed to release issue #42 (lease expired at 1700000000): boom');
   });
 
   it('joins multiple entries with a single newline', () => {
@@ -933,7 +933,7 @@ describe('formatClaimReconcileReport', () => {
     ]);
     expect(report).toBe(
       'reconcile: released issue #42 back to factory:queued (lease expired at 1700000000)\n' +
-        'reconcile: failed to release issue #43 (lease expired at 1700000100) — boom',
+        'reconcile: failed to release issue #43 (lease expired at 1700000100): boom',
     );
   });
 });
@@ -989,7 +989,7 @@ describe('unmergedGreenPrChecks', () => {
     expect(checks).toHaveLength(1);
     expect(checks[0].ok).toBe(false);
     expect(checks[0].optional).toBe(true);
-    expect(checks[0].detail).toContain('scan failed — boom');
+    expect(checks[0].detail).toContain('scan failed: boom');
     expect(doctorFailed(checks)).toBe(false);
   });
 });
@@ -1214,7 +1214,7 @@ describe('formatContainerReconcileReport', () => {
       { name: 'sf-job-1', removed: false, detail: 'docker rm -f -v sf-job-1 failed: no such container' },
     ];
     expect(formatContainerReconcileReport(rows)).toBe(
-      'reconcile: failed to remove container sf-job-1 — docker rm -f -v sf-job-1 failed: no such container',
+      'reconcile: failed to remove container sf-job-1: docker rm -f -v sf-job-1 failed: no such container',
     );
   });
 
@@ -1224,7 +1224,7 @@ describe('formatContainerReconcileReport', () => {
       { name: 'sf-job-2', removed: false, detail: 'boom' },
     ];
     expect(formatContainerReconcileReport(rows)).toBe(
-      'reconcile: removed container sf-job-1\nreconcile: failed to remove container sf-job-2 — boom',
+      'reconcile: removed container sf-job-1\nreconcile: failed to remove container sf-job-2: boom',
     );
   });
 });
@@ -1244,7 +1244,7 @@ describe('formatMicroVmReconcileReport', () => {
       { name: 'factory-abc123', removed: false, detail: 'sbx rm --force factory-abc123 failed: not found' },
     ];
     expect(formatMicroVmReconcileReport(rows)).toBe(
-      'reconcile: failed to remove sbx VM factory-abc123 — sbx rm --force factory-abc123 failed: not found',
+      'reconcile: failed to remove sbx VM factory-abc123: sbx rm --force factory-abc123 failed: not found',
     );
   });
 });
@@ -1264,7 +1264,7 @@ describe('declaredHarnessChecks', () => {
     expect(checks[0]).toMatchObject({
       name: 'harness my-agent',
       ok: false,
-      detail: 'unavailable — probe `my-agent --version` failed: exit 127: not found',
+      detail: 'unavailable: probe `my-agent --version` failed: exit 127: not found',
     });
     expect(checks[0].optional).toBeUndefined();
     expect(checks[0].fix).toContain('probe');
@@ -1277,7 +1277,7 @@ describe('declaredHarnessChecks', () => {
       name: 'harness my-agent',
       ok: false,
       optional: true,
-      detail: 'unverified — no probe configured',
+      detail: 'unverified: no probe configured',
     });
     expect(checks[0].fix).toContain('probe');
     expect(doctorFailed(checks)).toBe(false);
@@ -1513,7 +1513,7 @@ describe('per-harness setup sections (#2555)', () => {
       expect(lines[idx[i]! + 1]).toContain(rows[i]!);
     });
     const output = lines.join('\n');
-    for (const c of checks) expect(output.split(`${c.name} —`).length - 1).toBe(1);
+    for (const c of checks) expect(output.split(`${c.name} -`).length - 1).toBe(1);
   });
 
   it('a missing CLI fails its installed row and ends with its install command', () => {
@@ -1541,7 +1541,7 @@ describe('per-harness setup sections (#2555)', () => {
     const row = checks.find((c) => c.name === 'codex installed')!;
     expect(row.ok).toBe(true);
     expect(row.detail).toContain('codex-cli 0.47.0');
-    expect(formatDoctorChecks(checks)).toContain('  ✅ codex installed — found on PATH (codex-cli 0.47.0)');
+    expect(formatDoctorChecks(checks)).toContain('  ✅ codex installed - found on PATH (codex-cli 0.47.0)');
   });
 
   it('harnessInstallChecks handles null, empty and multi-line version output', () => {
@@ -1563,7 +1563,7 @@ describe('per-harness setup sections (#2555)', () => {
       { name: 'c', ok: false, optional: true, detail: 'z', section: 'S' },
       { name: 'd', ok: false, detail: 'w' },
     ]);
-    expect(output).toContain(['  ✅ b — y', '  ❌ d — w', '-- S --', '  ✅ a — x', '  ⚠️ c — z'].join('\n'));
+    expect(output).toContain(['  ✅ b - y', '  ❌ d - w', '-- S --', '  ✅ a - x', '  ⚠️ c - z'].join('\n'));
     expect(output).toContain('2 passed, 1 failed, 1 warnings');
   });
 });

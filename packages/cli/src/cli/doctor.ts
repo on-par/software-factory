@@ -52,7 +52,7 @@ export const REPO_SECTION = 'Repo';
 export const NOT_IN_REPO_HINT = 'cd into your repo, then run factory doctor again';
 
 /** Detail for every repo wired-up row when doctor runs outside a git repository (#2554). */
-export const NOT_IN_REPO_SKIP_DETAIL = `skipped — not inside a git repository; ${NOT_IN_REPO_HINT}`;
+export const NOT_IN_REPO_SKIP_DETAIL = `skipped: not inside a git repository; ${NOT_IN_REPO_HINT}`;
 
 export function hasSandboxRuntime(platform: NodeJS.Platform, commandAvailable: (cmd: string) => boolean): boolean {
   return detectSandboxRuntime(platform, commandAvailable) !== 'none';
@@ -65,8 +65,8 @@ export function sandboxAuthSkipDetail(opts: {
   hostOk: boolean;
   inRepo: boolean;
 }): string | null {
-  if (!opts.runtimeAvailable) return 'skipped — no sandbox runtime (sandbox-exec/firejail) on this host';
-  if (!opts.hostOk) return 'skipped — host claude auth was not verified';
+  if (!opts.runtimeAvailable) return 'skipped: no sandbox runtime (sandbox-exec/firejail) on this host';
+  if (!opts.hostOk) return 'skipped: host claude auth was not verified';
   if (!opts.inRepo) return NOT_IN_REPO_SKIP_DETAIL;
   return null;
 }
@@ -121,7 +121,7 @@ export function gitAuthCheck(
   }
   const origin = tryExec('git remote get-url origin');
   if (!origin) {
-    return { name: GIT_AUTH_CHECK, ok: true, optional: true, detail: 'skipped — no origin remote configured' };
+    return { name: GIT_AUTH_CHECK, ok: true, optional: true, detail: 'skipped: no origin remote configured' };
   }
   // An empty string is exit 0 with no HEAD ref (an empty repo): still authenticated.
   const probe = tryExec(GIT_AUTH_PROBE_CMD, { env: { ...GIT_AUTH_PROBE_ENV }, timeoutMs: GIT_AUTH_PROBE_TIMEOUT_MS });
@@ -224,7 +224,7 @@ export function harnessSignInChecks(probes: DoctorEnvProbes): DoctorCheck[] {
   return HARNESS_SETUP.map(({ section, cli, login, envKeys }): DoctorCheck => {
     const name = `${cli} signed in`;
     if (!commandAvailable(cli)) {
-      return { name, section, ok: true, optional: true, detail: `skipped — ${cli} not installed` };
+      return { name, section, ok: true, optional: true, detail: `skipped: ${cli} not installed` };
     }
     const fix = `sign in to ${section}: ${login}`;
     if (cli === 'codex') {
@@ -280,7 +280,7 @@ export function harnessSignInChecks(probes: DoctorEnvProbes): DoctorCheck[] {
       ok: false,
       // Required only when this is the sole agent: then nothing else can run.
       optional: found.length > 1,
-      detail: `unverified — no sign-in evidence (${SIGN_IN_EVIDENCE[cli]})`,
+      detail: `unverified: no sign-in evidence (${SIGN_IN_EVIDENCE[cli]})`,
       fix,
       next: login,
     };
@@ -320,7 +320,7 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
           name: 'git repository',
           ok: false,
           optional: true,
-          detail: 'not inside a git repository — repo checks skipped',
+          detail: 'not inside a git repository; repo checks skipped',
           fix: NOT_IN_REPO_HINT,
         },
   );
@@ -430,14 +430,14 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
           optional: true,
           detail:
             sandboxRuntime === 'none'
-              ? 'codex CLI found — no sandbox runtime, so codex runs with danger-full-access'
+              ? 'codex CLI found; no sandbox runtime, so codex runs with danger-full-access'
               : 'codex CLI found (sandboxed builds available)',
         }
       : {
           name: 'codex sandbox',
           ok: false,
           optional: true,
-          detail: 'codex CLI not found — codex build routes unavailable',
+          detail: 'codex CLI not found; codex build routes unavailable',
           fix: 'install the codex CLI, or rely on claude routes',
         },
   );
@@ -449,7 +449,7 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
           name: 'sandbox runtime',
           ok: false,
           optional: true,
-          detail: 'no sandbox-exec (macOS) or firejail (Linux) on PATH — agents will run uncontained',
+          detail: 'no sandbox-exec (macOS) or firejail (Linux) on PATH; agents will run uncontained',
           fix: 'install firejail (Linux) or run on macOS; see README Safety',
         },
   );
@@ -525,7 +525,7 @@ export function formatDoctorChecks(checks: DoctorCheck[], opts: { inRepo?: boole
     }
     currentSection = check.section;
     const icon = doctorCheckIcon(check);
-    lines.push(`  ${icon} ${check.name} — ${check.detail}`);
+    lines.push(`  ${icon} ${check.name} - ${check.detail}`);
     if (!check.ok && check.fix) {
       lines.push(`       fix: ${check.fix}`);
     }
@@ -589,8 +589,8 @@ export function claudeKeychainCheck(probe: KeychainProbeStatus): DoctorCheck {
     return {
       name: 'claude keychain (macOS)',
       ok: false,
-      detail: `security find-generic-password -s '${service}'${profile} failed inside tmux (SecKeychainSearchCopyNext) — Claude OAuth refresh will fail with local_auth`,
-      fix: 'run the factory from a context with login-keychain access — a LaunchAgent in the gui domain (launchctl bootstrap gui/$(id -u) …) or a login Terminal, not a raw tmux pane — see docs/runbooks/macos-keychain-launchagent.md',
+      detail: `security find-generic-password -s '${service}'${profile} failed inside tmux (SecKeychainSearchCopyNext); Claude OAuth refresh will fail with local_auth`,
+      fix: 'run the factory from a context with login-keychain access, such as a LaunchAgent in the gui domain (launchctl bootstrap gui/$(id -u) …) or a login Terminal, not a raw tmux pane; see docs/runbooks/macos-keychain-launchagent.md',
     };
   }
 
@@ -598,7 +598,7 @@ export function claudeKeychainCheck(probe: KeychainProbeStatus): DoctorCheck {
     name: 'claude keychain (macOS)',
     ok: false,
     optional: true,
-    detail: `security find-generic-password -s '${service}'${profile} failed — either never logged in, or this launch context cannot read the login keychain`,
+    detail: `security find-generic-password -s '${service}'${profile} failed; either never logged in, or this launch context cannot read the login keychain`,
     fix: `run ${loginFix(probe)} and complete /login (or export ANTHROPIC_API_KEY); if already logged in, see docs/runbooks/macos-keychain-launchagent.md`,
   };
 }
@@ -608,7 +608,7 @@ export function claudeKeychainCheck(probe: KeychainProbeStatus): DoctorCheck {
 export function keychainPreflightError(probe: KeychainProbeStatus): string | null {
   if (probe.status !== 'unreadable' || !probe.inTmux) return null;
   const service = probe.service ?? DEFAULT_KEYCHAIN_SERVICE;
-  return `Claude Code credentials are not readable from this tmux session (security find-generic-password -s '${service}' failed / SecKeychainSearchCopyNext). OAuth refresh will fail and every claimed issue would spuriously park as local_auth. Launch the factory from a context with login-keychain access — a LaunchAgent in the gui domain (launchctl bootstrap gui/$(id -u) …) or a login Terminal — or export ANTHROPIC_API_KEY. See docs/runbooks/macos-keychain-launchagent.md.`;
+  return `Claude Code credentials are not readable from this tmux session (security find-generic-password -s '${service}' failed / SecKeychainSearchCopyNext). OAuth refresh will fail and every claimed issue would spuriously park as local_auth. Launch the factory from a context with login-keychain access, such as a LaunchAgent in the gui domain (launchctl bootstrap gui/$(id -u) …) or a login Terminal, or export ANTHROPIC_API_KEY. See docs/runbooks/macos-keychain-launchagent.md.`;
 }
 
 /** Outcome of one `claude -p` probe: it succeeded, it failed, or it was not run. */
@@ -649,7 +649,7 @@ export function sandboxClaudeAuthChecks(result: ClaudeAuthProbeResult): DoctorCh
     sandboxed = {
       name: SANDBOX_AUTH_CHECK,
       ok: false,
-      detail: `${result.sandboxDetail} — host claude auth is healthy, so the sandbox is blocking Claude credential refresh`,
+      detail: `${result.sandboxDetail}; host claude auth is healthy, so the sandbox is blocking Claude credential refresh`,
       fix: 'check the sandbox write allowlist (~/.claude.json*, $CLAUDE_CONFIG_DIR when set, ~/Library/Keychains); as a stopgap run with FACTORY_SANDBOX=0',
     };
   } else {
@@ -657,7 +657,7 @@ export function sandboxClaudeAuthChecks(result: ClaudeAuthProbeResult): DoctorCh
       name: SANDBOX_AUTH_CHECK,
       ok: false,
       optional: true,
-      detail: `${result.sandboxDetail} — host claude auth is not healthy either, so this is not attributable to the sandbox`,
+      detail: `${result.sandboxDetail}; host claude auth is not healthy either, so this is not attributable to the sandbox`,
       fix: 'fix host claude auth first, then re-run `factory doctor`',
     };
   }
@@ -702,7 +702,7 @@ export function leaseChecks(rows: LeaseHealthRow[]): DoctorCheck[] {
         name: `port lease :${row.port}`,
         ok: true,
         optional: true,
-        detail: `${row.worktreeId} — port ${row.port}, pid ${row.pid}, live`,
+        detail: `${row.worktreeId}: port ${row.port}, pid ${row.pid}, live`,
       };
     }
 
@@ -711,7 +711,7 @@ export function leaseChecks(rows: LeaseHealthRow[]): DoctorCheck[] {
       name: `port lease :${row.port}`,
       ok: false,
       optional: true,
-      detail: `${row.worktreeId} — port ${row.port}, pid ${row.pid}, stale (${row.reason})${squatted}`,
+      detail: `${row.worktreeId}: port ${row.port}, pid ${row.pid}, stale (${row.reason})${squatted}`,
       fix: 'run `factory doctor --reconcile` to reclaim stale leases',
     };
   });
@@ -756,7 +756,7 @@ export function eventLogCheck(integrity: EventLogIntegrity | null): DoctorCheck 
     ok: false,
     optional: true,
     detail: `${integrity.unparseable} of ${integrity.total} lines unparseable (${pct}%)`,
-    fix: 'historical corruption from pre-lock parallel writes; appends are now serialized — metrics over this file carry this error bar',
+    fix: 'historical corruption from pre-lock parallel writes; appends are now serialized; metrics over this file carry this error bar',
   };
 }
 
@@ -796,7 +796,7 @@ export function formatContainerReconcileReport(reaped: ReapRow[]): string {
     .map((r) =>
       r.removed
         ? `reconcile: removed container ${r.name}`
-        : `reconcile: failed to remove container ${r.name} — ${r.detail}`,
+        : `reconcile: failed to remove container ${r.name}: ${r.detail}`,
     )
     .join('\n');
 }
@@ -807,7 +807,7 @@ export function formatMicroVmReconcileReport(reaped: ReapRow[]): string {
     .map((r) =>
       r.removed
         ? `reconcile: removed sbx VM ${r.name} (sbx rm --force)`
-        : `reconcile: failed to remove sbx VM ${r.name} — ${r.detail}`,
+        : `reconcile: failed to remove sbx VM ${r.name}: ${r.detail}`,
     )
     .join('\n');
 }
@@ -860,7 +860,7 @@ export function formatClaimReconcileReport(released: ReleasedClaim[]): string {
     .map((c) =>
       c.released
         ? `reconcile: released issue #${c.issue} back to factory:queued (lease expired at ${c.expiresAt})`
-        : `reconcile: failed to release issue #${c.issue} (lease expired at ${c.expiresAt}) — ${c.detail ?? 'unknown error'}`,
+        : `reconcile: failed to release issue #${c.issue} (lease expired at ${c.expiresAt}): ${c.detail ?? 'unknown error'}`,
     )
     .join('\n');
 }
@@ -892,7 +892,7 @@ export function unmergedGreenPrChecks(result: GreenPrScanResult): DoctorCheck[] 
         name: GREEN_PR_CHECK,
         ok: false,
         optional: true,
-        detail: `scan failed — ${result.detail}`,
+        detail: `scan failed: ${result.detail}`,
         fix: 'check `gh auth status` and network access, then re-run `factory doctor`',
       },
     ];
@@ -904,8 +904,8 @@ export function unmergedGreenPrChecks(result: GreenPrScanResult): DoctorCheck[] 
     name: `green PR #${row.number}`,
     ok: false,
     optional: true,
-    detail: `${row.issue === null ? 'owning issue unknown' : `issue #${row.issue}`} — green and ready on ${row.branch}, open ${row.ageHours}h, not merged`,
-    fix: `review and merge #${row.number} (or close it) — the factory never auto-merges an orphaned PR`,
+    detail: `${row.issue === null ? 'owning issue unknown' : `issue #${row.issue}`}: green and ready on ${row.branch}, open ${row.ageHours}h, not merged`,
+    fix: `review and merge #${row.number} (or close it); the factory never auto-merges an orphaned PR`,
   }));
 }
 
@@ -918,7 +918,7 @@ export function declaredHarnessChecks(probes: DeclaredHarnessProbe[]): DoctorChe
       return {
         name,
         ok: false,
-        detail: `unavailable — probe \`${p.probe}\` failed: ${p.detail}`,
+        detail: `unavailable: probe \`${p.probe}\` failed: ${p.detail}`,
         fix: 'install the agent CLI on PATH or fix the "probe" command in the models config harnesses section',
       };
     }
@@ -926,7 +926,7 @@ export function declaredHarnessChecks(probes: DeclaredHarnessProbe[]): DoctorChe
       name,
       ok: false,
       optional: true,
-      detail: 'unverified — no probe configured',
+      detail: 'unverified: no probe configured',
       fix: 'add a "probe" command (exit 0 = reachable) to the harness in the models config',
     };
   });

@@ -16,10 +16,12 @@
 // these ports and re-raises a parked/escalated outcome as LaneParkError.
 
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import type { Octokit } from '@octokit/rest';
 
 import type { ApprovalGate } from '../approvals/index.js';
 import type { checkBaseHealth } from '../checkers/base-health.js';
+import { findUnknownConstitutionCheckers, formatUnknownCheckerMessage } from '../checkers/constitution-preflight.js';
 import { laneEnv } from '../environment/index.js';
 import { buildPhase as buildPhaseDefault } from '../phases/build.js';
 import {
@@ -533,6 +535,26 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
         'fail',
         `config preflight failed before PLAN:\n${tokenFindings.map((f) => f.message).join('\n')}`,
       );
+    }
+
+    // Pre-PLAN checker-name preflight (#2585): an unknown `checkers:` entry would only fail closed in
+    // CHECK, after PLAN and BUILD spent model calls. Read-only, no subprocess, runs for localOnly too.
+    if (constitution?.checkers?.length) {
+      const file =
+        constitution.repoInstance?.absPath ?? (constitution.source === 'bundled' ? constitution.path : undefined);
+      let raw: string | undefined;
+      if (file) {
+        try {
+          raw = readFileSync(file, 'utf-8');
+        } catch {
+          raw = undefined;
+        }
+      }
+      const problems = findUnknownConstitutionCheckers(constitution.checkers, raw);
+      if (problems.length > 0) {
+        const display = constitution.repoInstance?.relPath ?? constitution.path;
+        return terminalEscalated(problems.map((p) => formatUnknownCheckerMessage(display, p)).join('\n'));
+      }
     }
 
     // Pre-PLAN base health (#2339): a red origin/main releases the issue before any model spend;

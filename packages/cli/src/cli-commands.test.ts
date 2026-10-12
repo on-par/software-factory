@@ -6425,7 +6425,7 @@ Please add a widget that does the thing.
       h.harnessProbes = [{ harness: 'my-agent', probe: 'my-agent --version', status: 'available', detail: '' }];
       const res = await runMain('doctor');
       expect(res.exited).toBe(false);
-      expect(logged()).toContain('harness my-agent — available (probe: my-agent --version)');
+      expect(logged()).toContain('harness my-agent - available (probe: my-agent --version)');
     });
 
     it('reports a declared harness without a probe as unverified without failing doctor', async () => {
@@ -6433,7 +6433,7 @@ Please add a widget that does the thing.
       h.harnessProbes = [{ harness: 'my-agent', status: 'unverified', detail: '' }];
       const res = await runMain('doctor');
       expect(res.exited).toBe(false);
-      expect(logged()).toContain('unverified — no probe configured');
+      expect(logged()).toContain('unverified: no probe configured');
     });
 
     it('probes the sandbox runtime through the injected execSync seam, not node:child_process (#2014)', async () => {
@@ -6447,7 +6447,7 @@ Please add a widget that does the thing.
       };
       const res = await runMain('doctor', '--probe-inference');
       expect(res.exited).toBe(false);
-      expect(logged()).toContain('skipped — no sandbox runtime (sandbox-exec/firejail) on this host');
+      expect(logged()).toContain('skipped: no sandbox runtime (sandbox-exec/firejail) on this host');
       expect(ops.execSync).toHaveBeenCalledWith(
         expect.stringMatching(/^command -v (sandbox-exec|firejail) /),
         expect.anything(),
@@ -6459,7 +6459,7 @@ Please add a widget that does the thing.
       h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, enabled: false } };
       const res = await runMain('doctor', '--probe-inference');
       expect(res.exited).toBe(false);
-      expect(logged()).toContain('skipped — sandbox disabled by config or FACTORY_SANDBOX');
+      expect(logged()).toContain('skipped: sandbox disabled by config or FACTORY_SANDBOX');
     });
 
     it('reports .factory/state/STOP not present when the sentinel is absent', async () => {
@@ -6608,7 +6608,7 @@ Please add a widget that does the thing.
       expect(res.exited).toBe(false);
       expect(logged()).toContain('reconcile: freed port 4002');
       expect(logged()).toContain(
-        'reconcile: found pid 55 (pgid 66, stray-proc) squatting port 4002 of dead lane /nonexistent/wt — not factory-started, left running',
+        'reconcile: found pid 55 (pgid 66, stray-proc) squatting port 4002 of dead lane /nonexistent/wt; not factory-started, left running',
       );
     });
 
@@ -6705,7 +6705,7 @@ Please add a widget that does the thing.
         return '';
       };
       await runMain('doctor', '--reconcile');
-      expect(logged()).toContain('reconcile: skipping stale claims — no GitHub repo or token');
+      expect(logged()).toContain('reconcile: skipping stale claims: no GitHub repo or token');
       expect(ops.releaseStaleClaims).not.toHaveBeenCalled();
     });
 
