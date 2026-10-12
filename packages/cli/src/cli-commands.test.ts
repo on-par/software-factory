@@ -1,6 +1,15 @@
 import type * as ChildProcess from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -89,7 +98,7 @@ const h = vi.hoisted(() => {
   };
 });
 
-import { microVmName, renderSlicePlanComment } from '@on-par/factory-core/internal';
+import { listBuiltInCheckers, microVmName, renderSlicePlanComment } from '@on-par/factory-core/internal';
 
 import { FACTORYD_LABEL, factorydFiles, type DaemonCtlDeps } from './cli/daemon.js';
 import { HELP_GROUPS, OTHER_GROUP } from './cli/help-groups.js';
@@ -123,6 +132,8 @@ class ExitError extends Error {
 let exitSpy: any;
 let logSpy: any;
 let errSpy: any;
+const DEFAULT_CODE_FIXTURE = '---\nproduct: default-code\ncheckers: [compile]\n---\n# Default Code Constitution\n';
+
 const savedEnv: Record<string, string | undefined> = {};
 
 function trackEnv(...keys: string[]) {
@@ -305,6 +316,7 @@ function makeCoreFakes() {
     ConstitutionLoader: vi.fn(function () {
       return {
         listProducts: () => ['alpha', 'beta'],
+        load: (p: string) => ({ product: p, checkers: p === 'alpha' ? ['compile', 'lint'] : [] }),
         resolve: (...args: any[]) => (h.constitutionResolve as (...a: any[]) => any)(...args),
       };
     }) as any,
@@ -633,6 +645,16 @@ describe('cli commands (via main dispatch)', () => {
         join(h.constitutionsDir, '_template.md'),
         '```markdown\n---\nproduct: <product-name>\n---\n# <Product> Constitution\n```\n',
       );
+      writeFileSync(join(h.constitutionsDir, 'default-code.md'), DEFAULT_CODE_FIXTURE);
+    });
+
+    it("scaffolds the active product's bundled constitution when state/product names one", async () => {
+      writeFileSync(join(h.constitutionsDir, 'alpha.md'), '# alpha constitution\n');
+      mkdirSync(dirname(paths().product), { recursive: true });
+      writeFileSync(paths().product, 'alpha');
+      const res = await runMain('init');
+      expect(res.exited).toBe(false);
+      expect(readFileSync(paths().constitution, 'utf-8')).toBe('# alpha constitution\n');
     });
 
     it('creates .factory dirs, the git exclude entry, and a sample queue', async () => {
@@ -692,8 +714,7 @@ describe('cli commands (via main dispatch)', () => {
 
       expect(existsSync(paths().constitution)).toBe(true);
       const constitution = readFileSync(paths().constitution, 'utf-8');
-      const repoName = h.repoRoot.split('/').pop();
-      expect(constitution).toContain(JSON.stringify(repoName));
+      expect(constitution).toBe(DEFAULT_CODE_FIXTURE);
 
       expect(existsSync(paths().gitignore)).toBe(true);
       expect(readFileSync(paths().gitignore, 'utf-8')).toContain('state/');
@@ -767,6 +788,7 @@ describe('cli commands (via main dispatch)', () => {
         join(h.constitutionsDir, '_template.md'),
         '```markdown\n---\nproduct: <product-name>\n---\n# <Product> Constitution\n```\n',
       );
+      writeFileSync(join(h.constitutionsDir, 'default-code.md'), DEFAULT_CODE_FIXTURE);
       h.diagnoses = [
         {
           model: 'a',
@@ -899,6 +921,54 @@ describe('cli commands (via main dispatch)', () => {
       expect(logged()).toContain('beta');
     });
 
+    it('--list prints each product with its checkers', async () => {
+      await runMain('constitution', '--list');
+      expect(logged()).toContain('alpha — compile, lint');
+      expect(logged()).toContain('beta — (no checkers)');
+    });
+
+    it('--checkers prints every built-in checker with a description', async () => {
+      const res = await runMain('constitution', '--checkers');
+      expect(res.exited).toBe(false);
+      const out = logged();
+      for (const c of listBuiltInCheckers()) expect(out).toContain(`${c.name} — ${c.description}`);
+      expect(out).toContain('custom_<name>');
+    });
+
+    it('--product overwrites the unmodified init scaffold without --force', async () => {
+      writeFileSync(join(h.constitutionsDir, 'default-code.md'), DEFAULT_CODE_FIXTURE);
+      writeFileSync(join(h.constitutionsDir, 'alpha.md'), '# alpha constitution\n');
+      await runMain('init');
+      const res = await runMain('constitution', '--product', 'alpha');
+      expect(res.exited).toBe(false);
+      expect(readFileSync(paths().constitution, 'utf-8')).toBe('# alpha constitution\n');
+      expect(readFileSync(paths().product, 'utf-8')).toBe('alpha');
+    });
+
+    it('--product overwrites the legacy template scaffold without --force', async () => {
+      writeFileSync(
+        join(h.constitutionsDir, '_template.md'),
+        '```markdown\n---\nproduct: <product-name>\n---\n# <Product> Constitution\n```\n',
+      );
+      writeFileSync(join(h.constitutionsDir, 'alpha.md'), '# alpha constitution\n');
+      await runMain('constitution', '--init');
+      const res = await runMain('constitution', '--product', 'alpha');
+      expect(res.exited).toBe(false);
+      expect(readFileSync(paths().constitution, 'utf-8')).toBe('# alpha constitution\n');
+    });
+
+    it('--product still refuses a user-edited constitution without --force', async () => {
+      writeFileSync(join(h.constitutionsDir, 'default-code.md'), DEFAULT_CODE_FIXTURE);
+      writeFileSync(join(h.constitutionsDir, 'alpha.md'), '# alpha constitution\n');
+      await runMain('init');
+      appendFileSync(paths().constitution, '\nMy own rule.\n');
+      const before = readFileSync(paths().constitution, 'utf-8');
+      const res = await runMain('constitution', '--product', 'alpha');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('already exists');
+      expect(readFileSync(paths().constitution, 'utf-8')).toBe(before);
+    });
+
     it('sets the active product when the constitution exists', async () => {
       writeFileSync(join(h.constitutionsDir, 'alpha.md'), '# alpha');
       const res = await runMain('constitution', '--product', 'alpha');
@@ -989,7 +1059,7 @@ describe('cli commands (via main dispatch)', () => {
       expect(res.exited).toBe(true);
       const text = written.join('').replace(/\s+/g, ' ');
       expect(text).toContain('.factory/constitution.md in this repo is the source of truth');
-      expect(text).toContain('Seed .factory/constitution.md from the bundled example constitution for <name>');
+      expect(text).toContain('Seed .factory/constitution.md from the bundled constitution for <name>');
     });
   });
 

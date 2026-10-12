@@ -665,7 +665,14 @@ export {
   REVIEW_ACCESS_ERROR_EXIT_CODE,
 } from './review/pr-reference.js';
 export type { ReviewConstitution, ReviewConstitutionSource } from './constitutions/index.js';
-export { DEFAULT_REVIEW_CONSTITUTION, describeReviewConstitutionSource } from './constitutions/index.js';
+export {
+  DEFAULT_CODE_CONSTITUTION,
+  DEFAULT_REVIEW_CONSTITUTION,
+  describeConstitutionSource,
+  describeReviewConstitutionSource,
+} from './constitutions/index.js';
+export type { BuiltInCheckerInfo } from './checkers/index.js';
+export { listBuiltInCheckers } from './checkers/index.js';
 
 // Readiness deep check (#1732)
 export type { DecompositionOutput } from './readiness/decompose.js';

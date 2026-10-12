@@ -21,6 +21,7 @@ import {
   renderCheckerFindings,
   resolveTestsCommand,
   lintChecker,
+  listBuiltInCheckers,
   runAllCheckers,
   runCustomChecker,
   summarizeCheckerOutputs,
@@ -1483,6 +1484,22 @@ describe('runAllCheckers', () => {
       expect(accessibility?.result).toBe('PASS');
     },
   );
+});
+
+describe('listBuiltInCheckers', () => {
+  it('names exactly the checkers runAllCheckers runs for a null constitution', { timeout: 60000 }, async () => {
+    const worktree = await makeWorktree();
+    const router = new ModelRouter(models, routes, false, new StubModelExecutor({ scripts: {} }));
+    const summary = await runAllCheckers(makeContext(worktree), router, null);
+    expect(listBuiltInCheckers().map((c) => c.name)).toEqual(summary.results.map((r) => r.checker));
+  });
+
+  it('gives every checker a non-empty single-line description', () => {
+    for (const c of listBuiltInCheckers()) {
+      expect(c.description.length).toBeGreaterThan(0);
+      expect(c.description).not.toContain('\n');
+    }
+  });
 });
 
 describe('fileExists', () => {

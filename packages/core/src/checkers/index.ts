@@ -559,15 +559,53 @@ Steps:
 // ---------- Runner: run all checkers for a product ----------
 
 /** The unified registry: every checker — built-in, agent-backed, custom, unknown — runs through the same fail-closed path. */
-const BUILT_IN_CHECKERS: readonly Checker[] = [
-  { name: WORKER_OUTPUT_CHECKER, run: (ctx) => workerOutputChecker(ctx) },
-  { name: 'compile', run: (ctx) => compileChecker(ctx) },
-  { name: 'tests', run: (ctx) => testsChecker(ctx) },
-  { name: 'lint', run: (ctx) => lintChecker(ctx) },
-  { name: 'links', run: (ctx) => linksChecker(ctx) },
-  { name: 'accessibility', run: (ctx) => accessibilityChecker(ctx) },
-  { name: DESIGN_SMELLS_CHECKER, run: (ctx) => designSmellsChecker(ctx, ctx.router, ctx.timeoutSeconds) },
+const BUILT_IN_CHECKERS: readonly (Checker & { description: string })[] = [
+  {
+    name: WORKER_OUTPUT_CHECKER,
+    run: (ctx) => workerOutputChecker(ctx),
+    description: 'FAILs when the worker produced no diff against the base',
+  },
+  {
+    name: 'compile',
+    run: (ctx) => compileChecker(ctx),
+    description: "runs the repo's build/typecheck script",
+  },
+  {
+    name: 'tests',
+    run: (ctx) => testsChecker(ctx),
+    description: "runs the repo's verify or test command (FAILs instead of SKIPs with requireTests)",
+  },
+  {
+    name: 'lint',
+    run: (ctx) => lintChecker(ctx),
+    description: "runs the repo's lint script",
+  },
+  {
+    name: 'links',
+    run: (ctx) => linksChecker(ctx),
+    description: 'checks href/src links in generated HTML files resolve',
+  },
+  {
+    name: 'accessibility',
+    run: (ctx) => accessibilityChecker(ctx),
+    description: 'runs accessibility checks on generated HTML',
+  },
+  {
+    name: DESIGN_SMELLS_CHECKER,
+    run: (ctx) => designSmellsChecker(ctx, ctx.router, ctx.timeoutSeconds),
+    description: 'model-judged review of the diff for design smells',
+  },
 ];
+
+export interface BuiltInCheckerInfo {
+  name: string;
+  description: string;
+}
+
+/** Every built-in checker with a one-line description — the same registry CHECK runs, so it cannot drift. */
+export function listBuiltInCheckers(): BuiltInCheckerInfo[] {
+  return BUILT_IN_CHECKERS.map(({ name, description }) => ({ name, description }));
+}
 
 const STANDARD_CHECKER_NAMES = BUILT_IN_CHECKERS.map((c) => c.name);
 

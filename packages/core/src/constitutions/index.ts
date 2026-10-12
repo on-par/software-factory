@@ -21,6 +21,9 @@ export const DEFAULT_REPO_CONSTITUTION_PATH = '.factory/constitution.md';
 /** Bundled product name of the built-in review fallback (packages/config/src/constitutions/default-review.md). */
 export const DEFAULT_REVIEW_CONSTITUTION = 'default-review';
 
+/** Bundled product name of the default code constitution (packages/config/src/constitutions/default-code.md), scaffolded by `factory init` when no product is active. */
+export const DEFAULT_CODE_CONSTITUTION = 'default-code';
+
 export type ReviewConstitutionSource =
   | { kind: 'repo-constitution'; path: string }
   | { kind: 'instruction-files'; files: string[] }
@@ -90,7 +93,7 @@ export class ConstitutionLoader {
     }
     if (!raw.trim()) return null;
     const fallbackProduct = basename(relPath).replace(/\.md$/, '');
-    return parseConstitution(raw, path, fallbackProduct);
+    return { ...parseConstitution(raw, path, fallbackProduct), repoInstance: { relPath, absPath: path } };
   }
 
   private readInstructionFiles(repoDir: string): Array<{ file: string; content: string }> {
@@ -196,17 +199,34 @@ export class ConstitutionLoader {
           : fromRepo.body,
         checkers: bundled.checkers,
         requireTests: bundled.requireTests,
+        repoInstance: bundled.repoInstance,
       };
     }
     return fromRepo ?? bundled;
   }
 
-  /** List available product constitutions */
+  /** List available product constitutions: the example products plus default-code (default-review is review-only and hidden). */
   listProducts(): string[] {
     return readdirSync(this.dir)
-      .filter((f) => f.endsWith('.md') && f.startsWith('example-'))
-      .map((f) => f.replace(/\.md$/, ''));
+      .filter((f) => f.endsWith('.md') && !f.startsWith('_') && f !== `${DEFAULT_REVIEW_CONSTITUTION}.md`)
+      .map((f) => f.replace(/\.md$/, ''))
+      .sort();
   }
+}
+
+/** One-line `constitution` log text saying which standards a run resolved and where they were loaded from. */
+export function describeConstitutionSource(c: Constitution | null, product?: string): string {
+  if (!c) return 'No standards found (no repo instruction files, no constitution) — proceeding without';
+  if (c.repoInstance) {
+    const base = `Standards from ${c.repoInstance.relPath} (${c.repoInstance.absPath})`;
+    if (c.source !== 'repo') return base;
+    const files = REPO_INSTRUCTION_FILES.filter((f) => c.body.includes(`<standards source="${f}">`));
+    return `${base}, plus repo instruction files (${files.join(', ')})`;
+  }
+  if (c.source === 'repo') {
+    return `Standards from repo instruction files${product ? ` (custom checkers from '${product}')` : ''}`;
+  }
+  return `Standards from bundled constitution '${c.product}' (${c.path})`;
 }
 
 /** Build the prompt context for an already-resolved constitution */

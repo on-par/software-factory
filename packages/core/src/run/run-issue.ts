@@ -26,6 +26,7 @@ import {
   remainingShowstoppers,
   renderEnvironmentReleaseComment,
 } from '../phases/check.js';
+import { describeConstitutionSource } from '../constitutions/index.js';
 import { planPhase as planPhaseDefault } from '../phases/plan.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
 import { upsertSlicePlanComment } from '../readiness/slice-plan-github.js';
@@ -519,16 +520,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     // Resolve standards ONCE against the fresh worktree (Invariant 1). Resolving again
     // later would let the build worker author the standards it is graded by.
     const constitution = ports.resolveConstitution();
-    if (constitution) {
-      log(
-        'constitution',
-        constitution.source === 'repo'
-          ? `Standards from repo instruction files${request.product ? ` (custom checkers from '${request.product}')` : ''}`
-          : `Standards from bundled constitution '${constitution.product}'`,
-      );
-    } else {
-      log('constitution', 'No standards found (no repo instruction files, no constitution) — proceeding without');
-    }
+    log('constitution', describeConstitutionSource(constitution, request.product));
 
     // Pre-PLAN base health (#2339): a red origin/main releases the issue before any model spend;
     // the CLI turns `released` into LaneEnvironmentPauseError, whose runLane branch writes the base hold.
