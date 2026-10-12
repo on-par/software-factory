@@ -16,6 +16,8 @@ export interface DoctorCheck {
   fix?: string;
   /** Optional checks never fail the doctor exit code. */
   optional?: boolean;
+  /** Setup section the row renders under (#2555); unsectioned rows render first. */
+  section?: string;
 }
 
 export interface DoctorExecOptions {
@@ -128,8 +130,49 @@ export function gitAuthCheck(
   return { name: GIT_AUTH_CHECK, ok: true, detail: 'git can authenticate to origin non-interactively' };
 }
 
+export interface HarnessSetup {
+  section: string;
+  cli: string;
+  install: string;
+}
+
+/** One doctor section per built-in harness (#2555), in display order. */
+export const HARNESS_SETUP: readonly HarnessSetup[] = [
+  { section: 'Claude Code', cli: 'claude', install: 'npm install -g @anthropic-ai/claude-code' },
+  { section: 'Codex', cli: 'codex', install: 'npm install -g @openai/codex' },
+  { section: 'OpenCode', cli: 'opencode', install: 'npm install -g opencode-ai' },
+];
+
+/** One optional `<cli> installed` row per harness, with the CLI version when found and the install command when not (#2555). */
+export function harnessInstallChecks(
+  commandAvailable: (cmd: string) => boolean,
+  tryExec: (cmd: string) => string | null,
+): DoctorCheck[] {
+  return HARNESS_SETUP.map(({ section, cli, install }): DoctorCheck => {
+    const name = `${cli} installed`;
+    if (!commandAvailable(cli)) {
+      return {
+        name,
+        section,
+        ok: false,
+        optional: true,
+        detail: `${cli} not found on PATH, ${cli} routes unavailable`,
+        fix: `install ${section}: ${install}`,
+      };
+    }
+    const version = tryExec(`${cli} --version`)?.trim().split('\n')[0]?.trim();
+    return {
+      name,
+      section,
+      ok: true,
+      optional: true,
+      detail: version ? `found on PATH (${version})` : 'found on PATH (version unknown)',
+    };
+  });
+}
+
 /** Coding agent prerequisites: at least one agent CLI is required; each CLI is then reported
- *  on its own optional line, with Codex sign-in reported separately from installation (#1269, #2422). */
+ *  on its own optional line, with Codex sign-in reported separately from installation (#1269, #2422, #2555). */
 export function agentCliChecks(
   commandAvailable: (cmd: string) => boolean,
   tryExec: (cmd: string) => string | null,
@@ -146,17 +189,7 @@ export function agentCliChecks(
           fix: `install Claude Code (${CLAUDE_CODE_URL}) or the Codex CLI (${CODEX_CLI_URL})`,
         },
   ];
-  checks.push(
-    found.includes('claude')
-      ? { name: 'claude CLI', ok: true, optional: true, detail: 'found on PATH' }
-      : {
-          name: 'claude CLI',
-          ok: false,
-          optional: true,
-          detail: 'not found on PATH, claude routes unavailable',
-          fix: `optional: install Claude Code: ${CLAUDE_CODE_URL}`,
-        },
-  );
+  checks.push(...harnessInstallChecks(commandAvailable, tryExec));
   if (found.includes('codex')) {
     const method = codexAuthMethod(tryExec('codex login status 2>&1'));
     const session = method === 'ChatGPT' ? codexSessionState() : 'unknown';
@@ -387,7 +420,14 @@ export function formatDoctorChecks(checks: DoctorCheck[], opts: { inRepo?: boole
   let failed = 0;
   let warnings = 0;
 
-  for (const check of checks) {
+  const sections = [...new Set(checks.flatMap((c) => (c.section === undefined ? [] : [c.section])))];
+  const ordered = [
+    ...checks.filter((c) => c.section === undefined),
+    ...sections.flatMap((s) => checks.filter((c) => c.section === s)),
+  ];
+
+  let currentSection: string | undefined;
+  for (const check of ordered) {
     if (check.ok) {
       passed++;
     } else if (check.optional) {
@@ -395,6 +435,10 @@ export function formatDoctorChecks(checks: DoctorCheck[], opts: { inRepo?: boole
     } else {
       failed++;
     }
+    if (check.section !== undefined && check.section !== currentSection) {
+      lines.push(`-- ${check.section} --`);
+    }
+    currentSection = check.section;
     const icon = doctorCheckIcon(check);
     lines.push(`  ${icon} ${check.name} — ${check.detail}`);
     if (!check.ok && check.fix) {

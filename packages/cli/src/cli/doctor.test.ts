@@ -19,6 +19,7 @@ import {
   GIT_AUTH_FIX,
   GIT_AUTH_PROBE_CMD,
   GIT_AUTH_PROBE_TIMEOUT_MS,
+  harnessInstallChecks,
   gitAuthCheck,
   type GreenPrScanResult,
   leaseChecks,
@@ -168,9 +169,9 @@ describe('gitAuthCheck', () => {
 });
 
 describe('runDoctorChecks', () => {
-  it('fully configured repo: 13 checks all ok, pre-existing rows unchanged, doctorFailed false', () => {
+  it('fully configured repo: 15 checks all ok, pre-existing rows unchanged, doctorFailed false', () => {
     const checks = runDoctorChecks(probes());
-    expect(checks).toHaveLength(13);
+    expect(checks).toHaveLength(15);
     expect(checks.every((c) => c.ok)).toBe(true);
     expect(doctorFailed(checks)).toBe(false);
     const byName = (n: string) => checks.find((c) => c.name === n)!;
@@ -186,10 +187,11 @@ describe('runDoctorChecks', () => {
 
   it('claude CLI missing is optional when codex is installed and logged in (#1269)', () => {
     const checks = runDoctorChecks(probes({ commandAvailable: (cmd) => cmd !== 'claude' && cmd !== 'opencode' }));
-    const claude = checks.find((c) => c.name === 'claude CLI')!;
+    const claude = checks.find((c) => c.name === 'claude installed')!;
     expect(claude.ok).toBe(false);
     expect(claude.optional).toBe(true);
-    expect(claude.fix).toContain('install Claude Code');
+    expect(claude.section).toBe('Claude Code');
+    expect(claude.fix).toMatch(/npm install -g @anthropic-ai\/claude-code$/);
     expect(checks.find((c) => c.name === 'coding agent')).toMatchObject({ ok: true, detail: 'found codex' });
     expect(checks.find((c) => c.name === 'codex auth')).toMatchObject({ ok: true });
     expect(checks.find((c) => c.name === 'codex auth')!.detail).toContain('ChatGPT');
@@ -616,7 +618,7 @@ describe('codex-only host: optional claude agent (#2551)', () => {
 
   const assertNoClaudeFailure = (final: ReturnType<typeof codexOnlyChecks>) => {
     const output = formatDoctorChecks(final);
-    expect(lineOf(output, 'claude CLI')).toMatch(/(⚠️|➖) claude CLI/);
+    expect(lineOf(output, 'claude installed')).toMatch(/(⚠️|➖) claude installed/);
     for (const name of ['claude keychain (macOS)', 'claude auth (host)', 'claude auth (sandboxed)'])
       expect(lineOf(output, name)).toContain(`➖ ${name}`);
     for (const line of output.split('\n').filter((l) => l.includes('claude'))) expect(line).not.toContain('❌');
@@ -1274,5 +1276,81 @@ describe('reconcileAgentAuthChecks (#2496)', () => {
     const out = reconcileAgentAuthChecks([codexFailed, claudeSkipped]);
     expect(out[0]).toMatchObject({ ok: false, optional: false });
     expect(out[1]).toBe(claudeSkipped);
+  });
+});
+
+describe('per-harness setup sections (#2555)', () => {
+  const base = probes();
+  const withVersion = (overrides: Partial<DoctorEnvProbes> = {}) =>
+    probes({
+      tryExec: (cmd) => (cmd === 'codex --version' ? 'codex-cli 0.47.0' : base.tryExec(cmd)),
+      ...overrides,
+    });
+
+  it('renders one section per harness with its installed row', () => {
+    const checks = runDoctorChecks(withVersion());
+    const lines = formatDoctorChecks(checks).split('\n');
+    const headers = ['-- Claude Code --', '-- Codex --', '-- OpenCode --'];
+    const rows = ['claude installed', 'codex installed', 'opencode installed'];
+    const idx = headers.map((h) => lines.indexOf(h));
+    expect(idx.every((i) => i >= 0)).toBe(true);
+    expect([...idx].sort((a, b) => a - b)).toEqual(idx);
+    headers.forEach((h, i) => {
+      expect(lines.filter((l) => l === h)).toHaveLength(1);
+      expect(lines[idx[i]! + 1]).toContain(rows[i]!);
+    });
+    const output = lines.join('\n');
+    for (const c of checks) expect(output.split(`${c.name} —`).length - 1).toBe(1);
+  });
+
+  it('a missing CLI fails its installed row and ends with its install command', () => {
+    const checks = runDoctorChecks(
+      probes({ commandAvailable: (cmd) => !['claude', 'codex', 'opencode'].includes(cmd) }),
+    );
+    const output = formatDoctorChecks(checks).split('\n');
+    const expected = [
+      ['claude', 'Claude Code', /npm install -g @anthropic-ai\/claude-code$/],
+      ['codex', 'Codex', /npm install -g @openai\/codex$/],
+      ['opencode', 'OpenCode', /npm install -g opencode-ai$/],
+    ] as const;
+    for (const [cli, section, re] of expected) {
+      const row = checks.find((c) => c.name === `${cli} installed`)!;
+      expect(row).toMatchObject({ ok: false, section });
+      expect(row.fix).toMatch(re);
+      const at = output.findIndex((l) => l.includes(`${cli} installed`));
+      expect(output[at + 1]).toMatch(re);
+      expect(output[at + 1]).toContain('fix:');
+    }
+  });
+
+  it('an installed codex CLI passes and shows its version', () => {
+    const checks = runDoctorChecks(withVersion());
+    const row = checks.find((c) => c.name === 'codex installed')!;
+    expect(row.ok).toBe(true);
+    expect(row.detail).toContain('codex-cli 0.47.0');
+    expect(formatDoctorChecks(checks)).toContain('  ✅ codex installed — found on PATH (codex-cli 0.47.0)');
+  });
+
+  it('harnessInstallChecks handles null, empty and multi-line version output', () => {
+    const detail = (out: string | null) =>
+      harnessInstallChecks(
+        () => true,
+        () => out,
+      ).find((c) => c.name === 'claude installed')!.detail;
+    expect(detail(null)).toBe('found on PATH (version unknown)');
+    expect(detail('')).toBe('found on PATH (version unknown)');
+    expect(detail('  \n ')).toBe('found on PATH (version unknown)');
+    expect(detail('1.2.3 (Claude Code)\nextra line')).toBe('found on PATH (1.2.3 (Claude Code))');
+  });
+
+  it('formatDoctorChecks puts unsectioned rows first and keeps totals', () => {
+    const output = formatDoctorChecks([
+      { name: 'a', ok: true, detail: 'x', section: 'S' },
+      { name: 'b', ok: true, detail: 'y' },
+      { name: 'c', ok: false, optional: true, detail: 'z', section: 'S' },
+      { name: 'd', ok: false, detail: 'w' },
+    ]);
+    expect(output).toContain(['  ✅ b — y', '  ❌ d — w', '-- S --', '  ✅ a — x', '  ⚠️ c — z'].join('\n'));
+    expect(output).toContain('2 passed, 1 failed, 1 warnings');
   });
 });
