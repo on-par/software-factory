@@ -55,3 +55,34 @@ What a harness receives, must return and how its failures are classified is spec
 | `timeout`                   | Failover immediately                       |
 | `error`                     | Retry once, then failover                  |
 | `empty_response`            | Failover immediately                       |
+
+## Declaring a custom harness
+
+Add a `harnesses` section to the models config to name your own agent CLI, then reference its id from a model's `harness` field:
+
+```json
+{
+  "harnesses": {
+    "my-agent": {
+      "command": "my-agent",
+      "prompt": "stdin",
+      "output": "stdout",
+      "agentic": true,
+      "usage": "none",
+      "errorPatterns": ["rate limit"],
+      "probe": "my-agent --version"
+    }
+  },
+  "models": {
+    "my-model": { "harness": "my-agent" }
+  }
+}
+```
+
+- `prompt`: `stdin`, `file` or `arg`.
+- `output`: `stdout`, `file:{outFile}` or `jsonl-last-message`.
+- `usage`: `none` or `jsonl`.
+- `errorPatterns` (regular expressions) and `probe` (a command; exit 0 means reachable) are optional.
+- Ids of built-in harnesses cannot be redeclared.
+
+Declarations are validated only. The factory does not run the declared command yet.
