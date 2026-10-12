@@ -1073,6 +1073,78 @@ describe('cli commands (via main dispatch)', () => {
       expect(out).toContain('boss:');
     });
 
+    describe('with the real registry and diagnoseModels (#2402)', () => {
+      const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+      const saved = { base: process.env.OLLAMA_BASE_URL, localOnly: process.env.FACTORY_LOCAL_ONLY };
+      let captured: InstanceType<typeof FactoryCore.ModelRegistry> | undefined;
+
+      beforeEach(() => {
+        delete process.env.OLLAMA_BASE_URL;
+        delete process.env.FACTORY_LOCAL_ONLY;
+        captured = undefined;
+        h.execSyncImpl = () => {
+          throw new Error('ollama: command not found');
+        };
+      });
+
+      afterEach(() => {
+        if (saved.base === undefined) delete process.env.OLLAMA_BASE_URL;
+        else process.env.OLLAMA_BASE_URL = saved.base;
+        if (saved.localOnly === undefined) delete process.env.FACTORY_LOCAL_ONLY;
+        else process.env.FACTORY_LOCAL_ONLY = saved.localOnly;
+      });
+
+      function realDeps(): CliDeps {
+        return {
+          daemon: daemonDeps(),
+          runTui: recordingRunTui,
+          ModelRegistry: vi.fn(function (cfg: never) {
+            captured = new FactoryCore.ModelRegistry(cfg);
+            return captured;
+          }) as never,
+          diagnoseModels: FactoryCore.diagnoseModels,
+        };
+      }
+
+      function iconsByModel(out: string, suffix: string): Map<string, string> {
+        const map = new Map<string, string>();
+        for (const line of out.replace(ANSI, '').split('\n')) {
+          const match = line.match(new RegExp(`^\\s*(✅|⚠️|❌) (\\S+) ${suffix}`));
+          if (match) map.set(match[2], match[1]);
+        }
+        return map;
+      }
+
+      it('marks every ollama-provider model ❌ when ollama is not on PATH', async () => {
+        coreFakes.isCommandAvailable.mockImplementation((c: string) => c !== 'ollama');
+
+        await runMainRaw(realDeps(), 'models');
+
+        const ollamaModels = captured!.list().filter((m) => captured!.get(m)?.provider === 'ollama');
+        expect(ollamaModels.length).toBeGreaterThan(0);
+        const lines = logged().replace(ANSI, '').split('\n');
+        for (const m of ollamaModels) {
+          expect(lines.some((l) => l.includes(`❌ ${m} tier=`))).toBe(true);
+          expect(lines.some((l) => l.includes(`✅ ${m} tier=`))).toBe(false);
+        }
+      });
+
+      it('plain list and --doctor show the same status per model', async () => {
+        coreFakes.isCommandAvailable.mockImplementation((c: string) => c === 'claude');
+
+        await runMainRaw(realDeps(), 'models');
+        const plain = iconsByModel(logged(), 'tier=');
+        logSpy.mockClear();
+        await runMainRaw(realDeps(), 'models', '--doctor');
+        const doctor = iconsByModel(logged(), 'provider=');
+        process.exitCode = undefined;
+
+        expect(plain.size).toBeGreaterThan(0);
+        expect([...plain.keys()].sort()).toEqual([...doctor.keys()].sort());
+        for (const [model, icon] of plain) expect(doctor.get(model)).toBe(icon);
+      });
+    });
+
     it('doctor prints the report and returns when a worker is reachable', async () => {
       h.diagnoses = [
         { model: 'w', provider: 'openai', tiers: ['worker'], reachable: true, experimental: false, reason: 'ok' },
