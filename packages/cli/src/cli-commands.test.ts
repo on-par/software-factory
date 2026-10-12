@@ -2938,6 +2938,47 @@ bash scripts/verify.sh
       expect(out).toContain('factory triage accept');
     });
 
+    it('a proposal written by triage is accepted by triage accept', async () => {
+      const rev = (cmd: string) =>
+        cmd.includes('rev-parse') ? h.repoRoot : cmd.includes('gh repo view') ? h.ghRepo : '';
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('claude -p')) {
+          writeFileSync(
+            paths().queueProposed,
+            '# Triage queue — constitution: default-code\n# c1\n# c2\n# c3\n# c4\n\ngreet 1\n',
+          );
+          return '';
+        }
+        return rev(cmd);
+      };
+      const triaged = await runMain('triage');
+      expect(triaged.exited).toBe(false);
+      expect(logged()).toContain('greet 1');
+      h.execImpl = rev;
+      const accepted = await runMain('triage', 'accept');
+      expect(accepted.exited).toBe(false);
+      expect(existsSync(paths().queue)).toBe(true);
+      expect(existsSync(paths().queueProposed)).toBe(false);
+      expect(logged()).toContain('queue accepted');
+    });
+
+    it('exits 1 with the validation errors when the proposal would be rejected by accept', async () => {
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) return h.ghRepo;
+        if (cmd.includes('claude -p')) {
+          writeFileSync(paths().queueProposed, 'app 5\napp notanumber\n');
+          return '';
+        }
+        return '';
+      };
+      const res = await runMain('triage');
+      expect(res).toEqual({ exited: true, code: 1 });
+      expect(errored()).toContain('malformed');
+      expect(errored()).toContain('triage accept');
+      expect(existsSync(paths().queueProposed)).toBe(true);
+    });
+
     it('logs the Claude model it passes via --model, not the Ollama tier head', async () => {
       h.modelProviders = { 'qwen2.5-coder:14b': 'ollama', 'claude-sonnet-5': 'anthropic' };
       h.triageCandidates = ['qwen2.5-coder:14b', 'claude-sonnet-5'];
@@ -3003,6 +3044,18 @@ bash scripts/verify.sh
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('"type":"triage_accepted"');
       expect(events).toContain('5, 6');
+    });
+
+    it('accepts a proposal with a header, comments and a blank line before the first entry', async () => {
+      const body = '# Triage queue — constitution: default-code\n# c1\n# c2\n# c3\n# c4\n\ngreet 1\n';
+      writeFileSync(paths().queueProposed, body);
+      const res = await runMain('triage', 'accept');
+      expect(res.exited).toBe(false);
+      expect(readFileSync(paths().queue, 'utf-8')).toBe(body);
+      expect(logged()).toContain('queue accepted');
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('"type":"triage_accepted"');
+      expect(events).toContain('1');
     });
 
     it('rejects an invalid queue and leaves it unchanged', async () => {

@@ -108,26 +108,16 @@ export function rewriteQueueForDecomposition(
 export function validateQueue(content: string): QueueValidationResult {
   const lines = content.split('\n');
 
-  let lastNonBlankIndex = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim() !== '') lastNonBlankIndex = i;
-  }
-
   const issues: number[] = [];
   const errors: string[] = [];
   const seenIssues = new Set<number>();
 
-  for (let i = 0; i <= lastNonBlankIndex; i++) {
+  for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const lineNo = i + 1;
     const trimmed = line.trim();
 
-    if (trimmed === '') {
-      errors.push(`line ${lineNo}: empty line in the middle of the queue`);
-      continue;
-    }
-
-    if (trimmed.startsWith('#')) continue;
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
 
     const match = ENTRY_RE.exec(line);
     const issueNum = match ? parseInt(match[2], 10) : NaN;
