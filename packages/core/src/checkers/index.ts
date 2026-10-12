@@ -618,12 +618,17 @@ function unknownCheckerOutput(name: string): CheckerOutput {
   };
 }
 
-/** Built-ins first (current order), then constitution checkers not already registered, in constitution order. */
+/** A declared checkers list selects the built-ins (registry order) plus worker_output, the empty-diff guard
+ *  checkPhase parks on; no list (null or empty) runs every built-in. Declared non-built-ins follow in constitution order (#2455). */
 function buildCheckers(constitution: Constitution | null): Checker[] {
+  const declared = constitution?.checkers ?? [];
   const checkers = new Map<string, Checker>();
-  for (const checker of BUILT_IN_CHECKERS) checkers.set(checker.name, checker);
+  for (const checker of BUILT_IN_CHECKERS) {
+    if (declared.length > 0 && checker.name !== WORKER_OUTPUT_CHECKER && !declared.includes(checker.name)) continue;
+    checkers.set(checker.name, checker);
+  }
 
-  for (const name of constitution?.checkers ?? []) {
+  for (const name of declared) {
     if (checkers.has(name)) continue;
     checkers.set(
       name,

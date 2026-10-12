@@ -1271,7 +1271,7 @@ describe('runAllCheckers', () => {
 
       const summary = await runAllCheckers(makeContext(worktree), router, constitution);
 
-      expect(summary.total).toBe(9); // 7 built-ins + custom_style + not_a_real_checker
+      expect(summary.total).toBe(3); // worker_output + custom_style + not_a_real_checker (undeclared built-ins dropped)
       expect(summary.passes + summary.failures + summary.skips).toBe(summary.total);
       expect(summary.results.map((result) => result.checker)).toContain('custom_style');
       const unknown = summary.results.find((result) => result.checker === 'not_a_real_checker');
@@ -1297,6 +1297,62 @@ describe('runAllCheckers', () => {
     expect(summary.failures).toBeGreaterThanOrEqual(1);
     expect(summary.results.some((r) => r.checker === 'ghost_checker' && r.result === 'FAIL')).toBe(true);
     expect(stub.calls).toHaveLength(0); // unknown names must NOT be routed to the custom-checker agent
+  });
+
+  it("runs exactly the default-code constitution's declared checkers (#2455)", { timeout: 60000 }, async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
+    const constitution = new ConstitutionLoader().load('default-code');
+
+    const summary = await runAllCheckers(makeContext(worktree), router, constitution);
+
+    const names = summary.results.map((r) => r.checker);
+    expect(names).toEqual(['worker_output', 'compile', 'tests', 'lint', 'design_smells']);
+    expect(summary.total).toBe(5);
+    expect(names).not.toContain('links');
+    expect(names).not.toContain('accessibility');
+  });
+
+  it('runs a declared links checker and drops undeclared built-ins (#2455)', { timeout: 60000 }, async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
+    const constitution: Constitution = {
+      product: 'myproduct',
+      version: 1,
+      checkers: ['compile', 'links'],
+      body: 'Body standard text',
+      path: worktree,
+      source: 'bundled',
+    };
+
+    const summary = await runAllCheckers(makeContext(worktree), router, constitution);
+
+    expect(summary.results.map((r) => r.checker)).toEqual(['worker_output', 'compile', 'links']);
+  });
+
+  it('runs every built-in when the constitution declares no checkers', { timeout: 60000 }, async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
+    const constitution: Constitution = {
+      product: 'myproduct',
+      version: 1,
+      checkers: [],
+      body: 'Body standard text',
+      path: worktree,
+      source: 'bundled',
+    };
+
+    const summary = await runAllCheckers(makeContext(worktree), router, constitution);
+
+    expect(summary.results.map((r) => r.checker)).toEqual([
+      'worker_output',
+      'compile',
+      'tests',
+      'lint',
+      'links',
+      'accessibility',
+      'design_smells',
+    ]);
   });
 
   it('runs only built-ins when no constitution is resolved', { timeout: 60000 }, async () => {
