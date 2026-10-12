@@ -18,7 +18,9 @@ export interface ParsedOpenCodeJson {
   text: string;
   /** Summed `step_finish` usage; undefined when no step reported numeric tokens. */
   usage?: HarnessUsage;
-  /** Messages from `error` events, newline-joined; '' when none. */
+  /** One line per `error` event, newline-joined; '' when none. Each line is the message (or
+   *  error name), then `data.responseBody` when a string, then `status <n>` when
+   *  `data.statusCode` is a number, so caps and 429s carried outside the message classify. */
   errorText: string;
 }
 
@@ -68,10 +70,16 @@ export function parseOpenCodeJson(stdout: string): ParsedOpenCodeJson | undefine
       cacheWrite += num(tokens.cache?.write);
       cost += num(event.part?.cost);
     } else if (event.type === 'error') {
-      const message = event.error?.data?.message;
+      const data = event.error?.data;
       const name = event.error?.name;
-      if (typeof message === 'string') errors.push(message);
-      else if (typeof name === 'string') errors.push(name);
+      const parts: string[] = [];
+      if (typeof data?.message === 'string') parts.push(data.message);
+      else if (typeof name === 'string') parts.push(name);
+      if (typeof data?.responseBody === 'string' && data.responseBody) parts.push(data.responseBody);
+      if (typeof data?.statusCode === 'number' && Number.isFinite(data.statusCode)) {
+        parts.push(`status ${data.statusCode}`);
+      }
+      if (parts.length > 0) errors.push(parts.join(' '));
     }
   }
 
@@ -122,6 +130,7 @@ export class OpenCodeHarness implements CodingHarness {
 
     try {
       let stdout = '';
+      let stderr = '';
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         const attemptPrompt = attempt === 1 ? prompt : prompt + FINAL_MESSAGE_NUDGE;
         // `--auto`: headless runs auto-REJECT permission prompts (e.g. reading the
@@ -140,7 +149,7 @@ export class OpenCodeHarness implements CodingHarness {
         const cmd = `opencode run --auto --format json ${modelArg}${effortArg} < ${shellEscape(promptPath)}`;
 
         try {
-          ({ stdout } = await this.execFn(cmd, {
+          ({ stdout, stderr } = await this.execFn(cmd, {
             cwd: worktree,
             timeoutMs: timeoutSeconds * 1000,
             // JSON `tool_use` events carry full tool output.
@@ -165,6 +174,16 @@ export class OpenCodeHarness implements CodingHarness {
         const parsed = parseOpenCodeJson(stdout);
         const output = parsed ? parsed.text : stdout;
         if (output.trim().length > 0) return { output, ...(parsed?.usage ? { usage: parsed.usage } : {}) };
+        if (parsed && parsed.errorText) {
+          // OpenCode can exit 0 with the session error only on stdout. Do not
+          // nudge-retry into a usage cap or rate limit; let the router fail over.
+          const classifyText = [stderr, parsed.errorText].filter(Boolean).join('\n');
+          throw new HarnessError(
+            `opencode run reported an error event: ${parsed.errorText.split('\n')[0]}`,
+            classifyFailure(classifyText, 1),
+            { exitCode: 0, stderr: stderr || undefined },
+          );
+        }
       }
 
       throw new HarnessError(`opencode CLI returned empty output (${MAX_ATTEMPTS} attempts)`, 'empty_response', {
