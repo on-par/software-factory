@@ -46,12 +46,22 @@ Private workspaces (server, dashboard, product, scbench-adapter) also live here 
 
 - Node.js ≥ 24 (the `engines.node` field in `packages/cli/package.json`)
 - `git`
-- Claude Code (`claude`) installed, on your PATH, and signed in. The TRIAGE phase shells out to `claude -p`, and Claude models in every tier run through it.
+- At least one coding agent CLI on your PATH and signed in: Claude Code (`claude`) or the OpenAI Codex CLI (`codex`). Either one alone runs the whole loop (triage, PLAN, BUILD, CHECK and SHIP). With both installed, the factory can use either for any phase (see [Use Codex](#use-codex)).
 - The GitHub CLI `gh`, signed in with `gh auth login`. The factory uses `gh repo view` to detect your repo.
 - A GitHub token. The factory reads `GITHUB_TOKEN`, then `GH_TOKEN`, and falls back to `gh auth token` when neither is set, so `gh auth login` is usually enough.
-- Optional: the OpenAI Codex CLI (`codex`) for worker builds, and `ollama` for experimental local models. When Ollama is not running, the factory skips local models and says so once in the log.
+- Optional: `ollama` for experimental local models. When Ollama is not running, the factory skips local models and says so once in the log.
 
 Run `factory doctor` after installing (Step 1) to check all of this.
+
+### Use Codex
+
+Install the Codex CLI and sign in once:
+
+- `codex login` signs in with ChatGPT and uses your Plus or Pro plan, with no API key. Runs count toward your plan limits; manage them in ChatGPT settings.
+- `codex login --with-api-key` uses API billing instead, which suits automation and CI.
+- `codex login --device-auth` signs in on a headless machine.
+
+`factory doctor` shows a `codex auth` line with the sign-in method. Models whose CLI is not installed are skipped, so on a machine with only Codex every phase runs on Codex models and PLAN picks the codex build route. With both CLIs installed, pin a phase in `.factory/config.json` (`models.pins.plan`, `build`, `checker`, `triage`), set `route`, or reorder `tiers`; `factory triage --model <id>` picks the triage model for one run. See [docs/models.md](docs/models.md).
 
 ### Safety
 
