@@ -593,6 +593,71 @@ describe('diagnoseModels', () => {
     expect(d.reason).toContain('`claude /login`');
   });
 
+  describe('diagnoseModels unverified state', () => {
+    const P = 'unverified — no auth evidence: ';
+
+    it('reports a logged-out Claude model as unverified, not reachable', () => {
+      const d = opusDiagnosis({
+        commandAvailable: (c) => c === 'claude',
+        envPresent: () => false,
+        claudeLoggedIn: () => false,
+      });
+      expect(d.reachable).toBe(false);
+      expect(d.unverified).toBe(true);
+      expect(d.reason.startsWith(P)).toBe(true);
+      expect(d.reason).toContain('`claude /login`');
+    });
+
+    it('reports a logged-out Codex model as unverified, not reachable', () => {
+      const d = diagnosisFor('codex-model', {
+        commandAvailable: (c) => c === 'codex',
+        envPresent: () => false,
+        codexLoggedIn: () => false,
+      });
+      expect(d.reachable).toBe(false);
+      expect(d.unverified).toBe(true);
+      expect(d.reason.startsWith(P)).toBe(true);
+      expect(d.reason).toContain('codex login');
+    });
+
+    it('a throwing login probe is unverified', () => {
+      const d = opusDiagnosis({
+        commandAvailable: (c) => c === 'claude',
+        envPresent: () => false,
+        claudeLoggedIn: () => {
+          throw new Error('boom');
+        },
+      });
+      expect(d.unverified).toBe(true);
+    });
+
+    it('a logged-in Claude model is reachable and not unverified', () => {
+      const probes = { commandAvailable: (c: string) => c === 'claude', claudeLoggedIn: () => true };
+      expect(opusDiagnosis({ ...probes, envPresent: () => false })).toMatchObject({
+        reachable: true,
+        unverified: false,
+      });
+      expect(opusDiagnosis({ ...probes, claudeLoggedIn: () => false, envPresent: () => true })).toMatchObject({
+        reachable: true,
+        unverified: false,
+      });
+    });
+
+    it('a logged-in Codex model is reachable and not unverified', () => {
+      const d = diagnosisFor('codex-model', {
+        commandAvailable: (c) => c === 'codex',
+        envPresent: () => false,
+        codexLoggedIn: () => true,
+      });
+      expect(d).toMatchObject({ reachable: true, unverified: false });
+    });
+
+    it('a missing CLI is unreachable, not unverified', () => {
+      const d = opusDiagnosis({ commandAvailable: () => false, envPresent: () => false });
+      expect(d).toMatchObject({ reachable: false, unverified: false });
+    });
+  });
+
   it('marks an ollama model unreachable when ollama is missing, even with claude present', () => {
     const d = diagnosisFor(
       'ollama-model',
