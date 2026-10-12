@@ -30,6 +30,7 @@ import {
   findOpenPRForIssue,
   findOpenPRNumber,
   formatDoctorReport,
+  repoDefinedTag,
   modelStatusIcon,
   getCliVersion,
   getPullRequestLandState,
@@ -5421,6 +5422,44 @@ describe('cli', () => {
       const lines = report.split('\n');
       expect(lines.find((l) => l.includes('claude-opus-4-8'))).toContain('✅');
       expect(lines.find((l) => l.includes('gpt-5.1-codex'))).toContain('❌');
+    });
+  });
+
+  describe('formatDoctorReport repo-defined marker', () => {
+    const diagnoses: ModelDiagnosis[] = [
+      {
+        model: 'claude-opus-4-8',
+        provider: 'anthropic',
+        tiers: ['boss'],
+        reachable: true,
+        experimental: false,
+        reason: 'ok',
+      },
+      {
+        model: 'gpt-5.1-codex',
+        provider: 'openai',
+        tiers: ['worker'],
+        reachable: false,
+        experimental: false,
+        reason: 'no',
+      },
+    ];
+
+    it('appends [repo-defined] only to rows whose model is in the repo-defined set', () => {
+      const lines = formatDoctorReport(diagnoses, new Set(['gpt-5.1-codex'])).split('\n');
+      expect(lines.find((l) => l.includes('gpt-5.1-codex'))).toContain('[repo-defined]');
+      expect(lines.find((l) => l.includes('claude-opus-4-8'))).not.toContain('[repo-defined]');
+    });
+
+    it('renders no repo-defined marker when no set is passed', () => {
+      expect(formatDoctorReport(diagnoses)).not.toContain('repo-defined');
+    });
+  });
+
+  describe('repoDefinedTag', () => {
+    it('returns the marker only for ids in the set', () => {
+      expect(repoDefinedTag('a', new Set(['b']))).toBe('');
+      expect(repoDefinedTag('a', new Set(['a']))).toContain('[repo-defined]');
     });
   });
 
