@@ -68,4 +68,31 @@ test -d .factory/state/
 test -f .factory/state/queue
 grep -q "^\.factory/$" .git/info/exclude
 
+# Codex-only machine (#2406): with a fake signed-in codex CLI and no claude on PATH, doctor must
+# pass the coding agent prerequisite and report the ChatGPT sign-in.
+FAKEBIN="$(mktemp -d)"
+cat >"$FAKEBIN/codex" <<'FAKE'
+#!/bin/sh
+if [ "$1 $2" = "login status" ]; then echo "Logged in using ChatGPT" >&2; exit 0; fi
+exit 1
+FAKE
+chmod +x "$FAKEBIN/codex"
+NO_CLAUDE_PATH="$FAKEBIN"
+IFS=: read -r -a PATH_DIRS <<<"$PATH"
+for dir in "${PATH_DIRS[@]}"; do
+  [ -x "$dir/claude" ] || [ -x "$dir/opencode" ] || NO_CLAUDE_PATH="$NO_CLAUDE_PATH:$dir"
+done
+DOCTOR_OUT="$(PATH="$NO_CLAUDE_PATH" "$FACTORY" doctor 2>&1 || true)"
+rm -rf "$FAKEBIN"
+echo "$DOCTOR_OUT" | grep -q "coding agent.*found codex" || {
+  echo "expected doctor to accept a codex-only machine, got:" >&2
+  echo "$DOCTOR_OUT" >&2
+  exit 1
+}
+echo "$DOCTOR_OUT" | grep -q "codex auth.*ChatGPT" || {
+  echo "expected doctor to report the codex ChatGPT sign-in, got:" >&2
+  echo "$DOCTOR_OUT" >&2
+  exit 1
+}
+
 echo "quickstart smoke OK"
