@@ -6190,13 +6190,13 @@ Please add a widget that does the thing.
     describe('agent sign-in (#2496)', () => {
       const withAuth = (claudeOk: boolean, codexOk: boolean) => {
         const base = h.execSyncImpl;
-        h.execSyncImpl = (cmd: string, ...rest: any[]) => {
+        h.execSyncImpl = (cmd: string) => {
           if (cmd.startsWith('claude -p')) {
             if (!claudeOk) throw new Error('Not logged in');
             return 'ok';
           }
           if (cmd.startsWith('codex login status')) return codexOk ? 'Logged in using ChatGPT' : 'Not logged in';
-          return base(cmd, ...rest);
+          return base(cmd);
         };
       };
 
