@@ -72,6 +72,7 @@ describe('stopSentinelCheck', () => {
     const check = stopSentinelCheck({ present: false });
     expect(check.ok).toBe(true);
     expect(check.fix).toBeUndefined();
+    expect(check.detail).toContain('.factory/state/STOP not present');
   });
 
   it('returns ok:false, optional:true with a fix mentioning factory resume when STOP is present', () => {
@@ -79,6 +80,17 @@ describe('stopSentinelCheck', () => {
     expect(check.ok).toBe(false);
     expect(check.optional).toBe(true);
     expect(check.fix).toContain('factory resume');
-    expect(check.detail).toContain('.factory/STOP present');
+    expect(check.detail).toContain('.factory/state/STOP present');
+    expect(check.fix).toContain('rm .factory/state/STOP');
+  });
+
+  it('never mentions .factory/STOP in detail or fix, present or absent', () => {
+    for (const status of [
+      { present: false } as const,
+      { present: true, ageMs: 65_000, writtenAt: '2026-09-17T00:00:00.000Z' } as const,
+    ]) {
+      const check = stopSentinelCheck(status);
+      expect(`${check.detail} ${check.fix ?? ''}`).not.toContain('.factory/STOP');
+    }
   });
 });

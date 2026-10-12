@@ -6384,13 +6384,22 @@ Please add a widget that does the thing.
       expect(logged()).toContain('skipped — sandbox disabled by config or FACTORY_SANDBOX');
     });
 
-    it('reports .factory/STOP presence as an explicit, non-failing row', async () => {
+    it('reports .factory/state/STOP not present when the sentinel is absent', async () => {
+      h.claudeAvailable = true;
+      rmSync(paths().stop, { force: true });
+      await runMain('doctor');
+      expect(logged()).toContain('.factory/state/STOP not present');
+      expect(logged()).not.toContain('.factory/STOP');
+    });
+
+    it('reports .factory/state/STOP presence as an explicit, non-failing row', async () => {
       h.claudeAvailable = true;
       writeFileSync(paths().stop, '');
       const res = await runMain('doctor');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('STOP sentinel');
-      expect(logged()).toContain('.factory/STOP present');
+      expect(logged()).toContain('.factory/state/STOP present');
+      expect(logged()).not.toContain('.factory/STOP');
     });
 
     it('exits 0 outside a git repo and prints the cd hint', async () => {
