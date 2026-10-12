@@ -6334,7 +6334,7 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     }
   }
 
-  console.log(formatDoctorChecks(checks));
+  console.log(formatDoctorChecks(checks, { inRepo: repoRoot !== null }));
   if (doctorFailed(checks)) process.exit(1);
 }
 

@@ -26,6 +26,7 @@ import {
   keychainPreflightError,
   type LeaseHealthRow,
   NOT_IN_REPO_HINT,
+  NOT_IN_REPO_SKIP_DETAIL,
   orphanContainerChecks,
   orphanMicroVmChecks,
   type ReapRow,
@@ -494,6 +495,51 @@ describe('formatDoctorChecks', () => {
 
       Model reachability: factory models --doctor"
     `);
+  });
+});
+
+describe('outside a git repo (#2554)', () => {
+  function outsideProbes() {
+    const base = probes();
+    const tryExec = vi.fn((cmd: string): string | null => {
+      if (cmd.includes('git rev-parse') || cmd.includes('git config user.')) return null;
+      return base.tryExec(cmd);
+    });
+    return { tryExec, env: probes({ tryExec }) };
+  }
+
+  it('renders every repo check as skipped and does not fail when git identity is unset', () => {
+    const { tryExec, env } = outsideProbes();
+    const checks = runDoctorChecks(env);
+    for (const name of ['git identity', 'git worktree clean', '.factory initialized', 'git auth']) {
+      const row = checks.find((c) => c.name === name)!;
+      expect(row.detail).toMatch(/^skipped — not inside a git repository/);
+      expect(doctorCheckIcon(row)).toBe('➖');
+    }
+    const identity = checks.find((c) => c.name === 'git identity')!;
+    expect(identity).toMatchObject({ ok: false, optional: true, detail: NOT_IN_REPO_SKIP_DETAIL });
+    expect(identity.fix).toBeUndefined();
+    expect(tryExec.mock.calls.some(([cmd]) => cmd.includes('git config user.'))).toBe(false);
+    expect(doctorFailed(checks)).toBe(false);
+    const out = formatDoctorChecks(checks, { inRepo: false });
+    expect(out).toContain(' 0 failed');
+    expect(out).not.toContain('❌');
+  });
+
+  it('prints no repo-bound next command', () => {
+    const out = formatDoctorChecks(runDoctorChecks(outsideProbes().env), { inRepo: false });
+    expect(out).not.toContain('factory models --doctor');
+    expect(out).toContain('Model reachability: skipped — not inside a git repository');
+    const fixes = out.split('\n').filter((l) => l.includes('fix:'));
+    for (const line of fixes) expect(line).not.toMatch(/factory (models|init|run|queue|triage)\b/);
+  });
+
+  it('keeps the in-repo trailer unchanged', () => {
+    const rows = runDoctorChecks(probes());
+    expect(formatDoctorChecks(rows).endsWith('Model reachability: factory models --doctor')).toBe(true);
+    expect(formatDoctorChecks(rows, { inRepo: true }).endsWith('Model reachability: factory models --doctor')).toBe(
+      true,
+    );
   });
 });
 

@@ -40,6 +40,9 @@ export interface DoctorEnvProbes {
 
 export const NOT_IN_REPO_HINT = 'cd into your repo, then run factory doctor again';
 
+/** Detail for every repo wired-up row when doctor runs outside a git repository (#2554). */
+export const NOT_IN_REPO_SKIP_DETAIL = `skipped — not inside a git repository; ${NOT_IN_REPO_HINT}`;
+
 export function hasSandboxRuntime(platform: NodeJS.Platform, commandAvailable: (cmd: string) => boolean): boolean {
   return detectSandboxRuntime(platform, commandAvailable) !== 'none';
 }
@@ -53,7 +56,7 @@ export function sandboxAuthSkipDetail(opts: {
 }): string | null {
   if (!opts.runtimeAvailable) return 'skipped — no sandbox runtime (sandbox-exec/firejail) on this host';
   if (!opts.hostOk) return 'skipped — host claude auth was not verified';
-  if (!opts.inRepo) return `skipped — not inside a git repository; ${NOT_IN_REPO_HINT}`;
+  if (!opts.inRepo) return NOT_IN_REPO_SKIP_DETAIL;
   return null;
 }
 
@@ -105,7 +108,7 @@ export function gitAuthCheck(
       name: GIT_AUTH_CHECK,
       ok: true,
       optional: true,
-      detail: `skipped — not inside a git repository; ${NOT_IN_REPO_HINT}`,
+      detail: NOT_IN_REPO_SKIP_DETAIL,
     };
   }
   const origin = tryExec('git remote get-url origin');
@@ -213,18 +216,22 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
         },
   );
 
-  const userName = tryExec('git config user.name');
-  const userEmail = tryExec('git config user.email');
-  if (userName && userEmail) {
-    checks.push({ name: 'git identity', ok: true, detail: `${userName} <${userEmail}>` });
+  if (repoRoot === null) {
+    checks.push({ name: 'git identity', ok: false, optional: true, detail: NOT_IN_REPO_SKIP_DETAIL });
   } else {
-    const missing = [!userName && 'user.name', !userEmail && 'user.email'].filter(Boolean).join(' and ');
-    checks.push({
-      name: 'git identity',
-      ok: false,
-      detail: `${missing} not set`,
-      fix: 'git config --global user.name "Your Name" && git config --global user.email you@example.com',
-    });
+    const userName = tryExec('git config user.name');
+    const userEmail = tryExec('git config user.email');
+    if (userName && userEmail) {
+      checks.push({ name: 'git identity', ok: true, detail: `${userName} <${userEmail}>` });
+    } else {
+      const missing = [!userName && 'user.name', !userEmail && 'user.email'].filter(Boolean).join(' and ');
+      checks.push({
+        name: 'git identity',
+        ok: false,
+        detail: `${missing} not set`,
+        fix: 'git config --global user.name "Your Name" && git config --global user.email you@example.com',
+      });
+    }
   }
 
   checks.push(...agentCliChecks(commandAvailable, tryExec, probes.codexSessionState));
@@ -283,7 +290,7 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
       name: 'git worktree clean',
       ok: false,
       optional: true,
-      detail: `skipped — not a git repository; ${NOT_IN_REPO_HINT}`,
+      detail: NOT_IN_REPO_SKIP_DETAIL,
     });
   } else if (tryExec('git status --porcelain') === '') {
     checks.push({ name: 'git worktree clean', ok: true, detail: 'clean' });
@@ -335,7 +342,7 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
       name: '.factory initialized',
       ok: false,
       optional: true,
-      detail: `skipped — not a git repository; ${NOT_IN_REPO_HINT}`,
+      detail: NOT_IN_REPO_SKIP_DETAIL,
     });
   } else if (pathExists(resolve(repoRoot, '.factory'))) {
     checks.push({ name: '.factory initialized', ok: true, optional: true, detail: '.factory/ present' });
@@ -373,7 +380,8 @@ export function doctorCheckIcon(check: DoctorCheck): string {
   return check.ok ? '✅' : '⚠️';
 }
 
-export function formatDoctorChecks(checks: DoctorCheck[]): string {
+/** Outside a repo the models hint is skipped because `factory models --doctor` needs a repo (#2472). */
+export function formatDoctorChecks(checks: DoctorCheck[], opts: { inRepo?: boolean } = {}): string {
   const lines = ['== factory doctor =='];
   let passed = 0;
   let failed = 0;
@@ -396,7 +404,11 @@ export function formatDoctorChecks(checks: DoctorCheck[]): string {
 
   lines.push(`${passed} passed, ${failed} failed, ${warnings} warnings`);
   lines.push('');
-  lines.push('Model reachability: factory models --doctor');
+  lines.push(
+    opts.inRepo === false
+      ? `Model reachability: ${NOT_IN_REPO_SKIP_DETAIL}`
+      : 'Model reachability: factory models --doctor',
+  );
 
   return lines.join('\n');
 }
