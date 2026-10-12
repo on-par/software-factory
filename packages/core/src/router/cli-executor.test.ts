@@ -2,13 +2,14 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { mkdtemp, rm, writeFile as realWriteFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { HarnessError, KNOWN_HARNESS_IDS } from '../harness/index.js';
 import { ModelRegistry } from '../models/index.js';
-import { CliModelExecutor } from './index.js';
+import { CliModelExecutor, ModelRouter } from './index.js';
 import { resetOllamaProbeCache } from './ollama-probe.js';
 
 const modelsConfig: ModelsConfig = {
@@ -453,6 +454,27 @@ describe('CliModelExecutor', () => {
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd).toMatch(/^opencode run /);
     expect(rec.calls[0].opts.cwd).toBe(worktree);
+  });
+
+  it('records a non-estimated cost row with real tokens for an OpenCode JSON run', async () => {
+    const stdout = readFileSync(
+      fileURLToPath(new URL('../__fixtures__/opencode/run-json.jsonl', import.meta.url)),
+      'utf8',
+    );
+    const models: ModelsConfig = {
+      ...modelsConfig,
+      tiers: { boss: ['opencode-declared'] },
+    };
+    const router = new ModelRouter(models, routesConfig, false, new CliModelExecutor(recordingExec({ stdout }).fn));
+    const rows: any[] = [];
+    router.setCostSink((e) => rows.push(e));
+
+    await router.run('plan', 'do it', { worktree, timeoutSeconds });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].estimated).toBe(false);
+    expect(rows[0].inputTokens).toBe(9200);
+    expect(rows[0].outputTokens).toBe(140);
   });
 
   it('dispatches through the ollama-agentic harness', async () => {

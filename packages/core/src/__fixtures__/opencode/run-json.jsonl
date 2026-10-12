@@ -1,0 +1,7 @@
+{"type":"step_start","timestamp":1700000000000,"sessionID":"ses_fixture","part":{"type":"step-start"}}
+{"type":"text","timestamp":1700000000000,"sessionID":"ses_fixture","part":{"type":"text","text":"I'll inspect the repo first.","time":{"start":1,"end":2}}}
+{"type":"tool_use","timestamp":1700000000000,"sessionID":"ses_fixture","part":{"type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"TOOL_CHATTER_MARKER src package.json","title":"ls"}}}
+{"type":"step_finish","timestamp":1700000000000,"sessionID":"ses_fixture","part":{"type":"step-finish","reason":"tool-calls","cost":0.0021,"tokens":{"input":1200,"output":80,"reasoning":20,"cache":{"read":3000,"write":500}}}}
+{"type":"step_start","timestamp":1700000000000,"sessionID":"ses_fixture","part":{"type":"step-start"}}
+{"type":"text","timestamp":1700000000000,"sessionID":"ses_fixture","part":{"type":"text","text":"FINAL ANSWER: the build is done.","time":{"start":3,"end":4}}}
+{"type":"step_finish","timestamp":1700000000000,"sessionID":"ses_fixture","part":{"type":"step-finish","reason":"stop","cost":0.0009,"tokens":{"input":300,"output":40,"reasoning":0,"cache":{"read":4200,"write":0}}}}

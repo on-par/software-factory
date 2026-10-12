@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -8,7 +9,7 @@ import type { ModelsConfig } from '../config/index.js';
 import { diagnoseModels, ModelRegistry } from '../models/index.js';
 import { codingHarnessContractCases, makeContractRequest } from './contract.js';
 import { HarnessError } from './index.js';
-import { OpenCodeHarness } from './opencode.js';
+import { OpenCodeHarness, parseOpenCodeJson } from './opencode.js';
 
 describe('CodingHarness contract: OpenCodeHarness', () => {
   const cases = codingHarnessContractCases({
@@ -94,6 +95,7 @@ describe('OpenCodeHarness command shape', () => {
     expect(rec.calls).toHaveLength(1);
     const { cmd, opts } = rec.calls[0];
     expect(cmd).toMatch(/^opencode run /);
+    expect(cmd).toContain('--auto --format json');
     expect(cmd).toContain("--model 'anthropic/claude-sonnet-5'");
     expect(cmd).not.toContain('build it');
     expect(cmd).toMatch(/ < '[^']*factory-opencode-prompt-[^']*\/prompt\.txt'$/);
@@ -101,7 +103,7 @@ describe('OpenCodeHarness command shape', () => {
     expect(rec.calls[0].stdin).toBe('build it');
     expect(opts.cwd).toBe('/tmp/factory worktree');
     expect(opts.timeoutMs).toBe(7 * 1000);
-    expect(opts.maxBuffer).toBe(10 * 1024 * 1024);
+    expect(opts.maxBuffer).toBe(64 * 1024 * 1024);
   });
 
   it('omits the model flag when no providerModel is configured', async () => {
@@ -342,5 +344,105 @@ describe('OpenCode doctor auth probe', () => {
     expect(diags).toHaveLength(2);
     for (const d of diags) expect(d.unverified).toBe(true);
     expect(opencodeLoggedIn).toHaveBeenCalledTimes(1);
+  });
+});
+
+const jsonFixture = readFileSync(
+  fileURLToPath(new URL('../__fixtures__/opencode/run-json.jsonl', import.meta.url)),
+  'utf8',
+);
+
+describe('OpenCodeHarness JSON output', () => {
+  it('returns fixture usage and only assistant text from the recorded JSON fixture', async () => {
+    const rec = recordingExec({ stdout: jsonFixture });
+    const result = await new OpenCodeHarness(rec.fn).run(
+      makeContractRequest({ model: 'opencode-model', registry, prompt: 'build it' }),
+    );
+
+    expect(result.output).toBe("I'll inspect the repo first.\n\nFINAL ANSWER: the build is done.");
+    expect(result.output).not.toContain('TOOL_CHATTER_MARKER');
+    expect(result.output).not.toContain('step_finish');
+    expect(result.usage).toMatchObject({
+      inputTokens: 9200,
+      outputTokens: 140,
+      rawInputTokens: 1500,
+      cacheReadTokens: 7200,
+      cacheCreationTokens: 500,
+      numTurns: 2,
+    });
+    expect(result.usage?.costUsd).toBeCloseTo(0.003);
+  });
+
+  it('falls back to raw stdout with no usage when stdout is not JSON', async () => {
+    const stdout = 'plain answer\n⚙ bash ls\n';
+    const rec = recordingExec({ stdout });
+    const result = await new OpenCodeHarness(rec.fn).run(
+      makeContractRequest({ model: 'opencode-model', registry, prompt: 'build it' }),
+    );
+    expect(result.output).toBe(stdout);
+    expect(result.usage).toBeUndefined();
+  });
+
+  it('retries with the nudge and throws empty_response when JSON events carry no text', async () => {
+    const lines = jsonFixture.split('\n').filter((l) => l && !l.includes('"type":"text"'));
+    const rec = recordingExec({ stdout: lines.join('\n') });
+    const err = await new OpenCodeHarness(rec.fn)
+      .run(makeContractRequest({ model: 'opencode-model', registry, prompt: 'build it' }))
+      .catch((e) => e);
+    expect(rec.calls).toHaveLength(2);
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('empty_response');
+  });
+
+  it('classifies a JSON error event from stdout on exec failure', async () => {
+    const harness = new OpenCodeHarness(async () => {
+      throw Object.assign(new Error('boom'), {
+        code: 1,
+        stderr: '',
+        stdout: '{"type":"error","error":{"name":"APIError","data":{"message":"rate limit exceeded"}}}\n',
+      });
+    });
+    const err = await harness
+      .run(makeContractRequest({ model: 'opencode-model', registry, prompt: 'build it' }))
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('rate_limit');
+  });
+});
+
+describe('parseOpenCodeJson', () => {
+  it('returns undefined for empty and non-JSON text', () => {
+    expect(parseOpenCodeJson('')).toBeUndefined();
+    expect(parseOpenCodeJson('hello\n42\n[1]\n{"a":1}')).toBeUndefined();
+  });
+
+  it('skips malformed lines mixed with valid events', () => {
+    const parsed = parseOpenCodeJson('{bad\n{"type":"text","part":{"text":"  hi  "}}\nnull\n');
+    expect(parsed?.text).toBe('hi');
+    expect(parsed?.usage).toBeUndefined();
+  });
+
+  it('leaves usage undefined when step_finish has no numeric tokens', () => {
+    const parsed = parseOpenCodeJson(
+      '{"type":"step_finish","part":{"cost":1}}\n{"type":"step_finish","part":{"tokens":{"input":"x"}}}',
+    );
+    expect(parsed).toEqual({ text: '', errorText: '' });
+  });
+
+  it('omits costUsd when the cost is 0 and tolerates a missing cache block', () => {
+    const parsed = parseOpenCodeJson('{"type":"step_finish","part":{"cost":0,"tokens":{"input":5,"output":2}}}');
+    expect(parsed?.usage).toEqual({
+      inputTokens: 5,
+      outputTokens: 2,
+      rawInputTokens: 5,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      numTurns: 1,
+    });
+  });
+
+  it('falls back to error.name when there is no data.message', () => {
+    const parsed = parseOpenCodeJson('{"type":"error","error":{"name":"APIError"}}\n{"type":"error","error":{}}');
+    expect(parsed?.errorText).toBe('APIError');
   });
 });
