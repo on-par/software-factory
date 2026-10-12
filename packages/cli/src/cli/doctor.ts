@@ -366,6 +366,13 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
   return checks;
 }
 
+/** Row icon (#2550): ❌ only for a failure (counted in "N failed"), ➖ for a skipped row, ⚠️ for an optional warning. */
+export function doctorCheckIcon(check: DoctorCheck): string {
+  if (!check.ok && !check.optional) return '❌';
+  if (/^skipped\b/.test(check.detail)) return '➖';
+  return check.ok ? '✅' : '⚠️';
+}
+
 export function formatDoctorChecks(checks: DoctorCheck[]): string {
   const lines = ['== factory doctor =='];
   let passed = 0;
@@ -380,7 +387,7 @@ export function formatDoctorChecks(checks: DoctorCheck[]): string {
     } else {
       failed++;
     }
-    const icon = check.ok ? '✅' : '❌';
+    const icon = doctorCheckIcon(check);
     lines.push(`  ${icon} ${check.name} — ${check.detail}`);
     if (!check.ok && check.fix) {
       lines.push(`       fix: ${check.fix}`);
