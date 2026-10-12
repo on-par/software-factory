@@ -51,6 +51,11 @@ Private workspaces (server, dashboard, product, scbench-adapter) also live here 
 - A GitHub token. The factory reads `GITHUB_TOKEN`, then `GH_TOKEN`, and falls back to `gh auth token` when neither is set, so `gh auth login` is usually enough.
 - Optional: `ollama` for experimental local models. When Ollama is not running, the factory skips local models and says so once in the log.
 
+Two terms used in the steps below:
+
+- **Constitution**: the written standard that defines "done right" for your repo. It lives in `.factory/constitution.md`, and every build is checked against it. See [Constitutions](#constitutions).
+- **Triage**: the step where a model reads your open GitHub issues and proposes an ordered work queue in `.factory/state/queue.proposed`. You review the proposal and accept it with `factory triage accept`, and `factory run` then works through the accepted queue.
+
 Run `factory doctor` after installing (Step 1) to check all of this.
 
 ### Use Codex
