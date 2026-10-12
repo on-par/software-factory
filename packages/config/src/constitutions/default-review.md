@@ -26,6 +26,6 @@ The fallback standard for reviewing a pull request in a repository that has no
 
 ## Checkers
 
-Only the built-in compile, tests and lint checkers apply (links and accessibility
-always run). No `custom_*` checkers are declared because the reviewed repository has
+Only the declared compile, tests and lint checkers run, plus the always-on
+worker_output guard. No `custom_*` checkers are declared because the reviewed repository has
 not opted into factory conventions.
