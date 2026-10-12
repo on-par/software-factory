@@ -3793,7 +3793,7 @@ async function cmdTriage(opts: { product?: string; model?: string }) {
     model = result.model;
     const queue = normalizeTriageQueue(result.output);
     if (queue) {
-      const header = `# Triage queue (model ${model}${product ? `, constitution ${product}` : ''})\n`;
+      const header = triageQueueHeader(model, product);
       writeFileSync(paths.queueProposed, header + queue);
     }
   } catch (err: unknown) {
@@ -3811,6 +3811,10 @@ async function cmdTriage(opts: { product?: string; model?: string }) {
   }
 }
 
+export function triageQueueHeader(model: string | undefined, product: string | null | undefined): string {
+  return `# Triage queue (model ${model}${product ? `, constitution ${product}` : ''})\n`;
+}
+
 export function triageProposalMessage(proposed: string, proposedPath: string, queuePath: string): string | null {
   if (!proposed.trim()) return null;
   return `${proposed}\n---\nreview and run: factory triage accept   (promotes ${proposedPath} -> ${queuePath})`;
@@ -3821,7 +3825,7 @@ export async function cmdTriageAccept(opts: { force?: boolean }) {
   const paths = getFactoryPaths(repoRoot);
 
   if (!existsSync(paths.queueProposed)) {
-    console.log(`nothing to accept — ${paths.queueProposed} not found`);
+    console.log(`nothing to accept: ${paths.queueProposed} not found`);
     return; // zero exit
   }
 
@@ -3830,7 +3834,7 @@ export async function cmdTriageAccept(opts: { force?: boolean }) {
 
   if (!opts.force && !result.ok) {
     throw new CliExitError(
-      `factory: proposed queue is invalid — ${paths.queueProposed} left unchanged\n` +
+      `factory: proposed queue is invalid: ${paths.queueProposed} left unchanged\n` +
         result.errors.map((e) => `  - ${e}`).join('\n'),
       1,
     );
@@ -3851,7 +3855,7 @@ export async function cmdTriageAccept(opts: { force?: boolean }) {
     '-',
     `accepted ${result.issues.length} issue(s) [${result.issues.join(', ')}] by ${acceptedBy}${suffix}`,
   );
-  console.log(styleText('green', `queue accepted — ${result.issues.length} issue(s) promoted to ${paths.queue}`));
+  console.log(styleText('green', `queue accepted: ${result.issues.length} issue(s) promoted to ${paths.queue}`));
 }
 
 export async function cmdQueueMigrate(opts: { file?: string; dryRun?: boolean } = {}): Promise<void> {
@@ -6187,14 +6191,14 @@ async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean }
     };
 
     let host: ClaudeAuthProbe = 'skipped';
-    let hostDetail = 'skipped — claude CLI not on PATH';
+    let hostDetail = 'skipped: claude CLI not on PATH';
     if (coreOps.isCommandAvailable('claude')) {
       host = probeExec(CLAUDE_AUTH_PROBE) === null ? 'failed' : 'ok';
       hostDetail = host === 'ok' ? 'claude -p succeeded on the host' : 'claude -p failed on the host';
     }
 
     let sandboxed: ClaudeAuthProbe = 'skipped';
-    let sandboxDetail = 'skipped — host claude auth was not verified';
+    let sandboxDetail = 'skipped: host claude auth was not verified';
     const runtimeAvailable = hasSandboxRuntime(process.platform, (cmd) => isCommandAvailableViaShell(shellOps, cmd));
     const skip = sandboxAuthSkipDetail({ runtimeAvailable, hostOk: host === 'ok', inRepo: repoRoot !== null });
     if (skip !== null) {
@@ -6209,11 +6213,11 @@ async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean }
         },
       );
       if (!policy) {
-        sandboxDetail = 'skipped — sandbox disabled by config or FACTORY_SANDBOX';
+        sandboxDetail = 'skipped: sandbox disabled by config or FACTORY_SANDBOX';
       } else if (policy.runtime === 'none') {
-        sandboxDetail = 'skipped — no sandbox runtime (sandbox-exec/firejail) on this host';
+        sandboxDetail = 'skipped: no sandbox runtime (sandbox-exec/firejail) on this host';
       } else if (policy.runtime === 'docker-sandbox') {
-        sandboxDetail = 'skipped — docker-sandbox containment is the microVM, not command wrapping (#653)';
+        sandboxDetail = 'skipped: docker-sandbox containment is the microVM, not command wrapping (#653)';
       } else {
         sandboxed = probeExec(wrapCommandInSandbox(CLAUDE_AUTH_PROBE, policy)) === null ? 'failed' : 'ok';
         sandboxDetail =
@@ -6304,7 +6308,7 @@ async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean }
         const orphanEvents = await coreOps.reapOrphanProcesses({ reaped, graceMs });
         for (const e of orphanEvents) {
           console.log(
-            `reconcile: ${e.action === 'killed' ? 'killed' : 'found'} pid ${e.pid} (pgid ${e.pgid}, ${e.command}) squatting port ${e.port} of dead lane ${e.worktreeId}${e.action === 'reported' ? ' — not factory-started, left running' : ''}`,
+            `reconcile: ${e.action === 'killed' ? 'killed' : 'found'} pid ${e.pid} (pgid ${e.pgid}, ${e.command}) squatting port ${e.port} of dead lane ${e.worktreeId}${e.action === 'reported' ? '; not factory-started, left running' : ''}`,
           );
         }
       }
@@ -6327,7 +6331,7 @@ async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean }
         );
         console.log(formatWorktreeReconcileReport(report.removed));
       } catch (err: any) {
-        console.log(`reconcile: worktree sweep failed — ${err?.message ?? String(err)}`);
+        console.log(`reconcile: worktree sweep failed: ${err?.message ?? String(err)}`);
       }
 
       // Stale claim reap (#999): factory:in-progress claims naming a dead local pid go back to
@@ -6342,10 +6346,10 @@ async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean }
           });
           console.log(formatClaimReconcileReport(released));
         } else {
-          console.log('reconcile: skipping stale claims — no GitHub repo or token');
+          console.log('reconcile: skipping stale claims: no GitHub repo or token');
         }
       } catch (err: any) {
-        console.log(`reconcile: stale claim release failed — ${err?.message ?? String(err)}`);
+        console.log(`reconcile: stale claim release failed: ${err?.message ?? String(err)}`);
       }
     }
   }

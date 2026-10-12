@@ -60,14 +60,14 @@ export function sweepHeartbeatCheck(status: SweepHeartbeatStatus): DoctorCheck |
       return {
         name: NAME,
         ok: false,
-        detail: `${status.file} not found — the sweep has never written a heartbeat`,
+        detail: `${status.file} not found; the sweep has never written a heartbeat`,
         fix: 'confirm the sweep loop is running and HEARTBEAT_FILE / sweep.heartbeatFile point at the right path',
       };
     case 'stale':
       return {
         name: NAME,
         ok: false,
-        detail: `${status.file} last updated ${status.ageSeconds}s ago (> ${status.thresholdSeconds}s threshold) — the sweep looks dead`,
+        detail: `${status.file} last updated ${status.ageSeconds}s ago (> ${status.thresholdSeconds}s threshold); the sweep looks dead`,
         fix: 'check the sweep loop / launchd job (see docs/runbooks/sweep-heartbeat.md) and restart it',
       };
     case 'fresh':
@@ -84,10 +84,10 @@ export function formatSweepHeartbeatStatusLine(status: SweepHeartbeatStatus): st
     case 'unconfigured':
       return 'not configured (sweep.heartbeatFile / HEARTBEAT_FILE unset)';
     case 'missing':
-      return `MISSING — ${status.file} not found`;
+      return `MISSING: ${status.file} not found`;
     case 'stale':
-      return `STALE — ${status.file}, last updated ${status.ageSeconds}s ago (threshold ${status.thresholdSeconds}s)`;
+      return `STALE: ${status.file}, last updated ${status.ageSeconds}s ago (threshold ${status.thresholdSeconds}s)`;
     case 'fresh':
-      return `OK — ${status.file}, last updated ${status.ageSeconds}s ago (threshold ${status.thresholdSeconds}s)`;
+      return `OK: ${status.file}, last updated ${status.ageSeconds}s ago (threshold ${status.thresholdSeconds}s)`;
   }
 }

@@ -49,7 +49,7 @@ export function formatStopFileAge(ms: number): string {
 export function stopSentinelRunSkipMessage(status: StopSentinelStatus): string {
   if (!status.present) return '';
   return (
-    `.factory/STOP present (age ${formatStopFileAge(status.ageMs)}, written ${status.writtenAt}) — ` +
+    `.factory/STOP present (age ${formatStopFileAge(status.ageMs)}, written ${status.writtenAt}); ` +
     `factory run is skipping this pass and claiming no new work. ` +
     `Remove .factory/STOP (or run \`factory resume\`) to continue.`
   );
@@ -60,14 +60,14 @@ export function stopSentinelCheck(status: StopSentinelStatus): DoctorCheck {
     return {
       name: 'STOP sentinel',
       ok: true,
-      detail: `${STOP_FILE_LABEL} not present — factory run will claim work normally`,
+      detail: `${STOP_FILE_LABEL} not present; factory run will claim work normally`,
     };
   }
   return {
     name: 'STOP sentinel',
     ok: false,
     optional: true,
-    detail: `${STOP_FILE_LABEL} present (age ${formatStopFileAge(status.ageMs)}, written ${status.writtenAt}) — repo is intentionally paused`,
+    detail: `${STOP_FILE_LABEL} present (age ${formatStopFileAge(status.ageMs)}, written ${status.writtenAt}); repo is intentionally paused`,
     fix: `rm ${STOP_FILE_LABEL}, or run \`factory resume\`, to let factory run claim work again`,
   };
 }
