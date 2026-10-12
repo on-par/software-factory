@@ -387,7 +387,8 @@ import {
 import {
   DOCS_URL,
   formatOverview,
-  missingClaudeCliMessage,
+  availableAgentClis,
+  missingAgentCliMessage,
   missingTokenMessage,
   notInitializedMessage,
 } from './first-run.js';
@@ -2930,8 +2931,8 @@ async function cmdShip(
     branchPrefix?: string;
   },
 ) {
-  if (!coreOps.isCommandAvailable('claude')) {
-    throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
+  if (availableAgentClis(coreOps.isCommandAvailable).length === 0) {
+    throw new CliExitError(`factory: ${missingAgentCliMessage()}`, 2);
   }
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
@@ -2986,8 +2987,8 @@ async function cmdRunIssue(
     maxSlices?: string;
   },
 ) {
-  if (!coreOps.isCommandAvailable('claude')) {
-    throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
+  if (availableAgentClis(coreOps.isCommandAvailable).length === 0) {
+    throw new CliExitError(`factory: ${missingAgentCliMessage()}`, 2);
   }
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
@@ -3149,8 +3150,8 @@ async function cmdRunBrief(
     branchPrefix?: string;
   },
 ) {
-  if (!coreOps.isCommandAvailable('claude')) {
-    throw new CliExitError(`factory: ${missingClaudeCliMessage()}`, 2);
+  if (availableAgentClis(coreOps.isCommandAvailable).length === 0) {
+    throw new CliExitError(`factory: ${missingAgentCliMessage()}`, 2);
   }
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
@@ -3290,7 +3291,8 @@ async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) 
     process.env.FACTORY_LOCAL_ONLY = '1';
 
     const preflight = async (): Promise<OvernightPreflightResult> => {
-      if (!coreOps.isCommandAvailable('claude')) return { ok: false, reason: missingClaudeCliMessage() };
+      if (availableAgentClis(coreOps.isCommandAvailable).length === 0)
+        return { ok: false, reason: missingAgentCliMessage() };
       const registry = new coreOps.ModelRegistry(
         applyRepoConfig(configLoaders.loadModelsConfig(), configLoaders.loadRepoConfig(repoRoot)),
       );

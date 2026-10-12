@@ -11,7 +11,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DOCS_URL,
   formatOverview,
-  missingClaudeCliMessage,
+  availableAgentClis,
+  missingAgentCliMessage,
   missingTokenMessage,
   notInitializedMessage,
 } from './first-run.js';
@@ -60,15 +61,20 @@ describe('formatOverview', () => {
   });
 });
 
-describe('missingClaudeCliMessage', () => {
-  it('matches the frozen copy', () => {
-    expect(missingClaudeCliMessage()).toMatchInlineSnapshot(
-      `"claude CLI not found — install Claude Code first: https://docs.anthropic.com/en/docs/claude-code"`,
-    );
+describe('missingAgentCliMessage', () => {
+  it('names both supported agent CLIs and their sign-in commands', () => {
+    const msg = missingAgentCliMessage();
+    expect(msg).toContain('no coding agent CLI found on PATH');
+    expect(msg).toContain('Claude Code');
+    expect(msg).toContain('Codex CLI');
+    expect(msg).toContain('codex login');
   });
+});
 
-  it('contains the acceptance-criteria substring verbatim', () => {
-    expect(missingClaudeCliMessage()).toContain('claude CLI not found — install Claude Code first:');
+describe('availableAgentClis', () => {
+  it('lists only the agent CLIs found on PATH', () => {
+    expect(availableAgentClis((c) => c === 'codex')).toEqual(['codex']);
+    expect(availableAgentClis(() => false)).toEqual([]);
   });
 });
 

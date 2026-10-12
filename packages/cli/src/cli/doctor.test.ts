@@ -4,6 +4,7 @@ import {
   analyzeEventLog,
   type ClaudeAuthProbeResult,
   claudeKeychainCheck,
+  codexAuthMethod,
   type DoctorEnvProbes,
   declaredHarnessChecks,
   doctorFailed,
@@ -40,6 +41,7 @@ function probes(overrides: Partial<DoctorEnvProbes> = {}): DoctorEnvProbes {
       if (cmd.includes('git config user.email')) return 'test@example.com';
       if (cmd.includes('gh auth token')) return 'gho_token';
       if (cmd.includes('gh auth status')) return 'Logged in';
+      if (cmd.includes('codex login status')) return 'Logged in using ChatGPT';
       return '';
     },
     pathExists: () => true,
@@ -49,9 +51,9 @@ function probes(overrides: Partial<DoctorEnvProbes> = {}): DoctorEnvProbes {
 }
 
 describe('runDoctorChecks', () => {
-  it('fully configured repo: 10 checks all ok, pre-existing rows unchanged, doctorFailed false', () => {
+  it('fully configured repo: 12 checks all ok, pre-existing rows unchanged, doctorFailed false', () => {
     const checks = runDoctorChecks(probes());
-    expect(checks).toHaveLength(10);
+    expect(checks).toHaveLength(12);
     expect(checks.every((c) => c.ok)).toBe(true);
     expect(doctorFailed(checks)).toBe(false);
     const byName = (n: string) => checks.find((c) => c.name === n)!;
@@ -63,12 +65,70 @@ describe('runDoctorChecks', () => {
     expect(byName('sandbox runtime').detail).toBe('sandbox-exec found');
   });
 
-  it('claude CLI missing fails with the Claude Code fix', () => {
-    const checks = runDoctorChecks(probes({ commandAvailable: (cmd) => cmd !== 'claude' }));
+  it('claude CLI missing is optional when codex is installed and logged in (#1269)', () => {
+    const checks = runDoctorChecks(probes({ commandAvailable: (cmd) => cmd !== 'claude' && cmd !== 'opencode' }));
     const claude = checks.find((c) => c.name === 'claude CLI')!;
     expect(claude.ok).toBe(false);
-    expect(claude.fix).toContain('install Claude Code first:');
+    expect(claude.optional).toBe(true);
+    expect(claude.fix).toContain('install Claude Code');
+    expect(checks.find((c) => c.name === 'coding agent')).toMatchObject({ ok: true, detail: 'found codex' });
+    expect(checks.find((c) => c.name === 'codex auth')).toMatchObject({ ok: true });
+    expect(checks.find((c) => c.name === 'codex auth')!.detail).toContain('ChatGPT');
+    expect(doctorFailed(checks)).toBe(false);
+  });
+
+  it('fails when no coding agent CLI is installed', () => {
+    const agents = new Set(['claude', 'codex', 'opencode']);
+    const checks = runDoctorChecks(probes({ commandAvailable: (cmd) => !agents.has(cmd) }));
+    const agent = checks.find((c) => c.name === 'coding agent')!;
+    expect(agent.ok).toBe(false);
+    expect(agent.fix).toContain('Codex CLI');
+    expect(checks.find((c) => c.name === 'codex auth')).toBeUndefined();
     expect(doctorFailed(checks)).toBe(true);
+  });
+
+  it('codex-only machine without a codex login fails codex auth with sign-in guidance (#2422)', () => {
+    const base = probes();
+    const checks = runDoctorChecks(
+      probes({
+        commandAvailable: (cmd) => cmd !== 'claude' && cmd !== 'opencode',
+        tryExec: (cmd) => (cmd.includes('codex login status') ? 'Not logged in' : base.tryExec(cmd)),
+      }),
+    );
+    const auth = checks.find((c) => c.name === 'codex auth')!;
+    expect(auth.ok).toBe(false);
+    expect(auth.optional).toBe(false);
+    expect(auth.fix).toContain('codex login');
+    expect(auth.fix).toContain('--with-api-key');
+    expect(auth.fix).toContain('--device-auth');
+    expect(doctorFailed(checks)).toBe(true);
+  });
+
+  it('a missing codex login is optional when another agent CLI is installed', () => {
+    const base = probes();
+    const checks = runDoctorChecks(
+      probes({ tryExec: (cmd) => (cmd.includes('codex login status') ? null : base.tryExec(cmd)) }),
+    );
+    expect(checks.find((c) => c.name === 'codex auth')).toMatchObject({ ok: false, optional: true });
+  });
+
+  it('codexAuthMethod maps status text to a fixed label and never echoes it', () => {
+    expect(codexAuthMethod(null)).toBeNull();
+    expect(codexAuthMethod('Not logged in')).toBeNull();
+    expect(codexAuthMethod('Logged in using ChatGPT')).toBe('ChatGPT');
+    expect(codexAuthMethod('Logged in using an API key - sk-abc***')).toBe('API key');
+    expect(codexAuthMethod('Logged in using an access token')).toBe('access token');
+    expect(codexAuthMethod('Logged in')).toBe('unknown method');
+  });
+
+  it('labels a non-ChatGPT login with its method', () => {
+    const base = probes();
+    const checks = runDoctorChecks(
+      probes({
+        tryExec: (cmd) => (cmd.includes('codex login status') ? 'Logged in using an API key' : base.tryExec(cmd)),
+      }),
+    );
+    expect(checks.find((c) => c.name === 'codex auth')!.detail).toBe('logged in with API key');
   });
 
   it('gh missing on PATH gives a distinct fail detail from gh unauthenticated', () => {

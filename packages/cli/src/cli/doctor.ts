@@ -6,7 +6,7 @@ import type { DeclaredHarnessProbe } from '@on-par/factory-core';
 import { detectSandboxRuntime } from '@on-par/factory-core';
 
 import { MIN_NODE_MAJOR } from '../node-version.js';
-import { CLAUDE_CODE_URL, GITHUB_TOKENS_URL } from './first-run.js';
+import { availableAgentClis, CLAUDE_CODE_URL, CODEX_CLI_URL, GITHUB_TOKENS_URL } from './first-run.js';
 
 export interface DoctorCheck {
   name: string;
@@ -48,6 +48,74 @@ export function sandboxAuthSkipDetail(opts: {
   return null;
 }
 
+/** Sign-in method reported by `codex login status`, or null when it shows no login. Never returns
+ *  any part of a credential: only a fixed label is derived from the status text. */
+export function codexAuthMethod(statusOutput: string | null): string | null {
+  if (statusOutput === null) return null;
+  const text = statusOutput.toLowerCase();
+  if (!text.includes('logged in') || text.includes('not logged in')) return null;
+  if (text.includes('chatgpt')) return 'ChatGPT';
+  if (text.includes('api key')) return 'API key';
+  if (text.includes('access token')) return 'access token';
+  return 'unknown method';
+}
+
+const CODEX_LOGIN_FIX =
+  'run `codex login` (Sign in with ChatGPT, for Plus or Pro plans), `codex login --with-api-key` (API billing), or `codex login --device-auth` on a headless machine';
+
+/** Coding agent prerequisites: at least one agent CLI is required; each CLI is then reported
+ *  on its own optional line, with Codex sign-in reported separately from installation (#1269, #2422). */
+export function agentCliChecks(
+  commandAvailable: (cmd: string) => boolean,
+  tryExec: (cmd: string) => string | null,
+): DoctorCheck[] {
+  const found = availableAgentClis(commandAvailable);
+  const checks: DoctorCheck[] = [
+    found.length > 0
+      ? { name: 'coding agent', ok: true, detail: `found ${found.join(', ')}` }
+      : {
+          name: 'coding agent',
+          ok: false,
+          detail: 'no coding agent CLI on PATH (claude, codex or opencode)',
+          fix: `install Claude Code (${CLAUDE_CODE_URL}) or the Codex CLI (${CODEX_CLI_URL})`,
+        },
+  ];
+  checks.push(
+    found.includes('claude')
+      ? { name: 'claude CLI', ok: true, optional: true, detail: 'found on PATH' }
+      : {
+          name: 'claude CLI',
+          ok: false,
+          optional: true,
+          detail: 'not found on PATH, claude routes unavailable',
+          fix: `optional: install Claude Code: ${CLAUDE_CODE_URL}`,
+        },
+  );
+  if (found.includes('codex')) {
+    const method = codexAuthMethod(tryExec('codex login status 2>&1'));
+    checks.push(
+      method
+        ? {
+            name: 'codex auth',
+            ok: true,
+            detail:
+              method === 'ChatGPT'
+                ? 'logged in with ChatGPT; runs draw on your ChatGPT plan limits (manage usage in ChatGPT settings)'
+                : `logged in with ${method}`,
+          }
+        : {
+            name: 'codex auth',
+            // Required only when codex is the sole agent: then nothing else can run.
+            ok: false,
+            optional: found.length > 1,
+            detail: 'codex CLI installed but not logged in',
+            fix: CODEX_LOGIN_FIX,
+          },
+    );
+  }
+  return checks;
+}
+
 export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
   const { commandAvailable, envPresent, tryExec, pathExists, distFreshness } = probes;
   const checks: DoctorCheck[] = [];
@@ -79,16 +147,7 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
     });
   }
 
-  checks.push(
-    commandAvailable('claude')
-      ? { name: 'claude CLI', ok: true, detail: 'found on PATH' }
-      : {
-          name: 'claude CLI',
-          ok: false,
-          detail: 'not found on PATH',
-          fix: `install Claude Code first: ${CLAUDE_CODE_URL}`,
-        },
-  );
+  checks.push(...agentCliChecks(commandAvailable, tryExec));
 
   if (!commandAvailable('gh')) {
     checks.push({
