@@ -814,7 +814,12 @@ async function cmdInit(opts: { force?: boolean } = {}) {
   // Doctor-style validation (policy=auto, N models reachable) — informational, never fails init.
   const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), configLoaders.loadRepoConfig(repoRoot));
   const registry = new coreOps.ModelRegistry(modelsConfig);
-  const diagnoses = coreOps.diagnoseModels(registry, modelDoctorProbes(), resolveExperimental(), resolveLocalOnly());
+  const diagnoses = coreOps.diagnoseModels(
+    registry,
+    modelDoctorProbes({ requireOllamaOnPath: true }),
+    resolveExperimental(),
+    resolveLocalOnly(),
+  );
   console.log(formatInitReachability(diagnoses));
   if (!hasReachableWorker(diagnoses)) {
     console.log(
@@ -1281,7 +1286,8 @@ export function hasReachableWorker(diagnoses: ModelDiagnosis[]): boolean {
   return diagnoses.some((d) => d.reachable && (d.tiers.includes('worker') || d.tiers.includes('worker_fallback')));
 }
 
-function ollamaModelSet(): Set<string> | undefined {
+function ollamaModelSet(requireOnPath = false): Set<string> | undefined {
+  if (requireOnPath && !coreOps.isCommandAvailable('ollama')) return undefined;
   try {
     const out = shellOps.execSync('ollama list', { timeout: 10_000 });
     return new Set(
@@ -1297,9 +1303,10 @@ function ollamaModelSet(): Set<string> | undefined {
 }
 
 /** Probes shared by every doctor-style reachability check (init, models --doctor, overnight
- *  preflight), so their counts agree. */
-export function modelDoctorProbes(): DoctorProbes {
-  const ollamaModels = ollamaModelSet();
+ *  preflight), so their counts agree. init passes `requireOllamaOnPath` so a missing binary never
+ *  reaches the shell (#2507). */
+export function modelDoctorProbes(opts: { requireOllamaOnPath?: boolean } = {}): DoctorProbes {
+  const ollamaModels = ollamaModelSet(opts.requireOllamaOnPath === true);
   return {
     commandAvailable: coreOps.isCommandAvailable,
     ollamaModelPresent: ollamaModels ? (model: string) => ollamaModels.has(model) : undefined,

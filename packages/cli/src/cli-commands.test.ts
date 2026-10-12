@@ -680,6 +680,37 @@ describe('cli commands (via main dispatch)', () => {
       expect(out.trimEnd().split('\n').at(-1)).toMatch(/^Next: factory doctor, then factory triage/);
     });
 
+    it('does not run `ollama list` when ollama is not on PATH', async () => {
+      coreFakes.isCommandAvailable.mockImplementation((c: string) => c !== 'ollama');
+      const cmds: string[] = [];
+      const prev = h.execSyncImpl;
+      h.execSyncImpl = (cmd: string) => {
+        cmds.push(cmd);
+        if (cmd === 'ollama list') throw new Error('/bin/sh: 1: ollama: not found');
+        return prev(cmd);
+      };
+      const res = await runMain('init');
+      expect(res.exited).toBe(false);
+      expect(cmds).not.toContain('ollama list');
+      for (const text of [logged(), errored()]) {
+        expect(text).not.toMatch(/\/bin\/sh/);
+        expect(text).not.toMatch(/not found/);
+        expect(text).not.toMatch(/ollama/i);
+      }
+    });
+
+    it('runs `ollama list` unchanged when ollama is on PATH', async () => {
+      const prev = h.execSyncImpl;
+      h.execSyncImpl = (cmd: string) => (cmd === 'ollama list' ? 'NAME ID SIZE MODIFIED\n' : prev(cmd));
+      const res = await runMain('init');
+      expect(res.exited).toBe(false);
+      expect(ops.execSync).toHaveBeenCalledWith('ollama list', { timeout: 10_000 });
+      const out = logged();
+      expect(out).toContain('policy=auto');
+      expect(out).toContain('Initialized');
+      expect(out).toContain('Next: factory doctor');
+    });
+
     it('creates .factory dirs, the git exclude entry, and a sample queue', async () => {
       const res = await runMain('init');
       expect(res.exited).toBe(false);
