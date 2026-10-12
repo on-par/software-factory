@@ -140,6 +140,42 @@ async function drainMicrotasksAndYield(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+describe('ModelRouter.skipMissingHarnessClis (#2406)', () => {
+  const realModels = loadModelsConfig();
+  const realRoutes = loadRoutesConfig();
+
+  it('drops claude-cli models when only the codex CLI is on PATH', () => {
+    const router = new ModelRouter(realModels, realRoutes);
+    const probed: string[] = [];
+    router.skipMissingHarnessClis((cmd) => {
+      probed.push(cmd);
+      return cmd === 'codex';
+    });
+    expect(router.resolveAll('build_claude')).toEqual([]);
+    expect(router.resolveAll('build_codex').length).toBeGreaterThan(0);
+    const plan = router.resolveAll('plan');
+    expect(plan).toContain('gpt-5.6-terra-high');
+    expect(plan.some((m) => router.registryRef.getHarnessId(m) === 'claude-cli')).toBe(false);
+    expect(router.resolveAll('triage')).toContain('gpt-5.6-luna-high');
+    // One probe per command, cached across tasks.
+    expect(probed.filter((c) => c === 'claude')).toHaveLength(1);
+  });
+
+  it('drops codex-cli models when only the claude CLI is on PATH', () => {
+    const router = new ModelRouter(realModels, realRoutes);
+    router.skipMissingHarnessClis((cmd) => cmd === 'claude');
+    expect(router.resolveAll('build_codex')).toEqual([]);
+    expect(router.resolveAll('build_claude').length).toBeGreaterThan(0);
+    expect(router.resolve('plan')).toBe('claude-opus-5');
+  });
+
+  it('keeps every model when the filter is never installed', () => {
+    const router = new ModelRouter(realModels, realRoutes);
+    expect(router.resolveAll('build_claude').length).toBeGreaterThan(0);
+    expect(router.resolveAll('build_codex').length).toBeGreaterThan(0);
+  });
+});
+
 describe('ModelRouter with StubModelExecutor', () => {
   afterEach(() => {
     vi.useRealTimers();

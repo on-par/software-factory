@@ -4,6 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { HARNESS_CATALOG } from '../harness/catalog.js';
 import { classifyFailure } from '../harness/classify.js';
 import { ClaudeCliHarness } from '../harness/claude-cli.js';
 import { CodexCliHarness } from '../harness/codex-cli.js';
@@ -546,6 +547,7 @@ function estimateTokens(text: string): number {
 export class ModelRouter {
   private registry: ModelRegistry;
   private costSink?: CostSink;
+  private harnessCliAvailable?: (harnessId: string) => boolean;
 
   constructor(
     modelsConfig: ModelsConfig,
@@ -562,6 +564,24 @@ export class ModelRouter {
 
   get registryRef() {
     return this.registry;
+  }
+
+  /** Skip models whose harness CLI is not on PATH (for example claude-cli models on a machine
+   *  with only the codex CLI), so routing never spends retries on an agent that cannot start.
+   *  Harnesses without a CLI probe (Ollama, declared harnesses) are never skipped. Results are
+   *  cached per command for the router's lifetime. */
+  skipMissingHarnessClis(commandAvailable: (cmd: string) => boolean): void {
+    const cache = new Map<string, boolean>();
+    this.harnessCliAvailable = (harnessId) => {
+      const probe = HARNESS_CATALOG[harnessId]?.probe;
+      if (probe?.kind !== 'command') return true;
+      let ok = cache.get(probe.command);
+      if (ok === undefined) {
+        ok = commandAvailable(probe.command);
+        cache.set(probe.command, ok);
+      }
+      return ok;
+    };
   }
 
   /** Register a sink that receives one cost row per successful run(). */
@@ -618,6 +638,10 @@ export class ModelRouter {
     const tier = this.getTier(task);
     if (!tier) return [];
     let models = this.registry.getAvailableModelsForTier(tier, this.byok, this.allowExperimental, this.localOnly);
+    const harnessCliAvailable = this.harnessCliAvailable;
+    if (harnessCliAvailable) {
+      models = models.filter((model) => harnessCliAvailable(this.registry.getHarnessId(model) ?? ''));
+    }
     const requires = this.routesConfig.routes[task]?.requires;
     if (requires === 'codex') {
       models = models.filter((model) => this.registry.isCodexModel(model));

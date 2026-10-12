@@ -2339,6 +2339,7 @@ export async function shipIssue(
     policy.effective.allowExperimental,
     policy.effective.localOnly,
   );
+  router.skipMissingHarnessClis(core.isCommandAvailable);
   let issueSpend = 0;
   let laneSandboxRuntime = 'none';
   const laneWorkspaceBackend =

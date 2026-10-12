@@ -251,7 +251,7 @@ export const defaultModelsConfig: ModelsDefaults = {
     /** Codex GPT BUILD/CHECK profile: GPT 5.6 Luna at high reasoning effort. Codex CLI subscription auth (ChatGPT/OAuth) — do not gate on OPENAI_API_KEY. Intended for fast worker/checker lanes when the repo explicitly pins it. */
     'gpt-5.6-luna-high': {
       provider: 'openai',
-      tier: ['worker', 'checker'],
+      tier: ['worker', 'checker', 'triage'],
       costPerMtokInput: 1.25,
       costPerMtokOutput: 10.0,
       contextWindow: 272000,
@@ -484,7 +484,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       'gpt-4.1-mini',
       'glm-5.2',
     ],
-    triage: ['qwen2.5-coder:14b', 'claude-sonnet-5', 'glm-5.2'],
+    triage: ['qwen2.5-coder:14b', 'claude-sonnet-5', 'glm-5.2', 'gpt-5.6-luna-high'],
   },
   failover: {
     triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
