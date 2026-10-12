@@ -28,6 +28,9 @@ export interface BuildResult {
   /** Run-start HEAD SHA captured before the worker ran (#1162) — checkPhase's
    *  fallback diff base for remote-less checkouts (#1211). */
   diffBase?: string;
+  /** Why the build ran on a model other than the one first tried (cross-harness or in-tier
+   *  failover), so a summary can say a pin was not used (#2511). */
+  failoverReason?: FailoverReason;
 }
 
 export async function buildPhase(opts: Parameters<typeof buildPhaseImpl>[0]): Promise<BuildResult> {
@@ -216,6 +219,7 @@ async function buildPhaseImpl(opts: {
   const fallbackBaseRef = await (opts.captureBase ?? captureDiffBase)(worktree);
 
   let result: RouterResult;
+  let crossHarnessReason: FailoverReason | undefined;
   try {
     result = await router.run(taskType, prompt, runOpts);
   } catch (err) {
@@ -250,6 +254,7 @@ async function buildPhaseImpl(opts: {
         failoverReason: reason,
       });
       route = 'codex';
+      crossHarnessReason = reason;
       result = await router.run(
         'build_codex',
         buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding }),
@@ -282,6 +287,7 @@ async function buildPhaseImpl(opts: {
         log('warn', `provider breaker callback failed (non-fatal): ${(breakerErr as Error).message}`);
       }
       route = 'claude';
+      crossHarnessReason = reason;
       const claudePrompt = applySteering(claudeRoutePrompt(), steering);
       result = await router.run('build_claude', claudePrompt, {
         ...runOpts,
@@ -318,7 +324,14 @@ async function buildPhaseImpl(opts: {
   }
 
   log('build', `Build complete with model ${result.model}`, { model: result.model });
-  return { ok: true, model: result.model, route, diffBase: fallbackBaseRef };
+  const failoverReason = crossHarnessReason ?? result.failoverReason;
+  return {
+    ok: true,
+    model: result.model,
+    route,
+    diffBase: fallbackBaseRef,
+    ...(failoverReason ? { failoverReason } : {}),
+  };
 }
 
 export function buildLocalSmallPrompt(opts: { issue: number; branch: string; spec: string }): string {

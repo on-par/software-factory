@@ -1203,6 +1203,38 @@ describe('runIssue — #1367: a pinned build model determines the build route', 
     expect(events.some(([t]) => t === 'model_override_ignored')).toBe(false);
   });
 
+  it('reports an overridden build pin in the ready summary and PR evidence (#2511)', async () => {
+    const events: Array<[string, string]> = [];
+    const log = vi.fn((type: string, msg: string) => events.push([type, msg]));
+    vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, route: 'codex' });
+    vi.mocked(buildPhase).mockResolvedValue({
+      ok: true,
+      model: 'claude-sonnet-5',
+      route: 'claude',
+      failoverReason: 'usage_cap',
+    });
+    const router = fakeRouter({ 'gpt-build': { provider: 'openai', codex: true } });
+    const request = baseRequest({ modelPins: { build: 'gpt-build', sources: { build: 'repo' } } });
+    await runIssue(request, basePolicy(), basePorts({ events: () => log, router }));
+
+    const note = 'build pin gpt-build not used (usage_cap); built with claude-sonnet-5';
+    expect(vi.mocked(shipPhase).mock.calls[0][0].pinNotes).toEqual([note]);
+    expect(events).toContainEqual(['ready', `PR #42 ready for review (${note})`]);
+  });
+
+  it('adds no pin note when the pinned build model built the PR (#2511)', async () => {
+    const events: Array<[string, string]> = [];
+    const log = vi.fn((type: string, msg: string) => events.push([type, msg]));
+    vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, route: 'codex' });
+    vi.mocked(buildPhase).mockResolvedValue({ ok: true, model: 'gpt-build', route: 'codex' });
+    const router = fakeRouter({ 'gpt-build': { provider: 'openai', codex: true } });
+    const request = baseRequest({ modelPins: { build: 'gpt-build', sources: { build: 'repo' } } });
+    await runIssue(request, basePolicy(), basePorts({ events: () => log, router }));
+
+    expect(vi.mocked(shipPhase).mock.calls[0][0].pinNotes).toBeUndefined();
+    expect(events).toContainEqual(['ready', 'PR #42 ready for review']);
+  });
+
   it('keeps a codex build pin on the codex route even when PLAN picks claude', async () => {
     vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, route: 'claude' });
     const router = fakeRouter({ 'gpt-build': { provider: 'openai', codex: true } });

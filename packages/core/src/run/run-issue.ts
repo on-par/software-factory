@@ -778,6 +778,12 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     }
     const buildBudget = await assertBudget('BUILD');
     if (buildBudget) return buildBudget;
+    // #2511: say so when a permitted failover built with something other than the user's pin.
+    const pinnedBuild = request.modelPins.build;
+    const pinNote =
+      pinnedBuild !== undefined && build.model !== pinnedBuild
+        ? `build pin ${pinnedBuild} not used (${build.failoverReason ?? 'overridden'}); built with ${build.model}`
+        : undefined;
 
     // CHECK
     await setPhase('check');
@@ -1029,6 +1035,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       work: request.work,
       laneId: request.lane,
       reviewRouting,
+      ...(pinNote ? { pinNotes: [pinNote] } : {}),
       slice: plan.slice ? { index: plan.slice.index, count: plan.slice.plan.slices.length } : undefined,
     });
     if (!ship.ok) {
@@ -1071,7 +1078,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     const readyMsg = ship.alreadyDelivered
       ? `already delivered${ship.prNumber !== undefined ? ` by merged PR #${ship.prNumber}` : ' — branch already landed on main'}`
       : `PR #${ship.prNumber} ready for review`;
-    log('ready', readyMsg);
+    log('ready', pinNote ? `${readyMsg} (${pinNote})` : readyMsg);
     await ports.writeLocalRunReport?.({ outcome: 'ready', route, branch: request.branch, reworkRounds });
     return {
       state: 'ready',

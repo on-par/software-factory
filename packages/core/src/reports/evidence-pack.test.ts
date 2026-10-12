@@ -528,3 +528,13 @@ describe('renderEvidencePack — PR #2162 fixture (#2249)', () => {
     expect(rendered).not.toContain('Event timeline');
   });
 });
+
+describe('renderEvidencePack — model pins (#2511)', () => {
+  it('lists an overridden pin and omits the section otherwise', () => {
+    const note = 'build pin gpt-build not used (usage_cap); built with claude-sonnet-5';
+    const withNote = renderEvidencePack({ issue: 1, events: [], logFiles: [], pinNotes: [note] });
+    expect(withNote).toContain('Model pins');
+    expect(withNote).toContain(note);
+    expect(renderEvidencePack({ issue: 1, events: [], logFiles: [] })).not.toContain('Model pins');
+  });
+});
