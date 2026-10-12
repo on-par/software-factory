@@ -4,6 +4,59 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.9.4
+
+Fixes the pre-PLAN base health check that read a green `main` as red in JS
+repos, plus a `factory doctor` overhaul for first-run setup and broader
+agent-neutral support. All seven published `@on-par` packages move to 0.9.4 in
+lockstep. Install or update with `npm install -g @on-par/factory-cli@latest`.
+
+### Added
+
+- `factory doctor` walks a fresh install through setup: one section per
+  harness with install checks, a sign-in check that makes no model call, git
+  authentication to origin, and repo checks that print the next command
+  (`factory init`, `gh auth login`, git identity). It runs outside a git repo
+  and skips repo checks there (#2483, #2484, #2550, #2551, #2554, #2555,
+  #2556, #2557).
+- `factory --help` and the `factory init` Next hint name `factory doctor` as
+  the first step (#2506, #2558).
+- Any coding agent CLI satisfies the ship, run and doctor prerequisites, and
+  the router only routes to agents that can run on this host (#1269, #2406).
+- OpenCode: prompts go via stdin or a file, JSON output is parsed for the final
+  message and token usage, failures are classified, and auth is probed as a
+  CLI with an optional API key override (#2460, #2461, #2462, #2463).
+- `docs/agents.md`: harness matrix, provider sections, config recipes and an
+  add-your-own-agent section, linked from both READMEs (#2532, #2533, #2539,
+  #2540, #2541).
+- `factory models` and `factory doctor` mark repo-defined models and report
+  invalid `models.registry` entries (#2442, #2443).
+
+### Changed
+
+- `factory triage` runs through the model router (#1650).
+- A pinned build model fails over only on `usage_cap` or `rate_limit`, and the
+  ready summary and PR evidence say when a build pin was overridden (#2510,
+  #2511).
+- A required check that cannot run fails CHECK instead of passing silently
+  (#2493).
+- A signed-out agent CLI trips a per-run breaker. A Codex 401 is reported as
+  `local_auth` with a one-line `codex login` hint (#2494, #2495).
+
+### Fixed
+
+- The base worktree used by pre-PLAN base health and the CHECK baseline
+  installs JS dependencies before running checkers. Without them `compile`
+  failed with `tsc: command not found`, every issue was released to queued as
+  `environment`, and the failure was cached (#2576).
+- `factory doctor` checks `.factory/state/STOP`, not `.factory/STOP` (#2453).
+- An expired Codex access token with a refresh token counts as signed in, and
+  an expired ChatGPT session does not (#2509, #2516).
+- `factory ship` and `factory run-issue` refuse a pull request number (#2492).
+- `factory triage accept` accepts the queue `factory triage` just wrote
+  (#2450).
+- `factory init` hides the raw "ollama not found" shell error (#2507).
+
 ## 0.9.3
 
 First-run reliability fixes and the start of agent-neutral command harnesses.
