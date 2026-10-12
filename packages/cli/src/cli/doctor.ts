@@ -2,6 +2,7 @@
 
 import { resolve } from 'node:path';
 
+import type { DeclaredHarnessProbe } from '@on-par/factory-core';
 import { detectSandboxRuntime } from '@on-par/factory-core';
 
 import { MIN_NODE_MAJOR } from '../node-version.js';
@@ -598,4 +599,27 @@ export function unmergedGreenPrChecks(result: GreenPrScanResult): DoctorCheck[] 
     detail: `${row.issue === null ? 'owning issue unknown' : `issue #${row.issue}`} — green and ready on ${row.branch}, open ${row.ageHours}h, not merged`,
     fix: `review and merge #${row.number} (or close it) — the factory never auto-merges an orphaned PR`,
   }));
+}
+
+/** One doctor check per user-declared harness, from its `probe` result. */
+export function declaredHarnessChecks(probes: DeclaredHarnessProbe[]): DoctorCheck[] {
+  return probes.map((p): DoctorCheck => {
+    const name = `harness ${p.harness}`;
+    if (p.status === 'available') return { name, ok: true, detail: `available (probe: ${p.probe})` };
+    if (p.status === 'unavailable') {
+      return {
+        name,
+        ok: false,
+        detail: `unavailable — probe \`${p.probe}\` failed: ${p.detail}`,
+        fix: 'install the agent CLI on PATH or fix the "probe" command in the models config harnesses section',
+      };
+    }
+    return {
+      name,
+      ok: false,
+      optional: true,
+      detail: 'unverified — no probe configured',
+      fix: 'add a "probe" command (exit 0 = reachable) to the harness in the models config',
+    };
+  });
 }

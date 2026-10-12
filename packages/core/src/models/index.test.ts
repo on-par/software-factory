@@ -2,7 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig } from '../config/index.js';
 import { loadModelsConfig } from '../config/index.js';
-import { diagnoseModels, isCommandAvailable, ModelRegistry, resolveModelOverrides } from './index.js';
+import {
+  diagnoseModels,
+  isCommandAvailable,
+  ModelRegistry,
+  probeDeclaredHarnesses,
+  resolveModelOverrides,
+  runHarnessProbe,
+} from './index.js';
 
 const config: ModelsConfig = {
   version: 1,
@@ -59,6 +66,14 @@ describe('ModelRegistry harness declarations', () => {
     expect(registry.getHarnessDeclaration('nope')).toBeUndefined();
     expect(registry.getHarnessDeclaration('toString')).toBeUndefined();
     expect(registry.isAgenticHarnessId('nope')).toBe(false);
+  });
+
+  it('lists declared harness ids', () => {
+    expect(withHarnesses({ 'my-agent': declaration, other: declaration }).listDeclaredHarnesses()).toEqual([
+      'my-agent',
+      'other',
+    ]);
+    expect(new ModelRegistry(config).listDeclaredHarnesses()).toEqual([]);
   });
 
   it('tolerates a config with harnesses undefined', () => {
@@ -1079,6 +1094,89 @@ describe('diagnoseModels', () => {
     ).find((x) => x.model === 'bogus-harness-model')!;
     expect(d.reachable).toBe(false);
     expect(d.reason).toMatch(/^unknown harness 'bogus'/);
+  });
+});
+
+describe('diagnoseModels declared harnesses', () => {
+  const declared = (probe?: string): ModelsConfig => {
+    const model = (harness: string) => ({
+      provider: 'custom',
+      tier: 'worker' as const,
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+      harness,
+    });
+    return {
+      ...doctorConfig,
+      models: { 'agent-a': model('my-agent'), 'agent-b': model('my-agent') },
+      tiers: { ...doctorConfig.tiers, worker: ['agent-a', 'agent-b'] },
+      harnesses: {
+        'my-agent': {
+          command: 'my-agent {model}',
+          prompt: 'stdin',
+          output: 'stdout',
+          agentic: true,
+          usage: 'none',
+          probe,
+        },
+      },
+    } as ModelsConfig;
+  };
+  const diagnose = (cfg: ModelsConfig, harnessProbe: (cmd: string) => string | null) =>
+    diagnoseModels(new ModelRegistry(cfg), { harnessProbe }, true).find((x) => x.model === 'agent-a')!;
+
+  it('marks a model reachable when the declared probe passes', () => {
+    const d = diagnose(declared('my-agent --version'), () => null);
+    expect(d.reachable).toBe(true);
+    expect(d.reason).toBe("ok (harness 'my-agent' probe passed)");
+  });
+
+  it('marks a model unreachable with the probe failure when the declared probe fails', () => {
+    const d = diagnose(declared('my-agent --version'), () => 'exit 127: my-agent: command not found');
+    expect(d.reachable).toBe(false);
+    expect(d.reason).toContain('probe failed');
+    expect(d.reason).toContain('exit 127');
+  });
+
+  it('marks a model unverified when its declared harness has no probe', () => {
+    const d = diagnose(declared(), () => null);
+    expect(d.unverified).toBe(true);
+    expect(d.reachable).toBe(false);
+    expect(d.reason).toMatch(/^unverified — harness 'my-agent' has no probe configured/);
+  });
+
+  it('runs a shared probe once for several models', () => {
+    const spy = vi.fn(() => null);
+    diagnoseModels(new ModelRegistry(declared('my-agent --version')), { harnessProbe: spy }, true);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('turns a throwing probe into unavailable', () => {
+    const result = probeDeclaredHarnesses(new ModelRegistry(declared('x')), () => {
+      throw new Error('spawn failed');
+    });
+    expect(result).toEqual([{ harness: 'my-agent', probe: 'x', status: 'unavailable', detail: 'spawn failed' }]);
+  });
+
+  it('returns no probes when no harnesses are declared', () => {
+    expect(probeDeclaredHarnesses(new ModelRegistry(doctorConfig))).toEqual([]);
+  });
+});
+
+describe('runHarnessProbe', () => {
+  it('returns null on exit 0', () => {
+    expect(runHarnessProbe('true')).toBeNull();
+  });
+
+  it('returns the exit code on failure', () => {
+    expect(runHarnessProbe('exit 3')).toBe('exit 3');
+  });
+
+  it('includes the first stderr line', () => {
+    expect(runHarnessProbe('echo boom >&2; exit 2')).toContain('boom');
   });
 });
 

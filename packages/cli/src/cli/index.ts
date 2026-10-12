@@ -24,6 +24,7 @@ import type {
   BenchmarkRunFailure,
   CheckFailureInfo,
   CheckSummary,
+  DeclaredHarnessProbe,
   Environment,
   EnvironmentProxySettings,
   EventKind,
@@ -90,6 +91,7 @@ import {
   describeEffectiveConfig,
   detectPostMergeDefects,
   diagnoseModels,
+  probeDeclaredHarnesses,
   drainSteering,
   estimateTrailingSpend,
   fetchDefectSources,
@@ -366,6 +368,7 @@ import {
   formatReconcileReport,
   formatWorktreeReconcileReport,
   type GreenPrScanResult,
+  declaredHarnessChecks,
   hasSandboxRuntime,
   leaseChecks,
   keychainPreflightError,
@@ -561,6 +564,7 @@ type CoreOpKey =
   | 'watchUsage'
   | 'fetchSubscriptionUsage'
   | 'diagnoseModels'
+  | 'probeDeclaredHarnesses'
   | 'writeLocalRunReport';
 type CoreOps = Required<Pick<CliDeps, CoreOpKey>>;
 
@@ -576,6 +580,7 @@ const DEFAULT_CORE_OPS: CoreOps = {
   watchUsage,
   fetchSubscriptionUsage,
   diagnoseModels,
+  probeDeclaredHarnesses,
   writeLocalRunReport,
 };
 
@@ -596,6 +601,7 @@ function resolveCoreOps(overrides: Partial<CoreOps>, base: CoreOps = coreOps): C
     watchUsage: overrides.watchUsage ?? base.watchUsage,
     fetchSubscriptionUsage: overrides.fetchSubscriptionUsage ?? base.fetchSubscriptionUsage,
     diagnoseModels: overrides.diagnoseModels ?? base.diagnoseModels,
+    probeDeclaredHarnesses: overrides.probeDeclaredHarnesses ?? base.probeDeclaredHarnesses,
     writeLocalRunReport: overrides.writeLocalRunReport ?? base.writeLocalRunReport,
   };
 }
@@ -6188,6 +6194,17 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     const eventsContent = existsSync(paths.events) ? readFileSync(paths.events, 'utf-8') : null;
     checks.push(eventLogCheck(eventsContent === null ? null : analyzeEventLog(eventsContent)));
 
+    let harnessProbes: DeclaredHarnessProbe[] = [];
+    try {
+      const registry = new coreOps.ModelRegistry(
+        applyRepoConfig(configLoaders.loadModelsConfig(), configLoaders.loadRepoConfig(repoRoot)),
+      );
+      harnessProbes = coreOps.probeDeclaredHarnesses(registry);
+    } catch {
+      // models config problems are reported by `factory models --doctor`; doctor keeps going
+    }
+    checks.push(...declaredHarnessChecks(harnessProbes));
+
     // Full run-lifecycle reap (#998): dead-run worktrees and their branches. Uses the same
     // GitHub evidence and the same lock pairing as `factory worktree gc` (cmdWorktreeGc) —
     // a merged or closed PR is what makes a worktree reapable.
@@ -6323,6 +6340,7 @@ export interface CliDeps {
   watchUsage?: typeof watchUsage;
   fetchSubscriptionUsage?: typeof fetchSubscriptionUsage;
   diagnoseModels?: typeof diagnoseModels;
+  probeDeclaredHarnesses?: typeof probeDeclaredHarnesses;
   writeLocalRunReport?: typeof writeLocalRunReport;
 }
 
