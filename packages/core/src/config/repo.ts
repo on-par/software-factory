@@ -88,7 +88,7 @@ export const RepoFactoryConfigV2Schema = z
           .record(z.string(), ModelDefSchema.strict())
           .optional()
           .describe(
-            'Repo-declared models: model id -> definition, same fields as a packaged model. Merged over the packaged registry before tiers and pins, so these ids can be pinned and placed in tiers.',
+            'Repo-declared models: model id -> definition, same fields as a packaged model. Merged over the packaged registry before tiers and pins, so these ids can be pinned and placed in tiers. Ids must not reuse a packaged model id.',
           ),
         efforts: ModelEffortsSchema.optional(),
         pins: z
@@ -340,13 +340,19 @@ export function loadRepoConfig(repoRoot: string, stateRoot?: string): RepoFactor
  *  registry, then `models.registry`, then tiers, providers, pins). Pure — returns a new ModelsConfig; `null` repo is
  *  the identity transform (the critical no-`.factory/config.json` regression
  *  surface). Throws naming the offending tier/model on an unknown model id, or
- *  naming the tier emptied by provider/tier settings. */
+ *  naming the tier emptied by provider/tier settings, and when a
+ *  `models.registry` id redefines a packaged model id. */
 export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | null): ModelsConfig {
   if (!repo) return models;
 
   const registry = repo.models?.registry ?? {};
   const validHarnesses = [...KNOWN_HARNESS_IDS, ...Object.keys(models.harnesses ?? {})];
   for (const [id, def] of Object.entries(registry)) {
+    if (Object.hasOwn(models.models, id)) {
+      throw new Error(
+        `.factory/config.json: models.registry.${id} redefines packaged model '${id}'; packaged model ids cannot be redefined. Register it under a new id (for example '${id}-custom') and pin or tier that id instead`,
+      );
+    }
     if (def.harness !== undefined && !validHarnesses.includes(def.harness)) {
       throw new Error(
         `.factory/config.json: models.registry.${id} declares unknown harness '${def.harness}' (valid harnesses: ${validHarnesses.join(', ')})`,

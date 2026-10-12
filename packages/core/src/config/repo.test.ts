@@ -1096,12 +1096,41 @@ describe('repo models.registry (#2440)', () => {
     expect(merged.models['my-opencode-model']).toBeDefined();
   });
 
+  it('rejects a registry entry that redefines a packaged model id, naming the id and config path', () => {
+    const snapshot = structuredClone(models);
+    expect(() => applyRepoConfig(models, { version: 2, models: { registry: { 'claude-model': custom } } })).toThrow(
+      /\.factory\/config\.json: models\.registry\.claude-model redefines packaged model 'claude-model'/,
+    );
+    expect(() =>
+      applyRepoConfig(models, {
+        version: 2,
+        models: { registry: { 'my-opencode-model': custom, 'gpt-model-a': custom } },
+      }),
+    ).toThrow(/gpt-model-a/);
+    expect(models).toEqual(snapshot);
+  });
+
+  it('merges non-conflicting registry ids with no redefinition error or warning', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const merged = applyRepoConfig(models, withRegistry());
+      expect(merged.models['my-opencode-model']).toBeDefined();
+      expect(merged.models['claude-model']).toBe(models.models['claude-model']);
+      expect(() =>
+        applyRepoConfig(models, { version: 2, models: { registry: { 'Claude-Model': custom, constructor: custom } } }),
+      ).not.toThrow();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('applies packaged, then repo registry, then tiers, then pins', () => {
-    const redefined = baseModel({ tier: 'checker', provider: 'anthropic', contextWindow: 4242 });
+    const repoChecker = baseModel({ tier: 'checker', provider: 'anthropic', contextWindow: 4242 });
     const merged = applyRepoConfig(models, {
       version: 2,
       models: {
-        registry: { 'my-opencode-model': custom, 'checker-model': redefined },
+        registry: { 'my-opencode-model': custom, 'repo-checker-model': repoChecker },
         pins: { checker: 'my-opencode-model' },
       },
       tiers: { worker: ['my-opencode-model'], checker: ['gpt-model-b'] },
@@ -1109,7 +1138,7 @@ describe('repo models.registry (#2440)', () => {
     expect(merged.models['claude-model']).toBeDefined();
     expect(merged.tiers.worker).toEqual(['my-opencode-model']);
     expect(merged.tiers.checker).toEqual(['my-opencode-model']);
-    expect(merged.models['checker-model']?.contextWindow).toBe(4242);
+    expect(merged.models['repo-checker-model']?.contextWindow).toBe(4242);
 
     const openai = baseModel({ provider: 'openai', tier: 'worker' });
     const stripped = applyRepoConfig(models, {
