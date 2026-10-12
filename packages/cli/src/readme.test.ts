@@ -130,3 +130,41 @@ describe('README provider setup guide guard self-test', () => {
     expect(providerGuideProblems('', 'cli', () => true)).toEqual(['missing prerequisites section']);
   });
 });
+
+describe('README agent-neutral prerequisites', () => {
+  it('README.md and packages/cli/README.md prerequisites say one supported coding agent CLI and do not name claude, and doctor descriptions do not name claude', () => {
+    const problems: string[] = [];
+    const root = rootPrerequisites(rootReadme) ?? '';
+    const cli = cliPrerequisites(cliReadme) ?? '';
+    if (!root.toLowerCase().includes('one supported coding agent cli (see [docs/agents.md](docs/agents.md))')) {
+      problems.push('root prerequisites lack the agent-neutral bullet');
+    }
+    if (!cli.includes(`one supported coding agent CLI (see [docs/agents.md](${CLI_PREFIX}${GUIDE}))`)) {
+      problems.push('cli prerequisites lack the agent-neutral sentence');
+    }
+    if (/`claude`|Claude Code/.test(root)) problems.push('root prerequisites name claude');
+    if (/`claude`|Claude Code/.test(cli)) problems.push('cli prerequisites name claude');
+    const doctorLines = rootReadme
+      .split('\n')
+      .filter((line) => /^factory doctor\s+Check/.test(line) || line.includes('`factory doctor` checks'));
+    if (doctorLines.length < 2) problems.push(`expected 2 doctor descriptions, found ${doctorLines.length}`);
+    for (const line of doctorLines) {
+      if (/\bclaude\b/i.test(line)) problems.push(`doctor description names claude: ${line.slice(0, 60)}`);
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('docs/models.md and docs/status.md each link to agents.md and the target exists', () => {
+    const docsDir = join(repoRoot, 'docs');
+    for (const file of ['docs/models.md', 'docs/status.md']) {
+      const text = readFileSync(join(repoRoot, file), 'utf8');
+      const targets = [...text.matchAll(/\]\(([^)\s]*agents\.md)\)/g)].map((m) => m[1] as string);
+      expect(targets.length, `${file} links agents.md`).toBeGreaterThan(0);
+      for (const target of targets) {
+        const resolved = resolve(docsDir, target);
+        expect(resolved, `${file} -> ${target}`).toBe(join(repoRoot, 'docs/agents.md'));
+        expect(existsSync(resolved)).toBe(true);
+      }
+    }
+  });
+});
