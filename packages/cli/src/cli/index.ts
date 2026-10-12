@@ -637,7 +637,9 @@ function resolvePhaseOps(overrides: Partial<PhaseOps>, base: PhaseOps = phaseOps
 
 type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
 
-export const PREREQUISITES_TEXT = `Prerequisites:
+export const PREREQUISITES_TEXT = `First step: run \`factory doctor\` to check your setup and see what to fix.
+
+Prerequisites:
   - Claude Code CLI installed and authenticated (Claude subscription): https://claude.com/claude-code
   - GitHub CLI authenticated: gh auth login
   - GITHUB_TOKEN or GH_TOKEN set (falls back to \`gh auth token\`)
