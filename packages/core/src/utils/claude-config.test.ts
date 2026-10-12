@@ -1,8 +1,13 @@
 import { resolve } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { claudeConfigDirOverride, claudeConfigDirPath, claudeKeychainService } from './claude-config.js';
+import {
+  claudeConfigDirOverride,
+  claudeConfigDirPath,
+  claudeKeychainService,
+  hasClaudeLoginEvidence,
+} from './claude-config.js';
 
 describe('claudeConfigDirOverride', () => {
   it('is undefined when CLAUDE_CONFIG_DIR is unset or empty', () => {
@@ -70,5 +75,80 @@ describe('claudeKeychainService', () => {
     expect(
       claudeKeychainService({ CLAUDE_CONFIG_DIR: '/home/dev/.claude-work', CLAUDE_SECURESTORAGE_CONFIG_DIR: '' }),
     ).toBe('Claude Code-credentials');
+  });
+});
+
+describe('hasClaudeLoginEvidence', () => {
+  it('returns true for a non-empty CLAUDE_CODE_OAUTH_TOKEN without touching exec or the filesystem', () => {
+    const exec = vi.fn();
+    const fileExists = vi.fn(() => false);
+    expect(
+      hasClaudeLoginEvidence({ env: { CLAUDE_CODE_OAUTH_TOKEN: 'tok' }, platform: 'darwin', exec, fileExists }),
+    ).toBe(true);
+    expect(exec).not.toHaveBeenCalled();
+    expect(fileExists).not.toHaveBeenCalled();
+  });
+
+  it('ignores a whitespace-only CLAUDE_CODE_OAUTH_TOKEN', () => {
+    expect(
+      hasClaudeLoginEvidence({
+        env: { CLAUDE_CODE_OAUTH_TOKEN: '  ' },
+        platform: 'linux',
+        fileExists: () => false,
+      }),
+    ).toBe(false);
+  });
+
+  it('uses only env, keychain-entry and file-existence evidence and never runs claude', () => {
+    const exec = vi.fn();
+    expect(hasClaudeLoginEvidence({ env: {}, platform: 'darwin', exec, fileExists: () => false })).toBe(true);
+    expect(exec).toHaveBeenCalledTimes(1);
+    expect(exec).toHaveBeenCalledWith('security', ['find-generic-password', '-s', 'Claude Code-credentials']);
+    expect(exec.mock.calls[0]![1]).not.toContain('-w');
+    expect(exec.mock.calls.some(([file]) => file === 'claude')).toBe(false);
+  });
+
+  it('resolves the keychain service and credentials file for CLAUDE_CONFIG_DIR', () => {
+    const env = { CLAUDE_CONFIG_DIR: '/home/dev/.claude-work' };
+    const exec = vi.fn(() => {
+      throw new Error('not found');
+    });
+    const fileExists = vi.fn(() => true);
+    expect(hasClaudeLoginEvidence({ env, platform: 'darwin', exec, fileExists })).toBe(true);
+    expect(exec).toHaveBeenCalledWith('security', ['find-generic-password', '-s', claudeKeychainService(env)]);
+    expect(fileExists).toHaveBeenCalledWith(resolve('/home/dev/.claude-work', '.credentials.json'));
+  });
+
+  it('falls back to the credentials file when the darwin keychain lookup throws', () => {
+    const exec = vi.fn(() => {
+      throw new Error('no keychain');
+    });
+    expect(hasClaudeLoginEvidence({ env: {}, platform: 'darwin', exec, fileExists: () => true })).toBe(true);
+    expect(hasClaudeLoginEvidence({ env: {}, platform: 'darwin', exec, fileExists: () => false })).toBe(false);
+  });
+
+  it('never calls exec on linux; only the credentials file decides', () => {
+    const exec = vi.fn();
+    expect(hasClaudeLoginEvidence({ env: {}, platform: 'linux', exec, fileExists: () => true })).toBe(true);
+    expect(hasClaudeLoginEvidence({ env: {}, platform: 'linux', exec, fileExists: () => false })).toBe(false);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('returns false when the file check throws', () => {
+    expect(
+      hasClaudeLoginEvidence({
+        env: {},
+        platform: 'linux',
+        fileExists: () => {
+          throw new Error('EACCES');
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it('runs with real defaults without throwing', () => {
+    expect(typeof hasClaudeLoginEvidence({ env: { CLAUDE_CONFIG_DIR: '/nonexistent/x' }, platform: 'linux' })).toBe(
+      'boolean',
+    );
   });
 });

@@ -10,7 +10,7 @@ export type HarnessProbe =
       okLabel: string;
       /** 'cli' = the harness CLI carries its own auth; a missing envKey never blocks. */
       auth: 'env-key' | 'cli';
-      /** Providers whose CLI login substitutes for the env key (reachable with a soft note). */
+      /** Providers whose CLI login substitutes for the env key (reachable when the CLI shows login evidence). */
       selfAuth?: { providers: string[]; defaultEnvKey: string };
     }
   | {
