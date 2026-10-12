@@ -314,6 +314,8 @@ import {
   normalizeTriageQueue,
   parseTriageCandidates,
   codexChatgptSessionState,
+  hasClaudeLoginEvidence,
+  hasOpencodeLoginEvidence,
 } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
 import { Command } from 'commander';
@@ -6131,7 +6133,7 @@ function probeClaudeKeychain(): KeychainProbeStatus {
   }
 }
 
-async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
+async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean } = {}) {
   const checks = runDoctorChecks({
     commandAvailable: coreOps.isCommandAvailable,
     envPresent: (key) => !!process.env[key],
@@ -6151,6 +6153,14 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     pathExists: existsSync,
     distFreshness: distFreshnessProbe(import.meta.url),
     codexSessionState: () => codexChatgptSessionState(),
+    claudeLoggedIn: () =>
+      hasClaudeLoginEvidence({
+        exec: (file, args) => {
+          shellOps.execSync([file, ...args].map(shellEscape).join(' '), { timeout: 10_000, stdio: 'ignore' });
+        },
+        fileExists: existsSync,
+      }),
+    opencodeLoggedIn: () => hasOpencodeLoginEvidence(),
   });
 
   let repoRoot: string | null;
@@ -6165,54 +6175,58 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
     repoRoot = null;
   }
 
-  const CLAUDE_AUTH_PROBE = 'claude -p "reply with exactly: ok"';
-  const probeExec = (cmd: string): string | null => {
-    try {
-      return shellOps.execSync(cmd, { timeout: 120_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    } catch {
-      return null;
-    }
-  };
+  // Only with --probe-inference: these send a real prompt (uses quota). Plain doctor makes no inference call.
+  if (opts.probeInference) {
+    const CLAUDE_AUTH_PROBE = 'claude -p "reply with exactly: ok"';
+    const probeExec = (cmd: string): string | null => {
+      try {
+        return shellOps.execSync(cmd, { timeout: 120_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      } catch {
+        return null;
+      }
+    };
 
-  let host: ClaudeAuthProbe = 'skipped';
-  let hostDetail = 'skipped — claude CLI not on PATH';
-  if (coreOps.isCommandAvailable('claude')) {
-    host = probeExec(CLAUDE_AUTH_PROBE) === null ? 'failed' : 'ok';
-    hostDetail = host === 'ok' ? 'claude -p succeeded on the host' : 'claude -p failed on the host';
-  }
-
-  let sandboxed: ClaudeAuthProbe = 'skipped';
-  let sandboxDetail = 'skipped — host claude auth was not verified';
-  const runtimeAvailable = hasSandboxRuntime(process.platform, (cmd) => isCommandAvailableViaShell(shellOps, cmd));
-  const skip = sandboxAuthSkipDetail({ runtimeAvailable, hostOk: host === 'ok', inRepo: repoRoot !== null });
-  if (skip !== null) {
-    sandboxDetail = skip;
-  } else if (repoRoot !== null) {
-    const policy = resolveSandboxPolicy(
-      configLoaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox,
-      {
-        worktree: repoRoot,
-        repoRoot,
-        isAvailable: (cmd) => isCommandAvailableViaShell(shellOps, cmd),
-      },
-    );
-    if (!policy) {
-      sandboxDetail = 'skipped — sandbox disabled by config or FACTORY_SANDBOX';
-    } else if (policy.runtime === 'none') {
-      sandboxDetail = 'skipped — no sandbox runtime (sandbox-exec/firejail) on this host';
-    } else if (policy.runtime === 'docker-sandbox') {
-      sandboxDetail = 'skipped — docker-sandbox containment is the microVM, not command wrapping (#653)';
-    } else {
-      sandboxed = probeExec(wrapCommandInSandbox(CLAUDE_AUTH_PROBE, policy)) === null ? 'failed' : 'ok';
-      sandboxDetail =
-        sandboxed === 'ok'
-          ? `claude -p succeeded under ${policy.runtime}`
-          : `claude -p failed under ${policy.runtime} (local_auth)`;
+    let host: ClaudeAuthProbe = 'skipped';
+    let hostDetail = 'skipped — claude CLI not on PATH';
+    if (coreOps.isCommandAvailable('claude')) {
+      host = probeExec(CLAUDE_AUTH_PROBE) === null ? 'failed' : 'ok';
+      hostDetail = host === 'ok' ? 'claude -p succeeded on the host' : 'claude -p failed on the host';
     }
+
+    let sandboxed: ClaudeAuthProbe = 'skipped';
+    let sandboxDetail = 'skipped — host claude auth was not verified';
+    const runtimeAvailable = hasSandboxRuntime(process.platform, (cmd) => isCommandAvailableViaShell(shellOps, cmd));
+    const skip = sandboxAuthSkipDetail({ runtimeAvailable, hostOk: host === 'ok', inRepo: repoRoot !== null });
+    if (skip !== null) {
+      sandboxDetail = skip;
+    } else if (repoRoot !== null) {
+      const policy = resolveSandboxPolicy(
+        configLoaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox,
+        {
+          worktree: repoRoot,
+          repoRoot,
+          isAvailable: (cmd) => isCommandAvailableViaShell(shellOps, cmd),
+        },
+      );
+      if (!policy) {
+        sandboxDetail = 'skipped — sandbox disabled by config or FACTORY_SANDBOX';
+      } else if (policy.runtime === 'none') {
+        sandboxDetail = 'skipped — no sandbox runtime (sandbox-exec/firejail) on this host';
+      } else if (policy.runtime === 'docker-sandbox') {
+        sandboxDetail = 'skipped — docker-sandbox containment is the microVM, not command wrapping (#653)';
+      } else {
+        sandboxed = probeExec(wrapCommandInSandbox(CLAUDE_AUTH_PROBE, policy)) === null ? 'failed' : 'ok';
+        sandboxDetail =
+          sandboxed === 'ok'
+            ? `claude -p succeeded under ${policy.runtime}`
+            : `claude -p failed under ${policy.runtime} (local_auth)`;
+      }
+    }
+
+    checks.push(...sandboxClaudeAuthChecks({ host, sandboxed, hostDetail, sandboxDetail }));
   }
 
   checks.push(claudeKeychainCheck(probeClaudeKeychain()));
-  checks.push(...sandboxClaudeAuthChecks({ host, sandboxed, hostDetail, sandboxDetail }));
   checks.splice(0, checks.length, ...reconcileAgentAuthChecks(checks));
 
   if (repoRoot !== null) {
@@ -6554,12 +6568,18 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
 
   program
     .command('doctor')
-    .description('Check your environment (git, claude, gh auth, GitHub token, npm, sandbox, .factory/)')
+    .description(
+      'Check your environment (git, agent install and sign-in, gh auth, GitHub token, npm, sandbox, .factory/)',
+    )
     .option(
       '--reconcile',
       'Reap stale port leases, dead-run worktrees, stale issue claims, orphan sf-job-*/factory.managed containers, and orphan factory-* sbx VMs',
     )
-    .action((opts: { reconcile?: boolean }) => cmdDoctor(opts));
+    .option(
+      '--probe-inference',
+      'Also send one real prompt with claude -p on the host and in the sandbox to verify Claude auth (uses quota)',
+    )
+    .action((opts: { reconcile?: boolean; probeInference?: boolean }) => cmdDoctor(opts));
 
   program
     .command('cost')

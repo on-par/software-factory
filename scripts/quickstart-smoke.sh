@@ -89,7 +89,7 @@ echo "$DOCTOR_OUT" | grep -q "coding agent.*found codex" || {
   echo "$DOCTOR_OUT" >&2
   exit 1
 }
-echo "$DOCTOR_OUT" | grep -q "codex auth.*ChatGPT" || {
+echo "$DOCTOR_OUT" | grep -q "codex signed in.*ChatGPT" || {
   echo "expected doctor to report the codex ChatGPT sign-in, got:" >&2
   echo "$DOCTOR_OUT" >&2
   exit 1
