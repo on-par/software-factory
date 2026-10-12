@@ -29,7 +29,7 @@ import { ModelEffortsSchema } from './effort.js';
 
 // ---------- Schemas ----------
 
-const ModelDefSchema = z.object({
+export const ModelDefSchema = z.object({
   provider: z.enum(['anthropic', 'openai', 'ollama', 'deepseek', 'custom']),
   tier: z.union([z.string(), z.array(z.string())]),
   costPerMtokInput: z.number(),

@@ -20,6 +20,7 @@ import {
   FACTORY_RUNTIME_CONFIG_KEYS,
   getFactoryPaths,
   isPlainObject,
+  ModelDefSchema,
   resolveBranchPrefix,
   resolveExperimental,
   resolveLocalOnly,
@@ -29,6 +30,7 @@ import {
   type ModelsConfig,
 } from './index.js';
 
+import { KNOWN_HARNESS_IDS } from '../harness/catalog.js';
 import { ModelEffortsSchema } from './effort.js';
 
 // ---------- Schema ----------
@@ -82,6 +84,12 @@ export const RepoFactoryConfigV2Schema = z
     version: z.literal(2),
     models: z
       .object({
+        registry: z
+          .record(z.string(), ModelDefSchema.strict())
+          .optional()
+          .describe(
+            'Repo-declared models: model id -> definition, same fields as a packaged model. Merged over the packaged registry before tiers and pins, so these ids can be pinned and placed in tiers.',
+          ),
         efforts: ModelEffortsSchema.optional(),
         pins: z
           .object({
@@ -327,21 +335,32 @@ export function loadRepoConfig(repoRoot: string, stateRoot?: string): RepoFactor
 
 // ---------- Applying to ModelsConfig ----------
 
-/** Apply a repo config's tier overrides, provider flags, and checker/triage pins
- *  to a packaged ModelsConfig. Pure — returns a new ModelsConfig; `null` repo is
+/** Apply a repo config's model registry, tier overrides, provider flags, and
+ *  checker/triage pins to a packaged ModelsConfig, in that order (packaged
+ *  registry, then `models.registry`, then tiers, providers, pins). Pure — returns a new ModelsConfig; `null` repo is
  *  the identity transform (the critical no-`.factory/config.json` regression
  *  surface). Throws naming the offending tier/model on an unknown model id, or
  *  naming the tier emptied by provider/tier settings. */
 export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | null): ModelsConfig {
   if (!repo) return models;
 
-  const knownModels = Object.keys(models.models).join(', ');
+  const registry = repo.models?.registry ?? {};
+  const validHarnesses = [...KNOWN_HARNESS_IDS, ...Object.keys(models.harnesses ?? {})];
+  for (const [id, def] of Object.entries(registry)) {
+    if (def.harness !== undefined && !validHarnesses.includes(def.harness)) {
+      throw new Error(
+        `.factory/config.json: models.registry.${id} declares unknown harness '${def.harness}' (valid harnesses: ${validHarnesses.join(', ')})`,
+      );
+    }
+  }
+  const mergedModels = { ...models.models, ...registry };
+  const knownModels = Object.keys(mergedModels).join(', ');
   let tiers: Record<string, string[]> = { ...models.tiers };
 
   if (repo.tiers) {
     for (const [tierName, modelIds] of Object.entries(repo.tiers)) {
       for (const id of modelIds) {
-        if (!models.models[id]) {
+        if (!mergedModels[id]) {
           throw new Error(
             `.factory/config.json: tier '${tierName}' references unknown model '${id}' (known models: ${knownModels})`,
           );
@@ -358,14 +377,14 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
     if (disabledProviders.length > 0) {
       const nextTiers: Record<string, string[]> = {};
       for (const [tierName, modelIds] of Object.entries(tiers)) {
-        nextTiers[tierName] = modelIds.filter((id) => !disabledProviders.includes(models.models[id]?.provider));
+        nextTiers[tierName] = modelIds.filter((id) => !disabledProviders.includes(mergedModels[id]?.provider));
       }
       tiers = nextTiers;
     }
   }
 
   if (repo.models?.pins?.checker) {
-    if (!models.models[repo.models.pins.checker]) {
+    if (!mergedModels[repo.models.pins.checker]) {
       throw new Error(
         `.factory/config.json: models.pins.checker references unknown model '${repo.models.pins.checker}' (known models: ${knownModels})`,
       );
@@ -373,14 +392,14 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
     tiers = { ...tiers, checker: [repo.models.pins.checker] };
   }
   if (repo.models?.pins?.triage) {
-    if (!models.models[repo.models.pins.triage]) {
+    if (!mergedModels[repo.models.pins.triage]) {
       throw new Error(
         `.factory/config.json: models.pins.triage references unknown model '${repo.models.pins.triage}' (known models: ${knownModels})`,
       );
     }
     tiers = { ...tiers, triage: [repo.models.pins.triage] };
   }
-  if (repo.models?.pins?.classifier && !models.models[repo.models.pins.classifier]) {
+  if (repo.models?.pins?.classifier && !mergedModels[repo.models.pins.classifier]) {
     throw new Error(
       `.factory/config.json: models.pins.classifier references unknown model '${repo.models.pins.classifier}' (known models: ${knownModels})`,
     );
@@ -397,6 +416,7 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
 
   return {
     ...models,
+    models: mergedModels,
     tiers,
     ...(repo.models?.efforts ? { efforts: { ...models.efforts, ...repo.models.efforts } } : {}),
   };
