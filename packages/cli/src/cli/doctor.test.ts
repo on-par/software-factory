@@ -38,6 +38,7 @@ import {
   unmergedGreenPrChecks,
   reconcileAgentAuthChecks,
 } from './doctor.js';
+import { PREREQUISITES_TEXT } from './index.js';
 
 function probes(overrides: Partial<DoctorEnvProbes> = {}): DoctorEnvProbes {
   return {
@@ -1444,5 +1445,13 @@ describe('per-harness setup sections (#2555)', () => {
     ]);
     expect(output).toContain(['  ✅ b — y', '  ❌ d — w', '-- S --', '  ✅ a — x', '  ⚠️ c — z'].join('\n'));
     expect(output).toContain('2 passed, 1 failed, 1 warnings');
+  });
+});
+
+describe('factory --help first step (#2558)', () => {
+  it('PREREQUISITES_TEXT opens by naming factory doctor as the first step', () => {
+    const firstLine = PREREQUISITES_TEXT.split('\n')[0];
+    expect(firstLine).toMatch(/first step/i);
+    expect(firstLine).toContain('factory doctor');
   });
 });

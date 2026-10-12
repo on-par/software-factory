@@ -2954,6 +2954,26 @@ bash scripts/verify.sh
       expect(text).toContain('factory <command> --help');
     });
 
+    it('root --help names factory doctor as the first step on its first line (#2558)', async () => {
+      const originalWrite = process.stdout.write;
+      const written: string[] = [];
+      process.stdout.write = ((chunk: string | Uint8Array) => {
+        written.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write;
+      let res: Awaited<ReturnType<typeof runMain>>;
+      try {
+        res = await runMain('--help');
+      } finally {
+        process.stdout.write = originalWrite;
+      }
+      expect(res.exited).toBe(true);
+      const lines = written.join('').split('\n');
+      expect(lines[0]).toContain('factory doctor');
+      expect(lines[0]).toMatch(/first step/i);
+      expect(lines.slice(0, 10).join('\n')).toContain('Prerequisites:');
+    });
+
     it('calls runTui with repo undefined when gh repo detection fails, and the reader says so', async () => {
       h.execImpl = (cmd: string) => {
         if (cmd.includes('rev-parse')) return h.repoRoot;
