@@ -5423,6 +5423,31 @@ describe('cli', () => {
     });
   });
 
+  describe('formatDoctorReport unverified rows', () => {
+    const rows: ModelDiagnosis[] = [
+      { model: 'ok-m', provider: 'ollama', tiers: ['worker'], reachable: true, experimental: false, reason: 'ok' },
+      {
+        model: 'unv-m',
+        provider: 'anthropic',
+        tiers: ['boss'],
+        reachable: false,
+        unverified: true,
+        experimental: false,
+        reason: 'unverified — no auth evidence: x',
+      },
+      { model: 'bad-m', provider: 'openai', tiers: ['worker'], reachable: false, experimental: false, reason: 'gone' },
+    ];
+
+    it('marks unverified rows with a warning and ends with the count line', () => {
+      const report = formatDoctorReport(rows);
+      const lines = report.split('\n');
+      const line = lines.find((l) => l.includes('unv-m'))!;
+      expect(line).toContain('⚠️');
+      expect(line).not.toContain('❌');
+      expect(lines.at(-1)).toContain('1/3 models reachable, 1 unverified (no auth evidence)');
+    });
+  });
+
   describe('hasReachableWorker', () => {
     it('is false when every model is unreachable', () => {
       const diagnoses: ModelDiagnosis[] = [

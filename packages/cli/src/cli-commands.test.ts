@@ -748,6 +748,67 @@ describe('cli commands (via main dispatch)', () => {
     });
   });
 
+  describe('formatInitReachability unverified', () => {
+    it('counts reachable models and reports unverified ones separately', () => {
+      const diagnoses = [
+        { reachable: true } as any,
+        { reachable: false, unverified: true } as any,
+        { reachable: false } as any,
+      ];
+      expect(formatInitReachability(diagnoses)).toBe(
+        'policy=auto, 1/3 models reachable, 1 unverified (no auth evidence)',
+      );
+    });
+  });
+
+  describe('init and models --doctor parity', () => {
+    it('prints the same reachable count as models --doctor and passes the same probes', async () => {
+      writeFileSync(
+        join(h.constitutionsDir, '_template.md'),
+        '```markdown\n---\nproduct: <product-name>\n---\n# <Product> Constitution\n```\n',
+      );
+      h.diagnoses = [
+        {
+          model: 'a',
+          provider: 'anthropic',
+          tiers: ['worker'],
+          reachable: false,
+          unverified: true,
+          experimental: false,
+          reason: 'r',
+        },
+        {
+          model: 'b',
+          provider: 'openai',
+          tiers: ['worker'],
+          reachable: false,
+          unverified: true,
+          experimental: false,
+          reason: 'r',
+        },
+        { model: 'c', provider: 'ollama', tiers: ['worker'], reachable: true, experimental: false, reason: 'ok' },
+      ] as any[];
+      const count = '1/3 models reachable, 2 unverified (no auth evidence)';
+      await runMain('init');
+      expect(logged()).toContain(count);
+      expect(coreFakes.diagnoseModels).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.objectContaining({ ollamaModelPresent: undefined }),
+        expect.anything(),
+        expect.anything(),
+      );
+      logSpy.mockClear();
+      await runMain('models', '--doctor');
+      expect(logged()).toContain(count);
+      expect(coreFakes.diagnoseModels).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.objectContaining({ ollamaModelPresent: undefined }),
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+  });
+
   describe('constitution', () => {
     it('scaffolds .factory/constitution.md with --init <product>, never touching getConstitutionsDir()', async () => {
       writeFileSync(

@@ -40,6 +40,7 @@ import type {
   LocalBriefParams,
   LocalOnlyPolicy,
   MergePolicyOverrides,
+  DoctorProbes,
   ModelDiagnosis,
   PrSource,
   LanePausedPayload,
@@ -741,8 +742,15 @@ function writeIfAbsent(path: string, content: string, label: string, force = fal
 
 /** One-line onboarding reachability summary, e.g. "policy=auto, 3/7 models reachable". */
 export function formatInitReachability(diagnoses: ModelDiagnosis[]): string {
+  return `policy=auto, ${formatReachabilityCount(diagnoses)}`;
+}
+
+/** Shared "K/N models reachable[, U unverified (no auth evidence)]" count for init and models --doctor. */
+export function formatReachabilityCount(diagnoses: ModelDiagnosis[]): string {
   const reachable = diagnoses.filter((d) => d.reachable).length;
-  return `policy=auto, ${reachable}/${diagnoses.length} models reachable`;
+  const unverified = diagnoses.filter((d) => !d.reachable && d.unverified).length;
+  const base = `${reachable}/${diagnoses.length} models reachable`;
+  return unverified > 0 ? `${base}, ${unverified} unverified (no auth evidence)` : base;
 }
 
 async function cmdInit(opts: { force?: boolean } = {}) {
@@ -786,7 +794,7 @@ async function cmdInit(opts: { force?: boolean } = {}) {
   // Doctor-style validation (policy=auto, N models reachable) — informational, never fails init.
   const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), configLoaders.loadRepoConfig(repoRoot));
   const registry = new coreOps.ModelRegistry(modelsConfig);
-  const diagnoses = coreOps.diagnoseModels(registry, {}, resolveExperimental(), resolveLocalOnly());
+  const diagnoses = coreOps.diagnoseModels(registry, modelDoctorProbes(), resolveExperimental(), resolveLocalOnly());
   console.log(formatInitReachability(diagnoses));
   if (!hasReachableWorker(diagnoses)) {
     console.log(
@@ -1173,10 +1181,15 @@ export async function cmdConstitution(
 export function formatDoctorReport(diagnoses: ModelDiagnosis[]): string {
   const lines = [styleText('bold', '\n== Model Doctor ==')];
   for (const d of diagnoses) {
-    const icon = d.reachable ? styleText('green', '✅') : styleText('red', '❌');
+    const icon = d.reachable
+      ? styleText('green', '✅')
+      : d.unverified
+        ? styleText('yellow', '⚠️')
+        : styleText('red', '❌');
     const tiers = d.tiers.join('/');
     lines.push(`  ${icon} ${d.model} provider=${d.provider} tier=${tiers} — ${d.reason}`);
   }
+  lines.push(`  ${formatReachabilityCount(diagnoses)}`);
   return lines.join('\n');
 }
 
@@ -1199,6 +1212,13 @@ function ollamaModelSet(): Set<string> | undefined {
   }
 }
 
+/** Probes shared by every doctor-style reachability check (init, models --doctor, overnight
+ *  preflight), so their counts agree. */
+export function modelDoctorProbes(): DoctorProbes {
+  const ollamaModels = ollamaModelSet();
+  return { ollamaModelPresent: ollamaModels ? (model: string) => ollamaModels.has(model) : undefined };
+}
+
 async function cmdModels(opts: { doctor?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), configLoaders.loadRepoConfig(repoRoot));
@@ -1207,15 +1227,7 @@ async function cmdModels(opts: { doctor?: boolean } = {}) {
   const localOnly = resolveLocalOnly();
 
   if (opts.doctor) {
-    const ollamaModels = ollamaModelSet();
-    const diagnoses = coreOps.diagnoseModels(
-      registry,
-      {
-        ollamaModelPresent: ollamaModels ? (model: string) => ollamaModels.has(model) : undefined,
-      },
-      allowExperimental,
-      localOnly,
-    );
+    const diagnoses = coreOps.diagnoseModels(registry, modelDoctorProbes(), allowExperimental, localOnly);
     console.log(formatDoctorReport(diagnoses));
     if (!hasReachableWorker(diagnoses)) {
       throw new CliExitError('factory: no worker model is reachable — fix the reasons above before running a queue', 1);
@@ -3201,10 +3213,9 @@ async function cmdLocalSmallOvernight(opts: { queue?: string; state?: string }) 
       const registry = new coreOps.ModelRegistry(
         applyRepoConfig(configLoaders.loadModelsConfig(), configLoaders.loadRepoConfig(repoRoot)),
       );
-      const ollamaModels = ollamaModelSet();
       const diagnoses = coreOps.diagnoseModels(
         registry,
-        { ollamaModelPresent: ollamaModels ? (m: string) => ollamaModels.has(m) : undefined },
+        modelDoctorProbes(),
         resolveExperimental(),
         true, // localOnly
       );

@@ -196,9 +196,13 @@ export interface ModelDiagnosis {
   provider: string;
   tiers: ModelTier[];
   reachable: boolean;
+  /** True when the CLI is installed but shows no auth evidence (no login, no API key). Never reachable. */
+  unverified?: boolean;
   experimental: boolean;
   reason: string;
 }
+
+const UNVERIFIED_PREFIX = 'unverified — no auth evidence: ';
 
 /** True when OLLAMA_BASE_URL points at a non-loopback host, i.e. the local
  *  `ollama` CLI and `ollama list` are the wrong probes. Unparseable URLs fall
@@ -258,6 +262,7 @@ export function diagnoseModels(
     const provider = def.provider;
 
     let reachable = false;
+    let unverified = false;
     let reason = '';
 
     if (experimental && !allowExperimental) {
@@ -277,7 +282,8 @@ export function diagnoseModels(
           // CLI carries its own (OAuth-based) auth — a missing API key doesn't block, but the
           // CLI must show login evidence (#2418).
           if (probe.command === 'codex' && !codexLoggedIn()) {
-            reason = `${probe.okLabel} installed but not logged in — run \`codex login\` (or set CODEX_API_KEY)`;
+            unverified = true;
+            reason = `${UNVERIFIED_PREFIX}${probe.okLabel} installed but not logged in — run \`codex login\` (or set CODEX_API_KEY)`;
           } else {
             reachable = true;
             reason = `ok (${probe.okLabel})`;
@@ -291,7 +297,8 @@ export function diagnoseModels(
             reachable = true;
             reason = `ok (${probe.okLabel} auth; ${key} not set)`;
           } else {
-            reason = `${probe.okLabel} installed but not logged in and ${key} not set — run \`claude /login\` or export ${key} (on macOS, also check the login keychain is readable from this context)`;
+            unverified = true;
+            reason = `${UNVERIFIED_PREFIX}${probe.okLabel} installed but not logged in and ${key} not set — run \`claude /login\` or export ${key} (on macOS, also check the login keychain is readable from this context)`;
           }
         } else if (def.envKey && !envPresent(def.envKey)) {
           reason = `${def.envKey} not set`;
@@ -317,6 +324,6 @@ export function diagnoseModels(
       }
     }
 
-    return { model: m, provider, tiers, reachable, experimental, reason };
+    return { model: m, provider, tiers, reachable, unverified, experimental, reason };
   });
 }
