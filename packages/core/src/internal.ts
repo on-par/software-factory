@@ -717,4 +717,5 @@ export { BASE_HEALTH_CHECKERS, checkBaseHealth } from './checkers/base-health.js
 export type { BaseHealthOptions, BaseHealthResult } from './checkers/base-health.js';
 
 // Codex ChatGPT session freshness for doctor (#2509)
-export { codexChatgptSessionExpired } from './utils/codex-config.js';
+export { codexChatgptSessionState } from './utils/codex-config.js';
+export type { CodexSessionState } from './utils/codex-config.js';
