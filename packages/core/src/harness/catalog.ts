@@ -8,7 +8,8 @@ export type HarnessProbe =
       command: string;
       /** Human label used in doctor reasons, e.g. 'claude CLI'. */
       okLabel: string;
-      /** 'cli' = the harness CLI carries its own auth; a missing envKey never blocks. */
+      /** 'cli' = the harness CLI carries its own auth; a missing envKey never blocks, but the CLI must
+       *  show login evidence (codex: `codex login status`). */
       auth: 'env-key' | 'cli';
       /** Providers whose CLI login substitutes for the env key (reachable when the CLI shows login evidence). */
       selfAuth?: { providers: string[]; defaultEnvKey: string };
