@@ -85,4 +85,9 @@ Add a `harnesses` section to the models config to name your own agent CLI, then 
 - `errorPatterns` (regular expressions) and `probe` (a command; exit 0 means reachable) are optional.
 - Ids of built-in harnesses cannot be redeclared.
 
-Declarations are validated only. The factory does not run the declared command yet.
+The factory runs the declared command through the built-in `command` harness, in the lane worktree:
+
+- `{model}` is the provider model id, `{worktree}` is the lane worktree, and `{outFile}` is a temp file the factory reads back when `output` is `file:{outFile}`.
+- Values are shell-escaped, so metacharacters reach the agent as literal text. Write placeholders unquoted in the template; the factory supplies the quoting.
+- `prompt: arg` appends the prompt, and `prompt: file` appends the path of a temp prompt file, as the last argument. `prompt: stdin` pipes the prompt in.
+- `command` is a reserved id and cannot be declared.

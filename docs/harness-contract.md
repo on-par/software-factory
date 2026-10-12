@@ -1,6 +1,6 @@
 # Harness adapter contract
 
-A **harness** is the provider adapter that runs a model: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, `opencode`, plus `stub` in tests. This page specifies what the factory sends a harness, what it must return, how failures are classified, and what each phase expects. It describes current behavior only.
+A **harness** is the provider adapter that runs a model: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, `opencode`, `command` (runs a harness declared under `harnesses:`), plus `stub` in tests. This page specifies what the factory sends a harness, what it must return, how failures are classified, and what each phase expects. It describes current behavior only.
 
 The source of truth is [`packages/core/src/harness/index.ts`](../packages/core/src/harness/index.ts). Failure classification lives in [`harness/classify.ts`](../packages/core/src/harness/classify.ts). The executable conformance kit is [`harness/contract.ts`](../packages/core/src/harness/contract.ts) (`codingHarnessContractCases`). Routing, effort and failover configuration are in [models.md](./models.md).
 

@@ -646,6 +646,37 @@ describe('ModelRouter with StubModelExecutor', () => {
     expect(router.resolveAll('plan')).toEqual(['ollama-local']);
   });
 
+  it('keeps declared agentic harness models for a build task and drops non-agentic ones', () => {
+    const base = {
+      provider: 'custom' as const,
+      tier: 'boss',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+      codex: true,
+    };
+    const declared = { command: 'agent {model}', prompt: 'stdin', output: 'stdout', usage: 'none' } as const;
+    const buildModels: ModelsConfig = {
+      version: 1,
+      models: {
+        'declared-agentic': { ...base, harness: 'my-agent' },
+        'declared-chat': { ...base, harness: 'chat-only' },
+      },
+      tiers: { boss: ['declared-agentic', 'declared-chat'] },
+      failover: models.failover,
+      routingRules: {},
+      harnesses: {
+        'my-agent': { ...declared, agentic: true },
+        'chat-only': { ...declared, agentic: false },
+      },
+    };
+    const router = new ModelRouter(buildModels, routes, false, new StubModelExecutor({ scripts: {} }));
+
+    expect(router.resolveAll('build_claude')).toEqual(['declared-agentic']);
+  });
+
   it('excludes non-agentic harnesses from build_claude while keeping agentic ones', () => {
     const buildModels: ModelsConfig = {
       version: 1,

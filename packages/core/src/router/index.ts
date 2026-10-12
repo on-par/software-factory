@@ -7,8 +7,9 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { classifyFailure } from '../harness/classify.js';
 import { ClaudeCliHarness } from '../harness/claude-cli.js';
 import { CodexCliHarness } from '../harness/codex-cli.js';
+import { CommandHarness } from '../harness/command.js';
 import type { CodingHarness, HarnessFailureReason, HarnessUsage } from '../harness/index.js';
-import { HarnessError, isAgenticHarness, isRetryableFailure, taskRequiresAgenticHarness } from '../harness/index.js';
+import { HarnessError, isRetryableFailure, taskRequiresAgenticHarness } from '../harness/index.js';
 import { OllamaAgenticHarness } from '../harness/ollama-agentic.js';
 import { OllamaHttpHarness } from '../harness/ollama-http.js';
 import { OpenCodeHarness } from '../harness/opencode.js';
@@ -156,8 +157,21 @@ export class CliModelExecutor implements ModelExecutor {
       },
       opencode: { run: (m, p, c) => this.runViaHarness(this.opencodeHarness, m, p, c) },
       'ollama-agentic': { run: (m, p, c) => this.runViaHarness(this.ollamaAgenticHarness, m, p, c) },
+      command: { run: (m, p, c) => this.runCommandHarness(m, p, c) },
       ...harnessOverrides,
     };
+  }
+
+  /** Run a model whose harness id is declared under `harnesses` through the generic command harness. */
+  private runCommandHarness(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string> {
+    const harnessId = ctx.registry.getHarnessId(model) ?? '';
+    const declaration = ctx.registry.getHarnessDeclaration(harnessId);
+    if (!declaration) {
+      throw new Error(
+        `Model '${model}' uses the command harness, which needs a matching entry under 'harnesses' (none declared for '${harnessId}')`,
+      );
+    }
+    return this.runViaHarness(new CommandHarness(harnessId, declaration, this.execFn), model, prompt, ctx);
   }
 
   /** Harness ids this executor can dispatch — the defaults plus any injected
@@ -180,13 +194,14 @@ export class CliModelExecutor implements ModelExecutor {
     if (!harnessId) {
       throw new Error(`Model '${model}' has no resolvable harness id — declare a 'harness' in models.json`);
     }
-    const entry = this.harnesses[harnessId];
+    const entry =
+      this.harnesses[harnessId] ?? (ctx.registry.getHarnessDeclaration(harnessId) ? this.harnesses.command : undefined);
     if (!entry) {
       throw new Error(
         `Model '${model}' declares unknown harness '${harnessId}' (known harnesses: ${Object.keys(this.harnesses).join(', ')})`,
       );
     }
-    if (!isAgenticHarness(harnessId) && taskRequiresAgenticHarness(ctx.task)) {
+    if (!ctx.registry.isAgenticHarnessId(harnessId) && taskRequiresAgenticHarness(ctx.task)) {
       throw new Error(
         `Model '${model}' uses non-agentic harness '${harnessId}', which cannot edit files — rejected for build task '${ctx.task}'`,
       );
@@ -616,7 +631,7 @@ export class ModelRouter {
       models = models.filter((model) => this.registry.getHarnessId(model) === 'opencode');
     }
     if (taskRequiresAgenticHarness(task)) {
-      models = models.filter((model) => isAgenticHarness(this.registry.getHarnessId(model) ?? ''));
+      models = models.filter((model) => this.registry.isAgenticHarnessId(this.registry.getHarnessId(model) ?? ''));
     }
     return models;
   }

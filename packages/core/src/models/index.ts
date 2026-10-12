@@ -3,8 +3,8 @@
 import { execSync } from 'node:child_process';
 
 import { ModelEffortsSchema, supportsEffort } from '../config/effort.js';
-import type { ModelsConfig } from '../config/index.js';
-import { HARNESS_CATALOG, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
+import type { HarnessDeclaration, ModelsConfig } from '../config/index.js';
+import { HARNESS_CATALOG, isAgenticHarness, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
 import type { ModelDefinition, ModelTier } from '../types/index.js';
 import { hasClaudeLoginEvidence } from '../utils/claude-config.js';
 import { hasCodexLoginEvidence } from '../utils/codex-config.js';
@@ -58,6 +58,18 @@ export class ModelRegistry {
   isCodexModel(modelId: string): boolean {
     const def = this.get(modelId);
     return !!def?.codex;
+  }
+
+  /** The user declaration for a harness id under the config's `harnesses`, if any. */
+  getHarnessDeclaration(harnessId: string): HarnessDeclaration | undefined {
+    return this.config.harnesses && Object.hasOwn(this.config.harnesses, harnessId)
+      ? this.config.harnesses[harnessId]
+      : undefined;
+  }
+
+  /** True for agentic built-in harness ids and for declared ids whose declaration says `agentic`. */
+  isAgenticHarnessId(harnessId: string): boolean {
+    return isAgenticHarness(harnessId) || this.getHarnessDeclaration(harnessId)?.agentic === true;
   }
 
   /** Harness id for a model: the config-declared `harness`, else inferred from

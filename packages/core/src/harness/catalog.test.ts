@@ -9,7 +9,7 @@ describe('HARNESS_CATALOG', () => {
     }
   });
 
-  it('exposes KNOWN_HARNESS_IDS as the catalog keys, including the six known harnesses', () => {
+  it('exposes KNOWN_HARNESS_IDS as the catalog keys, including the known harnesses', () => {
     expect(KNOWN_HARNESS_IDS).toEqual(Object.keys(HARNESS_CATALOG));
     expect(KNOWN_HARNESS_IDS).toEqual(
       expect.arrayContaining([
@@ -19,6 +19,7 @@ describe('HARNESS_CATALOG', () => {
         'opencode',
         'ollama-agentic',
         'ollama-command-agent',
+        'command',
       ]),
     );
   });
