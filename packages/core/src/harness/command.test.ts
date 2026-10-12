@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { HarnessDeclaration, ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRegistry } from '../models/index.js';
 import { CliModelExecutor } from '../router/index.js';
+import type { SandboxPolicy } from '../sandbox/index.js';
+import { wrapCommandInSandbox } from '../sandbox/index.js';
 import { shellEscape } from '../utils/index.js';
 import { buildHarnessCommand, CommandHarness, extractJsonlLastMessage } from './command.js';
 import { codingHarnessContractCases, makeContractRequest } from './contract.js';
@@ -252,4 +254,86 @@ describe('CommandHarness BUILD through CliModelExecutor', () => {
       expect(git(worktree, 'ls-remote', 'origin')).toBe(before);
     },
   );
+});
+
+describe('CommandHarness sandbox', () => {
+  const sandboxPolicy: SandboxPolicy = {
+    runtime: 'sandbox-exec',
+    worktree: '/tmp/factory worktree',
+    writablePaths: ['/tmp/factory worktree'],
+    writableFilePrefixes: [],
+    allowHosts: [],
+    cpuMs: 300_000,
+    memMb: 4096,
+  };
+  const providerModel = "prov model; $(x) '";
+  const prompt = 'do it';
+
+  async function capture(sandbox?: SandboxPolicy): Promise<string> {
+    const calls: string[] = [];
+    const registry = makeRegistry({ a: declare({ command: 'agent {model}', prompt: 'arg' }) }, providerModel);
+    const harness = new CommandHarness('a', registry.getHarnessDeclaration('a')!, async (cmd) => {
+      calls.push(cmd);
+      return { stdout: 'ok', stderr: '' };
+    });
+    await harness.run(makeContractRequest({ registry, model: 'fake', prompt, sandbox }));
+    expect(calls).toHaveLength(1);
+    return calls[0];
+  }
+
+  it('wraps the built command in the sandbox wrapper when request.sandbox is set', async () => {
+    const raw = await capture();
+    const wrapped = await capture(sandboxPolicy);
+    expect(wrapped.startsWith('sandbox-exec -p ')).toBe(true);
+    expect(wrapped).toBe(wrapCommandInSandbox(raw, sandboxPolicy));
+  });
+
+  it('runs the built command unwrapped when request.sandbox is undefined', async () => {
+    const cmd = await capture();
+    expect(cmd).toBe(`agent ${shellEscape(providerModel)} ${shellEscape(prompt)} < /dev/null`);
+    expect(cmd).not.toContain('sandbox-exec');
+    expect(cmd).not.toContain('/bin/sh -c');
+  });
+
+  it.each(['none', 'docker-sandbox'] as const)('leaves the command unwrapped for runtime %s', async (runtime) => {
+    expect(await capture({ ...sandboxPolicy, runtime })).toBe(await capture());
+  });
+
+  realExec('keeps shell metacharacters literal through the sandbox wrapper', async () => {
+    const root = tmp();
+    const bin = join(root, 'bin');
+    mkdirSync(bin);
+    const shim = join(bin, 'sandbox-exec');
+    writeFileSync(shim, '#!/bin/sh\ntouch "$SHIM_MARK"; shift 2; exec "$@"\n');
+    chmodSync(shim, 0o755);
+    const agent = writeAgent(root, 'for a in "$@"; do printf "%s\\n" "$a"; done > "$PWD/args.txt"; echo done');
+    const evilModel = "x; touch pwned1 $(touch pwned2) `touch pwned3` '\\''q";
+    const evilPrompt = "say $HOME `touch pwned4` it's";
+    const worktree = join(root, 'wt a;b');
+    mkdirSync(worktree);
+    const registry = makeRegistry(
+      { evil: declare({ command: `${agent} --model {model} --cd {worktree}`, prompt: 'arg' }) },
+      evilModel,
+    );
+    const harness = new CommandHarness('evil', registry.getHarnessDeclaration('evil')!);
+    const result = await harness.run(
+      makeContractRequest({
+        registry,
+        model: 'fake',
+        worktree,
+        prompt: evilPrompt,
+        sandbox: sandboxPolicy,
+        env: { PATH: `${bin}:${process.env.PATH}`, SHIM_MARK: join(root, 'shim-ran') },
+      }),
+    );
+
+    expect(existsSync(join(root, 'shim-ran'))).toBe(true);
+    expect(result.output.trim()).toBe('done');
+    expect(readFileSync(join(worktree, 'args.txt'), 'utf8')).toBe(
+      `--model\n${evilModel}\n--cd\n${worktree}\n${evilPrompt}\n`,
+    );
+    for (const dir of [worktree, process.cwd(), root]) {
+      for (const name of ['pwned1', 'pwned2', 'pwned3', 'pwned4']) expect(existsSync(join(dir, name))).toBe(false);
+    }
+  });
 });
