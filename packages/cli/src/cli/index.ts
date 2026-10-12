@@ -110,6 +110,7 @@ import {
   isCommandAvailable,
   isProxyRunning,
   kpiBranchPrefixes,
+  KNOWN_HARNESS_IDS,
   kpisToHistoryRecord,
   laneBaseUrl,
   laneEnv,
@@ -375,6 +376,7 @@ import {
   type KeychainProbeStatus,
   type LeaseHealthRow,
   orphanContainerChecks,
+  modelsRegistryChecks,
   orphanMicroVmChecks,
   runDoctorChecks,
   sandboxAuthSkipDetail,
@@ -6193,6 +6195,18 @@ async function cmdDoctor(opts: { reconcile?: boolean } = {}) {
 
     const eventsContent = existsSync(paths.events) ? readFileSync(paths.events, 'utf-8') : null;
     checks.push(eventLogCheck(eventsContent === null ? null : analyzeEventLog(eventsContent)));
+
+    try {
+      const declared = Object.keys(configLoaders.loadModelsConfig().harnesses ?? {});
+      checks.push(
+        ...modelsRegistryChecks(paths.config, configLoaders.loadRepoConfig(repoRoot)?.models?.registry, [
+          ...KNOWN_HARNESS_IDS,
+          ...declared,
+        ]),
+      );
+    } catch {
+      // malformed config is reported by the load paths / `factory models --doctor`; doctor keeps going
+    }
 
     let harnessProbes: DeclaredHarnessProbe[] = [];
     try {

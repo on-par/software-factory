@@ -623,3 +623,39 @@ export function declaredHarnessChecks(probes: DeclaredHarnessProbe[]): DoctorChe
     };
   });
 }
+
+const REGISTRY_CHECK = 'models.registry';
+
+/** One failed check per models.registry entry whose harness is missing or unknown;
+ *  a single ok row when every entry is valid; nothing when there is no registry. */
+export function modelsRegistryChecks(
+  configPath: string,
+  registry: Readonly<Record<string, { harness?: string }>> | undefined,
+  validHarnesses: readonly string[],
+): DoctorCheck[] {
+  const entries = Object.entries(registry ?? {});
+  if (entries.length === 0) return [];
+  const failed: DoctorCheck[] = [];
+  for (const [id, def] of entries) {
+    const field = `models.registry.${id}.harness`;
+    const name = `${REGISTRY_CHECK} ${id}`;
+    if (def.harness === undefined || def.harness.trim() === '') {
+      failed.push({
+        name,
+        ok: false,
+        detail: `${configPath}: ${field} is missing`,
+        fix: `set "harness" to one of: ${validHarnesses.join(', ')}`,
+      });
+    } else if (!validHarnesses.includes(def.harness)) {
+      failed.push({
+        name,
+        ok: false,
+        detail: `${configPath}: ${field} '${def.harness}' is not a known harness (valid harnesses: ${validHarnesses.join(', ')})`,
+        fix: 'use a built-in harness id or declare it under "harnesses" in the models config',
+      });
+    }
+  }
+  if (failed.length > 0) return failed;
+  const n = entries.length;
+  return [{ name: REGISTRY_CHECK, ok: true, detail: `${n} entr${n === 1 ? 'y' : 'ies'} valid (${configPath})` }];
+}
