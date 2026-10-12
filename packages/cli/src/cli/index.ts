@@ -1236,14 +1236,15 @@ export async function cmdConstitution(
   throw new CliExitError('usage: factory constitution --init <product> | --list | --checkers | --product <name>', 2);
 }
 
+/** Single owner of the per-model status icon, shared by `factory models` and `models --doctor` (#2402). */
+export function modelStatusIcon(d: ModelDiagnosis): string {
+  return d.reachable ? styleText('green', '✅') : d.unverified ? styleText('yellow', '⚠️') : styleText('red', '❌');
+}
+
 export function formatDoctorReport(diagnoses: ModelDiagnosis[]): string {
   const lines = [styleText('bold', '\n== Model Doctor ==')];
   for (const d of diagnoses) {
-    const icon = d.reachable
-      ? styleText('green', '✅')
-      : d.unverified
-        ? styleText('yellow', '⚠️')
-        : styleText('red', '❌');
+    const icon = modelStatusIcon(d);
     const tiers = d.tiers.join('/');
     lines.push(`  ${icon} ${d.model} provider=${d.provider} tier=${tiers} — ${d.reason}`);
   }
@@ -1274,7 +1275,10 @@ function ollamaModelSet(): Set<string> | undefined {
  *  preflight), so their counts agree. */
 export function modelDoctorProbes(): DoctorProbes {
   const ollamaModels = ollamaModelSet();
-  return { ollamaModelPresent: ollamaModels ? (model: string) => ollamaModels.has(model) : undefined };
+  return {
+    commandAvailable: coreOps.isCommandAvailable,
+    ollamaModelPresent: ollamaModels ? (model: string) => ollamaModels.has(model) : undefined,
+  };
 }
 
 async function cmdModels(opts: { doctor?: boolean } = {}) {
@@ -1284,8 +1288,9 @@ async function cmdModels(opts: { doctor?: boolean } = {}) {
   const allowExperimental = resolveExperimental();
   const localOnly = resolveLocalOnly();
 
+  const diagnoses = coreOps.diagnoseModels(registry, modelDoctorProbes(), allowExperimental, localOnly);
+
   if (opts.doctor) {
-    const diagnoses = coreOps.diagnoseModels(registry, modelDoctorProbes(), allowExperimental, localOnly);
     console.log(formatDoctorReport(diagnoses));
     if (!hasReachableWorker(diagnoses)) {
       throw new CliExitError('factory: no worker model is reachable — fix the reasons above before running a queue', 1);
@@ -1294,12 +1299,13 @@ async function cmdModels(opts: { doctor?: boolean } = {}) {
   }
 
   console.log(styleText('bold', '\n== Available Models =='));
+  const byModel = new Map(diagnoses.map((d) => [d.model, d]));
   for (const m of registry.list()) {
     const tiers = registry.getTiers(m).join('/');
     const est = registry.estimateCost(m, 1_000_000, 1_000_000);
     const cost = est === null ? 'unpriced' : `$${est.toFixed(2)}/M`;
-    const gated = registry.isExperimental(m) && !allowExperimental;
-    const avail = !gated && registry.isAvailable(m) ? styleText('green', '✅') : styleText('red', '❌');
+    const d = byModel.get(m);
+    const avail = d ? modelStatusIcon(d) : styleText('red', '❌');
     const tag = registry.isExperimental(m) ? styleText('yellow', ' [experimental]') : '';
     console.log(`  ${avail} ${m} tier=${tiers} ${cost}${tag}`);
   }

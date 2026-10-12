@@ -115,6 +115,7 @@ export type EventKind =
   | 'plan_redirect'
   | 'plan_rejected'
   | 'post-merge-defect'
+  | 'pr_opened'
   | 'queue_admission_conflict'
   | 'queue_added'
   | 'queue_reprioritized'
@@ -360,6 +361,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   plan_redirect: { severity: 'info', isPark: false, isTerminal: false },
   plan_rejected: { severity: 'info', isPark: false, isTerminal: false },
   'post-merge-defect': { severity: 'info', isPark: false, isTerminal: false },
+  pr_opened: { severity: 'info', isPark: false, isTerminal: false },
   queue_added: { severity: 'info', isPark: false, isTerminal: false },
   queue_admission_conflict: { severity: 'warn', isPark: false, isTerminal: false },
   queue_reprioritized: { severity: 'info', isPark: false, isTerminal: false },

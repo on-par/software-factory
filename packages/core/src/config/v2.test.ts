@@ -4,7 +4,13 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { factoryConfigV2JsonSchema, loadV2Config, parseV2Config, type FactoryConfigV2 } from './v2.js';
+import {
+  FactoryConfigV2Schema,
+  factoryConfigV2JsonSchema,
+  loadV2Config,
+  parseV2Config,
+  type FactoryConfigV2,
+} from './v2.js';
 
 let dir: string;
 
@@ -377,4 +383,11 @@ describe('exported schema shape', () => {
 it('retains model and task effort settings in v2 config', () => {
   const efforts = { 'gpt-6-astra': { plan: 'ultra' }, 'claude-opus-5': 'high', 'qwen3.5:9b': false };
   expect(parseV2Config({ version: 2, models: { efforts } }).models.efforts).toEqual(efforts);
+});
+
+describe('FactoryConfigV2Schema description', () => {
+  it("names On PAR Dev's Software Factory without em dashes (#2388)", () => {
+    expect(FactoryConfigV2Schema.description).toContain("On PAR Dev's Software Factory");
+    expect(FactoryConfigV2Schema.description).not.toContain('—');
+  });
 });

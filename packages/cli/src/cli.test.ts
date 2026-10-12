@@ -30,6 +30,7 @@ import {
   findOpenPRForIssue,
   findOpenPRNumber,
   formatDoctorReport,
+  modelStatusIcon,
   getCliVersion,
   getPullRequestLandState,
   hasReachableWorker,
@@ -5420,6 +5421,16 @@ describe('cli', () => {
       const lines = report.split('\n');
       expect(lines.find((l) => l.includes('claude-opus-4-8'))).toContain('✅');
       expect(lines.find((l) => l.includes('gpt-5.1-codex'))).toContain('❌');
+    });
+  });
+
+  describe('modelStatusIcon', () => {
+    const base = { model: 'm', provider: 'ollama', tiers: ['worker'], experimental: false, reason: 'r' };
+
+    it('maps reachable to ✅, unverified to ⚠️, and anything else to ❌', () => {
+      expect(modelStatusIcon({ ...base, reachable: true })).toContain('✅');
+      expect(modelStatusIcon({ ...base, reachable: false, unverified: true })).toContain('⚠️');
+      expect(modelStatusIcon({ ...base, reachable: false })).toContain('❌');
     });
   });
 
