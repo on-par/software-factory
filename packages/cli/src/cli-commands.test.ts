@@ -669,6 +669,17 @@ describe('cli commands (via main dispatch)', () => {
       expect(readFileSync(paths().constitution, 'utf-8')).toBe('# alpha constitution\n');
     });
 
+    it('ends with a Next hint that recommends factory doctor, then factory triage, with --product optional', async () => {
+      const res = await runMain('init');
+      expect(res.exited).toBe(false);
+      const out = logged();
+      expect(out).toContain(
+        'Next: factory doctor, then factory triage (optional: factory constitution --product <name> to swap the default constitution)',
+      );
+      expect(out).not.toContain('Next: factory constitution --product <name>, then factory triage');
+      expect(out.trimEnd().split('\n').at(-1)).toMatch(/^Next: factory doctor, then factory triage/);
+    });
+
     it('creates .factory dirs, the git exclude entry, and a sample queue', async () => {
       const res = await runMain('init');
       expect(res.exited).toBe(false);
