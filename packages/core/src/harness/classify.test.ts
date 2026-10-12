@@ -66,3 +66,15 @@ describe('classifyFailure cli_missing (#2493)', () => {
     expect(classifyFailure('file not found in diff', 1)).not.toBe('cli_missing');
   });
 });
+
+describe('classifyFailure codex 401 (#2494)', () => {
+  it('classifies a logged-out codex 401 as local_auth', () => {
+    expect(
+      classifyFailure('unexpected status 401 Unauthorized: Missing bearer or basic authentication in header', 1),
+    ).toBe('local_auth');
+    expect(classifyFailure('401 Unauthorized', 1)).toBe('local_auth');
+  });
+  it('does not treat a bare 401 line number as auth', () => {
+    expect(classifyFailure('error at line 401: unexpected token', 1)).toBe('error');
+  });
+});

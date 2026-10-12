@@ -9,6 +9,8 @@ export function classifyFailure(stderr: string, exitCode: number): HarnessFailur
   if (exitCode === 127 || /\benoent\b|command not found|: not found\b/.test(text)) return 'cli_missing';
   if (/failed to authenticate|oauth session expired|could not be refreshed|please (run )?\/?login/.test(text))
     return 'local_auth';
+  // Codex CLI without a login: `unexpected status 401 Unauthorized: Missing bearer ...` (#2494).
+  if (/missing bearer|\b401\b[^\n]{0,20}unauthori[sz]ed/.test(text)) return 'local_auth';
   // Codex/ChatGPT limit patterns below target Codex CLI (ChatGPT plan/usage-cap) output.
   // Codex CLI version: 0.144.6 as of 2026-07-20. Revisit when Codex changes its wording;
   // real samples can be harvested from .factory/events.ndjson (failoverReason/stderr fields).

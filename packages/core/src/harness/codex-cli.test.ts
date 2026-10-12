@@ -446,6 +446,26 @@ describe('CodexCliHarness served-model verification', () => {
 });
 
 describe('CodexCliHarness failure classification', () => {
+  it('turns a logged-out 401 into local_auth with a one-line codex login hint (#2494)', async () => {
+    const stdout = [
+      '{"type":"thread.started"}',
+      '{"type":"error","message":"unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses"}',
+      '{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized: Missing bearer"}}',
+    ].join('\n');
+    const harness = new CodexCliHarness(async () => {
+      throw Object.assign(new Error(`Command failed: codex exec\n${stdout}`), { stdout, stderr: '', code: 1 });
+    });
+
+    const err: any = await harness.run(makeContractRequest({ model: 'codex-model', registry })).catch((e) => e);
+
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('local_auth');
+    expect(err.message).toBe('codex is not signed in (401): run `codex login`, then retry');
+    expect(err.message).not.toContain('{');
+    expect(err.details.stdout).toBeUndefined();
+    expect(err.details.stderr).toBeUndefined();
+  });
+
   it('classifies usage_cap from stderr', async () => {
     const harness = new CodexCliHarness(async () => {
       throw Object.assign(new Error('boom'), { stderr: 'quota exceeded', code: 1 });

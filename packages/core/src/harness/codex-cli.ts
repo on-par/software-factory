@@ -12,6 +12,8 @@ import { classifyFailure } from './classify.js';
 import type { CodingHarness, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
 import { HarnessError } from './index.js';
 
+const CODEX_LOGIN_HINT = 'codex is not signed in (401): run `codex login`, then retry';
+
 export type CodexExecFn = ExecFn;
 
 /** Injectable temp-file I/O for CodexCliHarness; each field defaults to node:fs/promises. */
@@ -71,6 +73,12 @@ export class CodexCliHarness implements CodingHarness {
         const stdout = typeof err.stdout === 'string' ? err.stdout : '';
         const errorText = `${err.stderr ?? ''}\n${extractCodexErrorText(stdout)}`;
         const reason = err.killed ? 'timeout' : classifyFailure(errorText, err.code ?? 1);
+        if (reason === 'local_auth') {
+          // One actionable line instead of codex's raw 401 JSON (#2494).
+          throw new HarnessError(CODEX_LOGIN_HINT, 'local_auth', {
+            exitCode: typeof err.code === 'number' ? err.code : undefined,
+          });
+        }
         throw new HarnessError(err.message ?? String(err), reason, {
           exitCode: typeof err.code === 'number' ? err.code : undefined,
           stderr: err.stderr,
