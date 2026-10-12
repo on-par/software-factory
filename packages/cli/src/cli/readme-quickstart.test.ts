@@ -43,4 +43,10 @@ describe('README Quick start constitution step', () => {
     const step3 = section(readme, '**Step 3', '**Step 4');
     expect(step3).toContain('For a code repo, skip this step');
   });
+
+  it('README Prerequisites defines constitution and triage before Step 3', () => {
+    const prereqs = section(readme, '**Prerequisites**', '**Step 3');
+    expect(prereqs).toMatch(/^- \*\*Constitution\*\*: /m);
+    expect(prereqs).toMatch(/^- \*\*Triage\*\*: /m);
+  });
 });
