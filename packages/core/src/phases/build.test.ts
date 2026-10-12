@@ -1380,6 +1380,47 @@ describe('buildPhase cross-harness failover', () => {
     },
   };
 
+  async function runPinned(fail: 'local_auth' | 'usage_cap') {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const stub = new StubModelExecutor({
+      scripts: { build_codex: [{ fail }, { fail }], build_claude: [{ output: 'claude output' }] },
+    });
+    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
+    const logCalls: string[] = [];
+    const run = buildPhase({
+      issue: 2510,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath: join(worktree, 'issue-2510.md'),
+      branch: 'factory/2510-pinned',
+      route: 'codex',
+      router,
+      constitution: null,
+      modelOverride: 'codex-a',
+      pinnedModel: true,
+      log: (type) => {
+        logCalls.push(type);
+      },
+    });
+    return { run, stub, logCalls };
+  }
+
+  it('a pinned codex build that fails local_auth parks instead of crossing to claude (#2510)', async () => {
+    const { run, stub, logCalls } = await runPinned('local_auth');
+    await expect(run).rejects.toMatchObject({ reason: 'local_auth' });
+    expect(stub.calls.some((c) => c.task === 'build_claude')).toBe(false);
+    expect(logCalls).not.toContain('worker_failover');
+  });
+
+  it('a pinned codex build still fails over to claude on usage_cap (#367, #2510)', async () => {
+    const { run, stub, logCalls } = await runPinned('usage_cap');
+    const result = await run;
+    expect(result.route).toBe('claude');
+    expect(stub.calls.some((c) => c.task === 'build_claude')).toBe(true);
+    expect(logCalls).toContain('worker_failover');
+  });
+
   it('continues a codex build on claude when every codex worker is quota-exhausted', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);

@@ -750,6 +750,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       disablePublish: Boolean(request.localOnly),
       publishFromBuild: request.publishFromBuild,
       modelOverride: buildModel,
+      pinnedModel: buildModel !== undefined && buildModel === request.modelPins.build,
       codexFallbackModel: request.modelPins.buildFallback ?? ports.router.resolveAll('build_codex')[0],
       onProviderFailure: rememberProviderFailure,
       sandbox: request.sandboxPolicy,

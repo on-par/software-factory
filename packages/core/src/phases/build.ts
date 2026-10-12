@@ -81,6 +81,9 @@ async function buildPhaseImpl(opts: {
   /** Opt-in (#1867, build.publishFromBuild): the claude route sends the publishing prompt (push, open PR, wait for CI). Default false = commit-only on every route. Ignored when disablePublish is set. */
   publishFromBuild?: boolean;
   modelOverride?: string;
+  /** modelOverride is the user's build pin (#367, #2510). A pinned build crosses harnesses only on
+   *  usage_cap or rate_limit; any other failure (local_auth included) parks like a pinned plan. */
+  pinnedModel?: boolean;
   /** Cross-provider Codex fallback used when a Claude worker is capped or unavailable. */
   codexFallbackModel?: string;
   onProviderFailure?: (info: { provider: string; reason: FailoverReason }) => void | Promise<void>;
@@ -228,10 +231,18 @@ async function buildPhaseImpl(opts: {
       reason === 'unavailable' ||
       reason === 'local_auth' ||
       reason === 'cli_missing';
+    const crossHarnessOk =
+      opts.pinnedModel === true ? reason === 'usage_cap' || reason === 'rate_limit' : providerFailure;
+    if (providerFailure && !crossHarnessOk) {
+      log(
+        'model-override',
+        `pinned build model ${modelOverride} failed (${reason}); a pin only fails over on usage_cap or rate_limit (#367)`,
+      );
+    }
     // Only swap when we actually ran the codex route and it was exhausted on a
     // quota reason. The router only throws after trying every eligible codex
     // worker, so reaching here already means "no Codex-harness worker remains".
-    if (taskType === 'build_claude' && providerFailure) {
+    if (taskType === 'build_claude' && crossHarnessOk) {
       if (opts.autoFailover && !opts.autoFailover.enabled) throw err;
       const fallback = codexFallbackModel ?? router.resolveAll('build_codex')[0];
       if (!fallback) throw err;
@@ -244,7 +255,7 @@ async function buildPhaseImpl(opts: {
         buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding }),
         { ...runOpts, retryCause: 'failover', modelOverride: fallback },
       );
-    } else if (taskType !== 'build_codex' || !providerFailure) throw err;
+    } else if (taskType !== 'build_codex' || !crossHarnessOk || reason === undefined) throw err;
     else {
       if (opts.autoFailover && !opts.autoFailover.enabled) throw err;
       const fromModel = attempts?.at(-1)?.model ?? 'unknown';
