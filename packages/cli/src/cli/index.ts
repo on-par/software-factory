@@ -692,12 +692,28 @@ async function getRepoRoot(shell: ShellOps = shellOps): Promise<string> {
   }
 }
 
+const GH_UNAUTHENTICATED = /gh auth login|not logged in/i;
+
+/** CliExitError message for a failed `gh repo view`; names gh auth when gh's stderr says it is logged out (#2592). */
+export function ghRepoViewFailureMessage(stderr: string | undefined): string {
+  if (stderr && GH_UNAUTHENTICATED.test(stderr)) {
+    const detail = stderr
+      .trim()
+      .split('\n')
+      .find((l) => l.trim())
+      ?.trim();
+    return `factory: gh is not authenticated, run \`gh auth login\`${detail ? ` (gh repo view failed: ${detail})` : ''}`;
+  }
+  return 'factory: no GitHub remote detected (gh repo view failed)';
+}
+
 async function getGitHubRepo(shell: ShellOps = shellOps): Promise<string> {
   try {
     const { stdout } = await shell.exec('gh repo view --json nameWithOwner --jq .nameWithOwner');
     return stdout.trim();
-  } catch {
-    throw new CliExitError('factory: no GitHub remote detected (gh repo view failed)', 2);
+  } catch (err) {
+    const stderr = (err as { stderr?: unknown } | null)?.stderr;
+    throw new CliExitError(ghRepoViewFailureMessage(typeof stderr === 'string' ? stderr : undefined), 2);
   }
 }
 

@@ -120,6 +120,7 @@ import {
   LaneParkError,
   IssueSkippedError,
   LaneEnvironmentPauseError,
+  ghRepoViewFailureMessage,
   main,
   parseIssueArg,
   shipIssue as cliShipIssue,
@@ -1645,6 +1646,24 @@ bash scripts/verify.sh
   });
 
   describe('status', () => {
+    it('status exits 2 with gh auth login guidance when gh is not authenticated (#2592)', async () => {
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) {
+          throw Object.assign(new Error('Command failed: gh repo view'), {
+            stderr:
+              'To get started with GitHub CLI, please run:  gh auth login\nAlternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.\n',
+          });
+        }
+        return '';
+      };
+      const res = await runMain('status');
+      expect(res).toMatchObject({ exited: true, code: 2 });
+      expect(errored()).toContain('gh is not authenticated');
+      expect(errored()).toContain('gh auth login');
+      expect(errored()).not.toContain('no GitHub remote detected');
+    });
+
     describe('base hold (#2351)', () => {
       const writeHold = (repo: string): void => {
         mkdirSync(dirname(paths().baseHold), { recursive: true });
@@ -3005,6 +3024,24 @@ bash scripts/verify.sh
   });
 
   describe('triage', () => {
+    it('triage exits 2 with gh auth login guidance when gh is not authenticated (#2592)', async () => {
+      h.execImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('gh repo view')) {
+          throw Object.assign(new Error('Command failed: gh repo view'), {
+            stderr:
+              'To get started with GitHub CLI, please run:  gh auth login\nAlternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.\n',
+          });
+        }
+        return '';
+      };
+      const res = await runMain('triage');
+      expect(res).toMatchObject({ exited: true, code: 2 });
+      expect(errored()).toContain('gh is not authenticated');
+      expect(errored()).toContain('gh auth login');
+      expect(errored()).not.toContain('no GitHub remote detected');
+    });
+
     const ghIssues = JSON.stringify([
       { number: 5, title: 'Five', labels: [{ name: 'bug' }], body: 'x'.repeat(10_000) },
       { number: 6, title: 'Six', labels: [], body: 'short' },
@@ -8107,5 +8144,20 @@ describe('factory --help layout', () => {
     const help = (await topLevelHelp()).replace(/\s+/g, ' ');
     expect(help).toContain('open a ready-for-review PR; never merges (merge later with land)');
     expect(help).toContain('Like ship, but loads the issue first');
+  });
+});
+
+describe('ghRepoViewFailureMessage (#2592)', () => {
+  it.each([undefined, '', 'no git remotes found'])('keeps the no-remote message for %j', (stderr) => {
+    expect(ghRepoViewFailureMessage(stderr)).toBe('factory: no GitHub remote detected (gh repo view failed)');
+  });
+
+  it('names gh authentication when gh says it is logged out', () => {
+    const msg = ghRepoViewFailureMessage(
+      'You are not logged into any GitHub hosts. Run gh auth login to authenticate.',
+    );
+    expect(msg).toContain('gh is not authenticated');
+    expect(msg).toContain('`gh auth login`');
+    expect(msg).not.toContain('no GitHub remote detected');
   });
 });
