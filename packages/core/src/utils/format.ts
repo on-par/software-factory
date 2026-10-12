@@ -32,7 +32,7 @@ type Category = 'phase' | 'ok' | 'warn' | 'error' | 'router' | 'other';
 // distinction is cosmetic to this console renderer, not a severity/park/lane
 // classification other consumers need.
 const PHASE_TYPES = new Set(['plan', 'build', 'check', 'ship', 'triage']);
-const OK_TYPES = new Set(['ready', 'recovered', 'approval_granted', 'run-done', 'lane-start']);
+const OK_TYPES = new Set(['ready', 'recovered', 'pr_opened', 'approval_granted', 'run-done', 'lane-start']);
 
 function categorize(type: string): Category {
   if (PHASE_TYPES.has(type)) return 'phase';

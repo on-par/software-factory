@@ -16,6 +16,10 @@ const VALID_SEVERITIES = new Set(['debug', 'info', 'warn', 'error']);
 const VALID_LANE_STATUSES = new Set(['running', 'waiting-merge', 'ready', 'merged', 'failed', 'parked', 'stopped']);
 
 describe('EVENT_TRAITS', () => {
+  it('classifies pr_opened as non-park info (#2388)', () => {
+    expect(EVENT_TRAITS.pr_opened).toEqual({ severity: 'info', isPark: false, isTerminal: false });
+  });
+
   it('gives every EventKind member a well-formed traits entry', () => {
     const entries = Object.entries(EVENT_TRAITS);
     expect(entries.length).toBeGreaterThan(0);

@@ -309,7 +309,7 @@ async function shipPhaseImpl(opts: {
       });
 
       prNumber = pr.number;
-      log('recovered', `opened PR #${prNumber} for committed work on ${branch}`);
+      log('pr_opened', `opened PR #${prNumber} for committed work on ${branch}`);
     } catch (err) {
       if (!isPullAlreadyExistsError(err)) throw err;
       const existing = await findOpenPR(octokit, owner, repoName, branch);

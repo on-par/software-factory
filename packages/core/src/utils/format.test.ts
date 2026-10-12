@@ -61,6 +61,7 @@ describe('formatEventLine — color mode', () => {
     ['triage', '▶', `${BOLD}${CYAN}`, 'phase'],
     ['ready', '✓', GREEN, 'ok'],
     ['recovered', '✓', GREEN, 'ok'],
+    ['pr_opened', '✓', GREEN, 'ok'],
     ['approval_granted', '✓', GREEN, 'ok'],
     ['run-done', '✓', GREEN, 'ok'],
     ['warn', '⚠', `${BOLD}${YELLOW}`, 'warn'],
