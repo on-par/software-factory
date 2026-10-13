@@ -961,6 +961,7 @@ describe('checkPhase auto rework', () => {
     const { worktree, specPath } = await makeFailingWorktree();
     const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'rework complete' }] } });
     const router = new ModelRouter(codexModels, codexRoutes, false, stub);
+    const logs: Array<[string, string]> = [];
 
     await checkPhase({
       issue: 817,
@@ -968,7 +969,7 @@ describe('checkPhase auto rework', () => {
       specPath,
       router,
       constitution: null,
-      log: () => {},
+      log: (type, msg) => logs.push([type, msg]),
       maxReworkRounds: 1,
       reworkRoute: 'codex',
       reworkModel: 'codex-worker',
@@ -977,7 +978,38 @@ describe('checkPhase auto rework', () => {
     expect(stub.calls).toHaveLength(1);
     expect(stub.calls[0]).toMatchObject({ task: 'build_codex', model: 'codex-worker' });
     expect(stub.calls.some((call) => call.task === 'build_claude')).toBe(false);
+    expect(logs.some(([type]) => type === 'model-override')).toBe(false);
   });
+
+  it(
+    'rework reroutes a non-runnable claude route to the first runnable route and logs why',
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, specPath } = await makeFailingWorktree();
+      const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'rework complete' }] } });
+      const base = new ModelRouter(codexModels, codexRoutes, false, stub);
+      const router = Object.assign(Object.create(base), {
+        resolveAll: (task: string) => (task === 'build_codex' ? ['codex-worker'] : []),
+      }) as ModelRouter;
+      const logs: Array<[string, string]> = [];
+
+      await checkPhase({
+        issue: 2634,
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        log: (type, msg) => logs.push([type, msg]),
+        maxReworkRounds: 1,
+        reworkModel: 'claude-something',
+      });
+
+      expect(stub.calls[0]).toMatchObject({ task: 'build_codex', model: 'codex-worker' });
+      const override = logs.find(([type]) => type === 'model-override');
+      expect(override?.[1]).toContain('no runnable model');
+      expect(override?.[1]).toContain('rerouting to codex');
+    },
+  );
 
   it('threads the per-run id into the rework worker env (#1910)', { timeout: 120_000 }, async () => {
     const { worktree, specPath } = await makeFailingWorktree();

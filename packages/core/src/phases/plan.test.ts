@@ -15,7 +15,13 @@ import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE } from '../utils/untrusted-input.js';
 import { UnsupportedWorkSourceError, WorkSourceRegistry } from '../work/index.js';
-import { buildPlanPrompt, defaultBuildRoute, planPhase, runnableBuildRoutes } from './plan.js';
+import {
+  buildPlanPrompt,
+  defaultBuildRoute,
+  planPhase,
+  resolveRunnableBuildRoute,
+  runnableBuildRoutes,
+} from './plan.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -3352,5 +3358,90 @@ describe('runnableBuildRoutes / defaultBuildRoute', () => {
     });
     expect(prompt).toContain('Default to route: claude when genuinely unsure.');
     expect(prompt).not.toContain('Only these routes can run');
+  });
+
+  const promptFor = (runnableRoutes?: Array<'codex' | 'claude' | 'opencode'>) =>
+    buildPlanPrompt({
+      issue: 1,
+      issueTitle: 't',
+      issueBody: 'b',
+      specPath: '/s.md',
+      constitutionCtx: '',
+      runnableRoutes,
+    });
+
+  it('offers only runnable routes in the route bullets and template', () => {
+    const prompt = promptFor(['codex']);
+    expect(prompt).toContain('route: codex —');
+    expect(prompt).toContain('\nroute: codex\n');
+    expect(prompt).not.toContain('route: claude —');
+    expect(prompt).not.toContain('route: opencode —');
+    expect(prompt).not.toContain("Replace 'codex'");
+  });
+
+  it('shows the opencode route in the template when it is the only runnable route', () => {
+    const prompt = promptFor(['opencode']);
+    expect(prompt).toContain('\nroute: opencode\n');
+    expect(prompt).not.toContain('route: codex —');
+    expect(prompt).not.toContain('route: claude —');
+  });
+
+  it('keeps all three bullets and the replace note when omitted or all runnable', () => {
+    for (const prompt of [promptFor(), promptFor(['claude', 'codex', 'opencode'])]) {
+      expect(prompt).toContain('route: codex —');
+      expect(prompt).toContain('route: claude —');
+      expect(prompt).toContain('route: opencode —');
+      expect(prompt).toContain("(Replace 'codex' in the frontmatter with 'claude' if that's the route you chose.)");
+    }
+    expect(promptFor()).toBe(promptFor(['claude', 'codex', 'opencode']));
+  });
+});
+
+describe('resolveRunnableBuildRoute', () => {
+  it('does not restrict when the runnable set is unknown', () => {
+    expect(resolveRunnableBuildRoute('claude', [])).toEqual({ route: 'claude', rerouted: false });
+  });
+  it('reroutes to the first runnable route', () => {
+    expect(resolveRunnableBuildRoute('claude', ['codex', 'opencode'])).toEqual({ route: 'codex', rerouted: true });
+  });
+  it('keeps a runnable route', () => {
+    expect(resolveRunnableBuildRoute('opencode', ['claude', 'opencode'])).toEqual({
+      route: 'opencode',
+      rerouted: false,
+    });
+  });
+});
+
+describe('planPhase failure routes on a Claude-less machine', () => {
+  const claudeLess = (router: ModelRouter) =>
+    Object.assign(Object.create(router), {
+      resolveAll: (task: string) =>
+        task.startsWith('build_') ? (task === 'build_codex' ? ['m'] : []) : router.resolveAll(task),
+    }) as ModelRouter;
+  const octokit: any = {
+    rest: { issues: { get: async () => ({ data: { title: 'Add auth', body: 'Add authentication.' } }) } },
+  };
+
+  it('PLAN escalation returns the runnable fallback route, not claude', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ output: 'notes\nESCALATE: which auth provider should we use?\nmore text' }] },
+    });
+    const router = claudeLess(new ModelRouter(models, routes, false, stub));
+
+    const result = await planPhase({
+      issue: 44,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath: join(worktree, 'issue-44.md'),
+      router,
+      constitution: null,
+      octokit,
+      log: () => {},
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.route).toBe('codex');
   });
 });

@@ -22,6 +22,7 @@ import type { ModelRouter, RouterResult } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
+import { resolveRunnableBuildRoute, runnableBuildRoutes } from './plan.js';
 import type {
   BaseFailureCause,
   CheckerOutput,
@@ -783,8 +784,13 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
   let failureReason: FailoverReason | undefined;
   let attempts: RouterResult['attempts'] = [];
 
+  const { route, rerouted } = resolveRunnableBuildRoute(reworkRoute, runnableBuildRoutes(router));
+  if (rerouted) {
+    log('model-override', `rework route ${reworkRoute} has no runnable model on this machine, rerouting to ${route}`);
+  }
+
   try {
-    reworkResult = await router.run(`build_${reworkRoute}`, prompt, {
+    reworkResult = await router.run(`build_${route}`, prompt, {
       worktree,
       timeoutSeconds: buildTimeoutSeconds ?? 7200,
       sandbox,
@@ -793,7 +799,8 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
       env: laneEnv(appPort, process.env, appBaseUrl, worktree, runId),
       onPgid,
       retryCause: 'checker',
-      modelOverride: reworkModel,
+      // The pinned model belongs to the old route's harness.
+      modelOverride: rerouted ? undefined : reworkModel,
     });
     attempts = reworkResult.attempts;
   } catch (err) {
