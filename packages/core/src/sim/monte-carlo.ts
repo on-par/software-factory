@@ -153,7 +153,7 @@ export async function runMonteCarlo(options: MonteCarloOptions): Promise<MonteCa
   const simulate = options.simulate ?? ((simOptions: SimulationOptions) => runSimulation(simOptions));
   const jitter = options.simulation.jitter;
   const limit = Math.min(options.concurrency ?? 1, options.runs);
-  const summaries: MonteCarloRunSummary[] = new Array(options.runs);
+  const summaries: MonteCarloRunSummary[] = [];
 
   let next = 0;
   const worker = async (): Promise<void> => {
