@@ -6,7 +6,12 @@ import { resolve } from 'node:path';
 import type { DeclaredHarnessProbe } from '@on-par/factory-core';
 import { detectSandboxRuntime } from '@on-par/factory-core';
 import type { ConfigLintInput } from '@on-par/factory-core/internal';
-import { isTemplateToken, lintFactoryConfig, listBuiltInCheckers } from '@on-par/factory-core/internal';
+import {
+  findConfigSchemaErrors,
+  isTemplateToken,
+  lintFactoryConfig,
+  listBuiltInCheckers,
+} from '@on-par/factory-core/internal';
 
 import { MIN_NODE_MAJOR } from '../node-version.js';
 import { availableAgentClis, CLAUDE_CODE_URL, CODEX_CLI_URL, GITHUB_TOKENS_URL } from './first-run.js';
@@ -974,6 +979,13 @@ export function modelsRegistryChecks(
 /** `config` rows from the shared pre-PLAN lint (#2612): one failing row per finding, so doctor fails exactly when
  *  the run preflight would escalate or park. A single ok row when clean. Read-only. */
 export function configLintChecks(input: ConfigLintInput, loadError?: string): DoctorCheck[] {
+  const schemaRows = (input.configFile ? findConfigSchemaErrors(input.configFile) : []).map((f): DoctorCheck => ({
+    name: 'config',
+    ok: false,
+    section: REPO_SECTION,
+    detail: `${f.file}${f.line ? `:${f.line}` : ''}: schema error at '${f.path}': ${f.message}`,
+    fix: f.fix,
+  }));
   if (loadError !== undefined) {
     return [
       {
@@ -983,12 +995,13 @@ export function configLintChecks(input: ConfigLintInput, loadError?: string): Do
         detail: loadError,
         fix: 'fix the constitution frontmatter YAML',
       },
+      ...schemaRows,
     ];
   }
   const { findings } = lintFactoryConfig(input);
   if (findings.length > 0) {
     const names = [...listBuiltInCheckers().map((c) => c.name), 'custom_*'].join(', ');
-    return findings.map((f): DoctorCheck => {
+    const lintRows = findings.map((f): DoctorCheck => {
       const where = `${f.file}${f.line ? `:${f.line}` : ''}`;
       if (f.rule === 'unknown-checker') {
         const kind = isTemplateToken(f.token) ? 'placeholder' : 'unknown';
@@ -1008,7 +1021,9 @@ export function configLintChecks(input: ConfigLintInput, loadError?: string): Do
         fix: `replace '${f.token}' with a real value`,
       };
     });
+    return [...lintRows, ...schemaRows];
   }
+  if (schemaRows.length > 0) return schemaRows;
   const scanned: string[] = [];
   if (input.constitution?.repoInstance) scanned.push(input.constitution.repoInstance.relPath);
   if (input.configFile && existsSync(input.configFile.absPath)) scanned.push(input.configFile.relPath);
@@ -1019,7 +1034,7 @@ export function configLintChecks(input: ConfigLintInput, loadError?: string): Do
       section: REPO_SECTION,
       detail:
         scanned.length > 0
-          ? `no unfilled placeholders or unknown checkers in ${scanned.join(', ')}`
+          ? `no unfilled placeholders, unknown checkers or schema errors in ${scanned.join(', ')}`
           : 'no constitution or config file to scan',
     },
   ];

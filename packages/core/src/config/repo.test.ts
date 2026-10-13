@@ -15,6 +15,7 @@ import {
   applyRepoConfig,
   describeEffectiveConfig,
   loadRepoConfig,
+  repoRoutingConfigIssues,
   resolveCodexDisabled,
   resolveEffectiveBuildRoute,
   resolveEffectiveConfig,
@@ -1180,5 +1181,16 @@ describe('repo models.registry (#2440)', () => {
     const snapshot = structuredClone(models);
     applyRepoConfig(models, withRegistry({ pins: { checker: 'my-opencode-model' } }));
     expect(models).toEqual(snapshot);
+  });
+});
+
+describe('repoRoutingConfigIssues (#2611)', () => {
+  it('returns an unrecognized_keys issue with the keys', () => {
+    const issues = repoRoutingConfigIssues({ version: 2, models: { pins: { bogus: 'x' } } });
+    expect(issues).toContainEqual(expect.objectContaining({ code: 'unrecognized_keys', keys: ['bogus'] }));
+  });
+
+  it('returns no issues for a valid config', () => {
+    expect(repoRoutingConfigIssues({ version: 2 })).toEqual([]);
   });
 });

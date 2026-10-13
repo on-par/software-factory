@@ -678,6 +678,8 @@ export type { BuiltInCheckerInfo } from './checkers/index.js';
 export { listBuiltInCheckers } from './checkers/index.js';
 export { findTemplateTokens, isTemplateToken } from './config/template-tokens.js';
 export { lintFactoryConfig } from './config/config-lint.js';
+export { findConfigSchemaErrors } from './config/config-schema-lint.js';
+export type { ConfigSchemaFinding } from './config/config-schema-lint.js';
 export type { ConfigLintFinding, ConfigLintInput, ConfigLintResult, ConfigLintVerdict } from './config/config-lint.js';
 export type { TemplateTokenFinding } from './config/template-tokens.js';
 export { findUnknownConstitutionCheckers, formatUnknownCheckerMessage } from './checkers/constitution-preflight.js';

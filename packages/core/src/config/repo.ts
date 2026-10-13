@@ -11,6 +11,7 @@ import { defaultLaneBreakerThreshold } from '@on-par/factory-config';
 import { z } from 'zod';
 import { readRepoConfigFile } from './repo-config-file.js';
 import { runConfigSource } from './run-config-source.js';
+import { toConfigSchemaIssues, type ConfigSchemaIssue } from './index.js';
 
 import type { ModelRegistry } from '../models/index.js';
 import { resolveModelOverrides } from '../models/index.js';
@@ -294,6 +295,16 @@ export function adaptV1ToV2(v1: RepoFactoryConfigV1Input): RepoFactoryConfig {
 
 const warnedV1ConfigPaths = new Set<string>();
 
+/** Schema issues for the model-routing keys of a parsed repo config file (V1 or V2 by `version`); `[]` when valid. Pure. */
+export function repoRoutingConfigIssues(raw: unknown): ConfigSchemaIssue[] {
+  const toParse = isPlainObject(raw) ? stripRuntimeKeys(raw) : raw;
+  const result =
+    isPlainObject(toParse) && toParse.version === 2
+      ? RepoFactoryConfigV2Schema.safeParse(toParse)
+      : RepoFactoryConfigV1Schema.safeParse(toParse);
+  return result.success ? [] : toConfigSchemaIssues(result.error);
+}
+
 /** Read the resolved repo config file (`config.yaml|yml|json`). Returns `null` when the file
  *  does not exist. Throws a descriptive error naming the file path on malformed JSON/YAML or a
  *  schema violation (typos are rejected loudly via `.strict()` at every level). */
@@ -319,7 +330,9 @@ export function loadRepoConfig(repoRoot: string, stateRoot?: string): RepoFactor
       ? RepoFactoryConfigV2Schema.safeParse(toParse)
       : RepoFactoryConfigV1Schema.safeParse(toParse);
   if (!result.success) {
-    const issues = result.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
+    const issues = toConfigSchemaIssues(result.error)
+      .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+      .join('; ');
     throw new Error(`Invalid ${path}: ${issues}`);
   }
   if (result.data.version === 2) return result.data;

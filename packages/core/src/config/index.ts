@@ -444,6 +444,37 @@ function deepMergeConfig(base: Record<string, unknown>, overlay: Record<string, 
   return out;
 }
 
+export interface ConfigSchemaIssue {
+  path: (string | number)[];
+  message: string;
+  code: string;
+  keys?: string[];
+}
+
+/** Flatten a zod error into plain issues (symbol path segments dropped). */
+export function toConfigSchemaIssues(error: z.ZodError): ConfigSchemaIssue[] {
+  return error.issues.map((i) => ({
+    path: i.path.filter((p) => typeof p !== 'symbol') as (string | number)[],
+    message: i.message,
+    code: i.code,
+    keys: 'keys' in i ? (i.keys as string[]) : undefined,
+  }));
+}
+
+function mergeRuntimeOverlay(raw: Record<string, unknown>): Record<string, unknown> {
+  const overlay: Record<string, unknown> = {};
+  for (const key of FACTORY_RUNTIME_CONFIG_KEYS) {
+    if (key in raw) overlay[key] = raw[key];
+  }
+  return deepMergeConfig(asRecord(defaultFactoryConfig), overlay);
+}
+
+/** Schema issues for the runtime-policy keys of a parsed repo config file; `[]` when valid. Pure. */
+export function factoryRuntimeConfigIssues(raw: Record<string, unknown>): ConfigSchemaIssue[] {
+  const result = FactoryConfigSchema.safeParse(mergeRuntimeOverlay(raw));
+  return result.success ? [] : toConfigSchemaIssues(result.error);
+}
+
 /** Load the effective FactoryConfig for a repo: the shipped defaults, with the runtime-policy
  *  keys of the repo config file (`.factory/config.yaml|yml|json`, i.e. `getFactoryPaths(repoRoot).config`) merged
  *  over them. Returns the shipped defaults untouched when the file does not exist. A partial
@@ -467,15 +498,11 @@ export function loadFactoryConfigForRepo(configPath: string): FactoryConfig {
     throw new Error(`Invalid ${configPath}: expected a JSON object`);
   }
 
-  const overlay: Record<string, unknown> = {};
-  for (const key of FACTORY_RUNTIME_CONFIG_KEYS) {
-    if (key in raw) overlay[key] = raw[key];
-  }
-
-  const merged = deepMergeConfig(asRecord(defaultFactoryConfig), overlay);
-  const result = FactoryConfigSchema.safeParse(merged);
+  const result = FactoryConfigSchema.safeParse(mergeRuntimeOverlay(raw));
   if (!result.success) {
-    const issues = result.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
+    const issues = toConfigSchemaIssues(result.error)
+      .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+      .join('; ');
     throw new Error(`Invalid ${configPath}: ${issues}`);
   }
   return result.data;
