@@ -60,6 +60,8 @@ Run `factory doctor` after installing (Step 1) to check all of this.
 
 ### Use Codex
 
+On Linux, install `firejail` first (for example `sudo apt install firejail`), before you set up an agent. It is the OS sandbox the factory wraps agent runs in. Without it, Codex runs with `--sandbox danger-full-access`.
+
 Install the Codex CLI and sign in once:
 
 - `codex login` signs in with ChatGPT and uses your Plus or Pro plan, with no API key. Runs count toward your plan limits; manage them in ChatGPT settings.
@@ -89,7 +91,7 @@ factory --version
 factory doctor
 ```
 
-Older Node versions are refused with a clear message. `factory doctor` checks git, your git identity (`user.name` and `user.email`, which commits need), your coding agent CLI, `gh` auth, the GitHub token, npm and the sandbox, and prints a fix for anything missing. It works from any directory, including outside a repo. To run from a clone instead, see [CONTRIBUTING.md](CONTRIBUTING.md).
+Older Node versions are refused with a clear message. `factory doctor` checks git, your git identity (`user.name` and `user.email`, which commits need; set them with `git config --global`, or repo-local `git config` in the target repo works too), your coding agent CLI, `gh` auth, the GitHub token, npm and the sandbox, and prints a fix for anything missing. It works from any directory, including outside a repo. To run from a clone instead, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 **Step 2: Point it at your repo**
 
@@ -142,7 +144,7 @@ Every other key is optional. [`docs/config.example.yaml`](docs/config.example.ya
 npm install -g @on-par/factory-cli@latest
 ```
 
-Automatic updates are planned: #2354, #2355. The version check (`factory self-update --check`, #2354) is merged on `main` but is not in the 0.9.0 release on npm; the installer (#2355) and the daemon update loop (#1939) are still open. The planned design is in [docs/ops/updating.md](docs/ops/updating.md).
+`factory self-update --check` reports whether a newer release is on npm. It works in 0.9.3 and later. Automatic updates are planned: the installer (#2355) and the daemon update loop (#1939). The planned design is in [docs/ops/updating.md](docs/ops/updating.md).
 
 ## CLI commands
 

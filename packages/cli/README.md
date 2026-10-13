@@ -16,7 +16,7 @@ factory --version
 factory doctor
 ```
 
-Also requires `git`, one supported coding agent CLI (see [docs/agents.md](https://github.com/on-par/software-factory/blob/main/docs/agents.md)), signed in, and the GitHub CLI signed in with `gh auth login`. The factory reads `GITHUB_TOKEN`, then `GH_TOKEN`, and falls back to `gh auth token`. `factory doctor` checks all of this and prints a fix for anything missing. It also checks your git identity and the sandbox runtime, and it runs outside a repo.
+Also requires `git`, one supported coding agent CLI (see [docs/agents.md](https://github.com/on-par/software-factory/blob/main/docs/agents.md)), signed in, and the GitHub CLI signed in with `gh auth login`. The factory reads `GITHUB_TOKEN`, then `GH_TOKEN`, and falls back to `gh auth token`. `factory doctor` checks all of this and prints a fix for anything missing. It also checks your git identity and the sandbox runtime, and it runs outside a repo. Global or repo-local `git config` for `user.name` and `user.email` both work. On Linux, install `firejail` first: without it, Codex runs with `--sandbox danger-full-access`.
 
 `factory init` creates a local-only `.factory/` (git-excluded) with a `default-code` constitution. See the main README quick start.
 
@@ -30,7 +30,7 @@ Agents run with their permission prompts off (Claude Code with `--permission-mod
 npm install -g @on-par/factory-cli@latest
 ```
 
-Automatic updates are planned: [#2354](https://github.com/on-par/software-factory/issues/2354), [#2355](https://github.com/on-par/software-factory/issues/2355).
+`factory self-update --check` reports whether a newer release is on npm. It works in 0.9.3 and later. Automatic updates are planned: [#2355](https://github.com/on-par/software-factory/issues/2355), [#1939](https://github.com/on-par/software-factory/issues/1939).
 
 ## Documentation
 

@@ -213,3 +213,84 @@ describe('factory --help queue path', () => {
     expect(text).toMatch(/\.factory\/state\/queue\b(?!\.)/);
   });
 });
+
+function section(text: string, heading: string): string | undefined {
+  const lines = text.split('\n');
+  const start = lines.findIndex((l) => l === heading);
+  if (start < 0) return undefined;
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((l) => l.startsWith('## '));
+  return [heading, ...(end < 0 ? rest : rest.slice(0, end))].join('\n');
+}
+
+function updatingProblems(text: string): string[] {
+  const block = section(text, '## Updating');
+  if (block === undefined) return ['missing Updating section'];
+  const problems: string[] = [];
+  if (block.includes('0.9.0')) problems.push('Updating names 0.9.0');
+  if (!block.includes('self-update --check')) problems.push('Updating does not mention self-update --check');
+  if (!block.includes('0.9.3')) problems.push('Updating does not say 0.9.3');
+  return problems;
+}
+
+function linuxFirejailProblems(block: string | undefined): string[] {
+  if (block === undefined) return ['missing section'];
+  const ok = block
+    .split(/\n\s*\n/)
+    .some((p) => /Linux/.test(p) && /install `?firejail`?/i.test(p) && /danger-full-access/.test(p));
+  return ok ? [] : ['no Linux firejail install step with the danger-full-access reason'];
+}
+
+const gitIdentityProblems = (text: string): string[] =>
+  text.includes('repo-local `git config`') ? [] : ['git identity text does not say repo-local git config works'];
+
+describe('README update and setup text', () => {
+  it('Updating sections name no stale release and say self-update --check works in 0.9.3', () => {
+    expect({ root: updatingProblems(rootReadme), cli: updatingProblems(cliReadme) }).toEqual({ root: [], cli: [] });
+  });
+
+  it('Linux Quick start says to install firejail first and why', () => {
+    expect(linuxFirejailProblems(section(rootReadme, '## Quick start'))).toEqual([]);
+    expect(linuxFirejailProblems(section(cliReadme, '## Install'))).toEqual([]);
+  });
+
+  it('git identity text says repo-local git config works too', () => {
+    expect({ root: gitIdentityProblems(rootReadme), cli: gitIdentityProblems(cliReadme) }).toEqual({
+      root: [],
+      cli: [],
+    });
+  });
+});
+
+describe('README update and setup guard self-test', () => {
+  it('rejects the pre-fix root Updating text', () => {
+    const old =
+      '## Updating\n\nAutomatic updates are planned: #2354, #2355. The version check (`factory self-update --check`, #2354) is merged on `main` but is not in the 0.9.0 release on npm.\n';
+    expect(updatingProblems(old)).toContain('Updating names 0.9.0');
+  });
+
+  it('rejects the pre-fix CLI Updating text', () => {
+    const old = '## Updating\n\nAutomatic updates are planned: [#2354](https://example.com/2354).\n';
+    expect(updatingProblems(old)).toEqual([
+      'Updating does not mention self-update --check',
+      'Updating does not say 0.9.3',
+    ]);
+  });
+
+  it('is not fooled by the pre-existing firejail mentions', () => {
+    const old = [
+      '## Quick start',
+      '',
+      'Safety: the factory uses `firejail` on Linux and install its dependencies first.',
+      '',
+      '- Codex runs with `--sandbox danger-full-access` when no OS sandbox is available.',
+    ].join('\n');
+    expect(linuxFirejailProblems(old)).toEqual(['no Linux firejail install step with the danger-full-access reason']);
+  });
+
+  it('reports missing sections', () => {
+    expect(updatingProblems('')).toEqual(['missing Updating section']);
+    expect(linuxFirejailProblems(section('', '## Quick start'))).toEqual(['missing section']);
+    expect(gitIdentityProblems('')).toHaveLength(1);
+  });
+});
