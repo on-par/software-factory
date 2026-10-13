@@ -2,13 +2,16 @@
 //
 // Issues in one lane usually share a base SHA, so re-running the same failing
 // checker on the base for each issue repeats the same slow work. This file-backed
-// cache is keyed by base SHA + a hash of the applied laneEnv + checker name.
+// cache is keyed by base SHA + a hash of the applied laneEnv + checker name. Each
+// entry also carries a hash of the constitution's checker config, compared on read,
+// so a config fix invalidates it (#2563). Config-validation FAILs are never cached.
 
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-import type { CheckerOutput } from '../types/index.js';
+import type { CheckerOutput, Constitution } from '../types/index.js';
+import { isConfigCheckerOutput } from './index.js';
 
 /** laneEnv keys that differ per lane lease or per run and do not describe the environment contract. */
 export const BASELINE_ENV_VOLATILE_KEYS: readonly string[] = [
@@ -26,8 +29,19 @@ export function hashBaselineEnv(env: Record<string, string> | undefined): string
   return createHash('sha256').update(JSON.stringify(entries)).digest('hex').slice(0, 16);
 }
 
+/** First 16 hex chars of the SHA-256 of the constitution's checker config: a config fix invalidates cached base results (#2563). */
+export function hashBaselineCheckerConfig(constitution: Constitution | null): string {
+  const config = {
+    checkers: constitution?.checkers ?? null,
+    requireTests: constitution?.requireTests === true,
+    optionalCheckers: constitution?.optionalCheckers ?? [],
+  };
+  return createHash('sha256').update(JSON.stringify(config)).digest('hex').slice(0, 16);
+}
+
 interface BaselineCacheEntry {
   output: CheckerOutput;
+  configHash: string;
   recordedAt: string;
 }
 
@@ -47,23 +61,26 @@ export class BaselineCache {
   ) {}
 
   /** Cached base result for the checker, or undefined on a miss. */
-  async get(baseSha: string, envHash: string, checker: string): Promise<CheckerOutput | undefined> {
+  async get(baseSha: string, envHash: string, configHash: string, checker: string): Promise<CheckerOutput | undefined> {
     const data = await this.read();
-    const output = data.entries[entryKey(baseSha, envHash, checker)]?.output;
+    const entry = data.entries[entryKey(baseSha, envHash, checker)];
+    if (entry?.configHash !== configHash) return undefined;
+    const output = entry.output;
     if (typeof output !== 'object' || output === null) return undefined;
     if (output.checker !== checker) return undefined;
     if (output.result !== 'PASS' && output.result !== 'FAIL') return undefined;
+    if (isConfigCheckerOutput(output)) return undefined;
     return output;
   }
 
-  /** Stores PASS/FAIL outputs; SKIPs are never cached. */
-  async set(baseSha: string, envHash: string, outputs: readonly CheckerOutput[]): Promise<void> {
-    const storable = outputs.filter((o) => o.result === 'PASS' || o.result === 'FAIL');
+  /** Stores PASS/FAIL outputs of checkers that really ran; SKIPs and config-validation FAILs are never cached. */
+  async set(baseSha: string, envHash: string, configHash: string, outputs: readonly CheckerOutput[]): Promise<void> {
+    const storable = outputs.filter((o) => (o.result === 'PASS' || o.result === 'FAIL') && !isConfigCheckerOutput(o));
     if (storable.length === 0) return;
     const data = await this.read();
     const recordedAt = new Date(this.now()).toISOString();
     for (const output of storable) {
-      data.entries[entryKey(baseSha, envHash, output.checker)] = { output, recordedAt };
+      data.entries[entryKey(baseSha, envHash, output.checker)] = { output, configHash, recordedAt };
     }
     await this.write(data);
   }
