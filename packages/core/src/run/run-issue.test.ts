@@ -413,7 +413,12 @@ describe('runIssue — slice shipping (ADR-0147)', () => {
     const outcome = await runIssue(baseRequest({ sizeGateMode: 'slice' }), basePolicy(), sliceSetup(updateComment));
 
     expect(vi.mocked(shipPhase).mock.calls[0][0].slice).toEqual({ index: 2, count: 3 });
-    expect(recorded(updateComment)).toMatchObject({ index: 2, state: 'pr-open', prNumber: 55 });
+    expect(recorded(updateComment)).toMatchObject({
+      index: 2,
+      state: 'pr-open',
+      prNumber: 55,
+      branch: 'issue-1-fix-the-thing',
+    });
     expect(outcome).toMatchObject({ state: 'ready', prNumber: 55, slice: { index: 2, count: 3 } });
   });
 

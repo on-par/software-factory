@@ -18,7 +18,8 @@ export const SLICE_CAP_CEILING = 20;
 /** Effective slice cap when neither sizeGate.maxSlices nor --max-slices is set (ADR-0156). */
 export const DEFAULT_MAX_SLICES = 10;
 
-export type SliceState = 'pending' | 'pr-open' | 'merged';
+/** `not-built` is set when a stack run stops before building the slice (ADR-0161). */
+export type SliceState = 'pending' | 'pr-open' | 'merged' | 'not-built';
 
 export interface Slice {
   /** 1-based position in build order. */
@@ -27,6 +28,8 @@ export interface Slice {
   story: Story;
   state: SliceState;
   prNumber?: number;
+  /** Head branch of the slice PR, once known. */
+  branch?: string;
 }
 
 export interface SlicePlan {
@@ -48,8 +51,9 @@ const SliceSchema = z.object({
   index: z.number().int().positive(),
   title: z.string().min(1),
   story: StorySchema,
-  state: z.enum(['pending', 'pr-open', 'merged']),
+  state: z.enum(['pending', 'pr-open', 'merged', 'not-built']),
   prNumber: z.number().int().positive().optional(),
+  branch: z.string().min(1).optional(),
 });
 
 const SlicePlanSchema = z.object({
@@ -84,13 +88,17 @@ function stateLabel(slice: Slice): string {
   if (slice.state === 'merged') {
     return pr === undefined ? 'merged' : `merged (#${pr})`;
   }
+  if (slice.state === 'not-built') return 'not built';
   return 'pending';
 }
+
+const branchSuffix = (slice: Slice): string => (slice.branch ? ` · branch \`${slice.branch}\`` : '');
 
 export function renderSlicePlanComment(plan: SlicePlan): string {
   const n = plan.slices.length;
   const checklist = plan.slices.map(
-    (s) => `- [${s.state === 'merged' ? 'x' : ' '}] ${s.index}/${n}. ${oneLine(s.title)} — ${stateLabel(s)}`,
+    (s) =>
+      `- [${s.state === 'merged' ? 'x' : ' '}] ${s.index}/${n}. ${oneLine(s.title)} — ${stateLabel(s)}${branchSuffix(s)}`,
   );
   const data = Buffer.from(JSON.stringify(plan), 'utf8').toString('base64');
   return [
@@ -141,14 +149,33 @@ export function currentSlice(plan: SlicePlan): Slice | undefined {
   return plan.slices.find((s) => s.state !== 'merged');
 }
 
-export function withSliceState(plan: SlicePlan, index: number, state: SliceState, prNumber?: number): SlicePlan {
+export function withSliceState(
+  plan: SlicePlan,
+  index: number,
+  state: SliceState,
+  prNumber?: number,
+  branch?: string,
+): SlicePlan {
   if (!plan.slices.some((s) => s.index === index)) {
     throw new RangeError(`slice ${index} is not in the plan for #${plan.issue}`);
   }
   return {
     ...plan,
     slices: plan.slices.map((s) =>
-      s.index === index ? { ...s, state, ...(prNumber !== undefined ? { prNumber } : {}) } : s,
+      s.index === index
+        ? { ...s, state, ...(prNumber !== undefined ? { prNumber } : {}), ...(branch !== undefined ? { branch } : {}) }
+        : s,
     ),
   };
+}
+
+/** Flips the slice whose PR is `prNumber` to merged; undefined when no slice carries that PR. */
+export function markSliceMerged(
+  plan: SlicePlan,
+  prNumber: number,
+): { plan: SlicePlan; index: number; changed: boolean } | undefined {
+  const slice = plan.slices.find((s) => s.prNumber === prNumber);
+  if (slice === undefined) return undefined;
+  if (slice.state === 'merged') return { plan, index: slice.index, changed: false };
+  return { plan: withSliceState(plan, slice.index, 'merged'), index: slice.index, changed: true };
 }
