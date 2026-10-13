@@ -6746,14 +6746,14 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
 
   const triage = program
     .command('triage')
-    .description('Have a model propose a queue from open issues into .factory/queue.proposed')
+    .description('Have a model propose a queue from open issues into .factory/state/queue.proposed')
     .option('--product <name>', 'Product constitution to scope triage')
     .option('--model <id>', 'Model to triage with (any registered model, Claude or Codex)')
     .action(cmdTriage);
 
   triage
     .command('accept')
-    .description('Validate and atomically promote .factory/queue.proposed to .factory/queue')
+    .description('Validate and atomically promote .factory/state/queue.proposed to .factory/state/queue')
     .option('--force', 'Skip validation and promote as-is')
     .action(async (opts) => {
       await cmdTriageAccept(opts);

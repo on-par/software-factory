@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { main } from './cli/index.js';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
@@ -166,5 +167,49 @@ describe('README agent-neutral prerequisites', () => {
         expect(existsSync(resolved)).toBe(true);
       }
     }
+  });
+});
+
+class HelpExit extends Error {
+  constructor(readonly code: number) {
+    super(`process.exit(${code})`);
+  }
+}
+
+// Commander prints help and then calls process.exit, so stub exit to throw and capture stdout.
+async function helpOutput(...args: string[]): Promise<string> {
+  const chunks: string[] = [];
+  const realWrite = process.stdout.write;
+  process.stdout.write = ((chunk: unknown) => {
+    chunks.push(String(chunk));
+    return true;
+  }) as typeof process.stdout.write;
+  const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+    throw new HelpExit(code ?? 0);
+  }) as never);
+  try {
+    await main(['node', 'factory', ...args]);
+  } catch (err) {
+    if (!(err instanceof HelpExit)) throw err;
+  } finally {
+    process.stdout.write = realWrite;
+    exitSpy.mockRestore();
+    process.exitCode = undefined;
+  }
+  return chunks.join('').replace(/\s+/g, ' ');
+}
+
+describe('factory --help queue path', () => {
+  it('root --help names .factory/state/queue.proposed and never .factory/queue.proposed', async () => {
+    const text = await helpOutput('--help');
+    expect(text).toContain('.factory/state/queue.proposed');
+    expect(text).not.toContain('.factory/queue.proposed');
+  });
+
+  it('triage --help names .factory/state/queue.proposed and .factory/state/queue', async () => {
+    const text = await helpOutput('triage', '--help');
+    expect(text).toContain('.factory/state/queue.proposed');
+    expect(text).not.toContain('.factory/queue.proposed');
+    expect(text).toMatch(/\.factory\/state\/queue\b(?!\.)/);
   });
 });
