@@ -1,7 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   analyzeEventLog,
+  configPlaceholderChecks,
   type ClaudeAuthProbeResult,
   claudeKeychainCheck,
   codexAuthMethod,
@@ -1573,5 +1578,81 @@ describe('factory --help first step (#2558)', () => {
     const firstLine = PREREQUISITES_TEXT.split('\n')[0];
     expect(firstLine).toMatch(/first step/i);
     expect(firstLine).toContain('factory doctor');
+  });
+});
+
+describe('configPlaceholderChecks (#2610)', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  const PLACEHOLDER_CONSTITUTION =
+    '---\nproduct: acme\nversion: 1\ncheckers:\n  - <checker-name>\n  - compile\n---\nbody\n';
+  const VALID_CONSTITUTION = PLACEHOLDER_CONSTITUTION.replace('<checker-name>', 'compile');
+  const VALID_CONFIG = 'sweep:\n  enabled: false\n';
+
+  function setup(constitution: string, config: string) {
+    const dir = mkdtempSync(join(tmpdir(), 'doctor-config-'));
+    dirs.push(dir);
+    mkdirSync(join(dir, '.factory'));
+    const c = join(dir, '.factory', 'constitution.md');
+    const y = join(dir, '.factory', 'config.yaml');
+    writeFileSync(c, constitution);
+    writeFileSync(y, config);
+    return [
+      { absPath: c, relPath: '.factory/constitution.md', scope: 'frontmatter' as const },
+      { absPath: y, relPath: '.factory/config.yaml', scope: 'all' as const },
+    ];
+  }
+
+  it('flags a placeholder checker with file:line and the fix', () => {
+    const rows = configPlaceholderChecks(setup(PLACEHOLDER_CONSTITUTION, VALID_CONFIG));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ name: 'config', ok: false, section: REPO_SECTION });
+    expect(rows[0].optional).toBeUndefined();
+    expect(rows[0].detail).toContain('.factory/constitution.md:5');
+    expect(rows[0].detail).toContain('<checker-name>');
+    expect(rows[0].fix).toContain('compile');
+    expect(rows[0].fix).toContain('custom_*');
+    expect(doctorFailed(rows)).toBe(true);
+    const out = formatDoctorChecks(rows);
+    expect(out).toContain('❌ config - .factory/constitution.md:5');
+    expect(out).toContain('fix:');
+  });
+
+  it('passes when the constitution and config.yaml have no placeholders', () => {
+    const rows = configPlaceholderChecks(setup(VALID_CONSTITUTION, VALID_CONFIG));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ name: 'config', ok: true });
+    expect(rows[0].detail).toContain('.factory/constitution.md');
+    expect(rows[0].detail).toContain('.factory/config.yaml');
+    expect(doctorFailed(rows)).toBe(false);
+  });
+
+  it('reports an unfilled token in config.yaml with the generic fix', () => {
+    const rows = configPlaceholderChecks(setup(VALID_CONSTITUTION, 'models:\n  pins:\n    build: <model id>\n'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].ok).toBe(false);
+    expect(rows[0].detail).toBe(".factory/config.yaml:3: unfilled template token '<model id>'");
+    expect(rows[0].fix).toBe("replace '<model id>' with a real value");
+  });
+
+  it('passes with a neutral detail when neither file exists', () => {
+    const rows = configPlaceholderChecks([
+      { absPath: '/nonexistent/a.md', relPath: 'a.md', scope: 'frontmatter' },
+      { absPath: '/nonexistent/b.yaml', relPath: 'b.yaml', scope: 'all' },
+    ]);
+    expect(rows).toEqual([
+      { name: 'config', ok: true, section: REPO_SECTION, detail: 'no constitution or config file to scan' },
+    ]);
+  });
+
+  it('leaves the constitution and config file byte-identical', () => {
+    const files = setup(PLACEHOLDER_CONSTITUTION, 'models:\n  pins:\n    build: <model id>\n');
+    const snap = () => files.map((f) => [readFileSync(f.absPath, 'utf-8'), statSync(f.absPath).mtimeMs]);
+    const before = snap();
+    configPlaceholderChecks(files);
+    expect(snap()).toEqual(before);
   });
 });
