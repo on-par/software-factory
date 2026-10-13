@@ -1,0 +1,109 @@
+name: Nightly Real CLI
+
+# The recorded fake codex/opencode shims (scripts/fixtures/agents/) replay frozen output, so
+# they cannot notice when the real Codex or OpenCode CLI changes a flag, an output format or
+# its auth behavior. This workflow installs the real CLIs, authenticates them from repository
+# secrets and runs a full PLAN -> BUILD -> CHECK -> SHIP loop against each in a throwaway repo
+# (#2649). It is deliberately non-blocking: the job is continue-on-error and is not a required
+# check. An agent whose secret is not configured is skipped and the run stays green.
+
+on:
+  schedule:
+    - cron: '30 7 * * *' # nightly, 07:30 UTC
+  workflow_dispatch:
+    inputs:
+      force_failure:
+        description: Force a failure to exercise the issue filing path
+        type: boolean
+        default: false
+
+jobs:
+  real-cli:
+    name: real-cli-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    continue-on-error: true
+    permissions:
+      contents: read
+      issues: write
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Codex CLI
+        if: env.OPENAI_API_KEY != ''
+        run: |
+          npm install -g @openai/codex
+          printenv OPENAI_API_KEY | codex login --with-api-key
+          codex --version >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Real Codex full-loop smoke
+        id: codex
+        continue-on-error: true
+        run: bash scripts/real-cli-smoke.sh codex
+
+      - name: Install OpenCode CLI
+        if: env.OPENCODE_API_KEY != ''
+        run: |
+          npm install -g opencode-ai
+          opencode --version >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Real OpenCode full-loop smoke
+        id: opencode
+        continue-on-error: true
+        run: bash scripts/real-cli-smoke.sh opencode
+
+      - name: Forced failure
+        id: forced
+        if: inputs.force_failure
+        continue-on-error: true
+        run: exit 1
+
+      - name: File or update the failure issue
+        if: steps.codex.outcome == 'failure' || steps.opencode.outcome == 'failure' || steps.forced.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TITLE: Nightly real-CLI smoke failing
+          LABEL: ci
+          CODEX_OUTCOME: ${{ steps.codex.outcome }}
+          OPENCODE_OUTCOME: ${{ steps.opencode.outcome }}
+          FORCED_OUTCOME: ${{ steps.forced.outcome }}
+        run: |
+          BODY_FILE="$RUNNER_TEMP/failure-body.md"
+          printf '%s\n' \
+            "The scheduled real-CLI full-loop smoke failed." \
+            "" \
+            "- Codex: ${CODEX_OUTCOME}" \
+            "- OpenCode: ${OPENCODE_OUTCOME}" \
+            "- Forced failure: ${FORCED_OUTCOME:-skipped}" \
+            "" \
+            "Run: $RUN_URL" \
+            "Commit: $GITHUB_SHA" \
+            "" \
+            "This job is non-blocking and not a required check. A failure means the real" \
+            "CLI changed (flags, output format or auth) in a way the recorded shims miss." \
+            "" \
+            "Reproduce locally with: \`OPENAI_API_KEY=… bash scripts/real-cli-smoke.sh codex\`" \
+            "or \`OPENCODE_API_KEY=… bash scripts/real-cli-smoke.sh opencode\`" >"$BODY_FILE"
+          export BODY_FILE
+          bash scripts/nightly-failure-issue.sh
+
+      - name: Fail the job when a real-CLI smoke failed
+        if: steps.codex.outcome == 'failure' || steps.opencode.outcome == 'failure' || steps.forced.outcome == 'failure'
+        run: |
+          echo "::error::real-CLI smoke failed — see the filed issue"
+          exit 1
