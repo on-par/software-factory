@@ -143,6 +143,17 @@ describe('resolveSandboxPolicy', () => {
     tmpdir: '/tmp',
   };
 
+  it('resolves blockTelemetry from config, off by default (#2667)', () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'sandbox-telemetry-'));
+    try {
+      expect(resolveSandboxPolicy(defaultSandboxCfg, { ...baseOpts, repoRoot, env: {} })?.blockTelemetry).toBe(false);
+      const on = { ...defaultSandboxCfg, network: { ...defaultSandboxCfg.network, blockTelemetry: true } };
+      expect(resolveSandboxPolicy(on, { ...baseOpts, repoRoot, env: {} })?.blockTelemetry).toBe(true);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
   it('adds the npm and yarn registries to allowHosts for a Node repo (#2659)', () => {
     const repoRoot = mkdtempSync(join(tmpdir(), 'sandbox-node-'));
     try {

@@ -462,3 +462,76 @@ describe('egressHostMessage (#2664)', () => {
     expect(egressHostMessage('a.com', true)).toBe('a.com (on allowlist)');
   });
 });
+
+describe('telemetry block switch (#2667)', () => {
+  it('refuses a CONNECT to a telemetry host with 403 and still reports it as telemetry when blockTelemetry is on', async () => {
+    const calls: Array<[string, boolean]> = [];
+    const proxy = await startEgressProxy({
+      allowHosts: ['github.com'],
+      blockTelemetry: true,
+      onHost: (h, a) => calls.push([h, a]),
+    });
+    cleanups.push(() => proxy.close());
+    const out = await rawExchange(proxy.port, 'CONNECT x.datadoghq.com:443 HTTP/1.1\r\nHost: x\r\n\r\n');
+    expect(out).toContain('403');
+    expect(calls).toEqual([['x.datadoghq.com', false]]);
+    expect(egressSummaryMessage(proxy.hosts(), ['github.com'])).toBe(
+      '1 host(s) used, 1 telemetry not on allowlist: x.datadoghq.com',
+    );
+  });
+
+  it('refuses absolute-form HTTP to a telemetry host with 403', async () => {
+    const proxy = await startEgressProxy({ allowHosts: ['github.com'], blockTelemetry: true });
+    cleanups.push(() => proxy.close());
+    const out = await rawExchange(
+      proxy.port,
+      'GET http://X.DATADOGHQ.COM/v1 HTTP/1.1\r\nHost: x.datadoghq.com\r\nConnection: close\r\n\r\n',
+    );
+    expect(out).toContain('403');
+    expect(proxy.hosts()).toEqual(['x.datadoghq.com']);
+  });
+
+  it('blocks an allowlisted telemetry host when the switch is on', async () => {
+    const proxy = await startEgressProxy({ allowHosts: ['*.datadoghq.com'], blockTelemetry: true });
+    cleanups.push(() => proxy.close());
+    const out = await rawExchange(proxy.port, 'CONNECT x.datadoghq.com:443 HTTP/1.1\r\nHost: x\r\n\r\n');
+    expect(out).toContain('403');
+  });
+
+  it.each([undefined, false])('forwards a telemetry host when blockTelemetry is %s', async (blockTelemetry) => {
+    const proxy = await startEgressProxy({ allowHosts: ['github.com'], blockTelemetry });
+    cleanups.push(() => proxy.close());
+    // The upstream is a real host: do not wait for it to resolve or answer, just for the proxy's decision.
+    const out = await new Promise<string>((resolve) => {
+      const sock = net.connect(proxy.port, '127.0.0.1');
+      let data = '';
+      const done = (): void => {
+        sock.destroy();
+        resolve(data);
+      };
+      const timer = setTimeout(done, 1000);
+      sock.on('data', (d) => {
+        data += d.toString();
+        clearTimeout(timer);
+        done();
+      });
+      sock.on('close', () => {
+        clearTimeout(timer);
+        done();
+      });
+      sock.on('error', () => undefined);
+      sock.write('CONNECT x.datadoghq.com:443 HTTP/1.1\r\nHost: x\r\n\r\n');
+    });
+    expect(out).not.toContain('403');
+    expect(proxy.hosts()).toEqual(['x.datadoghq.com']);
+  });
+
+  it('still forwards non-telemetry hosts when the switch is on', async () => {
+    const upstreamPort = await startUpstream();
+    const proxy = await startEgressProxy({ allowHosts: [], blockTelemetry: true });
+    cleanups.push(() => proxy.close());
+    const { status, socket } = await connectTunnel(proxy, `localhost:${upstreamPort}`);
+    socket.destroy();
+    expect(status).toBe(200);
+  });
+});

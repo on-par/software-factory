@@ -182,12 +182,15 @@ workspace:
 # FACTORY_SANDBOX_RUNTIME to pick a runtime; auto probes the host. docker-sandbox is reserved for
 # the microVM runtime and does not contain anything yet (#653). sandbox.docker.rolloutPercent
 # (0-100) deterministically promotes that percentage of unpinned lanes into the docker-sandbox
-# cohort for A/B evidence (#655).
+# cohort for A/B evidence (#655). sandbox.network.blockTelemetry (default false) makes the egress
+# proxy refuse known telemetry hosts (e.g. *.datadoghq.com) with 403, even if allowlisted; it only
+# takes effect where the egress proxy runs (sandbox-exec with a non-empty allowlist) (#2667).
 sandbox:
   enabled: true
   runtime: "auto"
   network:
     allow: ["api.anthropic.com", "github.com"]
+    blockTelemetry: false
   resources:
     cpuMs: 300000
     memMb: 4096
