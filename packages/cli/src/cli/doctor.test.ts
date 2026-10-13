@@ -566,6 +566,67 @@ describe('outside a git repo (#2554)', () => {
   });
 });
 
+describe('hints outside a git repo (#2472)', () => {
+  /** factory subcommands that run without a git repo. Everything else goes through getRepoRoot. */
+  const OUTSIDE_REPO_SAFE = new Set(['doctor']);
+
+  const noRepo = (cmd: string, base: DoctorEnvProbes): string | null =>
+    cmd.includes('git rev-parse') || cmd.includes('git config user.') ? null : base.tryExec(cmd);
+
+  function probeSets(platform: NodeJS.Platform): Record<string, DoctorEnvProbes> {
+    const base = probes({ platform });
+    return {
+      passing: { ...base, tryExec: (cmd) => noRepo(cmd, base) },
+      failing: probes({
+        platform,
+        commandAvailable: () => false,
+        envPresent: () => false,
+        tryExec: () => null,
+        claudeLoggedIn: () => false,
+        opencodeLoggedIn: () => false,
+        codexSessionState: () => 'unusable',
+        distFreshness: () => ({ fresh: false, detail: 'dist stale' }),
+      }),
+    };
+  }
+
+  function render(env: DoctorEnvProbes): string {
+    const rows = reconcileAgentAuthChecks([
+      ...runDoctorChecks(env),
+      ...sandboxClaudeAuthChecks({
+        host: 'failed',
+        sandboxed: 'skipped',
+        hostDetail: 'claude -p failed on the host',
+        sandboxDetail: NOT_IN_REPO_SKIP_DETAIL,
+      }),
+      claudeKeychainCheck({ status: 'unreadable', inTmux: true }),
+    ]);
+    return formatDoctorChecks(rows, { inRepo: false });
+  }
+
+  it('names no repo-bound factory command in any hint', () => {
+    let failingHints = 0;
+    for (const platform of ['darwin', 'linux'] as const) {
+      for (const [label, env] of Object.entries(probeSets(platform))) {
+        const out = render(env);
+        const lines = out.split('\n');
+        expect(out).not.toContain('factory models --doctor');
+        expect(lines[lines.length - 1]).toBe(`Model reachability: ${NOT_IN_REPO_SKIP_DETAIL}`);
+        const hints = [...lines.filter((l) => l.includes('fix:') || l.includes('next:')), lines[lines.length - 1]!];
+        if (label === 'failing') failingHints += hints.length;
+        for (const line of hints) {
+          for (const m of line.matchAll(/(?:`|next: |reachability: |run )factory ([a-z][a-z-]*)/g)) {
+            expect(OUTSIDE_REPO_SAFE.has(m[1]!), `${platform}/${label}: "${line.trim()}" names factory ${m[1]}`).toBe(
+              true,
+            );
+          }
+        }
+      }
+    }
+    expect(failingHints).toBeGreaterThan(0);
+  });
+});
+
 describe('repo checks (#2557)', () => {
   function rowBlocks(out: string): string[][] {
     const blocks: string[][] = [];
