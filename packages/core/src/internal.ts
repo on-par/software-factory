@@ -598,6 +598,12 @@ export type { ShipSliceStackResult, StackFallbackResult } from './phases/stack-f
 export type { SliceStackResult, StackSliceInput, StackedPr } from './phases/ship-stack.js';
 export { shipStackStoppedAtSlice } from './phases/stack-check-failure.js';
 export type { StackCheckFailure, StoppedStackResult } from './phases/stack-check-failure.js';
+export { detectLowerSliceChange, parkOnLowerSliceChange } from './phases/stack-review-change.js';
+export type {
+  LowerSliceChange,
+  LowerSliceChangeDetection,
+  ReviewChangeParkResult,
+} from './phases/stack-review-change.js';
 export { createShipExecutor } from './daemon/ship-executor.js';
 
 // Review verdict (#1679)
@@ -724,6 +730,7 @@ export {
   renderSlicePlanComment,
   slicePlanFromDecomposition,
   withSliceState,
+  withSlicesAffected,
   withSlicesNotBuilt,
 } from './readiness/slice-plan.js';
 export type {

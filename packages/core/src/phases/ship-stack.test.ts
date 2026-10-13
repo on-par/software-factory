@@ -106,6 +106,13 @@ describe('openSliceStack', () => {
     ]);
   });
 
+  it('records the head SHA of each created PR in the slice-plan comment', async () => {
+    const create = vi.fn().mockImplementation(async () => ({ data: { number: 101, head: { sha: 'abc' } } }));
+    const f = fake({ create });
+    await run(f, [slice(1)]);
+    expect(recorded(f)[0]).toMatchObject({ prNumber: 101, headSha: 'abc' });
+  });
+
   it('never closes the issue on a partial stack and leaves the missing slice pending', async () => {
     const f = fake();
     await run(f, [slice(1), slice(2)]);

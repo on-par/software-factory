@@ -27,6 +27,8 @@ export interface StackedPr {
   prNumber: number;
   branch: string;
   base: string;
+  /** Head SHA of the created PR; unset for a reused existing PR. */
+  headSha?: string;
 }
 
 export type SliceStackResult =
@@ -72,6 +74,7 @@ export async function openSliceStack(opts: {
     const top = slice.index === count;
     const label = `slice ${slice.index}/${count}`;
     let prNumber: number;
+    let headSha: string | undefined;
     try {
       const { data: pr } = await octokit.rest.pulls.create({
         owner,
@@ -92,6 +95,7 @@ export async function openSliceStack(opts: {
         }),
       });
       prNumber = pr.number;
+      headSha = (pr as { head?: { sha?: string } }).head?.sha;
       log('pr_opened', `opened PR #${prNumber} for ${label} on ${slice.branch} (base ${base})`);
     } catch (err) {
       const existing = isPullAlreadyExistsError(err)
@@ -106,7 +110,13 @@ export async function openSliceStack(opts: {
         break;
       }
     }
-    prs.push({ index: slice.index, prNumber, branch: slice.branch, base });
+    prs.push({
+      index: slice.index,
+      prNumber,
+      branch: slice.branch,
+      base,
+      ...(headSha !== undefined ? { headSha } : {}),
+    });
   }
 
   let stackNumber = 0;
@@ -129,7 +139,10 @@ export async function openSliceStack(opts: {
   if (prs.length > 0) {
     try {
       const start = notBuilt.length > 0 ? withSlicesNotBuilt(plan, Math.min(...notBuilt)) : plan;
-      const recorded = prs.reduce((p, s) => withSliceState(p, s.index, 'pr-open', s.prNumber, s.branch), start);
+      const recorded = prs.reduce(
+        (p, s) => withSliceState(p, s.index, 'pr-open', s.prNumber, s.branch, s.headSha),
+        start,
+      );
       await upsertSlicePlanComment({ octokit, repo, issue, plan: recorded });
       log(
         'ship',
