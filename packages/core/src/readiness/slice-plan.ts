@@ -158,6 +158,20 @@ export function currentSlice(plan: SlicePlan): Slice | undefined {
   return plan.slices.find((s) => s.state !== 'merged');
 }
 
+/** ADR-0161: the deterministic head branch for slice `index` of a stacked issue. */
+export function stackSliceBranch(issue: number, index: number): string {
+  return `factory/${issue}-slice-${index}`;
+}
+
+/** ADR-0161: slice 1 branches from `mainRef`; slice k from slice k-1's recorded branch. Undefined when that
+ *  branch is not recorded or `index` is not a slice in the plan, so callers can park. */
+export function parentRefForSlice(plan: SlicePlan, index: number, mainRef = 'origin/main'): string | undefined {
+  if (!Number.isInteger(index) || index < 1 || index > plan.slices.length) return undefined;
+  if (index === 1) return mainRef;
+  const branch = plan.slices.find((s) => s.index === index - 1)?.branch;
+  return branch ? branch : undefined;
+}
+
 export function withSliceState(
   plan: SlicePlan,
   index: number,

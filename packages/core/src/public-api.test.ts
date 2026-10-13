@@ -394,6 +394,8 @@ const INTERNAL_API_KEYS = [
   'withSliceState',
   'withSlicesAffected',
   'withSlicesNotBuilt',
+  'parentRefForSlice',
+  'stackSliceBranch',
   // Worktree location (#1758)
   'ensureWorktreeParentExcluded',
   'formatWorktreeLocation',
