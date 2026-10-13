@@ -419,6 +419,8 @@ const INTERNAL_API_KEYS = [
   'findUnknownConstitutionCheckers',
   'findTemplateTokens',
   'isTemplateToken',
+  'harnessCliCommand',
+  'isHarnessCliPresent',
   'lintFactoryConfig',
   'findConfigSchemaErrors',
   'formatUnknownCheckerMessage',
