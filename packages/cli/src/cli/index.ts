@@ -227,6 +227,7 @@ import {
   createPlanReuseStore,
   checkBaseHealth,
   currentSlice,
+  egressHostMessage,
   egressSummaryMessage,
   findSlicePlanComment,
   upsertSlicePlanComment,
@@ -2788,7 +2789,7 @@ export async function shipIssue(
   const egressProxy = proxied
     ? await startEgressProxy({
         allowHosts: proxied.allowHosts,
-        onHost: (host, allowed) => log('egress_host', `${host} (${allowed ? 'on allowlist' : 'not on allowlist'})`),
+        onHost: (host, allowed) => log('egress_host', egressHostMessage(host, allowed)),
       })
     : undefined;
   let outcome: Awaited<ReturnType<typeof runIssue>>;

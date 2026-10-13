@@ -10,9 +10,11 @@ import {
   buildEgressAllowlist,
   detectEcosystems,
   ECOSYSTEM_ALLOW_HOSTS,
+  egressHostMessage,
   egressSummaryMessage,
   isAllowedHost,
   isSafeHttpHeaderName,
+  isTelemetryHost,
   sanitizeProxyHeaders,
   startEgressProxy,
   type EgressProxy,
@@ -411,5 +413,52 @@ describe('isAllowedHost wildcard', () => {
     expect(isAllowedHost('x.com', ['*'])).toBe(false);
     expect(isAllowedHost('x.com', ['*.'])).toBe(false);
     expect(isAllowedHost('afoo.com', ['*foo.com'])).toBe(false);
+  });
+});
+
+describe('egressSummaryMessage telemetry (#2664)', () => {
+  it('reports a datadoghq host as telemetry, separately from unlisted hosts', () => {
+    expect(egressSummaryMessage(['a.com', 'http-intake.logs.datadoghq.com', 'github.com'], ['github.com'])).toBe(
+      '3 host(s) used, 1 not on allowlist: a.com; 1 telemetry not on allowlist: http-intake.logs.datadoghq.com',
+    );
+  });
+
+  it('keeps a non-telemetry unlisted host in the unlisted bucket, not telemetry', () => {
+    const msg = egressSummaryMessage(['a.com', 'x.datadoghq.com'], []);
+    expect(msg).toContain('1 not on allowlist: a.com');
+    expect(msg.split('telemetry not on allowlist:')[1]).not.toContain('a.com');
+    expect(egressSummaryMessage(['evil-datadoghq.com'], [])).toBe(
+      '1 host(s) used, 1 not on allowlist: evil-datadoghq.com',
+    );
+  });
+
+  it('lists only telemetry hosts in the telemetry bucket and treats allowlisted ones as listed', () => {
+    expect(egressSummaryMessage(['x.datadoghq.com'], [])).toBe(
+      '1 host(s) used, 1 telemetry not on allowlist: x.datadoghq.com',
+    );
+    expect(egressSummaryMessage(['x.datadoghq.com'], ['*.datadoghq.com'])).toBe('1 host(s) used, all on allowlist');
+    expect(egressSummaryMessage([], [])).toBe('0 host(s) used, all on allowlist');
+  });
+});
+
+describe('isTelemetryHost (#2664)', () => {
+  it('matches the apex, subdomains, and uppercase', () => {
+    expect(isTelemetryHost('datadoghq.com')).toBe(true);
+    expect(isTelemetryHost('http-intake.logs.datadoghq.com')).toBe(true);
+    expect(isTelemetryHost('X.DATADOGHQ.COM')).toBe(true);
+  });
+
+  it('rejects lookalikes and unrelated hosts', () => {
+    expect(isTelemetryHost('evil-datadoghq.com')).toBe(false);
+    expect(isTelemetryHost('github.com')).toBe(false);
+  });
+});
+
+describe('egressHostMessage (#2664)', () => {
+  it('tags telemetry hosts and leaves others unchanged', () => {
+    expect(egressHostMessage('x.datadoghq.com', false)).toBe('x.datadoghq.com (telemetry, not on allowlist)');
+    expect(egressHostMessage('x.datadoghq.com', true)).toBe('x.datadoghq.com (telemetry, on allowlist)');
+    expect(egressHostMessage('a.com', false)).toBe('a.com (not on allowlist)');
+    expect(egressHostMessage('a.com', true)).toBe('a.com (on allowlist)');
   });
 });

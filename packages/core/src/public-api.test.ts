@@ -682,6 +682,9 @@ const INTERNAL_API_KEYS = [
   // report-only egress proxy for sandbox-exec (#2214)
   'startEgressProxy',
   'egressSummaryMessage',
+  'egressHostMessage',
+  'isTelemetryHost',
+  'TELEMETRY_HOST_PATTERNS',
   'shouldProxyEgress',
   'classifyCiFailure',
   'watchChecks',
