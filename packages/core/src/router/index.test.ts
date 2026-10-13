@@ -233,6 +233,37 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
     expect(runnableBuildRoutes(router)).toEqual(['codex']);
   });
 
+  it('reports a local_auth failure to the local-auth sink once, naming only the agent (#2733)', async () => {
+    let router!: ModelRouter;
+    router = new ModelRouter(
+      realModels,
+      realRoutes,
+      false,
+      executor(() => router, []),
+    );
+    const sink = vi.fn();
+    router.setLocalAuthSink(sink);
+    await router.run('readiness_enrich', 'enrich');
+    await router.run('plan', 'plan');
+    expect(sink).toHaveBeenCalledTimes(1);
+    expect(sink).toHaveBeenCalledWith('claude');
+  });
+
+  it('a throwing local-auth sink never breaks failover (#2733)', async () => {
+    let router!: ModelRouter;
+    router = new ModelRouter(
+      realModels,
+      realRoutes,
+      false,
+      executor(() => router, []),
+    );
+    router.setLocalAuthSink(() => {
+      throw new Error('disk full');
+    });
+    const result = await router.run('readiness_enrich', 'enrich');
+    expect(result.output).toBe('ENRICHED');
+  });
+
   it('fails with local_auth when every model for a task signed out earlier in the run (#2495)', async () => {
     let router!: ModelRouter;
     router = new ModelRouter(

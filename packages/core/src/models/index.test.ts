@@ -658,6 +658,58 @@ describe('diagnoseModels', () => {
     },
   );
 
+  it('marks Claude models unreachable when the last run hit local_auth with no login since (#2733)', () => {
+    const localAuthFailure = vi.fn((a: 'claude' | 'codex') =>
+      a === 'claude' ? { agent: a, at: '2026-10-13T16:00:00.000Z' } : null,
+    );
+    const ds = diagnoseModels(
+      new ModelRegistry(claudeOpusConfig()),
+      {
+        commandAvailable: () => true,
+        envPresent: () => true,
+        claudeLoggedIn: () => true,
+        codexLoggedIn: () => true,
+        localAuthFailure,
+      },
+      true,
+    );
+    const opus = ds.find((x) => x.model === 'claude-opus-5')!;
+    expect(opus.reachable).toBe(false);
+    expect(opus.reason).toContain('re-run claude login');
+    expect(localAuthFailure.mock.calls.filter(([a]) => a === 'claude')).toHaveLength(1);
+  });
+
+  it('marks Codex models unreachable when codex hit local_auth with no login since (#2733)', () => {
+    const ds = diagnoseModels(
+      new ModelRegistry(doctorConfig),
+      {
+        commandAvailable: () => true,
+        envPresent: () => true,
+        codexLoggedIn: () => true,
+        localAuthFailure: (a) => (a === 'codex' ? { agent: a, at: '2026-10-13T16:00:00.000Z' } : null),
+      },
+      true,
+    );
+    const codex = ds.filter((d) => new ModelRegistry(doctorConfig).getHarnessId(d.model) === 'codex-cli');
+    expect(codex.length).toBeGreaterThan(0);
+    for (const d of codex) {
+      expect(d.reachable).toBe(false);
+      expect(d.reason).toContain('re-run codex login');
+    }
+  });
+
+  it('treats a throwing local-auth probe as no failure (#2733)', () => {
+    const d = opusDiagnosis({
+      commandAvailable: (c) => c === 'claude',
+      envPresent: () => false,
+      claudeLoggedIn: () => true,
+      localAuthFailure: () => {
+        throw new Error('boom');
+      },
+    });
+    expect(d.reachable).toBe(true);
+  });
+
   it('treats a throwing login probe as not logged in', () => {
     const d = opusDiagnosis({
       commandAvailable: (c) => c === 'claude',

@@ -21,6 +21,7 @@ import type { CostEntry, RetryCause, TaskType } from '../types/index.js';
 import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { shellEscape } from '../utils/index.js';
+import { type LocalAuthAgent, localAuthAgentFor } from '../utils/local-auth-record.js';
 import { extractFailoverReason, ModelExecutorError, ModelRouterError, type RouterAttempt } from './executor-error.js';
 import { describeFailureDetail } from './failure-detail.js';
 import { claimOllamaSkipNotice, type OllamaProbeResult, probeOllama } from './ollama-probe.js';
@@ -555,6 +556,7 @@ export class ModelRouter {
   /** Harness ids already reported as missing their CLI. One router serves one run, so each
    *  harness is logged at most once per run (#2629). */
   private readonly missingHarnessNoticed = new Set<string>();
+  private localAuthSink?: (agent: LocalAuthAgent) => void;
 
   constructor(
     modelsConfig: ModelsConfig,
@@ -610,6 +612,12 @@ export class ModelRouter {
   private isAuthTripped(model: string): boolean {
     const key = this.authKey(model);
     return key !== undefined && this.authTripped.has(key);
+  }
+
+  /** Register a sink told which agent login (claude / codex) failed local_auth, so doctor can
+   *  flag it until the next login (#2733). Receives only the agent name. */
+  setLocalAuthSink(sink: (agent: LocalAuthAgent) => void): void {
+    this.localAuthSink = sink;
   }
 
   /** Register a sink that receives one cost row per successful run(). */
@@ -849,6 +857,14 @@ export class ModelRouter {
             if (key !== undefined && !this.authTripped.has(key)) {
               this.authTripped.add(key);
               onLog(`${key} is not signed in; skipping it for the rest of this run`);
+            }
+            const agent = localAuthAgentFor(key);
+            if (agent && this.localAuthSink) {
+              try {
+                this.localAuthSink(agent);
+              } catch {
+                // bookkeeping only
+              }
             }
           }
           if (detail) onLog(`${model} failure detail on ${task}: ${detail}`);

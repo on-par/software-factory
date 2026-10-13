@@ -777,3 +777,13 @@ export type { BaseHealthOptions, BaseHealthResult } from './checkers/base-health
 // Codex ChatGPT session freshness for doctor (#2509)
 export { codexChatgptSessionState } from './utils/codex-config.js';
 export type { CodexSessionState } from './utils/codex-config.js';
+
+// Last run-time local_auth failure per agent, read by doctor (#2733)
+export {
+  localAuthAgentFor,
+  localAuthCredentialPath,
+  localAuthFailureSinceLogin,
+  localAuthRecordPath,
+  recordLocalAuthFailure,
+} from './utils/local-auth-record.js';
+export type { LocalAuthAgent, LocalAuthFailure } from './utils/local-auth-record.js';
