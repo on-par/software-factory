@@ -255,7 +255,7 @@ export async function fetchDefectSources(
         author: c.user?.login ?? 'unknown',
         body: c.body ?? '',
         ts: c.created_at,
-        isBot: c.user?.type === 'Bot' || /\[bot\]$/.test(c.user?.login ?? ''),
+        isBot: c.user?.type === 'Bot' || (c.user?.login ?? '').endsWith('[bot]'),
       }));
     }),
   );

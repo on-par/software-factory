@@ -2,7 +2,9 @@ import { defineConfig } from 'oxlint';
 
 export default defineConfig({
   ignorePatterns: ['**/dist/**', 'coverage/**', '.factory/**', 'tools/oxlint/anti-slop/**'],
-  plugins: ['typescript'],
+  // Listing plugins replaces oxlint's default set, so `unicorn` and `oxc` are named here
+  // to keep their correctness rules on alongside `typescript` and `promise`.
+  plugins: ['typescript', 'unicorn', 'oxc', 'promise'],
   // Vendored, not an npm dependency — see tools/oxlint/anti-slop/VENDORED.md (#795).
   // Oxlint's JS plugin API is alpha and not subject to semver, so @oxlint/plugins is
   // pinned lockstep to oxlint and scripts/check-oxlint-plugin-version.sh guards the pin.
@@ -26,8 +28,56 @@ export default defineConfig({
     'typescript/no-misused-spread': 'off',
     'typescript/require-array-sort-compare': 'off',
     'typescript/unbound-method': 'off',
+    // Gherkin criteria carry a legitimate `then` field (contracts/gherkin.ts), not a thenable.
+    'unicorn/no-thenable': 'off',
+    // Slop guards that report zero violations repo-wide. Same rule as anti-slop below: a rule
+    // is only listed once the code is clean, never paired with a suppression.
+    // Type and suppression slop.
+    'typescript/ban-ts-comment': 'error',
+    'typescript/prefer-ts-expect-error': 'error',
+    'typescript/no-unnecessary-type-parameters': 'error',
+    'typescript/no-unnecessary-type-arguments': 'error',
+    'typescript/no-unnecessary-type-constraint': 'error',
+    'typescript/no-inferrable-types': 'error',
+    'typescript/no-empty-object-type': 'error',
+    'typescript/no-unsafe-function-type': 'error',
+    'typescript/no-unsafe-enum-comparison': 'error',
+    'typescript/no-non-null-asserted-nullish-coalescing': 'error',
+    'typescript/no-confusing-non-null-assertion': 'error',
+    'typescript/no-extraneous-class': 'error',
+    'typescript/no-namespace': 'error',
+    'typescript/consistent-type-assertions': 'error',
+    'typescript/restrict-plus-operands': 'error',
+    // Redundant or dead control flow.
+    'no-else-return': 'error',
+    'no-useless-return': 'error',
+    'no-useless-constructor': 'error',
+    'no-useless-computed-key': 'error',
+    'no-unneeded-ternary': 'error',
+    'no-lonely-if': 'error',
+    'no-extra-bind': 'error',
+    'no-self-compare': 'error',
+    'no-fallthrough': 'error',
+    'array-callback-return': 'error',
+    'no-implied-eval': 'error',
+    // Leftover TODO/FIXME/XXX markers: file an issue instead.
+    'no-warning-comments': 'error',
+    'unicorn/no-useless-switch-case': 'error',
+    'unicorn/no-useless-error-capture-stack-trace': 'error',
+    'unicorn/no-static-only-class': 'error',
+    'unicorn/no-instanceof-array': 'error',
+    'unicorn/prefer-array-some': 'error',
+    'unicorn/prefer-array-flat-map': 'error',
+    'unicorn/prefer-node-protocol': 'error',
+    'unicorn/prefer-optional-catch-binding': 'error',
+    'unicorn/throw-new-error': 'error',
+    'unicorn/prefer-date-now': 'error',
+    'unicorn/prefer-object-from-entries': 'error',
+    'promise/no-nesting': 'error',
+    'promise/no-multiple-resolved': 'error',
+    'promise/no-promise-in-callback': 'error',
     // anti-slop (#795): the six generic rules that already report zero violations
-    // repo-wide. The remaining nine each land in their own issue with their own fixes;
+    // repo-wide. The remaining seven each land in their own issue with their own fixes;
     // never pair a rule here with a suppression for the code it fires on.
     'anti-slop/no-object-parameters': 'error',
     'anti-slop/no-reflect-apply': 'error',
