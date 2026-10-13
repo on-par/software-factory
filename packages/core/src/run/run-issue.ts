@@ -9,7 +9,7 @@
 //      (including the non-park `released` exit for an environment-caused CHECK failure, #1928; a config cause parks, #2583).
 // PLAN may be skipped by the planReuse port after an environment release (#2340).
 // CHECK may be resumed on a kept worktree via request.resumeFrom after an environment release (#2564).
-// A config preflight (#2586) rejects unfilled template tokens before base health and PLAN.
+// A config preflight (#2586) rejects unfilled template tokens before base health and PLAN; any preflight failure parks with the `config` cause (#2587).
 //
 // Path-bound CLI concerns (Octokit, worktree/environment provisioning, the events sink,
 // approval/steering, and reporting hooks) are injected as ports so this file stays free of
@@ -540,21 +540,17 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
 
     // Pre-PLAN config preflight (#2585/#2586), shared with `factory doctor` via lintFactoryConfig (#2612).
     // An unknown `checkers:` entry would only fail closed in CHECK, after PLAN and BUILD spent model calls;
-    // unfilled scaffold tokens park the run. Read-only, no subprocess, runs for localOnly too. Checker
-    // findings win so a `<checker-name>` placeholder gets the checker-specific escalate message.
+    // unfilled scaffold tokens would ship a placeholder. Read-only, no subprocess, runs for localOnly too.
+    // Any failing verdict parks with the `config` cause (#2587); checker findings come first in the message.
     const lint = lintFactoryConfig({ constitution, configFile: request.repoConfigFile });
-    if (lint.verdict === 'escalate') {
-      return terminalEscalated(
-        lint.findings
-          .filter((f) => f.rule === 'unknown-checker')
-          .map((f) => f.message)
-          .join('\n'),
-      );
-    }
-    if (lint.verdict === 'park') {
+    if (lint.verdict !== 'ok') {
       return terminalParked(
-        'fail',
-        `config preflight failed before PLAN:\n${lint.findings.map((f) => f.message).join('\n')}`,
+        'config',
+        [
+          'config preflight failed before PLAN:',
+          ...lint.findings.map((f) => f.message),
+          `then run factory unpark ${request.issue}`,
+        ].join('\n'),
       );
     }
 

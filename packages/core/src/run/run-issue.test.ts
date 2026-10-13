@@ -220,19 +220,21 @@ describe('runIssue — constitution checker preflight (#2585)', () => {
     return { dir, constitution };
   }
 
-  it('escalates before PLAN with a file:line message for a <checker-name> placeholder', async () => {
+  it('parks with the config cause before PLAN with a file:line message for a <checker-name> placeholder', async () => {
     const { dir, constitution } = setup(['<checker-name>', 'compile']);
     try {
       const checkBaseHealth = vi.fn();
       const router = fakeRouter();
+      const events = vi.fn();
       const outcome = await runIssue(
         baseRequest(),
         basePolicy(),
-        basePorts({ router, resolveConstitution: () => constitution, checkBaseHealth }),
+        basePorts({ router, resolveConstitution: () => constitution, checkBaseHealth, events: () => events }),
       );
-      expect(outcome.state).toBe('escalated');
-      expect(JSON.stringify(outcome)).toContain(".factory/constitution.md:5: unknown checker '<checker-name>'");
-      expect(JSON.stringify(outcome)).toContain('custom_*');
+      expect(outcome).toMatchObject({ state: 'parked', reason: 'config' });
+      const message = events.mock.calls.find((c) => c[0] === 'config')?.[1];
+      expect(message).toContain(".factory/constitution.md:5: unknown checker '<checker-name>'");
+      expect(message).toContain('custom_*');
       expect(planPhase).not.toHaveBeenCalled();
       expect(checkBaseHealth).not.toHaveBeenCalled();
     } finally {
@@ -240,19 +242,22 @@ describe('runIssue — constitution checker preflight (#2585)', () => {
     }
   });
 
-  it('escalates before PLAN naming an unknown checker such as typecheck', async () => {
+  it('parks with the config cause before PLAN naming an unknown checker such as typecheck', async () => {
     const { dir, constitution } = setup(
       ['typecheck'],
       '---\nproduct: acme\nversion: 1\ncheckers:\n  - typecheck\n---\nbody',
     );
     try {
+      const events = vi.fn();
       const outcome = await runIssue(
         { ...baseRequest(), localOnly: true },
         basePolicy(),
-        basePorts({ resolveConstitution: () => constitution }),
+        basePorts({ resolveConstitution: () => constitution, events: () => events }),
       );
-      expect(outcome.state).toBe('escalated');
-      expect(JSON.stringify(outcome)).toContain("constitution.md:5: unknown checker 'typecheck'");
+      expect(outcome).toMatchObject({ state: 'parked', reason: 'config' });
+      expect(events.mock.calls.find((c) => c[0] === 'config')?.[1]).toContain(
+        "constitution.md:5: unknown checker 'typecheck'",
+      );
       expect(planPhase).not.toHaveBeenCalled();
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -2301,12 +2306,12 @@ describe('runIssue — config template-token preflight (#2586)', () => {
         resolveConstitution: () => constitutionAt(constitutionPath),
       }),
     );
-    expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'config' });
     for (const phase of [planPhase, buildPhase, checkPhase, shipPhase]) expect(phase).not.toHaveBeenCalled();
     expect(checkBaseHealth).not.toHaveBeenCalled();
     expect(run).not.toHaveBeenCalled();
     expect(recordPhase).not.toHaveBeenCalledWith('plan');
-    expect(events).toHaveBeenCalledWith('fail', expect.stringContaining(expected), undefined);
+    expect(events).toHaveBeenCalledWith('config', expect.stringContaining(expected), undefined);
   }
 
   it('parks before PLAN with file:line when the constitution frontmatter has an unfilled token', async () => {
@@ -2335,6 +2340,95 @@ describe('runIssue — config template-token preflight (#2586)', () => {
     );
     expect(outcome.state).toBe('ready');
     expect(planPhase).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('runIssue — preflight config failure ends with the config cause (#2587)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'config-cause-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  function fixture(text = '---\nproduct: acme\nversion: 1\ncheckers:\n  - <checker-name>\n  - compile\n---\nbody') {
+    mkdirSync(join(dir, '.factory'));
+    const absPath = join(dir, '.factory', 'constitution.md');
+    writeFileSync(absPath, text);
+    const constitution: Constitution = {
+      source: 'repo',
+      product: 'acme',
+      version: 1,
+      checkers: ['<checker-name>', 'compile'],
+      body: 'stds',
+      path: absPath,
+      requireTests: true,
+      repoInstance: { relPath: '.factory/constitution.md', absPath },
+    };
+    return constitution;
+  }
+
+  it('ends an unknown-checker preflight failure with the config cause, no CHECK failure and no model call', async () => {
+    const constitution = fixture();
+    const router = fakeRouter();
+    const run = vi.spyOn(router, 'run');
+    const events = vi.fn();
+    const checkBaseHealth = vi.fn();
+    const recordPhase = vi.fn().mockResolvedValue(undefined);
+    const outcome = await runIssue(
+      baseRequest(),
+      basePolicy(),
+      basePorts({
+        router,
+        recordPhase,
+        checkBaseHealth,
+        events: () => events,
+        resolveConstitution: () => constitution,
+      }),
+    );
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'config' });
+    expect((outcome as { failureSignature?: unknown }).failureSignature).toBeUndefined();
+    expect((outcome as { failingChecks?: unknown }).failingChecks).toBeUndefined();
+    expect(run).not.toHaveBeenCalled();
+    for (const phase of [planPhase, buildPhase, checkPhase, shipPhase]) expect(phase).not.toHaveBeenCalled();
+    expect(checkBaseHealth).not.toHaveBeenCalled();
+    expect(recordPhase).not.toHaveBeenCalledWith('check');
+    const kinds = events.mock.calls.map((c) => c[0]);
+    expect(kinds).toContain('config');
+    for (const k of ['fail', 'escalate', 'check']) expect(kinds).not.toContain(k);
+    expect(events.mock.calls.find((c) => c[0] === 'config')?.[2]).toBeUndefined();
+  });
+
+  it('writes the file:line preflight message into the final run report', async () => {
+    const constitution = fixture();
+    const writeLocalRunReport = vi.fn().mockResolvedValue('/tmp/report.md');
+    const writeBenchmarkArtifacts = vi.fn().mockResolvedValue(undefined);
+    await runIssue(
+      baseRequest(),
+      basePolicy(),
+      basePorts({ writeLocalRunReport, writeBenchmarkArtifacts, resolveConstitution: () => constitution }),
+    );
+    const text = ".factory/constitution.md:5: unknown checker '<checker-name>'";
+    expect(writeLocalRunReport).toHaveBeenCalledTimes(1);
+    const report = writeLocalRunReport.mock.calls[0][0];
+    expect(report.reason).toContain(text);
+    expect(report.reason).toContain('factory unpark');
+    const failure = writeBenchmarkArtifacts.mock.calls[0][0].failure;
+    expect(failure.reason).toBe('config');
+    expect(failure.phase).not.toBe('check');
+    expect(failure.message).toContain(text);
+  });
+
+  it('reports a token-only failure with the config cause and its file:line', async () => {
+    const constitution = fixture('---\nproduct: acme\nname: <project-name>\n---\nbody');
+    constitution.checkers = ['compile'];
+    const writeLocalRunReport = vi.fn().mockResolvedValue('/tmp/report.md');
+    const outcome = await runIssue(
+      baseRequest(),
+      basePolicy(),
+      basePorts({ writeLocalRunReport, resolveConstitution: () => constitution }),
+    );
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'config' });
+    expect(writeLocalRunReport.mock.calls[0][0].reason).toContain('.factory/constitution.md:3');
   });
 });
 
