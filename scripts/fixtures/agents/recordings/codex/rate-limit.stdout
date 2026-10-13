@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"019ff914-ffab-7d32-9e8d-2b202a31c34f"}
+{"type":"turn.started"}
+{"type":"error","message":"stream error: rate limit exceeded; retry after 30s"}
+{"type":"turn.failed","error":{"message":"stream error: rate limit exceeded; retry after 30s"}}
