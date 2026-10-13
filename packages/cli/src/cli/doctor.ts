@@ -60,6 +60,8 @@ export interface DoctorEnvProbes {
   codexSessionState?: () => 'ok' | 'refresh-pending' | 'unusable' | 'unknown';
   /** Whether a stored Claude Code login exists (#2556); reads local state only, never runs inference. */
   claudeLoggedIn?: () => boolean;
+  /** Stored Claude Code OAuth session state (#2721), read locally; never refreshes. */
+  claudeSessionState?: () => 'ok' | 'refresh-pending' | 'unusable' | 'unknown';
   /** Whether a stored opencode auth login exists (#2556); reads local state only, never runs inference. */
   opencodeLoggedIn?: () => boolean;
   /** Repo-configured command harnesses (#2691); absent or [] means none. */
@@ -244,6 +246,15 @@ function safe(fn: (() => boolean) | undefined): boolean {
   }
 }
 
+function safeState(fn: (() => string) | undefined): string {
+  if (!fn) return 'unknown';
+  try {
+    return fn();
+  } catch {
+    return 'unknown';
+  }
+}
+
 /** One `<cli> signed in` row per installed harness CLI (#2556, #2631), judged only from local evidence: an env key,
  *  stored credentials, or `codex login status`. Never runs inference and never prints a secret. */
 export function harnessSignInChecks(probes: DoctorEnvProbes): DoctorCheck[] {
@@ -293,6 +304,18 @@ export function harnessSignInChecks(probes: DoctorEnvProbes): DoctorCheck[] {
       } else {
         const key = envKeys.find((k) => envPresent(k));
         if (key) return { name, section, ok: true, detail: `signed in (${key} set)` };
+        if (cli === 'claude' && safeState(probes.claudeSessionState) === 'unusable') {
+          return {
+            name,
+            section,
+            ok: false,
+            optional: found.length > 1,
+            detail:
+              'stored Claude Code login has expired and cannot be refreshed (no live access token and no refresh token); re-run claude login',
+            fix: 'run `claude`, then /login, then re-run `factory doctor`',
+            next: login,
+          };
+        }
         if (cli === 'claude' && safe(probes.claudeLoggedIn)) {
           return { name, section, ok: true, detail: 'signed in (stored Claude Code login found)' };
         }

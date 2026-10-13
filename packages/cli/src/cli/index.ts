@@ -323,6 +323,7 @@ import {
   parseTriageCandidates,
   codexChatgptSessionState,
   hasClaudeLoginEvidence,
+  claudeStoredSessionState,
   hasOpencodeLoginEvidence,
 } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
@@ -6387,6 +6388,7 @@ async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean }
         },
         fileExists: existsSync,
       }),
+    claudeSessionState: () => claudeStoredSessionState(),
     opencodeLoggedIn: () => hasOpencodeLoginEvidence(),
     commandHarnesses: () =>
       repoRoot === null
