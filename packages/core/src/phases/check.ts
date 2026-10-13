@@ -8,7 +8,7 @@ import { type BaselineReport, extractFailingTestNames, runBaselineCheckers } fro
 import { type FlakeRerun, rerunTestsChecker } from '../checkers/flaky-rerun.js';
 import {
   type CheckerContext,
-  isUnknownCheckerOutput,
+  isConfigCheckerOutput,
   probeWorktree,
   renderCheckerFindings,
   runAllCheckers,
@@ -229,16 +229,19 @@ function classifyReworkCause(opts: {
   failovers: { reason: FailoverReason }[];
   /** Reason from a router error when the call threw before any model produced output (#642). */
   failureReason?: FailoverReason;
+  /** A config-validation FAIL (unknown checker, schema error, unfilled placeholder) drove the round (#2582). */
+  config?: boolean;
 }): ReworkCause {
   if (opts.steering && opts.steering.messages.length > 0) return 'direction-change';
   if (opts.failovers.some((f) => EXTERNAL_REASONS.has(f.reason))) return 'external';
   if (opts.failureReason !== undefined && EXTERNAL_REASONS.has(opts.failureReason)) return 'external';
+  if (opts.config) return 'config';
   return 'factory-fault';
 }
 
-/** 'config' when any FAIL is an unknown-checker constitution error (#2581); otherwise 'environment'. */
+/** 'config' when any FAIL is a config-validation error (unknown checker, schema error, unfilled placeholder; #2581/#2582); otherwise 'environment'. */
 export function classifyBaseFailureCause(summary: CheckSummary): BaseFailureCause {
-  return summary.results.some(isUnknownCheckerOutput) ? 'config' : 'environment';
+  return summary.results.some(isConfigCheckerOutput) ? 'config' : 'environment';
 }
 
 /** True when every round-1 failing checker also fails on the base SHA (#1927): the failure
@@ -600,7 +603,12 @@ async function checkPhaseImpl(opts: {
       runId,
     });
 
-    const cause: ReworkCause = classifyReworkCause({ steering, failovers, failureReason });
+    const cause: ReworkCause = classifyReworkCause({
+      steering,
+      failovers,
+      failureReason,
+      config: summary.results.some(isConfigCheckerOutput),
+    });
     log(
       'rework',
       `round ${reworkRounds}/${maxRounds}: ${summary.failures} failing (${failingChecks.join(', ')}) — cause=${cause}`,

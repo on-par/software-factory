@@ -16,6 +16,11 @@ export interface TemplateTokenFinding {
 
 const TOKEN_RE = /(?<![\w])<[A-Za-z][^<>\r\n]*>/g;
 
+// Same grammar as TOKEN_RE, anchored to the whole trimmed string.
+export function isTemplateToken(value: string): boolean {
+  return /^<[A-Za-z][^<>\r\n]*>$/.test(value.trim());
+}
+
 export function findTemplateTokens(text: string, file: string, scope: 'frontmatter' | 'all'): TemplateTokenFinding[] {
   const lines = text.replace(/^﻿/, '').split(/\r?\n/);
   let start = 0;

@@ -14,7 +14,7 @@ import { StubModelExecutor } from '../router/stub.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import type { BaselineReport } from '../checkers/baseline.js';
 import { BaselineCache } from '../checkers/baseline-cache.js';
-import { unknownCheckerOutput } from '../checkers/index.js';
+import { schemaErrorCheckerOutput, unfilledPlaceholderCheckerOutput, unknownCheckerOutput } from '../checkers/index.js';
 import type { CheckSummary, Constitution, ReworkInfo } from '../types/index.js';
 import {
   baseFailingCheckers,
@@ -314,6 +314,34 @@ describe('partial base overlap (#1929)', () => {
   });
 });
 
+describe('classifyBaseFailureCause (#2582)', () => {
+  const summaryWith = (...results: CheckSummary['results']): CheckSummary => ({
+    results,
+    failures: results.length,
+    passes: 0,
+    skips: 0,
+    total: results.length,
+  });
+
+  it('is config for a schema-error-only summary', () => {
+    expect(classifyBaseFailureCause(summaryWith(schemaErrorCheckerOutput('checkers', 'is a string, not a list')))).toBe(
+      'config',
+    );
+  });
+
+  it('is config for a placeholder-only summary', () => {
+    expect(classifyBaseFailureCause(summaryWith(unfilledPlaceholderCheckerOutput('<checker-name>')))).toBe('config');
+  });
+
+  it('is environment when no output is a config output', () => {
+    expect(
+      classifyBaseFailureCause(
+        summaryWith({ checker: 'tests', result: 'FAIL', details: 'zod schema error: unfilled placeholder' }),
+      ),
+    ).toBe('environment');
+  });
+});
+
 describe('classifyBaseFailureCause (#2581)', () => {
   const summaryWith = (...results: Array<{ checker: string; details: string }>): CheckSummary => ({
     results: results.map((r) => ({ ...r, result: 'FAIL' as const })),
@@ -489,6 +517,160 @@ describe('rework cause environment (#1927)', () => {
       expect(result.reworkRounds).toBe(0);
       expect(stub.calls).toHaveLength(0);
       expect(messages.some((m) => m.includes('cause=config'))).toBe(true);
+    },
+  );
+
+  it(
+    'classifies a schema-error failure that also fails on base as cause=config (#2582)',
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, specPath } = await makeFailingWorktree();
+      const { router, stub } = makeRouter();
+      const messages: string[] = [];
+      const result = await checkPhase({
+        issue: 77,
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        maxReworkRounds: 1,
+        diffBase: 'abc1234567',
+        log: (_type, msg) => {
+          messages.push(msg);
+        },
+        runCheckers: async () => ({
+          results: [schemaErrorCheckerOutput('checkers', 'is a string, not a list')],
+          failures: 1,
+          passes: 0,
+          skips: 0,
+          total: 1,
+        }),
+        runBaseline: async (o) =>
+          ({
+            baseSha: o.baseSha,
+            checkers: o.failing
+              .filter((r) => r.result === 'FAIL')
+              .map((r) => ({ checker: r.checker, verdict: 'fails-on-base', baseResult: 'FAIL' })),
+          }) as BaselineReport,
+      });
+      expect(result.environment?.cause).toBe('config');
+      expect(result.reworkRounds).toBe(0);
+      expect(stub.calls).toHaveLength(0);
+      expect(messages.some((m) => m.includes('cause=config'))).toBe(true);
+    },
+  );
+
+  it(
+    'classifies an unfilled-placeholder failure that also fails on base as cause=config (#2582)',
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, specPath } = await makeFailingWorktree();
+      const { router, stub } = makeRouter();
+      const messages: string[] = [];
+      const result = await checkPhase({
+        issue: 77,
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        maxReworkRounds: 1,
+        diffBase: 'abc1234567',
+        log: (_type, msg) => {
+          messages.push(msg);
+        },
+        runCheckers: async () => ({
+          results: [unfilledPlaceholderCheckerOutput('<checker-name>')],
+          failures: 1,
+          passes: 0,
+          skips: 0,
+          total: 1,
+        }),
+        runBaseline: async (o) =>
+          ({
+            baseSha: o.baseSha,
+            checkers: o.failing
+              .filter((r) => r.result === 'FAIL')
+              .map((r) => ({ checker: r.checker, verdict: 'fails-on-base', baseResult: 'FAIL' })),
+          }) as BaselineReport,
+      });
+      expect(result.environment?.cause).toBe('config');
+      expect(result.reworkRounds).toBe(0);
+      expect(stub.calls).toHaveLength(0);
+      expect(messages.some((m) => m.includes('cause=config'))).toBe(true);
+    },
+  );
+
+  it('classifies a lane-only schema-error rework round as cause=config (#2582)', { timeout: 120_000 }, async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const { router } = makeRouter();
+    const logCalls: Array<[string, string, ({ rework?: ReworkInfo } | undefined)?]> = [];
+    const result = await checkPhase({
+      issue: 77,
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      maxReworkRounds: 1,
+      diffBase: 'abc1234567',
+      log: (type, msg, extra) => {
+        logCalls.push([type, msg, extra]);
+      },
+      runCheckers: async () => ({
+        results: [schemaErrorCheckerOutput('checkers', 'is a string, not a list')],
+        failures: 1,
+        passes: 0,
+        skips: 0,
+        total: 1,
+      }),
+      runBaseline: async (o) =>
+        ({
+          baseSha: o.baseSha,
+          checkers: o.failing
+            .filter((r) => r.result === 'FAIL')
+            .map((r) => ({ checker: r.checker, verdict: 'clean-on-base', baseResult: 'PASS' })),
+        }) as BaselineReport,
+    });
+    const rework = logCalls.find(([type]) => type === 'rework')?.[2]?.rework;
+    expect(rework?.cause).toBe('config');
+    expect(result.environment).toBeUndefined();
+  });
+
+  it(
+    'classifies a lane-only unfilled-placeholder rework round as cause=config (#2582)',
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, specPath } = await makeFailingWorktree();
+      const { router } = makeRouter();
+      const logCalls: Array<[string, string, ({ rework?: ReworkInfo } | undefined)?]> = [];
+      const result = await checkPhase({
+        issue: 77,
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        maxReworkRounds: 1,
+        diffBase: 'abc1234567',
+        log: (type, msg, extra) => {
+          logCalls.push([type, msg, extra]);
+        },
+        runCheckers: async () => ({
+          results: [unfilledPlaceholderCheckerOutput('<checker-name>')],
+          failures: 1,
+          passes: 0,
+          skips: 0,
+          total: 1,
+        }),
+        runBaseline: async (o) =>
+          ({
+            baseSha: o.baseSha,
+            checkers: o.failing
+              .filter((r) => r.result === 'FAIL')
+              .map((r) => ({ checker: r.checker, verdict: 'clean-on-base', baseResult: 'PASS' })),
+          }) as BaselineReport,
+      });
+      const rework = logCalls.find(([type]) => type === 'rework')?.[2]?.rework;
+      expect(rework?.cause).toBe('config');
+      expect(result.environment).toBeUndefined();
     },
   );
 

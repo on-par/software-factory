@@ -5,10 +5,21 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { Constitution } from '../types/index.js';
-import { findTemplateTokens, preflightConfigTokens } from './template-tokens.js';
+import { findTemplateTokens, isTemplateToken, preflightConfigTokens } from './template-tokens.js';
 
 const CF = '.factory/constitution.md';
 const fm = (text: string) => findTemplateTokens(text, CF, 'frontmatter');
+
+describe('isTemplateToken', () => {
+  it('is true for a whole token, ignoring surrounding whitespace', () => {
+    expect(isTemplateToken('<checker-name>')).toBe(true);
+    expect(isTemplateToken(' <project name> ')).toBe(true);
+  });
+
+  it('is false for non-tokens and mid-string tokens', () => {
+    for (const v of ['lint', 'lint<x>', 'custom_<x>', '<1abc>', '<>', '']) expect(isTemplateToken(v)).toBe(false);
+  });
+});
 
 describe('findTemplateTokens', () => {
   it('reports frontmatter tokens with 1-based lines and the exact message', () => {
