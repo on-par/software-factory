@@ -593,8 +593,7 @@ export const defaultRoutesConfig: RoutesDefaults = {
     steward: {
       tier: 'boss',
       description:
-        'Stuck-run steward (ADR-0155): one tool-less call over the sanitized packet, returning one JSON verdict',
-      model: 'claude-opus-5',
+        'Stuck-run steward (ADR-0155): one tool-less call over the sanitized packet, returning one JSON verdict; model: a pin, else the first runnable boss-tier model',
       allowedTools: [],
       output: 'json',
     },

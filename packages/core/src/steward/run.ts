@@ -20,6 +20,8 @@ export interface RunStewardPorts {
   comments: StewardCommentGitHubClient;
   /** Default: defaultRoutesConfig.routes.steward (diagnoseStewardPacket's default). */
   route?: StewardRouteConfig;
+  /** Runnable boss-tier models, used when the route pins no model. */
+  bossModels?: readonly string[];
   adrCandidates?: readonly AdrRelevanceCandidate[];
 }
 
@@ -49,6 +51,7 @@ export async function runSteward(input: RunStewardInput, ports: RunStewardPorts)
     invoke: ports.invoke,
     costsFile: ports.costsFile,
     ...(ports.route !== undefined ? { route: ports.route } : {}),
+    ...(ports.bossModels !== undefined ? { bossModels: ports.bossModels } : {}),
   });
   if (verdict.reason === 'steward-error') return { verdict };
   const [owner, repo] = input.repo.split('/');

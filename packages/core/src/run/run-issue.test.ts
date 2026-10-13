@@ -913,7 +913,13 @@ describe('runIssue — steward park path (#2124)', () => {
         }),
       };
     });
-    const steward: RunStewardPorts = { runDir, costsFile: join(runDir, 'costs.jsonl'), invoke, comments: client };
+    const steward: RunStewardPorts = {
+      runDir,
+      costsFile: join(runDir, 'costs.jsonl'),
+      invoke,
+      comments: client,
+      bossModels: ['boss-model'],
+    };
     return { comments, client, invoke, steward };
   };
   const stewardFiles = () => ['steward-packet.json', 'steward-verdict.json'].filter((f) => existsSync(join(runDir, f)));

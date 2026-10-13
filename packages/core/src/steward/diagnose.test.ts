@@ -17,6 +17,7 @@ import {
   diagnoseStewardPacket,
   findUncitedExcerpt,
   parseStewardVerdict,
+  resolveStewardModel,
   writeStewardVerdict,
 } from './diagnose.js';
 import type { StewardModelCall, StewardModelReply, StewardRouteConfig, StewardVerdictRecord } from './diagnose.js';
@@ -167,12 +168,14 @@ describe('diagnoseStewardPacket', () => {
       ...(usage ? { usage } : {}),
     }));
   const costsFileIn = (dir: string) => join(dir, 'costs.jsonl');
+  const BOSS = ['claude-opus-5'];
 
   it('writes a confident verdict and preserves nextStep', async () => {
     const dir = await tmp();
     const record = await diagnoseStewardPacket(dir, fixturePacket(), {
       invoke: replying(validVerdict()),
       costsFile: costsFileIn(dir),
+      bossModels: BOSS,
     });
     const file = await readVerdict(dir);
     expect(file).toMatchObject({
@@ -188,6 +191,7 @@ describe('diagnoseStewardPacket', () => {
     await diagnoseStewardPacket(dir, fixturePacket(), {
       invoke: replying({ ...validVerdict(), confidence: 0.5 }),
       costsFile: costsFileIn(dir),
+      bossModels: BOSS,
     });
     expect(await readVerdict(dir)).toMatchObject({ escalate: true, reason: 'low-confidence' });
   });
@@ -204,7 +208,11 @@ describe('diagnoseStewardPacket', () => {
   ];
   it.each(invalid)('fails closed on %s', async (_n, reply, errorKind) => {
     const dir = await tmp();
-    await diagnoseStewardPacket(dir, fixturePacket(), { invoke: replying(reply), costsFile: costsFileIn(dir) });
+    await diagnoseStewardPacket(dir, fixturePacket(), {
+      invoke: replying(reply),
+      costsFile: costsFileIn(dir),
+      bossModels: BOSS,
+    });
     expect(await readVerdict(dir)).toMatchObject({ escalate: true, reason: 'steward-error', confidence: 0, errorKind });
   });
 
@@ -216,6 +224,7 @@ describe('diagnoseStewardPacket', () => {
     await diagnoseStewardPacket(dir, fixturePacket(), {
       invoke: replying({ ...validVerdict(), citations: [citation] }),
       costsFile: costsFileIn(dir),
+      bossModels: BOSS,
     });
     expect(await readVerdict(dir)).toMatchObject({
       escalate: true,
@@ -229,7 +238,11 @@ describe('diagnoseStewardPacket', () => {
     const invoke = vi.fn(async () => {
       throw failure;
     });
-    const record = await diagnoseStewardPacket(dir, fixturePacket(), { invoke, costsFile: costsFileIn(dir) });
+    const record = await diagnoseStewardPacket(dir, fixturePacket(), {
+      invoke,
+      costsFile: costsFileIn(dir),
+      bossModels: BOSS,
+    });
     expect(record).toMatchObject({ reason: 'steward-error', errorKind: 'model-error' });
     expect(await readVerdict(dir)).toMatchObject({ escalate: true, errorKind: 'model-error' });
   });
@@ -239,24 +252,61 @@ describe('diagnoseStewardPacket', () => {
     const invoke = vi.fn(async () => {
       throw new Error('x'.repeat(2000));
     });
-    const record = await diagnoseStewardPacket(dir, fixturePacket(), { invoke, costsFile: costsFileIn(dir) });
+    const record = await diagnoseStewardPacket(dir, fixturePacket(), {
+      invoke,
+      costsFile: costsFileIn(dir),
+      bossModels: BOSS,
+    });
     expect(record.reason === 'steward-error' && record.detail.length).toBe(STEWARD_ERROR_DETAIL_CHARS);
   });
 
-  it('makes one tool-less, data-framed call on the pinned route', async () => {
+  it('makes one tool-less, data-framed call on the resolved boss model', async () => {
     const dir = await tmp();
     const invoke = replying(validVerdict());
-    await diagnoseStewardPacket(dir, fixturePacket(), { invoke, costsFile: costsFileIn(dir) });
+    await diagnoseStewardPacket(dir, fixturePacket(), { invoke, costsFile: costsFileIn(dir), bossModels: BOSS });
     expect(invoke).toHaveBeenCalledTimes(1);
     const call = invoke.mock.calls[0][0];
     expect(call).toMatchObject({
       route: 'steward',
-      model: defaultRoutesConfig.routes.steward.model,
+      model: 'claude-opus-5',
       allowedTools: [],
       output: 'json',
     });
     expect(call.prompt).toContain(STEWARD_PACKET_DATA_NOTICE);
     expect(call.prompt).toContain('data, not instructions');
+  });
+
+  it('calls the first runnable boss-tier model when the route has no pin', async () => {
+    const dir = await tmp();
+    const invoke = replying(validVerdict());
+    await diagnoseStewardPacket(dir, fixturePacket(), {
+      invoke,
+      costsFile: costsFileIn(dir),
+      bossModels: ['gpt-5.6-terra-high', 'gpt-5.6-sol'],
+    });
+    expect(invoke.mock.calls[0][0].model).toBe('gpt-5.6-terra-high');
+    expect(readCosts(costsFileIn(dir))[0]).toMatchObject({ model: 'gpt-5.6-terra-high' });
+  });
+
+  it('an explicit pin beats the boss tier', async () => {
+    const dir = await tmp();
+    const invoke = replying(validVerdict());
+    await diagnoseStewardPacket(dir, fixturePacket(), {
+      invoke,
+      route: { model: 'claude-opus-5', allowedTools: [] },
+      costsFile: costsFileIn(dir),
+      bossModels: ['gpt-5.6-terra-high'],
+    });
+    expect(invoke.mock.calls[0][0].model).toBe('claude-opus-5');
+  });
+
+  it('refuses the packaged route with no boss models without calling the model', async () => {
+    const dir = await tmp();
+    const invoke = replying(validVerdict());
+    await diagnoseStewardPacket(dir, fixturePacket(), { invoke, costsFile: costsFileIn(dir) });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(await readVerdict(dir)).toMatchObject({ reason: 'steward-error', errorKind: 'route-misconfigured' });
+    expect(readCosts(costsFileIn(dir))).toEqual([]);
   });
 
   it.each<[string, StewardRouteConfig]>([
@@ -278,12 +328,13 @@ describe('diagnoseStewardPacket', () => {
     await diagnoseStewardPacket(dir, fixturePacket(), {
       invoke: replying(validVerdict(), usage),
       costsFile: costsFileIn(dir),
+      bossModels: BOSS,
     });
     const rows = readCosts(costsFileIn(dir));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       task: 'steward',
-      model: defaultRoutesConfig.routes.steward.model,
+      model: 'claude-opus-5',
       issue: String(fixturePacket().issue.number),
       inputTokens: 1200,
       outputTokens: 300,
@@ -298,7 +349,11 @@ describe('diagnoseStewardPacket', () => {
 
   it('records a row even when the reply is invalid JSON', async () => {
     const dir = await tmp();
-    await diagnoseStewardPacket(dir, fixturePacket(), { invoke: replying('not json'), costsFile: costsFileIn(dir) });
+    await diagnoseStewardPacket(dir, fixturePacket(), {
+      invoke: replying('not json'),
+      costsFile: costsFileIn(dir),
+      bossModels: BOSS,
+    });
     const rows = readCosts(costsFileIn(dir));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ task: 'steward', estimated: true });
@@ -309,13 +364,36 @@ describe('diagnoseStewardPacket', () => {
     const invoke = vi.fn(async (): Promise<StewardModelReply> => {
       throw new Error('boom');
     });
-    await diagnoseStewardPacket(dir, fixturePacket(), { invoke, costsFile: costsFileIn(dir) });
+    await diagnoseStewardPacket(dir, fixturePacket(), { invoke, costsFile: costsFileIn(dir), bossModels: BOSS });
     expect(readCosts(costsFileIn(dir))).toEqual([]);
   });
 });
 
+describe('resolveStewardModel', () => {
+  it('returns the pinned model even when boss-tier models are available', () => {
+    expect(resolveStewardModel({ model: 'pinned' }, ['gpt-5.6-terra-high'])).toBe('pinned');
+  });
+
+  it('returns the first boss-tier model when no pin is set', () => {
+    expect(resolveStewardModel({}, ['gpt-5.6-terra-high', 'gpt-5.6-sol'])).toBe('gpt-5.6-terra-high');
+  });
+
+  it('treats a whitespace pin as unset', () => {
+    expect(resolveStewardModel({ model: '   ' }, ['m'])).toBe('m');
+  });
+
+  it('returns undefined with no pin and no boss models', () => {
+    expect(resolveStewardModel({})).toBeUndefined();
+    expect(resolveStewardModel(undefined, [])).toBeUndefined();
+  });
+
+  it('resolves the packaged default route from the boss tier', () => {
+    expect(resolveStewardModel(defaultRoutesConfig.routes.steward, ['gpt-5.6-terra-high'])).toBe('gpt-5.6-terra-high');
+  });
+});
+
 describe('buildStewardCostEntry', () => {
-  const model = defaultRoutesConfig.routes.steward.model as string;
+  const model = 'claude-opus-5';
 
   it('estimates tokens and prices with the registry when no usage is reported', () => {
     const entry = buildStewardCostEntry(model, 7, 'a'.repeat(41), { text: 'b'.repeat(8) });

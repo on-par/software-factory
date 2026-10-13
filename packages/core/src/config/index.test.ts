@@ -1005,10 +1005,10 @@ describe('loadRoutesConfig', () => {
     expect(() => loadRoutesConfig()).not.toThrow();
   });
 
-  it('keeps the steward route model, allowedTools and output', () => {
-    expect(loadRoutesConfig().routes.steward).toEqual(
-      expect.objectContaining({ tier: 'boss', model: 'claude-opus-5', allowedTools: [], output: 'json' }),
-    );
+  it('keeps the steward route allowedTools and output with no model pin', () => {
+    const route = loadRoutesConfig().routes.steward;
+    expect(route).toEqual(expect.objectContaining({ tier: 'boss', allowedTools: [], output: 'json' }));
+    expect(route.model).toBeUndefined();
   });
 
   it('throws when a route declares an unsupported output', async () => {
