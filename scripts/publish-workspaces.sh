@@ -12,6 +12,8 @@
 # --tag latest; anything else fails before any publish. A package already on the
 # registry at that version is skipped with a log line, so a half-finished run can be
 # retried. Every other arg goes to every `npm publish` call.
+# #2627: every publish passes `--provenance`, which needs a CI provider with OIDC
+# (publish.yml grants `id-token: write`).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -62,5 +64,5 @@ for name in "${NAMES[@]}"; do
     continue
   fi
   echo "publishing $name@$VERSION (--tag $TAG)"
-  npm publish --workspace "$name" --tag "$TAG" ${ARGS[@]+"${ARGS[@]}"}
+  npm publish --workspace "$name" --tag "$TAG" --provenance ${ARGS[@]+"${ARGS[@]}"}
 done

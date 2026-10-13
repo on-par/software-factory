@@ -3,6 +3,8 @@
 # workspaces, be in dependency order, be used by both consumers, and drive the publish loop.
 # #2244: the loop takes --tag next|latest, refuses the wrong channel for the version, and
 # skips packages already on the registry so a half-finished run can be retried.
+# #2627: every publish passes --provenance, and publish.yml grants id-token: write and is the
+# only publish workflow.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -57,6 +59,12 @@ list.forEach((name, i) => {
 
 # (c) consumers use the list
 grep -qE 'run: bash scripts/publish-release.sh$' "$PUBLISH_YML" || fail "publish.yml lacks the publish step"
+perm_line="$(grep -E '^ *permissions:' "$PUBLISH_YML" | head -n 1)"
+for scope in 'contents: read' 'issues: read' 'id-token: write'; do
+  grep -q -- "$scope" <<<"$perm_line" || fail "publish.yml permissions lack $scope"
+done
+[ "$(ls "$ROOT/.github/workflows" | grep -i publish)" = "publish.yml" ] || fail "publish workflow is not only publish.yml"
+grep -qE '^ *npm publish .*--provenance' "$ROOT/scripts/publish-workspaces.sh" || fail "publish-workspaces.sh does not pass --provenance"
 grep -qE '^bash scripts/publish-workspaces.sh --tag "\$channel" --dry-run ' "$ROOT/scripts/publish-release.sh" || fail "publish-release.sh lacks the dry-run"
 grep -qE '^bash scripts/publish-workspaces.sh --tag "\$channel" \|\|' "$ROOT/scripts/publish-release.sh" || fail "publish-release.sh does not run the publish loop"
 if grep -q -- '--workspace' "$PUBLISH_YML"; then fail "publish.yml hard-codes --workspace"; fi
@@ -126,7 +134,7 @@ while IFS= read -r call; do
   if [ $((i % 2)) -eq 0 ]; then
     [ "$call" = "view $name@$VERSION version" ] || fail "call $i was '$call'"
   else
-    [ "$call" = "publish --workspace $name --tag latest --dry-run" ] || fail "call $i was '$call'"
+    [ "$call" = "publish --workspace $name --tag latest --provenance --dry-run" ] || fail "call $i was '$call'"
   fi
   i=$((i + 1))
 done <"$NPM_CALL_LOG"
@@ -160,7 +168,7 @@ for n in 0 1 2; do
   grep -qx "skipping ${NAMES[$n]}@$VERSION: already on the registry" <<<"$out" || fail "no skip line for ${NAMES[$n]}"
 done
 want=""
-for n in 3 4 5 6; do want="${want}publish --workspace ${NAMES[$n]} --tag latest"$'\n'; done
+for n in 3 4 5 6; do want="${want}publish --workspace ${NAMES[$n]} --tag latest --provenance"$'\n'; done
 [ "$(publish_calls)" = "${want%$'\n'}" ] || fail "retry published: $(publish_calls)"
 
 # Pre-release: --tag next publishes with the exact version; --tag latest is refused.
@@ -171,7 +179,7 @@ grep -q "0.9.0-next.3 must use --tag next" "$BINDIR/err.txt" || fail "wrong-chan
 expect_no_npm "pre-release with --tag latest"
 : >"$NPM_CALL_LOG"
 bash "$PUBLISH" --tag next --dry-run >/dev/null
-[ "$(publish_calls | grep -c -- '--tag next --dry-run$')" = "${#NAMES[@]}" ] || fail "pre-release did not use --tag next: $(publish_calls)"
+[ "$(publish_calls | grep -c -- '--tag next --provenance --dry-run$')" = "${#NAMES[@]}" ] || fail "pre-release did not use --tag next: $(publish_calls)"
 [ "$(grep -c '^view .*@0.9.0-next.3 version$' "$NPM_CALL_LOG")" = "${#NAMES[@]}" ] || fail "pre-release registry checks: $(cat "$NPM_CALL_LOG")"
 
 # Lockstep drift: refused before any npm call.

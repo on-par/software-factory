@@ -11,7 +11,7 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    permissions: { contents: read, issues: read }
+    permissions: { contents: read, issues: read, id-token: write }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -31,6 +31,8 @@ jobs:
       # #2244: the version and dist-tag come from the tag name: vX.Y.Z-next.N publishes
       # X.Y.Z-next.N to `next`, vX.Y.Z publishes X.Y.Z to `latest`. The step dry-runs
       # every package (with exact internal pins) before the real publish.
+      # #2627: id-token: write + --provenance enable trusted publishing; publish-release.sh
+      # fails early on npm < 11.5.1. NPM_TOKEN stays as the fallback until an OIDC publish is proven.
       - name: Publish to npm
         id: publish
         env:

@@ -11,6 +11,8 @@
 # set-release-version.sh writes that version into the packages (never committed), then
 # publish-workspaces.sh dry-runs and publishes. A dry run on a non-tag ref uses the
 # checked-out version.
+# #2627: before the first dry-run the runner's npm must be at least NPM_MIN_VERSION (the
+# first npm with trusted publishing, OIDC), else the run ends NOT PUBLISHED.
 #
 # Env:
 #   PUBLISH_DRY_RUN=true   dry-run only (green, never publishes)
@@ -23,6 +25,28 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+
+# Minimum npm CLI for npm trusted publishing (#2627).
+NPM_MIN_VERSION=11.5.1
+
+# npm_version_ok <version>: 0 when <version> is at or above NPM_MIN_VERSION, 1 when older,
+# 2 when it is not X.Y.Z[-pre]. A pre-release of the minimum itself is too old.
+npm_version_ok() {
+  local v="${1//$'\r'/}"
+  v="${v#"${v%%[![:space:]]*}"}"
+  v="${v%"${v##*[![:space:]]}"}"
+  [[ "$v" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-.*)?$ ]] || return 2
+  local have=("$((10#${BASH_REMATCH[1]}))" "$((10#${BASH_REMATCH[2]}))" "$((10#${BASH_REMATCH[3]}))")
+  local pre="${BASH_REMATCH[4]}"
+  local want
+  IFS=. read -r -a want <<<"$NPM_MIN_VERSION"
+  local i
+  for i in 0 1 2; do
+    [ "${have[$i]}" -le "${want[$i]}" ] || return 0
+    [ "${have[$i]}" -ge "${want[$i]}" ] || return 1
+  done
+  [ -z "$pre" ] || return 1
+}
 
 summary() {
   echo "$1"
@@ -62,6 +86,16 @@ case "$version" in
   *-*) channel=next ;;
   *) channel=latest ;;
 esac
+
+npm_version="$(npm --version 2>/dev/null)" || npm_version=""
+npm_version="${npm_version//$'\r'/}"
+npm_version="${npm_version#"${npm_version%%[![:space:]]*}"}"
+npm_version="${npm_version%"${npm_version##*[![:space:]]}"}"
+rc=0
+npm_version_ok "$npm_version" || rc=$?
+[ "$rc" != 2 ] || not_published "could not read the npm version (got '${npm_version}')" 1
+[ "$rc" = 0 ] || not_published "npm $npm_version is older than $NPM_MIN_VERSION, the minimum for npm trusted publishing (OIDC)" 1
+echo "npm $npm_version >= $NPM_MIN_VERSION"
 
 bash scripts/publish-workspaces.sh --tag "$channel" --dry-run || not_published "dry-run failed" 1
 [ "$dry_run" = false ] || not_published "dry-run, not published" 0
