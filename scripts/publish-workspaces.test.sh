@@ -5,6 +5,7 @@
 # skips packages already on the registry so a half-finished run can be retried.
 # #2627: every publish passes --provenance, and publish.yml grants id-token: write and is the
 # only publish workflow.
+# #2630: no workflow passes NPM_TOKEN / NODE_AUTH_TOKEN; npm authenticates via OIDC.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -63,6 +64,12 @@ perm_line="$(grep -E '^ *permissions:' "$PUBLISH_YML" | head -n 1)"
 for scope in 'contents: read' 'issues: read' 'id-token: write'; do
   grep -q -- "$scope" <<<"$perm_line" || fail "publish.yml permissions lack $scope"
 done
+OIDC_COMMENT='# #2630: no NODE_AUTH_TOKEN is passed, so npm must authenticate via OIDC.'
+publish_step="$(awk '/- name: Publish to npm/{on=1;print;next} on&&/^      - /{on=0} on' "$PUBLISH_YML")"
+if grep -qE 'NODE_AUTH_TOKEN|NPM_TOKEN' <<<"$publish_step"; then fail "publish.yml's Publish to npm step sets NODE_AUTH_TOKEN"; fi
+grep -qF -- "$OIDC_COMMENT" "$PUBLISH_YML" || fail "publish.yml lacks the #2630 OIDC comment"
+token_refs="$(grep -rnE 'NPM_TOKEN|NODE_AUTH_TOKEN' "$ROOT/.github/workflows" | grep -vF -- "$OIDC_COMMENT" || true)"
+[ -z "$token_refs" ] || fail ".github/workflows references NPM_TOKEN or NODE_AUTH_TOKEN: $token_refs"
 [ "$(ls "$ROOT/.github/workflows" | grep -i publish)" = "publish.yml" ] || fail "publish workflow is not only publish.yml"
 grep -qE '^ *npm publish .*--provenance' "$ROOT/scripts/publish-workspaces.sh" || fail "publish-workspaces.sh does not pass --provenance"
 grep -qE '^bash scripts/publish-workspaces.sh --tag "\$channel" --dry-run ' "$ROOT/scripts/publish-release.sh" || fail "publish-release.sh lacks the dry-run"
