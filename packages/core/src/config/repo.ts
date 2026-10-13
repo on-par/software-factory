@@ -11,6 +11,7 @@ import { defaultLaneBreakerThreshold } from '@on-par/factory-config';
 import { z } from 'zod';
 import { readRepoConfigFile } from './repo-config-file.js';
 import { runConfigSource } from './run-config-source.js';
+import { toConfigSchemaIssue, type ConfigSchemaIssue } from './schema-issue.js';
 
 import type { ModelRegistry } from '../models/index.js';
 import { resolveModelOverrides } from '../models/index.js';
@@ -294,6 +295,19 @@ export function adaptV1ToV2(v1: RepoFactoryConfigV1Input): RepoFactoryConfig {
 
 const warnedV1ConfigPaths = new Set<string>();
 
+function parseRepoConfigSchema(raw: unknown) {
+  const toParse = isPlainObject(raw) ? stripRuntimeKeys(raw) : raw;
+  return isPlainObject(toParse) && toParse.version === 2
+    ? RepoFactoryConfigV2Schema.safeParse(toParse)
+    : RepoFactoryConfigV1Schema.safeParse(toParse);
+}
+
+/** Schema issues the repo (model-namespace) loader would raise for `raw`; empty when valid. Read-only (#2611). */
+export function repoConfigSchemaIssues(raw: unknown): ConfigSchemaIssue[] {
+  const result = parseRepoConfigSchema(raw);
+  return result.success ? [] : result.error.issues.map(toConfigSchemaIssue);
+}
+
 /** Read the resolved repo config file (`config.yaml|yml|json`). Returns `null` when the file
  *  does not exist. Throws a descriptive error naming the file path on malformed JSON/YAML or a
  *  schema violation (typos are rejected loudly via `.strict()` at every level). */
@@ -313,11 +327,7 @@ export function loadRepoConfig(repoRoot: string, stateRoot?: string): RepoFactor
     raw = readRepoConfigFile(path);
   }
 
-  const toParse = isPlainObject(raw) ? stripRuntimeKeys(raw) : raw;
-  const result =
-    isPlainObject(toParse) && toParse.version === 2
-      ? RepoFactoryConfigV2Schema.safeParse(toParse)
-      : RepoFactoryConfigV1Schema.safeParse(toParse);
+  const result = parseRepoConfigSchema(raw);
   if (!result.success) {
     const issues = result.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
     throw new Error(`Invalid ${path}: ${issues}`);

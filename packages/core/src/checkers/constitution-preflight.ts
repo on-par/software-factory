@@ -2,6 +2,7 @@
 // constitution `checkers:` names (#2585). CHECK fails closed on unknown names; this catches them
 // before any model call and locates the offending line in the constitution file.
 
+import matter from 'gray-matter';
 import { STANDARD_CHECKER_NAMES } from './index.js';
 
 export interface UnknownConstitutionChecker {
@@ -68,6 +69,17 @@ export function findUnknownConstitutionCheckers(
     }
   }
   return problems;
+}
+
+/** Unknown `checkers:` names in a constitution's raw text, parsed like ConstitutionLoader (#2611). Never throws. */
+export function findUnknownCheckersInText(raw: string): UnknownConstitutionChecker[] {
+  let checkers: unknown;
+  try {
+    checkers = matter(raw).data.checkers;
+  } catch {
+    return [];
+  }
+  return Array.isArray(checkers) ? findUnknownConstitutionCheckers(checkers, raw) : [];
 }
 
 export function formatUnknownCheckerMessage(displayPath: string, problem: UnknownConstitutionChecker): string {

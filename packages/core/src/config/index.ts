@@ -19,6 +19,7 @@ import { readRepoConfigFile, resolveRepoConfigPath } from './repo-config-file.js
 import { resolveStateRoot, STATE_ROOT_ENV } from './state-root.js';
 import { DEFAULT_MAX_SLICES, SLICE_CAP_CEILING } from '../readiness/slice-plan.js';
 import { runConfigSource } from './run-config-source.js';
+import { toConfigSchemaIssue, type ConfigSchemaIssue } from './schema-issue.js';
 
 import type { FilingPolicy } from '../filing/policy.js';
 import { KNOWN_HARNESS_IDS } from '../harness/catalog.js';
@@ -444,6 +445,21 @@ function deepMergeConfig(base: Record<string, unknown>, overlay: Record<string, 
   return out;
 }
 
+function parseRuntimeConfig(raw: Record<string, unknown>) {
+  const overlay: Record<string, unknown> = {};
+  for (const key of FACTORY_RUNTIME_CONFIG_KEYS) {
+    if (key in raw) overlay[key] = raw[key];
+  }
+  return FactoryConfigSchema.safeParse(deepMergeConfig(asRecord(defaultFactoryConfig), overlay));
+}
+
+/** Schema issues the runtime-namespace loader would raise for `raw`; empty when valid. Read-only (#2611). */
+export function factoryRuntimeConfigIssues(raw: unknown): ConfigSchemaIssue[] {
+  if (!isPlainObject(raw)) return [{ path: [], message: 'expected a JSON object' }];
+  const result = parseRuntimeConfig(raw);
+  return result.success ? [] : result.error.issues.map(toConfigSchemaIssue);
+}
+
 /** Load the effective FactoryConfig for a repo: the shipped defaults, with the runtime-policy
  *  keys of the repo config file (`.factory/config.yaml|yml|json`, i.e. `getFactoryPaths(repoRoot).config`) merged
  *  over them. Returns the shipped defaults untouched when the file does not exist. A partial
@@ -467,13 +483,7 @@ export function loadFactoryConfigForRepo(configPath: string): FactoryConfig {
     throw new Error(`Invalid ${configPath}: expected a JSON object`);
   }
 
-  const overlay: Record<string, unknown> = {};
-  for (const key of FACTORY_RUNTIME_CONFIG_KEYS) {
-    if (key in raw) overlay[key] = raw[key];
-  }
-
-  const merged = deepMergeConfig(asRecord(defaultFactoryConfig), overlay);
-  const result = FactoryConfigSchema.safeParse(merged);
+  const result = parseRuntimeConfig(raw);
   if (!result.success) {
     const issues = result.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
     throw new Error(`Invalid ${configPath}: ${issues}`);

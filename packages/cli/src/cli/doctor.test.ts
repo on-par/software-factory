@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   analyzeEventLog,
-  configPlaceholderChecks,
+  configFileChecks,
   type ClaudeAuthProbeResult,
   claudeKeychainCheck,
   codexAuthMethod,
@@ -1581,7 +1581,7 @@ describe('factory --help first step (#2558)', () => {
   });
 });
 
-describe('configPlaceholderChecks (#2610)', () => {
+describe('configFileChecks (#2610)', () => {
   const dirs: string[] = [];
   afterEach(() => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
@@ -1607,7 +1607,7 @@ describe('configPlaceholderChecks (#2610)', () => {
   }
 
   it('flags a placeholder checker with file:line and the fix', () => {
-    const rows = configPlaceholderChecks(setup(PLACEHOLDER_CONSTITUTION, VALID_CONFIG));
+    const rows = configFileChecks(setup(PLACEHOLDER_CONSTITUTION, VALID_CONFIG));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ name: 'config', ok: false, section: REPO_SECTION });
     expect(rows[0].optional).toBeUndefined();
@@ -1622,7 +1622,7 @@ describe('configPlaceholderChecks (#2610)', () => {
   });
 
   it('passes when the constitution and config.yaml have no placeholders', () => {
-    const rows = configPlaceholderChecks(setup(VALID_CONSTITUTION, VALID_CONFIG));
+    const rows = configFileChecks(setup(VALID_CONSTITUTION, VALID_CONFIG));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ name: 'config', ok: true });
     expect(rows[0].detail).toContain('.factory/constitution.md');
@@ -1631,15 +1631,15 @@ describe('configPlaceholderChecks (#2610)', () => {
   });
 
   it('reports an unfilled token in config.yaml with the generic fix', () => {
-    const rows = configPlaceholderChecks(setup(VALID_CONSTITUTION, 'models:\n  pins:\n    build: <model id>\n'));
+    const rows = configFileChecks(setup(VALID_CONSTITUTION, 'models:\n  build: <model id>\n'));
     expect(rows).toHaveLength(1);
     expect(rows[0].ok).toBe(false);
-    expect(rows[0].detail).toBe(".factory/config.yaml:3: unfilled template token '<model id>'");
+    expect(rows[0].detail).toBe(".factory/config.yaml:2: unfilled template token '<model id>'");
     expect(rows[0].fix).toBe("replace '<model id>' with a real value");
   });
 
   it('passes with a neutral detail when neither file exists', () => {
-    const rows = configPlaceholderChecks([
+    const rows = configFileChecks([
       { absPath: '/nonexistent/a.md', relPath: 'a.md', scope: 'frontmatter' },
       { absPath: '/nonexistent/b.yaml', relPath: 'b.yaml', scope: 'all' },
     ]);
@@ -1649,10 +1649,82 @@ describe('configPlaceholderChecks (#2610)', () => {
   });
 
   it('leaves the constitution and config file byte-identical', () => {
-    const files = setup(PLACEHOLDER_CONSTITUTION, 'models:\n  pins:\n    build: <model id>\n');
+    const files = setup(PLACEHOLDER_CONSTITUTION, 'models:\n  build: <model id>\n');
     const snap = () => files.map((f) => [readFileSync(f.absPath, 'utf-8'), statSync(f.absPath).mtimeMs]);
     const before = snap();
-    configPlaceholderChecks(files);
+    configFileChecks(files);
     expect(snap()).toEqual(before);
+  });
+});
+
+describe('configFileChecks (#2611)', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  const CONSTITUTION = '---\nproduct: acme\nversion: 1\ncheckers:\n  - compile\n  - lintt\n---\nbody\n';
+  const VALID_CONSTITUTION = CONSTITUTION.replace('lintt', 'lint');
+  const VALID_CONFIG = 'sweep:\n  enabled: false\n';
+
+  function setup(constitution: string, config: string) {
+    const dir = mkdtempSync(join(tmpdir(), 'doctor-config-'));
+    dirs.push(dir);
+    mkdirSync(join(dir, '.factory'));
+    const c = join(dir, '.factory', 'constitution.md');
+    const y = join(dir, '.factory', 'config.yaml');
+    writeFileSync(c, constitution);
+    writeFileSync(y, config);
+    return [
+      { absPath: c, relPath: '.factory/constitution.md', scope: 'frontmatter' as const },
+      { absPath: y, relPath: '.factory/config.yaml', scope: 'all' as const },
+    ];
+  }
+
+  it('flags an unknown checker in the constitution with file:line and the fix', () => {
+    const rows = configFileChecks(setup(CONSTITUTION, VALID_CONFIG));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ name: 'config', ok: false, section: REPO_SECTION });
+    expect(rows[0].detail).toBe(".factory/constitution.md:6: unknown checker 'lintt'");
+    expect(rows[0].fix).toContain('compile');
+    expect(rows[0].fix).toContain('custom_*');
+    expect(doctorFailed(rows)).toBe(true);
+    expect(formatDoctorChecks(rows)).toContain('❌ config - .factory/constitution.md:6');
+  });
+
+  it('flags a config.yaml schema error with file:line and the fix', () => {
+    const rows = configFileChecks(setup(VALID_CONSTITUTION, 'version: 2\nmodels:\n  pinz:\n    build: x\n'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].ok).toBe(false);
+    expect(rows[0].detail?.startsWith('.factory/config.yaml:3:')).toBe(true);
+    expect(rows[0].detail).toContain('pinz');
+    expect(rows[0].fix).toContain('pinz');
+    expect(rows[0].fix).toContain('docs/config.example.yaml');
+
+    const runtime = configFileChecks(setup(VALID_CONSTITUTION, 'sweep:\n  loopIntervalSeconds: maybe\n'));
+    expect(runtime).toHaveLength(1);
+    expect(runtime[0].detail?.startsWith('.factory/config.yaml:2:')).toBe(true);
+    expect(runtime[0].detail).toContain('sweep.loopIntervalSeconds');
+  });
+
+  it('reports a YAML syntax error with its line instead of throwing', () => {
+    const rows = configFileChecks(setup(VALID_CONSTITUTION, 'sweep:\n  enabled: [\n'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].detail).toMatch(/^\.factory\/config\.yaml:\d+: YAML parse error/);
+    expect(rows[0].fix).toContain('fix the YAML syntax');
+  });
+
+  it('does not double-report a placeholder checker as unknown', () => {
+    const rows = configFileChecks(
+      setup('---\nproduct: acme\nversion: 1\ncheckers:\n  - <checker-name>\n  - compile\n---\nbody\n', VALID_CONFIG),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].detail).toContain('placeholder checker');
+  });
+
+  it('passes custom_* checkers', () => {
+    const rows = configFileChecks(setup(CONSTITUTION.replace('lintt', 'custom_foo'), VALID_CONFIG));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].ok).toBe(true);
   });
 });

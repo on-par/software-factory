@@ -382,7 +382,7 @@ import {
   type KeychainProbeStatus,
   type LeaseHealthRow,
   orphanContainerChecks,
-  configPlaceholderChecks,
+  configFileChecks,
   modelsRegistryChecks,
   orphanMicroVmChecks,
   runDoctorChecks,
@@ -6240,15 +6240,24 @@ async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean }
     if (skip !== null) {
       sandboxDetail = skip;
     } else if (repoRoot !== null) {
-      const policy = resolveSandboxPolicy(
-        configLoaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox,
-        {
-          worktree: repoRoot,
-          repoRoot,
-          isAvailable: (cmd) => isCommandAvailableViaShell(shellOps, cmd),
-        },
-      );
-      if (!policy) {
+      let policy: ReturnType<typeof resolveSandboxPolicy>;
+      let configInvalid = false;
+      try {
+        policy = resolveSandboxPolicy(
+          configLoaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox,
+          {
+            worktree: repoRoot,
+            repoRoot,
+            isAvailable: (cmd) => isCommandAvailableViaShell(shellOps, cmd),
+          },
+        );
+      } catch {
+        configInvalid = true;
+        sandboxDetail = 'skipped: .factory config is invalid (see the config row)';
+      }
+      if (configInvalid) {
+        // config invalid: detail already set
+      } else if (!policy) {
         sandboxDetail = 'skipped: sandbox disabled by config or FACTORY_SANDBOX';
       } else if (policy.runtime === 'none') {
         sandboxDetail = 'skipped: no sandbox runtime (sandbox-exec/firejail) on this host';
@@ -6271,7 +6280,12 @@ async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean }
 
   if (repoRoot !== null) {
     const paths = getFactoryPaths(repoRoot);
-    const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
+    let factoryConfig: FactoryConfig | null = null;
+    try {
+      factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
+    } catch {
+      // reported by the config row
+    }
     const health = await inspectPortLeases({ registryFile: paths.ports });
     checks.push(...leaseChecks(health.map(toLeaseRow)));
 
@@ -6284,9 +6298,11 @@ async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean }
     const orphanVmNames = sbxAvailable ? (await internalOps.listMicroVms()).filter((n) => !activeVmNames.has(n)) : [];
     checks.push(...orphanMicroVmChecks(orphanVmNames));
 
-    const sweepStatus = checkSweepHeartbeat(factoryConfig.sweep, process.env, defaultSweepHeartbeatDeps());
-    const sweepCheck = sweepHeartbeatCheck(sweepStatus);
-    if (sweepCheck) checks.push(sweepCheck);
+    if (factoryConfig !== null) {
+      const sweepStatus = checkSweepHeartbeat(factoryConfig.sweep, process.env, defaultSweepHeartbeatDeps());
+      const sweepCheck = sweepHeartbeatCheck(sweepStatus);
+      if (sweepCheck) checks.push(sweepCheck);
+    }
 
     checks.push(stopSentinelCheck(readStopFileStatus(paths)));
 
@@ -6296,7 +6312,7 @@ async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean }
     const constitutionFile = repoConfigFileFor(repoRoot, resolve(paths.root, 'constitution.md'));
     const configFile = repoConfigFileFor(repoRoot, paths.config);
     checks.push(
-      ...configPlaceholderChecks([
+      ...configFileChecks([
         { ...constitutionFile, scope: 'frontmatter' },
         { ...configFile, scope: 'all' },
       ]),
@@ -6345,11 +6361,13 @@ async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean }
         console.log(formatMicroVmReconcileReport(reapedVms));
       }
 
+      // Reconcile mutates state, so an invalid config must stop it (rethrows the loader's error).
+      const reconcileConfig: FactoryConfig = factoryConfig ?? configLoaders.loadFactoryConfigForRepo(paths.config);
       const reaped = await reapStalePortLeases({ registryFile: paths.ports, lockDir: paths.portsLock });
       console.log(formatReconcileReport(reaped));
 
       if (reaped.length > 0) {
-        const graceMs = resolveProcessGroupGraceMs(factoryConfig);
+        const graceMs = resolveProcessGroupGraceMs(reconcileConfig);
         const orphanEvents = await coreOps.reapOrphanProcesses({ reaped, graceMs });
         for (const e of orphanEvents) {
           console.log(
@@ -6360,13 +6378,13 @@ async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean }
 
       try {
         const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
-        const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
+        const gcSandbox = gcWorktreeSandbox(reconcileConfig.sandbox, repoRoot);
         const report = await withGitLock(repoRoot, () =>
           withFileLock(paths.gitLock, () =>
             internalOps.sweepWorktrees(
               {
                 repoRoot,
-                ttlDays: factoryConfig.worktree.gcTtlDays,
+                ttlDays: reconcileConfig.worktree.gcTtlDays,
                 repo: ghRepo,
                 branchPrefix: resolveBranchPrefix(),
               },

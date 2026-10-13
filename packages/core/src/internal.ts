@@ -676,9 +676,15 @@ export {
 } from './constitutions/index.js';
 export type { BuiltInCheckerInfo } from './checkers/index.js';
 export { listBuiltInCheckers } from './checkers/index.js';
-export { findTemplateTokens } from './config/template-tokens.js';
+export { findTemplateTokens, isTemplateToken } from './config/template-tokens.js';
+export { findConfigSchemaErrors } from './config/schema-findings.js';
+export type { ConfigSchemaFinding } from './config/schema-findings.js';
 export type { TemplateTokenFinding } from './config/template-tokens.js';
-export { findUnknownConstitutionCheckers, formatUnknownCheckerMessage } from './checkers/constitution-preflight.js';
+export {
+  findUnknownCheckersInText,
+  findUnknownConstitutionCheckers,
+  formatUnknownCheckerMessage,
+} from './checkers/constitution-preflight.js';
 export type { UnknownConstitutionChecker } from './checkers/constitution-preflight.js';
 
 // Readiness deep check (#1732)

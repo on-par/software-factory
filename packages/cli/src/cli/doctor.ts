@@ -5,7 +5,13 @@ import { resolve } from 'node:path';
 
 import type { DeclaredHarnessProbe } from '@on-par/factory-core';
 import { detectSandboxRuntime } from '@on-par/factory-core';
-import { findTemplateTokens, listBuiltInCheckers } from '@on-par/factory-core/internal';
+import {
+  findConfigSchemaErrors,
+  findTemplateTokens,
+  findUnknownCheckersInText,
+  isTemplateToken,
+  listBuiltInCheckers,
+} from '@on-par/factory-core/internal';
 
 import { MIN_NODE_MAJOR } from '../node-version.js';
 import { availableAgentClis, CLAUDE_CODE_URL, CODEX_CLI_URL, GITHUB_TOKENS_URL } from './first-run.js';
@@ -986,9 +992,13 @@ function readTextOrNull(absPath: string): string | null {
   }
 }
 
-/** One failing `config` row per unfilled `<...>` placeholder in the constitution frontmatter or repo config
- *  file (#2610); a single ok row when there are none. Read-only. */
-export function configPlaceholderChecks(
+function checkerNames(): string {
+  return [...listBuiltInCheckers().map((c) => c.name), 'custom_*'].join(', ');
+}
+
+/** One failing `config` row per unfilled `<...>` placeholder (#2610), unknown constitution checker or
+ *  `.factory/config.yaml` schema/syntax error (#2611); a single ok row when there are none. Read-only. */
+export function configFileChecks(
   files: readonly ConfigScanFile[],
   readText: (absPath: string) => string | null = readTextOrNull,
 ): DoctorCheck[] {
@@ -999,17 +1009,18 @@ export function configPlaceholderChecks(
     if (text === null) continue;
     scanned.push(f.relPath);
     const lines = text.split(/\r?\n/);
+    const placeholderLines = new Set<number>();
     for (const finding of findTemplateTokens(text, f.relPath, f.scope)) {
+      placeholderLines.add(finding.line);
       const src = lines[finding.line - 1] ?? '';
       const isChecker = f.scope === 'frontmatter' && (/^\s*-\s*</.test(src) || /^\s*checkers\s*:/.test(src));
       if (isChecker) {
-        const names = [...listBuiltInCheckers().map((c) => c.name), 'custom_*'].join(', ');
         rows.push({
           name: 'config',
           ok: false,
           section: REPO_SECTION,
           detail: `${f.relPath}:${finding.line}: placeholder checker '${finding.token}'`,
-          fix: `replace '${finding.token}' with a real checker name (${names}) or delete the line`,
+          fix: `replace '${finding.token}' with a real checker name (${checkerNames()}) or delete the line`,
         });
       } else {
         rows.push({
@@ -1021,6 +1032,46 @@ export function configPlaceholderChecks(
         });
       }
     }
+    if (f.scope === 'frontmatter') {
+      for (const p of findUnknownCheckersInText(text)) {
+        if (isTemplateToken(p.name)) continue;
+        rows.push({
+          name: 'config',
+          ok: false,
+          section: REPO_SECTION,
+          detail: `${f.relPath}:${p.line ?? 1}: unknown checker '${p.name}'`,
+          fix: `replace '${p.name}' with a real checker name (${checkerNames()}) or delete the line`,
+        });
+      }
+    } else {
+      const rel = f.relPath;
+      for (const s of findConfigSchemaErrors(text, rel)) {
+        if (placeholderLines.has(s.line)) continue;
+        const base = { name: 'config', ok: false, section: REPO_SECTION } as const;
+        if (s.kind === 'parse') {
+          rows.push({
+            ...base,
+            detail: `${rel}:${s.line}: YAML parse error: ${s.message}`,
+            fix: `fix the YAML syntax on line ${s.line} of ${rel}`,
+          });
+        } else if (s.kind === 'unknown-key') {
+          rows.push({
+            ...base,
+            detail:
+              s.path === '(root)'
+                ? `${rel}:${s.line}: unknown top-level key '${s.key}'`
+                : `${rel}:${s.line}: unknown key '${s.key}' at '${s.path}'`,
+            fix: `remove '${s.key}' or correct its spelling; valid keys are listed in docs/config.example.yaml`,
+          });
+        } else {
+          rows.push({
+            ...base,
+            detail: `${rel}:${s.line}: schema error at '${s.path}': ${s.message}`,
+            fix: `set '${s.path}' to a valid value (${s.message}); see docs/config.example.yaml`,
+          });
+        }
+      }
+    }
   }
   if (rows.length > 0) return rows;
   return [
@@ -1030,7 +1081,7 @@ export function configPlaceholderChecks(
       section: REPO_SECTION,
       detail:
         scanned.length > 0
-          ? `no unfilled placeholders in ${scanned.join(', ')}`
+          ? `no placeholders, unknown checkers or schema errors in ${scanned.join(', ')}`
           : 'no constitution or config file to scan',
     },
   ];

@@ -37,6 +37,7 @@ import {
   resolveProcessGroupGraceMs,
   resolveSkipCI,
   resolveTimeouts,
+  factoryRuntimeConfigIssues,
 } from './index.js';
 
 function baseModelDef(overrides: Record<string, unknown> = {}) {
@@ -1946,5 +1947,17 @@ describe('resolveBuildPublish', () => {
   it('falls back to config when env is unset', () => {
     const on = { ...config, build: { publishFromBuild: true } };
     expect(resolveBuildPublish(on, {})).toBe(true);
+  });
+});
+
+describe('factoryRuntimeConfigIssues (#2611)', () => {
+  it('is empty for valid input and reports a non-object', () => {
+    expect(factoryRuntimeConfigIssues({ sweep: { enabled: false } })).toEqual([]);
+    expect(factoryRuntimeConfigIssues([])).toEqual([{ path: [], message: 'expected a JSON object' }]);
+  });
+
+  it('carries the path for type errors', () => {
+    const bad = factoryRuntimeConfigIssues({ sweep: { loopIntervalSeconds: 'maybe' } });
+    expect(bad.some((i) => i.path.join('.') === 'sweep.loopIntervalSeconds')).toBe(true);
   });
 });

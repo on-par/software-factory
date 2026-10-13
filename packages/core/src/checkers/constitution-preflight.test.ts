@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { STANDARD_CHECKER_NAMES } from './index.js';
-import { findUnknownConstitutionCheckers, formatUnknownCheckerMessage } from './constitution-preflight.js';
+import {
+  findUnknownCheckersInText,
+  findUnknownConstitutionCheckers,
+  formatUnknownCheckerMessage,
+} from './constitution-preflight.js';
 
 const fixture = '---\nproduct: acme\nversion: 1\ncheckers:\n  - <checker-name>\n  - compile\n---\nbody';
 
@@ -58,5 +62,22 @@ describe('formatUnknownCheckerMessage', () => {
     expect(formatUnknownCheckerMessage('.factory/constitution.md', { name: 'typecheck' })).toBe(
       `.factory/constitution.md: unknown checker 'typecheck'. Remove the line or use one of: ${allowed}`,
     );
+  });
+});
+
+describe('findUnknownCheckersInText (#2611)', () => {
+  it('finds an unknown name with its line in a block list', () => {
+    const raw = '---\nproduct: acme\nchecklers: x\ncheckers:\n  - compile\n  - lintt\n---\nbody';
+    expect(findUnknownCheckersInText(raw)).toEqual([{ name: 'lintt', line: 6 }]);
+  });
+
+  it('handles an inline list', () => {
+    expect(findUnknownCheckersInText('---\ncheckers: [compile, nope]\n---\nbody')).toEqual([{ name: 'nope', line: 2 }]);
+  });
+
+  it('returns [] without frontmatter, with broken frontmatter, and for custom_*', () => {
+    expect(findUnknownCheckersInText('just text')).toEqual([]);
+    expect(findUnknownCheckersInText('---\nchecklers: [\n  : :\n---\nbody')).toEqual([]);
+    expect(findUnknownCheckersInText('---\ncheckers:\n  - custom_foo\n---\n')).toEqual([]);
   });
 });

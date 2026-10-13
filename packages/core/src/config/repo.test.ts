@@ -15,6 +15,7 @@ import {
   applyRepoConfig,
   describeEffectiveConfig,
   loadRepoConfig,
+  repoConfigSchemaIssues,
   resolveCodexDisabled,
   resolveEffectiveBuildRoute,
   resolveEffectiveConfig,
@@ -1180,5 +1181,17 @@ describe('repo models.registry (#2440)', () => {
     const snapshot = structuredClone(models);
     applyRepoConfig(models, withRegistry({ pins: { checker: 'my-opencode-model' } }));
     expect(models).toEqual(snapshot);
+  });
+});
+
+describe('repoConfigSchemaIssues (#2611)', () => {
+  it('is empty for a valid config and carries keys for unrecognized_keys', () => {
+    expect(repoConfigSchemaIssues({ version: 2 })).toEqual([]);
+    const issues = repoConfigSchemaIssues({ version: 2, models: { pinz: {} } });
+    expect(issues.some((i) => i.keys?.includes('pinz'))).toBe(true);
+  });
+
+  it('reports a non-object root', () => {
+    expect(repoConfigSchemaIssues([]).length).toBeGreaterThan(0);
   });
 });
