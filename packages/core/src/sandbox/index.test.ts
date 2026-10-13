@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import type { FactoryConfig } from '../config/index.js';
@@ -138,6 +142,21 @@ describe('resolveSandboxPolicy', () => {
     homedir: '/home/factory',
     tmpdir: '/tmp',
   };
+
+  it('adds the npm and yarn registries to allowHosts for a Node repo (#2659)', () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'sandbox-node-'));
+    try {
+      writeFileSync(join(repoRoot, 'package.json'), '{}');
+      const policy = resolveSandboxPolicy(defaultSandboxCfg, { ...baseOpts, repoRoot, env: {} });
+      expect(policy?.allowHosts).toEqual([
+        ...defaultSandboxCfg.network.allow,
+        'registry.npmjs.org',
+        'registry.yarnpkg.com',
+      ]);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
 
   it('returns undefined when cliDisabled is set', () => {
     expect(resolveSandboxPolicy(defaultSandboxCfg, { ...baseOpts, cliDisabled: true })).toBeUndefined();
