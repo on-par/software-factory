@@ -1,5 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, type Mock, vi } from 'vitest';
-import { type EntryIo, runEntry } from './entry.js';
+import { type EntryIo, readCliVersion, runEntry } from './entry.js';
 
 function recordingIo(): EntryIo & { error: Mock<(msg: string) => void>; exit: Mock<(code: number) => void> } {
   return { error: vi.fn(), exit: vi.fn() };
@@ -52,6 +53,17 @@ describe('runEntry', () => {
     expect(io.error.mock.invocationCallOrder[0]).toBeLessThan(io.exit.mock.invocationCallOrder[0]);
   });
 
+  it('pins the CLI version in the reinstall line without calling main', async () => {
+    const io = recordingIo();
+    const main = vi.fn(async () => {});
+
+    await runEntry(main, io, 'v20.11.1', '1.2.3');
+
+    expect(main).not.toHaveBeenCalled();
+    expect(io.error.mock.calls[0][0]).toContain('@on-par/factory-cli@1.2.3');
+    expect(io.exit).toHaveBeenCalledWith(1);
+  });
+
   it('runs main at the minimum version', async () => {
     const io = recordingIo();
     const main = vi.fn(async () => {});
@@ -61,5 +73,24 @@ describe('runEntry', () => {
     expect(main).toHaveBeenCalledTimes(1);
     expect(io.error).not.toHaveBeenCalled();
     expect(io.exit).not.toHaveBeenCalled();
+  });
+});
+
+describe('readCliVersion', () => {
+  it('returns the version in packages/cli/package.json', () => {
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+      version: string;
+    };
+    expect(readCliVersion()).toBe(pkg.version);
+  });
+
+  it("falls back to '' when the loader throws or has no string version", () => {
+    expect(
+      readCliVersion(() => {
+        throw new Error('x');
+      }),
+    ).toBe('');
+    expect(readCliVersion(() => ({}))).toBe('');
+    expect(readCliVersion(() => null)).toBe('');
   });
 });

@@ -16,6 +16,16 @@ describe('checkNodeVersion', () => {
     expect(checkNodeVersion('v23.9.0').ok).toBe(false);
   });
 
+  it('pins the running CLI version in the reinstall line', () => {
+    const pinned = checkNodeVersion('v20.11.1', '0.9.3');
+    expect(pinned.ok).toBe(false);
+    if (!pinned.ok) expect(pinned.message).toContain('npm install -g @on-par/factory-cli@0.9.3');
+    for (const unpinned of [checkNodeVersion('v20.11.1'), checkNodeVersion('v20.11.1', '')]) {
+      expect(unpinned.ok).toBe(false);
+      if (!unpinned.ok) expect(unpinned.message.endsWith('npm install -g @on-par/factory-cli')).toBe(true);
+    }
+  });
+
   it('accepts the exact minimum and newer majors', () => {
     for (const v of ['v24.0.0', 'v24.10.1', 'v25.2.0']) {
       expect(checkNodeVersion(v)).toEqual({ ok: true });
