@@ -41,6 +41,11 @@ slice's branch and, once opened, its PR number. The comment is still the only re
   what the earlier slices actually did.
 - CHECK diffs slice k against its parent branch, not `main`, and the CHECK baseline (ADR-0147's base comparison) runs
   on the parent branch's head.
+- BUILD's no-diff check, CHECK and the review floor diff slice k against its parent branch
+  (`parentBaseRef`, passed to `collectDesignDiff` as `baseRefOverride`). In stack mode this
+  explicit parent base outranks the remote base refs (`origin/main`, `origin/master`) and the
+  run-start HEAD fallback. If it does not resolve, the diff is skipped and never falls back to
+  `main`. A slice with no changes beyond its parent parks as `no_diff` (#2717).
 - Both size gates still apply to each slice. A slice is never sliced again.
 - When slice k fails CHECK after rework, the run stops building. Slices 1 to k-1 still open as a shorter stack, and
   the issue parks with slices k to n recorded as not built.
