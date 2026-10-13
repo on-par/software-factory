@@ -1180,9 +1180,12 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
             octokit: ports.octokit,
             repo: request.repo,
             issue: request.issue,
-            plan: withSliceState(slicePlan, index, state, ship.prNumber),
+            plan: withSliceState(slicePlan, index, state, ship.prNumber, request.branch),
           });
-          log('ship', `recorded slice ${index}/${count} as ${state} (PR #${ship.prNumber}) in the slice plan comment`);
+          log(
+            'ship',
+            `recorded slice ${index}/${count} as ${state} (PR #${ship.prNumber}, branch ${request.branch}) in the slice plan comment`,
+          );
         } catch (err) {
           return terminalParked(
             'fail',
