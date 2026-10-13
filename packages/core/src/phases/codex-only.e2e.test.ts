@@ -126,7 +126,7 @@ afterEach(async () => {
   await kit.cleanup();
 });
 
-describe('Codex-only pipeline with a fake codex CLI (#2406)', () => {
+describe('Codex-only pipeline with a fake codex CLI (#2406, #2635)', () => {
   it(
     'runs PLAN, BUILD, CHECK with one rework round and SHIP without spawning claude',
     { timeout: 120_000 },
@@ -147,8 +147,10 @@ describe('Codex-only pipeline with a fake codex CLI (#2406)', () => {
       const log = (type: string, msg: string) => events.push([type, msg]);
 
       const router = new ModelRouter(codexOnlyModels(), loadRoutesConfig());
-      // Codex-only machine: the claude CLI cannot run here.
-      router.skipMissingHarnessClis((cmd) => cmd !== 'claude');
+      // Codex-only machine: codex is the only runnable CLI.
+      router.skipMissingHarnessClis((cmd) => cmd === 'codex');
+      const costs: string[] = [];
+      router.setCostSink((e) => costs.push(e.model));
 
       const plan = await planPhase({
         issue,
@@ -202,6 +204,13 @@ describe('Codex-only pipeline with a fake codex CLI (#2406)', () => {
       expect(spawned).toContain('codex exec');
       expect(spawned).not.toContain('claude');
       expect(existsSync(join(worktree, 'feature.txt'))).toBe(true);
+
+      // No attempt is ever made on a Claude model (#2635).
+      expect(events.some(([type, msg]) => type === 'router' && msg.includes('Trying fake-gpt'))).toBe(true);
+      expect(events.filter(([, msg]) => msg.includes('Trying fake-claude'))).toEqual([]);
+      expect(events.filter(([type, msg]) => type === 'failover' && msg.includes('fake-claude'))).toEqual([]);
+      expect(costs.length).toBeGreaterThan(0);
+      expect(costs.every((m) => m === 'fake-gpt')).toBe(true);
     },
   );
 });
