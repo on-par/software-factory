@@ -158,6 +158,17 @@ describe('resolveSandboxPolicy', () => {
     }
   });
 
+  it('adds api.nuget.org and *.nuget.org to allowHosts for a .NET repo (#2661)', () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'sandbox-dotnet-'));
+    try {
+      writeFileSync(join(repoRoot, 'App.sln'), '');
+      const policy = resolveSandboxPolicy(defaultSandboxCfg, { ...baseOpts, repoRoot, env: {} });
+      expect(policy?.allowHosts).toEqual([...defaultSandboxCfg.network.allow, 'api.nuget.org', '*.nuget.org']);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
   it('returns undefined when cliDisabled is set', () => {
     expect(resolveSandboxPolicy(defaultSandboxCfg, { ...baseOpts, cliDisabled: true })).toBeUndefined();
   });
