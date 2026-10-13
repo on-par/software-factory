@@ -608,6 +608,7 @@ const INTERNAL_API_KEYS = [
   'createRunRuntime',
   'findOpenPR',
   'openSliceStack',
+  'shipSliceStack',
   'shipStackStoppedAtSlice',
   'createShipExecutor',
   'DEFAULT_FACTORYD_PORT',
