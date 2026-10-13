@@ -585,6 +585,8 @@ export { startEgressProxy, egressSummaryMessage, type EgressProxy } from './sand
 
 export { createRunRuntime, type RunRuntime } from './daemon/run-runtime.js';
 export { findOpenPR, type PrLookup } from './phases/ship.js';
+export { openSliceStack } from './phases/ship-stack.js';
+export type { SliceStackResult, StackSliceInput, StackedPr } from './phases/ship-stack.js';
 export { createShipExecutor } from './daemon/ship-executor.js';
 
 // Review verdict (#1679)
