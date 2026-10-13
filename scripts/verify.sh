@@ -20,6 +20,11 @@ for arg in "$@"; do
   fi
 done
 
+# 1 keeps the run serial, as before; the factory host relies on it. Set
+# FACTORY_TEST_MAX_WORKERS=N to run test files in parallel with N workers.
+export FACTORY_TEST_MAX_WORKERS="${FACTORY_TEST_MAX_WORKERS:-1}"
+echo "verify: FACTORY_TEST_MAX_WORKERS=${FACTORY_TEST_MAX_WORKERS}"
+
 npm ci
 npm run format:check
 npm run build
@@ -30,9 +35,9 @@ npm run typecheck
 npm run lint
 npm run knip
 if [ "$NO_E2E" = "1" ]; then
-  npx vitest run
+  npx vitest run --maxWorkers="$FACTORY_TEST_MAX_WORKERS"
 else
-  npm run test
+  npm run test -- --maxWorkers="$FACTORY_TEST_MAX_WORKERS"
   npm run coverage-ratchet
 fi
 npm run eval -- --stub

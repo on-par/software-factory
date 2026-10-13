@@ -17,7 +17,7 @@
     "typecheck": "tsc -b && npm run typecheck --workspaces",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "NODE_OPTIONS=--max-old-space-size=16384 vitest run --coverage --maxWorkers=1",
+    "test": "NODE_OPTIONS=--max-old-space-size=16384 vitest run --coverage",
     "test:integration": "FACTORY_INTEGRATION_TESTS=1 vitest run",
     "coverage-ratchet": "tsx scripts/coverage-ratchet.ts",
     "config-example": "tsx scripts/gen-config-example.ts",

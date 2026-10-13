@@ -2,6 +2,8 @@ import { fileURLToPath } from 'node:url';
 
 import { configDefaults, defineConfig } from 'vitest/config';
 
+import { resolveTestMaxWorkers } from './scripts/test-workers.js';
+
 /**
  * The pipeline integration suites drive whole plan->build->check->ship cycles
  * against real git worktrees on disk. They are the only tests that shell out to
@@ -22,6 +24,7 @@ const INTEGRATION_GLOB = '**/*.integration.test.{ts,tsx}';
 const REAL_CLI_GLOB = '**/*.real-cli.test.{ts,tsx}';
 const integrationOnly = process.env.FACTORY_INTEGRATION_TESTS === '1';
 const realCliOnly = Boolean(process.env.FACTORY_REAL_CLI);
+const maxWorkers = resolveTestMaxWorkers(process.env);
 
 export default defineConfig({
   // Pin the project root to this config's directory. Without it, vitest run
@@ -32,9 +35,12 @@ export default defineConfig({
   test: {
     setupFiles: [fileURLToPath(new URL('./packages/core/src/test-support/setup-env.ts', import.meta.url))],
     // Coverage instrumentation across the monorepo is memory-intensive. Keep
-    // files serial so the required full-suite check stays within CI's heap
-    // limit instead of loading several instrumented workspace graphs at once.
-    fileParallelism: false,
+    // files serial by default so the required full-suite check stays within CI's
+    // heap limit instead of loading several instrumented workspace graphs at once.
+    // FACTORY_TEST_MAX_WORKERS sets the worker count; files run in parallel only
+    // when it is above 1.
+    maxWorkers,
+    fileParallelism: maxWorkers > 1,
     // Many unit suites spawn real subprocesses (git init/clone/push/worktree,
     // shells, CLIs) against throwaway temp repos. Each such test takes ~0.3-0.5s
     // on an idle machine, but the factory runs this suite (via verify.sh) on a
