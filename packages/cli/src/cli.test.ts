@@ -4240,6 +4240,37 @@ describe('cli', () => {
         },
       );
 
+      it.each([
+        [true, 0],
+        [false, 1],
+        [undefined, 1],
+      ])('buildPreserved=%s reaps the worktree %s time(s) (#2564)', async (buildPreserved, reaps) => {
+        const reapWorktree = vi.fn(async (_issue: number) => {});
+        await runLane(
+          'app',
+          [],
+          '/repo',
+          'on-par/software-factory',
+          { ...paths, baseHold: join(holdDir, 'state', 'base-hold.json') },
+          {
+            claimNext: vi.fn(async () => buildClaim(1)),
+            ship: async () => {
+              throw new LaneEnvironmentPauseError('base broken', {
+                baseSha: 'abc1234567890def',
+                failingChecks: ['tests'],
+                buildPreserved,
+              });
+            },
+            waitMerge: async () => {},
+            releaseIssue: async () => {},
+            pathExists: () => false,
+            emitEvent: (() => {}) as any,
+            reapWorktree,
+          },
+        );
+        expect(reapWorktree).toHaveBeenCalledTimes(reaps);
+      });
+
       it('still releases and pauses when the hold write fails', async () => {
         await writeFile(join(holdDir, 'file'), 'not a dir');
         await runPause(join(holdDir, 'file', 'base-hold.json'));

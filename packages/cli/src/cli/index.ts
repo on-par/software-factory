@@ -197,6 +197,7 @@ import {
   writeProxyState,
 } from '@on-par/factory-core';
 import type {
+  CheckResumeRecord,
   CiOutcome,
   InfraRerunOutcome,
   EnqueueResult,
@@ -221,6 +222,7 @@ import type {
 } from '@on-par/factory-core/internal';
 import {
   acquirePidFile,
+  createCheckResumeStore,
   createPlanReuseStore,
   checkBaseHealth,
   currentSlice,
@@ -2180,9 +2182,15 @@ export class LaneEnvironmentPauseError extends Error {
   readonly baseSha: string;
   readonly failingChecks: string[];
   readonly failureSignature?: string;
+  /** BUILD output was kept for `factory resume --from check` (#2564); runLane must not reap it. */
+  readonly buildPreserved?: boolean;
 
-  constructor(message: string, failure: { baseSha: string; failingChecks: string[]; failureSignature?: string }) {
+  constructor(
+    message: string,
+    failure: { baseSha: string; failingChecks: string[]; failureSignature?: string; buildPreserved?: boolean },
+  ) {
     super(message);
+    if (failure.buildPreserved !== undefined) this.buildPreserved = failure.buildPreserved;
     this.baseSha = failure.baseSha;
     this.failingChecks = failure.failingChecks;
     if (failure.failureSignature !== undefined) this.failureSignature = failure.failureSignature;
@@ -2336,6 +2344,8 @@ export async function shipIssue(
     localOnly?: LocalOnlyPolicy;
     /** Benchmark artifact directory (#509) — only set for local-only runs. */
     artifactsDir?: string;
+    /** Resume at CHECK on a kept worktree (#2564). */
+    resumeFrom?: CheckResumeRecord;
   },
   deps: Pick<
     CliDeps,
@@ -2430,7 +2440,7 @@ export async function shipIssue(
   const maxSlices = opts.maxSlices ?? resolveSizeGateMaxSlices(factoryConfig);
   // ADR-0147: slice k >= 2 builds on its own branch, so read the slice plan before the worktree exists.
   let sliceIndex: number | undefined;
-  if (sizeGateMode === 'slice' && !ctx?.localOnly && work.kind === GITHUB_ISSUE_SOURCE) {
+  if (sizeGateMode === 'slice' && !ctx?.localOnly && !ctx?.resumeFrom && work.kind === GITHUB_ISSUE_SOURCE) {
     try {
       const lookup = await findSlicePlanComment({ octokit, repo: ghRepo, issue: issueNum });
       if (lookup.status === 'found') sliceIndex = currentSlice(lookup.plan)?.index;
@@ -2441,10 +2451,12 @@ export async function shipIssue(
       );
     }
   }
-  const branch = branchFor(issueNum, issueTitle, policy.effective.branchPrefix, sliceIndex);
-  const worktree = ctx?.localOnly
-    ? ctx.localOnly.workspace
-    : worktreePathFor(repoRoot, ghRepo, issueNum, policy.effective.branchPrefix, loaders);
+  const branch = ctx?.resumeFrom?.branch ?? branchFor(issueNum, issueTitle, policy.effective.branchPrefix, sliceIndex);
+  const worktree = ctx?.resumeFrom
+    ? ctx.resumeFrom.worktree
+    : ctx?.localOnly
+      ? ctx.localOnly.workspace
+      : worktreePathFor(repoRoot, ghRepo, issueNum, policy.effective.branchPrefix, loaders);
   const specPath = resolve(paths.plans, `issue-${issueNum}.md`);
   const runStartedAt = new Date().toISOString();
 
@@ -2558,7 +2570,10 @@ export async function shipIssue(
   // stays a CLI concern (not called here, matching today — a worktree persists past
   // a successful run for GC/sweep commands to reclaim later).
   let workspace: Workspace;
-  if (!ctx?.localOnly) {
+  if (ctx?.resumeFrom) {
+    workspace = { path: worktree, dispose: async () => {} };
+    log('worktree', `reusing kept worktree at ${worktree} (resume --from check)`);
+  } else if (!ctx?.localOnly) {
     workspace = await worktreeWorkspace({
       repoRoot,
       branch,
@@ -2648,6 +2663,17 @@ export async function shipIssue(
     sandboxPolicy: activeSandboxPolicy,
     processGroupGraceMs,
     preferredRoute: repoConfig?.route,
+    ...(ctx?.resumeFrom
+      ? {
+          resumeFrom: {
+            phase: 'check' as const,
+            diffBase: ctx.resumeFrom.diffBase,
+            route: ctx.resumeFrom.route,
+            model: ctx.resumeFrom.model,
+            buildMinutes: ctx.resumeFrom.buildMinutes,
+          },
+        }
+      : {}),
     eventsFile: paths.events,
     logsDir: paths.logs,
     baselineCachePath: paths.baselineCache,
@@ -2665,6 +2691,7 @@ export async function shipIssue(
     getIssueSpend: () => issueSpend,
     breaker,
     planReuse: ctx?.localOnly ? undefined : createPlanReuseStore(specPath),
+    checkResume: ctx?.localOnly ? undefined : createCheckResumeStore(specPath),
     planPhase: phases.planPhase,
     buildPhase: phases.buildPhase,
     checkPhase: phases.checkPhase,
@@ -2791,6 +2818,7 @@ export async function shipIssue(
       baseSha: outcome.baseSha,
       failingChecks: outcome.failingChecks,
       failureSignature: outcome.failureSignature,
+      buildPreserved: outcome.buildPreserved,
     });
   }
 
@@ -5183,7 +5211,8 @@ export async function runLane(
         // The base is broken, not the issue (#1928): release to queued (never parked),
         // pause the lane whatever laneBreakerThreshold is, and stop claiming.
         streak = null;
-        await reapWorktree(issue).catch(() => {});
+        // A preserved build is kept for `factory resume --from check` (#2564).
+        if (!err.buildPreserved) await reapWorktree(issue).catch(() => {});
         await settle(issue, 'queued');
         // Persist the hold so a restarted supervisor remembers the broken base (#2348);
         // best-effort, never allowed to change lane flow.
@@ -6519,7 +6548,17 @@ export async function cmdStop(opts: { json?: boolean } = {}): Promise<void> {
   console.log('STOP set — lanes halt between issues');
 }
 
-export async function cmdResume(opts: { json?: boolean } = {}): Promise<void> {
+export async function cmdResume(issue?: string, opts: { json?: boolean; from?: string } = {}): Promise<void> {
+  if (issue === undefined && opts.from !== undefined) {
+    throw new CliExitError('factory: resume --from needs an issue number: factory resume <issue> --from check', 2);
+  }
+  if (issue !== undefined) {
+    if (opts.from !== 'check') {
+      throw new CliExitError('factory: resume <issue> only supports --from check (BUILD resume is #2320)', 2);
+    }
+    await resumeFromCheck(parseIssueArg(issue));
+    return;
+  }
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const json = opts.json ? { repo: await getGitHubRepo() } : undefined;
@@ -6537,6 +6576,52 @@ export async function cmdResume(opts: { json?: boolean } = {}): Promise<void> {
     return;
   }
   console.log('STOP cleared');
+}
+
+/** `factory resume <issue> --from check` (#2564): re-run CHECK and later phases on the kept worktree.
+ *  `--json` only applies to the STOP form and is ignored here. */
+async function resumeFromCheck(issueNum: number): Promise<void> {
+  if (availableAgentClis(coreOps.isCommandAvailable).length === 0) {
+    throw new CliExitError(`factory: ${missingAgentCliMessage()}`, 2);
+  }
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+  if (!existsSync(paths.root)) {
+    throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
+  }
+  const record = await createCheckResumeStore(resolve(paths.plans, `issue-${issueNum}.md`)).load();
+  if (!record || !existsSync(record.worktree)) {
+    throw new CliExitError(
+      `factory: no preserved build for #${issueNum} — nothing to resume; run factory run-issue ${issueNum}`,
+      2,
+    );
+  }
+
+  await withRepoRunLock(paths, 'factory resume', async () => {
+    const ghRepo = await getGitHubRepo();
+    const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit() });
+    let work: WorkRequest;
+    try {
+      work = await workSources.resolve(GITHUB_ISSUE_SOURCE, {
+        repo: ghRepo,
+        issue: issueNum,
+      } satisfies GithubIssueParams);
+    } catch (err) {
+      if (err instanceof InvalidWorkRequestInputError) {
+        throw new CliExitError(`factory: ${err.message}`, 2);
+      }
+      throw new CliExitError(
+        `factory: could not resolve issue #${issueNum} in ${ghRepo} (${errorDetail(err)}) — nothing was resumed`,
+        2,
+      );
+    }
+    try {
+      await shipIssue(issueNum, {}, { repoRoot, ghRepo, workRequest: work, resumeFrom: record });
+    } catch (err: any) {
+      if (err instanceof IssueSkippedError) return;
+      throw new CliExitError(`Resume failed for issue #${issueNum}: ${err.message}`, 1);
+    }
+  });
 }
 
 // ---------- main ----------
@@ -7175,10 +7260,13 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     .action((opts: { json?: boolean }) => cmdStop(opts));
 
   program
-    .command('resume')
-    .description('Clear a stop so lanes pick up new issues again')
+    .command('resume [issue]')
+    .description(
+      'Clear a stop so lanes pick up new issues again; with <issue> --from check, re-run CHECK on a build kept after a config/environment failure',
+    )
     .option('--json', 'Print one JSON object (schemaVersion 1): action, repo, stopFlag before/after')
-    .action((opts: { json?: boolean }) => cmdResume(opts));
+    .option('--from <phase>', 'Resume a kept build at this phase (only: check)')
+    .action((issue: string | undefined, opts: { json?: boolean; from?: string }) => cmdResume(issue, opts));
 
   applyHelpGroups(program);
 

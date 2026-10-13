@@ -4048,6 +4048,83 @@ bash scripts/verify.sh
     });
   });
 
+  describe('resume --from check (#2564)', () => {
+    const recordPath = () => join(paths().plans, 'issue-5.check-resume.json');
+    const configEnvFail = () => {
+      h.checkResult = {
+        passed: false,
+        summary: { results: [], failures: 1 },
+        reworkRounds: 0,
+        environment: { baseSha: 'b'.repeat(40), failingChecks: ['unknown-checker'], cause: 'config', logPaths: [] },
+      };
+    };
+    const writeRecord = (worktree: string) => {
+      mkdirSync(paths().plans, { recursive: true });
+      writeFileSync(
+        recordPath(),
+        JSON.stringify({
+          issue: 5,
+          branch: 'kept-branch',
+          worktree,
+          diffBase: 'dbase',
+          route: 'claude',
+          model: 'kept-model',
+          buildMinutes: 40,
+          fixTarget: '.factory/constitution.md:3',
+          preservedAt: '2026-01-01T00:00:00.000Z',
+        }),
+      );
+    };
+
+    it('a config-caused CHECK release keeps the worktree and branch and records the resume point', async () => {
+      configEnvFail();
+      const err = await shipIssue(5, {}, { repoRoot: h.repoRoot, ghRepo: h.ghRepo }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(LaneEnvironmentPauseError);
+      expect((err as LaneEnvironmentPauseError).buildPreserved).toBe(true);
+      expect(cleanupWorktree).not.toHaveBeenCalled();
+      expect(existsSync(recordPath())).toBe(true);
+      expect(readFileSync(paths().events, 'utf-8')).toContain('factory resume 5 --from check');
+    });
+
+    it('resume <issue> --from check runs CHECK in the kept worktree without setupWorktree, planPhase or buildPhase', async () => {
+      const kept = join(h.repoRoot, 'kept-worktree');
+      mkdirSync(kept, { recursive: true });
+      writeRecord(kept);
+      const res = await runMain('resume', '5', '--from', 'check');
+      expect(res.exited).toBe(false);
+      expect(setupWorktree).not.toHaveBeenCalled();
+      expect(phases.planPhase).not.toHaveBeenCalled();
+      expect(phases.buildPhase).not.toHaveBeenCalled();
+      expect(phases.checkPhase.mock.calls[0][0]).toMatchObject({
+        worktree: kept,
+        diffBase: 'dbase',
+        reworkModel: 'kept-model',
+      });
+      expect(existsSync(recordPath())).toBe(false);
+    });
+
+    it.each([
+      ['no --from', ['resume', '5']],
+      ['an unsupported phase', ['resume', '5', '--from', 'build']],
+      ['--from without an issue', ['resume', '--from', 'check']],
+      ['an invalid issue', ['resume', 'abc', '--from', 'check']],
+      ['no preserved build', ['resume', '5', '--from', 'check']],
+    ])('exits 2 and leaves STOP untouched for %s', async (_name, args) => {
+      writeFileSync(paths().stop, '');
+      const res = await runMain(...args);
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(existsSync(paths().stop)).toBe(true);
+      expect(phases.checkPhase).not.toHaveBeenCalled();
+    });
+
+    it('exits 2 when the recorded worktree no longer exists', async () => {
+      writeRecord(join(h.repoRoot, 'gone'));
+      const res = await runMain('resume', '5', '--from', 'check');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(phases.checkPhase).not.toHaveBeenCalled();
+    });
+  });
+
   describe('stop / resume', () => {
     it('stop writes the STOP file', async () => {
       await runMain('stop');
