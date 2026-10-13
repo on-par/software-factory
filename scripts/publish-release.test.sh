@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Tests scripts/publish-release.sh (#2335, #2244): a skipped or failed publish can never
-# show green, and the tag name picks the version and dist-tag. Each case runs the script
-# in a fresh scratch copy of the repo's publish files with stub `npm` and `gh` on PATH,
-# and checks the exit code, the job-summary line, the `published=` step output and the
-# npm calls. Together the cases cover every branch of the script.
+# show green, the tag name picks the version and dist-tag, and a main push publishes the
+# next X.Y.Z-next.N prerelease. Each case runs the script in a fresh scratch copy of the
+# repo's publish files with stub `npm` and `gh` on PATH, and checks the exit code, the
+# job-summary line, the `published=` step output and the npm calls. Together the cases
+# cover every branch of the script.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,7 +23,8 @@ fail() {
 REPO="$WORK/repo"
 # fresh_repo: the real publish scripts, list and package.json files, nothing else.
 fresh_repo() {
-  rm -rf "$REPO"
+  rm -rf "$REPO" "$NPM_REGISTRY"
+  mkdir -p "$NPM_REGISTRY"
   mkdir -p "$REPO/scripts" "$REPO/packages"
   cp "$ROOT/scripts/publish-release.sh" "$ROOT/scripts/publish-workspaces.sh" \
     "$ROOT/scripts/set-release-version.sh" "$ROOT/scripts/publish-workspaces.txt" "$REPO/scripts/"
@@ -42,14 +44,28 @@ BINDIR="$WORK/bin"
 mkdir -p "$BINDIR"
 export NPM_CALL_LOG="$WORK/npm-calls.log"
 export GH_CALL_LOG="$WORK/gh-calls.log"
-# Stub npm: logs calls; `npm view` 404s (nothing on the registry); NPM_FAIL_ON fails a
-# call containing it, NPM_FAIL_EXACT a call equal to it.
+export NPM_REGISTRY="$WORK/registry"
+# Stub npm: logs calls; NPM_FAIL_ON fails a call containing it, NPM_FAIL_EXACT a call
+# equal to it. `npm view <pkg> dist-tags.latest` prints NPM_STUB_LATEST (404 when unset);
+# `npm view <pkg> versions --json` prints $NPM_REGISTRY/<pkg with / as __> (404 when
+# missing); any other `npm view` 404s (nothing on the registry).
 cat >"$BINDIR/npm" <<'STUB'
 #!/usr/bin/env bash
 echo "$@" >>"$NPM_CALL_LOG"
 [ "$1" != --version ] || { [ "${NPM_VERSION_FAIL:-}" != 1 ] || exit 1; echo "${NPM_STUB_VERSION-11.5.1}"; exit 0; }
 [ -z "${NPM_FAIL_ON:-}" ] || case "$*" in *"$NPM_FAIL_ON"*) exit 1 ;; esac
 [ "$*" != "${NPM_FAIL_EXACT:-}" ] || exit 1
+if [ "$1" = view ] && [ "$3" = dist-tags.latest ]; then
+  [ -n "${NPM_STUB_LATEST:-}" ] || exit 1
+  echo "$NPM_STUB_LATEST"
+  exit 0
+fi
+if [ "$1" = view ] && [ "$3" = versions ]; then
+  f="$NPM_REGISTRY/${2//\//__}"
+  [ -f "$f" ] || exit 1
+  cat "$f"
+  exit 0
+fi
 [ "$1" != view ] || exit 1
 exit 0
 STUB
@@ -92,7 +108,7 @@ run() {
   : >"$NPM_CALL_LOG"
   : >"$GH_CALL_LOG"
   local got=0
-  env -u PUBLISH_DRY_RUN -u GITHUB_REF -u PUBLISH_BLOCKERS -u NPM_FAIL_ON -u NPM_FAIL_EXACT -u GH_FAIL -u NPM_STUB_VERSION -u NPM_VERSION_FAIL \
+  env -u PUBLISH_DRY_RUN -u PUBLISH_PRERELEASE -u GITHUB_REF -u PUBLISH_BLOCKERS -u NPM_FAIL_ON -u NPM_FAIL_EXACT -u GH_FAIL -u NPM_STUB_VERSION -u NPM_VERSION_FAIL -u NPM_STUB_LATEST \
     GITHUB_STEP_SUMMARY="$SUMMARY" GITHUB_OUTPUT="$OUTPUT" GITHUB_REPOSITORY=on-par/software-factory \
     "$@" bash "$REPO/scripts/publish-release.sh" >"$WORK/stdout.txt" 2>&1 || got=$?
   [ "$got" = "$want" ] || { cat "$WORK/stdout.txt" >&2; fail "${CASE}: exit $got, want $want"; }
@@ -266,11 +282,74 @@ run 0 GITHUB_REF=refs/tags/v$CURRENT PUBLISH_BLOCKERS=
 expect_summary "PUBLISHED$(published_list "$CURRENT") (--tag latest)"
 [ ! -s "$GH_CALL_LOG" ] || fail "$CASE: checked blockers"
 
+# registry <pkg> <json>: what `npm view <pkg> versions --json` prints.
+registry() {
+  printf '%s\n' "$2" >"$NPM_REGISTRY/${1//\//__}"
+}
+
+CASE="main prerelease with none published yet starts at next.1 above latest"
+fresh_repo
+run 0 PUBLISH_PRERELEASE=true GITHUB_REF=refs/heads/main NPM_STUB_LATEST=0.9.4
+expect_summary "PUBLISHED$(published_list 0.9.5-next.1) (--tag next)"
+expect_output true
+expect_publishes 14 "--tag next --provenance( --dry-run)?"
+grep -q '"@on-par/factory-core": "0.9.5-next.1"' "$REPO/packages/cli/package.json" || fail "$CASE: cli's core pin is not exact"
+
+CASE="main prerelease takes the highest next.N across every package"
+fresh_repo
+registry @on-par/factory-cli '["0.9.4","0.9.5-next.1","0.9.5-next.2"]'
+registry @on-par/adr-kit '["0.9.4","0.9.5-next.1","0.9.5-next.2","0.9.5-next.3"]'
+registry @on-par/contracts '"0.9.4"'
+registry @on-par/factory-core '["0.9.4-next.9","0.9.6-next.7","0.9.5-next.x","0.9.5-next.04"]'
+run 0 PUBLISH_PRERELEASE=true GITHUB_REF=refs/heads/main NPM_STUB_LATEST=0.9.4
+expect_summary "PUBLISHED$(published_list 0.9.5-next.4) (--tag next)"
+
+CASE="main prerelease dry run computes the version and publishes nothing"
+fresh_repo
+registry @on-par/factory-cli '["1.2.3","1.2.4-next.5"]'
+run 0 PUBLISH_DRY_RUN=true PUBLISH_PRERELEASE=true GITHUB_REF=refs/heads/main NPM_STUB_LATEST=1.2.3
+expect_summary "NOT PUBLISHED: dry-run, not published"
+expect_publishes 7 "--tag next --provenance --dry-run"
+grep -q '"version": "1.2.4-next.6"' "$REPO/packages/cli/package.json" || fail "$CASE: cli is not at 1.2.4-next.6"
+
+CASE="prerelease off main"
+fresh_repo
+run 1 PUBLISH_PRERELEASE=true GITHUB_REF=refs/heads/feature NPM_STUB_LATEST=0.9.4
+expect_summary "NOT PUBLISHED: prereleases publish only from refs/heads/main, not refs/heads/feature"
+expect_output false
+[ ! -s "$NPM_CALL_LOG" ] || fail "$CASE: npm was called"
+
+CASE="prerelease from a tag ref"
+fresh_repo
+run 1 PUBLISH_PRERELEASE=true GITHUB_REF=refs/tags/v0.9.0 NPM_STUB_LATEST=0.9.4
+expect_summary "NOT PUBLISHED: prereleases publish only from refs/heads/main, not refs/tags/v0.9.0"
+
+for latest in "" 0.9.4-next.1 garbage; do
+  CASE="prerelease with unreadable latest '$latest'"
+  fresh_repo
+  run 1 PUBLISH_PRERELEASE=true GITHUB_REF=refs/heads/main NPM_STUB_LATEST="$latest"
+  expect_summary "NOT PUBLISHED: could not work out the next prerelease version from npm"
+  expect_output false
+  expect_publishes 0
+done
+
+CASE="prerelease with packages out of lockstep"
+fresh_repo
+drift
+run 1 PUBLISH_PRERELEASE=true GITHUB_REF=refs/heads/main NPM_STUB_LATEST=0.9.4
+expect_summary "NOT PUBLISHED: could not set the package versions to 0.9.5-next.1"
+expect_publishes 0
+
+CASE="PUBLISH_PRERELEASE=false on main still needs a tag"
+fresh_repo
+run 1 PUBLISH_PRERELEASE=false GITHUB_REF=refs/heads/main
+expect_summary "NOT PUBLISHED: refs/heads/main is not a release tag (refs/tags/v*)"
+
 CASE="no GITHUB_OUTPUT or GITHUB_STEP_SUMMARY"
 fresh_repo
 : >"$SUMMARY"
 : >"$OUTPUT"
-out="$(env -u GITHUB_OUTPUT -u GITHUB_STEP_SUMMARY -u PUBLISH_DRY_RUN -u PUBLISH_BLOCKERS -u NPM_FAIL_ON -u NPM_FAIL_EXACT -u GH_FAIL -u NPM_STUB_VERSION -u NPM_VERSION_FAIL \
+out="$(env -u GITHUB_OUTPUT -u GITHUB_STEP_SUMMARY -u PUBLISH_DRY_RUN -u PUBLISH_PRERELEASE -u PUBLISH_BLOCKERS -u NPM_FAIL_ON -u NPM_FAIL_EXACT -u GH_FAIL -u NPM_STUB_VERSION -u NPM_VERSION_FAIL \
   GITHUB_REF=refs/tags/v0.9.0 bash "$REPO/scripts/publish-release.sh")"
 [ "$(printf '%s\n' "$out" | tail -n 1)" = "PUBLISHED$(published_list 0.9.0) (--tag latest)" ] || fail "$CASE: stdout ended '$out'"
 [ ! -s "$SUMMARY" ] && [ ! -s "$OUTPUT" ] || fail "$CASE: wrote a file"
