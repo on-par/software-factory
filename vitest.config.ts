@@ -34,11 +34,11 @@ export default defineConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),
   test: {
     setupFiles: [fileURLToPath(new URL('./packages/core/src/test-support/setup-env.ts', import.meta.url))],
-    // Coverage instrumentation across the monorepo is memory-intensive. Keep
-    // files serial by default so the required full-suite check stays within CI's
-    // heap limit instead of loading several instrumented workspace graphs at once.
-    // FACTORY_TEST_MAX_WORKERS sets the worker count; files run in parallel only
-    // when it is above 1.
+    // Test files run in parallel with 4 workers by default (DEFAULT_TEST_MAX_WORKERS
+    // in scripts/test-workers.ts), bounded so the instrumented coverage run stays
+    // inside CI's heap limit and 4 vCPUs (measured in
+    // docs/research/coverage-worker-scaling-2752.md). Set FACTORY_TEST_MAX_WORKERS=N
+    // to change it and FACTORY_TEST_MAX_WORKERS=1 to run serially.
     maxWorkers,
     fileParallelism: maxWorkers > 1,
     // Many unit suites spawn real subprocesses (git init/clone/push/worktree,

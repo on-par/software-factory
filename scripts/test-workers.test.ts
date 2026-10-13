@@ -8,10 +8,13 @@ import { resolveTestMaxWorkers } from './test-workers.js';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 describe('resolveTestMaxWorkers', () => {
-  it('returns 1 when FACTORY_TEST_MAX_WORKERS is 1, unset, or blank', () => {
-    expect(resolveTestMaxWorkers({})).toBe(1);
-    expect(resolveTestMaxWorkers({ FACTORY_TEST_MAX_WORKERS: '' })).toBe(1);
-    expect(resolveTestMaxWorkers({ FACTORY_TEST_MAX_WORKERS: '  ' })).toBe(1);
+  it('defaults to 4 workers when FACTORY_TEST_MAX_WORKERS is unset or blank', () => {
+    expect(resolveTestMaxWorkers({})).toBe(4);
+    expect(resolveTestMaxWorkers({ FACTORY_TEST_MAX_WORKERS: '' })).toBe(4);
+    expect(resolveTestMaxWorkers({ FACTORY_TEST_MAX_WORKERS: '  ' })).toBe(4);
+  });
+
+  it('returns 1 when FACTORY_TEST_MAX_WORKERS is 1 (serial opt-out)', () => {
     expect(resolveTestMaxWorkers({ FACTORY_TEST_MAX_WORKERS: '1' })).toBe(1);
   });
 
@@ -33,5 +36,13 @@ describe('resolveTestMaxWorkers', () => {
     const config = readFileSync(`${ROOT}vitest.config.ts`, 'utf8');
     expect(config).not.toMatch(/fileParallelism:\s*false/);
     expect(config).toContain('resolveTestMaxWorkers');
+  });
+
+  it('vitest.config.ts documents the default worker count and FACTORY_TEST_MAX_WORKERS', () => {
+    const config = readFileSync(`${ROOT}vitest.config.ts`, 'utf8');
+    expect(config).toContain('FACTORY_TEST_MAX_WORKERS');
+    expect(config).toMatch(/4 workers/);
+    expect(config).toMatch(/FACTORY_TEST_MAX_WORKERS=1/);
+    expect(config).not.toContain('Keep files serial by default');
   });
 });
