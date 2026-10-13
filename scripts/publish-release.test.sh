@@ -47,6 +47,7 @@ export GH_CALL_LOG="$WORK/gh-calls.log"
 cat >"$BINDIR/npm" <<'STUB'
 #!/usr/bin/env bash
 echo "$@" >>"$NPM_CALL_LOG"
+[ "$1" != --version ] || { [ "${NPM_VERSION_FAIL:-}" != 1 ] || exit 1; echo "${NPM_STUB_VERSION-11.5.1}"; exit 0; }
 [ -z "${NPM_FAIL_ON:-}" ] || case "$*" in *"$NPM_FAIL_ON"*) exit 1 ;; esac
 [ "$*" != "${NPM_FAIL_EXACT:-}" ] || exit 1
 [ "$1" != view ] || exit 1
@@ -91,7 +92,7 @@ run() {
   : >"$NPM_CALL_LOG"
   : >"$GH_CALL_LOG"
   local got=0
-  env -u PUBLISH_DRY_RUN -u GITHUB_REF -u PUBLISH_BLOCKERS -u NPM_FAIL_ON -u NPM_FAIL_EXACT -u GH_FAIL \
+  env -u PUBLISH_DRY_RUN -u GITHUB_REF -u PUBLISH_BLOCKERS -u NPM_FAIL_ON -u NPM_FAIL_EXACT -u GH_FAIL -u NPM_STUB_VERSION -u NPM_VERSION_FAIL \
     GITHUB_STEP_SUMMARY="$SUMMARY" GITHUB_OUTPUT="$OUTPUT" GITHUB_REPOSITORY=on-par/software-factory \
     "$@" bash "$REPO/scripts/publish-release.sh" >"$WORK/stdout.txt" 2>&1 || got=$?
   [ "$got" = "$want" ] || { cat "$WORK/stdout.txt" >&2; fail "${CASE}: exit $got, want $want"; }
@@ -115,14 +116,14 @@ fresh_repo
 run 0 PUBLISH_DRY_RUN=true GITHUB_REF=refs/heads/main
 expect_summary "NOT PUBLISHED: dry-run, not published"
 expect_output false
-expect_publishes 7 "--tag latest --dry-run"
+expect_publishes 7 "--tag latest --provenance --dry-run"
 [ ! -s "$GH_CALL_LOG" ] || fail "$CASE: dry run checked the blockers"
 
 CASE="dry run on a next tag routes to next at the tag version"
 fresh_repo
 run 0 PUBLISH_DRY_RUN=true GITHUB_REF=refs/tags/v0.9.0-next.3
 expect_summary "NOT PUBLISHED: dry-run, not published"
-expect_publishes 7 "--tag next --dry-run"
+expect_publishes 7 "--tag next --provenance --dry-run"
 [ "$(grep -c '^view @on-par/.*@0.9.0-next.3 version$' "$NPM_CALL_LOG")" = 7 ] || fail "$CASE: registry checks were not at 0.9.0-next.3"
 grep -q '"@on-par/factory-core": "0.9.0-next.3"' "$REPO/packages/cli/package.json" || fail "$CASE: cli's core pin is not exact"
 
@@ -191,7 +192,7 @@ expect_summary "NOT PUBLISHED: v1.0 blockers still open: #7 #8"
 
 CASE="publish fails"
 fresh_repo
-run 1 GITHUB_REF=refs/tags/v0.9.0 NPM_FAIL_EXACT="publish --workspace @on-par/factory-core --tag latest"
+run 1 GITHUB_REF=refs/tags/v0.9.0 NPM_FAIL_EXACT="publish --workspace @on-par/factory-core --tag latest --provenance"
 expect_summary "NOT PUBLISHED: npm publish failed; packages before the failing one in scripts/publish-workspaces.txt may already be on the registry (a rerun skips them)"
 expect_output false
 
@@ -202,8 +203,8 @@ expect_summary "PUBLISHED$(published_list 0.9.0) (--tag latest)"
 expect_output true
 calls="$(grep '^publish ' "$NPM_CALL_LOG")"
 want=""
-for n in "${NAMES[@]}"; do want="${want}publish --workspace $n --tag latest --dry-run"$'\n'; done
-for n in "${NAMES[@]}"; do want="${want}publish --workspace $n --tag latest"$'\n'; done
+for n in "${NAMES[@]}"; do want="${want}publish --workspace $n --tag latest --provenance --dry-run"$'\n'; done
+for n in "${NAMES[@]}"; do want="${want}publish --workspace $n --tag latest --provenance"$'\n'; done
 [ "$calls" = "${want%$'\n'}" ] || fail "$CASE: publish calls were: $calls"
 
 CASE="next tag publishes all 7 to next at the tag version"
@@ -211,7 +212,52 @@ fresh_repo
 run 0 GITHUB_REF=refs/tags/v0.9.0-next.3
 expect_summary "PUBLISHED$(published_list 0.9.0-next.3) (--tag next)"
 expect_output true
-expect_publishes 14 "--tag next( --dry-run)?"
+expect_publishes 14 "--tag next --provenance( --dry-run)?"
+
+for v in 11.5.0 10.9.2 11.5.1-pre.0; do
+  CASE="npm $v is too old"
+  fresh_repo
+  run 1 GITHUB_REF=refs/tags/v0.9.0 NPM_STUB_VERSION=$v
+  expect_summary "NOT PUBLISHED: npm $v is older than 11.5.1, the minimum for npm trusted publishing (OIDC)"
+  expect_output false
+  expect_publishes 0
+  [ ! -s "$GH_CALL_LOG" ] || fail "$CASE: gh was called"
+done
+
+CASE="npm too old on a dry run"
+fresh_repo
+run 1 PUBLISH_DRY_RUN=true NPM_STUB_VERSION=11.4.0
+expect_summary "NOT PUBLISHED: npm 11.4.0 is older than 11.5.1, the minimum for npm trusted publishing (OIDC)"
+expect_output false
+expect_publishes 0
+
+CASE="npm version unreadable (garbage)"
+fresh_repo
+run 1 GITHUB_REF=refs/tags/v0.9.0 NPM_STUB_VERSION=garbage
+expect_summary "NOT PUBLISHED: could not read the npm version (got 'garbage')"
+expect_output false
+expect_publishes 0
+
+CASE="npm version unreadable (empty)"
+fresh_repo
+run 1 GITHUB_REF=refs/tags/v0.9.0 NPM_STUB_VERSION=
+expect_summary "NOT PUBLISHED: could not read the npm version (got '')"
+expect_publishes 0
+
+CASE="npm version unreadable (npm fails)"
+fresh_repo
+run 1 GITHUB_REF=refs/tags/v0.9.0 NPM_VERSION_FAIL=1
+expect_summary "NOT PUBLISHED: could not read the npm version (got '')"
+expect_publishes 0
+
+for v in 11.5.1 12.0.0 11.10.0 11.6.0-pre.0 $'11.5.1\r'; do
+  CASE="npm ${v%$'\r'} passes"
+  fresh_repo
+  run 0 GITHUB_REF=refs/tags/v0.9.0 NPM_STUB_VERSION="$v"
+  expect_summary "PUBLISHED$(published_list 0.9.0) (--tag latest)"
+  expect_output true
+  expect_publishes 14 "--tag latest --provenance( --dry-run)?"
+done
 
 CASE="gate removed (no blockers), list with CRLF and blank lines"
 fresh_repo
@@ -224,7 +270,7 @@ CASE="no GITHUB_OUTPUT or GITHUB_STEP_SUMMARY"
 fresh_repo
 : >"$SUMMARY"
 : >"$OUTPUT"
-out="$(env -u GITHUB_OUTPUT -u GITHUB_STEP_SUMMARY -u PUBLISH_DRY_RUN -u PUBLISH_BLOCKERS -u NPM_FAIL_ON -u NPM_FAIL_EXACT -u GH_FAIL \
+out="$(env -u GITHUB_OUTPUT -u GITHUB_STEP_SUMMARY -u PUBLISH_DRY_RUN -u PUBLISH_BLOCKERS -u NPM_FAIL_ON -u NPM_FAIL_EXACT -u GH_FAIL -u NPM_STUB_VERSION -u NPM_VERSION_FAIL \
   GITHUB_REF=refs/tags/v0.9.0 bash "$REPO/scripts/publish-release.sh")"
 [ "$(printf '%s\n' "$out" | tail -n 1)" = "PUBLISHED$(published_list 0.9.0) (--tag latest)" ] || fail "$CASE: stdout ended '$out'"
 [ ! -s "$SUMMARY" ] && [ ! -s "$OUTPUT" ] || fail "$CASE: wrote a file"
