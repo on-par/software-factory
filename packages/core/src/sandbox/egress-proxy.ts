@@ -1,10 +1,13 @@
 // src/sandbox/egress-proxy.ts — report-only HTTP CONNECT proxy for sandboxed agent egress (#2214).
 //
 // Forwards everything and records each distinct host. It never blocks: the evidence it gathers
-// feeds a later slice that enforces `sandbox.network.allow`.
+// feeds a later slice that enforces `sandbox.network.allow`. The allowlist gains the registry hosts
+// of each detected ecosystem (#2659, #2661 for .NET).
 
+import { readdirSync, statSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
+import { join } from 'node:path';
 import type { Duplex } from 'node:stream';
 
 export interface EgressProxyOptions {
@@ -24,16 +27,67 @@ export interface EgressProxy {
   close(): Promise<void>;
 }
 
-// Exact match only; wildcard/suffix matching is an enforce-slice decision.
+// Exact match, plus `*.suffix` entries that match any subdomain of suffix but never suffix itself (#2661).
 export function isAllowedHost(host: string, allowHosts: readonly string[]): boolean {
   const h = host.trim().toLowerCase();
-  return allowHosts.some((a) => a.trim().toLowerCase() === h);
+  return allowHosts.some((raw) => {
+    const a = raw.trim().toLowerCase();
+    if (a === h) return true;
+    return a.startsWith('*.') && a.length > 2 && h.endsWith(a.slice(1)) && h.length > a.length - 1;
+  });
 }
 
 export function egressSummaryMessage(hosts: readonly string[], allowHosts: readonly string[]): string {
   const unlisted = hosts.filter((h) => !isAllowedHost(h, allowHosts)).sort();
   if (unlisted.length === 0) return `${hosts.length} host(s) used, all on allowlist`;
   return `${hosts.length} host(s) used, ${unlisted.length} not on allowlist: ${unlisted.join(', ')}`;
+}
+
+/** Package ecosystems a repo can be detected as (#2659, #2661). */
+export type Ecosystem = 'node' | 'dotnet';
+
+/** Hosts pre-allowed for a detected ecosystem. Only the ecosystems a repo actually uses are added. */
+export const ECOSYSTEM_ALLOW_HOSTS: Readonly<Record<Ecosystem, readonly string[]>> = {
+  node: ['registry.npmjs.org', 'registry.yarnpkg.com'],
+  dotnet: ['api.nuget.org', '*.nuget.org'],
+};
+
+const DOTNET_PROJECT_EXTENSIONS = ['.sln', '.slnx', '.csproj', '.fsproj', '.vbproj'];
+
+/** A root package.json file is Node; a root .sln/.slnx/.csproj/.fsproj/.vbproj file is .NET.
+ *  A missing dir or unreadable path detects nothing. */
+export function detectEcosystems(repoDir: string): Ecosystem[] {
+  if (repoDir === '') return [];
+  const found: Ecosystem[] = [];
+  try {
+    if (statSync(join(repoDir, 'package.json')).isFile()) found.push('node');
+  } catch {
+    // no package.json
+  }
+  try {
+    const entries = readdirSync(repoDir, { withFileTypes: true });
+    if (
+      entries.some((e) => e.isFile() && DOTNET_PROJECT_EXTENSIONS.some((ext) => e.name.toLowerCase().endsWith(ext)))
+    ) {
+      found.push('dotnet');
+    }
+  } catch {
+    // unreadable dir
+  }
+  return found;
+}
+
+/** The configured allowlist plus the hosts of every detected ecosystem, deduped case-insensitively.
+ *  An empty configured list means deny-all and is returned unchanged. */
+export function buildEgressAllowlist(configured: readonly string[], repoDir: string): string[] {
+  const out = [...configured];
+  if (out.length === 0) return out;
+  for (const eco of detectEcosystems(repoDir)) {
+    for (const host of ECOSYSTEM_ALLOW_HOSTS[eco]) {
+      if (!isAllowedHost(host, out)) out.push(host);
+    }
+  }
+  return out;
 }
 
 function parseAuthority(target: string): { host: string; port: number } | undefined {

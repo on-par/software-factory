@@ -198,6 +198,12 @@ describe('size-gate-escalated classification (#607)', () => {
   });
 });
 
+describe('size-gate-decomposed classification (#2662)', () => {
+  it('is info severity, not park, not terminal', () => {
+    expect(EVENT_TRAITS['size-gate-decomposed']).toEqual({ severity: 'info', isPark: false, isTerminal: false });
+  });
+});
+
 describe('size-gate-sliced classification (ADR-0147)', () => {
   it('is info severity, not park, not terminal', () => {
     expect(EVENT_TRAITS['size-gate-sliced']).toEqual({ severity: 'info', isPark: false, isTerminal: false });

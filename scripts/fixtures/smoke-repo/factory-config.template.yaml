@@ -1,0 +1,40 @@
+# Smoke-repo factory config. render-config.sh replaces __SMOKE_AGENT__ with codex, opencode or command.
+version: 2
+models:
+  registry:
+    smoke-codex:
+      provider: openai
+      tier: [worker]
+      costPerMtokInput: 0
+      costPerMtokOutput: 0
+      contextWindow: 272000
+      capabilities: [implementation, codex]
+      envKey: null
+      harness: codex-cli
+      codex: true
+      codexFlag: -m gpt-5.6-sol -c model_reasoning_effort=medium
+    smoke-opencode:
+      provider: custom
+      tier: [worker]
+      costPerMtokInput: 0
+      costPerMtokOutput: 0
+      contextWindow: 200000
+      capabilities: [implementation, coding]
+      envKey: null
+      harness: opencode
+      providerModel: opencode-go/deepseek-v4-flash
+      experimental: true
+    smoke-command:
+      provider: custom
+      tier: [worker]
+      costPerMtokInput: 0
+      costPerMtokOutput: 0
+      contextWindow: 200000
+      capabilities: [implementation]
+      envKey: null
+      harness: command
+  pins:
+    plan: smoke-__SMOKE_AGENT__
+    build: smoke-__SMOKE_AGENT__
+    checker: smoke-__SMOKE_AGENT__
+    triage: smoke-__SMOKE_AGENT__

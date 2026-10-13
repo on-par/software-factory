@@ -415,6 +415,7 @@ import { ensureFactoryExcluded, writeSampleQueue } from './init-files.js';
 import { cmdLogs } from './logs.js';
 import { applyHelpGroups } from './help-groups.js';
 import { mergeScopeNotice } from './merge-scope.js';
+import { GITHUB_STUB_CALLS_FILE, recordGitPushes, resolveGitHubMode, selectOctokit } from './github-stub.js';
 import { createFactoryOctokit, formatDeprecation, type FactoryOctokitOptions } from './octokit.js';
 import { DeepCheckError, createDeepModelRunner, runIssueCheck, type DeepCheckModelRunner } from './ready-check.js';
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
@@ -752,7 +753,9 @@ function resolveGitHubToken(shell: ShellOps = shellOps): string | undefined {
 let octokitFactory: (() => Octokit) | undefined;
 
 function getOctokit(shell: ShellOps = shellOps, options?: FactoryOctokitOptions): Octokit {
-  return octokitFactory ? octokitFactory() : createFactoryOctokit(resolveGitHubToken(shell), options);
+  return octokitFactory
+    ? octokitFactory()
+    : selectOctokit(process.env, () => createFactoryOctokit(resolveGitHubToken(shell), options));
 }
 
 export function errorDetail(err: unknown): string {
@@ -2368,6 +2371,16 @@ export async function shipIssue(
   const shell = resolveShellOps(deps);
   const core = resolveCoreOps(deps);
   const phases = resolvePhaseOps(deps);
+  // FACTORY_GITHUB=stub (#2652): record each `git push` ship runs in the stub's calls.jsonl.
+  let shipPhaseForMode = phases.shipPhase;
+  if (resolveGitHubMode(process.env) === 'stub') {
+    const base = phases.shipPhase;
+    const stubCalls = join(resolve(process.env.FACTORY_GITHUB_STUB_DIR ?? ''), GITHUB_STUB_CALLS_FILE);
+    const defaultShipRunner = promisify(execCb);
+    const wrapped: RunPorts['shipPhase'] = (o) =>
+      base({ ...o, run: recordGitPushes(o.run ?? defaultShipRunner, stubCalls, o.branch) });
+    shipPhaseForMode = wrapped;
+  }
   const repoRoot = ctx?.repoRoot ?? (await getRepoRoot(shell));
   const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo(shell));
   const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
@@ -2442,7 +2455,13 @@ export async function shipIssue(
   const maxSlices = opts.maxSlices ?? resolveSizeGateMaxSlices(factoryConfig);
   // ADR-0147: slice k >= 2 builds on its own branch, so read the slice plan before the worktree exists.
   let sliceIndex: number | undefined;
-  if (sizeGateMode === 'slice' && !ctx?.localOnly && !ctx?.resumeFrom && work.kind === GITHUB_ISSUE_SOURCE) {
+  // ADR-0161: stack runs as slice until stacked PRs are built.
+  if (
+    (sizeGateMode === 'slice' || sizeGateMode === 'stack') &&
+    !ctx?.localOnly &&
+    !ctx?.resumeFrom &&
+    work.kind === GITHUB_ISSUE_SOURCE
+  ) {
     try {
       const lookup = await findSlicePlanComment({ octokit, repo: ghRepo, issue: issueNum });
       if (lookup.status === 'found') sliceIndex = currentSlice(lookup.plan)?.index;
@@ -2698,7 +2717,7 @@ export async function shipIssue(
     planPhase: phases.planPhase,
     buildPhase: phases.buildPhase,
     checkPhase: phases.checkPhase,
-    shipPhase: phases.shipPhase,
+    shipPhase: shipPhaseForMode,
     checkBaseHealth: deps.checkBaseHealth ?? checkBaseHealth,
     resolveConstitution: () =>
       // Resolved once here — runIssue calls this exactly once and reuses the value for
@@ -7057,7 +7076,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     )
     .option(
       '--size-gate <mode>',
-      'Size gate mode for this run: file (file child issues / park), slice (ship as sequential slice PRs under the same issue; never files issues) or off (skip both gates); beats sizeGate.mode in the config',
+      'Size gate mode for this run: file (file child issues / park), slice (ship as sequential slice PRs under the same issue; never files issues), off (skip both gates) or stack (stacked PR set, ADR-0161; runs as slice until stacks are built); beats sizeGate.mode in the config',
     )
     .option(
       '--max-slices <count>',

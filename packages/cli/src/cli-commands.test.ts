@@ -1158,6 +1158,37 @@ describe('cli commands (via main dispatch)', () => {
       expect(phases.planPhase).toHaveBeenCalled();
     });
 
+    it('serves the run from the offline GitHub stub when FACTORY_GITHUB=stub (#2652)', async () => {
+      const stubDir = mkdtempSync(join(tmpdir(), 'factory-gh-stub-'));
+      try {
+        writeFileSync(
+          join(stubDir, 'fixture.json'),
+          JSON.stringify({ issues: { '5': { title: 'Stubbed title', body: 'b' } } }),
+        );
+        vi.stubEnv('FACTORY_GITHUB', 'stub');
+        vi.stubEnv('FACTORY_GITHUB_STUB_DIR', stubDir);
+        const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+        await shipIssue(5, {}, { repoRoot: h.repoRoot, ghRepo: h.ghRepo }, { octokit: undefined });
+
+        const plan = phases.planPhase.mock.calls.at(-1)?.[0] as any;
+        expect(plan.branch).toBe('factory/5-stubbed-title'); // slug of the fixture title
+        const captured = phases.shipPhase.mock.calls.at(-1)?.[0] as any;
+        await captured.octokit.rest.pulls.create({ head: captured.branch, title: 't', base: 'main' });
+        // The wrapper delegates to the real runner; only a harmless non-push command is run here.
+        await expect(captured.run('echo stub')).resolves.toMatchObject({ stdout: 'stub\n' });
+        const ops = readFileSync(join(stubDir, 'calls.jsonl'), 'utf-8')
+          .trim()
+          .split('\n')
+          .map((l) => JSON.parse(l).op);
+        expect(ops).toContain('pulls.create');
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllEnvs();
+        rmSync(stubDir, { recursive: true, force: true });
+      }
+    });
+
     it('red base from the pre-PLAN health check throws LaneEnvironmentPauseError before planPhase', async () => {
       const baseSha = 'a'.repeat(40);
       const red = vi.fn<NonNullable<CliDeps['checkBaseHealth']>>(async () => ({
@@ -5534,7 +5565,7 @@ bash scripts/verify.sh
       const call = phases.planPhase.mock.calls.at(-1)?.[0] as any;
       expect(call.approvalGate).toBeUndefined();
       expect(call.enforceReadiness).toBe(true);
-      expect(call.enforceSizeGate).toBe(true);
+      expect(call?.enforceSizeGate).toBe(true);
       expect(call.drainSteering).toBeUndefined();
     });
 
@@ -5705,6 +5736,19 @@ bash scripts/verify.sh
         h.factoryConfig = { ...h.factoryConfig, sizeGate: { mode: 'slice' } };
         await runMain('run-issue', '5');
         expect(phases.planPhase.mock.calls.at(-1)?.[0].sizeGateMode).toBe('slice');
+      });
+
+      it('--size-gate stack passes sizeGateMode stack to planPhase', async () => {
+        await runMain('run-issue', '5', '--size-gate', 'stack');
+        const call = phases.planPhase.mock.calls.at(-1)?.[0];
+        expect(call?.sizeGateMode).toBe('stack');
+        expect(call?.enforceSizeGate).toBe(true);
+      });
+
+      it('sizeGate.mode stack in the config passes sizeGateMode stack to planPhase', async () => {
+        h.factoryConfig = { ...h.factoryConfig, sizeGate: { mode: 'stack' } };
+        await runMain('run-issue', '5');
+        expect(phases.planPhase.mock.calls.at(-1)?.[0].sizeGateMode).toBe('stack');
       });
 
       it('--max-slices 6 passes maxSlices 6 to planPhase (ADR-0156)', async () => {

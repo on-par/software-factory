@@ -706,13 +706,18 @@ export {
   sliceCapExceeded,
   SLICE_PLAN_MARKER,
   currentSlice,
+  markSliceMerged,
   parseSlicePlanComment,
   renderSlicePlanComment,
   slicePlanFromDecomposition,
   withSliceState,
 } from './readiness/slice-plan.js';
-export type { SlicePlanCommentLookup, SlicePlanUpsertResult } from './readiness/slice-plan-github.js';
-export { findSlicePlanComment, upsertSlicePlanComment } from './readiness/slice-plan-github.js';
+export type {
+  SliceMergeRecordResult,
+  SlicePlanCommentLookup,
+  SlicePlanUpsertResult,
+} from './readiness/slice-plan-github.js';
+export { findSlicePlanComment, recordSliceMerged, upsertSlicePlanComment } from './readiness/slice-plan-github.js';
 export type { SliceGateOutcome } from './readiness/slice-gate.js';
 export { resolveSliceGate } from './readiness/slice-gate.js';
 export { publishDecomposition } from './readiness/decompose.js';

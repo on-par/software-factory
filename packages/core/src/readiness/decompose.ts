@@ -589,8 +589,8 @@ export interface DecomposeDriverDeps {
    *  known-capped provider on every relaunch cycle with no gating at all. */
   onProviderFailure?: (info: { provider: string; reason: FailoverReason; detail?: string }) => void | Promise<void>;
   /** File the decomposition as real GitHub issues linked as native sub-issues of the
-   *  original issue, instead of only commenting. Off by default: only the PLAN
-   *  pre-flight size gate opts in — the post-plan build-scope gate stays advisory (#823). */
+   *  original issue, instead of only commenting. Off by default: both
+   *  file-mode PLAN size gates (pre-flight and post-plan build-scope) opt in (#823, #2662). */
   fileSubIssues?: boolean;
   /** Default true. False returns the validated decomposition without posting the epic
    *  comment or filing (slice mode, ADR-0147). */

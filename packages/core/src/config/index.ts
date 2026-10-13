@@ -539,8 +539,11 @@ export function resolveSkipCI(config: FactoryConfig, env: NodeJS.ProcessEnv = pr
   return resolveEnabledFlag(env, 'FACTORY_SKIP_CI', config.ci?.skip ?? false);
 }
 
-/** sizeGate.mode values this build understands (ADR-0147). `slice` keeps an oversized issue whole and ships it as slice PRs. */
-export const SIZE_GATE_MODES = ['file', 'slice', 'off'] as const;
+/**
+ * sizeGate.mode values this build understands (ADR-0147). `slice` keeps an oversized issue whole and ships it as slice PRs.
+ * `stack` (ADR-0161) will ship a stacked PR set; until that is built the size gate runs it as `slice`.
+ */
+export const SIZE_GATE_MODES = ['file', 'slice', 'off', 'stack'] as const;
 export type SizeGateMode = (typeof SIZE_GATE_MODES)[number];
 
 /** Exact match against SIZE_GATE_MODES; anything else is undefined. */
