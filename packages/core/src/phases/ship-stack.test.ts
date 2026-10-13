@@ -106,6 +106,13 @@ describe('openSliceStack', () => {
     ]);
   });
 
+  it('records the head SHA of each created PR in the slice-plan comment', async () => {
+    const create = vi.fn().mockImplementation(async () => ({ data: { number: 101, head: { sha: 'abc' } } }));
+    const f = fake({ create });
+    await run(f, [slice(1)]);
+    expect(recorded(f)[0]).toMatchObject({ prNumber: 101, headSha: 'abc' });
+  });
+
   it('never closes the issue on a partial stack and leaves the missing slice pending', async () => {
     const f = fake();
     await run(f, [slice(1), slice(2)]);
@@ -117,7 +124,10 @@ describe('openSliceStack', () => {
     const f = fake({ request: vi.fn().mockRejectedValue(new Error('boom')) });
     const res = await run(f);
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.reason).toContain('stack');
+    if (!res.ok) {
+      expect(res.reason).toContain('stack');
+      expect(res.stackError).toBe('boom');
+    }
     expect(res.prs).toHaveLength(3);
     expect(f.create).toHaveBeenCalledTimes(3);
     expect(recorded(f).every((s) => s.state === 'pr-open')).toBe(true);
@@ -132,6 +142,7 @@ describe('openSliceStack', () => {
     const res = await run(f);
     expect(res.ok).toBe(false);
     expect(res.prs).toHaveLength(1);
+    if (!res.ok) expect(res.stackError).toBeUndefined();
     expect(f.request).not.toHaveBeenCalled();
     expect(recorded(f).map((s) => s.state)).toEqual(['pr-open', 'pending', 'pending']);
   });

@@ -258,5 +258,6 @@ npx vitest run packages/core/src/harness
 
 ### Request support instead
 
-If you would rather have the factory ship the adapter, open a "Request support for a coding agent" issue from the
-[issue template chooser](https://github.com/on-par/software-factory/issues/new/choose) (the template is tracked in #2409).
+If you would rather have the factory ship the adapter, open a
+[Request support for a coding agent](https://github.com/on-par/software-factory/issues/new?template=agent-support.yml)
+issue. The form is defined in [`.github/ISSUE_TEMPLATE/agent-support.yml`](../.github/ISSUE_TEMPLATE/agent-support.yml).

@@ -593,9 +593,17 @@ export {
 export { createRunRuntime, type RunRuntime } from './daemon/run-runtime.js';
 export { findOpenPR, type PrLookup } from './phases/ship.js';
 export { openSliceStack } from './phases/ship-stack.js';
+export { shipSliceStack } from './phases/stack-fallback.js';
+export type { ShipSliceStackResult, StackFallbackResult } from './phases/stack-fallback.js';
 export type { SliceStackResult, StackSliceInput, StackedPr } from './phases/ship-stack.js';
 export { shipStackStoppedAtSlice } from './phases/stack-check-failure.js';
 export type { StackCheckFailure, StoppedStackResult } from './phases/stack-check-failure.js';
+export { detectLowerSliceChange, parkOnLowerSliceChange } from './phases/stack-review-change.js';
+export type {
+  LowerSliceChange,
+  LowerSliceChangeDetection,
+  ReviewChangeParkResult,
+} from './phases/stack-review-change.js';
 export { createShipExecutor } from './daemon/ship-executor.js';
 
 // Review verdict (#1679)
@@ -722,6 +730,7 @@ export {
   renderSlicePlanComment,
   slicePlanFromDecomposition,
   withSliceState,
+  withSlicesAffected,
   withSlicesNotBuilt,
 } from './readiness/slice-plan.js';
 export type {
