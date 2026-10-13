@@ -18,6 +18,7 @@ import {
   buildReadinessEnrichmentPrompt,
   buildReadinessEnrichmentRetryPrompt,
   composeEnrichedIssueBody,
+  scoreEnrichedIssueReadiness,
   stripEnrichedBlock,
   type ReadinessEnrichmentRetryContext,
 } from '../readiness/enrich.js';
@@ -431,7 +432,7 @@ async function planPhaseImpl(opts: {
   const runnableRoutes = runnableBuildRoutes(router);
   const failureRoute = defaultBuildRoute(runnableRoutes);
 
-  let readiness = scoreIssueReadiness({ title: issueTitle, body: issueBody });
+  let readiness = scoreEnrichedIssueReadiness({ title: issueTitle, body: issueBody });
   if (
     opts.enforceReadiness &&
     source.kind === GITHUB_ISSUE_SOURCE &&
