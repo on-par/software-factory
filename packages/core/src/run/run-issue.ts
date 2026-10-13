@@ -936,7 +936,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
               ? { failureSignature: check.failureSignature, failingChecks: env.failingChecks }
               : undefined;
           return terminalParked(
-            'fail',
+            'config',
             configParkMessage({
               issue: request.issue,
               failure: env,

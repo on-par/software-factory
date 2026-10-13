@@ -1821,16 +1821,17 @@ describe('runIssue — config failure parks (#2583)', () => {
   };
   const kinds = (log: ReturnType<typeof vi.fn>) => log.mock.calls.map((c) => c[0]);
 
-  it('parks a config-caused CHECK failure with file, line and fix instead of releasing it', async () => {
+  it('parks a config-caused CHECK failure with event kind and park reason config (#2584)', async () => {
     const { run, log, createComment, checkResume, planReuse } = arrange('config');
     const outcome = await run();
-    expect(outcome).toMatchObject({ state: 'parked', reason: 'fail', failureSignature: 'sig' });
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'config', failureSignature: 'sig' });
     expect(outcome.state).not.toBe('released');
-    const fail = log.mock.calls.find((c) => c[0] === 'fail');
+    const fail = log.mock.calls.find((c) => c[0] === 'config');
     expect(fail?.[1]).toContain('.factory/constitution.md:4');
     expect(fail?.[1]).toContain('expected a list of checker names');
     expect(fail?.[1]).toContain('factory unpark');
     expect(kinds(log)).not.toContain('environment-released');
+    expect(kinds(log)).not.toContain('fail');
     expect(createComment).not.toHaveBeenCalled();
     expect(checkResume.record).not.toHaveBeenCalled();
     expect(planReuse.record).not.toHaveBeenCalled();

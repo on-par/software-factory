@@ -9,6 +9,10 @@ describe('parkReasonFor', () => {
     expect(parkReasonFor({ outcome: { state: 'parked', reason: 'fail' } })).toBe('fail');
   });
 
+  it('reads a config park reason (#2584)', () => {
+    expect(parkReasonFor({ outcome: { state: 'parked', reason: 'config' } })).toBe('config');
+  });
+
   it('reads a readonly parkReason marker (Land/Ci-shaped errors)', () => {
     expect(parkReasonFor({ parkReason: 'conflict' })).toBe('conflict');
     expect(parkReasonFor({ parkReason: 'ci-failed' })).toBe('ci-failed');
@@ -30,6 +34,13 @@ describe('parkEvents', () => {
   it('emits a single event for a non-timeout park', () => {
     const err = Object.assign(new Error('x'), { outcome: { state: 'parked' as const, reason: 'escalate' as const } });
     expect(parkEvents(err)).toEqual([{ type: 'escalate', msg: 'x' }]);
+  });
+
+  it('emits a single config event with no stuck companion (#2584)', () => {
+    const err = Object.assign(new Error('bad config'), {
+      outcome: { state: 'parked' as const, reason: 'config' as const },
+    });
+    expect(parkEvents(err)).toEqual([{ type: 'config', msg: 'bad config' }]);
   });
 
   it('derives the message from Error instances', () => {

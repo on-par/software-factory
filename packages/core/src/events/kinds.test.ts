@@ -233,6 +233,14 @@ describe('environment-released (#1928)', () => {
   });
 });
 
+describe('config park (#2584)', () => {
+  it('classifies config as a terminal park (#2584)', () => {
+    const traits = { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' };
+    expect(EVENT_TRAITS.config).toEqual(traits);
+    expect(eventTraitsFor('config')).toEqual(traits);
+  });
+});
+
 describe('lane-paused', () => {
   it('is registered in EVENT_TRAITS', () => {
     expect(Object.hasOwn(EVENT_TRAITS, 'lane-paused')).toBe(true);

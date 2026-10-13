@@ -36,6 +36,7 @@ export type EventKind =
   | 'ci-rescued'
   | 'ci-rescue-failed'
   | 'conflict'
+  | 'config'
   | 'constitution'
   | 'decompose_comment_posted'
   | 'decompose_duplicate_skipped'
@@ -271,6 +272,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   // The one-shot infra rerun (#2365) did not go green (#2366). Not a park.
   'ci-rescue-failed': { severity: 'warn', isPark: false, isTerminal: false },
   conflict: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
+  // A config-caused CHECK failure parked with file, line and fix (#2583/#2584): fails the same way on every requeue.
+  config: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
   constitution: { severity: 'info', isPark: false, isTerminal: false },
   decompose_comment_posted: { severity: 'info', isPark: false, isTerminal: false },
   decompose_duplicate_skipped: { severity: 'warn', isPark: false, isTerminal: false },
