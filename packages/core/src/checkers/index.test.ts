@@ -16,7 +16,6 @@ import {
   accessibilityChecker,
   type CheckerContext,
   compileChecker,
-  fileExists,
   linksChecker,
   renderCheckerFindings,
   requireRunnableChecker,
@@ -34,7 +33,7 @@ import {
   unknownCheckerOutput,
   type WorktreeProbe,
 } from './index.js';
-import type { PythonTestSurfaceSource } from './probe.js';
+import { fileExists, type PythonTestSurfaceSource } from './probe.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -1614,23 +1613,6 @@ describe('listBuiltInCheckers', () => {
       expect(c.description.length).toBeGreaterThan(0);
       expect(c.description).not.toContain('\n');
     }
-  });
-});
-
-describe('fileExists', () => {
-  it('returns true for an existing regular file', async () => {
-    const worktree = await makeWorktree({ 'scripts/verify.sh': 'exit 0' });
-    expect(await fileExists(join(worktree, 'scripts/verify.sh'))).toBe(true);
-  });
-
-  it('returns false for a missing path', async () => {
-    const worktree = await makeWorktree();
-    expect(await fileExists(join(worktree, 'no-such-file'))).toBe(false);
-  });
-
-  it('returns false for a directory', async () => {
-    const worktree = await makeWorktree({ 'scripts/verify.sh': 'exit 0' });
-    expect(await fileExists(join(worktree, 'scripts'))).toBe(false);
   });
 });
 
