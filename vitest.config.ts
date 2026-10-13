@@ -15,9 +15,13 @@ import { configDefaults, defineConfig } from 'vitest/config';
  * FACTORY_INTEGRATION_TESTS=1 -> only the integration suites. That is
  *                 `npm run test:integration`, run nightly by
  *                 .github/workflows/nightly-integration.yml.
+ * FACTORY_REAL_CLI=<agent> -> only the real-CLI suites, run nightly by
+ *                 .github/workflows/nightly-real-cli.yml.
  */
 const INTEGRATION_GLOB = '**/*.integration.test.{ts,tsx}';
+const REAL_CLI_GLOB = '**/*.real-cli.test.{ts,tsx}';
 const integrationOnly = process.env.FACTORY_INTEGRATION_TESTS === '1';
+const realCliOnly = Boolean(process.env.FACTORY_REAL_CLI);
 
 export default defineConfig({
   // Pin the project root to this config's directory. Without it, vitest run
@@ -47,10 +51,16 @@ export default defineConfig({
     hookTimeout: 30_000,
     // Discover tests across all workspaces in one run so coverage aggregates.
     // scripts/ helpers with logic carry colocated tests too.
-    include: integrationOnly
-      ? [`packages/*/src/${INTEGRATION_GLOB}`]
-      : ['packages/*/src/**/*.test.{ts,tsx}', 'scripts/**/*.test.ts'],
-    exclude: integrationOnly ? configDefaults.exclude : [...configDefaults.exclude, INTEGRATION_GLOB],
+    include: realCliOnly
+      ? [`packages/*/src/${REAL_CLI_GLOB}`]
+      : integrationOnly
+        ? [`packages/*/src/${INTEGRATION_GLOB}`]
+        : ['packages/*/src/**/*.test.{ts,tsx}', 'scripts/**/*.test.ts'],
+    exclude: realCliOnly
+      ? configDefaults.exclude
+      : integrationOnly
+        ? [...configDefaults.exclude, REAL_CLI_GLOB]
+        : [...configDefaults.exclude, INTEGRATION_GLOB, REAL_CLI_GLOB],
     coverage: {
       provider: 'v8',
       // 'text' prints the per-file table; 'text-summary' prints the totals line.
