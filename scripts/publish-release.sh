@@ -6,14 +6,17 @@
 #   NOT PUBLISHED: <reason>        anything else; the step fails unless it was a dry run
 #
 # The version and npm dist-tag come from the tag name (#2244):
-#   vX.Y.Z-next.N  ->  version X.Y.Z-next.N, --tag next
-#   vX.Y.Z         ->  version X.Y.Z,        --tag latest
+#   vX.Y.Z-next.N, vX.Y.Z-alpha.N  ->  that version, --tag next
+#   vX.Y.Z                         ->  version X.Y.Z, --tag latest
+# or, for the per-merge pre-release (#2245), from PUBLISH_PRERELEASE_VERSION (X.Y.Z-alpha.N,
+# always --tag next), which wins over the ref.
 # set-release-version.sh writes that version into the packages (never committed), then
 # publish-workspaces.sh dry-runs and publishes. A dry run on a non-tag ref uses the
 # checked-out version.
 #
 # Env:
 #   PUBLISH_DRY_RUN=true   dry-run only (green, never publishes)
+#   PUBLISH_PRERELEASE_VERSION   X.Y.Z-alpha.N from scripts/prerelease-plan.sh
 #   GITHUB_REF             must be refs/tags/v* for a real publish
 #   PUBLISH_BLOCKERS       issue numbers that must be CLOSED before a real publish
 #                          (default "195 151", the v1.0 blockers)
@@ -44,11 +47,19 @@ dry_run=false
 [ "${PUBLISH_DRY_RUN:-}" != "true" ] || dry_run=true
 
 ref="${GITHUB_REF:-}"
+pre="${PUBLISH_PRERELEASE_VERSION:-}"
+[ -z "$pre" ] || ref="prerelease"
 case "$ref" in
+  prerelease)
+    [[ "$pre" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-alpha\.(0|[1-9][0-9]*)$ ]] ||
+      not_published "pre-release version $pre does not parse as X.Y.Z-alpha.N" 1
+    version="$pre"
+    bash scripts/set-release-version.sh "$version" || not_published "could not set the package versions to $version" 1
+    ;;
   refs/tags/v*)
     tag="${ref#refs/tags/}"
-    [[ "$tag" =~ ^v((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-next\.(0|[1-9][0-9]*))?)$ ]] ||
-      not_published "tag $tag does not parse as vX.Y.Z or vX.Y.Z-next.N" 1
+    [[ "$tag" =~ ^v((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(next|alpha)\.(0|[1-9][0-9]*))?)$ ]] ||
+      not_published "tag $tag does not parse as vX.Y.Z or vX.Y.Z-next.N or vX.Y.Z-alpha.N" 1
     version="${BASH_REMATCH[1]}"
     bash scripts/set-release-version.sh "$version" || not_published "could not set the package versions to $version" 1
     ;;

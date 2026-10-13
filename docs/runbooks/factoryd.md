@@ -50,7 +50,9 @@ read-only: it compares the running version with the npm dist-tags of
 
 - Exit codes: `0` up to date, `10` update available, `1` error, `2` bad usage.
 - `stable` only looks at `latest` and never offers a prerelease version;
-  `prerelease` takes the highest of `next` and `latest`.
+  `prerelease` takes the highest of `next` and `latest`. Every green merge to
+  `main` that touches a published package puts an `X.Y.Z-alpha.N` on `next`
+  (#2245), where `X.Y.Z` is the patch after `latest`.
 - A registry or network failure sets `error`, forces `updateAvailable: false`
   and exits 1; it never reports an update.
 - `applies` is `true` only for an npm-global install; a source install still
