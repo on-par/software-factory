@@ -16,7 +16,7 @@ function isAllowed(value: unknown): boolean {
 }
 
 function cleanItem(text: string): string {
-  let t = text.replace(/\s+#.*$/, '').trim();
+  let t = text.replace(/[ \t]+#.*$/, '').trim();
   const m = /^(['"])(.*)\1$/.exec(t);
   if (m) t = m[2];
   return t;
@@ -32,7 +32,7 @@ function listCheckerLines(raw: string): Array<{ name: string; line: number }> {
   for (let i = 1; i < end; i++) {
     const m = /^checkers\s*:(.*)$/.exec(lines[i]);
     if (!m) continue;
-    const rest = m[1].replace(/\s+#.*$/, '').trim();
+    const rest = m[1].replace(/[ \t]+#.*$/, '').trim();
     if (rest.startsWith('[')) {
       const inner = rest.replace(/^\[/, '').replace(/\]$/, '');
       for (const part of inner.split(',')) out.push({ name: cleanItem(part), line: i + 1 });
@@ -41,7 +41,7 @@ function listCheckerLines(raw: string): Array<{ name: string; line: number }> {
     for (let j = i + 1; j < end; j++) {
       const l = lines[j];
       if (l.trim() === '' || l.trim().startsWith('#')) continue;
-      const item = /^\s*-\s*(.*)$/.exec(l);
+      const item = /^[ \t]*-[ \t]*(.*)$/.exec(l);
       if (!item) break;
       out.push({ name: cleanItem(item[1]), line: j + 1 });
     }
