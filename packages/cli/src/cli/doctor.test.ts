@@ -1557,6 +1557,44 @@ describe('harness sign-in (#2556)', () => {
     }
   });
 
+  it('an unrefreshable stored Claude login fails the claude row with the /login fix (#2721)', () => {
+    const inference = vi.fn();
+    const base = noEvidence();
+    const checks = runDoctorChecks({
+      ...base,
+      claudeLoggedIn: () => false,
+      claudeSessionState: () => 'unusable',
+      tryExec: (cmd, opts) => {
+        if (/^(claude\s+(-p|--print)|codex\s+exec|opencode\s+run)\b/.test(cmd)) inference();
+        return base.tryExec(cmd, opts);
+      },
+    });
+    const row = checks.find((c) => c.name === 'claude signed in');
+    expect(row).toMatchObject({ ok: false });
+    expect(row!.detail).toContain('re-run claude login');
+    expect(row!.fix).toContain('/login');
+    expect(inference).not.toHaveBeenCalled();
+  });
+
+  it('an expired Claude access token with a refresh token stays signed in (#2721)', () => {
+    const checks = runDoctorChecks(
+      noEvidence({ claudeLoggedIn: () => true, claudeSessionState: () => 'refresh-pending' }),
+    );
+    expect(checks.find((c) => c.name === 'claude signed in')).toMatchObject({ ok: true });
+  });
+
+  it('a throwing Claude session probe falls back to the stored-login probe', () => {
+    const checks = runDoctorChecks(
+      noEvidence({
+        claudeLoggedIn: () => true,
+        claudeSessionState: () => {
+          throw new Error('boom');
+        },
+      }),
+    );
+    expect(checks.find((c) => c.name === 'claude signed in')).toMatchObject({ ok: true });
+  });
+
   it('a throwing stored-login probe counts as no evidence', () => {
     const checks = runDoctorChecks(
       noEvidence({

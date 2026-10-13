@@ -19,7 +19,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
@@ -53,13 +53,66 @@ export interface ClaudeLoginEvidenceDeps {
   /** Runs a command, throws on non-zero exit. Default: execFileSync with stdio 'ignore'. */
   exec?: (file: string, args: readonly string[]) => void;
   fileExists?: (path: string) => boolean;
+  /** Reads a file as utf8, throws when missing. Default: readFileSync. */
+  readFile?: (path: string) => string;
+  now?: () => number;
+}
+
+/** Margin so a token about to lapse mid-run already counts as expired. */
+const EXPIRY_SKEW_MS = 5 * 60 * 1000;
+
+/** State of the stored Claude Code OAuth login in `<config dir>/.credentials.json` (#2721,
+ *  the Claude twin of #2509).
+ *  - `ok`: the access token is still valid.
+ *  - `refresh-pending`: the access token has expired but a refresh token is present. A normal
+ *    idle login; claude refreshes it on the next run, so it counts as signed in.
+ *  - `unusable`: the file is unparseable, or there is neither a live access token nor a refresh token.
+ *  - `unknown`: nothing to judge (no file, e.g. macOS keychain storage; no claudeAiOauth entry;
+ *    no expiry recorded).
+ *  A rotated or revoked refresh token cannot be told apart without a network refresh, which would
+ *  rotate the token, so that is left to run-time evidence (the local_auth class). Reads only: no
+ *  network call, no refresh, never returns or logs a credential value. Never throws. */
+export type ClaudeSessionState = 'ok' | 'refresh-pending' | 'unusable' | 'unknown';
+
+export function claudeStoredSessionState(deps: ClaudeLoginEvidenceDeps = {}): ClaudeSessionState {
+  const env = deps.env ?? process.env;
+  const readFile = deps.readFile ?? ((path: string) => readFileSync(path, 'utf8'));
+  const now = deps.now ?? Date.now;
+  let text: string;
+  try {
+    text = readFile(resolve(claudeConfigDirPath(env), '.credentials.json'));
+  } catch {
+    return 'unknown';
+  }
+  let creds: unknown;
+  try {
+    creds = JSON.parse(text);
+  } catch {
+    return 'unusable';
+  }
+  if (typeof creds !== 'object' || creds === null) return 'unusable';
+  const oauth = (creds as { claudeAiOauth?: unknown }).claudeAiOauth;
+  // No Claude.ai OAuth entry (e.g. only MCP OAuth state): nothing to judge, keep file-existence evidence.
+  if (typeof oauth !== 'object' || oauth === null) return 'unknown';
+  const { accessToken, refreshToken, expiresAt } = oauth as {
+    accessToken?: unknown;
+    refreshToken?: unknown;
+    expiresAt?: unknown;
+  };
+  const hasAccess = typeof accessToken === 'string' && accessToken.trim().length > 0;
+  const hasRefresh = typeof refreshToken === 'string' && refreshToken.trim().length > 0;
+  if (hasAccess && typeof expiresAt === 'number' && expiresAt > now() + EXPIRY_SKEW_MS) return 'ok';
+  if (hasRefresh) return 'refresh-pending';
+  if (hasAccess && typeof expiresAt !== 'number') return 'unknown';
+  return 'unusable';
 }
 
 /** True when this machine holds evidence of a Claude Code login for the selected profile,
  *  found without running `claude` or any inference/network call (#2417). Evidence order:
  *  CLAUDE_CODE_OAUTH_TOKEN set (non-empty); on darwin, the profile's keychain entry exists
  *  (`security find-generic-password -s <service>` without -w, so no secret is read);
- *  `<config dir>/.credentials.json` exists. Never throws. */
+ *  `<config dir>/.credentials.json` exists and its session is not unusable (#2721: an expired
+ *  access token with no refresh token is not a login). Never throws. */
 export function hasClaudeLoginEvidence(deps: ClaudeLoginEvidenceDeps = {}): boolean {
   const env = deps.env ?? process.env;
   const platform = deps.platform ?? process.platform;
@@ -80,7 +133,12 @@ export function hasClaudeLoginEvidence(deps: ClaudeLoginEvidenceDeps = {}): bool
     }
   }
   try {
-    return fileExists(resolve(claudeConfigDirPath(env), '.credentials.json'));
+    if (!fileExists(resolve(claudeConfigDirPath(env), '.credentials.json'))) return false;
+  } catch {
+    return false;
+  }
+  try {
+    return claudeStoredSessionState(deps) !== 'unusable';
   } catch {
     return false;
   }

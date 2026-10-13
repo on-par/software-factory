@@ -338,6 +338,7 @@ const INTERNAL_API_KEYS = [
   'checkBaseHealth',
   'codexChatgptSessionState',
   'hasClaudeLoginEvidence',
+  'claudeStoredSessionState',
   'hasOpencodeLoginEvidence',
   // Persisted per-issue run state (#2271)
   'readIssueRunState',

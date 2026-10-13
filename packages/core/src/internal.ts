@@ -278,7 +278,13 @@ export {
   slugify,
 } from './utils/index.js';
 // Selected Claude profile (CLAUDE_CONFIG_DIR) and its keychain entry
-export { claudeConfigDirOverride, claudeKeychainService, hasClaudeLoginEvidence } from './utils/claude-config.js';
+export {
+  claudeConfigDirOverride,
+  claudeKeychainService,
+  claudeStoredSessionState,
+  hasClaudeLoginEvidence,
+} from './utils/claude-config.js';
+export type { ClaudeSessionState } from './utils/claude-config.js';
 export { hasOpencodeLoginEvidence } from './utils/opencode-config.js';
 export type { MicroVmLifecycleOptions, ReapedMicroVm, WorktreeSandbox } from './utils/microvm.js';
 export {

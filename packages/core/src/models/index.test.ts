@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig } from '../config/index.js';
@@ -633,6 +636,27 @@ describe('diagnoseModels', () => {
     expect(ds.length).toBeGreaterThan(1);
     expect(claudeLoggedIn).toHaveBeenCalledTimes(1);
   });
+
+  it.skipIf(process.platform === 'darwin')(
+    'marks Claude models unreachable for a stored login that expired with no refresh token (#2721)',
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), 'claude-2721-'));
+      try {
+        vi.stubEnv('CLAUDE_CONFIG_DIR', dir);
+        vi.stubEnv('CLAUDE_CODE_OAUTH_TOKEN', '');
+        const write = (oauth: Record<string, unknown>) =>
+          writeFileSync(join(dir, '.credentials.json'), JSON.stringify({ claudeAiOauth: oauth }));
+        const probes = { commandAvailable: (c: string) => c === 'claude', envPresent: () => false };
+        write({ accessToken: 'x', expiresAt: Date.now() - 3_600_000 });
+        expect(opusDiagnosis(probes).reachable).toBe(false);
+        write({ accessToken: 'x', refreshToken: 'y', expiresAt: Date.now() - 3_600_000 });
+        expect(opusDiagnosis(probes).reachable).toBe(true);
+      } finally {
+        vi.unstubAllEnvs();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('treats a throwing login probe as not logged in', () => {
     const d = opusDiagnosis({

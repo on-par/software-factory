@@ -6632,6 +6632,31 @@ Please add a widget that does the thing.
         expect(logged()).toContain('ChatGPT session in auth.json is unusable');
       });
 
+      const writeClaudeCreds = (oauth: Record<string, unknown>) =>
+        writeFileSync(
+          join(h.repoRoot, 'no-claude-config', '.credentials.json'),
+          JSON.stringify({ claudeAiOauth: oauth }),
+        );
+
+      it('fails when the stored Claude login expired with no refresh token and no other agent is signed in (#2721)', async () => {
+        h.claudeAvailable = true;
+        withAuth(false, false);
+        writeClaudeCreds({ accessToken: 'dummy', expiresAt: Date.now() - 3_600_000 });
+        const res = await runMain('doctor');
+        expect(res.exited).toBeTruthy();
+        expect(logged()).toContain('re-run claude login');
+        expect(logged()).not.toContain('dummy');
+      });
+
+      it('keeps claude signed in for an expired access token with a refresh token (#2721)', async () => {
+        h.claudeAvailable = true;
+        withAuth(false, false);
+        writeClaudeCreds({ accessToken: 'dummy', refreshToken: 'dummy-r', expiresAt: Date.now() - 3_600_000 });
+        const res = await runMain('doctor');
+        expect(res.exited).toBe(false);
+        expect(logged()).toContain('signed in (stored Claude Code login found)');
+      });
+
       it('fails when every installed agent is logged out', async () => {
         h.claudeAvailable = true;
         withAuth(false, false);
