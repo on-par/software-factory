@@ -242,8 +242,11 @@ const FactoryConfigSchema = z.object({
       enabled: z.boolean().default(true),
       runtime: z.enum(['auto', 'sandbox-exec', 'firejail', 'docker-sandbox', 'none']).default('auto'),
       network: z
-        .object({ allow: z.array(z.string()).default(['api.anthropic.com', 'github.com']) })
-        .default({ allow: ['api.anthropic.com', 'github.com'] }),
+        .object({
+          allow: z.array(z.string()).default(['api.anthropic.com', 'github.com']),
+          blockTelemetry: z.boolean().optional(),
+        })
+        .default({ allow: ['api.anthropic.com', 'github.com'], blockTelemetry: false }),
       resources: z
         .object({ cpuMs: z.number().positive().default(300_000), memMb: z.number().positive().default(4096) })
         .default({ cpuMs: 300_000, memMb: 4096 }),
@@ -253,7 +256,7 @@ const FactoryConfigSchema = z.object({
     .default({
       enabled: true,
       runtime: 'auto',
-      network: { allow: ['api.anthropic.com', 'github.com'] },
+      network: { allow: ['api.anthropic.com', 'github.com'], blockTelemetry: false },
       resources: { cpuMs: 300_000, memMb: 4096 },
       docker: { rolloutPercent: 0 },
     }),

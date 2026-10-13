@@ -578,6 +578,38 @@ describe('loadFactoryConfig', () => {
     expect(config.sandbox.resources).toEqual({ cpuMs: 300_000, memMb: 4096 });
   });
 
+  it('defaults sandbox.network.blockTelemetry to false (#2667)', () => {
+    expect(loadFactoryConfig().sandbox.network.blockTelemetry).toBe(false);
+  });
+
+  it('loads sandbox.network.blockTelemetry true from a repo config (#2667)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
+    try {
+      const path = join(dir, 'factory.json');
+      const minimal = {
+        version: 1,
+        paths: {
+          constitutions: 'constitutions/',
+          checkers: 'lib/checkers/',
+          plans: '.factory/plans/',
+          logs: '.factory/logs/',
+          events: '.factory/events.ndjson',
+        },
+        timeouts: { plan_seconds: 1800, build_seconds: 7200, check_seconds: 1800, merge_poll_seconds: 120 },
+        merge: { auto: false, comment: '' },
+        worktree: { prefix: 'ship-it/', parent: '../', comment: '' },
+        byok: { enabled: false, comment: '' },
+        notifications: {},
+        cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
+        sandbox: { network: { blockTelemetry: true } },
+      };
+      await writeFile(path, JSON.stringify(minimal));
+      expect(loadFactoryConfig(path).sandbox.network.blockTelemetry).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('shipped config has an enabled auto_failover block with a 30 minute cooldown', () => {
     const config = loadFactoryConfig();
     expect(config.auto_failover.enabled).toBe(true);

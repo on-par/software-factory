@@ -50,6 +50,8 @@ export interface SandboxPolicy {
   allowHosts: string[];
   /** Report-only egress proxy URL (#2214); set only for sandbox-exec with a non-empty allowlist. */
   proxyUrl?: string;
+  /** Egress proxy refuses telemetry hosts with 403 (#2667); off unless config sets it true. */
+  blockTelemetry?: boolean;
   cpuMs: number;
   memMb: number;
 }
@@ -204,6 +206,7 @@ export function resolveSandboxPolicy(
     writablePaths,
     writableFilePrefixes,
     allowHosts: buildEgressAllowlist(cfg.network.allow, opts.repoRoot),
+    blockTelemetry: cfg.network.blockTelemetry === true,
     cpuMs: cfg.resources.cpuMs,
     memMb: cfg.resources.memMb,
   };

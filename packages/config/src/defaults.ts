@@ -87,7 +87,7 @@ export interface FactoryDefaults {
   sandbox: {
     enabled: boolean;
     runtime: 'auto' | 'sandbox-exec' | 'firejail' | 'docker-sandbox' | 'none';
-    network: { allow: string[] };
+    network: { allow: string[]; blockTelemetry?: boolean };
     resources: { cpuMs: number; memMb: number };
     docker?: { rolloutPercent: number };
     comment?: string;
@@ -715,11 +715,11 @@ export const defaultFactoryConfig: FactoryDefaults = {
   sandbox: {
     enabled: true,
     runtime: 'auto',
-    network: { allow: ['api.anthropic.com', 'github.com'] },
+    network: { allow: ['api.anthropic.com', 'github.com'], blockTelemetry: false },
     resources: { cpuMs: 300000, memMb: 4096 },
     docker: { rolloutPercent: 0 },
     comment:
-      'Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty network.allow denies all egress; non-empty leaves egress open (per-host filtering is logged as degraded in v1). Set sandbox.runtime (auto|sandbox-exec|firejail|docker-sandbox|none) or FACTORY_SANDBOX_RUNTIME to pick a runtime; auto probes the host. docker-sandbox is reserved for the microVM runtime and does not contain anything yet (#653). sandbox.docker.rolloutPercent (0-100) deterministically promotes that percentage of unpinned lanes into the docker-sandbox cohort for A/B evidence (#655).',
+      'Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty network.allow denies all egress; non-empty leaves egress open (per-host filtering is logged as degraded in v1). Set sandbox.runtime (auto|sandbox-exec|firejail|docker-sandbox|none) or FACTORY_SANDBOX_RUNTIME to pick a runtime; auto probes the host. docker-sandbox is reserved for the microVM runtime and does not contain anything yet (#653). sandbox.docker.rolloutPercent (0-100) deterministically promotes that percentage of unpinned lanes into the docker-sandbox cohort for A/B evidence (#655). sandbox.network.blockTelemetry (default false) makes the egress proxy refuse known telemetry hosts (e.g. *.datadoghq.com) with 403, even if allowlisted; it only takes effect where the egress proxy runs (sandbox-exec with a non-empty allowlist) (#2667).',
   },
   discovery: {
     enabled: true,

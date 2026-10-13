@@ -1,7 +1,7 @@
 // src/sandbox/egress-proxy.ts — report-only HTTP CONNECT proxy for sandboxed agent egress (#2214).
 //
-// Forwards everything and records each distinct host. It never blocks: the evidence it gathers
-// feeds a later slice that enforces `sandbox.network.allow`. The allowlist gains the registry hosts
+// Forwards everything (except telemetry hosts when `blockTelemetry` is set, #2667) and records each
+// distinct host. The evidence it gathers feeds a later slice that enforces `sandbox.network.allow`. The allowlist gains the registry hosts
 // of each detected ecosystem (#2659, #2661 for .NET). Known telemetry hosts are classified
 // separately in the egress logs (#2664).
 
@@ -13,6 +13,8 @@ import type { Duplex } from 'node:stream';
 
 export interface EgressProxyOptions {
   allowHosts: readonly string[];
+  /** Refuse hosts matching isTelemetryHost with 403 (still recorded) (#2667). */
+  blockTelemetry?: boolean;
   /** Fired exactly once per distinct (lowercased) host, before the upstream connect. */
   onHost?: (host: string, allowed: boolean) => void;
   /** Bind address; default '127.0.0.1'. Port is always 0 (ephemeral). */
@@ -246,6 +248,8 @@ export function startEgressProxy(opts: EgressProxyOptions): Promise<EgressProxy>
     s.once('close', () => sockets.delete(s));
   };
 
+  const blocked = (host: string): boolean => opts.blockTelemetry === true && isTelemetryHost(host);
+
   const record = (rawHost: string): string => {
     const host = rawHost.toLowerCase().replace(/^\[|\]$/g, '');
     if (!seen.has(host)) {
@@ -270,6 +274,10 @@ export function startEgressProxy(opts: EgressProxyOptions): Promise<EgressProxy>
       return;
     }
     const host = record(target.host);
+    if (blocked(host)) {
+      rejectSocket(clientSocket, '403 Forbidden');
+      return;
+    }
     const upstream = net.connect(target.port, host);
     track(upstream);
     let connected = false;
@@ -303,6 +311,11 @@ export function startEgressProxy(opts: EgressProxyOptions): Promise<EgressProxy>
       return;
     }
     const host = record(url.hostname);
+    if (blocked(host)) {
+      res.writeHead(403);
+      res.end();
+      return;
+    }
     const upstream = http.request({
       host,
       port: url.port ? Number(url.port) : 80,

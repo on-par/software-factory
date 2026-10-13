@@ -2802,6 +2802,7 @@ export async function shipIssue(
   const egressProxy = proxied
     ? await startEgressProxy({
         allowHosts: proxied.allowHosts,
+        blockTelemetry: proxied.blockTelemetry,
         onHost: (host, allowed) => log('egress_host', egressHostMessage(host, allowed)),
       })
     : undefined;
