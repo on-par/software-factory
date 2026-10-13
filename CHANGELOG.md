@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Changed
+
+- npm publishing uses OIDC trusted publishing instead of the `NPM_TOKEN`
+  classic token. Setup, verification and troubleshooting are in
+  [docs/runbooks/npm-trusted-publishing.md](docs/runbooks/npm-trusted-publishing.md)
+  (#2628).
+
 ## 0.9.4
 
 Fixes the pre-PLAN base health check that read a green `main` as red in JS
