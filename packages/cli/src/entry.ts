@@ -1,7 +1,7 @@
-// packages/cli/src/entry.ts — bin-entry runner: gates on the Node version (#2382) and pins the CLI version in its reinstall line (#2599), awaits main and exits 1 on rejection (#2031).
+// packages/cli/src/entry.ts — bin-entry runner: gates on the Node version (#2382) and pins the CLI version in its reinstall line (#2599) and offers nvm only when detected (#2600), awaits main and exits 1 on rejection (#2031).
 
 import { createRequire } from 'node:module';
-import { checkNodeVersion } from './node-version.js';
+import { checkNodeVersion, type NodeEnv } from './node-version.js';
 
 export interface EntryIo {
   error(msg: string): void;
@@ -26,8 +26,9 @@ export async function runEntry(
   io: EntryIo = defaultIo,
   nodeVersion: string = process.version,
   cliVersion: string = readCliVersion(),
+  env: NodeEnv = process.env,
 ): Promise<void> {
-  const node = checkNodeVersion(nodeVersion, cliVersion);
+  const node = checkNodeVersion(nodeVersion, cliVersion, env);
   if (!node.ok) {
     io.error(node.message);
     io.exit(1);

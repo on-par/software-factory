@@ -43,7 +43,7 @@ describe('runEntry', () => {
     const io = recordingIo();
     const main = vi.fn(async () => {});
 
-    await runEntry(main, io, 'v20.11.1');
+    await runEntry(main, io, 'v20.11.1', undefined, { NVM_DIR: '/x/.nvm' });
 
     expect(main).not.toHaveBeenCalled();
     expect(io.error).toHaveBeenCalledTimes(1);
@@ -51,6 +51,18 @@ describe('runEntry', () => {
     expect(io.error.mock.calls[0][0]).toContain('nvm install 24');
     expect(io.exit).toHaveBeenCalledWith(1);
     expect(io.error.mock.invocationCallOrder[0]).toBeLessThan(io.exit.mock.invocationCallOrder[0]);
+  });
+
+  it('points at nodejs.org/download when nvm is absent without calling main', async () => {
+    const io = recordingIo();
+    const main = vi.fn(async () => {});
+
+    await runEntry(main, io, 'v20.11.1', '1.2.3', {});
+
+    expect(main).not.toHaveBeenCalled();
+    expect(io.error.mock.calls[0][0]).toContain('https://nodejs.org/download');
+    expect(io.error.mock.calls[0][0]).not.toContain('nvm install');
+    expect(io.exit).toHaveBeenCalledWith(1);
   });
 
   it('pins the CLI version in the reinstall line without calling main', async () => {

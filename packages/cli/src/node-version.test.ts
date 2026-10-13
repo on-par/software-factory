@@ -2,7 +2,17 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
-import { checkNodeVersion, MIN_NODE_MAJOR } from './node-version.js';
+import { checkNodeVersion, hasNvm, MIN_NODE_MAJOR } from './node-version.js';
+
+describe('hasNvm', () => {
+  it('is true only for a non-empty NVM_DIR', () => {
+    expect(hasNvm({ NVM_DIR: '/home/u/.nvm' })).toBe(true);
+    expect(hasNvm({ NVM_DIR: undefined })).toBe(false);
+    expect(hasNvm({ NVM_DIR: '' })).toBe(false);
+    expect(hasNvm({ NVM_DIR: '   ' })).toBe(false);
+    expect(hasNvm({ NVM_BIN: '/home/u/.nvm/bin' })).toBe(false);
+  });
+});
 
 describe('checkNodeVersion', () => {
   it('rejects a major below the minimum', () => {
@@ -10,10 +20,32 @@ describe('checkNodeVersion', () => {
     expect(old.ok).toBe(false);
     if (!old.ok) {
       expect(old.message).toContain('needs Node.js 24 or newer (found v20.11.1)');
-      expect(old.message).toContain('nvm install 24 && nvm use 24');
       expect(old.message).toContain('npm install -g @on-par/factory-cli');
     }
     expect(checkNodeVersion('v23.9.0').ok).toBe(false);
+  });
+
+  it('points at nodejs.org/download and omits nvm when nvm is absent', () => {
+    for (const env of [{}, { NVM_DIR: '' }, { NVM_DIR: '  ' }, undefined]) {
+      const old = checkNodeVersion('v20.19.2', '0.9.3', env);
+      expect(old.ok).toBe(false);
+      if (!old.ok) {
+        expect(old.message).toContain('https://nodejs.org/download');
+        expect(old.message).not.toContain('nvm install');
+        expect(old.message.endsWith('npm install -g @on-par/factory-cli@0.9.3')).toBe(true);
+      }
+    }
+  });
+
+  it('offers nvm install 24 && nvm use 24 when NVM_DIR is set', () => {
+    const old = checkNodeVersion('v20.19.2', '0.9.3', { NVM_DIR: '/home/u/.nvm' });
+    expect(old.ok).toBe(false);
+    if (!old.ok) {
+      expect(old.message).toContain('nvm install 24 && nvm use 24');
+      expect(old.message).not.toContain('nodejs.org/download');
+      expect(old.message.endsWith('npm install -g @on-par/factory-cli@0.9.3')).toBe(true);
+    }
+    expect(checkNodeVersion('v24.0.0', undefined, {})).toEqual({ ok: true });
   });
 
   it('pins the running CLI version in the reinstall line', () => {
