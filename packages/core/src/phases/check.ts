@@ -8,6 +8,7 @@ import { type BaselineReport, extractFailingTestNames, runBaselineCheckers } fro
 import { type FlakeRerun, rerunTestsChecker } from '../checkers/flaky-rerun.js';
 import {
   type CheckerContext,
+  isUnknownCheckerOutput,
   probeWorktree,
   renderCheckerFindings,
   runAllCheckers,
@@ -22,6 +23,7 @@ import { failoversFrom } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
 import type {
+  BaseFailureCause,
   CheckerOutput,
   CheckSummary,
   Constitution,
@@ -42,6 +44,8 @@ export interface EnvironmentFailure {
   baseSha: string;
   /** Round-1 FAIL checker names, in summary order. */
   failingChecks: string[];
+  /** 'config' when a failing checker is an unknown-checker constitution error (#2581), else 'environment'. */
+  cause: BaseFailureCause;
   /** Full-output log files from round 1 plus the base-run log dir; empty when logsDir is unset. */
   logPaths: string[];
 }
@@ -230,6 +234,11 @@ function classifyReworkCause(opts: {
   if (opts.failovers.some((f) => EXTERNAL_REASONS.has(f.reason))) return 'external';
   if (opts.failureReason !== undefined && EXTERNAL_REASONS.has(opts.failureReason)) return 'external';
   return 'factory-fault';
+}
+
+/** 'config' when any FAIL is an unknown-checker constitution error (#2581); otherwise 'environment'. */
+export function classifyBaseFailureCause(summary: CheckSummary): BaseFailureCause {
+  return summary.results.some(isUnknownCheckerOutput) ? 'config' : 'environment';
 }
 
 /** True when every round-1 failing checker also fails on the base SHA (#1927): the failure
@@ -474,7 +483,9 @@ async function checkPhaseImpl(opts: {
 
   // Decided before the rework loop from the single pre-loop baseline (#1927).
   let environmentCause = isEnvironmentFailure(summary, baseline);
-  if (environmentCause) log('check', 'every failing checker also fails on base — rework cause=environment');
+  if (environmentCause) {
+    log('check', `every failing checker also fails on base — rework cause=${classifyBaseFailureCause(summary)}`);
+  }
 
   // Serial re-run (#2301): a tests failure that passes alone is flaky; act on it (#2302).
   let flakeRerun: FlakeRerun | undefined;
@@ -504,6 +515,7 @@ async function checkPhaseImpl(opts: {
     const environment: EnvironmentFailure = {
       baseSha: baseline.baseSha,
       failingChecks: failingCheckerNames(summary),
+      cause: classifyBaseFailureCause(summary),
       logPaths: environmentLogPaths(summary, checkBaseDir),
     };
     log(

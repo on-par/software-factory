@@ -22,11 +22,13 @@ import {
   requireRunnableChecker,
   resolveTestsCommand,
   lintChecker,
+  isUnknownCheckerOutput,
   listBuiltInCheckers,
   runAllCheckers,
   runCustomChecker,
   summarizeCheckerOutputs,
   testsChecker,
+  unknownCheckerOutput,
   type WorktreeProbe,
 } from './index.js';
 import type { PythonTestSurfaceSource } from './probe.js';
@@ -1649,5 +1651,12 @@ describe('requireRunnableChecker (#2493)', () => {
     expect(
       requireRunnableChecker({ checker: 'design_smells', result: 'PASS', details: '' }, constitution()).result,
     ).toBe('PASS');
+  });
+});
+
+describe('isUnknownCheckerOutput (#2581)', () => {
+  it('matches unknownCheckerOutput and nothing else', () => {
+    expect(isUnknownCheckerOutput(unknownCheckerOutput('x'))).toBe(true);
+    expect(isUnknownCheckerOutput({ checker: 'lint', result: 'FAIL', details: 'boom' })).toBe(false);
   });
 });

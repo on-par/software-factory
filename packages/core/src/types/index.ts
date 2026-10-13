@@ -205,7 +205,10 @@ export type RepoSlug = string;
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 /** Best-effort classification of why a rework round happened (#386). */
-export type ReworkCause = 'factory-fault' | 'direction-change' | 'external' | 'environment';
+export type ReworkCause = 'factory-fault' | 'direction-change' | 'external' | 'environment' | 'config';
+
+/** Cause of a CHECK failure that also reproduces on the base SHA (#2581). */
+export type BaseFailureCause = Extract<ReworkCause, 'environment' | 'config'>;
 
 /** Cause bucket for a retry attempt (#419): checker = rework round after failed
  *  checks, failover = provider/quota failover, timeout = runaway agent,

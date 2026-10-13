@@ -610,12 +610,19 @@ export function listBuiltInCheckers(): BuiltInCheckerInfo[] {
 export const STANDARD_CHECKER_NAMES = BUILT_IN_CHECKERS.map((c) => c.name);
 
 /** Fail closed: a declared standard we can't run must not vanish from the summary. */
-function unknownCheckerOutput(name: string): CheckerOutput {
+const UNKNOWN_CHECKER_PREFIX = 'unknown checker ';
+
+export function unknownCheckerOutput(name: string): CheckerOutput {
   return {
     checker: name,
     result: 'FAIL',
-    details: `unknown checker '${name}' — not a built-in (${STANDARD_CHECKER_NAMES.join(', ')}) and not a custom_* agent checker; failing closed so the declared standard is not silently skipped`,
+    details: `${UNKNOWN_CHECKER_PREFIX}'${name}' — not a built-in (${STANDARD_CHECKER_NAMES.join(', ')}) and not a custom_* agent checker; failing closed so the declared standard is not silently skipped`,
   };
+}
+
+/** True for the FAIL unknownCheckerOutput produces: a constitution names a checker the factory does not know. */
+export function isUnknownCheckerOutput(output: CheckerOutput): boolean {
+  return output.result === 'FAIL' && output.details.startsWith(UNKNOWN_CHECKER_PREFIX);
 }
 
 /** A declared checkers list selects the built-ins (registry order) plus worker_output, the empty-diff guard
