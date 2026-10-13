@@ -95,10 +95,42 @@ export function defaultBuildRoute(runnable: readonly BuildRouteName[]): BuildRou
   return runnable[0] ?? 'claude';
 }
 
+/** Keep the requested route when it can run here (or the router cannot say); otherwise fall back. */
+export function resolveRunnableBuildRoute(
+  requested: BuildRouteName,
+  runnable: readonly BuildRouteName[],
+): { route: BuildRouteName; rerouted: boolean } {
+  if (runnable.length === 0 || runnable.includes(requested)) return { route: requested, rerouted: false };
+  return { route: defaultBuildRoute(runnable), rerouted: true };
+}
+
+/** Step-3 route bullets, in display order. */
+const ROUTE_BULLETS: Record<BuildRouteName, string> = {
+  codex: `   - route: codex — when the implementation from a frozen spec is bounded and mechanical
+     (known-repro fixes, well-scoped features, refactors, test writing, CI/tooling)`,
+  claude: `   - route: claude — when the work needs UX, design, or architecture judgment; naming/API
+     design calls; is a tiny diff (<20 lines); needs session tools; or when the repo's
+     pinned build worker is a claude-cli model (e.g. claude-sonnet-5 in .factory/config.json)`,
+  opencode: `   - route: opencode — when the repo's pinned build worker is an opencode-harness model
+     (e.g. opencode-deepseek-v4-flash in .factory/config.json); bounded mechanical work`,
+};
+
 export function buildPlanPrompt(opts: PlanPromptOpts): string {
   const { issue, issueTitle, issueBody, specPath, constitutionCtx, adrCtx } = opts;
   const runnable = opts.runnableRoutes ?? [];
   const fallbackRoute = defaultBuildRoute(runnable);
+  const offered = runnable.length > 0 ? runnable : ROUTE_FALLBACK_ORDER;
+  const routeBullets = (['codex', 'claude', 'opencode'] as const)
+    .filter((r) => offered.includes(r))
+    .map((r) => ROUTE_BULLETS[r])
+    .join('\n');
+  const exampleRoute = offered.includes('codex') ? 'codex' : fallbackRoute;
+  const replaceNote =
+    offered.includes('codex') && offered.includes('claude')
+      ? `(Replace 'codex' in the frontmatter with 'claude' if that's the route you chose.)\n`
+      : offered.length > 1
+        ? `(Set route: in the frontmatter to the route you chose.)\n`
+        : '';
   const runnableNote =
     runnable.length > 0 && runnable.length < ROUTE_FALLBACK_ORDER.length
       ? `\n   Only these routes can run on this machine: ${runnable.join(', ')}. Choose one of them.`
@@ -123,13 +155,7 @@ Steps:
 2. Explore the codebase (read/search only) enough to name the exact files, functions,
    and existing patterns/tests this issue touches, and any edge cases.
 3. Decide the build route:
-   - route: codex — when the implementation from a frozen spec is bounded and mechanical
-     (known-repro fixes, well-scoped features, refactors, test writing, CI/tooling)
-   - route: claude — when the work needs UX, design, or architecture judgment; naming/API
-     design calls; is a tiny diff (<20 lines); needs session tools; or when the repo's
-     pinned build worker is a claude-cli model (e.g. claude-sonnet-5 in .factory/config.json)
-   - route: opencode — when the repo's pinned build worker is an opencode-harness model
-     (e.g. opencode-deepseek-v4-flash in .factory/config.json); bounded mechanical work
+${routeBullets}
    A pinned build worker's harness always wins over your judgment: the factory forces the
    route to match it after PLAN. Default to route: ${fallbackRoute} when genuinely unsure.${runnableNote}
 4. RIGHT-SIZE THE SLICE. A single BUILD pass must be bounded: aim for roughly
@@ -171,7 +197,7 @@ ${constitutionCtx ? '5. The constitution above defines the standards for this pr
 
 Write EXACTLY ONE file, at ${specPath}, in this shape:
 ---
-route: codex
+route: ${exampleRoute}
 design:
   restatedProblem: >-
     <one paragraph, the problem in your own words — if this is wrong, stop>
@@ -241,8 +267,7 @@ ${constitutionCtx ? `## Constitution compliance\nFor each standard in the consti
 ## Non-goals
 <explicitly out of scope, from the issue>
 
-(Replace 'codex' in the frontmatter with 'claude' if that's the route you chose.)
-The design: block is machine-validated — keys must match exactly as shown.
+${replaceNote}The design: block is machine-validated — keys must match exactly as shown.
 targetTypes / signatures / callGraph must be grounded in the real checkout: every
 file must be one that exists (or one you are creating), and every name/symbol must
 be one you actually read or are adding — omit an entry rather than guess. Quote
@@ -290,6 +315,7 @@ function fileModeEscalation(
   childIssues: number[],
   readiness: ReadinessInfo,
   specPath: string,
+  route: BuildRouteName,
   log: (type: EventKind, msg: string, extra?: { readiness?: ReadinessInfo }) => void,
   prefix = '',
 ): PlanResult {
@@ -301,7 +327,7 @@ function fileModeEscalation(
   log('size-gate-escalated', reason, { readiness });
   return {
     ok: false,
-    route: 'claude',
+    route,
     specPath,
     model: '',
     escalate: reason,
@@ -402,6 +428,8 @@ async function planPhaseImpl(opts: {
   );
 
   const constitutionCtx = buildConstitutionContext(constitution);
+  const runnableRoutes = runnableBuildRoutes(router);
+  const failureRoute = defaultBuildRoute(runnableRoutes);
 
   let readiness = scoreIssueReadiness({ title: issueTitle, body: issueBody });
   if (
@@ -468,14 +496,21 @@ async function planPhaseImpl(opts: {
         previous = { previousOutput: enrichment.output, template: candidate.template, stillMissing: candidate.missing };
       }
       if (!enriched) {
-        return { ok: false, route: 'claude', specPath, model: lastModel, escalate: lastReason, designArtifact: null };
+        return {
+          ok: false,
+          route: failureRoute,
+          specPath,
+          model: lastModel,
+          escalate: lastReason,
+          designArtifact: null,
+        };
       }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       log('readiness_enrichment_failed', `enrichment failed: ${reason}`);
       return {
         ok: false,
-        route: 'claude',
+        route: failureRoute,
         specPath,
         model: '',
         escalate: `readiness enrichment failed: ${reason}`,
@@ -506,7 +541,7 @@ async function planPhaseImpl(opts: {
     });
     const park = (reason: string): PlanResult => ({
       ok: false,
-      route: 'claude',
+      route: failureRoute,
       specPath,
       model: '',
       escalate: reason,
@@ -558,7 +593,7 @@ async function planPhaseImpl(opts: {
       onProviderFailure,
       fileSubIssues: true,
     });
-    return fileModeEscalation(decomposeResult.childIssues, readiness, specPath, log);
+    return fileModeEscalation(decomposeResult.childIssues, readiness, specPath, failureRoute, log);
   }
 
   // The fast path emits a compact Codex spec, so it is only valid when the route may be codex:
@@ -629,8 +664,6 @@ async function planPhaseImpl(opts: {
 
   let steering: ConsumedSteering | undefined;
   let replans = 0;
-  const runnableRoutes = runnableBuildRoutes(router);
-
   while (true) {
     const prompt = applySteering(
       buildPlanPrompt({ issue, issueTitle, issueBody, specPath, constitutionCtx, adrCtx, runnableRoutes }),
@@ -666,7 +699,7 @@ async function planPhaseImpl(opts: {
       log('escalate', escalateLine ?? 'plan escalated');
       return {
         ok: false,
-        route: 'claude',
+        route: failureRoute,
         specPath,
         model: result.model,
         escalate: escalateLine,
@@ -700,8 +733,9 @@ async function planPhaseImpl(opts: {
       await updateSpecRoute(specPath, 'claude', 'codex-disabled');
     }
 
-    if (runnableNow.length > 0 && !runnableNow.includes(route)) {
-      const next = defaultBuildRoute(runnableNow);
+    const resolved = resolveRunnableBuildRoute(route, runnableNow);
+    if (resolved.rerouted) {
+      const next = resolved.route;
       log('model-override', `route ${route} has no runnable model on this machine, rerouting to ${next}`);
       route = next;
       await updateSpecRoute(specPath, next, 'route-unavailable');
