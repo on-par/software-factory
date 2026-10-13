@@ -3,7 +3,8 @@ import type { SlicePlan } from '@on-par/factory-core/internal';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { QueuePreflightOps, SlicePullState } from './index.js';
-import { preflightQueuedIssue, runLane, waitForMerge } from './index.js';
+import { waitForMerge } from './land.js';
+import { preflightQueuedIssue, runLane } from './index.js';
 
 const story = (n: number) => ({
   title: `Story ${n}`,
