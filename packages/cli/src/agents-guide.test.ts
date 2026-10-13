@@ -364,4 +364,22 @@ describe('docs/agents.md supported agents guide', () => {
       expect(problems).toEqual([]);
     },
   );
+
+  it.skipIf(isPlaceholder)(
+    'Request support instead links the agent-support issue template, and the template exists',
+    () => {
+      const lines = (guideText ?? '').split('\n');
+      const start = headingIndex(lines, (h) => h === 'request support instead');
+      const section = start < 0 ? '' : sectionAt(lines, start);
+      const problems: string[] = [];
+      if (start < 0) problems.push('no Request support instead section');
+      if (!section.includes('issues/new?template=agent-support.yml'))
+        problems.push('Request support instead does not link issues/new?template=agent-support.yml');
+      if (!/\]\([^)]*\.github\/ISSUE_TEMPLATE\/agent-support\.yml\)/.test(section))
+        problems.push('Request support instead does not link .github/ISSUE_TEMPLATE/agent-support.yml');
+      if (!existsSync(join(repoRoot, '.github', 'ISSUE_TEMPLATE', 'agent-support.yml')))
+        problems.push('.github/ISSUE_TEMPLATE/agent-support.yml does not exist');
+      expect(problems).toEqual([]);
+    },
+  );
 });
