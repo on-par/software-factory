@@ -1061,9 +1061,31 @@ describe('resolveSizeGateMode (#2048)', () => {
     expect(resolveSizeGateMode({ ...config, sizeGate: { mode: 'slice' } })).toBe('slice');
   });
 
-  it.each(['SLICE', 'OFF', ' off ', ''])('resolves unknown mode %j to file', (mode) => {
+  it('resolves stack', () => {
+    const config = loadFactoryConfig();
+    expect(resolveSizeGateMode({ ...config, sizeGate: { mode: 'stack' } })).toBe('stack');
+  });
+
+  it('stays file by default now that stack exists', () => {
+    expect(resolveSizeGateMode(loadFactoryConfig())).toBe('file');
+  });
+
+  it.each(['SLICE', 'OFF', ' off ', '', 'STACK', ' stack '])('resolves unknown mode %j to file', (mode) => {
     const config = loadFactoryConfig();
     expect(resolveSizeGateMode({ ...config, sizeGate: { mode } })).toBe('file');
+  });
+
+  it('loads a config file with sizeGate.mode stack and resolves it to stack', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
+    try {
+      const path = join(dir, 'factory.json');
+      const base = loadFactoryConfig();
+      await writeFile(path, JSON.stringify({ ...base, sizeGate: { mode: 'stack' } }));
+      const config = loadFactoryConfig(path);
+      expect(resolveSizeGateMode(config)).toBe('stack');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('loads a config file with an unknown sizeGate.mode and resolves it to file', async () => {
@@ -1112,6 +1134,7 @@ describe('parseSizeGateMode (#2048)', () => {
     expect(parseSizeGateMode('file')).toBe('file');
     expect(parseSizeGateMode('slice')).toBe('slice');
     expect(parseSizeGateMode('off')).toBe('off');
+    expect(parseSizeGateMode('stack')).toBe('stack');
   });
 
   it('returns undefined for anything else', () => {

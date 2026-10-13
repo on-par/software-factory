@@ -5534,7 +5534,7 @@ bash scripts/verify.sh
       const call = phases.planPhase.mock.calls.at(-1)?.[0] as any;
       expect(call.approvalGate).toBeUndefined();
       expect(call.enforceReadiness).toBe(true);
-      expect(call.enforceSizeGate).toBe(true);
+      expect(call?.enforceSizeGate).toBe(true);
       expect(call.drainSteering).toBeUndefined();
     });
 
@@ -5705,6 +5705,19 @@ bash scripts/verify.sh
         h.factoryConfig = { ...h.factoryConfig, sizeGate: { mode: 'slice' } };
         await runMain('run-issue', '5');
         expect(phases.planPhase.mock.calls.at(-1)?.[0].sizeGateMode).toBe('slice');
+      });
+
+      it('--size-gate stack passes sizeGateMode stack to planPhase', async () => {
+        await runMain('run-issue', '5', '--size-gate', 'stack');
+        const call = phases.planPhase.mock.calls.at(-1)?.[0];
+        expect(call?.sizeGateMode).toBe('stack');
+        expect(call?.enforceSizeGate).toBe(true);
+      });
+
+      it('sizeGate.mode stack in the config passes sizeGateMode stack to planPhase', async () => {
+        h.factoryConfig = { ...h.factoryConfig, sizeGate: { mode: 'stack' } };
+        await runMain('run-issue', '5');
+        expect(phases.planPhase.mock.calls.at(-1)?.[0].sizeGateMode).toBe('stack');
       });
 
       it('--max-slices 6 passes maxSlices 6 to planPhase (ADR-0156)', async () => {

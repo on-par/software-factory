@@ -374,7 +374,7 @@ async function planPhaseImpl(opts: {
   fastPath?: boolean;
   /** Park oversized factory-task issues (sizeOk: false) instead of proceeding. Default true. */
   enforceSizeGate?: boolean;
-  /** sizeGate.mode (ADR-0147). 'slice' records a slice plan and plans only the current slice. Ignored when enforceSizeGate is false. */
+  /** sizeGate.mode (ADR-0147). 'slice' records a slice plan and plans only the current slice; 'stack' (ADR-0161) runs as 'slice' until stacked PRs are built. Ignored when enforceSizeGate is false. */
   sizeGateMode?: SizeGateMode;
   /** Slice cap for sizeGate.mode 'slice' (ADR-0156); default DEFAULT_MAX_SLICES. */
   maxSlices?: number;
@@ -519,10 +519,15 @@ async function planPhaseImpl(opts: {
     }
   }
 
+  // ADR-0161: stack PRs are not built yet; stack runs the slice-mode gates (its fallback).
+  const sliceMode = opts.sizeGateMode === 'slice' || opts.sizeGateMode === 'stack';
+  if (enforceSizeGate && opts.sizeGateMode === 'stack') {
+    log('plan', 'sizeGate.mode stack: stacked PRs are not built yet — using slice mode');
+  }
   let planningSlice = false;
   let sliceLabel = '';
   let plannedSlice: PlanResult['slice'];
-  if (enforceSizeGate && opts.sizeGateMode === 'slice' && source.kind === GITHUB_ISSUE_SOURCE) {
+  if (enforceSizeGate && sliceMode && source.kind === GITHUB_ISSUE_SOURCE) {
     const params = source.params as GithubIssueParams;
     const gate = await resolveSliceGate({
       issue: params.issue,
@@ -574,7 +579,7 @@ async function planPhaseImpl(opts: {
 
   if (
     enforceSizeGate &&
-    opts.sizeGateMode !== 'slice' &&
+    !sliceMode &&
     source.kind === GITHUB_ISSUE_SOURCE &&
     readiness.template === 'factory-task' &&
     readiness.sizeOk === false
@@ -807,7 +812,7 @@ async function planPhaseImpl(opts: {
           designArtifact: null,
         });
         // ADR-0147: in slice mode the post-plan gate slices a whole issue; a slice is never sliced again.
-        if (opts.sizeGateMode === 'slice') {
+        if (sliceMode) {
           if (planningSlice) {
             const reason = `${sliceLabel} exceeds the bounded-build budget (${scope}) — parked; a slice is never sliced again`;
             log('size-gate-escalated', reason);
