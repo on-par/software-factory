@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import config, { MAX_LINES_BASELINE } from '../oxlint.config.js';
+import { MAX_LINES_LIMIT, staleBaselineEntries } from './max-lines-baseline.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..');
 const LINTABLE = /\.(?:ts|tsx|js|jsx|mjs|cjs|mts|cts)$/;
@@ -15,7 +16,9 @@ function lineCount(path: string): number {
   return lines.at(-1) === '' ? lines.length - 1 : lines.length;
 }
 
-describe('max-lines lint guard (#2776, #2777)', () => {
+const countExisting = (path: string) => (existsSync(resolve(REPO_ROOT, path)) ? lineCount(path) : undefined);
+
+describe('max-lines lint guard (#2776, #2777, #2778)', () => {
   it('limits every file to 500 lines, counting blank lines and comments', () => {
     expect(config.rules?.['max-lines']).toEqual(['error', { max: 500, skipBlankLines: false, skipComments: false }]);
   });
@@ -38,6 +41,33 @@ describe('max-lines lint guard (#2776, #2777)', () => {
       expect(recorded, `${path} recorded count`).toBeGreaterThan(500);
       expect(lineCount(path), `${path} line count`).toBeLessThanOrEqual(recorded);
     }
+  });
+
+  it('flags a baseline entry whose file shrank to 500 lines or fewer, naming the file and asking for its removal', () => {
+    const baseline = { 'a.ts': 900, 'b.ts': 700 };
+    const counts: Record<string, number> = { 'a.ts': MAX_LINES_LIMIT, 'b.ts': 650 };
+    const messages = staleBaselineEntries(baseline, (path) => counts[path]);
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toContain('a.ts');
+    expect(messages[0]).toContain('500 lines');
+    expect(messages[0]).toContain('remove it from max-lines-baseline.json');
+    expect(staleBaselineEntries({ 'a.ts': 900 }, () => 499)).toHaveLength(1);
+    expect(staleBaselineEntries({ 'a.ts': 900 }, () => 501)).toEqual([]);
+  });
+
+  it('flags a baseline entry whose file no longer exists', () => {
+    expect(staleBaselineEntries({ 'gone.ts': 900 }, () => undefined)).toEqual([
+      'gone.ts no longer exists; remove it from max-lines-baseline.json',
+    ]);
+  });
+
+  it('passes once the stale entry is removed from the baseline', () => {
+    const counts: Record<string, number> = { 'b.ts': 650 };
+    expect(staleBaselineEntries({ 'b.ts': 700 }, (path) => counts[path])).toEqual([]);
+  });
+
+  it('keeps no baseline entry for a file that is missing or 500 lines or fewer', () => {
+    expect(staleBaselineEntries(MAX_LINES_BASELINE, countExisting)).toEqual([]);
   });
 
   it('records every lintable file over 500 lines in the baseline', () => {
