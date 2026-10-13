@@ -111,14 +111,33 @@ export interface CollectedDiff {
 export async function collectDesignDiff(
   worktree: string,
   run: DiffRunner = defaultDiffRunner,
-  opts?: { fallbackBaseRef?: string },
+  opts?: { fallbackBaseRef?: string; baseRefOverride?: string },
 ): Promise<CollectedDiff> {
   let baseRef: string | null = null;
-  for (const candidate of BASE_REF_CANDIDATES) {
-    const check = await run(['git', 'rev-parse', '--verify', '--quiet', `${candidate}^{commit}`], worktree);
-    if (check.ok) {
-      baseRef = candidate;
-      break;
+
+  // baseRefOverride (e.g. a slice's parent branch) outranks BASE_REF_CANDIDATES
+  // and has no fallback: an unresolvable override skips rather than diffing main.
+  if (opts?.baseRefOverride !== undefined) {
+    const override = opts.baseRefOverride;
+    const check = await run(['git', 'rev-parse', '--verify', '--quiet', `${override}^{commit}`], worktree);
+    if (!check.ok) {
+      return {
+        text: '',
+        baseRef: null,
+        truncated: false,
+        skipReason: `base ref override '${override}' does not resolve — not falling back to origin/main`,
+      };
+    }
+    baseRef = override;
+  }
+
+  if (baseRef === null) {
+    for (const candidate of BASE_REF_CANDIDATES) {
+      const check = await run(['git', 'rev-parse', '--verify', '--quiet', `${candidate}^{commit}`], worktree);
+      if (check.ok) {
+        baseRef = candidate;
+        break;
+      }
     }
   }
 
