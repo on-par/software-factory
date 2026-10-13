@@ -31,6 +31,7 @@
     "scbench": "tsx packages/scbench-adapter/src/cli.ts launch",
     "eval-history": "tsx scripts/eval-history.ts",
     "slowest-tests": "tsx scripts/slowest-tests.ts",
+    "test-budget": "tsx scripts/test-budget.ts",
     "regression-issue": "tsx scripts/regression-issue.ts",
     "knip": "knip"
   },

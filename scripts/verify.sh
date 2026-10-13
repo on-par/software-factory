@@ -43,13 +43,20 @@ REPORTER_ARGS=(--reporter=default --reporter=json "--outputFile.json=${VITEST_RE
 if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
   REPORTER_ARGS+=(--reporter=github-actions)
 fi
+# The test step is timed and compared against the stored budget (#2770); the budget lives in
+# scripts/test-budget.ts (TEST_BUDGET_SECONDS, override FACTORY_TEST_BUDGET_SECONDS). Over budget only warns.
 rm -f "$VITEST_REPORT"
+TEST_STEP_START=$SECONDS
 if [ "$NO_E2E" = "1" ]; then
   npx vitest run --maxWorkers="$FACTORY_TEST_MAX_WORKERS" "${REPORTER_ARGS[@]}"
+  TEST_STEP_SECONDS=$((SECONDS - TEST_STEP_START))
   npm run --silent slowest-tests -- "$VITEST_REPORT" || true
+  npm run --silent test-budget -- "$TEST_STEP_SECONDS" "$VITEST_REPORT"
 else
   npm run test -- --maxWorkers="$FACTORY_TEST_MAX_WORKERS" "${REPORTER_ARGS[@]}"
+  TEST_STEP_SECONDS=$((SECONDS - TEST_STEP_START))
   npm run --silent slowest-tests -- "$VITEST_REPORT" || true
+  npm run --silent test-budget -- "$TEST_STEP_SECONDS" "$VITEST_REPORT"
   npm run coverage-ratchet
 fi
 npm run eval -- --stub
