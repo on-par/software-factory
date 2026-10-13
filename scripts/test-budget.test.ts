@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { evaluateTestBudget, resolveTestBudgetSeconds, runTestBudgetCli, TEST_BUDGET_SECONDS } from './test-budget.js';
+import {
+  evaluateTestBudget,
+  isCiEnv,
+  resolveTestBudgetSeconds,
+  runTestBudgetCli,
+  TEST_BUDGET_SECONDS,
+} from './test-budget.js';
 
 function report(entries: Array<[string, number]>): unknown {
   return {
@@ -53,6 +59,18 @@ describe('evaluateTestBudget', () => {
     expect(evaluateTestBudget(100, 450).overBudget).toBe(false);
     expect(evaluateTestBudget(450, 450).overBudget).toBe(false);
     expect(evaluateTestBudget(451, 450).overBudget).toBe(true);
+  });
+});
+
+describe('isCiEnv', () => {
+  it.each(['true', 'TRUE', '1', 'yes', ' true '])('is true for CI=%j', (value) => {
+    expect(isCiEnv({ CI: value })).toBe(true);
+  });
+
+  it("is false for unset, blank, 'false' and '0'", () => {
+    for (const env of [{}, { CI: '' }, { CI: '  ' }, { CI: 'false' }, { CI: 'FALSE' }, { CI: '0' }]) {
+      expect(isCiEnv(env)).toBe(false);
+    }
   });
 });
 
@@ -112,5 +130,46 @@ describe('runTestBudgetCli', () => {
     expect(code).toBe(0);
     expect(lines[0]).toContain("ignoring FACTORY_TEST_BUDGET_SECONDS='abc'");
     expect(lines[1]).toMatch(/^test-budget: WARNING.*450s/);
+  });
+
+  it('returns 1 with a FAIL line and the slowest files when over budget in CI', () => {
+    const { code, lines } = run(['500', 'r.json'], { CI: 'true' });
+    const out = lines.join('\n');
+    expect(code).toBe(1);
+    expect(lines[0]).toMatch(/^test-budget: FAIL/);
+    expect(lines[0]).toContain('500s');
+    expect(lines[0]).toContain('450s');
+    expect(out).toContain('Slowest 5 test files:');
+    expect(out).toContain('b.test.ts');
+    expect(out).toContain('7.00s');
+    expect(out).not.toContain('a.test.ts');
+  });
+
+  it('prints PASS and returns 0 when within budget in CI', () => {
+    const { code, lines } = run(['300', 'r.json'], { CI: 'true' });
+    expect(code).toBe(0);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/^test-budget: PASS/);
+  });
+
+  it('returns 1 and notes missing durations when over budget in CI without a report', () => {
+    const { code, lines } = run(['500', 'r.json'], { CI: 'true' }, () => {
+      throw new Error('ENOENT');
+    });
+    expect(code).toBe(1);
+    expect(lines[0]).toMatch(/^test-budget: FAIL/);
+    expect(lines[1]).toBe('test-budget: no per-file durations in r.json');
+  });
+
+  it("still only warns when CI is 'false'", () => {
+    const { code, lines } = run(['500', 'r.json'], { CI: 'false' });
+    expect(code).toBe(0);
+    expect(lines[0]).toMatch(/^test-budget: WARNING/);
+  });
+
+  it('skips an invalid elapsed in CI with exit 0', () => {
+    const { code, lines } = run([], { CI: 'true' });
+    expect(code).toBe(0);
+    expect(lines[0]).toContain('no valid test-step duration');
   });
 });

@@ -1,7 +1,7 @@
 // scripts/test-budget.ts — Compare the verify test-step duration against the stored budget.
 //
 // See #2770. The budget lives here, in TEST_BUDGET_SECONDS. verify.sh times its test step and
-// runs this right after slowest-tests. Over budget only warns; it never fails verify.
+// runs this right after slowest-tests. Over budget warns locally and fails in CI (#2771).
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -53,7 +53,13 @@ export function evaluateTestBudget(elapsedSeconds: number, budgetSeconds: number
   return { elapsedSeconds, budgetSeconds, overBudget: elapsedSeconds > budgetSeconds };
 }
 
-/** Always returns 0: being over budget only prints a warning. */
+/** True when the CI env var is set to anything but blank, 'false' or '0' (case-insensitive). GitHub Actions sets CI=true. */
+export function isCiEnv(env: Readonly<Record<string, string | undefined>>): boolean {
+  const value = env.CI?.trim().toLowerCase() ?? '';
+  return value !== '' && value !== 'false' && value !== '0';
+}
+
+/** Returns 1 only when over budget in CI; otherwise 0. */
 export function runTestBudgetCli(argv: readonly string[], io: TestBudgetCliIo = {}): number {
   const readFile = io.readFile ?? ((p: string) => readFileSync(p, 'utf8'));
   const log = io.log ?? ((line: string) => console.log(line));
@@ -76,9 +82,16 @@ export function runTestBudgetCli(argv: readonly string[], io: TestBudgetCliIo = 
     log(`test-budget: PASS — test step took ${elapsed}s, budget ${budgetSeconds}s (scripts/test-budget.ts)`);
     return 0;
   }
-  log(
-    `test-budget: WARNING — test step took ${elapsed}s, over the ${budgetSeconds}s budget (scripts/test-budget.ts). Not failing verify.`,
-  );
+  const ci = isCiEnv(env);
+  if (ci) {
+    log(
+      `test-budget: FAIL — test step took ${elapsed}s, over the ${budgetSeconds}s budget (scripts/test-budget.ts). Failing verify because CI is set.`,
+    );
+  } else {
+    log(
+      `test-budget: WARNING — test step took ${elapsed}s, over the ${budgetSeconds}s budget (scripts/test-budget.ts). Not failing verify.`,
+    );
+  }
   let durations: FileDuration[] = [];
   try {
     durations = parseFileDurations(JSON.parse(readFile(path)), cwd);
@@ -87,10 +100,10 @@ export function runTestBudgetCli(argv: readonly string[], io: TestBudgetCliIo = 
   }
   if (durations.length === 0) {
     log(`test-budget: no per-file durations in ${path}`);
-    return 0;
+    return ci ? 1 : 0;
   }
   log(formatSlowestFiles(slowestFiles(durations)));
-  return 0;
+  return ci ? 1 : 0;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

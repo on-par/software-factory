@@ -25,6 +25,7 @@ done
 # FACTORY_TEST_MAX_WORKERS=N to override.
 export FACTORY_TEST_MAX_WORKERS="${FACTORY_TEST_MAX_WORKERS:-1}"
 echo "verify: FACTORY_TEST_MAX_WORKERS=${FACTORY_TEST_MAX_WORKERS}"
+echo "verify: CI=${CI:-} (test budget overrun fails verify when CI is set)"
 
 npm ci
 npm run format:check
@@ -44,7 +45,8 @@ if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
   REPORTER_ARGS+=(--reporter=github-actions)
 fi
 # The test step is timed and compared against the stored budget (#2770); the budget lives in
-# scripts/test-budget.ts (TEST_BUDGET_SECONDS, override FACTORY_TEST_BUDGET_SECONDS). Over budget only warns.
+# scripts/test-budget.ts (TEST_BUDGET_SECONDS, override FACTORY_TEST_BUDGET_SECONDS). Over budget warns locally and fails verify in CI
+# (CI env var set, e.g. CI=true on GitHub Actions; #2771).
 rm -f "$VITEST_REPORT"
 TEST_STEP_START=$SECONDS
 if [ "$NO_E2E" = "1" ]; then
