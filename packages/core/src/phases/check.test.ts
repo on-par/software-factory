@@ -14,10 +14,12 @@ import { StubModelExecutor } from '../router/stub.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import type { BaselineReport } from '../checkers/baseline.js';
 import { BaselineCache } from '../checkers/baseline-cache.js';
+import { unknownCheckerOutput } from '../checkers/index.js';
 import type { CheckSummary, Constitution, ReworkInfo } from '../types/index.js';
 import {
   baseFailingCheckers,
   checkPhase,
+  classifyBaseFailureCause,
   type EnvironmentFailure,
   excludeBaseFailing,
   environmentLogPaths,
@@ -312,6 +314,37 @@ describe('partial base overlap (#1929)', () => {
   });
 });
 
+describe('classifyBaseFailureCause (#2581)', () => {
+  const summaryWith = (...results: Array<{ checker: string; details: string }>): CheckSummary => ({
+    results: results.map((r) => ({ ...r, result: 'FAIL' as const })),
+    failures: results.length,
+    passes: 0,
+    skips: 0,
+    total: results.length,
+  });
+  const unknown = unknownCheckerOutput('typecheck');
+
+  it('is config for an unknown-checker-only summary', () => {
+    expect(classifyBaseFailureCause(summaryWith(unknown))).toBe('config');
+  });
+
+  it('is config when an unknown checker fails alongside a real checker', () => {
+    expect(classifyBaseFailureCause(summaryWith(unknown, { checker: 'lint', details: 'boom' }))).toBe('config');
+  });
+
+  it('is environment when no failure is an unknown-checker output', () => {
+    expect(
+      classifyBaseFailureCause(summaryWith({ checker: 'tests', details: 'x' }, { checker: 'lint', details: 'y' })),
+    ).toBe('environment');
+  });
+
+  it('is environment when details only mention unknown checker mid-text', () => {
+    expect(classifyBaseFailureCause(summaryWith({ checker: 'lint', details: 'saw an unknown checker here' }))).toBe(
+      'environment',
+    );
+  });
+});
+
 describe('rework cause environment (#1927)', () => {
   const summaryOf = (...results: Array<[string, 'PASS' | 'FAIL']>): CheckSummary => ({
     results: results.map(([checker, result]) => ({ checker, result, details: '' })),
@@ -412,9 +445,50 @@ describe('rework cause environment (#1927)', () => {
       expect(result.environment).toEqual({
         baseSha: 'abc1234567',
         failingChecks: expect.any(Array),
+        cause: 'environment',
         logPaths: [],
       });
       expect(result.environment?.failingChecks.length).toBeGreaterThan(0);
+    },
+  );
+
+  it(
+    'classifies an unknown-checker failure that also fails on base as cause=config (#2581)',
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, specPath } = await makeFailingWorktree();
+      const { router, stub } = makeRouter();
+      const messages: string[] = [];
+      const result = await checkPhase({
+        issue: 77,
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        maxReworkRounds: 1,
+        diffBase: 'abc1234567',
+        log: (_type, msg) => {
+          messages.push(msg);
+        },
+        runCheckers: async () => ({
+          results: [unknownCheckerOutput('typecheck')],
+          failures: 1,
+          passes: 0,
+          skips: 0,
+          total: 1,
+        }),
+        runBaseline: async (o) =>
+          ({
+            baseSha: o.baseSha,
+            checkers: o.failing
+              .filter((r) => r.result === 'FAIL')
+              .map((r) => ({ checker: r.checker, verdict: 'fails-on-base', baseResult: 'FAIL' })),
+          }) as BaselineReport,
+      });
+      expect(result.environment?.cause).toBe('config');
+      expect(result.reworkRounds).toBe(0);
+      expect(stub.calls).toHaveLength(0);
+      expect(messages.some((m) => m.includes('cause=config'))).toBe(true);
     },
   );
 
@@ -469,6 +543,7 @@ describe('rework cause environment (#1927)', () => {
       const failure: EnvironmentFailure = {
         baseSha: 'abc1234567890def',
         failingChecks: ['tests', 'lint'],
+        cause: 'environment',
         logPaths: ['/logs/a.log', '/logs/check-base'],
       };
       const body = renderEnvironmentReleaseComment(failure);
@@ -479,9 +554,14 @@ describe('rework cause environment (#1927)', () => {
     });
 
     it('says so when no log paths were recorded', () => {
-      expect(renderEnvironmentReleaseComment({ baseSha: 'abc', failingChecks: ['tests'], logPaths: [] })).toContain(
-        'No log paths were recorded (logsDir not set).',
-      );
+      expect(
+        renderEnvironmentReleaseComment({
+          baseSha: 'abc',
+          failingChecks: ['tests'],
+          cause: 'environment',
+          logPaths: [],
+        }),
+      ).toContain('No log paths were recorded (logsDir not set).');
     });
   });
 

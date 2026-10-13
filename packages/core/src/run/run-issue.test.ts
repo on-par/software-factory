@@ -1704,6 +1704,7 @@ describe('runIssue — environment release (#1928)', () => {
   const ENV = {
     baseSha: 'abc1234567890def',
     failingChecks: ['tests', 'lint'],
+    cause: 'environment' as const,
     logPaths: ['/logs/a.log', '/logs/check-base'],
   };
   const arrange = (request: Partial<RunRequest> = {}, createComment = vi.fn().mockResolvedValue({})) => {
@@ -1764,7 +1765,12 @@ describe('runIssue — environment release (#1928)', () => {
 });
 
 describe('runIssue — flaky_tests event (#2302)', () => {
-  const ENV = { baseSha: 'abc1234567890def', failingChecks: ['tests'], logPaths: [] as string[] };
+  const ENV = {
+    baseSha: 'abc1234567890def',
+    failingChecks: ['tests'],
+    cause: 'environment' as const,
+    logPaths: [] as string[],
+  };
   const baseline = { baseSha: 'abc1234567', checkers: [] };
   const arrange = (check: CheckPhaseResult) => {
     vi.mocked(checkPhase).mockResolvedValue(check);
@@ -2046,7 +2052,12 @@ describe('runIssue — pre-PLAN base health (#2339)', () => {
 });
 
 describe('runIssue — plan reuse after environment release (#2340)', () => {
-  const ENV = { baseSha: 'abc1234567890def', failingChecks: ['tests'], logPaths: [] as string[] };
+  const ENV = {
+    baseSha: 'abc1234567890def',
+    failingChecks: ['tests'],
+    cause: 'environment' as const,
+    logPaths: [] as string[],
+  };
   const ENV_FAIL: CheckPhaseResult = { passed: false, summary: CHECK_SUMMARY, reworkRounds: 0, environment: ENV };
   const REUSED: PlanResult = { ...PLAN_OK, route: 'claude', model: 'plan-reused' };
   const fakeStore = (hit: PlanResult | null = null) => ({
