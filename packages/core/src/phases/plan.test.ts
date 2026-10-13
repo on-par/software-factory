@@ -761,7 +761,7 @@ npm run test`;
       ],
     });
 
-    it('parks a plan whose design artifact exceeds the bounded-build budget, decomposing instead of building', async () => {
+    it('parks a plan whose design artifact exceeds the bounded-build budget when filing yields no children', async () => {
       const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
       tempDirs.add(worktree);
       const specPath = join(worktree, 'issue-901.md');
@@ -807,7 +807,7 @@ npm run test`;
       expect(events).toContain('decompose_comment_posted');
     });
 
-    it('parks an over-budget design artifact the same way in explicit file mode', async () => {
+    it('parks an over-budget design artifact the same way in explicit file mode when filing yields no children', async () => {
       const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
       tempDirs.add(worktree);
       const specPath = join(worktree, 'issue-901.md');
@@ -853,6 +853,56 @@ npm run test`;
       expect(createComment).toHaveBeenCalledTimes(1);
       expect(events).toContain('size-gate-escalated');
       expect(events).toContain('decompose_comment_posted');
+    });
+
+    it('files sub-issues and returns decomposed when an over-budget plan trips the post-plan gate in file mode (#2662)', async () => {
+      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+      tempDirs.add(worktree);
+      const specPath = join(worktree, 'issue-901.md');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{ output: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n` }],
+          decompose: [{ output: validDecomposition }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const createComment = vi.fn().mockResolvedValue({});
+      const create = vi.fn().mockResolvedValue({ data: { number: 902, id: 9902 } });
+      const request = vi.fn().mockResolvedValue({ data: [] });
+      const events: string[] = [];
+
+      const result = await planPhase({
+        issue: 901,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit: {
+          rest: {
+            issues: {
+              get: async () => ({
+                data: {
+                  title: 'Mega slice',
+                  body: '## Problem statement\nToo big.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test',
+                },
+              }),
+              createComment,
+              create,
+            },
+          },
+          request,
+        } as any,
+        log: (type) => events.push(type),
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.decomposed).toEqual({ childIssues: [902] });
+      expect(result.escalate).toMatch(/bounded-build budget.*decomposed into #902/);
+      expect(result.sliced).toBeUndefined();
+      expect(events).toContain('decompose_filed');
+      expect(events).toContain('size-gate-decomposed');
+      expect(events).not.toContain('size-gate-escalated');
     });
 
     it('leaves a bounded design artifact alone (no decompose, plan proceeds)', async () => {
@@ -1096,21 +1146,23 @@ npm run test`;
           rest: {
             issues: {
               get: async () => ({ data: { title: 'Harden the import queue', body } }),
-              create: vi.fn().mockResolvedValue({ data: { number: 1, html_url: 'u' } }),
+              create: vi.fn().mockResolvedValue({ data: { number: 2700, id: 9000 } }),
               createComment: vi.fn().mockResolvedValue({}),
               update: vi.fn().mockResolvedValue({}),
             },
           },
-          request: vi.fn().mockResolvedValue({}),
+          request: vi.fn().mockResolvedValue({ data: [] }),
         } as any,
         log: (type: any, msg: any, extra: any) => logs.push({ type, msg, extra }),
       });
 
       expect(stub.calls.map((call) => call.task)).toEqual(['decompose']);
-      const escalated = logs.find((l) => l.type === 'size-gate-escalated');
-      expect(escalated?.msg).toMatch(/8 acceptance criteria/);
-      expect(escalated?.extra.readiness.sizeOk).toBe(false);
+      const decomposed = logs.find((l) => l.type === 'size-gate-decomposed');
+      expect(decomposed?.msg).toMatch(/8 acceptance criteria/);
+      expect(decomposed?.extra.readiness.sizeOk).toBe(false);
+      expect(logs.some((l) => l.type === 'size-gate-escalated')).toBe(false);
       expect(result.ok).toBe(false);
+      expect(result.decomposed).toEqual({ childIssues: [2700] });
     });
 
     it('parks with size-gate-escalated even when the decomposition fails INVEST', async () => {
@@ -1236,7 +1288,8 @@ npm run test`;
       expect(create).toHaveBeenCalledTimes(1);
       expect(request).toHaveBeenCalledTimes(2); // GET duplicate check + POST sub-issue link
       expect(events).toContain('decompose_filed');
-      expect(events).toContain('size-gate-escalated');
+      expect(events).toContain('size-gate-decomposed');
+      expect(events).not.toContain('size-gate-escalated');
     });
 
     it('leaves decomposed unset and keeps the parked-for-decomposition message when filing yields no children', async () => {

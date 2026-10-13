@@ -52,8 +52,8 @@ export interface PlanResult {
   model: string;
   escalate?: string;
   designArtifact: DesignArtifact | null;
-  /** Set only by the pre-flight size gate when the oversized issue was decomposed into
-   *  real filed sub-issues. `ok` stays false: this run is over, but the caller can
+  /** Set by either file-mode size gate (pre-flight or post-plan build-scope) when the oversized
+   *  issue was decomposed into real filed sub-issues. `ok` stays false: this run is over, but the caller can
    *  continue the lane with these children instead of parking (#823). */
   decomposed?: { childIssues: number[] };
   /** Set only by the post-plan build-scope gate in sizeGate.mode 'slice' (ADR-0147) when the whole
@@ -311,7 +311,8 @@ function blockedNoChangeSpecReason(body: string): string | null {
   return 'PLAN returned a blocked/no-change note instead of a frozen spec';
 }
 
-/** The file-mode size-gate escalation: log it and build the parked (or decomposed) PlanResult. */
+/** The file-mode size-gate escalation: logs size-gate-decomposed when children were filed and
+ *  size-gate-escalated otherwise, and builds the parked (or decomposed) PlanResult. */
 function fileModeEscalation(
   childIssues: number[],
   readiness: ReadinessInfo,
@@ -325,7 +326,7 @@ function fileModeEscalation(
     (childIssues.length > 0
       ? `issue exceeds the size gate (${readiness.sizeReason ?? 'too big'}) — decomposed into ${childIssues.map((n) => `#${n}`).join(', ')}`
       : `issue exceeds the size gate (${readiness.sizeReason ?? 'too big'}) — parked for decomposition`);
-  log('size-gate-escalated', reason, { readiness });
+  log(childIssues.length > 0 ? 'size-gate-decomposed' : 'size-gate-escalated', reason, { readiness });
   return {
     ok: false,
     route,
@@ -792,6 +793,7 @@ async function planPhaseImpl(opts: {
       // ~40 min of agent churn is a planning failure, not a build problem.
       // Decompose the issue instead of handing a mega-slice to BUILD: detect
       // complexity at planning time and keep each build pass short (2026-08-15).
+      // File mode files the decomposition as sub-issues and re-queues them (#2662).
       if (
         enforceSizeGate &&
         source.kind === GITHUB_ISSUE_SOURCE &&
@@ -846,7 +848,8 @@ async function planPhaseImpl(opts: {
           log('escalate', reason);
           return park(reason);
         }
-        await decomposeOversizedIssue({
+        // File mode (#2662): file the decomposition as sub-issues and re-queue them instead of parking.
+        const decomposeResult = await decomposeOversizedIssue({
           issue: params.issue,
           repo: params.repo,
           title: issueTitle,
@@ -857,7 +860,14 @@ async function planPhaseImpl(opts: {
           log: (type, msg) => log(type, msg),
           timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
           onProviderFailure,
+          fileSubIssues: true,
         });
+        const { childIssues } = decomposeResult;
+        if (childIssues.length > 0) {
+          const reason = `plan scope exceeds the bounded-build budget (${scope}) — decomposed into ${childIssues.map((n) => `#${n}`).join(', ')}`;
+          log('size-gate-decomposed', reason);
+          return { ...park(reason), decomposed: { childIssues } };
+        }
         log('size-gate-escalated', fileReason);
         return park(fileReason);
       }
