@@ -35,10 +35,21 @@ bash scripts/check-oxlint-plugin-version.sh
 npm run typecheck
 npm run lint
 npm run knip
+# Per-file durations for the slowest-files report (#2769). Keep the default
+# console reporter, and keep github-actions annotations in CI (vitest only
+# auto-adds that reporter when none are passed).
+VITEST_REPORT=.tmp/vitest-report.json
+REPORTER_ARGS=(--reporter=default --reporter=json "--outputFile.json=${VITEST_REPORT}")
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+  REPORTER_ARGS+=(--reporter=github-actions)
+fi
+rm -f "$VITEST_REPORT"
 if [ "$NO_E2E" = "1" ]; then
-  npx vitest run --maxWorkers="$FACTORY_TEST_MAX_WORKERS"
+  npx vitest run --maxWorkers="$FACTORY_TEST_MAX_WORKERS" "${REPORTER_ARGS[@]}"
+  npm run --silent slowest-tests -- "$VITEST_REPORT" || true
 else
-  npm run test -- --maxWorkers="$FACTORY_TEST_MAX_WORKERS"
+  npm run test -- --maxWorkers="$FACTORY_TEST_MAX_WORKERS" "${REPORTER_ARGS[@]}"
+  npm run --silent slowest-tests -- "$VITEST_REPORT" || true
   npm run coverage-ratchet
 fi
 npm run eval -- --stub

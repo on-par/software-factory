@@ -30,6 +30,7 @@
     "ship-phase-breakdown-report": "tsx scripts/ship-phase-breakdown-report.ts",
     "scbench": "tsx packages/scbench-adapter/src/cli.ts launch",
     "eval-history": "tsx scripts/eval-history.ts",
+    "slowest-tests": "tsx scripts/slowest-tests.ts",
     "regression-issue": "tsx scripts/regression-issue.ts",
     "knip": "knip"
   },
