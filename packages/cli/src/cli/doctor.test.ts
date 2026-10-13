@@ -1641,11 +1641,36 @@ describe('configLintChecks (#2610, #2612)', () => {
   });
 
   it('reports an unfilled token in config.yaml with the generic fix', () => {
-    const rows = configLintChecks(setup(VALID_CONSTITUTION, 'models:\n  pins:\n    build: <model id>\n'));
+    const rows = configLintChecks(setup(VALID_CONSTITUTION, 'version: 2\nmodels:\n  pins:\n    build: <model id>\n'));
     expect(rows).toHaveLength(1);
     expect(rows[0].ok).toBe(false);
-    expect(rows[0].detail).toBe(".factory/config.yaml:3: unfilled template token '<model id>'");
+    expect(rows[0].detail).toBe(".factory/config.yaml:4: unfilled template token '<model id>'");
     expect(rows[0].fix).toBe("replace '<model id>' with a real value");
+  });
+
+  it('flags a config.yaml schema error with file:line and the fix', () => {
+    const rows = configLintChecks(setup(VALID_CONSTITUTION, 'sweep:\n  loopIntervalSeconds: soon\n'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ name: 'config', ok: false, section: REPO_SECTION });
+    expect(rows[0].optional).toBeUndefined();
+    expect(rows[0].detail).toMatch(/^\.factory\/config\.yaml:2: schema error at 'sweep\.loopIntervalSeconds'/);
+    expect(rows[0].fix).toContain('sweep.loopIntervalSeconds');
+    expect(doctorFailed(rows)).toBe(true);
+    const out = formatDoctorChecks(rows);
+    expect(out).toContain('❌ config - .factory/config.yaml:2');
+    expect(out).toContain('fix:');
+  });
+
+  it('reports an unknown checker and a config.yaml schema error, each with file:line and the fix', () => {
+    const rows = configLintChecks(
+      setup(PLACEHOLDER_CONSTITUTION.replace('<checker-name>', 'typecheck'), 'sweep:\n  loopIntervalSeconds: soon\n'),
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => !r.ok)).toBe(true);
+    expect(rows[0].detail).toBe(".factory/constitution.md:5: unknown checker 'typecheck'");
+    expect(rows[0].fix).toContain('custom_*');
+    expect(rows[1].detail).toContain('.factory/config.yaml:2');
+    expect(rows[1].fix).toBeTruthy();
   });
 
   it('passes with a neutral detail when neither file exists', () => {
@@ -1672,7 +1697,7 @@ describe('configLintChecks (#2610, #2612)', () => {
   });
 
   it('leaves the constitution and config file byte-identical', () => {
-    const input = setup(PLACEHOLDER_CONSTITUTION, 'models:\n  pins:\n    build: <model id>\n');
+    const input = setup(PLACEHOLDER_CONSTITUTION, 'version: 2\nmodels:\n  pins:\n    build: <model id>\n');
     const paths = [input.constitution?.repoInstance?.absPath as string, input.configFile?.absPath as string];
     const snap = () => paths.map((p) => [readFileSync(p, 'utf-8'), statSync(p).mtimeMs]);
     const before = snap();
@@ -1721,7 +1746,7 @@ describe('config lint parity with the run preflight (#2612)', () => {
       {
         name: 'config.yaml token',
         constitution: fm('\n  - compile'),
-        config: 'models:\n  pins:\n    build: <model id>\n',
+        config: 'version: 2\nmodels:\n  pins:\n    build: <model id>\n',
         verdict: 'park',
       },
       {
@@ -1739,12 +1764,13 @@ describe('config lint parity with the run preflight (#2612)', () => {
       {
         name: 'unknown checker plus config token',
         constitution: fm('\n  - typecheck'),
-        config: 'models:\n  pins:\n    build: <model id>\n',
+        config: 'version: 2\nmodels:\n  pins:\n    build: <model id>\n',
         verdict: 'escalate',
       },
       { name: 'no constitution file', constitution: null, config: CLEAN_CONFIG, verdict: 'ok' },
     ];
 
+  // Schema errors are doctor-only by design (#2611), so they are not in this parity table.
   it.each(fixtures)('doctor and preflight agree on $name', ({ constitution, config, verdict }) => {
     const dir = mkdtempSync(join(tmpdir(), 'doctor-parity-'));
     dirs.push(dir);

@@ -117,6 +117,7 @@ import {
   LaneFileGuard,
   laneHostLabel,
   listQueuedSteering,
+  loadFactoryConfig,
   loadFactoryConfigForRepo,
   loadModelsConfig,
   loadRepoConfig,
@@ -6272,7 +6273,12 @@ async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean }
 
   if (repoRoot !== null) {
     const paths = getFactoryPaths(repoRoot);
-    const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
+    let factoryConfig: FactoryConfig;
+    try {
+      factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
+    } catch {
+      factoryConfig = loadFactoryConfig(); // schema errors are reported by the config row (#2611)
+    }
     const health = await inspectPortLeases({ registryFile: paths.ports });
     checks.push(...leaseChecks(health.map(toLeaseRow)));
 

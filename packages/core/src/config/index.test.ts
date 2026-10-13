@@ -37,6 +37,7 @@ import {
   resolveProcessGroupGraceMs,
   resolveSkipCI,
   resolveTimeouts,
+  factoryRuntimeConfigIssues,
 } from './index.js';
 
 function baseModelDef(overrides: Record<string, unknown> = {}) {
@@ -1946,5 +1947,16 @@ describe('resolveBuildPublish', () => {
   it('falls back to config when env is unset', () => {
     const on = { ...config, build: { publishFromBuild: true } };
     expect(resolveBuildPublish(on, {})).toBe(true);
+  });
+});
+
+describe('factoryRuntimeConfigIssues (#2611)', () => {
+  it('returns no issues for an empty config', () => {
+    expect(factoryRuntimeConfigIssues({})).toEqual([]);
+  });
+
+  it('returns the path of a bad value', () => {
+    const issues = factoryRuntimeConfigIssues({ sweep: { loopIntervalSeconds: 'soon' } });
+    expect(issues.map((i) => i.path.join('.'))).toContain('sweep.loopIntervalSeconds');
   });
 });
