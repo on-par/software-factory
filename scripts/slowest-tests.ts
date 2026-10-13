@@ -1,7 +1,7 @@
 // scripts/slowest-tests.ts — Print the slowest test files from vitest's JSON report.
 //
 // See #2769. verify.sh runs this right after the test step. It only reports: it never fails,
-// and it does not compare durations against a budget (#2737).
+// and the budget comparison lives in scripts/test-budget.ts (#2770).
 
 import { readFileSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
