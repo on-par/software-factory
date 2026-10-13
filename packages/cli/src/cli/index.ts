@@ -230,6 +230,7 @@ import {
   egressHostMessage,
   egressSummaryMessage,
   findSlicePlanComment,
+  recordSliceMerged,
   upsertSlicePlanComment,
   withSliceState,
   DEFAULT_GARDEN_MAX_CLUSTERS,
@@ -3697,7 +3698,7 @@ async function landIssue(
   octokit: Octokit,
   skipCI?: boolean,
   branchPrefix?: string,
-  opts: { allowGated?: boolean } = {},
+  opts: { allowGated?: boolean; branch?: string } = {},
 ): Promise<{ branch: string; prNumber: number }> {
   const [owner, repoName] = ghRepo.split('/');
   const log = (type: EventKind, msg: string, extra?: { failoverReason?: FailoverReason }) =>
@@ -3711,7 +3712,10 @@ async function landIssue(
   // Legacy-prefix (LEGACY_BRANCH_PREFIX) branches are guessed too, after the resolved prefix (#1708).
   const resolved = branchPrefix ?? resolveEffectiveConfig(configLoaders.loadRepoConfig(repoRoot)).branchPrefix;
   const title = await getIssueTitle(ghRepo, issueNum, octokit);
-  const guesses = factoryBranchPrefixes(resolved).map((p) => branchFor(issueNum, title, p));
+  // ADR-0161: a stack layer lands by its exact branch, never by title guess or the Closes PR (the top layer).
+  const guesses = opts.branch
+    ? [opts.branch]
+    : factoryBranchPrefixes(resolved).map((p) => branchFor(issueNum, title, p));
   const guessedBranch = guesses[0];
 
   let branch = guessedBranch;
@@ -3728,7 +3732,7 @@ async function landIssue(
       return undefined;
     };
     [, prNumber] = await Promise.all([gitOps.gitFetch(repoRoot), findByGuess()]);
-    if (!prNumber) {
+    if (!prNumber && !opts.branch) {
       const fallback = await findOpenPRForIssue(octokit, owner, repoName, issueNum);
       if (fallback) {
         branch = fallback.branch;
@@ -4497,7 +4501,15 @@ async function cmdRun(
           repo,
           preflight: withAdmissionGuard({
             reader: admissionStateReaderFor(paths.state),
-            preflight: (issue) => preflightQueuedIssue(issue, createQueuePreflightOps(octokit, owner, repo)),
+            preflight: (issue) =>
+              preflightQueuedIssue(
+                issue,
+                createQueuePreflightOps(octokit, owner, repo, {
+                  autoMergeStack:
+                    resolveSizeGateMode(factoryConfig) === 'stack' &&
+                    resolveMergePolicy(factoryConfig, process.env, { auto: opts.autoMerge }).auto,
+                }),
+              ),
             onConflict: (issue, verdict) => {
               const line = `#${issue} refused — ${verdict.reason} | repair: ${verdict.repair}`;
               console.error(styleText('yellow', `factory: ${line}`));
@@ -4653,6 +4665,8 @@ async function cmdRun(
                 paths,
                 opts.branchPrefix === undefined ? undefined : branchPrefix,
               ),
+            recordStackMerge: (issue, prNumber) =>
+              recordSliceMerged({ octokit: getOctokit(), repo: ghRepo, issue, prNumber }).then(() => {}),
             waitMerge: (issue, branch, root, gh, p, d = {}) =>
               waitForMerge(issue, branch, root, gh, p, { ...d, mergeOverrides: { auto: opts.autoMerge } }),
           }),
@@ -4856,6 +4870,8 @@ type RunLaneDeps = {
     },
   ) => Promise<string>;
   waitMerge?: typeof waitForMerge;
+  /** ADR-0161: records a landed stack layer as merged in the slice-plan comment. Defaults to a no-op. */
+  recordStackMerge?: (issue: number, prNumber: number) => Promise<void>;
   pathExists?: (path: string) => boolean;
   emitEvent?: typeof logEvent;
   claimNext?: () => Promise<QueueClaim | null>;
@@ -4918,10 +4934,24 @@ export interface QueuePreflightOps {
   getPullState(prNumber: number): Promise<SlicePullState>;
   /** Rewrite the factory's slice plan comment in place. */
   saveSlicePlan(issue: number, plan: SlicePlan): Promise<void>;
+  /** ADR-0161: sizeGate.mode is `stack` and the merge policy is auto, so preflight may adopt the lowest open stack layer. */
+  autoMergeStack: boolean;
+  /** Current head/base refs of a slice PR; the head SHA is the rebased one after GitHub retargets a layer. */
+  getPullRefs(prNumber: number): Promise<{ headRef: string; baseRef: string; headSha: string }>;
 }
 
-export function createQueuePreflightOps(octokit: Octokit, owner: string, repo: string): QueuePreflightOps {
+export function createQueuePreflightOps(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  opts: { autoMergeStack?: boolean } = {},
+): QueuePreflightOps {
   return {
+    autoMergeStack: opts.autoMergeStack ?? false,
+    getPullRefs: async (prNumber) => {
+      const { data } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
+      return { headRef: data.head.ref, baseRef: data.base.ref, headSha: data.head.sha };
+    },
     expectedHeadRepoFullName: `${owner}/${repo}`,
     findOpenPR: (issue) => findOpenPRForIssue(octokit, owner, repo, issue),
     getLandState: (prNumber) => getPullRequestLandState(octokit, owner, repo, prNumber),
@@ -4938,8 +4968,10 @@ export function createQueuePreflightOps(octokit: Octokit, owner: string, repo: s
   };
 }
 
-/** ADR-0147: wait on the current slice PR, record its merge, or park when it was closed unmerged.
- *  Returns undefined to fall through to the Closes-PR preflight. */
+/** ADR-0147/ADR-0161: walk every pr-open slice PR bottom-up. Merged layers are recorded, a closed layer parks
+ *  (naming the layers above it), and the lowest open layer defers, or is adopted when stack auto-merge is on and
+ *  its base is main with green CI on the rebased head. Returns undefined to fall through to the Closes-PR
+ *  preflight only when no slice PR is still open. */
 async function preflightSlice(issue: number, deps: QueuePreflightOps): Promise<QueuePreflightDecision | undefined> {
   let lookup: SlicePlanCommentLookup;
   try {
@@ -4955,32 +4987,70 @@ async function preflightSlice(issue: number, deps: QueuePreflightOps): Promise<Q
   }
   if (lookup.status === 'not-found') return undefined;
   const { plan } = lookup;
-  const slice = currentSlice(plan);
-  if (slice === undefined || slice.state !== 'pr-open') return undefined;
-  const label = `slice ${slice.index}/${plan.slices.length}`;
-  if (slice.prNumber === undefined) {
-    return { kind: 'park', reason: `${label} of #${issue} is pr-open but the slice plan records no PR number` };
+  const n = plan.slices.length;
+  const open = plan.slices.filter((s) => s.state === 'pr-open');
+  if (open.length === 0) return undefined;
+  let next = plan;
+  let lastMerged: { label: string; pr: number } | undefined;
+  const save = async (): Promise<QueuePreflightDecision | undefined> => {
+    if (lastMerged === undefined) return undefined;
+    try {
+      await deps.saveSlicePlan(issue, next);
+    } catch (err) {
+      return {
+        kind: 'park',
+        reason: `${lastMerged.label} PR #${lastMerged.pr} merged but updating the slice plan failed: ${errorDetail(err)}`,
+      };
+    }
+    return undefined;
+  };
+  for (const [at, slice] of open.entries()) {
+    const label = `slice ${slice.index}/${n}`;
+    if (slice.prNumber === undefined) {
+      return { kind: 'park', reason: `${label} of #${issue} is pr-open but the slice plan records no PR number` };
+    }
+    const pr = slice.prNumber;
+    let state: SlicePullState;
+    try {
+      state = await deps.getPullState(pr);
+    } catch (err) {
+      return { kind: 'park', reason: `${label} PR #${pr} state lookup failed: ${errorDetail(err)}` };
+    }
+    if (state === 'merged') {
+      next = withSliceState(next, slice.index, 'merged', pr);
+      lastMerged = { label, pr };
+      continue;
+    }
+    if (state === 'closed') {
+      const above = open.slice(at + 1);
+      const suffix =
+        above.length > 0
+          ? `; layers above it: ${above.map((a) => `slice ${a.index}/${n} (#${a.prNumber})`).join(', ')}`
+          : '';
+      return { kind: 'park', reason: `${label} PR #${pr} was closed without merging${suffix}` };
+    }
+    const saved = await save();
+    if (saved) return saved;
+    if (!deps.autoMergeStack) return { kind: 'defer' };
+    let refs: Awaited<ReturnType<QueuePreflightOps['getPullRefs']>>;
+    try {
+      refs = await deps.getPullRefs(pr);
+    } catch (err) {
+      return { kind: 'park', reason: `${label} PR #${pr} ref lookup failed: ${errorDetail(err)}` };
+    }
+    // GitHub has not retargeted the layer to main yet: the lower layer is still unmerged.
+    if (refs.baseRef !== 'main') return { kind: 'defer' };
+    let outcome: CiOutcome;
+    try {
+      outcome = await deps.watch(refs.headSha);
+    } catch (err) {
+      return { kind: 'park', reason: `CI watch for ${label} PR #${pr} failed: ${errorDetail(err)}` };
+    }
+    if (outcome === 'failure') return { kind: 'park', reason: `CI for ${label} PR #${pr} ended failure` };
+    if (outcome !== 'success') return { kind: 'defer' };
+    return { kind: 'adopt', branch: refs.headRef, stackLayer: { index: slice.index, count: n, prNumber: pr } };
   }
-  const pr = slice.prNumber;
-  let state: SlicePullState;
-  try {
-    state = await deps.getPullState(pr);
-  } catch (err) {
-    return { kind: 'park', reason: `${label} PR #${pr} state lookup failed: ${errorDetail(err)}` };
-  }
-  if (state === 'open') return { kind: 'defer' };
-  if (state === 'closed') {
-    return { kind: 'park', reason: `${label} PR #${pr} was closed without merging` };
-  }
-  try {
-    await deps.saveSlicePlan(issue, withSliceState(plan, slice.index, 'merged', pr));
-  } catch (err) {
-    return {
-      kind: 'park',
-      reason: `${label} PR #${pr} merged but updating the slice plan failed: ${errorDetail(err)}`,
-    };
-  }
-  return undefined;
+  return (await save()) ?? undefined;
 }
 
 /** Resolve queued work from GitHub evidence without consuming model or worktree resources. */
@@ -5106,6 +5176,7 @@ export async function runLane(
   const {
     ship = shipIssue,
     waitMerge = waitForMerge,
+    recordStackMerge = async () => {},
     pathExists = existsSync,
     emitEvent = logEvent,
     claimNext = async () => null,
@@ -5188,6 +5259,7 @@ export async function runLane(
       streak = null;
       continue;
     }
+    const layer = decision.kind === 'adopt' ? decision.stackLayer : undefined;
     try {
       const sliceOutcome: { value?: RunOutcome } = {};
       const branch =
@@ -5217,6 +5289,25 @@ export async function runLane(
         await settle(issue, 'queued');
         continue;
       }
+      if (layer) {
+        // ADR-0161: land exactly this layer's branch, record it, and re-queue for the next layer.
+        await withHeartbeat(issue, heartbeat, () =>
+          waitMerge(issue, branch, repoRoot, ghRepo, paths, { landBranch: branch }),
+        );
+        await recordStackMerge(issue, layer.prNumber).catch((err) =>
+          emitEvent(
+            paths.events,
+            'warn',
+            issue,
+            `slice ${layer.index}/${layer.count} merged but recording it failed: ${errorDetail(err)}`,
+            { lane },
+          ),
+        );
+        merged++;
+        streak = null;
+        await settle(issue, layer.index < layer.count ? 'queued' : 'done');
+        continue;
+      }
       await withHeartbeat(issue, heartbeat, () => waitMerge(issue, branch, repoRoot, ghRepo, paths));
       merged++;
       streak = null;
@@ -5227,7 +5318,7 @@ export async function runLane(
         // worktree — this is a clean outcome, not a park; move to the next issue.
         awaitingReview++;
         streak = null;
-        await settle(issue, 'done');
+        await settle(issue, layer && layer.index < layer.count ? 'queued' : 'done');
         continue;
       }
       if (err instanceof IssueSkippedError) {
@@ -5954,7 +6045,12 @@ type WaitForMergeDeps = {
     ghRepo: string,
     paths: ReturnType<typeof getFactoryPaths>,
     octokit: Octokit,
+    skipCI?: boolean,
+    branchPrefix?: string,
+    opts?: { allowGated?: boolean; branch?: string },
   ) => Promise<{ branch: string; prNumber: number }>;
+  /** ADR-0161 stack layer: land exactly this head branch. */
+  landBranch?: string;
   listIssueLabels?: (octokit: Octokit, owner: string, repo: string, issue: number) => Promise<string[]>;
   sleep?: (ms: number) => Promise<void>;
   emitEvent?: typeof logEvent;
@@ -5994,6 +6090,7 @@ export async function waitForMerge(
     writeLine = (line) => console.log(line),
     now = () => Date.now(),
     mergeOverrides,
+    landBranch,
   } = deps;
   const factoryConfig = loadConfig(paths.config);
   const isMergeEnabled = mergeEnabled ?? (() => resolveMergePolicy(factoryConfig, process.env, mergeOverrides).auto);
@@ -6059,7 +6156,8 @@ export async function waitForMerge(
         await sleep(120_000);
         continue;
       }
-      await land(issue, repoRoot, ghRepo, paths, octokit, skipCI);
+      if (landBranch) await land(issue, repoRoot, ghRepo, paths, octokit, skipCI, undefined, { branch: landBranch });
+      else await land(issue, repoRoot, ghRepo, paths, octokit, skipCI);
       return;
     }
 
