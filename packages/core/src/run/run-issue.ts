@@ -16,12 +16,10 @@
 // these ports and re-raises a parked/escalated outcome as LaneParkError.
 
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import type { Octokit } from '@octokit/rest';
 
 import type { ApprovalGate } from '../approvals/index.js';
 import type { checkBaseHealth } from '../checkers/base-health.js';
-import { findUnknownConstitutionCheckers, formatUnknownCheckerMessage } from '../checkers/constitution-preflight.js';
 import { laneEnv } from '../environment/index.js';
 import { buildPhase as buildPhaseDefault } from '../phases/build.js';
 import {
@@ -30,7 +28,7 @@ import {
   renderEnvironmentReleaseComment,
 } from '../phases/check.js';
 import { describeConstitutionSource } from '../constitutions/index.js';
-import { preflightConfigTokens } from '../config/template-tokens.js';
+import { lintFactoryConfig } from '../config/config-lint.js';
 import { planPhase as planPhaseDefault } from '../phases/plan.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
 import { upsertSlicePlanComment } from '../readiness/slice-plan-github.js';
@@ -528,34 +526,23 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     const constitution = ports.resolveConstitution();
     log('constitution', describeConstitutionSource(constitution, request.product));
 
-    // Pre-PLAN checker-name preflight (#2585): an unknown `checkers:` entry would only fail closed in
-    // CHECK, after PLAN and BUILD spent model calls. Read-only, no subprocess, runs for localOnly too.
-    // Runs before token preflight so a `<checker-name>` placeholder gets the checker-specific escalate
-    // message rather than a generic token park (#2586).
-    if (constitution?.checkers?.length) {
-      const file =
-        constitution.repoInstance?.absPath ?? (constitution.source === 'bundled' ? constitution.path : undefined);
-      let raw: string | undefined;
-      if (file) {
-        try {
-          raw = readFileSync(file, 'utf-8');
-        } catch {
-          raw = undefined;
-        }
-      }
-      const problems = findUnknownConstitutionCheckers(constitution.checkers, raw);
-      if (problems.length > 0) {
-        const display = constitution.repoInstance?.relPath ?? constitution.path;
-        return terminalEscalated(problems.map((p) => formatUnknownCheckerMessage(display, p)).join('\n'));
-      }
+    // Pre-PLAN config preflight (#2585/#2586), shared with `factory doctor` via lintFactoryConfig (#2612).
+    // An unknown `checkers:` entry would only fail closed in CHECK, after PLAN and BUILD spent model calls;
+    // unfilled scaffold tokens park the run. Read-only, no subprocess, runs for localOnly too. Checker
+    // findings win so a `<checker-name>` placeholder gets the checker-specific escalate message.
+    const lint = lintFactoryConfig({ constitution, configFile: request.repoConfigFile });
+    if (lint.verdict === 'escalate') {
+      return terminalEscalated(
+        lint.findings
+          .filter((f) => f.rule === 'unknown-checker')
+          .map((f) => f.message)
+          .join('\n'),
+      );
     }
-
-    // Pre-PLAN config preflight (#2586): unfilled scaffold tokens park the run before any model call or subprocess.
-    const tokenFindings = preflightConfigTokens({ constitution, configFile: request.repoConfigFile });
-    if (tokenFindings.length > 0) {
+    if (lint.verdict === 'park') {
       return terminalParked(
         'fail',
-        `config preflight failed before PLAN:\n${tokenFindings.map((f) => f.message).join('\n')}`,
+        `config preflight failed before PLAN:\n${lint.findings.map((f) => f.message).join('\n')}`,
       );
     }
 

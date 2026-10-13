@@ -412,6 +412,8 @@ const INTERNAL_API_KEYS = [
   'listBuiltInCheckers',
   'findUnknownConstitutionCheckers',
   'findTemplateTokens',
+  'isTemplateToken',
+  'lintFactoryConfig',
   'formatUnknownCheckerMessage',
   'describePullRequestAccessError',
   'describeReviewConstitutionSource',

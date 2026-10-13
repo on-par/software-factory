@@ -2,11 +2,13 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { ConstitutionLoader } from '@on-par/factory-core';
+import { type ConfigLintInput, lintFactoryConfig } from '@on-par/factory-core/internal';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   analyzeEventLog,
-  configPlaceholderChecks,
+  configLintChecks,
   type ClaudeAuthProbeResult,
   claudeKeychainCheck,
   codexAuthMethod,
@@ -1581,7 +1583,7 @@ describe('factory --help first step (#2558)', () => {
   });
 });
 
-describe('configPlaceholderChecks (#2610)', () => {
+describe('configLintChecks (#2610, #2612)', () => {
   const dirs: string[] = [];
   afterEach(() => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
@@ -1592,26 +1594,26 @@ describe('configPlaceholderChecks (#2610)', () => {
   const VALID_CONSTITUTION = PLACEHOLDER_CONSTITUTION.replace('<checker-name>', 'compile');
   const VALID_CONFIG = 'sweep:\n  enabled: false\n';
 
-  function setup(constitution: string, config: string) {
+  function setup(constitution: string, config: string): ConfigLintInput {
     const dir = mkdtempSync(join(tmpdir(), 'doctor-config-'));
     dirs.push(dir);
     mkdirSync(join(dir, '.factory'));
-    const c = join(dir, '.factory', 'constitution.md');
+    writeFileSync(join(dir, '.factory', 'constitution.md'), constitution);
     const y = join(dir, '.factory', 'config.yaml');
-    writeFileSync(c, constitution);
     writeFileSync(y, config);
-    return [
-      { absPath: c, relPath: '.factory/constitution.md', scope: 'frontmatter' as const },
-      { absPath: y, relPath: '.factory/config.yaml', scope: 'all' as const },
-    ];
+    return {
+      constitution: new ConstitutionLoader().loadRepoConstitution(dir),
+      configFile: { absPath: y, relPath: '.factory/config.yaml' },
+    };
   }
 
   it('flags a placeholder checker with file:line and the fix', () => {
-    const rows = configPlaceholderChecks(setup(PLACEHOLDER_CONSTITUTION, VALID_CONFIG));
+    const rows = configLintChecks(setup(PLACEHOLDER_CONSTITUTION, VALID_CONFIG));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ name: 'config', ok: false, section: REPO_SECTION });
     expect(rows[0].optional).toBeUndefined();
     expect(rows[0].detail).toContain('.factory/constitution.md:5');
+    expect(rows[0].detail).toContain('placeholder checker');
     expect(rows[0].detail).toContain('<checker-name>');
     expect(rows[0].fix).toContain('compile');
     expect(rows[0].fix).toContain('custom_*');
@@ -1621,8 +1623,16 @@ describe('configPlaceholderChecks (#2610)', () => {
     expect(out).toContain('fix:');
   });
 
+  it("flags unknown checker 'typecheck' at its line", () => {
+    const rows = configLintChecks(setup(PLACEHOLDER_CONSTITUTION.replace('<checker-name>', 'typecheck'), VALID_CONFIG));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].ok).toBe(false);
+    expect(rows[0].detail).toBe(".factory/constitution.md:5: unknown checker 'typecheck'");
+    expect(rows[0].fix).toContain('custom_*');
+  });
+
   it('passes when the constitution and config.yaml have no placeholders', () => {
-    const rows = configPlaceholderChecks(setup(VALID_CONSTITUTION, VALID_CONFIG));
+    const rows = configLintChecks(setup(VALID_CONSTITUTION, VALID_CONFIG));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ name: 'config', ok: true });
     expect(rows[0].detail).toContain('.factory/constitution.md');
@@ -1631,7 +1641,7 @@ describe('configPlaceholderChecks (#2610)', () => {
   });
 
   it('reports an unfilled token in config.yaml with the generic fix', () => {
-    const rows = configPlaceholderChecks(setup(VALID_CONSTITUTION, 'models:\n  pins:\n    build: <model id>\n'));
+    const rows = configLintChecks(setup(VALID_CONSTITUTION, 'models:\n  pins:\n    build: <model id>\n'));
     expect(rows).toHaveLength(1);
     expect(rows[0].ok).toBe(false);
     expect(rows[0].detail).toBe(".factory/config.yaml:3: unfilled template token '<model id>'");
@@ -1639,20 +1649,116 @@ describe('configPlaceholderChecks (#2610)', () => {
   });
 
   it('passes with a neutral detail when neither file exists', () => {
-    const rows = configPlaceholderChecks([
-      { absPath: '/nonexistent/a.md', relPath: 'a.md', scope: 'frontmatter' },
-      { absPath: '/nonexistent/b.yaml', relPath: 'b.yaml', scope: 'all' },
-    ]);
+    const rows = configLintChecks({
+      constitution: null,
+      configFile: { absPath: '/nonexistent/b.yaml', relPath: 'b.yaml' },
+    });
     expect(rows).toEqual([
       { name: 'config', ok: true, section: REPO_SECTION, detail: 'no constitution or config file to scan' },
     ]);
   });
 
+  it('returns a single failing row when the constitution could not be parsed', () => {
+    const rows = configLintChecks({ constitution: null }, 'cannot parse constitution: bad yaml');
+    expect(rows).toEqual([
+      {
+        name: 'config',
+        ok: false,
+        section: REPO_SECTION,
+        detail: 'cannot parse constitution: bad yaml',
+        fix: 'fix the constitution frontmatter YAML',
+      },
+    ]);
+  });
+
   it('leaves the constitution and config file byte-identical', () => {
-    const files = setup(PLACEHOLDER_CONSTITUTION, 'models:\n  pins:\n    build: <model id>\n');
-    const snap = () => files.map((f) => [readFileSync(f.absPath, 'utf-8'), statSync(f.absPath).mtimeMs]);
+    const input = setup(PLACEHOLDER_CONSTITUTION, 'models:\n  pins:\n    build: <model id>\n');
+    const paths = [input.constitution?.repoInstance?.absPath as string, input.configFile?.absPath as string];
+    const snap = () => paths.map((p) => [readFileSync(p, 'utf-8'), statSync(p).mtimeMs]);
     const before = snap();
-    configPlaceholderChecks(files);
+    configLintChecks(input);
     expect(snap()).toEqual(before);
+  });
+});
+
+describe('config lint parity with the run preflight (#2612)', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  const fm = (checkers: string, body = 'body') =>
+    `---\nproduct: acme\nversion: 1\ncheckers:${checkers}\n---\n${body}\n`;
+  const CLEAN_CONFIG = 'sweep:\n  enabled: false\n';
+  const fixtures: { name: string; constitution: string | null; config: string; verdict: 'ok' | 'escalate' | 'park' }[] =
+    [
+      { name: 'clean', constitution: fm('\n  - compile'), config: CLEAN_CONFIG, verdict: 'ok' },
+      {
+        name: 'placeholder checker',
+        constitution: fm('\n  - <checker-name>'),
+        config: CLEAN_CONFIG,
+        verdict: 'escalate',
+      },
+      {
+        name: 'unknown checker typecheck',
+        constitution: fm('\n  - typecheck'),
+        config: CLEAN_CONFIG,
+        verdict: 'escalate',
+      },
+      { name: 'custom_foo checker', constitution: fm('\n  - custom_foo'), config: CLEAN_CONFIG, verdict: 'ok' },
+      {
+        name: 'frontmatter token',
+        constitution: '---\nproduct: <product name>\nversion: 1\ncheckers:\n  - compile\n---\nbody\n',
+        config: CLEAN_CONFIG,
+        verdict: 'park',
+      },
+      {
+        name: 'token only in body',
+        constitution: fm('\n  - compile', 'see <thing>'),
+        config: CLEAN_CONFIG,
+        verdict: 'ok',
+      },
+      {
+        name: 'config.yaml token',
+        constitution: fm('\n  - compile'),
+        config: 'models:\n  pins:\n    build: <model id>\n',
+        verdict: 'park',
+      },
+      {
+        name: 'commented-out token',
+        constitution: fm('\n  - compile'),
+        config: '# build: <model id>\nsweep:\n  enabled: false\n',
+        verdict: 'ok',
+      },
+      {
+        name: 'flow-list unknown checker',
+        constitution: fm(' [compile, bogus]'),
+        config: CLEAN_CONFIG,
+        verdict: 'escalate',
+      },
+      {
+        name: 'unknown checker plus config token',
+        constitution: fm('\n  - typecheck'),
+        config: 'models:\n  pins:\n    build: <model id>\n',
+        verdict: 'escalate',
+      },
+      { name: 'no constitution file', constitution: null, config: CLEAN_CONFIG, verdict: 'ok' },
+    ];
+
+  it.each(fixtures)('doctor and preflight agree on $name', ({ constitution, config, verdict }) => {
+    const dir = mkdtempSync(join(tmpdir(), 'doctor-parity-'));
+    dirs.push(dir);
+    mkdirSync(join(dir, '.factory'));
+    if (constitution !== null) writeFileSync(join(dir, '.factory', 'constitution.md'), constitution);
+    const y = join(dir, '.factory', 'config.yaml');
+    writeFileSync(y, config);
+    const input: ConfigLintInput = {
+      constitution: new ConstitutionLoader().loadRepoConstitution(dir),
+      configFile: { absPath: y, relPath: '.factory/config.yaml' },
+    };
+    const preflight = lintFactoryConfig(input).verdict !== 'ok';
+    const doctor = doctorFailed(configLintChecks(input));
+    expect(doctor).toBe(preflight);
+    expect(lintFactoryConfig(input).verdict).toBe(verdict);
   });
 });
