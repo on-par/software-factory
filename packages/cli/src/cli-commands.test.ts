@@ -4076,14 +4076,13 @@ bash scripts/verify.sh
       );
     };
 
-    it('a config-caused CHECK release keeps the worktree and branch and records the resume point', async () => {
+    it('a config-caused CHECK failure parks and records no resume point (#2583)', async () => {
       configEnvFail();
       const err = await shipIssue(5, {}, { repoRoot: h.repoRoot, ghRepo: h.ghRepo }).catch((e: unknown) => e);
-      expect(err).toBeInstanceOf(LaneEnvironmentPauseError);
-      expect((err as LaneEnvironmentPauseError).buildPreserved).toBe(true);
-      expect(cleanupWorktree).not.toHaveBeenCalled();
-      expect(existsSync(recordPath())).toBe(true);
-      expect(readFileSync(paths().events, 'utf-8')).toContain('factory resume 5 --from check');
+      expect(err).toBeInstanceOf(LaneParkError);
+      expect((err as LaneParkError).reason).toBe('fail');
+      expect(existsSync(recordPath())).toBe(false);
+      expect(readFileSync(paths().events, 'utf-8')).toContain('factory unpark 5');
     });
 
     it('resume <issue> --from check runs CHECK in the kept worktree without setupWorktree, planPhase or buildPhase', async () => {

@@ -6,7 +6,7 @@
 //   3. the acquired Environment is released exactly once on every exit path.
 //   4. a failed environment lease degrades (appPort undefined) rather than parking the run.
 //   5. exactly one terminal event sequence is emitted per run, matching the returned RunOutcome
-//      (including the non-park `released` exit for an environment-caused CHECK failure, #1928).
+//      (including the non-park `released` exit for an environment-caused CHECK failure, #1928; a config cause parks, #2583).
 // PLAN may be skipped by the planReuse port after an environment release (#2340).
 // CHECK may be resumed on a kept worktree via request.resumeFrom after an environment release (#2564).
 // A config preflight (#2586) rejects unfilled template tokens before base health and PLAN.
@@ -73,6 +73,7 @@ import { touchedFilesFrom } from './lane-file-guard.js';
 import { parkReasonFor, type BuildRoute, type ParkReason, type RunOutcome } from './outcome.js';
 import type { RunPolicy } from './policy.js';
 import {
+  configParkMessage,
   formatPreservedBuildMessage,
   issueBodyHash,
   preservedFixTarget,
@@ -927,6 +928,25 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     if (!check.passed) {
       if (check.environment) {
         const env = check.environment;
+        if (env.cause === 'config') {
+          // A config failure fails the same way on every requeue (#2583): park with file, line and fix.
+          await clearCheckResume();
+          const failure =
+            check.failureSignature !== undefined
+              ? { failureSignature: check.failureSignature, failingChecks: env.failingChecks }
+              : undefined;
+          return terminalParked(
+            'fail',
+            configParkMessage({
+              issue: request.issue,
+              failure: env,
+              summary: check.summary,
+              constitution,
+              configFile: request.repoConfigFile,
+            }),
+            failure,
+          );
+        }
         if (!request.localOnly) {
           const [owner, repoName] = request.repo.split('/');
           try {

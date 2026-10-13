@@ -27,6 +27,7 @@ import type { RunPolicy } from './policy.js';
 import type { Environment, Workspace } from './ports.js';
 import { createPlanReuseStore, issueBodyHash, type CheckResumeStore, type PlanReuseStore } from './resume-context.js';
 import { writeSpec } from '../spec/index.js';
+import { schemaErrorCheckerOutput } from '../checkers/index.js';
 import { preflightConfigTokens } from '../config/template-tokens.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
@@ -1761,6 +1762,85 @@ describe('runIssue — environment release (#1928)', () => {
     const { run, log } = arrange({}, vi.fn().mockRejectedValue(new Error('403')));
     expect(await run()).toMatchObject({ state: 'released' });
     expect(kinds(log)).toContain('environment_warning');
+  });
+});
+
+describe('runIssue — config failure parks (#2583)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'config-park-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const arrange = (cause: 'config' | 'environment') => {
+    const absPath = join(dir, 'constitution.md');
+    writeFileSync(absPath, '---\nproduct: acme\nchecklist: x\ncheckers:\n  - tests\n---\nbody\n');
+    const constitution: Constitution = {
+      source: 'repo',
+      product: 'acme',
+      version: 1,
+      checkers: ['tests'],
+      body: 'body',
+      path: absPath,
+      requireTests: true,
+      repoInstance: { relPath: '.factory/constitution.md', absPath },
+    };
+    vi.mocked(checkPhase).mockResolvedValue({
+      passed: false,
+      summary: {
+        failures: 1,
+        passes: 0,
+        skips: 0,
+        total: 1,
+        results: [schemaErrorCheckerOutput('checkers[0]', 'entry 0 is a number')],
+      },
+      reworkRounds: 0,
+      failureSignature: 'sig',
+      environment: { baseSha: 'abc1234567890def', failingChecks: ['checkers[0]'], cause, logPaths: [] },
+    });
+    const log = vi.fn();
+    const createComment = vi.fn().mockResolvedValue({});
+    const checkResume = {
+      load: vi.fn().mockResolvedValue(null),
+      record: vi.fn().mockResolvedValue(undefined),
+      clear: vi.fn().mockResolvedValue(undefined),
+    };
+    const planReuse = {
+      load: vi.fn().mockResolvedValue(null),
+      record: vi.fn().mockResolvedValue(undefined),
+      clear: vi.fn().mockResolvedValue(undefined),
+    };
+    const ports = basePorts({
+      events: () => log,
+      octokit: { rest: { issues: { createComment } } } as never,
+      resolveConstitution: () => constitution,
+      checkResume,
+      planReuse,
+    });
+    return { log, createComment, checkResume, planReuse, run: () => runIssue(baseRequest(), basePolicy(), ports) };
+  };
+  const kinds = (log: ReturnType<typeof vi.fn>) => log.mock.calls.map((c) => c[0]);
+
+  it('parks a config-caused CHECK failure with file, line and fix instead of releasing it', async () => {
+    const { run, log, createComment, checkResume, planReuse } = arrange('config');
+    const outcome = await run();
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'fail', failureSignature: 'sig' });
+    expect(outcome.state).not.toBe('released');
+    const fail = log.mock.calls.find((c) => c[0] === 'fail');
+    expect(fail?.[1]).toContain('.factory/constitution.md:4');
+    expect(fail?.[1]).toContain('expected a list of checker names');
+    expect(fail?.[1]).toContain('factory unpark');
+    expect(kinds(log)).not.toContain('environment-released');
+    expect(createComment).not.toHaveBeenCalled();
+    expect(checkResume.record).not.toHaveBeenCalled();
+    expect(planReuse.record).not.toHaveBeenCalled();
+  });
+
+  it('still releases an environment-caused CHECK failure to queued', async () => {
+    const { run, log } = arrange('environment');
+    expect(await run()).toMatchObject({ state: 'released', reason: 'environment' });
+    expect(kinds(log)).toContain('environment-released');
+    expect(kinds(log)).not.toContain('fail');
   });
 });
 

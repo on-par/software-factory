@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { schemaErrorCheckerOutput } from '../checkers/index.js';
 import { writeSpec } from '../spec/index.js';
 import {
   checkResumePath,
@@ -12,6 +13,7 @@ import {
   formatPreservedBuildMessage,
   issueBodyHash,
   planReusePath,
+  configParkMessage,
   preservedFixTarget,
   type CheckResumeRecord,
   type PlanReuseRecord,
@@ -225,6 +227,56 @@ describe('check resume store (#2564)', () => {
       const env = { cause: 'environment' as const, failingChecks: ['tests', 'lint'], logPaths: ['/logs/a.log'] };
       expect(preservedFixTarget(env, null)).toBe('/logs/a.log');
       expect(preservedFixTarget({ ...env, logPaths: [] }, null)).toBe('the base (failing: tests, lint)');
+    });
+  });
+
+  describe('configParkMessage (#2583)', () => {
+    const constitutionAt = (file: string, checkers: string[]): Constitution => ({
+      source: 'repo',
+      product: 'p',
+      version: 1,
+      checkers,
+      body: '',
+      path: file,
+      repoInstance: { absPath: file, relPath: '.factory/constitution.md' },
+      requireTests: true,
+    });
+    const failure = { cause: 'config' as const, failingChecks: ['bogus'], logPaths: [] as string[] };
+    const emptySummary = { failures: 0, passes: 0, skips: 0, total: 0, results: [] };
+
+    it('names file:line and the lint fix for an unknown checker', async () => {
+      const file = join(dir, 'constitution.md');
+      await writeFile(file, '---\nversion: 1\ncheckers:\n  - bogus\n---\n');
+      const msg = configParkMessage({
+        issue: 7,
+        failure,
+        summary: emptySummary,
+        constitution: constitutionAt(file, ['bogus']),
+      });
+      expect(msg).toContain('file: .factory/constitution.md:4');
+      expect(msg.split('.factory/constitution.md:4')).toHaveLength(2);
+      expect(msg).toContain("unknown checker 'bogus'");
+      expect(msg).toContain('Remove the line or use one of');
+      expect(msg).toContain('factory unpark 7');
+    });
+
+    it('uses the checkers: line and schema-error details when lint has no finding', async () => {
+      const file = join(dir, 'constitution.md');
+      await writeFile(file, '# C\n\ncheckers:\n  - tests\n');
+      const msg = configParkMessage({
+        issue: 7,
+        failure,
+        summary: { ...emptySummary, results: [schemaErrorCheckerOutput('checkers[0]', 'entry 0 is a number')] },
+        constitution: constitutionAt(file, ['tests']),
+      });
+      expect(msg).toContain('file: .factory/constitution.md:3');
+      expect(msg).toContain('expected a list of checker names');
+    });
+
+    it('falls back to a generic target and fix with no constitution', () => {
+      const msg = configParkMessage({ issue: 7, failure, summary: emptySummary, constitution: null });
+      expect(msg).toContain('file: the constitution checkers list');
+      expect(msg).toContain('fix: fix the constitution checkers list so every entry is a known checker name');
     });
   });
 });

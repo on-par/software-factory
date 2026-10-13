@@ -349,6 +349,7 @@ const INTERNAL_API_KEYS = [
   'createCheckResumeStore',
   'formatPreservedBuildMessage',
   'preservedFixTarget',
+  'configParkMessage',
   // Garden harvest (#2083)
   'DEFAULT_GARDEN_MAX_CLUSTERS',
   'DEFAULT_GARDEN_SINCE',
