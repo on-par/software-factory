@@ -1,11 +1,12 @@
 // packages/cli/src/cli/doctor.ts — `factory doctor` environment preflight
 
-import { readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import type { DeclaredHarnessProbe } from '@on-par/factory-core';
 import { detectSandboxRuntime } from '@on-par/factory-core';
-import { findTemplateTokens, listBuiltInCheckers } from '@on-par/factory-core/internal';
+import type { ConfigLintInput } from '@on-par/factory-core/internal';
+import { isTemplateToken, lintFactoryConfig, listBuiltInCheckers } from '@on-par/factory-core/internal';
 
 import { MIN_NODE_MAJOR } from '../node-version.js';
 import { availableAgentClis, CLAUDE_CODE_URL, CODEX_CLI_URL, GITHUB_TOKENS_URL } from './first-run.js';
@@ -970,59 +971,47 @@ export function modelsRegistryChecks(
   return [{ name: REGISTRY_CHECK, ok: true, detail: `${n} entr${n === 1 ? 'y' : 'ies'} valid (${configPath})` }];
 }
 
-export interface ConfigScanFile {
-  absPath: string;
-  /** Display path in the row, e.g. `.factory/constitution.md`. */
-  relPath: string;
-  /** `frontmatter` for the constitution, `all` for the repo config file (same scopes as the run preflight). */
-  scope: 'frontmatter' | 'all';
-}
-
-function readTextOrNull(absPath: string): string | null {
-  try {
-    return readFileSync(absPath, 'utf-8');
-  } catch {
-    return null;
+/** `config` rows from the shared pre-PLAN lint (#2612): one failing row per finding, so doctor fails exactly when
+ *  the run preflight would escalate or park. A single ok row when clean. Read-only. */
+export function configLintChecks(input: ConfigLintInput, loadError?: string): DoctorCheck[] {
+  if (loadError !== undefined) {
+    return [
+      {
+        name: 'config',
+        ok: false,
+        section: REPO_SECTION,
+        detail: loadError,
+        fix: 'fix the constitution frontmatter YAML',
+      },
+    ];
   }
-}
-
-/** One failing `config` row per unfilled `<...>` placeholder in the constitution frontmatter or repo config
- *  file (#2610); a single ok row when there are none. Read-only. */
-export function configPlaceholderChecks(
-  files: readonly ConfigScanFile[],
-  readText: (absPath: string) => string | null = readTextOrNull,
-): DoctorCheck[] {
-  const scanned: string[] = [];
-  const rows: DoctorCheck[] = [];
-  for (const f of files) {
-    const text = readText(f.absPath);
-    if (text === null) continue;
-    scanned.push(f.relPath);
-    const lines = text.split(/\r?\n/);
-    for (const finding of findTemplateTokens(text, f.relPath, f.scope)) {
-      const src = lines[finding.line - 1] ?? '';
-      const isChecker = f.scope === 'frontmatter' && (/^\s*-\s*</.test(src) || /^\s*checkers\s*:/.test(src));
-      if (isChecker) {
-        const names = [...listBuiltInCheckers().map((c) => c.name), 'custom_*'].join(', ');
-        rows.push({
+  const { findings } = lintFactoryConfig(input);
+  if (findings.length > 0) {
+    const names = [...listBuiltInCheckers().map((c) => c.name), 'custom_*'].join(', ');
+    return findings.map((f): DoctorCheck => {
+      const where = `${f.file}${f.line ? `:${f.line}` : ''}`;
+      if (f.rule === 'unknown-checker') {
+        const kind = isTemplateToken(f.token) ? 'placeholder' : 'unknown';
+        return {
           name: 'config',
           ok: false,
           section: REPO_SECTION,
-          detail: `${f.relPath}:${finding.line}: placeholder checker '${finding.token}'`,
-          fix: `replace '${finding.token}' with a real checker name (${names}) or delete the line`,
-        });
-      } else {
-        rows.push({
-          name: 'config',
-          ok: false,
-          section: REPO_SECTION,
-          detail: `${f.relPath}:${finding.line}: unfilled template token '${finding.token}'`,
-          fix: `replace '${finding.token}' with a real value`,
-        });
+          detail: `${where}: ${kind} checker '${f.token}'`,
+          fix: `replace '${f.token}' with a real checker name (${names}) or delete the line`,
+        };
       }
-    }
+      return {
+        name: 'config',
+        ok: false,
+        section: REPO_SECTION,
+        detail: `${where}: unfilled template token '${f.token}'`,
+        fix: `replace '${f.token}' with a real value`,
+      };
+    });
   }
-  if (rows.length > 0) return rows;
+  const scanned: string[] = [];
+  if (input.constitution?.repoInstance) scanned.push(input.constitution.repoInstance.relPath);
+  if (input.configFile && existsSync(input.configFile.absPath)) scanned.push(input.configFile.relPath);
   return [
     {
       name: 'config',
@@ -1030,7 +1019,7 @@ export function configPlaceholderChecks(
       section: REPO_SECTION,
       detail:
         scanned.length > 0
-          ? `no unfilled placeholders in ${scanned.join(', ')}`
+          ? `no unfilled placeholders or unknown checkers in ${scanned.join(', ')}`
           : 'no constitution or config file to scan',
     },
   ];

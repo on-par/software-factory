@@ -216,6 +216,7 @@ import type {
   UnmergedGreenPr,
   WatchChecksOptions,
   WorktreeSandbox,
+  ConfigLintInput,
 } from '@on-par/factory-core/internal';
 import {
   acquirePidFile,
@@ -382,7 +383,7 @@ import {
   type KeychainProbeStatus,
   type LeaseHealthRow,
   orphanContainerChecks,
-  configPlaceholderChecks,
+  configLintChecks,
   modelsRegistryChecks,
   orphanMicroVmChecks,
   runDoctorChecks,
@@ -6293,13 +6294,15 @@ async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean }
     const eventsContent = existsSync(paths.events) ? readFileSync(paths.events, 'utf-8') : null;
     checks.push(eventLogCheck(eventsContent === null ? null : analyzeEventLog(eventsContent)));
 
-    const constitutionFile = repoConfigFileFor(repoRoot, resolve(paths.root, 'constitution.md'));
-    const configFile = repoConfigFileFor(repoRoot, paths.config);
+    let constitution: ConfigLintInput['constitution'] = null;
+    let loadError: string | undefined;
+    try {
+      constitution = new ConstitutionLoader().loadRepoConstitution(repoRoot, factoryConfig.paths?.constitution);
+    } catch (err) {
+      loadError = `cannot parse constitution: ${err instanceof Error ? err.message : String(err)}`;
+    }
     checks.push(
-      ...configPlaceholderChecks([
-        { ...constitutionFile, scope: 'frontmatter' },
-        { ...configFile, scope: 'all' },
-      ]),
+      ...configLintChecks({ constitution, configFile: repoConfigFileFor(repoRoot, paths.config) }, loadError),
     );
 
     try {
