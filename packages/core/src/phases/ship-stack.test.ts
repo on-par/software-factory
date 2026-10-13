@@ -117,7 +117,10 @@ describe('openSliceStack', () => {
     const f = fake({ request: vi.fn().mockRejectedValue(new Error('boom')) });
     const res = await run(f);
     expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.reason).toContain('stack');
+    if (!res.ok) {
+      expect(res.reason).toContain('stack');
+      expect(res.stackError).toBe('boom');
+    }
     expect(res.prs).toHaveLength(3);
     expect(f.create).toHaveBeenCalledTimes(3);
     expect(recorded(f).every((s) => s.state === 'pr-open')).toBe(true);
@@ -132,6 +135,7 @@ describe('openSliceStack', () => {
     const res = await run(f);
     expect(res.ok).toBe(false);
     expect(res.prs).toHaveLength(1);
+    if (!res.ok) expect(res.stackError).toBeUndefined();
     expect(f.request).not.toHaveBeenCalled();
     expect(recorded(f).map((s) => s.state)).toEqual(['pr-open', 'pending', 'pending']);
   });

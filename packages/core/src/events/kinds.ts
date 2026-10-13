@@ -150,6 +150,7 @@ export type EventKind =
   | 'ship'
   | 'ship_denied'
   | 'skip-ci'
+  | 'stack-fallback'
   | 'skipped-already-closed'
   | 'size-gate-escalated'
   | 'size-gate-decomposed'
@@ -398,6 +399,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   sandbox_violation: { severity: 'warn', isPark: false, isTerminal: false },
   ship: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
   ship_denied: { severity: 'error', isPark: false, isTerminal: true, laneStatus: 'failed' },
+  // ADR-0161: the native stack API failed; the issue fell back to slice mode (#2672).
+  'stack-fallback': { severity: 'warn', isPark: false, isTerminal: false },
   'skip-ci': { severity: 'info', isPark: false, isTerminal: false },
   // The target issue was already closed when the run started — no work was
   // attempted, so this is a clean terminal outcome, never a park (#681).

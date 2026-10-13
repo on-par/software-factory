@@ -30,7 +30,14 @@ export interface StackedPr {
 }
 
 export type SliceStackResult =
-  { ok: true; stackNumber: number; prs: StackedPr[] } | { ok: false; reason: string; prs: StackedPr[] };
+  | { ok: true; stackNumber: number; prs: StackedPr[] }
+  | {
+      ok: false;
+      reason: string;
+      prs: StackedPr[];
+      /** Set only when the native stack API call itself failed (ADR-0161 fallback trigger). */
+      stackError?: string;
+    };
 
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -58,6 +65,7 @@ export async function openSliceStack(opts: {
 
   const prs: StackedPr[] = [];
   let failure: string | undefined;
+  let stackError: string | undefined;
 
   for (const [i, slice] of sorted.entries()) {
     const base = i === 0 ? 'main' : sorted[i - 1]!.branch;
@@ -112,6 +120,7 @@ export async function openSliceStack(opts: {
       stackNumber = (data as { number: number }).number;
       log('ship', `linked PRs ${prs.map((p) => `#${p.prNumber}`).join(', ')} as stack ${stackNumber}`);
     } catch (err) {
+      stackError = messageOf(err);
       failure = `could not link the slice PRs as a stack: ${messageOf(err)}`;
       log('ship', failure);
     }
@@ -129,9 +138,15 @@ export async function openSliceStack(opts: {
         } in the slice plan comment`,
       );
     } catch (err) {
-      return { ok: false, reason: `could not record the slice plan comment: ${messageOf(err)}`, prs };
+      return {
+        ok: false,
+        reason: `could not record the slice plan comment: ${messageOf(err)}`,
+        prs,
+        ...(stackError !== undefined ? { stackError } : {}),
+      };
     }
   }
 
-  return failure === undefined ? { ok: true, stackNumber, prs } : { ok: false, reason: failure, prs };
+  if (failure === undefined) return { ok: true, stackNumber, prs };
+  return { ok: false, reason: failure, prs, ...(stackError !== undefined ? { stackError } : {}) };
 }
