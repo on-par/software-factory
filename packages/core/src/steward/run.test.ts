@@ -56,6 +56,7 @@ describe('runSteward', () => {
       costsFile: join(dir, 'costs.jsonl'),
       invoke,
       comments: mem.client,
+      bossModels: ['boss-model'],
     };
     return { ...mem, invoke, ports };
   };
@@ -73,6 +74,7 @@ describe('runSteward', () => {
     await expect(readFile(join(dir, STEWARD_PACKET_FILE), 'utf8')).resolves.toBeTruthy();
     await expect(readFile(join(dir, STEWARD_VERDICT_FILE), 'utf8')).resolves.toBeTruthy();
     expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke.mock.calls[0][0].model).toBe('boss-model');
     expect(comments).toHaveLength(1);
     expect(comments[0].body).toContain(stewardCommentMarker('abc123abc123', 'sig-1'));
     expect(comments[0].body).toContain('check-exhausted');

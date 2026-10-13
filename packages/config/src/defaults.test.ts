@@ -250,13 +250,9 @@ describe('no JSON ships from this package', () => {
 describe('steward route (#2111)', () => {
   const route = defaultRoutesConfig.routes.steward;
 
-  it('pins an exact model ID, not a tier or alias', () => {
-    expect(route?.model).toBe('claude-opus-5');
-    const model = route?.model as string;
-    expect(Object.keys(defaultModelsConfig.models)).toContain(model);
-    expect(defaultModelsConfig.models[model].claudeFlag).toBe(model);
-    expect(model).not.toBe(route?.tier);
-    expect(model).not.toMatch(/^(opus|sonnet|fable|haiku)$/);
+  it('has no packaged model pin and resolves from the boss tier', () => {
+    expect(route?.model).toBeUndefined();
+    expect(route?.tier).toBe('boss');
   });
 
   it('is tool-less', () => {
@@ -267,10 +263,10 @@ describe('steward route (#2111)', () => {
     expect(route?.output).toBe('json');
   });
 
-  it('leaves every other route without model/allowedTools/output', () => {
+  it('leaves every route without a model pin, and every other route without allowedTools/output', () => {
     for (const [id, def] of Object.entries(defaultRoutesConfig.routes)) {
-      if (id === 'steward') continue;
       expect(def.model, id).toBeUndefined();
+      if (id === 'steward') continue;
       expect(def.allowedTools, id).toBeUndefined();
       expect(def.output, id).toBeUndefined();
     }

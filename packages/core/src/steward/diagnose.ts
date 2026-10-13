@@ -86,7 +86,7 @@ export type StewardRouteConfig = Pick<RouteDefaults, 'model' | 'allowedTools' | 
 
 export interface StewardModelCall {
   route: 'steward';
-  /** Pinned model-registry key from the steward route. */
+  /** Resolved model id: the route's pin, else the first runnable boss-tier model. */
   model: string;
   prompt: string;
   /** Always empty: the steward is tool-less (ADR-0155). */
@@ -128,6 +128,18 @@ export interface DiagnoseStewardOptions {
   route?: StewardRouteConfig;
   /** costs.jsonl path; one task 'steward' row is appended per completed model call (#2113). */
   costsFile: string;
+  /** Runnable boss-tier models in priority order (e.g. router.resolveAll('steward')); used when the route pins no model. */
+  bossModels?: readonly string[];
+}
+
+/** Pure: the steward model. A non-blank route pin wins; otherwise the first runnable boss-tier model; undefined when neither exists. */
+export function resolveStewardModel(
+  route: StewardRouteConfig | undefined,
+  bossModels: readonly string[] = [],
+): string | undefined {
+  const pin = route?.model?.trim();
+  if (pin) return pin;
+  return bossModels.find((m) => m.trim() !== '');
 }
 
 /** Pure: the steward prompt. The packet is embedded as JSON with every `<` escaped so packet text cannot close the data block. */
@@ -276,17 +288,21 @@ export async function diagnoseStewardPacket(
   options: DiagnoseStewardOptions,
 ): Promise<StewardVerdictRecord> {
   const route: StewardRouteConfig | undefined = options.route ?? defaultRoutesConfig.routes.steward;
+  const model = resolveStewardModel(route, options.bossModels);
   const result =
-    !route?.model || !Array.isArray(route.allowedTools) || route.allowedTools.length > 0
+    !model || !Array.isArray(route?.allowedTools) || route.allowedTools.length > 0
       ? {
-          record: stewardError('route-misconfigured', 'steward route must pin a model and allow no tools'),
+          record: stewardError(
+            'route-misconfigured',
+            'steward route must allow no tools and resolve a model (pin one, or provide a runnable boss-tier model)',
+          ),
           prompt: '',
           reply: undefined,
         }
-      : await runDiagnosis(route.model, packet, options.invoke);
+      : await runDiagnosis(model, packet, options.invoke);
   await writeStewardVerdict(runDir, result.record);
-  if (result.reply && route?.model) {
-    logCost(options.costsFile, buildStewardCostEntry(route.model, packet.issue.number, result.prompt, result.reply));
+  if (result.reply && model) {
+    logCost(options.costsFile, buildStewardCostEntry(model, packet.issue.number, result.prompt, result.reply));
   }
   return result.record;
 }
