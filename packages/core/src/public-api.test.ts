@@ -606,6 +606,7 @@ const INTERNAL_API_KEYS = [
   'createFactorydServer',
   'createRunRuntime',
   'findOpenPR',
+  'openSliceStack',
   'createShipExecutor',
   'DEFAULT_FACTORYD_PORT',
   // Durable explicit daemon runs (#1393)

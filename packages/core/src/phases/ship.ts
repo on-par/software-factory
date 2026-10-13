@@ -481,7 +481,7 @@ export async function findMergedPR(octokit: Octokit, owner: string, repo: string
 
 /** A `pulls.create` 422 whose message says the PR already exists — recoverable by re-querying,
  *  unlike every other 422 (e.g. "No commits between ..."), which still propagates (#641). */
-function isPullAlreadyExistsError(err: unknown): boolean {
+export function isPullAlreadyExistsError(err: unknown): boolean {
   const e = err as {
     status?: number;
     message?: string;
