@@ -2,7 +2,7 @@
 
 `.github/workflows/publish.yml` publishes the packages listed in
 `scripts/publish-workspaces.txt` when a `v*` tag is pushed, and publishes the next
-`X.Y.Z-next.N` prerelease to the `next` dist-tag on every push to `main` (see
+`X.Y.Z-next.N` prerelease to the `next` dist-tag when CI passes on a push to `main` (see
 `scripts/publish-release.sh`). Authentication comes from npm trusted
 publishing (GitHub OIDC), so no long-lived npm token is involved. This
 replaces the `NPM_TOKEN` repo secret.
