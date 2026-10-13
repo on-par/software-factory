@@ -15,10 +15,21 @@ function isAllowed(value: unknown): boolean {
   return typeof value === 'string' && (STANDARD_CHECKER_NAMES.includes(value) || value.startsWith('custom_'));
 }
 
+function stripInlineComment(text: string): string {
+  // Avoid regex ReDoS: strip " #" / tab-hash comments with index scan.
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if ((c === ' ' || c === '\t') && text[i + 1] === '#') return text.slice(0, i);
+  }
+  return text;
+}
+
 function cleanItem(text: string): string {
-  let t = text.replace(/[ \t]+#.*$/, '').trim();
-  const m = /^(['"])(.*)\1$/.exec(t);
-  if (m) t = m[2];
+  let t = stripInlineComment(text).trim();
+  if (t.length >= 2) {
+    const q = t[0];
+    if ((q === "'" || q === '"') && t[t.length - 1] === q) t = t.slice(1, -1);
+  }
   return t;
 }
 
@@ -30,9 +41,9 @@ function listCheckerLines(raw: string): Array<{ name: string; line: number }> {
   if (end < 0) end = lines.length;
   const out: Array<{ name: string; line: number }> = [];
   for (let i = 1; i < end; i++) {
-    const m = /^checkers\s*:(.*)$/.exec(lines[i]);
+    const m = /^checkers[ \t]*:(.*)$/.exec(lines[i]);
     if (!m) continue;
-    const rest = m[1].replace(/[ \t]+#.*$/, '').trim();
+    const rest = stripInlineComment(m[1]).trim();
     if (rest.startsWith('[')) {
       const inner = rest.replace(/^\[/, '').replace(/\]$/, '');
       for (const part of inner.split(',')) out.push({ name: cleanItem(part), line: i + 1 });
@@ -41,9 +52,12 @@ function listCheckerLines(raw: string): Array<{ name: string; line: number }> {
     for (let j = i + 1; j < end; j++) {
       const l = lines[j];
       if (l.trim() === '' || l.trim().startsWith('#')) continue;
-      const item = /^[ \t]*-[ \t]*(.*)$/.exec(l);
-      if (!item) break;
-      out.push({ name: cleanItem(item[1]), line: j + 1 });
+      let k = 0;
+      while (k < l.length && (l[k] === ' ' || l[k] === '\t')) k++;
+      if (k >= l.length || l[k] !== '-') break;
+      k++;
+      while (k < l.length && (l[k] === ' ' || l[k] === '\t')) k++;
+      out.push({ name: cleanItem(l.slice(k)), line: j + 1 });
     }
     return out;
   }
