@@ -514,8 +514,32 @@ describe('decomposeOversizedIssue', () => {
     });
 
     expect(result).toMatchObject({ posted: false, childIssues: [] });
+    expect(result.failureReason).toEqual(expect.any(String));
+    expect(result.failureReason).not.toBe('');
     expect(createComment).not.toHaveBeenCalled();
     expect(events.some((e) => e.type === 'decompose_failed')).toBe(true);
+  });
+
+  it('carries the parse failure in failureReason when no attempt parses', async () => {
+    const stub = new StubModelExecutor({ scripts: { decompose: [{ output: 'not json' }, { output: 'not json' }] } });
+    const router = new ModelRouter(models, routes, false, stub);
+    const { octokit } = makeOctokit();
+    const { log } = makeLog();
+
+    const result = await decomposeOversizedIssue({
+      issue: 607,
+      repo,
+      title: 't',
+      body: 'b',
+      worktree: '/tmp/wt',
+      router,
+      octokit,
+      log,
+    });
+
+    expect(result.decomposition).toBeUndefined();
+    expect(result.failureReason).toContain('2 attempt(s) failed');
+    expect(result.failureReason).toContain('no JSON object found in the model output');
   });
 
   it('reports a provider-level failure to onProviderFailure so the breaker opens (#745)', async () => {

@@ -1803,6 +1803,18 @@ npm run test`;
       expect(events).toContain('size-gate-escalated');
     });
 
+    it("escalates with the slicer's reason when the slicer cannot split the issue", async () => {
+      const { result, stub, events, createComment, create } = await run({ decompose: ['not json', 'not json'] });
+
+      expect(result.ok).toBe(false);
+      expect(result.escalate).toContain('slice decomposition failed');
+      expect(result.escalate).toContain('no JSON object found in the model output');
+      expect(events).toContain('size-gate-escalated');
+      expect(createComment).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+      expect(stub.calls.map((call) => call.task)).not.toContain('plan');
+    });
+
     it('a raised cap reuses the recorded plan without decomposing', async () => {
       const { result, stub, createComment } = await run({
         comments: [{ id: 1, user: { id: BOT }, body: planComment({ count: 6 }) }],
@@ -1905,6 +1917,16 @@ npm run test`;
         expect(events).toContain('size-gate-sliced');
         expect(events).not.toContain('size-gate-escalated');
         expect(result.escalate).toMatch(/sliced into 2 slice/);
+      });
+
+      it("escalates with the slicer's reason when the slicer cannot split a whole issue", async () => {
+        const { result, events, create } = await runPostPlan({ decompose: ['not json', 'not json'] });
+
+        expect(result.ok).toBe(false);
+        expect(result.sliced).toBeUndefined();
+        expect(result.escalate).toContain('no JSON object found in the model output');
+        expect(events).toContain('size-gate-escalated');
+        expect(create).not.toHaveBeenCalled();
       });
 
       it('AC2: parks a slice that is still over budget and never slices again', async () => {

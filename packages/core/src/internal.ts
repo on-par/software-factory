@@ -581,10 +581,19 @@ export {
 
 // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
 export { wrapCommandInSandbox, shouldProxyEgress } from './sandbox/index.js';
-export { startEgressProxy, egressSummaryMessage, type EgressProxy } from './sandbox/egress-proxy.js';
+export {
+  startEgressProxy,
+  egressSummaryMessage,
+  egressHostMessage,
+  isTelemetryHost,
+  TELEMETRY_HOST_PATTERNS,
+  type EgressProxy,
+} from './sandbox/egress-proxy.js';
 
 export { createRunRuntime, type RunRuntime } from './daemon/run-runtime.js';
 export { findOpenPR, type PrLookup } from './phases/ship.js';
+export { openSliceStack } from './phases/ship-stack.js';
+export type { SliceStackResult, StackSliceInput, StackedPr } from './phases/ship-stack.js';
 export { createShipExecutor } from './daemon/ship-executor.js';
 
 // Review verdict (#1679)
@@ -706,13 +715,18 @@ export {
   sliceCapExceeded,
   SLICE_PLAN_MARKER,
   currentSlice,
+  markSliceMerged,
   parseSlicePlanComment,
   renderSlicePlanComment,
   slicePlanFromDecomposition,
   withSliceState,
 } from './readiness/slice-plan.js';
-export type { SlicePlanCommentLookup, SlicePlanUpsertResult } from './readiness/slice-plan-github.js';
-export { findSlicePlanComment, upsertSlicePlanComment } from './readiness/slice-plan-github.js';
+export type {
+  SliceMergeRecordResult,
+  SlicePlanCommentLookup,
+  SlicePlanUpsertResult,
+} from './readiness/slice-plan-github.js';
+export { findSlicePlanComment, recordSliceMerged, upsertSlicePlanComment } from './readiness/slice-plan-github.js';
 export type { SliceGateOutcome } from './readiness/slice-gate.js';
 export { resolveSliceGate } from './readiness/slice-gate.js';
 export { publishDecomposition } from './readiness/decompose.js';

@@ -192,7 +192,7 @@ describe('resolveSliceGate', () => {
   it('parks without recording when the decomposition exceeds the ceiling of 20', async () => {
     const f = fake([]);
     const { run } = setup([decompositionJson(21)], f, true, 5);
-    expect(await run()).toMatchObject({ kind: 'park', reason: expect.stringContaining('ceiling of 20') });
+    expect(await run()).toMatchObject({ kind: 'unsliceable', reason: expect.stringContaining('ceiling of 20') });
     expect(f.createComment).not.toHaveBeenCalled();
     expect(f.updateComment).not.toHaveBeenCalled();
   });
@@ -223,14 +223,27 @@ describe('resolveSliceGate', () => {
     expect(outcome.kind === 'slice' && outcome.slice.index).toBe(2);
   });
 
-  it('parks when the decomposition fails INVEST twice', async () => {
+  it("returns unsliceable with the slicer's reason when the decomposition fails INVEST twice", async () => {
     const bad = JSON.stringify({
       epic: { title: 'E', why: 'w', doneWhen: ['d'], children: ['S'] },
       stories: [{ ...storyJson(1), outOfScope: ['x'], want: 'depends on other work', tracesTo: [] }],
     });
     const f = fake([]);
     const { run } = setup([bad, bad], f);
-    expect(await run()).toMatchObject({ kind: 'park', reason: expect.stringContaining('slice decomposition failed') });
+    expect(await run()).toMatchObject({
+      kind: 'unsliceable',
+      reason: expect.stringMatching(/slice decomposition failed.*INVEST/),
+    });
+    expect(f.createComment).not.toHaveBeenCalled();
+  });
+
+  it('returns unsliceable with the parse error when the slicer output is not JSON', async () => {
+    const f = fake([]);
+    const { run } = setup(['not json', 'not json'], f);
+    expect(await run()).toMatchObject({
+      kind: 'unsliceable',
+      reason: expect.stringContaining('no JSON object found in the model output'),
+    });
     expect(f.createComment).not.toHaveBeenCalled();
   });
 

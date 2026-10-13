@@ -8,9 +8,9 @@ import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ModelRouter } from '../router/index.js';
-import type { CheckerOutput } from '../types/index.js';
+import type { CheckerOutput, Constitution } from '../types/index.js';
 import { runCommand } from '../utils/command-runner.js';
-import { BaselineCache, hashBaselineEnv } from './baseline-cache.js';
+import { BaselineCache, hashBaselineCheckerConfig, hashBaselineEnv } from './baseline-cache.js';
 import { baseInstallCommand, compareBaseline, extractFailingTestNames, runBaselineCheckers } from './baseline.js';
 import { type CheckerContext, type runAllCheckers, summarizeCheckerOutputs } from './index.js';
 
@@ -393,7 +393,9 @@ describe('runBaselineCheckers', () => {
       const { repo, shaA } = await makeRepo();
       const file = await cacheFilePath();
       const { env, opts } = makeOpts(repo, shaA);
-      await new BaselineCache(file).set(shaA, hashBaselineEnv(env), [out('tests', 'FAIL', 'base')]);
+      await new BaselineCache(file).set(shaA, hashBaselineEnv(env), hashBaselineCheckerConfig(null), [
+        out('tests', 'FAIL', 'base'),
+      ]);
       const { filters, commands, deps } = recorder();
       const report = await runBaselineCheckers({ ...opts, deps, cache: new BaselineCache(file) });
       expect(filters).toEqual([]);
@@ -404,11 +406,68 @@ describe('runBaselineCheckers', () => {
       expect(report.checkers.find((c) => c.checker === 'design_smells')?.cached).toBeUndefined();
     });
 
+    const constitutionWith = (checkers: string[]): Constitution => ({
+      product: 'p',
+      version: 1,
+      checkers,
+      body: '',
+      path: 'c.md',
+      source: 'repo',
+    });
+
+    it('writes no cache entry for an unknown checker (#2563)', async () => {
+      const { repo, shaA } = await makeRepo();
+      const file = await cacheFilePath();
+      const { opts } = makeOpts(repo, shaA, {
+        constitution: constitutionWith(['typecheck']),
+        failing: [out('typecheck', 'FAIL')],
+        cache: new BaselineCache(file),
+      });
+      await runBaselineCheckers(opts);
+      if (existsSync(file)) {
+        const stored = JSON.parse(await readFile(file, 'utf-8'));
+        expect(Object.keys(stored.entries).filter((k) => k.endsWith(':typecheck'))).toEqual([]);
+      }
+    });
+
+    it('re-runs the base when the constitution checker list changes (#2563)', async () => {
+      const { repo, shaA } = await makeRepo();
+      const file = await cacheFilePath();
+      const constitutionA = constitutionWith(['tests']);
+      const constitutionB = constitutionWith(['tests', 'lint']);
+      const { env, opts } = makeOpts(repo, shaA);
+      await new BaselineCache(file).set(shaA, hashBaselineEnv(env), hashBaselineCheckerConfig(constitutionA), [
+        out('tests', 'FAIL', 'base'),
+      ]);
+      const changed = recorder();
+      const report = await runBaselineCheckers({
+        ...opts,
+        constitution: constitutionB,
+        deps: changed.deps,
+        cache: new BaselineCache(file),
+      });
+      expect(changed.filters).toEqual([['tests']]);
+      expect(report.checkers.find((c) => c.checker === 'tests')?.cached).toBeUndefined();
+      await new BaselineCache(file).set(shaA, hashBaselineEnv(env), hashBaselineCheckerConfig(constitutionA), [
+        out('tests', 'FAIL', 'base'),
+      ]);
+      const same = recorder();
+      await runBaselineCheckers({
+        ...opts,
+        constitution: constitutionA,
+        deps: same.deps,
+        cache: new BaselineCache(file),
+      });
+      expect(same.filters).toEqual([]);
+    });
+
     it('misses when the applied laneEnv changes', async () => {
       const { repo, shaA } = await makeRepo();
       const file = await cacheFilePath();
       const envA = { FACTORY_HEADLESS: '1' };
-      await new BaselineCache(file).set(shaA, hashBaselineEnv(envA), [out('tests', 'FAIL')]);
+      await new BaselineCache(file).set(shaA, hashBaselineEnv(envA), hashBaselineCheckerConfig(null), [
+        out('tests', 'FAIL'),
+      ]);
       const { filters, deps } = recorder();
       const { opts } = makeOpts(repo, shaA, { deps, cache: new BaselineCache(file) });
       await runBaselineCheckers({ ...opts, ctx: { ...opts.ctx, env: {} } });
@@ -420,9 +479,12 @@ describe('runBaselineCheckers', () => {
     it('ignores volatile env keys', async () => {
       const { repo, shaA } = await makeRepo();
       const file = await cacheFilePath();
-      await new BaselineCache(file).set(shaA, hashBaselineEnv({ FACTORY_HEADLESS: '1', PORT: '4001' }), [
-        out('tests', 'FAIL'),
-      ]);
+      await new BaselineCache(file).set(
+        shaA,
+        hashBaselineEnv({ FACTORY_HEADLESS: '1', PORT: '4001' }),
+        hashBaselineCheckerConfig(null),
+        [out('tests', 'FAIL')],
+      );
       const { filters, deps } = recorder();
       const { opts } = makeOpts(repo, shaA, { deps, cache: new BaselineCache(file) });
       await runBaselineCheckers({ ...opts, ctx: { ...opts.ctx, env: { FACTORY_HEADLESS: '1', PORT: '4002' } } });
@@ -433,7 +495,9 @@ describe('runBaselineCheckers', () => {
       const { repo, shaA } = await makeRepo();
       const file = await cacheFilePath();
       const { env, opts } = makeOpts(repo, shaA);
-      await new BaselineCache(file).set(shaA, hashBaselineEnv(env), [out('tests', 'FAIL')]);
+      await new BaselineCache(file).set(shaA, hashBaselineEnv(env), hashBaselineCheckerConfig(null), [
+        out('tests', 'FAIL'),
+      ]);
       const { filters, deps } = recorder();
       const report = await runBaselineCheckers({
         ...opts,

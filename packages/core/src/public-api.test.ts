@@ -382,8 +382,10 @@ const INTERNAL_API_KEYS = [
   'STATE_ROOT_ENV',
   'currentSlice',
   'findSlicePlanComment',
+  'markSliceMerged',
   'parseSlicePlanComment',
   'publishDecomposition',
+  'recordSliceMerged',
   'renderSlicePlanComment',
   'resolveSliceGate',
   'resolveStateRoot',
@@ -604,6 +606,7 @@ const INTERNAL_API_KEYS = [
   'createFactorydServer',
   'createRunRuntime',
   'findOpenPR',
+  'openSliceStack',
   'createShipExecutor',
   'DEFAULT_FACTORYD_PORT',
   // Durable explicit daemon runs (#1393)
@@ -682,6 +685,9 @@ const INTERNAL_API_KEYS = [
   // report-only egress proxy for sandbox-exec (#2214)
   'startEgressProxy',
   'egressSummaryMessage',
+  'egressHostMessage',
+  'isTelemetryHost',
+  'TELEMETRY_HOST_PATTERNS',
   'shouldProxyEgress',
   'classifyCiFailure',
   'watchChecks',

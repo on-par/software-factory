@@ -9,7 +9,7 @@ import type { ModelRouter } from '../router/index.js';
 import type { CheckerOutput, CheckResult, Constitution } from '../types/index.js';
 import { runCommand } from '../utils/command-runner.js';
 import { GIT_COMMAND_TIMEOUT_MS } from '../utils/git-exec.js';
-import { type BaselineCache, hashBaselineEnv } from './baseline-cache.js';
+import { type BaselineCache, hashBaselineCheckerConfig, hashBaselineEnv } from './baseline-cache.js';
 import { DESIGN_SMELLS_CHECKER, WORKER_OUTPUT_CHECKER } from './design-smells.js';
 import { type CheckerContext, runAllCheckers } from './index.js';
 
@@ -158,12 +158,13 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
   if (runnable.length === 0) return { baseSha, checkers: compareBaseline(failing, []) };
 
   const envHash = hashBaselineEnv(ctx.env);
+  const configHash = hashBaselineCheckerConfig(constitution);
   const cachedOutputs: CheckerOutput[] = [];
   const toRun: string[] = [];
   for (const name of runnable) {
     let hit: CheckerOutput | undefined;
     try {
-      hit = await cache?.get(baseSha, envHash, name);
+      hit = await cache?.get(baseSha, envHash, configHash, name);
     } catch {
       hit = undefined; // a cache read error is a miss
     }
@@ -215,7 +216,7 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
       toRun,
     );
     const fresh = summary.results.filter((o) => toRun.includes(o.checker));
-    await cache?.set(baseSha, envHash, fresh).catch(() => {});
+    await cache?.set(baseSha, envHash, configHash, fresh).catch(() => {});
     return { baseSha, checkers: markCached(compareBaseline(failing, [...cachedOutputs, ...fresh]), cachedNames) };
   } catch (e: any) {
     return {

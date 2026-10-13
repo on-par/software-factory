@@ -2,7 +2,8 @@
 //
 // In slice mode an oversized issue stays whole and no issue is ever filed (ADR-0156). This module finds the trusted slice plan comment
 // (or decomposes once, without filing or commenting, and records a new plan) and tells PLAN which
-// slice to plan. It never throws: every GitHub I/O failure or unusable plan comes back as a park.
+// slice to plan. It never throws: every GitHub I/O failure or unusable plan comes back as a park;
+// a slicer failure (no usable decomposition) comes back as `unsliceable` so PLAN escalates it as a size-gate escalation.
 
 import type { Octokit } from '@octokit/rest';
 
@@ -24,7 +25,13 @@ export type SliceGateOutcome =
   | { kind: 'none' }
   | { kind: 'slice'; plan: SlicePlan; slice: Slice; created: boolean }
   | { kind: 'park'; reason: string }
-  | { kind: 'over-cap'; plan: SlicePlan; reason: string };
+  | { kind: 'over-cap'; plan: SlicePlan; reason: string }
+  /** The slicer could not produce a usable slice plan, so PLAN escalates as a size-gate escalation. */
+  | { kind: 'unsliceable'; reason: string };
+
+const MAX_SLICER_REASON = 500;
+const clip = (text: string): string =>
+  text.length > MAX_SLICER_REASON ? `${text.slice(0, MAX_SLICER_REASON)}…` : text;
 
 const errorDetail = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -98,19 +105,22 @@ export async function resolveSliceGate(deps: {
   });
   const { decomposition } = decomposed;
   if (decomposition === undefined) {
-    return { kind: 'park', reason: `issue exceeds the size gate (${reasonText}) — slice decomposition failed, parked` };
+    return {
+      kind: 'unsliceable',
+      reason: `issue exceeds the size gate (${reasonText}) — slice decomposition failed (${clip(decomposed.failureReason ?? 'no decomposition returned')}), parked`,
+    };
   }
 
   const built = slicePlanFromDecomposition(issue, decomposition);
   if (!built.ok) {
     if (built.reason === 'over-cap') {
       return {
-        kind: 'park',
+        kind: 'unsliceable',
         reason: `slice decomposition produced ${built.storyCount} slices, more than the ceiling of ${SLICE_CAP_CEILING} — parked; split the issue`,
       };
     }
     return {
-      kind: 'park',
+      kind: 'unsliceable',
       reason: `issue exceeds the size gate (${reasonText}) — decomposition produced no slices, parked`,
     };
   }

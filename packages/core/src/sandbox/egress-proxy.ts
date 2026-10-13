@@ -2,7 +2,8 @@
 //
 // Forwards everything and records each distinct host. It never blocks: the evidence it gathers
 // feeds a later slice that enforces `sandbox.network.allow`. The allowlist gains the registry hosts
-// of each detected ecosystem (#2659, #2661 for .NET).
+// of each detected ecosystem (#2659, #2661 for .NET). Known telemetry hosts are classified
+// separately in the egress logs (#2664).
 
 import { readdirSync, statSync } from 'node:fs';
 import http from 'node:http';
@@ -37,10 +38,32 @@ export function isAllowedHost(host: string, allowHosts: readonly string[]): bool
   });
 }
 
+/** Known vendor telemetry hosts, same exact / `*.suffix` syntax as the allowlist (#2664). */
+export const TELEMETRY_HOST_PATTERNS: readonly string[] = [
+  'datadoghq.com',
+  '*.datadoghq.com',
+  'datadoghq.eu',
+  '*.datadoghq.eu',
+];
+
+export function isTelemetryHost(host: string): boolean {
+  return isAllowedHost(host, TELEMETRY_HOST_PATTERNS);
+}
+
+export function egressHostMessage(host: string, allowed: boolean): string {
+  const list = allowed ? 'on allowlist' : 'not on allowlist';
+  return `${host} (${isTelemetryHost(host) ? `telemetry, ${list}` : list})`;
+}
+
 export function egressSummaryMessage(hosts: readonly string[], allowHosts: readonly string[]): string {
-  const unlisted = hosts.filter((h) => !isAllowedHost(h, allowHosts)).sort();
-  if (unlisted.length === 0) return `${hosts.length} host(s) used, all on allowlist`;
-  return `${hosts.length} host(s) used, ${unlisted.length} not on allowlist: ${unlisted.join(', ')}`;
+  const notListed = hosts.filter((h) => !isAllowedHost(h, allowHosts));
+  if (notListed.length === 0) return `${hosts.length} host(s) used, all on allowlist`;
+  const telemetry = notListed.filter(isTelemetryHost).sort();
+  const unlisted = notListed.filter((h) => !isTelemetryHost(h)).sort();
+  const parts: string[] = [];
+  if (unlisted.length > 0) parts.push(`${unlisted.length} not on allowlist: ${unlisted.join(', ')}`);
+  if (telemetry.length > 0) parts.push(`${telemetry.length} telemetry not on allowlist: ${telemetry.join(', ')}`);
+  return `${hosts.length} host(s) used, ${parts.join('; ')}`;
 }
 
 /** Package ecosystems a repo can be detected as (#2659, #2661). */

@@ -5,7 +5,7 @@
 
 import type { Octokit } from '@octokit/rest';
 
-import { parseSlicePlanComment, renderSlicePlanComment } from './slice-plan.js';
+import { markSliceMerged, parseSlicePlanComment, renderSlicePlanComment } from './slice-plan.js';
 import type { SlicePlan } from './slice-plan.js';
 
 export type SlicePlanCommentLookup =
@@ -78,4 +78,35 @@ export async function upsertSlicePlanComment(deps: {
   }
   await octokit.rest.issues.updateComment({ owner, repo: name, comment_id: existing.commentId, body });
   return { commentId: existing.commentId, created: false };
+}
+
+export type SliceMergeRecordResult =
+  | { status: 'recorded'; commentId: number; index: number }
+  | { status: 'already-merged'; commentId: number; index: number }
+  | { status: 'no-plan' }
+  | { status: 'invalid'; commentId: number; error: string }
+  | { status: 'no-slice'; commentId: number };
+
+/** Marks the slice whose PR merged as merged in the trusted slice plan comment, rewriting it in place. */
+export async function recordSliceMerged(deps: {
+  octokit: Octokit;
+  repo: string;
+  issue: number;
+  prNumber: number;
+}): Promise<SliceMergeRecordResult> {
+  const { octokit, repo, issue, prNumber } = deps;
+  const lookup = await findSlicePlanComment({ octokit, repo, issue });
+  if (lookup.status === 'not-found') return { status: 'no-plan' };
+  if (lookup.status === 'invalid') return lookup;
+  const next = markSliceMerged(lookup.plan, prNumber);
+  if (next === undefined) return { status: 'no-slice', commentId: lookup.commentId };
+  if (!next.changed) return { status: 'already-merged', commentId: lookup.commentId, index: next.index };
+  const [owner, name] = splitRepo(repo);
+  await octokit.rest.issues.updateComment({
+    owner,
+    repo: name,
+    comment_id: lookup.commentId,
+    body: renderSlicePlanComment(next.plan),
+  });
+  return { status: 'recorded', commentId: lookup.commentId, index: next.index };
 }
