@@ -2,9 +2,9 @@
 //
 // Forwards everything and records each distinct host. It never blocks: the evidence it gathers
 // feeds a later slice that enforces `sandbox.network.allow`. The allowlist gains the registry hosts
-// of each detected ecosystem (#2659).
+// of each detected ecosystem (#2659, #2661 for .NET).
 
-import { statSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import { join } from 'node:path';
@@ -27,10 +27,14 @@ export interface EgressProxy {
   close(): Promise<void>;
 }
 
-// Exact match only; wildcard/suffix matching is an enforce-slice decision.
+// Exact match, plus `*.suffix` entries that match any subdomain of suffix but never suffix itself (#2661).
 export function isAllowedHost(host: string, allowHosts: readonly string[]): boolean {
   const h = host.trim().toLowerCase();
-  return allowHosts.some((a) => a.trim().toLowerCase() === h);
+  return allowHosts.some((raw) => {
+    const a = raw.trim().toLowerCase();
+    if (a === h) return true;
+    return a.startsWith('*.') && a.length > 2 && h.endsWith(a.slice(1)) && h.length > a.length - 1;
+  });
 }
 
 export function egressSummaryMessage(hosts: readonly string[], allowHosts: readonly string[]): string {
@@ -39,22 +43,38 @@ export function egressSummaryMessage(hosts: readonly string[], allowHosts: reado
   return `${hosts.length} host(s) used, ${unlisted.length} not on allowlist: ${unlisted.join(', ')}`;
 }
 
-/** Package ecosystems a repo can be detected as (#2659). */
-export type Ecosystem = 'node';
+/** Package ecosystems a repo can be detected as (#2659, #2661). */
+export type Ecosystem = 'node' | 'dotnet';
 
 /** Hosts pre-allowed for a detected ecosystem. Only the ecosystems a repo actually uses are added. */
 export const ECOSYSTEM_ALLOW_HOSTS: Readonly<Record<Ecosystem, readonly string[]>> = {
   node: ['registry.npmjs.org', 'registry.yarnpkg.com'],
+  dotnet: ['api.nuget.org', '*.nuget.org'],
 };
 
-/** A repo with a root package.json file is Node. A missing dir or unreadable path detects nothing. */
+const DOTNET_PROJECT_EXTENSIONS = ['.sln', '.slnx', '.csproj', '.fsproj', '.vbproj'];
+
+/** A root package.json file is Node; a root .sln/.slnx/.csproj/.fsproj/.vbproj file is .NET.
+ *  A missing dir or unreadable path detects nothing. */
 export function detectEcosystems(repoDir: string): Ecosystem[] {
   if (repoDir === '') return [];
+  const found: Ecosystem[] = [];
   try {
-    return statSync(join(repoDir, 'package.json')).isFile() ? ['node'] : [];
+    if (statSync(join(repoDir, 'package.json')).isFile()) found.push('node');
   } catch {
-    return [];
+    // no package.json
   }
+  try {
+    const entries = readdirSync(repoDir, { withFileTypes: true });
+    if (
+      entries.some((e) => e.isFile() && DOTNET_PROJECT_EXTENSIONS.some((ext) => e.name.toLowerCase().endsWith(ext)))
+    ) {
+      found.push('dotnet');
+    }
+  } catch {
+    // unreadable dir
+  }
+  return found;
 }
 
 /** The configured allowlist plus the hosts of every detected ecosystem, deduped case-insensitively.

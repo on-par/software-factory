@@ -269,11 +269,14 @@ describe('isSafeHttpHeaderName', () => {
   });
 });
 
-function makeRepo(kind: 'node' | 'empty' | 'pkg-dir'): string {
+function makeRepo(kind: 'node' | 'empty' | 'pkg-dir' | 'dotnet' | 'node-dotnet' | 'sln-dir'): string {
   const dir = mkdtempSync(join(tmpdir(), 'egress-eco-'));
   cleanups.push(async () => rmSync(dir, { recursive: true, force: true }));
   if (kind === 'node') writeFileSync(join(dir, 'package.json'), '{}');
   if (kind === 'pkg-dir') mkdirSync(join(dir, 'package.json'));
+  if (kind === 'dotnet' || kind === 'node-dotnet') writeFileSync(join(dir, 'App.sln'), '');
+  if (kind === 'node-dotnet') writeFileSync(join(dir, 'package.json'), '{}');
+  if (kind === 'sln-dir') mkdirSync(join(dir, 'App.sln'));
   return dir;
 }
 
@@ -309,6 +312,51 @@ describe('buildEgressAllowlist', () => {
 
   it('keeps an empty (deny-all) allowlist empty for a Node repo', () => {
     expect(buildEgressAllowlist([], makeRepo('node'))).toEqual([]);
+    expect(buildEgressAllowlist([], makeRepo('dotnet'))).toEqual([]);
+  });
+
+  it('pre-allows api.nuget.org and *.nuget.org for a .NET repo (.sln fixture)', () => {
+    const configured = ['api.anthropic.com', 'github.com'];
+    const list = buildEgressAllowlist(configured, makeRepo('dotnet'));
+    expect(list).toEqual([...configured, 'api.nuget.org', '*.nuget.org']);
+    expect(isAllowedHost('api.nuget.org', list)).toBe(true);
+    expect(isAllowedHost('globalcdn.nuget.org', list)).toBe(true);
+    expect(egressSummaryMessage(['api.nuget.org', 'globalcdn.nuget.org'], list)).toContain('all on allowlist');
+  });
+
+  it('marks globalcdn.nuget.org as on allowlist through the proxy for a .NET repo', async () => {
+    const calls: Array<[string, boolean]> = [];
+    const list = buildEgressAllowlist(['github.com'], makeRepo('dotnet'));
+    const proxy = await proxyWith(list, calls);
+    const sock = net.connect(proxy.port, '127.0.0.1');
+    sock.on('error', () => {});
+    sock.write('CONNECT globalcdn.nuget.org:443 HTTP/1.1\r\nHost: x\r\n\r\n');
+    await vi.waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    sock.destroy();
+    expect(calls).toContainEqual(['globalcdn.nuget.org', true]);
+  });
+
+  it('does not pre-allow NuGet hosts for a Node-only repo', () => {
+    const configured = ['api.anthropic.com', 'github.com'];
+    const list = buildEgressAllowlist(configured, makeRepo('node'));
+    expect(list).toEqual([...configured, 'registry.npmjs.org', 'registry.yarnpkg.com']);
+    expect(isAllowedHost('api.nuget.org', list)).toBe(false);
+    expect(isAllowedHost('globalcdn.nuget.org', list)).toBe(false);
+    expect(egressSummaryMessage(['api.nuget.org'], list)).toContain('not on allowlist: api.nuget.org');
+  });
+
+  it('adds both Node and NuGet hosts for a repo with package.json and a .sln', () => {
+    expect(buildEgressAllowlist(['github.com'], makeRepo('node-dotnet'))).toEqual([
+      'github.com',
+      'registry.npmjs.org',
+      'registry.yarnpkg.com',
+      'api.nuget.org',
+      '*.nuget.org',
+    ]);
+  });
+
+  it('does not duplicate a configured *.nuget.org', () => {
+    expect(buildEgressAllowlist(['*.NuGet.org'], makeRepo('dotnet'))).toEqual(['*.NuGet.org']);
   });
 
   it('does not duplicate a registry already configured, in any casing', () => {
@@ -328,5 +376,40 @@ describe('detectEcosystems', () => {
     expect(detectEcosystems(makeRepo('empty'))).toEqual([]);
     expect(detectEcosystems(join(tmpdir(), 'egress-eco-missing-dir'))).toEqual([]);
     expect(detectEcosystems(makeRepo('pkg-dir'))).toEqual([]);
+  });
+});
+
+describe('detectEcosystems (.NET)', () => {
+  it.each(['App.sln', 'App.slnx', 'App.csproj', 'App.fsproj', 'App.vbproj', 'APP.SLN'])(
+    'detects dotnet from a root %s file',
+    (name) => {
+      const dir = makeRepo('empty');
+      writeFileSync(join(dir, name), '');
+      expect(detectEcosystems(dir)).toEqual(['dotnet']);
+    },
+  );
+
+  it('detects node and dotnet for a mixed repo', () => {
+    expect(detectEcosystems(makeRepo('node-dotnet'))).toEqual(['node', 'dotnet']);
+  });
+
+  it('does not detect dotnet for a .sln directory or a nested csproj', () => {
+    expect(detectEcosystems(makeRepo('sln-dir'))).toEqual([]);
+    const dir = makeRepo('empty');
+    mkdirSync(join(dir, 'src', 'App'), { recursive: true });
+    writeFileSync(join(dir, 'src', 'App', 'App.csproj'), '');
+    expect(detectEcosystems(dir)).toEqual([]);
+  });
+});
+
+describe('isAllowedHost wildcard', () => {
+  it('matches *. wildcard entries against subdomains only', () => {
+    expect(isAllowedHost('globalcdn.nuget.org', ['*.nuget.org'])).toBe(true);
+    expect(isAllowedHost('a.b.nuget.org', ['*.NuGet.org'])).toBe(true);
+    expect(isAllowedHost('nuget.org', ['*.nuget.org'])).toBe(false);
+    expect(isAllowedHost('evilnuget.org', ['*.nuget.org'])).toBe(false);
+    expect(isAllowedHost('x.com', ['*'])).toBe(false);
+    expect(isAllowedHost('x.com', ['*.'])).toBe(false);
+    expect(isAllowedHost('afoo.com', ['*foo.com'])).toBe(false);
   });
 });
