@@ -20,8 +20,9 @@ for arg in "$@"; do
   fi
 done
 
-# 1 keeps the run serial, as before; the factory host relies on it. Set
-# FACTORY_TEST_MAX_WORKERS=N to run test files in parallel with N workers.
+# The repo default (npm test / CI) is 4 workers. verify.sh opts out to 1 (serial)
+# by default because the shared factory host runs at very high load. Set
+# FACTORY_TEST_MAX_WORKERS=N to override.
 export FACTORY_TEST_MAX_WORKERS="${FACTORY_TEST_MAX_WORKERS:-1}"
 echo "verify: FACTORY_TEST_MAX_WORKERS=${FACTORY_TEST_MAX_WORKERS}"
 
