@@ -20,6 +20,8 @@ import { isCommandAvailable } from '../models/index.js';
 import { claudeConfigDirOverride } from '../utils/claude-config.js';
 import { shellEscape } from '../utils/index.js';
 
+import { buildEgressAllowlist } from './egress-proxy.js';
+
 export type SandboxRuntime = 'sandbox-exec' | 'firejail' | 'docker-sandbox' | 'none';
 
 /** The configurable form of SandboxRuntime: the concrete runtimes plus 'auto',
@@ -201,7 +203,7 @@ export function resolveSandboxPolicy(
     worktree: opts.worktree,
     writablePaths,
     writableFilePrefixes,
-    allowHosts: cfg.network.allow,
+    allowHosts: buildEgressAllowlist(cfg.network.allow, opts.repoRoot),
     cpuMs: cfg.resources.cpuMs,
     memMb: cfg.resources.memMb,
   };

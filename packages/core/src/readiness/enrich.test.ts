@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { FACTORY_TASK_REQUIRED_FIELDS } from './index.js';
+import { FACTORY_TASK_REQUIRED_FIELDS, scoreIssueReadiness } from './index.js';
 import {
   buildReadinessEnrichmentPrompt,
   buildReadinessEnrichmentRetryPrompt,
   buildReadinessGapPrompt,
   composeEnrichedIssueBody,
+  scoreEnrichedIssueReadiness,
   stripEnrichedBlock,
   parseReadinessGapOutput,
 } from './enrich.js';
@@ -145,5 +146,65 @@ describe('composeEnrichedIssueBody / stripEnrichedBlock', () => {
     const out = composeEnrichedIssueBody('', 'sections');
     expect(out.startsWith(START)).toBe(true);
     expect(out.endsWith(END)).toBe(true);
+  });
+});
+
+const acs = (n: number) => Array.from({ length: n }, (_, i) => `- [ ] Criterion ${i + 1}`).join('\n');
+const originalFiveAcs = `## Problem statement
+The import queue stalls under load.
+
+## In scope
+- Item 1
+
+## Out of scope
+Changing the queue API.
+
+## Acceptance criteria
+${acs(5)}`;
+const expandedEightAcs = `## Problem statement
+The import queue stalls under load.
+
+## In scope
+- Item 1
+
+## Out of scope
+Changing the queue API.
+
+## Acceptance criteria (expanded)
+${acs(8)}
+
+## Verification
+npm run test`;
+
+describe('scoreEnrichedIssueReadiness (#2660)', () => {
+  it('equals scoreIssueReadiness when there is no enriched marker', () => {
+    const input = { title: 'Harden the queue', body: originalFiveAcs };
+    expect(scoreEnrichedIssueReadiness(input)).toEqual(scoreIssueReadiness(input));
+    expect(scoreEnrichedIssueReadiness({ title: 'x', body: '' })).toEqual(
+      scoreIssueReadiness({ title: 'x', body: '' }),
+    );
+  });
+
+  it('scores the enriched sections when the heading only prefix-matches the original', () => {
+    const body = composeEnrichedIssueBody(originalFiveAcs, expandedEightAcs);
+    const title = 'Harden the queue';
+    expect(scoreIssueReadiness({ title, body }).sizeOk).toBe(true);
+    const result = scoreEnrichedIssueReadiness({ title, body });
+    expect(result.pass).toBe(true);
+    expect(result.sizeOk).toBe(false);
+    expect(result.sizeReason).toContain('8 acceptance criteria');
+  });
+
+  it('falls back to the full body when the block fails readiness on its own', () => {
+    const body = composeEnrichedIssueBody(originalFiveAcs, '## Verification\nnpm test');
+    const input = { title: 'Harden the queue', body };
+    expect(scoreEnrichedIssueReadiness(input)).toEqual(scoreIssueReadiness(input));
+  });
+
+  it('scores the sections after an unterminated start marker', () => {
+    const body = `${originalFiveAcs}\n\n<!-- factory:enriched -->\n${expandedEightAcs}`;
+    const result = scoreEnrichedIssueReadiness({ title: 'Harden the queue', body });
+    expect(result.sizeOk).toBe(false);
+    expect(result.sizeReason).toContain('8 acceptance criteria');
   });
 });

@@ -2455,7 +2455,13 @@ export async function shipIssue(
   const maxSlices = opts.maxSlices ?? resolveSizeGateMaxSlices(factoryConfig);
   // ADR-0147: slice k >= 2 builds on its own branch, so read the slice plan before the worktree exists.
   let sliceIndex: number | undefined;
-  if (sizeGateMode === 'slice' && !ctx?.localOnly && !ctx?.resumeFrom && work.kind === GITHUB_ISSUE_SOURCE) {
+  // ADR-0161: stack runs as slice until stacked PRs are built.
+  if (
+    (sizeGateMode === 'slice' || sizeGateMode === 'stack') &&
+    !ctx?.localOnly &&
+    !ctx?.resumeFrom &&
+    work.kind === GITHUB_ISSUE_SOURCE
+  ) {
     try {
       const lookup = await findSlicePlanComment({ octokit, repo: ghRepo, issue: issueNum });
       if (lookup.status === 'found') sliceIndex = currentSlice(lookup.plan)?.index;
@@ -7070,7 +7076,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     )
     .option(
       '--size-gate <mode>',
-      'Size gate mode for this run: file (file child issues / park), slice (ship as sequential slice PRs under the same issue; never files issues) or off (skip both gates); beats sizeGate.mode in the config',
+      'Size gate mode for this run: file (file child issues / park), slice (ship as sequential slice PRs under the same issue; never files issues), off (skip both gates) or stack (stacked PR set, ADR-0161; runs as slice until stacks are built); beats sizeGate.mode in the config',
     )
     .option(
       '--max-slices <count>',

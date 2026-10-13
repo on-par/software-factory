@@ -1,10 +1,13 @@
 // src/sandbox/egress-proxy.ts — report-only HTTP CONNECT proxy for sandboxed agent egress (#2214).
 //
 // Forwards everything and records each distinct host. It never blocks: the evidence it gathers
-// feeds a later slice that enforces `sandbox.network.allow`.
+// feeds a later slice that enforces `sandbox.network.allow`. The allowlist gains the registry hosts
+// of each detected ecosystem (#2659).
 
+import { statSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
+import { join } from 'node:path';
 import type { Duplex } from 'node:stream';
 
 export interface EgressProxyOptions {
@@ -34,6 +37,37 @@ export function egressSummaryMessage(hosts: readonly string[], allowHosts: reado
   const unlisted = hosts.filter((h) => !isAllowedHost(h, allowHosts)).sort();
   if (unlisted.length === 0) return `${hosts.length} host(s) used, all on allowlist`;
   return `${hosts.length} host(s) used, ${unlisted.length} not on allowlist: ${unlisted.join(', ')}`;
+}
+
+/** Package ecosystems a repo can be detected as (#2659). */
+export type Ecosystem = 'node';
+
+/** Hosts pre-allowed for a detected ecosystem. Only the ecosystems a repo actually uses are added. */
+export const ECOSYSTEM_ALLOW_HOSTS: Readonly<Record<Ecosystem, readonly string[]>> = {
+  node: ['registry.npmjs.org', 'registry.yarnpkg.com'],
+};
+
+/** A repo with a root package.json file is Node. A missing dir or unreadable path detects nothing. */
+export function detectEcosystems(repoDir: string): Ecosystem[] {
+  if (repoDir === '') return [];
+  try {
+    return statSync(join(repoDir, 'package.json')).isFile() ? ['node'] : [];
+  } catch {
+    return [];
+  }
+}
+
+/** The configured allowlist plus the hosts of every detected ecosystem, deduped case-insensitively.
+ *  An empty configured list means deny-all and is returned unchanged. */
+export function buildEgressAllowlist(configured: readonly string[], repoDir: string): string[] {
+  const out = [...configured];
+  if (out.length === 0) return out;
+  for (const eco of detectEcosystems(repoDir)) {
+    for (const host of ECOSYSTEM_ALLOW_HOSTS[eco]) {
+      if (!isAllowedHost(host, out)) out.push(host);
+    }
+  }
+  return out;
 }
 
 function parseAuthority(target: string): { host: string; port: number } | undefined {

@@ -1,7 +1,8 @@
 import { z } from 'zod';
 
+import type { ReadinessInfo } from '../types/index.js';
 import { extractJsonObject } from './decompose.js';
-import { FACTORY_TASK_REQUIRED_FIELDS } from './index.js';
+import { FACTORY_TASK_REQUIRED_FIELDS, scoreIssueReadiness } from './index.js';
 
 export interface ReadinessEnrichmentInput {
   title: string;
@@ -38,6 +39,25 @@ export function stripEnrichedBlock(body: string): string {
     start = result.indexOf(ENRICHED_START);
   }
   return result;
+}
+
+/** Text of the last factory:enriched block (unterminated runs to the end), minus the factory heading; null when there is no marker. */
+function extractEnrichedSections(body: string): string | null {
+  const start = body.lastIndexOf(ENRICHED_START);
+  if (start < 0) return null;
+  const from = start + ENRICHED_START.length;
+  const end = body.indexOf(ENRICHED_END, from);
+  const inner = body.slice(from, end < 0 ? undefined : end).trim();
+  return (inner.startsWith(ENRICHED_HEADING) ? inner.slice(ENRICHED_HEADING.length) : inner).trim();
+}
+
+/** Readiness for PLAN's size gate: the factory:enriched sections win over the original text when they pass on their own (#2660). */
+export function scoreEnrichedIssueReadiness(input: { title: string; body: string }): ReadinessInfo {
+  const full = scoreIssueReadiness(input);
+  const sections = extractEnrichedSections(input.body ?? '');
+  if (sections === null) return full;
+  const enriched = scoreIssueReadiness({ title: input.title, body: sections });
+  return enriched.template === 'factory-task' && enriched.pass ? enriched : full;
 }
 
 /** Original issue text verbatim, then one replaceable factory:enriched block holding the enriched sections. */

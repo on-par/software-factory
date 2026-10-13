@@ -1,9 +1,15 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  buildEgressAllowlist,
+  detectEcosystems,
+  ECOSYSTEM_ALLOW_HOSTS,
   egressSummaryMessage,
   isAllowedHost,
   isSafeHttpHeaderName,
@@ -260,5 +266,67 @@ describe('isSafeHttpHeaderName', () => {
     expect(isSafeHttpHeaderName('bad:name')).toBe(false);
     expect(isSafeHttpHeaderName('__proto__')).toBe(false);
     expect(isSafeHttpHeaderName('constructor')).toBe(false);
+  });
+});
+
+function makeRepo(kind: 'node' | 'empty' | 'pkg-dir'): string {
+  const dir = mkdtempSync(join(tmpdir(), 'egress-eco-'));
+  cleanups.push(async () => rmSync(dir, { recursive: true, force: true }));
+  if (kind === 'node') writeFileSync(join(dir, 'package.json'), '{}');
+  if (kind === 'pkg-dir') mkdirSync(join(dir, 'package.json'));
+  return dir;
+}
+
+describe('buildEgressAllowlist', () => {
+  it('pre-allows the npm and yarn registries for a Node repo (package.json fixture)', () => {
+    const list = buildEgressAllowlist(['api.anthropic.com', 'github.com'], makeRepo('node'));
+    expect(list).toEqual(['api.anthropic.com', 'github.com', 'registry.npmjs.org', 'registry.yarnpkg.com']);
+    expect(isAllowedHost('registry.npmjs.org', list)).toBe(true);
+  });
+
+  it('marks registry.yarnpkg.com as on allowlist through the proxy for a Node repo', async () => {
+    const calls: Array<[string, boolean]> = [];
+    const list = buildEgressAllowlist(['github.com'], makeRepo('node'));
+    const proxy = await proxyWith(list, calls);
+    // onHost fires before the upstream connect, so don't wait on real DNS: hang up once it has fired.
+    const sock = net.connect(proxy.port, '127.0.0.1');
+    sock.on('error', () => {});
+    sock.write('CONNECT registry.yarnpkg.com:443 HTTP/1.1\r\nHost: x\r\n\r\n');
+    await vi.waitFor(() => expect(calls.length).toBeGreaterThan(0));
+    sock.destroy();
+    expect(calls).toContainEqual(['registry.yarnpkg.com', true]);
+    expect(egressSummaryMessage([...ECOSYSTEM_ALLOW_HOSTS.node], list)).toContain('all on allowlist');
+  });
+
+  it('does not pre-allow registries for a repo without package.json', () => {
+    const configured = ['api.anthropic.com', 'github.com'];
+    for (const dir of [makeRepo('empty'), join(tmpdir(), 'egress-eco-missing-dir'), '']) {
+      const list = buildEgressAllowlist(configured, dir);
+      expect(list).toEqual(configured);
+      expect(isAllowedHost('registry.npmjs.org', list)).toBe(false);
+    }
+  });
+
+  it('keeps an empty (deny-all) allowlist empty for a Node repo', () => {
+    expect(buildEgressAllowlist([], makeRepo('node'))).toEqual([]);
+  });
+
+  it('does not duplicate a registry already configured, in any casing', () => {
+    expect(buildEgressAllowlist(['Registry.NPMJS.org'], makeRepo('node'))).toEqual([
+      'Registry.NPMJS.org',
+      'registry.yarnpkg.com',
+    ]);
+  });
+});
+
+describe('detectEcosystems', () => {
+  it('detects node from a root package.json file', () => {
+    expect(detectEcosystems(makeRepo('node'))).toEqual(['node']);
+  });
+
+  it('detects nothing for an empty dir, a missing dir, or a package.json directory', () => {
+    expect(detectEcosystems(makeRepo('empty'))).toEqual([]);
+    expect(detectEcosystems(join(tmpdir(), 'egress-eco-missing-dir'))).toEqual([]);
+    expect(detectEcosystems(makeRepo('pkg-dir'))).toEqual([]);
   });
 });
