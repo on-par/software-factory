@@ -4,7 +4,7 @@ On PAR Dev's Software Factory is a local CLI that takes a GitHub issue through p
 
 Built in TypeScript. Routes work across Claude and Codex, with experimental local models through Ollama, and logs cost per task.
 
-![On PAR Dev's Software Factory running a Sound Buddy lane (sped up)](https://raw.githubusercontent.com/on-par/software-factory/main/docs/assets/factory-run.gif)
+![On PAR Dev's Software Factory running a lane on a real product repo (sped up)](https://raw.githubusercontent.com/on-par/software-factory/main/docs/assets/factory-run.gif)
 
 For an example of its output, see [#2288](https://github.com/on-par/software-factory/pull/2288): the factory planned and built issue #2269 (`factory cost --json`), ran its checkers (7 pass, 1 rework round), opened the PR with an evidence pack comment, and CI passed. Merging was a separate step.
 
@@ -79,7 +79,7 @@ To run unattended, the factory starts agent CLIs with their permission prompts t
 
 Each build runs in a separate git worktree (under `~/.factory/worktrees/<owner>/<repo>/` on a `factory/` branch; set `worktree.parent` to move it and `--branch-prefix` to change the prefix), never in your main checkout. Where available, agent runs are wrapped in an OS sandbox (`sandbox-exec` on macOS, `firejail` on Linux). `factory doctor` warns when no sandbox runtime is found. The agents still run as you, with your file permissions and your GitHub token, and builds run the target repo's tests and install its dependencies. Only point the factory at repos and issues you trust.
 
-The factory never merges by default. `factory ship` and `factory run-issue` never merge; they stop at the PR, which is marked ready for review once CI passes. `factory run` and `factory supervise` merge only if you turn auto-merge on (`FACTORY_MERGE=1`, `run.merge.auto: true`, or `--auto-merge`). `FACTORY_MERGE_ADMIN=1` lets the token merge through unmet branch protection; use it only on purpose. Full rules: [docs/config.example.yaml](docs/config.example.yaml).
+The factory never merges by default. `factory ship` and `factory run-issue` never merge; they stop at the PR, which is marked ready for review once CI passes. `factory run` and `factory supervise` merge only if you turn auto-merge on (`FACTORY_MERGE=1`, `run.merge.auto: true`, or `--auto-merge`). `FACTORY_MERGE_ADMIN=1` lets the token merge through unmet branch protection; set it only when you mean to. Full rules: [docs/config.example.yaml](docs/config.example.yaml).
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
@@ -91,7 +91,7 @@ factory --version
 factory doctor
 ```
 
-Older Node versions are refused with a clear message. `factory doctor` checks git, your git identity (`user.name` and `user.email`, which commits need; set them with `git config --global`, or repo-local `git config` in the target repo works too), your coding agent CLI, `gh` auth, the GitHub token, npm and the sandbox, and prints a fix for anything missing. It works from any directory, including outside a repo. To run from a clone instead, see [CONTRIBUTING.md](CONTRIBUTING.md).
+On older Node versions, the CLI stops and tells you which version it needs. `factory doctor` checks git, your git identity (`user.name` and `user.email`, which commits need; set them with `git config --global`, or repo-local `git config` in the target repo works too), your coding agent CLI, `gh` auth, the GitHub token, npm and the sandbox, and prints a fix for anything missing. It works from any directory, including outside a repo. To run from a clone instead, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 **Step 2: Point it at your repo**
 
@@ -100,7 +100,7 @@ cd /path/to/your/repo        # any git repo with a GitHub remote and open issues
 factory init                 # creates .factory/ (config.yaml, constitution.md, .gitignore, state/)
 ```
 
-`factory init` seeds `.factory/constitution.md` from the bundled `default-code` constitution and adds `.factory/` to `.git/info/exclude`. So `.factory/` is local to this clone. It is not committed and does not travel with the repo, so copy it yourself to another machine or clone. Every run reads `.factory/constitution.md` from this main checkout, including builds that run in a lane worktree.
+`factory init` seeds `.factory/constitution.md` from the bundled `default-code` constitution and adds `.factory/` to `.git/info/exclude`. That keeps `.factory/` local to this clone. It isn't committed, so copy it yourself if you work from another machine or clone. Every run reads `.factory/constitution.md` from this main checkout, including builds that run in a lane worktree.
 
 **Step 3 (optional): Pick a different constitution**
 

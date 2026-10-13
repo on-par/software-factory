@@ -294,3 +294,47 @@ describe('README update and setup guard self-test', () => {
     expect(gitIdentityProblems('')).toHaveLength(1);
   });
 });
+
+const OLD_WORDING = [
+  'Older Node versions are refused with a clear message.',
+  'So `.factory/` is local to this clone',
+  'use it only on purpose',
+  'running a Sound Buddy lane',
+];
+const NEW_ROOT_WORDING = [
+  'On older Node versions, the CLI stops and tells you which version it needs.',
+  "That keeps `.factory/` local to this clone. It isn't committed, so copy it yourself if you work from another machine or clone.",
+  'set it only when you mean to.',
+  'running a lane on a real product repo (sped up)',
+];
+const GIF_ALT = 'running a lane on a real product repo (sped up)';
+
+function wordingProblems(text: string, oldList: string[], newList: string[]): string[] {
+  const problems: string[] = [];
+  for (const old of oldList) if (text.includes(old)) problems.push(`still says: ${old}`);
+  for (const want of newList) if (!text.includes(want)) problems.push(`missing: ${want}`);
+  return problems;
+}
+
+describe('README wording', () => {
+  it('Step 1 and Step 2 use the reworded Node and .factory/ text', () => {
+    expect(wordingProblems(rootReadme, OLD_WORDING.slice(0, 2), NEW_ROOT_WORDING.slice(0, 2))).toEqual([]);
+  });
+
+  it('Safety and GIF alt text use the reworded text in both READMEs', () => {
+    expect(wordingProblems(rootReadme, OLD_WORDING.slice(2), NEW_ROOT_WORDING.slice(2))).toEqual([]);
+    expect(wordingProblems(cliReadme, OLD_WORDING, [GIF_ALT])).toEqual([]);
+  });
+});
+
+describe('README wording guard self-test', () => {
+  it('rejects the pre-fix wording', () => {
+    const problems = wordingProblems(OLD_WORDING.join('\n'), OLD_WORDING, NEW_ROOT_WORDING);
+    for (const old of OLD_WORDING) expect(problems).toContain(`still says: ${old}`);
+    for (const want of NEW_ROOT_WORDING) expect(problems).toContain(`missing: ${want}`);
+  });
+
+  it('reports missing wording on an empty README', () => {
+    expect(wordingProblems('', OLD_WORDING, [GIF_ALT])).toEqual([`missing: ${GIF_ALT}`]);
+  });
+});
