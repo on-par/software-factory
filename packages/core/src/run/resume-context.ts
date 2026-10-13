@@ -5,12 +5,16 @@
 // #2320 (resume at BUILD) extends this same record and store.
 
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
+import { lintFactoryConfig } from '../config/config-lint.js';
 import { parseDesignArtifact } from '../design/index.js';
+import type { EnvironmentFailure } from '../phases/check.js';
 import type { PlanResult } from '../phases/plan.js';
 import { readSpec } from '../spec/index.js';
+import type { Constitution } from '../types/index.js';
 
 export interface PlanReuseRecord {
   /** issueBodyHash of the brief the frozen spec was planned from. */
@@ -76,4 +80,106 @@ export function createPlanReuseStore(specPath: string): PlanReuseStore {
       await rm(path, { force: true });
     },
   };
+}
+
+/** Where a kept build resumes at CHECK after a config/environment release (#2564). */
+export interface CheckResumeRecord {
+  issue: number;
+  branch: string;
+  /** Absolute path of the kept lane worktree. */
+  worktree: string;
+  /** build.diffBase from the original run (undefined when BUILD reported none). */
+  diffBase?: string;
+  route: 'codex' | 'claude' | 'opencode';
+  /** build.model of the original run, reused as CHECK's reworkModel. */
+  model: string;
+  /** Whole minutes from PLAN start to BUILD end in the original run, at least 1. */
+  buildMinutes: number;
+  /** What the user must fix, e.g. `.factory/constitution.md:14`. */
+  fixTarget: string;
+  preservedAt: string;
+}
+
+export interface CheckResumeStore {
+  /** ENOENT, malformed JSON or a wrong shape → null. */
+  load(): Promise<CheckResumeRecord | null>;
+  record(entry: CheckResumeRecord): Promise<void>;
+  /** Deletes the record; a missing file is not an error. */
+  clear(): Promise<void>;
+}
+
+/** The sidecar next to the frozen spec: issue-N.md → issue-N.check-resume.json. */
+export function checkResumePath(specPath: string): string {
+  return specPath.endsWith('.md') ? `${specPath.slice(0, -3)}.check-resume.json` : `${specPath}.check-resume.json`;
+}
+
+export function createCheckResumeStore(specPath: string): CheckResumeStore {
+  const path = checkResumePath(specPath);
+  return {
+    async load() {
+      let stored: unknown;
+      try {
+        stored = JSON.parse(await readFile(path, 'utf-8'));
+      } catch (err) {
+        if (isEnoent(err) || err instanceof SyntaxError) return null;
+        throw err;
+      }
+      if (typeof stored !== 'object' || stored === null) return null;
+      const r = stored as Record<string, unknown>;
+      if (
+        typeof r.branch !== 'string' ||
+        typeof r.worktree !== 'string' ||
+        typeof r.route !== 'string' ||
+        typeof r.model !== 'string' ||
+        typeof r.buildMinutes !== 'number'
+      ) {
+        return null;
+      }
+      return stored as CheckResumeRecord;
+    },
+    async record(entry) {
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, `${JSON.stringify(entry, null, 2)}\n`);
+    },
+    async clear() {
+      await rm(path, { force: true });
+    },
+  };
+}
+
+export function formatPreservedBuildMessage(opts: {
+  issue: number;
+  branch: string;
+  buildMinutes: number;
+  fixTarget: string;
+}): string {
+  return `${opts.buildMinutes} min of build preserved at ${opts.branch}; fix ${opts.fixTarget} then run factory resume ${opts.issue} --from check`;
+}
+
+/** The file:line (or description) the user must fix before resuming CHECK. */
+export function preservedFixTarget(
+  failure: Pick<EnvironmentFailure, 'cause' | 'failingChecks' | 'logPaths'>,
+  constitution: Constitution | null,
+  configFile?: { absPath: string; relPath: string },
+): string {
+  if (failure.cause === 'config') {
+    const { findings } = lintFactoryConfig({ constitution, configFile });
+    const withLine = findings.find((f) => f.line !== undefined);
+    if (withLine) return `${withLine.file}:${withLine.line}`;
+    if (findings.length > 0) return findings[0].file;
+    if (!constitution) return 'the constitution checkers list';
+    const file =
+      constitution.repoInstance?.absPath ?? (constitution.source === 'bundled' ? constitution.path : undefined);
+    const display = constitution.repoInstance?.relPath ?? constitution.path;
+    if (!file) return display;
+    let lines: string[] = [];
+    try {
+      lines = readFileSync(file, 'utf-8').split('\n');
+    } catch {
+      return display;
+    }
+    const idx = lines.findIndex((l) => /^\s*checkers\s*:/.test(l));
+    return idx >= 0 ? `${display}:${idx + 1}` : display;
+  }
+  return failure.logPaths?.[0] ?? `the base (failing: ${failure.failingChecks.join(', ')})`;
 }

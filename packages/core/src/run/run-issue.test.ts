@@ -25,7 +25,7 @@ import type { WorkRequest } from '../work/index.js';
 import { LaneFileGuard } from './lane-file-guard.js';
 import type { RunPolicy } from './policy.js';
 import type { Environment, Workspace } from './ports.js';
-import { createPlanReuseStore, issueBodyHash, type PlanReuseStore } from './resume-context.js';
+import { createPlanReuseStore, issueBodyHash, type CheckResumeStore, type PlanReuseStore } from './resume-context.js';
 import { writeSpec } from '../spec/index.js';
 import { preflightConfigTokens } from '../config/template-tokens.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
@@ -2254,5 +2254,118 @@ describe('runIssue — config template-token preflight (#2586)', () => {
     );
     expect(outcome.state).toBe('ready');
     expect(planPhase).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('runIssue — preserved build on a non-code CHECK failure (#2564)', () => {
+  const ENV = {
+    baseSha: 'abc1234567890def',
+    failingChecks: ['tests'],
+    cause: 'environment' as const,
+    logPaths: ['/logs/a.log'],
+  };
+  const ENV_FAIL: CheckPhaseResult = { passed: false, summary: CHECK_SUMMARY, reworkRounds: 0, environment: ENV };
+  const fakeStore = () => ({
+    load: vi.fn<CheckResumeStore['load']>().mockResolvedValue(null),
+    record: vi.fn<CheckResumeStore['record']>().mockResolvedValue(undefined),
+    clear: vi.fn<CheckResumeStore['clear']>().mockResolvedValue(undefined),
+  });
+  const RESUME = {
+    phase: 'check' as const,
+    diffBase: 'base123',
+    route: 'claude' as const,
+    model: 'rec-model',
+    buildMinutes: 33,
+  };
+
+  it('appends minutes, branch, file:line and the resume command to environment-released', async () => {
+    vi.mocked(buildPhase).mockResolvedValue({ ...BUILD_OK, diffBase: 'd1', model: 'bm', route: 'claude' });
+    vi.mocked(checkPhase).mockResolvedValue(ENV_FAIL);
+    const checkResume = fakeStore();
+    const log = vi.fn();
+    const outcome = await runIssue(
+      baseRequest({ issue: 42 }),
+      basePolicy(),
+      basePorts({ checkResume, events: () => log }),
+    );
+    expect(outcome).toMatchObject({ state: 'released', buildPreserved: true });
+    expect(checkResume.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        issue: 42,
+        branch: 'issue-1-fix-the-thing',
+        worktree: '/tmp/wt',
+        diffBase: 'd1',
+        route: 'claude',
+        model: 'bm',
+        fixTarget: '/logs/a.log',
+      }),
+    );
+    expect(checkResume.record.mock.calls[0][0].buildMinutes).toBeGreaterThanOrEqual(1);
+    const released = log.mock.calls.find((c) => c[0] === 'environment-released');
+    expect(released?.[1]).toMatch(/\d+ min of build preserved at .+; fix .+ then run factory resume 42 --from check/);
+  });
+
+  it('records nothing on a local-only run, and without the port', async () => {
+    vi.mocked(checkPhase).mockResolvedValue(ENV_FAIL);
+    const checkResume = fakeStore();
+    const local = await runIssue(baseRequest({ localOnly: true }), basePolicy(), basePorts({ checkResume }));
+    expect(local).not.toHaveProperty('buildPreserved');
+    expect(checkResume.record).not.toHaveBeenCalled();
+    const none = await runIssue(baseRequest(), basePolicy(), basePorts());
+    expect(none).not.toHaveProperty('buildPreserved');
+  });
+
+  it('does not preserve when recording fails', async () => {
+    vi.mocked(checkPhase).mockResolvedValue(ENV_FAIL);
+    const checkResume = fakeStore();
+    checkResume.record.mockRejectedValue(new Error('disk full'));
+    const log = vi.fn();
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ checkResume, events: () => log }));
+    expect(outcome).toMatchObject({ state: 'released' });
+    expect(outcome).not.toHaveProperty('buildPreserved');
+    expect(log.mock.calls.some((c) => c[0] === 'environment_warning' && /check-resume/.test(c[1]))).toBe(true);
+  });
+
+  it('resumeFrom check skips planPhase and buildPhase and feeds CHECK the recorded diffBase, route and model', async () => {
+    const checkResume = fakeStore();
+    const router = fakeRouter();
+    const resolveSpy = vi.spyOn(router, 'run');
+    const outcome = await runIssue(
+      baseRequest({ resumeFrom: RESUME }),
+      basePolicy(),
+      basePorts({ checkResume, router }),
+    );
+    expect(outcome.state).toBe('ready');
+    expect(planPhase).not.toHaveBeenCalled();
+    expect(buildPhase).not.toHaveBeenCalled();
+    expect(resolveSpy).not.toHaveBeenCalled();
+    expect(vi.mocked(checkPhase).mock.calls[0][0]).toMatchObject({
+      diffBase: 'base123',
+      reworkRoute: 'claude',
+      reworkModel: 'rec-model',
+    });
+    expect(checkResume.clear).toHaveBeenCalled();
+  });
+
+  it('a resumed run that is released again re-records with the original buildMinutes', async () => {
+    vi.mocked(checkPhase).mockResolvedValue(ENV_FAIL);
+    const checkResume = fakeStore();
+    const outcome = await runIssue(baseRequest({ resumeFrom: RESUME }), basePolicy(), basePorts({ checkResume }));
+    expect(outcome).toMatchObject({ state: 'released', buildPreserved: true });
+    expect(checkResume.record).toHaveBeenCalledWith(expect.objectContaining({ buildMinutes: 33, diffBase: 'base123' }));
+    expect(checkResume.clear).not.toHaveBeenCalled();
+  });
+
+  it('a code-caused CHECK failure parks as before and records no check-resume point', async () => {
+    vi.mocked(checkPhase).mockResolvedValue({
+      passed: false,
+      summary: { ...CHECK_SUMMARY, failures: 1 },
+      reworkRounds: 1,
+    });
+    const checkResume = fakeStore();
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ checkResume }));
+    expect(outcome.state).toBe('parked');
+    expect(checkResume.record).not.toHaveBeenCalled();
+    expect(checkResume.clear).not.toHaveBeenCalled();
   });
 });

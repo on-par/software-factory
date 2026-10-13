@@ -344,6 +344,11 @@ const INTERNAL_API_KEYS = [
   'createPlanReuseStore',
   'issueBodyHash',
   'planReusePath',
+  // Check-resume record (#2564)
+  'checkResumePath',
+  'createCheckResumeStore',
+  'formatPreservedBuildMessage',
+  'preservedFixTarget',
   // Garden harvest (#2083)
   'DEFAULT_GARDEN_MAX_CLUSTERS',
   'DEFAULT_GARDEN_SINCE',

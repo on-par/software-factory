@@ -44,6 +44,8 @@ export type RunOutcome =
       baseSha: string;
       failingChecks: string[];
       failureSignature?: string;
+      /** BUILD output was kept and a check-resume record written (#2564). */
+      buildPreserved?: boolean;
     }
   | { state: 'escalated'; reason: string; route?: BuildRoute; branch?: string; reworkRounds?: number };
 

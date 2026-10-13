@@ -8,6 +8,7 @@
 //   5. exactly one terminal event sequence is emitted per run, matching the returned RunOutcome
 //      (including the non-park `released` exit for an environment-caused CHECK failure, #1928).
 // PLAN may be skipped by the planReuse port after an environment release (#2340).
+// CHECK may be resumed on a kept worktree via request.resumeFrom after an environment release (#2564).
 // A config preflight (#2586) rejects unfilled template tokens before base health and PLAN.
 //
 // Path-bound CLI concerns (Octokit, worktree/environment provisioning, the events sink,
@@ -29,7 +30,7 @@ import {
 } from '../phases/check.js';
 import { describeConstitutionSource } from '../constitutions/index.js';
 import { lintFactoryConfig } from '../config/config-lint.js';
-import { planPhase as planPhaseDefault } from '../phases/plan.js';
+import { planPhase as planPhaseDefault, type PlanResult } from '../phases/plan.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
 import { upsertSlicePlanComment } from '../readiness/slice-plan-github.js';
 import { withSliceState } from '../readiness/slice-plan.js';
@@ -71,7 +72,13 @@ import type { LaneFileGuard } from './lane-file-guard.js';
 import { touchedFilesFrom } from './lane-file-guard.js';
 import { parkReasonFor, type BuildRoute, type ParkReason, type RunOutcome } from './outcome.js';
 import type { RunPolicy } from './policy.js';
-import { issueBodyHash, type PlanReuseStore } from './resume-context.js';
+import {
+  formatPreservedBuildMessage,
+  issueBodyHash,
+  preservedFixTarget,
+  type CheckResumeStore,
+  type PlanReuseStore,
+} from './resume-context.js';
 import type { Environment, Workspace } from './ports.js';
 
 /** Everything one run needs decided, as a plain resolved value — the CLI adapter
@@ -123,6 +130,8 @@ export interface RunRequest {
   processGroupGraceMs: number;
   /** Repo config pins the build route; forced after PLAN so the frozen spec stays authoritative. */
   preferredRoute?: BuildRoute;
+  /** Resume at CHECK on a kept worktree (#2564): PLAN and BUILD are skipped. */
+  resumeFrom?: { phase: 'check'; diffBase?: string; route: BuildRoute; model: string; buildMinutes: number };
   /** Resolved factory-state paths shipPhase reads/writes directly (unchanged from today —
    *  shipPhase's own surface already takes plain path strings, not a path-resolution port). */
   eventsFile?: string;
@@ -222,6 +231,8 @@ export interface RunPorts {
   checkBaseHealth?: typeof checkBaseHealth;
   /** Frozen-plan reuse after an environment release (#2340). Absent = always plan (existing callers/tests unchanged). */
   planReuse?: PlanReuseStore;
+  /** Check-resume record (#2564). Absent = no preservation (existing callers/tests unchanged). */
+  checkResume?: CheckResumeStore;
   /** Reads the PR's path changes for the classifier (#1724). Defaults to the git-backed reader. */
   readReviewFloorChanges?: (worktree: string, fallbackBaseRef?: string) => Promise<ReviewFloorPathChange[]>;
 }
@@ -585,229 +596,263 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     runStartDiffBase = request.localOnly ? await captureDiffBase(ports.workspace.path) : undefined;
 
     // PLAN
-    await setPhase('plan');
-    const planModel = await preferFallbackWhenProviderIsOpen(
-      request.modelPins.plan,
-      request.modelPins.planFallback,
-      'PLAN',
-    );
-    // A pinned build model determines the route (#1367): an explicit repo `route` still wins, but
-    // without one the pin's harness decides, so PLAN cannot send an Anthropic-pinned build to Codex.
-    // Two guards keep the pin from resurrecting a route the operator turned off: local-only mode
-    // forces codex in PLAN and a pin must not undo that; and a codex pin while codex is disabled
-    // cannot force codex — PLAN's codex→claude fallback applies and the compatibility check below
-    // drops the pin, exactly as on main.
-    let derivedRoute =
-      request.preferredRoute || request.localOnly
-        ? undefined
-        : routeForBuildModel(ports.router.registryRef, request.modelPins.build);
-    if (derivedRoute === 'codex' && request.codexDisabled) {
-      log(
-        'model-override',
-        `pinned build model ${request.modelPins.build} needs the codex route but codex is disabled — the pin cannot force it`,
+    const planStartedMs = Date.now();
+    let planRoute: BuildRoute;
+    let planSlice: PlanResult['slice'];
+    let buildDiffBase: string | undefined;
+    let builtRoute: BuildRoute;
+    let builtModel: string;
+    let pinNote: string | undefined;
+    let buildMinutes: number;
+    if (request.resumeFrom) {
+      const resumed = request.resumeFrom;
+      ports.events('check')(
+        'check',
+        `resuming #${request.issue} from CHECK on kept branch ${request.branch} — PLAN and BUILD skipped`,
       );
-      derivedRoute = undefined;
-    }
-    const pinnedRoute = request.preferredRoute ?? derivedRoute;
-    if (derivedRoute) {
-      log('model-override', `build route derived from pinned build model ${request.modelPins.build} → ${derivedRoute}`);
-    }
-
-    const reusablePlan = async () => {
-      if (!ports.planReuse) return null;
-      let hit: Awaited<ReturnType<PlanReuseStore['load']>> = null;
-      try {
-        hit = await ports.planReuse.load(issueBodyHash(request.work.brief));
-      } catch (err) {
-        log('environment_warning', `could not read the plan-reuse record: ${errorMessage(err)} — planning`);
+      route = resumed.route;
+      planRoute = resumed.route;
+      planSlice = undefined;
+      buildDiffBase = resumed.diffBase;
+      builtRoute = resumed.route;
+      builtModel = resumed.model;
+      pinNote = undefined;
+      buildMinutes = resumed.buildMinutes;
+    } else {
+      await setPhase('plan');
+      const planModel = await preferFallbackWhenProviderIsOpen(
+        request.modelPins.plan,
+        request.modelPins.planFallback,
+        'PLAN',
+      );
+      // A pinned build model determines the route (#1367): an explicit repo `route` still wins, but
+      // without one the pin's harness decides, so PLAN cannot send an Anthropic-pinned build to Codex.
+      // Two guards keep the pin from resurrecting a route the operator turned off: local-only mode
+      // forces codex in PLAN and a pin must not undo that; and a codex pin while codex is disabled
+      // cannot force codex — PLAN's codex→claude fallback applies and the compatibility check below
+      // drops the pin, exactly as on main.
+      let derivedRoute =
+        request.preferredRoute || request.localOnly
+          ? undefined
+          : routeForBuildModel(ports.router.registryRef, request.modelPins.build);
+      if (derivedRoute === 'codex' && request.codexDisabled) {
+        log(
+          'model-override',
+          `pinned build model ${request.modelPins.build} needs the codex route but codex is disabled — the pin cannot force it`,
+        );
+        derivedRoute = undefined;
       }
-      try {
-        await ports.planReuse.clear();
-      } catch (err) {
-        log('environment_warning', `could not clear the plan-reuse record: ${errorMessage(err)}`);
-      }
-      if (hit) {
-        ports.events('plan')(
-          'plan_reused',
-          `reusing frozen plan ${request.specPath} for #${request.issue} — body unchanged since the environment release, no PLAN model call`,
+      const pinnedRoute = request.preferredRoute ?? derivedRoute;
+      if (derivedRoute) {
+        log(
+          'model-override',
+          `build route derived from pinned build model ${request.modelPins.build} → ${derivedRoute}`,
         );
       }
-      return hit;
-    };
-    const plan =
-      (await reusablePlan()) ??
-      (await planPhase({
+
+      const reusablePlan = async () => {
+        if (!ports.planReuse) return null;
+        let hit: Awaited<ReturnType<PlanReuseStore['load']>> = null;
+        try {
+          hit = await ports.planReuse.load(issueBodyHash(request.work.brief));
+        } catch (err) {
+          log('environment_warning', `could not read the plan-reuse record: ${errorMessage(err)} — planning`);
+        }
+        try {
+          await ports.planReuse.clear();
+        } catch (err) {
+          log('environment_warning', `could not clear the plan-reuse record: ${errorMessage(err)}`);
+        }
+        if (hit) {
+          ports.events('plan')(
+            'plan_reused',
+            `reusing frozen plan ${request.specPath} for #${request.issue} — body unchanged since the environment release, no PLAN model call`,
+          );
+        }
+        return hit;
+      };
+      const plan =
+        (await reusablePlan()) ??
+        (await planPhase({
+          issue: request.issue,
+          repo: request.repo,
+          worktree: ports.workspace.path,
+          specPath: request.specPath,
+          constitution,
+          router: ports.router,
+          octokit: ports.octokit,
+          log: ports.events('plan'),
+          timeoutSeconds: request.timeouts.plan,
+          modelOverride: planModel,
+          modelFallbacks:
+            planModel === request.modelPins.plan && request.modelPins.planFallback
+              ? [request.modelPins.planFallback]
+              : undefined,
+          onProviderFailure: rememberProviderFailure,
+          branch: request.branch,
+          approvalGate: request.options.approvePlan ? ports.createApprovalGate?.() : undefined,
+          drainSteering: request.options.approvePlan ? ports.drainSteering : undefined,
+          codexDisabled: request.codexDisabled,
+          localOnly: request.localOnly,
+          laneId: request.lane,
+          workSource: request.workSource,
+          enforceReadiness: true,
+          fastPath: request.efficiency.fastPath,
+          enforceSizeGate: (request.sizeGateMode ?? 'file') !== 'off',
+          sizeGateMode: request.sizeGateMode,
+          maxSlices: request.maxSlices,
+          blockUnresolvedRegressions: request.blockUnresolvedRegressions,
+          updateIssueBodyOnEnrich: request.readinessUpdateIssueBody,
+          preferredRoute: pinnedRoute,
+        }));
+      route = plan.route;
+      if (!plan.ok) {
+        const decomposedChildren = plan.decomposed?.childIssues ?? [];
+        if (decomposedChildren.length > 0) {
+          await ports.onDecomposed?.(decomposedChildren);
+          const childList = decomposedChildren.map((n) => `#${n}`).join(', ');
+          return { state: 'escalated', reason: `issue #${request.issue} decomposed into ${childList}`, route };
+        }
+        if (plan.sliced) {
+          return terminalEscalated(
+            `issue #${request.issue} sliced into ${plan.sliced.sliceCount} slice(s): ${plan.escalate ?? 'slice plan recorded'}`,
+          );
+        }
+        return terminalEscalated(`plan escalated: ${plan.escalate ?? 'unknown'}`);
+      }
+      const planBudget = await assertBudget('PLAN');
+      if (planBudget) return planBudget;
+
+      // Same-file lane guard (#1515): before this run claims BUILD, make sure no other
+      // in-flight run in this repo already owns a file PLAN just said this run will touch.
+      if (ports.laneFileGuard && plan.designArtifact) {
+        const touchedFiles = touchedFilesFrom(plan.designArtifact);
+        const collision = await ports.laneFileGuard.findCollision(request.repo, request.issue, touchedFiles);
+        if (collision) {
+          return terminalParked(
+            'held',
+            `issue held: #${request.issue} touches ${collision.file}, already claimed by in-flight issue #${collision.issue} — held until that lane finishes`,
+          );
+        }
+        if (touchedFiles.length > 0) {
+          await ports.laneFileGuard.register(request.repo, request.issue, touchedFiles);
+          laneFileClaimed = true;
+        }
+      }
+
+      // BUILD
+      await setPhase('build');
+      let buildSteering: ConsumedSteering | undefined;
+      if (request.options.interactive) {
+        buildSteering = ports.drainSteering?.();
+        if (buildSteering && buildSteering.messages.length > 0) {
+          ports.events('build')('steering_applied', describeSteering(buildSteering));
+        }
+      }
+      let breakerBlocked = false;
+      if (request.failover.enabled) {
+        const providers = [
+          ...new Set(
+            ports.router
+              .resolveAll('build_codex')
+              .map((m) => ports.router.registryRef.get(m)?.provider)
+              .filter((p): p is string => Boolean(p)),
+          ),
+        ];
+        const gate = await gateBuildOnBreaker({ breaker: ports.breaker, providers, log: ports.events('build') });
+        breakerBlocked = gate.codexBlocked;
+      }
+
+      // PLAN already honors pinnedRoute and rewrites the spec; re-apply here so a plan port that
+      // ignores it (a daemon or a test double) still cannot route a pinned worker elsewhere.
+      let buildRoute = pinnedRoute ?? plan.route;
+      let buildModel = request.modelPins.build;
+      if (request.failover.enabled && buildRoute === 'claude') {
+        const primaryClaude = buildModel ?? ports.router.resolveAll('build_claude')[0];
+        const fallbackCodex = request.modelPins.buildFallback ?? ports.router.resolveAll('build_codex')[0];
+        const selected = await preferFallbackWhenProviderIsOpen(primaryClaude, fallbackCodex, 'BUILD');
+        if (selected && selected !== primaryClaude) {
+          buildRoute = 'codex';
+          buildModel = selected;
+        }
+      }
+      if (buildModel) {
+        const harnessId = ports.router.registryRef.getHarnessId(buildModel);
+        const compatible =
+          buildRoute === 'codex'
+            ? ports.router.registryRef.isCodexModel(buildModel)
+            : buildRoute === 'opencode'
+              ? harnessId === 'opencode'
+              : harnessId === 'claude-cli';
+        if (!compatible) {
+          log(
+            'model_override_ignored',
+            `build model ${buildModel} is incompatible with the ${buildRoute} route${
+              buildRoute === request.preferredRoute ? ' pinned by .factory/config.json' : ''
+            } — using that route's default worker`,
+          );
+          buildModel = undefined;
+        }
+      }
+
+      const build = await buildPhase({
+        runId,
         issue: request.issue,
         repo: request.repo,
         worktree: ports.workspace.path,
         specPath: request.specPath,
-        constitution,
-        router: ports.router,
-        octokit: ports.octokit,
-        log: ports.events('plan'),
-        timeoutSeconds: request.timeouts.plan,
-        modelOverride: planModel,
-        modelFallbacks:
-          planModel === request.modelPins.plan && request.modelPins.planFallback
-            ? [request.modelPins.planFallback]
-            : undefined,
-        onProviderFailure: rememberProviderFailure,
         branch: request.branch,
-        approvalGate: request.options.approvePlan ? ports.createApprovalGate?.() : undefined,
-        drainSteering: request.options.approvePlan ? ports.drainSteering : undefined,
-        codexDisabled: request.codexDisabled,
+        constitution,
+        route: buildRoute,
+        router: ports.router,
+        log: ports.events('build'),
+        timeoutSeconds: request.timeouts.build,
+        skipCI: request.skipCI,
+        disablePublish: Boolean(request.localOnly),
+        publishFromBuild: request.publishFromBuild,
+        modelOverride: buildModel,
+        pinnedModel: buildModel !== undefined && buildModel === request.modelPins.build,
+        codexFallbackModel: request.modelPins.buildFallback ?? ports.router.resolveAll('build_codex')[0],
+        onProviderFailure: rememberProviderFailure,
+        sandbox: request.sandboxPolicy,
+        steering: buildSteering,
+        appPort,
+        appBaseUrl,
+        codexDisabled: request.codexDisabled || breakerBlocked,
         localOnly: request.localOnly,
+        autoFailover: { enabled: request.failover.enabled, fallbackModel: request.failover.fallbackModel },
+        onPgid,
         laneId: request.lane,
-        workSource: request.workSource,
-        enforceReadiness: true,
-        fastPath: request.efficiency.fastPath,
-        enforceSizeGate: (request.sizeGateMode ?? 'file') !== 'off',
-        sizeGateMode: request.sizeGateMode,
-        maxSlices: request.maxSlices,
-        blockUnresolvedRegressions: request.blockUnresolvedRegressions,
-        updateIssueBodyOnEnrich: request.readinessUpdateIssueBody,
-        preferredRoute: pinnedRoute,
-      }));
-    route = plan.route;
-    if (!plan.ok) {
-      const decomposedChildren = plan.decomposed?.childIssues ?? [];
-      if (decomposedChildren.length > 0) {
-        await ports.onDecomposed?.(decomposedChildren);
-        const childList = decomposedChildren.map((n) => `#${n}`).join(', ');
-        return { state: 'escalated', reason: `issue #${request.issue} decomposed into ${childList}`, route };
+      });
+      route = build.route;
+      if (!build.ok) {
+        if (build.reason === 'no_diff') {
+          return terminalParked('fail', 'build produced no diff against the base ref — no implementation was produced');
+        }
+        if (build.reason === 'junk_only_diff') {
+          return terminalParked(
+            'fail',
+            'build changed only generated/cache files (e.g. __pycache__) — no implementation was produced',
+          );
+        }
+        return terminalEscalated(`build escalated: ${build.escalate ?? 'unknown'}`);
       }
-      if (plan.sliced) {
-        return terminalEscalated(
-          `issue #${request.issue} sliced into ${plan.sliced.sliceCount} slice(s): ${plan.escalate ?? 'slice plan recorded'}`,
-        );
-      }
-      return terminalEscalated(`plan escalated: ${plan.escalate ?? 'unknown'}`);
-    }
-    const planBudget = await assertBudget('PLAN');
-    if (planBudget) return planBudget;
+      const buildBudget = await assertBudget('BUILD');
+      if (buildBudget) return buildBudget;
+      // #2511: say so when a permitted failover built with something other than the user's pin.
+      const pinnedBuild = request.modelPins.build;
+      pinNote =
+        pinnedBuild !== undefined && build.model !== pinnedBuild
+          ? `build pin ${pinnedBuild} not used (${build.failoverReason ?? 'overridden'}); built with ${build.model}`
+          : undefined;
 
-    // Same-file lane guard (#1515): before this run claims BUILD, make sure no other
-    // in-flight run in this repo already owns a file PLAN just said this run will touch.
-    if (ports.laneFileGuard && plan.designArtifact) {
-      const touchedFiles = touchedFilesFrom(plan.designArtifact);
-      const collision = await ports.laneFileGuard.findCollision(request.repo, request.issue, touchedFiles);
-      if (collision) {
-        return terminalParked(
-          'held',
-          `issue held: #${request.issue} touches ${collision.file}, already claimed by in-flight issue #${collision.issue} — held until that lane finishes`,
-        );
-      }
-      if (touchedFiles.length > 0) {
-        await ports.laneFileGuard.register(request.repo, request.issue, touchedFiles);
-        laneFileClaimed = true;
-      }
+      planRoute = plan.route;
+      planSlice = plan.slice;
+      buildDiffBase = build.diffBase;
+      builtRoute = build.route;
+      builtModel = build.model;
+      buildMinutes = Math.max(1, Math.round((Date.now() - planStartedMs) / 60_000));
     }
-
-    // BUILD
-    await setPhase('build');
-    let buildSteering: ConsumedSteering | undefined;
-    if (request.options.interactive) {
-      buildSteering = ports.drainSteering?.();
-      if (buildSteering && buildSteering.messages.length > 0) {
-        ports.events('build')('steering_applied', describeSteering(buildSteering));
-      }
-    }
-    let breakerBlocked = false;
-    if (request.failover.enabled) {
-      const providers = [
-        ...new Set(
-          ports.router
-            .resolveAll('build_codex')
-            .map((m) => ports.router.registryRef.get(m)?.provider)
-            .filter((p): p is string => Boolean(p)),
-        ),
-      ];
-      const gate = await gateBuildOnBreaker({ breaker: ports.breaker, providers, log: ports.events('build') });
-      breakerBlocked = gate.codexBlocked;
-    }
-
-    // PLAN already honors pinnedRoute and rewrites the spec; re-apply here so a plan port that
-    // ignores it (a daemon or a test double) still cannot route a pinned worker elsewhere.
-    let buildRoute = pinnedRoute ?? plan.route;
-    let buildModel = request.modelPins.build;
-    if (request.failover.enabled && buildRoute === 'claude') {
-      const primaryClaude = buildModel ?? ports.router.resolveAll('build_claude')[0];
-      const fallbackCodex = request.modelPins.buildFallback ?? ports.router.resolveAll('build_codex')[0];
-      const selected = await preferFallbackWhenProviderIsOpen(primaryClaude, fallbackCodex, 'BUILD');
-      if (selected && selected !== primaryClaude) {
-        buildRoute = 'codex';
-        buildModel = selected;
-      }
-    }
-    if (buildModel) {
-      const harnessId = ports.router.registryRef.getHarnessId(buildModel);
-      const compatible =
-        buildRoute === 'codex'
-          ? ports.router.registryRef.isCodexModel(buildModel)
-          : buildRoute === 'opencode'
-            ? harnessId === 'opencode'
-            : harnessId === 'claude-cli';
-      if (!compatible) {
-        log(
-          'model_override_ignored',
-          `build model ${buildModel} is incompatible with the ${buildRoute} route${
-            buildRoute === request.preferredRoute ? ' pinned by .factory/config.json' : ''
-          } — using that route's default worker`,
-        );
-        buildModel = undefined;
-      }
-    }
-
-    const build = await buildPhase({
-      runId,
-      issue: request.issue,
-      repo: request.repo,
-      worktree: ports.workspace.path,
-      specPath: request.specPath,
-      branch: request.branch,
-      constitution,
-      route: buildRoute,
-      router: ports.router,
-      log: ports.events('build'),
-      timeoutSeconds: request.timeouts.build,
-      skipCI: request.skipCI,
-      disablePublish: Boolean(request.localOnly),
-      publishFromBuild: request.publishFromBuild,
-      modelOverride: buildModel,
-      pinnedModel: buildModel !== undefined && buildModel === request.modelPins.build,
-      codexFallbackModel: request.modelPins.buildFallback ?? ports.router.resolveAll('build_codex')[0],
-      onProviderFailure: rememberProviderFailure,
-      sandbox: request.sandboxPolicy,
-      steering: buildSteering,
-      appPort,
-      appBaseUrl,
-      codexDisabled: request.codexDisabled || breakerBlocked,
-      localOnly: request.localOnly,
-      autoFailover: { enabled: request.failover.enabled, fallbackModel: request.failover.fallbackModel },
-      onPgid,
-      laneId: request.lane,
-    });
-    route = build.route;
-    if (!build.ok) {
-      if (build.reason === 'no_diff') {
-        return terminalParked('fail', 'build produced no diff against the base ref — no implementation was produced');
-      }
-      if (build.reason === 'junk_only_diff') {
-        return terminalParked(
-          'fail',
-          'build changed only generated/cache files (e.g. __pycache__) — no implementation was produced',
-        );
-      }
-      return terminalEscalated(`build escalated: ${build.escalate ?? 'unknown'}`);
-    }
-    const buildBudget = await assertBudget('BUILD');
-    if (buildBudget) return buildBudget;
-    // #2511: say so when a permitted failover built with something other than the user's pin.
-    const pinnedBuild = request.modelPins.build;
-    const pinNote =
-      pinnedBuild !== undefined && build.model !== pinnedBuild
-        ? `build pin ${pinnedBuild} not used (${build.failoverReason ?? 'overridden'}); built with ${build.model}`
-        : undefined;
 
     // CHECK
     await setPhase('check');
@@ -831,9 +876,9 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       appBaseUrl,
       onPgid,
       priorFailureSignature,
-      diffBase: request.localOnly ? runStartDiffBase : build.diffBase,
-      reworkRoute: build.route,
-      reworkModel: build.model,
+      diffBase: request.localOnly ? runStartDiffBase : buildDiffBase,
+      reworkRoute: builtRoute,
+      reworkModel: builtModel,
       laneId: request.lane,
       onActivity: ports.onActivity,
       logsDir: request.logsDir,
@@ -869,6 +914,14 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
         });
       }
     }
+    const clearCheckResume = async (): Promise<void> => {
+      if (!request.resumeFrom) return;
+      try {
+        await ports.checkResume?.clear();
+      } catch (err) {
+        log('environment_warning', `could not clear the check-resume point: ${errorMessage(err)}`);
+      }
+    };
     const checkBudget = await assertBudget('CHECK');
     if (checkBudget) return checkBudget;
     if (!check.passed) {
@@ -887,16 +940,40 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
             log('environment_warning', `could not post the environment-failure comment: ${errorMessage(err)}`);
           }
         }
+        let preserve = ports.checkResume !== undefined && !request.localOnly && !planSlice;
+        let fixTarget = '';
+        if (preserve && ports.checkResume) {
+          fixTarget = preservedFixTarget(env, constitution, request.repoConfigFile);
+          try {
+            await ports.checkResume.record({
+              issue: request.issue,
+              branch: request.branch,
+              worktree: ports.workspace.path,
+              diffBase: buildDiffBase,
+              route: builtRoute,
+              model: builtModel,
+              buildMinutes,
+              fixTarget,
+              preservedAt: new Date().toISOString(),
+            });
+          } catch (err) {
+            log('environment_warning', `could not record the check-resume point: ${errorMessage(err)}`);
+            preserve = false;
+          }
+        }
         log(
           'environment-released',
-          `every failing checker (${env.failingChecks.join(', ')}) also fails on base ${env.baseSha.slice(0, 8)} — no rework, releasing #${request.issue} to queued`,
+          `every failing checker (${env.failingChecks.join(', ')}) also fails on base ${env.baseSha.slice(0, 8)} — no rework, releasing #${request.issue} to queued` +
+            (preserve
+              ? ` — ${formatPreservedBuildMessage({ issue: request.issue, branch: request.branch, buildMinutes, fixTarget })}`
+              : ''),
         );
-        if (ports.planReuse && !plan.slice) {
+        if (ports.planReuse && !planSlice && !request.resumeFrom) {
           try {
             await ports.planReuse.record({
               bodyHash: issueBodyHash(request.work.brief),
               baseSha: env.baseSha,
-              route: plan.route,
+              route: planRoute,
               releasedAt: new Date().toISOString(),
             });
           } catch (err) {
@@ -912,6 +989,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
           baseSha: env.baseSha,
           failingChecks: env.failingChecks,
           ...(check.failureSignature !== undefined ? { failureSignature: check.failureSignature } : {}),
+          ...(preserve ? { buildPreserved: true } : {}),
         };
       }
       const checkFailure =
@@ -935,8 +1013,10 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
         showstoppers.length > 0
           ? `${message}\nremaining showstoppers:\n${showstoppers.map((s) => `- ${s}`).join('\n')}`
           : message;
+      await clearCheckResume();
       return terminalParked(reason, parkedMessage, checkFailure);
     }
+    await clearCheckResume();
     // Clean check — clear stale cross-run history so a future, genuinely different
     // failure is not mistaken for a repeat of one already resolved.
     await ports.reworkHistory?.clear(request.issue);
@@ -969,7 +1049,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     if (request.prClassifier) {
       reviewRouting = await resolveReviewRouting({
         worktree: ports.workspace.path,
-        fallbackBaseRef: build.diffBase,
+        fallbackBaseRef: buildDiffBase,
         rules: request.prClassifier.rules,
         readChanges: ports.readReviewFloorChanges,
       });
@@ -999,7 +1079,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       // decided, so it cannot change the label or merge routing.
       const shadowInput: PrShadowInput = {
         worktree: ports.workspace.path,
-        fallbackBaseRef: build.diffBase,
+        fallbackBaseRef: buildDiffBase,
         issueTitle: request.work.title,
         issueBody: request.work.brief,
         specPath: request.specPath,
@@ -1060,7 +1140,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       laneId: request.lane,
       reviewRouting,
       ...(pinNote ? { pinNotes: [pinNote] } : {}),
-      slice: plan.slice ? { index: plan.slice.index, count: plan.slice.plan.slices.length } : undefined,
+      slice: planSlice ? { index: planSlice.index, count: planSlice.plan.slices.length } : undefined,
     });
     if (!ship.ok) {
       const reason: ParkReason = ship.denied ? 'escalate' : ship.ciOutcome === 'infra-failure' ? 'ci-infra' : 'fail';
@@ -1072,8 +1152,8 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       return terminalParked(reason, message);
     }
 
-    if (plan.slice) {
-      const { index, plan: slicePlan } = plan.slice;
+    if (planSlice) {
+      const { index, plan: slicePlan } = planSlice;
       const count = slicePlan.slices.length;
       if (ship.prNumber === undefined) {
         log('ship', `slice ${index}/${count} shipped with no PR number — slice plan not updated`);
@@ -1110,7 +1190,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       branch: request.branch,
       reworkRounds,
       prNumber: ship.prNumber,
-      ...(plan.slice ? { slice: { index: plan.slice.index, count: plan.slice.plan.slices.length } } : {}),
+      ...(planSlice ? { slice: { index: planSlice.index, count: planSlice.plan.slices.length } } : {}),
     };
   } catch (err) {
     if (isDecomposeSignal(err)) throw err;
