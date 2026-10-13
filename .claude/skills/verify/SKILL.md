@@ -44,6 +44,24 @@ CI (`.github/workflows/ci.yml`) runs the same steps as the full path. It also ru
 - `npm run coverage-ratchet` fails when measured coverage beats a threshold by more than 2 points (`DEFAULT_RATCHET_SLACK`). Raise that threshold to the suggested value it prints, in the same PR.
 - `packages/core/src/types/**` and `packages/core/src/test-support/**` are excluded from coverage.
 
+## Max-lines guard
+
+No lintable file may exceed 500 lines. Tests count, and so do blank lines and comments. The limit is set in `oxlint.config.ts` and enforced by `npm run lint` (step 8). `scripts/max-lines-config.test.ts` enforces it again in the test step.
+
+`max-lines-baseline.json` grandfathers files that were already over the limit. It is a flat JSON object that maps a repo-relative path to the line count recorded when the file was grandfathered. That count is the file's own ceiling, so the file may shrink but never grow. Never add a new entry and never raise a count.
+
+### New file over 500 lines
+
+Lint fails with `File has too many lines`, and the test step fails because the file is not baselined. Split the file by responsibility into colocated modules of 500 lines or fewer. Keep `.js` import extensions, and split the colocated tests the same way. Do not add the file to the baseline.
+
+### Baseline file grew
+
+Lint fails for the file, and the test step reports it grew past its recorded ceiling. Move code out, or split the file, until it is at or under its recorded count. Never raise the number.
+
+### Baseline file shrank or was deleted
+
+The test step names the file in a `remove it from max-lines-baseline.json` message. Delete its line from `max-lines-baseline.json` so the default 500 ceiling applies again.
+
 ## Integration tests
 
 `*.integration.test.ts` files (real git worktrees, whole plan → build → check → ship cycles) are excluded from both verify paths. They run nightly in `.github/workflows/nightly-integration.yml` (07:00 UTC). Run them with `npm run test:integration` when you touch `packages/core/src/phases/` or worktree handling.
@@ -59,6 +77,7 @@ CI (`.github/workflows/ci.yml`) runs the same steps as the full path. It also ru
 | `check-config-json`                       | Move the data into `packages/config/src/defaults.ts` as typed TS. Delete the JSON file.                                                   |
 | `check-oxlint-plugin…`                    | Bump `oxlint` and `@oxlint/plugins` to the same version in `package.json`, then `npm install`.                                            |
 | `lint`                                    | Fix the code. Warnings fail the build too.                                                                                                |
+| `lint` / test: `max-lines`                | See [Max-lines guard](#max-lines-guard).                                                                                                  |
 | `knip`                                    | Delete the unused export, file, or dependency.                                                                                            |
 | `test` threshold                          | Add tests for the uncovered lines the report names.                                                                                       |
 | `coverage-ratchet`                        | Raise the named threshold in `vitest.config.ts` to the suggested value.                                                                   |

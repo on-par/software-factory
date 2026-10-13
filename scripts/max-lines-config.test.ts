@@ -5,7 +5,13 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import config, { MAX_LINES_BASELINE } from '../oxlint.config.js';
-import { MAX_LINES_LIMIT, staleBaselineEntries } from './max-lines-baseline.js';
+import {
+  grownBaselineMessage,
+  MAX_LINES_DOCS,
+  MAX_LINES_LIMIT,
+  oversizedFileMessage,
+  staleBaselineEntries,
+} from './max-lines-baseline.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '..');
 const LINTABLE = /\.(?:ts|tsx|js|jsx|mjs|cjs|mts|cts)$/;
@@ -39,7 +45,7 @@ describe('max-lines lint guard (#2776, #2777, #2778)', () => {
     for (const [path, recorded] of Object.entries(MAX_LINES_BASELINE)) {
       expect(existsSync(resolve(REPO_ROOT, path)), `${path} exists`).toBe(true);
       expect(recorded, `${path} recorded count`).toBeGreaterThan(500);
-      expect(lineCount(path), `${path} line count`).toBeLessThanOrEqual(recorded);
+      expect(lineCount(path), grownBaselineMessage(path, lineCount(path), recorded)).toBeLessThanOrEqual(recorded);
     }
   });
 
@@ -57,7 +63,7 @@ describe('max-lines lint guard (#2776, #2777, #2778)', () => {
 
   it('flags a baseline entry whose file no longer exists', () => {
     expect(staleBaselineEntries({ 'gone.ts': 900 }, () => undefined)).toEqual([
-      'gone.ts no longer exists; remove it from max-lines-baseline.json',
+      `gone.ts no longer exists; remove it from max-lines-baseline.json; see ${MAX_LINES_DOCS}`,
     ]);
   });
 
@@ -81,7 +87,34 @@ describe('max-lines lint guard (#2776, #2777, #2778)', () => {
         lineCount(path) > 500,
     );
     for (const path of oversized) {
-      expect(Object.keys(MAX_LINES_BASELINE), `${path} is baselined`).toContain(path);
+      expect(Object.keys(MAX_LINES_BASELINE), oversizedFileMessage(path, lineCount(path))).toContain(path);
     }
+  });
+
+  it('points every max-lines failure message to the docs', () => {
+    const oversized = oversizedFileMessage('a.ts', 501);
+    const grown = grownBaselineMessage('a.ts', 901, 900);
+    const [shrunk] = staleBaselineEntries({ 'a.ts': 900 }, () => 400);
+    const [missing] = staleBaselineEntries({ 'a.ts': 900 }, () => undefined);
+    for (const message of [oversized, grown, shrunk, missing]) {
+      expect(message).toContain(MAX_LINES_DOCS);
+    }
+    expect(oversized).toContain('split');
+    expect(grown).toContain('900');
+    expect(shrunk).toContain('remove it from max-lines-baseline.json');
+    expect(missing).toContain('remove it from max-lines-baseline.json');
+  });
+
+  it('documents the limit, the baseline format and the fix for each failure in the verify skill', () => {
+    const [docPath, anchor] = MAX_LINES_DOCS.split('#');
+    const doc = readFileSync(resolve(REPO_ROOT, docPath ?? ''), 'utf8');
+    expect(doc).toContain('## Max-lines guard');
+    expect(anchor).toBe('max-lines-guard');
+    expect(doc).toContain('500');
+    expect(doc).toContain('max-lines-baseline.json');
+    expect(doc).toContain('oxlint.config.ts');
+    expect(doc).toContain('### New file over 500 lines');
+    expect(doc).toContain('### Baseline file grew');
+    expect(doc).toContain('### Baseline file shrank or was deleted');
   });
 });

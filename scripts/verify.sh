@@ -34,7 +34,10 @@ npm run adr:index -- --check
 bash scripts/check-config-json.sh
 bash scripts/check-oxlint-plugin-version.sh
 npm run typecheck
-npm run lint
+npm run lint || {
+  echo "verify: lint failed. For max-lines errors see .claude/skills/verify/SKILL.md#max-lines-guard"
+  exit 1
+}
 npm run knip
 # Per-file durations for the slowest-files report (#2769). Keep the default
 # console reporter, and keep github-actions annotations in CI (vitest only
