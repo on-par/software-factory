@@ -5,6 +5,7 @@ import { defineConfig } from 'oxlint';
 // #2777: files over the 500-line limit on main, with the line count recorded when they were
 // grandfathered. Each count is that file's own max-lines ceiling, so it can shrink but never grow.
 // Never add a new file here. Split the file instead.
+// Fix-up steps: .claude/skills/verify/SKILL.md#max-lines-guard.
 export const MAX_LINES_BASELINE: Readonly<Record<string, number>> = JSON.parse(
   readFileSync(new URL('./max-lines-baseline.json', import.meta.url), 'utf8'),
 );
@@ -25,6 +26,7 @@ export default defineConfig({
   },
   rules: {
     // #2776: no file over 500 lines, tests included. Blank lines and comments count.
+    // Fix-up steps: .claude/skills/verify/SKILL.md#max-lines-guard.
     'max-lines': ['error', { max: 500, ...MAX_LINES_OPTIONS }],
     'no-empty': ['error', { allowEmptyCatch: true }],
     'no-unused-vars': [
