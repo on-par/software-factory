@@ -40,10 +40,17 @@ run
 [ "$RC" -eq 2 ] || fail "no argument exited $RC"
 echo "$OUT" | grep -q 'usage:' || fail "usage line missing"
 [ ! -s "$NPM_LOG" ] || fail "no argument must not call npm"
-for agent in opencode command claude CODEX; do
+for agent in command claude CODEX OPENCODE; do
   run "$agent"
   [ "$RC" -eq 2 ] || fail "$agent exited $RC"
   [ ! -s "$NPM_LOG" ] || fail "$agent must not call npm"
 done
 bash -n "$SCRIPT" || fail "adapter-smoke.sh has a syntax error"
 echo "PASS: rejects a missing or unsupported agent before packing"
+for agent in codex opencode; do
+  run "$agent"
+  [ "$RC" -ne 2 ] || fail "$agent was rejected as unsupported"
+  [ -s "$NPM_LOG" ] || fail "$agent must reach npm pack"
+  ! echo "$OUT" | grep -q 'usage:' || fail "$agent printed a usage line"
+done
+echo "PASS: accepts codex and opencode and reaches packing"
