@@ -132,6 +132,8 @@ export interface RunRequest {
   /** Repo config pins the build route; forced after PLAN so the frozen spec stays authoritative. */
   preferredRoute?: BuildRoute;
   /** Resume at CHECK on a kept worktree (#2564): PLAN and BUILD are skipped. */
+  /** Parent ref of a stacked slice branch (#2716); CHECK and the review floor diff against it. Absent = origin/main. */
+  parentBaseRef?: string;
   resumeFrom?: { phase: 'check'; diffBase?: string; route: BuildRoute; model: string; buildMinutes: number };
   /** Resolved factory-state paths shipPhase reads/writes directly (unchanged from today —
    *  shipPhase's own surface already takes plain path strings, not a path-resolution port). */
@@ -235,7 +237,11 @@ export interface RunPorts {
   /** Check-resume record (#2564). Absent = no preservation (existing callers/tests unchanged). */
   checkResume?: CheckResumeStore;
   /** Reads the PR's path changes for the classifier (#1724). Defaults to the git-backed reader. */
-  readReviewFloorChanges?: (worktree: string, fallbackBaseRef?: string) => Promise<ReviewFloorPathChange[]>;
+  readReviewFloorChanges?: (
+    worktree: string,
+    fallbackBaseRef?: string,
+    parentBaseRef?: string,
+  ) => Promise<ReviewFloorPathChange[]>;
 }
 
 function errorMessage(err: unknown): string {
@@ -874,6 +880,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       onPgid,
       priorFailureSignature,
       diffBase: request.localOnly ? runStartDiffBase : buildDiffBase,
+      parentBaseRef: request.parentBaseRef,
       reworkRoute: builtRoute,
       reworkModel: builtModel,
       laneId: request.lane,
@@ -1066,6 +1073,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       reviewRouting = await resolveReviewRouting({
         worktree: ports.workspace.path,
         fallbackBaseRef: buildDiffBase,
+        parentBaseRef: request.parentBaseRef,
         rules: request.prClassifier.rules,
         readChanges: ports.readReviewFloorChanges,
       });

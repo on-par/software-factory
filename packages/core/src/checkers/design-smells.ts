@@ -222,6 +222,7 @@ export async function workerOutputChecker(
   // 1-arg shape still typecheck against `typeof collectDesignDiff`.
   const diff = await (deps?.collectDiff ?? collectDesignDiff)(ctx.worktree, undefined, {
     fallbackBaseRef: ctx.diffBase,
+    baseRefOverride: ctx.parentBaseRef,
   });
   if (diff.skipReason) {
     return { checker: WORKER_OUTPUT_CHECKER, result: 'SKIP', details: diff.skipReason };
@@ -397,6 +398,7 @@ export async function designSmellsChecker(
   // 1-arg shape still typecheck against `typeof collectDesignDiff`.
   const diff = await (deps?.collectDiff ?? collectDesignDiff)(ctx.worktree, undefined, {
     fallbackBaseRef: ctx.diffBase,
+    baseRefOverride: ctx.parentBaseRef,
   });
   if (diff.skipReason) {
     return { checker: DESIGN_SMELLS_CHECKER, result: 'SKIP', details: diff.skipReason };

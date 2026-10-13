@@ -417,6 +417,17 @@ describe('designSmellsEnabled', () => {
 });
 
 describe('workerOutputChecker', () => {
+  it('passes ctx.parentBaseRef as baseRefOverride (#2716)', async () => {
+    const seen: (string | undefined)[] = [];
+    const collectDiff = async (_w: string, _n: unknown, opts?: { baseRefOverride?: string }) => {
+      seen.push(opts?.baseRefOverride);
+      return { text: '', baseRef: 'origin/main', truncated: false };
+    };
+    await workerOutputChecker(makeContext('/worktree', { parentBaseRef: 'slice-1' }), { collectDiff } as any);
+    await workerOutputChecker(makeContext('/worktree'), { collectDiff } as any);
+    expect(seen).toEqual(['slice-1', undefined]);
+  });
+
   it('fails when a collectable diff is empty', async () => {
     const result = await workerOutputChecker(makeContext('/worktree'), {
       collectDiff: async () => ({ text: '', baseRef: 'origin/main', truncated: false }),

@@ -347,6 +347,8 @@ async function checkPhaseImpl(opts: {
    *  HEAD captured once in runIssue before PLAN (#1210); otherwise it is buildPhase's
    *  pre-worker HEAD. */
   diffBase?: string;
+  /** Parent ref of a stacked slice (#2716); forwarded to CheckerContext.parentBaseRef. */
+  parentBaseRef?: string;
   /** Worker route that completed BUILD; direct callers retain Claude rework by default. */
   reworkRoute?: 'codex' | 'claude' | 'opencode';
   /** Worker model that completed BUILD, retained as the compatible rework override. */
@@ -391,6 +393,7 @@ async function checkPhaseImpl(opts: {
     onPgid,
     priorFailureSignature,
     diffBase,
+    parentBaseRef,
     reworkRoute,
     reworkModel,
     runId,
@@ -424,6 +427,7 @@ async function checkPhaseImpl(opts: {
     worktree,
     specPath,
     diffBase,
+    parentBaseRef,
     env: laneEnv(appPort, process.env, appBaseUrl, worktree, runId),
     onPgid,
     probe,

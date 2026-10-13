@@ -70,6 +70,21 @@ describe('resolveReviewRouting', () => {
     });
     expect(r).toEqual({ floor: null, rules: [], gated: true, reason: 'classifier:error', error: 'boom' });
   });
+
+  it('passes parentBaseRef to readChanges (#2716)', async () => {
+    const seen: (string | undefined)[] = [];
+    await resolveReviewRouting({
+      worktree: '/w',
+      fallbackBaseRef: 'deadbeef',
+      parentBaseRef: 'slice-1',
+      rules,
+      readChanges: async (_w, _f, p) => {
+        seen.push(p);
+        return [];
+      },
+    });
+    expect(seen).toEqual(['slice-1']);
+  });
 });
 
 describe('readReviewFloorChanges', () => {
@@ -103,6 +118,27 @@ describe('readReviewFloorChanges', () => {
       { path: 'empty.txt', added: 0, removed: 0 },
     ]);
     expect(calls).toContain('git diff --numstat --no-renames abc123');
+  });
+
+  it('diffs against the merge-base of parentBaseRef and never tries origin/main (#2716)', async () => {
+    const { run, calls } = fakeRun({
+      'git rev-parse --verify --quiet slice-1': { ok: true },
+      'git merge-base slice-1 HEAD': { ok: true, stdout: 'def456\n' },
+      'git diff --numstat --no-renames def456': { ok: true, stdout: '3\t1\tsrc/b.ts\n' },
+      'git ls-files --others': { ok: true },
+    });
+    const changes = await readReviewFloorChanges('/w', { run, parentBaseRef: 'slice-1' });
+    expect(changes).toEqual([{ path: 'src/b.ts', added: 3, removed: 1 }]);
+    expect(calls).toContain('git diff --numstat --no-renames def456');
+    expect(calls.some((c) => c.includes('origin/main'))).toBe(false);
+  });
+
+  it('throws when parentBaseRef does not resolve, without falling back (#2716)', async () => {
+    const { run, calls } = fakeRun({
+      'git rev-parse --verify --quiet origin/main': { ok: true },
+    });
+    await expect(readReviewFloorChanges('/w', { run, parentBaseRef: 'slice-1' })).rejects.toThrow(/does not resolve/);
+    expect(calls.some((c) => c.includes('origin/main'))).toBe(false);
   });
 
   it('uses the ref itself when merge-base fails', async () => {
