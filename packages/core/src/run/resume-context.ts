@@ -3,18 +3,20 @@
 // fails on the base SHA, the frozen spec is still valid; this store remembers which issue body
 // it was planned from so the next claim can skip the boss PLAN call when the body is unchanged.
 // #2320 (resume at BUILD) extends this same record and store.
+// It also builds the #2583 park message for a config-caused CHECK failure.
 
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
+import { isConfigCheckerOutput } from '../checkers/index.js';
 import { lintFactoryConfig } from '../config/config-lint.js';
 import { parseDesignArtifact } from '../design/index.js';
 import type { EnvironmentFailure } from '../phases/check.js';
 import type { PlanResult } from '../phases/plan.js';
 import { readSpec } from '../spec/index.js';
-import type { Constitution } from '../types/index.js';
+import type { CheckSummary, Constitution } from '../types/index.js';
 
 export interface PlanReuseRecord {
   /** issueBodyHash of the brief the frozen spec was planned from. */
@@ -182,4 +184,36 @@ export function preservedFixTarget(
     return idx >= 0 ? `${display}:${idx + 1}` : display;
   }
   return failure.logPaths?.[0] ?? `the base (failing: ${failure.failingChecks.join(', ')})`;
+}
+
+/** Park message for a config-caused CHECK failure (#2583): file:line, the fix, and how to re-queue. */
+export function configParkMessage(opts: {
+  issue: number;
+  failure: Pick<EnvironmentFailure, 'cause' | 'failingChecks' | 'logPaths'>;
+  summary: CheckSummary;
+  constitution: Constitution | null;
+  configFile?: { absPath: string; relPath: string };
+}): string {
+  const { issue, failure, summary, constitution, configFile } = opts;
+  const { findings } = lintFactoryConfig({ constitution, configFile });
+  const finding = findings.find((f) => f.line !== undefined) ?? findings[0];
+  const target =
+    finding?.line !== undefined
+      ? `${finding.file}:${finding.line}`
+      : preservedFixTarget(failure, constitution, configFile);
+  let fix: string;
+  if (finding) {
+    const prefix = `${target}: `;
+    fix = finding.message.startsWith(prefix) ? finding.message.slice(prefix.length) : finding.message;
+  } else {
+    fix =
+      summary.results.find((r) => isConfigCheckerOutput(r))?.details ??
+      'fix the constitution checkers list so every entry is a known checker name';
+  }
+  return [
+    `config failure in CHECK (${failure.failingChecks.join(', ')}) — parked, not released to queued: it fails the same way on every requeue`,
+    `file: ${target}`,
+    `fix: ${fix}`,
+    `then run factory unpark ${issue}`,
+  ].join('\n');
 }

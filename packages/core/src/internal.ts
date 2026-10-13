@@ -720,6 +720,7 @@ export type { IssueRunState, RunStatus } from './types/index.js';
 export { readIssueRunState } from './run/state.js';
 export {
   checkResumePath,
+  configParkMessage,
   createCheckResumeStore,
   createPlanReuseStore,
   formatPreservedBuildMessage,

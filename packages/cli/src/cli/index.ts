@@ -7262,7 +7262,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
   program
     .command('resume [issue]')
     .description(
-      'Clear a stop so lanes pick up new issues again; with <issue> --from check, re-run CHECK on a build kept after a config/environment failure',
+      'Clear a stop so lanes pick up new issues again; with <issue> --from check, re-run CHECK on a build kept after an environment failure',
     )
     .option('--json', 'Print one JSON object (schemaVersion 1): action, repo, stopFlag before/after')
     .option('--from <phase>', 'Resume a kept build at this phase (only: check)')
