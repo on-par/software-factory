@@ -213,6 +213,8 @@ export { judgeSpec, median, runJudgeSamples, scoreSpec } from './eval/index.js';
 
 // Usage internals
 export { defaultTranscriptRoots, priceFor, TRAILING_WINDOW_MS } from './usage/index.js';
+export { harnessHasUsageSignal, resolveRunUsageHarness, USAGE_NOT_AVAILABLE_FOR_AGENT } from './usage/index.js';
+export type { RunUsageHarnessInput } from './usage/index.js';
 export { readClaudeAccessToken } from './usage/subscription.js';
 
 // Utils

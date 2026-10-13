@@ -4367,6 +4367,32 @@ bash scripts/verify.sh
       expect(events).toContain('run-done');
     });
 
+    it('passes the non-Claude harness to the usage watchdog for an opencode route with a non-Claude plan pin', async () => {
+      mkdirSync(paths().root, { recursive: true });
+      writeFileSync(paths().config, JSON.stringify({ version: 2, route: 'opencode' }));
+      h.modelOverrides = { plan: 'opencode-deepseek-v4-flash' };
+      const original = coreFakes.ModelRegistry.getMockImplementation();
+      coreFakes.ModelRegistry.mockImplementation(function (this: unknown, ...args: unknown[]) {
+        return { ...(original as any).apply(this, args), getHarnessId: () => 'opencode' };
+      } as never);
+      try {
+        writeFileSync(paths().queue, 'app 1\n');
+        const res = await runMain('run', '--local-queue');
+        expect(res.exited).toBe(false);
+        expect(coreFakes.watchUsage).toHaveBeenCalledWith(expect.objectContaining({ harness: 'opencode' }));
+      } finally {
+        coreFakes.ModelRegistry.mockImplementation(original as never);
+      }
+    });
+
+    it('passes no harness to the usage watchdog when the run is not resolved as non-Claude', async () => {
+      writeFileSync(paths().queue, 'app 1\n');
+      const res = await runMain('run', '--local-queue');
+      expect(res.exited).toBe(false);
+      expect(coreFakes.watchUsage).toHaveBeenCalled();
+      expect(coreFakes.watchUsage.mock.calls.at(-1)?.[0]).not.toHaveProperty('harness');
+    });
+
     it('logs a warn event without crashing the run when the usage watchdog rejects', async () => {
       coreFakes.watchUsage.mockRejectedValueOnce(new Error('watchdog exploded'));
       writeFileSync(paths().queue, 'app 1\n');

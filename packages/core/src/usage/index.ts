@@ -4,6 +4,7 @@ import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from '
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
+import type { BuildRoutePin, EffectiveBuildRoute } from '../config/repo.js';
 import type { CostEntry } from '../types/index.js';
 import { claudeConfigDirOverride } from '../utils/claude-config.js';
 import { logEvent } from '../utils/index.js';
@@ -175,6 +176,39 @@ export interface WatchUsageOptions {
   emitEvent?: typeof logEvent;
   setStop?: (file: string) => void;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  /** Agent harness of the run; one without a usage signal makes the watchdog report unavailable (#2633). */
+  harness?: string;
+}
+
+/** Event text for a harness with no usage signal (ADR-0099: never shown as armed). */
+export const USAGE_NOT_AVAILABLE_FOR_AGENT = 'usage watchdog not available for this agent';
+
+/** Only the claude-cli harness has a usage signal (Anthropic subscription window). undefined = assume Claude. */
+export function harnessHasUsageSignal(harness: string | undefined): boolean {
+  return harness === undefined || harness === 'claude-cli';
+}
+
+export interface RunUsageHarnessInput {
+  buildRoute?: BuildRoutePin;
+  buildRouteSource: EffectiveBuildRoute['source'];
+  /** Harness ids of the plan pin and planFallback pin, when pinned (undefined entry = unknown model). */
+  planHarnesses: ReadonlyArray<string | undefined>;
+  codexDisabled: boolean;
+  localOnly: boolean;
+}
+
+/** The run's agent harness for the usage watchdog. Returns a non-Claude id only when both PLAN and
+ *  BUILD are known to run off Claude; any doubt returns undefined, which keeps Claude gating. */
+export function resolveRunUsageHarness(input: RunUsageHarnessInput): string | undefined {
+  const { buildRoute, buildRouteSource, planHarnesses, codexDisabled, localOnly } = input;
+  if (localOnly) return undefined;
+  if (buildRoute === undefined || buildRoute === 'claude') return undefined;
+  // run-issue.ts: a build pin cannot force codex when it is disabled, so BUILD falls back to Claude
+  if (buildRoute === 'codex' && buildRouteSource === 'build-pin' && codexDisabled) return undefined;
+  if (planHarnesses.length === 0 || planHarnesses.some((h) => h === undefined || h === 'claude-cli')) {
+    return undefined;
+  }
+  return buildRoute === 'codex' ? 'codex-cli' : 'opencode';
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -191,7 +225,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-export async function watchUsage(opts: WatchUsageOptions): Promise<'stopped' | 'aborted'> {
+export async function watchUsage(opts: WatchUsageOptions): Promise<'stopped' | 'aborted' | 'unavailable'> {
   const {
     cap,
     stopAt,
@@ -206,7 +240,18 @@ export async function watchUsage(opts: WatchUsageOptions): Promise<'stopped' | '
     emitEvent = logEvent,
     setStop = (file: string) => writeFileSync(file, ''),
     sleep: wait = sleep,
+    harness,
   } = opts;
+
+  if (!harnessHasUsageSignal(harness)) {
+    emitEvent(
+      eventsFile,
+      'usage-unavailable',
+      'usage',
+      `${USAGE_NOT_AVAILABLE_FOR_AGENT} (${harness}): no usage signal for this harness, not gating on Claude usage`,
+    );
+    return 'unavailable';
+  }
 
   emitEvent(
     eventsFile,
