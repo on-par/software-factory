@@ -3,14 +3,13 @@
 # repo from scripts/fixtures/smoke-repo/ whose config pins the given agent's recorded shim, and
 # runs `factory doctor` on a PATH where claude cannot be found. Exits 0 only when doctor passes.
 #
-# Only `codex` is supported for now; opencode, command, the ship step and CI wiring are later
-# slices. Assumes `npm ci` and `npm run build` have already run at the repo root.
+# `codex` and `opencode` are supported; command, the ship step and CI wiring are later slices. Assumes `npm ci` and `npm run build` have already run at the repo root.
 set -euo pipefail
 
 AGENT="${1:-}"
 case "$AGENT" in
-  codex) ;;
-  *) echo "usage: $0 <codex>" >&2; exit 2 ;;
+  codex | opencode) ;;
+  *) echo "usage: $0 <codex|opencode>" >&2; exit 2 ;;
 esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -63,9 +62,9 @@ bash "$ROOT/scripts/fixtures/smoke-repo/render-config.sh" "$AGENT" >.factory/con
 git add -A
 git commit -q -m "smoke-repo fixture"
 
-# The codex entry is a wrapper, not a symlink: the shim resolves its fixtures from dirname "$0".
-printf '#!/bin/sh\nexec "%s" "$@"\n' "$ROOT/scripts/fixtures/agents/bin/codex" >"$FAKEBIN/codex"
-chmod +x "$FAKEBIN/codex"
+# The agent entry is a wrapper, not a symlink: the shim resolves its fixtures from dirname "$0".
+printf '#!/bin/sh\nexec "%s" "$@"\n' "$ROOT/scripts/fixtures/agents/bin/$AGENT" >"$FAKEBIN/$AGENT"
+chmod +x "$FAKEBIN/$AGENT"
 cat >"$FAKEBIN/gh" <<'FAKE'
 #!/bin/sh
 case "$1 $2" in
@@ -77,26 +76,29 @@ FAKE
 chmod +x "$FAKEBIN/gh"
 ln -s "$(command -v node)" "$FAKEBIN/node"
 ln -s "$(command -v git)" "$FAKEBIN/git"
-CODEX_PATH="$FAKEBIN"
+AGENT_PATH="$FAKEBIN"
 IFS=: read -r -a PATH_DIRS <<<"$PATH"
 for dir in "${PATH_DIRS[@]}"; do
-  [ -x "$dir/claude" ] || [ -x "$dir/opencode" ] || CODEX_PATH="$CODEX_PATH:$dir"
+  [ -x "$dir/claude" ] || [ -x "$dir/codex" ] || [ -x "$dir/opencode" ] || AGENT_PATH="$AGENT_PATH:$dir"
 done
-echo "codex PATH: $CODEX_PATH"
+echo "$AGENT PATH: $AGENT_PATH"
 
 CLAUDE_EXIT=0
-CLAUDE_OUT="$(PATH="$CODEX_PATH" command -v claude)" || CLAUDE_EXIT=$?
+CLAUDE_OUT="$(PATH="$AGENT_PATH" command -v claude)" || CLAUDE_EXIT=$?
 if [ -n "$CLAUDE_OUT" ] || [ "$CLAUDE_EXIT" -eq 0 ]; then
-  echo "expected claude to be unreachable on the codex PATH, got '$CLAUDE_OUT' (exit $CLAUDE_EXIT)" >&2
+  echo "expected claude to be unreachable on the $AGENT PATH, got '$CLAUDE_OUT' (exit $CLAUDE_EXIT)" >&2
   exit 1
 fi
-echo "claude not reachable on codex PATH: OK"
+echo "claude not reachable on $AGENT PATH: OK"
 
-# FAKE_AGENT_MODE=empty keeps the shim from committing into the repo when doctor probes codex.
-# CODEX_API_KEY is the sign-in evidence, so the signed-in row passes without parsing login status.
+# FAKE_AGENT_MODE=empty keeps the shim from committing into the repo when doctor probes the agent.
+# The env key is the sign-in evidence, so the signed-in row passes without reading stored logins.
+case "$AGENT" in
+  codex) AGENT_ENV=(CODEX_HOME="$CODEX_HOME_DIR" CODEX_API_KEY=smoke-dummy-key) ;;
+  opencode) AGENT_ENV=(OPENCODE_API_KEY=smoke-dummy-key) ;;
+esac
 DOCTOR_EXIT=0
-DOCTOR_OUT="$(PATH="$CODEX_PATH" CODEX_HOME="$CODEX_HOME_DIR" CODEX_API_KEY=smoke-dummy-key \
-  FAKE_AGENT_MODE=empty "$FACTORY" doctor 2>&1)" || DOCTOR_EXIT=$?
+DOCTOR_OUT="$(env PATH="$AGENT_PATH" "${AGENT_ENV[@]}" FAKE_AGENT_MODE=empty "$FACTORY" doctor 2>&1)" || DOCTOR_EXIT=$?
 echo "$DOCTOR_OUT"
 if [ "$DOCTOR_EXIT" -ne 0 ]; then
   echo "expected factory doctor to exit 0 on the $AGENT PATH, got exit $DOCTOR_EXIT" >&2
