@@ -4,7 +4,7 @@ import { execSync } from 'node:child_process';
 
 import { ModelEffortsSchema, supportsEffort } from '../config/effort.js';
 import type { HarnessDeclaration, ModelsConfig } from '../config/index.js';
-import { HARNESS_CATALOG, isAgenticHarness, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
+import { HARNESS_CATALOG, harnessCliCommand, isAgenticHarness, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
 import type { ModelDefinition, ModelTier } from '../types/index.js';
 import { hasClaudeLoginEvidence } from '../utils/claude-config.js';
 import { hasCodexLoginEvidence } from '../utils/codex-config.js';
@@ -195,6 +195,15 @@ export function isCommandAvailable(cmd: string): boolean {
   }
 }
 
+/** True unless the harness needs a CLI that is not on PATH. Harnesses with no CLI probe are always present. */
+export function isHarnessCliPresent(
+  harnessId: string | undefined,
+  commandAvailable: (cmd: string) => boolean = isCommandAvailable,
+): boolean {
+  const cmd = harnessCliCommand(harnessId);
+  return cmd === undefined || commandAvailable(cmd);
+}
+
 const HARNESS_PROBE_TIMEOUT_MS = 10_000;
 
 /** Run a declared harness probe command. Returns null on exit 0, else a one-line failure detail. */
@@ -382,7 +391,7 @@ export function diagnoseModels(
         reason = `unknown harness '${harnessId ?? 'none'}' — declare a 'harness' from: ${KNOWN_HARNESS_IDS.join(', ')}`;
       } else if (entry.probe.kind === 'command') {
         const probe = entry.probe;
-        if (!commandAvailable(probe.command)) {
+        if (!isHarnessCliPresent(harnessId, commandAvailable)) {
           reason = `${probe.command} CLI not found on PATH`;
         } else if (probe.auth === 'cli') {
           // CLI carries its own (OAuth-based) auth — a missing API key doesn't block, but the

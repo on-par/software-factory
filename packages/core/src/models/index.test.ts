@@ -5,6 +5,7 @@ import { loadModelsConfig } from '../config/index.js';
 import {
   diagnoseModels,
   isCommandAvailable,
+  isHarnessCliPresent,
   ModelRegistry,
   probeDeclaredHarnesses,
   resolveModelOverrides,
@@ -1255,5 +1256,18 @@ describe('resolveModelOverrides', () => {
       plan: undefined,
       build: undefined,
     });
+  });
+});
+
+describe('isHarnessCliPresent', () => {
+  it('is true for harnesses with no CLI probe even when no command is available', () => {
+    expect(isHarnessCliPresent('ollama-http', () => false)).toBe(true);
+    expect(isHarnessCliPresent('my-declared-harness', () => false)).toBe(true);
+    expect(isHarnessCliPresent(undefined, () => false)).toBe(true);
+  });
+
+  it('follows the injected probe for CLI harnesses', () => {
+    expect(isHarnessCliPresent('claude-cli', (cmd) => cmd !== 'claude')).toBe(false);
+    expect(isHarnessCliPresent('claude-cli', (cmd) => cmd === 'claude')).toBe(true);
   });
 });

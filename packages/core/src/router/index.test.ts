@@ -1737,3 +1737,81 @@ describe('Ollama reachability probe', () => {
     expect(fetchStub).not.toHaveBeenCalled();
   });
 });
+
+describe('missing harness CLI (#2629)', () => {
+  const realModels = loadModelsConfig();
+  const realRoutes = loadRoutesConfig();
+  const codexOnly = (cmd: string) => cmd === 'codex';
+
+  function setup() {
+    const calls: string[] = [];
+    const router = new ModelRouter(realModels, realRoutes, false, {
+      probeOllama: async () => ({
+        reachable: false as const,
+        endpoint: 'http://127.0.0.1:11434',
+        reason: 'ECONNREFUSED',
+      }),
+      runModel: async (model: string) => {
+        calls.push(model);
+        return 'OK';
+      },
+    });
+    const harnessOf = (model: string) => router.registryRef.getHarnessId(model);
+    return { router, calls, harnessOf };
+  }
+
+  it('never attempts a claude-cli override or fallback when the claude CLI is missing and picks the codex boss model', async () => {
+    const { router, calls, harnessOf } = setup();
+    router.skipMissingHarnessClis(codexOnly);
+    const result = await router.run('plan', 'p', {
+      modelOverride: 'claude-opus-5',
+      modelFallbacks: ['gpt-5.6-terra-high'],
+    });
+    expect(calls.some((m) => harnessOf(m) === 'claude-cli')).toBe(false);
+    expect(result.model).toBe('gpt-5.6-terra-high');
+    expect(result.attempts.some((a) => harnessOf(a.model) === 'claude-cli')).toBe(false);
+
+    calls.length = 0;
+    const plain = await router.run('plan', 'p');
+    expect(harnessOf(plain.model)).toBe('codex-cli');
+    expect(calls.some((m) => harnessOf(m) === 'claude-cli')).toBe(false);
+  });
+
+  it('logs exactly one skip line per missing harness across repeated runs', async () => {
+    const { router } = setup();
+    router.skipMissingHarnessClis(codexOnly);
+    const logs: string[] = [];
+    const onLog = (m: string) => logs.push(m);
+    await router.run('plan', 'p', { onLog });
+    await router.run('plan', 'p', { onLog });
+    await router.run('plan', 'p', { onLog });
+    await router.run('triage', 'p', { onLog });
+    expect(logs.filter((l) => l.includes('claude-cli') && l.includes('claude CLI not found on PATH'))).toHaveLength(1);
+    expect(logs.some((l) => /Trying claude-/.test(l))).toBe(false);
+  });
+
+  it('keeps boss-tier selection identical when every harness CLI is present', async () => {
+    const a = setup();
+    const b = setup();
+    a.router.skipMissingHarnessClis(() => true);
+    expect(a.router.resolveAll('plan')).toEqual(b.router.resolveAll('plan'));
+    const logsA: string[] = [];
+    const logsB: string[] = [];
+    const ra = await a.router.run('plan', 'p', { onLog: (m) => logsA.push(m) });
+    const rb = await b.router.run('plan', 'p', { onLog: (m) => logsB.push(m) });
+    expect(ra.model).toBe('claude-opus-5');
+    expect(ra.model).toBe(rb.model);
+    expect(ra.attempts).toEqual(rb.attempts);
+    expect([...logsA, ...logsB].some((l) => l.includes('not found on PATH'))).toBe(false);
+  });
+
+  it('throws an unavailable error naming the CLI when every override candidate is missing', async () => {
+    const { router, calls } = setup();
+    router.skipMissingHarnessClis(codexOnly);
+    await expect(router.run('plan', 'p', { modelOverride: 'claude-opus-5' })).rejects.toMatchObject({
+      reason: 'unavailable',
+      message: expect.stringMatching(/plan.*claude CLI not found on PATH/),
+    });
+    expect(calls).toHaveLength(0);
+  });
+});

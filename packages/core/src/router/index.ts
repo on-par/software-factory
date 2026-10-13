@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
-import { HARNESS_CATALOG } from '../harness/catalog.js';
+import { harnessCliCommand } from '../harness/catalog.js';
 import { classifyFailure } from '../harness/classify.js';
 import { ClaudeCliHarness } from '../harness/claude-cli.js';
 import { CodexCliHarness } from '../harness/codex-cli.js';
@@ -14,7 +14,7 @@ import { HarnessError, isRetryableFailure, taskRequiresAgenticHarness } from '..
 import { OllamaAgenticHarness } from '../harness/ollama-agentic.js';
 import { OllamaHttpHarness } from '../harness/ollama-http.js';
 import { OpenCodeHarness } from '../harness/opencode.js';
-import { ModelRegistry } from '../models/index.js';
+import { isHarnessCliPresent, ModelRegistry } from '../models/index.js';
 import type { SandboxEventType, SandboxPolicy } from '../sandbox/index.js';
 import { sandboxEventFromError } from '../sandbox/index.js';
 import type { CostEntry, RetryCause, TaskType } from '../types/index.js';
@@ -552,6 +552,9 @@ export class ModelRouter {
    *  router serves one run, so a signed-out CLI is tried once and then skipped by every later
    *  task, and PLAN stops offering its build route. */
   private readonly authTripped = new Set<string>();
+  /** Harness ids already reported as missing their CLI. One router serves one run, so each
+   *  harness is logged at most once per run (#2629). */
+  private readonly missingHarnessNoticed = new Set<string>();
 
   constructor(
     modelsConfig: ModelsConfig,
@@ -576,16 +579,28 @@ export class ModelRouter {
    *  cached per command for the router's lifetime. */
   skipMissingHarnessClis(commandAvailable: (cmd: string) => boolean): void {
     const cache = new Map<string, boolean>();
-    this.harnessCliAvailable = (harnessId) => {
-      const probe = HARNESS_CATALOG[harnessId]?.probe;
-      if (probe?.kind !== 'command') return true;
-      let ok = cache.get(probe.command);
+    const cachedCommandAvailable = (cmd: string): boolean => {
+      let ok = cache.get(cmd);
       if (ok === undefined) {
-        ok = commandAvailable(probe.command);
-        cache.set(probe.command, ok);
+        ok = commandAvailable(cmd);
+        cache.set(cmd, ok);
       }
       return ok;
     };
+    this.harnessCliAvailable = (harnessId) => isHarnessCliPresent(harnessId, cachedCommandAvailable);
+  }
+
+  private harnessCliMissing(model: string): boolean {
+    return this.harnessCliAvailable !== undefined && !this.harnessCliAvailable(this.registry.getHarnessId(model) ?? '');
+  }
+
+  private noticeMissingHarness(model: string, onLog: (msg: string) => void): void {
+    const harnessId = this.registry.getHarnessId(model) ?? '';
+    if (this.missingHarnessNoticed.has(harnessId)) return;
+    this.missingHarnessNoticed.add(harnessId);
+    onLog(
+      `Skipping ${harnessId} models for the rest of this run: ${harnessCliCommand(harnessId)} CLI not found on PATH`,
+    );
   }
 
   private authKey(model: string): string | undefined {
@@ -651,10 +666,7 @@ export class ModelRouter {
     const tier = this.getTier(task);
     if (!tier) return [];
     let models = this.registry.getAvailableModelsForTier(tier, this.byok, this.allowExperimental, this.localOnly);
-    const harnessCliAvailable = this.harnessCliAvailable;
-    if (harnessCliAvailable) {
-      models = models.filter((model) => harnessCliAvailable(this.registry.getHarnessId(model) ?? ''));
-    }
+    if (this.harnessCliAvailable) models = models.filter((model) => !this.harnessCliMissing(model));
     if (this.authTripped.size > 0) models = models.filter((model) => !this.isAuthTripped(model));
     const requires = this.routesConfig.routes[task]?.requires;
     if (requires === 'codex') {
@@ -718,6 +730,20 @@ export class ModelRouter {
       retryCause,
     } = options;
 
+    if (!modelOverride && this.harnessCliAvailable) {
+      const tier = this.getTier(task);
+      if (tier) {
+        for (const m of this.registry.getAvailableModelsForTier(
+          tier,
+          this.byok,
+          this.allowExperimental,
+          this.localOnly,
+        )) {
+          if (this.harnessCliMissing(m)) this.noticeMissingHarness(m, onLog);
+        }
+      }
+    }
+
     const models = modelOverride
       ? [modelOverride, ...modelFallbacks.filter((id) => id !== modelOverride)]
       : this.resolveAll(task);
@@ -743,6 +769,8 @@ export class ModelRouter {
 
     let ollamaProbe: OllamaProbeResult | undefined;
     let skippedForOllama = false;
+    let skippedForMissingCli = false;
+    const missingClis: string[] = [];
 
     for (const model of models) {
       const modelProvider = this.registry.get(model)?.provider;
@@ -755,6 +783,13 @@ export class ModelRouter {
           skippedForOllama = true;
           continue;
         }
+      }
+      if (this.harnessCliMissing(model)) {
+        this.noticeMissingHarness(model, onLog);
+        skippedForMissingCli = true;
+        const cmd = harnessCliCommand(this.registry.getHarnessId(model));
+        if (cmd) missingClis.push(cmd);
+        continue;
       }
       if (this.isAuthTripped(model)) {
         onLog(`Skipping ${model} for ${task}: ${this.authKey(model)} failed sign-in earlier in this run`);
@@ -934,6 +969,15 @@ export class ModelRouter {
         }
         break;
       }
+    }
+
+    if (attempts.length === 0 && skippedForMissingCli && !skippedForOllama) {
+      const cmds = [...new Set(missingClis)].sort().join(', ');
+      throw new ModelRouterError(
+        `No runnable models for task '${task}': ${cmds} CLI not found on PATH`,
+        'unavailable',
+        attempts,
+      );
     }
 
     if (attempts.length === 0 && skippedForOllama && ollamaProbe && !ollamaProbe.reachable) {
