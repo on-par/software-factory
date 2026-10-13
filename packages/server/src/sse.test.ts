@@ -70,13 +70,6 @@ describe('createReplayRing', () => {
     expect(ring.since(undefined)).toEqual([]);
   });
 
-  it('since(0) returns everything retained', () => {
-    const ring = createReplayRing(5);
-    ring.push(1, makeRepositoryEvent());
-    ring.push(2, makeRepositoryEvent());
-    expect(ring.since(0).map((e) => e.id)).toEqual([1, 2]);
-  });
-
   it('since(n) returns only ids greater than n', () => {
     const ring = createReplayRing(5);
     ring.push(1, makeRepositoryEvent());

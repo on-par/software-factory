@@ -25,8 +25,8 @@ import {
   type WorktreeProbe,
 } from './probe.js';
 
-export type { PackageJsonProbe, PythonTestSurface, PythonTestSurfaceSource, WorktreeProbe } from './probe.js';
-export { countPlaceholderLinks, detectPythonTestSurface, fileExists, findHtmlFiles, probeWorktree } from './probe.js';
+export type { WorktreeProbe } from './probe.js';
+export { probeWorktree } from './probe.js';
 
 interface PackageJson {
   scripts?: Record<string, string>;

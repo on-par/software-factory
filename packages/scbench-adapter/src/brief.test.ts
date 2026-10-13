@@ -24,16 +24,10 @@ describe('materializeBrief', () => {
     expect(brief).toContain(CHECKPOINT.task);
   });
 
-  it('includes a non-empty acceptance criteria section', () => {
-    const brief = materializeBrief(CHECKPOINT);
-    expect(brief).toContain('## Acceptance criteria');
-    expect(brief).toContain('- Every example in the specification above reproduces exactly.');
-  });
-
   it('acceptance criteria are generic and spec-derived', () => {
     const brief = materializeBrief(CHECKPOINT);
     expect(brief).toContain('## Acceptance criteria');
-    expect(brief).toContain('Every example in the specification above reproduces exactly.');
+    expect(brief).toContain('- Every example in the specification above reproduces exactly.');
     expect(brief).toContain('Behaviour from earlier checkpoints is preserved.');
     expect(brief).toContain("The workspace's test suite passes.");
   });

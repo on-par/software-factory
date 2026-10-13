@@ -16,7 +16,7 @@ import {
   type PythonTestSurface,
   type PythonTestSurfaceSource,
   type WorktreeProbe,
-} from './index.js';
+} from './probe.js';
 
 const tempDirs = new Set<string>();
 
