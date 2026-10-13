@@ -13,6 +13,7 @@ import {
   sliceCapExceeded,
   slicePlanFromDecomposition,
   withSliceState,
+  withSlicesAffected,
   withSlicesNotBuilt,
 } from './slice-plan.js';
 import type { SlicePlan } from './slice-plan.js';
@@ -226,5 +227,49 @@ describe('withSlicesNotBuilt', () => {
 
   it('throws RangeError for an unknown index', () => {
     expect(() => withSlicesNotBuilt(built(2), 3)).toThrow(RangeError);
+  });
+});
+
+describe('withSlicesAffected and headSha', () => {
+  const open = () =>
+    withSliceState(
+      withSliceState(withSliceState(built(3), 1, 'pr-open', 9, 'b1', 'sha1'), 2, 'pr-open', 10, 'b2', 'sha2'),
+      3,
+      'pr-open',
+      11,
+      'b3',
+      'sha3',
+    );
+
+  it('marks only upper pr-open slices as affected', () => {
+    const base = withSliceState(open(), 3, 'not-built');
+    const { plan, affected } = withSlicesAffected(base, 1);
+    expect(affected).toEqual([2]);
+    expect(plan.slices.map((s) => s.affectedBy)).toEqual([undefined, 1, undefined]);
+  });
+
+  it('throws RangeError for an unknown index', () => {
+    expect(() => withSlicesAffected(built(2), 3)).toThrow(RangeError);
+  });
+
+  it('records headSha via withSliceState', () => {
+    expect(open().slices[0]).toMatchObject({ headSha: 'sha1' });
+  });
+
+  it('round-trips headSha and affectedBy and renders the affected note', () => {
+    const { plan } = withSlicesAffected(open(), 1);
+    const body = renderSlicePlanComment(plan);
+    expect(body).toContain('affected by review changes to slice 1');
+    const parsed = parseSlicePlanComment(body);
+    expect(parsed?.ok && parsed.plan.slices.map((s) => [s.headSha, s.affectedBy])).toEqual([
+      ['sha1', undefined],
+      ['sha2', 1],
+      ['sha3', 1],
+    ]);
+  });
+
+  it('still parses a comment without the new fields', () => {
+    const parsed = parseSlicePlanComment(renderSlicePlanComment(built(2)));
+    expect(parsed?.ok && parsed.plan.slices[0]?.headSha).toBeUndefined();
   });
 });

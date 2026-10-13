@@ -30,6 +30,10 @@ export interface Slice {
   prNumber?: number;
   /** Head branch of the slice PR, once known. */
   branch?: string;
+  /** Head SHA of the slice PR when the factory opened it (ADR-0161, #2674); a later change means review pushed. */
+  headSha?: string;
+  /** Index of the lower slice whose review changes may have invalidated this slice (ADR-0161, #2674). */
+  affectedBy?: number;
 }
 
 export interface SlicePlan {
@@ -54,6 +58,8 @@ const SliceSchema = z.object({
   state: z.enum(['pending', 'pr-open', 'merged', 'not-built']),
   prNumber: z.number().int().positive().optional(),
   branch: z.string().min(1).optional(),
+  headSha: z.string().min(1).optional(),
+  affectedBy: z.number().int().positive().optional(),
 });
 
 const SlicePlanSchema = z.object({
@@ -94,11 +100,14 @@ function stateLabel(slice: Slice): string {
 
 const branchSuffix = (slice: Slice): string => (slice.branch ? ` · branch \`${slice.branch}\`` : '');
 
+const affectedSuffix = (slice: Slice): string =>
+  slice.affectedBy !== undefined ? ` · affected by review changes to slice ${slice.affectedBy}` : '';
+
 export function renderSlicePlanComment(plan: SlicePlan): string {
   const n = plan.slices.length;
   const checklist = plan.slices.map(
     (s) =>
-      `- [${s.state === 'merged' ? 'x' : ' '}] ${s.index}/${n}. ${oneLine(s.title)} — ${stateLabel(s)}${branchSuffix(s)}`,
+      `- [${s.state === 'merged' ? 'x' : ' '}] ${s.index}/${n}. ${oneLine(s.title)} — ${stateLabel(s)}${branchSuffix(s)}${affectedSuffix(s)}`,
   );
   const data = Buffer.from(JSON.stringify(plan), 'utf8').toString('base64');
   return [
@@ -155,6 +164,7 @@ export function withSliceState(
   state: SliceState,
   prNumber?: number,
   branch?: string,
+  headSha?: string,
 ): SlicePlan {
   if (!plan.slices.some((s) => s.index === index)) {
     throw new RangeError(`slice ${index} is not in the plan for #${plan.issue}`);
@@ -163,7 +173,13 @@ export function withSliceState(
     ...plan,
     slices: plan.slices.map((s) =>
       s.index === index
-        ? { ...s, state, ...(prNumber !== undefined ? { prNumber } : {}), ...(branch !== undefined ? { branch } : {}) }
+        ? {
+            ...s,
+            state,
+            ...(prNumber !== undefined ? { prNumber } : {}),
+            ...(branch !== undefined ? { branch } : {}),
+            ...(headSha !== undefined ? { headSha } : {}),
+          }
         : s,
     ),
   };
@@ -177,6 +193,18 @@ export function withSlicesNotBuilt(plan: SlicePlan, fromIndex: number): SlicePla
   return {
     ...plan,
     slices: plan.slices.map((s) => (s.index >= fromIndex ? { ...s, state: 'not-built' as const } : s)),
+  };
+}
+
+/** ADR-0161: review changed slice `changedIndex`; every open upper slice is marked as affected by it. */
+export function withSlicesAffected(plan: SlicePlan, changedIndex: number): { plan: SlicePlan; affected: number[] } {
+  if (!plan.slices.some((s) => s.index === changedIndex)) {
+    throw new RangeError(`slice ${changedIndex} is not in the plan for #${plan.issue}`);
+  }
+  const hit = (s: Slice): boolean => s.index > changedIndex && s.state === 'pr-open';
+  return {
+    plan: { ...plan, slices: plan.slices.map((s) => (hit(s) ? { ...s, affectedBy: changedIndex } : s)) },
+    affected: plan.slices.filter(hit).map((s) => s.index),
   };
 }
 
