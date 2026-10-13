@@ -17,10 +17,10 @@
   "license": "MIT",
   "dependencies": {
     "@on-par/factory-core": "^0.9.4",
-    "execa": "^10.0.1",
+    "execa": "^10.1.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/node": "^26.6.4"
+    "@types/node": "^26.6.5"
   }
 }
