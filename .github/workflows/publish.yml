@@ -32,11 +32,11 @@ jobs:
       # X.Y.Z-next.N to `next`, vX.Y.Z publishes X.Y.Z to `latest`. The step dry-runs
       # every package (with exact internal pins) before the real publish.
       # #2627: id-token: write + --provenance enable trusted publishing; publish-release.sh
-      # fails early on npm < 11.5.1. NPM_TOKEN stays as the fallback until an OIDC publish is proven.
+      # fails early on npm < 11.5.1.
+      # #2630: no NODE_AUTH_TOKEN is passed, so npm must authenticate via OIDC.
       - name: Publish to npm
         id: publish
         env:
           GH_TOKEN: '${{ github.token }}'
-          NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}'
           PUBLISH_DRY_RUN: '${{ inputs.dry_run }}'
         run: bash scripts/publish-release.sh
