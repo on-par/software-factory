@@ -39,6 +39,9 @@ export interface CheckerContext {
   /** Run-start HEAD SHA captured by buildPhase before the worker ran — the diff base
    *  for checkouts with no origin/main or origin/master (#1162, #1211). */
   diffBase?: string;
+  /** Parent ref of a stacked slice branch (e.g. 'slice-1'); when set, base-ref checkers diff against it
+   *  instead of origin/main, with no fallback (#2716). Set by checkPhase. */
+  parentBaseRef?: string;
   /** Set by runAllCheckers from the resolved constitution — the single source of the standards text */
   constitutionBody?: string;
   packageJson?: PackageJson | null;

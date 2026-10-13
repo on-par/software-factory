@@ -2,6 +2,7 @@ import { EpicSchema, StorySchema } from '@on-par/contracts';
 import type { Story } from '@on-par/contracts';
 import { describe, expect, it } from 'vitest';
 
+import { designSmellsChecker, workerOutputChecker } from '../checkers/design-smells.js';
 import type { DecompositionOutput } from './decompose.js';
 import {
   parentRefForSlice,
@@ -126,5 +127,22 @@ describe('withSliceBranchCreated', () => {
     const plan = freshPlan(3);
     expect(() => withSliceBranchCreated(plan, 0)).toThrow(RangeError);
     expect(() => withSliceBranchCreated(plan, 4)).toThrow(RangeError);
+  });
+});
+
+describe('CHECK diff base', () => {
+  it('CHECK diff base: workerOutputChecker and designSmellsChecker diff against the slice parent ref', async () => {
+    const plan = withSliceBranchCreated(freshPlan(3), 1);
+    const ref = parentRefForSlice(plan, 2);
+    expect(ref).toBe('factory/2702-slice-1');
+    const seen: (string | undefined)[] = [];
+    const collectDiff = (async (_w: string, _n: unknown, opts?: { baseRefOverride?: string }) => {
+      seen.push(opts?.baseRefOverride);
+      return { text: '', baseRef: ref, truncated: false };
+    }) as any;
+    const ctx = { worktree: '/w', specPath: '/w/spec.md', parentBaseRef: ref };
+    await workerOutputChecker(ctx, { collectDiff });
+    await designSmellsChecker(ctx, {} as any, undefined, { collectDiff, env: {} });
+    expect(seen).toEqual([ref, ref]);
   });
 });

@@ -1616,6 +1616,53 @@ describe('checkPhase sandbox', () => {
   });
 });
 
+describe('parentBaseRef (#2716)', () => {
+  const empty = { results: [], failures: 0, passes: 0, skips: 0, total: 0 };
+
+  it('forwards parentBaseRef to the checker ctx (#2716)', async () => {
+    const { worktree, specPath } = await makePassingWorktree();
+    const seen: any[] = [];
+    await checkPhase({
+      issue: 99,
+      worktree,
+      specPath,
+      router: {} as any,
+      constitution: null,
+      log: () => {},
+      diffBase: 'abc1234567',
+      parentBaseRef: 'slice-1',
+      runCheckers: async (ctx) => {
+        seen.push(ctx);
+        return empty;
+      },
+    });
+    expect(seen.length).toBeGreaterThan(0);
+    for (const ctx of seen) {
+      expect(ctx.parentBaseRef).toBe('slice-1');
+      expect(ctx.diffBase).toBe('abc1234567');
+    }
+  });
+
+  it('leaves parentBaseRef undefined in the checker ctx by default (#2716)', async () => {
+    const { worktree, specPath } = await makePassingWorktree();
+    const seen: any[] = [];
+    await checkPhase({
+      issue: 99,
+      worktree,
+      specPath,
+      router: {} as any,
+      constitution: null,
+      log: () => {},
+      runCheckers: async (ctx) => {
+        seen.push(ctx);
+        return empty;
+      },
+    });
+    expect(seen.length).toBeGreaterThan(0);
+    for (const ctx of seen) expect(ctx.parentBaseRef).toBeUndefined();
+  });
+});
+
 describe('checkPhase appPort', () => {
   let prevFactoryHeadless: string | undefined;
 

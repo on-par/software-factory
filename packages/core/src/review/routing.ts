@@ -54,18 +54,34 @@ function countLines(text: string): number {
  *  (the same base CHECK resolves), plus untracked files. Throws when no base can be found. */
 export async function readReviewFloorChanges(
   worktree: string,
-  opts: { fallbackBaseRef?: string; run?: DiffRunner; readFile?: (path: string) => string } = {},
+  opts: {
+    fallbackBaseRef?: string;
+    parentBaseRef?: string;
+    run?: DiffRunner;
+    readFile?: (path: string) => string;
+  } = {},
 ): Promise<ReviewFloorPathChange[]> {
   const run = opts.run ?? defaultDiffRunner;
   const readFile = opts.readFile ?? ((p: string) => readFileSync(p, 'utf8'));
 
   let base: string | null = null;
-  for (const candidate of BASE_REF_CANDIDATES) {
-    const check = await run(['git', 'rev-parse', '--verify', '--quiet', `${candidate}^{commit}`], worktree);
-    if (!check.ok) continue;
-    const mb = await run(['git', 'merge-base', candidate, 'HEAD'], worktree);
-    base = mb.ok && mb.stdout.trim() !== '' ? mb.stdout.trim() : candidate;
-    break;
+  if (opts.parentBaseRef !== undefined) {
+    const ref = opts.parentBaseRef;
+    const check = await run(['git', 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`], worktree);
+    if (!check.ok) {
+      throw new Error(`review floor base ref override '${ref}' does not resolve — not falling back to origin/main`);
+    }
+    const mb = await run(['git', 'merge-base', ref, 'HEAD'], worktree);
+    base = mb.ok && mb.stdout.trim() !== '' ? mb.stdout.trim() : ref;
+  }
+  if (base === null) {
+    for (const candidate of BASE_REF_CANDIDATES) {
+      const check = await run(['git', 'rev-parse', '--verify', '--quiet', `${candidate}^{commit}`], worktree);
+      if (!check.ok) continue;
+      const mb = await run(['git', 'merge-base', candidate, 'HEAD'], worktree);
+      base = mb.ok && mb.stdout.trim() !== '' ? mb.stdout.trim() : candidate;
+      break;
+    }
   }
   if (base === null && opts.fallbackBaseRef !== undefined) {
     const check = await run(['git', 'rev-parse', '--verify', '--quiet', `${opts.fallbackBaseRef}^{commit}`], worktree);
@@ -95,14 +111,20 @@ export function classifierGateReason(result: ReviewFloorResult): string {
 export async function resolveReviewRouting(input: {
   worktree: string;
   fallbackBaseRef?: string;
+  parentBaseRef?: string;
   rules: ReviewFloorRuleSet;
-  readChanges?: (worktree: string, fallbackBaseRef?: string) => Promise<ReviewFloorPathChange[]>;
+  readChanges?: (
+    worktree: string,
+    fallbackBaseRef?: string,
+    parentBaseRef?: string,
+  ) => Promise<ReviewFloorPathChange[]>;
 }): Promise<ReviewRouting> {
   const readChanges =
-    input.readChanges ?? ((w: string, f?: string) => readReviewFloorChanges(w, { fallbackBaseRef: f }));
+    input.readChanges ??
+    ((w: string, f?: string, p?: string) => readReviewFloorChanges(w, { fallbackBaseRef: f, parentBaseRef: p }));
   try {
     const result = computeReviewFloor({
-      changes: await readChanges(input.worktree, input.fallbackBaseRef),
+      changes: await readChanges(input.worktree, input.fallbackBaseRef, input.parentBaseRef),
       rules: input.rules,
     });
     if (result.floor === 'A') return { floor: 'A', rules: result.rules, gated: false };
