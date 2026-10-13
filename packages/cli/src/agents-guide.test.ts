@@ -232,19 +232,16 @@ describe('docs/agents.md guard self-test', () => {
   });
 });
 
-// The content guard arms itself once #2539 replaces the placeholder stub.
-const isPlaceholder = guideText !== undefined && guideText.includes('The per-provider sections are tracked in #2408.');
-
 describe('docs/agents.md supported agents guide', () => {
   it('docs/agents.md exists', () => {
     expect(guideText === undefined ? [`${label} does not exist`] : []).toEqual([]);
   });
 
-  it.skipIf(isPlaceholder)('has a matrix row for every catalog harness id and complete provider sections', () => {
+  it('has a matrix row for every catalog harness id and complete provider sections', () => {
     expect(agentsGuideProblems(guideText, KNOWN_HARNESS_IDS, label)).toEqual([]);
   });
 
-  it.skipIf(isPlaceholder)('matrix has every column filled and a valid status in every row', () => {
+  it('matrix has every column filled and a valid status in every row', () => {
     const lines = (guideText ?? '').split('\n');
     const problems: string[] = [];
     const start = lines.findIndex((l) => l.trim().startsWith('|') && cellsOf(l).some((c) => /^harness id$/i.test(c)));
@@ -271,115 +268,105 @@ describe('docs/agents.md supported agents guide', () => {
     expect(problems).toEqual([]);
   });
 
-  it.skipIf(isPlaceholder)('has all five recipes, each with one yaml block and a Version tested line', () => {
+  it('has all five recipes, each with one yaml block and a Version tested line', () => {
     expect(recipeProblems(guideText ?? '', label)).toEqual([]);
   });
 
-  it.skipIf(isPlaceholder)(
-    'every recipe loads as a .factory/config.yaml and pins only known models, with versions matching the provider sections',
-    () => {
-      const lines = (guideText ?? '').split('\n');
-      const problems: string[] = [];
-      const savedRunConfig = process.env.FACTORY_RUN_CONFIG_JSON;
-      delete process.env.FACTORY_RUN_CONFIG_JSON;
-      try {
-        for (const recipe of RECIPES) {
-          const yaml = yamlBlocks(recipeSection(lines, recipe) ?? '')[0];
-          if (yaml === undefined) {
-            problems.push(`${recipe}: no yaml block`);
+  it('every recipe loads as a .factory/config.yaml and pins only known models, with versions matching the provider sections', () => {
+    const lines = (guideText ?? '').split('\n');
+    const problems: string[] = [];
+    const savedRunConfig = process.env.FACTORY_RUN_CONFIG_JSON;
+    delete process.env.FACTORY_RUN_CONFIG_JSON;
+    try {
+      for (const recipe of RECIPES) {
+        const yaml = yamlBlocks(recipeSection(lines, recipe) ?? '')[0];
+        if (yaml === undefined) {
+          problems.push(`${recipe}: no yaml block`);
+          continue;
+        }
+        const dir = mkdtempSync(join(tmpdir(), 'agents-recipe-'));
+        try {
+          mkdirSync(join(dir, '.factory'));
+          writeFileSync(join(dir, '.factory', 'config.yaml'), yaml);
+          const repo = loadRepoConfig(dir);
+          if (repo?.version !== 2) {
+            problems.push(`${recipe}: expected a version 2 config`);
             continue;
           }
-          const dir = mkdtempSync(join(tmpdir(), 'agents-recipe-'));
-          try {
-            mkdirSync(join(dir, '.factory'));
-            writeFileSync(join(dir, '.factory', 'config.yaml'), yaml);
-            const repo = loadRepoConfig(dir);
-            if (repo?.version !== 2) {
-              problems.push(`${recipe}: expected a version 2 config`);
-              continue;
-            }
-            const applied = applyRepoConfig(loadModelsConfig(), repo);
-            for (const id of Object.values(repo.models?.pins ?? {}))
-              if (typeof id === 'string' && !(id in applied.models))
-                problems.push(`${recipe} pins unknown model ${id}`);
-          } catch (err) {
-            problems.push(`${recipe}: ${err instanceof Error ? err.message : String(err)}`);
-          } finally {
-            rmSync(dir, { recursive: true, force: true });
-          }
+          const applied = applyRepoConfig(loadModelsConfig(), repo);
+          for (const id of Object.values(repo.models?.pins ?? {}))
+            if (typeof id === 'string' && !(id in applied.models)) problems.push(`${recipe} pins unknown model ${id}`);
+        } catch (err) {
+          problems.push(`${recipe}: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
         }
-      } finally {
-        if (savedRunConfig === undefined) delete process.env.FACTORY_RUN_CONFIG_JSON;
-        else process.env.FACTORY_RUN_CONFIG_JSON = savedRunConfig;
       }
-      const expectations: ReadonlyArray<[(typeof PROVIDERS)[number], (typeof RECIPES)[number][]]> = [
-        ['Claude Code', ['Claude-only', 'Mixed']],
-        ['Codex', ['Codex-only', 'Mixed']],
-        ['OpenCode', ['OpenCode Go-only']],
+    } finally {
+      if (savedRunConfig === undefined) delete process.env.FACTORY_RUN_CONFIG_JSON;
+      else process.env.FACTORY_RUN_CONFIG_JSON = savedRunConfig;
+    }
+    const expectations: ReadonlyArray<[(typeof PROVIDERS)[number], (typeof RECIPES)[number][]]> = [
+      ['Claude Code', ['Claude-only', 'Mixed']],
+      ['Codex', ['Codex-only', 'Mixed']],
+      ['OpenCode', ['OpenCode Go-only']],
+    ];
+    for (const [provider, recipes] of expectations) {
+      const version = versionTested(providerSection(lines, provider) ?? '');
+      if (version === '') problems.push(`${provider} section has no version tested value`);
+      for (const recipe of recipes)
+        if (!versionTested(recipeSection(lines, recipe) ?? '').includes(version))
+          problems.push(`Recipe: ${recipe} version does not include ${provider} version "${version}"`);
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('add-your-own-agent section covers the command harness, contract doc, contract kit and issue template, and relative links resolve', () => {
+    const text = guideText ?? '';
+    const lines = text.split('\n');
+    const start = headingIndex(lines, (h) => h === 'add your own agent');
+    const problems: string[] = [];
+    if (start < 0) {
+      problems.push('no Add your own agent section');
+    } else {
+      const section = sectionAt(lines, start);
+      const parts: Array<[string, boolean]> = [
+        ['a harnesses declaration', section.includes('harnesses')],
+        ['the command harness', section.includes('"command"') || section.includes('command:')],
+        ['a link to harness-contract.md', /\]\([^)]*harness-contract\.md[^)]*\)/.test(section)],
+        ['codingHarnessContractCases', section.includes('codingHarnessContractCases')],
+        ['the contract kit command (npx vitest run)', section.includes('npx vitest run')],
+        [
+          'an issue template link (issues/new/choose or issues/new?template=<file> that exists)',
+          section.includes('issues/new/choose') ||
+            [...section.matchAll(/issues\/new\?template=([^)\s&]+)/g)].some((m) =>
+              existsSync(join(repoRoot, '.github', 'ISSUE_TEMPLATE', m[1] ?? '')),
+            ),
+        ],
       ];
-      for (const [provider, recipes] of expectations) {
-        const version = versionTested(providerSection(lines, provider) ?? '');
-        if (version === '') problems.push(`${provider} section has no version tested value`);
-        for (const recipe of recipes)
-          if (!versionTested(recipeSection(lines, recipe) ?? '').includes(version))
-            problems.push(`Recipe: ${recipe} version does not include ${provider} version "${version}"`);
-      }
-      expect(problems).toEqual([]);
-    },
-  );
+      for (const [what, ok] of parts) if (!ok) problems.push(`Add your own agent section is missing ${what}`);
+    }
+    for (const m of text.matchAll(/\]\(([^)\s]+)\)/g)) {
+      const target = m[1] ?? '';
+      if (/^(https?:|mailto:|#)/.test(target)) continue;
+      const path = target.split('#')[0] ?? '';
+      if (!existsSync(resolve(dirname(guidePath), path))) problems.push(`broken relative link ${target}`);
+    }
+    expect(problems).toEqual([]);
+  });
 
-  it.skipIf(isPlaceholder)(
-    'add-your-own-agent section covers the command harness, contract doc, contract kit and issue template, and relative links resolve',
-    () => {
-      const text = guideText ?? '';
-      const lines = text.split('\n');
-      const start = headingIndex(lines, (h) => h === 'add your own agent');
-      const problems: string[] = [];
-      if (start < 0) {
-        problems.push('no Add your own agent section');
-      } else {
-        const section = sectionAt(lines, start);
-        const parts: Array<[string, boolean]> = [
-          ['a harnesses declaration', section.includes('harnesses')],
-          ['the command harness', section.includes('"command"') || section.includes('command:')],
-          ['a link to harness-contract.md', /\]\([^)]*harness-contract\.md[^)]*\)/.test(section)],
-          ['codingHarnessContractCases', section.includes('codingHarnessContractCases')],
-          ['the contract kit command (npx vitest run)', section.includes('npx vitest run')],
-          [
-            'an issue template link (issues/new/choose or issues/new?template=<file> that exists)',
-            section.includes('issues/new/choose') ||
-              [...section.matchAll(/issues\/new\?template=([^)\s&]+)/g)].some((m) =>
-                existsSync(join(repoRoot, '.github', 'ISSUE_TEMPLATE', m[1] ?? '')),
-              ),
-          ],
-        ];
-        for (const [what, ok] of parts) if (!ok) problems.push(`Add your own agent section is missing ${what}`);
-      }
-      for (const m of text.matchAll(/\]\(([^)\s]+)\)/g)) {
-        const target = m[1] ?? '';
-        if (/^(https?:|mailto:|#)/.test(target)) continue;
-        const path = target.split('#')[0] ?? '';
-        if (!existsSync(resolve(dirname(guidePath), path))) problems.push(`broken relative link ${target}`);
-      }
-      expect(problems).toEqual([]);
-    },
-  );
-
-  it.skipIf(isPlaceholder)(
-    'Request support instead links the agent-support issue template, and the template exists',
-    () => {
-      const lines = (guideText ?? '').split('\n');
-      const start = headingIndex(lines, (h) => h === 'request support instead');
-      const section = start < 0 ? '' : sectionAt(lines, start);
-      const problems: string[] = [];
-      if (start < 0) problems.push('no Request support instead section');
-      if (!section.includes('issues/new?template=agent-support.yml'))
-        problems.push('Request support instead does not link issues/new?template=agent-support.yml');
-      if (!/\]\([^)]*\.github\/ISSUE_TEMPLATE\/agent-support\.yml\)/.test(section))
-        problems.push('Request support instead does not link .github/ISSUE_TEMPLATE/agent-support.yml');
-      if (!existsSync(join(repoRoot, '.github', 'ISSUE_TEMPLATE', 'agent-support.yml')))
-        problems.push('.github/ISSUE_TEMPLATE/agent-support.yml does not exist');
-      expect(problems).toEqual([]);
-    },
-  );
+  it('Request support instead links the agent-support issue template, and the template exists', () => {
+    const lines = (guideText ?? '').split('\n');
+    const start = headingIndex(lines, (h) => h === 'request support instead');
+    const section = start < 0 ? '' : sectionAt(lines, start);
+    const problems: string[] = [];
+    if (start < 0) problems.push('no Request support instead section');
+    if (!section.includes('issues/new?template=agent-support.yml'))
+      problems.push('Request support instead does not link issues/new?template=agent-support.yml');
+    if (!/\]\([^)]*\.github\/ISSUE_TEMPLATE\/agent-support\.yml\)/.test(section))
+      problems.push('Request support instead does not link .github/ISSUE_TEMPLATE/agent-support.yml');
+    if (!existsSync(join(repoRoot, '.github', 'ISSUE_TEMPLATE', 'agent-support.yml')))
+      problems.push('.github/ISSUE_TEMPLATE/agent-support.yml does not exist');
+    expect(problems).toEqual([]);
+  });
 });

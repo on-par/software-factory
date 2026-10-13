@@ -38,7 +38,3 @@ __pycache__/
 
 # Logs
 *.log
-
-# Python
-__pycache__/
-*.pyc

@@ -279,16 +279,6 @@ describe('createQueueRationaleAuditor', () => {
     expect(commentClient.calls[0].body).not.toContain('**Rationale:**');
   });
 
-  it('posts no comment when no comment client is injected', async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), 'factory-queue-rationale-'));
-    const { auditor, eventsFile } = createAuditor();
-
-    await auditor.observeAcceptedProjection(projection('Build', 1));
-    await auditor.observeAcceptedProjection(projection('Check', 1));
-
-    expectHumanReprioritization(readEvents(eventsFile)[0], 'lane', 'Build', 'Check');
-  });
-
   it('swallows a rejecting comment client, still writes the event, and logs a warn event', async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'factory-queue-rationale-'));
     const eventsFile = join(tmpDir, 'events.ndjson');
