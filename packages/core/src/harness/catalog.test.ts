@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { HARNESS_CATALOG, isAgenticHarness, KNOWN_HARNESS_IDS } from './catalog.js';
+import { HARNESS_CATALOG, harnessCliCommand, isAgenticHarness, KNOWN_HARNESS_IDS } from './catalog.js';
 
 describe('HARNESS_CATALOG', () => {
   it('has an id on every entry that matches its record key', () => {
@@ -64,5 +64,19 @@ describe('HARNESS_CATALOG', () => {
     for (const id of ['ollama-http', 'ollama-agentic', 'ollama-command-agent']) {
       expect(HARNESS_CATALOG[id].probe.kind).toBe('ollama');
     }
+  });
+});
+
+describe('harnessCliCommand', () => {
+  it('names the CLI of command-probe harnesses', () => {
+    expect(harnessCliCommand('claude-cli')).toBe('claude');
+    expect(harnessCliCommand('codex-cli')).toBe('codex');
+    expect(harnessCliCommand('opencode')).toBe('opencode');
+  });
+
+  it('is undefined for ollama, unknown and missing harness ids', () => {
+    expect(harnessCliCommand('ollama-http')).toBeUndefined();
+    expect(harnessCliCommand('my-declared-harness')).toBeUndefined();
+    expect(harnessCliCommand(undefined)).toBeUndefined();
   });
 });

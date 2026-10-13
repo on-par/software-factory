@@ -79,3 +79,10 @@ export const KNOWN_HARNESS_IDS = Object.keys(HARNESS_CATALOG);
 export function isAgenticHarness(harnessId: string): boolean {
   return HARNESS_CATALOG[harnessId]?.agentic === true;
 }
+
+/** CLI a catalog harness needs on PATH, or undefined when it has none to check
+ *  (Ollama harnesses, declared harnesses, unknown ids). Shared by doctor and the router (#2629). */
+export function harnessCliCommand(harnessId: string | undefined): string | undefined {
+  const probe = harnessId ? HARNESS_CATALOG[harnessId]?.probe : undefined;
+  return probe?.kind === 'command' ? probe.command : undefined;
+}
