@@ -558,7 +558,7 @@ async function planPhaseImpl(opts: {
       log('escalate', gate.reason);
       return park(gate.reason);
     }
-    if (gate.kind === 'over-cap') {
+    if (gate.kind === 'over-cap' || gate.kind === 'unsliceable') {
       log('size-gate-escalated', gate.reason);
       return park(gate.reason);
     }
@@ -840,7 +840,7 @@ async function planPhaseImpl(opts: {
             const reason = `plan scope exceeds the bounded-build budget (${scope}) — sliced into ${gate.plan.slices.length} slice(s); the next run plans slice ${gate.slice.index}`;
             return { ...park(reason), sliced: { sliceCount: gate.plan.slices.length } };
           }
-          if (gate.kind === 'over-cap') {
+          if (gate.kind === 'over-cap' || gate.kind === 'unsliceable') {
             log('size-gate-escalated', gate.reason);
             return park(gate.reason);
           }

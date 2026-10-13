@@ -568,6 +568,8 @@ export interface DecomposeResult {
   childIssues: number[];
   /** The decomposition that passed the INVEST gate, set whenever one did. */
   decomposition?: DecompositionOutput;
+  /** Why no INVEST-passing decomposition was produced (parse error, violations, thrown error). Set only when `decomposition` is unset by a failure. */
+  failureReason?: string;
 }
 
 export interface DecomposeDriverDeps {
@@ -683,9 +685,13 @@ export async function decomposeOversizedIssue(deps: DecomposeDriverDeps): Promis
       'decompose_failed',
       `decomposition of issue #${issue} failed after ${maxAttempts} attempt(s): ${violations.join('; ')}`,
     );
-    return { posted: false, childIssues: [] };
+    return {
+      posted: false,
+      childIssues: [],
+      failureReason: `${maxAttempts} attempt(s) failed: ${violations.join('; ')}`,
+    };
   } catch (error) {
     log('decompose_failed', `decomposition of issue #${issue} failed: ${errorDetail(error)}`);
-    return { posted: false, childIssues: [] };
+    return { posted: false, childIssues: [], failureReason: errorDetail(error) };
   }
 }
