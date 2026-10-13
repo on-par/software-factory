@@ -6281,10 +6281,11 @@ async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean }
   if (repoRoot !== null) {
     const paths = getFactoryPaths(repoRoot);
     let factoryConfig: FactoryConfig | null = null;
+    let factoryConfigError: string | null = null;
     try {
       factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
-    } catch {
-      // reported by the config row
+    } catch (err) {
+      factoryConfigError = err instanceof Error ? err.message : String(err);
     }
     const health = await inspectPortLeases({ registryFile: paths.ports });
     checks.push(...leaseChecks(health.map(toLeaseRow)));
@@ -6298,7 +6299,13 @@ async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean }
     const orphanVmNames = sbxAvailable ? (await internalOps.listMicroVms()).filter((n) => !activeVmNames.has(n)) : [];
     checks.push(...orphanMicroVmChecks(orphanVmNames));
 
-    if (factoryConfig !== null) {
+    if (factoryConfig === null) {
+      checks.push({
+        name: 'auto-merge sweep heartbeat',
+        ok: true,
+        detail: `skipped: .factory config is invalid (${factoryConfigError ?? 'unreadable'}); see the config row`,
+      });
+    } else {
       const sweepStatus = checkSweepHeartbeat(factoryConfig.sweep, process.env, defaultSweepHeartbeatDeps());
       const sweepCheck = sweepHeartbeatCheck(sweepStatus);
       if (sweepCheck) checks.push(sweepCheck);
