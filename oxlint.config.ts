@@ -1,78 +1,15 @@
+import { readFileSync } from 'node:fs';
+
 import { defineConfig } from 'oxlint';
 
-// #2776: files already over the 500-line max-lines limit on main. They are switched off
-// here only so main stays green. #2777 replaces this list with a baseline that cannot grow.
-// Never add a new file to this list. Split the file instead.
-export const OVERSIZED_FILES_PENDING_BASELINE: readonly string[] = [
-  'packages/cli/src/cli-commands.test.ts',
-  'packages/cli/src/cli.test.ts',
-  'packages/cli/src/cli/daemon.test.ts',
-  'packages/cli/src/cli/daemon.ts',
-  'packages/cli/src/cli/doctor.test.ts',
-  'packages/cli/src/cli/doctor.ts',
-  'packages/cli/src/cli/index.ts',
-  'packages/config/src/defaults.ts',
-  'packages/core/src/checkers/baseline.test.ts',
-  'packages/core/src/checkers/design-smells.test.ts',
-  'packages/core/src/checkers/index.test.ts',
-  'packages/core/src/checkers/index.ts',
-  'packages/core/src/config/index.test.ts',
-  'packages/core/src/config/index.ts',
-  'packages/core/src/config/repo.test.ts',
-  'packages/core/src/config/repo.ts',
-  'packages/core/src/constitutions/index.test.ts',
-  'packages/core/src/daemon/factoryd-http.test.ts',
-  'packages/core/src/discovery/promote.test.ts',
-  'packages/core/src/environment/index.test.ts',
-  'packages/core/src/filing/index.test.ts',
-  'packages/core/src/harness/claude-cli.test.ts',
-  'packages/core/src/harness/codex-cli.test.ts',
-  'packages/core/src/harness/ollama-agentic.test.ts',
-  'packages/core/src/harness/opencode.test.ts',
-  'packages/core/src/hosted/runner.test.ts',
-  'packages/core/src/hosted/store-contract.ts',
-  'packages/core/src/index.ts',
-  'packages/core/src/internal.ts',
-  'packages/core/src/kpis/index.test.ts',
-  'packages/core/src/kpis/index.ts',
-  'packages/core/src/logger/index.test.ts',
-  'packages/core/src/models/index.test.ts',
-  'packages/core/src/phases/build.test.ts',
-  'packages/core/src/phases/check.test.ts',
-  'packages/core/src/phases/check.ts',
-  'packages/core/src/phases/plan.test.ts',
-  'packages/core/src/phases/plan.ts',
-  'packages/core/src/phases/ship.test.ts',
-  'packages/core/src/phases/ship.ts',
-  'packages/core/src/public-api.test.ts',
-  'packages/core/src/queue/github-queue.test.ts',
-  'packages/core/src/queue/github-queue.ts',
-  'packages/core/src/readiness/decompose.test.ts',
-  'packages/core/src/readiness/decompose.ts',
-  'packages/core/src/reports/benchmark-artifacts.test.ts',
-  'packages/core/src/reports/evidence-pack.test.ts',
-  'packages/core/src/review/contained.test.ts',
-  'packages/core/src/router/cli-executor.test.ts',
-  'packages/core/src/router/index.test.ts',
-  'packages/core/src/router/index.ts',
-  'packages/core/src/run/run-issue.test.ts',
-  'packages/core/src/run/run-issue.ts',
-  'packages/core/src/sandbox/egress-proxy.test.ts',
-  'packages/core/src/sandbox/index.test.ts',
-  'packages/core/src/usage/index.test.ts',
-  'packages/core/src/utils/ci-watch.test.ts',
-  'packages/core/src/utils/index.test.ts',
-  'packages/core/src/utils/lock.test.ts',
-  'packages/core/src/utils/worktree-gc.test.ts',
-  'packages/core/src/utils/worktree-gc.ts',
-  'packages/scbench-adapter/src/baseline.test.ts',
-  'packages/scbench-adapter/src/baseline.ts',
-  'packages/scbench-adapter/src/cli-run.test.ts',
-  'packages/scbench-adapter/src/cli-run.ts',
-  'packages/server/src/index.test.ts',
-  'packages/tui/src/components/App.test.tsx',
-  'packages/tui/src/components/App.tsx',
-];
+// #2777: files over the 500-line limit on main, with the line count recorded when they were
+// grandfathered. Each count is that file's own max-lines ceiling, so it can shrink but never grow.
+// Never add a new file here. Split the file instead.
+export const MAX_LINES_BASELINE: Readonly<Record<string, number>> = JSON.parse(
+  readFileSync(new URL('./max-lines-baseline.json', import.meta.url), 'utf8'),
+);
+
+const MAX_LINES_OPTIONS = { skipBlankLines: false, skipComments: false } as const;
 
 export default defineConfig({
   ignorePatterns: ['**/dist/**', 'coverage/**', '.factory/**', 'tools/oxlint/anti-slop/**'],
@@ -88,7 +25,7 @@ export default defineConfig({
   },
   rules: {
     // #2776: no file over 500 lines, tests included. Blank lines and comments count.
-    'max-lines': ['error', { max: 500, skipBlankLines: false, skipComments: false }],
+    'max-lines': ['error', { max: 500, ...MAX_LINES_OPTIONS }],
     'no-empty': ['error', { allowEmptyCatch: true }],
     'no-unused-vars': [
       'error',
@@ -167,5 +104,8 @@ export default defineConfig({
     // #798/#1975: repo-wide. Replace dependencies through a real injected seam, never vi.mock/jest.mock.
     'anti-slop/no-module-mocking': 'error',
   },
-  overrides: [{ files: [...OVERSIZED_FILES_PENDING_BASELINE], rules: { 'max-lines': 'off' } }],
+  overrides: Object.entries(MAX_LINES_BASELINE).map(([file, max]) => ({
+    files: [file],
+    rules: { 'max-lines': ['error', { max, ...MAX_LINES_OPTIONS }] },
+  })),
 });
