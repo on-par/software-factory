@@ -22,12 +22,15 @@ import {
   requireRunnableChecker,
   resolveTestsCommand,
   lintChecker,
+  isConfigCheckerOutput,
   isUnknownCheckerOutput,
   listBuiltInCheckers,
   runAllCheckers,
   runCustomChecker,
+  schemaErrorCheckerOutput,
   summarizeCheckerOutputs,
   testsChecker,
+  unfilledPlaceholderCheckerOutput,
   unknownCheckerOutput,
   type WorktreeProbe,
 } from './index.js';
@@ -1253,6 +1256,25 @@ describe('summarizeCheckerOutputs', () => {
   });
 });
 
+/** A constitution whose `checkers` frontmatter bypassed the parser's typing (#2582). */
+function malformedConstitution(checkers: unknown): Constitution {
+  const base: Constitution = { product: 'p', version: 1, checkers: [], body: '', path: 'p.md', source: 'bundled' };
+  return Object.assign(base, { checkers });
+}
+
+describe('isConfigCheckerOutput (#2582)', () => {
+  it('matches unknown-checker, schema-error and placeholder FAILs only', () => {
+    expect(isConfigCheckerOutput(unknownCheckerOutput('x'))).toBe(true);
+    expect(isConfigCheckerOutput(schemaErrorCheckerOutput('checkers', 'is a string, not a list'))).toBe(true);
+    expect(isConfigCheckerOutput(unfilledPlaceholderCheckerOutput('<checker-name>'))).toBe(true);
+    expect(isConfigCheckerOutput({ checker: 'tests', result: 'FAIL', details: 'zod schema error: bad' })).toBe(false);
+    expect(isConfigCheckerOutput({ checker: 'tests', result: 'FAIL', details: 'saw unfilled placeholder here' })).toBe(
+      false,
+    );
+    expect(isConfigCheckerOutput({ ...unfilledPlaceholderCheckerOutput('<a>'), result: 'SKIP' })).toBe(false);
+  });
+});
+
 describe('runAllCheckers', () => {
   it(
     'aggregates built-ins and custom checkers and fails closed on unknown checker names',
@@ -1282,6 +1304,40 @@ describe('runAllCheckers', () => {
       expect(summary.failures).toBeGreaterThanOrEqual(1);
     },
   );
+
+  it(
+    'turns a non-array or non-string checkers value into a schema-error FAIL (#2582)',
+    { timeout: 60000 },
+    async () => {
+      const worktree = await makeWorktree();
+      const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
+      const withCheckers = (checkers: unknown): Constitution => malformedConstitution(checkers);
+
+      for (const value of ['lint', 5]) {
+        const summary = await runAllCheckers(makeContext(worktree), router, withCheckers(value));
+        const bad = summary.results.filter(isConfigCheckerOutput);
+        expect(bad.map((r) => r.checker)).toEqual(['checkers']);
+        expect(bad[0]?.details).toContain('config schema error');
+        expect(summary.results.every((r) => r.checker.length > 1)).toBe(true);
+      }
+
+      const mixed = await runAllCheckers(makeContext(worktree), router, withCheckers(['worker_output', 7, { a: 1 }]));
+      expect(mixed.results.filter(isConfigCheckerOutput).map((r) => r.checker)).toEqual(['checkers[1]', 'checkers[2]']);
+    },
+  );
+
+  it('turns a placeholder checkers entry into an unfilled-placeholder FAIL (#2582)', { timeout: 60000 }, async () => {
+    const worktree = await makeWorktree();
+    const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
+    const constitution = malformedConstitution(['<checker-name>']);
+    const summary = await runAllCheckers(makeContext(worktree), router, constitution);
+    const fails = summary.results.filter((r) => r.checker === '<checker-name>');
+    expect(fails).toHaveLength(1);
+    expect(fails[0]?.result).toBe('FAIL');
+    expect(fails[0]?.details.startsWith('unfilled placeholder')).toBe(true);
+    expect(isUnknownCheckerOutput(fails[0]!)).toBe(false);
+    expect(isConfigCheckerOutput(fails[0]!)).toBe(true);
+  });
 
   it('fails closed on an unknown checker alone, blocking a clean pass', { timeout: 60000 }, async () => {
     const constitutionDir = await mkdtemp(join(tmpdir(), 'checker-test-constitution-'));

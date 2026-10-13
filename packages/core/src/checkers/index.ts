@@ -8,6 +8,7 @@ import type { ModelRouter } from '../router/index.js';
 import type { CheckerOutput, CheckSummary, Constitution, RegressionFinding } from '../types/index.js';
 import { type CommandResult, type RunCommandOptions } from '../utils/command-runner.js';
 import { runVerificationCommand as runCommand } from './run-command.js';
+import { isTemplateToken } from '../config/template-tokens.js';
 import { extractJsonObjects } from '../utils/json.js';
 import {
   DESIGN_SMELLS_CHECKER,
@@ -625,13 +626,62 @@ export function isUnknownCheckerOutput(output: CheckerOutput): boolean {
   return output.result === 'FAIL' && output.details.startsWith(UNKNOWN_CHECKER_PREFIX);
 }
 
+const SCHEMA_ERROR_PREFIX = 'config schema error: ';
+const UNFILLED_PLACEHOLDER_PREFIX = 'unfilled placeholder ';
+
+export function schemaErrorCheckerOutput(name: string, problem: string): CheckerOutput {
+  return {
+    checker: name,
+    result: 'FAIL',
+    details: `${SCHEMA_ERROR_PREFIX}constitution ${name} ${problem} — expected a list of checker names (strings); failing closed`,
+  };
+}
+
+export function unfilledPlaceholderCheckerOutput(token: string): CheckerOutput {
+  return {
+    checker: token,
+    result: 'FAIL',
+    details: `${UNFILLED_PLACEHOLDER_PREFIX}'${token}' in constitution checkers — replace it with a real checker name (${STANDARD_CHECKER_NAMES.join(', ')}, custom_*); failing closed`,
+  };
+}
+
+/** True for a config-validation FAIL: unknown checker, schema error or unfilled placeholder (#2581/#2582). */
+export function isConfigCheckerOutput(output: CheckerOutput): boolean {
+  return (
+    output.result === 'FAIL' &&
+    (isUnknownCheckerOutput(output) ||
+      output.details.startsWith(SCHEMA_ERROR_PREFIX) ||
+      output.details.startsWith(UNFILLED_PLACEHOLDER_PREFIX))
+  );
+}
+
+function describeType(v: unknown): string {
+  if (v === null) return 'null';
+  if (Array.isArray(v)) return 'an array';
+  return `a ${typeof v}`;
+}
+
 /** A declared checkers list selects the built-ins (registry order) plus worker_output, the empty-diff guard
  *  checkPhase parks on; no list (null or empty) runs every built-in. Declared non-built-ins follow in constitution order (#2455). */
 function buildCheckers(constitution: Constitution | null): Checker[] {
-  const declared = constitution?.checkers ?? [];
+  const raw: unknown = constitution?.checkers;
+  const invalid: CheckerOutput[] = [];
+  const declared: string[] = [];
+  let hasDeclaration = false;
+  if (Array.isArray(raw)) {
+    hasDeclaration = raw.length > 0;
+    raw.forEach((v, i) =>
+      typeof v === 'string'
+        ? declared.push(v)
+        : invalid.push(schemaErrorCheckerOutput(`checkers[${i}]`, `entry ${i} is ${describeType(v)}`)),
+    );
+  } else if (raw !== undefined && raw !== null) {
+    hasDeclaration = true;
+    invalid.push(schemaErrorCheckerOutput('checkers', `is ${describeType(raw)}, not a list`));
+  }
   const checkers = new Map<string, Checker>();
   for (const checker of BUILT_IN_CHECKERS) {
-    if (declared.length > 0 && checker.name !== WORKER_OUTPUT_CHECKER && !declared.includes(checker.name)) continue;
+    if (hasDeclaration && checker.name !== WORKER_OUTPUT_CHECKER && !declared.includes(checker.name)) continue;
     checkers.set(checker.name, checker);
   }
 
@@ -639,10 +689,15 @@ function buildCheckers(constitution: Constitution | null): Checker[] {
     if (checkers.has(name)) continue;
     checkers.set(
       name,
-      name.startsWith('custom_')
-        ? { name, run: (ctx) => runCustomChecker(ctx, name, ctx.router, ctx.timeoutSeconds) }
-        : { name, run: async () => unknownCheckerOutput(name) },
+      isTemplateToken(name)
+        ? { name, run: async () => unfilledPlaceholderCheckerOutput(name) }
+        : name.startsWith('custom_')
+          ? { name, run: (ctx) => runCustomChecker(ctx, name, ctx.router, ctx.timeoutSeconds) }
+          : { name, run: async () => unknownCheckerOutput(name) },
     );
+  }
+  for (const o of invalid) {
+    if (!checkers.has(o.checker)) checkers.set(o.checker, { name: o.checker, run: async () => o });
   }
 
   return [...checkers.values()];
@@ -667,7 +722,12 @@ export function requireRunnableChecker(
 ): CheckerOutput {
   if (output.result !== 'SKIP' || output.unavailable !== true) return output;
   const name = output.checker;
-  if (!constitution?.checkers.includes(name) || constitution.optionalCheckers?.includes(name)) return output;
+  if (
+    !Array.isArray(constitution?.checkers) ||
+    !constitution.checkers.includes(name) ||
+    constitution.optionalCheckers?.includes(name)
+  )
+    return output;
   log?.('environment_warning', `required check ${name} could not run: ${output.details}`);
   return {
     ...output,
