@@ -15,7 +15,9 @@ import {
   formatUsageReport,
   priceFor,
   readCostsFile,
+  harnessHasUsageSignal,
   readUsage,
+  resolveRunUsageHarness,
   watchUsage,
 } from './index.js';
 
@@ -625,6 +627,78 @@ describe('readUsage', () => {
 });
 
 describe('watchUsage', () => {
+  it.each(['opencode', 'codex-cli'])(
+    'reports not available for this agent for a non-Claude harness and never reads Claude usage (%s)',
+    async (harness) => {
+      const events: EmitEventArgs[] = [];
+      const readUsageFn = vi.fn(async () => ({ pct: 0.99, source: 'estimate' as const, detail: 'x' }));
+      const setStop = vi.fn();
+      const sleepFn = vi.fn(async () => {});
+
+      await expect(
+        watchUsage({
+          cap: 227,
+          stopAt: 0.75,
+          pollMs: 180_000,
+          stopFile: '/repo/.factory/STOP',
+          eventsFile: '/repo/.factory/events.ndjson',
+          harness,
+          readUsageFn,
+          emitEvent: (...args) => {
+            events.push(args);
+          },
+          setStop,
+          sleep: sleepFn,
+        }),
+      ).resolves.toBe('unavailable');
+
+      expect(events).toHaveLength(1);
+      expect(events[0].slice(0, 3)).toEqual(['/repo/.factory/events.ndjson', 'usage-unavailable', 'usage']);
+      expect(events[0][3]).toContain('not available for this agent');
+      expect(events[0][3]).toContain(harness);
+      expect(readUsageFn).not.toHaveBeenCalled();
+      expect(setStop).not.toHaveBeenCalled();
+      expect(sleepFn).not.toHaveBeenCalled();
+    },
+  );
+
+  it('gates a claude-cli harness exactly like an unset harness (stops at the cap)', async () => {
+    const events: EmitEventArgs[] = [];
+    const readings: Array<UsageReading> = [
+      { pct: 0.5, source: 'estimate', detail: 'trailing-5h usage ~= $100 = 44% of $227 cap' },
+      { pct: 0.79, source: 'estimate', detail: 'trailing-5h usage ~= $180 = 79% of $227 cap' },
+    ];
+    const setStop = vi.fn();
+
+    await expect(
+      watchUsage({
+        cap: 227,
+        stopAt: 0.75,
+        pollMs: 180_000,
+        stopFile: '/repo/.factory/STOP',
+        eventsFile: '/repo/.factory/events.ndjson',
+        harness: 'claude-cli',
+        readUsageFn: async () => readings.shift()!,
+        emitEvent: (...args) => {
+          events.push(args);
+        },
+        setStop,
+        sleep: async () => {},
+      }),
+    ).resolves.toBe('stopped');
+
+    expect(setStop).toHaveBeenCalledTimes(1);
+    expect(events).toEqual([
+      ['/repo/.factory/events.ndjson', 'watchdog', 'usage', 'usage watchdog armed: stop at 75% of $227 cap, poll 180s'],
+      [
+        '/repo/.factory/events.ndjson',
+        'usage-stop',
+        'usage',
+        'trailing-5h usage ~= $180 = 79% of $227 cap -- STOP set, lanes halt between issues',
+      ],
+    ]);
+  });
+
   it('stops when the cap is reached mid-run', async () => {
     const events: EmitEventArgs[] = [];
     const readings: Array<UsageReading> = [
@@ -811,5 +885,47 @@ describe('watchUsage', () => {
       'usage',
       'usage watchdog armed: stop at 75% of $227 cap, poll 180s',
     ]);
+  });
+});
+
+describe('harnessHasUsageSignal', () => {
+  it.each([
+    [undefined, true],
+    ['claude-cli', true],
+    ['codex-cli', false],
+    ['opencode', false],
+    ['', false],
+    ['my-agent', false],
+  ])('%j -> %s', (harness, expected) => {
+    expect(harnessHasUsageSignal(harness)).toBe(expected);
+  });
+});
+
+describe('resolveRunUsageHarness', () => {
+  const base = {
+    buildRoute: 'opencode' as const,
+    buildRouteSource: 'repo' as const,
+    planHarnesses: ['opencode'] as ReadonlyArray<string | undefined>,
+    codexDisabled: false,
+    localOnly: false,
+  };
+  it.each([
+    ['opencode route, non-Claude plan pin', {}, 'opencode'],
+    ['codex route, non-Claude plan pin', { buildRoute: 'codex' as const }, 'codex-cli'],
+    ['repo codex route with codexDisabled', { buildRoute: 'codex' as const, codexDisabled: true }, 'codex-cli'],
+    ['claude route', { buildRoute: 'claude' as const }, undefined],
+    ['undefined route', { buildRoute: undefined, buildRouteSource: 'plan' as const }, undefined],
+    ['no plan pins', { planHarnesses: [] }, undefined],
+    ['claude-cli plan pin', { planHarnesses: ['claude-cli'] }, undefined],
+    ['claude-cli planFallback', { planHarnesses: ['opencode', 'claude-cli'] }, undefined],
+    ['unknown plan model', { planHarnesses: [undefined] }, undefined],
+    ['localOnly', { localOnly: true }, undefined],
+    [
+      'build-pin codex route with codexDisabled',
+      { buildRoute: 'codex' as const, buildRouteSource: 'build-pin' as const, codexDisabled: true },
+      undefined,
+    ],
+  ])('%s', (_name, override, expected) => {
+    expect(resolveRunUsageHarness({ ...base, ...override })).toBe(expected);
   });
 });

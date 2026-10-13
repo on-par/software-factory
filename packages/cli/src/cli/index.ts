@@ -163,6 +163,7 @@ import {
   type SizeGateMode,
   resolveDesignRegressionBlock,
   resolveReadinessUpdateIssueBody,
+  resolveEffectiveBuildRoute,
   resolveEffectiveModelPins,
   resolveEfficiencyPolicy,
   resolveLaneBreakerThreshold,
@@ -294,6 +295,7 @@ import {
   resolveFilingPolicy,
   resolveLocalOnly,
   resolvePrClassifierPolicy,
+  resolveRunUsageHarness,
   resolveReviewFloorRules,
   RunLockHeldError,
   runOvernightQueue,
@@ -4512,6 +4514,26 @@ async function cmdRun(
       console.log(`[factory] run: ${detail}`);
       logEvent(paths.events, 'watchdog', 'all', detail);
     }
+    let watchdogHarness: string | undefined;
+    if (knobs.watch) {
+      try {
+        const repoConfig = configLoaders.loadRepoConfig(repoRoot);
+        const registry = new coreOps.ModelRegistry(applyRepoConfig(configLoaders.loadModelsConfig(), repoConfig));
+        const pins = configLoaders.resolveEffectiveModelPins(registry, repoConfig, process.env);
+        const build = resolveEffectiveBuildRoute(registry, repoConfig, pins);
+        watchdogHarness = resolveRunUsageHarness({
+          buildRoute: build.route,
+          buildRouteSource: build.source,
+          planHarnesses: [pins.plan, pins.planFallback]
+            .filter((m): m is string => !!m)
+            .map((m) => registry.getHarnessId(m)),
+          codexDisabled: resolveCodexDisabled(repoConfig),
+          localOnly: resolveLocalOnly(),
+        });
+      } catch {
+        watchdogHarness = undefined; // unresolvable config keeps today's Claude gating
+      }
+    }
     const controller = new AbortController();
     const watchdog = knobs.watch
       ? coreOps
@@ -4523,6 +4545,7 @@ async function cmdRun(
             eventsFile: paths.events,
             signal: controller.signal,
             estimator: knobs.estimator,
+            ...(watchdogHarness ? { harness: watchdogHarness } : {}),
           })
           .catch((err: any) => {
             // a watchdog crash must never take down the run

@@ -75,6 +75,12 @@ Model-judged checkers (for example `lens_review`, `design_smells`, `regression_h
 
 Review calls such as the PR classifier ([`review/classifier.ts`](../packages/core/src/review/classifier.ts)) ask for a JSON verdict (`class` of `A`, `B` or `C`, with cited `claims`) and validate it against a schema. The classifier never throws: an unparseable or invalid verdict is recorded as no model class and does not crash the run.
 
+## Usage watchdog
+
+Only `claude-cli` has a usage signal (the Anthropic subscription window, or the opt-in transcript estimator). `factory run` decides which harness the run uses: when the effective build route is `codex` or `opencode` and the plan pin (plus `planFallback`) is a non-Claude model, the run's harness is `codex-cli` or `opencode`. The watchdog then logs one `usage-unavailable` event, "usage watchdog not available for this agent (<harness>)", and does not gate the run on Claude usage.
+
+Every other case keeps Claude gating, including an unpinned plan, a Claude plan pin, an unknown route and local-only runs. Auxiliary Claude calls (checker, triage) in a non-Claude run are not gated by the watchdog.
+
 ## Testing a harness
 
 Implement `HarnessContractScenarios` (`success`, `timeout`, `emptyOutput`, `failure`), each returning the harness under test plus optional request overrides. Register `codingHarnessContractCases(...)` in a vitest file; the existing `packages/core/src/harness/*.test.ts` files show examples. Run them with:

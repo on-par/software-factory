@@ -587,6 +587,9 @@ const INTERNAL_API_KEYS = [
   'defaultTranscriptRoots',
   'priceFor',
   'TRAILING_WINDOW_MS',
+  'harnessHasUsageSignal',
+  'resolveRunUsageHarness',
+  'USAGE_NOT_AVAILABLE_FOR_AGENT',
   'readClaudeAccessToken',
   // Daemon repo registry (#781)
   'defaultRegistryPath',
