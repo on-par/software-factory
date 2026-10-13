@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+FAKE_AGENTS_DIR=$(cd "$(dirname "$0")/.." && pwd)
+. "$FAKE_AGENTS_DIR/lib/replay.sh"
+
+mode=$(fake_mode)
+fake_drain_stdin
+case "$mode" in
+  success)
+    fake_commit command-agent "$PWD"
+    fake_replay command-agent success
+    ;;
+  rate-limit | usage-cap)
+    fake_replay command-agent "$mode"
+    exit 1
+    ;;
+  empty)
+    fake_replay command-agent empty
+    ;;
+esac

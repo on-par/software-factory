@@ -1,0 +1,32 @@
+#!/bin/sh
+set -eu
+FAKE_AGENTS_DIR=$(cd "$(dirname "$0")/.." && pwd)
+. "$FAKE_AGENTS_DIR/lib/replay.sh"
+
+worktree=$PWD
+outfile=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -C) worktree=$2; shift ;;
+    -o) outfile=$2; shift ;;
+  esac
+  shift
+done
+
+mode=$(fake_mode)
+fake_drain_stdin
+case "$mode" in
+  success)
+    fake_commit codex "$worktree"
+    fake_replay codex success
+    if [ -n "$outfile" ]; then cp "$FAKE_AGENTS_DIR/recordings/codex/success.last-message" "$outfile"; fi
+    ;;
+  rate-limit | usage-cap)
+    fake_replay codex "$mode"
+    exit 1
+    ;;
+  empty)
+    fake_replay codex empty
+    if [ -n "$outfile" ]; then : >"$outfile"; fi
+    ;;
+esac
