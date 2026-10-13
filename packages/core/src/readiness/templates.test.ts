@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
 
 import { EPIC_REQUIRED_FIELDS, FACTORY_BUG_REQUIRED_FIELDS, FACTORY_TASK_REQUIRED_FIELDS } from './index.js';
 
@@ -37,5 +38,42 @@ describe('issue templates <-> readiness scorer coupling', () => {
   it('config.yml disables blank issues', () => {
     const template = readTemplate('config.yml');
     expect(template).toContain('blank_issues_enabled: false');
+  });
+
+  it('agent-support.yml is a valid issue form with unique ids, required agent and invocation, and non-empty dropdown options', () => {
+    const form = parse(readTemplate('agent-support.yml')) as {
+      name: string;
+      title: string;
+      labels: string[];
+      body: Array<{
+        type: string;
+        id?: string;
+        attributes: { options?: unknown[]; render?: string; multiple?: boolean };
+        validations?: { required?: boolean };
+      }>;
+    };
+    expect(form.name).toBe('Request support for a coding agent');
+    expect(form.title).toBe('agent support: <agent name>');
+    expect(form.labels).toEqual(expect.arrayContaining(['agent-support', 'enhancement']));
+    const ids = form.body.map((field) => field.id);
+    expect(ids).toEqual(['agent', 'invocation', 'output', 'auth', 'phases', 'limits', 'command-harness', 'notes']);
+    expect(new Set(ids).size).toBe(ids.length);
+    const byId = new Map(form.body.map((field) => [field.id, field]));
+    expect(byId.get('agent')).toMatchObject({ type: 'input', validations: { required: true } });
+    expect(byId.get('invocation')).toMatchObject({
+      type: 'textarea',
+      attributes: { render: 'shell' },
+      validations: { required: true },
+    });
+    for (const field of form.body.filter((f) => f.id !== 'agent' && f.id !== 'invocation')) {
+      expect(field.validations?.required ?? false).toBe(false);
+    }
+    expect(byId.get('phases')?.attributes).toMatchObject({
+      multiple: true,
+      options: ['PLAN', 'BUILD', 'CHECK', 'review', 'triage', 'all'],
+    });
+    for (const field of form.body.filter((f) => f.type === 'dropdown')) {
+      expect(field.attributes.options?.length ?? 0).toBeGreaterThan(0);
+    }
   });
 });

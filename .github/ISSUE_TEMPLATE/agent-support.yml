@@ -1,0 +1,79 @@
+name: Request support for a coding agent
+description: Ask the factory to support a new coding agent or harness
+title: 'agent support: <agent name>'
+labels:
+  - agent-support
+  - enhancement
+body:
+  - type: input
+    id: agent
+    attributes:
+      label: Agent
+      description: Name of the coding agent or harness, and the version you tested.
+      placeholder: e.g. my-agent 1.2.3
+    validations:
+      required: true
+  - type: textarea
+    id: invocation
+    attributes:
+      label: Invocation
+      description: The exact non-interactive command that runs the agent on a prompt.
+      placeholder: my-agent run --prompt-file prompt.md --yes
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: What the agent prints or writes (plain text, JSON, stream-json), and where the final answer is.
+    validations:
+      required: false
+  - type: textarea
+    id: auth
+    attributes:
+      label: Auth
+      description: How the agent authenticates (env var, login command, config file). Do not paste secrets.
+    validations:
+      required: false
+  - type: dropdown
+    id: phases
+    attributes:
+      label: Phases
+      description: Which factory phases this agent should serve.
+      multiple: true
+      options:
+        - PLAN
+        - BUILD
+        - CHECK
+        - review
+        - triage
+        - all
+    validations:
+      required: false
+  - type: textarea
+    id: limits
+    attributes:
+      label: Limits
+      description: Known rate limits, context window, timeouts, or cost caps.
+    validations:
+      required: false
+  - type: dropdown
+    id: command-harness
+    attributes:
+      label: Command harness
+      description: Have you tried the agent through the generic command harness?
+      options:
+        - Works with the command harness as-is
+        - Works with the command harness after config changes
+        - Does not work with the command harness
+        - Not tried
+    validations:
+      required: false
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Anything else maintainers should know (links, docs, quirks).
+    validations:
+      required: false
