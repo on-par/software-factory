@@ -51,8 +51,10 @@ slice's branch and, once opened, its PR number. The comment is still the only re
   bottom PR targets `main`. Each other PR targets the branch below it.
 - PR titles end with `slice k/n (#<issue>)`. Slices 1 to n-1 say `Part of #<issue>`. Only the top slice says
   `Closes #<issue>`.
-- When the stack cannot be created (API error, preview not enabled for the repository), the run falls back to `slice`
-  mode for this issue, logs why, and opens only slice 1.
+- When the stack API call fails (API error, preview not enabled for the repository), the run falls back to `slice`
+  mode for this issue. It keeps the bottom slice PR open on `main`, closes the upper slice PRs so no half-linked stack
+  stays open, resets the slice-plan comment so slices 2 to n are pending, and emits one `stack-fallback` warn event
+  with the API error as the reason. That event is not a park.
 
 ### Merging
 
@@ -63,9 +65,19 @@ auto-merge, where the tier allows it, merges the stack in order and never merges
 ### Queue
 
 An issue in stack mode has several open PRs. The queue preflight defers the issue while any slice PR in its slice-plan
-comment is open, as `slice` mode already does for one PR. When a lower PR closes without merging, the issue parks and
-names the layers above it. The factory does not rebuild upper layers after review changes to a lower layer; that is a
-later decision.
+comment is open, as `slice` mode already does for one PR.
+Failure rules are collected in the next subsection.
+
+### Failure handling
+
+- Stack API failure: fall back to `slice` as described under SHIP (#2672).
+- A slice fails CHECK after rework: stop building. Slices 1 to k-1 open as a shorter stack, and the issue parks with
+  slices k to n recorded `not-built` in the slice-plan comment.
+- Review changes a lower slice (its PR head SHA differs from the one recorded when the factory opened it,
+  `detectLowerSliceChange` and `parkOnLowerSliceChange` in `packages/core/src/phases/stack-review-change.ts`): the
+  issue parks and the slice-plan comment names the affected upper slices. The factory does not rebuild them (#2674).
+- A lower PR closes without merging: the issue parks and names the layers above it.
+- An over-cap slice plan: recorded and parks, as in ADR-0156.
 
 ## Consequences
 
@@ -84,3 +96,13 @@ Stacked PRs are a preview feature, and the API may change. `slice` stays the fal
 never strands an issue.
 
 Changing the default mode to `stack`, or rebuilding upper layers automatically, needs a new ADR.
+
+## Out of scope
+
+- Making `stack` the default mode.
+- Automatically rebuilding upper layers after review changes a lower layer.
+- Re-slicing a slice.
+- Cross-repository stacks.
+- A dependency on the `gh stack` CLI extension.
+- Changes to the ADR-0144 trust tiers or ADR-0146 SHA-pinned merges.
+- Changing `file`, `slice` or `off` behavior.
