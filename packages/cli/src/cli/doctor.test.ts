@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { ConstitutionLoader } from '@on-par/factory-core';
-import { type ConfigLintInput, lintFactoryConfig } from '@on-par/factory-core/internal';
+import { type ConfigLintInput, harnessCliCommand, lintFactoryConfig } from '@on-par/factory-core/internal';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -26,7 +26,9 @@ import {
   GIT_AUTH_FIX,
   GIT_AUTH_PROBE_CMD,
   GIT_AUTH_PROBE_TIMEOUT_MS,
+  HARNESS_SETUP,
   harnessInstallChecks,
+  harnessSignInChecks,
   gitAuthCheck,
   type GreenPrScanResult,
   leaseChecks,
@@ -220,7 +222,7 @@ describe('runDoctorChecks', () => {
     const agent = checks.find((c) => c.name === 'coding agent')!;
     expect(agent.ok).toBe(false);
     expect(agent.fix).toContain('Codex CLI');
-    expect(checks.find((c) => c.name === 'codex signed in')!.detail).toMatch(/^skipped/);
+    expect(checks.some((c) => c.name === 'codex signed in')).toBe(false);
     expect(doctorFailed(checks)).toBe(true);
   });
 
@@ -1479,14 +1481,53 @@ describe('harness sign-in (#2556)', () => {
     expect(opencode.fix).toMatch(/opencode auth login$/);
   });
 
-  it('a harness that is not installed gets a skipped signed-in row that does not count as signed in', () => {
+  it('a harness that is not installed gets no signed-in row', () => {
     const checks = reconcileAgentAuthChecks(runDoctorChecks(noEvidence({ commandAvailable: only('codex') })));
     for (const name of ['claude signed in', 'opencode signed in']) {
-      const row = checks.find((c) => c.name === name)!;
-      expect(row).toMatchObject({ ok: true, optional: true });
-      expect(row.detail).toMatch(/^skipped/);
+      expect(checks.some((c) => c.name === name)).toBe(false);
     }
     expect(doctorFailed(checks)).toBe(true);
+  });
+
+  describe('harness auth rows (#2631)', () => {
+    const names = (checks: { name: string }[]) => checks.map((c) => c.name);
+
+    it('an installed, logged-in codex shows a passing codex signed in row and no rows for missing CLIs', () => {
+      const checks = runDoctorChecks(probes({ commandAvailable: only('codex') }));
+      expect(checks.find((c) => c.name === 'codex signed in')).toMatchObject({ ok: true, section: 'Codex' });
+      expect(names(checks)).not.toContain('claude signed in');
+      expect(names(checks)).not.toContain('opencode signed in');
+    });
+
+    it('an installed, unauthenticated opencode fails its auth row with the opencode auth login hint, and no codex row when codex is missing', () => {
+      const checks = runDoctorChecks(noEvidence({ commandAvailable: only('opencode') }));
+      const row = checks.find((c) => c.name === 'opencode signed in')!;
+      expect(row.ok).toBe(false);
+      expect(row.fix).toMatch(/opencode auth login$/);
+      expect(row.next).toBe('opencode auth login');
+      expect(names(checks)).not.toContain('codex signed in');
+    });
+
+    it('a missing codex CLI has no codex signed in row in checks or formatted output', () => {
+      const checks = runDoctorChecks(probes({ commandAvailable: (cmd) => cmd !== 'codex' }));
+      expect(names(checks)).not.toContain('codex signed in');
+      expect(formatDoctorChecks(checks)).not.toContain('codex signed in');
+      expect(checks.find((c) => c.name === 'codex installed')).toMatchObject({ ok: false });
+    });
+
+    it('each HARNESS_SETUP entry names the CLI its catalog harness probes', () => {
+      for (const entry of HARNESS_SETUP) {
+        expect(harnessCliCommand(entry.harnessId)).toBe(entry.cli);
+      }
+    });
+
+    it('the shared harness probe decides each row via commandAvailable', () => {
+      const commandAvailable = vi.fn(() => true);
+      harnessSignInChecks(probes({ commandAvailable }));
+      for (const cli of ['claude', 'codex', 'opencode']) {
+        expect(commandAvailable).toHaveBeenCalledWith(cli);
+      }
+    });
   });
 
   it('makes no inference call for any of the three harnesses', () => {

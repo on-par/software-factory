@@ -8,6 +8,7 @@ import { detectSandboxRuntime } from '@on-par/factory-core';
 import type { ConfigLintInput } from '@on-par/factory-core/internal';
 import {
   findConfigSchemaErrors,
+  isHarnessCliPresent,
   isTemplateToken,
   lintFactoryConfig,
   listBuiltInCheckers,
@@ -147,6 +148,8 @@ export function gitAuthCheck(
 
 export interface HarnessSetup {
   section: string;
+  /** HARNESS_CATALOG id whose CLI probe decides whether this harness is installed (#2631). */
+  harnessId: string;
   cli: string;
   install: string;
   /** Exact shell command that signs the harness in (#2556); also the row's `next` command. */
@@ -159,6 +162,7 @@ export interface HarnessSetup {
 export const HARNESS_SETUP: readonly HarnessSetup[] = [
   {
     section: 'Claude Code',
+    harnessId: 'claude-cli',
     cli: 'claude',
     install: 'npm install -g @anthropic-ai/claude-code',
     login: 'claude /login',
@@ -166,6 +170,7 @@ export const HARNESS_SETUP: readonly HarnessSetup[] = [
   },
   {
     section: 'Codex',
+    harnessId: 'codex-cli',
     cli: 'codex',
     install: 'npm install -g @openai/codex',
     login: 'codex login',
@@ -173,6 +178,7 @@ export const HARNESS_SETUP: readonly HarnessSetup[] = [
   },
   {
     section: 'OpenCode',
+    harnessId: 'opencode',
     cli: 'opencode',
     install: 'npm install -g opencode-ai',
     login: 'opencode auth login',
@@ -224,75 +230,74 @@ function safe(fn: (() => boolean) | undefined): boolean {
   }
 }
 
-/** One `<cli> signed in` row per harness (#2556), judged only from local evidence: an env key,
+/** One `<cli> signed in` row per installed harness CLI (#2556, #2631), judged only from local evidence: an env key,
  *  stored credentials, or `codex login status`. Never runs inference and never prints a secret. */
 export function harnessSignInChecks(probes: DoctorEnvProbes): DoctorCheck[] {
   const { commandAvailable, envPresent, tryExec } = probes;
   const found = availableAgentClis(commandAvailable);
-  return HARNESS_SETUP.map(({ section, cli, login, envKeys }): DoctorCheck => {
-    const name = `${cli} signed in`;
-    if (!commandAvailable(cli)) {
-      return { name, section, ok: true, optional: true, detail: `skipped: ${cli} not installed` };
-    }
-    const fix = `sign in to ${section}: ${login}`;
-    if (cli === 'codex') {
-      const key = envKeys.find((k) => envPresent(k));
-      if (key) return { name, section, ok: true, detail: `signed in (${key} set)` };
-      const method = codexAuthMethod(tryExec('codex login status 2>&1'));
-      const session = method === 'ChatGPT' ? (probes.codexSessionState?.() ?? 'unknown') : 'unknown';
-      if (session === 'unusable') {
-        return {
-          name,
-          section,
-          ok: false,
-          optional: found.length > 1,
-          detail:
-            'ChatGPT session in auth.json is unusable (unreadable, or no valid access token and no refresh token)',
-          fix,
-          next: login,
-        };
+  return HARNESS_SETUP.filter(({ harnessId }) => isHarnessCliPresent(harnessId, commandAvailable)).map(
+    ({ section, cli, login, envKeys }): DoctorCheck => {
+      const name = `${cli} signed in`;
+      const fix = `sign in to ${section}: ${login}`;
+      if (cli === 'codex') {
+        const key = envKeys.find((k) => envPresent(k));
+        if (key) return { name, section, ok: true, detail: `signed in (${key} set)` };
+        const method = codexAuthMethod(tryExec('codex login status 2>&1'));
+        const session = method === 'ChatGPT' ? (probes.codexSessionState?.() ?? 'unknown') : 'unknown';
+        if (session === 'unusable') {
+          return {
+            name,
+            section,
+            ok: false,
+            optional: found.length > 1,
+            detail:
+              'ChatGPT session in auth.json is unusable (unreadable, or no valid access token and no refresh token)',
+            fix,
+            next: login,
+          };
+        }
+        if (session === 'refresh-pending') {
+          return {
+            name,
+            section,
+            ok: true,
+            detail:
+              'logged in with ChatGPT; access token expired, codex refreshes it on the next run (run `codex login` if that run fails with 401)',
+          };
+        }
+        if (method) {
+          return {
+            name,
+            section,
+            ok: true,
+            detail:
+              method === 'ChatGPT'
+                ? 'logged in with ChatGPT; runs draw on your ChatGPT plan limits (manage usage in ChatGPT settings)'
+                : `logged in with ${method}`,
+          };
+        }
+      } else {
+        const key = envKeys.find((k) => envPresent(k));
+        if (key) return { name, section, ok: true, detail: `signed in (${key} set)` };
+        if (cli === 'claude' && safe(probes.claudeLoggedIn)) {
+          return { name, section, ok: true, detail: 'signed in (stored Claude Code login found)' };
+        }
+        if (cli === 'opencode' && safe(probes.opencodeLoggedIn)) {
+          return { name, section, ok: true, detail: 'signed in (stored opencode auth login found)' };
+        }
       }
-      if (session === 'refresh-pending') {
-        return {
-          name,
-          section,
-          ok: true,
-          detail:
-            'logged in with ChatGPT; access token expired, codex refreshes it on the next run (run `codex login` if that run fails with 401)',
-        };
-      }
-      if (method) {
-        return {
-          name,
-          section,
-          ok: true,
-          detail:
-            method === 'ChatGPT'
-              ? 'logged in with ChatGPT; runs draw on your ChatGPT plan limits (manage usage in ChatGPT settings)'
-              : `logged in with ${method}`,
-        };
-      }
-    } else {
-      const key = envKeys.find((k) => envPresent(k));
-      if (key) return { name, section, ok: true, detail: `signed in (${key} set)` };
-      if (cli === 'claude' && safe(probes.claudeLoggedIn)) {
-        return { name, section, ok: true, detail: 'signed in (stored Claude Code login found)' };
-      }
-      if (cli === 'opencode' && safe(probes.opencodeLoggedIn)) {
-        return { name, section, ok: true, detail: 'signed in (stored opencode auth login found)' };
-      }
-    }
-    return {
-      name,
-      section,
-      ok: false,
-      // Required only when this is the sole agent: then nothing else can run.
-      optional: found.length > 1,
-      detail: `unverified: no sign-in evidence (${SIGN_IN_EVIDENCE[cli]})`,
-      fix,
-      next: login,
-    };
-  });
+      return {
+        name,
+        section,
+        ok: false,
+        // Required only when this is the sole agent: then nothing else can run.
+        optional: found.length > 1,
+        detail: `unverified: no sign-in evidence (${SIGN_IN_EVIDENCE[cli]})`,
+        fix,
+        next: login,
+      };
+    },
+  );
 }
 
 /** Coding agent prerequisites: at least one agent CLI is required; each CLI is then reported

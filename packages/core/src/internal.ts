@@ -155,6 +155,8 @@ export type { OrphanContainer, ReapedContainer } from './hosted/orphans.js';
 export { listOrphanContainers, reapOrphanContainers } from './hosted/orphans.js';
 
 // Router
+export { harnessCliCommand } from './harness/catalog.js';
+export { isHarnessCliPresent } from './models/index.js';
 export { CliModelExecutor } from './router/index.js';
 
 // Phase helpers
