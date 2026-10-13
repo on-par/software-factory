@@ -159,4 +159,20 @@ describe('openSliceStack', () => {
     expect(f.request).not.toHaveBeenCalled();
     expect(f.createComment).not.toHaveBeenCalled();
   });
+
+  it('records notBuilt slices as not-built in the same comment write', async () => {
+    const f = fake();
+    await openSliceStack({
+      octokit: f.octokit,
+      repo: 'acme/widgets',
+      issue: 5,
+      title: 'Big',
+      plan,
+      slices: [slice(1)],
+      notBuilt: [2, 3],
+      log: vi.fn(),
+    });
+    expect(f.createComment).toHaveBeenCalledTimes(1);
+    expect(recorded(f).map((s) => s.state)).toEqual(['pr-open', 'not-built', 'not-built']);
+  });
 });

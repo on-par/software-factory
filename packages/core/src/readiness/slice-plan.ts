@@ -169,6 +169,17 @@ export function withSliceState(
   };
 }
 
+/** ADR-0161: a stack run stopped at slice `fromIndex`; it and every later slice are recorded as not built. */
+export function withSlicesNotBuilt(plan: SlicePlan, fromIndex: number): SlicePlan {
+  if (!plan.slices.some((s) => s.index === fromIndex)) {
+    throw new RangeError(`slice ${fromIndex} is not in the plan for #${plan.issue}`);
+  }
+  return {
+    ...plan,
+    slices: plan.slices.map((s) => (s.index >= fromIndex ? { ...s, state: 'not-built' as const } : s)),
+  };
+}
+
 /** Flips the slice whose PR is `prNumber` to merged; undefined when no slice carries that PR. */
 export function markSliceMerged(
   plan: SlicePlan,

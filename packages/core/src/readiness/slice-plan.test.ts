@@ -13,6 +13,7 @@ import {
   sliceCapExceeded,
   slicePlanFromDecomposition,
   withSliceState,
+  withSlicesNotBuilt,
 } from './slice-plan.js';
 import type { SlicePlan } from './slice-plan.js';
 
@@ -204,5 +205,26 @@ describe('withSliceState', () => {
 
   it('throws RangeError for an unknown index', () => {
     expect(() => withSliceState(built(1), 2, 'merged')).toThrow(RangeError);
+  });
+});
+
+describe('withSlicesNotBuilt', () => {
+  it('marks slices from k to n not-built and keeps lower slices identical', () => {
+    const plan = withSliceState(withSliceState(built(3), 1, 'pr-open', 9, 'b1'), 2, 'pr-open', 10, 'b2');
+    const stopped = withSlicesNotBuilt(plan, 2);
+    expect(stopped.slices.map((s) => s.state)).toEqual(['pr-open', 'not-built', 'not-built']);
+    expect(stopped.slices[0]).toBe(plan.slices[0]);
+    expect(stopped.slices[1]).toMatchObject({ prNumber: 10, branch: 'b2' });
+    expect(plan.slices[1]?.state).toBe('pr-open');
+  });
+
+  it('round-trips through render and parse', () => {
+    const stopped = withSlicesNotBuilt(built(3), 2);
+    const parsed = parseSlicePlanComment(renderSlicePlanComment(stopped));
+    expect(parsed?.ok && parsed.plan.slices.map((s) => s.state)).toEqual(['pending', 'not-built', 'not-built']);
+  });
+
+  it('throws RangeError for an unknown index', () => {
+    expect(() => withSlicesNotBuilt(built(2), 3)).toThrow(RangeError);
   });
 });

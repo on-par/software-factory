@@ -392,6 +392,7 @@ const INTERNAL_API_KEYS = [
   'slicePlanFromDecomposition',
   'upsertSlicePlanComment',
   'withSliceState',
+  'withSlicesNotBuilt',
   // Worktree location (#1758)
   'ensureWorktreeParentExcluded',
   'formatWorktreeLocation',
@@ -607,6 +608,7 @@ const INTERNAL_API_KEYS = [
   'createRunRuntime',
   'findOpenPR',
   'openSliceStack',
+  'shipStackStoppedAtSlice',
   'createShipExecutor',
   'DEFAULT_FACTORYD_PORT',
   // Durable explicit daemon runs (#1393)
