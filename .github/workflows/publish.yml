@@ -1,6 +1,9 @@
 name: Publish
 on:
   push:
+    # A main push publishes the next X.Y.Z-next.N prerelease to `next`; a v* tag publishes
+    # that exact version (see scripts/publish-release.sh).
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
     inputs:
@@ -8,6 +11,11 @@ on:
         description: 'Dry run: pack and list every package, publish nothing'
         type: boolean
         default: true
+# One publish at a time per ref, so two quick merges to main can't race to the same
+# -next.N. A newer pending run replaces an older pending one; it contains that commit.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -39,4 +47,5 @@ jobs:
         env:
           GH_TOKEN: '${{ github.token }}'
           PUBLISH_DRY_RUN: '${{ inputs.dry_run }}'
+          PUBLISH_PRERELEASE: "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}"
         run: bash scripts/publish-release.sh

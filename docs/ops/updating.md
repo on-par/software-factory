@@ -22,6 +22,10 @@ Precedence, highest first:
 `autoUpdate` in `daemon.json` also accepts `checkIntervalMinutes` (default 30) and
 `drainTimeoutMinutes` (default 60). An invalid mode exits with code 2.
 
+Every merge to `main` publishes a new `next` prerelease (`X.Y.Z-next.N`, where `X.Y.Z` is
+`latest` with the patch bumped), so `prerelease` tracks main. Stable releases still come
+from a pushed `vX.Y.Z` tag.
+
 A non-npm install that asks for `stable` or `prerelease` prints
 `update mode <m> needs an npm install; staying manual` and stays manual.
 

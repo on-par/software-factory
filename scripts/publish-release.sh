@@ -8,6 +8,9 @@
 # The version and npm dist-tag come from the tag name (#2244):
 #   vX.Y.Z-next.N  ->  version X.Y.Z-next.N, --tag next
 #   vX.Y.Z         ->  version X.Y.Z,        --tag latest
+# A push to main publishes a prerelease to `next` with no tag: the version is the npm
+# `latest` of @on-par/factory-cli with the patch bumped, plus `-next.N`, where N is one
+# more than the highest N already published for that X.Y.Z by any listed package.
 # set-release-version.sh writes that version into the packages (never committed), then
 # publish-workspaces.sh dry-runs and publishes. A dry run on a non-tag ref uses the
 # checked-out version.
@@ -16,7 +19,10 @@
 #
 # Env:
 #   PUBLISH_DRY_RUN=true   dry-run only (green, never publishes)
-#   GITHUB_REF             must be refs/tags/v* for a real publish
+#   PUBLISH_PRERELEASE=true  publish the next main prerelease (GITHUB_REF must be
+#                          refs/heads/main)
+#   GITHUB_REF             must be refs/tags/v* for a real publish, unless
+#                          PUBLISH_PRERELEASE=true
 #   PUBLISH_BLOCKERS       issue numbers that must be CLOSED before a real publish
 #                          (default "195 151", the v1.0 blockers)
 #   GITHUB_REPOSITORY      repo for the blocker lookups (gh issue view --repo)
@@ -67,21 +73,56 @@ not_published() {
 dry_run=false
 [ "${PUBLISH_DRY_RUN:-}" != "true" ] || dry_run=true
 
+# next_prerelease_version: prints X.Y.Z-next.N for a main prerelease (see the header).
+next_prerelease_version() {
+  local latest base n max=0 name versions
+  latest="$(npm view @on-par/factory-cli dist-tags.latest 2>/dev/null)" || return 1
+  latest="${latest//[[:space:]]/}"
+  [[ "$latest" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || return 1
+  base="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+  while IFS= read -r name || [ -n "$name" ]; do
+    name="${name//$'\r'/}"
+    name="${name//[[:space:]]/}"
+    [ -n "$name" ] || continue
+    # A package with nothing on the registry 404s; it has no prereleases to count.
+    versions="$(npm view "$name" versions --json 2>/dev/null)" || continue
+    n="$(node -e '
+      const [json, base] = process.argv.slice(1);
+      const list = [].concat(JSON.parse(json));
+      const prefix = `${base}-next.`;
+      let max = 0;
+      for (const v of list) {
+        const rest = String(v).startsWith(prefix) ? String(v).slice(prefix.length) : "";
+        if (/^(0|[1-9][0-9]*)$/.test(rest)) max = Math.max(max, Number(rest));
+      }
+      console.log(max);
+    ' "$versions" "$base")" || return 1
+    [ "$n" -le "$max" ] || max="$n"
+  done <scripts/publish-workspaces.txt
+  echo "$base-next.$((max + 1))"
+}
+
 ref="${GITHUB_REF:-}"
-case "$ref" in
-  refs/tags/v*)
-    tag="${ref#refs/tags/}"
-    [[ "$tag" =~ ^v((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-next\.(0|[1-9][0-9]*))?)$ ]] ||
-      not_published "tag $tag does not parse as vX.Y.Z or vX.Y.Z-next.N" 1
-    version="${BASH_REMATCH[1]}"
-    bash scripts/set-release-version.sh "$version" || not_published "could not set the package versions to $version" 1
-    ;;
-  *)
-    [ "$dry_run" = true ] || not_published "${ref:-no ref} is not a release tag (refs/tags/v*)" 1
-    version="$(bash scripts/set-release-version.sh --current)" ||
-      not_published "the packages are not at one version" 1
-    ;;
-esac
+if [ "${PUBLISH_PRERELEASE:-}" = "true" ]; then
+  [ "$ref" = refs/heads/main ] || not_published "prereleases publish only from refs/heads/main, not ${ref:-no ref}" 1
+  version="$(next_prerelease_version)" || not_published "could not work out the next prerelease version from npm" 1
+  bash scripts/set-release-version.sh "$version" || not_published "could not set the package versions to $version" 1
+else
+  case "$ref" in
+    refs/tags/v*)
+      tag="${ref#refs/tags/}"
+      [[ "$tag" =~ ^v((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-next\.(0|[1-9][0-9]*))?)$ ]] ||
+        not_published "tag $tag does not parse as vX.Y.Z or vX.Y.Z-next.N" 1
+      version="${BASH_REMATCH[1]}"
+      bash scripts/set-release-version.sh "$version" || not_published "could not set the package versions to $version" 1
+      ;;
+    *)
+      [ "$dry_run" = true ] || not_published "${ref:-no ref} is not a release tag (refs/tags/v*)" 1
+      version="$(bash scripts/set-release-version.sh --current)" ||
+        not_published "the packages are not at one version" 1
+      ;;
+  esac
+fi
 case "$version" in
   *-*) channel=next ;;
   *) channel=latest ;;
