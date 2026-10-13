@@ -5,7 +5,7 @@
   "packages/cli/src/cli/daemon.ts": 817,
   "packages/cli/src/cli/doctor.test.ts": 2053,
   "packages/cli/src/cli/doctor.ts": 1184,
-  "packages/cli/src/cli/index.ts": 7467,
+  "packages/cli/src/cli/index.ts": 6762,
   "packages/config/src/defaults.ts": 774,
   "packages/core/src/checkers/baseline.test.ts": 558,
   "packages/core/src/checkers/design-smells.test.ts": 1011,
