@@ -3381,6 +3381,8 @@ describe('cli', () => {
       findSlicePlan: async () => ({ status: 'not-found' as const }),
       getPullState: async () => 'open' as const,
       saveSlicePlan: async () => {},
+      autoMergeStack: false,
+      getPullRefs: async () => ({ headRef: 'b', baseRef: 'main', headSha: 's' }),
     };
 
     const sliceStory = (n: number) => ({

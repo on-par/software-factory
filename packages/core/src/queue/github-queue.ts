@@ -125,7 +125,15 @@ export interface QueueIssue {
 
 /** A no-model classification made before a queue candidate is claimed. */
 export type QueuePreflightDecision =
-  { kind: 'build' } | { kind: 'adopt'; branch: string } | { kind: 'park'; reason: string } | { kind: 'defer' };
+  | { kind: 'build' }
+  | {
+      kind: 'adopt';
+      branch: string;
+      /** ADR-0161: the adopted PR is this stack layer; land it by exact branch and re-queue the issue unless it is the top layer. */
+      stackLayer?: { index: number; count: number; prNumber: number };
+    }
+  | { kind: 'park'; reason: string }
+  | { kind: 'defer' };
 
 export type QueuePreflight = (candidate: QueueIssue) => Promise<QueuePreflightDecision>;
 
