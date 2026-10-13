@@ -21,17 +21,12 @@ import { promisify, styleText } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
 import type {
-  BenchmarkRunFailure,
-  CheckFailureInfo,
-  CheckSummary,
   DeclaredHarnessProbe,
   Environment,
   EnvironmentProxySettings,
   EventKind,
   FactoryConfig,
   FactoryEvent,
-  FailoverReason,
-  FailurePhase,
   GithubIssueParams,
   HealthKpis,
   IngestSettings,
@@ -45,25 +40,17 @@ import type {
   ModelDiagnosis,
   PrSource,
   LanePausedPayload,
-  StewardTriggeredPayload,
-  FlakyTestsPayload,
   ParkReason,
   QueueDiagnostic,
-  ReadinessInfo,
   ReapedLease,
   RepoFactoryConfig,
   RunOutcome,
-  RunPolicy,
   RunPorts,
-  RunRequest,
-  SandboxPolicy,
   SandboxRuntime,
   UsageReading,
   WatchdogPolicyOverrides,
   WatchdogPolicySource,
-  Workspace,
   WorkRequest,
-  WorkRequestSourceKind,
 } from '@on-par/factory-core';
 import {
   BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION,
@@ -79,11 +66,9 @@ import {
   buildPhase,
   checkPhase,
   clearProxyState,
-  closedWorkSkipReason,
   computeHealthKpis,
   ConstitutionLoader,
   createDefaultWorkSourceRegistry,
-  createFileApprovalGate,
   createLogger,
   createLaneProxy,
   defaultFindPortListeners,
@@ -91,7 +76,6 @@ import {
   detectPostMergeDefects,
   diagnoseModels,
   probeDeclaredHarnesses,
-  drainSteering,
   estimateTrailingSpend,
   fetchDefectSources,
   fetchHumanEventSources,
@@ -113,16 +97,13 @@ import {
   kpisToHistoryRecord,
   laneBaseUrl,
   laneEnv,
-  LaneFileGuard,
   laneHostLabel,
-  listQueuedSteering,
   loadFactoryConfig,
   loadFactoryConfigForRepo,
   loadModelsConfig,
   loadRepoConfig,
   loadRoutesConfig,
   LOCAL_BRIEF_SOURCE,
-  localOnlyWorkspace,
   joinClassifierOutcomes,
   mergeClassifierOutcomes,
   parseClassifierOutcomes,
@@ -135,7 +116,6 @@ import {
   parseKpiHistory,
   parseQueue,
   partitionLocalQueueByActivity,
-  phaseSnapshotFile,
   planPhase,
   provisionLaneContainer,
   ProviderBreaker,
@@ -150,54 +130,36 @@ import {
   releasePortLease,
   renderKpiReport,
   renderKpiTrend,
-  resolveAutoFailover,
   resolveCodexDisabled,
   resolveDefectWindowDays,
-  resolveBuildPublish,
   resolveSizeGateMode,
   parseSizeGateMode,
   parseMaxSlices,
-  resolveSizeGateMaxSlices,
   SIZE_GATE_MODES,
   type SizeGateMode,
-  resolveDesignRegressionBlock,
-  resolveReadinessUpdateIssueBody,
   resolveEffectiveBuildRoute,
   resolveEffectiveModelPins,
-  resolveEfficiencyPolicy,
   resolveLaneBreakerThreshold,
-  resolveEnvironmentPorts,
   resolveEnvironmentProxy,
   resolveArtifactsDir,
   resolveIngestConfig,
   resolveLocalOnlyPolicy,
   resolveMergePolicy,
-  resolvePlanApproval,
   resolveProcessGroupGraceMs,
   resolveSandboxPolicy,
   resolveSkipCI,
   resolveTimeouts,
   resolveUsageCap,
   resolveWatchdogPolicy,
-  ReworkHistory,
-  rewriteQueueForDecomposition,
   runAutoIngest,
-  runIssue,
   shipPhase,
-  summarizeEvent,
   formatCostTotal,
-  touchLastEvent,
-  touchRunActivity,
   validateQueue,
   watchUsage,
-  worktreeWorkspace,
-  writeBenchmarkArtifacts,
   writeLocalRunReport,
-  writePhaseSnapshot,
   writeProxyState,
 } from '@on-par/factory-core';
 import type {
-  CheckResumeRecord,
   CiOutcome,
   EnqueueResult,
   GardenCluster,
@@ -206,7 +168,6 @@ import type {
   OvernightPreflightResult,
   OvernightQueueDeps,
   OvernightStateItem,
-  PrClassificationRecord,
   QueueClaim,
   QueueIssue,
   QueuePreflightDecision,
@@ -221,11 +182,6 @@ import type {
 import {
   acquirePidFile,
   createCheckResumeStore,
-  createPlanReuseStore,
-  checkBaseHealth,
-  currentSlice,
-  egressHostMessage,
-  egressSummaryMessage,
   findSlicePlanComment,
   recordSliceMerged,
   upsertSlicePlanComment,
@@ -247,7 +203,6 @@ import {
   resolveWorktreeRoot,
   migrateRepoConfigToYaml,
   REPO_CONFIG_YAML_HEADER,
-  branchFor,
   claudeConfigDirOverride,
   claudeKeychainService,
   cleanupWorktree,
@@ -289,21 +244,17 @@ import {
   resolveEffectiveConfig,
   worktreeSandboxFor,
   resolveExperimental,
-  resolveFilingPolicy,
   resolveLocalOnly,
   resolvePrClassifierPolicy,
   resolveRunUsageHarness,
   resolveReviewFloorRules,
   RunLockHeldError,
   runOvernightQueue,
-  findOpenPR,
   parseRemoteSlug,
   setupWorktree,
   shellEscape,
   listBuiltInCheckers,
-  shouldProxyEgress,
   slugify,
-  startEgressProxy,
   sweepWorktrees,
   watchChecks,
   withAdmissionGuard,
@@ -341,6 +292,8 @@ import {
   MergeGatedError,
 } from './land-pr.js';
 import { setLandRuntime } from './land-runtime.js';
+import { shipIssue } from './ship.js';
+import { setShipRuntime } from './ship-runtime.js';
 import { runQueueClear } from './queue-clear.js';
 import { applyStateRootOption } from './state-root.js';
 import { buildCostJson } from './cost-json.js';
@@ -426,8 +379,8 @@ import { ensureFactoryExcluded, writeSampleQueue } from './init-files.js';
 import { cmdLogs } from './logs.js';
 import { applyHelpGroups } from './help-groups.js';
 import { mergeScopeNotice } from './merge-scope.js';
-import { GITHUB_STUB_CALLS_FILE, recordGitPushes, resolveGitHubMode, selectOctokit } from './github-stub.js';
-import { createFactoryOctokit, formatDeprecation, type FactoryOctokitOptions } from './octokit.js';
+import { selectOctokit } from './github-stub.js';
+import { createFactoryOctokit, type FactoryOctokitOptions } from './octokit.js';
 import { DeepCheckError, createDeepModelRunner, runIssueCheck, type DeepCheckModelRunner } from './ready-check.js';
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
 import {
@@ -590,7 +543,7 @@ function resolveShellOps(overrides: Partial<ShellOps>, base: ShellOps = shellOps
   };
 }
 
-type CoreOpKey =
+export type CoreOpKey =
   | 'ModelRouter'
   | 'ConstitutionLoader'
   | 'ModelRegistry'
@@ -786,6 +739,33 @@ setLandRuntime(() => ({
   worktreePathFor,
   LaneParkError,
 }));
+
+// The ship flow (ship.ts, ship-steps.ts) reads these live, so per-call deps injection reaches it (#2788).
+setShipRuntime(() => ({
+  resolveConfigLoaders: (overrides) => resolveConfigLoaders(overrides),
+  resolveGitOps: (overrides) => resolveGitOps(overrides),
+  resolveShellOps: (overrides) => resolveShellOps(overrides),
+  resolveCoreOps: (overrides) => resolveCoreOps(overrides),
+  resolvePhaseOps: (overrides) => resolvePhaseOps(overrides),
+  getRepoRoot,
+  getGitHubRepo,
+  getOctokit,
+  worktreePathFor,
+  repoConfigFileFor,
+  isCommandAvailableViaShell,
+  readTextFileOrEmpty,
+  readActiveProduct,
+  errorDetail,
+  resolveEnvironmentAcquirer,
+  resolveLaneBaseUrl,
+  defaultWriteLocalRunReport: () => coreOps.writeLocalRunReport,
+  LaneParkError,
+  LaneEnvironmentPauseError,
+  IssueSkippedError,
+  IssueDecomposedError,
+}));
+
+export { shipIssue };
 
 export function hasGitHubToken(env: NodeJS.ProcessEnv = process.env, tryToken?: () => string): boolean {
   if (env.GITHUB_TOKEN || env.GH_TOKEN) return true;
@@ -2339,621 +2319,6 @@ export function resolveEnvironmentAcquirer(opts: {
       },
     };
   };
-}
-
-export async function shipIssue(
-  issueNum: number,
-  opts: {
-    product?: string;
-    autoRework?: boolean;
-    interactive?: boolean;
-    sandbox?: boolean;
-    approvePlan?: boolean;
-    branchPrefix?: string;
-    /** `run-issue --size-gate` (ADR-0147); undefined defers to sizeGate.mode in the config. */
-    sizeGate?: SizeGateMode;
-    /** run-issue --max-slices (ADR-0156); undefined defers to sizeGate.maxSlices. */
-    maxSlices?: number;
-    /** `--pr-classifier` / `--no-pr-classifier` (#1724); undefined defers to config/env. */
-    prClassifier?: boolean;
-  },
-  ctx?: {
-    repoRoot: string;
-    ghRepo: string;
-    /** Resolved factory state paths, supplied by daemon lanes with an external state root. */
-    paths?: ReturnType<typeof getFactoryPaths>;
-    lane?: string;
-    workRequest?: WorkRequest;
-    /** Receives the core RunOutcome before shipIssue maps it to a return/throw — lets
-     *  `run-issue --run-children` read the PR number as data (#1747). */
-    onOutcome?: (outcome: RunOutcome) => void;
-    /** Input source for planPhase to resolve; defaults inside planPhase to this run's GitHub issue. */
-    workSource?: { kind: WorkRequestSourceKind; params: unknown };
-    /** Local-only policy (#508): run in this caller-provided workspace, skip
-     *  worktree creation, disable publishing, and skip the SHIP phase. */
-    localOnly?: LocalOnlyPolicy;
-    /** Benchmark artifact directory (#509) — only set for local-only runs. */
-    artifactsDir?: string;
-    /** Resume at CHECK on a kept worktree (#2564). */
-    resumeFrom?: CheckResumeRecord;
-  },
-  deps: Pick<
-    CliDeps,
-    | 'octokit'
-    | 'planPhase'
-    | 'buildPhase'
-    | 'checkPhase'
-    | 'shipPhase'
-    | 'checkBaseHealth'
-    | ConfigLoaderKey
-    | GitOpKey
-    | ShellOpKey
-    | CoreOpKey
-  > = {},
-): Promise<string> {
-  const loaders = resolveConfigLoaders(deps);
-  const git = resolveGitOps(deps);
-  const shell = resolveShellOps(deps);
-  const core = resolveCoreOps(deps);
-  const phases = resolvePhaseOps(deps);
-  // FACTORY_GITHUB=stub (#2652): record each `git push` ship runs in the stub's calls.jsonl.
-  let shipPhaseForMode = phases.shipPhase;
-  if (resolveGitHubMode(process.env) === 'stub') {
-    const base = phases.shipPhase;
-    const stubCalls = join(resolve(process.env.FACTORY_GITHUB_STUB_DIR ?? ''), GITHUB_STUB_CALLS_FILE);
-    const defaultShipRunner = promisify(execCb);
-    const wrapped: RunPorts['shipPhase'] = (o) =>
-      base({ ...o, run: recordGitPushes(o.run ?? defaultShipRunner, stubCalls, o.branch) });
-    shipPhaseForMode = wrapped;
-  }
-  const repoRoot = ctx?.repoRoot ?? (await getRepoRoot(shell));
-  const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo(shell));
-  const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
-  // GitHub REST deprecations seen on this run's client become one warn event per route (#2218).
-  const octokit = (
-    deps.octokit ??
-    (() =>
-      getOctokit(shell, {
-        log: (d) =>
-          logEvent(paths.events, 'github_api_deprecated', issueNum, formatDeprecation(d), { lane: ctx?.lane }),
-      }))
-  )();
-  const [ghOwner, ghName] = ghRepo.split('/');
-
-  const repoConfig = loaders.loadRepoConfig(repoRoot, paths.root);
-  const factoryConfig = loaders.loadFactoryConfigForRepo(paths.config);
-  const classifierPolicy = resolvePrClassifierPolicy(factoryConfig, process.env, { classifier: opts.prClassifier });
-  const timeouts = loaders.resolveTimeouts(factoryConfig);
-  const failoverSettings = resolveAutoFailover(factoryConfig);
-  const breaker = new ProviderBreaker(paths.breaker);
-  const reworkHistory = new ReworkHistory(paths.reworkHistory);
-  const laneFileGuard = new LaneFileGuard(paths.laneFiles);
-  const efficiency = resolveEfficiencyPolicy(repoConfig);
-  const policy: RunPolicy = {
-    models: applyRepoConfig(loaders.loadModelsConfig(), repoConfig),
-    routes: loaders.loadRoutesConfig(),
-    sandbox: factoryConfig.sandbox,
-    budget: { perIssueCapUsd: efficiency.perIssueCapUsd },
-    effective:
-      opts.branchPrefix === undefined
-        ? resolveEffectiveConfig(repoConfig)
-        : { ...resolveEffectiveConfig(repoConfig), branchPrefix: opts.branchPrefix },
-  };
-  const router = new core.ModelRouter(
-    policy.models,
-    policy.routes,
-    false,
-    undefined,
-    policy.effective.allowExperimental,
-    policy.effective.localOnly,
-  );
-  router.setLocalAuthSink?.(recordLocalAuthFailure);
-  router.skipMissingHarnessClis(core.isCommandAvailable);
-  let issueSpend = 0;
-  let laneSandboxRuntime = 'none';
-  const laneWorkspaceBackend =
-    factoryConfig.workspace?.backend === 'disposable-docker' ? 'disposable-docker' : 'worktree';
-  router.setCostSink((entry) => {
-    issueSpend += entry.cost ?? 0;
-    logCost(paths.costs, {
-      ...entry,
-      issue: String(issueNum),
-      sandboxRuntime: laneSandboxRuntime,
-      reworkRoundCount: laneReworkRounds,
-      workspaceBackend: laneWorkspaceBackend,
-    });
-  });
-  const modelPins = loaders.resolveEffectiveModelPins(router.registryRef, repoConfig);
-  const codexOff = resolveCodexDisabled(repoConfig);
-  const constitutionLoader = new core.ConstitutionLoader();
-
-  const product = opts.product ?? readActiveProduct(paths.product);
-  const autoRework = opts.autoRework ?? true;
-
-  const work =
-    ctx?.workRequest ??
-    (await createDefaultWorkSourceRegistry({ octokit }).resolve(GITHUB_ISSUE_SOURCE, {
-      repo: ghRepo,
-      issue: issueNum,
-    } satisfies GithubIssueParams));
-  const issueTitle = work.title;
-  const sizeGateMode = opts.sizeGate ?? resolveSizeGateMode(factoryConfig);
-  const maxSlices = opts.maxSlices ?? resolveSizeGateMaxSlices(factoryConfig);
-  // ADR-0147: slice k >= 2 builds on its own branch, so read the slice plan before the worktree exists.
-  let sliceIndex: number | undefined;
-  // ADR-0161: stack runs as slice until stacked PRs are built.
-  if (
-    (sizeGateMode === 'slice' || sizeGateMode === 'stack') &&
-    !ctx?.localOnly &&
-    !ctx?.resumeFrom &&
-    work.kind === GITHUB_ISSUE_SOURCE
-  ) {
-    try {
-      const lookup = await findSlicePlanComment({ octokit, repo: ghRepo, issue: issueNum });
-      if (lookup.status === 'found') sliceIndex = currentSlice(lookup.plan)?.index;
-    } catch (err) {
-      throw new LaneParkError(
-        `slice plan lookup failed for #${issueNum}: ${errorDetail(err)} — parked before creating a worktree`,
-        'escalate',
-      );
-    }
-  }
-  const branch = ctx?.resumeFrom?.branch ?? branchFor(issueNum, issueTitle, policy.effective.branchPrefix, sliceIndex);
-  const worktree = ctx?.resumeFrom
-    ? ctx.resumeFrom.worktree
-    : ctx?.localOnly
-      ? ctx.localOnly.workspace
-      : worktreePathFor(repoRoot, ghRepo, issueNum, policy.effective.branchPrefix, loaders);
-  const specPath = resolve(paths.plans, `issue-${issueNum}.md`);
-  const runStartedAt = new Date().toISOString();
-
-  const lane = ctx?.lane;
-  // Captures the message of the last terminal event runIssue emits (ready/fail/
-  // escalate/held/conflict/ci-failed/timeout) so the LaneParkError this adapter
-  // raises below carries the same diagnostic text shipIssue used to throw with —
-  // RunOutcome's parked variant carries only the ParkReason enum, not free text.
-  const TERMINAL_EVENT_KINDS = new Set<EventKind>([
-    'ready',
-    'environment-released',
-    'fail',
-    'escalate',
-    'held',
-    'conflict',
-    'config',
-    'ci-failed',
-    'ci-infra',
-    'timeout',
-  ]);
-  let terminalMessage: string | undefined;
-  let laneReworkRounds = 0;
-  const mkLog =
-    (phase?: string) =>
-    (
-      type: EventKind,
-      msg: string,
-      extra?: {
-        failoverReason?: FailoverReason;
-        model?: string;
-        tokens?: { input: number; output: number };
-        readiness?: ReadinessInfo;
-        prClassification?: PrClassificationRecord;
-        checkFailure?: CheckFailureInfo;
-        stewardTriggered?: StewardTriggeredPayload;
-        flakyTests?: FlakyTestsPayload;
-      },
-    ) => {
-      if (TERMINAL_EVENT_KINDS.has(type)) terminalMessage = msg;
-      if (type === 'rework') laneReworkRounds++;
-      // checkPhase logs each skipped checker as a 'check' event prefixed "SKIPPED: " —
-      // echo it to the terminal the way shipIssue used to print it directly.
-      if (type === 'check' && msg.startsWith('SKIPPED: ')) {
-        console.error(styleText('yellow', `  SKIP: ${msg.slice('SKIPPED: '.length)}`));
-      }
-      // Likewise for each failing checker, so a parked run still names which checker
-      // failed and why — the parked RunOutcome carries only an aggregate count (#675).
-      if (type === 'check' && msg.startsWith('FAILED: ')) {
-        console.error(styleText('red', `  FAIL: ${msg.slice('FAILED: '.length)}`));
-      }
-      logEvent(paths.events, type, issueNum, msg, { ...extra, lane, phase });
-      // Best-effort lastEvent summary (#1327) for factory.run.snapshot — an
-      // observability side channel, so a write failure is swallowed, not logged (that
-      // would re-enter this same function for every event this chokepoint fires on).
-      touchLastEvent(phaseSnapshotFile(paths.runs, issueNum), summarizeEvent(type, msg)).catch(() => {});
-    };
-  const log = mkLog();
-
-  log('issue-title', issueTitle);
-  if (modelPins.plan) {
-    const source = modelPins.sources.plan === 'repo' ? '.factory/config.json' : 'FACTORY_PLAN_MODEL';
-    log('model-override', `plan model pinned to ${modelPins.plan} (${source})`);
-  }
-  if (modelPins.build) {
-    const source = modelPins.sources.build === 'repo' ? '.factory/config.json' : 'FACTORY_BUILD_MODEL';
-    log('model-override', `build model pinned to ${modelPins.build} (${source})`);
-  }
-
-  const skipReason = closedWorkSkipReason(work);
-  if (skipReason) {
-    log('skipped-already-closed', skipReason);
-    console.log(styleText('yellow', `skipped: ${skipReason}`));
-    throw new IssueSkippedError(skipReason, 'already-closed');
-  }
-
-  const sandboxPolicy = resolveSandboxPolicy(policy.sandbox, {
-    worktree,
-    repoRoot,
-    cliDisabled: opts.sandbox === false,
-    laneId: lane,
-    isAvailable: (cmd) => isCommandAvailableViaShell(shell, cmd),
-  });
-  laneSandboxRuntime = sandboxPolicy?.runtime ?? 'none';
-  const worktreeSandbox: WorktreeSandbox | undefined = worktreeSandboxFor(sandboxPolicy?.runtime, {
-    allowHosts: sandboxPolicy?.allowHosts ?? [],
-  });
-  let activeSandboxPolicy: SandboxPolicy | undefined;
-  if (opts.sandbox === false) {
-    console.error(styleText('yellow', 'factory: sandbox disabled by --no-sandbox — agent runs are UNCONTAINED'));
-    log('sandbox-disabled', 'sandbox disabled by --no-sandbox');
-  } else if (!sandboxPolicy) {
-    log('sandbox-disabled', 'sandbox disabled by config/FACTORY_SANDBOX');
-  } else if (sandboxPolicy.runtime === 'none') {
-    log('sandbox-unavailable', 'no sandbox runtime found (sandbox-exec/firejail) — running uncontained');
-  } else if (sandboxPolicy.runtime === 'docker-sandbox') {
-    // docker-sandbox's containment is the microVM created by worktreeWorkspace below
-    // (#653), not a command-prefix wrap — activeSandboxPolicy stays undefined because
-    // wrapCommandInSandbox remains a no-op for this runtime. createMicroVm logs the
-    // actual outcome ('sandbox' on success, 'sandbox-unavailable' on fallback), so no
-    // speculative log is emitted here.
-  } else {
-    activeSandboxPolicy = sandboxPolicy;
-    if (sandboxPolicy.allowHosts.length > 0) {
-      log(
-        'sandbox-degraded',
-        `host-level egress filtering unavailable in v1; intended allowlist: ${sandboxPolicy.allowHosts.join(', ')}`,
-      );
-    }
-  }
-
-  // Setup worktree FIRST — PLAN needs cwd=worktree to run claude. Worktree cleanup
-  // stays a CLI concern (not called here, matching today — a worktree persists past
-  // a successful run for GC/sweep commands to reclaim later).
-  let workspace: Workspace;
-  if (ctx?.resumeFrom) {
-    workspace = { path: worktree, dispose: async () => {} };
-    log('worktree', `reusing kept worktree at ${worktree} (resume --from check)`);
-  } else if (!ctx?.localOnly) {
-    workspace = await worktreeWorkspace({
-      repoRoot,
-      branch,
-      worktreePath: worktree,
-      log,
-      sandbox: worktreeSandbox,
-      findOpenPr: (br) => findOpenPR(octokit, ghOwner, ghName, br),
-      setup: (root, br, wt, sp, sandbox, setupLog, setupOpts) =>
-        withGitLock(root, () =>
-          withFileLock(
-            paths.gitLock,
-            // setupWorktree fetches origin itself before creating the worktree (#1167),
-            // so no explicit gitFetch here — still under the git + file locks.
-            () => git.setupWorktree(root, br, wt, sp, sandbox, setupLog, setupOpts),
-            { onSteal: (pid) => log('lock-stolen', `stole ${paths.gitLock} from dead holder pid ${pid ?? 'unknown'}`) },
-          ),
-        ),
-    });
-    log('worktree', `Worktree ready at ${worktree}`);
-  } else {
-    workspace = localOnlyWorkspace(ctx.localOnly);
-    log('workspace', `local-only: using caller-provided workspace ${worktree} (no factory worktree created)`);
-  }
-
-  const planApprovalEnabled = opts.approvePlan ?? resolvePlanApproval(factoryConfig);
-  const processGroupGraceMs = resolveProcessGroupGraceMs(factoryConfig);
-
-  const portsSettings = resolveEnvironmentPorts(factoryConfig);
-  if (!portsSettings.enabled) {
-    log('environment_lease', 'port leasing disabled (environment.ports.enabled=false or FACTORY_ENV_PORTS=0)');
-  }
-  // acquireEnvironment.recordPgid/release only persist/deallocate the lease — process-
-  // group tracking and killing is runIssue's own unconditional tracker (Invariant 3),
-  // so a lease-disabled/failed run still tears down every spawned agent process.
-  const acquireEnvironment = portsSettings.enabled
-    ? resolveEnvironmentAcquirer({
-        laneSandboxRuntime: sandboxPolicy?.runtime ?? 'none',
-        paths,
-        worktree,
-        branch,
-        range: portsSettings.range,
-        processGroupGraceMs,
-        log,
-        findPortListeners: core.defaultFindPortListeners,
-        reapOrphanProcesses: core.reapOrphanProcesses,
-      })
-    : undefined;
-
-  const proxySettings = resolveEnvironmentProxy(factoryConfig);
-  const resolveBaseUrl = (appPort: number | undefined) => resolveLaneBaseUrl(paths, proxySettings, worktree, appPort);
-
-  const request: RunRequest = {
-    issue: issueNum,
-    repo: ghRepo,
-    branch,
-    specPath,
-    work,
-    workSource: ctx?.workSource,
-    product,
-    startedAt: runStartedAt,
-    lane,
-    options: {
-      interactive: Boolean(opts.interactive),
-      autoRework,
-      approvePlan: planApprovalEnabled,
-      sandboxDisabled: opts.sandbox === false,
-    },
-    localOnly: Boolean(ctx?.localOnly),
-    blockUnresolvedRegressions: resolveDesignRegressionBlock(factoryConfig),
-    readinessUpdateIssueBody: resolveReadinessUpdateIssueBody(factoryConfig),
-    publishFromBuild: resolveBuildPublish(factoryConfig),
-    sizeGateMode,
-    maxSlices,
-    prClassifier: classifierPolicy.enabled
-      ? {
-          rules: resolveReviewFloorRules(repoConfig),
-          gateLabel: resolveFilingPolicy(factoryConfig).selfFixLabel,
-          modelPin: repoConfig?.models?.pins?.classifier,
-        }
-      : undefined,
-    timeouts,
-    modelPins,
-    codexDisabled: codexOff,
-    skipCI: loaders.resolveSkipCI(factoryConfig),
-    failover: failoverSettings,
-    efficiency: { maxReworkRounds: efficiency.maxReworkRounds, fastPath: efficiency.fastPath },
-    sandboxPolicy: activeSandboxPolicy,
-    processGroupGraceMs,
-    preferredRoute: repoConfig?.route,
-    ...(ctx?.resumeFrom
-      ? {
-          resumeFrom: {
-            phase: 'check' as const,
-            diffBase: ctx.resumeFrom.diffBase,
-            route: ctx.resumeFrom.route,
-            model: ctx.resumeFrom.model,
-            buildMinutes: ctx.resumeFrom.buildMinutes,
-          },
-        }
-      : {}),
-    eventsFile: paths.events,
-    logsDir: paths.logs,
-    baselineCachePath: paths.baselineCache,
-    repoConfigFile: repoConfigFileFor(repoRoot, paths.config),
-    flakyLedgerPath: paths.flakyLedger,
-  };
-
-  const ports: RunPorts = {
-    router,
-    octokit,
-    workspace,
-    events: mkLog,
-    acquireEnvironment,
-    resolveBaseUrl,
-    getIssueSpend: () => issueSpend,
-    breaker,
-    planReuse: ctx?.localOnly ? undefined : createPlanReuseStore(specPath),
-    checkResume: ctx?.localOnly ? undefined : createCheckResumeStore(specPath),
-    planPhase: phases.planPhase,
-    buildPhase: phases.buildPhase,
-    checkPhase: phases.checkPhase,
-    shipPhase: shipPhaseForMode,
-    checkBaseHealth: deps.checkBaseHealth ?? checkBaseHealth,
-    resolveConstitution: () =>
-      // Resolved once here — runIssue calls this exactly once and reuses the value for
-      // every phase, so the build worker can never author the standards it is graded by.
-      // A local-only workspace is caller-provided, not a checkout of repoRoot, so it keeps its own constitution.
-      constitutionLoader.resolve(
-        worktree,
-        product,
-        factoryConfig.paths?.constitution,
-        ctx?.localOnly ? undefined : repoRoot,
-      ),
-    createApprovalGate: () => createFileApprovalGate({ dir: paths.approvals, timeoutMs: timeouts.approval * 1000 }),
-    drainSteering: () => drainSteering(paths.steering, issueNum, worktree),
-    reworkHistory,
-    laneFileGuard,
-    recordPhase: (phase: FailurePhase) => {
-      const now = new Date().toISOString();
-      return writePhaseSnapshot(phaseSnapshotFile(paths.runs, issueNum), {
-        issue: issueNum,
-        phase,
-        updatedAt: now,
-        lastActivityAt: now,
-      });
-    },
-    onActivity: () => touchRunActivity(phaseSnapshotFile(paths.runs, issueNum), new Date().toISOString()),
-    onDecomposed: (childIssues) => {
-      const childList = childIssues.map((n) => `#${n}`).join(', ');
-      const planLog = mkLog('plan');
-      try {
-        const before = readTextFileOrEmpty(paths.queue);
-        const rewrite = rewriteQueueForDecomposition(before, { issue: issueNum, childIssues });
-        if (rewrite.changed) {
-          writeFileSync(paths.queue, rewrite.content);
-          planLog('decompose_filed', `queue entry for #${issueNum} replaced with ${childList}`);
-        } else {
-          planLog(
-            'decompose_filed',
-            `#${issueNum} had no queue entry to replace — continuing the lane with ${childList}`,
-          );
-        }
-      } catch (err) {
-        planLog('decompose_file_failed', `queue rewrite for #${issueNum} failed: ${errorDetail(err)}`);
-      }
-      throw new IssueDecomposedError(`issue #${issueNum} decomposed into ${childList}`, childIssues);
-    },
-    writeLocalRunReport: (info) =>
-      maybeWriteLocalRunReport({
-        issueNum,
-        paths,
-        startedAt: runStartedAt,
-        outcome: info.outcome,
-        branch: info.branch,
-        worktree,
-        specPath,
-        route: info.route,
-        reason: info.reason,
-        writeLocalRunReport: core.writeLocalRunReport,
-      }),
-    writeBenchmarkArtifacts: (info) =>
-      maybeWriteBenchmarkArtifacts({
-        issueNum,
-        paths,
-        ctx,
-        startedAt: runStartedAt,
-        outcome: info.outcome === 'parked' ? 'failed' : info.outcome,
-        branch: info.branch,
-        specPath,
-        route: info.route,
-        checkSummary: info.checkSummary,
-        reworkRounds: info.reworkRounds,
-        failure: info.failure,
-        reportPath: info.reportPath,
-        diffBase: info.diffBase,
-        log,
-      }),
-  };
-
-  // #2214: report-only per-lane egress proxy for sandbox-exec. Started here, after worktree setup,
-  // so the finally below is the single place that stops it on every exit path.
-  const proxied = shouldProxyEgress(request.sandboxPolicy) ? request.sandboxPolicy : undefined;
-  const egressProxy = proxied
-    ? await startEgressProxy({
-        allowHosts: proxied.allowHosts,
-        blockTelemetry: proxied.blockTelemetry,
-        onHost: (host, allowed) => log('egress_host', egressHostMessage(host, allowed)),
-      })
-    : undefined;
-  let outcome: Awaited<ReturnType<typeof runIssue>>;
-  try {
-    outcome = await runIssue(
-      proxied && egressProxy ? { ...request, sandboxPolicy: { ...proxied, proxyUrl: egressProxy.url } } : request,
-      policy,
-      ports,
-    );
-  } finally {
-    if (proxied && egressProxy) {
-      log('egress_summary', egressSummaryMessage(egressProxy.hosts(), proxied.allowHosts));
-      await egressProxy.close();
-    }
-  }
-  ctx?.onOutcome?.(outcome);
-
-  if (opts.interactive && !ctx?.localOnly && (outcome.state === 'ready' || outcome.state === 'shipped')) {
-    const leftover = listQueuedSteering(paths.steering, issueNum);
-    if (leftover.length > 0) {
-      log('steering_unconsumed', `${leftover.length} steering message(s) not consumed (no worker phase remained)`);
-    }
-  }
-
-  if (outcome.state === 'ready' || outcome.state === 'shipped') {
-    if (ctx?.localOnly) {
-      console.log(styleText('green', `✅ Local-only run complete in ${worktree} (no PR — publishing disabled)`));
-    } else {
-      console.log(styleText('green', `✅ Issue #${issueNum} → ${terminalMessage ?? 'ready'}`));
-    }
-    return outcome.branch;
-  }
-
-  if (outcome.state === 'released') {
-    throw new LaneEnvironmentPauseError(terminalMessage ?? 'environment failure on base', {
-      baseSha: outcome.baseSha,
-      failingChecks: outcome.failingChecks,
-      failureSignature: outcome.failureSignature,
-      buildPreserved: outcome.buildPreserved,
-    });
-  }
-
-  const reason: ParkReason = outcome.state === 'escalated' ? 'escalate' : outcome.reason;
-  const message = outcome.state === 'escalated' ? outcome.reason : (terminalMessage ?? `run parked: ${outcome.reason}`);
-  throw new LaneParkError(
-    message,
-    reason,
-    outcome.state === 'parked'
-      ? { failureSignature: outcome.failureSignature, failingChecks: outcome.failingChecks }
-      : undefined,
-  );
-}
-
-async function maybeWriteLocalRunReport(opts: {
-  issueNum: number;
-  paths: ReturnType<typeof getFactoryPaths>;
-  startedAt: string;
-  outcome: 'ready' | 'failed' | 'parked' | 'escalated';
-  branch?: string;
-  worktree?: string;
-  specPath?: string;
-  route?: string;
-  reason?: string;
-  writeLocalRunReport?: typeof writeLocalRunReport;
-}): Promise<string | undefined> {
-  if (process.env.FACTORY_LOCAL_ONLY !== '1') return undefined;
-  const report = await (opts.writeLocalRunReport ?? coreOps.writeLocalRunReport)({
-    issue: opts.issueNum,
-    eventsFile: opts.paths.events,
-    reportsDir: opts.paths.reports,
-    startedAt: opts.startedAt,
-    outcome: opts.outcome,
-    profile: 'local-only',
-    branch: opts.branch,
-    worktree: opts.worktree,
-    specPath: opts.specPath,
-    route: opts.route,
-    reason: opts.reason,
-  });
-  console.log(styleText('cyan', `local-only report: ${report.path}`));
-  return report.path;
-}
-
-async function maybeWriteBenchmarkArtifacts(opts: {
-  issueNum: number;
-  paths: ReturnType<typeof getFactoryPaths>;
-  ctx?: { localOnly?: LocalOnlyPolicy; artifactsDir?: string; workRequest?: WorkRequest };
-  startedAt: string;
-  outcome: 'ready' | 'failed' | 'escalated';
-  branch?: string;
-  specPath?: string;
-  route?: string;
-  checkSummary?: CheckSummary;
-  reworkRounds?: number;
-  failure?: BenchmarkRunFailure;
-  reportPath?: string;
-  diffBase?: string;
-  log: (type: EventKind, msg: string) => void;
-}): Promise<void> {
-  if (!opts.ctx?.localOnly || !opts.ctx.artifactsDir) return;
-  try {
-    const { manifestPath } = await writeBenchmarkArtifacts({
-      issue: opts.issueNum,
-      artifactsDir: opts.ctx.artifactsDir,
-      eventsFile: opts.paths.events,
-      costsFile: opts.paths.costs,
-      startedAt: opts.startedAt,
-      outcome: opts.outcome,
-      workspace: opts.ctx.localOnly.workspace,
-      branch: opts.branch,
-      specPath: opts.specPath,
-      route: opts.route,
-      request: opts.ctx.workRequest,
-      checkSummary: opts.checkSummary,
-      reworkRounds: opts.reworkRounds,
-      failure: opts.failure,
-      reportPath: opts.reportPath,
-      diffBase: opts.diffBase,
-    });
-    opts.log('benchmark-artifacts', `manifest written to ${manifestPath}`);
-    console.log(styleText('cyan', `benchmark artifacts: ${manifestPath}`));
-  } catch (err: any) {
-    // Never let artifact emission mask the run outcome.
-    opts.log('benchmark-artifacts-failed', `could not write benchmark artifacts: ${err.message}`);
-  }
 }
 
 /** The autoGcOnRun-gated worktree sweep every pipeline entry point runs before shipping
