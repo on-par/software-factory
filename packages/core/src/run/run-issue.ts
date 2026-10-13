@@ -826,6 +826,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
         autoFailover: { enabled: request.failover.enabled, fallbackModel: request.failover.fallbackModel },
         onPgid,
         laneId: request.lane,
+        parentBaseRef: request.parentBaseRef,
       });
       route = build.route;
       if (!build.ok) {

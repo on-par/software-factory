@@ -6,6 +6,7 @@ import { LaneLifecycleEventSchema } from '@on-par/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createLifecycleBus } from '../bus/index.js';
+import type { collectDesignDiff } from '../checkers/design-smells.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
@@ -2018,6 +2019,71 @@ describe('buildPhase no-diff post-condition', () => {
       type: 'fail',
       msg: 'worker produced no diff against origin/main; no implementation was produced',
     });
+  });
+
+  it('fails with no_diff when the slice has no changes beyond its parent base ref (#2717)', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-2717-empty.md');
+    const logs: Array<{ type: string; msg: string }> = [];
+    let receivedOpts: Parameters<typeof collectDesignDiff>[2];
+
+    const result = await buildPhase({
+      issue: 2717,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'factory/2717-slice-2',
+      route: 'claude',
+      router: fakeRouter(),
+      constitution: null,
+      log: (type, msg) => logs.push({ type, msg }),
+      parentBaseRef: 'factory/2717-slice-1',
+      captureBase: async () => 'presha',
+      collectDiff: async (_wt, _run, opts) => {
+        receivedOpts = opts;
+        if (opts?.baseRefOverride === 'factory/2717-slice-1') {
+          return { text: '', baseRef: opts.baseRefOverride, truncated: false };
+        }
+        return { text: 'diff --git a/parent b/parent', baseRef: 'origin/main', truncated: false };
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('no_diff');
+    expect(receivedOpts).toEqual({ fallbackBaseRef: 'presha', baseRefOverride: 'factory/2717-slice-1' });
+    expect(logs).toContainEqual({
+      type: 'fail',
+      msg: 'worker produced no diff against factory/2717-slice-1; no implementation was produced',
+    });
+  });
+
+  it('does not pass baseRefOverride when no parentBaseRef is given (#2717)', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-2717-default.md');
+    let receivedOpts: Parameters<typeof collectDesignDiff>[2];
+
+    const result = await buildPhase({
+      issue: 2717,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      branch: 'factory/2717-default',
+      route: 'claude',
+      router: fakeRouter(),
+      constitution: null,
+      log: () => {},
+      captureBase: async () => 'presha',
+      collectDiff: async (_wt, _run, opts) => {
+        receivedOpts = opts;
+        return { text: 'diff --git a/x b/x', baseRef: 'origin/main', truncated: false };
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(receivedOpts).toBeDefined();
+    expect('baseRefOverride' in (receivedOpts ?? {})).toBe(false);
   });
 
   it('fails with junk_only_diff when the filtered diff is empty but excluded paths exist', async () => {

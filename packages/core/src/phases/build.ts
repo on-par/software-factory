@@ -108,6 +108,8 @@ async function buildPhaseImpl(opts: {
   laneId?: string;
   /** Per-run id minted by runIssue; becomes SharedCompilationId=factory-<runId> for .NET lanes (#1910). */
   runId?: string;
+  /** Parent ref of a stacked slice (#2717); the no-diff check diffs against it instead of origin/main. Absent = default base. */
+  parentBaseRef?: string;
   /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
   bus?: LifecycleBus;
   /** Injectable for tests; defaults to collectDesignDiff. */
@@ -136,6 +138,7 @@ async function buildPhaseImpl(opts: {
     appBaseUrl,
     onPgid,
     runId,
+    parentBaseRef,
   } = opts;
   let route = opts.route;
 
@@ -311,7 +314,10 @@ async function buildPhaseImpl(opts: {
 
   // Second positional arg stays undefined so injected test stubs with the old
   // 1-arg shape still typecheck against `typeof collectDesignDiff`.
-  const diff = await (opts.collectDiff ?? collectDesignDiff)(worktree, undefined, { fallbackBaseRef });
+  const diff = await (opts.collectDiff ?? collectDesignDiff)(worktree, undefined, {
+    fallbackBaseRef,
+    ...(parentBaseRef !== undefined ? { baseRefOverride: parentBaseRef } : {}),
+  });
   if (diff.skipReason) {
     log('build', `diff post-condition skipped — ${diff.skipReason}`);
   } else if (diff.text === '') {
