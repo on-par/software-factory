@@ -339,6 +339,12 @@ const INTERNAL_API_KEYS = [
   'codexChatgptSessionState',
   'hasClaudeLoginEvidence',
   'claudeStoredSessionState',
+  // Last run-time local_auth failure per agent (#2733)
+  'localAuthAgentFor',
+  'localAuthCredentialPath',
+  'localAuthFailureSinceLogin',
+  'localAuthRecordPath',
+  'recordLocalAuthFailure',
   'hasOpencodeLoginEvidence',
   // Persisted per-issue run state (#2271)
   'readIssueRunState',

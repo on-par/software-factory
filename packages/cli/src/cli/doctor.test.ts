@@ -1595,6 +1595,43 @@ describe('harness sign-in (#2556)', () => {
     expect(checks.find((c) => c.name === 'claude signed in')).toMatchObject({ ok: true });
   });
 
+  it.each(['claude', 'codex'] as const)(
+    'fails the %s row when its last run hit local_auth with no login since (#2733)',
+    (agent) => {
+      const localAuthFailure = vi.fn((a: 'claude' | 'codex') =>
+        a === agent ? { agent: a, at: '2026-10-13T16:00:00.000Z' } : null,
+      );
+      const checks = runDoctorChecks(probes({ localAuthFailure }));
+      const row = checks.find((c) => c.name === `${agent} signed in`);
+      expect(row).toMatchObject({ ok: false });
+      expect(row!.detail).toContain(`re-run ${agent} login`);
+      expect(row!.detail).toContain('2026-10-13T16:00:00.000Z');
+      const other = agent === 'claude' ? 'codex' : 'claude';
+      expect(checks.find((c) => c.name === `${other} signed in`)).toMatchObject({ ok: true });
+    },
+  );
+
+  it('fails doctor when the only agent hit local_auth since its last login (#2733)', () => {
+    const checks = runDoctorChecks(
+      probes({
+        commandAvailable: (cmd) => cmd !== 'codex' && cmd !== 'opencode',
+        localAuthFailure: (a) => (a === 'claude' ? { agent: a, at: '2026-10-13T16:00:00.000Z' } : null),
+      }),
+    );
+    expect(checks.find((c) => c.name === 'claude signed in')).toMatchObject({ ok: false, optional: false });
+  });
+
+  it('a throwing local-auth probe is ignored (#2733)', () => {
+    const checks = runDoctorChecks(
+      probes({
+        localAuthFailure: () => {
+          throw new Error('boom');
+        },
+      }),
+    );
+    expect(checks.find((c) => c.name === 'claude signed in')).toMatchObject({ ok: true });
+  });
+
   it('a throwing stored-login probe counts as no evidence', () => {
     const checks = runDoctorChecks(
       noEvidence({

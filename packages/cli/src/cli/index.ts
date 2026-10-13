@@ -324,6 +324,8 @@ import {
   codexChatgptSessionState,
   hasClaudeLoginEvidence,
   claudeStoredSessionState,
+  localAuthFailureSinceLogin,
+  recordLocalAuthFailure,
   hasOpencodeLoginEvidence,
 } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
@@ -1486,6 +1488,7 @@ async function cmdCheck(issueRaw: string, opts: { json?: boolean; deep?: boolean
       effective.allowExperimental,
       effective.localOnly,
     );
+    router.setLocalAuthSink?.(recordLocalAuthFailure);
     runModel = createDeepModelRunner(router, repoRoot);
   }
   let report;
@@ -1618,6 +1621,7 @@ async function cmdClassifierBacktestEntry(opts: ClassifierBacktestOptions) {
     effective.allowExperimental,
     effective.localOnly,
   );
+  router.setLocalAuthSink?.(recordLocalAuthFailure);
   try {
     await cmdClassifierBacktest(
       { ...opts, branchPrefix },
@@ -1923,6 +1927,7 @@ export async function cmdStatus(opts: { kpis?: boolean; json?: boolean } = {}) {
     effective.allowExperimental,
     effective.localOnly,
   );
+  router.setLocalAuthSink?.(recordLocalAuthFailure);
   const product = readActiveProduct(paths.product) ?? '(none)';
 
   console.log(styleText('bold', `== ${ghRepo} ==`));
@@ -2125,6 +2130,7 @@ async function cmdTui(opts: { localQueue?: boolean } = {}, runTuiImpl: typeof ru
     effective.allowExperimental,
     effective.localOnly,
   );
+  router.setLocalAuthSink?.(recordLocalAuthFailure);
   const effectiveConfigLines = describeEffectiveConfig({
     router,
     repo: repoConfig,
@@ -2426,6 +2432,7 @@ export async function shipIssue(
     policy.effective.allowExperimental,
     policy.effective.localOnly,
   );
+  router.setLocalAuthSink?.(recordLocalAuthFailure);
   router.skipMissingHarnessClis(core.isCommandAvailable);
   let issueSpend = 0;
   let laneSandboxRuntime = 'none';
@@ -3869,6 +3876,7 @@ async function cmdTriage(opts: { product?: string; model?: string }) {
     effective.allowExperimental,
     effective.localOnly,
   );
+  router.setLocalAuthSink?.(recordLocalAuthFailure);
   router.skipMissingHarnessClis(coreOps.isCommandAvailable);
   router.setCostSink((entry) => logCost(paths.costs, { ...entry, issue: '-' }));
 
@@ -6389,6 +6397,7 @@ async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean }
         fileExists: existsSync,
       }),
     claudeSessionState: () => claudeStoredSessionState(),
+    localAuthFailure: (agent) => localAuthFailureSinceLogin(agent),
     opencodeLoggedIn: () => hasOpencodeLoginEvidence(),
     commandHarnesses: () =>
       repoRoot === null

@@ -8,6 +8,12 @@ import { HARNESS_CATALOG, harnessCliCommand, isAgenticHarness, KNOWN_HARNESS_IDS
 import type { ModelDefinition, ModelTier } from '../types/index.js';
 import { hasClaudeLoginEvidence } from '../utils/claude-config.js';
 import { hasCodexLoginEvidence } from '../utils/codex-config.js';
+import {
+  type LocalAuthAgent,
+  type LocalAuthFailure,
+  localAuthAgentFor,
+  localAuthFailureSinceLogin,
+} from '../utils/local-auth-record.js';
 import { hasOpencodeLoginEvidence } from '../utils/opencode-config.js';
 
 export class ModelRegistry {
@@ -269,6 +275,9 @@ export interface DoctorProbes {
   /** Non-inference evidence that the opencode CLI is logged in (stored credentials in opencode's
    *  auth.json). Default: hasOpencodeLoginEvidence(). Never runs `opencode run`. */
   opencodeLoggedIn?: () => boolean;
+  /** The agent's last recorded run-time local_auth failure when no login has happened since
+   *  (#2733). Default: localAuthFailureSinceLogin(). Reads local state only. */
+  localAuthFailure?: (agent: LocalAuthAgent) => LocalAuthFailure | null;
   /** Runs a declared harness `probe` command; returns null on exit 0, else a failure detail.
    *  Default: runHarnessProbe. */
   harnessProbe?: (cmd: string) => string | null;
@@ -286,6 +295,11 @@ export interface ModelDiagnosis {
 }
 
 const UNVERIFIED_PREFIX = 'unverified — no auth evidence: ';
+
+/** Reason shown when an agent's last run hit local_auth and nobody has logged in since (#2733). */
+export function localAuthFailureReason(failure: LocalAuthFailure): string {
+  return `${failure.agent} failed sign-in (local_auth) on a run at ${failure.at}, with no login since — re-run ${failure.agent} login`;
+}
 
 /** True when OLLAMA_BASE_URL points at a non-loopback host, i.e. the local
  *  `ollama` CLI and `ollama list` are the wrong probes. Unparseable URLs fall
@@ -350,6 +364,22 @@ export function diagnoseModels(
     return opencodeLoggedInCache;
   };
 
+  const localAuthFailureProbe =
+    probes.localAuthFailure ?? ((agent: LocalAuthAgent) => localAuthFailureSinceLogin(agent));
+  const localAuthFailureCache = new Map<LocalAuthAgent, LocalAuthFailure | null>();
+  const localAuthFailure = (agent: LocalAuthAgent): LocalAuthFailure | null => {
+    if (!localAuthFailureCache.has(agent)) {
+      let failure: LocalAuthFailure | null = null;
+      try {
+        failure = localAuthFailureProbe(agent);
+      } catch {
+        failure = null;
+      }
+      localAuthFailureCache.set(agent, failure);
+    }
+    return localAuthFailureCache.get(agent) ?? null;
+  };
+
   let declaredProbes: Map<string, DeclaredHarnessProbe> | undefined;
   const declaredProbe = (id: string): DeclaredHarnessProbe | undefined => {
     declaredProbes ??= new Map(
@@ -391,8 +421,12 @@ export function diagnoseModels(
         reason = `unknown harness '${harnessId ?? 'none'}' — declare a 'harness' from: ${KNOWN_HARNESS_IDS.join(', ')}`;
       } else if (entry.probe.kind === 'command') {
         const probe = entry.probe;
+        const authAgent = localAuthAgentFor(harnessId);
+        const authFailure = authAgent ? localAuthFailure(authAgent) : null;
         if (!isHarnessCliPresent(harnessId, commandAvailable)) {
           reason = `${probe.command} CLI not found on PATH`;
+        } else if (authAgent && authFailure) {
+          reason = localAuthFailureReason(authFailure);
         } else if (probe.auth === 'cli') {
           // CLI carries its own (OAuth-based) auth — a missing API key doesn't block, but the
           // CLI must show login evidence (#2418). For opencode the envKey is an optional override (#2461).

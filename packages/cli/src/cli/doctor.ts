@@ -62,6 +62,9 @@ export interface DoctorEnvProbes {
   claudeLoggedIn?: () => boolean;
   /** Stored Claude Code OAuth session state (#2721), read locally; never refreshes. */
   claudeSessionState?: () => 'ok' | 'refresh-pending' | 'unusable' | 'unknown';
+  /** The agent's last recorded run-time local_auth failure when no login has happened since
+   *  (#2733); reads local state only, never refreshes. */
+  localAuthFailure?: (agent: 'claude' | 'codex') => { agent: string; at: string } | null;
   /** Whether a stored opencode auth login exists (#2556); reads local state only, never runs inference. */
   opencodeLoggedIn?: () => boolean;
   /** Repo-configured command harnesses (#2691); absent or [] means none. */
@@ -264,6 +267,25 @@ export function harnessSignInChecks(probes: DoctorEnvProbes): DoctorCheck[] {
     ({ section, cli, login, envKeys }): DoctorCheck => {
       const name = `${cli} signed in`;
       const fix = `sign in to ${section}: ${login}`;
+      if (cli === 'claude' || cli === 'codex') {
+        let failure: { agent: string; at: string } | null = null;
+        try {
+          failure = probes.localAuthFailure?.(cli) ?? null;
+        } catch {
+          failure = null;
+        }
+        if (failure) {
+          return {
+            name,
+            section,
+            ok: false,
+            optional: found.length > 1,
+            detail: `the most recent run failed sign-in (local_auth) at ${failure.at} and there has been no login since; re-run ${cli} login`,
+            fix,
+            next: login,
+          };
+        }
+      }
       if (cli === 'codex') {
         const key = envKeys.find((k) => envPresent(k));
         if (key) return { name, section, ok: true, detail: `signed in (${key} set)` };

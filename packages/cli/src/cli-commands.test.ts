@@ -10,6 +10,7 @@ import {
   rmSync,
   unlinkSync,
   writeFileSync,
+  utimesSync,
 } from 'node:fs';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -6655,6 +6656,35 @@ Please add a widget that does the thing.
         const res = await runMain('doctor');
         expect(res.exited).toBe(false);
         expect(logged()).toContain('signed in (stored Claude Code login found)');
+      });
+
+      it('fails claude when its last run hit local_auth after the last login, and a new login clears it (#2733)', async () => {
+        h.claudeAvailable = true;
+        withAuth(false, false);
+        const home = mkdtempSync(join(tmpdir(), 'factory-2733-home-'));
+        try {
+          vi.stubEnv('HOME', home);
+          const cred = join(h.repoRoot, 'no-claude-config', '.credentials.json');
+          writeClaudeCreds({ accessToken: 'dummy', refreshToken: 'dummy-r', expiresAt: Date.now() + 3_600_000 });
+          const loginAt = (Date.now() - 3_600_000) / 1000;
+          utimesSync(cred, loginAt, loginAt);
+          mkdirSync(join(home, '.factory', 'auth'), { recursive: true });
+          writeFileSync(
+            join(home, '.factory', 'auth', 'local-auth-failures.json'),
+            JSON.stringify({ claude: { agent: 'claude', at: new Date(Date.now() - 60_000).toISOString() } }),
+          );
+          const res = await runMain('doctor');
+          expect(res.exited).toBeTruthy();
+          expect(logged()).toContain('re-run claude login');
+          expect(logged()).not.toContain('dummy');
+
+          const relogin = Date.now() / 1000;
+          utimesSync(cred, relogin, relogin);
+          const again = await runMain('doctor');
+          expect(again.exited).toBe(false);
+        } finally {
+          rmSync(home, { recursive: true, force: true });
+        }
       });
 
       it('fails when every installed agent is logged out', async () => {
