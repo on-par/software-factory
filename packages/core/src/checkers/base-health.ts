@@ -6,7 +6,7 @@ import type { Constitution } from '../types/index.js';
 import { runCommand } from '../utils/command-runner.js';
 import { GIT_COMMAND_TIMEOUT_MS } from '../utils/git-exec.js';
 import { type BaselineDeps, type BaselineReport, runBaselineCheckers } from './baseline.js';
-import { BaselineCache, hashBaselineEnv } from './baseline-cache.js';
+import { BaselineCache, hashBaselineCheckerConfig, hashBaselineEnv } from './baseline-cache.js';
 
 /** Deterministic checkers that never call a model; the only ones run on base before PLAN. */
 export const BASE_HEALTH_CHECKERS: readonly string[] = ['compile', 'lint', 'tests'];
@@ -74,7 +74,7 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
     }
     const sha8 = baseSha.slice(0, 8);
     const map = deps.memo ?? defaultMemo;
-    const key = `${baseSha}:${hashBaselineEnv(env)}`;
+    const key = `${baseSha}:${hashBaselineEnv(env)}:${hashBaselineCheckerConfig(constitution)}`;
     const memoized = map.has(key);
     if (!memoized) {
       map.set(

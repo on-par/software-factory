@@ -153,6 +153,21 @@ describe('checkBaseHealth', () => {
     expect(runBaseline.mock.calls[1][0].cache).toBeDefined();
   });
 
+  it('does not share the memo across different checker configs (#2563)', async () => {
+    const runBaseline = vi.fn<typeof runBaselineCheckers>(async () => report({}));
+    const c = (checkers: string[]) => ({
+      product: 'p',
+      version: 1,
+      checkers,
+      body: '',
+      path: 'c.md',
+      source: 'repo' as const,
+    });
+    await checkBaseHealth(opts({ runBaseline }, { constitution: c(['tests']) }));
+    await checkBaseHealth(opts({ runBaseline }, { constitution: c(['tests', 'lint']) }));
+    expect(runBaseline).toHaveBeenCalledTimes(2);
+  });
+
   it('uses the real runCommand and module memo by default (non-git dir → skipped)', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'base-health-'));
     try {
