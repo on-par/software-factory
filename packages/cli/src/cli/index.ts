@@ -395,6 +395,7 @@ import {
   runDoctorChecks,
   sandboxAuthSkipDetail,
   reconcileAgentAuthChecks,
+  repoCommandHarnesses,
   sandboxClaudeAuthChecks,
   unmergedGreenPrChecks,
   type UnmergedGreenPrRow,
@@ -6250,6 +6251,18 @@ function probeClaudeKeychain(): KeychainProbeStatus {
 }
 
 async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean } = {}) {
+  let repoRoot: string | null;
+  try {
+    repoRoot = shellOps
+      .execSync('git rev-parse --show-toplevel', {
+        timeout: 10_000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+      .trim();
+  } catch {
+    repoRoot = null;
+  }
+
   const checks = runDoctorChecks({
     commandAvailable: coreOps.isCommandAvailable,
     envPresent: (key) => !!process.env[key],
@@ -6277,19 +6290,14 @@ async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean }
         fileExists: existsSync,
       }),
     opencodeLoggedIn: () => hasOpencodeLoginEvidence(),
+    commandHarnesses: () =>
+      repoRoot === null
+        ? []
+        : repoCommandHarnesses(
+            configLoaders.loadModelsConfig().harnesses,
+            configLoaders.loadRepoConfig(repoRoot)?.models?.registry,
+          ),
   });
-
-  let repoRoot: string | null;
-  try {
-    repoRoot = shellOps
-      .execSync('git rev-parse --show-toplevel', {
-        timeout: 10_000,
-        stdio: ['ignore', 'pipe', 'ignore'],
-      })
-      .trim();
-  } catch {
-    repoRoot = null;
-  }
 
   // Only with --probe-inference: these send a real prompt (uses quota). Plain doctor makes no inference call.
   if (opts.probeInference) {

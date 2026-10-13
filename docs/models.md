@@ -123,6 +123,7 @@ Add a `harnesses` section to the models config to name your own agent CLI, then 
 - `errorPatterns` and `probe` (a command; exit 0 means reachable) are optional.
 - Ids of built-in harnesses cannot be redeclared.
 - `factory doctor` and `factory models --doctor` run `probe` and report the harness as available (exit 0) or unavailable (with the failure). With no `probe`, the harness is reported as unverified, which is a warning and not a failure.
+- A declared `agentic: true` harness used by a `models.registry` model counts as the coding agent in `factory doctor` when the first word of `command` is on PATH; when it is not, doctor names the configured command.
 
 The factory runs the declared command through the built-in `command` harness, in the lane worktree:
 

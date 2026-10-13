@@ -7,7 +7,12 @@ import { type ConfigLintInput, harnessCliCommand, lintFactoryConfig } from '@on-
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  agentCliChecks,
   analyzeEventLog,
+  commandExecutable,
+  type ConfiguredCommandHarness,
+  commandHarnessChecks,
+  repoCommandHarnesses,
   configLintChecks,
   type ClaudeAuthProbeResult,
   claudeKeychainCheck,
@@ -1888,5 +1893,86 @@ describe('config lint parity with the run preflight (#2612)', () => {
     const doctor = doctorFailed(configLintChecks(input));
     expect(doctor).toBe(preflight);
     expect(lintFactoryConfig(input).verdict).toBe(verdict);
+  });
+});
+
+describe('agentCliChecks command harnesses (#2691)', () => {
+  const BUILT_INS = ['claude', 'codex', 'opencode'];
+  const harness: ConfiguredCommandHarness = {
+    harness: 'my-agent',
+    command: 'my-agent --model {model}',
+    executable: 'my-agent',
+  };
+  const only =
+    (...names: string[]) =>
+    (cmd: string) =>
+      names.includes(cmd);
+  const agentRow = (checks: ReturnType<typeof agentCliChecks>) => checks.find((c) => c.name === 'coding agent')!;
+
+  it('parses the executable from a command template', () => {
+    expect(commandExecutable('my-agent --model {model}')).toBe('my-agent');
+    expect(commandExecutable('FOO=1 my-agent')).toBe('my-agent');
+    expect(commandExecutable('./bin/agent')).toBe('./bin/agent');
+    expect(commandExecutable('"my-agent" x')).toBe('my-agent');
+    expect(commandExecutable('"my agent" x')).toBeNull();
+    expect(commandExecutable('$(evil)')).toBeNull();
+    expect(commandExecutable('')).toBeNull();
+    expect(commandExecutable('{model}')).toBeNull();
+  });
+
+  it('keeps only agentic declared harnesses the registry references', () => {
+    const harnesses = {
+      used: { command: 'used-agent run', agentic: true },
+      plain: { command: 'plain-agent', agentic: false },
+      idle: { command: 'idle-agent', agentic: true },
+    };
+    expect(repoCommandHarnesses(harnesses, { m: { harness: 'used' }, n: { harness: 'plain' }, o: {} })).toEqual([
+      { harness: 'used', command: 'used-agent run', executable: 'used-agent' },
+    ]);
+    expect(repoCommandHarnesses(undefined, undefined)).toEqual([]);
+  });
+
+  it('passes the coding agent row with only a command harness on PATH', () => {
+    const checks = agentCliChecks(probes({ commandAvailable: only('my-agent'), commandHarnesses: () => [harness] }));
+    expect(agentRow(checks)).toMatchObject({ ok: true, detail: 'found my-agent (command harness)' });
+    expect(doctorFailed(checks)).toBe(false);
+  });
+
+  it('fails the coding agent row and names the configured command when the command harness executable is missing (#2691)', () => {
+    const checks = agentCliChecks(probes({ commandAvailable: only(), commandHarnesses: () => [harness] }));
+    const row = agentRow(checks);
+    expect(row.ok).toBe(false);
+    expect(row.detail).toContain('my-agent --model {model}');
+    expect(row.next).toBeUndefined();
+    expect(doctorFailed(checks)).toBe(true);
+  });
+
+  it('lists each configured command harness in its own row next to the built-in agents (#2691)', () => {
+    const checks = agentCliChecks(
+      probes({ commandAvailable: only(...BUILT_INS, 'my-agent'), commandHarnesses: () => [harness] }),
+    );
+    const idx = checks.findIndex((c) => c.name === 'command harness my-agent');
+    expect(idx).toBeGreaterThan(checks.findIndex((c) => c.name === 'opencode installed'));
+    expect(checks[idx]).toMatchObject({ section: 'Command harness', optional: true, ok: true });
+    expect(agentRow(checks).detail).toBe('found claude, codex, opencode, my-agent (command harness)');
+  });
+
+  it('fails the optional row when the executable cannot be parsed', () => {
+    const [row] = commandHarnessChecks([{ harness: 'x', command: '$(x)', executable: null }], () => true);
+    expect(row).toMatchObject({ ok: false, optional: true });
+    expect(row!.detail).toContain('cannot parse');
+  });
+
+  it('treats a throwing probe as no command harnesses', () => {
+    const base = agentCliChecks(probes({ commandAvailable: only() }));
+    const thrown = agentCliChecks(
+      probes({
+        commandAvailable: only(),
+        commandHarnesses: () => {
+          throw new Error('bad config');
+        },
+      }),
+    );
+    expect(thrown).toEqual(base);
   });
 });
