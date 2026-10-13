@@ -5,15 +5,26 @@ export const MIN_NODE_MAJOR = 24;
 
 export type NodeVersionCheck = { ok: true } | { ok: false; message: string };
 
-export function checkNodeVersion(version: string, cliVersion?: string): NodeVersionCheck {
+/** Environment lookup compatible with process.env; injectable so tests are deterministic (#2600). */
+export type NodeEnv = Readonly<Record<string, string | undefined>>;
+
+/** True when nvm is loaded in the calling shell: nvm.sh exports NVM_DIR (#2600). */
+export function hasNvm(env: NodeEnv): boolean {
+  return (env.NVM_DIR ?? '').trim() !== '';
+}
+
+export function checkNodeVersion(version: string, cliVersion?: string, env: NodeEnv = {}): NodeVersionCheck {
   const match = /^v?(\d+)\./.exec(version);
   if (match && Number(match[1]) >= MIN_NODE_MAJOR) return { ok: true };
   const found = version === '' ? 'unknown' : match && !version.startsWith('v') ? `v${version}` : version;
   const pkg = cliVersion ? `@on-par/factory-cli@${cliVersion}` : '@on-par/factory-cli';
+  const install = hasNvm(env)
+    ? `nvm install ${MIN_NODE_MAJOR} && nvm use ${MIN_NODE_MAJOR}`
+    : `install Node.js ${MIN_NODE_MAJOR} from https://nodejs.org/download`;
   return {
     ok: false,
     message:
       `On PAR Dev's Software Factory needs Node.js ${MIN_NODE_MAJOR} or newer (found ${found}).\n` +
-      `Fix: nvm install ${MIN_NODE_MAJOR} && nvm use ${MIN_NODE_MAJOR}, then npm install -g ${pkg}`,
+      `Fix: ${install}, then npm install -g ${pkg}`,
   };
 }
