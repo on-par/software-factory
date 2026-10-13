@@ -4,3 +4,7 @@ useDefault = true
 [[allowlists]]
 description = "Fake fixture token used by router redaction tests (packages/core/src/router/index.test.ts); also present in git history"
 regexes = ['''sk-live-abc123''']
+
+[[allowlists]]
+description = "Local, gitignored factory plan artifacts (.factory/plans/) that quote prompt-injection and canary fixture text, not real credentials"
+paths = ['''^\.factory/plans/''']
