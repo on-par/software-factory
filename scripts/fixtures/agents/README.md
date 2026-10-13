@@ -6,6 +6,8 @@ These are fake `codex`, `opencode` and `command-agent` CLIs used by the smoke te
 
 - `bin/<agent>`: the shim. POSIX sh. Sources `lib/replay.sh`.
 - `lib/replay.sh`: shared helpers `fake_mode`, `fake_replay`, `fake_commit` and `fake_drain_stdin`.
+- `sentinel/claude`: recording `claude` stand-in that always fails. See Claude sentinel below.
+- `lib/claude-sentinel.sh`: `claude_sentinel_check <log>`, the assertion for the sentinel.
 - `recordings/<agent>/<mode>.stdout`: replayed to stdout. An optional `<mode>.stderr` is replayed to stderr.
 - `recordings/codex/success.last-message`: copied to the `-o <file>` path in success mode.
 - `agents.test.ts`: checks every shim and mode, that `classifyFailure` classifies the recorded rate-limit and usage-cap output, and that this README covers every recorded agent.
@@ -22,6 +24,19 @@ Set `FAKE_AGENT_MODE` to choose a mode. The default is `success`.
 | `empty`      | 0    | no     | `empty.stdout` (codex also truncates the `-o` file) |
 
 Any other value exits 2 with `unknown FAKE_AGENT_MODE`.
+
+## Claude sentinel
+
+A non-Claude adapter smoke run must never shell out to `claude`. `sentinel/claude` is a fake `claude` that appends one line (`claude <args>`) to `$CLAUDE_SENTINEL_LOG`, prints `claude sentinel invoked` to stderr and exits 1. With the variable unset it still exits 1, so a call is never silent. It lives outside `bin/` so a caller can put only one agent shim on PATH.
+
+```sh
+export CLAUDE_SENTINEL_LOG="$TMP/claude-sentinel.log"
+PATH="$ROOT/scripts/fixtures/agents/sentinel:$ROOT/scripts/fixtures/agents/bin/<agent>...:$PATH"
+. "$ROOT/scripts/fixtures/agents/lib/claude-sentinel.sh"
+claude_sentinel_check "$CLAUDE_SENTINEL_LOG"
+```
+
+`claude_sentinel_check` returns 0 when the log is missing or empty, and returns 1 (printing the recorded calls) otherwise.
 
 ## Recorded agents
 

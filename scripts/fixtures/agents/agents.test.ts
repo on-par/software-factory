@@ -143,3 +143,50 @@ describe('recorded fixture README', () => {
     }
   });
 });
+
+describe.skipIf(process.platform === 'win32')('claude sentinel', () => {
+  const SENTINEL = join(HERE, 'sentinel', 'claude');
+  const LIB = join(HERE, 'lib', 'claude-sentinel.sh');
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'claude-sentinel-'));
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const check = (log: string) =>
+    spawnSync('sh', ['-c', '. "$1"; claude_sentinel_check "$2"', 'sh', LIB, log], {
+      encoding: 'utf8',
+    });
+
+  it('records the call and the check fails', () => {
+    const log = join(tmp, 'claude.log');
+    const res = spawnSync(SENTINEL, ['-p', '--model', 'x'], {
+      input: 'prompt',
+      encoding: 'utf8',
+      env: { ...process.env, CLAUDE_SENTINEL_LOG: log },
+    });
+    expect(res.status).toBe(1);
+    expect(readFileSync(log, 'utf8')).toContain('claude -p --model x');
+    const verdict = check(log);
+    expect(verdict.status).toBe(1);
+    expect(verdict.stderr).toContain('claude was invoked');
+  });
+
+  it('check passes when the sentinel was never called', () => {
+    expect(check(join(tmp, 'missing.log')).status).toBe(0);
+    const empty = join(tmp, 'empty.log');
+    writeFileSync(empty, '');
+    expect(check(empty).status).toBe(0);
+  });
+
+  it('fails loudly with no log configured', () => {
+    const env = { ...process.env };
+    delete env.CLAUDE_SENTINEL_LOG;
+    const res = spawnSync(SENTINEL, ['-p'], { input: 'prompt', encoding: 'utf8', env });
+    expect(res.status).toBe(1);
+    expect(res.stderr).toContain('claude sentinel invoked');
+  });
+});
