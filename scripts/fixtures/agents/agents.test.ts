@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -123,5 +123,23 @@ describe.skipIf(process.platform === 'win32')('fake agent CLI shims', () => {
       expect(res.stderr).toContain('unknown FAKE_AGENT_MODE');
       expect(commitCount(repo)).toBe(before);
     });
+  });
+});
+
+describe('recorded fixture README', () => {
+  it('documents a version and refresh steps for every recorded agent', () => {
+    const readme = readFileSync(join(HERE, 'README.md'), 'utf8');
+    const agents = readdirSync(join(HERE, 'recordings'), { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+    expect(agents).toEqual(expect.arrayContaining([...AGENTS]));
+    const sections = readme.split(/^### /m).slice(1);
+    for (const agent of agents) {
+      const section = sections.find((s) => s.split('\n')[0]?.trim() === agent);
+      expect(section, `README section for ${agent}`).toBeDefined();
+      expect(section).toMatch(/^Version: \S/m);
+      expect(section).toContain(`#### Refresh ${agent}`);
+      expect(section).toMatch(/^1\. /m);
+    }
   });
 });
