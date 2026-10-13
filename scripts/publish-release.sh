@@ -8,9 +8,10 @@
 # The version and npm dist-tag come from the tag name (#2244):
 #   vX.Y.Z-next.N  ->  version X.Y.Z-next.N, --tag next
 #   vX.Y.Z         ->  version X.Y.Z,        --tag latest
-# A push to main publishes a prerelease to `next` with no tag: the version is the npm
-# `latest` of @on-par/factory-cli with the patch bumped, plus `-next.N`, where N is one
-# more than the highest N already published for that X.Y.Z by any listed package.
+# A green CI run on a push to main publishes a prerelease to `next` with no tag: the
+# version is the npm `latest` of @on-par/factory-cli with the patch bumped, plus `-next.N`,
+# where N is one more than the highest N already published for that X.Y.Z by any listed
+# package.
 # set-release-version.sh writes that version into the packages (never committed), then
 # publish-workspaces.sh dry-runs and publishes. A dry run on a non-tag ref uses the
 # checked-out version.

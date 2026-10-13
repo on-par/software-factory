@@ -1,10 +1,14 @@
 name: Publish
 on:
   push:
-    # A main push publishes the next X.Y.Z-next.N prerelease to `next`; a v* tag publishes
-    # that exact version (see scripts/publish-release.sh).
-    branches: [main]
+    # A v* tag publishes that exact version (see scripts/publish-release.sh).
     tags: ['v*']
+  # A green CI run on a main push publishes the next X.Y.Z-next.N prerelease to `next`.
+  # CI already ran the full gate on that commit, so this path skips Verify and the smoke.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -18,18 +22,30 @@ concurrency:
   cancel-in-progress: false
 jobs:
   publish:
+    # Main prereleases publish only commits whose push-triggered CI passed.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     permissions: { contents: read, issues: read, id-token: write }
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The commit CI tested, not whatever main points at now.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
           registry-url: 'https://registry.npmjs.org'
       - name: Verify
+        if: github.event_name != 'workflow_run'
         run: bash scripts/verify.sh
+      - name: Install and build
+        if: github.event_name == 'workflow_run'
+        run: npm ci && npm run build
       - name: Quickstart smoke
+        if: github.event_name != 'workflow_run'
         # Same env as ci.yml's quickstart-smoke job: the packed CLI runs `factory init`.
         env: { GH_TOKEN: '${{ github.token }}' }
         run: bash scripts/quickstart-smoke.sh
@@ -47,5 +63,5 @@ jobs:
         env:
           GH_TOKEN: '${{ github.token }}'
           PUBLISH_DRY_RUN: '${{ inputs.dry_run }}'
-          PUBLISH_PRERELEASE: "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}"
+          PUBLISH_PRERELEASE: "${{ github.event_name == 'workflow_run' }}"
         run: bash scripts/publish-release.sh
