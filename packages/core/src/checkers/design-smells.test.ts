@@ -305,6 +305,65 @@ describe('collectDesignDiff', () => {
     expect(result.skipReason).toBeUndefined();
   });
 
+  it(
+    'baseRefOverride outranks origin/main and diffs only commits after the override',
+    { timeout: 120_000 },
+    async () => {
+      const { worktree, baseSha } = await makeRemoteLessGitRepo();
+      await execFile('git', ['update-ref', 'refs/remotes/origin/main', baseSha], { cwd: worktree });
+      await writeFile(join(worktree, 'parent.ts'), 'export const parent = true;\n');
+      await execFile('git', ['add', '.'], { cwd: worktree });
+      await execFile('git', ['commit', '-m', 'parent'], { cwd: worktree });
+      await execFile('git', ['branch', 'slice-1'], { cwd: worktree });
+      await writeFile(join(worktree, 'child.ts'), 'export const child = true;\n');
+      await execFile('git', ['add', '.'], { cwd: worktree });
+      await execFile('git', ['commit', '-m', 'child'], { cwd: worktree });
+
+      const result = await collectDesignDiff(worktree, undefined, { baseRefOverride: 'slice-1' });
+
+      expect(result.baseRef).toBe('slice-1');
+      expect(result.skipReason).toBeUndefined();
+      expect(result.text).toContain('child.ts');
+      expect(result.text).not.toContain('parent.ts');
+    },
+  );
+
+  it('returns a skipReason naming an unresolvable baseRefOverride without falling back to origin/main', async () => {
+    const calls: string[][] = [];
+    const run: DiffRunner = async (argv) => {
+      calls.push([...argv]);
+      if (argv[1] === 'rev-parse') return { ok: argv[4] === 'origin/main^{commit}', stdout: '' };
+      return { ok: true, stdout: '' };
+    };
+
+    const result = await collectDesignDiff('/worktree', run, {
+      baseRefOverride: 'missing-ref',
+      fallbackBaseRef: 'presha123',
+    });
+
+    expect(result.baseRef).toBeNull();
+    expect(result.text).toBe('');
+    expect(result.skipReason).toContain('missing-ref');
+    const flat = calls.map((c) => c.join(' '));
+    expect(flat.some((c) => c.includes('origin/main^{commit}'))).toBe(false);
+    expect(flat.some((c) => c.includes('presha123^{commit}'))).toBe(false);
+    expect(flat.some((c) => c.includes('git diff'))).toBe(false);
+  });
+
+  it('without baseRefOverride keeps origin/main', async () => {
+    const calls: string[][] = [];
+    const run: DiffRunner = async (argv) => {
+      calls.push([...argv]);
+      if (argv[1] === 'rev-parse') return { ok: argv[4] === 'origin/main^{commit}', stdout: '' };
+      return { ok: true, stdout: '' };
+    };
+
+    const result = await collectDesignDiff('/worktree', run, { fallbackBaseRef: 'presha123' });
+
+    expect(result.baseRef).toBe('origin/main');
+    expect(calls[0]?.[4]).toBe('origin/main^{commit}');
+  });
+
   it('returns text: "" when both diffs are empty', async () => {
     const run: DiffRunner = async (argv) => {
       if (argv[1] === 'rev-parse') return { ok: true, stdout: '' };
