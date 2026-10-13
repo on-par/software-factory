@@ -3,7 +3,7 @@
 import type { Octokit } from '@octokit/rest';
 
 import type { EventKind } from '../events/kinds.js';
-import { type SlicePlan, withSliceState } from '../readiness/slice-plan.js';
+import { type SlicePlan, withSliceState, withSlicesNotBuilt } from '../readiness/slice-plan.js';
 import { upsertSlicePlanComment } from '../readiness/slice-plan-github.js';
 import { renderPrBody } from '../reports/pr-body.js';
 import type { CheckSummary } from '../types/index.js';
@@ -45,9 +45,12 @@ export async function openSliceStack(opts: {
   title: string;
   plan: SlicePlan;
   slices: readonly StackSliceInput[];
+  /** Slice indexes the run stopped before building (ADR-0161); recorded as `not-built` in the same comment write. */
+  notBuilt?: readonly number[];
   log: (type: EventKind, msg: string) => void;
 }): Promise<SliceStackResult> {
   const { octokit, repo, issue, plan, log } = opts;
+  const notBuilt = opts.notBuilt ?? [];
   const [owner, repoName] = repo.split('/') as [string, string];
   const count = plan.slices.length;
   const sorted = [...opts.slices].sort((a, b) => a.index - b.index);
@@ -116,9 +119,15 @@ export async function openSliceStack(opts: {
 
   if (prs.length > 0) {
     try {
-      const recorded = prs.reduce((p, s) => withSliceState(p, s.index, 'pr-open', s.prNumber, s.branch), plan);
+      const start = notBuilt.length > 0 ? withSlicesNotBuilt(plan, Math.min(...notBuilt)) : plan;
+      const recorded = prs.reduce((p, s) => withSliceState(p, s.index, 'pr-open', s.prNumber, s.branch), start);
       await upsertSlicePlanComment({ octokit, repo, issue, plan: recorded });
-      log('ship', `recorded slices ${prs.map((p) => p.index).join(', ')} as pr-open in the slice plan comment`);
+      log(
+        'ship',
+        `recorded slices ${prs.map((p) => p.index).join(', ')} as pr-open${
+          notBuilt.length > 0 ? `; slices ${notBuilt.join(', ')} as not-built` : ''
+        } in the slice plan comment`,
+      );
     } catch (err) {
       return { ok: false, reason: `could not record the slice plan comment: ${messageOf(err)}`, prs };
     }
