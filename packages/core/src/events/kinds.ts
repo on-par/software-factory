@@ -152,6 +152,7 @@ export type EventKind =
   | 'skip-ci'
   | 'skipped-already-closed'
   | 'size-gate-escalated'
+  | 'size-gate-decomposed'
   | 'size-gate-sliced'
   | 'steward-triggered'
   | 'steering_applied'
@@ -402,6 +403,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   // attempted, so this is a clean terminal outcome, never a park (#681).
   'skipped-already-closed': { severity: 'info', isPark: false, isTerminal: true },
   'size-gate-escalated': { severity: 'warn', isPark: false, isTerminal: false },
+  // #2662: a file-mode size-gate trip filed its decomposition as sub-issues — no human escalation.
+  'size-gate-decomposed': { severity: 'info', isPark: false, isTerminal: false },
   // ADR-0147: the oversized issue was kept whole and a slice plan was recorded.
   'size-gate-sliced': { severity: 'info', isPark: false, isTerminal: false },
   // The stuck-run steward picked up a parked run (ADR-0155). Not a park: the run already
