@@ -155,7 +155,7 @@ describe('BaselineCache', () => {
       unfilledPlaceholderCheckerOutput('<Standard Category 1>'),
     ];
     await cache.set('sha', 'env', 'cfg', bad);
-    expect(existsSync(file)).toBe(false);
+    await expect(readFile(file, 'utf-8')).rejects.toMatchObject({ code: 'ENOENT' });
     await cache.set('sha', 'env', 'cfg', [...bad, out('lint', 'PASS')]);
     const parsed = JSON.parse(await readFile(file, 'utf-8'));
     expect(Object.keys(parsed.entries)).toEqual(['sha:env:lint']);
