@@ -731,6 +731,7 @@ export {
   renderSlicePlanComment,
   slicePlanFromDecomposition,
   stackSliceBranch,
+  withSliceBranchCreated,
   withSliceState,
   withSlicesAffected,
   withSlicesNotBuilt,

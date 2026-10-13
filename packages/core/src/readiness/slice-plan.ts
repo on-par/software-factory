@@ -172,6 +172,15 @@ export function parentRefForSlice(plan: SlicePlan, index: number, mainRef = 'ori
   return branch ? branch : undefined;
 }
 
+/** ADR-0161: records slice `index`'s branch when it is created (default stackSliceBranch), keeping its state. */
+export function withSliceBranchCreated(plan: SlicePlan, index: number, branch?: string): SlicePlan {
+  const slice = plan.slices.find((s) => s.index === index);
+  if (slice === undefined) {
+    throw new RangeError(`slice ${index} is not in the plan for #${plan.issue}`);
+  }
+  return withSliceState(plan, index, slice.state, undefined, branch ?? stackSliceBranch(plan.issue, index));
+}
+
 export function withSliceState(
   plan: SlicePlan,
   index: number,
