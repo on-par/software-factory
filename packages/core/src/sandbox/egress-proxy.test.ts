@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -17,6 +18,7 @@ import {
   isTelemetryHost,
   sanitizeProxyHeaders,
   startEgressProxy,
+  TELEMETRY_HOST_PATTERNS,
   type EgressProxy,
 } from './egress-proxy.js';
 
@@ -533,5 +535,22 @@ describe('telemetry block switch (#2667)', () => {
     const { status, socket } = await connectTunnel(proxy, `localhost:${upstreamPort}`);
     socket.destroy();
     expect(status).toBe(200);
+  });
+});
+
+const EGRESS_DOC = fileURLToPath(new URL('../../../../docs/egress.md', import.meta.url));
+
+describe('docs/egress.md', () => {
+  const doc = () => readFileSync(EGRESS_DOC, 'utf8');
+  it('lists every ECOSYSTEM_ALLOW_HOSTS host and says they apply only to detected ecosystems', () => {
+    const text = doc();
+    for (const host of Object.values(ECOSYSTEM_ALLOW_HOSTS).flat()) expect(text).toContain(`\`${host}\``);
+    expect(text).toMatch(/only for ecosystems detected/i);
+  });
+  it('lists every TELEMETRY_HOST_PATTERNS entry and names sandbox.network.blockTelemetry', () => {
+    const text = doc();
+    for (const host of TELEMETRY_HOST_PATTERNS) expect(text).toContain(`\`${host}\``);
+    expect(text).toContain('sandbox.network.blockTelemetry');
+    expect(text).toMatch(/telemetry, not on allowlist/);
   });
 });
