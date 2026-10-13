@@ -6514,6 +6514,72 @@ Please add a widget that does the thing.
       vi.unstubAllEnvs();
     });
 
+    describe('repo-configured command harness (#2691)', () => {
+      const setup = (agentOnPath: boolean) => {
+        coreFakes.isCommandAvailable.mockImplementation((c: string) =>
+          c === 'my-agent' ? agentOnPath : !['claude', 'codex', 'opencode'].includes(c),
+        );
+        mkdirSync(paths().root, { recursive: true });
+        writeFileSync(
+          paths().config,
+          JSON.stringify({
+            version: 2,
+            models: {
+              registry: {
+                'my-model': {
+                  provider: 'custom',
+                  tier: 'worker',
+                  costPerMtokInput: 1,
+                  costPerMtokOutput: 2,
+                  contextWindow: 1000,
+                  capabilities: [],
+                  envKey: null,
+                  providerModel: 'my-model',
+                  harness: 'my-agent',
+                },
+              },
+            },
+          }),
+        );
+        return runMainWith(
+          {
+            loadModelsConfig: () =>
+              ({
+                models: {},
+                tiers: {},
+                harnesses: {
+                  'my-agent': {
+                    command: 'my-agent --model {model}',
+                    prompt: 'stdin',
+                    output: 'stdout',
+                    agentic: true,
+                    usage: 'none',
+                  },
+                },
+              }) as never,
+            loadRepoConfig: (root: string) => JSON.parse(readFileSync(join(root, '.factory', 'config.json'), 'utf-8')),
+          },
+          'doctor',
+        );
+      };
+
+      afterEach(() => {
+        rmSync(paths().config, { force: true });
+      });
+
+      it('passes with only a repo-configured command harness on PATH (#2691)', async () => {
+        const res = await setup(true);
+        expect(res.exited).toBe(false);
+        expect(logged()).toContain('my-agent (command harness)');
+      });
+
+      it('fails and names the configured command when the executable is missing', async () => {
+        const res = await setup(false);
+        expect(res.exited).toBeTruthy();
+        expect(logged()).toContain('my-agent --model {model}');
+      });
+    });
+
     describe('agent sign-in (#2496)', () => {
       const withAuth = (claudeOk: boolean, codexOk: boolean) => {
         // Claude sign-in comes from local evidence (#2556), never from `claude -p`.

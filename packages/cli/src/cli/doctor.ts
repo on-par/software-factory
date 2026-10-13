@@ -38,6 +38,15 @@ export interface DoctorExecOptions {
   timeoutMs?: number;
 }
 
+/** A declared, agentic command harness the repo's models.registry uses (#2691). */
+export interface ConfiguredCommandHarness {
+  harness: string;
+  /** The declared `command` template, verbatim. */
+  command: string;
+  /** First token of `command` to look up on PATH; null when it cannot be parsed safely. */
+  executable: string | null;
+}
+
 export interface DoctorEnvProbes {
   commandAvailable: (cmd: string) => boolean;
   envPresent: (key: string) => boolean;
@@ -53,7 +62,12 @@ export interface DoctorEnvProbes {
   claudeLoggedIn?: () => boolean;
   /** Whether a stored opencode auth login exists (#2556); reads local state only, never runs inference. */
   opencodeLoggedIn?: () => boolean;
+  /** Repo-configured command harnesses (#2691); absent or [] means none. */
+  commandHarnesses?: () => ConfiguredCommandHarness[];
 }
+
+/** Section for rows about repo-configured command harnesses (#2691). */
+export const COMMAND_HARNESS_SECTION = 'Command harness';
 
 /** Repo wired-up rows, sectioned only inside a git repo (#2557). */
 export const REPO_SECTION = 'Repo';
@@ -300,23 +314,102 @@ export function harnessSignInChecks(probes: DoctorEnvProbes): DoctorCheck[] {
   );
 }
 
+function safeList(fn: (() => ConfiguredCommandHarness[]) | undefined): ConfiguredCommandHarness[] {
+  if (!fn) return [];
+  try {
+    return fn();
+  } catch {
+    return [];
+  }
+}
+
+/** The executable (first token) of a command template, or null when it cannot be parsed safely (#2691).
+ *  Guards `isCommandAvailable`, which interpolates into `command -v` unescaped. */
+export function commandExecutable(command: string): string | null {
+  const tokens = command.trim().split(/\s+/);
+  while (tokens.length > 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0]!)) tokens.shift();
+  let token = tokens[0];
+  if (!token) return null;
+  const quoted = /^(['"])(.*)\1$/.exec(token);
+  if (quoted) token = quoted[2]!;
+  return /^[\w./@+~-]+$/.test(token) ? token : null;
+}
+
+/** Declared, agentic command harnesses that at least one repo `models.registry` entry uses (#2691). */
+export function repoCommandHarnesses(
+  harnesses: Readonly<Record<string, { command: string; agentic: boolean }>> | undefined,
+  registry: Readonly<Record<string, { harness?: string }>> | undefined,
+): ConfiguredCommandHarness[] {
+  const used = new Set(Object.values(registry ?? {}).map((def) => def.harness));
+  return Object.entries(harnesses ?? {})
+    .filter(([id, decl]) => decl.agentic === true && used.has(id))
+    .map(([id, decl]) => ({ harness: id, command: decl.command, executable: commandExecutable(decl.command) }));
+}
+
+/** One optional `command harness <id>` row per configured command harness (#2691). */
+export function commandHarnessChecks(
+  harnesses: readonly ConfiguredCommandHarness[],
+  commandAvailable: (cmd: string) => boolean,
+): DoctorCheck[] {
+  return harnesses.map((h): DoctorCheck => {
+    const name = `command harness ${h.harness}`;
+    if (h.executable !== null && commandAvailable(h.executable)) {
+      return {
+        name,
+        section: COMMAND_HARNESS_SECTION,
+        optional: true,
+        ok: true,
+        detail: `${h.executable} found on PATH (command: ${h.command})`,
+      };
+    }
+    return {
+      name,
+      section: COMMAND_HARNESS_SECTION,
+      optional: true,
+      ok: false,
+      detail: `configured command \`${h.command}\`: ${
+        h.executable === null ? 'cannot parse an executable from it' : `${h.executable} not found on PATH`
+      }`,
+      fix: installFix(h),
+    };
+  });
+}
+
+function installFix(h: ConfiguredCommandHarness): string {
+  return `install ${h.executable ?? 'the agent CLI'} on PATH or fix "command" for harness ${h.harness} in the models config harnesses section`;
+}
+
 /** Coding agent prerequisites: at least one agent CLI is required; each CLI is then reported
- *  on its own optional line, with sign-in reported separately from installation (#1269, #2422, #2555, #2556). */
+ *  on its own optional line, with sign-in reported separately from installation (#1269, #2422, #2555, #2556).
+ *  A repo-configured command harness whose executable is on PATH also counts as a coding agent (#2691). */
 export function agentCliChecks(probes: DoctorEnvProbes): DoctorCheck[] {
   const { commandAvailable, tryExec } = probes;
   const found = availableAgentClis(commandAvailable);
-  const checks: DoctorCheck[] = [
-    found.length > 0
-      ? { name: 'coding agent', ok: true, detail: `found ${found.join(', ')}` }
-      : {
+  const configured = safeList(probes.commandHarnesses);
+  const runnable = configured.filter((h) => h.executable !== null && commandAvailable(h.executable));
+  const agents = [...found, ...runnable.map((h) => `${h.harness} (command harness)`)];
+  const describe = (h: ConfiguredCommandHarness): string =>
+    `command harness ${h.harness} runs \`${h.command}\`, but ${h.executable ?? 'its executable'} is not on PATH`;
+  const missingRow: DoctorCheck =
+    configured.length === 0
+      ? {
           name: 'coding agent',
           ok: false,
           detail: 'no coding agent CLI on PATH (claude, codex or opencode)',
           fix: `install Claude Code (${CLAUDE_CODE_URL}) or the Codex CLI (${CODEX_CLI_URL})`,
           next: HARNESS_SETUP[0]!.install,
-        },
+        }
+      : {
+          name: 'coding agent',
+          ok: false,
+          detail: `no coding agent CLI on PATH (claude, codex or opencode); ${configured.map(describe).join('; ')}`,
+          fix: installFix(configured[0]!),
+        };
+  const checks: DoctorCheck[] = [
+    agents.length > 0 ? { name: 'coding agent', ok: true, detail: `found ${agents.join(', ')}` } : missingRow,
   ];
   checks.push(...harnessInstallChecks(commandAvailable, tryExec));
+  checks.push(...commandHarnessChecks(configured, commandAvailable));
   checks.push(...harnessSignInChecks(probes));
   return checks;
 }
