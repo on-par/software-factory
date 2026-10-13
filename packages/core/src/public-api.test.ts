@@ -411,6 +411,7 @@ const INTERNAL_API_KEYS = [
   'describeConstitutionSource',
   'listBuiltInCheckers',
   'findUnknownConstitutionCheckers',
+  'findTemplateTokens',
   'formatUnknownCheckerMessage',
   'describePullRequestAccessError',
   'describeReviewConstitutionSource',

@@ -1,9 +1,11 @@
 // packages/cli/src/cli/doctor.ts — `factory doctor` environment preflight
 
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import type { DeclaredHarnessProbe } from '@on-par/factory-core';
 import { detectSandboxRuntime } from '@on-par/factory-core';
+import { findTemplateTokens, listBuiltInCheckers } from '@on-par/factory-core/internal';
 
 import { MIN_NODE_MAJOR } from '../node-version.js';
 import { availableAgentClis, CLAUDE_CODE_URL, CODEX_CLI_URL, GITHUB_TOKENS_URL } from './first-run.js';
@@ -966,4 +968,70 @@ export function modelsRegistryChecks(
   if (failed.length > 0) return failed;
   const n = entries.length;
   return [{ name: REGISTRY_CHECK, ok: true, detail: `${n} entr${n === 1 ? 'y' : 'ies'} valid (${configPath})` }];
+}
+
+export interface ConfigScanFile {
+  absPath: string;
+  /** Display path in the row, e.g. `.factory/constitution.md`. */
+  relPath: string;
+  /** `frontmatter` for the constitution, `all` for the repo config file (same scopes as the run preflight). */
+  scope: 'frontmatter' | 'all';
+}
+
+function readTextOrNull(absPath: string): string | null {
+  try {
+    return readFileSync(absPath, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+/** One failing `config` row per unfilled `<...>` placeholder in the constitution frontmatter or repo config
+ *  file (#2610); a single ok row when there are none. Read-only. */
+export function configPlaceholderChecks(
+  files: readonly ConfigScanFile[],
+  readText: (absPath: string) => string | null = readTextOrNull,
+): DoctorCheck[] {
+  const scanned: string[] = [];
+  const rows: DoctorCheck[] = [];
+  for (const f of files) {
+    const text = readText(f.absPath);
+    if (text === null) continue;
+    scanned.push(f.relPath);
+    const lines = text.split(/\r?\n/);
+    for (const finding of findTemplateTokens(text, f.relPath, f.scope)) {
+      const src = lines[finding.line - 1] ?? '';
+      const isChecker = f.scope === 'frontmatter' && (/^\s*-\s*</.test(src) || /^\s*checkers\s*:/.test(src));
+      if (isChecker) {
+        const names = [...listBuiltInCheckers().map((c) => c.name), 'custom_*'].join(', ');
+        rows.push({
+          name: 'config',
+          ok: false,
+          section: REPO_SECTION,
+          detail: `${f.relPath}:${finding.line}: placeholder checker '${finding.token}'`,
+          fix: `replace '${finding.token}' with a real checker name (${names}) or delete the line`,
+        });
+      } else {
+        rows.push({
+          name: 'config',
+          ok: false,
+          section: REPO_SECTION,
+          detail: `${f.relPath}:${finding.line}: unfilled template token '${finding.token}'`,
+          fix: `replace '${finding.token}' with a real value`,
+        });
+      }
+    }
+  }
+  if (rows.length > 0) return rows;
+  return [
+    {
+      name: 'config',
+      ok: true,
+      section: REPO_SECTION,
+      detail:
+        scanned.length > 0
+          ? `no unfilled placeholders in ${scanned.join(', ')}`
+          : 'no constitution or config file to scan',
+    },
+  ];
 }

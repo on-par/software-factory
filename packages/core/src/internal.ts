@@ -676,6 +676,8 @@ export {
 } from './constitutions/index.js';
 export type { BuiltInCheckerInfo } from './checkers/index.js';
 export { listBuiltInCheckers } from './checkers/index.js';
+export { findTemplateTokens } from './config/template-tokens.js';
+export type { TemplateTokenFinding } from './config/template-tokens.js';
 export { findUnknownConstitutionCheckers, formatUnknownCheckerMessage } from './checkers/constitution-preflight.js';
 export type { UnknownConstitutionChecker } from './checkers/constitution-preflight.js';
 

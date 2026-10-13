@@ -382,6 +382,7 @@ import {
   type KeychainProbeStatus,
   type LeaseHealthRow,
   orphanContainerChecks,
+  configPlaceholderChecks,
   modelsRegistryChecks,
   orphanMicroVmChecks,
   runDoctorChecks,
@@ -6291,6 +6292,15 @@ async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean }
 
     const eventsContent = existsSync(paths.events) ? readFileSync(paths.events, 'utf-8') : null;
     checks.push(eventLogCheck(eventsContent === null ? null : analyzeEventLog(eventsContent)));
+
+    const constitutionFile = repoConfigFileFor(repoRoot, resolve(paths.root, 'constitution.md'));
+    const configFile = repoConfigFileFor(repoRoot, paths.config);
+    checks.push(
+      ...configPlaceholderChecks([
+        { ...constitutionFile, scope: 'frontmatter' },
+        { ...configFile, scope: 'all' },
+      ]),
+    );
 
     try {
       const declared = Object.keys(configLoaders.loadModelsConfig().harnesses ?? {});
