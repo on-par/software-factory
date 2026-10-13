@@ -2,10 +2,21 @@ import { copyFile, lstat, mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { execa } from 'execa';
 
+export interface PrepareRunWorktreeOptions {
+  /** Commit-ish the new run branch starts from. Defaults to HEAD. */
+  baseRef?: string;
+}
+
 /** A run owns its checkout, branch and .factory state. Retain it for inspection after completion. */
-export async function prepareRunWorktree(repo: string, runId: string): Promise<string> {
+export async function prepareRunWorktree(
+  repo: string,
+  runId: string,
+  options: PrepareRunWorktreeOptions = {},
+): Promise<string> {
   if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(runId))
     throw new Error('Invalid run identifier');
+  const baseRef = options.baseRef ?? 'HEAD';
+  if (!baseRef.trim() || baseRef.startsWith('-')) throw new Error('Invalid base ref');
   const git = (...args: string[]) => execa('git', args, { cwd: repo, timeout: 30_000 });
   const common = resolve(repo, (await git('rev-parse', '--git-common-dir')).stdout);
   const path = join(common, 'factory-runs', runId);
@@ -20,7 +31,7 @@ export async function prepareRunWorktree(repo: string, runId: string): Promise<s
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
   await mkdir(join(common, 'factory-runs'), { recursive: true });
-  await git('worktree', 'add', '-b', branch, path, 'HEAD');
+  await git('worktree', 'add', '-b', branch, path, baseRef);
   await mkdir(join(path, '.factory'), { recursive: true });
   try {
     await copyFile(join(repo, '.factory', 'config.json'), join(path, '.factory', 'config.json'));
