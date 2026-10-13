@@ -2472,6 +2472,7 @@ export async function shipIssue(
     'escalate',
     'held',
     'conflict',
+    'config',
     'ci-failed',
     'ci-infra',
     'timeout',

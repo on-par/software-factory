@@ -1701,6 +1701,23 @@ bash scripts/verify.sh
       expect(errored()).not.toContain('rejected the token');
     });
 
+    it('status Last Events shows a config park as config (#2584)', async () => {
+      mkdirSync(dirname(paths().events), { recursive: true });
+      writeFileSync(
+        paths().events,
+        [
+          { type: 'config', issue: '7', msg: 'config failure in CHECK: .factory/constitution.md:4' },
+          { type: 'parked', issue: '7', msg: 'issue #7 parked (config); fix the config' },
+        ]
+          .map((e) => JSON.stringify(e))
+          .join('\n') + '\n',
+      );
+      await runMain('status');
+      const out = logged();
+      expect(out).toContain('config #7: config failure in CHECK');
+      expect(out).toContain('parked (config)');
+    });
+
     describe('base hold (#2351)', () => {
       const writeHold = (repo: string): void => {
         mkdirSync(dirname(paths().baseHold), { recursive: true });
@@ -4080,7 +4097,7 @@ bash scripts/verify.sh
       configEnvFail();
       const err = await shipIssue(5, {}, { repoRoot: h.repoRoot, ghRepo: h.ghRepo }).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(LaneParkError);
-      expect((err as LaneParkError).reason).toBe('fail');
+      expect((err as LaneParkError).reason).toBe('config');
       expect(existsSync(recordPath())).toBe(false);
       expect(readFileSync(paths().events, 'utf-8')).toContain('factory unpark 5');
     });

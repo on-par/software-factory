@@ -62,7 +62,7 @@ export function resolveArtifactsDir(raw: string): string {
 export interface BenchmarkRunFailure {
   /** Pipeline phase the run terminated in. */
   phase: FailurePhase;
-  /** Park classification from parkReasonFor: 'fail' | 'escalate' | 'timeout' | 'conflict'. */
+  /** Park classification from parkReasonFor: 'fail' | 'escalate' | 'timeout' | 'conflict' | 'config'. */
   reason: string;
   message: string;
 }
