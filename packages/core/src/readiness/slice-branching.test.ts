@@ -3,7 +3,15 @@ import type { Story } from '@on-par/contracts';
 import { describe, expect, it } from 'vitest';
 
 import type { DecompositionOutput } from './decompose.js';
-import { parentRefForSlice, slicePlanFromDecomposition, stackSliceBranch, withSliceState } from './slice-plan.js';
+import {
+  parentRefForSlice,
+  parseSlicePlanComment,
+  renderSlicePlanComment,
+  slicePlanFromDecomposition,
+  stackSliceBranch,
+  withSliceBranchCreated,
+  withSliceState,
+} from './slice-plan.js';
 import type { SlicePlan } from './slice-plan.js';
 
 function story(title: string): Story {
@@ -74,5 +82,49 @@ describe('parentRefForSlice', () => {
     for (const index of [0, -1, 1.5, plan.slices.length + 1]) {
       expect(parentRefForSlice(plan, index)).toBeUndefined();
     }
+  });
+});
+
+describe('withSliceBranchCreated', () => {
+  it('records the slice branch in the plan comment on creation', () => {
+    const plan = withSliceBranchCreated(freshPlan(3), 1);
+    expect(plan.slices[0]?.branch).toBe('factory/2702-slice-1');
+    const body = renderSlicePlanComment(plan);
+    expect(body).toContain('branch `factory/2702-slice-1`');
+    const parsed = parseSlicePlanComment(body);
+    expect(parsed?.ok).toBe(true);
+    if (parsed?.ok) expect(parsed.plan.slices[0]?.branch).toBe('factory/2702-slice-1');
+  });
+
+  it('keeps the slice pending when the plan is read back', () => {
+    const parsed = parseSlicePlanComment(renderSlicePlanComment(withSliceBranchCreated(freshPlan(3), 2)));
+    expect(parsed?.ok).toBe(true);
+    if (!parsed?.ok) return;
+    expect(parsed.plan.slices.map((s) => s.state)).toEqual(['pending', 'pending', 'pending']);
+    expect(parsed.plan.slices[1]?.prNumber).toBeUndefined();
+    expect(parsed.plan.slices[1]?.headSha).toBeUndefined();
+  });
+
+  it('lets parentRefForSlice resolve the next slice before SHIP', () => {
+    const fresh = freshPlan(3);
+    expect(parentRefForSlice(fresh, 2)).toBeUndefined();
+    const plan = withSliceBranchCreated(fresh, 1);
+    expect(parentRefForSlice(plan, 2)).toBe('factory/2702-slice-1');
+  });
+
+  it('records an explicit branch and leaves other slices and an existing state untouched', () => {
+    const before = withSliceState(freshPlan(3), 1, 'pr-open', 11);
+    const snapshot = structuredClone(before);
+    const plan = withSliceBranchCreated(before, 1, 'factory/custom');
+    expect(plan.slices[0]).toMatchObject({ state: 'pr-open', prNumber: 11, branch: 'factory/custom' });
+    expect(plan.slices[1]).toEqual(before.slices[1]);
+    expect(plan.slices[2]).toEqual(before.slices[2]);
+    expect(before).toEqual(snapshot);
+  });
+
+  it('throws for an index outside the plan', () => {
+    const plan = freshPlan(3);
+    expect(() => withSliceBranchCreated(plan, 0)).toThrow(RangeError);
+    expect(() => withSliceBranchCreated(plan, 4)).toThrow(RangeError);
   });
 });
