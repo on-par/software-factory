@@ -1,0 +1,12 @@
+#!/bin/sh
+# Sentinel for non-Claude adapter smoke runs: records every call and fails.
+# Put this directory on PATH so a fallback to the real claude CLI is caught.
+set -u
+
+[ -t 0 ] || cat >/dev/null
+
+if [ -n "${CLAUDE_SENTINEL_LOG:-}" ]; then
+  printf '%s\n' "claude $*" >>"$CLAUDE_SENTINEL_LOG"
+fi
+echo "claude sentinel invoked: $*" >&2
+exit 1
