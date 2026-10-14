@@ -1263,7 +1263,7 @@ describe('per-harness setup sections (#2555)', () => {
     const expected = [
       ['claude', 'Claude Code', /npm install -g @anthropic-ai\/claude-code$/],
       ['codex', 'Codex', /npm install -g @openai\/codex$/],
-      ['opencode', 'OpenCode', /npm install -g opencode-ai$/],
+      ['opencode', 'OpenCode', /npm install -g opencode-ai@1\.18\.28$/],
     ] as const;
     for (const [cli, section, re] of expected) {
       const row = checks.find((c) => c.name === `${cli} installed`)!;

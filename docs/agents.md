@@ -102,6 +102,9 @@ runs without effort.
 Run `factory doctor` in the repo. The `coding agent` line lists `opencode`, and the `OpenCode` section
 shows `opencode installed` and `opencode signed in`. `factory models --doctor` probes OpenCode reachability.
 
+Supported OpenCode versions are `>=1.18.0 <2.1.0`. Doctor warns, without failing, when the installed
+version is outside that range. Install the tested version with `npm install -g opencode-ai@1.18.28`.
+
 Version tested: 1.18.28
 
 ## Recipes

@@ -29,6 +29,7 @@ jobs:
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+      OPENCODE_DISABLE_AUTOUPDATE: '1'
     steps:
       - uses: actions/checkout@v7
 
@@ -57,8 +58,12 @@ jobs:
 
       - name: Install OpenCode CLI
         if: env.OPENCODE_API_KEY != ''
+        env:
+          OPENCODE_DISABLE_AUTOUPDATE: '1'
+        # The pin matches OPENCODE_PINNED_VERSION in packages/core/src/harness/opencode-version.ts.
         run: |
-          npm install -g opencode-ai
+          npm install -g opencode-ai@1.18.28
+          echo "OpenCode pinned: opencode-ai@1.18.28 (autoupdate disabled)" >> "$GITHUB_STEP_SUMMARY"
           opencode --version >> "$GITHUB_STEP_SUMMARY"
 
       - name: Real OpenCode full-loop smoke

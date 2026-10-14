@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import * as opencodeVersionApi from './harness/opencode-version.js';
 import * as publicApi from './index.js';
 import * as internalApi from './internal.js';
 import * as kpisApi from './kpis-entry.js';
@@ -173,7 +174,6 @@ const PUBLIC_API_KEYS = [
   'isCommandAvailable',
   'ModelRegistry',
   'resolveModelOverrides',
-  // Router
   'failoversFrom',
   'ModelRouter',
   // Provider circuit breaker
@@ -883,7 +883,7 @@ describe('public API surface (ADR-0004)', () => {
   });
 
   it('./internal exposes exactly the documented internal API', () => {
-    expect(Object.keys(internalApi).sort()).toEqual([...INTERNAL_API_KEYS].sort());
+    expect(Object.keys(internalApi).sort()).toEqual([...INTERNAL_API_KEYS, ...Object.keys(opencodeVersionApi)].sort());
   });
 
   it('./testing exposes exactly the documented testing API', () => {
