@@ -75,7 +75,6 @@ import {
   fetchDefectSources,
   fetchHumanEventSources,
   fetchSubscriptionUsage,
-  formatKpiLines,
   formatUsageReport,
   getConstitutionsDir,
   getFactoryPaths,
@@ -110,10 +109,8 @@ import {
   parkReasonFor,
   parseKpiHistory,
   parseQueue,
-  partitionLocalQueueByActivity,
   planPhase,
   provisionLaneContainer,
-  ProviderBreaker,
   readEvents,
   readPortLeases,
   readQueue,
@@ -192,9 +189,7 @@ import {
   readHarvestEvents,
   renderGardenJson,
   renderGardenReport,
-  formatWorktreeLocation,
   laneWorktreePath,
-  resolveWorktreeRoot,
   migrateRepoConfigToYaml,
   REPO_CONFIG_YAML_HEADER,
   claudeConfigDirOverride,
@@ -284,6 +279,7 @@ import {
 } from './land-pr.js';
 import { setLandRuntime } from './land-runtime.js';
 import { shipIssue } from './ship.js';
+import { cmdStatus, type StatusOptions } from './status.js';
 import { cmdSupervise, type SuperviseOptions } from './supervise.js';
 import { setShipRuntime } from './ship-runtime.js';
 import { runQueueClear } from './queue-clear.js';
@@ -294,11 +290,8 @@ import { buildQueueListJson } from './queue-list.js';
 import { runUnpark, UnparkError, type UnparkJson } from './unpark.js';
 import { buildRunsJson, parseRunsLimit } from './runs.js';
 import { buildRunDiffstatJson, NoRunError, parseDiffstatIssue, type RunDiffstatJson } from './runs-diffstat.js';
-import { buildStatusJson } from './status-json.js';
 import {
-  buildStatusUpdateJson,
   formatUpdateStartupLine,
-  formatUpdateStatusLine,
   initialUpdateState,
   readUpdateState,
   updateStatePath,
@@ -374,23 +367,11 @@ import { selectOctokit } from './github-stub.js';
 import { createFactoryOctokit, type FactoryOctokitOptions } from './octokit.js';
 import { DeepCheckError, createDeepModelRunner, runIssueCheck, type DeepCheckModelRunner } from './ready-check.js';
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
-import {
-  type BaseHoldDecision,
-  createBaseHoldGate,
-  formatBaseHoldCleared,
-  formatBaseHoldStatus,
-  readBaseHold,
-  writeBaseHold,
-} from './base-hold.js';
+import { type BaseHoldDecision, createBaseHoldGate, formatBaseHoldCleared, writeBaseHold } from './base-hold.js';
 import { readRunFlagOverrides, writeRunFlagOverrides } from './run-flags.js';
 import { distFreshnessProbe, runStalenessGuard } from './staleness.js';
 import { readStopFileStatus, stopSentinelCheck, stopSentinelRunSkipMessage } from './stop-sentinel.js';
-import {
-  checkSweepHeartbeat,
-  defaultSweepHeartbeatDeps,
-  formatSweepHeartbeatStatusLine,
-  sweepHeartbeatCheck,
-} from './sweep-heartbeat.js';
+import { checkSweepHeartbeat, defaultSweepHeartbeatDeps, sweepHeartbeatCheck } from './sweep-heartbeat.js';
 
 export type ConfigLoaderKey =
   | 'loadModelsConfig'
@@ -1856,192 +1837,6 @@ export async function cmdUsage(
 function warnQueueDiagnostics(diagnostics: QueueDiagnostic[]): void {
   for (const d of diagnostics) {
     console.error(styleText('yellow', `factory: queue ${d.message} — skipped`));
-  }
-}
-
-/** Formats the time since `lastActivityAt` as a short duration (e.g. `3m`) for the
- *  `factory status` `== Active ==` section's `[phase, <age> ago]` display (#1343). An
- *  active claim's heartbeat is always within DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS
- *  (15m), so minutes is the only unit that ever shows. */
-function formatClaimAge(lastActivityAt: string, now: number): string {
-  const ageMs = Math.max(0, now - Date.parse(lastActivityAt));
-  const minutes = Math.floor(ageMs / 60_000);
-  return minutes < 1 ? '<1m' : `${minutes}m`;
-}
-
-export async function cmdStatus(opts: { kpis?: boolean; json?: boolean } = {}) {
-  if (opts.json) {
-    // `--kpis` is deliberately ignored here: the JSON shape is fixed (#1101).
-    const repoRoot = await getRepoRoot();
-    const paths = getFactoryPaths(repoRoot);
-    if (!existsSync(paths.root)) throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
-    const ghRepo = await getGitHubRepo();
-    let active: Awaited<ReturnType<typeof partitionLocalQueueByActivity>>['active'] = [];
-    if (existsSync(paths.queue)) {
-      const { entries, diagnostics } = parseQueue(readFileSync(paths.queue, 'utf-8'));
-      if (entries.length > 0) ({ active } = await partitionLocalQueueByActivity(entries, paths.runs));
-      warnQueueDiagnostics(diagnostics);
-    }
-    console.log(
-      JSON.stringify(
-        buildStatusJson({
-          repo: ghRepo,
-          product: readActiveProduct(paths.product) ?? null,
-          stop: existsSync(paths.stop),
-          breakers: await new ProviderBreaker(paths.breaker).list(),
-          active,
-          update: buildStatusUpdateJson(readUpdateState(updateStatePath(daemonRuntimePaths().dir))),
-          now: Date.now(),
-        }),
-      ),
-    );
-    return;
-  }
-  const repoRoot = await getRepoRoot();
-  const ghRepo = await getGitHubRepo();
-  const paths = getFactoryPaths(repoRoot);
-
-  const repoConfig = configLoaders.loadRepoConfig(repoRoot);
-  const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), repoConfig);
-  const routesConfig = configLoaders.loadRoutesConfig();
-  const effective = resolveEffectiveConfig(repoConfig);
-  const router = new coreOps.ModelRouter(
-    modelsConfig,
-    routesConfig,
-    false,
-    undefined,
-    effective.allowExperimental,
-    effective.localOnly,
-  );
-  router.setLocalAuthSink?.(recordLocalAuthFailure);
-  const product = readActiveProduct(paths.product) ?? '(none)';
-
-  console.log(styleText('bold', `== ${ghRepo} ==`));
-  console.log(`Product: ${product}`);
-  const worktreeParent = configLoaders.loadFactoryConfigForRepo(paths.config).worktree.parent;
-  console.log(
-    formatWorktreeLocation(resolveWorktreeRoot({ repoRoot, parent: worktreeParent, repo: ghRepo }), worktreeParent),
-  );
-
-  console.log(styleText('bold', '\n== Active =='));
-  if (existsSync(paths.queue)) {
-    const { entries, diagnostics } = parseQueue(readFileSync(paths.queue, 'utf-8'));
-    if (entries.length > 0) {
-      const { active, staleCount } = await partitionLocalQueueByActivity(entries, paths.runs);
-      if (active.length === 0) {
-        console.log('  (idle — no active claims)');
-      } else {
-        const now = Date.now();
-        for (const e of active) {
-          console.log(`  ${e.lane} ${e.issue}  [${e.phase}, ${formatClaimAge(e.lastActivityAt, now)} ago]`);
-        }
-      }
-      if (staleCount > 0) {
-        console.log(`  (${staleCount} stale entr${staleCount === 1 ? 'y' : 'ies'} hidden — no recent activity)`);
-      }
-    } else if (diagnostics.length === 0) {
-      console.log('  (idle — no active claims)');
-    }
-    warnQueueDiagnostics(diagnostics);
-  } else {
-    console.log('  (no queue file)');
-  }
-
-  const baseHold = readBaseHold(paths.baseHold);
-  if (baseHold !== null && baseHold.repo === ghRepo) {
-    console.log(styleText('bold', '\n== Base hold =='));
-    for (const line of formatBaseHoldStatus(baseHold)) console.log(line);
-  }
-
-  console.log(styleText('bold', '\n== Queue =='));
-  if (!hasGitHubToken()) {
-    console.log('  (no GitHub token — run `gh auth login`)');
-  } else {
-    const [owner, repoName] = ghRepo.split('/');
-    const githubQueue = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo: repoName });
-    try {
-      const lanes = await githubQueue.lanes();
-      let printed = false;
-      for (const lane of lanes) {
-        const issues = await githubQueue.list(lane);
-        for (const issue of issues) {
-          console.log(`  ${lane} #${issue}`);
-          printed = true;
-        }
-      }
-      if (!printed) {
-        console.log('  (no claimable work)');
-      }
-    } catch (err) {
-      console.log(`  (queue lookup failed — ${errorDetail(err)})`);
-    }
-  }
-
-  console.log(styleText('bold', '\n== Health =='));
-  const update = buildStatusUpdateJson(readUpdateState(updateStatePath(daemonRuntimePaths().dir)));
-  console.log(`  ${formatUpdateStatusLine(update)}`);
-
-  if (opts.kpis) {
-    console.log(styleText('bold', '\n  Effective config:'));
-    for (const line of describeEffectiveConfig({
-      router,
-      repo: repoConfig,
-      repoConfigPath: '.factory/config.json',
-      mergePolicy: resolveMergePolicy(configLoaders.loadFactoryConfigForRepo(paths.config), process.env, {
-        auto: readRunFlagOverrides(paths.runFlags).autoMerge,
-      }),
-      prClassifier: resolvePrClassifierPolicy(configLoaders.loadFactoryConfigForRepo(paths.config), process.env, {
-        classifier: readRunFlagOverrides(paths.runFlags).prClassifier,
-      }),
-    })) {
-      console.log(`    ${line}`);
-    }
-  } else {
-    console.log('\n  (Effective config and KPIs hidden — run `factory status --kpis` to view)');
-  }
-
-  console.log(styleText('bold', '\n  Provider breaker:'));
-  const openBreakers = await new ProviderBreaker(paths.breaker).list();
-  if (openBreakers.length === 0) {
-    console.log('    (closed)');
-  } else {
-    for (const b of openBreakers) {
-      console.log(`    ${b.provider}: OPEN (${b.reason}) — ${Math.ceil(b.remainingMs / 60_000)}m remaining`);
-    }
-  }
-
-  console.log(styleText('bold', '\n  Sweep heartbeat:'));
-  const sweepStatus = checkSweepHeartbeat(
-    configLoaders.loadFactoryConfigForRepo(paths.config).sweep,
-    process.env,
-    defaultSweepHeartbeatDeps(),
-  );
-  console.log(`    ${formatSweepHeartbeatStatusLine(sweepStatus)}`);
-
-  console.log(styleText('bold', '\n  Last Events:'));
-  if (existsSync(paths.events)) {
-    const events = readFileSync(paths.events, 'utf-8').trim().split('\n').slice(-12);
-    for (const e of events) {
-      try {
-        const ev = JSON.parse(e);
-        console.log(`    ${ev.type} #${ev.issue}: ${ev.msg}`);
-      } catch {}
-    }
-  } else {
-    console.log('    (none)');
-  }
-
-  if (opts.kpis) {
-    console.log(styleText('bold', '\n  KPIs:'));
-    const kpiEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
-    const kpiCosts = existsSync(paths.costs) ? internalOps.readCosts(paths.costs) : [];
-    for (const line of formatKpiLines(computeHealthKpis(kpiEvents, kpiCosts))) {
-      console.log(`    ${line}`);
-    }
-  }
-
-  if (existsSync(paths.stop)) {
-    console.log(styleText('red', '\n!! STOP file present — factory halting between issues'));
   }
 }
 
@@ -5385,6 +5180,23 @@ function runSupervise(opts: SuperviseOptions): Promise<void> {
   });
 }
 
+/** `factory status` (#2798): the handler lives in ./status.ts; this binds its runtime. */
+function runStatus(opts: StatusOptions = {}): Promise<void> {
+  return cmdStatus(opts, {
+    configLoaders,
+    ModelRouter: coreOps.ModelRouter,
+    readCosts: internalOps.readCosts,
+    getRepoRoot: () => getRepoRoot(),
+    getGitHubRepo: () => getGitHubRepo(),
+    getOctokit: () => getOctokit(),
+    hasGitHubToken: () => hasGitHubToken(),
+    readActiveProduct,
+    warnQueueDiagnostics,
+    errorDetail,
+    CliExitError,
+  });
+}
+
 export const PROGRAM_HANDLERS = {
   cmdInit,
   cmdMigrate,
@@ -5393,7 +5205,7 @@ export const PROGRAM_HANDLERS = {
   cmdDoctor,
   cmdCost,
   cmdUsage,
-  cmdStatus,
+  cmdStatus: runStatus,
   cmdRuns,
   cmdKpis,
   cmdClassifierReport,
