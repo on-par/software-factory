@@ -7,9 +7,13 @@ import type { ReviewRouting } from '../review/routing.js';
 import type { CiFailureEvidence, Constitution } from '../types/index.js';
 import {
   attributableCodeqlAlerts,
+  attributeCiFailure,
+  type BaseFailingChecks,
   CI_REWORK_INSTRUCTIONS,
   ciReworkSummary,
+  listBaseFailingChecks as listBaseFailingChecksDefault,
   listPrChangedFiles as listPrChangedFilesDefault,
+  needsBaseChecks,
   resolveMaxCiReworkRounds,
 } from './ci-rework.js';
 import type { BuildRoute, ParkReason } from './outcome.js';
@@ -22,6 +26,8 @@ export interface CiReworkPorts {
   reworkWorker?: typeof reworkWorkerDefault;
   /** Lists a PR's changed files for CI alert attribution; defaults to the GitHub REST lister. */
   listPrChangedFiles?: typeof listPrChangedFilesDefault;
+  /** Lists failing check names on the PR base branch's latest commit (#2817); defaults to the GitHub REST lister. */
+  listBaseFailingChecks?: typeof listBaseFailingChecksDefault;
 }
 
 export interface CiReworkLoopContext {
@@ -72,6 +78,7 @@ export async function shipWithCiRework(
   const { request, ports, shipPhase, checkPhase, check } = ctx;
   const rework = ports.reworkWorker ?? reworkWorkerDefault;
   const listChanged = ports.listPrChangedFiles ?? listPrChangedFilesDefault;
+  const listBase = ports.listBaseFailingChecks ?? listBaseFailingChecksDefault;
   const { builtRoute, builtModel, planSlice } = inputs;
   const log = ports.events();
   const shipOpts = {
@@ -111,6 +118,22 @@ export async function shipWithCiRework(
       ports.events('ship')('ship', msg);
       break;
     }
+    let base: BaseFailingChecks | undefined;
+    if (needsBaseChecks(ship.ciFailure)) {
+      try {
+        base = await listBase(ports.octokit, owner, repoName, ship.prNumber);
+      } catch (err) {
+        ports.events('ship')('ship', `could not read base checks for PR #${ship.prNumber}: ${errorMessage(err)}`);
+      }
+    }
+    const attribution = attributeCiFailure(ship.ciFailure, changed, base);
+    if (ship.ciFailure) lastCiFailure = { ...ship.ciFailure, attribution };
+    if (attribution.baseline) {
+      const note = 'baseline: no CI failure is attributable to this PR';
+      suffix = ` — ${note}`;
+      ports.events('ship')('ship', `${note} (PR #${ship.prNumber})`);
+      break;
+    }
     const attributable = attributableCodeqlAlerts(ship.ciFailure, changed);
     if (attributable.length === 0) break;
     if (rounds >= maxRounds) {
@@ -118,9 +141,12 @@ export async function shipWithCiRework(
       break;
     }
     rounds++;
+    const skipped = attribution.items.filter((i) => !i.attributable).map((i) => i.ref);
     log(
       'rework',
-      `CI rework round ${rounds}/${maxRounds}: ${attributable.length} attributable CodeQL alert(s) on PR #${ship.prNumber}`,
+      `CI rework round ${rounds}/${maxRounds}: ${attributable.length} attributable CodeQL alert(s) on PR #${ship.prNumber}` +
+        (skipped.length > 0 ? `; non-attributable: ${skipped.join(', ')}` : ''),
+      lastCiFailure ? { ciFailure: lastCiFailure } : undefined,
     );
     const worked = await rework({
       issue: request.issue,
@@ -169,5 +195,5 @@ export async function shipWithCiRework(
     : ship.reason
       ? `ship phase failed: ${ship.reason}${suffix}`
       : `ship phase failed${suffix}`;
-  return { ship, parked: { reason: shipParkReason(ship), message, ciFailure: ship.ciFailure ?? lastCiFailure } };
+  return { ship, parked: { reason: shipParkReason(ship), message, ciFailure: lastCiFailure ?? ship.ciFailure } };
 }

@@ -240,6 +240,24 @@ export interface CiCodeScanningAlert {
   message: string;
 }
 
+/** One CI-failure item's attribution to the PR (#2817). */
+export interface CiAttributionItem {
+  kind: 'codeql-alert' | 'check';
+  /** Alert: "ruleId at path:line"; check: the check name. */
+  ref: string;
+  attributable: boolean;
+  /** e.g. 'file changed by this PR', 'also failing on base main@abc123def456', 'base checks unavailable'. */
+  reason: string;
+}
+
+/** Attribution of a SHIP CI failure (#2817). baseline = no item is attributable to the PR. */
+export interface CiAttribution {
+  baseline: boolean;
+  baseRef?: string;
+  baseSha?: string;
+  items: CiAttributionItem[];
+}
+
 /** Bounded CI-failure evidence carried on a SHIP ci-failed park event (#2814). */
 export interface CiFailureEvidence {
   failingChecks: CiFailingCheck[];
@@ -248,6 +266,8 @@ export interface CiFailureEvidence {
   truncated: boolean;
   /** Best-effort collection errors ("checks: …", "code-scanning: …"); omitted when none. */
   errors?: string[];
+  /** Which failing items the PR caused versus baseline failures (#2817). */
+  attribution?: CiAttribution;
 }
 
 export interface CheckFailureInfo {
