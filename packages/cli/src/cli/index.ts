@@ -291,6 +291,7 @@ import {
   type FactorydConfig,
 } from './daemon.js';
 import { checkForUpdate, cmdSelfUpdateCheck, type SelfUpdateDeps } from './self-update.js';
+import { cmdHarnessCheck } from './harness-check.js';
 import { cmdDoctor, type KeychainProbeStatus } from './doctor.js';
 import type { GreenPrScanResult, LeaseHealthRow, UnmergedGreenPrRow } from './doctor-health.js';
 import {
@@ -4342,6 +4343,7 @@ export const PROGRAM_HANDLERS = {
   cmdConstitution,
   cmdModels,
   cmdDoctor: runDoctor,
+  cmdHarnessCheck,
   cmdCost,
   cmdUsage,
   cmdStatus: runStatus,
