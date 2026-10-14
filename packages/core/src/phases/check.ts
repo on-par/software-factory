@@ -15,6 +15,7 @@ import {
   type WorktreeProbe,
 } from '../checkers/index.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
+import type { BuildRoutePin } from '../config/repo.js';
 import { laneEnv } from '../environment/index.js';
 import type { EventKind } from '../events/kinds.js';
 import { routerFailureOf } from '../router/executor-error.js';
@@ -22,7 +23,7 @@ import type { ModelRouter, RouterResult } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
-import { resolveRunnableBuildRoute, runnableBuildRoutes } from './plan.js';
+import { resolveReworkRoute } from './plan-routes.js';
 import type {
   BaseFailureCause,
   CheckerOutput,
@@ -349,8 +350,8 @@ async function checkPhaseImpl(opts: {
   diffBase?: string;
   /** Parent ref of a stacked slice (#2716); forwarded to CheckerContext.parentBaseRef. */
   parentBaseRef?: string;
-  /** Worker route that completed BUILD; direct callers retain Claude rework by default. */
-  reworkRoute?: 'codex' | 'claude' | 'opencode';
+  /** Worker route that completed BUILD (`command` included, #2873); direct callers retain Claude rework by default. */
+  reworkRoute?: BuildRoutePin;
   /** Worker model that completed BUILD, retained as the compatible rework override. */
   reworkModel?: string;
   /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
@@ -726,7 +727,7 @@ export interface ReworkWorkerOptions {
   appPort?: number;
   appBaseUrl?: string;
   onPgid?: (pgid: number) => void;
-  reworkRoute?: 'codex' | 'claude' | 'opencode';
+  reworkRoute?: BuildRoutePin;
   reworkModel?: string;
   runId?: string;
   extraInstructions?: string;
@@ -788,7 +789,7 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
   let failureReason: FailoverReason | undefined;
   let attempts: RouterResult['attempts'] = [];
 
-  const { route, rerouted } = resolveRunnableBuildRoute(reworkRoute, runnableBuildRoutes(router));
+  const { route, rerouted, modelOverride } = resolveReworkRoute(router, reworkRoute, reworkModel);
   if (rerouted) {
     log('model-override', `rework route ${reworkRoute} has no runnable model on this machine, rerouting to ${route}`);
   }
@@ -803,8 +804,7 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
       env: laneEnv(appPort, process.env, appBaseUrl, worktree, runId),
       onPgid,
       retryCause: 'checker',
-      // The pinned model belongs to the old route's harness.
-      modelOverride: rerouted ? undefined : reworkModel,
+      modelOverride,
     });
     attempts = reworkResult.attempts;
   } catch (err) {

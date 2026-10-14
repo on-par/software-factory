@@ -9,13 +9,13 @@ import type { BuildRoutePin } from '../config/repo.js';
 
 export type BuildRoute = BuildRoutePin;
 
-/** CHECK/CI rework cannot run on the command route yet (byo-05): a command build reworks on the
- *  claude route's default worker, since its model would not fit build_claude. */
+/** CHECK/CI rework reruns on the route BUILD completed on, `command` included (#2873):
+ *  reworkWorker keeps it when its model can run and reroutes otherwise. */
 export function reworkRouteFor(
   route: BuildRoute,
   model: string | undefined,
-): { reworkRoute?: 'codex' | 'claude' | 'opencode'; reworkModel?: string } {
-  return route === 'command' ? {} : { reworkRoute: route, reworkModel: model };
+): { reworkRoute?: BuildRoutePin; reworkModel?: string } {
+  return { reworkRoute: route, reworkModel: model };
 }
 
 /** A run's terminal outcome. `parked` is produced by the CLI's LaneParkError and `released`

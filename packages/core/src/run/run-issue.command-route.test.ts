@@ -131,7 +131,7 @@ describe('runIssue — command build route (#2872)', () => {
       pinnedModel: true,
     });
     expect(events.some(([t]) => t === 'model_override_ignored')).toBe(false);
-    expect(checkPhase.mock.calls[0][0].reworkRoute).toBeUndefined();
-    expect(checkPhase.mock.calls[0][0].reworkModel).toBeUndefined();
+    expect(checkPhase.mock.calls[0][0].reworkRoute).toBe('command');
+    expect(checkPhase.mock.calls[0][0].reworkModel).toBe('my-model');
   });
 });

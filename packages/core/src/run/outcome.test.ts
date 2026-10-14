@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parkEvents, parkReasonFor } from './outcome.js';
+import { parkEvents, parkReasonFor, reworkRouteFor } from './outcome.js';
 import type { RunOutcome } from './outcome.js';
 
 describe('parkReasonFor', () => {
@@ -72,5 +72,12 @@ describe('RunOutcome', () => {
       'parked',
       'escalated',
     ]);
+  });
+});
+
+describe('reworkRouteFor', () => {
+  it('passes every built route through, command included (#2873)', () => {
+    expect(reworkRouteFor('command', 'my-model')).toEqual({ reworkRoute: 'command', reworkModel: 'my-model' });
+    expect(reworkRouteFor('codex', undefined)).toEqual({ reworkRoute: 'codex', reworkModel: undefined });
   });
 });
