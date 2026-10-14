@@ -14,7 +14,7 @@ import { runConfigSource } from './run-config-source.js';
 import { toConfigSchemaIssues, type ConfigSchemaIssue } from './index.js';
 
 import type { ModelRegistry } from '../models/index.js';
-import { resolveModelOverrides } from '../models/index.js';
+import { resolveModelOverrides, retiredModelHint } from '../models/index.js';
 import type { ModelRouter } from '../router/index.js';
 import { applyReviewFloorOverrides, type ReviewFloorRuleSet } from '../review/floor.js';
 import {
@@ -381,7 +381,7 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
       for (const id of modelIds) {
         if (!mergedModels[id]) {
           throw new Error(
-            `.factory/config.json: tier '${tierName}' references unknown model '${id}' (known models: ${knownModels})`,
+            `.factory/config.json: tier '${tierName}' references unknown model '${id}' (known models: ${knownModels})${retiredModelHint(id)}`,
           );
         }
       }
@@ -405,7 +405,7 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
   if (repo.models?.pins?.checker) {
     if (!mergedModels[repo.models.pins.checker]) {
       throw new Error(
-        `.factory/config.json: models.pins.checker references unknown model '${repo.models.pins.checker}' (known models: ${knownModels})`,
+        `.factory/config.json: models.pins.checker references unknown model '${repo.models.pins.checker}' (known models: ${knownModels})${retiredModelHint(repo.models.pins.checker)}`,
       );
     }
     tiers = { ...tiers, checker: [repo.models.pins.checker] };
@@ -413,14 +413,14 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
   if (repo.models?.pins?.triage) {
     if (!mergedModels[repo.models.pins.triage]) {
       throw new Error(
-        `.factory/config.json: models.pins.triage references unknown model '${repo.models.pins.triage}' (known models: ${knownModels})`,
+        `.factory/config.json: models.pins.triage references unknown model '${repo.models.pins.triage}' (known models: ${knownModels})${retiredModelHint(repo.models.pins.triage)}`,
       );
     }
     tiers = { ...tiers, triage: [repo.models.pins.triage] };
   }
   if (repo.models?.pins?.classifier && !mergedModels[repo.models.pins.classifier]) {
     throw new Error(
-      `.factory/config.json: models.pins.classifier references unknown model '${repo.models.pins.classifier}' (known models: ${knownModels})`,
+      `.factory/config.json: models.pins.classifier references unknown model '${repo.models.pins.classifier}' (known models: ${knownModels})${retiredModelHint(repo.models.pins.classifier)}`,
     );
   }
 
@@ -470,7 +470,7 @@ export function resolveEffectiveModelPins(
   if (repo?.models?.pins?.plan) {
     if (!registry.get(repo.models.pins.plan)) {
       throw new Error(
-        `.factory/config.json: models.pins.plan references unknown model '${repo.models.pins.plan}' (known models: ${registry.list().join(', ')})`,
+        `.factory/config.json: models.pins.plan references unknown model '${repo.models.pins.plan}' (known models: ${registry.list().join(', ')})${retiredModelHint(repo.models.pins.plan)}`,
       );
     }
     plan = repo.models.pins.plan;
@@ -480,7 +480,7 @@ export function resolveEffectiveModelPins(
   if (repo?.models?.pins?.planFallback) {
     if (!registry.get(repo.models.pins.planFallback)) {
       throw new Error(
-        `.factory/config.json: models.pins.planFallback references unknown model '${repo.models.pins.planFallback}' (known models: ${registry.list().join(', ')})`,
+        `.factory/config.json: models.pins.planFallback references unknown model '${repo.models.pins.planFallback}' (known models: ${registry.list().join(', ')})${retiredModelHint(repo.models.pins.planFallback)}`,
       );
     }
     planFallback = repo.models.pins.planFallback;
@@ -489,7 +489,7 @@ export function resolveEffectiveModelPins(
   if (repo?.models?.pins?.build) {
     if (!registry.get(repo.models.pins.build)) {
       throw new Error(
-        `.factory/config.json: models.pins.build references unknown model '${repo.models.pins.build}' (known models: ${registry.list().join(', ')})`,
+        `.factory/config.json: models.pins.build references unknown model '${repo.models.pins.build}' (known models: ${registry.list().join(', ')})${retiredModelHint(repo.models.pins.build)}`,
       );
     }
     build = repo.models.pins.build;
@@ -500,7 +500,7 @@ export function resolveEffectiveModelPins(
   if (repo?.models?.pins?.buildFallback) {
     if (!registry.get(repo.models.pins.buildFallback)) {
       throw new Error(
-        `.factory/config.json: models.pins.buildFallback references unknown model '${repo.models.pins.buildFallback}' (known models: ${registry.list().join(', ')})`,
+        `.factory/config.json: models.pins.buildFallback references unknown model '${repo.models.pins.buildFallback}' (known models: ${registry.list().join(', ')})${retiredModelHint(repo.models.pins.buildFallback)}`,
       );
     }
     if (!registry.isCodexModel(repo.models.pins.buildFallback)) {
