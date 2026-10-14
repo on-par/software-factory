@@ -9,6 +9,7 @@
 //      (including the non-park `released` exit for an environment-caused CHECK failure, #1928; a config cause parks, #2583).
 // PLAN may be skipped by the planReuse port after an environment release (#2340).
 // CHECK may be resumed on a kept worktree via request.resumeFrom after an environment release (#2564).
+// Every park posts or edits one issue-level park comment behind a hidden marker; a GitHub failure only logs a warning (#2314).
 // A config preflight (#2586) rejects unfilled template tokens before base health and PLAN; any preflight failure parks with the `config` cause (#2587).
 //
 // Path-bound CLI concerns (Octokit, worktree/environment provisioning, the events sink,
@@ -32,6 +33,7 @@ import { describeConstitutionSource } from '../constitutions/index.js';
 import { lintFactoryConfig } from '../config/config-lint.js';
 import { planPhase as planPhaseDefault, type PlanResult } from '../phases/plan.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
+import { publishParkComment } from './park-comment.js';
 import { upsertSlicePlanComment } from '../readiness/slice-plan-github.js';
 import { withSliceState } from '../readiness/slice-plan.js';
 import type { ReviewFloorPathChange, ReviewFloorRuleSet } from '../review/floor.js';
@@ -432,6 +434,23 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     log(reason, message, parkLogExtra(checkFailure, ciFailure));
     if (reason === 'timeout') {
       log('stuck', `run exceeded its phase timeout without progressing — ${message}`);
+    }
+    if (!request.localOnly) {
+      const posted = await publishParkComment({
+        octokit: ports.octokit,
+        repo: request.repo,
+        worktree: ports.workspace.path,
+        input: {
+          issue: request.issue,
+          reason,
+          message,
+          runId,
+          branch: request.branch,
+          lane: request.lane,
+          blockers: [],
+        },
+      });
+      if (!posted.ok) log('environment_warning', `could not post the issue park comment: ${posted.error}`);
     }
     const outcome: RunOutcome = {
       state: 'parked',
