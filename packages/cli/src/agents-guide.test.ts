@@ -391,8 +391,8 @@ describe('docs/agents.md supported agents guide', () => {
           if (declared.length === 0) problems.push('declares no harness under harnesses');
           const applied = applyRepoConfig(loadModelsConfig(), repo);
           for (const id of declared) if (!(id in (applied.harnesses ?? {}))) problems.push(`harness ${id} not applied`);
-          for (const pin of ['plan', 'build', 'checker']) {
-            const model = repo?.models?.pins?.[pin as 'plan'];
+          for (const pin of ['plan', 'build', 'checker'] as const) {
+            const model = repo?.models?.pins?.[pin];
             if (typeof model !== 'string') problems.push(`no ${pin} pin`);
             else if (!(model in applied.models)) problems.push(`${pin} pins unknown model ${model}`);
           }
