@@ -10,6 +10,7 @@ import { shellEscape } from '../utils/index.js';
 import { classifyFailure } from './classify.js';
 import type { CodingHarness, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
 import { HarnessError } from './index.js';
+import { type OpenCodeVersionProbe, probeOpenCodeMajor } from './opencode-version.js';
 
 export type OpenCodeExecFn = ExecFn;
 
@@ -103,19 +104,49 @@ export function parseOpenCodeJson(stdout: string): ParsedOpenCodeJson | undefine
   };
 }
 
-/** Runs a model via the OpenCode CLI: opencode run --auto --format json [--model <provider/model>] [--variant <effort>] < prompt-file, executed with cwd = worktree. */
+/** `--model`/`--variant` fragment for `opencode run`. v2+ (#2878) carries effort as a `#effort`
+ *  model suffix and has no --variant; v1 or an unknown major keeps `--variant`. */
+export function buildOpenCodeModelArgs(
+  providerModel: string | undefined,
+  effort: string | undefined,
+  major: number | undefined,
+): string {
+  if (major !== undefined && major >= 2) {
+    if (!providerModel) return '';
+    return `--model ${shellEscape(effort === undefined ? providerModel : `${providerModel}#${effort}`)}`;
+  }
+  const modelArg = providerModel ? `--model ${shellEscape(providerModel)}` : '';
+  return `${modelArg}${effort === undefined ? '' : ` --variant ${shellEscape(effort)}`}`;
+}
+
+/** Runs a model via the OpenCode CLI: opencode run --auto --format json [--model <p/m>[#<effort>]] [--variant <effort>] (v1 only) < prompt-file, executed with cwd = worktree. */
 export class OpenCodeHarness implements CodingHarness {
   readonly id = 'opencode';
   readonly agentic = true;
 
-  constructor(private execFn: OpenCodeExecFn = defaultExecFn) {}
+  private readonly versionProbe: OpenCodeVersionProbe;
+  private majorVersion?: Promise<number | undefined>;
+
+  constructor(
+    private execFn: OpenCodeExecFn = defaultExecFn,
+    versionProbe?: OpenCodeVersionProbe,
+  ) {
+    this.versionProbe = versionProbe ?? (() => probeOpenCodeMajor(this.execFn));
+  }
+
+  /** Probed once per harness instance; an undefined result is cached too. */
+  private getMajorVersion(): Promise<number | undefined> {
+    this.majorVersion ??= this.versionProbe().catch(() => undefined);
+    return this.majorVersion;
+  }
 
   async run(request: HarnessRequest): Promise<HarnessResult> {
     const { model, prompt, worktree, timeoutSeconds, registry, env, onPgid } = request;
     const effort = registry.getEffort(model, request.task);
-    const effortArg = effort === undefined ? '' : ` --variant ${shellEscape(String(effort))}`;
     const providerModel = registry.get(model)?.providerModel;
-    const modelArg = providerModel ? `--model ${shellEscape(providerModel)}` : '';
+    const effortValue = effort === undefined ? undefined : String(effort);
+    const major = effortValue === undefined ? undefined : await this.getMajorVersion();
+    const modelArgs = buildOpenCodeModelArgs(providerModel, effortValue, major);
 
     // Agentic sessions can legitimately end on a tool call with an empty final
     // message (observed with deepseek-v4-flash on large plan prompts). One
@@ -146,7 +177,7 @@ export class OpenCodeHarness implements CodingHarness {
         // `--format json` emits NDJSON events so the harness can drop tool chatter
         // and read token usage from `step_finish` events.
         await writeFile(promptPath, attemptPrompt, 'utf8');
-        const cmd = `opencode run --auto --format json ${modelArg}${effortArg} < ${shellEscape(promptPath)}`;
+        const cmd = `opencode run --auto --format json ${modelArgs} < ${shellEscape(promptPath)}`;
 
         try {
           ({ stdout, stderr } = await this.execFn(cmd, {
