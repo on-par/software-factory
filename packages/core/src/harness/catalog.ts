@@ -51,6 +51,7 @@ const CATALOG_ENTRIES: HarnessCatalogEntry[] = [
     agentic: true,
     probe: { kind: 'command', command: 'opencode', okLabel: 'opencode CLI', auth: 'cli' },
   },
+  { id: 'pi', agentic: true, probe: { kind: 'command', command: 'pi', okLabel: 'pi CLI', auth: 'cli' } },
   { id: 'ollama-agentic', agentic: true, probe: { kind: 'ollama', okLabel: 'ollama agentic' } },
   // Local command-loop worker (runOllamaCommandAgent). Not yet extracted into a
   // contract-verified CodingHarness (out of scope here); dispatched via an
