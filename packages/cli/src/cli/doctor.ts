@@ -53,7 +53,7 @@ import {
 import { HARNESS_SETUP, harnessInstallChecks } from './doctor-harness.js';
 import { resolveDoctorHarnesses } from './doctor-harness-view.js';
 import { reconcileQueue } from './doctor-queue-reconcile.js';
-export { HARNESS_SETUP, harnessInstallChecks } from './doctor-harness.js';
+export { HARNESS_SETUP, type HarnessSetup, harnessInstallChecks, openCodeVersionCheck } from './doctor-harness.js';
 import { availableAgentClis, CLAUDE_CODE_URL, CODEX_CLI_URL, GITHUB_TOKENS_URL } from './first-run.js';
 import type { CliDeps } from './index.js';
 import { distFreshnessProbe } from './staleness.js';

@@ -147,8 +147,16 @@ export type { OllamaAgenticChange, OllamaAgenticExecFn, OllamaAgenticProposal } 
 export { OllamaAgenticHarness, PATCH_PROPOSAL_SCHEMA } from './harness/ollama-agentic.js';
 export type { OllamaFetchFn } from './harness/ollama-http.js';
 export { OllamaHttpHarness } from './harness/ollama-http.js';
-export { type OpenCodeExecFn, OpenCodeHarness } from './harness/opencode.js';
-export * from './harness/opencode-version.js';
+export type { OpenCodeExecFn } from './harness/opencode.js';
+export { OpenCodeHarness } from './harness/opencode.js';
+export {
+  isOpenCodeVersionSupported,
+  OPENCODE_PINNED_INSTALL,
+  OPENCODE_PINNED_VERSION,
+  OPENCODE_SUPPORTED_RANGE,
+  parseOpenCodeMajor,
+  parseOpenCodeVersion,
+} from './harness/opencode-version.js';
 export type { DockerEngineOptions } from './hosted/docker.js';
 export { createDockerEngine } from './hosted/docker.js';
 export type { OrphanContainer, ReapedContainer } from './hosted/orphans.js';
