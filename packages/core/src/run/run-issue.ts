@@ -568,7 +568,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     // Any failing verdict parks with the `config` cause (#2587); checker findings come first in the message.
     const lint = lintFactoryConfig({ constitution, configFile: request.repoConfigFile });
     if (lint.verdict !== 'ok') {
-      return terminalParked(
+      return await terminalParked(
         'config',
         [
           'config preflight failed before PLAN:',
@@ -735,11 +735,11 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
           return { state: 'escalated', reason: `issue #${request.issue} decomposed into ${childList}`, route };
         }
         if (plan.sliced) {
-          return terminalEscalated(
+          return await terminalEscalated(
             `issue #${request.issue} sliced into ${plan.sliced.sliceCount} slice(s): ${plan.escalate ?? 'slice plan recorded'}`,
           );
         }
-        return terminalEscalated(`plan escalated: ${plan.escalate ?? 'unknown'}`);
+        return await terminalEscalated(`plan escalated: ${plan.escalate ?? 'unknown'}`);
       }
       const planBudget = await assertBudget('PLAN');
       if (planBudget) return planBudget;
@@ -750,7 +750,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
         const touchedFiles = touchedFilesFrom(plan.designArtifact);
         const collision = await ports.laneFileGuard.findCollision(request.repo, request.issue, touchedFiles);
         if (collision) {
-          return terminalParked(
+          return await terminalParked(
             'held',
             `issue held: #${request.issue} touches ${collision.file}, already claimed by in-flight issue #${collision.issue} — held until that lane finishes`,
           );
@@ -849,15 +849,18 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       route = build.route;
       if (!build.ok) {
         if (build.reason === 'no_diff') {
-          return terminalParked('fail', 'build produced no diff against the base ref — no implementation was produced');
+          return await terminalParked(
+            'fail',
+            'build produced no diff against the base ref — no implementation was produced',
+          );
         }
         if (build.reason === 'junk_only_diff') {
-          return terminalParked(
+          return await terminalParked(
             'fail',
             'build changed only generated/cache files (e.g. __pycache__) — no implementation was produced',
           );
         }
-        return terminalEscalated(`build escalated: ${build.escalate ?? 'unknown'}`);
+        return await terminalEscalated(`build escalated: ${build.escalate ?? 'unknown'}`);
       }
       const buildBudget = await assertBudget('BUILD');
       if (buildBudget) return buildBudget;
@@ -958,7 +961,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
             check.failureSignature !== undefined
               ? { failureSignature: check.failureSignature, failingChecks: env.failingChecks }
               : undefined;
-          return terminalParked(
+          return await terminalParked(
             'config',
             configParkMessage({
               issue: request.issue,
@@ -1057,7 +1060,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
           ? `${message}\nremaining showstoppers:\n${showstoppers.map((s) => `- ${s}`).join('\n')}`
           : message;
       await clearCheckResume();
-      return terminalParked(reason, parkedMessage, checkFailure);
+      return await terminalParked(reason, parkedMessage, checkFailure);
     }
     await clearCheckResume();
     // Clean check — clear stale cross-run history so a future, genuinely different
@@ -1108,7 +1111,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
             labels: [label],
           });
         } catch (err) {
-          return terminalParked(
+          return await terminalParked(
             'held',
             `issue held: classifier gate label '${label}' could not be applied (${reviewRouting.reason}): ${errorMessage(err)} — needs a human`,
           );
@@ -1169,7 +1172,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       { builtRoute, builtModel, reviewRouting, pinNote, planSlice },
     );
     const { ship, parked } = shipped;
-    if (parked) return terminalParked(parked.reason, parked.message, parked.checkFailure, parked.ciFailure);
+    if (parked) return await terminalParked(parked.reason, parked.message, parked.checkFailure, parked.ciFailure);
 
     if (planSlice) {
       const { index, plan: slicePlan } = planSlice;
@@ -1190,7 +1193,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
             `recorded slice ${index}/${count} as ${state} (PR #${ship.prNumber}, branch ${request.branch}) in the slice plan comment`,
           );
         } catch (err) {
-          return terminalParked(
+          return await terminalParked(
             'fail',
             `slice ${index}/${count} PR #${ship.prNumber} opened but recording it in the slice plan comment failed: ${errorMessage(err)}`,
           );
@@ -1224,7 +1227,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
           'cannot refresh Claude OAuth — run `factory doctor` (#1014)',
       );
     }
-    return terminalParked(parkReasonFor(err), errorMessage(err));
+    return await terminalParked(parkReasonFor(err), errorMessage(err));
   } finally {
     await release();
   }

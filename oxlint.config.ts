@@ -39,6 +39,7 @@ export default defineConfig({
     ],
     'typescript/consistent-type-imports': ['error', { prefer: 'type-imports', fixStyle: 'separate-type-imports' }],
     'typescript/no-floating-promises': 'error',
+    'typescript/return-await': 'error',
     'typescript/no-base-to-string': 'off',
     'typescript/no-misused-spread': 'off',
     'typescript/require-array-sort-compare': 'off',
