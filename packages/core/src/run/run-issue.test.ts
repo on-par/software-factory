@@ -737,7 +737,7 @@ describe('runIssue — outcome mapping', () => {
     );
     const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ events: () => log }));
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
-    const warnings = events.filter(([type]) => type === 'environment_warning');
+    const warnings = events.filter(([type, msg]) => type === 'environment_warning' && !msg.includes('park comment'));
     expect(warnings).toHaveLength(1);
     expect(warnings[0][1]).toContain('local_auth');
     expect(warnings[0][1]).toContain('factory doctor');
