@@ -1,0 +1,79 @@
+First step: run `factory doctor` to check your setup and see what to fix.
+
+Prerequisites:
+  - Claude Code CLI installed and authenticated (Claude subscription): https://claude.com/claude-code
+  - GitHub CLI authenticated: gh auth login
+  - GITHUB_TOKEN or GH_TOKEN set (falls back to `gh auth token`)
+Run inside a git repository with a GitHub remote.
+
+Usage: factory [options] [command]
+
+Multi-agent software factory with boss-worker-checker orchestration
+
+Options:
+  -V, --version                          output the version number
+  --state-root <path>                    Keep factory state and config outside the checkout: an absolute path, ~/..., or "auto" (~/.factory/<owner>/<name>); env FACTORY_STATE_ROOT
+  -h, --help                             display help for command
+
+Run work:
+  ship [options] <issue>                 Plan → build → check one GitHub issue and open a ready-for-review PR; never merges (merge later with land)
+  run-issue [options] <issue>            Like ship, but loads the issue first and exits 2 before any worktree or PR if it cannot be found
+  run-brief [options] <file>             Like run-issue, but the work comes from a local Markdown brief instead of a GitHub issue
+  run [options]                          Claim queued issues (factory:queued labels) and ship them, lanes in parallel; merges only when auto-merge is on
+  supervise [options]                    Unattended loop: wait for usage headroom, run the queue, repeat until it is empty
+  land [options] <issue>                 Squash-merge the issue's open PR once CI is green, then remove its worktree (left open if CI fails or review is pending)
+  resume-approved [options]              Land open factory PRs (factory/*, plus legacy ship-it/*) whose review is now approved; skip the rest
+  stop [options]                         Tell running lanes to halt after their current issue
+  resume [options] [issue]               Clear a stop so lanes pick up new issues again; with <issue> --from check, re-run CHECK on a build kept after an environment failure
+
+Setup:
+  init [options]                         Set up .factory/ in this repo (config, constitution, queue file, .gitignore) and check model reachability
+  doctor [options]                       Check your environment (git, agent install and sign-in, gh auth, GitHub token, npm, sandbox, .factory/)
+  constitution [options]                 Manage product constitutions — .factory/constitution.md in this repo is the source of truth
+  models [options]                       List models with their tiers, cost per 1M tokens, and availability
+  migrate [options]                      Upgrade .factory/ to the v2 layout (config, constitution.md, .gitignore, state/); --to-yaml converts config.json to config.yaml
+  help [command]                         display help for command
+
+Queue:
+  queue                                  Manage the GitHub-label work queue (list, add, clear, reconcile, migrate)
+  unpark [options] <issue>               Unpark a factory:parked issue: remove factory:parked and re-queue it in its lane with a fresh order label (same path as `queue add`)
+  triage [options]                       Have a model propose a queue from open issues into .factory/state/queue.proposed
+  check|ready [options] <issue>          Check an issue before queuing: required fields and whether the size gate runs it as-is or would split it, plus an advisory INVEST report (read-only, optional --deep model review; exit 0 ready, 1 missing fields or ungradeable criteria, 2 invalid --deep output, 3 would split)
+  feedback [options] <pr-url>            File one factory issue (bug, factory:needs-triage) from a PR's human review findings
+  filing                                 Inspect upstream factory reports (nothing is sent)
+
+Observe:
+  status [options]                       Show active runs, the GitHub queue, provider health, and recent events
+  runs [options]                         Print per-issue run state from the local runs directory as one JSON object, newest first (read-only)
+  logs [options]                         Print pipeline events from .factory/events.ndjson (--follow to tail)
+  tui [options]                          Live read-only view of the current run (q to quit)
+  cost [options]                         Show recorded model spend by model (--issue for one issue)
+  usage [options]                        Report 5-hour subscription usage (falls back to a list-price estimate)
+  kpis [options]                         Compute factory health KPIs and record a trend snapshot
+  classifier                             Inspect or backtest the shadow PR classifier track record
+  garden [options]                       Read-only report of recurring failure patterns in local events, deduped against open issues by GitHub search
+
+Advanced / experimental:
+  worktree                               Clean up stale factory worktrees (gc)
+  reset [options] <issue...>             Remove an issue's local factory state (worktree, local branch, plan/phase files, rework history, logs, leases) so the next run starts fresh. A worktree or branch with uncommitted changes or unpushed commits is kept unless --force is passed. Do not run while that issue's lane is active. Preview with --dry-run
+  daemon                                 Manage factoryd, the long-running background service for this user
+  self-update [options]                  Check npm for a newer factory release (read-only; nothing is installed)
+  proxy                                  Run the opt-in lane reverse proxy in the foreground (run and supervise start it themselves)
+  hosted                                 Experimental remote-runner execution (needs FACTORY_HOSTED_EXEC=1)
+  local-small-dry-run [options] <issue>  Create a bounded local-small step plan and first context pack without changing source files
+  local-small-overnight [options]        Process a curated local-small queue one issue at a time: review-only PRs, never merges, parks on ambiguity
+
+Common environment variables:
+  FACTORY_MERGE=1                     Squash-merge eligible PRs (--auto-merge / --no-auto-merge win)
+  FACTORY_MERGE_ADMIN=1               Merge with GitHub admin bypass of unmet requirements
+  FACTORY_SKIP_CI=1                   Do not wait for CI before merging
+  FACTORY_SANDBOX=0                   Disable the containment sandbox for agent runs (dangerous)
+  FACTORY_PLAN_MODEL=<id>             Pick the PLAN model
+  FACTORY_BUILD_MODEL=<id>            Pick the BUILD model
+  FACTORY_STOP_AT=<fraction>          Usage fraction (0-1] at which work pauses
+  FACTORY_RESUME_AT=<fraction>        Usage fraction (0-1] at which paused work resumes
+  FACTORY_ALLOW_STALE=1               Run even when the built CLI is older than its source
+Every config key, its default, and its env var: docs/config.example.yaml
+
+Run `factory <command> --help` for a command's options.
+Docs: https://github.com/on-par/software-factory#readme
