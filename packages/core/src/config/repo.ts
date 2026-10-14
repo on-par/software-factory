@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs';
 
 import { defaultLaneBreakerThreshold } from '@on-par/factory-config';
 import { z } from 'zod';
+import { assertRegistryEntries } from './repo-registry.js';
 import { readRepoConfigFile } from './repo-config-file.js';
 import { runConfigSource } from './run-config-source.js';
 import { toConfigSchemaIssues, type ConfigSchemaIssue } from './index.js';
@@ -354,24 +355,14 @@ export function loadRepoConfig(repoRoot: string, stateRoot?: string): RepoFactor
  *  packaged ModelsConfig, in that order (packaged registry, then `models.registry`, then tiers, providers, pins).
  *  Pure — returns a new ModelsConfig; `null` repo is the identity transform (the critical no-`.factory/config.json`
  *  regression surface). Throws naming the offending tier/model on an unknown model id, or naming the tier emptied
- *  by provider/tier settings, redefining a packaged model id, or redeclaring a built-in harness id. */
+ *  by provider/tier settings, redefining a packaged model id, redeclaring a built-in harness id, or registering a model
+ *  that reaches DeepSeek's first-party API (ADR-0163). */
 export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | null): ModelsConfig {
   if (!repo) return models;
 
   const registry = repo.models?.registry ?? {};
   const { valid: validHarnesses, patch: harnessPatch } = resolveRepoHarnesses(models, repo.harnesses);
-  for (const [id, def] of Object.entries(registry)) {
-    if (Object.hasOwn(models.models, id)) {
-      throw new Error(
-        `.factory/config.json: models.registry.${id} redefines packaged model '${id}'; packaged model ids cannot be redefined. Register it under a new id (for example '${id}-custom') and pin or tier that id instead`,
-      );
-    }
-    if (def.harness !== undefined && !validHarnesses.includes(def.harness)) {
-      throw new Error(
-        `.factory/config.json: models.registry.${id} declares unknown harness '${def.harness}' (valid harnesses: ${validHarnesses.join(', ')})`,
-      );
-    }
-  }
+  assertRegistryEntries(models, registry, validHarnesses);
   const mergedModels = { ...models.models, ...registry };
   const knownModels = Object.keys(mergedModels).join(', ');
   let tiers: Record<string, string[]> = { ...models.tiers };
