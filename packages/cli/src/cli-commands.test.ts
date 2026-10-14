@@ -430,6 +430,7 @@ function daemonDeps(): DaemonCtlDeps {
     cliScriptPath: '/opt/factory/cli.js',
     registryFile: join(h.daemonHome, '.factory', 'registry.json'),
     pollMs: 10,
+    sleep: () => Promise.resolve(),
   };
 }
 
@@ -3983,10 +3984,16 @@ bash scripts/verify.sh
 
     it('daemon start installs the plist and bootstraps it through launchctl', async () => {
       const { plistPath } = factorydFiles(h.daemonHome);
+      let prints = 0;
+      h.daemonExecImpl = (_cmd, args) =>
+        args[0] === 'print' && prints++ === 0
+          ? { code: 113, stdout: '', stderr: 'Could not find service' }
+          : { code: 0, stdout: '', stderr: '' };
       const res = await runMain('daemon', 'start');
       expect(res.exited).toBe(false);
       expect(h.daemonExecCalls).toEqual([
         bootout,
+        print,
         { cmd: 'launchctl', args: ['bootstrap', 'gui/501', plistPath] },
         print,
       ]);
