@@ -378,7 +378,7 @@ describe('cmdLand (direct invocation)', () => {
 
   it('materializes a missing adopted PR worktree from its remote head, rebases it, and rechecks CI', async () => {
     const branch = 'contributor/adopted-pr';
-    const worktree = `${h.repoRoot}-factory-factory-5`;
+    const worktree = `${h.repoRoot}-factory-5`;
     const commands: string[] = [];
     const originalExec = h.execImpl;
     h.execImpl = (command) => {

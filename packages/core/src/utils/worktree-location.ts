@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { execGit } from './git-exec.js';
-import { branchPrefixSlug } from './index.js';
+import { legacyWorktreeDirName, worktreeDirName } from './worktree-name.js';
 
 /** Root directory lane worktrees are created under. A `~` or absolute parent is a shared
  *  root and is namespaced `<owner>/<repo>`; a repo-relative parent is used as-is. */
@@ -24,8 +24,8 @@ export function resolveWorktreeRoot(opts: { repoRoot: string; parent: string; re
   return owner && name ? join(base, owner, name) : join(base, basename(resolve(repoRoot)));
 }
 
-/** Absolute lane worktree path. Falls back to the legacy sibling path when only that exists,
- *  so in-flight lanes keep their checkout. The basename never changes (GC matches on it). */
+/** Absolute lane worktree path. The basename comes from worktreeDirName (#2763); an existing
+ *  old-name (repeated segment) or legacy-sibling checkout is reused so in-flight lanes keep theirs. */
 export function laneWorktreePath(opts: {
   repoRoot: string;
   parent: string;
@@ -36,10 +36,16 @@ export function laneWorktreePath(opts: {
   exists?: (path: string) => boolean;
 }): string {
   const { repoRoot, parent, repo, issue, prefix, home, exists = existsSync } = opts;
-  const dirName = `${basename(resolve(repoRoot))}-factory-${branchPrefixSlug(prefix)}-${issue}`;
-  const primary = join(resolveWorktreeRoot({ repoRoot, parent, repo, home }), dirName);
-  const legacy = join(dirname(resolve(repoRoot)), dirName);
-  return !exists(primary) && primary !== legacy && exists(legacy) ? legacy : primary;
+  const repoBase = basename(resolve(repoRoot));
+  const root = resolveWorktreeRoot({ repoRoot, parent, repo, home });
+  const sibling = dirname(resolve(repoRoot));
+  const names = [
+    ...new Set([worktreeDirName(repoBase, issue, prefix), legacyWorktreeDirName(repoBase, issue, prefix)]),
+  ];
+  const primary = join(root, names[0]!);
+  const fallbacks = [...names.slice(1).map((n) => join(root, n)), ...names.map((n) => join(sibling, n))];
+  if (exists(primary)) return primary;
+  return fallbacks.find((p) => p !== primary && exists(p)) ?? primary;
 }
 
 /** Adds an in-repo worktree parent to the repo's info/exclude. Returns true when a line was

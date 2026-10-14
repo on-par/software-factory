@@ -27,6 +27,7 @@ import { findStaleClaims } from '../queue/stale-claims.js';
 import { getFactoryPaths } from '../config/index.js';
 import { factoryBranchPrefixes, shellEscape } from './index.js';
 import { removeMicroVm, type WorktreeSandbox } from './microvm.js';
+import { isFactoryDirName } from './worktree-name.js';
 
 const exec = promisify(execCb);
 
@@ -561,7 +562,6 @@ export async function sweepWorktrees(
 
   const repoRootResolved = resolve(repoRoot);
   const repoBase = basename(repoRootResolved);
-  const factoryPrefix = `${repoBase}-factory-`;
   // Slugs are [a-z0-9-] only (branchPrefixSlug), so interpolating them into a regex is safe.
   // Matches the resolved prefix and the legacy ship-it one.
   const lanePattern = new RegExp('^(?:' + factoryBranchPrefixes(opts.branchPrefix).join('|') + ')/(\\d+)-');
@@ -570,7 +570,7 @@ export async function sweepWorktrees(
     const entryPath = resolve(entry.path);
     if (entryPath === repoRootResolved) return false;
     const base = basename(entryPath);
-    if (base.startsWith(factoryPrefix)) return true;
+    if (isFactoryDirName(repoBase, base, entry.branch, opts.branchPrefix)) return true;
     // Legacy lane paths (<repo>-ship-it-<n>) predate the -factory- infix; there the checked-out
     // lane-branch shape is what proves factory ownership — manual/* and experiment worktrees
     // under a <repo>-* name never match it and are never candidates.

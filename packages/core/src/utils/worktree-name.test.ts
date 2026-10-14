@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { worktreeDirName } from './worktree-name.js';
+import { legacyWorktreeDirName, worktreeDirName } from './worktree-name.js';
 
 describe('worktreeDirName', () => {
   it('collapses the default factory prefix', () => {
@@ -31,5 +31,12 @@ describe('worktreeDirName', () => {
 
   it('handles a repo named exactly factory', () => {
     expect(worktreeDirName('factory', 3, 'factory')).toBe('factory-3');
+  });
+});
+
+describe('legacyWorktreeDirName', () => {
+  it('keeps the pre-#2763 repeated segments', () => {
+    expect(legacyWorktreeDirName('software-factory', 2149, 'factory')).toBe('software-factory-factory-factory-2149');
+    expect(legacyWorktreeDirName('main', 5, 'sf')).toBe('main-factory-sf-5');
   });
 });
