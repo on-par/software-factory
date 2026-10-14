@@ -1,5 +1,6 @@
 // src/phases/plan-routes.ts — build-route helpers shared by PLAN and its prompt
 
+import { type BuildRoutePin, routeForBuildModel } from '../config/repo.js';
 import type { ModelRouter } from '../router/index.js';
 
 export type BuildRouteName = 'codex' | 'claude' | 'opencode';
@@ -29,6 +30,41 @@ export function resolveRunnableBuildRoute(
 ): { route: BuildRouteName; rerouted: boolean } {
   if (runnable.length === 0 || runnable.includes(requested)) return { route: requested, rerouted: false };
   return { route: defaultBuildRoute(runnable), rerouted: true };
+}
+
+/** The route and pin CHECK/CI rework runs on (#2873). codex/claude/opencode follow
+ *  resolveRunnableBuildRoute and keep the pin unless rerouted (the pin belongs to the old route's
+ *  harness). `command` is pin-only, so it is not in ROUTE_FALLBACK_ORDER: it stays when the pin sits
+ *  on a declared agentic harness (pin kept) or build_command resolves a runnable model (router
+ *  picks), and otherwise falls back without the pin. */
+export function resolveReworkRoute(
+  router: Pick<ModelRouter, 'resolveAll'> & Partial<Pick<ModelRouter, 'registryRef'>>,
+  requested: BuildRoutePin,
+  pinnedModel: string | undefined,
+): { route: BuildRoutePin; rerouted: boolean; modelOverride?: string } {
+  if (requested !== 'command') {
+    const { route, rerouted } = resolveRunnableBuildRoute(requested, runnableBuildRoutes(router));
+    return rerouted ? { route, rerouted } : { route, rerouted, modelOverride: pinnedModel };
+  }
+  if (pinFitsCommand(router, pinnedModel)) return { route: 'command', rerouted: false, modelOverride: pinnedModel };
+  if (commandResolves(router)) return { route: 'command', rerouted: false };
+  return { route: defaultBuildRoute(runnableBuildRoutes(router)), rerouted: true };
+}
+
+function pinFitsCommand(router: Partial<Pick<ModelRouter, 'registryRef'>>, model: string | undefined): boolean {
+  try {
+    return !!model && !!router.registryRef && routeForBuildModel(router.registryRef, model) === 'command';
+  } catch {
+    return false;
+  }
+}
+
+function commandResolves(router: Pick<ModelRouter, 'resolveAll'>): boolean {
+  try {
+    return router.resolveAll('build_command').length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /** Step-3 route bullets, in display order. */
