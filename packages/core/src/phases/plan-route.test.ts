@@ -82,6 +82,18 @@ describe('settlePlanRoute command route (#2872)', () => {
     expect(await readFile(specPath, 'utf8')).toContain('route: claude');
   });
 
+  it('keeps a planner-written command when build_command is runnable', async () => {
+    const specPath = await tempSpec('e.md', 'command');
+    const route = await settlePlanRoute({
+      ...base,
+      runnableNow: ['claude', 'codex', 'command'],
+      parsedRoute: 'command',
+      specPath,
+    });
+    expect(route).toBe('command');
+    expect(await readFile(specPath, 'utf8')).toContain('route: command');
+  });
+
   it('keeps the planned route when it is runnable and unpinned', async () => {
     const specPath = await tempSpec('d.md', 'codex');
     expect(await settlePlanRoute({ ...base, parsedRoute: 'codex', specPath })).toBe('codex');
@@ -127,5 +139,67 @@ npm test`;
     expect(result.ok).toBe(true);
     expect(result.route).toBe(expected);
     expect(await readFile(specPath, 'utf8')).toContain(`route: ${expected}`);
+  });
+});
+
+describe('planPhase planner-chosen command route (#2874)', () => {
+  it('planPhase honors a planner-written route command when build_command is runnable (#2874)', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    tempDirs.add(worktree);
+    const specPath = join(worktree, 'issue-2874.md');
+    const body = `## Problem statement
+Status output has an extra blank line.
+## In scope
+- Update packages/cli/src/status.ts and its test.
+## Out of scope
+- Changing output format.
+## Acceptance criteria
+- [ ] Status has no blank line.
+## Verification
+npm test`;
+    const declaredModels: ModelsConfig = {
+      ...models,
+      models: {
+        ...models.models,
+        'my-model': {
+          provider: 'custom',
+          tier: 'worker',
+          costPerMtokInput: 0,
+          costPerMtokOutput: 0,
+          contextWindow: 1000,
+          capabilities: [],
+          envKey: null,
+          harness: 'my-agent',
+        },
+      },
+      tiers: { boss: ['stub-model'], worker: ['my-model'] },
+      harnesses: {
+        'my-agent': { command: 'my-agent {model}', prompt: 'stdin', output: 'stdout', agentic: true, usage: 'none' },
+      },
+    };
+    const declaredRoutes: RoutesConfig = {
+      ...routes,
+      routes: { ...routes.routes, build_command: { tier: 'worker', description: 'stub', requires: 'command' } },
+    };
+    const stub = new StubModelExecutor({
+      scripts: { plan: [{ output: '---\nroute: command\n---\n# Spec\n' }] },
+    });
+    const router = new ModelRouter(declaredModels, declaredRoutes, false, stub);
+
+    const result = await planPhase({
+      issue: 2874,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath,
+      router,
+      constitution: null,
+      octokit: { rest: { issues: { get: async () => ({ data: { title: 'Fix status output', body } }) } } } as any,
+      log: () => {},
+      enforceReadiness: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.route).toBe('command');
+    expect(await readFile(specPath, 'utf8')).toContain('route: command');
   });
 });

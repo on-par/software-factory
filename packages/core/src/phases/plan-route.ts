@@ -16,8 +16,10 @@ export async function settlePlanRoute(opts: {
   log: (type: EventKind, msg: string) => void;
 }): Promise<BuildRoutePin> {
   const { parsedRoute, runnableNow, localOnly, isCodexDisabled, preferredRoute, specPath, log } = opts;
-  // `command` is pin-only (byo-06 owns PLAN choosing it): a planner-written one is no choice.
-  let planned: BuildRouteName = (parsedRoute === 'command' ? undefined : parsedRoute) ?? defaultBuildRoute(runnableNow);
+  // A planner-written command is kept only when build_command can run here (#2874).
+  const commandRunnable = runnableNow.includes('command');
+  let planned: BuildRouteName =
+    (parsedRoute === 'command' && !commandRunnable ? undefined : parsedRoute) ?? defaultBuildRoute(runnableNow);
 
   if (localOnly && planned !== 'codex') {
     log('warn', 'local-only mode requires a local Codex harness — forcing route to codex');
@@ -44,7 +46,7 @@ export async function settlePlanRoute(opts: {
     await updateSpecRoute(specPath, preferredRoute, 'repo-config-pin');
     return preferredRoute;
   }
-  // The spec still names the pin-only command route the planner wrote: record the route actually used.
-  if (parsedRoute === 'command') await updateSpecRoute(specPath, planned, 'route-unavailable');
+  // The spec still names the command route the planner wrote but could not run: record the route actually used.
+  if (parsedRoute === 'command' && planned !== 'command') await updateSpecRoute(specPath, planned, 'route-unavailable');
   return planned;
 }

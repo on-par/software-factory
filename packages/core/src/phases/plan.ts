@@ -47,10 +47,10 @@ import {
 } from './plan-design-retry.js';
 import {
   type BuildRouteName,
+  CLI_BUILD_ROUTES,
   defaultBuildRoute,
   ROUTE_BULLETS,
   resolveRunnableBuildRoute,
-  ROUTE_FALLBACK_ORDER,
   runnableBuildRoutes,
 } from './plan-routes.js';
 
@@ -91,7 +91,7 @@ export interface PlanPromptOpts {
   specPath: string;
   constitutionCtx: string;
   adrCtx?: string;
-  /** Build routes with at least one runnable model on this machine. Empty or omitted = all. */
+  /** Build routes with at least one runnable model on this machine. Empty or omitted = the CLI routes; command only when listed. */
   runnableRoutes?: readonly BuildRouteName[];
 }
 
@@ -99,8 +99,8 @@ export function buildPlanPrompt(opts: PlanPromptOpts): string {
   const { issue, issueTitle, issueBody, specPath, constitutionCtx, adrCtx } = opts;
   const runnable = opts.runnableRoutes ?? [];
   const fallbackRoute = defaultBuildRoute(runnable);
-  const offered = runnable.length > 0 ? runnable : ROUTE_FALLBACK_ORDER;
-  const routeBullets = (['codex', 'claude', 'opencode'] as const)
+  const offered = runnable.length > 0 ? runnable : CLI_BUILD_ROUTES;
+  const routeBullets = (['codex', 'claude', 'opencode', 'command'] as const)
     .filter((r) => offered.includes(r))
     .map((r) => ROUTE_BULLETS[r])
     .join('\n');
@@ -112,7 +112,7 @@ export function buildPlanPrompt(opts: PlanPromptOpts): string {
         ? `(Set route: in the frontmatter to the route you chose.)\n`
         : '';
   const runnableNote =
-    runnable.length > 0 && runnable.length < ROUTE_FALLBACK_ORDER.length
+    runnable.length > 0 && CLI_BUILD_ROUTES.some((r) => !runnable.includes(r))
       ? `\n   Only these routes can run on this machine: ${runnable.join(', ')}. Choose one of them.`
       : '';
 

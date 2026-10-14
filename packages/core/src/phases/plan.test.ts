@@ -2453,7 +2453,7 @@ npm run test`;
       });
       const router = new ModelRouter(models, routes, false, stub);
       vi.spyOn(router, 'resolveAll').mockImplementation((task: string) =>
-        task === 'build_claude' || task === 'build_opencode' ? [] : ['stub-model'],
+        task === 'build_claude' || task === 'build_opencode' || task === 'build_command' ? [] : ['stub-model'],
       );
       const octokit: any = {
         rest: { issues: { get: async () => ({ data: { title: 'Codex only', body: 'Do it.' } }) } },

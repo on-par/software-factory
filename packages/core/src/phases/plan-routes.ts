@@ -3,10 +3,14 @@
 import { type BuildRoutePin, routeForBuildModel } from '../config/repo.js';
 import type { ModelRouter } from '../router/index.js';
 
-export type BuildRouteName = 'codex' | 'claude' | 'opencode';
+export type BuildRouteName = 'codex' | 'claude' | 'opencode' | 'command';
 
 /** Order PLAN falls back through when its chosen route cannot run here. */
-export const ROUTE_FALLBACK_ORDER: readonly BuildRouteName[] = ['claude', 'codex', 'opencode'];
+export const ROUTE_FALLBACK_ORDER: readonly BuildRouteName[] = ['claude', 'codex', 'opencode', 'command'];
+
+/** Routes PLAN offers when the runnable set is unknown. `command` needs a declared agentic harness,
+ *  so it is only offered when known runnable. */
+export const CLI_BUILD_ROUTES: readonly BuildRouteName[] = ['codex', 'claude', 'opencode'];
 
 /** Build routes whose task resolves to at least one runnable model, in fallback order.
  *  Returns [] when the router cannot answer, which callers treat as "no restriction". */
@@ -34,9 +38,10 @@ export function resolveRunnableBuildRoute(
 
 /** The route and pin CHECK/CI rework runs on (#2873). codex/claude/opencode follow
  *  resolveRunnableBuildRoute and keep the pin unless rerouted (the pin belongs to the old route's
- *  harness). `command` is pin-only, so it is not in ROUTE_FALLBACK_ORDER: it stays when the pin sits
- *  on a declared agentic harness (pin kept) or build_command resolves a runnable model (router
- *  picks), and otherwise falls back without the pin. */
+ *  harness). `command` is last in ROUTE_FALLBACK_ORDER and runnable when build_command resolves; its
+ *  own branch decides pin keeping: it stays when the pin sits on a declared agentic harness (pin
+ *  kept) or build_command resolves a runnable model (router picks), and otherwise falls back
+ *  without the pin. */
 export function resolveReworkRoute(
   router: Pick<ModelRouter, 'resolveAll'> & Partial<Pick<ModelRouter, 'registryRef'>>,
   requested: BuildRoutePin,
@@ -76,4 +81,6 @@ export const ROUTE_BULLETS: Record<BuildRouteName, string> = {
      pinned build worker is a claude-cli model (e.g. claude-sonnet-5 in .factory/config.json)`,
   opencode: `   - route: opencode — when the repo's pinned build worker is an opencode-harness model
      (e.g. opencode-deepseek-v4-flash in .factory/config.json); bounded mechanical work`,
+  command: `   - route: command — when the repo's build worker is a declared agentic harness
+     (harnesses: in .factory/config.yaml); bounded mechanical work`,
 };
