@@ -17,7 +17,7 @@ export type ExecFn = (
     cwd?: string;
     timeoutMs?: number;
     maxBuffer?: number;
-    env?: Record<string, string>;
+    env?: Record<string, string | undefined>;
     /** When set, the child is spawned detached (its own process group) and
      *  its pid is reported here so a lane can track and later kill the
      *  whole group. */

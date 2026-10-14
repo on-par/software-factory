@@ -155,7 +155,7 @@ export class PiHarness implements CodingHarness {
           cwd: worktree,
           timeoutMs: timeoutSeconds * 1000,
           maxBuffer: 64 * 1024 * 1024,
-          env: childEnv as Record<string, string>,
+          env: childEnv,
           onPgid,
         }));
       } catch (err: any) {
