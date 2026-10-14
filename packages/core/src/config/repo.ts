@@ -524,18 +524,18 @@ export function resolveEffectiveModelPins(
 
 // ---------- Effective build route ----------
 /** Same literal union as run/outcome.ts's BuildRoute; kept local so config/ never imports run/. */
-export type BuildRoutePin = 'codex' | 'claude' | 'opencode';
+export type BuildRoutePin = 'codex' | 'claude' | 'opencode' | 'command';
 
-/** The build route a pinned build model implies, read from its harness: a Codex-harness model
- *  can only run on the codex route, an opencode-harness model on opencode, a claude-cli model on
- *  claude. `undefined` when there is no pin or the harness has no dedicated route (#1367). */
+/** The build route a pinned build model implies, read from its harness: declared agentic harness →
+ *  command (wins over `codex: true`), codex-harness → codex, opencode → opencode, claude-cli → claude.
+ *  `undefined` when there is no pin or the harness has no dedicated route (#1367). */
 export function routeForBuildModel(registry: ModelRegistry, modelId: string | undefined): BuildRoutePin | undefined {
   if (!modelId || !registry.get(modelId)) return undefined;
-  if (registry.isCodexModel(modelId)) return 'codex';
   const harness = registry.getHarnessId(modelId);
+  if (harness && registry.getHarnessDeclaration(harness) && registry.isAgenticHarnessId(harness)) return 'command';
+  if (registry.isCodexModel(modelId)) return 'codex';
   if (harness === 'opencode') return 'opencode';
-  if (harness === 'claude-cli') return 'claude';
-  return undefined;
+  return harness === 'claude-cli' ? 'claude' : undefined;
 }
 
 export interface EffectiveBuildRoute {

@@ -546,18 +546,15 @@ export const defaultRoutesConfig: RoutesDefaults = {
         'OpenCode CLI implementation from frozen spec - requires the opencode harness (e.g. opencode-deepseek-v4-flash)',
       requires: 'opencode',
     },
-    check_compile: {
-      tier: 'checker',
-      description: 'Build/compile verification',
+    build_command: {
+      tier: 'worker',
+      description:
+        'Declared agentic harness implementation from frozen spec - requires a harness declared under `harnesses` with agentic: true (commit-only; SHIP publishes after CHECK)',
+      requires: 'command',
     },
-    check_tests: {
-      tier: 'checker',
-      description: 'Test suite execution and result verification',
-    },
-    check_lint: {
-      tier: 'checker',
-      description: 'Linting and type checking',
-    },
+    check_compile: { tier: 'checker', description: 'Build/compile verification' },
+    check_tests: { tier: 'checker', description: 'Test suite execution and result verification' },
+    check_lint: { tier: 'checker', description: 'Linting and type checking' },
     check_accessibility: {
       tier: 'checker',
       description: 'WCAG/accessibility checks in real browser',

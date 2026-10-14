@@ -25,6 +25,7 @@ import { type LocalAuthAgent, localAuthAgentFor } from '../utils/local-auth-reco
 import { extractFailoverReason, ModelExecutorError, ModelRouterError, type RouterAttempt } from './executor-error.js';
 import { describeFailureDetail } from './failure-detail.js';
 import { claimOllamaSkipNotice, type OllamaProbeResult, probeOllama } from './ollama-probe.js';
+import { filterModelsByRequires } from './requires.js';
 import { captureWorktreeState, resetWorktreeState } from './worktree-state.js';
 
 export type { ExecFn } from '../utils/exec.js';
@@ -677,17 +678,7 @@ export class ModelRouter {
     if (this.harnessCliAvailable) models = models.filter((model) => !this.harnessCliMissing(model));
     if (this.authTripped.size > 0) models = models.filter((model) => !this.isAuthTripped(model));
     const requires = this.routesConfig.routes[task]?.requires;
-    if (requires === 'codex') {
-      models = models.filter((model) => this.registry.isCodexModel(model));
-    } else if (requires === 'claude') {
-      // build_claude's prompt contract assumes the claude-cli harness (it drives its
-      // own commits). Running a codex-cli model here "succeeds" but leaves the
-      // worktree with no commits, so the ship phase fails and parks the lane.
-      models = models.filter((model) => this.registry.getHarnessId(model) === 'claude-cli');
-    } else if (requires === 'opencode') {
-      // build_opencode runs through the opencode CLI harness (e.g. deepseek).
-      models = models.filter((model) => this.registry.getHarnessId(model) === 'opencode');
-    }
+    models = filterModelsByRequires(this.registry, models, requires);
     if (taskRequiresAgenticHarness(task)) {
       models = models.filter((model) => this.registry.isAgenticHarnessId(this.registry.getHarnessId(model) ?? ''));
     }

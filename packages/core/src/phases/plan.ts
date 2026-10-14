@@ -23,6 +23,8 @@ import {
   type ReadinessEnrichmentRetryContext,
 } from '../readiness/enrich.js';
 import type { SizeGateMode } from '../config/index.js';
+import type { BuildRoutePin } from '../config/repo.js';
+import { settlePlanRoute } from './plan-route.js';
 import { decomposeOversizedIssue, renderChildIssueBody } from '../readiness/decompose.js';
 import { resolveSliceGate } from '../readiness/slice-gate.js';
 import { DEFAULT_MAX_SLICES, type SlicePlan } from '../readiness/slice-plan.js';
@@ -31,7 +33,7 @@ import { scoreIssueReadiness } from '../readiness/index.js';
 import type { ModelRouter } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
-import { archiveSpec, readSpec, updateSpecRoute, writeSpec } from '../spec/index.js';
+import { archiveSpec, readSpec, writeSpec } from '../spec/index.js';
 import type { Constitution, DesignArtifact, FailoverReason, ReadinessInfo } from '../types/index.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE, wrapUntrustedIssueBody } from '../utils/untrusted-input.js';
@@ -64,7 +66,7 @@ const GITHUB_ISSUE_UPDATE_API_VERSION = '2026-03-10';
 
 export interface PlanResult {
   ok: boolean;
-  route: 'codex' | 'claude' | 'opencode';
+  route: BuildRoutePin;
   specPath: string;
   model: string;
   escalate?: string;
@@ -365,7 +367,7 @@ async function planPhaseImpl(opts: {
   localOnly?: boolean;
   /** Repo config pins the build route (`.factory/config.json` → `route`). Forced
    *  after plan so the spec frontmatter stays the frozen truth. */
-  preferredRoute?: 'codex' | 'claude' | 'opencode';
+  preferredRoute?: BuildRoutePin;
   /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
   laneId?: string;
   /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
@@ -724,35 +726,15 @@ async function planPhaseImpl(opts: {
     }
     // Re-read after the PLAN call: a CLI that failed sign-in during PLAN is no longer runnable (#2495).
     const runnableNow = runnableBuildRoutes(router);
-    let route: 'codex' | 'claude' | 'opencode' = parsed.route ?? defaultBuildRoute(runnableNow);
-
-    if (localOnly && route !== 'codex') {
-      log('warn', 'local-only mode requires a local Codex harness — forcing route to codex');
-      route = 'codex';
-      await updateSpecRoute(specPath, 'codex', 'local-only');
-    }
-
-    if (route === 'codex' && isCodexDisabled) {
-      log('warn', 'codex unavailable — falling back to claude');
-      route = 'claude';
-      // Keep the persisted spec's frontmatter in sync with the actual route,
-      // since it's the frozen artifact downstream consumers (eval scoring, PR review) read.
-      await updateSpecRoute(specPath, 'claude', 'codex-disabled');
-    }
-
-    const resolved = resolveRunnableBuildRoute(route, runnableNow);
-    if (resolved.rerouted) {
-      const next = resolved.route;
-      log('model-override', `route ${route} has no runnable model on this machine, rerouting to ${next}`);
-      route = next;
-      await updateSpecRoute(specPath, next, 'route-unavailable');
-    }
-
-    if (opts.preferredRoute && route !== opts.preferredRoute) {
-      log('model-override', `pinned build route ${opts.preferredRoute} — overriding plan's ${route}`);
-      route = opts.preferredRoute;
-      await updateSpecRoute(specPath, opts.preferredRoute, 'repo-config-pin');
-    }
+    const route = await settlePlanRoute({
+      parsedRoute: parsed.route,
+      runnableNow,
+      localOnly,
+      isCodexDisabled,
+      preferredRoute: opts.preferredRoute,
+      specPath,
+      log,
+    });
 
     const { artifact: designArtifact, errors: designErrors, coerced: designCoerced } = designParse;
     if (designCoerced.length > 0) {

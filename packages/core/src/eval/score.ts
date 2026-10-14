@@ -30,7 +30,8 @@ export function scoreSpec(
 
   const { data, route: parsedRoute } = parseSpec(specContent);
   const frontmatterPass = Object.keys(data).length > 0;
-  const route: ScoredRoute = parsedRoute === null ? 'unparseable' : parsedRoute;
+  // PLAN cannot choose the pin-only command route, so a spec naming it scores as unparseable.
+  const route: ScoredRoute = parsedRoute === null || parsedRoute === 'command' ? 'unparseable' : parsedRoute;
   const routeCorrect = expected === 'any' || route === expected;
   const requiredSections = ['## Goal', '## Files / approach', '## Tests', '## Non-goals'];
   if (opts.requireConstitution) requiredSections.push('## Constitution compliance');

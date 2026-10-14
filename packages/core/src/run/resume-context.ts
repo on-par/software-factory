@@ -17,13 +17,14 @@ import type { EnvironmentFailure } from '../phases/check.js';
 import type { PlanResult } from '../phases/plan.js';
 import { readSpec } from '../spec/index.js';
 import type { CheckSummary, Constitution } from '../types/index.js';
+import type { BuildRoutePin } from '../config/repo.js';
 
 export interface PlanReuseRecord {
   /** issueBodyHash of the brief the frozen spec was planned from. */
   bodyHash: string;
   /** Base SHA the CHECK environment release was decided on. */
   baseSha: string;
-  route: 'codex' | 'claude' | 'opencode';
+  route: BuildRoutePin;
   releasedAt: string;
 }
 
@@ -92,7 +93,7 @@ export interface CheckResumeRecord {
   worktree: string;
   /** build.diffBase from the original run (undefined when BUILD reported none). */
   diffBase?: string;
-  route: 'codex' | 'claude' | 'opencode';
+  route: BuildRoutePin;
   /** build.model of the original run, reused as CHECK's reworkModel. */
   model: string;
   /** Whole minutes from PLAN start to BUILD end in the original run, at least 1. */

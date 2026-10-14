@@ -17,6 +17,7 @@ import { buildPhase } from './build.js';
 import { checkPhase } from './check.js';
 import { planPhase } from './plan.js';
 import { shipPhase } from './ship.js';
+import { reworkRouteFor } from '../run/outcome.js';
 
 const exec = promisify(execCb);
 const repo = 'on-par/software-factory';
@@ -192,7 +193,7 @@ describe('OpenCode-only pipeline with a fake opencode CLI (#2635)', () => {
         router,
         constitution: null,
         log,
-        reworkRoute: build.route,
+        ...reworkRouteFor(build.route, undefined),
       });
       expect(check.passed).toBe(true);
       expect(check.reworkRounds).toBe(1);

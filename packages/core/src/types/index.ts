@@ -466,7 +466,7 @@ export interface IssueRunState {
   worktree: string;
   specPath: string;
   model: string;
-  route: 'codex' | 'claude' | 'opencode';
+  route: BuildRoutePin;
   attempts: number;
   startedAt: string;
   updatedAt: string;
@@ -487,3 +487,4 @@ export type {
   TargetType,
   VerificationStep,
 } from '@on-par/contracts';
+import type { BuildRoutePin } from '../config/repo.js';
