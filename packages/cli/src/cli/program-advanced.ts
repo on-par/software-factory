@@ -5,6 +5,7 @@ import { DEFAULT_FACTORYD_PORT } from '@on-par/factory-core/internal';
 import { BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION } from './branch-prefix.js';
 import { DaemonCtlError } from './daemon.js';
 import type { CliDeps, ProgramHandlers } from './index.js';
+import { cmdSelfUpdateApply } from './self-update-apply.js';
 
 export function registerAdvancedCommands(program: Command, handlers: ProgramHandlers, deps: CliDeps): void {
   const hosted = program
@@ -135,14 +136,45 @@ export function registerAdvancedCommands(program: Command, handlers: ProgramHand
 
   program
     .command('self-update')
-    .description('Check npm for a newer factory release (read-only; nothing is installed)')
-    .option('--check', 'Compare the running version with the npm dist-tag (required)')
+    .description('Check npm for a newer factory release (--check), or install an exact stable release (--to)')
+    .option('--check', 'Compare the running version with the npm dist-tag (read-only)')
+    .option(
+      '--to <version>',
+      'Install this exact stable version next to the running Node, run doctor, restart; roll back on failure',
+    )
+    .option('--dry-run', 'With --to: validate the version, install kind, and npm without installing')
+    .option('--force', 'With --to: apply even while a run is active')
+    .option('--no-restart', 'With --to: do not restart factoryd (factoryd passes this and restarts itself)')
     .option('--json', 'Print one JSON object instead of text')
     .option('--update-mode <mode>', 'Channel to check: stable (npm latest, default) or prerelease (npm next)')
-    .action(async (opts: { check?: boolean; json?: boolean; updateMode?: string }) => {
-      if (opts.check !== true) throw new handlers.CliExitError('factory self-update: only --check is supported', 2);
-      process.exitCode = await daemonCtl(() => handlers.cmdSelfUpdateCheck(opts, deps.selfUpdate));
-    });
+    .action(
+      async (opts: {
+        check?: boolean;
+        to?: string;
+        dryRun?: boolean;
+        force?: boolean;
+        restart?: boolean;
+        json?: boolean;
+        updateMode?: string;
+      }) => {
+        if (opts.check === true && opts.to !== undefined) {
+          throw new handlers.CliExitError('factory self-update: --check and --to are mutually exclusive', 2);
+        }
+        if (opts.to !== undefined) {
+          const to = opts.to;
+          process.exitCode = await daemonCtl(() =>
+            cmdSelfUpdateApply(
+              { to, json: opts.json, dryRun: opts.dryRun, force: opts.force, restart: opts.restart },
+              deps.selfUpdate,
+            ),
+          );
+          return;
+        }
+        if (opts.check !== true)
+          throw new handlers.CliExitError('factory self-update: pass --check or --to <version>', 2);
+        process.exitCode = await daemonCtl(() => handlers.cmdSelfUpdateCheck(opts, deps.selfUpdate));
+      },
+    );
 
   const worktreeCmd = program.command('worktree').description('Clean up stale factory worktrees (gc)');
   worktreeCmd

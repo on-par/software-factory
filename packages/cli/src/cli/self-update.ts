@@ -26,6 +26,11 @@ export interface SelfUpdateDeps {
   registry?: string;
   timeoutMs?: number;
   out?: { write(s: string): unknown };
+  /** `self-update --to` (#2355): runs npm / node without a shell; never rejects. Default: execFile. */
+  exec?: (cmd: string, args: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
+  /** `self-update --to`: labels of active runs; non-empty refuses with exit 3 unless --force. Default: run locks. */
+  activeRuns?: () => Promise<string[]>;
+  platform?: NodeJS.Platform;
 }
 
 export interface SelfUpdateCheckResult {

@@ -827,7 +827,6 @@ describe('auto-update (#1939)', () => {
     stop = join(dir, 'repo', 'STOP');
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
-
   const cfg = (mode: 'manual' | 'stable' | 'prerelease', version = '0.9.0') => ({
     autoUpdate: {
       mode,
@@ -869,6 +868,7 @@ describe('auto-update (#1939)', () => {
         applied.push(v);
         return applies.shift() ?? { code: 0, rolledBack: false, error: null };
       }),
+      preflight: vi.fn(async () => ({ code: 0, rolledBack: false, error: null })),
       activeRuns: vi.fn(async () => {
         polls++;
         return polls <= (over.activeUntilPoll ?? 0) ? ['acme/app'] : [];
