@@ -40,3 +40,24 @@ describe('parseIssueArg', () => {
     }
   });
 });
+
+describe('parseIssueArg unsafe-integer guard (#2837)', () => {
+  it.each(['9007199254740993', '99999999999999999999'])(
+    "rejects '%s' with exit 2 echoing the original string",
+    (raw) => {
+      let caught: unknown;
+      try {
+        parseIssueArg(raw);
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeInstanceOf(CliExitError);
+      expect(caught).toMatchObject({ code: 2 });
+      expect((caught as Error).message).toContain(`invalid issue argument '${raw}'`);
+    },
+  );
+
+  it('accepts 9007199254740991 (Number.MAX_SAFE_INTEGER)', () => {
+    expect(parseIssueArg('9007199254740991')).toBe(9007199254740991);
+  });
+});
