@@ -49,9 +49,9 @@ describe('shipped defaults', () => {
     expect(defaultModelsConfig.models[retired?.replacement ?? '']).toBeDefined();
   });
 
-  it('has 22 models with the expected harness-bearing spot checks', () => {
+  it('has 23 models with the expected harness-bearing spot checks', () => {
     const modelIds = Object.keys(defaultModelsConfig.models);
-    expect(modelIds).toHaveLength(22);
+    expect(modelIds).toHaveLength(23);
 
     for (const id of [
       'claude-opus-5',
@@ -66,6 +66,7 @@ describe('shipped defaults', () => {
       'gpt-5.6-sol',
       'gpt-5.1-codex',
       'opencode-deepseek-v4-flash-free',
+      'opencode-deepseek-v4-pro',
       'qwen2.5-coder:14b',
     ]) {
       expect(modelIds, `missing model ${id}`).toContain(id);
@@ -77,6 +78,31 @@ describe('shipped defaults', () => {
     expect(defaultModelsConfig.models['qwen3.5:9b'].harness).toBe('ollama-http');
     expect(defaultModelsConfig.models['codex-ollama-qwen3.5:9b'].harness).toBe('ollama-agentic');
     expect(defaultModelsConfig.models['opencode-deepseek-v4-flash-free'].harness).toBe('opencode');
+  });
+
+  it('points opencode-deepseek-v4-flash at OpenCode Go V4.1 Flash at the published prices (#2898)', () => {
+    expect(defaultModelsConfig.models['opencode-deepseek-v4-flash']).toMatchObject({
+      harness: 'opencode',
+      providerModel: 'opencode-go/deepseek-v4.1-flash',
+      costPerMtokInput: 0.3,
+      costPerMtokOutput: 1.2,
+      envKey: 'OPENCODE_API_KEY',
+    });
+  });
+
+  it('registers opencode-deepseek-v4-pro as an experimental pin-only OpenCode Go model (#2898)', () => {
+    expect(defaultModelsConfig.models['opencode-deepseek-v4-pro']).toMatchObject({
+      harness: 'opencode',
+      providerModel: 'opencode-go/deepseek-v4-pro',
+      envKey: 'OPENCODE_API_KEY',
+      contextWindow: 1000000,
+      costPerMtokInput: 1.74,
+      costPerMtokOutput: 3.48,
+      experimental: true,
+    });
+    for (const ids of Object.values(defaultModelsConfig.tiers)) {
+      expect(ids).not.toContain('opencode-deepseek-v4-pro');
+    }
   });
 
   it('offers Astra through subscription-authenticated Codex without changing tier defaults', () => {
