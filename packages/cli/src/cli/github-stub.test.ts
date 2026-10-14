@@ -161,6 +161,10 @@ describe('createStubOctokit', () => {
     await expect(o.rest.issues.get({ owner: 'o', repo: 'r', issue_number: 1 })).rejects.toThrow(
       new RegExp(GITHUB_STUB_FIXTURE_FILE),
     );
+    await expect(o.rest.issues.get({ owner: 'o', repo: 'r', issue_number: 1 })).rejects.toHaveProperty(
+      'cause',
+      expect.any(SyntaxError),
+    );
   });
 });
 

@@ -43,7 +43,9 @@ export function readRepoConfigFile(configPath: string): unknown {
       return parseYaml(text);
     } catch (err) {
       if (err instanceof YAMLParseError) {
-        throw new Error(`Failed to parse ${configPath} (line ${err.linePos?.[0]?.line ?? '?'}): ${err.message}`);
+        throw new Error(`Failed to parse ${configPath} (line ${err.linePos?.[0]?.line ?? '?'}): ${err.message}`, {
+          cause: err,
+        });
       }
       throw err;
     }
@@ -51,7 +53,7 @@ export function readRepoConfigFile(configPath: string): unknown {
   try {
     return JSON.parse(text);
   } catch (err) {
-    throw new Error(`Failed to parse ${configPath}: ${(err as Error).message}`);
+    throw new Error(`Failed to parse ${configPath}: ${(err as Error).message}`, { cause: err });
   }
 }
 

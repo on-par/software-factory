@@ -329,6 +329,11 @@ describe('validation errors', () => {
   it('names the file path on a schema violation', async () => {
     const path = await writeConfig({ version: 3 });
     expect(() => loadV2Config(path)).toThrow(new RegExp(`Invalid ${escapeRegExp(path)}`));
+    try {
+      loadV2Config(path);
+    } catch (err) {
+      expect((err as Error).cause).toBeDefined();
+    }
   });
 });
 

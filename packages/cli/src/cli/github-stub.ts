@@ -104,7 +104,7 @@ export function createStubOctokit(dir: string, { now = () => new Date() }: { now
     try {
       return (fixture = JSON.parse(raw) as GitHubStubFixture);
     } catch (err) {
-      throw new Error(`FACTORY_GITHUB=stub: malformed ${fixturePath}: ${(err as Error).message}`);
+      throw new Error(`FACTORY_GITHUB=stub: malformed ${fixturePath}: ${(err as Error).message}`, { cause: err });
     }
   };
 

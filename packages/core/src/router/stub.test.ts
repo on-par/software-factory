@@ -22,4 +22,10 @@ describe('StubModelExecutor script exhaustion', () => {
       "StubModelExecutor: no scripted step or defaultOutput for task 'plan'",
     );
   });
+
+  it('keeps the delegate error as cause', async () => {
+    const err = await new StubModelExecutor().runModel('m', 'p', ctx()).catch((e: Error) => e);
+    expect((err as Error).cause).toBeInstanceOf(Error);
+    expect(((err as Error).cause as Error).message).toMatch(/^SimModelExecutor:/);
+  });
 });

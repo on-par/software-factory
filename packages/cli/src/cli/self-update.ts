@@ -149,7 +149,7 @@ export async function fetchDistTags(
     res = await fetchImpl(url, { timeoutMs });
   } catch (err) {
     if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
-      throw new Error(`registry request timed out after ${timeoutMs} ms`);
+      throw new Error(`registry request timed out after ${timeoutMs} ms`, { cause: err });
     }
     throw err;
   }

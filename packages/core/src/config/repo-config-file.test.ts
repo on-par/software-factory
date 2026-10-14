@@ -81,6 +81,19 @@ describe('repo-config-file', () => {
       const j = write('config.json', '{nope');
       expect(() => readRepoConfigFile(j)).toThrow(`Failed to parse ${j}:`);
     });
+    it('attaches the parse error as cause', () => {
+      const causeOf = (file: string): unknown => {
+        try {
+          readRepoConfigFile(file);
+        } catch (err) {
+          return (err as Error).cause;
+        }
+        return undefined;
+      };
+      expect(causeOf(write('config.json', '{nope'))).toBeInstanceOf(SyntaxError);
+      rmSync(join(factory, 'config.json'));
+      expect(causeOf(write('config.yaml', 'models:\n  pins: [unclosed'))).toMatchObject({ name: 'YAMLParseError' });
+    });
     it('skips the collision check for non-candidate names', () => {
       write('config.yaml', YAML_TEXT);
       expect(readRepoConfigFile(write('foo.json', '{"a":1}'))).toEqual({ a: 1 });

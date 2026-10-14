@@ -123,6 +123,7 @@ describe('fetchDistTags', () => {
       throw Object.assign(new Error('x'), { name: 'TimeoutError' });
     };
     await expect(fetchDistTags(timeout, { timeoutMs: 7 })).rejects.toThrow('timed out after 7 ms');
+    await expect(fetchDistTags(timeout, { timeoutMs: 7 })).rejects.toMatchObject({ cause: { name: 'TimeoutError' } });
     await expect(
       fetchDistTags(async () => {
         throw new Error('ECONNREFUSED');

@@ -44,6 +44,15 @@ describe('parseCoverageSummary', () => {
     expect(() => parseCoverageSummary('{not json')).toThrow(/not valid JSON/);
   });
 
+  it('attaches the JSON parse error as cause', () => {
+    try {
+      parseCoverageSummary('{not json');
+      expect.unreachable();
+    } catch (err) {
+      expect((err as Error).cause).toBeInstanceOf(SyntaxError);
+    }
+  });
+
   it('throws when the total block is missing', () => {
     expect(() => parseCoverageSummary('{}')).toThrow(/missing a "total" block/);
   });

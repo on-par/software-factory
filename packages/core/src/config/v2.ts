@@ -455,7 +455,7 @@ export function loadV2Config(path: string): FactoryConfigV2 {
   try {
     return parseV2Config(raw);
   } catch (err: any) {
-    throw new Error(err.message.replace('Invalid v2 config:', `Invalid ${path}:`));
+    throw new Error(err.message.replace('Invalid v2 config:', `Invalid ${path}:`), { cause: err });
   }
 }
 

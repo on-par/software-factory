@@ -40,6 +40,9 @@ export default defineConfig({
     'typescript/consistent-type-imports': ['error', { prefer: 'type-imports', fixStyle: 'separate-type-imports' }],
     'typescript/no-floating-promises': 'error',
     'typescript/return-await': 'error',
+    'typescript/no-misused-promises': 'error',
+    // Tests deliberately reject with non-Error values to cover non-Error handling branches (#2844).
+    'typescript/prefer-promise-reject-errors': 'off',
     'typescript/no-base-to-string': 'off',
     'typescript/no-misused-spread': 'off',
     'typescript/require-array-sort-compare': 'off',
@@ -86,6 +89,7 @@ export default defineConfig({
     'no-warning-comments': 'error',
     'unicorn/no-useless-switch-case': 'error',
     'unicorn/no-useless-error-capture-stack-trace': 'error',
+    'preserve-caught-error': 'error',
     'unicorn/no-static-only-class': 'error',
     'unicorn/no-instanceof-array': 'error',
     'unicorn/prefer-array-some': 'error',
