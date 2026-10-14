@@ -1,9 +1,12 @@
 // src/phases/build.ts — BUILD phase: worker model implements the frozen spec
 
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import { captureDiffBase, collectDesignDiff } from '../checkers/design-smells.js';
+import { type LintCommand, resolveLintCommands } from '../checkers/index.js';
+import { fileExists } from '../checkers/probe.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { readDesignArtifact, renderDesignGrounding } from '../design/index.js';
 import { laneEnv } from '../environment/index.js';
@@ -146,6 +149,11 @@ async function buildPhaseImpl(opts: {
   const spec = await readFile(specPath, 'utf-8').catch(() => '');
   const designArtifact = await readDesignArtifact(specPath);
   const designGrounding = designArtifact ? renderDesignGrounding(designArtifact) : '';
+  // BUILD names the lint checker's commands only when verify.sh does not already cover them (#2829).
+  const lintCommands = (await fileExists(join(worktree, 'scripts/verify.sh')))
+    ? []
+    : await resolveLintCommands({ worktree }).catch(() => []);
+  const promptOpts = { issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding, lintCommands };
   if (designArtifact) {
     log(
       'design_artifact_received',
@@ -161,8 +169,18 @@ async function buildPhaseImpl(opts: {
   // Commit-only unless the repo opts in (#1867); local-only always stays commit-only (#508).
   const claudeRoutePrompt = (): string =>
     publishFromBuild && !disablePublish
-      ? buildClaudePrompt({ issue, branch, specPath, constitutionCtx, skipCI, appPort, appBaseUrl, designGrounding })
-      : buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding });
+      ? buildClaudePrompt({
+          issue,
+          branch,
+          specPath,
+          constitutionCtx,
+          skipCI,
+          appPort,
+          appBaseUrl,
+          designGrounding,
+          lintCommands,
+        })
+      : buildCommitOnlyPrompt(promptOpts);
   let prompt: string;
   let taskType: 'build_codex' | 'build_claude' | 'build_opencode';
 
@@ -184,12 +202,10 @@ async function buildPhaseImpl(opts: {
 
   if (route === 'codex') {
     taskType = 'build_codex';
-    prompt = localOnly
-      ? buildLocalSmallPrompt({ issue, branch, spec })
-      : buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding });
+    prompt = localOnly ? buildLocalSmallPrompt({ issue, branch, spec }) : buildCommitOnlyPrompt(promptOpts);
   } else if (route === 'opencode') {
     taskType = 'build_opencode';
-    prompt = buildOpencodePrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding });
+    prompt = buildOpencodePrompt(promptOpts);
   } else {
     taskType = 'build_claude';
     prompt = claudeRoutePrompt();
@@ -258,11 +274,11 @@ async function buildPhaseImpl(opts: {
       });
       route = 'codex';
       crossHarnessReason = reason;
-      result = await router.run(
-        'build_codex',
-        buildCommitOnlyPrompt({ issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding }),
-        { ...runOpts, retryCause: 'failover', modelOverride: fallback },
-      );
+      result = await router.run('build_codex', buildCommitOnlyPrompt(promptOpts), {
+        ...runOpts,
+        retryCause: 'failover',
+        modelOverride: fallback,
+      });
     } else if (taskType !== 'build_codex' || !crossHarnessOk || reason === undefined) throw err;
     else {
       if (opts.autoFailover && !opts.autoFailover.enabled) throw err;
@@ -375,8 +391,9 @@ export function buildCommitOnlyPrompt(opts: {
   appPort?: number;
   appBaseUrl?: string;
   designGrounding?: string;
+  lintCommands?: readonly LintCommand[];
 }): string {
-  const { issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding } = opts;
+  const { issue, specPath, constitutionCtx, spec, appPort, appBaseUrl, designGrounding, lintCommands } = opts;
   return `Implement issue #${issue} from the frozen spec below (also saved at ${specPath}). It is the approved plan: follow it and stay within its scope, with no unrelated refactors or drive-by changes.
 
 ${constitutionCtx}
@@ -388,7 +405,7 @@ ${spec}
 
 ## Rules
 - Match the surrounding code style. Add or update the tests in the spec's Tests section.
-- ${VERIFY_RULE}
+- ${verifyRule(lintCommands)}
 - Commit atomically: one commit per independently testable functional change, with a clear conventional message. Never mix unrelated functional changes in one commit. A single-slice task yields exactly ONE commit.
 - Do NOT push, do NOT open a pull request, do NOT merge. CHECK and SHIP run next.
 - If something is genuinely ambiguous, print a line starting exactly with "ESCALATE:" followed by the question, then stop. If you are stuck, commit what safely builds and passes, say what is blocked in the commit message, and stop.
@@ -406,8 +423,9 @@ export function buildClaudePrompt(opts: {
   appPort?: number;
   appBaseUrl?: string;
   designGrounding?: string;
+  lintCommands?: readonly LintCommand[];
 }): string {
-  const { issue, branch, specPath, constitutionCtx, skipCI, appPort, appBaseUrl, designGrounding } = opts;
+  const { issue, branch, specPath, constitutionCtx, skipCI, appPort, appBaseUrl, designGrounding, lintCommands } = opts;
   return `Run fully autonomously in headless mode for issue #${issue}, BUILD phase.
 You are ALREADY inside the isolated git worktree for branch ${branch} (cwd). Nobody is watching: never pause for permission or input.
 
@@ -417,7 +435,7 @@ The frozen, approved spec is at ${specPath}. Read it and follow it as the plan. 
 
 ${UNTRUSTED_ISSUE_BODY_NOTICE}
 
-- ${VERIFY_RULE}
+- ${verifyRule(lintCommands)}
 - Commit atomically: one commit per independently testable functional change, with a clear conventional message. Never mix unrelated functional changes in one commit.
 - Do NOT merge (the factory merges). Your session ends when you end your turn, so do not stop until: (1) branch ${branch} is pushed, (2) an open PR exists with 'Closes #${issue}' in its body, ${skipCI ? '(3) local verify passes (CI is intentionally skipped: do not block on GitHub Actions CI or escalate if CI cannot run), (4) the PR is ready.' : '(3) CI is green, (4) the PR is ready.'}
 - If and only if something is genuinely ambiguous, print a line starting exactly with "ESCALATE:" followed by the question, then stop.
@@ -426,10 +444,17 @@ ${promptTail(appPort, appBaseUrl, designGrounding)}`;
 }
 
 // Mirrors testsChecker's command order so BUILD verifies with what CHECK runs (#1976).
-const VERIFY_RULE =
+const VERIFY_RULE_BASE =
   'Verify with the command CHECK runs: `bash scripts/verify.sh --no-e2e` if scripts/verify.sh exists, ' +
   'otherwise the test script (`npm test`) or pytest, plus any verify command the constitution names. ' +
   'Fix failures before finishing and report the exact command and its output.';
+
+// Names the lint checker's commands (resolveLintCommands) when the repo has no verify.sh (#2829).
+function verifyRule(lintCommands: readonly LintCommand[] = []): string {
+  if (lintCommands.length === 0) return VERIFY_RULE_BASE;
+  const cmds = lintCommands.map((c) => `\`${c.argv.join(' ')}\``).join(' and ');
+  return `${VERIFY_RULE_BASE} Also run ${cmds} (CHECK's lint checker runs them) and fix their failures before finishing.`;
+}
 
 function promptTail(appPort?: number, appBaseUrl?: string, designGrounding?: string): string {
   return `${headlessNote()}${appPort ? `\n\n${appPortNote(appPort, appBaseUrl)}` : ''}${designGrounding ? `\n\n${designGrounding}` : ''}`;
