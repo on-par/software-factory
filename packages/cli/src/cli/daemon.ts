@@ -30,6 +30,7 @@ import {
 } from '@on-par/factory-core/internal';
 import { defaultIsPidAlive, getFactoryPaths } from '@on-par/factory-core';
 
+import { runSelfUpdateCommand } from './self-update-exec.js';
 import {
   initialUpdateState,
   readUpdateState,
@@ -548,12 +549,22 @@ export interface AutoUpdateApplyResult {
   error: string | null;
 }
 export type AutoUpdateOutcome =
-  'manual' | 'check-error' | 'no-update' | 'skipped-failed-version' | 'drain-timeout' | 'busy' | 'failed' | 'updated';
+  | 'manual'
+  | 'check-error'
+  | 'no-update'
+  | 'skipped-failed-version'
+  | 'preflight-failed'
+  | 'drain-timeout'
+  | 'busy'
+  | 'failed'
+  | 'updated';
 
 export interface AutoUpdateDeps {
   stateFile: string;
   check(): Promise<AutoUpdateCheck>;
   apply(version: string): Promise<AutoUpdateApplyResult>;
+  /** Proves the update command works (`self-update --to <v> --dry-run`) BEFORE any STOP is written (#2355). */
+  preflight(version: string): Promise<AutoUpdateApplyResult>;
   /** Slugs/labels with an active run; empty = drained. */
   activeRuns(): Promise<string[]>;
   /** Exclusively creates STOP in every attached repo; returns only the paths it created. */
@@ -640,6 +651,20 @@ export async function runAutoUpdateCycle(config: AutoUpdateConfig, deps: AutoUpd
     });
   };
 
+  // Preflight before draining: an unsupported or broken update command must never stop builds (#2355).
+  let pre: AutoUpdateApplyResult;
+  try {
+    pre = await deps.preflight(candidate);
+  } catch (err) {
+    pre = { code: 1, rolledBack: false, error: errorMessage(err) };
+  }
+  if (pre.code !== 0) {
+    const error = `preflight failed: ${pre.error ?? `exit ${pre.code}`}`;
+    finish({ outcome: 'skipped', error });
+    deps.log(`update: ${candidate} ${error}; not draining`);
+    return 'preflight-failed';
+  }
+
   let stopFiles: string[] = [];
   try {
     stopFiles = await deps.writeStops();
@@ -724,23 +749,6 @@ export function recoverStaleDrain(previous: UpdateState | null, removeStop: (fil
   return removed;
 }
 
-function parseLastJsonLine(stdout: string): Record<string, unknown> | null {
-  const line = lastLines(stdout.trimEnd(), 1)[0];
-  if (!line) return null;
-  try {
-    const parsed: unknown = JSON.parse(line);
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function lastStderrLine(stderr: string): string | null {
-  return lastLines(stderr.trimEnd(), 1)[0] || null;
-}
-
 /** Production deps: checks via the injected `check`, applies via `factory self-update --to`, detects activity from the run runtime and run locks. */
 export function createAutoUpdateDeps(opts: {
   registryFile: string;
@@ -754,22 +762,12 @@ export function createAutoUpdateDeps(opts: {
 }): AutoUpdateDeps {
   const exec = defaultExec();
   const attached = async () => listRepos(await loadRegistry(opts.registryFile)).filter((e) => e.state !== 'detached');
+  const runSelfUpdate = (args: string[]) => runSelfUpdateCommand(exec, opts.cliEntrypoint, args);
   return {
     stateFile: opts.stateFile,
     check: opts.check,
-    async apply(version) {
-      const r = await exec(process.execPath, [opts.cliEntrypoint, 'self-update', '--to', version, '--json']);
-      const json = parseLastJsonLine(r.stdout);
-      const error =
-        (typeof json?.error === 'string' && json.error !== '' ? json.error : null) ??
-        lastStderrLine(r.stderr) ??
-        (r.code === 0 ? null : `exit ${r.code}`);
-      return {
-        code: r.code,
-        rolledBack: json?.rolledBack === true || json?.outcome === 'rolled-back',
-        error,
-      };
-    },
+    apply: (version) => runSelfUpdate(['--to', version, '--no-restart']),
+    preflight: (version) => runSelfUpdate(['--to', version, '--dry-run', '--force']),
     async activeRuns() {
       const active = opts.runRuntime
         .list()
