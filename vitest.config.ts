@@ -95,6 +95,8 @@ export default defineConfig({
         // integration suites; it is scaffolding, not product code, and its fake
         // branches would only dilute the gate.
         'packages/core/src/test-support/**',
+        // Test-only shipIssue harness for the cli ship*.test.ts suites (#2789).
+        'packages/cli/src/**/test-support/**',
       ],
       thresholds: {
         // RATCHET: global catch-all. Files matched by the per-package globs below

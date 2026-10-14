@@ -1009,7 +1009,7 @@ describe('legacy branch prefix literal', () => {
     return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {
-        return entry.name === 'node_modules' || entry.name === 'dist' ? [] : sourceFiles(full);
+        return ['node_modules', 'dist', 'test-support'].includes(entry.name) ? [] : sourceFiles(full);
       }
       return /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [full] : [];
     });
