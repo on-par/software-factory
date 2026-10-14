@@ -1,5 +1,6 @@
 // packages/core/src/queue/queue-backend.ts — Backend-agnostic queue seam; GitHub-labels is today's only implementation (#1499).
 
+import { type BlockedParkPollResult, type BlockedParkStore, pollBlockedParks } from '../blockers/poller.js';
 import {
   createGithubQueue,
   type GithubQueueOptions,
@@ -17,9 +18,11 @@ export interface QueueBackend {
   list(lane?: string): Promise<number[]>;
   /** Detects and releases claims whose TTL lease has expired across the whole queue. */
   reap(): Promise<StaleClaimRelease[]>;
+  /** Unparks `blocked` parents whose blockers resolved (#2318); [] when no blockedParks store was configured. */
+  pollBlockedParks(): Promise<BlockedParkPollResult[]>;
 }
 
-export type GithubQueueBackendOptions = GithubQueueOptions;
+export type GithubQueueBackendOptions = GithubQueueOptions & { blockedParks?: BlockedParkStore };
 
 export function createGithubQueueBackend(options: GithubQueueBackendOptions): QueueBackend {
   const { client, owner, repo, now } = options;
@@ -38,5 +41,10 @@ export function createGithubQueueBackend(options: GithubQueueBackendOptions): Qu
     return releaseStaleClaims({ client, owner, repo, now });
   }
 
-  return { claimNext: queue.claimNext, release: queue.release, list, reap };
+  async function pollParks(): Promise<BlockedParkPollResult[]> {
+    if (options.blockedParks === undefined) return [];
+    return pollBlockedParks({ client, owner, repo, store: options.blockedParks });
+  }
+
+  return { claimNext: queue.claimNext, release: queue.release, list, reap, pollBlockedParks: pollParks };
 }

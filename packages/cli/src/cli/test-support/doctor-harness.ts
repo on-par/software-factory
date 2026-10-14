@@ -14,6 +14,7 @@ export const h = Object.assign(shipH, {
   reapedVms: [] as Array<{ name: string; removed: boolean; detail: string }>,
   gcReport: { removed: [], kept: 0, dryRun: false } as any,
   staleClaims: [] as any[],
+  blockedParks: [] as any[],
   greenPrs: [] as any[],
 });
 
@@ -21,6 +22,7 @@ function makeInternalFakes() {
   return {
     sweepWorktrees: vi.fn(async () => h.gcReport) as any,
     releaseStaleClaims: vi.fn(async () => h.staleClaims) as any,
+    pollBlockedParks: vi.fn(async () => h.blockedParks) as any,
     findUnmergedGreenPrs: vi.fn(async () => h.greenPrs) as any,
     listOrphanContainers: vi.fn(async () => h.orphanContainers) as any,
     reapOrphanContainers: vi.fn(async () => h.reapedContainers) as any,
@@ -37,6 +39,7 @@ function makeInternalFakes() {
     CliDeps,
     | 'sweepWorktrees'
     | 'releaseStaleClaims'
+    | 'pollBlockedParks'
     | 'findUnmergedGreenPrs'
     | 'listOrphanContainers'
     | 'reapOrphanContainers'

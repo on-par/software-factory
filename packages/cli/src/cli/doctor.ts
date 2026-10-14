@@ -21,7 +21,6 @@ import type { ConfigLintInput, WorktreeSandbox } from '@on-par/factory-core/inte
 import {
   claudeStoredSessionState,
   codexChatgptSessionState,
-  createOctokitQueueClient,
   hasClaudeLoginEvidence,
   hasOpencodeLoginEvidence,
   isHarnessCliPresent,
@@ -40,7 +39,6 @@ import { configLintChecks, declaredHarnessChecks, modelsRegistryChecks } from '.
 import {
   analyzeEventLog,
   eventLogCheck,
-  formatClaimReconcileReport,
   formatContainerReconcileReport,
   formatMicroVmReconcileReport,
   formatReconcileReport,
@@ -52,6 +50,7 @@ import {
   orphanMicroVmChecks,
   unmergedGreenPrChecks,
 } from './doctor-health.js';
+import { reconcileQueue } from './doctor-queue-reconcile.js';
 import { availableAgentClis, CLAUDE_CODE_URL, CODEX_CLI_URL, GITHUB_TOKENS_URL } from './first-run.js';
 import type { CliDeps } from './index.js';
 import { distFreshnessProbe } from './staleness.js';
@@ -888,6 +887,7 @@ export interface DoctorRuntime {
       | 'reapOrphanMicroVm'
       | 'sweepWorktrees'
       | 'releaseStaleClaims'
+      | 'pollBlockedParks'
     >
   >;
   configLoaders: Required<Pick<CliDeps, 'loadModelsConfig' | 'loadRepoConfig' | 'loadFactoryConfigForRepo'>>;
@@ -1134,23 +1134,7 @@ export async function cmdDoctor(
         console.log(`reconcile: worktree sweep failed: ${err?.message ?? String(err)}`);
       }
 
-      // Stale claim reap (#999): factory:in-progress claims naming a dead local pid go back to
-      // factory:queued so the next run can claim them with no manual label surgery.
-      try {
-        if (ghRepo && octokit) {
-          const [owner, repoName] = ghRepo.split('/');
-          const released = await rt.internalOps.releaseStaleClaims({
-            client: createOctokitQueueClient(octokit),
-            owner,
-            repo: repoName,
-          });
-          console.log(formatClaimReconcileReport(released));
-        } else {
-          console.log('reconcile: skipping stale claims: no GitHub repo or token');
-        }
-      } catch (err: any) {
-        console.log(`reconcile: stale claim release failed: ${err?.message ?? String(err)}`);
-      }
+      await reconcileQueue(rt.internalOps, ghRepo, octokit, getFactoryPaths(repoRoot).events);
     }
   }
 

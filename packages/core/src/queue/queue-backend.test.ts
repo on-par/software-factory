@@ -2,11 +2,13 @@
 
 import { describe, expect, it } from 'vitest';
 
+import type { BlockedParkStore } from '../blockers/poller.js';
 import {
   claimedByLabel,
   claimExpiresLabel,
   IN_PROGRESS_LABEL,
   laneLabel,
+  PARKED_LABEL,
   QUEUED_LABEL,
   queueOrderLabel,
   type QueueGitHubClient,
@@ -120,5 +122,23 @@ describe('createGithubQueueBackend', () => {
 
     expect(results).toEqual([{ issue: 1, label: expiresLabel, expiresAt: NOW_SECONDS - 60, released: true }]);
     expect(state.get(1)!.has(QUEUED_LABEL)).toBe(true);
+  });
+
+  it('pollBlockedParks() returns [] without a blockedParks store', async () => {
+    const { client } = createFakeStore([]);
+    const backend = createGithubQueueBackend({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
+    expect(await backend.pollBlockedParks()).toEqual([]);
+  });
+
+  it('pollBlockedParks() delegates to the poller with the configured store', async () => {
+    const { client } = createFakeStore([{ number: 5, labels: [PARKED_LABEL] }]);
+    const blockedParks: BlockedParkStore = {
+      readParkComment: async () => undefined,
+      updateComment: async () => {},
+      listBlockedBy: async () => [],
+      blockerEvidence: async () => ({ factoryFiled: false, mergedClosingPr: false }),
+    };
+    const backend = createGithubQueueBackend({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1', blockedParks });
+    expect(await backend.pollBlockedParks()).toEqual([{ issue: 5, outcome: 'skipped', detail: 'no park comment' }]);
   });
 });
