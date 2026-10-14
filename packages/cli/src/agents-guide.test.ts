@@ -67,8 +67,10 @@ function matrixIds(lines: string[]): string[] | undefined {
 function sectionAt(lines: string[], start: number): string {
   const depth = (/^(#+)/.exec(lines[start] ?? '')?.[1] ?? '').length;
   let end = start + 1;
+  let inFence = false;
   while (end < lines.length) {
-    const m = /^(#{1,6})\s+/.exec(lines[end] ?? '');
+    if ((lines[end] ?? '').startsWith('```')) inFence = !inFence;
+    const m = inFence ? null : /^(#{1,6})\s+/.exec(lines[end] ?? '');
     if (m && (m[1] ?? '').length <= depth) break;
     end++;
   }
@@ -111,6 +113,40 @@ function recipeProblems(text: string, name = GUIDE): string[] {
     if (versionTested(section) === '') problems.push(`${name} Recipe: ${recipe} has no Version tested line`);
   }
   return problems;
+}
+
+function withRepoConfig<T>(yaml: string, prefix: string, fn: (repo: ReturnType<typeof loadRepoConfig>) => T): T {
+  const savedRunConfig = process.env.FACTORY_RUN_CONFIG_JSON;
+  delete process.env.FACTORY_RUN_CONFIG_JSON;
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  try {
+    mkdirSync(join(dir, '.factory'));
+    writeFileSync(join(dir, '.factory', 'config.yaml'), yaml);
+    return fn(loadRepoConfig(dir));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    if (savedRunConfig === undefined) delete process.env.FACTORY_RUN_CONFIG_JSON;
+    else process.env.FACTORY_RUN_CONFIG_JSON = savedRunConfig;
+  }
+}
+
+function byoProblems(section: string): string[] {
+  const parts: Array<[string, boolean]> = [
+    ['harnesses:', section.includes('harnesses:')],
+    ['factory doctor', section.includes('factory doctor')],
+    ['factory harness check', section.includes('factory harness check')],
+    ['factory run', section.includes('factory run')],
+    ['output: jsonl-last-message', section.includes('output: jsonl-last-message')],
+    ['a link to harness-contract.md', /\]\([^)]*harness-contract\.md[^)]*\)/.test(section)],
+    [
+      'an issue template link (issues/new/choose or issues/new?template=<file> that exists)',
+      section.includes('issues/new/choose') ||
+        [...section.matchAll(/issues\/new\?template=([^)\s&]+)/g)].some((m) =>
+          existsSync(join(repoRoot, '.github', 'ISSUE_TEMPLATE', m[1] ?? '')),
+        ),
+    ],
+  ];
+  return parts.filter(([, ok]) => !ok).map(([what]) => `Bring your own agent section is missing ${what}`);
 }
 
 function agentsGuideProblems(text: string | undefined, harnessIds: readonly string[], name = GUIDE): string[] {
@@ -224,6 +260,18 @@ describe('docs/agents.md guard self-test', () => {
     ]);
   });
 
+  it('names a Bring your own agent section missing the harness check step', () => {
+    const section = [
+      'harnesses:',
+      'factory doctor',
+      'factory run',
+      'output: jsonl-last-message',
+      '[contract](harness-contract.md)',
+      'https://github.com/on-par/software-factory/issues/new/choose',
+    ].join('\n');
+    expect(byoProblems(section)).toEqual(['Bring your own agent section is missing factory harness check']);
+  });
+
   it('reports a guide with no harness matrix', () => {
     const stub = '# Coding agent setup\n\nThe per-provider sections are tracked in #2408.\n';
     expect(agentsGuideProblems(stub, KNOWN_HARNESS_IDS)).toContain(
@@ -275,36 +323,25 @@ describe('docs/agents.md supported agents guide', () => {
   it('every recipe loads as a .factory/config.yaml and pins only known models, with versions matching the provider sections', () => {
     const lines = (guideText ?? '').split('\n');
     const problems: string[] = [];
-    const savedRunConfig = process.env.FACTORY_RUN_CONFIG_JSON;
-    delete process.env.FACTORY_RUN_CONFIG_JSON;
-    try {
-      for (const recipe of RECIPES) {
-        const yaml = yamlBlocks(recipeSection(lines, recipe) ?? '')[0];
-        if (yaml === undefined) {
-          problems.push(`${recipe}: no yaml block`);
-          continue;
-        }
-        const dir = mkdtempSync(join(tmpdir(), 'agents-recipe-'));
-        try {
-          mkdirSync(join(dir, '.factory'));
-          writeFileSync(join(dir, '.factory', 'config.yaml'), yaml);
-          const repo = loadRepoConfig(dir);
+    for (const recipe of RECIPES) {
+      const yaml = yamlBlocks(recipeSection(lines, recipe) ?? '')[0];
+      if (yaml === undefined) {
+        problems.push(`${recipe}: no yaml block`);
+        continue;
+      }
+      try {
+        withRepoConfig(yaml, 'agents-recipe-', (repo) => {
           if (repo?.version !== 2) {
             problems.push(`${recipe}: expected a version 2 config`);
-            continue;
+            return;
           }
           const applied = applyRepoConfig(loadModelsConfig(), repo);
           for (const id of Object.values(repo.models?.pins ?? {}))
             if (typeof id === 'string' && !(id in applied.models)) problems.push(`${recipe} pins unknown model ${id}`);
-        } catch (err) {
-          problems.push(`${recipe}: ${err instanceof Error ? err.message : String(err)}`);
-        } finally {
-          rmSync(dir, { recursive: true, force: true });
-        }
+        });
+      } catch (err) {
+        problems.push(`${recipe}: ${err instanceof Error ? err.message : String(err)}`);
       }
-    } finally {
-      if (savedRunConfig === undefined) delete process.env.FACTORY_RUN_CONFIG_JSON;
-      else process.env.FACTORY_RUN_CONFIG_JSON = savedRunConfig;
     }
     const expectations: ReadonlyArray<[(typeof PROVIDERS)[number], (typeof RECIPES)[number][]]> = [
       ['Claude Code', ['Claude-only', 'Mixed']],
@@ -321,37 +358,69 @@ describe('docs/agents.md supported agents guide', () => {
     expect(problems).toEqual([]);
   });
 
-  it('add-your-own-agent section covers the command harness, contract doc, contract kit and issue template, and relative links resolve', () => {
+  it('Bring your own agent section names every step and links harness-contract.md, and relative links resolve', () => {
     const text = guideText ?? '';
     const lines = text.split('\n');
-    const start = headingIndex(lines, (h) => h === 'add your own agent');
+    const start = headingIndex(lines, (h) => h === 'bring your own agent');
     const problems: string[] = [];
-    if (start < 0) {
-      problems.push('no Add your own agent section');
-    } else {
-      const section = sectionAt(lines, start);
-      const parts: Array<[string, boolean]> = [
-        ['a harnesses declaration', section.includes('harnesses')],
-        ['the command harness', section.includes('"command"') || section.includes('command:')],
-        ['a link to harness-contract.md', /\]\([^)]*harness-contract\.md[^)]*\)/.test(section)],
-        ['codingHarnessContractCases', section.includes('codingHarnessContractCases')],
-        ['the contract kit command (npx vitest run)', section.includes('npx vitest run')],
-        [
-          'an issue template link (issues/new/choose or issues/new?template=<file> that exists)',
-          section.includes('issues/new/choose') ||
-            [...section.matchAll(/issues\/new\?template=([^)\s&]+)/g)].some((m) =>
-              existsSync(join(repoRoot, '.github', 'ISSUE_TEMPLATE', m[1] ?? '')),
-            ),
-        ],
-      ];
-      for (const [what, ok] of parts) if (!ok) problems.push(`Add your own agent section is missing ${what}`);
-    }
+    if (start < 0) problems.push('no Bring your own agent section');
+    else problems.push(...byoProblems(sectionAt(lines, start)));
+    if (headingIndex(lines, (h) => h === 'add your own agent') >= 0)
+      problems.push('stale Add your own agent section remains');
     for (const m of text.matchAll(/\]\(([^)\s]+)\)/g)) {
       const target = m[1] ?? '';
       if (/^(https?:|mailto:|#)/.test(target)) continue;
       const path = target.split('#')[0] ?? '';
       if (!existsSync(resolve(dirname(guidePath), path))) problems.push(`broken relative link ${target}`);
     }
+    expect(problems).toEqual([]);
+  });
+
+  it('Bring your own agent yaml loads as a .factory/config.yaml, declares a harness and pins plan, build and checker to known models', () => {
+    const lines = (guideText ?? '').split('\n');
+    const start = headingIndex(lines, (h) => h === 'bring your own agent');
+    const blocks = start < 0 ? [] : yamlBlocks(sectionAt(lines, start));
+    const problems: string[] = [];
+    if (blocks.length !== 1)
+      problems.push(`Bring your own agent must have exactly one yaml block, found ${blocks.length}`);
+    else {
+      try {
+        withRepoConfig(blocks[0] ?? '', 'agents-byo-', (repo) => {
+          if (repo?.version !== 2) problems.push('expected a version 2 config');
+          const declared = Object.keys(repo?.harnesses ?? {});
+          if (declared.length === 0) problems.push('declares no harness under harnesses');
+          const applied = applyRepoConfig(loadModelsConfig(), repo);
+          for (const id of declared) if (!(id in (applied.harnesses ?? {}))) problems.push(`harness ${id} not applied`);
+          for (const pin of ['plan', 'build', 'checker']) {
+            const model = repo?.models?.pins?.[pin as 'plan'];
+            if (typeof model !== 'string') problems.push(`no ${pin} pin`);
+            else if (!(model in applied.models)) problems.push(`${pin} pins unknown model ${model}`);
+          }
+        });
+      } catch (err) {
+        problems.push(err instanceof Error ? err.message : String(err));
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('matrix command row Phases cell names build_command and agentic true', () => {
+    const lines = (guideText ?? '').split('\n');
+    const start = lines.findIndex((l) => l.trim().startsWith('|') && cellsOf(l).some((c) => /^harness id$/i.test(c)));
+    const table: string[] = [];
+    for (let i = start; start >= 0 && i < lines.length && (lines[i] ?? '').trim().startsWith('|'); i++)
+      table.push(lines[i] ?? '');
+    const header = cellsOf(table[0] ?? '');
+    const idCol = header.findIndex((c) => /^harness id$/i.test(c));
+    const phasesCol = header.findIndex((c) => /^phases$/i.test(c));
+    const row = table
+      .slice(1)
+      .map(cellsOf)
+      .find((cells) => (cells[idCol] ?? '').replace(/`/g, '').trim() === 'command');
+    const cell = row?.[phasesCol] ?? '';
+    const problems: string[] = [];
+    if (!cell.includes('build_command')) problems.push('command Phases cell does not name build_command');
+    if (!cell.includes('agentic: true')) problems.push('command Phases cell does not say agentic: true');
     expect(problems).toEqual([]);
   });
 

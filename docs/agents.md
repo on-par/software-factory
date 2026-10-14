@@ -2,8 +2,8 @@
 
 This guide covers installing, signing in and configuring each supported coding agent CLI
 (Claude Code, Codex and OpenCode) for the factory. See [models.md](models.md) for model routing
-and [harness-contract.md](harness-contract.md) for the adapter contract. To declare your own CLI,
-see "Declaring a custom harness" in [models.md](models.md).
+and [harness-contract.md](harness-contract.md) for the adapter contract. To bring your own CLI,
+see [Bring your own agent](#bring-your-own-agent).
 
 ## Harness matrix
 
@@ -15,7 +15,7 @@ see "Declaring a custom harness" in [models.md](models.md).
 | Ollama (prompt-only)         | `ollama-http`          | Ollama server running locally, no login                                                     | PLAN, CHECK, review, triage; not BUILD (not agentic)                                              | No, it makes no file edits                                                                 | Not reported                                                                    | `classifyFailure` on the HTTP status and body                       | Contract tests in the required `ci` check                                    | `experimental` |
 | Ollama (agentic)             | `ollama-agentic`       | Ollama server running locally, no login                                                     | BUILD plus the other phases (agentic)                                                             | No                                                                                         | Not reported                                                                    | `classifyFailure`                                                   | Contract tests in the required `ci` check                                    | `experimental` |
 | Ollama (command-loop worker) | `ollama-command-agent` | Ollama server running locally, no login                                                     | BUILD (internal adapter in the model executor)                                                    | No                                                                                         | Not reported                                                                    | Router `classifyFailure` on the error text and exit code            | None, it is not extracted into a coding harness                              | `experimental` |
-| Declared custom harness      | `command`              | Your CLI on PATH, declared under `harnesses:` with an optional `probe`                      | Any phase, through the declared `agentic` setting                                                 | Yes, the command is wrapped in the outer sandbox                                           | `usage: jsonl` or none                                                          | Declared `errorPatterns`, then `classifyFailure`                    | Contract tests in the required `ci` check                                    | `supported`    |
+| Declared custom harness      | `command`              | Your CLI on PATH, declared under `harnesses:` with an optional `probe`                      | PLAN, CHECK, review, triage; BUILD (`build_command`) only when declared `agentic: true`           | Yes, the command is wrapped in the outer sandbox                                           | `usage: jsonl` or none                                                          | Declared `errorPatterns`, then `classifyFailure`                    | Contract tests in the required `ci` check                                    | `supported`    |
 
 ## Claude Code
 
@@ -199,34 +199,29 @@ route: codex
 
 Version tested: 2.1.296 (Claude Code), codex-cli 0.155.1, ollama (version not recorded, see the local Ollama recipe)
 
-## Add your own agent
+## Bring your own agent
 
 Any CLI that reads a prompt and edits the worktree can run through the built-in `command` harness. No code
-change is needed: you declare the command, then point a model at it.
+change is needed: you declare the command, point a model at it, pin the model and check it. The field
+reference is "Declaring a custom harness" in [models.md](models.md). The contract is in
+[harness-contract.md](harness-contract.md).
 
-Declare the harness under `harnesses` in the models config. See "Declaring a custom harness" in
-[models.md](models.md) for every field.
+### 1. Declare the harness and a model
 
-```json
-{
-  "harnesses": {
-    "my-agent": {
-      "command": "my-agent",
-      "prompt": "stdin",
-      "output": "stdout",
-      "agentic": true,
-      "usage": "none",
-      "errorPatterns": { "rate_limit": "429|rate limit" },
-      "probe": "my-agent --version"
-    }
-  }
-}
-```
-
-Then register a model on it and pin it in `.factory/config.yaml`:
+Put the harness, a model on it and the pins in one `.factory/config.yaml`:
 
 ```yaml
 version: 2
+harnesses:
+  my-agent:
+    command: ./scripts/my-agent.sh
+    prompt: stdin
+    output: jsonl-last-message
+    agentic: true
+    usage: none
+    errorPatterns:
+      rate_limit: '429|rate limit'
+    probe: my-agent --version
 models:
   registry:
     my-agent-model:
@@ -236,25 +231,50 @@ models:
       costPerMtokInput: 0
       costPerMtokOutput: 0
       contextWindow: 200000
-      capabilities: [code]
+      capabilities: [implementation]
       envKey: null
   pins:
+    plan: my-agent-model
     build: my-agent-model
+    checker: my-agent-model
 ```
 
-`factory doctor` runs the `probe` command and reports the harness as available or unavailable.
-See [harness-contract.md](harness-contract.md) for the inputs, outputs and failure classification.
+Leave `route` unset; the factory derives `command` from the build pin.
 
-### Run the contract kit
-
-Implement `HarnessContractScenarios` and register `codingHarnessContractCases(...)` from
-`@on-par/factory-core/testing` in a vitest file, then run:
+The command can be a small wrapper that reads the prompt on stdin, runs the agent in the worktree (the
+working directory) and prints one JSON line per message. For example, `scripts/my-agent.sh`:
 
 ```bash
-npx vitest run packages/core/src/harness
+#!/usr/bin/env bash
+# Read the prompt on stdin, run the agent in the worktree (cwd), print one JSON line per message.
+set -euo pipefail
+prompt=$(cat)
+reply=$(my-agent --non-interactive "$prompt")
+jq -cn --arg text "$reply" '{type: "message", text: $text}'
 ```
 
-`packages/core/src/harness/command.test.ts` is the worked example.
+With `output: jsonl-last-message` the factory returns the text of the last JSON line that carries `text`,
+`result`, `message` or `content`, so progress lines before it are ignored.
+
+### 2. Pin plan, build and checker
+
+The `pins` in the block above send PLAN, BUILD and CHECK to your model. BUILD needs `agentic: true`; a
+non-agentic build pin is refused when config loads. BUILD runs the `build_command` task and leaves commits
+only. SHIP publishes.
+
+### 3. Run `factory doctor`
+
+`factory doctor` runs the `probe` command and reports the harness as available, unavailable or unverified.
+It counts an agentic declared harness as the coding agent when the first word of `command` is on PATH.
+
+### 4. Run `factory harness check my-agent`
+
+`factory harness check my-agent` runs the contract scenarios against your declared CLI and reports pass or
+fail per scenario. See [Testing a harness](harness-contract.md#testing-a-harness).
+
+### 5. Run `factory run`
+
+Start the factory with `factory run`. PLAN, BUILD and CHECK use the pinned model on your harness.
 
 ### Request support instead
 
