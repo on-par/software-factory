@@ -83,7 +83,9 @@ Every other case keeps Claude gating, including an unpinned plan, a Claude plan 
 
 ## Testing a harness
 
-Implement `HarnessContractScenarios` (`success`, `timeout`, `emptyOutput`, `failure`), each returning the harness under test plus optional request overrides. Register `codingHarnessContractCases(...)` in a vitest file; the existing `packages/core/src/harness/*.test.ts` files show examples. Run them with:
+To test a CLI declared under `harnesses:`, run `factory harness check <id>`. No code is needed (see [Bring your own agent](./agents.md#bring-your-own-agent)).
+
+For an in-repo adapter, implement `HarnessContractScenarios` (`success`, `timeout`, `emptyOutput`, `failure`), each returning the harness under test plus optional request overrides. Register `codingHarnessContractCases(...)` in a vitest file; the existing `packages/core/src/harness/*.test.ts` files show examples. Run them with:
 
 ```bash
 npx vitest run packages/core/src/harness
