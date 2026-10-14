@@ -189,3 +189,16 @@ export function recordUpdateCheck(
   log(formatUpdateCheckLine(next));
   return next;
 }
+
+/** Records a manual `self-update --to` outcome (#2933). No file (or an invalid one) → null, nothing written. */
+export function recordUpdateResult(file: string, result: UpdateLastResult): UpdateState | null {
+  const state = readUpdateState(file);
+  if (!state) return null;
+  const next: UpdateState = { ...state, lastResult: result };
+  if (result.outcome === 'updated') {
+    next.current = result.version;
+    if (state.available === result.version) next.available = null;
+  }
+  writeUpdateState(file, next);
+  return next;
+}

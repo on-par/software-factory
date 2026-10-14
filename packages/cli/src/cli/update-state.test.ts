@@ -9,6 +9,7 @@ import {
   initialUpdateState,
   readUpdateState,
   recordUpdateCheck,
+  recordUpdateResult,
   updateStatePath,
   writeUpdateState,
   type UpdateState,
@@ -189,5 +190,33 @@ describe('recordUpdateCheck', () => {
     const lines: string[] = [];
     expect(recordUpdateCheck(file, { at: 't', available: null }, (l) => lines.push(l))).toBeNull();
     expect(lines).toEqual([]);
+  });
+});
+
+describe('recordUpdateResult', () => {
+  it('returns null and writes nothing without a state file', () => {
+    const r = { at: 't', version: '0.9.1', outcome: 'updated' as const };
+    expect(recordUpdateResult(file, r)).toBeNull();
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it('an updated result bumps current and clears a matching available', () => {
+    writeUpdateState(file, state({ available: '0.9.1' }));
+    const r = { at: 't', version: '0.9.1', outcome: 'updated' as const };
+    expect(recordUpdateResult(file, r)).toMatchObject({ current: '0.9.1', available: null, lastResult: r });
+    expect(readUpdateState(file)).toMatchObject({ current: '0.9.1', available: null, lastResult: r });
+  });
+
+  it('an updated result keeps a different available', () => {
+    writeUpdateState(file, state({ available: '0.9.2' }));
+    recordUpdateResult(file, { at: 't', version: '0.9.1', outcome: 'updated' });
+    expect(readUpdateState(file)).toMatchObject({ current: '0.9.1', available: '0.9.2' });
+  });
+
+  it('rolled-back keeps current and available and stores the error', () => {
+    writeUpdateState(file, state({ available: '0.9.1' }));
+    const r = { at: 't', version: '0.9.1', outcome: 'rolled-back' as const, error: 'doctor failed' };
+    recordUpdateResult(file, r);
+    expect(readUpdateState(file)).toMatchObject({ current: '0.9.0', available: '0.9.1', lastResult: r });
   });
 });

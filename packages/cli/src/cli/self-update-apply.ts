@@ -2,11 +2,18 @@
 import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 
-import { defaultRegistryPath, listRepos, loadRegistry, readRunLockHolder } from '@on-par/factory-core/internal';
+import {
+  daemonRuntimePaths,
+  defaultRegistryPath,
+  listRepos,
+  loadRegistry,
+  readRunLockHolder,
+} from '@on-par/factory-core/internal';
 import { defaultIsPidAlive, getFactoryPaths } from '@on-par/factory-core';
 
 import { detectInstall, type InstallKind } from './daemon.js';
 import { EXIT_UP_TO_DATE, PACKAGE_NAME, parseSemver, type SelfUpdateDeps } from './self-update.js';
+import { recordUpdateResult, updateStatePath, type UpdateOutcome } from './update-state.js';
 
 // ---------------------------------------------------------------------------
 // factory self-update --to <version> (#2355)
@@ -243,8 +250,27 @@ export function formatApplyResult(r: SelfUpdateApplyResult): string {
   }
 }
 
+/** Outcomes a manual run records in update-state lastResult (#2933); nothing was installed for the rest. */
+const RECORDED_OUTCOMES: ReadonlySet<ApplyOutcome> = new Set(['updated', 'rolled-back', 'failed']);
+
 export async function cmdSelfUpdateApply(opts: SelfUpdateApplyOpts, deps: SelfUpdateApplyDeps = {}): Promise<number> {
   const { code, result } = await applySelfUpdate(opts, deps);
+  // factoryd (--no-restart) records its own result in runAutoUpdateCycle
+  if (opts.restart !== false && RECORDED_OUTCOMES.has(result.outcome)) {
+    const file = deps.updateStateFile === undefined ? updateStatePath(daemonRuntimePaths().dir) : deps.updateStateFile;
+    if (file !== null) {
+      try {
+        recordUpdateResult(file, {
+          at: (deps.now ?? (() => new Date()))().toISOString(),
+          version: result.to,
+          outcome: result.outcome as UpdateOutcome,
+          ...(result.error ? { error: result.error } : {}),
+        });
+      } catch {
+        // best-effort: recording must never change the apply's exit code or output
+      }
+    }
+  }
   (deps.out ?? process.stdout).write(opts.json ? `${JSON.stringify(result)}\n` : `${formatApplyResult(result)}\n`);
   return code;
 }
