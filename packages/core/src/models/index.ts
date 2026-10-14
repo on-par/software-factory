@@ -17,6 +17,7 @@ import {
   localAuthFailureSinceLogin,
 } from '../utils/local-auth-record.js';
 import { hasOpencodeLoginEvidence } from '../utils/opencode-config.js';
+import { applyZdrReview } from './zdr-review.js';
 
 export class ModelRegistry {
   constructor(private config: ModelsConfig) {
@@ -289,6 +290,7 @@ export interface DoctorProbes {
   /** Runs a declared harness `probe` command; returns null on exit 0, else a failure detail.
    *  Default: runHarnessProbe. */
   harnessProbe?: (cmd: string) => string | null;
+  now?: () => Date; // clock for the ZDR review-date check (#2897). Default: new Date().
 }
 
 export interface ModelDiagnosis {
@@ -492,7 +494,7 @@ export function diagnoseModels(
         }
       }
     }
-
-    return { model: m, provider, tiers, reachable, unverified, experimental, reason };
+    const row = { model: m, provider, tiers, reachable, unverified, experimental, reason };
+    return applyZdrReview(row, registry.getProviderModel(m), probes.now);
   });
 }
