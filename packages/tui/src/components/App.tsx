@@ -125,7 +125,7 @@ export function App({
   staleThresholdMs = DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS,
 }: AppProps): JSX.Element {
   const { exit } = useApp();
-  const { stdout } = useStdout();
+  const { rows, columns } = useStdout().stdout as Partial<NodeJS.WriteStream>;
   const [state, setState] = useState<DashboardState>(initialDashboard());
   const [events, setEvents] = useState<FactoryEvent[]>([]);
   const [now, setNow] = useState(Date.now());
@@ -285,7 +285,7 @@ export function App({
 
   const runCosts = useMemo(() => summarizeRunCosts(costsRead.entries, state.lanes), [costsRead, state.lanes]);
   const costsCurrent = resolveCostsSelection(runCosts, state.lanes, costsSelectedIssue);
-  const logHeight = Math.max(5, (stdout?.rows ?? 24) - 4);
+  const logHeight = Math.max(5, (rows ?? 24) - 4);
   const visibleApprovals = pendingApprovals.filter((r) => !answered.has(r.id));
   const groups = lanesOf(activeState);
   const clampedLane = Math.min(laneIndex, Math.max(0, groups.length - 1));
@@ -547,7 +547,7 @@ export function App({
           lanes={state.lanes}
           selectedIssue={costsCurrent}
           expanded={costsExpanded}
-          width={stdout?.columns ?? 100}
+          width={columns ?? 100}
         />
       )}
       {tab === 'log' && <LogTab events={events} scroll={logScroll} height={logHeight} />}
