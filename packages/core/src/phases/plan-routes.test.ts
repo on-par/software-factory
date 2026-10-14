@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
+import { buildPlanPrompt } from './plan.js';
 import { resolveReworkRoute, resolveRunnableBuildRoute, runnableBuildRoutes } from './plan-routes.js';
 
 const base: ModelsConfig = {
@@ -124,5 +125,37 @@ describe('resolveReworkRoute', () => {
     const rerouted = resolveReworkRoute(router, 'opencode', 'x');
     expect(rerouted.rerouted).toBe(true);
     expect(rerouted.modelOverride).toBeUndefined();
+  });
+});
+
+describe('command route offering (#2874)', () => {
+  const promptWith = (runnableRoutes?: ReturnType<typeof runnableBuildRoutes>) =>
+    buildPlanPrompt({
+      issue: 1,
+      issueTitle: 't',
+      issueBody: 'b',
+      specPath: '/s.md',
+      constitutionCtx: '',
+      runnableRoutes,
+    });
+
+  it('reports command last only when build_command is runnable', () => {
+    expect(runnableBuildRoutes(makeRouter(declared)).at(-1)).toBe('command');
+    expect(runnableBuildRoutes(makeRouter(undeclared))).not.toContain('command');
+  });
+
+  it('offers the command bullet when a declared agentic worker makes build_command runnable', () => {
+    expect(promptWith(runnableBuildRoutes(makeRouter(declared)))).toContain('route: command —');
+  });
+
+  it('hides the command bullet when no declared agentic harness can run build_command', () => {
+    expect(promptWith(runnableBuildRoutes(makeRouter(undeclared)))).not.toContain('route: command');
+    expect(promptWith()).not.toContain('route: command');
+  });
+
+  it('offers command without a runnable note when it is runnable alongside every CLI route', () => {
+    const prompt = promptWith(['claude', 'codex', 'opencode', 'command']);
+    expect(prompt).toContain('route: command —');
+    expect(prompt).not.toContain('Only these routes can run');
   });
 });

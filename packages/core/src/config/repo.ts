@@ -71,10 +71,10 @@ export const RepoFactoryConfigV1Schema = z
       })
       .strict()
       .optional(),
-    /** Repo pins the build route for every issue (e.g. "opencode"). The plan
+    /** Repo pins the build route for every issue (e.g. "opencode", or "command" for a declared harness). The plan
      *  phase still writes the spec, but the pinned route wins over the model's
      *  route choice so deepseek workers are actually used when pinned. */
-    route: z.enum(['codex', 'claude', 'opencode']).optional(),
+    route: z.enum(['codex', 'claude', 'opencode', 'command']).optional(),
   })
   .strict();
 
@@ -222,14 +222,14 @@ export const RepoFactoryConfigV2Schema = z
       .strict()
       .optional()
       .describe('Review floor rules for the PR classifier. Unset keys use the packaged floor rules.'),
-    /** Repo pins the build route for every issue (e.g. "opencode"). The plan
+    /** Repo pins the build route for every issue (e.g. "opencode", or "command" for a declared harness). The plan
      *  phase still writes the spec, but the pinned route wins over the model's
      *  route choice so deepseek workers are actually used when pinned. */
     route: z
-      .enum(['codex', 'claude', 'opencode'])
+      .enum(['codex', 'claude', 'opencode', 'command'])
       .optional()
       .describe(
-        'Build route for every issue: "codex", "claude", or "opencode". ' +
+        'Build route for every issue: "codex", "claude", "opencode", or "command" (a declared agentic harness under `harnesses`). ' +
           "Unset: derived from the build pin's harness, else PLAN decides per issue.",
       ),
   })
