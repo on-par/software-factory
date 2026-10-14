@@ -8,9 +8,8 @@ import * as internalApi from './internal.js';
 import * as kpisApi from './kpis-entry.js';
 import * as testingApi from './testing.js';
 // Pins the exact export surface of each @on-par/factory-core entry point
-// (ADR-0004). Object.keys(...) only reflects runtime values — type-only
-// exports (export type ...) don't appear at runtime, so these allowlists
-// list value exports only.
+// (ADR-0004). Object.keys(...) only reflects runtime values, so these
+// allowlists list value exports only.
 
 const PUBLIC_API_KEYS = [
   // Config
@@ -329,6 +328,7 @@ const PUBLIC_API_KEYS = [
 ];
 
 const INTERNAL_API_KEYS = [
+  'openCodeVersion',
   'DEFAULT_CI_DEADLINE_MS',
   'DEFAULT_CI_NO_CHECKS_GRACE_MS',
   'resolveCiNoChecksGraceMs',

@@ -149,11 +149,11 @@ export type { OllamaFetchFn } from './harness/ollama-http.js';
 export { OllamaHttpHarness } from './harness/ollama-http.js';
 export type { OpenCodeExecFn } from './harness/opencode.js';
 export { OpenCodeHarness } from './harness/opencode.js';
+export * as openCodeVersion from './harness/opencode-version.js';
 export type { DockerEngineOptions } from './hosted/docker.js';
 export { createDockerEngine } from './hosted/docker.js';
 export type { OrphanContainer, ReapedContainer } from './hosted/orphans.js';
 export { listOrphanContainers, reapOrphanContainers } from './hosted/orphans.js';
-
 // Router
 export { harnessCliCommand } from './harness/catalog.js';
 export { isHarnessCliPresent } from './models/index.js';
