@@ -90,6 +90,13 @@ models:
 route: opencode
 ```
 
+### Effort
+
+`models.efforts` for an OpenCode model is passed as `--variant <effort>` on OpenCode 1.x, and as
+`--model '<provider/model>#<effort>'` on 2.x. The factory reads `opencode --version` once per run
+process; when the version is unknown it uses the 1.x form. On 2.x a model with no `providerModel`
+runs without effort.
+
 ### Verify with `factory doctor`
 
 Run `factory doctor` in the repo. The `coding agent` line lists `opencode`, and the `OpenCode` section
