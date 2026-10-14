@@ -19,11 +19,12 @@ import { applySteering, type ConsumedSteering } from '../steering/index.js';
 import type { Constitution, FailoverReason } from '../types/index.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE } from '../utils/untrusted-input.js';
+import type { BuildRoutePin } from '../config/repo.js';
 
 export interface BuildResult {
   ok: boolean;
   model: string;
-  route: 'codex' | 'claude' | 'opencode' | 'command';
+  route: BuildRoutePin;
   escalate?: string;
   /** Set on a non-escalation build failure; 'no_diff' = worker produced no diff,
    *  'junk_only_diff' = worker changed only generated/cache files. */
@@ -66,7 +67,7 @@ async function buildPhaseImpl(opts: {
   specPath: string;
   branch: string;
   constitution: Constitution | null;
-  route: 'codex' | 'claude' | 'opencode' | 'command';
+  route: BuildRoutePin;
   router: ModelRouter;
   log: (
     type: EventKind,

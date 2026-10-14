@@ -14,6 +14,7 @@ import { buildPhase } from './build.js';
 import { checkPhase } from './check.js';
 import { planPhase } from './plan.js';
 import { shipPhase } from './ship.js';
+import { reworkRouteFor } from '../run/outcome.js';
 
 const AGENTS: Record<string, { model: string; cmd: string }> = {
   codex: { model: 'gpt-5.6-terra-medium', cmd: 'codex' },
@@ -96,7 +97,7 @@ describe.skipIf(!selected)(`real ${agent} CLI full loop (#2649)`, () => {
         router,
         constitution: null,
         log,
-        reworkRoute: build.route === 'command' ? undefined : build.route,
+        ...reworkRouteFor(build.route, undefined),
       });
       expect(check.passed).toBe(true);
 

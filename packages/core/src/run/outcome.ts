@@ -5,7 +5,9 @@ export type ParkReason = Extract<
   'escalate' | 'timeout' | 'fail' | 'conflict' | 'ci-failed' | 'ci-infra' | 'held' | 'config' | 'blocked'
 >;
 
-export type BuildRoute = 'codex' | 'claude' | 'opencode' | 'command';
+import type { BuildRoutePin } from '../config/repo.js';
+
+export type BuildRoute = BuildRoutePin;
 
 /** CHECK/CI rework cannot run on the command route yet (byo-05): a command build reworks on the
  *  claude route's default worker, since its model would not fit build_claude. */

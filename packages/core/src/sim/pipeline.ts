@@ -31,6 +31,7 @@ import { type SimModelCall, SimModelExecutor, type SimModelExecutorOptions, type
 import { asPhaseOctokit, createSimOctokit, type SimOctokitOptions, type SimRecordedCall } from './octokit.js';
 import type { SimPhaseName, SimTerminalState } from './types.js';
 import { createSimWorkspace, simCommitAll, type SimWorkspace } from './workspace.js';
+import type { BuildRoutePin } from '../config/repo.js';
 
 export interface SimPipelineEvent {
   phase: SimPhaseName;
@@ -65,7 +66,7 @@ export interface SimIssueOutcome {
   state: SimTerminalState;
   /** The phase the run ended in. 'ship' for a shipped run. */
   phase: SimPhaseName;
-  route: 'codex' | 'claude' | 'opencode' | 'command';
+  route: BuildRoutePin;
   branch: string;
   prNumber?: number;
   reworkRounds: number;
@@ -301,7 +302,7 @@ async function runSimIssue(
     effective: { localOnly: false, allowExperimental: false, codexDisabled: false, branchPrefix: 'ship-it' },
   };
   const router = new ModelRouter(policy.models, policy.routes, false, routedExecutor);
-  let route: 'codex' | 'claude' | 'opencode' | 'command' = 'claude';
+  let route: BuildRoutePin = 'claude';
   let reworkRounds = 0;
   let designArtifact: DesignArtifact | null = null;
 
