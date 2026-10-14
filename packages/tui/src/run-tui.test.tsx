@@ -59,6 +59,7 @@ describe('runTui', () => {
       waitUntilExit,
       cleanup: vi.fn(),
       clear: vi.fn(),
+      waitUntilRenderFlush: vi.fn().mockResolvedValue(undefined),
     }));
     const followPlainFn = vi.fn(() => vi.fn());
 
@@ -80,6 +81,7 @@ describe('runTui', () => {
       waitUntilExit,
       cleanup: vi.fn(),
       clear: vi.fn(),
+      waitUntilRenderFlush: vi.fn().mockResolvedValue(undefined),
     }));
     const followPlainFn = vi.fn(() => vi.fn());
 
@@ -106,6 +108,7 @@ describe('runTui', () => {
       waitUntilExit,
       cleanup: vi.fn(),
       clear: vi.fn(),
+      waitUntilRenderFlush: vi.fn().mockResolvedValue(undefined),
     }));
     const followPlainFn = vi.fn(() => vi.fn());
 
@@ -135,6 +138,7 @@ describe('runTui', () => {
       waitUntilExit,
       cleanup: vi.fn(),
       clear: vi.fn(),
+      waitUntilRenderFlush: vi.fn().mockResolvedValue(undefined),
     }));
     const followPlainFn = vi.fn(() => vi.fn());
 
@@ -160,6 +164,7 @@ describe('runTui', () => {
       waitUntilExit,
       cleanup: vi.fn(),
       clear: vi.fn(),
+      waitUntilRenderFlush: vi.fn().mockResolvedValue(undefined),
     }));
     const followPlainFn = vi.fn(() => vi.fn());
 
@@ -185,6 +190,7 @@ describe('runTui', () => {
       waitUntilExit,
       cleanup: vi.fn(),
       clear: vi.fn(),
+      waitUntilRenderFlush: vi.fn().mockResolvedValue(undefined),
     }));
     const followPlainFn = vi.fn(() => vi.fn());
 

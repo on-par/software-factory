@@ -53,6 +53,12 @@ const flush = async () => {
   await new Promise((resolve) => setImmediate(resolve));
 };
 
+// ink 7 holds a lone Escape byte for ~20ms (to tell it from the start of a sequence) before delivering it.
+const flushEscape = async () => {
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  await flush();
+};
+
 describe('App', () => {
   it('shows a waiting message before any events arrive', () => {
     const { follow } = makeFakeFollow();
@@ -211,7 +217,7 @@ describe('App', () => {
     expect(detailFrame).toContain('esc back · q quit');
 
     stdin.write(''); // escape
-    await flush();
+    await flushEscape();
 
     const dashboardFrame = lastFrame() ?? '';
     expect(dashboardFrame).toContain('lane default');
@@ -412,7 +418,7 @@ describe('App', () => {
     expect(lastFrame()).toContain('per-model — #296');
 
     stdin.write('\u001b');
-    await flush();
+    await flushEscape();
     expect(lastFrame()).not.toContain('per-model —');
   });
 
@@ -593,7 +599,7 @@ describe('App lane drill-down (#1743)', () => {
     expect(frame).not.toContain('#1706');
 
     stdin.write(esc);
-    await flush();
+    await flushEscape();
     await flush();
     frame = lastFrame() ?? '';
     expect(frame).toContain('open lane');
@@ -611,7 +617,7 @@ describe('App lane drill-down (#1743)', () => {
     await flush();
     expect(lastFrame()).toContain('esc back · q quit');
     stdin.write(esc);
-    await flush();
+    await flushEscape();
     await flush();
     expect(lastFrame()).toContain('lane prefix');
     expect(lastFrame()).not.toContain('esc back · q quit');
@@ -792,7 +798,7 @@ describe('App approvals', () => {
     expect(lastFrame()).toContain('deny reason');
 
     stdin.write('\x1B'); // escape
-    await flush();
+    await flushEscape();
 
     expect(lastFrame()).toContain('y approve · n deny');
     expect(respondFn).not.toHaveBeenCalled();
@@ -891,6 +897,34 @@ describe('App steering composer', () => {
     expect(lastFrame()).not.toContain('Steer issue #296');
   });
 
+  it('Backspace deletes the last composer character', async () => {
+    const fake = makeFakeFollow();
+    const queueSteeringFn = vi.fn();
+    const { stdin } = render(
+      <App
+        eventsFile="ignored"
+        follow={fake.follow}
+        steeringDir="/repo/.factory/steering"
+        queueSteeringFn={queueSteeringFn}
+      />,
+    );
+    fake.push(ev('plan', 'Starting plan phase', '296'));
+    await flush();
+
+    stdin.write('i');
+    await flush();
+    stdin.write('abc');
+    await flush();
+    await flush();
+    stdin.write('\x7f'); // physical Backspace (ink 7: key.backspace)
+    await flush();
+    await flush();
+    stdin.write('\r');
+    await flush();
+
+    expect(queueSteeringFn).toHaveBeenCalledWith('/repo/.factory/steering', 296, 'ab');
+  });
+
   it('Escape closes the composer without sending', async () => {
     const fake = makeFakeFollow();
     const queueSteeringFn = vi.fn();
@@ -910,7 +944,7 @@ describe('App steering composer', () => {
     stdin.write('some text');
     await flush();
     stdin.write('\x1B'); // escape
-    await flush();
+    await flushEscape();
 
     expect(queueSteeringFn).not.toHaveBeenCalled();
     expect(lastFrame()).not.toContain('Steer issue #296');
