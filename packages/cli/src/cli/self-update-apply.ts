@@ -197,8 +197,15 @@ export async function applySelfUpdate(
 
 export function formatApplyResult(r: SelfUpdateApplyResult): string {
   switch (r.outcome) {
-    case 'updated':
-      return `factory updated ${r.from} → ${r.to}${r.restart === 'restarted' ? '; factoryd restarted' : r.restart === 'failed' ? '; factoryd restart failed — run `factory daemon start`' : ''}`;
+    case 'updated': {
+      let restartText = '';
+      if (r.restart === 'restarted') restartText = '; factoryd restarted';
+      else if (r.restart === 'failed') {
+        const detail = [...r.steps].reverse().find((s) => s.step === 'restart')?.detail;
+        restartText = `; factoryd restart failed${detail ? `: ${detail}` : ''} — run \`factory daemon start\``;
+      }
+      return `factory updated ${r.from} → ${r.to}${restartText}`;
+    }
     case 'up-to-date':
       return `factory ${r.from} is already ${r.to}`;
     case 'dry-run':

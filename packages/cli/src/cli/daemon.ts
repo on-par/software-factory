@@ -30,6 +30,7 @@ import {
 } from '@on-par/factory-core/internal';
 import { defaultIsPidAlive, getFactoryPaths } from '@on-par/factory-core';
 
+import { bootstrapFailureMessage, reloadLaunchAgent } from './daemon-launchctl.js';
 import { runSelfUpdateCommand } from './self-update-exec.js';
 import {
   initialUpdateState,
@@ -77,6 +78,8 @@ export interface DaemonCtlDeps {
   registryFile?: string;
   /** Follow-mode poll interval; tests pass ~10. Default 250. */
   pollMs?: number;
+  /** Default setTimeout-based sleep. Tests pass a no-op. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 /** Where a given home directory keeps the LaunchAgent plist and the daemon log. */
@@ -340,6 +343,7 @@ interface ResolvedDeps {
   cliScriptPath: string;
   registryFile: string;
   pollMs: number;
+  sleep: (ms: number) => Promise<void>;
 }
 
 function resolveDeps(deps: DaemonCtlDeps): ResolvedDeps {
@@ -353,6 +357,7 @@ function resolveDeps(deps: DaemonCtlDeps): ResolvedDeps {
     cliScriptPath: deps.cliScriptPath ?? realpathSync(process.argv[1] ?? ''),
     registryFile: deps.registryFile ?? defaultRegistryPath(),
     pollMs: deps.pollMs ?? 250,
+    sleep: deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms))),
   };
 }
 
@@ -364,7 +369,8 @@ function requireDarwin(platform: NodeJS.Platform): void {
 
 /** Install (or reinstall) and load the LaunchAgent. Always a full reinstall:
  *  regenerate the plist, bootout (ignoring failure — handles both "already
- *  loaded" and "not loaded"), then bootstrap into the gui domain so the daemon's
+ *  loaded" and "not loaded"), wait (bounded) for launchd to drop the job, then
+ *  bootstrap (retrying a transient EIO, #2922) into the gui domain so the daemon's
  *  Claude workers keep login-keychain access (docs/runbooks/macos-keychain-launchagent.md). */
 export async function cmdDaemonStart(deps: DaemonCtlDeps = {}): Promise<void> {
   const d = resolveDeps(deps);
@@ -375,13 +381,9 @@ export async function cmdDaemonStart(deps: DaemonCtlDeps = {}): Promise<void> {
   mkdirSync(dirname(logPath), { recursive: true });
   writeFileSync(plistPath, renderFactorydPlist({ nodePath: d.nodePath, cliScriptPath: d.cliScriptPath, logPath }));
 
-  await d.exec('launchctl', ['bootout', `gui/${d.uid}/${FACTORYD_LABEL}`]);
-  const boot = await d.exec('launchctl', ['bootstrap', `gui/${d.uid}`, plistPath]);
+  const boot = await reloadLaunchAgent(d, `gui/${d.uid}/${FACTORYD_LABEL}`, plistPath);
   if (boot.code !== 0) {
-    throw new DaemonCtlError(
-      `launchctl bootstrap failed: ${boot.stderr.trim() || boot.stdout.trim() || `exit ${boot.code}`}`,
-      1,
-    );
+    throw new DaemonCtlError(bootstrapFailureMessage(boot), 1);
   }
 
   const print = await d.exec('launchctl', ['print', `gui/${d.uid}/${FACTORYD_LABEL}`]);

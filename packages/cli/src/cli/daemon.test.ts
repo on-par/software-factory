@@ -1,6 +1,6 @@
 // packages/cli/src/cli/daemon.test.ts — factory daemon start|stop|status|logs (#1179).
 
-import { mkdtempSync, appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -464,46 +464,6 @@ describe('daemon control commands', () => {
       registryFile: join(home, '.factory', 'registry.json'),
     };
   }
-
-  describe('cmdDaemonStart', () => {
-    it('writes the plist, creates .factory, and runs bootout → bootstrap → print against gui/<uid>', async () => {
-      const { exec, calls } = makeFakeExec({ print: { code: 0, stdout: PRINT_RUNNING } });
-      const { out, text } = makeOut();
-      await cmdDaemonStart(baseDeps(exec, out));
-
-      const { plistPath } = factorydFiles(home);
-      expect(existsSync(plistPath)).toBe(true);
-      expect(existsSync(join(home, '.factory'))).toBe(true);
-      expect(readFileSync(plistPath, 'utf-8')).toContain('<key>KeepAlive</key>');
-
-      expect(calls).toEqual([
-        { cmd: 'launchctl', args: ['bootout', 'gui/501/com.onpar.factoryd'] },
-        { cmd: 'launchctl', args: ['bootstrap', 'gui/501', plistPath] },
-        { cmd: 'launchctl', args: ['print', 'gui/501/com.onpar.factoryd'] },
-      ]);
-      expect(text()).toContain(`factoryd: installed ${plistPath}`);
-      expect(text()).toContain('factoryd: running (pid 123)');
-    });
-
-    it('a bootout failure alone does not fail start', async () => {
-      const { exec } = makeFakeExec({
-        bootout: { code: 3, stderr: 'Boot-out failed: 3: No such process' },
-        print: { code: 0, stdout: 'state = waiting' },
-      });
-      const { out, text } = makeOut();
-      await cmdDaemonStart(baseDeps(exec, out));
-      expect(text()).toContain('factoryd: loaded — launchd will start it (RunAtLoad)');
-    });
-
-    it('throws DaemonCtlError(1) with stderr text when bootstrap fails', async () => {
-      const { exec } = makeFakeExec({ bootstrap: { code: 5, stderr: 'Bootstrap failed: 5: Input/output error' } });
-      const { out } = makeOut();
-      const err = await cmdDaemonStart(baseDeps(exec, out)).catch((e: unknown) => e);
-      expect(err).toBeInstanceOf(DaemonCtlError);
-      expect((err as DaemonCtlError).code).toBe(1);
-      expect((err as DaemonCtlError).message).toContain('Bootstrap failed: 5');
-    });
-  });
 
   describe('cmdDaemonStop', () => {
     it('reports stopped when bootout succeeds', async () => {

@@ -132,6 +132,17 @@ describe('applySelfUpdate', () => {
     expect(formatApplyResult(failed.result)).toContain('factory daemon start');
   });
 
+  it('includes the restart step detail in the text output when the factoryd restart fails', async () => {
+    const s = stubExec({
+      status: { code: 0, stdout: '{"running":true}' },
+      start: { code: 1, stderr: 'factory: launchctl bootstrap failed: Bootstrap failed: 5: Input/output error' },
+    });
+    const { result } = await applySelfUpdate({ to: '0.9.1' }, deps(s.exec));
+    const text = formatApplyResult(result);
+    expect(text).toContain('Bootstrap failed: 5: Input/output error');
+    expect(text).toContain('factory daemon start');
+  });
+
   it('doctor fails → reinstalls the previous exact version with the same prefix and exits 1', async () => {
     const s = stubExec({ doctor: { code: 1, stderr: 'claude: not signed in' } });
     const { code, result } = await applySelfUpdate({ to: '0.9.1' }, deps(s.exec));
