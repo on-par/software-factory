@@ -25,6 +25,8 @@ const checkPhase = vi.fn<typeof realCheckPhase>();
 const shipPhase = vi.fn<typeof realShipPhase>();
 const reworkWorker = vi.fn<typeof realReworkWorker>();
 const listPrChangedFiles = vi.fn<(...args: unknown[]) => Promise<string[]>>();
+const listBaseFailingChecks =
+  vi.fn<(...args: unknown[]) => Promise<{ baseRef: string; baseSha: string; failing: string[] }>>();
 
 const PLAN_OK: PlanResult = { ok: true, route: 'codex', specPath: '/tmp/wt/spec.md', model: 'm', designArtifact: null };
 const BUILD_OK: BuildResult = { ok: true, model: 'm', route: 'codex' };
@@ -101,6 +103,7 @@ function ports(log: Log): RunPorts {
     shipPhase,
     reworkWorker,
     listPrChangedFiles: listPrChangedFiles as RunPorts['listPrChangedFiles'],
+    listBaseFailingChecks: listBaseFailingChecks as RunPorts['listBaseFailingChecks'],
   };
 }
 
@@ -111,6 +114,7 @@ beforeEach(() => {
   shipPhase.mockReset();
   reworkWorker.mockReset().mockResolvedValue({ failovers: [], modelCompleted: true });
   listPrChangedFiles.mockReset().mockResolvedValue(['packages/core/src/sandbox/egress-proxy.ts']);
+  listBaseFailingChecks.mockReset().mockResolvedValue({ baseRef: 'main', baseSha: 'b'.repeat(40), failing: [] });
 });
 
 afterEach(() => {
@@ -129,6 +133,10 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     ],
     truncated: false,
   };
+  const ATTRIBUTED = expect.objectContaining({
+    ...EVIDENCE,
+    attribution: expect.objectContaining({ baseline: false }),
+  });
   const CI_FAIL = {
     ok: false,
     prNumber: 9,
@@ -165,7 +173,7 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     expect(log).toHaveBeenCalledWith(
       'ci-failed',
       'ship phase failed: CI failed for PR #9 — CI rework budget exhausted after 2 rounds',
-      { ciFailure: EVIDENCE },
+      { ciFailure: ATTRIBUTED },
     );
   });
 
@@ -180,17 +188,87 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     expect(log).toHaveBeenCalledWith(
       'ci-failed',
       'ship phase failed: CI failed for PR #9 — CI rework budget exhausted after 1 round',
-      { ciFailure: EVIDENCE },
+      { ciFailure: ATTRIBUTED },
     );
   });
 
-  it('parks unchanged when no alert is on a changed file', async () => {
+  it('parks ci-failed as baseline with zero rework calls when every CodeQL alert is outside the changed files', async () => {
     listPrChangedFiles.mockResolvedValue(['other.ts']);
     shipPhase.mockResolvedValue(CI_FAIL);
     const log = vi.fn<Log>();
+    expect(await runIssue(request, policy, ports(log))).toMatchObject({ state: 'parked', reason: 'ci-failed' });
+    expect(reworkWorker).not.toHaveBeenCalled();
+    expect(listBaseFailingChecks).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(
+      'ci-failed',
+      'ship phase failed: CI failed for PR #9 — baseline: no CI failure is attributable to this PR',
+      {
+        ciFailure: expect.objectContaining({
+          attribution: expect.objectContaining({
+            baseline: true,
+            items: [expect.objectContaining({ kind: 'codeql-alert', attributable: false })],
+          }),
+        }),
+      },
+    );
+  });
+
+  const TEST_EVIDENCE: CiFailureEvidence = {
+    failingChecks: [{ name: 'test', conclusion: 'failure' }],
+    alerts: [],
+    truncated: false,
+  };
+  const TEST_FAIL = { ...CI_FAIL, ciFailure: TEST_EVIDENCE };
+
+  it('parks ci-failed as baseline with zero rework calls when the failing check also fails on the base commit', async () => {
+    listBaseFailingChecks.mockResolvedValue({ baseRef: 'main', baseSha: 'b'.repeat(40), failing: ['test'] });
+    shipPhase.mockResolvedValue(TEST_FAIL);
+    const log = vi.fn<Log>();
+    expect(await runIssue(request, policy, ports(log))).toMatchObject({ state: 'parked', reason: 'ci-failed' });
+    expect(reworkWorker).not.toHaveBeenCalled();
+    expect(checkPhase).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith('ci-failed', expect.stringContaining('baseline'), {
+      ciFailure: expect.objectContaining({ attribution: expect.objectContaining({ baseline: true }) }),
+    });
+  });
+
+  it('parks ci-failed without baseline and without rework for a check not failing on base', async () => {
+    shipPhase.mockResolvedValue(TEST_FAIL);
+    const log = vi.fn<Log>();
     expect(await runIssue(request, policy, ports(log))).toMatchObject({ reason: 'ci-failed' });
     expect(reworkWorker).not.toHaveBeenCalled();
-    expect(log).toHaveBeenCalledWith('ci-failed', 'ship phase failed: CI failed for PR #9', { ciFailure: EVIDENCE });
+    expect(log).toHaveBeenCalledWith('ci-failed', 'ship phase failed: CI failed for PR #9', {
+      ciFailure: expect.objectContaining({ attribution: expect.objectContaining({ baseline: false }) }),
+    });
+  });
+
+  it('parks ci-failed without baseline when the base lookup throws', async () => {
+    listBaseFailingChecks.mockRejectedValue(new Error('nope'));
+    shipPhase.mockResolvedValue(TEST_FAIL);
+    const log = vi.fn<Log>();
+    expect(await runIssue(request, policy, ports(log))).toMatchObject({ reason: 'ci-failed' });
+    expect(reworkWorker).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith('ci-failed', 'ship phase failed: CI failed for PR #9', expect.anything());
+  });
+
+  it('reworks the attributable alert in a mixed failure and marks the base-failing check non-attributable in the evidence', async () => {
+    listBaseFailingChecks.mockResolvedValue({ baseRef: 'main', baseSha: 'b'.repeat(40), failing: ['test'] });
+    const mixed = {
+      ...CI_FAIL,
+      ciFailure: { ...EVIDENCE, failingChecks: [...EVIDENCE.failingChecks, { name: 'test', conclusion: 'failure' }] },
+    };
+    shipPhase.mockResolvedValueOnce(mixed).mockResolvedValueOnce({ ok: true, prNumber: 9, ciOutcome: 'success' });
+    const log = vi.fn<Log>();
+    expect(await runIssue(request, policy, ports(log))).toMatchObject({ state: 'ready' });
+    expect(reworkWorker).toHaveBeenCalledTimes(1);
+    expect(reworkWorker.mock.calls[0][0].summary.results[0].details).toContain('js/request-forgery');
+    const call = log.mock.calls.find((c) => c[0] === 'rework') ?? [];
+    expect(call[1]).toContain('non-attributable: test');
+    const items = (call[2] as { ciFailure: CiFailureEvidence }).ciFailure.attribution?.items;
+    expect(items).toEqual([
+      expect.objectContaining({ kind: 'codeql-alert', attributable: true }),
+      expect.objectContaining({ kind: 'check', ref: 'test', attributable: false }),
+    ]);
   });
 
   it('parks ci-failed with no rework when the changed-files lookup throws', async () => {
@@ -209,7 +287,7 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     expect(log).toHaveBeenCalledWith(
       'ci-failed',
       'ship phase failed: CI failed for PR #9 — CI rework worker never ran',
-      { ciFailure: EVIDENCE },
+      { ciFailure: ATTRIBUTED },
     );
   });
 

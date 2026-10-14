@@ -2,7 +2,14 @@
 
 import type { Octokit } from '@octokit/rest';
 
-import type { CheckSummary, CiCodeScanningAlert, CiFailureEvidence } from '../types/index.js';
+import { isPassingConclusion, listAllCheckRuns } from '../utils/ci-watch.js';
+import type {
+  CheckSummary,
+  CiAttribution,
+  CiAttributionItem,
+  CiCodeScanningAlert,
+  CiFailureEvidence,
+} from '../types/index.js';
 
 export const MAX_CI_REWORK_ROUNDS = 2;
 export const CI_REWORK_ENV = 'FACTORY_MAX_CI_REWORK_ROUNDS';
@@ -39,6 +46,75 @@ export function attributableCodeqlAlerts(
     const path = alertPath(alert.location);
     return path !== undefined && changed.has(path);
   });
+}
+
+/** Failing check names on the PR base branch's latest commit (#2817). */
+export interface BaseFailingChecks {
+  baseRef: string;
+  baseSha: string;
+  failing: string[];
+}
+
+/** True when a failing check is attributed on its own (not through CodeQL alerts). */
+export function needsBaseChecks(evidence: CiFailureEvidence | undefined): boolean {
+  return !!evidence && evidence.failingChecks.some((c) => !(/codeql/i.test(c.name) && evidence.alerts.length > 0));
+}
+
+/** Attributes each failing item to the PR: alerts by changed file, other checks by the base commit (#2817). */
+export function attributeCiFailure(
+  evidence: CiFailureEvidence | undefined,
+  changedFiles: readonly string[],
+  base: BaseFailingChecks | undefined,
+): CiAttribution {
+  if (!evidence) return { baseline: false, items: [] };
+  const changed = new Set(changedFiles);
+  const items: CiAttributionItem[] = [];
+  for (const alert of evidence.alerts) {
+    const path = alertPath(alert.location);
+    const attributable = path !== undefined && changed.has(path);
+    items.push({
+      kind: 'codeql-alert',
+      ref: `${alert.ruleId} at ${alert.location}`,
+      attributable,
+      reason: attributable ? 'file changed by this PR' : 'file not changed by this PR',
+    });
+  }
+  const baseLabel = base ? `${base.baseRef}@${base.baseSha.slice(0, 12)}` : '';
+  for (const check of evidence.failingChecks) {
+    if (/codeql/i.test(check.name) && evidence.alerts.length > 0) continue;
+    if (!base) {
+      items.push({ kind: 'check', ref: check.name, attributable: true, reason: 'base checks unavailable' });
+      continue;
+    }
+    const onBase = base.failing.includes(check.name);
+    items.push({
+      kind: 'check',
+      ref: check.name,
+      attributable: !onBase,
+      reason: onBase ? `also failing on base ${baseLabel}` : `not failing on base ${baseLabel}`,
+    });
+  }
+  const baseline = items.length > 0 && items.every((i) => !i.attributable) && !evidence.errors?.length;
+  return { baseline, ...(base ? { baseRef: base.baseRef, baseSha: base.baseSha } : {}), items };
+}
+
+/** Failing check names on the latest commit of the PR's base branch. Errors propagate to the caller. */
+export async function listBaseFailingChecks(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  prNumber: number,
+): Promise<BaseFailingChecks> {
+  const { data: pr } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
+  const baseRef = pr.base.ref;
+  const { data: branch } = await octokit.rest.repos.getBranch({ owner, repo, branch: baseRef });
+  const baseSha = branch.commit.sha;
+  const runs = await listAllCheckRuns(octokit, owner, repo, baseSha, 100, 10);
+  const failing = new Set<string>();
+  for (const run of runs) {
+    if (run.name && run.status === 'completed' && !isPassingConclusion(run.conclusion)) failing.add(run.name);
+  }
+  return { baseRef, baseSha, failing: [...failing] };
 }
 
 /** The same CheckSummary shape local CHECK rework consumes, with one FAIL `ci_codeql` result. */

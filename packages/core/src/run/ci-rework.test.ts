@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import type { CiFailureEvidence } from '../types/index.js';
 import {
   attributableCodeqlAlerts,
+  attributeCiFailure,
   ciReworkSummary,
+  listBaseFailingChecks,
   listPrChangedFiles,
   MAX_CI_REWORK_ROUNDS,
   resolveMaxCiReworkRounds,
@@ -84,5 +86,97 @@ describe('listPrChangedFiles', () => {
     expect(files).toHaveLength(101);
     expect(files.at(-1)).toBe('last');
     expect(seen).toEqual([1, 2]);
+  });
+});
+
+describe('attributeCiFailure (#2817)', () => {
+  const base = { baseRef: 'main', baseSha: 'a'.repeat(40), failing: ['test'] };
+  const ev = (over: Partial<CiFailureEvidence>): CiFailureEvidence => ({
+    failingChecks: [],
+    alerts: [],
+    truncated: false,
+    ...over,
+  });
+
+  it('attributes alerts by changed file', () => {
+    const a = attributeCiFailure(ev({ alerts: [alert('src/a.ts:1'), alert('src/z.ts:2')] }), ['src/a.ts'], undefined);
+    expect(a.items.map((i) => i.attributable)).toEqual([true, false]);
+    expect(a.items[1].reason).toBe('file not changed by this PR');
+    expect(a.baseline).toBe(false);
+    expect(attributeCiFailure(ev({ alerts: [alert('src/z.ts:2')] }), ['src/a.ts'], undefined).baseline).toBe(true);
+  });
+
+  it('marks a check also failing on base as non-attributable baseline', () => {
+    const a = attributeCiFailure(ev({ failingChecks: [{ name: 'test', conclusion: 'failure' }] }), [], base);
+    expect(a.baseline).toBe(true);
+    expect(a.items[0].reason).toBe(`also failing on base main@${'a'.repeat(12)}`);
+    expect(a).toMatchObject({ baseRef: 'main', baseSha: base.baseSha });
+  });
+
+  it('attributes a check not failing on base', () => {
+    const a = attributeCiFailure(ev({ failingChecks: [{ name: 'lint', conclusion: 'failure' }] }), [], base);
+    expect(a.baseline).toBe(false);
+    expect(a.items[0]).toMatchObject({ attributable: true, reason: `not failing on base main@${'a'.repeat(12)}` });
+  });
+
+  it('attributes checks when base is unavailable', () => {
+    const a = attributeCiFailure(ev({ failingChecks: [{ name: 'test', conclusion: 'failure' }] }), [], undefined);
+    expect(a.items[0]).toMatchObject({ attributable: true, reason: 'base checks unavailable' });
+    expect(a.baseRef).toBeUndefined();
+  });
+
+  it('folds a CodeQL check into its alerts, but treats it as a check without alerts', () => {
+    const codeql = { name: 'CodeQL', conclusion: 'failure' };
+    expect(
+      attributeCiFailure(ev({ failingChecks: [codeql], alerts: [alert('src/a.ts:1')] }), ['src/a.ts'], base).items,
+    ).toHaveLength(1);
+    expect(attributeCiFailure(ev({ failingChecks: [codeql] }), [], base).items[0]).toMatchObject({
+      kind: 'check',
+      ref: 'CodeQL',
+    });
+  });
+
+  it('is never baseline with collection errors, empty or undefined evidence', () => {
+    const errs = ev({ failingChecks: [{ name: 'test', conclusion: 'failure' }], errors: ['checks: boom'] });
+    expect(attributeCiFailure(errs, [], base).baseline).toBe(false);
+    expect(attributeCiFailure(ev({}), [], base)).toMatchObject({ baseline: false, items: [] });
+    expect(attributeCiFailure(undefined, [], base)).toEqual({ baseline: false, items: [] });
+  });
+});
+
+describe('listBaseFailingChecks', () => {
+  it('returns the base ref, sha and deduped completed non-passing check names', async () => {
+    const octokit = {
+      rest: {
+        pulls: { get: async () => ({ data: { base: { ref: 'main' } } }) },
+        repos: {
+          getBranch: async (a: { branch: string }) => {
+            expect(a.branch).toBe('main');
+            return { data: { commit: { sha: 'deadbeef' } } };
+          },
+        },
+        checks: {
+          listForRef: async (a: { ref: string }) => {
+            expect(a.ref).toBe('deadbeef');
+            return {
+              data: {
+                check_runs: [
+                  { name: 'test', status: 'completed', conclusion: 'failure' },
+                  { name: 'test', status: 'completed', conclusion: 'timed_out' },
+                  { name: 'lint', status: 'completed', conclusion: 'success' },
+                  { name: 'skip', status: 'completed', conclusion: 'skipped' },
+                  { name: 'pending', status: 'in_progress', conclusion: null },
+                ],
+              },
+            };
+          },
+        },
+      },
+    } as never;
+    expect(await listBaseFailingChecks(octokit, 'o', 'r', 9)).toEqual({
+      baseRef: 'main',
+      baseSha: 'deadbeef',
+      failing: ['test'],
+    });
   });
 });
