@@ -34,7 +34,7 @@ export function createShipExecutor(options: {
   terminationGraceMs?: number;
 }): RunExecutor {
   return async ({ run, cwd, signal, output, started, ownershipFile }) => {
-    if (run.laneId !== undefined && !signal.aborted) cwd = await prepareRunWorktree(cwd, run.runId);
+    const runCwd = run.laneId !== undefined && !signal.aborted ? await prepareRunWorktree(cwd, run.runId) : cwd;
     return new Promise((resolve, reject) => {
       if (signal.aborted) {
         resolve({ exitCode: null, prUrl: null });
@@ -70,7 +70,7 @@ export function createShipExecutor(options: {
       delete env.FACTORY_MERGE;
       delete env.FACTORY_MERGE_ADMIN;
       const child = spawn(process.execPath, ['-e', launcher, options.cliEntrypoint, String(run.issue)], {
-        cwd,
+        cwd: runCwd,
         env,
         detached: process.platform !== 'win32',
         stdio: ['pipe', 'pipe', 'pipe'],
