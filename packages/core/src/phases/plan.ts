@@ -38,7 +38,11 @@ import { UNTRUSTED_ISSUE_BODY_NOTICE, wrapUntrustedIssueBody } from '../utils/un
 import { GITHUB_ISSUE_SOURCE, type GithubIssueParams } from '../work/github-issue.js';
 import { createDefaultWorkSourceRegistry, type WorkRequestSourceKind, type WorkSourceRegistry } from '../work/index.js';
 
-import { buildDesignArtifactRetryPrompt, MAX_DESIGN_ARTIFACT_RETRIES } from './plan-design-retry.js';
+import {
+  buildDesignArtifactRetryPrompt,
+  designArtifactInvalidMessage,
+  MAX_DESIGN_ARTIFACT_RETRIES,
+} from './plan-design-retry.js';
 import {
   type BuildRouteName,
   defaultBuildRoute,
@@ -885,7 +889,7 @@ async function planPhaseImpl(opts: {
         log('escalate', blockedReason);
         return { ok: false, route, specPath, model: result.model, escalate: blockedReason, designArtifact: null };
       }
-      log('design_artifact_invalid', `spec frontmatter has no valid design artifact: ${designErrors.join('; ')}`);
+      log('design_artifact_invalid', designArtifactInvalidMessage(designErrors, designRetries + 1));
     }
 
     log('plan', `Plan complete with model ${result.model}, route: ${route}`, { model: result.model });

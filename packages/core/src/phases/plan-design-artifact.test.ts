@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
-import { buildDesignArtifactRetryPrompt, planPhase } from './plan.js';
+import { buildDesignArtifactRetryPrompt, MAX_DESIGN_ARTIFACT_RETRIES, planPhase } from './plan.js';
+import { DESIGN_ARTIFACT_LOSS, designArtifactInvalidMessage } from './plan-design-retry.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -169,6 +170,29 @@ describe('design artifact retry (#2803)', () => {
     expect(result.ok).toBe(true);
     expect(result.designArtifact).toBeNull();
     expect(logs.filter((l) => l.type === 'design_artifact_invalid')).toHaveLength(1);
+  });
+
+  it('logs design_artifact_invalid once after exhausting retries, with the attempt count and what the run loses (#2804)', async () => {
+    const { result, logs, stub } = await runPlan([missingRisk, missingRisk, missingRisk, missingRisk]);
+
+    expect(planCalls(stub)).toHaveLength(MAX_DESIGN_ARTIFACT_RETRIES + 1);
+    expect(result.ok).toBe(true);
+    expect(result.designArtifact).toBeNull();
+    const invalid = logs.filter((l) => l.type === 'design_artifact_invalid');
+    expect(invalid).toHaveLength(1);
+    expect(invalid[0]?.msg).toContain('riskBlastRadius');
+    expect(invalid[0]?.msg).toContain(`after ${MAX_DESIGN_ARTIFACT_RETRIES + 1} attempt(s)`);
+    expect(invalid[0]?.msg).toContain(DESIGN_ARTIFACT_LOSS);
+    expect(invalid[0]?.msg).toMatch(/lane guard/);
+    expect(invalid[0]?.msg).toMatch(/Risk \/ blast radius/);
+  });
+
+  it('designArtifactInvalidMessage keeps the legacy prefix and names every error and the loss (#2804)', () => {
+    const msg = designArtifactInvalidMessage(['err one', 'err two'], 3);
+    expect(msg.startsWith('spec frontmatter has no valid design artifact')).toBe(true);
+    expect(msg).toContain('err one; err two');
+    expect(msg).toContain('after 3 attempt(s)');
+    expect(msg).toContain(DESIGN_ARTIFACT_LOSS);
   });
 
   it('buildDesignArtifactRetryPrompt includes the base prompt and every error (#2803)', () => {
