@@ -431,7 +431,10 @@ export function diagnoseModels(
         const probe = entry.probe;
         const authAgent = localAuthAgentFor(harnessId);
         const authFailure = authAgent ? localAuthFailure(authAgent) : null;
-        if (!isHarnessCliPresent(harnessId, commandAvailable)) {
+        if (probe.selfAuth && !probe.selfAuth.providers.includes(def.provider)) {
+          // The claude CLI only serves its selfAuth providers; any other provider can never run here (#2896).
+          reason = `unsupported: the ${probe.okLabel} serves only Anthropic models (provider '${def.provider}')`;
+        } else if (!isHarnessCliPresent(harnessId, commandAvailable)) {
           reason = `${probe.command} CLI not found on PATH`;
         } else if (authAgent && authFailure) {
           reason = localAuthFailureReason(authFailure);

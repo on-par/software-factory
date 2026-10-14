@@ -49,9 +49,9 @@ describe('shipped defaults', () => {
     expect(defaultModelsConfig.models[retired?.replacement ?? '']).toBeDefined();
   });
 
-  it('has 23 models with the expected harness-bearing spot checks', () => {
+  it('has 22 models with the expected harness-bearing spot checks', () => {
     const modelIds = Object.keys(defaultModelsConfig.models);
-    expect(modelIds).toHaveLength(23);
+    expect(modelIds).toHaveLength(22);
 
     for (const id of [
       'claude-opus-5',
@@ -126,7 +126,7 @@ describe('shipped defaults', () => {
 
     expect(defaultModelsConfig.tiers.boss).toHaveLength(8);
     expect(defaultModelsConfig.tiers.worker).toHaveLength(12);
-    expect(defaultModelsConfig.tiers.checker).toHaveLength(8);
+    expect(defaultModelsConfig.tiers.checker).toHaveLength(7);
     expect(defaultModelsConfig.tiers.triage).toHaveLength(4);
   });
 
@@ -141,7 +141,7 @@ describe('shipped defaults', () => {
     const checkerIdx = (id: string) => defaultModelsConfig.tiers.checker.indexOf(id);
     expect(checkerIdx('claude-sonnet-5')).toBeGreaterThanOrEqual(0);
     expect(checkerIdx('claude-sonnet-5')).toBeLessThan(checkerIdx('gpt-5.6-luna-high'));
-    expect(checkerIdx('gpt-5.6-luna-high')).toBeLessThan(checkerIdx('gpt-4.1-mini'));
+    expect(checkerIdx('gpt-5.6-luna-high')).toBeGreaterThanOrEqual(0);
   });
 
   it('has the expected failover policy', () => {
@@ -291,5 +291,24 @@ describe('steward route (#2111)', () => {
       expect(def.allowedTools, id).toBeUndefined();
       expect(def.output, id).toBeUndefined();
     }
+  });
+
+  it('ships no model that pairs the claude-cli harness with a non-anthropic provider', () => {
+    const offenders = Object.entries(defaultModelsConfig.models)
+      .filter(([, def]) => {
+        const harness =
+          def.harness ??
+          (def.codex && def.provider === 'ollama'
+            ? 'ollama-command-agent'
+            : def.codex
+              ? 'codex-cli'
+              : def.provider === 'ollama'
+                ? 'ollama-http'
+                : 'claude-cli');
+        return harness === 'claude-cli' && def.provider !== 'anthropic';
+      })
+      .map(([id]) => id);
+    expect(offenders).toEqual([]);
+    expect(defaultModelsConfig.tiers.checker).not.toContain('gpt-4.1-mini');
   });
 });

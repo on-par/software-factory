@@ -274,19 +274,6 @@ export const defaultModelsConfig: ModelsDefaults = {
       codex: true,
       codexFlag: '-m gpt-6-astra -c model_reasoning_effort=medium',
     },
-    /** claude-CLI wiring is unproven — the Claude CLI only serves Anthropic models */
-    'gpt-4.1-mini': {
-      provider: 'openai',
-      tier: 'checker',
-      costPerMtokInput: 0.4,
-      costPerMtokOutput: 1.6,
-      contextWindow: 128000,
-      capabilities: ['verification', 'lightweight_review'],
-      envKey: 'OPENAI_API_KEY',
-      harness: 'claude-cli',
-      claudeFlag: 'gpt-4.1-mini',
-      experimental: true,
-    },
     /** speculative — opt in with FACTORY_EXPERIMENTAL=1 */
     'glm-5.2': {
       provider: 'ollama',
@@ -467,7 +454,6 @@ export const defaultModelsConfig: ModelsDefaults = {
       'qwen3:8b',
       'claude-sonnet-5',
       'gpt-5.6-luna-high',
-      'gpt-4.1-mini',
       'glm-5.2',
     ],
     triage: ['qwen2.5-coder:14b', 'claude-sonnet-5', 'glm-5.2', 'gpt-5.6-luna-high'],

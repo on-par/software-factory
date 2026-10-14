@@ -416,6 +416,7 @@ const doctorConfig: ModelsConfig = {
       contextWindow: 1000,
       capabilities: [],
       envKey: null,
+      harness: 'codex-cli',
       experimental: true,
     },
     'opencode-model': {
@@ -861,29 +862,19 @@ describe('diagnoseModels', () => {
     expect(diagnoses.find((d) => d.model === 'codex-model')?.reason).toBe('excluded by FACTORY_LOCAL_ONLY=1');
   });
 
-  it('marks a non-anthropic env-keyed model unreachable when the key is missing, naming the key', () => {
-    const d = diagnosisFor(
-      'deepseek-model',
-      {
-        commandAvailable: (cmd) => cmd === 'claude',
-        envPresent: () => false,
-      },
-      true,
-    );
-    expect(d.reachable).toBe(false);
-    expect(d.reason).toBe('DEEPSEEK_API_KEY not set');
-  });
-
-  it('marks a non-anthropic env-keyed model reachable when the key is present', () => {
-    const d = diagnosisFor(
-      'deepseek-model',
-      {
-        commandAvailable: (cmd) => cmd === 'claude',
-        envPresent: (key) => key === 'DEEPSEEK_API_KEY',
-      },
-      true,
-    );
-    expect(d.reachable).toBe(true);
+  it('marks a non-anthropic model on the default claude-cli harness unsupported whether or not its key is set', () => {
+    for (const keySet of [false, true]) {
+      const d = diagnosisFor(
+        'deepseek-model',
+        {
+          commandAvailable: (cmd) => cmd === 'claude',
+          envPresent: () => keySet,
+        },
+        true,
+      );
+      expect(d.reachable).toBe(false);
+      expect(d.reason).toMatch(/^unsupported: the claude CLI serves only Anthropic models/);
+    }
   });
 
   it('gates an experimental model by default, mentioning the opt-in env var', () => {
