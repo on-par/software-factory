@@ -426,7 +426,7 @@ describe('parseOpenCodeJson', () => {
     const parsed = parseOpenCodeJson(
       '{"type":"step_finish","part":{"cost":1}}\n{"type":"step_finish","part":{"tokens":{"input":"x"}}}',
     );
-    expect(parsed).toEqual({ text: '', errorText: '' });
+    expect(parsed).toEqual({ text: '', errorText: '', finished: true });
   });
 
   it('omits costUsd when the cost is 0 and tolerates a missing cache block', () => {
@@ -503,7 +503,7 @@ describe('OpenCodeHarness recorded error fixtures', () => {
   });
 
   it('returns assistant text even when an error event is present on exit 0', async () => {
-    const textLine = '{"type":"text","sessionID":"ses_fixture","part":{"type":"text","text":"done"}}';
+    const textLine = '{"type":"text","part":{"type":"text","text":"done"}}\n{"type":"step_finish","part":{}}';
     const rec = recordingExec({ stdout: `${rateLimitFixture}${textLine}\n` });
     const result = await new OpenCodeHarness(rec.fn).run(makeContractRequest({ model: 'opencode-model', registry }));
     expect(result.output).toBe('done');
