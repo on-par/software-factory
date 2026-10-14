@@ -1,11 +1,6 @@
 // src/cli/doctor-harness.ts — per-harness setup table and `<cli> installed` rows for `factory doctor`.
 
-import {
-  OPENCODE_PINNED_INSTALL,
-  OPENCODE_SUPPORTED_RANGE,
-  isOpenCodeVersionSupported,
-  parseOpenCodeVersion,
-} from '@on-par/factory-core/internal';
+import { openCodeVersion } from '@on-par/factory-core/internal';
 
 import type { DoctorCheck } from './doctor.js';
 
@@ -26,22 +21,28 @@ export interface HarnessSetup {
 /** Warns, without failing, when the installed OpenCode is outside the supported range (#2880). */
 export function openCodeVersionCheck(versionLine: string | undefined): Pick<DoctorCheck, 'ok' | 'detail' | 'fix'> {
   if (!versionLine) {
-    return { ok: true, detail: `found on PATH (version unknown, supported ${OPENCODE_SUPPORTED_RANGE})` };
+    return {
+      ok: true,
+      detail: `found on PATH (version unknown, supported ${openCodeVersion.OPENCODE_SUPPORTED_RANGE})`,
+    };
   }
-  const parsed = parseOpenCodeVersion(versionLine);
+  const parsed = openCodeVersion.parseOpenCodeVersion(versionLine);
   if (!parsed) {
     return {
       ok: true,
-      detail: `found on PATH (version unknown: ${versionLine}, supported ${OPENCODE_SUPPORTED_RANGE})`,
+      detail: `found on PATH (version unknown: ${versionLine}, supported ${openCodeVersion.OPENCODE_SUPPORTED_RANGE})`,
     };
   }
-  if (isOpenCodeVersionSupported(parsed)) {
-    return { ok: true, detail: `found on PATH (${versionLine}, supported ${OPENCODE_SUPPORTED_RANGE})` };
+  if (openCodeVersion.isOpenCodeVersionSupported(parsed)) {
+    return {
+      ok: true,
+      detail: `found on PATH (${versionLine}, supported ${openCodeVersion.OPENCODE_SUPPORTED_RANGE})`,
+    };
   }
   return {
     ok: false,
-    detail: `OpenCode ${versionLine} is outside the supported range ${OPENCODE_SUPPORTED_RANGE}; install the tested version: ${OPENCODE_PINNED_INSTALL}`,
-    fix: `install the tested OpenCode: ${OPENCODE_PINNED_INSTALL}`,
+    detail: `OpenCode ${versionLine} is outside the supported range ${openCodeVersion.OPENCODE_SUPPORTED_RANGE}; install the tested version: ${openCodeVersion.OPENCODE_PINNED_INSTALL}`,
+    fix: `install the tested OpenCode: ${openCodeVersion.OPENCODE_PINNED_INSTALL}`,
   };
 }
 
@@ -67,7 +68,7 @@ export const HARNESS_SETUP: readonly HarnessSetup[] = [
     section: 'OpenCode',
     harnessId: 'opencode',
     cli: 'opencode',
-    install: OPENCODE_PINNED_INSTALL,
+    install: openCodeVersion.OPENCODE_PINNED_INSTALL,
     login: 'opencode auth login',
     envKeys: ['OPENCODE_API_KEY'],
     checkVersion: openCodeVersionCheck,

@@ -4,7 +4,6 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import * as publicApi from './index.js';
-import * as opencodeVersion from './harness/opencode-version.js';
 import * as internalApi from './internal.js';
 import * as kpisApi from './kpis-entry.js';
 import * as testingApi from './testing.js';
@@ -329,6 +328,7 @@ const PUBLIC_API_KEYS = [
 ];
 
 const INTERNAL_API_KEYS = [
+  'openCodeVersion',
   'DEFAULT_CI_DEADLINE_MS',
   'DEFAULT_CI_NO_CHECKS_GRACE_MS',
   'resolveCiNoChecksGraceMs',
@@ -883,7 +883,7 @@ describe('public API surface (ADR-0004)', () => {
   });
 
   it('./internal exposes exactly the documented internal API', () => {
-    expect(Object.keys(internalApi).sort()).toEqual([...INTERNAL_API_KEYS, ...Object.keys(opencodeVersion)].sort());
+    expect(Object.keys(internalApi).sort()).toEqual([...INTERNAL_API_KEYS].sort());
   });
 
   it('./testing exposes exactly the documented testing API', () => {
