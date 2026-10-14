@@ -71,7 +71,20 @@ export function stableVersionError(v: string): string | null {
   return null;
 }
 
-function firstLine(s: string): string | null {
+/** Names of the ❌ (failed) rows in `factory doctor` text output, in order, deduped (#2932). */
+export function failingDoctorChecks(output: string): string[] {
+  const names: string[] = [];
+  for (const raw of output.split('\n')) {
+    // eslint-disable-next-line no-control-regex -- strips ANSI color codes
+    const line = raw.replace(/\u001b\[[0-9;]*m/g, '');
+    const m = /^\s*❌\s+(.+?)\s+-\s/.exec(line) ?? /^\s*❌\s+(.+?)\s*$/.exec(line);
+    const name = m?.[1]?.trim();
+    if (name && !names.includes(name)) names.push(name);
+  }
+  return names;
+}
+
+function lastLine(s: string): string | null {
   const l = s
     .trim()
     .split('\n')
@@ -120,10 +133,20 @@ export async function applySelfUpdate(
     result.error = error;
     return { code, result };
   };
-  const run = async (step: ApplyStep['step'], cmd: string, args: string[]) => {
+  const run = async (
+    step: ApplyStep['step'],
+    cmd: string,
+    args: string[],
+    detailOf?: (r: { code: number; stdout: string; stderr: string }) => string | null,
+  ) => {
     const r = await exec(cmd, args);
     const ok = r.code === 0;
-    steps.push({ step, ok, code: r.code, detail: ok ? null : (firstLine(r.stderr) ?? firstLine(r.stdout)) });
+    steps.push({
+      step,
+      ok,
+      code: r.code,
+      detail: ok ? null : detailOf ? detailOf(r) : (lastLine(r.stderr) ?? lastLine(r.stdout)),
+    });
     return { ...r, ok };
   };
   const installVersion = (v: string, step: 'install' | 'rollback') =>
@@ -161,7 +184,10 @@ export async function applySelfUpdate(
   if (!inst.ok) failure = `install of ${to} failed: ${steps.at(-1)?.detail ?? `exit ${inst.code}`}`;
   else if (!(await verifyVersion(to, 'verify'))) failure = `version check failed: ${steps.at(-1)?.detail}`;
   else {
-    const doc = await run('doctor', node, [cli, 'doctor']);
+    const doc = await run('doctor', node, [cli, 'doctor'], (r) => {
+      const names = failingDoctorChecks(`${r.stdout}\n${r.stderr}`);
+      return names.length > 0 ? `failing checks: ${names.join(', ')}` : `exit ${r.code}`;
+    });
     if (!doc.ok) failure = `doctor failed on ${to}: ${steps.at(-1)?.detail ?? `exit ${doc.code}`}`;
   }
 
