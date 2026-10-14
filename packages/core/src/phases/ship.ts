@@ -7,13 +7,13 @@ import type { Octokit } from '@octokit/rest';
 
 import type { ApprovalGate } from '../approvals/index.js';
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
-import { readDesignArtifact } from '../design/index.js';
 import type { EventKind } from '../events/kinds.js';
 import { gatherEvidencePack } from '../reports/evidence-pack.js';
 import { renderPrBody } from '../reports/pr-body.js';
 import type { ReviewRouting } from '../review/routing.js';
-import { readSpec } from '../spec/index.js';
-import type { CheckSummary } from '../types/index.js';
+import { readRisk, readSpecBody } from './ship-spec.js';
+import type { CheckSummary, CiFailureEvidence } from '../types/index.js';
+import { collectCiFailureEvidence } from '../utils/ci-evidence.js';
 import {
   DEFAULT_CI_DEADLINE_MS,
   type InfraRerunOutcome,
@@ -34,6 +34,8 @@ export interface ShipResult {
   deniedReason?: string;
   reason?: string;
   ciOutcome?: InfraRerunOutcome;
+  /** Bounded evidence for a CI-watch 'failure' (#2814). */
+  ciFailure?: CiFailureEvidence;
   /** True when the branch's content had already landed on main (e.g. a retry after a
    *  squash merge) — nothing was pushed and no PR was created (#520). */
   alreadyDelivered?: boolean;
@@ -383,7 +385,8 @@ async function shipPhaseImpl(opts: {
       else if (ciOutcome === 'failure') {
         const reason = `CI failed for PR #${prNumber}`;
         log('ship', reason);
-        return { ok: false, prNumber, reason, ciOutcome };
+        const ciFailure = await collectCiFailureEvidence({ octokit, owner, repo: repoName, ref: branch, prNumber });
+        return { ok: false, prNumber, reason, ciOutcome, ciFailure };
       } else if (ciOutcome === 'infra-failure') {
         const reason = `CI failed again for infrastructure reasons for PR #${prNumber} after one rerun`;
         log('ship', reason);
@@ -418,26 +421,6 @@ async function shipPhaseImpl(opts: {
       : `PR #${prNumber} ready for review`,
   );
   return ciOutcome === undefined ? { ok: true, prNumber } : { ok: true, prNumber, ciOutcome };
-}
-
-/** The frozen spec body for the PR description; undefined when there is no readable spec. */
-async function readSpecBody(specPath: string | undefined): Promise<string | undefined> {
-  if (!specPath) return undefined;
-  try {
-    return (await readSpec(specPath)).body;
-  } catch {
-    return undefined;
-  }
-}
-
-/** The design artifact's Risk / blast radius for the PR body; undefined when there is no readable artifact. */
-async function readRisk(specPath: string | undefined): Promise<string | undefined> {
-  if (!specPath) return undefined;
-  try {
-    return (await readDesignArtifact(specPath))?.riskBlastRadius;
-  } catch {
-    return undefined;
-  }
 }
 
 async function computeDiffStat(run: CommandRunner, worktree: string): Promise<string> {

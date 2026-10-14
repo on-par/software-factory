@@ -212,9 +212,8 @@ export { applyLocalSmallPatchStep, createLocalSmallDryRun } from './local-small/
 export { judgeSpec, median, runJudgeSamples, scoreSpec } from './eval/index.js';
 
 // Usage internals
-export { defaultTranscriptRoots, priceFor, TRAILING_WINDOW_MS } from './usage/index.js';
+export { defaultTranscriptRoots, priceFor, TRAILING_WINDOW_MS, type RunUsageHarnessInput } from './usage/index.js';
 export { harnessHasUsageSignal, resolveRunUsageHarness, USAGE_NOT_AVAILABLE_FOR_AGENT } from './usage/index.js';
-export type { RunUsageHarnessInput } from './usage/index.js';
 export { readClaudeAccessToken } from './usage/subscription.js';
 
 // Utils
@@ -232,6 +231,7 @@ export type {
   InfraRerunWatchOptions,
   WatchChecksOptions,
 } from './utils/ci-watch.js';
+export { collectCiFailureEvidence } from './utils/ci-evidence.js';
 export {
   classifyCiFailure,
   DEFAULT_CI_DEADLINE_MS,

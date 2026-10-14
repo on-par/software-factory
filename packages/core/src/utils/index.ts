@@ -10,6 +10,7 @@ import type { PrClassificationRecord } from '../review/classifier.js';
 import type { PrLookup } from '../phases/ship.js';
 import type {
   CheckFailureInfo,
+  CiFailureEvidence,
   CostEntry,
   FailoverReason,
   LogLevel,
@@ -45,6 +46,7 @@ export function logEvent(
     stewardTriggered?: StewardTriggeredPayload;
     flakyTests?: FlakyTestsPayload;
     checkFailure?: CheckFailureInfo;
+    ciFailure?: CiFailureEvidence;
     actor?: string;
     model?: string;
     tokens?: { input: number; output: number };
@@ -62,6 +64,7 @@ export function logEvent(
     stewardTriggered?: StewardTriggeredPayload;
     flakyTests?: FlakyTestsPayload;
     checkFailure?: CheckFailureInfo;
+    ciFailure?: CiFailureEvidence;
     actor?: string;
     model?: string;
     tokens?: { input: number; output: number };
@@ -75,6 +78,7 @@ export function logEvent(
   if (extra?.stewardTriggered) meta.stewardTriggered = extra.stewardTriggered;
   if (extra?.flakyTests) meta.flakyTests = extra.flakyTests;
   if (extra?.checkFailure) meta.checkFailure = extra.checkFailure;
+  if (extra?.ciFailure) meta.ciFailure = extra.ciFailure;
   if (extra?.actor) meta.actor = extra.actor;
   if (extra?.model) meta.model = extra.model;
   if (extra?.tokens) meta.tokens = extra.tokens;

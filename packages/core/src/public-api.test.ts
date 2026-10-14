@@ -688,12 +688,11 @@ const INTERNAL_API_KEYS = [
   // Selected Claude profile (CLAUDE_CONFIG_DIR) and its keychain entry
   'claudeConfigDirOverride',
   'claudeKeychainService',
-  // docker-sandbox microVM lifecycle (#653)
+  // docker-sandbox microVM lifecycle + orphan scan/reap (#653, #1527)
   'createMicroVm',
   'microVmName',
   'removeMicroVm',
   'worktreeSandboxFor',
-  // docker-sandbox orphan microVM scan + reap (#1527)
   'listMicroVms',
   'reapOrphanMicroVm',
   'shellEscape',
@@ -706,6 +705,7 @@ const INTERNAL_API_KEYS = [
   'TELEMETRY_HOST_PATTERNS',
   'shouldProxyEgress',
   'classifyCiFailure',
+  'collectCiFailureEvidence',
   'watchChecks',
   'watchChecksWithInfraRerun',
   'isPassingConclusion',
