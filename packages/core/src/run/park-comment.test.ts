@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ParkReason } from './outcome.js';
 import {
+  findOwnParkComment,
   issueStateMarker,
+  patchParkComment,
   parkUnblockHint,
   publishParkComment,
   readParkState,
@@ -113,6 +115,7 @@ describe('readParkState', () => {
     const body = renderParkComment(input());
     expect(readParkState([{ id: 1, body }], 7)).toEqual({
       reason: 'fail',
+      autoUnparks: 0,
       lane: 'lane-a',
       runId: 'run-1',
       branch: 'issue-7-x',
@@ -146,7 +149,7 @@ describe('readParkState', () => {
 
   it('reads a state block with only a reason line as no lane, SHA or blockers', () => {
     const body = `**Park state**\n\n\`\`\`\`\`\nreason: fail\n\`\`\`\`\`\n${issueStateMarker(7)}`;
-    expect(readParkState([{ id: 1, body }])).toEqual({ reason: 'fail', blockers: [] });
+    expect(readParkState([{ id: 1, body }])).toEqual({ reason: 'fail', blockers: [], autoUnparks: 0 });
   });
 
   it('lets the lowest id win among marked comments', () => {
@@ -255,5 +258,111 @@ describe('publishParkComment', () => {
       ok: false,
       error: 'plain string',
     });
+  });
+});
+
+describe('park comment counter and status', () => {
+  it('renders auto-unparks and status only when set, leaving the default output unchanged', () => {
+    const plain = renderParkComment(input());
+    expect(plain).not.toContain('auto-unparks');
+    expect(plain).not.toContain('status:');
+    expect(renderParkComment(input({ autoUnparks: 0 }))).toBe(plain);
+    const body = renderParkComment(input({ autoUnparks: 2, status: 'held: x\ny' }));
+    expect(body).toContain('auto-unparks: 2');
+    expect(body).toContain('status: held: x y');
+  });
+
+  it('parses auto-unparks (malformed gives 0) and status', () => {
+    const read = (b: string) => readParkState([{ id: 1, body: b }], 7)!;
+    expect(read(renderParkComment(input())).autoUnparks).toBe(0);
+    expect(read(renderParkComment(input())).status).toBeUndefined();
+    const ok = read(renderParkComment(input({ autoUnparks: 2, status: 'resumed' })));
+    expect(ok.autoUnparks).toBe(2);
+    expect(ok.status).toBe('resumed');
+    const bad = renderParkComment(input({ autoUnparks: 2 })).replace('auto-unparks: 2', 'auto-unparks: two');
+    expect(read(bad).autoUnparks).toBe(0);
+    const huge = renderParkComment(input({ autoUnparks: 2 })).replace(
+      'auto-unparks: 2',
+      'auto-unparks: 99999999999999999999',
+    );
+    expect(read(huge).autoUnparks).toBe(0);
+  });
+});
+
+describe('patchParkComment', () => {
+  it('replaces the reason and the unblock hint', () => {
+    const body = renderParkComment(input({ reason: 'blocked' }));
+    const out = patchParkComment(body, 7, { reason: 'held' })!;
+    expect(out).toContain('reason: held');
+    expect(out).not.toContain('reason: blocked');
+    expect(out).toContain(`**What unblocks this:** ${parkUnblockHint('held', 7)}`);
+    expect(readParkState([{ id: 1, body: out }], 7)?.reason).toBe('held');
+  });
+
+  it('appends then replaces status and auto-unparks, leaving other lines alone', () => {
+    const body = renderParkComment(input());
+    const first = patchParkComment(body, 7, { status: 'resumed', autoUnparks: 1 })!;
+    expect(first).toContain('status: resumed');
+    expect(first).toContain('auto-unparks: 1');
+    expect(first).toContain('branch: issue-7-x');
+    const second = patchParkComment(first, 7, { status: 'held: a\nb', autoUnparks: 2 })!;
+    expect(second.match(/^status:/gm)).toHaveLength(1);
+    expect(second).toContain('status: held: a b');
+    expect(second).toContain('auto-unparks: 2');
+    expect(second).toContain('reason: fail');
+    expect(second).toContain('**What unblocks this:** fix the failing');
+  });
+
+  it('tolerates a body with no hint line', () => {
+    const body = renderParkComment(input()).replace(/\*\*What unblocks this:\*\*.*\n/, '');
+    expect(patchParkComment(body, 7, { reason: 'held' })).toContain('reason: held');
+  });
+
+  it('returns null when there is no state block', () => {
+    expect(patchParkComment('nothing here', 7, { status: 'x' })).toBeNull();
+  });
+});
+
+describe('findOwnParkComment', () => {
+  it('returns undefined when none match and ignores foreign authors and null bodies', async () => {
+    const f = fakeOctokit([
+      { id: 1, body: issueStateMarker(7), user: { id: 5 } },
+      { id: 2, body: null, user: { id: ME } },
+    ]);
+    expect(await findOwnParkComment({ octokit: f.octokit, repo: 'o/r', issue: 7 })).toBeUndefined();
+  });
+
+  it('returns the lowest-id own marker comment across pages', async () => {
+    const filler: FakeComment[] = Array.from({ length: 100 }, (_, i) => ({ id: i + 10, body: 'x', user: { id: ME } }));
+    const f = fakeOctokit([
+      ...filler,
+      { id: 600, body: issueStateMarker(7), user: { id: ME } },
+      { id: 500, body: issueStateMarker(7), user: { id: ME } },
+    ]);
+    expect(await findOwnParkComment({ octokit: f.octokit, repo: 'o/r', issue: 7 })).toEqual({
+      id: 500,
+      body: issueStateMarker(7),
+    });
+  });
+});
+
+describe('upsertParkComment auto-unparks counter', () => {
+  it('carries the counter from the existing comment on a re-park', async () => {
+    const f = fakeOctokit([{ id: 1, body: renderParkComment(input({ autoUnparks: 2 })), user: { id: ME } }]);
+    await upsertParkComment({ octokit: f.octokit, repo: 'o/r', input: input({ reason: 'config' }) });
+    expect(f.store[0].body).toContain('auto-unparks: 2');
+    expect(f.store[0].body).toContain('reason: config');
+  });
+
+  it('lets an explicit autoUnparks win', async () => {
+    const f = fakeOctokit([{ id: 1, body: renderParkComment(input({ autoUnparks: 2 })), user: { id: ME } }]);
+    await upsertParkComment({ octokit: f.octokit, repo: 'o/r', input: input({ autoUnparks: 1 }) });
+    expect(f.store[0].body).toContain('auto-unparks: 1');
+  });
+
+  it('starts at zero when the existing comment is unreadable', async () => {
+    const f = fakeOctokit([{ id: 1, body: issueStateMarker(7), user: { id: ME } }]);
+    await upsertParkComment({ octokit: f.octokit, repo: 'o/r', input: input() });
+    expect(f.store[0].body).not.toContain('auto-unparks');
   });
 });

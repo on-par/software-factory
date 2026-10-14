@@ -20,6 +20,8 @@ export interface ParkCommentInput {
   lane?: string;
   parkSha?: string;
   blockers?: readonly number[];
+  autoUnparks?: number;
+  status?: string;
 }
 
 /** `reason` is a plain string because the parser reads untrusted text. */
@@ -30,6 +32,9 @@ export interface ParkState {
   branch?: string;
   parkSha?: string;
   blockers: number[];
+  /** Times the blocked-park poller re-queued this issue; 0 when the line is absent or malformed. */
+  autoUnparks: number;
+  status?: string;
 }
 
 export interface ParkStateComment {
@@ -70,14 +75,17 @@ function clean(v: string): string {
 
 export function renderParkComment(input: ParkCommentInput): string {
   const blockers = input.blockers ?? [];
-  const stateBlock = [
+  const stateLines = [
     `reason: ${clean(input.reason)}`,
     `lane: ${(input.lane && clean(input.lane)) || '-'}`,
     `run: ${clean(input.runId)}`,
     `branch: ${clean(input.branch)}`,
     `park-sha: ${(input.parkSha && clean(input.parkSha)) || '-'}`,
     `blockers: ${blockers.length > 0 ? blockers.map((n) => `#${n}`).join(', ') : '-'}`,
-  ].join('\n');
+  ];
+  if (input.autoUnparks !== undefined && input.autoUnparks > 0) stateLines.push(`auto-unparks: ${input.autoUnparks}`);
+  if (input.status) stateLines.push(`status: ${clean(input.status)}`);
+  const stateBlock = stateLines.join('\n');
   return [
     '### Factory park state',
     '',
@@ -95,7 +103,7 @@ export function renderParkComment(input: ParkCommentInput): string {
   ].join('\n');
 }
 
-function parseStateBlock(body: string): ParkState | null {
+function findStateFence(body: string): { lines: string[]; open: number; close: number } | null {
   const lines = body.split('\n');
   const heading = lines.indexOf(STATE_HEADING);
   if (heading === -1) return null;
@@ -104,6 +112,13 @@ function parseStateBlock(body: string): ParkState | null {
   if (open === -1) return null;
   const close = lines.indexOf(lines[open], open + 1);
   if (close === -1) return null;
+  return { lines, open, close };
+}
+
+function parseStateBlock(body: string): ParkState | null {
+  const fence = findStateFence(body);
+  if (fence === null) return null;
+  const { lines, open, close } = fence;
   const values = new Map<string, string>();
   for (const line of lines.slice(open + 1, close)) {
     const sep = line.indexOf(':');
@@ -117,6 +132,9 @@ function parseStateBlock(body: string): ParkState | null {
     return v === undefined || v === '' || v === '-' ? undefined : v;
   };
   const blockers = [...(values.get('blockers') ?? '').matchAll(/#(\d+)/g)].map((m) => Number(m[1]));
+  const rawAutoUnparks = values.get('auto-unparks') ?? '';
+  const autoUnparks =
+    /^\d+$/.test(rawAutoUnparks) && Number.isSafeInteger(Number(rawAutoUnparks)) ? Number(rawAutoUnparks) : 0;
   return {
     reason,
     lane: optional('lane'),
@@ -124,7 +142,37 @@ function parseStateBlock(body: string): ParkState | null {
     branch: optional('branch'),
     parkSha: optional('park-sha'),
     blockers,
+    autoUnparks,
+    status: optional('status'),
   };
+}
+
+export interface ParkCommentPatch {
+  reason?: ParkReason;
+  status?: string;
+  autoUnparks?: number;
+}
+
+/** Rewrites the state block (and the unblock hint on a reason change) in place; null when there is no state block. */
+export function patchParkComment(body: string, issue: number, patch: ParkCommentPatch): string | null {
+  const fence = findStateFence(body);
+  if (fence === null) return null;
+  const { lines, open, close } = fence;
+  const inner = lines.slice(open + 1, close);
+  const setLine = (key: string, value: string): void => {
+    const at = inner.findIndex((l) => l.slice(0, Math.max(l.indexOf(':'), 0)).trim() === key);
+    if (at === -1) inner.push(`${key}: ${value}`);
+    else inner[at] = `${key}: ${value}`;
+  };
+  if (patch.reason !== undefined) setLine('reason', clean(patch.reason));
+  if (patch.status !== undefined) setLine('status', clean(patch.status));
+  if (patch.autoUnparks !== undefined) setLine('auto-unparks', String(patch.autoUnparks));
+  const out = [...lines.slice(0, open + 1), ...inner, ...lines.slice(close)];
+  if (patch.reason !== undefined) {
+    const hint = out.findIndex((l) => l.startsWith('**What unblocks this:**'));
+    if (hint !== -1) out[hint] = `**What unblocks this:** ${parkUnblockHint(patch.reason, issue)}`;
+  }
+  return out.join('\n');
 }
 
 /** Lowest-id marked comment decides; null when none, or when its state block is unreadable. */
@@ -139,6 +187,35 @@ export function readParkState(comments: readonly ParkStateComment[], issue?: num
   return parseStateBlock(marked[0].body);
 }
 
+/** The lowest-id marker comment written by the authenticated user, or undefined. */
+export async function findOwnParkComment(deps: {
+  octokit: Octokit;
+  repo: string;
+  issue: number;
+}): Promise<ParkStateComment | undefined> {
+  const { octokit, repo, issue } = deps;
+  const [owner, name] = repo.split('/');
+  const marker = issueStateMarker(issue);
+  const { data: me } = await octokit.rest.users.getAuthenticated();
+  let existing: ParkStateComment | undefined;
+  for (let page = 1; ; page++) {
+    const { data } = await octokit.rest.issues.listComments({
+      owner,
+      repo: name,
+      issue_number: issue,
+      per_page: PAGE_SIZE,
+      page,
+    });
+    for (const comment of data) {
+      const body = comment.body ?? '';
+      if (comment.user?.id !== me.id || !body.includes(marker)) continue;
+      if (existing === undefined || comment.id < existing.id) existing = { id: comment.id, body };
+    }
+    if (data.length < PAGE_SIZE) break;
+  }
+  return existing;
+}
+
 export async function upsertParkComment(deps: {
   octokit: Octokit;
   repo: string;
@@ -146,27 +223,13 @@ export async function upsertParkComment(deps: {
 }): Promise<{ commentId: number; created: boolean }> {
   const { octokit, repo, input } = deps;
   const [owner, name] = repo.split('/');
-  const marker = issueStateMarker(input.issue);
-  const { data: me } = await octokit.rest.users.getAuthenticated();
-  let existing: number | undefined;
-  for (let page = 1; ; page++) {
-    const { data } = await octokit.rest.issues.listComments({
-      owner,
-      repo: name,
-      issue_number: input.issue,
-      per_page: PAGE_SIZE,
-      page,
-    });
-    for (const comment of data) {
-      if (comment.user?.id !== me.id || !(comment.body ?? '').includes(marker)) continue;
-      if (existing === undefined || comment.id < existing) existing = comment.id;
-    }
-    if (data.length < PAGE_SIZE) break;
-  }
-  const body = renderParkComment(input);
+  const existing = await findOwnParkComment({ octokit, repo, issue: input.issue });
+  const autoUnparks =
+    input.autoUnparks ?? (existing === undefined ? 0 : (readParkState([existing], input.issue)?.autoUnparks ?? 0));
+  const body = renderParkComment({ ...input, autoUnparks });
   if (existing !== undefined) {
-    await octokit.rest.issues.updateComment({ owner, repo: name, comment_id: existing, body });
-    return { commentId: existing, created: false };
+    await octokit.rest.issues.updateComment({ owner, repo: name, comment_id: existing.id, body });
+    return { commentId: existing.id, created: false };
   }
   const { data } = await octokit.rest.issues.createComment({ owner, repo: name, issue_number: input.issue, body });
   return { commentId: data.id, created: true };

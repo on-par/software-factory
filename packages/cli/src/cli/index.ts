@@ -201,6 +201,7 @@ import {
   logCost,
   logEvent,
   planQueueMigration,
+  pollBlockedParks,
   readCosts,
   readGithubQueueSnapshot,
   reapLaneWorktree,
@@ -261,7 +262,7 @@ import { buildProgram } from './program.js';
 import { buildCostJson } from './cost-json.js';
 import { buildQueueAddJson } from './queue-add-json.js';
 import { buildQueueListJson } from './queue-list.js';
-import { runUnpark, UnparkError, type UnparkJson } from './unpark.js';
+import { appendUnparkEvent, runUnpark, UnparkError, type UnparkJson } from './unpark.js';
 import { buildRunsJson, parseRunsLimit } from './runs.js';
 import { buildRunDiffstatJson, NoRunError, parseDiffstatIssue, type RunDiffstatJson } from './runs-diffstat.js';
 import {
@@ -383,6 +384,7 @@ export type InternalOpKey =
   | 'readCosts'
   | 'sweepWorktrees'
   | 'releaseStaleClaims'
+  | 'pollBlockedParks'
   | 'findUnmergedGreenPrs'
   | 'listOrphanContainers'
   | 'reapOrphanContainers'
@@ -397,6 +399,7 @@ const DEFAULT_INTERNAL_OPS: InternalOps = {
   readCosts,
   sweepWorktrees,
   releaseStaleClaims,
+  pollBlockedParks,
   findUnmergedGreenPrs,
   listOrphanContainers,
   reapOrphanContainers,
@@ -416,6 +419,7 @@ function resolveInternalOps(overrides: Partial<InternalOps>, base: InternalOps =
     readCosts: overrides.readCosts ?? base.readCosts,
     sweepWorktrees: overrides.sweepWorktrees ?? base.sweepWorktrees,
     releaseStaleClaims: overrides.releaseStaleClaims ?? base.releaseStaleClaims,
+    pollBlockedParks: overrides.pollBlockedParks ?? base.pollBlockedParks,
     findUnmergedGreenPrs: overrides.findUnmergedGreenPrs ?? base.findUnmergedGreenPrs,
     listOrphanContainers: overrides.listOrphanContainers ?? base.listOrphanContainers,
     reapOrphanContainers: overrides.reapOrphanContainers ?? base.reapOrphanContainers,
@@ -3012,19 +3016,6 @@ async function recordQueueAdded(lane: string, results: readonly EnqueueResult[])
   }
 }
 
-/** Append one `issue_unparked` event; the silent sink keeps stdout untouched. */
-async function recordIssueUnparked(result: UnparkJson): Promise<void> {
-  try {
-    const eventsFile = getFactoryPaths(await getRepoRoot()).events;
-    createLogger(eventsFile, { lane: result.lane, issue: result.issue }, { out: { write: () => true } }).info(
-      'issue_unparked',
-      `#${result.issue} unparked → ${result.lane} (order ${result.order})`,
-    );
-  } catch (err) {
-    console.error(styleText('yellow', `factory: unpark event not recorded — ${errorDetail(err)}`));
-  }
-}
-
 export async function cmdUnpark(issueArg: string, opts: { lane?: string; json?: boolean } = {}): Promise<void> {
   const issue = parseIssueArg(issueArg);
   let result: UnparkJson;
@@ -3041,7 +3032,11 @@ export async function cmdUnpark(issueArg: string, opts: { lane?: string; json?: 
     const code = err instanceof UnparkError ? err.code : 'unpark-failed';
     throw new CliExitError(`factory: unpark #${issue} [${code}] — ${errorDetail(err)}`, 1);
   }
-  await recordIssueUnparked(result);
+  try {
+    appendUnparkEvent(result, getFactoryPaths(await getRepoRoot()).events);
+  } catch (err) {
+    console.error(styleText('yellow', `factory: unpark event not recorded — ${errorDetail(err)}`));
+  }
   if (opts.json) {
     console.log(JSON.stringify(result));
     return;
@@ -4109,6 +4104,7 @@ export interface CliDeps {
   readCosts?: typeof readCosts;
   sweepWorktrees?: typeof sweepWorktrees;
   releaseStaleClaims?: typeof releaseStaleClaims;
+  pollBlockedParks?: typeof pollBlockedParks;
   findUnmergedGreenPrs?: typeof findUnmergedGreenPrs;
   listOrphanContainers?: typeof listOrphanContainers;
   reapOrphanContainers?: typeof reapOrphanContainers;

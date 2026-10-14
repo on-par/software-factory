@@ -236,6 +236,51 @@ describe('cli', () => {
       expect(ops.releaseStaleClaims).not.toHaveBeenCalled();
     });
 
+    it('--reconcile reports the blocked-parks summary and logs poller events', async () => {
+      h.claudeAvailable = true;
+      h.blockedParks = [
+        { issue: 7, outcome: 'unparked', lane: 'a', order: 1 },
+        { issue: 8, outcome: 'held', detail: 'blocker #9 closed not_planned' },
+        { issue: 10, outcome: 'waiting' },
+        { issue: 11, outcome: 'skipped', detail: 'no blockers' },
+        { issue: 12, outcome: 'raced' },
+      ];
+      const res = await runMain('doctor', '--reconcile');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('reconcile: blocked parks: 1 unparked, 1 held, 0 capped, 1 waiting');
+      expect(logged()).toContain('#8 held — blocker #9 closed not_planned');
+      expect(logged()).toContain('#12 raced');
+      const { logEvent } = ops.pollBlockedParks.mock.calls[0][0];
+      expect(() => {
+        logEvent('issue_unparked', 7, '#7 auto-unparked');
+        logEvent('warn', 7, 'park comment not updated');
+      }).not.toThrow();
+    });
+
+    it('--reconcile survives a rejected pollBlockedParks', async () => {
+      h.claudeAvailable = true;
+      ops.pollBlockedParks.mockRejectedValueOnce(new Error('poll boom'));
+      const res = await runMain('doctor', '--reconcile');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('reconcile: blocked park poll failed: poll boom');
+    });
+
+    it('--reconcile skips blocked parks when no GitHub token is available', async () => {
+      h.claudeAvailable = true;
+      delete process.env.GITHUB_TOKEN;
+      delete process.env.GH_TOKEN;
+      h.execSyncImpl = (cmd: string) => {
+        if (cmd.includes('rev-parse')) return h.repoRoot;
+        if (cmd.includes('status --porcelain')) return '';
+        if (cmd.includes('gh auth token')) throw new Error('not logged in');
+        if (cmd.includes('gh auth status')) throw new Error('not logged in');
+        return '';
+      };
+      await runMain('doctor', '--reconcile');
+      expect(logged()).toContain('reconcile: skipping blocked parks: no GitHub repo or token');
+      expect(ops.pollBlockedParks).not.toHaveBeenCalled();
+    });
+
     it('reports a green-and-ready PR with its owning issue', async () => {
       h.claudeAvailable = true;
       h.greenPrs = [{ number: 957, branch: 'ship-it/939-x', title: 't', issue: 939, ageHours: 9 }];

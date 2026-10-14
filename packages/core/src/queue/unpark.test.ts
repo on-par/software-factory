@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
-import type { QueueGitHubClient } from '@on-par/factory-core/internal';
 import { describe, expect, it, vi } from 'vitest';
+import type { QueueGitHubClient } from './github-queue.js';
 import { runUnpark, UnparkError } from './unpark.js';
 
 function fakeClient(labels: Map<number, string[]>) {

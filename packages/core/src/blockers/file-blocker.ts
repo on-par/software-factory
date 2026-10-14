@@ -85,6 +85,9 @@ export function hashBlockerClaim(claim: BlockerClaim): string {
   return createHash('sha256').update(normalized).digest('hex').slice(0, 12);
 }
 
+/** Matches the marker of any factory-filed blocker, whatever its parent or hash. */
+export const BLOCKER_MARKER_RE = /<!-- factory-blocker v1 parent:\d+ hash:/;
+
 export function blockerMarker(parent: number, hash: string): string {
   return `<!-- factory-blocker v1 parent:${parent} hash:${hash} -->`;
 }
