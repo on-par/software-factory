@@ -151,9 +151,18 @@ describe('shipped defaults', () => {
     }
 
     expect(defaultModelsConfig.tiers.boss).toHaveLength(8);
-    expect(defaultModelsConfig.tiers.worker).toHaveLength(12);
+    expect(defaultModelsConfig.tiers.worker).toHaveLength(11);
     expect(defaultModelsConfig.tiers.checker).toHaveLength(7);
     expect(defaultModelsConfig.tiers.triage).toHaveLength(4);
+  });
+
+  it('flags opencode-deepseek-v4-flash-free as trainsOnPrompts and lists it in no tier', () => {
+    expect(defaultModelsConfig.models['opencode-deepseek-v4-flash-free'].trainsOnPrompts).toBe(true);
+    const tiered = new Set(Object.values(defaultModelsConfig.tiers).flat());
+    expect(tiered.has('opencode-deepseek-v4-flash-free')).toBe(false);
+    for (const [id, def] of Object.entries(defaultModelsConfig.models)) {
+      if (def.trainsOnPrompts) expect(tiered.has(id), `trainsOnPrompts model '${id}' is in a tier`).toBe(false);
+    }
   });
 
   it('preserves tier order invariants the router depends on', () => {

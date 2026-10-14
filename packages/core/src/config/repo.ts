@@ -30,10 +30,10 @@ import {
   type MergePolicySource,
   type ModelsConfig,
 } from './index.js';
-
 import { RepoHarnessesSchema, resolveRepoHarnesses } from './repo-harnesses.js';
 import { ModelEffortsSchema } from './effort.js';
 import { assertAgenticBuildPin } from './repo-build-pin.js';
+import { assertTierMayRoute } from './repo-tier-guard.js';
 
 // ---------- Schema ----------
 
@@ -351,10 +351,9 @@ export function loadRepoConfig(repoRoot: string, stateRoot?: string): RepoFactor
 // ---------- Applying to ModelsConfig ----------
 
 /** Apply a repo config's model registry, tier overrides, harnesses, provider flags, and checker/triage pins to a
- *  packaged ModelsConfig, in that order (packaged registry, then `models.registry`, then tiers, providers, pins).
- *  Pure — returns a new ModelsConfig; `null` repo is the identity transform (the critical no-`.factory/config.json`
- *  regression surface). Throws naming the offending tier/model on an unknown model id, or naming the tier emptied
- *  by provider/tier settings, redefining a packaged model id, or redeclaring a built-in harness id. */
+ *  packaged ModelsConfig, in that order. Pure; `null` repo is the identity transform (the critical no-config
+ *  regression surface). Throws naming the tier/model on an unknown or `trainsOnPrompts` id (pin it instead), an
+ *  emptied tier, a redefined packaged id, or a redeclared harness. */
 export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | null): ModelsConfig {
   if (!repo) return models;
 
@@ -384,6 +383,7 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
             `.factory/config.json: tier '${tierName}' references unknown model '${id}' (known models: ${knownModels})${retiredModelHint(id)}`,
           );
         }
+        assertTierMayRoute(tierName, id, mergedModels[id]);
       }
       tiers[tierName] = [...modelIds];
     }
