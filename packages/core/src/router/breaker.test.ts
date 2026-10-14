@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { gateBuildOnBreaker, parseResetCooldownMs, ProviderBreaker } from './breaker.js';
+import { gateBuildOnBreaker, MAX_REPORTED_COOLDOWN_MS, parseResetCooldownMs, ProviderBreaker } from './breaker.js';
 
 const tempDirs = new Set<string>();
 
@@ -169,6 +169,7 @@ describe('parseResetCooldownMs', () => {
     const text =
       'AI_APICallError: Weekly usage limit reached. Resets in 3hr 17min. To continue using this model now, enable usage from your available balance: https://opencode.ai/workspace/wrk_x/go';
     expect(parseResetCooldownMs(text)).toBe((3 * 60 + 17) * 60_000 + 2 * 60_000);
+    expect(parseResetCooldownMs('Resets in 3hr 17min')).toBe(11_940_000);
   });
 
   it('parses minutes-only durations', () => {
@@ -191,5 +192,31 @@ describe('parseResetCooldownMs', () => {
 
   it('returns null when "resets in" appears without a parseable duration', () => {
     expect(parseResetCooldownMs('Your quota resets in a little while.')).toBeNull();
+  });
+
+  it('parses an absolute "resets at" ISO instant against the injected now', () => {
+    const now = Date.parse('2026-10-31T00:00:00Z');
+    expect(parseResetCooldownMs('Your limit resets at 2026-11-01T00:00:00Z.', undefined, now)).toBe(86_520_000);
+    expect(parseResetCooldownMs('Your limit RESETS AT 2026-11-01T00:00:00Z.', undefined, now)).toBe(86_520_000);
+    expect(parseResetCooldownMs('Your limit resets at 2026-11-01T02:00:00+02:00.', undefined, now)).toBe(86_520_000);
+  });
+
+  it('caps a far-future reset at MAX_REPORTED_COOLDOWN_MS', () => {
+    const now = Date.parse('2026-10-31T00:00:00Z');
+    const far = new Date(now + 90 * 24 * 60 * 60_000).toISOString();
+    expect(parseResetCooldownMs(`resets at ${far}`, undefined, now)).toBe(MAX_REPORTED_COOLDOWN_MS);
+  });
+
+  it('returns null for a reset instant in the past', () => {
+    const now = Date.parse('2026-10-31T00:00:00Z');
+    expect(parseResetCooldownMs('resets at 2026-10-30T00:00:00Z', undefined, now)).toBeNull();
+    expect(parseResetCooldownMs('resets at 2026-10-31T00:00:00Z', undefined, now)).toBeNull();
+  });
+
+  it('returns null for an unparseable or offset-less reset instant', () => {
+    const now = Date.parse('2026-10-31T00:00:00Z');
+    expect(parseResetCooldownMs('resets at 2026-13-45T99:00:00Z', undefined, now)).toBeNull();
+    expect(parseResetCooldownMs('resets at 2026-11-01T00:00:00', undefined, now)).toBeNull();
+    expect(parseResetCooldownMs('resets at noon', undefined, now)).toBeNull();
   });
 });
