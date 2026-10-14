@@ -34,6 +34,7 @@ import { lintFactoryConfig } from '../config/config-lint.js';
 import { planPhase as planPhaseDefault, type PlanResult } from '../phases/plan.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
 import { publishParkComment } from './park-comment.js';
+import { blockerParker } from './park-on-blocker.js';
 import { upsertSlicePlanComment } from '../readiness/slice-plan-github.js';
 import { withSliceState } from '../readiness/slice-plan.js';
 import type { ReviewFloorPathChange, ReviewFloorRuleSet } from '../review/floor.js';
@@ -71,9 +72,8 @@ import type {
   ReadinessInfo,
 } from '../types/index.js';
 import type { WorkRequest, WorkRequestSourceKind } from '../work/index.js';
-import type { LaneFileGuard } from './lane-file-guard.js';
-import { touchedFilesFrom } from './lane-file-guard.js';
-import { parkReasonFor, type BuildRoute, type ParkReason, type RunOutcome } from './outcome.js';
+import { type LaneFileGuard, touchedFilesFrom } from './lane-file-guard.js';
+import { parkReasonFor, reportOutcomeFor, type BuildRoute, type ParkReason, type RunOutcome } from './outcome.js';
 import type { RunPolicy } from './policy.js';
 import {
   configParkMessage,
@@ -392,9 +392,6 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
   // Every escalated/parked exit reports the same way a thrown park did before the lift:
   // one terminal event (plus a 'stuck' companion for timeouts) and, when hooks are wired,
   // a local run report + benchmark artifacts (Invariant 5).
-  const reportOutcomeFor = (reason: ParkReason): 'failed' | 'escalated' =>
-    reason === 'escalate' ? 'escalated' : 'failed';
-
   const writeReports = async (
     reportOutcome: 'failed' | 'escalated',
     reason: ParkReason,
@@ -430,6 +427,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     message: string,
     checkFailure?: { failureSignature: string; failingChecks: string[] },
     ciFailure?: CiFailureEvidence,
+    blockers?: readonly number[],
   ): Promise<RunOutcome> => {
     // A blocked park never carries a failure signature, so the ADR-0139 lane breaker and the cross-run stuck check skip it (#2315).
     const failure = reason === 'blocked' ? undefined : checkFailure;
@@ -449,7 +447,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
           runId,
           branch: request.branch,
           lane: request.lane,
-          blockers: [],
+          blockers: [...(blockers ?? [])],
         },
       });
       if (!posted.ok) log('environment_warning', `could not post the issue park comment: ${posted.error}`);
@@ -489,6 +487,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     await writeReports(reportOutcomeFor(reason), reason, message);
     return outcome;
   };
+  const parkOnBlocker = blockerParker({ request, ports, terminalEscalated, terminalParked });
 
   const assertBudget = async (phase: string): Promise<RunOutcome | undefined> => {
     const spend = ports.getIssueSpend?.() ?? 0;
@@ -741,6 +740,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
             `issue #${request.issue} sliced into ${plan.sliced.sliceCount} slice(s): ${plan.escalate ?? 'slice plan recorded'}`,
           );
         }
+        if (plan.blocker) return await parkOnBlocker('plan', plan.blocker, plan.escalate);
         return await terminalEscalated(`plan escalated: ${plan.escalate ?? 'unknown'}`);
       }
       const planBudget = await assertBudget('PLAN');
@@ -850,6 +850,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       });
       route = build.route;
       if (!build.ok) {
+        if (build.blocker) return await parkOnBlocker('build', build.blocker, build.escalate);
         if (build.reason === 'no_diff') {
           return await terminalParked(
             'fail',

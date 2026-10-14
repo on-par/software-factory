@@ -3,6 +3,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { BLOCKED_BY_PROMPT_RULE, type BlockerClaim } from '../blockers/index.js';
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import { captureDiffBase, collectDesignDiff } from '../checkers/design-smells.js';
 import { type LintCommand, resolveLintCommands } from '../checkers/index.js';
@@ -19,12 +20,16 @@ import { applySteering, type ConsumedSteering } from '../steering/index.js';
 import type { Constitution, FailoverReason } from '../types/index.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE } from '../utils/untrusted-input.js';
+import { blockerBuildResult } from './build-blocker.js';
+import type { CommandRunner } from './ship-git.js';
 
 export interface BuildResult {
   ok: boolean;
   model: string;
   route: 'codex' | 'claude' | 'opencode';
   escalate?: string;
+  /** Set when BUILD emitted a valid BLOCKED_BY claim (#2317). ok is false; runIssue files the blocker and parks. */
+  blocker?: BlockerClaim;
   /** Set on a non-escalation build failure; 'no_diff' = worker produced no diff,
    *  'junk_only_diff' = worker changed only generated/cache files. */
   reason?: 'no_diff' | 'junk_only_diff';
@@ -55,7 +60,7 @@ export async function buildPhase(opts: Parameters<typeof buildPhaseImpl>[0]): Pr
           ? 'build failed: worker changed only generated/cache files'
           : r.reason === 'no_diff'
             ? 'build failed: worker produced no diff'
-            : `build escalated: ${r.escalate ?? 'unknown'}`,
+            : `build ${r.blocker ? 'blocked' : 'escalated'}: ${r.escalate ?? 'unknown'}`,
   );
 }
 
@@ -119,6 +124,8 @@ async function buildPhaseImpl(opts: {
   collectDiff?: typeof collectDesignDiff;
   /** Injectable for tests; defaults to captureDiffBase. */
   captureBase?: typeof captureDiffBase;
+  /** Injectable for tests; runs the best-effort branch push on a blocker park. Defaults to child_process exec. */
+  run?: CommandRunner;
 }): Promise<BuildResult> {
   const {
     issue,
@@ -322,6 +329,10 @@ async function buildPhaseImpl(opts: {
     });
   }
 
+  const publish = !opts.disablePublish && !localOnly;
+  const blocked = await blockerBuildResult({ result, route, branch, worktree, publish, run: opts.run, log });
+  if (blocked) return blocked;
+
   if (isEscalation(result.output)) {
     const escalateLine = escalationLine(result.output);
     log('escalate', escalateLine ?? 'build escalated');
@@ -370,6 +381,7 @@ Rules:
 - Create exactly one git commit.
 - Do not push, open a PR, or merge.
 - If something is genuinely ambiguous, print a line starting exactly with "ESCALATE:" followed by the question, then stop.
+- ${BLOCKED_BY_PROMPT_RULE}
 
 ${UNTRUSTED_ISSUE_BODY_NOTICE}
 
@@ -409,6 +421,7 @@ ${spec}
 - Commit atomically: one commit per independently testable functional change, with a clear conventional message. Never mix unrelated functional changes in one commit. A single-slice task yields exactly ONE commit.
 - Do NOT push, do NOT open a pull request, do NOT merge. CHECK and SHIP run next.
 - If something is genuinely ambiguous, print a line starting exactly with "ESCALATE:" followed by the question, then stop. If you are stuck, commit what safely builds and passes, say what is blocked in the commit message, and stop.
+- ${BLOCKED_BY_PROMPT_RULE} Commit what safely builds first.
 - Work directly. Use sub-agents only for genuinely independent work.
 
 ${promptTail(appPort, appBaseUrl, designGrounding)}`;
@@ -439,6 +452,7 @@ ${UNTRUSTED_ISSUE_BODY_NOTICE}
 - Commit atomically: one commit per independently testable functional change, with a clear conventional message. Never mix unrelated functional changes in one commit.
 - Do NOT merge (the factory merges). Your session ends when you end your turn, so do not stop until: (1) branch ${branch} is pushed, (2) an open PR exists with 'Closes #${issue}' in its body, ${skipCI ? '(3) local verify passes (CI is intentionally skipped: do not block on GitHub Actions CI or escalate if CI cannot run), (4) the PR is ready.' : '(3) CI is green, (4) the PR is ready.'}
 - If and only if something is genuinely ambiguous, print a line starting exactly with "ESCALATE:" followed by the question, then stop.
+- ${BLOCKED_BY_PROMPT_RULE}
 
 ${promptTail(appPort, appBaseUrl, designGrounding)}`;
 }

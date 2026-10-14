@@ -12,3 +12,7 @@ export {
   renderBlockerBody,
 } from './file-blocker.js';
 export type { BlockerClaim, BlockerRefusalReason, FileBlockerDeps, FileBlockerResult } from './file-blocker.js';
+export { BLOCKED_BY_PROMPT_RULE, MAX_BLOCKER_TITLE_LENGTH, claimRestatesParent, parseBlockerClaim } from './claim.js';
+export type { BlockerClaimParse } from './claim.js';
+export { runBlockerTrigger } from './trigger.js';
+export type { BlockerTriggerOutcome } from './trigger.js';

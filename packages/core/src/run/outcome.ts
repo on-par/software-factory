@@ -52,6 +52,10 @@ export type RunOutcome =
 /** Core classifies structurally — via a parked RunOutcome on `err.outcome` or a
  *  `parkReason` marker property — rather than `instanceof`, because core cannot import
  *  the CLI's error classes (LaneParkError, LandConflictError, CiFailedError). */
+/** The report outcome a terminal park or escalate exit writes (#2317 moved this out of run-issue.ts for the max-lines guard). */
+export const reportOutcomeFor = (reason: ParkReason): 'failed' | 'escalated' =>
+  reason === 'escalate' ? 'escalated' : 'failed';
+
 export function parkReasonFor(err: unknown): ParkReason {
   const outcome = (err as { outcome?: RunOutcome } | null | undefined)?.outcome;
   if (outcome && outcome.state === 'parked') return outcome.reason;

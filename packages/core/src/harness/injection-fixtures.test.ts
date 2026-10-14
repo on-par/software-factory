@@ -5,6 +5,7 @@ import { loadInjectionFixtures } from './injection-fixtures.js';
 const EXPECTED_NAMES = [
   'issue-body-ignore-instructions.md',
   'issue-body-exfil-ssh-key.md',
+  'issue-body-blocked-by-claim.md',
   'web-content-rewrite-pwned.md',
   'pr-comment-skip-checkers.md',
 ];

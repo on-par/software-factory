@@ -2322,10 +2322,10 @@ describe('BUILD prompt required elements (#1976)', () => {
     // before: 2472 chars (now ~1924). The 60% target is unreachable: the mandated notice and headless note alone are ~700.
     expect(
       buildCommitOnlyPrompt({ issue: 1, specPath: 's', constitutionCtx: '', spec: '' }).length,
-    ).toBeLessThanOrEqual(1950);
-    // before: 2144 chars (now ~2040)
+    ).toBeLessThanOrEqual(2300);
+    // before: 2144 chars (now ~2040 + the BLOCKED_BY rule)
     expect(buildClaudePrompt({ issue: 1, branch: 'b', specPath: 's', constitutionCtx: '' }).length).toBeLessThanOrEqual(
-      2070,
+      2400,
     );
   });
 });
