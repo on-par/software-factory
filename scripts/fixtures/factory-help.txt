@@ -31,6 +31,7 @@ Setup:
   doctor [options]                       Check your environment (git, agent install and sign-in, gh auth, GitHub token, npm, sandbox, .factory/)
   constitution [options]                 Manage product constitutions — .factory/constitution.md in this repo is the source of truth
   models [options]                       List models with their tiers, cost per 1M tokens, and availability
+  harness                                Check agent CLIs declared under harnesses: in .factory/config.yaml
   migrate [options]                      Upgrade .factory/ to the v2 layout (config, constitution.md, .gitignore, state/); --to-yaml converts config.json to config.yaml
   help [command]                         display help for command
 
@@ -57,7 +58,7 @@ Advanced / experimental:
   worktree                               Clean up stale factory worktrees (gc)
   reset [options] <issue...>             Remove an issue's local factory state (worktree, local branch, plan/phase files, rework history, logs, leases) so the next run starts fresh. A worktree or branch with uncommitted changes or unpushed commits is kept unless --force is passed. Do not run while that issue's lane is active. Preview with --dry-run
   daemon                                 Manage factoryd, the long-running background service for this user
-  self-update [options]                  Check npm for a newer factory release (read-only; nothing is installed)
+  self-update [options]                  Check npm for a newer factory release (--check), or install an exact stable release (--to)
   proxy                                  Run the opt-in lane reverse proxy in the foreground (run and supervise start it themselves)
   hosted                                 Experimental remote-runner execution (needs FACTORY_HOSTED_EXEC=1)
   local-small-dry-run [options] <issue>  Create a bounded local-small step plan and first context pack without changing source files

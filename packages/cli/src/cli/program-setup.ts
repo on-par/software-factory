@@ -1,6 +1,7 @@
 // packages/cli/src/cli/program-setup.ts — registers the Setup help-group commands (#2793)
 
 import type { Command } from 'commander';
+import { cmdHarnessCheck } from './harness-check.js';
 import type { ProgramHandlers } from './index.js';
 
 export function registerSetupCommands(program: Command, handlers: ProgramHandlers): void {
@@ -45,6 +46,16 @@ export function registerSetupCommands(program: Command, handlers: ProgramHandler
     .description('List models with their tiers, cost per 1M tokens, and availability')
     .option('--doctor', 'Probe provider CLIs and env keys; report per-model reachability')
     .action(handlers.cmdModels);
+
+  const harnessCmd = program
+    .command('harness')
+    .description('Check agent CLIs declared under harnesses: in .factory/config.yaml');
+  harnessCmd
+    .command('check <id>')
+    .description('Run the harness contract kit against a declared harness; exit 0 only when every case passes')
+    .option('--model <id>', 'Registry model to run (default: the first models.registry entry on that harness)')
+    .option('--no-injection', 'Skip the prompt-injection cases (they call the real CLI and spend tokens)')
+    .action((id: string, opts: { model?: string; injection?: boolean }) => cmdHarnessCheck(id, opts));
 
   program
     .command('doctor')

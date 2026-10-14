@@ -7,10 +7,9 @@ import * as publicApi from './index.js';
 import * as internalApi from './internal.js';
 import * as kpisApi from './kpis-entry.js';
 import * as testingApi from './testing.js';
-// Pins the exact export surface of each @on-par/factory-core entry point
-// (ADR-0004). Object.keys(...) only reflects runtime values — type-only
-// exports (export type ...) don't appear at runtime, so these allowlists
-// list value exports only.
+// Pins the exact export surface of each @on-par/factory-core entry point (ADR-0004).
+// Object.keys(...) only reflects runtime values, not type-only exports, so these
+// allowlists list value exports only.
 
 const PUBLIC_API_KEYS = [
   // Config
@@ -780,6 +779,7 @@ const INTERNAL_API_KEYS = [
   'createBoardQueueScheduler',
   // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
   'wrapCommandInSandbox',
+  'runHarnessCheck',
 ];
 
 const TESTING_API_KEYS = [
