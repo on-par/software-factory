@@ -943,13 +943,13 @@ export class CliExitError extends Error {
   }
 }
 
-/** Parse a CLI <issue> argument. Throws CliExitError(2) before any git/GitHub work runs. */
+/** Parse a CLI <issue> argument; rejects unsafe integers (#2836), also used by reset. Throws CliExitError(2) before any git/GitHub work runs. */
 export function parseIssueArg(raw: string): number {
-  const trimmed = raw.trim();
-  if (!/^\d+$/.test(trimmed) || Number(trimmed) < 1) {
+  const n = /^\d+$/.test(raw.trim()) ? Number(raw) : NaN;
+  if (!Number.isSafeInteger(n) || n < 1) {
     throw new CliExitError(`factory: invalid issue argument '${raw}' — expected a positive integer issue number`, 2);
   }
-  return Number(trimmed);
+  return n;
 }
 
 /** Run `factory feedback` and print the filed issue; validation errors become exit-2 CliExitErrors. */
@@ -2703,7 +2703,7 @@ export async function cmdReset(
 ): Promise<void> {
   let nums: number[];
   try {
-    nums = parseResetIssues(issues);
+    nums = parseResetIssues(issues.map((raw) => String(parseIssueArg(raw))));
   } catch (err: any) {
     throw new CliExitError(err.message, 2);
   }

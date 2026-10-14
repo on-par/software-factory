@@ -117,7 +117,6 @@ import {
   LaneEnvironmentPauseError,
   ghRepoViewFailureMessage,
   main,
-  parseIssueArg,
   shipIssue as cliShipIssue,
 } from './cli/index.js';
 
@@ -4196,7 +4195,7 @@ bash scripts/verify.sh
     it('exits 2 on a non-numeric issue', async () => {
       const res = await runMain('reset', 'abc');
       expect(res).toEqual({ exited: true, code: 2 });
-      expect(errored()).toContain('is not an issue number');
+      expect(errored()).toContain('expected a positive integer issue number');
     });
 
     it('exits 2 when --branch-prefix has no letters or digits', async () => {
@@ -5512,29 +5511,16 @@ describe('CliExitError (direct command invocation)', () => {
 });
 
 // ===========================================================================
-describe('parseIssueArg', () => {
-  it('returns the parsed number for a valid issue argument', () => {
-    expect(parseIssueArg('123')).toBe(123);
-  });
-
-  it('trims surrounding whitespace before parsing', () => {
-    expect(parseIssueArg(' 42 ')).toBe(42);
-  });
-
-  it.each(['abc', '', '12abc', '1.5', '-3', '0', '#123'])(
-    "throws CliExitError(2) naming the invalid argument for '%s'",
-    (raw) => {
-      expect(() => parseIssueArg(raw)).toThrowError(CliExitError);
-      try {
-        parseIssueArg(raw);
-        expect.fail('expected parseIssueArg to throw');
-      } catch (err) {
-        expect(err).toMatchObject({
-          name: 'CliExitError',
-          code: 2,
-          message: expect.stringContaining(`'${raw}'`),
-        });
-      }
+describe('parseIssueArg rejects unsafe integers across commands', () => {
+  it.each([['ship'], ['run-issue'], ['queue', 'add', 'default'], ['reset']])(
+    "'%s 9007199254740993' exits 2 before any GitHub work",
+    async (...args) => {
+      const res = await runMain(...args, '9007199254740993');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain("invalid issue argument '9007199254740993'");
+      expect(errored()).toContain('expected a positive integer issue number');
+      expect(h.octokit.rest.issues.get).not.toHaveBeenCalled();
+      expect(h.octokit.rest.pulls.list).not.toHaveBeenCalled();
     },
   );
 });
