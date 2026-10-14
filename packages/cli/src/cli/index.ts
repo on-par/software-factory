@@ -52,12 +52,7 @@ import type {
   WatchdogPolicySource,
   WorkRequest,
 } from '@on-par/factory-core';
-import {
-  BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION,
-  BRANCH_PREFIX_OPTION_DESCRIPTION,
-  INVALID_BRANCH_PREFIX_MESSAGE,
-  resolveBranchPrefixOption,
-} from './branch-prefix.js';
+import { INVALID_BRANCH_PREFIX_MESSAGE, resolveBranchPrefixOption } from './branch-prefix.js';
 import {
   acquirePortLease,
   aggregateCosts,
@@ -209,7 +204,6 @@ import {
   createDaemonLogSink,
   factoryBranchIssue,
   factoryBranchPrefixes,
-  LEGACY_BRANCH_PREFIX,
   createDockerEngine,
   createFactorydServer,
   createRunRuntime,
@@ -220,7 +214,6 @@ import {
   createOctokitGreenPrClient,
   createOctokitQueueClient,
   daemonRuntimePaths,
-  DEFAULT_FACTORYD_PORT,
   defaultRegistryPath,
   ensureDir,
   FACTORY_RUNTIME_CONFIG_KEYS,
@@ -274,7 +267,6 @@ import {
   hasOpencodeLoginEvidence,
 } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
-import { Command } from 'commander';
 import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
 import {
   cmdClassifierBacktest,
@@ -295,7 +287,7 @@ import { setLandRuntime } from './land-runtime.js';
 import { shipIssue } from './ship.js';
 import { setShipRuntime } from './ship-runtime.js';
 import { runQueueClear } from './queue-clear.js';
-import { applyStateRootOption } from './state-root.js';
+import { buildProgram } from './program.js';
 import { buildCostJson } from './cost-json.js';
 import { buildQueueAddJson } from './queue-add-json.js';
 import { buildQueueListJson } from './queue-list.js';
@@ -377,7 +369,6 @@ import { resolveFactoryCheckoutCommit, runFilingPreview } from './filing.js';
 import { buildFeedbackDeps, type FeedbackDeps, resolveFeedbackRepo, runFeedback } from './feedback.js';
 import { ensureFactoryExcluded, writeSampleQueue } from './init-files.js';
 import { cmdLogs } from './logs.js';
-import { applyHelpGroups } from './help-groups.js';
 import { mergeScopeNotice } from './merge-scope.js';
 import { selectOctokit } from './github-stub.js';
 import { createFactoryOctokit, type FactoryOctokitOptions } from './octokit.js';
@@ -5446,6 +5437,66 @@ async function resumeFromCheck(issueNum: number): Promise<void> {
   });
 }
 
+/** index.ts bindings the commander registrations in program*.ts call (#2793); type-only imports there avoid a runtime cycle. */
+export const PROGRAM_HANDLERS = {
+  cmdInit,
+  cmdMigrate,
+  cmdConstitution,
+  cmdModels,
+  cmdDoctor,
+  cmdCost,
+  cmdUsage,
+  cmdStatus,
+  cmdRuns,
+  cmdKpis,
+  cmdClassifierReport,
+  cmdClassifierBacktestEntry,
+  cmdGarden,
+  cmdTui,
+  cmdLogs,
+  cmdFeedback,
+  cmdFilingPreview,
+  cmdTriage,
+  cmdTriageAccept,
+  cmdUnpark,
+  cmdQueueMigrate,
+  cmdQueueAdd,
+  cmdQueueReconcile,
+  cmdQueueList,
+  cmdQueueClear,
+  cmdHostedSmoke,
+  cmdHostedRunner,
+  cmdHostedQueue,
+  cmdCheck,
+  cmdShip,
+  cmdRunIssue,
+  cmdRunBrief,
+  cmdLocalSmallDryRun,
+  cmdLocalSmallOvernight,
+  cmdLand,
+  cmdResumeApproved,
+  cmdRun,
+  cmdProxy,
+  cmdFactoryd,
+  cmdDaemonStart,
+  cmdDaemonStop,
+  cmdDaemonStatus,
+  cmdDaemonLogs,
+  cmdSelfUpdateCheck,
+  cmdWorktreeGc,
+  cmdReset,
+  cmdSupervise,
+  cmdStop,
+  cmdResume,
+  parseIssueArg,
+  getRepoRoot,
+  getCliVersion,
+  CliExitError,
+  PREREQUISITES_TEXT,
+  HELP_FOOTER_TEXT,
+};
+export type ProgramHandlers = typeof PROGRAM_HANDLERS;
+
 // ---------- main ----------
 
 export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
@@ -5466,631 +5517,7 @@ export async function main(argv: string[] = process.argv, deps: CliDeps = {}) {
     return;
   }
 
-  const program = new Command();
-
-  program
-    .name('factory')
-    .description('Multi-agent software factory with boss-worker-checker orchestration')
-    .version(getCliVersion())
-    .addHelpText('before', PREREQUISITES_TEXT)
-    .addHelpText('after', HELP_FOOTER_TEXT)
-    .option(
-      '--state-root <path>',
-      'Keep factory state and config outside the checkout: an absolute path, ~/..., or "auto" (~/.factory/<owner>/<name>); env FACTORY_STATE_ROOT',
-    );
-
-  program.hook('preAction', async () => {
-    const flag = program.opts<{ stateRoot?: string }>().stateRoot;
-    if (flag === undefined && !process.env.FACTORY_STATE_ROOT?.trim()) return;
-    try {
-      applyStateRootOption(flag, await getRepoRoot());
-    } catch (e) {
-      throw new CliExitError(`factory: ${(e as Error).message}`, 2);
-    }
-  });
-
-  program
-    .command('init')
-    .description(
-      'Set up .factory/ in this repo (config, constitution, queue file, .gitignore) and check model reachability',
-    )
-    .option('--force', 'Overwrite an existing .factory config, constitution, and .gitignore')
-    .action((opts: { force?: boolean }) => cmdInit(opts));
-
-  program
-    .command('migrate')
-    .description(
-      'Upgrade .factory/ to the v2 layout (config, constitution.md, .gitignore, state/); --to-yaml converts config.json to config.yaml',
-    )
-    .option('--dry-run', 'Print planned changes without writing')
-    .option(
-      '--to-yaml',
-      'Convert .factory/config.json to .factory/config.yaml (removes the JSON only after a round-trip check)',
-    )
-    .action((opts: { dryRun?: boolean; toYaml?: boolean }) => cmdMigrate(opts));
-
-  program
-    .command('constitution')
-    .description('Manage product constitutions — .factory/constitution.md in this repo is the source of truth')
-    .option(
-      '--init [product]',
-      'Write .factory/constitution.md in this repo, scaffolded from the template (an optional name overrides the display name)',
-    )
-    .option('--list', 'List available constitutions with their checkers')
-    .option('--checkers', 'List every built-in checker name with a one-line description')
-    .option(
-      '--product <name>',
-      'Seed .factory/constitution.md from the bundled constitution for <name>; replaces an unmodified scaffold without --force',
-    )
-    .option('--force', 'With --init or --product, overwrite an existing .factory/constitution.md')
-    .action((opts) => cmdConstitution(opts));
-
-  program
-    .command('models')
-    .description('List models with their tiers, cost per 1M tokens, and availability')
-    .option('--doctor', 'Probe provider CLIs and env keys; report per-model reachability')
-    .action(cmdModels);
-
-  program
-    .command('doctor')
-    .description(
-      'Check your environment (git, agent install and sign-in, gh auth, GitHub token, npm, sandbox, .factory/)',
-    )
-    .option(
-      '--reconcile',
-      'Reap stale port leases, dead-run worktrees, stale issue claims, orphan sf-job-*/factory.managed containers, and orphan factory-* sbx VMs',
-    )
-    .option(
-      '--probe-inference',
-      'Also send one real prompt with claude -p on the host and in the sandbox to verify Claude auth (uses quota)',
-    )
-    .action((opts: { reconcile?: boolean; probeInference?: boolean }) => cmdDoctor(opts));
-
-  program
-    .command('cost')
-    .description('Show recorded model spend by model (--issue for one issue)')
-    .option('--issue <number>', 'Show per-entry detail for one issue')
-    .option('--json', 'Print one JSON object (schemaVersion 1): rows, perModel, total; unpriced cost is null')
-    .action((opts: { issue?: string; json?: boolean }) => cmdCost(opts));
-
-  program
-    .command('usage')
-    .description('Report 5-hour subscription usage (falls back to a list-price estimate)')
-    .option('--json', 'Print one JSON object (schemaVersion 1) instead of text')
-    .action((opts: { json?: boolean }) => cmdUsage({}, opts));
-
-  program
-    .command('status')
-    .description('Show active runs, the GitHub queue, provider health, and recent events')
-    .option('--kpis', 'Also show the full health KPIs and the effective config')
-    .option(
-      '--json',
-      'Print one JSON object (schemaVersion 1): repo, product, stop, breaker, active claims, update; --kpis is ignored',
-    )
-    .action((opts: { kpis?: boolean; json?: boolean }) => cmdStatus(opts));
-
-  program
-    .command('runs')
-    .description('Print per-issue run state from the local runs directory as one JSON object, newest first (read-only)')
-    .option('--json', 'Print one JSON object (schemaVersion 1) — required')
-    .option('--limit <n>', 'Show at most N runs (default 50)')
-    .option(
-      '--diffstat <issue>',
-      "Print per-file added/deleted line counts for one issue's run branch vs origin/<default branch>",
-    )
-    .action(async (opts: { json?: boolean; limit?: string; diffstat?: string }) => {
-      await cmdRuns(opts);
-    });
-
-  program
-    .command('kpis')
-    .description('Compute factory health KPIs and record a trend snapshot')
-    .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
-    .action(async (opts) => {
-      await cmdKpis(opts);
-    });
-
-  const classifierCmd = program
-    .command('classifier')
-    .description('Inspect or backtest the shadow PR classifier track record');
-  classifierCmd
-    .command('report')
-    .description(
-      'Confusion table, rule-of-three slip bounds and model-vs-floor agreement from classifier-outcomes.jsonl',
-    )
-    .option('--json', 'Print one JSON object with the same numbers')
-    .action((opts: { json?: boolean }) => cmdClassifierReport(opts));
-  classifierCmd
-    .command('backtest')
-    .description('Replay the floor and shadow classifier over merged factory PRs and print the outcome report')
-    .requiredOption('--since <date>', 'Only PRs merged on or after this date (YYYY-MM-DD)')
-    .option('--limit <n>', 'Classify at most N PRs (oldest merge first)')
-    .option(
-      '--labels <file>',
-      'CSV of hand labels `pr,class` (class: defect|clean|gated) that override heuristic outcomes',
-    )
-    .option('--max-cost <usd>', 'Stop before the next PR once estimated model spend reaches this many USD')
-    .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
-    .option('--json', 'Print one JSON object instead of the table')
-    .action((opts: ClassifierBacktestOptions) => cmdClassifierBacktestEntry(opts));
-
-  program
-    .command('garden')
-    .description(
-      'Read-only report of recurring failure patterns in local events, deduped against open issues by GitHub search',
-    )
-    .option('--report', 'Print recurring CHECK failure-signature clusters as markdown')
-    .option('--since <duration>', 'Only consider events from this window, e.g. 7d, 36h, 2w', DEFAULT_GARDEN_SINCE)
-    .option('--max-clusters <n>', 'Print at most this many clusters', String(DEFAULT_GARDEN_MAX_CLUSTERS))
-    .option('--json', 'Print the same cluster data as JSON')
-    .option('--out <file>', 'Write the report to this file instead of stdout')
-    .option('--only-new', 'Omit clusters an open issue already tracks; keep new and tracked: unknown clusters')
-    .action(
-      (opts: {
-        report?: boolean;
-        since?: string;
-        maxClusters?: string;
-        json?: boolean;
-        out?: string;
-        onlyNew?: boolean;
-      }) => cmdGarden(opts),
-    );
-
-  program
-    .command('tui')
-    .description('Live read-only view of the current run (q to quit)')
-    .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
-    .action((opts: { localQueue?: boolean }) => cmdTui(opts, deps.runTui ?? runTui));
-
-  program
-    .command('logs')
-    .description('Print pipeline events from .factory/events.ndjson (--follow to tail)')
-    .option('--follow', 'Keep watching for new events')
-    .option('--json', 'Emit one JSON object per line')
-    .option('--issue <number>', 'Only show events for this issue')
-    .action(async (opts: { follow?: boolean; json?: boolean; issue?: string }) => {
-      const repoRoot = await getRepoRoot();
-      const paths = getFactoryPaths(repoRoot);
-      await cmdLogs(opts, { eventsFile: paths.events });
-    });
-
-  program
-    .command('feedback <pr-url>')
-    .description("File one factory issue (bug, factory:needs-triage) from a PR's human review findings")
-    .option('--note <text>', 'Use this as the issue title instead of the first finding')
-    .option('--repo <owner/name>', 'Repo to file the issue in (default: filing.repo, then the origin remote)')
-    .option('--include-local-paths', 'Include this host name and local design/log paths in the issue')
-    .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
-    .action(cmdFeedback);
-
-  const filingCmd = program.command('filing').description('Inspect upstream factory reports (nothing is sent)');
-  filingCmd
-    .command('preview <run-id>')
-    .description('Print the exact redacted [factory-report] title and body that would be sent upstream; sends nothing')
-    .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
-    .action((runId: string, opts: { branchPrefix?: string }) => cmdFilingPreview(runId, opts));
-
-  const triage = program
-    .command('triage')
-    .description('Have a model propose a queue from open issues into .factory/state/queue.proposed')
-    .option('--product <name>', 'Product constitution to scope triage')
-    .option('--model <id>', 'Model to triage with (any registered model, Claude or Codex)')
-    .action(cmdTriage);
-
-  triage
-    .command('accept')
-    .description('Validate and atomically promote .factory/state/queue.proposed to .factory/state/queue')
-    .option('--force', 'Skip validation and promote as-is')
-    .action(async (opts) => {
-      await cmdTriageAccept(opts);
-    });
-
-  program
-    .command('unpark <issue>')
-    .description(
-      'Unpark a factory:parked issue: remove factory:parked and re-queue it in its lane with a fresh order label (same path as `queue add`)',
-    )
-    .option('--lane <lane>', "Lane to re-queue into (default: the issue's existing factory:lane:* label)")
-    .option(
-      '--json',
-      'Print one JSON object (schemaVersion 1): ok, action, issue, lane, order, labelsBefore, labelsAfter',
-    )
-    .action(async (issue: string, opts: { lane?: string; json?: boolean }) => {
-      await cmdUnpark(issue, opts);
-    });
-
-  const queue = program
-    .command('queue')
-    .description('Manage the GitHub-label work queue (list, add, clear, reconcile, migrate)');
-  queue
-    .command('migrate')
-    .description('Copy valid .factory/queue lane order into GitHub issue labels')
-    .option('--file <path>', 'Read the legacy queue from an explicit path instead of .factory/queue')
-    .option('--dry-run', 'Print the intended label updates without mutating GitHub')
-    .action((opts: { file?: string; dryRun?: boolean }) => cmdQueueMigrate(opts));
-  queue
-    .command('add <lane> <issues...>')
-    .description(
-      'Queue explicit GitHub issues into a lane — applies factory:queued + factory:lane:<lane> (and an order label), creating any missing factory labels idempotently',
-    )
-    .option(
-      '--json',
-      'Print one JSON object (schemaVersion 1): ok, action, lane, issues[{number, outcome, order, labelsAdded}], labelsCreated',
-    )
-    .action(async (lane: string, issues: string[], opts: { json?: boolean }) => {
-      await cmdQueueAdd(lane, issues, opts);
-    });
-  queue
-    .command('reconcile')
-    .description(
-      'Report queued GitHub issues that conflict with Factory App admission state, with the repair-flow pointer for each',
-    )
-    .option('--lane <lane>', 'Only reconcile one lane')
-    .action(async (opts: { lane?: string }) => {
-      await cmdQueueReconcile(opts);
-    });
-  queue
-    .command('list')
-    .description('Print queued, in-progress and parked GitHub-queue issues per lane as one JSON object (read-only)')
-    .option('--json', 'Print one JSON object (schemaVersion 1) — required')
-    .option('--lane <lane>', 'Only list this lane (factory:lane:<lane>)')
-    .action(async (opts: { json?: boolean; lane?: string }) => {
-      await cmdQueueList(opts);
-    });
-  queue
-    .command('clear')
-    .description(
-      'Empty the GitHub-backed queue: removes factory:queued and factory:order:* from every unclaimed queued issue (lane labels kept; claimed issues skipped). Preview with --dry-run; limit to one lane with --lane',
-    )
-    .option('--dry-run', 'Print the preview and exit 0 without changing any label')
-    .option('--yes', 'Confirm and remove the queue labels')
-    .option('--lane <lane>', 'Only clear queued issues in this lane (factory:lane:<lane>)')
-    .action(async (opts: { dryRun?: boolean; yes?: boolean; lane?: string }) => {
-      await cmdQueueClear(opts);
-    });
-
-  const hosted = program
-    .command('hosted')
-    .description('Experimental remote-runner execution (needs FACTORY_HOSTED_EXEC=1)');
-  hosted
-    .command('smoke')
-    .description('Local end-to-end hosted-exec smoke: create → lease → Docker run → result → cleanup')
-    .option('--repo <slug>', 'owner/repo to clone and run against', 'on-par/software-factory')
-    .option('--image <image>', 'Container image for the smoke run', 'node:20-alpine')
-    .action(async (opts: { repo?: string; image?: string }) => {
-      await cmdHostedSmoke(opts);
-    });
-  hosted
-    .command('runner')
-    .description('Register capabilities with the local control plane and lease one compatible job, then exit')
-    .option('--url <url>', 'Control-plane base URL', 'http://127.0.0.1:8799')
-    .option('--runner-id <id>', 'Runner identity (default runner-<pid>)')
-    .option('--capabilities <csv>', 'Comma-separated capability list', 'git,node')
-    .option('--timeout <ms>', 'Bounded wait window for a compatible job, in ms', '30000')
-    .option('--poll-interval <ms>', 'Delay between poll attempts, in ms', '2000')
-    .option('--lease-ttl <ms>', 'Lease TTL, in ms', '300000')
-    .option('--heartbeat-interval <ms>', 'Expected heartbeat interval, in ms', '30000')
-    .action(
-      async (opts: {
-        url?: string;
-        runnerId?: string;
-        capabilities?: string;
-        timeout?: string;
-        pollInterval?: string;
-        leaseTtl?: string;
-        heartbeatInterval?: string;
-      }) => {
-        await cmdHostedRunner(opts);
-      },
-    );
-  hosted
-    .command('queue')
-    .description('Queue one job to the local control plane, tail it to terminal, print the result')
-    .option('--url <url>', 'Control-plane base URL', 'http://127.0.0.1:8799')
-    .option('--repo <slug>', 'owner/repo the job runs against', 'on-par/software-factory')
-    .option('--task <text>', 'Opaque task payload')
-    .option('--capabilities <csv>', 'Comma-separated required capabilities', 'git,node')
-    .option('--authority <authority>', 'Required authority', 'repo:read')
-    .option('--timeout <ms>', 'Bounded wait for a terminal result, in ms', '120000')
-    .option('--poll-interval <ms>', 'Delay between summary polls, in ms', '1000')
-    .option('--job-id <id>', 'Explicit job id (default server-generated)')
-    .action(
-      async (opts: {
-        url?: string;
-        repo?: string;
-        task?: string;
-        capabilities?: string;
-        authority?: string;
-        timeout?: string;
-        pollInterval?: string;
-        jobId?: string;
-      }) => {
-        await cmdHostedQueue(opts);
-      },
-    );
-
-  program
-    .command('check <issue>')
-    .alias('ready')
-    .description(
-      'Check an issue before queuing: required fields and whether the size gate runs it as-is or would split it, plus an advisory INVEST report (read-only, optional --deep model review; exit 0 ready, 1 missing fields or ungradeable criteria, 2 invalid --deep output, 3 would split)',
-    )
-    .option(
-      '--json',
-      'Print one JSON object with fields, criteria findings, size verdict, INVEST findings, and reasons',
-    )
-    .option(
-      '--deep',
-      'Also call the triage-tier model once: preview the proposed split when the issue would split, otherwise suggest missing criteria and scope concerns (prints model id and cost; never files anything; exit 2 on invalid model output)',
-    )
-    .action(cmdCheck);
-
-  program
-    .command('ship <issue>')
-    .description(
-      'Plan → build → check one GitHub issue and open a ready-for-review PR; never merges (merge later with land)',
-    )
-    .option('--product <name>', 'Override active product constitution')
-    .option('--no-auto-rework', 'Disable automatic rework loop')
-    .option('--interactive', 'Pause before opening the PR and wait for approval from the TUI')
-    .option('--approve-plan', 'Pause after PLAN freezes the spec and wait for approval before BUILD')
-    .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
-    .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
-    .action(async (issueNum, opts) => {
-      await cmdShip(parseIssueArg(issueNum), opts);
-    });
-
-  program
-    .command('run-issue <issue>')
-    .description('Like ship, but loads the issue first and exits 2 before any worktree or PR if it cannot be found')
-    .option('--product <name>', 'Override active product constitution')
-    .option('--no-auto-rework', 'Disable automatic rework loop')
-    .option('--interactive', 'Pause before opening the PR and wait for approval from the TUI')
-    .option('--approve-plan', 'Pause after PLAN freezes the spec and wait for approval before BUILD')
-    .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
-    .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
-    .option(
-      '--run-children',
-      'File mode only: when the size gate files child issues, run them (slice mode never files issues)',
-    )
-    .option(
-      '--size-gate <mode>',
-      'Size gate mode for this run: file (file child issues / park), slice (ship as sequential slice PRs under the same issue; never files issues), off (skip both gates) or stack (stacked PR set, ADR-0161; runs as slice until stacks are built); beats sizeGate.mode in the config',
-    )
-    .option(
-      '--max-slices <count>',
-      'Slice mode: most slices a not-yet-started slice plan may have (1-20); an over-cap plan is recorded and parks; beats sizeGate.maxSlices (default 10)',
-    )
-    .action(async (issueNum, opts) => {
-      await cmdRunIssue(parseIssueArg(issueNum), opts);
-    });
-
-  program
-    .command('run-brief <file>')
-    .description('Like run-issue, but the work comes from a local Markdown brief instead of a GitHub issue')
-    .option('--product <name>', 'Override active product constitution')
-    .option('--no-auto-rework', 'Disable automatic rework loop')
-    .option('--interactive', 'Pause before opening the PR and wait for approval from the TUI')
-    .option('--approve-plan', 'Pause after PLAN freezes the spec and wait for approval before BUILD')
-    .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
-    .option(
-      '--workspace <dir>',
-      'Local-only: run PLAN/BUILD/CHECK in this caller-provided git workspace and disable PR creation, merging, queue polling, and GitHub mutations',
-    )
-    .option(
-      '--artifacts <dir>',
-      'Local-only: write a versioned benchmark artifact manifest (manifest.json, request.json, events.ndjson, diff.patch) to this directory; requires --workspace',
-    )
-    .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
-    .action(async (file, opts) => {
-      await cmdRunBrief(file, opts);
-    });
-
-  program
-    .command('local-small-dry-run <issue>')
-    .description('Create a bounded local-small step plan and first context pack without changing source files')
-    .option('--spec <path>', 'Frozen spec path; defaults to .factory/plans/issue-<n>.md')
-    .option('--output <path>', 'Artifact directory; defaults to .factory/local-small/issue-<n>')
-    .action(async (issueNum, opts) => {
-      await cmdLocalSmallDryRun(parseIssueArg(issueNum), opts);
-    });
-
-  program
-    .command('local-small-overnight')
-    .description(
-      'Process a curated local-small queue one issue at a time: review-only PRs, never merges, parks on ambiguity',
-    )
-    .option('--queue <path>', 'Curated queue file; defaults to .factory/local-small/overnight-queue')
-    .option('--state <path>', 'Resume-state file; defaults to .factory/local-small/overnight-state.json')
-    .action(async (opts) => {
-      await cmdLocalSmallOvernight(opts);
-    });
-
-  program
-    .command('land <issue>')
-    .description(
-      "Squash-merge the issue's open PR once CI is green, then remove its worktree (left open if CI fails or review is pending)",
-    )
-    .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
-    .option(
-      '--allow-gated',
-      'Merge even when the issue or PR carries the no-auto-merge gate label (human override; writes an AUDIT line and a merge-gated-override event)',
-    )
-    .action(async (issueNum, opts) => {
-      await cmdLand(parseIssueArg(issueNum), opts);
-    });
-
-  program
-    .command('resume-approved')
-    .description(
-      `Land open factory PRs (factory/*, plus legacy ${LEGACY_BRANCH_PREFIX}/*) whose review is now approved; skip the rest`,
-    )
-    .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
-    .action(async (opts) => {
-      await cmdResumeApproved(opts);
-    });
-
-  program
-    .command('run')
-    .description(
-      'Claim queued issues (factory:queued labels) and ship them, lanes in parallel; merges only when auto-merge is on',
-    )
-    .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
-    .option('--auto-merge', 'Merge eligible PRs autonomously, overriding .factory/config.yaml and FACTORY_MERGE')
-    .option('--no-auto-merge', 'Never merge autonomously, overriding .factory/config.yaml and FACTORY_MERGE')
-    .option(
-      '--pr-classifier',
-      'Hold PRs whose review floor is B or C for a human (applies no-auto-merge), overriding .factory/config.json and FACTORY_PR_CLASSIFIER',
-    )
-    .option(
-      '--no-pr-classifier',
-      'Never run the PR classifier gate, overriding .factory/config.json and FACTORY_PR_CLASSIFIER',
-    )
-    .option(
-      '--usage-watch',
-      'Enforce the usage gate for this run, overriding .factory/config.yaml and FACTORY_USAGE_WATCH',
-    )
-    .option(
-      '--no-usage-watch',
-      'Skip the usage gate for this run, overriding .factory/config.yaml and FACTORY_USAGE_WATCH',
-    )
-    .option(
-      '--usage-threshold <fraction>',
-      "Override .factory/config.yaml and FACTORY_STOP_AT for this run's usage threshold",
-    )
-    .option('--usage-poll <seconds>', "Override .factory/config.yaml and FACTORY_USAGE_POLL for this run's usage poll")
-    .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
-    .action(
-      (opts: {
-        localQueue?: boolean;
-        autoMerge?: boolean;
-        usageWatch?: boolean;
-        usageThreshold?: string;
-        usagePoll?: string;
-        branchPrefix?: string;
-      }) => cmdRun(opts),
-    );
-
-  program
-    .command('proxy')
-    .description('Run the opt-in lane reverse proxy in the foreground (run and supervise start it themselves)')
-    .action(cmdProxy);
-
-  const daemonCmd = program
-    .command('daemon')
-    .description('Manage factoryd, the long-running background service for this user');
-  daemonCmd
-    .command('run')
-    .description('Run factoryd in the foreground: a localhost-only HTTP API over the repo registry')
-    .option('--port <n>', `Port to bind on 127.0.0.1 (default ${DEFAULT_FACTORYD_PORT})`)
-    .option('--registry <file>', 'Registry file to serve (default ~/.factory/registry.json)')
-    .option(
-      '--update-mode <mode>',
-      'Self-update channel: manual, stable (npm latest) or prerelease (npm next) (default: stable on npm installs, manual otherwise)',
-    )
-    .option('--auto-update', 'Deprecated: same as --update-mode stable')
-    .action((opts: { port?: string; registry?: string; updateMode?: string; autoUpdate?: boolean }) =>
-      cmdFactoryd(opts),
-    );
-  const daemonCtl = <T>(fn: () => Promise<T>) =>
-    fn().catch((err: unknown) => {
-      if (err instanceof DaemonCtlError) throw new CliExitError(err.message, err.code);
-      throw err;
-    });
-  daemonCmd
-    .command('start')
-    .description('Install and load the com.onpar.factoryd LaunchAgent (macOS only; KeepAlive, RunAtLoad)')
-    .action(() => daemonCtl(() => cmdDaemonStart(deps.daemon)));
-  daemonCmd
-    .command('stop')
-    .description('Unload the LaunchAgent (macOS only; plist stays installed)')
-    .action(() => daemonCtl(() => cmdDaemonStop(deps.daemon)));
-  daemonCmd
-    .command('status')
-    .description('Report factoryd pid, uptime, and attached repos')
-    .option('--json', 'Print one JSON object (schemaVersion 1) instead of text')
-    .action((opts: { json?: boolean }) => daemonCtl(() => cmdDaemonStatus(deps.daemon, { json: opts.json })));
-  daemonCmd
-    .command('logs')
-    .description('Print or tail ~/.factory/daemon.log')
-    .option('-f, --follow', 'Keep tailing')
-    .option('-n, --lines <n>', 'Lines to print first (default 100)')
-    .action((opts: { follow?: boolean; lines?: string }) => daemonCtl(() => cmdDaemonLogs(opts, deps.daemon)));
-
-  program
-    .command('self-update')
-    .description('Check npm for a newer factory release (read-only; nothing is installed)')
-    .option('--check', 'Compare the running version with the npm dist-tag (required)')
-    .option('--json', 'Print one JSON object instead of text')
-    .option('--update-mode <mode>', 'Channel to check: stable (npm latest, default) or prerelease (npm next)')
-    .action(async (opts: { check?: boolean; json?: boolean; updateMode?: string }) => {
-      if (opts.check !== true) throw new CliExitError('factory self-update: only --check is supported', 2);
-      process.exitCode = await daemonCtl(() => cmdSelfUpdateCheck(opts, deps.selfUpdate));
-    });
-
-  const worktreeCmd = program.command('worktree').description('Clean up stale factory worktrees (gc)');
-  worktreeCmd
-    .command('gc')
-    .description('Remove stale factory worktrees (merged/closed branches or older than TTL) and scrub credentials')
-    .option('--dry-run', 'Preview what would be removed without deleting anything')
-    .option('--ttl-days <n>', 'Override worktree.gcTtlDays from .factory/config.yaml (default 7)')
-    .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
-    .action(cmdWorktreeGc);
-
-  program
-    .command('reset <issue...>')
-    .description(
-      "Remove an issue's local factory state (worktree, local branch, plan/phase files, rework history, logs, leases) so the next run starts fresh. A worktree or branch with uncommitted changes or unpushed commits is kept unless --force is passed. Do not run while that issue's lane is active. Preview with --dry-run",
-    )
-    .option(
-      '--dry-run',
-      'List every worktree, branch, file, history entry, log dir, claim and lease that would be removed, without changing anything',
-    )
-    .option('--force', 'Remove worktrees and branches even when they have uncommitted changes or unpushed commits')
-    .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
-    .action(cmdReset);
-
-  program
-    .command('supervise')
-    .description('Unattended loop: wait for usage headroom, run the queue, repeat until it is empty')
-    .option('--now', 'Skip the initial headroom wait')
-    .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
-    .option('--auto-merge', 'Merge eligible PRs autonomously, overriding .factory/config.yaml and FACTORY_MERGE')
-    .option('--no-auto-merge', 'Never merge autonomously, overriding .factory/config.yaml and FACTORY_MERGE')
-    .option(
-      '--usage-watch',
-      'Enforce the usage gate for this run, overriding .factory/config.yaml and FACTORY_USAGE_WATCH',
-    )
-    .option(
-      '--no-usage-watch',
-      'Skip the usage gate for this run, overriding .factory/config.yaml and FACTORY_USAGE_WATCH',
-    )
-    .option(
-      '--usage-threshold <fraction>',
-      "Override .factory/config.yaml and FACTORY_RESUME_AT for this run's usage threshold",
-    )
-    .option('--usage-poll <seconds>', "Override .factory/config.yaml and FACTORY_USAGE_POLL for this run's usage poll")
-    .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
-    .action(async (opts) => {
-      await cmdSupervise(opts);
-    });
-
-  program
-    .command('stop')
-    .description('Tell running lanes to halt after their current issue')
-    .option('--json', 'Print one JSON object (schemaVersion 1): action, repo, stopFlag before/after')
-    .action((opts: { json?: boolean }) => cmdStop(opts));
-
-  program
-    .command('resume [issue]')
-    .description(
-      'Clear a stop so lanes pick up new issues again; with <issue> --from check, re-run CHECK on a build kept after an environment failure',
-    )
-    .option('--json', 'Print one JSON object (schemaVersion 1): action, repo, stopFlag before/after')
-    .option('--from <phase>', 'Resume a kept build at this phase (only: check)')
-    .action((issue: string | undefined, opts: { json?: boolean; from?: string }) => cmdResume(issue, opts));
-
-  applyHelpGroups(program);
+  const program = buildProgram(PROGRAM_HANDLERS, deps);
 
   const previousLoaders = configLoaders;
   const previousGitOps = gitOps;

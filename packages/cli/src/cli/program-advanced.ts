@@ -1,0 +1,168 @@
+// packages/cli/src/cli/program-advanced.ts — registers the Advanced / experimental help-group commands (#2793)
+
+import type { Command } from 'commander';
+import { DEFAULT_FACTORYD_PORT } from '@on-par/factory-core/internal';
+import { BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION } from './branch-prefix.js';
+import { DaemonCtlError } from './daemon.js';
+import type { CliDeps, ProgramHandlers } from './index.js';
+
+export function registerAdvancedCommands(program: Command, handlers: ProgramHandlers, deps: CliDeps): void {
+  const hosted = program
+    .command('hosted')
+    .description('Experimental remote-runner execution (needs FACTORY_HOSTED_EXEC=1)');
+  hosted
+    .command('smoke')
+    .description('Local end-to-end hosted-exec smoke: create → lease → Docker run → result → cleanup')
+    .option('--repo <slug>', 'owner/repo to clone and run against', 'on-par/software-factory')
+    .option('--image <image>', 'Container image for the smoke run', 'node:20-alpine')
+    .action(async (opts: { repo?: string; image?: string }) => {
+      await handlers.cmdHostedSmoke(opts);
+    });
+  hosted
+    .command('runner')
+    .description('Register capabilities with the local control plane and lease one compatible job, then exit')
+    .option('--url <url>', 'Control-plane base URL', 'http://127.0.0.1:8799')
+    .option('--runner-id <id>', 'Runner identity (default runner-<pid>)')
+    .option('--capabilities <csv>', 'Comma-separated capability list', 'git,node')
+    .option('--timeout <ms>', 'Bounded wait window for a compatible job, in ms', '30000')
+    .option('--poll-interval <ms>', 'Delay between poll attempts, in ms', '2000')
+    .option('--lease-ttl <ms>', 'Lease TTL, in ms', '300000')
+    .option('--heartbeat-interval <ms>', 'Expected heartbeat interval, in ms', '30000')
+    .action(
+      async (opts: {
+        url?: string;
+        runnerId?: string;
+        capabilities?: string;
+        timeout?: string;
+        pollInterval?: string;
+        leaseTtl?: string;
+        heartbeatInterval?: string;
+      }) => {
+        await handlers.cmdHostedRunner(opts);
+      },
+    );
+  hosted
+    .command('queue')
+    .description('Queue one job to the local control plane, tail it to terminal, print the result')
+    .option('--url <url>', 'Control-plane base URL', 'http://127.0.0.1:8799')
+    .option('--repo <slug>', 'owner/repo the job runs against', 'on-par/software-factory')
+    .option('--task <text>', 'Opaque task payload')
+    .option('--capabilities <csv>', 'Comma-separated required capabilities', 'git,node')
+    .option('--authority <authority>', 'Required authority', 'repo:read')
+    .option('--timeout <ms>', 'Bounded wait for a terminal result, in ms', '120000')
+    .option('--poll-interval <ms>', 'Delay between summary polls, in ms', '1000')
+    .option('--job-id <id>', 'Explicit job id (default server-generated)')
+    .action(
+      async (opts: {
+        url?: string;
+        repo?: string;
+        task?: string;
+        capabilities?: string;
+        authority?: string;
+        timeout?: string;
+        pollInterval?: string;
+        jobId?: string;
+      }) => {
+        await handlers.cmdHostedQueue(opts);
+      },
+    );
+
+  program
+    .command('local-small-dry-run <issue>')
+    .description('Create a bounded local-small step plan and first context pack without changing source files')
+    .option('--spec <path>', 'Frozen spec path; defaults to .factory/plans/issue-<n>.md')
+    .option('--output <path>', 'Artifact directory; defaults to .factory/local-small/issue-<n>')
+    .action(async (issueNum, opts) => {
+      await handlers.cmdLocalSmallDryRun(handlers.parseIssueArg(issueNum), opts);
+    });
+
+  program
+    .command('local-small-overnight')
+    .description(
+      'Process a curated local-small queue one issue at a time: review-only PRs, never merges, parks on ambiguity',
+    )
+    .option('--queue <path>', 'Curated queue file; defaults to .factory/local-small/overnight-queue')
+    .option('--state <path>', 'Resume-state file; defaults to .factory/local-small/overnight-state.json')
+    .action(async (opts) => {
+      await handlers.cmdLocalSmallOvernight(opts);
+    });
+
+  program
+    .command('proxy')
+    .description('Run the opt-in lane reverse proxy in the foreground (run and supervise start it themselves)')
+    .action(handlers.cmdProxy);
+
+  const daemonCmd = program
+    .command('daemon')
+    .description('Manage factoryd, the long-running background service for this user');
+  daemonCmd
+    .command('run')
+    .description('Run factoryd in the foreground: a localhost-only HTTP API over the repo registry')
+    .option('--port <n>', `Port to bind on 127.0.0.1 (default ${DEFAULT_FACTORYD_PORT})`)
+    .option('--registry <file>', 'Registry file to serve (default ~/.factory/registry.json)')
+    .option(
+      '--update-mode <mode>',
+      'Self-update channel: manual, stable (npm latest) or prerelease (npm next) (default: stable on npm installs, manual otherwise)',
+    )
+    .option('--auto-update', 'Deprecated: same as --update-mode stable')
+    .action((opts: { port?: string; registry?: string; updateMode?: string; autoUpdate?: boolean }) =>
+      handlers.cmdFactoryd(opts),
+    );
+  const daemonCtl = <T>(fn: () => Promise<T>) =>
+    fn().catch((err: unknown) => {
+      if (err instanceof DaemonCtlError) throw new handlers.CliExitError(err.message, err.code);
+      throw err;
+    });
+  daemonCmd
+    .command('start')
+    .description('Install and load the com.onpar.factoryd LaunchAgent (macOS only; KeepAlive, RunAtLoad)')
+    .action(() => daemonCtl(() => handlers.cmdDaemonStart(deps.daemon)));
+  daemonCmd
+    .command('stop')
+    .description('Unload the LaunchAgent (macOS only; plist stays installed)')
+    .action(() => daemonCtl(() => handlers.cmdDaemonStop(deps.daemon)));
+  daemonCmd
+    .command('status')
+    .description('Report factoryd pid, uptime, and attached repos')
+    .option('--json', 'Print one JSON object (schemaVersion 1) instead of text')
+    .action((opts: { json?: boolean }) => daemonCtl(() => handlers.cmdDaemonStatus(deps.daemon, { json: opts.json })));
+  daemonCmd
+    .command('logs')
+    .description('Print or tail ~/.factory/daemon.log')
+    .option('-f, --follow', 'Keep tailing')
+    .option('-n, --lines <n>', 'Lines to print first (default 100)')
+    .action((opts: { follow?: boolean; lines?: string }) => daemonCtl(() => handlers.cmdDaemonLogs(opts, deps.daemon)));
+
+  program
+    .command('self-update')
+    .description('Check npm for a newer factory release (read-only; nothing is installed)')
+    .option('--check', 'Compare the running version with the npm dist-tag (required)')
+    .option('--json', 'Print one JSON object instead of text')
+    .option('--update-mode <mode>', 'Channel to check: stable (npm latest, default) or prerelease (npm next)')
+    .action(async (opts: { check?: boolean; json?: boolean; updateMode?: string }) => {
+      if (opts.check !== true) throw new handlers.CliExitError('factory self-update: only --check is supported', 2);
+      process.exitCode = await daemonCtl(() => handlers.cmdSelfUpdateCheck(opts, deps.selfUpdate));
+    });
+
+  const worktreeCmd = program.command('worktree').description('Clean up stale factory worktrees (gc)');
+  worktreeCmd
+    .command('gc')
+    .description('Remove stale factory worktrees (merged/closed branches or older than TTL) and scrub credentials')
+    .option('--dry-run', 'Preview what would be removed without deleting anything')
+    .option('--ttl-days <n>', 'Override worktree.gcTtlDays from .factory/config.yaml (default 7)')
+    .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
+    .action(handlers.cmdWorktreeGc);
+
+  program
+    .command('reset <issue...>')
+    .description(
+      "Remove an issue's local factory state (worktree, local branch, plan/phase files, rework history, logs, leases) so the next run starts fresh. A worktree or branch with uncommitted changes or unpushed commits is kept unless --force is passed. Do not run while that issue's lane is active. Preview with --dry-run",
+    )
+    .option(
+      '--dry-run',
+      'List every worktree, branch, file, history entry, log dir, claim and lease that would be removed, without changing anything',
+    )
+    .option('--force', 'Remove worktrees and branches even when they have uncommitted changes or unpushed commits')
+    .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
+    .action(handlers.cmdReset);
+}
