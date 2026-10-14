@@ -201,6 +201,24 @@ function modelNamespace(): Node[] {
     },
     {
       kind: 'object',
+      key: 'harnesses',
+      doc: doc('harnesses'),
+      children: [
+        {
+          kind: 'object',
+          key: 'my-agent',
+          children: [
+            unset('command', undefined, '"my-agent --model {model}"'),
+            unset('prompt', undefined, '"stdin"'),
+            unset('output', undefined, '"stdout"'),
+            unset('agentic', undefined, true),
+            unset('usage', undefined, '"none"'),
+          ],
+        },
+      ],
+    },
+    {
+      kind: 'object',
       key: 'tiers',
       doc: doc('tiers'),
       children: Object.entries(packagedTiers).map(([tier, ids]) => unset(tier, undefined, ids)),

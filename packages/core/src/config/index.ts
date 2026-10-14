@@ -21,7 +21,7 @@ import { DEFAULT_MAX_SLICES, SLICE_CAP_CEILING } from '../readiness/slice-plan.j
 import { runConfigSource } from './run-config-source.js';
 
 import type { FilingPolicy } from '../filing/policy.js';
-import { KNOWN_HARNESS_IDS } from '../harness/catalog.js';
+import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
 import type { HarnessFailureReason } from '../harness/index.js';
 import type { FailoverReason } from '../types/index.js';
 
@@ -77,7 +77,7 @@ function isValidRegExp(source: string): boolean {
 
 const RegexString = z.string().refine(isValidRegExp, 'errorPatterns entries must be valid regular expressions');
 
-const HarnessDeclarationSchema = z
+export const HarnessDeclarationSchema = z
   .object({
     command: z.string({ error: 'command is required (the CLI to run)' }).min(1, 'command must not be empty'),
     prompt: z.enum(HARNESS_PROMPT_MODES, {
@@ -123,7 +123,7 @@ const ModelsConfigSchema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['harnesses', id],
-          message: `Harness '${id}' is built in and cannot be redeclared under harnesses`,
+          message: builtInHarnessRedeclaredMessage(id),
         });
       }
     }

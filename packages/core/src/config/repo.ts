@@ -31,7 +31,7 @@ import {
   type ModelsConfig,
 } from './index.js';
 
-import { KNOWN_HARNESS_IDS } from '../harness/catalog.js';
+import { RepoHarnessesSchema, resolveRepoHarnesses } from './repo-harnesses.js';
 import { ModelEffortsSchema } from './effort.js';
 
 // ---------- Schema ----------
@@ -126,6 +126,7 @@ export const RepoFactoryConfigV2Schema = z
       .strict()
       .optional()
       .describe('Written by `factory migrate`. Not read at runtime.'),
+    harnesses: RepoHarnessesSchema,
     tiers: z
       .record(z.string(), z.array(z.string()))
       .optional()
@@ -348,18 +349,16 @@ export function loadRepoConfig(repoRoot: string, stateRoot?: string): RepoFactor
 
 // ---------- Applying to ModelsConfig ----------
 
-/** Apply a repo config's model registry, tier overrides, provider flags, and
- *  checker/triage pins to a packaged ModelsConfig, in that order (packaged
- *  registry, then `models.registry`, then tiers, providers, pins). Pure — returns a new ModelsConfig; `null` repo is
- *  the identity transform (the critical no-`.factory/config.json` regression
- *  surface). Throws naming the offending tier/model on an unknown model id, or
- *  naming the tier emptied by provider/tier settings, and when a
- *  `models.registry` id redefines a packaged model id. */
+/** Apply a repo config's model registry, tier overrides, harnesses, provider flags, and checker/triage pins to a
+ *  packaged ModelsConfig, in that order (packaged registry, then `models.registry`, then tiers, providers, pins).
+ *  Pure — returns a new ModelsConfig; `null` repo is the identity transform (the critical no-`.factory/config.json`
+ *  regression surface). Throws naming the offending tier/model on an unknown model id, or naming the tier emptied
+ *  by provider/tier settings, redefining a packaged model id, or redeclaring a built-in harness id. */
 export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | null): ModelsConfig {
   if (!repo) return models;
 
   const registry = repo.models?.registry ?? {};
-  const validHarnesses = [...KNOWN_HARNESS_IDS, ...Object.keys(models.harnesses ?? {})];
+  const { valid: validHarnesses, patch: harnessPatch } = resolveRepoHarnesses(models, repo.harnesses);
   for (const [id, def] of Object.entries(registry)) {
     if (Object.hasOwn(models.models, id)) {
       throw new Error(
@@ -437,6 +436,7 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
     ...models,
     models: mergedModels,
     tiers,
+    ...harnessPatch,
     ...(repo.models?.efforts ? { efforts: { ...models.efforts, ...repo.models.efforts } } : {}),
   };
 }

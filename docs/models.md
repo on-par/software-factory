@@ -94,25 +94,33 @@ Swap in `opencode-deepseek-v4-flash-free` (OpenCode Zen free promo tier, no subs
 
 ## Declaring a custom harness
 
-Add a `harnesses` section to the models config to name your own agent CLI, then reference its id from a model's `harness` field:
+Add a top-level `harnesses` section to `.factory/config.yaml` to name your own agent CLI, then reference its id from a `models.registry` model's `harness` field (and pin or tier that model):
 
-```json
-{
-  "harnesses": {
-    "my-agent": {
-      "command": "my-agent",
-      "prompt": "stdin",
-      "output": "stdout",
-      "agentic": true,
-      "usage": "none",
-      "errorPatterns": { "rate_limit": "429|rate limit" },
-      "probe": "my-agent --version"
-    }
-  },
-  "models": {
-    "my-model": { "harness": "my-agent" }
-  }
-}
+```yaml
+version: 2
+harnesses:
+  my-agent:
+    command: my-agent
+    prompt: stdin
+    output: stdout
+    agentic: true
+    usage: none
+    errorPatterns:
+      rate_limit: '429|rate limit'
+    probe: my-agent --version
+models:
+  registry:
+    my-model:
+      provider: custom
+      tier: worker
+      costPerMtokInput: 0
+      costPerMtokOutput: 0
+      contextWindow: 200000
+      capabilities: [implementation]
+      envKey: null
+      harness: my-agent
+  pins:
+    plan: my-model
 ```
 
 - `prompt`: `stdin`, `file` or `arg`.
@@ -122,6 +130,7 @@ Add a `harnesses` section to the models config to name your own agent CLI, then 
 - `errorPatterns` maps a failure reason (`rate_limit`, `usage_cap`, `timeout`, `error`, `empty_response`, `unavailable`, `local_auth`, `schema_invalid`, `apply_failed`, `verify_failed` or `unknown`) to a regular expression. Patterns are tested case-insensitively against stderr, then stdout, in declaration order, and only when the command exits non-zero; the first match selects the reason. A timeout always wins. A plain list of regular expressions is also accepted: a match is classified by the built-in rules (an unrecognised match becomes `error`).
 - `errorPatterns` and `probe` (a command; exit 0 means reachable) are optional.
 - Ids of built-in harnesses cannot be redeclared.
+- The model can be pinned for PLAN, CHECK and review. A BUILD pin on a declared harness is not supported yet and is dropped as incompatible.
 - `factory doctor` and `factory models --doctor` run `probe` and report the harness as available (exit 0) or unavailable (with the failure). With no `probe`, the harness is reported as unverified, which is a warning and not a failure.
 - A declared `agentic: true` harness used by a `models.registry` model counts as the coding agent in `factory doctor` when the first word of `command` is on PATH; when it is not, doctor names the configured command.
 

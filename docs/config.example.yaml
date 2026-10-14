@@ -57,6 +57,16 @@ version: 2
     # PR classifier model (classify_pr route). Unset: the checker tier. Changing it demotes the
     # classifier (ADR-0121).
     # classifier: "<model id>"
+# Repo-declared agent CLIs: harness id -> declaration (command, prompt, output, agentic, usage,
+# optional errorPatterns and probe). Run through the built-in `command` harness. Reference an id
+# from a models.registry entry's `harness`. Built-in harness ids cannot be redeclared.
+# harnesses:
+  # my-agent:
+    # command: "my-agent --model {model}"
+    # prompt: "stdin"
+    # output: "stdout"
+    # agentic: true
+    # usage: "none"
 # Tier name -> ordered model ids. Replaces that packaged tier; the router uses the first available
 # model. An unknown model id fails loudly. The packaged tiers are:
 # tiers:
