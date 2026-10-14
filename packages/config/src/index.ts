@@ -33,6 +33,8 @@ export {
   type FactoryDefaults,
   type ModelDefaults,
   type ModelsDefaults,
+  type RetiredModelDefaults,
+  retiredModels,
   type RouteDefaults,
   type RoutesDefaults,
 } from './defaults.js';

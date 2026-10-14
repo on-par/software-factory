@@ -2,6 +2,8 @@
 
 import { execSync } from 'node:child_process';
 
+import { retiredModels } from '@on-par/factory-config';
+
 import { ModelEffortsSchema, supportsEffort } from '../config/effort.js';
 import type { HarnessDeclaration, ModelsConfig } from '../config/index.js';
 import { HARNESS_CATALOG, harnessCliCommand, isAgenticHarness, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
@@ -173,6 +175,12 @@ export interface ModelOverrides {
   build?: string;
 }
 
+/** Suffix for an unknown-model error when the id is a retired packaged model; '' otherwise. */
+export function retiredModelHint(id: string): string {
+  const retired = Object.hasOwn(retiredModels, id) ? retiredModels[id] : undefined;
+  return retired ? `; '${id}' was removed under ${retired.adr}; use '${retired.replacement}'` : '';
+}
+
 /** Resolve FACTORY_PLAN_MODEL / FACTORY_BUILD_MODEL env overrides, validated
  *  against the registry. Throws a configuration error naming the env var when
  *  it references a model not present in models.json. Empty/whitespace values
@@ -183,7 +191,7 @@ export function resolveModelOverrides(registry: ModelRegistry, env: NodeJS.Proce
     if (!value) return undefined;
     if (!registry.get(value)) {
       throw new Error(
-        `${envVar} is set to '${value}', which is not a model in models.json (known models: ${registry.list().join(', ')})`,
+        `${envVar} is set to '${value}', which is not a model in models.json (known models: ${registry.list().join(', ')})${retiredModelHint(value)}`,
       );
     }
     return value;

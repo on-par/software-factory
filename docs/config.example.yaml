@@ -71,7 +71,7 @@ version: 2
 # model. An unknown model id fails loudly. The packaged tiers are:
 # tiers:
   # boss: ["claude-opus-5", "qwen2.5-coder:14b", "gemma4:12b", "claude-fable-5", "claude-opus-4-8", "claude-sonnet-5", "glm-5.2", "gpt-5.6-terra-high"]
-  # worker: ["codex-ollama-qwen3.5:9b", "qwen2.5-coder:14b", "qwen3.5:9b", "qwen3:8b", "gpt-5.6-terra-medium", "gpt-5.6-sol", "gpt-5.1-codex", "claude-sonnet-5", "glm-5.2", "deepseek-v3", "qwen-3.5-coder", "opencode-sonnet", "opencode-deepseek-v4-flash-free"]
+  # worker: ["codex-ollama-qwen3.5:9b", "qwen2.5-coder:14b", "qwen3.5:9b", "qwen3:8b", "gpt-5.6-terra-medium", "gpt-5.6-sol", "gpt-5.1-codex", "claude-sonnet-5", "glm-5.2", "qwen-3.5-coder", "opencode-sonnet", "opencode-deepseek-v4-flash-free"]
   # checker: ["qwen3.5:9b", "gemma4:12b", "qwen2.5-coder:14b", "qwen3:8b", "claude-sonnet-5", "gpt-5.6-luna-high", "gpt-4.1-mini", "glm-5.2"]
   # triage: ["qwen2.5-coder:14b", "claude-sonnet-5", "glm-5.2", "gpt-5.6-luna-high"]
 # Provider switches. Unset leaves a provider on. `false` removes its models from every tier.

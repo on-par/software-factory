@@ -9,6 +9,7 @@ import {
   defaultLaneBreakerThreshold,
   defaultModelsConfig,
   defaultRoutesConfig,
+  retiredModels,
 } from './defaults.js';
 
 describe('shipped defaults', () => {
@@ -28,9 +29,29 @@ describe('shipped defaults', () => {
     expect(defaultFactoryConfig.intake.trustedApprovers).toBeUndefined();
   });
 
-  it('has 24 models with the expected harness-bearing spot checks', () => {
+  it('ships no deepseek-v3 model and no tier lists it (ADR-0163)', () => {
+    expect(Object.hasOwn(defaultModelsConfig.models, 'deepseek-v3')).toBe(false);
+    for (const [tier, ids] of Object.entries(defaultModelsConfig.tiers)) {
+      expect(ids, `tier '${tier}'`).not.toContain('deepseek-v3');
+    }
+  });
+
+  it('ships no direct DeepSeek model (ADR-0163)', () => {
+    for (const [id, model] of Object.entries(defaultModelsConfig.models)) {
+      expect(model.provider, `model '${id}' provider`).not.toBe('deepseek');
+      expect(model.envKey, `model '${id}' envKey`).not.toBe('DEEPSEEK_API_KEY');
+    }
+  });
+
+  it('points the retired deepseek-v3 at a packaged replacement (ADR-0163)', () => {
+    const retired = retiredModels['deepseek-v3'];
+    expect(retired?.adr).toBe('ADR-0163');
+    expect(defaultModelsConfig.models[retired?.replacement ?? '']).toBeDefined();
+  });
+
+  it('has 23 models with the expected harness-bearing spot checks', () => {
     const modelIds = Object.keys(defaultModelsConfig.models);
-    expect(modelIds).toHaveLength(24);
+    expect(modelIds).toHaveLength(23);
 
     for (const id of [
       'claude-opus-5',
@@ -104,7 +125,7 @@ describe('shipped defaults', () => {
     }
 
     expect(defaultModelsConfig.tiers.boss).toHaveLength(8);
-    expect(defaultModelsConfig.tiers.worker).toHaveLength(13);
+    expect(defaultModelsConfig.tiers.worker).toHaveLength(12);
     expect(defaultModelsConfig.tiers.checker).toHaveLength(8);
     expect(defaultModelsConfig.tiers.triage).toHaveLength(4);
   });

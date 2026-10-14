@@ -383,19 +383,6 @@ export const defaultModelsConfig: ModelsDefaults = {
       },
     },
     /** speculative — opt in with FACTORY_EXPERIMENTAL=1 */
-    'deepseek-v3': {
-      provider: 'deepseek',
-      tier: 'worker',
-      costPerMtokInput: 0.07,
-      costPerMtokOutput: 0.28,
-      contextWindow: 128000,
-      capabilities: ['implementation', 'coding'],
-      envKey: 'DEEPSEEK_API_KEY',
-      harness: 'claude-cli',
-      claudeFlag: 'deepseek/deepseek-chat',
-      experimental: true,
-    },
-    /** speculative — opt in with FACTORY_EXPERIMENTAL=1 */
     'qwen-3.5-coder': {
       provider: 'ollama',
       tier: 'worker',
@@ -469,7 +456,6 @@ export const defaultModelsConfig: ModelsDefaults = {
       'gpt-5.1-codex',
       'claude-sonnet-5',
       'glm-5.2',
-      'deepseek-v3',
       'qwen-3.5-coder',
       'opencode-sonnet',
       'opencode-deepseek-v4-flash-free',
@@ -510,6 +496,18 @@ export const defaultModelsConfig: ModelsDefaults = {
       note: 'In BYOK mode, only use models whose env keys are present',
     },
   },
+};
+
+export interface RetiredModelDefaults {
+  /** ADR that removed the model, e.g. 'ADR-0163'. */
+  adr: string;
+  /** Packaged model id to use instead. */
+  replacement: string;
+}
+
+/** Packaged model ids that were removed, so unknown-model errors can say why and what to use instead. */
+export const retiredModels: Readonly<Record<string, RetiredModelDefaults>> = {
+  'deepseek-v3': { adr: 'ADR-0163', replacement: 'opencode-deepseek-v4-flash' },
 };
 
 /** Task-type → model-tier routing. The router resolves a tier to the first available model. */
