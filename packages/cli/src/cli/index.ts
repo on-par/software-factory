@@ -137,7 +137,6 @@ import {
   resolveLaneBreakerThreshold,
   resolveEnvironmentProxy,
   resolveArtifactsDir,
-  resolveIngestConfig,
   resolveLocalOnlyPolicy,
   resolveMergePolicy,
   resolveProcessGroupGraceMs,
@@ -285,6 +284,7 @@ import {
 } from './land-pr.js';
 import { setLandRuntime } from './land-runtime.js';
 import { shipIssue } from './ship.js';
+import { cmdSupervise, type SuperviseOptions } from './supervise.js';
 import { setShipRuntime } from './ship-runtime.js';
 import { runQueueClear } from './queue-clear.js';
 import { buildProgram } from './program.js';
@@ -4000,79 +4000,6 @@ export function createIngestHook(
   };
 }
 
-async function cmdSupervise(opts: {
-  now?: boolean;
-  localQueue?: boolean;
-  autoMerge?: boolean;
-  usageWatch?: boolean;
-  usageThreshold?: string;
-  usagePoll?: string;
-  branchPrefix?: string;
-}): Promise<void> {
-  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
-  const repoRoot = await getRepoRoot();
-  const paths = getFactoryPaths(repoRoot);
-  const ingestCfg = resolveIngestConfig(configLoaders.loadFactoryConfigForRepo(paths.config));
-
-  const countPending = async (): Promise<number> => {
-    if (opts.localQueue === true) {
-      const content = existsSync(paths.queue) ? readFileSync(paths.queue, 'utf-8') : '';
-      const parsed = parseQueue(content);
-      warnQueueDiagnostics(parsed.diagnostics);
-      return parsed.entries.length;
-    }
-    const [owner, repo] = (await getGitHubRepo()).split('/');
-    const gq = createGithubQueue({ client: createOctokitQueueClient(getOctokit()), owner, repo });
-    const lanes = await gq.lanes();
-    const counts = await Promise.all(lanes.map((lane) => gq.list(lane)));
-    return counts.reduce((total, issues) => total + issues.length, 0);
-  };
-
-  if ((await countPending()) === 0 && !ingestCfg.enabled) {
-    throw new CliExitError('queue empty — run factory init + triage first', 2);
-  }
-
-  let knobs: UsageKnobs;
-  try {
-    knobs = resolveUsageKnobs(
-      process.env,
-      configLoaders.loadRepoConfig(repoRoot),
-      usageFlagOverrides(opts, 'resumeAt'),
-    );
-  } catch (err: any) {
-    throw new CliExitError(`factory: ${err.message}`, 2);
-  }
-
-  await withRepoRunLock(paths, 'factory supervise', () =>
-    superviseLoop({
-      cap: knobs.cap,
-      resumeAt: knobs.resumeAt,
-      pollMs: knobs.pollMs,
-      watch: knobs.watch,
-      watchSource: knobs.watchSource,
-      resumeAtSource: knobs.resumeAtSource,
-      pollSource: knobs.pollSource,
-      estimator: knobs.estimator,
-      stopFile: paths.stop,
-      eventsFile: paths.events,
-      now: opts.now,
-      runQueue: createSuperviseRunQueue(paths, ingestCfg, {
-        cmdRunFn: () =>
-          cmdRun({
-            localQueue: opts.localQueue,
-            autoMerge: opts.autoMerge,
-            usageWatch: opts.usageWatch,
-            usageThreshold: opts.usageThreshold,
-            usagePoll: opts.usagePoll,
-            branchPrefix: opts.branchPrefix,
-          }),
-        pendingCount: countPending,
-      }),
-      ingest: ingestCfg.enabled ? createIngestHook(repoRoot, paths, ingestCfg, { branchPrefix }) : undefined,
-    }),
-  );
-}
-
 type RunLaneDeps = {
   /** Lane circuit breaker (#1918): pause after this many consecutive parks with the same
    *  non-empty failure signature. 0 or absent = off; cmdRun wires the resolved
@@ -5438,6 +5365,26 @@ async function resumeFromCheck(issueNum: number): Promise<void> {
 }
 
 /** index.ts bindings the commander registrations in program*.ts call (#2793); type-only imports there avoid a runtime cycle. */
+/** `factory supervise` (#2797): the handler lives in ./supervise.ts; this binds its runtime. */
+function runSupervise(opts: SuperviseOptions): Promise<void> {
+  return cmdSupervise(opts, {
+    configLoaders,
+    getRepoRoot: () => getRepoRoot(),
+    getGitHubRepo: () => getGitHubRepo(),
+    getOctokit: () => getOctokit(),
+    branchPrefixOrExit,
+    warnQueueDiagnostics,
+    resolveUsageKnobs,
+    usageFlagOverrides,
+    withRepoRunLock,
+    superviseLoop,
+    createSuperviseRunQueue,
+    createIngestHook,
+    cmdRun: (o) => cmdRun(o),
+    CliExitError,
+  });
+}
+
 export const PROGRAM_HANDLERS = {
   cmdInit,
   cmdMigrate,
@@ -5485,7 +5432,7 @@ export const PROGRAM_HANDLERS = {
   cmdSelfUpdateCheck,
   cmdWorktreeGc,
   cmdReset,
-  cmdSupervise,
+  cmdSupervise: runSupervise,
   cmdStop,
   cmdResume,
   parseIssueArg,
