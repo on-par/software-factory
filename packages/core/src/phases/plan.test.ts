@@ -12,7 +12,6 @@ import { composeEnrichedIssueBody } from '../readiness/enrich.js';
 import { parseDecompositionOutput } from '../readiness/decompose.js';
 import { renderSlicePlanComment, slicePlanFromDecomposition, withSliceState } from '../readiness/slice-plan.js';
 import { ModelRouter } from '../router/index.js';
-import { StubModelExecutor } from '../router/stub.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE } from '../utils/untrusted-input.js';
 import { UnsupportedWorkSourceError, WorkSourceRegistry } from '../work/index.js';
 import {
@@ -22,6 +21,7 @@ import {
   resolveRunnableBuildRoute,
   runnableBuildRoutes,
 } from './plan.js';
+import { specWithDesign, StubModelExecutor } from './plan-test-helpers.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -433,7 +433,7 @@ npm run test`;
     const stub = new StubModelExecutor({
       scripts: {
         readiness_enrich: [{ output: completeBody }],
-        plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
+        plan: [{ output: specWithDesign('Spec') }],
       },
     });
     const router = new ModelRouter(models, routes, false, stub);
@@ -497,7 +497,7 @@ npm run test`;
       const stub = new StubModelExecutor({
         scripts: {
           readiness_enrich: [{ output: opts.enrichOutput ?? completeBody }],
-          plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
+          plan: [{ output: specWithDesign('Spec') }],
         },
       });
       const router = new ModelRouter(models, routes, false, stub);
@@ -593,7 +593,7 @@ npm run test`;
     const stub = new StubModelExecutor({
       scripts: {
         readiness_enrich: [{ output: incompleteBody }, { output: completeBody }],
-        plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
+        plan: [{ output: specWithDesign('Spec') }],
       },
     });
     const router = new ModelRouter(models, routes, false, stub);
@@ -710,7 +710,7 @@ API changes.
 - [ ] Queue works.
 ## Verification
 npm run test`;
-    const stub = new StubModelExecutor({ scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] } });
+    const stub = new StubModelExecutor({ scripts: { plan: [{ output: specWithDesign('Spec') }] } });
     const router = new ModelRouter(models, routes, false, stub);
     let updates = 0;
     const result = await planPhase({
@@ -1210,7 +1210,7 @@ npm run test`;
       const specPath = join(worktree, 'issue-607.md');
       const stub = new StubModelExecutor({
         scripts: {
-          plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
+          plan: [{ output: specWithDesign('Spec') }],
         },
       });
       const router = new ModelRouter(models, routes, false, stub);
@@ -1552,7 +1552,7 @@ npm run test`;
       scripts: {
         plan: [
           {
-            output: '---\nroute: codex\n---\n# Fresh Spec\n',
+            output: specWithDesign('Fresh Spec'),
           },
         ],
       },
@@ -1618,7 +1618,7 @@ Changing the queue API.
 npm run test`;
 
     const BOT = 42;
-    const PLAN_OUTPUT = '---\nroute: codex\n---\n# Spec\n';
+    const PLAN_OUTPUT = specWithDesign('Spec');
 
     const storyJson = (n: number, inScope: string[] = [`Scope ${n}`]) => ({
       title: `Story ${n}`,
@@ -2987,7 +2987,7 @@ npm run test`;
       const specPath = join(worktree, 'issue-52.md');
       const stub = new StubModelExecutor({
         scripts: {
-          plan: [{ output: '---\nroute: codex\n---\n# Spec v1\n' }, { output: '---\nroute: codex\n---\n# Spec v2\n' }],
+          plan: [{ output: specWithDesign('Spec v1') }, { output: specWithDesign('Spec v2') }],
         },
       });
       const router = new ModelRouter(models, routes, false, stub);
@@ -3085,9 +3085,9 @@ npm run test`;
       const stub = new StubModelExecutor({
         scripts: {
           plan: [
-            { output: '---\nroute: codex\n---\n# Spec v1\n' },
-            { output: '---\nroute: codex\n---\n# Spec v2\n' },
-            { output: '---\nroute: codex\n---\n# Spec v3\n' },
+            { output: specWithDesign('Spec v1') },
+            { output: specWithDesign('Spec v2') },
+            { output: specWithDesign('Spec v3') },
           ],
         },
       });
