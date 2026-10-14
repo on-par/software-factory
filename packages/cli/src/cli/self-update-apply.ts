@@ -205,7 +205,9 @@ export function formatApplyResult(r: SelfUpdateApplyResult): string {
       return `factory self-update --to ${r.to}: preflight ok (would install with ${r.prefix}/bin/npm)`;
     case 'rolled-back':
       return `factory self-update --to ${r.to} failed and was rolled back to ${r.from}: ${r.error}`;
-    default:
+    case 'busy':
+    case 'failed':
+    case 'refused':
       return `factory self-update --to ${r.to} ${r.outcome}: ${r.error}`;
   }
 }

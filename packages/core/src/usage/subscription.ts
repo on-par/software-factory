@@ -58,7 +58,7 @@ const UsageResponseSchema = z
       resets_at: z.string().nullish(),
     }),
   })
-  .passthrough();
+  .loose();
 
 export async function readClaudeAccessToken(deps: SubscriptionUsageDeps = {}): Promise<string | null> {
   const env = deps.env ?? process.env;

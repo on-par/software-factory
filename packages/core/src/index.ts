@@ -1,8 +1,8 @@
 // packages/core/src/index.ts — Library entry point for programmatic use
 //
-// This is the narrow public API of @on-par/factory-core (ADR-0004). Implementation
-// details live behind '@on-par/factory-core/internal'; test doubles and contract
-// kits live behind '@on-par/factory-core/testing'.
+// This is the narrow public API of @on-par/factory-core (ADR-0004). Implementation details live behind
+// '@on-par/factory-core/internal'; test doubles and contract kits live behind '@on-par/factory-core/testing'.
+import type { AcceptanceCriterion } from '@on-par/contracts';
 
 // Config
 export type {
@@ -200,8 +200,7 @@ export type { HostedJobSummary } from './hosted/summary.js';
 export { summarizeHostedJob, summarizeHostedJobs } from './hosted/summary.js';
 export type { HostedSmokeConfig, HostedSmokeOutcome } from './hosted/smoke.js';
 export { runHostedSmoke } from './hosted/smoke.js';
-// Re-exported so consumers gating on the hosted-exec flag (e.g. the CLI) go through
-// core rather than reaching past it to `@on-par/contracts` directly.
+// Re-exported so consumers (e.g. the CLI) go through core, not `@on-par/contracts` directly.
 export { hostedExecEnabled } from '@on-par/contracts';
 export type {
   AuthorityBroker,
@@ -554,8 +553,9 @@ export type {
   DraftStory,
   EpicLifecycle,
   EpicView,
-  GherkinScenario,
 } from './discovery/promote.js';
+/** @deprecated Alias kept for the public API; prefer AcceptanceCriterion from @on-par/contracts. */
+export type GherkinScenario = AcceptanceCriterion;
 export {
   advanceDraftEpic,
   ARCHIVED_LABEL,

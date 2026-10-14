@@ -121,7 +121,7 @@ const ModelsConfigSchema = z
     for (const id of declared) {
       if (KNOWN_HARNESS_IDS.includes(id)) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           path: ['harnesses', id],
           message: `Harness '${id}' is built in and cannot be redeclared under harnesses`,
         });
@@ -131,7 +131,7 @@ const ModelsConfigSchema = z
     for (const [name, def] of Object.entries(config.models)) {
       if (def.harness !== undefined && !valid.includes(def.harness)) {
         ctx.addIssue({
-          code: z.ZodIssueCode.custom,
+          code: 'custom',
           path: ['models', name, 'harness'],
           message: `Model '${name}' declares unknown harness '${def.harness}' (valid harnesses: ${valid.join(', ')}; declare custom ones under 'harnesses')`,
         });

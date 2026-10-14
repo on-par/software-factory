@@ -26,7 +26,7 @@ describe('parseIssueArg', () => {
     '9007199254740993',
     '99999999999999999999',
   ])("throws CliExitError(2) naming the invalid argument for '%s'", (raw) => {
-    expect(() => parseIssueArg(raw)).toThrowError(CliExitError);
+    expect(() => parseIssueArg(raw)).toThrow(CliExitError);
     try {
       parseIssueArg(raw);
       expect.fail('expected parseIssueArg to throw');

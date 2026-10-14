@@ -42,7 +42,9 @@ function createFakeStore(issues: Array<{ number: number; labels: string[] }>) {
     async removeLabel({ issue_number, name }) {
       state.get(issue_number)?.delete(name);
     },
-    async ensureLabel() {},
+    async ensureLabel() {
+      return false;
+    },
   };
 
   return { state, client };

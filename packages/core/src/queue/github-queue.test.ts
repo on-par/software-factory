@@ -1,5 +1,4 @@
 // packages/core/src/queue/github-queue.test.ts — Claim/release/list over the factory:* label taxonomy (#824).
-
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -62,6 +61,7 @@ function createFakeStore(issues: Array<{ number: number; labels: string[] }>) {
     async ensureLabel({ name }) {
       calls.push('ensureLabel');
       createdLabels.add(name);
+      return false;
     },
   };
 

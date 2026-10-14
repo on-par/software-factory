@@ -150,8 +150,8 @@ export interface QueueGitHubClient {
   getIssueLabels(input: { owner: string; repo: string; issue_number: number }): Promise<string[]>;
   addLabels(input: { owner: string; repo: string; issue_number: number; labels: string[] }): Promise<void>;
   removeLabel(input: { owner: string; repo: string; issue_number: number; name: string }): Promise<void>;
-  /** Create the label if missing. Must be idempotent — an already-existing label is not an error. Resolves `true` when it created the label, `false`/undefined when it already existed. */
-  ensureLabel(input: { owner: string; repo: string } & QueueLabelSpec): Promise<boolean | void>;
+  /** Create the label if missing. Must be idempotent — an already-existing label is not an error. Resolves `true` when it created the label, `false` when it already existed. */
+  ensureLabel(input: { owner: string; repo: string } & QueueLabelSpec): Promise<boolean>;
 }
 
 function labelExistsError(err: unknown): boolean {
@@ -616,7 +616,7 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
         ];
         const created: string[] = [];
         for (const spec of specs) {
-          if ((await client.ensureLabel({ owner, repo, ...spec })) === true) created.push(spec.name);
+          if (await client.ensureLabel({ owner, repo, ...spec })) created.push(spec.name);
         }
         await client.addLabels({ owner, repo, issue_number: issue, labels: specs.map((s) => s.name) });
         results.push({

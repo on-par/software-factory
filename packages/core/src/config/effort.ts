@@ -13,6 +13,7 @@ export const ModelEffortsSchema = z
 
 /** Transport-level support; the selected provider/model remains authoritative for availability. */
 export function supportsEffort(harness: string | undefined, effort: z.infer<typeof EffortSchema>): boolean {
+  if (harness === undefined) return false;
   switch (harness) {
     case 'codex-cli':
     case 'opencode':
