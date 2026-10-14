@@ -377,7 +377,16 @@ const INTERNAL_API_KEYS = [
   // Readiness deep check (#1732)
   'buildDecompositionPrompt',
   'parseDecompositionOutput',
-  ...Object.keys(await import('./blockers/index.js')), // blocker filing (#2316)
+  // Blocker filing (#2316)
+  'addBlockedBy',
+  'listBlockedBy',
+  'BlockerClaimSchema',
+  'BlockerFilingError',
+  'MAX_BLOCKER_CHILDREN',
+  'blockerMarker',
+  'fileBlocker',
+  'hashBlockerClaim',
+  'renderBlockerBody',
   'buildReadinessGapPrompt',
   'parseReadinessGapOutput',
   // Slice plan model (ADR-0147)
