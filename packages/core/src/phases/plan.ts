@@ -38,6 +38,19 @@ import { UNTRUSTED_ISSUE_BODY_NOTICE, wrapUntrustedIssueBody } from '../utils/un
 import { GITHUB_ISSUE_SOURCE, type GithubIssueParams } from '../work/github-issue.js';
 import { createDefaultWorkSourceRegistry, type WorkRequestSourceKind, type WorkSourceRegistry } from '../work/index.js';
 
+import { buildDesignArtifactRetryPrompt, MAX_DESIGN_ARTIFACT_RETRIES } from './plan-design-retry.js';
+import {
+  type BuildRouteName,
+  defaultBuildRoute,
+  ROUTE_BULLETS,
+  resolveRunnableBuildRoute,
+  ROUTE_FALLBACK_ORDER,
+  runnableBuildRoutes,
+} from './plan-routes.js';
+
+export { buildDesignArtifactRetryPrompt, MAX_DESIGN_ARTIFACT_RETRIES };
+export { type BuildRouteName, defaultBuildRoute, resolveRunnableBuildRoute, runnableBuildRoutes };
+
 /**
  * REST API version pinned on the readiness-enrichment issues.update call (#2385). GitHub serves 2022-11-28 when no
  * header is sent; it is deprecated (sunset 2028-03-10). Scoped to this call because 2026-03-10 has breaking changes
@@ -75,46 +88,6 @@ export interface PlanPromptOpts {
   /** Build routes with at least one runnable model on this machine. Empty or omitted = all. */
   runnableRoutes?: readonly BuildRouteName[];
 }
-
-export type BuildRouteName = 'codex' | 'claude' | 'opencode';
-
-/** Order PLAN falls back through when its chosen route cannot run here. */
-const ROUTE_FALLBACK_ORDER: readonly BuildRouteName[] = ['claude', 'codex', 'opencode'];
-
-/** Build routes whose task resolves to at least one runnable model, in fallback order.
- *  Returns [] when the router cannot answer, which callers treat as "no restriction". */
-export function runnableBuildRoutes(router: Pick<ModelRouter, 'resolveAll'>): BuildRouteName[] {
-  try {
-    return ROUTE_FALLBACK_ORDER.filter((route) => router.resolveAll(`build_${route}`).length > 0);
-  } catch {
-    return [];
-  }
-}
-
-/** The route PLAN should use when it chose none, or chose one that cannot run here. */
-export function defaultBuildRoute(runnable: readonly BuildRouteName[]): BuildRouteName {
-  return runnable[0] ?? 'claude';
-}
-
-/** Keep the requested route when it can run here (or the router cannot say); otherwise fall back. */
-export function resolveRunnableBuildRoute(
-  requested: BuildRouteName,
-  runnable: readonly BuildRouteName[],
-): { route: BuildRouteName; rerouted: boolean } {
-  if (runnable.length === 0 || runnable.includes(requested)) return { route: requested, rerouted: false };
-  return { route: defaultBuildRoute(runnable), rerouted: true };
-}
-
-/** Step-3 route bullets, in display order. */
-const ROUTE_BULLETS: Record<BuildRouteName, string> = {
-  codex: `   - route: codex — when the implementation from a frozen spec is bounded and mechanical
-     (known-repro fixes, well-scoped features, refactors, test writing, CI/tooling)`,
-  claude: `   - route: claude — when the work needs UX, design, or architecture judgment; naming/API
-     design calls; is a tiny diff (<20 lines); needs session tools; or when the repo's
-     pinned build worker is a claude-cli model (e.g. claude-sonnet-5 in .factory/config.json)`,
-  opencode: `   - route: opencode — when the repo's pinned build worker is an opencode-harness model
-     (e.g. opencode-deepseek-v4-flash in .factory/config.json); bounded mechanical work`,
-};
 
 export function buildPlanPrompt(opts: PlanPromptOpts): string {
   const { issue, issueTitle, issueBody, specPath, constitutionCtx, adrCtx } = opts;
@@ -672,7 +645,7 @@ async function planPhaseImpl(opts: {
   let steering: ConsumedSteering | undefined;
   let replans = 0;
   while (true) {
-    const prompt = applySteering(
+    const basePrompt = applySteering(
       buildPlanPrompt({ issue, issueTitle, issueBody, specPath, constitutionCtx, adrCtx, runnableRoutes }),
       steering,
     );
@@ -680,48 +653,71 @@ async function planPhaseImpl(opts: {
     if (replans > 0) {
       log('plan', `Re-planning after operator redirect (attempt ${replans + 1})`);
     }
-    const archived = await archiveSpec(specPath);
-    if (archived.length > 0) {
-      log('plan', `Archived existing spec before planning: ${archived.join(', ')}`);
-    }
 
-    const result = await router.run('plan', prompt, {
-      worktree,
-      timeoutSeconds: timeoutSeconds ?? 1800,
-      modelOverride,
-      modelFallbacks,
-      onProviderFailure,
-      onLog: (msg) => log('router', msg),
-    });
+    let prompt = basePrompt;
+    let designRetries = 0;
+    let result: Awaited<ReturnType<ModelRouter['run']>>;
+    let parsed: Awaited<ReturnType<typeof readSpec>>;
+    let designParse: ReturnType<typeof parseDesignArtifact>;
+    while (true) {
+      const archived = await archiveSpec(specPath);
+      if (archived.length > 0) {
+        log('plan', `Archived existing spec before planning: ${archived.join(', ')}`);
+      }
 
-    for (const f of failoversFrom(result.attempts)) {
-      log('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, {
-        failoverReason: f.reason,
+      result = await router.run('plan', prompt, {
+        worktree,
+        timeoutSeconds: timeoutSeconds ?? 1800,
+        modelOverride,
+        modelFallbacks,
+        onProviderFailure,
+        onLog: (msg) => log('router', msg),
       });
-    }
 
-    // Check for escalation
-    if (isEscalation(result.output)) {
-      const escalateLine = escalationLine(result.output);
-      log('escalate', escalateLine ?? 'plan escalated');
-      return {
-        ok: false,
-        route: failureRoute,
-        specPath,
-        model: result.model,
-        escalate: escalateLine,
-        designArtifact: null,
-      };
-    }
+      for (const f of failoversFrom(result.attempts)) {
+        log('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, {
+          failoverReason: f.reason,
+        });
+      }
 
-    // Check spec file was created. If the model is chat-only, the output is the
-    // spec content; if it has file tools, it may have written specPath directly.
-    if (!existsSync(specPath)) {
-      await writeSpec(specPath, { body: result.output });
-    }
+      // Check for escalation
+      if (isEscalation(result.output)) {
+        const escalateLine = escalationLine(result.output);
+        log('escalate', escalateLine ?? 'plan escalated');
+        return {
+          ok: false,
+          route: failureRoute,
+          specPath,
+          model: result.model,
+          escalate: escalateLine,
+          designArtifact: null,
+        };
+      }
 
-    // Read route from spec frontmatter (single normalization site: parseSpec)
-    const parsed = await readSpec(specPath);
+      // Check spec file was created. If the model is chat-only, the output is the
+      // spec content; if it has file tools, it may have written specPath directly.
+      if (!existsSync(specPath)) {
+        await writeSpec(specPath, { body: result.output });
+      }
+
+      // Read route from spec frontmatter (single normalization site: parseSpec)
+      parsed = await readSpec(specPath);
+      designParse = parseDesignArtifact(parsed.data);
+      if (
+        !designParse.artifact &&
+        blockedNoChangeSpecReason(parsed.body) === null &&
+        designRetries < MAX_DESIGN_ARTIFACT_RETRIES
+      ) {
+        designRetries++;
+        log(
+          'plan',
+          `design artifact invalid — re-prompting planner with ${designParse.errors.length} validation error(s) (retry ${designRetries}/${MAX_DESIGN_ARTIFACT_RETRIES}): ${designParse.errors.join('; ')}`,
+        );
+        prompt = buildDesignArtifactRetryPrompt(basePrompt, designParse.errors);
+        continue;
+      }
+      break;
+    }
     // Re-read after the PLAN call: a CLI that failed sign-in during PLAN is no longer runnable (#2495).
     const runnableNow = runnableBuildRoutes(router);
     let route: 'codex' | 'claude' | 'opencode' = parsed.route ?? defaultBuildRoute(runnableNow);
@@ -754,7 +750,7 @@ async function planPhaseImpl(opts: {
       await updateSpecRoute(specPath, opts.preferredRoute, 'repo-config-pin');
     }
 
-    const { artifact: designArtifact, errors: designErrors, coerced: designCoerced } = parseDesignArtifact(parsed.data);
+    const { artifact: designArtifact, errors: designErrors, coerced: designCoerced } = designParse;
     if (designCoerced.length > 0) {
       log(
         'design_artifact_coerced',
