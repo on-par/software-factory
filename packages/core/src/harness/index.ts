@@ -12,6 +12,7 @@ export const AGENTIC_BUILD_TASKS = [
   'build_codex',
   'build_claude',
   'build_opencode',
+  'build_command',
 ] as const satisfies readonly TaskType[];
 
 /** Single source of truth for whether a task requires a file-editing (agentic) harness. */

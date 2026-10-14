@@ -23,7 +23,7 @@ export interface PlanReuseRecord {
   bodyHash: string;
   /** Base SHA the CHECK environment release was decided on. */
   baseSha: string;
-  route: 'codex' | 'claude' | 'opencode';
+  route: 'codex' | 'claude' | 'opencode' | 'command';
   releasedAt: string;
 }
 
@@ -92,7 +92,7 @@ export interface CheckResumeRecord {
   worktree: string;
   /** build.diffBase from the original run (undefined when BUILD reported none). */
   diffBase?: string;
-  route: 'codex' | 'claude' | 'opencode';
+  route: 'codex' | 'claude' | 'opencode' | 'command';
   /** build.model of the original run, reused as CHECK's reworkModel. */
   model: string;
   /** Whole minutes from PLAN start to BUILD end in the original run, at least 1. */

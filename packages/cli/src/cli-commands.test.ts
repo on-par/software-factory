@@ -307,6 +307,8 @@ function makeCoreFakes() {
           get: (id: string) => (h.modelProviders[id] ? { provider: h.modelProviders[id] } : undefined),
           getHarnessId: (id: string) => (h.modelProviders[id] === 'anthropic' ? 'claude-cli' : 'codex-cli'),
           isCodexModel: (id: string) => h.modelProviders[id] === 'openai',
+          getHarnessDeclaration: () => undefined,
+          isAgenticHarnessId: () => true,
         },
         setCostSink: vi.fn((sink: (entry: any) => void) => {
           h.costSinkCallback = sink;

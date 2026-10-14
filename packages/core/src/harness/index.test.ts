@@ -6,6 +6,7 @@ describe('taskRequiresAgenticHarness', () => {
   it('returns true for build tasks that edit files', () => {
     expect(taskRequiresAgenticHarness('build_codex')).toBe(true);
     expect(taskRequiresAgenticHarness('build_claude')).toBe(true);
+    expect(taskRequiresAgenticHarness('build_command')).toBe(true);
   });
 
   it('returns false for non-build tasks', () => {

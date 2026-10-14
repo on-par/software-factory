@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ModelRegistry } from '../models/index.js';
 import type { ModelsConfig } from './index.js';
-import { resolveEffectiveModelPins } from './repo.js';
+import { resolveEffectiveBuildRoute, resolveEffectiveModelPins, routeForBuildModel } from './repo.js';
 
 type ModelDef = ModelsConfig['models'][string];
 
@@ -95,5 +95,50 @@ describe('resolveEffectiveModelPins agentic build pins', () => {
 
   it('does not check plan pins for agentic harnesses', () => {
     expect(resolveEffectiveModelPins(registry, pins({ plan: 'ollama-model' }), {}).plan).toBe('ollama-model');
+  });
+});
+
+describe('routeForBuildModel / resolveEffectiveBuildRoute command route', () => {
+  const decl = {
+    command: 'my-agent {model}',
+    prompt: 'stdin',
+    output: 'stdout',
+    agentic: true,
+    usage: 'none',
+  } as const;
+  const registry = new ModelRegistry({
+    ...models,
+    models: {
+      ...models.models,
+      'my-model': baseModel({ tier: 'worker', provider: 'anthropic', harness: 'my-agent' }),
+      'plain-model': baseModel({ tier: 'worker', provider: 'anthropic', harness: 'lazy-agent' }),
+      'codex-model': baseModel({ tier: 'worker', provider: 'openai', codex: true }),
+      'codex-chat': baseModel({ tier: 'worker', provider: 'openai', codex: true, harness: 'my-agent' }),
+      'oc-model': baseModel({ tier: 'worker', provider: 'deepseek', harness: 'opencode' }),
+    },
+    harnesses: { 'my-agent': decl, 'lazy-agent': { ...decl, agentic: false } },
+  });
+
+  it('derives the command route from a build pin on a declared agentic harness', () => {
+    expect(resolveEffectiveBuildRoute(registry, null, { build: 'my-model', sources: {} })).toEqual({
+      route: 'command',
+      source: 'build-pin',
+    });
+    const repo = { version: 2 as const, route: 'claude' as const };
+    expect(resolveEffectiveBuildRoute(registry, repo, { build: 'my-model', sources: {} })).toEqual({
+      route: 'claude',
+      source: 'repo',
+    });
+  });
+
+  it('routeForBuildModel keeps built-in harness routes and ignores declared non-agentic harnesses', () => {
+    expect(routeForBuildModel(registry, 'claude-model')).toBe('claude');
+    expect(routeForBuildModel(registry, 'codex-model')).toBe('codex');
+    expect(routeForBuildModel(registry, 'oc-model')).toBe('opencode');
+    expect(routeForBuildModel(registry, 'plain-model')).toBeUndefined();
+    expect(routeForBuildModel(registry, 'ollama-model')).toBeUndefined();
+    expect(routeForBuildModel(registry, 'nope')).toBeUndefined();
+    expect(routeForBuildModel(registry, undefined)).toBeUndefined();
+    expect(routeForBuildModel(registry, 'codex-chat')).toBe('command');
   });
 });

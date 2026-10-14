@@ -96,7 +96,7 @@ describe.skipIf(!selected)(`real ${agent} CLI full loop (#2649)`, () => {
         router,
         constitution: null,
         log,
-        reworkRoute: build.route,
+        reworkRoute: build.route === 'command' ? undefined : build.route,
       });
       expect(check.passed).toBe(true);
 

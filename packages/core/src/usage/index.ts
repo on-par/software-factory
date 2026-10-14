@@ -202,7 +202,7 @@ export interface RunUsageHarnessInput {
 export function resolveRunUsageHarness(input: RunUsageHarnessInput): string | undefined {
   const { buildRoute, buildRouteSource, planHarnesses, codexDisabled, localOnly } = input;
   if (localOnly) return undefined;
-  if (buildRoute === undefined || buildRoute === 'claude') return undefined;
+  if (buildRoute === undefined || buildRoute === 'claude' || buildRoute === 'command') return undefined;
   // run-issue.ts: a build pin cannot force codex when it is disabled, so BUILD falls back to Claude
   if (buildRoute === 'codex' && buildRouteSource === 'build-pin' && codexDisabled) return undefined;
   if (planHarnesses.length === 0 || planHarnesses.some((h) => h === undefined || h === 'claude-cli')) {

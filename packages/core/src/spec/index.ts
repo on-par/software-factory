@@ -37,7 +37,7 @@ export interface FrozenSpec {
   /** Parsed frontmatter; {} when absent or unparsable. */
   data: Record<string, unknown>;
   /** Normalized route: .trim() + validate. null when missing/unparseable/non-string. */
-  route: 'codex' | 'claude' | 'opencode' | null;
+  route: 'codex' | 'claude' | 'opencode' | 'command' | null;
 }
 
 /** The single route-normalization site. Never throws. */
@@ -53,7 +53,8 @@ export function parseSpec(content: string): FrozenSpec {
   }
 
   const t = typeof data.route === 'string' ? data.route.trim() : '';
-  const route: 'codex' | 'claude' | 'opencode' | null = t === 'codex' || t === 'claude' || t === 'opencode' ? t : null;
+  const route: 'codex' | 'claude' | 'opencode' | 'command' | null =
+    t === 'codex' || t === 'claude' || t === 'opencode' || t === 'command' ? t : null;
   return { path: '', raw: content, body, data, route };
 }
 
@@ -123,7 +124,7 @@ export async function archiveSpec(specPath: string): Promise<string[]> {
  */
 export async function updateSpecRoute(
   specPath: string,
-  route: 'codex' | 'claude' | 'opencode',
+  route: 'codex' | 'claude' | 'opencode' | 'command',
   reason: string,
 ): Promise<void> {
   void reason;

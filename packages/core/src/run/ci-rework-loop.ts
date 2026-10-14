@@ -22,7 +22,7 @@ import {
   readWorktreeHead as readWorktreeHeadDefault,
   scanReworkDiff,
 } from './ci-suppression-guard.js';
-import type { BuildRoute, ParkReason } from './outcome.js';
+import { reworkRouteFor, type BuildRoute, type ParkReason } from './outcome.js';
 import type { RunPorts, RunRequest } from './run-issue.js';
 import { shipParkReason } from './ship-park.js';
 
@@ -197,8 +197,7 @@ export async function shipWithCiRework(
       appPort: ctx.appPort,
       appBaseUrl: ctx.appBaseUrl,
       onPgid: ctx.onPgid,
-      reworkRoute: builtRoute,
-      reworkModel: builtModel,
+      ...reworkRouteFor(builtRoute, builtModel),
       runId: ctx.runId,
       extraInstructions: CI_REWORK_INSTRUCTIONS,
     });

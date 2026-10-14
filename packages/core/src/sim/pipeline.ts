@@ -65,7 +65,7 @@ export interface SimIssueOutcome {
   state: SimTerminalState;
   /** The phase the run ended in. 'ship' for a shipped run. */
   phase: SimPhaseName;
-  route: 'codex' | 'claude' | 'opencode';
+  route: 'codex' | 'claude' | 'opencode' | 'command';
   branch: string;
   prNumber?: number;
   reworkRounds: number;
@@ -301,7 +301,7 @@ async function runSimIssue(
     effective: { localOnly: false, allowExperimental: false, codexDisabled: false, branchPrefix: 'ship-it' },
   };
   const router = new ModelRouter(policy.models, policy.routes, false, routedExecutor);
-  let route: 'codex' | 'claude' | 'opencode' = 'claude';
+  let route: 'codex' | 'claude' | 'opencode' | 'command' = 'claude';
   let reworkRounds = 0;
   let designArtifact: DesignArtifact | null = null;
 

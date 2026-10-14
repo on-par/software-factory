@@ -73,7 +73,7 @@ import type {
 import type { WorkRequest, WorkRequestSourceKind } from '../work/index.js';
 import type { LaneFileGuard } from './lane-file-guard.js';
 import { touchedFilesFrom } from './lane-file-guard.js';
-import { parkReasonFor, type BuildRoute, type ParkReason, type RunOutcome } from './outcome.js';
+import { parkReasonFor, reworkRouteFor, type BuildRoute, type ParkReason, type RunOutcome } from './outcome.js';
 import type { RunPolicy } from './policy.js';
 import {
   configParkMessage,
@@ -806,7 +806,9 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
             ? ports.router.registryRef.isCodexModel(buildModel)
             : buildRoute === 'opencode'
               ? harnessId === 'opencode'
-              : harnessId === 'claude-cli';
+              : buildRoute === 'command'
+                ? routeForBuildModel(ports.router.registryRef, buildModel) === 'command'
+                : harnessId === 'claude-cli';
         if (!compatible) {
           log(
             'model_override_ignored',
@@ -905,8 +907,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       priorFailureSignature,
       diffBase: request.localOnly ? runStartDiffBase : buildDiffBase,
       parentBaseRef: request.parentBaseRef,
-      reworkRoute: builtRoute,
-      reworkModel: builtModel,
+      ...reworkRouteFor(builtRoute, builtModel),
       laneId: request.lane,
       onActivity: ports.onActivity,
       logsDir: request.logsDir,

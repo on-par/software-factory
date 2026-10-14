@@ -192,6 +192,18 @@ describe('updateSpecRoute', () => {
     expect(parsed.body).toContain('# Spec');
   });
 
+  it('updateSpecRoute writes route: command and parseSpec returns it', async () => {
+    const dir = await tempDir();
+    const specPath = join(dir, 'issue-8.md');
+    await writeSpec(specPath, { body: '# Spec\n', data: { route: 'claude' } });
+
+    await updateSpecRoute(specPath, 'command', 'repo-config-pin');
+
+    const raw = await readFile(specPath, 'utf8');
+    expect(raw).toContain('route: command');
+    expect(parseSpec(raw).route).toBe('command');
+  });
+
   it('repairs a spec whose frontmatter is malformed instead of leaving it untouched', async () => {
     const dir = await tempDir();
     const specPath = join(dir, 'issue-7.md');

@@ -466,7 +466,7 @@ export interface IssueRunState {
   worktree: string;
   specPath: string;
   model: string;
-  route: 'codex' | 'claude' | 'opencode';
+  route: 'codex' | 'claude' | 'opencode' | 'command';
   attempts: number;
   startedAt: string;
   updatedAt: string;

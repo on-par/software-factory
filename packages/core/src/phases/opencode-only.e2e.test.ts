@@ -192,7 +192,7 @@ describe('OpenCode-only pipeline with a fake opencode CLI (#2635)', () => {
         router,
         constitution: null,
         log,
-        reworkRoute: build.route,
+        reworkRoute: build.route === 'command' ? undefined : build.route,
       });
       expect(check.passed).toBe(true);
       expect(check.reworkRounds).toBe(1);

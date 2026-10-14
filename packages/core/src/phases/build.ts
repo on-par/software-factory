@@ -23,7 +23,7 @@ import { UNTRUSTED_ISSUE_BODY_NOTICE } from '../utils/untrusted-input.js';
 export interface BuildResult {
   ok: boolean;
   model: string;
-  route: 'codex' | 'claude' | 'opencode';
+  route: 'codex' | 'claude' | 'opencode' | 'command';
   escalate?: string;
   /** Set on a non-escalation build failure; 'no_diff' = worker produced no diff,
    *  'junk_only_diff' = worker changed only generated/cache files. */
@@ -66,7 +66,7 @@ async function buildPhaseImpl(opts: {
   specPath: string;
   branch: string;
   constitution: Constitution | null;
-  route: 'codex' | 'claude' | 'opencode';
+  route: 'codex' | 'claude' | 'opencode' | 'command';
   router: ModelRouter;
   log: (
     type: EventKind,
@@ -182,7 +182,7 @@ async function buildPhaseImpl(opts: {
         })
       : buildCommitOnlyPrompt(promptOpts);
   let prompt: string;
-  let taskType: 'build_codex' | 'build_claude' | 'build_opencode';
+  let taskType: 'build_codex' | 'build_claude' | 'build_opencode' | 'build_command';
 
   let modelOverride = modelOverrideOpt;
   if (route === 'codex' && isCodexDisabled) {
@@ -206,6 +206,9 @@ async function buildPhaseImpl(opts: {
   } else if (route === 'opencode') {
     taskType = 'build_opencode';
     prompt = buildOpencodePrompt(promptOpts);
+  } else if (route === 'command') {
+    taskType = 'build_command';
+    prompt = buildCommitOnlyPrompt(promptOpts);
   } else {
     taskType = 'build_claude';
     prompt = claudeRoutePrompt();

@@ -5,7 +5,16 @@ export type ParkReason = Extract<
   'escalate' | 'timeout' | 'fail' | 'conflict' | 'ci-failed' | 'ci-infra' | 'held' | 'config' | 'blocked'
 >;
 
-export type BuildRoute = 'codex' | 'claude' | 'opencode';
+export type BuildRoute = 'codex' | 'claude' | 'opencode' | 'command';
+
+/** CHECK/CI rework cannot run on the command route yet (byo-05): a command build reworks on the
+ *  claude route's default worker, since its model would not fit build_claude. */
+export function reworkRouteFor(
+  route: BuildRoute,
+  model: string | undefined,
+): { reworkRoute?: 'codex' | 'claude' | 'opencode'; reworkModel?: string } {
+  return route === 'command' ? {} : { reworkRoute: route, reworkModel: model };
+}
 
 /** A run's terminal outcome. `parked` is produced by the CLI's LaneParkError and `released`
  *  by an environment-caused CHECK failure (#1928, not a park); `shipped` / `ready` /
