@@ -33,6 +33,7 @@ import {
 
 import { RepoHarnessesSchema, resolveRepoHarnesses } from './repo-harnesses.js';
 import { ModelEffortsSchema } from './effort.js';
+import { assertAgenticBuildPin } from './repo-build-pin.js';
 
 // ---------- Schema ----------
 
@@ -494,6 +495,7 @@ export function resolveEffectiveModelPins(
     build = repo.models.pins.build;
     sources.build = 'repo';
   }
+  if (build) assertAgenticBuildPin(registry, build, sources.build);
   let buildFallback: string | undefined;
   if (repo?.models?.pins?.buildFallback) {
     if (!registry.get(repo.models.pins.buildFallback)) {
@@ -506,6 +508,7 @@ export function resolveEffectiveModelPins(
         `.factory/config.json: models.pins.buildFallback must be a Codex-capable model because it is used after Claude build failure`,
       );
     }
+    assertAgenticBuildPin(registry, repo.models.pins.buildFallback, 'repo', 'buildFallback');
     buildFallback = repo.models.pins.buildFallback;
     sources.buildFallback = 'repo';
   }
@@ -519,10 +522,7 @@ export function resolveEffectiveModelPins(
   };
 }
 
-// ---------- Codex kill-switch ----------
-
 // ---------- Effective build route ----------
-
 /** Same literal union as run/outcome.ts's BuildRoute; kept local so config/ never imports run/. */
 export type BuildRoutePin = 'codex' | 'claude' | 'opencode';
 
