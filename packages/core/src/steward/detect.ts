@@ -13,8 +13,11 @@ export interface StuckDetection {
 /** Classifies a terminal run outcome as stuck per ADR-0155, or null. Pure: no I/O.
  *
  *  `check-exhausted` requires a `failureSignature` because only runIssue's CHECK-fail path
- *  attaches one. Budget parks (`assertBudget`) and ship-phase failures also park `fail` but
- *  carry none, and ADR-0155 excludes budget parks.
+ *  attaches one. Budget parks (`assertBudget`) and non-CI ship failures park `fail` without
+ *  one, and ADR-0155 excludes them.
+ *  `ship-failed` fires for every parked `ci-failed`, whatever its origin: the land path
+ *  (`CiFailedError` / `CiUnverifiedError`) and SHIP's CI watch (`shipParkReason` maps
+ *  `ciOutcome: 'failure'` to `ci-failed`, #2814).
  *  `ci-infra` parks are non-triggers: the change did not break CI. */
 export function detectStuck(outcome: RunOutcome, reworkBudget: number = MAX_REWORK_ROUNDS): StuckDetection | null {
   if (outcome.state !== 'parked') return null;
