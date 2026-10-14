@@ -63,7 +63,7 @@ describe('cli', () => {
         ['waitMerge', 2],
       ]);
       expect(calls.some((c) => c[0] === 'event' && c[1] === 'parked')).toBe(false);
-      const lastEvent = calls.filter((c) => c[0] === 'event').at(-1);
+      const lastEvent = [...calls].reverse().find((c) => c[0] === 'event');
       expect(lastEvent).toEqual([
         'event',
         'lane-done',

@@ -67,8 +67,8 @@ describe('createFileApprovalGate', () => {
       const promise = gate({ issue: 1, branch: 'b', worktree: '/w', diffStat: '' });
 
       setTimeout(() => {
-        const files = readdirSync(dir).filter((f) => f.endsWith('.request.json'));
-        const id = files[0].replace('.request.json', '');
+        const file = readdirSync(dir).find((f) => f.endsWith('.request.json'));
+        const id = file!.replace('.request.json', '');
         respondToApproval(dir, id, { approved: true });
       }, 20);
 

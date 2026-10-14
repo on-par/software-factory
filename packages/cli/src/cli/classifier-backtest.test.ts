@@ -104,7 +104,7 @@ function makeDeps(prs: any[], extra: Partial<ClassifierBacktestDeps> = {}) {
     ...extra,
   };
   const jsonl = () => {
-    const [name] = [...files.keys()].filter((k) => k.includes('classifier-backtest-'));
+    const name = [...files.keys()].find((k) => k.includes('classifier-backtest-'));
     return name
       ? files
           .get(name)!

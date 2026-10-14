@@ -97,10 +97,8 @@ describe('docs/config.example.yaml', () => {
     // Top-level keys sit at column 0, live or commented out (e.g. `# route: ...`); skip the header prose.
     const text = renderConfigExample();
     const body = text.slice(text.indexOf('\nversion: 2\n'));
-    const rendered = [...body.matchAll(/^(?:# )?"?([A-Za-z_$][\w$-]*)"?:(?: |$)/gm)].map((m) => m[1]);
-    const missing = acceptedTopLevelKeys.filter(
-      (key) => !rendered.includes(key) && !(key in CONFIG_EXAMPLE_OMITTED_KEYS),
-    );
+    const rendered = new Set([...body.matchAll(/^(?:# )?"?([A-Za-z_$][\w$-]*)"?:(?: |$)/gm)].map((m) => m[1]));
+    const missing = acceptedTopLevelKeys.filter((key) => !rendered.has(key) && !(key in CONFIG_EXAMPLE_OMITTED_KEYS));
     expect(missing).toEqual([]);
   });
 

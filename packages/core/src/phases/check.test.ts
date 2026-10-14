@@ -1401,8 +1401,8 @@ describe('checkPhase auto rework', () => {
       drainSteering,
     });
 
-    const reworkCalls = logCalls.filter(([type]) => type === 'rework');
-    expect(reworkCalls[0][2]?.rework?.cause).toBe('direction-change');
+    const reworkCall = logCalls.find(([type]) => type === 'rework');
+    expect(reworkCall?.[2]?.rework?.cause).toBe('direction-change');
   });
 
   it(

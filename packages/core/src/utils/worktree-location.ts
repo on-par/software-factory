@@ -62,8 +62,8 @@ export async function ensureWorktreeParentExcluded(repoRoot: string, worktreePar
   } catch {
     // no exclude file yet
   }
-  const lines = existing.split(/\r?\n/).map((l) => l.trim());
-  if (lines.includes(line) || lines.includes('/.factory/') || lines.includes('.factory/')) return false;
+  const lines = new Set(existing.split(/\r?\n/).map((l) => l.trim()));
+  if (lines.has(line) || lines.has('/.factory/') || lines.has('.factory/')) return false;
   mkdirSync(dirname(file), { recursive: true });
   appendFileSync(file, `${existing === '' || existing.endsWith('\n') ? '' : '\n'}${line}\n`);
   return true;

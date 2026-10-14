@@ -35,7 +35,7 @@ export interface UpdateState {
 /** `update` in `factory status --json` — UpdateState without schemaVersion. */
 export type StatusUpdateJson = Omit<UpdateState, 'schemaVersion'>;
 
-const INSTALL_KINDS: readonly InstallKind[] = ['npm-global', 'source', 'unknown'];
+const INSTALL_KINDS: ReadonlySet<InstallKind> = new Set<InstallKind>(['npm-global', 'source', 'unknown']);
 
 export function updateStatePath(stateDir: string): string {
   return join(stateDir, 'update-state.json');
@@ -81,9 +81,7 @@ export function readUpdateState(file: string): UpdateState | null {
       schemaVersion: 1,
       mode: raw.mode as UpdateMode,
       channel: raw.channel === 'latest' || raw.channel === 'next' ? raw.channel : null,
-      installKind: INSTALL_KINDS.includes(raw.installKind as InstallKind)
-        ? (raw.installKind as InstallKind)
-        : 'unknown',
+      installKind: INSTALL_KINDS.has(raw.installKind as InstallKind) ? (raw.installKind as InstallKind) : 'unknown',
       current: raw.current,
       available: stringOrNull(raw.available),
       lastCheckAt: stringOrNull(raw.lastCheckAt),
