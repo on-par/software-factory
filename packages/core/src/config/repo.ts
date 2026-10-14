@@ -33,13 +33,7 @@ import {
 
 import { RepoHarnessesSchema, resolveRepoHarnesses } from './repo-harnesses.js';
 import { ModelEffortsSchema } from './effort.js';
-import { assertAgenticBuildPin, resolveEffectiveBuildRoute } from './repo-build-pin.js';
-export {
-  resolveEffectiveBuildRoute,
-  routeForBuildModel,
-  type BuildRoutePin,
-  type EffectiveBuildRoute,
-} from './repo-build-pin.js';
+import { assertAgenticBuildPin } from './repo-build-pin.js';
 
 // ---------- Schema ----------
 
@@ -501,13 +495,7 @@ export function resolveEffectiveModelPins(
     build = repo.models.pins.build;
     sources.build = 'repo';
   }
-  if (build) {
-    assertAgenticBuildPin(
-      registry,
-      sources.build === 'repo' ? '.factory/config.json: models.pins.build' : 'FACTORY_BUILD_MODEL',
-      build,
-    );
-  }
+  if (build) assertAgenticBuildPin(registry, build, sources.build);
   let buildFallback: string | undefined;
   if (repo?.models?.pins?.buildFallback) {
     if (!registry.get(repo.models.pins.buildFallback)) {
@@ -520,7 +508,7 @@ export function resolveEffectiveModelPins(
         `.factory/config.json: models.pins.buildFallback must be a Codex-capable model because it is used after Claude build failure`,
       );
     }
-    assertAgenticBuildPin(registry, '.factory/config.json: models.pins.buildFallback', repo.models.pins.buildFallback);
+    assertAgenticBuildPin(registry, repo.models.pins.buildFallback, 'repo', 'buildFallback');
     buildFallback = repo.models.pins.buildFallback;
     sources.buildFallback = 'repo';
   }
@@ -534,10 +522,41 @@ export function resolveEffectiveModelPins(
   };
 }
 
-// ---------- Codex kill-switch ----------
-
 // ---------- Effective build route ----------
-// (lives in repo-build-pin.ts; re-exported here)
+/** Same literal union as run/outcome.ts's BuildRoute; kept local so config/ never imports run/. */
+export type BuildRoutePin = 'codex' | 'claude' | 'opencode';
+
+/** The build route a pinned build model implies, read from its harness: a Codex-harness model
+ *  can only run on the codex route, an opencode-harness model on opencode, a claude-cli model on
+ *  claude. `undefined` when there is no pin or the harness has no dedicated route (#1367). */
+export function routeForBuildModel(registry: ModelRegistry, modelId: string | undefined): BuildRoutePin | undefined {
+  if (!modelId || !registry.get(modelId)) return undefined;
+  if (registry.isCodexModel(modelId)) return 'codex';
+  const harness = registry.getHarnessId(modelId);
+  if (harness === 'opencode') return 'opencode';
+  if (harness === 'claude-cli') return 'claude';
+  return undefined;
+}
+
+export interface EffectiveBuildRoute {
+  route?: BuildRoutePin;
+  /** 'repo' = explicit `route` in .factory/config.json; 'build-pin' = derived from the pinned
+   *  build model's harness; 'plan' = nothing pinned, the PLAN model decides per issue. */
+  source: 'repo' | 'build-pin' | 'plan';
+}
+
+/** An explicit repo `route` wins; otherwise a pinned build model determines the route, so an
+ *  operator who pins an Anthropic worker keeps BUILD on Anthropic without also learning about
+ *  `route`. With neither, PLAN decides (#1367). */
+export function resolveEffectiveBuildRoute(
+  registry: ModelRegistry,
+  repo: RepoFactoryConfig | null,
+  pins: EffectiveModelPins,
+): EffectiveBuildRoute {
+  if (repo?.route) return { route: repo.route, source: 'repo' };
+  const derived = routeForBuildModel(registry, pins.build);
+  return derived ? { route: derived, source: 'build-pin' } : { source: 'plan' };
+}
 
 /** Whether Codex/OpenAI routes should be disabled. Repo `providers.openai`, when
  *  explicitly set, wins; otherwise falls back to the FACTORY_CODEX=0 kill-switch. */
