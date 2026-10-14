@@ -82,7 +82,8 @@ import {
   type PlanReuseStore,
 } from './resume-context.js';
 import type { Environment, Workspace } from './ports.js';
-import { parkLogExtra, shipParkReason } from './ship-park.js';
+import { shipWithCiRework, type CiReworkPorts } from './ci-rework-loop.js';
+import { parkLogExtra } from './ship-park.js';
 
 /** Everything one run needs decided, as a plain resolved value — the CLI adapter
  *  computes this today; no config/file/path resolution happens in here. */
@@ -180,7 +181,7 @@ interface RunReportInfo {
 /** The injected seams runIssue needs. Effectful, path-bound concerns (Octokit, worktree
  *  layout, approvals/steering directories, report/artifact destinations) are the caller's
  *  responsibility to wire — runIssue only calls the closures it is handed. */
-export interface RunPorts {
+export interface RunPorts extends CiReworkPorts {
   /** Stuck-run steward seams (#2124). Used only when request.stewardEnabled is true and detectStuck fires
    *  on the park; absent → only the steward-triggered event is logged (#2086). */
   steward?: RunStewardPorts;
@@ -859,7 +860,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     // CHECK
     await setPhase('check');
     const priorFailureSignature = await ports.reworkHistory?.priorSignature(request.issue);
-    const check = await checkPhase({
+    const checkOpts = {
       runId,
       issue: request.issue,
       worktree: ports.workspace.path,
@@ -886,7 +887,8 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       onActivity: ports.onActivity,
       logsDir: request.logsDir,
       baselineCachePath: request.baselineCachePath,
-    });
+    };
+    const check = await checkPhase(checkOpts);
     checkSummary = check.summary;
     reworkRounds = check.reworkRounds;
     const flake = check.flakeRerun;
@@ -1143,37 +1145,12 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
 
     // SHIP
     await setPhase('ship');
-    const ship = await shipPhase({
-      issue: request.issue,
-      repo: request.repo,
-      worktree: ports.workspace.path,
-      branch: request.branch,
-      recordedRemoteSha: ports.workspace.remoteBranch?.sha,
-      octokit: ports.octokit,
-      watchCI: !request.skipCI,
-      log: ports.events('ship'),
-      approvalGate: request.options.interactive ? ports.createApprovalGate?.() : undefined,
-      checkSummary: check.summary,
-      specPath: request.specPath,
-      eventsFile: request.eventsFile,
-      startedAt: request.startedAt,
-      logsDir: request.logsDir,
-      reworkRounds: check.reworkRounds,
-      work: request.work,
-      laneId: request.lane,
-      reviewRouting,
-      ...(pinNote ? { pinNotes: [pinNote] } : {}),
-      slice: planSlice ? { index: planSlice.index, count: planSlice.plan.slices.length } : undefined,
-    });
-    if (!ship.ok) {
-      const reason = shipParkReason(ship);
-      const message = ship.denied
-        ? `ship denied: ${ship.deniedReason}`
-        : ship.reason
-          ? `ship phase failed: ${ship.reason}`
-          : 'ship phase failed';
-      return terminalParked(reason, message, undefined, ship.ciFailure);
-    }
+    const shipped = await shipWithCiRework(
+      { request, ports, shipPhase, checkPhase, checkOpts, check, constitution, appPort, appBaseUrl, onPgid, runId },
+      { builtRoute, builtModel, reviewRouting, pinNote, planSlice },
+    );
+    const { ship, parked } = shipped;
+    if (parked) return terminalParked(parked.reason, parked.message, parked.checkFailure, parked.ciFailure);
 
     if (planSlice) {
       const { index, plan: slicePlan } = planSlice;
