@@ -15,7 +15,8 @@ import { type OpenCodeVersionProbe, probeOpenCodeMajor } from './opencode-versio
 export type OpenCodeExecFn = ExecFn;
 
 export interface ParsedOpenCodeJson {
-  /** Assistant `text` parts, trimmed, non-empty, joined by a blank line. */
+  /** Text parts of the last step (after the final `step_start`), trimmed, non-empty, joined by a
+   *  blank line; '' when that step has no text. */
   text: string;
   /** Summed `step_finish` usage; undefined when no step reported numeric tokens. */
   usage?: HarnessUsage;
@@ -30,9 +31,10 @@ const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v)
 /** Parses `opencode run --format json` NDJSON. Returns undefined when stdout has no
  *  OpenCode event lines (an object with a string `type`), so callers fall back to raw
  *  stdout. Tolerant by design: malformed lines, unknown event types and bad counts are
- *  skipped. Usage capture must never fail a run (#2462). */
+ *  skipped. Usage capture must never fail a run (#2462). Only the last step's text is returned:
+ *  narration from earlier steps is dropped (#2881). */
 export function parseOpenCodeJson(stdout: string): ParsedOpenCodeJson | undefined {
-  const texts: string[] = [];
+  let stepTexts: string[] = [];
   const errors: string[] = [];
   let sawEvent = false;
   let sawUsage = false;
@@ -56,9 +58,11 @@ export function parseOpenCodeJson(stdout: string): ParsedOpenCodeJson | undefine
     if (!event || typeof event !== 'object' || Array.isArray(event) || typeof event.type !== 'string') continue;
     sawEvent = true;
 
-    if (event.type === 'text') {
+    if (event.type === 'step_start') {
+      stepTexts = [];
+    } else if (event.type === 'text') {
       const text = event.part?.text;
-      if (typeof text === 'string' && text.trim().length > 0) texts.push(text.trim());
+      if (typeof text === 'string' && text.trim().length > 0) stepTexts.push(text.trim());
     } else if (event.type === 'step_finish') {
       const tokens = event.part?.tokens;
       if (!tokens || !Number.isFinite(tokens.input) || !Number.isFinite(tokens.output)) continue;
@@ -86,7 +90,7 @@ export function parseOpenCodeJson(stdout: string): ParsedOpenCodeJson | undefine
 
   if (!sawEvent) return undefined;
   return {
-    text: texts.join('\n\n'),
+    text: stepTexts.join('\n\n'),
     errorText: errors.join('\n'),
     ...(sawUsage
       ? {

@@ -353,13 +353,13 @@ const jsonFixture = readFileSync(
 );
 
 describe('OpenCodeHarness JSON output', () => {
-  it('returns fixture usage and only assistant text from the recorded JSON fixture', async () => {
+  it('returns fixture usage and only the final step text from the recorded JSON fixture', async () => {
     const rec = recordingExec({ stdout: jsonFixture });
     const result = await new OpenCodeHarness(rec.fn).run(
       makeContractRequest({ model: 'opencode-model', registry, prompt: 'build it' }),
     );
 
-    expect(result.output).toBe("I'll inspect the repo first.\n\nFINAL ANSWER: the build is done.");
+    expect(result.output).toBe('FINAL ANSWER: the build is done.');
     expect(result.output).not.toContain('TOOL_CHATTER_MARKER');
     expect(result.output).not.toContain('step_finish');
     expect(result.usage).toMatchObject({
