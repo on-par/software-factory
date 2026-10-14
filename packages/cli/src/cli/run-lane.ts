@@ -313,7 +313,8 @@ export async function runLane(
       // once by the layer that detects the failure — shipIssue for pipeline failures,
       // the land path for merge failures. runLane owns only lane-lifecycle events
       // (stopped/parked/lane-done), so injected ship functions never change ownership.
-      const signature = err instanceof LaneParkError ? err.failureSignature : undefined;
+      // A blocked park waits on a filed blocker (#2315); it never counts toward the lane breaker.
+      const signature = err instanceof LaneParkError && err.reason !== 'blocked' ? err.failureSignature : undefined;
       const checks = err instanceof LaneParkError ? (err.failingChecks ?? []) : [];
       if (!signature) streak = null;
       else if (streak && streak.signature === signature) streak.count++;

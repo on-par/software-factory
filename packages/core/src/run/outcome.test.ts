@@ -13,6 +13,11 @@ describe('parkReasonFor', () => {
     expect(parkReasonFor({ outcome: { state: 'parked', reason: 'config' } })).toBe('config');
   });
 
+  it('reads a blocked park reason from a marker or a parked outcome (#2315)', () => {
+    expect(parkReasonFor({ parkReason: 'blocked' })).toBe('blocked');
+    expect(parkReasonFor({ outcome: { state: 'parked', reason: 'blocked' } })).toBe('blocked');
+  });
+
   it('reads a readonly parkReason marker (Land/Ci-shaped errors)', () => {
     expect(parkReasonFor({ parkReason: 'conflict' })).toBe('conflict');
     expect(parkReasonFor({ parkReason: 'ci-failed' })).toBe('ci-failed');

@@ -431,7 +431,9 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     checkFailure?: { failureSignature: string; failingChecks: string[] },
     ciFailure?: CiFailureEvidence,
   ): Promise<RunOutcome> => {
-    log(reason, message, parkLogExtra(checkFailure, ciFailure));
+    // A blocked park never carries a failure signature, so the ADR-0139 lane breaker and the cross-run stuck check skip it (#2315).
+    const failure = reason === 'blocked' ? undefined : checkFailure;
+    log(reason, message, parkLogExtra(failure, ciFailure));
     if (reason === 'timeout') {
       log('stuck', `run exceeded its phase timeout without progressing — ${message}`);
     }
@@ -458,7 +460,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       route,
       branch: request.branch,
       reworkRounds,
-      ...checkFailure,
+      ...failure,
     };
     // The steward runs after the park event and before the reports and the return, so it finishes
     // before the CLI raises LaneParkError or pauses the lane (#2124).

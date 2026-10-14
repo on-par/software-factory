@@ -47,6 +47,8 @@ export function issueStateMarker(issue: number): string {
 
 const PARK_HINTS: Record<ParkReason, string> = {
   fail: 'fix the failing checks on the branch or clarify the issue, then run `factory unpark <n>`.',
+  blocked:
+    'waiting on a filed blocker. The factory resumes it once the blocker closes; run `factory unpark <n>` to retry sooner.',
   escalate: 'a human decision is needed. Answer it on the issue, then run `factory unpark <n>`.',
   timeout: 'a phase timed out. Check the lane log and retry with `factory unpark <n>`.',
   conflict: 'rebase the branch onto main, then run `factory unpark <n>`.',

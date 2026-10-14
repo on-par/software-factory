@@ -6,6 +6,19 @@ import { shipParkReason } from '../run/ship-park.js';
 import { detectStuck, type StuckDetection } from './detect.js';
 
 describe('detectStuck', () => {
+  it('returns null for a blocked park, even with a signature at the rework budget', () => {
+    expect(detectStuck({ state: 'parked', reason: 'blocked' })).toBeNull();
+    expect(
+      detectStuck({
+        state: 'parked',
+        reason: 'blocked',
+        reworkRounds: 3,
+        failureSignature: 'sig',
+        failingChecks: ['tests'],
+      }),
+    ).toBeNull();
+  });
+
   it('flags a parked fail at the rework budget with a signature as check-exhausted', () => {
     const outcome: RunOutcome = {
       state: 'parked',

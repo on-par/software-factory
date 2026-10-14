@@ -18,7 +18,8 @@ export interface StuckDetection {
  *  `ship-failed` fires for every parked `ci-failed`, whatever its origin: the land path
  *  (`CiFailedError` / `CiUnverifiedError`) and SHIP's CI watch (`shipParkReason` maps
  *  `ciOutcome: 'failure'` to `ci-failed`, #2814).
- *  `ci-infra` parks are non-triggers: the change did not break CI. */
+ *  `ci-infra` parks are non-triggers: the change did not break CI.
+ *  `blocked` parks are non-triggers: they wait on a filed blocker and carry no signature. */
 export function detectStuck(outcome: RunOutcome, reworkBudget: number = MAX_REWORK_ROUNDS): StuckDetection | null {
   if (outcome.state !== 'parked') return null;
   // ci-infra: the one infra rerun also failed for infra (#2366). Like an environment release, the change is not at fault.

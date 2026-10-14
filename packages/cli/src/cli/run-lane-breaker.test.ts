@@ -181,6 +181,18 @@ describe('cli', () => {
         expect(kinds(h.events, 'lane-done')[0][3]).toContain('3 parked');
       });
 
+      it('does not pause on consecutive blocked parks, even with the same signature', async () => {
+        const blocked = new LaneParkError('waiting', 'blocked', {
+          failureSignature: 'sig-A',
+          failingChecks: ['tests'],
+        });
+        const h = harness({ 1: blocked, 2: blocked, 3: blocked }, [1, 2, 3]);
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, { ...h.deps, laneBreakerThreshold: 2 });
+
+        expect(h.shipped).toEqual([1, 2, 3]);
+        expect(kinds(h.events, 'lane-paused')).toHaveLength(0);
+      });
+
       it('does not pause on parks without a signature', async () => {
         const h = harness({ 1: new Error('boom'), 2: new Error('boom'), 3: parkErr(''), 4: parkErr('') }, [1, 2, 3, 4]);
         await runLane('app', [], '/repo', 'on-par/software-factory', paths, { ...h.deps, laneBreakerThreshold: 2 });

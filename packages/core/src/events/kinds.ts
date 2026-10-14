@@ -26,6 +26,7 @@ export type EventKind =
   | 'base-hold-cleared'
   | 'benchmark-artifacts'
   | 'benchmark-artifacts-failed'
+  | 'blocked'
   | 'budget_exceeded'
   | 'build'
   | 'check'
@@ -261,6 +262,9 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'base-hold-cleared': { severity: 'info', isPark: false, isTerminal: false },
   'benchmark-artifacts': { severity: 'info', isPark: false, isTerminal: false },
   'benchmark-artifacts-failed': { severity: 'info', isPark: false, isTerminal: false },
+  // Parked while waiting on a filed blocker; the factory resumes it, not a human (#2315).
+  // Carries no failure signature, so the steward and the lane breaker skip it.
+  blocked: { severity: 'warn', isPark: true, isTerminal: true, laneStatus: 'parked' },
   budget_exceeded: { severity: 'warn', isPark: false, isTerminal: false },
   build: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
   check: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
