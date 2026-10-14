@@ -2,7 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { defaultFactoryConfig } from '@on-par/factory-config';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -13,6 +13,7 @@ import {
   laneWorktreePath,
   resolveWorktreeRoot,
 } from './worktree-location.js';
+import { worktreeDirName } from './worktree-name.js';
 
 describe('resolveWorktreeRoot', () => {
   const repoRoot = '/code/software-factory';
@@ -56,21 +57,67 @@ describe('laneWorktreePath', () => {
   };
 
   it('puts the lane under the shared root with the stable basename', () => {
-    expect(laneWorktreePath({ ...base, exists: () => false })).toBe('/h/.factory/worktrees/o/r/r-factory-factory-12');
+    expect(laneWorktreePath({ ...base, exists: () => false })).toBe('/h/.factory/worktrees/o/r/r-factory-12');
   });
 
-  it('falls back to an existing legacy sibling', () => {
+  it('falls back to an existing old-name legacy sibling', () => {
     expect(laneWorktreePath({ ...base, exists: (p) => p === '/code/r-factory-factory-12' })).toBe(
       '/code/r-factory-factory-12',
     );
   });
 
+  it('falls back to an existing new-name legacy sibling', () => {
+    expect(laneWorktreePath({ ...base, exists: (p) => p === '/code/r-factory-12' })).toBe('/code/r-factory-12');
+  });
+
+  it('names the lane with worktreeDirName (no repeated factory segment)', () => {
+    const path = laneWorktreePath({ ...base, exists: () => false });
+    expect(path).toBe('/h/.factory/worktrees/o/r/r-factory-12');
+    expect(basename(path)).toBe(worktreeDirName('r', 12, 'factory'));
+  });
+
+  describe('software-factory (#2763)', () => {
+    const sf = {
+      ...base,
+      repoRoot: '/code/software-factory',
+      repo: 'on-par/software-factory',
+      issue: 2149,
+    };
+    const root = '/h/.factory/worktrees/on-par/software-factory';
+
+    it('resolves software-factory issue 2149 to software-factory-2149 (#2763)', () => {
+      const path = laneWorktreePath({ ...sf, exists: () => false });
+      expect(path).toBe(`${root}/software-factory-2149`);
+      expect(path).not.toContain('factory-factory');
+    });
+
+    it('reuses an existing old repeated-segment worktree under the shared root (#2763)', () => {
+      const old = `${root}/software-factory-factory-factory-2149`;
+      expect(laneWorktreePath({ ...sf, exists: (p) => p === old })).toBe(old);
+    });
+
+    it('reuses an old-name legacy sibling (#2763)', () => {
+      const old = '/code/software-factory-factory-factory-2149';
+      expect(laneWorktreePath({ ...sf, exists: (p) => p === old })).toBe(old);
+    });
+
+    it('prefers the new name when both old and new exist (#2763)', () => {
+      expect(laneWorktreePath({ ...sf, exists: () => true })).toBe(`${root}/software-factory-2149`);
+    });
+  });
+
+  it('leaves a custom prefix name unchanged', () => {
+    expect(laneWorktreePath({ ...base, prefix: 'sf', exists: () => false })).toBe(
+      '/h/.factory/worktrees/o/r/r-factory-sf-12',
+    );
+  });
+
   it('prefers the primary when both exist', () => {
-    expect(laneWorktreePath({ ...base, exists: () => true })).toBe('/h/.factory/worktrees/o/r/r-factory-factory-12');
+    expect(laneWorktreePath({ ...base, exists: () => true })).toBe('/h/.factory/worktrees/o/r/r-factory-12');
   });
 
   it('reproduces the sibling layout for ../', () => {
-    expect(laneWorktreePath({ ...base, parent: '../', exists: () => false })).toBe('/code/r-factory-factory-12');
+    expect(laneWorktreePath({ ...base, parent: '../', exists: () => false })).toBe('/code/r-factory-12');
   });
 });
 
