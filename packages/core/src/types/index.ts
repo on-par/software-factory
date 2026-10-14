@@ -226,6 +226,30 @@ export type ReworkCauseTag = 'merge-conflict' | 'checker-failure' | 'other';
 export type HumanEventType = 'human-approved' | 'human-edited' | 'human-restarted' | 'human-merged' | 'human-abandoned';
 
 /** CHECK failure that caused a park, carried on the park event (#2083). */
+/** One failing CI check run in CiFailureEvidence (#2814). */
+export interface CiFailingCheck {
+  name: string;
+  conclusion: string;
+  summary?: string;
+}
+
+/** One open code-scanning alert on the PR head (#2814). `location` is "path:line" (or "path" without a line). */
+export interface CiCodeScanningAlert {
+  ruleId: string;
+  location: string;
+  message: string;
+}
+
+/** Bounded CI-failure evidence carried on a SHIP ci-failed park event (#2814). */
+export interface CiFailureEvidence {
+  failingChecks: CiFailingCheck[];
+  alerts: CiCodeScanningAlert[];
+  /** True when checks/alerts were dropped past the caps or a text field was cut. */
+  truncated: boolean;
+  /** Best-effort collection errors ("checks: …", "code-scanning: …"); omitted when none. */
+  errors?: string[];
+}
+
 export interface CheckFailureInfo {
   /** `stuckSignature()` of the final CHECK, the same string as RunOutcome.failureSignature. */
   signature: string;
@@ -311,6 +335,8 @@ export interface FactoryEvent {
   flakyTests?: FlakyTestsPayload;
   /** CHECK failure signature behind a park event (#2083). */
   checkFailure?: CheckFailureInfo;
+  /** CI-failure evidence behind a SHIP ci-failed park (#2814). */
+  ciFailure?: CiFailureEvidence;
   model?: string;
   tokens?: { input: number; output: number };
   durationMs?: number;

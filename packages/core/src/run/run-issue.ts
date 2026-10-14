@@ -61,6 +61,7 @@ import type { SandboxPolicy } from '../sandbox/index.js';
 import { describeSteering, type ConsumedSteering } from '../steering/index.js';
 import type {
   CheckFailureInfo,
+  CiFailureEvidence,
   CheckSummary,
   Constitution,
   FailoverReason,
@@ -81,6 +82,7 @@ import {
   type PlanReuseStore,
 } from './resume-context.js';
 import type { Environment, Workspace } from './ports.js';
+import { parkLogExtra, shipParkReason } from './ship-park.js';
 
 /** Everything one run needs decided, as a plain resolved value — the CLI adapter
  *  computes this today; no config/file/path resolution happens in here. */
@@ -157,6 +159,7 @@ type LogFn = (
     readiness?: ReadinessInfo;
     prClassification?: PrClassificationRecord;
     checkFailure?: CheckFailureInfo;
+    ciFailure?: CiFailureEvidence;
     stewardTriggered?: StewardTriggeredPayload;
     flakyTests?: FlakyTestsPayload;
   },
@@ -423,14 +426,9 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     reason: ParkReason,
     message: string,
     checkFailure?: { failureSignature: string; failingChecks: string[] },
+    ciFailure?: CiFailureEvidence,
   ): Promise<RunOutcome> => {
-    log(
-      reason,
-      message,
-      checkFailure
-        ? { checkFailure: { signature: checkFailure.failureSignature, failingChecks: checkFailure.failingChecks } }
-        : undefined,
-    );
+    log(reason, message, parkLogExtra(checkFailure, ciFailure));
     if (reason === 'timeout') {
       log('stuck', `run exceeded its phase timeout without progressing — ${message}`);
     }
@@ -1168,13 +1166,13 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       slice: planSlice ? { index: planSlice.index, count: planSlice.plan.slices.length } : undefined,
     });
     if (!ship.ok) {
-      const reason: ParkReason = ship.denied ? 'escalate' : ship.ciOutcome === 'infra-failure' ? 'ci-infra' : 'fail';
+      const reason = shipParkReason(ship);
       const message = ship.denied
         ? `ship denied: ${ship.deniedReason}`
         : ship.reason
           ? `ship phase failed: ${ship.reason}`
           : 'ship phase failed';
-      return terminalParked(reason, message);
+      return terminalParked(reason, message, undefined, ship.ciFailure);
     }
 
     if (planSlice) {

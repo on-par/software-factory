@@ -1042,7 +1042,7 @@ describe('shipPhase CI watch', () => {
       await vi.runAllTimersAsync();
       const result = await promise;
 
-      expect(result).toEqual({
+      expect(result).toMatchObject({
         ok: false,
         prNumber: 123,
         reason: 'CI failed for PR #123',
@@ -1053,7 +1053,7 @@ describe('shipPhase CI watch', () => {
       expect(logs).not.toContainEqual(['ready', 'PR #123 ready for review']);
       expect(calls.some(([name]) => name === 'pulls.get')).toBe(false);
       expect(calls.some(([name]) => name === 'graphql')).toBe(false);
-      expect(callCount()).toBe(3); // 2 watch polls + 1 re-list by the infra-rerun rescue check (#2365)
+      expect(callCount()).toBe(4); // 2 watch polls + rescue re-list (#2365) + evidence re-list (#2814)
     } finally {
       vi.useRealTimers();
     }

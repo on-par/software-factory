@@ -150,9 +150,16 @@ async function commitStatusCount(
   }
 }
 
-type CheckRunLike = { id?: number; head_sha?: string | null; status?: string | null; conclusion?: string | null };
+export type CheckRunLike = {
+  id?: number;
+  name?: string | null;
+  head_sha?: string | null;
+  status?: string | null;
+  conclusion?: string | null;
+  output?: { title?: string | null; summary?: string | null } | null;
+};
 
-async function listAllCheckRuns(
+export async function listAllCheckRuns(
   octokit: Octokit,
   owner: string,
   repo: string,

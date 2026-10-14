@@ -831,7 +831,7 @@ describe('runIssue — steward-triggered event (#2086)', () => {
     expect(stewardCalls(log)).toHaveLength(0);
   });
 
-  it('still parks a ship failure with ciOutcome failure as fail', async () => {
+  it('parks a ship failure with ciOutcome failure as ci-failed', async () => {
     vi.mocked(shipPhase).mockResolvedValue({
       ok: false,
       prNumber: 9,
@@ -839,7 +839,7 @@ describe('runIssue — steward-triggered event (#2086)', () => {
       ciOutcome: 'failure',
     });
     const outcome = await runIssue(baseRequest({ stewardEnabled: true }), basePolicy(), basePorts());
-    expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'ci-failed' });
   });
 
   it('logs nothing for non-trigger parks', async () => {

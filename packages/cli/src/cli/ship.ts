@@ -5,6 +5,7 @@ import { styleText } from 'node:util';
 
 import type {
   CheckFailureInfo,
+  CiFailureEvidence,
   EventKind,
   FailoverReason,
   FailurePhase,
@@ -251,6 +252,7 @@ export async function shipIssue(
         readiness?: ReadinessInfo;
         prClassification?: PrClassificationRecord;
         checkFailure?: CheckFailureInfo;
+        ciFailure?: CiFailureEvidence;
         stewardTriggered?: StewardTriggeredPayload;
         flakyTests?: FlakyTestsPayload;
       },
