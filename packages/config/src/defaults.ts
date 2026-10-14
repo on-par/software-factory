@@ -395,17 +395,30 @@ export const defaultModelsConfig: ModelsDefaults = {
       providerModel: 'anthropic/claude-sonnet-5',
       experimental: true,
     },
-    /** Added 2026-08-12 for OpenCode Go subscriptions (OPENCODE_API_KEY env var). Served via OpenCode Go (https://opencode.ai/zen/go/v1), a distinct provider from OpenCode Zen (opencode/... prefix, pay-per-use; do not confuse the two, the same env var backs both). Confirmed working live: `opencode run --model opencode-go/deepseek-v4-flash "..."` returns real output. opt in with FACTORY_EXPERIMENTAL=1. */
+    /** Added 2026-08-12 for OpenCode Go subscriptions (OPENCODE_API_KEY env var). Served via OpenCode Go (https://opencode.ai/zen/go/v1), a distinct provider from OpenCode Zen (opencode/... prefix, pay-per-use; do not confuse the two, the same env var backs both). Confirmed working live: `opencode run --model opencode-go/deepseek-v4-flash "..."` returns real output. Updated 2026-10-14 (#2898): DeepSeek now serves V4.1 Flash (the old `deepseek-v4-flash` name routes there). Go id `opencode-go/deepseek-v4.1-flash` per https://opencode.ai/docs/go (taken from the docs page; `opencode models opencode-go` needs a Go login); prices $0.30/$1.20 per 1M per https://opencode.ai/docs/zen (Go bills $0.15/$0.60 off-peak, $0.30/$1.20 peak), checked 2026-10-14. opt in with FACTORY_EXPERIMENTAL=1. */
     'opencode-deepseek-v4-flash': {
       provider: 'custom',
       tier: ['worker'],
-      costPerMtokInput: 0.07,
-      costPerMtokOutput: 0.14,
+      costPerMtokInput: 0.3,
+      costPerMtokOutput: 1.2,
       contextWindow: 1000000,
       capabilities: ['implementation', 'coding'],
       envKey: 'OPENCODE_API_KEY',
       harness: 'opencode',
-      providerModel: 'opencode-go/deepseek-v4-flash',
+      providerModel: 'opencode-go/deepseek-v4.1-flash',
+      experimental: true,
+    },
+    /** Added 2026-10-14 (#2898): DeepSeek V4 Pro via OpenCode Go (still served; retirement reversed 2026-09-11). Go id `opencode-go/deepseek-v4-pro` per https://opencode.ai/docs/go (taken from the docs page); prices $1.74/$3.48 per 1M per https://opencode.ai/docs/zen (Go bills $0.66/$1.98 off-peak, $1.32/$3.96 peak), checked 2026-10-14. Pin-only: in no tier. OpenCode Go is an approved zero-retention intermediary (ADR-0163). opt in with FACTORY_EXPERIMENTAL=1. */
+    'opencode-deepseek-v4-pro': {
+      provider: 'custom',
+      tier: ['worker'],
+      costPerMtokInput: 1.74,
+      costPerMtokOutput: 3.48,
+      contextWindow: 1000000,
+      capabilities: ['implementation', 'coding'],
+      envKey: 'OPENCODE_API_KEY',
+      harness: 'opencode',
+      providerModel: 'opencode-go/deepseek-v4-pro',
       experimental: true,
     },
     /** Added 2026-08-17: OpenCode Go's monthly usage cap ($60/mo) hit 100% and doesn't reset until 2026-09-13, blocking opencode-deepseek-v4-flash. This is OpenCode Zen's (not Go's) promo-period free tier for the same model, opencode/... prefix, no balance or subscription quota involved. Anoma.ly's privacy notice: during the free promo, request data may be used to improve the model (not the zero-retention terms Go/paid Zen get) — acceptable for skunkworks throwaway prototypes, reconsider before using on anything with real user/client data. Free tier may be pulled without notice; if `opencode/deepseek-v4-flash-free` starts erroring, check https://opencode.ai/docs/zen/ for current free-tier availability. Confirmed working live: `opencode run --model opencode/deepseek-v4-flash-free "..."` returns real output. opt in with FACTORY_EXPERIMENTAL=1. */

@@ -17,7 +17,7 @@ Models whose agent CLI is not on PATH are skipped, so a machine with only the Co
 
 **Stuck-run steward.** The steward has no packaged model and no Claude requirement. It uses the steward route's `model` pin when set, otherwise the first runnable boss-tier model (models whose CLI is missing are skipped), so a Codex-only machine uses `gpt-5.6-terra-high`. The boss tier has no OpenCode model, so on an OpenCode-only machine pin the steward route model (e.g. `opencode-deepseek-v4-flash`); otherwise the steward fails closed with a `route-misconfigured` escalation.
 
-Local Ollama models cost $0 and lead every tier. `FACTORY_LOCAL_ONLY=1` restricts routing to local models entirely. Experimental models (glm-5.2, qwen-3.5-coder, opencode-sonnet, opencode-deepseek-v4-flash, opencode-deepseek-v4-flash-free) exist in `defaults.ts` but are only routed when `FACTORY_EXPERIMENTAL=1`.
+Local Ollama models cost $0 and lead every tier. `FACTORY_LOCAL_ONLY=1` restricts routing to local models entirely. Experimental models (glm-5.2, qwen-3.5-coder, opencode-sonnet, opencode-deepseek-v4-flash, opencode-deepseek-v4-pro, opencode-deepseek-v4-flash-free) exist in `defaults.ts` but are only routed when `FACTORY_EXPERIMENTAL=1`.
 
 **Codex GPT phase profiles.** Whenever Codex GPT is the selected provider path (e.g. `providers.anthropic`/`providers.ollama` disabled, or an explicit pin), PLAN defaults to `gpt-5.6-terra-high` (`model_reasoning_effort=high`) and BUILD (`build_codex`) defaults to `gpt-5.6-terra-medium` (`model_reasoning_effort=medium`); the generic `gpt-5.6-sol` → `gpt-5.1-codex` profiles remain as failover. Override per repo with `.factory/config.yaml` (`models.pins.plan` / `models.pins.build`) or per run with `FACTORY_PLAN_MODEL` / `FACTORY_BUILD_MODEL`; the repo file wins over env.
 
@@ -54,7 +54,7 @@ What a harness receives, must return and how its failures are classified is spec
 
 ## OpenCode-only profile
 
-Use this profile when the OpenCode CLI is the only agent CLI on the machine. Every packaged OpenCode model (`opencode-sonnet`, `opencode-deepseek-v4-flash`, `opencode-deepseek-v4-flash-free`) is experimental and only in the `worker` tier, so the default tiers never pick one for PLAN, checker or triage.
+Use this profile when the OpenCode CLI is the only agent CLI on the machine. Every packaged OpenCode model (`opencode-sonnet`, `opencode-deepseek-v4-flash`, `opencode-deepseek-v4-pro`, `opencode-deepseek-v4-flash-free`) is experimental. `opencode-deepseek-v4-pro` is in no tier and is pin-only. The others are only in the `worker` tier, so the default tiers never pick one for PLAN, checker or triage.
 
 Requirements:
 
@@ -79,6 +79,8 @@ route: opencode
 | Worker (BUILD) | `models.pins.build` and `route: opencode` | `opencode-deepseek-v4-flash` | `route: opencode` sends BUILD to `build_opencode`; a pinned build worker's harness also forces the route after PLAN. |
 | Checker        | `models.pins.checker`                     | `opencode-deepseek-v4-flash` | The pin replaces the checker tier with this one model.                                                               |
 | Triage         | `models.pins.triage`                      | `opencode-deepseek-v4-flash` | The pin replaces the triage tier with this one model.                                                                |
+
+`opencode-deepseek-v4-flash` is served as `opencode-go/deepseek-v4.1-flash` at $0.30/$1.20 per 1M tokens. `opencode-deepseek-v4-pro` (`opencode-go/deepseek-v4-pro`, $1.74/$3.48 per 1M) is a pin-only, stronger option for any phase, with a lower Go monthly quota.
 
 Swap in `opencode-deepseek-v4-flash-free` (OpenCode Zen free promo tier, no subscription quota, but request data may be used for training) or `opencode-sonnet` for any phase. `FACTORY_PLAN_MODEL` / `FACTORY_BUILD_MODEL` still override plan/build per run, and the repo file wins over env.
 

@@ -156,7 +156,7 @@ Version tested: codex-cli 0.155.1
 
 ### Recipe: OpenCode Go-only
 
-Use this with an OpenCode Go subscription (the pinned model is served as `opencode-go/deepseek-v4-flash`).
+Use this with an OpenCode Go subscription (the pinned model is served as `opencode-go/deepseek-v4.1-flash`).
 Set `FACTORY_EXPERIMENTAL=1` in the factory's environment and sign in with `opencode auth login`, or set `OPENCODE_API_KEY`.
 Do not switch off every provider: that empties the boss tier and the config fails to load. The pins keep it OpenCode-only.
 
