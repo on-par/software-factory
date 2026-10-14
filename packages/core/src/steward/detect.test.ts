@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import type { ShipResult } from '../phases/ship.js';
 import type { RunOutcome } from '../run/outcome.js';
-import { detectStuck } from './detect.js';
+import { shipParkReason } from '../run/ship-park.js';
+import { detectStuck, type StuckDetection } from './detect.js';
 
 describe('detectStuck', () => {
   it('flags a parked fail at the rework budget with a signature as check-exhausted', () => {
@@ -95,5 +97,44 @@ describe('detectStuck', () => {
     const specifiers = [...source.matchAll(/^import\s.*?from\s+'([^']+)';$/gm)].map((m) => m[1]);
     expect(specifiers).toEqual(['../phases/check.js', '../run/outcome.js']);
     expect(source).toMatch(/^import type \{ RunOutcome \} from '\.\.\/run\/outcome\.js';$/m);
+  });
+});
+
+describe('detectStuck ci-failed origins', () => {
+  it('SHIP-origin ci failure maps to the ci-failed park reason', () => {
+    expect(shipParkReason({ ok: false, ciOutcome: 'failure' })).toBe('ci-failed');
+  });
+
+  it.each<[string, ShipResult, Partial<RunOutcome>, StuckDetection | null]>([
+    ['ci failure with a PR', { ok: false, ciOutcome: 'failure', prNumber: 7 }, {}, { trigger: 'ship-failed' }],
+    [
+      'ci failure with a signature',
+      { ok: false, ciOutcome: 'failure' },
+      { failureSignature: 'sig-ci' },
+      { trigger: 'ship-failed', failureSignature: 'sig-ci' },
+    ],
+    ['ci-infra is not a trigger', { ok: false, ciOutcome: 'infra-failure' }, {}, null],
+    ['denied escalates, not a trigger', { ok: false, denied: true, deniedReason: 'x' }, {}, null],
+    ['plain fail without a signature is not a trigger', { ok: false, reason: 'push failed' }, {}, null],
+  ])('SHIP-origin %s', (_name, ship, extra, expected) => {
+    const outcome = {
+      state: 'parked',
+      reason: shipParkReason(ship),
+      route: 'claude',
+      branch: 'b',
+      reworkRounds: 0,
+      ...extra,
+    } as RunOutcome;
+    expect(detectStuck(outcome)).toEqual(expected);
+  });
+
+  it.each<[string, Partial<RunOutcome>, StuckDetection]>([
+    ['with a PR number', { prNumber: 42 }, { trigger: 'ship-failed' }],
+    ['without a PR number', {}, { trigger: 'ship-failed' }],
+    ['with a signature', { failureSignature: 'sig-land' }, { trigger: 'ship-failed', failureSignature: 'sig-land' }],
+    ['with an empty signature', { failureSignature: '' }, { trigger: 'ship-failed' }],
+  ])('land-path ci-failed %s', (_name, extra, expected) => {
+    const outcome = { state: 'parked', reason: 'ci-failed', reworkRounds: 0, ...extra } as RunOutcome;
+    expect(detectStuck(outcome)).toEqual(expected);
   });
 });
