@@ -1,5 +1,6 @@
-// packages/cli/src/cli/program.test.ts — buildProgram registers every command under its help group (#2793)
+// packages/cli/src/cli/program.test.ts — buildProgram registers every command under its help group (#2793) and main() stays a thin entry point (#2794)
 
+import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
 import { describe, expect, it } from 'vitest';
 import { HELP_GROUPS, OTHER_GROUP } from './help-groups.js';
@@ -43,5 +44,16 @@ describe('buildProgram', () => {
     const program = buildProgram(PROGRAM_HANDLERS, {});
     expect(program.commands.find((c) => c.name() === 'check')?.aliases()).toEqual(['ready']);
     expect(program.options.some((o) => o.long === '--state-root')).toBe(true);
+  });
+});
+
+describe('main', () => {
+  it('main() in cli/index.ts is 100 lines or fewer', () => {
+    const lines = readFileSync(new URL('./index.ts', import.meta.url), 'utf8').split('\n');
+    const start = lines.findIndex((l) => /^(export )?(async )?function main\(/.test(l));
+    expect(start).toBeGreaterThanOrEqual(0);
+    const end = lines.findIndex((l, i) => i > start && l.startsWith('}'));
+    expect(end).toBeGreaterThan(start);
+    expect(end - start + 1).toBeLessThanOrEqual(100);
   });
 });
