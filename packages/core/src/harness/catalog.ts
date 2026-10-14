@@ -76,6 +76,11 @@ export const HARNESS_CATALOG: Record<string, HarnessCatalogEntry> = Object.fromE
 
 export const KNOWN_HARNESS_IDS = Object.keys(HARNESS_CATALOG);
 
+/** Shared by the models-config and repo-config checks so the two cannot drift. */
+export function builtInHarnessRedeclaredMessage(id: string): string {
+  return `Harness '${id}' is built in and cannot be redeclared under harnesses`;
+}
+
 export function isAgenticHarness(harnessId: string): boolean {
   return HARNESS_CATALOG[harnessId]?.agentic ?? false;
 }
