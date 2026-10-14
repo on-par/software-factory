@@ -146,7 +146,7 @@ describe('laneStatusOf', () => {
   // must read differently from a real error in the TUI, so it uses the word
   // "parked" (2026-08-20).
   it('maps self-parked kinds to parked, distinct from a genuine failure', () => {
-    for (const kind of ['escalate', 'parked', 'held']) {
+    for (const kind of ['escalate', 'parked', 'held', 'blocked']) {
       expect(laneStatusOf(kind), kind).toBe('parked');
     }
   });
@@ -320,5 +320,12 @@ describe('steward-triggered classification (#2084)', () => {
     // @ts-expect-error 'budget' is not an ADR-0155 trigger
     const invalid: StewardTriggeredPayload = { trigger: 'budget' };
     expect(invalid).toBeDefined();
+  });
+});
+
+describe('blocked park kind (#2315)', () => {
+  it('is a warn terminal park with lane status parked', () => {
+    expect(EVENT_TRAITS.blocked).toEqual({ severity: 'warn', isPark: true, isTerminal: true, laneStatus: 'parked' });
+    expect(laneStatusOf('blocked')).toBe('parked');
   });
 });

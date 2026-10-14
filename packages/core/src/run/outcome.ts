@@ -2,7 +2,7 @@ import type { EventKind } from '../events/kinds.js';
 
 export type ParkReason = Extract<
   EventKind,
-  'escalate' | 'timeout' | 'fail' | 'conflict' | 'ci-failed' | 'ci-infra' | 'held' | 'config'
+  'escalate' | 'timeout' | 'fail' | 'conflict' | 'ci-failed' | 'ci-infra' | 'held' | 'config' | 'blocked'
 >;
 
 export type BuildRoute = 'codex' | 'claude' | 'opencode';

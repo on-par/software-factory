@@ -153,4 +153,16 @@ describe('runIssue — issue park comment (#2314)', () => {
     expect(createComment).not.toHaveBeenCalled();
     expect(getAuthenticated).not.toHaveBeenCalled();
   });
+
+  it('parks blocked with no failure signature when a phase throws a blocked marker (#2315)', async () => {
+    vi.mocked(buildPhase).mockRejectedValue(Object.assign(new Error('waiting on #9'), { parkReason: 'blocked' }));
+    const log = vi.fn<Log>();
+    const { octokit, createComment } = commentOctokit();
+    const outcome = await runIssue(request, policy, ports(log, octokit));
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'blocked' });
+    expect(outcome).not.toHaveProperty('failureSignature');
+    expect(outcome).not.toHaveProperty('failingChecks');
+    expect(log.mock.calls.map(([type]) => type)).toContain('blocked');
+    expect(createComment.mock.calls[0][0].body).toContain('reason: blocked');
+  });
 });

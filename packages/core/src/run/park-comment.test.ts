@@ -13,7 +13,17 @@ import {
 } from './park-comment.js';
 
 const ME = 99;
-const REASONS: ParkReason[] = ['escalate', 'timeout', 'fail', 'conflict', 'ci-failed', 'ci-infra', 'held', 'config'];
+const REASONS: ParkReason[] = [
+  'escalate',
+  'timeout',
+  'fail',
+  'conflict',
+  'ci-failed',
+  'ci-infra',
+  'held',
+  'config',
+  'blocked',
+];
 
 function input(overrides: Partial<ParkCommentInput> = {}): ParkCommentInput {
   return {
