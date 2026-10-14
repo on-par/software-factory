@@ -295,6 +295,25 @@ export async function resolveTestsCommand(ctx: CheckerContext): Promise<TestsCom
   };
 }
 
+/** Worktree facts the lint resolver reads — a subset of CheckerContext so BUILD can call it with just `{ worktree }`. */
+export type LintCommandSource = Pick<CheckerContext, 'worktree' | 'packageJson' | 'probe'>;
+
+/** One lint-family command the `lint` checker runs; label names it in details and the log file. */
+export interface LintCommand {
+  label: 'lint' | 'tsc';
+  argv: string[];
+}
+
+/** Lint commands that apply, in run order: `npm run lint` (package.json lint script), then `npx tsc --noEmit` (tsconfig.json). */
+export async function resolveLintCommands(ctx: LintCommandSource): Promise<LintCommand[]> {
+  const commands: LintCommand[] = [];
+  const pkg = await getPackageJson(ctx);
+  if (pkg?.scripts?.lint) commands.push({ label: 'lint', argv: ['npm', 'run', 'lint'] });
+  if (await fileExists(join(ctx.worktree, 'tsconfig.json')))
+    commands.push({ label: 'tsc', argv: ['npx', 'tsc', '--noEmit'] });
+  return commands;
+}
+
 const TESTS_PASS_DETAILS = {
   verify: 'scripts/verify.sh: OK',
   npm: 'npm test: OK',
@@ -358,37 +377,18 @@ export const lintChecker: CheckerFn = async (ctx) => {
   const details: string[] = [];
   let result: 'PASS' | 'FAIL' = 'PASS';
 
-  const pkg = await getPackageJson(ctx);
-  const scripts = pkg?.scripts ?? {};
-
-  if (scripts.lint) {
-    const r = await runCommand(['npm', 'run', 'lint'], {
+  for (const cmd of await resolveLintCommands(ctx)) {
+    const r = await runCommand(cmd.argv, {
       cwd: ctx.worktree,
       timeoutMs: 120_000,
       env: ctx.env,
       onPgid: ctx.onPgid,
     });
     if (r.ok) {
-      details.push('lint: OK');
+      details.push(`${cmd.label}: OK`);
     } else {
       result = 'FAIL';
-      details.push(await commandFailureDetails(ctx, 'lint', 'lint', r, describeCommandFailureTail(r, 300)));
-    }
-  }
-
-  // TypeScript type check
-  if (await fileExists(join(ctx.worktree, 'tsconfig.json'))) {
-    const r = await runCommand(['npx', 'tsc', '--noEmit'], {
-      cwd: ctx.worktree,
-      timeoutMs: 120_000,
-      env: ctx.env,
-      onPgid: ctx.onPgid,
-    });
-    if (r.ok) {
-      details.push('tsc: OK');
-    } else {
-      result = 'FAIL';
-      details.push(await commandFailureDetails(ctx, 'lint', 'tsc', r, describeCommandFailureTail(r, 300)));
+      details.push(await commandFailureDetails(ctx, 'lint', cmd.label, r, describeCommandFailureTail(r, 300)));
     }
   }
 
@@ -828,7 +828,7 @@ async function loadPackageJson(worktree: string): Promise<PackageJson | null> {
   return JSON.parse(raw) as PackageJson;
 }
 
-export async function getPackageJson(ctx: CheckerContext): Promise<PackageJson | null> {
+export async function getPackageJson(ctx: LintCommandSource): Promise<PackageJson | null> {
   if (ctx.packageJson !== undefined) return ctx.packageJson;
   const p = ctx.probe?.packageJson;
   if (p) {
