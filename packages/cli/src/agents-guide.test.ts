@@ -20,7 +20,7 @@ const MATRIX_COLUMNS = [
   'CI coverage',
   'Status',
 ];
-const STATUSES = ['supported', 'experimental', 'planned'];
+const STATUSES = new Set(['supported', 'experimental', 'planned']);
 const STEPS: ReadonlyArray<{ step: string; test: (s: string) => boolean }> = [
   { step: 'install', test: (s) => /\binstall/i.test(s) },
   { step: 'log in', test: (s) => /\blog\s?in\b|\bsign(ed)?\s?in\b/i.test(s) },
@@ -258,7 +258,7 @@ describe('docs/agents.md supported agents guide', () => {
       if (row.length !== header.length) problems.push(`row ${id} has ${row.length} cells, expected ${header.length}`);
       if (row.some((c) => c === '')) problems.push(`row ${id} has an empty cell`);
       const status = (row[statusCol] ?? '').replace(/`/g, '').toLowerCase();
-      if (!STATUSES.includes(status)) problems.push(`row ${id} has invalid status "${status}"`);
+      if (!STATUSES.has(status)) problems.push(`row ${id} has invalid status "${status}"`);
     }
     for (const provider of PROVIDERS) {
       const section = providerSection(lines, provider);

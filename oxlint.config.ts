@@ -82,6 +82,10 @@ export default defineConfig({
     'unicorn/no-static-only-class': 'error',
     'unicorn/no-instanceof-array': 'error',
     'unicorn/prefer-array-some': 'error',
+    'unicorn/prefer-set-has': 'error',
+    'unicorn/prefer-array-find': 'error',
+    // `== null` / `!= null` intentionally matches null and undefined.
+    eqeqeq: ['error', 'always', { null: 'ignore' }],
     'unicorn/prefer-array-flat-map': 'error',
     'unicorn/prefer-node-protocol': 'error',
     'unicorn/prefer-optional-catch-binding': 'error',

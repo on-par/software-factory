@@ -180,8 +180,8 @@ describe('utils', () => {
 
     logEvent(eventsFile, 'fail', 85, 'boom');
 
-    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
-    expect(JSON.parse(lines[0]).level).toBe('error');
+    const line = readFileSync(eventsFile, 'utf-8').split('\n').find(Boolean) ?? '';
+    expect(JSON.parse(line).level).toBe('error');
   });
 
   it('writes checkFailure onto the line only when passed (#2083)', async () => {
@@ -236,8 +236,8 @@ describe('utils', () => {
 
     logEvent(eventsFile, 'failover', 5, 'msg', { failoverReason: 'rate_limit' });
 
-    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
-    expect(JSON.parse(lines[0])).toEqual({
+    const line = readFileSync(eventsFile, 'utf-8').split('\n').find(Boolean) ?? '';
+    expect(JSON.parse(line)).toEqual({
       ts: expect.any(String),
       type: 'failover',
       issue: '5',
@@ -253,8 +253,8 @@ describe('utils', () => {
 
     logEvent(eventsFile, 'plan', 5, 'msg', { model: 'claude-model', tokens: { input: 1, output: 2 } });
 
-    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
-    expect(JSON.parse(lines[0])).toEqual({
+    const line = readFileSync(eventsFile, 'utf-8').split('\n').find(Boolean) ?? '';
+    expect(JSON.parse(line)).toEqual({
       ts: expect.any(String),
       type: 'plan',
       issue: '5',
@@ -279,8 +279,8 @@ describe('utils', () => {
       },
     });
 
-    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
-    expect(JSON.parse(lines[0])).toEqual({
+    const line = readFileSync(eventsFile, 'utf-8').split('\n').find(Boolean) ?? '';
+    expect(JSON.parse(line)).toEqual({
       ts: expect.any(String),
       type: 'rework',
       issue: '77',
@@ -304,8 +304,8 @@ describe('utils', () => {
       readiness: { template: 'factory-task', score: 1, pass: true, missing: [] },
     });
 
-    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
-    expect(JSON.parse(lines[0])).toEqual({
+    const line = readFileSync(eventsFile, 'utf-8').split('\n').find(Boolean) ?? '';
+    expect(JSON.parse(line)).toEqual({
       ts: expect.any(String),
       type: 'readiness',
       issue: '85',
@@ -321,8 +321,8 @@ describe('utils', () => {
 
     logEvent(eventsFile, 'phase_completed', 1, 'msg', { durationMs: 10 });
 
-    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
-    expect(JSON.parse(lines[0]).durationMs).toBe(10);
+    const line = readFileSync(eventsFile, 'utf-8').split('\n').find(Boolean) ?? '';
+    expect(JSON.parse(line).durationMs).toBe(10);
   });
 
   it('includes lane and phase in the written event when passed as extra', async () => {
@@ -331,8 +331,8 @@ describe('utils', () => {
 
     logEvent(eventsFile, 'build', 5, 'msg', { lane: 'app', phase: 'build' });
 
-    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
-    expect(JSON.parse(lines[0])).toEqual({
+    const line = readFileSync(eventsFile, 'utf-8').split('\n').find(Boolean) ?? '';
+    expect(JSON.parse(line)).toEqual({
       ts: expect.any(String),
       type: 'build',
       issue: '5',
@@ -349,8 +349,8 @@ describe('utils', () => {
 
     logEvent(eventsFile, 'plan', 5, 'msg');
 
-    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
-    const parsed = JSON.parse(lines[0]);
+    const line = readFileSync(eventsFile, 'utf-8').split('\n').find(Boolean) ?? '';
+    const parsed = JSON.parse(line);
     expect(parsed).not.toHaveProperty('failoverReason');
     expect(Object.keys(parsed).sort()).toEqual(['issue', 'level', 'msg', 'ts', 'type']);
   });
@@ -361,8 +361,8 @@ describe('utils', () => {
 
     logEvent(eventsFile, 'plan', 85, 'forced error level', { level: 'error' });
 
-    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter(Boolean);
-    expect(JSON.parse(lines[0]).level).toBe('error');
+    const line = readFileSync(eventsFile, 'utf-8').split('\n').find(Boolean) ?? '';
+    expect(JSON.parse(line).level).toBe('error');
   });
 
   it('creates missing directories when logging events', async () => {

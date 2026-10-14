@@ -36,7 +36,7 @@ export function summarizeEvent(type: EventKind, msg: string): string {
   return summary.length > LAST_EVENT_MAX_LENGTH ? `${summary.slice(0, LAST_EVENT_MAX_LENGTH - 1)}…` : summary;
 }
 
-const PHASES: readonly FailurePhase[] = ['plan', 'build', 'check', 'ship'];
+const PHASES: ReadonlySet<FailurePhase> = new Set<FailurePhase>(['plan', 'build', 'check', 'ship']);
 
 /** Path of one issue's persisted phase snapshot inside `runsDir`
  *  (`getFactoryPaths(repoRoot).runs`). */
@@ -93,7 +93,7 @@ export async function readPhaseSnapshot(file: string): Promise<RunPhaseSnapshot 
     typeof record.issue !== 'number' ||
     typeof record.updatedAt !== 'string' ||
     typeof record.lastActivityAt !== 'string' ||
-    !PHASES.includes(record.phase as FailurePhase)
+    !PHASES.has(record.phase as FailurePhase)
   ) {
     return null;
   }

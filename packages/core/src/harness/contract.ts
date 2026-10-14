@@ -6,7 +6,7 @@ import type { CodingHarness, HarnessFailureReason, HarnessRequest } from './inde
 import { HarnessError } from './index.js';
 import { loadInjectionFixtures } from './injection-fixtures.js';
 
-const HARNESS_FAILURE_REASONS: HarnessFailureReason[] = [
+const HARNESS_FAILURE_REASONS: ReadonlySet<HarnessFailureReason> = new Set<HarnessFailureReason>([
   'rate_limit',
   'usage_cap',
   'timeout',
@@ -19,7 +19,7 @@ const HARNESS_FAILURE_REASONS: HarnessFailureReason[] = [
   'apply_failed',
   'verify_failed',
   'unknown',
-];
+]);
 
 const CONTRACT_MODELS_CONFIG: ModelsConfig = {
   version: 1,
@@ -104,7 +104,7 @@ export function codingHarnessContractCases(scenarios: HarnessContractScenarios):
         assert.equal(typeof result.output, 'string');
       } catch (err) {
         assert.ok(err instanceof HarnessError);
-        assert.ok(HARNESS_FAILURE_REASONS.includes((err as HarnessError).reason));
+        assert.ok(HARNESS_FAILURE_REASONS.has((err as HarnessError).reason));
       }
     },
   }));
@@ -142,7 +142,7 @@ export function codingHarnessContractCases(scenarios: HarnessContractScenarios):
     {
       name: 'rejects with a classified reason on nonzero failure',
       async run() {
-        await expectHarnessError(scenarios.failure(), (err) => assert.ok(HARNESS_FAILURE_REASONS.includes(err.reason)));
+        await expectHarnessError(scenarios.failure(), (err) => assert.ok(HARNESS_FAILURE_REASONS.has(err.reason)));
       },
     },
     {

@@ -444,9 +444,9 @@ async function resolveIssueDisposition(
   try {
     const { data } = await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issue });
     if (data.state === 'closed') return 'reap-closed';
-    const labels = (data.labels ?? []).map((label) => (typeof label === 'string' ? label : (label?.name ?? '')));
-    if (labels.includes(PARKED_LABEL)) return 'reap-parked';
-    if (labels.includes(DECOMPOSED_LABEL)) return 'reap-decomposed';
+    const labels = new Set((data.labels ?? []).map((l) => (typeof l === 'string' ? l : (l?.name ?? ''))));
+    if (labels.has(PARKED_LABEL)) return 'reap-parked';
+    if (labels.has(DECOMPOSED_LABEL)) return 'reap-decomposed';
     return 'keep';
   } catch (err: any) {
     if (issueWarnDedup.record(issue)) {

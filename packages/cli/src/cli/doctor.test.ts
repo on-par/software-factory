@@ -32,12 +32,12 @@ import {
 } from './doctor.js';
 import { PREREQUISITES_TEXT } from './index.js';
 
-const SIGN_IN_ENV_KEYS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'CODEX_API_KEY', 'OPENCODE_API_KEY'];
+const SIGN_IN_ENV_KEYS = new Set(['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'CODEX_API_KEY', 'OPENCODE_API_KEY']);
 
 function probes(overrides: Partial<DoctorEnvProbes> = {}): DoctorEnvProbes {
   return {
     commandAvailable: () => true,
-    envPresent: (key) => !SIGN_IN_ENV_KEYS.includes(key),
+    envPresent: (key) => !SIGN_IN_ENV_KEYS.has(key),
     tryExec: (cmd: string) => {
       if (cmd.includes('git rev-parse')) return '/repo';
       if (cmd.includes('git status --porcelain')) return '';

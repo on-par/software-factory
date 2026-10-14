@@ -54,7 +54,7 @@ export interface BacktestResult {
   budgetReached: boolean;
 }
 
-const HAND_LABELS: readonly string[] = ['defect', 'clean', 'gated'];
+const HAND_LABELS: ReadonlySet<string> = new Set(['defect', 'clean', 'gated']);
 
 export function parseBacktestLabels(csv: string): Map<number, BacktestHandLabel> {
   const labels = new Map<number, BacktestHandLabel>();
@@ -72,7 +72,7 @@ export function parseBacktestLabels(csv: string): Map<number, BacktestHandLabel>
     const pr = cells[0].replace(/^#/, '');
     if (!/^\d+$/.test(pr) || Number(pr) < 1) throw new Error(`labels line ${n}: invalid PR number '${cells[0]}'`);
     const cls = cells[1].toLowerCase();
-    if (!HAND_LABELS.includes(cls)) {
+    if (!HAND_LABELS.has(cls)) {
       throw new Error(`labels line ${n}: invalid class '${cells[1]}' (expected defect|clean|gated)`);
     }
     labels.set(Number(pr), cls as BacktestHandLabel);
