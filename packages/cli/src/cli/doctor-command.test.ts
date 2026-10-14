@@ -116,6 +116,74 @@ describe('cli', () => {
       });
     });
 
+    describe('repo-declared harness (#2870)', () => {
+      const agent = { command: 'my-agent --headless', prompt: 'stdin', output: 'stdout', agentic: true, usage: 'none' };
+      const setup = (harnessId: string, agentOnPath: boolean, usedHarness = 'my-agent') => {
+        coreFakes.isCommandAvailable.mockImplementation((c: string) =>
+          c === 'my-agent' ? agentOnPath : !['claude', 'codex', 'opencode'].includes(c),
+        );
+        mkdirSync(paths().root, { recursive: true });
+        writeFileSync(
+          paths().config,
+          JSON.stringify({
+            version: 2,
+            harnesses: { [harnessId]: agent },
+            models: {
+              registry: {
+                'my-model': {
+                  provider: 'custom',
+                  tier: 'worker',
+                  costPerMtokInput: 1,
+                  costPerMtokOutput: 2,
+                  contextWindow: 1000,
+                  capabilities: [],
+                  envKey: null,
+                  providerModel: 'my-model',
+                  harness: usedHarness,
+                },
+              },
+            },
+          }),
+        );
+        return runMainWith(
+          {
+            loadModelsConfig: () => ({ models: {}, tiers: {}, harnesses: {} }) as never,
+            loadRepoConfig: (root: string) => JSON.parse(readFileSync(join(root, '.factory', 'config.json'), 'utf-8')),
+          },
+          'doctor',
+        );
+      };
+
+      afterEach(() => {
+        rmSync(paths().config, { force: true });
+      });
+
+      it('counts a harness declared in the repo config as the coding agent', async () => {
+        const res = await setup('my-agent', true);
+        expect(res.exited).toBe(false);
+        expect(logged()).toContain('my-agent (command harness)');
+      });
+
+      it('accepts the repo-declared id in the models.registry check', async () => {
+        await setup('my-agent', true);
+        expect(logged()).not.toContain('unknown harness');
+        expect(logged()).not.toContain('is not a known harness');
+      });
+
+      it('names harnesses.my-agent.command in .factory/config.yaml when the executable is missing', async () => {
+        const res = await setup('my-agent', false);
+        expect(res.exited).toBeTruthy();
+        expect(logged()).toContain('harnesses.my-agent.command in .factory/config.yaml');
+      });
+
+      it('reports a redeclared built-in harness once and keeps going', async () => {
+        h.claudeAvailable = true;
+        const res = await setup('claude-cli', true, 'claude-cli');
+        expect(res.exited).toBeTruthy();
+        expect(logged().split("Harness 'claude-cli' is built in").length - 1).toBe(1);
+      });
+    });
+
     describe('agent sign-in (#2496)', () => {
       const withAuth = (claudeOk: boolean, codexOk: boolean) => {
         // Claude sign-in comes from local evidence (#2556), never from `claude -p`.

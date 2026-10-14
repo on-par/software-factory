@@ -50,6 +50,7 @@ import {
   orphanMicroVmChecks,
   unmergedGreenPrChecks,
 } from './doctor-health.js';
+import { resolveDoctorHarnesses } from './doctor-harness-view.js';
 import { reconcileQueue } from './doctor-queue-reconcile.js';
 import { availableAgentClis, CLAUDE_CODE_URL, CODEX_CLI_URL, GITHUB_TOKENS_URL } from './first-run.js';
 import type { CliDeps } from './index.js';
@@ -461,7 +462,7 @@ export function commandHarnessChecks(
 }
 
 function installFix(h: ConfiguredCommandHarness): string {
-  return `install ${h.executable ?? 'the agent CLI'} on PATH or fix "command" for harness ${h.harness} in the models config harnesses section`;
+  return `install ${h.executable ?? 'the agent CLI'} on PATH or fix harnesses.${h.harness}.command in .factory/config.yaml`;
 }
 
 /** Coding agent prerequisites: at least one agent CLI is required; each CLI is then reported
@@ -920,6 +921,7 @@ export async function cmdDoctor(
   } catch {
     repoRoot = null;
   }
+  const harnessView = repoRoot === null ? null : resolveDoctorHarnesses(rt.configLoaders, repoRoot);
 
   const checks = runDoctorChecks({
     commandAvailable: rt.coreOps.isCommandAvailable,
@@ -950,13 +952,7 @@ export async function cmdDoctor(
     claudeSessionState: () => claudeStoredSessionState(),
     localAuthFailure: (agent) => localAuthFailureSinceLogin(agent),
     opencodeLoggedIn: () => hasOpencodeLoginEvidence(),
-    commandHarnesses: () =>
-      repoRoot === null
-        ? []
-        : repoCommandHarnesses(
-            rt.configLoaders.loadModelsConfig().harnesses,
-            rt.configLoaders.loadRepoConfig(repoRoot)?.models?.registry,
-          ),
+    commandHarnesses: () => (harnessView?.merged ? repoCommandHarnesses(harnessView.merged, harnessView.registry) : []),
   });
 
   // Only with --probe-inference: these send a real prompt (uses quota). Plain doctor makes no inference call.
@@ -1057,16 +1053,20 @@ export async function cmdDoctor(
       ...configLintChecks({ constitution, configFile: rt.repoConfigFileFor(repoRoot, paths.config) }, loadError),
     );
 
-    try {
-      const declared = Object.keys(rt.configLoaders.loadModelsConfig().harnesses ?? {});
-      checks.push(
-        ...modelsRegistryChecks(paths.config, rt.configLoaders.loadRepoConfig(repoRoot)?.models?.registry, [
-          ...KNOWN_HARNESS_IDS,
-          ...declared,
-        ]),
-      );
-    } catch {
-      // malformed config is reported by the load paths / `factory models --doctor`; doctor keeps going
+    // A malformed config never aborts doctor; a merge failure is reported once, below.
+    const view = harnessView ?? { declaredIds: [] };
+    const registryRows = modelsRegistryChecks(paths.config, view.registry, [
+      ...new Set([...KNOWN_HARNESS_IDS, ...view.declaredIds]),
+    ]);
+    checks.push(...registryRows);
+    if (view.mergeError !== undefined && registryRows.every((r) => r.ok)) {
+      checks.push({
+        name: 'models config',
+        section: REPO_SECTION,
+        ok: false,
+        detail: view.mergeError,
+        fix: 'fix the harnesses or models section in .factory/config.yaml (built-in harness ids cannot be redeclared)',
+      });
     }
 
     let harnessProbes: DeclaredHarnessProbe[] = [];
