@@ -54,7 +54,16 @@ What a harness receives, must return and how its failures are classified is spec
 
 ## OpenCode-only profile
 
-Use this profile when the OpenCode CLI is the only agent CLI on the machine. Every packaged OpenCode model (`opencode-sonnet`, `opencode-deepseek-v4-flash`, `opencode-deepseek-v4-pro`, `opencode-deepseek-v4-flash-free`) is experimental. `opencode-deepseek-v4-pro` is in no tier and is pin-only. The others are only in the `worker` tier, so the default tiers never pick one for PLAN, checker or triage.
+Use this profile when the OpenCode CLI is the only agent CLI on the machine. Every packaged OpenCode model is experimental. Only `opencode-sonnet` is tiered, and only in `worker`. The rest are pin-only and in no tier, so the default tiers never pick one for PLAN, checker or triage.
+
+| Model                             | Tiered or pin-only |
+| --------------------------------- | ------------------ |
+| `opencode-sonnet`                 | tiered (`worker`)  |
+| `opencode-deepseek-v4-flash`      | pin-only           |
+| `opencode-deepseek-v4-pro`        | pin-only           |
+| `opencode-deepseek-v4-flash-free` | pin-only           |
+
+`opencode-deepseek-v4-flash-free` carries `trainsOnPrompts: true` (its provider may use request data for training), so no tier may list it and a repo `tiers` entry naming it fails to load. It can only be pinned.
 
 Requirements:
 
@@ -82,7 +91,7 @@ route: opencode
 
 `opencode-deepseek-v4-flash` is served as `opencode-go/deepseek-v4.1-flash` at $0.30/$1.20 per 1M tokens. `opencode-deepseek-v4-pro` (`opencode-go/deepseek-v4-pro`, $1.74/$3.48 per 1M) is a pin-only, stronger option for any phase, with a lower Go monthly quota.
 
-Swap in `opencode-deepseek-v4-flash-free` (OpenCode Zen free promo tier, no subscription quota, but request data may be used for training) or `opencode-sonnet` for any phase. `FACTORY_PLAN_MODEL` / `FACTORY_BUILD_MODEL` still override plan/build per run, and the repo file wins over env.
+Pin `opencode-deepseek-v4-flash-free` (pin-only; OpenCode Zen free promo tier, no subscription quota, but request data may be used for training) or `opencode-sonnet` for any phase. `FACTORY_PLAN_MODEL` / `FACTORY_BUILD_MODEL` still override plan/build per run, and the repo file wins over env.
 
 ## Failover Triggers
 

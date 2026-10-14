@@ -2,8 +2,6 @@
 
 import { execSync } from 'node:child_process';
 
-import { retiredModels } from '@on-par/factory-config';
-
 import { ModelEffortsSchema, supportsEffort } from '../config/effort.js';
 import type { HarnessDeclaration, ModelsConfig } from '../config/index.js';
 import { HARNESS_CATALOG, harnessCliCommand, isAgenticHarness, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
@@ -18,6 +16,8 @@ import {
 } from '../utils/local-auth-record.js';
 import { hasOpencodeLoginEvidence } from '../utils/opencode-config.js';
 import { applyZdrReview } from './zdr-review.js';
+
+export { type ModelOverrides, resolveModelOverrides, retiredModelHint } from './overrides.js';
 
 export class ModelRegistry {
   constructor(private config: ModelsConfig) {
@@ -104,6 +104,11 @@ export class ModelRegistry {
     return !!this.get(modelId)?.experimental;
   }
 
+  /** True when the model's provider may use prompts for training (#2899): never chosen from a tier. */
+  trainsOnPrompts(modelId: string): boolean {
+    return !!this.get(modelId)?.trainsOnPrompts;
+  }
+
   /** Check if a model is safe for local-only routing. */
   isLocalOnlyModel(modelId: string): boolean {
     const def = this.get(modelId);
@@ -157,7 +162,11 @@ export class ModelRegistry {
 
   /** Get all available models for a tier, in priority order */
   getAvailableModelsForTier(tier: string, byok = false, allowExperimental = false, localOnly = false): string[] {
-    return this.getModelsInTier(tier).filter((m) => {
+    const models = this.getModelsInTier(tier);
+    return models.filter((m) => {
+      // A single-entry tier is the shape of a models.pins.checker / models.pins.triage pin (applyRepoConfig), so a
+      // deliberate pin stays routable. Repo tiers cannot list a trainsOnPrompts model, and packaged tiers do not.
+      if (models.length > 1 && this.trainsOnPrompts(m)) return false;
       if (!allowExperimental && this.isExperimental(m)) return false;
       if (localOnly && !this.isLocalOnlyModel(m)) return false;
       if (byok && !this.isEnvAvailable(m)) return false;
@@ -169,35 +178,6 @@ export class ModelRegistry {
   get failover() {
     return this.config.failover;
   }
-}
-
-export interface ModelOverrides {
-  plan?: string;
-  build?: string;
-}
-
-/** Suffix for an unknown-model error when the id is a retired packaged model; '' otherwise. */
-export function retiredModelHint(id: string): string {
-  const retired = Object.hasOwn(retiredModels, id) ? retiredModels[id] : undefined;
-  return retired ? `; '${id}' was removed under ${retired.adr}; use '${retired.replacement}'` : '';
-}
-
-/** Resolve FACTORY_PLAN_MODEL / FACTORY_BUILD_MODEL env overrides, validated
- *  against the registry. Throws a configuration error naming the env var when
- *  it references a model not present in models.json. Empty/whitespace values
- *  are treated as unset. */
-export function resolveModelOverrides(registry: ModelRegistry, env: NodeJS.ProcessEnv = process.env): ModelOverrides {
-  const resolveVar = (envVar: 'FACTORY_PLAN_MODEL' | 'FACTORY_BUILD_MODEL'): string | undefined => {
-    const value = env[envVar]?.trim();
-    if (!value) return undefined;
-    if (!registry.get(value)) {
-      throw new Error(
-        `${envVar} is set to '${value}', which is not a model in models.json (known models: ${registry.list().join(', ')})${retiredModelHint(value)}`,
-      );
-    }
-    return value;
-  };
-  return { plan: resolveVar('FACTORY_PLAN_MODEL'), build: resolveVar('FACTORY_BUILD_MODEL') };
 }
 
 /** Check if a command is available on PATH */

@@ -32,6 +32,7 @@ export interface ModelDefinition {
   harness?: string;
   /** Speculative/unproven model — excluded from routing unless FACTORY_EXPERIMENTAL=1 */
   experimental?: boolean;
+  trainsOnPrompts?: boolean;
 }
 
 // ---------- Config types (re-exported from config module) ----------

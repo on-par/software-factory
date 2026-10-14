@@ -66,6 +66,10 @@ const ModelDefSchema = z
       .describe('Harness id that drives this model (claude-cli, codex-cli, ollama-http, ...).'),
     codex: z.boolean().optional().describe('Marks the model eligible for the build_codex route.'),
     experimental: z.boolean().optional().describe('Requires FACTORY_EXPERIMENTAL=1 to be routable.'),
+    trainsOnPrompts: z
+      .boolean()
+      .optional()
+      .describe('Provider may use prompts for training. Never routed from a tier; pin it to use it.'),
   })
   .describe('A single model in the registry: provider, cost, capabilities, and harness wiring.');
 

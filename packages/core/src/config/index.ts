@@ -44,6 +44,7 @@ export const ModelDefSchema = z.object({
   codexFlag: z.string().optional(),
   harness: z.string().optional(),
   experimental: z.boolean().optional(),
+  trainsOnPrompts: z.boolean().optional(),
 });
 
 export const HARNESS_PROMPT_MODES = ['stdin', 'file', 'arg'] as const;
@@ -672,8 +673,7 @@ export function resolveLocalOnly(env: NodeJS.ProcessEnv = process.env): boolean 
   return resolveEnabledFlag(env, 'FACTORY_LOCAL_ONLY', false);
 }
 
-/** Experimental models: make experimental-tier models eligible for routing
- *  (FACTORY_EXPERIMENTAL=1). */
+/** Experimental models: make experimental-tier models eligible for routing (FACTORY_EXPERIMENTAL=1). */
 export function resolveExperimental(env: NodeJS.ProcessEnv = process.env): boolean {
   return resolveEnabledFlag(env, 'FACTORY_EXPERIMENTAL', false);
 }

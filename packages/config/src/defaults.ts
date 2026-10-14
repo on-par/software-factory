@@ -25,6 +25,8 @@ export interface ModelDefaults {
   codexFlag?: string;
   harness?: string;
   experimental?: boolean;
+  /** Provider may use prompts for training. Never placed in a tier, reachable only by an explicit pin (#2899). */
+  trainsOnPrompts?: boolean;
 }
 
 export interface ModelsDefaults {
@@ -421,7 +423,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       providerModel: 'opencode-go/deepseek-v4-pro',
       experimental: true,
     },
-    /** Added 2026-08-17: OpenCode Go's monthly usage cap ($60/mo) hit 100% and doesn't reset until 2026-09-13, blocking opencode-deepseek-v4-flash. This is OpenCode Zen's (not Go's) promo-period free tier for the same model, opencode/... prefix, no balance or subscription quota involved. Anoma.ly's privacy notice: during the free promo, request data may be used to improve the model (not the zero-retention terms Go/paid Zen get) — acceptable for skunkworks throwaway prototypes, reconsider before using on anything with real user/client data. Free tier may be pulled without notice; if `opencode/deepseek-v4-flash-free` starts erroring, check https://opencode.ai/docs/zen/ for current free-tier availability. Confirmed working live: `opencode run --model opencode/deepseek-v4-flash-free "..."` returns real output. opt in with FACTORY_EXPERIMENTAL=1. */
+    /** Added 2026-08-17: OpenCode Go's monthly usage cap ($60/mo) hit 100% and doesn't reset until 2026-09-13, blocking opencode-deepseek-v4-flash. This is OpenCode Zen's (not Go's) promo-period free tier for the same model, opencode/... prefix, no balance or subscription quota involved. Anoma.ly's privacy notice: during the free promo, request data may be used to improve the model (not the zero-retention terms Go/paid Zen get) — acceptable for skunkworks throwaway prototypes, reconsider before using on anything with real user/client data. Free tier may be pulled without notice; if `opencode/deepseek-v4-flash-free` starts erroring, check https://opencode.ai/docs/zen/ for current free-tier availability. Confirmed working live: `opencode run --model opencode/deepseek-v4-flash-free "..."` returns real output. opt in with FACTORY_EXPERIMENTAL=1. trainsOnPrompts: in no tier, pin-only (#2899). */
     'opencode-deepseek-v4-flash-free': {
       provider: 'custom',
       tier: ['worker'],
@@ -433,6 +435,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       harness: 'opencode',
       providerModel: 'opencode/deepseek-v4-flash-free',
       experimental: true,
+      trainsOnPrompts: true,
     },
   },
   tiers: {
@@ -458,7 +461,6 @@ export const defaultModelsConfig: ModelsDefaults = {
       'glm-5.2',
       'qwen-3.5-coder',
       'opencode-sonnet',
-      'opencode-deepseek-v4-flash-free',
     ],
     checker: [
       'qwen3.5:9b',
