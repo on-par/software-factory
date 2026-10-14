@@ -210,8 +210,8 @@ async function runCommandAttached(
   });
 
   const exitCode = typeof r.exitCode === 'number' ? r.exitCode : -1;
-  const killed = r.isTerminated === true;
-  const timedOut = r.timedOut === true;
+  const killed = r.isTerminated;
+  const timedOut = r.timedOut;
   const stdout = typeof r.stdout === 'string' ? r.stdout : '';
   const stderr =
     r.failed && typeof r.exitCode !== 'number' ? (r.shortMessage ?? '') : typeof r.stderr === 'string' ? r.stderr : '';

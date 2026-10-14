@@ -133,7 +133,7 @@ function sandboxDisabled(
   if (cliDisabled) return true;
   if (env.FACTORY_SANDBOX === '0') return true;
   if (env.FACTORY_SANDBOX === '1') return false;
-  return cfg.enabled === false;
+  return !cfg.enabled;
 }
 
 function dedupeAbsolutePaths(paths: string[]): string[] {

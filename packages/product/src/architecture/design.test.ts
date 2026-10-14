@@ -262,7 +262,7 @@ describe('designEpicArchitecture', () => {
   });
 
   it('condenses a long ADR decision to 300 characters with an ellipsis', () => {
-    const longDecision = `${'a'.repeat(310)}`;
+    const longDecision = 'a'.repeat(310);
     const longAdr: EpicAdr = { ...WIDGET_ADR, decision: longDecision };
     const decomposition: Decomposition = { epic: buildEpic([WIDGET_STORY.title]), stories: [WIDGET_STORY] };
 

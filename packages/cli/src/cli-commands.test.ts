@@ -4525,7 +4525,7 @@ bash scripts/verify.sh
       expect(errored()).not.toContain('no coding agent CLI');
       expect(errored()).not.toContain('claude CLI not found');
       expect(phases.planPhase).toHaveBeenCalled();
-      expect(res.exited === false || res.code !== 2).toBe(true);
+      expect(!res.exited || res.code !== 2).toBe(true);
     });
 
     it('exits 2 with the missing-agent message and never invokes the phase mocks when no agent CLI is available', async () => {

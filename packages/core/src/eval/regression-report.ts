@@ -33,7 +33,7 @@ export function formatRegressionIssue(
     ...summary.results.map((result) => {
       const baselineCase = baseline.cases[result.id];
       const regressed =
-        (baselineCase?.pass === true && !result.pass) ||
+        (!!baselineCase?.pass && !result.pass) ||
         (baselineCase?.rubricScore !== undefined &&
           result.rubricScore !== undefined &&
           result.rubricScore < baselineCase.rubricScore - baseline.tolerance.rubricScore);

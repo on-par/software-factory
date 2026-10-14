@@ -23,7 +23,7 @@ export function describeHostedJobStoreContract(
 ): void {
   describe(`HostedJobStore contract (${label})`, () => {
     it('creates a job and reads it back deterministically (AC#1)', () => {
-      let clock = 1_000;
+      const clock = 1_000;
       const store = makeStore({ now: () => clock });
 
       const created = store.create(baseJobInput());

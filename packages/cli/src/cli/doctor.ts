@@ -428,7 +428,7 @@ export function repoCommandHarnesses(
 ): ConfiguredCommandHarness[] {
   const used = new Set(Object.values(registry ?? {}).map((def) => def.harness));
   return Object.entries(harnesses ?? {})
-    .filter(([id, decl]) => decl.agentic === true && used.has(id))
+    .filter(([id, decl]) => decl.agentic && used.has(id))
     .map(([id, decl]) => ({ harness: id, command: decl.command, executable: commandExecutable(decl.command) }));
 }
 

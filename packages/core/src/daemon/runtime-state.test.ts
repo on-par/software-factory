@@ -134,7 +134,7 @@ describe('createDaemonLogSink', () => {
     sink('factoryd: listening on 127.0.0.1:8787');
     sink('GET /repos 200');
     expect(await readFile(paths.logFile, 'utf-8')).toBe(
-      '2026-09-02T10:00:00.000Z factoryd: listening on 127.0.0.1:8787\n' + '2026-09-02T10:00:00.000Z GET /repos 200\n',
+      '2026-09-02T10:00:00.000Z factoryd: listening on 127.0.0.1:8787\n2026-09-02T10:00:00.000Z GET /repos 200\n',
     );
   });
 

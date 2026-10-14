@@ -90,7 +90,7 @@ export async function runInterview(
     const question: InterviewQuestion = {
       index: transcript.length + 1,
       dimension: probe.dimension,
-      text: phrased ? phrased : probe.question,
+      text: phrased || probe.question,
     };
     const answer = await deps.ask(question);
     baseAsked += 1;

@@ -169,7 +169,7 @@ export function parentRefForSlice(plan: SlicePlan, index: number, mainRef = 'ori
   if (!Number.isInteger(index) || index < 1 || index > plan.slices.length) return undefined;
   if (index === 1) return mainRef;
   const branch = plan.slices.find((s) => s.index === index - 1)?.branch;
-  return branch ? branch : undefined;
+  return branch || undefined;
 }
 
 /** ADR-0161: records slice `index`'s branch when it is created (default stackSliceBranch), keeping its state. */

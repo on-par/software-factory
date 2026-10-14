@@ -128,8 +128,13 @@ async function containsPythonTestFile(dir: string): Promise<boolean> {
     if (entry.isFile() && PYTHON_TEST_FILE.test(entry.name)) return true;
   }
   for (const entry of entries) {
-    if (entry.isDirectory() && !GENERATED_DIRS.has(entry.name) && !PYTHON_SKIP_DIRS.has(entry.name)) {
-      if (await containsPythonTestFile(join(dir, entry.name))) return true;
+    if (
+      entry.isDirectory() &&
+      !GENERATED_DIRS.has(entry.name) &&
+      !PYTHON_SKIP_DIRS.has(entry.name) &&
+      (await containsPythonTestFile(join(dir, entry.name)))
+    ) {
+      return true;
     }
   }
   return false;
