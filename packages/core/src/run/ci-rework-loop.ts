@@ -4,7 +4,7 @@ import { type checkPhase as checkPhaseDefault, reworkWorker as reworkWorkerDefau
 import type { PlanResult } from '../phases/plan.js';
 import type { shipPhase as shipPhaseDefault, ShipResult } from '../phases/ship.js';
 import type { ReviewRouting } from '../review/routing.js';
-import type { CiFailureEvidence, Constitution } from '../types/index.js';
+import type { CiFailureEvidence, CiSuppressionFinding, Constitution } from '../types/index.js';
 import {
   attributableCodeqlAlerts,
   attributeCiFailure,
@@ -16,6 +16,12 @@ import {
   needsBaseChecks,
   resolveMaxCiReworkRounds,
 } from './ci-rework.js';
+import {
+  describeSuppression,
+  readReworkDiff as readReworkDiffDefault,
+  readWorktreeHead as readWorktreeHeadDefault,
+  scanReworkDiff,
+} from './ci-suppression-guard.js';
 import type { BuildRoute, ParkReason } from './outcome.js';
 import type { RunPorts, RunRequest } from './run-issue.js';
 import { shipParkReason } from './ship-park.js';
@@ -28,6 +34,10 @@ export interface CiReworkPorts {
   listPrChangedFiles?: typeof listPrChangedFilesDefault;
   /** Lists failing check names on the PR base branch's latest commit (#2817); defaults to the GitHub REST lister. */
   listBaseFailingChecks?: typeof listBaseFailingChecksDefault;
+  /** Reads the worktree HEAD before a CI rework round (#2818); defaults to git rev-parse. */
+  readWorktreeHead?: typeof readWorktreeHeadDefault;
+  /** Reads the diff a CI rework round produced (#2818); defaults to git diff <before> HEAD. */
+  readReworkDiff?: typeof readReworkDiffDefault;
 }
 
 export interface CiReworkLoopContext {
@@ -66,10 +76,19 @@ export interface ShipWithCiReworkResult {
 
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
+const guardError = (match: string): CiSuppressionFinding => ({
+  kind: 'path',
+  rule: 'guard-error',
+  file: '(unknown)',
+  match,
+});
+
 /**
  * Runs SHIP. When the CI watch fails on CodeQL alerts in files the PR changed, feeds them to the
  * BUILD rework worker, re-runs CHECK and re-enters SHIP on the same PR, up to
  * resolveMaxCiReworkRounds() rounds — a counter separate from CHECK's own rework rounds.
+ * After each rework round the committed diff is scanned for suppression attempts (#2818); any hit,
+ * or an unreadable diff, parks ci-failed before the re-CHECK, push or re-watch.
  */
 export async function shipWithCiRework(
   ctx: CiReworkLoopContext,
@@ -79,6 +98,8 @@ export async function shipWithCiRework(
   const rework = ports.reworkWorker ?? reworkWorkerDefault;
   const listChanged = ports.listPrChangedFiles ?? listPrChangedFilesDefault;
   const listBase = ports.listBaseFailingChecks ?? listBaseFailingChecksDefault;
+  const readHead = ports.readWorktreeHead ?? readWorktreeHeadDefault;
+  const readDiff = ports.readReworkDiff ?? readReworkDiffDefault;
   const { builtRoute, builtModel, planSlice } = inputs;
   const log = ports.events();
   const shipOpts = {
@@ -148,6 +169,21 @@ export async function shipWithCiRework(
         (skipped.length > 0 ? `; non-attributable: ${skipped.join(', ')}` : ''),
       lastCiFailure ? { ciFailure: lastCiFailure } : undefined,
     );
+    const suppressionPark = (findings: CiSuppressionFinding[]): ShipWithCiReworkResult => {
+      const described = describeSuppression(findings);
+      ports.events('ship')('ship', `${described} after CI rework round ${rounds} (PR #${ship.prNumber})`);
+      const message = ship.reason
+        ? `ship phase failed: ${ship.reason} — ${described}`
+        : `ship phase failed — ${described}`;
+      const base = lastCiFailure ?? { failingChecks: [], alerts: [], truncated: false };
+      return { ship, parked: { reason: 'ci-failed', message, ciFailure: { ...base, suppressionAttempt: findings } } };
+    };
+    let beforeSha: string;
+    try {
+      beforeSha = await readHead(ports.workspace.path);
+    } catch (err) {
+      return suppressionPark([guardError(`could not read the worktree HEAD: ${errorMessage(err)}`)]);
+    }
     const worked = await rework({
       issue: request.issue,
       worktree: ports.workspace.path,
@@ -170,6 +206,13 @@ export async function shipWithCiRework(
       suffix = ' — CI rework worker never ran';
       break;
     }
+    let findings: CiSuppressionFinding[];
+    try {
+      findings = scanReworkDiff(await readDiff(ports.workspace.path, beforeSha));
+    } catch (err) {
+      findings = [guardError(`could not read the CI rework diff: ${errorMessage(err)}`)];
+    }
+    if (findings.length > 0) return suppressionPark(findings);
     const recheck = await checkPhase(ctx.checkOpts);
     if (!recheck.passed) {
       const checkFailure =

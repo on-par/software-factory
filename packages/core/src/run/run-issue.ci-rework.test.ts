@@ -24,6 +24,8 @@ const buildPhase = vi.fn<typeof realBuildPhase>();
 const checkPhase = vi.fn<typeof realCheckPhase>();
 const shipPhase = vi.fn<typeof realShipPhase>();
 const reworkWorker = vi.fn<typeof realReworkWorker>();
+const readWorktreeHead = vi.fn<(worktree: string) => Promise<string>>();
+const readReworkDiff = vi.fn<(worktree: string, fromSha: string) => Promise<string>>();
 const listPrChangedFiles = vi.fn<(...args: unknown[]) => Promise<string[]>>();
 const listBaseFailingChecks =
   vi.fn<(...args: unknown[]) => Promise<{ baseRef: string; baseSha: string; failing: string[] }>>();
@@ -102,6 +104,8 @@ function ports(log: Log): RunPorts {
     checkPhase,
     shipPhase,
     reworkWorker,
+    readWorktreeHead,
+    readReworkDiff,
     listPrChangedFiles: listPrChangedFiles as RunPorts['listPrChangedFiles'],
     listBaseFailingChecks: listBaseFailingChecks as RunPorts['listBaseFailingChecks'],
   };
@@ -113,6 +117,8 @@ beforeEach(() => {
   vi.mocked(checkPhase).mockReset().mockResolvedValue(CHECK_OK);
   shipPhase.mockReset();
   reworkWorker.mockReset().mockResolvedValue({ failovers: [], modelCompleted: true });
+  readWorktreeHead.mockReset().mockResolvedValue('a'.repeat(40));
+  readReworkDiff.mockReset().mockResolvedValue('');
   listPrChangedFiles.mockReset().mockResolvedValue(['packages/core/src/sandbox/egress-proxy.ts']);
   listBaseFailingChecks.mockReset().mockResolvedValue({ baseRef: 'main', baseSha: 'b'.repeat(40), failing: [] });
 });
@@ -299,5 +305,88 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     const outcome = await runIssue(request, policy, ports(vi.fn<Log>()));
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
     expect(shipPhase).toHaveBeenCalledTimes(1);
+  });
+
+  const parkedSuppression = (rule: string) => ({
+    ciFailure: expect.objectContaining({
+      suppressionAttempt: expect.arrayContaining([expect.objectContaining({ rule })]),
+    }),
+  });
+
+  it('parks ci-failed suppression-attempt when the CI rework diff adds a suppression comment, without re-CHECK or SHIP re-entry', async () => {
+    shipPhase.mockResolvedValueOnce(CI_FAIL);
+    readReworkDiff.mockResolvedValue(
+      'diff --git a/packages/core/src/sandbox/egress-proxy.ts b/packages/core/src/sandbox/egress-proxy.ts\n' +
+        '--- a/packages/core/src/sandbox/egress-proxy.ts\n+++ b/packages/core/src/sandbox/egress-proxy.ts\n' +
+        '@@ -130,0 +130,1 @@\n+// codeql[js/request-forgery]\n',
+    );
+    const log = vi.fn<Log>();
+    expect(await runIssue(request, policy, ports(log))).toMatchObject({ state: 'parked', reason: 'ci-failed' });
+    expect(reworkWorker).toHaveBeenCalledTimes(1);
+    expect(checkPhase).toHaveBeenCalledTimes(1);
+    expect(shipPhase).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith(
+      'ci-failed',
+      expect.stringContaining('suppression-attempt'),
+      parkedSuppression('codeql-comment'),
+    );
+  });
+
+  it.each([
+    ['.github/workflows/codeql.yml', 'workflow-path'],
+    ['.github/codeql/codeql-config.yml', 'codeql-path'],
+    ['out.sarif', 'sarif-path'],
+  ])(
+    'parks ci-failed suppression-attempt when the CI rework diff touches a workflow, CodeQL config or sarif file (%s)',
+    async (path, rule) => {
+      shipPhase.mockResolvedValueOnce(CI_FAIL);
+      readReworkDiff.mockResolvedValue(
+        `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n+x\n`,
+      );
+      const log = vi.fn<Log>();
+      expect(await runIssue(request, policy, ports(log))).toMatchObject({ state: 'parked', reason: 'ci-failed' });
+      expect(checkPhase).toHaveBeenCalledTimes(1);
+      expect(shipPhase).toHaveBeenCalledTimes(1);
+      expect(log).toHaveBeenCalledWith(
+        'ci-failed',
+        expect.stringContaining('suppression-attempt'),
+        parkedSuppression(rule),
+      );
+    },
+  );
+
+  it('parks ci-failed suppression-attempt when the rework diff cannot be read', async () => {
+    shipPhase.mockResolvedValueOnce(CI_FAIL);
+    readReworkDiff.mockRejectedValue(new Error('git exploded'));
+    const log = vi.fn<Log>();
+    expect(await runIssue(request, policy, ports(log))).toMatchObject({ state: 'parked', reason: 'ci-failed' });
+    expect(shipPhase).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith(
+      'ci-failed',
+      expect.stringContaining('git exploded'),
+      parkedSuppression('guard-error'),
+    );
+  });
+
+  it('parks ci-failed suppression-attempt without running rework when the pre-rework HEAD cannot be read', async () => {
+    shipPhase.mockResolvedValueOnce(CI_FAIL);
+    readWorktreeHead.mockRejectedValue(new Error('no head'));
+    const log = vi.fn<Log>();
+    expect(await runIssue(request, policy, ports(log))).toMatchObject({ state: 'parked', reason: 'ci-failed' });
+    expect(reworkWorker).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(
+      'ci-failed',
+      expect.stringContaining('suppression-attempt'),
+      parkedSuppression('guard-error'),
+    );
+  });
+
+  it('a clean CI rework diff passes the suppression guard and re-enters SHIP with the previous head SHA', async () => {
+    shipPhase.mockResolvedValueOnce(CI_FAIL).mockResolvedValueOnce({ ok: true, prNumber: 9, ciOutcome: 'success' });
+    expect(await runIssue(request, policy, ports(vi.fn<Log>()))).toMatchObject({ state: 'ready' });
+    expect(readReworkDiff).toHaveBeenCalledWith('/tmp/wt', 'a'.repeat(40));
+    expect(readWorktreeHead.mock.invocationCallOrder[0]).toBeLessThan(reworkWorker.mock.invocationCallOrder[0]);
+    expect(shipPhase).toHaveBeenCalledTimes(2);
+    expect(shipPhase.mock.calls[1][0].reentry).toEqual({ prNumber: 9, previousHeadSha: 'sha' });
   });
 });
