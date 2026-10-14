@@ -72,6 +72,7 @@ export default defineConfig({
     'no-unneeded-ternary': 'error',
     'no-lonely-if': 'error',
     'prefer-const': 'error',
+    'no-param-reassign': 'error',
     'no-useless-concat': 'error',
     'typescript/no-unnecessary-template-expression': 'error',
     'typescript/no-unnecessary-boolean-literal-compare': 'error',
