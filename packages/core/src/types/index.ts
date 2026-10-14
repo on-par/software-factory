@@ -258,6 +258,19 @@ export interface CiAttribution {
   items: CiAttributionItem[];
 }
 
+/** One suppression-guard hit in a SHIP CI rework diff (#2818). */
+export interface CiSuppressionFinding {
+  kind: 'comment' | 'path';
+  /** e.g. 'codeql-comment', 'lgtm-comment', 'nosec-comment', 'eslint-disable-security', 'workflow-path', 'codeql-path', 'sarif-path', 'guard-error'. */
+  rule: string;
+  /** Repo-relative path, '(unknown)' when the diff had no file header. */
+  file: string;
+  /** New-file line number for comment hits, when the hunk header gave one. */
+  line?: number;
+  /** The offending added line (trimmed, max 200 chars) or the touched path. */
+  match: string;
+}
+
 /** Bounded CI-failure evidence carried on a SHIP ci-failed park event (#2814). */
 export interface CiFailureEvidence {
   failingChecks: CiFailingCheck[];
@@ -268,6 +281,8 @@ export interface CiFailureEvidence {
   errors?: string[];
   /** Which failing items the PR caused versus baseline failures (#2817). */
   attribution?: CiAttribution;
+  /** Suppression-guard hits that parked a CI rework round (#2818). */
+  suppressionAttempt?: CiSuppressionFinding[];
 }
 
 export interface CheckFailureInfo {
