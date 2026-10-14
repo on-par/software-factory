@@ -712,7 +712,7 @@ function describeBaseline(report: BaselineReport): string {
   return `baseline at ${report.baseSha.slice(0, 8)}: ${body}${report.error ? ` — error: ${report.error}` : ''}`;
 }
 
-interface ReworkWorkerOptions {
+export interface ReworkWorkerOptions {
   issue: number;
   worktree: string;
   specPath: string;
@@ -729,9 +729,10 @@ interface ReworkWorkerOptions {
   reworkRoute?: 'codex' | 'claude' | 'opencode';
   reworkModel?: string;
   runId?: string;
+  extraInstructions?: string;
 }
 
-async function reworkWorker(opts: ReworkWorkerOptions): Promise<{
+export async function reworkWorker(opts: ReworkWorkerOptions): Promise<{
   failovers: { model: string; reason: FailoverReason; detail?: string }[];
   /** False when router.run threw — no model produced output for this round (#642). */
   modelCompleted: boolean;
@@ -778,12 +779,11 @@ read that file first — it holds the command's complete stdout and stderr.
 1. Make one focused repair pass. Change only files necessary to address the listed failures.
 2. Do not re-plan, refactor unrelated code, or investigate outside these failures.
 3. Re-run only the failing command or the smallest relevant verification command.
-4. Commit the repair with a clear message.
+4. Commit the repair with a clear message.${opts.extraInstructions ? `\n5. ${opts.extraInstructions}` : ''}
 
 Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`;
 
   prompt = applySteering(prompt, steering);
-
   let reworkResult: RouterResult | null = null;
   let failureReason: FailoverReason | undefined;
   let attempts: RouterResult['attempts'] = [];

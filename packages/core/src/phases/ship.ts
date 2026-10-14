@@ -11,6 +11,13 @@ import type { EventKind } from '../events/kinds.js';
 import { gatherEvidencePack } from '../reports/evidence-pack.js';
 import { renderPrBody } from '../reports/pr-body.js';
 import type { ReviewRouting } from '../review/routing.js';
+import {
+  type CommandRunner,
+  describePushFailure,
+  readRemoteBranchSha,
+  shortDetail,
+  verifyRemoteHead,
+} from './ship-git.js';
 import { readRisk, readSpecBody } from './ship-spec.js';
 import type { CheckSummary, CiFailureEvidence } from '../types/index.js';
 import { collectCiFailureEvidence } from '../utils/ci-evidence.js';
@@ -25,7 +32,6 @@ import { GITHUB_ISSUE_SOURCE } from '../work/github-issue.js';
 import type { WorkRequest } from '../work/index.js';
 
 const exec = promisify(execCb);
-type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<{ stdout: string }>;
 
 export interface ShipResult {
   ok: boolean;
@@ -39,6 +45,8 @@ export interface ShipResult {
   /** True when the branch's content had already landed on main (e.g. a retry after a
    *  squash merge) — nothing was pushed and no PR was created (#520). */
   alreadyDelivered?: boolean;
+  /** The head SHA watched on a CI rework re-entry (#2816). */
+  headSha?: string;
 }
 
 export async function shipPhase(opts: Parameters<typeof shipPhaseImpl>[0]): Promise<ShipResult> {
@@ -96,6 +104,8 @@ async function shipPhaseImpl(opts: {
   /** origin/<branch> SHA recorded at worktree creation (#1868). When set, the new-PR push
    *  replaces that stale head under a lease on this SHA, and fails closed if the remote moved (#1869). */
   recordedRemoteSha?: string;
+  /** SHIP re-entry after a CI rework round (#2816): same open PR, plain push, watch the pushed SHA. */
+  reentry?: { prNumber: number; previousHeadSha?: string };
 }): Promise<ShipResult> {
   const {
     issue,
@@ -143,6 +153,50 @@ async function shipPhaseImpl(opts: {
     return { ok: false };
   }
   let prNumber: number | undefined = openLookup.status === 'found' ? openLookup.prNumber : undefined;
+  const reentry = opts.reentry;
+  let watchRef = branch;
+  let headSha: string | undefined;
+
+  if (reentry) {
+    if (prNumber !== reentry.prNumber) {
+      const reason = `re-entry expected open PR #${reentry.prNumber} for ${branch} but found ${prNumber === undefined ? 'none' : `#${prNumber}`}`;
+      log('ship', reason);
+      return { ok: false, reason };
+    }
+    let localSha: string;
+    try {
+      localSha = (await run('git rev-parse HEAD', { cwd: worktree })).stdout.trim();
+    } catch (err) {
+      const reason = `could not read local HEAD on re-entry (${shortDetail(err)})`;
+      log('ship', reason);
+      return { ok: false, prNumber, reason };
+    }
+    if (localSha && localSha === reentry.previousHeadSha) {
+      const reason = `CI rework produced no new commit on ${branch}`;
+      log('ship', reason);
+      return { ok: false, prNumber, ciOutcome: 'failure', reason, headSha: localSha };
+    }
+    try {
+      await run(`git push origin ${shellEscape(branch)}`, { cwd: worktree });
+    } catch (err) {
+      const { kind, detail } = describePushFailure(err);
+      const reason = `re-entry push of ${branch} failed (${kind}): ${detail}`;
+      log('ship', reason);
+      return { ok: false, prNumber, reason };
+    }
+    const remoteHead = await verifyRemoteHead(run, worktree, branch);
+    if (remoteHead.status !== 'match') {
+      const reason =
+        remoteHead.status === 'mismatch'
+          ? `remote head ${remoteHead.remoteSha} does not match local HEAD ${remoteHead.localSha} for ${branch} after re-entry push`
+          : `could not verify the remote head for ${branch} after re-entry push (${remoteHead.detail})`;
+      log('ship', reason);
+      return { ok: false, prNumber, reason };
+    }
+    watchRef = remoteHead.remoteSha;
+    headSha = remoteHead.remoteSha;
+    log('ship', `re-entry pushed ${branch} @ ${headSha}`);
+  }
 
   if (!prNumber) {
     // Recovery decisions must compare against the *current* remote — a stale
@@ -334,21 +388,22 @@ async function shipPhaseImpl(opts: {
     return { ok: false };
   }
 
-  try {
-    const body = gatherEvidencePack({
-      issue,
-      checkSummary,
-      reworkRounds: opts.reworkRounds,
-      specPath: opts.specPath,
-      eventsFile: opts.eventsFile,
-      startedAt: opts.startedAt,
-      logsDir: opts.logsDir,
-      reviewRouting: opts.reviewRouting,
-      pinNotes: opts.pinNotes,
-    });
-    await octokit.rest.issues.createComment({ owner, repo: repoName, issue_number: prNumber, body });
-    log('evidence', `posted evidence pack to PR #${prNumber}`);
-  } catch {}
+  if (!reentry)
+    try {
+      const body = gatherEvidencePack({
+        issue,
+        checkSummary,
+        reworkRounds: opts.reworkRounds,
+        specPath: opts.specPath,
+        eventsFile: opts.eventsFile,
+        startedAt: opts.startedAt,
+        logsDir: opts.logsDir,
+        reviewRouting: opts.reviewRouting,
+        pinNotes: opts.pinNotes,
+      });
+      await octokit.rest.issues.createComment({ owner, repo: repoName, issue_number: prNumber, body });
+      log('evidence', `posted evidence pack to PR #${prNumber}`);
+    } catch {}
 
   let ciOutcome: InfraRerunOutcome | undefined;
 
@@ -360,7 +415,7 @@ async function shipPhaseImpl(opts: {
         octokit,
         owner,
         repo: repoName,
-        ref: branch,
+        ref: watchRef,
         rerun,
         deadlineMs: DEFAULT_CI_DEADLINE_MS,
         noChecksGraceMs: opts.ciNoChecksGraceMs ?? resolveCiNoChecksGraceMs(),
@@ -385,8 +440,8 @@ async function shipPhaseImpl(opts: {
       else if (ciOutcome === 'failure') {
         const reason = `CI failed for PR #${prNumber}`;
         log('ship', reason);
-        const ciFailure = await collectCiFailureEvidence({ octokit, owner, repo: repoName, ref: branch, prNumber });
-        return { ok: false, prNumber, reason, ciOutcome, ciFailure };
+        const ciFailure = await collectCiFailureEvidence({ octokit, owner, repo: repoName, ref: watchRef, prNumber });
+        return { ok: false, prNumber, reason, ciOutcome, ciFailure, ...(headSha ? { headSha } : {}) };
       } else if (ciOutcome === 'infra-failure') {
         const reason = `CI failed again for infrastructure reasons for PR #${prNumber} after one rerun`;
         log('ship', reason);
@@ -420,7 +475,12 @@ async function shipPhaseImpl(opts: {
       ? `PR #${prNumber} ready for review (CI skipped: no checks found)`
       : `PR #${prNumber} ready for review`,
   );
-  return ciOutcome === undefined ? { ok: true, prNumber } : { ok: true, prNumber, ciOutcome };
+  return {
+    ok: true,
+    prNumber,
+    ...(ciOutcome === undefined ? {} : { ciOutcome }),
+    ...(headSha ? { headSha } : {}),
+  };
 }
 
 async function computeDiffStat(run: CommandRunner, worktree: string): Promise<string> {
@@ -538,126 +598,8 @@ async function commitLeftoverBuildOutput(o: {
   return { ok: true };
 }
 
-/** Why a `git push` was refused, as far as git's own stderr says (#733). */
-type PushFailureKind = 'non-fast-forward' | 'network' | 'unknown';
-
-/** Bound on the failure text copied into one NDJSON event row. */
-const MAX_PUSH_ERROR_DETAIL = 400;
-
-const NON_FAST_FORWARD_MARKERS = [
-  'non-fast-forward',
-  '! [rejected]',
-  'fetch first',
-  'updates were rejected',
-  'stale info',
-];
-
-const NETWORK_MARKERS = [
-  'could not resolve host',
-  'failed to connect',
-  'connection timed out',
-  'connection refused',
-  'network is unreachable',
-  'operation timed out',
-  'the remote end hung up unexpectedly',
-];
-
-function classifyPushFailure(text: string): PushFailureKind {
-  const t = text.toLowerCase();
-  if (NON_FAST_FORWARD_MARKERS.some((m) => t.includes(m))) return 'non-fast-forward';
-  if (NETWORK_MARKERS.some((m) => t.includes(m))) return 'network';
-  return 'unknown';
-}
-
-/**
- * The real reason a push failed, from git's own stderr when the runner exposes it
- * (node's promisified `exec` rejection carries `stderr`), else the Error message, else the
- * value's string form. Flattened to one line and bounded so a single event row stays
- * greppable in `.factory/events.ndjson`.
- */
-function describePushFailure(err: unknown): { kind: PushFailureKind; detail: string } {
-  const raw = (err as { stderr?: unknown } | null | undefined)?.stderr;
-  const stderr = typeof raw === 'string' ? raw : '';
-  const text = stderr.trim() || (err instanceof Error ? err.message : String(err));
-  const detail = text.replace(/\s+/g, ' ').trim().slice(0, MAX_PUSH_ERROR_DETAIL);
-  return { kind: classifyPushFailure(detail), detail: detail || 'no error output' };
-}
-
-/** Bound on the ls-remote failure text copied into one NDJSON event row (#735). */
-const MAX_REMOTE_HEAD_DETAIL = 200;
-
-/** The result of comparing the pushed branch's remote head against local HEAD (#735). */
-type RemoteHeadCheck =
-  | { status: 'match'; localSha: string; remoteSha: string }
-  | { status: 'mismatch'; localSha: string; remoteSha: string }
-  | { status: 'unreadable'; localSha?: string; remoteSha?: string; detail: string };
-
 /** The result of asking GitHub whether a PR exists for a branch. `error` is never collapsed
  *  into `absent` — an unanswered lookup makes ship fail closed rather than open a duplicate
  *  PR (#641). */
 export type PrLookup =
   { status: 'found'; prNumber: number } | { status: 'absent' } | { status: 'error'; detail: string };
-
-/** Same flatten-and-bound shaping as {@link describePushFailure}, kept separate so that
- *  function's asserted output never changes. */
-function shortDetail(err: unknown): string {
-  const raw = (err as { stderr?: unknown } | null | undefined)?.stderr;
-  const stderr = typeof raw === 'string' ? raw : '';
-  const text = stderr.trim() || (err instanceof Error ? err.message : String(err));
-  return text.replace(/\s+/g, ' ').trim().slice(0, MAX_REMOTE_HEAD_DETAIL) || 'no error output';
-}
-
-/** The SHA on the `refs/heads/<branch>` line of `git ls-remote` output. `--heads origin <branch>`
- *  is a suffix pattern, so it can list more than one ref — match the ref name exactly rather than
- *  trusting the first line. */
-function parseRemoteHeadSha(stdout: string, branch: string): string | undefined {
-  for (const line of stdout.split('\n')) {
-    const [sha, ref] = line.trim().split(/\s+/);
-    if (ref === `refs/heads/${branch}` && sha) return sha;
-  }
-  return undefined;
-}
-
-/** origin/<branch>'s current SHA, `null` when the branch is absent, or the failure detail (#1869). */
-async function readRemoteBranchSha(
-  run: CommandRunner,
-  worktree: string,
-  branch: string,
-): Promise<{ status: 'ok'; sha: string | null } | { status: 'unreadable'; detail: string }> {
-  try {
-    const { stdout } = await run(`git ls-remote --heads origin ${shellEscape(branch)}`, { cwd: worktree });
-    return { status: 'ok', sha: parseRemoteHeadSha(stdout, branch) ?? null };
-  } catch (err) {
-    return { status: 'unreadable', detail: shortDetail(err) };
-  }
-}
-
-/**
- * A zero-exit push is not proof the remote branch actually carries this run's commits — a
- * concurrent push or an update that silently applied nothing leaves the remote head elsewhere,
- * and a PR opened against it would advertise work that is not there (#735).
- */
-async function verifyRemoteHead(run: CommandRunner, worktree: string, branch: string): Promise<RemoteHeadCheck> {
-  let localSha: string | undefined;
-  try {
-    const { stdout } = await run('git rev-parse HEAD', { cwd: worktree });
-    localSha = stdout.trim();
-  } catch (err) {
-    return { status: 'unreadable', detail: shortDetail(err) };
-  }
-  if (!localSha) return { status: 'unreadable', detail: 'git rev-parse HEAD produced no SHA' };
-
-  let listing: string;
-  try {
-    const { stdout } = await run(`git ls-remote --heads origin ${shellEscape(branch)}`, { cwd: worktree });
-    listing = stdout;
-  } catch (err) {
-    return { status: 'unreadable', localSha, detail: shortDetail(err) };
-  }
-
-  const remoteSha = parseRemoteHeadSha(listing, branch);
-  if (!remoteSha) return { status: 'unreadable', localSha, detail: `no refs/heads/${branch} on origin` };
-  return remoteSha === localSha
-    ? { status: 'match', localSha, remoteSha }
-    : { status: 'mismatch', localSha, remoteSha };
-}
