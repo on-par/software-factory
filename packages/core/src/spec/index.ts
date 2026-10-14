@@ -54,8 +54,7 @@ export function parseSpec(content: string): FrozenSpec {
   }
 
   const t = typeof data.route === 'string' ? data.route.trim() : '';
-  const route: BuildRoutePin | null =
-    t === 'codex' || t === 'claude' || t === 'opencode' || t === 'command' ? t : null;
+  const route: BuildRoutePin | null = t === 'codex' || t === 'claude' || t === 'opencode' || t === 'command' ? t : null;
   return { path: '', raw: content, body, data, route };
 }
 
@@ -123,11 +122,7 @@ export async function archiveSpec(specPath: string): Promise<string[]> {
  * Post-freeze route rewrite. `reason` is accepted for #664's consumption; the caller
  * logs its own message as today. Also repairs a spec whose frontmatter was malformed.
  */
-export async function updateSpecRoute(
-  specPath: string,
-  route: BuildRoutePin,
-  reason: string,
-): Promise<void> {
+export async function updateSpecRoute(specPath: string, route: BuildRoutePin, reason: string): Promise<void> {
   void reason;
   const parsed = await readSpec(specPath);
   await writeSpec(specPath, { body: parsed.body, data: { ...parsed.data, route } });
