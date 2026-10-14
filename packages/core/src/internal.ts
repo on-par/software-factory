@@ -716,7 +716,7 @@ export type { UnknownConstitutionChecker } from './checkers/constitution-preflig
 
 // Readiness deep check (#1732)
 export type { DecompositionOutput } from './readiness/decompose.js';
-export { buildDecompositionPrompt, parseDecompositionOutput } from './readiness/decompose.js';
+export { buildDecompositionPrompt, parseDecompositionOutput, publishDecomposition } from './readiness/decompose.js';
 export type {
   Slice,
   SlicePlan,
@@ -750,7 +750,7 @@ export type {
 export { findSlicePlanComment, recordSliceMerged, upsertSlicePlanComment } from './readiness/slice-plan-github.js';
 export type { SliceGateOutcome } from './readiness/slice-gate.js';
 export { resolveSliceGate } from './readiness/slice-gate.js';
-export { publishDecomposition } from './readiness/decompose.js';
+export * from './blockers/index.js';
 export type { ReadinessGapCriterion, ReadinessGapReport } from './readiness/enrich.js';
 export { buildReadinessGapPrompt, parseReadinessGapOutput } from './readiness/enrich.js';
 

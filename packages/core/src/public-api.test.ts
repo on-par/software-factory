@@ -7,7 +7,6 @@ import * as publicApi from './index.js';
 import * as internalApi from './internal.js';
 import * as kpisApi from './kpis-entry.js';
 import * as testingApi from './testing.js';
-
 // Pins the exact export surface of each @on-par/factory-core entry point
 // (ADR-0004). Object.keys(...) only reflects runtime values — type-only
 // exports (export type ...) don't appear at runtime, so these allowlists
@@ -378,6 +377,7 @@ const INTERNAL_API_KEYS = [
   // Readiness deep check (#1732)
   'buildDecompositionPrompt',
   'parseDecompositionOutput',
+  ...Object.keys(await import('./blockers/index.js')), // blocker filing (#2316)
   'buildReadinessGapPrompt',
   'parseReadinessGapOutput',
   // Slice plan model (ADR-0147)
