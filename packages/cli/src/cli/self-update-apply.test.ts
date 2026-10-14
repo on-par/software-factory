@@ -14,6 +14,7 @@ import {
   applySelfUpdate,
   attachedRunLocks,
   cmdSelfUpdateApply,
+  failingDoctorChecks,
   formatApplyResult,
   stableVersionError,
   type ApplyExec,
@@ -150,8 +151,51 @@ describe('applySelfUpdate', () => {
     expect(s.calls).toContain(installCmd('0.9.0'));
     expect(s.installed()).toBe('0.9.0');
     expect(result).toMatchObject({ outcome: 'rolled-back', rolledBack: true, restart: null });
-    expect(result.error).toContain('doctor failed on 0.9.1: claude: not signed in');
+    expect(result.error).toContain('doctor failed on 0.9.1: exit 1');
     expect(s.calls.some((c) => c.includes('daemon'))).toBe(false);
+  });
+
+  const FOOTER = ['', 'Model reachability: factory models --doctor'];
+  it('doctor rollback names the failing check, not the Model reachability footer', async () => {
+    const stdout = [
+      '== factory doctor ==',
+      '  ✅ node - v22',
+      '  ❌ git auth - not authenticated',
+      '       fix: gh auth login',
+      '1 passed, 1 failed, 0 warnings',
+      ...FOOTER,
+    ].join('\n');
+    const s = stubExec({ doctor: { code: 1, stdout } });
+    const { result } = await applySelfUpdate({ to: '0.9.1' }, deps(s.exec));
+    expect(result.outcome).toBe('rolled-back');
+    expect(result.error).toContain('git auth');
+    expect(result.error).not.toContain('Model reachability');
+  });
+
+  it('doctor rollback names every failing check', async () => {
+    const stdout = [
+      '  ❌ git auth - not authenticated',
+      '  ⚠️ optional thing - meh',
+      '  ❌ claude auth - signed out',
+      ...FOOTER,
+    ].join('\n');
+    const s = stubExec({ doctor: { code: 1, stdout } });
+    const { result } = await applySelfUpdate({ to: '0.9.1' }, deps(s.exec));
+    expect(result.error).toContain('failing checks: git auth, claude auth');
+    expect(result.error).not.toContain('optional thing');
+  });
+
+  it('doctor rollback with no failing row falls back to the exit code', async () => {
+    const stdout = ['  ✅ node - v22', '  ⚠️ optional thing - meh', ...FOOTER].join('\n');
+    const s = stubExec({ doctor: { code: 2, stdout } });
+    const { result } = await applySelfUpdate({ to: '0.9.1' }, deps(s.exec));
+    expect(result.error).toBe('doctor failed on 0.9.1: exit 2');
+  });
+
+  it('failingDoctorChecks strips ANSI, dedupes, and handles empty input', () => {
+    expect(failingDoctorChecks('\u001b[31m  ❌ git auth - bad\u001b[0m')).toEqual(['git auth']);
+    expect(failingDoctorChecks('  ❌ a - x\n  ❌ a - y')).toEqual(['a']);
+    expect(failingDoctorChecks('')).toEqual([]);
   });
 
   it('install fails → previous version stays in place and it exits 1', async () => {
