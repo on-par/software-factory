@@ -193,7 +193,7 @@ export class OpenCodeHarness implements CodingHarness {
             onPgid,
           }));
         } catch (err: any) {
-          // Under --format json, session errors arrive as stdout `error` events.
+          // Under --format json, session errors arrive as stdout `error` events; kept as the diagnostic.
           const jsonErr = typeof err.stdout === 'string' ? (parseOpenCodeJson(err.stdout)?.errorText ?? '') : '';
           const classifyText = [err.stderr ?? '', jsonErr].filter(Boolean).join('\n');
           const reason = err.killed ? 'timeout' : classifyFailure(classifyText, err.code ?? 1);
@@ -203,6 +203,7 @@ export class OpenCodeHarness implements CodingHarness {
             code: typeof err.code === 'string' || typeof err.code === 'number' ? err.code : undefined,
             signal: typeof err.signal === 'string' ? err.signal : undefined,
             killed: err.killed === true ? true : undefined,
+            ...(jsonErr ? { diagnostic: jsonErr } : {}),
           });
         }
 
@@ -216,7 +217,7 @@ export class OpenCodeHarness implements CodingHarness {
           throw new HarnessError(
             `opencode run reported an error event: ${parsed.errorText.split('\n')[0]}`,
             classifyFailure(classifyText, 1),
-            { exitCode: 0, stderr: stderr || undefined },
+            { exitCode: 0, stderr: stderr || undefined, diagnostic: parsed.errorText },
           );
         }
       }
