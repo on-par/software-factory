@@ -336,6 +336,10 @@ export function logged(): string {
   return logSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
 }
 
+export function errored(): string {
+  return errSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
+}
+
 /** Registers the per-test reset of h, fakes, temp dirs, env tracking and console/process.exit spies. */
 export function installShipHarness(): void {
   beforeEach(() => {
