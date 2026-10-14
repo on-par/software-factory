@@ -31,6 +31,10 @@ export interface SelfUpdateDeps {
   /** `self-update --to`: labels of active runs; non-empty refuses with exit 3 unless --force. Default: run locks. */
   activeRuns?: () => Promise<string[]>;
   platform?: NodeJS.Platform;
+  /** `self-update --to` (#2933): update-state.json to record the outcome in. Default: the factoryd state file; null disables. */
+  updateStateFile?: string | null;
+  /** Clock for `lastResult.at` (#2933). Default: `new Date()`. */
+  now?: () => Date;
 }
 
 export interface SelfUpdateCheckResult {
