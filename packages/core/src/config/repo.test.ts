@@ -482,12 +482,12 @@ describe('resolveEffectiveModelPins', () => {
   it('reports sources correctly for a mixed plan/build scenario', () => {
     const result = resolveEffectiveModelPins(
       registry,
-      { version: 2, models: { pins: { build: 'ollama-model' } } },
+      { version: 2, models: { pins: { build: 'gpt-model-a' } } },
       { FACTORY_PLAN_MODEL: 'claude-model' },
     );
     expect(result).toEqual({
       plan: 'claude-model',
-      build: 'ollama-model',
+      build: 'gpt-model-a',
       sources: { plan: 'env', build: 'repo' },
     });
   });
