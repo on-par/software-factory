@@ -138,12 +138,14 @@ export function compareToBaseline(summary: EvalSummary, baseline: Baseline): Bas
       regressions.push(`case '${result.id}' was passing in the baseline and now fails`);
     }
 
-    if (baselineCase.rubricScore !== undefined && result.rubricScore !== undefined) {
-      if (result.rubricScore < baselineCase.rubricScore - baseline.tolerance.rubricScore) {
-        regressions.push(
-          `case '${result.id}' rubric score dropped: ${result.rubricScore} < baseline ${baselineCase.rubricScore} - tolerance ${baseline.tolerance.rubricScore}`,
-        );
-      }
+    if (
+      baselineCase.rubricScore !== undefined &&
+      result.rubricScore !== undefined &&
+      result.rubricScore < baselineCase.rubricScore - baseline.tolerance.rubricScore
+    ) {
+      regressions.push(
+        `case '${result.id}' rubric score dropped: ${result.rubricScore} < baseline ${baselineCase.rubricScore} - tolerance ${baseline.tolerance.rubricScore}`,
+      );
     }
   }
 

@@ -63,7 +63,7 @@ export function isCrossRepoPullRequest(pr: ReviewPullRequestRepos, currentRepo: 
 async function probeAvailable(engine: ContainerEngine): Promise<boolean> {
   if (!engine.isAvailable) return false;
   try {
-    return (await engine.isAvailable()) === true;
+    return await engine.isAvailable();
   } catch {
     return false;
   }

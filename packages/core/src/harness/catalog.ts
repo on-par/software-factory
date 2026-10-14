@@ -77,7 +77,7 @@ export const HARNESS_CATALOG: Record<string, HarnessCatalogEntry> = Object.fromE
 export const KNOWN_HARNESS_IDS = Object.keys(HARNESS_CATALOG);
 
 export function isAgenticHarness(harnessId: string): boolean {
-  return HARNESS_CATALOG[harnessId]?.agentic === true;
+  return HARNESS_CATALOG[harnessId]?.agentic ?? false;
 }
 
 /** CLI a catalog harness needs on PATH, or undefined when it has none to check

@@ -144,7 +144,7 @@ describe('parseNumstat', () => {
   });
 
   it('keeps spaces and tabs in paths', () => {
-    expect(parseNumstat('1\t0\tmy file.txt\0' + '1\t0\ta\tb.txt\0')).toEqual([
+    expect(parseNumstat('1\t0\tmy file.txt\x001\t0\ta\tb.txt\0')).toEqual([
       { path: 'my file.txt', added: 1, deleted: 0 },
       { path: 'a\tb.txt', added: 1, deleted: 0 },
     ]);

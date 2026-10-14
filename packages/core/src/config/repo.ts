@@ -391,7 +391,7 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
 
   if (repo.providers) {
     const disabledProviders = Object.entries(repo.providers)
-      .filter(([, enabled]) => enabled === false)
+      .filter(([, enabled]) => !enabled)
       .map(([provider]) => provider);
     if (disabledProviders.length > 0) {
       const nextTiers: Record<string, string[]> = {};

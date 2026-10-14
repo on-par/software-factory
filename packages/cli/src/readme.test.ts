@@ -106,7 +106,7 @@ describe('README provider setup guide guard self-test', () => {
   });
 
   it('rejects two provider setup guide links', () => {
-    const root = `${V093_ROOT.replace('Run `factory doctor`', '')}`.replace(
+    const root = V093_ROOT.replace('Run `factory doctor`', '').replace(
       '- `git`',
       '- `git` ([setup](docs/agents.md), [again](docs/agents.md))',
     );

@@ -23,7 +23,7 @@ export function detectStuck(outcome: RunOutcome, reworkBudget: number = MAX_REWO
   if (outcome.state !== 'parked') return null;
   // ci-infra: the one infra rerun also failed for infra (#2366). Like an environment release, the change is not at fault.
   if (outcome.reason === 'ci-infra') return null;
-  const signature = outcome.failureSignature ? outcome.failureSignature : undefined;
+  const signature = outcome.failureSignature || undefined;
   if (outcome.reason === 'ci-failed') {
     return signature ? { trigger: 'ship-failed', failureSignature: signature } : { trigger: 'ship-failed' };
   }

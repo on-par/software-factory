@@ -34,14 +34,14 @@ describe('probeOllama', () => {
       throw new TypeError('fetch failed', { cause: { code: 'ECONNREFUSED' } });
     });
     const r = await probeOllama(refused, EP);
-    expect(r.reachable === false && r.reason).toContain('ECONNREFUSED');
+    expect(!r.reachable && r.reason).toContain('ECONNREFUSED');
 
     resetOllamaProbeCache();
     const plain = vi.fn<FetchFn>(async () => {
       throw new Error('boom');
     });
     const p = await probeOllama(plain, EP);
-    expect(p.reachable === false && p.reason).toBe('boom');
+    expect(!p.reachable && p.reason).toBe('boom');
   });
 
   it('reports a timeout', async () => {
@@ -49,7 +49,7 @@ describe('probeOllama', () => {
       throw new DOMException('timed out', 'TimeoutError');
     });
     const r = await probeOllama(fetchFn, EP);
-    expect(r.reachable === false && r.reason).toBe('timed out after 1500ms');
+    expect(!r.reachable && r.reason).toBe('timed out after 1500ms');
   });
 
   it('shares one in-flight probe across concurrent callers and caches per endpoint', async () => {

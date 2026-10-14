@@ -8,3 +8,7 @@ regexes = ['''sk-live-abc123''']
 [[allowlists]]
 description = "Local, gitignored factory plan artifacts (.factory/plans/) that quote prompt-injection and canary fixture text, not real credentials"
 paths = ['''^\.factory/plans/''']
+
+[[allowlists]]
+description = "Fake AWS access-key fixture in packages/core/src/filing/redact.test.ts (and git history of oxlint enable commits)"
+regexes = ['''AKIAABCDEFGHIJKLMNOP''']

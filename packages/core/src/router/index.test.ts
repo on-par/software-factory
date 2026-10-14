@@ -201,8 +201,7 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
 
   it('fails over from a Claude model with local_auth to a reachable Codex model', async () => {
     const calls: string[] = [];
-    let router!: ModelRouter;
-    router = new ModelRouter(
+    const router: ModelRouter = new ModelRouter(
       realModels,
       realRoutes,
       false,
@@ -216,8 +215,7 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
 
   it('tries a signed-out Claude once per run, then skips it and drops its build route (#2495)', async () => {
     const calls: string[] = [];
-    let router!: ModelRouter;
-    router = new ModelRouter(
+    const router: ModelRouter = new ModelRouter(
       realModels,
       realRoutes,
       false,
@@ -234,8 +232,7 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
   });
 
   it('reports a local_auth failure to the local-auth sink once, naming only the agent (#2733)', async () => {
-    let router!: ModelRouter;
-    router = new ModelRouter(
+    const router: ModelRouter = new ModelRouter(
       realModels,
       realRoutes,
       false,
@@ -250,8 +247,7 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
   });
 
   it('a throwing local-auth sink never breaks failover (#2733)', async () => {
-    let router!: ModelRouter;
-    router = new ModelRouter(
+    const router: ModelRouter = new ModelRouter(
       realModels,
       realRoutes,
       false,
@@ -265,8 +261,7 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
   });
 
   it('fails with local_auth when every model for a task signed out earlier in the run (#2495)', async () => {
-    let router!: ModelRouter;
-    router = new ModelRouter(
+    const router: ModelRouter = new ModelRouter(
       realModels,
       realRoutes,
       false,
@@ -278,8 +273,7 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
 
   it('never attempts Claude when only the codex CLI is installed', async () => {
     const calls: string[] = [];
-    let router!: ModelRouter;
-    router = new ModelRouter(
+    const router: ModelRouter = new ModelRouter(
       realModels,
       realRoutes,
       false,

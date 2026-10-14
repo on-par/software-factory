@@ -55,7 +55,7 @@ describe('createLaneScheduler', () => {
   });
 
   it('keys park state per lane+phase so a denial on one phase does not suppress another', async () => {
-    let nowMs = 0;
+    const nowMs = 0;
     const now = () => nowMs;
     const acquire = vi.fn();
     const scheduler = createLaneScheduler({ acquire, now });

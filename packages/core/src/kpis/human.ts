@@ -128,12 +128,8 @@ export function hasUnresolvedPark(events: FactoryEvent[], issue: string): boolea
     if (event.issue !== issue) continue;
     const ts = Date.parse(event.ts);
     if (Number.isNaN(ts)) continue;
-    if (isParkKind(event.type)) {
-      if (lastParkTs === null || ts > lastParkTs) lastParkTs = ts;
-    }
-    if (event.type === 'merged') {
-      if (lastMergedTs === null || ts > lastMergedTs) lastMergedTs = ts;
-    }
+    if (isParkKind(event.type) && (lastParkTs === null || ts > lastParkTs)) lastParkTs = ts;
+    if (event.type === 'merged' && (lastMergedTs === null || ts > lastMergedTs)) lastMergedTs = ts;
   }
 
   if (lastParkTs === null) return false;

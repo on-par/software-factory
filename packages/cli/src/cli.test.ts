@@ -3222,7 +3222,7 @@ describe('cli', () => {
     });
 
     it('with no token at startup, reports it per read and recovers once a token appears', async () => {
-      let current: string | undefined;
+      let current: string | undefined = undefined;
       const token = vi.fn(() => current);
       const octokit = vi.fn(() => fakeOctokit);
       const reader = tuiQueueReader({ ...base, localQueue: false, token, octokit });

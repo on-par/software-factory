@@ -58,7 +58,7 @@ describe('redactText', () => {
     ['ghp', `ghp_${'a1'.repeat(15)}`],
     ['pat', `github_pat_${'Ab1_'.repeat(8)}`],
     ['anthropic', 'sk-ant-api03-abcdefghijklmnop'],
-    ['aws', `AKIA${'ABCDEFGHIJKLMNOP'}`],
+    ['aws', 'AKIAABCDEFGHIJKLMNOP'],
     ['jwt', 'eyJhbGciOi.eyJzdWIiOiIx.sigsigsig'],
     ['password', 'password=hunter2'],
     ['bearer', 'Bearer abc'],

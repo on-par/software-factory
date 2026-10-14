@@ -173,7 +173,7 @@ describe('describeDotnetEnv', () => {
 describe('compiler server lifecycle', () => {
   it('no non-test source file shuts down compiler servers', () => {
     const repoRoot = fileURLToPath(new URL('../../../../', import.meta.url));
-    const needle = 'build-server' + ' shutdown';
+    const needle = 'build-server shutdown';
     const offenders: string[] = [];
     const walk = (dir: string): void => {
       for (const e of readdirSync(dir, { withFileTypes: true })) {
