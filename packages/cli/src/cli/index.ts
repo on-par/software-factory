@@ -21,7 +21,6 @@ import { promisify, styleText } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
 import type {
-  DeclaredHarnessProbe,
   Environment,
   EnvironmentProxySettings,
   EventKind,
@@ -83,16 +82,13 @@ import {
   InvalidArtifactsDirError,
   InvalidWorkRequestInputError,
   InvalidWorkspaceError,
-  inspectPortLeases,
   isCommandAvailable,
   isProxyRunning,
   kpiBranchPrefixes,
-  KNOWN_HARNESS_IDS,
   kpisToHistoryRecord,
   laneBaseUrl,
   laneEnv,
   laneHostLabel,
-  loadFactoryConfig,
   loadFactoryConfigForRepo,
   loadModelsConfig,
   loadRepoConfig,
@@ -116,7 +112,6 @@ import {
   readQueue,
   readUsage,
   reapOrphanProcesses,
-  reapStalePortLeases,
   reconstructKpiEvents,
   recordLeasePgid,
   releasePortLease,
@@ -136,7 +131,6 @@ import {
   resolveArtifactsDir,
   resolveLocalOnlyPolicy,
   resolveMergePolicy,
-  resolveProcessGroupGraceMs,
   resolveSandboxPolicy,
   resolveSkipCI,
   resolveTimeouts,
@@ -168,7 +162,6 @@ import type {
   SlicePlanCommentLookup,
   UnmergedGreenPr,
   WorktreeSandbox,
-  ConfigLintInput,
 } from '@on-par/factory-core/internal';
 import {
   acquirePidFile,
@@ -218,7 +211,6 @@ import {
   listOrphanContainers,
   logCost,
   logEvent,
-  microVmName,
   planQueueMigration,
   readCosts,
   readGithubQueueSnapshot,
@@ -248,17 +240,11 @@ import {
   withFileLock,
   withGitLock,
   withRunLock,
-  wrapCommandInSandbox,
   writePortFile,
   buildTriagePrompt,
   normalizeTriageQueue,
   parseTriageCandidates,
-  codexChatgptSessionState,
-  hasClaudeLoginEvidence,
-  claudeStoredSessionState,
-  localAuthFailureSinceLogin,
   recordLocalAuthFailure,
-  hasOpencodeLoginEvidence,
 } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
 import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
@@ -316,37 +302,8 @@ import {
   type FactorydConfig,
 } from './daemon.js';
 import { checkForUpdate, cmdSelfUpdateCheck, type SelfUpdateDeps } from './self-update.js';
-import {
-  analyzeEventLog,
-  type ClaudeAuthProbe,
-  claudeKeychainCheck,
-  doctorFailed,
-  eventLogCheck,
-  formatClaimReconcileReport,
-  formatContainerReconcileReport,
-  formatDoctorChecks,
-  formatMicroVmReconcileReport,
-  formatReconcileReport,
-  formatWorktreeReconcileReport,
-  type GreenPrScanResult,
-  declaredHarnessChecks,
-  hasSandboxRuntime,
-  leaseChecks,
-  keychainPreflightError,
-  type KeychainProbeStatus,
-  type LeaseHealthRow,
-  orphanContainerChecks,
-  configLintChecks,
-  modelsRegistryChecks,
-  orphanMicroVmChecks,
-  runDoctorChecks,
-  sandboxAuthSkipDetail,
-  reconcileAgentAuthChecks,
-  repoCommandHarnesses,
-  sandboxClaudeAuthChecks,
-  unmergedGreenPrChecks,
-  type UnmergedGreenPrRow,
-} from './doctor.js';
+import { cmdDoctor, keychainPreflightError, type KeychainProbeStatus } from './doctor.js';
+import type { GreenPrScanResult, LeaseHealthRow, UnmergedGreenPrRow } from './doctor-health.js';
 import {
   DOCS_URL,
   formatOverview,
@@ -369,9 +326,8 @@ import { DeepCheckError, createDeepModelRunner, runIssueCheck, type DeepCheckMod
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
 import { type BaseHoldDecision, createBaseHoldGate, formatBaseHoldCleared, writeBaseHold } from './base-hold.js';
 import { readRunFlagOverrides, writeRunFlagOverrides } from './run-flags.js';
-import { distFreshnessProbe, runStalenessGuard } from './staleness.js';
-import { readStopFileStatus, stopSentinelCheck, stopSentinelRunSkipMessage } from './stop-sentinel.js';
-import { checkSweepHeartbeat, defaultSweepHeartbeatDeps, sweepHeartbeatCheck } from './sweep-heartbeat.js';
+import { runStalenessGuard } from './staleness.js';
+import { readStopFileStatus, stopSentinelRunSkipMessage } from './stop-sentinel.js';
 
 export type ConfigLoaderKey =
   | 'loadModelsConfig'
@@ -4730,252 +4686,6 @@ function probeClaudeKeychain(): KeychainProbeStatus {
   }
 }
 
-async function cmdDoctor(opts: { reconcile?: boolean; probeInference?: boolean } = {}) {
-  let repoRoot: string | null;
-  try {
-    repoRoot = shellOps
-      .execSync('git rev-parse --show-toplevel', {
-        timeout: 10_000,
-        stdio: ['ignore', 'pipe', 'ignore'],
-      })
-      .trim();
-  } catch {
-    repoRoot = null;
-  }
-
-  const checks = runDoctorChecks({
-    commandAvailable: coreOps.isCommandAvailable,
-    envPresent: (key) => !!process.env[key],
-    tryExec: (cmd, opts) => {
-      try {
-        return shellOps
-          .execSync(cmd, {
-            timeout: opts?.timeoutMs ?? 10_000,
-            stdio: ['ignore', 'pipe', 'ignore'],
-            ...(opts?.env ? { env: { ...process.env, ...opts.env } } : {}),
-          })
-          .trim();
-      } catch {
-        return null;
-      }
-    },
-    pathExists: existsSync,
-    distFreshness: distFreshnessProbe(import.meta.url),
-    codexSessionState: () => codexChatgptSessionState(),
-    claudeLoggedIn: () =>
-      hasClaudeLoginEvidence({
-        exec: (file, args) => {
-          shellOps.execSync([file, ...args].map(shellEscape).join(' '), { timeout: 10_000, stdio: 'ignore' });
-        },
-        fileExists: existsSync,
-      }),
-    claudeSessionState: () => claudeStoredSessionState(),
-    localAuthFailure: (agent) => localAuthFailureSinceLogin(agent),
-    opencodeLoggedIn: () => hasOpencodeLoginEvidence(),
-    commandHarnesses: () =>
-      repoRoot === null
-        ? []
-        : repoCommandHarnesses(
-            configLoaders.loadModelsConfig().harnesses,
-            configLoaders.loadRepoConfig(repoRoot)?.models?.registry,
-          ),
-  });
-
-  // Only with --probe-inference: these send a real prompt (uses quota). Plain doctor makes no inference call.
-  if (opts.probeInference) {
-    const CLAUDE_AUTH_PROBE = 'claude -p "reply with exactly: ok"';
-    const probeExec = (cmd: string): string | null => {
-      try {
-        return shellOps.execSync(cmd, { timeout: 120_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-      } catch {
-        return null;
-      }
-    };
-
-    let host: ClaudeAuthProbe = 'skipped';
-    let hostDetail = 'skipped: claude CLI not on PATH';
-    if (coreOps.isCommandAvailable('claude')) {
-      host = probeExec(CLAUDE_AUTH_PROBE) === null ? 'failed' : 'ok';
-      hostDetail = host === 'ok' ? 'claude -p succeeded on the host' : 'claude -p failed on the host';
-    }
-
-    let sandboxed: ClaudeAuthProbe = 'skipped';
-    let sandboxDetail = 'skipped: host claude auth was not verified';
-    const runtimeAvailable = hasSandboxRuntime(process.platform, (cmd) => isCommandAvailableViaShell(shellOps, cmd));
-    const skip = sandboxAuthSkipDetail({ runtimeAvailable, hostOk: host === 'ok', inRepo: repoRoot !== null });
-    if (skip !== null) {
-      sandboxDetail = skip;
-    } else if (repoRoot !== null) {
-      const policy = resolveSandboxPolicy(
-        configLoaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox,
-        {
-          worktree: repoRoot,
-          repoRoot,
-          isAvailable: (cmd) => isCommandAvailableViaShell(shellOps, cmd),
-        },
-      );
-      if (!policy) {
-        sandboxDetail = 'skipped: sandbox disabled by config or FACTORY_SANDBOX';
-      } else if (policy.runtime === 'none') {
-        sandboxDetail = 'skipped: no sandbox runtime (sandbox-exec/firejail) on this host';
-      } else if (policy.runtime === 'docker-sandbox') {
-        sandboxDetail = 'skipped: docker-sandbox containment is the microVM, not command wrapping (#653)';
-      } else {
-        sandboxed = probeExec(wrapCommandInSandbox(CLAUDE_AUTH_PROBE, policy)) === null ? 'failed' : 'ok';
-        sandboxDetail =
-          sandboxed === 'ok'
-            ? `claude -p succeeded under ${policy.runtime}`
-            : `claude -p failed under ${policy.runtime} (local_auth)`;
-      }
-    }
-
-    checks.push(...sandboxClaudeAuthChecks({ host, sandboxed, hostDetail, sandboxDetail }));
-  }
-
-  checks.push(claudeKeychainCheck(probeClaudeKeychain()));
-  checks.splice(0, checks.length, ...reconcileAgentAuthChecks(checks));
-
-  if (repoRoot !== null) {
-    const paths = getFactoryPaths(repoRoot);
-    let factoryConfig: FactoryConfig;
-    try {
-      factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
-    } catch {
-      factoryConfig = loadFactoryConfig(); // schema errors are reported by the config row (#2611)
-    }
-    const health = await inspectPortLeases({ registryFile: paths.ports });
-    checks.push(...leaseChecks(health.map(toLeaseRow)));
-
-    const dockerAvailable = coreOps.isCommandAvailable('docker');
-    const orphanContainers = dockerAvailable ? await internalOps.listOrphanContainers().catch(() => []) : [];
-    checks.push(...orphanContainerChecks(orphanContainers.map((c) => c.name)));
-
-    const sbxAvailable = coreOps.isCommandAvailable('sbx');
-    const activeVmNames = new Set(health.filter((h) => h.alive).map((h) => microVmName(h.lease.worktreeId)));
-    const orphanVmNames = sbxAvailable ? (await internalOps.listMicroVms()).filter((n) => !activeVmNames.has(n)) : [];
-    checks.push(...orphanMicroVmChecks(orphanVmNames));
-
-    const sweepStatus = checkSweepHeartbeat(factoryConfig.sweep, process.env, defaultSweepHeartbeatDeps());
-    const sweepCheck = sweepHeartbeatCheck(sweepStatus);
-    if (sweepCheck) checks.push(sweepCheck);
-
-    checks.push(stopSentinelCheck(readStopFileStatus(paths)));
-
-    const eventsContent = existsSync(paths.events) ? readFileSync(paths.events, 'utf-8') : null;
-    checks.push(eventLogCheck(eventsContent === null ? null : analyzeEventLog(eventsContent)));
-
-    let constitution: ConfigLintInput['constitution'] = null;
-    let loadError: string | undefined;
-    try {
-      constitution = new ConstitutionLoader().loadRepoConstitution(repoRoot, factoryConfig.paths?.constitution);
-    } catch (err) {
-      loadError = `cannot parse constitution: ${err instanceof Error ? err.message : String(err)}`;
-    }
-    checks.push(
-      ...configLintChecks({ constitution, configFile: repoConfigFileFor(repoRoot, paths.config) }, loadError),
-    );
-
-    try {
-      const declared = Object.keys(configLoaders.loadModelsConfig().harnesses ?? {});
-      checks.push(
-        ...modelsRegistryChecks(paths.config, configLoaders.loadRepoConfig(repoRoot)?.models?.registry, [
-          ...KNOWN_HARNESS_IDS,
-          ...declared,
-        ]),
-      );
-    } catch {
-      // malformed config is reported by the load paths / `factory models --doctor`; doctor keeps going
-    }
-
-    let harnessProbes: DeclaredHarnessProbe[] = [];
-    try {
-      const registry = new coreOps.ModelRegistry(
-        applyRepoConfig(configLoaders.loadModelsConfig(), configLoaders.loadRepoConfig(repoRoot)),
-      );
-      harnessProbes = coreOps.probeDeclaredHarnesses(registry);
-    } catch {
-      // models config problems are reported by `factory models --doctor`; doctor keeps going
-    }
-    checks.push(...declaredHarnessChecks(harnessProbes));
-
-    // Full run-lifecycle reap (#998): dead-run worktrees and their branches. Uses the same
-    // GitHub evidence and the same lock pairing as `factory worktree gc` (cmdWorktreeGc) —
-    // a merged or closed PR is what makes a worktree reapable.
-    const ghRepo = await getGitHubRepo().catch(() => undefined);
-    const octokit = ghRepo && hasGitHubToken() ? getOctokit() : undefined;
-
-    // Green-and-ready PRs with no merge (#1000). Report only — doctor never lands a PR.
-    checks.push(...unmergedGreenPrChecks(await scanGreenPrs(ghRepo, octokit)));
-
-    if (opts.reconcile) {
-      if (orphanContainers.length > 0) {
-        const reapedContainers = await internalOps.reapOrphanContainers(orphanContainers);
-        console.log(formatContainerReconcileReport(reapedContainers));
-      }
-
-      if (orphanVmNames.length > 0) {
-        const reapedVms = await Promise.all(orphanVmNames.map((name) => internalOps.reapOrphanMicroVm(name)));
-        console.log(formatMicroVmReconcileReport(reapedVms));
-      }
-
-      const reaped = await reapStalePortLeases({ registryFile: paths.ports, lockDir: paths.portsLock });
-      console.log(formatReconcileReport(reaped));
-
-      if (reaped.length > 0) {
-        const graceMs = resolveProcessGroupGraceMs(factoryConfig);
-        const orphanEvents = await coreOps.reapOrphanProcesses({ reaped, graceMs });
-        for (const e of orphanEvents) {
-          console.log(
-            `reconcile: ${e.action === 'killed' ? 'killed' : 'found'} pid ${e.pid} (pgid ${e.pgid}, ${e.command}) squatting port ${e.port} of dead lane ${e.worktreeId}${e.action === 'reported' ? '; not factory-started, left running' : ''}`,
-          );
-        }
-      }
-
-      try {
-        const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
-        const gcSandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
-        const report = await withGitLock(repoRoot, () =>
-          withFileLock(paths.gitLock, () =>
-            internalOps.sweepWorktrees(
-              {
-                repoRoot,
-                ttlDays: factoryConfig.worktree.gcTtlDays,
-                repo: ghRepo,
-                branchPrefix: resolveBranchPrefix(),
-              },
-              { log: gcLog, octokit, sandbox: gcSandbox },
-            ),
-          ),
-        );
-        console.log(formatWorktreeReconcileReport(report.removed));
-      } catch (err: any) {
-        console.log(`reconcile: worktree sweep failed: ${err?.message ?? String(err)}`);
-      }
-
-      // Stale claim reap (#999): factory:in-progress claims naming a dead local pid go back to
-      // factory:queued so the next run can claim them with no manual label surgery.
-      try {
-        if (ghRepo && octokit) {
-          const [owner, repoName] = ghRepo.split('/');
-          const released = await internalOps.releaseStaleClaims({
-            client: createOctokitQueueClient(octokit),
-            owner,
-            repo: repoName,
-          });
-          console.log(formatClaimReconcileReport(released));
-        } else {
-          console.log('reconcile: skipping stale claims: no GitHub repo or token');
-        }
-      } catch (err: any) {
-        console.log(`reconcile: stale claim release failed: ${err?.message ?? String(err)}`);
-      }
-    }
-  }
-
-  console.log(formatDoctorChecks(checks, { inRepo: repoRoot !== null }));
-  if (doctorFailed(checks)) process.exit(1);
-}
-
 /** Injectable seams for main(). Unset fields fall back to the real implementations. */
 export interface CliDeps {
   /** Shell seams for every `exec` / `execSync` the CLI runs (git, gh, claude, ollama, security). Default to node:child_process. */
@@ -5197,12 +4907,31 @@ function runStatus(opts: StatusOptions = {}): Promise<void> {
   });
 }
 
+/** `factory doctor` (#2799): the handler lives in ./doctor.ts; this binds its runtime. */
+function runDoctor(opts: { reconcile?: boolean; probeInference?: boolean } = {}): Promise<void> {
+  return cmdDoctor(opts, {
+    shellOps,
+    coreOps,
+    internalOps,
+    configLoaders,
+    getGitHubRepo: () => getGitHubRepo(),
+    getOctokit: () => getOctokit(),
+    hasGitHubToken: () => hasGitHubToken(),
+    scanGreenPrs,
+    probeClaudeKeychain,
+    toLeaseRow,
+    gcWorktreeSandbox,
+    repoConfigFileFor,
+    isCommandAvailableViaShell,
+  });
+}
+
 export const PROGRAM_HANDLERS = {
   cmdInit,
   cmdMigrate,
   cmdConstitution,
   cmdModels,
-  cmdDoctor,
+  cmdDoctor: runDoctor,
   cmdCost,
   cmdUsage,
   cmdStatus: runStatus,

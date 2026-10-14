@@ -6,22 +6,24 @@ import {
   claudeKeychainCheck,
   type DoctorCheck,
   type DoctorEnvProbes,
-  declaredHarnessChecks,
-  eventLogCheck,
-  formatClaimReconcileReport,
-  formatContainerReconcileReport,
   formatDoctorChecks,
-  formatMicroVmReconcileReport,
-  formatWorktreeReconcileReport,
   gitAuthCheck,
   harnessInstallChecks,
-  leaseChecks,
   NOT_IN_REPO_SKIP_DETAIL,
   runDoctorChecks,
   sandboxAuthSkipDetail,
   sandboxClaudeAuthChecks,
-  unmergedGreenPrChecks,
 } from './doctor.js';
+import { declaredHarnessChecks } from './doctor-config.js';
+import {
+  eventLogCheck,
+  formatClaimReconcileReport,
+  formatContainerReconcileReport,
+  formatMicroVmReconcileReport,
+  formatWorktreeReconcileReport,
+  leaseChecks,
+  unmergedGreenPrChecks,
+} from './doctor-health.js';
 import { triageQueueHeader } from './index.js';
 import { sweepHeartbeatCheck } from './sweep-heartbeat.js';
 import { stopSentinelCheck } from './stop-sentinel.js';
@@ -170,11 +172,17 @@ const read = (file: string): string => readFileSync(new URL(file, import.meta.ur
 describe('em dash guard', () => {
   it('doctor and triage sources contain no U+2014 outside comments', () => {
     const hits: string[] = [];
-    for (const file of ['./doctor.ts', './sweep-heartbeat.ts', './stop-sentinel.ts']) {
+    for (const file of [
+      './doctor.ts',
+      './doctor-health.ts',
+      './doctor-config.ts',
+      './sweep-heartbeat.ts',
+      './stop-sentinel.ts',
+    ]) {
       hits.push(...findEmDashLines(read(file), file));
     }
     const index = read('./index.ts');
-    for (const name of ['cmdDoctor', 'cmdTriage', 'cmdTriageAccept', 'triageQueueHeader']) {
+    for (const name of ['cmdTriage', 'cmdTriageAccept', 'triageQueueHeader']) {
       const fn = functionSource(index, name);
       hits.push(...findEmDashLines(fn.text, `./index.ts(${name})`, fn.offset));
     }

@@ -1,21 +1,62 @@
 // packages/cli/src/cli/doctor.ts — `factory doctor` environment preflight
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import type { DeclaredHarnessProbe } from '@on-par/factory-core';
-import { detectSandboxRuntime } from '@on-par/factory-core';
-import type { ConfigLintInput } from '@on-par/factory-core/internal';
+import type { Octokit } from '@octokit/rest';
+import type { DeclaredHarnessProbe, EventKind, FactoryConfig, LeaseHealth } from '@on-par/factory-core';
 import {
-  findConfigSchemaErrors,
+  applyRepoConfig,
+  ConstitutionLoader,
+  detectSandboxRuntime,
+  getFactoryPaths,
+  inspectPortLeases,
+  KNOWN_HARNESS_IDS,
+  loadFactoryConfig,
+  reapStalePortLeases,
+  resolveProcessGroupGraceMs,
+  resolveSandboxPolicy,
+} from '@on-par/factory-core';
+import type { ConfigLintInput, WorktreeSandbox } from '@on-par/factory-core/internal';
+import {
+  claudeStoredSessionState,
+  codexChatgptSessionState,
+  createOctokitQueueClient,
+  hasClaudeLoginEvidence,
+  hasOpencodeLoginEvidence,
   isHarnessCliPresent,
-  isTemplateToken,
-  lintFactoryConfig,
-  listBuiltInCheckers,
+  localAuthFailureSinceLogin,
+  logEvent,
+  microVmName,
+  resolveBranchPrefix,
+  shellEscape,
+  withFileLock,
+  withGitLock,
+  wrapCommandInSandbox,
 } from '@on-par/factory-core/internal';
 
 import { MIN_NODE_MAJOR } from '../node-version.js';
+import { configLintChecks, declaredHarnessChecks, modelsRegistryChecks } from './doctor-config.js';
+import {
+  analyzeEventLog,
+  eventLogCheck,
+  formatClaimReconcileReport,
+  formatContainerReconcileReport,
+  formatMicroVmReconcileReport,
+  formatReconcileReport,
+  formatWorktreeReconcileReport,
+  type GreenPrScanResult,
+  leaseChecks,
+  type LeaseHealthRow,
+  orphanContainerChecks,
+  orphanMicroVmChecks,
+  unmergedGreenPrChecks,
+} from './doctor-health.js';
 import { availableAgentClis, CLAUDE_CODE_URL, CODEX_CLI_URL, GITHUB_TOKENS_URL } from './first-run.js';
+import type { CliDeps } from './index.js';
+import { distFreshnessProbe } from './staleness.js';
+import { readStopFileStatus, stopSentinelCheck } from './stop-sentinel.js';
+import { checkSweepHeartbeat, defaultSweepHeartbeatDeps, sweepHeartbeatCheck } from './sweep-heartbeat.js';
 
 export interface DoctorCheck {
   name: string;
@@ -832,353 +873,287 @@ export function reconcileAgentAuthChecks(checks: DoctorCheck[]): DoctorCheck[] {
   });
 }
 
-export interface LeaseHealthRow {
-  worktreeId: string;
-  branch: string;
-  port: number;
-  pid: number;
-  alive: boolean;
-  reason?: 'dead-pid' | 'missing-worktree';
-  portSquatted?: boolean;
+/** index.ts's seams and helpers for `factory doctor`, built at call time so main() deps injection reaches the handler. */
+export interface DoctorRuntime {
+  shellOps: Required<Pick<CliDeps, 'exec' | 'execSync'>>;
+  coreOps: Required<
+    Pick<CliDeps, 'isCommandAvailable' | 'ModelRegistry' | 'probeDeclaredHarnesses' | 'reapOrphanProcesses'>
+  >;
+  internalOps: Required<
+    Pick<
+      CliDeps,
+      | 'listOrphanContainers'
+      | 'listMicroVms'
+      | 'reapOrphanContainers'
+      | 'reapOrphanMicroVm'
+      | 'sweepWorktrees'
+      | 'releaseStaleClaims'
+    >
+  >;
+  configLoaders: Required<Pick<CliDeps, 'loadModelsConfig' | 'loadRepoConfig' | 'loadFactoryConfigForRepo'>>;
+  getGitHubRepo: () => Promise<string>;
+  getOctokit: () => Octokit;
+  hasGitHubToken: () => boolean;
+  scanGreenPrs: (ghRepo: string | undefined, octokit: Octokit | undefined) => Promise<GreenPrScanResult>;
+  probeClaudeKeychain: () => KeychainProbeStatus;
+  toLeaseRow: (health: LeaseHealth) => LeaseHealthRow;
+  gcWorktreeSandbox: (
+    sandboxCfg: FactoryConfig['sandbox'] | undefined,
+    repoRoot: string,
+  ) => WorktreeSandbox | undefined;
+  repoConfigFileFor: (repoRoot: string, absPath: string) => { absPath: string; relPath: string };
+  isCommandAvailableViaShell: (shell: DoctorRuntime['shellOps'], cmd: string) => boolean;
 }
 
-export function leaseChecks(rows: LeaseHealthRow[]): DoctorCheck[] {
-  if (rows.length === 0) {
-    return [{ name: 'port leases', ok: true, optional: true, detail: 'no active leases' }];
+export async function cmdDoctor(
+  opts: { reconcile?: boolean; probeInference?: boolean },
+  rt: DoctorRuntime,
+): Promise<void> {
+  let repoRoot: string | null;
+  try {
+    repoRoot = rt.shellOps
+      .execSync('git rev-parse --show-toplevel', {
+        timeout: 10_000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+      .trim();
+  } catch {
+    repoRoot = null;
   }
 
-  return rows.map((row) => {
-    if (row.alive) {
-      return {
-        name: `port lease :${row.port}`,
-        ok: true,
-        optional: true,
-        detail: `${row.worktreeId}: port ${row.port}, pid ${row.pid}, live`,
-      };
-    }
-
-    const squatted = row.portSquatted ? '; port still in use by another process' : '';
-    return {
-      name: `port lease :${row.port}`,
-      ok: false,
-      optional: true,
-      detail: `${row.worktreeId}: port ${row.port}, pid ${row.pid}, stale (${row.reason})${squatted}`,
-      fix: 'run `factory doctor --reconcile` to reclaim stale leases',
-    };
-  });
-}
-
-export interface EventLogIntegrity {
-  total: number;
-  unparseable: number;
-}
-
-export function analyzeEventLog(content: string): EventLogIntegrity {
-  const lines = content.split('\n').filter((l) => l.trim() !== '');
-  let unparseable = 0;
-  for (const line of lines) {
-    try {
-      JSON.parse(line);
-    } catch {
-      unparseable++;
-    }
-  }
-  return { total: lines.length, unparseable };
-}
-
-export function eventLogCheck(integrity: EventLogIntegrity | null): DoctorCheck {
-  if (integrity === null) {
-    return { name: 'event log integrity', ok: true, optional: true, detail: 'no events.ndjson yet' };
-  }
-  if (integrity.total === 0) {
-    return { name: 'event log integrity', ok: true, optional: true, detail: 'events.ndjson is empty' };
-  }
-  const pct = ((integrity.unparseable / integrity.total) * 100).toFixed(1);
-  if (integrity.unparseable === 0) {
-    return {
-      name: 'event log integrity',
-      ok: true,
-      optional: true,
-      detail: `${integrity.total} lines, 0 unparseable (0.0%)`,
-    };
-  }
-  return {
-    name: 'event log integrity',
-    ok: false,
-    optional: true,
-    detail: `${integrity.unparseable} of ${integrity.total} lines unparseable (${pct}%)`,
-    fix: 'historical corruption from pre-lock parallel writes; appends are now serialized; metrics over this file carry this error bar',
-  };
-}
-
-export interface ReapRow {
-  name: string;
-  removed: boolean;
-  detail: string;
-}
-
-export function orphanContainerChecks(names: readonly string[]): DoctorCheck[] {
-  if (names.length === 0) {
-    return [{ name: 'orphan containers', ok: true, detail: 'no orphan sf-job-*/factory.managed containers' }];
-  }
-  return names.map((name) => ({
-    name: `orphan container ${name}`,
-    ok: false,
-    detail: `${name} is stopped and not tied to any running job`,
-    fix: 'run `factory doctor --reconcile` to remove it and its anonymous volumes',
-  }));
-}
-
-export function orphanMicroVmChecks(names: readonly string[]): DoctorCheck[] {
-  if (names.length === 0) {
-    return [{ name: 'orphan sbx VMs', ok: true, detail: 'no orphan factory-* sbx VMs' }];
-  }
-  return names.map((name) => ({
-    name: `orphan sbx VM ${name}`,
-    ok: false,
-    detail: `${name} has no active lane holding its worktree`,
-    fix: 'run `factory doctor --reconcile` to remove it via `sbx rm --force`',
-  }));
-}
-
-export function formatContainerReconcileReport(reaped: ReapRow[]): string {
-  if (reaped.length === 0) return 'reconcile: no orphan containers';
-  return reaped
-    .map((r) =>
-      r.removed
-        ? `reconcile: removed container ${r.name}`
-        : `reconcile: failed to remove container ${r.name}: ${r.detail}`,
-    )
-    .join('\n');
-}
-
-export function formatMicroVmReconcileReport(reaped: ReapRow[]): string {
-  if (reaped.length === 0) return 'reconcile: no orphan sbx VMs';
-  return reaped
-    .map((r) =>
-      r.removed
-        ? `reconcile: removed sbx VM ${r.name} (sbx rm --force)`
-        : `reconcile: failed to remove sbx VM ${r.name}: ${r.detail}`,
-    )
-    .join('\n');
-}
-
-export function formatReconcileReport(
-  reaped: Array<{ lease: { worktreeId: string; port: number }; reason: string }>,
-): string {
-  if (reaped.length === 0) return 'reconcile: no stale leases';
-
-  return reaped
-    .map((r) => `reconcile: freed port ${r.lease.port} (worktree ${r.lease.worktreeId}, reason ${r.reason})`)
-    .join('\n');
-}
-
-/** One worktree the reconcile pass removed. Structurally the subset of core's `GcCandidate`
- *  that the report renders — kept local so `doctor.ts` stays dependency-free and unit-testable. */
-export interface ReconciledWorktree {
-  path: string;
-  branch: string | null;
-  reason: string;
-  branchDeleted: boolean;
-}
-
-export function formatWorktreeReconcileReport(removed: ReconciledWorktree[]): string {
-  if (removed.length === 0) return 'reconcile: no dead-run worktrees';
-
-  return removed
-    .map((w) => {
-      const branchLabel = w.branch ?? 'detached';
-      const deleted = w.branchDeleted ? `, deleted branch ${w.branch}` : '';
-      return `reconcile: removed worktree ${w.path} (branch ${branchLabel}, reason ${w.reason})${deleted}`;
-    })
-    .join('\n');
-}
-
-/** One claim the reconcile pass put back in the queue. Structurally the subset of core's
- *  `StaleClaimRelease` that the report renders — kept local so `doctor.ts` stays
- *  dependency-free and unit-testable. */
-export interface ReleasedClaim {
-  issue: number;
-  expiresAt: number;
-  released: boolean;
-  detail?: string;
-}
-
-export function formatClaimReconcileReport(released: ReleasedClaim[]): string {
-  if (released.length === 0) return 'reconcile: no stale claims';
-
-  return released
-    .map((c) =>
-      c.released
-        ? `reconcile: released issue #${c.issue} back to factory:queued (lease expired at ${c.expiresAt})`
-        : `reconcile: failed to release issue #${c.issue} (lease expired at ${c.expiresAt}): ${c.detail ?? 'unknown error'}`,
-    )
-    .join('\n');
-}
-
-/** One green-and-ready PR nobody merged. Structurally the subset of core's `UnmergedGreenPr`
- *  the report renders — kept local so `doctor.ts` stays dependency-free and unit-testable. */
-export interface UnmergedGreenPrRow {
-  number: number;
-  branch: string;
-  issue: number | null;
-  ageHours: number;
-}
-
-/** Outcome of the green-PR scan: it ran, it was skipped (no repo/token), or it failed. */
-export type GreenPrScanResult =
-  | { status: 'ok'; rows: UnmergedGreenPrRow[] }
-  | { status: 'skipped'; detail: string }
-  | { status: 'failed'; detail: string };
-
-const GREEN_PR_CHECK = 'green PRs awaiting merge';
-
-export function unmergedGreenPrChecks(result: GreenPrScanResult): DoctorCheck[] {
-  if (result.status === 'skipped') {
-    return [{ name: GREEN_PR_CHECK, ok: true, optional: true, detail: result.detail }];
-  }
-  if (result.status === 'failed') {
-    return [
-      {
-        name: GREEN_PR_CHECK,
-        ok: false,
-        optional: true,
-        detail: `scan failed: ${result.detail}`,
-        fix: 'check `gh auth status` and network access, then re-run `factory doctor`',
-      },
-    ];
-  }
-  if (result.rows.length === 0) {
-    return [{ name: GREEN_PR_CHECK, ok: true, optional: true, detail: 'no green-and-ready PRs awaiting merge' }];
-  }
-  return result.rows.map((row) => ({
-    name: `green PR #${row.number}`,
-    ok: false,
-    optional: true,
-    detail: `${row.issue === null ? 'owning issue unknown' : `issue #${row.issue}`}: green and ready on ${row.branch}, open ${row.ageHours}h, not merged`,
-    fix: `review and merge #${row.number} (or close it); the factory never auto-merges an orphaned PR`,
-  }));
-}
-
-/** One doctor check per user-declared harness, from its `probe` result. */
-export function declaredHarnessChecks(probes: DeclaredHarnessProbe[]): DoctorCheck[] {
-  return probes.map((p): DoctorCheck => {
-    const name = `harness ${p.harness}`;
-    if (p.status === 'available') return { name, ok: true, detail: `available (probe: ${p.probe})` };
-    if (p.status === 'unavailable') {
-      return {
-        name,
-        ok: false,
-        detail: `unavailable: probe \`${p.probe}\` failed: ${p.detail}`,
-        fix: 'install the agent CLI on PATH or fix the "probe" command in the models config harnesses section',
-      };
-    }
-    return {
-      name,
-      ok: false,
-      optional: true,
-      detail: 'unverified: no probe configured',
-      fix: 'add a "probe" command (exit 0 = reachable) to the harness in the models config',
-    };
-  });
-}
-
-const REGISTRY_CHECK = 'models.registry';
-
-/** One failed check per models.registry entry whose harness is missing or unknown;
- *  a single ok row when every entry is valid; nothing when there is no registry. */
-export function modelsRegistryChecks(
-  configPath: string,
-  registry: Readonly<Record<string, { harness?: string }>> | undefined,
-  validHarnesses: readonly string[],
-): DoctorCheck[] {
-  const entries = Object.entries(registry ?? {});
-  if (entries.length === 0) return [];
-  const failed: DoctorCheck[] = [];
-  for (const [id, def] of entries) {
-    const field = `models.registry.${id}.harness`;
-    const name = `${REGISTRY_CHECK} ${id}`;
-    if (def.harness === undefined || def.harness.trim() === '') {
-      failed.push({
-        name,
-        ok: false,
-        detail: `${configPath}: ${field} is missing`,
-        fix: `set "harness" to one of: ${validHarnesses.join(', ')}`,
-      });
-    } else if (!validHarnesses.includes(def.harness)) {
-      failed.push({
-        name,
-        ok: false,
-        detail: `${configPath}: ${field} '${def.harness}' is not a known harness (valid harnesses: ${validHarnesses.join(', ')})`,
-        fix: 'use a built-in harness id or declare it under "harnesses" in the models config',
-      });
-    }
-  }
-  if (failed.length > 0) return failed;
-  const n = entries.length;
-  return [{ name: REGISTRY_CHECK, ok: true, detail: `${n} entr${n === 1 ? 'y' : 'ies'} valid (${configPath})` }];
-}
-
-/** `config` rows from the shared pre-PLAN lint (#2612): one failing row per finding, so doctor fails exactly when
- *  the run preflight would escalate or park. A single ok row when clean. Read-only. */
-export function configLintChecks(input: ConfigLintInput, loadError?: string): DoctorCheck[] {
-  const schemaRows = (input.configFile ? findConfigSchemaErrors(input.configFile) : []).map((f): DoctorCheck => ({
-    name: 'config',
-    ok: false,
-    section: REPO_SECTION,
-    detail: `${f.file}${f.line ? `:${f.line}` : ''}: schema error at '${f.path}': ${f.message}`,
-    fix: f.fix,
-  }));
-  if (loadError !== undefined) {
-    return [
-      {
-        name: 'config',
-        ok: false,
-        section: REPO_SECTION,
-        detail: loadError,
-        fix: 'fix the constitution frontmatter YAML',
-      },
-      ...schemaRows,
-    ];
-  }
-  const { findings } = lintFactoryConfig(input);
-  if (findings.length > 0) {
-    const names = [...listBuiltInCheckers().map((c) => c.name), 'custom_*'].join(', ');
-    const lintRows = findings.map((f): DoctorCheck => {
-      const where = `${f.file}${f.line ? `:${f.line}` : ''}`;
-      if (f.rule === 'unknown-checker') {
-        const kind = isTemplateToken(f.token) ? 'placeholder' : 'unknown';
-        return {
-          name: 'config',
-          ok: false,
-          section: REPO_SECTION,
-          detail: `${where}: ${kind} checker '${f.token}'`,
-          fix: `replace '${f.token}' with a real checker name (${names}) or delete the line`,
-        };
+  const checks = runDoctorChecks({
+    commandAvailable: rt.coreOps.isCommandAvailable,
+    envPresent: (key) => !!process.env[key],
+    tryExec: (cmd, opts) => {
+      try {
+        return rt.shellOps
+          .execSync(cmd, {
+            timeout: opts?.timeoutMs ?? 10_000,
+            stdio: ['ignore', 'pipe', 'ignore'],
+            ...(opts?.env ? { env: { ...process.env, ...opts.env } } : {}),
+          })
+          .trim();
+      } catch {
+        return null;
       }
-      return {
-        name: 'config',
-        ok: false,
-        section: REPO_SECTION,
-        detail: `${where}: unfilled template token '${f.token}'`,
-        fix: `replace '${f.token}' with a real value`,
-      };
-    });
-    return [...lintRows, ...schemaRows];
-  }
-  if (schemaRows.length > 0) return schemaRows;
-  const scanned: string[] = [];
-  if (input.constitution?.repoInstance) scanned.push(input.constitution.repoInstance.relPath);
-  if (input.configFile && existsSync(input.configFile.absPath)) scanned.push(input.configFile.relPath);
-  return [
-    {
-      name: 'config',
-      ok: true,
-      section: REPO_SECTION,
-      detail:
-        scanned.length > 0
-          ? `no unfilled placeholders, unknown checkers or schema errors in ${scanned.join(', ')}`
-          : 'no constitution or config file to scan',
     },
-  ];
+    pathExists: existsSync,
+    distFreshness: distFreshnessProbe(import.meta.url),
+    codexSessionState: () => codexChatgptSessionState(),
+    claudeLoggedIn: () =>
+      hasClaudeLoginEvidence({
+        exec: (file, args) => {
+          rt.shellOps.execSync([file, ...args].map(shellEscape).join(' '), { timeout: 10_000, stdio: 'ignore' });
+        },
+        fileExists: existsSync,
+      }),
+    claudeSessionState: () => claudeStoredSessionState(),
+    localAuthFailure: (agent) => localAuthFailureSinceLogin(agent),
+    opencodeLoggedIn: () => hasOpencodeLoginEvidence(),
+    commandHarnesses: () =>
+      repoRoot === null
+        ? []
+        : repoCommandHarnesses(
+            rt.configLoaders.loadModelsConfig().harnesses,
+            rt.configLoaders.loadRepoConfig(repoRoot)?.models?.registry,
+          ),
+  });
+
+  // Only with --probe-inference: these send a real prompt (uses quota). Plain doctor makes no inference call.
+  if (opts.probeInference) {
+    const CLAUDE_AUTH_PROBE = 'claude -p "reply with exactly: ok"';
+    const probeExec = (cmd: string): string | null => {
+      try {
+        return rt.shellOps.execSync(cmd, { timeout: 120_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      } catch {
+        return null;
+      }
+    };
+
+    let host: ClaudeAuthProbe = 'skipped';
+    let hostDetail = 'skipped: claude CLI not on PATH';
+    if (rt.coreOps.isCommandAvailable('claude')) {
+      host = probeExec(CLAUDE_AUTH_PROBE) === null ? 'failed' : 'ok';
+      hostDetail = host === 'ok' ? 'claude -p succeeded on the host' : 'claude -p failed on the host';
+    }
+
+    let sandboxed: ClaudeAuthProbe = 'skipped';
+    let sandboxDetail = 'skipped: host claude auth was not verified';
+    const runtimeAvailable = hasSandboxRuntime(process.platform, (cmd) =>
+      rt.isCommandAvailableViaShell(rt.shellOps, cmd),
+    );
+    const skip = sandboxAuthSkipDetail({ runtimeAvailable, hostOk: host === 'ok', inRepo: repoRoot !== null });
+    if (skip !== null) {
+      sandboxDetail = skip;
+    } else if (repoRoot !== null) {
+      const policy = resolveSandboxPolicy(
+        rt.configLoaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox,
+        {
+          worktree: repoRoot,
+          repoRoot,
+          isAvailable: (cmd) => rt.isCommandAvailableViaShell(rt.shellOps, cmd),
+        },
+      );
+      if (!policy) {
+        sandboxDetail = 'skipped: sandbox disabled by config or FACTORY_SANDBOX';
+      } else if (policy.runtime === 'none') {
+        sandboxDetail = 'skipped: no sandbox runtime (sandbox-exec/firejail) on this host';
+      } else if (policy.runtime === 'docker-sandbox') {
+        sandboxDetail = 'skipped: docker-sandbox containment is the microVM, not command wrapping (#653)';
+      } else {
+        sandboxed = probeExec(wrapCommandInSandbox(CLAUDE_AUTH_PROBE, policy)) === null ? 'failed' : 'ok';
+        sandboxDetail =
+          sandboxed === 'ok'
+            ? `claude -p succeeded under ${policy.runtime}`
+            : `claude -p failed under ${policy.runtime} (local_auth)`;
+      }
+    }
+
+    checks.push(...sandboxClaudeAuthChecks({ host, sandboxed, hostDetail, sandboxDetail }));
+  }
+
+  checks.push(claudeKeychainCheck(rt.probeClaudeKeychain()));
+  checks.splice(0, checks.length, ...reconcileAgentAuthChecks(checks));
+
+  if (repoRoot !== null) {
+    const paths = getFactoryPaths(repoRoot);
+    let factoryConfig: FactoryConfig;
+    try {
+      factoryConfig = rt.configLoaders.loadFactoryConfigForRepo(paths.config);
+    } catch {
+      factoryConfig = loadFactoryConfig(); // schema errors are reported by the config row (#2611)
+    }
+    const health = await inspectPortLeases({ registryFile: paths.ports });
+    checks.push(...leaseChecks(health.map(rt.toLeaseRow)));
+
+    const dockerAvailable = rt.coreOps.isCommandAvailable('docker');
+    const orphanContainers = dockerAvailable ? await rt.internalOps.listOrphanContainers().catch(() => []) : [];
+    checks.push(...orphanContainerChecks(orphanContainers.map((c) => c.name)));
+
+    const sbxAvailable = rt.coreOps.isCommandAvailable('sbx');
+    const activeVmNames = new Set(health.filter((h) => h.alive).map((h) => microVmName(h.lease.worktreeId)));
+    const orphanVmNames = sbxAvailable
+      ? (await rt.internalOps.listMicroVms()).filter((n) => !activeVmNames.has(n))
+      : [];
+    checks.push(...orphanMicroVmChecks(orphanVmNames));
+
+    const sweepStatus = checkSweepHeartbeat(factoryConfig.sweep, process.env, defaultSweepHeartbeatDeps());
+    const sweepCheck = sweepHeartbeatCheck(sweepStatus);
+    if (sweepCheck) checks.push(sweepCheck);
+
+    checks.push(stopSentinelCheck(readStopFileStatus(paths)));
+
+    const eventsContent = existsSync(paths.events) ? readFileSync(paths.events, 'utf-8') : null;
+    checks.push(eventLogCheck(eventsContent === null ? null : analyzeEventLog(eventsContent)));
+
+    let constitution: ConfigLintInput['constitution'] = null;
+    let loadError: string | undefined;
+    try {
+      constitution = new ConstitutionLoader().loadRepoConstitution(repoRoot, factoryConfig.paths?.constitution);
+    } catch (err) {
+      loadError = `cannot parse constitution: ${err instanceof Error ? err.message : String(err)}`;
+    }
+    checks.push(
+      ...configLintChecks({ constitution, configFile: rt.repoConfigFileFor(repoRoot, paths.config) }, loadError),
+    );
+
+    try {
+      const declared = Object.keys(rt.configLoaders.loadModelsConfig().harnesses ?? {});
+      checks.push(
+        ...modelsRegistryChecks(paths.config, rt.configLoaders.loadRepoConfig(repoRoot)?.models?.registry, [
+          ...KNOWN_HARNESS_IDS,
+          ...declared,
+        ]),
+      );
+    } catch {
+      // malformed config is reported by the load paths / `factory models --doctor`; doctor keeps going
+    }
+
+    let harnessProbes: DeclaredHarnessProbe[] = [];
+    try {
+      const registry = new rt.coreOps.ModelRegistry(
+        applyRepoConfig(rt.configLoaders.loadModelsConfig(), rt.configLoaders.loadRepoConfig(repoRoot)),
+      );
+      harnessProbes = rt.coreOps.probeDeclaredHarnesses(registry);
+    } catch {
+      // models config problems are reported by `factory models --doctor`; doctor keeps going
+    }
+    checks.push(...declaredHarnessChecks(harnessProbes));
+
+    // Full run-lifecycle reap (#998): dead-run worktrees and their branches. Uses the same
+    // GitHub evidence and the same lock pairing as `factory worktree gc` (cmdWorktreeGc) —
+    // a merged or closed PR is what makes a worktree reapable.
+    const ghRepo = await rt.getGitHubRepo().catch(() => undefined);
+    const octokit = ghRepo && rt.hasGitHubToken() ? rt.getOctokit() : undefined;
+
+    // Green-and-ready PRs with no merge (#1000). Report only — doctor never lands a PR.
+    checks.push(...unmergedGreenPrChecks(await rt.scanGreenPrs(ghRepo, octokit)));
+
+    if (opts.reconcile) {
+      if (orphanContainers.length > 0) {
+        const reapedContainers = await rt.internalOps.reapOrphanContainers(orphanContainers);
+        console.log(formatContainerReconcileReport(reapedContainers));
+      }
+
+      if (orphanVmNames.length > 0) {
+        const reapedVms = await Promise.all(orphanVmNames.map((name) => rt.internalOps.reapOrphanMicroVm(name)));
+        console.log(formatMicroVmReconcileReport(reapedVms));
+      }
+
+      const reaped = await reapStalePortLeases({ registryFile: paths.ports, lockDir: paths.portsLock });
+      console.log(formatReconcileReport(reaped));
+
+      if (reaped.length > 0) {
+        const graceMs = resolveProcessGroupGraceMs(factoryConfig);
+        const orphanEvents = await rt.coreOps.reapOrphanProcesses({ reaped, graceMs });
+        for (const e of orphanEvents) {
+          console.log(
+            `reconcile: ${e.action === 'killed' ? 'killed' : 'found'} pid ${e.pid} (pgid ${e.pgid}, ${e.command}) squatting port ${e.port} of dead lane ${e.worktreeId}${e.action === 'reported' ? '; not factory-started, left running' : ''}`,
+          );
+        }
+      }
+
+      try {
+        const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
+        const gcSandbox = rt.gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
+        const report = await withGitLock(repoRoot, () =>
+          withFileLock(paths.gitLock, () =>
+            rt.internalOps.sweepWorktrees(
+              {
+                repoRoot,
+                ttlDays: factoryConfig.worktree.gcTtlDays,
+                repo: ghRepo,
+                branchPrefix: resolveBranchPrefix(),
+              },
+              { log: gcLog, octokit, sandbox: gcSandbox },
+            ),
+          ),
+        );
+        console.log(formatWorktreeReconcileReport(report.removed));
+      } catch (err: any) {
+        console.log(`reconcile: worktree sweep failed: ${err?.message ?? String(err)}`);
+      }
+
+      // Stale claim reap (#999): factory:in-progress claims naming a dead local pid go back to
+      // factory:queued so the next run can claim them with no manual label surgery.
+      try {
+        if (ghRepo && octokit) {
+          const [owner, repoName] = ghRepo.split('/');
+          const released = await rt.internalOps.releaseStaleClaims({
+            client: createOctokitQueueClient(octokit),
+            owner,
+            repo: repoName,
+          });
+          console.log(formatClaimReconcileReport(released));
+        } else {
+          console.log('reconcile: skipping stale claims: no GitHub repo or token');
+        }
+      } catch (err: any) {
+        console.log(`reconcile: stale claim release failed: ${err?.message ?? String(err)}`);
+      }
+    }
+  }
+
+  console.log(formatDoctorChecks(checks, { inRepo: repoRoot !== null }));
+  if (doctorFailed(checks)) process.exit(1);
 }
