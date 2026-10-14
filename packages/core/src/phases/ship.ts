@@ -11,6 +11,7 @@ import type { EventKind } from '../events/kinds.js';
 import { gatherEvidencePack } from '../reports/evidence-pack.js';
 import { renderPrBody } from '../reports/pr-body.js';
 import type { ReviewRouting } from '../review/routing.js';
+import { pushAdoptedHead } from './ship-adopt.js';
 import { readRisk, readSpecBody } from './ship-spec.js';
 import type { CheckSummary, CiFailureEvidence } from '../types/index.js';
 import { collectCiFailureEvidence } from '../utils/ci-evidence.js';
@@ -96,6 +97,8 @@ async function shipPhaseImpl(opts: {
   /** origin/<branch> SHA recorded at worktree creation (#1868). When set, the new-PR push
    *  replaces that stale head under a lease on this SHA, and fails closed if the remote moved (#1869). */
   recordedRemoteSha?: string;
+  /** Head SHA of the stranded PR branch this run adopted (#2253); new commits are pushed onto it and CI is watched on the new head. */
+  adoptedHeadSha?: string;
 }): Promise<ShipResult> {
   const {
     issue,
@@ -143,6 +146,17 @@ async function shipPhaseImpl(opts: {
     return { ok: false };
   }
   let prNumber: number | undefined = openLookup.status === 'found' ? openLookup.prNumber : undefined;
+  if (prNumber && opts.adoptedHeadSha) {
+    const pushed = await pushAdoptedHead({
+      run,
+      worktree,
+      branch,
+      prNumber,
+      adoptedHeadSha: opts.adoptedHeadSha,
+      log,
+    });
+    if (!pushed.ok) return { ok: false, prNumber, reason: pushed.reason };
+  }
 
   if (!prNumber) {
     // Recovery decisions must compare against the *current* remote — a stale

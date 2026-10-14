@@ -2730,9 +2730,16 @@ describe('cli', () => {
   });
 
   describe('queue PR preflight', () => {
+    const linkedPr = {
+      number: 71,
+      branch: 'contributor/real-head',
+      headSha: 'abc123',
+      headRepoFullName: 'on-par/software-factory',
+    };
     const baseDeps = {
       expectedHeadRepoFullName: 'on-par/software-factory',
-      findOpenPR: async () => undefined,
+      findOpenPRs: async () => [],
+      lastPark: () => undefined,
       getLandState: async () => ({ isDraft: false, mergeStateStatus: 'CLEAN' }),
       watch: async () => 'success' as const,
       findSlicePlan: async () => ({ status: 'not-found' as const }),
@@ -2822,12 +2829,14 @@ describe('cli', () => {
 
       const ops = createQueuePreflightOps(octokit, 'on-par', 'software-factory');
 
-      await expect(ops.findOpenPR(7)).resolves.toEqual({
-        number: 71,
-        branch: 'ship-it/7-real-branch',
-        headSha: 'head-sha-7',
-        headRepoFullName: 'on-par/software-factory',
-      });
+      await expect(ops.findOpenPRs(7)).resolves.toEqual([
+        {
+          number: 71,
+          branch: 'ship-it/7-real-branch',
+          headSha: 'head-sha-7',
+          headRepoFullName: 'on-par/software-factory',
+        },
+      ]);
       await expect(ops.getLandState(71)).resolves.toEqual({
         id: 'PR_kwDO',
         isDraft: false,
@@ -2845,7 +2854,7 @@ describe('cli', () => {
 
     it('builds when no linked open PR exists', async () => {
       await expect(
-        preflightQueuedIssue({ number: 7, labels: [] }, { ...baseDeps, findOpenPR: async () => undefined }),
+        preflightQueuedIssue({ number: 7, labels: [] }, { ...baseDeps, findOpenPRs: async () => [] }),
       ).resolves.toEqual({ kind: 'build' });
     });
 
@@ -2855,12 +2864,7 @@ describe('cli', () => {
           { number: 7, labels: [] },
           {
             ...baseDeps,
-            findOpenPR: async () => ({
-              number: 71,
-              branch: 'contributor/real-head',
-              headSha: 'abc123',
-              headRepoFullName: 'on-par/software-factory',
-            }),
+            findOpenPRs: async () => [linkedPr],
             getLandState: async () => ({ isDraft: false, mergeStateStatus: 'CLEAN' }),
             watch: async (ref) => {
               expect(ref).toBe('abc123');
@@ -2872,25 +2876,15 @@ describe('cli', () => {
     });
 
     it('fails closed to park for red, timeout, draft, lookup-error, and unresolvable PR evidence', async () => {
-      const pr = async () => ({
-        number: 71,
-        branch: 'contributor/real-head',
-        headSha: 'abc123',
-        headRepoFullName: 'on-par/software-factory',
-      });
+      const pr = async () => [linkedPr];
       const cases = [
         { watch: async () => 'failure' as const },
         { watch: async () => 'timeout' as const },
         { getLandState: async () => ({ isDraft: true, mergeStateStatus: 'CLEAN' }) },
-        { findOpenPR: async () => Promise.reject(new Error('rate limited')) },
+        { findOpenPRs: async () => Promise.reject(new Error('rate limited')) },
         { getLandState: async () => ({ isDraft: false, mergeStateStatus: 'UNKNOWN' }) },
         {
-          findOpenPR: async () => ({
-            number: 71,
-            branch: 'fork-head',
-            headSha: 'def456',
-            headRepoFullName: 'fork/repo',
-          }),
+          findOpenPRs: async () => [{ ...linkedPr, branch: 'fork-head', headRepoFullName: 'fork/repo' }],
         },
       ];
 
@@ -2899,7 +2893,7 @@ describe('cli', () => {
           { number: 7, labels: [] },
           {
             ...baseDeps,
-            findOpenPR: pr,
+            findOpenPRs: pr,
             getLandState: async () => ({ isDraft: false, mergeStateStatus: 'CLEAN' }),
             watch: async () => 'success' as const,
             ...overrides,
@@ -2910,7 +2904,7 @@ describe('cli', () => {
     });
 
     it('defers while the current slice PR is open without any Closes-PR work', async () => {
-      const findOpenPR = vi.fn(async () => undefined);
+      const findOpenPRs = vi.fn(async () => []);
       const getLandState = vi.fn();
       const watch = vi.fn();
       const saveSlicePlan = vi.fn(async () => {});
@@ -2918,7 +2912,7 @@ describe('cli', () => {
         { number: 7, labels: [] },
         {
           ...baseDeps,
-          findOpenPR,
+          findOpenPRs,
           getLandState,
           watch,
           saveSlicePlan,
@@ -2927,7 +2921,7 @@ describe('cli', () => {
         },
       );
       expect(result).toEqual({ kind: 'defer' });
-      for (const fn of [findOpenPR, getLandState, watch, saveSlicePlan]) expect(fn).not.toHaveBeenCalled();
+      for (const fn of [findOpenPRs, getLandState, watch, saveSlicePlan]) expect(fn).not.toHaveBeenCalled();
     });
 
     it('marks the slice merged and builds once its PR merged', async () => {
@@ -2976,12 +2970,7 @@ describe('cli', () => {
         {
           ...baseDeps,
           getPullState,
-          findOpenPR: async () => ({
-            number: 71,
-            branch: 'contributor/real-head',
-            headSha: 'abc123',
-            headRepoFullName: 'on-par/software-factory',
-          }),
+          findOpenPRs: async () => [linkedPr],
         },
       );
       expect(result).toEqual({ kind: 'adopt', branch: 'contributor/real-head' });

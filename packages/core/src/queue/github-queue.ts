@@ -125,7 +125,7 @@ export interface QueueIssue {
 
 /** A no-model classification made before a queue candidate is claimed. */
 export type QueuePreflightDecision =
-  | { kind: 'build' }
+  | { kind: 'build'; reworkPr?: { number: number; branch: string; headSha: string } }
   | {
       kind: 'adopt';
       branch: string;

@@ -137,6 +137,7 @@ export type EventKind =
   | 'resume-approved'
   | 'resumed'
   | 'rework'
+  | 'rework-adopted'
   | 'rework_model_failed'
   | 'router'
   | 'run_lock_conflict'
@@ -386,6 +387,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   resource_limit: { severity: 'warn', isPark: false, isTerminal: false },
   'resume-approved': { severity: 'info', isPark: false, isTerminal: false },
   resumed: { severity: 'info', isPark: false, isTerminal: false },
+  // A requeued ci-failed issue adopted its stranded draft PR's branch (#2253).
+  'rework-adopted': { severity: 'info', isPark: false, isTerminal: false },
   rework: { severity: 'warn', isPark: false, isTerminal: false, laneStatus: 'running' },
   rework_model_failed: { severity: 'warn', isPark: false, isTerminal: false },
   router: { severity: 'info', isPark: false, isTerminal: false },

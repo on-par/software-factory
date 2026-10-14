@@ -45,12 +45,15 @@ const stackPlan = (): SlicePlan => {
 const makeOps = (states: Record<number, SlicePullState>, over: Partial<QueuePreflightOps> = {}) => {
   const ops = {
     expectedHeadRepoFullName: 'on-par/software-factory',
-    findOpenPR: vi.fn(async () => ({
-      number: 13,
-      branch: 'factory/7-s3-x',
-      headSha: 'top',
-      headRepoFullName: 'on-par/software-factory',
-    })),
+    findOpenPRs: vi.fn(async () => [
+      {
+        number: 13,
+        branch: 'factory/7-s3-x',
+        headSha: 'top',
+        headRepoFullName: 'on-par/software-factory',
+      },
+    ]),
+    lastPark: () => undefined,
     getLandState: vi.fn(async () => ({ isDraft: true, mergeStateStatus: 'CLEAN' })),
     watch: vi.fn(async () => 'success' as const),
     findSlicePlan: vi.fn(async () => ({ status: 'found' as const, commentId: 5, plan: stackPlan() })),
@@ -75,7 +78,7 @@ describe('stack queue preflight and merge ordering (ADR-0161)', () => {
   it("preflight defers a stack whose bottom layer merged instead of falling through to the top layer's Closes PR", async () => {
     const ops = makeOps({ 11: 'merged', 12: 'open', 13: 'open' });
     await expect(preflightQueuedIssue(issue, ops)).resolves.toEqual({ kind: 'defer' });
-    expect(ops.findOpenPR).not.toHaveBeenCalled();
+    expect(ops.findOpenPRs).not.toHaveBeenCalled();
     expect(ops.getLandState).not.toHaveBeenCalled();
     expect(ops.saveSlicePlan).toHaveBeenCalledTimes(1);
     const saved = savedPlan(ops);
@@ -86,7 +89,7 @@ describe('stack queue preflight and merge ordering (ADR-0161)', () => {
     const ops = makeOps({ 11: 'open', 12: 'open', 13: 'open' });
     await expect(preflightQueuedIssue(issue, ops)).resolves.toEqual({ kind: 'defer' });
     expect(ops.saveSlicePlan).not.toHaveBeenCalled();
-    expect(ops.findOpenPR).not.toHaveBeenCalled();
+    expect(ops.findOpenPRs).not.toHaveBeenCalled();
   });
 
   it('after the bottom layer merges, preflight records slice 1 merged and adopts slice 2 once its base is main', async () => {
@@ -112,7 +115,7 @@ describe('stack queue preflight and merge ordering (ADR-0161)', () => {
       const decision = await preflightQueuedIssue(issue, ops);
       expect(decision).toEqual({ kind: 'defer' });
       expect(ops.watch).not.toHaveBeenCalled();
-      expect(ops.findOpenPR).not.toHaveBeenCalled();
+      expect(ops.findOpenPRs).not.toHaveBeenCalled();
     });
 
     it('parks when CI failed on the rebased head', async () => {
@@ -120,14 +123,14 @@ describe('stack queue preflight and merge ordering (ADR-0161)', () => {
       const decision = await preflightQueuedIssue(issue, ops);
       expect(decision.kind).toBe('park');
       expect(decision.kind === 'park' && decision.reason).toMatch(/CI for slice 2\/3 PR #12 ended failure/);
-      expect(ops.findOpenPR).not.toHaveBeenCalled();
+      expect(ops.findOpenPRs).not.toHaveBeenCalled();
     });
 
     it('defers when CI timed out', async () => {
       const ops = makeOps(states, { autoMergeStack: true, watch: vi.fn(async () => 'timeout' as const) });
       const decision = await preflightQueuedIssue(issue, ops);
       expect(decision).toEqual({ kind: 'defer' });
-      expect(ops.findOpenPR).not.toHaveBeenCalled();
+      expect(ops.findOpenPRs).not.toHaveBeenCalled();
     });
   });
 

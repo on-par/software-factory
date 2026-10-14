@@ -1,5 +1,6 @@
 // packages/cli/src/cli/ship.ts — issue-level ship flow: resolve config, build RunRequest/RunPorts, run runIssue, map the outcome (#2788)
 
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { styleText } from 'node:util';
 
@@ -30,6 +31,7 @@ import {
   GITHUB_ISSUE_SOURCE,
   LaneFileGuard,
   phaseSnapshotFile,
+  readEvents,
   ProviderBreaker,
   resolveAutoFailover,
   resolveCodexDisabled,
@@ -68,6 +70,7 @@ import {
 } from '@on-par/factory-core/internal';
 import { formatDeprecation } from './octokit.js';
 import type { CliDeps, ConfigLoaderKey, CoreOpKey, GitOpKey, ShellOpKey } from './index.js';
+import { describeAdoption, lastParkEvent, renderReworkBrief, type ReworkPr } from './rework-adopt.js';
 import { shipRuntime } from './ship-runtime.js';
 import {
   buildRunRequest,
@@ -117,6 +120,8 @@ export async function shipIssue(
     artifactsDir?: string;
     /** Resume at CHECK on a kept worktree (#2564). */
     resumeFrom?: CheckResumeRecord;
+    /** Stranded ci-failed draft PR to continue on instead of a fresh branch (#2253). */
+    reworkPr?: ReworkPr;
   },
   deps: Pick<
     CliDeps,
@@ -218,7 +223,7 @@ export async function shipIssue(
   const product = opts.product ?? readActiveProduct(paths.product);
   const autoRework = opts.autoRework ?? true;
 
-  const work =
+  let work =
     ctx?.workRequest ??
     (await createDefaultWorkSourceRegistry({ octokit }).resolve(GITHUB_ISSUE_SOURCE, {
       repo: ghRepo,
@@ -228,7 +233,10 @@ export async function shipIssue(
   const sizeGateMode = opts.sizeGate ?? resolveSizeGateMode(factoryConfig);
   const maxSlices = opts.maxSlices ?? resolveSizeGateMaxSlices(factoryConfig);
   const sliceIndex = await findSliceIndex({ sizeGateMode, ctx, work, octokit, ghRepo, issueNum });
-  const branch = ctx?.resumeFrom?.branch ?? branchFor(issueNum, issueTitle, policy.effective.branchPrefix, sliceIndex);
+  const branch =
+    ctx?.resumeFrom?.branch ??
+    ctx?.reworkPr?.branch ??
+    branchFor(issueNum, issueTitle, policy.effective.branchPrefix, sliceIndex);
   const worktree = ctx?.resumeFrom
     ? ctx.resumeFrom.worktree
     : ctx?.localOnly
@@ -310,11 +318,18 @@ export async function shipIssue(
   // Setup worktree FIRST — PLAN needs cwd=worktree to run claude. Worktree cleanup
   // stays a CLI concern (not called here, matching today — a worktree persists past
   // a successful run for GC/sweep commands to reclaim later).
+  const reworkPr = ctx && !ctx.resumeFrom && !ctx.localOnly ? ctx.reworkPr : undefined;
+  if (reworkPr) {
+    const park = lastParkEvent(existsSync(paths.events) ? readEvents(paths.events) : [], issueNum);
+    work = { ...work, brief: `${work.brief}\n\n${renderReworkBrief(reworkPr, park)}` };
+    log('rework-adopted', describeAdoption(reworkPr, park));
+  }
   const workspace = await setupRunWorkspace({
     ctx,
     repoRoot,
     branch,
     worktree,
+    startPoint: reworkPr ? `origin/${reworkPr.branch}` : undefined,
     log,
     worktreeSandbox,
     octokit,

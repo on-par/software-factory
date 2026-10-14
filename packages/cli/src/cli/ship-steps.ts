@@ -158,6 +158,7 @@ export async function setupRunWorkspace({
   repoRoot,
   branch,
   worktree,
+  startPoint,
   log,
   worktreeSandbox,
   octokit,
@@ -170,6 +171,8 @@ export async function setupRunWorkspace({
   repoRoot: string;
   branch: string;
   worktree: string;
+  /** Base ref for the new worktree; defaults to the repo's default remote base. */
+  startPoint?: string;
   log: (type: EventKind, msg: string) => void;
   worktreeSandbox: WorktreeSandbox | undefined;
   octokit: Octokit;
@@ -187,6 +190,7 @@ export async function setupRunWorkspace({
       repoRoot,
       branch,
       worktreePath: worktree,
+      startPoint,
       log,
       sandbox: worktreeSandbox,
       findOpenPr: (br) => findOpenPR(octokit, ghOwner, ghName, br),

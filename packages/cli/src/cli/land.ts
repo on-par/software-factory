@@ -20,7 +20,7 @@ import {
   withGitLock,
   worktreeSandboxFor,
 } from '@on-par/factory-core/internal';
-import type { OpenPullRequestEvidence } from './index.js';
+import type { OpenPullRequestEvidence } from './queue-preflight.js';
 import {
   AwaitingReviewError,
   CiFailedError,
@@ -259,6 +259,37 @@ export async function findOpenPRForIssue(
       return { number: pr.number, branch: pr.head.ref, headSha: pr.head.sha, headRepoFullName };
     }
     if (prs.length < perPage) return undefined;
+  }
+}
+
+/** Every open PR whose body says "Closes #N" (#2253); findOpenPRForIssue returns only the first. */
+export async function findOpenPRsForIssue(
+  octokit: Octokit,
+  owner: string,
+  repoName: string,
+  issueNum: number,
+): Promise<OpenPullRequestEvidence[]> {
+  const perPage = 100;
+  const matches = new RegExp(`\\bcloses\\s+#${issueNum}\\b`, 'i');
+  const found: OpenPullRequestEvidence[] = [];
+  for (let page = 1; ; page++) {
+    const { data: prs } = await octokit.rest.pulls.list({
+      owner,
+      repo: repoName,
+      state: 'open',
+      per_page: perPage,
+      page,
+    });
+    for (const pr of prs as any[]) {
+      if (!matches.test(pr.body ?? '')) continue;
+      found.push({
+        number: pr.number,
+        branch: pr.head.ref,
+        headSha: pr.head.sha,
+        headRepoFullName: pr.head.repo?.full_name ?? null,
+      });
+    }
+    if (prs.length < perPage) return found;
   }
 }
 

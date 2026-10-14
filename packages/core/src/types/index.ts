@@ -416,6 +416,8 @@ export interface RemoteBranchRecord {
   sha: string;
   /** Open PR whose head is this branch, when the lookup found one. */
   prNumber?: number;
+  /** Set when the worktree was created from origin/<branch> to continue an existing PR (#2253). */
+  adopted?: boolean;
 }
 
 export interface IssueRunState {

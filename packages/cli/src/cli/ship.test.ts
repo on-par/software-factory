@@ -31,6 +31,29 @@ describe('shipIssue (direct)', () => {
     expect(setupWorktree).not.toHaveBeenCalled();
   });
 
+  describe('rework adoption (#2253)', () => {
+    const reworkPr = { number: 71, branch: 'factory/5-existing-pr', headSha: 'f'.repeat(40) };
+    const custom = () =>
+      vi.fn(async (..._args: Parameters<NonNullable<CliDeps['setupWorktree']>>) => undefined as never);
+
+    it('uses the PR branch, starts the worktree from origin/<branch> and logs rework-adopted', async () => {
+      const setup = custom();
+      await shipIssue(5, {}, { ...ctx(), reworkPr }, { setupWorktree: setup });
+      expect(setup.mock.calls[0]?.[1]).toBe('factory/5-existing-pr');
+      expect(setup.mock.calls[0]?.[3]).toBe('origin/factory/5-existing-pr');
+      const events = readFileSync(paths().events, 'utf-8');
+      expect(events).toContain('rework-adopted');
+      expect(events).toContain('adopting PR #71');
+    });
+
+    it('without reworkPr creates the worktree from the default base', async () => {
+      const setup = custom();
+      await shipIssue(5, {}, ctx(), { setupWorktree: setup });
+      expect(setup.mock.calls[0]?.[3]).toBeUndefined();
+      expect(readFileSync(paths().events, 'utf-8')).not.toContain('rework-adopted');
+    });
+  });
+
   describe('slice branch (ADR-0147)', () => {
     const sliceStory = (n: number) => ({
       schemaVersion: 1 as const,

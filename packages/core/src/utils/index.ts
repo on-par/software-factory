@@ -175,11 +175,13 @@ export async function setupWorktree(
   // branch state, which can be stale, dirty, or ahead (#1167).
   await gitFetch(repoRoot);
   const base = startPoint ?? (await defaultRemoteBase(repoRoot));
-  // An earlier run's push (#1868) is recorded and reported here, never adopted or discarded.
+  // An earlier run's push (#1868) is recorded and reported here; it is adopted only when the caller starts from origin/<branch> (#2253).
   let remoteBranch: RemoteBranchRecord | null = null;
   const remoteSha = await detectRemoteBranch(repoRoot, branch);
   if (remoteSha) {
     remoteBranch = { sha: remoteSha };
+    const adopted = startPoint === `origin/${branch}`;
+    if (adopted) remoteBranch.adopted = true;
     let prText = 'open PR not checked';
     if (opts?.findOpenPr) {
       let lookup: PrLookup;
@@ -197,7 +199,10 @@ export async function setupWorktree(
         prText = `open PR lookup failed: ${lookup.detail}`;
       }
     }
-    log?.('remote-branch-preexisting', `origin/${branch} already exists @ ${remoteSha}; ${prText}`);
+    log?.(
+      'remote-branch-preexisting',
+      `origin/${branch} already exists @ ${remoteSha}; ${prText}${adopted ? '; adopted as worktree base' : ''}`,
+    );
   }
   await execGit(['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot }).catch(() => {});
   await execGit(['branch', '-D', branch], { cwd: repoRoot }).catch(() => {});

@@ -1149,6 +1149,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       worktree: ports.workspace.path,
       branch: request.branch,
       recordedRemoteSha: ports.workspace.remoteBranch?.sha,
+      adoptedHeadSha: ports.workspace.remoteBranch?.adopted ? ports.workspace.remoteBranch.sha : undefined,
       octokit: ports.octokit,
       watchCI: !request.skipCI,
       log: ports.events('ship'),
