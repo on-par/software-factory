@@ -1,6 +1,6 @@
 # Recorded agent fixtures
 
-These are fake `codex`, `opencode` and `command-agent` CLIs used by the smoke tests (#2407). Each shim in `bin/` replays a recording from `recordings/<agent>/`. In success mode it also makes a real commit in the worktree. Put `bin/` first on `PATH` to use them.
+These are fake `codex`, `opencode`, `pi` and `command-agent` CLIs used by the smoke tests (#2407). Each shim in `bin/` replays a recording from `recordings/<agent>/`. In success mode it also makes a real commit in the worktree. Put `bin/` first on `PATH` to use them.
 
 ## Layout
 
@@ -72,6 +72,23 @@ Files: `success.stdout`, `rate-limit.stdout`, `usage-cap.stdout`, `empty.stdout`
 3. For `empty`, use a prompt that asks for no reply. For `rate-limit` and `usage-cap`, keep the output of a real 429 or 403 `usage_limit` response if you have one. Otherwise hand-edit the error text and keep the event shape from the new version.
 4. Normalise: set every `timestamp` to `1700000000000` and every `sessionID` to `ses_fixture`. Keep the `TOOL_CHATTER_MARKER` tool_use line and the `FINAL ANSWER:` text that the tests rely on.
 5. Overwrite the files in `recordings/opencode/` and update the Version line above.
+6. Run `npx vitest run scripts/fixtures/agents/agents.test.ts` from the repo root.
+
+### pi
+
+Version: pi 0.1.0 (synthetic, event shape from the `parsePiJson` parser in `packages/core/src/harness/pi.ts`)
+
+Captured with: `pi -p --mode json --no-approve` (prompt on stdin). The shim also answers `pi --version` and `pi auth check` before mode handling, so doctor probes never commit.
+
+Files: `success.stdout`, `rate-limit.stdout`, `usage-cap.stdout`, `empty.stdout`.
+
+#### Refresh pi
+
+1. Run `pi --version` and note the version.
+2. In a scratch git repo, pipe a small prompt into the command above, with `> success.stdout`.
+3. For `empty`, use a prompt that asks for no reply. For `rate-limit` and `usage-cap`, keep the output of a real failing run if you have one. Otherwise hand-edit the assistant `errorMessage` text and keep the event shape from the new version.
+4. Normalise: keep the assistant `message_end` and `agent_settled` events the factory reads, drop the rest, and keep the `FINAL ANSWER:` text.
+5. Overwrite the files in `recordings/pi/` and update the Version line above.
 6. Run `npx vitest run scripts/fixtures/agents/agents.test.ts` from the repo root.
 
 ### command-agent

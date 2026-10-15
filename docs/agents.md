@@ -1,7 +1,7 @@
 # Coding agent setup
 
 This guide covers installing, signing in and configuring each supported coding agent CLI
-(Claude Code, Codex and OpenCode) for the factory. See [models.md](models.md) for model routing
+(Claude Code, Codex, OpenCode and Pi) for the factory. See [models.md](models.md) for model routing
 and [harness-contract.md](harness-contract.md) for the adapter contract. To bring your own CLI,
 see [Bring your own agent](#bring-your-own-agent).
 
@@ -114,6 +114,35 @@ version is outside that range. Install the tested version with `npm install -g o
 
 Version tested: 1.18.28
 
+## Pi
+
+### Install and log in
+
+Install the CLI with `npm install -g @earendil-works/pi-coding-agent`. Then run `pi` and complete
+`/login <provider>`, or export the provider key, for example `OPENROUTER_API_KEY`. Pi models are
+experimental, so set `FACTORY_EXPERIMENTAL=1` in the factory's environment.
+
+### Minimal `.factory/config.yaml`
+
+```yaml
+version: 2
+models:
+  pins:
+    plan: pi-openrouter-deepseek-v4-flash
+    build: pi-openrouter-deepseek-v4-flash
+    checker: pi-openrouter-deepseek-v4-flash
+    triage: pi-openrouter-deepseek-v4-flash
+route: pi
+```
+
+### Verify with `factory doctor`
+
+Run `factory doctor` in the repo. The `coding agent` line lists `pi`, and the Pi section shows
+`pi installed` and `pi signed in`. Sign-in evidence is `OPENROUTER_API_KEY`, `OPENCODE_API_KEY` or
+`AZURE_OPENAI_API_KEY` in the environment. `factory models --doctor` runs
+`pi auth check --model <providerModel> --no-refresh` for each pinned Pi model (exit 0 is ready, 1 is
+not ready, 2 is invalid).
+
 ## Recipes
 
 Each recipe is a complete, minimal `.factory/config.yaml`. Copy it to the repo, then run `factory doctor`.
@@ -179,6 +208,35 @@ route: opencode
 ```
 
 Version tested: 1.18.28
+
+### Recipe: DeepSeek on Pi through OpenRouter
+
+DeepSeek runs on Pi only through OpenRouter, never the native `deepseek/` provider or `DEEPSEEK_API_KEY`
+(ADR-0163 refuses both, and the harness removes `DEEPSEEK_API_KEY` from Pi's environment).
+
+1. Create an OpenRouter API key with zero data retention (ZDR) enforced, by guardrail or account setting.
+2. Export it: `export OPENROUTER_API_KEY=...`, and set `FACTORY_EXPERIMENTAL=1`.
+3. Check the key: `pi auth check --model openrouter/deepseek/deepseek-v4.1-flash --no-refresh` must print `ready`.
+4. Pin the model in `.factory/config.yaml`:
+
+```yaml
+version: 2
+models:
+  pins:
+    plan: pi-openrouter-deepseek-v4-flash
+    build: pi-openrouter-deepseek-v4-flash
+    checker: pi-openrouter-deepseek-v4-flash
+    triage: pi-openrouter-deepseek-v4-flash
+route: pi
+```
+
+5. Run `factory doctor`, then `factory models --doctor`.
+
+Why `--no-approve` is forced: the factory runs Pi non-interactively in an untrusted worktree, so it always
+passes `--no-approve` (with `--no-extensions`, `--no-skills`, `--no-prompt-templates` and `--no-mcp`). Pi never
+loads or approves repo-local `.pi/` config, extensions, skills or MCP servers that a PR could plant.
+
+Version tested: Pi 0.1.0 (recorded shim; real-run behavior unverified)
 
 ### Recipe: Local Ollama
 

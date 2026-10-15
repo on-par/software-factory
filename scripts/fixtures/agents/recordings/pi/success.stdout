@@ -1,0 +1,4 @@
+{"type":"agent_start"}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"I'll inspect the repo first."}],"usage":{"input":1200,"output":80,"cacheRead":3000,"cacheWrite":500,"cost":{"total":0.0021}},"stopReason":"toolUse"}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"FINAL ANSWER: the build is done."}],"usage":{"input":300,"output":40,"cacheRead":4200,"cacheWrite":0,"cost":{"total":0.0009}},"stopReason":"stop"}}
+{"type":"agent_settled","aborted":false}

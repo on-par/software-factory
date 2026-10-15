@@ -1,0 +1,3 @@
+{"type":"agent_start"}
+{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"403 Forbidden: monthly usage limit reached. Your limit resets at 2026-11-01T00:00:00Z."}}
+{"type":"agent_settled","aborted":false}

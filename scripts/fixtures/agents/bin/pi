@@ -1,0 +1,32 @@
+#!/bin/sh
+set -eu
+FAKE_AGENTS_DIR=$(cd "$(dirname "$0")/.." && pwd)
+. "$FAKE_AGENTS_DIR/lib/replay.sh"
+
+# Doctor probes answer before mode handling so they never block on stdin or commit.
+case "${1:-} ${2:-}" in
+  "--version "*)
+    echo "0.1.0"
+    exit 0
+    ;;
+  "auth check")
+    echo "ready"
+    exit 0
+    ;;
+esac
+
+mode=$(fake_mode)
+fake_drain_stdin
+case "$mode" in
+  success)
+    fake_commit pi "$PWD"
+    fake_replay pi success
+    ;;
+  rate-limit | usage-cap)
+    fake_replay pi "$mode"
+    exit 1
+    ;;
+  empty)
+    fake_replay pi empty
+    ;;
+esac
