@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { expect, it } from 'vitest';
 
+import { supportsEffort } from '../config/effort.js';
 import { loadModelsConfig, loadRoutesConfig } from '../config/index.js';
 import { applyRepoConfig, loadRepoConfig, resolveEffectiveModelPins } from '../config/repo.js';
 import { ModelRegistry } from '../models/index.js';
@@ -190,4 +191,24 @@ it('preserves arbitrary Codex profile flags and appends effort with final preced
     timeoutSeconds: 5,
   });
   expect(command).toContain(`${flags} -c 'model_reasoning_effort=low'`);
+});
+
+it('supportsEffort for pi accepts none..max and rejects ultra and booleans', () => {
+  for (const effort of ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const) {
+    expect(supportsEffort('pi', effort)).toBe(true);
+  }
+  for (const effort of ['ultra', true, false] as const) {
+    expect(supportsEffort('pi', effort)).toBe(false);
+  }
+});
+
+it('ModelRegistry rejects ultra effort for a pi model but accepts high', () => {
+  const build = (effort: 'ultra' | 'high') => {
+    const config = loadModelsConfig();
+    config.models['pi-test'] = { ...config.models['claude-opus-5'], harness: 'pi', providerModel: 'openrouter/x' };
+    config.efforts = { 'pi-test': effort };
+    return new ModelRegistry(config);
+  };
+  expect(() => build('ultra')).toThrow();
+  expect(() => build('high')).not.toThrow();
 });

@@ -152,6 +152,11 @@ describe('buildPiCommand', () => {
       expect(() => buildPiCommand(bad, '/tmp/p')).toThrow(HarnessError);
     }
   });
+
+  it('adds --thinking only when an effort is given', () => {
+    expect(buildPiCommand('a/b', '/p', 'xhigh')).toContain("--model 'b' --thinking 'xhigh' < '/p'");
+    expect(buildPiCommand('a/b', '/p')).not.toContain('--thinking');
+  });
 });
 
 describe('PiHarness', () => {
@@ -168,6 +173,30 @@ describe('PiHarness', () => {
     expect(opts.cwd).toBe('/tmp/factory worktree');
     expect(opts.timeoutMs).toBe(7000);
     expect(opts.maxBuffer).toBe(64 * 1024 * 1024);
+  });
+
+  it('passes the configured effort as --thinking', async () => {
+    const exec = okExec();
+    const effortRegistry = new ModelRegistry({ ...modelsConfig, efforts: { 'pi-model': 'high' } });
+    await new PiHarness(exec).run(req({ registry: effortRegistry }));
+    expect(exec.mock.calls[0][0]).toContain("--model 'deepseek/deepseek-v4-flash' --thinking 'high' < '");
+  });
+
+  it('maps effort none to --thinking off', async () => {
+    const exec = okExec();
+    const effortRegistry = new ModelRegistry({ ...modelsConfig, efforts: { 'pi-model': 'none' } });
+    await new PiHarness(exec).run(req({ registry: effortRegistry }));
+    expect(exec.mock.calls[0][0]).toContain("--thinking 'off'");
+    expect(exec.mock.calls[0][0]).not.toContain("'none'");
+  });
+
+  it('omits --thinking when no effort is configured for the task', async () => {
+    const exec = okExec();
+    await new PiHarness(exec).run(req());
+    const taskRegistry = new ModelRegistry({ ...modelsConfig, efforts: { 'pi-model': { triage: 'high' } } });
+    await new PiHarness(exec).run(req({ registry: taskRegistry }));
+    expect(exec.mock.calls[0][0]).not.toContain('--thinking');
+    expect(exec.mock.calls[1][0]).not.toContain('--thinking');
   });
 
   it('drops DEEPSEEK_API_KEY from the child env', async () => {
