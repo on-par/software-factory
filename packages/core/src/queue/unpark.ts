@@ -8,6 +8,9 @@ import {
   QUEUE_ORDER_LABEL_PREFIX,
   type QueueGitHubClient,
 } from './github-queue.js';
+import type { OrderCollision } from './order-collision.js';
+
+export type { OrderCollision };
 
 export type UnparkErrorCode = 'not-parked' | 'lane-required' | 'unpark-failed';
 
@@ -31,6 +34,8 @@ export interface UnparkJson {
   lane: string;
   /** The one order position assigned. */
   order: number;
+  /** Set only when the placement bumped past an order held without factory:queued (#2988). */
+  collision?: OrderCollision;
   labelsBefore: string[];
   labelsAfter: string[];
 }
@@ -96,6 +101,7 @@ export async function runUnpark(input: UnparkInput): Promise<UnparkJson> {
       issue,
       lane,
       order: r.position,
+      ...(r.collision ? { collision: r.collision } : {}),
       labelsBefore: [...labelsBefore],
       labelsAfter,
     };

@@ -32,6 +32,7 @@ import { formatBaseHoldStatus, readBaseHold } from './base-hold.js';
 import { notInitializedMessage } from './first-run.js';
 import type { CliDeps, CliExitError, readActiveProduct } from './index.js';
 import { readRunFlagOverrides } from './run-flags.js';
+import { readStopFileStatus, stopSentinelStatusLine } from './stop-sentinel.js';
 import { buildStatusJson } from './status-json.js';
 import { checkSweepHeartbeat, defaultSweepHeartbeatDeps, formatSweepHeartbeatStatusLine } from './sweep-heartbeat.js';
 import { buildStatusUpdateJson, formatUpdateStatusLine, readUpdateState, updateStatePath } from './update-state.js';
@@ -56,6 +57,8 @@ export interface StatusRuntime {
   warnQueueDiagnostics: (diagnostics: QueueDiagnostic[]) => void;
   errorDetail: (err: unknown) => string;
   CliExitError: typeof CliExitError;
+  /** Resolves the repo config file's display path, so messages name the file actually loaded (#2570). */
+  repoConfigFileFor: (repoRoot: string, absPath: string) => { absPath: string; relPath: string };
 }
 
 /** Formats the time since `lastActivityAt` as a short duration (e.g. `3m`) for the
@@ -185,7 +188,7 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
     for (const line of describeEffectiveConfig({
       router,
       repo: repoConfig,
-      repoConfigPath: '.factory/config.json',
+      repoConfigPath: rt.repoConfigFileFor(repoRoot, paths.config).relPath,
       mergePolicy: resolveMergePolicy(rt.configLoaders.loadFactoryConfigForRepo(paths.config), process.env, {
         auto: readRunFlagOverrides(paths.runFlags).autoMerge,
       }),
@@ -239,7 +242,6 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
     }
   }
 
-  if (existsSync(paths.stop)) {
-    console.log(styleText('red', '\n!! STOP file present — factory halting between issues'));
-  }
+  const stopLine = stopSentinelStatusLine(readStopFileStatus(paths));
+  if (stopLine) console.log(styleText('red', `\n!! ${stopLine}`));
 }

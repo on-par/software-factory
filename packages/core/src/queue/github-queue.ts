@@ -4,6 +4,7 @@ import { hostname } from 'node:os';
 
 import type { Octokit } from '@octokit/rest';
 
+import { orderCollisionAt, scanLaneOrders, type OrderCollision } from './order-collision.js';
 import type { QueueEntry, QueueSnapshot, QueueSnapshotEntry } from './index.js';
 import { orderedCandidates, QUEUE_ORDER_LABEL_PREFIX, type QueueOrderConflict } from './queue-order.js';
 
@@ -311,6 +312,8 @@ export interface EnqueueResult {
   labelsCreated?: string[];
   /** Failure detail; set only when outcome === 'failed'. */
   detail?: string;
+  /** Set only on 'queued' when order-only in-lane issues held the slot a queued-only scan would have used (#2988). */
+  collision?: OrderCollision;
 }
 
 export type QueueClearAction = 'would-clear' | 'would-skip';
@@ -551,17 +554,10 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
 
   async function enqueue(lane: string, issues: readonly number[]): Promise<EnqueueResult[]> {
     const routeLabel = laneLabel(lane);
-    const members = await client.listOpenIssuesWithLabels({ owner, repo, labels: [QUEUED_LABEL, routeLabel] });
-    // Tolerant max-position scan: ignore malformed/missing order labels rather than throwing.
-    let maxPos = 0;
-    for (const member of members) {
-      for (const label of member.labels) {
-        if (!label.startsWith(QUEUE_ORDER_LABEL_PREFIX)) continue;
-        const n = Number(label.slice(QUEUE_ORDER_LABEL_PREFIX.length));
-        if (Number.isSafeInteger(n) && n > maxPos) maxPos = n;
-      }
-    }
-    let next = maxPos + 1;
+    const members = await client.listOpenIssuesWithLabels({ owner, repo, labels: [routeLabel] });
+    const scan = scanLaneOrders(members, QUEUED_LABEL, QUEUE_ORDER_LABEL_PREFIX); // tolerant, every open in-lane holder (#2987, #2988)
+    let next = scan.maxPos + 1;
+    let naive = scan.queuedMax + 1;
 
     const results: EnqueueResult[] = [];
     for (const issue of issues) {
@@ -589,14 +585,17 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
           if (await client.ensureLabel({ owner, repo, ...spec })) created.push(spec.name);
         }
         await client.addLabels({ owner, repo, issue_number: issue, labels: specs.map((s) => s.name) });
+        const collision = orderCollisionAt(scan, naive);
         results.push({
           issue,
           outcome: 'queued',
           position: next,
           labelsAdded: specs.map((s) => s.name).filter((name) => !current.includes(name)),
           labelsCreated: created,
+          ...(collision ? { collision } : {}),
         });
         next += 1;
+        naive += 1;
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         results.push({ issue, outcome: 'failed', detail });

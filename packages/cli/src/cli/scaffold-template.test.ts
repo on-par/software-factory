@@ -22,6 +22,50 @@ function stripComment(line: string): string {
   return line.trim().startsWith('#') ? '' : line.replace(/\s+#.*$/, '');
 }
 
+// The pre-#2973 skeleton (live `- <checker-name>` lines), frozen for #2975. Only the frontmatter and heading matter here.
+const OLD_TEMPLATE = [
+  '# Constitution Template',
+  '',
+  '```markdown',
+  '---',
+  'product: <product-name>',
+  'version: 1',
+  'checkers:',
+  '  - <checker-name> # References lib/checkers/<checker-name>.sh',
+  '  - <checker-name>',
+  'enforced_on: [plan, build, check] # Which phases load this constitution',
+  'requireTests: true # FAIL (instead of SKIP) the tests checker when the repo has no verify/test command',
+  '---',
+  '',
+  '# <Product> Constitution',
+  '```',
+  '',
+].join('\n');
+
+async function scaffoldFrontmatterViolations(template: string, product: string): Promise<string[]> {
+  const scaffold = scaffoldConstitution(template, product);
+  const violations: string[] = [];
+  const dir = await mkdtemp(join(tmpdir(), 'factory-scaffold-'));
+  try {
+    await mkdir(join(dir, '.factory'), { recursive: true });
+    await writeFile(join(dir, '.factory', 'constitution.md'), scaffold);
+    const constitution = new ConstitutionLoader().loadRepoConstitution(dir);
+    if (!constitution) return ['constitution did not load'];
+    for (const value of [constitution.product, ...constitution.checkers]) {
+      if (typeof value === 'string' && /<[^>]+>/.test(value)) violations.push(`placeholder value: ${value}`);
+    }
+    for (const p of findUnknownConstitutionCheckers(constitution.checkers, scaffold)) {
+      violations.push(`unknown checker: ${p.name}`);
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+  for (const line of frontmatterLines(scaffold).map(stripComment)) {
+    if (/<[^>]+>/.test(line)) violations.push(`placeholder line: ${line.trim()}`);
+  }
+  return violations;
+}
+
 describe('scaffoldConstitution on the bundled template', () => {
   it('scaffoldConstitution on the bundled _template.md lists only known checkers and no live <...> placeholder', async () => {
     const template = readFileSync(join(getConstitutionsDir(), '_template.md'), 'utf-8');
@@ -62,5 +106,19 @@ describe('scaffoldConstitution on the bundled template', () => {
       .map(stripComment)
       .flatMap((l) => l.match(/<[^>]+>/g) ?? []);
     expect([...new Set(tokens)]).toEqual(['<product-name>']);
+  });
+});
+
+describe('scaffold frontmatter regression (#2975)', () => {
+  it('has no <...> values and only known checkers for the bundled _template.md', async () => {
+    const template = readFileSync(join(getConstitutionsDir(), '_template.md'), 'utf-8');
+    expect(await scaffoldFrontmatterViolations(template, 'acme-app')).toEqual([]);
+  });
+
+  it('reports <checker-name> placeholders and unknown checkers for the pre-#2973 template', async () => {
+    const v = await scaffoldFrontmatterViolations(OLD_TEMPLATE, 'acme-app');
+    expect(v).toContain('placeholder value: <checker-name>');
+    expect(v).toContain('unknown checker: <checker-name>');
+    expect(v.some((l) => l.startsWith('placeholder line:'))).toBe(true);
   });
 });

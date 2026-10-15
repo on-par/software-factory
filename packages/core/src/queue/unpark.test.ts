@@ -85,6 +85,35 @@ describe('runUnpark', () => {
     expect(res.labelsAfter.filter((l) => l.startsWith('factory:lane:'))).toEqual(['factory:lane:daw']);
   });
 
+  it('assigns a position after an order-only in-lane issue', async () => {
+    const labels = new Map([
+      [5, ['factory:parked', 'factory:lane:ops']],
+      [24, ['factory:lane:ops', 'factory:order:24']],
+    ]);
+    const { client } = fakeClient(labels);
+    const res = await runUnpark({ ...base, client, issue: 5 });
+    expect(res.order).toBe(25);
+  });
+
+  it('reports the order-only issue holding the slot a queued-only scan would reuse', async () => {
+    const labels = new Map<number, string[]>([
+      [5, ['factory:parked', 'factory:lane:ops']],
+      [23, ['factory:queued', 'factory:lane:ops', 'factory:order:23']],
+      [24, ['factory:lane:ops', 'factory:order:24']],
+    ]);
+    const { client } = fakeClient(labels);
+    const res = await runUnpark({ ...base, client, issue: 5 });
+    expect(res.order).toBe(25);
+    expect(res.collision).toEqual({ order: 24, heldBy: [24] });
+  });
+
+  it('has no collision key without an order-only holder', async () => {
+    const labels = new Map<number, string[]>([[5, ['factory:parked', 'factory:lane:ops']], ...peers()]);
+    const { client } = fakeClient(labels);
+    const res = await runUnpark({ ...base, client, issue: 5 });
+    expect(res).not.toHaveProperty('collision');
+  });
+
   it('keeps factory:parked when enqueue fails so a retry is possible', async () => {
     const labels = new Map([[5, ['factory:parked', 'factory:lane:ops']]]);
     const { client } = fakeClient(labels);

@@ -222,6 +222,30 @@ describe('superviseLoop', () => {
     expect(sleeps).toBe(0);
   });
 
+  it('usage-watch repo config: superviseLoop attributes a skipped resume gate to the loaded config file (#2570)', async () => {
+    const calls: string[] = [];
+
+    await superviseLoop({
+      cap: 1,
+      resumeAt: 0.65,
+      pollMs: 1000,
+      watch: false,
+      watchSource: 'repo',
+      repoConfigLabel: '.factory/config.yaml',
+      stopFile: '/repo/.factory/STOP',
+      eventsFile: '/repo/.factory/events.ndjson',
+      readUsageFn: async () => reading(1),
+      pathExists: () => false,
+      clearStop: () => {},
+      sleep: async () => {},
+      emitEvent: () => {},
+      writeLine: (line) => calls.push(line),
+      runQueue: async () => {},
+    });
+
+    expect(calls.join('\n')).toContain('.factory/config.yaml: budget.watchdog.watch');
+  });
+
   it('usage-watch flag: superviseLoop logs --usage-watch when the flag forces the gate on', async () => {
     const calls: string[] = [];
     let runQueueCalls = 0;

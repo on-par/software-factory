@@ -20,6 +20,7 @@ import { promisify, styleText } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
 import { INVALID_BRANCH_PREFIX_MESSAGE, resolveBranchPrefixOption } from './branch-prefix.js';
+import { proposeTriageQueue } from './triage-open-prs.js';
 import {
   type Environment,
   type EnvironmentProxySettings,
@@ -225,7 +226,6 @@ import {
   withRunLock,
   writePortFile,
   buildTriagePrompt,
-  normalizeTriageQueue,
   parseTriageCandidates,
   recordLocalAuthFailure,
 } from '@on-par/factory-core/internal';
@@ -238,6 +238,7 @@ import {
 } from './classifier-backtest.js';
 import { runHarnessCheckCommand } from './harness-check.js';
 import { findOpenPRForIssue, landIssue } from './land.js';
+import { STOP_SET_MESSAGE } from './stop-sentinel.js';
 import {
   AwaitingReviewError,
   CiFailedError,
@@ -258,6 +259,7 @@ import { runQueueClear } from './queue-clear.js';
 import { buildProgram } from './program.js';
 import { buildCostJson } from './cost-json.js';
 import { buildQueueAddJson } from './queue-add-json.js';
+import { renderQueueAddLines, renderUnparkLines } from './queue-output.js';
 import { buildQueueListJson } from './queue-list.js';
 import { appendUnparkEvent, runUnpark, UnparkError, type UnparkJson } from './unpark.js';
 import { buildRunsJson, parseRunsLimit } from './runs.js';
@@ -736,7 +738,7 @@ export function formatReachabilityCount(diagnoses: ModelDiagnosis[]): string {
   return unverified > 0 ? `${base}, ${unverified} unverified (no auth evidence)` : base;
 }
 
-async function cmdInit(opts: { force?: boolean } = {}) {
+async function cmdInit(opts: { force?: boolean; yes?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   // init itself never calls GitHub, so a missing token is a warning here; ship/run still need one.
   if (!hasGitHubToken()) {
@@ -1718,13 +1720,18 @@ export function resolveUsageKnobs(
 }
 
 /** Human-readable name for whatever decided the usage-watch gate, used in the `factory run`
- *  and `factory supervise` logs so an explicit operator override is always attributable (#1404). */
-export function usageWatchSourceLabel(source: WatchdogPolicySource, watch: boolean): string {
+ *  and `factory supervise` logs so an explicit operator override is always attributable (#1404). `repoConfigLabel` names the
+ *  repo config file that was loaded (#2570). */
+export function usageWatchSourceLabel(
+  source: WatchdogPolicySource,
+  watch: boolean,
+  repoConfigLabel = 'the repo config',
+): string {
   switch (source) {
     case 'flag':
       return watch ? 'flag: --usage-watch' : 'flag: --no-usage-watch';
     case 'repo':
-      return '.factory/config.json: budget.watchdog.watch';
+      return `${repoConfigLabel}: budget.watchdog.watch`;
     case 'env':
       return 'env: FACTORY_USAGE_WATCH';
     case 'default':
@@ -1859,7 +1866,7 @@ async function cmdTui(opts: { localQueue?: boolean } = {}, runTuiImpl: typeof ru
   const effectiveConfigLines = describeEffectiveConfig({
     router,
     repo: repoConfig,
-    repoConfigPath: '.factory/config.json',
+    repoConfigPath: repoConfigFileFor(repoRoot, paths.config).relPath,
     mergePolicy: resolveMergePolicy(configLoaders.loadFactoryConfigForRepo(paths.config), process.env, {
       auto: readRunFlagOverrides(paths.runFlags).autoMerge,
     }),
@@ -2848,7 +2855,7 @@ async function cmdTriage(opts: { product?: string; model?: string }) {
       onLog: (msg) => logEvent(paths.events, 'triage', '-', msg),
     });
     model = result.model;
-    const queue = normalizeTriageQueue(result.output);
+    const queue = await proposeTriageQueue(result.output, ghRepo, paths.events, shellOps.exec);
     if (queue) {
       const header = triageQueueHeader(model, product);
       writeFileSync(paths.queueProposed, header + queue);
@@ -3039,7 +3046,7 @@ export async function cmdUnpark(issueArg: string, opts: { lane?: string; json?: 
     console.log(JSON.stringify(result));
     return;
   }
-  console.log(styleText('green', `#${issue} unparked → lane ${result.lane}, position ${result.order}`));
+  for (const line of renderUnparkLines(result)) console.log(line);
 }
 
 export async function cmdQueueAdd(lane: string, issueArgs: string[], opts: { json?: boolean } = {}): Promise<void> {
@@ -3081,15 +3088,8 @@ export async function cmdQueueAdd(lane: string, issueArgs: string[], opts: { jso
     return;
   }
 
-  for (const r of results) {
-    if (r.outcome === 'queued') {
-      console.log(styleText('green', `#${r.issue} queued → lane ${lane}, position ${r.position}`));
-    } else if (r.outcome === 'already-queued') {
-      console.log(`#${r.issue} already queued — skipped`);
-    } else {
-      console.error(styleText('red', `#${r.issue} failed — ${r.detail}`));
-    }
-  }
+  for (const line of renderQueueAddLines(lane, results))
+    (line.stream === 'err' ? console.error : console.log)(line.text);
 
   const failed = results.filter((r) => r.outcome === 'failed');
   if (failed.length > 0) {
@@ -3889,6 +3889,8 @@ export interface SuperviseDeps {
   /** Where `watch` was decided, so the loop can attribute an explicit operator override
    *  to the flag rather than always blaming FACTORY_USAGE_WATCH (#1404). */
   watchSource?: WatchdogPolicySource;
+  /** Display label for the loaded repo config file, used when watch was decided by the repo config (#2570). */
+  repoConfigLabel?: string;
   /** Where the resume threshold was decided, for attribution of explicit CLI overrides. */
   resumeAtSource?: WatchdogPolicySource;
   /** Where the poll interval was decided, for attribution of explicit CLI overrides. */
@@ -3919,6 +3921,7 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
     pollMs,
     watch = true,
     watchSource = 'default',
+    repoConfigLabel,
     resumeAtSource = 'default',
     pollSource = 'default',
     estimator = false,
@@ -3953,12 +3956,12 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
 
     if (!watch) {
       writeLine(
-        `[factory] supervise: usage watchdog disabled (${usageWatchSourceLabel(watchSource, watch)}) — skipping resume gate`,
+        `[factory] supervise: usage watchdog disabled (${usageWatchSourceLabel(watchSource, watch, repoConfigLabel)}) — skipping resume gate`,
       );
     } else {
       if (watchSource === 'flag') {
         writeLine(
-          `[factory] supervise: usage watchdog enabled (${usageWatchSourceLabel(watchSource, watch)}) — enforcing resume gate`,
+          `[factory] supervise: usage watchdog enabled (${usageWatchSourceLabel(watchSource, watch, repoConfigLabel)}) — enforcing resume gate`,
         );
       }
       let reading = await readUsageFn();
@@ -4168,7 +4171,7 @@ export async function cmdStop(opts: { json?: boolean } = {}): Promise<void> {
     console.log(JSON.stringify(buildStopResumeJson({ action: 'stop', repo: json.repo, before, after })));
     return;
   }
-  console.log('STOP set — lanes halt between issues');
+  console.log(STOP_SET_MESSAGE);
 }
 
 export async function cmdResume(issue?: string, opts: { json?: boolean; from?: string } = {}): Promise<void> {
@@ -4265,6 +4268,7 @@ function runSupervise(opts: SuperviseOptions): Promise<void> {
     createIngestHook,
     cmdRun: (o) => runRun(o),
     CliExitError,
+    repoConfigFileFor,
   });
 }
 
@@ -4282,6 +4286,7 @@ function runStatus(opts: StatusOptions = {}): Promise<void> {
     warnQueueDiagnostics,
     errorDetail,
     CliExitError,
+    repoConfigFileFor,
   });
 }
 

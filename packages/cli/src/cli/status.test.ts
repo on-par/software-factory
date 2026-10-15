@@ -289,7 +289,25 @@ describe('cli', () => {
       expect(out).toContain('Effective config and KPIs hidden');
       expect(out).not.toContain('Effective config:');
       expect(out).not.toContain('Merge rate:');
-      expect(logged() + errored()).toContain('STOP file present');
+      expect(logged() + errored()).toContain('STOP is set');
+    });
+
+    describe('STOP line (#2544)', () => {
+      it('says STOP is set, since when, and to run factory resume when the STOP file exists', async () => {
+        writeFileSync(paths().stop, '');
+        await runMain('status');
+        const out = logged();
+        expect(out).toContain('STOP is set');
+        expect(out).toContain('factory resume');
+        expect(out).toMatch(/since \d{4}-\d{2}-\d{2}T/);
+      });
+
+      it('prints no STOP line when the STOP file is absent', async () => {
+        await runMain('status');
+        const out = logged();
+        expect(out).not.toContain('STOP is set');
+        expect(out).not.toContain('STOP file present');
+      });
     });
 
     it('shows full Effective config and KPIs when --kpis is passed', async () => {
