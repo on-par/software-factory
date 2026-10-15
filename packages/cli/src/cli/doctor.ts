@@ -106,8 +106,8 @@ export interface DoctorEnvProbes {
   /** Stored Claude Code OAuth session state (#2721), read locally; never refreshes. */
   claudeSessionState?: () => 'ok' | 'refresh-pending' | 'unusable' | 'unknown';
   /** The agent's last recorded run-time local_auth failure when no login has happened since
-   *  (#2733); reads local state only, never refreshes. */
-  localAuthFailure?: (agent: 'claude' | 'codex') => { agent: string; at: string } | null;
+   *  (#2733, #2890); reads local state only, never refreshes. */
+  localAuthFailure?: (agent: 'claude' | 'codex' | 'opencode') => { agent: string; at: string } | null;
   /** Whether a stored opencode auth login exists (#2556); reads local state only, never runs inference. */
   opencodeLoggedIn?: () => boolean;
   /** Repo-configured command harnesses (#2691); absent or [] means none. */
@@ -280,7 +280,7 @@ export function harnessSignInChecks(probes: DoctorEnvProbes): DoctorCheck[] {
     ({ section, cli, login, next, envKeys }): DoctorCheck => {
       const name = `${cli} signed in`;
       const fix = `sign in to ${section}: ${login}`;
-      if (cli === 'claude' || cli === 'codex') {
+      if (cli === 'claude' || cli === 'codex' || cli === 'opencode') {
         let failure: { agent: string; at: string } | null = null;
         try {
           failure = probes.localAuthFailure?.(cli) ?? null;
@@ -293,7 +293,7 @@ export function harnessSignInChecks(probes: DoctorEnvProbes): DoctorCheck[] {
             section,
             ok: false,
             optional: found.length > 1,
-            detail: `the most recent run failed sign-in (local_auth) at ${failure.at} and there has been no login since; re-run ${cli} login`,
+            detail: `the most recent run failed sign-in (local_auth) at ${failure.at} and there has been no login since; re-run ${cli === 'opencode' ? login : `${cli} login`}`,
             fix,
             next: login,
           };

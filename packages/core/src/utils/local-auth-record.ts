@@ -1,4 +1,4 @@
-// src/utils/local-auth-record.ts — the last run-time local_auth failure per agent (#2733).
+// src/utils/local-auth-record.ts — the last run-time local_auth failure per agent (#2733, #2890 adds opencode).
 //
 // A refresh token that is present but already used or revoked looks fine on disk, and doctor
 // must not refresh it to find out (that would burn the token). So when a run hits local_auth,
@@ -16,7 +16,7 @@ import { dirname, join, resolve } from 'node:path';
 
 import { claudeConfigDirPath } from './claude-config.js';
 
-export type LocalAuthAgent = 'claude' | 'codex';
+export type LocalAuthAgent = 'claude' | 'codex' | 'opencode';
 
 export interface LocalAuthRecordDeps {
   env?: NodeJS.ProcessEnv;
@@ -43,14 +43,18 @@ export function localAuthRecordPath(deps: LocalAuthRecordDeps = {}): string {
 export function localAuthAgentFor(harnessOrProvider: string | undefined): LocalAuthAgent | undefined {
   if (harnessOrProvider === 'claude-cli' || harnessOrProvider === 'anthropic') return 'claude';
   if (harnessOrProvider === 'codex-cli') return 'codex';
+  if (harnessOrProvider === 'opencode') return 'opencode';
   return undefined;
 }
 
-/** Credential file whose mtime marks the agent's latest login. */
+/** Credential file whose mtime marks the agent's latest login (opencode's is written by `opencode auth login`). */
 export function localAuthCredentialPath(agent: LocalAuthAgent, deps: LocalAuthRecordDeps = {}): string {
   const env = deps.env ?? process.env;
   const home = (deps.homedir ?? osHomedir)();
   if (agent === 'claude') return resolve(claudeConfigDirPath(env, home), '.credentials.json');
+  if (agent === 'opencode') {
+    return join(env.XDG_DATA_HOME?.trim() || join(home, '.local', 'share'), 'opencode', 'auth.json');
+  }
   return join(env.CODEX_HOME?.trim() || join(home, '.codex'), 'auth.json');
 }
 
@@ -60,7 +64,7 @@ function readAll(deps: LocalAuthRecordDeps): Partial<Record<LocalAuthAgent, Loca
     const parsed = JSON.parse(readFile(localAuthRecordPath(deps))) as unknown;
     if (typeof parsed !== 'object' || parsed === null) return {};
     const out: Partial<Record<LocalAuthAgent, LocalAuthFailure>> = {};
-    for (const agent of ['claude', 'codex'] as const) {
+    for (const agent of ['claude', 'codex', 'opencode'] as const) {
       const at = (parsed as Record<string, { at?: unknown } | undefined>)[agent]?.at;
       if (typeof at === 'string' && Number.isFinite(Date.parse(at))) out[agent] = { agent, at };
     }
