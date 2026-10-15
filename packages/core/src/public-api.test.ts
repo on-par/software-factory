@@ -325,7 +325,6 @@ const PUBLIC_API_KEYS = [
   'watchUsage',
   'fetchSubscriptionUsage',
 ];
-
 const INTERNAL_API_KEYS = [
   'openCodeVersion',
   'DEFAULT_CI_DEADLINE_MS',
@@ -556,6 +555,7 @@ const INTERNAL_API_KEYS = [
   'renderDesignArtifact',
   // Concrete coding harnesses
   'classifyFailure',
+  'runHarnessCheck',
   'classifyOpenCodeErrorType',
   'ClaudeCliHarness',
   'CodexCliHarness',
