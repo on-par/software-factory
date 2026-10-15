@@ -282,6 +282,42 @@ describe('shipIssue (direct)', () => {
     expect(events).toContain('build-y');
   });
 
+  it('logs one model-override per pinned phase naming .factory/config.yaml (#2497)', async () => {
+    mkdirSync(paths().root, { recursive: true });
+    writeFileSync(
+      `${paths().root}/config.yaml`,
+      'version: 2\nmodels:\n  pins:\n    triage: triage-x\n    plan: plan-x\n    build: build-y\n    checker: checker-z\n',
+    );
+    const models = vi.fn(
+      () =>
+        ({
+          models: Object.fromEntries(
+            ['triage-x', 'plan-x', 'build-y', 'checker-z'].map((id) => [id, { provider: 'anthropic' }]),
+          ),
+          tiers: {},
+        }) as never,
+    );
+    const pins = vi.fn(() => ({
+      plan: 'plan-x',
+      planFallback: undefined,
+      build: 'build-y',
+      buildFallback: undefined,
+      sources: { plan: 'repo', build: 'repo' },
+    }));
+    await shipIssue(5, {}, ctx(), { loadModelsConfig: models, resolveEffectiveModelPins: pins as never });
+    const lines = readFileSync(paths().events, 'utf-8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .filter((e) => e.type === 'model-override' && / model pinned to /.test(e.msg));
+    expect(lines.map((e) => e.msg)).toEqual([
+      'triage model pinned to triage-x (.factory/config.yaml)',
+      'plan model pinned to plan-x (.factory/config.yaml)',
+      'build model pinned to build-y (.factory/config.yaml)',
+      'checker model pinned to checker-z (.factory/config.yaml)',
+    ]);
+  });
+
   it('remembers a capped planning provider and uses the configured fallback on the next issue', async () => {
     h.modelOverrides = { plan: 'claude-plan', planFallback: 'gpt-plan' };
     h.modelProviders = { 'claude-plan': 'anthropic', 'gpt-plan': 'openai' };
