@@ -34,7 +34,7 @@ import { assertRegistryHarness, RepoHarnessesSchema, resolveRepoHarnesses } from
 import { ModelEffortsSchema } from './effort.js';
 import { assertAgenticBuildPin } from './repo-build-pin.js';
 import { assertTierMayRoute } from './repo-tier-guard.js';
-import { assertApprovedClaudeEndpoint } from './intermediaries.js';
+import { assertApprovedClaudeEndpoint, assertNoDirectDeepSeek } from './intermediaries.js';
 
 // ---------- Schema ----------
 
@@ -354,8 +354,8 @@ export function loadRepoConfig(repoRoot: string, stateRoot?: string): RepoFactor
 /** Apply a repo config's model registry, tier overrides, harnesses, provider flags, and checker/triage pins to a
  *  packaged ModelsConfig, in that order. Pure; `null` repo is the identity transform (the critical no-config
  *  regression surface). Throws naming the tier/model on an unknown or `trainsOnPrompts` id (pin it instead), an
- *  emptied tier, a redefined packaged id, or a redeclared harness, or a registry `endpoint` that is not an approved
- *  Anthropic-compatible intermediary (ADR-0163) or lacks an envKey. */
+ *  emptied tier, a redefined packaged id, a redeclared harness, a registry `endpoint` that is not an approved
+ *  Anthropic-compatible intermediary or lacks an envKey, or a registry model reaching DeepSeek directly (ADR-0163). */
 export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | null): ModelsConfig {
   if (!repo) return models;
 
@@ -369,6 +369,7 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
     }
     assertRegistryHarness(id, def.harness, validHarnesses);
     assertApprovedClaudeEndpoint(id, def);
+    assertNoDirectDeepSeek(id, def);
   }
   const mergedModels = { ...models.models, ...registry };
   const knownModels = Object.keys(mergedModels).join(', ');

@@ -1061,7 +1061,7 @@ describe('classifier config (#1723)', () => {
 });
 
 describe('repo models.registry (#2440)', () => {
-  const custom = baseModel({ provider: 'custom', tier: 'worker', harness: 'opencode', providerModel: 'deepseek/x' });
+  const custom = baseModel({ provider: 'custom', tier: 'worker', harness: 'opencode', providerModel: 'opencode-go/x' });
   const withRegistry = (extra: Record<string, unknown> = {}) =>
     ({ version: 2, models: { registry: { 'my-opencode-model': custom }, ...extra } }) as NonNullable<
       Parameters<typeof applyRepoConfig>[1]
