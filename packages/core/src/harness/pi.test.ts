@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ModelsConfig } from '../config/index.js';
+import { loadModelsConfig, type ModelsConfig } from '../config/index.js';
+import { resolveEffectiveModelPins } from '../config/repo.js';
 import { ModelRegistry } from '../models/index.js';
 import { type SandboxPolicy, wrapCommandInSandbox } from '../sandbox/index.js';
 import { codingHarnessContractCases, makeContractRequest } from './contract.js';
@@ -160,6 +161,19 @@ describe('buildPiCommand', () => {
 });
 
 describe('PiHarness', () => {
+  it("runs a models.pins.plan pin of packaged pi-openrouter-deepseek-v4-flash with --provider 'openrouter' (#2904)", async () => {
+    const shipped = new ModelRegistry(loadModelsConfig());
+    const pins = resolveEffectiveModelPins(
+      shipped,
+      { version: 2, models: { pins: { plan: 'pi-openrouter-deepseek-v4-flash' } } },
+      {},
+    );
+    expect(pins.plan).toBe('pi-openrouter-deepseek-v4-flash');
+    const exec = okExec();
+    await new PiHarness(exec).run(req({ model: pins.plan!, registry: shipped, task: 'plan' }));
+    expect(exec.mock.calls[0][0]).toContain("--provider 'openrouter' --model 'deepseek/deepseek-v4.1-flash'");
+  });
+
   it('passes the required headless flags and splits providerModel into --provider/--model', async () => {
     const exec = okExec();
     const result = await new PiHarness(exec).run(req({ worktree: '/tmp/factory worktree', timeoutSeconds: 7 }));

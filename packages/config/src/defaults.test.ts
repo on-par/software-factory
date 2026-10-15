@@ -49,9 +49,9 @@ describe('shipped defaults', () => {
     expect(defaultModelsConfig.models[retired?.replacement ?? '']).toBeDefined();
   });
 
-  it('has 23 models with the expected harness-bearing spot checks', () => {
+  it('has 25 models with the expected harness-bearing spot checks', () => {
     const modelIds = Object.keys(defaultModelsConfig.models);
-    expect(modelIds).toHaveLength(23);
+    expect(modelIds).toHaveLength(25);
 
     for (const id of [
       'claude-opus-5',
@@ -67,6 +67,8 @@ describe('shipped defaults', () => {
       'gpt-5.1-codex',
       'opencode-deepseek-v4-flash-free',
       'opencode-deepseek-v4-pro',
+      'pi-openrouter-deepseek-v4-flash',
+      'pi-openrouter-deepseek-v4-pro',
       'qwen2.5-coder:14b',
     ]) {
       expect(modelIds, `missing model ${id}`).toContain(id);
@@ -78,6 +80,34 @@ describe('shipped defaults', () => {
     expect(defaultModelsConfig.models['qwen3.5:9b'].harness).toBe('ollama-http');
     expect(defaultModelsConfig.models['codex-ollama-qwen3.5:9b'].harness).toBe('ollama-agentic');
     expect(defaultModelsConfig.models['opencode-deepseek-v4-flash-free'].harness).toBe('opencode');
+    expect(defaultModelsConfig.models['pi-openrouter-deepseek-v4-flash'].harness).toBe('pi');
+  });
+
+  it('registers pi-openrouter-deepseek-v4-flash and -pro as experimental pin-only Pi models via OpenRouter (#2904)', () => {
+    for (const id of ['pi-openrouter-deepseek-v4-flash', 'pi-openrouter-deepseek-v4-pro']) {
+      const model = defaultModelsConfig.models[id];
+      expect(model, id).toMatchObject({
+        provider: 'custom',
+        harness: 'pi',
+        envKey: 'OPENROUTER_API_KEY',
+        contextWindow: 1000000,
+        experimental: true,
+      });
+      expect(model.providerModel, id).toMatch(/^openrouter\/deepseek\//);
+      for (const list of Object.values(defaultModelsConfig.tiers)) {
+        expect(list, id).not.toContain(id);
+      }
+    }
+  });
+
+  it('ships no pi model with an azure/ or deepseek/ prefix (ADR-0163)', () => {
+    for (const [id, model] of Object.entries(defaultModelsConfig.models)) {
+      if (model.harness !== 'pi') continue;
+      const pm = model.providerModel?.toLowerCase();
+      expect(pm, id).toBeDefined();
+      expect(pm!.startsWith('azure/'), id).toBe(false);
+      expect(pm!.startsWith('deepseek/'), id).toBe(false);
+    }
   });
 
   it('points opencode-deepseek-v4-flash at OpenCode Go V4.1 Flash at the published prices (#2898)', () => {
