@@ -6,13 +6,15 @@ import type { Octokit } from '@octokit/rest';
 
 import { orderCollisionAt, scanLaneOrders, type OrderCollision } from './order-collision.js';
 import type { QueueEntry, QueueSnapshot, QueueSnapshotEntry } from './index.js';
+import { orderedCandidates, QUEUE_ORDER_LABEL_PREFIX, type QueueOrderConflict } from './queue-order.js';
+
+export { QUEUE_ORDER_LABEL_PREFIX, type QueueOrderConflict };
 
 export const QUEUED_LABEL = 'factory:queued';
 export const IN_PROGRESS_LABEL = 'factory:in-progress';
 export const PARKED_LABEL = 'factory:parked';
 export const DECOMPOSED_LABEL = 'factory:decomposed';
 export const LANE_LABEL_PREFIX = 'factory:lane:';
-export const QUEUE_ORDER_LABEL_PREFIX = 'factory:order:';
 export const CLAIMED_BY_LABEL_PREFIX = 'factory:claimed-by:';
 export const CLAIM_EXPIRES_LABEL_PREFIX = 'factory:claim-expires:';
 
@@ -198,41 +200,6 @@ export function planQueueMigration(entries: readonly QueueEntry[]): QueueMigrati
   return steps;
 }
 
-function orderedCandidates(lane: string, issues: QueueIssue[]): QueueIssue[] {
-  const positions = new Map<number, number>();
-  const candidates = issues.map((issue) => {
-    const orderLabels = issue.labels.filter((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX));
-    if (orderLabels.length !== 1) {
-      throw new Error(
-        `invalid GitHub queue state for lane ${lane}: issue #${issue.number} must have exactly one queue order label`,
-      );
-    }
-
-    const positionText = orderLabels[0].slice(QUEUE_ORDER_LABEL_PREFIX.length);
-    if (!/^[1-9]\d*$/.test(positionText)) {
-      throw new Error(
-        `invalid GitHub queue state for lane ${lane}: issue #${issue.number} has malformed queue order label ${orderLabels[0]}`,
-      );
-    }
-    const position = Number(positionText);
-    if (!Number.isSafeInteger(position)) {
-      throw new Error(
-        `invalid GitHub queue state for lane ${lane}: issue #${issue.number} has malformed queue order label ${orderLabels[0]}`,
-      );
-    }
-    const priorIssue = positions.get(position);
-    if (priorIssue !== undefined) {
-      throw new Error(
-        `invalid GitHub queue state for lane ${lane}: issues #${priorIssue} and #${issue.number} both have position ${position}`,
-      );
-    }
-    positions.set(position, issue.number);
-    return { issue, position };
-  });
-
-  return candidates.sort((a, b) => a.position - b.position).map(({ issue }) => issue);
-}
-
 /** Claim state of one GitHub-backed queue issue, read from its labels. `in-progress` is the
  *  mid-claim window where `factory:queued` and `factory:in-progress` coexist; `parked` can only
  *  come from a hand-applied label, since `release(issue, 'parked')` strips `factory:queued` and the
@@ -252,7 +219,8 @@ function queueIssueStatus(labels: readonly string[]): Pick<QueueSnapshotEntry, '
  *  tab renders, so `factory tui` can show the same backlog `factory status` does (#1362).
  *  One list call for `factory:queued` issues; lanes come from their `factory:lane:*` labels and
  *  each lane is ordered exactly as `GithubQueue.list(lane)` orders it. Throws on the same
- *  malformed-order-label states `list()` throws on; callers degrade to a message. */
+ *  malformed or missing order labels `list()` throws on (callers degrade to a message); issues
+ *  sharing a `factory:order` position are left out (#2977). */
 export async function readGithubQueueSnapshot(input: {
   client: Pick<QueueGitHubClient, 'listOpenIssuesWithLabels'>;
   owner: string;
@@ -425,6 +393,8 @@ export interface GithubQueueOptions {
   leaseMs?: number;
   /** Clock injection for tests. Defaults to `Date.now`. */
   now?: () => number;
+  /** Called once per duplicated `factory:order:<n>` position seen by list/claimNext; those issues are skipped (#2977). */
+  onOrderConflict?: (conflict: QueueOrderConflict) => void;
 }
 
 export interface GithubQueue {
@@ -473,12 +443,12 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
 
   async function list(lane: string): Promise<number[]> {
     const issues = await candidatesFor(lane);
-    return orderedCandidates(lane, issues).map((issue) => issue.number);
+    return orderedCandidates(lane, issues, options.onOrderConflict).map((issue) => issue.number);
   }
 
   async function claimNext(lane: string): Promise<QueueClaim | null> {
     const routeLabel = laneLabel(lane);
-    const candidates = orderedCandidates(lane, await candidatesFor(lane));
+    const candidates = orderedCandidates(lane, await candidatesFor(lane), options.onOrderConflict);
     if (candidates.length === 0) return null;
 
     await ensureLabels(lane);

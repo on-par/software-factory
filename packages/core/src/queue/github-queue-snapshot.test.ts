@@ -28,6 +28,16 @@ describe('readGithubQueueSnapshot (#1362)', () => {
     });
   });
 
+  it('leaves out issues that share an order position instead of throwing (#2977)', async () => {
+    const { client } = clientWith([
+      { number: 1, labels: ['factory:queued', 'factory:lane:ops', 'factory:order:1'] },
+      { number: 2, labels: ['factory:queued', 'factory:lane:ops', 'factory:order:1'] },
+      { number: 3, labels: ['factory:queued', 'factory:lane:ops', 'factory:order:2'] },
+    ]);
+    const { entries } = await readGithubQueueSnapshot({ client, owner: 'o', repo: 'r' });
+    expect(entries.map((e) => e.issue)).toEqual([3]);
+  });
+
   it('lists an issue carrying two lane labels under both lanes, as list(lane) would', async () => {
     const { client } = clientWith([
       { number: 4, labels: ['factory:queued', 'factory:lane:a', 'factory:lane:b', 'factory:order:1'] },

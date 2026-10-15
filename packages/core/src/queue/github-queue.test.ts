@@ -181,21 +181,10 @@ describe('list', () => {
     const { client } = createFakeStore([
       { number: 1, labels: [QUEUED_LABEL, laneLabel('build')] },
       { number: 2, labels: [QUEUED_LABEL, laneLabel('build'), queueOrderLabel(1)] },
-      { number: 3, labels: [QUEUED_LABEL, laneLabel('build'), queueOrderLabel(1)] },
     ]);
     const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
 
     await expect(queue.list('build')).rejects.toThrow('invalid GitHub queue state');
-  });
-
-  it('rejects duplicate positions within a lane', async () => {
-    const { client } = createFakeStore([
-      { number: 1, labels: [QUEUED_LABEL, laneLabel('build'), queueOrderLabel(1)] },
-      { number: 2, labels: [QUEUED_LABEL, laneLabel('build'), queueOrderLabel(1)] },
-    ]);
-    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
-
-    await expect(queue.claimNext('build')).rejects.toThrow('both have position 1');
   });
 
   it.each([

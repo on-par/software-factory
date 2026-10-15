@@ -162,6 +162,11 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
               logEvent(paths.events, 'queue_admission_conflict', String(issue), line);
             },
           }),
+          onOrderConflict: ({ lane, position, issues }) => {
+            const line = `lane ${lane}: issues ${issues.map((n) => `#${n}`).join(', ')} share factory:order:${position}; skipped | repair: give each a unique order label`;
+            console.error(styleText('yellow', `factory: ${line}`));
+            logEvent(paths.events, 'queue_order_conflict', issues.join(','), line, { lane });
+          },
         });
       },
     });
