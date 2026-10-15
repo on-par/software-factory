@@ -140,3 +140,10 @@ export function harnessInstallChecks(
     };
   });
 }
+
+/** Agents whose `<cli> signed in` row is a hard pass (#2999), in HARNESS_SETUP order. */
+export function readyAgents(checks: DoctorCheck[]): string[] {
+  return HARNESS_SETUP.filter(({ cli }) =>
+    checks.some((c) => c.name === `${cli} signed in` && c.ok && c.optional !== true),
+  ).map(({ cli }) => cli);
+}
