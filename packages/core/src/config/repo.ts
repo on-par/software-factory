@@ -321,7 +321,7 @@ export function loadRepoConfig(repoRoot: string, stateRoot?: string): RepoFactor
     try {
       raw = JSON.parse(explicit);
     } catch (err: any) {
-      throw new Error(`Failed to parse ${path}: ${err.message}`);
+      throw new Error(`Failed to parse ${path}: ${err.message}`, { cause: err });
     }
   } else {
     raw = readRepoConfigFile(path);

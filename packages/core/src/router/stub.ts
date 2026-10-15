@@ -42,7 +42,7 @@ export class StubModelExecutor implements ModelExecutor {
         err instanceof Error &&
         err.message === `SimModelExecutor: no scripted step or defaultStep for task '${ctx.task}'`
       ) {
-        throw new Error(`StubModelExecutor: no scripted step or defaultOutput for task '${ctx.task}'`);
+        throw new Error(`StubModelExecutor: no scripted step or defaultOutput for task '${ctx.task}'`, { cause: err });
       }
       throw err;
     }
