@@ -1,4 +1,4 @@
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
@@ -50,9 +50,9 @@ describe('shipped defaults', () => {
     expect(defaultModelsConfig.models[retired?.replacement ?? '']).toBeDefined();
   });
 
-  it('has 25 models with the expected harness-bearing spot checks', () => {
+  it('has 26 models with the expected harness-bearing spot checks', () => {
     const modelIds = Object.keys(defaultModelsConfig.models);
-    expect(modelIds).toHaveLength(25);
+    expect(modelIds).toHaveLength(26);
 
     for (const id of [
       'claude-opus-5',
@@ -99,6 +99,41 @@ describe('shipped defaults', () => {
         expect(list, id).not.toContain(id);
       }
     }
+  });
+
+  it('registers claude-openrouter-deepseek-v4-flash as an experimental pin-only claude-cli model via OpenRouter (#2908)', () => {
+    const id = 'claude-openrouter-deepseek-v4-flash';
+    const model = defaultModelsConfig.models[id];
+    expect(model).toMatchObject({
+      provider: 'custom',
+      harness: 'claude-cli',
+      endpoint: 'https://openrouter.ai/api',
+      envKey: 'OPENROUTER_API_KEY',
+      claudeFlag: 'deepseek/deepseek-v4.1-flash',
+      experimental: true,
+    });
+    // config cannot import core, so the host is asserted literally. Keep it in sync with the
+    // approved list in packages/core/src/config/intermediaries.ts.
+    const url = new URL(model.endpoint!);
+    expect(url.protocol).toBe('https:');
+    expect(url.hostname).toBe('openrouter.ai');
+    expect(model.costPerMtokInput).toBeGreaterThan(0);
+    expect(model.costPerMtokOutput).toBeGreaterThan(0);
+    for (const list of Object.values(defaultModelsConfig.tiers)) {
+      expect(list).not.toContain(id);
+    }
+  });
+
+  it('documents dated tools, thinking and ZDR verification in the claude-openrouter-deepseek-v4-flash JSDoc (#2908)', () => {
+    const lines = readFileSync(new URL('./defaults.ts', import.meta.url), 'utf8').split('\n');
+    const idx = lines.findIndex((l) => l.includes("'claude-openrouter-deepseek-v4-flash': {"));
+    expect(idx).toBeGreaterThan(0);
+    const doc = lines[idx - 1];
+    expect(doc).toMatch(/Verified \d{4}-\d{2}-\d{2}/);
+    expect(doc).toMatch(/tools (PASS|FAIL)/i);
+    expect(doc).toMatch(/thinking (PASS|FAIL)/i);
+    expect(doc).toMatch(/ZDR (PASS|FAIL)/i);
+    expect(doc).toContain('live `claude -p`');
   });
 
   it('ships no pi model with an azure/ or deepseek/ prefix (ADR-0163)', () => {
