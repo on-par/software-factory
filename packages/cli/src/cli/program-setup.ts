@@ -10,7 +10,8 @@ export function registerSetupCommands(program: Command, handlers: ProgramHandler
       'Set up .factory/ in this repo (config, constitution, queue file, .gitignore) and check model reachability',
     )
     .option('--force', 'Overwrite an existing .factory config, constitution, and .gitignore')
-    .action((opts: { force?: boolean }) => handlers.cmdInit(opts));
+    .option('-y, --yes', 'Accept defaults without prompting (init never prompts; accepted for scripts and CI)')
+    .action((opts: { force?: boolean; yes?: boolean }) => handlers.cmdInit(opts));
 
   program
     .command('migrate')
