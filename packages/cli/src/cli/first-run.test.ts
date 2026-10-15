@@ -8,6 +8,7 @@ import { ConstitutionLoader, getConstitutionsDir } from '@on-par/factory-core';
 import {
   describeConstitutionSource,
   laneWorktreePath,
+  lintFactoryConfig,
   openCodeVersion,
   setupWorktree,
 } from '@on-par/factory-core/internal';
@@ -224,5 +225,42 @@ describe('factory init → lane worktree constitution (integration)', () => {
     expect(resolved!.product).toBe('default-code');
     expect(resolved!.checkers.some((c) => c.startsWith('custom_'))).toBe(false);
     expect(describeConstitutionSource(resolved)).toMatch(/^Standards from \.factory\/constitution\.md \(/);
+  }, 30_000);
+
+  const scaffoldExec = async (
+    cmd: string,
+    opts?: { cwd?: string; timeout?: number },
+  ): Promise<{ stdout: string; stderr: string }> => {
+    const { stdout, stderr } = await execAsync(cmd, {
+      cwd: opts?.cwd ?? repo,
+      timeout: opts?.timeout,
+      encoding: 'utf-8',
+    });
+    return { stdout: String(stdout), stderr: String(stderr) };
+  };
+
+  it('an unedited factory init scaffold passes the config preflight', async () => {
+    await main(['node', 'factory', 'init'], { exec: scaffoldExec });
+    expect(existsSync(join(repo, '.factory/config.yaml'))).toBe(true);
+
+    const constitution = new ConstitutionLoader().loadRepoConstitution(repo);
+    expect(constitution).not.toBeNull();
+    const result = lintFactoryConfig({
+      constitution,
+      configFile: { absPath: join(repo, '.factory/config.yaml'), relPath: '.factory/config.yaml' },
+    });
+    expect(result.findings).toEqual([]);
+    expect(result.verdict).toBe('ok');
+  }, 30_000);
+
+  it('an unedited factory constitution --init scaffold passes the config preflight', async () => {
+    await main(['node', 'factory', 'constitution', '--init'], { exec: scaffoldExec });
+
+    const constitution = new ConstitutionLoader().loadRepoConstitution(repo);
+    expect(constitution).not.toBeNull();
+    expect(constitution!.checkers.length).toBeGreaterThan(0);
+    const result = lintFactoryConfig({ constitution });
+    expect(result.findings).toEqual([]);
+    expect(result.verdict).toBe('ok');
   }, 30_000);
 });
