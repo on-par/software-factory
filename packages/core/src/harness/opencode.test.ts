@@ -466,7 +466,7 @@ describe('OpenCodeHarness recorded error fixtures', () => {
   });
 
   it('returns assistant text even when an error event is present on exit 0', async () => {
-    const textLine = '{"type":"text","sessionID":"ses_fixture","part":{"type":"text","text":"done"}}';
+    const textLine = '{"type":"text","part":{"type":"text","text":"done"}}\n{"type":"step_finish","part":{}}';
     const rec = recordingExec({ stdout: `${rateLimitFixture}${textLine}\n` });
     const result = await new OpenCodeHarness(rec.fn).run(makeContractRequest({ model: 'opencode-model', registry }));
     expect(result.output).toBe('done');

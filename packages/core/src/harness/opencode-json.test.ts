@@ -46,7 +46,7 @@ describe('parseOpenCodeJson', () => {
     const parsed = parseOpenCodeJson(
       '{"type":"step_finish","part":{"cost":1}}\n{"type":"step_finish","part":{"tokens":{"input":"x"}}}',
     );
-    expect(parsed).toEqual({ text: '', errorText: '', permissionDenials: [] });
+    expect(parsed).toEqual({ text: '', errorText: '', permissionDenials: [], finished: true });
   });
 
   it('omits costUsd when the cost is 0 and tolerates a missing cache block', () => {
@@ -132,7 +132,7 @@ describe('parseOpenCodeJson typed error events', () => {
   it('omits errorType for a non-string or empty type', () => {
     for (const type of ['', 5, null, { a: 1 }]) {
       const parsed = parseOpenCodeJson(err({ type, data: { message: 'm' } }));
-      expect(parsed).toEqual({ text: '', errorText: 'm', permissionDenials: [] });
+      expect(parsed).toEqual({ text: '', errorText: 'm', permissionDenials: [], finished: true });
     }
   });
 

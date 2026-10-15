@@ -33,6 +33,8 @@ export interface ParsedOpenCodeJson {
   /** `tool_use` events whose state error/output says the non-interactive run could not ask for
    *  permission; always present, `[]` when none. */
   permissionDenials: OpenCodePermissionDenial[];
+  /** False when a `step_start` has no later `step_finish` (truncated run, #2882); true when every step closed or none started. */
+  finished: boolean;
 }
 
 export interface OpenCodePermissionDenial {
@@ -78,6 +80,7 @@ export function parseOpenCodeJson(stdout: string): ParsedOpenCodeJson | undefine
   const permissionDenials: OpenCodePermissionDenial[] = [];
   let sawEvent = false;
   let sawUsage = false;
+  let openStep = false;
   let numTurns = 0;
   let minTs: number | undefined;
   let maxTs: number | undefined;
@@ -107,10 +110,12 @@ export function parseOpenCodeJson(stdout: string): ParsedOpenCodeJson | undefine
 
     if (event.type === 'step_start') {
       stepTexts = [];
+      openStep = true;
     } else if (event.type === 'text') {
       const text = event.part?.text;
       if (typeof text === 'string' && text.trim().length > 0) stepTexts.push(text.trim());
     } else if (event.type === 'step_finish') {
+      openStep = false;
       const tokens = event.part?.tokens;
       if (!tokens || !Number.isFinite(tokens.input) || !Number.isFinite(tokens.output)) continue;
       sawUsage = true;
@@ -164,6 +169,7 @@ export function parseOpenCodeJson(stdout: string): ParsedOpenCodeJson | undefine
     permissionDenials,
     ...(errorType !== undefined ? { errorType } : {}),
     ...(errorStatus !== undefined ? { errorStatus } : {}),
+    finished: !openStep,
     ...(sawUsage
       ? {
           usage: {
@@ -236,6 +242,7 @@ export class OpenCodeHarness implements CodingHarness {
     // message (observed with deepseek-v4-flash on large plan prompts). One
     // retry with an explicit final-message instruction recovers those runs
     // without masking a genuinely broken provider (still throws after 2 tries).
+    // It also covers exit-0 runs truncated before the last `step_finish`.
     const FINAL_MESSAGE_NUDGE =
       '\n\nIMPORTANT: your final message must contain your complete answer as plain text. Do not end the session on a tool call or with an empty message.';
     const MAX_ATTEMPTS = 2;
@@ -246,6 +253,7 @@ export class OpenCodeHarness implements CodingHarness {
     try {
       let stdout = '';
       let stderr = '';
+      let truncated = false;
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         const attemptPrompt = attempt === 1 ? prompt : prompt + FINAL_MESSAGE_NUDGE;
         // `--auto`: headless runs auto-REJECT permission prompts (e.g. reading the
@@ -306,7 +314,11 @@ export class OpenCodeHarness implements CodingHarness {
           );
         }
         const output = parsed ? parsed.text : stdout;
-        if (output.trim().length > 0) return { output, ...(parsed?.usage ? { usage: parsed.usage } : {}) };
+        // An exit-0 run whose last step never got a step_finish is truncated
+        // (anomalyco/opencode#50514): fall through to the nudge retry.
+        truncated = parsed !== undefined && !parsed.finished;
+        if (output.trim().length > 0 && !truncated)
+          return { output, ...(parsed?.usage ? { usage: parsed.usage } : {}) };
         if (parsed && parsed.errorText) {
           // OpenCode can exit 0 with the session error only on stdout. Do not
           // nudge-retry into a usage cap or rate limit; let the router fail over.
@@ -319,9 +331,13 @@ export class OpenCodeHarness implements CodingHarness {
         }
       }
 
-      throw new HarnessError(`opencode CLI returned empty output (${MAX_ATTEMPTS} attempts)`, 'empty_response', {
-        exitCode: 0,
-      });
+      throw new HarnessError(
+        truncated
+          ? `opencode run exited 0 without a final step_finish (${MAX_ATTEMPTS} attempts)`
+          : `opencode CLI returned empty output (${MAX_ATTEMPTS} attempts)`,
+        'empty_response',
+        { exitCode: 0 },
+      );
     } finally {
       await rm(promptDir, { recursive: true, force: true });
     }
