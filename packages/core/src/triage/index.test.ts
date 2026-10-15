@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildTriagePrompt,
+  closingKeywordIssues,
   dropQueuedIssues,
   normalizeTriageQueue,
   parseOpenPrIssues,
@@ -117,5 +118,35 @@ describe('dropQueuedIssues', () => {
 
   it('returns an empty string when every entry is dropped', () => {
     expect(dropQueuedIssues(queue, new Set([1, 3, 5, 6])).queue).toBe('');
+  });
+});
+
+describe('closingKeywordIssues (#2983)', () => {
+  it('matches all nine keywords, the colon form, and multiple refs', () => {
+    for (const k of ['close', 'closes', 'closed', 'fix', 'fixes', 'fixed', 'resolve', 'resolves', 'RESOLVED']) {
+      expect(closingKeywordIssues(`${k} #5`)).toEqual([5]);
+    }
+    expect(closingKeywordIssues('Closes: #7')).toEqual([7]);
+    expect(closingKeywordIssues('Closes #7, fixes #9')).toEqual([7, 9]);
+  });
+
+  it('ignores bare refs, keyword-in-word, cross-repo refs and empty text', () => {
+    for (const t of ['see #7', 'prefixes #7', 'unresolved #7', 'closes o/r#7', '']) {
+      expect(closingKeywordIssues(t)).toEqual([]);
+    }
+  });
+});
+
+describe('parseOpenPrIssues closing keywords (#2983)', () => {
+  const parse = (rows: unknown[]) => parseOpenPrIssues(JSON.stringify(rows), 'factory');
+  it('links by body or title on any branch', () => {
+    expect(parse([{ headRefName: 'feature/x', body: 'Closes #7' }, { title: 'fix #4' }])).toEqual(new Set([7, 4]));
+  });
+  it('skips non-OPEN rows and counts OPEN ones', () => {
+    expect(parse([{ state: 'CLOSED', body: 'Closes #8', headRefName: 'factory/9-a' }])).toEqual(new Set());
+    expect(parse([{ state: 'OPEN', body: 'Closes #8' }])).toEqual(new Set([8]));
+  });
+  it('ignores null and non-string title/body', () => {
+    expect(parse([{ title: null, body: 5 }])).toEqual(new Set());
   });
 });

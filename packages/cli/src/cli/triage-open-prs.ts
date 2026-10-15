@@ -1,4 +1,4 @@
-// triage-open-prs.ts: drops issues that already own an open factory PR from the triage queue (#2981).
+// triage-open-prs.ts: drops issues that already own an open PR (factory branch or closing keyword) from the triage queue (#2981, #2983).
 import {
   dropQueuedIssues,
   logEvent,
@@ -16,7 +16,7 @@ export function skippedIssuesComment(dropped: readonly number[]): string {
   return `# Skipped (a PR is open): ${dropped.map((n) => `#${n}`).join(', ')}\n`;
 }
 
-/** Normalizes the model output, then removes entries for issues with an open `<prefix>/<n>-…` PR.
+/** Normalizes the model output, then removes entries for issues with an open `<prefix>/<n>-…` PR or an open PR whose title/body closes them by keyword.
  *  When entries survive, a `# Skipped (a PR is open): …` comment line naming the dropped issues leads the queue.
  *  A failing or malformed `gh pr list` leaves the queue unfiltered. Returns '' when nothing survives. */
 export async function proposeTriageQueue(
@@ -30,7 +30,7 @@ export async function proposeTriageQueue(
   let prJson: string;
   try {
     const { stdout } = await exec(
-      `gh pr list --repo ${shellEscape(ghRepo)} --state open --limit 200 --json headRefName`,
+      `gh pr list --repo ${shellEscape(ghRepo)} --state open --limit 200 --json headRefName,title,body,state`,
     );
     prJson = stdout || '[]';
   } catch (err: unknown) {

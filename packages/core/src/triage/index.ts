@@ -108,8 +108,17 @@ export function normalizeTriageQueue(output: string): string {
   return entries > 0 ? `${lines.join('\n')}\n` : '';
 }
 
-/** Issue numbers that own an open factory PR, from `gh pr list --json headRefName` (#2981).
- *  Rows without a string headRefName are skipped; malformed JSON returns null so the caller can warn. */
+/** GitHub closing keywords (close/fix/resolve and their -s/-d/-es/-ed forms), optional colon, same-repo `#N` only (#2983). */
+const CLOSING_KEYWORD_RE = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+#(\d+)\b/gi;
+
+/** Every issue number a PR title or body closes by keyword, in order of appearance (#2983). */
+export function closingKeywordIssues(text: string): number[] {
+  return [...text.matchAll(CLOSING_KEYWORD_RE)].map((m) => Number(m[1]));
+}
+
+/** Issue numbers that own an open PR, from `gh pr list --json headRefName,title,body,state`: a factory branch
+ *  name (#2981) or a closing keyword in the title or body (#2983). Non-OPEN rows are skipped;
+ *  malformed JSON returns null so the caller can warn. */
 export function parseOpenPrIssues(json: string, prefix?: string): Set<number> | null {
   const issues = new Set<number>();
   let raw: unknown;
@@ -121,10 +130,15 @@ export function parseOpenPrIssues(json: string, prefix?: string): Set<number> | 
   if (!Array.isArray(raw)) return null;
   for (const item of raw) {
     if (typeof item !== 'object' || item === null) continue;
-    const head = (item as { headRefName?: unknown }).headRefName;
-    if (typeof head !== 'string') continue;
-    const issue = factoryBranchIssue(head, prefix);
-    if (issue !== null) issues.add(issue);
+    const row = item as { headRefName?: unknown; title?: unknown; body?: unknown; state?: unknown };
+    if (typeof row.state === 'string' && row.state.toUpperCase() !== 'OPEN') continue;
+    if (typeof row.headRefName === 'string') {
+      const issue = factoryBranchIssue(row.headRefName, prefix);
+      if (issue !== null) issues.add(issue);
+    }
+    for (const text of [row.title, row.body]) {
+      if (typeof text === 'string') for (const n of closingKeywordIssues(text)) issues.add(n);
+    }
   }
   return issues;
 }
