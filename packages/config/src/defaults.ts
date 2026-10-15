@@ -451,6 +451,20 @@ export const defaultModelsConfig: ModelsDefaults = {
       providerModel: 'openrouter/deepseek/deepseek-v4-pro',
       experimental: true,
     },
+    /** Added 2026-10-15 (#2908): DeepSeek V4.1 Flash on the claude-cli harness via OpenRouter's Anthropic-compatible endpoint (#2906), an approved zero-retention intermediary (ADR-0163). Secondary route: Pi (`pi-openrouter-deepseek-v4-flash`) is the main DeepSeek route. Verified 2026-10-15: tools PASS and thinking PASS (`deepseek/deepseek-v4.1-flash` lists tools, tool_choice, reasoning per https://openrouter.ai/api/v1/models; OpenRouter's Claude Code guide says the Anthropic skin passes through tool use and thinking blocks); ZDR PASS (enforceable per key through OpenRouter guardrails per https://openrouter.ai/docs/features/zdr) — the OPENROUTER_API_KEY must have ZDR enforced, without it this model must not be used; live `claude -p` call: not run (no OPENROUTER_API_KEY on the build machine). Prices $0.02376/$0.72 per 1M per https://openrouter.ai/api/v1/models, checked 2026-10-15; priced from the registry, not Claude Code's total_cost_usd (#2907). Pin-only: in no tier. opt in with FACTORY_EXPERIMENTAL=1. */
+    'claude-openrouter-deepseek-v4-flash': {
+      provider: 'custom',
+      tier: ['worker'],
+      costPerMtokInput: 0.02376,
+      costPerMtokOutput: 0.72,
+      contextWindow: 1000000,
+      capabilities: ['implementation', 'coding'],
+      envKey: 'OPENROUTER_API_KEY',
+      harness: 'claude-cli',
+      claudeFlag: 'deepseek/deepseek-v4.1-flash',
+      endpoint: 'https://openrouter.ai/api',
+      experimental: true,
+    },
   },
   tiers: {
     boss: [

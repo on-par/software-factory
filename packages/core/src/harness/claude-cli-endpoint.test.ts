@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { ModelsConfig } from '../config/index.js';
+import { loadModelsConfig, type ModelsConfig } from '../config/index.js';
+import { resolveEffectiveModelPins } from '../config/repo.js';
 import { ModelRegistry } from '../models/index.js';
 import { CliModelExecutor } from '../router/index.js';
 import { ClaudeCliHarness, claudeEndpointEnv } from './claude-cli.js';
@@ -163,5 +164,34 @@ describe('ClaudeCliHarness intermediary endpoint (#2906)', () => {
     expect(() =>
       claudeEndpointEnv({ endpoint: 'https://api.deepseek.com/anthropic', envKey: 'K' }, { K: 'v' }),
     ).toThrow(/not an approved intermediary/);
+  });
+});
+
+describe('packaged claude-openrouter-deepseek-v4-flash (#2908)', () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('a repo plan pin to packaged claude-openrouter-deepseek-v4-flash sets ANTHROPIC_BASE_URL to its endpoint and keeps the key out of the command (#2908)', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-test-2908');
+    const registry = new ModelRegistry(loadModelsConfig());
+    const pins = resolveEffectiveModelPins(
+      registry,
+      { version: 2, models: { pins: { plan: 'claude-openrouter-deepseek-v4-flash' } } },
+      {},
+    );
+    expect(pins.plan).toBe('claude-openrouter-deepseek-v4-flash');
+    const def = registry.get(pins.plan!)!;
+    const rec = recordingExec({ stdout: envelope() });
+    await new CliModelExecutor(rec.fn as any).runModel(pins.plan!, 'p', {
+      worktree: '/tmp/wt',
+      timeoutSeconds: 5,
+      task: 'plan',
+      registry,
+      routesConfig: {} as any,
+    });
+    expect(rec.calls).toHaveLength(1);
+    expect(rec.calls[0].opts.env.ANTHROPIC_BASE_URL).toBe(def.endpoint);
+    expect(rec.calls[0].opts.env.ANTHROPIC_AUTH_TOKEN).toBe('sk-or-test-2908');
+    expect(rec.calls[0].cmd).not.toContain('sk-or-test-2908');
+    expect(rec.calls[0].cmd).toMatch(/^claude -p /);
   });
 });

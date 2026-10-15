@@ -75,6 +75,18 @@ A registry model on the `claude-cli` harness may set `endpoint` (an https URL) t
 }
 ```
 
+### DeepSeek on Claude Code (secondary route)
+
+`claude-openrouter-deepseek-v4-flash` is packaged, experimental and pin-only (in no tier). It needs `FACTORY_EXPERIMENTAL=1` and an `OPENROUTER_API_KEY` with ZDR enforced (guardrail or account setting). It runs Claude Code against OpenRouter's Anthropic-compatible endpoint, and its cost comes from registry prices. Pi (`pi-openrouter-deepseek-v4-flash`) is the main DeepSeek route. Use this one only when you need Claude Code's sandbox and tooling.
+
+```yaml
+# .factory/config.yaml
+version: 2
+models:
+  pins:
+    plan: claude-openrouter-deepseek-v4-flash
+```
+
 Requirements:
 
 - Set `FACTORY_EXPERIMENTAL=1` in the factory's environment. Without it the router drops experimental models from every tier, pinned tiers included, and `factory models` shows them as `experimental — set FACTORY_EXPERIMENTAL=1 to enable`.
