@@ -122,7 +122,7 @@ function parseCoverageSummaryJson(json: string): unknown {
   try {
     return JSON.parse(json);
   } catch (err) {
-    throw new Error(`coverage summary is not valid JSON: ${(err as Error).message}`);
+    throw new Error(`coverage summary is not valid JSON: ${(err as Error).message}`, { cause: err });
   }
 }
 

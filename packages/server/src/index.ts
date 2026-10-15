@@ -135,7 +135,16 @@ export function createServer(config: ServerConfig): FactoryServer {
     res.end(JSON.stringify({ error: 'not found' }));
   }
 
-  const server = http.createServer(handleRequest);
+  const server = http.createServer((req, res) => {
+    void handleRequest(req, res).catch(() => {
+      if (!res.headersSent) {
+        res.writeHead(500, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'internal error' }));
+      } else {
+        res.end();
+      }
+    });
+  });
 
   const factoryServer: FactoryServer = {
     server,

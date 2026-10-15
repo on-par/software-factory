@@ -1,6 +1,6 @@
 # Sandbox egress
 
-Under `sandbox-exec` (macOS) with a non-empty `sandbox.network.allow`, each lane's agent traffic goes through a local report-only proxy. The proxy logs every host it sees (`egress_host`) and a per-run summary (`egress_summary`). The allowlist is not enforced yet: hosts that are not on it are still forwarded and reported. Enforcement on macOS is tracked in #2215.
+Under `sandbox-exec` (macOS) with a non-empty `sandbox.network.allow`, each lane's agent traffic goes through a local report-only proxy. The proxy logs every host it sees (`egress_host`) and a per-run summary (`egress_summary`). The allowlist is not enforced yet: hosts that are not on it are still forwarded and reported. Mini egress is currently report-only; enforce mode is tracked in #2215.
 
 An empty `sandbox.network.allow` denies all egress, and the proxy does not run.
 

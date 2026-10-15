@@ -494,7 +494,7 @@ export function loadFactoryConfigForRepo(configPath: string): FactoryConfig {
     try {
       raw = JSON.parse(explicit);
     } catch (err) {
-      throw new Error(`Failed to parse ${configPath}: ${(err as Error).message}`);
+      throw new Error(`Failed to parse ${configPath}: ${(err as Error).message}`, { cause: err });
     }
   } else {
     raw = readRepoConfigFile(configPath);

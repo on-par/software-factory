@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { YAMLParseError } from 'yaml';
 
 import { getFactoryPaths, loadFactoryConfigForRepo } from './index.js';
 import { resolveSafeRepoPolicy } from './policy.js';
@@ -80,6 +81,31 @@ describe('repo-config-file', () => {
     it('keeps the json error prefix', () => {
       const j = write('config.json', '{nope');
       expect(() => readRepoConfigFile(j)).toThrow(`Failed to parse ${j}:`);
+    });
+    it('keeps the JSON parse error as the cause of a malformed config error', () => {
+      const j = write('config.json', '{nope');
+      const err = (() => {
+        try {
+          readRepoConfigFile(j);
+        } catch (e) {
+          return e as Error;
+        }
+        throw new Error('expected readRepoConfigFile to throw');
+      })();
+      expect(err.message.startsWith('Failed to parse')).toBe(true);
+      expect(err.cause).toBeInstanceOf(SyntaxError);
+    });
+    it('keeps the YAML parse error as the cause of a malformed config error', () => {
+      const y = write('config.yaml', 'models:\n  pins: [unclosed');
+      const err = (() => {
+        try {
+          readRepoConfigFile(y);
+        } catch (e) {
+          return e as Error;
+        }
+        throw new Error('expected readRepoConfigFile to throw');
+      })();
+      expect(err.cause).toBeInstanceOf(YAMLParseError);
     });
     it('skips the collision check for non-candidate names', () => {
       write('config.yaml', YAML_TEXT);
