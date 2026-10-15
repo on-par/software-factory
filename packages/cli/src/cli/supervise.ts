@@ -44,6 +44,8 @@ export interface SuperviseRuntime {
   createIngestHook: typeof createIngestHook;
   cmdRun: (opts: Omit<SuperviseOptions, 'now'>) => Promise<void>;
   CliExitError: typeof CliExitError;
+  /** Resolves the repo config file's display path, so messages name the file actually loaded (#2570). */
+  repoConfigFileFor: (repoRoot: string, absPath: string) => { absPath: string; relPath: string };
 }
 
 export async function cmdSupervise(opts: SuperviseOptions, rt: SuperviseRuntime): Promise<void> {
@@ -83,6 +85,7 @@ export async function cmdSupervise(opts: SuperviseOptions, rt: SuperviseRuntime)
 
   await rt.withRepoRunLock(paths, 'factory supervise', () =>
     rt.superviseLoop({
+      repoConfigLabel: rt.repoConfigFileFor(repoRoot, paths.config).relPath,
       cap: knobs.cap,
       resumeAt: knobs.resumeAt,
       pollMs: knobs.pollMs,

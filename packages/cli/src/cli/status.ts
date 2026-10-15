@@ -57,6 +57,8 @@ export interface StatusRuntime {
   warnQueueDiagnostics: (diagnostics: QueueDiagnostic[]) => void;
   errorDetail: (err: unknown) => string;
   CliExitError: typeof CliExitError;
+  /** Resolves the repo config file's display path, so messages name the file actually loaded (#2570). */
+  repoConfigFileFor: (repoRoot: string, absPath: string) => { absPath: string; relPath: string };
 }
 
 /** Formats the time since `lastActivityAt` as a short duration (e.g. `3m`) for the
@@ -186,7 +188,7 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
     for (const line of describeEffectiveConfig({
       router,
       repo: repoConfig,
-      repoConfigPath: '.factory/config.json',
+      repoConfigPath: rt.repoConfigFileFor(repoRoot, paths.config).relPath,
       mergePolicy: resolveMergePolicy(rt.configLoaders.loadFactoryConfigForRepo(paths.config), process.env, {
         auto: readRunFlagOverrides(paths.runFlags).autoMerge,
       }),
