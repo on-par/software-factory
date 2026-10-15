@@ -81,6 +81,14 @@ function describeError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** A fast CLI (e.g. `echo ok`) can exit before a 1ms timer fires — routinely on Linux or a busy event
+ *  loop — and the run then resolves instead of timing out. Keeping the process group alive after the CLI,
+ *  and killing the whole group via onPgid, makes the timeout case deterministic. A newline, not `;`,
+ *  so a trailing `#` comment in the declared command cannot swallow the sleep. */
+function lingeringExec(execFn: ExecFn): ExecFn {
+  return (cmd, o) => execFn(`${cmd}\nsleep 30`, o);
+}
+
 /** Runs every contract-kit case against the declared harness; never throws for a failing case. */
 export async function runHarnessCheck(opts: HarnessCheckOptions): Promise<HarnessCheckResult[]> {
   const { id, declaration, model, registry } = opts;
@@ -92,7 +100,10 @@ export async function runHarnessCheck(opts: HarnessCheckOptions): Promise<Harnes
     const real = new CommandHarness(id, declaration, execFn);
     const scenarios: HarnessContractScenarios = {
       success: () => ({ harness: real, request: base }),
-      timeout: () => ({ harness: real, request: { ...base, timeoutSeconds: 0.001 } }),
+      timeout: () => ({
+        harness: new CommandHarness(id, declaration, lingeringExec(execFn)),
+        request: { ...base, timeoutSeconds: 0.001, onPgid: () => {} },
+      }),
       emptyOutput: () => ({
         harness: new CommandHarness(id, { ...declaration, command: 'true' }, execFn),
         request: base,

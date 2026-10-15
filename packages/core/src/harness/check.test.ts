@@ -98,6 +98,24 @@ describe('runHarnessCheck', () => {
     expect(results.find((r) => r.name === 'rejects with HarnessError reason timeout on timeout')?.ok).toBe(true);
   });
 
+  it('times out a fast script even when the timer fires after it exits', async () => {
+    // Blocking the event loop right after spawn lets `echo ok` exit before the 1ms timer runs,
+    // as on a fast Linux CI host under parallel test load.
+    const lateTimerExec: ExecFn = (cmd, o) => {
+      const run = defaultExecFn(cmd, o);
+      const until = Date.now() + 50;
+      while (Date.now() < until);
+      return run;
+    };
+    const results = await runHarnessCheck({ ...base, declaration: decl('ok.sh'), execFn: lateTimerExec });
+    for (const name of [
+      'rejects with HarnessError reason timeout on timeout',
+      'failure rejections carry a non-empty diagnostic message',
+    ]) {
+      expect(results.find((r) => r.name === name)).toMatchObject({ ok: true });
+    }
+  });
+
   it('maps every kit case name to a docs/harness-contract.md rule', async () => {
     const results = await runHarnessCheck({ ...base, declaration: decl('ok.sh') });
     for (const r of results) expect(r.rule).toContain('docs/harness-contract.md');
