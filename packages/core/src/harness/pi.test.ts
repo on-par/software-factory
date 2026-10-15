@@ -117,6 +117,30 @@ describe('parsePiJson', () => {
     expect(parsed.usage?.costUsd).toBeUndefined();
   });
 
+  it('collects auto_retry_end.finalError and compaction_end.errorMessage in stream order', () => {
+    const parsed = parsePiJson(
+      [
+        '{"type":"compaction_end","errorMessage":"compaction failed"}',
+        '{"type":"auto_retry_end","success":false,"finalError":"429 rate limit"}',
+        '{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"gave up"}}',
+      ].join('\n'),
+    )!;
+    expect(parsed.errorText).toBe('compaction failed\n429 rate limit\ngave up');
+  });
+
+  it('ignores non-string and empty error values', () => {
+    const parsed = parsePiJson(
+      [
+        '{"type":"compaction_end","errorMessage":5}',
+        '{"type":"compaction_end"}',
+        '{"type":"auto_retry_end","finalError":null}',
+        '{"type":"auto_retry_end","finalError":"  "}',
+        '{"type":"message_end","message":{"role":"assistant","errorMessage":""}}',
+      ].join('\n'),
+    )!;
+    expect(parsed.errorText).toBe('');
+  });
+
   it('omits usage when no assistant message reports tokens', () => {
     expect(parsePiJson('{"type":"agent_start"}')?.usage).toBeUndefined();
   });
@@ -240,5 +264,83 @@ describe('PiHarness', () => {
     const f = await failed.run(req()).catch((e) => e);
     expect(f).toBeInstanceOf(HarnessError);
     expect(f.reason).toBe('rate_limit');
+  });
+});
+
+describe('PiHarness exit-0 failure classification', () => {
+  const run = (stdout: string, stderr = '') =>
+    new PiHarness(vi.fn(async () => ({ stdout, stderr }))).run(req()).catch((e) => e);
+  const successLines = success.trim().split('\n');
+
+  it.each([
+    ['error-rate-limit.jsonl', 'rate_limit'],
+    ['error-usage-cap.jsonl', 'usage_cap'],
+    ['error-auth-401.jsonl', 'local_auth'],
+  ])('classifies %s as %s', async (name, reason) => {
+    const err = await new PiHarness(okExec(fixture(name))).run(req()).catch((e) => e);
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe(reason);
+  });
+
+  it('classifies error-stop-reason.jsonl as error', async () => {
+    const err = await new PiHarness(okExec(fixture('error-stop-reason.jsonl'))).run(req()).catch((e) => e);
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('error');
+    expect(err.message).toContain('stopReason error');
+  });
+
+  it('rejects an aborted run with reason error and a "pi run was aborted" message even when the error text names a rate limit', async () => {
+    const stdout = [
+      ...successLines.slice(0, -1),
+      '{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"429 rate limit"}}',
+      '{"type":"agent_settled","aborted":true}',
+    ].join('\n');
+    const err = await run(stdout);
+    expect(err).toBeInstanceOf(HarnessError);
+    expect(err.reason).toBe('error');
+    expect(err.message).toContain('aborted');
+    expect(err.message).toContain('pi run was aborted');
+  });
+
+  it('rejects stopReason length with reason error naming the cause', async () => {
+    const stdout = [
+      '{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"length","errorMessage":"402 Insufficient credits"}}',
+      '{"type":"agent_settled","aborted":false}',
+    ].join('\n');
+    const err = await run(stdout);
+    expect(err.reason).toBe('error');
+    expect(err.message).toContain('stopReason length');
+  });
+
+  it('classifies a rate limit from stderr on exit 0', async () => {
+    const err = await run(fixture('stop-error.jsonl'), '429 Too Many Requests');
+    expect(err.reason).toBe('rate_limit');
+  });
+
+  it('narrows non-provider classifications to error', async () => {
+    const stdout = [
+      '{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"model foo: not found"}}',
+      '{"type":"agent_settled","aborted":false}',
+    ].join('\n');
+    const err = await run(stdout);
+    expect(err.reason).toBe('error');
+  });
+
+  it('still succeeds when an earlier compaction_end carries an errorMessage', async () => {
+    const stdout = ['{"type":"compaction_end","errorMessage":"429 rate limit"}', ...successLines].join('\n');
+    const result = await new PiHarness(okExec(stdout)).run(req());
+    expect(result.output).toBe('Final answer');
+  });
+
+  it('classifies a nonzero exit from auto_retry_end.finalError on stdout', async () => {
+    const exec = vi.fn(async () => {
+      throw Object.assign(new Error('pi failed'), {
+        code: 1,
+        stderr: '',
+        stdout: '{"type":"auto_retry_end","success":false,"finalError":"429 rate limit"}\n',
+      });
+    });
+    const err = await new PiHarness(exec).run(req()).catch((e) => e);
+    expect(err.reason).toBe('rate_limit');
   });
 });

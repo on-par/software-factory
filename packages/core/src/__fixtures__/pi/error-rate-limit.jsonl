@@ -1,0 +1,6 @@
+{"_comment":"Built from Pi docs/json.md event shapes, not recorded from a real run (#2901)."}
+{"type":"agent_start"}
+{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":2000,"errorMessage":"429 rate limited"}
+{"type":"auto_retry_end","success":false,"attempt":3,"finalError":"429 {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"Number of request tokens has exceeded your per-minute rate limit\"}}"}
+{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"Request failed after 3 retries","usage":{"input":10,"output":0,"cacheRead":0,"cacheWrite":0,"cost":{"total":0}}}}
+{"type":"agent_settled","aborted":false}

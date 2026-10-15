@@ -11,6 +11,10 @@ export function classifyFailure(stderr: string, exitCode: number): HarnessFailur
     return 'local_auth';
   // Codex CLI without a login: `unexpected status 401 Unauthorized: Missing bearer ...` (#2494).
   if (/missing bearer|\b401\b[^\n]{0,20}unauthori[sz]ed/.test(text)) return 'local_auth';
+  // Provider 401 bodies as surfaced by Pi: Anthropic `authentication_error`, OpenAI
+  // "Incorrect API key provided", OpenRouter "No auth credentials found" (#2901).
+  if (/\bauthentication_error\b|(?:invalid|incorrect) (?:x-)?api[\s_-]?key|no auth credentials found/.test(text))
+    return 'local_auth';
   // Codex/ChatGPT limit patterns below target Codex CLI (ChatGPT plan/usage-cap) output.
   // Codex CLI version: 0.144.6 as of 2026-07-20. Revisit when Codex changes its wording;
   // real samples can be harvested from .factory/events.ndjson (failoverReason/stderr fields).

@@ -1,0 +1,3 @@
+{"_comment":"Built from Pi docs/json.md event shapes, not recorded from a real run (#2901)."}
+{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"402 Insufficient credits. Add more using https://openrouter.ai/settings/credits","usage":{"input":10,"output":0,"cacheRead":0,"cacheWrite":0,"cost":{"total":0}}}}
+{"type":"agent_settled","aborted":false}

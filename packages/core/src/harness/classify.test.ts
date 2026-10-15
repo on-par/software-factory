@@ -78,3 +78,16 @@ describe('classifyFailure codex 401 (#2494)', () => {
     expect(classifyFailure('error at line 401: unexpected token', 1)).toBe('error');
   });
 });
+
+describe('classifyFailure provider 401 wording (#2901)', () => {
+  it.each([
+    '401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}',
+    '401 Incorrect API key provided: sk-...',
+    'No auth credentials found',
+  ])('classifies %s as local_auth', (text) => {
+    expect(classifyFailure(text, 0)).toBe('local_auth');
+  });
+  it('does not treat unrelated "invalid api ..." text as auth', () => {
+    expect(classifyFailure('invalid api version', 1)).not.toBe('local_auth');
+  });
+});
