@@ -20,6 +20,7 @@ import { promisify, styleText } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
 import { INVALID_BRANCH_PREFIX_MESSAGE, resolveBranchPrefixOption } from './branch-prefix.js';
+import { proposeTriageQueue } from './triage-open-prs.js';
 import {
   type Environment,
   type EnvironmentProxySettings,
@@ -225,7 +226,6 @@ import {
   withRunLock,
   writePortFile,
   buildTriagePrompt,
-  normalizeTriageQueue,
   parseTriageCandidates,
   recordLocalAuthFailure,
 } from '@on-par/factory-core/internal';
@@ -2853,7 +2853,7 @@ async function cmdTriage(opts: { product?: string; model?: string }) {
       onLog: (msg) => logEvent(paths.events, 'triage', '-', msg),
     });
     model = result.model;
-    const queue = normalizeTriageQueue(result.output);
+    const queue = await proposeTriageQueue(result.output, ghRepo, paths.events, shellOps.exec);
     if (queue) {
       const header = triageQueueHeader(model, product);
       writeFileSync(paths.queueProposed, header + queue);
