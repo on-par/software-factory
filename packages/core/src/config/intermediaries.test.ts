@@ -1,7 +1,12 @@
 import { defaultModelsConfig } from '@on-par/factory-config';
 import { describe, expect, it } from 'vitest';
 
-import { claudeEndpointIntermediary, intermediaryFor } from './intermediaries.js';
+import {
+  assertNoDirectDeepSeek,
+  claudeEndpointIntermediary,
+  directDeepSeekReason,
+  intermediaryFor,
+} from './intermediaries.js';
 
 describe('intermediaryFor', () => {
   it('finds OpenCode Go with its review date', () => {
@@ -50,5 +55,95 @@ describe('claudeEndpointIntermediary (#2906)', () => {
     '',
   ])('rejects %s', (url) => {
     expect(claudeEndpointIntermediary(url)).toBeUndefined();
+  });
+});
+
+describe('directDeepSeekReason (ADR-0163)', () => {
+  const reason = (d: Partial<Parameters<typeof directDeepSeekReason>[0]>) =>
+    directDeepSeekReason({ envKey: null, ...d });
+
+  it.each(['deepseek/deepseek-chat', 'DeepSeek/x', ' deepseek/x', 'deepseek'])('flags providerModel %s', (pm) => {
+    expect(reason({ providerModel: pm })).toMatch(/native deepseek\/ provider/);
+  });
+
+  it.each(['openrouter/deepseek/deepseek-v4-flash', 'opencode-go/deepseek-v4-pro', 'deepseek-community/x', undefined])(
+    'does not flag providerModel %s',
+    (pm) => {
+      expect(reason({ providerModel: pm })).toBeUndefined();
+    },
+  );
+
+  it('flags envKey DEEPSEEK_API_KEY but not null or other keys', () => {
+    expect(reason({ envKey: 'DEEPSEEK_API_KEY' })).toMatch(/DEEPSEEK_API_KEY/);
+    expect(reason({ envKey: null })).toBeUndefined();
+    expect(reason({ envKey: 'OPENROUTER_API_KEY' })).toBeUndefined();
+  });
+
+  it('flags api.deepseek.com in providerOptions at any depth and case', () => {
+    expect(reason({ providerOptions: { baseURL: 'https://api.deepseek.com/v1' } })).toBe(
+      "providerOptions.baseURL 'https://api.deepseek.com/v1' points at api.deepseek.com",
+    );
+    expect(reason({ providerOptions: { provider: { options: { baseURL: 'https://API.DEEPSEEK.COM' } } } })).toBe(
+      "providerOptions.provider.options.baseURL 'https://API.DEEPSEEK.COM' points at api.deepseek.com",
+    );
+    expect(reason({ providerOptions: { urls: ['https://api.deepseek.com'] } })).toBe(
+      "providerOptions.urls[0] 'https://api.deepseek.com' points at api.deepseek.com",
+    );
+  });
+
+  it.each([
+    ['api.deepseek.com/v1', 'api.deepseek.com'],
+    ['http://api.deepseek.com:8080/v1', 'api.deepseek.com'],
+    ['https://api.deepseek.com./v1', 'api.deepseek.com'],
+    ['https://deepseek.com', 'deepseek.com'],
+    ['https://eu.api.deepseek.com/v1', 'eu.api.deepseek.com'],
+  ])('flags DeepSeek host %s by its parsed hostname', (baseURL, host) => {
+    expect(reason({ providerOptions: { baseURL } })).toBe(`providerOptions.baseURL '${baseURL}' points at ${host}`);
+  });
+
+  it.each([
+    'https://api.deepseek.com.evil.example/v1',
+    'https://evil.example/?u=api.deepseek.com',
+    'https://evil.example/api.deepseek.com/v1',
+    'https://notdeepseek.com/v1',
+    'https://openrouter.ai/api/v1#api.deepseek.com',
+    'not a url at all',
+    'http://[::1',
+    '',
+  ])('does not flag lookalike or unparseable value %j', (baseURL) => {
+    expect(reason({ providerOptions: { baseURL } })).toBeUndefined();
+    expect(reason({ claudeFlag: baseURL })).toBeUndefined();
+  });
+
+  it('ignores non-string providerOptions values', () => {
+    expect(reason({ providerOptions: { n: 1, b: true, z: null, o: {}, a: [] } })).toBeUndefined();
+  });
+
+  it('flags a claudeFlag on api.deepseek.com but not deepseek/ behind an approved endpoint', () => {
+    expect(reason({ claudeFlag: 'https://api.deepseek.com/anthropic' })).toMatch(/claudeFlag/);
+    expect(reason({ claudeFlag: 'deepseek/deepseek-v4-flash' })).toBeUndefined();
+  });
+
+  it('flags no packaged model', () => {
+    for (const [id, m] of Object.entries(defaultModelsConfig.models)) {
+      expect(directDeepSeekReason(m), id).toBeUndefined();
+    }
+  });
+});
+
+describe('assertNoDirectDeepSeek (ADR-0163)', () => {
+  it('names the entry, ADR and approved intermediaries but not pending ones', () => {
+    let message = '';
+    try {
+      assertNoDirectDeepSeek('my-ds', { envKey: 'DEEPSEEK_API_KEY' });
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    for (const s of ['my-ds', 'ADR-0163', 'OpenRouter', 'OpenCode Go']) expect(message).toContain(s);
+    expect(message).not.toContain('Azure');
+  });
+
+  it('does not throw for an allowed definition', () => {
+    expect(() => assertNoDirectDeepSeek('ok', { envKey: null, providerModel: 'openrouter/deepseek/x' })).not.toThrow();
   });
 });
