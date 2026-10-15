@@ -1720,13 +1720,18 @@ export function resolveUsageKnobs(
 }
 
 /** Human-readable name for whatever decided the usage-watch gate, used in the `factory run`
- *  and `factory supervise` logs so an explicit operator override is always attributable (#1404). */
-export function usageWatchSourceLabel(source: WatchdogPolicySource, watch: boolean): string {
+ *  and `factory supervise` logs so an explicit operator override is always attributable (#1404). `repoConfigLabel` names the
+ *  repo config file that was loaded (#2570). */
+export function usageWatchSourceLabel(
+  source: WatchdogPolicySource,
+  watch: boolean,
+  repoConfigLabel = 'the repo config',
+): string {
   switch (source) {
     case 'flag':
       return watch ? 'flag: --usage-watch' : 'flag: --no-usage-watch';
     case 'repo':
-      return '.factory/config.json: budget.watchdog.watch';
+      return `${repoConfigLabel}: budget.watchdog.watch`;
     case 'env':
       return 'env: FACTORY_USAGE_WATCH';
     case 'default':
@@ -1861,7 +1866,7 @@ async function cmdTui(opts: { localQueue?: boolean } = {}, runTuiImpl: typeof ru
   const effectiveConfigLines = describeEffectiveConfig({
     router,
     repo: repoConfig,
-    repoConfigPath: '.factory/config.json',
+    repoConfigPath: repoConfigFileFor(repoRoot, paths.config).relPath,
     mergePolicy: resolveMergePolicy(configLoaders.loadFactoryConfigForRepo(paths.config), process.env, {
       auto: readRunFlagOverrides(paths.runFlags).autoMerge,
     }),
@@ -3884,6 +3889,8 @@ export interface SuperviseDeps {
   /** Where `watch` was decided, so the loop can attribute an explicit operator override
    *  to the flag rather than always blaming FACTORY_USAGE_WATCH (#1404). */
   watchSource?: WatchdogPolicySource;
+  /** Display label for the loaded repo config file, used when watch was decided by the repo config (#2570). */
+  repoConfigLabel?: string;
   /** Where the resume threshold was decided, for attribution of explicit CLI overrides. */
   resumeAtSource?: WatchdogPolicySource;
   /** Where the poll interval was decided, for attribution of explicit CLI overrides. */
@@ -3914,6 +3921,7 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
     pollMs,
     watch = true,
     watchSource = 'default',
+    repoConfigLabel,
     resumeAtSource = 'default',
     pollSource = 'default',
     estimator = false,
@@ -3948,12 +3956,12 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
 
     if (!watch) {
       writeLine(
-        `[factory] supervise: usage watchdog disabled (${usageWatchSourceLabel(watchSource, watch)}) — skipping resume gate`,
+        `[factory] supervise: usage watchdog disabled (${usageWatchSourceLabel(watchSource, watch, repoConfigLabel)}) — skipping resume gate`,
       );
     } else {
       if (watchSource === 'flag') {
         writeLine(
-          `[factory] supervise: usage watchdog enabled (${usageWatchSourceLabel(watchSource, watch)}) — enforcing resume gate`,
+          `[factory] supervise: usage watchdog enabled (${usageWatchSourceLabel(watchSource, watch, repoConfigLabel)}) — enforcing resume gate`,
         );
       }
       let reading = await readUsageFn();
@@ -4260,6 +4268,7 @@ function runSupervise(opts: SuperviseOptions): Promise<void> {
     createIngestHook,
     cmdRun: (o) => runRun(o),
     CliExitError,
+    repoConfigFileFor,
   });
 }
 
@@ -4277,6 +4286,7 @@ function runStatus(opts: StatusOptions = {}): Promise<void> {
     warnQueueDiagnostics,
     errorDetail,
     CliExitError,
+    repoConfigFileFor,
   });
 }
 

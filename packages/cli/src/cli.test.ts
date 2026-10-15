@@ -211,7 +211,7 @@ describe('cli', () => {
   it('usage-watch flag: usageWatchSourceLabel names each source', () => {
     expect(usageWatchSourceLabel('flag', false)).toBe('flag: --no-usage-watch');
     expect(usageWatchSourceLabel('flag', true)).toBe('flag: --usage-watch');
-    expect(usageWatchSourceLabel('repo', true)).toBe('.factory/config.json: budget.watchdog.watch');
+    expect(usageWatchSourceLabel('repo', true)).toBe('the repo config: budget.watchdog.watch');
     expect(usageWatchSourceLabel('env', false)).toBe('env: FACTORY_USAGE_WATCH');
     expect(usageWatchSourceLabel('default', true)).toBe('default');
   });
