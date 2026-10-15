@@ -54,7 +54,7 @@ import {
 import { OPENCODE_LIVE_AUTH_CHECK, opencodeLiveAuthCheck, runOpencodeAuthProbe } from './doctor-opencode-probe.js';
 import { resolveDoctorHarnesses } from './doctor-harness-view.js';
 import { reconcileQueue } from './doctor-queue-reconcile.js';
-import { HARNESS_SETUP, harnessInstallChecks } from './doctor-harness.js';
+import { HARNESS_SETUP, harnessInstallChecks, skipMissingAgentCheck } from './doctor-harness.js';
 export { HARNESS_SETUP, harnessInstallChecks };
 import { availableAgentClis, CLAUDE_CODE_URL, CODEX_CLI_URL, GITHUB_TOKENS_URL } from './first-run.js';
 import type { CliDeps } from './index.js';
@@ -874,12 +874,12 @@ const AGENT_AUTH_CHECKS = new Set([
 ]);
 
 /** #2496: doctor fails on agent sign-in only when no installed agent is signed in. A logged-out
- *  agent is a warning while another one is signed in, and a hard failure when none is. Skipped
- *  probes (optional passes, e.g. a `<cli> signed in` row for a CLI not on PATH) never count as signed in. */
+ *  agent is a warning while another one is signed in, and a hard failure when none is. Skipped probes
+ *  never count as signed in. #2996: not-installed agents become ➖ skipped info while one is signed in. */
 export function reconcileAgentAuthChecks(checks: DoctorCheck[]): DoctorCheck[] {
-  const auth = checks.filter((c) => AGENT_AUTH_CHECKS.has(c.name));
-  const anySignedIn = auth.some((c) => c.ok && c.optional !== true);
-  return checks.map((c) => {
+  const anySignedIn = checks.some((c) => AGENT_AUTH_CHECKS.has(c.name) && c.ok && c.optional !== true);
+  return checks.map((row) => {
+    const c = anySignedIn ? skipMissingAgentCheck(row) : row;
     if (!AGENT_AUTH_CHECKS.has(c.name) || c.ok) return c;
     return anySignedIn
       ? { ...c, optional: true, detail: `${c.detail} (another agent is signed in, so runs can still proceed)` }
