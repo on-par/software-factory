@@ -738,7 +738,7 @@ export function formatReachabilityCount(diagnoses: ModelDiagnosis[]): string {
   return unverified > 0 ? `${base}, ${unverified} unverified (no auth evidence)` : base;
 }
 
-async function cmdInit(opts: { force?: boolean } = {}) {
+async function cmdInit(opts: { force?: boolean; yes?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   // init itself never calls GitHub, so a missing token is a warning here; ship/run still need one.
   if (!hasGitHubToken()) {

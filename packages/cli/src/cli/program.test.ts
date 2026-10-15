@@ -40,6 +40,12 @@ describe('buildProgram', () => {
     for (const cmd of program.commands) expect(cmd.helpGroup()).not.toBe(OTHER_GROUP);
   });
 
+  it('init registers -y/--yes alongside --force', () => {
+    const init = buildProgram(PROGRAM_HANDLERS, {}).commands.find((c) => c.name() === 'init');
+    expect(init?.options.some((o) => o.long === '--yes' && o.short === '-y')).toBe(true);
+    expect(init?.options.some((o) => o.long === '--force')).toBe(true);
+  });
+
   it('check keeps its ready alias and the root keeps --state-root', () => {
     const program = buildProgram(PROGRAM_HANDLERS, {});
     expect(program.commands.find((c) => c.name() === 'check')?.aliases()).toEqual(['ready']);
