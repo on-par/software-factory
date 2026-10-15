@@ -52,6 +52,7 @@ import {
 } from './doctor-health.js';
 import { OPENCODE_LIVE_AUTH_CHECK, opencodeLiveAuthCheck, runOpencodeAuthProbe } from './doctor-opencode-probe.js';
 import { resolveDoctorHarnesses } from './doctor-harness-view.js';
+import { gitAuthCheck } from './doctor-git-auth.js';
 import { reconcileQueue } from './doctor-queue-reconcile.js';
 import { HARNESS_SETUP, harnessInstallChecks } from './doctor-harness.js';
 export { HARNESS_SETUP, harnessInstallChecks };
@@ -153,97 +154,6 @@ export function codexAuthMethod(statusOutput: string | null): string | null {
   if (text.includes('api key')) return 'API key';
   if (text.includes('access token')) return 'access token';
   return 'unknown method';
-}
-
-const GIT_AUTH_CHECK = 'git auth';
-
-/** Non-interactive read-only probe of origin. `credential.interactive=never` turns off Git
- *  Credential Manager UI and an empty `core.askPass` turns off configured askpass programs;
- *  stored credentials from any helper still work. */
-export const GIT_AUTH_PROBE_CMD = 'git -c credential.interactive=never -c core.askPass= ls-remote --quiet origin HEAD';
-/** GIT_TERMINAL_PROMPT=0 makes git fail instead of asking on the terminal; empty GIT_ASKPASS
- *  and SSH_ASKPASS turn off askpass programs and ssh's GUI askpass; GCM_INTERACTIVE=never
- *  turns off Git Credential Manager prompts. */
-export const GIT_AUTH_PROBE_ENV: Readonly<Record<string, string>> = {
-  GIT_TERMINAL_PROMPT: '0',
-  GIT_ASKPASS: '',
-  SSH_ASKPASS: '',
-  GCM_INTERACTIVE: 'never',
-};
-/** Bounds the probe, e.g. an ssh key passphrase prompt that waits on /dev/tty. */
-export const GIT_AUTH_PROBE_TIMEOUT_MS = 15_000;
-
-/** Remedy shown only when the git-auth probe fails: wires git's credential helper to gh. */
-export const GIT_AUTH_FIX = 'run `gh auth setup-git` so git uses your gh credentials, then re-run `factory doctor`';
-
-/** Classifies an origin URL's transport (#2939). Returns null when it is not SSH (ssh://,
- *  git+ssh://, ssh+git:// or scp-style `[user@]host:path`), else the bare hostname, or null
- *  when the host is not a safe hostname. Never returns the user, port or path. */
-export function sshOriginHost(origin: string): { host: string | null } | null {
-  const url = origin.trim();
-  let candidate: string;
-  const scheme = /^(?:ssh|git\+ssh|ssh\+git):\/\/(?:[^@/]*@)?([^/:]*)/i.exec(url);
-  if (scheme) {
-    candidate = scheme[1] ?? '';
-  } else if (url.includes('://')) {
-    return null;
-  } else {
-    const scp = /^(?:([^@/:\s]+)@)?([^/:\s]+):/.exec(url);
-    if (!scp || (scp[2] ?? '').length <= 1) return null;
-    candidate = scp[2] ?? '';
-  }
-  return { host: /^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(candidate) ? candidate : null };
-}
-
-/** Remedy for a failing SSH origin (#2939); `<host>` stands in when the host is unknown. */
-export function gitAuthSshFix(host: string | null): string {
-  const target = host ?? '<host>';
-  return `origin uses SSH: test with \`ssh -T git@${target}\` and check your SSH key is loaded (\`ssh-add -l\`), then re-run \`factory doctor\``;
-}
-
-/** Git-auth check (#2482, #2483): skipped, never failing, outside a git repository or without
- *  an origin remote. Otherwise runs a non-interactive `git ls-remote` against origin and fails
- *  when it cannot authenticate. SSH origins get SSH guidance instead of `gh auth setup-git`
- *  (#2939). The output never echoes the origin URL, which may hold a token; only a bare
- *  SSH hostname may appear. */
-export function gitAuthCheck(
-  repoRoot: string | null,
-  tryExec: (cmd: string, opts?: DoctorExecOptions) => string | null,
-): DoctorCheck {
-  if (repoRoot === null) {
-    return {
-      name: GIT_AUTH_CHECK,
-      ok: true,
-      optional: true,
-      detail: NOT_IN_REPO_SKIP_DETAIL,
-    };
-  }
-  const origin = tryExec('git remote get-url origin');
-  if (!origin) {
-    return { name: GIT_AUTH_CHECK, ok: true, optional: true, detail: 'skipped: no origin remote configured' };
-  }
-  // An empty string is exit 0 with no HEAD ref (an empty repo): still authenticated.
-  const probe = tryExec(GIT_AUTH_PROBE_CMD, { env: { ...GIT_AUTH_PROBE_ENV }, timeoutMs: GIT_AUTH_PROBE_TIMEOUT_MS });
-  if (probe === null) {
-    const ssh = sshOriginHost(origin);
-    if (ssh) {
-      return {
-        name: GIT_AUTH_CHECK,
-        ok: false,
-        detail: 'git could not authenticate to origin over SSH non-interactively (prompting disabled)',
-        fix: gitAuthSshFix(ssh.host),
-        ...(ssh.host ? { next: `ssh -T git@${ssh.host}` } : {}),
-      };
-    }
-    return {
-      name: GIT_AUTH_CHECK,
-      ok: false,
-      detail: 'git could not authenticate to origin non-interactively (prompting disabled)',
-      fix: GIT_AUTH_FIX,
-      next: 'gh auth setup-git',
-    };
-  }
-  return { name: GIT_AUTH_CHECK, ok: true, detail: 'git can authenticate to origin non-interactively' };
 }
 
 const SIGN_IN_EVIDENCE: Readonly<Record<string, string>> = {
@@ -534,7 +444,7 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
     checks.push({ name: 'gh auth', ok: true, detail: 'authenticated' });
   }
 
-  checks.push({ ...gitAuthCheck(repoRoot, tryExec), ...repoSection });
+  checks.push({ ...gitAuthCheck(repoRoot, tryExec, pathExists), ...repoSection });
 
   if (envPresent('GITHUB_TOKEN')) {
     checks.push({ name: 'GitHub token', ok: true, detail: 'GITHUB_TOKEN set' });
