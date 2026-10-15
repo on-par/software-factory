@@ -2210,8 +2210,7 @@ async function cmdShip(
     } catch (err: any) {
       if (err instanceof IssueSkippedError) return;
       if (ghRepo && !(err instanceof InvalidWorkRequestInputError) && !(err instanceof LaneEnvironmentPauseError)) {
-        const args: [number, string, string, typeof paths, string] = [issueNum, repoRoot, ghRepo, paths, branchPrefix];
-        await reapPrlessShip({ configLoaders, worktreePathFor }, internalOps.reapCleanShipWorktree, args);
+        await reapPrlessShipWorktree(issueNum, repoRoot, ghRepo, paths, branchPrefix);
       }
       // #2492: a pull request number is a usage error, not a failed ship.
       if (err instanceof InvalidWorkRequestInputError) throw new CliExitError(`factory: ${err.message}`, 2);
@@ -2658,6 +2657,22 @@ export async function reapParkedLaneWorktree(
   prefixOverride?: string,
 ): Promise<void> {
   await reapParkedLane({ configLoaders, worktreePathFor }, reapLaneWorktree, [
+    issue,
+    repoRoot,
+    ghRepo,
+    paths,
+    prefixOverride,
+  ]);
+}
+
+export async function reapPrlessShipWorktree(
+  issue: number,
+  repoRoot: string,
+  ghRepo: string,
+  paths: ReturnType<typeof getFactoryPaths>,
+  prefixOverride?: string,
+): Promise<void> {
+  await reapPrlessShip({ configLoaders, worktreePathFor }, internalOps.reapCleanShipWorktree, [
     issue,
     repoRoot,
     ghRepo,
