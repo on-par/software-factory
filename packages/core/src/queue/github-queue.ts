@@ -581,8 +581,8 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
 
   async function enqueue(lane: string, issues: readonly number[]): Promise<EnqueueResult[]> {
     const routeLabel = laneLabel(lane);
-    const members = await client.listOpenIssuesWithLabels({ owner, repo, labels: [QUEUED_LABEL, routeLabel] });
-    // Tolerant max-position scan: ignore malformed/missing order labels rather than throwing.
+    const members = await client.listOpenIssuesWithLabels({ owner, repo, labels: [routeLabel] });
+    // Tolerant max-position scan over every open in-lane issue (queued, in-progress or order-only), ignoring other lanes and malformed labels (#2987).
     let maxPos = 0;
     for (const member of members) {
       for (const label of member.labels) {
