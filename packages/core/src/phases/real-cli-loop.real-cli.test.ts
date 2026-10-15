@@ -1,5 +1,5 @@
-// Real-CLI full loop (#2649): PLAN, BUILD, CHECK and SHIP through the real Codex or OpenCode CLI in a throwaway repo,
-// with only GitHub faked. Runs nightly via scripts/real-cli-smoke.sh when FACTORY_REAL_CLI=<codex|opencode>;
+// Real-CLI full loop (#2649): PLAN, BUILD, CHECK and SHIP through the real Codex, OpenCode or Pi CLI in a throwaway repo,
+// with only GitHub faked. Runs nightly via scripts/real-cli-smoke.sh when FACTORY_REAL_CLI=<codex|opencode|pi>;
 // vitest.config.ts keeps it out of every other run.
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -19,6 +19,7 @@ import { reworkRouteFor } from '../run/outcome.js';
 const AGENTS: Record<string, { model: string; cmd: string }> = {
   codex: { model: 'gpt-5.6-terra-medium', cmd: 'codex' },
   opencode: { model: 'opencode-deepseek-v4-flash', cmd: 'opencode' },
+  pi: { model: 'pi-openrouter-deepseek-v4-flash', cmd: 'pi' },
 };
 
 const agent = process.env.FACTORY_REAL_CLI;
