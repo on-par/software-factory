@@ -1729,7 +1729,7 @@ export function usageWatchSourceLabel(source: WatchdogPolicySource, watch: boole
       return '.factory/config.json: budget.watchdog.watch';
     case 'env':
       return 'env: FACTORY_USAGE_WATCH';
-    default:
+    case 'default':
       return 'default';
   }
 }

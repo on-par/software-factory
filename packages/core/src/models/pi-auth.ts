@@ -63,7 +63,7 @@ export function piAuthOutcome(
         unverified: false,
         reason: `${okLabel} reports invalid credentials for ${target} — ${PI_LOGIN_HINT}`,
       };
-    default:
+    case 'unknown':
       return {
         reachable: false,
         unverified: true,

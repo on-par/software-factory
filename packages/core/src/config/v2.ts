@@ -61,7 +61,6 @@ const ModelDefSchema = z
       .optional()
       .describe('Extra provider-specific options (e.g. Ollama num_ctx/temperature).'),
     endpoint: z
-      .string()
       .url()
       .optional()
       .describe(

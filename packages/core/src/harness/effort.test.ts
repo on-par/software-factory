@@ -212,3 +212,8 @@ it('ModelRegistry rejects ultra effort for a pi model but accepts high', () => {
   expect(() => build('ultra')).toThrow();
   expect(() => build('high')).not.toThrow();
 });
+
+it('supportsEffort returns false for an undefined or unknown harness', () => {
+  expect(supportsEffort(undefined, 'high')).toBe(false);
+  expect(supportsEffort('foo', 'high')).toBe(false);
+});
