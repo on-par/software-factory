@@ -130,6 +130,33 @@ describe('ClaudeCliHarness intermediary endpoint (#2906)', () => {
     expect(env.ANTHROPIC_MODEL).toBeUndefined();
   });
 
+  const costEnvelope = (cost: number) =>
+    JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'OUT',
+      total_cost_usd: cost,
+      usage: { input_tokens: 1_000_000, output_tokens: 1_000_000 },
+    });
+
+  it('omits total_cost_usd from usage for an endpoint model but keeps token counts (#2907)', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-test-123');
+    const rec = recordingExec({ stdout: costEnvelope(9.99) });
+    const result = await new ClaudeCliHarness(rec.fn).run(makeContractRequest({ model: 'A', registry: epRegistry }));
+    expect(result.usage).not.toHaveProperty('costUsd');
+    expect(result.usage?.inputTokens).toBe(1_000_000);
+    expect(result.usage?.outputTokens).toBe(1_000_000);
+  });
+
+  it('keeps total_cost_usd as costUsd for a model with no endpoint (#2907)', async () => {
+    const rec = recordingExec({ stdout: costEnvelope(0.42) });
+    const result = await new ClaudeCliHarness(rec.fn).run(
+      makeContractRequest({ model: 'claude-sonnet-5', registry: epRegistry }),
+    );
+    expect(result.usage?.costUsd).toBe(0.42);
+  });
+
   it('claudeEndpointEnv returns {} without an endpoint and throws for a non-approved one', () => {
     expect(claudeEndpointEnv(undefined)).toEqual({});
     expect(claudeEndpointEnv({ envKey: null })).toEqual({});
