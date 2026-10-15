@@ -86,6 +86,15 @@ describe('ModelRegistry harness declarations', () => {
     expect(registry.isAgenticHarnessId('my-agent')).toBe(false);
   });
 
+  it('ridesCommandRoute: declared agentic harnesses and pi only (#2909)', () => {
+    const registry = withHarnesses({ 'my-agent': declaration, 'chat-only': { ...declaration, agentic: false } });
+    expect(registry.ridesCommandRoute('pi')).toBe(true);
+    expect(registry.ridesCommandRoute('my-agent')).toBe(true);
+    for (const id of ['chat-only', 'ollama-http', 'ollama-agentic', 'claude-cli', 'unknown', '']) {
+      expect(registry.ridesCommandRoute(id)).toBe(false);
+    }
+  });
+
   it('keeps built-in agentic semantics', () => {
     const registry = new ModelRegistry(config);
     expect(registry.isAgenticHarnessId('claude-cli')).toBe(true);

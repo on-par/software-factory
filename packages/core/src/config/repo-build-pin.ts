@@ -13,8 +13,8 @@ export function assertAgenticBuildPin(
   const harnessId = registry.getHarnessId(model) ?? '';
   if (registry.isAgenticHarnessId(harnessId)) return;
   const fix = registry.getHarnessDeclaration(harnessId)
-    ? `set agentic: true under harnesses.${harnessId}, or pin a model on claude-cli, codex-cli or opencode`
-    : 'pin a model on claude-cli, codex-cli or opencode';
+    ? `set agentic: true under harnesses.${harnessId}, or pin a model on claude-cli, codex-cli, opencode or pi`
+    : 'pin a model on claude-cli, codex-cli, opencode or pi';
   throw new Error(
     `${label} '${model}' runs on harness '${harnessId}', which is not agentic; BUILD needs an agentic harness (${fix})`,
   );
