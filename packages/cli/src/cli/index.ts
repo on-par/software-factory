@@ -779,12 +779,7 @@ async function cmdInit(opts: { force?: boolean } = {}) {
   // Doctor-style validation (policy=auto, N models reachable) — informational, never fails init.
   const modelsConfig = applyRepoConfig(configLoaders.loadModelsConfig(), configLoaders.loadRepoConfig(repoRoot));
   const registry = new coreOps.ModelRegistry(modelsConfig);
-  const diagnoses = coreOps.diagnoseModels(
-    registry,
-    modelDoctorProbes({ requireOllamaOnPath: true }),
-    resolveExperimental(),
-    resolveLocalOnly(),
-  );
+  const diagnoses = coreOps.diagnoseModels(registry, modelDoctorProbes(), resolveExperimental(), resolveLocalOnly());
   console.log(formatInitReachability(diagnoses));
   if (!hasReachableWorker(diagnoses)) {
     console.log(
@@ -1251,8 +1246,8 @@ export function hasReachableWorker(diagnoses: ModelDiagnosis[]): boolean {
   return diagnoses.some((d) => d.reachable && (d.tiers.includes('worker') || d.tiers.includes('worker_fallback')));
 }
 
-function ollamaModelSet(requireOnPath = false): Set<string> | undefined {
-  if (requireOnPath && !coreOps.isCommandAvailable('ollama')) return undefined;
+function ollamaModelSet(): Set<string> | undefined {
+  if (!coreOps.isCommandAvailable('ollama')) return undefined;
   try {
     const out = shellOps.execSync('ollama list', { timeout: 10_000 });
     return new Set(
@@ -1268,10 +1263,10 @@ function ollamaModelSet(requireOnPath = false): Set<string> | undefined {
 }
 
 /** Probes shared by every doctor-style reachability check (init, models --doctor, overnight
- *  preflight), so their counts agree. init passes `requireOllamaOnPath` so a missing binary never
- *  reaches the shell (#2507). */
-export function modelDoctorProbes(opts: { requireOllamaOnPath?: boolean } = {}): DoctorProbes {
-  const ollamaModels = ollamaModelSet(opts.requireOllamaOnPath === true);
+ *  preflight), so their counts agree. The probes never invoke `ollama` unless it is on PATH, so a
+ *  missing binary never reaches the shell (#2507, #2724). */
+export function modelDoctorProbes(): DoctorProbes {
+  const ollamaModels = ollamaModelSet();
   return {
     commandAvailable: coreOps.isCommandAvailable,
     ollamaModelPresent: ollamaModels ? (model: string) => ollamaModels.has(model) : undefined,
