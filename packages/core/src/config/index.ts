@@ -24,7 +24,6 @@ import type { FilingPolicy } from '../filing/policy.js';
 import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
 import type { HarnessFailureReason } from '../harness/index.js';
 import type { FailoverReason } from '../types/index.js';
-
 import { ModelEffortsSchema } from './effort.js';
 
 // ---------- Schemas ----------
@@ -40,6 +39,7 @@ export const ModelDefSchema = z.object({
   claudeFlag: z.string().optional(),
   providerModel: z.string().optional(),
   providerOptions: z.record(z.string(), z.unknown()).optional(),
+  endpoint: z.string().optional(),
   codex: z.boolean().optional(),
   codexFlag: z.string().optional(),
   harness: z.string().optional(),

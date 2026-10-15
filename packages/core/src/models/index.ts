@@ -2,6 +2,7 @@
 
 import { execSync } from 'node:child_process';
 
+import { claudeEndpointIntermediary } from '../config/intermediaries.js';
 import { ModelEffortsSchema, supportsEffort } from '../config/effort.js';
 import type { HarnessDeclaration, ModelsConfig } from '../config/index.js';
 import {
@@ -21,10 +22,12 @@ import {
   localAuthFailureSinceLogin,
 } from '../utils/local-auth-record.js';
 import { hasOpencodeLoginEvidence } from '../utils/opencode-config.js';
+import { isRemoteOllamaBaseUrl, localAuthFailureReason } from './diagnose-helpers.js';
 import { type PiAuthStatus, piAuthOutcome, runPiAuthCheck } from './pi-auth.js';
 import { runHarnessProbe } from './harness-probe.js';
 import { applyZdrReview } from './zdr-review.js';
 
+export { localAuthFailureReason };
 export { type ModelOverrides, resolveModelOverrides, retiredModelHint } from './overrides.js';
 
 export class ModelRegistry {
@@ -145,6 +148,11 @@ export class ModelRegistry {
   /** Get the claude -p flag for a model */
   getClaudeFlag(modelId: string): string | undefined {
     return this.get(modelId)?.claudeFlag;
+  }
+
+  /** Get the approved intermediary endpoint for a model (#2906) */
+  getEndpoint(modelId: string): string | undefined {
+    return this.get(modelId)?.endpoint;
   }
 
   /** Get provider-native model id */
@@ -288,24 +296,6 @@ export interface ModelDiagnosis {
 
 const UNVERIFIED_PREFIX = 'unverified — no auth evidence: ';
 
-/** Reason shown when an agent's last run hit local_auth and nobody has logged in since (#2733). */
-export function localAuthFailureReason(failure: LocalAuthFailure): string {
-  return `${failure.agent} failed sign-in (local_auth) on a run at ${failure.at}, with no login since — re-run ${failure.agent === 'opencode' ? 'opencode auth login' : `${failure.agent} login`}`;
-}
-
-/** True when OLLAMA_BASE_URL points at a non-loopback host, i.e. the local
- *  `ollama` CLI and `ollama list` are the wrong probes. Unparseable URLs fall
- *  back to local probing. */
-function isRemoteOllamaBaseUrl(baseUrl: string | undefined): boolean {
-  if (!baseUrl?.trim()) return false;
-  try {
-    const host = new URL(baseUrl).hostname;
-    return !['localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0'].includes(host);
-  } catch {
-    return false;
-  }
-}
-
 /** Probe which registered models are actually reachable on this machine (CLIs on PATH, env keys set).
  *  Probe selection is keyed solely on the model's declared/inferred harness id
  *  (registry.getHarnessId), with probe metadata sourced from the harness catalog. */
@@ -429,7 +419,16 @@ export function diagnoseModels(
         const probe = entry.probe;
         const authAgent = localAuthAgentFor(harnessId);
         const authFailure = authAgent ? localAuthFailure(authAgent) : null;
-        if (probe.selfAuth && !probe.selfAuth.providers.includes(def.provider)) {
+        const viaEndpoint = probe.selfAuth && def.endpoint ? claudeEndpointIntermediary(def.endpoint) : undefined;
+        if (viaEndpoint) {
+          // An approved intermediary endpoint authenticates with its own envKey, not the claude login (#2906).
+          if (!isHarnessCliPresent(harnessId, commandAvailable)) reason = `${probe.command} CLI not found on PATH`;
+          else if (def.envKey && !envPresent(def.envKey)) reason = `${def.envKey} not set`;
+          else {
+            reachable = true;
+            reason = `ok (${probe.okLabel} via ${viaEndpoint.host})`;
+          }
+        } else if (probe.selfAuth && !probe.selfAuth.providers.includes(def.provider)) {
           // The claude CLI only serves its selfAuth providers; any other provider can never run here (#2896).
           reason = `unsupported: the ${probe.okLabel} serves only Anthropic models (provider '${def.provider}')`;
         } else if (!isHarnessCliPresent(harnessId, commandAvailable)) {

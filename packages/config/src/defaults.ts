@@ -21,6 +21,8 @@ export interface ModelDefaults {
   claudeFlag?: string;
   providerModel?: string;
   providerOptions?: Record<string, unknown>;
+  /** Approved Anthropic-compatible intermediary base URL (https) for the claude-cli harness; needs envKey (#2906, ADR-0163). */
+  endpoint?: string;
   codex?: boolean;
   codexFlag?: string;
   harness?: string;

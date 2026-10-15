@@ -10,6 +10,7 @@ import {
   defaultModelsConfig,
   defaultRoutesConfig,
   retiredModels,
+  type ModelDefaults,
 } from './defaults.js';
 
 describe('shipped defaults', () => {
@@ -358,22 +359,31 @@ describe('steward route (#2111)', () => {
     }
   });
 
-  it('ships no model that pairs the claude-cli harness with a non-anthropic provider', () => {
-    const offenders = Object.entries(defaultModelsConfig.models)
-      .filter(([, def]) => {
-        const harness =
-          def.harness ??
-          (def.codex && def.provider === 'ollama'
-            ? 'ollama-command-agent'
-            : def.codex
-              ? 'codex-cli'
-              : def.provider === 'ollama'
-                ? 'ollama-http'
-                : 'claude-cli');
-        return harness === 'claude-cli' && def.provider !== 'anthropic';
-      })
-      .map(([id]) => id);
+  it('ships no model that pairs the claude-cli harness with a non-anthropic provider unless it sets an endpoint', () => {
+    const offenders = claudeCliOffenders(defaultModelsConfig.models);
     expect(offenders).toEqual([]);
     expect(defaultModelsConfig.tiers.checker).not.toContain('gpt-4.1-mini');
   });
+
+  it('exempts a claude-cli model with an endpoint from the non-anthropic guard', () => {
+    const base = { ...defaultModelsConfig.models['claude-fable-5'], provider: 'custom' as const };
+    expect(claudeCliOffenders({ a: base, b: { ...base, endpoint: 'https://openrouter.ai/api' } })).toEqual(['a']);
+  });
 });
+
+function claudeCliOffenders(models: Record<string, ModelDefaults>): string[] {
+  return Object.entries(models)
+    .filter(([, def]) => {
+      const harness =
+        def.harness ??
+        (def.codex && def.provider === 'ollama'
+          ? 'ollama-command-agent'
+          : def.codex
+            ? 'codex-cli'
+            : def.provider === 'ollama'
+              ? 'ollama-http'
+              : 'claude-cli');
+      return harness === 'claude-cli' && def.provider !== 'anthropic' && !def.endpoint;
+    })
+    .map(([id]) => id);
+}

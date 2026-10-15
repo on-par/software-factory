@@ -66,6 +66,15 @@ Use this profile when the OpenCode CLI is the only agent CLI on the machine. Eve
 
 `opencode-deepseek-v4-flash-free` carries `trainsOnPrompts: true` (its provider may use request data for training), so no tier may list it and a repo `tiers` entry naming it fails to load. It can only be pinned.
 
+A registry model on the `claude-cli` harness may set `endpoint` (an https URL) to run through an approved Anthropic-compatible zero-retention intermediary (ADR-0163; today only `openrouter.ai`). It needs a non-null `envKey`, and repo config load rejects any other host. For that model's calls only, the harness sets `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` (read from `process.env[envKey]`, never argv), `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL` (the last five from `claudeFlag`) and unsets `ANTHROPIC_API_KEY`. The OpenRouter key must have ZDR enforced.
+
+```json
+"deepseek-v4-flash-or": {
+  "provider": "custom", "harness": "claude-cli", "endpoint": "https://openrouter.ai/api",
+  "envKey": "OPENROUTER_API_KEY", "claudeFlag": "deepseek/deepseek-v4-flash", ...
+}
+```
+
 Requirements:
 
 - Set `FACTORY_EXPERIMENTAL=1` in the factory's environment. Without it the router drops experimental models from every tier, pinned tiers included, and `factory models` shows them as `experimental — set FACTORY_EXPERIMENTAL=1 to enable`.
