@@ -43,6 +43,8 @@ import {
   resolveSizeGateMode,
   ReworkHistory,
   runIssue,
+  type EffectiveModelPins,
+  type RepoFactoryConfig,
   type SizeGateMode,
   summarizeEvent,
   touchLastEvent,
@@ -81,6 +83,24 @@ import {
   stubAwareShipPhase,
   TERMINAL_EVENT_KINDS,
 } from './ship-steps.js';
+
+/** One `model-override` message per pinned phase, naming the file or env var it came from (#2497). */
+function modelOverrideMessages(
+  pins: EffectiveModelPins,
+  repo: RepoFactoryConfig | null,
+  repoConfigLabel: string,
+): string[] {
+  const label = (source: 'repo' | 'env' | undefined, envVar: string) => (source === 'repo' ? repoConfigLabel : envVar);
+  const repoPins = repo?.models?.pins;
+  return [
+    ...(repoPins?.triage ? [`triage model pinned to ${repoPins.triage} (${repoConfigLabel})`] : []),
+    ...(pins.plan ? [`plan model pinned to ${pins.plan} (${label(pins.sources.plan, 'FACTORY_PLAN_MODEL')})`] : []),
+    ...(pins.build
+      ? [`build model pinned to ${pins.build} (${label(pins.sources.build, 'FACTORY_BUILD_MODEL')})`]
+      : []),
+    ...(repoPins?.checker ? [`checker model pinned to ${repoPins.checker} (${repoConfigLabel})`] : []),
+  ];
+}
 
 export async function shipIssue(
   issueNum: number,
@@ -140,6 +160,7 @@ export async function shipIssue(
     resolvePhaseOps,
     getRepoRoot,
     getGitHubRepo,
+    repoConfigFileFor,
     getOctokit,
     worktreePathFor,
     isCommandAvailableViaShell,
@@ -278,14 +299,8 @@ export async function shipIssue(
   const log = mkLog();
 
   log('issue-title', issueTitle);
-  if (modelPins.plan) {
-    const source = modelPins.sources.plan === 'repo' ? '.factory/config.json' : 'FACTORY_PLAN_MODEL';
-    log('model-override', `plan model pinned to ${modelPins.plan} (${source})`);
-  }
-  if (modelPins.build) {
-    const source = modelPins.sources.build === 'repo' ? '.factory/config.json' : 'FACTORY_BUILD_MODEL';
-    log('model-override', `build model pinned to ${modelPins.build} (${source})`);
-  }
+  const repoConfigLabel = repoConfigFileFor(repoRoot, paths.config).relPath;
+  for (const msg of modelOverrideMessages(modelPins, repoConfig, repoConfigLabel)) log('model-override', msg);
 
   const skipReason = closedWorkSkipReason(work);
   if (skipReason) {
