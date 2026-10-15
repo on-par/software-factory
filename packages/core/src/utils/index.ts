@@ -236,7 +236,7 @@ export async function cleanupWorktree(
 }
 
 export interface LaneWorktreeReapResult {
-  outcome: 'removed' | 'kept-dirty' | 'kept-committed' | 'kept-branch-mismatch' | 'absent';
+  outcome: 'removed' | 'kept-dirty' | 'kept-committed' | 'kept-branch-mismatch' | 'kept-unverified' | 'absent';
   branch: string | null;
   branchDeleted: boolean;
 }
@@ -334,7 +334,7 @@ export async function reapLaneWorktree(
  * PR (#3008), fail-closed: the checked-out branch must be the lane's `<prefix>/<issue>-*`
  * branch, the tree must be completely clean (untracked files count), and HEAD must have zero
  * commits beyond the default remote base. Zero commits also means no PR can exist. Every probe
- * failure means keep.
+ * failure returns kept-unverified.
  */
 export async function reapCleanShipWorktree(
   repoRoot: string,
@@ -356,16 +356,21 @@ export async function reapCleanShipWorktree(
     (r) => r.stdout.trim(),
     () => null,
   );
-  if (branch === null || !branch.startsWith(lanePrefix)) {
-    log(
-      'warn',
-      `worktree at ${worktreePath} is on '${branch ?? 'unknown'}', not a ${lanePrefix}* lane branch — leaving it alone`,
-    );
+  if (branch === null) {
+    log('warn', `could not read the checked-out branch of ${worktreePath} — kept`);
+    return { outcome: 'kept-unverified', branch: null, branchDeleted: false };
+  }
+  if (!branch.startsWith(lanePrefix)) {
+    log('warn', `worktree at ${worktreePath} is on '${branch}', not a ${lanePrefix}* lane branch — leaving it alone`);
     return { outcome: 'kept-branch-mismatch', branch, branchDeleted: false };
   }
 
   const status = await execGit(['status', '--porcelain'], { cwd: worktreePath }).catch(() => null);
-  if (status === null || status.stdout.trim() !== '') {
+  if (status === null) {
+    log('warn', `could not verify ${worktreePath} is clean (git status failed) — kept`);
+    return { outcome: 'kept-unverified', branch, branchDeleted: false };
+  }
+  if (status.stdout.trim() !== '') {
     log('worktree-gc', `kept worktree ${worktreePath} — it has uncommitted changes`);
     return { outcome: 'kept-dirty', branch, branchDeleted: false };
   }
@@ -375,6 +380,10 @@ export async function reapCleanShipWorktree(
     (r) => Number.parseInt(r.stdout.trim(), 10),
     () => Number.NaN,
   );
+  if (Number.isNaN(ahead)) {
+    log('warn', `could not count commits beyond ${base} in ${worktreePath} — kept`);
+    return { outcome: 'kept-unverified', branch, branchDeleted: false };
+  }
   if (ahead !== 0) {
     log('worktree-gc', `kept worktree ${worktreePath} and branch ${branch} — it has commits beyond ${base}`);
     return { outcome: 'kept-committed', branch, branchDeleted: false };
