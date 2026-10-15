@@ -9,7 +9,7 @@ import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { shellEscape } from '../utils/index.js';
 import { classifyFailure } from './classify.js';
-import type { CodingHarness, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
+import type { CodingHarness, HarnessFailureReason, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
 import { HarnessError } from './index.js';
 
 export type PiExecFn = ExecFn;
@@ -23,9 +23,12 @@ export interface ParsedPiJson {
   lastStopReason?: string;
   /** `aborted` of the last `agent_settled` event; undefined when absent or non-boolean. */
   aborted?: boolean;
-  /** One line per assistant `errorMessage`, newline-joined; '' when none. */
+  /** One line per assistant `errorMessage`, `auto_retry_end.finalError` and `compaction_end.errorMessage`, in stream order; '' when none. */
   errorText: string;
 }
+
+/** Reasons an exit-0 Pi failure may be classified as; everything else stays a generic 'error'. */
+const PI_PROVIDER_REASONS = new Set<HarnessFailureReason>(['rate_limit', 'usage_cap', 'local_auth']);
 
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
@@ -66,7 +69,7 @@ export function parsePiJson(stdout: string): ParsedPiJson | undefined {
         .map((part: any) => (part?.type === 'text' && typeof part.text === 'string' ? part.text : ''))
         .join('');
       lastStopReason = typeof message.stopReason === 'string' ? message.stopReason : undefined;
-      if (typeof message.errorMessage === 'string') errors.push(message.errorMessage);
+      if (typeof message.errorMessage === 'string' && message.errorMessage.trim()) errors.push(message.errorMessage);
       const usage = message.usage;
       if (usage && Number.isFinite(usage.input) && Number.isFinite(usage.output)) {
         sawUsage = true;
@@ -79,6 +82,10 @@ export function parsePiJson(stdout: string): ParsedPiJson | undefined {
       }
     } else if (event.type === 'agent_settled') {
       aborted = typeof event.aborted === 'boolean' ? event.aborted : undefined;
+    } else if (event.type === 'auto_retry_end' && typeof event.finalError === 'string' && event.finalError.trim()) {
+      errors.push(event.finalError);
+    } else if (event.type === 'compaction_end' && typeof event.errorMessage === 'string' && event.errorMessage.trim()) {
+      errors.push(event.errorMessage);
     }
   }
 
@@ -178,12 +185,26 @@ export class PiHarness implements CodingHarness {
           stderr,
         });
       }
+      const detail = parsed.errorText ? `: ${parsed.errorText.split('\n')[0]}` : '';
+      if (parsed.aborted === true) {
+        throw new HarnessError(`pi run was aborted (agent_settled.aborted true)${detail}`, 'error', {
+          exitCode: 0,
+          stderr: stderr || undefined,
+        });
+      }
+      if (parsed.lastStopReason === 'length') {
+        throw new HarnessError(`pi response hit the output length limit (stopReason length)${detail}`, 'error', {
+          exitCode: 0,
+          stderr: stderr || undefined,
+        });
+      }
       if (parsed.lastStopReason !== 'stop' || parsed.aborted !== false) {
-        const detail = parsed.errorText ? `: ${parsed.errorText.split('\n')[0]}` : '';
+        const classified = classifyFailure([parsed.errorText, stderr].filter(Boolean).join('\n'), 0);
+        const reason = PI_PROVIDER_REASONS.has(classified) ? classified : 'error';
         throw new HarnessError(
           `pi run did not finish cleanly (stopReason ${parsed.lastStopReason ?? 'missing'}, aborted ${String(parsed.aborted)})${detail}`,
-          'error',
-          { exitCode: 0, stderr: stderr || undefined },
+          reason,
+          { exitCode: 0, stderr: stderr || undefined, ...(parsed.errorText ? { diagnostic: parsed.errorText } : {}) },
         );
       }
       if (parsed.text.trim() === '') {
