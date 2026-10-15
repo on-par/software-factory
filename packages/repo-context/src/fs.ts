@@ -45,7 +45,7 @@ const nodeFs: FsLike = {
 };
 
 function classifyFsError(error: unknown): DegradeReason {
-  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  const code = (error as NodeJS.ErrnoException | undefined)?.code ?? '';
   switch (code) {
     case 'ENOENT':
     case 'ENOTDIR':

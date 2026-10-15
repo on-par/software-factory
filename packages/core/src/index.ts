@@ -554,8 +554,8 @@ export type {
   DraftStory,
   EpicLifecycle,
   EpicView,
-  GherkinScenario,
 } from './discovery/promote.js';
+export type * from './discovery/gherkin-scenario.js';
 export {
   advanceDraftEpic,
   ARCHIVED_LABEL,

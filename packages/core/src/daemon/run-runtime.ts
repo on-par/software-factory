@@ -9,7 +9,7 @@ import { loadRegistry } from './registry.js';
 
 const factoryRunSchema = z.object({
   laneId: z.number().int().min(1).max(8).optional(),
-  runId: z.string().uuid(),
+  runId: z.uuid(),
   repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/),
   issue: z.number().int().positive(),
   status: z.enum(['queued', 'running', 'succeeded', 'failed', 'interrupted', 'canceled']),
@@ -92,7 +92,7 @@ export async function createRunRuntime(options: {
           log: z.string(),
           truncated: z.boolean(),
           executionPid: z.number().int().positive().optional(),
-          expiresAt: z.string().datetime().optional(),
+          expiresAt: z.iso.datetime().optional(),
         }),
       )
       .parse(JSON.parse(await readFile(file, 'utf8')));
@@ -303,7 +303,7 @@ export async function createRunRuntime(options: {
             );
           }
         }
-        if (expiresAt !== undefined && !z.string().datetime().safeParse(expiresAt).success)
+        if (expiresAt !== undefined && !z.iso.datetime().safeParse(expiresAt).success)
           throw new RunRequestError(400, 'expiresAt must be an ISO timestamp');
         if (
           typeof runId !== 'string' ||

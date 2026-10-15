@@ -127,7 +127,7 @@ export class SimJitterExecutor implements ModelExecutor {
         throw new ModelExecutorError('sim jitter: network error (ECONNRESET)', 'unavailable', { exitCode: 1 });
       case 'malformed_output':
         return SIM_MALFORMED_OUTPUT;
-      default:
+      case null:
         return this.inner.runModel(model, prompt, ctx);
     }
   }

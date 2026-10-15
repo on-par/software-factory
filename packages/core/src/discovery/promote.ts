@@ -84,16 +84,13 @@ export function upsertSection(body: string, heading: string, content: string): s
 
 // ---------- Types ----------
 
-/** @deprecated Alias kept for the public API; prefer AcceptanceCriterion from @on-par/contracts. */
-export type GherkinScenario = AcceptanceCriterion;
-
 export interface DraftStory {
   title: string;
   role: string;
   want: string;
   soThat: string;
   investNote?: string;
-  scenarios: GherkinScenario[];
+  scenarios: AcceptanceCriterion[];
 }
 
 export interface EpicView {

@@ -22,7 +22,7 @@ export function AttachRepoForm({ attach = attachRepo, onAttached }: AttachRepoFo
   const [outcome, setOutcome] = useState<AttachRepoOutcome | null>(null);
   const [fieldErrors, setFieldErrors] = useState<AttachFieldErrors>({});
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  function handleSubmit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const input: AttachRepoInput = { repo: repo.trim(), path: path.trim() };
     const errors = validateAttachInput(input);

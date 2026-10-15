@@ -64,6 +64,10 @@ export default defineConfig({
     'typescript/no-namespace': 'error',
     'typescript/consistent-type-assertions': 'error',
     'typescript/restrict-plus-operands': 'error',
+    // #2845: typing and deprecation guards, enabled once their violations were fixed.
+    'typescript/switch-exhaustiveness-check': 'error',
+    'typescript/no-deprecated': 'error',
+    'typescript/no-invalid-void-type': 'error',
     // Redundant or dead control flow.
     'no-else-return': 'error',
     'no-useless-return': 'error',

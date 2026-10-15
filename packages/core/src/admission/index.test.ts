@@ -248,6 +248,7 @@ describe('withAdmissionGuard', () => {
       },
       async ensureLabel() {
         calls.push('ensureLabel');
+        return false;
       },
     };
 

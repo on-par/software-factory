@@ -62,9 +62,9 @@ function createFakeStore(issues: Array<{ number: number; labels: string[] }>) {
     async ensureLabel({ name }) {
       calls.push('ensureLabel');
       createdLabels.add(name);
+      return false;
     },
   };
-
   return { state, createdLabels, calls, client };
 }
 
