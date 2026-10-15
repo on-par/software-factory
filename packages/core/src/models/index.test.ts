@@ -660,7 +660,7 @@ describe('diagnoseModels', () => {
   );
 
   it('marks Claude models unreachable when the last run hit local_auth with no login since (#2733)', () => {
-    const localAuthFailure = vi.fn((a: 'claude' | 'codex') =>
+    const localAuthFailure = vi.fn((a: 'claude' | 'codex' | 'opencode') =>
       a === 'claude' ? { agent: a, at: '2026-10-13T16:00:00.000Z' } : null,
     );
     const ds = diagnoseModels(

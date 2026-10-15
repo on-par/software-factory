@@ -619,7 +619,7 @@ export class ModelRouter {
     return key !== undefined && this.authTripped.has(key);
   }
 
-  /** Register a sink told which agent login (claude / codex) failed local_auth, so doctor can
+  /** Register a sink told which agent login (claude / codex / opencode) failed local_auth, so doctor can
    *  flag it until the next login (#2733). Receives only the agent name. */
   setLocalAuthSink(sink: (agent: LocalAuthAgent) => void): void {
     this.localAuthSink = sink;

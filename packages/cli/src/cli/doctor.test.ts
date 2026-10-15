@@ -1140,7 +1140,7 @@ describe('harness sign-in (#2556)', () => {
   it.each(['claude', 'codex'] as const)(
     'fails the %s row when its last run hit local_auth with no login since (#2733)',
     (agent) => {
-      const localAuthFailure = vi.fn((a: 'claude' | 'codex') =>
+      const localAuthFailure = vi.fn((a: 'claude' | 'codex' | 'opencode') =>
         a === agent ? { agent: a, at: '2026-10-13T16:00:00.000Z' } : null,
       );
       const checks = runDoctorChecks(probes({ localAuthFailure }));

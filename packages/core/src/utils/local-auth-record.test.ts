@@ -27,6 +27,8 @@ describe('local auth record (#2733)', () => {
     expect(localAuthAgentFor('claude-cli')).toBe('claude');
     expect(localAuthAgentFor('anthropic')).toBe('claude');
     expect(localAuthAgentFor('codex-cli')).toBe('codex');
+    expect(localAuthAgentFor('opencode')).toBe('opencode');
+    expect(localAuthAgentFor('pi')).toBeUndefined();
     expect(localAuthAgentFor('ollama-http')).toBeUndefined();
     expect(localAuthAgentFor(undefined)).toBeUndefined();
   });
@@ -36,6 +38,13 @@ describe('local auth record (#2733)', () => {
     expect(localAuthRecordPath(deps)).toBe(join('/h', '.factory', 'auth', 'local-auth-failures.json'));
     expect(localAuthCredentialPath('claude', deps)).toBe(resolve('/h/.claude/.credentials.json'));
     expect(localAuthCredentialPath('codex', deps)).toBe(join('/h', '.codex', 'auth.json'));
+    expect(localAuthCredentialPath('opencode', deps)).toBe(join('/h', '.local', 'share', 'opencode', 'auth.json'));
+    expect(localAuthCredentialPath('opencode', { ...deps, env: { XDG_DATA_HOME: '/x' } })).toBe(
+      join('/x', 'opencode', 'auth.json'),
+    );
+    expect(localAuthCredentialPath('opencode', { ...deps, env: { XDG_DATA_HOME: '  ' } })).toBe(
+      join('/h', '.local', 'share', 'opencode', 'auth.json'),
+    );
     expect(localAuthCredentialPath('claude', { ...deps, env: { CLAUDE_CONFIG_DIR: '/p' } })).toBe(
       resolve('/p/.credentials.json'),
     );
@@ -71,6 +80,38 @@ describe('local auth record (#2733)', () => {
     const relogin = Date.UTC(2026, 9, 13, 17) / 1000;
     utimesSync(cred, relogin, relogin);
     expect(localAuthFailureSinceLogin('claude', { homedir: () => h, env })).toBeNull();
+  });
+
+  it('records an opencode failure with an ISO timestamp, keeping claude and codex (#2890)', () => {
+    const h = home();
+    const deps = { homedir: () => h, env: {}, now: () => Date.UTC(2026, 9, 14, 9) };
+    recordLocalAuthFailure('claude', deps);
+    recordLocalAuthFailure('opencode', deps);
+    const saved = JSON.parse(readFileSync(localAuthRecordPath(deps), 'utf8')) as Record<string, unknown>;
+    expect(saved).toEqual({
+      claude: { agent: 'claude', at: '2026-10-14T09:00:00.000Z' },
+      opencode: { agent: 'opencode', at: '2026-10-14T09:00:00.000Z' },
+    });
+  });
+
+  it('reports an opencode failure newer than auth.json and clears it after a new login (#2890)', () => {
+    const h = home();
+    const env = { XDG_DATA_HOME: join(h, 'xdg') };
+    const deps = { homedir: () => h, env };
+    expect(localAuthFailureSinceLogin('opencode', deps)).toBeNull();
+    const cred = localAuthCredentialPath('opencode', deps);
+    mkdirSync(join(h, 'xdg', 'opencode'), { recursive: true });
+    writeFileSync(cred, '{}');
+    const loginAt = Date.UTC(2026, 9, 14, 8) / 1000;
+    utimesSync(cred, loginAt, loginAt);
+    recordLocalAuthFailure('opencode', { ...deps, now: () => Date.UTC(2026, 9, 14, 9) });
+    expect(localAuthFailureSinceLogin('opencode', deps)).toEqual({
+      agent: 'opencode',
+      at: '2026-10-14T09:00:00.000Z',
+    });
+    const relogin = Date.UTC(2026, 9, 14, 10) / 1000;
+    utimesSync(cred, relogin, relogin);
+    expect(localAuthFailureSinceLogin('opencode', deps)).toBeNull();
   });
 
   it('does not report a failure with no credential file to date the login', () => {

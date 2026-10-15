@@ -291,7 +291,7 @@ const UNVERIFIED_PREFIX = 'unverified — no auth evidence: ';
 
 /** Reason shown when an agent's last run hit local_auth and nobody has logged in since (#2733). */
 export function localAuthFailureReason(failure: LocalAuthFailure): string {
-  return `${failure.agent} failed sign-in (local_auth) on a run at ${failure.at}, with no login since — re-run ${failure.agent} login`;
+  return `${failure.agent} failed sign-in (local_auth) on a run at ${failure.at}, with no login since — re-run ${failure.agent === 'opencode' ? 'opencode auth login' : `${failure.agent} login`}`;
 }
 
 /** True when OLLAMA_BASE_URL points at a non-loopback host, i.e. the local
