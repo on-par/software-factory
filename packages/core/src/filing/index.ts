@@ -117,6 +117,7 @@ const SUSPECTED_CAUSE_BY_REASON: Record<FailoverReason, string> = {
   schema_invalid: 'The model response did not match the expected schema.',
   apply_failed: 'The proposed patch failed to apply.',
   verify_failed: 'Implementation did not pass the verification gate.',
+  permission_denied: 'The agent CLI auto-rejected a tool permission request in a non-interactive run.',
   unknown: 'See the evidence excerpt above.',
 };
 

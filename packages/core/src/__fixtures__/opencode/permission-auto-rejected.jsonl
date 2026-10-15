@@ -1,0 +1,6 @@
+{"type":"step_start","timestamp":1700000000000,"sessionID":"ses_fixture","part":{"type":"step-start"}}
+{"type":"tool_use","timestamp":1700000000000,"sessionID":"ses_fixture","part":{"type":"tool","tool":"bash","state":{"status":"error","input":{"command":"git push origin HEAD"},"error":"This non-interactive run cannot ask the user for permission, so the request was rejected. Continue without this action.","time":{"start":1,"end":2}}}}
+{"type":"step_finish","timestamp":1700000000000,"sessionID":"ses_fixture","part":{"type":"step-finish","reason":"tool-calls","cost":0.001,"tokens":{"input":500,"output":30,"reasoning":0,"cache":{"read":1000,"write":0}}}}
+{"type":"step_start","timestamp":1700000000000,"sessionID":"ses_fixture","part":{"type":"step-start"}}
+{"type":"text","timestamp":1700000000000,"sessionID":"ses_fixture","part":{"type":"text","text":"I could not push; continuing without it. Done.","time":{"start":3,"end":4}}}
+{"type":"step_finish","timestamp":1700000000000,"sessionID":"ses_fixture","part":{"type":"step-finish","reason":"stop","cost":0.0005,"tokens":{"input":200,"output":20,"reasoning":0,"cache":{"read":1500,"write":0}}}}
