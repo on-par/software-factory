@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
-import { type DoctorCheck, type DoctorExecOptions, NOT_IN_REPO_SKIP_DETAIL } from './doctor.js';
+import { type DoctorCheck, type DoctorExecOptions, NOT_IN_REPO_SKIP_DETAIL } from './doctor-types.js';
 
 const GIT_AUTH_CHECK = 'git auth';
 
