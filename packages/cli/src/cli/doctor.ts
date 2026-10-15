@@ -733,7 +733,7 @@ export function formatDoctorChecks(checks: DoctorCheck[], opts: { inRepo?: boole
   lines.push(
     opts.inRepo === false
       ? `Model reachability: ${NOT_IN_REPO_SKIP_DETAIL}`
-      : 'Model reachability: factory models --doctor',
+      : 'Model reachability: not checked. Run `factory models --doctor`',
   );
 
   return lines.join('\n');
