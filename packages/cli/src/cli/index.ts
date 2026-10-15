@@ -19,38 +19,36 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { promisify, styleText } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
-import type {
-  Environment,
-  EnvironmentProxySettings,
-  EventKind,
-  FactoryConfig,
-  FactoryEvent,
-  GithubIssueParams,
-  HealthKpis,
-  IngestSettings,
-  KpiHistoryRecord,
-  KpiReconstruction,
-  LaneProxy,
-  LeaseHealth,
-  LocalBriefParams,
-  LocalOnlyPolicy,
-  DoctorProbes,
-  ModelDiagnosis,
-  PrSource,
-  ParkReason,
-  QueueDiagnostic,
-  ReapedLease,
-  RepoFactoryConfig,
-  RunOutcome,
-  RunPorts,
-  SandboxRuntime,
-  UsageReading,
-  WatchdogPolicyOverrides,
-  WatchdogPolicySource,
-  WorkRequest,
-} from '@on-par/factory-core';
 import { INVALID_BRANCH_PREFIX_MESSAGE, resolveBranchPrefixOption } from './branch-prefix.js';
 import {
+  type Environment,
+  type EnvironmentProxySettings,
+  type EventKind,
+  type FactoryConfig,
+  type FactoryEvent,
+  type GithubIssueParams,
+  type HealthKpis,
+  type IngestSettings,
+  type KpiHistoryRecord,
+  type KpiReconstruction,
+  type LaneProxy,
+  type LeaseHealth,
+  type LocalBriefParams,
+  type LocalOnlyPolicy,
+  type DoctorProbes,
+  type ModelDiagnosis,
+  type PrSource,
+  type ParkReason,
+  type QueueDiagnostic,
+  type ReapedLease,
+  type RepoFactoryConfig,
+  type RunOutcome,
+  type RunPorts,
+  type SandboxRuntime,
+  type UsageReading,
+  type WatchdogPolicyOverrides,
+  type WatchdogPolicySource,
+  type WorkRequest,
   acquirePortLease,
   aggregateCosts,
   appendKpiHistoryLine,
@@ -137,24 +135,22 @@ import {
   writeLocalRunReport,
   writeProxyState,
 } from '@on-par/factory-core';
-import type {
-  CiOutcome,
-  EnqueueResult,
-  GardenCluster,
-  GithubQueue,
-  OvernightItemOutcome,
-  OvernightPreflightResult,
-  OvernightQueueDeps,
-  OvernightStateItem,
-  QueueIssue,
-  QueuePreflightDecision,
-  RepoConfigYamlMigration,
-  SlicePlan,
-  SlicePlanCommentLookup,
-  UnmergedGreenPr,
-  WorktreeSandbox,
-} from '@on-par/factory-core/internal';
 import {
+  type CiOutcome,
+  type EnqueueResult,
+  type GardenCluster,
+  type GithubQueue,
+  type OvernightItemOutcome,
+  type OvernightPreflightResult,
+  type OvernightQueueDeps,
+  type OvernightStateItem,
+  type QueueIssue,
+  type QueuePreflightDecision,
+  type RepoConfigYamlMigration,
+  type SlicePlan,
+  type SlicePlanCommentLookup,
+  type UnmergedGreenPr,
+  type WorktreeSandbox,
   acquirePidFile,
   createCheckResumeStore,
   findSlicePlanComment,
@@ -240,6 +236,7 @@ import {
   ClassifierBacktestInputError,
   type ClassifierBacktestOptions,
 } from './classifier-backtest.js';
+import { runHarnessCheckCommand } from './harness-check.js';
 import { findOpenPRForIssue, landIssue } from './land.js';
 import {
   AwaitingReviewError,
@@ -1281,6 +1278,12 @@ export function modelDoctorProbes(opts: { requireOllamaOnPath?: boolean } = {}):
   };
 }
 
+async function cmdHarnessCheck(id: string, opts: { model?: string }) {
+  const r = await runHarnessCheckCommand(id, opts, { repoRoot: await getRepoRoot(), ...configLoaders });
+  if (r.exitCode !== 0) throw new CliExitError(r.output, r.exitCode);
+  console.log(r.output);
+}
+
 async function cmdModels(opts: { doctor?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   const repoConfig = configLoaders.loadRepoConfig(repoRoot);
@@ -1889,8 +1892,7 @@ async function cmdTui(opts: { localQueue?: boolean } = {}, runTuiImpl: typeof ru
   });
 }
 
-export type { ParkReason, RunOutcome } from '@on-par/factory-core';
-export { parkEvents, parkReasonFor } from '@on-par/factory-core';
+export { type ParkReason, type RunOutcome, parkEvents, parkReasonFor } from '@on-par/factory-core';
 
 export class LaneParkError extends Error {
   readonly outcome: Extract<RunOutcome, { state: 'parked' }>;
@@ -4342,6 +4344,7 @@ export const PROGRAM_HANDLERS = {
   cmdMigrate,
   cmdConstitution,
   cmdModels,
+  cmdHarnessCheck,
   cmdDoctor: runDoctor,
   cmdCost,
   cmdUsage,

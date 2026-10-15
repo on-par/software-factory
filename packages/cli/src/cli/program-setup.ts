@@ -46,6 +46,17 @@ export function registerSetupCommands(program: Command, handlers: ProgramHandler
     .option('--doctor', 'Probe provider CLIs and env keys; report per-model reachability')
     .action(handlers.cmdModels);
 
+  const harnessCmd = program
+    .command('harness')
+    .description('Check a harness declared under harnesses: in .factory/config');
+  harnessCmd
+    .command('check <id>')
+    .description(
+      'Run the harness contract kit against a declared harness; exits 0 only when every case passes (spends model tokens)',
+    )
+    .option('--model <id>', 'Registry model id to run (default: the first models.registry entry on that harness)')
+    .action((id: string, opts: { model?: string }) => handlers.cmdHarnessCheck(id, opts));
+
   program
     .command('doctor')
     .description(
