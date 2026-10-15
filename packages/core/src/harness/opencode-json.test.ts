@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseOpenCodeJson } from './opencode.js';
+import { classifyOpenCodeErrorType, parseOpenCodeJson } from './opencode.js';
 
 describe('parseOpenCodeJson', () => {
   it('sets durationMs to the span between the smallest and largest event timestamps', () => {
@@ -106,5 +106,59 @@ describe('parseOpenCodeJson', () => {
       toolUse({ tool: 'bash', state: { status: 'error', error: 'ENOENT' } }),
     ].join('\n');
     expect(parseOpenCodeJson(stdout)?.permissionDenials).toEqual([]);
+  });
+});
+
+describe('parseOpenCodeJson typed error events', () => {
+  const err = (error: unknown) => JSON.stringify({ type: 'error', error });
+
+  it('reports errorType and errorStatus from the first typed error event', () => {
+    const parsed = parseOpenCodeJson(
+      [
+        err({ name: 'X', data: { message: 'untyped' } }),
+        err({ type: 'provider.quota', status: 402, data: { message: 'q' } }),
+        err({ type: 'provider.auth', status: 401, data: { message: 'a' } }),
+      ].join('\n'),
+    );
+    expect(parsed?.errorType).toBe('provider.quota');
+    expect(parsed?.errorStatus).toBe(402);
+  });
+
+  it('takes errorStatus from data.statusCode when error.status is absent', () => {
+    const parsed = parseOpenCodeJson(err({ type: 'provider.rate-limit', data: { message: 'm', statusCode: 429 } }));
+    expect(parsed?.errorStatus).toBe(429);
+  });
+
+  it('omits errorType for a non-string or empty type', () => {
+    for (const type of ['', 5, null, { a: 1 }]) {
+      const parsed = parseOpenCodeJson(err({ type, data: { message: 'm' } }));
+      expect(parsed).toEqual({ text: '', errorText: 'm', permissionDenials: [] });
+    }
+  });
+
+  it('uses the type as the errorText line when message and name are absent', () => {
+    const parsed = parseOpenCodeJson(err({ type: 'provider.connect', status: 503 }));
+    expect(parsed?.errorText).toBe('provider.connect status 503');
+  });
+});
+
+describe('classifyOpenCodeErrorType', () => {
+  it('maps the listed types', () => {
+    expect(
+      [
+        'provider.rate-limit',
+        'provider.quota',
+        'provider.auth',
+        'provider.timeout',
+        'provider.connect',
+        'provider.no-route',
+      ].map(classifyOpenCodeErrorType),
+    ).toEqual(['rate_limit', 'usage_cap', 'local_auth', 'timeout', 'unavailable', 'unavailable']);
+  });
+
+  it('returns undefined for missing, unmapped, differently cased and prototype keys', () => {
+    for (const t of [undefined, 'provider.content-filter', 'Provider.Quota', 'constructor']) {
+      expect(classifyOpenCodeErrorType(t)).toBeUndefined();
+    }
   });
 });
