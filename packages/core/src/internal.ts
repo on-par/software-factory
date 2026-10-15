@@ -136,10 +136,9 @@ export { DesignArtifactSchema, parseDesignArtifact, readDesignArtifact, renderDe
 
 // Concrete coding harnesses
 export { classifyFailure } from './harness/classify.js';
-export type { ClaudeExecFn } from './harness/claude-cli.js';
-export { ClaudeCliHarness } from './harness/claude-cli.js';
-export type { CodexExecFn } from './harness/codex-cli.js';
-export { CodexCliHarness } from './harness/codex-cli.js';
+export { type ClaudeExecFn, ClaudeCliHarness } from './harness/claude-cli.js';
+export { type CodexExecFn, CodexCliHarness } from './harness/codex-cli.js';
+export { type HarnessCheckOptions, type HarnessCheckResult, runHarnessCheck } from './harness/check.js';
 export { buildHarnessCommand, CommandHarness } from './harness/command.js';
 export { isAgenticHarness, isRetryableFailure, NON_RETRYABLE_FAILURE_REASONS } from './harness/index.js';
 export type { OllamaAgenticChange, OllamaAgenticExecFn, OllamaAgenticProposal } from './harness/ollama-agentic.js';
