@@ -1276,11 +1276,14 @@ describe('cli commands (via main dispatch)', () => {
         return map;
       }
 
-      it('marks every ollama-provider model ❌ when ollama is not on PATH', async () => {
+      it('marks every ollama-provider model ❌ without running `ollama list` when ollama is not on PATH (#2724)', async () => {
         coreFakes.isCommandAvailable.mockImplementation((c: string) => c !== 'ollama');
-
-        await runMainRaw(realDeps(), 'models');
-
+        const cmds: string[] = [];
+        h.execSyncImpl = (cmd: string) => (cmds.push(cmd), '/bin/sh: 1: ollama: not found');
+        for (const args of [['models'], ['models', '--doctor']]) await runMainRaw(realDeps(), ...args);
+        process.exitCode = undefined;
+        expect(cmds).not.toContain('ollama list');
+        expect(logged() + errored()).not.toMatch(/\/bin\/sh|ollama: not found/);
         const ollamaModels = captured!.list().filter((m) => captured!.get(m)?.provider === 'ollama');
         expect(ollamaModels.length).toBeGreaterThan(0);
         const lines = logged().replace(ANSI, '').split('\n');
