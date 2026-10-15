@@ -794,6 +794,11 @@ export function claudeKeychainCheck(probe: KeychainProbeStatus): DoctorCheck {
   };
 }
 
+/** The keychain row(s) for doctor: none off macOS, where the login keychain does not apply (#2998). */
+export function claudeKeychainChecks(platform: NodeJS.Platform, probe: () => KeychainProbeStatus): DoctorCheck[] {
+  return platform === 'darwin' ? [claudeKeychainCheck(probe())] : [];
+}
+
 /** Non-null when `factory run` must fail fast instead of claiming issues (#1014).
  *  Only the tmux-without-keychain differential is certain enough to abort a run on. */
 export function keychainPreflightError(probe: KeychainProbeStatus): string | null {
@@ -1013,7 +1018,7 @@ export async function cmdDoctor(
     checks.push(opencodeLiveAuthCheck(runOpencodeAuthProbe(rt, repoRoot)));
   }
 
-  checks.push(claudeKeychainCheck(rt.probeClaudeKeychain()));
+  checks.push(...claudeKeychainChecks(process.platform, rt.probeClaudeKeychain));
   checks.splice(0, checks.length, ...reconcileAgentAuthChecks(checks));
 
   if (repoRoot !== null) {
