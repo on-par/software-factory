@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Runs the real-CLI full-loop smoke for one agent, or skips cleanly (exit 0) when the
-# agent's secret is not configured. Usage: real-cli-smoke.sh <codex|opencode>
+# agent's secret is not configured. Usage: real-cli-smoke.sh <codex|opencode|pi>
 set -euo pipefail
 
 agent="${1:-}"
 case "$agent" in
   codex) var=OPENAI_API_KEY ;;
   opencode) var=OPENCODE_API_KEY ;;
+  pi) var=OPENROUTER_API_KEY ;;
   *)
-    echo "usage: $0 <codex|opencode>" >&2
+    echo "usage: $0 <codex|opencode|pi>" >&2
     exit 2
     ;;
 esac

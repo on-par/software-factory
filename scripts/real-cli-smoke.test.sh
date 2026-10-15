@@ -44,6 +44,10 @@ OPENAI_API_KEY='' OPENCODE_API_KEY='' run opencode
 [ "$RC" -eq 0 ] || fail "opencode skip exited $RC"
 echo "$OUT" | grep -q 'skipping' || fail "opencode skip notice missing"
 [ ! -s "$NPX_LOG" ] || fail "opencode skip must not call npx"
+OPENAI_API_KEY='' OPENCODE_API_KEY='' OPENROUTER_API_KEY='' run pi
+[ "$RC" -eq 0 ] || fail "pi skip exited $RC"
+echo "$OUT" | grep -q 'skipping' || fail "pi skip notice missing"
+[ ! -s "$NPX_LOG" ] || fail "pi skip must not call npx"
 echo "PASS: skips with exit 0 when the agent secret is empty"
 
 run foo
@@ -57,3 +61,18 @@ OPENAI_API_KEY=x run codex
 grep -q 'FACTORY_REAL_CLI=codex' "$NPX_LOG" || fail "FACTORY_REAL_CLI=codex not passed"
 grep -q 'real-cli-loop.real-cli.test.ts' "$NPX_LOG" || fail "suite file not passed"
 echo "PASS: runs the real-cli suite when the secret is set"
+
+OPENROUTER_API_KEY=x run pi
+[ "$RC" -eq 0 ] || fail "pi run exited $RC"
+grep -q 'FACTORY_REAL_CLI=pi' "$NPX_LOG" || fail "FACTORY_REAL_CLI=pi not passed"
+grep -q 'real-cli-loop.real-cli.test.ts' "$NPX_LOG" || fail "suite file not passed for pi"
+echo "PASS: runs the real-cli suite for pi when OPENROUTER_API_KEY is set"
+
+WF="$ROOT/.github/workflows/nightly-real-cli.yml"
+grep -qF 'npm install -g @earendil-works/pi-coding-agent@1.2.0' "$WF" || fail "workflow lacks the exact Pi install"
+if grep -o 'pi-coding-agent[^ "]*' "$WF" | grep -vqx 'pi-coding-agent@1.2.0'; then
+  fail "workflow has a non-exact pi-coding-agent spec"
+fi
+grep -qF "if: env.OPENROUTER_API_KEY != ''" "$WF" || fail "Pi install is not gated on the secret"
+grep -qF 'bash scripts/real-cli-smoke.sh pi' "$WF" || fail "workflow lacks the Pi smoke step"
+echo "PASS: nightly workflow installs the exact Pi pin behind the secret"
