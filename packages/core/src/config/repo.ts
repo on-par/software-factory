@@ -30,10 +30,11 @@ import {
   type MergePolicySource,
   type ModelsConfig,
 } from './index.js';
-import { RepoHarnessesSchema, resolveRepoHarnesses } from './repo-harnesses.js';
+import { assertRegistryHarness, RepoHarnessesSchema, resolveRepoHarnesses } from './repo-harnesses.js';
 import { ModelEffortsSchema } from './effort.js';
 import { assertAgenticBuildPin } from './repo-build-pin.js';
 import { assertTierMayRoute } from './repo-tier-guard.js';
+import { assertApprovedClaudeEndpoint } from './intermediaries.js';
 
 // ---------- Schema ----------
 
@@ -353,7 +354,8 @@ export function loadRepoConfig(repoRoot: string, stateRoot?: string): RepoFactor
 /** Apply a repo config's model registry, tier overrides, harnesses, provider flags, and checker/triage pins to a
  *  packaged ModelsConfig, in that order. Pure; `null` repo is the identity transform (the critical no-config
  *  regression surface). Throws naming the tier/model on an unknown or `trainsOnPrompts` id (pin it instead), an
- *  emptied tier, a redefined packaged id, or a redeclared harness. */
+ *  emptied tier, a redefined packaged id, or a redeclared harness, or a registry `endpoint` that is not an approved
+ *  Anthropic-compatible intermediary (ADR-0163) or lacks an envKey. */
 export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | null): ModelsConfig {
   if (!repo) return models;
 
@@ -365,11 +367,8 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
         `.factory/config.json: models.registry.${id} redefines packaged model '${id}'; packaged model ids cannot be redefined. Register it under a new id (for example '${id}-custom') and pin or tier that id instead`,
       );
     }
-    if (def.harness !== undefined && !validHarnesses.includes(def.harness)) {
-      throw new Error(
-        `.factory/config.json: models.registry.${id} declares unknown harness '${def.harness}' (valid harnesses: ${validHarnesses.join(', ')})`,
-      );
-    }
+    assertRegistryHarness(id, def.harness, validHarnesses);
+    assertApprovedClaudeEndpoint(id, def);
   }
   const mergedModels = { ...models.models, ...registry };
   const knownModels = Object.keys(mergedModels).join(', ');

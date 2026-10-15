@@ -60,6 +60,13 @@ const ModelDefSchema = z
       .record(z.string(), z.unknown())
       .optional()
       .describe('Extra provider-specific options (e.g. Ollama num_ctx/temperature).'),
+    endpoint: z
+      .string()
+      .url()
+      .optional()
+      .describe(
+        'Approved Anthropic-compatible intermediary base URL (https) for the claude-cli harness. Needs envKey; host must be an ADR-0163 approved intermediary.',
+      ),
     harness: z
       .string()
       .optional()

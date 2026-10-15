@@ -1,7 +1,7 @@
 import { defaultModelsConfig } from '@on-par/factory-config';
 import { describe, expect, it } from 'vitest';
 
-import { intermediaryFor } from './intermediaries.js';
+import { claudeEndpointIntermediary, intermediaryFor } from './intermediaries.js';
 
 describe('intermediaryFor', () => {
   it('finds OpenCode Go with its review date', () => {
@@ -31,5 +31,24 @@ describe('packaged pi models', () => {
     for (const [id, m] of piModels) {
       expect(intermediaryFor(m.providerModel ?? '')?.status, id).toBe('approved');
     }
+  });
+});
+
+describe('claudeEndpointIntermediary (#2906)', () => {
+  it.each(['https://openrouter.ai/api', 'https://OpenRouter.ai/api'])('accepts %s', (url) => {
+    expect(claudeEndpointIntermediary(url)?.name).toBe('OpenRouter');
+  });
+
+  it.each([
+    'http://openrouter.ai/api',
+    'https://api.deepseek.com/anthropic',
+    'https://opencode.ai/zen/go',
+    'https://ai.azure.com/x',
+    'https://openrouter.ai.evil.com',
+    'https://evil-openrouter.ai',
+    'not a url',
+    '',
+  ])('rejects %s', (url) => {
+    expect(claudeEndpointIntermediary(url)).toBeUndefined();
   });
 });

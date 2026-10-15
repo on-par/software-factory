@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { claudeEndpointIntermediary } from '../config/intermediaries.js';
 import { wrapCommandInSandbox } from '../sandbox/index.js';
 import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
@@ -114,8 +115,35 @@ function stripClaudeStreamMetadata(text: string): string {
   return diagnostics !== undefined ? diagnostics : text;
 }
 
+/** Per-call env that points the claude CLI at a model's approved intermediary (#2906, ADR-0163). Empty when the
+ *  model has no endpoint. ANTHROPIC_API_KEY is an explicit undefined so ExecFn's merge removes the parent's copy. */
+export function claudeEndpointEnv(
+  def: { endpoint?: string; envKey: string | null; claudeFlag?: string } | undefined,
+  source: Record<string, string | undefined> = process.env,
+): Record<string, string | undefined> {
+  if (!def?.endpoint) return {};
+  if (!claudeEndpointIntermediary(def.endpoint) || def.envKey === null) {
+    throw new HarnessError('claude CLI endpoint is not an approved intermediary (ADR-0163)', 'error');
+  }
+  const token = source[def.envKey];
+  if (!token) {
+    throw new HarnessError(`${def.envKey} not set for the claude CLI intermediary endpoint`, 'unavailable');
+  }
+  const modelEnv = def.claudeFlag
+    ? {
+        ANTHROPIC_MODEL: def.claudeFlag,
+        ANTHROPIC_DEFAULT_OPUS_MODEL: def.claudeFlag,
+        ANTHROPIC_DEFAULT_SONNET_MODEL: def.claudeFlag,
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: def.claudeFlag,
+        CLAUDE_CODE_SUBAGENT_MODEL: def.claudeFlag,
+      }
+    : {};
+  return { ANTHROPIC_BASE_URL: def.endpoint, ANTHROPIC_AUTH_TOKEN: token, ANTHROPIC_API_KEY: undefined, ...modelEnv };
+}
+
 /** Runs a model via the Claude CLI:
- *  claude -p [--model <claudeFlag>] --output-format stream-json --verbose --safe-mode --permission-mode bypassPermissions < prompt-file */
+ *  claude -p [--model <claudeFlag>] --output-format stream-json --verbose --safe-mode --permission-mode bypassPermissions < prompt-file
+ *  A model with an approved `endpoint` also gets that call's ANTHROPIC_* env (base URL, bearer token from its envKey). */
 export class ClaudeCliHarness implements CodingHarness {
   readonly id = 'claude-cli';
   readonly agentic = true;
@@ -128,10 +156,13 @@ export class ClaudeCliHarness implements CodingHarness {
     const effortArg = effort === undefined ? '' : ` --effort ${shellEscape(String(effort))}`;
     const flag = registry.getClaudeFlag(model);
     const modelArg = flag ? `--model ${shellEscape(flag)}` : '';
+    const endpointEnv = claudeEndpointEnv(registry.get(model));
     const promptDir = await mkdtemp(join(tmpdir(), 'factory-claude-prompt-'));
     const promptPath = join(promptDir, 'prompt.txt');
     await writeFile(promptPath, prompt, 'utf8');
     const cmd = `claude -p ${modelArg}${effortArg} --output-format stream-json --include-partial-messages --verbose --safe-mode --permission-mode bypassPermissions < ${shellEscape(promptPath)}`;
+    const effortEnv = effort === undefined ? {} : { CLAUDE_CODE_EFFORT_LEVEL: String(effort) };
+    const hasOverlay = Object.keys(endpointEnv).length > 0 || effort !== undefined;
     const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
 
     let stdout: string;
@@ -140,7 +171,7 @@ export class ClaudeCliHarness implements CodingHarness {
         cwd: worktree,
         timeoutMs: timeoutSeconds * 1000,
         maxBuffer: 10 * 1024 * 1024,
-        env: effort === undefined ? env : { ...env, CLAUDE_CODE_EFFORT_LEVEL: String(effort) },
+        env: hasOverlay ? { ...env, ...endpointEnv, ...effortEnv } : env,
         onPgid,
       }));
     } catch (err: any) {
