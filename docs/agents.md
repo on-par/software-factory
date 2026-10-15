@@ -94,9 +94,15 @@ route: opencode
 ### Effort
 
 `models.efforts` for an OpenCode model is passed as `--variant <effort>` on OpenCode 1.x, and as
-`--model '<provider/model>#<effort>'` on 2.x. The factory reads `opencode --version` once per run
-process; when the version is unknown it uses the 1.x form. On 2.x a model with no `providerModel`
+`--model '<provider/model>#<effort>'` on 2.x. The factory reads `opencode --version` once per
+harness instance (for every OpenCode run, not only when an effort is set); when the version is unknown it uses the 1.x form. On 2.x a model with no `providerModel`
 runs without effort.
+
+### Isolation
+
+On OpenCode 2.x the factory passes `--standalone` to `opencode run`, so each run starts a private
+server and never attaches to the shared per-user background server. On 1.x, or when the version is
+unknown, the flag is omitted.
 
 ### Verify with `factory doctor`
 

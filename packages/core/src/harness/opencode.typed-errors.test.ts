@@ -13,6 +13,7 @@ const readFixture = (name: string) =>
 function recordingExec(result: { stdout?: string; stderr?: string } = {}) {
   const calls: { cmd: string }[] = [];
   const fn = async (cmd: string) => {
+    if (cmd === 'opencode --version') return { stdout: '', stderr: '' };
     calls.push({ cmd });
     return { stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
   };

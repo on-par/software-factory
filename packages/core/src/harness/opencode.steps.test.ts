@@ -42,6 +42,7 @@ const textEvent = (text: string) => JSON.stringify({ type: 'text', part: { text 
 function recordingExec(stdout: string) {
   const calls: { stdin?: string }[] = [];
   const fn = async (cmd: string) => {
+    if (cmd === 'opencode --version') return { stdout: '', stderr: '' };
     const promptPath = /< '([^']+)'$/.exec(cmd)?.[1];
     calls.push({ stdin: promptPath ? (await import('node:fs')).readFileSync(promptPath, 'utf8') : undefined });
     return { stdout, stderr: '' };

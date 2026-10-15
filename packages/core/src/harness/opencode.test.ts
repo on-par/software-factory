@@ -69,6 +69,7 @@ const registry = new ModelRegistry(modelsConfig);
 function recordingExec(result: { stdout?: string; stderr?: string } = {}) {
   const calls: { cmd: string; opts: any; promptPath?: string; stdin?: string }[] = [];
   const fn = async (cmd: string, opts: any) => {
+    if (cmd === 'opencode --version') return { stdout: '', stderr: '' };
     const promptPath = /< '([^']+)'$/.exec(cmd)?.[1];
     calls.push({ cmd, opts, promptPath, stdin: promptPath ? readFileSync(promptPath, 'utf8') : undefined });
     return { stdout: result.stdout ?? '', stderr: result.stderr ?? '' };

@@ -150,7 +150,7 @@ function recordingExec(
 ) {
   const calls: { cmd: string; opts: any }[] = [];
   const fn = async (cmd: string, opts: any) => {
-    calls.push({ cmd, opts });
+    if (cmd !== 'opencode --version') calls.push({ cmd, opts });
     if (onCmd) await onCmd(cmd);
     return { stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
   };
