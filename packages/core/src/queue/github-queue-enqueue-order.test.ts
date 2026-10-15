@@ -85,4 +85,41 @@ describe('enqueue order selection', () => {
 
     expect(res?.position).toBe(1);
   });
+
+  it('reports the order-only issue holding the slot a queued-only scan would reuse', async () => {
+    const client = createStore([...queuedPeers(23), { number: 50, labels: [laneLabel('L'), queueOrderLabel(24)] }]);
+
+    const [res] = await queueFor(client).enqueue('L', [100]);
+
+    expect(res?.position).toBe(25);
+    expect(res?.collision).toEqual({ order: 24, heldBy: [50] });
+  });
+
+  it('sets no collision when no order-only issue holds the slot', async () => {
+    const client = createStore(queuedPeers(3));
+
+    const [res] = await queueFor(client).enqueue('L', [100]);
+
+    expect(res).not.toHaveProperty('collision');
+  });
+
+  it('reports a collision only on the batch member whose naive slot is held', async () => {
+    const client = createStore([...queuedPeers(23), { number: 50, labels: [laneLabel('L'), queueOrderLabel(24)] }]);
+
+    const [first, second] = await queueFor(client).enqueue('L', [100, 101]);
+
+    expect(first?.position).toBe(25);
+    expect(first?.collision).toEqual({ order: 24, heldBy: [50] });
+    expect(second?.position).toBe(26);
+    expect(second).not.toHaveProperty('collision');
+  });
+
+  it('does not report a collision for an order held in another lane', async () => {
+    const client = createStore([...queuedPeers(23), { number: 50, labels: [laneLabel('other'), queueOrderLabel(24)] }]);
+
+    const [res] = await queueFor(client).enqueue('L', [100]);
+
+    expect(res?.position).toBe(24);
+    expect(res).not.toHaveProperty('collision');
+  });
 });

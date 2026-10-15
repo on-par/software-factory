@@ -258,6 +258,7 @@ import { runQueueClear } from './queue-clear.js';
 import { buildProgram } from './program.js';
 import { buildCostJson } from './cost-json.js';
 import { buildQueueAddJson } from './queue-add-json.js';
+import { renderQueueAddLines, renderUnparkLines } from './queue-output.js';
 import { buildQueueListJson } from './queue-list.js';
 import { appendUnparkEvent, runUnpark, UnparkError, type UnparkJson } from './unpark.js';
 import { buildRunsJson, parseRunsLimit } from './runs.js';
@@ -3039,7 +3040,7 @@ export async function cmdUnpark(issueArg: string, opts: { lane?: string; json?: 
     console.log(JSON.stringify(result));
     return;
   }
-  console.log(styleText('green', `#${issue} unparked → lane ${result.lane}, position ${result.order}`));
+  for (const line of renderUnparkLines(result)) console.log(line);
 }
 
 export async function cmdQueueAdd(lane: string, issueArgs: string[], opts: { json?: boolean } = {}): Promise<void> {
@@ -3081,15 +3082,8 @@ export async function cmdQueueAdd(lane: string, issueArgs: string[], opts: { jso
     return;
   }
 
-  for (const r of results) {
-    if (r.outcome === 'queued') {
-      console.log(styleText('green', `#${r.issue} queued → lane ${lane}, position ${r.position}`));
-    } else if (r.outcome === 'already-queued') {
-      console.log(`#${r.issue} already queued — skipped`);
-    } else {
-      console.error(styleText('red', `#${r.issue} failed — ${r.detail}`));
-    }
-  }
+  for (const line of renderQueueAddLines(lane, results))
+    (line.stream === 'err' ? console.error : console.log)(line.text);
 
   const failed = results.filter((r) => r.outcome === 'failed');
   if (failed.length > 0) {

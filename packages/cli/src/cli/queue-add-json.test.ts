@@ -12,6 +12,15 @@ const FIXED: EnqueueResult[] = [
 ];
 
 describe('buildQueueAddJson', () => {
+  it('passes collision through only when set', () => {
+    const json = buildQueueAddJson('ops', [
+      { issue: 1, outcome: 'queued', position: 25, labelsAdded: [], collision: { order: 24, heldBy: [7] } },
+      { issue: 2, outcome: 'queued', position: 26, labelsAdded: [] },
+    ]);
+    expect(json.issues[0]?.collision).toEqual({ order: 24, heldBy: [7] });
+    expect(json.issues[1]).not.toHaveProperty('collision');
+  });
+
   it('builds queued issues with consecutive orders', () => {
     const json = buildQueueAddJson('ops', FIXED.slice(0, 2));
     expect(json.schemaVersion).toBe(1);
