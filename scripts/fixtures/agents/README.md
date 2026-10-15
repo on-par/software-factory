@@ -1,6 +1,6 @@
 # Recorded agent fixtures
 
-These are fake `codex`, `opencode` and `command-agent` CLIs used by the smoke tests (#2407). Each shim in `bin/` replays a recording from `recordings/<agent>/`. In success mode it also makes a real commit in the worktree. Put `bin/` first on `PATH` to use them.
+These are fake `codex`, `opencode`, `pi` and `command-agent` CLIs used by the smoke tests (#2407). Each shim in `bin/` replays a recording from `recordings/<agent>/`. In success mode it also makes a real commit in the worktree. Put `bin/` first on `PATH` to use them.
 
 ## Layout
 
@@ -73,6 +73,21 @@ Files: `success.stdout`, `rate-limit.stdout`, `usage-cap.stdout`, `empty.stdout`
 4. Normalise: set every `timestamp` to `1700000000000` and every `sessionID` to `ses_fixture`. Keep the `TOOL_CHATTER_MARKER` tool_use line and the `FINAL ANSWER:` text that the tests rely on.
 5. Overwrite the files in `recordings/opencode/` and update the Version line above.
 6. Run `npx vitest run scripts/fixtures/agents/agents.test.ts` from the repo root.
+
+### pi
+
+Version: pi 0.1.0 (synthesized, not captured from a real pi)
+
+Only `--version` and `auth check` are recorded, from the output contract in `packages/core/src/models/pi-auth.ts`. Run modes are not recorded.
+
+Files: `version.stdout`, `auth-check.stdout`.
+
+#### Refresh pi
+
+1. Run `pi --version` and save the output to `recordings/pi/version.stdout`.
+2. With a zero-data-retention OpenRouter key in `OPENROUTER_API_KEY`, run `pi auth check --model openrouter/deepseek/deepseek-v4.1-flash --no-refresh` and save the output to `recordings/pi/auth-check.stdout` (the first line must be `ready`).
+3. Update the Version line above.
+4. Run `npx vitest run scripts/fixtures/agents/agents.test.ts` from the repo root.
 
 ### command-agent
 

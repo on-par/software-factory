@@ -126,6 +126,37 @@ describe.skipIf(process.platform === 'win32')('fake agent CLI shims', () => {
   });
 });
 
+describe.skipIf(process.platform === 'win32')('fake pi shim', () => {
+  const run = (args: string[], mode?: string) => {
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    if (mode === undefined) delete env.FAKE_AGENT_MODE;
+    else env.FAKE_AGENT_MODE = mode;
+    return spawnSync(join(BIN, 'pi'), args, { input: '', encoding: 'utf8', env });
+  };
+
+  it('replays the recorded --version output', () => {
+    const res = run(['--version']);
+    expect(res.status).toBe(0);
+    expect(res.stdout).toBe(recording('pi', 'version.stdout'));
+  });
+
+  it('reports ready from auth check', () => {
+    const res = run(['auth', 'check', '--model', 'openrouter/deepseek/deepseek-v4.1-flash', '--no-refresh']);
+    expect(res.status).toBe(0);
+    expect(res.stdout.split('\n')[0]).toBe('ready');
+  });
+
+  it('exits 0 with no output for other args in empty mode', () => {
+    const res = run(['--print'], 'empty');
+    expect(res.status).toBe(0);
+    expect(res.stdout).toBe('');
+  });
+
+  it('exits 2 for other args in the default mode', () => {
+    expect(run(['--print']).status).toBe(2);
+  });
+});
+
 describe('recorded fixture README', () => {
   it('documents a version and refresh steps for every recorded agent', () => {
     const readme = readFileSync(join(HERE, 'README.md'), 'utf8');

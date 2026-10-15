@@ -1,4 +1,4 @@
-# Smoke-repo factory config. render-config.sh replaces __SMOKE_AGENT__ with codex, opencode or command.
+# Smoke-repo factory config. render-config.sh replaces __SMOKE_AGENT__ with codex, opencode, pi or command.
 version: 2
 models:
   registry:
@@ -23,6 +23,17 @@ models:
       envKey: null
       harness: opencode
       providerModel: opencode-go/deepseek-v4-flash
+      experimental: true
+    smoke-pi:
+      provider: custom
+      tier: [worker]
+      costPerMtokInput: 0
+      costPerMtokOutput: 0
+      contextWindow: 200000
+      capabilities: [implementation, coding]
+      envKey: null
+      harness: pi
+      providerModel: openrouter/deepseek/deepseek-v4.1-flash
       experimental: true
     smoke-command:
       provider: custom

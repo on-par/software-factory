@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+FAKE_AGENTS_DIR=$(cd "$(dirname "$0")/.." && pwd)
+. "$FAKE_AGENTS_DIR/lib/replay.sh"
+
+case "${1:-} ${2:-}" in
+  "--version "*) fake_replay pi version ;;
+  "auth check") fake_replay pi auth-check ;;
+  *)
+    mode=$(fake_mode)
+    fake_drain_stdin
+    if [ "$mode" = empty ]; then exit 0; fi
+    echo "fake pi: only --version, auth check and FAKE_AGENT_MODE=empty are recorded" >&2
+    exit 2
+    ;;
+esac

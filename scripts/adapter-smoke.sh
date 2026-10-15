@@ -3,13 +3,13 @@
 # repo from scripts/fixtures/smoke-repo/ whose config pins the given agent's recorded shim, and
 # runs `factory doctor` on a PATH where claude cannot be found. Exits 0 only when doctor passes.
 #
-# `codex` and `opencode` are supported; command, the ship step and CI wiring are later slices. Assumes `npm ci` and `npm run build` have already run at the repo root.
+# `codex`, `opencode` and `pi` are supported; command, the ship step and CI wiring are later slices. Assumes `npm ci` and `npm run build` have already run at the repo root.
 set -euo pipefail
 
 AGENT="${1:-}"
 case "$AGENT" in
-  codex | opencode) ;;
-  *) echo "usage: $0 <codex|opencode>" >&2; exit 2 ;;
+  codex | opencode | pi) ;;
+  *) echo "usage: $0 <codex|opencode|pi>" >&2; exit 2 ;;
 esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -79,7 +79,7 @@ ln -s "$(command -v git)" "$FAKEBIN/git"
 AGENT_PATH="$FAKEBIN"
 IFS=: read -r -a PATH_DIRS <<<"$PATH"
 for dir in "${PATH_DIRS[@]}"; do
-  [ -x "$dir/claude" ] || [ -x "$dir/codex" ] || [ -x "$dir/opencode" ] || AGENT_PATH="$AGENT_PATH:$dir"
+  [ -x "$dir/claude" ] || [ -x "$dir/codex" ] || [ -x "$dir/opencode" ] || [ -x "$dir/pi" ] || AGENT_PATH="$AGENT_PATH:$dir"
 done
 echo "$AGENT PATH: $AGENT_PATH"
 
@@ -96,6 +96,7 @@ echo "claude not reachable on $AGENT PATH: OK"
 case "$AGENT" in
   codex) AGENT_ENV=(CODEX_HOME="$CODEX_HOME_DIR" CODEX_API_KEY=smoke-dummy-key) ;;
   opencode) AGENT_ENV=(OPENCODE_API_KEY=smoke-dummy-key) ;;
+  pi) AGENT_ENV=(OPENROUTER_API_KEY=smoke-dummy-key) ;;
 esac
 DOCTOR_EXIT=0
 DOCTOR_OUT="$(env PATH="$AGENT_PATH" "${AGENT_ENV[@]}" FAKE_AGENT_MODE=empty "$FACTORY" doctor 2>&1)" || DOCTOR_EXIT=$?

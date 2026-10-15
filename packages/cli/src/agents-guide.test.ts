@@ -8,7 +8,14 @@ import { describe, expect, it } from 'vitest';
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const GUIDE = 'docs/agents.md';
 const PROVIDERS = ['Claude Code', 'Codex', 'OpenCode'] as const;
-const RECIPES = ['Claude-only', 'Codex-only', 'OpenCode Go-only', 'Local Ollama', 'Mixed'] as const;
+const RECIPES = [
+  'Claude-only',
+  'Codex-only',
+  'OpenCode Go-only',
+  'Local Ollama',
+  'Mixed',
+  'DeepSeek on Pi through OpenRouter',
+] as const;
 const MATRIX_COLUMNS = [
   'Agent',
   'Harness id',
@@ -316,8 +323,14 @@ describe('docs/agents.md supported agents guide', () => {
     expect(problems).toEqual([]);
   });
 
-  it('has all five recipes, each with one yaml block and a Version tested line', () => {
+  it('has all six recipes, each with one yaml block and a Version tested line', () => {
     expect(recipeProblems(guideText ?? '', label)).toEqual([]);
+  });
+
+  it('the Pi recipe names OPENROUTER_API_KEY, pi auth check and pi-openrouter-deepseek-v4-flash', () => {
+    const section = recipeSection((guideText ?? '').split('\n'), 'DeepSeek on Pi through OpenRouter') ?? '';
+    for (const needle of ['OPENROUTER_API_KEY', 'pi auth check', 'pi-openrouter-deepseek-v4-flash', '--no-approve'])
+      expect(section).toContain(needle);
   });
 
   it('every recipe loads as a .factory/config.yaml and pins only known models, with versions matching the provider sections', () => {
