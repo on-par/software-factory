@@ -1279,10 +1279,9 @@ export function modelDoctorProbes(opts: { requireOllamaOnPath?: boolean } = {}):
 }
 
 async function cmdHarnessCheck(id: string, opts: { model?: string }) {
-  const deps = { repoRoot: await getRepoRoot(), ...configLoaders, applyRepoConfig };
-  const { output, exitCode } = await runHarnessCheckCommand(id, opts, deps);
-  if (exitCode !== 0) throw new CliExitError(output, exitCode);
-  console.log(output);
+  const r = await runHarnessCheckCommand(id, opts, { repoRoot: await getRepoRoot(), ...configLoaders });
+  if (r.exitCode !== 0) throw new CliExitError(r.output, r.exitCode);
+  console.log(r.output);
 }
 
 async function cmdModels(opts: { doctor?: boolean } = {}) {

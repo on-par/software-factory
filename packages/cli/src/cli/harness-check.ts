@@ -1,6 +1,6 @@
 // packages/cli/src/cli/harness-check.ts — `factory harness check <id>` (#2875).
 
-import { ModelRegistry, type ModelsConfig, type RepoFactoryConfig } from '@on-par/factory-core';
+import { applyRepoConfig, ModelRegistry, type ModelsConfig, type RepoFactoryConfig } from '@on-par/factory-core';
 import { type HarnessCheckResult, runHarnessCheck } from '@on-par/factory-core/internal';
 
 type HarnessDeclaration = NonNullable<ModelsConfig['harnesses']>[string];
@@ -9,8 +9,8 @@ export interface HarnessCheckCommandDeps {
   repoRoot: string;
   loadModelsConfig: () => ModelsConfig;
   loadRepoConfig: (repoRoot: string) => RepoFactoryConfig | null;
-  applyRepoConfig: (modelsConfig: ModelsConfig, repoConfig: RepoFactoryConfig | null) => ModelsConfig;
   /** Injectable seams; default to the real core implementations. */
+  applyRepoConfig?: (modelsConfig: ModelsConfig, repoConfig: RepoFactoryConfig | null) => ModelsConfig;
   runHarnessCheck?: typeof runHarnessCheck;
   registryClass?: typeof ModelRegistry;
 }
@@ -67,7 +67,7 @@ export async function runHarnessCheckCommand(
   deps: HarnessCheckCommandDeps,
 ): Promise<{ output: string; exitCode: number }> {
   const repoConfig = deps.loadRepoConfig(deps.repoRoot);
-  const modelsConfig = deps.applyRepoConfig(deps.loadModelsConfig(), repoConfig);
+  const modelsConfig = (deps.applyRepoConfig ?? applyRepoConfig)(deps.loadModelsConfig(), repoConfig);
   const target = resolveHarnessCheckTarget(id, modelsConfig, repoConfig, opts.model);
   if ('error' in target) return { output: target.error, exitCode: 1 };
   const results = await (deps.runHarnessCheck ?? runHarnessCheck)({
