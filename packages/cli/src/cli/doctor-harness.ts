@@ -87,6 +87,28 @@ export const HARNESS_SETUP: readonly HarnessSetup[] = [
   },
 ];
 
+/** Detail of a `<cli> installed` row when the CLI is not on PATH; doctor matches it exactly to skip the row (#2996). */
+export function notInstalledDetail(cli: string): string {
+  return `${cli} not found on PATH, ${cli} routes unavailable`;
+}
+
+const INSTALL_ROW_CLI = new Map(HARNESS_SETUP.map(({ cli }) => [`${cli} installed`, cli]));
+
+/** #2996: rewrites a not-installed agent row (`<cli> installed` with the exact not-on-PATH detail)
+ *  to ➖ skipped info; every other row is returned as is. Call only while an agent is signed in. */
+export function skipMissingAgentCheck(c: DoctorCheck): DoctorCheck {
+  if (c.ok) return c;
+  const cli = INSTALL_ROW_CLI.get(c.name);
+  if (cli === undefined || c.detail !== notInstalledDetail(cli)) return c;
+  const { fix: _fix, ...rest } = c;
+  return {
+    ...rest,
+    ok: true,
+    optional: true,
+    detail: `skipped: ${cli} not installed; another agent is signed in, so runs can proceed`,
+  };
+}
+
 /** One optional `<cli> installed` row per harness, with the CLI version when found and the install command when not (#2555). */
 export function harnessInstallChecks(
   commandAvailable: (cmd: string) => boolean,
@@ -100,7 +122,7 @@ export function harnessInstallChecks(
         section,
         ok: false,
         optional: true,
-        detail: `${cli} not found on PATH, ${cli} routes unavailable`,
+        detail: notInstalledDetail(cli),
         fix: `install ${section}: ${install}`,
       };
     }
@@ -117,4 +139,11 @@ export function harnessInstallChecks(
       detail: version ? `found on PATH (${version})` : 'found on PATH (version unknown)',
     };
   });
+}
+
+/** Agents whose `<cli> signed in` row is a hard pass (#2999), in HARNESS_SETUP order. */
+export function readyAgents(checks: DoctorCheck[]): string[] {
+  return HARNESS_SETUP.filter(({ cli }) =>
+    checks.some((c) => c.name === `${cli} signed in` && c.ok && c.optional !== true),
+  ).map(({ cli }) => cli);
 }

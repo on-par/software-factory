@@ -45,6 +45,20 @@ export function formatStopFileAge(ms: number): string {
   return `${h}h ${m % 60}m`;
 }
 
+/** Printed by `factory stop` in text mode (#2544): STOP halts between issues, never mid-issue. */
+export const STOP_SET_MESSAGE =
+  "STOP set: lanes halt between issues. A running `factory ship` or lane finishes its current issue; the next issue won't start. Run `factory resume` to clear it.";
+
+/** The `factory status` STOP line (#2544); '' when STOP is absent. */
+export function stopSentinelStatusLine(status: StopSentinelStatus): string {
+  if (!status.present) return '';
+  const since =
+    status.writtenAt === 'unknown'
+      ? 'STOP is set (set time unknown)'
+      : `STOP is set since ${status.writtenAt} (${formatStopFileAge(status.ageMs)} ago)`;
+  return `${since}. Lanes halt between issues. Run \`factory resume\` to clear it.`;
+}
+
 /** Message logged/printed by `factory run` when it skips a pass because STOP is present. */
 export function stopSentinelRunSkipMessage(status: StopSentinelStatus): string {
   if (!status.present) return '';

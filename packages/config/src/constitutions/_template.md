@@ -11,8 +11,12 @@ a standard plus a way to check it.
 product: <product-name>
 version: 1
 checkers:
-  - <checker-name> # References lib/checkers/<checker-name>.sh
-  - <checker-name>
+  - worker_output
+  - compile
+  - tests
+  - lint
+  - design_smells
+  # - custom_my_checker # add your own; see factory constitution --checkers
 enforced_on: [plan, build, check] # Which phases load this constitution
 requireTests: true # FAIL (instead of SKIP) the tests checker when the repo has no verify/test command
 ---

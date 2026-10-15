@@ -1,4 +1,4 @@
-import type { EnqueueOutcome, EnqueueResult } from '@on-par/factory-core/internal';
+import type { EnqueueOutcome, EnqueueResult, OrderCollision } from '@on-par/factory-core/internal';
 
 /** One issue in `factory queue add --json` (#2275). */
 export interface QueueAddIssueJson {
@@ -9,6 +9,8 @@ export interface QueueAddIssueJson {
   labelsAdded: string[];
   /** Set only when outcome === 'failed'. */
   detail?: string;
+  /** Set only when this placement bumped past an order held without factory:queued (#2988). */
+  collision?: OrderCollision;
 }
 
 /** `factory queue add --json` payload (#2275). Additive changes only; bump schemaVersion on a breaking change. */
@@ -35,6 +37,7 @@ export function buildQueueAddJson(lane: string, results: readonly EnqueueResult[
       order: failed ? null : (r.position ?? null),
       labelsAdded: failed ? [] : [...(r.labelsAdded ?? [])],
       ...(failed ? { detail: r.detail ?? '' } : {}),
+      ...(!failed && r.collision ? { collision: r.collision } : {}),
     };
   });
   return {

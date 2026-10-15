@@ -101,11 +101,11 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     .option('--no-auto-merge', 'Never merge autonomously, overriding .factory/config.yaml and FACTORY_MERGE')
     .option(
       '--pr-classifier',
-      'Hold PRs whose review floor is B or C for a human (applies no-auto-merge), overriding .factory/config.json and FACTORY_PR_CLASSIFIER',
+      'Hold PRs whose review floor is B or C for a human (applies no-auto-merge), overriding the repo config (.factory/config.yaml) and FACTORY_PR_CLASSIFIER',
     )
     .option(
       '--no-pr-classifier',
-      'Never run the PR classifier gate, overriding .factory/config.json and FACTORY_PR_CLASSIFIER',
+      'Never run the PR classifier gate, overriding the repo config (.factory/config.yaml) and FACTORY_PR_CLASSIFIER',
     )
     .option(
       '--usage-watch',

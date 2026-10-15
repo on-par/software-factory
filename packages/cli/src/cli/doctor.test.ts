@@ -170,16 +170,16 @@ describe('gitAuthCheck', () => {
 });
 
 describe('runDoctorChecks', () => {
-  it('fully configured repo: 19 checks all ok, pre-existing rows unchanged, doctorFailed false', () => {
+  it('fully configured repo: 18 checks all ok, pre-existing rows unchanged, doctorFailed false', () => {
     const checks = runDoctorChecks(probes());
-    expect(checks).toHaveLength(19);
+    expect(checks).toHaveLength(18);
     expect(checks.every((c) => c.ok)).toBe(true);
     expect(doctorFailed(checks)).toBe(false);
     const byName = (n: string) => checks.find((c) => c.name === n)!;
     expect(byName('git repository').detail).toBe('/repo');
     expect(byName('git auth')).toMatchObject({ ok: true });
     expect(byName('git auth').detail).not.toContain('github.com');
-    expect(byName('codex sandbox').detail).toBe('codex CLI found (sandboxed builds available)');
+    expect(byName('codex installed').detail).toMatch(/; sandboxed builds available$/);
     expect(byName('git worktree clean').detail).toBe('clean');
     expect(byName('.factory initialized').detail).toBe('.factory/ present');
     expect(byName('git identity').detail).toBe('Test User <test@example.com>');
@@ -387,7 +387,7 @@ describe('runDoctorChecks', () => {
     expect(runtime.optional).toBe(true);
     expect(runtime.detail).toContain('uncontained');
     expect(runtime.fix).toContain('firejail');
-    const codex = checks.find((c) => c.name === 'codex sandbox')!;
+    const codex = checks.find((c) => c.name === 'codex installed')!;
     expect(codex.detail).toContain('danger-full-access');
     expect(codex.detail).not.toContain('sandboxed builds available');
     expect(doctorFailed(checks)).toBe(false);
@@ -443,9 +443,10 @@ describe('runDoctorChecks', () => {
 
   it('codex missing is an optional failure only', () => {
     const checks = runDoctorChecks(probes({ commandAvailable: (cmd) => cmd !== 'codex' }));
-    const codex = checks.find((c) => c.name === 'codex sandbox')!;
+    const codex = checks.find((c) => c.name === 'codex installed')!;
     expect(codex.ok).toBe(false);
     expect(codex.optional).toBe(true);
+    expect(checks.some((c) => c.name === 'codex sandbox')).toBe(false);
     expect(doctorFailed(checks)).toBe(false);
   });
 });
@@ -476,7 +477,7 @@ describe('formatDoctorChecks', () => {
         fix: 'install Claude Code first: https://docs.anthropic.com/en/docs/claude-code',
       },
       {
-        name: 'codex sandbox',
+        name: 'codex installed',
         ok: false,
         optional: true,
         detail: 'codex CLI not found; codex build routes unavailable',
@@ -488,7 +489,7 @@ describe('formatDoctorChecks', () => {
         ✅ git repository - /path/to/repo
         ❌ claude CLI - not found on PATH
              fix: install Claude Code first: https://docs.anthropic.com/en/docs/claude-code
-        ⚠️ codex sandbox - codex CLI not found; codex build routes unavailable
+        ⚠️ codex installed - codex CLI not found; codex build routes unavailable
              fix: install the codex CLI, or rely on claude routes
       1 passed, 1 failed, 1 warnings
 
@@ -694,7 +695,7 @@ describe('formatDoctorChecks icons', () => {
   const rows = [
     { name: 'node', ok: true, detail: 'v22' },
     { name: 'sandbox runtime', ok: false, optional: true, detail: 'not available' },
-    { name: 'codex sandbox', ok: false, optional: true, detail: 'codex CLI not found' },
+    { name: 'codex installed', ok: false, optional: true, detail: 'codex CLI not found' },
     {
       name: 'git worktree clean',
       ok: false,
@@ -716,7 +717,7 @@ describe('formatDoctorChecks icons', () => {
     expect(count(output, '⚠️')).toBe(2);
     expect(count(output, '➖')).toBe(2);
     expect(output).toContain('0 failed, 4 warnings');
-    for (const name of ['sandbox runtime', 'codex sandbox']) expect(lineOf(output, name)).toContain(`⚠️ ${name}`);
+    for (const name of ['sandbox runtime', 'codex installed']) expect(lineOf(output, name)).toContain(`⚠️ ${name}`);
     for (const name of ['git worktree clean', '.factory initialized'])
       expect(lineOf(output, name)).toContain(`➖ ${name}`);
   });

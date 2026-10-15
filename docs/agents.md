@@ -66,7 +66,7 @@ route: codex
 ### Verify with `factory doctor`
 
 Run `factory doctor` in the repo. Look for the `Codex` section with `codex installed` (it shows the CLI
-version), the `codex signed in` line (it names the sign-in method) and `codex sandbox`.
+version), and the `codex signed in` line (it names the sign-in method). The `codex installed` line also says whether sandboxed builds are available.
 
 Version tested: codex-cli 0.155.1
 

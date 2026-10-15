@@ -54,8 +54,8 @@ import {
 import { OPENCODE_LIVE_AUTH_CHECK, opencodeLiveAuthCheck, runOpencodeAuthProbe } from './doctor-opencode-probe.js';
 import { resolveDoctorHarnesses } from './doctor-harness-view.js';
 import { reconcileQueue } from './doctor-queue-reconcile.js';
-import { HARNESS_SETUP, harnessInstallChecks } from './doctor-harness.js';
-export { HARNESS_SETUP, harnessInstallChecks };
+import { HARNESS_SETUP, harnessInstallChecks, readyAgents, skipMissingAgentCheck } from './doctor-harness.js';
+export { HARNESS_SETUP, harnessInstallChecks, readyAgents };
 import { availableAgentClis, CLAUDE_CODE_URL, CODEX_CLI_URL, GITHUB_TOKENS_URL } from './first-run.js';
 import type { CliDeps } from './index.js';
 import { distFreshnessProbe } from './staleness.js';
@@ -477,6 +477,7 @@ function installFix(h: ConfiguredCommandHarness): string {
 
 /** Coding agent prerequisites: at least one agent CLI is required; each CLI is then reported
  *  on its own optional line, with sign-in reported separately from installation (#1269, #2422, #2555, #2556).
+ *  The codex sandbox note is folded into the ok `codex installed` row, so each agent has one row (#2997).
  *  A repo-configured command harness whose executable is on PATH also counts as a coding agent (#2691). */
 export function agentCliChecks(probes: DoctorEnvProbes): DoctorCheck[] {
   const { commandAvailable, tryExec } = probes;
@@ -504,7 +505,15 @@ export function agentCliChecks(probes: DoctorEnvProbes): DoctorCheck[] {
   const checks: DoctorCheck[] = [
     agents.length > 0 ? { name: 'coding agent', ok: true, detail: `found ${agents.join(', ')}` } : missingRow,
   ];
-  checks.push(...harnessInstallChecks(commandAvailable, tryExec));
+  const codexSandbox =
+    detectSandboxRuntime(probes.platform ?? process.platform, commandAvailable) === 'none'
+      ? 'no sandbox runtime, so codex runs with danger-full-access'
+      : 'sandboxed builds available';
+  checks.push(
+    ...harnessInstallChecks(commandAvailable, tryExec).map((c) =>
+      c.name === 'codex installed' && c.ok ? { ...c, detail: `${c.detail}; ${codexSandbox}` } : c,
+    ),
+  );
   checks.push(...commandHarnessChecks(configured, commandAvailable));
   checks.push(...harnessSignInChecks(probes));
   return checks;
@@ -625,26 +634,6 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
 
   const sandboxRuntime = detectSandboxRuntime(probes.platform ?? process.platform, commandAvailable);
   checks.push(
-    commandAvailable('codex')
-      ? {
-          name: 'codex sandbox',
-          ok: true,
-          optional: true,
-          detail:
-            sandboxRuntime === 'none'
-              ? 'codex CLI found; no sandbox runtime, so codex runs with danger-full-access'
-              : 'codex CLI found (sandboxed builds available)',
-        }
-      : {
-          name: 'codex sandbox',
-          ok: false,
-          optional: true,
-          detail: 'codex CLI not found; codex build routes unavailable',
-          fix: 'install the codex CLI, or rely on claude routes',
-        },
-  );
-
-  checks.push(
     sandboxRuntime !== 'none'
       ? { name: 'sandbox runtime', ok: true, optional: true, detail: `${sandboxRuntime} found` }
       : {
@@ -736,7 +725,9 @@ export function formatDoctorChecks(checks: DoctorCheck[], opts: { inRepo?: boole
     }
   }
 
-  lines.push(`${passed} passed, ${failed} failed, ${warnings} warnings`);
+  const ready = readyAgents(checks);
+  const readySuffix = ready.length > 0 ? `; ready: ${ready.join(', ')}` : '';
+  lines.push(`${passed} passed, ${failed} failed, ${warnings} warnings${readySuffix}`);
   lines.push('');
   lines.push(
     opts.inRepo === false
@@ -803,6 +794,11 @@ export function claudeKeychainCheck(probe: KeychainProbeStatus): DoctorCheck {
     detail: `security find-generic-password -s '${service}'${profile} failed; either never logged in, or this launch context cannot read the login keychain`,
     fix: `run ${loginFix(probe)} and complete /login (or export ANTHROPIC_API_KEY); if already logged in, see docs/runbooks/macos-keychain-launchagent.md`,
   };
+}
+
+/** The keychain row(s) for doctor: none off macOS, where the login keychain does not apply (#2998). */
+export function claudeKeychainChecks(platform: NodeJS.Platform, probe: () => KeychainProbeStatus): DoctorCheck[] {
+  return platform === 'darwin' ? [claudeKeychainCheck(probe())] : [];
 }
 
 /** Non-null when `factory run` must fail fast instead of claiming issues (#1014).
@@ -874,12 +870,12 @@ const AGENT_AUTH_CHECKS = new Set([
 ]);
 
 /** #2496: doctor fails on agent sign-in only when no installed agent is signed in. A logged-out
- *  agent is a warning while another one is signed in, and a hard failure when none is. Skipped
- *  probes (optional passes, e.g. a `<cli> signed in` row for a CLI not on PATH) never count as signed in. */
+ *  agent is a warning while another one is signed in, and a hard failure when none is. Skipped probes
+ *  never count as signed in. #2996: not-installed agents become ➖ skipped info while one is signed in. */
 export function reconcileAgentAuthChecks(checks: DoctorCheck[]): DoctorCheck[] {
-  const auth = checks.filter((c) => AGENT_AUTH_CHECKS.has(c.name));
-  const anySignedIn = auth.some((c) => c.ok && c.optional !== true);
-  return checks.map((c) => {
+  const anySignedIn = checks.some((c) => AGENT_AUTH_CHECKS.has(c.name) && c.ok && c.optional !== true);
+  return checks.map((row) => {
+    const c = anySignedIn ? skipMissingAgentCheck(row) : row;
     if (!AGENT_AUTH_CHECKS.has(c.name) || c.ok) return c;
     return anySignedIn
       ? { ...c, optional: true, detail: `${c.detail} (another agent is signed in, so runs can still proceed)` }
@@ -1024,7 +1020,7 @@ export async function cmdDoctor(
     checks.push(opencodeLiveAuthCheck(runOpencodeAuthProbe(rt, repoRoot)));
   }
 
-  checks.push(claudeKeychainCheck(rt.probeClaudeKeychain()));
+  checks.push(...claudeKeychainChecks(process.platform, rt.probeClaudeKeychain));
   checks.splice(0, checks.length, ...reconcileAgentAuthChecks(checks));
 
   if (repoRoot !== null) {
