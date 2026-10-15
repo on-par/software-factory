@@ -58,3 +58,58 @@ export function assertApprovedClaudeEndpoint(id: string, def: { endpoint?: strin
     );
   }
 }
+
+const DEEPSEEK_HOST = 'api.deepseek.com';
+const DEEPSEEK_KEY = 'DEEPSEEK_API_KEY';
+
+function collectStrings(value: unknown, path: string, out: Array<[string, string]> = []): Array<[string, string]> {
+  if (typeof value === 'string') out.push([path, value]);
+  else if (Array.isArray(value)) value.forEach((v, i) => collectStrings(v, `${path}[${i}]`, out));
+  else if (value !== null && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value)) collectStrings(v, `${path}.${k}`, out);
+  }
+  return out;
+}
+
+/** Why a registry model reaches DeepSeek's first-party API (native `deepseek/` provider, DEEPSEEK_API_KEY, or the
+ *  api.deepseek.com host), or undefined. A claude-cli `claudeFlag` of `deepseek/...` is legitimate behind an approved
+ *  endpoint, so only the host is checked there. Pure (ADR-0163). */
+export function directDeepSeekReason(def: {
+  providerModel?: string;
+  envKey: string | null;
+  claudeFlag?: string;
+  providerOptions?: Record<string, unknown>;
+}): string | undefined {
+  if (def.providerModel !== undefined && def.providerModel.trim().toLowerCase().split('/')[0] === 'deepseek') {
+    return `providerModel '${def.providerModel}' uses the native deepseek/ provider`;
+  }
+  if (def.envKey === DEEPSEEK_KEY) return `envKey '${DEEPSEEK_KEY}' is DeepSeek's first-party API key`;
+  const fields: Array<[string, string]> = [];
+  if (def.claudeFlag !== undefined) fields.push(['claudeFlag', def.claudeFlag]);
+  if (def.providerModel !== undefined) fields.push(['providerModel', def.providerModel]);
+  collectStrings(def.providerOptions, 'providerOptions', fields);
+  for (const [field, value] of fields) {
+    if (value.toLowerCase().includes(DEEPSEEK_HOST)) return `${field} '${value}' points at ${DEEPSEEK_HOST}`;
+  }
+  return undefined;
+}
+
+/** Throws when a registry model would reach DeepSeek's first-party API instead of an approved intermediary (ADR-0163). */
+export function assertNoDirectDeepSeek(
+  id: string,
+  def: {
+    providerModel?: string;
+    envKey: string | null;
+    claudeFlag?: string;
+    providerOptions?: Record<string, unknown>;
+  },
+): void {
+  const reason = directDeepSeekReason(def);
+  if (reason === undefined) return;
+  const approved = APPROVED_INTERMEDIARIES.filter((i) => i.status === 'approved')
+    .map((i) => `${i.name} (${i.prefix})`)
+    .join(', ');
+  throw new Error(
+    `.factory/config.json: models.registry.${id} reaches DeepSeek's first-party API: ${reason}. DeepSeek models are reached only through approved zero-retention intermediaries (ADR-0163): ${approved}`,
+  );
+}
