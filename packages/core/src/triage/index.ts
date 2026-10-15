@@ -2,6 +2,8 @@
 // The CLI fetches candidates and dispatches the prompt through ModelRouter, so triage honors
 // routing, failover, local-only mode and timeouts like every other task.
 
+import { factoryBranchIssue } from '../utils/index.js';
+
 /** Max characters of an issue body sent to the triage model. */
 export const TRIAGE_BODY_MAX_CHARS = 1500;
 
@@ -104,4 +106,49 @@ export function normalizeTriageQueue(output: string): string {
     entries++;
   }
   return entries > 0 ? `${lines.join('\n')}\n` : '';
+}
+
+/** Issue numbers that own an open factory PR, from `gh pr list --json headRefName` (#2981).
+ *  Rows without a string headRefName are skipped; malformed JSON returns null so the caller can warn. */
+export function parseOpenPrIssues(json: string, prefix?: string): Set<number> | null {
+  const issues = new Set<number>();
+  let raw: unknown;
+  try {
+    raw = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(raw)) return null;
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue;
+    const head = (item as { headRefName?: unknown }).headRefName;
+    if (typeof head !== 'string') continue;
+    const issue = factoryBranchIssue(head, prefix);
+    if (issue !== null) issues.add(issue);
+  }
+  return issues;
+}
+
+/** Removes '<lane> <n>' entries whose n is in `issues` from a normalizeTriageQueue result,
+ *  keeping comment lines. Returns the surviving queue ('' when no entry survives) and the
+ *  dropped issue numbers (#2981). */
+export function dropQueuedIssues(queue: string, issues: ReadonlySet<number>): { queue: string; dropped: number[] } {
+  const lines: string[] = [];
+  const dropped: number[] = [];
+  let entries = 0;
+  for (const line of queue.split('\n')) {
+    if (line === '') continue;
+    if (line.startsWith('#')) {
+      lines.push(line);
+      continue;
+    }
+    const match = /^\S+\s+(\d+)$/.exec(line);
+    if (match && issues.has(Number(match[1]))) {
+      dropped.push(Number(match[1]));
+      continue;
+    }
+    lines.push(line);
+    entries++;
+  }
+  return { queue: entries > 0 ? `${lines.join('\n')}\n` : '', dropped };
 }

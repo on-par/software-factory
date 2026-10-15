@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildTriagePrompt,
+  dropQueuedIssues,
   normalizeTriageQueue,
+  parseOpenPrIssues,
   parseTriageCandidates,
   TRIAGE_BODY_MAX_CHARS,
   truncateTriageBody,
@@ -73,5 +75,47 @@ describe('normalizeTriageQueue', () => {
 
   it('returns empty when no entry survives', () => {
     expect(normalizeTriageQueue('# only comments\nnothing here')).toBe('');
+  });
+});
+
+describe('parseOpenPrIssues', () => {
+  it('collects issue numbers from factory and legacy branches only', () => {
+    const json = JSON.stringify([
+      { headRefName: 'factory/1-foo' },
+      { headRefName: 'factory/3-bar' },
+      { headRefName: 'feature/5-x' },
+      { headRefName: 'ship-it/7-old' },
+      {},
+      null,
+    ]);
+    expect(parseOpenPrIssues(json, 'factory')).toEqual(new Set([1, 3, 7]));
+  });
+
+  it('returns null for malformed input', () => {
+    expect(parseOpenPrIssues('not json', 'factory')).toBeNull();
+    expect(parseOpenPrIssues('{}', 'factory')).toBeNull();
+  });
+});
+
+describe('dropQueuedIssues', () => {
+  const queue = '# Triage queue\napp 1\napp 3\napp 5\ndocs 6\n';
+
+  it('drops #1 and #3 with open factory PRs and keeps #5 (#2981)', () => {
+    const issues = parseOpenPrIssues(
+      JSON.stringify([{ headRefName: 'factory/1-a' }, { headRefName: 'factory/3-b' }]),
+      'factory',
+    );
+    const out = dropQueuedIssues(queue, issues ?? new Set());
+    expect(out.queue).toBe('# Triage queue\napp 5\ndocs 6\n');
+    expect(out.dropped).toEqual([1, 3]);
+    expect(validateQueue(out.queue).ok).toBe(true);
+  });
+
+  it('returns the queue unchanged for an empty set', () => {
+    expect(dropQueuedIssues(queue, new Set())).toEqual({ queue, dropped: [] });
+  });
+
+  it('returns an empty string when every entry is dropped', () => {
+    expect(dropQueuedIssues(queue, new Set([1, 3, 5, 6])).queue).toBe('');
   });
 });
