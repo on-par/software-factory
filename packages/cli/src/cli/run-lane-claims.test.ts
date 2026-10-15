@@ -319,5 +319,49 @@ describe('cli', () => {
         expect(events).not.toContain('parked');
       });
     });
+
+    it("two lanes: lane B's between-issues sweep sees lane A's in-flight issue as protected (#2964)", async () => {
+      const activeIssues = new Set<number>();
+      let releaseA!: () => void;
+      const aGate = new Promise<void>((r) => {
+        releaseA = r;
+      });
+      let aStarted!: () => void;
+      const aRunning = new Promise<void>((r) => {
+        aStarted = r;
+      });
+      const snapshots: number[][] = [];
+      const base = { pathExists: () => false, emitEvent: () => {}, waitMerge: async () => {}, activeIssues };
+
+      const laneA = runLane('a', [], '/repo', 'o/r', paths, {
+        ...base,
+        ship: async (issue) => {
+          aStarted();
+          await aGate;
+          return `ship-it/${issue}-x`;
+        },
+        claimNext: (() => {
+          const q = [1];
+          return async () => buildClaim(q.shift());
+        })(),
+      });
+      await aRunning;
+      await runLane('b', [], '/repo', 'o/r', paths, {
+        ...base,
+        ship: async (issue) => `ship-it/${issue}-x`,
+        claimNext: (() => {
+          const q = [2];
+          return async () => buildClaim(q.shift());
+        })(),
+        sweepFinished: async () => {
+          snapshots.push([...activeIssues]);
+        },
+      });
+
+      expect(snapshots).toEqual([[1]]);
+      releaseA();
+      await laneA;
+      expect(activeIssues.size).toBe(0);
+    });
   });
 });

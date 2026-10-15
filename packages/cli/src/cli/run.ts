@@ -242,6 +242,8 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
     try {
       // Run lanes in parallel
       const pids: Promise<void>[] = [];
+      // Issues in flight on any lane of this run; every lane's between-issues sweep protects them (#2964).
+      const inFlightIssues = new Set<number>();
       for (const planned of lanes) {
         logEvent(
           paths.events,
@@ -280,6 +282,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
           runLane(planned.lane, planned.issues, repoRoot, ghRepo, paths, {
             ...planned.deps,
             laneBreakerThreshold,
+            activeIssues: inFlightIssues,
             baseHoldGate:
               opts.localQueue === true
                 ? undefined
@@ -302,7 +305,11 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
             },
             ship: (issue, o, c) => shipIssue(issue, { ...o, branchPrefix, prClassifier: opts.prClassifier }, c),
             sweepFinished: (issue) =>
-              rt.sweepBetweenLaneIssues(issue, planned.lane, repoRoot, ghRepo, paths).then(() => {}),
+              rt
+                .sweepBetweenLaneIssues(issue, planned.lane, repoRoot, ghRepo, paths, {
+                  protectedIssues: () => inFlightIssues,
+                })
+                .then(() => {}),
             reapWorktree: (issue) =>
               rt.reapParkedLaneWorktree(
                 issue,
