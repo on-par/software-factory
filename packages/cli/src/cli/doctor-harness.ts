@@ -109,10 +109,12 @@ export function skipMissingAgentCheck(c: DoctorCheck): DoctorCheck {
   };
 }
 
-/** One optional `<cli> installed` row per harness, with the CLI version when found and the install command when not (#2555). */
+/** One optional `<cli> installed` row per harness, with the CLI version when found and the install command when not (#2555).
+ *  With `noAgentFound` (#3000) a missing CLI is a hard failure that keeps its install fix. */
 export function harnessInstallChecks(
   commandAvailable: (cmd: string) => boolean,
   tryExec: (cmd: string) => string | null,
+  noAgentFound = false,
 ): DoctorCheck[] {
   return HARNESS_SETUP.map(({ section, cli, install, checkVersion }): DoctorCheck => {
     const name = `${cli} installed`;
@@ -121,7 +123,7 @@ export function harnessInstallChecks(
         name,
         section,
         ok: false,
-        optional: true,
+        optional: !noAgentFound,
         detail: notInstalledDetail(cli),
         fix: `install ${section}: ${install}`,
       };

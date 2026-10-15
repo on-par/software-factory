@@ -510,7 +510,7 @@ export function agentCliChecks(probes: DoctorEnvProbes): DoctorCheck[] {
       ? 'no sandbox runtime, so codex runs with danger-full-access'
       : 'sandboxed builds available';
   checks.push(
-    ...harnessInstallChecks(commandAvailable, tryExec).map((c) =>
+    ...harnessInstallChecks(commandAvailable, tryExec, agents.length === 0).map((c) =>
       c.name === 'codex installed' && c.ok ? { ...c, detail: `${c.detail}; ${codexSandbox}` } : c,
     ),
   );
