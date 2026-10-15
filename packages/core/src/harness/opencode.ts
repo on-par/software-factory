@@ -8,7 +8,7 @@ import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { shellEscape } from '../utils/index.js';
 import { classifyFailure } from './classify.js';
-import type { CodingHarness, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
+import type { CodingHarness, HarnessFailureReason, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
 import { HarnessError } from './index.js';
 import { type OpenCodeVersionProbe, probeOpenCodeMajor } from './opencode-version.js';
 
@@ -25,6 +25,11 @@ export interface ParsedOpenCodeJson {
    *  error name), then `data.responseBody` when a string, then `status <n>` when
    *  `data.statusCode` is a number, so caps and 429s carried outside the message classify. */
   errorText: string;
+  /** `error.type` of the first `error` event with a non-empty string type (#2889); absent when none. */
+  errorType?: string;
+  /** HTTP status of that same event: first finite number of `error.status`, `error.statusCode`,
+   *  `error.data.statusCode`; absent when none. */
+  errorStatus?: number;
   /** `tool_use` events whose state error/output says the non-interactive run could not ask for
    *  permission; always present, `[]` when none. */
   permissionDenials: OpenCodePermissionDenial[];
@@ -39,6 +44,22 @@ export interface OpenCodePermissionDenial {
 
 const PERMISSION_REJECTED = /cannot ask the user for permission/i;
 
+/** OpenCode typed `error.type` → failure reason (#2889). Unlisted types fall back to classifyFailure. */
+export const OPENCODE_ERROR_TYPE_REASONS: Readonly<Record<string, HarnessFailureReason>> = {
+  'provider.rate-limit': 'rate_limit',
+  'provider.quota': 'usage_cap',
+  'provider.auth': 'local_auth',
+  'provider.timeout': 'timeout',
+  'provider.connect': 'unavailable',
+  'provider.no-route': 'unavailable',
+};
+
+export function classifyOpenCodeErrorType(type: string | undefined): HarnessFailureReason | undefined {
+  return type !== undefined && Object.hasOwn(OPENCODE_ERROR_TYPE_REASONS, type)
+    ? OPENCODE_ERROR_TYPE_REASONS[type]
+    : undefined;
+}
+
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
 /** Parses `opencode run --format json` NDJSON. Returns undefined when stdout has no
@@ -47,10 +68,13 @@ const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v)
  *  skipped. Usage capture must never fail a run (#2462). Usage `durationMs` is the span between
  *  the smallest and largest finite event `timestamp` (omitted when none). Only the last step's text is returned:
  *  narration from earlier steps is dropped (#2881). A `tool_use` whose state error/output says the
- *  run cannot ask for permission is reported in `permissionDenials` (#2888). */
+ *  run cannot ask for permission is reported in `permissionDenials` (#2888). The first `error` event
+ *  with a string `error.type` is reported as `errorType`/`errorStatus` (#2889). */
 export function parseOpenCodeJson(stdout: string): ParsedOpenCodeJson | undefined {
   let stepTexts: string[] = [];
   const errors: string[] = [];
+  let errorType: string | undefined;
+  let errorStatus: number | undefined;
   const permissionDenials: OpenCodePermissionDenial[] = [];
   let sawEvent = false;
   let sawUsage = false;
@@ -100,12 +124,24 @@ export function parseOpenCodeJson(stdout: string): ParsedOpenCodeJson | undefine
     } else if (event.type === 'error') {
       const data = event.error?.data;
       const name = event.error?.name;
+      const type = event.error?.type;
+      const typed = typeof type === 'string' && type.length > 0;
+      const status = [event.error?.status, event.error?.statusCode, data?.statusCode].find(
+        (v): v is number => typeof v === 'number' && Number.isFinite(v),
+      );
+      if (typed && errorType === undefined) {
+        errorType = type;
+        errorStatus = status;
+      }
       const parts: string[] = [];
       if (typeof data?.message === 'string') parts.push(data.message);
       else if (typeof name === 'string') parts.push(name);
       if (typeof data?.responseBody === 'string' && data.responseBody) parts.push(data.responseBody);
+      if (parts.length === 0 && typed) parts.push(type);
       if (typeof data?.statusCode === 'number' && Number.isFinite(data.statusCode)) {
         parts.push(`status ${data.statusCode}`);
+      } else if (parts.length > 0 && status !== undefined) {
+        parts.push(`status ${status}`);
       }
       if (parts.length > 0) errors.push(parts.join(' '));
     } else if (event.type === 'tool_use') {
@@ -126,6 +162,8 @@ export function parseOpenCodeJson(stdout: string): ParsedOpenCodeJson | undefine
     text: stepTexts.join('\n\n'),
     errorText: errors.join('\n'),
     permissionDenials,
+    ...(errorType !== undefined ? { errorType } : {}),
+    ...(errorStatus !== undefined ? { errorStatus } : {}),
     ...(sawUsage
       ? {
           usage: {
@@ -229,9 +267,13 @@ export class OpenCodeHarness implements CodingHarness {
           }));
         } catch (err: any) {
           // Under --format json, session errors arrive as stdout `error` events; kept as the diagnostic.
-          const jsonErr = typeof err.stdout === 'string' ? (parseOpenCodeJson(err.stdout)?.errorText ?? '') : '';
+          const parsedErr = typeof err.stdout === 'string' ? parseOpenCodeJson(err.stdout) : undefined;
+          const jsonErr = parsedErr?.errorText ?? '';
           const classifyText = [err.stderr ?? '', jsonErr].filter(Boolean).join('\n');
-          const reason = err.killed ? 'timeout' : classifyFailure(classifyText, err.code ?? 1);
+          const reason = err.killed
+            ? 'timeout'
+            : ((err.code === 124 ? undefined : classifyOpenCodeErrorType(parsedErr?.errorType)) ??
+              classifyFailure(classifyText, err.code ?? 1));
           throw new HarnessError(err.message ?? String(err), reason, {
             exitCode: typeof err.code === 'number' ? err.code : undefined,
             stderr: err.stderr,
@@ -262,7 +304,7 @@ export class OpenCodeHarness implements CodingHarness {
           const classifyText = [stderr, parsed.errorText].filter(Boolean).join('\n');
           throw new HarnessError(
             `opencode run reported an error event: ${parsed.errorText.split('\n')[0]}`,
-            classifyFailure(classifyText, 1),
+            classifyOpenCodeErrorType(parsed.errorType) ?? classifyFailure(classifyText, 1),
             { exitCode: 0, stderr: stderr || undefined, diagnostic: parsed.errorText },
           );
         }
