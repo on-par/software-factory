@@ -19,6 +19,8 @@ export function supportsEffort(harness: string | undefined, effort: z.infer<type
       return typeof effort === 'string';
     case 'claude-cli':
       return ['low', 'medium', 'high', 'xhigh', 'max'].includes(String(effort));
+    case 'pi':
+      return ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(String(effort));
     case 'ollama-http':
     case 'ollama-agentic':
     case 'ollama-command-agent':

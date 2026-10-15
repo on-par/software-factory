@@ -112,7 +112,7 @@ export function parsePiJson(stdout: string): ParsedPiJson | undefined {
 }
 
 /** Builds the headless `pi` invocation. providerModel is `<provider>/<model>`, split on the first '/'. */
-export function buildPiCommand(providerModel: string | undefined, promptPath: string): string {
+export function buildPiCommand(providerModel: string | undefined, promptPath: string, effort?: string): string {
   const slash = providerModel?.indexOf('/') ?? -1;
   if (!providerModel || slash <= 0 || slash === providerModel.length - 1) {
     throw new HarnessError(
@@ -126,10 +126,12 @@ export function buildPiCommand(providerModel: string | undefined, promptPath: st
   // --no-context-files: skip AGENTS.md/CLAUDE.md (the prompt already embeds the constitution).
   // --no-extensions/--no-skills/--no-prompt-templates/--no-mcp: no repo-controlled code or tools.
   // --no-approve: do not trust repo .pi/ project config. --offline: skip update/telemetry checks.
-  return `pi -p --mode json --no-session --no-context-files --no-extensions --no-skills --no-prompt-templates --no-mcp --no-approve --offline --provider ${shellEscape(provider)} --model ${shellEscape(id)} < ${shellEscape(promptPath)}`;
+  // --thinking: factory effort; Pi calls "no thinking" off, not none.
+  const thinkingArg = effort === undefined ? '' : ` --thinking ${shellEscape(effort === 'none' ? 'off' : effort)}`;
+  return `pi -p --mode json --no-session --no-context-files --no-extensions --no-skills --no-prompt-templates --no-mcp --no-approve --offline --provider ${shellEscape(provider)} --model ${shellEscape(id)}${thinkingArg} < ${shellEscape(promptPath)}`;
 }
 
-/** Runs a model via the Pi CLI: pi -p --mode json ... --provider <p> --model <m> < prompt-file, executed with cwd = worktree.
+/** Runs a model via the Pi CLI: pi -p --mode json ... --provider <p> --model <m> [--thinking <level>] < prompt-file, executed with cwd = worktree.
  *  Pi can exit 0 after a failed response, so success is decided from the JSONL stream. */
 export class PiHarness implements CodingHarness {
   readonly id = 'pi';
@@ -140,12 +142,13 @@ export class PiHarness implements CodingHarness {
   async run(request: HarnessRequest): Promise<HarnessResult> {
     const { model, prompt, worktree, timeoutSeconds, registry, sandbox, env, onPgid } = request;
     const providerModel = registry.get(model)?.providerModel;
+    const effort = registry.getEffort(model, request.task);
 
     const promptDir = await mkdtemp(join(tmpdir(), 'factory-pi-prompt-'));
     const promptPath = join(promptDir, 'prompt.txt');
 
     try {
-      const cmd = buildPiCommand(providerModel, promptPath);
+      const cmd = buildPiCommand(providerModel, promptPath, effort === undefined ? undefined : String(effort));
       await writeFile(promptPath, prompt, 'utf8');
       const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
 
