@@ -10,7 +10,14 @@ import {
 
 export type TriageExec = (cmd: string) => Promise<{ stdout: string }>;
 
+/** The queue.proposed comment naming issues skipped for an open PR (#2982); '' when none were. */
+export function skippedIssuesComment(dropped: readonly number[]): string {
+  if (dropped.length === 0) return '';
+  return `# Skipped (a PR is open): ${dropped.map((n) => `#${n}`).join(', ')}\n`;
+}
+
 /** Normalizes the model output, then removes entries for issues with an open `<prefix>/<n>-…` PR.
+ *  When entries survive, a `# Skipped (a PR is open): …` comment line naming the dropped issues leads the queue.
  *  A failing or malformed `gh pr list` leaves the queue unfiltered. Returns '' when nothing survives. */
 export async function proposeTriageQueue(
   output: string,
@@ -41,5 +48,5 @@ export async function proposeTriageQueue(
     const nums = dropped.map((n) => `#${n}`).join(', ');
     logEvent(eventsPath, 'triage', '-', `Dropped issue(s) with an open factory PR: ${nums}`);
   }
-  return queue;
+  return queue ? skippedIssuesComment(dropped) + queue : queue;
 }

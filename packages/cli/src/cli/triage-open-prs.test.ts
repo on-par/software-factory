@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { proposeTriageQueue } from './triage-open-prs.js';
+import { proposeTriageQueue, skippedIssuesComment } from './triage-open-prs.js';
 
 const output = 'app 1\napp 3\napp 5\n';
 const prs = (...nums: number[]) => JSON.stringify(nums.map((n) => ({ headRefName: `factory/${n}-x` })));
@@ -31,10 +31,21 @@ describe('proposeTriageQueue (#2981)', () => {
       cmds.push(cmd);
       return { stdout: prs(1, 3) };
     };
-    expect(await proposeTriageQueue(output, 'o/r', events, exec)).toBe('app 5\n');
+    expect(await proposeTriageQueue(output, 'o/r', events, exec)).toBe('# Skipped (a PR is open): #1, #3\napp 5\n');
     expect(cmds[0]).toContain('gh pr list');
     expect(cmds[0]).toContain('--state open');
     expect(logged()).toContain('Dropped issue(s) with an open factory PR: #1, #3');
+  });
+
+  it('writes no skipped comment line when nothing is dropped (#2982)', async () => {
+    const res = await proposeTriageQueue(output, 'o/r', events, async () => ({ stdout: prs(7) }));
+    expect(res).toBe(output);
+    expect(res).not.toContain('Skipped');
+  });
+
+  it('formats the skipped comment line (#2982)', () => {
+    expect(skippedIssuesComment([])).toBe('');
+    expect(skippedIssuesComment([1, 3])).toBe('# Skipped (a PR is open): #1, #3\n');
   });
 
   it('keeps the queue unfiltered when gh pr list fails', async () => {
