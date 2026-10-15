@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { HARNESS_CATALOG, harnessCliCommand, isAgenticHarness, KNOWN_HARNESS_IDS } from './catalog.js';
+import {
+  HARNESS_CATALOG,
+  harnessCliCommand,
+  isAgenticHarness,
+  KNOWN_HARNESS_IDS,
+  usesGenericBuildRoute,
+} from './catalog.js';
 
 describe('HARNESS_CATALOG', () => {
   it('has an id on every entry that matches its record key', () => {
@@ -85,5 +91,14 @@ describe('harnessCliCommand', () => {
     expect(harnessCliCommand('ollama-http')).toBeUndefined();
     expect(harnessCliCommand('my-declared-harness')).toBeUndefined();
     expect(harnessCliCommand(undefined)).toBeUndefined();
+  });
+});
+
+describe('usesGenericBuildRoute', () => {
+  it('is true only for pi (#2909)', () => {
+    expect(usesGenericBuildRoute('pi')).toBe(true);
+    for (const id of ['claude-cli', 'ollama-agentic', 'command', '']) {
+      expect(usesGenericBuildRoute(id)).toBe(false);
+    }
   });
 });

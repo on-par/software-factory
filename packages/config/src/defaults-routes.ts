@@ -55,7 +55,7 @@ export const defaultRoutesConfig: RoutesDefaults = {
     build_command: {
       tier: 'worker',
       description:
-        'Declared agentic harness implementation from frozen spec - requires a harness declared under `harnesses` with agentic: true (commit-only; SHIP publishes after CHECK)',
+        'Declared agentic harness implementation from frozen spec - requires a harness declared under `harnesses` with agentic: true, or the built-in `pi` harness (commit-only; SHIP publishes after CHECK)',
       requires: 'command',
     },
     check_compile: { tier: 'checker', description: 'Build/compile verification' },

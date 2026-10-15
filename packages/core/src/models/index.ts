@@ -4,7 +4,13 @@ import { execSync } from 'node:child_process';
 
 import { ModelEffortsSchema, supportsEffort } from '../config/effort.js';
 import type { HarnessDeclaration, ModelsConfig } from '../config/index.js';
-import { HARNESS_CATALOG, harnessCliCommand, isAgenticHarness, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
+import {
+  HARNESS_CATALOG,
+  harnessCliCommand,
+  isAgenticHarness,
+  KNOWN_HARNESS_IDS,
+  usesGenericBuildRoute,
+} from '../harness/catalog.js';
 import type { ModelDefinition, ModelTier } from '../types/index.js';
 import { hasClaudeLoginEvidence } from '../utils/claude-config.js';
 import { hasCodexLoginEvidence } from '../utils/codex-config.js';
@@ -16,6 +22,7 @@ import {
 } from '../utils/local-auth-record.js';
 import { hasOpencodeLoginEvidence } from '../utils/opencode-config.js';
 import { type PiAuthStatus, piAuthOutcome, runPiAuthCheck } from './pi-auth.js';
+import { runHarnessProbe } from './harness-probe.js';
 import { applyZdrReview } from './zdr-review.js';
 
 export { type ModelOverrides, resolveModelOverrides, retiredModelHint } from './overrides.js';
@@ -86,6 +93,15 @@ export class ModelRegistry {
   /** True for agentic built-in harness ids and for declared ids whose declaration says `agentic`. */
   isAgenticHarnessId(harnessId: string): boolean {
     return isAgenticHarness(harnessId) || this.getHarnessDeclaration(harnessId)?.agentic === true;
+  }
+
+  /** Single owner of which harnesses BUILD runs on through the generic `command` route: a declared
+   *  agentic harness, or a built-in flagged `genericBuildRoute` (Pi, #2909). */
+  ridesCommandRoute(harnessId: string): boolean {
+    return (
+      (!!this.getHarnessDeclaration(harnessId) && this.isAgenticHarnessId(harnessId)) ||
+      usesGenericBuildRoute(harnessId)
+    );
   }
 
   /** Harness id for a model: the config-declared `harness`, else inferred from
@@ -200,24 +216,7 @@ export function isHarnessCliPresent(
   return cmd === undefined || commandAvailable(cmd);
 }
 
-const HARNESS_PROBE_TIMEOUT_MS = 10_000;
-
-/** Run a declared harness probe command. Returns null on exit 0, else a one-line failure detail. */
-export function runHarnessProbe(cmd: string): string | null {
-  try {
-    execSync(cmd, { stdio: 'pipe', shell: '/bin/bash', timeout: HARNESS_PROBE_TIMEOUT_MS });
-    return null;
-  } catch (e) {
-    const err = e as { status?: number | null; signal?: string | null; code?: string; stderr?: Buffer | string };
-    if (err.signal === 'SIGTERM' || err.code === 'ETIMEDOUT')
-      return `timed out after ${HARNESS_PROBE_TIMEOUT_MS / 1000}s`;
-    const firstLine = (err.stderr?.toString() ?? '')
-      .split('\n')
-      .map((l) => l.trim())
-      .find((l) => l !== '');
-    return `exit ${err.status ?? '?'}${firstLine ? `: ${firstLine}` : ''}`;
-  }
-}
+export { runHarnessProbe };
 
 export type HarnessProbeStatus = 'available' | 'unavailable' | 'unverified';
 
