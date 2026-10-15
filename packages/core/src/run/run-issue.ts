@@ -786,8 +786,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
         breakerBlocked = gate.codexBlocked;
       }
 
-      // PLAN already honors pinnedRoute and rewrites the spec; re-apply here so a plan port that
-      // ignores it (a daemon or a test double) still cannot route a pinned worker elsewhere.
+      // PLAN honors pinnedRoute; re-apply it so a plan port that ignores it cannot route elsewhere.
       let buildRoute = pinnedRoute ?? plan.route;
       let buildModel = request.modelPins.build;
       if (request.failover.enabled && buildRoute === 'claude') {
@@ -837,6 +836,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
         publishFromBuild: request.publishFromBuild,
         modelOverride: buildModel,
         pinnedModel: buildModel !== undefined && buildModel === request.modelPins.build,
+        routePinned: request.preferredRoute !== undefined,
         codexFallbackModel: request.modelPins.buildFallback ?? ports.router.resolveAll('build_codex')[0],
         onProviderFailure: rememberProviderFailure,
         sandbox: request.sandboxPolicy,
