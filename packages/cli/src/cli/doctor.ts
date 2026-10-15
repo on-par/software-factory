@@ -54,8 +54,8 @@ import {
 import { OPENCODE_LIVE_AUTH_CHECK, opencodeLiveAuthCheck, runOpencodeAuthProbe } from './doctor-opencode-probe.js';
 import { resolveDoctorHarnesses } from './doctor-harness-view.js';
 import { reconcileQueue } from './doctor-queue-reconcile.js';
-import { HARNESS_SETUP, harnessInstallChecks, skipMissingAgentCheck } from './doctor-harness.js';
-export { HARNESS_SETUP, harnessInstallChecks };
+import { HARNESS_SETUP, harnessInstallChecks, readyAgents, skipMissingAgentCheck } from './doctor-harness.js';
+export { HARNESS_SETUP, harnessInstallChecks, readyAgents };
 import { availableAgentClis, CLAUDE_CODE_URL, CODEX_CLI_URL, GITHUB_TOKENS_URL } from './first-run.js';
 import type { CliDeps } from './index.js';
 import { distFreshnessProbe } from './staleness.js';
@@ -725,7 +725,9 @@ export function formatDoctorChecks(checks: DoctorCheck[], opts: { inRepo?: boole
     }
   }
 
-  lines.push(`${passed} passed, ${failed} failed, ${warnings} warnings`);
+  const ready = readyAgents(checks);
+  const readySuffix = ready.length > 0 ? `; ready: ${ready.join(', ')}` : '';
+  lines.push(`${passed} passed, ${failed} failed, ${warnings} warnings${readySuffix}`);
   lines.push('');
   lines.push(
     opts.inRepo === false
