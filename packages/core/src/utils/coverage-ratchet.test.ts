@@ -42,6 +42,9 @@ describe('parseCoverageSummary', () => {
 
   it('throws on invalid JSON', () => {
     expect(() => parseCoverageSummary('{not json')).toThrow(/not valid JSON/);
+    expect(() => parseCoverageSummary('{not json')).toThrow(
+      expect.objectContaining({ cause: expect.any(SyntaxError) }),
+    );
   });
 
   it('throws when the total block is missing', () => {

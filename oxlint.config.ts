@@ -68,6 +68,10 @@ export default defineConfig({
     'typescript/switch-exhaustiveness-check': 'error',
     'typescript/no-deprecated': 'error',
     'typescript/no-invalid-void-type': 'error',
+    // #2844: error-handling and promise guards, enabled once their violations were fixed.
+    // typescript/prefer-promise-reject-errors stays off: tests reject with plain strings on purpose.
+    'preserve-caught-error': 'error',
+    'typescript/no-misused-promises': 'error',
     // Redundant or dead control flow.
     'no-else-return': 'error',
     'no-useless-return': 'error',
