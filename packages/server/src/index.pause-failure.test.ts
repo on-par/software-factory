@@ -41,4 +41,21 @@ describe('@on-par/factory-server request failures', () => {
     expect(paused.body).toBe(JSON.stringify({ error: 'internal error' }));
     expect((await request(server.port, '/nope')).status).toBe(404);
   });
+
+  it('ends the response without a 500 body when headers were already sent before pause rejects', async () => {
+    const controller: LaneController = { pause: () => Promise.reject(new Error('boom')) };
+    server = createServer({
+      repositories: [{ repo: REPO, source: { on: () => () => undefined }, controller }],
+      port: 0,
+    });
+    server.server.prependListener('request', (_req: http.IncomingMessage, res: http.ServerResponse) => {
+      res.writeHead(202);
+    });
+    await server.start();
+
+    const paused = await request(server.port, `/repos/${REPO}/lanes/lane-1/pause`, 'POST');
+
+    expect(paused.status).toBe(202);
+    expect(paused.body).toBe('');
+  });
 });
