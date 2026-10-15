@@ -57,7 +57,7 @@ export function registerSetupCommands(program: Command, handlers: ProgramHandler
     )
     .option(
       '--probe-inference',
-      'Also send one real prompt with claude -p on the host and in the sandbox to verify Claude auth (uses quota)',
+      'Also send one real prompt with claude -p (host and sandbox) and opencode run to verify Claude and OpenCode auth (uses quota)',
     )
     .action((opts: { reconcile?: boolean; probeInference?: boolean }) => handlers.cmdDoctor(opts));
 }

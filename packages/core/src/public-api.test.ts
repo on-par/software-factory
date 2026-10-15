@@ -10,7 +10,6 @@ import * as testingApi from './testing.js';
 // Pins the exact export surface of each @on-par/factory-core entry point
 // (ADR-0004). Object.keys(...) only reflects runtime values, so these
 // allowlists list value exports only.
-
 const PUBLIC_API_KEYS = [
   // Config
   'FactoryConfigV2Schema',
@@ -557,6 +556,7 @@ const INTERNAL_API_KEYS = [
   'renderDesignArtifact',
   // Concrete coding harnesses
   'classifyFailure',
+  'classifyOpenCodeErrorType',
   'ClaudeCliHarness',
   'CodexCliHarness',
   'buildHarnessCommand',
@@ -569,6 +569,7 @@ const INTERNAL_API_KEYS = [
   'OllamaHttpHarness',
   'OpenCodeHarness',
   'PiHarness',
+  'parseOpenCodeJson',
   'parsePiJson',
   // Hosted execution: Docker container engine adapter (#899)
   'createDockerEngine',
