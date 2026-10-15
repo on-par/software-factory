@@ -64,6 +64,7 @@ export const HARNESS_ERROR_PATTERN_REASONS = [
   'schema_invalid',
   'apply_failed',
   'verify_failed',
+  'permission_denied',
   'unknown',
 ] as const satisfies readonly HarnessFailureReason[];
 
@@ -545,8 +546,7 @@ export function resolveSkipCI(config: FactoryConfig, env: NodeJS.ProcessEnv = pr
 
 /**
  * sizeGate.mode values this build understands (ADR-0147). `slice` keeps an oversized issue whole and ships it as slice PRs.
- * `stack` (ADR-0161) will ship a stacked PR set; until that is built the size gate runs it as `slice`.
- */
+ * `stack` (ADR-0161) will ship a stacked PR set; until that is built the size gate runs it as `slice`. */
 export const SIZE_GATE_MODES = ['file', 'slice', 'off', 'stack'] as const;
 export type SizeGateMode = (typeof SIZE_GATE_MODES)[number];
 

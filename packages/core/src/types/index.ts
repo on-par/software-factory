@@ -138,6 +138,8 @@ export type FailoverReason =
   | 'schema_invalid'
   | 'apply_failed'
   | 'verify_failed'
+  /** An agent CLI auto-rejected a tool permission in a non-interactive run (#2888). */
+  | 'permission_denied'
   | 'unknown';
 
 // ---------- Failure fingerprint & evidence (#372) ----------

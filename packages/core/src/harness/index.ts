@@ -28,6 +28,7 @@ export const NON_RETRYABLE_FAILURE_REASONS = [
   'schema_invalid',
   'apply_failed',
   'verify_failed',
+  'permission_denied',
 ] as const satisfies readonly HarnessFailureReason[];
 
 /** True when failing over to another model can plausibly help. */

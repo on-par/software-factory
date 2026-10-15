@@ -18,6 +18,7 @@ const HARNESS_FAILURE_REASONS: ReadonlySet<HarnessFailureReason> = new Set<Harne
   'schema_invalid',
   'apply_failed',
   'verify_failed',
+  'permission_denied',
   'unknown',
 ]);
 

@@ -46,7 +46,7 @@ describe('parseOpenCodeJson', () => {
     const parsed = parseOpenCodeJson(
       '{"type":"step_finish","part":{"cost":1}}\n{"type":"step_finish","part":{"tokens":{"input":"x"}}}',
     );
-    expect(parsed).toEqual({ text: '', errorText: '' });
+    expect(parsed).toEqual({ text: '', errorText: '', permissionDenials: [] });
   });
 
   it('omits costUsd when the cost is 0 and tolerates a missing cache block', () => {
@@ -78,5 +78,33 @@ describe('parseOpenCodeJson', () => {
       '{"type":"error","error":{"data":{"message":"Boom","statusCode":"429","responseBody":{"a":1}}}}',
     );
     expect(parsed?.errorText).toBe('Boom');
+  });
+
+  const PHRASE = 'This non-interactive run cannot ask the user for permission, so the request was rejected.';
+  const toolUse = (part: unknown) => JSON.stringify({ type: 'tool_use', part });
+
+  it('detects the permission rejection in state.output, case-insensitively', () => {
+    const out = `\n  ${PHRASE.toUpperCase()}\nmore`;
+    const parsed = parseOpenCodeJson(toolUse({ tool: 'edit', state: { status: 'completed', output: out } }));
+    expect(parsed?.permissionDenials).toEqual([{ tool: 'edit', message: PHRASE.toUpperCase() }]);
+  });
+
+  it("uses 'unknown' when part.tool is missing", () => {
+    const parsed = parseOpenCodeJson(toolUse({ state: { status: 'error', error: PHRASE } }));
+    expect(parsed?.permissionDenials).toEqual([{ tool: 'unknown', message: PHRASE }]);
+  });
+
+  it('does not treat a text event quoting the phrase as a denial', () => {
+    const parsed = parseOpenCodeJson(JSON.stringify({ type: 'text', part: { text: PHRASE } }));
+    expect(parsed?.permissionDenials).toEqual([]);
+  });
+
+  it('ignores malformed tool_use events', () => {
+    const stdout = [
+      '{"type":"tool_use"}',
+      toolUse({ tool: 'bash', state: { error: 42, output: { a: 1 } } }),
+      toolUse({ tool: 'bash', state: { status: 'error', error: 'ENOENT' } }),
+    ].join('\n');
+    expect(parseOpenCodeJson(stdout)?.permissionDenials).toEqual([]);
   });
 });

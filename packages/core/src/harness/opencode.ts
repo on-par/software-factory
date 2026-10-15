@@ -25,7 +25,19 @@ export interface ParsedOpenCodeJson {
    *  error name), then `data.responseBody` when a string, then `status <n>` when
    *  `data.statusCode` is a number, so caps and 429s carried outside the message classify. */
   errorText: string;
+  /** `tool_use` events whose state error/output says the non-interactive run could not ask for
+   *  permission; always present, `[]` when none. */
+  permissionDenials: OpenCodePermissionDenial[];
 }
+
+export interface OpenCodePermissionDenial {
+  /** `part.tool` of the rejected `tool_use`; 'unknown' when absent. */
+  tool: string;
+  /** First line of the state error/output that carried the rejection, trimmed. */
+  message: string;
+}
+
+const PERMISSION_REJECTED = /cannot ask the user for permission/i;
 
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
@@ -34,10 +46,12 @@ const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v)
  *  stdout. Tolerant by design: malformed lines, unknown event types and bad counts are
  *  skipped. Usage capture must never fail a run (#2462). Usage `durationMs` is the span between
  *  the smallest and largest finite event `timestamp` (omitted when none). Only the last step's text is returned:
- *  narration from earlier steps is dropped (#2881). */
+ *  narration from earlier steps is dropped (#2881). A `tool_use` whose state error/output says the
+ *  run cannot ask for permission is reported in `permissionDenials` (#2888). */
 export function parseOpenCodeJson(stdout: string): ParsedOpenCodeJson | undefined {
   let stepTexts: string[] = [];
   const errors: string[] = [];
+  const permissionDenials: OpenCodePermissionDenial[] = [];
   let sawEvent = false;
   let sawUsage = false;
   let numTurns = 0;
@@ -94,6 +108,16 @@ export function parseOpenCodeJson(stdout: string): ParsedOpenCodeJson | undefine
         parts.push(`status ${data.statusCode}`);
       }
       if (parts.length > 0) errors.push(parts.join(' '));
+    } else if (event.type === 'tool_use') {
+      const state = event.part?.state;
+      const match = [state?.error, state?.output].find(
+        (c): c is string => typeof c === 'string' && PERMISSION_REJECTED.test(c),
+      );
+      if (match !== undefined) {
+        const tool = event.part?.tool;
+        const line = match.split('\n').find((l) => l.trim()) ?? match;
+        permissionDenials.push({ tool: typeof tool === 'string' && tool ? tool : 'unknown', message: line.trim() });
+      }
     }
   }
 
@@ -101,6 +125,7 @@ export function parseOpenCodeJson(stdout: string): ParsedOpenCodeJson | undefine
   return {
     text: stepTexts.join('\n\n'),
     errorText: errors.join('\n'),
+    permissionDenials,
     ...(sawUsage
       ? {
           usage: {
@@ -218,6 +243,17 @@ export class OpenCodeHarness implements CodingHarness {
         }
 
         const parsed = parseOpenCodeJson(stdout);
+        // A non-interactive run auto-rejects `ask` permissions, still exits 0, and the model carries
+        // on. The failure is deterministic: no nudge retry, no failover (#2888).
+        if (parsed && parsed.permissionDenials.length > 0) {
+          const tools = [...new Set(parsed.permissionDenials.map((d) => d.tool))].join(', ');
+          const diagnostic = parsed.permissionDenials.map((d) => `${d.tool}: ${d.message}`).join('\n');
+          throw new HarnessError(
+            `opencode run auto-rejected a permission request for tool ${tools}: ${parsed.permissionDenials[0].message}`,
+            'permission_denied',
+            { exitCode: 0, stderr: stderr || undefined, diagnostic },
+          );
+        }
         const output = parsed ? parsed.text : stdout;
         if (output.trim().length > 0) return { output, ...(parsed?.usage ? { usage: parsed.usage } : {}) };
         if (parsed && parsed.errorText) {
