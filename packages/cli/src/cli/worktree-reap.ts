@@ -3,6 +3,7 @@
 import type { EventKind, FactoryConfig, getFactoryPaths } from '@on-par/factory-core';
 import { resolveSandboxPolicy } from '@on-par/factory-core';
 import {
+  type LaneWorktreeReapResult,
   type WorktreeSandbox,
   logEvent,
   resolveEffectiveConfig,
@@ -41,21 +42,23 @@ async function reapUnderLock<R>(
   [issue, repoRoot, ghRepo, paths, prefixOverride]: [number, string, string, Paths, string | undefined],
   failure: string,
   reap: (worktreePath: string, opts: Parameters<typeof reapLaneWorktree>[2]) => Promise<R>,
-): Promise<{ worktreePath: string; result: R } | undefined> {
+): Promise<{ worktreePath: string | undefined; result: R | undefined }> {
+  let worktreePath: string | undefined;
   try {
     const factoryConfig = rt.configLoaders.loadFactoryConfigForRepo(paths.config);
     const branchPrefix =
       prefixOverride ?? resolveEffectiveConfig(rt.configLoaders.loadRepoConfig(repoRoot)).branchPrefix;
-    const worktreePath = rt.worktreePathFor(repoRoot, ghRepo, issue, branchPrefix);
+    const resolved = rt.worktreePathFor(repoRoot, ghRepo, issue, branchPrefix);
+    worktreePath = resolved;
     const log = (type: EventKind, msg: string) => logEvent(paths.events, type, issue, msg);
     const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
     const result = await withGitLock(repoRoot, () =>
-      withFileLock(paths.gitLock, () => reap(worktreePath, { issue, branchPrefix, log, sandbox })),
+      withFileLock(paths.gitLock, () => reap(resolved, { issue, branchPrefix, log, sandbox })),
     );
     return { worktreePath, result };
   } catch (err: any) {
     logEvent(paths.events, 'warn', issue, `${failure}: ${err?.message ?? String(err)}`);
-    return undefined;
+    return { worktreePath, result: undefined };
   }
 }
 
@@ -72,6 +75,28 @@ export async function reapParkedLane(
   );
 }
 
+/** The one run-output line for a PR-less ship's reap: where the worktree is and why it was kept
+ *  or removed (#3009). `undefined` means the reap threw, so the state is unknown. */
+export function formatShipReapLine(worktreePath: string, result: LaneWorktreeReapResult | undefined): string | null {
+  const unverified = `📌 Kept worktree ${worktreePath} — its state could not be verified, so nothing was removed`;
+  if (result === undefined) return unverified;
+  const withBranch = result.branch ? ` and branch ${result.branch}` : '';
+  switch (result.outcome) {
+    case 'removed':
+      return `🧹 Removed worktree ${worktreePath}${result.branchDeleted ? ` and branch ${result.branch}` : ''} — no PR was opened and nothing was committed`;
+    case 'kept-dirty':
+      return `📌 Kept worktree ${worktreePath}${withBranch} — it has uncommitted changes`;
+    case 'kept-committed':
+      return `📌 Kept worktree ${worktreePath}${withBranch} — it has commits beyond the base`;
+    case 'kept-branch-mismatch':
+      return `📌 Kept worktree ${worktreePath} — it is on '${result.branch}', not this issue's lane branch`;
+    case 'kept-unverified':
+      return unverified;
+    case 'absent':
+      return null;
+  }
+}
+
 /** Removes a one-shot `factory ship`'s worktree and branch when it ended without a PR and left
  *  them clean with no commits (#3008). All safety gates live in reapCleanShipWorktree; a
  *  failure is logged as a warn and never changes the ship's exit. */
@@ -83,9 +108,10 @@ export async function reapPrlessShip(
   const done = await reapUnderLock(rt, args, 'PR-less ship worktree cleanup failed', (worktreePath, opts) =>
     reap(args[1], worktreePath, opts),
   );
-  if (done?.result.outcome === 'removed') {
-    console.log(
-      `🧹 Removed worktree ${done.worktreePath}${done.result.branchDeleted ? ` and branch ${done.result.branch}` : ''} — no PR was opened and nothing was committed`,
-    );
+  if (done.worktreePath === undefined) {
+    console.log(`📌 Kept the worktree for issue #${args[0]} — its state could not be verified, so nothing was removed`);
+    return;
   }
+  const line = formatShipReapLine(done.worktreePath, done.result);
+  if (line !== null) console.log(line);
 }

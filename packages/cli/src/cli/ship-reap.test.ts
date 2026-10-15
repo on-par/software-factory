@@ -55,4 +55,38 @@ describe('ship (via cmdShip) PR-less worktree reap', () => {
     expect(res).toEqual({ exited: true, code: 1 });
     expect(logged()).not.toContain('Removed worktree');
   });
+
+  it('prints the kept path and uncommitted-changes reason for a dirty PR-less worktree (#3009)', async () => {
+    h.shipReap = { outcome: 'kept-dirty', branch: 'factory/5-fix-the-bug', branchDeleted: false };
+    h.planResult = { ok: false, route: 'claude', escalate: 'needs human' };
+    const res = await runMainWith(undefined, 'ship', '5');
+    expect(res).toEqual({ exited: true, code: 1 });
+    expect(logged()).toContain('Kept worktree');
+    expect(logged()).toContain('factory/5-fix-the-bug');
+    expect(logged()).toContain('uncommitted changes');
+    expect(logged()).not.toContain('Removed worktree');
+  });
+
+  it('prints the kept path and commits-beyond-base reason for a committed PR-less worktree (#3009)', async () => {
+    h.shipReap = { outcome: 'kept-committed', branch: 'factory/5-fix-the-bug', branchDeleted: false };
+    h.planResult = { ok: false, route: 'claude', escalate: 'needs human' };
+    const res = await runMainWith(undefined, 'ship', '5');
+    expect(res).toEqual({ exited: true, code: 1 });
+    expect(logged()).toContain('Kept worktree');
+    expect(logged()).toContain('factory/5-fix-the-bug');
+    expect(logged()).toContain('commits beyond the base');
+  });
+
+  it('prints a could-not-be-verified keep line when the reap result is unverified or the reap throws (#3009)', async () => {
+    h.shipReap = { outcome: 'kept-unverified', branch: null, branchDeleted: false };
+    h.planResult = { ok: false, route: 'claude', escalate: 'needs human' };
+    const first = await runMainWith(undefined, 'ship', '5');
+    expect(first).toEqual({ exited: true, code: 1 });
+    expect(logged()).toContain('could not be verified');
+
+    ops.reapCleanShipWorktree.mockRejectedValueOnce(new Error('boom'));
+    const second = await runMainWith(undefined, 'ship', '5');
+    expect(second).toEqual({ exited: true, code: 1 });
+    expect(logged()).toContain('could not be verified');
+  });
 });

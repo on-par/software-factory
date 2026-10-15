@@ -52,6 +52,21 @@ describe('reapCleanShipWorktree', () => {
     expect(await branchList(repoRoot, branch)).toContain(branch);
   });
 
+  it('keeps the worktree as kept-unverified when commits beyond the base cannot be counted', async () => {
+    const { repoRoot } = await kit.makeThrowawayRepo();
+    const worktree = kit.trackWorktree(repoRoot, 409);
+    const branch = 'ship-it/409-x';
+    await setupWorktree(repoRoot, branch, worktree);
+    await execFile('git', ['update-ref', '-d', 'refs/remotes/origin/main'], { cwd: repoRoot });
+    await execFile('git', ['symbolic-ref', '-d', 'refs/remotes/origin/HEAD'], { cwd: repoRoot }).catch(() => {});
+
+    const result = await reapCleanShipWorktree(repoRoot, worktree, { issue: 409 });
+
+    expect(result).toEqual({ outcome: 'kept-unverified', branch, branchDeleted: false });
+    expect(existsSync(worktree)).toBe(true);
+    expect(await branchList(repoRoot, branch)).toContain(branch);
+  });
+
   it('keeps a worktree with modified tracked files', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 403);
