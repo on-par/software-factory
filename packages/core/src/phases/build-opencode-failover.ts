@@ -4,6 +4,19 @@ import type { FailoverReason } from '../types/index.js';
 
 type Log = (type: 'worker_failover', msg: string, extra: { failoverReason: FailoverReason }) => void;
 
+/** oc-08's cross-harness order for leaving OpenCode: the first build_claude worker, else the first
+ *  build_codex worker unless codex is disabled. Shared by in-phase failover and runIssue's
+ *  pre-BUILD breaker gate (#2891). */
+export function pickOpencodeFallback(
+  router: ModelRouter,
+  codexDisabled?: boolean,
+): { route: 'claude' | 'codex'; task: 'build_claude' | 'build_codex'; model: string } | undefined {
+  const claudeModel = router.resolveAll('build_claude')[0];
+  if (claudeModel) return { route: 'claude', task: 'build_claude', model: claudeModel };
+  const codexModel = codexDisabled ? undefined : router.resolveAll('build_codex')[0];
+  return codexModel ? { route: 'codex', task: 'build_codex', model: codexModel } : undefined;
+}
+
 /**
  * Where an OpenCode BUILD continues once every build_opencode worker is capped (#2885): the first
  * build_claude worker, else the first build_codex worker. Undefined means rethrow the original
@@ -26,13 +39,7 @@ export async function failOverOpencodeBuild(opts: {
   const { router, reason, fromModel } = opts;
   if (opts.build.routePinned === true || (opts.build.autoFailover && !opts.build.autoFailover.enabled))
     return undefined;
-  const claudeModel = router.resolveAll('build_claude')[0];
-  const codexModel = opts.build.codexDisabled ? undefined : router.resolveAll('build_codex')[0];
-  const target = claudeModel
-    ? ({ route: 'claude', task: 'build_claude', model: claudeModel } as const)
-    : codexModel
-      ? ({ route: 'codex', task: 'build_codex', model: codexModel } as const)
-      : undefined;
+  const target = pickOpencodeFallback(router, opts.build.codexDisabled);
   if (!target) return undefined;
   opts.build.log(
     'worker_failover',
