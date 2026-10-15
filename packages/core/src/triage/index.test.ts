@@ -91,9 +91,9 @@ describe('parseOpenPrIssues', () => {
     expect(parseOpenPrIssues(json, 'factory')).toEqual(new Set([1, 3, 7]));
   });
 
-  it('yields nothing for malformed input', () => {
-    expect(parseOpenPrIssues('not json', 'factory').size).toBe(0);
-    expect(parseOpenPrIssues('{}', 'factory').size).toBe(0);
+  it('returns null for malformed input', () => {
+    expect(parseOpenPrIssues('not json', 'factory')).toBeNull();
+    expect(parseOpenPrIssues('{}', 'factory')).toBeNull();
   });
 });
 
@@ -105,26 +105,17 @@ describe('dropQueuedIssues', () => {
       JSON.stringify([{ headRefName: 'factory/1-a' }, { headRefName: 'factory/3-b' }]),
       'factory',
     );
-    const out = dropQueuedIssues(queue, issues);
-    expect(out).toBe('# Triage queue\napp 5\ndocs 6\n');
-    expect(out).toContain('app 5');
-    expect(out).not.toMatch(/^app [13]$/m);
-    expect(validateQueue(out).ok).toBe(true);
+    const out = dropQueuedIssues(queue, issues ?? new Set());
+    expect(out.queue).toBe('# Triage queue\napp 5\ndocs 6\n');
+    expect(out.dropped).toEqual([1, 3]);
+    expect(validateQueue(out.queue).ok).toBe(true);
   });
 
   it('returns the queue unchanged for an empty set', () => {
-    expect(dropQueuedIssues(queue, new Set())).toBe(queue);
+    expect(dropQueuedIssues(queue, new Set())).toEqual({ queue, dropped: [] });
   });
 
   it('returns an empty string when every entry is dropped', () => {
-    expect(dropQueuedIssues(queue, new Set([1, 3, 5, 6]))).toBe('');
-  });
-});
-
-describe('normalizeTriageQueue with open PRs', () => {
-  it('drops issues owning an open factory PR (#2981)', () => {
-    const json = JSON.stringify([{ headRefName: 'factory/1-a' }]);
-    expect(normalizeTriageQueue('app 1\napp 5\n', json, 'factory')).toBe('app 5\n');
-    expect(normalizeTriageQueue('app 1\napp 5\n')).toBe('app 1\napp 5\n');
+    expect(dropQueuedIssues(queue, new Set([1, 3, 5, 6])).queue).toBe('');
   });
 });

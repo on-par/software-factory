@@ -46,6 +46,11 @@ describe('proposeTriageQueue (#2981)', () => {
     expect(logged()).toContain('boom');
   });
 
+  it('warns and keeps the queue unfiltered when gh output is malformed', async () => {
+    expect(await proposeTriageQueue(output, 'o/r', events, async () => ({ stdout: 'not json' }))).toBe(output);
+    expect(logged()).toContain('could not list open PRs');
+  });
+
   it('treats empty gh output as no open PRs and stringifies non-Error failures', async () => {
     expect(await proposeTriageQueue(output, 'o/r', events, async () => ({ stdout: '' }))).toBe(output);
     expect(await proposeTriageQueue(output, 'o/r', events, () => Promise.reject('nope'))).toBe(output);

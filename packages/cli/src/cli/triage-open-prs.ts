@@ -1,5 +1,12 @@
 // triage-open-prs.ts: drops issues that already own an open factory PR from the triage queue (#2981).
-import { logEvent, normalizeTriageQueue, resolveBranchPrefix, shellEscape } from '@on-par/factory-core/internal';
+import {
+  dropQueuedIssues,
+  logEvent,
+  normalizeTriageQueue,
+  parseOpenPrIssues,
+  resolveBranchPrefix,
+  shellEscape,
+} from '@on-par/factory-core/internal';
 
 export type TriageExec = (cmd: string) => Promise<{ stdout: string }>;
 
@@ -24,11 +31,14 @@ export async function proposeTriageQueue(
     logEvent(eventsPath, 'warn', '-', `triage could not list open PRs, not filtering: ${detail}`);
     return normalized;
   }
-  const queue = normalizeTriageQueue(output, prJson, resolveBranchPrefix());
-  const kept = new Set(queue.split('\n'));
-  const dropped = normalized.split('\n').filter((l) => l && !l.startsWith('#') && !kept.has(l));
+  const open = parseOpenPrIssues(prJson, resolveBranchPrefix());
+  if (open === null) {
+    logEvent(eventsPath, 'warn', '-', 'triage could not list open PRs, not filtering: malformed gh pr list output');
+    return normalized;
+  }
+  const { queue, dropped } = dropQueuedIssues(normalized, open);
   if (dropped.length > 0) {
-    const nums = dropped.map((l) => `#${l.split(' ')[1]}`).join(', ');
+    const nums = dropped.map((n) => `#${n}`).join(', ');
     logEvent(eventsPath, 'triage', '-', `Dropped issue(s) with an open factory PR: ${nums}`);
   }
   return queue;

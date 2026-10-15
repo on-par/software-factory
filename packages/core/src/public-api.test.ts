@@ -576,13 +576,13 @@ const INTERNAL_API_KEYS = [
   // Hosted execution: orphan sf-job-* container scan + reap (#1527)
   'listOrphanContainers',
   'reapOrphanContainers',
-  // Router
+  // Router, phase helpers, triage prompt and queue normalization (#1650, #2981)
   'CliModelExecutor',
-  // Phase helpers
   'buildPlanPrompt',
-  // Triage prompt and queue normalization (#1650)
   'buildTriagePrompt',
+  'dropQueuedIssues',
   'normalizeTriageQueue',
+  'parseOpenPrIssues',
   'parseTriageCandidates',
   // Local-small harness
   'applyLocalSmallPatchStep',

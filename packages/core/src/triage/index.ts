@@ -87,9 +87,8 @@ const ENTRY = /^(\S+)\s+#?(\d+)\s*$/;
 
 /** Turns model output into a queue `factory triage accept` will validate: keeps '#' comments and
  *  '<lane> <issue#>' entries (a leading '#' on the number is dropped), removes blank lines, code
- *  fences, prose and duplicate issues. With `openPrJson` (`gh pr list --json headRefName` output) it also
- *  drops issues owning an open factory PR (#2981). Returns '' when no entry survives. */
-export function normalizeTriageQueue(output: string, openPrJson?: string, prefix?: string): string {
+ *  fences, prose and duplicate issues. Returns '' when no entry survives. */
+export function normalizeTriageQueue(output: string): string {
   const lines: string[] = [];
   const seen = new Set<string>();
   let entries = 0;
@@ -106,21 +105,20 @@ export function normalizeTriageQueue(output: string, openPrJson?: string, prefix
     lines.push(`${match[1]} ${match[2]}`);
     entries++;
   }
-  const queue = entries > 0 ? `${lines.join('\n')}\n` : '';
-  return openPrJson === undefined ? queue : dropQueuedIssues(queue, parseOpenPrIssues(openPrJson, prefix));
+  return entries > 0 ? `${lines.join('\n')}\n` : '';
 }
 
 /** Issue numbers that own an open factory PR, from `gh pr list --json headRefName` (#2981).
- *  Malformed JSON or rows without a string headRefName yield nothing. */
-export function parseOpenPrIssues(json: string, prefix?: string): Set<number> {
+ *  Rows without a string headRefName are skipped; malformed JSON returns null so the caller can warn. */
+export function parseOpenPrIssues(json: string, prefix?: string): Set<number> | null {
   const issues = new Set<number>();
   let raw: unknown;
   try {
     raw = JSON.parse(json);
   } catch {
-    return issues;
+    return null;
   }
-  if (!Array.isArray(raw)) return issues;
+  if (!Array.isArray(raw)) return null;
   for (const item of raw) {
     if (typeof item !== 'object' || item === null) continue;
     const head = (item as { headRefName?: unknown }).headRefName;
@@ -132,10 +130,11 @@ export function parseOpenPrIssues(json: string, prefix?: string): Set<number> {
 }
 
 /** Removes '<lane> <n>' entries whose n is in `issues` from a normalizeTriageQueue result,
- *  keeping comment lines. Returns '' when no entry survives (#2981). */
-export function dropQueuedIssues(queue: string, issues: ReadonlySet<number>): string {
-  if (issues.size === 0) return queue;
+ *  keeping comment lines. Returns the surviving queue ('' when no entry survives) and the
+ *  dropped issue numbers (#2981). */
+export function dropQueuedIssues(queue: string, issues: ReadonlySet<number>): { queue: string; dropped: number[] } {
   const lines: string[] = [];
+  const dropped: number[] = [];
   let entries = 0;
   for (const line of queue.split('\n')) {
     if (line === '') continue;
@@ -144,9 +143,12 @@ export function dropQueuedIssues(queue: string, issues: ReadonlySet<number>): st
       continue;
     }
     const match = /^\S+\s+(\d+)$/.exec(line);
-    if (match && issues.has(Number(match[1]))) continue;
+    if (match && issues.has(Number(match[1]))) {
+      dropped.push(Number(match[1]));
+      continue;
+    }
     lines.push(line);
     entries++;
   }
-  return entries > 0 ? `${lines.join('\n')}\n` : '';
+  return { queue: entries > 0 ? `${lines.join('\n')}\n` : '', dropped };
 }
