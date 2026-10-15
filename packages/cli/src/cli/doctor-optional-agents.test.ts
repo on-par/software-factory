@@ -47,7 +47,7 @@ describe('claude-only host: missing agents are optional info (#2996)', () => {
       runDoctorChecks(probes({ commandAvailable: without('codex', 'opencode', 'pi') })),
     );
     const output = formatDoctorChecks(final);
-    for (const name of ['codex installed', 'opencode installed', 'pi installed', 'codex sandbox']) {
+    for (const name of ['codex installed', 'opencode installed', 'pi installed']) {
       const line = lineOf(output, name);
       expect(line).toContain(`➖ ${name}`);
       expect(line).not.toContain('⚠️');
@@ -103,16 +103,36 @@ describe('reconcileAgentAuthChecks skips missing agents (#2996)', () => {
     expect(reconcileAgentAuthChecks([badVersion, codexOk])[0]).toBe(badVersion);
   });
 
-  it('skips a failing codex sandbox row while an agent is signed in', () => {
-    const sandbox: DoctorCheck = { name: 'codex sandbox', ok: false, optional: true, detail: 'codex CLI not found' };
-    const out = reconcileAgentAuthChecks([sandbox, codexOk]);
-    expect(out[0]).toMatchObject({ ok: true, optional: true });
-    expect(out[0]!.detail).toMatch(/^skipped: /);
-  });
-
-  it('leaves a passing codex sandbox row and an empty list alone', () => {
-    const sandbox: DoctorCheck = { name: 'codex sandbox', ok: true, optional: true, detail: 'found' };
+  it('leaves a passing codex installed row and an empty list alone', () => {
+    const sandbox: DoctorCheck = { name: 'codex installed', ok: true, optional: true, detail: 'found' };
     expect(reconcileAgentAuthChecks([sandbox, codexOk])[0]).toBe(sandbox);
     expect(reconcileAgentAuthChecks([])).toEqual([]);
+  });
+});
+
+describe('one row per agent (#2997)', () => {
+  const mentionsCodex = (checks: DoctorCheck[]) =>
+    checks.filter((c) => /\bcodex\b/i.test(`${c.name} ${c.detail} ${c.fix ?? ''}`));
+
+  it('mentions codex in exactly one row when codex is not installed', () => {
+    const raw = runDoctorChecks(probes({ commandAvailable: without('codex') }));
+    for (const checks of [raw, reconcileAgentAuthChecks(raw)]) {
+      const rows = mentionsCodex(checks);
+      expect(rows.map((c) => c.name)).toEqual(['codex installed']);
+    }
+  });
+
+  it('shows each installed agent (claude, codex, opencode) in exactly one agent row', () => {
+    const checks = runDoctorChecks(probes());
+    for (const cli of ['claude', 'codex', 'opencode']) {
+      const rows = checks.filter(
+        (c) =>
+          c.name.startsWith(`${cli} `) &&
+          !c.name.endsWith(' signed in') &&
+          !c.name.includes('auth') &&
+          c.name !== 'claude keychain (macOS)',
+      );
+      expect(rows.map((c) => c.name)).toEqual([`${cli} installed`]);
+    }
   });
 });

@@ -94,19 +94,18 @@ export function notInstalledDetail(cli: string): string {
 
 const INSTALL_ROW_CLI = new Map(HARNESS_SETUP.map(({ cli }) => [`${cli} installed`, cli]));
 
-/** #2996: rewrites a not-installed agent row (`<cli> installed` with the exact not-on-PATH detail, or a failing
- *  `codex sandbox`) to ➖ skipped info; every other row is returned as is. Call only while an agent is signed in. */
+/** #2996: rewrites a not-installed agent row (`<cli> installed` with the exact not-on-PATH detail)
+ *  to ➖ skipped info; every other row is returned as is. Call only while an agent is signed in. */
 export function skipMissingAgentCheck(c: DoctorCheck): DoctorCheck {
   if (c.ok) return c;
   const cli = INSTALL_ROW_CLI.get(c.name);
-  const missing = cli !== undefined ? c.detail === notInstalledDetail(cli) : c.name === 'codex sandbox';
-  if (!missing) return c;
+  if (cli === undefined || c.detail !== notInstalledDetail(cli)) return c;
   const { fix: _fix, ...rest } = c;
   return {
     ...rest,
     ok: true,
     optional: true,
-    detail: `skipped: ${cli ?? 'codex'} not installed; another agent is signed in, so runs can proceed`,
+    detail: `skipped: ${cli} not installed; another agent is signed in, so runs can proceed`,
   };
 }
 

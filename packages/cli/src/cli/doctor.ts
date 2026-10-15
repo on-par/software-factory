@@ -477,6 +477,7 @@ function installFix(h: ConfiguredCommandHarness): string {
 
 /** Coding agent prerequisites: at least one agent CLI is required; each CLI is then reported
  *  on its own optional line, with sign-in reported separately from installation (#1269, #2422, #2555, #2556).
+ *  The codex sandbox note is folded into the ok `codex installed` row, so each agent has one row (#2997).
  *  A repo-configured command harness whose executable is on PATH also counts as a coding agent (#2691). */
 export function agentCliChecks(probes: DoctorEnvProbes): DoctorCheck[] {
   const { commandAvailable, tryExec } = probes;
@@ -504,7 +505,15 @@ export function agentCliChecks(probes: DoctorEnvProbes): DoctorCheck[] {
   const checks: DoctorCheck[] = [
     agents.length > 0 ? { name: 'coding agent', ok: true, detail: `found ${agents.join(', ')}` } : missingRow,
   ];
-  checks.push(...harnessInstallChecks(commandAvailable, tryExec));
+  const codexSandbox =
+    detectSandboxRuntime(probes.platform ?? process.platform, commandAvailable) === 'none'
+      ? 'no sandbox runtime, so codex runs with danger-full-access'
+      : 'sandboxed builds available';
+  checks.push(
+    ...harnessInstallChecks(commandAvailable, tryExec).map((c) =>
+      c.name === 'codex installed' && c.ok ? { ...c, detail: `${c.detail}; ${codexSandbox}` } : c,
+    ),
+  );
   checks.push(...commandHarnessChecks(configured, commandAvailable));
   checks.push(...harnessSignInChecks(probes));
   return checks;
@@ -624,26 +633,6 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
   }
 
   const sandboxRuntime = detectSandboxRuntime(probes.platform ?? process.platform, commandAvailable);
-  checks.push(
-    commandAvailable('codex')
-      ? {
-          name: 'codex sandbox',
-          ok: true,
-          optional: true,
-          detail:
-            sandboxRuntime === 'none'
-              ? 'codex CLI found; no sandbox runtime, so codex runs with danger-full-access'
-              : 'codex CLI found (sandboxed builds available)',
-        }
-      : {
-          name: 'codex sandbox',
-          ok: false,
-          optional: true,
-          detail: 'codex CLI not found; codex build routes unavailable',
-          fix: 'install the codex CLI, or rely on claude routes',
-        },
-  );
-
   checks.push(
     sandboxRuntime !== 'none'
       ? { name: 'sandbox runtime', ok: true, optional: true, detail: `${sandboxRuntime} found` }
