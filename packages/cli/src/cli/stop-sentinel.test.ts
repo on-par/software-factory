@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatStopFileAge,
+  STOP_SET_MESSAGE,
+  stopSentinelStatusLine,
   readStopFileStatus,
   stopSentinelCheck,
   stopSentinelRunSkipMessage,
@@ -91,6 +93,31 @@ describe('stopSentinelCheck', () => {
     ]) {
       const check = stopSentinelCheck(status);
       expect(`${check.detail} ${check.fix ?? ''}`).not.toContain('.factory/STOP');
+    }
+  });
+});
+
+describe('stopSentinelStatusLine', () => {
+  it('returns empty when STOP is absent', () => {
+    expect(stopSentinelStatusLine({ present: false })).toBe('');
+  });
+
+  it('says when STOP was set and how to clear it', () => {
+    const line = stopSentinelStatusLine({ present: true, ageMs: 3_720_000, writtenAt: '2026-10-15T16:24:26.000Z' });
+    for (const s of ['STOP is set', '2026-10-15T16:24:26.000Z', '1h 2m', 'factory resume']) expect(line).toContain(s);
+  });
+
+  it('handles an unknown set time', () => {
+    const line = stopSentinelStatusLine({ present: true, ageMs: 0, writtenAt: 'unknown' });
+    expect(line).toContain('set time unknown');
+    expect(line).toContain('factory resume');
+  });
+});
+
+describe('STOP_SET_MESSAGE', () => {
+  it('explains in-flight work finishes', () => {
+    for (const s of ['factory ship', 'finishes its current issue', "won't start", 'factory resume']) {
+      expect(STOP_SET_MESSAGE).toContain(s);
     }
   });
 });

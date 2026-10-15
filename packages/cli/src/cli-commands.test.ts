@@ -3740,9 +3740,9 @@ bash scripts/verify.sh
       expect(logged()).toContain('STOP cleared');
     });
 
-    it('text output is byte-identical without --json', async () => {
+    it('stop says a running ship finishes its current issue and the next one will not start (#2544)', async () => {
       await runMain('stop');
-      expect(logged()).toBe('STOP set — lanes halt between issues');
+      expect(logged()).toMatch(/factory ship.*finishes its current issue.*won't start.*factory resume/);
     });
 
     it('resume text output is byte-identical without --json', async () => {
@@ -3813,7 +3813,7 @@ bash scripts/verify.sh
           .map((l) => (JSON.parse(l) as { type: string }).type);
       await runMain('stop');
       expect(types()).toEqual(['stop-file-set']);
-      expect(logged()).toBe('STOP set — lanes halt between issues');
+      expect(logged()).toMatch(/^STOP set: lanes halt between issues/);
       await runMain('resume');
       expect(types()).toEqual(['stop-file-set', 'stop-file-cleared']);
     });
