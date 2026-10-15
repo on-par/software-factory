@@ -6,8 +6,9 @@ import { runCommand } from './command-runner.js';
  *  set was final — see `settleMs` / `minChecks`), 'failure' (a completed check run reported a
  *  non-passing conclusion), 'timeout' (no verdict was reached — the deadline elapsed, no check
  *  runs ever registered, or repeated API failures exhausted the retry budget), or 'no-checks'
- *  (returned only when `noChecksGraceMs` > 0 and, once the grace period has passed, the ref has
- *  zero check runs and zero commit statuses). It never rejects. */
+ *  (returned only when `noChecksGraceMs` > 0 and the ref has zero check runs and zero commit
+ *  statuses, either once the grace period has passed or at once when the up-front no-CI probe
+ *  proves the repo has no CI configured, #2488). It never rejects. */
 export type CiOutcome = 'success' | 'failure' | 'timeout' | 'no-checks';
 
 export const DEFAULT_CI_DEADLINE_MS = 600_000;
@@ -26,6 +27,11 @@ export interface CiWatchProgress {
 export interface CiNoChecksInfo {
   sha: string;
   waitedMs: number;
+  /** 'no-ci-configured' when the up-front probe proved the repo has no CI (#2488);
+   *  'grace-elapsed' when noChecksGraceMs passed with no checks (#2386). */
+  reason: 'no-ci-configured' | 'grace-elapsed';
+  /** Default branch the probe inspected; set only for 'no-ci-configured'. */
+  defaultBranch?: string;
 }
 
 export interface WatchChecksOptions {
@@ -48,7 +54,9 @@ export interface WatchChecksOptions {
   settleMs?: number;
   /** Once this long has passed since the watch started, a successful poll that sees zero check
    *  runs and a combined commit status with zero statuses ends the watch 'no-checks' (#2386).
-   *  Default 0, which disables the early exit. */
+   *  A repo proven to have no CI (no workflow files, no checks or statuses on recent default-branch
+   *  commits) ends 'no-checks' on the first such poll without waiting (#2488).
+   *  Default 0, which disables the early exit and the probe. */
   noChecksGraceMs?: number;
   /** Minimum gap between onProgress calls. Default 60_000. */
   progressIntervalMs?: number;
@@ -150,6 +158,52 @@ async function commitStatusCount(
   }
 }
 
+const DEFAULT_NO_CI_RECENT_COMMITS = 5;
+
+/** Probes whether a repo has no CI configured: no workflow files on `ref`, and no check runs or
+ *  commit statuses on its recent default-branch commits (#2488). Fails closed: only proven absence
+ *  returns non-null; any error, missing field or empty history returns null. Never rejects. */
+export async function detectNoCiConfigured(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  ref: string,
+  recentCommits = DEFAULT_NO_CI_RECENT_COMMITS,
+): Promise<{ defaultBranch: string } | null> {
+  try {
+    try {
+      const { data } = await octokit.rest.repos.getContent({ owner, repo, path: '.github/workflows', ref });
+      if (!Array.isArray(data) || data.some((e) => e.type === 'file')) return null;
+    } catch (err) {
+      if ((err as { status?: number }).status !== 404) return null;
+    }
+    const { data: repoData } = await octokit.rest.repos.get({ owner, repo });
+    const defaultBranch = repoData.default_branch;
+    if (typeof defaultBranch !== 'string' || defaultBranch === '') return null;
+    const { data: commits } = await octokit.rest.repos.listCommits({
+      owner,
+      repo,
+      sha: defaultBranch,
+      per_page: recentCommits,
+    });
+    if (!commits || commits.length === 0) return null;
+    for (const c of commits) {
+      const { data: checks } = await octokit.rest.checks.listForRef({ owner, repo, ref: c.sha, per_page: 1 });
+      if ((checks.total_count ?? checks.check_runs?.length ?? 0) > 0) return null;
+      const { data: status } = await octokit.rest.repos.getCombinedStatusForRef({
+        owner,
+        repo,
+        ref: c.sha,
+        per_page: 1,
+      });
+      if ((status.total_count ?? status.statuses?.length ?? 0) > 0) return null;
+    }
+    return { defaultBranch };
+  } catch {
+    return null;
+  }
+}
+
 export type CheckRunLike = {
   id?: number;
   name?: string | null;
@@ -209,6 +263,7 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
   // seen; a complete set is final only after that count holds still (or minChecks is met).
   let stableCount = -1;
   let stableSince = now();
+  let noCiProbed = false;
   while (now() < deadline) {
     try {
       const runs = await listAllCheckRuns(octokit, owner, repo, ref, perPage, maxPages);
@@ -217,12 +272,30 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
         stableCount = runs.length;
         stableSince = now();
       }
+      if (runs.length === 0 && noChecksGraceMs > 0 && !noCiProbed) {
+        noCiProbed = true;
+        const noCi = await detectNoCiConfigured(octokit, owner, repo, ref);
+        if (noCi) {
+          const statuses = await commitStatusCount(octokit, owner, repo, ref);
+          if (statuses && statuses.total === 0) {
+            try {
+              onNoChecks?.({
+                sha: statuses.sha,
+                waitedMs: now() - startedAt,
+                reason: 'no-ci-configured',
+                defaultBranch: noCi.defaultBranch,
+              });
+            } catch {}
+            return 'no-checks';
+          }
+        }
+      }
       if (runs.length === 0 && noChecksGraceMs > 0 && now() - startedAt >= noChecksGraceMs) {
         // Unknown (null) keeps polling; it is not a poll error.
         const statuses = await commitStatusCount(octokit, owner, repo, ref);
         if (statuses && statuses.total === 0) {
           try {
-            onNoChecks?.({ sha: statuses.sha, waitedMs: now() - startedAt });
+            onNoChecks?.({ sha: statuses.sha, waitedMs: now() - startedAt, reason: 'grace-elapsed' });
           } catch {}
           return 'no-checks';
         }

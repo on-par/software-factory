@@ -424,7 +424,13 @@ async function shipPhaseImpl(opts: {
             'ship',
             `CI for PR #${prNumber}: ${pending} pending, ${completed}/${total} completed, ${Math.ceil(remainingMs / 60_000)} min left before the CI timeout`,
           ),
-        onNoChecks: ({ sha }) => log('ship', `no CI checks found on ${repo} for ${sha}; skipping CI wait`),
+        onNoChecks: ({ sha, reason, defaultBranch }) =>
+          log(
+            'ship',
+            reason === 'no-ci-configured'
+              ? `no CI configured on ${repo} (no workflow files on ${sha} and no checks or statuses on recent ${defaultBranch} commits); skipping CI wait`
+              : `no CI checks found on ${repo} for ${sha}; skipping CI wait`,
+          ),
         onRescued: ({ headSha, runIds }) =>
           log(
             'ci-rescued',
