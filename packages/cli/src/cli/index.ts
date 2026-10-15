@@ -2097,6 +2097,8 @@ export interface LaneGcDeps {
   sweep?: typeof sweepWorktrees;
   emitEvent?: typeof logEvent;
   octokit?: () => NonNullable<Parameters<typeof sweepWorktrees>[1]>['octokit'];
+  /** Issues other lanes of this run have in flight (#2964). */
+  protectedIssues?: () => ReadonlySet<number>;
 }
 
 /** Mid-run worktree GC between issues in a lane (#1757). Honors worktree.autoGcOnRun, holds
@@ -2116,21 +2118,20 @@ export async function sweepBetweenLaneIssues(
     sweep = internalOps.sweepWorktrees,
     emitEvent = logEvent,
     octokit = getOctokit,
+    protectedIssues = () => new Set<number>(),
   } = deps;
   try {
     const cfg = loadConfig(paths.config);
     if (!cfg.worktree.autoGcOnRun) return 'disabled';
     const gcLog = (type: EventKind, msg: string) => emitEvent(paths.events, type, issue, msg, { lane });
     const sandbox = gcWorktreeSandbox(cfg.sandbox, repoRoot);
+    const gcOpts = { repoRoot, ttlDays: cfg.worktree.gcTtlDays, repo: ghRepo, branchPrefix: resolveBranchPrefix() };
     const report = await withGitLock(repoRoot, () =>
       withFileLock(
         paths.mergeLock,
         () =>
           withFileLock(paths.gitLock, () =>
-            sweep(
-              { repoRoot, ttlDays: cfg.worktree.gcTtlDays, repo: ghRepo, branchPrefix: resolveBranchPrefix() },
-              { log: gcLog, octokit: octokit(), sandbox },
-            ),
+            sweep({ ...gcOpts, protectedIssues: protectedIssues() }, { log: gcLog, octokit: octokit(), sandbox }),
           ),
         { timeoutMs: 0 },
       ),

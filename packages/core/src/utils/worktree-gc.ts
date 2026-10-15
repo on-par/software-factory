@@ -22,11 +22,15 @@ import { promisify } from 'node:util';
 import type { Octokit } from '@octokit/rest';
 
 import type { EventKind } from '../events/kinds.js';
-import { CLAIMED_BY_LABEL_PREFIX, DECOMPOSED_LABEL, PARKED_LABEL } from '../queue/github-queue.js';
-import { findStaleClaims } from '../queue/stale-claims.js';
 import { getFactoryPaths } from '../config/index.js';
 import { factoryBranchPrefixes, shellEscape } from './index.js';
 import { removeMicroVm, type WorktreeSandbox } from './microvm.js';
+import {
+  type IssueDisposition,
+  resolveActiveClaim,
+  resolveIssueDisposition,
+  resolveIssueExistence,
+} from './worktree-gc-issues.js';
 import { isFactoryDirName } from './worktree-name.js';
 
 const exec = promisify(execCb);
@@ -416,10 +420,6 @@ async function resolvePrState(
   }
 }
 
-/** The owning issue's verdict on a lane worktree. `null` means "no verdict" (no client/repo,
- *  or the query failed) and must always fall back to the PR-state/local-evidence rules. */
-type IssueDisposition = 'reap-closed' | 'reap-parked' | 'reap-decomposed' | 'keep';
-
 /** The lane issue number a candidate belongs to: capture group 1 of the lane-branch shape
  *  `<prefix>/<n>-*`, falling back to a trailing `-<n>` in the directory basename (covers
  *  detached checkouts of factory-named paths). `null` when neither matches. */
@@ -428,95 +428,6 @@ function laneIssueNumber(entry: WorktreeListEntry, lanePattern: RegExp): number 
   if (fromBranch) return Number(fromBranch[1]);
   const fromPath = basename(entry.path).match(/-(\d+)$/);
   return fromPath ? Number(fromPath[1]) : null;
-}
-
-/** GitHub's verdict on the owning issue. A closed issue and a factory:parked label both mean
- *  the lane is finished-or-parked and its clean checkout is redundant (see ADR, this PR). */
-async function resolveIssueDisposition(
-  octokit: SweepDeps['octokit'],
-  repo: string | undefined,
-  issue: number,
-  log: (type: EventKind, msg: string) => void,
-  issueWarnDedup: IssueWarnDedup,
-): Promise<IssueDisposition | null> {
-  if (!octokit || !repo) return null;
-  const [owner, repoName] = repo.split('/');
-  try {
-    const { data } = await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issue });
-    if (data.state === 'closed') return 'reap-closed';
-    const labels = new Set((data.labels ?? []).map((l) => (typeof l === 'string' ? l : (l?.name ?? ''))));
-    if (labels.has(PARKED_LABEL)) return 'reap-parked';
-    if (labels.has(DECOMPOSED_LABEL)) return 'reap-decomposed';
-    return 'keep';
-  } catch (err: any) {
-    if (issueWarnDedup.record(issue)) {
-      log(
-        'warn',
-        `worktree-gc: GitHub issue query failed for #${issue} (${err?.message ?? String(err)}) — using PR/local evidence only`,
-      );
-    } else {
-      log(
-        'warn',
-        `worktree-gc: GitHub issue query failed for #${issue} — suppressed ${issueWarnDedup.suppressedCount(issue)} repeated warning(s) (using PR/local evidence only)`,
-      );
-    }
-    return null;
-  }
-}
-
-/** The lane issue's existence on GitHub, checked only for worktree-gc's dry-run report.
- *  'not-configured' (no client/repo) and 'error' (the call threw anything but a 404) both mean
- *  "no verdict" but are reported differently: 'error' surfaces as unverifiable so a rate-limit
- *  or network blip is never mistaken for a confirmed-gone issue. */
-async function resolveIssueExistence(
-  octokit: SweepDeps['octokit'],
-  repo: string | undefined,
-  issue: number,
-  log: (type: EventKind, msg: string) => void,
-): Promise<'exists' | 'not-found' | 'error' | 'not-configured'> {
-  if (!octokit || !repo) return 'not-configured';
-  const [owner, repoName] = repo.split('/');
-  try {
-    await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issue });
-    return 'exists';
-  } catch (err: any) {
-    if (err?.status === 404) return 'not-found';
-    log(
-      'warn',
-      `worktree-gc: GitHub issue existence check failed for #${issue} (${err?.message ?? String(err)}) — reporting as unverifiable`,
-    );
-    return 'error';
-  }
-}
-
-/** Whether the lane issue carries an active, unexpired claim, checked only for worktree-gc's
- *  dry-run report. A `factory:claimed-by:*` label alone is not enough (#1501): if the issue also
- *  carries a `factory:claim-expires:*` lease label and that lease has lapsed, `findStaleClaims`
- *  (the same primitive the queue's own reconcile uses, ADR-0104/#1506) reads it as unclaimed
- *  immediately — no separate release step, and no host-pid/hostname evidence anywhere. Fail-safe:
- *  no client/repo, or a lookup error, both resolve to 'unknown' — never conflated with a
- *  confirmed 'unclaimed' verdict. */
-async function resolveActiveClaim(
-  octokit: SweepDeps['octokit'],
-  repo: string | undefined,
-  issue: number,
-  log: (type: EventKind, msg: string) => void,
-): Promise<'claimed' | 'unclaimed' | 'unknown'> {
-  if (!octokit || !repo) return 'unknown';
-  const [owner, repoName] = repo.split('/');
-  try {
-    const { data } = await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issue });
-    const labels = (data.labels ?? []).map((label: any) => (typeof label === 'string' ? label : (label?.name ?? '')));
-    if (!labels.some((name: string) => name.startsWith(CLAIMED_BY_LABEL_PREFIX))) return 'unclaimed';
-    const stale = findStaleClaims([{ number: issue, labels }]);
-    return stale.length > 0 ? 'unclaimed' : 'claimed';
-  } catch (err: any) {
-    log(
-      'warn',
-      `worktree-gc: GitHub claim-label check failed for #${issue} (${err?.message ?? String(err)}) — reporting as unknown (not flagged)`,
-    );
-    return 'unknown';
-  }
 }
 
 /** A worktree is clean when it has no modified tracked files. `--untracked-files=no` deliberately
@@ -543,8 +454,30 @@ export async function countUnpushedCommits(
   return Number.isInteger(n) ? n : null;
 }
 
+/** True only when `head` has exactly 0 commits ahead of origin/main — a lane that has not committed
+ *  yet (every lane starts at origin/main), never proof of a merge (#2964). Probe failure ⇒ false. */
+export async function isZeroCommitLane(
+  runCommand: NonNullable<SweepDeps['runCommand']>,
+  repoRoot: string,
+  head: string | null,
+): Promise<boolean> {
+  if (head === null) return false;
+  const result = await safeExec(runCommand, `git rev-list --count origin/main..${shellEscape(head)}`, {
+    cwd: repoRoot,
+  });
+  return result !== null && result.stdout.trim() === '0';
+}
+
 export async function sweepWorktrees(
-  opts: { repoRoot: string; ttlDays: number; dryRun?: boolean; repo?: string; branchPrefix?: string },
+  opts: {
+    repoRoot: string;
+    ttlDays: number;
+    dryRun?: boolean;
+    repo?: string;
+    branchPrefix?: string;
+    /** Issues other lanes of this run have in flight: never reaped, whatever their age or PR state (#2964). */
+    protectedIssues?: ReadonlySet<number>;
+  },
   deps: SweepDeps = {},
 ): Promise<GcReport> {
   const {
@@ -639,6 +572,11 @@ export async function sweepWorktrees(
   };
 
   for (const entry of candidates) {
+    const entryIssue = laneIssueNumber(entry, lanePattern);
+    if (entryIssue !== null && opts.protectedIssues?.has(entryIssue)) {
+      kept++;
+      continue;
+    }
     const ageDays = computeAgeDays(entry.path, now, log);
 
     let pushEvidence: boolean | undefined;
@@ -648,6 +586,12 @@ export async function sweepWorktrees(
         pushEvidence = await hasPriorPushEvidence(runCommand, repoRoot, entry.branch);
       }
       return pushEvidence;
+    };
+
+    let zeroCommit: boolean | undefined;
+    const zeroCommitLane = async (): Promise<boolean> => {
+      zeroCommit ??= await isZeroCommitLane(runCommand, repoRoot, entry.head);
+      return zeroCommit;
     };
 
     let reason: GcReason | null = null;
@@ -724,7 +668,7 @@ export async function sweepWorktrees(
         reason = null;
       } else if (prState === 'merged') {
         // GitHub decided the branch is merged — authoritative on its own, no ancestry/push requirement.
-        if (await isWorktreeClean(runCommand, entry.path)) reason = 'merged';
+        if ((await isWorktreeClean(runCommand, entry.path)) && !(await zeroCommitLane())) reason = 'merged';
       } else if (prState === 'closed') {
         if (await isWorktreeClean(runCommand, entry.path)) {
           const delivered =
@@ -733,7 +677,9 @@ export async function sweepWorktrees(
             (await safeExec(runCommand, `git merge-base --is-ancestor ${shellEscape(entry.head)} origin/main`, {
               cwd: repoRoot,
             })) !== null;
-          if (delivered) {
+          if (await zeroCommitLane()) {
+            // A zero-commit lane is trivially an ancestor of main — not delivered work (#2964).
+          } else if (delivered) {
             // Closed-not-merged PR whose content reached main — delivered, removable.
             reason = 'merged';
           } else {
@@ -757,7 +703,7 @@ export async function sweepWorktrees(
           // origin/main (setupWorktree: `git worktree add -b <branch> <path> origin/main`), so a lane
           // that has not committed yet is trivially an ancestor. Require evidence the branch was
           // actually pushed before calling it merged.
-          if (ancestorResult !== null && (await priorPush())) {
+          if (ancestorResult !== null && (await priorPush()) && !(await zeroCommitLane())) {
             reason = 'merged';
           }
         }
@@ -767,7 +713,7 @@ export async function sweepWorktrees(
           });
           // An empty ls-remote is ambiguous — "merged and deleted upstream" or "never pushed". Only the
           // former is garbage, and only a prior push distinguishes them.
-          if (lsRemote !== null && lsRemote.stdout.trim() === '' && (await priorPush())) {
+          if (lsRemote !== null && lsRemote.stdout.trim() === '' && (await priorPush()) && !(await zeroCommitLane())) {
             reason = 'remote-gone';
           }
         }
@@ -783,7 +729,19 @@ export async function sweepWorktrees(
     // never touched on a heuristic signal alone) and never overriding a live open PR — the same
     // "never remove" rule the hard-evidence tier above already applies to it.
     const openPr = entry.branch !== null && (await prStateFor(entry.branch)) === 'open';
-    if (!reason && !heldThisEntry && !dryRun && !openPr && (await isWorktreeClean(runCommand, entry.path))) {
+    const claimedDisposition = entryIssue === null ? null : await dispositionFor(entryIssue);
+    if (claimedDisposition === 'keep-claimed') {
+      // A live claim outranks every reap tier, TTL included (#2964).
+      reason = null;
+    }
+    if (
+      !reason &&
+      !heldThisEntry &&
+      claimedDisposition !== 'keep-claimed' &&
+      !dryRun &&
+      !openPr &&
+      (await isWorktreeClean(runCommand, entry.path))
+    ) {
       const issueNumber = laneIssueNumber(entry, lanePattern);
       if (issueNumber !== null) {
         const existence = await issueExistenceFor(issueNumber);

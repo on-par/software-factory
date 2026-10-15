@@ -49,6 +49,9 @@ export type RunLaneDeps = {
    *  lane moves on. Defaults to a no-op so injected-deps callers and tests are unaffected;
    *  cmdRun wires it to sweepBetweenLaneIssues. */
   sweepFinished?: (issue: number) => Promise<void>;
+  /** Issues in flight on any lane of this run — shared across every lane of one run; an issue is in
+   *  it from start to settle so no lane's sweep reaps it (#2964). */
+  activeIssues?: Set<number>;
   /** Number of issues still claimable on this lane's remote queue (#1222). Absent for
    *  static local lanes, whose pending list is the whole truth. */
   countRemaining?: () => Promise<number>;
@@ -112,6 +115,7 @@ export async function runLane(
     heartbeat,
     reapWorktree = async () => {},
     sweepFinished = async () => {},
+    activeIssues = new Set<number>(),
     countRemaining,
     baseHoldGate,
     laneBreakerThreshold = 0,
@@ -141,6 +145,8 @@ export async function runLane(
   // Every terminal outcome releases the claim, then gives finished worktrees a GC pass before
   // the lane moves on (#1757). The pass is fail-closed and must never change lane flow.
   const settle = async (issue: number, outcome: QueueReleaseOutcome): Promise<void> => {
+    // Drop the in-flight mark first so this lane's own finished worktree stays reapable.
+    activeIssues.delete(issue);
     await releaseIssue(issue, outcome);
     await sweepFinished(issue).catch(() => {});
   };
@@ -165,8 +171,10 @@ export async function runLane(
       pending.push(claimed);
     }
     const { issue, decision } = pending[i];
+    activeIssues.add(issue);
     if (pathExists(paths.stop)) {
       emitEvent(paths.events, 'stopped', issue, 'STOP file present', { lane });
+      activeIssues.delete(issue);
       await releaseIssue(issue, 'queued');
       return;
     }
@@ -306,6 +314,7 @@ export async function runLane(
           `lane '${lane}' paused: #${issue} failed only on checkers that also fail on base ${err.baseSha.slice(0, 8)} (${err.failingChecks.join(', ')}); #${issue} released to queued`,
           { lane, lanePaused: payload },
         );
+        activeIssues.delete(issue);
         return;
       }
       const reason = parkReasonFor(err);
