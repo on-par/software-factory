@@ -1,0 +1,3 @@
+{"type":"agent_start"}
+{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"429 Provider returned error: rate limit exceeded"}}
+{"type":"agent_settled","aborted":false}

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const BIN = join(HERE, 'bin');
-const AGENTS = ['codex', 'opencode', 'command-agent'] as const;
+const AGENTS = ['codex', 'opencode', 'pi', 'command-agent'] as const;
 const FAILURE_MODES = ['rate-limit', 'usage-cap', 'empty'] as const;
 
 let repo: string;
@@ -55,7 +55,9 @@ function runShim(agent: string, mode: string | undefined) {
       ]
     : agent === 'opencode'
       ? ['run', '--auto', '--format', 'json']
-      : [];
+      : agent === 'pi'
+        ? ['-p', '--mode', 'json', '--no-approve']
+        : [];
   return spawnSync(join(BIN, agent), args, {
     cwd: codex ? elsewhere : repo,
     input: 'prompt text',
@@ -123,6 +125,38 @@ describe.skipIf(process.platform === 'win32')('fake agent CLI shims', () => {
       expect(res.stderr).toContain('unknown FAKE_AGENT_MODE');
       expect(commitCount(repo)).toBe(before);
     });
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('pi doctor probes', () => {
+  let probeRepo: string;
+
+  beforeEach(() => {
+    probeRepo = mkdtempSync(join(tmpdir(), 'fake-pi-probe-'));
+    git(probeRepo, 'init', '-q');
+    writeFileSync(join(probeRepo, 'README.md'), 'hello\n');
+    git(probeRepo, 'add', '-A');
+    git(probeRepo, 'commit', '-q', '-m', 'init');
+  });
+  afterEach(() => {
+    rmSync(probeRepo, { recursive: true, force: true });
+  });
+
+  const probe = (...args: string[]) =>
+    spawnSync(join(BIN, 'pi'), args, { cwd: probeRepo, encoding: 'utf8', input: '' });
+
+  it('--version prints a version line without committing', () => {
+    const res = probe('--version');
+    expect(res.status).toBe(0);
+    expect(res.stdout.trim()).not.toBe('');
+    expect(commitCount(probeRepo)).toBe(1);
+  });
+
+  it('auth check prints ready without committing', () => {
+    const res = probe('auth', 'check', '--model', 'openrouter/deepseek/deepseek-v4.1-flash', '--no-refresh');
+    expect(res.status).toBe(0);
+    expect(res.stdout.split('\n')[0]).toBe('ready');
+    expect(commitCount(probeRepo)).toBe(1);
   });
 });
 
