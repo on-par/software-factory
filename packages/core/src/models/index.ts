@@ -15,6 +15,7 @@ import {
   localAuthFailureSinceLogin,
 } from '../utils/local-auth-record.js';
 import { hasOpencodeLoginEvidence } from '../utils/opencode-config.js';
+import { type PiAuthStatus, piAuthOutcome, runPiAuthCheck } from './pi-auth.js';
 import { applyZdrReview } from './zdr-review.js';
 
 export { type ModelOverrides, resolveModelOverrides, retiredModelHint } from './overrides.js';
@@ -264,6 +265,8 @@ export interface DoctorProbes {
   /** Non-inference evidence that the opencode CLI is logged in (stored credentials in opencode's
    *  auth.json). Default: hasOpencodeLoginEvidence(). Never runs `opencode run`. */
   opencodeLoggedIn?: () => boolean;
+  /** `pi auth check` for one provider model (#2903). Default: runPiAuthCheck. Never runs inference. */
+  piAuthCheck?: (providerModel: string) => PiAuthStatus;
   /** The agent's last recorded run-time local_auth failure when no login has happened since
    *  (#2733). Default: localAuthFailureSinceLogin(). Reads local state only. */
   localAuthFailure?: (agent: LocalAuthAgent) => LocalAuthFailure | null;
@@ -354,6 +357,20 @@ export function diagnoseModels(
     return opencodeLoggedInCache;
   };
 
+  const piAuthCache = new Map<string, PiAuthStatus>();
+  const piAuth = (providerModel: string): PiAuthStatus => {
+    let status = piAuthCache.get(providerModel);
+    if (status === undefined) {
+      try {
+        status = (probes.piAuthCheck ?? runPiAuthCheck)(providerModel);
+      } catch {
+        status = 'unknown';
+      }
+      piAuthCache.set(providerModel, status);
+    }
+    return status;
+  };
+
   const localAuthFailureProbe =
     probes.localAuthFailure ?? ((agent: LocalAuthAgent) => localAuthFailureSinceLogin(agent));
   const localAuthFailureCache = new Map<LocalAuthAgent, LocalAuthFailure | null>();
@@ -435,6 +452,9 @@ export function diagnoseModels(
               unverified = true;
               reason = `${UNVERIFIED_PREFIX}${probe.okLabel} installed but not logged in and ${def.envKey} not set — run \`opencode auth login\` or export ${def.envKey}`;
             }
+          } else if (probe.command === 'pi') {
+            const target = registry.getProviderModel(m);
+            ({ reachable, unverified, reason } = piAuthOutcome(piAuth(target), target, probe.okLabel));
           } else {
             reachable = true;
             reason = `ok (${probe.okLabel})`;

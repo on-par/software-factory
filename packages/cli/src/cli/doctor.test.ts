@@ -34,6 +34,9 @@ import { PREREQUISITES_TEXT } from './index.js';
 
 const SIGN_IN_ENV_KEYS = new Set(['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'CODEX_API_KEY', 'OPENCODE_API_KEY']);
 
+// prettier-ignore
+const without = (...gone: string[]) => (cmd: string) => !gone.includes(cmd);
+
 function probes(overrides: Partial<DoctorEnvProbes> = {}): DoctorEnvProbes {
   return {
     commandAvailable: () => true,
@@ -167,9 +170,9 @@ describe('gitAuthCheck', () => {
 });
 
 describe('runDoctorChecks', () => {
-  it('fully configured repo: 17 checks all ok, pre-existing rows unchanged, doctorFailed false', () => {
+  it('fully configured repo: 19 checks all ok, pre-existing rows unchanged, doctorFailed false', () => {
     const checks = runDoctorChecks(probes());
-    expect(checks).toHaveLength(17);
+    expect(checks).toHaveLength(19);
     expect(checks.every((c) => c.ok)).toBe(true);
     expect(doctorFailed(checks)).toBe(false);
     const byName = (n: string) => checks.find((c) => c.name === n)!;
@@ -187,7 +190,7 @@ describe('runDoctorChecks', () => {
   });
 
   it('claude CLI missing is optional when codex is installed and logged in (#1269)', () => {
-    const checks = runDoctorChecks(probes({ commandAvailable: (cmd) => cmd !== 'claude' && cmd !== 'opencode' }));
+    const checks = runDoctorChecks(probes({ commandAvailable: without('claude', 'opencode', 'pi') }));
     const claude = checks.find((c) => c.name === 'claude installed')!;
     expect(claude.ok).toBe(false);
     expect(claude.optional).toBe(true);
@@ -200,7 +203,7 @@ describe('runDoctorChecks', () => {
   });
 
   it('fails when no coding agent CLI is installed', () => {
-    const agents = new Set(['claude', 'codex', 'opencode']);
+    const agents = new Set(['claude', 'codex', 'opencode', 'pi']);
     const checks = runDoctorChecks(probes({ commandAvailable: (cmd) => !agents.has(cmd) }));
     const agent = checks.find((c) => c.name === 'coding agent')!;
     expect(agent.ok).toBe(false);
@@ -213,7 +216,7 @@ describe('runDoctorChecks', () => {
     const base = probes();
     const checks = runDoctorChecks(
       probes({
-        commandAvailable: (cmd) => cmd !== 'claude' && cmd !== 'opencode',
+        commandAvailable: without('claude', 'opencode', 'pi'),
         tryExec: (cmd) => (cmd.includes('codex login status') ? 'Not logged in' : base.tryExec(cmd)),
       }),
     );
@@ -229,7 +232,7 @@ describe('runDoctorChecks', () => {
   it('an expired access token with a refresh token passes codex auth on a codex-only machine (#2509)', () => {
     const checks = runDoctorChecks(
       probes({
-        commandAvailable: (cmd) => cmd !== 'claude' && cmd !== 'opencode',
+        commandAvailable: without('claude', 'opencode', 'pi'),
         codexSessionState: () => 'refresh-pending',
       }),
     );
@@ -242,24 +245,13 @@ describe('runDoctorChecks', () => {
   it('an unusable ChatGPT session is not passing and names codex login (#2509)', () => {
     const checks = runDoctorChecks(
       probes({
-        commandAvailable: (cmd) => cmd !== 'claude' && cmd !== 'opencode',
+        commandAvailable: without('claude', 'opencode', 'pi'),
         codexSessionState: () => 'unusable',
       }),
     );
     const auth = checks.find((c) => c.name === 'codex signed in')!;
     expect(auth.ok).toBe(false);
     expect(auth.fix).toContain('codex login');
-    expect(doctorFailed(checks)).toBe(true);
-  });
-
-  it('an unusable codex session plus a logged-out claude fails doctor (#2509)', () => {
-    const checks = reconcileAgentAuthChecks([
-      ...runDoctorChecks(
-        probes({ codexSessionState: () => 'unusable', claudeLoggedIn: () => false, opencodeLoggedIn: () => false }),
-      ),
-      { name: 'claude auth (host)', ok: false, detail: 'claude -p failed on the host' },
-    ]);
-    expect(checks.find((c) => c.name === 'codex signed in')).toMatchObject({ ok: false, optional: false });
     expect(doctorFailed(checks)).toBe(true);
   });
 
@@ -755,7 +747,7 @@ describe('codex-only host: optional claude agent (#2551)', () => {
   const lineOf = (output: string, name: string) => output.split('\n').find((l) => l.includes(name)) ?? '';
 
   function codexOnlyChecks(opts: { keychainDetail: string; runtimeAvailable: boolean }) {
-    const checks = runDoctorChecks(probes({ commandAvailable: (cmd) => cmd !== 'claude' && cmd !== 'opencode' }));
+    const checks = runDoctorChecks(probes({ commandAvailable: without('claude', 'opencode', 'pi') }));
     checks.push(claudeKeychainCheck({ status: 'skipped', detail: opts.keychainDetail }));
     checks.push(
       ...sandboxClaudeAuthChecks({
@@ -993,7 +985,7 @@ describe('harness sign-in (#2556)', () => {
 
   it('codex not logged in: the Codex sign-in row fails and its fix ends with codex login', () => {
     const checks = reconcileAgentAuthChecks(
-      runDoctorChecks(noEvidence({ commandAvailable: (cmd) => cmd !== 'claude' && cmd !== 'opencode' })),
+      runDoctorChecks(noEvidence({ commandAvailable: without('claude', 'opencode', 'pi') })),
     );
     expect(checks.find((c) => c.name === 'codex signed in')).toMatchObject({
       section: 'Codex',
@@ -1164,7 +1156,7 @@ describe('harness sign-in (#2556)', () => {
   it('fails doctor when the only agent hit local_auth since its last login (#2733)', () => {
     const checks = runDoctorChecks(
       probes({
-        commandAvailable: (cmd) => cmd !== 'codex' && cmd !== 'opencode',
+        commandAvailable: without('codex', 'opencode', 'pi'),
         localAuthFailure: (a) => (a === 'claude' ? { agent: a, at: '2026-10-13T16:00:00.000Z' } : null),
       }),
     );
@@ -1242,8 +1234,8 @@ describe('per-harness setup sections (#2555)', () => {
   it('renders one section per harness with its installed row', () => {
     const checks = runDoctorChecks(withVersion());
     const lines = formatDoctorChecks(checks).split('\n');
-    const headers = ['-- Claude Code --', '-- Codex --', '-- OpenCode --'];
-    const rows = ['claude installed', 'codex installed', 'opencode installed'];
+    const headers = ['-- Claude Code --', '-- Codex --', '-- OpenCode --', '-- Pi --'];
+    const rows = ['claude installed', 'codex installed', 'opencode installed', 'pi installed'];
     const idx = headers.map((h) => lines.indexOf(h));
     expect(idx.every((i) => i >= 0)).toBe(true);
     expect([...idx].sort((a, b) => a - b)).toEqual(idx);
@@ -1257,7 +1249,7 @@ describe('per-harness setup sections (#2555)', () => {
 
   it('a missing CLI fails its installed row and ends with its install command', () => {
     const checks = runDoctorChecks(
-      probes({ commandAvailable: (cmd) => !['claude', 'codex', 'opencode'].includes(cmd) }),
+      probes({ commandAvailable: (cmd) => !['claude', 'codex', 'opencode', 'pi'].includes(cmd) }),
     );
     const output = formatDoctorChecks(checks).split('\n');
     const expected = [

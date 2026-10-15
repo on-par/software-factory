@@ -68,6 +68,12 @@ describe('formatOverview', () => {
 });
 
 describe('missingAgentCliMessage', () => {
+  it('names Pi install and sign-in (#2903)', () => {
+    const msg = missingAgentCliMessage();
+    expect(msg).toContain('@earendil-works/pi-coding-agent');
+    expect(msg).toContain('/login');
+  });
+
   it('names both supported agent CLIs and their sign-in commands', () => {
     const msg = missingAgentCliMessage();
     expect(msg).toContain('no coding agent CLI found on PATH');
@@ -94,6 +100,10 @@ describe('availableAgentClis', () => {
   it('lists only the agent CLIs found on PATH', () => {
     expect(availableAgentClis((c) => c === 'codex')).toEqual(['codex']);
     expect(availableAgentClis(() => false)).toEqual([]);
+  });
+
+  it('pi alone is enough (#2903)', () => {
+    expect(availableAgentClis((c) => c === 'pi')).toEqual(['pi']);
   });
 });
 

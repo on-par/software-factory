@@ -250,6 +250,7 @@ const SIGN_IN_EVIDENCE: Readonly<Record<string, string>> = {
   codex:
     'no CODEX_API_KEY or codex login; API billing: codex login --with-api-key; headless: codex login --device-auth',
   opencode: 'no OPENCODE_API_KEY or stored auth login',
+  pi: 'no OPENROUTER_API_KEY, OPENCODE_API_KEY or AZURE_OPENAI_API_KEY set; Pi may still hold a stored /login (factory models --doctor runs pi auth check)',
 };
 
 function safe(fn: (() => boolean) | undefined): boolean {
@@ -276,7 +277,7 @@ export function harnessSignInChecks(probes: DoctorEnvProbes): DoctorCheck[] {
   const { commandAvailable, envPresent, tryExec } = probes;
   const found = availableAgentClis(commandAvailable);
   return HARNESS_SETUP.filter(({ harnessId }) => isHarnessCliPresent(harnessId, commandAvailable)).map(
-    ({ section, cli, login, envKeys }): DoctorCheck => {
+    ({ section, cli, login, next, envKeys }): DoctorCheck => {
       const name = `${cli} signed in`;
       const fix = `sign in to ${section}: ${login}`;
       if (cli === 'claude' || cli === 'codex') {
@@ -365,7 +366,7 @@ export function harnessSignInChecks(probes: DoctorEnvProbes): DoctorCheck[] {
         optional: found.length > 1,
         detail: `unverified: no sign-in evidence (${SIGN_IN_EVIDENCE[cli]})`,
         fix,
-        next: login,
+        next: next ?? login,
       };
     },
   );
@@ -452,14 +453,14 @@ export function agentCliChecks(probes: DoctorEnvProbes): DoctorCheck[] {
       ? {
           name: 'coding agent',
           ok: false,
-          detail: 'no coding agent CLI on PATH (claude, codex or opencode)',
+          detail: 'no coding agent CLI on PATH (claude, codex, opencode or pi)',
           fix: `install Claude Code (${CLAUDE_CODE_URL}) or the Codex CLI (${CODEX_CLI_URL})`,
           next: HARNESS_SETUP[0]!.install,
         }
       : {
           name: 'coding agent',
           ok: false,
-          detail: `no coding agent CLI on PATH (claude, codex or opencode); ${configured.map(describe).join('; ')}`,
+          detail: `no coding agent CLI on PATH (claude, codex, opencode or pi); ${configured.map(describe).join('; ')}`,
           fix: installFix(configured[0]!),
         };
   const checks: DoctorCheck[] = [

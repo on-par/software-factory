@@ -56,3 +56,22 @@ describe('opencode not installed (#2880)', () => {
     expect(row.fix).toBe('install OpenCode: npm install -g opencode-ai@1.18.28');
   });
 });
+
+describe('pi installed row (#2903)', () => {
+  it('pi installed shows the pi --version output (#2903)', () => {
+    const row = harnessInstallChecks(
+      () => true,
+      (cmd) => (cmd === 'pi --version' ? '1.2.0\n' : 'x'),
+    ).find((c) => c.name === 'pi installed')!;
+    expect(row).toMatchObject({ ok: true, section: 'Pi', detail: 'found on PATH (1.2.0)' });
+  });
+
+  it('a missing pi is optional and names the install command', () => {
+    const row = harnessInstallChecks(
+      (cmd) => cmd !== 'pi',
+      () => null,
+    ).find((c) => c.name === 'pi installed')!;
+    expect(row).toMatchObject({ ok: false, optional: true, section: 'Pi' });
+    expect(row.fix).toContain('@earendil-works/pi-coding-agent');
+  });
+});
