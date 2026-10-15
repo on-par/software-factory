@@ -48,6 +48,7 @@ export const h = {
   harnessProbes: [] as any[],
   costs: [] as any[],
   gcReport: { removed: [], kept: 0, dryRun: false } as any,
+  shipReap: { outcome: 'removed', branch: 'factory/5-fix-the-bug', branchDeleted: true } as any,
   costSinkCallback: undefined as ((entry: any) => void) | undefined,
   trailingSpend: 10,
   subscriptionUsage: null as { fiveHourUtilization: number; fiveHourResetsAt: string | null } | null,
@@ -189,6 +190,7 @@ function makeInternalFakes() {
   return {
     readCosts: vi.fn(() => h.costs) as any,
     sweepWorktrees: vi.fn(async () => h.gcReport) as any,
+    reapCleanShipWorktree: vi.fn(async () => h.shipReap) as any,
     formatGcReport: vi.fn(
       (report: any) =>
         `GC_REPORT:${report.dryRun ? 'dry' : 'real'}:removed=${report.removed.length}:kept=${report.kept}`,
@@ -196,7 +198,10 @@ function makeInternalFakes() {
     exec: vi.fn(async (cmd: string) => ({ stdout: h.execImpl(cmd), stderr: '' })),
     execSync: vi.fn((cmd: string) => h.execSyncImpl(cmd)),
     octokit: () => h.octokit,
-  } satisfies Pick<CliDeps, 'readCosts' | 'sweepWorktrees' | 'formatGcReport' | 'exec' | 'execSync' | 'octokit'>;
+  } satisfies Pick<
+    CliDeps,
+    'readCosts' | 'sweepWorktrees' | 'reapCleanShipWorktree' | 'formatGcReport' | 'exec' | 'execSync' | 'octokit'
+  >;
 }
 /** Fresh fakes per test, spread into every main/shipIssue call. */
 export let ops = makeInternalFakes();
@@ -386,6 +391,7 @@ export function installShipHarness(): void {
     h.harnessProbes = [];
     h.costs = [];
     h.gcReport = { removed: [], kept: 0, dryRun: false };
+    h.shipReap = { outcome: 'removed', branch: 'factory/5-fix-the-bug', branchDeleted: true };
     h.trailingSpend = 10;
     h.subscriptionUsage = null;
     h.routerResolve = () => 'claude-model';

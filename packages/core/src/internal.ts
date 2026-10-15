@@ -252,8 +252,8 @@ export {
   parseCoverageSummaryScopes,
   renderRatchetReport,
 } from './utils/coverage-ratchet.js';
-export type { LaneWorktreeReapResult } from './utils/index.js';
 export {
+  type LaneWorktreeReapResult,
   branchFor,
   branchPrefixSlug,
   LEGACY_BRANCH_PREFIX,
@@ -272,12 +272,12 @@ export {
   logCost,
   logEvent,
   readCosts,
+  reapCleanShipWorktree,
   reapLaneWorktree,
   setupWorktree,
   shellEscape,
   slugify,
 } from './utils/index.js';
-// Selected Claude profile (CLAUDE_CONFIG_DIR) and its keychain entry
 export {
   claudeConfigDirOverride,
   claudeKeychainService,
