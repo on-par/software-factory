@@ -17,11 +17,17 @@ describe('HARNESS_CATALOG', () => {
         'codex-cli',
         'ollama-http',
         'opencode',
+        'pi',
         'ollama-agentic',
         'ollama-command-agent',
         'command',
       ]),
     );
+  });
+
+  it('probes pi as an agentic command harness whose CLI carries its own auth', () => {
+    expect(HARNESS_CATALOG.pi.probe).toMatchObject({ kind: 'command', command: 'pi', okLabel: 'pi CLI', auth: 'cli' });
+    expect(isAgenticHarness('pi')).toBe(true);
   });
 
   it('probes opencode as a command harness whose CLI carries its own auth', () => {
@@ -72,6 +78,7 @@ describe('harnessCliCommand', () => {
     expect(harnessCliCommand('claude-cli')).toBe('claude');
     expect(harnessCliCommand('codex-cli')).toBe('codex');
     expect(harnessCliCommand('opencode')).toBe('opencode');
+    expect(harnessCliCommand('pi')).toBe('pi');
   });
 
   it('is undefined for ollama, unknown and missing harness ids', () => {

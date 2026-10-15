@@ -14,6 +14,7 @@ import { HarnessError, isRetryableFailure, taskRequiresAgenticHarness } from '..
 import { OllamaAgenticHarness } from '../harness/ollama-agentic.js';
 import { OllamaHttpHarness } from '../harness/ollama-http.js';
 import { OpenCodeHarness } from '../harness/opencode.js';
+import { PiHarness } from '../harness/pi.js';
 import { isHarnessCliPresent, ModelRegistry } from '../models/index.js';
 import type { SandboxEventType, SandboxPolicy } from '../sandbox/index.js';
 import { sandboxEventFromError } from '../sandbox/index.js';
@@ -137,6 +138,7 @@ export class CliModelExecutor implements ModelExecutor {
   private codexHarness: CodexCliHarness;
   private ollamaHarness: OllamaHttpHarness;
   private opencodeHarness: OpenCodeHarness;
+  private piHarness: PiHarness;
   private ollamaAgenticHarness: OllamaAgenticHarness;
   private harnesses: Record<string, ExecutorHarness>;
 
@@ -149,6 +151,7 @@ export class CliModelExecutor implements ModelExecutor {
     this.codexHarness = new CodexCliHarness(execFn);
     this.ollamaHarness = new OllamaHttpHarness(fetchFn);
     this.opencodeHarness = new OpenCodeHarness(execFn);
+    this.piHarness = new PiHarness(execFn);
     this.ollamaAgenticHarness = new OllamaAgenticHarness(fetchFn, execFn);
     this.harnesses = {
       'claude-cli': { run: (m, p, c) => this.runViaHarness(this.claudeHarness, m, p, c) },
@@ -159,6 +162,7 @@ export class CliModelExecutor implements ModelExecutor {
           this.runOllamaCommandAgent(m, p, c.worktree, c.timeoutSeconds, c.registry, c.task, c.env, c.onPgid),
       },
       opencode: { run: (m, p, c) => this.runViaHarness(this.opencodeHarness, m, p, c) },
+      pi: { run: (m, p, c) => this.runViaHarness(this.piHarness, m, p, c) },
       'ollama-agentic': { run: (m, p, c) => this.runViaHarness(this.ollamaAgenticHarness, m, p, c) },
       command: { run: (m, p, c) => this.runCommandHarness(m, p, c) },
       ...harnessOverrides,

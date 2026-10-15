@@ -568,6 +568,8 @@ const INTERNAL_API_KEYS = [
   'PATCH_PROPOSAL_SCHEMA',
   'OllamaHttpHarness',
   'OpenCodeHarness',
+  'PiHarness',
+  'parsePiJson',
   // Hosted execution: Docker container engine adapter (#899)
   'createDockerEngine',
   // Hosted execution: orphan sf-job-* container scan + reap (#1527)
@@ -892,9 +894,7 @@ describe('public API surface (ADR-0004)', () => {
 
   it('./kpis exposes exactly the documented KPI subset, and nothing beyond the root API', () => {
     expect(Object.keys(kpisApi).sort()).toEqual([...KPIS_API_KEYS].sort());
-    for (const key of KPIS_API_KEYS) {
-      expect(Object.keys(publicApi)).toContain(key);
-    }
+    for (const key of KPIS_API_KEYS) expect(Object.keys(publicApi)).toContain(key);
   });
 
   it('package.json declares exactly the four documented entry points', () => {
@@ -903,8 +903,7 @@ describe('public API surface (ADR-0004)', () => {
       exports: Record<string, { development: string; import: string; types: string }>;
     };
     expect(Object.keys(pkg.exports).sort()).toEqual(['.', './internal', './kpis', './testing'].sort());
-    for (const entry of Object.values(pkg.exports)) {
+    for (const entry of Object.values(pkg.exports))
       expect(Object.keys(entry).sort()).toEqual(['development', 'import', 'types']);
-    }
   });
 });
