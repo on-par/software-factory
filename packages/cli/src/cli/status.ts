@@ -32,6 +32,7 @@ import { formatBaseHoldStatus, readBaseHold } from './base-hold.js';
 import { notInitializedMessage } from './first-run.js';
 import type { CliDeps, CliExitError, readActiveProduct } from './index.js';
 import { readRunFlagOverrides } from './run-flags.js';
+import { readStopFileStatus, stopSentinelStatusLine } from './stop-sentinel.js';
 import { buildStatusJson } from './status-json.js';
 import { checkSweepHeartbeat, defaultSweepHeartbeatDeps, formatSweepHeartbeatStatusLine } from './sweep-heartbeat.js';
 import { buildStatusUpdateJson, formatUpdateStatusLine, readUpdateState, updateStatePath } from './update-state.js';
@@ -239,7 +240,6 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
     }
   }
 
-  if (existsSync(paths.stop)) {
-    console.log(styleText('red', '\n!! STOP file present — factory halting between issues'));
-  }
+  const stopLine = stopSentinelStatusLine(readStopFileStatus(paths));
+  if (stopLine) console.log(styleText('red', `\n!! ${stopLine}`));
 }

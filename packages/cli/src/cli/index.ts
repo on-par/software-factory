@@ -238,6 +238,7 @@ import {
 } from './classifier-backtest.js';
 import { runHarnessCheckCommand } from './harness-check.js';
 import { findOpenPRForIssue, landIssue } from './land.js';
+import { STOP_SET_MESSAGE } from './stop-sentinel.js';
 import {
   AwaitingReviewError,
   CiFailedError,
@@ -4162,7 +4163,7 @@ export async function cmdStop(opts: { json?: boolean } = {}): Promise<void> {
     console.log(JSON.stringify(buildStopResumeJson({ action: 'stop', repo: json.repo, before, after })));
     return;
   }
-  console.log('STOP set — lanes halt between issues');
+  console.log(STOP_SET_MESSAGE);
 }
 
 export async function cmdResume(issue?: string, opts: { json?: boolean; from?: string } = {}): Promise<void> {
