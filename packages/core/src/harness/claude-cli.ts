@@ -143,7 +143,8 @@ export function claudeEndpointEnv(
 
 /** Runs a model via the Claude CLI:
  *  claude -p [--model <claudeFlag>] --output-format stream-json --verbose --safe-mode --permission-mode bypassPermissions < prompt-file
- *  A model with an approved `endpoint` also gets that call's ANTHROPIC_* env (base URL, bearer token from its envKey). */
+ *  A model with an approved `endpoint` also gets that call's ANTHROPIC_* env (base URL, bearer token from its envKey).
+ *  Its usage omits `costUsd` (Claude Code prices it at Claude rates) so callers price it from the registry (#2907). */
 export class ClaudeCliHarness implements CodingHarness {
   readonly id = 'claude-cli';
   readonly agentic = true;
@@ -196,7 +197,13 @@ export class ClaudeCliHarness implements CodingHarness {
       await rm(promptDir, { recursive: true, force: true });
     }
 
-    const { output, usage, isError, subtype } = parseResultEnvelope(stdout);
+    const { output, usage: parsedUsage, isError, subtype } = parseResultEnvelope(stdout);
+    // An endpoint model is not Claude; total_cost_usd prices it at Claude rates, so callers use registry prices (#2907).
+    let usage = parsedUsage;
+    if (usage && registry.getEndpoint(model)) {
+      const { costUsd: _claudeRate, ...rest } = usage;
+      usage = rest;
+    }
     if (isError) {
       const unavailable = usage?.inputTokens === 0 && usage.outputTokens === 0 && usage.durationApiMs === 0;
       throw new HarnessError(
