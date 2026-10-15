@@ -55,6 +55,7 @@ import { OPENCODE_LIVE_AUTH_CHECK, opencodeLiveAuthCheck, runOpencodeAuthProbe }
 import { resolveDoctorHarnesses } from './doctor-harness-view.js';
 import { reconcileQueue } from './doctor-queue-reconcile.js';
 import { HARNESS_SETUP, harnessInstallChecks, readyAgents, skipMissingAgentCheck } from './doctor-harness.js';
+import { failMissingAgentCheck as failMissing } from './doctor-harness.js';
 export { HARNESS_SETUP, harnessInstallChecks, readyAgents };
 import { availableAgentClis, CLAUDE_CODE_URL, CODEX_CLI_URL, GITHUB_TOKENS_URL } from './first-run.js';
 import type { CliDeps } from './index.js';
@@ -502,18 +503,18 @@ export function agentCliChecks(probes: DoctorEnvProbes): DoctorCheck[] {
           detail: `no coding agent CLI on PATH (claude, codex, opencode or pi); ${configured.map(describe).join('; ')}`,
           fix: installFix(configured[0]!),
         };
-  const checks: DoctorCheck[] = [
-    agents.length > 0 ? { name: 'coding agent', ok: true, detail: `found ${agents.join(', ')}` } : missingRow,
-  ];
   const codexSandbox =
     detectSandboxRuntime(probes.platform ?? process.platform, commandAvailable) === 'none'
       ? 'no sandbox runtime, so codex runs with danger-full-access'
       : 'sandboxed builds available';
-  checks.push(
+  const checks: DoctorCheck[] = [
+    agents.length > 0 ? { name: 'coding agent', ok: true, detail: `found ${agents.join(', ')}` } : missingRow,
     ...harnessInstallChecks(commandAvailable, tryExec).map((c) =>
-      c.name === 'codex installed' && c.ok ? { ...c, detail: `${c.detail}; ${codexSandbox}` } : c,
+      c.name === 'codex installed' && c.ok
+        ? { ...c, detail: `${c.detail}; ${codexSandbox}` }
+        : failMissing(c, !agents.length),
     ),
-  );
+  ];
   checks.push(...commandHarnessChecks(configured, commandAvailable));
   checks.push(...harnessSignInChecks(probes));
   return checks;
