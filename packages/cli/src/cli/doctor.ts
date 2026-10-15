@@ -1,6 +1,7 @@
 // packages/cli/src/cli/doctor.ts — `factory doctor` environment preflight
 
 import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
@@ -201,22 +202,54 @@ export function gitAuthSshFix(host: string | null): string {
   return `origin uses SSH: test with \`ssh -T git@${target}\` and check your SSH key is loaded (\`ssh-add -l\`), then re-run \`factory doctor\``;
 }
 
+type TryExec = (cmd: string, opts?: DoctorExecOptions) => string | null;
+/** GitHub's SSH endpoints: ssh.github.com is the port-443 alternate for github.com (#2940). */
+const GITHUB_SSH_SIBLING_HOSTS: Readonly<Record<string, string>> = {
+  'github.com': 'ssh.github.com',
+  'ssh.github.com': 'github.com',
+};
+
+/** Identity files `ssh -G <host>` offers, `~` expanded; null when ssh could not run (#2940). The host is shell-safe. */
+export function sshIdentityFiles(host: string, tryExec: TryExec, home: string = homedir()): string[] | null {
+  const out = tryExec(`ssh -G ${host}`, { timeoutMs: 5_000 });
+  if (out === null) return null;
+  const values = out.split(/\r?\n/).map((line) => /^identityfile\s+(.+)$/i.exec(line.trim())?.[1]?.trim());
+  return values
+    .filter((v): v is string => !!v && v.toLowerCase() !== 'none')
+    .map((v) => (v === '~' ? home : v.startsWith('~/') ? resolve(home, v.slice(2)) : v));
+}
+
+/** Host alias mismatch (#2940): no existing key for the origin host, but its GitHub sibling has one. */
+export function sshHostAliasMismatch(
+  host: string,
+  tryExec: TryExec,
+  fileExists: (p: string) => boolean,
+  home?: string,
+): { originHost: string; siblingHost: string } | null {
+  const origin = host.toLowerCase();
+  const sibling = GITHUB_SSH_SIBLING_HOSTS[origin];
+  if (!sibling || sshIdentityFiles(origin, tryExec, home)?.some(fileExists) !== false) return null;
+  return sshIdentityFiles(sibling, tryExec, home)?.some(fileExists)
+    ? { originHost: origin, siblingHost: sibling }
+    : null;
+}
+
+export function gitAuthSshAliasFix(originHost: string, siblingHost: string): string {
+  return `origin host \`${originHost}\` gets no existing SSH key, but \`${siblingHost}\` does: add \`${originHost}\` to the \`Host ${siblingHost}\` line in \`~/.ssh/config\` (e.g. \`Host ${siblingHost} ${originHost}\`), then re-run \`factory doctor\``;
+}
+
 /** Git-auth check (#2482, #2483): skipped, never failing, outside a git repository or without
  *  an origin remote. Otherwise runs a non-interactive `git ls-remote` against origin and fails
  *  when it cannot authenticate. SSH origins get SSH guidance instead of `gh auth setup-git`
- *  (#2939). The output never echoes the origin URL, which may hold a token; only a bare
- *  SSH hostname may appear. */
+ *  (#2939), and a Host alias mismatch is named when detected (#2940). The output never echoes the
+ *  origin URL, which may hold a token; only a bare SSH hostname may appear. */
 export function gitAuthCheck(
   repoRoot: string | null,
-  tryExec: (cmd: string, opts?: DoctorExecOptions) => string | null,
+  tryExec: TryExec,
+  fileExists: (path: string) => boolean = existsSync,
 ): DoctorCheck {
   if (repoRoot === null) {
-    return {
-      name: GIT_AUTH_CHECK,
-      ok: true,
-      optional: true,
-      detail: NOT_IN_REPO_SKIP_DETAIL,
-    };
+    return { name: GIT_AUTH_CHECK, ok: true, optional: true, detail: NOT_IN_REPO_SKIP_DETAIL };
   }
   const origin = tryExec('git remote get-url origin');
   if (!origin) {
@@ -227,12 +260,16 @@ export function gitAuthCheck(
   if (probe === null) {
     const ssh = sshOriginHost(origin);
     if (ssh) {
+      const m = ssh.host ? sshHostAliasMismatch(ssh.host, tryExec, fileExists) : null;
+      const host = m?.originHost ?? ssh.host;
       return {
         name: GIT_AUTH_CHECK,
         ok: false,
-        detail: 'git could not authenticate to origin over SSH non-interactively (prompting disabled)',
-        fix: gitAuthSshFix(ssh.host),
-        ...(ssh.host ? { next: `ssh -T git@${ssh.host}` } : {}),
+        detail: m
+          ? `git could not authenticate to origin over SSH: ssh offers no existing key for ${m.originHost}, but ${m.siblingHost} has one in ~/.ssh/config`
+          : 'git could not authenticate to origin over SSH non-interactively (prompting disabled)',
+        fix: m ? gitAuthSshAliasFix(m.originHost, m.siblingHost) : gitAuthSshFix(ssh.host),
+        ...(host ? { next: `ssh -T git@${host}` } : {}),
       };
     }
     return {
@@ -534,7 +571,7 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
     checks.push({ name: 'gh auth', ok: true, detail: 'authenticated' });
   }
 
-  checks.push({ ...gitAuthCheck(repoRoot, tryExec), ...repoSection });
+  checks.push({ ...gitAuthCheck(repoRoot, tryExec, pathExists), ...repoSection });
 
   if (envPresent('GITHUB_TOKEN')) {
     checks.push({ name: 'GitHub token', ok: true, detail: 'GITHUB_TOKEN set' });
