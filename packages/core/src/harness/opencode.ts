@@ -18,7 +18,8 @@ export interface ParsedOpenCodeJson {
   /** Text parts of the last step (after the final `step_start`), trimmed, non-empty, joined by a
    *  blank line; '' when that step has no text. */
   text: string;
-  /** Summed `step_finish` usage; undefined when no step reported numeric tokens. */
+  /** Summed `step_finish` usage; undefined when no step reported numeric tokens. `durationMs` is
+   *  the span between the smallest and largest finite event `timestamp`, omitted when none. */
   usage?: HarnessUsage;
   /** One line per `error` event, newline-joined; '' when none. Each line is the message (or
    *  error name), then `data.responseBody` when a string, then `status <n>` when
@@ -31,7 +32,8 @@ const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v)
 /** Parses `opencode run --format json` NDJSON. Returns undefined when stdout has no
  *  OpenCode event lines (an object with a string `type`), so callers fall back to raw
  *  stdout. Tolerant by design: malformed lines, unknown event types and bad counts are
- *  skipped. Usage capture must never fail a run (#2462). Only the last step's text is returned:
+ *  skipped. Usage capture must never fail a run (#2462). Usage `durationMs` is the span between
+ *  the smallest and largest finite event `timestamp` (omitted when none). Only the last step's text is returned:
  *  narration from earlier steps is dropped (#2881). */
 export function parseOpenCodeJson(stdout: string): ParsedOpenCodeJson | undefined {
   let stepTexts: string[] = [];
@@ -39,6 +41,8 @@ export function parseOpenCodeJson(stdout: string): ParsedOpenCodeJson | undefine
   let sawEvent = false;
   let sawUsage = false;
   let numTurns = 0;
+  let minTs: number | undefined;
+  let maxTs: number | undefined;
   let input = 0;
   let output = 0;
   let reasoning = 0;
@@ -57,6 +61,11 @@ export function parseOpenCodeJson(stdout: string): ParsedOpenCodeJson | undefine
     }
     if (!event || typeof event !== 'object' || Array.isArray(event) || typeof event.type !== 'string') continue;
     sawEvent = true;
+    const ts = event.timestamp;
+    if (typeof ts === 'number' && Number.isFinite(ts)) {
+      if (minTs === undefined || ts < minTs) minTs = ts;
+      if (maxTs === undefined || ts > maxTs) maxTs = ts;
+    }
 
     if (event.type === 'step_start') {
       stepTexts = [];
@@ -101,6 +110,7 @@ export function parseOpenCodeJson(stdout: string): ParsedOpenCodeJson | undefine
             cacheReadTokens: cacheRead,
             cacheCreationTokens: cacheWrite,
             numTurns,
+            ...(minTs !== undefined && maxTs !== undefined ? { durationMs: maxTs - minTs } : {}),
             ...(cost > 0 ? { costUsd: cost } : {}),
           },
         }
