@@ -196,7 +196,13 @@ export function buildOpenCodeModelArgs(
   return `${modelArg}${effort === undefined ? '' : ` --variant ${shellEscape(effort)}`}`;
 }
 
-/** Runs a model via the OpenCode CLI: opencode run --auto --format json [--model <p/m>[#<effort>]] [--variant <effort>] (v1 only) < prompt-file, executed with cwd = worktree. */
+/** Isolation flag for `opencode run`. v2+ (#2879) shares a per-user background server by default;
+ *  `--standalone` gives the run a private one. v1 has no such flag, and an unknown major omits it. */
+export function buildOpenCodeIsolationArgs(major: number | undefined): string {
+  return major !== undefined && major >= 2 ? '--standalone' : '';
+}
+
+/** Runs a model via the OpenCode CLI: opencode run --auto --format json [--standalone] (v2+ only) [--model <p/m>[#<effort>]] [--variant <effort>] (v1 only) < prompt-file, executed with cwd = worktree. */
 export class OpenCodeHarness implements CodingHarness {
   readonly id = 'opencode';
   readonly agentic = true;
@@ -222,8 +228,9 @@ export class OpenCodeHarness implements CodingHarness {
     const effort = registry.getEffort(model, request.task);
     const providerModel = registry.get(model)?.providerModel;
     const effortValue = effort === undefined ? undefined : String(effort);
-    const major = effortValue === undefined ? undefined : await this.getMajorVersion();
+    const major = await this.getMajorVersion();
     const modelArgs = buildOpenCodeModelArgs(providerModel, effortValue, major);
+    const isolationArgs = buildOpenCodeIsolationArgs(major);
 
     // Agentic sessions can legitimately end on a tool call with an empty final
     // message (observed with deepseek-v4-flash on large plan prompts). One
@@ -253,8 +260,10 @@ export class OpenCodeHarness implements CodingHarness {
         // every call until the phase timeout.
         // `--format json` emits NDJSON events so the harness can drop tool chatter
         // and read token usage from `step_finish` events.
+        // `--standalone` (v2+ only): v2's run attaches to a shared per-user background
+        // server by default; this gives the lane a private one. v1 has no such flag.
         await writeFile(promptPath, attemptPrompt, 'utf8');
-        const cmd = `opencode run --auto --format json ${modelArgs} < ${shellEscape(promptPath)}`;
+        const cmd = `opencode run --auto --format json ${[isolationArgs, modelArgs].filter(Boolean).join(' ')} < ${shellEscape(promptPath)}`;
 
         try {
           ({ stdout, stderr } = await this.execFn(cmd, {

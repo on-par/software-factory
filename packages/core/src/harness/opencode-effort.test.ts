@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ModelsConfig } from '../config/index.js';
 import { ModelRegistry } from '../models/index.js';
 import { makeContractRequest } from './contract.js';
-import { OpenCodeHarness } from './opencode.js';
+import { buildOpenCodeIsolationArgs, OpenCodeHarness } from './opencode.js';
 
 const modelsConfig: ModelsConfig = {
   version: 1,
@@ -109,5 +109,66 @@ describe('OpenCodeHarness effort by OpenCode version', () => {
     expect(rec.runCalls()).toHaveLength(1);
     expect(rec.runCalls()[0]).not.toContain('--model');
     expect(rec.runCalls()[0]).not.toContain('--variant');
+  });
+
+  describe('--standalone isolation (#2879)', () => {
+    const plainRegistry = new ModelRegistry(modelsConfig);
+    const plainReq = () => makeContractRequest({ model: 'opencode-model', registry: plainRegistry, prompt: 'x' });
+
+    it('passes --standalone on v2', async () => {
+      for (const mk of [req, plainReq]) {
+        const rec = versionedExec('2.0.29');
+        await new OpenCodeHarness(rec.fn).run(mk());
+        expect(rec.runCalls()[0]).toContain('--format json --standalone');
+        expect(rec.calls).toContain('opencode --version');
+      }
+    });
+
+    it('omits --standalone on v1', async () => {
+      for (const mk of [req, plainReq]) {
+        const rec = versionedExec('1.18.28');
+        await new OpenCodeHarness(rec.fn).run(mk());
+        expect(rec.runCalls()[0]).not.toContain('--standalone');
+        expect(rec.calls).toContain('opencode --version');
+      }
+    });
+
+    it('omits --standalone and returns output when the version probe fails', async () => {
+      for (const version of [new Error('ENOENT'), 'garbage', '']) {
+        const rec = versionedExec(version);
+        const result = await new OpenCodeHarness(rec.fn).run(plainReq());
+        expect(result.output).toBe('RUN OUTPUT');
+        expect(rec.calls).toContain('opencode --version');
+        expect(rec.runCalls()[0]).not.toContain('--standalone');
+      }
+      const rec = versionedExec('2.0.29');
+      const result = await new OpenCodeHarness(rec.fn, async () => {
+        throw new Error('boom');
+      }).run(plainReq());
+      expect(result.output).toBe('RUN OUTPUT');
+      expect(rec.runCalls()[0]).not.toContain('--standalone');
+    });
+
+    it('applies --standalone to the final-message retry on v2', async () => {
+      const calls: string[] = [];
+      const fn = async (cmd: string) => {
+        calls.push(cmd);
+        if (cmd === 'opencode --version') return { stdout: '2.0.29', stderr: '' };
+        return {
+          stdout: calls.filter((c) => c.startsWith('opencode run')).length === 1 ? '' : 'RUN OUTPUT',
+          stderr: '',
+        };
+      };
+      await new OpenCodeHarness(fn).run(plainReq());
+      const runs = calls.filter((c) => c.startsWith('opencode run'));
+      expect(runs).toHaveLength(2);
+      for (const c of runs) expect(c).toContain('--standalone');
+    });
+
+    it('buildOpenCodeIsolationArgs returns the flag only for v2+', () => {
+      expect(buildOpenCodeIsolationArgs(2)).toBe('--standalone');
+      expect(buildOpenCodeIsolationArgs(1)).toBe('');
+      expect(buildOpenCodeIsolationArgs(undefined)).toBe('');
+    });
   });
 });
