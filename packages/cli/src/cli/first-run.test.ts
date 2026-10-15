@@ -5,7 +5,12 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { ConstitutionLoader, getConstitutionsDir } from '@on-par/factory-core';
-import { describeConstitutionSource, laneWorktreePath, setupWorktree } from '@on-par/factory-core/internal';
+import {
+  describeConstitutionSource,
+  laneWorktreePath,
+  openCodeVersion,
+  setupWorktree,
+} from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -15,6 +20,7 @@ import {
   missingAgentCliMessage,
   missingTokenMessage,
   notInitializedMessage,
+  OPENCODE_URL,
 } from './first-run.js';
 import { main } from './index.js';
 
@@ -62,12 +68,31 @@ describe('formatOverview', () => {
 });
 
 describe('missingAgentCliMessage', () => {
+  it('names Pi install and sign-in (#2903)', () => {
+    const msg = missingAgentCliMessage();
+    expect(msg).toContain('@earendil-works/pi-coding-agent');
+    expect(msg).toContain('/login');
+  });
+
   it('names both supported agent CLIs and their sign-in commands', () => {
     const msg = missingAgentCliMessage();
     expect(msg).toContain('no coding agent CLI found on PATH');
     expect(msg).toContain('Claude Code');
     expect(msg).toContain('Codex CLI');
+    expect(msg).toContain('claude /login');
     expect(msg).toContain('codex login');
+  });
+
+  it('gives OpenCode install and sign-in steps', () => {
+    const msg = missingAgentCliMessage();
+    expect(msg).toContain('https://opencode.ai');
+    expect(msg).toContain(OPENCODE_URL);
+    expect(msg).toContain('opencode auth login');
+    expect(msg).toContain(openCodeVersion.OPENCODE_PINNED_INSTALL);
+  });
+
+  it('says OpenCode models need FACTORY_EXPERIMENTAL=1', () => {
+    expect(missingAgentCliMessage()).toContain('FACTORY_EXPERIMENTAL=1');
   });
 });
 
@@ -75,6 +100,10 @@ describe('availableAgentClis', () => {
   it('lists only the agent CLIs found on PATH', () => {
     expect(availableAgentClis((c) => c === 'codex')).toEqual(['codex']);
     expect(availableAgentClis(() => false)).toEqual([]);
+  });
+
+  it('pi alone is enough (#2903)', () => {
+    expect(availableAgentClis((c) => c === 'pi')).toEqual(['pi']);
   });
 });
 

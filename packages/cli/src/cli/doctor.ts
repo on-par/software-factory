@@ -50,6 +50,7 @@ import {
   orphanMicroVmChecks,
   unmergedGreenPrChecks,
 } from './doctor-health.js';
+import { OPENCODE_LIVE_AUTH_CHECK, opencodeLiveAuthCheck, runOpencodeAuthProbe } from './doctor-opencode-probe.js';
 import { resolveDoctorHarnesses } from './doctor-harness-view.js';
 import { reconcileQueue } from './doctor-queue-reconcile.js';
 import { HARNESS_SETUP, harnessInstallChecks } from './doctor-harness.js';
@@ -106,8 +107,8 @@ export interface DoctorEnvProbes {
   /** Stored Claude Code OAuth session state (#2721), read locally; never refreshes. */
   claudeSessionState?: () => 'ok' | 'refresh-pending' | 'unusable' | 'unknown';
   /** The agent's last recorded run-time local_auth failure when no login has happened since
-   *  (#2733); reads local state only, never refreshes. */
-  localAuthFailure?: (agent: 'claude' | 'codex') => { agent: string; at: string } | null;
+   *  (#2733, #2890); reads local state only, never refreshes. */
+  localAuthFailure?: (agent: 'claude' | 'codex' | 'opencode') => { agent: string; at: string } | null;
   /** Whether a stored opencode auth login exists (#2556); reads local state only, never runs inference. */
   opencodeLoggedIn?: () => boolean;
   /** Repo-configured command harnesses (#2691); absent or [] means none. */
@@ -175,9 +176,36 @@ export const GIT_AUTH_PROBE_TIMEOUT_MS = 15_000;
 /** Remedy shown only when the git-auth probe fails: wires git's credential helper to gh. */
 export const GIT_AUTH_FIX = 'run `gh auth setup-git` so git uses your gh credentials, then re-run `factory doctor`';
 
+/** Classifies an origin URL's transport (#2939). Returns null when it is not SSH (ssh://,
+ *  git+ssh://, ssh+git:// or scp-style `[user@]host:path`), else the bare hostname, or null
+ *  when the host is not a safe hostname. Never returns the user, port or path. */
+export function sshOriginHost(origin: string): { host: string | null } | null {
+  const url = origin.trim();
+  let candidate: string;
+  const scheme = /^(?:ssh|git\+ssh|ssh\+git):\/\/(?:[^@/]*@)?([^/:]*)/i.exec(url);
+  if (scheme) {
+    candidate = scheme[1] ?? '';
+  } else if (url.includes('://')) {
+    return null;
+  } else {
+    const scp = /^(?:([^@/:\s]+)@)?([^/:\s]+):/.exec(url);
+    if (!scp || (scp[2] ?? '').length <= 1) return null;
+    candidate = scp[2] ?? '';
+  }
+  return { host: /^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(candidate) ? candidate : null };
+}
+
+/** Remedy for a failing SSH origin (#2939); `<host>` stands in when the host is unknown. */
+export function gitAuthSshFix(host: string | null): string {
+  const target = host ?? '<host>';
+  return `origin uses SSH: test with \`ssh -T git@${target}\` and check your SSH key is loaded (\`ssh-add -l\`), then re-run \`factory doctor\``;
+}
+
 /** Git-auth check (#2482, #2483): skipped, never failing, outside a git repository or without
  *  an origin remote. Otherwise runs a non-interactive `git ls-remote` against origin and fails
- *  when it cannot authenticate. The detail never echoes the origin URL, which may hold a token. */
+ *  when it cannot authenticate. SSH origins get SSH guidance instead of `gh auth setup-git`
+ *  (#2939). The output never echoes the origin URL, which may hold a token; only a bare
+ *  SSH hostname may appear. */
 export function gitAuthCheck(
   repoRoot: string | null,
   tryExec: (cmd: string, opts?: DoctorExecOptions) => string | null,
@@ -197,6 +225,16 @@ export function gitAuthCheck(
   // An empty string is exit 0 with no HEAD ref (an empty repo): still authenticated.
   const probe = tryExec(GIT_AUTH_PROBE_CMD, { env: { ...GIT_AUTH_PROBE_ENV }, timeoutMs: GIT_AUTH_PROBE_TIMEOUT_MS });
   if (probe === null) {
+    const ssh = sshOriginHost(origin);
+    if (ssh) {
+      return {
+        name: GIT_AUTH_CHECK,
+        ok: false,
+        detail: 'git could not authenticate to origin over SSH non-interactively (prompting disabled)',
+        fix: gitAuthSshFix(ssh.host),
+        ...(ssh.host ? { next: `ssh -T git@${ssh.host}` } : {}),
+      };
+    }
     return {
       name: GIT_AUTH_CHECK,
       ok: false,
@@ -213,6 +251,7 @@ const SIGN_IN_EVIDENCE: Readonly<Record<string, string>> = {
   codex:
     'no CODEX_API_KEY or codex login; API billing: codex login --with-api-key; headless: codex login --device-auth',
   opencode: 'no OPENCODE_API_KEY or stored auth login',
+  pi: 'no OPENROUTER_API_KEY, OPENCODE_API_KEY or AZURE_OPENAI_API_KEY set; Pi may still hold a stored /login (factory models --doctor runs pi auth check)',
 };
 
 function safe(fn: (() => boolean) | undefined): boolean {
@@ -239,10 +278,10 @@ export function harnessSignInChecks(probes: DoctorEnvProbes): DoctorCheck[] {
   const { commandAvailable, envPresent, tryExec } = probes;
   const found = availableAgentClis(commandAvailable);
   return HARNESS_SETUP.filter(({ harnessId }) => isHarnessCliPresent(harnessId, commandAvailable)).map(
-    ({ section, cli, login, envKeys }): DoctorCheck => {
+    ({ section, cli, login, next, envKeys }): DoctorCheck => {
       const name = `${cli} signed in`;
       const fix = `sign in to ${section}: ${login}`;
-      if (cli === 'claude' || cli === 'codex') {
+      if (cli === 'claude' || cli === 'codex' || cli === 'opencode') {
         let failure: { agent: string; at: string } | null = null;
         try {
           failure = probes.localAuthFailure?.(cli) ?? null;
@@ -255,7 +294,7 @@ export function harnessSignInChecks(probes: DoctorEnvProbes): DoctorCheck[] {
             section,
             ok: false,
             optional: found.length > 1,
-            detail: `the most recent run failed sign-in (local_auth) at ${failure.at} and there has been no login since; re-run ${cli} login`,
+            detail: `the most recent run failed sign-in (local_auth) at ${failure.at} and there has been no login since; re-run ${cli === 'opencode' ? login : `${cli} login`}`,
             fix,
             next: login,
           };
@@ -328,7 +367,7 @@ export function harnessSignInChecks(probes: DoctorEnvProbes): DoctorCheck[] {
         optional: found.length > 1,
         detail: `unverified: no sign-in evidence (${SIGN_IN_EVIDENCE[cli]})`,
         fix,
-        next: login,
+        next: next ?? login,
       };
     },
   );
@@ -415,14 +454,14 @@ export function agentCliChecks(probes: DoctorEnvProbes): DoctorCheck[] {
       ? {
           name: 'coding agent',
           ok: false,
-          detail: 'no coding agent CLI on PATH (claude, codex or opencode)',
+          detail: 'no coding agent CLI on PATH (claude, codex, opencode or pi)',
           fix: `install Claude Code (${CLAUDE_CODE_URL}) or the Codex CLI (${CODEX_CLI_URL})`,
           next: HARNESS_SETUP[0]!.install,
         }
       : {
           name: 'coding agent',
           ok: false,
-          detail: `no coding agent CLI on PATH (claude, codex or opencode); ${configured.map(describe).join('; ')}`,
+          detail: `no coding agent CLI on PATH (claude, codex, opencode or pi); ${configured.map(describe).join('; ')}`,
           fix: installFix(configured[0]!),
         };
   const checks: DoctorCheck[] = [
@@ -791,7 +830,11 @@ export function sandboxClaudeAuthChecks(result: ClaudeAuthProbeResult): DoctorCh
   return [host, sandboxed];
 }
 
-const AGENT_AUTH_CHECKS = new Set([...HARNESS_SETUP.map(({ cli }) => `${cli} signed in`), HOST_AUTH_CHECK]);
+const AGENT_AUTH_CHECKS = new Set([
+  ...HARNESS_SETUP.map(({ cli }) => `${cli} signed in`),
+  HOST_AUTH_CHECK,
+  OPENCODE_LIVE_AUTH_CHECK,
+]);
 
 /** #2496: doctor fails on agent sign-in only when no installed agent is signed in. A logged-out
  *  agent is a warning while another one is signed in, and a hard failure when none is. Skipped
@@ -889,7 +932,7 @@ export async function cmdDoctor(
     commandHarnesses: () => (harnessView?.merged ? repoCommandHarnesses(harnessView.merged, harnessView.registry) : []),
   });
 
-  // Only with --probe-inference: these send a real prompt (uses quota). Plain doctor makes no inference call.
+  // Only with --probe-inference: these send a real prompt (claude, opencode; uses quota). Plain doctor makes no inference call.
   if (opts.probeInference) {
     const CLAUDE_AUTH_PROBE = 'claude -p "reply with exactly: ok"';
     const probeExec = (cmd: string): string | null => {
@@ -940,6 +983,8 @@ export async function cmdDoctor(
     }
 
     checks.push(...sandboxClaudeAuthChecks({ host, sandboxed, hostDetail, sandboxDetail }));
+
+    checks.push(opencodeLiveAuthCheck(runOpencodeAuthProbe(rt, repoRoot)));
   }
 
   checks.push(claudeKeychainCheck(rt.probeClaudeKeychain()));

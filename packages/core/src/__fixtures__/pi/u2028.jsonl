@@ -1,0 +1,4 @@
+{"type":"agent_start"}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"one two"}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"alpha beta"}],"stopReason":"stop","usage":{"input":1,"output":1}}}
+{"type":"agent_settled","aborted":false}

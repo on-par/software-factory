@@ -60,12 +60,23 @@ const ModelDefSchema = z
       .record(z.string(), z.unknown())
       .optional()
       .describe('Extra provider-specific options (e.g. Ollama num_ctx/temperature).'),
+    endpoint: z
+      .string()
+      .url()
+      .optional()
+      .describe(
+        'Approved Anthropic-compatible intermediary base URL (https) for the claude-cli harness. Needs envKey; host must be an ADR-0163 approved intermediary.',
+      ),
     harness: z
       .string()
       .optional()
       .describe('Harness id that drives this model (claude-cli, codex-cli, ollama-http, ...).'),
     codex: z.boolean().optional().describe('Marks the model eligible for the build_codex route.'),
     experimental: z.boolean().optional().describe('Requires FACTORY_EXPERIMENTAL=1 to be routable.'),
+    trainsOnPrompts: z
+      .boolean()
+      .optional()
+      .describe('Provider may use prompts for training. Never routed from a tier; pin it to use it.'),
   })
   .describe('A single model in the registry: provider, cost, capabilities, and harness wiring.');
 

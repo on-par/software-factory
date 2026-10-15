@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { HARNESS_CATALOG, harnessCliCommand, isAgenticHarness, KNOWN_HARNESS_IDS } from './catalog.js';
+import {
+  HARNESS_CATALOG,
+  harnessCliCommand,
+  isAgenticHarness,
+  KNOWN_HARNESS_IDS,
+  usesGenericBuildRoute,
+} from './catalog.js';
 
 describe('HARNESS_CATALOG', () => {
   it('has an id on every entry that matches its record key', () => {
@@ -17,11 +23,17 @@ describe('HARNESS_CATALOG', () => {
         'codex-cli',
         'ollama-http',
         'opencode',
+        'pi',
         'ollama-agentic',
         'ollama-command-agent',
         'command',
       ]),
     );
+  });
+
+  it('probes pi as an agentic command harness whose CLI carries its own auth', () => {
+    expect(HARNESS_CATALOG.pi.probe).toMatchObject({ kind: 'command', command: 'pi', okLabel: 'pi CLI', auth: 'cli' });
+    expect(isAgenticHarness('pi')).toBe(true);
   });
 
   it('probes opencode as a command harness whose CLI carries its own auth', () => {
@@ -72,11 +84,21 @@ describe('harnessCliCommand', () => {
     expect(harnessCliCommand('claude-cli')).toBe('claude');
     expect(harnessCliCommand('codex-cli')).toBe('codex');
     expect(harnessCliCommand('opencode')).toBe('opencode');
+    expect(harnessCliCommand('pi')).toBe('pi');
   });
 
   it('is undefined for ollama, unknown and missing harness ids', () => {
     expect(harnessCliCommand('ollama-http')).toBeUndefined();
     expect(harnessCliCommand('my-declared-harness')).toBeUndefined();
     expect(harnessCliCommand(undefined)).toBeUndefined();
+  });
+});
+
+describe('usesGenericBuildRoute', () => {
+  it('is true only for pi (#2909)', () => {
+    expect(usesGenericBuildRoute('pi')).toBe(true);
+    for (const id of ['claude-cli', 'ollama-agentic', 'command', '']) {
+      expect(usesGenericBuildRoute(id)).toBe(false);
+    }
   });
 });

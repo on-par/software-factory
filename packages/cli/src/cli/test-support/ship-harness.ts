@@ -226,6 +226,7 @@ function makeCoreFakes() {
           isCodexModel: (id: string) => h.modelProviders[id] === 'openai',
           getHarnessDeclaration: () => undefined,
           isAgenticHarnessId: () => true,
+          ridesCommandRoute: () => false,
         },
         setCostSink: vi.fn((sink: (entry: any) => void) => {
           h.costSinkCallback = sink;

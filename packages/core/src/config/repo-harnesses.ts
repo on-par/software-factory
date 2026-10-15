@@ -10,6 +10,15 @@ export const RepoHarnessesSchema = z
     "Repo-declared agent CLIs: harness id -> declaration (command, prompt, output, agentic, usage, optional errorPatterns and probe). Run through the built-in `command` harness. Reference an id from a models.registry entry's `harness`. Built-in harness ids cannot be redeclared.",
   );
 
+/** Throws when a registry model declares a harness that is neither built in nor declared under `harnesses`. */
+export function assertRegistryHarness(id: string, harness: string | undefined, valid: string[]): void {
+  if (harness !== undefined && !valid.includes(harness)) {
+    throw new Error(
+      `.factory/config.json: models.registry.${id} declares unknown harness '${harness}' (valid harnesses: ${valid.join(', ')})`,
+    );
+  }
+}
+
 /** Merge a repo's `harnesses` over the packaged declarations (repo wins) and list every valid harness id.
  *  `patch` is empty when the repo declares none, so the packaged `harnesses` value is left untouched.
  *  Throws when a repo id is built in. */

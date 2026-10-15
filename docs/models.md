@@ -17,7 +17,7 @@ Models whose agent CLI is not on PATH are skipped, so a machine with only the Co
 
 **Stuck-run steward.** The steward has no packaged model and no Claude requirement. It uses the steward route's `model` pin when set, otherwise the first runnable boss-tier model (models whose CLI is missing are skipped), so a Codex-only machine uses `gpt-5.6-terra-high`. The boss tier has no OpenCode model, so on an OpenCode-only machine pin the steward route model (e.g. `opencode-deepseek-v4-flash`); otherwise the steward fails closed with a `route-misconfigured` escalation.
 
-Local Ollama models cost $0 and lead every tier. `FACTORY_LOCAL_ONLY=1` restricts routing to local models entirely. Experimental models (glm-5.2, qwen-3.5-coder, opencode-sonnet, opencode-deepseek-v4-flash, opencode-deepseek-v4-flash-free) exist in `defaults.ts` but are only routed when `FACTORY_EXPERIMENTAL=1`.
+Local Ollama models cost $0 and lead every tier. `FACTORY_LOCAL_ONLY=1` restricts routing to local models entirely. Experimental models (glm-5.2, qwen-3.5-coder, opencode-sonnet, opencode-deepseek-v4-flash, opencode-deepseek-v4-pro, opencode-deepseek-v4-flash-free) exist in `defaults.ts` but are only routed when `FACTORY_EXPERIMENTAL=1`.
 
 **Codex GPT phase profiles.** Whenever Codex GPT is the selected provider path (e.g. `providers.anthropic`/`providers.ollama` disabled, or an explicit pin), PLAN defaults to `gpt-5.6-terra-high` (`model_reasoning_effort=high`) and BUILD (`build_codex`) defaults to `gpt-5.6-terra-medium` (`model_reasoning_effort=medium`); the generic `gpt-5.6-sol` → `gpt-5.1-codex` profiles remain as failover. Override per repo with `.factory/config.yaml` (`models.pins.plan` / `models.pins.build`) or per run with `FACTORY_PLAN_MODEL` / `FACTORY_BUILD_MODEL`; the repo file wins over env.
 
@@ -42,19 +42,38 @@ Each `efforts` key is a registered model ID. A scalar applies to every task for 
 | Codex                                  | `-c model_reasoning_effort=...`           | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra` |
 | Claude Code                            | `--effort` and `CLAUDE_CODE_EFFORT_LEVEL` | `low`, `medium`, `high`, `xhigh`, `max`                             |
 | OpenCode                               | `--variant`                               | Named effort levels listed for Codex above                          |
+| Pi                                     | `--thinking` (`none` is sent as `off`)    | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`          |
 | Ollama HTTP / agentic / command worker | `think`                                   | `true`, `false`, `low`, `medium`, `high`, `max`                     |
 
 These are transport options, not a guarantee that every model supports every level. Use a level/variant supported by your selected model and installed CLI; the provider controls model-specific availability and may reject or normalize unsupported levels. Astra in the installed Codex catalog supports `low` through `ultra`; it does not support `none` or `minimal`. Claude's explicit factory effort also overrides inherited `CLAUDE_CODE_EFFORT_LEVEL`. Unknown model IDs, invalid values, and unsupported harness/value combinations fail before execution.
 
 Native references: [Codex configuration](https://learn.chatgpt.com/docs/config-file/config-reference), [Claude effort](https://code.claude.com/docs/en/model-config#adjust-effort-level), [OpenCode variants](https://opencode.ai/docs/cli/#run), [Ollama thinking](https://docs.ollama.com/capabilities/thinking). Test the factory wiring without credentials or model calls with `npx vitest run packages/core/src/harness/effort.test.ts`.
 
-Every model declares a **harness** — the provider adapter that executes it: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, or `opencode`. Build tasks require an agentic (file-editing) harness; prompt-only harnesses like `ollama-http` are rejected for builds. OpenCode models are reachable when the opencode CLI is logged in (`opencode auth login`); `OPENCODE_API_KEY` is an optional override. Per-task tokens and cost are logged to `.factory/costs.jsonl` (`factory cost` to inspect).
+Every model declares a **harness** — the provider adapter that executes it: `claude-cli`, `codex-cli`, `ollama-http`, `ollama-agentic`, `opencode`, or `pi`. Build tasks require an agentic (file-editing) harness; prompt-only harnesses like `ollama-http` are rejected for builds. A `pi` build pin runs BUILD through the generic commit-only `build_command` route. OpenCode models are reachable when the opencode CLI is logged in (`opencode auth login`); `OPENCODE_API_KEY` is an optional override. Per-task tokens and cost are logged to `.factory/costs.jsonl` (`factory cost` to inspect).
 
 What a harness receives, must return and how its failures are classified is specified in [harness-contract.md](./harness-contract.md).
 
 ## OpenCode-only profile
 
-Use this profile when the OpenCode CLI is the only agent CLI on the machine. Every packaged OpenCode model (`opencode-sonnet`, `opencode-deepseek-v4-flash`, `opencode-deepseek-v4-flash-free`) is experimental and only in the `worker` tier, so the default tiers never pick one for PLAN, checker or triage.
+Use this profile when the OpenCode CLI is the only agent CLI on the machine. Every packaged OpenCode model is experimental. Only `opencode-sonnet` is tiered, and only in `worker`. The rest are pin-only and in no tier, so the default tiers never pick one for PLAN, checker or triage.
+
+| Model                             | Tiered or pin-only |
+| --------------------------------- | ------------------ |
+| `opencode-sonnet`                 | tiered (`worker`)  |
+| `opencode-deepseek-v4-flash`      | pin-only           |
+| `opencode-deepseek-v4-pro`        | pin-only           |
+| `opencode-deepseek-v4-flash-free` | pin-only           |
+
+`opencode-deepseek-v4-flash-free` carries `trainsOnPrompts: true` (its provider may use request data for training), so no tier may list it and a repo `tiers` entry naming it fails to load. It can only be pinned.
+
+A registry model on the `claude-cli` harness may set `endpoint` (an https URL) to run through an approved Anthropic-compatible zero-retention intermediary (ADR-0163; today only `openrouter.ai`). It needs a non-null `envKey`, and repo config load rejects any other host. For that model's calls only, the harness sets `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` (read from `process.env[envKey]`, never argv), `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL` (the last five from `claudeFlag`) and unsets `ANTHROPIC_API_KEY`. The OpenRouter key must have ZDR enforced.
+
+```json
+"deepseek-v4-flash-or": {
+  "provider": "custom", "harness": "claude-cli", "endpoint": "https://openrouter.ai/api",
+  "envKey": "OPENROUTER_API_KEY", "claudeFlag": "deepseek/deepseek-v4-flash", ...
+}
+```
 
 Requirements:
 
@@ -80,7 +99,9 @@ route: opencode
 | Checker        | `models.pins.checker`                     | `opencode-deepseek-v4-flash` | The pin replaces the checker tier with this one model.                                                               |
 | Triage         | `models.pins.triage`                      | `opencode-deepseek-v4-flash` | The pin replaces the triage tier with this one model.                                                                |
 
-Swap in `opencode-deepseek-v4-flash-free` (OpenCode Zen free promo tier, no subscription quota, but request data may be used for training) or `opencode-sonnet` for any phase. `FACTORY_PLAN_MODEL` / `FACTORY_BUILD_MODEL` still override plan/build per run, and the repo file wins over env.
+`opencode-deepseek-v4-flash` is served as `opencode-go/deepseek-v4.1-flash` at $0.30/$1.20 per 1M tokens. `opencode-deepseek-v4-pro` (`opencode-go/deepseek-v4-pro`, $1.74/$3.48 per 1M) is a pin-only, stronger option for any phase, with a lower Go monthly quota.
+
+Pin `opencode-deepseek-v4-flash-free` (pin-only; OpenCode Zen free promo tier, no subscription quota, but request data may be used for training) or `opencode-sonnet` for any phase. `FACTORY_PLAN_MODEL` / `FACTORY_BUILD_MODEL` still override plan/build per run, and the repo file wins over env.
 
 ## Failover Triggers
 

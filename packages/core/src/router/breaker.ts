@@ -24,20 +24,38 @@ interface BreakerFile {
 
 const RESET_HINT_PATTERN = /resets?\s+in\s+(?:(\d+)\s*hr)?\s*(?:(\d+)\s*min)?/i;
 
-/** Extracts a provider-reported reset time (e.g. "Resets in 3hr 17min", from
- *  opencode.ai's weekly-usage-cap error) so the breaker can cool down for as
+const ABSOLUTE_RESET_PATTERN =
+  /resets?\s+at\s+(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2}))/i;
+
+/** Longest cooldown the breaker accepts from a provider-reported reset hint (31 days),
+ *  so a typo'd or hostile far-future date can't park a provider indefinitely. */
+export const MAX_REPORTED_COOLDOWN_MS = 31 * 24 * 60 * 60_000;
+
+/** Extracts a provider-reported reset time so the breaker can cool down for as
  *  long as the provider actually says, instead of the flat default cooldown
- *  meant for transient rate limits. Returns null when the text has no
- *  parseable hint (both hour and minute groups absent or zero), so the
- *  caller falls back to its own default. `bufferMs` pads the parsed duration
- *  so the breaker doesn't reopen a few seconds before the real reset. */
-export function parseResetCooldownMs(text: string, bufferMs = 2 * 60_000): number | null {
+ *  meant for transient rate limits. Understands the relative form ("Resets in
+ *  3hr 17min", opencode.ai's weekly-usage-cap error) and the absolute form
+ *  ("resets at 2026-11-01T00:00:00Z", OpenCode Go's monthly cap), the latter
+ *  measured against `now`. Returns null when the text has no parseable hint
+ *  (relative hour and minute groups absent or zero; absolute instant
+ *  unparseable, offset-less, or at or before `now`), so the caller falls back
+ *  to its own default. `bufferMs` pads the parsed duration so the breaker
+ *  doesn't reopen a few seconds before the real reset. Results are capped at
+ *  MAX_REPORTED_COOLDOWN_MS. */
+export function parseResetCooldownMs(text: string, bufferMs = 2 * 60_000, now: number = Date.now()): number | null {
   const match = RESET_HINT_PATTERN.exec(text);
-  if (!match) return null;
-  const hours = match[1] ? Number(match[1]) : 0;
-  const minutes = match[2] ? Number(match[2]) : 0;
-  if (hours === 0 && minutes === 0) return null;
-  return (hours * 60 + minutes) * 60_000 + bufferMs;
+  if (match) {
+    const hours = match[1] ? Number(match[1]) : 0;
+    const minutes = match[2] ? Number(match[2]) : 0;
+    if (hours !== 0 || minutes !== 0) {
+      return Math.min((hours * 60 + minutes) * 60_000 + bufferMs, MAX_REPORTED_COOLDOWN_MS);
+    }
+  }
+  const absolute = ABSOLUTE_RESET_PATTERN.exec(text);
+  if (!absolute) return null;
+  const resetAt = Date.parse(absolute[1]);
+  if (Number.isNaN(resetAt) || resetAt <= now) return null;
+  return Math.min(resetAt - now + bufferMs, MAX_REPORTED_COOLDOWN_MS);
 }
 
 export class ProviderBreaker {

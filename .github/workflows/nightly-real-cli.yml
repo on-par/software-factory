@@ -1,7 +1,7 @@
 name: Nightly Real CLI
 
-# The recorded fake codex/opencode shims (scripts/fixtures/agents/) replay frozen output, so
-# they cannot notice when the real Codex or OpenCode CLI changes a flag, an output format or
+# The recorded fake codex/opencode/pi shims (scripts/fixtures/agents/) replay frozen output, so
+# they cannot notice when the real Codex, OpenCode or Pi CLI changes a flag, an output format or
 # its auth behavior. This workflow installs the real CLIs, authenticates them from repository
 # secrets and runs a full PLAN -> BUILD -> CHECK -> SHIP loop against each in a throwaway repo
 # (#2649). It is deliberately non-blocking: the job is continue-on-error and is not a required
@@ -29,6 +29,7 @@ jobs:
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       OPENCODE_DISABLE_AUTOUPDATE: '1'
     steps:
       - uses: actions/checkout@v7
@@ -71,6 +72,19 @@ jobs:
         continue-on-error: true
         run: bash scripts/real-cli-smoke.sh opencode
 
+      - name: Install Pi CLI
+        if: env.OPENROUTER_API_KEY != ''
+        # Exact pin; bumping it is a deliberate change (#2910).
+        run: |
+          npm install -g @earendil-works/pi-coding-agent@1.2.0
+          echo "Pi pinned: @earendil-works/pi-coding-agent@1.2.0" >> "$GITHUB_STEP_SUMMARY"
+          pi --version >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Real Pi full-loop smoke
+        id: pi
+        continue-on-error: true
+        run: bash scripts/real-cli-smoke.sh pi
+
       - name: Forced failure
         id: forced
         if: inputs.force_failure
@@ -78,7 +92,7 @@ jobs:
         run: exit 1
 
       - name: File or update the failure issue
-        if: steps.codex.outcome == 'failure' || steps.opencode.outcome == 'failure' || steps.forced.outcome == 'failure'
+        if: steps.codex.outcome == 'failure' || steps.opencode.outcome == 'failure' || steps.pi.outcome == 'failure' || steps.forced.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -86,6 +100,7 @@ jobs:
           LABEL: ci
           CODEX_OUTCOME: ${{ steps.codex.outcome }}
           OPENCODE_OUTCOME: ${{ steps.opencode.outcome }}
+          PI_OUTCOME: ${{ steps.pi.outcome }}
           FORCED_OUTCOME: ${{ steps.forced.outcome }}
         run: |
           BODY_FILE="$RUNNER_TEMP/failure-body.md"
@@ -94,6 +109,7 @@ jobs:
             "" \
             "- Codex: ${CODEX_OUTCOME}" \
             "- OpenCode: ${OPENCODE_OUTCOME}" \
+            "- Pi: ${PI_OUTCOME}" \
             "- Forced failure: ${FORCED_OUTCOME:-skipped}" \
             "" \
             "Run: $RUN_URL" \
@@ -103,12 +119,13 @@ jobs:
             "CLI changed (flags, output format or auth) in a way the recorded shims miss." \
             "" \
             "Reproduce locally with: \`OPENAI_API_KEY=… bash scripts/real-cli-smoke.sh codex\`" \
-            "or \`OPENCODE_API_KEY=… bash scripts/real-cli-smoke.sh opencode\`" >"$BODY_FILE"
+            "or \`OPENCODE_API_KEY=… bash scripts/real-cli-smoke.sh opencode\`" \
+            "or \`OPENROUTER_API_KEY=… bash scripts/real-cli-smoke.sh pi\`" >"$BODY_FILE"
           export BODY_FILE
           bash scripts/nightly-failure-issue.sh
 
       - name: Fail the job when a real-CLI smoke failed
-        if: steps.codex.outcome == 'failure' || steps.opencode.outcome == 'failure' || steps.forced.outcome == 'failure'
+        if: steps.codex.outcome == 'failure' || steps.opencode.outcome == 'failure' || steps.pi.outcome == 'failure' || steps.forced.outcome == 'failure'
         run: |
           echo "::error::real-CLI smoke failed — see the filed issue"
           exit 1

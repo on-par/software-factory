@@ -21,10 +21,14 @@ export interface ModelDefaults {
   claudeFlag?: string;
   providerModel?: string;
   providerOptions?: Record<string, unknown>;
+  /** Approved Anthropic-compatible intermediary base URL (https) for the claude-cli harness; needs envKey (#2906, ADR-0163). */
+  endpoint?: string;
   codex?: boolean;
   codexFlag?: string;
   harness?: string;
   experimental?: boolean;
+  /** Provider may use prompts for training. Never placed in a tier, reachable only by an explicit pin (#2899). */
+  trainsOnPrompts?: boolean;
 }
 
 export interface ModelsDefaults {
@@ -35,22 +39,8 @@ export interface ModelsDefaults {
   routingRules: Record<string, unknown>;
 }
 
-export interface RouteDefaults {
-  tier: string;
-  description: string;
-  requires?: string;
-  /** Pinned model-registry key (a key of defaultModelsConfig.models) used instead of resolving the tier. An exact ID, never an alias. */
-  model?: string;
-  /** Explicit tool allow-list for the route's model call. An empty array means tool-less: no file, shell or network tools. */
-  allowedTools?: string[];
-  /** Output contract for the route's model call. 'json' means the model must return exactly one JSON object. */
-  output?: 'json';
-}
-
-export interface RoutesDefaults {
-  version: number;
-  routes: Record<string, RouteDefaults>;
-}
+export type { RouteDefaults, RoutesDefaults } from './defaults-routes.js';
+export { defaultRoutesConfig } from './defaults-routes.js';
 
 export interface FactoryDefaults {
   version: number;
@@ -395,20 +385,33 @@ export const defaultModelsConfig: ModelsDefaults = {
       providerModel: 'anthropic/claude-sonnet-5',
       experimental: true,
     },
-    /** Added 2026-08-12 for OpenCode Go subscriptions (OPENCODE_API_KEY env var). Served via OpenCode Go (https://opencode.ai/zen/go/v1), a distinct provider from OpenCode Zen (opencode/... prefix, pay-per-use; do not confuse the two, the same env var backs both). Confirmed working live: `opencode run --model opencode-go/deepseek-v4-flash "..."` returns real output. opt in with FACTORY_EXPERIMENTAL=1. */
+    /** Added 2026-08-12 for OpenCode Go subscriptions (OPENCODE_API_KEY env var). Served via OpenCode Go (https://opencode.ai/zen/go/v1), a distinct provider from OpenCode Zen (opencode/... prefix, pay-per-use; do not confuse the two, the same env var backs both). Confirmed working live: `opencode run --model opencode-go/deepseek-v4-flash "..."` returns real output. Updated 2026-10-14 (#2898): DeepSeek now serves V4.1 Flash (the old `deepseek-v4-flash` name routes there). Go id `opencode-go/deepseek-v4.1-flash` per https://opencode.ai/docs/go (taken from the docs page; `opencode models opencode-go` needs a Go login); prices $0.30/$1.20 per 1M per https://opencode.ai/docs/zen (Go bills $0.15/$0.60 off-peak, $0.30/$1.20 peak), checked 2026-10-14. opt in with FACTORY_EXPERIMENTAL=1. */
     'opencode-deepseek-v4-flash': {
       provider: 'custom',
       tier: ['worker'],
-      costPerMtokInput: 0.07,
-      costPerMtokOutput: 0.14,
+      costPerMtokInput: 0.3,
+      costPerMtokOutput: 1.2,
       contextWindow: 1000000,
       capabilities: ['implementation', 'coding'],
       envKey: 'OPENCODE_API_KEY',
       harness: 'opencode',
-      providerModel: 'opencode-go/deepseek-v4-flash',
+      providerModel: 'opencode-go/deepseek-v4.1-flash',
       experimental: true,
     },
-    /** Added 2026-08-17: OpenCode Go's monthly usage cap ($60/mo) hit 100% and doesn't reset until 2026-09-13, blocking opencode-deepseek-v4-flash. This is OpenCode Zen's (not Go's) promo-period free tier for the same model, opencode/... prefix, no balance or subscription quota involved. Anoma.ly's privacy notice: during the free promo, request data may be used to improve the model (not the zero-retention terms Go/paid Zen get) — acceptable for skunkworks throwaway prototypes, reconsider before using on anything with real user/client data. Free tier may be pulled without notice; if `opencode/deepseek-v4-flash-free` starts erroring, check https://opencode.ai/docs/zen/ for current free-tier availability. Confirmed working live: `opencode run --model opencode/deepseek-v4-flash-free "..."` returns real output. opt in with FACTORY_EXPERIMENTAL=1. */
+    /** Added 2026-10-14 (#2898): DeepSeek V4 Pro via OpenCode Go (still served; retirement reversed 2026-09-11). Go id `opencode-go/deepseek-v4-pro` per https://opencode.ai/docs/go (taken from the docs page); prices $1.74/$3.48 per 1M per https://opencode.ai/docs/zen (Go bills $0.66/$1.98 off-peak, $1.32/$3.96 peak), checked 2026-10-14. Pin-only: in no tier. OpenCode Go is an approved zero-retention intermediary (ADR-0163). opt in with FACTORY_EXPERIMENTAL=1. */
+    'opencode-deepseek-v4-pro': {
+      provider: 'custom',
+      tier: ['worker'],
+      costPerMtokInput: 1.74,
+      costPerMtokOutput: 3.48,
+      contextWindow: 1000000,
+      capabilities: ['implementation', 'coding'],
+      envKey: 'OPENCODE_API_KEY',
+      harness: 'opencode',
+      providerModel: 'opencode-go/deepseek-v4-pro',
+      experimental: true,
+    },
+    /** Added 2026-08-17: OpenCode Go's monthly usage cap ($60/mo) hit 100% and doesn't reset until 2026-09-13, blocking opencode-deepseek-v4-flash. This is OpenCode Zen's (not Go's) promo-period free tier for the same model, opencode/... prefix, no balance or subscription quota involved. Anoma.ly's privacy notice: during the free promo, request data may be used to improve the model (not the zero-retention terms Go/paid Zen get) — acceptable for skunkworks throwaway prototypes, reconsider before using on anything with real user/client data. Free tier may be pulled without notice; if `opencode/deepseek-v4-flash-free` starts erroring, check https://opencode.ai/docs/zen/ for current free-tier availability. Confirmed working live: `opencode run --model opencode/deepseek-v4-flash-free "..."` returns real output. opt in with FACTORY_EXPERIMENTAL=1. trainsOnPrompts: in no tier, pin-only (#2899). */
     'opencode-deepseek-v4-flash-free': {
       provider: 'custom',
       tier: ['worker'],
@@ -419,6 +422,33 @@ export const defaultModelsConfig: ModelsDefaults = {
       envKey: 'OPENCODE_API_KEY',
       harness: 'opencode',
       providerModel: 'opencode/deepseek-v4-flash-free',
+      experimental: true,
+      trainsOnPrompts: true,
+    },
+    /** Added 2026-10-14 (#2904): DeepSeek V4.1 Flash on the Pi harness via OpenRouter, an approved zero-retention intermediary (ADR-0163). The OPENROUTER_API_KEY must have zero data retention (ZDR) enforced in OpenRouter's privacy settings; without ZDR this model must not be used. OpenRouter id `deepseek/deepseek-v4.1-flash` and prices $0.01584/$0.891 per 1M per https://openrouter.ai/api/v1/models, checked 2026-10-14 (ids came from the OpenRouter API only; `pi` was not installed to confirm with `pi --list-models`). Pin-only: in no tier. opt in with FACTORY_EXPERIMENTAL=1. */
+    'pi-openrouter-deepseek-v4-flash': {
+      provider: 'custom',
+      tier: ['worker'],
+      costPerMtokInput: 0.01584,
+      costPerMtokOutput: 0.891,
+      contextWindow: 1000000,
+      capabilities: ['implementation', 'coding'],
+      envKey: 'OPENROUTER_API_KEY',
+      harness: 'pi',
+      providerModel: 'openrouter/deepseek/deepseek-v4.1-flash',
+      experimental: true,
+    },
+    /** Added 2026-10-14 (#2904): DeepSeek V4 Pro on the Pi harness via OpenRouter, an approved zero-retention intermediary (ADR-0163). The OPENROUTER_API_KEY must have zero data retention (ZDR) enforced in OpenRouter's privacy settings; without ZDR this model must not be used. OpenRouter id `deepseek/deepseek-v4-pro` and prices $0.95526/$1.91052 per 1M per https://openrouter.ai/api/v1/models, checked 2026-10-14 (ids came from the OpenRouter API only; `pi` was not installed to confirm with `pi --list-models`). Pin-only: in no tier. opt in with FACTORY_EXPERIMENTAL=1. */
+    'pi-openrouter-deepseek-v4-pro': {
+      provider: 'custom',
+      tier: ['worker'],
+      costPerMtokInput: 0.95526,
+      costPerMtokOutput: 1.91052,
+      contextWindow: 1000000,
+      capabilities: ['implementation', 'coding'],
+      envKey: 'OPENROUTER_API_KEY',
+      harness: 'pi',
+      providerModel: 'openrouter/deepseek/deepseek-v4-pro',
       experimental: true,
     },
   },
@@ -445,7 +475,6 @@ export const defaultModelsConfig: ModelsDefaults = {
       'glm-5.2',
       'qwen-3.5-coder',
       'opencode-sonnet',
-      'opencode-deepseek-v4-flash-free',
     ],
     checker: [
       'qwen3.5:9b',
@@ -494,99 +523,6 @@ export interface RetiredModelDefaults {
 /** Packaged model ids that were removed, so unknown-model errors can say why and what to use instead. */
 export const retiredModels: Readonly<Record<string, RetiredModelDefaults>> = {
   'deepseek-v3': { adr: 'ADR-0163', replacement: 'opencode-deepseek-v4-flash' },
-};
-
-/** Task-type → model-tier routing. The router resolves a tier to the first available model. */
-export const defaultRoutesConfig: RoutesDefaults = {
-  version: 1,
-  routes: {
-    plan: {
-      tier: 'boss',
-      description: 'Spec writing, architecture, route selection — needs judgment',
-    },
-    readiness_enrich: {
-      tier: 'triage',
-      description: 'Create a complete factory-task issue body before PLAN',
-    },
-    decompose: {
-      tier: 'triage',
-      description:
-        'Decompose an oversized factory-task issue into an epic + INVEST-sized stories (proposed as a comment, not filed)',
-    },
-    build_codex: {
-      tier: 'worker',
-      description: 'Codex CLI implementation from frozen spec',
-      requires: 'codex',
-    },
-    build_claude: {
-      tier: 'worker',
-      description:
-        'Claude implementation from frozen spec (design/UX tasks) - requires the claude-cli harness, which drives its own commits (commit-only; SHIP publishes after CHECK)',
-      requires: 'claude',
-    },
-    build_opencode: {
-      tier: 'worker',
-      description:
-        'OpenCode CLI implementation from frozen spec - requires the opencode harness (e.g. opencode-deepseek-v4-flash)',
-      requires: 'opencode',
-    },
-    build_command: {
-      tier: 'worker',
-      description:
-        'Declared agentic harness implementation from frozen spec - requires a harness declared under `harnesses` with agentic: true (commit-only; SHIP publishes after CHECK)',
-      requires: 'command',
-    },
-    check_compile: { tier: 'checker', description: 'Build/compile verification' },
-    check_tests: { tier: 'checker', description: 'Test suite execution and result verification' },
-    check_lint: { tier: 'checker', description: 'Linting and type checking' },
-    check_accessibility: {
-      tier: 'checker',
-      description: 'WCAG/accessibility checks in real browser',
-    },
-    check_links: {
-      tier: 'checker',
-      description: 'URL/link resolution and validation',
-    },
-    check_custom: {
-      tier: 'checker',
-      description: 'Product-specific custom checks (from constitution)',
-    },
-    check_design: {
-      tier: 'checker',
-      description: "Program-design smell critic over the lane's real diff",
-    },
-    eval_judge: {
-      tier: 'checker',
-      description: 'LLM judge scoring eval specs against a rubric',
-    },
-    review_pr: {
-      tier: 'checker',
-      description: 'Code review of the final diff before PR',
-    },
-    security_review: {
-      tier: 'checker',
-      description: 'Security review of the diff',
-    },
-    classify_pr: {
-      tier: 'checker',
-      description: 'PR classifier: escalate-only review class (A/B/C) from the diff (ADR-0121)',
-    },
-    steward: {
-      tier: 'boss',
-      description:
-        'Stuck-run steward (ADR-0155): one tool-less call over the sanitized packet, returning one JSON verdict; model: a pin, else the first runnable boss-tier model',
-      allowedTools: [],
-      output: 'json',
-    },
-    dispute_resolution: {
-      tier: 'boss',
-      description: 'Boss arbitrates when worker disputes checker failure',
-    },
-    triage: {
-      tier: 'triage',
-      description: 'Issue triage and queue building',
-    },
-  },
 };
 
 /** Size caps for auto-filed bug evidence (#1842). Raw logs stay local; issues get a capped excerpt plus a host:path pointer. */

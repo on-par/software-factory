@@ -55,6 +55,7 @@ const rateLimitFixture = readFixture('error-rate-limit.jsonl');
 function recordingExec(result: { stdout?: string } = {}) {
   const calls: { cmd: string; stdin?: string }[] = [];
   const fn = async (cmd: string) => {
+    if (cmd === 'opencode --version') return { stdout: '', stderr: '' };
     const promptPath = /< '([^']+)'$/.exec(cmd)?.[1];
     calls.push({ cmd, stdin: promptPath ? readFileSync(promptPath, 'utf8') : undefined });
     return { stdout: result.stdout ?? '', stderr: '' };
@@ -85,11 +86,13 @@ describe('parseOpenCodeJson finished flag', () => {
 describe('OpenCodeHarness truncated runs', () => {
   const run = (fn: any) =>
     new OpenCodeHarness(fn).run(makeContractRequest({ model: 'opencode-model', registry, prompt: 'build it' }));
-  const FINAL = "I'll inspect the repo first.\n\nFINAL ANSWER: the build is done.";
+  // Only the last step's text is returned (#2881).
+  const FINAL = 'FINAL ANSWER: the build is done.';
 
   function sequenceExec(stdouts: string[]) {
     const calls: { cmd: string; stdin?: string }[] = [];
     const fn = async (cmd: string) => {
+      if (cmd === 'opencode --version') return { stdout: '', stderr: '' };
       const promptPath = /< '([^']+)'$/.exec(cmd)?.[1];
       calls.push({ cmd, stdin: promptPath ? readFileSync(promptPath, 'utf8') : undefined });
       return { stdout: stdouts[calls.length - 1] ?? '', stderr: '' };

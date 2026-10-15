@@ -2,11 +2,18 @@
 import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 
-import { defaultRegistryPath, listRepos, loadRegistry, readRunLockHolder } from '@on-par/factory-core/internal';
+import {
+  daemonRuntimePaths,
+  defaultRegistryPath,
+  listRepos,
+  loadRegistry,
+  readRunLockHolder,
+} from '@on-par/factory-core/internal';
 import { defaultIsPidAlive, getFactoryPaths } from '@on-par/factory-core';
 
 import { detectInstall, type InstallKind } from './daemon.js';
 import { EXIT_UP_TO_DATE, PACKAGE_NAME, parseSemver, type SelfUpdateDeps } from './self-update.js';
+import { recordUpdateResult, updateStatePath, type UpdateOutcome } from './update-state.js';
 
 // ---------------------------------------------------------------------------
 // factory self-update --to <version> (#2355)
@@ -71,7 +78,20 @@ export function stableVersionError(v: string): string | null {
   return null;
 }
 
-function firstLine(s: string): string | null {
+/** Names of the ❌ (failed) rows in `factory doctor` text output, in order, deduped (#2932). */
+export function failingDoctorChecks(output: string): string[] {
+  const names: string[] = [];
+  for (const raw of output.split('\n')) {
+    // eslint-disable-next-line no-control-regex -- strips ANSI color codes
+    const line = raw.replace(/\u001b\[[0-9;]*m/g, '');
+    const m = /^\s*❌\s+(.+?)\s+-\s/.exec(line) ?? /^\s*❌\s+(.+?)\s*$/.exec(line);
+    const name = m?.[1]?.trim();
+    if (name && !names.includes(name)) names.push(name);
+  }
+  return names;
+}
+
+function lastLine(s: string): string | null {
   const l = s
     .trim()
     .split('\n')
@@ -120,10 +140,20 @@ export async function applySelfUpdate(
     result.error = error;
     return { code, result };
   };
-  const run = async (step: ApplyStep['step'], cmd: string, args: string[]) => {
+  const run = async (
+    step: ApplyStep['step'],
+    cmd: string,
+    args: string[],
+    detailOf?: (r: { code: number; stdout: string; stderr: string }) => string | null,
+  ) => {
     const r = await exec(cmd, args);
     const ok = r.code === 0;
-    steps.push({ step, ok, code: r.code, detail: ok ? null : (firstLine(r.stderr) ?? firstLine(r.stdout)) });
+    steps.push({
+      step,
+      ok,
+      code: r.code,
+      detail: ok ? null : detailOf ? detailOf(r) : (lastLine(r.stderr) ?? lastLine(r.stdout)),
+    });
     return { ...r, ok };
   };
   const installVersion = (v: string, step: 'install' | 'rollback') =>
@@ -161,7 +191,10 @@ export async function applySelfUpdate(
   if (!inst.ok) failure = `install of ${to} failed: ${steps.at(-1)?.detail ?? `exit ${inst.code}`}`;
   else if (!(await verifyVersion(to, 'verify'))) failure = `version check failed: ${steps.at(-1)?.detail}`;
   else {
-    const doc = await run('doctor', node, [cli, 'doctor']);
+    const doc = await run('doctor', node, [cli, 'doctor'], (r) => {
+      const names = failingDoctorChecks(`${r.stdout}\n${r.stderr}`);
+      return names.length > 0 ? `failing checks: ${names.join(', ')}` : `exit ${r.code}`;
+    });
     if (!doc.ok) failure = `doctor failed on ${to}: ${steps.at(-1)?.detail ?? `exit ${doc.code}`}`;
   }
 
@@ -197,8 +230,15 @@ export async function applySelfUpdate(
 
 export function formatApplyResult(r: SelfUpdateApplyResult): string {
   switch (r.outcome) {
-    case 'updated':
-      return `factory updated ${r.from} → ${r.to}${r.restart === 'restarted' ? '; factoryd restarted' : r.restart === 'failed' ? '; factoryd restart failed — run `factory daemon start`' : ''}`;
+    case 'updated': {
+      let restartText = '';
+      if (r.restart === 'restarted') restartText = '; factoryd restarted';
+      else if (r.restart === 'failed') {
+        const detail = [...r.steps].reverse().find((s) => s.step === 'restart')?.detail;
+        restartText = `; factoryd restart failed${detail ? `: ${detail}` : ''} — run \`factory daemon start\``;
+      }
+      return `factory updated ${r.from} → ${r.to}${restartText}`;
+    }
     case 'up-to-date':
       return `factory ${r.from} is already ${r.to}`;
     case 'dry-run':
@@ -210,8 +250,27 @@ export function formatApplyResult(r: SelfUpdateApplyResult): string {
   }
 }
 
+/** Outcomes a manual run records in update-state lastResult (#2933); nothing was installed for the rest. */
+const RECORDED_OUTCOMES: ReadonlySet<ApplyOutcome> = new Set(['updated', 'rolled-back', 'failed']);
+
 export async function cmdSelfUpdateApply(opts: SelfUpdateApplyOpts, deps: SelfUpdateApplyDeps = {}): Promise<number> {
   const { code, result } = await applySelfUpdate(opts, deps);
+  // factoryd (--no-restart) records its own result in runAutoUpdateCycle
+  if (opts.restart !== false && RECORDED_OUTCOMES.has(result.outcome)) {
+    const file = deps.updateStateFile === undefined ? updateStatePath(daemonRuntimePaths().dir) : deps.updateStateFile;
+    if (file !== null) {
+      try {
+        recordUpdateResult(file, {
+          at: (deps.now ?? (() => new Date()))().toISOString(),
+          version: result.to,
+          outcome: result.outcome as UpdateOutcome,
+          ...(result.error ? { error: result.error } : {}),
+        });
+      } catch {
+        // best-effort: recording must never change the apply's exit code or output
+      }
+    }
+  }
   (deps.out ?? process.stdout).write(opts.json ? `${JSON.stringify(result)}\n` : `${formatApplyResult(result)}\n`);
   return code;
 }

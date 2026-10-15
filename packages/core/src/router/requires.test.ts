@@ -40,4 +40,34 @@ describe('ModelRouter.resolveAll requires command', () => {
 
     expect(router.resolveAll('build_command')).toEqual(['declared-agentic']);
   });
+
+  it('build_command admits pi-harness models and still excludes ollama-http (#2909)', () => {
+    const base = {
+      tier: 'worker',
+      costPerMtokInput: 0,
+      costPerMtokOutput: 0,
+      contextWindow: 1000,
+      capabilities: [],
+      envKey: null,
+    };
+    const models: ModelsConfig = {
+      version: 1,
+      models: {
+        'pi-model': { ...base, provider: 'custom', harness: 'pi', providerModel: 'openrouter/x' },
+        'ollama-model': { ...base, provider: 'ollama', harness: 'ollama-http' },
+        'agentic-ollama': { ...base, provider: 'ollama', harness: 'ollama-agentic' },
+        'claude-model': { ...base, provider: 'anthropic' },
+      },
+      tiers: { worker: ['pi-model', 'ollama-model', 'agentic-ollama', 'claude-model'] },
+      failover: { triggers: [], maxRetries: 0, cooldownMs: 0, escalateAfterTierExhausted: false },
+      routingRules: {},
+    };
+    const routes: RoutesConfig = {
+      version: 1,
+      routes: { build_command: { tier: 'worker', description: 'stub', requires: 'command' } },
+    };
+    const router = new ModelRouter(models, routes, false, new StubModelExecutor({ scripts: {} }));
+
+    expect(router.resolveAll('build_command')).toEqual(['pi-model']);
+  });
 });

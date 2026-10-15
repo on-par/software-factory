@@ -3,6 +3,7 @@
 import { openCodeVersion } from '@on-par/factory-core/internal';
 
 import type { DoctorCheck } from './doctor.js';
+import { PI_INSTALL } from './first-run.js';
 
 export interface HarnessSetup {
   section: string;
@@ -12,6 +13,8 @@ export interface HarnessSetup {
   install: string;
   /** Exact shell command that signs the harness in (#2556); also the row's `next` command. */
   login: string;
+  /** Shell command for the sign-in row's `next` line when `login` is a prose hint (#2903); defaults to `login`. */
+  next?: string;
   /** Env vars that count as sign-in evidence (#2556). */
   envKeys: readonly string[];
   /** Judges the first `--version` line for the installed row (#2880); harnesses without one just print it. */
@@ -72,6 +75,15 @@ export const HARNESS_SETUP: readonly HarnessSetup[] = [
     login: 'opencode auth login',
     envKeys: ['OPENCODE_API_KEY'],
     checkVersion: openCodeVersionCheck,
+  },
+  {
+    section: 'Pi',
+    harnessId: 'pi',
+    cli: 'pi',
+    install: PI_INSTALL,
+    login: 'run `pi` then `/login <provider>`, or export the provider key',
+    next: 'pi',
+    envKeys: ['OPENROUTER_API_KEY', 'OPENCODE_API_KEY', 'AZURE_OPENAI_API_KEY'],
   },
 ];
 

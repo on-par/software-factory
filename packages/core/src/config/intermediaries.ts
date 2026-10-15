@@ -8,12 +8,14 @@ export interface Intermediary {
   status: 'approved' | 'pending';
   /** ISO date when approval must be re-checked (OpenCode Go ZDR expiry). */
   reviewBy?: string;
+  /** Serves an Anthropic Messages API usable as the claude CLI's ANTHROPIC_BASE_URL (#2906). */
+  anthropicCompatible?: boolean;
 }
 
 /** Intermediaries DeepSeek models may be routed through (ADR-0163). Azure Foundry is pending verification, so its
  *  prefix and host are placeholders that are never used for acceptance. */
 export const APPROVED_INTERMEDIARIES: readonly Intermediary[] = [
-  { name: 'OpenRouter', prefix: 'openrouter/', host: 'openrouter.ai', status: 'approved' },
+  { name: 'OpenRouter', prefix: 'openrouter/', host: 'openrouter.ai', status: 'approved', anthropicCompatible: true },
   { name: 'OpenCode Go', prefix: 'opencode-go/', host: 'opencode.ai', status: 'approved', reviewBy: '2026-10-31' },
   { name: 'Azure Foundry', prefix: 'azure/', host: 'ai.azure.com', status: 'pending' },
 ];
@@ -22,4 +24,37 @@ export const APPROVED_INTERMEDIARIES: readonly Intermediary[] = [
 export function intermediaryFor(providerModel: string): Intermediary | undefined {
   const pm = providerModel.trim().toLowerCase();
   return APPROVED_INTERMEDIARIES.find((i) => pm.startsWith(i.prefix));
+}
+
+/** The approved Anthropic-compatible intermediary an https `endpoint` points at (exact host match), or undefined. Pure. */
+export function claudeEndpointIntermediary(endpoint: string): Intermediary | undefined {
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== 'https:') return undefined;
+  return APPROVED_INTERMEDIARIES.find(
+    (i) => i.status === 'approved' && i.anthropicCompatible && i.host === url.hostname,
+  );
+}
+
+/** Throws unless a registry model's `endpoint` (when set) is an approved Anthropic-compatible intermediary and the
+ *  model names an envKey (#2906, ADR-0163). */
+export function assertApprovedClaudeEndpoint(id: string, def: { endpoint?: string; envKey: string | null }): void {
+  if (def.endpoint === undefined) return;
+  if (!claudeEndpointIntermediary(def.endpoint)) {
+    const allowed = APPROVED_INTERMEDIARIES.filter((i) => i.status === 'approved' && i.anthropicCompatible).map(
+      (i) => i.host,
+    );
+    throw new Error(
+      `.factory/config.json: models.registry.${id}.endpoint '${def.endpoint}' is not an approved Anthropic-compatible intermediary (allowed hosts: ${allowed.join(', ')}; https only). DeepSeek and other non-Anthropic models are reached only through approved zero-retention intermediaries (ADR-0163)`,
+    );
+  }
+  if (def.envKey === null) {
+    throw new Error(
+      `.factory/config.json: models.registry.${id} sets an endpoint but envKey is null; an endpoint needs envKey naming the intermediary's API key variable`,
+    );
+  }
 }

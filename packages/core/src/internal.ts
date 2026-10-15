@@ -131,7 +131,6 @@ export {
 } from './config/repo-config-file.js';
 export type { RepoConfigYamlMigration } from './config/repo-config-file.js';
 export { CONFIG_EXAMPLE_OMITTED_KEYS, renderConfigExample } from './config/example.js';
-
 // Design artifact (#422)
 export { DesignArtifactSchema, parseDesignArtifact, readDesignArtifact, renderDesignArtifact } from './design/index.js';
 
@@ -147,8 +146,9 @@ export type { OllamaAgenticChange, OllamaAgenticExecFn, OllamaAgenticProposal } 
 export { OllamaAgenticHarness, PATCH_PROPOSAL_SCHEMA } from './harness/ollama-agentic.js';
 export type { OllamaFetchFn } from './harness/ollama-http.js';
 export { OllamaHttpHarness } from './harness/ollama-http.js';
-export type { OpenCodeExecFn } from './harness/opencode.js';
-export { OpenCodeHarness } from './harness/opencode.js';
+export { classifyOpenCodeErrorType, parseOpenCodeJson } from './harness/opencode.js';
+export { type OpenCodeExecFn, OpenCodeHarness } from './harness/opencode.js';
+export { parsePiJson, type PiExecFn, PiHarness } from './harness/pi.js';
 export * as openCodeVersion from './harness/opencode-version.js';
 export type { DockerEngineOptions } from './hosted/docker.js';
 export { createDockerEngine } from './hosted/docker.js';

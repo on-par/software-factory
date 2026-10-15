@@ -1,5 +1,5 @@
 // packages/cli/src/cli/self-update-apply.test.ts — factory self-update --to (#2355)
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -14,11 +14,13 @@ import {
   applySelfUpdate,
   attachedRunLocks,
   cmdSelfUpdateApply,
+  failingDoctorChecks,
   formatApplyResult,
   stableVersionError,
   type ApplyExec,
   type SelfUpdateApplyDeps,
 } from './self-update-apply.js';
+import { buildStatusUpdateJson, formatUpdateStatusLine, readUpdateState, writeUpdateState } from './update-state.js';
 
 const PREFIX = '/usr/local';
 const NPM = '/usr/local/bin/npm';
@@ -69,6 +71,7 @@ function deps(
     exec,
     platform: 'darwin',
     activeRuns: async () => [],
+    updateStateFile: null,
     install: { version: '0.9.0', env, execPath: NODE, cliPath: CLI, exists: () => false },
     ...over,
   };
@@ -132,6 +135,17 @@ describe('applySelfUpdate', () => {
     expect(formatApplyResult(failed.result)).toContain('factory daemon start');
   });
 
+  it('includes the restart step detail in the text output when the factoryd restart fails', async () => {
+    const s = stubExec({
+      status: { code: 0, stdout: '{"running":true}' },
+      start: { code: 1, stderr: 'factory: launchctl bootstrap failed: Bootstrap failed: 5: Input/output error' },
+    });
+    const { result } = await applySelfUpdate({ to: '0.9.1' }, deps(s.exec));
+    const text = formatApplyResult(result);
+    expect(text).toContain('Bootstrap failed: 5: Input/output error');
+    expect(text).toContain('factory daemon start');
+  });
+
   it('doctor fails → reinstalls the previous exact version with the same prefix and exits 1', async () => {
     const s = stubExec({ doctor: { code: 1, stderr: 'claude: not signed in' } });
     const { code, result } = await applySelfUpdate({ to: '0.9.1' }, deps(s.exec));
@@ -139,8 +153,51 @@ describe('applySelfUpdate', () => {
     expect(s.calls).toContain(installCmd('0.9.0'));
     expect(s.installed()).toBe('0.9.0');
     expect(result).toMatchObject({ outcome: 'rolled-back', rolledBack: true, restart: null });
-    expect(result.error).toContain('doctor failed on 0.9.1: claude: not signed in');
+    expect(result.error).toContain('doctor failed on 0.9.1: exit 1');
     expect(s.calls.some((c) => c.includes('daemon'))).toBe(false);
+  });
+
+  const FOOTER = ['', 'Model reachability: factory models --doctor'];
+  it('doctor rollback names the failing check, not the Model reachability footer', async () => {
+    const stdout = [
+      '== factory doctor ==',
+      '  ✅ node - v22',
+      '  ❌ git auth - not authenticated',
+      '       fix: gh auth login',
+      '1 passed, 1 failed, 0 warnings',
+      ...FOOTER,
+    ].join('\n');
+    const s = stubExec({ doctor: { code: 1, stdout } });
+    const { result } = await applySelfUpdate({ to: '0.9.1' }, deps(s.exec));
+    expect(result.outcome).toBe('rolled-back');
+    expect(result.error).toContain('git auth');
+    expect(result.error).not.toContain('Model reachability');
+  });
+
+  it('doctor rollback names every failing check', async () => {
+    const stdout = [
+      '  ❌ git auth - not authenticated',
+      '  ⚠️ optional thing - meh',
+      '  ❌ claude auth - signed out',
+      ...FOOTER,
+    ].join('\n');
+    const s = stubExec({ doctor: { code: 1, stdout } });
+    const { result } = await applySelfUpdate({ to: '0.9.1' }, deps(s.exec));
+    expect(result.error).toContain('failing checks: git auth, claude auth');
+    expect(result.error).not.toContain('optional thing');
+  });
+
+  it('doctor rollback with no failing row falls back to the exit code', async () => {
+    const stdout = ['  ✅ node - v22', '  ⚠️ optional thing - meh', ...FOOTER].join('\n');
+    const s = stubExec({ doctor: { code: 2, stdout } });
+    const { result } = await applySelfUpdate({ to: '0.9.1' }, deps(s.exec));
+    expect(result.error).toBe('doctor failed on 0.9.1: exit 2');
+  });
+
+  it('failingDoctorChecks strips ANSI, dedupes, and handles empty input', () => {
+    expect(failingDoctorChecks('\u001b[31m  ❌ git auth - bad\u001b[0m')).toEqual(['git auth']);
+    expect(failingDoctorChecks('  ❌ a - x\n  ❌ a - y')).toEqual(['a']);
+    expect(failingDoctorChecks('')).toEqual([]);
   });
 
   it('install fails → previous version stays in place and it exits 1', async () => {
@@ -246,6 +303,91 @@ describe('applySelfUpdate', () => {
     }
     const rb = await applySelfUpdate({ to: '0.9.1' }, deps(stubExec({ doctor: { code: 1 } }).exec));
     expect(formatApplyResult(rb.result)).toContain('rolled back to 0.9.0');
+  });
+});
+
+describe('cmdSelfUpdateApply records its outcome in update-state lastResult (#2933)', () => {
+  let dir: string;
+  let file: string;
+  const NOW = new Date('2026-10-14T00:00:00.000Z');
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'self-update-record-'));
+    file = join(dir, 'update-state.json');
+    writeUpdateState(file, {
+      schemaVersion: 1,
+      mode: 'stable',
+      channel: 'latest',
+      installKind: 'npm-global',
+      current: '0.9.0',
+      available: '0.9.1',
+      lastCheckAt: null,
+      lastResult: {
+        at: '2026-10-01T00:00:00.000Z',
+        version: '0.9.0',
+        outcome: 'failed',
+        error: "unknown option '--to'",
+      },
+      draining: null,
+    });
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const run = (
+    exec: ApplyExec,
+    opts: { to: string; dryRun?: boolean; restart?: boolean } = { to: '0.9.1' },
+    path = file,
+  ) => cmdSelfUpdateApply(opts, deps(exec, { updateStateFile: path, now: () => NOW, out: { write: () => true } }));
+
+  it('records updated over an older failure, and the status line no longer shows it', async () => {
+    expect(await run(stubExec({}).exec)).toBe(0);
+    const st = readUpdateState(file)!;
+    expect(st.lastResult).toEqual({ at: NOW.toISOString(), version: '0.9.1', outcome: 'updated' });
+    expect(st.current).toBe('0.9.1');
+    expect(st.available).toBeNull();
+    const line = formatUpdateStatusLine(buildStatusUpdateJson(st));
+    expect(line).toContain('last update to 0.9.1 updated');
+    expect(line).not.toContain('unknown option');
+  });
+
+  it('records rolled-back with the target version and the error', async () => {
+    const out = { write: vi.fn() };
+    const e = stubExec({ doctor: { code: 1 } });
+    expect(
+      await cmdSelfUpdateApply(
+        { to: '0.9.1', json: true },
+        deps(e.exec, { updateStateFile: file, now: () => NOW, out }),
+      ),
+    ).toBe(1);
+    const reported = JSON.parse(String(out.write.mock.calls[0]![0])) as { error: string };
+    const last = readUpdateState(file)!.lastResult!;
+    expect(last).toMatchObject({ outcome: 'rolled-back', version: '0.9.1', error: reported.error });
+    expect(last.error).toContain('doctor failed on 0.9.1');
+  });
+
+  it('records failed when the rollback also fails', async () => {
+    const s = stubExec({
+      doctor: { code: 1 },
+      install: (spec) => (spec.endsWith('0.9.0') ? { code: 1 } : { code: 0 }),
+    });
+    expect(await run(s.exec)).toBe(1);
+    const last = readUpdateState(file)!.lastResult!;
+    expect(last).toMatchObject({ outcome: 'failed', version: '0.9.1' });
+    expect(last.error).toContain('rollback to 0.9.0 also failed');
+  });
+
+  it('leaves the file unchanged for refused, dry-run, up-to-date and --no-restart runs', async () => {
+    const before = readFileSync(file, 'utf8');
+    expect(await run(stubExec({}).exec, { to: 'latest' })).toBe(2);
+    expect(await run(stubExec({}).exec, { to: '0.9.1', dryRun: true })).toBe(0);
+    expect(await run(stubExec({}).exec, { to: '0.9.0' })).toBe(0);
+    expect(await run(stubExec({}).exec, { to: '0.9.1', restart: false })).toBe(0);
+    expect(readFileSync(file, 'utf8')).toBe(before);
+  });
+
+  it('does not create a missing file', async () => {
+    const missing = join(dir, 'nope', 'update-state.json');
+    expect(await run(stubExec({}).exec, { to: '0.9.1' }, missing)).toBe(0);
+    expect(existsSync(missing)).toBe(false);
   });
 });
 

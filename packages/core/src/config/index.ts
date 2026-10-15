@@ -24,7 +24,6 @@ import type { FilingPolicy } from '../filing/policy.js';
 import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
 import type { HarnessFailureReason } from '../harness/index.js';
 import type { FailoverReason } from '../types/index.js';
-
 import { ModelEffortsSchema } from './effort.js';
 
 // ---------- Schemas ----------
@@ -40,10 +39,12 @@ export const ModelDefSchema = z.object({
   claudeFlag: z.string().optional(),
   providerModel: z.string().optional(),
   providerOptions: z.record(z.string(), z.unknown()).optional(),
+  endpoint: z.string().optional(),
   codex: z.boolean().optional(),
   codexFlag: z.string().optional(),
   harness: z.string().optional(),
   experimental: z.boolean().optional(),
+  trainsOnPrompts: z.boolean().optional(),
 });
 
 export const HARNESS_PROMPT_MODES = ['stdin', 'file', 'arg'] as const;
@@ -63,6 +64,7 @@ export const HARNESS_ERROR_PATTERN_REASONS = [
   'schema_invalid',
   'apply_failed',
   'verify_failed',
+  'permission_denied',
   'unknown',
 ] as const satisfies readonly HarnessFailureReason[];
 
@@ -544,8 +546,7 @@ export function resolveSkipCI(config: FactoryConfig, env: NodeJS.ProcessEnv = pr
 
 /**
  * sizeGate.mode values this build understands (ADR-0147). `slice` keeps an oversized issue whole and ships it as slice PRs.
- * `stack` (ADR-0161) will ship a stacked PR set; until that is built the size gate runs it as `slice`.
- */
+ * `stack` (ADR-0161) will ship a stacked PR set; until that is built the size gate runs it as `slice`. */
 export const SIZE_GATE_MODES = ['file', 'slice', 'off', 'stack'] as const;
 export type SizeGateMode = (typeof SIZE_GATE_MODES)[number];
 
@@ -672,8 +673,7 @@ export function resolveLocalOnly(env: NodeJS.ProcessEnv = process.env): boolean 
   return resolveEnabledFlag(env, 'FACTORY_LOCAL_ONLY', false);
 }
 
-/** Experimental models: make experimental-tier models eligible for routing
- *  (FACTORY_EXPERIMENTAL=1). */
+/** Experimental models: make experimental-tier models eligible for routing (FACTORY_EXPERIMENTAL=1). */
 export function resolveExperimental(env: NodeJS.ProcessEnv = process.env): boolean {
   return resolveEnabledFlag(env, 'FACTORY_EXPERIMENTAL', false);
 }

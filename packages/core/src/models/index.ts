@@ -2,11 +2,16 @@
 
 import { execSync } from 'node:child_process';
 
-import { retiredModels } from '@on-par/factory-config';
-
+import { claudeEndpointIntermediary } from '../config/intermediaries.js';
 import { ModelEffortsSchema, supportsEffort } from '../config/effort.js';
 import type { HarnessDeclaration, ModelsConfig } from '../config/index.js';
-import { HARNESS_CATALOG, harnessCliCommand, isAgenticHarness, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
+import {
+  HARNESS_CATALOG,
+  harnessCliCommand,
+  isAgenticHarness,
+  KNOWN_HARNESS_IDS,
+  usesGenericBuildRoute,
+} from '../harness/catalog.js';
 import type { ModelDefinition, ModelTier } from '../types/index.js';
 import { hasClaudeLoginEvidence } from '../utils/claude-config.js';
 import { hasCodexLoginEvidence } from '../utils/codex-config.js';
@@ -17,7 +22,13 @@ import {
   localAuthFailureSinceLogin,
 } from '../utils/local-auth-record.js';
 import { hasOpencodeLoginEvidence } from '../utils/opencode-config.js';
+import { isRemoteOllamaBaseUrl, localAuthFailureReason } from './diagnose-helpers.js';
+import { type PiAuthStatus, piAuthOutcome, runPiAuthCheck } from './pi-auth.js';
+import { runHarnessProbe } from './harness-probe.js';
 import { applyZdrReview } from './zdr-review.js';
+
+export { localAuthFailureReason };
+export { type ModelOverrides, resolveModelOverrides, retiredModelHint } from './overrides.js';
 
 export class ModelRegistry {
   constructor(private config: ModelsConfig) {
@@ -87,6 +98,15 @@ export class ModelRegistry {
     return isAgenticHarness(harnessId) || this.getHarnessDeclaration(harnessId)?.agentic === true;
   }
 
+  /** Single owner of which harnesses BUILD runs on through the generic `command` route: a declared
+   *  agentic harness, or a built-in flagged `genericBuildRoute` (Pi, #2909). */
+  ridesCommandRoute(harnessId: string): boolean {
+    return (
+      (!!this.getHarnessDeclaration(harnessId) && this.isAgenticHarnessId(harnessId)) ||
+      usesGenericBuildRoute(harnessId)
+    );
+  }
+
   /** Harness id for a model: the config-declared `harness`, else inferred from
    *  legacy provider/codex flags (pre-#187 dispatch behavior). */
   getHarnessId(modelId: string): string | undefined {
@@ -102,6 +122,11 @@ export class ModelRegistry {
   /** Check if a model is speculative/unproven (excluded from routing unless opted in) */
   isExperimental(modelId: string): boolean {
     return !!this.get(modelId)?.experimental;
+  }
+
+  /** True when the model's provider may use prompts for training (#2899): never chosen from a tier. */
+  trainsOnPrompts(modelId: string): boolean {
+    return !!this.get(modelId)?.trainsOnPrompts;
   }
 
   /** Check if a model is safe for local-only routing. */
@@ -123,6 +148,11 @@ export class ModelRegistry {
   /** Get the claude -p flag for a model */
   getClaudeFlag(modelId: string): string | undefined {
     return this.get(modelId)?.claudeFlag;
+  }
+
+  /** Get the approved intermediary endpoint for a model (#2906) */
+  getEndpoint(modelId: string): string | undefined {
+    return this.get(modelId)?.endpoint;
   }
 
   /** Get provider-native model id */
@@ -157,7 +187,11 @@ export class ModelRegistry {
 
   /** Get all available models for a tier, in priority order */
   getAvailableModelsForTier(tier: string, byok = false, allowExperimental = false, localOnly = false): string[] {
-    return this.getModelsInTier(tier).filter((m) => {
+    const models = this.getModelsInTier(tier);
+    return models.filter((m) => {
+      // A single-entry tier is the shape of a models.pins.checker / models.pins.triage pin (applyRepoConfig), so a
+      // deliberate pin stays routable. Repo tiers cannot list a trainsOnPrompts model, and packaged tiers do not.
+      if (models.length > 1 && this.trainsOnPrompts(m)) return false;
       if (!allowExperimental && this.isExperimental(m)) return false;
       if (localOnly && !this.isLocalOnlyModel(m)) return false;
       if (byok && !this.isEnvAvailable(m)) return false;
@@ -169,35 +203,6 @@ export class ModelRegistry {
   get failover() {
     return this.config.failover;
   }
-}
-
-export interface ModelOverrides {
-  plan?: string;
-  build?: string;
-}
-
-/** Suffix for an unknown-model error when the id is a retired packaged model; '' otherwise. */
-export function retiredModelHint(id: string): string {
-  const retired = Object.hasOwn(retiredModels, id) ? retiredModels[id] : undefined;
-  return retired ? `; '${id}' was removed under ${retired.adr}; use '${retired.replacement}'` : '';
-}
-
-/** Resolve FACTORY_PLAN_MODEL / FACTORY_BUILD_MODEL env overrides, validated
- *  against the registry. Throws a configuration error naming the env var when
- *  it references a model not present in models.json. Empty/whitespace values
- *  are treated as unset. */
-export function resolveModelOverrides(registry: ModelRegistry, env: NodeJS.ProcessEnv = process.env): ModelOverrides {
-  const resolveVar = (envVar: 'FACTORY_PLAN_MODEL' | 'FACTORY_BUILD_MODEL'): string | undefined => {
-    const value = env[envVar]?.trim();
-    if (!value) return undefined;
-    if (!registry.get(value)) {
-      throw new Error(
-        `${envVar} is set to '${value}', which is not a model in models.json (known models: ${registry.list().join(', ')})${retiredModelHint(value)}`,
-      );
-    }
-    return value;
-  };
-  return { plan: resolveVar('FACTORY_PLAN_MODEL'), build: resolveVar('FACTORY_BUILD_MODEL') };
 }
 
 /** Check if a command is available on PATH */
@@ -219,24 +224,7 @@ export function isHarnessCliPresent(
   return cmd === undefined || commandAvailable(cmd);
 }
 
-const HARNESS_PROBE_TIMEOUT_MS = 10_000;
-
-/** Run a declared harness probe command. Returns null on exit 0, else a one-line failure detail. */
-export function runHarnessProbe(cmd: string): string | null {
-  try {
-    execSync(cmd, { stdio: 'pipe', shell: '/bin/bash', timeout: HARNESS_PROBE_TIMEOUT_MS });
-    return null;
-  } catch (e) {
-    const err = e as { status?: number | null; signal?: string | null; code?: string; stderr?: Buffer | string };
-    if (err.signal === 'SIGTERM' || err.code === 'ETIMEDOUT')
-      return `timed out after ${HARNESS_PROBE_TIMEOUT_MS / 1000}s`;
-    const firstLine = (err.stderr?.toString() ?? '')
-      .split('\n')
-      .map((l) => l.trim())
-      .find((l) => l !== '');
-    return `exit ${err.status ?? '?'}${firstLine ? `: ${firstLine}` : ''}`;
-  }
-}
+export { runHarnessProbe };
 
 export type HarnessProbeStatus = 'available' | 'unavailable' | 'unverified';
 
@@ -284,6 +272,8 @@ export interface DoctorProbes {
   /** Non-inference evidence that the opencode CLI is logged in (stored credentials in opencode's
    *  auth.json). Default: hasOpencodeLoginEvidence(). Never runs `opencode run`. */
   opencodeLoggedIn?: () => boolean;
+  /** `pi auth check` for one provider model (#2903). Default: runPiAuthCheck. Never runs inference. */
+  piAuthCheck?: (providerModel: string) => PiAuthStatus;
   /** The agent's last recorded run-time local_auth failure when no login has happened since
    *  (#2733). Default: localAuthFailureSinceLogin(). Reads local state only. */
   localAuthFailure?: (agent: LocalAuthAgent) => LocalAuthFailure | null;
@@ -305,24 +295,6 @@ export interface ModelDiagnosis {
 }
 
 const UNVERIFIED_PREFIX = 'unverified — no auth evidence: ';
-
-/** Reason shown when an agent's last run hit local_auth and nobody has logged in since (#2733). */
-export function localAuthFailureReason(failure: LocalAuthFailure): string {
-  return `${failure.agent} failed sign-in (local_auth) on a run at ${failure.at}, with no login since — re-run ${failure.agent} login`;
-}
-
-/** True when OLLAMA_BASE_URL points at a non-loopback host, i.e. the local
- *  `ollama` CLI and `ollama list` are the wrong probes. Unparseable URLs fall
- *  back to local probing. */
-function isRemoteOllamaBaseUrl(baseUrl: string | undefined): boolean {
-  if (!baseUrl?.trim()) return false;
-  try {
-    const host = new URL(baseUrl).hostname;
-    return !['localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0'].includes(host);
-  } catch {
-    return false;
-  }
-}
 
 /** Probe which registered models are actually reachable on this machine (CLIs on PATH, env keys set).
  *  Probe selection is keyed solely on the model's declared/inferred harness id
@@ -372,6 +344,20 @@ export function diagnoseModels(
       }
     }
     return opencodeLoggedInCache;
+  };
+
+  const piAuthCache = new Map<string, PiAuthStatus>();
+  const piAuth = (providerModel: string): PiAuthStatus => {
+    let status = piAuthCache.get(providerModel);
+    if (status === undefined) {
+      try {
+        status = (probes.piAuthCheck ?? runPiAuthCheck)(providerModel);
+      } catch {
+        status = 'unknown';
+      }
+      piAuthCache.set(providerModel, status);
+    }
+    return status;
   };
 
   const localAuthFailureProbe =
@@ -433,7 +419,16 @@ export function diagnoseModels(
         const probe = entry.probe;
         const authAgent = localAuthAgentFor(harnessId);
         const authFailure = authAgent ? localAuthFailure(authAgent) : null;
-        if (probe.selfAuth && !probe.selfAuth.providers.includes(def.provider)) {
+        const viaEndpoint = probe.selfAuth && def.endpoint ? claudeEndpointIntermediary(def.endpoint) : undefined;
+        if (viaEndpoint) {
+          // An approved intermediary endpoint authenticates with its own envKey, not the claude login (#2906).
+          if (!isHarnessCliPresent(harnessId, commandAvailable)) reason = `${probe.command} CLI not found on PATH`;
+          else if (def.envKey && !envPresent(def.envKey)) reason = `${def.envKey} not set`;
+          else {
+            reachable = true;
+            reason = `ok (${probe.okLabel} via ${viaEndpoint.host})`;
+          }
+        } else if (probe.selfAuth && !probe.selfAuth.providers.includes(def.provider)) {
           // The claude CLI only serves its selfAuth providers; any other provider can never run here (#2896).
           reason = `unsupported: the ${probe.okLabel} serves only Anthropic models (provider '${def.provider}')`;
         } else if (!isHarnessCliPresent(harnessId, commandAvailable)) {
@@ -455,6 +450,9 @@ export function diagnoseModels(
               unverified = true;
               reason = `${UNVERIFIED_PREFIX}${probe.okLabel} installed but not logged in and ${def.envKey} not set — run \`opencode auth login\` or export ${def.envKey}`;
             }
+          } else if (probe.command === 'pi') {
+            const target = registry.getProviderModel(m);
+            ({ reachable, unverified, reason } = piAuthOutcome(piAuth(target), target, probe.okLabel));
           } else {
             reachable = true;
             reason = `ok (${probe.okLabel})`;

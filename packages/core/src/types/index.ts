@@ -23,6 +23,8 @@ export interface ModelDefinition {
   providerModel?: string;
   /** Provider-native options, e.g. Ollama num_ctx/temperature */
   providerOptions?: Record<string, unknown>;
+  /** Approved Anthropic-compatible intermediary base URL (https) the claude-cli harness targets for this model; needs envKey (#2906, ADR-0163) */
+  endpoint?: string;
   /** Whether this model runs via Codex CLI */
   codex?: boolean;
   /** Extra Codex CLI flags */
@@ -32,6 +34,7 @@ export interface ModelDefinition {
   harness?: string;
   /** Speculative/unproven model — excluded from routing unless FACTORY_EXPERIMENTAL=1 */
   experimental?: boolean;
+  trainsOnPrompts?: boolean;
 }
 
 // ---------- Config types (re-exported from config module) ----------
@@ -137,6 +140,8 @@ export type FailoverReason =
   | 'schema_invalid'
   | 'apply_failed'
   | 'verify_failed'
+  /** An agent CLI auto-rejected a tool permission in a non-interactive run (#2888). */
+  | 'permission_denied'
   | 'unknown';
 
 // ---------- Failure fingerprint & evidence (#372) ----------

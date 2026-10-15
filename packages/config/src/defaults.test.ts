@@ -10,6 +10,7 @@ import {
   defaultModelsConfig,
   defaultRoutesConfig,
   retiredModels,
+  type ModelDefaults,
 } from './defaults.js';
 
 describe('shipped defaults', () => {
@@ -49,9 +50,9 @@ describe('shipped defaults', () => {
     expect(defaultModelsConfig.models[retired?.replacement ?? '']).toBeDefined();
   });
 
-  it('has 22 models with the expected harness-bearing spot checks', () => {
+  it('has 25 models with the expected harness-bearing spot checks', () => {
     const modelIds = Object.keys(defaultModelsConfig.models);
-    expect(modelIds).toHaveLength(22);
+    expect(modelIds).toHaveLength(25);
 
     for (const id of [
       'claude-opus-5',
@@ -66,6 +67,9 @@ describe('shipped defaults', () => {
       'gpt-5.6-sol',
       'gpt-5.1-codex',
       'opencode-deepseek-v4-flash-free',
+      'opencode-deepseek-v4-pro',
+      'pi-openrouter-deepseek-v4-flash',
+      'pi-openrouter-deepseek-v4-pro',
       'qwen2.5-coder:14b',
     ]) {
       expect(modelIds, `missing model ${id}`).toContain(id);
@@ -77,6 +81,59 @@ describe('shipped defaults', () => {
     expect(defaultModelsConfig.models['qwen3.5:9b'].harness).toBe('ollama-http');
     expect(defaultModelsConfig.models['codex-ollama-qwen3.5:9b'].harness).toBe('ollama-agentic');
     expect(defaultModelsConfig.models['opencode-deepseek-v4-flash-free'].harness).toBe('opencode');
+    expect(defaultModelsConfig.models['pi-openrouter-deepseek-v4-flash'].harness).toBe('pi');
+  });
+
+  it('registers pi-openrouter-deepseek-v4-flash and -pro as experimental pin-only Pi models via OpenRouter (#2904)', () => {
+    for (const id of ['pi-openrouter-deepseek-v4-flash', 'pi-openrouter-deepseek-v4-pro']) {
+      const model = defaultModelsConfig.models[id];
+      expect(model, id).toMatchObject({
+        provider: 'custom',
+        harness: 'pi',
+        envKey: 'OPENROUTER_API_KEY',
+        contextWindow: 1000000,
+        experimental: true,
+      });
+      expect(model.providerModel, id).toMatch(/^openrouter\/deepseek\//);
+      for (const list of Object.values(defaultModelsConfig.tiers)) {
+        expect(list, id).not.toContain(id);
+      }
+    }
+  });
+
+  it('ships no pi model with an azure/ or deepseek/ prefix (ADR-0163)', () => {
+    for (const [id, model] of Object.entries(defaultModelsConfig.models)) {
+      if (model.harness !== 'pi') continue;
+      const pm = model.providerModel?.toLowerCase();
+      expect(pm, id).toBeDefined();
+      expect(pm!.startsWith('azure/'), id).toBe(false);
+      expect(pm!.startsWith('deepseek/'), id).toBe(false);
+    }
+  });
+
+  it('points opencode-deepseek-v4-flash at OpenCode Go V4.1 Flash at the published prices (#2898)', () => {
+    expect(defaultModelsConfig.models['opencode-deepseek-v4-flash']).toMatchObject({
+      harness: 'opencode',
+      providerModel: 'opencode-go/deepseek-v4.1-flash',
+      costPerMtokInput: 0.3,
+      costPerMtokOutput: 1.2,
+      envKey: 'OPENCODE_API_KEY',
+    });
+  });
+
+  it('registers opencode-deepseek-v4-pro as an experimental pin-only OpenCode Go model (#2898)', () => {
+    expect(defaultModelsConfig.models['opencode-deepseek-v4-pro']).toMatchObject({
+      harness: 'opencode',
+      providerModel: 'opencode-go/deepseek-v4-pro',
+      envKey: 'OPENCODE_API_KEY',
+      contextWindow: 1000000,
+      costPerMtokInput: 1.74,
+      costPerMtokOutput: 3.48,
+      experimental: true,
+    });
+    for (const ids of Object.values(defaultModelsConfig.tiers)) {
+      expect(ids).not.toContain('opencode-deepseek-v4-pro');
+    }
   });
 
   it('offers Astra through subscription-authenticated Codex without changing tier defaults', () => {
@@ -125,9 +182,18 @@ describe('shipped defaults', () => {
     }
 
     expect(defaultModelsConfig.tiers.boss).toHaveLength(8);
-    expect(defaultModelsConfig.tiers.worker).toHaveLength(12);
+    expect(defaultModelsConfig.tiers.worker).toHaveLength(11);
     expect(defaultModelsConfig.tiers.checker).toHaveLength(7);
     expect(defaultModelsConfig.tiers.triage).toHaveLength(4);
+  });
+
+  it('flags opencode-deepseek-v4-flash-free as trainsOnPrompts and lists it in no tier', () => {
+    expect(defaultModelsConfig.models['opencode-deepseek-v4-flash-free'].trainsOnPrompts).toBe(true);
+    const tiered = new Set(Object.values(defaultModelsConfig.tiers).flat());
+    expect(tiered.has('opencode-deepseek-v4-flash-free')).toBe(false);
+    for (const [id, def] of Object.entries(defaultModelsConfig.models)) {
+      if (def.trainsOnPrompts) expect(tiered.has(id), `trainsOnPrompts model '${id}' is in a tier`).toBe(false);
+    }
   });
 
   it('preserves tier order invariants the router depends on', () => {
@@ -293,22 +359,31 @@ describe('steward route (#2111)', () => {
     }
   });
 
-  it('ships no model that pairs the claude-cli harness with a non-anthropic provider', () => {
-    const offenders = Object.entries(defaultModelsConfig.models)
-      .filter(([, def]) => {
-        const harness =
-          def.harness ??
-          (def.codex && def.provider === 'ollama'
-            ? 'ollama-command-agent'
-            : def.codex
-              ? 'codex-cli'
-              : def.provider === 'ollama'
-                ? 'ollama-http'
-                : 'claude-cli');
-        return harness === 'claude-cli' && def.provider !== 'anthropic';
-      })
-      .map(([id]) => id);
+  it('ships no model that pairs the claude-cli harness with a non-anthropic provider unless it sets an endpoint', () => {
+    const offenders = claudeCliOffenders(defaultModelsConfig.models);
     expect(offenders).toEqual([]);
     expect(defaultModelsConfig.tiers.checker).not.toContain('gpt-4.1-mini');
   });
+
+  it('exempts a claude-cli model with an endpoint from the non-anthropic guard', () => {
+    const base = { ...defaultModelsConfig.models['claude-fable-5'], provider: 'custom' as const };
+    expect(claudeCliOffenders({ a: base, b: { ...base, endpoint: 'https://openrouter.ai/api' } })).toEqual(['a']);
+  });
 });
+
+function claudeCliOffenders(models: Record<string, ModelDefaults>): string[] {
+  return Object.entries(models)
+    .filter(([, def]) => {
+      const harness =
+        def.harness ??
+        (def.codex && def.provider === 'ollama'
+          ? 'ollama-command-agent'
+          : def.codex
+            ? 'codex-cli'
+            : def.provider === 'ollama'
+              ? 'ollama-http'
+              : 'claude-cli');
+      return harness === 'claude-cli' && def.provider !== 'anthropic' && !def.endpoint;
+    })
+    .map(([id]) => id);
+}

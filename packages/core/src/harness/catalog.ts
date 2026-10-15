@@ -24,6 +24,9 @@ export interface HarnessCatalogEntry {
   id: string;
   /** True when the harness can edit files in the worktree (build routes require this). */
   agentic: boolean;
+  /** Built-in agentic harness with no dedicated build route: BUILD rides the generic commit-only
+   *  `command` route (#2909). */
+  genericBuildRoute?: boolean;
   /** How doctor probes reachability for this harness. */
   probe: HarnessProbe;
 }
@@ -50,6 +53,12 @@ const CATALOG_ENTRIES: HarnessCatalogEntry[] = [
     id: 'opencode',
     agentic: true,
     probe: { kind: 'command', command: 'opencode', okLabel: 'opencode CLI', auth: 'cli' },
+  },
+  {
+    id: 'pi',
+    agentic: true,
+    genericBuildRoute: true,
+    probe: { kind: 'command', command: 'pi', okLabel: 'pi CLI', auth: 'cli' },
   },
   { id: 'ollama-agentic', agentic: true, probe: { kind: 'ollama', okLabel: 'ollama agentic' } },
   // Local command-loop worker (runOllamaCommandAgent). Not yet extracted into a
@@ -83,6 +92,11 @@ export function builtInHarnessRedeclaredMessage(id: string): string {
 
 export function isAgenticHarness(harnessId: string): boolean {
   return HARNESS_CATALOG[harnessId]?.agentic ?? false;
+}
+
+/** True for a built-in harness whose BUILD runs through the generic `command` route (#2909). */
+export function usesGenericBuildRoute(harnessId: string): boolean {
+  return HARNESS_CATALOG[harnessId]?.genericBuildRoute === true;
 }
 
 /** CLI a catalog harness needs on PATH, or undefined when it has none to check

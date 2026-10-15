@@ -53,7 +53,7 @@ describe('cli', () => {
     describe('repo-configured command harness (#2691)', () => {
       const setup = (agentOnPath: boolean) => {
         coreFakes.isCommandAvailable.mockImplementation((c: string) =>
-          c === 'my-agent' ? agentOnPath : !['claude', 'codex', 'opencode'].includes(c),
+          c === 'my-agent' ? agentOnPath : !['claude', 'codex', 'opencode', 'pi'].includes(c),
         );
         mkdirSync(paths().root, { recursive: true });
         writeFileSync(
@@ -120,7 +120,7 @@ describe('cli', () => {
       const agent = { command: 'my-agent --headless', prompt: 'stdin', output: 'stdout', agentic: true, usage: 'none' };
       const setup = (harnessId: string, agentOnPath: boolean, usedHarness = 'my-agent') => {
         coreFakes.isCommandAvailable.mockImplementation((c: string) =>
-          c === 'my-agent' ? agentOnPath : !['claude', 'codex', 'opencode'].includes(c),
+          c === 'my-agent' ? agentOnPath : !['claude', 'codex', 'opencode', 'pi'].includes(c),
         );
         mkdirSync(paths().root, { recursive: true });
         writeFileSync(

@@ -34,6 +34,7 @@ import { lintFactoryConfig } from '../config/config-lint.js';
 import { planPhase as planPhaseDefault, type PlanResult } from '../phases/plan.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
 import { publishParkComment } from './park-comment.js';
+import { gateOpencodeBuildOnBreaker, providerFallbackPreferrer } from './provider-breaker-gate.js';
 import { upsertSlicePlanComment } from '../readiness/slice-plan-github.js';
 import { withSliceState } from '../readiness/slice-plan.js';
 import type { ReviewFloorPathChange, ReviewFloorRuleSet } from '../review/floor.js';
@@ -519,23 +520,8 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     );
   };
 
-  const preferFallbackWhenProviderIsOpen = async (
-    primary: string | undefined,
-    fallback: string | undefined,
-    phase: string,
-  ): Promise<string | undefined> => {
-    if (!primary || !fallback) return primary;
-    const provider = ports.router.registryRef.get(primary)?.provider;
-    if (!provider) return primary;
-    const status = await ports.breaker.status(provider);
-    if (!status.open) return primary;
-    const minutes = Math.ceil(status.remainingMs / 60_000);
-    log(
-      'provider_breaker_skip',
-      `breaker open for ${provider} (${status.entry.reason}) — using ${fallback} for ${phase}, ${minutes}m remaining`,
-    );
-    return fallback;
-  };
+  const gateDeps = { router: ports.router, breaker: ports.breaker, log };
+  const preferFallbackWhenProviderIsOpen = providerFallbackPreferrer(gateDeps);
 
   try {
     if (ports.acquireEnvironment) {
@@ -786,10 +772,20 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
         breakerBlocked = gate.codexBlocked;
       }
 
-      // PLAN already honors pinnedRoute and rewrites the spec; re-apply here so a plan port that
-      // ignores it (a daemon or a test double) still cannot route a pinned worker elsewhere.
+      // PLAN honors pinnedRoute; re-apply it so a plan port that ignores it cannot route elsewhere.
       let buildRoute = pinnedRoute ?? plan.route;
       let buildModel = request.modelPins.build;
+      if (request.failover.enabled && buildRoute === 'opencode') {
+        const target = await gateOpencodeBuildOnBreaker(gateDeps, {
+          opencodeModel: buildModel ?? ports.router.resolveAll('build_opencode')[0],
+          routePinned: request.preferredRoute !== undefined,
+          codexDisabled: request.codexDisabled || breakerBlocked,
+        });
+        if (target) {
+          buildRoute = target.route;
+          buildModel = target.model;
+        }
+      }
       if (request.failover.enabled && buildRoute === 'claude') {
         const primaryClaude = buildModel ?? ports.router.resolveAll('build_claude')[0];
         const fallbackCodex = request.modelPins.buildFallback ?? ports.router.resolveAll('build_codex')[0];
@@ -837,6 +833,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
         publishFromBuild: request.publishFromBuild,
         modelOverride: buildModel,
         pinnedModel: buildModel !== undefined && buildModel === request.modelPins.build,
+        routePinned: request.preferredRoute !== undefined,
         codexFallbackModel: request.modelPins.buildFallback ?? ports.router.resolveAll('build_codex')[0],
         onProviderFailure: rememberProviderFailure,
         sandbox: request.sandboxPolicy,

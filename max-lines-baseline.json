@@ -23,7 +23,6 @@
   "packages/core/src/harness/claude-cli.test.ts": 596,
   "packages/core/src/harness/codex-cli.test.ts": 602,
   "packages/core/src/harness/ollama-agentic.test.ts": 564,
-  "packages/core/src/harness/opencode.test.ts": 511,
   "packages/core/src/hosted/runner.test.ts": 502,
   "packages/core/src/hosted/store-contract.ts": 628,
   "packages/core/src/index.ts": 643,

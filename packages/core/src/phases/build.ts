@@ -20,6 +20,7 @@ import type { Constitution, FailoverReason } from '../types/index.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE } from '../utils/untrusted-input.js';
 import type { BuildRoutePin } from '../config/repo.js';
+import { failOverOpencodeBuild } from './build-opencode-failover.js';
 
 export interface BuildResult {
   ok: boolean;
@@ -91,6 +92,8 @@ async function buildPhaseImpl(opts: {
   /** modelOverride is the user's build pin (#367, #2510). A pinned build crosses harnesses only on
    *  usage_cap or rate_limit; any other failure (local_auth included) parks like a pinned plan. */
   pinnedModel?: boolean;
+  /** The repo pinned the build route in .factory/config.json (ADR-0092); the opencode route never crosses harnesses then (#2885). */
+  routePinned?: boolean;
   /** Cross-provider Codex fallback used when a Claude worker is capped or unavailable. */
   codexFallbackModel?: string;
   onProviderFailure?: (info: { provider: string; reason: FailoverReason }) => void | Promise<void>;
@@ -283,6 +286,18 @@ async function buildPhaseImpl(opts: {
         retryCause: 'failover',
         modelOverride: fallback,
       });
+    } else if (taskType === 'build_opencode' && (reason === 'usage_cap' || reason === 'rate_limit')) {
+      const next = await failOverOpencodeBuild({
+        router,
+        reason,
+        runOpts,
+        build: opts,
+        fromModel: attempts?.at(-1)?.model ?? 'unknown',
+        prompts: { claude: claudeRoutePrompt, codex: () => buildCommitOnlyPrompt(promptOpts) },
+      });
+      if (!next) throw err;
+      ({ route, result } = next);
+      crossHarnessReason = reason;
     } else if (taskType !== 'build_codex' || !crossHarnessOk || reason === undefined) throw err;
     else {
       if (opts.autoFailover && !opts.autoFailover.enabled) throw err;
