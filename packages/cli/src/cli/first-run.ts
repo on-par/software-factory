@@ -1,5 +1,7 @@
 // packages/cli/src/cli/first-run.ts — designed first-run copy: overview + structured error messages
 
+import { openCodeVersion } from '@on-par/factory-core/internal';
+
 export const DOCS_URL = 'https://github.com/on-par/software-factory#readme';
 export const CLAUDE_CODE_URL = 'https://docs.anthropic.com/en/docs/claude-code';
 export const GITHUB_TOKENS_URL = 'https://github.com/settings/tokens';
@@ -26,6 +28,7 @@ Docs:                   ${DOCS_URL}
 }
 
 export const CODEX_CLI_URL = 'https://developers.openai.com/codex/cli';
+export const OPENCODE_URL = 'https://opencode.ai';
 
 /** Coding agent CLIs the factory can drive for PLAN and BUILD. Any one of them is enough. */
 export const AGENT_CLIS = ['claude', 'codex', 'opencode'] as const;
@@ -36,7 +39,7 @@ export function availableAgentClis(commandAvailable: (cmd: string) => boolean): 
 }
 
 export function missingAgentCliMessage(): string {
-  return `no coding agent CLI found on PATH (claude, codex or opencode). Install one: Claude Code (${CLAUDE_CODE_URL}) or the Codex CLI (${CODEX_CLI_URL}), then sign in with \`claude /login\` or \`codex login\``;
+  return `no coding agent CLI found on PATH (claude, codex or opencode). Install one: Claude Code (${CLAUDE_CODE_URL}), the Codex CLI (${CODEX_CLI_URL}) or OpenCode (${OPENCODE_URL}; \`${openCodeVersion.OPENCODE_PINNED_INSTALL}\`), then sign in with \`claude /login\`, \`codex login\` or \`opencode auth login\`. OpenCode models are experimental: set FACTORY_EXPERIMENTAL=1 to use them`;
 }
 
 export function missingTokenMessage(): string {
