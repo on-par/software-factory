@@ -45,16 +45,22 @@ beforeAll(() => {
   };
   script('ok.sh', 'echo ok');
   script('silent.sh', 'exit 0');
+  script(
+    'commit.sh',
+    "printf 'ok\\n' > HARNESS_CHECK.txt && git add HARNESS_CHECK.txt && git commit -q -m check && echo ok",
+  );
+  script('edit.sh', "printf 'ok\\n' > HARNESS_CHECK.txt; echo ok");
+  script('other.sh', 'printf ok > other.txt && git add other.txt && git commit -q -m x && echo ok');
   script('slow.sh', 'sleep 5; echo ok');
 });
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-function decl(script: string): HarnessDeclaration {
+function decl(script: string, agentic = false): HarnessDeclaration {
   return {
     command: join(dir, script),
     prompt: 'stdin',
     output: 'stdout',
-    agentic: false,
+    agentic,
     usage: 'none',
   };
 }
@@ -72,9 +78,59 @@ const base = { id: 'my-agent', model: 'fx-model', registry };
 describe('runHarnessCheck', () => {
   it('passes every case, injection cases included, for a conforming script', async () => {
     const results = await runHarnessCheck({ ...base, declaration: decl('ok.sh') });
-    const expected = codingHarnessContractCases(UNUSED).length;
+    const expected = codingHarnessContractCases(UNUSED).length + 1;
     expect(results).toHaveLength(expected);
     expect(results.filter((r) => !r.ok)).toEqual([]);
+    expect(results[results.length - 1]).toMatchObject({
+      name: 'commits a change in the worktree',
+      ok: true,
+      skip: 'agentic: false',
+    });
+  });
+
+  const commitCase = async (script: string, execFn?: ExecFn) =>
+    (await runHarnessCheck({ ...base, declaration: decl(script, true), execFn })).find(
+      (r) => r.name === 'commits a change in the worktree',
+    );
+
+  it('passes the commit case for an agentic script that commits HARNESS_CHECK.txt', async () => {
+    const r = await commitCase('commit.sh');
+    expect(r?.ok).toBe(true);
+    expect(r?.skip).toBeUndefined();
+  });
+
+  it('fails the commit case when the agent edits but does not commit', async () => {
+    const r = await commitCase('edit.sh');
+    expect(r?.ok).toBe(false);
+    expect(r?.error).toContain('no new commit was found');
+    expect(r?.fix).toContain('commit');
+    expect(r?.fix).toContain('not push');
+  });
+
+  it('fails the commit case when the agent never writes the file', async () => {
+    expect((await commitCase('ok.sh'))?.error).toContain('no new commit was found');
+  });
+
+  it('fails the commit case when a different file is committed', async () => {
+    expect((await commitCase('other.sh'))?.error).toContain('HARNESS_CHECK.txt is not tracked');
+  });
+
+  it('fails the commit case with the harness error when the run rejects', async () => {
+    const r = await commitCase('silent.sh');
+    expect(r?.ok).toBe(false);
+    expect(r?.error).toContain('empty_response');
+  });
+
+  it('removes the commit scratch repo afterwards', async () => {
+    const cwds = new Set<string>();
+    const execFn: ExecFn = (cmd, o) => {
+      if (o.cwd?.includes('factory-harness-commit-')) cwds.add(o.cwd);
+      return defaultExecFn(cmd, o);
+    };
+    await commitCase('commit.sh', execFn);
+    await commitCase('edit.sh', execFn);
+    expect(cwds.size).toBeGreaterThan(0);
+    for (const c of cwds) expect(existsSync(c)).toBe(false);
   });
 
   it('explains a silent command on the success case; the substituted cases still pass', async () => {
