@@ -854,7 +854,7 @@ describe('watchChecks no-checks early exit and progress (#2386)', () => {
 
     expect(outcome).toBe('no-checks');
     expect(onNoChecks).toHaveBeenCalledTimes(1);
-    expect(onNoChecks.mock.calls[0][0]).toMatchObject({ sha: 'abc123' });
+    expect(onNoChecks.mock.calls[0][0]).toMatchObject({ sha: 'abc123', reason: 'grace-elapsed' });
     expect(now()).toBeGreaterThanOrEqual(90_000);
     expect(now()).toBeLessThanOrEqual(90_000 + 60_000);
     expect(getCombinedStatusForRef).toHaveBeenCalledTimes(1);
