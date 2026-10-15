@@ -50,6 +50,7 @@ import {
   orphanMicroVmChecks,
   unmergedGreenPrChecks,
 } from './doctor-health.js';
+import { OPENCODE_LIVE_AUTH_CHECK, opencodeLiveAuthCheck, runOpencodeAuthProbe } from './doctor-opencode-probe.js';
 import { resolveDoctorHarnesses } from './doctor-harness-view.js';
 import { reconcileQueue } from './doctor-queue-reconcile.js';
 import { HARNESS_SETUP, harnessInstallChecks } from './doctor-harness.js';
@@ -829,7 +830,11 @@ export function sandboxClaudeAuthChecks(result: ClaudeAuthProbeResult): DoctorCh
   return [host, sandboxed];
 }
 
-const AGENT_AUTH_CHECKS = new Set([...HARNESS_SETUP.map(({ cli }) => `${cli} signed in`), HOST_AUTH_CHECK]);
+const AGENT_AUTH_CHECKS = new Set([
+  ...HARNESS_SETUP.map(({ cli }) => `${cli} signed in`),
+  HOST_AUTH_CHECK,
+  OPENCODE_LIVE_AUTH_CHECK,
+]);
 
 /** #2496: doctor fails on agent sign-in only when no installed agent is signed in. A logged-out
  *  agent is a warning while another one is signed in, and a hard failure when none is. Skipped
@@ -927,7 +932,7 @@ export async function cmdDoctor(
     commandHarnesses: () => (harnessView?.merged ? repoCommandHarnesses(harnessView.merged, harnessView.registry) : []),
   });
 
-  // Only with --probe-inference: these send a real prompt (uses quota). Plain doctor makes no inference call.
+  // Only with --probe-inference: these send a real prompt (claude, opencode; uses quota). Plain doctor makes no inference call.
   if (opts.probeInference) {
     const CLAUDE_AUTH_PROBE = 'claude -p "reply with exactly: ok"';
     const probeExec = (cmd: string): string | null => {
@@ -978,6 +983,8 @@ export async function cmdDoctor(
     }
 
     checks.push(...sandboxClaudeAuthChecks({ host, sandboxed, hostDetail, sandboxDetail }));
+
+    checks.push(opencodeLiveAuthCheck(runOpencodeAuthProbe(rt, repoRoot)));
   }
 
   checks.push(claudeKeychainCheck(rt.probeClaudeKeychain()));
