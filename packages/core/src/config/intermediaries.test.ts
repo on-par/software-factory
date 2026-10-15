@@ -80,11 +80,39 @@ describe('directDeepSeekReason (ADR-0163)', () => {
   });
 
   it('flags api.deepseek.com in providerOptions at any depth and case', () => {
-    expect(reason({ providerOptions: { baseURL: 'https://api.deepseek.com/v1' } })).toMatch(/providerOptions\.baseURL/);
-    expect(reason({ providerOptions: { provider: { options: { baseURL: 'https://API.DEEPSEEK.COM' } } } })).toMatch(
-      /api\.deepseek\.com/,
+    expect(reason({ providerOptions: { baseURL: 'https://api.deepseek.com/v1' } })).toBe(
+      "providerOptions.baseURL 'https://api.deepseek.com/v1' points at api.deepseek.com",
     );
-    expect(reason({ providerOptions: { urls: ['https://api.deepseek.com'] } })).toMatch(/api\.deepseek\.com/);
+    expect(reason({ providerOptions: { provider: { options: { baseURL: 'https://API.DEEPSEEK.COM' } } } })).toBe(
+      "providerOptions.provider.options.baseURL 'https://API.DEEPSEEK.COM' points at api.deepseek.com",
+    );
+    expect(reason({ providerOptions: { urls: ['https://api.deepseek.com'] } })).toBe(
+      "providerOptions.urls[0] 'https://api.deepseek.com' points at api.deepseek.com",
+    );
+  });
+
+  it.each([
+    ['api.deepseek.com/v1', 'api.deepseek.com'],
+    ['http://api.deepseek.com:8080/v1', 'api.deepseek.com'],
+    ['https://api.deepseek.com./v1', 'api.deepseek.com'],
+    ['https://deepseek.com', 'deepseek.com'],
+    ['https://eu.api.deepseek.com/v1', 'eu.api.deepseek.com'],
+  ])('flags DeepSeek host %s by its parsed hostname', (baseURL, host) => {
+    expect(reason({ providerOptions: { baseURL } })).toBe(`providerOptions.baseURL '${baseURL}' points at ${host}`);
+  });
+
+  it.each([
+    'https://api.deepseek.com.evil.example/v1',
+    'https://evil.example/?u=api.deepseek.com',
+    'https://evil.example/api.deepseek.com/v1',
+    'https://notdeepseek.com/v1',
+    'https://openrouter.ai/api/v1#api.deepseek.com',
+    'not a url at all',
+    'http://[::1',
+    '',
+  ])('does not flag lookalike or unparseable value %j', (baseURL) => {
+    expect(reason({ providerOptions: { baseURL } })).toBeUndefined();
+    expect(reason({ claudeFlag: baseURL })).toBeUndefined();
   });
 
   it('ignores non-string providerOptions values', () => {

@@ -45,7 +45,9 @@ describe('repo models.registry direct DeepSeek (ADR-0163)', () => {
 
   it('refuses a providerOptions baseURL on api.deepseek.com', () => {
     const repo = repoWith({ harness: 'opencode', providerOptions: { baseURL: 'https://api.deepseek.com/v1' } });
-    expect(() => applyRepoConfig(models, repo)).toThrow(/api\.deepseek\.com/);
+    expect(() => applyRepoConfig(models, repo)).toThrow(
+      "providerOptions.baseURL 'https://api.deepseek.com/v1' points at api.deepseek.com",
+    );
     expect(() => applyRepoConfig(models, repo)).toThrow(/OpenRouter/);
     expect(() => applyRepoConfig(models, repo)).toThrow(/OpenCode Go/);
   });
