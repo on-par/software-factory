@@ -1,6 +1,7 @@
 // packages/cli/src/cli/doctor.ts — `factory doctor` environment preflight
 
 import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
@@ -52,8 +53,6 @@ import {
 } from './doctor-health.js';
 import { OPENCODE_LIVE_AUTH_CHECK, opencodeLiveAuthCheck, runOpencodeAuthProbe } from './doctor-opencode-probe.js';
 import { resolveDoctorHarnesses } from './doctor-harness-view.js';
-import { gitAuthCheck } from './doctor-git-auth.js';
-import { type DoctorCheck, type DoctorExecOptions, NOT_IN_REPO_HINT, NOT_IN_REPO_SKIP_DETAIL } from './doctor-types.js';
 import { reconcileQueue } from './doctor-queue-reconcile.js';
 import { HARNESS_SETUP, harnessInstallChecks } from './doctor-harness.js';
 export { HARNESS_SETUP, harnessInstallChecks };
@@ -63,10 +62,28 @@ import { distFreshnessProbe } from './staleness.js';
 import { readStopFileStatus, stopSentinelCheck } from './stop-sentinel.js';
 import { checkSweepHeartbeat, defaultSweepHeartbeatDeps, sweepHeartbeatCheck } from './sweep-heartbeat.js';
 
-/** A declared, agentic command harness the repo's models.registry uses (#2691). */
-export type { DoctorCheck, DoctorExecOptions };
-export { NOT_IN_REPO_HINT, NOT_IN_REPO_SKIP_DETAIL };
+export interface DoctorCheck {
+  name: string;
+  ok: boolean;
+  detail: string;
+  /** One-line fix suggestion; only meaningful when ok=false. */
+  fix?: string;
+  /** Optional checks never fail the doctor exit code. */
+  optional?: boolean;
+  /** Setup section the row renders under (#2555); unsectioned rows render first. */
+  section?: string;
+  /** Exactly one shell command to run next (#2557); rendered as the last line of a non-ok row. */
+  next?: string;
+}
 
+export interface DoctorExecOptions {
+  /** Extra env vars merged over process.env for this command. */
+  env?: Record<string, string>;
+  /** Kill the command after this many ms; the probe then returns null. */
+  timeoutMs?: number;
+}
+
+/** A declared, agentic command harness the repo's models.registry uses (#2691). */
 export interface ConfiguredCommandHarness {
   harness: string;
   /** The declared `command` template, verbatim. */
@@ -105,6 +122,11 @@ export const COMMAND_HARNESS_SECTION = 'Command harness';
 /** Repo wired-up rows, sectioned only inside a git repo (#2557). */
 export const REPO_SECTION = 'Repo';
 
+export const NOT_IN_REPO_HINT = 'cd into your repo, then run factory doctor again';
+
+/** Detail for every repo wired-up row when doctor runs outside a git repository (#2554). */
+export const NOT_IN_REPO_SKIP_DETAIL = `skipped: not inside a git repository; ${NOT_IN_REPO_HINT}`;
+
 export function hasSandboxRuntime(platform: NodeJS.Platform, commandAvailable: (cmd: string) => boolean): boolean {
   return detectSandboxRuntime(platform, commandAvailable) !== 'none';
 }
@@ -132,6 +154,133 @@ export function codexAuthMethod(statusOutput: string | null): string | null {
   if (text.includes('api key')) return 'API key';
   if (text.includes('access token')) return 'access token';
   return 'unknown method';
+}
+
+const GIT_AUTH_CHECK = 'git auth';
+
+/** Non-interactive read-only probe of origin. `credential.interactive=never` turns off Git
+ *  Credential Manager UI and an empty `core.askPass` turns off configured askpass programs;
+ *  stored credentials from any helper still work. */
+export const GIT_AUTH_PROBE_CMD = 'git -c credential.interactive=never -c core.askPass= ls-remote --quiet origin HEAD';
+/** GIT_TERMINAL_PROMPT=0 makes git fail instead of asking on the terminal; empty GIT_ASKPASS
+ *  and SSH_ASKPASS turn off askpass programs and ssh's GUI askpass; GCM_INTERACTIVE=never
+ *  turns off Git Credential Manager prompts. */
+export const GIT_AUTH_PROBE_ENV: Readonly<Record<string, string>> = {
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_ASKPASS: '',
+  SSH_ASKPASS: '',
+  GCM_INTERACTIVE: 'never',
+};
+/** Bounds the probe, e.g. an ssh key passphrase prompt that waits on /dev/tty. */
+export const GIT_AUTH_PROBE_TIMEOUT_MS = 15_000;
+
+/** Remedy shown only when the git-auth probe fails: wires git's credential helper to gh. */
+export const GIT_AUTH_FIX = 'run `gh auth setup-git` so git uses your gh credentials, then re-run `factory doctor`';
+
+/** Classifies an origin URL's transport (#2939). Returns null when it is not SSH (ssh://,
+ *  git+ssh://, ssh+git:// or scp-style `[user@]host:path`), else the bare hostname, or null
+ *  when the host is not a safe hostname. Never returns the user, port or path. */
+export function sshOriginHost(origin: string): { host: string | null } | null {
+  const url = origin.trim();
+  let candidate: string;
+  const scheme = /^(?:ssh|git\+ssh|ssh\+git):\/\/(?:[^@/]*@)?([^/:]*)/i.exec(url);
+  if (scheme) {
+    candidate = scheme[1] ?? '';
+  } else if (url.includes('://')) {
+    return null;
+  } else {
+    const scp = /^(?:([^@/:\s]+)@)?([^/:\s]+):/.exec(url);
+    if (!scp || (scp[2] ?? '').length <= 1) return null;
+    candidate = scp[2] ?? '';
+  }
+  return { host: /^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(candidate) ? candidate : null };
+}
+
+/** Remedy for a failing SSH origin (#2939); `<host>` stands in when the host is unknown. */
+export function gitAuthSshFix(host: string | null): string {
+  const target = host ?? '<host>';
+  return `origin uses SSH: test with \`ssh -T git@${target}\` and check your SSH key is loaded (\`ssh-add -l\`), then re-run \`factory doctor\``;
+}
+
+type TryExec = (cmd: string, opts?: DoctorExecOptions) => string | null;
+/** GitHub's SSH endpoints: ssh.github.com is the port-443 alternate for github.com (#2940). */
+const GITHUB_SSH_SIBLING_HOSTS: Readonly<Record<string, string>> = {
+  'github.com': 'ssh.github.com',
+  'ssh.github.com': 'github.com',
+};
+
+/** Identity files `ssh -G <host>` offers, `~` expanded; null when ssh could not run (#2940). The host is shell-safe. */
+export function sshIdentityFiles(host: string, tryExec: TryExec, home: string = homedir()): string[] | null {
+  const out = tryExec(`ssh -G ${host}`, { timeoutMs: 5_000 });
+  if (out === null) return null;
+  const values = out.split(/\r?\n/).map((line) => /^identityfile\s+(.+)$/i.exec(line.trim())?.[1]?.trim());
+  return values
+    .filter((v): v is string => !!v && v.toLowerCase() !== 'none')
+    .map((v) => (v === '~' ? home : v.startsWith('~/') ? resolve(home, v.slice(2)) : v));
+}
+
+/** Host alias mismatch (#2940): no existing key for the origin host, but its GitHub sibling has one. */
+export function sshHostAliasMismatch(
+  host: string,
+  tryExec: TryExec,
+  fileExists: (p: string) => boolean,
+  home?: string,
+): { originHost: string; siblingHost: string } | null {
+  const origin = host.toLowerCase();
+  const sibling = GITHUB_SSH_SIBLING_HOSTS[origin];
+  if (!sibling || sshIdentityFiles(origin, tryExec, home)?.some(fileExists) !== false) return null;
+  return sshIdentityFiles(sibling, tryExec, home)?.some(fileExists)
+    ? { originHost: origin, siblingHost: sibling }
+    : null;
+}
+
+export function gitAuthSshAliasFix(originHost: string, siblingHost: string): string {
+  return `origin host \`${originHost}\` gets no existing SSH key, but \`${siblingHost}\` does: add \`${originHost}\` to the \`Host ${siblingHost}\` line in \`~/.ssh/config\` (e.g. \`Host ${siblingHost} ${originHost}\`), then re-run \`factory doctor\``;
+}
+
+/** Git-auth check (#2482, #2483): skipped, never failing, outside a git repository or without
+ *  an origin remote. Otherwise runs a non-interactive `git ls-remote` against origin and fails
+ *  when it cannot authenticate. SSH origins get SSH guidance instead of `gh auth setup-git`
+ *  (#2939), and a Host alias mismatch is named when detected (#2940). The output never echoes the
+ *  origin URL, which may hold a token; only a bare SSH hostname may appear. */
+export function gitAuthCheck(
+  repoRoot: string | null,
+  tryExec: TryExec,
+  fileExists: (path: string) => boolean = existsSync,
+): DoctorCheck {
+  if (repoRoot === null) {
+    return { name: GIT_AUTH_CHECK, ok: true, optional: true, detail: NOT_IN_REPO_SKIP_DETAIL };
+  }
+  const origin = tryExec('git remote get-url origin');
+  if (!origin) {
+    return { name: GIT_AUTH_CHECK, ok: true, optional: true, detail: 'skipped: no origin remote configured' };
+  }
+  // An empty string is exit 0 with no HEAD ref (an empty repo): still authenticated.
+  const probe = tryExec(GIT_AUTH_PROBE_CMD, { env: { ...GIT_AUTH_PROBE_ENV }, timeoutMs: GIT_AUTH_PROBE_TIMEOUT_MS });
+  if (probe === null) {
+    const ssh = sshOriginHost(origin);
+    if (ssh) {
+      const m = ssh.host ? sshHostAliasMismatch(ssh.host, tryExec, fileExists) : null;
+      const host = m?.originHost ?? ssh.host;
+      return {
+        name: GIT_AUTH_CHECK,
+        ok: false,
+        detail: m
+          ? `git could not authenticate to origin over SSH: ssh offers no existing key for ${m.originHost}, but ${m.siblingHost} has one in ~/.ssh/config`
+          : 'git could not authenticate to origin over SSH non-interactively (prompting disabled)',
+        fix: m ? gitAuthSshAliasFix(m.originHost, m.siblingHost) : gitAuthSshFix(ssh.host),
+        ...(host ? { next: `ssh -T git@${host}` } : {}),
+      };
+    }
+    return {
+      name: GIT_AUTH_CHECK,
+      ok: false,
+      detail: 'git could not authenticate to origin non-interactively (prompting disabled)',
+      fix: GIT_AUTH_FIX,
+      next: 'gh auth setup-git',
+    };
+  }
+  return { name: GIT_AUTH_CHECK, ok: true, detail: 'git can authenticate to origin non-interactively' };
 }
 
 const SIGN_IN_EVIDENCE: Readonly<Record<string, string>> = {

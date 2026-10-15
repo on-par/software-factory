@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatDoctorChecks, runDoctorChecks } from './doctor.js';
 import {
+  formatDoctorChecks,
+  runDoctorChecks,
   GIT_AUTH_FIX,
   gitAuthCheck,
   gitAuthSshAliasFix,
@@ -9,7 +10,7 @@ import {
   sshHostAliasMismatch,
   sshIdentityFiles,
   sshOriginHost,
-} from './doctor-git-auth.js';
+} from './doctor.js';
 
 describe('gitAuthCheck SSH origins (#2939)', () => {
   const failingWith = (origin: string) => gitAuthCheck('/repo', (cmd) => (cmd.includes('ls-remote') ? null : origin));

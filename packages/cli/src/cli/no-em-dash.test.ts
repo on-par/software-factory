@@ -7,6 +7,7 @@ import {
   type DoctorCheck,
   type DoctorEnvProbes,
   formatDoctorChecks,
+  gitAuthCheck,
   harnessInstallChecks,
   NOT_IN_REPO_SKIP_DETAIL,
   runDoctorChecks,
@@ -14,7 +15,6 @@ import {
   sandboxClaudeAuthChecks,
 } from './doctor.js';
 import { declaredHarnessChecks } from './doctor-config.js';
-import { gitAuthCheck } from './doctor-git-auth.js';
 import {
   eventLogCheck,
   formatClaimReconcileReport,

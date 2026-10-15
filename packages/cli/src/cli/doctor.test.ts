@@ -14,9 +14,13 @@ import {
   doctorCheckIcon,
   doctorFailed,
   formatDoctorChecks,
+  GIT_AUTH_FIX,
+  GIT_AUTH_PROBE_CMD,
+  GIT_AUTH_PROBE_TIMEOUT_MS,
   HARNESS_SETUP,
   harnessInstallChecks,
   harnessSignInChecks,
+  gitAuthCheck,
   keychainPreflightError,
   NOT_IN_REPO_HINT,
   NOT_IN_REPO_SKIP_DETAIL,
@@ -26,7 +30,6 @@ import {
   sandboxClaudeAuthChecks,
   reconcileAgentAuthChecks,
 } from './doctor.js';
-import { GIT_AUTH_FIX, GIT_AUTH_PROBE_CMD, GIT_AUTH_PROBE_TIMEOUT_MS, gitAuthCheck } from './doctor-git-auth.js';
 import { PREREQUISITES_TEXT } from './index.js';
 
 const SIGN_IN_ENV_KEYS = new Set(['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'CODEX_API_KEY', 'OPENCODE_API_KEY']);
