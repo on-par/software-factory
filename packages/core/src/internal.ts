@@ -428,6 +428,7 @@ export type {
   QueueIssue,
   QueueLabelSpec,
   QueueMigrationStep,
+  QueueOrderConflict,
   QueuePreflight,
   QueuePreflightDecision,
   QueueReleaseOutcome,

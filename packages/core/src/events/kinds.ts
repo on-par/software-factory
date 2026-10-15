@@ -119,6 +119,7 @@ export type EventKind =
   | 'post-merge-defect'
   | 'pr_opened'
   | 'queue_admission_conflict'
+  | 'queue_order_conflict'
   | 'queue_added'
   | 'queue_reprioritized'
   | 'queue_rationale_comment_failed'
@@ -374,6 +375,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   pr_opened: { severity: 'info', isPark: false, isTerminal: false },
   queue_added: { severity: 'info', isPark: false, isTerminal: false },
   queue_admission_conflict: { severity: 'warn', isPark: false, isTerminal: false },
+  queue_order_conflict: { severity: 'warn', isPark: false, isTerminal: false },
   queue_reprioritized: { severity: 'info', isPark: false, isTerminal: false },
   queue_rationale_comment_failed: { severity: 'warn', isPark: false, isTerminal: false },
   project_queue_refresh_failed: { severity: 'warn', isPark: false, isTerminal: false },
