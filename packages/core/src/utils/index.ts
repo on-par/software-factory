@@ -236,7 +236,7 @@ export async function cleanupWorktree(
 }
 
 export interface LaneWorktreeReapResult {
-  outcome: 'removed' | 'kept-dirty' | 'kept-branch-mismatch' | 'absent';
+  outcome: 'removed' | 'kept-dirty' | 'kept-committed' | 'kept-branch-mismatch' | 'absent';
   branch: string | null;
   branchDeleted: boolean;
 }
@@ -325,6 +325,77 @@ export async function reapLaneWorktree(
   log(
     'worktree-gc',
     `removed lane worktree ${worktreePath} for issue #${opts.issue}${branchDeleted ? `, deleted branch ${branch}` : ''}`,
+  );
+  return { outcome: 'removed', branch, branchDeleted };
+}
+
+/**
+ * Removes the lane worktree and local branch of a one-shot `factory ship` that ended without a
+ * PR (#3008), fail-closed: the checked-out branch must be the lane's `<prefix>/<issue>-*`
+ * branch, the tree must be completely clean (untracked files count), and HEAD must have zero
+ * commits beyond the default remote base. Zero commits also means no PR can exist. Every probe
+ * failure means keep.
+ */
+export async function reapCleanShipWorktree(
+  repoRoot: string,
+  worktreePath: string,
+  opts: {
+    issue: number;
+    branchPrefix?: string;
+    log?: (type: EventKind, msg: string) => void;
+    sandbox?: WorktreeSandbox;
+  },
+): Promise<LaneWorktreeReapResult> {
+  const log = opts.log ?? (() => {});
+  if (!existsSync(worktreePath)) {
+    return { outcome: 'absent', branch: null, branchDeleted: false };
+  }
+
+  const lanePrefix = `${branchPrefixSlug(opts.branchPrefix)}/${opts.issue}-`;
+  const branch = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: worktreePath }).then(
+    (r) => r.stdout.trim(),
+    () => null,
+  );
+  if (branch === null || !branch.startsWith(lanePrefix)) {
+    log(
+      'warn',
+      `worktree at ${worktreePath} is on '${branch ?? 'unknown'}', not a ${lanePrefix}* lane branch — leaving it alone`,
+    );
+    return { outcome: 'kept-branch-mismatch', branch, branchDeleted: false };
+  }
+
+  const status = await execGit(['status', '--porcelain'], { cwd: worktreePath }).catch(() => null);
+  if (status === null || status.stdout.trim() !== '') {
+    log('worktree-gc', `kept worktree ${worktreePath} — it has uncommitted changes`);
+    return { outcome: 'kept-dirty', branch, branchDeleted: false };
+  }
+
+  const base = await defaultRemoteBase(repoRoot);
+  const ahead = await execGit(['rev-list', '--count', `${base}..HEAD`], { cwd: worktreePath }).then(
+    (r) => Number.parseInt(r.stdout.trim(), 10),
+    () => Number.NaN,
+  );
+  if (ahead !== 0) {
+    log('worktree-gc', `kept worktree ${worktreePath} and branch ${branch} — it has commits beyond ${base}`);
+    return { outcome: 'kept-committed', branch, branchDeleted: false };
+  }
+
+  await cleanupWorktree(repoRoot, worktreePath, log, opts.sandbox);
+
+  let branchDeleted = false;
+  try {
+    await execGit(['branch', '-D', branch], { cwd: repoRoot });
+    branchDeleted = true;
+  } catch (err: any) {
+    log(
+      'warn',
+      `git branch -D failed for ${branch}: ${(err?.stderr ?? err?.message ?? String(err)).toString().trim()}`,
+    );
+  }
+
+  log(
+    'worktree-gc',
+    `removed PR-less ship worktree ${worktreePath} for issue #${opts.issue}${branchDeleted ? `, deleted branch ${branch}` : ''}`,
   );
   return { outcome: 'removed', branch, branchDeleted };
 }

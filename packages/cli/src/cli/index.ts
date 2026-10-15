@@ -123,7 +123,6 @@ import {
   resolveArtifactsDir,
   resolveLocalOnlyPolicy,
   resolveMergePolicy,
-  resolveSandboxPolicy,
   resolveSkipCI,
   resolveTimeouts,
   resolveUsageCap,
@@ -151,7 +150,6 @@ import {
   type SlicePlan,
   type SlicePlanCommentLookup,
   type UnmergedGreenPr,
-  type WorktreeSandbox,
   acquirePidFile,
   createCheckResumeStore,
   findSlicePlanComment,
@@ -201,6 +199,7 @@ import {
   pollBlockedParks,
   readCosts,
   readGithubQueueSnapshot,
+  reapCleanShipWorktree,
   reapLaneWorktree,
   reapOrphanContainers,
   reapOrphanMicroVm,
@@ -208,7 +207,6 @@ import {
   releaseStaleClaims,
   resolveBranchPrefix,
   resolveEffectiveConfig,
-  worktreeSandboxFor,
   resolveExperimental,
   resolveLocalOnly,
   resolvePrClassifierPolicy,
@@ -314,6 +312,7 @@ import { DeepCheckError, createDeepModelRunner, runIssueCheck, type DeepCheckMod
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
 import { readRunFlagOverrides } from './run-flags.js';
 import { runStalenessGuard } from './staleness.js';
+import { gcWorktreeSandbox, reapParkedLane, reapPrlessShip } from './worktree-reap.js';
 
 export type ConfigLoaderKey =
   | 'loadModelsConfig'
@@ -382,6 +381,7 @@ export type InternalOpKey =
   | 'createLocalSmallDryRun'
   | 'readCosts'
   | 'sweepWorktrees'
+  | 'reapCleanShipWorktree'
   | 'releaseStaleClaims'
   | 'pollBlockedParks'
   | 'findUnmergedGreenPrs'
@@ -397,6 +397,7 @@ const DEFAULT_INTERNAL_OPS: InternalOps = {
   createLocalSmallDryRun,
   readCosts,
   sweepWorktrees,
+  reapCleanShipWorktree,
   releaseStaleClaims,
   pollBlockedParks,
   findUnmergedGreenPrs,
@@ -417,6 +418,7 @@ function resolveInternalOps(overrides: Partial<InternalOps>, base: InternalOps =
     createLocalSmallDryRun: overrides.createLocalSmallDryRun ?? base.createLocalSmallDryRun,
     readCosts: overrides.readCosts ?? base.readCosts,
     sweepWorktrees: overrides.sweepWorktrees ?? base.sweepWorktrees,
+    reapCleanShipWorktree: overrides.reapCleanShipWorktree ?? base.reapCleanShipWorktree,
     releaseStaleClaims: overrides.releaseStaleClaims ?? base.releaseStaleClaims,
     pollBlockedParks: overrides.pollBlockedParks ?? base.pollBlockedParks,
     findUnmergedGreenPrs: overrides.findUnmergedGreenPrs ?? base.findUnmergedGreenPrs,
@@ -2207,6 +2209,9 @@ async function cmdShip(
       return await shipIssue(issueNum, { ...opts, branchPrefix });
     } catch (err: any) {
       if (err instanceof IssueSkippedError) return;
+      if (ghRepo && !(err instanceof InvalidWorkRequestInputError) && !(err instanceof LaneEnvironmentPauseError)) {
+        await reapPrlessShipWorktree(issueNum, repoRoot, ghRepo, paths, branchPrefix);
+      }
       // #2492: a pull request number is a usage error, not a failed ship.
       if (err instanceof InvalidWorkRequestInputError) throw new CliExitError(`factory: ${err.message}`, 2);
       throw new CliExitError(`Ship failed for issue #${issueNum}: ${err.message}`, 1);
@@ -2644,21 +2649,6 @@ export async function withRepoRunLock<T>(
   }
 }
 
-/** The repo's current docker-sandbox descriptor for worktree-gc sweeps, or undefined for
- *  every other runtime/config state (including a fixture config with no `sandbox` key). */
-function gcWorktreeSandbox(
-  sandboxCfg: FactoryConfig['sandbox'] | undefined,
-  repoRoot: string,
-): WorktreeSandbox | undefined {
-  if (!sandboxCfg) return undefined;
-  const policy = resolveSandboxPolicy(sandboxCfg, { worktree: repoRoot, repoRoot });
-  return worktreeSandboxFor(policy?.runtime);
-}
-
-/** Eagerly reaps a parked lane's own worktree inside `factory run` (#1007). All the safety
- *  gates live in reapLaneWorktree; this wrapper resolves the lane's conventional worktree
- *  path and holds the same git+file lock pairing as every other worktree mutation site. A
- *  reap failure is logged as a warn and never surfaces — parking must always succeed. */
 export async function reapParkedLaneWorktree(
   issue: number,
   repoRoot: string,
@@ -2666,20 +2656,29 @@ export async function reapParkedLaneWorktree(
   paths: ReturnType<typeof getFactoryPaths>,
   prefixOverride?: string,
 ): Promise<void> {
-  try {
-    const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
-    const branchPrefix = prefixOverride ?? resolveEffectiveConfig(configLoaders.loadRepoConfig(repoRoot)).branchPrefix;
-    const worktreePath = worktreePathFor(repoRoot, ghRepo, issue, branchPrefix);
-    const log = (type: EventKind, msg: string) => logEvent(paths.events, type, issue, msg);
-    const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
-    await withGitLock(repoRoot, () =>
-      withFileLock(paths.gitLock, () =>
-        reapLaneWorktree(repoRoot, worktreePath, { issue, branchPrefix, log, sandbox }),
-      ),
-    );
-  } catch (err: any) {
-    logEvent(paths.events, 'warn', issue, `parked-lane worktree reap failed: ${err?.message ?? String(err)}`);
-  }
+  await reapParkedLane({ configLoaders, worktreePathFor }, reapLaneWorktree, [
+    issue,
+    repoRoot,
+    ghRepo,
+    paths,
+    prefixOverride,
+  ]);
+}
+
+export async function reapPrlessShipWorktree(
+  issue: number,
+  repoRoot: string,
+  ghRepo: string,
+  paths: ReturnType<typeof getFactoryPaths>,
+  prefixOverride?: string,
+): Promise<void> {
+  await reapPrlessShip({ configLoaders, worktreePathFor }, internalOps.reapCleanShipWorktree, [
+    issue,
+    repoRoot,
+    ghRepo,
+    paths,
+    prefixOverride,
+  ]);
 }
 
 export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string; branchPrefix?: string }) {
@@ -4104,6 +4103,7 @@ export interface CliDeps {
   createLocalSmallDryRun?: typeof createLocalSmallDryRun;
   readCosts?: typeof readCosts;
   sweepWorktrees?: typeof sweepWorktrees;
+  reapCleanShipWorktree?: typeof reapCleanShipWorktree;
   releaseStaleClaims?: typeof releaseStaleClaims;
   pollBlockedParks?: typeof pollBlockedParks;
   findUnmergedGreenPrs?: typeof findUnmergedGreenPrs;
