@@ -1,8 +1,14 @@
 import { EpicSchema, StorySchema } from '@on-par/contracts';
 import type { Story } from '@on-par/contracts';
-import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { designSmellsChecker, workerOutputChecker } from '../checkers/design-smells.js';
+import { createStackSliceBranch } from '../run/stack-slice-branch.js';
 import type { DecompositionOutput } from './decompose.js';
 import {
   parentRefForSlice,
@@ -144,5 +150,44 @@ describe('CHECK diff base', () => {
     await workerOutputChecker(ctx, { collectDiff });
     await designSmellsChecker(ctx, {} as any, undefined, { collectDiff, env: {} });
     expect(seen).toEqual([ref, ref]);
+  });
+});
+
+describe('stack chain', () => {
+  let dir: string | undefined;
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+
+  it('each slice branch has the previous slice branch as merge-base', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'stack-chain-'));
+    dir = root;
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+    const commit = (name: string) => {
+      writeFileSync(join(root, name), name);
+      git('add', '.');
+      git('commit', '-m', name);
+      return git('rev-parse', 'HEAD');
+    };
+    git('init', '-b', 'main');
+    git('config', 'user.name', 'T');
+    git('config', 'user.email', 't@example.com');
+    git('config', 'commit.gpgsign', 'false');
+    const mainSha = commit('base');
+    git('update-ref', 'refs/remotes/origin/main', 'HEAD');
+
+    let plan = freshPlan(3);
+    const heads: string[] = [];
+    for (let k = 1; k <= 3; k++) {
+      const parent = parentRefForSlice(plan, k);
+      await createStackSliceBranch({ worktree: root, branch: stackSliceBranch(2702, k), startPoint: parent! });
+      heads.push(commit(`slice-${k}`));
+      plan = withSliceBranchCreated(plan, k);
+    }
+
+    expect(git('merge-base', 'factory/2702-slice-2', 'factory/2702-slice-1')).toBe(heads[0]);
+    expect(git('merge-base', 'factory/2702-slice-3', 'factory/2702-slice-2')).toBe(heads[1]);
+    expect(git('merge-base', 'factory/2702-slice-1', 'origin/main')).toBe(mainSha);
   });
 });
