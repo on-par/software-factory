@@ -28,6 +28,13 @@ function noCiOctokit() {
   };
 }
 
+const SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+const matchingRemote = async (command: string) => {
+  if (command === 'git rev-parse HEAD') return { stdout: `${SHA}\n` };
+  if (command.startsWith('git ls-remote --heads origin')) return { stdout: `${SHA}\trefs/heads/ship-it/123-ci-poll\n` };
+  return { stdout: '' };
+};
+
 describe('ship no-CI repo (#2488)', () => {
   it('logs no CI configured and marks ready without waiting the grace period when the repo has no workflows and no default-branch checks', async () => {
     const logs: Array<[string, string]> = [];
@@ -43,7 +50,7 @@ describe('ship no-CI repo (#2488)', () => {
         watchCI: true,
         ciNoChecksGraceMs: 90_000,
         log: (type, msg) => logs.push([type, msg]),
-        run: async () => ({ stdout: '' }),
+        run: matchingRemote,
       });
       await vi.runAllTimersAsync();
       const result = await promise;

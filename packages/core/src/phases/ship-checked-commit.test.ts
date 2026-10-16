@@ -49,9 +49,13 @@ async function ship(run: (command: string) => Promise<{ stdout: string }>) {
 
 describe('shipPhase evidence pack checked commit (#1812)', () => {
   it('names the local HEAD SHA the checks ran on in the posted evidence pack', async () => {
-    const { result, bodies } = await ship(async (command) =>
-      command === 'git rev-parse HEAD' ? { stdout: `${HEAD_SHA}\n` } : { stdout: '' },
-    );
+    const { result, bodies } = await ship(async (command) => {
+      if (command === 'git rev-parse HEAD') return { stdout: `${HEAD_SHA}\n` };
+      if (command.startsWith('git ls-remote --heads origin')) {
+        return { stdout: `${HEAD_SHA}\trefs/heads/ship-it/1812-checked-commit\n` };
+      }
+      return { stdout: '' };
+    });
 
     expect(result).toEqual({ ok: true, prNumber: 123 });
     expect(bodies).toHaveLength(1);
@@ -59,8 +63,14 @@ describe('shipPhase evidence pack checked commit (#1812)', () => {
   });
 
   it('still posts the evidence pack without a SHA when git rev-parse HEAD fails at evidence time', async () => {
+    let revParseCalls = 0;
     const { result, bodies, logs } = await ship(async (command) => {
-      if (command === 'git rev-parse HEAD') throw new Error('rev-parse failed');
+      // The first call is the remote-head sync check; the evidence-time call is the one that fails.
+      if (command === 'git rev-parse HEAD' && ++revParseCalls > 1) throw new Error('rev-parse failed');
+      if (command === 'git rev-parse HEAD') return { stdout: `${HEAD_SHA}\n` };
+      if (command.startsWith('git ls-remote --heads origin')) {
+        return { stdout: `${HEAD_SHA}\trefs/heads/ship-it/1812-checked-commit\n` };
+      }
       return { stdout: '' };
     });
 

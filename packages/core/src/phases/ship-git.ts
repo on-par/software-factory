@@ -8,7 +8,7 @@ export type CommandRunner = (
 ) => Promise<{ stdout: string }>;
 
 /** Why a `git push` was refused, as far as git's own stderr says (#733). */
-type PushFailureKind = 'non-fast-forward' | 'network' | 'unknown';
+export type PushFailureKind = 'non-fast-forward' | 'network' | 'unknown';
 
 /** Bound on the failure text copied into one NDJSON event row. */
 const MAX_PUSH_ERROR_DETAIL = 400;
@@ -123,4 +123,28 @@ export async function verifyRemoteHead(run: CommandRunner, worktree: string, bra
   return remoteSha === localSha
     ? { status: 'match', localSha, remoteSha }
     : { status: 'mismatch', localSha, remoteSha };
+}
+
+/** Outcome of one push followed by a remote-head check, the single verified push site for SHIP (#734/#735/#1813). */
+export type VerifiedPush =
+  | { status: 'pushed'; localSha: string; remoteSha: string }
+  | { status: 'push-failed'; kind: PushFailureKind; detail: string }
+  | { status: 'mismatch'; localSha: string; remoteSha: string }
+  | { status: 'unreadable'; localSha?: string; detail: string };
+
+export async function pushAndVerifyRemoteHead(
+  run: CommandRunner,
+  worktree: string,
+  branch: string,
+  pushCmd: string,
+): Promise<VerifiedPush> {
+  try {
+    await run(pushCmd, { cwd: worktree });
+  } catch (err) {
+    return { status: 'push-failed', ...describePushFailure(err) };
+  }
+  const head = await verifyRemoteHead(run, worktree, branch);
+  if (head.status === 'match') return { status: 'pushed', localSha: head.localSha, remoteSha: head.remoteSha };
+  if (head.status === 'mismatch') return head;
+  return { status: 'unreadable', localSha: head.localSha, detail: head.detail };
 }
