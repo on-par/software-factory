@@ -125,6 +125,30 @@ export async function verifyRemoteHead(run: CommandRunner, worktree: string, bra
     : { status: 'mismatch', localSha, remoteSha };
 }
 
+/** Whether origin's head is an ancestor of local HEAD, i.e. a plain push is a fast-forward (#1815). */
+export type RemoteAncestry = { status: 'ancestor' } | { status: 'diverged' } | { status: 'unreadable'; detail: string };
+
+const MISSING_OBJECT_MARKERS = ['not a valid object name', 'not a valid commit', 'bad object', 'unknown revision'];
+
+export async function checkRemoteIsAncestor(
+  run: CommandRunner,
+  worktree: string,
+  remoteSha: string,
+  localSha: string,
+): Promise<RemoteAncestry> {
+  try {
+    await run(`git merge-base --is-ancestor ${shellEscape(remoteSha)} ${shellEscape(localSha)}`, { cwd: worktree });
+    return { status: 'ancestor' };
+  } catch (err) {
+    // Exit 1 is git's documented "not an ancestor"; other non-zero statuses are errors.
+    if ((err as { code?: unknown } | null)?.code === 1) return { status: 'diverged' };
+    const detail = shortDetail(err);
+    // A remote commit absent from the local object store cannot be contained in local HEAD.
+    if (MISSING_OBJECT_MARKERS.some((marker) => detail.toLowerCase().includes(marker))) return { status: 'diverged' };
+    return { status: 'unreadable', detail };
+  }
+}
+
 /** Outcome of one push followed by a remote-head check, the single verified push site for SHIP (#734/#735/#1813). */
 export type VerifiedPush =
   | { status: 'pushed'; localSha: string; remoteSha: string }

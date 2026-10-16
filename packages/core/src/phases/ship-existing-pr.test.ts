@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { shipPhase } from './ship.js';
-import { pushAndVerifyRemoteHead } from './ship-git.js';
+import { checkRemoteIsAncestor, pushAndVerifyRemoteHead } from './ship-git.js';
 
 const allSuccess = [{ status: 'completed', conclusion: 'success' }];
 
@@ -166,5 +166,39 @@ describe('pushAndVerifyRemoteHead (#1813)', () => {
     expect(noRef).toMatchObject({ status: 'unreadable', localSha: SHA });
     const noHead = await pushAndVerifyRemoteHead(makeRun({ head: new Error('boom') }), '/w', 'b', 'git push');
     expect(noHead).toMatchObject({ status: 'unreadable' });
+  });
+});
+
+describe('checkRemoteIsAncestor (#1815)', () => {
+  const check = (err?: unknown) =>
+    checkRemoteIsAncestor(
+      async () => {
+        if (err) throw err;
+        return { stdout: '' };
+      },
+      '/w',
+      'b'.repeat(40),
+      'a'.repeat(40),
+    );
+
+  it('reports ancestor when merge-base resolves', async () => {
+    expect(await check()).toEqual({ status: 'ancestor' });
+  });
+
+  it('reports diverged on exit code 1', async () => {
+    expect(await check(Object.assign(new Error('Command failed'), { code: 1 }))).toEqual({ status: 'diverged' });
+  });
+
+  it('reports diverged when the remote object is missing locally', async () => {
+    const err = Object.assign(new Error('Command failed'), { code: 128, stderr: 'fatal: Not a valid commit name x' });
+    expect(await check(err)).toEqual({ status: 'diverged' });
+  });
+
+  it('reports unreadable for any other failure', async () => {
+    expect(await check(new Error('boom'))).toMatchObject({
+      status: 'unreadable',
+      detail: expect.stringContaining('boom'),
+    });
+    expect(await check('weird')).toMatchObject({ status: 'unreadable' });
   });
 });

@@ -13,6 +13,7 @@ import { renderPrBody } from '../reports/pr-body.js';
 import type { ReviewRouting } from '../review/routing.js';
 import {
   type CommandRunner,
+  checkRemoteIsAncestor,
   describePushFailure,
   pushAndVerifyRemoteHead,
   readRemoteBranchSha,
@@ -206,6 +207,17 @@ async function shipPhaseImpl(opts: {
         `remote head ${current.remoteSha} matches local HEAD ${current.localSha} for ${branch} — already in sync, not pushing`,
       );
     } else {
+      if (current.status === 'mismatch') {
+        const ancestry = await checkRemoteIsAncestor(run, worktree, current.remoteSha, current.localSha);
+        if (ancestry.status !== 'ancestor') {
+          const reason =
+            ancestry.status === 'diverged'
+              ? `origin/${branch} @ ${current.remoteSha} has diverged from local HEAD ${current.localSha} (remote has commits local HEAD lacks) on open PR #${prNumber} — not force-pushing`
+              : `could not confirm origin/${branch} @ ${current.remoteSha} is an ancestor of local HEAD ${current.localSha} on open PR #${prNumber} (${ancestry.detail})`;
+          log('ship', `${reason} — aborting before evidence`);
+          return { ok: false, prNumber, reason };
+        }
+      }
       const pushed = await pushAndVerifyRemoteHead(run, worktree, branch, `git push -u origin ${shellEscape(branch)}`);
       if (pushed.status !== 'pushed') {
         const reason =
