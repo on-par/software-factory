@@ -2,9 +2,12 @@ import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { withHostAgentJobLease } from '@on-par/factory-core/internal';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentJobUsageError, cmdAgentJob, runAgentJob, type RunAgentJobOptions } from './agent-job.js';
+import { PROGRAM_HANDLERS } from './index.js';
+import { buildProgram } from './program.js';
 
 let dir: string;
 
@@ -72,5 +75,90 @@ describe('cmdAgentJob usage errors', () => {
     await expect(cmdAgentJob(['true'], { kind: 'bogus' })).rejects.toBeInstanceOf(AgentJobUsageError);
     await expect(cmdAgentJob(['true'], { issue: 'x' })).rejects.toBeInstanceOf(AgentJobUsageError);
     await expect(cmdAgentJob(['true'], { issue: '-2' })).rejects.toBeInstanceOf(AgentJobUsageError);
+  });
+});
+
+describe('cmdAgentJob', () => {
+  beforeEach(() => {
+    vi.stubEnv('FACTORY_HOST_AGENT_JOBS_DIR', join(dir, 'jobs'));
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("runs the command inside a lease in the host agent jobs dir and returns the child's exit code", async () => {
+    expect(
+      await cmdAgentJob([process.execPath, '-e', 'process.exit(4)'], { kind: 'steward', repo: 'o/r', issue: '7' }),
+    ).toBe(4);
+    expect(await leftovers()).toEqual([]);
+  });
+
+  it('logs to stderr while it waits for a lease held by another job', async () => {
+    const stderr: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      stderr.push(String(chunk));
+      return true;
+    });
+    try {
+      let releaseHolder!: () => void;
+      const held = new Promise<void>((r) => (releaseHolder = r));
+      let holderStarted!: () => void;
+      const started = new Promise<void>((r) => (holderStarted = r));
+      const holder = withHostAgentJobLease(
+        { dir: join(dir, 'jobs'), maxAgentJobs: 1, repo: 'o/r', issue: 1, job: 'rescue', log: () => {}, pollMs: 25 },
+        async () => {
+          holderStarted();
+          await held;
+        },
+      );
+      await started;
+      const waiting = cmdAgentJob([process.execPath, '-e', ''], {});
+      await vi.waitFor(() => expect(stderr.join('')).toContain('factory agent-job: waiting for host agent job lease'));
+      releaseHolder();
+      await holder;
+      expect(await waiting).toBe(0);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('falls back to the default config when it is not run inside a git repo', async () => {
+    vi.stubEnv('GIT_DIR', join(dir, 'not-a-repo'));
+    expect(await cmdAgentJob([process.execPath, '-e', ''], {})).toBe(0);
+    expect(await leftovers()).toEqual([]);
+  });
+});
+
+describe('factory agent-job command', () => {
+  let stderr: string[];
+
+  beforeEach(() => {
+    vi.stubEnv('FACTORY_HOST_AGENT_JOBS_DIR', join(dir, 'jobs'));
+    stderr = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      stderr.push(String(chunk));
+      return true;
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    process.exitCode = undefined;
+  });
+
+  const run = (args: string[]) =>
+    buildProgram(PROGRAM_HANDLERS, {}).parseAsync(['node', 'factory', 'agent-job', ...args]);
+
+  it("sets the process exit code to the command's exit code", async () => {
+    await run(['--', process.execPath, '-e', 'process.exit(5)']);
+    expect(process.exitCode).toBe(5);
+  });
+
+  it('prints a usage error and exits 2 for a bad --kind', async () => {
+    await run(['--kind', 'bogus', '--', process.execPath, '-e', '']);
+    expect(process.exitCode).toBe(2);
+    expect(stderr.join('')).toContain('--kind must be rescue or steward, got "bogus"');
   });
 });
