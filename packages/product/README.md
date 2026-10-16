@@ -8,15 +8,11 @@ This package is private and is never published to npm.
 
 ## Status
 
-The foundation slice (#469) shipped a runnable `product --help` CLI skeleton.
-Story #470 added the Interviewer: given a PM's brain-dump, it asks
-clarifying questions until intent is pinned. Story #471 added the Intent
-Doc — the canonical artifact built from a pinned interview. Story #472
-added the Decomposer: it expands an approved intent doc into an Epic plus
-INVEST stories. This story (#473) adds the Persona Panel: it interrogates a
-decomposition from five perspectives. Later stories in epic #463 fill in
-the judge/rework loop, readiness report, export, epic architecture design,
-and ADR reader.
+The package ships the CLI skeleton (#469), the interviewer (#470), the intent
+doc (#471), the decomposer (#472), the persona panel (#473) and the judge
+(#474). The readiness report and handoff gate, the export step, and the epic
+architecture design (proposer side) also live here, under `src/readiness`,
+`src/export` and `src/architecture`.
 
 ## Commands
 
@@ -42,6 +38,11 @@ and ADR reader.
   the decomposition as eng/customer/support/security/ops and print the
   findings; `--approve` is required, and the command fails with the
   approval or decomposition blockers when either gate refuses.
+- `product judge --approve "<name>" --text "<brain-dump>"` (or `--file <path>`)
+  — run the interview, approve, decompose, then judge each story against the
+  intent doc and rework below-threshold stories (bounded); `--approve` is
+  required, `--threshold <n>` sets the minimum passing score (0-100) and
+  `--max-iterations <n>` caps rework iterations per story.
 
 ## Interviewer
 
