@@ -18,7 +18,9 @@ function errorMessage(err: unknown): string {
 }
 
 /** Runs one pass per slice: while a stack-mode pass is ready and neither the top slice nor the slice cap
- *  (`maxSlices`, ADR-0156), plans the next one. */
+ *  (`maxSlices`, ADR-0156), plans the next one. Any non-ready slice outcome (a CHECK park, escalation or
+ *  environment release, or any earlier park) ends the chain. That outcome is returned as the run's outcome,
+ *  and later slices are never planned, branched or built (#3061). */
 export async function runStackLoop(
   request: RunRequest,
   runOnce: (request: RunRequest) => Promise<RunOutcome>,
