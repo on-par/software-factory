@@ -5,10 +5,13 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { designSmellsChecker, workerOutputChecker } from '../checkers/design-smells.js';
+import type { RunOutcome } from '../run/outcome.js';
+import type { RunRequest } from '../run/run-issue.js';
 import { createStackSliceBranch } from '../run/stack-slice-branch.js';
+import { runStackLoop } from '../run/stack-slice-entry.js';
 import type { DecompositionOutput } from './decompose.js';
 import {
   parentRefForSlice,
@@ -189,5 +192,34 @@ describe('stack chain', () => {
     expect(git('merge-base', 'factory/2702-slice-2', 'factory/2702-slice-1')).toBe(heads[0]);
     expect(git('merge-base', 'factory/2702-slice-3', 'factory/2702-slice-2')).toBe(heads[1]);
     expect(git('merge-base', 'factory/2702-slice-1', 'origin/main')).toBe(mainSha);
+  });
+});
+
+describe('runStackLoop cap', () => {
+  const fakeRunOnce = (count: number) =>
+    vi.fn(
+      async (req: RunRequest) =>
+        ({
+          state: 'ready',
+          route: 'codex',
+          branch: 'b',
+          reworkRounds: 0,
+          slice: { index: req.sliceIndex ?? 1, count },
+        }) as RunOutcome,
+    );
+
+  it('stops at maxSlices for a plan above the cap', async () => {
+    const runOnce = fakeRunOnce(3);
+    const outcome = await runStackLoop({ sizeGateMode: 'stack', maxSlices: 2 } as RunRequest, runOnce);
+
+    expect(runOnce.mock.calls.map((c) => c[0].sliceIndex)).toEqual([undefined, 2]);
+    expect(outcome).toMatchObject({ slice: { index: 2, count: 3 } });
+  });
+
+  it('builds every slice when the default cap does not bite', async () => {
+    const runOnce = fakeRunOnce(3);
+    await runStackLoop({ sizeGateMode: 'stack' } as RunRequest, runOnce);
+
+    expect(runOnce.mock.calls.map((c) => c[0].sliceIndex)).toEqual([undefined, 2, 3]);
   });
 });
