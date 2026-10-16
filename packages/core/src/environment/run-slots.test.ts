@@ -77,7 +77,7 @@ describe('withRunAndHostBuildSlot (#3049)', () => {
     const h = harness(createRunSlotGate(1), 2);
     const p1 = h.lane(1);
     const p2 = h.lane(2);
-    await tick();
+    await until(() => h.gates.length > 0 && h.logs.includes('waiting for run build slot (1/1 in use)'));
     expect(h.state.maxActive).toBe(1);
     expect(await slotFiles()).toHaveLength(1);
     expect(h.logs).toContain('waiting for run build slot (1/1 in use)');
@@ -94,7 +94,7 @@ describe('withRunAndHostBuildSlot (#3049)', () => {
     const h = harness(createRunSlotGate(3), 1);
     const p1 = h.lane(1);
     const p2 = h.lane(2);
-    await tick();
+    await until(() => h.gates.length > 0 && h.logs.includes('waiting for host build slot (1/1 in use)'));
     expect(h.state.maxActive).toBe(1);
     expect(h.logs).toContain('waiting for host build slot (1/1 in use)');
     expect(h.logs.some((l) => l.includes('run build slot'))).toBe(false);
