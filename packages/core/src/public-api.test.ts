@@ -766,6 +766,7 @@ const INTERNAL_API_KEYS = [
   'ADMISSION_STATE_FILENAME',
   'classifyQueueCompatibility',
   'createFileAdmissionStateReader',
+  'createGithubLaneClaimStalenessProbe',
   'FACTORY_APP_REPAIR_HINT',
   'formatAdmissionConflict',
   'withAdmissionGuard',
@@ -870,7 +871,6 @@ describe('public API surface (ADR-0004)', () => {
   it('root export exposes exactly the documented public API', () => {
     expect(Object.keys(publicApi).sort()).toEqual([...PUBLIC_API_KEYS].sort());
   });
-
   it('root export has no internal or testing symbols', () => {
     for (const key of [
       'ClaudeCliHarness',

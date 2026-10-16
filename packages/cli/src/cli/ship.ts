@@ -55,6 +55,7 @@ import {
   branchFor,
   checkBaseHealth,
   createCheckResumeStore,
+  createGithubLaneClaimStalenessProbe,
   createPlanReuseStore,
   egressHostMessage,
   egressSummaryMessage,
@@ -237,7 +238,6 @@ export async function shipIssue(
 
   const product = opts.product ?? readActiveProduct(paths.product);
   const autoRework = opts.autoRework ?? true;
-
   const work =
     ctx?.workRequest ??
     (await createDefaultWorkSourceRegistry({ octokit }).resolve(GITHUB_ISSUE_SOURCE, {
@@ -296,7 +296,6 @@ export async function shipIssue(
       touchLastEvent(phaseSnapshotFile(paths.runs, issueNum), summarizeEvent(type, msg)).catch(() => {});
     };
   const log = mkLog();
-
   log('issue-title', issueTitle);
   const repoConfigLabel = repoConfigFileFor(repoRoot, paths.config).relPath;
   for (const msg of modelOverrideMessages(modelPins, repoConfig, repoConfigLabel)) log('model-override', msg);
@@ -426,6 +425,7 @@ export async function shipIssue(
     drainSteering: () => drainSteering(paths.steering, issueNum, worktree),
     reworkHistory,
     laneFileGuard,
+    laneClaimStaleness: createGithubLaneClaimStalenessProbe({ octokit, branchPrefix: policy.effective.branchPrefix }),
     recordPhase: (phase: FailurePhase) => {
       const now = new Date().toISOString();
       return writePhaseSnapshot(phaseSnapshotFile(paths.runs, issueNum), {

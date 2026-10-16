@@ -72,7 +72,7 @@ import type {
   ReadinessInfo,
 } from '../types/index.js';
 import type { WorkRequest, WorkRequestSourceKind } from '../work/index.js';
-import { touchedFilesFrom, type LaneFileGuard } from './lane-file-guard.js';
+import { touchedFilesFrom, type LaneClaimStalenessProbe, type LaneFileGuard } from './lane-file-guard.js';
 import { parkReasonFor, reworkRouteFor, type BuildRoute, type ParkReason, type RunOutcome } from './outcome.js';
 import type { RunPolicy } from './policy.js';
 import {
@@ -212,8 +212,10 @@ export interface RunPorts extends CiReworkPorts {
   reworkHistory?: ReworkHistory;
   /** Same-file lane guard (#1515): parks a run whose PLAN-reported touched files collide
    *  with another in-flight run's claim in the same repo. Optional and a no-op when
-   *  undefined, so existing callers/tests that don't wire it see no behavior change. */
+   *  undefined, so existing callers/tests that don't wire it see no behavior change.
+   *  `laneClaimStaleness` (#3063) lets it reap provably finished holders; undefined = never reap. */
   laneFileGuard?: LaneFileGuard;
+  laneClaimStaleness?: LaneClaimStalenessProbe;
   /** PLAN's pre-flight size gate decomposed this issue into filed sub-issues. The hook
    *  owns the (path-bound) queue rewrite and is expected to throw to signal the caller;
    *  if it returns normally, runIssue treats the decomposition as an escalation. */
@@ -544,12 +546,10 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     // Record which .NET lane variables BUILD/CHECK/rework children get (#1911).
     const dotnet = dotnetEnvReport(ports.workspace.path, process.env, runId);
     if (dotnet) log('environment_dotnet', describeDotnetEnv(dotnet));
-
     // Resolve standards ONCE against the fresh worktree (Invariant 1). Resolving again
     // later would let the build worker author the standards it is graded by.
     const constitution = ports.resolveConstitution();
     log('constitution', describeConstitutionSource(constitution, request.product));
-
     // Pre-PLAN config preflight (#2585/#2586), shared with `factory doctor` via lintFactoryConfig (#2612).
     // An unknown `checkers:` entry would only fail closed in CHECK, after PLAN and BUILD spent model calls;
     // unfilled scaffold tokens would ship a placeholder. Read-only, no subprocess, runs for localOnly too.
@@ -603,7 +603,6 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     // workspace runs — there is no remote to diff against, and every rework round
     // inside CHECK must diff against this same base rather than a moving target.
     runStartDiffBase = request.localOnly ? await captureDiffBase(ports.workspace.path) : undefined;
-
     // PLAN
     const planStartedMs = Date.now();
     let planRoute: BuildRoute;
@@ -736,7 +735,8 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       // in-flight run in this repo already owns a file PLAN just said this run will touch.
       if (ports.laneFileGuard && plan.designArtifact) {
         const touchedFiles = touchedFilesFrom(plan.designArtifact);
-        const collision = await ports.laneFileGuard.findCollision(request.repo, request.issue, touchedFiles);
+        const staleOpts = ports.laneClaimStaleness && { isStale: ports.laneClaimStaleness, log: ports.events('plan') };
+        const collision = await ports.laneFileGuard.findCollision(request.repo, request.issue, touchedFiles, staleOpts);
         if (collision) {
           return await terminalParked(
             'held',

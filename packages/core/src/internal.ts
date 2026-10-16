@@ -344,6 +344,7 @@ export {
   writeRegistry,
 } from './daemon/registry.js';
 
+export { createGithubLaneClaimStalenessProbe, type LaneClaimStalenessProbe } from './run/lane-file-guard.js';
 // Daemon lane state resolution (#843)
 export type { DaemonLaneContext } from './daemon/lane-context.js';
 export { createDaemonLaneContext } from './daemon/lane-context.js';
@@ -767,8 +768,7 @@ export {
   planReusePath,
   preservedFixTarget,
 } from './run/resume-context.js';
-export type { CheckResumeRecord, CheckResumeStore } from './run/resume-context.js';
-export type { PlanReuseRecord, PlanReuseStore } from './run/resume-context.js';
+export type { CheckResumeRecord, CheckResumeStore, PlanReuseRecord, PlanReuseStore } from './run/resume-context.js';
 
 // Pre-PLAN base health (#2339)
 export { BASE_HEALTH_CHECKERS, checkBaseHealth } from './checkers/base-health.js';
