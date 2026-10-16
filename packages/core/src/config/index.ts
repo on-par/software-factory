@@ -291,8 +291,12 @@ const FactoryConfigSchema = z.object({
       proxy: { enabled: false, port: 80, domain: 'factory.localhost' },
     }),
   host: z
-    .object({ maxBuilds: z.number().int().positive().default(2), comment: z.string().optional() })
-    .default({ maxBuilds: 2 }),
+    .object({
+      maxBuilds: z.number().int().positive().default(2),
+      maxAgentJobs: z.number().int().positive().default(1),
+      comment: z.string().optional(),
+    })
+    .default({ maxBuilds: 2, maxAgentJobs: 1 }),
   auto_failover: z
     .object({
       enabled: z.boolean().default(true),
@@ -616,6 +620,10 @@ export function resolveAutoFailover(config: FactoryConfig): AutoFailoverSettings
 }
 
 /** Host-wide cap on lanes inside BUILD or CHECK at once (#3043). */
+export function resolveHostMaxAgentJobs(config: FactoryConfig): number {
+  return config.host?.maxAgentJobs ?? defaultFactoryConfig.host.maxAgentJobs;
+}
+
 export function resolveHostMaxBuilds(config: FactoryConfig): number {
   return config.host?.maxBuilds ?? defaultFactoryConfig.host.maxBuilds;
 }

@@ -1,18 +1,22 @@
+import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { defaultFactoryConfig } from '@on-par/factory-config';
 
 import {
   acquireHostBuildSlot,
+  hostAgentJobsDir,
   hostBuildSlotsDir,
   listHostSlots,
   readHostBuildSlots,
   reclaimStaleHostSlot,
+  withHostAgentJobLease,
   withHostBuildSlot,
+  type AcquireHostAgentJobOptions,
   type AcquireHostBuildSlotOptions,
 } from './host-slots.js';
 
@@ -295,5 +299,72 @@ describe('listHostSlots (#3045)', () => {
   it('flags an unparseable file as unreadable and not stale', async () => {
     await write('slot-0.json', 'not json');
     expect(listHostSlots(dir, () => false)).toMatchObject([{ slot: 0, unreadable: true, stale: false }]);
+  });
+});
+
+describe('host agent job leases (#3047)', () => {
+  function jobOpts(over: Partial<AcquireHostAgentJobOptions> = {}): AcquireHostAgentJobOptions {
+    return { dir, maxAgentJobs: 1, repo: 'o/r', issue: 7, job: 'steward', ...over };
+  }
+
+  it('hostAgentJobsDir honours FACTORY_HOST_AGENT_JOBS_DIR and defaults under <home>/.factory/host/agent-jobs', () => {
+    expect(hostAgentJobsDir('/h')).toBe(join('/h', '.factory', 'host', 'agent-jobs'));
+    vi.stubEnv('FACTORY_HOST_AGENT_JOBS_DIR', '/override');
+    try {
+      expect(hostAgentJobsDir()).toBe('/override');
+      expect(hostAgentJobsDir('/h')).toBe(join('/h', '.factory', 'host', 'agent-jobs'));
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('writes slot-0.json with the job phase during fn and removes it after fn resolves or throws', async () => {
+    await withHostAgentJobLease(jobOpts(), async () => {
+      expect(await slotFiles()).toEqual(['slot-0.json']);
+      const rec = JSON.parse(await readFile(join(dir, 'slot-0.json'), 'utf8')) as Record<string, unknown>;
+      expect(rec.phase).toBe('steward');
+      expect(Object.keys(rec).sort()).toEqual(['acquiredAt', 'issue', 'phase', 'pid', 'repo', 'token']);
+    });
+    expect(await slotFiles()).toEqual([]);
+    await expect(
+      withHostAgentJobLease(jobOpts(), async () => {
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
+    expect(await slotFiles()).toEqual([]);
+  });
+
+  it('logs waiting for host agent job lease (1/1 in use) once while a live holder keeps the lease', async () => {
+    await writeFile(
+      join(dir, 'slot-0.json'),
+      JSON.stringify({ pid: 999, repo: 'o/x', issue: 3, phase: 'rescue', token: 't', acquiredAt: '' }),
+    );
+    const logs: string[] = [];
+    let sleeps = 0;
+    await withHostAgentJobLease(
+      jobOpts({
+        isPidAlive: () => true,
+        log: (m) => logs.push(m),
+        sleep: async () => {
+          if (++sleeps === 3) await rm(join(dir, 'slot-0.json'));
+        },
+      }),
+      async () => {},
+    );
+    expect(logs).toEqual(['waiting for host agent job lease (1/1 in use)']);
+  });
+
+  it('reclaims a lease whose holder pid is dead and logs it', async () => {
+    const dead = spawnSync(process.execPath, ['-e', '']).pid!;
+    await writeFile(
+      join(dir, 'slot-0.json'),
+      JSON.stringify({ pid: dead, repo: 'o/r', issue: 7, phase: 'rescue', token: 'tok', acquiredAt: '' }),
+    );
+    const logs: string[] = [];
+    await withHostAgentJobLease(jobOpts({ log: (m) => logs.push(m) }), async () => {
+      expect(await slotFiles()).toEqual(['slot-0.json']);
+    });
+    expect(logs).toEqual([`reclaimed host agent job lease 0 from o/r#7 (pid ${dead}, not alive)`]);
+    expect(await slotFiles()).toEqual([]);
   });
 });

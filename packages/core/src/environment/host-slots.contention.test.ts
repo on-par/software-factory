@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { hostBuildSlotsDir } from './host-slots.js';
+import { hostAgentJobsDir, hostBuildSlotsDir } from './host-slots.js';
 
 const repoRoot = fileURLToPath(new URL('../../../..', import.meta.url));
 
@@ -195,6 +195,59 @@ await withHostBuildSlot(
           .flatMap((r) => r.stdout.split('\n'))
           .filter((l) => l.includes('reclaimed host build slot 0'));
         expect(reclaims).toHaveLength(1);
+      } finally {
+        await rm(tmpHome, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
+describe('host agent job leases across processes (#3047)', () => {
+  it(
+    'two agent job processes with maxAgentJobs 1 never overlap and the second starts after the first releases',
+    { timeout: 60_000 },
+    async () => {
+      const tmpHome = await mkdtemp(join(tmpdir(), 'factory-host-agent-jobs-contention-'));
+      try {
+        const eventsFile = join(tmpHome, 'events.txt');
+        const childPath = join(tmpHome, 'child.mts');
+        const spec = pathToFileURL(join(repoRoot, 'packages/core/src/environment/host-slots.ts')).href;
+        await writeFile(
+          childPath,
+          `import { appendFileSync } from 'node:fs';
+import { hostAgentJobsDir, withHostAgentJobLease } from '${spec}';
+const [home, repo, issue, eventsFile] = process.argv.slice(2);
+await withHostAgentJobLease(
+  { dir: hostAgentJobsDir(home), maxAgentJobs: 1, job: 'rescue', repo, issue: Number(issue), pollMs: 25,
+    log: (m) => process.stdout.write(m + '\\n') },
+  async () => {
+    appendFileSync(eventsFile, 'start ' + issue + ' ' + Date.now() + '\\n');
+    await new Promise((r) => setTimeout(r, 400));
+    appendFileSync(eventsFile, 'end ' + issue + ' ' + Date.now() + '\\n');
+  },
+);
+`,
+        );
+        const results = await Promise.all(
+          ['1', '2'].map((issue) => runChild(childPath, [tmpHome, `o/r${issue}`, issue, eventsFile])),
+        );
+        for (const r of results) expect(r, r.stderr).toMatchObject({ code: 0 });
+
+        const events = (await readFile(eventsFile, 'utf8'))
+          .trim()
+          .split('\n')
+          .map((l) => {
+            const [kind, issue, ts] = l.split(' ');
+            return { kind, issue, ts: Number(ts) };
+          });
+        const first = events.find((e) => e.kind === 'start')!;
+        const firstEnd = events.find((e) => e.kind === 'end' && e.issue === first.issue)!;
+        const second = events.find((e) => e.kind === 'start' && e.issue !== first.issue)!;
+        expect(events).toHaveLength(4);
+        expect(second.ts).toBeGreaterThanOrEqual(firstEnd.ts);
+        expect(results.some((r) => r.stdout.includes('waiting for host agent job lease (1/1 in use)'))).toBe(true);
+        const left = (await readdir(hostAgentJobsDir(tmpHome))).filter((f) => f.startsWith('slot-'));
+        expect(left).toEqual([]);
       } finally {
         await rm(tmpHome, { recursive: true, force: true });
       }

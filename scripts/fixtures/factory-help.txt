@@ -61,6 +61,7 @@ Advanced / experimental:
   self-update [options]                  Check npm for a newer factory release (--check), or install an exact stable release (--to)
   proxy                                  Run the opt-in lane reverse proxy in the foreground (run and supervise start it themselves)
   hosted                                 Experimental remote-runner execution (needs FACTORY_HOSTED_EXEC=1)
+  agent-job [options] <command...>       Run an ad-hoc rescue or steward command while holding a host agent job lease (host.maxAgentJobs, default 1); waits for a free lease and releases it when the command ends
   local-small-dry-run [options] <issue>  Create a bounded local-small step plan and first context pack without changing source files
   local-small-overnight [options]        Process a curated local-small queue one issue at a time: review-only PRs, never merges, parks on ambiguity
 
