@@ -231,9 +231,11 @@ environment:
     domain: "factory.localhost"
 # Host-wide cap on lanes in BUILD or CHECK at once, shared by every runner on this machine through
 # slot files in ~/.factory/host/build-slots/. A lane waits for a free slot before each BUILD/CHECK
-# phase.
+# phase. maxAgentJobs caps ad-hoc rescue/steward jobs started with `factory agent-job`, through
+# lease files in ~/.factory/host/agent-jobs/.
 host:
   maxBuilds: 2
+  maxAgentJobs: 1
 # Supervisor circuit breaker for cross-harness build failover. On a quota trip
 # (usage_cap/rate_limit) the Codex provider is skipped for cooldown_minutes: the lane that trips it
 # falls over to fallback_model (when available); every later lane during the cooldown is routed

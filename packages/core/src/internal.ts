@@ -71,8 +71,7 @@ export {
 export { stripHiddenContent } from './filing/sanitize.js';
 
 // Redacted upstream factory report (#1858)
-export type { RedactionClass, RedactionContext } from './filing/redact.js';
-export { REDACTION_PLACEHOLDERS, redactText } from './filing/redact.js';
+export { REDACTION_PLACEHOLDERS, redactText, type RedactionClass, type RedactionContext } from './filing/redact.js';
 export type { UpstreamEnvironment, UpstreamReport, UpstreamReportInput } from './filing/upstream.js';
 
 // Send upstream reports with outbox fallback (#1860)
@@ -117,8 +116,9 @@ export { resolveFilingPolicy, resolvePrClassifierPolicy, type EffectivePrClassif
 export type { EffectiveConfig, TrustTier } from './config/repo.js';
 export { resolveEffectiveConfig, resolveReviewFloorRules, resolveTrustTier } from './config/repo.js';
 export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix, resolveHostMaxBuilds } from './config/index.js';
-export { hostBuildSlotsDir, listHostSlots, withHostBuildSlot, type HostSlotStatus } from './environment/host-slots.js';
-export { FACTORY_RUNTIME_CONFIG_KEYS } from './config/index.js';
+export { hostAgentJobsDir, hostBuildSlotsDir, listHostSlots, withHostAgentJobLease } from './environment/host-slots.js';
+export { withHostBuildSlot, type HostAgentJobKind, type HostSlotStatus } from './environment/host-slots.js';
+export { FACTORY_RUNTIME_CONFIG_KEYS, resolveHostMaxAgentJobs } from './config/index.js';
 export { isTrustedApprover, createOctokitCollaboratorPermissionClient } from './queue/approval.js';
 export type { CollaboratorPermissionClient, TrustedApproverOptions } from './queue/approval.js';
 export {

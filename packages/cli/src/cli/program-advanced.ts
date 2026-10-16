@@ -2,6 +2,7 @@
 
 import type { Command } from 'commander';
 import { DEFAULT_FACTORYD_PORT } from '@on-par/factory-core/internal';
+import { AgentJobUsageError, cmdAgentJob } from './agent-job.js';
 import { BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION } from './branch-prefix.js';
 import { DaemonCtlError } from './daemon.js';
 import type { CliDeps, ProgramHandlers } from './index.js';
@@ -197,4 +198,23 @@ export function registerAdvancedCommands(program: Command, handlers: ProgramHand
     .option('--force', 'Remove worktrees and branches even when they have uncommitted changes or unpushed commits')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
     .action(handlers.cmdReset);
+
+  program
+    .command('agent-job')
+    .description(
+      'Run an ad-hoc rescue or steward command while holding a host agent job lease (host.maxAgentJobs, default 1); waits for a free lease and releases it when the command ends',
+    )
+    .argument('<command...>', 'Command and arguments to run, after --')
+    .option('--kind <kind>', 'rescue or steward', 'rescue')
+    .option('--repo <slug>', 'owner/repo recorded on the lease')
+    .option('--issue <n>', 'Issue number recorded on the lease')
+    .action(async (command: string[], opts: { kind?: string; repo?: string; issue?: string }) => {
+      try {
+        process.exitCode = await cmdAgentJob(command, opts);
+      } catch (err) {
+        if (!(err instanceof AgentJobUsageError)) throw err;
+        process.stderr.write(`${err.message}\n`);
+        process.exitCode = 2;
+      }
+    });
 }

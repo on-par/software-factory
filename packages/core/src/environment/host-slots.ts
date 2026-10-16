@@ -1,7 +1,8 @@
 // src/environment/host-slots.ts — Host-wide BUILD/CHECK slot leases (#3043). Every runner
 // process on the machine shares one directory of slot files, so the number of lanes inside a
 // BUILD or CHECK phase is capped no matter how many repos or supervisors are running. Slots whose
-// holder pid is dead are reclaimed (#3044) under a per-slot arbiter.
+// holder pid is dead are reclaimed (#3044) under a per-slot arbiter. Ad-hoc rescue/steward agent
+// jobs take leases of the same shape from a sibling directory, capped by host.maxAgentJobs (#3047).
 
 import { randomUUID } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -11,12 +12,15 @@ import { join } from 'node:path';
 
 import { defaultIsPidAlive } from './index.js';
 
+/** Kind of ad-hoc agent job that holds a host agent job lease. */
+export type HostAgentJobKind = 'rescue' | 'steward';
+
 export interface HostSlotHolder {
   slot: number;
   pid: number;
   repo: string;
   issue: number;
-  phase: 'build' | 'check';
+  phase: 'build' | 'check' | HostAgentJobKind;
   token: string;
   acquiredAt: string;
 }
@@ -56,6 +60,13 @@ export function hostBuildSlotsDir(home?: string): string {
   const override = process.env.FACTORY_HOST_SLOTS_DIR;
   if (home === undefined && override) return override;
   return join(home ?? homedir(), '.factory', 'host', 'build-slots');
+}
+
+/** Shared agent job lease directory: `<home>/.factory/host/agent-jobs`. FACTORY_HOST_AGENT_JOBS_DIR overrides the default (tests). */
+export function hostAgentJobsDir(home?: string): string {
+  const override = process.env.FACTORY_HOST_AGENT_JOBS_DIR;
+  if (home === undefined && override) return override;
+  return join(home ?? homedir(), '.factory', 'host', 'agent-jobs');
 }
 
 function slotFile(dir: string, slot: number): string {
@@ -193,9 +204,19 @@ export function listHostSlots(dir: string, isPidAlive: (pid: number) => boolean 
   return out;
 }
 
-/** Takes the first free slot, polling (and logging the held count when it changes) until one frees. */
+/** Takes the first free build slot, polling (and logging the held count when it changes) until one frees. */
 export async function acquireHostBuildSlot(opts: AcquireHostBuildSlotOptions): Promise<HostBuildSlotLease> {
-  const { dir, maxBuilds, log } = opts;
+  return acquireHostLease({ ...opts, maxSlots: opts.maxBuilds, noun: 'host build slot' });
+}
+
+async function acquireHostLease(
+  opts: Omit<AcquireHostBuildSlotOptions, 'maxBuilds' | 'phase'> & {
+    maxSlots: number;
+    phase: HostSlotHolder['phase'];
+    noun: string;
+  },
+): Promise<HostBuildSlotLease> {
+  const { dir, maxSlots, noun, log } = opts;
   const pid = opts.pid ?? process.pid;
   const pollMs = opts.pollMs ?? DEFAULT_POLL_MS;
   const isPidAlive = opts.isPidAlive ?? defaultIsPidAlive;
@@ -218,7 +239,7 @@ export async function acquireHostBuildSlot(opts: AcquireHostBuildSlotOptions): P
   let lastLogged = -1;
   try {
     for (;;) {
-      for (let slot = 0; slot < maxBuilds; slot++) {
+      for (let slot = 0; slot < maxSlots; slot++) {
         const file = slotFile(dir, slot);
         // link() is atomic and fails with EEXIST when the slot is held, so a slot never appears half-written.
         const tryLink = async (): Promise<boolean> => {
@@ -242,9 +263,7 @@ export async function acquireHostBuildSlot(opts: AcquireHostBuildSlotOptions): P
             !isPidAlive(holder.pid) &&
             (await reclaimStaleHostSlot(dir, holder, graceMs))
           ) {
-            log?.(
-              `reclaimed host build slot ${slot} from ${holder.repo}#${holder.issue} (pid ${holder.pid}, not alive)`,
-            );
+            log?.(`reclaimed ${noun} ${slot} from ${holder.repo}#${holder.issue} (pid ${holder.pid}, not alive)`);
             taken = await tryLink();
           }
         }
@@ -252,10 +271,10 @@ export async function acquireHostBuildSlot(opts: AcquireHostBuildSlotOptions): P
         await unlink(tmp).catch(() => {});
         return { slot, file, release: () => releaseSlot(file, token) };
       }
-      const held = Math.min(readHostBuildSlots(dir, maxBuilds).length, maxBuilds);
+      const held = Math.min(readHostBuildSlots(dir, maxSlots).length, maxSlots);
       if (held !== lastLogged) {
         lastLogged = held;
-        log?.(`waiting for host build slot (${held}/${maxBuilds} in use)`);
+        log?.(`waiting for ${noun} (${held}/${maxSlots} in use)`);
       }
       await sleep(pollMs);
     }
@@ -283,6 +302,28 @@ async function releaseSlot(file: string, token: string): Promise<void> {
   await unlink(file).catch((err: NodeJS.ErrnoException) => {
     if (err.code !== 'ENOENT') throw err;
   });
+}
+
+export interface AcquireHostAgentJobOptions extends Omit<AcquireHostBuildSlotOptions, 'maxBuilds' | 'phase'> {
+  /** `dir` is usually hostAgentJobsDir(). Host-wide cap on concurrent agent jobs (>= 1). */
+  maxAgentJobs: number;
+  job: HostAgentJobKind;
+}
+
+/** Runs `fn` while holding a host agent job lease; the lease is freed when fn resolves or throws. */
+export async function withHostAgentJobLease<T>(opts: AcquireHostAgentJobOptions, fn: () => Promise<T>): Promise<T> {
+  const { maxAgentJobs, job, ...rest } = opts;
+  const lease = await acquireHostLease({
+    ...rest,
+    maxSlots: maxAgentJobs,
+    phase: job,
+    noun: 'host agent job lease',
+  });
+  try {
+    return await fn();
+  } finally {
+    await lease.release();
+  }
 }
 
 /** Runs `fn` while holding a host build slot; the slot is freed when fn resolves or throws. */

@@ -35,6 +35,7 @@ export const HELP_GROUPS: readonly HelpGroup[] = [
       'self-update',
       'proxy',
       'hosted',
+      'agent-job',
       'local-small-dry-run',
       'local-small-overnight',
     ],
