@@ -547,7 +547,7 @@ const INTERNAL_API_KEYS = [
   ...'resolveHostLoadGuard evaluateLoadGuard formatLoadHold readHostLoad'.split(' '), // #3048
   'hostBuildSlotsDir',
   'listHostSlots',
-  'withHostBuildSlot',
+  ...'withHostBuildSlot createRunSlotGate withRunAndHostBuildSlot'.split(' '), // #3049
   'FACTORY_RUNTIME_CONFIG_KEYS',
   'isTrustedApprover',
   'createOctokitCollaboratorPermissionClient',

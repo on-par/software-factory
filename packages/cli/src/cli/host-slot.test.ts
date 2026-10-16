@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadFactoryConfig } from '@on-par/factory-core';
+import { createRunSlotGate } from '@on-par/factory-core/internal';
 
 import { hostBuildSlotPort } from './host-slot.js';
 
@@ -49,5 +50,23 @@ describe('hostBuildSlotPort (#3043)', () => {
       'environment_lease',
       expect.stringContaining(`reclaimed host build slot 0 from o/dead#12 (pid ${deadPid}`),
     );
+  });
+});
+
+describe('hostBuildSlotPort with a run gate (#3049)', () => {
+  it('serialises lanes on the run cap and logs the run wait line', async () => {
+    const log = vi.fn();
+    const port = hostBuildSlotPort(loadFactoryConfig(), 'o/r', 7, log, createRunSlotGate(1));
+    let active = 0;
+    let maxActive = 0;
+    const fn = async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((r) => setTimeout(r, 30));
+      active -= 1;
+    };
+    await Promise.all([port('build', fn), port('check', fn)]);
+    expect(maxActive).toBe(1);
+    expect(log).toHaveBeenCalledWith('environment_lease', 'waiting for run build slot (1/1 in use)');
   });
 });

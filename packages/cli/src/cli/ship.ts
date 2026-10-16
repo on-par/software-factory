@@ -130,13 +130,13 @@ export async function shipIssue(
     onOutcome?: (outcome: RunOutcome) => void;
     /** Input source for planPhase to resolve; defaults inside planPhase to this run's GitHub issue. */
     workSource?: { kind: WorkRequestSourceKind; params: unknown };
-    /** Local-only policy (#508): run in this caller-provided workspace, skip
-     *  worktree creation, disable publishing, and skip the SHIP phase. */
+    /** Local-only policy (#508): run in this caller-provided workspace, no worktree, no publishing, no SHIP phase. */
     localOnly?: LocalOnlyPolicy;
+    /** Per-run BUILD/CHECK slot gate shared by every lane of one run (#3049); absent = host cap only. */
+    runSlots?: Parameters<typeof hostBuildSlotPort>[4];
     /** Benchmark artifact directory (#509) — only set for local-only runs. */
     artifactsDir?: string;
-    /** Resume at CHECK on a kept worktree (#2564). */
-    resumeFrom?: CheckResumeRecord;
+    resumeFrom?: CheckResumeRecord; // Resume at CHECK on a kept worktree (#2564).
   },
   deps: Pick<
     CliDeps,
@@ -408,7 +408,7 @@ export async function shipIssue(
     planPhase: phases.planPhase,
     buildPhase: phases.buildPhase,
     checkPhase: phases.checkPhase,
-    hostBuildSlot: hostBuildSlotPort(factoryConfig, ghRepo, issueNum, log),
+    hostBuildSlot: hostBuildSlotPort(factoryConfig, ghRepo, issueNum, log, ctx?.runSlots),
     shipPhase: shipPhaseForMode,
     checkBaseHealth: deps.checkBaseHealth ?? checkBaseHealth,
     resolveConstitution: () =>
