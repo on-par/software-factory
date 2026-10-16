@@ -493,7 +493,7 @@ describe('formatDoctorChecks', () => {
              fix: install the codex CLI, or rely on claude routes
       1 passed, 1 failed, 1 warnings
 
-      Model reachability: factory models --doctor"
+      Model reachability: not checked. Run \`factory models --doctor\`"
     `);
   });
 });
@@ -537,10 +537,16 @@ describe('outside a git repo (#2554)', () => {
 
   it('keeps the in-repo trailer unchanged', () => {
     const rows = runDoctorChecks(probes());
-    expect(formatDoctorChecks(rows).endsWith('Model reachability: factory models --doctor')).toBe(true);
-    expect(formatDoctorChecks(rows, { inRepo: true }).endsWith('Model reachability: factory models --doctor')).toBe(
-      true,
-    );
+    const trailer = 'Model reachability: not checked. Run `factory models --doctor`';
+    expect(formatDoctorChecks(rows).endsWith(trailer)).toBe(true);
+    expect(formatDoctorChecks(rows, { inRepo: true }).endsWith(trailer)).toBe(true);
+  });
+
+  it('in-repo trailer says not checked and how to run it (#2723)', () => {
+    const rows = runDoctorChecks(probes());
+    for (const out of [formatDoctorChecks(rows), formatDoctorChecks(rows, { inRepo: true })])
+      expect(out.split('\n').pop()).toMatch(/^Model reachability: .*not checked.*Run `factory models --doctor`/);
+    expect(formatDoctorChecks(rows, { inRepo: false })).not.toContain('not checked');
   });
 });
 

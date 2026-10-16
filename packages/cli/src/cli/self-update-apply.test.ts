@@ -157,7 +157,7 @@ describe('applySelfUpdate', () => {
     expect(s.calls.some((c) => c.includes('daemon'))).toBe(false);
   });
 
-  const FOOTER = ['', 'Model reachability: factory models --doctor'];
+  const FOOTER = ['', 'Model reachability: not checked. Run `factory models --doctor`'];
   it('doctor rollback names the failing check, not the Model reachability footer', async () => {
     const stdout = [
       '== factory doctor ==',
