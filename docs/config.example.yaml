@@ -231,11 +231,13 @@ environment:
     domain: "factory.localhost"
 # Host-wide cap on lanes in BUILD or CHECK at once, shared by every runner on this machine through
 # slot files in ~/.factory/host/build-slots/. A lane waits for a free slot before each BUILD/CHECK
-# phase. loadGuard holds new issue claims while the host 5-minute load average is above maxLoad
-# (default 3x CPU count), retrying every retrySeconds; enabled: false or FACTORY_LOAD_GUARD=0 turns
-# it off.
+# phase. maxAgentJobs caps ad-hoc rescue/steward jobs started with `factory agent-job`, through
+# lease files in ~/.factory/host/agent-jobs/. loadGuard holds new issue claims while the host
+# 5-minute load average is above maxLoad (default 3x CPU count), retrying every retrySeconds;
+# enabled: false or FACTORY_LOAD_GUARD=0 turns it off.
 host:
   maxBuilds: 2
+  maxAgentJobs: 1
   loadGuard:
     enabled: true
     retrySeconds: 60

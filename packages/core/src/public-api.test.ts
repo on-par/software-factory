@@ -7,9 +7,8 @@ import * as publicApi from './index.js';
 import * as internalApi from './internal.js';
 import * as kpisApi from './kpis-entry.js';
 import * as testingApi from './testing.js';
-// Pins the exact export surface of each @on-par/factory-core entry point
-// (ADR-0004). Object.keys(...) only reflects runtime values, so these
-// allowlists list value exports only.
+// Pins the exact export surface of each @on-par/factory-core entry point (ADR-0004).
+// Object.keys(...) only reflects runtime values, so these allowlists list value exports only.
 const PUBLIC_API_KEYS = [
   // Config
   'FactoryConfigV2Schema',
@@ -325,6 +324,7 @@ const PUBLIC_API_KEYS = [
   'watchUsage',
   'fetchSubscriptionUsage',
 ];
+const AGENT_JOB_KEYS = ['resolveHostMaxAgentJobs', 'hostAgentJobsDir', 'withHostAgentJobLease']; // #3047
 const INTERNAL_API_KEYS = [
   'openCodeVersion',
   'DEFAULT_CI_DEADLINE_MS',
@@ -889,7 +889,7 @@ describe('public API surface (ADR-0004)', () => {
     }
   });
   it('./internal exposes exactly the documented internal API', () => {
-    expect(Object.keys(internalApi).sort()).toEqual([...INTERNAL_API_KEYS].sort());
+    expect(Object.keys(internalApi).sort()).toEqual([...INTERNAL_API_KEYS, ...AGENT_JOB_KEYS].sort());
   });
   it('./testing exposes exactly the documented testing API', () => {
     expect(Object.keys(testingApi).sort()).toEqual([...TESTING_API_KEYS].sort());

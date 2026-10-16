@@ -11,6 +11,7 @@ import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/c
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
 import type { shipPhase as realShipPhase } from '../phases/ship.js';
 import {
+  overCapReason,
   parseSlicePlanComment,
   renderSlicePlanComment,
   stackSliceBranch,
@@ -185,6 +186,33 @@ describe('runIssue — stack mode chains slice branches (ADR-0161)', () => {
     expect(outcome).toMatchObject({ state: 'ready', slice: { index: 3, count: 3 } });
   });
 
+  it('builds at most maxSlices slices when the gate is bypassed', async () => {
+    const { ports, createSliceBranch } = stackSetup();
+    const outcome = await runIssue(baseRequest({ maxSlices: 2 }), policy, ports);
+
+    expect(planPhase.mock.calls.map((c) => c[0].sliceIndex)).toEqual([undefined, 2]);
+    expect(buildPhase.mock.calls.map((c) => c[0].branch)).toEqual([branch(1), branch(2)]);
+    expect(createSliceBranch).toHaveBeenCalledTimes(2);
+    expect(outcome).toMatchObject({ state: 'ready', slice: { index: 2, count: 3 } });
+  });
+
+  it('parks over-cap through the gate and builds no slice', async () => {
+    const { ports } = stackSetup();
+    planPhase.mockImplementation(async () => ({
+      ok: false,
+      route: 'codex',
+      specPath: '/tmp/wt/spec.md',
+      model: '',
+      escalate: overCapReason(3, 2),
+      designArtifact: null,
+    }));
+    const outcome = await runIssue(baseRequest({ maxSlices: 2 }), policy, ports);
+
+    expect(outcome.state).toBe('escalated');
+    expect(planPhase).toHaveBeenCalledTimes(1);
+    expect(buildPhase).not.toHaveBeenCalled();
+  });
+
   it('passes the parent slice branch to checkPhase as parentBaseRef', async () => {
     const { ports } = stackSetup();
     await runIssue(baseRequest(), policy, ports);
@@ -217,6 +245,41 @@ describe('runIssue — stack mode chains slice branches (ADR-0161)', () => {
 
     expect(planPhase).toHaveBeenCalledTimes(2);
     expect(outcome.state).not.toBe('ready');
+  });
+
+  it.each([
+    { name: 'fail', stuck: false, reason: 'fail' },
+    { name: 'stuck', stuck: true, reason: 'escalate' },
+  ])('halts the stack when slice 2 of 3 fails CHECK ($name)', async ({ stuck, reason }) => {
+    const { ports, createSliceBranch } = stackSetup();
+    const failed: CheckPhaseResult = {
+      passed: false,
+      stuck,
+      reworkRounds: 1,
+      failureSignature: 'sig-2',
+      summary: {
+        failures: 1,
+        passes: 0,
+        skips: 0,
+        total: 1,
+        results: [{ checker: 'tests', result: 'FAIL' } as never],
+      },
+    };
+    checkPhase.mockReset().mockResolvedValueOnce(CHECK_OK).mockResolvedValueOnce(failed);
+    const outcome = await runIssue(baseRequest(), policy, ports);
+
+    expect(planPhase.mock.calls.map((c) => c[0].sliceIndex)).toEqual([undefined, 2]);
+    expect(createSliceBranch.mock.calls.map((c) => c[0].branch)).toEqual([branch(1), branch(2)]);
+    expect(buildPhase.mock.calls.map((c) => c[0].branch)).toEqual([branch(1), branch(2)]);
+    expect(checkPhase).toHaveBeenCalledTimes(2);
+    expect(shipPhase).toHaveBeenCalledTimes(1);
+    expect(outcome).toMatchObject({
+      state: 'parked',
+      reason,
+      branch: branch(2),
+      failureSignature: 'sig-2',
+      failingChecks: ['tests'],
+    });
   });
 
   it('parks fail when the parent slice branch is not recorded', async () => {

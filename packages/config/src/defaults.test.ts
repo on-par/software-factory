@@ -25,6 +25,10 @@ describe('shipped defaults', () => {
     expect(description).not.toMatch(/\bpush|pull request|\bopens? (a )?PR\b|wait(s)? for CI/i);
   });
 
+  it('defaults the host-wide agent job cap to 1 (#3047)', () => {
+    expect(defaultFactoryConfig.host.maxAgentJobs).toBe(1);
+  });
+
   it('defaults the host-wide BUILD/CHECK cap to 2 (#3043)', () => {
     expect(defaultFactoryConfig.host.maxBuilds).toBe(2);
   });

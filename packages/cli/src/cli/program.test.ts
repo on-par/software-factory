@@ -2,7 +2,7 @@
 
 import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { HELP_GROUPS, OTHER_GROUP } from './help-groups.js';
 import { PROGRAM_HANDLERS } from './index.js';
 import { buildProgram } from './program.js';
@@ -15,8 +15,8 @@ import { registerSetupCommands } from './program-setup.js';
 const countCommands = (cmd: Command): number => cmd.commands.reduce((n, c) => n + 1 + countCommands(c), 0);
 
 describe('buildProgram', () => {
-  it('buildProgram registers 57 commands', () => {
-    expect(countCommands(buildProgram(PROGRAM_HANDLERS, {}))).toBe(57);
+  it('buildProgram registers 58 commands', () => {
+    expect(countCommands(buildProgram(PROGRAM_HANDLERS, {}))).toBe(58);
   });
 
   it('each help-group registrar registers exactly its HELP_GROUPS commands', () => {
@@ -50,6 +50,20 @@ describe('buildProgram', () => {
     const program = buildProgram(PROGRAM_HANDLERS, {});
     expect(program.commands.find((c) => c.name() === 'check')?.aliases()).toEqual(['ready']);
     expect(program.options.some((o) => o.long === '--state-root')).toBe(true);
+  });
+
+  it('hosted smoke, runner and queue pass their options to their handlers', async () => {
+    const cmdHostedSmoke = vi.fn(async () => {});
+    const cmdHostedRunner = vi.fn(async () => {});
+    const cmdHostedQueue = vi.fn(async () => {});
+    const handlers = { ...PROGRAM_HANDLERS, cmdHostedSmoke, cmdHostedRunner, cmdHostedQueue };
+    const run = (args: string[]) => buildProgram(handlers, {}).parseAsync(['node', 'factory', 'hosted', ...args]);
+    await run(['smoke', '--image', 'node:22']);
+    expect(cmdHostedSmoke).toHaveBeenCalledWith(expect.objectContaining({ image: 'node:22' }));
+    await run(['runner', '--runner-id', 'r1']);
+    expect(cmdHostedRunner).toHaveBeenCalledWith(expect.objectContaining({ runnerId: 'r1' }));
+    await run(['queue']);
+    expect(cmdHostedQueue).toHaveBeenCalledTimes(1);
   });
 });
 
