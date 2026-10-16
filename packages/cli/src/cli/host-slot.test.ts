@@ -1,4 +1,5 @@
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -28,5 +29,25 @@ describe('hostBuildSlotPort (#3043)', () => {
     );
     await expect(port('check', async () => Promise.reject(new Error('boom')))).rejects.toThrow('boom');
     expect((await readdir(dir)).filter((f) => f.startsWith('slot-'))).toEqual([]);
+  });
+
+  it("logs an environment_lease event naming the reclaimed slot and the dead holder's repo, issue and pid", async () => {
+    const deadPid = spawnSync(process.execPath, ['-e', '']).pid as number;
+    for (const [slot, token] of [
+      [0, 'a'],
+      [1, 'b'],
+    ] as const) {
+      await writeFile(
+        join(dir, `slot-${slot}.json`),
+        JSON.stringify({ pid: deadPid, repo: 'o/dead', issue: 12, phase: 'build', token, acquiredAt: '' }),
+      );
+    }
+    const log = vi.fn();
+    const port = hostBuildSlotPort(loadFactoryConfig(), 'o/r', 7, log);
+    await expect(port('build', async () => 'ok')).resolves.toBe('ok');
+    expect(log).toHaveBeenCalledWith(
+      'environment_lease',
+      expect.stringContaining(`reclaimed host build slot 0 from o/dead#12 (pid ${deadPid}`),
+    );
   });
 });
