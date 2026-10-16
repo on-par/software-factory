@@ -33,7 +33,7 @@ import {
   unknownCheckerOutput,
   type WorktreeProbe,
 } from './index.js';
-import { fileExists, type PythonTestSurfaceSource } from './probe.js';
+import { fileExists, probeWorktree, type PythonTestSurfaceSource } from './probe.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -393,11 +393,7 @@ describe('testsChecker', () => {
   it('prefers the probe-time pytest surface over re-walking the disk', async () => {
     const worktree = await makeWorktree();
     const probe: WorktreeProbe = {
-      packageJson: { status: 'loaded', value: { scripts: {} } },
-      htmlFiles: [],
-      playwrightConfigFiles: [],
-      playwrightConfigContents: {},
-      scripts: {},
+      ...(await probeWorktree(worktree)),
       pythonTestSurface: { present: true, sources: ['pytest.ini'] },
     };
     const { run } = stubRunner({ ok: true, exitCode: 0 });
@@ -704,6 +700,7 @@ describe('resolveTestsCommand', () => {
     playwrightConfigContents: {},
     scripts: {},
     pythonTestSurface: { present: sources !== null, sources: sources ?? [] },
+    lintConfig: null,
   });
 
   it('prefers scripts/verify.sh', async () => {
@@ -1580,6 +1577,7 @@ describe('runAllCheckers', () => {
         playwrightConfigContents: {},
         scripts: {},
         pythonTestSurface: { present: false, sources: [] },
+        lintConfig: null,
       };
       const probeWorktreeMock = vi.fn(async () => probe);
       const { router } = makeRouter('{"checker":"custom_x","result":"PASS","details":"ok"}');
