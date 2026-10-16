@@ -20,6 +20,7 @@ import type { Constitution, FailoverReason } from '../types/index.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE } from '../utils/untrusted-input.js';
 import type { BuildRoutePin } from '../config/repo.js';
+import { renderLintRulesInForce } from './build-lint-rules.js';
 import { failOverOpencodeBuild } from './build-opencode-failover.js';
 
 export interface BuildResult {
@@ -149,7 +150,7 @@ async function buildPhaseImpl(opts: {
   } = opts;
   let route = opts.route;
 
-  const constitutionCtx = buildConstitutionContext(constitution);
+  const constitutionCtx = buildConstitutionContext(constitution) + (await renderLintRulesInForce(worktree));
   const spec = await readFile(specPath, 'utf-8').catch(() => '');
   const designArtifact = await readDesignArtifact(specPath);
   const designGrounding = designArtifact ? renderDesignGrounding(designArtifact) : '';
