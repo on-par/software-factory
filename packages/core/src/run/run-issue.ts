@@ -73,7 +73,12 @@ import type {
   ReadinessInfo,
 } from '../types/index.js';
 import type { WorkRequest, WorkRequestSourceKind } from '../work/index.js';
-import { touchedFilesFrom, type LaneClaimStalenessProbe, type LaneFileGuard } from './lane-file-guard.js';
+import {
+  releaseLaneClaim,
+  touchedFilesFrom,
+  type LaneClaimStalenessProbe,
+  type LaneFileGuard,
+} from './lane-file-guard.js';
 import { parkReasonFor, reworkRouteFor, type BuildRoute, type ParkReason, type RunOutcome } from './outcome.js';
 import type { RunPolicy } from './policy.js';
 import {
@@ -306,7 +311,7 @@ async function runIssueOnce(initialRequest: RunRequest, policy: RunPolicy, ports
     released = true;
     if (laneFileClaimed) {
       laneFileClaimed = false;
-      await ports.laneFileGuard?.release(request.repo, request.issue);
+      if (ports.laneFileGuard) await releaseLaneClaim(ports.laneFileGuard, request.repo, request.issue, log);
     }
     const outcomes = await tracker.killAll({ graceMs: request.processGroupGraceMs });
     if (outcomes.length > 0) {

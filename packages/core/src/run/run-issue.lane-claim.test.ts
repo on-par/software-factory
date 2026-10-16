@@ -142,4 +142,38 @@ describe('runIssue — stale lane-file claim reaping (#3063)', () => {
     expect(buildPhase).toHaveBeenCalled();
     expect(events.some(([type, msg]) => type === 'lane_file_claim_reaped' && msg.includes('#100'))).toBe(true);
   });
+
+  it('a failing claim release logs lane_file_release_failed and the run still finishes', async () => {
+    const guard = new LaneFileGuard(join(breakerDir, 'lane-files-release-fail.json'));
+    vi.spyOn(guard, 'release').mockRejectedValue(new Error('ENOSPC: no space left on device'));
+    const events: Array<[string, string]> = [];
+    const ports: RunPorts = {
+      router: new ModelRouter(MODELS, ROUTES),
+      octokit: {} as Octokit,
+      workspace: { path: '/tmp/wt', dispose: async () => {} } as Workspace,
+      events: () => (type, msg) => events.push([type, msg]),
+      breaker: new ProviderBreaker(join(breakerDir, 'breaker-release-fail.json')),
+      resolveConstitution: () => null,
+      planPhase: vi.fn<typeof realPlanPhase>().mockResolvedValue({
+        ok: true,
+        route: 'claude',
+        specPath: '/tmp/wt/spec.md',
+        model: 'm',
+        designArtifact: design,
+      } satisfies PlanResult),
+      buildPhase: vi
+        .fn<typeof realBuildPhase>()
+        .mockResolvedValue({ ok: true, model: 'my-model', route: 'command' } satisfies BuildResult),
+      checkPhase: vi.fn<typeof realCheckPhase>().mockResolvedValue({
+        passed: true,
+        summary: { failures: 0, passes: 1, skips: 0, total: 1, results: [] },
+        reworkRounds: 0,
+      } satisfies CheckPhaseResult),
+      shipPhase: vi.fn<typeof realShipPhase>().mockResolvedValue({ ok: true, prNumber: 42 } satisfies ShipResult),
+      laneFileGuard: guard,
+    };
+    await expect(runIssue(request, policy, ports)).resolves.toBeDefined();
+    expect(events.some(([type, msg]) => type === 'lane_file_release_failed' && msg.includes('#1'))).toBe(true);
+    expect(await guard.claimsForIssue(1)).toHaveLength(1);
+  });
 });

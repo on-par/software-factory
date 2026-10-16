@@ -769,6 +769,7 @@ const INTERNAL_API_KEYS = [
   'classifyQueueCompatibility',
   'createFileAdmissionStateReader',
   'createGithubLaneClaimStalenessProbe',
+  'releaseLaneClaim',
   'FACTORY_APP_REPAIR_HINT',
   'formatAdmissionConflict',
   'withAdmissionGuard',
@@ -867,7 +868,6 @@ const KPIS_API_KEYS = [
   'renderKpiReport',
   'renderKpiTrend',
 ];
-
 describe('public API surface (ADR-0004)', () => {
   it('root export exposes exactly the documented public API', () => {
     expect(Object.keys(publicApi).sort()).toEqual([...PUBLIC_API_KEYS].sort());

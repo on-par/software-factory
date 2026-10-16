@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -6,7 +6,12 @@ import type { Octokit } from '@octokit/rest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { DesignArtifact } from '../types/index.js';
-import { createGithubLaneClaimStalenessProbe, LaneFileGuard, touchedFilesFrom } from './lane-file-guard.js';
+import {
+  createGithubLaneClaimStalenessProbe,
+  LaneFileGuard,
+  releaseLaneClaim,
+  touchedFilesFrom,
+} from './lane-file-guard.js';
 
 const tempDirs = new Set<string>();
 
@@ -434,5 +439,41 @@ describe('LaneFileGuard.sweepStale', () => {
     expect(reaped).toEqual([]);
     expect(events).toEqual([]);
     expect(await guard.claimsForIssue(1)).toHaveLength(1);
+  });
+});
+
+describe('releaseLaneClaim', () => {
+  it('releaseLaneClaim removes the #1 claim and resolves true without logging', async () => {
+    const guard = new LaneFileGuard(await tmpFile());
+    await guard.register('o/r', 1, ['src/a.ts']);
+    const events: Array<[string, string]> = [];
+    const ok = await releaseLaneClaim(guard, 'o/r', 1, (type, msg) => events.push([type, msg]));
+    expect(ok).toBe(true);
+    expect(await guard.claimsForIssue(1)).toEqual([]);
+    expect(events).toEqual([]);
+  });
+
+  it('releaseLaneClaim logs lane_file_release_failed naming #1, resolves false and keeps the claim when the write fails', async () => {
+    const file = await tmpFile();
+    const guard = new LaneFileGuard(file);
+    await guard.register('o/r', 1, ['src/a.ts']);
+    await mkdir(`${file}.tmp`);
+    const events: Array<[string, string]> = [];
+    const ok = await releaseLaneClaim(guard, 'o/r', 1, (type, msg) => events.push([type, msg]));
+    expect(ok).toBe(false);
+    const failed = events.filter(([type]) => type === 'lane_file_release_failed');
+    expect(failed).toHaveLength(1);
+    expect(failed[0][1]).toContain('#1');
+    expect(await readFile(file, 'utf8')).toContain('o/r#1');
+  });
+
+  it('releaseLaneClaim on an unclaimed issue is a silent no-op', async () => {
+    const file = await tmpFile();
+    const guard = new LaneFileGuard(file);
+    const events: Array<[string, string]> = [];
+    const ok = await releaseLaneClaim(guard, 'o/r', 7, (type, msg) => events.push([type, msg]));
+    expect(ok).toBe(true);
+    expect(events).toEqual([]);
+    await expect(readFile(file, 'utf8')).rejects.toThrow();
   });
 });

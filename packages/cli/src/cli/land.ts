@@ -5,7 +5,13 @@ import { existsSync } from 'node:fs';
 import type { Octokit } from '@octokit/rest';
 import type { EventKind, FactoryConfig, FailoverReason, MergePolicyOverrides } from '@on-par/factory-core';
 import type { getFactoryPaths } from '@on-par/factory-core';
-import { phaseSnapshotFile, resolveMergePolicy, resolveSandboxPolicy, touchRunActivity } from '@on-par/factory-core';
+import {
+  LaneFileGuard,
+  phaseSnapshotFile,
+  resolveMergePolicy,
+  resolveSandboxPolicy,
+  touchRunActivity,
+} from '@on-par/factory-core';
 import type { WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
   branchFor,
@@ -14,6 +20,7 @@ import {
   isAutoMergeBlocked,
   LEGACY_BRANCH_PREFIX,
   logEvent,
+  releaseLaneClaim,
   resolveEffectiveConfig,
   resolveFilingPolicy,
   withFileLock,
@@ -31,6 +38,16 @@ import {
 } from './land-pr.js';
 import type { LandLock } from './land-pr.js';
 import { landRuntime } from './land-runtime.js';
+
+async function releaseLandedClaim(
+  paths: ReturnType<typeof getFactoryPaths>,
+  ghRepo: string,
+  issue: number,
+  log: (type: EventKind, msg: string) => void,
+): Promise<void> {
+  if (!paths.laneFiles) return;
+  await releaseLaneClaim(new LaneFileGuard(paths.laneFiles), ghRepo, issue, log);
+}
 
 export async function landIssue(
   issueNum: number,
@@ -175,6 +192,7 @@ export async function landIssue(
       throw err;
     }
     log('merged', `squash-merged PR #${prNumber}`);
+    await releaseLandedClaim(paths, ghRepo, issueNum, log);
     await withLandLock(() => gitOps.cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
   } catch (err: any) {
     if (err instanceof LandConflictError || err instanceof AwaitingReviewError || err instanceof CiFailedError)
@@ -415,6 +433,7 @@ export async function waitForMerge(
       }
       if (landBranch) await land(issue, repoRoot, ghRepo, paths, octokit, skipCI, undefined, { branch: landBranch });
       else await land(issue, repoRoot, ghRepo, paths, octokit, skipCI);
+      await releaseLandedClaim(paths, ghRepo, issue, (type, msg) => emitEvent(paths.events, type, issue, msg));
       return;
     }
 
