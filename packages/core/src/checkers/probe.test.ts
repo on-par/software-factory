@@ -2,15 +2,17 @@
 
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   countPlaceholderLinks,
+  detectLintConfig,
   detectPythonTestSurface,
   fileExists,
   findHtmlFiles,
+  type LintConfigProbe,
   type PackageJsonProbe,
   probeWorktree,
   type PythonTestSurface,
@@ -63,6 +65,17 @@ describe('probeWorktree', () => {
     });
     expect(probe.scripts).toEqual({ build: 'tsc', e2e: 'playwright test' });
     expect(probe.pythonTestSurface).toEqual({ present: false, sources: [] });
+    expect(probe.lintConfig).toBeNull();
+  });
+
+  it('exposes the root lint config on the probe', async () => {
+    const worktree = await makeWorktree({ 'biome.json': '{}' });
+    expect((await probeWorktree(worktree)).lintConfig).toEqual({
+      linter: 'biome',
+      configPath: 'biome.json',
+      format: 'json',
+      executable: false,
+    });
   });
 
   it('carries the Python test-surface fact when config and convention surfaces exist', async () => {
@@ -258,5 +271,99 @@ describe('fileExists', () => {
   it('returns false for a directory', async () => {
     const worktree = await makeWorktree({ 'scripts/verify.sh': 'exit 0' });
     expect(await fileExists(join(worktree, 'scripts'))).toBe(false);
+  });
+});
+
+const LINT_CONFIG_FIXTURES: Array<{ name: string; files: Record<string, string>; expected: LintConfigProbe | null }> = [
+  {
+    name: 'oxlint JSON',
+    files: { '.oxlintrc.json': '{ "rules": {} }\n', 'package.json': '{}' },
+    expected: { linter: 'oxlint', configPath: '.oxlintrc.json', format: 'json', executable: false },
+  },
+  {
+    name: 'oxlint TS',
+    files: { 'oxlint.config.ts': 'export default { rules: {} };\n' },
+    expected: { linter: 'oxlint', configPath: 'oxlint.config.ts', format: 'executable', executable: true },
+  },
+  {
+    name: 'ESLint flat',
+    files: { 'eslint.config.js': 'export default [];\n' },
+    expected: { linter: 'eslint', configPath: 'eslint.config.js', format: 'executable', executable: true },
+  },
+  {
+    name: 'Biome',
+    files: { 'biome.json': '{ "linter": { "enabled": true } }\n' },
+    expected: { linter: 'biome', configPath: 'biome.json', format: 'json', executable: false },
+  },
+  { name: 'no config', files: { 'package.json': '{}', 'src/index.ts': 'export {};\n' }, expected: null },
+];
+
+describe('detectLintConfig', () => {
+  it.each(LINT_CONFIG_FIXTURES.filter((f) => f.expected !== null))('detects $name', async ({ files, expected }) => {
+    const result = await detectLintConfig(await makeWorktree(files));
+    expect(result).toEqual(expected);
+    expect(isAbsolute(result?.configPath ?? '')).toBe(false);
+  });
+
+  it('returns null for a repo with no lint config', async () => {
+    const fixture = LINT_CONFIG_FIXTURES.find((f) => f.name === 'no config')!;
+    expect(await detectLintConfig(await makeWorktree(fixture.files))).toBeNull();
+  });
+
+  it('never evaluates an executable config', async () => {
+    const g = globalThis as Record<string, unknown>;
+    const cjs =
+      "globalThis.__lintConfigEvaluated = true; require('node:fs').writeFileSync(require('node:path').join(__dirname, 'EVALUATED'), 'x'); throw new Error('evaluated');\n";
+    const esm =
+      "import { writeFileSync } from 'node:fs';\nglobalThis.__lintConfigEvaluated = true;\nwriteFileSync(import.meta.dirname + '/EVALUATED', 'x');\nthrow new Error('evaluated');\n";
+    const worktree = await makeWorktree({ 'oxlint.config.ts': esm, 'eslint.config.js': cjs });
+
+    const result = await detectLintConfig(worktree);
+
+    expect(result).toEqual({
+      linter: 'oxlint',
+      configPath: 'oxlint.config.ts',
+      format: 'executable',
+      executable: true,
+    });
+    expect(await fileExists(join(worktree, 'EVALUATED'))).toBe(false);
+    expect(g.__lintConfigEvaluated).toBeUndefined();
+  });
+
+  it('returns null when a candidate name is a directory', async () => {
+    const worktree = await makeWorktree({ 'eslint.config.js/keep.txt': 'x' });
+    expect(await detectLintConfig(worktree)).toBeNull();
+  });
+
+  it('returns null for a nonexistent worktree', async () => {
+    expect(await detectLintConfig(join(tmpdir(), 'checker-probe-test-does-not-exist'))).toBeNull();
+  });
+
+  it('prefers oxlint over eslint when both exist', async () => {
+    const worktree = await makeWorktree({ '.oxlintrc.json': '{}', 'eslint.config.js': 'export default [];\n' });
+    expect((await detectLintConfig(worktree))?.linter).toBe('oxlint');
+  });
+
+  it('treats .eslintrc.yml as static yaml', async () => {
+    expect(await detectLintConfig(await makeWorktree({ '.eslintrc.yml': 'root: true\n' }))).toEqual({
+      linter: 'eslint',
+      configPath: '.eslintrc.yml',
+      format: 'yaml',
+      executable: false,
+    });
+  });
+
+  it('detects biome.jsonc', async () => {
+    expect(await detectLintConfig(await makeWorktree({ 'biome.jsonc': '{}' }))).toEqual({
+      linter: 'biome',
+      configPath: 'biome.jsonc',
+      format: 'json',
+      executable: false,
+    });
+  });
+
+  it('ignores configs nested in subdirectories', async () => {
+    const worktree = await makeWorktree({ 'packages/a/eslint.config.js': 'export default [];\n' });
+    expect(await detectLintConfig(worktree)).toBeNull();
   });
 });

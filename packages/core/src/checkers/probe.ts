@@ -23,6 +23,20 @@ export interface PythonTestSurface {
   sources: PythonTestSurfaceSource[];
 }
 
+export type LintConfigLinter = 'oxlint' | 'eslint' | 'biome';
+/** 'executable' = TS/JS module the linter would evaluate; json/yaml are static data. */
+export type LintConfigFormat = 'json' | 'yaml' | 'executable';
+
+/** Probe-time fact: which linter the repo configures at its root, and where (#3039). */
+export interface LintConfigProbe {
+  linter: LintConfigLinter;
+  /** Repo-relative config path (root-level filename). */
+  configPath: string;
+  format: LintConfigFormat;
+  /** True for TS/JS configs: loading them runs code. The probe itself never loads them. */
+  executable: boolean;
+}
+
 /** Facts captured exactly once per CHECK round — the single place worktree state is read. */
 export interface WorktreeProbe {
   packageJson: PackageJsonProbe;
@@ -36,7 +50,34 @@ export interface WorktreeProbe {
   scripts: Record<string, string>;
   /** Python (pytest) test-surface fact — config-declared and convention surfaces (#1217). */
   pythonTestSurface: PythonTestSurface;
+  /** Root lint config fact from detectLintConfig — never read or evaluated (#3039). */
+  lintConfig: LintConfigProbe | null;
 }
+
+// Root lint config candidates; order is the precedence order (#3039).
+const LINT_CONFIG_CANDIDATES: ReadonlyArray<{ path: string; linter: LintConfigLinter; format: LintConfigFormat }> = [
+  { path: 'oxlint.config.ts', linter: 'oxlint', format: 'executable' },
+  { path: 'oxlint.config.mts', linter: 'oxlint', format: 'executable' },
+  { path: 'oxlint.config.cts', linter: 'oxlint', format: 'executable' },
+  { path: 'oxlint.config.js', linter: 'oxlint', format: 'executable' },
+  { path: 'oxlint.config.mjs', linter: 'oxlint', format: 'executable' },
+  { path: 'oxlint.config.cjs', linter: 'oxlint', format: 'executable' },
+  { path: '.oxlintrc.json', linter: 'oxlint', format: 'json' },
+  { path: 'eslint.config.js', linter: 'eslint', format: 'executable' },
+  { path: 'eslint.config.mjs', linter: 'eslint', format: 'executable' },
+  { path: 'eslint.config.cjs', linter: 'eslint', format: 'executable' },
+  { path: 'eslint.config.ts', linter: 'eslint', format: 'executable' },
+  { path: 'eslint.config.mts', linter: 'eslint', format: 'executable' },
+  { path: 'eslint.config.cts', linter: 'eslint', format: 'executable' },
+  { path: '.eslintrc.js', linter: 'eslint', format: 'executable' },
+  { path: '.eslintrc.cjs', linter: 'eslint', format: 'executable' },
+  { path: '.eslintrc.yaml', linter: 'eslint', format: 'yaml' },
+  { path: '.eslintrc.yml', linter: 'eslint', format: 'yaml' },
+  { path: '.eslintrc.json', linter: 'eslint', format: 'json' },
+  { path: '.eslintrc', linter: 'eslint', format: 'yaml' }, // legacy: ESLint parses it as YAML (a JSON superset)
+  { path: 'biome.json', linter: 'biome', format: 'json' },
+  { path: 'biome.jsonc', linter: 'biome', format: 'json' },
+];
 
 const PLAYWRIGHT_CONFIG_FILES = [
   'playwright.config.ts',
@@ -60,6 +101,7 @@ export async function probeWorktree(worktree: string): Promise<WorktreeProbe> {
   const packageJson = await probePackageJson(worktree);
   const htmlFiles = await findHtmlFiles(worktree);
   const pythonTestSurface = await detectPythonTestSurface(worktree);
+  const lintConfig = await detectLintConfig(worktree);
 
   const playwrightConfigFiles: string[] = [];
   const playwrightConfigContents: Record<string, string> = {};
@@ -80,7 +122,26 @@ export async function probeWorktree(worktree: string): Promise<WorktreeProbe> {
     }
   }
 
-  return { packageJson, htmlFiles, playwrightConfigFiles, playwrightConfigContents, scripts, pythonTestSurface };
+  return {
+    packageJson,
+    htmlFiles,
+    playwrightConfigFiles,
+    playwrightConfigContents,
+    scripts,
+    pythonTestSurface,
+    lintConfig,
+  };
+}
+
+/** Detect the root lint config by filename only (#3039). Stats paths, never reads, imports or evaluates them.
+ *  First candidate in precedence order wins; null when none exists (fail-open like detectPythonTestSurface). */
+export async function detectLintConfig(worktree: string): Promise<LintConfigProbe | null> {
+  for (const c of LINT_CONFIG_CANDIDATES) {
+    if (await fileExists(join(worktree, c.path))) {
+      return { linter: c.linter, configPath: c.path, format: c.format, executable: c.format === 'executable' };
+    }
+  }
+  return null;
 }
 
 /** True when any line of the ini-style content, trimmed, is exactly the section header. */
