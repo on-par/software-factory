@@ -231,9 +231,14 @@ environment:
     domain: "factory.localhost"
 # Host-wide cap on lanes in BUILD or CHECK at once, shared by every runner on this machine through
 # slot files in ~/.factory/host/build-slots/. A lane waits for a free slot before each BUILD/CHECK
-# phase.
+# phase. loadGuard holds new issue claims while the host 5-minute load average is above maxLoad
+# (default 3x CPU count), retrying every retrySeconds; enabled: false or FACTORY_LOAD_GUARD=0 turns
+# it off.
 host:
   maxBuilds: 2
+  loadGuard:
+    enabled: true
+    retrySeconds: 60
 # Supervisor circuit breaker for cross-harness build failover. On a quota trip
 # (usage_cap/rate_limit) the Codex provider is skipped for cooldown_minutes: the lane that trips it
 # falls over to fallback_model (when available); every later lane during the cooldown is routed

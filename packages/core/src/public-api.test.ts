@@ -544,6 +544,7 @@ const INTERNAL_API_KEYS = [
   'resolveExperimental',
   'resolveLocalOnly',
   'resolveHostMaxBuilds',
+  ...'resolveHostLoadGuard evaluateLoadGuard formatLoadHold readHostLoad'.split(' '), // #3048
   'hostBuildSlotsDir',
   'listHostSlots',
   'withHostBuildSlot',
@@ -887,7 +888,6 @@ describe('public API surface (ADR-0004)', () => {
       expect(Object.keys(publicApi)).not.toContain(key);
     }
   });
-
   it('./internal exposes exactly the documented internal API', () => {
     expect(Object.keys(internalApi).sort()).toEqual([...INTERNAL_API_KEYS].sort());
   });

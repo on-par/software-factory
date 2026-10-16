@@ -29,6 +29,10 @@ describe('shipped defaults', () => {
     expect(defaultFactoryConfig.host.maxBuilds).toBe(2);
   });
 
+  it('enables the host load guard by default (#3048)', () => {
+    expect(defaultFactoryConfig.host.loadGuard).toEqual({ enabled: true, retrySeconds: 60 });
+  });
+
   it('defaults intake to warn with no trusted approvers', () => {
     expect(defaultFactoryConfig.intake.enforce).toBe('warn');
     expect(defaultFactoryConfig.intake.trustedApprovers).toBeUndefined();
