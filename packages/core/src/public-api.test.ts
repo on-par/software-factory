@@ -544,6 +544,7 @@ const INTERNAL_API_KEYS = [
   'resolveExperimental',
   'resolveLocalOnly',
   'FACTORY_RUNTIME_CONFIG_KEYS',
+  'gateHostPhases',
   'isTrustedApprover',
   'createOctokitCollaboratorPermissionClient',
   'CONFIG_EXAMPLE_OMITTED_KEYS',
@@ -888,7 +889,6 @@ describe('public API surface (ADR-0004)', () => {
   it('./internal exposes exactly the documented internal API', () => {
     expect(Object.keys(internalApi).sort()).toEqual([...INTERNAL_API_KEYS].sort());
   });
-
   it('./testing exposes exactly the documented testing API', () => {
     expect(Object.keys(testingApi).sort()).toEqual([...TESTING_API_KEYS].sort());
   });

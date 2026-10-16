@@ -59,6 +59,7 @@ import {
   createPlanReuseStore,
   egressHostMessage,
   egressSummaryMessage,
+  gateHostPhases,
   logCost,
   logEvent,
   recordLocalAuthFailure,
@@ -408,8 +409,7 @@ export async function shipIssue(
     planReuse: ctx?.localOnly ? undefined : createPlanReuseStore(specPath),
     checkResume: ctx?.localOnly ? undefined : createCheckResumeStore(specPath),
     planPhase: phases.planPhase,
-    buildPhase: phases.buildPhase,
-    checkPhase: phases.checkPhase,
+    ...gateHostPhases(phases, factoryConfig, ghRepo, issueNum, log),
     shipPhase: shipPhaseForMode,
     checkBaseHealth: deps.checkBaseHealth ?? checkBaseHealth,
     resolveConstitution: () =>

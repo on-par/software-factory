@@ -113,12 +113,12 @@ export {
 
 // Config
 export { resolveStateRoot, STATE_ROOT_ENV } from './config/state-root.js';
-export { resolveFilingPolicy, resolvePrClassifierPolicy } from './config/index.js';
-export type { EffectivePrClassifierPolicy } from './config/index.js';
+export { resolveFilingPolicy, resolvePrClassifierPolicy, type EffectivePrClassifierPolicy } from './config/index.js';
 export type { EffectiveConfig, TrustTier } from './config/repo.js';
 export { resolveEffectiveConfig, resolveReviewFloorRules, resolveTrustTier } from './config/repo.js';
 export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix } from './config/index.js';
 export { FACTORY_RUNTIME_CONFIG_KEYS } from './config/index.js';
+export { gateHostPhases } from './environment/host-slots.js';
 export { isTrustedApprover, createOctokitCollaboratorPermissionClient } from './queue/approval.js';
 export type { CollaboratorPermissionClient, TrustedApproverOptions } from './queue/approval.js';
 export {

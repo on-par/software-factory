@@ -25,6 +25,10 @@ describe('shipped defaults', () => {
     expect(description).not.toMatch(/\bpush|pull request|\bopens? (a )?PR\b|wait(s)? for CI/i);
   });
 
+  it('defaults the host-wide BUILD/CHECK cap to 2 (#3043)', () => {
+    expect(defaultFactoryConfig.host.maxBuilds).toBe(2);
+  });
+
   it('defaults intake to warn with no trusted approvers', () => {
     expect(defaultFactoryConfig.intake.enforce).toBe('warn');
     expect(defaultFactoryConfig.intake.trustedApprovers).toBeUndefined();
@@ -310,6 +314,7 @@ describe('docs live as JSDoc, not as note/comment data', () => {
     'environment.ports',
     'environment.proxy',
     'auto_failover',
+    'host',
   ]);
   const ALLOWED_COMMENT_PATHS = new Set([...REQUIRED_COMMENT_PATHS, ...OPTIONAL_PRESERVED_COMMENT_PATHS]);
 

@@ -19,6 +19,7 @@ import { readRepoConfigFile, resolveRepoConfigPath } from './repo-config-file.js
 import { resolveStateRoot, STATE_ROOT_ENV } from './state-root.js';
 import { DEFAULT_MAX_SLICES, SLICE_CAP_CEILING } from '../readiness/slice-plan.js';
 import { runConfigSource } from './run-config-source.js';
+import { HostConfigSchema } from './host.js';
 
 import type { FilingPolicy } from '../filing/policy.js';
 import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
@@ -346,6 +347,7 @@ const FactoryConfigSchema = z.object({
       processGroups: { graceMs: 5000 },
       proxy: { enabled: false, port: 80, domain: 'factory.localhost' },
     }),
+  host: HostConfigSchema,
   auto_failover: z
     .object({
       enabled: z.boolean().default(true),
@@ -422,6 +424,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'ingest',
   'intake',
   'environment',
+  'host',
   'auto_failover',
   'adr',
   'workspace',
@@ -651,21 +654,7 @@ export function resolveEnvironmentProxy(
   };
 }
 
-export interface AutoFailoverSettings {
-  enabled: boolean;
-  cooldownMs: number;
-  fallbackModel: string;
-}
-
-/** Failover policy comes from validated configuration, never inherited process state. */
-export function resolveAutoFailover(config: FactoryConfig): AutoFailoverSettings {
-  return {
-    enabled: config.auto_failover?.enabled ?? defaultFactoryConfig.auto_failover.enabled,
-    cooldownMs:
-      (config.auto_failover?.cooldown_minutes ?? defaultFactoryConfig.auto_failover.cooldown_minutes) * 60_000,
-    fallbackModel: config.auto_failover?.fallback_model ?? defaultFactoryConfig.auto_failover.fallback_model,
-  };
-}
+export { resolveAutoFailover, resolveHostMaxBuilds, type AutoFailoverSettings } from './host.js';
 
 /** Local-only mode: restrict routing to local worker models and force the
  *  build route to codex (FACTORY_LOCAL_ONLY=1). */
