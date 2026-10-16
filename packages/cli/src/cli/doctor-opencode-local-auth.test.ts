@@ -41,4 +41,16 @@ describe('opencode signed in row and local_auth failures (#2890)', () => {
     );
     expect(throwing.find((c) => c.name === 'opencode signed in')).toMatchObject({ ok: true });
   });
+
+  it('an opencode-only failure leaves the claude and codex rows identical to the no-failure baseline', () => {
+    const baseline = harnessSignInChecks(probes({ localAuthFailure: () => null }));
+    const failed = harnessSignInChecks(
+      probes({
+        localAuthFailure: (a) => (a === 'opencode' ? { agent: a, at: '2026-10-13T16:00:00.000Z' } : null),
+      }),
+    );
+    for (const name of ['claude signed in', 'codex signed in']) {
+      expect(failed.find((c) => c.name === name)).toEqual(baseline.find((c) => c.name === name));
+    }
+  });
 });
