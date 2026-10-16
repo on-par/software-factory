@@ -543,6 +543,9 @@ const INTERNAL_API_KEYS = [
   'resolveEffectiveConfig',
   'resolveExperimental',
   'resolveLocalOnly',
+  'resolveHostMaxBuilds',
+  'hostBuildSlotsDir',
+  'withHostBuildSlot',
   'FACTORY_RUNTIME_CONFIG_KEYS',
   'isTrustedApprover',
   'createOctokitCollaboratorPermissionClient',
@@ -888,16 +891,13 @@ describe('public API surface (ADR-0004)', () => {
   it('./internal exposes exactly the documented internal API', () => {
     expect(Object.keys(internalApi).sort()).toEqual([...INTERNAL_API_KEYS].sort());
   });
-
   it('./testing exposes exactly the documented testing API', () => {
     expect(Object.keys(testingApi).sort()).toEqual([...TESTING_API_KEYS].sort());
   });
-
   it('./kpis exposes exactly the documented KPI subset, and nothing beyond the root API', () => {
     expect(Object.keys(kpisApi).sort()).toEqual([...KPIS_API_KEYS].sort());
     for (const key of KPIS_API_KEYS) expect(Object.keys(publicApi)).toContain(key);
   });
-
   it('package.json declares exactly the four documented entry points', () => {
     const pkgPath = fileURLToPath(new URL('../package.json', import.meta.url));
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as {
