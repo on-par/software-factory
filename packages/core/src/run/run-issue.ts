@@ -775,15 +775,18 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       // PLAN honors pinnedRoute; re-apply it so a plan port that ignores it cannot route elsewhere.
       let buildRoute = pinnedRoute ?? plan.route;
       let buildModel = request.modelPins.build;
+      let buildSwapReason: FailoverReason | undefined;
       if (request.failover.enabled && buildRoute === 'opencode') {
-        const target = await gateOpencodeBuildOnBreaker(gateDeps, {
+        const gate = await gateOpencodeBuildOnBreaker(gateDeps, {
           opencodeModel: buildModel ?? ports.router.resolveAll('build_opencode')[0],
           routePinned: request.preferredRoute !== undefined,
           codexDisabled: request.codexDisabled || breakerBlocked,
         });
-        if (target) {
-          buildRoute = target.route;
-          buildModel = target.model;
+        if (gate?.kind === 'blocked') return await terminalEscalated(`build escalated: ${gate.message}`);
+        if (gate?.kind === 'swap') {
+          buildRoute = gate.route;
+          buildModel = gate.model;
+          buildSwapReason = gate.reason;
         }
       }
       if (request.failover.enabled && buildRoute === 'claude') {
@@ -869,7 +872,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
       const pinnedBuild = request.modelPins.build;
       pinNote =
         pinnedBuild !== undefined && build.model !== pinnedBuild
-          ? `build pin ${pinnedBuild} not used (${build.failoverReason ?? 'overridden'}); built with ${build.model}`
+          ? `build pin ${pinnedBuild} not used (${build.failoverReason ?? buildSwapReason ?? 'overridden'}); built with ${build.model}`
           : undefined;
 
       planRoute = plan.route;

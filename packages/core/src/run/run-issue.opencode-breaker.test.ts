@@ -130,8 +130,8 @@ async function run(opts: { open: boolean; models?: Record<string, ModelDef>; req
     } satisfies CheckPhaseResult),
     shipPhase: vi.fn<typeof realShipPhase>().mockResolvedValue({ ok: true, prNumber: 42 } satisfies ShipResult),
   };
-  await runIssue({ ...request, ...opts.request }, policy, ports);
-  return { events, call: buildPhase.mock.calls[0][0] };
+  const outcome = await runIssue({ ...request, ...opts.request }, policy, ports);
+  return { events, outcome, buildPhase, call: buildPhase.mock.calls[0]?.[0] };
 }
 
 describe('runIssue — opencode provider breaker before BUILD (#2891)', () => {
@@ -143,15 +143,28 @@ describe('runIssue — opencode provider breaker before BUILD (#2891)', () => {
     expect(skip?.[1]).toMatch(/\d+m remaining/);
   });
 
+  it('starts BUILD on claude and records the swap reason as a worker_failover when the opencode provider breaker is open', async () => {
+    const { events, call } = await run({ open: true });
+    expect(call).toMatchObject({ route: 'claude' });
+    const failover = events.find(([t]) => t === 'worker_failover');
+    expect(failover?.[1]).toContain('reason=usage_cap');
+    expect(failover?.[1]).toContain('to_route=build_claude');
+  });
+
   it('keeps the opencode route when the opencode provider breaker is closed', async () => {
     const { events, call } = await run({ open: false });
     expect(call).toMatchObject({ route: 'opencode' });
     expect(events.some(([t]) => t === 'provider_breaker_skip')).toBe(false);
   });
 
-  it('keeps a pinned opencode route and logs provider_breaker_pinned when the breaker is open', async () => {
-    const { events, call } = await run({ open: true, request: { preferredRoute: 'opencode' } });
-    expect(call).toMatchObject({ route: 'opencode' });
+  it("fails BUILD with the cap reason and reset time without calling buildPhase when the pinned opencode route's breaker is open", async () => {
+    const { events, outcome, buildPhase } = await run({ open: true, request: { preferredRoute: 'opencode' } });
+    expect(buildPhase).not.toHaveBeenCalled();
+    expect(outcome.state).toBe('escalated');
+    const reason = (outcome as { reason?: string }).reason ?? '';
+    expect(reason).toMatch(/usage_cap/);
+    expect(reason).toMatch(/ADR-0092/);
+    expect(reason).toMatch(/resets at \d{4}-\d{2}-\d{2}T/);
     expect(events.find(([t]) => t === 'provider_breaker_pinned')?.[1]).toContain('opencode-go');
     expect(events.some(([t]) => t === 'provider_breaker_skip')).toBe(false);
   });
