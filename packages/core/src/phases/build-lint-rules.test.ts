@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,7 +10,8 @@ import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { UNTRUSTED_LINT_CONFIG_NOTICE } from '../utils/untrusted-input.js';
 import { buildCommitOnlyPrompt, buildPhase } from './build.js';
-import { collectOxlintErrorRules, renderLintRulesInForce } from './build-lint-rules.js';
+import type { LintConfigProbe } from '../checkers/probe.js';
+import { collectOxlintErrorRules, renderLintConfigPointer, renderLintRulesInForce } from './build-lint-rules.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -168,5 +170,68 @@ describe('Lint rules in force', () => {
       constitutionCtx: await renderLintRulesInForce(dir),
     });
     expect(prompt).toContain('## Lint rules in force');
+  });
+});
+
+describe('lint config pointer', () => {
+  it('buildPhase prompt points at the eslint flat, legacy eslint and biome lint configs', async () => {
+    const cases: Array<[Record<string, string>, string, string]> = [
+      [{ 'eslint.config.js': 'export default [];' }, 'ESLint', 'eslint.config.js'],
+      [{ '.eslintrc.json': '{"rules":{"no-debugger":"error"}}' }, 'ESLint', '.eslintrc.json'],
+      [{ '.eslintrc.yml': 'rules: {}' }, 'ESLint', '.eslintrc.yml'],
+      [{ 'biome.json': '{"linter":{"enabled":true}}' }, 'Biome', 'biome.json'],
+    ];
+    for (const [files, name, path] of cases) {
+      const prompt = await runPrompt(await fixture(files));
+      expect(prompt).toContain('## Lint rules in force');
+      expect(prompt).toContain(name);
+      expect(prompt).toContain(`\`${path}\``);
+      expect(prompt).toContain('Read that file before you write any code');
+      expect(prompt).not.toContain('- no-debugger');
+      expect(prompt).not.toContain('<untrusted-lint-config>');
+    }
+  });
+
+  it('buildPhase prompt names the linter and path for an unparseable lint config without executing it', async () => {
+    const worktree = await fixture({
+      'eslint.config.mjs':
+        "import { writeFileSync } from 'node:fs'; writeFileSync(new URL('./executed.txt', import.meta.url), 'x'); export default [];",
+    });
+    const prompt = await runPrompt(worktree);
+    expect(prompt).toContain('ESLint');
+    expect(prompt).toContain('`eslint.config.mjs`');
+    expect(prompt).toContain('was not evaluated');
+    expect(existsSync(join(worktree, 'executed.txt'))).toBe(false);
+    expect(prompt).not.toContain('writeFileSync');
+
+    const biome = await runPrompt(await fixture({ 'biome.json': '{ "linter": ' }));
+    expect(biome).toContain('Biome');
+    expect(biome).toContain('`biome.json`');
+  });
+
+  it('buildPhase prompt adds no lint section without a recognised lint config', async () => {
+    expect(await runPrompt(await fixture({}))).not.toContain('Lint rules in force');
+    expect(await runPrompt(await fixture({ 'tsconfig.json': '{}' }))).not.toContain('Lint rules in force');
+    expect(await runPrompt(await fixture({ 'biome.json': '{}' }))).toContain('Lint rules in force');
+  });
+
+  it('renderLintConfigPointer lint precedence keeps oxlint json ahead of eslint', async () => {
+    const section = await renderLintRulesInForce(
+      await fixture({ '.oxlintrc.json': oxlintrc, 'eslint.config.js': 'export default [];' }),
+    );
+    expect(section).toContain('- no-debugger');
+    expect(section).not.toContain('ESLint');
+  });
+
+  it('renderLintConfigPointer lint text for json vs executable', () => {
+    const json: LintConfigProbe = { linter: 'biome', configPath: 'biome.jsonc', format: 'json', executable: false };
+    expect(renderLintConfigPointer(json)).not.toContain('not evaluated');
+    const exec: LintConfigProbe = {
+      linter: 'eslint',
+      configPath: 'eslint.config.js',
+      format: 'executable',
+      executable: true,
+    };
+    expect(renderLintConfigPointer(exec)).toContain('not evaluated');
   });
 });
