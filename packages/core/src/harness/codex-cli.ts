@@ -24,7 +24,7 @@ export interface CodexFsDeps {
 }
 
 /** Runs a model via the Codex CLI:
- *  codex exec --json --sandbox <mode> -c approval_policy=never -C <worktree> [flags] -o <output> - < <prompt> */
+ *  codex exec --json --sandbox <mode> -c approval_policy=never [network -c flags] -C <worktree> [flags] -o <output> - < <prompt> */
 export class CodexCliHarness implements CodingHarness {
   readonly id = 'codex-cli';
   readonly agentic = true;
@@ -57,7 +57,13 @@ export class CodexCliHarness implements CodingHarness {
     // workspace-write is codex's own restriction and blocks legitimate writes, so the run
     // produces a blocked no-op spec instead of an implementation (#834).
     const codexSandbox = sandbox ? 'workspace-write' : 'danger-full-access';
-    const cmd = `codex exec --json --sandbox ${codexSandbox} -c approval_policy=never -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
+    // Codex's own sandbox is the containment only when no OS wrapper (sandbox-exec/firejail) runs it;
+    // then its network must allow exactly the factory allowlist (#3079).
+    const networkFlags =
+      sandbox && sandbox.runtime !== 'sandbox-exec' && sandbox.runtime !== 'firejail'
+        ? ` ${codexNetworkConfigFlags(sandbox.allowHosts)}`
+        : '';
+    const cmd = `codex exec --json --sandbox ${codexSandbox} -c approval_policy=never${networkFlags} -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
     const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
 
     try {
@@ -104,6 +110,20 @@ export class CodexCliHarness implements CodingHarness {
 }
 
 const SAFE_SHELL_WORD = /^[\w@%+=:,./-]+$/;
+
+// Exact DNS name / IPv4, or a `*.suffix` wildcard (subdomains only — same meaning in the factory and Codex).
+const CODEX_DOMAIN_PATTERN = /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
+
+/** Codex `-c` overrides that let its workspace-write sandbox reach exactly `allowHosts` (#3079).
+ *  Hosts are trimmed, lowercased and deduped; anything that is not an exact host or `*.suffix`
+ *  (a lone `*`, `**.x`, `host:port`, quotes, blanks) is dropped so the set can never widen.
+ *  An empty result keeps Codex's network off. */
+export function codexNetworkConfigFlags(allowHosts: readonly string[]): string {
+  const hosts = [...new Set(allowHosts.map((h) => h.trim().toLowerCase()).filter((h) => CODEX_DOMAIN_PATTERN.test(h)))];
+  if (hosts.length === 0) return '-c sandbox_workspace_write.network_access=false';
+  const table = `{${hosts.map((h) => `"${h}"="allow"`).join(',')}}`;
+  return `-c sandbox_workspace_write.network_access=true -c features.network_proxy.enabled=true -c ${shellEscape(`features.network_proxy.domains=${table}`)}`;
+}
 
 /** Render a configured `codexFlag` string for the codex shell command. The string can come from
  *  the target repo's `.factory/config.yaml`, so it is never spliced in raw (CodeQL #107): it is
