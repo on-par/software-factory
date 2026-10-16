@@ -22,8 +22,11 @@ import {
   createOctokitQueueClient,
   daemonRuntimePaths,
   formatWorktreeLocation,
+  hostBuildSlotsDir,
+  listHostSlots,
   recordLocalAuthFailure,
   resolveEffectiveConfig,
+  resolveHostMaxBuilds,
   resolvePrClassifierPolicy,
   resolveWorktreeRoot,
 } from '@on-par/factory-core/internal';
@@ -33,6 +36,7 @@ import { notInitializedMessage } from './first-run.js';
 import type { CliDeps, CliExitError, readActiveProduct } from './index.js';
 import { readRunFlagOverrides } from './run-flags.js';
 import { readStopFileStatus, stopSentinelStatusLine } from './stop-sentinel.js';
+import { formatHostSlotsSection } from './status-host-slots.js';
 import { buildStatusJson } from './status-json.js';
 import { checkSweepHeartbeat, defaultSweepHeartbeatDeps, formatSweepHeartbeatStatusLine } from './sweep-heartbeat.js';
 import { buildStatusUpdateJson, formatUpdateStatusLine, readUpdateState, updateStatePath } from './update-state.js';
@@ -153,6 +157,14 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
   if (baseHold !== null && baseHold.repo === ghRepo) {
     console.log(styleText('bold', '\n== Base hold =='));
     for (const line of formatBaseHoldStatus(baseHold)) console.log(line);
+  }
+
+  console.log(styleText('bold', '\n== Host slots =='));
+  try {
+    const maxBuilds = resolveHostMaxBuilds(rt.configLoaders.loadFactoryConfigForRepo(paths.config));
+    for (const line of formatHostSlotsSection(listHostSlots(hostBuildSlotsDir()), maxBuilds)) console.log(line);
+  } catch (err) {
+    console.log(`  (host slot lookup failed — ${rt.errorDetail(err)})`);
   }
 
   console.log(styleText('bold', '\n== Queue =='));

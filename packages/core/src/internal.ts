@@ -117,7 +117,7 @@ export { resolveFilingPolicy, resolvePrClassifierPolicy, type EffectivePrClassif
 export type { EffectiveConfig, TrustTier } from './config/repo.js';
 export { resolveEffectiveConfig, resolveReviewFloorRules, resolveTrustTier } from './config/repo.js';
 export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix, resolveHostMaxBuilds } from './config/index.js';
-export { hostBuildSlotsDir, withHostBuildSlot } from './environment/host-slots.js';
+export { hostBuildSlotsDir, listHostSlots, withHostBuildSlot, type HostSlotStatus } from './environment/host-slots.js';
 export { FACTORY_RUNTIME_CONFIG_KEYS } from './config/index.js';
 export { isTrustedApprover, createOctokitCollaboratorPermissionClient } from './queue/approval.js';
 export type { CollaboratorPermissionClient, TrustedApproverOptions } from './queue/approval.js';
