@@ -287,16 +287,15 @@ async function buildPhaseImpl(opts: {
         modelOverride: fallback,
       });
     } else if (taskType === 'build_opencode' && (reason === 'usage_cap' || reason === 'rate_limit')) {
-      const next = await failOverOpencodeBuild({
+      ({ route, result } = await failOverOpencodeBuild({
         router,
         reason,
+        err,
+        attempts: attempts ?? [],
         runOpts,
         build: opts,
-        fromModel: attempts?.at(-1)?.model ?? 'unknown',
         prompts: { claude: claudeRoutePrompt, codex: () => buildCommitOnlyPrompt(promptOpts) },
-      });
-      if (!next) throw err;
-      ({ route, result } = next);
+      }));
       crossHarnessReason = reason;
     } else if (taskType !== 'build_codex' || !crossHarnessOk || reason === undefined) throw err;
     else {
