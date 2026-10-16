@@ -25,11 +25,15 @@ function recordingExec(result: { stdout?: string; stderr?: string } = {}) {
 describe('OpenCodeHarness permission auto-rejection', () => {
   const run = (rec: ReturnType<typeof recordingExec>) => new OpenCodeHarness(rec.fn as any).run(makeContractRequest());
 
-  it('rejects the recorded permission-auto-rejected fixture as permission_denied naming bash', async () => {
+  it('rejects the recorded permission-auto-rejected fixture as permission_denied naming bash and the denied command', async () => {
     const err = await run(recordingExec({ stdout: permissionFixture })).catch((e) => e);
     expect(err).toBeInstanceOf(HarnessError);
     expect(err.reason).toBe('permission_denied');
-    expect(err.message).toContain('bash');
+    expect(err.message).toContain('bash (git push origin HEAD)');
+    expect(err.details.diagnostic).toContain(
+      'bash (git push origin HEAD): This non-interactive run cannot ask the user for permission',
+    );
+    expect(isRetryableFailure(err.reason)).toBe(false);
     expect(err.details.exitCode).toBe(0);
   });
 

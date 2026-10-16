@@ -42,9 +42,32 @@ export interface OpenCodePermissionDenial {
   tool: string;
   /** First line of the state error/output that carried the rejection, trimmed. */
   message: string;
+  /** Denied request from state.input (command/filePath/path/url/pattern) or state.title; first line, ≤200 chars. Absent when none. */
+  permission?: string;
 }
 
 const PERMISSION_REJECTED = /cannot ask the user for permission/i;
+const PERMISSION_INPUT_KEYS = ['command', 'filePath', 'path', 'url', 'pattern'] as const;
+const PERMISSION_MAX = 200;
+
+/** The request a rejected `tool_use` asked for, so the error names what was denied (#3025). */
+function deniedPermission(state: any): string | undefined {
+  const input = state?.input;
+  const candidates: unknown[] =
+    input && typeof input === 'object' && !Array.isArray(input)
+      ? [...PERMISSION_INPUT_KEYS.map((k) => input[k]), state?.title]
+      : [state?.title];
+  for (const c of candidates) {
+    if (typeof c !== 'string') continue;
+    const line = c
+      .split('\n')
+      .find((l) => l.trim())
+      ?.trim();
+    if (!line) continue;
+    return line.length > PERMISSION_MAX ? `${line.slice(0, PERMISSION_MAX)}…` : line;
+  }
+  return undefined;
+}
 
 /** OpenCode typed `error.type` → failure reason (#2889). Unlisted types fall back to classifyFailure. */
 export const OPENCODE_ERROR_TYPE_REASONS: Readonly<Record<string, HarnessFailureReason>> = {
@@ -157,7 +180,12 @@ export function parseOpenCodeJson(stdout: string): ParsedOpenCodeJson | undefine
       if (match !== undefined) {
         const tool = event.part?.tool;
         const line = match.split('\n').find((l) => l.trim()) ?? match;
-        permissionDenials.push({ tool: typeof tool === 'string' && tool ? tool : 'unknown', message: line.trim() });
+        const permission = deniedPermission(state);
+        permissionDenials.push({
+          tool: typeof tool === 'string' && tool ? tool : 'unknown',
+          message: line.trim(),
+          ...(permission ? { permission } : {}),
+        });
       }
     }
   }
@@ -303,10 +331,12 @@ export class OpenCodeHarness implements CodingHarness {
 
         const parsed = parseOpenCodeJson(stdout);
         // A non-interactive run auto-rejects `ask` permissions, still exits 0, and the model carries
-        // on. The failure is deterministic: no nudge retry, no failover (#2888).
+        // on. The failure is deterministic: no nudge retry, no failover (#2888). The denied request
+        // is named alongside the tool (#3025).
         if (parsed && parsed.permissionDenials.length > 0) {
-          const tools = [...new Set(parsed.permissionDenials.map((d) => d.tool))].join(', ');
-          const diagnostic = parsed.permissionDenials.map((d) => `${d.tool}: ${d.message}`).join('\n');
+          const label = (d: OpenCodePermissionDenial) => (d.permission ? `${d.tool} (${d.permission})` : d.tool);
+          const tools = [...new Set(parsed.permissionDenials.map(label))].join(', ');
+          const diagnostic = parsed.permissionDenials.map((d) => `${label(d)}: ${d.message}`).join('\n');
           throw new HarnessError(
             `opencode run auto-rejected a permission request for tool ${tools}: ${parsed.permissionDenials[0].message}`,
             'permission_denied',
