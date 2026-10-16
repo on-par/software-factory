@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 
 import { classifyOpenCodeErrorType, parseOpenCodeJson } from './opencode.js';
@@ -97,6 +100,43 @@ describe('parseOpenCodeJson', () => {
   it('does not treat a text event quoting the phrase as a denial', () => {
     const parsed = parseOpenCodeJson(JSON.stringify({ type: 'text', part: { text: PHRASE } }));
     expect(parsed?.permissionDenials).toEqual([]);
+  });
+
+  const denied = (state: Record<string, unknown>) =>
+    parseOpenCodeJson(toolUse({ tool: 'bash', state: { status: 'error', error: PHRASE, ...state } }))
+      ?.permissionDenials;
+
+  it('names the denied command from the recorded fixture', () => {
+    const fixture = readFileSync(
+      fileURLToPath(new URL('../__fixtures__/opencode/permission-auto-rejected.jsonl', import.meta.url)),
+      'utf8',
+    );
+    expect(parseOpenCodeJson(fixture)?.permissionDenials).toEqual([
+      {
+        tool: 'bash',
+        message: expect.stringContaining('cannot ask the user for permission'),
+        permission: 'git push origin HEAD',
+      },
+    ]);
+  });
+
+  it('takes the permission from filePath, or from title when input has nothing usable', () => {
+    expect(denied({ input: { filePath: '/a/b.ts' } })?.[0].permission).toBe('/a/b.ts');
+    expect(denied({ title: 'Edit b.ts' })?.[0].permission).toBe('Edit b.ts');
+    expect(denied({ input: { command: '  ' }, title: 'T' })?.[0].permission).toBe('T');
+  });
+
+  it('omits permission for blank, non-string or missing input', () => {
+    const bare = [{ tool: 'bash', message: PHRASE }];
+    expect(denied({ input: { command: '   ' } })).toEqual(bare);
+    expect(denied({ input: { command: 5, path: { a: 1 } } })).toEqual(bare);
+    expect(denied({ input: 'nope' })).toEqual(bare);
+    expect(denied({ input: ['x'] })).toEqual(bare);
+  });
+
+  it('keeps only the first line and caps at 200 chars', () => {
+    expect(denied({ input: { command: 'echo a\necho b' } })?.[0].permission).toBe('echo a');
+    expect(denied({ input: { command: 'x'.repeat(300) } })?.[0].permission).toBe(`${'x'.repeat(200)}…`);
   });
 
   it('ignores malformed tool_use events', () => {
