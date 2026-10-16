@@ -294,9 +294,16 @@ const FactoryConfigSchema = z.object({
     .object({
       maxBuilds: z.number().int().positive().default(2),
       maxAgentJobs: z.number().int().positive().default(1),
+      loadGuard: z
+        .object({
+          enabled: z.boolean().default(true),
+          maxLoad: z.number().positive().optional(),
+          retrySeconds: z.number().int().positive().default(60),
+        })
+        .default({ enabled: true, retrySeconds: 60 }),
       comment: z.string().optional(),
     })
-    .default({ maxBuilds: 2, maxAgentJobs: 1 }),
+    .default({ maxBuilds: 2, maxAgentJobs: 1, loadGuard: { enabled: true, retrySeconds: 60 } }),
   auto_failover: z
     .object({
       enabled: z.boolean().default(true),
@@ -626,6 +633,23 @@ export function resolveHostMaxAgentJobs(config: FactoryConfig): number {
 
 export function resolveHostMaxBuilds(config: FactoryConfig): number {
   return config.host?.maxBuilds ?? defaultFactoryConfig.host.maxBuilds;
+}
+
+/** Host load guard policy (#3048). FACTORY_LOAD_GUARD=1/0 beats host.loadGuard.enabled. */
+export interface HostLoadGuardPolicy {
+  enabled: boolean;
+  maxLoad?: number;
+  retryMs: number;
+}
+
+export function resolveHostLoadGuard(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): HostLoadGuardPolicy {
+  const d = defaultFactoryConfig.host.loadGuard;
+  const g = config.host?.loadGuard;
+  return {
+    enabled: resolveEnabledFlag(env, 'FACTORY_LOAD_GUARD', g?.enabled ?? d.enabled),
+    maxLoad: g?.maxLoad,
+    retryMs: (g?.retrySeconds ?? d.retrySeconds) * 1000,
+  };
 }
 
 /** Local-only mode: restrict routing to local worker models and force the

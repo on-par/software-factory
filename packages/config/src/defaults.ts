@@ -107,7 +107,12 @@ export interface FactoryDefaults {
     ports: { enabled: boolean; range: [number, number]; comment?: string };
     proxy: { enabled: boolean; port: number; domain: string; comment?: string };
   };
-  host: { maxBuilds: number; maxAgentJobs: number; comment?: string };
+  host: {
+    maxBuilds: number;
+    maxAgentJobs: number;
+    loadGuard: { enabled: boolean; maxLoad?: number; retrySeconds: number };
+    comment?: string;
+  };
   auto_failover: { enabled: boolean; cooldown_minutes: number; fallback_model: string; comment?: string };
 }
 
@@ -699,8 +704,9 @@ export const defaultFactoryConfig: FactoryDefaults = {
   host: {
     maxBuilds: 2,
     maxAgentJobs: 1,
+    loadGuard: { enabled: true, retrySeconds: 60 },
     comment:
-      'Host-wide cap on lanes in BUILD or CHECK at once, shared by every runner on this machine through slot files in ~/.factory/host/build-slots/. A lane waits for a free slot before each BUILD/CHECK phase. maxAgentJobs caps ad-hoc rescue/steward jobs started with `factory agent-job`, through lease files in ~/.factory/host/agent-jobs/.',
+      'Host-wide cap on lanes in BUILD or CHECK at once, shared by every runner on this machine through slot files in ~/.factory/host/build-slots/. A lane waits for a free slot before each BUILD/CHECK phase. maxAgentJobs caps ad-hoc rescue/steward jobs started with `factory agent-job`, through lease files in ~/.factory/host/agent-jobs/. loadGuard holds new issue claims while the host 5-minute load average is above maxLoad (default 3x CPU count), retrying every retrySeconds; enabled: false or FACTORY_LOAD_GUARD=0 turns it off.',
   },
   auto_failover: {
     enabled: true,

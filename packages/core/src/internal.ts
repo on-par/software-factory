@@ -109,16 +109,16 @@ export {
   rollDay,
   touchesSensitiveScope,
 } from './filing/policy.js';
-
 // Config
 export { resolveStateRoot, STATE_ROOT_ENV } from './config/state-root.js';
 export { resolveFilingPolicy, resolvePrClassifierPolicy, type EffectivePrClassifierPolicy } from './config/index.js';
 export type { EffectiveConfig, TrustTier } from './config/repo.js';
 export { resolveEffectiveConfig, resolveReviewFloorRules, resolveTrustTier } from './config/repo.js';
 export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix, resolveHostMaxBuilds } from './config/index.js';
+export { evaluateLoadGuard, formatLoadHold, readHostLoad, type LoadGuardDecision } from './environment/load-guard.js';
 export { hostAgentJobsDir, hostBuildSlotsDir, listHostSlots, withHostAgentJobLease } from './environment/host-slots.js';
 export { withHostBuildSlot, type HostAgentJobKind, type HostSlotStatus } from './environment/host-slots.js';
-export { FACTORY_RUNTIME_CONFIG_KEYS, resolveHostMaxAgentJobs } from './config/index.js';
+export { FACTORY_RUNTIME_CONFIG_KEYS, resolveHostLoadGuard, resolveHostMaxAgentJobs } from './config/index.js';
 export { isTrustedApprover, createOctokitCollaboratorPermissionClient } from './queue/approval.js';
 export type { CollaboratorPermissionClient, TrustedApproverOptions } from './queue/approval.js';
 export {

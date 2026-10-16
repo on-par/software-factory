@@ -4,8 +4,8 @@ import { existsSync } from 'node:fs';
 
 import { parkReasonFor } from '@on-par/factory-core';
 import type { LanePausedPayload, getFactoryPaths, RunOutcome } from '@on-par/factory-core';
-import { logEvent } from '@on-par/factory-core/internal';
-import type { QueueClaim, QueueReleaseOutcome } from '@on-par/factory-core/internal';
+import { formatLoadHold, logEvent } from '@on-par/factory-core/internal';
+import type { LoadGuardDecision, QueueClaim, QueueReleaseOutcome } from '@on-par/factory-core/internal';
 
 import { type BaseHoldDecision, writeBaseHold } from './base-hold.js';
 import { waitForMerge } from './land.js';
@@ -58,6 +58,13 @@ export type RunLaneDeps = {
   /** Base-hold claim gate (#2349): consulted before every remote claim; 'hold' stops the lane
    *  without claiming. Absent = always claim (local lanes, injected-deps callers, tests). */
   baseHoldGate?: () => Promise<BaseHoldDecision>;
+  /** Host load guard (#3048): consulted before every remote claim, after the base-hold gate; 'hold'
+   *  waits retryMs and re-checks. Absent = always claim (local lanes, injected-deps callers, tests). */
+  loadGuard?: () => LoadGuardDecision;
+  /** Injectable for tests. Default: setTimeout-based sleep. */
+  sleep?: (ms: number) => Promise<void>;
+  /** Injectable clock for the logged retry time. Default: () => new Date(). */
+  now?: () => Date;
 };
 
 /** How often an in-flight issue's claim lease is refreshed (#1500). Well inside the
@@ -118,6 +125,9 @@ export async function runLane(
     activeIssues = new Set<number>(),
     countRemaining,
     baseHoldGate,
+    loadGuard,
+    sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    now = () => new Date(),
     laneBreakerThreshold = 0,
     commentIssue = async () => {},
   } = deps;
@@ -150,6 +160,22 @@ export async function runLane(
     await releaseIssue(issue, outcome);
     await sweepFinished(issue).catch(() => {});
   };
+  const decide = (guard: () => LoadGuardDecision): LoadGuardDecision => {
+    try {
+      return guard();
+    } catch {
+      return { kind: 'claim' };
+    }
+  };
+  const holdForLoad = async (guard: () => LoadGuardDecision): Promise<'claim' | 'stopped'> => {
+    for (let d = decide(guard); d.kind === 'hold'; d = decide(guard)) {
+      const retryAt = new Date(now().getTime() + d.retryMs);
+      emitEvent(paths.events, 'warn', lane, formatLoadHold(lane, d, retryAt), { lane });
+      await sleep(d.retryMs);
+      if (pathExists(paths.stop)) return 'stopped';
+    }
+    return 'claim';
+  };
   for (let i = 0; ; i++) {
     if (i >= pending.length) {
       // A persisted base hold on the unchanged origin/main SHA means the base is still broken
@@ -165,6 +191,7 @@ export async function runLane(
         );
         return;
       }
+      if (loadGuard && (await holdForLoad(loadGuard)) === 'stopped') break;
       const claimed = await claimNext();
       if (claimed === null) break;
       seen.add(claimed.issue);

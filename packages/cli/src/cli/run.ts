@@ -25,8 +25,11 @@ import {
   createGithubQueue,
   createOctokitGreenPrClient,
   createOctokitQueueClient,
+  evaluateLoadGuard,
   logEvent,
+  readHostLoad,
   recordSliceMerged,
+  resolveHostLoadGuard,
   resolveLocalOnly,
   resolveRunUsageHarness,
   slugify,
@@ -174,6 +177,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
     });
     rt.warnQueueDiagnostics(diagnostics);
 
+    const loadGuardPolicy = resolveHostLoadGuard(factoryConfig);
     let knobs: UsageKnobs;
     let laneBreakerThreshold: number;
     try {
@@ -290,6 +294,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
             ...planned.deps,
             laneBreakerThreshold,
             activeIssues: inFlightIssues,
+            loadGuard: opts.localQueue === true ? undefined : () => evaluateLoadGuard(loadGuardPolicy, readHostLoad()),
             baseHoldGate:
               opts.localQueue === true
                 ? undefined
