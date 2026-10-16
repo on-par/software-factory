@@ -9,7 +9,7 @@ import type { ModelsConfig } from '../config/index.js';
 import { diagnoseModels, ModelRegistry } from '../models/index.js';
 import { codingHarnessContractCases, makeContractRequest } from './contract.js';
 import { HarnessError } from './index.js';
-import { OpenCodeHarness } from './opencode.js';
+import { OpenCodeHarness, parseOpenCodeJson } from './opencode.js';
 
 describe('CodingHarness contract: OpenCodeHarness', () => {
   const cases = codingHarnessContractCases({
@@ -361,6 +361,7 @@ describe('OpenCodeHarness JSON output', () => {
     );
 
     expect(result.output).toBe('FINAL ANSWER: the build is done.');
+    expect(result.output).not.toContain("I'll inspect the repo first.");
     expect(result.output).not.toContain('TOOL_CHATTER_MARKER');
     expect(result.output).not.toContain('step_finish');
     expect(result.usage).toMatchObject({
@@ -428,6 +429,31 @@ const readFixture = (name: string) =>
   readFileSync(fileURLToPath(new URL(`../__fixtures__/opencode/${name}`, import.meta.url)), 'utf8');
 const capFixture = readFixture('error-usage-cap.jsonl');
 const rateLimitFixture = readFixture('error-rate-limit.jsonl');
+
+// Shaped on the real `opencode run --format json` event stream (per-part id/messageID, one message per step).
+const narrationFixture = readFixture('run-narration-final.jsonl');
+const NARRATION_FINAL = 'VERDICT: PASS — the build script and tests are in place.';
+
+describe('OpenCodeHarness final assistant message (#3023)', () => {
+  it('returns only the final assistant message and drops narration from earlier steps', async () => {
+    const rec = recordingExec({ stdout: narrationFixture });
+    const result = await new OpenCodeHarness(rec.fn).run(
+      makeContractRequest({ model: 'opencode-model', registry, prompt: 'check it' }),
+    );
+    expect(result.output).toBe(NARRATION_FINAL);
+    expect(result.output).not.toContain("I'll inspect the repo first.");
+    expect(result.output).not.toContain("Now I'll read package.json");
+    expect(result.output).not.toContain('TOOL_CHATTER_MARKER');
+    expect(result.usage?.numTurns).toBe(3);
+  });
+
+  it('parseOpenCodeJson returns only the final assistant message text, without narration', () => {
+    const parsed = parseOpenCodeJson(narrationFixture);
+    expect(parsed?.text).toBe(NARRATION_FINAL);
+    expect(parsed?.finished).toBe(true);
+    expect(parsed?.text).not.toContain("I'll inspect the repo first.");
+  });
+});
 
 describe('OpenCodeHarness recorded error fixtures', () => {
   const runFailing = (stdout: string) =>
