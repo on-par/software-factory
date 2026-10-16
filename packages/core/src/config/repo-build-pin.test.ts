@@ -1,8 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ModelRegistry } from '../models/index.js';
-import type { ModelsConfig } from './index.js';
-import { resolveEffectiveBuildRoute, resolveEffectiveModelPins, routeForBuildModel } from './repo.js';
+import { loadModelsConfig, type ModelsConfig } from './index.js';
+import {
+  applyRepoConfig,
+  loadRepoConfig,
+  resolveEffectiveBuildRoute,
+  resolveEffectiveModelPins,
+  routeForBuildModel,
+} from './repo.js';
 
 type ModelDef = ModelsConfig['models'][string];
 
@@ -140,5 +150,71 @@ describe('routeForBuildModel / resolveEffectiveBuildRoute command route', () => 
     expect(routeForBuildModel(registry, 'nope')).toBeUndefined();
     expect(routeForBuildModel(registry, undefined)).toBeUndefined();
     expect(routeForBuildModel(registry, 'codex-chat')).toBe('command');
+  });
+});
+
+const tempDirs = new Set<string>();
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
+  tempDirs.clear();
+});
+
+async function loadPins(yaml: string) {
+  vi.stubEnv('FACTORY_RUN_CONFIG_JSON', undefined);
+  const root = await mkdtemp(join(tmpdir(), 'repo-build-pin-test-'));
+  tempDirs.add(root);
+  await mkdir(join(root, '.factory'), { recursive: true });
+  await writeFile(join(root, '.factory', 'config.yaml'), yaml);
+  const repo = loadRepoConfig(root);
+  const applied = applyRepoConfig(loadModelsConfig(), repo);
+  const registry = new ModelRegistry(applied);
+  return { applied, run: () => resolveEffectiveModelPins(registry, repo, {}) };
+}
+
+function configYaml(agentic: boolean, pins: string[]): string {
+  return `version: 2
+harnesses:
+  chat-agent:
+    command: chat-agent {model}
+    prompt: stdin
+    output: stdout
+    agentic: ${agentic}
+    usage: none
+models:
+  registry:
+    chat-model:
+      provider: anthropic
+      tier: worker
+      costPerMtokInput: 0
+      costPerMtokOutput: 0
+      contextWindow: 1000
+      capabilities: []
+      envKey: null
+      harness: chat-agent
+  pins:
+${pins.map((line) => `    ${line}`).join('\n')}
+`;
+}
+
+describe('agentic BUILD pin through config load (#3062)', () => {
+  it('refuses a build pin on a declared non-agentic harness loaded from config', async () => {
+    const { run } = await loadPins(configYaml(false, ['build: chat-model']));
+    expect(run).toThrow(/BUILD needs an agentic harness/);
+    expect(run).toThrow(/chat-agent/);
+    expect(run).toThrow(/chat-model/);
+    expect(run).toThrow(/models\.pins\.build/);
+  });
+
+  it('loads a build pin on a declared agentic harness from config', async () => {
+    const { run } = await loadPins(configYaml(true, ['build: chat-model']));
+    expect(run().build).toBe('chat-model');
+  });
+
+  it('loads a non-agentic declared harness pinned only for plan and checker', async () => {
+    const { applied, run } = await loadPins(configYaml(false, ['plan: chat-model', 'checker: chat-model']));
+    expect(run).not.toThrow();
+    expect(run().plan).toBe('chat-model');
+    expect(applied.tiers.checker).toEqual(['chat-model']);
   });
 });
