@@ -14,9 +14,12 @@ or may follow it once and drift. The same bug then comes back, and a human catch
 The `POST .../labels - 422` noise still reached stderr, because nothing checked the output the user actually sees. A
 CLI regression test through the real Octokit client now fails if the line comes back.
 
-On PAR Dev's Software Factory already turns some rules into gates, for example the proof gate
-([#2971](https://github.com/on-par/software-factory/issues/2971)). This ADR makes a gate the default answer to every
-correction.
+On PAR Dev's Software Factory already turns some rules into gates: CHECK blocks on a high-confidence lens-review
+showstopper and fails closed on lens errors
+([ADR-0158](0158-check-may-block-on-a-model-judged-lens-review-showstopper-at-90-confidence-and-fails-closed-on-lens-errors.md)),
+and CI rework diffs are guarded against suppressing checks
+([ADR-0162](0162-ci-rework-diffs-are-guarded-against-suppression-and-park-as-ci-failed-suppression-attempt.md)). This
+ADR makes a gate the default answer to every correction.
 
 ## Decision
 
