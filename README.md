@@ -25,20 +25,24 @@ The full matrix, including model harnesses, prompt evals, the server, and experi
 
 ## Monorepo structure
 
-An npm-workspaces monorepo. The published packages:
+An npm-workspaces monorepo:
 
 ```
 packages/
-├── cli/           @on-par/factory-cli      the `factory` command
-├── core/          @on-par/factory-core     engine: router, phases, checkers
-├── config/        @on-par/factory-config   typed defaults + constitutions (zero deps)
-├── contracts/     @on-par/contracts        shared zod schemas (Issue/Epic/Story/Design)
-├── tui/           @on-par/factory-tui      read-only Ink TUI for a live run
-├── adr-kit/       @on-par/adr-kit          pure ADR kernel (zero deps)
-└── repo-context/  @on-par/repo-context     read-only repo reader port (zero deps)
+├── adr-kit/          @on-par/adr-kit            pure ADR kernel (zero deps)
+├── cli/              @on-par/factory-cli        the `factory` command
+├── config/           @on-par/factory-config     typed defaults + constitutions in TypeScript (zero deps)
+├── contracts/        @on-par/contracts          shared zod schemas (Issue/Epic/Story/Design)
+├── core/             @on-par/factory-core       engine: router, phases, checkers
+├── dashboard/        @on-par/factory-dashboard  (private) web dashboard, Vite + React
+├── product/          @on-par/product            (private) proposer: brain-dump to engineering-ready issues
+├── repo-context/     @on-par/repo-context       read-only repo reader port (zero deps)
+├── scbench-adapter/  @on-par/scbench-adapter    (private) SlopCodeBench adapter
+├── server/           @on-par/factory-server     (private) loopback SSE events + lane pause endpoint
+└── tui/              @on-par/factory-tui        read-only Ink TUI for a live run
 ```
 
-Private workspaces (server, dashboard, product, scbench-adapter) also live here but are not published. For the dependency graph and per-package detail, see [docs/architecture.md](docs/architecture.md). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md) and the rules in [AGENTS.md](AGENTS.md).
+Packages marked (private) are not published to npm. For the dependency graph and per-package detail, see [docs/architecture.md](docs/architecture.md). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md) and the rules in [AGENTS.md](AGENTS.md).
 
 ## Quick start
 
@@ -242,7 +246,7 @@ Product e2e suites should boot their app on `PORT` (strict-port) and point their
 
 **What's OSS (this repo):** `packages/cli`, `packages/core`, and `packages/config` are the open-source core. The full local pipeline (router, constitutions, checkers, phases) runs from this repo alone, MIT-licensed.
 
-**What isn't published:** `packages/dashboard` (web dashboard, Vite + React walking skeleton), `packages/product` (the proposer: brain-dump to engineering-ready issues), `packages/server` and `packages/scbench-adapter` (SlopCodeBench adapter) live in this monorepo as private workspaces and are not published to npm. A hosted multi-tenant control plane is not part of this codebase. `packages/server` is a small local server. Its only route is `GET /events`, an SSE relay of the lane lifecycle bus, unauthenticated and loopback-only.
+**What isn't published:** `packages/dashboard` (web dashboard, Vite + React walking skeleton), `packages/product` (the proposer: brain-dump to engineering-ready issues), `packages/server` and `packages/scbench-adapter` (SlopCodeBench adapter) live in this monorepo as private workspaces and are not published to npm. A hosted multi-tenant control plane is not part of this codebase. `packages/server` is a small local server. It serves `GET /events`, an SSE relay of the lane lifecycle bus, and `POST /repos/:owner/:repo/lanes/:laneId/pause`, which pauses a lane. Both are unauthenticated and loopback-only.
 
 For the safety note (agent permissions, worktrees, and when the factory merges), see [Safety](#safety) under Quick start.
 

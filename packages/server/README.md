@@ -46,9 +46,8 @@ default and both `/events` and the repository-qualified pause endpoint are
 unauthenticated; do not bind it to a non-loopback host or put it behind a
 public proxy.
 
-## Phase 2 (planned)
+## Not yet built
 
-Beyond the pause endpoint, the planned roadmap adds other controls (such as
-approving a lane), auth, and eventually webhook triggers that run factory
-pipeline jobs through `@on-par/factory-core` in sandboxed environments — see
-#583 for the next slice.
+Other lane controls (such as approving a lane), auth, and webhook triggers that
+run factory pipeline jobs in sandboxed environments are not built. Pause is the
+only control endpoint today.
