@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -5,9 +6,11 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
-import { ModelRouter } from '../router/index.js';
+import { CliModelExecutor, ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
-import { checkPhase } from './check.js';
+import type { SandboxPolicy } from '../sandbox/index.js';
+import type { CheckSummary } from '../types/index.js';
+import { checkPhase, reworkWorker } from './check.js';
 import { runnableBuildRoutes } from './plan-routes.js';
 
 const failover: ModelsConfig['failover'] = {
@@ -154,5 +157,100 @@ describe('checkPhase auto rework on the command route (#2873)', () => {
     expect(override?.[1]).toContain('rework route command has no runnable model on this machine, rerouting to');
     expect(stub.calls[0].task).toBe(`build_${runnableBuildRoutes(router)[0]}`);
     expect(runSpy.mock.calls[0][2]?.modelOverride).toBeUndefined();
+  });
+});
+
+const failingSummary: CheckSummary = {
+  failures: 1,
+  passes: 0,
+  skips: 0,
+  total: 1,
+  results: [{ checker: 'tests', result: 'FAIL', details: 'exit 1' }],
+};
+
+describe('reworkWorker on a declared agentic harness (#3066)', () => {
+  it('runs the sandboxed declared harness command and adds a local commit (#3066)', async () => {
+    const worktree = await mkdtemp(join(tmpdir(), 'check-rework-declared-'));
+    tempDirs.add(worktree);
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: worktree, encoding: 'utf8' }).trim();
+    git('init', '-q');
+    git('config', 'user.name', 'Test');
+    git('config', 'user.email', 'test@example.com');
+    git('config', 'commit.gpgsign', 'false');
+    await writeFile(join(worktree, 'README.md'), 'hi\n');
+    git('add', '.');
+    git('commit', '-q', '-m', 'init');
+    expect(git('rev-list', '--count', 'HEAD')).toBe('1');
+
+    const policy: SandboxPolicy = {
+      runtime: 'sandbox-exec',
+      worktree,
+      writablePaths: [worktree],
+      writableFilePrefixes: [],
+      allowHosts: [],
+      cpuMs: 300_000,
+      memMb: 4096,
+    };
+    const calls: string[] = [];
+    // Records the wrapped command but never runs it: only the commit is real.
+    const stubExec = async (cmd: string, opts: { cwd?: string }) => {
+      calls.push(cmd);
+      const cwd = opts.cwd ?? worktree;
+      await writeFile(join(cwd, 'fix.txt'), 'fix\n');
+      execFileSync('git', ['add', '.'], { cwd });
+      execFileSync('git', ['commit', '-q', '-m', 'fix: repair failing check'], { cwd });
+      return { stdout: 'done', stderr: '' };
+    };
+    const logs: Array<[string, string]> = [];
+
+    const result = await reworkWorker({
+      issue: 3066,
+      worktree,
+      specPath: join(worktree, 'issue-3066.md'),
+      summary: failingSummary,
+      constitution: null,
+      router: new ModelRouter(commandModels, commandRoutes, false, new CliModelExecutor(stubExec)),
+      log: (type, msg) => logs.push([type, msg]),
+      sandbox: policy,
+      reworkRoute: 'command',
+      reworkModel: 'my-model',
+    });
+
+    expect(result.modelCompleted).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].startsWith('sandbox-exec -p ')).toBe(true);
+    expect(calls[0]).toContain('my-agent');
+    for (const packaged of ['claude -p', 'codex exec', 'opencode run', 'pi -p']) {
+      expect(calls[0]).not.toContain(packaged);
+    }
+    expect(git('rev-list', '--count', 'HEAD')).toBe('2');
+    expect(git('log', '-1', '--format=%s')).toBe('fix: repair failing check');
+    expect(git('status', '--porcelain')).toBe('');
+    expect(logs.some(([type]) => type === 'model-override')).toBe(false);
+  });
+
+  it('packaged route rework keeps the claude route and built model (#3066)', async () => {
+    const { worktree, specPath } = await makeFailingWorktree();
+    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'rework complete' }] } });
+    const router = new ModelRouter(codexModels, codexRoutes, false, stub);
+    const runSpy = vi.spyOn(router, 'run');
+    const logs: Array<[string, string]> = [];
+
+    await reworkWorker({
+      issue: 3066,
+      worktree,
+      specPath,
+      summary: failingSummary,
+      constitution: null,
+      router,
+      log: (type, msg) => logs.push([type, msg]),
+      reworkRoute: 'claude',
+      reworkModel: 'claude-worker',
+    });
+
+    expect(runSpy.mock.calls[0][0]).toBe('build_claude');
+    expect(runSpy.mock.calls[0][2]?.modelOverride).toBe('claude-worker');
+    expect(stub.calls[0]).toMatchObject({ task: 'build_claude', model: 'claude-worker' });
+    expect(logs.some(([type]) => type === 'model-override')).toBe(false);
   });
 });
