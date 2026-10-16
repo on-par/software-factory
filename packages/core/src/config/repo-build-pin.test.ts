@@ -150,6 +150,7 @@ describe('routeForBuildModel / resolveEffectiveBuildRoute command route', () => 
     expect(routeForBuildModel(registry, 'nope')).toBeUndefined();
     expect(routeForBuildModel(registry, undefined)).toBeUndefined();
     expect(routeForBuildModel(registry, 'codex-chat')).toBe('command');
+    expect(routeForBuildModel(registry, 'my-model')).toBe('command');
   });
 });
 
