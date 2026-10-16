@@ -1,12 +1,15 @@
-// src/phases/build-lint-rules.ts — "Lint rules in force" BUILD prompt section from .oxlintrc.json (#3040)
+// src/phases/build-lint-rules.ts — "Lint rules in force" BUILD prompt section from .oxlintrc.json (#3040); ESLint/Biome get a config pointer (#3041)
 
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import type { LintConfigProbe } from '../checkers/probe.js';
 import { detectLintConfig } from '../checkers/probe.js';
 import { UNTRUSTED_LINT_CONFIG_NOTICE, wrapUntrustedLintConfig } from '../utils/untrusted-input.js';
 
 export const LINT_RULES_HEADING = '## Lint rules in force';
+
+const LINTER_NAMES: Record<LintConfigProbe['linter'], string> = { oxlint: 'oxlint', eslint: 'ESLint', biome: 'Biome' };
 
 // oxlint AllowWarnDeny: "error" | "deny" | 2 are error severity.
 const ERROR_SEVERITIES = new Set<unknown>(['error', 'deny', 2]);
@@ -31,11 +34,22 @@ export function collectOxlintErrorRules(config: unknown): { rules: string[]; uns
   return { rules: rules.sort(), unsafe };
 }
 
+/** Pointer section naming the linter and its config path; never reads the config (#3041). */
+export function renderLintConfigPointer(probe: LintConfigProbe): string {
+  const exec = probe.executable ? ' It is a JS/TS module, so it was not evaluated.' : '';
+  return (
+    `\n\n${LINT_RULES_HEADING}\n` +
+    `The repo lints with ${LINTER_NAMES[probe.linter]}, configured in \`${probe.configPath}\`. Read that file before you write any code, and write code that satisfies its rules: CHECK's lint step fails on its errors. Its rules are not listed here.${exec}`
+  );
+}
+
 /** Markdown section (leading blank line) for the BUILD prompt, or '' when there is nothing to say. Never throws. */
 export async function renderLintRulesInForce(worktree: string): Promise<string> {
   try {
     const probe = await detectLintConfig(worktree);
-    if (!probe || probe.linter !== 'oxlint' || probe.format !== 'json') return '';
+    if (!probe) return '';
+    if (probe.linter === 'eslint' || probe.linter === 'biome') return renderLintConfigPointer(probe);
+    if (probe.format !== 'json') return '';
 
     let parsed: unknown;
     try {
