@@ -118,8 +118,7 @@ const STUB_HEAD_SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
 
 /** stdout for the two remote-head verification commands the recovery path runs before opening a
  *  PR (#735); returns undefined for any other command so callers keep their own handling. The
- *  branch is pulled out of the `git ls-remote --heads origin '<branch>'` command text itself, so
- *  callers don't need to pass it in. */
+ *  branch is pulled out of the `git ls-remote --heads origin '<branch>'` command text, so callers don't pass it. */
 function remoteHeadStub(command: string, remoteSha = STUB_HEAD_SHA): { stdout: string } | undefined {
   if (command === 'git rev-parse HEAD') return { stdout: `${STUB_HEAD_SHA}\n` };
   const match = /^git ls-remote --heads origin '(.+)'$/.exec(command);
@@ -164,6 +163,7 @@ describe('shipPhase self-healing', () => {
       'git rev-parse HEAD',
       "git ls-remote --heads origin 'ship-it/23-self-heal'",
       'git diff --stat origin/main...HEAD',
+      'git rev-parse HEAD',
     ]);
     expect(calls).toContainEqual([
       'pulls.create',

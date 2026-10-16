@@ -390,6 +390,10 @@ async function shipPhaseImpl(opts: {
 
   if (!reentry)
     try {
+      let checkedSha: string | undefined;
+      try {
+        checkedSha = (await run('git rev-parse HEAD', { cwd: worktree })).stdout.trim() || undefined;
+      } catch {}
       const body = gatherEvidencePack({
         issue,
         checkSummary,
@@ -400,6 +404,7 @@ async function shipPhaseImpl(opts: {
         logsDir: opts.logsDir,
         reviewRouting: opts.reviewRouting,
         pinNotes: opts.pinNotes,
+        headSha: checkedSha,
       });
       await octokit.rest.issues.createComment({ owner, repo: repoName, issue_number: prNumber, body });
       log('evidence', `posted evidence pack to PR #${prNumber}`);

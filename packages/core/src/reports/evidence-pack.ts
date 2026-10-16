@@ -22,6 +22,8 @@ export interface EvidencePackRenderInput {
   reviewRouting?: ReviewRouting;
   /** Model pins that were not honored (#2511); the section is omitted when empty. */
   pinNotes?: string[];
+  /** Local HEAD SHA the checks ran on (#1812); the line is omitted when undefined or blank. */
+  headSha?: string;
 }
 
 export interface EvidencePackGatherInput {
@@ -35,10 +37,12 @@ export interface EvidencePackGatherInput {
   reviewRouting?: ReviewRouting;
   /** Model pins that were not honored (#2511); the section is omitted when empty. */
   pinNotes?: string[];
+  /** Local HEAD SHA the checks ran on (#1812); the line is omitted when undefined or blank. */
+  headSha?: string;
 }
 
 export function renderEvidencePack(input: EvidencePackRenderInput): string {
-  const { checkSummary, reworkRounds, designMarkdown, events, logFiles, reviewRouting, pinNotes } = input;
+  const { checkSummary, reworkRounds, designMarkdown, events, logFiles, reviewRouting, pinNotes, headSha } = input;
 
   const summaryParts = [
     checkSummary
@@ -59,6 +63,7 @@ export function renderEvidencePack(input: EvidencePackRenderInput): string {
     '',
     summaryParts.length > 0 ? summaryParts.join(' · ') : 'No verification data available.',
     '',
+    ...(headSha && headSha.trim() !== '' ? [`Checked commit: \`${headSha.trim()}\``, ''] : []),
     section(
       'Checker verdicts',
       checkSummary && checkSummary.results.length > 0
@@ -115,6 +120,7 @@ export function gatherEvidencePack(input: EvidencePackGatherInput): string {
     logFiles,
     reviewRouting: input.reviewRouting,
     pinNotes: input.pinNotes,
+    headSha: input.headSha,
   });
 }
 
