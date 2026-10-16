@@ -995,7 +995,7 @@ describe('shipPhase CI watch', () => {
   it('logs CI green and stops polling once all checks complete successfully', async () => {
     const { octokit, callCount } = createWatchOctokit([pending, pending, allSuccess]);
     const logs: Array<[string, string]> = [];
-    const run = async () => ({ stdout: '' });
+    const run = async (c: string) => remoteHeadStub(c) ?? { stdout: '' };
 
     vi.useFakeTimers();
     try {
@@ -1025,7 +1025,7 @@ describe('shipPhase CI watch', () => {
   it('fails and leaves the PR unready once a check run fails', async () => {
     const { octokit, calls, callCount } = createWatchOctokit([pending, oneFailure]);
     const logs: Array<[string, string]> = [];
-    const run = async () => ({ stdout: '' });
+    const run = async (c: string) => remoteHeadStub(c) ?? { stdout: '' };
 
     vi.useFakeTimers();
     try {
@@ -1089,7 +1089,7 @@ describe('shipPhase CI watch', () => {
         octokit: octokit as any,
         watchCI: true,
         log: (type, msg) => logs.push([type, msg]),
-        run: async () => ({ stdout: '' }),
+        run: async (c: string) => remoteHeadStub(c) ?? { stdout: '' },
         rerun: async (argv) => {
           rerunCalls.push([...argv]);
           return { ok: true };
@@ -1115,7 +1115,7 @@ describe('shipPhase CI watch', () => {
   it('gives up after the 10-minute deadline when checks never complete', async () => {
     const { octokit, callCount } = createWatchOctokit([pending]);
     const logs: Array<[string, string]> = [];
-    const run = async () => ({ stdout: '' });
+    const run = async (c: string) => remoteHeadStub(c) ?? { stdout: '' };
 
     vi.useFakeTimers();
     try {
@@ -1164,7 +1164,7 @@ describe('shipPhase CI watch', () => {
           watchCI: true,
           ciNoChecksGraceMs: extra.ciNoChecksGraceMs ?? 90_000,
           log: (type, msg) => logs.push([type, msg]),
-          run: async () => ({ stdout: '' }),
+          run: async (c: string) => remoteHeadStub(c) ?? { stdout: '' },
         });
         await vi.runAllTimersAsync();
         const result = await promise;
@@ -1219,7 +1219,7 @@ describe('shipPhase CI watch', () => {
       throw new Error('checks API unavailable');
     };
     const logs: Array<[string, string]> = [];
-    const run = async () => ({ stdout: '' });
+    const run = async (c: string) => remoteHeadStub(c) ?? { stdout: '' };
 
     vi.useFakeTimers();
     try {

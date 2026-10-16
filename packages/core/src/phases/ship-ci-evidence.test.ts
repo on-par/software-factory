@@ -35,6 +35,13 @@ function fakeOctokit(runs: unknown[], alerts: unknown[]) {
   return { octokit, calls };
 }
 
+const SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+const matchingRemote = async (command: string) => {
+  if (command === 'git rev-parse HEAD') return { stdout: `${SHA}\n` };
+  if (command.startsWith('git ls-remote --heads origin')) return { stdout: `${SHA}\trefs/heads/ship-it/123-ci-poll\n` };
+  return { stdout: '' };
+};
+
 describe('shipPhase — CI failure evidence (#2814)', () => {
   it('attaches CodeQL alert evidence for a #2225-shaped CI failure', async () => {
     const alert = {
@@ -59,7 +66,7 @@ describe('shipPhase — CI failure evidence (#2814)', () => {
         octokit: octokit as any,
         watchCI: true,
         log: () => {},
-        run: async () => ({ stdout: '' }),
+        run: matchingRemote,
       });
       await vi.runAllTimersAsync();
       const result = await promise;

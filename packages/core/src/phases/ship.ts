@@ -14,6 +14,7 @@ import type { ReviewRouting } from '../review/routing.js';
 import {
   type CommandRunner,
   describePushFailure,
+  pushAndVerifyRemoteHead,
   readRemoteBranchSha,
   shortDetail,
   verifyRemoteHead,
@@ -196,6 +197,28 @@ async function shipPhaseImpl(opts: {
     watchRef = remoteHead.remoteSha;
     headSha = remoteHead.remoteSha;
     log('ship', `re-entry pushed ${branch} @ ${headSha}`);
+  } else if (prNumber) {
+    // Rework commits made after BUILD's push must reach the open PR before evidence or ready (#1813).
+    const current = await verifyRemoteHead(run, worktree, branch);
+    if (current.status === 'match') {
+      log(
+        'ship',
+        `remote head ${current.remoteSha} matches local HEAD ${current.localSha} for ${branch} — already in sync, not pushing`,
+      );
+    } else {
+      const pushed = await pushAndVerifyRemoteHead(run, worktree, branch, `git push -u origin ${shellEscape(branch)}`);
+      if (pushed.status !== 'pushed') {
+        const reason =
+          pushed.status === 'push-failed'
+            ? `push of ${branch} to open PR #${prNumber} failed (${pushed.kind}): ${pushed.detail}`
+            : pushed.status === 'mismatch'
+              ? `remote head ${pushed.remoteSha} does not match local HEAD ${pushed.localSha} for ${branch} after push to open PR #${prNumber}`
+              : `could not verify the remote head for ${branch} after push to open PR #${prNumber} (${pushed.detail})`;
+        log('ship', `${reason} — aborting before evidence`);
+        return { ok: false, prNumber, reason };
+      }
+      log('ship', `remote head ${pushed.remoteSha} matches local HEAD ${pushed.localSha} for ${branch}`);
+    }
   }
 
   if (!prNumber) {
@@ -290,37 +313,36 @@ async function shipPhaseImpl(opts: {
         log('ship', `replacing stale origin/${branch} @ ${recorded} with a leased push`);
       }
     }
-    try {
-      await run(pushCmd, { cwd: worktree });
-    } catch (err) {
-      const { kind, detail } = describePushFailure(err);
-      log('ship', `git push failed (${kind}): ${detail} — aborting before PR creation`);
-      if (leased) {
-        return { ok: false, reason: `leased push of ${branch} over recorded ${recorded} was rejected (${kind})` };
-      }
-      return { ok: false };
-    }
-
     // A zero-exit push is not proof the remote branch actually carries this run's commits — a
     // concurrent push or an update that silently applied nothing leaves the remote head elsewhere,
     // and a PR opened against it advertises work that is not there (#735). Fail closed, like the
-    // push-failure abort above (#734).
-    const remoteHead = await verifyRemoteHead(run, worktree, branch);
-    if (remoteHead.status === 'mismatch') {
+    // push-failure abort (#734).
+    const pushed = await pushAndVerifyRemoteHead(run, worktree, branch, pushCmd);
+    if (pushed.status === 'push-failed') {
+      log('ship', `git push failed (${pushed.kind}): ${pushed.detail} — aborting before PR creation`);
+      if (leased) {
+        return {
+          ok: false,
+          reason: `leased push of ${branch} over recorded ${recorded} was rejected (${pushed.kind})`,
+        };
+      }
+      return { ok: false };
+    }
+    if (pushed.status === 'mismatch') {
       log(
         'ship',
-        `remote head ${remoteHead.remoteSha} does not match local HEAD ${remoteHead.localSha} for ${branch} — aborting before PR creation`,
+        `remote head ${pushed.remoteSha} does not match local HEAD ${pushed.localSha} for ${branch} — aborting before PR creation`,
       );
       return { ok: false };
     }
-    if (remoteHead.status === 'unreadable') {
+    if (pushed.status === 'unreadable') {
       log(
         'ship',
-        `could not verify the remote head for ${branch} (${remoteHead.detail}); local HEAD ${remoteHead.localSha ?? 'unknown'} — aborting before PR creation`,
+        `could not verify the remote head for ${branch} (${pushed.detail}); local HEAD ${pushed.localSha ?? 'unknown'} — aborting before PR creation`,
       );
       return { ok: false };
     }
-    log('ship', `remote head ${remoteHead.remoteSha} matches local HEAD ${remoteHead.localSha} for ${branch}`);
+    log('ship', `remote head ${pushed.remoteSha} matches local HEAD ${pushed.localSha} for ${branch}`);
 
     const inlineWork = opts.work && opts.work.kind !== GITHUB_ISSUE_SOURCE ? opts.work : undefined;
 
