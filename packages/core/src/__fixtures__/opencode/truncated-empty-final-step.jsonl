@@ -1,0 +1,6 @@
+{"_note":"Shaped on the real opencode run --format json stream: the final step started but the stream ended with no text and no step_finish (anomalyco/opencode#50514, #3024)."}
+{"type":"step_start","timestamp":1760000001500,"sessionID":"ses_truncated","part":{"id":"prt_01","sessionID":"ses_truncated","messageID":"msg_01","type":"step-start"}}
+{"type":"text","timestamp":1760000003000,"sessionID":"ses_truncated","part":{"id":"prt_02","sessionID":"ses_truncated","messageID":"msg_01","type":"text","text":"I'll inspect the repo first."}}
+{"type":"tool_use","timestamp":1760000004500,"sessionID":"ses_truncated","part":{"id":"prt_03","sessionID":"ses_truncated","messageID":"msg_01","type":"tool","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"TOOL_CHATTER_MARKER src package.json","title":"ls"}}}
+{"type":"step_finish","timestamp":1760000006000,"sessionID":"ses_truncated","part":{"id":"prt_04","sessionID":"ses_truncated","messageID":"msg_01","type":"step-finish","reason":"tool-calls","cost":0.001,"tokens":{"input":1000,"output":50,"reasoning":10,"cache":{"read":2000,"write":400}}}}
+{"type":"step_start","timestamp":1760000007500,"sessionID":"ses_truncated","part":{"id":"prt_05","sessionID":"ses_truncated","messageID":"msg_02","type":"step-start"}}
