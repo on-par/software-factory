@@ -57,6 +57,18 @@ export interface FindCollisionOptions {
   log?: (type: EventKind, msg: string) => void;
 }
 
+export interface SweepStaleOptions {
+  isStale: LaneClaimStalenessProbe;
+  /** Only sweep claims in this repo (owner/name). Omitted = every claim. */
+  repo?: string;
+  log?: (type: EventKind, msg: string) => void;
+}
+
+export interface LaneClaimReap {
+  claim: LaneFileClaim;
+  reason: LaneClaimStaleReason;
+}
+
 function runKeyFor(repo: string, issue: number): string {
   return `${repo}#${issue}`;
 }
@@ -140,11 +152,31 @@ export class LaneFileGuard {
     return collision;
   }
 
+  /** Proactive stale-claim sweep (#3065): probes every claim (scoped to opts.repo when set)
+   *  and releases the ones whose holder is provably finished, logging each as
+   *  `lane_file_claim_reaped`. An undefined verdict or a throwing probe keeps the claim. */
+  async sweepStale(opts: SweepStaleOptions): Promise<LaneClaimReap[]> {
+    const data = await this.read();
+    const stale: Array<{ key: string; claim: LaneFileClaim; reason: LaneClaimStaleReason }> = [];
+    for (const [key, claim] of Object.entries(data.claims)) {
+      if (opts.repo !== undefined && claim.repo !== opts.repo) continue;
+      let reason: LaneClaimStaleReason | undefined;
+      try {
+        reason = await opts.isStale(claim);
+      } catch {
+        reason = undefined;
+      }
+      if (reason !== undefined) stale.push({ key, claim, reason });
+    }
+    if (stale.length === 0) return [];
+    return this.reap(stale, opts.log);
+  }
+
   /** Drops probed-stale claims, skipping any whose holder re-registered since the probe. */
   private async reap(
     reaped: Array<{ key: string; claim: LaneFileClaim; reason: LaneClaimStaleReason }>,
     log: FindCollisionOptions['log'],
-  ): Promise<void> {
+  ): Promise<LaneClaimReap[]> {
     const data = await this.read();
     const removed: typeof reaped = [];
     for (const entry of reaped) {
@@ -152,7 +184,7 @@ export class LaneFileGuard {
       delete data.claims[entry.key];
       removed.push(entry);
     }
-    if (removed.length === 0) return;
+    if (removed.length === 0) return [];
     await this.write(data);
     for (const { claim, reason } of removed) {
       log?.(
@@ -160,6 +192,7 @@ export class LaneFileGuard {
         `lane file claim reaped: #${claim.issue} (${reason}) released ${claim.files.join(', ')} in ${claim.repo}`,
       );
     }
+    return removed.map(({ claim, reason }) => ({ claim, reason }));
   }
 
   private async read(): Promise<LaneFileGuardFile> {

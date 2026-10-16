@@ -85,6 +85,7 @@ export interface RunRuntime {
     ghRepo: string,
     eventScope: string | number,
   ) => Promise<void>;
+  sweepStaleLaneClaims: (paths: ReturnType<typeof getFactoryPaths>, ghRepo: string) => Promise<void>;
   planRunLanes: typeof planRunLanes;
   preflightQueuedIssue: typeof preflightQueuedIssue;
   createQueuePreflightOps: typeof createQueuePreflightOps;
@@ -134,6 +135,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
       throw new Error(keychainErr);
     }
     await rt.runAutoWorktreeGc(repoRoot, paths, ghRepo, 'all');
+    await rt.sweepStaleLaneClaims(paths, ghRepo);
 
     const { lanes, diagnostics } = await rt.planRunLanes({
       localQueue: opts.localQueue === true,

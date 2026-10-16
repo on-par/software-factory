@@ -631,6 +631,7 @@ const INTERNAL_API_KEYS = [
   'detectLowerSliceChange',
   'parkOnLowerSliceChange',
   'createShipExecutor',
+  'createStackSliceBranch',
   'DEFAULT_FACTORYD_PORT',
   // Durable explicit daemon runs (#1393)
   'createDaemonRunExclusive',
@@ -831,7 +832,6 @@ const TESTING_API_KEYS = [
   'simRegressionFixture',
   'simSpecWithObjectInterface',
 ];
-
 // The same KPI functions the root export documents (see the "// KPIs" block in
 // PUBLIC_API_KEYS above), re-exported standalone from a Node-dep-free entry point so
 // browser bundlers can import them without pulling in the root's harness/router deps.

@@ -704,8 +704,7 @@ export {
   describeConstitutionSource,
   describeReviewConstitutionSource,
 } from './constitutions/index.js';
-export type { BuiltInCheckerInfo } from './checkers/index.js';
-export { listBuiltInCheckers } from './checkers/index.js';
+export { listBuiltInCheckers, type BuiltInCheckerInfo } from './checkers/index.js';
 export { findTemplateTokens, isTemplateToken } from './config/template-tokens.js';
 export { lintFactoryConfig } from './config/config-lint.js';
 export { findConfigSchemaErrors } from './config/config-schema-lint.js';
@@ -758,6 +757,7 @@ export { buildReadinessGapPrompt, parseReadinessGapOutput } from './readiness/en
 // Persisted per-issue run state (#972, #2271)
 export type { IssueRunState, RunStatus } from './types/index.js';
 export { readIssueRunState } from './run/state.js';
+export { createStackSliceBranch } from './run/stack-slice-branch.js';
 export {
   checkResumePath,
   configParkMessage,

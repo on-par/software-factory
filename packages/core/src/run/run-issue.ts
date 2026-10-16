@@ -35,6 +35,8 @@ import { planPhase as planPhaseDefault, type PlanResult } from '../phases/plan.j
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
 import { publishParkComment } from './park-comment.js';
 import { gateOpencodeBuildOnBreaker, providerFallbackPreferrer } from './provider-breaker-gate.js';
+import { fileFlakyTests } from './flaky-tests.js';
+import { enterStackSlice, runStackLoop } from './stack-slice-entry.js';
 import { upsertSlicePlanComment } from '../readiness/slice-plan-github.js';
 import { withSliceState } from '../readiness/slice-plan.js';
 import type { ReviewFloorPathChange, ReviewFloorRuleSet } from '../review/floor.js';
@@ -48,7 +50,6 @@ import {
   type PrShadowVerdict,
 } from '../review/classifier.js';
 import { resolveReviewRouting, type ReviewRouting } from '../review/routing.js';
-import { recordFlakes, setFlakyIssue, type FlakyThresholdEntry } from '../checkers/flaky-ledger.js';
 import { captureDiffBase } from '../checkers/design-smells.js';
 import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings, SizeGateMode } from '../config/index.js';
@@ -90,6 +91,8 @@ import { parkLogExtra } from './ship-park.js';
 /** Everything one run needs decided, as a plain resolved value — the CLI adapter
  *  computes this today; no config/file/path resolution happens in here. */
 export interface RunRequest {
+  /** ADR-0161 stack mode: the 1-based slice to plan. Set by runIssue's stack loop; undefined = the gate's current slice. */
+  sliceIndex?: number;
   issue: number;
   repo: string;
   branch: string;
@@ -184,6 +187,8 @@ interface RunReportInfo {
  *  layout, approvals/steering directories, report/artifact destinations) are the caller's
  *  responsibility to wire — runIssue only calls the closures it is handed. */
 export interface RunPorts extends CiReworkPorts {
+  /** ADR-0161 stack mode: creates a slice branch in the worktree. Defaults to createStackSliceBranch. */
+  createSliceBranch?: (opts: { worktree: string; branch: string; startPoint: string }) => Promise<void>;
   /** Stuck-run steward seams (#2124). Used only when request.stewardEnabled is true and detectStuck fires
    *  on the park; absent → only the steward-triggered event is logged (#2086). */
   steward?: RunStewardPorts;
@@ -257,83 +262,6 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function parseRunKey(run: string): string {
-  const [issue, sha] = run.split('@');
-  return sha === undefined ? run : `#${issue} on base ${sha}`;
-}
-
-function renderFlakyIssueBody(entry: FlakyThresholdEntry, baseSha: string, logPath?: string): string {
-  return [
-    `The test \`${entry.test}\` failed on its first attempt and passed on a serial re-run (a flake).`,
-    '',
-    `It has flaked in ${entry.runs.length} distinct runs:`,
-    ...entry.runs.map((run) => `- ${parseRunKey(run)}`),
-    '',
-    `Latest base SHA: ${baseSha}`,
-    ...(logPath !== undefined ? [`Re-run log: ${logPath}`] : []),
-  ].join('\n');
-}
-
-function renderFlakyComment(entry: FlakyThresholdEntry, run: string, baseSha: string, logPath?: string): string {
-  return [
-    `\`${entry.test}\` flaked again in ${parseRunKey(run)} (base ${baseSha}).`,
-    `It has now flaked in ${entry.runs.length} distinct runs.`,
-    ...(logPath !== undefined ? [`Re-run log: ${logPath}`] : []),
-  ].join('\n');
-}
-
-/** Records passing-flake tests in the ledger and files or updates a flaky-test issue for those at
- *  the threshold. Never throws: every ledger or GitHub failure is logged. */
-async function fileFlakyTests(args: {
-  request: RunRequest;
-  octokit: Octokit;
-  log: LogFn;
-  file: string;
-  baseSha: string;
-  tests: string[];
-  logPath?: string;
-}): Promise<void> {
-  const { request, octokit, log, file, baseSha, tests, logPath } = args;
-  const run = `${request.issue}@${baseSha.slice(0, 8)}`;
-  let hits: FlakyThresholdEntry[];
-  try {
-    hits = await recordFlakes(file, run, tests);
-  } catch (err) {
-    log('environment_warning', `could not update the flaky-test ledger: ${errorMessage(err)}`);
-    return;
-  }
-  for (const hit of hits) {
-    if (request.localOnly) {
-      log('flaky_tests', `flaky test ${hit.test} reached ${hit.runs.length} runs — local-only run, not filing`);
-      continue;
-    }
-    const [owner, repoName] = request.repo.split('/');
-    try {
-      if (hit.issue === null) {
-        const { data } = await octokit.rest.issues.create({
-          owner,
-          repo: repoName,
-          title: `flaky: ${hit.test}`,
-          labels: ['bug', 'testing'],
-          body: renderFlakyIssueBody(hit, baseSha, logPath),
-        });
-        await setFlakyIssue(file, hit.test, data.number);
-        log('flaky_tests', `filed #${data.number} for flaky test ${hit.test} (${hit.runs.length} runs)`);
-      } else {
-        await octokit.rest.issues.createComment({
-          owner,
-          repo: repoName,
-          issue_number: hit.issue,
-          body: renderFlakyComment(hit, run, baseSha, logPath),
-        });
-        log('flaky_tests', `commented on #${hit.issue} for flaky test ${hit.test} (${hit.runs.length} runs)`);
-      }
-    } catch (err) {
-      log('environment_warning', `could not file the flaky-test issue for ${hit.test}: ${errorMessage(err)}`);
-    }
-  }
-}
-
 /** Structural marker for the decompose-hook's thrown signal (core cannot import the
  *  CLI's IssueDecomposedError; see outcome.ts's parkReasonFor for the same convention). */
 function isDecomposeSignal(err: unknown): boolean {
@@ -341,6 +269,11 @@ function isDecomposeSignal(err: unknown): boolean {
 }
 
 export async function runIssue(request: RunRequest, policy: RunPolicy, ports: RunPorts): Promise<RunOutcome> {
+  return runStackLoop(request, (req) => runIssueOnce(req, policy, ports));
+}
+
+async function runIssueOnce(initialRequest: RunRequest, policy: RunPolicy, ports: RunPorts): Promise<RunOutcome> {
+  let request = initialRequest;
   const planPhase = ports.planPhase ?? planPhaseDefault;
   const slot = ports.hostBuildSlot ?? ((_phase, fn) => fn());
   const buildPhase: typeof buildPhaseDefault = (o) => slot('build', () => (ports.buildPhase ?? buildPhaseDefault)(o));
@@ -708,6 +641,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
           fastPath: request.efficiency.fastPath,
           enforceSizeGate: (request.sizeGateMode ?? 'file') !== 'off',
           sizeGateMode: request.sizeGateMode,
+          sliceIndex: request.sliceIndex,
           maxSlices: request.maxSlices,
           blockUnresolvedRegressions: request.blockUnresolvedRegressions,
           updateIssueBodyOnEnrich: request.readinessUpdateIssueBody,
@@ -747,6 +681,20 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
           await ports.laneFileGuard.register(request.repo, request.issue, touchedFiles);
           laneFileClaimed = true;
         }
+      }
+
+      let enteredSlice: PlanResult['slice'];
+      if (request.sizeGateMode === 'stack' && plan.slice) {
+        const entered = await enterStackSlice({
+          slice: plan.slice,
+          request,
+          ports,
+          log,
+          park: (message) => terminalParked('fail', message),
+        });
+        if ('outcome' in entered) return entered.outcome;
+        enteredSlice = entered.slice;
+        request = entered.request;
       }
 
       // BUILD
@@ -876,7 +824,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
           : undefined;
 
       planRoute = plan.route;
-      planSlice = plan.slice;
+      planSlice = enteredSlice ?? plan.slice;
       buildDiffBase = build.diffBase;
       builtRoute = build.route;
       builtModel = build.model;
