@@ -35,6 +35,39 @@ const clip = (text: string): string =>
 
 const errorDetail = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
+function selectSlice(
+  plan: SlicePlan,
+  issue: number,
+  sliceIndex: number | undefined,
+): { kind: 'slice'; slice: Slice } | { kind: 'park'; reason: string } {
+  let slice: Slice | undefined;
+  if (sliceIndex === undefined) {
+    slice = currentSlice(plan);
+    if (slice === undefined) {
+      return { kind: 'park', reason: `every slice in the slice plan for #${issue} is merged — parked` };
+    }
+  } else {
+    slice = plan.slices.find((s) => s.index === sliceIndex);
+    if (slice === undefined) {
+      return { kind: 'park', reason: `slice ${sliceIndex} is not in the slice plan for #${issue} — parked` };
+    }
+    if (slice.state === 'merged') {
+      return {
+        kind: 'park',
+        reason: `slice ${slice.index}/${plan.slices.length} of #${issue} is already merged — parked`,
+      };
+    }
+  }
+  if (slice.state === 'pr-open') {
+    const pr = slice.prNumber === undefined ? 'with no PR number' : `PR #${slice.prNumber}`;
+    return {
+      kind: 'park',
+      reason: `slice ${slice.index}/${plan.slices.length} of #${issue} already has ${pr} open — the queue resumes after it merges, parked`,
+    };
+  }
+  return { kind: 'slice', slice };
+}
+
 export async function resolveSliceGate(deps: {
   issue: number;
   repo: string;
@@ -43,6 +76,8 @@ export async function resolveSliceGate(deps: {
   oversized: boolean;
   sizeReason?: string;
   maxSlices: number;
+  /** ADR-0161 stack mode: plan this 1-based slice instead of currentSlice(plan). */
+  sliceIndex?: number;
   worktree: string;
   router: ModelRouter;
   octokit: Octokit;
@@ -74,18 +109,9 @@ export async function resolveSliceGate(deps: {
         reason: overCapReason(lookup.plan.slices.length, deps.maxSlices),
       };
     }
-    const slice = currentSlice(lookup.plan);
-    if (slice === undefined) {
-      return { kind: 'park', reason: `every slice in the slice plan for #${issue} is merged — parked` };
-    }
-    if (slice.state === 'pr-open') {
-      const pr = slice.prNumber === undefined ? 'with no PR number' : `PR #${slice.prNumber}`;
-      return {
-        kind: 'park',
-        reason: `slice ${slice.index}/${lookup.plan.slices.length} of #${issue} already has ${pr} open — the queue resumes after it merges, parked`,
-      };
-    }
-    return { kind: 'slice', plan: lookup.plan, slice, created: false };
+    const selected = selectSlice(lookup.plan, issue, deps.sliceIndex);
+    if (selected.kind === 'park') return selected;
+    return { kind: 'slice', plan: lookup.plan, slice: selected.slice, created: false };
   }
   if (!deps.oversized) return { kind: 'none' };
 
@@ -142,5 +168,7 @@ export async function resolveSliceGate(deps: {
     'size-gate-sliced',
     `issue exceeds the size gate (${reasonText}) — sliced into ${built.plan.slices.length} slice(s), slice plan comment ${upserted.commentId}`,
   );
-  return { kind: 'slice', plan: built.plan, slice: built.plan.slices[0], created: true };
+  const selected = selectSlice(built.plan, issue, deps.sliceIndex);
+  if (selected.kind === 'park') return selected;
+  return { kind: 'slice', plan: built.plan, slice: selected.slice, created: true };
 }

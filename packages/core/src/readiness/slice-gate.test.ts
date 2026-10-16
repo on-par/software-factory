@@ -88,7 +88,7 @@ function fake(comments: { id: number; user: { id: number } | null; body?: string
   return { octokit, createComment, updateComment };
 }
 
-function setup(decompose: string[], f: ReturnType<typeof fake>, oversized = true, maxSlices = 10) {
+function setup(decompose: string[], f: ReturnType<typeof fake>, oversized = true, maxSlices = 10, sliceIndex?: number) {
   const stub = new StubModelExecutor({ scripts: { decompose: decompose.map((output) => ({ output })) } });
   const router = new ModelRouter(models, routes, false, stub);
   const events: { type: string; msg: string }[] = [];
@@ -101,6 +101,7 @@ function setup(decompose: string[], f: ReturnType<typeof fake>, oversized = true
       oversized,
       sizeReason: 'too many items',
       maxSlices,
+      sliceIndex,
       worktree: '/tmp/wt',
       router,
       octokit: f.octokit,
@@ -145,6 +146,40 @@ describe('resolveSliceGate', () => {
     const { stub, run } = setup([], f);
     expect(await run()).toMatchObject({ kind: 'park', reason: expect.stringContaining('PR #81') });
     expect(stub.calls).toEqual([]);
+  });
+
+  describe('explicit sliceIndex (ADR-0161 stack mode)', () => {
+    const found = (plan: SlicePlan) => fake([{ id: 1, user: { id: BOT }, body: renderSlicePlanComment(plan) }]);
+
+    it('selects the requested slice even when an earlier slice is pending', async () => {
+      const { stub, run } = setup([], found(planOf(2)), true, 10, 2);
+      const outcome = await run();
+      expect(outcome).toMatchObject({ kind: 'slice', created: false });
+      expect(outcome.kind === 'slice' && outcome.slice.index).toBe(2);
+      expect(stub.calls).toEqual([]);
+    });
+
+    it('parks when the index is not in the plan', async () => {
+      const { run } = setup([], found(planOf(2)), true, 10, 3);
+      expect(await run()).toMatchObject({ kind: 'park', reason: expect.stringContaining('not in the slice plan') });
+    });
+
+    it('parks when the requested slice is merged', async () => {
+      const { run } = setup([], found(withSliceState(planOf(2), 2, 'merged')), true, 10, 2);
+      expect(await run()).toMatchObject({ kind: 'park', reason: expect.stringContaining('already merged') });
+    });
+
+    it('parks with the pr-open reason when the requested slice has an open PR', async () => {
+      const { run } = setup([], found(withSliceState(planOf(2), 2, 'pr-open', 82)), true, 10, 2);
+      expect(await run()).toMatchObject({ kind: 'park', reason: expect.stringContaining('PR #82') });
+    });
+
+    it('selects the requested slice of a newly created plan', async () => {
+      const { run } = setup([decompositionJson(2)], fake([]), true, 10, 2);
+      const outcome = await run();
+      expect(outcome).toMatchObject({ kind: 'slice', created: true });
+      expect(outcome.kind === 'slice' && outcome.slice.index).toBe(2);
+    });
   });
 
   it('parks when every slice is merged', async () => {

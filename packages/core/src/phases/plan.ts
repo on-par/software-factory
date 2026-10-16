@@ -355,10 +355,12 @@ async function planPhaseImpl(opts: {
   fastPath?: boolean;
   /** Park oversized factory-task issues (sizeOk: false) instead of proceeding. Default true. */
   enforceSizeGate?: boolean;
-  /** sizeGate.mode (ADR-0147). 'slice' records a slice plan and plans only the current slice; 'stack' (ADR-0161) runs as 'slice' until stacked PRs are built. Ignored when enforceSizeGate is false. */
+  /** sizeGate.mode (ADR-0147). 'slice' records a slice plan and plans only the current slice; 'stack' (ADR-0161) uses the slice-mode gates and may plan an explicit `sliceIndex`. Ignored when enforceSizeGate is false. */
   sizeGateMode?: SizeGateMode;
   /** Slice cap for sizeGate.mode 'slice' (ADR-0156); default DEFAULT_MAX_SLICES. */
   maxSlices?: number;
+  /** ADR-0161 stack mode: plan this 1-based slice of the trusted slice plan. Default: the current slice. Ignored outside stack mode. */
+  sliceIndex?: number;
   /** Stop PLAN before BUILD when a worse/unknown behaviorDelta row is not in openQuestions (#1819). Default false = log only. */
   blockUnresolvedRegressions?: boolean;
   /** readiness.updateIssueBody resolved (#2385); false = enrich in memory only, never write the issue body. Default true. */
@@ -500,11 +502,8 @@ async function planPhaseImpl(opts: {
     }
   }
 
-  // ADR-0161: stack PRs are not built yet; stack runs the slice-mode gates (its fallback).
+  // ADR-0161: stack uses the slice-mode gates; it may plan an explicit slice.
   const sliceMode = opts.sizeGateMode === 'slice' || opts.sizeGateMode === 'stack';
-  if (enforceSizeGate && opts.sizeGateMode === 'stack') {
-    log('plan', 'sizeGate.mode stack: stacked PRs are not built yet — using slice mode');
-  }
   let planningSlice = false;
   let sliceLabel = '';
   let plannedSlice: PlanResult['slice'];
@@ -518,6 +517,7 @@ async function planPhaseImpl(opts: {
       oversized: readiness.template === 'factory-task' && readiness.sizeOk === false,
       sizeReason: readiness.sizeReason,
       maxSlices: opts.maxSlices ?? DEFAULT_MAX_SLICES,
+      ...(opts.sizeGateMode === 'stack' && opts.sliceIndex !== undefined ? { sliceIndex: opts.sliceIndex } : {}),
       worktree,
       router,
       octokit,
