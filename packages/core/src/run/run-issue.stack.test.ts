@@ -247,6 +247,41 @@ describe('runIssue — stack mode chains slice branches (ADR-0161)', () => {
     expect(outcome.state).not.toBe('ready');
   });
 
+  it.each([
+    { name: 'fail', stuck: false, reason: 'fail' },
+    { name: 'stuck', stuck: true, reason: 'escalate' },
+  ])('halts the stack when slice 2 of 3 fails CHECK ($name)', async ({ stuck, reason }) => {
+    const { ports, createSliceBranch } = stackSetup();
+    const failed: CheckPhaseResult = {
+      passed: false,
+      stuck,
+      reworkRounds: 1,
+      failureSignature: 'sig-2',
+      summary: {
+        failures: 1,
+        passes: 0,
+        skips: 0,
+        total: 1,
+        results: [{ checker: 'tests', result: 'FAIL' } as never],
+      },
+    };
+    checkPhase.mockReset().mockResolvedValueOnce(CHECK_OK).mockResolvedValueOnce(failed);
+    const outcome = await runIssue(baseRequest(), policy, ports);
+
+    expect(planPhase.mock.calls.map((c) => c[0].sliceIndex)).toEqual([undefined, 2]);
+    expect(createSliceBranch.mock.calls.map((c) => c[0].branch)).toEqual([branch(1), branch(2)]);
+    expect(buildPhase.mock.calls.map((c) => c[0].branch)).toEqual([branch(1), branch(2)]);
+    expect(checkPhase).toHaveBeenCalledTimes(2);
+    expect(shipPhase).toHaveBeenCalledTimes(1);
+    expect(outcome).toMatchObject({
+      state: 'parked',
+      reason,
+      branch: branch(2),
+      failureSignature: 'sig-2',
+      failingChecks: ['tests'],
+    });
+  });
+
   it('parks fail when the parent slice branch is not recorded', async () => {
     const { ports, createSliceBranch } = stackSetup();
     planPhase.mockImplementation(async () => ({ ...PLAN_OK, slice: { plan: freshPlan(), index: 2 } }));
