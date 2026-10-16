@@ -213,6 +213,26 @@ export class LaneFileGuard {
   }
 }
 
+/** Best-effort claim release (#3067): a failing lane-files.json write is logged as
+ *  `lane_file_release_failed` and the claim stays recorded; never throws. */
+export async function releaseLaneClaim(
+  guard: LaneFileGuard,
+  repo: string,
+  issue: number,
+  log: (type: EventKind, msg: string) => void,
+): Promise<boolean> {
+  try {
+    await guard.release(repo, issue);
+    return true;
+  } catch (err) {
+    log(
+      'lane_file_release_failed',
+      `lane file claim release failed for #${issue} in ${repo}: ${err instanceof Error ? err.message : String(err)} — claim kept in lane-files.json`,
+    );
+    return false;
+  }
+}
+
 /** GitHub-backed staleness probe (#3063). Fails safe: any lookup error, a live holder
  *  (in-progress label or unexpired lease), an open PR, or no PR found all return undefined. */
 export function createGithubLaneClaimStalenessProbe(opts: {
