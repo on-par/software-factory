@@ -31,6 +31,7 @@
 import { z } from 'zod';
 
 import { ModelEffortsSchema } from './effort.js';
+import { HarnessDeclarationSchema } from './harness-declaration.js';
 import { readRepoConfigFile } from './repo-config-file.js';
 
 // ---------- Models ----------
@@ -429,6 +430,12 @@ export const FactoryConfigV2Schema = z
   .object({
     version: z.literal(2).describe('Config schema version. Must be 2.'),
     models: ModelsSectionSchema.prefault({}),
+    harnesses: z
+      .record(z.string(), HarnessDeclarationSchema)
+      .optional()
+      .describe(
+        "Repo-declared agent CLIs: harness id -> declaration (command, prompt, output, agentic, usage, optional errorPatterns and probe). Run through the built-in `command` harness; reference an id from a models.registry entry's `harness`.",
+      ),
     routes: RoutesSectionSchema,
     run: RunSectionSchema.prefault({}),
     budget: BudgetSectionSchema.prefault({}),

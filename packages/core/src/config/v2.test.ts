@@ -374,7 +374,42 @@ describe('exported schema shape', () => {
   it('exposes the top-level sections the issue enumerates', () => {
     const configSections = factoryConfigV2JsonSchema().properties as Record<string, unknown>;
     expect(Object.keys(configSections).sort()).toEqual(
-      ['budget', 'constitution', 'intake', 'models', 'notifications', 'routes', 'run', 'steward', 'version'].sort(),
+      [
+        'budget',
+        'constitution',
+        'harnesses',
+        'intake',
+        'models',
+        'notifications',
+        'routes',
+        'run',
+        'steward',
+        'version',
+      ].sort(),
+    );
+  });
+});
+
+describe('harnesses', () => {
+  const declaration = {
+    command: 'my-agent',
+    prompt: 'stdin',
+    output: 'stdout',
+    agentic: true,
+    usage: 'none',
+    probe: 'my-agent --version',
+  };
+
+  it('keeps a declared command harness and lists harnesses in the JSON schema', () => {
+    const config = parseV2Config({ version: 2, harnesses: { 'my-agent': declaration } });
+    expect(config.harnesses?.['my-agent']).toEqual(declaration);
+    const properties = factoryConfigV2JsonSchema().properties as Record<string, { description?: string }>;
+    expect(properties.harnesses?.description).toBeTruthy();
+  });
+
+  it('rejects a malformed harness declaration with its path', () => {
+    expect(() => parseV2Config({ version: 2, harnesses: { 'my-agent': { ...declaration, prompt: 'pipe' } } })).toThrow(
+      /harnesses\.my-agent\.prompt/,
     );
   });
 });
