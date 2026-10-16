@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -17,6 +19,21 @@ async function tmpFile(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'breaker-test-'));
   tempDirs.add(dir);
   return join(dir, 'breaker.json');
+}
+
+/** The provider message inside the recorded OpenCode Go usage-cap error event. */
+function opencodeCapMessage(): string {
+  const raw = readFileSync(
+    fileURLToPath(new URL('../__fixtures__/opencode/error-usage-cap.jsonl', import.meta.url)),
+    'utf8',
+  );
+  const event = raw
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => JSON.parse(line) as { type: string; error?: { data?: { responseBody?: string } } })
+    .find((e) => e.type === 'error');
+  const body = JSON.parse(event?.error?.data?.responseBody ?? '{}') as { error?: { message?: string } };
+  return body.error?.message ?? '';
 }
 
 describe('ProviderBreaker', () => {
@@ -165,6 +182,23 @@ describe('gateBuildOnBreaker', () => {
 });
 
 describe('parseResetCooldownMs', () => {
+  it('parses the recorded OpenCode Go usage-cap fixture message to its reset instant', () => {
+    const now = Date.parse('2026-10-31T00:00:00Z');
+    const msg = opencodeCapMessage();
+    expect(msg).toContain('resets at 2026-11-01T00:00:00Z');
+    expect(parseResetCooldownMs(msg, undefined, now)).toBe(Date.parse('2026-11-01T00:00:00Z') - now + 2 * 60_000);
+    expect(parseResetCooldownMs(msg, 0, now)).toBe(86_400_000);
+  });
+
+  it('returns null for the recorded fixture message once its reset instant is in the past', () => {
+    const now = Date.parse('2026-11-02T00:00:00Z');
+    expect(parseResetCooldownMs(opencodeCapMessage(), undefined, now)).toBeNull();
+  });
+
+  it('parses "Resets in 1hr 30min" as 90 minutes', () => {
+    expect(parseResetCooldownMs('Resets in 1hr 30min.', 0)).toBe(90 * 60_000);
+    expect(parseResetCooldownMs('Resets in 1hr 30min.')).toBe(90 * 60_000 + 2 * 60_000);
+  });
   it('parses "Xhr Ymin" and pads with the buffer', () => {
     const text =
       'AI_APICallError: Weekly usage limit reached. Resets in 3hr 17min. To continue using this model now, enable usage from your available balance: https://opencode.ai/workspace/wrk_x/go';
