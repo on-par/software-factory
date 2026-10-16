@@ -323,6 +323,7 @@ function runtimeNamespace(): Node[] {
     section('workspace'),
     section('sandbox'),
     section('environment'),
+    section('host'),
     section('auto_failover'),
     section('ingest'),
     intake,

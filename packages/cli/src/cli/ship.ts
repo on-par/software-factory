@@ -1,8 +1,6 @@
 // packages/cli/src/cli/ship.ts — issue-level ship flow: resolve config, build RunRequest/RunPorts, run runIssue, map the outcome (#2788)
-
 import { resolve } from 'node:path';
 import { styleText } from 'node:util';
-
 import type {
   CheckFailureInfo,
   CiFailureEvidence,
@@ -51,6 +49,7 @@ import {
   touchRunActivity,
   writePhaseSnapshot,
 } from '@on-par/factory-core';
+import { hostBuildSlotPort } from './host-slot.js';
 import type { CheckResumeRecord, PrClassificationRecord, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
   branchFor,
@@ -410,6 +409,7 @@ export async function shipIssue(
     planPhase: phases.planPhase,
     buildPhase: phases.buildPhase,
     checkPhase: phases.checkPhase,
+    hostBuildSlot: hostBuildSlotPort(factoryConfig, ghRepo, issueNum, log),
     shipPhase: shipPhaseForMode,
     checkBaseHealth: deps.checkBaseHealth ?? checkBaseHealth,
     resolveConstitution: () =>

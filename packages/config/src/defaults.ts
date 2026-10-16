@@ -107,6 +107,7 @@ export interface FactoryDefaults {
     ports: { enabled: boolean; range: [number, number]; comment?: string };
     proxy: { enabled: boolean; port: number; domain: string; comment?: string };
   };
+  host: { maxBuilds: number; comment?: string };
   auto_failover: { enabled: boolean; cooldown_minutes: number; fallback_model: string; comment?: string };
 }
 
@@ -694,6 +695,11 @@ export const defaultFactoryConfig: FactoryDefaults = {
       comment:
         'Opt-in loopback reverse proxy giving each lane a stable URL http://<lane>.<domain>[:port]. Routes resolve per-request from .factory/ports.json so they always track the lease lifecycle. Binds 127.0.0.1 only. *.localhost resolves to loopback in Chrome/Firefox and per RFC 6761; Safari/curl may need dnsmasq with a .test domain — documented, not solved, in v1. Started in-process by `factory run`/`supervise`, or manually via `factory proxy`. If the port cannot be bound (e.g. :80 without privileges on Linux) lanes degrade to port-based URLs with one informational log line. Override per-run with FACTORY_PROXY=1/0.',
     },
+  },
+  host: {
+    maxBuilds: 2,
+    comment:
+      'Host-wide cap on lanes in BUILD or CHECK at once, shared by every runner on this machine through slot files in ~/.factory/host/build-slots/. A lane waits for a free slot before each BUILD/CHECK phase.',
   },
   auto_failover: {
     enabled: true,

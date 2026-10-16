@@ -169,10 +169,7 @@ const FactoryConfigSchema = z.object({
     })
     .default({ loopIntervalSeconds: 300, staleThresholdMultiplier: 2 }),
   plan_approval: z
-    .object({
-      enabled: z.boolean().default(false),
-      comment: z.string().optional(),
-    })
+    .object({ enabled: z.boolean().default(false), comment: z.string().optional() })
     .default({ enabled: false }),
   design: z
     .object({ blockUnresolvedRegressions: z.boolean().default(false) })
@@ -187,10 +184,7 @@ const FactoryConfigSchema = z.object({
     })
     .default({ mode: 'file' }),
   kpis: z
-    .object({
-      defectWindowDays: z.number().int().positive().default(14),
-      comment: z.string().optional(),
-    })
+    .object({ defectWindowDays: z.number().int().positive().default(14), comment: z.string().optional() })
     .default({ defectWindowDays: 14 }),
   sandbox: z
     .object({
@@ -280,10 +274,7 @@ const FactoryConfigSchema = z.object({
         .refine((p) => p.range[0] <= p.range[1], { message: 'ports.range must be [low, high]' })
         .default({ enabled: true, range: [3100, 3999] }),
       processGroups: z
-        .object({
-          graceMs: z.number().int().positive().default(5000),
-          comment: z.string().optional(),
-        })
+        .object({ graceMs: z.number().int().positive().default(5000), comment: z.string().optional() })
         .default({ graceMs: 5000 }),
       proxy: z
         .object({
@@ -299,6 +290,9 @@ const FactoryConfigSchema = z.object({
       processGroups: { graceMs: 5000 },
       proxy: { enabled: false, port: 80, domain: 'factory.localhost' },
     }),
+  host: z
+    .object({ maxBuilds: z.number().int().positive().default(2), comment: z.string().optional() })
+    .default({ maxBuilds: 2 }),
   auto_failover: z
     .object({
       enabled: z.boolean().default(true),
@@ -375,6 +369,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'ingest',
   'intake',
   'environment',
+  'host',
   'auto_failover',
   'adr',
   'workspace',
@@ -618,6 +613,11 @@ export function resolveAutoFailover(config: FactoryConfig): AutoFailoverSettings
       (config.auto_failover?.cooldown_minutes ?? defaultFactoryConfig.auto_failover.cooldown_minutes) * 60_000,
     fallbackModel: config.auto_failover?.fallback_model ?? defaultFactoryConfig.auto_failover.fallback_model,
   };
+}
+
+/** Host-wide cap on lanes inside BUILD or CHECK at once (#3043). */
+export function resolveHostMaxBuilds(config: FactoryConfig): number {
+  return config.host?.maxBuilds ?? defaultFactoryConfig.host.maxBuilds;
 }
 
 /** Local-only mode: restrict routing to local worker models and force the

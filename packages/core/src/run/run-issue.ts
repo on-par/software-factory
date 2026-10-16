@@ -72,8 +72,7 @@ import type {
   ReadinessInfo,
 } from '../types/index.js';
 import type { WorkRequest, WorkRequestSourceKind } from '../work/index.js';
-import type { LaneFileGuard } from './lane-file-guard.js';
-import { touchedFilesFrom } from './lane-file-guard.js';
+import { touchedFilesFrom, type LaneFileGuard } from './lane-file-guard.js';
 import { parkReasonFor, reworkRouteFor, type BuildRoute, type ParkReason, type RunOutcome } from './outcome.js';
 import type { RunPolicy } from './policy.js';
 import {
@@ -236,6 +235,7 @@ export interface RunPorts extends CiReworkPorts {
   planPhase?: typeof planPhaseDefault;
   buildPhase?: typeof buildPhaseDefault;
   checkPhase?: typeof checkPhaseDefault;
+  hostBuildSlot?: <T>(phase: 'build' | 'check', fn: () => Promise<T>) => Promise<T>;
   shipPhase?: typeof shipPhaseDefault;
   /** Pre-PLAN health check of origin/main (#2339). Absent = skipped (existing callers/tests unchanged). */
   checkBaseHealth?: typeof checkBaseHealth;
@@ -340,8 +340,9 @@ function isDecomposeSignal(err: unknown): boolean {
 
 export async function runIssue(request: RunRequest, policy: RunPolicy, ports: RunPorts): Promise<RunOutcome> {
   const planPhase = ports.planPhase ?? planPhaseDefault;
-  const buildPhase = ports.buildPhase ?? buildPhaseDefault;
-  const checkPhase = ports.checkPhase ?? checkPhaseDefault;
+  const slot = ports.hostBuildSlot ?? ((_phase, fn) => fn());
+  const buildPhase: typeof buildPhaseDefault = (o) => slot('build', () => (ports.buildPhase ?? buildPhaseDefault)(o));
+  const checkPhase: typeof checkPhaseDefault = (o) => slot('check', () => (ports.checkPhase ?? checkPhaseDefault)(o));
   const shipPhase = ports.shipPhase ?? shipPhaseDefault;
   const log = ports.events();
   // One id per run: BUILD, CHECK and rework share a per-run VBCSCompiler server (#1910).
@@ -356,7 +357,6 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
   let failurePhase: FailurePhase = 'plan';
   let runStartDiffBase: string | undefined;
   let laneFileClaimed = false;
-
   const setPhase = async (phase: FailurePhase): Promise<void> => {
     failurePhase = phase;
     try {
