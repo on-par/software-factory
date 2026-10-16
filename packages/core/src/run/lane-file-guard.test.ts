@@ -325,3 +325,114 @@ describe('LaneFileGuard stale claims', () => {
     expect(await readFile(file, 'utf-8')).toBe(before);
   });
 });
+
+describe('LaneFileGuard.sweepStale', () => {
+  async function seed(...issues: number[]) {
+    const file = await tmpFile();
+    const guard = new LaneFileGuard(file);
+    for (const n of issues) await guard.register('acme/repo', n, [`f${n}.swift`]);
+    const events: Array<[string, string]> = [];
+    const log = (type: string, msg: string) => events.push([type, msg]);
+    return { file, guard, events, log };
+  }
+
+  function fakeOctokit(issue: { state: string; labels: string[]; title: string }, prs: unknown[] = []) {
+    const get = vi.fn(async () => ({ data: issue }));
+    const list = vi.fn(async () => ({ data: prs }));
+    return Object.assign({} as Octokit, { rest: { issues: { get }, pulls: { list } } }) as Pick<Octokit, 'rest'>;
+  }
+
+  it('sweepStale reaps a claim whose holder PR is merged and emits lane_file_claim_reaped naming #1', async () => {
+    const { guard, events, log } = await seed(1);
+    const octokit = fakeOctokit({ state: 'open', labels: [], title: 'Do thing' }, [
+      { state: 'closed', merged_at: '2026-01-01T00:00:00Z' },
+    ]);
+    const reaped = await guard.sweepStale({
+      isStale: createGithubLaneClaimStalenessProbe({ octokit, branchPrefix: 'factory' }),
+      log,
+    });
+    expect(await guard.claimsForIssue(1)).toEqual([]);
+    expect(reaped).toHaveLength(1);
+    expect(reaped[0]).toMatchObject({ claim: { issue: 1 }, reason: 'pr-merged' });
+    expect(events).toHaveLength(1);
+    expect(events[0][0]).toBe('lane_file_claim_reaped');
+    expect(events[0][1]).toContain('#1');
+    expect(events[0][1]).toContain('pr-merged');
+  });
+
+  it('sweepStale reaps a claim whose holder issue is closed', async () => {
+    const { guard, events, log } = await seed(1);
+    const octokit = fakeOctokit({ state: 'closed', labels: [], title: 'X' });
+    await guard.sweepStale({
+      isStale: createGithubLaneClaimStalenessProbe({ octokit, branchPrefix: 'factory' }),
+      log,
+    });
+    expect(await guard.claimsForIssue(1)).toEqual([]);
+    expect(events[0][1]).toContain('issue-closed');
+  });
+
+  it('sweepStale keeps the live #3 claim while reaping the finished #1 claim', async () => {
+    const { guard, events, log } = await seed(1, 3);
+    const reaped = await guard.sweepStale({
+      isStale: async (claim) => (claim.issue === 1 ? 'issue-closed' : undefined),
+      log,
+    });
+    expect(reaped.map((r) => r.claim.issue)).toEqual([1]);
+    expect(await guard.claimsForIssue(1)).toEqual([]);
+    expect(await guard.claimsForIssue(3)).toHaveLength(1);
+    expect(events.some(([, msg]) => msg.includes('#3'))).toBe(false);
+  });
+
+  it('keeps the claim when the probe throws', async () => {
+    const { file, guard, events, log } = await seed(1);
+    const before = await readFile(file, 'utf-8');
+    const reaped = await guard.sweepStale({
+      isStale: async () => {
+        throw new Error('boom');
+      },
+      log,
+    });
+    expect(reaped).toEqual([]);
+    expect(events).toEqual([]);
+    expect(await readFile(file, 'utf-8')).toBe(before);
+  });
+
+  it('returns [] without rewriting the file when nothing is stale', async () => {
+    const { file, guard } = await seed(1);
+    const before = await readFile(file, 'utf-8');
+    await expect(guard.sweepStale({ isStale: async () => undefined })).resolves.toEqual([]);
+    expect(await readFile(file, 'utf-8')).toBe(before);
+  });
+
+  it('does not create the file when there are no claims', async () => {
+    const file = await tmpFile();
+    const guard = new LaneFileGuard(file);
+    await expect(guard.sweepStale({ isStale: async () => 'issue-closed' })).resolves.toEqual([]);
+    await expect(readFile(file, 'utf-8')).rejects.toThrow();
+  });
+
+  it('scopes to opts.repo: other repos are neither probed nor removed', async () => {
+    const { guard } = await seed(1);
+    await guard.register('other/repo', 5, ['z.swift']);
+    const probe = vi.fn(async () => 'issue-closed' as const);
+    await guard.sweepStale({ isStale: probe, repo: 'acme/repo' });
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(await guard.claimsForIssue(1)).toEqual([]);
+    expect(await guard.claimsForIssue(5)).toHaveLength(1);
+  });
+
+  it('keeps a claim that was re-registered after it was probed', async () => {
+    const { guard, events, log } = await seed(1);
+    const reaped = await guard.sweepStale({
+      isStale: async () => {
+        await new Promise((r) => setTimeout(r, 5));
+        await guard.register('acme/repo', 1, ['f1.swift']);
+        return 'issue-closed';
+      },
+      log,
+    });
+    expect(reaped).toEqual([]);
+    expect(events).toEqual([]);
+    expect(await guard.claimsForIssue(1)).toHaveLength(1);
+  });
+});

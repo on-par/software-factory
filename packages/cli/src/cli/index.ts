@@ -20,6 +20,7 @@ import { promisify, styleText } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
 import { INVALID_BRANCH_PREFIX_MESSAGE, resolveBranchPrefixOption } from './branch-prefix.js';
+import { sweepLaneClaims, warnQueueDiagnostics } from './queue-startup.js';
 import { proposeTriageQueue } from './triage-open-prs.js';
 import {
   type Environment,
@@ -1787,12 +1788,6 @@ export async function cmdUsage(
   }
 }
 
-function warnQueueDiagnostics(diagnostics: QueueDiagnostic[]): void {
-  for (const d of diagnostics) {
-    console.error(styleText('yellow', `factory: queue ${d.message} — skipped`));
-  }
-}
-
 /** GitHub is polled far less often than local files: a queue changes on the order of minutes. */
 const TUI_GITHUB_QUEUE_POLL_MS = 30_000;
 
@@ -2058,6 +2053,9 @@ export function resolveEnvironmentAcquirer(opts: {
     };
   };
 }
+
+const sweepStaleLaneClaims = (paths: ReturnType<typeof getFactoryPaths>, ghRepo: string) =>
+  sweepLaneClaims(paths, ghRepo, () => (hasGitHubToken() ? getOctokit() : undefined));
 
 /** The autoGcOnRun-gated worktree sweep every pipeline entry point runs before shipping
  *  (`factory run`, and since #1756 the one-shot `factory ship` / `factory run-issue`). Never
@@ -3100,6 +3098,7 @@ export async function cmdQueueReconcile(opts: { lane?: string } = {}): Promise<v
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const [owner, repo] = (await getGitHubRepo()).split('/');
+  await sweepStaleLaneClaims(paths, `${owner}/${repo}`);
   const client = createOctokitQueueClient(getOctokit());
   const { report, conflicts } = await runQueueReconcile({
     readSnapshot: () => readGithubQueueSnapshot({ client, owner, repo }),
@@ -4303,6 +4302,7 @@ function runRun(opts: RunOptions = {}): Promise<void> {
     branchPrefixOrExit,
     withRepoRunLock,
     runAutoWorktreeGc,
+    sweepStaleLaneClaims,
     planRunLanes,
     preflightQueuedIssue,
     createQueuePreflightOps,
