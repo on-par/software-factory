@@ -98,11 +98,11 @@ describe('withRunAndHostBuildSlot (#3049)', () => {
     expect(h.state.maxActive).toBe(1);
     expect(h.logs).toContain('waiting for host build slot (1/1 in use)');
     expect(h.logs.some((l) => l.includes('run build slot'))).toBe(false);
+    // Which lane wins the host slot is a race (same pid, async link), so release whoever holds it.
     h.gates[0]!();
-    await p1;
     await until(() => h.gates.length > 1);
     h.gates[1]!();
-    await expect(p2).resolves.toBe(2);
+    await expect(Promise.all([p1, p2])).resolves.toEqual([1, 2]);
     expect(h.state.maxActive).toBe(1);
   });
 
