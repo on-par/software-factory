@@ -8,10 +8,6 @@ import { link, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-import { resolveHostMaxBuilds, type FactoryConfig } from '../config/index.js';
-import type { EventKind } from '../events/kinds.js';
-import type { RunPorts } from '../run/run-issue.js';
-
 export interface HostSlotHolder {
   slot: number;
   pid: number;
@@ -154,26 +150,4 @@ export async function withHostBuildSlot<T>(opts: AcquireHostBuildSlotOptions, fn
   } finally {
     await lease.release();
   }
-}
-
-type GatedPhases = Pick<Required<RunPorts>, 'buildPhase' | 'checkPhase'>;
-
-/** Wraps the BUILD and CHECK phases so each call holds one of `host.maxBuilds` slots shared by every
- *  runner on this host. Every CHECK call is gated, including the CI-rework recheck. */
-export function gateHostPhases(
-  phases: GatedPhases,
-  config: FactoryConfig,
-  repo: string,
-  issue: number,
-  log: (kind: EventKind, message: string) => void,
-): GatedPhases {
-  const maxBuilds = resolveHostMaxBuilds(config);
-  const gate =
-    <A, R>(phase: 'build' | 'check', fn: (arg: A) => Promise<R>) =>
-    (arg: A) =>
-      withHostBuildSlot(
-        { dir: hostBuildSlotsDir(), maxBuilds, repo, issue, phase, log: (m) => log('environment_lease', m) },
-        () => fn(arg),
-      );
-  return { buildPhase: gate('build', phases.buildPhase), checkPhase: gate('check', phases.checkPhase) };
 }

@@ -2,14 +2,12 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { defaultFactoryConfig } from '@on-par/factory-config';
 
-import { loadFactoryConfig } from '../config/index.js';
 import {
   acquireHostBuildSlot,
-  gateHostPhases,
   hostBuildSlotsDir,
   readHostBuildSlots,
   withHostBuildSlot,
@@ -137,25 +135,5 @@ describe('host build slots', () => {
 
   it('rethrows non-EEXIST link failures and cleans up its temp file', async () => {
     await expect(acquireHostBuildSlot(opts({ dir: join(dir, 'x', '\0bad') }))).rejects.toThrow();
-  });
-
-  it('gateHostPhases runs BUILD and CHECK inside a slot and frees it afterwards', async () => {
-    vi.stubEnv('FACTORY_HOST_SLOTS_DIR', dir);
-    const held: string[][] = [];
-    const snapshot = async () => void held.push(await slotFiles());
-    const build = vi.fn(async (o: string) => (await snapshot(), `build:${o}`));
-    const check = vi.fn(async (o: string) => (await snapshot(), `check:${o}`));
-    const gated = gateHostPhases(
-      { buildPhase: build, checkPhase: check } as never,
-      loadFactoryConfig(),
-      'o/r',
-      7,
-      vi.fn(),
-    );
-    await expect(gated.buildPhase('a' as never)).resolves.toBe('build:a');
-    await expect(gated.checkPhase('b' as never)).resolves.toBe('check:b');
-    expect(held).toEqual([['slot-0.json'], ['slot-0.json']]);
-    expect(await slotFiles()).toEqual([]);
-    vi.unstubAllEnvs();
   });
 });
