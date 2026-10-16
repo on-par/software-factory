@@ -118,6 +118,7 @@ export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix, resolveHost
 export { evaluateLoadGuard, formatLoadHold, readHostLoad, type LoadGuardDecision } from './environment/load-guard.js';
 export { hostAgentJobsDir, hostBuildSlotsDir, listHostSlots, withHostAgentJobLease } from './environment/host-slots.js';
 export { withHostBuildSlot, type HostAgentJobKind, type HostSlotStatus } from './environment/host-slots.js';
+export { createRunSlotGate, withRunAndHostBuildSlot, type RunSlotGate } from './environment/run-slots.js';
 export { FACTORY_RUNTIME_CONFIG_KEYS, resolveHostLoadGuard, resolveHostMaxAgentJobs } from './config/index.js';
 export { isTrustedApprover, createOctokitCollaboratorPermissionClient } from './queue/approval.js';
 export type { CollaboratorPermissionClient, TrustedApproverOptions } from './queue/approval.js';
@@ -159,8 +160,7 @@ export { isHarnessCliPresent } from './models/index.js';
 export { CliModelExecutor } from './router/index.js';
 
 // Phase helpers
-export type { PlanPromptOpts } from './phases/plan.js';
-export { buildPlanPrompt } from './phases/plan.js';
+export { buildPlanPrompt, type PlanPromptOpts } from './phases/plan.js';
 export { buildTriagePrompt, normalizeTriageQueue, parseTriageCandidates } from './triage/index.js';
 export { dropQueuedIssues, parseOpenPrIssues } from './triage/index.js';
 
