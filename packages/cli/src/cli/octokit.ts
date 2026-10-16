@@ -59,6 +59,13 @@ export function isOctokitDeprecationWarning(message: string): boolean {
   return /^\[@octokit\/request\] ".*" is deprecated\./.test(message);
 }
 
+/** True for @octokit/plugin-request-log's per-request failure line, e.g.
+ *  `POST /repos/o/r/labels - 422 with id E5FD:… in 532ms`. The same failure also rejects the call,
+ *  so the caller either handles it (ensureLabel's already_exists 422) or surfaces its own error (#1004). */
+export function isOctokitRequestLogLine(message: string): boolean {
+  return /^[A-Z]+ \S+ - \S+ with id \S+ in \d+ms$/.test(message);
+}
+
 /** Reads GitHub's deprecation headers (Octokit lower-cases header keys); undefined when not deprecated. */
 export function readDeprecation(
   method: string,
@@ -93,7 +100,9 @@ export function createFactoryOctokit(token?: string, options: FactoryOctokitOpti
     warn: (message: string) => {
       if (!isOctokitDeprecationWarning(message)) console.warn(message);
     },
-    error: (message: string) => console.error(message),
+    error: (message: string) => {
+      if (!isOctokitRequestLogLine(message)) console.error(message);
+    },
   };
   const octokit = new FactoryOctokit({
     auth: token,

@@ -4,6 +4,7 @@ import {
   createFactoryOctokit,
   formatDeprecation,
   isOctokitDeprecationWarning,
+  isOctokitRequestLogLine,
   MAX_THROTTLE_RETRIES,
   onRateLimit,
   onSecondaryRateLimit,
@@ -145,5 +146,44 @@ describe('createFactoryOctokit deprecations (#2218)', () => {
     const { octokit, warn } = setup();
     octokit.log.warn('x');
     expect(warn).toHaveBeenCalledWith('x');
+  });
+});
+
+describe('createFactoryOctokit request log (#1004)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('keeps a failed GET off stderr and still rejects with the GitHub error', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const octokit = createFactoryOctokit('t');
+    const notFound = (async () =>
+      new Response(JSON.stringify({ message: 'Not Found' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json', 'x-github-request-id': 'ID' },
+      })) as typeof fetch;
+
+    await expect(
+      octokit.rest.issues.listLabelsOnIssue({
+        owner: 'o',
+        repo: 'r',
+        issue_number: 99999,
+        request: { fetch: notFound },
+      }),
+    ).rejects.toMatchObject({ status: 404, message: expect.stringContaining('Not Found') });
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it('forwards other errors to console.error', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    createFactoryOctokit('t').log.error('boom');
+    expect(error).toHaveBeenCalledWith('boom');
+  });
+
+  it('recognises only the request-log line', () => {
+    expect(isOctokitRequestLogLine('POST /repos/o/r/labels - 422 with id E5FD:11280C:2A69BC in 532ms')).toBe(true);
+    expect(isOctokitRequestLogLine('GET /repos/o/r/issues/1/labels?per_page=100 - 404 with id UNKNOWN in 3ms')).toBe(
+      true,
+    );
+    expect(isOctokitRequestLogLine('POST /repos/o/r/labels failed: 422')).toBe(false);
+    expect(isOctokitRequestLogLine('boom')).toBe(false);
   });
 });
