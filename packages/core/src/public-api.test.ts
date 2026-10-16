@@ -545,6 +545,7 @@ const INTERNAL_API_KEYS = [
   'resolveLocalOnly',
   'resolveHostMaxBuilds',
   'hostBuildSlotsDir',
+  'listHostSlots',
   'withHostBuildSlot',
   'FACTORY_RUNTIME_CONFIG_KEYS',
   'isTrustedApprover',
@@ -787,7 +788,6 @@ const INTERNAL_API_KEYS = [
   // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
   'wrapCommandInSandbox',
 ];
-
 const TESTING_API_KEYS = [
   'StubModelExecutor',
   'StubCodingHarness',

@@ -4,7 +4,7 @@
 // holder pid is dead are reclaimed (#3044) under a per-slot arbiter.
 
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { link, mkdir, readFile, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -139,6 +139,58 @@ export function readHostBuildSlots(dir: string, maxBuilds: number): HostSlotHold
     }
   }
   return holders;
+}
+
+/** One slot file as `factory status` shows it (#3045). */
+export interface HostSlotStatus extends HostSlotHolder {
+  /** Holder pid > 0 and not alive: shown as stale, not counted as in use. */
+  stale: boolean;
+  /** File could not be parsed (pid 0 fallback): still counted as held, matching acquire. */
+  unreadable: boolean;
+}
+
+/** Lists every `slot-<N>.json` in `dir`, sorted by N, for read-only display. Never reclaims. Missing dir → []. */
+export function listHostSlots(dir: string, isPidAlive: (pid: number) => boolean = defaultIsPidAlive): HostSlotStatus[] {
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw err;
+  }
+  const slots = names
+    .map((name) => /^slot-(\d+)\.json$/.exec(name))
+    .filter((m): m is RegExpExecArray => m !== null)
+    .map((m) => Number(m[1]))
+    .sort((a, b) => a - b);
+  const out: HostSlotStatus[] = [];
+  for (const slot of slots) {
+    let raw: string;
+    try {
+      raw = readFileSync(slotFile(dir, slot), 'utf8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw err;
+    }
+    try {
+      const holder = { ...(JSON.parse(raw) as HostSlotHolder), slot };
+      const stale = typeof holder.pid === 'number' && holder.pid > 0 && !isPidAlive(holder.pid);
+      out.push({ ...holder, stale, unreadable: false });
+    } catch {
+      out.push({
+        slot,
+        pid: 0,
+        repo: '',
+        issue: 0,
+        phase: 'build',
+        token: '',
+        acquiredAt: '',
+        stale: false,
+        unreadable: true,
+      });
+    }
+  }
+  return out;
 }
 
 /** Takes the first free slot, polling (and logging the held count when it changes) until one frees. */

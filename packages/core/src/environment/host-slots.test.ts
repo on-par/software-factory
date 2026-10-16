@@ -9,6 +9,7 @@ import { defaultFactoryConfig } from '@on-par/factory-config';
 import {
   acquireHostBuildSlot,
   hostBuildSlotsDir,
+  listHostSlots,
   readHostBuildSlots,
   reclaimStaleHostSlot,
   withHostBuildSlot,
@@ -256,5 +257,43 @@ describe('reclaiming slots of dead holders (#3044)', () => {
     expect(done).toBe(2);
     expect(logs.filter((m) => m.startsWith('reclaimed'))).toHaveLength(1);
     expect(await slotFiles()).toEqual([]);
+  });
+});
+
+describe('listHostSlots (#3045)', () => {
+  const write = (name: string, body: unknown): Promise<void> =>
+    writeFile(join(dir, name), typeof body === 'string' ? body : JSON.stringify(body));
+  const holder = (pid: number, issue: number) => ({
+    pid,
+    repo: 'o/r',
+    issue,
+    phase: 'build',
+    token: 't',
+    acquiredAt: '',
+  });
+
+  it('returns [] for a missing dir', () => {
+    expect(listHostSlots(join(dir, 'nope'))).toEqual([]);
+  });
+
+  it('lists only slot-N.json files, sorted by N', async () => {
+    await write('slot-3.json', holder(1, 3));
+    await write('slot-0.json', holder(1, 0));
+    await write('slot-1.json', holder(1, 1));
+    await write('.tmp-1-x.json', holder(1, 9));
+    await mkdir(join(dir, 'slot-0.reclaim'));
+    expect(listHostSlots(dir, () => true).map((s) => s.slot)).toEqual([0, 1, 3]);
+  });
+
+  it('marks only the dead holder stale', async () => {
+    await write('slot-0.json', holder(111, 1));
+    await write('slot-1.json', holder(222, 2));
+    const slots = listHostSlots(dir, (pid) => pid !== 111);
+    expect(slots.map((s) => s.stale)).toEqual([true, false]);
+  });
+
+  it('flags an unparseable file as unreadable and not stale', async () => {
+    await write('slot-0.json', 'not json');
+    expect(listHostSlots(dir, () => false)).toMatchObject([{ slot: 0, unreadable: true, stale: false }]);
   });
 });
