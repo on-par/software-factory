@@ -8,7 +8,13 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
+import type { Octokit } from '@octokit/rest';
+
+import type { EventKind } from '../events/kinds.js';
+import { CLAIM_EXPIRES_LABEL_PREFIX, IN_PROGRESS_LABEL } from '../queue/github-queue.js';
+import { findStaleClaims } from '../queue/stale-claims.js';
 import type { DesignArtifact } from '../types/index.js';
+import { branchFor } from '../utils/index.js';
 
 export interface LaneFileClaim {
   repo: string;
@@ -38,6 +44,17 @@ export function touchedFilesFrom(design: Pick<DesignArtifact, 'targetTypes' | 's
   }
   for (const s of design.signatures) files.add(s.file);
   return [...files];
+}
+
+export type LaneClaimStaleReason = 'issue-closed' | 'pr-merged' | 'pr-closed';
+
+/** Resolves why `claim`'s holder is finished, or undefined when it is (or may be) live. Must
+ *  never throw for a lookup failure — return undefined so the claim keeps blocking. */
+export type LaneClaimStalenessProbe = (claim: LaneFileClaim) => Promise<LaneClaimStaleReason | undefined>;
+
+export interface FindCollisionOptions {
+  isStale?: LaneClaimStalenessProbe;
+  log?: (type: EventKind, msg: string) => void;
 }
 
 function runKeyFor(repo: string, issue: number): string {
@@ -86,18 +103,63 @@ export class LaneFileGuard {
 
   /** Checks `files` against every other repo-scoped claim (the caller's own repo+issue is
    *  excluded, so a re-check never collides with itself). Cross-repo claims never collide —
-   *  single-repo scope, by design. Returns the first colliding issue/file pair, if any. */
-  async findCollision(repo: string, issue: number, files: string[]): Promise<LaneFileCollision | undefined> {
+   *  single-repo scope, by design. Returns the first colliding issue/file pair, if any.
+   *  With `opts.isStale` (#3063), an overlapping claim whose holder is provably finished is
+   *  removed (and logged as `lane_file_claim_reaped`) and the scan continues; an undefined
+   *  verdict, or a throwing probe, keeps the claim blocking. */
+  async findCollision(
+    repo: string,
+    issue: number,
+    files: string[],
+    opts: FindCollisionOptions = {},
+  ): Promise<LaneFileCollision | undefined> {
     if (files.length === 0) return undefined;
     const data = await this.read();
     const wanted = new Set(files);
-    for (const claim of Object.values(data.claims)) {
+    const reaped: Array<{ key: string; claim: LaneFileClaim; reason: LaneClaimStaleReason }> = [];
+    let collision: LaneFileCollision | undefined;
+    for (const [key, claim] of Object.entries(data.claims)) {
       if (claim.repo !== repo || claim.issue === issue) continue;
-      for (const f of claim.files) {
-        if (wanted.has(f)) return { issue: claim.issue, file: f };
+      const file = claim.files.find((f) => wanted.has(f));
+      if (file === undefined) continue;
+      let reason: LaneClaimStaleReason | undefined;
+      if (opts.isStale) {
+        try {
+          reason = await opts.isStale(claim);
+        } catch {
+          reason = undefined;
+        }
       }
+      if (reason === undefined) {
+        collision = { issue: claim.issue, file };
+        break;
+      }
+      reaped.push({ key, claim, reason });
     }
-    return undefined;
+    if (reaped.length > 0) await this.reap(reaped, opts.log);
+    return collision;
+  }
+
+  /** Drops probed-stale claims, skipping any whose holder re-registered since the probe. */
+  private async reap(
+    reaped: Array<{ key: string; claim: LaneFileClaim; reason: LaneClaimStaleReason }>,
+    log: FindCollisionOptions['log'],
+  ): Promise<void> {
+    const data = await this.read();
+    const removed: typeof reaped = [];
+    for (const entry of reaped) {
+      if (data.claims[entry.key]?.claimedAt !== entry.claim.claimedAt) continue;
+      delete data.claims[entry.key];
+      removed.push(entry);
+    }
+    if (removed.length === 0) return;
+    await this.write(data);
+    for (const { claim, reason } of removed) {
+      log?.(
+        'lane_file_claim_reaped',
+        `lane file claim reaped: #${claim.issue} (${reason}) released ${claim.files.join(', ')} in ${claim.repo}`,
+      );
+    }
   }
 
   private async read(): Promise<LaneFileGuardFile> {
@@ -116,4 +178,42 @@ export class LaneFileGuard {
     await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`);
     await rename(tmp, this.file);
   }
+}
+
+/** GitHub-backed staleness probe (#3063). Fails safe: any lookup error, a live holder
+ *  (in-progress label or unexpired lease), an open PR, or no PR found all return undefined. */
+export function createGithubLaneClaimStalenessProbe(opts: {
+  octokit: Pick<Octokit, 'rest'>;
+  branchPrefix?: string;
+  now?: () => number;
+}): LaneClaimStalenessProbe {
+  const { octokit, branchPrefix, now } = opts;
+  return async (claim) => {
+    try {
+      const [owner, repoName] = claim.repo.split('/');
+      const { data } = await octokit.rest.issues.get({ owner, repo: repoName, issue_number: claim.issue });
+      if (data.state === 'closed') return 'issue-closed';
+      const labels = (data.labels ?? []).map((l) => (typeof l === 'string' ? l : (l?.name ?? '')));
+      if (labels.includes(IN_PROGRESS_LABEL)) return undefined;
+      if (
+        labels.some((l) => l.startsWith(CLAIM_EXPIRES_LABEL_PREFIX)) &&
+        findStaleClaims([{ number: claim.issue, labels }], { now }).length === 0
+      ) {
+        return undefined;
+      }
+      const branch = branchFor(claim.issue, data.title, branchPrefix);
+      const { data: prs } = await octokit.rest.pulls.list({
+        owner,
+        repo: repoName,
+        state: 'all',
+        head: `${owner}:${branch}`,
+        per_page: 100,
+      });
+      if (prs.some((pr) => pr.state === 'open')) return undefined;
+      if (prs.some((pr) => pr.merged_at)) return 'pr-merged';
+      return prs.length > 0 ? 'pr-closed' : undefined;
+    } catch {
+      return undefined;
+    }
+  };
 }

@@ -89,6 +89,7 @@ export type EventKind =
   | 'issue_unparked'
   | 'kpi-snapshot'
   | 'land'
+  | 'lane_file_claim_reaped'
   | 'landed'
   | 'lane-done'
   | 'lane-paused'
@@ -341,6 +342,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   issue_unparked: { severity: 'info', isPark: false, isTerminal: false },
   'kpi-snapshot': { severity: 'info', isPark: false, isTerminal: false },
   land: { severity: 'info', isPark: false, isTerminal: false },
+  lane_file_claim_reaped: { severity: 'info', isPark: false, isTerminal: false },
   landed: { severity: 'info', isPark: false, isTerminal: true, laneStatus: 'merged' },
   'lane-done': { severity: 'info', isPark: false, isTerminal: false },
   // The lane circuit breaker stopped claiming issues (#1906). Not a park: both
