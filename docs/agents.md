@@ -68,6 +68,12 @@ route: codex
 Run `factory doctor` in the repo. Look for the `Codex` section with `codex installed` (it shows the CLI
 version), and the `codex signed in` line (it names the sign-in method). The `codex installed` line also says whether sandboxed builds are available.
 
+### Full access opt-in
+
+Set `FACTORY_CODEX_FULL_ACCESS=1` (or `true`) in the factory's environment to run Codex with
+`--sandbox danger-full-access` on purpose. No sandbox preflight runs, and the run log says full access
+is on because the operator opted in. Without it, the current behavior is unchanged.
+
 Version tested: codex-cli 0.155.1
 
 ## OpenCode
