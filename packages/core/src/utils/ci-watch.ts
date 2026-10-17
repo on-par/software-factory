@@ -13,6 +13,8 @@ export type CiOutcome = 'success' | 'failure' | 'timeout' | 'no-checks';
 
 export const DEFAULT_CI_DEADLINE_MS = 600_000;
 export const DEFAULT_CI_NO_CHECKS_GRACE_MS = 90_000;
+const DEFAULT_CI_INITIAL_INTERVAL_MS = 15_000;
+const DEFAULT_CI_MAX_INTERVAL_MS = 60_000;
 
 /** Snapshot passed to `onProgress` while check runs are pending. */
 export interface CiWatchProgress {
@@ -143,6 +145,25 @@ export function resolveCiNoChecksGraceMs(env: NodeJS.ProcessEnv = process.env): 
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 1000) : DEFAULT_CI_NO_CHECKS_GRACE_MS;
 }
 
+/** Elapsed sleep time of the first watchChecks poll at or after `graceMs`, i.e. when a ref with
+ *  no checks gets its grace-elapsed 'no-checks' verdict (API latency not included). 105 s for
+ *  the defaults. 0 when graceMs <= 0. */
+export function noChecksVerdictMs(
+  graceMs: number = DEFAULT_CI_NO_CHECKS_GRACE_MS,
+  initialIntervalMs: number = DEFAULT_CI_INITIAL_INTERVAL_MS,
+  maxIntervalMs: number = DEFAULT_CI_MAX_INTERVAL_MS,
+): number {
+  if (graceMs <= 0) return 0;
+  if (initialIntervalMs <= 0) return graceMs;
+  let t = 0;
+  let interval = initialIntervalMs;
+  while (t < graceMs) {
+    t += interval;
+    interval = Math.min(interval * 2, maxIntervalMs);
+  }
+  return t;
+}
+
 /** Commit-status count and resolved SHA for a ref, or null when it cannot be determined. */
 async function commitStatusCount(
   octokit: Octokit,
@@ -238,8 +259,8 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
     repo,
     ref,
     deadlineMs = DEFAULT_CI_DEADLINE_MS,
-    initialIntervalMs = 15_000,
-    maxIntervalMs = 60_000,
+    initialIntervalMs = DEFAULT_CI_INITIAL_INTERVAL_MS,
+    maxIntervalMs = DEFAULT_CI_MAX_INTERVAL_MS,
     perPage = DEFAULT_PER_PAGE,
     maxPages = DEFAULT_MAX_PAGES,
     maxPollErrors = DEFAULT_MAX_POLL_ERRORS,
