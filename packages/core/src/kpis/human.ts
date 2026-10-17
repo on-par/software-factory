@@ -193,6 +193,53 @@ export async function reconstructKpiEvents(
   }
 }
 
+/** Configured prefixes when given as a non-empty list, else `kpiBranchPrefixes(configured)` (#2342). */
+export function resolveKpiBranchPrefixes(branchPrefixes?: string | readonly string[]): readonly string[] {
+  return typeof branchPrefixes === 'object' && branchPrefixes.length > 0
+    ? branchPrefixes
+    : kpiBranchPrefixes(typeof branchPrefixes === 'string' ? branchPrefixes : undefined);
+}
+
+/** Issue number parsed from a PR's head branch under any of `prefixes`, else null. */
+export function factoryPrIssue(pr: { head?: { ref?: string } }, prefixes: readonly string[]): number | null {
+  return prefixes.reduce<number | null>((found, p) => found ?? factoryBranchIssue(pr.head?.ref ?? '', p), null);
+}
+
+export type PrDetails = Pick<PrSource, 'commits' | 'approvals' | 'mergedBy'>;
+
+/** Commits + approvals via REST (2 calls), plus `pulls.get` for merged_by when merged (1 more). */
+export async function fetchPrDetailsRest(
+  client: HumanSourceClient,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  merged: boolean,
+): Promise<PrDetails> {
+  const [{ data: commitsData }, { data: reviewsData }] = await Promise.all([
+    client.rest.pulls.listCommits({ owner, repo, pull_number: prNumber, per_page: 100 }),
+    client.rest.pulls.listReviews({ owner, repo, pull_number: prNumber, per_page: 100 }),
+  ]);
+
+  const commits: CommitSource[] = commitsData.map((c: any) => ({
+    sha: c.sha,
+    author: c.author?.login ?? c.commit?.author?.name ?? 'unknown',
+    ts: c.commit.author.date,
+  }));
+
+  const approvals = reviewsData
+    .filter((r: any) => r.state === 'APPROVED')
+    .map((r: any) => ({ actor: r.user?.login ?? 'unknown', ts: r.submitted_at }));
+
+  let mergedBy: string | null | undefined;
+  if (merged) {
+    const { data: prDetail } = await client.rest.pulls.get({ owner, repo, pull_number: prNumber });
+    mergedBy = prDetail.merged_by?.login;
+  }
+  return { commits, approvals, mergedBy };
+}
+
+/** Uncached: lists up to 3 pages of PRs and fetches details for every match (~3 + 2N + M REST calls).
+ *  Run-time KPI sweeps use `fetchHumanEventSourcesCached` instead; `factory classifier-backtest` uses this. */
 export async function fetchHumanEventSources(
   client: HumanSourceClient,
   owner: string,
@@ -200,10 +247,7 @@ export async function fetchHumanEventSources(
   issues: ReadonlySet<string> | null,
   branchPrefixes?: string | readonly string[],
 ): Promise<PrSource[]> {
-  const prefixes =
-    typeof branchPrefixes === 'object' && branchPrefixes.length > 0
-      ? branchPrefixes
-      : kpiBranchPrefixes(typeof branchPrefixes === 'string' ? branchPrefixes : undefined);
+  const prefixes = resolveKpiBranchPrefixes(branchPrefixes);
   const prs: any[] = [];
   for (let page = 1; page <= 3; page++) {
     const { data } = await client.rest.pulls.list({
@@ -220,46 +264,20 @@ export async function fetchHumanEventSources(
   }
 
   const matched = prs
-    .map((pr) => ({
-      pr,
-      issue: prefixes.reduce<number | null>((found, p) => found ?? factoryBranchIssue(pr.head?.ref ?? '', p), null),
-    }))
+    .map((pr) => ({ pr, issue: factoryPrIssue(pr, prefixes) }))
     .filter(({ issue }) => issue !== null && (issues === null || issues.has(String(issue))));
 
   return Promise.all(
     matched.map(async ({ pr, issue: issueNum }) => {
-      const issue = String(issueNum);
-
-      const [{ data: commitsData }, { data: reviewsData }] = await Promise.all([
-        client.rest.pulls.listCommits({ owner, repo, pull_number: pr.number, per_page: 100 }),
-        client.rest.pulls.listReviews({ owner, repo, pull_number: pr.number, per_page: 100 }),
-      ]);
-
-      const commits: CommitSource[] = commitsData.map((c: any) => ({
-        sha: c.sha,
-        author: c.author?.login ?? c.commit?.author?.name ?? 'unknown',
-        ts: c.commit.author.date,
-      }));
-
-      const approvals = reviewsData
-        .filter((r: any) => r.state === 'APPROVED')
-        .map((r: any) => ({ actor: r.user?.login ?? 'unknown', ts: r.submitted_at }));
-
       const mergedAt: string | null = pr.merged_at ?? null;
-      let mergedBy: string | null | undefined;
-      if (mergedAt !== null) {
-        const { data: prDetail } = await client.rest.pulls.get({ owner, repo, pull_number: pr.number });
-        mergedBy = prDetail.merged_by?.login;
-      }
+      const details = await fetchPrDetailsRest(client, owner, repo, pr.number, mergedAt !== null);
       const closedAt: string | null = pr.state === 'closed' && !pr.merged_at ? pr.closed_at : null;
 
       return {
-        issue,
+        issue: String(issueNum),
         prNumber: pr.number,
-        commits,
-        approvals,
+        ...details,
         mergedAt,
-        mergedBy,
         closedAt,
         mergeCommitSha: pr.merge_commit_sha ?? null,
       };

@@ -6,8 +6,7 @@ import * as publicApi from './index.js';
 import * as internalApi from './internal.js';
 import * as kpisApi from './kpis-entry.js';
 import * as testingApi from './testing.js';
-// Pins the exact export surface of each @on-par/factory-core entry point (ADR-0004).
-// Object.keys(...) only reflects runtime values, so these allowlists list value exports only.
+// Pins each @on-par/factory-core entry point's exact runtime value exports (ADR-0004); types are not listed.
 const PUBLIC_API_KEYS = [
   // Config
   'FactoryConfigV2Schema',
@@ -469,9 +468,8 @@ const INTERNAL_API_KEYS = [
   // Standalone local UsageCoordinator fallback (#1033)
   'createLocalUsageCoordinator',
   'selectUsageCoordinator',
-  // Coarse ProjectV2 status publishing (#868)
+  // Coarse ProjectV2 status publishing (#868) and writing (#849)
   'createProjectStatusWriter',
-  // Coarse ProjectV2 status writing (#849)
   'createProjectBoardStatusWriter',
   // Failure fingerprint & evidence
   'captureFailure',
@@ -588,6 +586,9 @@ const INTERNAL_API_KEYS = [
   'normalizeTriageQueue',
   'parseOpenPrIssues',
   'parseTriageCandidates',
+  // Rate-limit-aware incremental KPI sweep
+  'fetchHumanEventSourcesCached',
+  'runProducedPrOrMerge',
   // Local-small harness
   'applyLocalSmallPatchStep',
   'createLocalSmallDryRun',

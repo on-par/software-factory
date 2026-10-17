@@ -180,6 +180,7 @@ function defaultOctokit() {
         listComments: vi.fn(async () => ({ data: [] })),
       },
       users: { getAuthenticated: vi.fn(async () => ({ data: { id: 7 } })) },
+      rateLimit: { get: vi.fn(async () => ({ data: { resources: { core: { limit: 5000, remaining: 5000 } } } })) },
       pulls: {
         list: vi.fn(async ({ state }: any) =>
           state === 'open'
@@ -2247,7 +2248,6 @@ bash scripts/verify.sh
         if (cmd.includes('gh repo view')) return h.ghRepo;
         return '';
       };
-
       const bad = await runMain('kpis', '--branch-prefix', '!!!');
       expect(bad).toEqual({ exited: true, code: 2 });
       expect(errored()).toContain('--branch-prefix');

@@ -127,6 +127,7 @@ export function defaultOctokit() {
         listComments: vi.fn(async () => ({ data: [] })),
       },
       users: { getAuthenticated: vi.fn(async () => ({ data: { id: 7 } })) },
+      rateLimit: { get: vi.fn(async () => ({ data: { resources: { core: { limit: 5000, remaining: 5000 } } } })) },
       pulls: {
         list: vi.fn(async ({ state }: any) =>
           state === 'open'

@@ -100,6 +100,7 @@ describe('getFactoryPaths', () => {
       approvals: resolve(state, 'approvals'),
       steering: resolve(state, 'steering'),
       kpiHistory: resolve(state, 'kpi-history.jsonl'),
+      kpiSweepCache: resolve(state, 'kpi-sweep-cache.json'),
       classifierOutcomes: resolve(state, 'classifier-outcomes.jsonl'),
       ingestWatermark: resolve(state, 'ingest-watermark'),
       ports: resolve(state, 'ports.json'),
@@ -183,7 +184,6 @@ describe('getFactoryPaths', () => {
     const repoRoot = '/tmp/some-repo';
     const stateRoot = '/var/lib/factory-state/../factory-state';
     const paths = getFactoryPaths(repoRoot, stateRoot);
-
     expect(paths).toEqual(expectedPaths(resolve(stateRoot)));
     expect(paths.root).toBe(resolve(stateRoot));
     expect(paths.state).toBe(resolve(resolve(stateRoot), 'state'));

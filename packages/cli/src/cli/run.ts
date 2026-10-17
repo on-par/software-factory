@@ -8,10 +8,8 @@ import type { Octokit } from '@octokit/rest';
 import {
   applyRepoConfig,
   clearProxyState,
-  computeHealthKpis,
   getFactoryPaths,
   provisionLaneContainer,
-  readEvents,
   resolveCodexDisabled,
   resolveEffectiveBuildRoute,
   resolveEnvironmentProxy,
@@ -54,6 +52,7 @@ import type {
   usageWatchSourceLabel,
   withRepoRunLock,
 } from './index.js';
+import { runEndOfRunKpiSnapshot } from './kpi-sweep.js';
 import { waitForMerge } from './land.js';
 import { runLane } from './run-lane.js';
 import { writeRunFlagOverrides } from './run-flags.js';
@@ -123,6 +122,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
   const branchPrefix = rt.branchPrefixOrExit(opts.branchPrefix);
 
   return rt.withRepoRunLock(paths, 'factory run', async () => {
+    const runStartedAt = new Date().toISOString();
     const stopStatus = readStopFileStatus(paths);
     if (stopStatus.present) {
       const msg = stopSentinelRunSkipMessage(stopStatus);
@@ -350,25 +350,6 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
       }
     }
 
-    if (lanes.length > 0) {
-      try {
-        const events = existsSync(paths.events) ? readEvents(paths.events) : [];
-        const costs = existsSync(paths.costs) ? rt.readCosts(paths.costs) : [];
-        const recon = await rt.reconstructHumanEventsForKpis(events, branchPrefix);
-        const kpis = computeHealthKpis(recon.events, costs);
-        await rt.appendKpiSnapshot(paths, repoRoot, kpis, { partial: recon.partial });
-        if (recon.partial) {
-          logEvent(
-            paths.events,
-            'warn',
-            'all',
-            `kpi snapshot partial: GitHub human-event reconstruction failed: ${recon.error}`,
-          );
-        }
-        logEvent(paths.events, 'kpi-snapshot', 'all', `KPI snapshot appended to ${paths.kpiHistory}`);
-      } catch (err: any) {
-        logEvent(paths.events, 'warn', 'all', `kpi snapshot failed: ${err.message}`);
-      }
-    }
+    if (lanes.length > 0) await runEndOfRunKpiSnapshot(paths, repoRoot, branchPrefix, runStartedAt, rt);
   });
 }

@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- The end-of-run KPI snapshot no longer exhausts the GitHub REST rate limit.
+  It used to make about 800 calls per run (3 list pages, plus commits and
+  reviews for every factory PR, plus `pulls.get` for every merged one). Now
+  runs that open no PR and merge nothing skip the sweep. A sweep reads
+  `GET /rate_limit` first and skips, marking the snapshot partial, when less
+  than 20% of the core budget is left. The sweep keeps a cursor and per-PR
+  cache in `kpi-sweep-cache.json` in the state dir, so it sends a conditional
+  (ETag) list request and fetches details only for PRs that changed, batched
+  in GraphQL. Merged PRs are never fetched again. A steady-state run makes 1
+  REST call, usually a free 304.
+- Queue label setup no longer POSTs `createLabel` for labels that already
+  exist. The repo's label list is read once per client, and the 422
+  `already_exists` handling stays as a fallback for races.
+
 ### Changed
 
 - npm publishing uses OIDC trusted publishing instead of the `NPM_TOKEN`

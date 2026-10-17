@@ -5,6 +5,7 @@ import { hostname } from 'node:os';
 
 import type { Octokit } from '@octokit/rest';
 
+import { knownRepoLabels } from './label-cache.js';
 import { orderCollisionAt, scanLaneOrders, type OrderCollision } from './order-collision.js';
 import type { QueueEntry, QueueSnapshot, QueueSnapshotEntry } from './index.js';
 import {
@@ -306,12 +307,16 @@ export function createOctokitQueueClient(octokit: Octokit): QueueGitHubClient {
       await octokit.rest.issues.removeLabel({ owner, repo, issue_number, name });
     },
     async ensureLabel({ owner, repo, name, color, description }) {
+      const known = await knownRepoLabels(octokit, owner, repo);
+      if (known.has(name)) return false;
       try {
         await octokit.rest.issues.createLabel({ owner, repo, name, color, description });
+        known.add(name);
         return true;
       } catch (err) {
-        if (labelExistsError(err)) return false;
-        throw err;
+        if (!labelExistsError(err)) throw err; // 422 already_exists: created since the list was read
+        known.add(name);
+        return false;
       }
     },
   };

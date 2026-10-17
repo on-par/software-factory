@@ -70,7 +70,6 @@ import {
   probeDeclaredHarnesses,
   estimateTrailingSpend,
   fetchDefectSources,
-  fetchHumanEventSources,
   fetchSubscriptionUsage,
   formatUsageReport,
   getConstitutionsDir,
@@ -188,6 +187,7 @@ import {
   daemonRuntimePaths,
   defaultRegistryPath,
   ensureDir,
+  fetchHumanEventSourcesCached,
   FACTORY_RUNTIME_CONFIG_KEYS,
   findUnmergedGreenPrs,
   formatGcReport,
@@ -1460,7 +1460,8 @@ function readTextFileOrEmpty(path: string): string {
   }
 }
 
-/** Local events plus human-* events reconstructed from GitHub; warns and marks the result partial when the fetch fails (#2342). */
+/** Local events plus human-* events reconstructed from GitHub via the incremental, budget-guarded sweep;
+ *  warns and marks the result partial when the fetch fails or the guard skips it (#2342). */
 async function reconstructHumanEventsForKpis(
   events: FactoryEvent[],
   branchPrefix: string,
@@ -1469,7 +1470,10 @@ async function reconstructHumanEventsForKpis(
   let repoName = '';
   const recon = await reconstructKpiEvents(events, async (issues) => {
     [owner, repoName] = (await getGitHubRepo()).split('/');
-    return fetchHumanEventSources(getOctokit(), owner, repoName, issues, kpiBranchPrefixes(branchPrefix));
+    const cachePath = getFactoryPaths(await getRepoRoot()).kpiSweepCache;
+    return fetchHumanEventSourcesCached(getOctokit(), owner, repoName, issues, kpiBranchPrefixes(branchPrefix), {
+      cachePath,
+    });
   });
   if (recon.partial) {
     console.error(

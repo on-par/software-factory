@@ -786,3 +786,4 @@ export {
   recordLocalAuthFailure,
 } from './utils/local-auth-record.js';
 export type { LocalAuthAgent, LocalAuthFailure } from './utils/local-auth-record.js';
+export { fetchHumanEventSourcesCached, runProducedPrOrMerge } from './kpis/sweep.js';
