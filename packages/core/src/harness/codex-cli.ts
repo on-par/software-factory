@@ -23,7 +23,24 @@ export interface CodexFsDeps {
   unlink?: (path: string) => Promise<void>;
 }
 
-/** Runs a model via the Codex CLI:
+/** Operator opt-in for `codex exec --sandbox danger-full-access` (#3080). */
+export const CODEX_FULL_ACCESS_ENV = 'FACTORY_CODEX_FULL_ACCESS';
+
+/** True only when FACTORY_CODEX_FULL_ACCESS is '1' or 'true' (trimmed, case-insensitive). */
+export function codexFullAccessOptIn(source: Record<string, string | undefined> = process.env): boolean {
+  const value = source[CODEX_FULL_ACCESS_ENV]?.trim().toLowerCase();
+  return value === '1' || value === 'true';
+}
+
+/** Injectable environment and logging for CodexCliHarness. */
+export interface CodexHarnessOptions {
+  /** Env source for the full-access opt-in; defaults to process.env. */
+  env?: Record<string, string | undefined>;
+  /** Line logger; defaults to writing the line to stderr. */
+  log?: (line: string) => void;
+}
+
+/** Runs a model via the Codex CLI. FACTORY_CODEX_FULL_ACCESS=1 forces `--sandbox danger-full-access` with no preflight (#3080):
  *  codex exec --json --sandbox <mode> -c approval_policy=never [network -c flags] -C <worktree> [flags] -o <output> - < <prompt> */
 export class CodexCliHarness implements CodingHarness {
   readonly id = 'codex-cli';
@@ -32,11 +49,17 @@ export class CodexCliHarness implements CodingHarness {
   private readonly writeFile: (path: string, data: string) => Promise<void>;
   private readonly readFile: (path: string, encoding: 'utf-8') => Promise<string>;
   private readonly unlink: (path: string) => Promise<void>;
+  private readonly envSource: Record<string, string | undefined>;
+  private readonly log: (line: string) => void;
+  private loggedFullAccess = false;
 
   constructor(
     private execFn: CodexExecFn = defaultExecFn,
     fs: CodexFsDeps = {},
+    options: CodexHarnessOptions = {},
   ) {
+    this.envSource = options.env ?? process.env;
+    this.log = options.log ?? ((line) => process.stderr.write(`${line}\n`));
     this.writeFile = fs.writeFile ?? writeFile;
     this.readFile = fs.readFile ?? readFile;
     this.unlink = fs.unlink ?? unlink;
@@ -56,11 +79,17 @@ export class CodexCliHarness implements CodingHarness {
     // With an outer containment sandbox, codex runs workspace-write inside it. Without one,
     // workspace-write is codex's own restriction and blocks legitimate writes, so the run
     // produces a blocked no-op spec instead of an implementation (#834).
-    const codexSandbox = sandbox ? 'workspace-write' : 'danger-full-access';
+    // The FACTORY_CODEX_FULL_ACCESS opt-in picks danger-full-access on purpose and skips any preflight (#3080).
+    const fullAccessOptIn = codexFullAccessOptIn(this.envSource);
+    if (fullAccessOptIn && !this.loggedFullAccess) {
+      this.loggedFullAccess = true;
+      this.log(`codex: --sandbox danger-full-access is on because the operator opted in (${CODEX_FULL_ACCESS_ENV}=1)`);
+    }
+    const codexSandbox = fullAccessOptIn || !sandbox ? 'danger-full-access' : 'workspace-write';
     // Codex's own sandbox is the containment only when no OS wrapper (sandbox-exec/firejail) runs it;
     // then its network must allow exactly the factory allowlist (#3079).
     const networkFlags =
-      sandbox && sandbox.runtime !== 'sandbox-exec' && sandbox.runtime !== 'firejail'
+      !fullAccessOptIn && sandbox && sandbox.runtime !== 'sandbox-exec' && sandbox.runtime !== 'firejail'
         ? ` ${codexNetworkConfigFlags(sandbox.allowHosts)}`
         : '';
     const cmd = `codex exec --json --sandbox ${codexSandbox} -c approval_policy=never${networkFlags} -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
