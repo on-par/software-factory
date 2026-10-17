@@ -62,6 +62,6 @@ describe('factory run remote queue', () => {
     expect(res.exited).toBe(false);
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).not.toContain('not claiming: host load');
-    expect(events).toContain('lane app: issues #7, #8 share factory:order:1; skipped');
+    expect(events).toContain('lane app: issues #7, #8 share factory:order:1 — claimed in issue-number order');
   });
 });

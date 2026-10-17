@@ -24,7 +24,25 @@ describe('buildQueueListJson', () => {
           ],
         },
       ],
+      orderConflicts: [],
     });
+  });
+
+  it('maps order conflicts position→order and drops other lanes under --lane (#3101)', () => {
+    const withConflicts = {
+      entries: snapshot.entries,
+      orderConflicts: [
+        { lane: 'cleanup', position: 1, issues: [11, 12] },
+        { lane: 'access', position: 2, issues: [7, 8] },
+      ],
+    } as QueueSnapshot;
+    expect(buildQueueListJson(withConflicts).orderConflicts).toEqual([
+      { lane: 'cleanup', order: 1, issues: [11, 12] },
+      { lane: 'access', order: 2, issues: [7, 8] },
+    ]);
+    expect(buildQueueListJson(withConflicts, 'cleanup').orderConflicts).toEqual([
+      { lane: 'cleanup', order: 1, issues: [11, 12] },
+    ]);
   });
 
   it('filters by lane; unknown lane gives no lanes', () => {
@@ -44,7 +62,7 @@ describe('buildQueueListJson', () => {
   });
 
   it('handles an empty snapshot', () => {
-    expect(buildQueueListJson({ entries: [] })).toEqual({ schemaVersion: 1, lanes: [] });
+    expect(buildQueueListJson({ entries: [] })).toEqual({ schemaVersion: 1, lanes: [], orderConflicts: [] });
   });
 
   it('omits title when absent and defaults status to queued', () => {

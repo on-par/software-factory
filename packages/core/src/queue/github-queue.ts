@@ -6,9 +6,14 @@ import type { Octokit } from '@octokit/rest';
 
 import { orderCollisionAt, scanLaneOrders, type OrderCollision } from './order-collision.js';
 import type { QueueEntry, QueueSnapshot, QueueSnapshotEntry } from './index.js';
-import { orderedCandidates, QUEUE_ORDER_LABEL_PREFIX, type QueueOrderConflict } from './queue-order.js';
+import {
+  formatQueueOrderConflict,
+  orderedCandidates,
+  QUEUE_ORDER_LABEL_PREFIX,
+  type QueueOrderConflict,
+} from './queue-order.js';
 
-export { QUEUE_ORDER_LABEL_PREFIX, type QueueOrderConflict };
+export { formatQueueOrderConflict, QUEUE_ORDER_LABEL_PREFIX, type QueueOrderConflict };
 
 export const QUEUED_LABEL = 'factory:queued';
 export const IN_PROGRESS_LABEL = 'factory:in-progress';
@@ -220,7 +225,8 @@ function queueIssueStatus(labels: readonly string[]): Pick<QueueSnapshotEntry, '
  *  One list call for `factory:queued` issues; lanes come from their `factory:lane:*` labels and
  *  each lane is ordered exactly as `GithubQueue.list(lane)` orders it. Throws on the same
  *  malformed or missing order labels `list()` throws on (callers degrade to a message); issues
- *  sharing a `factory:order` position are left out (#2977). */
+ *  sharing a `factory:order` position are kept in issue-number order and reported in
+ *  `orderConflicts` (#2977, #3101). */
 export async function readGithubQueueSnapshot(input: {
   client: Pick<QueueGitHubClient, 'listOpenIssuesWithLabels'>;
   owner: string;
@@ -241,8 +247,9 @@ export async function readGithubQueueSnapshot(input: {
   }
 
   const entries: QueueSnapshotEntry[] = [];
+  const orderConflicts: QueueOrderConflict[] = [];
   for (const lane of [...byLane.keys()].sort()) {
-    for (const issue of orderedCandidates(lane, byLane.get(lane)!)) {
+    for (const issue of orderedCandidates(lane, byLane.get(lane)!, (c) => orderConflicts.push(c))) {
       const status: Pick<QueueSnapshotEntry, 'status' | 'claimant'> = queueIssueStatus(issue.labels);
       entries.push({
         lane,
@@ -252,7 +259,7 @@ export async function readGithubQueueSnapshot(input: {
       });
     }
   }
-  return { entries };
+  return orderConflicts.length > 0 ? { entries, orderConflicts } : { entries };
 }
 
 export function createOctokitQueueClient(octokit: Octokit): QueueGitHubClient {
@@ -393,7 +400,7 @@ export interface GithubQueueOptions {
   leaseMs?: number;
   /** Clock injection for tests. Defaults to `Date.now`. */
   now?: () => number;
-  /** Called once per duplicated `factory:order:<n>` position seen by list/claimNext; those issues are skipped (#2977). */
+  /** Called once per duplicated `factory:order:<n>` position seen by list/claimNext; those issues are claimed in issue-number order (#3101). */
   onOrderConflict?: (conflict: QueueOrderConflict) => void;
 }
 

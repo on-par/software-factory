@@ -144,8 +144,7 @@ export { buildHarnessCommand, CommandHarness } from './harness/command.js';
 export { isAgenticHarness, isRetryableFailure, NON_RETRYABLE_FAILURE_REASONS } from './harness/index.js';
 export type { OllamaAgenticChange, OllamaAgenticExecFn, OllamaAgenticProposal } from './harness/ollama-agentic.js';
 export { OllamaAgenticHarness, PATCH_PROPOSAL_SCHEMA } from './harness/ollama-agentic.js';
-export type { OllamaFetchFn } from './harness/ollama-http.js';
-export { OllamaHttpHarness } from './harness/ollama-http.js';
+export { OllamaHttpHarness, type OllamaFetchFn } from './harness/ollama-http.js';
 export { classifyOpenCodeErrorType, parseOpenCodeJson } from './harness/opencode.js';
 export { type OpenCodeExecFn, OpenCodeHarness } from './harness/opencode.js';
 export { parsePiJson, type PiExecFn, PiHarness } from './harness/pi.js';
@@ -459,6 +458,7 @@ export {
   readGithubQueueSnapshot,
 } from './queue/github-queue.js';
 export type { QueueEntry, QueueSnapshot, QueueSnapshotEntry } from './queue/index.js';
+export { formatQueueOrderConflict, type QueueOrderConflict } from './queue/queue-order.js';
 
 // Factory App admission-state compatibility (#1497)
 export type {
