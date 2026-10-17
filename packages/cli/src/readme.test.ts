@@ -338,3 +338,102 @@ describe('README wording guard self-test', () => {
     expect(wordingProblems('', OLD_WORDING, [GIF_ALT])).toEqual([`missing: ${GIF_ALT}`]);
   });
 });
+
+const agentsGuide = readFileSync(join(repoRoot, GUIDE), 'utf8');
+
+function supportedCodingAgents(guide: string): string[] {
+  const lines = guide.split('\n');
+  const start = lines.findIndex((l) => l === '## Harness matrix');
+  if (start < 0) return [];
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((l) => l.startsWith('## '));
+  const agents: string[] = [];
+  for (const line of end < 0 ? rest : rest.slice(0, end)) {
+    if (!line.startsWith('|') || line.startsWith('| ---')) continue;
+    const cells = line
+      .split('|')
+      .map((c) => c.trim())
+      .filter((c) => c !== '');
+    const agent = cells[0] ?? '';
+    if (cells[cells.length - 1] === '`supported`' && lines.includes(`## ${agent}`)) agents.push(agent);
+  }
+  return agents;
+}
+
+function quickStartAgentParityProblems(readme: string, agents: string[]): string[] {
+  const quickStart = section(readme, '## Quick start');
+  if (quickStart === undefined) return ['missing Quick start section'];
+  if (agents.length === 0) return ['no supported coding agents found in docs/agents.md'];
+  const lines = quickStart.split('\n');
+  const missing = agents.filter((a) => !lines.includes(`### Use ${a}`));
+  return missing.length === agents.length ? [] : missing.map((a) => `missing ### Use ${a}`);
+}
+
+function claudeCodeSubsectionProblems(readme: string): string[] {
+  const lines = (section(readme, '## Quick start') ?? '').split('\n');
+  const start = lines.indexOf('### Use Claude Code');
+  if (start < 0) return ['missing ### Use Claude Code'];
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((l) => l.startsWith('### ') || l.startsWith('## '));
+  const block = (end < 0 ? rest : rest.slice(0, end)).join('\n');
+  return ['/login', 'ANTHROPIC_API_KEY', 'factory doctor', '](docs/agents.md)']
+    .filter((needle) => !block.includes(needle))
+    .map((needle) => `Use Claude Code does not mention ${needle}`);
+}
+
+describe('README Quick start agent parity', () => {
+  it('every supported coding agent in docs/agents.md has a Use <Agent> Quick start subsection when any does', () => {
+    const agents = supportedCodingAgents(agentsGuide);
+    expect(agents).toEqual(expect.arrayContaining(['Claude Code', 'Codex']));
+    expect(quickStartAgentParityProblems(rootReadme, agents)).toEqual([]);
+  });
+
+  it('Use Claude Code subsection names /login, ANTHROPIC_API_KEY, factory doctor and links docs/agents.md', () => {
+    expect(claudeCodeSubsectionProblems(rootReadme)).toEqual([]);
+  });
+});
+
+describe('README Quick start agent parity guard self-test', () => {
+  const matrix = [
+    '## Harness matrix',
+    '',
+    '| Agent | Harness id | Status |',
+    '| --- | --- | --- |',
+    '| Claude Code | `claude-cli` | `supported` |',
+    '| Codex | `codex-cli` | `supported` |',
+    '| OpenCode | `opencode` | `experimental` |',
+    '| Declared custom harness | `command` | `supported` |',
+    '',
+    '## Claude Code',
+    '## Codex',
+    '## OpenCode',
+  ].join('\n');
+
+  it('reads Claude Code and Codex, not experimental or custom harness rows, from the matrix', () => {
+    expect(supportedCodingAgents(matrix)).toEqual(['Claude Code', 'Codex']);
+  });
+
+  it('rejects a Quick start with Use Codex and no Use Claude Code', () => {
+    const readme = '## Quick start\n\n### Use Codex\n\ntext\n\n## Configuration';
+    expect(quickStartAgentParityProblems(readme, ['Claude Code', 'Codex'])).toEqual(['missing ### Use Claude Code']);
+  });
+
+  it('passes when no agent has a subsection, and reports a missing section or empty agent list', () => {
+    expect(quickStartAgentParityProblems('## Quick start\n\ntext\n', ['Claude Code', 'Codex'])).toEqual([]);
+    expect(quickStartAgentParityProblems('# Title', ['Codex'])).toEqual(['missing Quick start section']);
+    expect(quickStartAgentParityProblems('## Quick start\n', [])).toEqual([
+      'no supported coding agents found in docs/agents.md',
+    ]);
+  });
+
+  it('rejects a Use Claude Code subsection with no login or doctor check', () => {
+    const readme = '## Quick start\n\n### Use Claude Code\n\nInstall it.\n\n### Safety\n\n`/login`';
+    expect(claudeCodeSubsectionProblems(readme)).toEqual([
+      'Use Claude Code does not mention /login',
+      'Use Claude Code does not mention ANTHROPIC_API_KEY',
+      'Use Claude Code does not mention factory doctor',
+      'Use Claude Code does not mention ](docs/agents.md)',
+    ]);
+    expect(claudeCodeSubsectionProblems('## Quick start\n')).toEqual(['missing ### Use Claude Code']);
+  });
+});

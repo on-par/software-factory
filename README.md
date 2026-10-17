@@ -74,6 +74,15 @@ Install the Codex CLI and sign in once:
 
 `factory doctor` shows a `codex signed in` line with the sign-in method. Models whose CLI is not installed are skipped, so on a machine with only Codex every phase runs on Codex models and PLAN picks the codex build route. With both CLIs installed, pin a phase in `.factory/config.json` (`models.pins.plan`, `build`, `checker`, `triage`), set `route`, or reorder `tiers`; `factory triage --model <id>` picks the triage model for one run. See [docs/models.md](docs/models.md).
 
+### Use Claude Code
+
+Install the Claude Code CLI, for example `npm install -g @anthropic-ai/claude-code`, and sign in once:
+
+- Run `claude` and complete `/login` to use your Claude subscription.
+- Or set `ANTHROPIC_API_KEY` to use API billing instead, which suits automation and CI.
+
+`factory doctor` shows a `claude installed` line with the CLI version and a `claude signed in` line. Run `factory doctor --probe-inference` to also send one real `claude -p` prompt. On a machine with only Claude Code, every phase runs on Claude models and PLAN picks the claude build route. For a minimal config and the other agents, see [docs/agents.md](docs/agents.md).
+
 ### Safety
 
 To run unattended, the factory starts agent CLIs with their permission prompts turned off:
