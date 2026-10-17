@@ -227,6 +227,7 @@ import {
   buildTriagePrompt,
   parseTriageCandidates,
   recordLocalAuthFailure,
+  laneSlug,
 } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
 import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
@@ -3047,16 +3048,9 @@ export async function cmdUnpark(issueArg: string, opts: { lane?: string; json?: 
 }
 
 export async function cmdQueueAdd(lane: string, issueArgs: string[], opts: { json?: boolean } = {}): Promise<void> {
+  if (lane.trim() === '') throw new CliExitError('factory: queue add needs a non-empty lane name', 2);
   // Validate + dedupe BEFORE any GitHub call. parseIssueArg throws CliExitError(2) on bad input.
-  const seen = new Set<number>();
-  const issues: number[] = [];
-  for (const raw of issueArgs) {
-    const n = parseIssueArg(raw);
-    if (!seen.has(n)) {
-      seen.add(n);
-      issues.push(n);
-    }
-  }
+  const issues = [...new Set(issueArgs.map(parseIssueArg))];
 
   const enqueueAll = async (): Promise<EnqueueResult[]> => {
     const [owner, repo] = (await getGitHubRepo()).split('/');
@@ -3085,7 +3079,7 @@ export async function cmdQueueAdd(lane: string, issueArgs: string[], opts: { jso
     return;
   }
 
-  for (const line of renderQueueAddLines(lane, results))
+  for (const line of renderQueueAddLines(laneSlug(lane), results))
     (line.stream === 'err' ? console.error : console.log)(line.text);
 
   const failed = results.filter((r) => r.outcome === 'failed');

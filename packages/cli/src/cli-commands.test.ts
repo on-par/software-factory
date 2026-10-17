@@ -2966,38 +2966,39 @@ bash scripts/verify.sh
       h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async () => ({ data: [] }));
     });
 
+    it.each(['', '   '])('exits 2 for an empty or whitespace lane before any GitHub call', async (lane) => {
+      const res = await runMain('queue', 'add', lane, '1');
+      expect(res).toEqual({ exited: true, code: 2 });
+      expect(errored()).toContain('lane');
+      for (const fn of ['createLabel', 'addLabels', 'listForRepo'] as const)
+        expect(h.octokit.rest.issues[fn]).not.toHaveBeenCalled();
+    });
+
+    it('prints the applied lane slug in the success line', async () => {
+      await runMain('queue', 'add', 'a b', '1');
+      expect(logged()).toContain('lane a-b');
+      expect(logged()).not.toContain('lane a b');
+    });
+
     it('queues explicit issues into a lane, applying queued/lane/order labels in order', async () => {
       const res = await runMain('queue', 'add', 'daw', '10', '11');
-
       expect(res.exited).toBe(false);
       expect(logged()).toContain('#10 queued');
       expect(logged()).toContain('#11 queued');
-      expect(h.octokit.rest.issues.addLabels).toHaveBeenNthCalledWith(1, {
-        owner: 'on-par',
-        repo: 'software-factory',
-        issue_number: 10,
-        labels: ['factory:queued', 'factory:lane:daw', 'factory:order:1'],
-      });
-      expect(h.octokit.rest.issues.addLabels).toHaveBeenNthCalledWith(2, {
-        owner: 'on-par',
-        repo: 'software-factory',
-        issue_number: 11,
-        labels: ['factory:queued', 'factory:lane:daw', 'factory:order:2'],
-      });
+      for (const [i, issue_number] of [10, 11].entries()) {
+        expect(h.octokit.rest.issues.addLabels).toHaveBeenNthCalledWith(i + 1, {
+          owner: 'on-par',
+          repo: 'software-factory',
+          issue_number,
+          labels: ['factory:queued', 'factory:lane:daw', `factory:order:${i + 1}`],
+        });
+      }
     });
 
     it('creates missing factory labels idempotently before applying them', async () => {
       await runMain('queue', 'add', 'daw', '10');
-
-      expect(h.octokit.rest.issues.createLabel).toHaveBeenCalledWith(
-        expect.objectContaining({ name: 'factory:queued' }),
-      );
-      expect(h.octokit.rest.issues.createLabel).toHaveBeenCalledWith(
-        expect.objectContaining({ name: 'factory:lane:daw' }),
-      );
-      expect(h.octokit.rest.issues.createLabel).toHaveBeenCalledWith(
-        expect.objectContaining({ name: 'factory:order:1' }),
-      );
+      for (const name of ['factory:queued', 'factory:lane:daw', 'factory:order:1'])
+        expect(h.octokit.rest.issues.createLabel).toHaveBeenCalledWith(expect.objectContaining({ name }));
     });
 
     it('exits nonzero and reports a per-issue failure without dropping the successful issue', async () => {
