@@ -1,9 +1,9 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import type { FactoryEvent } from '../types/index.js';
 import { fetchHumanEventSources } from './human.js';
 import {
@@ -118,13 +118,14 @@ function fakeGitHub(prs: FakePr[], opts: { graphql?: boolean; remaining?: number
   return { client, calls, restCalls, reset };
 }
 
+const tmp = createTempDirs();
 let dir: string;
 let cachePath: string;
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'kpi-sweep-'));
+  dir = tmp.makeSync('kpi-sweep-');
   cachePath = join(dir, 'state', 'kpi-sweep-cache.json');
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => tmp.cleanup());
 
 const sweep = (client: any, issues: ReadonlySet<string> | null = null) =>
   fetchHumanEventSourcesCached(client, 'o', 'r', issues, 'factory', { cachePath });

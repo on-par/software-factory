@@ -1,11 +1,11 @@
 // packages/cli/src/cli/kpi-sweep.test.ts — the end-of-run KPI snapshot skips no-op runs and degrades on a low budget
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { getFactoryPaths, readEvents, reconstructKpiEvents } from '@on-par/factory-core';
 import { fetchHumanEventSourcesCached } from '@on-par/factory-core/internal';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { KPI_SWEEP_NOOP_MESSAGE, runEndOfRunKpiSnapshot } from './kpi-sweep.js';
@@ -13,15 +13,16 @@ import { KPI_SWEEP_NOOP_MESSAGE, runEndOfRunKpiSnapshot } from './kpi-sweep.js';
 const RUN_START = '2026-10-17T10:00:00.000Z';
 const DURING = '2026-10-17T10:05:00.000Z';
 
+const tmp = createTempDirs();
 let root: string;
 let paths: ReturnType<typeof getFactoryPaths>;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'kpi-sweep-cli-'));
+  root = tmp.makeSync('kpi-sweep-cli-');
   paths = getFactoryPaths(root, join(root, '.factory'));
   mkdirSync(paths.state, { recursive: true });
 });
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => tmp.cleanup());
 
 function writeEvents(...events: Array<{ type: string; ts: string; issue?: string }>): void {
   const lines = events.map((e) => JSON.stringify({ issue: '1', msg: '', ...e }));

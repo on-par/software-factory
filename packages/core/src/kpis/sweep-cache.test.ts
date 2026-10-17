@@ -1,9 +1,9 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import {
   emptyKpiSweepCache,
   parseKpiSweepCache,
@@ -19,11 +19,12 @@ function cachedPr(number: number, updatedAt: string): CachedPr {
   return { number, issue: String(number), updatedAt, mergedAt: null, closedAt: null, mergeCommitSha: null };
 }
 
+const tmp = createTempDirs();
 let dir: string;
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'kpi-sweep-cache-'));
+  dir = tmp.makeSync('kpi-sweep-cache-');
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => tmp.cleanup());
 
 describe('kpi sweep cache', () => {
   it('round-trips through write and read, creating the state dir', () => {
