@@ -1,5 +1,6 @@
 // packages/core/src/queue/github-queue.ts — GitHub-label-backed work queue: claim/release/list (#824).
 
+import { createHash } from 'node:crypto';
 import { hostname } from 'node:os';
 
 import type { Octokit } from '@octokit/rest';
@@ -55,8 +56,20 @@ function slugSegment(raw: string, maxLen: number): string {
   return slug === '' ? 'unknown' : slug;
 }
 
+/**
+ * The lane slug applied in the label. Slugs that fit the label budget are unchanged; longer ones keep a
+ * prefix plus an 8-hex sha256 of the full slug, so distinct long names never share a label (#3100).
+ */
+export function laneSlug(lane: string): string {
+  const budget = MAX_LABEL_NAME_LENGTH - LANE_LABEL_PREFIX.length;
+  const full = slugSegment(lane, Number.POSITIVE_INFINITY);
+  if (full.length <= budget) return full;
+  const hash = createHash('sha256').update(full).digest('hex').slice(0, 8);
+  return `${full.slice(0, budget - 9).replace(/-+$/g, '')}-${hash}`;
+}
+
 export function laneLabel(lane: string): string {
-  return LANE_LABEL_PREFIX + slugSegment(lane, MAX_LABEL_NAME_LENGTH - LANE_LABEL_PREFIX.length);
+  return LANE_LABEL_PREFIX + laneSlug(lane);
 }
 
 /** Renders one-based queue ordering metadata as a GitHub-safe factory label. */

@@ -752,6 +752,7 @@ const INTERNAL_API_KEYS = [
   'IN_PROGRESS_LABEL',
   'LANE_LABEL_PREFIX',
   'laneLabel',
+  'laneSlug',
   'MAX_LABEL_NAME_LENGTH',
   'parseClaimExpiresLabel',
   'PARKED_LABEL',
@@ -900,9 +901,7 @@ describe('public API surface (ADR-0004)', () => {
   });
   it('package.json declares exactly the four documented entry points', () => {
     const pkgPath = fileURLToPath(new URL('../package.json', import.meta.url));
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as {
-      exports: Record<string, { development: string; import: string; types: string }>;
-    };
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { exports: Record<string, Record<string, string>> };
     expect(Object.keys(pkg.exports).sort()).toEqual(['.', './internal', './kpis', './testing'].sort());
     for (const entry of Object.values(pkg.exports))
       expect(Object.keys(entry).sort()).toEqual(['development', 'import', 'types']);

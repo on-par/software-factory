@@ -446,6 +446,7 @@ export {
   IN_PROGRESS_LABEL,
   LANE_LABEL_PREFIX,
   laneLabel,
+  laneSlug,
   MAX_LABEL_NAME_LENGTH,
   parseClaimExpiresLabel,
   PARKED_LABEL,
@@ -708,8 +709,7 @@ export {
 export { listBuiltInCheckers, type BuiltInCheckerInfo } from './checkers/index.js';
 export { findTemplateTokens, isTemplateToken } from './config/template-tokens.js';
 export { lintFactoryConfig } from './config/config-lint.js';
-export { findConfigSchemaErrors } from './config/config-schema-lint.js';
-export type { ConfigSchemaFinding } from './config/config-schema-lint.js';
+export { findConfigSchemaErrors, type ConfigSchemaFinding } from './config/config-schema-lint.js';
 export type { ConfigLintFinding, ConfigLintInput, ConfigLintResult, ConfigLintVerdict } from './config/config-lint.js';
 export type { TemplateTokenFinding } from './config/template-tokens.js';
 export { findUnknownConstitutionCheckers, formatUnknownCheckerMessage } from './checkers/constitution-preflight.js';
@@ -775,8 +775,7 @@ export { BASE_HEALTH_CHECKERS, checkBaseHealth } from './checkers/base-health.js
 export type { BaseHealthOptions, BaseHealthResult } from './checkers/base-health.js';
 
 // Codex ChatGPT session freshness for doctor (#2509)
-export { codexChatgptSessionState } from './utils/codex-config.js';
-export type { CodexSessionState } from './utils/codex-config.js';
+export { codexChatgptSessionState, type CodexSessionState } from './utils/codex-config.js';
 
 // Last run-time local_auth failure per agent, read by doctor (#2733)
 export {
