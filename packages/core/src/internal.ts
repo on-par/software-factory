@@ -1,7 +1,6 @@
 // packages/core/src/internal.ts — Implementation details consumed by the factory's
 // own packages (cli, tui, root scripts). No stability guarantee: these exports may
 // change or disappear without notice. See ADR-0004 for the public/internal split.
-
 // Garden harvest (#2083)
 export type {
   GardenCluster,
@@ -236,6 +235,7 @@ export {
   DEFAULT_CI_DEADLINE_MS,
   DEFAULT_CI_NO_CHECKS_GRACE_MS,
   isPassingConclusion,
+  noChecksVerdictMs,
   resolveCiNoChecksGraceMs,
   watchChecks,
   watchChecksWithInfraRerun,

@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-
 import { describe, expect, it } from 'vitest';
 
 import * as publicApi from './index.js';
@@ -328,6 +327,7 @@ const INTERNAL_API_KEYS = [
   'openCodeVersion',
   'DEFAULT_CI_DEADLINE_MS',
   'DEFAULT_CI_NO_CHECKS_GRACE_MS',
+  'noChecksVerdictMs',
   'resolveCiNoChecksGraceMs',
   // Pre-PLAN base health (#2339)
   'BASE_HEALTH_CHECKERS',
