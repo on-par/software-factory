@@ -21,6 +21,7 @@ import {
   createGithubQueue,
   createOctokitQueueClient,
   daemonRuntimePaths,
+  formatQueueOrderConflict,
   formatWorktreeLocation,
   hostBuildSlotsDir,
   listHostSlots,
@@ -30,6 +31,7 @@ import {
   resolvePrClassifierPolicy,
   resolveWorktreeRoot,
 } from '@on-par/factory-core/internal';
+import type { QueueOrderConflict } from '@on-par/factory-core/internal';
 
 import { formatBaseHoldStatus, readBaseHold } from './base-hold.js';
 import { notInitializedMessage } from './first-run.js';
@@ -172,7 +174,13 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
     console.log('  (no GitHub token — run `gh auth login`)');
   } else {
     const [owner, repoName] = ghRepo.split('/');
-    const githubQueue = createGithubQueue({ client: createOctokitQueueClient(rt.getOctokit()), owner, repo: repoName });
+    const orderConflicts: QueueOrderConflict[] = [];
+    const githubQueue = createGithubQueue({
+      client: createOctokitQueueClient(rt.getOctokit()),
+      owner,
+      repo: repoName,
+      onOrderConflict: (c) => orderConflicts.push(c),
+    });
     try {
       const lanes = await githubQueue.lanes();
       let printed = false;
@@ -182,6 +190,9 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
           console.log(`  ${lane} #${issue}`);
           printed = true;
         }
+      }
+      for (const c of orderConflicts) {
+        console.log(styleText('yellow', `  ⚠ ${formatQueueOrderConflict(c)}`));
       }
       if (!printed) {
         console.log('  (no claimable work)');

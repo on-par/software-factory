@@ -3292,6 +3292,7 @@ bash scripts/verify.sh
           },
           { lane: 'other', items: [{ issue: 2, title: 'Two', status: 'queued', order: 1, claimedBy: null }] },
         ],
+        orderConflicts: [],
       });
       expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
       expect(h.octokit.rest.issues.removeLabel).not.toHaveBeenCalled();
@@ -3345,7 +3346,7 @@ bash scripts/verify.sh
       const res = await runMain('queue', 'list', '--json');
 
       expect(res).toEqual({ exited: false, code: undefined });
-      expect(JSON.parse(logged())).toEqual({ schemaVersion: 1, lanes: [] });
+      expect(JSON.parse(logged())).toEqual({ schemaVersion: 1, lanes: [], orderConflicts: [] });
     });
 
     it('exits 1 with stderr only on a GitHub read failure', async () => {

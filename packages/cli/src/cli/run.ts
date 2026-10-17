@@ -26,6 +26,7 @@ import {
   createOctokitGreenPrClient,
   createOctokitQueueClient,
   evaluateLoadGuard,
+  formatQueueOrderConflict,
   logEvent,
   readHostLoad,
   recordSliceMerged,
@@ -167,10 +168,10 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
               logEvent(paths.events, 'queue_admission_conflict', String(issue), line);
             },
           }),
-          onOrderConflict: ({ lane, position, issues }) => {
-            const line = `lane ${lane}: issues ${issues.map((n) => `#${n}`).join(', ')} share factory:order:${position}; skipped | repair: give each a unique order label`;
+          onOrderConflict: (conflict) => {
+            const line = formatQueueOrderConflict(conflict);
             console.error(styleText('yellow', `factory: ${line}`));
-            logEvent(paths.events, 'queue_order_conflict', issues.join(','), line, { lane });
+            logEvent(paths.events, 'queue_order_conflict', conflict.issues.join(','), line, { lane: conflict.lane });
           },
         });
       },

@@ -5,15 +5,24 @@ export interface QueueListItemJson {
   issue: number;
   title?: string;
   status: 'queued' | 'in-progress' | 'parked';
-  /** 1-based position within the lane, in order-label order. */
+  /** 1-based rank within the lane after sorting by the factory:order label (ties broken by issue number) — not the label value (#3101). */
   order: number;
   claimedBy: string | null;
+}
+
+/** A duplicated `factory:order:<n>` position in one lane (#3101); `order` is the label value. */
+export interface QueueListOrderConflictJson {
+  lane: string;
+  order: number;
+  issues: number[];
 }
 
 /** `factory queue list --json` payload (#2268). Additive changes only; bump schemaVersion on a breaking change. */
 export interface QueueListJson {
   schemaVersion: 1;
   lanes: Array<{ lane: string; items: QueueListItemJson[] }>;
+  /** Duplicated order positions, filtered by `--lane`; additive, present since #3101. */
+  orderConflicts: QueueListOrderConflictJson[];
 }
 
 /**
@@ -37,5 +46,8 @@ export function buildQueueListJson(snapshot: QueueSnapshot, lane?: string): Queu
       claimedBy: entry.claimant ?? null,
     });
   }
-  return { schemaVersion: 1, lanes: [...byLane].map(([name, items]) => ({ lane: name, items })) };
+  const orderConflicts = (snapshot.orderConflicts ?? [])
+    .filter((c) => lane === undefined || c.lane === lane)
+    .map((c) => ({ lane: c.lane, order: c.position, issues: c.issues }));
+  return { schemaVersion: 1, lanes: [...byLane].map(([name, items]) => ({ lane: name, items })), orderConflicts };
 }

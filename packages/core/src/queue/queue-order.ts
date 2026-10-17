@@ -1,4 +1,4 @@
-// packages/core/src/queue/queue-order.ts — Per-lane `factory:order:<n>` ordering for the GitHub queue (#824, #2977).
+// packages/core/src/queue/queue-order.ts — Per-lane `factory:order:<n>` ordering for the GitHub queue (#824, #2977, #3101).
 
 export const QUEUE_ORDER_LABEL_PREFIX = 'factory:order:';
 
@@ -44,10 +44,17 @@ export function orderedCandidates<T extends { number: number; labels: string[] }
   const kept: T[] = [];
   for (const [position, group] of [...byPosition].sort((a, b) => a[0] - b[0])) {
     if (group.length >= 2) {
-      onConflict?.({ lane, position, issues: group.map((i) => i.number).sort((a, b) => a - b) });
+      const sorted = [...group].sort((a, b) => a.number - b.number);
+      onConflict?.({ lane, position, issues: sorted.map((i) => i.number) });
+      kept.push(...sorted);
     } else {
       kept.push(group[0]);
     }
   }
   return kept;
+}
+
+/** One-line operator warning for a duplicated `factory:order:<n>` position (#3101). */
+export function formatQueueOrderConflict(conflict: QueueOrderConflict): string {
+  return `lane ${conflict.lane}: issues ${conflict.issues.map((n) => `#${n}`).join(', ')} share ${QUEUE_ORDER_LABEL_PREFIX}${conflict.position} — claimed in issue-number order | repair: give each a unique order label`;
 }

@@ -91,9 +91,8 @@ const PUBLIC_API_KEYS = [
   'redactSecretPatterns',
   'rewriteQueueForDecomposition',
   'validateQueue',
-  // Queue activity (#1342)
   'DEFAULT_QUEUE_ACTIVITY_STALE_THRESHOLD_MS',
-  'partitionLocalQueueByActivity',
+  'partitionLocalQueueByActivity', // Queue activity (#1342)
   // Hosted execution (control plane)
   'createHostedJobStore',
   'createSqliteHostedJobStore',
@@ -763,6 +762,7 @@ const INTERNAL_API_KEYS = [
   'queueOrderLabel',
   'queueLabelSpecs',
   'readGithubQueueSnapshot',
+  'formatQueueOrderConflict',
   // Factory App admission-state compatibility (#1497)
   'ADMISSION_SNAPSHOT_VERSION',
   'ADMISSION_STATE_FILENAME',

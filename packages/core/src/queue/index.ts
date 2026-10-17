@@ -2,6 +2,8 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 
+import type { QueueOrderConflict } from './queue-order.js';
+
 const ENTRY_RE = /^(\S+)\s+(\d+)\s*$/;
 
 export interface QueueValidationResult {
@@ -163,6 +165,8 @@ export interface QueueSnapshot {
   proposedCount?: number;
   /** Set when the source could not be read; `entries` then holds the last good read (or nothing). */
   error?: string;
+  /** Duplicated factory:order positions seen while ordering (GitHub queue only, #3101). */
+  orderConflicts?: QueueOrderConflict[];
 }
 
 /** De-duplicated {lane, issue} pairs from the shared parseQueue() parser, first occurrence wins. */
