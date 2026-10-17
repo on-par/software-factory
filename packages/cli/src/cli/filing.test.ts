@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { buildUpstreamReport, upstreamInputFromEvidence } from '@on-par/factory-core/internal';
-import { describe, expect, it } from 'vitest';
+import { createTempDirs } from '@on-par/factory-core/testing';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { type FilingPreviewDeps, resolveFactoryCheckoutCommit, runFilingPreview } from './filing.js';
 
@@ -19,8 +20,11 @@ const evidence = {
   logPath: '/tmp/x.log',
 } as const;
 
+const tmp = createTempDirs();
+afterEach(() => tmp.cleanup());
+
 function setup(events: object[]) {
-  const dir = mkdtempSync(join(tmpdir(), 'filing-'));
+  const dir = tmp.makeSync('filing-');
   const eventsFile = join(dir, 'events.jsonl');
   const runsDir = join(dir, 'runs');
   mkdirSync(runsDir);

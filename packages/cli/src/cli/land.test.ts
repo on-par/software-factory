@@ -1,8 +1,8 @@
 // packages/cli/src/cli/land.test.ts — land command tests via main() and direct cmdLand (#2785)
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type CliDeps, cmdLand as cliCmdLand, main } from './index.js';
@@ -26,10 +26,9 @@ class ExitError extends Error {
   }
 }
 
-let exitSpy: any;
-let logSpy: any;
-let errSpy: any;
+let exitSpy: any, logSpy: any, errSpy: any;
 const savedEnv: Record<string, string | undefined> = {};
+const tmp = createTempDirs();
 
 function paths() {
   const state = join(h.repoRoot, '.factory', 'state');
@@ -135,7 +134,7 @@ async function runMain(...args: string[]) {
 
 beforeEach(() => {
   ops = makeInternalFakes();
-  h.repoRoot = mkdtempSync(join(tmpdir(), 'factory-cli-'));
+  h.repoRoot = tmp.makeSync('factory-cli-');
   mkdirSync(join(h.repoRoot, '.git', 'info'), { recursive: true });
   mkdirSync(paths().state, { recursive: true });
   mkdirSync(paths().plans, { recursive: true });
@@ -181,8 +180,8 @@ beforeEach(() => {
   errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
-afterEach(() => {
-  rmSync(h.repoRoot, { recursive: true, force: true });
+afterEach(async () => {
+  await tmp.cleanup();
   for (const [k, v] of Object.entries(savedEnv)) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;

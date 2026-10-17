@@ -33,6 +33,8 @@ export default defineConfig({
   // test files — the packages/core "test script" agent trap in AGENTS.md.
   root: fileURLToPath(new URL('.', import.meta.url)),
   test: {
+    // One per-run TMPDIR sandbox, removed at the end, plus a guard that names prefixes leaking into the real TMPDIR (#3114).
+    globalSetup: [fileURLToPath(new URL('./scripts/test-tmp-sandbox.ts', import.meta.url))],
     setupFiles: [fileURLToPath(new URL('./packages/core/src/test-support/setup-env.ts', import.meta.url))],
     // Test files run in parallel with 4 workers by default (DEFAULT_TEST_MAX_WORKERS
     // in scripts/test-workers.ts), bounded so the instrumented coverage run stays

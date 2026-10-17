@@ -1,5 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -8,7 +7,8 @@ import {
   QUEUE_ORDER_LABEL_PREFIX,
   QUEUED_LABEL,
 } from '@on-par/factory-core/internal';
-import { describe, expect, it } from 'vitest';
+import { createTempDirs } from '@on-par/factory-core/testing';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   buildFeedbackDeps,
@@ -26,8 +26,11 @@ import {
 const PR = 'https://github.com/acme/widgets/pull/7';
 const now = () => new Date('2026-07-20T00:00:00.000Z');
 
+const tmp = createTempDirs();
+afterEach(() => tmp.cleanup());
+
 function setup(opts: { headRef?: string; reviews?: any[]; comments?: any[] } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), 'feedback-'));
+  const dir = tmp.makeSync('feedback-');
   const events = join(dir, 'events.ndjson');
   const ev = (ts: string, issue: string) => JSON.stringify({ ts, type: 'phase', issue, msg: 'x' });
   writeFileSync(

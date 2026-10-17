@@ -1,6 +1,8 @@
 // packages/core/src/testing.ts — Test doubles and contract kits for exercising the
 // factory without real model CLIs. See ADR-0004 for the public/internal/testing split.
 
+export type { TempDirs } from './harness/temp-dir.js';
+export { createTempDirs, withTempDir } from './harness/temp-dir.js';
 export type { HarnessContractCase, HarnessContractScenario, HarnessContractScenarios } from './harness/contract.js';
 export { codingHarnessContractCases, makeContractRequest } from './harness/contract.js';
 export type { InjectionFixture, InjectionSurface } from './harness/injection-fixtures.js';
