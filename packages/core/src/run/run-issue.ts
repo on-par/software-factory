@@ -515,6 +515,7 @@ async function runIssueOnce(initialRequest: RunRequest, policy: RunPolicy, ports
           env: laneEnv(appPort, process.env, appBaseUrl, ports.workspace.path, runId),
           cachePath: request.baselineCachePath,
           timeoutSeconds: request.timeouts.check,
+          testsTimeoutSeconds: request.timeouts.tests,
           log: (type, msg) => log(type, msg),
         })
         .catch((err): undefined => {

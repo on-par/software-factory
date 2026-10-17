@@ -1,14 +1,16 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
 
+import { loadFactoryConfig, resolveTimeouts } from '../config/index.js';
 import type { EventKind } from '../events/kinds.js';
 import type { ModelRouter } from '../router/index.js';
 import type { CommandResult } from '../utils/command-runner.js';
 import type { BaselineCheckerComparison, BaselineReport, runBaselineCheckers } from './baseline.js';
 import { BASE_HEALTH_CHECKERS, checkBaseHealth, type BaseHealthOptions } from './base-health.js';
+import { testsChecker } from './index.js';
 
 const SHA = 'b'.repeat(40);
 const router = {} as ModelRouter;
@@ -214,6 +216,47 @@ describe('checkBaseHealth', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('checkBaseHealth tests timeout (#3095)', () => {
+  /** Runs the real testsChecker on base and returns the timeoutMs its tests command received. */
+  async function baseTestsTimeoutMs(testsTimeoutSeconds?: number): Promise<number | undefined> {
+    const fixture = await mkdtemp(join(tmpdir(), 'base-health-tests-timeout-'));
+    try {
+      await writeFile(join(fixture, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run' } }));
+      const testRun = vi.fn(async (_argv: string[], _opts: { timeoutMs?: number }) => cmd(''));
+      const baselineDeps = {
+        runCommand: vi.fn(async () => cmd('')),
+        runCheckers: (async (ctx: Parameters<typeof testsChecker>[0]) => {
+          const out = await testsChecker({ ...ctx, worktree: fixture, runCommand: testRun as never });
+          return { failures: 0, passes: 1, skips: 0, total: 1, results: [out] };
+        }) as never,
+        makeTempDir: () => mkdtemp(join(fixture, 'p-')),
+      };
+      await checkBaseHealth(opts({ baselineDeps, memo: new Map() }, { testsTimeoutSeconds }));
+      const call = testRun.mock.calls.find(([argv]) => argv.includes('test'));
+      return call?.[1].timeoutMs;
+    } finally {
+      await rm(fixture, { recursive: true, force: true });
+    }
+  }
+
+  it('runs the base tests command with the configured tests_seconds (600s)', async () => {
+    expect(await baseTestsTimeoutMs(600)).toBe(600_000);
+  });
+
+  it('FACTORY_TESTS_TIMEOUT (900) wins over tests_seconds (600)', async () => {
+    const cfg = loadFactoryConfig();
+    const tests = resolveTimeouts(
+      { ...cfg, timeouts: { ...cfg.timeouts, tests_seconds: 600 } },
+      { FACTORY_TESTS_TIMEOUT: '900' },
+    ).tests;
+    expect(await baseTestsTimeoutMs(tests)).toBe(900_000);
+  });
+
+  it('defaults the base tests command to 300s when nothing is configured', async () => {
+    expect(await baseTestsTimeoutMs()).toBe(300_000);
   });
 });
 
