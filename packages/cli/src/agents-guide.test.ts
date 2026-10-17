@@ -424,6 +424,28 @@ describe('docs/agents.md supported agents guide', () => {
     expect(problems).toEqual([]);
   });
 
+  it('matrix claude-cli row Phases cell lists triage and the guide never says triage always runs', () => {
+    const lines = (guideText ?? '').split('\n');
+    const start = lines.findIndex((l) => l.trim().startsWith('|') && cellsOf(l).some((c) => /^harness id$/i.test(c)));
+    const table: string[] = [];
+    for (let i = start; start >= 0 && i < lines.length && (lines[i] ?? '').trim().startsWith('|'); i++)
+      table.push(lines[i] ?? '');
+    const header = cellsOf(table[0] ?? '');
+    const idCol = header.findIndex((c) => /^harness id$/i.test(c));
+    const phasesCol = header.findIndex((c) => /^phases$/i.test(c));
+    const row = table
+      .slice(1)
+      .map(cellsOf)
+      .find((cells) => (cells[idCol] ?? '').replace(/`/g, '').trim() === 'claude-cli');
+    const cell = row?.[phasesCol] ?? '';
+    const problems: string[] = [];
+    if (/triage always runs/i.test(guideText ?? ''))
+      problems.push('docs/agents.md says triage always runs a fixed agent; triage goes through the model router');
+    if (!/\btriage\b/.test(cell)) problems.push('claude-cli Phases cell does not list triage');
+    if (cell.includes('claude -p')) problems.push('claude-cli Phases cell ties triage to claude -p');
+    expect(problems).toEqual([]);
+  });
+
   it('Request support instead links the agent-support issue template, and the template exists', () => {
     const lines = (guideText ?? '').split('\n');
     const start = headingIndex(lines, (h) => h === 'request support instead');
