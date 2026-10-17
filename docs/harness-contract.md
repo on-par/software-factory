@@ -88,6 +88,8 @@ Every other case keeps Claude gating, including an unpinned plan, a Claude plan 
 
 To test a CLI declared under `harnesses:`, run `factory harness check <id>`. No code is needed (see [Bring your own agent](./agents.md#bring-your-own-agent)).
 
+For `agentic: true` declarations, the check also runs the CLI in a scratch git repo and requires it to commit `HARNESS_CHECK.txt` locally; non-agentic declarations skip this case.
+
 For an in-repo adapter, implement `HarnessContractScenarios` (`success`, `timeout`, `emptyOutput`, `failure`), each returning the harness under test plus optional request overrides. Register `codingHarnessContractCases(...)` in a vitest file; the existing `packages/core/src/harness/*.test.ts` files show examples. Run them with:
 
 ```bash
