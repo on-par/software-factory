@@ -150,7 +150,8 @@ export async function detectRemoteBranch(repoRoot: string, branch: string): Prom
 }
 
 export interface WorktreeSetupOptions {
-  /** Looks up an open PR whose head is `branch`; only called when origin/<branch> exists. */
+  /** Looks up an open PR whose head is `branch`; only called when origin/<branch> exists.
+   *  When it reports an open PR and no startPoint is given, the worktree is based on origin/<branch> (#3099). */
   findOpenPr?: (branch: string) => Promise<PrLookup>;
 }
 
@@ -174,8 +175,10 @@ export async function setupWorktree(
   // The base of record is the freshly fetched remote-tracking ref — never local
   // branch state, which can be stale, dirty, or ahead (#1167).
   await gitFetch(repoRoot);
-  const base = startPoint ?? (await defaultRemoteBase(repoRoot));
-  // An earlier run's push (#1868) is recorded and reported here, never adopted or discarded.
+  // An earlier run's push (#1868) is recorded and reported here. When an open PR's head is
+  // this branch and the caller gave no start point, the lane continues on it (#3099), so
+  // SHIP pushes fast-forward to that PR. Otherwise it is never adopted or discarded here.
+  let openPrBranch = false;
   let remoteBranch: RemoteBranchRecord | null = null;
   const remoteSha = await detectRemoteBranch(repoRoot, branch);
   if (remoteSha) {
@@ -190,7 +193,10 @@ export async function setupWorktree(
       }
       if (lookup.status === 'found') {
         remoteBranch.prNumber = lookup.prNumber;
-        prText = `open PR #${lookup.prNumber}`;
+        openPrBranch = true;
+        prText = startPoint
+          ? `open PR #${lookup.prNumber}`
+          : `open PR #${lookup.prNumber} — continuing on origin/${branch}`;
       } else if (lookup.status === 'absent') {
         prText = 'no open PR';
       } else {
@@ -199,6 +205,7 @@ export async function setupWorktree(
     }
     log?.('remote-branch-preexisting', `origin/${branch} already exists @ ${remoteSha}; ${prText}`);
   }
+  const base = startPoint ?? (openPrBranch ? `origin/${branch}` : await defaultRemoteBase(repoRoot));
   await execGit(['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot }).catch(() => {});
   await execGit(['branch', '-D', branch], { cwd: repoRoot }).catch(() => {});
   mkdirSync(dirname(worktreePath), { recursive: true });
