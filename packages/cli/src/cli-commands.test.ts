@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative } from 'node:path';
 
 import * as FactoryCore from '@on-par/factory-core';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
@@ -455,13 +456,14 @@ async function runMainRaw(deps: CliDeps | undefined, ...args: string[]) {
   return code === undefined ? { exited: false as const, code: undefined } : { exited: true as const, code };
 }
 
+const tmp = createTempDirs();
 beforeEach(() => {
   ops = makeInternalFakes();
   coreFakes = makeCoreFakes();
   phases = makePhaseFakes();
-  h.repoRoot = mkdtempSync(join(tmpdir(), 'factory-cli-'));
-  h.constitutionsDir = mkdtempSync(join(tmpdir(), 'factory-const-'));
-  h.daemonHome = mkdtempSync(join(tmpdir(), 'factory-daemon-home-'));
+  h.repoRoot = tmp.makeSync('factory-cli-');
+  h.constitutionsDir = tmp.makeSync('factory-const-');
+  h.daemonHome = tmp.makeSync('factory-daemon-home-');
   h.daemonPlatform = 'darwin';
   h.daemonExecCalls = [];
   h.daemonExecImpl = () => ({ code: 0, stdout: '', stderr: '' });
@@ -578,10 +580,8 @@ beforeEach(() => {
   errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
-afterEach(() => {
-  rmSync(h.repoRoot, { recursive: true, force: true });
-  rmSync(h.constitutionsDir, { recursive: true, force: true });
-  rmSync(h.daemonHome, { recursive: true, force: true });
+afterEach(async () => {
+  await tmp.cleanup();
   for (const [k, v] of Object.entries(savedEnv)) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;

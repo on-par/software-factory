@@ -1,9 +1,10 @@
 // packages/cli/src/cli/land.lane-claim.test.ts — lane file claim release after a factory merge (#3067)
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { LaneFileGuard } from '@on-par/factory-core';
@@ -133,9 +134,11 @@ async function runMain(...args: string[]) {
   return code === undefined ? { exited: false as const, code: undefined } : { exited: true as const, code };
 }
 
+const tmp = createTempDirs();
+
 beforeEach(() => {
   ops = makeInternalFakes();
-  h.repoRoot = mkdtempSync(join(tmpdir(), 'factory-cli-'));
+  h.repoRoot = tmp.makeSync('factory-cli-');
   mkdirSync(join(h.repoRoot, '.git', 'info'), { recursive: true });
   mkdirSync(paths().state, { recursive: true });
   mkdirSync(paths().plans, { recursive: true });
@@ -181,8 +184,8 @@ beforeEach(() => {
   errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
-afterEach(() => {
-  rmSync(h.repoRoot, { recursive: true, force: true });
+afterEach(async () => {
+  await tmp.cleanup();
   for (const [k, v] of Object.entries(savedEnv)) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;

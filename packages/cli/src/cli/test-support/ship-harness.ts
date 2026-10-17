@@ -3,9 +3,12 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, vi } from 'vitest';
 
 import { type CliDeps, main, shipIssue as cliShipIssue } from '../index.js';
+
+const tmp = createTempDirs();
 
 // ---------------------------------------------------------------------------
 // Shared mutable state the fakes read from. Reset per test by installShipHarness().
@@ -360,7 +363,7 @@ export function installShipHarness(): void {
     ops = makeInternalFakes();
     coreFakes = makeCoreFakes();
     phases = makePhaseFakes();
-    h.repoRoot = mkdtempSync(join(tmpdir(), 'factory-cli-'));
+    h.repoRoot = tmp.makeSync('factory-cli-');
     h.constitutionsDir = mkdtempSync(join(tmpdir(), 'factory-const-'));
     mkdirSync(join(h.repoRoot, '.git', 'info'), { recursive: true });
     mkdirSync(paths().state, { recursive: true });
@@ -468,8 +471,8 @@ export function installShipHarness(): void {
     errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
-  afterEach(() => {
-    rmSync(h.repoRoot, { recursive: true, force: true });
+  afterEach(async () => {
+    await tmp.cleanup();
     rmSync(h.constitutionsDir, { recursive: true, force: true });
     for (const [k, v] of Object.entries(savedEnv)) {
       if (v === undefined) delete process.env[k];

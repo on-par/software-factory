@@ -893,7 +893,7 @@ describe('public API surface (ADR-0004)', () => {
     expect(Object.keys(internalApi).sort()).toEqual([...INTERNAL_API_KEYS, ...AGENT_JOB_KEYS].sort());
   });
   it('./testing exposes exactly the documented testing API', () => {
-    expect(Object.keys(testingApi).sort()).toEqual([...TESTING_API_KEYS].sort());
+    expect(Object.keys(testingApi).sort()).toEqual([...TESTING_API_KEYS, 'createTempDirs', 'withTempDir'].sort());
   });
   it('./kpis exposes exactly the documented KPI subset, and nothing beyond the root API', () => {
     expect(Object.keys(kpisApi).sort()).toEqual([...KPIS_API_KEYS].sort());

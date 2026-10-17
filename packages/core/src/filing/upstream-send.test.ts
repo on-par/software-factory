@@ -1,9 +1,9 @@
-import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import type { CandidateIssue } from './index.js';
 import { buildUpstreamReport, upstreamReportMarker } from './upstream.js';
 import {
@@ -50,8 +50,11 @@ const logger = {
   warn: (type: string, msg: string) => void logs.push({ level: 'warn', type, msg }),
 };
 
+const tmp = createTempDirs();
+afterEach(() => tmp.cleanup());
+
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'upstream-send-'));
+  dir = await tmp.make('upstream-send-');
   ledgerFile = join(dir, 'ledger.json');
   outboxDir = join(dir, 'outbox');
   logs = [];
