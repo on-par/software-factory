@@ -1,6 +1,7 @@
 // packages/cli/src/cli/run.test.ts — factory run tests, moved from cli-commands.test.ts (#2800)
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -225,6 +226,35 @@ describe('cli', () => {
       const events = readFileSync(paths().events, 'utf-8');
       expect(events).toContain('kpi snapshot partial');
       expect(events).toContain('run-done');
+    });
+
+    it('run: skips the post-run GitHub sweep when core remaining is under 20%, marking the snapshot partial', async () => {
+      writeFileSync(paths().queue, 'app 1\n');
+      const core = { limit: 5000, remaining: 300 };
+      h.octokit.rest.rateLimit.get = vi.fn(async () => ({ data: { resources: { core } } }));
+      h.octokit.rest.pulls.list = vi.fn(async () => ({ data: [] }));
+      const res = await runMain('run', '--local-queue');
+      expect(res.exited).toBe(false);
+
+      expect(h.octokit.rest.pulls.list).not.toHaveBeenCalledWith(expect.objectContaining({ state: 'all' }));
+      const record = JSON.parse(readFileSync(paths().kpiHistory, 'utf-8').trim().split('\n')[0]);
+      expect(record.partial).toBe(true);
+      expect(readFileSync(paths().events, 'utf-8')).toContain('GitHub REST core budget low: 300/5000 remaining');
+    });
+
+    it('run: a second run reuses the KPI sweep cache instead of re-fetching merged PRs', async () => {
+      writeFileSync(paths().queue, 'app 1\n');
+      const pr = { number: 5, head: { ref: 'factory/1-fix-it' }, state: 'closed', merged_at: '2026-10-01T00:00:00Z' };
+      h.octokit.rest.pulls.list = vi.fn(async ({ state }: any) =>
+        state === 'all' ? { data: [{ ...pr, closed_at: null, updated_at: '2026-10-01T00:00:00Z' }] } : { data: [] },
+      );
+      h.octokit.rest.pulls.listCommits = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.pulls.listReviews = vi.fn(async () => ({ data: [] }));
+      await runMain('run', '--local-queue');
+      await runMain('run', '--local-queue');
+
+      expect(h.octokit.rest.pulls.listCommits).toHaveBeenCalledTimes(1);
+      expect(existsSync(join(paths().state, 'kpi-sweep-cache.json'))).toBe(true);
     });
 
     it('appends a second KPI snapshot on a second run', async () => {
