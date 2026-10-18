@@ -209,12 +209,8 @@ describe('createFactorydServer', () => {
       );
       expect(status).toBe(201);
       expect(JSON.parse(body)).toEqual({
-        repo: {
-          slug: 'on-par/software-factory',
-          path: '/tmp/checkout',
-          attachedAt: '2026-08-19T12:00:00.000Z',
-          state: 'active',
-        },
+        repo: expect.objectContaining({ path: '/tmp/checkout', attachedAt: '2026-08-19T12:00:00.000Z' }),
+        created: true,
       });
 
       const listing = await get(factoryd.port, '/repos');

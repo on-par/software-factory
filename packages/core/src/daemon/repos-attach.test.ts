@@ -82,6 +82,7 @@ describe('attachRepo', () => {
 
     expect(result).toEqual({
       ok: true,
+      created: true,
       entry: { slug: 'on-par/software-factory', path: dir, attachedAt: '2026-08-19T12:00:00.000Z', state: 'active' },
     });
 
@@ -234,41 +235,126 @@ describe('attachRepo', () => {
     if (result.ok) expect(result.entry.slug).toBe('On-Par/Software-Factory');
   });
 
-  it('re-attaching an already-registered slug overwrites its entry and leaves siblings untouched', async () => {
-    const dir = await checkoutWithConfig();
-    const registryFile = join(await tmpDir(), 'registry.json');
-    await writeFile(
-      registryFile,
-      JSON.stringify({
-        version: 1,
-        repos: {
-          'on-par/software-factory': { path: '/old/path', attachedAt: '2020-01-01T00:00:00.000Z', state: 'active' },
-          'on-par/sibling': { path: '/sibling', attachedAt: '2020-01-01T00:00:00.000Z', state: 'paused' },
-        },
-      }),
-    );
+  const slug = 'on-par/software-factory';
+  const attachDeps = {
+    readOrigin: async () => 'git@github.com:on-par/software-factory.git',
+    fileExists: async () => true,
+    now: () => new Date('2026-08-19T12:00:00.000Z'),
+  };
 
-    const result = await attachRepo(
-      registryFile,
-      { repo: 'on-par/software-factory', path: dir },
-      {
-        readOrigin: async () => 'git@github.com:on-par/software-factory.git',
-        now: () => new Date('2026-08-19T12:00:00.000Z'),
-      },
-    );
+  async function seed(repos: Record<string, unknown>): Promise<string> {
+    const registryFile = join(await tmpDir(), 'registry.json');
+    await writeFile(registryFile, JSON.stringify({ version: 1, repos }, null, 2));
+    return registryFile;
+  }
+
+  it('re-attaching an active entry at a new path updates only the path and leaves siblings untouched', async () => {
+    const dir = await checkoutWithConfig();
+    const registryFile = await seed({
+      [slug]: { path: '/old/path', attachedAt: '2020-01-01T00:00:00.000Z', state: 'active' },
+      'on-par/sibling': { path: '/sibling', attachedAt: '2020-01-01T00:00:00.000Z', state: 'paused' },
+    });
+
+    const result = await attachRepo(registryFile, { repo: slug, path: dir }, attachDeps);
 
     expect(result).toEqual({
       ok: true,
-      entry: { slug: 'on-par/software-factory', path: dir, attachedAt: '2026-08-19T12:00:00.000Z', state: 'active' },
+      created: false,
+      changed: true,
+      entry: { slug, path: dir, attachedAt: '2020-01-01T00:00:00.000Z', state: 'active' },
     });
-
-    const raw = await readFile(registryFile, 'utf-8');
-    const parsed = JSON.parse(raw) as { repos: Record<string, { path: string; state: string }> };
-    expect(parsed.repos['on-par/software-factory'].path).toBe(dir);
-    expect(parsed.repos['on-par/sibling']).toEqual({
+    const registry = await loadRegistry(registryFile);
+    expect(registry.repos['on-par/sibling']).toEqual({
       path: '/sibling',
       attachedAt: '2020-01-01T00:00:00.000Z',
       state: 'paused',
+    });
+  });
+
+  it.each(['active', 'paused'])('re-attaching a %s entry at the same path is a no-op', async (state) => {
+    const dir = await checkoutWithConfig();
+    const registryFile = await seed({ [slug]: { path: dir, attachedAt: '2020-01-01T00:00:00.000Z', state } });
+    const before = await readFile(registryFile, 'utf-8');
+
+    const result = await attachRepo(registryFile, { repo: slug, path: dir }, attachDeps);
+
+    expect(result).toEqual({
+      ok: true,
+      created: false,
+      changed: false,
+      entry: { slug, path: dir, attachedAt: '2020-01-01T00:00:00.000Z', state },
+    });
+    expect(await readFile(registryFile, 'utf-8')).toBe(before);
+  });
+
+  it('re-attaching a paused entry at a new path keeps it paused', async () => {
+    const dir = await checkoutWithConfig();
+    const registryFile = await seed({
+      [slug]: { path: '/old/path', attachedAt: '2020-01-01T00:00:00.000Z', state: 'paused' },
+    });
+
+    const result = await attachRepo(registryFile, { repo: slug, path: dir }, attachDeps);
+
+    expect(result).toMatchObject({
+      ok: true,
+      created: false,
+      changed: true,
+      entry: { path: dir, state: 'paused', attachedAt: '2020-01-01T00:00:00.000Z' },
+    });
+    const registry = await loadRegistry(registryFile);
+    expect(registry.repos[slug]).toMatchObject({
+      path: dir,
+      state: 'paused',
+      attachedAt: '2020-01-01T00:00:00.000Z',
+    });
+  });
+
+  it('re-attaching a draining entry is rejected', async () => {
+    const dir = await checkoutWithConfig();
+    const registryFile = await seed({
+      [slug]: { path: dir, attachedAt: '2020-01-01T00:00:00.000Z', state: 'draining' },
+    });
+    const before = await readFile(registryFile, 'utf-8');
+
+    const result = await attachRepo(registryFile, { repo: slug, path: dir }, attachDeps);
+
+    expect(result).toMatchObject({ ok: false, reason: 'draining' });
+    expect(await readFile(registryFile, 'utf-8')).toBe(before);
+  });
+
+  it.each([['/ext/root'], [undefined]])(
+    're-attaching with a different stateRoot is rejected (stored %s)',
+    async (stored) => {
+      const dir = await tmpDir();
+      const registryFile = await seed({
+        [slug]: {
+          path: dir,
+          ...(stored ? { stateRoot: stored } : {}),
+          attachedAt: '2020-01-01T00:00:00.000Z',
+          state: 'active',
+        },
+      });
+      const before = await readFile(registryFile, 'utf-8');
+
+      const result = await attachRepo(registryFile, { repo: slug, path: dir, stateRoot: '/other/root' }, attachDeps);
+
+      expect(result).toMatchObject({ ok: false, reason: 'state-root-mismatch' });
+      expect(await readFile(registryFile, 'utf-8')).toBe(before);
+    },
+  );
+
+  it('attaching a detached tombstone revives it', async () => {
+    const dir = await checkoutWithConfig();
+    const registryFile = await seed({
+      [slug]: { path: dir, attachedAt: '2020-01-01T00:00:00.000Z', state: 'detached' },
+    });
+
+    const result = await attachRepo(registryFile, { repo: slug, path: dir }, attachDeps);
+
+    expect(result).toEqual({
+      ok: true,
+      created: true,
+      entry: { slug, path: dir, attachedAt: '2026-08-19T12:00:00.000Z', state: 'active' },
     });
   });
 
@@ -319,7 +405,7 @@ describe('attachRepo with a stateRoot', () => {
     const body = { repo: 'on-par/software-factory', path: dir };
     await attachRepo(registryFile, { ...body, stateRoot: '/ext/root' }, deps);
     const again = await attachRepo(registryFile, body, deps);
-    expect(again.ok).toBe(true);
+    expect(again).toMatchObject({ ok: true, created: false, changed: false });
     const registry = await loadRegistry(registryFile);
     expect(registry.repos['on-par/software-factory']?.stateRoot).toBe('/ext/root');
   });
