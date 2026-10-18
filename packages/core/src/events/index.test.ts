@@ -1,4 +1,4 @@
-import { appendFileSync, mkdtempSync, openSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -215,5 +215,15 @@ describe('followEvents', () => {
     appendFileSync(file, line({ type: 'build', msg: 'Starting build phase' }));
     await delay(50);
     expect(seen).toHaveLength(1);
+  });
+
+  it('startOffset delivers only events appended after that offset', async () => {
+    writeFileSync(file, line({ type: 'plan', msg: 'old' }));
+    const size = readFileSync(file).length;
+    const seen: FactoryEvent[] = [];
+    stops.push(followEvents(file, (e) => seen.push(e), { startOffset: size, pollMs: 10 }));
+    appendFileSync(file, line({ type: 'build', msg: 'new' }));
+    await waitFor(() => seen.length === 1);
+    expect(seen.map((e) => e.msg)).toEqual(['new']);
   });
 });

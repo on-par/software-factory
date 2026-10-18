@@ -1,10 +1,13 @@
 // packages/cli/src/cli/logs.test.ts
 
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { FactoryEvent } from '@on-par/factory-core';
+import { readEvents } from '@on-par/factory-core';
+import { createTempDirs } from '@on-par/factory-core/testing';
+import { eventSegmentFileName, eventSegmentsDir } from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { cmdLogs, eventMatchesIssue, renderEvent, runLogs } from './logs.js';
@@ -225,5 +228,115 @@ describe('cmdLogs', () => {
     appendFileSync(file, line({ type: 'plan', issue: '1', msg: 'after-stop' }));
     await delay(30);
     expect(written).toEqual(['[factory] plan #1: hi\n']);
+  });
+});
+
+const tmp = createTempDirs();
+
+describe('runLogs --limit/--since', () => {
+  let dir: string;
+  let file: string;
+  const total = 200_000;
+  const evLine = (i: number) =>
+    `{"ts":"2026-01-01T00:00:00.000Z","type":"plan","issue":"${i % 50}","msg":"event ${i}"}\n`;
+  const parse = (written: string[]) => written.map((w) => JSON.parse(w) as FactoryEvent & { cursor: string });
+
+  beforeEach(() => {
+    dir = tmp.makeSync('factory-logs-tail-');
+    file = join(dir, 'events.ndjson');
+    writeFileSync(file, Array.from({ length: total }, (_, i) => evLine(i)).join(''));
+  });
+
+  afterEach(async () => {
+    process.exitCode = undefined;
+    await tmp.cleanup();
+  });
+
+  const run = (opts: Parameters<typeof runLogs>[1]) => {
+    const { written, out } = outStub();
+    runLogs(file, { json: true, ...opts }, { out, env: {} });
+    return parse(written);
+  };
+
+  it('--limit 500 on a 200,000-event log prints the newest 500 oldest first and reads under 1 MB', () => {
+    const { written, out } = outStub();
+    let bytes = 0;
+    runLogs(file, { json: true, limit: 500 }, { out, env: {}, onBytesRead: (n) => (bytes += n) });
+    const events = parse(written);
+    expect(events).toHaveLength(500);
+    expect(events.map((e) => e.msg)).toEqual(Array.from({ length: 500 }, (_, i) => `event ${199_500 + i}`));
+    expect(events.every((e) => typeof e.cursor === 'string')).toBe(true);
+    expect(bytes).toBeGreaterThan(0);
+    expect(bytes).toBeLessThan(1_000_000);
+  }, 30_000);
+
+  it('--since the cursor of event 199,990 prints only the 10 later events, and the newest cursor prints nothing', () => {
+    const tail = run({ limit: 11 });
+    const after = run({ since: tail[0]!.cursor });
+    expect(after.map((e) => e.msg)).toEqual(Array.from({ length: 10 }, (_, i) => `event ${199_990 + i}`));
+    expect(run({ since: tail[10]!.cursor })).toEqual([]);
+  }, 30_000);
+
+  it('a cursor taken before rotation into state/logs/events/ returns exactly the 10 events appended after it', () => {
+    const [mid, last] = [run({ limit: 5 })[0]!, run({ limit: 1 })[0]!];
+    mkdirSync(eventSegmentsDir(file), { recursive: true });
+    renameSync(file, join(eventSegmentsDir(file), eventSegmentFileName(0)));
+    writeFileSync(file, Array.from({ length: 10 }, (_, i) => evLine(total + i)).join(''));
+    expect(run({ since: last.cursor }).map((e) => e.msg)).toEqual(
+      Array.from({ length: 10 }, (_, i) => `event ${total + i}`),
+    );
+    expect(run({ since: mid.cursor })).toHaveLength(4 + 10);
+    expect(run({ limit: 12 }).map((e) => e.msg)[0]).toBe(`event ${total - 2}`);
+  }, 30_000);
+
+  it('combines --issue with --limit', () => {
+    const events = run({ limit: 3, issue: '7' });
+    expect(events.map((e) => e.msg)).toEqual(['event 199857', 'event 199907', 'event 199957']);
+    expect(events.every((e) => e.issue === '7')).toBe(true);
+  }, 30_000);
+
+  it('--since with --limit pages forward', () => {
+    const first = run({ limit: 3 });
+    const page = run({ since: first[0]!.cursor, limit: 1 });
+    expect(page.map((e) => e.msg)).toEqual(['event 199998']);
+  }, 30_000);
+
+  it('human format has no cursor', () => {
+    const { written, out } = outStub();
+    runLogs(file, { limit: 1 }, { out, env: {} });
+    expect(written).toEqual(['[2026-01-01T00:00:00.000Z] [factory] plan #49: event 199999\n']);
+  });
+
+  it('--follow with --limit prints the page, then newly appended events', async () => {
+    const { written, out } = outStub();
+    const stop = runLogs(file, { json: true, limit: 2, follow: true }, { out, env: {}, pollMs: 10 });
+    appendFileSync(file, evLine(total));
+    await waitFor(() => written.length === 3);
+    stop();
+    expect(parse(written).map((e) => e.msg)).toEqual(['event 199998', 'event 199999', `event ${total}`]);
+  }, 30_000);
+
+  it('cmdLogs sets exit code 1 and writes a JSON error for bad cursors and limits', async () => {
+    const errors: string[] = [];
+    const deps = { eventsFile: file, out: outStub().out, env: {}, err: { write: (s: string) => errors.push(s) } };
+    await cmdLogs({ json: true, since: 'garbage' }, deps);
+    expect(process.exitCode).toBe(1);
+    expect(JSON.parse(errors[0]!).error).toBe('malformed-cursor');
+
+    const unknown = 'c1.' + Buffer.from(JSON.stringify({ v: 1, s: 12345, o: 0 })).toString('base64url');
+    await cmdLogs({ json: true, since: unknown }, deps);
+    expect(JSON.parse(errors[1]!).error).toBe('unknown-cursor');
+
+    await cmdLogs({ json: true, limit: 0 }, deps);
+    expect(JSON.parse(errors[2]!).error).toBe('invalid-limit');
+  });
+
+  it('without --limit or --since output equals the legacy readEvents rendering byte for byte', () => {
+    writeFileSync(file, evLine(1) + evLine(2));
+    for (const json of [true, false]) {
+      const { written, out } = outStub();
+      runLogs(file, json ? { json } : {}, { out, env: {} });
+      expect(written).toEqual(readEvents(file).map((e) => renderEvent(e, { json, color: false }) + '\n'));
+    }
   });
 });
