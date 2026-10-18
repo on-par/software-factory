@@ -1144,7 +1144,7 @@ describe('shipPhase CI watch', () => {
   });
 
   describe('CI wait visibility (#2386)', () => {
-    async function runShip(sequence: any[][], extra: { statusTotal?: number; ciNoChecksGraceMs?: number } = {}) {
+    async function runShip(sequence: any[][], extra: { statusTotal?: number } = {}) {
       const { octokit } = createWatchOctokit(sequence);
       (octokit as any).rest.repos = {
         getCombinedStatusForRef: async () => ({
@@ -1162,7 +1162,6 @@ describe('shipPhase CI watch', () => {
           branch: 'ship-it/123-ci-poll',
           octokit: octokit as any,
           watchCI: true,
-          ciNoChecksGraceMs: extra.ciNoChecksGraceMs ?? 90_000,
           log: (type, msg) => logs.push([type, msg]),
           run: async (c: string) => remoteHeadStub(c) ?? { stdout: '' },
         });
@@ -1174,16 +1173,11 @@ describe('shipPhase CI watch', () => {
       }
     }
 
-    it('logs no CI checks and marks ready within the grace period plus one poll when the PR head has no checks or statuses', async () => {
-      const { result, logs, elapsed } = await runShip([[]]);
+    it('keeps waiting past the old grace when the head has no checks', async () => {
+      const { result, logs } = await runShip([[]]);
 
-      expect(result).toEqual({ ok: true, prNumber: 123, ciOutcome: 'no-checks' });
-      expect(logs).toContainEqual([
-        'ship',
-        'no CI checks found on on-par/software-factory for deadbeef; skipping CI wait',
-      ]);
-      expect(logs).toContainEqual(['ready', 'PR #123 ready for review (CI skipped: no checks found)']);
-      expect(elapsed).toBeLessThanOrEqual(90_000 + 60_000);
+      expect(result).toMatchObject({ ok: true, prNumber: 123, ciOutcome: 'timeout' });
+      expect(logs.some(([, msg]) => msg.includes('skipping CI wait'))).toBe(false);
     });
 
     it('logs a CI timeout line and still marks the PR ready', async () => {
@@ -1204,12 +1198,6 @@ describe('shipPhase CI watch', () => {
       );
       expect(lines.length).toBeGreaterThanOrEqual(1);
       expect(lines.length).toBeLessThanOrEqual(11);
-    });
-
-    it('ciNoChecksGraceMs: 0 disables the early exit', async () => {
-      const { result } = await runShip([[]], { ciNoChecksGraceMs: 0 });
-
-      expect(result).toMatchObject({ ok: true, ciOutcome: 'timeout' });
     });
   });
 
