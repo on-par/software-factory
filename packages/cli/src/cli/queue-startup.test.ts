@@ -1,10 +1,11 @@
 // packages/cli/src/cli/queue-startup.test.ts — the startup stale lane-claim sweep never throws (#3065)
 
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { getFactoryPaths } from '@on-par/factory-core';
+import type { Octokit } from '@octokit/rest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { sweepLaneClaims } from './queue-startup.js';
@@ -36,5 +37,20 @@ describe('sweepLaneClaims', () => {
       }),
     ).resolves.toBeUndefined();
     expect(await readFile(paths.events, 'utf8')).toContain('lane claim sweep failed: token store unreadable');
+  });
+
+  it('releases a crash-left claim for a queued issue with no PR (holder-not-running)', async () => {
+    const claim = { repo: 'o/r', issue: 247, files: ['StatusReport.swift'], claimedAt: '2026-10-18T06:53:00.000Z' };
+    await writeFile(paths.laneFiles, JSON.stringify({ version: 1, claims: { 'o/r#247': claim } }));
+    const rest = {
+      issues: { get: async () => ({ data: { state: 'open', labels: ['factory:queued'], title: 'Status report' } }) },
+      pulls: { list: async () => ({ data: [] }) },
+    };
+    const octokit: Octokit = Object.assign({} as Octokit, { rest });
+    await sweepLaneClaims(paths, 'o/r', () => octokit);
+    expect(JSON.parse(await readFile(paths.laneFiles, 'utf8')).claims).toEqual({});
+    const events = await readFile(paths.events, 'utf8');
+    expect(events).toContain('lane_file_claim_reaped');
+    expect(events).toContain('holder-not-running');
   });
 });
