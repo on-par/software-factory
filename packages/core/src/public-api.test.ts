@@ -322,6 +322,7 @@ const PUBLIC_API_KEYS = [
   'fetchSubscriptionUsage',
 ];
 const AGENT_JOB_KEYS = ['resolveHostMaxAgentJobs', 'hostAgentJobsDir', 'withHostAgentJobLease']; // #3047
+const EXTRA_INTERNAL_KEYS = [...AGENT_JOB_KEYS, 'agentInvocationsFromEvents', 'computeTokenCoverage']; // #3126
 const INTERNAL_API_KEYS = [
   'openCodeVersion',
   'DEFAULT_CI_DEADLINE_MS',
@@ -836,9 +837,8 @@ const TESTING_API_KEYS = [
   'simRegressionFixture',
   'simSpecWithObjectInterface',
 ];
-// The same KPI functions the root export documents (see the "// KPIs" block in
-// PUBLIC_API_KEYS above), re-exported standalone from a Node-dep-free entry point so
-// browser bundlers can import them without pulling in the root's harness/router deps.
+// The root export's "// KPIs" block (PUBLIC_API_KEYS above), re-exported standalone from a
+// Node-dep-free entry point so browser bundlers skip the root's harness/router deps.
 const KPIS_API_KEYS = [
   'appendKpiHistoryLine',
   'computeHealthKpis',
@@ -891,7 +891,7 @@ describe('public API surface (ADR-0004)', () => {
     }
   });
   it('./internal exposes exactly the documented internal API', () => {
-    expect(Object.keys(internalApi).sort()).toEqual([...INTERNAL_API_KEYS, ...AGENT_JOB_KEYS].sort());
+    expect(Object.keys(internalApi).sort()).toEqual([...INTERNAL_API_KEYS, ...EXTRA_INTERNAL_KEYS].sort());
   });
   it('./testing exposes exactly the documented testing API', () => {
     expect(Object.keys(testingApi).sort()).toEqual([...TESTING_API_KEYS, 'createTempDirs', 'withTempDir'].sort());

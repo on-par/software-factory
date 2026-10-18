@@ -2,6 +2,9 @@
 
 import type { CostEntry, FactoryEvent, ReadinessInfo, ReworkCauseTag, RetryCause } from '../types/index.js';
 import { isHumanEvent } from './human.js';
+import { phaseOfCostEntry } from './phase.js';
+
+export { phaseOfCostEntry } from './phase.js';
 
 /** A factory-seen merge (`merged`, `landed`) or a reconstructed human merge (#2342). */
 function isMergeEvent(event: FactoryEvent): boolean {
@@ -224,34 +227,6 @@ interface RunStats {
   defectSignals: number;
   lane: string | null;
   skipped: boolean;
-}
-
-/** Maps a CostEntry's `task` to the pipeline phase it billed against (#614). */
-const TASK_PHASE: Record<string, string> = {
-  plan: 'plan',
-  triage: 'plan',
-  build_codex: 'build',
-  build_claude: 'build',
-  check_compile: 'check',
-  check_tests: 'check',
-  check_lint: 'check',
-  check_accessibility: 'check',
-  check_links: 'check',
-  check_custom: 'check',
-  check_design: 'check',
-  dispute_resolution: 'check',
-  review_pr: 'ship',
-  security_review: 'ship',
-  classify_pr: 'ship',
-};
-
-/** Attributes one CostEntry to a phase, or null if the task isn't mapped.
- *  CHECK's rework-repair calls reuse the `build_claude` task (they run the
- *  same worker harness) but are tagged `retryCause: 'checker'`, so that
- *  signal — not the task name — decides they belong to `check` (#614). */
-export function phaseOfCostEntry(entry: CostEntry): string | null {
-  if (entry.retryCause === 'checker') return 'check';
-  return TASK_PHASE[entry.task] ?? null;
 }
 
 /** Which provider's bill a cost row lands on (#426). Deliberately a *spend* split,

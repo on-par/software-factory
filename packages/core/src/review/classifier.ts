@@ -47,6 +47,7 @@ export interface PrClassifierClaim {
 }
 
 export interface PrShadowInput {
+  onLog?: (msg: string) => void;
   worktree: string;
   fallbackBaseRef?: string;
   issueTitle: string;
@@ -285,6 +286,7 @@ export async function classifyPrShadow(
       result = await input.router.run('classify_pr', prompt, {
         worktree: input.worktree,
         timeoutSeconds: CLASSIFIER_TIMEOUT_SECONDS,
+        ...(input.onLog ? { onLog: input.onLog } : {}),
         ...(input.modelPin ? { modelOverride: input.modelPin } : {}),
       });
     } catch (err) {

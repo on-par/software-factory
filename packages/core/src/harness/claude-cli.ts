@@ -20,7 +20,7 @@ export type ClaudeExecFn = ExecFn;
  *  must never cause a run to fail. `isError`/`subtype` surface the CLI's own
  *  error signal (e.g. max-turns exceeded) so a truncated error response isn't
  *  mistaken for a completed result (#424 code review). */
-function parseResultEnvelope(stdout: string): {
+export function parseResultEnvelope(stdout: string): {
   output: string;
   usage?: HarnessUsage;
   isError?: boolean;

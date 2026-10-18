@@ -40,6 +40,24 @@ claude_sentinel_check "$CLAUDE_SENTINEL_LOG"
 
 ## Recorded agents
 
+### claude-cli
+
+Version: claude 2.1 (result-envelope shape read by `parseResultEnvelope` in `packages/core/src/harness/claude-cli.ts`)
+
+Captured with: `claude -p --output-format json` (prompt on stdin).
+
+Files: `success.stdout`.
+
+claude-cli has no `bin/` shim, because `sentinel/claude` owns that name. The recording is read directly by `packages/core/src/harness/usage-fixtures.test.ts`.
+
+#### Refresh claude-cli
+
+1. Run `claude --version` and note the version.
+2. In a scratch git repo, pipe a small prompt into the command above, with `> success.stdout`.
+3. Keep the single `result` envelope with its `usage` block and drop any session ids.
+4. Overwrite `recordings/claude-cli/success.stdout` and update the Version line above.
+5. Run `npx vitest run scripts/fixtures/agents/agents.test.ts packages/core/src/harness/usage-fixtures.test.ts` from the repo root.
+
 ### codex
 
 Version: codex-cli 0.155.1
