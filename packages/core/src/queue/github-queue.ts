@@ -7,6 +7,7 @@ import type { Octokit } from '@octokit/rest';
 
 import { knownRepoLabels } from './label-cache.js';
 import { orderCollisionAt, scanLaneOrders, type OrderCollision } from './order-collision.js';
+import { addQueuedOnRelease } from './release-queued.js';
 import type { QueueEntry, QueueSnapshot, QueueSnapshotEntry } from './index.js';
 import {
   formatQueueOrderConflict,
@@ -181,7 +182,7 @@ function labelExistsError(err: unknown): boolean {
   return view.status === 422;
 }
 
-function queueOrderLabelSpec(position: number): QueueLabelSpec {
+export function queueOrderLabelSpec(position: number): QueueLabelSpec {
   return {
     name: queueOrderLabel(position),
     color: QUEUE_ORDER_LABEL_COLOR,
@@ -532,7 +533,9 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
 
     if (outcome === 'done') return;
 
-    const target = outcome === 'parked' ? PARKED_LABEL : QUEUED_LABEL;
+    if (outcome === 'queued') return addQueuedOnRelease(client, owner, repo, issue, current);
+
+    const target = PARKED_LABEL;
     if (!current.includes(target)) {
       const spec = queueLabelSpecs('release', claimantId).find((s) => s.name === target);
       if (spec) {

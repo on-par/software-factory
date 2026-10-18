@@ -117,7 +117,9 @@ describe('createGithubQueueBackend', () => {
   it('reap() delegates unchanged: releases an expired-lease claim back to factory:queued', async () => {
     const claimedLabel = claimedByLabel('other-claimant');
     const expiresLabel = claimExpiresLabel(NOW_SECONDS - 60);
-    const { state, client } = createFakeStore([{ number: 1, labels: [IN_PROGRESS_LABEL, claimedLabel, expiresLabel] }]);
+    const { state, client } = createFakeStore([
+      { number: 1, labels: [IN_PROGRESS_LABEL, claimedLabel, expiresLabel, laneLabel('build'), queueOrderLabel(1)] },
+    ]);
     const backend = createGithubQueueBackend({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1', now });
 
     const results = await backend.reap();

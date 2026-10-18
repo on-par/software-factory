@@ -114,7 +114,7 @@ describe('releaseStaleClaims', () => {
     const label2 = claimExpiresLabel(NOW_SECONDS - 30);
     const { state, client } = createFakeStore([
       { number: 1, labels: [IN_PROGRESS_LABEL, label1] },
-      { number: 2, labels: [IN_PROGRESS_LABEL, label2] },
+      { number: 2, labels: [IN_PROGRESS_LABEL, label2, 'factory:lane:default', 'factory:order:1'] },
     ]);
     const originalRemoveLabel = client.removeLabel.bind(client);
     client.removeLabel = async (input) => {
@@ -129,5 +129,19 @@ describe('releaseStaleClaims', () => {
       { issue: 2, label: label2, expiresAt: NOW_SECONDS - 30, released: true },
     ]);
     expect(state.get(2)!.has('factory:queued')).toBe(true);
+  });
+
+  it('leaves a parked issue with an expired lease parked and unqueued (#3193)', async () => {
+    const { state, client } = createFakeStore([
+      {
+        number: 1,
+        labels: [IN_PROGRESS_LABEL, claimExpiresLabel(NOW_SECONDS - 60), 'factory:parked', 'factory:lane:self-repair'],
+      },
+    ]);
+
+    const results = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now });
+
+    expect(results[0]?.released).toBe(true);
+    expect([...(state.get(1) ?? [])].sort()).toEqual(['factory:lane:self-repair', 'factory:parked']);
   });
 });
