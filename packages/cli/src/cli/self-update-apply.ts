@@ -1,6 +1,6 @@
 // packages/cli/src/cli/self-update-apply.ts — factory self-update --to <version> (#2355)
 import { execFile } from 'node:child_process';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 
 import {
   daemonRuntimePaths,
@@ -100,10 +100,16 @@ function lastLine(s: string): string | null {
   return l.at(-1) ?? null;
 }
 
-function defaultApplyExec(): ApplyExec {
+/** `env` with `binDir` first on PATH, so `#!/usr/bin/env node` scripts there run under launchd's minimal PATH (#3122). */
+export function prependPath(binDir: string, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const rest = (env.PATH ?? '').split(delimiter).filter((p) => p !== '' && p !== binDir);
+  return { ...env, PATH: [binDir, ...rest].join(delimiter) };
+}
+
+function defaultApplyExec(binDir: string): ApplyExec {
   return (cmd, args) =>
     new Promise((res) => {
-      execFile(cmd, args, { maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+      execFile(cmd, args, { maxBuffer: 16 * 1024 * 1024, env: prependPath(binDir) }, (error, stdout, stderr) => {
         const raw = error ? (error as { code?: unknown }).code : 0;
         res({ code: typeof raw === 'number' ? raw : error ? 1 : 0, stdout: String(stdout), stderr: String(stderr) });
       });
@@ -116,9 +122,9 @@ export async function applySelfUpdate(
   deps: SelfUpdateApplyDeps = {},
 ): Promise<{ code: number; result: SelfUpdateApplyResult }> {
   const install = detectInstall(deps.install);
-  const exec = deps.exec ?? defaultApplyExec();
   const to = opts.to.trim().replace(/^v/, '');
   const prefix = install.prefix;
+  const exec = deps.exec ?? defaultApplyExec(join(prefix, 'bin'));
   const npm = join(prefix, 'bin', 'npm');
   const node = join(prefix, 'bin', 'node');
   const cli = join(prefix, 'lib', 'node_modules', '@on-par', 'factory-cli', 'dist', 'cli.js');
