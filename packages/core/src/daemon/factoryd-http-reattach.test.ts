@@ -1,10 +1,10 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import http from 'node:http';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { createFactorydServer, type FactorydServer } from './factoryd-http.js';
 
 function get(port: number, path: string, method: string, body: string): Promise<{ status: number; body: string }> {
@@ -22,19 +22,20 @@ function get(port: number, path: string, method: string, body: string): Promise<
 }
 
 describe('POST /repos re-attaching a registered slug (#3200)', () => {
+  const tempDirs = createTempDirs();
   let dir: string;
   let registryFile: string;
   let factoryd: FactorydServer | undefined;
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'factoryd-reattach-'));
+    dir = await tempDirs.make('factoryd-reattach-');
     registryFile = join(dir, 'registry.json');
   });
 
   afterEach(async () => {
     await factoryd?.stop();
     factoryd = undefined;
-    await rm(dir, { recursive: true, force: true });
+    await tempDirs.cleanup();
   });
 
   const slug = 'on-par/software-factory';
