@@ -1,24 +1,20 @@
 // packages/core/src/run/lane-file-guard-holder.test.ts — a claim left by a crashed run is reaped (#1618)
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { createGithubLaneClaimStalenessProbe, LaneFileGuard } from './lane-file-guard.js';
 
-const tempDirs = new Set<string>();
+const tempDirs = createTempDirs();
 
-afterEach(async () => {
-  for (const dir of tempDirs) await rm(dir, { recursive: true, force: true });
-  tempDirs.clear();
-});
+afterEach(() => tempDirs.cleanup());
 
 async function tmpFile(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'lane-file-guard-holder-test-'));
-  tempDirs.add(dir);
+  const dir = await tempDirs.make('lane-file-guard-holder-test-');
   return join(dir, 'lane-files.json');
 }
 
