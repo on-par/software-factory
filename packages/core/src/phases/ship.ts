@@ -23,15 +23,13 @@ import {
 import { readRisk, readSpecBody } from './ship-spec.js';
 import type { CheckSummary, CiFailureEvidence } from '../types/index.js';
 import { collectCiFailureEvidence } from '../utils/ci-evidence.js';
-import {
-  DEFAULT_CI_DEADLINE_MS,
-  type InfraRerunOutcome,
-  resolveCiNoChecksGraceMs,
-  watchChecksWithInfraRerun,
-} from '../utils/ci-watch.js';
+import { DEFAULT_CI_DEADLINE_MS, type InfraRerunOutcome, watchChecksWithInfraRerun } from '../utils/ci-watch.js';
 import { shellEscape } from '../utils/index.js';
 import { GITHUB_ISSUE_SOURCE } from '../work/github-issue.js';
 import type { WorkRequest } from '../work/index.js';
+
+/** Ship opens PRs against, and watches required checks of, this branch. */
+const SHIP_BASE_BRANCH = 'main';
 
 const exec = promisify(execCb);
 
@@ -81,8 +79,6 @@ async function shipPhaseImpl(opts: {
   run?: CommandRunner;
   /** Runs the gh rerun argv for the CI infra rescue (#2365); default runCommand. */
   rerun?: (argv: readonly string[]) => Promise<{ ok: boolean }>;
-  /** Grace before ship stops watching a PR head with no check runs and no statuses (#2386); default resolveCiNoChecksGraceMs(), 0 disables. */
-  ciNoChecksGraceMs?: number;
   approvalGate?: ApprovalGate;
   checkSummary?: CheckSummary;
   specPath?: string;
@@ -385,7 +381,7 @@ async function shipPhaseImpl(opts: {
         owner,
         repo: repoName,
         head: branch,
-        base: 'main',
+        base: SHIP_BASE_BRANCH,
         title: prTitle,
         draft: true,
         body: renderPrBody({
@@ -457,18 +453,19 @@ async function shipPhaseImpl(opts: {
         ref: watchRef,
         rerun,
         deadlineMs: DEFAULT_CI_DEADLINE_MS,
-        noChecksGraceMs: opts.ciNoChecksGraceMs ?? resolveCiNoChecksGraceMs(),
-        onProgress: ({ total, completed, pending, remainingMs }) =>
+        probeNoCi: true,
+        requiredChecks: { branch: SHIP_BASE_BRANCH },
+        onProgress: ({ total, completed, pending, remainingMs, waitingFor }) =>
           log(
             'ship',
-            `CI for PR #${prNumber}: ${pending} pending, ${completed}/${total} completed, ${Math.ceil(remainingMs / 60_000)} min left before the CI timeout`,
+            waitingFor?.length
+              ? `CI for PR #${prNumber}: waiting for required check${waitingFor.length > 1 ? 's' : ''} ${waitingFor.map((w) => `${w.name} (${w.state})`).join(', ')}, ${Math.ceil(remainingMs / 60_000)} min left`
+              : `CI for PR #${prNumber}: ${pending} pending, ${completed}/${total} completed, ${Math.ceil(remainingMs / 60_000)} min left before the CI timeout`,
           ),
-        onNoChecks: ({ sha, reason, defaultBranch }) =>
+        onNoChecks: ({ sha, defaultBranch }) =>
           log(
             'ship',
-            reason === 'no-ci-configured'
-              ? `no CI configured on ${repo} (no workflow files on ${sha} and no checks or statuses on recent ${defaultBranch} commits); skipping CI wait`
-              : `no CI checks found on ${repo} for ${sha}; skipping CI wait`,
+            `no CI configured on ${repo} (no workflow files on ${sha} and no checks or statuses on recent ${defaultBranch} commits); skipping CI wait`,
           ),
         onRescued: ({ headSha, runIds }) =>
           log(

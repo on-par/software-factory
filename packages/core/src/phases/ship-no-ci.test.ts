@@ -48,7 +48,6 @@ describe('ship no-CI repo (#2488)', () => {
         branch: 'ship-it/123-ci-poll',
         octokit: noCiOctokit() as any,
         watchCI: true,
-        ciNoChecksGraceMs: 90_000,
         log: (type, msg) => logs.push([type, msg]),
         run: matchingRemote,
       });

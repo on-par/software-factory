@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { evaluatePushChecks, evaluateRequiredChecks, fetchRequiredChecksVerdict } from './required-checks.js';
+import {
+  classifyRequiredChecks,
+  evaluatePushChecks,
+  evaluateRequiredChecks,
+  fetchRequiredChecksVerdict,
+  fetchRequiredContexts,
+} from './required-checks.js';
 
 const run = (name: string, status: string | null, conclusion: string | null) => ({ name, status, conclusion });
 
@@ -198,5 +204,94 @@ describe('evaluatePushChecks', () => {
 
   it('is green when every run succeeded', () => {
     expect(evaluatePushChecks([run('a', 'completed', 'success')]).green).toBe(true);
+  });
+});
+
+describe('classifyRequiredChecks', () => {
+  it('is green when every required context completed with success', () => {
+    expect(classifyRequiredChecks(['a'], [run('a', 'completed', 'success')])).toEqual({
+      state: 'green',
+      missing: [],
+      pending: [],
+      failed: [],
+    });
+  });
+
+  it('is pending with the missing contexts when a required check has no run', () => {
+    expect(classifyRequiredChecks(['verify'], [run('lint', 'completed', 'success')])).toEqual({
+      state: 'pending',
+      missing: ['verify'],
+      pending: [],
+      failed: [],
+    });
+  });
+
+  it('is pending for a queued or in-progress run', () => {
+    expect(
+      classifyRequiredChecks(['a', 'b'], [run('a', 'queued', null), run('b', 'in_progress', null)]).pending,
+    ).toEqual(['a', 'b']);
+  });
+
+  it('lists completed runs whose conclusion is not success as failed', () => {
+    const rs = classifyRequiredChecks(
+      ['a', 'b', 'c'],
+      [run('a', 'completed', 'failure'), run('b', 'completed', 'skipped'), run('c', 'completed', null)],
+    );
+    expect(rs).toEqual({ state: 'failed', missing: [], pending: [], failed: ['a', 'b', 'c'] });
+  });
+
+  it('lets failed win over pending and dedupes the required list', () => {
+    const rs = classifyRequiredChecks(['a', 'b', 'a'], [run('a', 'completed', 'failure')]);
+    expect(rs).toEqual({ state: 'failed', missing: ['b'], pending: [], failed: ['a'] });
+  });
+
+  it('returns pending with empty arrays for an empty list', () => {
+    expect(classifyRequiredChecks([], [run('a', 'completed', 'success')])).toEqual({
+      state: 'pending',
+      missing: [],
+      pending: [],
+      failed: [],
+    });
+  });
+});
+
+describe('fetchRequiredContexts', () => {
+  const args = { owner: 'o', repo: 'r', branch: 'main' };
+  const notFound = () => Object.assign(new Error('Not Found'), { status: 404 });
+
+  it('returns the deduped protection + rulesets union', async () => {
+    const octokit: any = {
+      rest: {
+        repos: {
+          getStatusChecksProtection: async () => ({ data: { contexts: ['a'], checks: [{ context: 'b' }] } }),
+          getBranchRules: async () => ({
+            data: [
+              {
+                type: 'required_status_checks',
+                parameters: { required_status_checks: [{ context: 'b' }, { context: 'c' }] },
+              },
+              { type: 'other' },
+            ],
+          }),
+        },
+      },
+    };
+    expect(await fetchRequiredContexts(octokit, args)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('returns [] when both lookups 404', async () => {
+    const octokit: any = {
+      rest: {
+        repos: {
+          getStatusChecksProtection: async () => {
+            throw notFound();
+          },
+          getBranchRules: async () => {
+            throw notFound();
+          },
+        },
+      },
+    };
+    expect(await fetchRequiredContexts(octokit, args)).toEqual([]);
   });
 });

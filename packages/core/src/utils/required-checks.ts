@@ -1,4 +1,4 @@
-// src/utils/required-checks.ts — strict "every required check succeeded" verdict for a commit (#3186); #3195 adds an opt-in push-event fallback when no checks are required
+// src/utils/required-checks.ts — strict "every required check succeeded" verdict for a commit (#3186); #3195 adds an opt-in push-event fallback when no checks are required; #3206 adds a three-way classifier and the shared required-contexts lookup
 
 import type { Octokit } from '@octokit/rest';
 
@@ -55,13 +55,44 @@ function httpStatus(err: unknown): number | undefined {
   return (err as { status?: number } | null)?.status;
 }
 
-/** Required check contexts from branch protection plus rulesets, checked against the check runs on the exact SHA. Throws on unexpected API errors. */
-export async function fetchRequiredChecksVerdict(
+export interface RequiredChecksState {
+  state: 'green' | 'pending' | 'failed';
+  /** Required contexts with no run yet. */
+  missing: string[];
+  /** Required contexts with a run that is not completed. */
+  pending: string[];
+  /** Required contexts with a completed run whose conclusion is not `success`. */
+  failed: string[];
+}
+
+/**
+ * Three-way view of the required contexts: failed beats pending beats green. Green means what
+ * `evaluateRequiredChecks(...).green` means. An empty list returns `pending`, so callers must check emptiness themselves.
+ */
+export function classifyRequiredChecks(
+  required: readonly string[],
+  runs: readonly CheckRunLike[],
+): RequiredChecksState {
+  const result: RequiredChecksState = { state: 'pending', missing: [], pending: [], failed: [] };
+  for (const ctx of new Set(required)) {
+    const matching = runs.filter((r) => r.name === ctx);
+    if (matching.length === 0) result.missing.push(ctx);
+    else if (matching.some((r) => r.status !== 'completed')) result.pending.push(ctx);
+    else if (matching.some((r) => r.conclusion !== 'success')) result.failed.push(ctx);
+  }
+  if (new Set(required).size === 0) return result;
+  if (result.failed.length > 0) result.state = 'failed';
+  else if (result.missing.length + result.pending.length > 0) result.state = 'pending';
+  else result.state = 'green';
+  return result;
+}
+
+/** Required check contexts from branch protection plus rulesets (deduped). Throws on unexpected API errors. */
+export async function fetchRequiredContexts(
   octokit: Octokit,
-  args: { owner: string; repo: string; branch: string; sha: string },
-  opts?: { pushFallback?: boolean },
-): Promise<RequiredChecksVerdict> {
-  const { owner, repo, branch, sha } = args;
+  args: { owner: string; repo: string; branch: string },
+): Promise<string[]> {
+  const { owner, repo, branch } = args;
   const required: string[] = [];
   try {
     const { data } = await octokit.rest.repos.getStatusChecksProtection({ owner, repo, branch });
@@ -78,6 +109,17 @@ export async function fetchRequiredChecksVerdict(
   } catch (err) {
     if (httpStatus(err) !== 404) throw err;
   }
+  return [...new Set(required)];
+}
+
+/** Required check contexts from branch protection plus rulesets, checked against the check runs on the exact SHA. Throws on unexpected API errors. */
+export async function fetchRequiredChecksVerdict(
+  octokit: Octokit,
+  args: { owner: string; repo: string; branch: string; sha: string },
+  opts?: { pushFallback?: boolean },
+): Promise<RequiredChecksVerdict> {
+  const { owner, repo, branch, sha } = args;
+  const required = await fetchRequiredContexts(octokit, { owner, repo, branch });
   const { data: checks } = await octokit.rest.checks.listForRef({
     owner,
     repo,

@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { noChecksVerdictMs } from '@on-par/factory-core/internal';
 import { describe, expect, it, vi } from 'vitest';
 import { main } from './cli/index.js';
 
@@ -17,16 +16,13 @@ const GUIDE = 'docs/agents.md';
 const CLI_PREFIX = 'https://github.com/on-par/software-factory/blob/main/';
 type ReadmeKind = 'root' | 'cli';
 
-function noCiWaitProblems(text: string, verdictMs: number, slackMs: number): string[] {
-  const m = /waits about (\d+) s, logs `no CI checks found`/.exec(text);
-  if (!m) return ['missing "waits about N s, logs `no CI checks found`" sentence'];
-  const ms = Number(m[1]) * 1000;
-  if (ms < verdictMs || ms >= verdictMs + slackMs) {
-    return [
-      `README says ${m[1]} s; no-checks verdict lands at ${verdictMs / 1000} s (allow up to ${(verdictMs + slackMs) / 1000} s exclusive)`,
-    ];
+function noCiWaitProblems(text: string): string[] {
+  const problems: string[] = [];
+  if (!text.includes('no checks reported yet counts as pending')) {
+    problems.push('missing "no checks reported yet counts as pending" sentence');
   }
-  return [];
+  if (text.includes('logs `no CI checks found`')) problems.push('still claims SHIP logs `no CI checks found`');
+  return problems;
 }
 
 function rootPrerequisites(text: string): string | undefined {
@@ -452,16 +448,13 @@ describe('README Quick start agent parity guard self-test', () => {
 });
 
 describe('README no-CI wait', () => {
-  it('README.md no-CI wait figure matches the CI-wait verdict time within one poll interval', () => {
-    expect(noCiWaitProblems(rootReadme, noChecksVerdictMs(), noChecksVerdictMs(1))).toEqual([]);
+  it('README.md says a PR with no checks yet counts as pending', () => {
+    expect(noCiWaitProblems(rootReadme)).toEqual([]);
   });
 
-  it('flags a stale figure or a missing sentence and accepts a matching one', () => {
-    expect(noCiWaitProblems('it waits about 90 s, logs `no CI checks found`, and marks', 105_000, 15_000)).toHaveLength(
-      1,
-    );
-    expect(noCiWaitProblems('', 105_000, 15_000)).toHaveLength(1);
-    expect(noCiWaitProblems('waits about 110 s, logs `no CI checks found`', 105_000, 15_000)).toEqual([]);
-    expect(noCiWaitProblems('waits about 120 s, logs `no CI checks found`', 105_000, 15_000)).toHaveLength(1);
+  it('flags a missing sentence or the stale skip claim and accepts the new one', () => {
+    expect(noCiWaitProblems('')).toHaveLength(1);
+    expect(noCiWaitProblems('no checks reported yet counts as pending; it logs `no CI checks found`')).toHaveLength(1);
+    expect(noCiWaitProblems('a PR with no checks reported yet counts as pending')).toEqual([]);
   });
 });

@@ -1,14 +1,19 @@
 // src/utils/ci-watch.ts — shared CI watcher with exponential backoff
 import type { Octokit } from '@octokit/rest';
 import { runCommand } from './command-runner.js';
+import { commitStatusCount, detectNoCiConfigured } from './ci-watch-no-ci.js';
+import { type RequiredWaitingFor, readRequiredState, resolveRequiredContexts } from './ci-watch-required.js';
+
+export { detectNoCiConfigured };
 
 /** watchChecks reports exactly one of four outcomes: 'success' (every check run passed and the
  *  set was final — see `settleMs` / `minChecks`), 'failure' (a completed check run reported a
  *  non-passing conclusion), 'timeout' (no verdict was reached — the deadline elapsed, no check
  *  runs ever registered, or repeated API failures exhausted the retry budget), or 'no-checks'
- *  (returned only when `noChecksGraceMs` > 0 and the ref has zero check runs and zero commit
- *  statuses, either once the grace period has passed or at once when the up-front no-CI probe
- *  proves the repo has no CI configured, #2488). It never rejects. */
+ *  (returned only when the ref has zero check runs and zero commit statuses: at once from the
+ *  up-front no-CI probe when `probeNoCi` or `noChecksGraceMs` > 0 and it proves the repo has no CI
+ *  configured, #2488, or once the grace period has passed when `noChecksGraceMs` > 0). It never
+ *  rejects. */
 export type CiOutcome = 'success' | 'failure' | 'timeout' | 'no-checks';
 
 export const DEFAULT_CI_DEADLINE_MS = 600_000;
@@ -23,6 +28,8 @@ export interface CiWatchProgress {
   pending: number;
   elapsedMs: number;
   remainingMs: number;
+  /** Required checks the watch is still waiting for (#3206); set only when some are pending. */
+  waitingFor?: RequiredWaitingFor;
 }
 
 /** Passed to `onNoChecks` when the watch ends 'no-checks'. */
@@ -60,10 +67,16 @@ export interface WatchChecksOptions {
    *  commits) ends 'no-checks' on the first such poll without waiting (#2488).
    *  Default 0, which disables the early exit and the probe. */
   noChecksGraceMs?: number;
+  /** The branch whose required checks (protection plus rulesets) gate success (#3206). While any
+   *  is missing or running the watch keeps polling. Unset, or a branch with none, keeps the
+   *  all-check-runs rule. */
+  requiredChecks?: { branch: string };
+  /** Run the #2488 no-CI probe without the grace-elapsed exit. Default false. */
+  probeNoCi?: boolean;
   /** Minimum gap between onProgress calls. Default 60_000. */
   progressIntervalMs?: number;
-  /** Called after a successful poll that sees at least one check run and does not end the watch,
-   *  at most once per progressIntervalMs. */
+  /** Called after a successful poll that sees at least one check run (or a pending required check)
+   *  and does not end the watch, at most once per progressIntervalMs. */
   onProgress?: (p: CiWatchProgress) => void;
   /** Called once, just before the watch returns 'no-checks'. */
   onNoChecks?: (info: CiNoChecksInfo) => void;
@@ -164,67 +177,6 @@ export function noChecksVerdictMs(
   return t;
 }
 
-/** Commit-status count and resolved SHA for a ref, or null when it cannot be determined. */
-async function commitStatusCount(
-  octokit: Octokit,
-  owner: string,
-  repo: string,
-  ref: string,
-): Promise<{ total: number; sha: string } | null> {
-  try {
-    const { data } = await octokit.rest.repos.getCombinedStatusForRef({ owner, repo, ref, per_page: 1 });
-    return { total: data.total_count ?? data.statuses?.length ?? 0, sha: data.sha ?? ref };
-  } catch {
-    return null;
-  }
-}
-
-const DEFAULT_NO_CI_RECENT_COMMITS = 5;
-
-/** Probes whether a repo has no CI configured: no workflow files on `ref`, and no check runs or
- *  commit statuses on its recent default-branch commits (#2488). Fails closed: only proven absence
- *  returns non-null; any error, missing field or empty history returns null. Never rejects. */
-export async function detectNoCiConfigured(
-  octokit: Octokit,
-  owner: string,
-  repo: string,
-  ref: string,
-  recentCommits = DEFAULT_NO_CI_RECENT_COMMITS,
-): Promise<{ defaultBranch: string } | null> {
-  try {
-    try {
-      const { data } = await octokit.rest.repos.getContent({ owner, repo, path: '.github/workflows', ref });
-      if (!Array.isArray(data) || data.some((e) => e.type === 'file')) return null;
-    } catch (err) {
-      if ((err as { status?: number }).status !== 404) return null;
-    }
-    const { data: repoData } = await octokit.rest.repos.get({ owner, repo });
-    const defaultBranch = repoData.default_branch;
-    if (typeof defaultBranch !== 'string' || defaultBranch === '') return null;
-    const { data: commits } = await octokit.rest.repos.listCommits({
-      owner,
-      repo,
-      sha: defaultBranch,
-      per_page: recentCommits,
-    });
-    if (!commits || commits.length === 0) return null;
-    for (const c of commits) {
-      const { data: checks } = await octokit.rest.checks.listForRef({ owner, repo, ref: c.sha, per_page: 1 });
-      if ((checks.total_count ?? checks.check_runs?.length ?? 0) > 0) return null;
-      const { data: status } = await octokit.rest.repos.getCombinedStatusForRef({
-        owner,
-        repo,
-        ref: c.sha,
-        per_page: 1,
-      });
-      if ((status.total_count ?? status.statuses?.length ?? 0) > 0) return null;
-    }
-    return { defaultBranch };
-  } catch {
-    return null;
-  }
-}
-
 export type CheckRunLike = {
   id?: number;
   name?: string | null;
@@ -267,6 +219,8 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
     minChecks = DEFAULT_MIN_CHECKS,
     settleMs = DEFAULT_SETTLE_MS,
     noChecksGraceMs = 0,
+    requiredChecks,
+    probeNoCi = false,
     progressIntervalMs = DEFAULT_PROGRESS_INTERVAL_MS,
     onProgress,
     onNoChecks,
@@ -285,7 +239,9 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
   let stableCount = -1;
   let stableSince = now();
   let noCiProbed = false;
+  let required: string[] | undefined;
   while (now() < deadline) {
+    required ??= await resolveRequiredContexts(octokit, owner, repo, requiredChecks?.branch);
     try {
       const runs = await listAllCheckRuns(octokit, owner, repo, ref, perPage, maxPages);
       consecutiveErrors = 0;
@@ -293,7 +249,7 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
         stableCount = runs.length;
         stableSince = now();
       }
-      if (runs.length === 0 && noChecksGraceMs > 0 && !noCiProbed) {
+      if (runs.length === 0 && (probeNoCi || noChecksGraceMs > 0) && !noCiProbed) {
         noCiProbed = true;
         const noCi = await detectNoCiConfigured(octokit, owner, repo, ref);
         if (noCi) {
@@ -321,6 +277,9 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
           return 'no-checks';
         }
       }
+      const req = required.length > 0 ? await readRequiredState(octokit, owner, repo, ref, required, runs) : undefined;
+      if (req?.statusFailed) return 'failure';
+      const rs = req?.rs;
       if (runs.length > 0 && runs.every((r) => r.status === 'completed')) {
         // Fail closed: only an explicitly passing conclusion counts as green. `cancelled`,
         // `timed_out`, `action_required`, `stale`, a null conclusion on a completed run, and any
@@ -329,11 +288,16 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
         // A red verdict needs no settle: a check run that registers later cannot turn a
         // completed check green.
         if (!allPassed) return 'failure';
-        const setIsFinal = minChecks > 0 ? runs.length >= minChecks : now() - stableSince >= settleMs;
-        if (setIsFinal) return 'success';
+        if (rs) {
+          // The required set is known, so there is nothing to settle: done once none is missing or running.
+          if (rs.missing.length === 0 && rs.pending.length === 0) return 'success';
+        } else {
+          const setIsFinal = minChecks > 0 ? runs.length >= minChecks : now() - stableSince >= settleMs;
+          if (setIsFinal) return 'success';
+        }
       }
       if (
-        runs.length > 0 &&
+        (runs.length > 0 || rs?.state === 'pending') &&
         onProgress &&
         (lastProgressAt === undefined || now() - lastProgressAt >= progressIntervalMs)
       ) {
@@ -346,6 +310,7 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
             pending: runs.length - completed,
             elapsedMs: now() - startedAt,
             remainingMs: Math.max(0, deadline - now()),
+            ...(req?.waitingFor.length ? { waitingFor: req.waitingFor } : {}),
           });
         } catch {}
       }

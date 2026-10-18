@@ -242,6 +242,7 @@ export async function landOpenPullRequest(opts: {
     try {
       const { data: pr } = await octokit.rest.pulls.get({ owner, repo: repoName, pull_number: prNumber });
       headSha = pr.head.sha;
+      const baseRef = (pr as { base?: { ref?: string } }).base?.ref;
       outcome = await watchChecksWithInfraRerun({
         octokit,
         owner,
@@ -249,6 +250,14 @@ export async function landOpenPullRequest(opts: {
         ref: headSha,
         watch,
         rerun,
+        ...(baseRef ? { requiredChecks: { branch: baseRef } } : {}),
+        onProgress: ({ total, completed, pending, remainingMs, waitingFor }) =>
+          log(
+            'land',
+            waitingFor?.length
+              ? `CI for PR #${prNumber}: waiting for required check${waitingFor.length > 1 ? 's' : ''} ${waitingFor.map((w) => `${w.name} (${w.state})`).join(', ')}, ${Math.ceil(remainingMs / 60_000)} min left`
+              : `CI for PR #${prNumber}: ${pending} pending, ${completed}/${total} completed, ${Math.ceil(remainingMs / 60_000)} min left before the CI timeout`,
+          ),
         onRescued: ({ runIds }) =>
           log(
             'ci-rescued',
