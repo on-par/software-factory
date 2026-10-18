@@ -223,7 +223,7 @@ function assertServedModelMatches(extraFlag: string, stderr: string): void {
  *  design: non-JSON lines, a missing usage block, and non-finite counts all resolve
  *  to `undefined`, which the router renders as an `estimated: true` cost row —
  *  usage capture must never fail a run (#425). */
-function parseCodexUsage(stdout: string): HarnessUsage | undefined {
+export function parseCodexUsage(stdout: string): HarnessUsage | undefined {
   let inputTokens = 0;
   let outputTokens = 0;
   let cacheReadTokens = 0;

@@ -2,8 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { collectDesignDiff, type DiffRunner } from '../checkers/design-smells.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { phaseOfCostEntry } from '../kpis/index.js';
+import { agentInvocationsFromEvents } from '../metrics/token-coverage.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
+import type { CostEntry } from '../types/index.js';
 import { DEFAULT_REVIEW_FLOOR_RULES } from './floor.js';
 import {
   buildClassifierPrompt,
@@ -117,6 +120,24 @@ describe('classifyPrShadow', () => {
     expect(v.costUsd).toBe(0.01);
     expect(run).toHaveBeenCalledTimes(1);
     expect(toClassificationRecord(v)).toEqual(v);
+  });
+
+  it('classifyPrShadow writes a ship-phase cost row and logs the router invocation', async () => {
+    const router = new ModelRouter(
+      MODELS,
+      ROUTES,
+      false,
+      new StubModelExecutor({ scripts: { classify_pr: [{ output: VALID }] } }),
+    );
+    const rows: Omit<CostEntry, 'issue' | 'ts'>[] = [];
+    router.setCostSink((entry) => rows.push(entry));
+    const lines: string[] = [];
+    await classifyPrShadow(input(router, { onLog: (m) => lines.push(m) }), deps);
+    expect(rows).toHaveLength(1);
+    expect(phaseOfCostEntry({ ...(rows[0] as Omit<CostEntry, 'issue' | 'ts'>), issue: '1', ts: '' })).toBe('ship');
+    const events = lines.map((msg) => ({ ts: '', type: 'router' as const, issue: '1', msg }));
+    const invocations = agentInvocationsFromEvents(events, () => 'stub');
+    expect(invocations.map((i) => i.phase)).toEqual(['ship']);
   });
 
   it('passes the pin as modelOverride and omits it otherwise', async () => {

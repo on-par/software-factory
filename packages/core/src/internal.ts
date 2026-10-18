@@ -553,10 +553,8 @@ export type { LaneAcquire, LaneAdmission, LaneScheduler, LaneSchedulerOptions } 
 export { createLaneScheduler } from './usage/lane-scheduler.js';
 
 // Standalone local UsageCoordinator fallback (#1033)
-export type { LocalUsageCoordinatorOptions } from './usage/local-coordinator.js';
-export { createLocalUsageCoordinator } from './usage/local-coordinator.js';
-export type { SelectUsageCoordinatorOptions } from './usage/select-coordinator.js';
-export { selectUsageCoordinator } from './usage/select-coordinator.js';
+export { createLocalUsageCoordinator, type LocalUsageCoordinatorOptions } from './usage/local-coordinator.js';
+export { selectUsageCoordinator, type SelectUsageCoordinatorOptions } from './usage/select-coordinator.js';
 
 // Local queue reprioritization audit records (#869)
 export type { QueueReprioritizationRecord } from './types/index.js';
@@ -787,3 +785,5 @@ export {
 } from './utils/local-auth-record.js';
 export type { LocalAuthAgent, LocalAuthFailure } from './utils/local-auth-record.js';
 export { fetchHumanEventSourcesCached, runProducedPrOrMerge } from './kpis/sweep.js';
+export type { AgentInvocation, TokenCoverage, TokenCoverageEntry } from './metrics/token-coverage.js';
+export { agentInvocationsFromEvents, computeTokenCoverage } from './metrics/token-coverage.js';

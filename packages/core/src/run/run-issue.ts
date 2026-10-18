@@ -1092,6 +1092,7 @@ async function runIssueOnce(initialRequest: RunRequest, policy: RunPolicy, ports
         rules: request.prClassifier.rules,
         modelPin: request.prClassifier.modelPin,
         router: ports.router,
+        onLog: (msg: string) => log('router', msg),
       };
       let shadow: PrShadowVerdict;
       try {
