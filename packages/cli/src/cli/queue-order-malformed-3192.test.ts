@@ -1,11 +1,9 @@
 // A queued issue with no `factory:order:<n>` label through the real CLI GitHub client against a mocked fetch (#3192):
 // `queue list --json` exits 0, lists the valid issue and reports the bad one; the lane claims only the valid one.
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
 import { createGithubQueue, createOctokitQueueClient } from '@on-par/factory-core/internal';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { main } from './index.js';
@@ -55,13 +53,15 @@ function githubFetch(): typeof fetch {
   }) as typeof fetch;
 }
 
+const tmp = createTempDirs();
+
 describe('missing factory:order label (#3192)', () => {
   const originalCwd = process.cwd();
   let root: string;
   let output: string[];
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'factory-3192-'));
+    root = tmp.makeSync('factory-3192-');
     execFileSync('git', ['init', '-q', root]);
     process.chdir(root);
     output = [];
@@ -85,7 +85,7 @@ describe('missing factory:order label (#3192)', () => {
     process.exitCode = undefined;
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
-    rmSync(root, { recursive: true, force: true });
+    tmp.cleanup();
   });
 
   it('queue list --json exits 0, lists #2253 and reports #2319 as missing-order-label', async () => {
