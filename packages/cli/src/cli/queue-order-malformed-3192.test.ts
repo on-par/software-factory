@@ -80,12 +80,12 @@ describe('missing factory:order label (#3192)', () => {
     vi.stubGlobal('fetch', githubFetch());
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     process.chdir(originalCwd);
     process.exitCode = undefined;
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
-    tmp.cleanup();
+    await tmp.cleanup();
   });
 
   it('queue list --json exits 0, lists #2253 and reports #2319 as missing-order-label', async () => {
