@@ -37,9 +37,9 @@ describe('production seams', () => {
   beforeEach(() => {
     dir = tmp.makeSync('self-update-apply-path-');
   });
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllEnvs();
-    tmp.cleanup();
+    await tmp.cleanup();
   });
 
   it('the default exec puts the install bin dir first on PATH so an env-node npm passes preflight when PATH lacks node (#3122)', async () => {
