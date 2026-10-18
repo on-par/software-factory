@@ -21,7 +21,6 @@ import type { FactoryEvent, HealthKpis, KpiReconstruction, QueueDiagnostic } fro
 import {
   createDockerEngine,
   createGithubQueue,
-  createOctokitGreenPrClient,
   createOctokitQueueClient,
   evaluateLoadGuard,
   fetchRequiredChecksVerdict,
@@ -310,16 +309,11 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
                     git: (cmd) => rt.shellOps.exec(cmd, { cwd: repoRoot }).then((r) => r.stdout),
                     requiredChecksVerdict: (sha) => {
                       const [owner, repoName] = ghRepo.split('/');
-                      return fetchRequiredChecksVerdict(rt.getOctokit(), {
-                        owner,
-                        repo: repoName,
-                        branch: 'main',
-                        sha,
-                      });
-                    },
-                    listCheckRuns: (ref) => {
-                      const [owner, repoName] = ghRepo.split('/');
-                      return createOctokitGreenPrClient(rt.getOctokit()).listCheckRuns({ owner, repo: repoName, ref });
+                      return fetchRequiredChecksVerdict(
+                        rt.getOctokit(),
+                        { owner, repo: repoName, branch: 'main', sha },
+                        { pushFallback: true },
+                      );
                     },
                   }),
             commentIssue: async (issue, body) => {

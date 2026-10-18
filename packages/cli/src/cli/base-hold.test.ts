@@ -14,7 +14,6 @@ import {
   deleteBaseHold,
   evaluateBaseHold,
   formatBaseHoldStatus,
-  isGreenCheckRunSet,
   parseLsRemoteSha,
   readBaseHold,
   writeBaseHold,
@@ -127,9 +126,9 @@ describe('base hold gate (#2349)', () => {
         if (sha instanceof Error) throw sha;
         return sha;
       }),
-      baseCiGreen: vi.fn(async () => {
+      requiredChecksVerdict: vi.fn(async () => {
         if (green instanceof Error) throw green;
-        return green;
+        return { green, reason: green ? 'ok' : 'ci failure' };
       }),
     });
 
@@ -137,7 +136,7 @@ describe('base hold gate (#2349)', () => {
       const deps = mkDeps();
       expect(await evaluateBaseHold(file, hold.repo, deps)).toEqual({ kind: 'claim' });
       expect(deps.currentBaseSha).toHaveBeenCalledTimes(0);
-      expect(deps.baseCiGreen).toHaveBeenCalledTimes(0);
+      expect(deps.requiredChecksVerdict).toHaveBeenCalledTimes(0);
     });
 
     it('claims for a hold on another repo and calls no dep', async () => {
@@ -145,12 +144,16 @@ describe('base hold gate (#2349)', () => {
       const deps = mkDeps();
       expect(await evaluateBaseHold(file, 'other/repo', deps)).toEqual({ kind: 'claim' });
       expect(deps.currentBaseSha).toHaveBeenCalledTimes(0);
-      expect(deps.baseCiGreen).toHaveBeenCalledTimes(0);
+      expect(deps.requiredChecksVerdict).toHaveBeenCalledTimes(0);
     });
 
     it('holds on the same SHA with CI not green', async () => {
       writeBaseHold(file, gateHold);
-      expect(await evaluateBaseHold(file, hold.repo, mkDeps())).toEqual({ kind: 'hold', hold: gateHold });
+      expect(await evaluateBaseHold(file, hold.repo, mkDeps())).toEqual({
+        kind: 'hold',
+        hold: gateHold,
+        ciReason: 'ci failure',
+      });
     });
 
     it('claims when the current SHA is null or the lookup throws', async () => {
@@ -164,31 +167,8 @@ describe('base hold gate (#2349)', () => {
       expect(await evaluateBaseHold(file, hold.repo, mkDeps(SHA_HELD, new Error('api')))).toEqual({
         kind: 'hold',
         hold: gateHold,
+        ciReason: expect.stringContaining('CI lookup failed'),
       });
-    });
-  });
-
-  describe('isGreenCheckRunSet', () => {
-    it('is false for an empty set', () => {
-      expect(isGreenCheckRunSet([])).toBe(false);
-    });
-
-    it('is false for a run that is not completed', () => {
-      expect(isGreenCheckRunSet([{ status: 'in_progress', conclusion: null }])).toBe(false);
-    });
-
-    it.each(['failure', 'cancelled', null])('is false for conclusion %s', (conclusion) => {
-      expect(isGreenCheckRunSet([{ status: 'completed', conclusion }])).toBe(false);
-    });
-
-    it('is true when every run completed with a passing conclusion', () => {
-      expect(
-        isGreenCheckRunSet([
-          { status: 'completed', conclusion: 'success' },
-          { status: 'completed', conclusion: 'neutral' },
-          { status: 'completed', conclusion: 'skipped' },
-        ]),
-      ).toBe(true);
     });
   });
 
@@ -207,29 +187,29 @@ describe('base hold gate (#2349)', () => {
   describe('createBaseHoldGate', () => {
     it('claims when origin/main moved off the held SHA', async () => {
       writeBaseHold(file, gateHold);
-      const listCheckRuns = vi.fn(async () => []);
+      const requiredChecksVerdict = vi.fn(async () => ({ green: false, reason: 'x' }));
       const gate = createBaseHoldGate({
         file,
         repo: hold.repo,
         git: async () => `${SHA_NEW}\trefs/heads/main\n`,
-        listCheckRuns,
+        requiredChecksVerdict,
       });
       expect(await gate()).toEqual({ kind: 'claim' });
       expect(existsSync(file)).toBe(false);
-      expect(listCheckRuns).toHaveBeenCalledTimes(0);
+      expect(requiredChecksVerdict).toHaveBeenCalledTimes(0);
     });
 
     it('claims when the held SHA is unchanged but its CI is green', async () => {
       writeBaseHold(file, gateHold);
-      const listCheckRuns = vi.fn(async () => [{ status: 'completed', conclusion: 'success' }]);
+      const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'ok' }));
       const gate = createBaseHoldGate({
         file,
         repo: hold.repo,
         git: async () => `${SHA_HELD}\trefs/heads/main\n`,
-        listCheckRuns,
+        requiredChecksVerdict,
       });
       expect(await gate()).toEqual({ kind: 'claim' });
-      expect(listCheckRuns).toHaveBeenCalledWith(SHA_HELD);
+      expect(requiredChecksVerdict).toHaveBeenCalledWith(SHA_HELD);
       expect(existsSync(file)).toBe(false);
     });
 
@@ -240,9 +220,9 @@ describe('base hold gate (#2349)', () => {
         file,
         repo: hold.repo,
         git,
-        listCheckRuns: async () => [{ status: 'completed', conclusion: 'failure' }],
+        requiredChecksVerdict: async () => ({ green: false, reason: 'ci failure' }),
       });
-      expect(await gate()).toEqual({ kind: 'hold', hold: gateHold });
+      expect(await gate()).toEqual({ kind: 'hold', hold: gateHold, ciReason: 'ci failure' });
       expect(git).toHaveBeenCalledWith('git ls-remote origin refs/heads/main');
     });
   });
@@ -267,7 +247,6 @@ describe('ci-awaiting base hold (#3186)', () => {
 
   const deps = (extra: Partial<Parameters<typeof evaluateBaseHold>[2]>) => ({
     currentBaseSha: async () => SHA,
-    baseCiGreen: vi.fn(async () => true),
     ...extra,
   });
 
@@ -286,7 +265,6 @@ describe('ci-awaiting base hold (#3186)', () => {
     const d = deps({ requiredChecksVerdict, now: () => T0 });
     expect(await evaluateBaseHold(file, hold.repo, d)).toEqual({ kind: 'hold', hold: awaiting });
     expect(requiredChecksVerdict).not.toHaveBeenCalled();
-    expect(d.baseCiGreen).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -298,12 +276,11 @@ describe('ci-awaiting base hold (#3186)', () => {
       },
     ],
     ['an absent dep', undefined],
-  ])('after the time, %s re-arms the backoff and never uses the lenient lookup', async (_n, requiredChecksVerdict) => {
+  ])('after the time, %s re-arms the backoff', async (_n, requiredChecksVerdict) => {
     writeBaseHold(file, awaiting);
     const now = T0 + 2000;
     const d = deps({ requiredChecksVerdict, now: () => now });
     expect((await evaluateBaseHold(file, hold.repo, d)).kind).toBe('hold');
-    expect(d.baseCiGreen).not.toHaveBeenCalled();
     expect(readBaseHold(file)?.ciRecheckAfter).toBe(new Date(now + BASE_HOLD_CI_RECHECK_MS).toISOString());
   });
 
@@ -328,11 +305,12 @@ describe('ci-awaiting base hold (#3186)', () => {
     expect(onCleared.mock.calls[0][0].reason).toBe('sha-changed');
   });
 
-  it('a hold without the field keeps the lenient behavior', async () => {
+  it('a hold without the field is judged by the same strict verdict, without backoff', async () => {
     writeBaseHold(file, { ...hold, baseSha: SHA });
-    const d = deps({ requiredChecksVerdict: vi.fn() });
+    const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'ok' }));
+    const d = deps({ requiredChecksVerdict });
     expect(await evaluateBaseHold(file, hold.repo, d)).toEqual({ kind: 'claim' });
-    expect(d.baseCiGreen).toHaveBeenCalledWith(SHA);
+    expect(requiredChecksVerdict).toHaveBeenCalledWith(SHA);
   });
 
   it('createBaseHoldGate forwards requiredChecksVerdict and now', async () => {
@@ -342,11 +320,94 @@ describe('ci-awaiting base hold (#3186)', () => {
       file,
       repo: hold.repo,
       git: async () => `${SHA}\trefs/heads/main\n`,
-      listCheckRuns: async () => [],
       requiredChecksVerdict,
       now: () => T0 + 2000,
     });
     expect(await gate()).toEqual({ kind: 'claim' });
     expect(requiredChecksVerdict).toHaveBeenCalledWith(SHA);
+  });
+});
+
+describe('base hold gate (#3195)', () => {
+  const SHA = '8fdcb345'.padEnd(40, '0');
+  const tempDirs = createTempDirs();
+  let file: string;
+  const testsHold: BaseHold = { ...hold, baseSha: SHA, failingChecks: ['tests'] };
+  const ok = (name: string) => ({ name, status: 'completed', conclusion: 'success' });
+  const baseRuns = [
+    ok('ci'),
+    ok('gitleaks'),
+    ok('publish'),
+    { name: 'pipeline-integration', status: 'completed', conclusion: 'failure' },
+  ];
+
+  beforeEach(async () => {
+    file = join(await tempDirs.make('factory-base-hold-3195-'), 'state', 'base-hold.json');
+    writeBaseHold(file, testsHold);
+  });
+  afterEach(async () => {
+    await tempDirs.cleanup();
+  });
+
+  // Mirrors core's evaluateRequiredChecks(['ci'], runs): internal.ts is at its max-lines ceiling, so it is not re-exported.
+  const evaluateRequiredChecks = (
+    required: string[],
+    runs: Array<{ name: string; status: string; conclusion: string | null }>,
+  ) => {
+    const run = runs.find((r) => r.name === required[0]);
+    const green = run?.status === 'completed' && run.conclusion === 'success';
+    return {
+      green,
+      reason: green ? 'ok' : `${required[0]} ${run?.conclusion ?? 'missing'}`,
+      basis: `required checks: ${required[0]}`,
+    };
+  };
+
+  const gateFor = (runs: Array<{ name: string; status: string; conclusion: string | null }>, onCleared?: () => void) =>
+    createBaseHoldGate({
+      file,
+      repo: hold.repo,
+      git: async () => `${SHA}\trefs/heads/main\n`,
+      requiredChecksVerdict: async () => evaluateRequiredChecks(['ci'], runs),
+      onCleared,
+    });
+
+  it('clears a tests hold on 8fdcb345 when required ci is green despite a failed scheduled pipeline-integration', async () => {
+    const onCleared = vi.fn();
+    expect(await gateFor(baseRuns, onCleared)()).toEqual({ kind: 'claim' });
+    expect(onCleared).toHaveBeenCalledWith({
+      hold: testsHold,
+      reason: 'ci-green',
+      currentSha: SHA,
+      basis: 'required checks: ci',
+    });
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it('stays held with ciReason naming ci when ci failed and scheduled runs are green', async () => {
+    const runs = baseRuns.map((r) => ({ ...r, conclusion: r.name === 'ci' ? 'failure' : 'success' }));
+    expect(await gateFor(runs)()).toEqual({ kind: 'hold', hold: testsHold, ciReason: 'ci failure' });
+    expect(existsSync(file)).toBe(true);
+  });
+
+  it.each([
+    ['in_progress', [{ name: 'ci', status: 'in_progress', conclusion: null }]],
+    ['skipped', [{ name: 'ci', status: 'completed', conclusion: 'skipped' }]],
+    ['missing', [ok('gitleaks')]],
+  ])('stays held for ci %s', async (_n, runs) => {
+    expect((await gateFor(runs)()).kind).toBe('hold');
+    expect(existsSync(file)).toBe(true);
+  });
+
+  it('stays held with a CI lookup failure reason when the lookup throws', async () => {
+    const gate = createBaseHoldGate({
+      file,
+      repo: hold.repo,
+      git: async () => `${SHA}\trefs/heads/main\n`,
+      requiredChecksVerdict: async () => {
+        throw new Error('401');
+      },
+    });
+    expect(await gate()).toEqual({ kind: 'hold', hold: testsHold, ciReason: 'CI lookup failed: 401' });
   });
 });

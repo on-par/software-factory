@@ -1,10 +1,12 @@
-// src/utils/required-checks.ts — strict "every required check succeeded" verdict for a commit (#3186)
+// src/utils/required-checks.ts — strict "every required check succeeded" verdict for a commit (#3186); #3195 adds an opt-in push-event fallback when no checks are required
 
 import type { Octokit } from '@octokit/rest';
 
 export interface RequiredChecksVerdict {
   green: boolean;
   reason: string;
+  /** Set when green; what the verdict was based on. */
+  basis?: string;
 }
 
 interface CheckRunLike {
@@ -28,7 +30,25 @@ export function evaluateRequiredChecks(
       if (run.conclusion !== 'success') return { green: false, reason: `${ctx} ${run.conclusion ?? 'incomplete'}` };
     }
   }
-  return { green: true, reason: `all ${contexts.length} required checks succeeded` };
+  return {
+    green: true,
+    reason: `all ${contexts.length} required checks succeeded`,
+    basis: `required checks: ${contexts.join(', ')}`,
+  };
+}
+
+/** Green only when there is at least one push-triggered check run and every one completed with `success` (#3195). */
+export function evaluatePushChecks(runs: readonly CheckRunLike[]): RequiredChecksVerdict {
+  if (runs.length === 0) return { green: false, reason: 'no push-triggered checks' };
+  for (const run of runs) {
+    if (run.status !== 'completed') return { green: false, reason: `${run.name} pending` };
+    if (run.conclusion !== 'success') return { green: false, reason: `${run.name} ${run.conclusion ?? 'incomplete'}` };
+  }
+  return {
+    green: true,
+    reason: `all ${runs.length} push-triggered checks succeeded`,
+    basis: `push checks: ${[...new Set(runs.map((r) => r.name))].join(', ')}`,
+  };
 }
 
 function httpStatus(err: unknown): number | undefined {
@@ -39,6 +59,7 @@ function httpStatus(err: unknown): number | undefined {
 export async function fetchRequiredChecksVerdict(
   octokit: Octokit,
   args: { owner: string; repo: string; branch: string; sha: string },
+  opts?: { pushFallback?: boolean },
 ): Promise<RequiredChecksVerdict> {
   const { owner, repo, branch, sha } = args;
   const required: string[] = [];
@@ -64,6 +85,23 @@ export async function fetchRequiredChecksVerdict(
     per_page: 100,
     filter: 'latest',
   });
-  const runs = checks.check_runs.map((r) => ({ name: r.name, status: r.status, conclusion: r.conclusion }));
+  const runs = checks.check_runs.map((r) => ({
+    name: r.name,
+    status: r.status,
+    conclusion: r.conclusion,
+    suiteId: r.check_suite?.id ?? null,
+  }));
+  if (new Set(required).size === 0 && opts?.pushFallback) {
+    const { data: workflowRuns } = await octokit.rest.actions.listWorkflowRunsForRepo({
+      owner,
+      repo,
+      head_sha: sha,
+      event: 'push',
+      per_page: 100,
+    });
+    const suites = new Set<number>();
+    for (const w of workflowRuns.workflow_runs) if (w.check_suite_id !== undefined) suites.add(w.check_suite_id);
+    return evaluatePushChecks(runs.filter((r) => r.suiteId !== null && suites.has(r.suiteId)));
+  }
   return evaluateRequiredChecks(required, runs);
 }
