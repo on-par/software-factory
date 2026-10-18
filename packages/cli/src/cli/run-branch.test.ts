@@ -1,23 +1,24 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Octokit } from '@octokit/rest';
 import type { CheckResumeRecord } from '@on-par/factory-core/internal';
 import { branchFor } from '@on-par/factory-core/internal';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { resolveRunBranch } from './run-branch.js';
 import { LaneParkError } from './index.js';
 
 const REPO = 'acme/widgets';
 const pr = (number: number, ref: string) => ({ number, head: { ref, sha: `sha${number}`, repo: { full_name: REPO } } });
 
+const tempDirs = createTempDirs();
 let dir: string;
 let eventsFile: string;
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'run-branch-'));
+  dir = tempDirs.makeSync('run-branch-');
   eventsFile = join(dir, 'events.ndjson');
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => tempDirs.cleanup());
 
 function stub(result: unknown[] | Error) {
   const list = vi.fn(async () => {
