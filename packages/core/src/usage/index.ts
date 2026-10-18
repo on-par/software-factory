@@ -8,6 +8,7 @@ import type { BuildRoutePin, EffectiveBuildRoute } from '../config/repo.js';
 import type { CostEntry } from '../types/index.js';
 import { claudeConfigDirOverride } from '../utils/claude-config.js';
 import { logEvent } from '../utils/index.js';
+import { formatStopMarker } from '../utils/stop-marker.js';
 import type { SubscriptionUsage, SubscriptionUsageDeps } from './subscription.js';
 import { fetchSubscriptionUsage } from './subscription.js';
 
@@ -238,7 +239,13 @@ export async function watchUsage(opts: WatchUsageOptions): Promise<'stopped' | '
     home,
     readUsageFn = () => readUsage({ cap, estimator, subscription, home }),
     emitEvent = logEvent,
-    setStop = (file: string) => writeFileSync(file, ''),
+    setStop = (file: string) => {
+      try {
+        writeFileSync(file, formatStopMarker('usage-watchdog'), { flag: 'wx' });
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      }
+    },
     sleep: wait = sleep,
     harness,
   } = opts;

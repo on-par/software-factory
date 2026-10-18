@@ -12,7 +12,6 @@ import {
   readFileSync,
   readSync,
   realpathSync,
-  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
@@ -32,6 +31,7 @@ import { defaultIsPidAlive, getFactoryPaths } from '@on-par/factory-core';
 
 import { bootstrapFailureMessage, reloadLaunchAgent } from './daemon-launchctl.js';
 import { runSelfUpdateCommand } from './self-update-exec.js';
+import { clearSelfUpdateStops, writeSelfUpdateStop } from './self-update-stop.js';
 import {
   initialUpdateState,
   readUpdateState,
@@ -787,7 +787,7 @@ export function createAutoUpdateDeps(opts: {
         const stop = getFactoryPaths(e.path, e.stateRoot).stop;
         try {
           mkdirSync(dirname(stop), { recursive: true });
-          writeFileSync(stop, '', { flag: 'wx' });
+          writeSelfUpdateStop(stop);
           created.push(stop);
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
@@ -798,13 +798,7 @@ export function createAutoUpdateDeps(opts: {
       return created;
     },
     async clearStops(files) {
-      for (const f of files) {
-        try {
-          unlinkSync(f);
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-        }
-      }
+      clearSelfUpdateStops(files);
     },
     now: Date.now,
     sleep: (ms) =>

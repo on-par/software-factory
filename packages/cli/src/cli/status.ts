@@ -30,6 +30,7 @@ import {
   resolveHostMaxBuilds,
   resolvePrClassifierPolicy,
   resolveWorktreeRoot,
+  readStopMarker,
 } from '@on-par/factory-core/internal';
 import type { QueueOrderConflict } from '@on-par/factory-core/internal';
 
@@ -90,12 +91,14 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
       if (entries.length > 0) ({ active } = await partitionLocalQueueByActivity(entries, paths.runs));
       rt.warnQueueDiagnostics(diagnostics);
     }
+    const marker = readStopMarker(paths.stop);
     console.log(
       JSON.stringify(
         buildStatusJson({
           repo: ghRepo,
           product: rt.readActiveProduct(paths.product) ?? null,
           stop: existsSync(paths.stop),
+          stopInfo: marker ? { source: marker.source, setAt: marker.at } : null,
           breakers: await new ProviderBreaker(paths.breaker).list(),
           active,
           update: buildStatusUpdateJson(readUpdateState(updateStatePath(daemonRuntimePaths().dir))),

@@ -284,6 +284,7 @@ export {
   hasClaudeLoginEvidence,
 } from './utils/claude-config.js';
 export type { ClaudeSessionState } from './utils/claude-config.js';
+export { formatStopMarker, readStopMarker, type StopMarker, type StopSource } from './utils/stop-marker.js';
 export { hasOpencodeLoginEvidence } from './utils/opencode-config.js';
 export type { MicroVmLifecycleOptions, ReapedMicroVm, WorktreeSandbox } from './utils/microvm.js';
 export {
@@ -753,7 +754,6 @@ export * from './blockers/index.js';
 export * from './events/tail.js';
 export type { ReadinessGapCriterion, ReadinessGapReport } from './readiness/enrich.js';
 export { buildReadinessGapPrompt, parseReadinessGapOutput } from './readiness/enrich.js';
-
 export type { IssueRunState, RunStatus } from './types/index.js';
 export * from './run/state.js';
 export { createStackSliceBranch } from './run/stack-slice-branch.js';
