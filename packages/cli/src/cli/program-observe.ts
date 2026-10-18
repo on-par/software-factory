@@ -107,13 +107,24 @@ export function registerObserveCommands(program: Command, handlers: ProgramHandl
 
   program
     .command('logs')
-    .description('Print pipeline events from .factory/events.ndjson (--follow to tail)')
+    .description(
+      'Print pipeline events from .factory/events.ndjson (--follow to tail, --limit/--since to read only part)',
+    )
     .option('--follow', 'Keep watching for new events')
     .option('--json', 'Emit one JSON object per line')
     .option('--issue <number>', 'Only show events for this issue')
-    .action(async (opts: { follow?: boolean; json?: boolean; issue?: string }) => {
+    .option(
+      '--limit <n>',
+      'Only the newest <n> matching events (oldest first); with --since, the first <n> after the cursor',
+    )
+    .option('--since <cursor>', 'Only events after this cursor (the "cursor" field of a previous --json line)')
+    .action(async (opts: { follow?: boolean; json?: boolean; issue?: string; limit?: string; since?: string }) => {
       const repoRoot = await handlers.getRepoRoot();
       const paths = getFactoryPaths(repoRoot);
-      await handlers.cmdLogs(opts, { eventsFile: paths.events });
+      const { limit, ...rest } = opts;
+      await handlers.cmdLogs(
+        { ...rest, ...(limit !== undefined ? { limit: Number(limit) } : {}) },
+        { eventsFile: paths.events },
+      );
     });
 }

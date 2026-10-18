@@ -8,7 +8,6 @@ import * as kpisApi from './kpis-entry.js';
 import * as testingApi from './testing.js';
 // Pins each @on-par/factory-core entry point's exact runtime value exports (ADR-0004); types are not listed.
 const PUBLIC_API_KEYS = [
-  // Config
   'FactoryConfigV2Schema',
   'factoryConfigV2JsonSchema',
   'getConstitutionsDir',
@@ -322,7 +321,8 @@ const PUBLIC_API_KEYS = [
   'fetchSubscriptionUsage',
 ];
 const AGENT_JOB_KEYS = ['resolveHostMaxAgentJobs', 'hostAgentJobsDir', 'withHostAgentJobLease']; // #3047
-const EXTRA_INTERNAL_KEYS = [...AGENT_JOB_KEYS, 'agentInvocationsFromEvents', 'computeTokenCoverage']; // #3126
+const TAIL = 'InvalidEventCursorError eventSegmentFileName eventSegmentsDir readEventsTail readEventsSince'.split(' ');
+const EXTRA_INTERNAL_KEYS = [...AGENT_JOB_KEYS, ...TAIL, 'agentInvocationsFromEvents', 'computeTokenCoverage']; // #3126
 const INTERNAL_API_KEYS = [
   'openCodeVersion',
   'DEFAULT_CI_DEADLINE_MS',

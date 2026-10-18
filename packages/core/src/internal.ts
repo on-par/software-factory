@@ -750,10 +750,10 @@ export { findSlicePlanComment, recordSliceMerged, upsertSlicePlanComment } from 
 export type { SliceGateOutcome } from './readiness/slice-gate.js';
 export { resolveSliceGate } from './readiness/slice-gate.js';
 export * from './blockers/index.js';
+export * from './events/tail.js';
 export type { ReadinessGapCriterion, ReadinessGapReport } from './readiness/enrich.js';
 export { buildReadinessGapPrompt, parseReadinessGapOutput } from './readiness/enrich.js';
 
-// Persisted per-issue run state (#972, #2271)
 export type { IssueRunState, RunStatus } from './types/index.js';
 export { readIssueRunState } from './run/state.js';
 export { createStackSliceBranch } from './run/stack-slice-branch.js';

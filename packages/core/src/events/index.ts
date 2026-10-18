@@ -28,6 +28,8 @@ export interface FollowEventsOptions {
   /** Opens the events file for one poll (default fs.openSync read-only). Tests
    *  wrap it to rotate the file just before the open. */
   openFile?: (path: string) => number;
+  /** Begin tailing at this byte offset; overrides fromStart. */
+  startOffset?: number;
 }
 
 /** Tail the events file. Returns a stop() function. Never throws for a missing file — waits for it to appear. */
@@ -36,13 +38,20 @@ export function followEvents(
   onEvent: (e: FactoryEvent) => void,
   opts: FollowEventsOptions = {},
 ): () => void {
-  const { fromStart = true, pollMs = 250, openFile = (path: string) => openSync(path, 'r') } = opts;
+  const { fromStart = true, pollMs = 250, openFile = (path: string) => openSync(path, 'r'), startOffset } = opts;
 
   let offset = 0;
   let carry = '';
   let ino: number | undefined;
 
-  if (!fromStart) {
+  if (startOffset !== undefined) {
+    offset = startOffset;
+    try {
+      ino = statSync(eventsFile).ino;
+    } catch {
+      ino = undefined;
+    }
+  } else if (!fromStart) {
     try {
       const stat = statSync(eventsFile);
       offset = stat.size;
