@@ -36,6 +36,8 @@ export interface BaseHealthOptions {
   timeoutSeconds?: number;
   /** Tests checker timeout in seconds (`request.timeouts.tests`, #3095); undefined = the tests checker's 300s default. */
   testsTimeoutSeconds?: number;
+  /** Compile checker timeout in seconds (`request.timeouts.compile`, #3185); undefined = the compile checker's 120s default. */
+  compileTimeoutSeconds?: number;
   log: (type: EventKind, msg: string) => void;
   deps?: {
     runCommand?: typeof runCommand;
@@ -67,7 +69,18 @@ async function resolveBaseSha(opts: BaseHealthOptions): Promise<string | undefin
 
 /** Runs compile/lint/tests on origin/main once per base SHA (shared in-process, file-cached across processes). Never throws. */
 export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHealthResult> {
-  const { worktree, constitution, router, env, cachePath, timeoutSeconds, testsTimeoutSeconds, log, deps = {} } = opts;
+  const {
+    worktree,
+    constitution,
+    router,
+    env,
+    cachePath,
+    timeoutSeconds,
+    testsTimeoutSeconds,
+    compileTimeoutSeconds,
+    log,
+    deps = {},
+  } = opts;
   try {
     const baseSha = await resolveBaseSha(opts);
     if (baseSha === undefined) {
@@ -86,7 +99,7 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
           baseSha,
           laneWorktree: worktree,
           failing: BASE_HEALTH_CHECKERS.map((checker) => ({ checker, result: 'FAIL' as const, details: '' })),
-          ctx: { worktree, specPath: '', env, testsTimeoutSeconds },
+          ctx: { worktree, specPath: '', env, testsTimeoutSeconds, compileTimeoutSeconds },
           router,
           constitution,
           customCheckerTimeoutSeconds: timeoutSeconds,

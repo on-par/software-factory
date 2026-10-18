@@ -333,6 +333,7 @@ async function checkPhaseImpl(opts: {
   checkTimeoutSeconds?: number;
   /** Timeout for the tests checker command (`timeouts.tests_seconds`, #2299). */
   testsTimeoutSeconds?: number;
+  compileTimeoutSeconds?: number;
   sandbox?: SandboxPolicy;
   drainSteering?: () => ConsumedSteering;
   appPort?: number;
@@ -414,12 +415,8 @@ async function checkPhaseImpl(opts: {
   // that name WHY a run parked are never surfaced to the operator (#675).
   const logFailures = (s: CheckSummary): void => {
     for (const f of s.results.filter((r) => r.result === 'FAIL')) {
-      log(
-        'check',
-        f.findings?.length
-          ? `FAILED: ${f.checker} — ${f.details}\n${renderCheckerFindings(f.findings).join('\n')}`
-          : `FAILED: ${f.checker} — ${f.details}`,
-      );
+      const findings = f.findings?.length ? `\n${renderCheckerFindings(f.findings).join('\n')}` : '';
+      log('check', `FAILED: ${f.checker} — ${f.details}${findings}`);
     }
   };
 
@@ -436,6 +433,7 @@ async function checkPhaseImpl(opts: {
     onActivity,
     outputLogDir: roundLogDir(0),
     testsTimeoutSeconds,
+    compileTimeoutSeconds: opts.compileTimeoutSeconds,
   };
 
   if (appPort === undefined) {

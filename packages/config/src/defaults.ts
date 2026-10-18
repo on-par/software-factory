@@ -52,6 +52,7 @@ export interface FactoryDefaults {
     merge_poll_seconds: number;
     approval_seconds: number;
     tests_seconds: number;
+    compile_seconds: number;
   };
   merge: { auto: boolean; comment: string };
   worktree: { parent: string; comment: string; gcTtlDays: number; autoGcOnRun: boolean };
@@ -579,6 +580,7 @@ export const defaultFactoryConfig: FactoryDefaults = {
     merge_poll_seconds: 120,
     approval_seconds: 1800,
     tests_seconds: 300,
+    compile_seconds: 120,
   },
   merge: {
     auto: false,

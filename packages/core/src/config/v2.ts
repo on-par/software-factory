@@ -177,6 +177,10 @@ const TimeoutsSchema = z
       .number()
       .default(300)
       .describe('Timeout in seconds for the tests checker command (verify.sh, npm test, pytest).'),
+    compile_seconds: z
+      .number()
+      .default(120)
+      .describe('Timeout in seconds for the compile checker command (npm run build, make, cargo build).'),
   })
   .describe('Per-phase timeouts.');
 

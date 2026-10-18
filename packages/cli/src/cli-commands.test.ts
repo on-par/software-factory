@@ -217,7 +217,7 @@ const inertConfigLoaders: Pick<
   loadRoutesConfig: () => ({}) as never,
   // Lazy: per-test h.factoryConfig mutations are observed.
   loadFactoryConfigForRepo: () => h.factoryConfig,
-  resolveTimeouts: () => ({ plan: 1, build: 1, check: 1, approval: 1, tests: 1 }),
+  resolveTimeouts: () => ({ plan: 1, build: 1, check: 1, approval: 1, tests: 1, compile: 1 }),
   resolveSkipCI: () => false,
   // Lazy: per-test h.constitutionsDir / h.modelOverrides mutations are observed.
   getConstitutionsDir: vi.fn(() => h.constitutionsDir),

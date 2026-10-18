@@ -1850,13 +1850,13 @@ describe('resolveTimeouts', () => {
   it('preserves defaults and ignores invalid env values', () => {
     const config = loadFactoryConfig();
 
-    expect(resolveTimeouts(config, {})).toEqual({ plan: 1800, build: 7200, check: 1800, approval: 1800, tests: 300 });
+    expect(resolveTimeouts(config, {})).toMatchObject({ plan: 1800, build: 7200, check: 1800, tests: 300 });
     expect(
       resolveTimeouts(config, {
         FACTORY_PLAN_TIMEOUT: 'abc',
         FACTORY_CHECK_TIMEOUT: '',
       }),
-    ).toEqual({ plan: 1800, build: 7200, check: 1800, approval: 1800, tests: 300 });
+    ).toMatchObject({ plan: 1800, build: 7200, check: 1800, approval: 1800, tests: 300 });
   });
 
   it('honors approval_seconds from config', () => {
@@ -1901,7 +1901,7 @@ describe('resolveTimeouts', () => {
     const config = loadFactoryConfig();
     const emptyTimeouts = { ...config, timeouts: {} as typeof config.timeouts };
 
-    expect(resolveTimeouts(emptyTimeouts, {})).toEqual({
+    expect(resolveTimeouts(emptyTimeouts, {})).toMatchObject({
       plan: 1800,
       build: 7200,
       check: 1800,

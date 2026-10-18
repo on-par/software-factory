@@ -64,6 +64,7 @@ describe('zero-config: { version: 2 }', () => {
       merge_poll_seconds: 120,
       approval_seconds: 1800,
       tests_seconds: 300,
+      compile_seconds: 120,
     });
     expect(cfg.run.sandbox).toEqual({
       enabled: true,
@@ -228,6 +229,7 @@ describe('full v2 config', () => {
         merge_poll_seconds: 60,
         approval_seconds: 600,
         tests_seconds: 1200,
+        compile_seconds: 120,
       },
       sandbox: { enabled: false, network: { allow: [] }, resources: { cpuMs: 100, memMb: 512 } },
       worktree: { parent: '../wt', gcTtlDays: 3, autoGcOnRun: false },
