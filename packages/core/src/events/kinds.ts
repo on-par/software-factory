@@ -12,6 +12,9 @@ import type { StuckTrigger } from '../steward/detect.js';
 import type { LogLevel } from '../types/index.js';
 
 export type EventKind =
+  | 'pr-adopt-ambiguous'
+  | 'pr-adopt-lookup-failed'
+  | 'pr-adopted'
   | 'activity_touch_failed'
   | 'adr_context'
   | 'adr_context_empty'
@@ -360,6 +363,9 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'lock-stolen': { severity: 'info', isPark: false, isTerminal: false },
   'merge-gated': { severity: 'info', isPark: false, isTerminal: false },
   'merge-gated-override': { severity: 'warn', isPark: false, isTerminal: false },
+  'pr-adopt-ambiguous': { severity: 'warn', isPark: false, isTerminal: false },
+  'pr-adopt-lookup-failed': { severity: 'warn', isPark: false, isTerminal: false },
+  'pr-adopted': { severity: 'info', isPark: false, isTerminal: false },
   'pr-classified': { severity: 'info', isPark: false, isTerminal: false },
   merged: { severity: 'info', isPark: false, isTerminal: true },
   'model-override': { severity: 'info', isPark: false, isTerminal: false },

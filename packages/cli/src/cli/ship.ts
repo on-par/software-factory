@@ -52,7 +52,6 @@ import {
 import { hostBuildSlotPort } from './host-slot.js';
 import type { CheckResumeRecord, PrClassificationRecord, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
-  branchFor,
   createCheckResumeStore,
   createGithubLaneClaimStalenessProbe,
   createPlanReuseStore,
@@ -70,11 +69,11 @@ import {
 import { baseHealthWithCi } from './base-health-ci.js';
 import { formatDeprecation } from './octokit.js';
 import type { CliDeps, ConfigLoaderKey, CoreOpKey, GitOpKey, ShellOpKey } from './index.js';
+import { resolveRunBranch } from './run-branch.js';
 import { shipRuntime } from './ship-runtime.js';
 import {
   buildRunRequest,
   decomposeQueue,
-  findSliceIndex,
   finishOutcome,
   logSandboxPolicy,
   maybeWriteBenchmarkArtifacts,
@@ -247,13 +246,14 @@ export async function shipIssue(
   const issueTitle = work.title;
   const sizeGateMode = opts.sizeGate ?? resolveSizeGateMode(factoryConfig);
   const maxSlices = opts.maxSlices ?? resolveSizeGateMaxSlices(factoryConfig);
-  const sliceIndex = await findSliceIndex({ sizeGateMode, ctx, work, octokit, ghRepo, issueNum });
-  const branch = ctx?.resumeFrom?.branch ?? branchFor(issueNum, issueTitle, policy.effective.branchPrefix, sliceIndex);
+  const { branchPrefix } = policy.effective;
+  const claim = { issueNum, issueTitle, ghRepo, sizeGateMode, work, ctx, octokit };
+  const branch = await resolveRunBranch({ ...claim, branchPrefix, eventsFile: paths.events });
   const worktree = ctx?.resumeFrom
     ? ctx.resumeFrom.worktree
     : ctx?.localOnly
       ? ctx.localOnly.workspace
-      : worktreePathFor(repoRoot, ghRepo, issueNum, policy.effective.branchPrefix, loaders);
+      : worktreePathFor(repoRoot, ghRepo, issueNum, branchPrefix, loaders);
   const specPath = resolve(paths.plans, `issue-${issueNum}.md`);
   const runStartedAt = new Date().toISOString();
 

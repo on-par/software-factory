@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-
 import * as publicApi from './index.js';
 import * as internalApi from './internal.js';
 import * as kpisApi from './kpis-entry.js';
@@ -358,6 +357,7 @@ const INTERNAL_API_KEYS = [
   'DEFAULT_GARDEN_SINCE',
   'capGardenClusters',
   'filterGardenWindow',
+  'findAdoptablePr',
   'parseGardenDuration',
   'renderGardenJson',
   'clusterCheckFailures',
