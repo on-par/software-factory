@@ -311,7 +311,7 @@ describe('createFactorydServer', () => {
       );
       expect(status).toBe(400);
       expect(JSON.parse(body)).toEqual({
-        error: expect.stringContaining('.factory/config.json not found'),
+        error: expect.stringContaining('no repo config in'),
         reason: 'missing-factory-config',
       });
 

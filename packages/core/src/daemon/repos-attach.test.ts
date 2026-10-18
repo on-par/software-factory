@@ -158,7 +158,7 @@ describe('attachRepo', () => {
     expect(result).toEqual({
       ok: false,
       reason: 'missing-factory-config',
-      detail: `${join(dir, '.factory', 'config.json')} not found`,
+      detail: `no repo config in ${join(dir, '.factory')} (looked for config.yaml, config.yml, config.json)`,
     });
     expect(existsSync(registryFile)).toBe(false);
   });
@@ -288,7 +288,7 @@ describe('attachRepo', () => {
     expect(result).toEqual({
       ok: false,
       reason: 'missing-factory-config',
-      detail: `${join(dir, '.factory', 'config.json')} not found`,
+      detail: `no repo config in ${join(dir, '.factory')} (looked for config.yaml, config.yml, config.json)`,
     });
   });
 });
