@@ -19,21 +19,35 @@ beforeEach(async () => {
   });
 });
 afterEach(async () => {
-  await runtime?.stop();
-  await rm(dir, { recursive: true, force: true });
+  try {
+    await runtime?.stop();
+  } finally {
+    runtime = undefined!;
+    await rm(dir, { recursive: true, force: true });
+  }
 });
-it('persists an accepted run before execution and exposes its terminal result after reconnecting', async () => {
-  let finish!: (value: { exitCode: number; prUrl: string }) => void;
-  runtime = await createRunRuntime({
-    registryFile,
-    execute: async () =>
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
+type Finish = (result: { exitCode: number | null; prUrl: string | null }) => void;
+function controllableExecute(beforeStart?: () => Promise<void>) {
+  let publish!: (finish: Finish) => void;
+  const started = new Promise<Finish>((resolve) => {
+    publish = resolve;
   });
+  const execute: Parameters<typeof createRunRuntime>[0]['execute'] = async ({ signal }) => {
+    await beforeStart?.();
+    return new Promise((resolve) => {
+      signal.addEventListener('abort', () => resolve({ exitCode: null, prUrl: null }));
+      publish(resolve);
+    });
+  };
+  return { execute, started };
+}
+it('persists an accepted run before execution and exposes its terminal result after reconnecting', async () => {
+  const { execute, started } = controllableExecute();
+  runtime = await createRunRuntime({ registryFile, execute });
   const input = { runId: randomUUID(), repo: 'test/repo', issue: 42 };
   expect((await runtime.submit(input)).status).toBe('queued');
   await expect.poll(() => runtime.get(input.runId)?.status).toBe('running');
+  const finish = await started;
   finish({ exitCode: 0, prUrl: 'https://github.com/test/repo/pull/9' });
   await expect.poll(() => runtime.get(input.runId)?.status).toBe('succeeded');
   await runtime.stop();
@@ -46,6 +60,16 @@ it('persists an accepted run before execution and exposes its terminal result af
   expect(runtime.list()).toMatchObject([
     { ...input, status: 'succeeded', exitCode: 0, prUrl: 'https://github.com/test/repo/pull/9' },
   ]);
+});
+it('waits for a slow execute to start before finishing the run', async () => {
+  const { execute, started } = controllableExecute(() => new Promise((resolve) => setTimeout(resolve, 200)));
+  runtime = await createRunRuntime({ registryFile, execute });
+  const input = { runId: randomUUID(), repo: 'test/repo', issue: 42 };
+  await runtime.submit(input);
+  await expect.poll(() => runtime.get(input.runId)?.status).toBe('running');
+  const finish = await started;
+  finish({ exitCode: 0, prUrl: 'https://github.com/test/repo/pull/9' });
+  await expect.poll(() => runtime.get(input.runId)?.status).toBe('succeeded');
 });
 it('deduplicates concurrent submissions and rejects identity changes and duplicate issue runs', async () => {
   let launches = 0;
