@@ -9,7 +9,8 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
 import { resolveRepoSlug } from '../logger/repo-slug.js';
-import type { IssueRunState } from '../types/index.js';
+import type { CheckerOutput, FailurePhase, IssueRunState, RunStatus } from '../types/index.js';
+import type { BuildRoute, RunOutcome } from './outcome.js';
 
 /** Path of one issue's persisted run state inside `runsDir`
  *  (`getFactoryPaths(repoRoot).runs`). */
@@ -52,4 +53,77 @@ export async function readIssueRunState(file: string): Promise<IssueRunState | n
     return rest as IssueRunState;
   }
   return record;
+}
+
+/** What runIssue knows at a transition (#3194). Absent fields keep the previous record's value. */
+export interface RunStateUpdate {
+  status: RunStatus;
+  branch?: string;
+  route?: BuildRoute;
+  model?: string;
+  attempts?: number;
+  prNumber?: number;
+  failures?: CheckerOutput[];
+}
+
+/** Fields the CLI fixes once per run. */
+export interface IssueRunStateBase {
+  issue: number;
+  lane: string;
+  branch: string;
+  worktree: string;
+  specPath: string;
+  startedAt: string;
+}
+
+export function runStatusForPhase(phase: FailurePhase): RunStatus {
+  switch (phase) {
+    case 'plan':
+      return 'planning';
+    case 'build':
+      return 'building';
+    case 'check':
+      return 'checking';
+    case 'ship':
+      return 'shipping';
+  }
+}
+
+export function terminalRunStatus(outcome: RunOutcome): RunStatus {
+  switch (outcome.state) {
+    case 'ready':
+    case 'shipped':
+      return 'ready';
+    case 'parked':
+      return 'parked';
+    case 'escalated':
+      return 'escalated';
+    case 'released':
+      return 'pending';
+  }
+}
+
+/** Merges `update` onto the previous in-memory record. Keys whose value is absent are omitted. */
+export function nextIssueRunState(
+  prev: IssueRunState | undefined,
+  base: IssueRunStateBase,
+  update: RunStateUpdate,
+  now: string,
+): IssueRunState {
+  const prNumber = update.prNumber ?? prev?.prNumber;
+  return {
+    ...base,
+    branch: update.branch ?? prev?.branch ?? base.branch,
+    status: update.status,
+    // IssueRunState.route is required, so before PLAN picks a route the packaged default
+    // harness is recorded. The runs row does not expose route.
+    route: update.route ?? prev?.route ?? 'claude',
+    model: update.model ?? prev?.model ?? '',
+    attempts: update.attempts ?? prev?.attempts ?? 1,
+    startedAt: base.startedAt,
+    updatedAt: now,
+    ...(prNumber === undefined ? {} : { prNumber }),
+    ...(update.failures !== undefined && update.failures.length > 0 ? { failures: update.failures } : {}),
+    ...(prev?.remoteBranch === undefined ? {} : { remoteBranch: prev.remoteBranch }),
+  };
 }

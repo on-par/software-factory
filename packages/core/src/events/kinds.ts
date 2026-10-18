@@ -115,6 +115,7 @@ export type EventKind =
   | 'parked'
   | 'phase_completed'
   | 'phase_snapshot_failed'
+  | 'run_state_failed'
   | 'phase_started'
   | 'plan'
   | 'plan_approval_granted'
@@ -377,6 +378,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   parked: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
   phase_completed: { severity: 'info', isPark: false, isTerminal: false },
   phase_snapshot_failed: { severity: 'info', isPark: false, isTerminal: false },
+  run_state_failed: { severity: 'info', isPark: false, isTerminal: false },
   phase_started: { severity: 'info', isPark: false, isTerminal: false },
   plan: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
   plan_approval_granted: { severity: 'info', isPark: false, isTerminal: false },
@@ -423,16 +425,14 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   // ADR-0161: the native stack API failed; the issue fell back to slice mode (#2672).
   'stack-fallback': { severity: 'warn', isPark: false, isTerminal: false },
   'skip-ci': { severity: 'info', isPark: false, isTerminal: false },
-  // The target issue was already closed when the run started — no work was
-  // attempted, so this is a clean terminal outcome, never a park (#681).
+  // Target issue already closed at run start: a clean terminal outcome, never a park (#681).
   'skipped-already-closed': { severity: 'info', isPark: false, isTerminal: true },
   'size-gate-escalated': { severity: 'warn', isPark: false, isTerminal: false },
   // #2662: a file-mode size-gate trip filed its decomposition as sub-issues — no human escalation.
   'size-gate-decomposed': { severity: 'info', isPark: false, isTerminal: false },
   // ADR-0147: the oversized issue was kept whole and a slice plan was recorded.
   'size-gate-sliced': { severity: 'info', isPark: false, isTerminal: false },
-  // The stuck-run steward picked up a parked run (ADR-0155). Not a park: the run already
-  // logged its own park, so counting this too would double human-intervention KPIs.
+  // Steward picked up a parked run (ADR-0155). Not a park: the run already logged its own park.
   'steward-triggered': { severity: 'info', isPark: false, isTerminal: false },
   steering_applied: { severity: 'info', isPark: false, isTerminal: false },
   steering_unconsumed: { severity: 'info', isPark: false, isTerminal: false },

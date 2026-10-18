@@ -755,7 +755,7 @@ export type { ReadinessGapCriterion, ReadinessGapReport } from './readiness/enri
 export { buildReadinessGapPrompt, parseReadinessGapOutput } from './readiness/enrich.js';
 
 export type { IssueRunState, RunStatus } from './types/index.js';
-export { readIssueRunState } from './run/state.js';
+export * from './run/state.js';
 export { createStackSliceBranch } from './run/stack-slice-branch.js';
 export {
   checkResumePath,

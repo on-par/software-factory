@@ -90,6 +90,8 @@ import {
   type PlanReuseStore,
 } from './resume-context.js';
 import type { Environment, Workspace } from './ports.js';
+import { safeRecordRunState, terminalRunStateUpdate, thrownRunStateUpdate } from './run-state-record.js';
+import { runStatusForPhase, type RunStateUpdate } from './state.js';
 import { shipWithCiRework, type CiReworkPorts } from './ci-rework-loop.js';
 import { parkLogExtra } from './ship-park.js';
 
@@ -236,6 +238,10 @@ export interface RunPorts extends CiReworkPorts {
    *  at each of the four PLAN/BUILD/CHECK/SHIP transitions. A rejection here is logged
    *  and swallowed: this is an observability side channel, not a run invariant. */
   recordPhase?: (phase: FailurePhase) => void | Promise<void>;
+  /** Persists the IssueRunState (#3194) — called at the four phase transitions and once
+   *  with the terminal status. A rejection is logged as `run_state_failed` and swallowed:
+   *  an observability side channel, not a run invariant. */
+  recordRunState?: (update: RunStateUpdate) => void | Promise<void>;
   /** Heartbeat hook (#1326) forwarded to CHECK's CheckerContext — called around every
    *  checker so the persisted run-phase snapshot's `lastActivityAt` advances during a
    *  long CHECK stage, not just at the four phase transitions `recordPhase` covers. A
@@ -274,10 +280,28 @@ function isDecomposeSignal(err: unknown): boolean {
 }
 
 export async function runIssue(request: RunRequest, policy: RunPolicy, ports: RunPorts): Promise<RunOutcome> {
-  return runStackLoop(request, (req) => runIssueOnce(req, policy, ports));
+  const log = ports.events();
+  return runStackLoop(request, async (req) => {
+    const observed: { checkSummary?: CheckSummary } = {};
+    let outcome: RunOutcome;
+    try {
+      outcome = await runIssueOnce(req, policy, ports, observed);
+    } catch (err) {
+      const update = thrownRunStateUpdate(isDecomposeSignal(err), req.branch, observed.checkSummary);
+      await safeRecordRunState(ports.recordRunState, log, update);
+      throw err;
+    }
+    await safeRecordRunState(ports.recordRunState, log, terminalRunStateUpdate(outcome, observed.checkSummary));
+    return outcome;
+  });
 }
 
-async function runIssueOnce(initialRequest: RunRequest, policy: RunPolicy, ports: RunPorts): Promise<RunOutcome> {
+async function runIssueOnce(
+  initialRequest: RunRequest,
+  policy: RunPolicy,
+  ports: RunPorts,
+  observed: { checkSummary?: CheckSummary },
+): Promise<RunOutcome> {
   let request = initialRequest;
   const planPhase = ports.planPhase ?? planPhaseDefault;
   const slot = ports.hostBuildSlot ?? ((_phase, fn) => fn());
@@ -293,6 +317,7 @@ async function runIssueOnce(initialRequest: RunRequest, policy: RunPolicy, ports
   let released = false;
   let route: BuildRoute | undefined;
   let reworkRounds: number | undefined;
+  let recordedModel: string | undefined;
   let checkSummary: CheckSummary | undefined;
   let failurePhase: FailurePhase = 'plan';
   let runStartDiffBase: string | undefined;
@@ -304,6 +329,13 @@ async function runIssueOnce(initialRequest: RunRequest, policy: RunPolicy, ports
     } catch (err) {
       log('phase_snapshot_failed', `phase snapshot write failed for '${phase}': ${errorMessage(err)}`);
     }
+    await safeRecordRunState(ports.recordRunState, log, {
+      status: runStatusForPhase(phase),
+      branch: request.branch,
+      route,
+      model: recordedModel,
+      attempts: 1 + (reworkRounds ?? 0),
+    });
   };
 
   const release = async (): Promise<void> => {
@@ -565,6 +597,7 @@ async function runIssueOnce(initialRequest: RunRequest, policy: RunPolicy, ports
       buildDiffBase = resumed.diffBase;
       builtRoute = resumed.route;
       builtModel = resumed.model;
+      recordedModel = resumed.model;
       pinNote = undefined;
       buildMinutes = resumed.buildMinutes;
     } else {
@@ -836,6 +869,7 @@ async function runIssueOnce(initialRequest: RunRequest, policy: RunPolicy, ports
       buildDiffBase = build.diffBase;
       builtRoute = build.route;
       builtModel = build.model;
+      recordedModel = build.model;
       buildMinutes = Math.max(1, Math.round((Date.now() - planStartedMs) / 60_000));
     }
 
@@ -872,6 +906,7 @@ async function runIssueOnce(initialRequest: RunRequest, policy: RunPolicy, ports
     };
     const check = await checkPhase(checkOpts);
     checkSummary = check.summary;
+    observed.checkSummary = check.summary;
     reworkRounds = check.reworkRounds;
     const flake = check.flakeRerun;
     if (flake && flake.verdict !== 'not-run' && check.baseline) {
