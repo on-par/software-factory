@@ -239,6 +239,12 @@ describe('cli', () => {
         expect(r.events.filter((e) => e[1] === 'lane-done')).toHaveLength(0);
       });
 
+      it('prints the gate ciReason in the not-claiming warning', async () => {
+        const r = await gateRun(async () => ({ kind: 'hold', hold, ciReason: 'ci failure' }));
+        const warn = r.events.find((e) => e[1] === 'warn');
+        expect(warn[3]).toContain('(ci failure)');
+      });
+
       it('claims normally when the gate returns claim', async () => {
         const r = await gateRun(async () => ({ kind: 'claim' }));
         expect(r.claimNext).toHaveBeenCalled();
@@ -420,7 +426,7 @@ describe('cli', () => {
               file: baseHold,
               repo: 'on-par/software-factory',
               git: async () => gitOut,
-              listCheckRuns: async () => [{ status: 'completed', conclusion: 'failure' }],
+              requiredChecksVerdict: async () => ({ green: false, reason: 'ci failure' }),
             }),
             ...laneDeps,
           },

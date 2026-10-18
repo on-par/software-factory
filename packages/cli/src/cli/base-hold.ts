@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-import { isPassingConclusion, type RequiredChecksVerdict } from '@on-par/factory-core/internal';
+import type { RequiredChecksVerdict } from '@on-par/factory-core/internal';
 
 /** A base SHA found broken by an environment pause (ADR-0141). */
 export interface BaseHold {
@@ -67,6 +67,8 @@ export interface BaseHoldCleared {
   reason: BaseHoldClearReason;
   /** origin/main SHA seen on the clearing poll. */
   currentSha: string;
+  /** What a ci-green verdict was based on (#3195). */
+  basis?: string;
 }
 
 /** Deletes the hold only if it is still on `baseSha`; true only when this call deleted it. Fully
@@ -83,7 +85,7 @@ export function formatBaseHoldCleared(c: BaseHoldCleared): string {
   const now = c.currentSha.slice(0, 8);
   return c.reason === 'sha-changed'
     ? `base hold on ${held} cleared (reason: sha-changed): origin/main moved to ${now}`
-    : `base hold on ${held} cleared (reason: ci-green): main CI on ${now} is green`;
+    : `base hold on ${held} cleared (reason: ci-green): main CI on ${now} is green (${c.basis ?? 'required checks'})`;
 }
 
 /** `factory status` lines for an active hold (#2351). */
@@ -92,14 +94,12 @@ export function formatBaseHoldStatus(hold: BaseHold): string[] {
   return [`  repo: ${hold.repo}`, `  baseSha: ${hold.baseSha}`, `  failingChecks: ${checks}`, `  since: ${hold.since}`];
 }
 
-export type BaseHoldDecision = { kind: 'claim' } | { kind: 'hold'; hold: BaseHold };
+export type BaseHoldDecision = { kind: 'claim' } | { kind: 'hold'; hold: BaseHold; ciReason?: string };
 
 export interface BaseHoldGateDeps {
   /** Current origin/main SHA; null (or a throw) means unknown. */
   currentBaseSha: () => Promise<string | null>;
-  /** True only when main's CI on `sha` is green. */
-  baseCiGreen: (sha: string) => Promise<boolean>;
-  /** Strict required-checks lookup for a hold with `ciRecheckAfter` (#3186); absent = not green. */
+  /** Strict CI verdict used for every hold (#3186, #3195); absent = not green. */
   requiredChecksVerdict?: (sha: string) => Promise<RequiredChecksVerdict>;
   /** Clock in epoch ms; defaults to Date.now. */
   now?: () => number;
@@ -120,10 +120,10 @@ export async function evaluateBaseHold(file: string, repo: string, deps: BaseHol
     sha = null;
   }
   if (sha === null) return { kind: 'claim' };
-  const clear = (reason: BaseHoldClearReason, currentSha: string): void => {
+  const clear = (reason: BaseHoldClearReason, currentSha: string, basis?: string): void => {
     if (!clearBaseHold(file, hold.baseSha)) return;
     try {
-      deps.onCleared?.({ hold, reason, currentSha });
+      deps.onCleared?.({ hold, reason, currentSha, ...(basis !== undefined ? { basis } : {}) });
     } catch {
       // an observer failure must not change the decision
     }
@@ -135,14 +135,9 @@ export async function evaluateBaseHold(file: string, repo: string, deps: BaseHol
   if (hold.ciRecheckAfter !== undefined) {
     const now = deps.now ?? Date.now;
     if (now() < Date.parse(hold.ciRecheckAfter)) return { kind: 'hold', hold };
-    let strictGreen = false;
-    try {
-      strictGreen = (await deps.requiredChecksVerdict?.(sha))?.green === true;
-    } catch {
-      strictGreen = false;
-    }
-    if (strictGreen) {
-      clear('ci-green', sha);
+    const v = await strictVerdict(deps, sha);
+    if (v.green) {
+      clear('ci-green', sha, v.basis);
       return { kind: 'claim' };
     }
     try {
@@ -150,22 +145,22 @@ export async function evaluateBaseHold(file: string, repo: string, deps: BaseHol
     } catch {
       // a failed re-arm only means the next poll re-checks sooner
     }
-    return { kind: 'hold', hold };
+    return { kind: 'hold', hold, ciReason: v.reason };
   }
-  let green = false;
-  try {
-    green = await deps.baseCiGreen(sha);
-  } catch {
-    green = false;
-  }
-  if (!green) return { kind: 'hold', hold };
-  clear('ci-green', sha);
+  const v = await strictVerdict(deps, sha);
+  if (!v.green) return { kind: 'hold', hold, ciReason: v.reason };
+  clear('ci-green', sha, v.basis);
   return { kind: 'claim' };
 }
 
-/** Green = at least one check run, all completed, all on the ADR-0014 passing allow-list. */
-export function isGreenCheckRunSet(runs: ReadonlyArray<{ status: string | null; conclusion: string | null }>): boolean {
-  return runs.length > 0 && runs.every((r) => r.status === 'completed' && isPassingConclusion(r.conclusion));
+async function strictVerdict(deps: BaseHoldGateDeps, sha: string): Promise<RequiredChecksVerdict> {
+  if (!deps.requiredChecksVerdict) return { green: false, reason: 'no CI lookup configured' };
+  try {
+    const v = await deps.requiredChecksVerdict(sha);
+    return v.green ? v : { ...v, green: false };
+  } catch (err) {
+    return { green: false, reason: `CI lookup failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
 }
 
 /** SHA from the first line of `git ls-remote` output, or null when absent or malformed. */
@@ -179,7 +174,6 @@ export function createBaseHoldGate(opts: {
   file: string;
   repo: string;
   git: (cmd: string) => Promise<string>;
-  listCheckRuns: (ref: string) => Promise<Array<{ status: string | null; conclusion: string | null }>>;
   requiredChecksVerdict?: (sha: string) => Promise<RequiredChecksVerdict>;
   onCleared?: (cleared: BaseHoldCleared) => void;
   now?: () => number;
@@ -187,7 +181,6 @@ export function createBaseHoldGate(opts: {
   return () =>
     evaluateBaseHold(opts.file, opts.repo, {
       currentBaseSha: async () => parseLsRemoteSha(await opts.git('git ls-remote origin refs/heads/main')),
-      baseCiGreen: async (sha) => isGreenCheckRunSet(await opts.listCheckRuns(sha)),
       requiredChecksVerdict: opts.requiredChecksVerdict,
       onCleared: opts.onCleared,
       now: opts.now,

@@ -186,7 +186,7 @@ export async function runLane(
           paths.events,
           'warn',
           lane,
-          `lane '${lane}' not claiming: base hold on ${gate.hold.baseSha.slice(0, 8)} (${gate.hold.failingChecks.join(', ')}) — origin/main unchanged and its CI is not green`,
+          `lane '${lane}' not claiming: base hold on ${gate.hold.baseSha.slice(0, 8)} (${gate.hold.failingChecks.join(', ')}) — origin/main unchanged and its CI is not green${gate.ciReason ? ` (${gate.ciReason})` : ''}`,
           { lane },
         );
         return;
