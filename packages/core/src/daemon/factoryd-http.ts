@@ -266,10 +266,15 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
         }
         const result = await attachRepo(registryFile, body.value, opts.attachDeps);
         if (!result.ok) {
-          send(res, req, 400, { error: result.detail, reason: result.reason });
+          const status = result.reason === 'draining' || result.reason === 'state-root-mismatch' ? 409 : 400;
+          send(res, req, status, { error: result.detail, reason: result.reason });
           return;
         }
-        send(res, req, 201, { repo: result.entry });
+        if (result.created) {
+          send(res, req, 201, { repo: result.entry, created: true });
+        } else {
+          send(res, req, 200, { repo: result.entry, created: false, changed: result.changed });
+        }
         return;
       }
 
