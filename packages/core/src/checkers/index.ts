@@ -120,6 +120,7 @@ export const compileChecker: CheckerFn = async (ctx) => {
       checker: 'compile',
       result: 'FAIL',
       details: await commandFailureDetails(ctx, 'compile', label, r, evidence(r)),
+      ...(r.timedOut ? { timedOut: true } : {}),
     };
   } catch (e: any) {
     return {

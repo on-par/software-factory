@@ -19,6 +19,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { promisify, styleText } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
+import { LaneEnvironmentPauseError } from './lane-environment-pause-error.js';
 import { INVALID_BRANCH_PREFIX_MESSAGE, resolveBranchPrefixOption } from './branch-prefix.js';
 import { sweepLaneClaims, warnQueueDiagnostics } from './queue-startup.js';
 import { proposeTriageQueue } from './triage-open-prs.js';
@@ -686,7 +687,7 @@ setShipRuntime(() => ({
   IssueDecomposedError,
 }));
 
-export { shipIssue };
+export { LaneEnvironmentPauseError, shipIssue };
 
 export function hasGitHubToken(env: NodeJS.ProcessEnv = process.env, tryToken?: () => string): boolean {
   if (env.GITHUB_TOKEN || env.GH_TOKEN) return true;
@@ -1921,27 +1922,6 @@ export class LaneParkError extends Error {
 
   get failingChecks(): string[] | undefined {
     return this.outcome.failingChecks;
-  }
-}
-
-/** CHECK found every failing checker also failing on the base SHA (#1928): the issue is
- *  released to queued (not parked) and the lane pauses. */
-export class LaneEnvironmentPauseError extends Error {
-  readonly baseSha: string;
-  readonly failingChecks: string[];
-  readonly failureSignature?: string;
-  /** BUILD output was kept for `factory resume --from check` (#2564); runLane must not reap it. */
-  readonly buildPreserved?: boolean;
-
-  constructor(
-    message: string,
-    failure: { baseSha: string; failingChecks: string[]; failureSignature?: string; buildPreserved?: boolean },
-  ) {
-    super(message);
-    if (failure.buildPreserved !== undefined) this.buildPreserved = failure.buildPreserved;
-    this.baseSha = failure.baseSha;
-    this.failingChecks = failure.failingChecks;
-    if (failure.failureSignature !== undefined) this.failureSignature = failure.failureSignature;
   }
 }
 

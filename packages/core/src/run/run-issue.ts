@@ -535,6 +535,7 @@ async function runIssueOnce(initialRequest: RunRequest, policy: RunPolicy, ports
           reworkRounds: 0,
           baseSha: health.baseSha,
           failingChecks: health.failingChecks,
+          ...(health.awaitingCi ? { awaitingCi: true } : {}),
         };
       }
     }

@@ -5,6 +5,10 @@ import type { ModelRouter } from '../router/index.js';
 import type { Constitution } from '../types/index.js';
 import { runCommand } from '../utils/command-runner.js';
 import { GIT_COMMAND_TIMEOUT_MS } from '../utils/git-exec.js';
+import type { RequiredChecksVerdict } from '../utils/required-checks.js';
+
+// The strict CI lookup rides with base health on the internal surface (#3186).
+export { fetchRequiredChecksVerdict, type RequiredChecksVerdict } from '../utils/required-checks.js';
 import { type BaselineDeps, type BaselineReport, runBaselineCheckers } from './baseline.js';
 import { BaselineCache, hashBaselineCheckerConfig, hashBaselineEnv } from './baseline-cache.js';
 
@@ -20,6 +24,8 @@ export interface BaseHealthResult {
   /** True when any base result came from the baseline cache or the in-process memo. */
   cached: boolean;
   reason?: string;
+  /** Red only because a compile timeout awaits green required CI (#3186). */
+  awaitingCi?: boolean;
 }
 
 export interface BaseHealthOptions {
@@ -38,6 +44,8 @@ export interface BaseHealthOptions {
   testsTimeoutSeconds?: number;
   /** Compile checker timeout in seconds (`request.timeouts.compile`, #3185); undefined = the compile checker's 120s default. */
   compileTimeoutSeconds?: number;
+  /** Strict GitHub CI lookup for a timed-out compile (#3186); absent = CI unknown. */
+  requiredChecksVerdict?: (sha: string) => Promise<RequiredChecksVerdict>;
   log: (type: EventKind, msg: string) => void;
   deps?: {
     runCommand?: typeof runCommand;
@@ -120,14 +128,41 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
       log('environment_warning', `base health skipped: ${report.error}`);
       return { kind: 'skipped', baseSha, failingChecks: [], cached: false, reason: report.error };
     }
-    const failing = report.checkers.filter((c) => c.verdict === 'fails-on-base').map((c) => c.checker);
+    let failing = report.checkers.filter((c) => c.verdict === 'fails-on-base').map((c) => c.checker);
+    const timedOut = report.checkers.find(
+      (c) => c.checker === 'compile' && c.verdict === 'fails-on-base' && c.baseTimedOut === true,
+    );
+    let ciPending = false;
+    if (timedOut) {
+      map.delete(key);
+      let verdict: RequiredChecksVerdict;
+      try {
+        verdict = (await opts.requiredChecksVerdict?.(baseSha)) ?? { green: false, reason: 'CI lookup unavailable' };
+      } catch (err) {
+        verdict = { green: false, reason: `CI lookup failed: ${errorMessage(err)}` };
+      }
+      if (verdict.green) {
+        failing = failing.filter((c) => c !== 'compile');
+        log(
+          'check',
+          `base health: compile timed out locally on origin/main ${baseSha} but GitHub CI is green (${verdict.reason}) — overriding compile to passing`,
+        );
+      } else {
+        ciPending = true;
+        log(
+          'check',
+          `base health: compile timed out locally on origin/main ${sha8}; GitHub CI not green (${verdict.reason}) — holding`,
+        );
+      }
+    }
     const cached = memoized || report.checkers.some((c) => c.cached === true);
     if (cached) {
       log('check', `base health: cache hit for ${sha8} (${memoized ? 'shared with another lane' : 'baseline cache'})`);
     }
     if (failing.length > 0) {
       log('check', `base health: origin/main ${sha8} is red (${failing.join(', ')})`);
-      return { kind: 'red', baseSha, failingChecks: failing, cached };
+      const awaitingCi = ciPending && failing.length === 1 && failing[0] === 'compile';
+      return { kind: 'red', baseSha, failingChecks: failing, cached, ...(awaitingCi ? { awaitingCi } : {}) };
     }
     log('check', `base health: origin/main ${sha8} is green`);
     return { kind: 'green', baseSha, failingChecks: [], cached };

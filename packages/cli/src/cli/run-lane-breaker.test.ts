@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { type BaseHold, createBaseHoldGate, readBaseHold } from './base-hold.js';
+import { BASE_HOLD_CI_RECHECK_MS, type BaseHold, createBaseHoldGate, readBaseHold } from './base-hold.js';
 import { LaneEnvironmentPauseError, LaneParkError } from './index.js';
 import { renderLanePausedComment, runLane } from './run-lane.js';
 
@@ -271,7 +271,7 @@ describe('cli', () => {
         await rm(holdDir, { recursive: true, force: true });
       });
 
-      const runPause = async (baseHold: string, laneBreakerThreshold?: number) => {
+      const runPause = async (baseHold: string, laneBreakerThreshold?: number, awaitingCi?: boolean) => {
         const shipped: number[] = [];
         const events: any[] = [];
         const released: any[] = [];
@@ -291,6 +291,7 @@ describe('cli', () => {
                 baseSha: 'abc1234567890def',
                 failingChecks: ['tests'],
                 failureSignature: 'sig',
+                awaitingCi,
               });
             },
             waitMerge: async () => {},
@@ -302,6 +303,7 @@ describe('cli', () => {
               events.push(args);
             }) as any,
             laneBreakerThreshold,
+            now: () => new Date('2026-03-01T00:00:00.000Z'),
           },
         );
 
@@ -339,6 +341,14 @@ describe('cli', () => {
           expect(Number.isNaN(Date.parse(hold!.since))).toBe(false);
         },
       );
+
+      it('awaitingCi writes ciRecheckAfter = now + backoff (#3186)', async () => {
+        const holdFile = join(holdDir, 'state', 'base-hold.json');
+        await runPause(holdFile, undefined, true);
+        expect(readBaseHold(holdFile)?.ciRecheckAfter).toBe(
+          new Date(Date.parse('2026-03-01T00:00:00.000Z') + BASE_HOLD_CI_RECHECK_MS).toISOString(),
+        );
+      });
 
       it.each([
         [true, 0],

@@ -2,12 +2,13 @@
 // base SHA (#2348), so a restarted supervisor remembers the pause. #2349 reads it back as the
 // claim gate: no claiming while origin/main is still at the held SHA and its CI is not green.
 // #2350 clears the hold once origin/main moves or its CI goes green. #2351 reads it for
-// `factory status`.
+// `factory status`. #3186 adds `ciRecheckAfter`: a hold awaiting GitHub CI on a timed-out base
+// compile backs off and is re-checked with the strict required-checks verdict, not the lenient one.
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-import { isPassingConclusion } from '@on-par/factory-core/internal';
+import { isPassingConclusion, type RequiredChecksVerdict } from '@on-par/factory-core/internal';
 
 /** A base SHA found broken by an environment pause (ADR-0141). */
 export interface BaseHold {
@@ -17,7 +18,12 @@ export interface BaseHold {
   failingChecks: string[];
   /** ISO-8601 time the hold was recorded. */
   since: string;
+  /** ISO-8601 time; set when the hold awaits GitHub CI on a timed-out base compile (#3186). */
+  ciRecheckAfter?: string;
 }
+
+/** Backoff between strict CI re-checks of a ci-awaiting hold (#3186). */
+export const BASE_HOLD_CI_RECHECK_MS = 5 * 60 * 1000;
 
 export function writeBaseHold(file: string, hold: BaseHold): void {
   mkdirSync(dirname(file), { recursive: true });
@@ -26,6 +32,7 @@ export function writeBaseHold(file: string, hold: BaseHold): void {
     baseSha: hold.baseSha,
     failingChecks: [...hold.failingChecks],
     since: hold.since,
+    ...(hold.ciRecheckAfter !== undefined ? { ciRecheckAfter: hold.ciRecheckAfter } : {}),
   };
   writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
 }
@@ -40,10 +47,12 @@ export function readBaseHold(file: string): BaseHold | null {
     return null;
   }
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
-  const { repo, baseSha, failingChecks, since } = raw as Record<string, unknown>;
+  const { repo, baseSha, failingChecks, since, ciRecheckAfter } = raw as Record<string, unknown>;
   if (typeof repo !== 'string' || typeof baseSha !== 'string' || typeof since !== 'string') return null;
   if (!Array.isArray(failingChecks) || !failingChecks.every((c) => typeof c === 'string')) return null;
-  return { repo, baseSha, failingChecks: [...failingChecks], since };
+  const recheck =
+    typeof ciRecheckAfter === 'string' && Number.isFinite(Date.parse(ciRecheckAfter)) ? { ciRecheckAfter } : {};
+  return { repo, baseSha, failingChecks: [...failingChecks], since, ...recheck };
 }
 
 export function deleteBaseHold(file: string): void {
@@ -90,6 +99,10 @@ export interface BaseHoldGateDeps {
   currentBaseSha: () => Promise<string | null>;
   /** True only when main's CI on `sha` is green. */
   baseCiGreen: (sha: string) => Promise<boolean>;
+  /** Strict required-checks lookup for a hold with `ciRecheckAfter` (#3186); absent = not green. */
+  requiredChecksVerdict?: (sha: string) => Promise<RequiredChecksVerdict>;
+  /** Clock in epoch ms; defaults to Date.now. */
+  now?: () => number;
   /** Called once, only by the poll that actually deleted the hold. A throw is swallowed. */
   onCleared?: (cleared: BaseHoldCleared) => void;
 }
@@ -119,6 +132,26 @@ export async function evaluateBaseHold(file: string, repo: string, deps: BaseHol
     clear('sha-changed', sha);
     return { kind: 'claim' };
   }
+  if (hold.ciRecheckAfter !== undefined) {
+    const now = deps.now ?? Date.now;
+    if (now() < Date.parse(hold.ciRecheckAfter)) return { kind: 'hold', hold };
+    let strictGreen = false;
+    try {
+      strictGreen = (await deps.requiredChecksVerdict?.(sha))?.green === true;
+    } catch {
+      strictGreen = false;
+    }
+    if (strictGreen) {
+      clear('ci-green', sha);
+      return { kind: 'claim' };
+    }
+    try {
+      writeBaseHold(file, { ...hold, ciRecheckAfter: new Date(now() + BASE_HOLD_CI_RECHECK_MS).toISOString() });
+    } catch {
+      // a failed re-arm only means the next poll re-checks sooner
+    }
+    return { kind: 'hold', hold };
+  }
   let green = false;
   try {
     green = await deps.baseCiGreen(sha);
@@ -147,12 +180,16 @@ export function createBaseHoldGate(opts: {
   repo: string;
   git: (cmd: string) => Promise<string>;
   listCheckRuns: (ref: string) => Promise<Array<{ status: string | null; conclusion: string | null }>>;
+  requiredChecksVerdict?: (sha: string) => Promise<RequiredChecksVerdict>;
   onCleared?: (cleared: BaseHoldCleared) => void;
+  now?: () => number;
 }): () => Promise<BaseHoldDecision> {
   return () =>
     evaluateBaseHold(opts.file, opts.repo, {
       currentBaseSha: async () => parseLsRemoteSha(await opts.git('git ls-remote origin refs/heads/main')),
       baseCiGreen: async (sha) => isGreenCheckRunSet(await opts.listCheckRuns(sha)),
+      requiredChecksVerdict: opts.requiredChecksVerdict,
       onCleared: opts.onCleared,
+      now: opts.now,
     });
 }

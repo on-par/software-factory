@@ -7,7 +7,7 @@ import type { LanePausedPayload, getFactoryPaths, RunOutcome } from '@on-par/fac
 import { formatLoadHold, logEvent } from '@on-par/factory-core/internal';
 import type { LoadGuardDecision, QueueClaim, QueueReleaseOutcome } from '@on-par/factory-core/internal';
 
-import { type BaseHoldDecision, writeBaseHold } from './base-hold.js';
+import { BASE_HOLD_CI_RECHECK_MS, type BaseHoldDecision, writeBaseHold } from './base-hold.js';
 import { waitForMerge } from './land.js';
 import { AwaitingReviewError } from './land-pr.js';
 import { shipIssue } from './ship.js';
@@ -323,6 +323,9 @@ export async function runLane(
             baseSha: err.baseSha,
             failingChecks: err.failingChecks,
             since: new Date().toISOString(),
+            ...(err.awaitingCi
+              ? { ciRecheckAfter: new Date(now().getTime() + BASE_HOLD_CI_RECHECK_MS).toISOString() }
+              : {}),
           });
         } catch {}
         const payload: LanePausedPayload = {

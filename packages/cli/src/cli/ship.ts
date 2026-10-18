@@ -53,7 +53,6 @@ import { hostBuildSlotPort } from './host-slot.js';
 import type { CheckResumeRecord, PrClassificationRecord, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
   branchFor,
-  checkBaseHealth,
   createCheckResumeStore,
   createGithubLaneClaimStalenessProbe,
   createPlanReuseStore,
@@ -68,6 +67,7 @@ import {
   startEgressProxy,
   worktreeSandboxFor,
 } from '@on-par/factory-core/internal';
+import { baseHealthWithCi } from './base-health-ci.js';
 import { formatDeprecation } from './octokit.js';
 import type { CliDeps, ConfigLoaderKey, CoreOpKey, GitOpKey, ShellOpKey } from './index.js';
 import { shipRuntime } from './ship-runtime.js';
@@ -410,7 +410,7 @@ export async function shipIssue(
     checkPhase: phases.checkPhase,
     hostBuildSlot: hostBuildSlotPort(factoryConfig, ghRepo, issueNum, log, ctx?.runSlots),
     shipPhase: shipPhaseForMode,
-    checkBaseHealth: deps.checkBaseHealth ?? checkBaseHealth,
+    checkBaseHealth: deps.checkBaseHealth ?? baseHealthWithCi(octokit, ghOwner, ghName),
     resolveConstitution: () =>
       // Resolved once here — runIssue calls this exactly once and reuses the value for
       // every phase, so the build worker can never author the standards it is graded by.

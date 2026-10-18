@@ -111,6 +111,8 @@ export interface CheckerOutput {
   findings?: RegressionFinding[];
   /** Set on a SKIP when no model could run the checker; a required checker then fails (#2493). */
   unavailable?: boolean;
+  /** True when the checker's command ended by timeout (#3186): inconclusive, never cached. */
+  timedOut?: boolean;
 }
 
 export interface CheckSummary {

@@ -281,6 +281,7 @@ export function finishOutcome({
       failingChecks: outcome.failingChecks,
       failureSignature: outcome.failureSignature,
       buildPreserved: outcome.buildPreserved,
+      awaitingCi: outcome.awaitingCi,
     });
   }
 

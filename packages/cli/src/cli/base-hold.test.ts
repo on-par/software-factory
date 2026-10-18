@@ -1,11 +1,14 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
+
 import {
+  BASE_HOLD_CI_RECHECK_MS,
   type BaseHold,
   createBaseHoldGate,
   deleteBaseHold,
@@ -242,5 +245,108 @@ describe('base hold gate (#2349)', () => {
       expect(await gate()).toEqual({ kind: 'hold', hold: gateHold });
       expect(git).toHaveBeenCalledWith('git ls-remote origin refs/heads/main');
     });
+  });
+});
+
+describe('ci-awaiting base hold (#3186)', () => {
+  const SHA = 'a'.repeat(40);
+  const T0 = Date.parse('2026-02-01T00:00:00.000Z');
+  const recheck = new Date(T0 + 1000).toISOString();
+  const tempDirs = createTempDirs();
+  let dir: string;
+  let file: string;
+  const awaiting: BaseHold = { ...hold, baseSha: SHA, ciRecheckAfter: recheck };
+
+  beforeEach(async () => {
+    dir = await tempDirs.make('factory-base-hold-ci-');
+    file = join(dir, 'state', 'base-hold.json');
+  });
+  afterEach(async () => {
+    await tempDirs.cleanup();
+  });
+
+  const deps = (extra: Partial<Parameters<typeof evaluateBaseHold>[2]>) => ({
+    currentBaseSha: async () => SHA,
+    baseCiGreen: vi.fn(async () => true),
+    ...extra,
+  });
+
+  it('round-trips ciRecheckAfter and drops a malformed value', () => {
+    writeBaseHold(file, awaiting);
+    expect(readBaseHold(file)).toEqual(awaiting);
+    writeFileSync(file, JSON.stringify({ ...awaiting, ciRecheckAfter: 'not a date' }));
+    expect(readBaseHold(file)).toEqual({ ...hold, baseSha: SHA });
+    writeFileSync(file, JSON.stringify({ ...awaiting, ciRecheckAfter: 5 }));
+    expect(readBaseHold(file)?.ciRecheckAfter).toBeUndefined();
+  });
+
+  it('holds without any CI lookup before ciRecheckAfter', async () => {
+    writeBaseHold(file, awaiting);
+    const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'ok' }));
+    const d = deps({ requiredChecksVerdict, now: () => T0 });
+    expect(await evaluateBaseHold(file, hold.repo, d)).toEqual({ kind: 'hold', hold: awaiting });
+    expect(requiredChecksVerdict).not.toHaveBeenCalled();
+    expect(d.baseCiGreen).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['not green', async () => ({ green: false, reason: 'x skipped' })],
+    [
+      'a throw',
+      async (): Promise<{ green: boolean; reason: string }> => {
+        throw new Error('offline');
+      },
+    ],
+    ['an absent dep', undefined],
+  ])('after the time, %s re-arms the backoff and never uses the lenient lookup', async (_n, requiredChecksVerdict) => {
+    writeBaseHold(file, awaiting);
+    const now = T0 + 2000;
+    const d = deps({ requiredChecksVerdict, now: () => now });
+    expect((await evaluateBaseHold(file, hold.repo, d)).kind).toBe('hold');
+    expect(d.baseCiGreen).not.toHaveBeenCalled();
+    expect(readBaseHold(file)?.ciRecheckAfter).toBe(new Date(now + BASE_HOLD_CI_RECHECK_MS).toISOString());
+  });
+
+  it('after the time, a green strict verdict clears with ci-green', async () => {
+    writeBaseHold(file, awaiting);
+    const onCleared = vi.fn();
+    const d = deps({
+      requiredChecksVerdict: async () => ({ green: true, reason: 'ok' }),
+      now: () => T0 + 2000,
+      onCleared,
+    });
+    expect(await evaluateBaseHold(file, hold.repo, d)).toEqual({ kind: 'claim' });
+    expect(onCleared).toHaveBeenCalledWith({ hold: awaiting, reason: 'ci-green', currentSha: SHA });
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it('a moved SHA clears with sha-changed before any backoff', async () => {
+    writeBaseHold(file, awaiting);
+    const onCleared = vi.fn();
+    const d = deps({ currentBaseSha: async () => 'c'.repeat(40), now: () => T0, onCleared });
+    expect(await evaluateBaseHold(file, hold.repo, d)).toEqual({ kind: 'claim' });
+    expect(onCleared.mock.calls[0][0].reason).toBe('sha-changed');
+  });
+
+  it('a hold without the field keeps the lenient behavior', async () => {
+    writeBaseHold(file, { ...hold, baseSha: SHA });
+    const d = deps({ requiredChecksVerdict: vi.fn() });
+    expect(await evaluateBaseHold(file, hold.repo, d)).toEqual({ kind: 'claim' });
+    expect(d.baseCiGreen).toHaveBeenCalledWith(SHA);
+  });
+
+  it('createBaseHoldGate forwards requiredChecksVerdict and now', async () => {
+    writeBaseHold(file, awaiting);
+    const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'ok' }));
+    const gate = createBaseHoldGate({
+      file,
+      repo: hold.repo,
+      git: async () => `${SHA}\trefs/heads/main\n`,
+      listCheckRuns: async () => [],
+      requiredChecksVerdict,
+      now: () => T0 + 2000,
+    });
+    expect(await gate()).toEqual({ kind: 'claim' });
+    expect(requiredChecksVerdict).toHaveBeenCalledWith(SHA);
   });
 });
