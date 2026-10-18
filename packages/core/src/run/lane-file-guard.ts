@@ -10,6 +10,7 @@ import { dirname } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
 
+import { defaultIsPidAlive } from '../environment/index.js';
 import type { EventKind } from '../events/kinds.js';
 import { CLAIM_EXPIRES_LABEL_PREFIX, IN_PROGRESS_LABEL } from '../queue/github-queue.js';
 import { findStaleClaims } from '../queue/stale-claims.js';
@@ -21,6 +22,8 @@ export interface LaneFileClaim {
   issue: number;
   files: string[];
   claimedAt: string;
+  /** pid of the process that registered the claim (#1618). Absent on claims written before it. */
+  pid?: number;
 }
 
 interface LaneFileGuardFile {
@@ -46,7 +49,7 @@ export function touchedFilesFrom(design: Pick<DesignArtifact, 'targetTypes' | 's
   return [...files];
 }
 
-export type LaneClaimStaleReason = 'issue-closed' | 'pr-merged' | 'pr-closed';
+export type LaneClaimStaleReason = 'issue-closed' | 'pr-merged' | 'pr-closed' | 'holder-not-running';
 
 /** Resolves why `claim`'s holder is finished, or undefined when it is (or may be) live. Must
  *  never throw for a lookup failure — return undefined so the claim keeps blocking. */
@@ -80,7 +83,13 @@ export class LaneFileGuard {
   async register(repo: string, issue: number, files: string[]): Promise<void> {
     if (files.length === 0) return;
     const data = await this.read();
-    data.claims[runKeyFor(repo, issue)] = { repo, issue, files, claimedAt: new Date().toISOString() };
+    data.claims[runKeyFor(repo, issue)] = {
+      repo,
+      issue,
+      files,
+      claimedAt: new Date().toISOString(),
+      pid: process.pid,
+    };
     await this.write(data);
   }
 
@@ -234,13 +243,15 @@ export async function releaseLaneClaim(
 }
 
 /** GitHub-backed staleness probe (#3063). Fails safe: any lookup error, a live holder
- *  (in-progress label or unexpired lease), an open PR, or no PR found all return undefined. */
+ *  (in-progress label, unexpired lease, open PR, or a live recorded pid) or any lookup error returns
+ *  undefined. No PR plus an absent or dead pid returns 'holder-not-running' (#1618). */
 export function createGithubLaneClaimStalenessProbe(opts: {
   octokit: Pick<Octokit, 'rest'>;
   branchPrefix?: string;
   now?: () => number;
+  isPidAlive?: (pid: number) => boolean;
 }): LaneClaimStalenessProbe {
-  const { octokit, branchPrefix, now } = opts;
+  const { octokit, branchPrefix, now, isPidAlive = defaultIsPidAlive } = opts;
   return async (claim) => {
     try {
       const [owner, repoName] = claim.repo.split('/');
@@ -264,9 +275,16 @@ export function createGithubLaneClaimStalenessProbe(opts: {
       });
       if (prs.some((pr) => pr.state === 'open')) return undefined;
       if (prs.some((pr) => pr.merged_at)) return 'pr-merged';
-      return prs.length > 0 ? 'pr-closed' : undefined;
+      if (prs.length > 0) return 'pr-closed';
+      return holderRunning(claim.pid, isPidAlive) ? undefined : 'holder-not-running';
     } catch {
       return undefined;
     }
   };
+}
+
+/** True only for a valid positive-integer pid that is alive on this host; an absent or
+ *  malformed pid is never passed to process.kill (0/negatives target process groups). */
+function holderRunning(pid: unknown, isPidAlive: (pid: number) => boolean): boolean {
+  return typeof pid === 'number' && Number.isInteger(pid) && pid > 0 && isPidAlive(pid);
 }

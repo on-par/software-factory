@@ -262,8 +262,9 @@ describe('LaneFileGuard stale claims', () => {
     expect(await guard.claimsForIssue(1)).toHaveLength(1);
   });
 
-  it('keeps a claim when no PR is found', async () => {
-    const { guard, check } = await setup({ state: 'open', labels: [], title: 'Do thing' }, []);
+  it('keeps a claim when no PR is found and the recorded pid is alive', async () => {
+    const { file, guard, check } = await setup({ state: 'open', labels: [], title: 'Do thing' }, []);
+    expect(JSON.parse(await readFile(file, 'utf-8')).claims['acme/repo#1'].pid).toBe(process.pid);
     await expect(check()).resolves.toEqual({ issue: 1, file: 'a.swift' });
     expect(await guard.claimsForIssue(1)).toHaveLength(1);
   });
