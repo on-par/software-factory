@@ -237,10 +237,9 @@ function queueIssueStatus(labels: readonly string[]): Pick<QueueSnapshotEntry, '
 /** One read of the claimable GitHub-backed queue as a `QueueSnapshot` — the shape the TUI Queue
  *  tab renders, so `factory tui` can show the same backlog `factory status` does (#1362).
  *  One list call for `factory:queued` issues; lanes come from their `factory:lane:*` labels and
- *  each lane is ordered exactly as `GithubQueue.list(lane)` orders it. Throws on the same
- *  malformed or missing order labels `list()` throws on (callers degrade to a message); issues
- *  sharing a `factory:order` position are kept in issue-number order and reported in
- *  `orderConflicts` (#2977, #3101). */
+ *  each lane is ordered exactly as `GithubQueue.list(lane)` orders it. Issues with a bad order
+ *  label are skipped and reported in `orderConflicts` with `position: null` (#3192); duplicates
+ *  are kept in issue-number order and reported there too (#2977, #3101). */
 export async function readGithubQueueSnapshot(input: {
   client: Pick<QueueGitHubClient, 'listOpenIssuesWithLabels'>;
   owner: string;
@@ -262,8 +261,9 @@ export async function readGithubQueueSnapshot(input: {
 
   const entries: QueueSnapshotEntry[] = [];
   const orderConflicts: QueueOrderConflict[] = [];
+  const report = (c: QueueOrderConflict) => orderConflicts.push(c);
   for (const lane of [...byLane.keys()].sort()) {
-    for (const issue of orderedCandidates(lane, byLane.get(lane)!, (c) => orderConflicts.push(c))) {
+    for (const issue of orderedCandidates(lane, byLane.get(lane)!, report, report)) {
       const status: Pick<QueueSnapshotEntry, 'status' | 'claimant'> = queueIssueStatus(issue.labels);
       entries.push({
         lane,
@@ -418,7 +418,7 @@ export interface GithubQueueOptions {
   leaseMs?: number;
   /** Clock injection for tests. Defaults to `Date.now`. */
   now?: () => number;
-  /** Called once per duplicated `factory:order:<n>` position seen by list/claimNext; those issues are claimed in issue-number order (#3101). */
+  /** Called once per duplicated `factory:order:<n>` position seen by list/claimNext; those issues are claimed in issue-number order (#3101). Also receives issues with a missing, multiple or malformed order label, which are skipped and not claimed (#3192). */
   onOrderConflict?: (conflict: QueueOrderConflict) => void;
 }
 
@@ -466,14 +466,16 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     return client.listOpenIssuesWithLabels({ owner, repo, labels: [QUEUED_LABEL, laneLabel(lane)] });
   }
 
+  const { onOrderConflict } = options;
+
   async function list(lane: string): Promise<number[]> {
     const issues = await candidatesFor(lane);
-    return orderedCandidates(lane, issues, options.onOrderConflict).map((issue) => issue.number);
+    return orderedCandidates(lane, issues, onOrderConflict, onOrderConflict).map((issue) => issue.number);
   }
 
   async function claimNext(lane: string): Promise<QueueClaim | null> {
     const routeLabel = laneLabel(lane);
-    const candidates = orderedCandidates(lane, await candidatesFor(lane), options.onOrderConflict);
+    const candidates = orderedCandidates(lane, await candidatesFor(lane), onOrderConflict, onOrderConflict);
     if (candidates.length === 0) return null;
 
     await ensureLabels(lane);

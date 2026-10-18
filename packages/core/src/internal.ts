@@ -459,7 +459,7 @@ export {
   readGithubQueueSnapshot,
 } from './queue/github-queue.js';
 export type { QueueEntry, QueueSnapshot, QueueSnapshotEntry } from './queue/index.js';
-export { formatQueueOrderConflict, type QueueOrderConflict } from './queue/queue-order.js';
+export { formatQueueOrderConflict, type QueueOrderConflict, type QueueOrderLabelProblem } from './queue/queue-order.js';
 
 // Factory App admission-state compatibility (#1497)
 export type {

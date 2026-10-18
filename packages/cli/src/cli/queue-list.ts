@@ -1,4 +1,4 @@
-import type { QueueSnapshot } from '@on-par/factory-core/internal';
+import type { QueueOrderLabelProblem, QueueSnapshot } from '@on-par/factory-core/internal';
 
 /** One item in `factory queue list --json` (#2268). */
 export interface QueueListItemJson {
@@ -10,18 +10,19 @@ export interface QueueListItemJson {
   claimedBy: string | null;
 }
 
-/** A duplicated `factory:order:<n>` position in one lane (#3101); `order` is the label value. */
+/** A duplicated `factory:order:<n>` position in one lane (#3101), or a skipped issue with a missing or malformed order label (#3192); `order` is the label value, null for a skipped issue. */
 export interface QueueListOrderConflictJson {
   lane: string;
-  order: number;
+  order: number | null;
   issues: number[];
+  reason?: QueueOrderLabelProblem;
 }
 
 /** `factory queue list --json` payload (#2268). Additive changes only; bump schemaVersion on a breaking change. */
 export interface QueueListJson {
   schemaVersion: 1;
   lanes: Array<{ lane: string; items: QueueListItemJson[] }>;
-  /** Duplicated order positions, filtered by `--lane`; additive, present since #3101. */
+  /** Duplicated order positions and skipped malformed-label issues (#3192), filtered by `--lane`; additive, present since #3101. */
   orderConflicts: QueueListOrderConflictJson[];
 }
 
@@ -48,6 +49,11 @@ export function buildQueueListJson(snapshot: QueueSnapshot, lane?: string): Queu
   }
   const orderConflicts = (snapshot.orderConflicts ?? [])
     .filter((c) => lane === undefined || c.lane === lane)
-    .map((c) => ({ lane: c.lane, order: c.position, issues: c.issues }));
+    .map((c) => ({
+      lane: c.lane,
+      order: c.position,
+      issues: c.issues,
+      ...(c.reason === undefined ? {} : { reason: c.reason }),
+    }));
   return { schemaVersion: 1, lanes: [...byLane].map(([name, items]) => ({ lane: name, items })), orderConflicts };
 }

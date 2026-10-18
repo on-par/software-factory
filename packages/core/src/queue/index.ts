@@ -165,7 +165,7 @@ export interface QueueSnapshot {
   proposedCount?: number;
   /** Set when the source could not be read; `entries` then holds the last good read (or nothing). */
   error?: string;
-  /** Duplicated factory:order positions seen while ordering (GitHub queue only, #3101). */
+  /** Duplicated factory:order positions and skipped issues with a missing or malformed order label (GitHub queue only, #3101, #3192). */
   orderConflicts?: QueueOrderConflict[];
 }
 

@@ -10,6 +10,7 @@ import {
   queueOrderLabel,
   type QueueGitHubClient,
   type QueueIssue,
+  type QueueOrderConflict,
 } from './github-queue.js';
 
 function createFakeStore(issues: Array<{ number: number; labels: string[] }>) {
@@ -128,5 +129,75 @@ describe('formatQueueOrderConflict', () => {
     expect(formatQueueOrderConflict({ lane: 'dup', position: 1, issues: [3, 4] })).toBe(
       'lane dup: issues #3, #4 share factory:order:1 — claimed in issue-number order | repair: give each a unique order label',
     );
+  });
+
+  it.each([
+    ['missing-order-label', 'has no factory:order:<n> label'],
+    ['multiple-order-labels', 'has multiple factory:order labels'],
+    ['malformed-order-label', 'has a malformed factory:order label'],
+  ] as const)('describes a skipped issue (%s)', (reason, text) => {
+    const line = formatQueueOrderConflict({ lane: 'ops', position: null, issues: [7], reason });
+    expect(line).toContain('lane ops');
+    expect(line).toContain('#7');
+    expect(line).toContain(text);
+    expect(line).toContain('skipped');
+  });
+});
+
+describe('missing, multiple or malformed order labels (#3192)', () => {
+  it('list skips an issue with no order label and reports it (#3192)', async () => {
+    const { client } = createFakeStore([
+      { number: 1, labels: [QUEUED_LABEL, laneLabel('build')] },
+      { number: 2, labels: [QUEUED_LABEL, laneLabel('build'), queueOrderLabel(1)] },
+    ]);
+    const seen: QueueOrderConflict[] = [];
+    const queue = createGithubQueue({
+      client,
+      owner: 'o',
+      repo: 'r',
+      claimantId: 'aaa-1',
+      onOrderConflict: (c) => seen.push(c),
+    });
+
+    expect(await queue.list('build')).toEqual([2]);
+    expect(seen).toEqual([{ lane: 'build', position: null, issues: [1], reason: 'missing-order-label' }]);
+  });
+
+  it.each([
+    [[QUEUED_LABEL, laneLabel('build'), 'factory:order:0'], 'malformed-order-label'],
+    [[QUEUED_LABEL, laneLabel('build'), queueOrderLabel(1), queueOrderLabel(2)], 'multiple-order-labels'],
+  ])('claimNext skips malformed or multiple order labels and claims the valid issue', async (labels, reason) => {
+    const { client } = createFakeStore([
+      { number: 1, labels },
+      { number: 2, labels: [QUEUED_LABEL, laneLabel('build'), queueOrderLabel(1)] },
+    ]);
+    const seen: QueueOrderConflict[] = [];
+    const queue = createGithubQueue({
+      client,
+      owner: 'o',
+      repo: 'r',
+      claimantId: 'aaa-1',
+      onOrderConflict: (c) => seen.push(c),
+    });
+
+    const claimed = await queue.claimNext('build');
+
+    expect(claimed?.issue).toBe(2);
+    expect(seen[0].reason).toBe(reason);
+  });
+
+  it('claimNext returns null and reports a lane holding only a malformed issue', async () => {
+    const { client } = createFakeStore([{ number: 1, labels: [QUEUED_LABEL, laneLabel('build')] }]);
+    const seen: QueueOrderConflict[] = [];
+    const queue = createGithubQueue({
+      client,
+      owner: 'o',
+      repo: 'r',
+      claimantId: 'aaa-1',
+      onOrderConflict: (c) => seen.push(c),
+    });
+
+    expect(await queue.claimNext('build')).toBeNull();
+    expect(seen).toEqual([{ lane: 'build', position: null, issues: [1], reason: 'missing-order-label' }]);
   });
 });

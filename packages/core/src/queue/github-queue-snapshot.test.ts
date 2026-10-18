@@ -96,10 +96,29 @@ describe('readGithubQueueSnapshot (#1362)', () => {
     ).toEqual({ entries: [] });
   });
 
-  it('throws the same malformed-order-label error GithubQueue.list() throws', async () => {
-    const { client } = clientWith([{ number: 9, labels: ['factory:queued', 'factory:lane:ops'] }]);
-    await expect(readGithubQueueSnapshot({ client, owner: 'o', repo: 'r' })).rejects.toThrow(
-      'invalid GitHub queue state for lane ops: issue #9 must have exactly one queue order label',
-    );
+  it('skips an issue with no order label and reports it as missing-order-label (#3192)', async () => {
+    const { client } = clientWith([
+      { number: 9, labels: ['factory:queued', 'factory:parked', 'factory:lane:ops'] },
+      { number: 10, labels: ['factory:queued', 'factory:lane:ops', 'factory:order:1'] },
+    ]);
+    const snapshot = await readGithubQueueSnapshot({ client, owner: 'o', repo: 'r' });
+    expect(snapshot.entries.map((e) => e.issue)).toEqual([10]);
+    expect(snapshot.orderConflicts).toEqual([
+      { lane: 'ops', position: null, issues: [9], reason: 'missing-order-label' },
+    ]);
+  });
+
+  it('skips multiple and malformed order labels and reports each once in orderConflicts', async () => {
+    const { client } = clientWith([
+      { number: 1, labels: ['factory:queued', 'factory:lane:ops', 'factory:order:1', 'factory:order:2'] },
+      { number: 2, labels: ['factory:queued', 'factory:lane:ops', 'factory:order:0'] },
+      { number: 3, labels: ['factory:queued', 'factory:lane:ops', 'factory:order:1'] },
+    ]);
+    const snapshot = await readGithubQueueSnapshot({ client, owner: 'o', repo: 'r' });
+    expect(snapshot.entries.map((e) => e.issue)).toEqual([3]);
+    expect(snapshot.orderConflicts).toEqual([
+      { lane: 'ops', position: null, issues: [1], reason: 'multiple-order-labels' },
+      { lane: 'ops', position: null, issues: [2], reason: 'malformed-order-label' },
+    ]);
   });
 });
