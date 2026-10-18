@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +16,11 @@ describe('findLeakedTempEntries', () => {
       { prefix: 'feedback-', entries: ['feedback-a', 'feedback-b'] },
       { prefix: 'filing-', entries: ['filing-1'] },
     ]);
+  });
+
+  it('ignores factory lane runtime prefixes but still reports other factory- names (#3173)', () => {
+    const after = ['factory-claude-prompt-a', 'factory-pi-prompt-b', 'factory-other-c'];
+    expect(findLeakedTempEntries(new Set(), after)).toEqual([{ prefix: 'factory-', entries: ['factory-other-c'] }]);
   });
 
   it('returns nothing when nothing leaked', () => {
@@ -84,5 +90,19 @@ describe('setup', () => {
     const { teardown, sandbox } = start();
     await expect(teardown()).resolves.toBeUndefined();
     expect(existsSync(sandbox)).toBe(false);
+  });
+
+  it('ignores prompt dirs a concurrent factory process creates during the run', async () => {
+    const { teardown } = start();
+    for (const name of ['factory-claude-prompt-x', 'factory-pi-prompt-y']) {
+      execFileSync(process.execPath, ['-e', 'require("node:fs").mkdirSync(process.argv[1])', join(scratch, name)]);
+    }
+    await expect(teardown()).resolves.toBeUndefined();
+  });
+
+  it('still throws on a same-run factory- leak', async () => {
+    const { teardown } = start();
+    mkdirSync(join(scratch, 'factory-leaked-z'));
+    await expect(teardown()).rejects.toThrow('factory-leaked-z');
   });
 });
