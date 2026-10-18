@@ -1,7 +1,6 @@
 // src/harness/claude-cli.ts — CodingHarness adapter for the Claude CLI.
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { claudeEndpointIntermediary } from '../config/intermediaries.js';
@@ -12,6 +11,7 @@ import { shellEscape } from '../utils/index.js';
 import { classifyFailure } from './classify.js';
 import type { CodingHarness, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
 import { HarnessError } from './index.js';
+import { withTempDir } from './temp-dir.js';
 
 export type ClaudeExecFn = ExecFn;
 
@@ -158,44 +158,44 @@ export class ClaudeCliHarness implements CodingHarness {
     const flag = registry.getClaudeFlag(model);
     const modelArg = flag ? `--model ${shellEscape(flag)}` : '';
     const endpointEnv = claudeEndpointEnv(registry.get(model));
-    const promptDir = await mkdtemp(join(tmpdir(), 'factory-claude-prompt-'));
-    const promptPath = join(promptDir, 'prompt.txt');
-    await writeFile(promptPath, prompt, 'utf8');
-    const cmd = `claude -p ${modelArg}${effortArg} --output-format stream-json --include-partial-messages --verbose --safe-mode --permission-mode bypassPermissions < ${shellEscape(promptPath)}`;
     const effortEnv = effort === undefined ? {} : { CLAUDE_CODE_EFFORT_LEVEL: String(effort) };
     const hasOverlay = Object.keys(endpointEnv).length > 0 || effort !== undefined;
-    const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
 
-    let stdout: string;
-    try {
-      ({ stdout } = await this.execFn(finalCmd, {
-        cwd: worktree,
-        timeoutMs: timeoutSeconds * 1000,
-        maxBuffer: 10 * 1024 * 1024,
-        env: hasOverlay ? { ...env, ...endpointEnv, ...effortEnv } : env,
-        onPgid,
-      }));
-    } catch (err: any) {
-      const stdout = typeof err.stdout === 'string' && err.stdout.length > 0 ? err.stdout : undefined;
-      const stdoutDiagnostic = stdout ? extractFailureDiagnosticFromStream(stdout) : undefined;
-      const stderrDiagnostic = typeof err.stderr === 'string' ? stripClaudeStreamMetadata(err.stderr) : undefined;
-      const diagnosticText = [stderrDiagnostic, stdoutDiagnostic ?? stdout]
-        .filter((text) => typeof text === 'string')
-        .join('\n');
-      const reason = err.killed ? 'timeout' : classifyFailure(diagnosticText, err.code ?? 1);
-      const codeText = typeof err.code === 'number' || typeof err.code === 'string' ? ` ${err.code}` : '';
-      throw new HarnessError(`claude CLI process exited${codeText}`.trim(), reason, {
-        exitCode: typeof err.code === 'number' ? err.code : undefined,
-        stderr: typeof err.stderr === 'string' ? err.stderr : undefined,
-        stdout,
-        diagnostic: diagnosticText.trim().length > 0 ? diagnosticText : undefined,
-        code: typeof err.code === 'string' || typeof err.code === 'number' ? err.code : undefined,
-        signal: typeof err.signal === 'string' ? err.signal : undefined,
-        killed: err.killed === true ? true : undefined,
-      });
-    } finally {
-      await rm(promptDir, { recursive: true, force: true });
-    }
+    const stdout = await withTempDir('factory-claude-prompt-', async (promptDir) => {
+      const promptPath = join(promptDir, 'prompt.txt');
+      await writeFile(promptPath, prompt, 'utf8');
+      const cmd = `claude -p ${modelArg}${effortArg} --output-format stream-json --include-partial-messages --verbose --safe-mode --permission-mode bypassPermissions < ${shellEscape(promptPath)}`;
+      const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
+      try {
+        return (
+          await this.execFn(finalCmd, {
+            cwd: worktree,
+            timeoutMs: timeoutSeconds * 1000,
+            maxBuffer: 10 * 1024 * 1024,
+            env: hasOverlay ? { ...env, ...endpointEnv, ...effortEnv } : env,
+            onPgid,
+          })
+        ).stdout;
+      } catch (err: any) {
+        const stdout = typeof err.stdout === 'string' && err.stdout.length > 0 ? err.stdout : undefined;
+        const stdoutDiagnostic = stdout ? extractFailureDiagnosticFromStream(stdout) : undefined;
+        const stderrDiagnostic = typeof err.stderr === 'string' ? stripClaudeStreamMetadata(err.stderr) : undefined;
+        const diagnosticText = [stderrDiagnostic, stdoutDiagnostic ?? stdout]
+          .filter((text) => typeof text === 'string')
+          .join('\n');
+        const reason = err.killed ? 'timeout' : classifyFailure(diagnosticText, err.code ?? 1);
+        const codeText = typeof err.code === 'number' || typeof err.code === 'string' ? ` ${err.code}` : '';
+        throw new HarnessError(`claude CLI process exited${codeText}`.trim(), reason, {
+          exitCode: typeof err.code === 'number' ? err.code : undefined,
+          stderr: typeof err.stderr === 'string' ? err.stderr : undefined,
+          stdout,
+          diagnostic: diagnosticText.trim().length > 0 ? diagnosticText : undefined,
+          code: typeof err.code === 'string' || typeof err.code === 'number' ? err.code : undefined,
+          signal: typeof err.signal === 'string' ? err.signal : undefined,
+          killed: err.killed === true ? true : undefined,
+        });
+      }
+    });
 
     const { output, usage: parsedUsage, isError, subtype } = parseResultEnvelope(stdout);
     // An endpoint model is not Claude; total_cost_usd prices it at Claude rates, so callers use registry prices (#2907).

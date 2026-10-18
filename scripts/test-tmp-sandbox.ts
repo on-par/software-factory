@@ -26,6 +26,17 @@ export const FACTORY_TEST_TMP_PREFIXES = [
   'factory-',
 ] as const;
 
+/** Prefixes that live factory lanes create in the shared real TMPDIR (#3173). Tests never create these there:
+ *  setup-env.ts points TMPDIR at the per-run sandbox, so a fresh one in the real TMPDIR belongs to a concurrent process. */
+export const FACTORY_RUNTIME_TMP_PREFIXES = [
+  'factory-claude-prompt-',
+  'factory-pi-prompt-',
+  'factory-opencode-prompt-',
+  'factory-harness-check-',
+  'factory-baseline-',
+  'factory-command-',
+] as const;
+
 export interface TempLeak {
   prefix: string;
   entries: string[];
@@ -37,10 +48,12 @@ export function findLeakedTempEntries(
   before: ReadonlySet<string>,
   after: readonly string[],
   prefixes: readonly string[] = FACTORY_TEST_TMP_PREFIXES,
+  ignorePrefixes: readonly string[] = FACTORY_RUNTIME_TMP_PREFIXES,
 ): TempLeak[] {
   const byPrefix = new Map<string, string[]>();
   for (const name of after) {
     if (before.has(name)) continue;
+    if (ignorePrefixes.some((p) => name.startsWith(p))) continue;
     const prefix = [...prefixes].sort((a, b) => b.length - a.length).find((p) => name.startsWith(p));
     if (prefix === undefined) continue;
     byPrefix.set(prefix, [...(byPrefix.get(prefix) ?? []), name]);

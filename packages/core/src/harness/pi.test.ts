@@ -1,8 +1,8 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadModelsConfig, type ModelsConfig } from '../config/index.js';
 import { resolveEffectiveModelPins } from '../config/repo.js';
@@ -11,6 +11,7 @@ import { type SandboxPolicy, wrapCommandInSandbox } from '../sandbox/index.js';
 import { codingHarnessContractCases, makeContractRequest } from './contract.js';
 import { HarnessError } from './index.js';
 import { buildPiCommand, PiHarness, parsePiJson } from './pi.js';
+import { createTempDirs } from './temp-dir.js';
 
 const fixture = (name: string) =>
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '__fixtures__', 'pi', name), 'utf8');
@@ -385,5 +386,46 @@ describe('PiHarness exit-0 failure classification', () => {
     });
     const err = await new PiHarness(exec).run(req()).catch((e) => e);
     expect(err.reason).toBe('rate_limit');
+  });
+});
+
+describe('PiHarness prompt dir cleanup', () => {
+  const tmp = createTempDirs();
+  let scratch: string;
+  let savedTmpdir: string | undefined;
+
+  beforeEach(() => {
+    savedTmpdir = process.env.TMPDIR;
+    scratch = tmp.makeSync('prompt-cleanup-test-');
+    process.env.TMPDIR = scratch;
+  });
+
+  afterEach(async () => {
+    if (savedTmpdir === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = savedTmpdir;
+    await tmp.cleanup();
+  });
+
+  const promptDirs = () => readdirSync(scratch).filter((n) => n.startsWith('factory-pi-prompt-'));
+
+  it('removes the prompt dir after a successful run', async () => {
+    await new PiHarness(async () => ({ stdout: success, stderr: '' })).run(req());
+    expect(promptDirs()).toEqual([]);
+  });
+
+  it('removes the prompt dir when the exec fails', async () => {
+    const harness = new PiHarness(async () => {
+      throw Object.assign(new Error('boom'), { code: 1, stderr: 'x' });
+    });
+    await expect(harness.run(req())).rejects.toBeInstanceOf(HarnessError);
+    expect(promptDirs()).toEqual([]);
+  });
+
+  it('removes the prompt dir when writing the prompt fails', async () => {
+    // A non-string prompt makes the real writeFile reject after the dir exists, without module mocking.
+    const exec = vi.fn(async () => ({ stdout: '', stderr: '' }));
+    await expect(new PiHarness(exec).run(req({ prompt: 42 as never }))).rejects.toThrow();
+    expect(exec).not.toHaveBeenCalled();
+    expect(promptDirs()).toEqual([]);
   });
 });
