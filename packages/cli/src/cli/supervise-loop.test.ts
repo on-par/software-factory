@@ -25,6 +25,7 @@ describe('superviseLoop', () => {
       readUsageFn: async () => readings.shift()!,
       pathExists: () => pathExistsResults.shift()!,
       clearStop: (path) => calls.push(['clearStop', path]),
+      readStopMarker: () => ({ source: 'usage-watchdog', at: '2026-01-01T00:00:00.000Z' }),
       sleep: async () => {
         calls.push(['sleep']);
       },
@@ -52,6 +53,70 @@ describe('superviseLoop', () => {
     expect(events.filter((e) => e[1] === 'supervisor-done')).toHaveLength(1);
     expect(events[events.length - 1][1]).toBe('supervisor-done');
     expect(events[0][3]).toContain('(subscription)');
+  });
+
+  function stopHarness(marker: { source: 'manual' | 'usage-watchdog' | 'unknown'; at: string }) {
+    const lines: string[] = [];
+    let clearCalls = 0;
+    let runQueueCalls = 0;
+    let stopPresent = false;
+    let waitPolls = 0;
+    const run = () =>
+      superviseLoop({
+        cap: 1,
+        resumeAt: 0.65,
+        pollMs: 1000,
+        stopFile: '/repo/.factory/STOP',
+        eventsFile: '/repo/.factory/events.ndjson',
+        now: false,
+        readUsageFn: async () => reading(0.1),
+        pathExists: () => {
+          if (stopPresent && marker.source !== 'usage-watchdog' && waitPolls >= 3) stopPresent = false;
+          return stopPresent;
+        },
+        clearStop: () => {
+          clearCalls++;
+          stopPresent = false;
+        },
+        readStopMarker: () => (stopPresent ? marker : null),
+        sleep: async () => {
+          waitPolls++;
+        },
+        emitEvent: () => {},
+        writeLine: (line) => lines.push(line),
+        runQueue: async () => {
+          runQueueCalls++;
+          if (runQueueCalls === 1) stopPresent = true;
+        },
+      });
+    return { run, lines, clears: () => clearCalls, runs: () => runQueueCalls, polls: () => waitPolls };
+  }
+
+  it('a manual STOP survives supervise cycles', async () => {
+    const h = stopHarness({ source: 'manual', at: '2026-01-01T00:00:00.000Z' });
+    await h.run();
+    expect(h.clears()).toBe(0);
+    expect(h.polls()).toBe(3);
+    expect(h.runs()).toBe(2);
+    expect(
+      h.lines.filter((l) => l.includes('STOP set by manual at 2026-01-01T00:00:00.000Z; waiting for factory resume')),
+    ).toHaveLength(1);
+  });
+
+  it('a usage-watchdog STOP is cleared and the queue runs again', async () => {
+    const h = stopHarness({ source: 'usage-watchdog', at: '2026-01-01T00:00:00.000Z' });
+    await h.run();
+    expect(h.clears()).toBe(1);
+    expect(h.polls()).toBe(0);
+    expect(h.runs()).toBe(2);
+  });
+
+  it('an unknown (legacy empty) STOP is not cleared', async () => {
+    const h = stopHarness({ source: 'unknown', at: '2026-01-01T00:00:00.000Z' });
+    await h.run();
+    expect(h.clears()).toBe(0);
+    expect(h.polls()).toBe(3);
+    expect(h.runs()).toBe(2);
   });
 
   it('exits after one cycle when the queue drains without STOP present', async () => {

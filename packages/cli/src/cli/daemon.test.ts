@@ -1,11 +1,17 @@
 // packages/cli/src/cli/daemon.test.ts — factory daemon start|stop|status|logs (#1179).
 
-import { mkdtempSync, appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { getFactoryPaths } from '@on-par/factory-core';
-import { DEFAULT_FACTORYD_PORT, defaultRegistryPath, type RunRuntime } from '@on-par/factory-core/internal';
+import {
+  DEFAULT_FACTORYD_PORT,
+  defaultRegistryPath,
+  formatStopMarker,
+  readStopMarker,
+  type RunRuntime,
+} from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -1094,6 +1100,32 @@ describe('auto-update (#1939)', () => {
       expect(deps.now()).toBeGreaterThan(0);
     });
 
+    it('writeStops writes a self-update marker and does not overwrite an existing manual STOP', async () => {
+      const { deps, repo } = setup();
+      const stop = getFactoryPaths(repo).stop;
+      const [written] = await deps.writeStops();
+      expect(written).toBe(stop);
+      expect(readStopMarker(stop)?.source).toBe('self-update');
+      writeFileSync(stop, formatStopMarker('manual'));
+      expect(await deps.writeStops()).toEqual([]);
+      expect(readStopMarker(stop)?.source).toBe('manual');
+    });
+
+    it('clearStops leaves a STOP whose source is no longer self-update', async () => {
+      const { deps } = setup();
+      const files = await deps.writeStops();
+      writeFileSync(files[0] as string, formatStopMarker('manual'));
+      await deps.clearStops(files);
+      expect(existsSync(files[0] as string)).toBe(true);
+    });
+
+    it('clearStops removes its own self-update STOP', async () => {
+      const { deps } = setup();
+      const files = await deps.writeStops();
+      await deps.clearStops(files);
+      expect(existsSync(files[0] as string)).toBe(false);
+    });
+
     it('counts a repo whose run lock is held by a live pid as active', async () => {
       const { deps, repo } = setup();
       const lock = getFactoryPaths(repo).runLock;
@@ -1112,9 +1144,16 @@ describe('auto-update (#1939)', () => {
 
     it('rethrows a clearStops failure other than ENOENT', async () => {
       const { deps } = setup();
-      const notAFile = join(dir, 'a-dir');
-      mkdirSync(notAFile);
-      await expect(deps.clearStops([notAFile])).rejects.toThrow();
+      const lockedDir = join(dir, 'locked');
+      mkdirSync(lockedDir);
+      const stop = join(lockedDir, 'STOP');
+      writeFileSync(stop, formatStopMarker('self-update'));
+      chmodSync(lockedDir, 0o500);
+      try {
+        await expect(deps.clearStops([stop])).rejects.toThrow();
+      } finally {
+        chmodSync(lockedDir, 0o700);
+      }
     });
 
     it('apply reports success from `self-update --to --json`', async () => {

@@ -229,8 +229,12 @@ import {
   parseTriageCandidates,
   recordLocalAuthFailure,
   laneSlug,
+  formatStopMarker,
+  readStopMarker,
 } from '@on-par/factory-core/internal';
+import type { StopMarker } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
+import { clearSelfUpdateStop } from './self-update-stop.js';
 import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
 import {
   cmdClassifierBacktest,
@@ -3303,8 +3307,7 @@ async function cmdFactoryd(opts: {
   const previousUpdate = readUpdateState(updateFile);
   for (const stop of recoverStaleDrain(previousUpdate, (file) => {
     try {
-      unlinkSync(file);
-      return true;
+      return clearSelfUpdateStop(file);
     } catch {
       return false;
     }
@@ -3879,6 +3882,8 @@ export interface SuperviseDeps {
   readUsageFn?: () => Promise<UsageReading | null>;
   pathExists?: (path: string) => boolean;
   clearStop?: (path: string) => void;
+  /** Reads who set the STOP file; supervise clears only usage-watchdog stops (#3209). */
+  readStopMarker?: (path: string) => StopMarker | null;
   sleep?: (ms: number) => Promise<void>;
   emitEvent?: typeof logEvent;
   writeLine?: (line: string) => void;
@@ -3908,6 +3913,7 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
     readUsageFn = () => readUsage({ cap, estimator }),
     pathExists = existsSync,
     clearStop = (path: string) => rmSync(path, { force: true }),
+    readStopMarker: readMarker = readStopMarker,
     sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
     emitEvent = logEvent,
     writeLine = (line: string) => console.log(line),
@@ -3972,7 +3978,15 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
       'usage',
       `supervise cycle ${cycle}: trailing usage (${source}) at ${Math.round(pct * 100)}% of cap — starting run`,
     );
-    clearStop(stopFile);
+    const marker = readMarker(stopFile);
+    if (marker?.source === 'usage-watchdog') {
+      clearStop(stopFile);
+    } else if (marker) {
+      writeLine(
+        `[factory] supervise: STOP set by ${marker.source}${marker.at ? ` at ${marker.at}` : ''}; waiting for factory resume`,
+      );
+      while (pathExists(stopFile)) await sleep(pollMs);
+    }
     if (ingest) {
       const appended = await ingest();
       if (appended > 0) writeLine(`[factory] supervise: auto-ingest appended ${appended} ready issue(s)`);
@@ -4113,7 +4127,7 @@ function logEventQuietly(eventsFile: string, type: EventKind, msg: string): void
 /** Creates the STOP file in one exclusive open (no check-then-write race). Returns false when it already existed. */
 function createStopFile(stopFile: string): boolean {
   try {
-    writeFileSync(stopFile, '', { flag: 'wx' });
+    writeFileSync(stopFile, formatStopMarker('manual'), { flag: 'wx' });
     return true;
   } catch (err: any) {
     if (err?.code === 'EEXIST') return false;
