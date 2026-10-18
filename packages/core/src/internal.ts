@@ -596,9 +596,9 @@ export {
   TELEMETRY_HOST_PATTERNS,
   type EgressProxy,
 } from './sandbox/egress-proxy.js';
-
 export { createRunRuntime, type RunRuntime } from './daemon/run-runtime.js';
 export { findOpenPR, type PrLookup } from './phases/ship.js';
+export { findAdoptablePr, type AdoptablePrLookup } from './run/adopt-pr.js';
 export { openSliceStack } from './phases/ship-stack.js';
 export { shipSliceStack } from './phases/stack-fallback.js';
 export type { ShipSliceStackResult, StackFallbackResult } from './phases/stack-fallback.js';
