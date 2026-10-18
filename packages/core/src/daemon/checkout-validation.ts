@@ -1,13 +1,14 @@
 // src/daemon/checkout-validation.ts — factoryd's checkout precondition gate:
 // validates a `{ repo, path }` request against the checkout on disk (its git
 // origin remote must resolve to the posted slug, and it must carry
-// .factory/config.json), with no registry access. Factored out of
+// a .factory/config.yaml|yml|json repo config), with no registry access. Factored out of
 // repos-attach.ts so callers can ask for a verdict without risking a registry
 // write (#1398, epic #1380).
 
 import { stat } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 
+import { REPO_CONFIG_FILENAMES } from '../config/repo-config-file.js';
 import { resolveStateRoot } from '../config/state-root.js';
 import { runCommand } from '../utils/command-runner.js';
 import { parseRemoteSlug } from './remote-slug.js';
@@ -24,7 +25,7 @@ export interface ValidatedCheckout {
   dir: string;
   /** The `owner/name` parsed from the checkout's git origin remote. */
   originSlug: string;
-  /** Absolute path of the in-checkout `.factory/config.json`, or null when absent under a state root. */
+  /** Absolute path of the in-checkout repo config file (`.factory/config.yaml|yml|json`, first in REPO_CONFIG_FILENAMES order), or null when absent under a state root. */
   configFile: string | null;
   /** The resolved external state root, when one is in effect (from the request or the registry entry). */
   stateRoot?: string;
@@ -118,10 +119,22 @@ export async function validateCheckout(
     request.stateRoot !== undefined
       ? resolveStateRoot(request.stateRoot, { repoRoot: dir, home: deps.home, resolveSlug: () => slug })
       : existingStateRoot;
-  const inCheckoutConfig = join(dir, '.factory', 'config.json');
-  const hasConfig = await (deps.fileExists ?? defaultFileExists)(inCheckoutConfig);
-  if (!hasConfig && stateRoot === undefined) {
-    return { ok: false, reason: 'missing-factory-config', detail: `${inCheckoutConfig} not found` };
+  const factoryDir = join(dir, '.factory');
+  const fileExists = deps.fileExists ?? defaultFileExists;
+  let configFile: string | null = null;
+  for (const name of REPO_CONFIG_FILENAMES) {
+    const candidate = join(factoryDir, name);
+    if (await fileExists(candidate)) {
+      configFile = candidate;
+      break;
+    }
+  }
+  if (configFile === null && stateRoot === undefined) {
+    return {
+      ok: false,
+      reason: 'missing-factory-config',
+      detail: `no repo config in ${factoryDir} (looked for ${REPO_CONFIG_FILENAMES.join(', ')})`,
+    };
   }
 
   return {
@@ -130,7 +143,7 @@ export async function validateCheckout(
       repo: request.repo,
       dir,
       originSlug: slug,
-      configFile: hasConfig ? inCheckoutConfig : null,
+      configFile,
       ...(stateRoot !== undefined ? { stateRoot } : {}),
     },
   };

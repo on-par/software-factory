@@ -47,6 +47,54 @@ describe('validateCheckout', () => {
     });
   });
 
+  async function checkoutWith(names: string[]): Promise<string> {
+    const dir = await tmpDir();
+    await mkdir(join(dir, '.factory'), { recursive: true });
+    for (const name of names) {
+      await writeFile(join(dir, '.factory', name), 'version: 2\n');
+    }
+    return dir;
+  }
+
+  async function configFileFor(dir: string): Promise<unknown> {
+    const result = await validateCheckout(
+      { repo: 'on-par/software-factory', path: dir },
+      { readOrigin: async () => 'git@github.com:on-par/software-factory.git' },
+    );
+    return result.ok ? result.checkout.configFile : result;
+  }
+
+  it('validateCheckout accepts a checkout initialized with .factory/config.yaml', async () => {
+    const dir = await checkoutWith(['config.yaml']);
+
+    await expect(
+      validateCheckout(
+        { repo: 'on-par/software-factory', path: dir },
+        { readOrigin: async () => 'git@github.com:on-par/software-factory.git' },
+      ),
+    ).resolves.toEqual({
+      ok: true,
+      checkout: {
+        repo: 'on-par/software-factory',
+        dir,
+        originSlug: 'on-par/software-factory',
+        configFile: join(dir, '.factory', 'config.yaml'),
+      },
+    });
+  });
+
+  it('accepts a checkout with only .factory/config.yml', async () => {
+    const dir = await checkoutWith(['config.yml']);
+
+    expect(await configFileFor(dir)).toBe(join(dir, '.factory', 'config.yml'));
+  });
+
+  it('prefers config.yaml over config.json when both exist', async () => {
+    const dir = await checkoutWith(['config.json', 'config.yaml']);
+
+    expect(await configFileFor(dir)).toBe(join(dir, '.factory', 'config.yaml'));
+  });
+
   it('rejects an origin mismatch (acceptance criterion 2)', async () => {
     const dir = await checkoutWithConfig();
 
@@ -73,7 +121,7 @@ describe('validateCheckout', () => {
     ).resolves.toEqual({
       ok: false,
       reason: 'missing-factory-config',
-      detail: `${join(dir, '.factory', 'config.json')} not found`,
+      detail: `no repo config in ${join(dir, '.factory')} (looked for config.yaml, config.yml, config.json)`,
     });
   });
 
@@ -89,7 +137,7 @@ describe('validateCheckout', () => {
     ).resolves.toEqual({
       ok: false,
       reason: 'missing-factory-config',
-      detail: `${join(dir, '.factory', 'config.json')} not found`,
+      detail: `no repo config in ${join(dir, '.factory')} (looked for config.yaml, config.yml, config.json)`,
     });
   });
 
