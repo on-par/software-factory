@@ -1,22 +1,21 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import type { CommandResult } from '../utils/command-runner.js';
 import { checkBaseHealth, type BaseHealthOptions } from './base-health.js';
 import { compileChecker, type CheckerContext } from './index.js';
 
-const dirs: string[] = [];
+const tmp = createTempDirs();
 
 afterEach(async () => {
-  await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+  await tmp.cleanup();
 });
 
 async function makeWorktree(files: Record<string, string>): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'compile-timeout-'));
-  dirs.push(dir);
+  const dir = await tmp.make('compile-timeout-');
   await mkdir(dir, { recursive: true });
   for (const [path, contents] of Object.entries(files)) await writeFile(join(dir, path), contents);
   return dir;

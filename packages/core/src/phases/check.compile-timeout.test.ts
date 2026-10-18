@@ -1,10 +1,10 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { checkPhase } from './check.js';
@@ -34,16 +34,15 @@ const models: ModelsConfig = {
 
 const routes: RoutesConfig = { version: 1, routes: { build_claude: { tier: 'boss', description: 'stub' } } };
 
-const dirs: string[] = [];
+const tmp = createTempDirs();
 
 afterEach(async () => {
-  await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+  await tmp.cleanup();
 });
 
 describe('checkPhase compile timeout (#3185)', () => {
   it('threads compileTimeoutSeconds into the checker context', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'check-phase-compile-'));
-    dirs.push(worktree);
+    const worktree = await tmp.make('check-phase-compile-');
     await writeFile(join(worktree, 'issue-3185.md'), '# Spec\n');
     const router = new ModelRouter(models, routes, false, new StubModelExecutor({ defaultOutput: 'ok' }));
     let seen: number | undefined;
