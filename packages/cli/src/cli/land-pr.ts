@@ -242,7 +242,7 @@ export async function landOpenPullRequest(opts: {
     try {
       const { data: pr } = await octokit.rest.pulls.get({ owner, repo: repoName, pull_number: prNumber });
       headSha = pr.head.sha;
-      const baseRef = (pr as { base?: { ref?: string } }).base?.ref;
+      const baseRef = pr.base?.ref;
       outcome = await watchChecksWithInfraRerun({
         octokit,
         owner,
