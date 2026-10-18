@@ -1,12 +1,11 @@
 // run-issue.run-state.test.ts — runIssue persists its run state through ports.recordRunState (#3194)
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.js';
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
@@ -46,8 +45,9 @@ const MODELS: ModelsConfig = {
   routingRules: {},
 };
 
-const breakerDir = mkdtempSync(join(tmpdir(), 'run-issue-run-state-'));
-afterAll(() => rmSync(breakerDir, { recursive: true, force: true }));
+const tempDirs = createTempDirs();
+const breakerDir = tempDirs.makeSync('run-issue-run-state-');
+afterAll(() => tempDirs.cleanup());
 
 const planPhase = vi.fn<typeof realPlanPhase>();
 const buildPhase = vi.fn<typeof realBuildPhase>();
