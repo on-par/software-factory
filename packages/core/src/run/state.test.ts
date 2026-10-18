@@ -7,7 +7,15 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { clearRepoSlugCache } from '../logger/repo-slug.js';
 import type { IssueRunState } from '../types/index.js';
-import { readIssueRunState, runStateFile, writeIssueRunState } from './state.js';
+import {
+  nextIssueRunState,
+  readIssueRunState,
+  runStateFile,
+  runStatusForPhase,
+  terminalRunStatus,
+  writeIssueRunState,
+  type IssueRunStateBase,
+} from './state.js';
 
 function initGitRepo(dir: string): void {
   execFileSync('git', ['init'], { cwd: dir });
@@ -128,6 +136,83 @@ describe('run/state', () => {
       const arrayJsonFile = join(runsDir, 'array.json');
       writeFileSync(arrayJsonFile, '[]');
       await expect(readIssueRunState(arrayJsonFile)).resolves.toBeNull();
+    });
+  });
+
+  describe('runStatusForPhase', () => {
+    it('maps all four phases', () => {
+      expect((['plan', 'build', 'check', 'ship'] as const).map(runStatusForPhase)).toEqual([
+        'planning',
+        'building',
+        'checking',
+        'shipping',
+      ]);
+    });
+  });
+
+  describe('terminalRunStatus', () => {
+    it('maps every outcome state', () => {
+      const route = 'claude' as const;
+      expect(terminalRunStatus({ state: 'ready', route, branch: 'b', reworkRounds: 0 })).toBe('ready');
+      expect(terminalRunStatus({ state: 'shipped', route, branch: 'b', reworkRounds: 0, prNumber: 1 })).toBe('ready');
+      expect(terminalRunStatus({ state: 'parked', reason: 'fail' })).toBe('parked');
+      expect(terminalRunStatus({ state: 'escalated', reason: 'x' })).toBe('escalated');
+      expect(
+        terminalRunStatus({
+          state: 'released',
+          reason: 'environment',
+          reworkRounds: 0,
+          baseSha: 's',
+          failingChecks: [],
+        }),
+      ).toBe('pending');
+    });
+  });
+
+  describe('nextIssueRunState', () => {
+    const base: IssueRunStateBase = {
+      issue: 42,
+      lane: 'bugfix',
+      branch: 'factory/42-fix',
+      worktree: '/w',
+      specPath: '/s.md',
+      startedAt: '2026-01-01T00:00:00.000Z',
+    };
+
+    it('fills defaults on the first write and omits absent keys', () => {
+      const next = nextIssueRunState(undefined, base, { status: 'planning' }, '2026-01-01T00:00:01.000Z');
+      expect(next).toMatchObject({
+        status: 'planning',
+        branch: 'factory/42-fix',
+        route: 'claude',
+        model: '',
+        attempts: 1,
+        startedAt: base.startedAt,
+        updatedAt: '2026-01-01T00:00:01.000Z',
+      });
+      expect(Object.keys(next)).not.toContain('prNumber');
+      expect(Object.keys(next)).not.toContain('failures');
+      expect(Object.values(next)).not.toContain(undefined);
+    });
+
+    it('keeps the previous model and prNumber, drops failures, and keeps startedAt', () => {
+      const failure = { checker: 'tests', result: 'FAIL' as const, details: 'x' };
+      const first = nextIssueRunState(
+        undefined,
+        base,
+        { status: 'parked', model: 'm', prNumber: 7, failures: [failure] },
+        't1',
+      );
+      expect(first.failures).toEqual([failure]);
+      const second = nextIssueRunState(first, base, { status: 'checking' }, 't2');
+      expect(second).toMatchObject({
+        status: 'checking',
+        model: 'm',
+        prNumber: 7,
+        startedAt: base.startedAt,
+        updatedAt: 't2',
+      });
+      expect(Object.keys(second)).not.toContain('failures');
     });
   });
 });

@@ -71,6 +71,7 @@ import { formatDeprecation } from './octokit.js';
 import type { CliDeps, ConfigLoaderKey, CoreOpKey, GitOpKey, ShellOpKey } from './index.js';
 import { resolveRunBranch } from './run-branch.js';
 import { shipRuntime } from './ship-runtime.js';
+import { runStateRecorder } from './ship-run-state.js';
 import {
   buildRunRequest,
   decomposeQueue,
@@ -279,20 +280,16 @@ export async function shipIssue(
     ) => {
       if (TERMINAL_EVENT_KINDS.has(type)) terminalMessage = msg;
       if (type === 'rework') laneReworkRounds++;
-      // checkPhase logs each skipped checker as a 'check' event prefixed "SKIPPED: " —
-      // echo it to the terminal the way shipIssue used to print it directly.
+      // checkPhase logs each skipped checker as a 'SKIPPED: ' check event — echo it to the terminal.
       if (type === 'check' && msg.startsWith('SKIPPED: ')) {
         console.error(styleText('yellow', `  SKIP: ${msg.slice('SKIPPED: '.length)}`));
       }
-      // Likewise for each failing checker, so a parked run still names which checker
-      // failed and why — the parked RunOutcome carries only an aggregate count (#675).
+      // Likewise for failing checkers: the parked RunOutcome carries only an aggregate count (#675).
       if (type === 'check' && msg.startsWith('FAILED: ')) {
         console.error(styleText('red', `  FAIL: ${msg.slice('FAILED: '.length)}`));
       }
       logEvent(paths.events, type, issueNum, msg, { ...extra, lane, phase });
-      // Best-effort lastEvent summary (#1327) for factory.run.snapshot — an
-      // observability side channel, so a write failure is swallowed, not logged (that
-      // would re-enter this same function for every event this chokepoint fires on).
+      // Best-effort lastEvent summary (#1327): a write failure is swallowed, not logged (re-entrancy).
       touchLastEvent(phaseSnapshotFile(paths.runs, issueNum), summarizeEvent(type, msg)).catch(() => {});
     };
   const log = mkLog();
@@ -320,9 +317,7 @@ export async function shipIssue(
   });
   const activeSandboxPolicy = logSandboxPolicy(opts, sandboxPolicy, log);
 
-  // Setup worktree FIRST — PLAN needs cwd=worktree to run claude. Worktree cleanup
-  // stays a CLI concern (not called here, matching today — a worktree persists past
-  // a successful run for GC/sweep commands to reclaim later).
+  // Setup worktree FIRST — PLAN needs cwd=worktree. Cleanup stays a CLI concern: the worktree persists for GC/sweep.
   const workspace = await setupRunWorkspace({
     ctx,
     repoRoot,
@@ -344,9 +339,7 @@ export async function shipIssue(
   if (!portsSettings.enabled) {
     log('environment_lease', 'port leasing disabled (environment.ports.enabled=false or FACTORY_ENV_PORTS=0)');
   }
-  // acquireEnvironment.recordPgid/release only persist/deallocate the lease — process-
-  // group tracking and killing is runIssue's own unconditional tracker (Invariant 3),
-  // so a lease-disabled/failed run still tears down every spawned agent process.
+  // recordPgid/release only persist/deallocate the lease; process-group killing is runIssue's own tracker (Invariant 3).
   const acquireEnvironment = portsSettings.enabled
     ? resolveEnvironmentAcquirer({
         laneSandboxRuntime: sandboxPolicy?.runtime ?? 'none',
@@ -412,8 +405,7 @@ export async function shipIssue(
     shipPhase: shipPhaseForMode,
     checkBaseHealth: deps.checkBaseHealth ?? baseHealthWithCi(octokit, ghOwner, ghName),
     resolveConstitution: () =>
-      // Resolved once here — runIssue calls this exactly once and reuses the value for
-      // every phase, so the build worker can never author the standards it is graded by.
+      // Resolved once: runIssue reuses it for every phase, so the build worker can't author its own standards.
       // A local-only workspace is caller-provided, not a checkout of repoRoot, so it keeps its own constitution.
       constitutionLoader.resolve(
         worktree,
@@ -435,6 +427,14 @@ export async function shipIssue(
         lastActivityAt: now,
       });
     },
+    recordRunState: runStateRecorder(paths.runs, {
+      issue: issueNum,
+      lane: lane ?? '',
+      branch,
+      worktree,
+      specPath,
+      startedAt: runStartedAt,
+    }),
     onActivity: () => touchRunActivity(phaseSnapshotFile(paths.runs, issueNum), new Date().toISOString()),
     onDecomposed: (childIssues) => {
       decomposeQueue({ issueNum, childIssues, paths, planLog: mkLog('plan') });

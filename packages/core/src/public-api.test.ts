@@ -158,14 +158,12 @@ const PUBLIC_API_KEYS = [
   // Lifecycle bus (#591)
   'createLifecycleBus',
   'lifecycleBus',
-  // Models
   'diagnoseModels',
   'probeDeclaredHarnesses',
   'runHarnessProbe',
   'isCommandAvailable',
   'ModelRegistry',
   'resolveModelOverrides',
-  // Router
   'failoversFrom',
   'ModelRouter',
   // Provider circuit breaker
@@ -185,7 +183,6 @@ const PUBLIC_API_KEYS = [
   'buildConstitutionContext',
   'ConstitutionLoader',
   'REPO_INSTRUCTION_FILES',
-  // Sandbox
   'detectSandboxRuntime',
   'resolveSandboxPolicy',
   // Readiness
@@ -211,12 +208,10 @@ const PUBLIC_API_KEYS = [
   'checkPhase',
   'planPhase',
   'shipPhase',
-  // Approvals
   'createFileApprovalGate',
   'listPendingApprovals',
   'PLAN_SPEC_PREVIEW_BYTES',
   'respondToApproval',
-  // Steering
   'applySteering',
   'describeSteering',
   'drainSteering',
@@ -343,6 +338,11 @@ const INTERNAL_API_KEYS = [
   'hasOpencodeLoginEvidence',
   // Persisted per-issue run state (#2271)
   'readIssueRunState',
+  'nextIssueRunState',
+  'runStateFile',
+  'runStatusForPhase',
+  'terminalRunStatus',
+  'writeIssueRunState',
   'createPlanReuseStore',
   'issueBodyHash',
   'planReusePath',
