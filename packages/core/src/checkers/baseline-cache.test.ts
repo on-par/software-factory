@@ -179,3 +179,32 @@ describe('BaselineCache', () => {
     expect(await cache.get('sha', 'env', 'cfg', 'tests')).toBeUndefined();
   });
 });
+
+describe('BaselineCache timeouts (#3186)', () => {
+  const timedOut: CheckerOutput = {
+    checker: 'compile',
+    result: 'FAIL',
+    details: 'timed out after 120s',
+    timedOut: true,
+  };
+
+  it('does not store a timed-out output but stores the others', async () => {
+    const file = await cacheFile();
+    const cache = new BaselineCache(file);
+    await cache.set('sha', 'env', 'cfg', [timedOut]);
+    expect(existsSync(file)).toBe(false);
+    await cache.set('sha', 'env', 'cfg', [timedOut, out('lint', 'FAIL', 'x')]);
+    expect(await cache.get('sha', 'env', 'cfg', 'compile')).toBeUndefined();
+    expect((await cache.get('sha', 'env', 'cfg', 'lint'))?.details).toBe('x');
+  });
+
+  it('ignores a hand-written timed-out entry on read', async () => {
+    const file = await cacheFile();
+    const cache = new BaselineCache(file);
+    await cache.set('sha', 'env', 'cfg', [out('compile', 'FAIL', 'x')]);
+    const data = JSON.parse(await readFile(file, 'utf-8'));
+    data.entries['sha:env:compile'].output.timedOut = true;
+    await writeFile(file, JSON.stringify(data));
+    expect(await cache.get('sha', 'env', 'cfg', 'compile')).toBeUndefined();
+  });
+});

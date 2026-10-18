@@ -54,6 +54,8 @@ export type RunOutcome =
       /** Base SHA every failing checker also failed on (#1928). */
       baseSha: string;
       failingChecks: string[];
+      /** Red only because a base compile timeout awaits green CI (#3186). */
+      awaitingCi?: boolean;
       failureSignature?: string;
       /** BUILD output was kept and a check-resume record written (#2564). */
       buildPreserved?: boolean;

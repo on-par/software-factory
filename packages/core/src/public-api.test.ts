@@ -329,7 +329,7 @@ const INTERNAL_API_KEYS = [
   'DEFAULT_CI_NO_CHECKS_GRACE_MS',
   'noChecksVerdictMs',
   'resolveCiNoChecksGraceMs',
-  // Pre-PLAN base health (#2339)
+  'fetchRequiredChecksVerdict', // #3186 CI lookup for a timed-out compile; base health (#2339) follows
   'BASE_HEALTH_CHECKERS',
   'checkBaseHealth',
   'codexChatgptSessionState',

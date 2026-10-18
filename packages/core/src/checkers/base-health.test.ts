@@ -5,12 +5,14 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
 
 import { loadFactoryConfig, resolveTimeouts } from '../config/index.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import type { EventKind } from '../events/kinds.js';
 import type { ModelRouter } from '../router/index.js';
 import type { CommandResult } from '../utils/command-runner.js';
 import type { BaselineCheckerComparison, BaselineReport, runBaselineCheckers } from './baseline.js';
 import { BASE_HEALTH_CHECKERS, checkBaseHealth, type BaseHealthOptions } from './base-health.js';
-import { testsChecker } from './index.js';
+import { BaselineCache, hashBaselineCheckerConfig, hashBaselineEnv } from './baseline-cache.js';
+import { compileChecker, testsChecker } from './index.js';
 
 const SHA = 'b'.repeat(40);
 const router = {} as ModelRouter;
@@ -261,3 +263,141 @@ describe('checkBaseHealth tests timeout (#3095)', () => {
 });
 
 afterEach(() => vi.restoreAllMocks());
+
+describe('checkBaseHealth compile timeout (#3186)', () => {
+  const tempDirs = createTempDirs();
+  afterEach(() => tempDirs.cleanup());
+
+  /** Real compileChecker over a fake runCommand, real BaselineCache in a tmp dir. */
+  async function run(compile: { timedOut: boolean }, extra: Partial<BaseHealthOptions>, lintFails = false) {
+    const dir = await tempDirs.make('base-health-timeout-');
+    await writeFile(join(dir, 'package.json'), JSON.stringify({ scripts: { build: 'tsc' } }));
+    const buildRun = vi.fn(async () => ({
+      ...cmd('', compile.timedOut ? 1 : 2),
+      timedOut: compile.timedOut,
+      killed: compile.timedOut,
+    }));
+    const runCheckers = (async (ctx: Parameters<typeof compileChecker>[0]) => {
+      const out = await compileChecker({ ...ctx, worktree: dir, runCommand: buildRun as never });
+      const lint = { checker: 'lint', result: lintFails ? ('FAIL' as const) : ('PASS' as const), details: 'l' };
+      const tests = { checker: 'tests', result: 'PASS' as const, details: '' };
+      return { failures: 0, passes: 0, skips: 0, total: 3, results: [out, lint, tests] };
+    }) as never;
+    const cachePath = join(dir, 'baseline-cache.json');
+    const baselineDeps = {
+      runCommand: vi.fn(async () => cmd('')),
+      runCheckers,
+      makeTempDir: () => mkdtemp(join(dir, 'p-')),
+    };
+    const m = new Map<string, Promise<BaselineReport>>();
+    const res = await checkBaseHealth(opts({ baselineDeps, memo: m }, { cachePath, ...extra }));
+    const cached = await new BaselineCache(cachePath).get(
+      SHA,
+      hashBaselineEnv({ A: '1' }),
+      hashBaselineCheckerConfig(null),
+      'compile',
+    );
+    return { res, cached, memo: m, dir };
+  }
+
+  it('a timed-out base compile with every required check succeeded is green, caches no compile entry and logs the override', async () => {
+    const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'all 2 required checks succeeded' }));
+    const { res, cached, memo: m, dir } = await run({ timedOut: true }, { requiredChecksVerdict });
+    try {
+      expect(res).toEqual({ kind: 'green', baseSha: SHA, failingChecks: [], cached: false });
+      expect(requiredChecksVerdict).toHaveBeenCalledWith(SHA);
+      expect(cached).toBeUndefined();
+      expect(m.size).toBe(0);
+      expect(messages().some((x) => x.includes(SHA) && x.includes('overriding'))).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a timed-out base compile with a skipped required check is red and awaitingCi', async () => {
+    const { res, cached, dir } = await run(
+      { timedOut: true },
+      { requiredChecksVerdict: async () => ({ green: false, reason: 'ci skipped' }) },
+    );
+    try {
+      expect(res).toMatchObject({ kind: 'red', failingChecks: ['compile'], awaitingCi: true });
+      expect(cached).toBeUndefined();
+      expect(messages().some((x) => x.includes('ci skipped') && x.includes('holding'))).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a lookup that throws counts as pending: red, awaitingCi, memo entry dropped', async () => {
+    const {
+      res,
+      memo: m,
+      dir,
+    } = await run(
+      { timedOut: true },
+      {
+        requiredChecksVerdict: async () => {
+          throw new Error('offline');
+        },
+      },
+    );
+    try {
+      expect(res).toMatchObject({ kind: 'red', failingChecks: ['compile'], awaitingCi: true });
+      expect(m.size).toBe(0);
+      expect(messages().some((x) => x.includes('CI lookup failed: offline'))).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('an absent lookup dep counts as CI unknown: red and awaitingCi', async () => {
+    const { res, dir } = await run({ timedOut: true }, {});
+    try {
+      expect(res).toMatchObject({ kind: 'red', failingChecks: ['compile'], awaitingCi: true });
+      expect(messages().some((x) => x.includes('CI lookup unavailable'))).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a non-timeout compile failure stays red and never calls the required-checks lookup', async () => {
+    const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'ok' }));
+    const { res, cached, dir } = await run({ timedOut: false }, { requiredChecksVerdict });
+    try {
+      expect(res).toMatchObject({ kind: 'red', failingChecks: ['compile'] });
+      expect(res.awaitingCi).toBeUndefined();
+      expect(requiredChecksVerdict).not.toHaveBeenCalled();
+      expect(cached?.result).toBe('FAIL');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a timed-out compile plus failing lint with CI green is red on lint only, without awaitingCi', async () => {
+    const { res, dir } = await run(
+      { timedOut: true },
+      { requiredChecksVerdict: async () => ({ green: true, reason: 'ok' }) },
+      true,
+    );
+    try {
+      expect(res).toMatchObject({ kind: 'red', failingChecks: ['lint'] });
+      expect(res.awaitingCi).toBeUndefined();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('a timed-out compile plus failing lint with CI not green is red without awaitingCi', async () => {
+    const { res, dir } = await run(
+      { timedOut: true },
+      { requiredChecksVerdict: async () => ({ green: false, reason: 'x' }) },
+      true,
+    );
+    try {
+      expect(res).toMatchObject({ kind: 'red', failingChecks: ['compile', 'lint'] });
+      expect(res.awaitingCi).toBeUndefined();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

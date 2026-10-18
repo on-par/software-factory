@@ -769,8 +769,8 @@ export {
 } from './run/resume-context.js';
 export type { CheckResumeRecord, CheckResumeStore, PlanReuseRecord, PlanReuseStore } from './run/resume-context.js';
 // Pre-PLAN base health (#2339)
-export { BASE_HEALTH_CHECKERS, checkBaseHealth } from './checkers/base-health.js';
-export type { BaseHealthOptions, BaseHealthResult } from './checkers/base-health.js';
+export { BASE_HEALTH_CHECKERS, checkBaseHealth, fetchRequiredChecksVerdict } from './checkers/base-health.js';
+export type { BaseHealthOptions, BaseHealthResult, RequiredChecksVerdict } from './checkers/base-health.js';
 
 // Codex ChatGPT session freshness for doctor (#2509)
 export { codexChatgptSessionState, type CodexSessionState } from './utils/codex-config.js';

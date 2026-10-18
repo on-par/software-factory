@@ -24,6 +24,7 @@ import {
   createOctokitGreenPrClient,
   createOctokitQueueClient,
   evaluateLoadGuard,
+  fetchRequiredChecksVerdict,
   formatQueueOrderConflict,
   logEvent,
   readHostLoad,
@@ -307,6 +308,15 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
                         lane: planned.lane,
                       }),
                     git: (cmd) => rt.shellOps.exec(cmd, { cwd: repoRoot }).then((r) => r.stdout),
+                    requiredChecksVerdict: (sha) => {
+                      const [owner, repoName] = ghRepo.split('/');
+                      return fetchRequiredChecksVerdict(rt.getOctokit(), {
+                        owner,
+                        repo: repoName,
+                        branch: 'main',
+                        sha,
+                      });
+                    },
                     listCheckRuns: (ref) => {
                       const [owner, repoName] = ghRepo.split('/');
                       return createOctokitGreenPrClient(rt.getOctokit()).listCheckRuns({ owner, repo: repoName, ref });

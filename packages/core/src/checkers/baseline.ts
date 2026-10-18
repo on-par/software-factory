@@ -20,6 +20,8 @@ export interface BaselineCheckerComparison {
   verdict: BaselineVerdict;
   /** The checker's result on the base SHA; absent when it was not run there. */
   baseResult?: CheckResult;
+  /** The base result ended by timeout (#3186): inconclusive. */
+  baseTimedOut?: true;
   /** Failing tests named by both the head and base output; present only when both name tests. */
   sharedFailingTests?: string[];
   /** Failing tests named by the head output but not the base output; present only when both name tests. */
@@ -111,6 +113,7 @@ export function compareBaseline(
       continue;
     }
     const comparison: BaselineCheckerComparison = { checker, verdict: 'fails-on-base', baseResult: 'FAIL' };
+    if (b.timedOut === true) comparison.baseTimedOut = true;
     const headTests = extractFailingTestNames(h.details);
     const baseTests = extractFailingTestNames(b.details);
     if (headTests.length > 0 && baseTests.length > 0) {

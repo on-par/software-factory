@@ -70,12 +70,15 @@ export class BaselineCache {
     if (output.checker !== checker) return undefined;
     if (output.result !== 'PASS' && output.result !== 'FAIL') return undefined;
     if (isConfigCheckerOutput(output)) return undefined;
+    if (output.timedOut === true) return undefined;
     return output;
   }
 
-  /** Stores PASS/FAIL outputs of checkers that really ran; SKIPs and config-validation FAILs are never cached. */
+  /** Stores PASS/FAIL outputs of checkers that really ran; SKIPs, config-validation FAILs and timeouts (inconclusive, #3186) are never cached. */
   async set(baseSha: string, envHash: string, configHash: string, outputs: readonly CheckerOutput[]): Promise<void> {
-    const storable = outputs.filter((o) => (o.result === 'PASS' || o.result === 'FAIL') && !isConfigCheckerOutput(o));
+    const storable = outputs.filter(
+      (o) => (o.result === 'PASS' || o.result === 'FAIL') && !isConfigCheckerOutput(o) && o.timedOut !== true,
+    );
     if (storable.length === 0) return;
     const data = await this.read();
     const recordedAt = new Date(this.now()).toISOString();
