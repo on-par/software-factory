@@ -73,6 +73,8 @@ export interface CheckerContext {
   outputLogDir?: string;
   /** Timeout for the tests checker command, in seconds (`timeouts.tests_seconds`, #2299). Defaults to 300. */
   testsTimeoutSeconds?: number;
+  /** Timeout for the compile checker command, in seconds (`timeouts.compile_seconds`, #3185). Defaults to 120. */
+  compileTimeoutSeconds?: number;
 }
 
 export type CheckerFn = (ctx: CheckerContext) => Promise<CheckerOutput>;
@@ -91,52 +93,34 @@ export interface CheckerRunCtx extends CheckerContext {
 
 // ---------- Built-in Checkers ----------
 
+const DEFAULT_COMPILE_TIMEOUT_SECONDS = 120;
+
 export const compileChecker: CheckerFn = async (ctx) => {
+  const run = ctx.runCommand ?? runCommand;
+  const timeoutSeconds = ctx.compileTimeoutSeconds ?? DEFAULT_COMPILE_TIMEOUT_SECONDS;
+  const timeoutMs = timeoutSeconds * 1000;
+  const evidence = (r: CommandResult): string => {
+    const tail = describeCommandFailureTail(r, 500);
+    if (!r.timedOut) return tail;
+    const head = `timed out after ${timeoutSeconds}s (raise timeouts.compile_seconds or FACTORY_COMPILE_TIMEOUT)`;
+    return tail === 'timed out' ? head : `${head}\n${tail}`;
+  };
   try {
     const pkg = await getPackageJson(ctx);
-    const hasBuild = pkg?.scripts?.build;
+    let argv: string[] | null = null;
+    if (pkg?.scripts?.build) argv = ['npm', 'run', 'build'];
+    else if (await fileExists(join(ctx.worktree, 'Makefile'))) argv = ['make'];
+    else if (await fileExists(join(ctx.worktree, 'Cargo.toml'))) argv = ['cargo', 'build'];
+    if (!argv) return { checker: 'compile', result: 'PASS', details: 'no build system detected — skipped' };
 
-    if (hasBuild) {
-      const r = await runCommand(['npm', 'run', 'build'], {
-        cwd: ctx.worktree,
-        timeoutMs: 120_000,
-        env: ctx.env,
-        onPgid: ctx.onPgid,
-      });
-      if (r.ok) return { checker: 'compile', result: 'PASS', details: 'npm run build: OK' };
-      return {
-        checker: 'compile',
-        result: 'FAIL',
-        details: await commandFailureDetails(ctx, 'compile', 'npm run build', r, describeCommandFailureTail(r, 500)),
-      };
-    }
-
-    if (await fileExists(join(ctx.worktree, 'Makefile'))) {
-      const r = await runCommand(['make'], { cwd: ctx.worktree, timeoutMs: 120_000, env: ctx.env, onPgid: ctx.onPgid });
-      if (r.ok) return { checker: 'compile', result: 'PASS', details: 'make: OK' };
-      return {
-        checker: 'compile',
-        result: 'FAIL',
-        details: await commandFailureDetails(ctx, 'compile', 'make', r, describeCommandFailureTail(r, 500)),
-      };
-    }
-
-    if (await fileExists(join(ctx.worktree, 'Cargo.toml'))) {
-      const r = await runCommand(['cargo', 'build'], {
-        cwd: ctx.worktree,
-        timeoutMs: 120_000,
-        env: ctx.env,
-        onPgid: ctx.onPgid,
-      });
-      if (r.ok) return { checker: 'compile', result: 'PASS', details: 'cargo build: OK' };
-      return {
-        checker: 'compile',
-        result: 'FAIL',
-        details: await commandFailureDetails(ctx, 'compile', 'cargo build', r, describeCommandFailureTail(r, 500)),
-      };
-    }
-
-    return { checker: 'compile', result: 'PASS', details: 'no build system detected — skipped' };
+    const label = argv.join(' ');
+    const r = await run(argv, { cwd: ctx.worktree, timeoutMs, env: ctx.env, onPgid: ctx.onPgid });
+    if (r.ok) return { checker: 'compile', result: 'PASS', details: `${label}: OK` };
+    return {
+      checker: 'compile',
+      result: 'FAIL',
+      details: await commandFailureDetails(ctx, 'compile', label, r, evidence(r)),
+    };
   } catch (e: any) {
     return {
       checker: 'compile',

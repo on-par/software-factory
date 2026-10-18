@@ -85,7 +85,7 @@ const inertConfigLoaders: Pick<
   loadModelsConfig: () => ({ models: {}, tiers: {} }) as never,
   loadRoutesConfig: () => ({}) as never,
   loadFactoryConfigForRepo: () => h.factoryConfig,
-  resolveTimeouts: () => ({ plan: 1, build: 1, check: 1, approval: 1, tests: 1 }),
+  resolveTimeouts: () => ({ plan: 1, build: 1, check: 1, approval: 1, tests: 1, compile: 1 }),
   resolveSkipCI: () => false,
   getConstitutionsDir: vi.fn(() => ''),
   resolveEffectiveModelPins: vi.fn(() => ({ sources: {} })) as never,

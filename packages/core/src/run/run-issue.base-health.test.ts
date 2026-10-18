@@ -63,7 +63,7 @@ const request: RunRequest = {
   work: WORK,
   startedAt: '2026-01-01T00:00:00.000Z',
   options: { interactive: false, autoRework: true, approvePlan: false, sandboxDisabled: false },
-  timeouts: { plan: 60, build: 60, check: 60, approval: 60, tests: 600 },
+  timeouts: { plan: 60, build: 60, check: 60, approval: 60, tests: 600, compile: 900 },
   modelPins: { build: 'my-model', sources: { build: 'repo' } },
   codexDisabled: false,
   skipCI: false,
@@ -104,6 +104,10 @@ describe('runIssue — pre-PLAN base health tests timeout (#3095)', () => {
       checkBaseHealth,
     };
     await runIssue(request, policy, ports);
-    expect(checkBaseHealth.mock.calls[0][0]).toMatchObject({ timeoutSeconds: 60, testsTimeoutSeconds: 600 });
+    expect(checkBaseHealth.mock.calls[0][0]).toMatchObject({
+      timeoutSeconds: 60,
+      testsTimeoutSeconds: 600,
+      compileTimeoutSeconds: 900,
+    });
   });
 });
