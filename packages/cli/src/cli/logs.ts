@@ -46,13 +46,16 @@ export function runLogs(eventsFile: string, opts: LogsOptions, deps: LogsDeps = 
   const env = deps.env ?? process.env;
   const color = colorEnabled(out, env) && !opts.json;
 
-  if (opts.limit !== undefined || opts.since !== undefined) {
-    const match = (e: FactoryEvent): boolean => eventMatchesIssue(e, opts.issue);
-    const readOpts = { limit: opts.limit, match, onBytesRead: deps.onBytesRead };
-    const page =
-      opts.since !== undefined
-        ? readEventsSince(eventsFile, opts.since, readOpts)
-        : readEventsTail(eventsFile, { ...readOpts, limit: opts.limit as number });
+  const { limit, since } = opts;
+  const match = (e: FactoryEvent): boolean => eventMatchesIssue(e, opts.issue);
+  const readOpts = { match, onBytesRead: deps.onBytesRead };
+  const page =
+    since !== undefined
+      ? readEventsSince(eventsFile, since, { ...readOpts, limit })
+      : limit !== undefined
+        ? readEventsTail(eventsFile, { ...readOpts, limit })
+        : undefined;
+  if (page) {
     for (const { event, cursor } of page.events) {
       out.write((opts.json ? JSON.stringify({ ...event, cursor }) : renderEvent(event, { json: false, color })) + '\n');
     }
