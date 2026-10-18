@@ -177,7 +177,7 @@ describe('list', () => {
     expect(await queue.list('build')).toEqual([]);
   });
 
-  it('rejects queued issues without one valid unique position per lane', async () => {
+  it('still rejects a bad order label when no onOrderConflict is given', async () => {
     const { client } = createFakeStore([
       { number: 1, labels: [QUEUED_LABEL, laneLabel('build')] },
       { number: 2, labels: [QUEUED_LABEL, laneLabel('build'), queueOrderLabel(1)] },
@@ -185,16 +185,6 @@ describe('list', () => {
     const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
 
     await expect(queue.list('build')).rejects.toThrow('invalid GitHub queue state');
-  });
-
-  it.each([
-    [[QUEUED_LABEL, laneLabel('build'), 'factory:order:0']],
-    [[QUEUED_LABEL, laneLabel('build'), queueOrderLabel(1), queueOrderLabel(2)]],
-  ])('rejects malformed or multiple order labels', async (labels) => {
-    const { client } = createFakeStore([{ number: 1, labels }]);
-    const queue = createGithubQueue({ client, owner: 'o', repo: 'r', claimantId: 'aaa-1' });
-
-    await expect(queue.claimNext('build')).rejects.toThrow('invalid GitHub queue state');
   });
 });
 

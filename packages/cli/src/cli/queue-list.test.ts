@@ -71,4 +71,24 @@ describe('buildQueueListJson', () => {
     expect('title' in item!).toBe(false);
     expect(item?.status).toBe('queued');
   });
+
+  it('maps a skipped-issue conflict to order null with its reason (#3192)', () => {
+    const skipped = {
+      entries: snapshot.entries,
+      orderConflicts: [{ lane: 'cleanup', position: null, issues: [9], reason: 'missing-order-label' }],
+    } as QueueSnapshot;
+    expect(buildQueueListJson(skipped).orderConflicts).toEqual([
+      { lane: 'cleanup', order: null, issues: [9], reason: 'missing-order-label' },
+    ]);
+  });
+
+  it('keeps the exact JSON for well-formed queues and duplicate conflicts (no reason key)', () => {
+    const dup = {
+      entries: [{ issue: 7, lane: 'access', title: 'Seven' }],
+      orderConflicts: [{ lane: 'access', position: 1, issues: [7, 8] }],
+    } as QueueSnapshot;
+    expect(JSON.stringify(buildQueueListJson(dup))).toBe(
+      '{"schemaVersion":1,"lanes":[{"lane":"access","items":[{"issue":7,"title":"Seven","status":"queued","order":1,"claimedBy":null}]}],"orderConflicts":[{"lane":"access","order":1,"issues":[7,8]}]}',
+    );
+  });
 });
