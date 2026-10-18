@@ -120,7 +120,7 @@ describe('buildStatusJson', () => {
         repo: 'o/r',
         product: null,
         stop: true,
-        stopInfo: marker ? { source: marker.source, setAt: marker.at } : null,
+        stopInfo: marker ? { source: marker.source, setAt: marker.at ?? null } : null,
         breakers: [],
         active: [],
         update: null,

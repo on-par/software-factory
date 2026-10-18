@@ -234,6 +234,7 @@ import {
 } from '@on-par/factory-core/internal';
 import type { StopMarker } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
+import { clearSelfUpdateStop } from './self-update-stop.js';
 import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
 import {
   cmdClassifierBacktest,
@@ -3306,9 +3307,7 @@ async function cmdFactoryd(opts: {
   const previousUpdate = readUpdateState(updateFile);
   for (const stop of recoverStaleDrain(previousUpdate, (file) => {
     try {
-      if (readStopMarker(file)?.source !== 'self-update') return false;
-      unlinkSync(file);
-      return true;
+      return clearSelfUpdateStop(file);
     } catch {
       return false;
     }
@@ -3983,7 +3982,9 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
     if (marker?.source === 'usage-watchdog') {
       clearStop(stopFile);
     } else if (marker) {
-      writeLine(`[factory] supervise: STOP set by ${marker.source} at ${marker.at}; waiting for factory resume`);
+      writeLine(
+        `[factory] supervise: STOP set by ${marker.source}${marker.at ? ` at ${marker.at}` : ''}; waiting for factory resume`,
+      );
       while (pathExists(stopFile)) await sleep(pollMs);
     }
     if (ingest) {

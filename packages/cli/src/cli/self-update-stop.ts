@@ -8,14 +8,19 @@ export function writeSelfUpdateStop(file: string): void {
   writeFileSync(file, formatStopMarker('self-update'), { flag: 'wx' });
 }
 
-/** Unlinks each STOP only while its marker still says `self-update`, so a STOP a person set mid-drain survives. */
-export function clearSelfUpdateStops(files: string[]): void {
-  for (const f of files) {
-    try {
-      if (readStopMarker(f)?.source !== 'self-update') continue;
-      unlinkSync(f);
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
-    }
+/** Unlinks one STOP only while its marker still says `self-update`; true when it was removed. */
+export function clearSelfUpdateStop(file: string): boolean {
+  try {
+    if (readStopMarker(file)?.source !== 'self-update') return false;
+    unlinkSync(file);
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    return false;
   }
+}
+
+/** Clears each STOP via `clearSelfUpdateStop`, so a STOP a person set mid-drain survives. */
+export function clearSelfUpdateStops(files: string[]): void {
+  for (const f of files) clearSelfUpdateStop(f);
 }

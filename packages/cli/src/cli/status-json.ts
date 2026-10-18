@@ -26,7 +26,7 @@ export interface StatusActiveRowJson {
 
 export interface StatusStopInfoJson {
   source: StopSource;
-  setAt: string;
+  setAt: string | null;
 }
 
 /** `factory status --json` payload (#1101). No queue (#2268) or usage (#2270) section.

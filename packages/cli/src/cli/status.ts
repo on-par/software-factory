@@ -98,7 +98,7 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
           repo: ghRepo,
           product: rt.readActiveProduct(paths.product) ?? null,
           stop: existsSync(paths.stop),
-          stopInfo: marker ? { source: marker.source, setAt: marker.at } : null,
+          stopInfo: marker ? { source: marker.source, setAt: marker.at ?? null } : null,
           breakers: await new ProviderBreaker(paths.breaker).list(),
           active,
           update: buildStatusUpdateJson(readUpdateState(updateStatePath(daemonRuntimePaths().dir))),

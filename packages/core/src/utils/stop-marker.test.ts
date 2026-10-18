@@ -54,14 +54,14 @@ describe('stop-marker', () => {
     });
   });
 
-  it('uses epoch when stat fails with a non-ENOENT error', () => {
+  it('omits at when stat fails with a non-ENOENT error', () => {
     const r = readStopMarker(file, {
       readFile: () => '',
       statMtimeMs: () => {
         throw Object.assign(new Error('x'), { code: 'EACCES' });
       },
     });
-    expect(r).toEqual({ source: 'unknown', at: new Date(0).toISOString() });
+    expect(r).toEqual({ source: 'unknown' });
   });
 
   it('returns null when stat hits ENOENT after a read', () => {
@@ -72,5 +72,17 @@ describe('stop-marker', () => {
       },
     });
     expect(r).toBeNull();
+  });
+});
+
+describe('readStopMarker non-ENOENT read errors', () => {
+  it('reports unknown with the reason in detail instead of treating the body as empty', () => {
+    const r = readStopMarker('/x/STOP', {
+      readFile: () => {
+        throw Object.assign(new Error('denied'), { code: 'EACCES' });
+      },
+      statMtimeMs: () => 0,
+    });
+    expect(r).toEqual({ source: 'unknown', at: new Date(0).toISOString(), detail: 'unreadable: EACCES' });
   });
 });

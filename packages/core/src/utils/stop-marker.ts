@@ -5,7 +5,8 @@ export type StopSource = 'manual' | 'usage-watchdog' | 'self-update' | 'unknown'
 
 export interface StopMarker {
   source: StopSource;
-  at: string;
+  /** Absent when neither the body nor the file's mtime could be read. */
+  at?: string;
   detail?: string;
 }
 
@@ -29,17 +30,19 @@ export function readStopMarker(path: string, deps: Partial<StopMarkerDeps> = {})
   const readFile = deps.readFile ?? ((p: string) => readFileSync(p, 'utf-8'));
   const statMtimeMs = deps.statMtimeMs ?? ((p: string) => statSync(p).mtimeMs);
   let content = '';
+  let readError: string | undefined;
   try {
     content = readFile(path);
   } catch (err) {
     if (isEnoent(err)) return null;
+    readError = `unreadable: ${(err as NodeJS.ErrnoException).code ?? String(err)}`;
   }
-  const mtimeIso = (): string | null => {
+  const mtimeIso = (): string | null | undefined => {
     try {
       return new Date(statMtimeMs(path)).toISOString();
     } catch (err) {
       if (isEnoent(err)) return null;
-      return new Date(0).toISOString();
+      return undefined;
     }
   };
   let parsed: unknown;
@@ -54,10 +57,14 @@ export function readStopMarker(path: string, deps: Partial<StopMarkerDeps> = {})
       const source = rec.source as Exclude<StopSource, 'unknown'>;
       const at = typeof rec.at === 'string' && Number.isFinite(Date.parse(rec.at)) ? rec.at : mtimeIso();
       if (at === null) return null;
-      return { source, at, ...(typeof rec.detail === 'string' ? { detail: rec.detail } : {}) };
+      return {
+        source,
+        ...(at !== undefined ? { at } : {}),
+        ...(typeof rec.detail === 'string' ? { detail: rec.detail } : {}),
+      };
     }
   }
   const at = mtimeIso();
   if (at === null) return null;
-  return { source: 'unknown', at };
+  return { source: 'unknown', ...(at !== undefined ? { at } : {}), ...(readError ? { detail: readError } : {}) };
 }
