@@ -1,7 +1,7 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { applySelfUpdate, prependPath } from './self-update-apply.js';
@@ -30,14 +30,16 @@ describe('prependPath (#3122)', () => {
   });
 });
 
+const tmp = createTempDirs();
+
 describe('production seams', () => {
   let dir: string;
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'self-update-apply-path-'));
+    dir = tmp.makeSync('self-update-apply-path-');
   });
   afterEach(() => {
     vi.unstubAllEnvs();
-    rmSync(dir, { recursive: true, force: true });
+    tmp.cleanup();
   });
 
   it('the default exec puts the install bin dir first on PATH so an env-node npm passes preflight when PATH lacks node (#3122)', async () => {
