@@ -7,6 +7,7 @@ import type { EvidenceAllowlist } from './evidence-allowlist.js';
 import { tokenizeEvidenceCommand } from './evidence-allowlist.js';
 import { runVerificationCommand } from './run-command.js';
 import type { CheckerContext } from './index.js';
+import { verifyFailToPass } from './evidence-plan-false-pass.js';
 
 export interface EvidencePlanResult {
   claim: string;
@@ -15,6 +16,16 @@ export interface EvidencePlanResult {
   reason: string;
   outputTail?: string;
   passWhenNotMachineChecked?: boolean;
+  headRun?: EvidenceTestRun;
+  baseRun?: EvidenceTestRun;
+  baseSha?: string;
+}
+
+export interface EvidenceTestRun {
+  exitCode: number;
+  timedOut: boolean;
+  killed: boolean;
+  outputTail?: string;
 }
 
 export interface EvidenceCommandLifecycle {
@@ -24,7 +35,7 @@ export interface EvidenceCommandLifecycle {
 
 export type EvidenceRunnerContext = Pick<
   CheckerContext,
-  'worktree' | 'sandbox' | 'env' | 'onPgid' | 'runCommand' | 'testsTimeoutSeconds'
+  'worktree' | 'sandbox' | 'env' | 'onPgid' | 'runCommand' | 'testsTimeoutSeconds' | 'diffBase' | 'parentBaseRef'
 >;
 
 const OUTPUT_LIMIT = 2000;
@@ -128,25 +139,39 @@ async function execute(
     const run = ctx.runCommand ?? runVerificationCommand;
     const outcome = await run(['/bin/sh', '-c', command], options);
     const outputTail = tail(outcome.stdout, outcome.stderr);
-    if (outcome.timedOut) return result(entry, 'FAIL', `timed out after ${timeoutSeconds}s`, outputTail);
-    if (outcome.killed) return result(entry, 'FAIL', 'terminated', outputTail);
+    const completed = (value: EvidencePlanResult): EvidencePlanResult =>
+      entry.kind === 'fail-to-pass-test'
+        ? {
+            ...value,
+            headRun: {
+              exitCode: outcome.exitCode,
+              timedOut: outcome.timedOut,
+              killed: outcome.killed,
+              ...(outputTail ? { outputTail } : {}),
+            },
+          }
+        : value;
+    if (outcome.timedOut) return completed(result(entry, 'FAIL', `timed out after ${timeoutSeconds}s`, outputTail));
+    if (outcome.killed) return completed(result(entry, 'FAIL', 'terminated', outputTail));
     if (entry.kind === 'command' && entry.expect) {
       const expectedExit = entry.expect.exitCode ?? 0;
       const required = entry.expect.stdoutContains ?? [];
       const missing = required.filter((part) => !outcome.stdout.includes(part));
       if (outcome.exitCode === expectedExit && missing.length === 0) {
-        return result(
-          entry,
-          'PASS',
-          `expected exit ${expectedExit}; matched stdout requirements ${expectedParts(required)}`,
-          outputTail,
+        return completed(
+          result(
+            entry,
+            'PASS',
+            `expected exit ${expectedExit}; matched stdout requirements ${expectedParts(required)}`,
+            outputTail,
+          ),
         );
       }
       const summary = `claim ${entry.claim}: expected exit ${expectedExit}, actual exit ${outcome.exitCode}; expected stdout substrings ${expectedParts(required)}; missing stdout substrings ${expectedParts(missing)}; actual stdout: ${actualOutput(outcome.stdout)}; actual stderr: ${actualOutput(outcome.stderr)}`;
-      return result(entry, 'FAIL', boundedReason(summary), outputTail);
+      return completed(result(entry, 'FAIL', boundedReason(summary), outputTail));
     }
-    if (outcome.exitCode === 0) return result(entry, 'PASS', 'exited with code 0', outputTail);
-    return result(entry, 'FAIL', `exited with code ${outcome.exitCode}`, outputTail);
+    if (outcome.exitCode === 0) return completed(result(entry, 'PASS', 'exited with code 0', outputTail));
+    return completed(result(entry, 'FAIL', `exited with code ${outcome.exitCode}`, outputTail));
   } catch (error) {
     const message = (error instanceof Error ? error.message : String(error)).slice(-OUTPUT_LIMIT);
     return result(entry, 'FAIL', `execution error: ${message}`);
@@ -196,7 +221,22 @@ export async function runEvidencePlan(
       results.push(result(entry, 'SKIP', 'sandbox unavailable'));
       continue;
     }
-    results.push(await execute(entry, argv, policy, ctx, lifecycle));
+    const head = await execute(entry, argv, policy, ctx, lifecycle);
+    if (entry.kind !== 'fail-to-pass-test') {
+      results.push(head);
+      continue;
+    }
+    results.push(
+      await verifyFailToPass(entry, head, ctx, async (worktree) => {
+        const basePolicy: SandboxPolicy = {
+          ...policy,
+          worktree,
+          writablePaths: [...policy.writablePaths, worktree],
+          writableFilePrefixes: [...policy.writableFilePrefixes],
+        };
+        return execute(entry, argv, basePolicy, { ...ctx, worktree, sandbox: basePolicy }, lifecycle);
+      }),
+    );
   }
   return results;
 }

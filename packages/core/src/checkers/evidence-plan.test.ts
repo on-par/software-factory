@@ -1,15 +1,25 @@
-import { describe, expect, it } from 'vitest';
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import type { EvidencePlanEntry } from '@on-par/contracts';
 import { shellEscape } from '../utils/index.js';
 import { wrapCommandInSandbox, type SandboxPolicy } from '../sandbox/index.js';
 import { resolveEvidenceAllowlist } from './evidence-allowlist.js';
 import { runEvidencePlan } from './evidence-plan.js';
 import type { CommandResult } from '../utils/command-runner.js';
+import { execGit } from '../utils/git-exec.js';
 
-const policy = (runtime: SandboxPolicy['runtime'] = 'firejail'): SandboxPolicy => ({
+const tempDirs = createTempDirs();
+
+afterEach(async () => {
+  await tempDirs.cleanup();
+});
+
+const policy = (runtime: SandboxPolicy['runtime'] = 'firejail', worktree = '/tmp/lane'): SandboxPolicy => ({
   runtime,
-  worktree: '/tmp/lane',
-  writablePaths: ['/tmp/lane', '/tmp'],
+  worktree,
+  writablePaths: [worktree, '/tmp'],
   writableFilePrefixes: ['/tmp/prefix'],
   allowHosts: ['example.com'],
   proxyUrl: 'http://proxy',
@@ -30,6 +40,17 @@ const entry = (kind: EvidencePlanEntry['kind'], fields: Record<string, string>):
 
 describe('evidence plan runner', () => {
   it('evidence runner returns per-entry outcomes and scopes its own test', async () => {
+    const worktree = await tempDirs.make('evidence-plan-');
+    await execGit(['init', '-q'], { cwd: worktree });
+    await execGit(['config', 'user.name', 'Evidence Test'], { cwd: worktree });
+    await execGit(['config', 'user.email', 'evidence@example.test'], { cwd: worktree });
+    await writeFile(join(worktree, 'fixture.txt'), 'base');
+    await execGit(['add', '.'], { cwd: worktree });
+    await execGit(['commit', '-qm', 'base'], { cwd: worktree });
+    const base = (await execGit(['rev-parse', 'HEAD'], { cwd: worktree })).stdout.trim();
+    await execGit(['update-ref', 'refs/remotes/origin/main', base], { cwd: worktree });
+    await writeFile(join(worktree, 'fixture.txt'), 'head');
+    await execGit(['commit', '-qam', 'head'], { cwd: worktree });
     const seen: string[][] = [];
     const allowlist = resolveEvidenceAllowlist(
       { packageManager: 'npm', scripts: { test: 'vitest run', lint: 'eslint' } },
@@ -40,18 +61,19 @@ describe('evidence plan runner', () => {
       entry('command', { command: 'lint --fix', passWhen: 'done' }),
     ];
     const results = await runEvidencePlan(entries, allowlist, {
-      worktree: '/tmp/lane',
-      sandbox: policy(),
-      runCommand: async (argv) => {
+      worktree,
+      sandbox: policy('firejail', worktree),
+      runCommand: async (argv, options) => {
         seen.push([...argv]);
-        return commandResult(0);
+        return commandResult(options?.cwd === worktree ? 0 : 1);
       },
     });
     expect(results.map((r) => r.status)).toEqual(['PASS', 'PASS']);
-    expect(seen).toHaveLength(2);
+    expect(seen).toHaveLength(3);
     expect(seen[0]?.[0]).toBe('/bin/sh');
     expect(seen[0]?.[2]).toContain(shellEscape('src/a test.ts'));
     expect(seen[0]?.[2]).toContain(shellEscape('--run'));
+    expect(seen[1]?.[2]).toContain(shellEscape('src/a test.ts'));
   });
 
   it('evidence runner FAILs an allowlisted command that exits non-zero', async () => {

@@ -110,6 +110,25 @@ describe('appendEvidencePlanStep', () => {
     expect(out.warnings).toEqual(['warning']);
   });
 
+  it('fails weak fail-to-pass proof with structured base and head outcomes for rework', async () => {
+    const { ctx } = await fixture([{ kind: 'fail-to-pass-test', claim: 'new behavior', test: 'src/new.test.ts' }]);
+    const weakProof = {
+      claim: 'new behavior',
+      kind: 'fail-to-pass-test' as const,
+      status: 'FAIL' as const,
+      reason: "test doesn't exercise the change; claim new behavior; merge-base: exited 0; head: exited 0",
+      baseSha: 'a'.repeat(40),
+      baseRun: { exitCode: 0, timedOut: false, killed: false },
+      headRun: { exitCode: 0, timedOut: false, killed: false },
+    };
+    const out = await appendEvidencePlanStep(summary, ctx, null, async () => [weakProof]);
+    const gate = out.results.find((result) => result.checker === 'evidence_plan');
+    expect(out.failures).toBe(1);
+    expect(gate?.result).toBe('FAIL');
+    expect(gate?.details).toContain("test doesn't exercise the change");
+    expect(gate?.evidencePlanResults).toEqual([weakProof]);
+  });
+
   it('skips disabled and blocked gates without calling the runner', async () => {
     const { ctx } = await fixture([{ kind: 'none', claim: 'docs', reason: 'docs' }]);
     const runEvidence = async () => {
