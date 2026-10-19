@@ -61,12 +61,14 @@ type RemoteHeadCheck =
   | { status: 'mismatch'; localSha: string; remoteSha: string }
   | { status: 'unreadable'; localSha?: string; remoteSha?: string; detail: string };
 
-/** Same flatten-and-bound shaping as {@link describePushFailure}, kept separate so that
- *  function's asserted output never changes. */
+/** Prefer stderr, then stdout, before the error fallback; keep details flattened and bounded. */
 export function shortDetail(err: unknown): string {
-  const raw = (err as { stderr?: unknown } | null | undefined)?.stderr;
-  const stderr = typeof raw === 'string' ? raw : '';
-  const text = stderr.trim() || (err instanceof Error ? err.message : String(err));
+  const output = err as { stderr?: unknown; stdout?: unknown } | null | undefined;
+  const rawStderr = output?.stderr;
+  const rawStdout = output?.stdout;
+  const stderr = typeof rawStderr === 'string' ? rawStderr.trim() : '';
+  const stdout = typeof rawStdout === 'string' ? rawStdout.trim() : '';
+  const text = stderr || stdout || (err instanceof Error ? err.message : String(err));
   return text.replace(/\s+/g, ' ').trim().slice(0, MAX_REMOTE_HEAD_DETAIL) || 'no error output';
 }
 
