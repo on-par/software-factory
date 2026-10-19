@@ -1205,8 +1205,8 @@ describe('runIssue — interactive steering, proxy, and pgid tracking', () => {
       basePolicy(),
       basePorts({ acquireEnvironment: async () => environment }),
     );
-    expect(outcome.state).toBe('ready');
-    expect(recordPgid).toHaveBeenCalledWith(4321);
+    expect([outcome.state, recordPgid.mock.calls]).toEqual(['ready', [[4321]]]);
+    expect(vi.mocked(checkPhase).mock.calls[0]?.[0].processGroupTracker?.killAll).toBeTypeOf('function');
   });
 });
 

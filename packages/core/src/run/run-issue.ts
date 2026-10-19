@@ -899,6 +899,7 @@ async function runIssueOnce(
       appPort,
       appBaseUrl,
       onPgid,
+      processGroupTracker: tracker,
       priorFailureSignature,
       diffBase: request.localOnly ? runStartDiffBase : buildDiffBase,
       parentBaseRef: request.parentBaseRef,

@@ -303,6 +303,7 @@ async function checkPhaseImpl(opts: {
   /** Stable lane URL from the factory proxy (e.g. http://<lane>.factory.localhost), when running. */
   appBaseUrl?: string;
   onPgid?: (pgid: number) => void;
+  processGroupTracker?: CheckerContext['processGroupTracker'];
   /** Failure signature this issue parked/got stuck on in a prior run (ReworkHistory,
    *  #740). When round one's signature matches, the rework loop is skipped entirely
    *  instead of re-burning a full budget against an unfixed root cause. */
@@ -358,6 +359,7 @@ async function checkPhaseImpl(opts: {
     appPort,
     appBaseUrl,
     onPgid,
+    processGroupTracker,
     priorFailureSignature,
     diffBase,
     parentBaseRef,
@@ -395,6 +397,7 @@ async function checkPhaseImpl(opts: {
     parentBaseRef,
     env: laneEnv(appPort, process.env, appBaseUrl, worktree, runId),
     onPgid,
+    processGroupTracker,
     probe,
     log,
     onActivity,
@@ -435,14 +438,20 @@ async function checkPhaseImpl(opts: {
   }
 
   let baseline: BaselineReport | undefined;
-  if (summary.results.some((result) => result.checker !== 'evidence_plan' && result.result === 'FAIL')) {
+  if (
+    summary.results.some(
+      (result) => !['evidence_plan', 'side_effects'].includes(result.checker) && result.result === 'FAIL',
+    )
+  ) {
     if (diffBase === undefined) {
       log('check', 'baseline skipped: no base SHA for this run');
     } else {
       baseline = await (runBaseline ?? runBaselineCheckers)({
         baseSha: diffBase,
         laneWorktree: worktree,
-        failing: summary.results.filter((result) => result.checker !== 'evidence_plan' && result.result === 'FAIL'),
+        failing: summary.results.filter(
+          (result) => !['evidence_plan', 'side_effects'].includes(result.checker) && result.result === 'FAIL',
+        ),
         ctx: {
           ...ctx,
           outputLogDir: checkBaseDir,
