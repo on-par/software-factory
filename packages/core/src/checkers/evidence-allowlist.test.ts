@@ -50,7 +50,7 @@ describe('evidence allowlist', () => {
     expect([
       ...resolveEvidenceAllowlist(
         { scripts: { ok: 'x', bad: 2, 'bad name': 'x' } },
-        { commands: { ok: 'echo | cat', __proto__: 'safe' } },
+        { commands: JSON.parse('{"ok":"echo | cat","__proto__":"safe"}') as Record<string, string> },
       ),
     ]).toEqual([]);
     expect([...resolveEvidenceAllowlist({ scripts: { test: 'x' } }, { commands: { test: 'npm test | cat' } })]).toEqual(
@@ -58,7 +58,7 @@ describe('evidence allowlist', () => {
     );
     expect([...resolveEvidenceAllowlist({ scripts: null }, null)]).toEqual([]);
     expect([
-      ...resolveEvidenceAllowlist({ scripts: { constructor: 'x', prototype: 'x', __proto__: 'x' } }, null),
+      ...resolveEvidenceAllowlist(JSON.parse('{"scripts":{"constructor":"x","prototype":"x","__proto__":"x"}}'), null),
     ]).toEqual([]);
   });
 
