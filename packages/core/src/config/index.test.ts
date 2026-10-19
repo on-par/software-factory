@@ -52,11 +52,9 @@ function baseModelDef(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
-
 function validDecl(overrides: Record<string, unknown> = {}) {
   return { command: 'my-agent', prompt: 'stdin', output: 'stdout', agentic: true, usage: 'none', ...overrides };
 }
-
 function writeModelsConfig(dir: string, harness?: string, harnesses?: Record<string, unknown>) {
   const config = {
     version: 1,
@@ -580,6 +578,7 @@ describe('loadFactoryConfig', () => {
 
   it('defaults sandbox.network.blockTelemetry to false (#2667)', () => {
     expect(loadFactoryConfig().sandbox.network.blockTelemetry).toBe(false);
+    expect(loadFactoryConfig().sandbox.codexFullAccessTasks).toEqual([]);
   });
 
   it('loads sandbox.network.blockTelemetry true from a repo config (#2667)', async () => {
@@ -601,10 +600,11 @@ describe('loadFactoryConfig', () => {
         byok: { enabled: false, comment: '' },
         notifications: {},
         cost_tracking: { enabled: true, log_file: '.factory/costs.jsonl', comment: '' },
-        sandbox: { network: { blockTelemetry: true } },
+        sandbox: { network: { blockTelemetry: true }, codexFullAccessTasks: ['build_codex'] },
       };
       await writeFile(path, JSON.stringify(minimal));
       expect(loadFactoryConfig(path).sandbox.network.blockTelemetry).toBe(true);
+      expect(loadFactoryConfig(path).sandbox.codexFullAccessTasks).toEqual(['build_codex']);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

@@ -1410,6 +1410,9 @@ async function cmdCheck(issueRaw: string, opts: { json?: boolean; deep?: boolean
       effective.allowExperimental,
       effective.localOnly,
     );
+    router.setCodexFullAccessTasks?.(
+      configLoaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox.codexFullAccessTasks,
+    );
     router.setLocalAuthSink?.(recordLocalAuthFailure);
     runModel = createDeepModelRunner(router, repoRoot);
   }
@@ -1547,6 +1550,7 @@ async function cmdClassifierBacktestEntry(opts: ClassifierBacktestOptions) {
     effective.allowExperimental,
     effective.localOnly,
   );
+  router.setCodexFullAccessTasks?.(configLoaders.loadFactoryConfigForRepo(paths.config).sandbox.codexFullAccessTasks);
   router.setLocalAuthSink?.(recordLocalAuthFailure);
   try {
     await cmdClassifierBacktest(
@@ -1869,6 +1873,7 @@ async function cmdTui(opts: { localQueue?: boolean } = {}, runTuiImpl: typeof ru
     effective.allowExperimental,
     effective.localOnly,
   );
+  router.setCodexFullAccessTasks?.(configLoaders.loadFactoryConfigForRepo(paths.config).sandbox.codexFullAccessTasks);
   router.setLocalAuthSink?.(recordLocalAuthFailure);
   const effectiveConfigLines = describeEffectiveConfig({
     router,
@@ -2822,6 +2827,7 @@ async function cmdTriage(opts: { product?: string; model?: string }) {
     effective.allowExperimental,
     effective.localOnly,
   );
+  router.setCodexFullAccessTasks?.(configLoaders.loadFactoryConfigForRepo(paths.config).sandbox.codexFullAccessTasks);
   router.setLocalAuthSink?.(recordLocalAuthFailure);
   router.skipMissingHarnessClis(coreOps.isCommandAvailable);
   router.setCostSink((entry) => logCost(paths.costs, { ...entry, issue: '-' }));

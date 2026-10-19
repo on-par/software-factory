@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
+import type { SandboxPolicy } from '../sandbox/index.js';
 import type { StubModelExecutorOptions } from '../router/stub.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { extractVerdict, judgeSpec, median, runJudgeSamples, runJudgeSpec } from './judge.js';
@@ -66,11 +67,15 @@ function judgeOpts() {
 
 describe('runJudgeSpec', () => {
   it('extracts a simple verdict', async () => {
-    const result = await runJudgeSpec(routerFor('{"score": 8, "reasons": "solid"}'), judgeOpts());
+    const router = routerFor('{"score": 8, "reasons": "solid"}');
+    const sandbox = { runtime: 'none' } as SandboxPolicy;
+    const run = vi.spyOn(router, 'run');
+    const result = await runJudgeSpec(router, { ...judgeOpts(), sandbox });
 
     expect(result.score).toBe(8);
     expect(result.reasons).toBe('solid');
     expect(result.malformed).toBe(false);
+    expect(run.mock.calls[0][2]?.sandbox).toBe(sandbox);
   });
 
   it('extracts a verdict after preamble text with braces inside a string', async () => {

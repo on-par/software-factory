@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { ModelRouter } from '../router/index.js';
+import type { SandboxPolicy } from '../sandbox/index.js';
 import { writeSpec } from '../spec/index.js';
 import { planPhase } from './plan.js';
 import { StubModelExecutor } from './plan-test-helpers.js';
@@ -100,7 +102,56 @@ describe('settlePlanRoute command route (#2872)', () => {
   });
 });
 
+const sandboxTmp = createTempDirs();
+afterEach(async () => {
+  await sandboxTmp.cleanup();
+});
+
 describe('planPhase command route (#2872)', () => {
+  it('passes a runtime-none policy to the plan router call', async () => {
+    const worktree = await sandboxTmp.make('plan-sandbox-test-');
+    const sandbox: SandboxPolicy = {
+      runtime: 'none',
+      worktree,
+      writablePaths: [worktree],
+      writableFilePrefixes: [],
+      allowHosts: [],
+      cpuMs: 300_000,
+      memMb: 4096,
+    };
+    let seenSandbox: SandboxPolicy | undefined;
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [
+          {
+            output: '---\nroute: codex\n---\n# Spec\n',
+            effect: (ctx) => {
+              seenSandbox = ctx.sandbox;
+            },
+          },
+        ],
+      },
+    });
+    const result = await planPhase({
+      issue: 3247,
+      repo: 'on-par/software-factory',
+      worktree,
+      specPath: join(worktree, 'spec.md'),
+      router: new ModelRouter(models, routes, false, stub),
+      constitution: null,
+      sandbox,
+      enforceReadiness: false,
+      octokit: {
+        rest: {
+          issues: { get: async () => ({ data: { title: 'Fix sandbox default', body: 'Use workspace-write' } }) },
+        },
+      } as any,
+      log: () => {},
+    });
+    expect(result.ok).toBe(true);
+    expect(seenSandbox).toBe(sandbox);
+  });
+
   it.each([
     ['preferredRoute command overrides the planned route and rewrites the spec', 'claude', 'command', 'command'],
     ['a planner-written route command with no pin is no choice', 'command', undefined, 'claude'],

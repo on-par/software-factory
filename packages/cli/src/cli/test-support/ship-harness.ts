@@ -61,6 +61,7 @@ export const h = {
     worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: false },
     sandbox: {
       enabled: true,
+      codexFullAccessTasks: [],
       network: { allow: ['api.anthropic.com', 'github.com'] },
       resources: { cpuMs: 300_000, memMb: 4096 },
     },
@@ -240,6 +241,7 @@ function makeCoreFakes() {
         setCostSink: vi.fn((sink: (entry: any) => void) => {
           h.costSinkCallback = sink;
         }),
+        setCodexFullAccessTasks: vi.fn(),
         skipMissingHarnessClis: vi.fn(),
         run: vi.fn(async (task: string, prompt: string, opts: any) => h.routerRun(task, prompt, opts)),
       };
@@ -404,6 +406,7 @@ export function installShipHarness(): void {
       worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: false },
       sandbox: {
         enabled: true,
+        codexFullAccessTasks: [],
         network: { allow: ['api.anthropic.com', 'github.com'] },
         resources: { cpuMs: 300_000, memMb: 4096 },
       },

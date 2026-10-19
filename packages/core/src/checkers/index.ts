@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import type { EventKind } from '../events/kinds.js';
 import type { ModelRouter } from '../router/index.js';
+import type { SandboxPolicy } from '../sandbox/index.js';
 import type { CheckerOutput, CheckSummary, Constitution, RegressionFinding } from '../types/index.js';
 import { type CommandResult, type RunCommandOptions } from '../utils/command-runner.js';
 import { runVerificationCommand as runCommand } from './run-command.js';
@@ -34,6 +35,7 @@ interface PackageJson {
 }
 
 export interface CheckerContext {
+  sandbox?: SandboxPolicy;
   worktree: string;
   specPath: string;
   /** Run-start HEAD SHA captured by buildPhase before the worker ran — the diff base
@@ -508,6 +510,7 @@ Steps:
   try {
     const result = await router.run('check_custom', prompt, {
       worktree: ctx.worktree,
+      sandbox: ctx.sandbox,
       timeoutSeconds: timeoutSeconds ?? 1800,
       env: ctx.env,
       onPgid: ctx.onPgid,

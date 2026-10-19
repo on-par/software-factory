@@ -9,6 +9,7 @@ import { loadFactoryConfigForRepo, type ModelsConfig, type RoutesConfig } from '
 import { killProcessGroup } from '../environment/process-groups.js';
 import { ConstitutionLoader } from '../constitutions/index.js';
 import { ModelRouter } from '../router/index.js';
+import type { SandboxPolicy } from '../sandbox/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import type { Constitution } from '../types/index.js';
 import type { CommandResult } from '../utils/command-runner.js';
@@ -1028,13 +1029,16 @@ describe('runCustomChecker', () => {
   it('parses a valid verdict and includes checker context in the prompt', async () => {
     const worktree = await makeWorktree();
     const { router, stub } = makeRouter('{"checker":"custom_x","result":"PASS","details":"all good"}');
+    const sandbox = { runtime: 'none' } as SandboxPolicy;
+    const run = vi.spyOn(router, 'run');
 
-    const result = await runCustomChecker(makeContext(worktree), 'custom_x', router);
+    const result = await runCustomChecker({ ...makeContext(worktree), sandbox }, 'custom_x', router);
 
     expect(result.result).toBe('PASS');
     expect(result.details).toBe('all good');
     expect(stub.calls[0].prompt).toContain('custom_x');
     expect(stub.calls[0].prompt).toContain('test constitution');
+    expect(run.mock.calls[0][2]?.sandbox).toBe(sandbox);
   });
 
   it('parses a verdict embedded in prose', async () => {
@@ -1680,7 +1684,6 @@ describe('requireRunnableChecker (#2493)', () => {
   it('lets an optional check skip', () => {
     expect(requireRunnableChecker(unavailable, constitution(['design_smells'])).result).toBe('SKIP');
   });
-
   it('leaves checks outside the constitution, ordinary skips and passes alone', () => {
     expect(requireRunnableChecker(unavailable, null).result).toBe('SKIP');
     expect(requireRunnableChecker({ ...unavailable, unavailable: undefined }, constitution()).result).toBe('SKIP');
@@ -1689,7 +1692,6 @@ describe('requireRunnableChecker (#2493)', () => {
     ).toBe('PASS');
   });
 });
-
 describe('isUnknownCheckerOutput (#2581)', () => {
   it('matches unknownCheckerOutput and nothing else', () => {
     expect(isUnknownCheckerOutput(unknownCheckerOutput('x'))).toBe(true);

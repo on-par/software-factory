@@ -423,6 +423,7 @@ async function checkPhaseImpl(opts: {
   let probe = await probeWorktree(worktree);
   const ctx: CheckerContext = {
     worktree,
+    sandbox,
     specPath,
     diffBase,
     parentBaseRef,

@@ -10,6 +10,7 @@ import { adrLabel, readAdrContext, renderAdrConstraints, type AdrContext } from 
 import { collectDesignDiff, MAX_DIFF_CHARS, MAX_SPEC_CHARS } from '../checkers/design-smells.js';
 import { readDesignArtifact, renderDesignGrounding } from '../design/index.js';
 import type { ModelRouter } from '../router/index.js';
+import type { SandboxPolicy } from '../sandbox/index.js';
 import { extractJsonObjects } from '../utils/json.js';
 import type { ReviewClass, ReviewFloorFiredRule, ReviewFloorRuleSet } from './floor.js';
 
@@ -47,6 +48,7 @@ export interface PrClassifierClaim {
 }
 
 export interface PrShadowInput {
+  sandbox?: SandboxPolicy;
   onLog?: (msg: string) => void;
   worktree: string;
   fallbackBaseRef?: string;
@@ -285,6 +287,7 @@ export async function classifyPrShadow(
     try {
       result = await input.router.run('classify_pr', prompt, {
         worktree: input.worktree,
+        sandbox: input.sandbox,
         timeoutSeconds: CLASSIFIER_TIMEOUT_SECONDS,
         ...(input.onLog ? { onLog: input.onLog } : {}),
         ...(input.modelPin ? { modelOverride: input.modelPin } : {}),

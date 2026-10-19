@@ -64,7 +64,7 @@ Run `factory doctor` after installing (Step 1) to check all of this.
 
 ### Use Codex
 
-On Linux, install `firejail` first (for example `sudo apt install firejail`), before you set up an agent. It is the OS sandbox the factory wraps agent runs in. Without it, Codex runs with `--sandbox danger-full-access`.
+On Linux, install `firejail` first (for example `sudo apt install firejail`), before you set up an agent. It is the OS sandbox the factory wraps agent runs in. Without it, Codex still uses its own `--sandbox workspace-write` containment.
 
 Install the Codex CLI and sign in once:
 
@@ -88,7 +88,7 @@ Install the Claude Code CLI, for example `npm install -g @anthropic-ai/claude-co
 To run unattended, the factory starts agent CLIs with their permission prompts turned off:
 
 - Claude Code runs as `claude -p ... --permission-mode bypassPermissions` (the same mode as `--dangerously-skip-permissions`).
-- Codex runs as `codex exec ... -c approval_policy=never`, with `--sandbox workspace-write` inside an OS sandbox, or `--sandbox danger-full-access` when no OS sandbox is available.
+- Codex runs as `codex exec ... -c approval_policy=never` with `--sandbox workspace-write` by default. Tasks listed in `sandbox.codexFullAccessTasks` use `--sandbox danger-full-access` and are logged.
 
 Each build runs in a separate git worktree (under `~/.factory/worktrees/<owner>/<repo>/` on a `factory/` branch; set `worktree.parent` to move it and `--branch-prefix` to change the prefix), never in your main checkout. Where available, agent runs are wrapped in an OS sandbox (`sandbox-exec` on macOS, `firejail` on Linux). `factory doctor` warns when no sandbox runtime is found. The agents still run as you, with your file permissions and your GitHub token, and builds run the target repo's tests and install its dependencies. Only point the factory at repos and issues you trust. Which hosts agents may reach, the registry hosts pre-allowed per ecosystem, and telemetry handling are in [docs/egress.md](docs/egress.md).
 

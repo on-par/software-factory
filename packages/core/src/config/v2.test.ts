@@ -68,6 +68,7 @@ describe('zero-config: { version: 2 }', () => {
     });
     expect(cfg.run.sandbox).toEqual({
       enabled: true,
+      codexFullAccessTasks: [],
       network: { allow: ['api.anthropic.com', 'github.com'] },
       resources: { cpuMs: 300_000, memMb: 4096 },
     });
@@ -231,7 +232,12 @@ describe('full v2 config', () => {
         tests_seconds: 1200,
         compile_seconds: 120,
       },
-      sandbox: { enabled: false, network: { allow: [] }, resources: { cpuMs: 100, memMb: 512 } },
+      sandbox: {
+        enabled: false,
+        codexFullAccessTasks: ['build_codex'],
+        network: { allow: [] },
+        resources: { cpuMs: 100, memMb: 512 },
+      },
       worktree: { parent: '../wt', gcTtlDays: 3, autoGcOnRun: false },
       environment: {
         ports: { enabled: false, range: [4000, 4100] },

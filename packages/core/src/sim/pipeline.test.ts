@@ -36,7 +36,7 @@ describe('runSimulation', () => {
 
   afterAll(() => sharedWorkspace.dispose());
 
-  it('clean batch of N ships', { timeout: 180_000 }, () => {
+  it('clean batch of N ships with the default sandbox config', { timeout: 180_000 }, () => {
     expect(cleanReport.totals).toEqual({ shipped: 3, parked: 0, escalated: 0 });
     for (const outcome of cleanReport.outcomes) {
       expect(outcome.state).toBe('shipped');

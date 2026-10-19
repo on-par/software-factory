@@ -31,6 +31,7 @@ import { DEFAULT_MAX_SLICES, type SlicePlan } from '../readiness/slice-plan.js';
 import { MAX_BUILD_CALL_EDGES, MAX_BUILD_SIGNATURES, MAX_BUILD_TARGET_TYPES } from '../readiness/size.js';
 import { scoreIssueReadiness } from '../readiness/index.js';
 import type { ModelRouter } from '../router/index.js';
+import type { SandboxPolicy } from '../sandbox/index.js';
 import { failoversFrom } from '../router/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
 import { archiveSpec, readSpec, writeSpec } from '../spec/index.js';
@@ -324,6 +325,7 @@ async function planPhaseImpl(opts: {
   specPath: string;
   constitution: Constitution | null;
   router: ModelRouter;
+  sandbox?: SandboxPolicy;
   octokit: Octokit;
   log: (
     type: EventKind,
@@ -439,6 +441,7 @@ async function planPhaseImpl(opts: {
             : buildReadinessEnrichmentRetryPrompt(input, previous);
         const enrichment = await router.run('readiness_enrich', prompt, {
           worktree,
+          sandbox: opts.sandbox,
           timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
           onLog: (msg) => log('router', msg),
         });
@@ -573,6 +576,7 @@ async function planPhaseImpl(opts: {
       body: issueBody,
       worktree,
       router,
+      sandbox: opts.sandbox,
       octokit,
       log: (type, msg) => log(type, msg),
       timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
@@ -673,6 +677,7 @@ async function planPhaseImpl(opts: {
 
       result = await router.run('plan', prompt, {
         worktree,
+        sandbox: opts.sandbox,
         timeoutSeconds: timeoutSeconds ?? 1800,
         modelOverride,
         modelFallbacks,
@@ -838,6 +843,7 @@ async function planPhaseImpl(opts: {
           body: issueBody,
           worktree,
           router,
+          sandbox: opts.sandbox,
           octokit,
           log: (type, msg) => log(type, msg),
           timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),

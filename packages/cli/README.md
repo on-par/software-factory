@@ -16,7 +16,7 @@ factory --version
 factory doctor
 ```
 
-Also requires `git`, one supported coding agent CLI (see [docs/agents.md](https://github.com/on-par/software-factory/blob/main/docs/agents.md)), signed in, and the GitHub CLI signed in with `gh auth login`. The factory reads `GITHUB_TOKEN`, then `GH_TOKEN`, and falls back to `gh auth token`. `factory doctor` checks all of this and prints a fix for anything missing. It also checks your git identity and the sandbox runtime, and it runs outside a repo. Global or repo-local `git config` for `user.name` and `user.email` both work. On Linux, install `firejail` first: without it, Codex runs with `--sandbox danger-full-access`.
+Also requires `git`, one supported coding agent CLI (see [docs/agents.md](https://github.com/on-par/software-factory/blob/main/docs/agents.md)), signed in, and the GitHub CLI signed in with `gh auth login`. The factory reads `GITHUB_TOKEN`, then `GH_TOKEN`, and falls back to `gh auth token`. `factory doctor` checks all of this and prints a fix for anything missing. It also checks your git identity and the sandbox runtime, and it runs outside a repo. Global or repo-local `git config` for `user.name` and `user.email` both work. On Linux, install `firejail` first; without it, Codex still runs with `--sandbox workspace-write`.
 
 `factory init` creates a local-only `.factory/` (git-excluded) with a `default-code` constitution. See the main README quick start.
 

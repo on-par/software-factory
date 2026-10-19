@@ -101,6 +101,7 @@ export interface ModelExecutorContext {
   registry: ModelRegistry;
   routesConfig: RoutesConfig;
   sandbox?: SandboxPolicy;
+  codexFullAccessTasks?: readonly string[];
   /** Extra child-env vars (e.g. the lane's PORT lease) merged over the parent env. */
   env?: Record<string, string>;
   /** When set, the harness's exec child is spawned detached (its own
@@ -225,7 +226,15 @@ export class CliModelExecutor implements ModelExecutor {
     prompt: string,
     ctx: Pick<
       ModelExecutorContext,
-      'worktree' | 'timeoutSeconds' | 'task' | 'registry' | 'sandbox' | 'env' | 'onPgid' | 'onUsage'
+      | 'worktree'
+      | 'timeoutSeconds'
+      | 'task'
+      | 'registry'
+      | 'sandbox'
+      | 'codexFullAccessTasks'
+      | 'env'
+      | 'onPgid'
+      | 'onUsage'
     >,
   ): Promise<string> {
     const { output, usage } = await harness.run({
@@ -236,6 +245,7 @@ export class CliModelExecutor implements ModelExecutor {
       task: ctx.task,
       registry: ctx.registry,
       sandbox: ctx.sandbox,
+      codexFullAccessTasks: ctx.codexFullAccessTasks,
       env: ctx.env,
       onPgid: ctx.onPgid,
     });
@@ -563,6 +573,7 @@ export class ModelRouter {
    *  harness is logged at most once per run (#2629). */
   private readonly missingHarnessNoticed = new Set<string>();
   private localAuthSink?: (agent: LocalAuthAgent) => void;
+  private codexFullAccessTasks: readonly string[] = [];
 
   constructor(
     modelsConfig: ModelsConfig,
@@ -579,6 +590,11 @@ export class ModelRouter {
 
   get registryRef() {
     return this.registry;
+  }
+
+  /** Resolved config allowlist, available even when the OS sandbox is disabled. */
+  setCodexFullAccessTasks(tasks: readonly string[] | undefined): void {
+    this.codexFullAccessTasks = [...(tasks ?? [])];
   }
 
   /** Skip models whose harness CLI is not on PATH (for example claude-cli models on a machine
@@ -819,6 +835,7 @@ export class ModelRouter {
             registry: this.registry,
             routesConfig: this.routesConfig,
             sandbox,
+            codexFullAccessTasks: this.codexFullAccessTasks,
             env,
             onPgid,
             onUsage: (u) => {
@@ -992,7 +1009,6 @@ export class ModelRouter {
         attempts,
       );
     }
-
     if (attempts.length === 0 && skippedForOllama && ollamaProbe && !ollamaProbe.reachable) {
       throw new ModelRouterError(
         `No reachable models for task '${task}': Ollama at ${ollamaProbe.endpoint} unreachable (${ollamaProbe.reason})`,
@@ -1000,7 +1016,6 @@ export class ModelRouter {
         attempts,
       );
     }
-
     const summary = attempts.map((a) => `${a.model}(${a.reason}${a.detail ? `: ${a.detail}` : ''})`).join(', ');
     throw new ModelRouterError(
       `All models failed for task '${task}': ${summary}`,
@@ -1009,21 +1024,17 @@ export class ModelRouter {
     );
   }
 }
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-
 function errStderr(err: unknown): string {
   const stderr = (err as { stderr?: unknown } | null)?.stderr;
   return typeof stderr === 'string' ? stderr : '';
 }
-
 function errExitCode(err: unknown): number {
   const exitCode = (err as { exitCode?: unknown } | null)?.exitCode;
   return typeof exitCode === 'number' ? exitCode : 1;
 }
-
 function parseLocalAgentAction(output: string): {
   commands: string[];
   done: boolean;
@@ -1033,7 +1044,6 @@ function parseLocalAgentAction(output: string): {
   if (output.trim().length === 0) {
     return { commands: [], done: false, final: '', malformedReason: 'empty_response' };
   }
-
   const jsonText = extractJsonObject(output);
   if (jsonText) {
     try {
@@ -1047,7 +1057,6 @@ function parseLocalAgentAction(output: string): {
       return { commands: [], done: false, final: output.trim(), malformedReason: 'invalid_json' };
     }
   }
-
   const fenced = [...output.matchAll(/```(?:bash|sh|zsh|shell)?\n([\s\S]*?)```/g)]
     .map((match) => match[1].trim())
     .filter(Boolean);
@@ -1055,7 +1064,6 @@ function parseLocalAgentAction(output: string): {
 
   return { commands: [], done: false, final: output.trim(), malformedReason: 'invalid_json' };
 }
-
 function normalizeLocalCommand(value: unknown): string[] {
   if (typeof value === 'string') {
     const command = value.trim();
@@ -1072,11 +1080,9 @@ function normalizeLocalCommand(value: unknown): string[] {
   if (args.length !== value.args.length) return [];
   return [`${command} ${args.map(shellEscape).join(' ')}`];
 }
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
-
 function buildLocalAgentRepairPrompt(opts: {
   retryPromptPath: string;
   malformedReason: 'empty_response' | 'invalid_json';
@@ -1092,13 +1098,11 @@ Return exactly one JSON object, no markdown, no prose:
 If the task is already complete, return:
 {"commands":[],"done":true,"final":"done"}`;
 }
-
 function summarizeRawResponse(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return '<empty>';
   return trimmed.replace(/\s+/g, ' ').slice(0, 500);
 }
-
 function extractJsonObject(output: string): string | undefined {
   const fenced = output.match(/```(?:json)?\n([\s\S]*?)```/);
   if (fenced) return fenced[1].trim();
@@ -1108,7 +1112,6 @@ function extractJsonObject(output: string): string | undefined {
   if (start >= 0 && end > start) return output.slice(start, end + 1);
   return undefined;
 }
-
 function parseGitStatusPaths(status: string): string[] {
   return status
     .split('\n')

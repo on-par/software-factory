@@ -994,10 +994,12 @@ describe('ModelRouter sandbox threading', () => {
       },
     };
     const router = new ModelRouter(models, routes, false, executor);
+    router.setCodexFullAccessTasks(['build_codex']);
 
     await router.run('plan', 'do it');
 
     expect(seenCtx[0].sandbox).toBeUndefined();
+    expect(seenCtx[0].codexFullAccessTasks).toEqual(['build_codex']);
   });
 
   it('invokes onSandboxEvent for a sandbox_violation and still fails over as before', async () => {

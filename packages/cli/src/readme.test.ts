@@ -246,8 +246,8 @@ function linuxFirejailProblems(block: string | undefined): string[] {
   if (block === undefined) return ['missing section'];
   const ok = block
     .split(/\n\s*\n/)
-    .some((p) => /Linux/.test(p) && /install `?firejail`?/i.test(p) && /danger-full-access/.test(p));
-  return ok ? [] : ['no Linux firejail install step with the danger-full-access reason'];
+    .some((p) => /Linux/.test(p) && /install `?firejail`?/i.test(p) && /workspace-write/.test(p));
+  return ok ? [] : ['no Linux firejail install step with the workspace-write fallback'];
 }
 
 const gitIdentityProblems = (text: string): string[] =>
@@ -292,9 +292,9 @@ describe('README update and setup guard self-test', () => {
       '',
       'Safety: the factory uses `firejail` on Linux and install its dependencies first.',
       '',
-      '- Codex runs with `--sandbox danger-full-access` when no OS sandbox is available.',
+      '- Codex runs with `--sandbox workspace-write` when no OS sandbox is available.',
     ].join('\n');
-    expect(linuxFirejailProblems(old)).toEqual(['no Linux firejail install step with the danger-full-access reason']);
+    expect(linuxFirejailProblems(old)).toEqual(['no Linux firejail install step with the workspace-write fallback']);
   });
 
   it('reports missing sections', () => {

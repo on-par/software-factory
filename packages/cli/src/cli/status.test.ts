@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import * as FactoryCore from '@on-par/factory-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { errored, h, installShipHarness, logged, paths, runMainWith } from './test-support/ship-harness.js';
+import { coreFakes, errored, h, installShipHarness, logged, paths, runMainWith } from './test-support/ship-harness.js';
 
 installShipHarness();
 
@@ -279,6 +279,9 @@ describe('cli', () => {
       );
       writeFileSync(paths().stop, '');
       await runMain('status');
+      expect(vi.mocked(coreFakes.ModelRouter).mock.results.at(-1)?.value.setCodexFullAccessTasks).toHaveBeenCalledWith(
+        [],
+      );
       const out = logged();
       expect(out).toContain('on-par/software-factory');
       expect(out).toContain('Product: alpha');

@@ -48,6 +48,8 @@ export interface HarnessRequest {
   registry: ModelRegistry;
   /** When set, the harness wraps its CLI invocation in this containment policy. */
   sandbox?: SandboxPolicy;
+  /** Configured Codex task names allowed danger-full-access, independent of OS sandbox policy. */
+  codexFullAccessTasks?: readonly string[];
   /** Extra child-env vars (e.g. the lane's PORT lease) merged over the parent env. */
   env?: Record<string, string>;
   /** When set, the harness's exec child is spawned detached (its own
