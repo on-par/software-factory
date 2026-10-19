@@ -69,7 +69,7 @@ describe('evidence plan runner', () => {
       claim: 'claim',
       kind: 'command',
       status: 'FAIL',
-      reason: 'exited with code 1',
+      reason: 'exited with code 1; passWhen not machine-checked',
       outputTail: long.slice(-2000),
     });
   });
@@ -188,9 +188,9 @@ describe('evidence plan runner', () => {
       },
     });
     expect(results.map((r) => r.reason)).toEqual([
-      'timed out after 300s',
-      'terminated',
-      'execution error: spawn broke',
+      'timed out after 300s; passWhen not machine-checked',
+      'terminated; passWhen not machine-checked',
+      'execution error: spawn broke; passWhen not machine-checked',
     ]);
     expect(results.map((r) => r.claim)).toEqual(['claim', 'claim', 'claim']);
   });

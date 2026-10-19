@@ -123,20 +123,14 @@ describe('buildPlanPrompt', () => {
 
   it('describes all four evidence kinds with their required fields (#2259)', () => {
     const prompt = riskyPrompt();
-    for (const s of [
-      'kind: fail-to-pass-test',
-      'kind: command',
-      'kind: screenshot',
-      'kind: none',
-      'claim:',
-      'test:',
-      'command:',
-      'passWhen:',
-      'route:',
-      'reason:',
-    ]) {
+    for (const s of 'kind: fail-to-pass-test|kind: command|kind: screenshot|kind: none|claim:|test:|command:|passWhen:|exitCode:|stdoutContains:|route:|reason:'.split(
+      '|',
+    )) {
       expect(prompt).toContain(s);
     }
+    expect(prompt).toContain(
+      'passWhen alone is not machine-checked. Add optional expect when output matters: exitCode defaults to 0; stdoutContains requires every case-sensitive literal substring in stdout.',
+    );
   });
 
   it('prefers fail-to-pass-test, limits screenshot to UI routes, and prefers none over weak proof (#2259)', () => {

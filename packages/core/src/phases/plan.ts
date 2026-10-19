@@ -166,7 +166,7 @@ ${constitutionCtx ? '5. The constitution above defines the standards for this pr
    Each entry has a kind, and each kind has required fields:
    - fail-to-pass-test: claim, test — a test (file path plus test name) that fails before
      the change and passes after it.
-   - command: claim, command, passWhen — an exact command and what a pass looks like.
+   - command: claim, command, passWhen — exact command and human explanation; passWhen alone is not machine-checked. Add optional expect when output matters: exitCode defaults to 0; stdoutContains requires every case-sensitive literal substring in stdout.
    - screenshot: claim, route — the concrete app route or page to capture.
    - none: claim, reason — why no evidence can honestly prove this criterion.
    Choosing a kind:
@@ -216,6 +216,9 @@ design:
       claim: <acceptance criterion>
       command: <exact command>
       passWhen: <what a pass looks like>
+      expect:
+        exitCode: 0
+        stdoutContains: [<literal output required when relevant>]
     - kind: screenshot
       claim: <user-visible acceptance criterion>
       route: <concrete route, e.g. /settings>
