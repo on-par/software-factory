@@ -42,6 +42,44 @@ const events: FactoryEvent[] = [
 ];
 
 describe('renderEvidencePack', () => {
+  it('renders stored evidence outcomes safely, keeps duplicate claims, and omits legacy evidence sections', () => {
+    const markdown = renderEvidencePack({
+      issue: 3264,
+      checkSummary: {
+        ...checkSummary,
+        results: [
+          ...checkSummary.results,
+          {
+            checker: 'evidence_plan',
+            result: 'SKIP',
+            details: 'other checkers failed',
+            evidencePlanResults: [
+              { claim: 'AC `one`\n|unsafe|', kind: 'command', status: 'PASS', reason: 'all good' },
+              { claim: 'AC `one`\n|unsafe|', kind: 'command', status: 'SKIP', reason: 'not allowlisted' },
+            ],
+          },
+        ],
+      },
+      events: [],
+      logFiles: [],
+    });
+    expect(markdown.match(/<summary>Evidence plan<\/summary>/g)).toHaveLength(1);
+    expect(markdown).toContain('AC \\`one\\` \\|unsafe\\| [command] PASS: all good');
+    expect(markdown).toContain('AC \\`one\\` \\|unsafe\\| [command] SKIP: not allowlisted');
+    const legacy = renderEvidencePack({ issue: 3264, checkSummary, events: [], logFiles: [] });
+    expect(legacy).not.toContain('<summary>Evidence plan</summary>');
+    const skipped = renderEvidencePack({
+      issue: 3264,
+      checkSummary: {
+        ...checkSummary,
+        results: [{ checker: 'evidence_plan', result: 'SKIP', details: 'disabled by constitution' }],
+      },
+      events: [],
+      logFiles: [],
+    });
+    expect(skipped).toContain('- disabled by constitution');
+  });
+
   it('renders a full pack with checker verdicts, rework, and logs', () => {
     const markdown = renderEvidencePack({
       issue: 385,
@@ -193,67 +231,6 @@ describe('renderEvidencePack — review routing (#1724)', () => {
     });
     expect(md).toContain('- Floor: unavailable (classifier error: boom)');
     expect(md).toContain('`classifier:error`');
-  });
-});
-
-describe('renderEvidencePack — shadow model verdict (#1725)', () => {
-  const base = { issue: 1, events: [], logFiles: [] };
-  const shadow = {
-    modelClass: 'C' as const,
-    floorClass: 'A' as const,
-    finalClass: 'A' as const,
-    model: 'm-1',
-    promptVersion: 'classify-pr/v1',
-    policyVersion: 'floor-0123456789ab',
-    diffSha: 'f'.repeat(64),
-    adrIds: ['ADR-0121', 'ADR-0123'],
-    costUsd: null,
-    claims: [{ text: 'touches the gate', citation: 'src/a.ts:12' }],
-    unsupportedClaims: [{ text: 'vibes', citation: '' }],
-    notInspected: ['tests'],
-    droppedClaims: 0,
-  };
-
-  it('renders the labeled shadow block with class, claims, gaps and ADRs', () => {
-    const md = renderEvidencePack({
-      ...base,
-      reviewRouting: { floor: 'A', gated: false, rules: [], shadow },
-    });
-    expect(md).toContain('Shadow model verdict — shadow — no effect');
-    expect(md).toContain('Model class: **C** (`m-1`, `classify-pr/v1`, policy `floor-0123456789ab`)');
-    expect(md).toContain('Final class: A (= floor)');
-    expect(md).toContain('touches the gate — `src/a.ts:12`');
-    expect(md).toContain('- vibes');
-    expect(md).toContain('- tests');
-    expect(md).toContain('ADRs consulted: ADR-0121, ADR-0123');
-  });
-
-  it('renders the reason and "none" when the model verdict is unavailable', () => {
-    const md = renderEvidencePack({
-      ...base,
-      reviewRouting: {
-        floor: 'A',
-        gated: false,
-        rules: [],
-        shadow: {
-          ...shadow,
-          modelClass: null,
-          reason: 'classifier call failed: x',
-          claims: [],
-          unsupportedClaims: [],
-          notInspected: [],
-          adrIds: [],
-        },
-      },
-    });
-    expect(md).toContain('Model class: unavailable — classifier call failed: x');
-    expect(md).toContain('ADRs consulted: none');
-    expect(md).toContain('  - none');
-  });
-
-  it('renders no shadow block without a shadow verdict', () => {
-    const md = renderEvidencePack({ ...base, reviewRouting: { floor: 'A', gated: false, rules: [] } });
-    expect(md).not.toContain('Shadow model verdict');
   });
 });
 

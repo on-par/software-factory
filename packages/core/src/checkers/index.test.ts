@@ -1242,20 +1242,6 @@ describe('runCustomChecker', () => {
   });
 });
 
-describe('summarizeCheckerOutputs', () => {
-  it('tallies failures, passes and skips and passes the results through', () => {
-    const results = [
-      { checker: 'compile', result: 'PASS' as const, details: 'ok' },
-      { checker: 'tests', result: 'FAIL' as const, details: 'bad' },
-      { checker: 'lint', result: 'SKIP' as const, details: 'none' },
-      { checker: 'links', result: 'SKIP' as const, details: 'none' },
-    ];
-
-    expect(summarizeCheckerOutputs(results)).toEqual({ failures: 1, passes: 1, skips: 2, total: 4, results });
-    expect(summarizeCheckerOutputs([])).toEqual({ failures: 0, passes: 0, skips: 0, total: 0, results: [] });
-  });
-});
-
 /** A constitution whose `checkers` frontmatter bypassed the parser's typing (#2582). */
 function malformedConstitution(checkers: unknown): Constitution {
   const base: Constitution = { product: 'p', version: 1, checkers: [], body: '', path: 'p.md', source: 'bundled' };

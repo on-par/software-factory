@@ -2,6 +2,7 @@
 
 import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
+import type { EvidencePlanResult } from '../checkers/evidence-plan.js';
 
 // ---------- Models ----------
 
@@ -78,6 +79,7 @@ export interface Constitution {
   checkers: string[];
   /** When true, a worktree with no verify/test command FAILs the tests checker instead of SKIPping (frontmatter: requireTests) */
   requireTests?: boolean;
+  disableEvidencePlan?: boolean;
   /** Constitution checkers allowed to skip when no model can run them (frontmatter: optionalCheckers). */
   optionalCheckers?: string[];
   body: string;
@@ -113,6 +115,7 @@ export interface CheckerOutput {
   unavailable?: boolean;
   /** True when the checker's command ended by timeout (#3186): inconclusive, never cached. */
   timedOut?: boolean;
+  evidencePlanResults?: EvidencePlanResult[];
 }
 
 export interface CheckSummary {
