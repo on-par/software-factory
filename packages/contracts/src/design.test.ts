@@ -250,6 +250,31 @@ describe('evidencePlan', () => {
     expect(back.evidencePlan).toEqual(allKinds);
   });
 
+  it('preserves command expect through design serde and accepts legacy omission', () => {
+    const command = { ...allKinds[1], expect: { exitCode: 2, stdoutContains: ['READY', 'done'] } };
+    const parsed = DesignArtifactSchema.parse({ ...validDesign, evidencePlan: [command] });
+    expect(parsed.evidencePlan).toEqual([command]);
+    expect(
+      deserialize(DesignArtifactSchema, serialize(DesignArtifactSchema, { ...validDesign, evidencePlan: [command] }))
+        .evidencePlan,
+    ).toEqual([command]);
+    expect(DesignArtifactSchema.parse({ ...validDesign, evidencePlan: [allKinds[1]] }).evidencePlan).toEqual([
+      allKinds[1],
+    ]);
+    expect(
+      DesignArtifactSchema.parse({ ...validDesign, evidencePlan: [{ ...allKinds[1], expect: {} }] }).evidencePlan,
+    ).toEqual([{ ...allKinds[1], expect: {} }]);
+  });
+
+  it.each([
+    [{ exitCode: '0' }, 'evidencePlan.0.expect.exitCode'],
+    [{ stdoutContains: 'READY' }, 'evidencePlan.0.expect.stdoutContains'],
+    [{ stdoutContains: ['READY', 1] }, 'evidencePlan.0.expect.stdoutContains.1'],
+    [null, 'evidencePlan.0.expect'],
+  ])('rejects malformed command expect %j at its nested path', (expectation, path) => {
+    expect(paths([{ ...allKinds[1], expect: expectation }])).toContain(path);
+  });
+
   it('rejects a screenshot entry with no route', () => {
     expect(paths([{ kind: 'screenshot', claim: 'x' }])).toContain('evidencePlan.0.route');
   });

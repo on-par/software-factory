@@ -14,6 +14,7 @@ export interface EvidencePlanResult {
   status: 'PASS' | 'FAIL' | 'SKIP';
   reason: string;
   outputTail?: string;
+  passWhenNotMachineChecked?: boolean;
 }
 
 export type EvidenceRunnerContext = Pick<
@@ -36,7 +37,32 @@ function result(
   reason: string,
   outputTail?: string,
 ): EvidencePlanResult {
-  return { claim: entry.claim, kind: entry.kind, status, reason, ...(outputTail ? { outputTail } : {}) };
+  const proseOnly = entry.kind === 'command' && !entry.expect && status !== 'SKIP';
+  const finalReason = proseOnly ? `${reason}; passWhen not machine-checked` : reason;
+  return {
+    claim: entry.claim,
+    kind: entry.kind,
+    status,
+    reason: finalReason,
+    ...(outputTail ? { outputTail } : {}),
+    ...(proseOnly ? { passWhenNotMachineChecked: true } : {}),
+  };
+}
+
+function boundedReason(reason: string): string {
+  if (reason.length <= OUTPUT_LIMIT) return reason;
+  const marker = '\n… diagnostic truncated';
+  return `${reason.slice(0, OUTPUT_LIMIT - marker.length)}${marker}`;
+}
+
+function expectedParts(parts: readonly string[]): string {
+  const rendered = JSON.stringify(parts);
+  return rendered.length <= 500 ? rendered : `${rendered.slice(0, 480)}…[truncated]`;
+}
+
+function actualOutput(output: string): string {
+  if (!output) return '<empty>';
+  return output.length <= 600 ? output : `…[truncated]${output.slice(-600)}`;
 }
 
 function resolveArgv(text: string, allowlist: EvidenceAllowlist): string[] | null {
@@ -91,6 +117,21 @@ async function execute(
     const outputTail = tail(outcome.stdout, outcome.stderr);
     if (outcome.timedOut) return result(entry, 'FAIL', `timed out after ${timeoutSeconds}s`, outputTail);
     if (outcome.killed) return result(entry, 'FAIL', 'terminated', outputTail);
+    if (entry.kind === 'command' && entry.expect) {
+      const expectedExit = entry.expect.exitCode ?? 0;
+      const required = entry.expect.stdoutContains ?? [];
+      const missing = required.filter((part) => !outcome.stdout.includes(part));
+      if (outcome.exitCode === expectedExit && missing.length === 0) {
+        return result(
+          entry,
+          'PASS',
+          `expected exit ${expectedExit}; matched stdout requirements ${expectedParts(required)}`,
+          outputTail,
+        );
+      }
+      const summary = `claim ${entry.claim}: expected exit ${expectedExit}, actual exit ${outcome.exitCode}; expected stdout substrings ${expectedParts(required)}; missing stdout substrings ${expectedParts(missing)}; actual stdout: ${actualOutput(outcome.stdout)}; actual stderr: ${actualOutput(outcome.stderr)}`;
+      return result(entry, 'FAIL', boundedReason(summary), outputTail);
+    }
     if (outcome.exitCode === 0) return result(entry, 'PASS', 'exited with code 0', outputTail);
     return result(entry, 'FAIL', `exited with code ${outcome.exitCode}`, outputTail);
   } catch (error) {

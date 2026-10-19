@@ -87,6 +87,12 @@ export const CommandEvidenceSchema = z.object({
   claim: z.string().min(1),
   command: z.string().min(1),
   passWhen: z.string().min(1),
+  expect: z
+    .object({
+      exitCode: z.number().optional(),
+      stdoutContains: z.array(z.string()).optional(),
+    })
+    .optional(),
 });
 
 export const ScreenshotEvidenceSchema = z.object({
