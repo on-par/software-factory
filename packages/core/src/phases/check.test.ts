@@ -1912,6 +1912,14 @@ describe('checkPhase appPort', () => {
 });
 
 describe('checkPhase frozen evidence plan', () => {
+  const passingCheckers: CheckSummary = {
+    failures: 0,
+    passes: 1,
+    skips: 0,
+    total: 1,
+    results: [{ checker: 'compile', result: 'PASS', details: 'ok' }],
+  };
+
   it('evidence-plan step sends a failing planned command to rework', async () => {
     const worktree = await makeWorktreeWithFiles(3264, {
       'package.json': JSON.stringify({ scripts: { test: 'true' } }),
@@ -1946,13 +1954,7 @@ describe('checkPhase frozen evidence plan', () => {
       router,
       constitution: null,
       log: () => {},
-      runCheckers: async () => ({
-        failures: 0,
-        passes: 1,
-        skips: 0,
-        total: 1,
-        results: [{ checker: 'compile', result: 'PASS', details: 'ok' }],
-      }),
+      runCheckers: async () => passingCheckers,
       runEvidence: async (entries) => {
         evidenceCalls++;
         const entry = entries![0]!;
@@ -1984,13 +1986,7 @@ describe('checkPhase frozen evidence plan', () => {
       constitution: { product: 'restricted', version: 1, checkers: ['compile'], body: '', path: '', source: 'bundled' },
       log: () => {},
       autoRework: false,
-      runCheckers: async () => ({
-        failures: 0,
-        passes: 1,
-        skips: 0,
-        total: 1,
-        results: [{ checker: 'compile', result: 'PASS', details: 'ok' }],
-      }),
+      runCheckers: async () => passingCheckers,
       runEvidence: async (entries) =>
         entries!.map((entry) => ({
           claim: entry.claim,
@@ -2000,12 +1996,14 @@ describe('checkPhase frozen evidence plan', () => {
         })),
     });
     const markdown = renderEvidencePack({ issue: 3265, checkSummary: check.summary, events: [], logFiles: [] });
+    expect(check.passed).toBe(true);
+    expect(check.summary.results.find((result) => result.checker === 'evidence_plan')?.result).toBe('PASS');
     expect(markdown).toContain('Evidence plan');
     expect(markdown).toContain('AC-3265 passed claim [command] PASS: proof passed');
     expect(markdown).toContain('AC-3265 second claim [none] PASS: proof passed');
   });
 
-  it('evidence-plan step skips a red ordinary checker without invoking the runner', async () => {
+  it('evidence-plan step sends a failing planned command to rework: red checker never invokes the runner', async () => {
     const { worktree, specPath } = await makeEvidencePlanWorktree(3267);
     let calls = 0;
     const check = await checkPhase({
@@ -2035,7 +2033,7 @@ describe('checkPhase frozen evidence plan', () => {
     });
   });
 
-  it('evidence-plan step skips absent and empty plans without invoking the runner', async () => {
+  it('evidence-plan step skips an absent plan without invoking the runner', async () => {
     const { worktree, specPath } = await makePassingWorktree();
     let calls = 0;
     const runEvidence = async () => {
@@ -2059,8 +2057,42 @@ describe('checkPhase frozen evidence plan', () => {
     );
   });
 
+  it('evidence-plan step skips a constitution opt-out without invoking the runner', async () => {
+    const { worktree, specPath } = await makeEvidencePlanWorktree(3271);
+    const runEvidence = vi.fn(async () => []);
+    const check = await checkPhase({
+      issue: 3271,
+      worktree,
+      specPath,
+      router: {} as ModelRouter,
+      constitution: {
+        product: 'restricted',
+        version: 1,
+        checkers: ['compile'],
+        body: '',
+        path: '',
+        source: 'bundled',
+        disableEvidencePlan: true,
+      },
+      log: () => {},
+      autoRework: false,
+      runCheckers: async () => passingCheckers,
+      runEvidence,
+    });
+    expect(runEvidence).not.toHaveBeenCalled();
+    expect(check.summary.results.find((result) => result.checker === 'evidence_plan')).toMatchObject({
+      result: 'SKIP',
+      details: 'disabled by constitution',
+    });
+  });
+
   it('evidence-plan step records only-SKIP outcomes without failing CHECK', async () => {
-    const { worktree, specPath } = await makeEvidencePlanWorktree(3268);
+    const { worktree, specPath } = await makeEvidencePlanWorktree(3268, [
+      { kind: 'command', claim: 'AC-3268 command claim', command: 'test', passWhen: 'passes' },
+      { kind: 'screenshot', claim: 'AC-3268 screenshot claim', route: '/settings' },
+      { kind: 'none', claim: 'AC-3268 manual claim', reason: 'manual review' },
+    ]);
+    const reasons = ['not allowlisted', 'screenshot: route /settings needs the app (#3253)', 'none: manual review'];
     const check = await checkPhase({
       issue: 3268,
       worktree,
@@ -2077,17 +2109,27 @@ describe('checkPhase frozen evidence plan', () => {
         results: [{ checker: 'compile', result: 'PASS', details: 'ok' }],
       }),
       runEvidence: async (entries) =>
-        entries!.map((entry) => ({
+        entries!.map((entry, index) => ({
           claim: entry.claim,
           kind: entry.kind,
           status: 'SKIP' as const,
-          reason: 'not allowlisted',
+          reason: reasons[index]!,
         })),
     });
     const markdown = renderEvidencePack({ issue: 3268, checkSummary: check.summary, events: [], logFiles: [] });
     expect(check.passed).toBe(true);
-    expect(markdown).toContain('AC-3268 passed claim [command] SKIP: not allowlisted');
-    expect(markdown).toContain('AC-3268 second claim [none] SKIP: not allowlisted');
+    expect(check.summary.failures).toBe(0);
+    const evidence = check.summary.results.find((result) => result.checker === 'evidence_plan');
+    expect(evidence?.result).toBe('SKIP');
+    for (const [index, claim, kind] of [
+      [0, 'AC-3268 command claim', 'command'],
+      [1, 'AC-3268 screenshot claim', 'screenshot'],
+      [2, 'AC-3268 manual claim', 'none'],
+    ] as const) {
+      const line = `${claim} [${kind}] SKIP: ${reasons[index]}`;
+      expect(evidence?.details).toContain(line);
+      expect(markdown).toContain(line);
+    }
   });
 
   it('does not baseline or exempt an evidence failure when diffBase is set', async () => {
@@ -2462,7 +2504,10 @@ async function makePassingWorktree(): Promise<{ worktree: string; specPath: stri
   return { worktree, specPath };
 }
 
-async function makeEvidencePlanWorktree(issue: number): Promise<{ worktree: string; specPath: string }> {
+async function makeEvidencePlanWorktree(
+  issue: number,
+  evidencePlan?: unknown[],
+): Promise<{ worktree: string; specPath: string }> {
   const worktree = await mkdtemp(join(tmpdir(), `check-evidence-${issue}-`));
   tempDirs.add(worktree);
   await writeFixture(worktree, 'package.json', JSON.stringify({ scripts: { test: 'true' } }));
@@ -2478,7 +2523,7 @@ async function makeEvidencePlanWorktree(issue: number): Promise<{ worktree: stri
     verificationPlan: [{ command: 'npm test', passWhen: 'passes' }],
     riskBlastRadius: 'CHECK',
     openQuestions: [],
-    evidencePlan: [
+    evidencePlan: evidencePlan ?? [
       { kind: 'command', claim: `AC-${issue} passed claim`, command: 'test', passWhen: 'passes' },
       { kind: 'none', claim: `AC-${issue} second claim`, reason: 'documentation only' },
     ],
