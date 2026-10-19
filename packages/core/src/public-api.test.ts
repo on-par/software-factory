@@ -551,6 +551,8 @@ const INTERNAL_API_KEYS = [
   'createOctokitCollaboratorPermissionClient',
   'CONFIG_EXAMPLE_OMITTED_KEYS',
   'renderConfigExample',
+  'resolveEvidenceAllowlist',
+  'runEvidencePlan',
   // Design artifact (#422)
   'DesignArtifactSchema',
   'parseDesignArtifact',
