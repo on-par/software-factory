@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "repo": {
+      "type": "string"
+    },
+    "product": {
+      "type": ["string", "null"]
+    },
+    "stop": {
+      "type": "boolean"
+    },
+    "stopInfo": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string",
+              "enum": ["manual", "usage-watchdog", "self-update", "unknown"]
+            },
+            "setAt": {
+              "type": ["string", "null"]
+            }
+          },
+          "required": ["source", "setAt"],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "breaker": {
+      "type": "object",
+      "properties": {
+        "open": {
+          "type": "boolean"
+        },
+        "providers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "openedAt": {
+                "type": "string"
+              },
+              "remainingSec": {
+                "type": "number"
+              }
+            },
+            "required": ["provider", "reason", "openedAt", "remainingSec"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["open", "providers"],
+      "additionalProperties": false
+    },
+    "active": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "lane": {
+            "type": "string"
+          },
+          "issue": {
+            "type": "number"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "ageSec": {
+            "type": "number"
+          }
+        },
+        "required": ["lane", "issue", "phase", "ageSec"],
+        "additionalProperties": false
+      }
+    },
+    "update": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["manual", "stable", "prerelease"]
+            },
+            "channel": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": ["latest", "next"]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "installKind": {
+              "type": "string",
+              "enum": ["npm-global", "source", "unknown"]
+            },
+            "current": {
+              "type": "string"
+            },
+            "available": {
+              "type": ["string", "null"]
+            },
+            "lastCheckAt": {
+              "type": ["string", "null"]
+            },
+            "lastResult": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "at": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "outcome": {
+                      "type": "string",
+                      "enum": ["updated", "rolled-back", "failed", "skipped"]
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["at", "version", "outcome"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "draining": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "since": {
+                      "type": "string"
+                    },
+                    "target": {
+                      "type": "string"
+                    },
+                    "stopFiles": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["since", "target"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "mode",
+            "channel",
+            "installKind",
+            "current",
+            "available",
+            "lastCheckAt",
+            "lastResult",
+            "draining"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": ["schemaVersion", "repo", "product", "stop", "stopInfo", "breaker", "active", "update"],
+  "additionalProperties": false
+}

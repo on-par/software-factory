@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "issue": {
+            "type": "number"
+          },
+          "lane": {
+            "type": ["string", "null"]
+          },
+          "repo": {
+            "type": ["string", "null"]
+          },
+          "status": {
+            "type": ["string", "null"]
+          },
+          "phase": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["plan", "build", "check", "ship"]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "branch": {
+            "type": ["string", "null"]
+          },
+          "prNumber": {
+            "type": ["number", "null"]
+          },
+          "model": {
+            "type": ["string", "null"]
+          },
+          "attempts": {
+            "type": ["number", "null"]
+          },
+          "startedAt": {
+            "type": ["string", "null"]
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "issue",
+          "lane",
+          "repo",
+          "status",
+          "phase",
+          "branch",
+          "prNumber",
+          "model",
+          "attempts",
+          "startedAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["schemaVersion", "runs"],
+  "additionalProperties": false
+}

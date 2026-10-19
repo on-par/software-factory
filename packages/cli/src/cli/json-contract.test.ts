@@ -26,6 +26,9 @@ import {
   type StatusJson,
 } from './json-contract.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import Ajv2020 from 'ajv/dist/2020.js';
+import { format, resolveConfig } from 'prettier';
+import { z } from 'zod';
 
 const fixedNow = Date.parse('2026-01-01T00:10:00.000Z');
 const tempDirs = createTempDirs();
@@ -61,6 +64,16 @@ const statusGolden = JSON.parse(
 ) as unknown;
 const fixture = (name: string): unknown =>
   JSON.parse(readFileSync(new URL(`./__fixtures__/json/${name}`, import.meta.url), 'utf-8')) as unknown;
+const generatedContracts = [
+  ['status.schema.json', 'status.json', statusJsonSchema],
+  ['logs-line.schema.json', 'logs-line.json', logsLineJsonSchema],
+  ['daemon-status.schema.json', 'daemon-status.json', daemonStatusJsonSchema],
+  ['queue-list.schema.json', 'queue-list.json', queueListJsonSchema],
+  ['usage.schema.json', 'usage.json', usageJsonSchema],
+  ['cost.schema.json', 'cost.json', costJsonSchema],
+  ['runs.schema.json', 'runs.json', runsJsonSchema],
+  ['runs-diffstat.schema.json', 'runs-diffstat.json', runDiffstatJsonSchema],
+] as const;
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -69,6 +82,45 @@ afterEach(async () => {
 });
 
 describe('JSON wire contracts', () => {
+  it('validates every golden fixture against its committed generated schema', async () => {
+    const ajv = new Ajv2020();
+    const formatOptions = (await resolveConfig(new URL(import.meta.url).pathname)) ?? {};
+    for (const [schemaFilename, fixtureFilename, zodSchema] of generatedContracts) {
+      const schemaText = readFileSync(new URL(`../../schemas/${schemaFilename}`, import.meta.url), 'utf-8');
+      expect(schemaText).toBe(
+        await format(JSON.stringify(z.toJSONSchema(zodSchema), null, 2), { ...formatOptions, parser: 'json' }),
+      );
+      const validator = ajv.compile(JSON.parse(schemaText) as object);
+      const valid = validator(fixture(fixtureFilename));
+      expect(valid, `${schemaFilename} errors: ${JSON.stringify(validator.errors)}`).toBe(true);
+    }
+  });
+
+  it('generated status schema requires the breaker object', () => {
+    const schema = JSON.parse(readFileSync(new URL('../../schemas/status.schema.json', import.meta.url), 'utf-8')) as {
+      properties: { breaker: { type: string; required: string[] }; schemaVersion: { const: number } };
+    };
+    expect(schema.properties.breaker.type).toBe('object');
+    expect(schema.properties.breaker.required).toEqual(expect.arrayContaining(['open', 'providers']));
+    expect(schema.properties.schemaVersion.const).toBe(1);
+    const validator = new Ajv2020().compile(schema);
+    const status = fixture('status.json') as Record<string, unknown>;
+    expect(validator({ ...status, breaker: 'openai' })).toBe(false);
+    const breaker = status.breaker as Record<string, unknown>;
+    expect(validator({ ...status, breaker: { providers: breaker.providers } })).toBe(false);
+    expect(validator({ ...status, breaker: { open: breaker.open } })).toBe(false);
+  });
+
+  it('keeps logs as an unversioned line with arbitrary object payloads', () => {
+    const schema = JSON.parse(
+      readFileSync(new URL('../../schemas/logs-line.schema.json', import.meta.url), 'utf-8'),
+    ) as object;
+    const validator = new Ajv2020().compile(schema);
+    const logsFixture = fixture('logs-line.json') as Record<string, unknown>;
+    expect(logsFixture).not.toHaveProperty('schemaVersion');
+    expect(validator({ ...logsFixture, rework: { nested: { custom: ['value'] } } })).toBe(true);
+  });
+
   it('matches the status golden and validates it', () => {
     const output = buildStatusJson(statusInput);
     expect(output).toEqual(statusGolden);

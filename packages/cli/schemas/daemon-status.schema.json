@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "running": {
+      "type": "boolean"
+    },
+    "pid": {
+      "type": ["number", "null"]
+    },
+    "uptimeSec": {
+      "type": ["number", "null"]
+    },
+    "plistInstalled": {
+      "type": "boolean"
+    },
+    "repos": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "checkoutPath": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": ["active", "paused", "draining", "detached"]
+          }
+        },
+        "required": ["slug", "checkoutPath", "state"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["schemaVersion", "running", "pid", "uptimeSec", "plistInstalled", "repos"],
+  "additionalProperties": false
+}
