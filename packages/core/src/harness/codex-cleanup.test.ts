@@ -104,6 +104,22 @@ describe('CodexCliHarness temp-file cleanup', () => {
     expectUnlinkedNotZeroed(rec);
   });
 
+  it('unlinks both temp files when writing the prompt fails', async () => {
+    const rec = recordingFs();
+    const harness = new CodexCliHarness(writingExecFn(rec.files), {
+      ...rec.fs,
+      writeFile: async (path, data) => {
+        await rec.fs.writeFile?.(path, data);
+        if (data === 'prompt') throw new Error('disk full');
+      },
+    });
+
+    await expect(harness.run(makeRequest())).rejects.toThrow('disk full');
+
+    expectUnlinkedNotZeroed(rec);
+    expect(rec.files.size).toBe(0);
+  });
+
   it('creates the temp files through the injected writeFile', async () => {
     const rec = recordingFs();
     const harness = new CodexCliHarness(writingExecFn(rec.files), rec.fs);

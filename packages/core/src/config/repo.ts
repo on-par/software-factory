@@ -38,6 +38,7 @@ import { assertApprovedClaudeEndpoint, assertNoDirectDeepSeek } from './intermed
 
 // ---------- Schema ----------
 
+const EVIDENCE_COMMANDS_DESCRIPTION = 'Named evidence commands. Shell-free argv; config overrides scripts.';
 export const RepoFactoryConfigV1Schema = z
   .object({
     $schema: z.string().optional(),
@@ -72,10 +73,8 @@ export const RepoFactoryConfigV1Schema = z
       })
       .strict()
       .optional(),
-    /** Repo pins the build route for every issue (e.g. "opencode", or "command" for a declared harness). The plan
-     *  phase still writes the spec, but the pinned route wins over the model's
-     *  route choice so deepseek workers are actually used when pinned. */
     route: z.enum(['codex', 'claude', 'opencode', 'command']).optional(),
+    commands: z.record(z.string(), z.string()).optional().describe(EVIDENCE_COMMANDS_DESCRIPTION),
   })
   .strict();
 
@@ -233,6 +232,7 @@ export const RepoFactoryConfigV2Schema = z
         'Build route for every issue: "codex", "claude", "opencode", or "command" (a declared agentic harness under `harnesses`). ' +
           "Unset: derived from the build pin's harness, else PLAN decides per issue.",
       ),
+    commands: z.record(z.string(), z.string()).optional().describe(EVIDENCE_COMMANDS_DESCRIPTION),
   })
   .strict();
 
@@ -261,7 +261,6 @@ export function resolveLaneBreakerThreshold(repo: RepoFactoryConfig | null): num
 }
 
 // ---------- Loading ----------
-
 /** The same file carries FactoryConfigSchema's runtime-policy namespace (see
  *  FACTORY_RUNTIME_CONFIG_KEYS). Drop those keys before the strict parse so they are not
  *  reported as typos, while genuine typos in the model namespace still fail loudly. */
@@ -293,6 +292,7 @@ export function adaptV1ToV2(v1: RepoFactoryConfigV1Input): RepoFactoryConfig {
     ...(v1.providers !== undefined ? { providers: v1.providers } : {}),
     ...(Object.keys(budget).length > 0 ? { budget } : {}),
     ...(v1.route !== undefined ? { route: v1.route } : {}),
+    ...(v1.commands !== undefined ? { commands: v1.commands } : {}),
   };
 }
 
