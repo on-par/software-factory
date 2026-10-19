@@ -75,7 +75,7 @@ export const TMPDIR_MKDTEMP_BASELINE: Readonly<Record<string, number>> = {
   'packages/core/src/config/repo.test.ts': 1,
   'packages/core/src/config/template-tokens.test.ts': 1,
   'packages/core/src/config/v2.test.ts': 1,
-  'packages/core/src/constitutions/index.test.ts': 9,
+  'packages/core/src/constitutions/index.test.ts': 8,
   'packages/core/src/daemon/checkout-validation.test.ts': 1,
   'packages/core/src/daemon/engine-supervisor.test.ts': 1,
   'packages/core/src/daemon/factoryd-http.test.ts': 1,

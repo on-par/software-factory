@@ -1,21 +1,20 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { checkPhase } from './check.js';
 
-const dirs: string[] = [];
+const dirs = createTempDirs();
 const green = { failures: 0, passes: 0, skips: 0, total: 0, results: [] };
 
 afterEach(async () => {
-  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  await dirs.cleanup();
 });
 
 async function fixture(files: Record<string, string>): Promise<string> {
-  const worktree = await mkdtemp(join(tmpdir(), 'check-headed-'));
-  dirs.push(worktree);
+  const worktree = await dirs.make('check-headed-');
   await writeFile(
     join(worktree, 'package.json'),
     JSON.stringify({ scripts: { test: 'true', ...JSON.parse(files['package.json'] ?? '{}').scripts } }),

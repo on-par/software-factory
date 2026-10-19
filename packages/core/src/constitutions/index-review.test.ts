@@ -1,7 +1,7 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
@@ -25,14 +25,15 @@ Bundled standards body.
 `;
 
 describe('ConstitutionLoader.resolveForReview (#1673)', () => {
+  const tempDirs = createTempDirs();
   let repoDir: string;
 
   beforeEach(async () => {
-    repoDir = await mkdtemp(join(tmpdir(), 'review-repo-'));
+    repoDir = await tempDirs.make('review-repo-');
   });
 
   afterEach(async () => {
-    await rm(repoDir, { recursive: true, force: true });
+    await tempDirs.cleanup();
   });
 
   it('prefers .factory/constitution.md and does not merge instruction files', async () => {

@@ -1,7 +1,7 @@
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { CheckerContext } from '../checkers/index.js';
@@ -29,15 +29,14 @@ const summary: CheckSummary = {
   results: [{ checker: 'compile', result: 'PASS', details: 'ok' }],
 };
 
-const tempDirs: string[] = [];
+const tempDirs = createTempDirs();
 
 afterEach(async () => {
-  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  await tempDirs.cleanup();
 });
 
 async function fixture(plan?: unknown): Promise<{ ctx: CheckerContext; worktree: string }> {
-  const worktree = await mkdtemp(join(tmpdir(), 'check-evidence-'));
-  tempDirs.push(worktree);
+  const worktree = await tempDirs.make('check-evidence-');
   const specPath = join(worktree, 'issue.md');
   await writeFile(specPath, `---\ndesign: ${JSON.stringify({ ...artifact, evidencePlan: plan })}\n---\nSpec\n`);
   await writeFile(
