@@ -154,7 +154,7 @@ async function execute(
     if (started) {
       const label =
         entry.kind === 'command' ? entry.command : entry.kind === 'fail-to-pass-test' ? entry.test : entry.kind;
-      await lifecycle?.afterCommand(label, pgids).catch(() => {});
+      await lifecycle?.afterCommand(label, pgids);
     }
   }
 }

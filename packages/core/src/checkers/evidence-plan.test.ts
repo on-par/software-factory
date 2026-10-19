@@ -220,4 +220,24 @@ describe('evidence plan runner', () => {
     );
     expect(calls).toEqual(['before', 'forward:12', 'after:check:12']);
   });
+
+  it('propagates lifecycle cleanup failures', async () => {
+    await expect(
+      runEvidencePlan(
+        [entry('command', { command: 'check', passWhen: 'ok' })],
+        new Map([['check', ['echo']]]),
+        {
+          worktree: '/tmp/lane',
+          sandbox: policy(),
+          runCommand: async () => commandResult(0),
+        },
+        {
+          beforeCommand: async () => {},
+          afterCommand: async () => {
+            throw new Error('cleanup broke');
+          },
+        },
+      ),
+    ).rejects.toThrow('cleanup broke');
+  });
 });
