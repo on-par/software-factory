@@ -124,6 +124,9 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
     effective.allowExperimental,
     effective.localOnly,
   );
+  router.setCodexFullAccessTasks?.(
+    rt.configLoaders.loadFactoryConfigForRepo(paths.config).sandbox.codexFullAccessTasks,
+  );
   router.setLocalAuthSink?.(recordLocalAuthFailure);
   const product = rt.readActiveProduct(paths.product) ?? '(none)';
 

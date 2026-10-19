@@ -23,7 +23,7 @@ export interface CodexFsDeps {
   unlink?: (path: string) => Promise<void>;
 }
 
-/** Operator opt-in for `codex exec --sandbox danger-full-access` (#3080). */
+/** Legacy operator request for full access; config must also name the task. */
 export const CODEX_FULL_ACCESS_ENV = 'FACTORY_CODEX_FULL_ACCESS';
 
 /** True only when FACTORY_CODEX_FULL_ACCESS is '1' or 'true' (trimmed, case-insensitive). */
@@ -34,13 +34,13 @@ export function codexFullAccessOptIn(source: Record<string, string | undefined> 
 
 /** Injectable environment and logging for CodexCliHarness. */
 export interface CodexHarnessOptions {
-  /** Env source for the full-access opt-in; defaults to process.env. */
+  /** Env source for legacy full-access requests; defaults to process.env. */
   env?: Record<string, string | undefined>;
   /** Line logger; defaults to writing the line to stderr. */
   log?: (line: string) => void;
 }
 
-/** Runs a model via the Codex CLI. FACTORY_CODEX_FULL_ACCESS=1 forces `--sandbox danger-full-access` with no preflight (#3080):
+/** Runs a model via the Codex CLI. Full access requires a task named in config:
  *  codex exec --json --sandbox <mode> -c approval_policy=never [network -c flags] -C <worktree> [flags] -o <output> - < <prompt> */
 export class CodexCliHarness implements CodingHarness {
   readonly id = 'codex-cli';
@@ -51,7 +51,8 @@ export class CodexCliHarness implements CodingHarness {
   private readonly unlink: (path: string) => Promise<void>;
   private readonly envSource: Record<string, string | undefined>;
   private readonly log: (line: string) => void;
-  private loggedFullAccess = false;
+  private readonly loggedFullAccess = new Set<string>();
+  private readonly loggedRefusals = new Set<string>();
 
   constructor(
     private execFn: CodexExecFn = defaultExecFn,
@@ -76,15 +77,20 @@ export class CodexCliHarness implements CodingHarness {
     const outFile = await mktemp(join(tmpdir(), 'factory-codex-out-'), this.writeFile);
     await this.writeFile(tmpFile, prompt);
 
-    // A sandbox policy keeps Codex in workspace-write, with or without an outer wrapper.
-    // Without a policy, workspace-write blocks legitimate writes (#834).
-    // The FACTORY_CODEX_FULL_ACCESS opt-in picks danger-full-access on purpose and skips any preflight (#3080).
-    const fullAccessOptIn = codexFullAccessOptIn(this.envSource);
-    if (fullAccessOptIn && !this.loggedFullAccess) {
-      this.loggedFullAccess = true;
-      this.log(`codex: --sandbox danger-full-access is on because the operator opted in (${CODEX_FULL_ACCESS_ENV}=1)`);
+    // Codex always contains its own writes, even without an outer sandbox policy (#834).
+    const fullAccessOptIn = request.codexFullAccessTasks?.includes(request.task) === true;
+    if (fullAccessOptIn && !this.loggedFullAccess.has(request.task)) {
+      this.loggedFullAccess.add(request.task);
+      this.log(
+        `codex: --sandbox danger-full-access for task ${request.task} (config sandbox.codexFullAccessTasks opt-in)`,
+      );
+    } else if (codexFullAccessOptIn(this.envSource) && !fullAccessOptIn && !this.loggedRefusals.has(request.task)) {
+      this.loggedRefusals.add(request.task);
+      this.log(
+        `codex: refused --sandbox danger-full-access for task ${request.task}: not opted in by config (sandbox.codexFullAccessTasks)`,
+      );
     }
-    const codexSandbox = fullAccessOptIn || !sandbox ? 'danger-full-access' : 'workspace-write';
+    const codexSandbox = fullAccessOptIn ? 'danger-full-access' : 'workspace-write';
     // Codex's own sandbox is the containment only when no OS wrapper (sandbox-exec/firejail) runs it;
     // then its network must allow exactly the factory allowlist (#3079).
     const networkFlags =

@@ -216,6 +216,7 @@ export async function shipIssue(
     policy.effective.allowExperimental,
     policy.effective.localOnly,
   );
+  router.setCodexFullAccessTasks?.(policy.sandbox.codexFullAccessTasks);
   router.setLocalAuthSink?.(recordLocalAuthFailure);
   router.skipMissingHarnessClis(core.isCommandAvailable);
   let issueSpend = 0;
@@ -303,7 +304,6 @@ export async function shipIssue(
     console.log(styleText('yellow', `skipped: ${skipReason}`));
     throw new IssueSkippedError(skipReason, 'already-closed');
   }
-
   const sandboxPolicy = resolveSandboxPolicy(policy.sandbox, {
     worktree,
     repoRoot,

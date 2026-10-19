@@ -201,6 +201,7 @@ workspace:
 sandbox:
   enabled: true
   runtime: "auto"
+  codexFullAccessTasks: []
   network:
     allow: ["api.anthropic.com", "github.com"]
     blockTelemetry: false

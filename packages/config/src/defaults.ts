@@ -78,6 +78,7 @@ export interface FactoryDefaults {
   sandbox: {
     enabled: boolean;
     runtime: 'auto' | 'sandbox-exec' | 'firejail' | 'docker-sandbox' | 'none';
+    codexFullAccessTasks?: string[];
     network: { allow: string[]; blockTelemetry?: boolean };
     resources: { cpuMs: number; memMb: number };
     docker?: { rolloutPercent: number };
@@ -654,6 +655,7 @@ export const defaultFactoryConfig: FactoryDefaults = {
   sandbox: {
     enabled: true,
     runtime: 'auto',
+    codexFullAccessTasks: [],
     network: { allow: ['api.anthropic.com', 'github.com'], blockTelemetry: false },
     resources: { cpuMs: 300000, memMb: 4096 },
     docker: { rolloutPercent: 0 },

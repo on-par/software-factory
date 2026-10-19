@@ -443,6 +443,7 @@ export async function designSmellsChecker(
   try {
     const result = await router.run('check_design', prompt, {
       worktree: ctx.worktree,
+      sandbox: ctx.sandbox,
       timeoutSeconds: timeoutSeconds ?? 1800,
       env: ctx.env,
       onPgid: ctx.onPgid,

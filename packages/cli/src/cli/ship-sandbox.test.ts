@@ -51,6 +51,16 @@ describe('shipIssue (direct)', () => {
     expect(events).toContain('sandbox disabled by config/FACTORY_SANDBOX');
   });
 
+  it('sets the Codex task allowlist from config even when OS containment is disabled', async () => {
+    h.factoryConfig = {
+      ...h.factoryConfig,
+      sandbox: { ...h.factoryConfig.sandbox, enabled: false, codexFullAccessTasks: ['build_codex'] },
+    };
+    await shipIssue(5, {}, ctx());
+    const router = vi.mocked(coreFakes.ModelRouter).mock.results.at(-1)?.value;
+    expect(router.setCodexFullAccessTasks).toHaveBeenCalledWith(['build_codex']);
+  });
+
   it('passes the docker-sandbox descriptor to setupWorktree without a speculative sandbox log when sandbox.runtime is docker-sandbox', async () => {
     h.factoryConfig = { ...h.factoryConfig, sandbox: { ...h.factoryConfig.sandbox, runtime: 'docker-sandbox' } };
     await shipIssue(5, {}, ctx());

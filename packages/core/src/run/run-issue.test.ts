@@ -18,6 +18,7 @@ import type { PrShadowVerdict } from '../review/classifier.js';
 import { DEFAULT_REVIEW_FLOOR_RULES } from '../review/floor.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
+import type { SandboxPolicy } from '../sandbox/index.js';
 import type { CheckSummary, Constitution, DesignArtifact } from '../types/index.js';
 import type { StewardCommentGitHubClient, StewardIssueComment } from '../steward/comment.js';
 import type { RunStewardPorts } from '../steward/run.js';
@@ -121,6 +122,7 @@ function basePolicy(overrides: Partial<RunPolicy> = {}): RunPolicy {
     sandbox: {
       enabled: false,
       runtime: 'auto',
+      codexFullAccessTasks: [],
       network: { allow: [] },
       resources: { cpuMs: 0, memMb: 0 },
       docker: { rolloutPercent: 0 },
@@ -163,7 +165,9 @@ beforeEach(() => {
 
 describe('runIssue — recorded remote branch SHA (#1869)', () => {
   it('threads the recorded remote SHA into shipPhase, undefined without a record', async () => {
-    await runIssue(baseRequest(), basePolicy(), basePorts());
+    const sandboxPolicy = { runtime: 'none' } as SandboxPolicy;
+    await runIssue(baseRequest({ sandboxPolicy }), basePolicy(), basePorts());
+    expect(vi.mocked(planPhase).mock.calls[0][0].sandbox).toBe(sandboxPolicy);
     expect(vi.mocked(shipPhase).mock.calls[0][0].recordedRemoteSha).toBeUndefined();
 
     vi.mocked(shipPhase).mockClear();
@@ -1478,7 +1482,6 @@ describe('runIssue — #1515: same-file lane guard', () => {
       openQuestions: [],
     };
   }
-
   it('parks the second run naming the colliding issue and file, while a disjoint third run is unaffected', async () => {
     const guard = new LaneFileGuard(await tmpGuardFile());
 
@@ -1576,7 +1579,6 @@ describe('runIssue — PR classifier gate (#1724)', () => {
     });
     return { addLabels, readReviewFloorChanges, classifyPr, events, ports };
   }
-
   function verdict(modelClass: 'A' | 'B' | 'C' | null, reason?: string): PrShadowVerdict {
     return {
       modelClass,
@@ -2324,7 +2326,6 @@ describe('runIssue — config template-token preflight (#2586)', () => {
     expect(recordPhase).not.toHaveBeenCalledWith('plan');
     expect(events).toHaveBeenCalledWith('config', expect.stringContaining(expected), undefined);
   }
-
   it('parks before PLAN with file:line when the constitution frontmatter has an unfilled token', async () => {
     await expectParked(
       '---\nproduct: acme\nname: <project-name>\n---\nbody\n',
@@ -2377,7 +2378,6 @@ describe('runIssue — preflight config failure ends with the config cause (#258
     };
     return constitution;
   }
-
   it('ends an unknown-checker preflight failure with the config cause, no CHECK failure and no model call', async () => {
     const constitution = fixture();
     const router = fakeRouter();

@@ -1622,6 +1622,7 @@ describe('parentBaseRef (#2716)', () => {
   it('forwards parentBaseRef to the checker ctx (#2716)', async () => {
     const { worktree, specPath } = await makePassingWorktree();
     const seen: any[] = [];
+    const sandbox = { runtime: 'none' } as SandboxPolicy;
     await checkPhase({
       issue: 99,
       worktree,
@@ -1631,6 +1632,7 @@ describe('parentBaseRef (#2716)', () => {
       log: () => {},
       diffBase: 'abc1234567',
       parentBaseRef: 'slice-1',
+      sandbox,
       runCheckers: async (ctx) => {
         seen.push(ctx);
         return empty;
@@ -1640,6 +1642,7 @@ describe('parentBaseRef (#2716)', () => {
     for (const ctx of seen) {
       expect(ctx.parentBaseRef).toBe('slice-1');
       expect(ctx.diffBase).toBe('abc1234567');
+      expect(ctx.sandbox).toBe(sandbox);
     }
   });
 
@@ -2859,7 +2862,6 @@ describe('flaky re-run verdict (#2301, #2302)', () => {
     expect(result.flakeRerun).toBeUndefined();
     expect(result.environment).toBeDefined();
   });
-
   it('skips the re-run when the cause is not environment', async () => {
     const fake = vi.fn(async () => okResult);
     const { result } = await run(['tests'], 'clean-on-base', fake, { maxReworkRounds: 0 });
@@ -2867,7 +2869,6 @@ describe('flaky re-run verdict (#2301, #2302)', () => {
     expect(result.flakeRerun).toBeUndefined();
   });
 });
-
 describe('markTestsFlaky (#2302)', () => {
   const base: CheckSummary = {
     results: [
@@ -2890,7 +2891,6 @@ describe('markTestsFlaky (#2302)', () => {
     expect(out.skips).toBe(3);
     expect(out.total).toBe(6);
   });
-
   it('falls back to full suite and leaves a non-FAIL tests result alone', () => {
     const out = markTestsFlaky(base, { verdict: 'passed', mode: 'full', tests: [] });
     expect(out.results[0]?.details).toBe('re-run passed; flaky: full suite');

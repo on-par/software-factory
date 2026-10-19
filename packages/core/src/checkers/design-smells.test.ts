@@ -6,10 +6,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
+import type { SandboxPolicy } from '../sandbox/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import {
   BASE_REF_CANDIDATES,
@@ -729,11 +730,13 @@ describe('designSmellsChecker', () => {
 
   it('fails the gate when a cast-to-pass smell is reported (rework-loop trigger)', async () => {
     const worktree = await makeWorktree();
+    const sandbox = { runtime: 'none' } as SandboxPolicy;
     const { router, stub } = makeRouter(
       '{"checker":"design_smells","result":"FAIL","smells":[{"kind":"cast-to-pass","file":"packages/core/src/a.ts","line":42,"evidence":"casts as any to satisfy signature","suggestion":"widen the parameter type instead"}]}',
     );
 
-    const result = await designSmellsChecker(makeContext(worktree), router, undefined, {
+    const run = vi.spyOn(router, 'run');
+    const result = await designSmellsChecker(makeContext(worktree, { sandbox }), router, undefined, {
       collectDiff: async () => cleanDiff,
     });
 
@@ -742,6 +745,7 @@ describe('designSmellsChecker', () => {
     expect(result.details).toContain('packages/core/src/a.ts:42');
     expect(result.details).toContain('widen the parameter type instead');
     expect(stub.calls[0].prompt).toContain('test constitution');
+    expect(run.mock.calls[0][2]?.sandbox).toBe(sandbox);
   });
 
   it('passes on a clean verdict with no smells', async () => {
@@ -914,7 +918,6 @@ describe('designSmellsChecker', () => {
     expect(result.result).toBe('FAIL');
     expect(result.details).not.toContain('malformed');
   });
-
   it('passes with a mismatch note when result is FAIL but smells is empty', async () => {
     const worktree = await makeWorktree();
     const { router } = makeRouter('{"checker":"design_smells","result":"FAIL","smells":[]}');
@@ -926,7 +929,6 @@ describe('designSmellsChecker', () => {
     expect(result.result).toBe('PASS');
     expect(result.details).toContain('not actionable');
   });
-
   it('fails with a truncation note when the diff was truncated and findings exist', async () => {
     const worktree = await makeWorktree();
     const { router } = makeRouter(
@@ -940,7 +942,6 @@ describe('designSmellsChecker', () => {
     expect(result.result).toBe('FAIL');
     expect(result.details).toContain('diff was truncated');
   });
-
   it('designSmellsChecker prompts with DIFF BASE = captured SHA', { timeout: 120_000 }, async () => {
     const { worktree, baseSha } = await makeRemoteLessGitRepo();
     // Excluded churn lives in nested paths (module-adjacent __pycache__ etc.):
@@ -972,7 +973,6 @@ describe('designSmellsChecker', () => {
     expect(prompt).not.toContain('.pyc');
     expect(prompt).not.toContain('.pytest_cache');
   });
-
   it(
     'skips with a reason naming the missing base when no base of any kind resolves',
     { timeout: 120_000 },

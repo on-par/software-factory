@@ -21,6 +21,7 @@ import { z } from 'zod';
 
 import type { EventKind } from '../events/kinds.js';
 import type { ModelRouter } from '../router/index.js';
+import type { SandboxPolicy } from '../sandbox/index.js';
 import { DECOMPOSED_LABEL } from '../queue/github-queue.js';
 import type { FailoverReason } from '../types/index.js';
 import { findDuplicateStory } from './duplicate-guard.js';
@@ -523,7 +524,6 @@ export async function fileDecomposition(deps: {
       );
       return [];
     }
-
     childIssues.push(created.number);
 
     try {
@@ -540,7 +540,6 @@ export async function fileDecomposition(deps: {
       );
     }
   }
-
   if (childIssues.length > 0) {
     try {
       await octokit.rest.issues.addLabels({ owner, repo: name, issue_number: issue, labels: [DECOMPOSED_LABEL] });
@@ -548,7 +547,6 @@ export async function fileDecomposition(deps: {
       log('decompose_file_failed', `failed to label #${issue} ${DECOMPOSED_LABEL}: ${errorDetail(error)}`);
     }
   }
-
   log(
     'decompose_filed',
     `filed ${childIssues.length} child issue(s) under #${issue}: ${childIssues.map((n) => `#${n}`).join(', ')}`,
@@ -571,8 +569,8 @@ export interface DecomposeResult {
   /** Why no INVEST-passing decomposition was produced (parse error, violations, thrown error). Set only when `decomposition` is unset by a failure. */
   failureReason?: string;
 }
-
 export interface DecomposeDriverDeps {
+  sandbox?: SandboxPolicy;
   issue: number;
   /** "owner/repo" of the original issue. */
   repo: string;
@@ -654,19 +652,22 @@ export async function decomposeOversizedIssue(deps: DecomposeDriverDeps): Promis
           ? buildDecompositionPrompt({ title, body })
           : buildDecompositionRetryPrompt({ title, body }, violations);
 
-      const result = await router.run('decompose', prompt, { worktree, timeoutSeconds, onProviderFailure });
+      const result = await router.run('decompose', prompt, {
+        worktree,
+        timeoutSeconds,
+        onProviderFailure,
+        sandbox: deps.sandbox,
+      });
       const parsed = parseDecompositionOutput(result.output);
       if (!parsed.ok) {
         violations = [`decomposition did not parse: ${parsed.reason}`];
         continue;
       }
-
       const validation = validateDecomposition(parsed.decomposition);
       if (!validation.ok) {
         violations = validation.violations;
         continue;
       }
-
       if (deps.postComment === false) {
         return { posted: false, childIssues: [], decomposition: parsed.decomposition };
       }
@@ -680,7 +681,6 @@ export async function decomposeOversizedIssue(deps: DecomposeDriverDeps): Promis
       });
       return { ...published, decomposition: parsed.decomposition };
     }
-
     log(
       'decompose_failed',
       `decomposition of issue #${issue} failed after ${maxAttempts} attempt(s): ${violations.join('; ')}`,

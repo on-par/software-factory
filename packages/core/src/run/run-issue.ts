@@ -662,6 +662,7 @@ async function runIssueOnce(
           specPath: request.specPath,
           constitution,
           router: ports.router,
+          sandbox: request.sandboxPolicy,
           octokit: ports.octokit,
           log: ports.events('plan'),
           timeoutSeconds: request.timeouts.plan,
@@ -1130,6 +1131,7 @@ async function runIssueOnce(
         rules: request.prClassifier.rules,
         modelPin: request.prClassifier.modelPin,
         router: ports.router,
+        sandbox: request.sandboxPolicy,
         onLog: (msg: string) => log('router', msg),
       };
       let shadow: PrShadowVerdict;

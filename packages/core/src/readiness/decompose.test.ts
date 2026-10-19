@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
+import type { SandboxPolicy } from '../sandbox/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { MAX_ACCEPTANCE_CRITERIA_ITEMS, MAX_IN_SCOPE_ITEMS } from './size.js';
 import {
@@ -395,6 +396,8 @@ describe('decomposeOversizedIssue', () => {
     const router = new ModelRouter(models, routes, false, stub);
     const { octokit, createComment, create } = makeOctokit();
     const { log } = makeLog();
+    const sandbox = { runtime: 'none' } as SandboxPolicy;
+    const run = vi.spyOn(router, 'run');
 
     const result = await decomposeOversizedIssue({
       issue: 606,
@@ -403,6 +406,7 @@ describe('decomposeOversizedIssue', () => {
       body: 'body',
       worktree: '/tmp/wt',
       router,
+      sandbox,
       octokit,
       log,
       fileSubIssues: true,
@@ -410,6 +414,7 @@ describe('decomposeOversizedIssue', () => {
     });
 
     expect(result.posted).toBe(false);
+    expect(run.mock.calls[0][2]?.sandbox).toBe(sandbox);
     expect(result.childIssues).toEqual([]);
     expect(result.decomposition?.stories.length).toBeGreaterThan(0);
     expect(createComment).not.toHaveBeenCalled();
@@ -1016,7 +1021,6 @@ describe('fileDecomposition', () => {
       expect(result).toEqual([]);
       expect(addLabels).not.toHaveBeenCalled();
     });
-
     it('still returns the child issues and logs when labeling fails', async () => {
       const addLabels = vi.fn().mockRejectedValue(new Error('label denied'));
       const { run, events } = fixture(addLabels);
@@ -1026,7 +1030,6 @@ describe('fileDecomposition', () => {
     });
   });
 });
-
 describe('renderChildIssueBody', () => {
   it('emits all five factory-task headings, no Children heading, and scores as a ready factory-task', () => {
     const parsed = parseDecompositionOutput(VALID_DECOMPOSITION_JSON);
@@ -1047,7 +1050,6 @@ describe('renderChildIssueBody', () => {
     expect(readiness.sizeOk).not.toBe(false);
   });
 });
-
 describe('extractJsonObject', () => {
   it('extracts fenced and raw objects and returns undefined otherwise', () => {
     expect(extractJsonObject('```json\n{"a":1}\n```')).toBe('{"a":1}');
@@ -1055,7 +1057,6 @@ describe('extractJsonObject', () => {
     expect(extractJsonObject('no json')).toBeUndefined();
   });
 });
-
 describe('publishDecomposition', () => {
   const repo = 'on-par/software-factory';
   const decomposition = (() => {
@@ -1086,7 +1087,6 @@ describe('publishDecomposition', () => {
     expect(create).toHaveBeenCalled();
     expect(events).toContain('decompose_comment_posted');
   });
-
   it('returns nothing posted without throwing when createComment fails', async () => {
     const createComment = vi.fn().mockRejectedValue(new Error('boom'));
     const octokit = { rest: { issues: { createComment } } } as any;

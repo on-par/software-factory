@@ -29,6 +29,10 @@ describe('shipped defaults', () => {
     expect(defaultFactoryConfig.host.maxAgentJobs).toBe(1);
   });
 
+  it('grants no Codex task full access by default', () => {
+    expect(defaultFactoryConfig.sandbox.codexFullAccessTasks).toEqual([]);
+  });
+
   it('defaults the host-wide BUILD/CHECK cap to 2 (#3043)', () => {
     expect(defaultFactoryConfig.host.maxBuilds).toBe(2);
   });

@@ -505,7 +505,7 @@ export function agentCliChecks(probes: DoctorEnvProbes): DoctorCheck[] {
         };
   const codexSandbox =
     detectSandboxRuntime(probes.platform ?? process.platform, commandAvailable) === 'none'
-      ? 'no sandbox runtime, so codex runs with danger-full-access'
+      ? 'no sandbox runtime; codex runs in its own workspace-write sandbox'
       : 'sandboxed builds available';
   const checks: DoctorCheck[] = [
     agents.length > 0 ? { name: 'coding agent', ok: true, detail: `found ${agents.join(', ')}` } : missingRow,

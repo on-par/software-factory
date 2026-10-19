@@ -1,6 +1,8 @@
 import type { ModelRouter, RouterResult } from '../router/index.js';
+import type { SandboxPolicy } from '../sandbox/index.js';
 
 export interface JudgeSpecOpts {
+  sandbox?: SandboxPolicy;
   specContent: string;
   issueTitle: string;
   issueBody: string;
@@ -105,6 +107,7 @@ export async function runJudgeSpec(router: ModelRouter, opts: JudgeSpecOpts): Pr
   try {
     const result = await router.run('eval_judge', prompt, {
       worktree: opts.worktree,
+      sandbox: opts.sandbox,
       timeoutSeconds: opts.timeoutSeconds,
     });
     const verdict = extractVerdict(result.output);

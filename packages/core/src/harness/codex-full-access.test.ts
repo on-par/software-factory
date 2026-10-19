@@ -49,8 +49,8 @@ function recordingExec() {
   return { calls, fn };
 }
 
-describe('CodexCliHarness full-access opt-in (#3080)', () => {
-  it('uses danger-full-access without a preflight and logs it when the operator opts in', async () => {
+describe('CodexCliHarness full-access config', () => {
+  it('refuses the env request for an unlisted task and logs once', async () => {
     const rec = recordingExec();
     const lines: string[] = [];
     const harness = new CodexCliHarness(
@@ -58,38 +58,42 @@ describe('CodexCliHarness full-access opt-in (#3080)', () => {
       {},
       { env: { FACTORY_CODEX_FULL_ACCESS: '1' }, log: (l) => lines.push(l) },
     );
-    const request = makeContractRequest({ model: 'codex-model', registry, sandbox: sandboxPolicy });
+    const request = makeContractRequest({ model: 'codex-model', registry, task: 'plan', sandbox: sandboxPolicy });
 
     await harness.run(request).catch(() => {});
     await harness.run(request).catch(() => {});
 
     expect(rec.calls).toHaveLength(2);
-    expect(rec.calls[0].cmd).toContain('--sandbox danger-full-access');
-    expect(rec.calls[0].cmd).not.toContain('workspace-write');
+    expect(rec.calls[0].cmd).toContain('--sandbox workspace-write');
+    expect(rec.calls[0].cmd).not.toContain('--sandbox danger-full-access');
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toMatch(/operator opted in/);
-    expect(lines[0]).toContain('FACTORY_CODEX_FULL_ACCESS');
+    expect(lines[0]).toBe(
+      'codex: refused --sandbox danger-full-access for task plan: not opted in by config (sandbox.codexFullAccessTasks)',
+    );
   });
 
-  it('emits no network config flags under the opt-in with a non-wrapper runtime', async () => {
+  it('grants a config-listed task and logs the config opt-in once', async () => {
     const rec = recordingExec();
-    const harness = new CodexCliHarness(rec.fn, {}, { env: { FACTORY_CODEX_FULL_ACCESS: 'true' }, log: () => {} });
+    const lines: string[] = [];
+    const harness = new CodexCliHarness(rec.fn, {}, { env: {}, log: (line) => lines.push(line) });
 
-    await harness
-      .run(
-        makeContractRequest({
-          model: 'codex-model',
-          registry,
-          sandbox: { ...sandboxPolicy, runtime: 'none', allowHosts: ['example.com'] },
-        }),
-      )
-      .catch(() => {});
+    const request = makeContractRequest({
+      model: 'codex-model',
+      registry,
+      task: 'build_codex',
+      codexFullAccessTasks: ['build_codex'],
+    });
+    await harness.run(request).catch(() => {});
+    await harness.run(request).catch(() => {});
 
     expect(rec.calls[0].cmd).toContain('--sandbox danger-full-access');
     expect(rec.calls[0].cmd).not.toContain('sandbox_workspace_write.network_access');
+    expect(lines).toEqual([
+      'codex: --sandbox danger-full-access for task build_codex (config sandbox.codexFullAccessTasks opt-in)',
+    ]);
   });
 
-  it("keeps today's command and logs nothing when the opt-in is unset", async () => {
+  it('defaults to workspace-write without a policy or config', async () => {
     const rec = recordingExec();
     const log = vi.fn();
     const harness = new CodexCliHarness(rec.fn, {}, { env: {}, log });
@@ -97,7 +101,8 @@ describe('CodexCliHarness full-access opt-in (#3080)', () => {
     await harness.run(makeContractRequest({ model: 'codex-model', registry })).catch(() => {});
     await harness.run(makeContractRequest({ model: 'codex-model', registry, sandbox: sandboxPolicy })).catch(() => {});
 
-    expect(rec.calls[0].cmd).toContain('--sandbox danger-full-access');
+    expect(rec.calls[0].cmd).toContain('--sandbox workspace-write');
+    expect(rec.calls[0].cmd).not.toContain('danger-full-access');
     expect(rec.calls[1].cmd).toContain('--sandbox workspace-write');
     expect(log).not.toHaveBeenCalled();
   });

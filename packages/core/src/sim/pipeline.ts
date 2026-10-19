@@ -294,6 +294,7 @@ async function runSimIssue(
     sandbox: {
       enabled: false,
       runtime: 'auto',
+      codexFullAccessTasks: [],
       network: { allow: [] },
       resources: { cpuMs: 300_000, memMb: 4096 },
       docker: { rolloutPercent: 0 },
