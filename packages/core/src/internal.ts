@@ -553,8 +553,7 @@ export { selectUsageCoordinator, type SelectUsageCoordinatorOptions } from './us
 
 // Local queue reprioritization audit records (#869)
 export type { QueueReprioritizationRecord } from './types/index.js';
-export type { QueueRationaleAuditor } from './queue/reprioritization-audit.js';
-export { createQueueRationaleAuditor } from './queue/reprioritization-audit.js';
+export { createQueueRationaleAuditor, type QueueRationaleAuditor } from './queue/reprioritization-audit.js';
 
 // Publish only coarse daemon lifecycle status to configured ProjectV2 items (#868)
 export type { ProjectStatusWriter, ProjectStatusWriterOptions } from './projects/project-status-writer.js';
@@ -782,6 +781,7 @@ export {
   recordLocalAuthFailure,
 } from './utils/local-auth-record.js';
 export type { LocalAuthAgent, LocalAuthFailure } from './utils/local-auth-record.js';
+export { syncLandBranch, type LandSyncOptions, type LandSyncResult } from './land/sync.js';
 export { fetchHumanEventSourcesCached, runProducedPrOrMerge } from './kpis/sweep.js';
 export type { AgentInvocation, TokenCoverage, TokenCoverageEntry } from './metrics/token-coverage.js';
 export { agentInvocationsFromEvents, computeTokenCoverage } from './metrics/token-coverage.js';

@@ -267,7 +267,7 @@ export function retryCauseOf(event: FactoryEvent): RetryCause | null {
 
 /** Tags a rework-triggering event's cause from the run's recorded failure/merge-state
  *  data (#615): a `conflict` event is the lane's branch colliding with a file another
- *  lane had already merged (a land-time rebase conflict, see rebaseDirtyPullRequest in
+ *  lane had already merged (a land-time merge conflict, see syncDirtyPullRequest in
  *  the CLI); a `rework`/`stuck` event with failing checkers is a legitimate quality/test
  *  issue. Returns null for events that are not rework-triggering at all. */
 export function reworkCauseTagOf(event: FactoryEvent): ReworkCauseTag | null {

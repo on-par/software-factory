@@ -88,17 +88,42 @@ describe('renderIndexTable', () => {
 });
 
 describe('upsertIndexRow', () => {
-  it('replaces a row with a matching number in place', () => {
+  it('replaces a row with a matching href even when its number changes', () => {
     const updated = upsertIndexRow(REAL_TABLE, {
-      number: 1,
+      number: 4,
       title: 'Renamed decision',
       status: 'Superseded',
-      href: '0001-renamed.md',
+      href: '0001-boss-worker-checker-pipeline.md',
     });
     const rows = parseIndexTable(updated);
     expect(rows).toHaveLength(2);
-    expect(rows[0].title).toBe('Renamed decision');
-    expect(rows[0].status).toBe('Superseded');
+    expect(rows[1]).toEqual({
+      number: 4,
+      title: 'Renamed decision',
+      status: 'Superseded',
+      href: '0001-boss-worker-checker-pipeline.md',
+    });
+  });
+
+  it('keeps distinct hrefs with the same number and makes repeated upserts idempotent', () => {
+    const rows = [
+      { number: 122, title: 'First', status: 'Accepted', href: '0122-first.md' },
+      { number: 122, title: 'Second', status: 'Accepted', href: '0122-second.md' },
+    ];
+    const once = upsertIndexRow(renderIndexTable(rows), {
+      number: 122,
+      title: 'Third',
+      status: 'Accepted',
+      href: '0122-third.md',
+    });
+    const twice = upsertIndexRow(once, {
+      number: 122,
+      title: 'Third',
+      status: 'Accepted',
+      href: '0122-third.md',
+    });
+    expect(parseIndexTable(once).map((row) => row.href)).toEqual(['0122-first.md', '0122-second.md', '0122-third.md']);
+    expect(twice).toBe(once);
   });
 
   it('inserts a new row in ascending order when the number is between existing rows', () => {

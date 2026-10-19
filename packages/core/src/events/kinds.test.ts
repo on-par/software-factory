@@ -20,6 +20,11 @@ describe('EVENT_TRAITS', () => {
     expect(EVENT_TRAITS.pr_opened).toEqual({ severity: 'info', isPark: false, isTerminal: false });
   });
 
+  it('classifies land conflict detection and resolution as non-terminal evidence', () => {
+    expect(EVENT_TRAITS.conflict_detected).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
+    expect(EVENT_TRAITS.conflict_resolved).toEqual({ severity: 'info', isPark: false, isTerminal: false });
+  });
+
   it('gives every EventKind member a well-formed traits entry', () => {
     const entries = Object.entries(EVENT_TRAITS);
     expect(entries.length).toBeGreaterThan(0);
