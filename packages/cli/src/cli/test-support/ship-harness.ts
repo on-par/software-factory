@@ -428,6 +428,7 @@ export function installShipHarness(): void {
       'FACTORY_USAGE_WATCH',
       'FACTORY_USAGE_ESTIMATOR',
       'FACTORY_SANDBOX',
+      'FACTORY_SANDBOX_RUNTIME',
       'FACTORY_PLAN_MODEL',
       'FACTORY_BUILD_MODEL',
       'FACTORY_AUTO_FAILOVER',
@@ -455,6 +456,7 @@ export function installShipHarness(): void {
     delete process.env.FACTORY_MERGE;
     delete process.env.FACTORY_MERGE_ADMIN;
     delete process.env.FACTORY_SANDBOX;
+    delete process.env.FACTORY_SANDBOX_RUNTIME;
     delete process.env.FACTORY_USAGE_WATCH;
     delete process.env.FACTORY_PLAN_MODEL;
     delete process.env.FACTORY_BUILD_MODEL;
