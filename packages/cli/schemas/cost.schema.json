@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ts": {
+            "type": "string"
+          },
+          "issue": {
+            "type": "string"
+          },
+          "task": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "inputTokens": {
+            "type": "number"
+          },
+          "outputTokens": {
+            "type": "number"
+          },
+          "cacheReadTokens": {
+            "type": ["number", "null"]
+          },
+          "cacheCreationTokens": {
+            "type": ["number", "null"]
+          },
+          "cost": {
+            "type": ["number", "null"]
+          }
+        },
+        "required": [
+          "ts",
+          "issue",
+          "task",
+          "model",
+          "inputTokens",
+          "outputTokens",
+          "cacheReadTokens",
+          "cacheCreationTokens",
+          "cost"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "perModel": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "tasks": {
+            "type": "number"
+          },
+          "inputTokens": {
+            "type": "number"
+          },
+          "outputTokens": {
+            "type": "number"
+          },
+          "cost": {
+            "type": ["number", "null"]
+          },
+          "unpricedCount": {
+            "type": "number"
+          }
+        },
+        "required": ["model", "tasks", "inputTokens", "outputTokens", "cost", "unpricedCount"],
+        "additionalProperties": false
+      }
+    },
+    "total": {
+      "type": "object",
+      "properties": {
+        "cost": {
+          "type": ["number", "null"]
+        },
+        "unpricedCount": {
+          "type": "number"
+        }
+      },
+      "required": ["cost", "unpricedCount"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["schemaVersion", "rows", "perModel", "total"],
+  "additionalProperties": false
+}

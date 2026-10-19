@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "ts": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string"
+    },
+    "issue": {
+      "type": "string"
+    },
+    "msg": {
+      "type": "string"
+    },
+    "level": {
+      "type": "string",
+      "enum": ["debug", "info", "warn", "error"]
+    },
+    "lane": {
+      "type": "string"
+    },
+    "repo": {
+      "type": "string"
+    },
+    "phase": {
+      "type": "string"
+    },
+    "actor": {
+      "type": "string"
+    },
+    "failoverReason": {
+      "type": "string"
+    },
+    "fingerprint": {
+      "type": "string"
+    },
+    "evidence": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
+    "rework": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
+    "readiness": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
+    "queueReprioritization": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
+    "prClassification": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
+    "lanePaused": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
+    "stewardTriggered": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
+    "flakyTests": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
+    "checkFailure": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
+    "ciFailure": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
+    "model": {
+      "type": "string"
+    },
+    "tokens": {
+      "type": "object",
+      "properties": {
+        "input": {
+          "type": "number"
+        },
+        "output": {
+          "type": "number"
+        }
+      },
+      "required": ["input", "output"],
+      "additionalProperties": false
+    },
+    "durationMs": {
+      "type": "number"
+    },
+    "cursor": {
+      "type": "string"
+    }
+  },
+  "required": ["ts", "type", "issue", "msg"],
+  "additionalProperties": false
+}

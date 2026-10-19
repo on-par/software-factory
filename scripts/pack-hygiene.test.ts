@@ -94,6 +94,25 @@ describe('checkPackFiles', () => {
   it('does not mistake a name that merely contains "test" for a test file', () => {
     expect(checkPackFiles('@on-par/x', [...CLEAN, 'dist/testing.js', 'dist/latest.js'])).toEqual([]);
   });
+
+  it('allows only direct schema artifacts in the CLI package', () => {
+    expect(checkPackFiles('@on-par/factory-cli', [...CLEAN, 'schemas/status.schema.json'])).toEqual([]);
+    const rejected = [
+      ['schemas/nested/status.schema.json', 'tarball ships schemas/nested/status.schema.json from outside dist/'],
+      ['schemas/../status.schema.json', 'tarball ships schemas/../status.schema.json from outside dist/'],
+      ['schemas/README.json', 'tarball ships schemas/README.json from outside dist/'],
+      ['schemas/status.test.schema.json', 'tarball ships test file schemas/status.test.schema.json'],
+      ['schemas/test-support/helper.js', 'tarball ships test-support file schemas/test-support/helper.js'],
+      ['schemas/.tsbuildinfo', 'tarball ships tsc build info schemas/.tsbuildinfo'],
+      ['schemas//status.schema.json', 'tarball ships schemas//status.schema.json from outside dist/'],
+    ] as const;
+    for (const [path, problem] of rejected) {
+      expect(checkPackFiles('@on-par/factory-cli', [...CLEAN, path])).toContain(`@on-par/factory-cli: ${problem}`);
+    }
+    expect(checkPackFiles('@on-par/other', [...CLEAN, 'schemas/status.schema.json'])).toContain(
+      '@on-par/other: tarball ships schemas/status.schema.json from outside dist/',
+    );
+  });
 });
 
 describe('checkPackageDir', () => {

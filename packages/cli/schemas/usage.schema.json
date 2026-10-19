@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "source": {
+      "type": "string",
+      "enum": ["subscription", "heuristic", "unavailable"]
+    },
+    "utilizationPct": {
+      "type": ["number", "null"]
+    },
+    "resetsAt": {
+      "type": ["string", "null"]
+    },
+    "windowHours": {
+      "type": "number"
+    },
+    "estimateUsd": {
+      "type": ["number", "null"]
+    }
+  },
+  "required": ["schemaVersion", "source", "utilizationPct", "resetsAt", "windowHours", "estimateUsd"],
+  "additionalProperties": false
+}

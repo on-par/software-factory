@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "issue": {
+      "type": "number"
+    },
+    "branch": {
+      "type": ["string", "null"]
+    },
+    "base": {
+      "type": "string"
+    },
+    "files": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "added": {
+                "type": ["number", "null"]
+              },
+              "deleted": {
+                "type": ["number", "null"]
+              }
+            },
+            "required": ["path", "added", "deleted"],
+            "additionalProperties": false
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "totals": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "number"
+            },
+            "added": {
+              "type": "number"
+            },
+            "deleted": {
+              "type": "number"
+            }
+          },
+          "required": ["files", "added", "deleted"],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": ["branch-missing", "base-missing", "no-branch"]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": ["schemaVersion", "issue", "branch", "base", "files", "totals", "reason"],
+  "additionalProperties": false
+}

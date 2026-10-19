@@ -7,9 +7,9 @@
 //   verify <json> <list>
 //                    checks `npm pack --json` output for every workspace named in
 //                    <list> (scripts/publish-workspaces.txt): README.md, LICENSE
-//                    and a built dist/ are present, nothing outside dist/ ships,
-//                    and no test file, test-support kit or .tsbuildinfo leaks into a
-//                    tarball.
+//                    and a built dist/ are present. The CLI may also ship its direct
+//                    schemas/*.schema.json artifacts; no test file, test-support kit
+//                    or .tsbuildinfo leaks into a tarball.
 //
 // Plain erasable TypeScript so Node >= 24 runs it directly (`node scripts/...ts`)
 // from a package's lifecycle script, with no tsx or build step in the way.
@@ -23,6 +23,7 @@ export const REQUIRED_PACK_FILES: readonly string[] = ['package.json', 'README.m
 const TEST_FILE = /(^|\/)[^/]+\.test\.[^/]+$/;
 const TEST_SUPPORT = /(^|\/)test-support\//;
 const BUILD_INFO = /\.tsbuildinfo$/;
+const CLI_SCHEMA = /^schemas\/[A-Za-z0-9-]+\.schema\.json$/;
 
 /** Problems with one package's tarball file list (paths relative to the package root). */
 export function checkPackFiles(name: string, paths: readonly string[]): string[] {
@@ -35,7 +36,11 @@ export function checkPackFiles(name: string, paths: readonly string[]): string[]
     if (TEST_FILE.test(p)) problems.push(`${name}: tarball ships test file ${p}`);
     else if (TEST_SUPPORT.test(p)) problems.push(`${name}: tarball ships test-support file ${p}`);
     else if (BUILD_INFO.test(p)) problems.push(`${name}: tarball ships tsc build info ${p}`);
-    else if (!REQUIRED_PACK_FILES.includes(p) && !p.startsWith('dist/')) {
+    else if (
+      !REQUIRED_PACK_FILES.includes(p) &&
+      !p.startsWith('dist/') &&
+      !(name === '@on-par/factory-cli' && CLI_SCHEMA.test(p))
+    ) {
       problems.push(`${name}: tarball ships ${p} from outside dist/`);
     }
   }
