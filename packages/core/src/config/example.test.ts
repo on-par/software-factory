@@ -75,6 +75,15 @@ describe('docs/config.example.yaml', () => {
     expect(merged?.providerModel).toBeDefined();
   });
 
+  it('documents named evidence commands as an optional valid map', () => {
+    const text = renderConfigExample();
+    expect(text).toMatch(/^# commands: \{ test: "vitest run" \}$/m);
+    expect(RepoFactoryConfigV2Schema.parse(parse('version: 2\ncommands:\n  test: "vitest run"\n')).commands).toEqual({
+      test: 'vitest run',
+    });
+    expect(RepoFactoryConfigV2Schema.parse({ version: 2 }).commands).toBeUndefined();
+  });
+
   it('parses as YAML into a mapping', () => {
     const parsed: unknown = parse(renderConfigExample());
     expect(parsed).not.toBeNull();

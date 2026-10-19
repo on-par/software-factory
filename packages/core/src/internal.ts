@@ -95,7 +95,6 @@ export {
   upstreamInputFromEvidence,
   upstreamReportMarker,
 } from './filing/upstream.js';
-
 export type { FilingDecision, FilingLedger, FilingPolicy, FilingSkipReason } from './filing/policy.js';
 export {
   DEFAULT_FILING_POLICY,
@@ -131,9 +130,10 @@ export {
 } from './config/repo-config-file.js';
 export type { RepoConfigYamlMigration } from './config/repo-config-file.js';
 export { CONFIG_EXAMPLE_OMITTED_KEYS, renderConfigExample } from './config/example.js';
+export { resolveEvidenceAllowlist, type EvidenceAllowlist } from './checkers/evidence-allowlist.js';
+export { runEvidencePlan, type EvidencePlanResult, type EvidenceRunnerContext } from './checkers/evidence-plan.js';
 // Design artifact (#422)
 export { DesignArtifactSchema, parseDesignArtifact, readDesignArtifact, renderDesignArtifact } from './design/index.js';
-
 // Concrete coding harnesses
 export { classifyFailure } from './harness/classify.js';
 export { type ClaudeExecFn, ClaudeCliHarness } from './harness/claude-cli.js';

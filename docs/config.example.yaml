@@ -84,6 +84,8 @@ version: 2
 # harness under `harnesses`). Unset: derived from the build pin's harness, else PLAN decides per
 # issue.
 # route: "<route>"
+# Named evidence commands. Shell-free argv; config overrides scripts.
+# commands: { test: "vitest run" }
 # budget:
   # Run-wide usage cap in USD. Beats FACTORY_USAGE_CAP.
   # capUsd: 227

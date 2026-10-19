@@ -76,56 +76,58 @@ export class CodexCliHarness implements CodingHarness {
     // Codex applies repeated config overrides in order; preserve arbitrary profile flags.
     const extraFlag = effort === undefined ? flags : `${flags} -c ${shellEscape(`model_reasoning_effort=${effort}`)}`;
 
-    const tmpFile = await mktemp(join(tmpdir(), 'factory-codex-'), this.writeFile);
-    const outFile = await mktemp(join(tmpdir(), 'factory-codex-out-'), this.writeFile);
-    await this.writeFile(tmpFile, prompt);
-
-    // Codex always contains its own writes, even without an outer sandbox policy (#834).
-    const fullAccessOptIn = request.codexFullAccessTasks?.includes(request.task) === true;
-    if (fullAccessOptIn && !this.loggedFullAccess.has(request.task)) {
-      this.loggedFullAccess.add(request.task);
-      this.log(
-        `codex: --sandbox danger-full-access for task ${request.task} (config sandbox.codexFullAccessTasks opt-in)`,
-      );
-    } else if (codexFullAccessOptIn(this.envSource) && !fullAccessOptIn && !this.loggedRefusals.has(request.task)) {
-      this.loggedRefusals.add(request.task);
-      this.log(
-        `codex: refused --sandbox danger-full-access for task ${request.task}: not opted in by config (sandbox.codexFullAccessTasks)`,
-      );
-    }
-    const codexSandbox = fullAccessOptIn ? 'danger-full-access' : 'workspace-write';
-    const { roots, rejected } = codexWritableRoots(request.writableRoots, worktree, request.primaryRepoRoot);
-    if (rejected && !this.loggedRejectedRoots.has(request.task)) {
-      this.loggedRejectedRoots.add(request.task);
-      this.log(`codex: dropped unsafe writable root for task ${request.task}`);
-    }
-    // gh/push stages get GitHub egress; agentic build stages keep the repo's configured allowlist
-    // (registries, #3079); judges and classifiers get no network.
-    const githubNetwork = CODEX_GITHUB_NETWORK_TASKS.has(request.task);
-    const allowlistNetwork = !githubNetwork && taskRequiresAgenticHarness(request.task) && sandbox !== undefined;
-    const network = githubNetwork ? 'github' : allowlistNetwork ? 'allowlist' : 'off';
-    const osOwnsNetwork = sandbox?.runtime === 'sandbox-exec' || sandbox?.runtime === 'firejail';
-    const networkFlags = fullAccessOptIn
-      ? ''
-      : network === 'off'
-        ? ' -c sandbox_workspace_write.network_access=false'
-        : osOwnsNetwork
-          ? ''
-          : ` ${codexNetworkConfigFlags(githubNetwork ? [...(sandbox?.allowHosts ?? []), ...CODEX_GITHUB_HOSTS] : (sandbox?.allowHosts ?? []))}`;
-    const rootFlags =
-      fullAccessOptIn || roots.length === 0
-        ? ''
-        : ` -c ${shellEscape(`sandbox_workspace_write.writable_roots=${JSON.stringify(roots)}`)}`;
-    if (!fullAccessOptIn && !this.loggedWorkspace.has(request.task)) {
-      this.loggedWorkspace.add(request.task);
-      this.log(
-        `codex: workspace-write for task ${request.task} (network ${network}, writable roots: ${roots.join(', ') || '(none)'})`,
-      );
-    }
-    const cmd = `codex exec --json --sandbox ${codexSandbox} -c approval_policy=never${networkFlags}${rootFlags} -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
-    const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
-
+    let tmpFile: string | undefined;
+    let outFile: string | undefined;
     try {
+      tmpFile = await mktemp(join(tmpdir(), 'factory-codex-'), this.writeFile);
+      outFile = await mktemp(join(tmpdir(), 'factory-codex-out-'), this.writeFile);
+      await this.writeFile(tmpFile, prompt);
+
+      // Codex always contains its own writes, even without an outer sandbox policy (#834).
+      const fullAccessOptIn = request.codexFullAccessTasks?.includes(request.task) === true;
+      if (fullAccessOptIn && !this.loggedFullAccess.has(request.task)) {
+        this.loggedFullAccess.add(request.task);
+        this.log(
+          `codex: --sandbox danger-full-access for task ${request.task} (config sandbox.codexFullAccessTasks opt-in)`,
+        );
+      } else if (codexFullAccessOptIn(this.envSource) && !fullAccessOptIn && !this.loggedRefusals.has(request.task)) {
+        this.loggedRefusals.add(request.task);
+        this.log(
+          `codex: refused --sandbox danger-full-access for task ${request.task}: not opted in by config (sandbox.codexFullAccessTasks)`,
+        );
+      }
+      const codexSandbox = fullAccessOptIn ? 'danger-full-access' : 'workspace-write';
+      const { roots, rejected } = codexWritableRoots(request.writableRoots, worktree, request.primaryRepoRoot);
+      if (rejected && !this.loggedRejectedRoots.has(request.task)) {
+        this.loggedRejectedRoots.add(request.task);
+        this.log(`codex: dropped unsafe writable root for task ${request.task}`);
+      }
+      // gh/push stages get GitHub egress; agentic build stages keep the repo's configured allowlist
+      // (registries, #3079); judges and classifiers get no network.
+      const githubNetwork = CODEX_GITHUB_NETWORK_TASKS.has(request.task);
+      const allowlistNetwork = !githubNetwork && taskRequiresAgenticHarness(request.task) && sandbox !== undefined;
+      const network = githubNetwork ? 'github' : allowlistNetwork ? 'allowlist' : 'off';
+      const osOwnsNetwork = sandbox?.runtime === 'sandbox-exec' || sandbox?.runtime === 'firejail';
+      const networkFlags = fullAccessOptIn
+        ? ''
+        : network === 'off'
+          ? ' -c sandbox_workspace_write.network_access=false'
+          : osOwnsNetwork
+            ? ''
+            : ` ${codexNetworkConfigFlags(githubNetwork ? [...(sandbox?.allowHosts ?? []), ...CODEX_GITHUB_HOSTS] : (sandbox?.allowHosts ?? []))}`;
+      const rootFlags =
+        fullAccessOptIn || roots.length === 0
+          ? ''
+          : ` -c ${shellEscape(`sandbox_workspace_write.writable_roots=${JSON.stringify(roots)}`)}`;
+      if (!fullAccessOptIn && !this.loggedWorkspace.has(request.task)) {
+        this.loggedWorkspace.add(request.task);
+        this.log(
+          `codex: workspace-write for task ${request.task} (network ${network}, writable roots: ${roots.join(', ') || '(none)'})`,
+        );
+      }
+      const cmd = `codex exec --json --sandbox ${codexSandbox} -c approval_policy=never${networkFlags}${rootFlags} -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
+      const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
+
       let execResult: { stdout: string; stderr: string };
       try {
         execResult = await this.execFn(finalCmd, {
@@ -162,8 +164,8 @@ export class CodexCliHarness implements CodingHarness {
       return { output, ...(usage ? { usage } : {}) };
     } finally {
       // Cleanup temp files (remove, don't zero out)
-      await this.unlink(tmpFile).catch(() => {});
-      await this.unlink(outFile).catch(() => {});
+      if (tmpFile !== undefined) await this.unlink(tmpFile).catch(() => {});
+      if (outFile !== undefined) await this.unlink(outFile).catch(() => {});
     }
   }
 }
