@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildRunsJson, parseRunsLimit } from './runs.js';
+import { runsJsonSchema } from './json-contract.js';
 
 let dir: string;
 
@@ -50,6 +51,7 @@ describe('buildRunsJson', () => {
 
     const { json, skipped } = await buildRunsJson(dir);
 
+    expect(runsJsonSchema.parse(json)).toEqual(json);
     expect(skipped).toEqual([]);
     expect(json.runs.map((r) => r.issue)).toEqual([2, 3, 1]);
     expect(json.runs[0]).toEqual({
@@ -77,6 +79,7 @@ describe('buildRunsJson', () => {
   it('gives prNumber null when there is no PR', async () => {
     writeRun(1, '2026-01-01T00:00:00Z');
     const { json } = await buildRunsJson(dir);
+    expect(runsJsonSchema.parse(json)).toEqual(json);
     expect(json.runs[0]?.prNumber).toBeNull();
   });
 

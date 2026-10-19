@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "running": true,
+  "pid": 42,
+  "uptimeSec": 123,
+  "plistInstalled": false,
+  "repos": [
+    { "slug": "acme/api", "checkoutPath": "/checkouts/api", "state": "active" },
+    { "slug": "acme/web", "checkoutPath": "/checkouts/web", "state": "paused" }
+  ]
+}

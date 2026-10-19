@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildUsageJson } from './usage-json.js';
+import { usageJsonSchema } from './json-contract.js';
 
 describe('buildUsageJson', () => {
   it('reports the subscription reading', () => {
-    expect(buildUsageJson({ fiveHourUtilization: 42, fiveHourResetsAt: '2026-07-15T18:00:00Z' }, 12.5, 100)).toEqual({
+    const output = buildUsageJson({ fiveHourUtilization: 42, fiveHourResetsAt: '2026-07-15T18:00:00Z' }, 12.5, 100);
+    expect(usageJsonSchema.parse(output)).toEqual(output);
+    expect(output).toEqual({
       schemaVersion: 1,
       source: 'subscription',
       utilizationPct: 42,
@@ -23,15 +26,19 @@ describe('buildUsageJson', () => {
 
   it('falls back to the heuristic against the cap', () => {
     const json = buildUsageJson(null, 30, 200);
+    expect(usageJsonSchema.parse(json)).toEqual(json);
     expect(json).toMatchObject({ source: 'heuristic', utilizationPct: 15, resetsAt: null, estimateUsd: 30 });
   });
 
   it('treats a zero estimate as a real heuristic reading', () => {
-    expect(buildUsageJson(null, 0, 100)).toMatchObject({ source: 'heuristic', estimateUsd: 0, utilizationPct: 0 });
+    const json = buildUsageJson(null, 0, 100);
+    expect(usageJsonSchema.parse(json)).toEqual(json);
+    expect(json).toMatchObject({ source: 'heuristic', estimateUsd: 0, utilizationPct: 0 });
   });
 
   it('is unavailable with explicit nulls, never 0', () => {
     const json = buildUsageJson(null, null, 100);
+    expect(usageJsonSchema.parse(json)).toEqual(json);
     expect(json).toEqual({
       schemaVersion: 1,
       source: 'unavailable',

@@ -1,37 +1,14 @@
 import { aggregateCosts, type CostEntry } from '@on-par/factory-core';
+import type { CostJson } from './json-contract.js';
+
+/** `factory cost --json` payload (#2269); additive changes bump schemaVersion only when breaking. */
+export type { CostJson } from './json-contract.js';
 
 /** One cost row in `factory cost --json` (#2269). CostEntry field names. */
-export interface CostRowJson {
-  ts: string;
-  issue: string;
-  task: string;
-  model: string;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number | null;
-  cacheCreationTokens: number | null;
-  /** null when unpriced (ADR-0020); never 0 for an unpriced row. */
-  cost: number | null;
-}
+export type CostRowJson = CostJson['rows'][number];
 
 /** Per-model rollup over the (filtered) rows, first-seen model order. */
-export interface CostModelRowJson {
-  model: string;
-  tasks: number;
-  inputTokens: number;
-  outputTokens: number;
-  /** Sum of priced rows; null when every row for the model is unpriced. */
-  cost: number | null;
-  unpricedCount: number;
-}
-
-/** `factory cost --json` payload (#2269). Additive changes only; bump schemaVersion on a breaking change. */
-export interface CostJson {
-  schemaVersion: 1;
-  rows: CostRowJson[];
-  perModel: CostModelRowJson[];
-  total: { cost: number | null; unpricedCount: number };
-}
+export type CostModelRowJson = CostJson['perModel'][number];
 
 /** Build the `factory cost --json` payload; `issue` keeps only that issue's rows. */
 export function buildCostJson(entries: CostEntry[], issue?: string): CostJson {

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "issue": 31,
+  "branch": "factory/31",
+  "base": "origin/main",
+  "files": [
+    { "path": "README.md", "added": 2, "deleted": 1 },
+    { "path": "image.png", "added": null, "deleted": null }
+  ],
+  "totals": { "files": 2, "added": 2, "deleted": 1 },
+  "reason": null
+}

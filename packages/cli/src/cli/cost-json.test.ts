@@ -6,6 +6,7 @@ import { readCosts } from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildCostJson } from './cost-json.js';
+import { costJsonSchema } from './json-contract.js';
 
 let dir: string;
 
@@ -40,6 +41,7 @@ describe('buildCostJson', () => {
         row({ model: 'b', cost: 2 }),
       ]),
     );
+    expect(costJsonSchema.parse(json)).toEqual(json);
     expect(json.total).toEqual({ cost: 3.5, unpricedCount: 0 });
     expect(json.perModel[0]).toMatchObject({ model: 'a', tasks: 2, cost: 1.5 });
     expect(json.rows[0]).toEqual({ ...row({}), cacheReadTokens: 3, cacheCreationTokens: 4, cost: 1 });
@@ -55,6 +57,7 @@ describe('buildCostJson', () => {
         row({ model: 'w' }),
       ]),
     );
+    expect(costJsonSchema.parse(json)).toEqual(json);
     expect(json.rows.map((r) => r.cost)).toEqual([2, null, null, null, null]);
     expect(json.total).toEqual({ cost: 2, unpricedCount: 4 });
     expect(json.perModel.find((m) => m.model === 'u')).toMatchObject({ cost: null, unpricedCount: 1 });

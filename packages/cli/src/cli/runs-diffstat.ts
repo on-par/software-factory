@@ -2,36 +2,17 @@ import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 
 import { defaultRemoteBase, readIssueRunState } from '@on-par/factory-core/internal';
+import type { RunDiffstatJson } from './json-contract.js';
+
+/** Machine-readable output of `factory runs --json --diffstat <issue>`; unavailable counts are null. */
+export type { RunDiffstatJson } from './json-contract.js';
 
 /** One changed file. `added`/`deleted` are null for binary files. */
-export interface RunDiffstatFileJson {
-  path: string;
-  added: number | null;
-  deleted: number | null;
-}
+export type RunDiffstatFileJson = NonNullable<RunDiffstatJson['files']>[number];
 
-export interface RunDiffstatTotalsJson {
-  files: number;
-  added: number;
-  deleted: number;
-}
+export type RunDiffstatTotalsJson = NonNullable<RunDiffstatJson['totals']>;
 
-export type RunDiffstatReason = 'branch-missing' | 'base-missing' | 'no-branch';
-
-/**
- * Machine-readable output of `factory runs --json --diffstat <issue>`.
- * Additive changes only; bump schemaVersion on a breaking change.
- * `files`/`totals` are null (with a `reason`) when the diff cannot be computed.
- */
-export interface RunDiffstatJson {
-  schemaVersion: 1;
-  issue: number;
-  branch: string | null;
-  base: string;
-  files: RunDiffstatFileJson[] | null;
-  totals: RunDiffstatTotalsJson | null;
-  reason: RunDiffstatReason | null;
-}
+export type RunDiffstatReason = NonNullable<RunDiffstatJson['reason']>;
 
 /** Runs `git <args>` in cwd without a shell. Resolves stdout; rejects on nonzero exit. */
 export type DiffstatGit = (args: readonly string[], cwd: string) => Promise<string>;

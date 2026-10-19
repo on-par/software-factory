@@ -1,30 +1,14 @@
-import type { QueueOrderLabelProblem, QueueSnapshot } from '@on-par/factory-core/internal';
+import type { QueueSnapshot } from '@on-par/factory-core/internal';
+import type { QueueListJson } from './json-contract.js';
+
+/** `factory queue list --json` payload (#2268); additive changes bump schemaVersion only when breaking. */
+export type { QueueListJson } from './json-contract.js';
 
 /** One item in `factory queue list --json` (#2268). */
-export interface QueueListItemJson {
-  issue: number;
-  title?: string;
-  status: 'queued' | 'in-progress' | 'parked';
-  /** 1-based rank within the lane after sorting by the factory:order label (ties broken by issue number) — not the label value (#3101). */
-  order: number;
-  claimedBy: string | null;
-}
+export type QueueListItemJson = QueueListJson['lanes'][number]['items'][number];
 
-/** A duplicated `factory:order:<n>` position in one lane (#3101), or a skipped issue with a missing or malformed order label (#3192); `order` is the label value, null for a skipped issue. */
-export interface QueueListOrderConflictJson {
-  lane: string;
-  order: number | null;
-  issues: number[];
-  reason?: QueueOrderLabelProblem;
-}
-
-/** `factory queue list --json` payload (#2268). Additive changes only; bump schemaVersion on a breaking change. */
-export interface QueueListJson {
-  schemaVersion: 1;
-  lanes: Array<{ lane: string; items: QueueListItemJson[] }>;
-  /** Duplicated order positions and skipped malformed-label issues (#3192), filtered by `--lane`; additive, present since #3101. */
-  orderConflicts: QueueListOrderConflictJson[];
-}
+/** Duplicated order positions or skipped issues; `order` is null for a skipped issue (#3101, #3192). */
+export type QueueListOrderConflictJson = QueueListJson['orderConflicts'][number];
 
 /**
  * Group the reader's already-sorted entries by lane (lane order preserved) and

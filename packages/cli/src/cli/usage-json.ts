@@ -1,23 +1,14 @@
 import type { SubscriptionUsage } from '@on-par/factory-core';
 import { TRAILING_WINDOW_MS } from '@on-par/factory-core/internal';
+import type { UsageJson } from './json-contract.js';
+
+/** `factory usage --json` payload (#2270); absent readings are null, never 0 (ADR-0099). */
+export type { UsageJson } from './json-contract.js';
 
 /** Hours in the trailing usage window `factory usage` reports on. */
 export const USAGE_WINDOW_HOURS = TRAILING_WINDOW_MS / 3_600_000;
 
-export type UsageJsonSource = 'subscription' | 'heuristic' | 'unavailable';
-
-/** `factory usage --json` payload (#2270). Absent readings are null, never 0 (ADR-0099).
- *  Additive changes only; bump schemaVersion on a breaking change. */
-export interface UsageJson {
-  schemaVersion: 1;
-  source: UsageJsonSource;
-  /** Percent of the window used, 0-100 scale. */
-  utilizationPct: number | null;
-  resetsAt: string | null;
-  windowHours: number;
-  /** Trailing-window list-price estimate in USD. */
-  estimateUsd: number | null;
-}
+export type UsageJsonSource = UsageJson['source'];
 
 /** Builds the `factory usage --json` payload: the real subscription reading when present, else the
  *  list-price heuristic against `cap`, else an explicit `unavailable` record. Numbers are not rounded. */

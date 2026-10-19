@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildRunDiffstatJson, NoRunError, parseDiffstatIssue, parseNumstat } from './runs-diffstat.js';
+import { runDiffstatJsonSchema } from './json-contract.js';
 
 let dir: string;
 let repo: string;
@@ -54,6 +55,7 @@ describe('buildRunDiffstatJson', () => {
 
     const out = await build(7);
 
+    expect(runDiffstatJsonSchema.parse(out)).toEqual(out);
     expect([...(out.files ?? [])].sort((l, r) => l.path.localeCompare(r.path))).toEqual([
       { path: 'a.txt', added: 2, deleted: 1 },
       { path: 'c.txt', added: 3, deleted: 0 },
@@ -79,6 +81,7 @@ describe('buildRunDiffstatJson', () => {
 
     const out = await build(7);
 
+    expect(runDiffstatJsonSchema.parse(out)).toEqual(out);
     expect(out).toMatchObject({ files: null, totals: null, reason: 'branch-missing' });
   });
 
@@ -103,12 +106,15 @@ describe('buildRunDiffstatJson', () => {
   it('returns no-branch for an empty branch', async () => {
     writeState(7, '');
 
-    expect(await build(7)).toMatchObject({ branch: null, files: null, reason: 'no-branch' });
+    const out = await build(7);
+    expect(runDiffstatJsonSchema.parse(out)).toEqual(out);
+    expect(out).toMatchObject({ branch: null, files: null, reason: 'no-branch' });
   });
 
   it('returns base-missing when the base ref does not resolve', async () => {
     const out = await build(7, async () => 'origin/nope');
 
+    expect(runDiffstatJsonSchema.parse(out)).toEqual(out);
     expect(out).toMatchObject({ files: null, totals: null, reason: 'base-missing' });
   });
 
