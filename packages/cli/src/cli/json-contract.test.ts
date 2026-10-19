@@ -1,15 +1,16 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { FactoryEvent } from '@on-par/factory-core';
 import { createLogger } from '@on-par/factory-core';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { buildLogsJson, runLogs } from './logs.js';
 import { buildStatusJson } from './status-json.js';
 import { logsLineJsonSchema, statusJsonSchema, type LogsLineJson, type StatusJson } from './json-contract.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const fixedNow = Date.parse('2026-01-01T00:10:00.000Z');
+const tempDirs = createTempDirs();
 const statusInput = {
   repo: 'acme/widgets',
   product: 'widget-service',
@@ -41,9 +42,10 @@ const statusGolden = JSON.parse(
   readFileSync(new URL('./__fixtures__/json/status.json', import.meta.url), 'utf-8'),
 ) as unknown;
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
   vi.useRealTimers();
+  await tempDirs.cleanup();
 });
 
 describe('JSON wire contracts', () => {
@@ -60,37 +62,33 @@ describe('JSON wire contracts', () => {
   });
 
   it('matches a real cursor-bearing logs line to the golden and validates it', async () => {
-    const directory = mkdtempSync(join(tmpdir(), 'factory-json-contract-'));
+    const directory = tempDirs.makeSync('factory-json-contract-');
     const eventsFile = join(directory, 'events.ndjson');
     vi.setSystemTime(new Date('2026-01-01T00:10:00.000Z'));
-    try {
-      const logger = createLogger(
-        eventsFile,
-        { repo: 'acme/widgets', lane: 'app', phase: 'build', issue: 3175 },
-        {
-          out: { write: () => {} },
-          env: {},
-        },
-      );
-      logger.info('plan', 'Started contract fixture event', {
-        model: 'gpt-6.1-sol',
-        tokens: { input: 42, output: 17 },
-        durationMs: 1250,
-        rework: { round: 1, failingChecks: ['tests'], cause: 'factory-fault' },
-      });
-      const emitted: string[] = [];
-      runLogs(eventsFile, { json: true, limit: 1 }, { out: { write: (line) => emitted.push(line) }, env: {} });
-      expect(emitted).toHaveLength(1);
-      const parsed: unknown = JSON.parse(emitted[0] ?? '');
-      const golden = JSON.parse(
-        readFileSync(new URL('./__fixtures__/json/logs-line.json', import.meta.url), 'utf-8'),
-      ) as unknown;
-      expect(parsed).toEqual(golden);
-      expect(logsLineJsonSchema.parse(parsed)).toEqual(parsed);
-      expect(logsLineJsonSchema.parse(golden)).toEqual(golden);
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
+    const logger = createLogger(
+      eventsFile,
+      { repo: 'acme/widgets', lane: 'app', phase: 'build', issue: 3175 },
+      {
+        out: { write: () => {} },
+        env: {},
+      },
+    );
+    logger.info('plan', 'Started contract fixture event', {
+      model: 'gpt-6.1-sol',
+      tokens: { input: 42, output: 17 },
+      durationMs: 1250,
+      rework: { round: 1, failingChecks: ['tests'], cause: 'factory-fault' },
+    });
+    const emitted: string[] = [];
+    runLogs(eventsFile, { json: true, limit: 1 }, { out: { write: (line) => emitted.push(line) }, env: {} });
+    expect(emitted).toHaveLength(1);
+    const parsed: unknown = JSON.parse(emitted[0] ?? '');
+    const golden = JSON.parse(
+      readFileSync(new URL('./__fixtures__/json/logs-line.json', import.meta.url), 'utf-8'),
+    ) as unknown;
+    expect(parsed).toEqual(golden);
+    expect(logsLineJsonSchema.parse(parsed)).toEqual(parsed);
+    expect(logsLineJsonSchema.parse(golden)).toEqual(golden);
   });
 
   it('accepts legacy lines without cursor or optional fields', () => {
