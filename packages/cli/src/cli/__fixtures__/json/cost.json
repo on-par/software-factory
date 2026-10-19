@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "rows": [
+    {
+      "ts": "2026-01-01T00:00:00.000Z",
+      "issue": "31",
+      "task": "build",
+      "model": "model-a",
+      "inputTokens": 120,
+      "outputTokens": 20,
+      "cacheReadTokens": 12,
+      "cacheCreationTokens": 3,
+      "cost": 1.2345
+    },
+    {
+      "ts": "2026-01-01T00:01:00.000Z",
+      "issue": "32",
+      "task": "check",
+      "model": "model-b",
+      "inputTokens": 80,
+      "outputTokens": 10,
+      "cacheReadTokens": null,
+      "cacheCreationTokens": null,
+      "cost": null
+    }
+  ],
+  "perModel": [
+    { "model": "model-a", "tasks": 1, "inputTokens": 120, "outputTokens": 20, "cost": 1.2345, "unpricedCount": 0 },
+    { "model": "model-b", "tasks": 1, "inputTokens": 80, "outputTokens": 10, "cost": null, "unpricedCount": 1 }
+  ],
+  "total": { "cost": 1.2345, "unpricedCount": 1 }
+}

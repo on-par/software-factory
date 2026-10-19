@@ -13,7 +13,7 @@ import {
   type RunRuntime,
 } from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
+import { daemonStatusJsonSchema } from './json-contract.js';
 import {
   cmdDaemonLogs,
   cmdDaemonStart,
@@ -529,7 +529,7 @@ describe('daemon control commands', () => {
         await cmdDaemonStatus({ ...baseDeps(exec, out), registryFile }, { json: true });
         expect(text().endsWith('\n')).toBe(true);
         expect(text().split('\n')).toHaveLength(2);
-        expect(JSON.parse(text())).toEqual({
+        expect(daemonStatusJsonSchema.parse(JSON.parse(text()))).toEqual({
           schemaVersion: 1,
           running: true,
           pid: 42,

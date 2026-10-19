@@ -87,5 +87,120 @@ export const logsLineJsonSchema = z.object({
   cursor: z.string().optional(),
 });
 
+export const daemonStatusJsonSchema = z.object({
+  schemaVersion: z.literal(1),
+  running: z.boolean(),
+  pid: z.number().nullable(),
+  uptimeSec: z.number().nullable(),
+  plistInstalled: z.boolean(),
+  repos: z.array(
+    z.object({
+      slug: z.string(),
+      checkoutPath: z.string(),
+      state: z.enum(['active', 'paused', 'draining', 'detached']),
+    }),
+  ),
+});
+
+export const queueListJsonSchema = z.object({
+  schemaVersion: z.literal(1),
+  lanes: z.array(
+    z.object({
+      lane: z.string(),
+      items: z.array(
+        z.object({
+          issue: z.number(),
+          title: z.string().optional(),
+          status: z.enum(['queued', 'in-progress', 'parked']),
+          order: z.number(),
+          claimedBy: z.string().nullable(),
+        }),
+      ),
+    }),
+  ),
+  orderConflicts: z.array(
+    z.object({
+      lane: z.string(),
+      order: z.number().nullable(),
+      issues: z.array(z.number()),
+      reason: z.enum(['missing-order-label', 'multiple-order-labels', 'malformed-order-label']).optional(),
+    }),
+  ),
+});
+
+export const usageJsonSchema = z.object({
+  schemaVersion: z.literal(1),
+  source: z.enum(['subscription', 'heuristic', 'unavailable']),
+  utilizationPct: z.number().nullable(),
+  resetsAt: z.string().nullable(),
+  windowHours: z.number(),
+  estimateUsd: z.number().nullable(),
+});
+
+export const costJsonSchema = z.object({
+  schemaVersion: z.literal(1),
+  rows: z.array(
+    z.object({
+      ts: z.string(),
+      issue: z.string(),
+      task: z.string(),
+      model: z.string(),
+      inputTokens: z.number(),
+      outputTokens: z.number(),
+      cacheReadTokens: z.number().nullable(),
+      cacheCreationTokens: z.number().nullable(),
+      cost: z.number().nullable(),
+    }),
+  ),
+  perModel: z.array(
+    z.object({
+      model: z.string(),
+      tasks: z.number(),
+      inputTokens: z.number(),
+      outputTokens: z.number(),
+      cost: z.number().nullable(),
+      unpricedCount: z.number(),
+    }),
+  ),
+  total: z.object({ cost: z.number().nullable(), unpricedCount: z.number() }),
+});
+
+export const runsJsonSchema = z.object({
+  schemaVersion: z.literal(1),
+  runs: z.array(
+    z.object({
+      issue: z.number(),
+      lane: z.string().nullable(),
+      repo: z.string().nullable(),
+      status: z.string().nullable(),
+      phase: z.enum(['plan', 'build', 'check', 'ship']).nullable(),
+      branch: z.string().nullable(),
+      prNumber: z.number().nullable(),
+      model: z.string().nullable(),
+      attempts: z.number().nullable(),
+      startedAt: z.string().nullable(),
+      updatedAt: z.string(),
+    }),
+  ),
+});
+
+export const runDiffstatJsonSchema = z.object({
+  schemaVersion: z.literal(1),
+  issue: z.number(),
+  branch: z.string().nullable(),
+  base: z.string(),
+  files: z
+    .array(z.object({ path: z.string(), added: z.number().nullable(), deleted: z.number().nullable() }))
+    .nullable(),
+  totals: z.object({ files: z.number(), added: z.number(), deleted: z.number() }).nullable(),
+  reason: z.enum(['branch-missing', 'base-missing', 'no-branch']).nullable(),
+});
+
 export type StatusJson = z.infer<typeof statusJsonSchema>;
 export type LogsLineJson = z.infer<typeof logsLineJsonSchema>;
+export type DaemonStatusJson = z.infer<typeof daemonStatusJsonSchema>;
+export type QueueListJson = z.infer<typeof queueListJsonSchema>;
+export type UsageJson = z.infer<typeof usageJsonSchema>;
+export type CostJson = z.infer<typeof costJsonSchema>;
+export type RunsJson = z.infer<typeof runsJsonSchema>;
+export type RunDiffstatJson = z.infer<typeof runDiffstatJsonSchema>;

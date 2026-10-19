@@ -24,12 +24,13 @@ import {
   listRepos,
   loadRegistry,
   readRunLockHolder,
-  type RepoState,
   type RunRuntime,
 } from '@on-par/factory-core/internal';
 import { defaultIsPidAlive, getFactoryPaths } from '@on-par/factory-core';
 
 import { bootstrapFailureMessage, reloadLaunchAgent } from './daemon-launchctl.js';
+import type { DaemonStatusJson } from './json-contract.js';
+export type { DaemonStatusJson } from './json-contract.js';
 import { runSelfUpdateCommand } from './self-update-exec.js';
 import { clearSelfUpdateStops, writeSelfUpdateStop } from './self-update-stop.js';
 import {
@@ -289,16 +290,6 @@ export function renderFactorydPlist(opts: { nodePath: string; cliScriptPath: str
 }
 
 /** Extracts the running pid from `launchctl print gui/<uid>/<label>` output. */
-/** `factory daemon status --json` payload (#2267). Additive changes only; bump schemaVersion on a breaking change. */
-export interface DaemonStatusJson {
-  schemaVersion: 1;
-  running: boolean;
-  pid: number | null;
-  uptimeSec: number | null;
-  plistInstalled: boolean;
-  repos: Array<{ slug: string; checkoutPath: string; state: RepoState }>;
-}
-
 /** ps `etime` ([[dd-]hh:]mm:ss) → whole seconds; null when empty or malformed. */
 export function parseEtime(etime: string): number | null {
   const m = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(etime.trim());

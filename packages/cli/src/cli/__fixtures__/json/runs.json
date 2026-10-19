@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "runs": [
+    {
+      "issue": 31,
+      "lane": "api",
+      "repo": "acme/api",
+      "status": "running",
+      "phase": "check",
+      "branch": "factory/31",
+      "prNumber": 98,
+      "model": "model-a",
+      "attempts": 2,
+      "startedAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:06:00.000Z"
+    },
+    {
+      "issue": 32,
+      "lane": null,
+      "repo": null,
+      "status": null,
+      "phase": "plan",
+      "branch": null,
+      "prNumber": null,
+      "model": null,
+      "attempts": null,
+      "startedAt": null,
+      "updatedAt": "2026-01-01T00:04:00.000Z"
+    }
+  ]
+}

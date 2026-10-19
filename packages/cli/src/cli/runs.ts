@@ -2,36 +2,17 @@ import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { readPhaseSnapshot, type RunPhaseSnapshot } from '@on-par/factory-core';
-import {
-  readIssueRunState,
-  type FailurePhase,
-  type IssueRunState,
-  type RunStatus,
-} from '@on-par/factory-core/internal';
+import { readIssueRunState, type IssueRunState } from '@on-par/factory-core/internal';
+import type { RunsJson } from './json-contract.js';
+
+/** `factory runs --json` payload (#2271); additive changes bump schemaVersion only when breaking. */
+export type { RunsJson } from './json-contract.js';
 
 /** Row cap when `--limit` is not given. */
 export const DEFAULT_RUNS_LIMIT = 50;
 
 /** One row of `factory runs --json` (#2271). Unknown values are null, never omitted. */
-export interface RunsRowJson {
-  issue: number;
-  lane: string | null;
-  repo: string | null;
-  status: RunStatus | null;
-  phase: FailurePhase | null;
-  branch: string | null;
-  prNumber: number | null;
-  model: string | null;
-  attempts: number | null;
-  startedAt: string | null;
-  updatedAt: string;
-}
-
-/** `factory runs --json` payload (#2271). Additive changes only; bump schemaVersion on a breaking change. */
-export interface RunsJson {
-  schemaVersion: 1;
-  runs: RunsRowJson[];
-}
+export type RunsRowJson = RunsJson['runs'][number];
 
 /** Parse `--limit`: absent → the default, otherwise a positive integer or an Error. */
 export function parseRunsLimit(raw: string | undefined): number {
@@ -119,7 +100,7 @@ export async function buildRunsJson(
       issue,
       lane: str(state?.lane),
       repo: str(state?.repo),
-      status: str(state?.status) as RunStatus | null,
+      status: str(state?.status),
       phase: snapshot?.phase ?? null,
       branch: str(state?.branch),
       prNumber: num(state?.prNumber),

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "lanes": [
+    {
+      "lane": "api",
+      "items": [
+        { "issue": 31, "title": "Ship API", "status": "in-progress", "order": 1, "claimedBy": "worker-a" },
+        { "issue": 32, "title": "Add tests", "status": "queued", "order": 2, "claimedBy": null }
+      ]
+    },
+    { "lane": "web", "items": [{ "issue": 40, "status": "parked", "order": 1, "claimedBy": null }] }
+  ],
+  "orderConflicts": [
+    { "lane": "api", "order": 1, "issues": [31, 32] },
+    { "lane": "web", "order": null, "issues": [41], "reason": "missing-order-label" }
+  ]
+}

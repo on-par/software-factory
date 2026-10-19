@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { QueueSnapshot } from '@on-par/factory-core/internal';
 import { buildQueueListJson } from './queue-list.js';
+import { queueListJsonSchema } from './json-contract.js';
 
 const snapshot: QueueSnapshot = {
   entries: [
@@ -12,7 +13,9 @@ const snapshot: QueueSnapshot = {
 
 describe('buildQueueListJson', () => {
   it('groups by lane in reader order with 1-based order', () => {
-    expect(buildQueueListJson(snapshot)).toEqual({
+    const output = buildQueueListJson(snapshot);
+    expect(queueListJsonSchema.parse(output)).toEqual(output);
+    expect(output).toEqual({
       schemaVersion: 1,
       lanes: [
         { lane: 'access', items: [{ issue: 7, title: 'Seven', status: 'queued', order: 1, claimedBy: null }] },
@@ -62,7 +65,9 @@ describe('buildQueueListJson', () => {
   });
 
   it('handles an empty snapshot', () => {
-    expect(buildQueueListJson({ entries: [] })).toEqual({ schemaVersion: 1, lanes: [], orderConflicts: [] });
+    const output = buildQueueListJson({ entries: [] });
+    expect(queueListJsonSchema.parse(output)).toEqual(output);
+    expect(output).toEqual({ schemaVersion: 1, lanes: [], orderConflicts: [] });
   });
 
   it('omits title when absent and defaults status to queued', () => {

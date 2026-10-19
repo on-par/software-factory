@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "source": "subscription",
+  "utilizationPct": 47.25,
+  "resetsAt": "2026-01-01T05:00:00.000Z",
+  "windowHours": 5,
+  "estimateUsd": 12.345
+}
