@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "repo": "acme/widgets",
+  "product": "widget-service",
+  "stop": true,
+  "stopInfo": {
+    "source": "usage-watchdog",
+    "setAt": "2026-01-01T00:09:00.000Z"
+  },
+  "breaker": {
+    "open": true,
+    "providers": [
+      {
+        "provider": "openai",
+        "reason": "usage_cap",
+        "openedAt": "2026-01-01T00:08:29.500Z",
+        "remainingSec": 91
+      }
+    ]
+  },
+  "active": [
+    {
+      "lane": "app",
+      "issue": 3175,
+      "phase": "build",
+      "ageSec": 125
+    }
+  ],
+  "update": {
+    "mode": "stable",
+    "channel": "latest",
+    "installKind": "npm-global",
+    "current": "0.9.4",
+    "available": "0.9.5",
+    "lastCheckAt": "2026-01-01T00:00:00.000Z",
+    "lastResult": {
+      "at": "2025-12-31T23:55:00.000Z",
+      "version": "0.9.3",
+      "outcome": "failed",
+      "error": "network unavailable"
+    },
+    "draining": {
+      "since": "2026-01-01T00:05:00.000Z",
+      "target": "0.9.5",
+      "stopFiles": ["/tmp/lane-a/STOP"]
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "ts": "2026-01-01T00:10:00.000Z",
+  "type": "plan",
+  "issue": "3175",
+  "msg": "Started contract fixture event",
+  "level": "info",
+  "lane": "app",
+  "repo": "acme/widgets",
+  "phase": "build",
+  "rework": {
+    "round": 1,
+    "failingChecks": ["tests"],
+    "cause": "factory-fault"
+  },
+  "model": "gpt-6.1-sol",
+  "tokens": {
+    "input": 42,
+    "output": 17
+  },
+  "durationMs": 1250,
+  "cursor": "c1.eyJ2IjoxLCJzIjowLCJvIjozMTN9"
+}

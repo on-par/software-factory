@@ -9,6 +9,7 @@ import {
   readEventsSince,
   readEventsTail,
 } from '@on-par/factory-core/internal';
+import type { LogsLineJson } from './json-contract.js';
 
 export interface LogsOptions {
   follow?: boolean;
@@ -31,12 +32,16 @@ export interface LogsDeps {
   onBytesRead?: (n: number) => void;
 }
 
+export function buildLogsJson(event: FactoryEvent, extra: { cursor?: string } = {}): LogsLineJson {
+  return { ...event, ...extra };
+}
+
 export function eventMatchesIssue(e: FactoryEvent, issue?: string): boolean {
   return !issue || e.issue === issue;
 }
 
 export function renderEvent(e: FactoryEvent, opts: { json?: boolean; color: boolean }): string {
-  if (opts.json) return JSON.stringify(e);
+  if (opts.json) return JSON.stringify(buildLogsJson(e));
   return formatEventLine(e.type, e.issue, e.msg, { color: opts.color, lane: e.lane, ts: e.ts });
 }
 
@@ -57,7 +62,10 @@ export function runLogs(eventsFile: string, opts: LogsOptions, deps: LogsDeps = 
         : undefined;
   if (page) {
     for (const { event, cursor } of page.events) {
-      out.write((opts.json ? JSON.stringify({ ...event, cursor }) : renderEvent(event, { json: false, color })) + '\n');
+      out.write(
+        (opts.json ? JSON.stringify(buildLogsJson(event, { cursor })) : renderEvent(event, { json: false, color })) +
+          '\n',
+      );
     }
     if (!opts.follow) return () => {};
     return followEvents(

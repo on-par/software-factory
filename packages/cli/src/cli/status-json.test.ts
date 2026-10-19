@@ -6,6 +6,7 @@ import { createTempDirs } from '@on-par/factory-core/testing';
 import { describe, expect, it } from 'vitest';
 
 import { buildStatusJson } from './status-json.js';
+import { statusJsonSchema } from './json-contract.js';
 
 const temp = createTempDirs();
 const now = Date.parse('2026-01-01T00:10:00.000Z');
@@ -49,6 +50,7 @@ describe('buildStatusJson', () => {
       'active',
       'update',
     ]);
+    expect(statusJsonSchema.parse(out)).toEqual(out);
   });
 
   it('reports closed breaker, no claims and null product', () => {
@@ -66,6 +68,7 @@ describe('buildStatusJson', () => {
     expect(out.active).toEqual([]);
     expect(out.product).toBeNull();
     expect(out.stop).toBe(false);
+    expect(statusJsonSchema.parse(out)).toEqual(out);
   });
 
   it('clamps future and unparsable activity times to 0', () => {
@@ -83,6 +86,7 @@ describe('buildStatusJson', () => {
       now,
     });
     expect(out.active.map((r) => r.ageSec)).toEqual([0, 0]);
+    expect(statusJsonSchema.parse(out)).toEqual(out);
   });
 
   it('copies a populated update object through', () => {
