@@ -995,11 +995,12 @@ describe('ModelRouter sandbox threading', () => {
     };
     const router = new ModelRouter(models, routes, false, executor);
     router.setCodexFullAccessTasks(['build_codex']);
-
+    router.setCodexWorkspacePaths({ primaryRepoRoot: '/repo', writableRoots: ['/repo/.factory/state'] });
     await router.run('plan', 'do it');
-
     expect(seenCtx[0].sandbox).toBeUndefined();
     expect(seenCtx[0].codexFullAccessTasks).toEqual(['build_codex']);
+    expect(seenCtx[0].writableRoots).toEqual(['/repo/.factory/state']);
+    expect(seenCtx[0].primaryRepoRoot).toBe('/repo');
   });
 
   it('invokes onSandboxEvent for a sandbox_violation and still fails over as before', async () => {

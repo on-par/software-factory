@@ -66,10 +66,11 @@ describe('CodexCliHarness full-access config', () => {
     expect(rec.calls).toHaveLength(2);
     expect(rec.calls[0].cmd).toContain('--sandbox workspace-write');
     expect(rec.calls[0].cmd).not.toContain('--sandbox danger-full-access');
-    expect(lines).toHaveLength(1);
     expect(lines[0]).toBe(
       'codex: refused --sandbox danger-full-access for task plan: not opted in by config (sandbox.codexFullAccessTasks)',
     );
+    expect(lines[1]).toBe('codex: workspace-write for task plan (network github, writable roots: (none))');
+    expect(lines).toHaveLength(2);
   });
 
   it('grants a config-listed task and logs the config opt-in once', async () => {
@@ -104,7 +105,9 @@ describe('CodexCliHarness full-access config', () => {
     expect(rec.calls[0].cmd).toContain('--sandbox workspace-write');
     expect(rec.calls[0].cmd).not.toContain('danger-full-access');
     expect(rec.calls[1].cmd).toContain('--sandbox workspace-write');
-    expect(log).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(
+      'codex: workspace-write for task build_codex (network off, writable roots: (none))',
+    );
   });
 });
 

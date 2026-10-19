@@ -86,6 +86,15 @@ describe('shipIssue (direct)', () => {
     expect(events).not.toContain('sandbox-unavailable');
   });
 
+  it('passes the resolved state root into the outer sandbox for PLAN', async () => {
+    h.factoryConfig = {
+      ...h.factoryConfig,
+      sandbox: { ...h.factoryConfig.sandbox, runtime: 'sandbox-exec', network: { allow: [] } },
+    };
+    await shipIssue(5, {}, ctx());
+    expect(phases.planPhase.mock.calls.at(-1)?.[0].sandbox?.writablePaths).toContain(paths().state);
+  });
+
   describe('report-only egress proxy (#2214)', () => {
     const refused = (port: number): Promise<string> =>
       new Promise((res) => {

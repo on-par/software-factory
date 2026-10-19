@@ -307,6 +307,7 @@ export async function shipIssue(
   const sandboxPolicy = resolveSandboxPolicy(policy.sandbox, {
     worktree,
     repoRoot,
+    factoryStateDir: paths.state,
     cliDisabled: opts.sandbox === false,
     laneId: lane,
     isAvailable: (cmd) => isCommandAvailableViaShell(shell, cmd),
@@ -317,7 +318,6 @@ export async function shipIssue(
   });
   const activeSandboxPolicy = logSandboxPolicy(opts, sandboxPolicy, log);
 
-  // Setup worktree FIRST — PLAN needs cwd=worktree. Cleanup stays a CLI concern: the worktree persists for GC/sweep.
   const workspace = await setupRunWorkspace({
     ctx,
     repoRoot,

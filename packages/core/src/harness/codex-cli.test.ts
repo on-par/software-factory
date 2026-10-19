@@ -138,7 +138,7 @@ describe('CodexCliHarness command shape', () => {
     expect(result.output).toBe('CODEX OUTPUT');
     expect(rec.calls).toHaveLength(1);
     const { cmd, opts } = rec.calls[0];
-    expect(cmd).toMatch(/^codex exec --json --sandbox workspace-write -c approval_policy=never -C '/);
+    expect(cmd).toContain('approval_policy=never -c sandbox_workspace_write.network_access=false -C');
     expect(cmd).toContain("-C '/tmp/factory worktree'");
     expect(cmd).toContain('--model gpt-5-codex');
     expect(cmd).toMatch(/ -o '\/.*factory-codex-out-[^']+' - </);
@@ -151,10 +151,9 @@ describe('CodexCliHarness command shape', () => {
   it('omits the model flag when none is configured, still parses', async () => {
     const rec = successExec();
     const harness = new CodexCliHarness(rec.fn);
-
     await harness.run(makeContractRequest({ model: 'codex-no-flag', registry, prompt: 'build it' }));
     expect(rec.calls).toHaveLength(1);
-    expect(rec.calls[0].cmd).toMatch(/^codex exec --json --sandbox workspace-write -c approval_policy=never -C '/);
+    expect(rec.calls[0].cmd).toContain('network_access=false -C');
     expect(rec.calls[0].cmd).not.toContain('--model');
   });
 
@@ -197,7 +196,6 @@ describe('CodexCliHarness command shape', () => {
   it('uses the outer wrapper when present and Codex workspace-write for runtime none', async () => {
     const rec = recordingExec();
     const harness = new CodexCliHarness(rec.fn);
-
     await harness
       .run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it', sandbox: sandboxPolicy }))
       .catch(() => {});
@@ -205,11 +203,13 @@ describe('CodexCliHarness command shape', () => {
     expect(rec.calls[0].cmd.startsWith('sandbox-exec -p ')).toBe(true);
     expect(rec.calls[0].cmd).toContain('codex exec --json --sandbox workspace-write');
     const none = { ...sandboxPolicy, runtime: 'none' as const, allowHosts: ['example.com'] };
-    await harness.run(makeContractRequest({ model: 'codex-model', registry, sandbox: none })).catch(() => {});
+    const request = makeContractRequest({ model: 'codex-model', registry, task: 'plan', sandbox: none });
+    await harness.run(request).catch(() => {});
     expect(rec.calls[1].cmd).toMatch(/^codex exec --json --sandbox workspace-write /);
     expect(rec.calls[1].cmd).toContain('-c sandbox_workspace_write.network_access=true');
     expect(rec.calls[1].cmd).toContain('-c features.network_proxy.enabled=true');
-    expect(rec.calls[1].cmd).toContain('features.network_proxy.domains={"example.com"="allow"}');
+    expect(rec.calls[1].cmd).toContain('"example.com"="allow"');
+    expect(rec.calls[1].cmd).toContain('"api.github.com"="allow"');
   });
 });
 

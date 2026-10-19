@@ -101,6 +101,8 @@ export interface ModelExecutorContext {
   registry: ModelRegistry;
   routesConfig: RoutesConfig;
   sandbox?: SandboxPolicy;
+  writableRoots?: readonly string[];
+  primaryRepoRoot?: string;
   codexFullAccessTasks?: readonly string[];
   /** Extra child-env vars (e.g. the lane's PORT lease) merged over the parent env. */
   env?: Record<string, string>;
@@ -113,24 +115,14 @@ export interface ModelExecutorContext {
   onUsage?: (usage: HarnessUsage) => void;
 }
 
-/** Executes a single resolved model. On failure, implementations should
- *  throw a ModelExecutorError (or let a HarnessError propagate) so the
- *  router can read a typed `reason`; plain Errors are classified from
- *  stderr/exit code as an intentional fallback. runModel must resolve
- *  only with non-empty (trimmed) output — empty provider output must
- *  surface as a typed error (HarnessError or ModelExecutorError) with
- *  reason 'empty_response', never as a resolved empty string. */
+/** Execute one model; failure and empty output must surface as typed errors. */
 export interface ModelExecutor {
   runModel(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string>;
   /** Optional: report whether the Ollama endpoint answers. Executors that omit it never have Ollama models skipped. */
   probeOllama?(): Promise<OllamaProbeResult>;
 }
 
-/** A dispatch-map entry in CliModelExecutor: runs one model through one harness.
- *  This is the executor-internal seam (string in/out), not the CodingHarness
- *  contract — injected fakes only need to implement run(). Implementations
- *  must uphold the same non-empty-output guarantee as ModelExecutor: never
- *  resolve with empty output, surface it as a typed 'empty_response' error. */
+/** Executor-internal harness seam; empty output must raise an error. */
 export interface ExecutorHarness {
   run(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string>;
 }
@@ -231,6 +223,8 @@ export class CliModelExecutor implements ModelExecutor {
       | 'task'
       | 'registry'
       | 'sandbox'
+      | 'writableRoots'
+      | 'primaryRepoRoot'
       | 'codexFullAccessTasks'
       | 'env'
       | 'onPgid'
@@ -245,6 +239,8 @@ export class CliModelExecutor implements ModelExecutor {
       task: ctx.task,
       registry: ctx.registry,
       sandbox: ctx.sandbox,
+      writableRoots: ctx.writableRoots,
+      primaryRepoRoot: ctx.primaryRepoRoot,
       codexFullAccessTasks: ctx.codexFullAccessTasks,
       env: ctx.env,
       onPgid: ctx.onPgid,
@@ -574,6 +570,7 @@ export class ModelRouter {
   private readonly missingHarnessNoticed = new Set<string>();
   private localAuthSink?: (agent: LocalAuthAgent) => void;
   private codexFullAccessTasks: readonly string[] = [];
+  private codexWorkspacePaths?: { primaryRepoRoot: string; writableRoots: readonly string[] };
 
   constructor(
     modelsConfig: ModelsConfig,
@@ -595,6 +592,11 @@ export class ModelRouter {
   /** Resolved config allowlist, available even when the OS sandbox is disabled. */
   setCodexFullAccessTasks(tasks: readonly string[] | undefined): void {
     this.codexFullAccessTasks = [...(tasks ?? [])];
+  }
+
+  /** Factory paths resolved for this run, separate from the OS sandbox's broader paths. */
+  setCodexWorkspacePaths(paths: { primaryRepoRoot: string; writableRoots: readonly string[] }): void {
+    this.codexWorkspacePaths = paths;
   }
 
   /** Skip models whose harness CLI is not on PATH (for example claude-cli models on a machine
@@ -711,11 +713,7 @@ export class ModelRouter {
     return classifyFailure(stderr, exitCode);
   }
 
-  /**
-   * Run a model with failover.
-   * Tries the resolved model; on failure, classifies and fails over to the next.
-   * Returns the model that succeeded and the output.
-   */
+  /** Try resolved models in order, returning the first successful output. */
   async run(
     task: TaskType,
     prompt: string,
@@ -835,6 +833,7 @@ export class ModelRouter {
             registry: this.registry,
             routesConfig: this.routesConfig,
             sandbox,
+            ...this.codexWorkspacePaths,
             codexFullAccessTasks: this.codexFullAccessTasks,
             env,
             onPgid,

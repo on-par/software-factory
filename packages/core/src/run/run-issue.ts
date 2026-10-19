@@ -142,6 +142,8 @@ export interface RunRequest {
   efficiency: { maxReworkRounds: number; fastPath: boolean };
   /** Sandbox containment already resolved against this run's worktree/repoRoot. */
   sandboxPolicy?: SandboxPolicy;
+  /** Resolved primary checkout paths for Codex workspace-write. */
+  codexWorkspacePaths?: { primaryRepoRoot: string; writableRoots: readonly string[] };
   /** Grace period before escalating to SIGKILL when tearing down tracked process groups. */
   processGroupGraceMs: number;
   /** Repo config pins the build route; forced after PLAN so the frozen spec stays authoritative. */
@@ -303,6 +305,7 @@ async function runIssueOnce(
   observed: { checkSummary?: CheckSummary },
 ): Promise<RunOutcome> {
   let request = initialRequest;
+  if (request.codexWorkspacePaths) ports.router.setCodexWorkspacePaths?.(request.codexWorkspacePaths);
   const planPhase = ports.planPhase ?? planPhaseDefault;
   const slot = ports.hostBuildSlot ?? ((_phase, fn) => fn());
   const buildPhase: typeof buildPhaseDefault = (o) => slot('build', () => (ports.buildPhase ?? buildPhaseDefault)(o));

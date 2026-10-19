@@ -12,7 +12,7 @@
 // the containment boundary, so it is not a command prefix and wraps nothing here.
 
 import { homedir, tmpdir } from 'node:os';
-import { resolve } from 'node:path';
+import { isAbsolute, relative, resolve } from 'node:path';
 
 import type { FactoryConfig } from '../config/index.js';
 import { HarnessError } from '../harness/index.js';
@@ -147,6 +147,8 @@ export function resolveSandboxPolicy(
   opts: {
     worktree: string;
     repoRoot: string;
+    /** Resolved factory state directory; may be relocated outside the checkout. */
+    factoryStateDir?: string;
     cliDisabled?: boolean;
     env?: NodeJS.ProcessEnv;
     platform?: NodeJS.Platform;
@@ -174,8 +176,14 @@ export function resolveSandboxPolicy(
     : resolveRolloutRuntime(opts.laneId, cfg.docker?.rolloutPercent ?? 0);
   const effectiveRuntime = rollout ?? runtime;
 
+  const factoryState =
+    opts.factoryStateDir && isAbsolute(opts.factoryStateDir) ? resolve(opts.factoryStateDir) : undefined;
+  const fromStateToRepo = factoryState === undefined ? undefined : relative(factoryState, resolve(opts.repoRoot));
+  const safeFactoryState =
+    fromStateToRepo !== undefined && (fromStateToRepo.startsWith('..') || isAbsolute(fromStateToRepo));
   const writablePaths = dedupeAbsolutePaths([
     opts.worktree,
+    ...(safeFactoryState && factoryState ? [factoryState] : []),
     resolve(opts.repoRoot, '.git'),
     tmp,
     resolve(home, '.claude'),

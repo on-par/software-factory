@@ -48,6 +48,10 @@ export interface HarnessRequest {
   registry: ModelRegistry;
   /** When set, the harness wraps its CLI invocation in this containment policy. */
   sandbox?: SandboxPolicy;
+  /** Factory-owned paths outside the worktree that this task may write. */
+  writableRoots?: readonly string[];
+  /** Primary checkout root, used to reject a writable root that grants the whole checkout. */
+  primaryRepoRoot?: string;
   /** Configured Codex task names allowed danger-full-access, independent of OS sandbox policy. */
   codexFullAccessTasks?: readonly string[];
   /** Extra child-env vars (e.g. the lane's PORT lease) merged over the parent env. */

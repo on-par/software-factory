@@ -4,10 +4,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-
 import type { Octokit } from '@octokit/rest';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import { parseSlicePlanComment, renderSlicePlanComment, type SlicePlan } from '../readiness/slice-plan.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.js';
@@ -31,20 +29,16 @@ import { writeSpec } from '../spec/index.js';
 import { schemaErrorCheckerOutput } from '../checkers/index.js';
 import { preflightConfigTokens } from '../config/template-tokens.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
-
 const planPhase = vi.fn<typeof realPlanPhase>();
 const buildPhase = vi.fn<typeof realBuildPhase>();
 const checkPhase = vi.fn<typeof realCheckPhase>();
 const shipPhase = vi.fn<typeof realShipPhase>();
-
 const execFile = promisify(execFileCb);
-
 const PLAN_OK: PlanResult = { ok: true, route: 'codex', specPath: '/tmp/wt/spec.md', model: 'm', designArtifact: null };
 const BUILD_OK: BuildResult = { ok: true, model: 'm', route: 'codex' };
 const CHECK_SUMMARY: CheckSummary = { failures: 0, passes: 1, skips: 0, total: 1, results: [] };
 const CHECK_OK: CheckPhaseResult = { passed: true, summary: CHECK_SUMMARY, reworkRounds: 0 };
 const SHIP_OK: ShipResult = { ok: true, prNumber: 42 };
-
 const WORK: WorkRequest = {
   id: 'github-issue:o/r#1',
   kind: 'github-issue',
@@ -81,9 +75,7 @@ const ROUTES: RoutesConfig = {
   },
 };
 
-/** A real ModelRouter (matching the rest of core's tests, e.g. phases/build.test.ts)
- *  over a minimal in-memory model set — avoids hand-rolling a partial ModelRouter
- *  double, which the codebase's structural-typing lint forbids for a class this shaped. */
+/** Minimal real router; structural typing forbids a partial class double. */
 function fakeRouter(modelDefs: Record<string, { provider: string; codex?: boolean }> = {}): ModelRouter {
   const models: ModelsConfig = {
     version: 1,
@@ -164,6 +156,14 @@ beforeEach(() => {
 });
 
 describe('runIssue — recorded remote branch SHA (#1869)', () => {
+  it('configures the real router with the state and git roots before PLAN', async () => {
+    const router = fakeRouter();
+    const paths = { primaryRepoRoot: '/repo', writableRoots: ['/repo/.factory/state', '/repo/.git'] };
+    const setPaths = vi.spyOn(router, 'setCodexWorkspacePaths');
+    await runIssue(baseRequest({ codexWorkspacePaths: paths }), basePolicy(), basePorts({ router }));
+    expect(setPaths).toHaveBeenCalledWith(paths);
+    expect(vi.mocked(planPhase).mock.calls[0][0].router).toBe(router);
+  });
   it('threads the recorded remote SHA into shipPhase, undefined without a record', async () => {
     const sandboxPolicy = { runtime: 'none' } as SandboxPolicy;
     await runIssue(baseRequest({ sandboxPolicy }), basePolicy(), basePorts());
