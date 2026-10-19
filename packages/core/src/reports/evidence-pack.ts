@@ -4,7 +4,7 @@ import type { PrClassifierClaim, PrShadowVerdict } from '../review/classifier.js
 import type { ReviewRouting } from '../review/routing.js';
 import { renderCheckerFindings } from '../checkers/index.js';
 import { specPaths } from '../spec/index.js';
-import type { CheckSummary, FactoryEvent } from '../types/index.js';
+import type { CheckSummary, CheckerOutput, FactoryEvent } from '../types/index.js';
 import { readIssueEvents } from './local-run.js';
 
 const REWORK_EVENT_TYPES = new Set(['rework', 'check', 'ship', 'ready']);
@@ -77,6 +77,14 @@ export function renderEvidencePack(input: EvidencePackRenderInput): string {
             .join('\n')
         : '- No checker results recorded.',
     ),
+    ...(checkSummary?.results.some((result) => result.checker === 'evidence_plan')
+      ? [
+          section(
+            'Evidence plan',
+            renderEvidencePlan(checkSummary.results.find((result) => result.checker === 'evidence_plan')!),
+          ),
+        ]
+      : []),
     ...(pinNotes && pinNotes.length > 0
       ? [section('Model pins', pinNotes.map((note) => `- ⚠️ ${note}`).join('\n'))]
       : []),
@@ -102,6 +110,29 @@ export function renderEvidencePack(input: EvidencePackRenderInput): string {
         : '- No per-issue log files found.',
     ),
   ].join('\n');
+}
+
+function renderEvidencePlan(output: CheckerOutput): string {
+  const results = output.evidencePlanResults ?? [];
+  if (results.length === 0) return `- ${markdownOneLine(output.details)}`;
+  return results
+    .map(
+      (result) =>
+        `- ${markdownOneLine(result.claim)} [${result.kind}] ${result.status}: ${markdownOneLine(result.reason)}`,
+    )
+    .join('\n');
+}
+
+function markdownOneLine(value: string): string {
+  return value
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\\/g, '\\\\')
+    .replace(/\[/g, '\\[')
+    .replace(/\]/g, '\\]')
+    .replace(/([`*_{}()#+.!|>])/g, '\\$1');
 }
 
 export function gatherEvidencePack(input: EvidencePackGatherInput): string {
