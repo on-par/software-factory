@@ -401,6 +401,7 @@ export function buildRunRequest({
     failover: failoverSettings,
     efficiency: { maxReworkRounds: efficiency.maxReworkRounds, fastPath: efficiency.fastPath },
     sandboxPolicy: activeSandboxPolicy,
+    codexWorkspacePaths: { primaryRepoRoot: repoRoot, writableRoots: [paths.state, resolve(repoRoot, '.git')] },
     processGroupGraceMs,
     preferredRoute: repoConfig?.route,
     ...(ctx?.resumeFrom

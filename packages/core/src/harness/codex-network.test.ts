@@ -130,6 +130,7 @@ describe('CodexCliHarness workspace-write network mapping', () => {
           registry,
           prompt: 'build it',
           sandbox: { ...sandboxPolicy, runtime, allowHosts },
+          task: 'plan',
         }),
       )
       .catch(() => {});
@@ -145,19 +146,43 @@ describe('CodexCliHarness workspace-write network mapping', () => {
         'codex exec --json --sandbox workspace-write -c approval_policy=never -c sandbox_workspace_write.network_access=true -c features.network_proxy.enabled=true',
       ),
     ).toBe(true);
-    expect(domainKeys(cmd)).toEqual(hosts);
+    expect(domainKeys(cmd)).toEqual(
+      [
+        ...new Set([
+          ...hosts,
+          'github.com',
+          'api.github.com',
+          'uploads.github.com',
+          'codeload.github.com',
+          'objects.githubusercontent.com',
+          'raw.githubusercontent.com',
+        ]),
+      ].sort(),
+    );
   });
 
   it('does the same for docker-sandbox', async () => {
     const cmd = await cmdFor('docker-sandbox', hosts);
     expect(cmd).toContain('-c features.network_proxy.enabled=true');
-    expect(domainKeys(cmd)).toEqual(hosts);
+    expect(domainKeys(cmd)).toEqual(
+      [
+        ...new Set([
+          ...hosts,
+          'github.com',
+          'api.github.com',
+          'uploads.github.com',
+          'codeload.github.com',
+          'objects.githubusercontent.com',
+          'raw.githubusercontent.com',
+        ]),
+      ].sort(),
+    );
   });
 
-  it('keeps codex network off for an empty allowlist', async () => {
+  it('allows only GitHub for a network task with an empty allowlist', async () => {
     const cmd = await cmdFor('none', []);
-    expect(cmd).toContain('-c sandbox_workspace_write.network_access=false');
-    expect(cmd).not.toContain('network_proxy');
+    expect(cmd).toContain('-c sandbox_workspace_write.network_access=true');
+    expect(domainKeys(cmd)).toContain('api.github.com');
   });
 
   it('leaves sandbox-exec and firejail commands unchanged', async () => {

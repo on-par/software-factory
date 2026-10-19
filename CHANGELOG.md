@@ -6,6 +6,11 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- Codex PLAN can write its spec under the resolved factory state directory, and
+  worktree commits can update the primary repo's `.git` metadata. Codex grants
+  GitHub egress to PLAN and publishing build tasks, keeps the configured
+  allowlist for other agentic build tasks, and runs judges and classifiers
+  without network access (#3249).
 - The end-of-run KPI snapshot no longer exhausts the GitHub REST rate limit.
   It used to make about 800 calls per run (3 list pages, plus commits and
   reviews for every factory PR, plus `pulls.get` for every merged one). Now
