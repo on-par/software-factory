@@ -17,6 +17,11 @@ export interface EvidencePlanResult {
   passWhenNotMachineChecked?: boolean;
 }
 
+export interface EvidenceCommandLifecycle {
+  beforeCommand(): Promise<void>;
+  afterCommand(command: string, pgids: readonly number[]): Promise<void>;
+}
+
 export type EvidenceRunnerContext = Pick<
   CheckerContext,
   'worktree' | 'sandbox' | 'env' | 'onPgid' | 'runCommand' | 'testsTimeoutSeconds'
@@ -101,17 +106,25 @@ async function execute(
   argv: string[],
   policy: SandboxPolicy,
   ctx: EvidenceRunnerContext,
+  lifecycle?: EvidenceCommandLifecycle,
 ): Promise<EvidencePlanResult> {
   const timeoutSeconds = ctx.testsTimeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
   const command = wrapCommandInSandbox(argv.map(shellEscape).join(' '), policy);
   const env: Record<string, string | undefined> = { ...ctx.env, FACTORY_RUN_CONFIG_JSON: undefined };
+  const pgids: number[] = [];
   const options: RunCommandOptions = {
     cwd: ctx.worktree,
     env,
     timeoutMs: timeoutSeconds * 1000,
-    onPgid: (pgid) => ctx.onPgid?.(pgid),
+    onPgid: (pgid) => {
+      pgids.push(pgid);
+      ctx.onPgid?.(pgid);
+    },
   };
+  let started = false;
   try {
+    await lifecycle?.beforeCommand();
+    started = true;
     const run = ctx.runCommand ?? runVerificationCommand;
     const outcome = await run(['/bin/sh', '-c', command], options);
     const outputTail = tail(outcome.stdout, outcome.stderr);
@@ -137,6 +150,12 @@ async function execute(
   } catch (error) {
     const message = (error instanceof Error ? error.message : String(error)).slice(-OUTPUT_LIMIT);
     return result(entry, 'FAIL', `execution error: ${message}`);
+  } finally {
+    if (started) {
+      const label =
+        entry.kind === 'command' ? entry.command : entry.kind === 'fail-to-pass-test' ? entry.test : entry.kind;
+      await lifecycle?.afterCommand(label, pgids).catch(() => {});
+    }
   }
 }
 
@@ -144,6 +163,7 @@ export async function runEvidencePlan(
   entries: readonly EvidencePlanEntry[] | null | undefined,
   allowlist: EvidenceAllowlist,
   ctx: EvidenceRunnerContext,
+  lifecycle?: EvidenceCommandLifecycle,
 ): Promise<EvidencePlanResult[]> {
   if (!entries?.length) return [];
   const results: EvidencePlanResult[] = [];
@@ -176,7 +196,7 @@ export async function runEvidencePlan(
       results.push(result(entry, 'SKIP', 'sandbox unavailable'));
       continue;
     }
-    results.push(await execute(entry, argv, policy, ctx));
+    results.push(await execute(entry, argv, policy, ctx, lifecycle));
   }
   return results;
 }

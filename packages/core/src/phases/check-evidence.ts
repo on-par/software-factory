@@ -5,14 +5,19 @@ import { loadRepoConfig } from '../config/repo.js';
 import { parseDesignArtifact } from '../design/index.js';
 import { resolveEvidenceAllowlist } from '../checkers/evidence-allowlist.js';
 import { runEvidencePlan, type EvidencePlanResult } from '../checkers/evidence-plan.js';
+import { createEvidenceSideEffectsGuard } from '../checkers/side-effects.js';
 import { summarizeCheckerOutputs, type CheckerContext } from '../checkers/index.js';
 import type { CheckSummary, CheckerOutput, Constitution } from '../types/index.js';
 import { readSpec } from '../spec/index.js';
 
 const MAX_ERROR_LENGTH = 500;
 
-function gateOutput(result: CheckerOutput, summary: CheckSummary): CheckSummary {
-  const results = [...summary.results.filter((item) => item.checker !== 'evidence_plan'), result];
+function gateOutput(result: CheckerOutput, sideEffects: CheckerOutput, summary: CheckSummary): CheckSummary {
+  const results = [
+    ...summary.results.filter((item) => !['evidence_plan', 'side_effects'].includes(item.checker)),
+    result,
+    sideEffects,
+  ];
   const counts = summarizeCheckerOutputs(results);
   return { ...summary, ...counts };
 }
@@ -39,6 +44,10 @@ function skip(reason: string): CheckerOutput {
   return { checker: 'evidence_plan', result: 'SKIP', details: reason, evidencePlanResults: [] };
 }
 
+function skipSideEffects(reason: string): CheckerOutput {
+  return { checker: 'side_effects', result: 'SKIP', details: reason };
+}
+
 function packageJsonFromContext(ctx: CheckerContext): unknown {
   const pkg = ctx.probe?.packageJson;
   if (!pkg) return null;
@@ -63,16 +72,21 @@ export async function appendEvidencePlanStep(
   constitution: Constitution | null,
   runEvidence: typeof runEvidencePlan = runEvidencePlan,
 ): Promise<CheckSummary> {
-  const ordinary = summary.results.filter((item) => item.checker !== 'evidence_plan');
+  const ordinary = summary.results.filter((item) => !['evidence_plan', 'side_effects'].includes(item.checker));
   const startedAt = Date.now();
   await touchActivity(ctx);
   ctx.log?.('checker_started', 'checker evidence_plan started');
+  await touchActivity(ctx);
+  ctx.log?.('checker_started', 'checker side_effects started');
 
   let output: CheckerOutput;
+  let sideEffectsOutput: CheckerOutput = skipSideEffects('no evidence command executed');
   if (constitution?.disableEvidencePlan === true) {
     output = skip('disabled by constitution');
+    sideEffectsOutput = skipSideEffects('disabled by constitution');
   } else if (ordinary.some((item) => item.result === 'FAIL')) {
     output = skip('other checkers failed');
+    sideEffectsOutput = skipSideEffects('other checkers failed');
   } else {
     let entries: EvidencePlanEntry[] | undefined;
     try {
@@ -88,12 +102,15 @@ export async function appendEvidencePlanStep(
     }
     if (!entries?.length) {
       output = skip('no evidencePlan in design artifact');
+      sideEffectsOutput = skipSideEffects('no evidencePlan in design artifact');
     } else {
+      let guard: ReturnType<typeof createEvidenceSideEffectsGuard> | undefined;
       try {
         const repoConfig = loadRepoConfig(ctx.worktree);
         const lockfiles = await readdir(ctx.worktree);
         const allowlist = resolveEvidenceAllowlist(packageJsonFromContext(ctx), repoConfig, lockfiles);
-        const results = await runEvidence(entries, allowlist, ctx);
+        guard = createEvidenceSideEffectsGuard(ctx);
+        const results = await runEvidence(entries, allowlist, ctx, guard);
         output = outputForResults(results);
       } catch (error) {
         const message = (error instanceof Error ? error.message : String(error)).slice(-MAX_ERROR_LENGTH);
@@ -103,6 +120,9 @@ export async function appendEvidencePlanStep(
           details: `evidence plan setup failed: ${message}`,
           evidencePlanResults: [],
         };
+      } finally {
+        if (guard) sideEffectsOutput = await guard.finish();
+        else sideEffectsOutput = skipSideEffects('evidence plan setup failed before execution');
       }
     }
   }
@@ -110,6 +130,10 @@ export async function appendEvidencePlanStep(
   ctx.log?.('checker_completed', `checker evidence_plan completed (${output.result})`, {
     durationMs: Date.now() - startedAt,
   });
+  ctx.log?.('checker_completed', `checker side_effects completed (${sideEffectsOutput.result})`, {
+    durationMs: Date.now() - startedAt,
+  });
   await touchActivity(ctx);
-  return gateOutput(output, { ...summary, results: ordinary });
+  await touchActivity(ctx);
+  return gateOutput(output, sideEffectsOutput, { ...summary, results: ordinary });
 }

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { CheckerContext } from '../checkers/index.js';
 import type { CheckSummary, Constitution } from '../types/index.js';
 import { appendEvidencePlanStep } from './check-evidence.js';
+import { execGit } from '../utils/git-exec.js';
 
 const artifact = {
   restatedProblem: 'A proof is needed.',
@@ -37,6 +38,7 @@ afterEach(async () => {
 
 async function fixture(plan?: unknown): Promise<{ ctx: CheckerContext; worktree: string }> {
   const worktree = await tempDirs.make('check-evidence-');
+  await execGit(['init', '-q'], { cwd: worktree });
   const specPath = join(worktree, 'issue.md');
   await writeFile(specPath, `---\ndesign: ${JSON.stringify({ ...artifact, evidencePlan: plan })}\n---\nSpec\n`);
   await writeFile(
@@ -84,7 +86,7 @@ describe('appendEvidencePlanStep', () => {
       },
       ctx,
       null,
-      async (entries, allowlist, runnerContext) => {
+      async (entries, allowlist, runnerContext, lifecycle) => {
         seenLockfiles = await readdir(ctx.worktree);
         expect(entries).toHaveLength(1);
         expect(allowlist.get('test')).toEqual(['npm', 'run', 'audit']);
@@ -94,12 +96,16 @@ describe('appendEvidencePlanStep', () => {
         expect(runnerContext.env).toBe(ctx.env);
         expect(runnerContext.onPgid).toBe(ctx.onPgid);
         expect(runnerContext.testsTimeoutSeconds).toBe(17);
+        await lifecycle?.beforeCommand();
+        await lifecycle?.afterCommand('test', []);
         return [{ claim: 'build', kind: 'command', status: 'FAIL', reason: 'exited with code 1', outputTail: 'boom' }];
       },
     );
     expect(seenLockfiles).toContain('pnpm-lock.yaml');
     expect(out.results.filter((result) => result.checker === 'evidence_plan')).toHaveLength(1);
-    expect(out.results.at(-1)?.details).toContain('build [command] FAIL: exited with code 1\nboom');
+    expect(out.results.find((result) => result.checker === 'evidence_plan')?.details).toContain(
+      'build [command] FAIL: exited with code 1\nboom',
+    );
     expect(out.failures).toBe(1);
     expect(out.warnings).toEqual(['warning']);
   });
@@ -122,6 +128,7 @@ describe('appendEvidencePlanStep', () => {
       results: [
         ...summary.results,
         { checker: 'evidence_plan', result: 'SKIP', details: 'disabled by constitution', evidencePlanResults: [] },
+        { checker: 'side_effects', result: 'SKIP', details: 'disabled by constitution' },
       ],
     });
     await expect(
@@ -139,7 +146,11 @@ describe('appendEvidencePlanStep', () => {
         runEvidence,
       ),
     ).resolves.toMatchObject({
-      results: [{ checker: 'lint' }, { checker: 'evidence_plan', details: 'other checkers failed' }],
+      results: [
+        { checker: 'lint' },
+        { checker: 'evidence_plan', details: 'other checkers failed' },
+        { checker: 'side_effects', details: 'other checkers failed' },
+      ],
     });
   });
 
@@ -152,13 +163,41 @@ describe('appendEvidencePlanStep', () => {
     });
     expect(calls).toBe(0);
     expect(out.results.at(-1)).toMatchObject({ result: 'SKIP', details: 'no evidencePlan in design artifact' });
+    expect(out.results.find((result) => result.checker === 'side_effects')).toMatchObject({
+      result: 'SKIP',
+      details: 'no evidencePlan in design artifact',
+    });
+  });
+
+  it('side_effects skips disabled or unexecuted evidence', async () => {
+    const disabledFixture = await fixture([{ kind: 'command', claim: 'proof', command: 'test', passWhen: 'passes' }]);
+    const disabled: Constitution = {
+      product: 'x',
+      version: 1,
+      checkers: [],
+      body: '',
+      path: '',
+      source: 'bundled',
+      disableEvidencePlan: true,
+    };
+    const disabledOutput = await appendEvidencePlanStep(summary, disabledFixture.ctx, disabled);
+    expect(disabledOutput.results.find((result) => result.checker === 'side_effects')).toMatchObject({
+      result: 'SKIP',
+    });
+
+    const absent = await fixture([]);
+    const absentOutput = await appendEvidencePlanStep(summary, absent.ctx, null);
+    expect(absentOutput.results.find((result) => result.checker === 'side_effects')).toMatchObject({ result: 'SKIP' });
   });
 
   it('turns command setup errors into a bounded checker failure', async () => {
     const { ctx } = await fixture([{ kind: 'command', claim: 'build', command: 'test', passWhen: 'passes' }]);
     await writeFile(join(ctx.worktree, '.factory', 'config.json'), '{');
     const out = await appendEvidencePlanStep(summary, ctx, null, async () => []);
-    expect(out.results.at(-1)).toMatchObject({ checker: 'evidence_plan', result: 'FAIL' });
-    expect(out.results.at(-1)?.details.length).toBeLessThan(550);
+    expect(out.results.find((result) => result.checker === 'evidence_plan')).toMatchObject({
+      checker: 'evidence_plan',
+      result: 'FAIL',
+    });
+    expect(out.results.find((result) => result.checker === 'evidence_plan')?.details.length).toBeLessThan(550);
   });
 });

@@ -194,4 +194,30 @@ describe('evidence plan runner', () => {
     ]);
     expect(results.map((r) => r.claim)).toEqual(['claim', 'claim', 'claim']);
   });
+
+  it('calls lifecycle hooks around executed entries and forwards every pgid once', async () => {
+    const calls: string[] = [];
+    await runEvidencePlan(
+      [entry('command', { command: 'check', passWhen: 'ok' }), entry('screenshot', { route: '/x' })],
+      new Map([['check', ['echo']]]),
+      {
+        worktree: '/tmp/lane',
+        sandbox: policy(),
+        onPgid: (pgid) => calls.push(`forward:${pgid}`),
+        runCommand: async (_argv, options) => {
+          options?.onPgid?.(12);
+          return commandResult(0);
+        },
+      },
+      {
+        beforeCommand: async () => {
+          calls.push('before');
+        },
+        afterCommand: async (command, pgids) => {
+          calls.push(`after:${command}:${pgids.join(',')}`);
+        },
+      },
+    );
+    expect(calls).toEqual(['before', 'forward:12', 'after:check:12']);
+  });
 });
