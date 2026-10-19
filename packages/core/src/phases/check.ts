@@ -12,8 +12,10 @@ import {
   probeWorktree,
   renderCheckerFindings,
   runAllCheckers,
-  type WorktreeProbe,
 } from '../checkers/index.js';
+import { detectHeadedModeSignals, detectLiveAppSignal } from './check-environment.js';
+import { appendEvidencePlanStep } from './check-evidence.js';
+import type { runEvidencePlan } from '../checkers/evidence-plan.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import type { BuildRoutePin } from '../config/repo.js';
 import { laneEnv } from '../environment/index.js';
@@ -187,45 +189,6 @@ function testFailureEvidence(summary: CheckSummary): Pick<ReworkInfo, 'failingTe
   };
 }
 
-/** Human-readable e2e signal ("playwright.config.ts", "package.json script 'e2e'"), or null when the worktree shows no live-app testing. */
-function detectLiveAppSignal(probe: WorktreeProbe): string | null {
-  if (probe.playwrightConfigFiles.length > 0) return probe.playwrightConfigFiles[0];
-
-  for (const [name, script] of Object.entries(probe.scripts)) {
-    if (script.includes('playwright') || name === 'e2e' || name.includes('e2e')) {
-      return `package.json script '${name}'`;
-    }
-  }
-
-  return null;
-}
-
-/** Human-readable headed-mode signals ("playwright.config.ts forces headless: false",
- *  "package.json script 'e2e' passes --headed"), empty when nothing forces a headed browser. */
-function detectHeadedModeSignals(probe: WorktreeProbe): string[] {
-  const signals: string[] = [];
-
-  for (const f of probe.playwrightConfigFiles) {
-    const content = probe.playwrightConfigContents[f] ?? '';
-    if (/headless\s*:\s*false/.test(content)) {
-      signals.push(`${f} forces headless: false`);
-    }
-  }
-
-  for (const [name, script] of Object.entries(probe.scripts)) {
-    if (/(^|\s)--headed\b/.test(script)) {
-      signals.push(`package.json script '${name}' passes --headed`);
-    } else if (/(^|\s)--ui\b/.test(script)) {
-      signals.push(`package.json script '${name}' passes --ui`);
-    }
-    if (/\bcypress\s+open\b/.test(script)) {
-      signals.push(`package.json script '${name}' runs 'cypress open' (interactive UI runner)`);
-    }
-  }
-
-  return signals;
-}
-
 function classifyReworkCause(opts: {
   steering?: ConsumedSteering;
   failovers: { reason: FailoverReason }[];
@@ -375,6 +338,8 @@ async function checkPhaseImpl(opts: {
   runCheckers?: typeof runAllCheckers;
   /** Injection seam for the flaky re-run command only (#2301); defaults to ctx.runCommand / runVerificationCommand. */
   runCommand?: CheckerContext['runCommand'];
+  /** Injection seam for tests; defaults to the frozen evidence-plan runner. */
+  runEvidence?: typeof runEvidencePlan;
 }): Promise<CheckPhaseResult> {
   const {
     issue,
@@ -405,6 +370,7 @@ async function checkPhaseImpl(opts: {
     runBaseline,
     runCheckers,
     runCommand,
+    runEvidence,
   } = opts;
   const roundLogDir = (round: number): string | undefined =>
     logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, `check-r${round}`);
@@ -458,6 +424,7 @@ async function checkPhaseImpl(opts: {
   log('check', 'Running checkers');
 
   let summary = await (runCheckers ?? runAllCheckers)(ctx, router, constitution, checkTimeoutSeconds);
+  summary = await appendEvidencePlanStep(summary, ctx, constitution, runEvidence);
   let reworkRounds = 0;
   const maxRounds = autoRework ? Math.min(maxReworkRounds, MAX_REWORK_ROUNDS) : 0;
 
@@ -468,14 +435,14 @@ async function checkPhaseImpl(opts: {
   }
 
   let baseline: BaselineReport | undefined;
-  if (summary.failures > 0) {
+  if (summary.results.some((result) => result.checker !== 'evidence_plan' && result.result === 'FAIL')) {
     if (diffBase === undefined) {
       log('check', 'baseline skipped: no base SHA for this run');
     } else {
       baseline = await (runBaseline ?? runBaselineCheckers)({
         baseSha: diffBase,
         laneWorktree: worktree,
-        failing: summary.results,
+        failing: summary.results.filter((result) => result.checker !== 'evidence_plan' && result.result === 'FAIL'),
         ctx: {
           ...ctx,
           outputLogDir: checkBaseDir,
@@ -508,6 +475,7 @@ async function checkPhaseImpl(opts: {
       );
       if (flakeRerun.verdict === 'passed') {
         summary = markTestsFlaky(summary, flakeRerun);
+        summary = await appendEvidencePlanStep(summary, ctx, constitution, runEvidence);
         environmentCause = isEnvironmentFailure(summary, baseline);
         log(
           'check',
@@ -627,6 +595,7 @@ async function checkPhaseImpl(opts: {
     ctx.probe = probe;
     ctx.outputLogDir = roundLogDir(reworkRounds);
     summary = await (runCheckers ?? runAllCheckers)(ctx, router, constitution, checkTimeoutSeconds);
+    summary = await appendEvidencePlanStep(summary, ctx, constitution, runEvidence);
     log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);
     // When no model ran this round (modelCompleted === false), an unchanged failure
     // signature is not evidence of a stuck worker — leave the streak untouched

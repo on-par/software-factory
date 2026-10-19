@@ -14,20 +14,19 @@ import { StubModelExecutor } from '../router/stub.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import type { BaselineReport } from '../checkers/baseline.js';
 import { BaselineCache } from '../checkers/baseline-cache.js';
+import type { EvidencePlanResult } from '../checkers/evidence-plan.js';
 import { schemaErrorCheckerOutput, unfilledPlaceholderCheckerOutput, unknownCheckerOutput } from '../checkers/index.js';
 import type { CheckSummary, Constitution, ReworkInfo } from '../types/index.js';
+import { renderEvidencePack } from '../reports/evidence-pack.js';
 import {
   baseFailingCheckers,
   checkPhase,
-  classifyBaseFailureCause,
   type EnvironmentFailure,
   excludeBaseFailing,
   environmentLogPaths,
   isEnvironmentFailure,
   markTestsFlaky,
   LENS_REVIEW_CHECKER,
-  lensShowstopperRefs,
-  remainingShowstoppers,
   renderEnvironmentReleaseComment,
   stuckSignature,
 } from './check.js';
@@ -311,65 +310,6 @@ describe('partial base overlap (#1929)', () => {
     expect(messages.some((m) => m.includes('only base-failing checkers remain'))).toBe(true);
     expect(result.passed).toBe(false);
     expect(result.failureSignature).toContain('tests:');
-  });
-});
-
-describe('classifyBaseFailureCause (#2582)', () => {
-  const summaryWith = (...results: CheckSummary['results']): CheckSummary => ({
-    results,
-    failures: results.length,
-    passes: 0,
-    skips: 0,
-    total: results.length,
-  });
-
-  it('is config for a schema-error-only summary', () => {
-    expect(classifyBaseFailureCause(summaryWith(schemaErrorCheckerOutput('checkers', 'is a string, not a list')))).toBe(
-      'config',
-    );
-  });
-
-  it('is config for a placeholder-only summary', () => {
-    expect(classifyBaseFailureCause(summaryWith(unfilledPlaceholderCheckerOutput('<checker-name>')))).toBe('config');
-  });
-
-  it('is environment when no output is a config output', () => {
-    expect(
-      classifyBaseFailureCause(
-        summaryWith({ checker: 'tests', result: 'FAIL', details: 'zod schema error: unfilled placeholder' }),
-      ),
-    ).toBe('environment');
-  });
-});
-
-describe('classifyBaseFailureCause (#2581)', () => {
-  const summaryWith = (...results: Array<{ checker: string; details: string }>): CheckSummary => ({
-    results: results.map((r) => ({ ...r, result: 'FAIL' as const })),
-    failures: results.length,
-    passes: 0,
-    skips: 0,
-    total: results.length,
-  });
-  const unknown = unknownCheckerOutput('typecheck');
-
-  it('is config for an unknown-checker-only summary', () => {
-    expect(classifyBaseFailureCause(summaryWith(unknown))).toBe('config');
-  });
-
-  it('is config when an unknown checker fails alongside a real checker', () => {
-    expect(classifyBaseFailureCause(summaryWith(unknown, { checker: 'lint', details: 'boom' }))).toBe('config');
-  });
-
-  it('is environment when no failure is an unknown-checker output', () => {
-    expect(
-      classifyBaseFailureCause(summaryWith({ checker: 'tests', details: 'x' }, { checker: 'lint', details: 'y' })),
-    ).toBe('environment');
-  });
-
-  it('is environment when details only mention unknown checker mid-text', () => {
-    expect(classifyBaseFailureCause(summaryWith({ checker: 'lint', details: 'saw an unknown checker here' }))).toBe(
-      'environment',
-    );
   });
 });
 
@@ -1971,141 +1911,252 @@ describe('checkPhase appPort', () => {
   });
 });
 
-describe('checkPhase headed-mode warnings', () => {
-  it('warns and records summary.warnings when playwright.config.ts forces headless: false', async () => {
-    const worktree = await makeWorktreeWithFiles(109, {
-      'playwright.config.ts': 'export default { use: { headless: false } };\n',
+describe('checkPhase frozen evidence plan', () => {
+  const passingCheckers: CheckSummary = {
+    failures: 0,
+    passes: 1,
+    skips: 0,
+    total: 1,
+    results: [{ checker: 'compile', result: 'PASS', details: 'ok' }],
+  };
+
+  it('evidence-plan step sends a failing planned command to rework', async () => {
+    const worktree = await makeWorktreeWithFiles(3264, {
+      'package.json': JSON.stringify({ scripts: { test: 'true' } }),
     });
-    const { router } = makeRouter();
-    const logCalls: Array<[string, string]> = [];
-
-    const check = await checkPhase({
-      issue: 109,
-      worktree,
-      specPath: join(worktree, 'issue-109.md'),
-      router,
-      constitution: null,
-      log: (type, msg) => logCalls.push([type, msg]),
-      appPort: 3142,
-      autoRework: false,
-    });
-
-    const warning = logCalls.find(
-      ([type, msg]) => type === 'environment_warning' && msg.includes('playwright.config.ts'),
-    );
-    expect(warning).toBeDefined();
-    expect(warning?.[1]).toContain('headless: false');
-    expect(check.summary.warnings).toEqual(['playwright.config.ts forces headless: false']);
-  });
-
-  it('warns when a package.json script passes --headed', async () => {
-    const worktree = await makeWorktreeWithFiles(110, {
-      'package.json': JSON.stringify({ scripts: { e2e: 'playwright test --headed' } }),
-    });
-    const { router } = makeRouter();
-    const logCalls: Array<[string, string]> = [];
-
-    const check = await checkPhase({
-      issue: 110,
-      worktree,
-      specPath: join(worktree, 'issue-110.md'),
-      router,
-      constitution: null,
-      log: (type, msg) => logCalls.push([type, msg]),
-      appPort: 3142,
-      autoRework: false,
-    });
-
-    const warning = logCalls.find(
-      ([type, msg]) => type === 'environment_warning' && msg.includes('headed e2e config detected'),
-    );
-    expect(warning).toBeDefined();
-    expect(warning?.[1]).toContain('--headed');
-    expect(check.summary.warnings).toEqual(["package.json script 'e2e' passes --headed"]);
-  });
-
-  it("warns when a package.json script runs 'cypress open'", async () => {
-    const worktree = await makeWorktreeWithFiles(111, {
-      'package.json': JSON.stringify({ scripts: { cy: 'cypress open' } }),
-    });
-    const { router } = makeRouter();
-    const logCalls: Array<[string, string]> = [];
-
-    const check = await checkPhase({
-      issue: 111,
-      worktree,
-      specPath: join(worktree, 'issue-111.md'),
-      router,
-      constitution: null,
-      log: (type, msg) => logCalls.push([type, msg]),
-      autoRework: false,
-    });
-
-    const warning = logCalls.find(([type, msg]) => type === 'environment_warning' && msg.includes("script 'cy'"));
-    expect(warning).toBeDefined();
-    expect(warning?.[1]).toContain('cypress open');
-    expect(check.summary.warnings).toEqual(["package.json script 'cy' runs 'cypress open' (interactive UI runner)"]);
-  });
-
-  it('does not warn for a plain headless playwright config and script', async () => {
-    const worktree = await makeWorktreeWithFiles(112, {
-      'playwright.config.ts': 'export default {};\n',
-      'package.json': JSON.stringify({ scripts: { e2e: 'playwright test' } }),
-    });
-    const { router } = makeRouter();
-    const logCalls: Array<[string, string]> = [];
-
-    const check = await checkPhase({
-      issue: 112,
-      worktree,
-      specPath: join(worktree, 'issue-112.md'),
-      router,
-      constitution: null,
-      log: (type, msg) => logCalls.push([type, msg]),
-      appPort: 3142,
-      autoRework: false,
-    });
-
-    expect(
-      logCalls.find(([type, msg]) => type === 'environment_warning' && msg.includes('headed e2e config detected')),
-    ).toBeUndefined();
-    expect(check.summary.warnings).toBeUndefined();
-  });
-
-  it('drops the warning from the final summary once rework fixes the headed config', { timeout: 120_000 }, async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'check-phase-headed-rework-'));
-    tempDirs.add(worktree);
-    const marker = join(worktree, 'fixed.marker');
-
-    await writeFixture(worktree, 'playwright.config.ts', 'export default { use: { headless: false } };\n');
-    await writeFixture(
-      worktree,
-      'package.json',
-      JSON.stringify({ scripts: { test: `node -e "process.exit(require('fs').existsSync('${marker}') ? 0 : 1)"` } }),
-    );
-    const specPath = join(worktree, 'issue-113.md');
-    await writeFixture(worktree, 'issue-113.md', '# Spec: headed config fixed by rework\n');
-
-    const fakeRouter = {
-      run: async () => {
-        await writeFile(join(worktree, 'playwright.config.ts'), 'export default { use: { headless: true } };\n');
-        await writeFile(marker, '');
-        return { model: 'fake-model', output: 'fixed', exitCode: 0, attempts: [] };
+    const specPath = join(worktree, 'issue-3264.md');
+    const artifact = {
+      restatedProblem: 'Proof must gate shipping.',
+      approach: { chosen: 'Run evidence.', rejected: [] },
+      interfacesTouched: [],
+      targetTypes: [],
+      signatures: [],
+      callGraph: [],
+      behaviorContract: ['Run after checks.'],
+      verificationPlan: [{ command: 'npm test', passWhen: 'passes' }],
+      riskBlastRadius: 'CHECK',
+      openQuestions: [],
+      evidencePlan: [{ kind: 'command', claim: 'AC-3264 command proof', command: 'test', passWhen: 'passes' }],
+    };
+    await writeFixture(worktree, 'issue-3264.md', `---\ndesign: ${JSON.stringify(artifact)}\n---\nSpec\n`);
+    const prompts: string[] = [];
+    const router = {
+      run: async (_route: string, prompt: string) => {
+        prompts.push(prompt);
+        return { model: 'fake', output: 'repaired', exitCode: 0, attempts: [] };
       },
     } as any;
-
+    let evidenceCalls = 0;
     const check = await checkPhase({
-      issue: 113,
+      issue: 3264,
       worktree,
       specPath,
-      router: fakeRouter,
+      router,
       constitution: null,
       log: () => {},
+      runCheckers: async () => passingCheckers,
+      runEvidence: async (entries) => {
+        evidenceCalls++;
+        const entry = entries![0]!;
+        const result: EvidencePlanResult =
+          evidenceCalls === 1
+            ? { claim: entry.claim, kind: entry.kind, status: 'FAIL', reason: 'exited with code 1', outputTail: 'boom' }
+            : { claim: entry.claim, kind: entry.kind, status: 'PASS', reason: 'exited with code 0' };
+        return [result];
+      },
     });
-
     expect(check.passed).toBe(true);
-    expect(check.reworkRounds).toBe(1);
-    expect(check.summary.warnings).toBeUndefined();
+    expect(evidenceCalls).toBe(2);
+    expect(prompts[0]).toContain('AC-3264 command proof');
+    expect(prompts[0]).toContain('command');
+    expect(prompts[0]).toContain('exited with code 1');
+    expect(prompts[0]).toContain('boom');
+    expect(
+      check.summary.results.find((result) => result.checker === 'evidence_plan')?.evidencePlanResults?.[0]?.status,
+    ).toBe('PASS');
+  });
+
+  it('evidence-plan step records passing entries for the evidence pack', async () => {
+    const { worktree, specPath } = await makeEvidencePlanWorktree(3265);
+    const check = await checkPhase({
+      issue: 3265,
+      worktree,
+      specPath,
+      router: {} as ModelRouter,
+      constitution: { product: 'restricted', version: 1, checkers: ['compile'], body: '', path: '', source: 'bundled' },
+      log: () => {},
+      autoRework: false,
+      runCheckers: async () => passingCheckers,
+      runEvidence: async (entries) =>
+        entries!.map((entry) => ({
+          claim: entry.claim,
+          kind: entry.kind,
+          status: 'PASS' as const,
+          reason: 'proof passed',
+        })),
+    });
+    const markdown = renderEvidencePack({ issue: 3265, checkSummary: check.summary, events: [], logFiles: [] });
+    expect(check.passed).toBe(true);
+    expect(check.summary.results.find((result) => result.checker === 'evidence_plan')?.result).toBe('PASS');
+    expect(markdown).toContain('Evidence plan');
+    expect(markdown).toContain('AC-3265 passed claim [command] PASS: proof passed');
+    expect(markdown).toContain('AC-3265 second claim [none] PASS: proof passed');
+  });
+
+  it('evidence-plan step sends a failing planned command to rework: red checker never invokes the runner', async () => {
+    const { worktree, specPath } = await makeEvidencePlanWorktree(3267);
+    let calls = 0;
+    const check = await checkPhase({
+      issue: 3267,
+      worktree,
+      specPath,
+      router: {} as ModelRouter,
+      constitution: null,
+      log: () => {},
+      autoRework: false,
+      runCheckers: async () => ({
+        failures: 1,
+        passes: 0,
+        skips: 0,
+        total: 1,
+        results: [{ checker: 'lint', result: 'FAIL', details: 'red' }],
+      }),
+      runEvidence: async () => {
+        calls++;
+        return [];
+      },
+    });
+    expect(calls).toBe(0);
+    expect(check.summary.results.find((result) => result.checker === 'evidence_plan')).toMatchObject({
+      result: 'SKIP',
+      details: 'other checkers failed',
+    });
+  });
+
+  it('evidence-plan step skips an absent plan without invoking the runner', async () => {
+    const { worktree, specPath } = await makePassingWorktree();
+    let calls = 0;
+    const runEvidence = async () => {
+      calls++;
+      return [];
+    };
+    const check = await checkPhase({
+      issue: 3269,
+      worktree,
+      specPath,
+      router: {} as ModelRouter,
+      constitution: null,
+      log: () => {},
+      autoRework: false,
+      runCheckers: async () => ({ failures: 0, passes: 0, skips: 0, total: 0, results: [] }),
+      runEvidence,
+    });
+    expect(calls).toBe(0);
+    expect(check.summary.results.find((result) => result.checker === 'evidence_plan')?.details).toBe(
+      'no evidencePlan in design artifact',
+    );
+  });
+
+  it('evidence-plan step skips a constitution opt-out without invoking the runner', async () => {
+    const { worktree, specPath } = await makeEvidencePlanWorktree(3271);
+    const runEvidence = vi.fn(async () => []);
+    const check = await checkPhase({
+      issue: 3271,
+      worktree,
+      specPath,
+      router: {} as ModelRouter,
+      constitution: {
+        product: 'restricted',
+        version: 1,
+        checkers: ['compile'],
+        body: '',
+        path: '',
+        source: 'bundled',
+        disableEvidencePlan: true,
+      },
+      log: () => {},
+      autoRework: false,
+      runCheckers: async () => passingCheckers,
+      runEvidence,
+    });
+    expect(runEvidence).not.toHaveBeenCalled();
+    expect(check.summary.results.find((result) => result.checker === 'evidence_plan')).toMatchObject({
+      result: 'SKIP',
+      details: 'disabled by constitution',
+    });
+  });
+
+  it('evidence-plan step records only-SKIP outcomes without failing CHECK', async () => {
+    const { worktree, specPath } = await makeEvidencePlanWorktree(3268, [
+      { kind: 'command', claim: 'AC-3268 command claim', command: 'test', passWhen: 'passes' },
+      { kind: 'screenshot', claim: 'AC-3268 screenshot claim', route: '/settings' },
+      { kind: 'none', claim: 'AC-3268 manual claim', reason: 'manual review' },
+    ]);
+    const reasons = ['not allowlisted', 'screenshot: route /settings needs the app (#3253)', 'none: manual review'];
+    const check = await checkPhase({
+      issue: 3268,
+      worktree,
+      specPath,
+      router: {} as ModelRouter,
+      constitution: null,
+      log: () => {},
+      autoRework: false,
+      runCheckers: async () => ({
+        failures: 0,
+        passes: 1,
+        skips: 0,
+        total: 1,
+        results: [{ checker: 'compile', result: 'PASS', details: 'ok' }],
+      }),
+      runEvidence: async (entries) =>
+        entries!.map((entry, index) => ({
+          claim: entry.claim,
+          kind: entry.kind,
+          status: 'SKIP' as const,
+          reason: reasons[index]!,
+        })),
+    });
+    const markdown = renderEvidencePack({ issue: 3268, checkSummary: check.summary, events: [], logFiles: [] });
+    expect(check.passed).toBe(true);
+    expect(check.summary.failures).toBe(0);
+    const evidence = check.summary.results.find((result) => result.checker === 'evidence_plan');
+    expect(evidence?.result).toBe('SKIP');
+    for (const [index, claim, kind] of [
+      [0, 'AC-3268 command claim', 'command'],
+      [1, 'AC-3268 screenshot claim', 'screenshot'],
+      [2, 'AC-3268 manual claim', 'none'],
+    ] as const) {
+      const line = `${claim} [${kind}] SKIP: ${reasons[index]}`;
+      expect(evidence?.details).toContain(line);
+      expect(markdown).toContain(line);
+    }
+  });
+
+  it('does not baseline or exempt an evidence failure when diffBase is set', async () => {
+    const { worktree, specPath } = await makeEvidencePlanWorktree(3270);
+    const baseline = vi.fn();
+    const check = await checkPhase({
+      issue: 3270,
+      worktree,
+      specPath,
+      router: {} as ModelRouter,
+      constitution: null,
+      diffBase: 'abc123',
+      log: () => {},
+      autoRework: false,
+      runCheckers: async () => ({ failures: 0, passes: 0, skips: 0, total: 0, results: [] }),
+      runBaseline: baseline as never,
+      runEvidence: async (entries) =>
+        entries!.map((entry) => ({
+          claim: entry.claim,
+          kind: entry.kind,
+          status: 'FAIL' as const,
+          reason: 'proof failed',
+        })),
+    });
+    expect(baseline).not.toHaveBeenCalled();
+    expect(check.baseline).toBeUndefined();
+    expect(check.passed).toBe(false);
   });
 });
 
@@ -2132,7 +2183,7 @@ describe('checkPhase success paths', () => {
     // Worker is never invoked when nothing fails.
     expect(stub.calls).toHaveLength(0);
     // worker_output and design_smells skip in this non-git temp worktree.
-    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (2 skipped)' });
+    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (3 skipped)' });
   });
 
   it(
@@ -2180,7 +2231,7 @@ describe('checkPhase success paths', () => {
     expect(stub.calls).toHaveLength(0);
     expect(logs.some((l) => l.type === 'check' && l.msg.startsWith('SKIPPED: tests'))).toBe(true);
     // worker_output and design_smells also skip in this non-git temp worktree.
-    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (3 skipped)' });
+    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (4 skipped)' });
   });
 
   it(
@@ -2258,7 +2309,7 @@ describe('checkPhase success paths', () => {
     expect(stub.calls).toHaveLength(1);
     expect(logs).toContainEqual({ type: 'check', msg: 'Rework round 1: 0 failures remaining' });
     // worker_output and design_smells skip in this non-git temp worktree.
-    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (2 skipped)' });
+    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (3 skipped)' });
   });
 });
 
@@ -2453,6 +2504,34 @@ async function makePassingWorktree(): Promise<{ worktree: string; specPath: stri
   return { worktree, specPath };
 }
 
+async function makeEvidencePlanWorktree(
+  issue: number,
+  evidencePlan?: unknown[],
+): Promise<{ worktree: string; specPath: string }> {
+  const worktree = await mkdtemp(join(tmpdir(), `check-evidence-${issue}-`));
+  tempDirs.add(worktree);
+  await writeFixture(worktree, 'package.json', JSON.stringify({ scripts: { test: 'true' } }));
+  const specPath = join(worktree, `issue-${issue}.md`);
+  const artifact = {
+    restatedProblem: 'Proof is needed.',
+    approach: { chosen: 'Run it.', rejected: [] },
+    interfacesTouched: [],
+    targetTypes: [],
+    signatures: [],
+    callGraph: [],
+    behaviorContract: ['Run after ordinary checks.'],
+    verificationPlan: [{ command: 'npm test', passWhen: 'passes' }],
+    riskBlastRadius: 'CHECK',
+    openQuestions: [],
+    evidencePlan: evidencePlan ?? [
+      { kind: 'command', claim: `AC-${issue} passed claim`, command: 'test', passWhen: 'passes' },
+      { kind: 'none', claim: `AC-${issue} second claim`, reason: 'documentation only' },
+    ],
+  };
+  await writeFixture(worktree, `issue-${issue}.md`, `---\ndesign: ${JSON.stringify(artifact)}\n---\nSpec\n`);
+  return { worktree, specPath };
+}
+
 async function makeSpecOnlyWorktree(): Promise<{ worktree: string; specPath: string }> {
   const worktree = await mkdtemp(join(tmpdir(), 'check-phase-spec-only-'));
   tempDirs.add(worktree);
@@ -2554,85 +2633,6 @@ function lensSummary(details: string, result: 'FAIL' | 'PASS' = 'FAIL'): CheckSu
     results: [{ checker: LENS_REVIEW_CHECKER, result, details }],
   };
 }
-
-describe('lensShowstopperRefs', () => {
-  it('parses file:line refs from showstopper lines', () => {
-    expect(
-      lensShowstopperRefs(
-        'src/a.ts:12 — x. Failure scenario: y (lenses: security)\nsrc/b.ts:3 — z. Failure scenario: w (lenses: techlead, product)',
-      ),
-    ).toEqual(['src/a.ts:12', 'src/b.ts:3']);
-  });
-
-  it('sorts and de-duplicates', () => {
-    expect(lensShowstopperRefs('b.ts:1 — x\na.ts:2 — y\na.ts:2 — z')).toEqual(['a.ts:2', 'b.ts:1']);
-  });
-
-  it('accepts bullets, leading whitespace and dash variants', () => {
-    expect(lensShowstopperRefs('- a.ts:1 — x\n  * b.ts:2 - y\n• c.ts:3 – z')).toEqual(['a.ts:1', 'b.ts:2', 'c.ts:3']);
-  });
-
-  it('skips headers and unparsable text', () => {
-    expect(lensShowstopperRefs('2 showstoppers:\na.ts:1 — x')).toEqual(['a.ts:1']);
-    expect(lensShowstopperRefs('')).toEqual([]);
-    expect(lensShowstopperRefs('lens security returned malformed JSON')).toEqual([]);
-  });
-
-  it('keeps a Windows drive path intact', () => {
-    expect(lensShowstopperRefs('C:\\x\\a.ts:12 — s')).toEqual(['C:\\x\\a.ts:12']);
-  });
-});
-
-describe('stuckSignature for lens_review', () => {
-  const sig = (s: CheckSummary) => stuckSignature(s, new Set());
-
-  it('is equal for the same refs regardless of wording or order', () => {
-    const a = lensSummary(
-      'a.ts:1 — one. Failure scenario: s (lenses: security)\nb.ts:2 — two. Failure scenario: t (lenses: product)',
-    );
-    const b = lensSummary(
-      'b.ts:2 — other words. Failure scenario: q (lenses: techlead)\na.ts:1 — new text. Failure scenario: r (lenses: a, b)',
-    );
-    expect(sig(a)).toBe(sig(b));
-  });
-
-  it('differs when refs differ', () => {
-    expect(sig(lensSummary('a.ts:1 — x'))).not.toBe(sig(lensSummary('a.ts:2 — x')));
-  });
-
-  it('falls back to normalized detail when no refs parse', () => {
-    expect(sig(lensSummary('lens security returned malformed JSON'))).toBe(
-      'lens_review:lens security returned malformed json',
-    );
-    expect(sig(lensSummary('reason one'))).not.toBe(sig(lensSummary('reason two')));
-  });
-
-  it('leaves other checkers on normalized detail', () => {
-    const t = (d: string): CheckSummary => ({
-      failures: 1,
-      passes: 0,
-      skips: 0,
-      total: 1,
-      results: [{ checker: 'tests', result: 'FAIL', details: d }],
-    });
-    expect(sig(t('3 failed'))).toBe(sig(t('4 failed')));
-    expect(sig(t('3 failed'))).toBe('tests:# failed');
-  });
-});
-
-describe('remainingShowstoppers', () => {
-  it('returns trimmed showstopper lines of a lens_review FAIL', () => {
-    expect(remainingShowstoppers(lensSummary('2 showstoppers:\n  - a.ts:1 — x\nb.ts:2 — y'))).toEqual([
-      '- a.ts:1 — x',
-      'b.ts:2 — y',
-    ]);
-  });
-
-  it('is empty when lens_review passes or is absent', () => {
-    expect(remainingShowstoppers(lensSummary('a.ts:1 — x', 'PASS'))).toEqual([]);
-    expect(remainingShowstoppers({ failures: 0, passes: 0, skips: 0, total: 0, results: [] })).toEqual([]);
-  });
-});
 
 describe('checkPhase with lens_review signatures', () => {
   const run = async (issue: number, detailsFor: (n: number) => string) => {
