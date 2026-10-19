@@ -82,7 +82,7 @@ export function stubAwareShipPhase(shipPhase: NonNullable<RunPorts['shipPhase']>
   return shipPhaseForMode;
 }
 
-/** Logs the sandbox state for this run and returns the policy to wrap agent commands in, if any. */
+/** Logs the sandbox state for this run and returns the policy to pass to harnesses, if any. */
 export function logSandboxPolicy(
   opts: { sandbox?: boolean },
   sandboxPolicy: ReturnType<typeof resolveSandboxPolicy>,
@@ -95,7 +95,11 @@ export function logSandboxPolicy(
   } else if (!sandboxPolicy) {
     log('sandbox-disabled', 'sandbox disabled by config/FACTORY_SANDBOX');
   } else if (sandboxPolicy.runtime === 'none') {
-    log('sandbox-unavailable', 'no sandbox runtime found (sandbox-exec/firejail) — running uncontained');
+    activeSandboxPolicy = sandboxPolicy;
+    log(
+      'sandbox',
+      'outer sandbox off; harness sandbox in use (codex --sandbox workspace-write; harnesses without their own sandbox run unwrapped)',
+    );
   } else if (sandboxPolicy.runtime === 'docker-sandbox') {
     // docker-sandbox's containment is the microVM created by worktreeWorkspace in shipIssue
     // (#653), not a command-prefix wrap — activeSandboxPolicy stays undefined because

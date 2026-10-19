@@ -826,7 +826,7 @@ export class ModelRouter {
             },
           });
         } catch (err) {
-          if (sandbox) {
+          if (sandbox && sandbox.runtime !== 'none') {
             const sandboxEvent = sandboxEventFromError(err);
             if (sandboxEvent) options.onSandboxEvent?.(sandboxEvent.type, sandboxEvent.detail);
           }

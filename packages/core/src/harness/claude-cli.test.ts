@@ -126,7 +126,6 @@ describe('ClaudeCliHarness command shape', () => {
         timeoutSeconds: 7,
       }),
     );
-
     expect(result.output).toBe('CLAUDE OUTPUT');
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd).toContain('claude -p');
@@ -150,7 +149,6 @@ describe('ClaudeCliHarness command shape', () => {
     const harness = new ClaudeCliHarness(rec.fn);
 
     await harness.run(makeContractRequest({ model: 'claude-no-flag', registry }));
-
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd).toContain('claude -p');
     expect(rec.calls[0].cmd).not.toMatch(/(^|\s)--model(\s|$)/);
@@ -168,7 +166,6 @@ describe('ClaudeCliHarness command shape', () => {
         env: { PORT: '3142', FACTORY_APP_PORT: '3142', FACTORY_BASE_URL: 'http://127.0.0.1:3142' },
       }),
     );
-
     expect(rec.calls[0].opts.env).toEqual({
       PORT: '3142',
       FACTORY_APP_PORT: '3142',
@@ -181,7 +178,6 @@ describe('ClaudeCliHarness command shape', () => {
     const harness = new ClaudeCliHarness(rec.fn);
 
     await harness.run(makeContractRequest({ model: 'claude-model', registry }));
-
     expect(rec.calls[0].opts.env).toBeUndefined();
   });
 
@@ -191,11 +187,10 @@ describe('ClaudeCliHarness command shape', () => {
     const onPgid = () => {};
 
     await harness.run(makeContractRequest({ model: 'claude-model', registry, onPgid }));
-
     expect(rec.calls[0].opts.onPgid).toBe(onPgid);
   });
 
-  it('wraps the invocation in sandbox-exec when request.sandbox is set', async () => {
+  it('wraps with sandbox-exec and leaves runtime none identical to no sandbox policy', async () => {
     const rec = recordingExec({ stdout: 'CLAUDE OUTPUT' });
     const harness = new ClaudeCliHarness(rec.fn);
 
@@ -208,6 +203,11 @@ describe('ClaudeCliHarness command shape', () => {
     expect(rec.calls[0].cmd).toContain('claude -p');
     expect(rec.calls[0].cmd).toContain('--permission-mode bypassPermissions');
     expect(rec.calls[0].cmd).toContain('factory-claude-prompt-');
+    const none = { ...sandboxPolicy, runtime: 'none' as const };
+    await harness.run(makeContractRequest({ model: 'claude-model', registry, sandbox: none }));
+    await harness.run(makeContractRequest({ model: 'claude-model', registry }));
+    const normalize = (cmd: string) => cmd.replace(/factory-claude-prompt-[^/]+/g, 'factory-claude-prompt');
+    expect(normalize(rec.calls[1].cmd)).toBe(normalize(rec.calls[2].cmd));
   });
 });
 

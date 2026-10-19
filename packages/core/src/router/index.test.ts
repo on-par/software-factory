@@ -1022,21 +1022,24 @@ describe('ModelRouter sandbox threading', () => {
     expect(calls).toBe(2);
   });
 
-  it('does not call onSandboxEvent when no sandbox policy is active', async () => {
-    const executor = {
-      async runModel() {
-        throw new HarnessError('denied', 'error', { stderr: 'Operation not permitted' });
-      },
-    };
-    const router = new ModelRouter(models, routes, false, executor);
-    const events: { type: string; detail: string }[] = [];
+  it.each([undefined, { ...sandboxPolicy, runtime: 'none' as const }])(
+    'does not call onSandboxEvent without an outer sandbox (%j)',
+    async (sandbox) => {
+      const executor = {
+        async runModel() {
+          throw new HarnessError('denied', 'error', { stderr: 'Operation not permitted' });
+        },
+      };
+      const router = new ModelRouter(models, routes, false, executor);
+      const events: { type: string; detail: string }[] = [];
 
-    await router
-      .run('plan', 'do it', { onSandboxEvent: (type, detail) => events.push({ type, detail }) })
-      .catch(() => {});
+      await router
+        .run('plan', 'do it', { sandbox, onSandboxEvent: (type, detail) => events.push({ type, detail }) })
+        .catch(() => {});
 
-    expect(events).toEqual([]);
-  });
+      expect(events).toEqual([]);
+    },
+  );
 });
 
 describe('ModelRouter worktree reset guard', () => {
