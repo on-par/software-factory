@@ -76,9 +76,8 @@ export class CodexCliHarness implements CodingHarness {
     const outFile = await mktemp(join(tmpdir(), 'factory-codex-out-'), this.writeFile);
     await this.writeFile(tmpFile, prompt);
 
-    // With an outer containment sandbox, codex runs workspace-write inside it. Without one,
-    // workspace-write is codex's own restriction and blocks legitimate writes, so the run
-    // produces a blocked no-op spec instead of an implementation (#834).
+    // A sandbox policy keeps Codex in workspace-write, with or without an outer wrapper.
+    // Without a policy, workspace-write blocks legitimate writes (#834).
     // The FACTORY_CODEX_FULL_ACCESS opt-in picks danger-full-access on purpose and skips any preflight (#3080).
     const fullAccessOptIn = codexFullAccessOptIn(this.envSource);
     if (fullAccessOptIn && !this.loggedFullAccess) {

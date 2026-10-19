@@ -135,7 +135,6 @@ describe('CodexCliHarness command shape', () => {
         timeoutSeconds: 7,
       }),
     );
-
     expect(result.output).toBe('CODEX OUTPUT');
     expect(rec.calls).toHaveLength(1);
     const { cmd, opts } = rec.calls[0];
@@ -154,7 +153,6 @@ describe('CodexCliHarness command shape', () => {
     const harness = new CodexCliHarness(rec.fn);
 
     await harness.run(makeContractRequest({ model: 'codex-no-flag', registry, prompt: 'build it' }));
-
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd).toMatch(/^codex exec --json --sandbox danger-full-access -c approval_policy=never -C '/);
     expect(rec.calls[0].cmd).not.toContain('--model');
@@ -172,7 +170,6 @@ describe('CodexCliHarness command shape', () => {
         env: { PORT: '3142', FACTORY_APP_PORT: '3142', FACTORY_BASE_URL: 'http://127.0.0.1:3142' },
       }),
     );
-
     expect(rec.calls[0].opts.env).toEqual({
       PORT: '3142',
       FACTORY_APP_PORT: '3142',
@@ -186,7 +183,6 @@ describe('CodexCliHarness command shape', () => {
     const onPgid = () => {};
 
     await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it', onPgid }));
-
     expect(rec.calls[0].opts.onPgid).toBe(onPgid);
   });
 
@@ -195,21 +191,25 @@ describe('CodexCliHarness command shape', () => {
     const harness = new CodexCliHarness(rec.fn);
 
     await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
-
     expect(rec.calls[0].opts.env).toBeUndefined();
   });
 
-  it('wraps the invocation in sandbox-exec when request.sandbox is set', async () => {
+  it('uses the outer wrapper when present and Codex workspace-write for runtime none', async () => {
     const rec = recordingExec();
     const harness = new CodexCliHarness(rec.fn);
 
     await harness
       .run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it', sandbox: sandboxPolicy }))
       .catch(() => {});
-
     expect(rec.calls).toHaveLength(1);
     expect(rec.calls[0].cmd.startsWith('sandbox-exec -p ')).toBe(true);
     expect(rec.calls[0].cmd).toContain('codex exec --json --sandbox workspace-write');
+    const none = { ...sandboxPolicy, runtime: 'none' as const, allowHosts: ['example.com'] };
+    await harness.run(makeContractRequest({ model: 'codex-model', registry, sandbox: none })).catch(() => {});
+    expect(rec.calls[1].cmd).toMatch(/^codex exec --json --sandbox workspace-write /);
+    expect(rec.calls[1].cmd).toContain('-c sandbox_workspace_write.network_access=true');
+    expect(rec.calls[1].cmd).toContain('-c features.network_proxy.enabled=true');
+    expect(rec.calls[1].cmd).toContain('features.network_proxy.domains={"example.com"="allow"}');
   });
 });
 
