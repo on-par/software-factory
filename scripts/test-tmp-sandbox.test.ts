@@ -19,8 +19,14 @@ describe('findLeakedTempEntries', () => {
   });
 
   it('ignores factory lane runtime prefixes but still reports other factory- names (#3173)', () => {
-    const after = ['factory-claude-prompt-a', 'factory-pi-prompt-b', 'factory-other-c'];
-    expect(findLeakedTempEntries(new Set(), after)).toEqual([{ prefix: 'factory-', entries: ['factory-other-c'] }]);
+    const after = [
+      'factory-claude-prompt-a',
+      'factory-codex-a',
+      'factory-codex-out-b',
+      'factory-pi-prompt-c',
+      'factory-other-d',
+    ];
+    expect(findLeakedTempEntries(new Set(), after)).toEqual([{ prefix: 'factory-', entries: ['factory-other-d'] }]);
   });
 
   it('returns nothing when nothing leaked', () => {
@@ -94,7 +100,7 @@ describe('setup', () => {
 
   it('ignores prompt dirs a concurrent factory process creates during the run', async () => {
     const { teardown } = start();
-    for (const name of ['factory-claude-prompt-x', 'factory-pi-prompt-y']) {
+    for (const name of ['factory-claude-prompt-x', 'factory-codex-x', 'factory-codex-out-y', 'factory-pi-prompt-z']) {
       execFileSync(process.execPath, ['-e', 'require("node:fs").mkdirSync(process.argv[1])', join(scratch, name)]);
     }
     await expect(teardown()).resolves.toBeUndefined();

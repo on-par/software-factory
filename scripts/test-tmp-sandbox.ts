@@ -30,6 +30,8 @@ export const FACTORY_TEST_TMP_PREFIXES = [
  *  setup-env.ts points TMPDIR at the per-run sandbox, so a fresh one in the real TMPDIR belongs to a concurrent process. */
 export const FACTORY_RUNTIME_TMP_PREFIXES = [
   'factory-claude-prompt-',
+  'factory-codex-',
+  'factory-codex-out-',
   'factory-pi-prompt-',
   'factory-opencode-prompt-',
   'factory-harness-check-',

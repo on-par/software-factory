@@ -10,7 +10,7 @@ import { createTempDirs } from '@on-par/factory-core/testing';
 import { eventSegmentFileName, eventSegmentsDir } from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { cmdLogs, eventMatchesIssue, renderEvent, runLogs } from './logs.js';
+import { buildLogsJson, cmdLogs, eventMatchesIssue, renderEvent, runLogs } from './logs.js';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -41,6 +41,24 @@ describe('eventMatchesIssue', () => {
     const e: FactoryEvent = { ts: '', type: 'plan', issue: '296', msg: '' };
     expect(eventMatchesIssue(e, '296')).toBe(true);
     expect(eventMatchesIssue(e, '301')).toBe(false);
+  });
+});
+
+describe('buildLogsJson', () => {
+  it('keeps legacy event keys and omits cursor by default', () => {
+    const event: FactoryEvent = { ts: 'now', type: 'plan', issue: '1', msg: 'hello' };
+    expect(buildLogsJson(event)).toEqual(event);
+  });
+
+  it('adds a cursor and preserves interface payload fields', () => {
+    const event: FactoryEvent = {
+      ts: 'now',
+      type: 'rework',
+      issue: '1',
+      msg: 'retry',
+      rework: { round: 1, failingChecks: ['tests'], cause: 'factory-fault' },
+    };
+    expect(buildLogsJson(event, { cursor: 'c1.abc' })).toEqual({ ...event, cursor: 'c1.abc' });
   });
 });
 
