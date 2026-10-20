@@ -101,10 +101,11 @@ npm run test`;
     yaml: string;
     mode?: 'file' | 'slice';
     sizeBudget?: { tokenBudget: number; maxFiles: number };
+    decomposition?: string;
   }) {
     const worktree = await tempDirs.make('plan-phase-test-');
     const stub = new StubModelExecutor({
-      scripts: { plan: planOf(opts.yaml), decompose: [{ output: decomposition }] },
+      scripts: { plan: planOf(opts.yaml), decompose: [{ output: opts.decomposition ?? decomposition }] },
     });
     const router = new ModelRouter(models, routes, false, stub);
     const createComment = vi.fn().mockResolvedValue({ data: { id: 9999 } });
@@ -164,6 +165,30 @@ npm run test`;
     expect(result.escalate).toMatch(/tokens.*budget 10/);
     expect(logs.find((l) => l.type === 'size-gate-decomposed')?.msg).toMatch(/tokens.*budget 10/);
   });
+
+  it.each(['file', 'slice'] as const)(
+    'keeps a cohesive over-budget issue whole and logs size_gate_cohesive (%s mode)',
+    async (mode) => {
+      const parsed = JSON.parse(decomposition);
+      const story = { ...parsed.stories[0], filesLikelyTouched: ['src/a.ts', 'src/b.ts'] };
+      parsed.stories = [story, { ...story, title: 'Story 2' }];
+      parsed.epic.children = ['Story 1', 'Story 2'];
+      const { result, stub, logs, createComment, create } = await run({
+        yaml: designYaml(4, 4),
+        mode,
+        sizeBudget: { tokenBudget: 10, maxFiles: 12 },
+        decomposition: JSON.stringify(parsed),
+      });
+
+      expect(result.ok).toBe(true);
+      expect(stub.calls.map((call) => call.task)).toEqual(['plan', 'decompose']);
+      expect(createComment).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+      expect(result.decomposed).toBeUndefined();
+      expect(result.sliced).toBeUndefined();
+      expect(logs.map((l) => l.type)).toContain('size_gate_cohesive');
+    },
+  );
 
   it('does not split an under-budget plan with more than 6 target types', async () => {
     const { result, stub } = await run({ yaml: designYaml(9, 5) });

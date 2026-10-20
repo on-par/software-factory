@@ -1,12 +1,10 @@
 // src/events/kinds.ts — Closed vocabulary for FactoryEvent.type (#663)
 //
-// FactoryEvent.type used to be a free-form string, classified independently by
-// six hand-maintained sets scattered across format.ts, tui/dashboard.ts,
-// tui/state.ts, kpis/human.ts, kpis/index.ts, and cli's ParkReason — with no
-// seam forcing a newly-emitted kind to be registered anywhere. This module is
-// that seam: EventKind is the closed set of kinds the factory actually emits,
-// and EVENT_TRAITS is the single table every consumer reads instead of
-// maintaining its own classification.
+// FactoryEvent.type used to be a free-form string, classified independently by six hand-maintained
+// sets (format.ts, tui/dashboard.ts, tui/state.ts, kpis/human.ts, kpis/index.ts, cli's ParkReason),
+// with no seam forcing a newly-emitted kind to be registered anywhere. This module is that seam:
+// EventKind is the closed set of kinds the factory emits, and EVENT_TRAITS is the single table
+// every consumer reads instead of maintaining its own classification.
 
 import type { StuckTrigger } from '../steward/detect.js';
 import type { LogLevel } from '../types/index.js';
@@ -169,6 +167,7 @@ export type EventKind =
   | 'size-gate-decomposed'
   | 'size-gate-sliced'
   | 'size_hint'
+  | 'size_gate_cohesive'
   | 'steward-triggered'
   | 'steering_applied'
   | 'steering_unconsumed'
@@ -437,6 +436,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'size-gate-decomposed': { severity: 'info', isPark: false, isTerminal: false },
   // ADR-0147: the oversized issue was kept whole and a slice plan was recorded.
   'size-gate-sliced': { severity: 'info', isPark: false, isTerminal: false },
+  size_gate_cohesive: { severity: 'info', isPark: false, isTerminal: false }, // slicer slices mostly edit the same files; issue kept whole (#3351)
   size_hint: { severity: 'warn', isPark: false, isTerminal: false }, // in-scope/AC counts read large; hint only (#3350)
   // Steward picked up a parked run (ADR-0155). Not a park: the run already logged its own park.
   'steward-triggered': { severity: 'info', isPark: false, isTerminal: false },

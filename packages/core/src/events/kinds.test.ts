@@ -34,6 +34,10 @@ describe('EVENT_TRAITS', () => {
     }
   });
 
+  it('classifies size_gate_cohesive as non-park info (#3351)', () => {
+    expect(EVENT_TRAITS.size_gate_cohesive).toEqual({ severity: 'info', isPark: false, isTerminal: false });
+  });
+
   it('classifies base-hold-cleared as non-park info (#2350)', () => {
     expect(EVENT_TRAITS['base-hold-cleared']).toEqual({ severity: 'info', isPark: false, isTerminal: false });
   });

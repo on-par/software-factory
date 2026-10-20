@@ -790,41 +790,48 @@ async function planPhaseImpl(opts: {
             timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
             onProviderFailure,
           });
-          if (gate.kind === 'slice') {
-            const reason = `plan scope exceeds the bounded-build budget (${scope}) — sliced into ${gate.plan.slices.length} slice(s); the next run plans slice ${gate.slice.index}`;
-            return { ...park(reason), sliced: { sliceCount: gate.plan.slices.length } };
+          // #3351: slices that mostly edit the same files keep the issue whole; PLAN continues.
+          if (gate.kind !== 'cohesive') {
+            if (gate.kind === 'slice') {
+              const reason = `plan scope exceeds the bounded-build budget (${scope}) — sliced into ${gate.plan.slices.length} slice(s); the next run plans slice ${gate.slice.index}`;
+              return { ...park(reason), sliced: { sliceCount: gate.plan.slices.length } };
+            }
+            if (gate.kind === 'over-cap' || gate.kind === 'unsliceable') {
+              log('size-gate-escalated', gate.reason);
+              return park(gate.reason);
+            }
+            const reason = gate.kind === 'park' ? gate.reason : fileReason;
+            log('escalate', reason);
+            return park(reason);
           }
-          if (gate.kind === 'over-cap' || gate.kind === 'unsliceable') {
-            log('size-gate-escalated', gate.reason);
-            return park(gate.reason);
+        } else {
+          // File mode (#2662): file the decomposition as sub-issues and re-queue them instead of parking.
+          const decomposeResult = await decomposeOversizedIssue({
+            issue: params.issue,
+            repo: params.repo,
+            title: issueTitle,
+            body: issueBody,
+            worktree,
+            router,
+            sandbox: opts.sandbox,
+            octokit,
+            log: (type, msg) => log(type, msg),
+            timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
+            onProviderFailure,
+            fileSubIssues: true,
+          });
+          // #3351: slices that mostly edit the same files keep the issue whole; PLAN continues.
+          if (decomposeResult.cohesive === undefined) {
+            const { childIssues } = decomposeResult;
+            if (childIssues.length > 0) {
+              const reason = `plan scope exceeds the bounded-build budget (${scope}) — decomposed into ${childIssues.map((n) => `#${n}`).join(', ')}`;
+              log('size-gate-decomposed', reason);
+              return { ...park(reason), decomposed: { childIssues } };
+            }
+            log('size-gate-escalated', fileReason);
+            return park(fileReason);
           }
-          const reason = gate.kind === 'park' ? gate.reason : fileReason;
-          log('escalate', reason);
-          return park(reason);
         }
-        // File mode (#2662): file the decomposition as sub-issues and re-queue them instead of parking.
-        const decomposeResult = await decomposeOversizedIssue({
-          issue: params.issue,
-          repo: params.repo,
-          title: issueTitle,
-          body: issueBody,
-          worktree,
-          router,
-          sandbox: opts.sandbox,
-          octokit,
-          log: (type, msg) => log(type, msg),
-          timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
-          onProviderFailure,
-          fileSubIssues: true,
-        });
-        const { childIssues } = decomposeResult;
-        if (childIssues.length > 0) {
-          const reason = `plan scope exceeds the bounded-build budget (${scope}) — decomposed into ${childIssues.map((n) => `#${n}`).join(', ')}`;
-          log('size-gate-decomposed', reason);
-          return { ...park(reason), decomposed: { childIssues } };
-        }
-        log('size-gate-escalated', fileReason);
-        return park(fileReason);
       }
       const unresolved = findUnresolvedRegressions(designArtifact);
       for (const row of unresolved) {
