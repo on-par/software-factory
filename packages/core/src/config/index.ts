@@ -18,6 +18,7 @@ import { z } from 'zod';
 import { readRepoConfigFile, resolveRepoConfigPath } from './repo-config-file.js';
 import { resolveStateRoot, STATE_ROOT_ENV } from './state-root.js';
 import { DEFAULT_MAX_SLICES, SLICE_CAP_CEILING } from '../readiness/slice-plan.js';
+import { DEFAULT_MAX_FILES, DEFAULT_TOKEN_BUDGET, type SizeBudget } from '../readiness/size.js';
 import { runConfigSource } from './run-config-source.js';
 
 import type { FilingPolicy } from '../filing/policy.js';
@@ -183,6 +184,8 @@ const FactoryConfigSchema = z.object({
     .object({
       mode: z.string().default('file'),
       maxSlices: z.number().int().min(1).max(SLICE_CAP_CEILING).optional(),
+      tokenBudget: z.number().int().positive().optional(),
+      maxFiles: z.number().int().positive().optional(),
     })
     .default({ mode: 'file' }),
   kpis: z
@@ -534,6 +537,11 @@ export function parseMaxSlices(raw: string): number | undefined {
 /** sizeGate.maxSlices from the factory config; absent resolves to DEFAULT_MAX_SLICES (10). */
 export function resolveSizeGateMaxSlices(config: FactoryConfig): number {
   return config.sizeGate?.maxSlices ?? DEFAULT_MAX_SLICES;
+}
+
+export function resolveSizeGateBudget(config: FactoryConfig): SizeBudget {
+  const { tokenBudget = DEFAULT_TOKEN_BUDGET, maxFiles = DEFAULT_MAX_FILES } = config.sizeGate ?? {};
+  return { tokenBudget, maxFiles };
 }
 
 export function resolveBuildPublish(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {

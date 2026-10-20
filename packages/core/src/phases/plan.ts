@@ -28,7 +28,13 @@ import { settlePlanRoute } from './plan-route.js';
 import { decomposeOversizedIssue, renderChildIssueBody } from '../readiness/decompose.js';
 import { resolveSliceGate } from '../readiness/slice-gate.js';
 import { DEFAULT_MAX_SLICES, type SlicePlan } from '../readiness/slice-plan.js';
-import { MAX_BUILD_CALL_EDGES, MAX_BUILD_SIGNATURES, MAX_BUILD_TARGET_TYPES } from '../readiness/size.js';
+import {
+  DEFAULT_MAX_FILES,
+  DEFAULT_TOKEN_BUDGET,
+  estimatePlanSize,
+  planOverBudget,
+  type SizeBudget,
+} from '../readiness/size.js';
 import { scoreIssueReadiness } from '../readiness/index.js';
 import type { ModelRouter } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
@@ -294,33 +300,6 @@ function blockedNoChangeSpecReason(body: string): string | null {
   return 'PLAN returned a blocked/no-change note instead of a frozen spec';
 }
 
-/** The file-mode size-gate escalation: logs size-gate-decomposed when children were filed and
- *  size-gate-escalated otherwise, and builds the parked (or decomposed) PlanResult. */
-function fileModeEscalation(
-  childIssues: number[],
-  readiness: ReadinessInfo,
-  specPath: string,
-  route: BuildRouteName,
-  log: (type: EventKind, msg: string, extra?: { readiness?: ReadinessInfo }) => void,
-  prefix = '',
-): PlanResult {
-  const reason =
-    prefix +
-    (childIssues.length > 0
-      ? `issue exceeds the size gate (${readiness.sizeReason ?? 'too big'}) — decomposed into ${childIssues.map((n) => `#${n}`).join(', ')}`
-      : `issue exceeds the size gate (${readiness.sizeReason ?? 'too big'}) — parked for decomposition`);
-  log(childIssues.length > 0 ? 'size-gate-decomposed' : 'size-gate-escalated', reason, { readiness });
-  return {
-    ok: false,
-    route,
-    specPath,
-    model: '',
-    escalate: reason,
-    designArtifact: null,
-    ...(childIssues.length > 0 ? { decomposed: { childIssues } } : {}),
-  };
-}
-
 async function planPhaseImpl(opts: {
   issue: number;
   repo: string;
@@ -364,6 +343,8 @@ async function planPhaseImpl(opts: {
   sizeGateMode?: SizeGateMode;
   /** Slice cap for sizeGate.mode 'slice' (ADR-0156); default DEFAULT_MAX_SLICES. */
   maxSlices?: number;
+  /** sizeGate.tokenBudget / maxFiles (#3350); default DEFAULT_TOKEN_BUDGET / DEFAULT_MAX_FILES. */
+  sizeBudget?: SizeBudget;
   /** ADR-0161 stack mode: plan this 1-based slice of the trusted slice plan. Default: the current slice. Ignored outside stack mode. */
   sliceIndex?: number;
   /** Stop PLAN before BUILD when a worse/unknown behaviorDelta row is not in openQuestions (#1819). Default false = log only. */
@@ -509,6 +490,7 @@ async function planPhaseImpl(opts: {
   }
 
   // ADR-0161: stack uses the slice-mode gates; it may plan an explicit slice.
+  const sizeBudget = opts.sizeBudget ?? { tokenBudget: DEFAULT_TOKEN_BUDGET, maxFiles: DEFAULT_MAX_FILES };
   const sliceMode = opts.sizeGateMode === 'slice' || opts.sizeGateMode === 'stack';
   let planningSlice = false;
   let sliceLabel = '';
@@ -520,8 +502,8 @@ async function planPhaseImpl(opts: {
       repo: params.repo,
       title: issueTitle,
       body: issueBody,
-      oversized: readiness.template === 'factory-task' && readiness.sizeOk === false,
-      sizeReason: readiness.sizeReason,
+      // #3350: issue prose never slices; only an existing trusted slice plan selects a slice here.
+      oversized: false,
       maxSlices: opts.maxSlices ?? DEFAULT_MAX_SLICES,
       ...(opts.sizeGateMode === 'stack' && opts.sliceIndex !== undefined ? { sliceIndex: opts.sliceIndex } : {}),
       worktree,
@@ -557,36 +539,25 @@ async function planPhaseImpl(opts: {
       sliceLabel = `slice ${slice.index}/${plan.slices.length} of #${params.issue}`;
       log('plan', `planning slice ${slice.index}/${plan.slices.length} of #${params.issue}: ${slice.title}`);
       if (readiness.sizeOk === false) {
-        const reason = `slice ${slice.index}/${plan.slices.length} of #${params.issue} exceeds the size gate (${readiness.sizeReason ?? 'too big'}) — parked; a slice is never sliced again`;
-        log('size-gate-escalated', reason);
-        return park(reason);
+        log(
+          'size_hint',
+          `slice reads as large (${readiness.sizeReason ?? 'too big'}) — not parked; the post-plan size estimate decides (#3350)`,
+          {
+            readiness,
+          },
+        );
       }
     }
   }
 
-  if (
-    enforceSizeGate &&
-    !sliceMode &&
-    source.kind === GITHUB_ISSUE_SOURCE &&
-    readiness.template === 'factory-task' &&
-    readiness.sizeOk === false
-  ) {
-    const params = source.params as GithubIssueParams;
-    const decomposeResult = await decomposeOversizedIssue({
-      issue: params.issue,
-      repo: params.repo,
-      title: issueTitle,
-      body: issueBody,
-      worktree,
-      router,
-      sandbox: opts.sandbox,
-      octokit,
-      log: (type, msg) => log(type, msg),
-      timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
-      onProviderFailure,
-      fileSubIssues: true,
-    });
-    return fileModeEscalation(decomposeResult.childIssues, readiness, specPath, failureRoute, log);
+  if (enforceSizeGate && readiness.template === 'factory-task' && readiness.sizeOk === false) {
+    log(
+      'size_hint',
+      `issue reads as large (${readiness.sizeReason ?? 'too big'}) — not split; the post-plan size estimate decides (#3350)`,
+      {
+        readiness,
+      },
+    );
   }
 
   // The fast path emits a compact Codex spec, so it is only valid when the route may be codex:
@@ -779,22 +750,15 @@ async function planPhaseImpl(opts: {
         log('design_open_questions', `plan has ${designArtifact.openQuestions.length} open question(s): ${truncated}`);
       }
 
-      // Build-scope gate: a plan whose declared surface is large enough to take
-      // ~40 min of agent churn is a planning failure, not a build problem.
-      // Decompose the issue instead of handing a mega-slice to BUILD: detect
-      // complexity at planning time and keep each build pass short (2026-08-15).
-      // File mode files the decomposition as sub-issues and re-queues them (#2662).
-      if (
-        enforceSizeGate &&
-        source.kind === GITHUB_ISSUE_SOURCE &&
-        (designArtifact.targetTypes.length > MAX_BUILD_TARGET_TYPES ||
-          designArtifact.signatures.length > MAX_BUILD_SIGNATURES ||
-          designArtifact.callGraph.length > MAX_BUILD_CALL_EDGES)
-      ) {
+      // Build-scope gate (#3350): a plan whose estimated size (changed files, and tokens from the
+      // bytes of the files it names) is over sizeGate.tokenBudget / maxFiles is too big for one
+      // bounded BUILD pass; a plan changing 3 files or fewer never splits. Decompose the issue
+      // instead of handing a mega-slice to BUILD. File mode files the decomposition as sub-issues
+      // and re-queues them (#2662).
+      const overBudget = planOverBudget(estimatePlanSize(designArtifact, { worktree }), sizeBudget);
+      if (enforceSizeGate && source.kind === GITHUB_ISSUE_SOURCE && overBudget !== null) {
         const params = source.params as GithubIssueParams;
-        const scope =
-          `${designArtifact.targetTypes.length} target types, ${designArtifact.signatures.length} signatures, ` +
-          `${designArtifact.callGraph.length} call edges`;
+        const scope = overBudget;
         const fileReason = `plan scope exceeds the bounded-build budget (${scope}) — parked for decomposition`;
         const park = (reason: string): PlanResult => ({
           ok: false,

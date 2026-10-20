@@ -177,11 +177,15 @@ build:
 # issues, records a slice plan comment and ships one slice per run; off skips both gates and sends
 # the whole issue to BUILD; stack (ADR-0161) requests a stacked PR set, and until stacks are built
 # it behaves like slice. maxSlices (1-20, default 10) caps a slice plan that has not started: an
-# over-cap plan is recorded and parks, and `--max-slices <n>` beats it for one run. `factory
-# run-issue --size-gate <mode>` beats mode for one run.
+# over-cap plan is recorded and parks, and `--max-slices <n>` beats it for one run. tokenBudget
+# (default 150000) and maxFiles (default 12) (#3350): the post-plan gate splits only when the plan's
+# estimated tokens exceed tokenBudget or its changed files exceed maxFiles; a plan changing 3 files
+# or fewer never splits. `factory run-issue --size-gate <mode>` beats mode for one run.
 sizeGate:
   mode: "file"
   maxSlices: 10
+  tokenBudget: 150000
+  maxFiles: 12
 # Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging
 ci:
   skip: false

@@ -168,6 +168,7 @@ export type EventKind =
   | 'size-gate-escalated'
   | 'size-gate-decomposed'
   | 'size-gate-sliced'
+  | 'size_hint'
   | 'steward-triggered'
   | 'steering_applied'
   | 'steering_unconsumed'
@@ -436,6 +437,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'size-gate-decomposed': { severity: 'info', isPark: false, isTerminal: false },
   // ADR-0147: the oversized issue was kept whole and a slice plan was recorded.
   'size-gate-sliced': { severity: 'info', isPark: false, isTerminal: false },
+  size_hint: { severity: 'warn', isPark: false, isTerminal: false }, // in-scope/AC counts read large; hint only (#3350)
   // Steward picked up a parked run (ADR-0155). Not a park: the run already logged its own park.
   'steward-triggered': { severity: 'info', isPark: false, isTerminal: false },
   steering_applied: { severity: 'info', isPark: false, isTerminal: false },
@@ -468,10 +470,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'worktree-gc': { severity: 'info', isPark: false, isTerminal: false },
 };
 
-/** Returned by `eventTraitsFor` for a string outside `EventKind` (e.g. a kind
- *  logged by an older factory version whose vocabulary has since narrowed).
- *  Deliberately not `{ severity: 'info', ... }` — an unrecognized kind must
- *  never silently read as routine/successful. */
+/** Returned by `eventTraitsFor` for a string outside `EventKind` (e.g. from an older factory version).
+ *  Deliberately not `info`: an unrecognized kind must never silently read as routine/successful. */
 export const UNKNOWN_EVENT_TRAITS: EventTraits = { severity: 'unknown', isPark: false, isTerminal: false };
 
 function isEventKind(type: string): type is EventKind {

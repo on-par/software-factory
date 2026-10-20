@@ -1042,6 +1042,9 @@ npm run test`;
       ],
     });
 
+    // #3350: counts never split; an over-budget design artifact (14 changed files > 12) does, post-plan.
+    const megaPlan = () => [{ output: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n` }];
+
     it('decomposes and parks a complete oversized factory-task by default', async () => {
       const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
       tempDirs.add(worktree);
@@ -1049,6 +1052,7 @@ npm run test`;
       const stub = new StubModelExecutor({
         scripts: {
           decompose: [{ output: validDecomposition }],
+          plan: megaPlan(),
         },
       });
       const router = new ModelRouter(models, routes, false, stub);
@@ -1074,9 +1078,8 @@ npm run test`;
       });
 
       expect(result.ok).toBe(false);
-      expect(result.escalate).toMatch(/size gate/);
-      expect(result.route).toBe('claude');
-      expect(stub.calls.map((call) => call.task)).toEqual(['decompose']);
+      expect(result.escalate).toMatch(/bounded-build budget/);
+      expect(stub.calls.map((call) => call.task)).toEqual(['plan', 'decompose']);
       expect(createComment).toHaveBeenCalledTimes(1);
       expect(createComment).toHaveBeenCalledWith({
         owner: 'on-par',
@@ -1122,7 +1125,7 @@ npm run test`;
       const stub = new StubModelExecutor({
         scripts: {
           decompose: [{ output: validDecomposition }],
-          plan: [{ output: '# Spec\n' }],
+          plan: megaPlan(),
         },
       });
       const router = new ModelRouter(models, routes, false, stub);
@@ -1150,10 +1153,11 @@ npm run test`;
         log: (type: any, msg: any, extra: any) => logs.push({ type, msg, extra }),
       });
 
-      expect(stub.calls.map((call) => call.task)).toEqual(['decompose']);
-      const decomposed = logs.find((l) => l.type === 'size-gate-decomposed');
-      expect(decomposed?.msg).toMatch(/8 acceptance criteria/);
-      expect(decomposed?.extra.readiness.sizeOk).toBe(false);
+      expect(stub.calls.map((call) => call.task)).toEqual(['plan', 'decompose']);
+      const hint = logs.find((l) => l.type === 'size_hint');
+      expect(hint?.msg).toMatch(/8 acceptance criteria/);
+      expect(hint?.extra.readiness.sizeOk).toBe(false);
+      expect(logs.some((l) => l.type === 'size-gate-decomposed')).toBe(true);
       expect(logs.some((l) => l.type === 'size-gate-escalated')).toBe(false);
       expect(result.ok).toBe(false);
       expect(result.decomposed).toEqual({ childIssues: [2700] });
@@ -1166,6 +1170,7 @@ npm run test`;
       const stub = new StubModelExecutor({
         scripts: {
           decompose: [{ output: investFailingDecomposition }, { output: investFailingDecomposition }],
+          plan: megaPlan(),
         },
       });
       const router = new ModelRouter(models, routes, false, stub);
@@ -1191,8 +1196,8 @@ npm run test`;
       });
 
       expect(result.ok).toBe(false);
-      expect(result.escalate).toMatch(/size gate/);
-      expect(stub.calls.map((call) => call.task)).toEqual(['decompose', 'decompose']);
+      expect(result.escalate).toMatch(/bounded-build budget/);
+      expect(stub.calls.map((call) => call.task)).toEqual(['plan', 'decompose', 'decompose']);
       expect(createComment).not.toHaveBeenCalled();
       expect(events).toContain('decompose_failed');
       expect(events).toContain('size-gate-escalated');
@@ -1244,6 +1249,7 @@ npm run test`;
       const stub = new StubModelExecutor({
         scripts: {
           decompose: [{ output: validDecomposition }],
+          plan: megaPlan(),
         },
       });
       const router = new ModelRouter(models, routes, false, stub);
@@ -1293,6 +1299,7 @@ npm run test`;
       const stub = new StubModelExecutor({
         scripts: {
           decompose: [{ output: validDecomposition }],
+          plan: megaPlan(),
         },
       });
       const router = new ModelRouter(models, routes, false, stub);
@@ -1667,13 +1674,15 @@ npm run test`;
       maxSlices?: number;
       mode?: 'slice' | 'stack';
       comments?: { id: number; user: { id: number }; body: string }[];
+      /** PLAN output; default is a small design. megaPlan trips the post-plan gate (14 changed files > 12). */
+      plan?: string;
     }) {
       const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
       tempDirs.add(worktree);
       const stub = new StubModelExecutor({
         scripts: {
           decompose: (opts.decompose ?? []).map((output) => ({ output })),
-          plan: [{ output: PLAN_OUTPUT }],
+          plan: [{ output: opts.plan ?? PLAN_OUTPUT }],
         },
       });
       const router = new ModelRouter(models, routes, false, stub);
@@ -1714,32 +1723,24 @@ npm run test`;
 
     const planPrompt = (stub: StubModelExecutor) => stub.calls.find((call) => call.task === 'plan')?.prompt ?? '';
 
-    it('AC1: keeps the issue whole, records one slice plan comment and plans slice 1 only', async () => {
-      const { result, stub, events, createComment, create, update } = await run({ decompose: [decompositionOf(2)] });
+    it('AC1 (#3350): an oversized-by-count issue is not sliced before PLAN; size_hint is logged and the whole issue is planned', async () => {
+      const { result, stub, events, createComment, create } = await run({ decompose: [decompositionOf(2)] });
 
       expect(result.ok).toBe(true);
-      expect(stub.calls.map((call) => call.task)).toEqual(['decompose', 'plan']);
+      expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
       expect(create).not.toHaveBeenCalled();
-      expect(update).not.toHaveBeenCalled();
-      expect(createComment).toHaveBeenCalledTimes(1);
-      expect(createComment.mock.calls[0][0].body).toContain('<!-- factory:slice-plan v1 -->');
-      expect(createComment.mock.calls[0][0].body).not.toContain('## Proposed epic');
-      expect(events).toContain('size-gate-sliced');
-      expect(events).not.toContain('size-gate-escalated');
-      expect(planPrompt(stub)).toContain('Problem for slice 1');
-      expect(planPrompt(stub)).not.toContain('Problem for slice 2');
-      expect(await readFile(result.specPath, 'utf8')).toContain('# Spec');
+      expect(createComment).not.toHaveBeenCalled();
+      expect(events).toContain('size_hint');
+      expect(events).not.toContain('size-gate-sliced');
     });
 
-    it('stack mode falls back to slice: records a slice plan and files no child issues (ADR-0161)', async () => {
+    it('stack mode does not slice from counts either (ADR-0161, #3350)', async () => {
       const { result, events, createComment, create } = await run({ decompose: [decompositionOf(2)], mode: 'stack' });
 
       expect(result.ok).toBe(true);
       expect(create).not.toHaveBeenCalled();
-      expect(createComment).toHaveBeenCalledTimes(1);
-      expect(createComment.mock.calls[0][0].body).toContain('<!-- factory:slice-plan v1 -->');
-      expect(events).toContain('size-gate-sliced');
-      expect(events).not.toContain('size-gate-escalated');
+      expect(createComment).not.toHaveBeenCalled();
+      expect(events).toContain('size_hint');
     });
 
     it('AC2: reuses a trusted plan without decomposing, and plans the first non-merged slice', async () => {
@@ -1764,26 +1765,28 @@ npm run test`;
       expect(result.slice?.plan.slices[0].state).toBe('merged');
     });
 
-    it('AC3: parks when the current slice is still oversized and never decomposes again', async () => {
+    it('AC3 (#3350): a count-oversized current slice is not parked pre-plan; size_hint is logged', async () => {
       const inScope = ['a', 'b', 'c', 'd', 'e', 'f'];
       const { result, stub, events } = await run({
         comments: [{ id: 1, user: { id: BOT }, body: planComment({ inScope }) }],
       });
 
-      expect(result.ok).toBe(false);
-      expect(result.escalate).toMatch(/slice 1\/2 of #607 exceeds the size gate/);
-      expect(stub.calls).toEqual([]);
-      expect(events).toContain('size-gate-escalated');
+      expect(result.ok).toBe(true);
+      expect(result.slice?.index).toBe(1);
+      expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
+      expect(events).toContain('size_hint');
+      expect(events).not.toContain('size-gate-escalated');
     });
 
     it('AC4a: more than the cap records the slice plan, files nothing and parks naming --max-slices', async () => {
       const { result, stub, events, createComment, create } = await run({
         decompose: [decompositionOf(6)],
         maxSlices: 5,
+        plan: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n`,
       });
 
       expect(result.ok).toBe(false);
-      expect(stub.calls.map((call) => call.task)).toEqual(['decompose']);
+      expect(stub.calls.map((call) => call.task)).toEqual(['plan', 'decompose']);
       expect(create).not.toHaveBeenCalled();
       expect(createComment).toHaveBeenCalledTimes(1);
       const body = createComment.mock.calls[0][0].body as string;
@@ -1798,7 +1801,10 @@ npm run test`;
     });
 
     it("escalates with the slicer's reason when the slicer cannot split the issue", async () => {
-      const { result, stub, events, createComment, create } = await run({ decompose: ['not json', 'not json'] });
+      const { result, stub, events, createComment, create } = await run({
+        decompose: ['not json', 'not json'],
+        plan: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n`,
+      });
 
       expect(result.ok).toBe(false);
       expect(result.escalate).toContain('slice decomposition failed');
@@ -1806,7 +1812,7 @@ npm run test`;
       expect(events).toContain('size-gate-escalated');
       expect(createComment).not.toHaveBeenCalled();
       expect(create).not.toHaveBeenCalled();
-      expect(stub.calls.map((call) => call.task)).not.toContain('plan');
+      expect(stub.calls.map((call) => call.task)).toEqual(['plan', 'decompose', 'decompose']);
     });
 
     it('a raised cap reuses the recorded plan without decomposing', async () => {

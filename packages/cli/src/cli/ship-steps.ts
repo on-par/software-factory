@@ -32,6 +32,7 @@ import {
   resolveBuildPublish,
   resolveDesignRegressionBlock,
   resolveReadinessUpdateIssueBody,
+  resolveSizeGateBudget,
   rewriteQueueForDecomposition,
   type SizeGateMode,
   worktreeWorkspace,
@@ -101,11 +102,9 @@ export function logSandboxPolicy(
       'outer sandbox off; harness sandbox in use (codex --sandbox workspace-write; harnesses without their own sandbox run unwrapped)',
     );
   } else if (sandboxPolicy.runtime === 'docker-sandbox') {
-    // docker-sandbox's containment is the microVM created by worktreeWorkspace in shipIssue
-    // (#653), not a command-prefix wrap — activeSandboxPolicy stays undefined because
-    // wrapCommandInSandbox remains a no-op for this runtime. createMicroVm logs the
-    // actual outcome ('sandbox' on success, 'sandbox-unavailable' on fallback), so no
-    // speculative log is emitted here.
+    // Containment is the microVM created by worktreeWorkspace in shipIssue (#653), not a command-prefix
+    // wrap: activeSandboxPolicy stays undefined (wrapCommandInSandbox is a no-op here) and createMicroVm
+    // logs the actual outcome ('sandbox' or 'sandbox-unavailable'), so nothing is logged here.
   } else {
     activeSandboxPolicy = sandboxPolicy;
     if (sandboxPolicy.allowHosts.length > 0) {
@@ -388,6 +387,7 @@ export function buildRunRequest({
     publishFromBuild: resolveBuildPublish(factoryConfig),
     sizeGateMode,
     maxSlices,
+    sizeBudget: resolveSizeGateBudget(factoryConfig),
     prClassifier: classifierPolicy.enabled
       ? {
           rules: resolveReviewFloorRules(repoConfig),
