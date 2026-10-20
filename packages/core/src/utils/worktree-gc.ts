@@ -32,6 +32,7 @@ import {
   resolveIssueExistence,
 } from './worktree-gc-issues.js';
 import { isFactoryDirName } from './worktree-name.js';
+import { readWorktreeKeeps, releaseWorktreeKeeps, type WorktreeKeep } from './worktree-keeps.js';
 
 const exec = promisify(execCb);
 
@@ -113,6 +114,14 @@ export interface GcHeldCandidate {
   why: string;
 }
 
+/** A worktree kept by a worktree-keeps.json record (#3316). */
+export interface GcKeptCandidate {
+  path: string;
+  branch: string | null;
+  issue: number;
+  reason: string;
+}
+
 export interface GcReport {
   removed: GcCandidate[];
   kept: number;
@@ -138,6 +147,8 @@ export interface GcReport {
    *  unpushed commits, or could not be verified (#1756). Populated in dry-run and real mode;
    *  every entry is also counted in `kept`. */
   held: GcHeldCandidate[];
+  /** Worktrees kept by a worktree-keeps.json record (#3316); also counted in kept. */
+  keptByRecord?: GcKeptCandidate[];
 }
 
 export interface SweepDeps {
@@ -477,6 +488,8 @@ export async function sweepWorktrees(
     branchPrefix?: string;
     /** Issues other lanes of this run have in flight: never reaped, whatever their age or PR state (#2964). */
     protectedIssues?: ReadonlySet<number>;
+    /** worktree-keeps.json to honor (#3316); defaults to the repo's state file. */
+    keepsFile?: string;
   },
   deps: SweepDeps = {},
 ): Promise<GcReport> {
@@ -523,6 +536,10 @@ export async function sweepWorktrees(
   const removed: GcCandidate[] = [];
   const held: GcHeldCandidate[] = [];
   let kept = 0;
+  const keepsFile = opts.keepsFile ?? getFactoryPaths(repoRoot).worktreeKeeps;
+  const keeps = new Map<number, WorktreeKeep>(readWorktreeKeeps(keepsFile, log).map((k) => [k.issue, k]));
+  const keptByRecord: GcKeptCandidate[] = [];
+  const releasedKeeps = new Map<string, number>();
 
   const mainTip = candidates.length > 0 ? await resolveMainTip(runCommand, repoRoot) : null;
 
@@ -577,6 +594,16 @@ export async function sweepWorktrees(
       kept++;
       continue;
     }
+    const keep = entryIssue === null ? undefined : keeps.get(entryIssue);
+    // A keep record protects the worktree from every reason except a closed issue with a clean tree.
+    if (
+      keep &&
+      !((await dispositionFor(keep.issue)) === 'reap-closed' && (await isWorktreeClean(runCommand, entry.path)))
+    ) {
+      kept++;
+      keptByRecord.push({ path: entry.path, branch: entry.branch, issue: keep.issue, reason: keep.reason });
+      continue;
+    }
     const ageDays = computeAgeDays(entry.path, now, log);
 
     let pushEvidence: boolean | undefined;
@@ -597,7 +624,7 @@ export async function sweepWorktrees(
     let reason: GcReason | null = null;
     let branchReapable = false;
     let heldThisEntry = false;
-    if (ageDays > ttlDays) {
+    if (ageDays > ttlDays && !keep) {
       reason = 'ttl-expired';
     }
     if (!reason) {
@@ -765,6 +792,7 @@ export async function sweepWorktrees(
       continue;
     }
 
+    if (keep) releasedKeeps.set(entry.path, keep.issue);
     removed.push({
       path: entry.path,
       branch: entry.branch,
@@ -804,7 +832,7 @@ export async function sweepWorktrees(
       }
     }
 
-    return { removed, kept, dryRun: true, issueNotFound, issueUnverifiable, noActiveClaim, held };
+    return { removed, kept, dryRun: true, issueNotFound, issueUnverifiable, noActiveClaim, held, keptByRecord };
   }
 
   for (const candidate of removed) {
@@ -863,13 +891,24 @@ export async function sweepWorktrees(
     }
   }
 
+  releaseWorktreeKeeps(keepsFile, releasedKeeps, log);
+
   await runCommand('git worktree prune', { cwd: repoRoot }).catch((err: any) =>
     log('warn', `git worktree prune failed in ${repoRoot}: ${err?.message ?? String(err)}`),
   );
 
   await deleteReapedBranches(removed, repoRoot, runCommand, log);
 
-  return { removed, kept, dryRun: false, issueNotFound: [], issueUnverifiable: [], noActiveClaim: [], held };
+  return {
+    removed,
+    kept,
+    dryRun: false,
+    issueNotFound: [],
+    issueUnverifiable: [],
+    noActiveClaim: [],
+    held,
+    keptByRecord,
+  };
 }
 
 async function deleteReapedBranches(
@@ -931,6 +970,9 @@ export function formatGcReport(report: GcReport): string {
       : `${verb} ${removedCount} worktree(s), kept ${report.kept}`,
   );
 
+  for (const c of report.keptByRecord ?? []) {
+    lines.push(`${c.path} (${c.branch ?? 'detached'}) — kept (${c.reason})`);
+  }
   if (report.issueNotFound.length > 0) {
     lines.push(`${report.issueNotFound.length} worktree(s) flagged — owning issue not found (404):`);
     for (const c of report.issueNotFound) {

@@ -39,7 +39,6 @@ import {
   resolveTimeouts,
   factoryRuntimeConfigIssues,
 } from './index.js';
-
 function baseModelDef(overrides: Record<string, unknown> = {}) {
   return {
     provider: 'anthropic',
@@ -94,6 +93,7 @@ describe('getFactoryPaths', () => {
       runLock: resolve(state, 'run.lock'),
       product: resolve(state, 'product'),
       stop: resolve(state, 'STOP'),
+      worktreeKeeps: resolve(state, 'worktree-keeps.json'),
       costs: resolve(state, 'costs.jsonl'),
       approvals: resolve(state, 'approvals'),
       steering: resolve(state, 'steering'),

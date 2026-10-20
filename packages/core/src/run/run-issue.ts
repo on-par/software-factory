@@ -94,6 +94,7 @@ import { safeRecordRunState, terminalRunStateUpdate, thrownRunStateUpdate } from
 import { runStatusForPhase, type RunStateUpdate } from './state.js';
 import { shipWithCiRework, type CiReworkPorts } from './ci-rework-loop.js';
 import { parkLogExtra } from './ship-park.js';
+import { enforceIssueBudget } from './budget.js';
 
 /** Everything one run needs decided, as a plain resolved value — the CLI adapter
  *  computes this today; no config/file/path resolution happens in here. */
@@ -162,6 +163,8 @@ export interface RunRequest {
   repoConfigFile?: { absPath: string; relPath: string };
   /** state/flaky-tests.json (#2303); undefined = no flake ledger or filing. */
   flakyLedgerPath?: string;
+  /** state/worktree-keeps.json (#3316); undefined = a budget park records no keep. */
+  worktreeKeepsPath?: string;
 }
 
 type LogFn = (
@@ -467,12 +470,9 @@ async function runIssueOnce(
   };
 
   const assertBudget = async (phase: string): Promise<RunOutcome | undefined> => {
-    const spend = ports.getIssueSpend?.() ?? 0;
-    const cap = policy.budget.perIssueCapUsd;
-    if (cap === undefined || spend <= cap) return undefined;
-    const message = `per-issue budget exceeded after ${phase}: $${spend.toFixed(2)} > $${cap.toFixed(2)}`;
-    log('budget_exceeded', message);
-    return terminalParked('fail', message);
+    // prettier-ignore
+    const message = enforceIssueBudget({ phase, spend: ports.getIssueSpend?.() ?? 0, cap: policy.budget.perIssueCapUsd, issue: request.issue, worktreePath: ports.workspace.path, keepsFile: request.worktreeKeepsPath, log });
+    return message === undefined ? undefined : terminalParked('fail', message);
   };
 
   const rememberProviderFailure = async ({

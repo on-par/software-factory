@@ -420,6 +420,7 @@ export function buildRunRequest({
     baselineCachePath: paths.baselineCache,
     repoConfigFile: repoConfigFileFor(repoRoot, paths.config),
     flakyLedgerPath: paths.flakyLedger,
+    worktreeKeepsPath: paths.worktreeKeeps,
   };
 }
 
