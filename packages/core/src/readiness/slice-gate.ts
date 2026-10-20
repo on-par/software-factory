@@ -3,6 +3,7 @@
 // In slice mode an oversized issue stays whole and no issue is ever filed (ADR-0156). This module finds the trusted slice plan comment
 // (or decomposes once, without filing or commenting, and records a new plan) and tells PLAN which
 // slice to plan. It never throws: every GitHub I/O failure or unusable plan comes back as a park;
+// a cohesive decomposition (slices mostly edit the same files) comes back as `cohesive` with no plan recorded (#3351);
 // a slicer failure (no usable decomposition) comes back as `unsliceable` so PLAN escalates it as a size-gate escalation.
 
 import type { Octokit } from '@octokit/rest';
@@ -19,6 +20,7 @@ import {
   slicePlanFromDecomposition,
 } from './slice-plan.js';
 import type { Slice, SlicePlan } from './slice-plan.js';
+import type { SliceOverlap } from './slice-overlap.js';
 import { findSlicePlanComment, upsertSlicePlanComment } from './slice-plan-github.js';
 
 export type SliceGateOutcome =
@@ -27,7 +29,9 @@ export type SliceGateOutcome =
   | { kind: 'park'; reason: string }
   | { kind: 'over-cap'; plan: SlicePlan; reason: string }
   /** The slicer could not produce a usable slice plan, so PLAN escalates as a size-gate escalation. */
-  | { kind: 'unsliceable'; reason: string };
+  | { kind: 'unsliceable'; reason: string }
+  /** The slicer's slices mostly edit the same files, so the issue stays whole and no slice plan is recorded (#3351). */
+  | { kind: 'cohesive'; overlap: SliceOverlap };
 
 const MAX_SLICER_REASON = 500;
 const clip = (text: string): string =>
@@ -136,6 +140,8 @@ export async function resolveSliceGate(deps: {
       reason: `issue exceeds the size gate (${reasonText}) — slice decomposition failed (${clip(decomposed.failureReason ?? 'no decomposition returned')}), parked`,
     };
   }
+
+  if (decomposed.cohesive !== undefined) return { kind: 'cohesive', overlap: decomposed.cohesive };
 
   const built = slicePlanFromDecomposition(issue, decomposition);
   if (!built.ok) {

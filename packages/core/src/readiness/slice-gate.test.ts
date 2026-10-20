@@ -43,8 +43,9 @@ const routes: RoutesConfig = {
   },
 };
 
-function storyJson(n: number) {
+function storyJson(n: number, files?: string[]) {
   return {
+    ...(files === undefined ? {} : { filesLikelyTouched: files }),
     title: `Story ${n}`,
     role: 'operator',
     want: `thing ${n} works`,
@@ -58,8 +59,8 @@ function storyJson(n: number) {
   };
 }
 
-function decompositionJson(count: number): string {
-  const stories = Array.from({ length: count }, (_, i) => storyJson(i + 1));
+function decompositionJson(count: number, filesFor?: (n: number) => string[]): string {
+  const stories = Array.from({ length: count }, (_, i) => storyJson(i + 1, filesFor?.(i + 1)));
   return JSON.stringify({
     epic: { title: 'Epic', why: 'why', doneWhen: ['done'], children: stories.map((s) => s.title) },
     stories,
@@ -287,5 +288,37 @@ describe('resolveSliceGate', () => {
     f.createComment.mockRejectedValue(new Error('403'));
     const { run } = setup([decompositionJson(2)], f);
     expect(await run()).toEqual({ kind: 'park', reason: 'posting the slice plan failed: 403' });
+  });
+
+  it('keeps an issue whole when every slice edits the same files', async () => {
+    const f = fake([]);
+    const same = ['src/list.ts', 'docs/list.md', 'src/list.test.ts'];
+    const { events, run } = setup([decompositionJson(3, () => same)], f);
+
+    const outcome = await run();
+
+    expect(outcome.kind).toBe('cohesive');
+    expect(f.createComment).not.toHaveBeenCalled();
+    expect(f.updateComment).not.toHaveBeenCalled();
+    const cohesive = events.find((e) => e.type === 'size_gate_cohesive');
+    expect(cohesive?.msg).toContain('3 slice');
+    expect(cohesive?.msg).toContain('src/list.ts');
+    expect(events.map((e) => e.type)).not.toContain('size-gate-sliced');
+  });
+
+  it('records a slice plan when slices edit disjoint files', async () => {
+    const f = fake([]);
+    const names = ['a', 'b', 'c'];
+    const { events, run } = setup(
+      [decompositionJson(3, (n) => [`src/${names[n - 1]}.ts`, `src/${names[n - 1]}.test.ts`])],
+      f,
+    );
+
+    const outcome = await run();
+
+    expect(outcome.kind).toBe('slice');
+    if (outcome.kind === 'slice') expect(outcome.created).toBe(true);
+    expect(f.createComment).toHaveBeenCalledTimes(1);
+    expect(events.map((e) => e.type)).toContain('size-gate-sliced');
   });
 });
