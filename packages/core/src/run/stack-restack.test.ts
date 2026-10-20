@@ -1,10 +1,11 @@
 // packages/core/src/run/stack-restack.test.ts — ADR-0161 (#3368): restack open slices after a squash merge, on a real git fixture.
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import type { Octokit } from '@octokit/rest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -33,6 +34,8 @@ const emptyPlan = (): SlicePlan => ({
   issue: 9,
   slices: [1, 2, 3].map((index) => ({ index, title: `S${index}`, story, state: 'pending' as const })),
 });
+
+const tempDirs = createTempDirs();
 
 describe('restackAfterSquashMerge', () => {
   let dir: string;
@@ -82,7 +85,7 @@ describe('restackAfterSquashMerge', () => {
     git(remote, 'log', '--format=%s', `main..${branch}`).split('\n').filter(Boolean);
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'restack-test-'));
+    dir = tempDirs.makeSync('restack-test-');
     remote = join(dir, 'remote.git');
     root = join(dir, 'root');
     update = vi.fn(async () => ({}));
@@ -117,7 +120,7 @@ describe('restackAfterSquashMerge', () => {
     plan = withSliceState(plan, 3, 'pr-open', 103, 'factory/9-slice-3', head3);
   });
 
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => tempDirs.cleanup());
 
   it('rebases the next slice onto main after its parent is squash-merged and retargets it', async () => {
     const out = await run({ plan: withSliceState(plan, 3, 'pending') });
