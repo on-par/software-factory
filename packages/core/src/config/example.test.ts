@@ -139,6 +139,13 @@ describe('the example, loaded as a repo config, behaves like no config file', ()
     expect(() => loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config)).not.toThrow();
   });
 
+  it('documents hermetic CHECK Git and its host-config opt-out', () => {
+    const example = readFileSync(EXAMPLE_PATH, 'utf8');
+    expect(example).toContain('hermeticGit: true');
+    expect(example).toContain('hermeticGit: false');
+    expect(example).toContain('identity and branch explicitly');
+  });
+
   it('keeps every runtime-policy value at its packaged default', () => {
     const { run: _run, ...fromExample } = loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config);
     const { run: _none, ...defaults } = loadFactoryConfigForRepo(noConfig);

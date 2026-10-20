@@ -57,6 +57,8 @@ const RUNTIME_NOTES: Record<string, string> = {
     'BUILD policy. publishFromBuild: true lets the claude BUILD worker push, open a PR and wait for CI before ' +
     'CHECK (the old behavior). Default false keeps BUILD commit-only on every route; SHIP pushes and opens the PR ' +
     'after CHECK. FACTORY_BUILD_PUBLISH=1/0 beats it.',
+  check:
+    'CHECK runs with empty global and system Git config by default. Set hermeticGit: false to use host Git helpers; tests must set identity and branch explicitly.',
   sizeGate:
     'Size gate policy at PLAN (ADR-0147, ADR-0156). mode: file (default) files child issues for an oversized issue and parks ' +
     'when the post-plan gate trips; slice keeps the issue whole, never files issues, records a slice plan comment and ships one slice per run; off skips both gates and sends the whole issue to BUILD; stack (ADR-0161) requests a stacked PR set, and until stacks are built it behaves like slice. ' +
@@ -313,6 +315,7 @@ function runtimeNamespace(): Node[] {
         },
       ],
     },
+    section('check'),
     section('timeouts'),
     section('plan_approval'),
     section('design'),

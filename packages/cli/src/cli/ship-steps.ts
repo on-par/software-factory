@@ -385,6 +385,7 @@ export function buildRunRequest({
     blockUnresolvedRegressions: resolveDesignRegressionBlock(factoryConfig),
     readinessUpdateIssueBody: resolveReadinessUpdateIssueBody(factoryConfig),
     publishFromBuild: resolveBuildPublish(factoryConfig),
+    hermeticGit: factoryConfig.check?.hermeticGit ?? true,
     sizeGateMode,
     maxSlices,
     prClassifier: classifierPolicy.enabled

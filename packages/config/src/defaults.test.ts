@@ -14,6 +14,10 @@ import {
 } from './defaults.js';
 
 describe('shipped defaults', () => {
+  it('enables hermetic Git for CHECK by default', () => {
+    expect(defaultFactoryConfig.check).toEqual({ hermeticGit: true });
+  });
+
   it('defaults the lane breaker threshold to 2 (#1915)', () => {
     expect(defaultLaneBreakerThreshold).toBe(2);
   });

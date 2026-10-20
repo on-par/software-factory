@@ -290,6 +290,7 @@ async function checkPhaseImpl(opts: {
   router: ModelRouter;
   log: LogFn;
   autoRework?: boolean;
+  hermeticGit?: boolean;
   /** Hard cap for checker repair attempts. Defaults to one to avoid full-session retry loops. */
   maxReworkRounds?: number;
   buildTimeoutSeconds?: number;
@@ -350,6 +351,7 @@ async function checkPhaseImpl(opts: {
     router,
     log,
     autoRework = true,
+    hermeticGit = true,
     maxReworkRounds = MAX_REWORK_ROUNDS,
     buildTimeoutSeconds,
     checkTimeoutSeconds,
@@ -395,7 +397,10 @@ async function checkPhaseImpl(opts: {
     specPath,
     diffBase,
     parentBaseRef,
-    env: laneEnv(appPort, process.env, appBaseUrl, worktree, runId),
+    env: {
+      ...laneEnv(appPort, process.env, appBaseUrl, worktree, runId),
+      ...(hermeticGit ? { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } : {}),
+    },
     onPgid,
     processGroupTracker,
     probe,
@@ -424,7 +429,7 @@ async function checkPhaseImpl(opts: {
     );
   }
 
-  log('check', 'Running checkers');
+  log('check', `Running checkers (round 0, hermetic git: ${hermeticGit ? 'on' : 'off'})`);
 
   let summary = await (runCheckers ?? runAllCheckers)(ctx, router, constitution, checkTimeoutSeconds);
   summary = await appendEvidencePlanStep(summary, ctx, constitution, runEvidence);
@@ -603,6 +608,7 @@ async function checkPhaseImpl(opts: {
     probe = await probeWorktree(worktree);
     ctx.probe = probe;
     ctx.outputLogDir = roundLogDir(reworkRounds);
+    log('check', `Running checkers (round ${reworkRounds}, hermetic git: ${hermeticGit ? 'on' : 'off'})`);
     summary = await (runCheckers ?? runAllCheckers)(ctx, router, constitution, checkTimeoutSeconds);
     summary = await appendEvidencePlanStep(summary, ctx, constitution, runEvidence);
     log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);

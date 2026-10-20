@@ -133,6 +133,10 @@ version: 2
     # Hold PRs whose review floor is B or C (or cannot be computed) for a human by applying
     # no-auto-merge. Unset: FACTORY_PR_CLASSIFIER=1. --pr-classifier / --no-pr-classifier beat all.
     # classifier: false
+# CHECK runs with empty global and system Git config by default. Set hermeticGit: false to use host
+# Git helpers; tests must set identity and branch explicitly.
+check:
+  hermeticGit: true
 # Phase timeouts in seconds. tests_seconds caps the tests checker command (scripts/verify.sh, npm
 # test or pytest). compile_seconds caps the compile checker command (npm run build, make or cargo
 # build). FACTORY_PLAN_TIMEOUT, FACTORY_BUILD_TIMEOUT, FACTORY_CHECK_TIMEOUT,

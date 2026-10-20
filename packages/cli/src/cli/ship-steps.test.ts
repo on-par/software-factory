@@ -7,7 +7,7 @@ import { buildRunRequest, logSandboxPolicy, type RunRequestInput } from './ship-
 it('passes the resolved factory state and primary git directory to Codex', () => {
   const repoRoot = '/tmp/primary';
   const paths = getFactoryPaths(repoRoot, '/tmp/relocated-factory');
-  const input = {
+  const input: RunRequestInput = {
     issueNum: 3249,
     ghRepo: 'on-par/software-factory',
     repoRoot,
@@ -40,13 +40,18 @@ it('passes the resolved factory state and primary git directory to Codex', () =>
     activeSandboxPolicy: undefined,
     processGroupGraceMs: 1,
     paths,
-  } satisfies RunRequestInput;
+  };
   const request = buildRunRequest(input);
   expect(request.codexWorkspacePaths).toEqual({
     primaryRepoRoot: repoRoot,
     writableRoots: [paths.state, `${repoRoot}/.git`],
   });
   expect(request.specPath.startsWith(`${paths.state}/plans/`)).toBe(true);
+  expect(request.hermeticGit).toBe(true);
+  input.factoryConfig = { ...input.factoryConfig, check: { hermeticGit: false } };
+  expect(buildRunRequest(input).hermeticGit).toBe(false);
+  input.factoryConfig = { ...input.factoryConfig, check: { hermeticGit: true } };
+  expect(buildRunRequest(input).hermeticGit).toBe(true);
 });
 
 it('retains runtime none for harnesses while --no-sandbox still disables it', () => {

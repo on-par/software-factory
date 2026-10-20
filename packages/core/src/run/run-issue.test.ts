@@ -176,7 +176,6 @@ describe('runIssue — recorded remote branch SHA (#1869)', () => {
     expect(vi.mocked(shipPhase).mock.calls[0][0].recordedRemoteSha).toBe('d'.repeat(40));
   });
 });
-
 describe('runIssue — invariant 1: constitution resolved exactly once', () => {
   it('calls resolveConstitution exactly once, before BUILD, and passes the same value to every phase', async () => {
     const constitution: Constitution = {
@@ -290,17 +289,18 @@ describe('runIssue — constitution checker preflight (#2585)', () => {
 
 describe('runIssue — per-run id threading (#1910)', () => {
   it('mints one runId shared by BUILD and CHECK, fresh for every run', async () => {
-    await runIssue(baseRequest(), basePolicy(), basePorts());
+    await runIssue(baseRequest({ hermeticGit: false }), basePolicy(), basePorts());
     const buildId = vi.mocked(buildPhase).mock.calls[0][0].runId;
     expect(buildId).toMatch(/^[0-9a-f]{12}$/);
-    expect(vi.mocked(checkPhase).mock.calls[0][0].runId).toBe(buildId);
+    expect(vi.mocked(checkPhase).mock.calls[0][0]).toMatchObject({ runId: buildId, hermeticGit: false });
+    expect(Object.hasOwn(vi.mocked(buildPhase).mock.calls[0][0], 'hermeticGit')).toBe(false);
+    expect(Object.hasOwn(vi.mocked(shipPhase).mock.calls[0][0], 'hermeticGit')).toBe(false);
 
     vi.mocked(buildPhase).mockClear();
     await runIssue(baseRequest(), basePolicy(), basePorts());
     expect(vi.mocked(buildPhase).mock.calls[0][0].runId).not.toBe(buildId);
   });
 });
-
 describe('runIssue — .NET env event (#1911)', () => {
   const dirs: string[] = [];
   afterEach(async () => {

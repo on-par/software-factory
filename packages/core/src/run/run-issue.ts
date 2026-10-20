@@ -95,9 +95,9 @@ import { runStatusForPhase, type RunStateUpdate } from './state.js';
 import { shipWithCiRework, type CiReworkPorts } from './ci-rework-loop.js';
 import { parkLogExtra } from './ship-park.js';
 
-/** Everything one run needs decided, as a plain resolved value — the CLI adapter
- *  computes this today; no config/file/path resolution happens in here. */
 export interface RunRequest {
+  /** CHECK Git config isolation; undefined means enabled. */
+  hermeticGit?: boolean;
   /** ADR-0161 stack mode: the 1-based slice to plan. Set by runIssue's stack loop; undefined = the gate's current slice. */
   sliceIndex?: number;
   issue: number;
@@ -146,7 +146,7 @@ export interface RunRequest {
   codexWorkspacePaths?: { primaryRepoRoot: string; writableRoots: readonly string[] };
   /** Grace period before escalating to SIGKILL when tearing down tracked process groups. */
   processGroupGraceMs: number;
-  /** Repo config pins the build route; forced after PLAN so the frozen spec stays authoritative. */
+  /** Repo config pins the build route after PLAN so the frozen spec stays authoritative. */
   preferredRoute?: BuildRoute;
   /** Resume at CHECK on a kept worktree (#2564): PLAN and BUILD are skipped. */
   /** Parent ref of a stacked slice branch (#2716); CHECK and the review floor diff against it. Absent = origin/main. */
@@ -892,6 +892,7 @@ async function runIssueOnce(
       maxReworkRounds: request.efficiency.maxReworkRounds,
       buildTimeoutSeconds: request.timeouts.build,
       checkTimeoutSeconds: request.timeouts.check,
+      hermeticGit: request.hermeticGit,
       testsTimeoutSeconds: request.timeouts.tests,
       compileTimeoutSeconds: request.timeouts.compile,
       sandbox: request.sandboxPolicy,

@@ -177,6 +177,10 @@ const FactoryConfigSchema = z.object({
     .default({ blockUnresolvedRegressions: false }),
   readiness: z.object({ updateIssueBody: z.boolean().default(true) }).default({ updateIssueBody: true }),
   build: z.object({ publishFromBuild: z.boolean().default(false) }).default({ publishFromBuild: false }),
+  check: z
+    .object({ hermeticGit: z.boolean().default(true) })
+    .strict()
+    .default({ hermeticGit: true }),
   // Plain string on purpose: an unknown mode must load and resolve to `file`, not throw.
   sizeGate: z
     .object({
@@ -375,6 +379,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'design',
   'readiness',
   'build',
+  'check',
   'sizeGate',
   'kpis',
   'sandbox',
