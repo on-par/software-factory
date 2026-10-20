@@ -72,7 +72,8 @@ const objectEdgeInputs = `  edgeInputs:
     - 'a plain string'
 `;
 
-const withDesign = (designYaml: string) => `---\nroute: codex\n${designYaml}  openQuestions: []\n---\n# Spec\n`;
+const withDesign = (designYaml: string) =>
+  `---\nroute: codex\n${designYaml}  openQuestions: []\n---\n# Spec\n\n## Files / approach\n\nUpdate packages/core/src/foo.ts.\n`;
 
 async function runPlan(designYaml: string | string[]) {
   const yamls = Array.isArray(designYaml) ? designYaml : [designYaml];
@@ -200,5 +201,28 @@ describe('design artifact retry (#2803)', () => {
     expect(prompt).toContain('BASE PROMPT');
     expect(prompt).toContain('- err one');
     expect(prompt).toContain('- err two');
+  });
+});
+
+describe('blocked plan notes', () => {
+  it('escalates a blocked no-change note before exhausting design retries', async () => {
+    const blockedSpec = [
+      '---',
+      'route: codex',
+      '---',
+      'Blocked: sandbox policy prevents writing the required file outside this worktree:',
+      '',
+      '`/Users/dev/repos/example/app/.factory/plans/issue-844.md`',
+      '',
+      'No files were changed.',
+      '',
+    ].join('\n');
+    const { result, logs, stub } = await runPlanOutputs([blockedSpec]);
+
+    expect(result.ok).toBe(false);
+    expect(result.escalate).toBe('PLAN returned a blocked/no-change note instead of a frozen spec');
+    expect(logs.some((entry) => entry.type === 'escalate' && entry.msg === result.escalate)).toBe(true);
+    expect(logs.some((entry) => entry.type === 'design_artifact_invalid')).toBe(false);
+    expect(stub.calls.filter((call) => call.task === 'plan')).toHaveLength(1);
   });
 });
