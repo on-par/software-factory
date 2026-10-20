@@ -21,7 +21,6 @@
   "packages/core/src/environment/index.test.ts": 1002,
   "packages/core/src/filing/index.test.ts": 616,
   "packages/core/src/harness/claude-cli.test.ts": 596,
-  "packages/core/src/harness/codex-cli.test.ts": 602,
   "packages/core/src/harness/ollama-agentic.test.ts": 564,
   "packages/core/src/hosted/runner.test.ts": 502,
   "packages/core/src/hosted/store-contract.ts": 628,

@@ -35,8 +35,22 @@ describe('types module', () => {
         failoverReason,
       };
 
+      const enriched: CostEntry = {
+        ...cost,
+        numTurns: 3,
+        peakInputTokens: 198303,
+        contextWindow: 272000,
+        costPerCallUsd: 0.01,
+      };
+
       expect(JSON.parse(JSON.stringify(cost)).failoverReason).toBe(failoverReason);
       expect(JSON.parse(JSON.stringify(event)).failoverReason).toBe(failoverReason);
+      expect(JSON.parse(JSON.stringify(enriched))).toMatchObject({
+        numTurns: 3,
+        peakInputTokens: 198303,
+        contextWindow: 272000,
+        costPerCallUsd: 0.01,
+      });
     }
   });
 });

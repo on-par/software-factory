@@ -619,7 +619,6 @@ export class ModelRouter {
   private harnessCliMissing(model: string): boolean {
     return this.harnessCliAvailable !== undefined && !this.harnessCliAvailable(this.registry.getHarnessId(model) ?? '');
   }
-
   private noticeMissingHarness(model: string, onLog: (msg: string) => void): void {
     const harnessId = this.registry.getHarnessId(model) ?? '';
     if (this.missingHarnessNoticed.has(harnessId)) return;
@@ -628,27 +627,22 @@ export class ModelRouter {
       `Skipping ${harnessId} models for the rest of this run: ${harnessCliCommand(harnessId)} CLI not found on PATH`,
     );
   }
-
   private authKey(model: string): string | undefined {
     return this.registry.getHarnessId(model) ?? this.registry.get(model)?.provider;
   }
-
   private isAuthTripped(model: string): boolean {
     const key = this.authKey(model);
     return key !== undefined && this.authTripped.has(key);
   }
-
   /** Register a sink told which agent login (claude / codex / opencode) failed local_auth, so doctor can
    *  flag it until the next login (#2733). Receives only the agent name. */
   setLocalAuthSink(sink: (agent: LocalAuthAgent) => void): void {
     this.localAuthSink = sink;
   }
-
   /** Register a sink that receives one cost row per successful run(). */
   setCostSink(sink: CostSink): void {
     this.costSink = sink;
   }
-
   private recordCost(
     task: TaskType,
     model: string,
@@ -676,18 +670,25 @@ export class ModelRouter {
       ...(usage?.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),
       ...(usage?.cacheCreationTokens !== undefined ? { cacheCreationTokens: usage.cacheCreationTokens } : {}),
       ...(usage?.numTurns !== undefined ? { numTurns: usage.numTurns } : {}),
+      ...(usage?.peakInputTokens !== undefined ? { peakInputTokens: usage.peakInputTokens } : {}),
+      ...(usage?.contextWindow !== undefined ? { contextWindow: usage.contextWindow } : {}),
+      ...(usage?.numTurns !== undefined &&
+      usage.numTurns > 0 &&
+      Number.isFinite(usage.numTurns) &&
+      cost !== null &&
+      Number.isFinite(cost)
+        ? { costPerCallUsd: cost / usage.numTurns }
+        : {}),
       ...(usage?.durationMs !== undefined ? { durationMs: usage.durationMs } : {}),
       ...(usage?.durationApiMs !== undefined ? { durationApiMs: usage.durationApiMs } : {}),
       ...(failoverReason ? { failoverReason } : {}),
       ...(retryCause ? { retryCause } : {}),
     });
   }
-
   /** Resolve a task type to its tier */
   getTier(task: TaskType): string | undefined {
     return this.routesConfig.routes[task]?.tier;
   }
-
   /** Resolve a task type to the first available model */
   resolve(task: TaskType): string | undefined {
     return this.resolveAll(task)[0];

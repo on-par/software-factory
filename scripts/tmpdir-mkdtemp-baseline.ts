@@ -152,7 +152,7 @@ export const TMPDIR_MKDTEMP_BASELINE: Readonly<Record<string, number>> = {
   'packages/core/src/reports/sandbox-ab.test.ts': 1,
   'packages/core/src/router/breaker.test.ts': 1,
   'packages/core/src/router/cli-executor.test.ts': 11,
-  'packages/core/src/router/index.test.ts': 2,
+  'packages/core/src/router/index.test.ts': 1,
   'packages/core/src/router/missing-worktree.test.ts': 1,
   'packages/core/src/router/opencode-local-auth-chain.test.ts': 1,
   'packages/core/src/router/worktree-state.test.ts': 5,

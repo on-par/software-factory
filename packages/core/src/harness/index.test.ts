@@ -1,6 +1,26 @@
 import { describe, expect, it } from 'vitest';
 
+import type { HarnessUsage } from './index.js';
 import { isRetryableFailure, NON_RETRYABLE_FAILURE_REASONS, taskRequiresAgenticHarness } from './index.js';
+
+describe('HarnessUsage', () => {
+  it('keeps old usage shapes valid and accepts rollout metadata', () => {
+    const originalUsage: HarnessUsage = { inputTokens: 10, outputTokens: 2 };
+    const rolloutUsage: HarnessUsage = {
+      ...originalUsage,
+      numTurns: 3,
+      peakInputTokens: 198303,
+      contextWindow: 272000,
+    };
+    expect(rolloutUsage).toEqual({
+      inputTokens: 10,
+      outputTokens: 2,
+      numTurns: 3,
+      peakInputTokens: 198303,
+      contextWindow: 272000,
+    });
+  });
+});
 
 describe('taskRequiresAgenticHarness', () => {
   it('returns true for build tasks that edit files', () => {

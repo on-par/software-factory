@@ -388,7 +388,6 @@ export interface FactoryEvent {
 }
 
 // ---------- Cost Tracking ----------
-
 export interface CostEntry {
   ts: string;
   issue: string;
@@ -402,27 +401,28 @@ export interface CostEntry {
   failoverReason?: FailoverReason;
   /** Set when this row is the cost of a retry attempt (#419). */
   retryCause?: RetryCause;
-  /** False when inputTokens/outputTokens came from the provider's own usage
-   *  report; true when they are the character-count heuristic (#424). */
+  /** False for provider-reported usage; true for the character-count heuristic (#424). */
   estimated?: boolean;
   /** Uncached input tokens; inputTokens minus the cache split (#490). */
   rawInputTokens?: number;
   /** Cache split for the invocation, when the provider reported it (#490). */
   cacheReadTokens?: number;
   cacheCreationTokens?: number;
-  /** Agentic-loop turns / wall-clock ms / API-time ms from the CLI envelope (#490). */
+  /** Model-call count for Codex or envelope turn count for other harnesses. */
   numTurns?: number;
+  /** Maximum input token count from one model call. */
+  peakInputTokens?: number;
+  /** Reported token capacity for the model context. */
+  contextWindow?: number;
+  /** Average cost per model call in USD. */
+  costPerCallUsd?: number;
   durationMs?: number;
   durationApiMs?: number;
-  /** Resolved sandbox runtime the lane was assigned, for A/B cohorting (#655).
-   *  The resolved name — a docker-sandbox lane is labeled here even while it runs
-   *  uncontained (#653). */
+  /** Resolved sandbox runtime for A/B cohorting; docker-sandbox stays labeled while uncontained (#653, #655). */
   sandboxRuntime?: string;
-  /** Router-measured wall-clock ms of this model invocation (distinct from the
-   *  CLI-reported durationMs) (#655). */
+  /** Router-measured wall-clock ms, distinct from CLI-reported durationMs (#655). */
   duration?: number;
-  /** Rework rounds completed in the run at the moment this row was emitted; the run
-   *  total is the max over its rows (#655). */
+  /** Rework rounds at emission time; the run total is the maximum over its rows (#655). */
   reworkRoundCount?: number;
   /** Lane workspace isolation backend the run used, mapped from `workspace.backend`
    *  config (`'host'` -> `'worktree'`) (#1532). */
