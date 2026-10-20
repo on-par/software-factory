@@ -12,7 +12,7 @@ import type { CommandResult } from '../utils/command-runner.js';
 import type { BaselineCheckerComparison, BaselineReport, runBaselineCheckers } from './baseline.js';
 import { BASE_HEALTH_CHECKERS, checkBaseHealth, type BaseHealthOptions } from './base-health.js';
 import { BaselineCache, hashBaselineCheckerConfig, hashBaselineEnv } from './baseline-cache.js';
-import { compileChecker, testsChecker } from './index.js';
+import { compileChecker, testsChecker, type runAllCheckers } from './index.js';
 
 const SHA = 'b'.repeat(40);
 const router = {} as ModelRouter;
@@ -74,6 +74,54 @@ describe('checkBaseHealth', () => {
     const res = await checkBaseHealth(opts({ runBaseline }));
     expect(res).toMatchObject({ kind: 'red', failingChecks: ['tests'], baseSha: SHA });
     expect(messages().some((m) => m.includes('is red (tests)'))).toBe(true);
+  });
+
+  it('a cached tests FAIL on a base whose CI is green is re-run once fresh, not re-held (Breaker, c4069f3f)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'base-health-green-ci-refresh-'));
+    try {
+      const cachePath = join(dir, 'baseline-cache.json');
+      const cache = new BaselineCache(cachePath);
+      const env = { A: '1' };
+      const envHash = hashBaselineEnv(env);
+      const configHash = hashBaselineCheckerConfig(null);
+      await cache.set(SHA, envHash, configHash, [
+        { checker: 'compile', result: 'PASS', details: 'cached pass' },
+        { checker: 'lint', result: 'PASS', details: 'cached pass' },
+        { checker: 'tests', result: 'FAIL', details: 'old cached failure' },
+      ]);
+      const runCheckers = vi.fn<typeof runAllCheckers>(async () => ({
+        failures: 0,
+        passes: 1,
+        skips: 0,
+        total: 1,
+        results: [{ checker: 'tests', result: 'PASS' as const, details: 'fresh pass' }],
+      }));
+      const baselineDeps = {
+        runCommand: vi.fn(async () => cmd('')),
+        runCheckers: runCheckers as never,
+        makeTempDir: () => mkdtemp(join(dir, 'worktree-parent-')),
+      };
+      const result = await checkBaseHealth(
+        opts(
+          { baselineDeps, memo: new Map() },
+          {
+            env,
+            cachePath,
+            requiredChecksVerdict: async () => ({ green: true, reason: 'push CI green' }),
+          },
+        ),
+      );
+      expect(result).toMatchObject({ kind: 'green', failingChecks: [] });
+      expect(runCheckers).toHaveBeenCalledOnce();
+      expect(runCheckers.mock.calls[0][0].worktree).toContain(`${dir}/worktree-parent-`);
+      expect(runCheckers.mock.calls[0][4]).toEqual(['tests']);
+      expect(await cache.get(SHA, envHash, configHash, 'tests')).toMatchObject({
+        result: 'PASS',
+        details: 'fresh pass',
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it.each([

@@ -113,6 +113,15 @@ describe('fetchRequiredChecksVerdict', () => {
     });
   });
 
+  it('treats a 403 on rules as unavailable while retaining protection contexts', async () => {
+    const { octokit } = fake({
+      protection: { contexts: ['from-protection'] },
+      rules: httpError(403),
+      runs: [run('from-protection', 'completed', 'success')],
+    });
+    expect(await fetchRequiredChecksVerdict(octokit, args)).toMatchObject({ green: true });
+  });
+
   it('is not green when both sources are empty', async () => {
     const { octokit } = fake({ runs: [run('ci', 'completed', 'success')] });
     expect(await fetchRequiredChecksVerdict(octokit, args)).toEqual({

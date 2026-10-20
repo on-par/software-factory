@@ -52,6 +52,16 @@ describe('base-hold', () => {
     expect(read?.failingChecks).not.toBe(hold.failingChecks);
   });
 
+  it('round-trips literal local confirmation and ignores malformed optional confirmation', async () => {
+    const confirmed = { ...hold, confirmedLocally: true };
+    writeBaseHold(file, confirmed);
+    expect(readBaseHold(file)).toEqual(confirmed);
+    await writeFile(file, JSON.stringify({ ...hold, confirmedLocally: 'yes' }));
+    expect(readBaseHold(file)).toEqual(hold);
+    await writeFile(file, JSON.stringify({ ...hold, confirmedLocally: false }));
+    expect(readBaseHold(file)).toEqual(hold);
+  });
+
   it('drops unknown keys', async () => {
     await mkdir(join(dir, 'state'), { recursive: true });
     await writeFile(file, JSON.stringify({ ...hold, extra: 1 }));
@@ -160,6 +170,25 @@ describe('base hold gate (#2349)', () => {
       writeBaseHold(file, gateHold);
       expect(await evaluateBaseHold(file, hold.repo, mkDeps(null))).toEqual({ kind: 'claim' });
       expect(await evaluateBaseHold(file, hold.repo, mkDeps(new Error('offline')))).toEqual({ kind: 'claim' });
+    });
+
+    it('retains a confirmed same-SHA hold through green CI and unknown SHA', async () => {
+      const confirmed = { ...gateHold, confirmedLocally: true };
+      writeBaseHold(file, confirmed);
+      const greenDeps = mkDeps(SHA_HELD, true);
+      expect(await evaluateBaseHold(file, hold.repo, greenDeps)).toEqual({ kind: 'hold', hold: confirmed });
+      expect(greenDeps.requiredChecksVerdict).not.toHaveBeenCalled();
+      expect(await evaluateBaseHold(file, hold.repo, mkDeps(null))).toEqual({ kind: 'hold', hold: confirmed });
+      expect(await evaluateBaseHold(file, hold.repo, mkDeps(new Error('offline')))).toEqual({
+        kind: 'hold',
+        hold: confirmed,
+      });
+    });
+
+    it('clears a confirmed hold when the base SHA changes', async () => {
+      writeBaseHold(file, { ...gateHold, confirmedLocally: true });
+      expect(await evaluateBaseHold(file, hold.repo, mkDeps(SHA_NEW, true))).toEqual({ kind: 'claim' });
+      expect(readBaseHold(file)).toBeNull();
     });
 
     it('holds when the CI lookup throws', async () => {

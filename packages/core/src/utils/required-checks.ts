@@ -107,7 +107,7 @@ export async function fetchRequiredContexts(
       required.push(...(rule.parameters?.required_status_checks ?? []).map((c) => c.context));
     }
   } catch (err) {
-    if (httpStatus(err) !== 404) throw err;
+    if (httpStatus(err) !== 404 && httpStatus(err) !== 403) throw err;
   }
   return [...new Set(required)];
 }

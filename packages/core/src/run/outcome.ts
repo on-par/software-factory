@@ -56,6 +56,7 @@ export type RunOutcome =
       failingChecks: string[];
       /** Red only because a base compile timeout awaits green CI (#3186). */
       awaitingCi?: boolean;
+      confirmedLocally?: boolean;
       failureSignature?: string;
       /** BUILD output was kept and a check-resume record written (#2564). */
       buildPreserved?: boolean;

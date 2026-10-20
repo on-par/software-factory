@@ -322,6 +322,7 @@ export async function runLane(
             repo: ghRepo,
             baseSha: err.baseSha,
             failingChecks: err.failingChecks,
+            ...(err.confirmedLocally ? { confirmedLocally: true } : {}),
             since: new Date().toISOString(),
             ...(err.awaitingCi
               ? { ciRecheckAfter: new Date(now().getTime() + BASE_HOLD_CI_RECHECK_MS).toISOString() }

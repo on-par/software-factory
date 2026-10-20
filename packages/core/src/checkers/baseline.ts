@@ -30,6 +30,10 @@ export interface BaselineCheckerComparison {
   reason?: string;
   /** True when the base result came from the baseline cache (#1926). */
   cached?: boolean;
+  /** Tail of failed base output, limited to 2000 characters. */
+  baseDetails?: string;
+  /** Set only when base health freshly confirmed a cached failure. */
+  confirmedLocally?: boolean;
 }
 
 export interface BaselineReport {
@@ -60,6 +64,8 @@ export interface BaselineOptions {
   deps?: BaselineDeps;
   /** Baseline result cache (#1926); when absent every runnable checker runs on base. */
   cache?: BaselineCache;
+  /** Skip cache reads while retaining normal writes for selected refreshes. */
+  bypassCache?: boolean;
 }
 
 /** Checkers that grade the change diff, which is empty at the base SHA. */
@@ -113,6 +119,7 @@ export function compareBaseline(
       continue;
     }
     const comparison: BaselineCheckerComparison = { checker, verdict: 'fails-on-base', baseResult: 'FAIL' };
+    comparison.baseDetails = b.details.slice(-2000);
     if (b.timedOut === true) comparison.baseTimedOut = true;
     const headTests = extractFailingTestNames(h.details);
     const baseTests = extractFailingTestNames(b.details);
@@ -166,10 +173,12 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
   const toRun: string[] = [];
   for (const name of runnable) {
     let hit: CheckerOutput | undefined;
-    try {
-      hit = await cache?.get(baseSha, envHash, configHash, name);
-    } catch {
-      hit = undefined; // a cache read error is a miss
+    if (!opts.bypassCache) {
+      try {
+        hit = await cache?.get(baseSha, envHash, configHash, name);
+      } catch {
+        hit = undefined; // a cache read error is a miss
+      }
     }
     if (hit) cachedOutputs.push(hit);
     else toRun.push(name);

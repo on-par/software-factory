@@ -38,6 +38,10 @@ describe('EVENT_TRAITS', () => {
     expect(EVENT_TRAITS['base-hold-cleared']).toEqual({ severity: 'info', isPark: false, isTerminal: false });
   });
 
+  it('classifies base divergence as a non-park warning', () => {
+    expect(EVENT_TRAITS.base_divergence).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
+  });
+
   it('classifies ci-rescued as non-park info (#2365)', () => {
     expect(EVENT_TRAITS['ci-rescued']).toEqual({ severity: 'info', isPark: false, isTerminal: false });
   });

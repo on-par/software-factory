@@ -73,6 +73,18 @@ describe('RunOutcome', () => {
       'escalated',
     ]);
   });
+
+  it('carries local confirmation on a released environment outcome', () => {
+    const released: RunOutcome = {
+      state: 'released',
+      reason: 'environment',
+      reworkRounds: 0,
+      baseSha: 'a'.repeat(40),
+      failingChecks: ['tests'],
+      confirmedLocally: true,
+    };
+    expect(released.confirmedLocally).toBe(true);
+  });
 });
 
 describe('reworkRouteFor', () => {

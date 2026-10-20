@@ -93,6 +93,7 @@ describe('runIssue — pre-PLAN base health tests timeout (#3095)', () => {
       baseSha: 'a'.repeat(40),
       failingChecks: ['tests'],
       cached: false,
+      confirmedLocally: true,
     });
     const ports: RunPorts = {
       router: new ModelRouter(MODELS, ROUTES),
@@ -103,7 +104,8 @@ describe('runIssue — pre-PLAN base health tests timeout (#3095)', () => {
       resolveConstitution: () => null,
       checkBaseHealth,
     };
-    await runIssue(request, policy, ports);
+    const outcome = await runIssue(request, policy, ports);
+    expect(outcome).toMatchObject({ state: 'released', confirmedLocally: true });
     expect(checkBaseHealth.mock.calls[0][0]).toMatchObject({
       timeoutSeconds: 60,
       testsTimeoutSeconds: 600,

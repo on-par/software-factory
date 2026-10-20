@@ -27,6 +27,7 @@ export type EventKind =
   | 'await-merge'
   | 'awaiting-review'
   | 'base-hold-cleared'
+  | 'base_divergence'
   | 'benchmark-artifacts'
   | 'benchmark-artifacts-failed'
   | 'blocked'
@@ -267,8 +268,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   approval_requested: { severity: 'warn', isPark: false, isTerminal: false },
   'await-merge': { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'waiting-merge' },
   'awaiting-review': { severity: 'info', isPark: false, isTerminal: false },
-  // A persisted base hold (#2348) ended: origin/main moved or its CI went green (#2350). Not a park.
   'base-hold-cleared': { severity: 'info', isPark: false, isTerminal: false },
+  base_divergence: { severity: 'warn', isPark: false, isTerminal: false },
   'benchmark-artifacts': { severity: 'info', isPark: false, isTerminal: false },
   'benchmark-artifacts-failed': { severity: 'info', isPark: false, isTerminal: false },
   // Parked while waiting on a filed blocker; the factory resumes it, not a human (#2315).
@@ -327,7 +328,6 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   fail: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   failover: { severity: 'info', isPark: false, isTerminal: false },
   fast_path: { severity: 'info', isPark: false, isTerminal: false },
-  // CHECK's serial re-run verdict for a base-red tests checker (#2302); evidence only, not a park.
   flaky_tests: { severity: 'info', isPark: false, isTerminal: false },
   // A GitHub REST call answered with a Deprecation header (#2218); logged once per route per run.
   github_api_deprecated: { severity: 'warn', isPark: false, isTerminal: false },

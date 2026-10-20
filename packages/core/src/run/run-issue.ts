@@ -571,6 +571,7 @@ async function runIssueOnce(
           baseSha: health.baseSha,
           failingChecks: health.failingChecks,
           ...(health.awaitingCi ? { awaitingCi: true } : {}),
+          ...(health.confirmedLocally ? { confirmedLocally: true } : {}),
         };
       }
     }

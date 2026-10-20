@@ -11,6 +11,7 @@ export function baseHealthWithCi(
   return (opts) =>
     checkBaseHealth({
       ...opts,
-      requiredChecksVerdict: (sha) => fetchRequiredChecksVerdict(octokit, { owner, repo, branch: 'main', sha }),
+      requiredChecksVerdict: (sha) =>
+        fetchRequiredChecksVerdict(octokit, { owner, repo, branch: 'main', sha }, { pushFallback: true }),
     });
 }
