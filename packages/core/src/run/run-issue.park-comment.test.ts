@@ -10,6 +10,7 @@ import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
 import type { ShipResult, shipPhase as realShipPhase } from '../phases/ship.js';
+import { workerOutputTail } from '../phases/build-no-diff.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import type { WorkRequest } from '../work/index.js';
@@ -164,5 +165,109 @@ describe('runIssue — issue park comment (#2314)', () => {
     expect(outcome).not.toHaveProperty('failingChecks');
     expect(log.mock.calls.map(([type]) => type)).toContain('blocked');
     expect(createComment.mock.calls[0][0].body).toContain('reason: blocked');
+  });
+
+  it('includes sandbox cause and worker tail in the no-diff park comment', async () => {
+    const { octokit, createComment } = commentOctokit();
+    const log = vi.fn<Log>();
+    const output = 'sandbox_apply: Operation not permitted';
+    vi.mocked(buildPhase).mockResolvedValue({
+      ok: false,
+      model: 'm',
+      route: 'codex',
+      reason: 'no_diff',
+      noDiffCause: 'sandbox',
+      workerOutputTail: output,
+    });
+    const outcome = await runIssue(request, policy, ports(log, octokit));
+    const fail = log.mock.calls.find(([type]) => type === 'fail')?.[1] ?? '';
+    const comment = createComment.mock.calls[0][0].body;
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
+    expect(fail).toContain('cause: sandbox');
+    expect(fail).toContain(output);
+    expect(comment).toContain('cause: sandbox');
+    expect(comment).toContain(output);
+    expect(checkPhase).not.toHaveBeenCalled();
+    expect(shipPhase).not.toHaveBeenCalled();
+  });
+
+  it('forwards plan questions and lists at most three on an open-questions park', async () => {
+    const { octokit, createComment } = commentOctokit();
+    const log = vi.fn<Log>();
+    const questions = ['First question?', 'Second question?', 'Third question?', 'Fourth question?'];
+    const designArtifact = {
+      restatedProblem: 'Worker did not resolve the intended behavior.',
+      approach: { chosen: 'Ask the operator to clarify.', rejected: [] },
+      interfacesTouched: [],
+      targetTypes: [],
+      signatures: [],
+      callGraph: [],
+      behaviorContract: [],
+      verificationPlan: [],
+      riskBlastRadius: 'No implementation is produced until intent is clear.',
+      openQuestions: questions,
+    };
+    vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, designArtifact });
+    vi.mocked(buildPhase).mockImplementation(async (opts) => {
+      expect(opts.openQuestions).toBe(questions);
+      return {
+        ok: false,
+        model: 'm',
+        route: 'codex',
+        reason: 'no_diff',
+        noDiffCause: 'open-questions',
+        workerOutputTail: 'worker had no diff',
+      };
+    });
+    await runIssue(request, policy, ports(log, octokit));
+    const fail = log.mock.calls.find(([type]) => type === 'fail')?.[1] ?? '';
+    const comment = createComment.mock.calls[0][0].body;
+    expect(fail).toContain('First question?');
+    expect(fail).toContain('Third question?');
+    expect(fail).not.toContain('Fourth question?');
+    expect(comment).toContain('First question?');
+    expect(comment).not.toContain('Fourth question?');
+    expect(checkPhase).not.toHaveBeenCalled();
+    expect(shipPhase).not.toHaveBeenCalled();
+  });
+
+  it('preserves the redacted capped tail in the park comment', async () => {
+    const { octokit, createComment } = commentOctokit();
+    const log = vi.fn<Log>();
+    const token = `ghp_${'a'.repeat(36)}`;
+    const tail = workerOutputTail(`${'ordinary output line\n'.repeat(30)}near-boundary ${token}\n${'z'.repeat(2100)}`);
+    vi.mocked(buildPhase).mockResolvedValue({
+      ok: false,
+      model: 'm',
+      route: 'codex',
+      reason: 'no_diff',
+      noDiffCause: 'unknown',
+      workerOutputTail: tail,
+    });
+    await runIssue(request, policy, ports(log, octokit));
+    const fail = log.mock.calls.find(([type]) => type === 'fail')?.[1] ?? '';
+    const comment = createComment.mock.calls[0][0].body;
+    expect(tail.length).toBeLessThanOrEqual(2000);
+    expect(tail).not.toContain('ghp_');
+    expect(fail).toContain(tail);
+    expect(comment).toContain(tail);
+  });
+
+  it('includes the worker tail in a junk-only park', async () => {
+    const { octokit, createComment } = commentOctokit();
+    const log = vi.fn<Log>();
+    vi.mocked(buildPhase).mockResolvedValue({
+      ok: false,
+      model: 'm',
+      route: 'codex',
+      reason: 'junk_only_diff',
+      workerOutputTail: 'generated files only',
+    });
+    await runIssue(request, policy, ports(log, octokit));
+    const fail = log.mock.calls.find(([type]) => type === 'fail')?.[1] ?? '';
+    const comment = createComment.mock.calls[0][0].body;
+    expect(fail).toContain('generated/cache files');
+    expect(fail).toContain('generated files only');
+    expect(comment).toContain('generated files only');
   });
 });

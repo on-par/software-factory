@@ -6,7 +6,6 @@ import { LaneLifecycleEventSchema } from '@on-par/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createLifecycleBus } from '../bus/index.js';
-import type { collectDesignDiff } from '../checkers/design-smells.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
@@ -1988,263 +1987,71 @@ describe('buildPhase lifecycle events', () => {
   });
 });
 
-describe('buildPhase no-diff post-condition', () => {
-  const fakeRouter = (output = 'done') =>
-    ({
-      run: async () => ({ model: 'fake-model', output, exitCode: 0, attempts: [] }),
-    }) as any;
+describe('buildPhase no-diff diagnostics', () => {
+  const fakeRouter = (output: string) =>
+    ({ run: async () => ({ model: 'fake-model', output, exitCode: 0, attempts: [] }) }) as any;
 
-  it('fails the build when the diff collector reports an empty diff', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
+  async function runNoDiff(output: string, opts: { openQuestions?: readonly string[] } = {}) {
+    const worktree = await mkdtemp(join(tmpdir(), 'build-no-diff-test-'));
     tempDirs.add(worktree);
-    const specPath = join(worktree, 'issue-961-empty.md');
     const logs: Array<{ type: string; msg: string }> = [];
-
     const result = await buildPhase({
-      issue: 961,
+      issue: 3273,
       repo: 'on-par/software-factory',
       worktree,
-      specPath,
-      branch: 'ship-it/961-no-diff',
+      specPath: join(worktree, 'issue-3273.md'),
+      branch: 'factory/3273-diagnostics',
       route: 'claude',
-      router: fakeRouter(),
+      router: fakeRouter(output),
       constitution: null,
       log: (type, msg) => logs.push({ type, msg }),
       collectDiff: async () => ({ text: '', baseRef: 'origin/main', truncated: false }),
+      ...opts,
     });
+    return { result, fail: logs.find((entry) => entry.type === 'fail')?.msg };
+  }
 
-    expect(result.ok).toBe(false);
-    expect(result.reason).toBe('no_diff');
-    expect(logs).toContainEqual({
-      type: 'fail',
-      msg: 'worker produced no diff against origin/main; no implementation was produced',
-    });
+  it("a no-diff build records cause sandbox and the worker's last lines (#3225 on 10/19)", async () => {
+    const output = 'worker started\nsandbox_apply: Operation not permitted';
+    const { result, fail } = await runNoDiff(output, { openQuestions: ['Should the sandbox be changed?'] });
+    expect(result).toMatchObject({ ok: false, reason: 'no_diff', noDiffCause: 'sandbox', workerOutputTail: output });
+    expect(fail).toContain('cause: sandbox');
+    expect(fail).toContain(`Worker output (last lines):\n${output}`);
   });
 
-  it('fails with no_diff when the slice has no changes beyond its parent base ref (#2717)', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
-    const specPath = join(worktree, 'issue-2717-empty.md');
-    const logs: Array<{ type: string; msg: string }> = [];
-    let receivedOpts: Parameters<typeof collectDesignDiff>[2];
-
-    const result = await buildPhase({
-      issue: 2717,
-      repo: 'on-par/software-factory',
-      worktree,
-      specPath,
-      branch: 'factory/2717-slice-2',
-      route: 'claude',
-      router: fakeRouter(),
-      constitution: null,
-      log: (type, msg) => logs.push({ type, msg }),
-      parentBaseRef: 'factory/2717-slice-1',
-      captureBase: async () => 'presha',
-      collectDiff: async (_wt, _run, opts) => {
-        receivedOpts = opts;
-        if (opts?.baseRefOverride === 'factory/2717-slice-1') {
-          return { text: '', baseRef: opts.baseRefOverride, truncated: false };
-        }
-        return { text: 'diff --git a/parent b/parent', baseRef: 'origin/main', truncated: false };
-      },
+  it('classifies a no-diff build with plan questions', async () => {
+    const { result, fail } = await runNoDiff('worker completed without changes', {
+      openQuestions: ['Which API should this use?'],
     });
-
-    expect(result.ok).toBe(false);
-    expect(result.reason).toBe('no_diff');
-    expect(receivedOpts).toEqual({ fallbackBaseRef: 'presha', baseRefOverride: 'factory/2717-slice-1' });
-    expect(logs).toContainEqual({
-      type: 'fail',
-      msg: 'worker produced no diff against factory/2717-slice-1; no implementation was produced',
-    });
+    expect(result).toMatchObject({ ok: false, reason: 'no_diff', noDiffCause: 'open-questions' });
+    expect(fail).toContain('cause: open-questions');
+    expect(fail).toContain('worker completed without changes');
   });
 
-  it('does not pass baseRefOverride when no parentBaseRef is given (#2717)', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
-    const specPath = join(worktree, 'issue-2717-default.md');
-    let receivedOpts: Parameters<typeof collectDesignDiff>[2];
-
-    const result = await buildPhase({
-      issue: 2717,
-      repo: 'on-par/software-factory',
-      worktree,
-      specPath,
-      branch: 'factory/2717-default',
-      route: 'claude',
-      router: fakeRouter(),
-      constitution: null,
-      log: () => {},
-      captureBase: async () => 'presha',
-      collectDiff: async (_wt, _run, opts) => {
-        receivedOpts = opts;
-        return { text: 'diff --git a/x b/x', baseRef: 'origin/main', truncated: false };
-      },
-    });
-
-    expect(result.ok).toBe(true);
-    expect(receivedOpts).toBeDefined();
-    expect('baseRefOverride' in (receivedOpts ?? {})).toBe(false);
+  it('includes an unknown cause and worker tail without plan questions', async () => {
+    const { result, fail } = await runNoDiff('worker had no applicable files');
+    expect(result).toMatchObject({ ok: false, reason: 'no_diff', noDiffCause: 'unknown' });
+    expect(result.workerOutputTail).toBe('worker had no applicable files');
+    expect(fail).toContain('cause: unknown');
+    expect(fail).toContain('Worker output (last lines):\nworker had no applicable files');
   });
 
-  it('fails with junk_only_diff when the filtered diff is empty but excluded paths exist', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
-    const specPath = join(worktree, 'issue-1162-junk.md');
-    const logs: Array<{ type: string; msg: string }> = [];
-
-    const result = await buildPhase({
-      issue: 1162,
-      repo: 'on-par/software-factory',
-      worktree,
-      specPath,
-      branch: 'ship-it/1162-junk-only',
-      route: 'claude',
-      router: fakeRouter(),
-      constitution: null,
-      log: (type, msg) => logs.push({ type, msg }),
-      collectDiff: async () => ({
-        text: '',
-        baseRef: 'abc123',
-        truncated: false,
-        excludedPaths: ['pkg/__pycache__/mod.cpython-311.pyc'],
-      }),
+  it('caps and redacts the no-diff worker tail', async () => {
+    const token = `ghp_${'a'.repeat(36)}`;
+    const lines = Array.from({ length: 25 }, (_value, index) => {
+      const content = index === 18 ? `boundary ${token}` : `numbered line ${index + 1}`;
+      return `\u001b[32m${content} ${'x'.repeat(135)}\u001b[0m`;
     });
-
-    expect(result.ok).toBe(false);
-    expect(result.reason).toBe('junk_only_diff');
-    const fail = logs.find((l) => l.type === 'fail');
-    expect(fail?.msg).toContain('only generated/cache files');
-    expect(fail?.msg).toContain('pkg/__pycache__/mod.cpython-311.pyc');
-  });
-
-  it('passes the captured pre-build base to the diff collector as fallbackBaseRef', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
-    const specPath = join(worktree, 'issue-1162-fallback.md');
-    let receivedOpts: { fallbackBaseRef?: string } | undefined;
-
-    const result = await buildPhase({
-      issue: 1162,
-      repo: 'on-par/software-factory',
-      worktree,
-      specPath,
-      branch: 'ship-it/1162-fallback-base',
-      route: 'claude',
-      router: fakeRouter(),
-      constitution: null,
-      log: () => {},
-      captureBase: async () => 'presha',
-      collectDiff: async (_worktree, _run, opts) => {
-        receivedOpts = opts;
-        return { text: 'diff --git a/x b/x', baseRef: 'presha', truncated: false };
-      },
-    });
-
-    expect(result.ok).toBe(true);
-    expect(receivedOpts).toEqual({ fallbackBaseRef: 'presha' });
-    expect(result.diffBase).toBe('presha');
-  });
-
-  it('succeeds when the diff collector reports a real diff', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
-    const specPath = join(worktree, 'issue-961-real.md');
-
-    const result = await buildPhase({
-      issue: 961,
-      repo: 'on-par/software-factory',
-      worktree,
-      specPath,
-      branch: 'ship-it/961-real-diff',
-      route: 'claude',
-      router: fakeRouter(),
-      constitution: null,
-      log: () => {},
-      collectDiff: async () => ({ text: 'diff --git a/x b/x', baseRef: 'origin/main', truncated: false }),
-    });
-
-    expect(result.ok).toBe(true);
-    expect(result.reason).toBeUndefined();
-  });
-
-  it('passes when a real source change survives the junk filter (junk alongside real change)', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
-    const specPath = join(worktree, 'issue-1162-mixed.md');
-
-    const result = await buildPhase({
-      issue: 1162,
-      repo: 'on-par/software-factory',
-      worktree,
-      specPath,
-      branch: 'ship-it/1162-mixed-diff',
-      route: 'claude',
-      router: fakeRouter(),
-      constitution: null,
-      log: () => {},
-      // The pycache churn is filtered out by DIFF_EXCLUDES; the surviving
-      // source-file hunk is what makes the filtered text non-empty.
-      collectDiff: async () => ({
-        text: 'diff --git a/src/real.py b/src/real.py\n+implemented\n',
-        baseRef: 'origin/main',
-        truncated: false,
-      }),
-    });
-
-    expect(result.ok).toBe(true);
-    expect(result.reason).toBeUndefined();
-  });
-
-  it('treats an uncollectable diff (skipReason) as a pass, not a worker failure', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
-    const specPath = join(worktree, 'issue-961-skip.md');
-    const logs: Array<{ type: string; msg: string }> = [];
-    const skipReason = 'no base ref (tried origin/main, origin/master) — not a git checkout or no remote base';
-
-    const result = await buildPhase({
-      issue: 961,
-      repo: 'on-par/software-factory',
-      worktree,
-      specPath,
-      branch: 'ship-it/961-skip-reason',
-      route: 'claude',
-      router: fakeRouter(),
-      constitution: null,
-      log: (type, msg) => logs.push({ type, msg }),
-      collectDiff: async () => ({ text: '', baseRef: null, truncated: false, skipReason }),
-    });
-
-    expect(result.ok).toBe(true);
-    expect(logs.some((l) => l.msg.includes(skipReason))).toBe(true);
-  });
-
-  it('lets escalation win over no_diff and never calls the diff collector', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
-    const specPath = join(worktree, 'issue-961-escalate.md');
-    let collectDiffCalled = false;
-
-    const result = await buildPhase({
-      issue: 961,
-      repo: 'on-par/software-factory',
-      worktree,
-      specPath,
-      branch: 'ship-it/961-escalate-wins',
-      route: 'claude',
-      router: fakeRouter('progress line\nESCALATE: the acceptance criteria are ambiguous\nmore text'),
-      constitution: null,
-      log: () => {},
-      collectDiff: async () => {
-        collectDiffCalled = true;
-        return { text: '', baseRef: 'origin/main', truncated: false };
-      },
-    });
-
-    expect(result.ok).toBe(false);
-    expect(result.escalate).toBe('ESCALATE: the acceptance criteria are ambiguous');
-    expect(result.reason).not.toBe('no_diff');
-    expect(collectDiffCalled).toBe(false);
+    const output = lines.flatMap((line) => [line, '  ']).join('\n');
+    const { result, fail } = await runNoDiff(output);
+    const tail = result.workerOutputTail ?? '';
+    expect(tail.length).toBeLessThanOrEqual(2000);
+    expect(tail.split('\n').length).toBeLessThanOrEqual(20);
+    expect(tail).not.toContain('ghp_');
+    expect(tail).toContain('<secret>');
+    expect(tail).toContain('numbered line 25');
+    expect(tail).not.toContain('\u001b');
+    expect(fail).toContain(tail);
   });
 });
 

@@ -21,9 +21,10 @@ import { escalationLine, isEscalation } from '../utils/index.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE } from '../utils/untrusted-input.js';
 import type { BuildRoutePin } from '../config/repo.js';
 import { renderLintRulesInForce } from './build-lint-rules.js';
+import { describeNoDiffFailure, type NoDiffDiagnostics } from './build-no-diff.js';
 import { failOverOpencodeBuild } from './build-opencode-failover.js';
 
-export interface BuildResult {
+export interface BuildResult extends NoDiffDiagnostics {
   ok: boolean;
   model: string;
   route: BuildRoutePin;
@@ -124,6 +125,7 @@ async function buildPhaseImpl(opts: {
   collectDiff?: typeof collectDesignDiff;
   /** Injectable for tests; defaults to captureDiffBase. */
   captureBase?: typeof captureDiffBase;
+  openQuestions?: readonly string[];
 }): Promise<BuildResult> {
   const {
     issue,
@@ -220,7 +222,6 @@ async function buildPhaseImpl(opts: {
   }
 
   prompt = applySteering(prompt, steering);
-
   log('build', `Starting build phase (route: ${route})`);
   if (sandbox) {
     log(
@@ -334,19 +335,16 @@ async function buildPhaseImpl(opts: {
       });
     }
   }
-
   for (const f of failoversFrom(result.attempts)) {
     log('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, {
       failoverReason: f.reason,
     });
   }
-
   if (isEscalation(result.output)) {
     const escalateLine = escalationLine(result.output);
     log('escalate', escalateLine ?? 'build escalated');
     return { ok: false, model: result.model, route, escalate: escalateLine };
   }
-
   // Second positional arg stays undefined so injected test stubs with the old
   // 1-arg shape still typecheck against `typeof collectDesignDiff`.
   const diff = await (opts.collectDiff ?? collectDesignDiff)(worktree, undefined, {
@@ -356,12 +354,14 @@ async function buildPhaseImpl(opts: {
   if (diff.skipReason) {
     log('build', `diff post-condition skipped — ${diff.skipReason}`);
   } else if (diff.text === '') {
-    const junkOnly = (diff.excludedPaths?.length ?? 0) > 0;
-    const detail = junkOnly
-      ? `worker changed only generated/cache files against ${diff.baseRef} (${diff.excludedPaths!.slice(0, 10).join(', ')}); no implementation was produced`
-      : `worker produced no diff against ${diff.baseRef}; no implementation was produced`;
+    const { detail, ...failure } = describeNoDiffFailure({
+      output: result.output,
+      openQuestions: opts.openQuestions,
+      baseRef: String(diff.baseRef),
+      excludedPaths: diff.excludedPaths,
+    });
     log('fail', detail);
-    return { ok: false, model: result.model, route, reason: junkOnly ? 'junk_only_diff' : 'no_diff' };
+    return { ok: false, model: result.model, route, ...failure };
   }
 
   log('build', `Build complete with model ${result.model}`, { model: result.model });

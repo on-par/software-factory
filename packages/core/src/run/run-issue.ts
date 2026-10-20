@@ -24,6 +24,7 @@ import type { ApprovalGate } from '../approvals/index.js';
 import type { checkBaseHealth } from '../checkers/base-health.js';
 import { laneEnv } from '../environment/index.js';
 import { buildPhase as buildPhaseDefault } from '../phases/build.js';
+import { formatNoDiffParkMessage } from '../phases/build-no-diff.js';
 import {
   checkPhase as checkPhaseDefault,
   remainingShowstoppers,
@@ -842,20 +843,12 @@ async function runIssueOnce(
         onPgid,
         laneId: request.lane,
         parentBaseRef: request.parentBaseRef,
+        openQuestions: plan.designArtifact?.openQuestions,
       });
       route = build.route;
       if (!build.ok) {
-        if (build.reason === 'no_diff') {
-          return await terminalParked(
-            'fail',
-            'build produced no diff against the base ref — no implementation was produced',
-          );
-        }
-        if (build.reason === 'junk_only_diff') {
-          return await terminalParked(
-            'fail',
-            'build changed only generated/cache files (e.g. __pycache__) — no implementation was produced',
-          );
+        if (build.reason === 'no_diff' || build.reason === 'junk_only_diff') {
+          return await terminalParked('fail', formatNoDiffParkMessage(build, plan.designArtifact?.openQuestions));
         }
         return await terminalEscalated(`build escalated: ${build.escalate ?? 'unknown'}`);
       }
