@@ -1,21 +1,20 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
+import { createTempDirs } from '@on-par/factory-core/testing';
 
 import { resolveBaseHealthChecks } from './base-health.js';
 import { loadRepoConfig } from './repo.js';
 
-const tempDirs: string[] = [];
+const tempDirs = createTempDirs();
 
 afterEach(async () => {
-  await Promise.all(tempDirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+  await tempDirs.cleanup();
 });
 
 async function repoWith(config: unknown): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'base-health-config-'));
-  tempDirs.push(dir);
+  const dir = await tempDirs.make('base-health-config-');
   await mkdir(join(dir, '.factory'), { recursive: true });
   await writeFile(join(dir, '.factory', 'config.json'), JSON.stringify(config));
   return dir;
