@@ -122,6 +122,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
   const branchPrefix = rt.branchPrefixOrExit(opts.branchPrefix);
 
   return rt.withRepoRunLock(paths, 'factory run', async () => {
+    const deferredIssues = new Set<number>();
     const runStartedAt = new Date().toISOString();
     const stopStatus = readStopFileStatus(paths);
     if (stopStatus.present) {
@@ -160,6 +161,11 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
                   autoMergeStack:
                     resolveSizeGateMode(factoryConfig) === 'stack' &&
                     resolveMergePolicy(factoryConfig, process.env, { auto: opts.autoMerge }).auto,
+                  onDeferred: (issue, message) => {
+                    if (deferredIssues.has(issue)) return;
+                    deferredIssues.add(issue);
+                    logEvent(paths.events, 'issue_deferred', issue, message);
+                  },
                 }),
               ),
             onConflict: (issue, verdict) => {
