@@ -41,6 +41,7 @@ import type { SandboxPolicy } from '../sandbox/index.js';
 import { failoversFrom } from '../router/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
 import { archiveSpec, readSpec, writeSpec } from '../spec/index.js';
+import type { EscalateKind } from '../types/escalate.js';
 import type { Constitution, DesignArtifact, FailoverReason, ReadinessInfo } from '../types/index.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE, wrapUntrustedIssueBody } from '../utils/untrusted-input.js';
@@ -100,6 +101,35 @@ export interface PlanPromptOpts {
   adrCtx?: string;
   /** Build routes with at least one runnable model on this machine. Empty or omitted = the CLI routes; command only when listed. */
   runnableRoutes?: readonly BuildRouteName[];
+  /** Pre-flight size-gate verdict (#3275). passed && enforced drops step 4's size ESCALATE. */
+  sizeGate?: { passed: boolean; reason?: string; enforced: boolean };
+}
+
+const RIGHT_SIZE_STEP = `4. RIGHT-SIZE THE SLICE. A single BUILD pass must be bounded: aim for roughly
+   5-15 minutes of agent work, a handful of files, at most ~6 target types /
+   ~8 signatures / ~10 call edges in the design block. If the issue genuinely
+   needs more surface than that, do NOT write a mega-spec — instead print a line
+   starting with ESCALATE: asking to split the issue into smaller slices first,
+   and do not write the spec file. A slice that takes 40 minutes to build is a
+   planning failure, not a build problem.`;
+
+const RIGHT_SIZE_STEP_GATE_PASSED = `4. RIGHT-SIZE THE SLICE. The factory's deterministic size gate passed this issue: size is
+   the gate's call, not yours. Do NOT print ESCALATE: about size or to ask for a split.
+   Still aim for a bounded BUILD pass (roughly 5-15 minutes of agent work, a handful of
+   files). If the scope really is bigger, write the full design block anyway: the factory's
+   post-plan build-scope gate measures it and slices or decomposes it. You may escalate only
+   for missing information or a contradiction, and must name which, as
+   "ESCALATE: missing-info: <question>" or "ESCALATE: contradiction: <what conflicts>";
+   then do not write the spec file.`;
+
+/** Classify a planner ESCALATE line for the escalate event (#3275). */
+export function classifyEscalation(line: string | undefined): EscalateKind | undefined {
+  if (!line) return undefined;
+  const rest = line.replace(/^\s*ESCALATE:\s*/i, '');
+  if (/^missing-info:/i.test(rest)) return 'missing-info';
+  if (/^contradiction:/i.test(rest)) return 'contradiction';
+  if (/\b(split|slices?|smaller|too (big|large)|size)\b/i.test(rest)) return 'split';
+  return undefined;
 }
 
 export function buildPlanPrompt(opts: PlanPromptOpts): string {
@@ -145,13 +175,7 @@ Steps:
 ${routeBullets}
    A pinned build worker's harness always wins over your judgment: the factory forces the
    route to match it after PLAN. Default to route: ${fallbackRoute} when genuinely unsure.${runnableNote}
-4. RIGHT-SIZE THE SLICE. A single BUILD pass must be bounded: aim for roughly
-   5-15 minutes of agent work, a handful of files, at most ~6 target types /
-   ~8 signatures / ~10 call edges in the design block. If the issue genuinely
-   needs more surface than that, do NOT write a mega-spec — instead print a line
-   starting with ESCALATE: asking to split the issue into smaller slices first,
-   and do not write the spec file. A slice that takes 40 minutes to build is a
-   planning failure, not a build problem.
+${opts.sizeGate?.passed && opts.sizeGate.enforced ? RIGHT_SIZE_STEP_GATE_PASSED : RIGHT_SIZE_STEP}
 ${constitutionCtx ? '5. The constitution above defines the standards for this product. Your spec MUST satisfy every standard.' : '5. No constitution loaded — use your best judgment.'}
 6. RISKY-CHANGE FIELDS. If the plan changes a dispatch, switch, or match; a default branch
    or fallthrough; or the flags passed to an external tool, you MUST fill the design fields
@@ -317,6 +341,7 @@ async function planPhaseImpl(opts: {
       model?: string;
       tokens?: { input: number; output: number };
       readiness?: ReadinessInfo;
+      escalateKind?: EscalateKind;
       durationMs?: number;
     },
   ) => void;
@@ -560,6 +585,15 @@ async function planPhaseImpl(opts: {
     );
   }
 
+  const sizeGate =
+    readiness.template === 'factory-task'
+      ? {
+          passed: readiness.sizeOk !== false,
+          ...(readiness.sizeReason ? { reason: readiness.sizeReason } : {}),
+          enforced: enforceSizeGate,
+        }
+      : undefined;
+
   // The fast path emits a compact Codex spec, so it is only valid when the route may be codex:
   // a pinned claude/opencode build route (#1367) must go through model PLAN like any other issue.
   const fastPathRouteOk = !opts.preferredRoute || opts.preferredRoute === 'codex';
@@ -630,7 +664,7 @@ async function planPhaseImpl(opts: {
   let replans = 0;
   while (true) {
     const basePrompt = applySteering(
-      buildPlanPrompt({ issue, issueTitle, issueBody, specPath, constitutionCtx, adrCtx, runnableRoutes }),
+      buildPlanPrompt({ issue, issueTitle, issueBody, specPath, constitutionCtx, adrCtx, runnableRoutes, sizeGate }),
       steering,
     );
 
@@ -668,7 +702,8 @@ async function planPhaseImpl(opts: {
       // Check for escalation
       if (isEscalation(result.output)) {
         const escalateLine = escalationLine(result.output);
-        log('escalate', escalateLine ?? 'plan escalated');
+        const escalateKind = classifyEscalation(escalateLine);
+        log('escalate', escalateLine ?? 'plan escalated', escalateKind ? { escalateKind } : undefined);
         return {
           ok: false,
           route: failureRoute,

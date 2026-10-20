@@ -6,6 +6,7 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
+import type { EscalateKind } from '../types/escalate.js';
 import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
 import type {
   CheckFailureInfo,
@@ -42,6 +43,7 @@ export interface LogExtra {
   flakyTests?: FlakyTestsPayload;
   checkFailure?: CheckFailureInfo;
   ciFailure?: CiFailureEvidence;
+  escalateKind?: EscalateKind;
   actor?: string;
   model?: string;
   tokens?: { input: number; output: number };
@@ -118,6 +120,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.flakyTests ? { flakyTests: extra.flakyTests } : {}),
       ...(extra?.checkFailure ? { checkFailure: extra.checkFailure } : {}),
       ...(extra?.ciFailure ? { ciFailure: extra.ciFailure } : {}),
+      ...(extra?.escalateKind ? { escalateKind: extra.escalateKind } : {}),
       ...(extra?.model ? { model: extra.model } : {}),
       ...(extra?.tokens ? { tokens: extra.tokens } : {}),
       ...(extra?.durationMs !== undefined ? { durationMs: extra.durationMs } : {}),

@@ -81,6 +81,7 @@ export const logsLineJsonSchema = z.object({
   flakyTests: loosePayloadSchema.optional(),
   checkFailure: loosePayloadSchema.optional(),
   ciFailure: loosePayloadSchema.optional(),
+  escalateKind: z.enum(['missing-info', 'contradiction', 'split']).optional(),
   model: z.string().optional(),
   tokens: z.object({ input: z.number(), output: z.number() }).optional(),
   durationMs: z.number().optional(),

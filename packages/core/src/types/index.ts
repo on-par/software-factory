@@ -1,5 +1,4 @@
 // src/types/index.ts — Core type definitions for the Software Factory
-
 import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
 import type { EvidencePlanResult } from '../checkers/evidence-plan.js';
@@ -381,6 +380,7 @@ export interface FactoryEvent {
   checkFailure?: CheckFailureInfo;
   /** CI-failure evidence behind a SHIP ci-failed park (#2814). */
   ciFailure?: CiFailureEvidence;
+  escalateKind?: 'missing-info' | 'contradiction' | 'split'; // kind of a planner ESCALATE (#3275)
   model?: string;
   tokens?: { input: number; output: number };
   durationMs?: number;
