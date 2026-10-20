@@ -10,6 +10,7 @@ import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import type { EventKind } from '../events/kinds.js';
 import { gatherEvidencePack } from '../reports/evidence-pack.js';
 import { renderPrBody } from '../reports/pr-body.js';
+import { renderStackOrderLine, type StackPosition } from './stack-order.js';
 import type { ReviewRouting } from '../review/routing.js';
 import {
   type CommandRunner,
@@ -95,6 +96,8 @@ async function shipPhaseImpl(opts: {
   work?: Pick<WorkRequest, 'id' | 'kind' | 'title'>;
   /** The ADR-0147 slice this run ships; titles the PR `slice k/n` and only the final slice closes the issue. */
   slice?: { index: number; count: number };
+  /** Stack-mode (ADR-0161) position: the PR opens on `stack.base` and its body names the stack order. Ignored for inline work. */
+  stack?: StackPosition;
   /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
   laneId?: string;
   /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
@@ -363,6 +366,8 @@ async function shipPhaseImpl(opts: {
     const stat = diffStat ?? (await computeDiffStat(run, worktree));
 
     const slice = inlineWork ? undefined : opts.slice;
+    const stack = inlineWork ? undefined : opts.stack;
+    const base = stack?.base ?? SHIP_BASE_BRANCH;
     const finalSlice = !slice || slice.index >= slice.count;
     const summaryLine = inlineWork
       ? `Implements local brief \`${inlineWork.id}\`.`
@@ -381,11 +386,12 @@ async function shipPhaseImpl(opts: {
         owner,
         repo: repoName,
         head: branch,
-        base: SHIP_BASE_BRANCH,
+        base,
         title: prTitle,
         draft: true,
         body: renderPrBody({
           summaryLine,
+          stackOrder: stack ? renderStackOrderLine(stack) : undefined,
           specBody: await readSpecBody(opts.specPath),
           diffStat: stat,
           checkSummary,
@@ -397,7 +403,7 @@ async function shipPhaseImpl(opts: {
       });
 
       prNumber = pr.number;
-      log('pr_opened', `opened PR #${prNumber} for committed work on ${branch}`);
+      log('pr_opened', `opened PR #${prNumber} for committed work on ${branch} (base ${base})`);
     } catch (err) {
       if (!isPullAlreadyExistsError(err)) throw err;
       const existing = await findOpenPR(octokit, owner, repoName, branch);

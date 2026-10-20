@@ -26,6 +26,8 @@ export interface PrBodyInput {
   closes?: number;
   /** Parent issue of a non-final ADR-0147 slice; renders `Part of #N` and never a closing keyword. */
   partOf?: number;
+  /** Stack-mode (ADR-0161) stack-order line, rendered right after the Summary. */
+  stackOrder?: string;
 }
 
 export interface SpecIntent {
@@ -45,6 +47,7 @@ export function renderPrBody(input: PrBodyInput): string {
 
   return [
     section('Summary', input.summaryLine),
+    input.stackOrder,
     whatChanged === undefined ? undefined : section('What changed', whatChanged),
     section('Proof', proof),
     risk ? `**Risk:** ${risk}` : undefined,

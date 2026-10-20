@@ -161,3 +161,15 @@ describe('renderPrBody', () => {
     expect(body).toContain('```\n\n```');
   });
 });
+
+describe('renderPrBody stack order (#3348)', () => {
+  it('renders stackOrder right after the Summary', () => {
+    const body = renderPrBody({
+      summaryLine: 'Implements slice 2/3 of #7.',
+      diffStat: 'x',
+      stackOrder: '<!-- m -->\nLINE',
+    });
+    expect(body.indexOf('LINE')).toBeGreaterThan(body.indexOf('## Summary'));
+    expect(body.indexOf('LINE')).toBeLessThan(body.indexOf('## Proof'));
+  });
+});

@@ -2,6 +2,7 @@
 
 import { type checkPhase as checkPhaseDefault, reworkWorker as reworkWorkerDefault } from '../phases/check.js';
 import type { PlanResult } from '../phases/plan.js';
+import { stackPositionFor } from '../phases/stack-order.js';
 import type { shipPhase as shipPhaseDefault, ShipResult } from '../phases/ship.js';
 import type { ReviewRouting } from '../review/routing.js';
 import type { CiFailureEvidence, CiSuppressionFinding, Constitution } from '../types/index.js';
@@ -121,6 +122,9 @@ export async function shipWithCiRework(
     reviewRouting: inputs.reviewRouting,
     ...(inputs.pinNote ? { pinNotes: [inputs.pinNote] } : {}),
     slice: planSlice ? { index: planSlice.index, count: planSlice.plan.slices.length } : undefined,
+    ...(request.sizeGateMode === 'stack' && planSlice
+      ? { stack: stackPositionFor(planSlice.plan, planSlice.index, request.parentBaseRef) }
+      : {}),
   };
   let ship = await shipPhase({ ...shipOpts, checkSummary: check.summary, reworkRounds: check.reworkRounds });
 

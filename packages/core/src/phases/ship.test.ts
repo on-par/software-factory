@@ -181,7 +181,7 @@ describe('shipPhase self-healing', () => {
     expect(issueCreate.body).not.toContain('PLAN → BUILD → CHECK → SHIP');
     expect(calls).toContainEqual(['pulls.get', { owner: 'on-par', repo: 'software-factory', pull_number: 123 }]);
     expect(calls).toContainEqual(['graphql', expect.stringContaining('markPullRequestReadyForReview'), { id: 'PR_1' }]);
-    expect(logs).toContainEqual(['pr_opened', 'opened PR #123 for committed work on ship-it/23-self-heal']);
+    expect(logs).toContainEqual(['pr_opened', 'opened PR #123 for committed work on ship-it/23-self-heal (base main)']);
     expect(logs.map(([type]) => type)).not.toContain('recovered');
   });
 

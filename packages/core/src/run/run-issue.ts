@@ -37,8 +37,7 @@ import { publishParkComment } from './park-comment.js';
 import { gateOpencodeBuildOnBreaker, providerFallbackPreferrer } from './provider-breaker-gate.js';
 import { fileFlakyTests } from './flaky-tests.js';
 import { enterStackSlice, runStackLoop } from './stack-slice-entry.js';
-import { upsertSlicePlanComment } from '../readiness/slice-plan-github.js';
-import { withSliceState } from '../readiness/slice-plan.js';
+import { recordShippedSlice } from './slice-ship-record.js';
 import type { ReviewFloorPathChange, ReviewFloorRuleSet } from '../review/floor.js';
 import {
   CLASSIFIER_PROMPT_VERSION,
@@ -1178,30 +1177,18 @@ async function runIssueOnce(
     if (parked) return await terminalParked(parked.reason, parked.message, parked.checkFailure, parked.ciFailure);
 
     if (planSlice) {
-      const { index, plan: slicePlan } = planSlice;
-      const count = slicePlan.slices.length;
-      if (ship.prNumber === undefined) {
-        log('ship', `slice ${index}/${count} shipped with no PR number — slice plan not updated`);
-      } else {
-        const state = ship.alreadyDelivered ? 'merged' : 'pr-open';
-        try {
-          await upsertSlicePlanComment({
-            octokit: ports.octokit,
-            repo: request.repo,
-            issue: request.issue,
-            plan: withSliceState(slicePlan, index, state, ship.prNumber, request.branch),
-          });
-          log(
-            'ship',
-            `recorded slice ${index}/${count} as ${state} (PR #${ship.prNumber}, branch ${request.branch}) in the slice plan comment`,
-          );
-        } catch (err) {
-          return await terminalParked(
-            'fail',
-            `slice ${index}/${count} PR #${ship.prNumber} opened but recording it in the slice plan comment failed: ${errorMessage(err)}`,
-          );
-        }
-      }
+      const failure = await recordShippedSlice({
+        octokit: ports.octokit,
+        repo: request.repo,
+        issue: request.issue,
+        branch: request.branch,
+        plan: planSlice.plan,
+        index: planSlice.index,
+        ship,
+        stackMode: request.sizeGateMode === 'stack',
+        log,
+      });
+      if (failure !== undefined) return await terminalParked('fail', failure);
     }
 
     if (request.skipCI) {
