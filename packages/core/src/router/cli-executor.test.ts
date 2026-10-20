@@ -329,9 +329,9 @@ describe('CliModelExecutor', () => {
       task: 'build_codex',
       registry,
       routesConfig,
+      env: { CODEX_HOME: '/nonexistent-codex-home' },
       onUsage: (u) => usages.push(u),
     });
-
     expect(output).toBe('CODEX OUTPUT');
     expect(usages).toEqual([
       {

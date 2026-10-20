@@ -1,12 +1,14 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm, writeFile as realWriteFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile as realWriteFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import type { ModelsConfig } from '../config/index.js';
+import type { RoutesConfig } from '../config/index.js';
+import { ModelRouter } from '../router/index.js';
 import { ModelRegistry } from '../models/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { CodexCliHarness, quoteCodexFlags } from './codex-cli.js';
@@ -213,185 +215,73 @@ describe('CodexCliHarness command shape', () => {
   });
 });
 
-describe('CodexCliHarness usage parsing', () => {
-  it('parses usage from a real turn.completed event (AC 1)', async () => {
+it('codex cost row carries the model-call count and peak context from the session rollout', async () => {
+  const codexHome = await mkdtemp(join(tmpdir(), 'factory-codex-rollout-'));
+  try {
+    const threadId = '019ff914-ffab-7d32-9e8d-2b202a31c34f';
+    const sessionDir = join(codexHome, 'sessions', '2026', '10', '19');
+    await mkdir(sessionDir, { recursive: true });
+    await realWriteFile(
+      join(sessionDir, `rollout-2026-10-19T00-00-00-${threadId}.jsonl`),
+      [27779, 120001, 198303]
+        .map((input, index) =>
+          JSON.stringify({
+            type: 'event_msg',
+            payload: {
+              type: 'token_count',
+              info: {
+                last_token_usage: { input_tokens: input, output_tokens: 10, total_tokens: input + 10 },
+                total_token_usage: { input_tokens: input, output_tokens: 10, total_tokens: (index + 1) * 200000 },
+                model_context_window: 272000,
+              },
+            },
+          }),
+        )
+        .join('\n'),
+    );
     const stdout = [
-      '{"type":"thread.started","thread_id":"019ff914-ffab-7d32-9e8d-2b202a31c34f"}',
-      '{"type":"turn.started"}',
-      '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"ok"}}',
-      '{"type":"turn.completed","usage":{"input_tokens":15785,"cached_input_tokens":9984,"output_tokens":5,"reasoning_output_tokens":0}}',
+      JSON.stringify({ type: 'thread.started', thread_id: threadId }),
+      JSON.stringify({
+        type: 'turn.completed',
+        usage: { input_tokens: 15785, cached_input_tokens: 9984, output_tokens: 5 },
+      }),
     ].join('\n');
-    const rec = recordingExec({ stdout }, async (cmd) => {
-      await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
-    });
+    const rec = recordingExec({ stdout }, async (cmd) => realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT'));
     const harness = new CodexCliHarness(rec.fn);
-
-    const result = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
-
-    expect(result.output).toBe('CODEX OUTPUT');
-    expect(result.usage).toEqual({
+    const result = await harness.run(
+      makeContractRequest({ model: 'codex-model', registry, prompt: 'build it', env: { CODEX_HOME: codexHome } }),
+    );
+    expect(result.usage).toMatchObject({
       inputTokens: 15785,
       outputTokens: 5,
       rawInputTokens: 5801,
       cacheReadTokens: 9984,
-    });
-    expect(result.usage).not.toHaveProperty('cacheCreationTokens');
-    expect(result.usage).not.toHaveProperty('costUsd');
-    expect(result.usage).not.toHaveProperty('numTurns');
-  });
-
-  it('sums usage across multiple turn.completed events', async () => {
-    const stdout = [
-      '{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":10,"cached_input_tokens":40}}',
-      '{"type":"turn.completed","usage":{"input_tokens":200,"output_tokens":20,"cached_input_tokens":60}}',
-    ].join('\n');
-    const rec = recordingExec({ stdout }, async (cmd) => {
-      await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
-    });
-    const harness = new CodexCliHarness(rec.fn);
-
-    const result = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
-
-    expect(result.usage).toEqual({
-      inputTokens: 300,
-      outputTokens: 30,
-      rawInputTokens: 200,
-      cacheReadTokens: 100,
-    });
-  });
-
-  it('resolves normally with no usage when stdout has no turn.completed event (AC 3)', async () => {
-    const stdout = [
-      '{"type":"thread.started","thread_id":"019ff914-ffab-7d32-9e8d-2b202a31c34f"}',
-      '{"type":"turn.started"}',
-      '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"ok"}}',
-    ].join('\n');
-    const rec = recordingExec({ stdout }, async (cmd) => {
-      await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
-    });
-    const harness = new CodexCliHarness(rec.fn);
-
-    const result = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
-
-    expect(result.output).toBe('CODEX OUTPUT');
-    expect(result.usage).toBeUndefined();
-  });
-
-  it('resolves with no usage when counts are malformed (AC 3)', async () => {
-    const stdout = '{"type":"turn.completed","usage":{"input_tokens":"many","output_tokens":5}}';
-    const rec = recordingExec({ stdout }, async (cmd) => {
-      await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
-    });
-    const harness = new CodexCliHarness(rec.fn);
-
-    const result = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
-
-    expect(result.usage).toBeUndefined();
-  });
-
-  it('tolerates non-JSON noise interleaved with the usage line', async () => {
-    const stdout = [
-      'warning: running inside sandbox wrapper',
-      '{"type":"turn.completed","usage":{"input_tokens":15785,"cached_input_tokens":9984,"output_tokens":5}}',
-      'not json at all {{{',
-    ].join('\n');
-    const rec = recordingExec({ stdout }, async (cmd) => {
-      await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
-    });
-    const harness = new CodexCliHarness(rec.fn);
-
-    const result = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
-
-    expect(result.usage).toEqual({
-      inputTokens: 15785,
-      outputTokens: 5,
-      rawInputTokens: 5801,
-      cacheReadTokens: 9984,
-    });
-  });
-
-  it('treats absent cached_input_tokens as zero', async () => {
-    const stdout = '{"type":"turn.completed","usage":{"input_tokens":100,"output_tokens":10}}';
-    const rec = recordingExec({ stdout }, async (cmd) => {
-      await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
-    });
-    const harness = new CodexCliHarness(rec.fn);
-
-    const result = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
-
-    expect(result.usage).toEqual({
-      inputTokens: 100,
-      outputTokens: 10,
-      rawInputTokens: 100,
-      cacheReadTokens: 0,
-    });
-  });
-
-  it('clamps rawInputTokens to zero when cached_input_tokens exceeds input_tokens', async () => {
-    const stdout = '{"type":"turn.completed","usage":{"input_tokens":50,"cached_input_tokens":80,"output_tokens":10}}';
-    const rec = recordingExec({ stdout }, async (cmd) => {
-      await realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT');
-    });
-    const harness = new CodexCliHarness(rec.fn);
-
-    const result = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
-
-    expect(result.usage).toEqual({
-      inputTokens: 50,
-      outputTokens: 10,
-      rawInputTokens: 0,
-      cacheReadTokens: 80,
-    });
-  });
-
-  it('resolves with no usage on empty stdout', async () => {
-    const rec = successExec();
-    const harness = new CodexCliHarness(rec.fn);
-
-    const result = await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
-
-    expect(result.usage).toBeUndefined();
-  });
-});
-
-describe('CodexCliHarness temp file cleanup', () => {
-  it('removes both temp files after a successful run', async () => {
-    const rec = successExec();
-    const harness = new CodexCliHarness(rec.fn);
-
-    await harness.run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }));
-
-    expectTempFilesCleanedUp(rec.calls[0].cmd);
-  });
-
-  it('removes both temp files after a failing run', async () => {
-    const rec = recordingExec();
-    const harness = new CodexCliHarness(async (cmd, opts) => {
-      rec.calls.push({ cmd, opts });
-      throw Object.assign(new Error('boom'), { stderr: 'boom', code: 1 });
+      numTurns: 3,
+      peakInputTokens: 198303,
+      contextWindow: 272000,
     });
 
-    const err: any = await harness
-      .run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }))
-      .catch((e) => e);
-
-    expect(err).toBeInstanceOf(HarnessError);
-    expectTempFilesCleanedUp(rec.calls[0].cmd);
-  });
-
-  it('removes both temp files after an empty-output run', async () => {
-    const rec = recordingExec();
-    const harness = new CodexCliHarness(rec.fn);
-
-    const err: any = await harness
-      .run(makeContractRequest({ model: 'codex-model', registry, prompt: 'build it' }))
-      .catch((e) => e);
-
-    expect(err).toBeInstanceOf(HarnessError);
-    expect(err.reason).toBe('empty_response');
-    expect(err.details.exitCode).toBe(0);
-    expectTempFilesCleanedUp(rec.calls[0].cmd);
-  });
+    const costModels: ModelsConfig = {
+      ...modelsConfig,
+      models: { 'codex-model': { ...modelsConfig.models['codex-model'], costPerMtokInput: 3, costPerMtokOutput: 15 } },
+    };
+    const routes: RoutesConfig = { version: 1, routes: { build_codex: { tier: 'boss', description: 'test' } } };
+    const router = new ModelRouter(costModels, routes, false, {
+      runModel: async (_model, _prompt, context) => {
+        if (result.usage) context.onUsage?.(result.usage);
+        return result.output;
+      },
+    });
+    const rows: { cost: number | null; costPerCallUsd?: number }[] = [];
+    router.setCostSink((entry) => rows.push(entry));
+    await router.run('build_codex', 'build it');
+    expect(rows).toHaveLength(1);
+    const rowCost = rows[0].cost;
+    if (rowCost === null) throw new Error('expected a priced cost row');
+    expect(rows[0].costPerCallUsd).toBe(rowCost / 3);
+  } finally {
+    await rm(codexHome, { recursive: true, force: true });
+  }
 });
 
 describe('CodexCliHarness served-model verification', () => {

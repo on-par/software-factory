@@ -1,7 +1,7 @@
 // src/harness/codex-cli.ts — CodingHarness adapter for the Codex CLI.
 
-import { readFile, unlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { wrapCommandInSandbox } from '../sandbox/index.js';
@@ -16,6 +16,97 @@ import { HarnessError, taskRequiresAgenticHarness } from './index.js';
 const CODEX_LOGIN_HINT = 'codex is not signed in (401): run `codex login`, then retry';
 
 export type CodexExecFn = ExecFn;
+
+export interface CodexRolloutUsage {
+  calls: HarnessUsage[];
+  numTurns: number;
+  peakInputTokens: number;
+  contextWindow?: number;
+}
+
+const CODEX_THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Read the complete token-count calls visible in one rollout snapshot. */
+export async function readCodexRolloutUsage(path: string): Promise<CodexRolloutUsage | undefined> {
+  let contents: string;
+  try {
+    contents = await readFile(path, 'utf-8');
+  } catch {
+    return undefined;
+  }
+  const calls: HarnessUsage[] = [];
+  let peakInputTokens = 0;
+  let contextWindow: number | undefined;
+  let previousIdentity: string | undefined;
+  for (const line of contents.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let value: unknown;
+    try {
+      value = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (!isRecord(value) || value.type !== 'event_msg' || !isRecord(value.payload)) continue;
+    const payload = value.payload;
+    if (payload.type !== 'token_count' || !isRecord(payload.info)) continue;
+    const info = payload.info;
+    if (!isRecord(info.last_token_usage) || !isRecord(info.total_token_usage)) continue;
+    const last = info.last_token_usage;
+    const total = info.total_token_usage;
+    if (!isValidCount(last.input_tokens) || !isValidCount(last.output_tokens) || !isValidCount(total.total_tokens))
+      continue;
+    const identity = JSON.stringify([total.input_tokens, total.output_tokens, total.total_tokens]);
+    if (identity === previousIdentity) continue;
+    previousIdentity = identity;
+    const cached = isValidCount(last.cached_input_tokens) ? last.cached_input_tokens : undefined;
+    const inputTokens = last.input_tokens;
+    calls.push({
+      inputTokens,
+      outputTokens: last.output_tokens,
+      rawInputTokens: Math.max(0, inputTokens - (cached ?? 0)),
+      ...(cached !== undefined ? { cacheReadTokens: cached } : {}),
+    });
+    peakInputTokens = Math.max(peakInputTokens, inputTokens);
+    if (isValidCount(info.model_context_window) && info.model_context_window > 0) {
+      contextWindow = info.model_context_window;
+    }
+  }
+  if (calls.length === 0) return undefined;
+  return { calls, numTurns: calls.length, peakInputTokens, ...(contextWindow !== undefined ? { contextWindow } : {}) };
+}
+
+/** Find the one regular rollout file whose exact suffix names this Codex thread. */
+export async function locateCodexRollout(threadId: string, codexHome?: string): Promise<string | undefined> {
+  if (!CODEX_THREAD_ID.test(threadId)) return undefined;
+  const home = codexHome?.trim() ? codexHome : join(homedir(), '.codex');
+  const root = join(home, 'sessions');
+  const matches: string[] = [];
+  const walk = async (directory: string): Promise<void> => {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) await walk(path);
+      else if (entry.isFile() && entry.name.startsWith('rollout-') && entry.name.endsWith(`-${threadId}.jsonl`)) {
+        matches.push(path);
+      }
+    }
+  };
+  try {
+    await walk(root);
+  } catch {
+    return undefined;
+  }
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isValidCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
 
 /** Injectable temp-file I/O for CodexCliHarness; each field defaults to node:fs/promises. */
 export interface CodexFsDeps {
@@ -160,7 +251,25 @@ export class CodexCliHarness implements CodingHarness {
       if (output.trim().length === 0) {
         throw new HarnessError('codex CLI returned empty output', 'empty_response', { exitCode: 0 });
       }
-      const usage = parseCodexUsage(execResult.stdout);
+      let usage = parseCodexUsage(execResult.stdout);
+      if (usage !== undefined) {
+        const threadId = codexThreadIdFromStdout(execResult.stdout);
+        if (threadId !== undefined) {
+          const selectedHome =
+            env?.CODEX_HOME !== undefined ? env.CODEX_HOME.trim() : this.envSource.CODEX_HOME?.trim();
+          const rolloutPath = await locateCodexRollout(threadId, selectedHome || undefined).catch(() => undefined);
+          const rolloutUsage =
+            rolloutPath === undefined ? undefined : await readCodexRolloutUsage(rolloutPath).catch(() => undefined);
+          if (rolloutUsage !== undefined) {
+            usage = {
+              ...usage,
+              numTurns: rolloutUsage.numTurns,
+              peakInputTokens: rolloutUsage.peakInputTokens,
+              ...(rolloutUsage.contextWindow !== undefined ? { contextWindow: rolloutUsage.contextWindow } : {}),
+            };
+          }
+        }
+      }
       return { output, ...(usage ? { usage } : {}) };
     } finally {
       // Cleanup temp files (remove, don't zero out)
@@ -168,6 +277,20 @@ export class CodexCliHarness implements CodingHarness {
       if (outFile !== undefined) await this.unlink(outFile).catch(() => {});
     }
   }
+}
+
+function codexThreadIdFromStdout(stdout: string): string | undefined {
+  for (const line of stdout.split('\n')) {
+    let value: unknown;
+    try {
+      value = JSON.parse(line.trim());
+    } catch {
+      continue;
+    }
+    if (!isRecord(value) || value.type !== 'thread.started' || typeof value.thread_id !== 'string') continue;
+    if (CODEX_THREAD_ID.test(value.thread_id)) return value.thread_id;
+  }
+  return undefined;
 }
 
 const SAFE_SHELL_WORD = /^[\w@%+=:,./-]+$/;

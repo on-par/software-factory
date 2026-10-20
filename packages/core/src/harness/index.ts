@@ -72,8 +72,12 @@ export interface HarnessUsage {
   /** Cache split, when the provider reports it (#490). */
   cacheReadTokens?: number;
   cacheCreationTokens?: number;
-  /** Agentic-loop turn count from the CLI result envelope (#490). */
+  /** Model-call count for Codex or envelope turn count for other harnesses. */
   numTurns?: number;
+  /** Maximum input token count from one model call. */
+  peakInputTokens?: number;
+  /** Reported token capacity for the model context. */
+  contextWindow?: number;
   /** Wall-clock and API-time durations from the CLI result envelope, in ms (#490). */
   durationMs?: number;
   durationApiMs?: number;
