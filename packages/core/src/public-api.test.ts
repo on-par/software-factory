@@ -28,6 +28,7 @@ const PUBLIC_API_KEYS = [
   'resolveSizeGateMode',
   'parseSizeGateMode',
   'parseMaxSlices',
+  'resolveSizeGateBudget',
   'resolveSizeGateMaxSlices',
   'SIZE_GATE_MODES',
   'resolveDesignRegressionBlock',

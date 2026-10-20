@@ -29,6 +29,7 @@ import {
   remainingShowstoppers,
   renderEnvironmentReleaseComment,
 } from '../phases/check.js';
+import type { SizeBudget } from '../readiness/size.js';
 import { describeConstitutionSource } from '../constitutions/index.js';
 import { lintFactoryConfig } from '../config/config-lint.js';
 import { planPhase as planPhaseDefault, type PlanResult } from '../phases/plan.js';
@@ -131,6 +132,8 @@ export interface RunRequest {
   sizeGateMode?: SizeGateMode;
   /** sizeGate.maxSlices or --max-slices resolved (ADR-0156); undefined = DEFAULT_MAX_SLICES. */
   maxSlices?: number;
+  /** sizeGate.tokenBudget / maxFiles resolved (#3350); undefined = defaults. */
+  sizeBudget?: SizeBudget;
   /** steward.enabled resolved (#2086); undefined = off (no steward-triggered event). */
   stewardEnabled?: boolean;
   prClassifier?: { rules: ReviewFloorRuleSet; gateLabel: string; modelPin?: string };
@@ -688,6 +691,7 @@ async function runIssueOnce(
           sizeGateMode: request.sizeGateMode,
           sliceIndex: request.sliceIndex,
           maxSlices: request.maxSlices,
+          sizeBudget: request.sizeBudget,
           blockUnresolvedRegressions: request.blockUnresolvedRegressions,
           updateIssueBodyOnEnrich: request.readinessUpdateIssueBody,
           preferredRoute: pinnedRoute,

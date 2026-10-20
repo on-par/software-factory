@@ -38,6 +38,7 @@ export {
   resolveSizeGateMode,
   parseSizeGateMode,
   parseMaxSlices,
+  resolveSizeGateBudget,
   resolveSizeGateMaxSlices,
   SIZE_GATE_MODES,
   resolveDesignRegressionBlock,
@@ -146,8 +147,7 @@ export type {
 } from './queue/index.js';
 export { parseQueue, readQueue, rewriteQueueForDecomposition, validateQueue } from './queue/index.js';
 
-// Pattern-based secret redaction for GitHub/provider error text shown to an operator (#1362).
-// Distinct from the authority-list `redactSecrets` exported from ./hosted/authority.js.
+// Pattern-based secret redaction for provider error text (#1362); distinct from ./hosted/authority.js `redactSecrets`.
 export { redactSecrets as redactSecretPatterns } from './router/failure-detail.js';
 
 // Queue activity (#1342)
