@@ -1,9 +1,9 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdtemp } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import type { ModelRouter } from '../router/index.js';
 import type { CheckerOutput } from '../types/index.js';
 import type { CommandResult } from '../utils/command-runner.js';
@@ -11,11 +11,9 @@ import { BaselineCache, hashBaselineCheckerConfig, hashBaselineEnv } from './bas
 import { runBaselineCheckers } from './baseline.js';
 
 const SHA = 'a'.repeat(40);
-const dirs: string[] = [];
+const tempDirs = createTempDirs();
 
-afterEach(async () => {
-  await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
-});
+afterEach(() => tempDirs.cleanup());
 
 const ok = (): CommandResult => ({
   command: [],
@@ -29,8 +27,7 @@ const ok = (): CommandResult => ({
 
 describe('runBaselineCheckers bypassCache (#3287)', () => {
   it('skips cache reads but still writes fresh results', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'baseline-bypass-'));
-    dirs.push(dir);
+    const dir = await tempDirs.make('baseline-bypass-');
     const env = { A: '1' };
     const cache = new BaselineCache(join(dir, 'baseline-cache.json'));
     const stale: CheckerOutput = { checker: 'tests', result: 'FAIL', details: 'stale' };
