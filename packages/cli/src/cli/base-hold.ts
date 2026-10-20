@@ -4,6 +4,8 @@
 // #2350 clears the hold once origin/main moves or its CI goes green. #2351 reads it for
 // `factory status`. #3186 adds `ciRecheckAfter`: a hold awaiting GitHub CI on a timed-out base
 // compile backs off and is re-checked with the strict required-checks verdict, not the lenient one.
+// #3287 adds `confirmedLocally`: a hold whose fresh local re-run failed while CI was green is
+// never cleared by CI green, only when origin/main moves.
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -20,6 +22,8 @@ export interface BaseHold {
   since: string;
   /** ISO-8601 time; set when the hold awaits GitHub CI on a timed-out base compile (#3186). */
   ciRecheckAfter?: string;
+  /** A fresh local re-run failed while CI was green (#3287); CI green never clears it. */
+  confirmedLocally?: true;
 }
 
 /** Backoff between strict CI re-checks of a ci-awaiting hold (#3186). */
@@ -33,6 +37,7 @@ export function writeBaseHold(file: string, hold: BaseHold): void {
     failingChecks: [...hold.failingChecks],
     since: hold.since,
     ...(hold.ciRecheckAfter !== undefined ? { ciRecheckAfter: hold.ciRecheckAfter } : {}),
+    ...(hold.confirmedLocally === true ? { confirmedLocally: true as const } : {}),
   };
   writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
 }
@@ -47,12 +52,19 @@ export function readBaseHold(file: string): BaseHold | null {
     return null;
   }
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
-  const { repo, baseSha, failingChecks, since, ciRecheckAfter } = raw as Record<string, unknown>;
+  const { repo, baseSha, failingChecks, since, ciRecheckAfter, confirmedLocally } = raw as Record<string, unknown>;
   if (typeof repo !== 'string' || typeof baseSha !== 'string' || typeof since !== 'string') return null;
   if (!Array.isArray(failingChecks) || !failingChecks.every((c) => typeof c === 'string')) return null;
   const recheck =
     typeof ciRecheckAfter === 'string' && Number.isFinite(Date.parse(ciRecheckAfter)) ? { ciRecheckAfter } : {};
-  return { repo, baseSha, failingChecks: [...failingChecks], since, ...recheck };
+  return {
+    repo,
+    baseSha,
+    failingChecks: [...failingChecks],
+    since,
+    ...recheck,
+    ...(confirmedLocally === true ? { confirmedLocally: true as const } : {}),
+  };
 }
 
 export function deleteBaseHold(file: string): void {
@@ -91,7 +103,14 @@ export function formatBaseHoldCleared(c: BaseHoldCleared): string {
 /** `factory status` lines for an active hold (#2351). */
 export function formatBaseHoldStatus(hold: BaseHold): string[] {
   const checks = hold.failingChecks.length > 0 ? hold.failingChecks.join(', ') : '(none recorded)';
-  return [`  repo: ${hold.repo}`, `  baseSha: ${hold.baseSha}`, `  failingChecks: ${checks}`, `  since: ${hold.since}`];
+  const lines = [
+    `  repo: ${hold.repo}`,
+    `  baseSha: ${hold.baseSha}`,
+    `  failingChecks: ${checks}`,
+    `  since: ${hold.since}`,
+  ];
+  if (hold.confirmedLocally === true) lines.push('  confirmedLocally: true');
+  return lines;
 }
 
 export type BaseHoldDecision = { kind: 'claim' } | { kind: 'hold'; hold: BaseHold; ciReason?: string };
@@ -131,6 +150,9 @@ export async function evaluateBaseHold(file: string, repo: string, deps: BaseHol
   if (sha !== hold.baseSha) {
     clear('sha-changed', sha);
     return { kind: 'claim' };
+  }
+  if (hold.confirmedLocally === true) {
+    return { kind: 'hold', hold, ciReason: 'confirmed locally: a fresh base re-run failed while CI was green' };
   }
   if (hold.ciRecheckAfter !== undefined) {
     const now = deps.now ?? Date.now;

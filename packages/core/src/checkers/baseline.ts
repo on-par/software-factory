@@ -60,6 +60,8 @@ export interface BaselineOptions {
   deps?: BaselineDeps;
   /** Baseline result cache (#1926); when absent every runnable checker runs on base. */
   cache?: BaselineCache;
+  /** Skip cache reads; fresh results are still written (#3287). */
+  bypassCache?: boolean;
 }
 
 /** Checkers that grade the change diff, which is empty at the base SHA. */
@@ -154,6 +156,7 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
     customCheckerTimeoutSeconds,
     deps = {},
     cache,
+    bypassCache,
   } = opts;
   const runnable = failing
     .filter((o) => o.result === 'FAIL' && notRunnableReason(o.checker) === null)
@@ -167,7 +170,7 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
   for (const name of runnable) {
     let hit: CheckerOutput | undefined;
     try {
-      hit = await cache?.get(baseSha, envHash, configHash, name);
+      hit = bypassCache === true ? undefined : await cache?.get(baseSha, envHash, configHash, name);
     } catch {
       hit = undefined; // a cache read error is a miss
     }

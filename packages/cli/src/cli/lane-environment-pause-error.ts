@@ -10,6 +10,8 @@ export class LaneEnvironmentPauseError extends Error {
   readonly buildPreserved?: boolean;
   /** Red only because a base compile timeout awaits green CI (#3186). */
   readonly awaitingCi?: boolean;
+  /** A fresh local re-run failed while CI was green (#3287). */
+  readonly confirmedLocally?: boolean;
 
   constructor(
     message: string,
@@ -19,10 +21,12 @@ export class LaneEnvironmentPauseError extends Error {
       failureSignature?: string;
       buildPreserved?: boolean;
       awaitingCi?: boolean;
+      confirmedLocally?: boolean;
     },
   ) {
     super(message);
     if (failure.awaitingCi !== undefined) this.awaitingCi = failure.awaitingCi;
+    if (failure.confirmedLocally !== undefined) this.confirmedLocally = failure.confirmedLocally;
     if (failure.buildPreserved !== undefined) this.buildPreserved = failure.buildPreserved;
     this.baseSha = failure.baseSha;
     this.failingChecks = failure.failingChecks;

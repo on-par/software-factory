@@ -1,4 +1,6 @@
-// src/checkers/base-health.ts — pre-PLAN health check of origin/main, cached per base SHA (#2339)
+// src/checkers/base-health.ts — pre-PLAN health check of origin/main, cached per base SHA (#2339).
+// #3287: a cached non-timeout FAIL whose SHA GitHub CI calls green is re-run once, fresh; a fresh
+// FAIL is `confirmedLocally` (logged as base_divergence) and never re-run for that SHA in-process.
 
 import type { EventKind } from '../events/kinds.js';
 import type { ModelRouter } from '../router/index.js';
@@ -11,9 +13,14 @@ import type { RequiredChecksVerdict } from '../utils/required-checks.js';
 export { fetchRequiredChecksVerdict, type RequiredChecksVerdict } from '../utils/required-checks.js';
 import { type BaselineDeps, type BaselineReport, runBaselineCheckers } from './baseline.js';
 import { BaselineCache, hashBaselineCheckerConfig, hashBaselineEnv } from './baseline-cache.js';
+import { runAllCheckers } from './index.js';
+import type { CheckerOutput } from '../types/index.js';
 
 /** Deterministic checkers that never call a model; the only ones run on base before PLAN. */
 export const BASE_HEALTH_CHECKERS: readonly string[] = ['compile', 'lint', 'tests'];
+
+/** Chars of the fresh checker output kept in a base_divergence event (#3287). */
+export const BASE_DIVERGENCE_TAIL_CHARS = 500;
 
 export interface BaseHealthResult {
   /** red = at least one BASE_HEALTH_CHECKERS checker FAILs on base; skipped = could not decide (fail open). */
@@ -26,6 +33,8 @@ export interface BaseHealthResult {
   reason?: string;
   /** Red only because a compile timeout awaits green required CI (#3186). */
   awaitingCi?: boolean;
+  /** Red because a fresh local re-run confirmed a cached FAIL that GitHub CI calls green (#3287). */
+  confirmedLocally?: boolean;
 }
 
 export interface BaseHealthOptions {
@@ -52,10 +61,13 @@ export interface BaseHealthOptions {
     runBaseline?: typeof runBaselineCheckers;
     baselineDeps?: BaselineDeps;
     memo?: Map<string, Promise<BaselineReport>>;
+    /** Memo keys whose cached-FAIL/green-CI divergence is already confirmed locally (#3287). */
+    confirmed?: Set<string>;
   };
 }
 
 const defaultMemo = new Map<string, Promise<BaselineReport>>();
+const defaultConfirmed = new Set<string>();
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -133,14 +145,20 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
       (c) => c.checker === 'compile' && c.verdict === 'fails-on-base' && c.baseTimedOut === true,
     );
     let ciPending = false;
+    let ciLookup: Promise<RequiredChecksVerdict> | undefined;
+    const ciVerdict = (): Promise<RequiredChecksVerdict> => {
+      ciLookup ??= (async () => {
+        try {
+          return (await opts.requiredChecksVerdict?.(baseSha)) ?? { green: false, reason: 'CI lookup unavailable' };
+        } catch (err) {
+          return { green: false, reason: `CI lookup failed: ${errorMessage(err)}` };
+        }
+      })();
+      return ciLookup;
+    };
     if (timedOut) {
       map.delete(key);
-      let verdict: RequiredChecksVerdict;
-      try {
-        verdict = (await opts.requiredChecksVerdict?.(baseSha)) ?? { green: false, reason: 'CI lookup unavailable' };
-      } catch (err) {
-        verdict = { green: false, reason: `CI lookup failed: ${errorMessage(err)}` };
-      }
+      const verdict = await ciVerdict();
       if (verdict.green) {
         failing = failing.filter((c) => c !== 'compile');
         log(
@@ -155,14 +173,92 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
         );
       }
     }
-    const cached = memoized || report.checkers.some((c) => c.cached === true);
+    const confirmedSet = deps.confirmed ?? defaultConfirmed;
+    let confirmedLocally = false;
+    let comparisons = report.checkers;
+    if (confirmedSet.has(key) && failing.length > 0) {
+      confirmedLocally = true;
+    } else {
+      const cachedFailing = comparisons
+        .filter(
+          (c) =>
+            c.verdict === 'fails-on-base' &&
+            c.cached === true &&
+            c.baseTimedOut !== true &&
+            failing.includes(c.checker),
+        )
+        .map((c) => c.checker);
+      const verdict = cachedFailing.length > 0 ? await ciVerdict() : undefined;
+      if (verdict?.green) {
+        log(
+          'check',
+          `base health: cached FAIL (${cachedFailing.join(', ')}) on origin/main ${sha8} but GitHub CI is green (${verdict.reason}) — re-running once with the cache bypassed`,
+        );
+        const captured: CheckerOutput[] = [];
+        const innerRun = deps.baselineDeps?.runCheckers ?? runAllCheckers;
+        const capture: typeof runAllCheckers = async (...args) => {
+          const summary = await innerRun(...args);
+          captured.push(...summary.results);
+          return summary;
+        };
+        let fresh: BaselineReport | undefined;
+        try {
+          fresh = await (deps.runBaseline ?? runBaselineCheckers)({
+            baseSha,
+            laneWorktree: worktree,
+            failing: cachedFailing.map((checker) => ({ checker, result: 'FAIL' as const, details: '' })),
+            ctx: { worktree, specPath: '', env, testsTimeoutSeconds, compileTimeoutSeconds },
+            router,
+            constitution,
+            customCheckerTimeoutSeconds: timeoutSeconds,
+            cache: cachePath === undefined ? undefined : new BaselineCache(cachePath),
+            deps: { ...deps.baselineDeps, runCheckers: capture },
+            bypassCache: true,
+          });
+        } catch (err) {
+          fresh = { baseSha, checkers: [], error: errorMessage(err) };
+        }
+        if (fresh.error !== undefined) {
+          log(
+            'environment_warning',
+            `base health: fresh re-run on ${sha8} failed: ${fresh.error} — keeping the cached result`,
+          );
+        } else {
+          const confirmed = fresh.checkers.filter((c) => c.verdict === 'fails-on-base').map((c) => c.checker);
+          failing = failing.filter((c) => !cachedFailing.includes(c) || confirmed.includes(c));
+          comparisons = [...comparisons.filter((c) => !cachedFailing.includes(c.checker)), ...fresh.checkers];
+          map.set(key, Promise.resolve({ ...report, checkers: comparisons }));
+          if (confirmed.length > 0) {
+            confirmedSet.add(key);
+            confirmedLocally = true;
+            for (const checker of confirmed) {
+              const tail = (captured.find((o) => o.checker === checker)?.details ?? '').slice(
+                -BASE_DIVERGENCE_TAIL_CHARS,
+              );
+              log(
+                'base_divergence',
+                `base divergence: origin/main ${baseSha} — ${checker} fails locally on a fresh re-run but GitHub CI is green (${verdict.reason}); holding until the SHA changes. Output tail: ${tail}`,
+              );
+            }
+          }
+        }
+      }
+    }
+    const cached = memoized || comparisons.some((c) => c.cached === true);
     if (cached) {
       log('check', `base health: cache hit for ${sha8} (${memoized ? 'shared with another lane' : 'baseline cache'})`);
     }
     if (failing.length > 0) {
       log('check', `base health: origin/main ${sha8} is red (${failing.join(', ')})`);
       const awaitingCi = ciPending && failing.length === 1 && failing[0] === 'compile';
-      return { kind: 'red', baseSha, failingChecks: failing, cached, ...(awaitingCi ? { awaitingCi } : {}) };
+      return {
+        kind: 'red',
+        baseSha,
+        failingChecks: failing,
+        cached,
+        ...(awaitingCi ? { awaitingCi } : {}),
+        ...(confirmedLocally ? { confirmedLocally: true } : {}),
+      };
     }
     log('check', `base health: origin/main ${sha8} is green`);
     return { kind: 'green', baseSha, failingChecks: [], cached };

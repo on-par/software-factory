@@ -11,6 +11,8 @@ export function baseHealthWithCi(
   return (opts) =>
     checkBaseHealth({
       ...opts,
-      requiredChecksVerdict: (sha) => fetchRequiredChecksVerdict(octokit, { owner, repo, branch: 'main', sha }),
+      // pushFallback matches the gate in run.ts, so both see the same verdict on 403-protection repos (#3287).
+      requiredChecksVerdict: (sha) =>
+        fetchRequiredChecksVerdict(octokit, { owner, repo, branch: 'main', sha }, { pushFallback: true }),
     });
 }
