@@ -32,6 +32,7 @@ export interface LogContext {
 
 export interface LogExtra {
   failoverReason?: FailoverReason;
+  escalateKind?: FactoryEvent['escalateKind'];
   fingerprint?: string;
   evidence?: EvidencePack;
   rework?: ReworkInfo;
@@ -108,6 +109,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(ctx.phase ? { phase: ctx.phase } : {}),
       ...(extra?.actor ? { actor: extra.actor } : {}),
       ...(extra?.failoverReason ? { failoverReason: extra.failoverReason } : {}),
+      ...(extra?.escalateKind ? { escalateKind: extra.escalateKind } : {}),
       ...(extra?.fingerprint ? { fingerprint: extra.fingerprint } : {}),
       ...(extra?.evidence ? { evidence: extra.evidence } : {}),
       ...(extra?.rework ? { rework: extra.rework } : {}),

@@ -158,7 +158,7 @@ export { isHarnessCliPresent } from './models/index.js';
 export { CliModelExecutor } from './router/index.js';
 
 // Phase helpers
-export { buildPlanPrompt, type PlanPromptOpts } from './phases/plan.js';
+export { buildPlanPrompt, type BuildRouteName, type PlanPromptOpts } from './phases/plan.js';
 export { buildTriagePrompt, normalizeTriageQueue, parseTriageCandidates } from './triage/index.js';
 export { dropQueuedIssues, parseOpenPrIssues } from './triage/index.js';
 

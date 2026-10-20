@@ -1,5 +1,3 @@
-// src/types/index.ts — Core type definitions for the Software Factory
-
 import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
 import type { EvidencePlanResult } from '../checkers/evidence-plan.js';
@@ -366,6 +364,7 @@ export interface FactoryEvent {
   /** Human who performed the action, for human-* event types (#420). */
   actor?: string;
   failoverReason?: FailoverReason;
+  escalateKind?: 'missing-info' | 'contradiction' | 'split';
   fingerprint?: string;
   evidence?: EvidencePack;
   rework?: ReworkInfo;

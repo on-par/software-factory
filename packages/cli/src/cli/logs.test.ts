@@ -50,6 +50,18 @@ describe('buildLogsJson', () => {
     expect(buildLogsJson(event)).toEqual(event);
   });
 
+  it('preserves the typed planner escalation kind', () => {
+    const event: FactoryEvent = {
+      ts: 'now',
+      type: 'escalate',
+      issue: '1',
+      msg: 'ESCALATE: split: too large',
+      model: 'stub-model',
+      escalateKind: 'split',
+    };
+    expect(buildLogsJson(event)).toEqual(event);
+  });
+
   it('adds a cursor and preserves interface payload fields', () => {
     const event: FactoryEvent = {
       ts: 'now',

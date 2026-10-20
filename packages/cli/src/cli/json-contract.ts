@@ -70,6 +70,7 @@ export const logsLineJsonSchema = z.object({
   phase: z.string().optional(),
   actor: z.string().optional(),
   failoverReason: z.string().optional(),
+  escalateKind: z.enum(['missing-info', 'contradiction', 'split']).optional(),
   fingerprint: z.string().optional(),
   evidence: loosePayloadSchema.optional(),
   rework: loosePayloadSchema.optional(),

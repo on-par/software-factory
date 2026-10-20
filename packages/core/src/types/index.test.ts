@@ -13,6 +13,20 @@ describe('types module', () => {
     expect(runtimeExports).toEqual([]);
   });
 
+  it('FactoryEvent supports the typed planner escalation kinds', () => {
+    const kinds: NonNullable<FactoryEvent['escalateKind']>[] = ['missing-info', 'contradiction', 'split'];
+    for (const escalateKind of kinds) {
+      const event: FactoryEvent = {
+        ts: '2026-07-16T00:00:00Z',
+        type: 'escalate',
+        issue: '1',
+        msg: 'planner escalation',
+        escalateKind,
+      };
+      expect(JSON.parse(JSON.stringify(event)).escalateKind).toBe(escalateKind);
+    }
+  });
+
   it('FailoverReason enumerates the issue-named reasons and round-trips on CostEntry/FactoryEvent', () => {
     const reasons: FailoverReason[] = ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response', 'unavailable'];
 

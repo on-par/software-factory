@@ -33,6 +33,10 @@
     "failoverReason": {
       "type": "string"
     },
+    "escalateKind": {
+      "type": "string",
+      "enum": ["missing-info", "contradiction", "split"]
+    },
     "fingerprint": {
       "type": "string"
     },
