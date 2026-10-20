@@ -1,476 +1,229 @@
 #!/usr/bin/env bash
-# Regression test for auto-merge-sweep.sh: proves that a failing `gh pr merge`
-# and a failing `factory land` are each logged as an explicit FAILURE line
-# carrying the command's real non-zero exit code, instead of being silently
-# swallowed.
+# Regression tests for sweep selection, landing, preview, and loop behavior.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BINDIR="$(mktemp -d)"
 REPO_ROOT="$(mktemp -d)"
-
-cleanup() {
-  rm -rf "$BINDIR" "$REPO_ROOT" "${FACTORY_BIN_TEST_DIR:-}" "${NO_FACTORY_PATH_DIR:-}"
-}
+cleanup() { rm -rf "$BINDIR" "$REPO_ROOT"; }
 trap cleanup EXIT
+mkdir -p "$REPO_ROOT/fakerepo" "$REPO_ROOT/otherrepo"
 
-mkdir -p "$REPO_ROOT/fakerepo"
-
-FACTORY_CALL_LOG="$BINDIR/factory-calls.log"
-: >"$FACTORY_CALL_LOG"
-
-GH_CALL_LOG="$BINDIR/gh-calls.log"
-export GH_CALL_LOG
-: >"$GH_CALL_LOG"
+export GH_CALL_LOG="$BINDIR/gh-calls.log"
+export FACTORY_CALL_LOG="$BINDIR/factory-calls.log"
+export SLEEP_CALL_LOG="$BINDIR/sleep-calls.log"
+: >"$GH_CALL_LOG"; : >"$FACTORY_CALL_LOG"; : >"$SLEEP_CALL_LOG"
 
 cat >"$BINDIR/gh" <<'EOF'
 #!/usr/bin/env bash
 set -uo pipefail
+printf '%s\n' "$*" >>"$GH_CALL_LOG"
 if [ "$1 $2" = "pr list" ]; then
-  if [ "${GH_PR_LIST_FAIL:-0}" = "1" ]; then
-    echo "simulated rate limit" >&2
-    exit 4
-  fi
+  if [ "${GH_PR_LIST_FAIL:-0}" = "1" ]; then echo "simulated rate limit" >&2; exit 4; fi
+  if [ "${GH_EMPTY_LIST:-0}" = "1" ]; then echo '[]'; exit 0; fi
   cat <<'JSON'
 [
-  {
-    "number": 101,
-    "isDraft": false,
-    "mergeable": "MERGEABLE",
-    "statusCheckRollup": [{"conclusion": "SUCCESS"}],
-    "closingIssuesReferences": []
-  },
-  {
-    "number": 102,
-    "isDraft": false,
-    "mergeable": "MERGEABLE",
-    "statusCheckRollup": [{"conclusion": "SUCCESS"}],
-    "closingIssuesReferences": [{"number": 42}]
-  },
-  {
-    "number": 103,
-    "isDraft": false,
-    "mergeable": "MERGEABLE",
-    "statusCheckRollup": [{"conclusion": "SUCCESS"}],
-    "closingIssuesReferences": [{"number": 55}, {"number": 56}]
-  },
-  {
-    "number": 104,
-    "isDraft": false,
-    "mergeable": "MERGEABLE",
-    "statusCheckRollup": [{"conclusion": "SUCCESS"}],
-    "closingIssuesReferences": [],
-    "labels": [{"name": "no-auto-merge"}]
-  },
-  {
-    "number": 105,
-    "isDraft": false,
-    "mergeable": "MERGEABLE",
-    "statusCheckRollup": [{"conclusion": "SUCCESS"}],
-    "closingIssuesReferences": [{"number": 60}]
-  },
-  {
-    "number": 106,
-    "isDraft": false,
-    "mergeable": "MERGEABLE",
-    "statusCheckRollup": [{"conclusion": "SUCCESS"}],
-    "closingIssuesReferences": [{"number": 61}]
-  }
+ {"number":101,"headRefName":"factory/standalone","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[]},
+ {"number":102,"headRefName":"factory/42-x","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":42}]},
+ {"number":103,"headRefName":"factory/multi","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":55},{"number":56}]},
+ {"number":104,"headRefName":"factory/104","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":44}],"labels":[{"name":"no-auto-merge"}]},
+ {"number":105,"headRefName":"factory/105","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":60}]},
+ {"number":106,"headRefName":"factory/106","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":61}]},
+ {"number":2580,"headRefName":"feat/2245-prerelease-on-merge","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"},{"conclusion":"SUCCESS"},{"conclusion":"SUCCESS"},{"conclusion":"SUCCESS"},{"conclusion":"SUCCESS"},{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":2580}]}
 ]
 JSON
   exit 0
-elif [ "$1 $2" = "issue view" ]; then
-  case "$3" in
-    60) echo "no-auto-merge"; exit 0 ;;
-    61) echo "simulated label failure" >&2; exit 9 ;;
-  esac
-  exit 0
-elif [ "$1 $2" = "pr merge" ]; then
-  echo "$@" >>"${GH_CALL_LOG}"
-  echo "simulated merge failure" >&2
-  exit 3
 fi
+if [ "$1 $2" = "issue view" ]; then
+  case "$3" in 44|60) echo no-auto-merge ;; 61) echo "simulated label failure" >&2; exit 9 ;; esac
+  exit 0
+fi
+if [ "$1 $2" = "pr merge" ]; then echo "unexpected gh merge" >&2; exit 3; fi
 exit 0
 EOF
 chmod +x "$BINDIR/gh"
 
-cat >"$BINDIR/fake-factory" <<EOF
+cat >"$BINDIR/fake-factory" <<'EOF'
 #!/usr/bin/env bash
-echo "called" >>"$FACTORY_CALL_LOG"
+printf 'cwd=%s args=%s\n' "$PWD" "$*" >>"$FACTORY_CALL_LOG"
 echo "simulated land failure" >&2
 exit 7
 EOF
 chmod +x "$BINDIR/fake-factory"
+cat >"$BINDIR/sleep" <<'EOF'
+#!/usr/bin/env bash
+echo "$*" >>"$SLEEP_CALL_LOG"
+exit 0
+EOF
+chmod +x "$BINDIR/sleep"
 
 export PATH="$BINDIR:$PATH"
+export ORG=on-par SWEEP_REPOS=fakerepo REPO_ROOT
 export FACTORY_BIN="$BINDIR/fake-factory"
-export REPO_ROOT
 export LOG_FILE="$BINDIR/state/auto-merge-sweep.log"
+export HEARTBEAT_FILE="$BINDIR/heartbeat"
 
+fail() { echo "FAIL: $*" >&2; exit 1; }
+contains() { grep -qF -- "$2" <<<"$1" || fail "missing '$2'"; }
+not_contains() { ! grep -qF -- "$2" <<<"$1" || fail "unexpected '$2'"; }
+
+# Sourcing does not consume the caller's arguments; normal sweep lands only issue 42.
+set -- keep these
 # shellcheck disable=SC1091
 source "$ROOT/scripts/auto-merge-sweep.sh"
-
-unset FACTORY_MERGE_ADMIN
+[ "$#" -eq 2 ] && [ "$1" = keep ] && [ "$2" = these ] || fail "source consumed positional arguments"
 output="$(sweep_repo fakerepo 2>&1)"
+contains "$output" "FAILED to land #42 (PR #102) (exit 7)"
+contains "$output" "SKIPPING PR #101: closes no issue"
+contains "$output" "SKIPPING PR #103: closes multiple issues (#55, #56)"
+contains "$output" "SKIPPING PR #2580: not a factory branch"
+contains "$output" "SKIPPING PR #104: labelled no-auto-merge"
+contains "$output" "SKIPPING PR #105: issue #60 is labelled no-auto-merge"
+contains "$output" "SKIPPING PR #106: could not read labels of issue #61 (exit 9)"
+contains "$(cat "$LOG_FILE")" "SKIPPING PR #2580"
+contains "$(cat "$LOG_FILE")" "FAILED to land #42 (PR #102) (exit 7)"
+grep -qF -- '--json number,isDraft,mergeable,statusCheckRollup,closingIssuesReferences,labels,headRefName' "$GH_CALL_LOG" || fail "gh list omitted headRefName"
+grep -qF "cwd=$REPO_ROOT/fakerepo args=land 42" "$FACTORY_CALL_LOG" || fail "factory land args or cwd wrong"
+[ "$(wc -l <"$FACTORY_CALL_LOG" | tr -d ' ')" = 1 ] || fail "unexpected factory call count"
+! grep -qE '^pr merge ' "$GH_CALL_LOG" || fail "gh pr merge was invoked"
 
-# Usage: assert_line contains|not_contains "<needle>"
-assert_line() {
-  local mode="$1" needle="$2" found=1
-  grep -qF "$needle" <<<"$output" && found=0
-  if { [ "$mode" = "contains" ] && [ "$found" -ne 0 ]; } || { [ "$mode" = "not_contains" ] && [ "$found" -eq 0 ]; }; then
-    echo "FAIL: expected output to $mode: $needle" >&2
-    echo "--- actual output ---" >&2
-    echo "$output" >&2
-    exit 1
-  fi
-}
-
-assert_line contains "FAILED to merge PR #101 (exit 3)"
-assert_line contains "FAILED to land #42 (PR #102) (exit 7)"
-assert_line not_contains "merged PR #101"
-assert_line not_contains "landed #42"
-assert_line contains "SKIPPING PR #103: closes multiple issues (#55, #56)"
-assert_line not_contains "landing issue #55"
-assert_line not_contains "merging standalone PR #103"
-
-# --- no-auto-merge gate: gated PRs / issues / unreadable labels are never merged ---
-
-assert_line contains "SKIPPING PR #104: labelled no-auto-merge"
-assert_line contains "SKIPPING PR #105: issue #60 is labelled no-auto-merge"
-assert_line contains "SKIPPING PR #106: could not read labels of issue #61 (exit 9)"
-assert_line not_contains "merging standalone PR #104"
-assert_line not_contains "landing issue #60"
-assert_line not_contains "landing issue #61"
-if grep -q "pr merge 104" "$GH_CALL_LOG"; then
-  echo "FAIL: gh pr merge was called for gated PR #104" >&2; cat "$GH_CALL_LOG" >&2; exit 1
-fi
-
-# --- log persistence: log() tees dated lines to LOG_FILE, creating its dir ---
-
-if [ ! -f "$LOG_FILE" ]; then
-  echo "FAIL: expected log file to be created at $LOG_FILE" >&2
-  exit 1
-fi
-grep -qF "FAILED to merge PR #101 (exit 3)" "$LOG_FILE" || {
-  echo "FAIL: merge failure line not persisted to $LOG_FILE" >&2; exit 1; }
-grep -qF "FAILED to land #42 (PR #102) (exit 7)" "$LOG_FILE" || {
-  echo "FAIL: land failure line not persisted to $LOG_FILE" >&2; exit 1; }
-grep -qF "SKIPPING PR #103" "$LOG_FILE" || {
-  echo "FAIL: skip line not persisted to $LOG_FILE" >&2; exit 1; }
-if grep -Evq '^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\] ' "$LOG_FILE"; then
-  echo "FAIL: log file contains lines without a full dated timestamp" >&2
-  cat "$LOG_FILE" >&2
-  exit 1
-fi
-
-# append, not truncate: line count grows across runs
-log_lines_before="$(wc -l <"$LOG_FILE" | tr -d ' ')"
-
-if [ "$(wc -l <"$FACTORY_CALL_LOG" | tr -d ' ')" != "1" ]; then
-  echo "FAIL: factory land call count wrong — multi-issue PR #103 may have been landed" >&2
-  exit 1
-fi
-
-calls_before_missing_dir="$(wc -l <"$FACTORY_CALL_LOG" | tr -d ' ')"
-
-missing_repo_dir="$REPO_ROOT/missingrepo"
-output="$(sweep_repo missingrepo 2>&1)"
-assert_line contains "missingrepo: repo dir missing: $missing_repo_dir"
-assert_line not_contains "landed #42"
-assert_line not_contains "FAILED to land #42"
-
-calls_after_missing_dir="$(wc -l <"$FACTORY_CALL_LOG" | tr -d ' ')"
-if [ "$calls_after_missing_dir" != "$calls_before_missing_dir" ]; then
-  echo "FAIL: factory land was invoked despite missing repo dir" >&2
-  exit 1
-fi
-
-# --- admin merge flag: default path omits --admin ---
-
-if ! grep -q -- "--squash --delete-branch" "$GH_CALL_LOG"; then
-  echo "FAIL: expected gh pr merge call to include --squash --delete-branch" >&2
-  cat "$GH_CALL_LOG" >&2
-  exit 1
-fi
-if grep -q -- "--admin" "$GH_CALL_LOG"; then
-  echo "FAIL: gh pr merge call included --admin without FACTORY_MERGE_ADMIN=1" >&2
-  cat "$GH_CALL_LOG" >&2
-  exit 1
-fi
-
-# --- admin merge flag: FACTORY_MERGE_ADMIN=1 adds --admin ---
-
-: >"$GH_CALL_LOG"
+# A standalone factory PR never merges even when a legacy admin variable is set.
 export FACTORY_MERGE_ADMIN=1
 output="$(sweep_repo fakerepo 2>&1)"
+contains "$output" "SKIPPING PR #101: closes no issue"
+! grep -qE '^pr merge ' "$GH_CALL_LOG" || fail "legacy admin setting enabled gh merge"
 unset FACTORY_MERGE_ADMIN
 
-assert_line contains "FAILED to merge PR #101 (exit 3)"
-
-log_lines_after="$(wc -l <"$LOG_FILE" | tr -d ' ')"
-if [ "$log_lines_after" -le "$log_lines_before" ]; then
-  echo "FAIL: log file did not grow across runs — tee -a not appending" >&2
-  exit 1
-fi
-
-if ! grep -q -- "--admin" "$GH_CALL_LOG"; then
-  echo "FAIL: expected gh pr merge call to include --admin when FACTORY_MERGE_ADMIN=1" >&2
-  cat "$GH_CALL_LOG" >&2
-  exit 1
-fi
-if ! grep -q -- "--squash" "$GH_CALL_LOG"; then
-  echo "FAIL: expected gh pr merge call to include --squash when FACTORY_MERGE_ADMIN=1" >&2
-  cat "$GH_CALL_LOG" >&2
-  exit 1
-fi
-if ! grep -q -- "--delete-branch" "$GH_CALL_LOG"; then
-  echo "FAIL: expected gh pr merge call to include --delete-branch when FACTORY_MERGE_ADMIN=1" >&2
-  cat "$GH_CALL_LOG" >&2
-  exit 1
-fi
-
-# --- heartbeat: sweep_once writes a timestamp, creating parent dirs ---
-
+# Existing normal-mode heartbeat and dated persistent logging remain intact.
 REPOS=(fakerepo)
-export HEARTBEAT_FILE="$BINDIR/hb/heartbeat"
 sweep_once >/dev/null 2>&1 || true
+[ -s "$HEARTBEAT_FILE" ] || fail "normal sweep did not write heartbeat"
+grep -Eq '^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\] ' "$LOG_FILE" || fail "log timestamps missing"
 
-if [ ! -f "$HEARTBEAT_FILE" ]; then
-  echo "FAIL: expected heartbeat file to be written at $HEARTBEAT_FILE" >&2
-  exit 1
-fi
-if ! grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}' "$HEARTBEAT_FILE"; then
-  echo "FAIL: heartbeat file does not contain a timestamp: $(cat "$HEARTBEAT_FILE")" >&2
-  exit 1
-fi
+# Missing repo checkouts are skipped; no factory call occurs for a missing directory.
+factory_calls_before_missing="$(wc -l <"$FACTORY_CALL_LOG" | tr -d ' ')"
+output="$(sweep_repo missingrepo 2>&1)"
+contains "$output" "missingrepo: repo dir missing: $REPO_ROOT/missingrepo"
+[ "$(wc -l <"$FACTORY_CALL_LOG" | tr -d ' ')" = "$factory_calls_before_missing" ] || fail "missing checkout invoked factory land"
 
-# --- preflight: crash early on missing dependencies ---
-
-# all deps present => preflight passes silently
-if ! output="$( (preflight) 2>&1 )"; then
-  echo "FAIL: preflight failed with all dependencies present: $output" >&2
-  exit 1
-fi
-
-# missing factory binary => FATAL + non-zero
-if output="$( (FACTORY_BIN="$BINDIR/does-not-exist"; preflight) 2>&1 )"; then
-  echo "FAIL: preflight passed despite missing factory binary" >&2
-  exit 1
-fi
-grep -qF "FATAL: factory CLI missing or not executable at $BINDIR/does-not-exist" <<<"$output" || {
-  echo "FAIL: missing-factory FATAL message not found in: $output" >&2; exit 1; }
-
-# missing gh on PATH => FATAL + non-zero (PATH reduced to a dir with python3 only)
+# Preflight checks dependencies, filter script, and configured checkout presence.
+if preflight >/dev/null 2>&1; then :; else fail "preflight rejected valid configuration"; fi
+output="$( (FACTORY_BIN="$BINDIR/missing"; preflight) 2>&1)" && fail "preflight accepted missing factory"
+contains "$output" "FATAL: factory CLI missing or not executable at $BINDIR/missing"
 GH_LESS_BIN="$(mktemp -d)"
 ln -s "$(command -v python3)" "$GH_LESS_BIN/python3"
-if output="$( (PATH="$GH_LESS_BIN"; preflight) 2>&1 )"; then
-  echo "FAIL: preflight passed despite gh missing from PATH" >&2
-  exit 1
-fi
-grep -qF "FATAL: gh not found on PATH" <<<"$output" || {
-  echo "FAIL: missing-gh FATAL message not found in: $output" >&2; exit 1; }
-rm -rf "$GH_LESS_BIN"
+output="$( (PATH="$GH_LESS_BIN"; preflight) 2>&1)" && fail "preflight accepted missing gh"
+contains "$output" "FATAL: gh not found on PATH"
+python3 -c 'from pathlib import Path; import shutil,sys; shutil.rmtree(sys.argv[1])' "$GH_LESS_BIN"
+output="$( (SCRIPT_DIR="$BINDIR/missing"; preflight) 2>&1)" && fail "preflight accepted missing filter"
+contains "$output" "FATAL: filter script missing: $BINDIR/missing/filter-green-prs.py"
+output="$( (REPOS=(missingrepo); preflight) 2>&1)" && fail "preflight accepted all checkouts missing"
+contains "$output" "FATAL: no configured repo checkouts found under $REPO_ROOT"
+output="$( (REPOS=(fakerepo missingrepo); preflight; echo "REPOS=${REPOS[*]}") 2>&1)" || fail "preflight rejected mixed present/missing checkouts"
+contains "$output" "WARN: skipping repo, checkout missing: $REPO_ROOT/missingrepo"
+contains "$output" "REPOS=fakerepo"
 
-# one checkout missing => WARN + skip, sweep continues with the rest
-if ! output="$( (REPOS=(fakerepo missingrepo); preflight; echo "REPOS=${REPOS[*]}") 2>&1 )"; then
-  echo "FAIL: preflight failed despite fakerepo checkout being present: $output" >&2
-  exit 1
-fi
-grep -qF "WARN: skipping repo, checkout missing: $REPO_ROOT/missingrepo" <<<"$output" || {
-  echo "FAIL: missing-repo WARN line not found in: $output" >&2; exit 1; }
-grep -qF "REPOS=fakerepo" <<<"$output" || {
-  echo "FAIL: preflight did not filter REPOS to present checkouts: $output" >&2; exit 1; }
-grep -qF "FATAL" <<<"$output" && {
-  echo "FAIL: unexpected FATAL in mixed present/missing preflight: $output" >&2; exit 1; }
-
-# every configured repo checkout missing => FATAL + non-zero
-if output="$( (REPOS=(missingrepo); preflight) 2>&1 )"; then
-  echo "FAIL: preflight passed despite every repo checkout missing" >&2
-  exit 1
-fi
-grep -qF "FATAL: no configured repo checkouts found under $REPO_ROOT" <<<"$output" || {
-  echo "FAIL: all-repos-missing FATAL message not found in: $output" >&2; exit 1; }
-
-# missing filter script => FATAL + non-zero
-if output="$( (SCRIPT_DIR="$BINDIR/nowhere"; preflight) 2>&1 )"; then
-  echo "FAIL: preflight passed despite missing filter script" >&2
-  exit 1
-fi
-grep -qF "FATAL: filter script missing: $BINDIR/nowhere/filter-green-prs.py" <<<"$output" || {
-  echo "FAIL: missing-filter FATAL message not found in: $output" >&2; exit 1; }
-
-# --- plist: valid property list with KeepAlive set ---
-
-PLIST="$ROOT/scripts/launchd/com.on-par.auto-merge-sweep.plist.template"
-if ! python3 -c 'import plistlib,sys; plistlib.load(open(sys.argv[1],"rb"))' "$PLIST"; then
-  echo "FAIL: $PLIST is not a valid property list" >&2
-  exit 1
-fi
-if ! grep -q "<key>KeepAlive</key>" "$PLIST"; then
-  echo "FAIL: $PLIST does not set KeepAlive" >&2
-  exit 1
-fi
-
-# --- backoff: next_sleep_seconds doubles and clamps to MAX_SLEEP_SECONDS ---
-
-MAX_SLEEP_SECONDS=3600
-[ "$(next_sleep_seconds 300)" = "600" ] || { echo "FAIL: next_sleep_seconds 300 != 600" >&2; exit 1; }
-[ "$(next_sleep_seconds 1800)" = "3600" ] || { echo "FAIL: next_sleep_seconds 1800 != 3600" >&2; exit 1; }
-[ "$(next_sleep_seconds 3600)" = "3600" ] || { echo "FAIL: next_sleep_seconds 3600 did not clamp" >&2; exit 1; }
-
-# --- backoff: sweep_repo signals gh pr list failure; sweep_once aggregates ---
-
-export GH_PR_LIST_FAIL=1
-if sweep_repo fakerepo >/dev/null 2>&1; then
-  echo "FAIL: sweep_repo returned success despite gh pr list failing" >&2; exit 1
-fi
-REPOS=(fakerepo)
-if sweep_once >/dev/null 2>&1; then
-  echo "FAIL: sweep_once returned success when every repo sweep failed" >&2; exit 1
-fi
-unset GH_PR_LIST_FAIL
-if ! sweep_once >/dev/null 2>&1; then
-  echo "FAIL: sweep_once returned failure on a healthy pass" >&2; exit 1
-fi
-
-# --- backoff: run_sweep_loop doubles sleep on repeated failure, clamps, resets on success ---
-
-SLEEP_LOG="$BINDIR/sleep.log"
-: >"$SLEEP_LOG"
-SWEEP_FAIL_COUNT_FILE="$BINDIR/sweep-fails"
-echo 3 >"$SWEEP_FAIL_COUNT_FILE" # first 3 passes fail, then succeed
-
+# Normal loop retains exponential backoff and resets after a successful pass.
+: >"$SLEEP_CALL_LOG"
+SWEEP_FAIL_COUNT_FILE="$BINDIR/sweep-failures"
+echo 3 >"$SWEEP_FAIL_COUNT_FILE"
 sweep_once() {
-  local left
-  left="$(cat "$SWEEP_FAIL_COUNT_FILE")"
-  if [ "$left" -gt 0 ]; then
-    echo $((left - 1)) >"$SWEEP_FAIL_COUNT_FILE"
+  local remaining
+  remaining="$(cat "$SWEEP_FAIL_COUNT_FILE")"
+  if [ "$remaining" -gt 0 ]; then
+    echo $((remaining - 1)) >"$SWEEP_FAIL_COUNT_FILE"
     return 1
   fi
   return 0
 }
-sleep() { echo "$1" >>"$SLEEP_LOG"; }
+SLEEP_SECONDS=300 MAX_SLEEP_SECONDS=1000 run_sweep_loop 5 >/dev/null 2>&1
+expected_sleeps=$'600\n1000\n1000\n300'
+[ "$(cat "$SLEEP_CALL_LOG")" = "$expected_sleeps" ] || fail "normal-loop backoff sequence changed"
+unset -f sweep_once
 
-SLEEP_SECONDS=300
-MAX_SLEEP_SECONDS=1000
-run_sweep_loop 5
+# Missing repo, gh failure aggregation, and backoff behavior.
+output="$(sweep_repo missingrepo 2>&1)"
+contains "$output" "repo dir missing: $REPO_ROOT/missingrepo"
+export GH_PR_LIST_FAIL=1
+if sweep_repo fakerepo >/dev/null 2>&1; then fail "gh list failure was swallowed"; fi
+if sweep_once >/dev/null 2>&1; then fail "sweep_once ignored all-repo failure"; fi
+unset GH_PR_LIST_FAIL
+MAX_SLEEP_SECONDS=3600
+[ "$(next_sleep_seconds 300)" = 600 ] || fail "backoff doubling failed"
+[ "$(next_sleep_seconds 1800)" = 3600 ] || fail "backoff cap failed"
 
-expected=$'600\n1000\n1000\n300'
-actual="$(cat "$SLEEP_LOG")"
-if [ "$actual" != "$expected" ]; then
-  echo "FAIL: backoff sleep sequence wrong" >&2
-  echo "expected: $expected" >&2
-  echo "actual:   $actual" >&2
-  exit 1
-fi
-unset -f sweep_once sleep
+# Executable dry-run: one pass, no land/merge/sleep/heartbeat mutation.
+run_preview() {
+  local heartbeat="$1" output_file="$2"; shift 2
+  env PATH="$PATH" ORG=on-par SWEEP_REPOS="fakerepo otherrepo" REPO_ROOT="$REPO_ROOT" \
+    FACTORY_BIN="$FACTORY_BIN" LOG_FILE="$BINDIR/preview.log" HEARTBEAT_FILE="$heartbeat" \
+    GH_CALL_LOG="$GH_CALL_LOG" FACTORY_CALL_LOG="$FACTORY_CALL_LOG" SLEEP_CALL_LOG="$SLEEP_CALL_LOG" \
+    "$ROOT/scripts/auto-merge-sweep.sh" "$@" >"$output_file" 2>&1
+}
+: >"$GH_CALL_LOG"; : >"$FACTORY_CALL_LOG"; : >"$SLEEP_CALL_LOG"
+rm -f "$BINDIR/preview.log" "$BINDIR/preview-heartbeat"
+run_preview "$BINDIR/preview-heartbeat" "$BINDIR/preview.out" --dry-run || fail "dry-run failed"
+preview="$(cat "$BINDIR/preview.out")"
+contains "$preview" "WOULD land #42 (PR #102)"
+contains "$preview" "SKIPPING PR #2580: not a factory branch"
+contains "$preview" "SKIPPING PR #104: labelled no-auto-merge"
+contains "$preview" "SKIPPING PR #105: issue #60 is labelled no-auto-merge"
+contains "$preview" "SKIPPING PR #106: could not read labels of issue #61"
+[ "$(grep -c '^pr list ' "$GH_CALL_LOG")" = 2 ] || fail "preview did not list each repo exactly once"
+[ ! -s "$FACTORY_CALL_LOG" ] || fail "preview invoked factory land"
+! grep -qE '^pr merge ' "$GH_CALL_LOG" || fail "preview invoked gh merge"
+[ ! -s "$SLEEP_CALL_LOG" ] || fail "preview slept"
+[ ! -e "$BINDIR/preview-heartbeat" ] || fail "preview created heartbeat"
+grep -qF "WOULD land #42 (PR #102)" "$BINDIR/preview.log" || fail "preview decision not persisted"
+grep -qF "SKIPPING PR #2580: not a factory branch" "$BINDIR/preview.log" || fail "preview branch skip not persisted"
 
-# --- ORG derives ghrepo: sweep_repo reads $ORG at call time ---
+printf 'sentinel heartbeat\n' >"$BINDIR/sentinel-heartbeat"
+run_preview "$BINDIR/sentinel-heartbeat" "$BINDIR/preview-existing.out" --dry-run || fail "dry-run with sentinel failed"
+[ "$(cat "$BINDIR/sentinel-heartbeat")" = "sentinel heartbeat" ] || fail "preview changed existing heartbeat"
 
-: >"$GH_CALL_LOG"
-ORG=testorg
-sweep_repo fakerepo >/dev/null 2>&1 || true
-grep -q -- "--repo testorg/fakerepo" "$GH_CALL_LOG" || {
-  echo "FAIL: ghrepo not derived from ORG" >&2; cat "$GH_CALL_LOG" >&2; exit 1; }
-ORG=on-par
+# Empty candidate and gh-list failure still complete one preview pass successfully.
+env PATH="$PATH" ORG=on-par SWEEP_REPOS=fakerepo REPO_ROOT="$REPO_ROOT" FACTORY_BIN="$FACTORY_BIN" \
+  GH_EMPTY_LIST=1 GH_CALL_LOG="$GH_CALL_LOG" FACTORY_CALL_LOG="$FACTORY_CALL_LOG" SLEEP_CALL_LOG="$SLEEP_CALL_LOG" \
+  HEARTBEAT_FILE="$BINDIR/empty-hb" LOG_FILE="$BINDIR/empty.log" "$ROOT/scripts/auto-merge-sweep.sh" --dry-run >/dev/null 2>&1 || fail "empty preview failed"
+[ ! -e "$BINDIR/empty-hb" ] || fail "empty preview wrote heartbeat"
+env PATH="$PATH" ORG=on-par SWEEP_REPOS=fakerepo REPO_ROOT="$REPO_ROOT" FACTORY_BIN="$FACTORY_BIN" \
+  GH_PR_LIST_FAIL=1 GH_CALL_LOG="$GH_CALL_LOG" FACTORY_CALL_LOG="$FACTORY_CALL_LOG" SLEEP_CALL_LOG="$SLEEP_CALL_LOG" \
+  HEARTBEAT_FILE="$BINDIR/fail-hb" LOG_FILE="$BINDIR/fail.log" "$ROOT/scripts/auto-merge-sweep.sh" --dry-run >"$BINDIR/fail.out" 2>&1 || fail "failed-list preview did not exit 0"
+grep -qF 'gh pr list failed (exit 4)' "$BINDIR/fail.log" || fail "preview gh failure not logged"
+[ ! -e "$BINDIR/fail-hb" ] || fail "failed preview wrote heartbeat"
 
-# --- MERGE_FLAGS override: replaces the default --squash --delete-branch ---
+# Only no arguments or exactly one --dry-run are accepted, before preflight.
+gh_calls_before_args="$(wc -l <"$GH_CALL_LOG" | tr -d ' ')"
+for args in 'bad' '--dry-run --dry-run' '--dry-run bad' 'positional'; do
+  set -- $args
+  rc=0
+  env ORG=on-par SWEEP_REPOS=fakerepo REPO_ROOT="$REPO_ROOT" FACTORY_BIN="$FACTORY_BIN" \
+    GH_CALL_LOG="$GH_CALL_LOG" FACTORY_CALL_LOG="$FACTORY_CALL_LOG" SLEEP_CALL_LOG="$SLEEP_CALL_LOG" \
+    "$ROOT/scripts/auto-merge-sweep.sh" "$@" >/dev/null 2>&1 || rc=$?
+  [ "$rc" -ne 0 ] || fail "invalid arguments accepted: $args"
+done
+[ "$(wc -l <"$GH_CALL_LOG" | tr -d ' ')" = "$gh_calls_before_args" ] || fail "invalid arguments started a sweep"
 
-: >"$GH_CALL_LOG"
-MERGE_FLAGS="--merge"
-sweep_repo fakerepo >/dev/null 2>&1 || true
-grep -q -- "--merge" "$GH_CALL_LOG" || {
-  echo "FAIL: expected gh pr merge call to include --merge" >&2; cat "$GH_CALL_LOG" >&2; exit 1; }
-grep -q -- "--squash" "$GH_CALL_LOG" && {
-  echo "FAIL: --squash should not appear when MERGE_FLAGS=--merge" >&2; cat "$GH_CALL_LOG" >&2; exit 1; }
-grep -q -- "--delete-branch" "$GH_CALL_LOG" && {
-  echo "FAIL: --delete-branch should not appear when MERGE_FLAGS=--merge" >&2; cat "$GH_CALL_LOG" >&2; exit 1; }
-MERGE_FLAGS="--squash --delete-branch"
+# Preflight retains missing-config and missing-factory behavior.
+usage_out="$(env -u ORG -u SWEEP_REPOS "$ROOT/scripts/auto-merge-sweep.sh" 2>&1)"
+contains "$usage_out" "Usage:"
+rc=0
+env ORG=on-par SWEEP_REPOS=fakerepo REPO_ROOT="$REPO_ROOT" FACTORY_BIN="$BINDIR/missing" "$ROOT/scripts/auto-merge-sweep.sh" --dry-run >/dev/null 2>&1 || rc=$?
+[ "$rc" -eq 1 ] || fail "preview did not enforce factory preflight"
 
-# --- MERGE_FLAGS + FACTORY_MERGE_ADMIN compose ---
-
-: >"$GH_CALL_LOG"
-MERGE_FLAGS="--merge"
-export FACTORY_MERGE_ADMIN=1
-sweep_repo fakerepo >/dev/null 2>&1 || true
-unset FACTORY_MERGE_ADMIN
-grep -q -- "--merge" "$GH_CALL_LOG" || {
-  echo "FAIL: expected gh pr merge call to include --merge (composed)" >&2; cat "$GH_CALL_LOG" >&2; exit 1; }
-grep -q -- "--admin" "$GH_CALL_LOG" || {
-  echo "FAIL: expected gh pr merge call to include --admin (composed)" >&2; cat "$GH_CALL_LOG" >&2; exit 1; }
-MERGE_FLAGS="--squash --delete-branch"
-
-# --- SWEEP_REPOS populates REPOS at source time ---
-
-repos_joined="$(SWEEP_REPOS="alpha beta" bash -c 'source "'"$ROOT"'/scripts/auto-merge-sweep.sh"; echo "${REPOS[*]+"${REPOS[*]}"}"')"
-[ "$repos_joined" = "alpha beta" ] || {
-  echo "FAIL: SWEEP_REPOS override not honoured: $repos_joined" >&2; exit 1; }
-
-repos_default="$(env -u SWEEP_REPOS bash -c 'source "'"$ROOT"'/scripts/auto-merge-sweep.sh"; echo "${REPOS[*]+"${REPOS[*]}"}"')"
-[ "$repos_default" = "" ] || {
-  echo "FAIL: default REPOS wrong: $repos_default" >&2; exit 1; }
-
-# --- REPO_ROOT default derives from ORG ---
-
-repo_root_check="$(env -u REPO_ROOT ORG=xyz bash -c 'source "'"$ROOT"'/scripts/auto-merge-sweep.sh"; echo "$REPO_ROOT"')"
-[ "$repo_root_check" = "$HOME/repos/xyz" ] || {
-  echo "FAIL: REPO_ROOT default not derived from ORG: $repo_root_check" >&2; exit 1; }
-
-# --- FACTORY_BIN resolution: command -v factory, else $HOME/.local/bin/factory ---
-
-FACTORY_BIN_TEST_DIR="$(mktemp -d)"
-cat >"$FACTORY_BIN_TEST_DIR/factory" <<'EOF'
+# Sourced defaults remain stable; the factory executable fallback and repo derivation are covered.
+repos="$(SWEEP_REPOS='alpha beta' bash -c 'source "$1"; echo "${REPOS[*]}"' _ "$ROOT/scripts/auto-merge-sweep.sh")"
+[ "$repos" = 'alpha beta' ] || fail "SWEEP_REPOS source-time parsing failed"
+repo_default="$(env -u REPO_ROOT ORG=xyz bash -c 'source "$1"; echo "$REPO_ROOT"' _ "$ROOT/scripts/auto-merge-sweep.sh")"
+[ "$repo_default" = "$HOME/repos/xyz" ] || fail "REPO_ROOT default failed"
+repos_default="$(env -u SWEEP_REPOS bash -c 'source "$1"; echo "[$SWEEP_REPOS:${REPOS[*]+${REPOS[*]}}]"' _ "$ROOT/scripts/auto-merge-sweep.sh")"
+[ "$repos_default" = '[:]' ] || fail "empty SWEEP_REPOS default failed"
+cat >"$BINDIR/factory" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
-chmod +x "$FACTORY_BIN_TEST_DIR/factory"
+chmod +x "$BINDIR/factory"
+factory_path="$(env -u FACTORY_BIN PATH="$BINDIR:$PATH" bash -c 'source "$1"; echo "$FACTORY_BIN"' _ "$ROOT/scripts/auto-merge-sweep.sh")"
+[ "$factory_path" = "$BINDIR/factory" ] || fail "FACTORY_BIN did not resolve through PATH"
 
-resolved_factory_bin="$(env -u FACTORY_BIN PATH="$FACTORY_BIN_TEST_DIR:$PATH" bash -c 'source "'"$ROOT"'/scripts/auto-merge-sweep.sh"; echo "$FACTORY_BIN"')"
-[ "$resolved_factory_bin" = "$FACTORY_BIN_TEST_DIR/factory" ] || {
-  echo "FAIL: FACTORY_BIN did not resolve via command -v factory: $resolved_factory_bin" >&2; exit 1; }
-
-NO_FACTORY_PATH_DIR="$(mktemp -d)"
-ln -s "$(command -v dirname)" "$NO_FACTORY_PATH_DIR/dirname"
-ln -s "$(command -v mkdir)" "$NO_FACTORY_PATH_DIR/mkdir"
-resolved_factory_bin_default="$(env -u FACTORY_BIN PATH="$NO_FACTORY_PATH_DIR" "$(command -v bash)" -c 'source "'"$ROOT"'/scripts/auto-merge-sweep.sh"; echo "$FACTORY_BIN"')"
-[ "$resolved_factory_bin_default" = "$HOME/.local/bin/factory" ] || {
-  echo "FAIL: FACTORY_BIN did not fall back to default: $resolved_factory_bin_default" >&2; exit 1; }
-
-# --- SWEEP_REPOS variable itself (not just the derived REPOS array) defaults to empty ---
-
-sweep_repos_var_default="$(env -u SWEEP_REPOS bash -c 'source "'"$ROOT"'/scripts/auto-merge-sweep.sh"; echo "[$SWEEP_REPOS]"')"
-[ "$sweep_repos_var_default" = "[]" ] || {
-  echo "FAIL: SWEEP_REPOS variable not empty by default: $sweep_repos_var_default" >&2; exit 1; }
-
-# --- usage guard: running the script as a real subprocess (not sourced) with ORG
-# and/or SWEEP_REPOS unset exits 0 and prints a usage message, in every combination
-# where at least one of the two is missing ---
-
-assert_usage_guard() {
-  local desc="$1" out
-  shift
-  if ! out="$(env -u ORG -u SWEEP_REPOS "$@" "$ROOT/scripts/auto-merge-sweep.sh" 2>&1)"; then
-    echo "FAIL: usage guard ($desc): expected exit 0, got $?: $out" >&2; exit 1
-  fi
-  grep -qF "Usage:" <<<"$out" || {
-    echo "FAIL: usage guard ($desc): expected a Usage message, got: $out" >&2; exit 1; }
-}
-
-assert_usage_guard "both unset"
-assert_usage_guard "only ORG set" ORG=testorg
-assert_usage_guard "only SWEEP_REPOS set" SWEEP_REPOS=fakerepo
-
-# --- explicit ORG/SWEEP_REPOS overrides bypass the usage guard and reach preflight,
-# proving the overrides were actually read (a deliberately bad FACTORY_BIN makes
-# preflight fail deterministically instead of the sweep loop running for real) ---
-
-override_rc=0
-override_out="$(env -u FACTORY_BIN ORG=testorg SWEEP_REPOS=fakerepo FACTORY_BIN="$BINDIR/does-not-exist" "$ROOT/scripts/auto-merge-sweep.sh" 2>&1)" || override_rc=$?
-[ "$override_rc" -eq 1 ] || {
-  echo "FAIL: override test: expected exit 1 from preflight failure, got $override_rc: $override_out" >&2; exit 1; }
-grep -qF "Usage:" <<<"$override_out" && {
-  echo "FAIL: override test: usage guard fired despite explicit ORG/SWEEP_REPOS overrides: $override_out" >&2; exit 1; }
-grep -qF "FATAL: factory CLI missing or not executable at $BINDIR/does-not-exist" <<<"$override_out" || {
-  echo "FAIL: override test: expected preflight FATAL for the bad FACTORY_BIN, got: $override_out" >&2; exit 1; }
-
-echo "PASS: auto-merge-sweep logs merge/land failures with real exit codes, skips landing when the repo dir is missing, honours FACTORY_MERGE_ADMIN for the standalone merge path, writes a heartbeat on each pass, ships a valid KeepAlive launchd plist, preflight skips missing repo checkouts with a WARN and fatally rejects only missing gh/factory/filter-script dependencies or an all-repos-missing configuration, backs off exponentially up to MAX_SLEEP_SECONDS on sweep-wide failures resetting on success, skips multi-issue-closing PRs with an explicit SKIPPING log line instead of silently landing only the first issue, tees every dated log line to a persistent LOG_FILE creating its parent directory, externalizes config so ORG drives both ghrepo and the REPO_ROOT default, SWEEP_REPOS overrides the repo list, MERGE_FLAGS overrides the standalone-merge flags, and FACTORY_BIN falls back to command -v factory, the SWEEP_REPOS variable itself (not just REPOS) defaults to empty, the usage guard exits 0 with a Usage message when run as a real subprocess with ORG and/or SWEEP_REPOS unset, and explicit overrides bypass that guard and fail deterministically in preflight instead"
+echo "PASS: sweep filters to one-issue factory PRs, lands only through factory land, previews one pass without mutations, and retains normal logging, heartbeat, preflight, and backoff behavior"

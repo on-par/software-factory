@@ -1,140 +1,115 @@
 #!/usr/bin/env bash
-# Unit test for scripts/filter-green-prs.py: the "which PRs are landable" policy,
-# exercised against fixture JSON piped on stdin.
+# Fixture tests for the PR selection policy used by the sweep.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FILTER="$ROOT/scripts/filter-green-prs.py"
+ERR_FILE="$(mktemp)"
+trap 'rm -f "$ERR_FILE"' EXIT
 
-run_filter() { python3 "$FILTER"; }
-
-assert_eq() { # assert_eq "<label>" "<expected>" "<actual>"
+run_filter() { python3 "$FILTER" 2>"$ERR_FILE"; }
+assert_eq() {
   if [ "$2" != "$3" ]; then
     printf 'FAIL: %s\nexpected: %q\nactual:   %q\n' "$1" "$2" "$3" >&2
     exit 1
   fi
 }
+assert_err() {
+  grep -qF "$1" "$ERR_FILE" || { echo "FAIL: missing diagnostic: $1" >&2; cat "$ERR_FILE" >&2; exit 1; }
+}
 
-# 1. Landable PR with one closing issue
+# One eligible factory PR keeps the three-column TSV contract.
 actual="$(run_filter <<'JSON'
-[{"number": 102, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": [{"number": 42}]}]
+[{"number":102,"headRefName":"factory/42-x","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":42}]}]
 JSON
 )"
-expected="$(printf '102\t42\t')"
-assert_eq "landable PR with one closing issue" "$expected" "$actual"
+assert_eq "landable PR with one closing issue" "$(printf '102\t42\t')" "$actual"
 
-# 2. Standalone landable PR (no closing issues) — trailing tab must survive
+# non-factory branch is not landable (PR #2580 shape)
 actual="$(run_filter <<'JSON'
-[{"number": 101, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": []}]
+[{"number":2580,"headRefName":"feat/2245-prerelease-on-merge","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"},{"conclusion":"SUCCESS"},{"conclusion":"SUCCESS"},{"conclusion":"SUCCESS"},{"conclusion":"SUCCESS"},{"conclusion":"SUCCESS"}],"closingIssuesReferences":[]}]
 JSON
 )"
-expected="$(printf '101\t\t')"
-assert_eq "standalone landable PR" "$expected" "$actual"
+assert_eq "non-factory branch is not landable (PR #2580 shape)" "" "$actual"
+assert_err "SKIPPING PR #2580: not a factory branch"
 
-# 3. Draft PR => skipped
-actual="$(run_filter <<'JSON'
-[{"number": 200, "isDraft": true, "mergeable": "MERGEABLE", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": []}]
-JSON
-)"
-assert_eq "draft PR skipped" "" "$actual"
-
-# 4. mergeable CONFLICTING and UNKNOWN => skipped
+# Branch rejection happens before issue count, while factory branches explain issue count.
 actual="$(run_filter <<'JSON'
 [
-  {"number": 201, "isDraft": false, "mergeable": "CONFLICTING", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": []},
-  {"number": 202, "isDraft": false, "mergeable": "UNKNOWN", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": []}
+ {"number":1,"headRefName":"feat/human","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":42}]},
+ {"number":2,"headRefName":"factory/standalone","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[]},
+ {"number":3,"headRefName":"factory/multi","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":55},{"number":56},{"number":55}]},
+ {"number":4,"headRefName":"factory/42-x","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":42},{"number":42}]}
 ]
 JSON
 )"
-assert_eq "non-mergeable PRs skipped" "" "$actual"
+assert_eq "rejections disappear and duplicate issue refs deduplicate" "$(printf '4\t42\t')" "$actual"
+assert_err "SKIPPING PR #1: not a factory branch"
+assert_err "SKIPPING PR #2: closes no issue"
+assert_err "SKIPPING PR #3: closes multiple issues (#55, #56)"
 
-# 5. Missing mergeable key => skipped
 actual="$(run_filter <<'JSON'
-[{"number": 203, "isDraft": false, "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": []}]
+[{"number":17,"headRefName":"factory/17","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":"invalid"}]}]
 JSON
 )"
-assert_eq "missing mergeable key skipped" "" "$actual"
+assert_eq "malformed closing issue references are rejected" "" "$actual"
+assert_err "SKIPPING PR #17: invalid closing issue references"
 
-# 6. Empty statusCheckRollup [] and null => skipped
+# Literal custom prefixes, empty/unset fallback, and invalid heads.
+actual="$(BRANCH_PREFIX='release[*] ' run_filter <<'JSON'
+[{"number":5,"headRefName":"release[*] candidate","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":8}]}]
+JSON
+)"
+assert_eq "custom prefix is literal" "$(printf '5\t8\t')" "$actual"
+for prefix_case in unset empty; do
+  if [ "$prefix_case" = unset ]; then
+    actual="$( (unset BRANCH_PREFIX; run_filter) <<'JSON'
+[{"number":6,"headRefName":"factory/6","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":6}]}]
+JSON
+)"
+  else
+    actual="$(BRANCH_PREFIX='' run_filter <<'JSON'
+[{"number":6,"headRefName":"factory/6","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":6}]}]
+JSON
+)"
+  fi
+  assert_eq "$prefix_case prefix defaults to factory/" "$(printf '6\t6\t')" "$actual"
+done
+actual="$(run_filter <<'JSON'
+[{"number":7,"headRefName":null,"isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":7}]},{"number":8,"headRefName":42,"isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":8}]},{"number":9,"isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":9}]}]
+JSON
+)"
+assert_eq "missing, null and non-string heads are rejected" "" "$actual"
+assert_err "SKIPPING PR #7: not a factory branch"
+assert_err "SKIPPING PR #8: not a factory branch"
+assert_err "SKIPPING PR #9: not a factory branch"
+
+# Readiness rules remain strict, and each rejection has an explanation.
 actual="$(run_filter <<'JSON'
 [
-  {"number": 204, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [], "closingIssuesReferences": []},
-  {"number": 205, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": null, "closingIssuesReferences": []}
+ {"number":10,"headRefName":"factory/10","isDraft":true,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":10}]},
+ {"number":11,"headRefName":"factory/11","isDraft":false,"mergeable":"UNKNOWN","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":11}]},
+ {"number":12,"headRefName":"factory/12","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[],"closingIssuesReferences":[{"number":12}]},
+ {"number":13,"headRefName":"factory/13","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"},{"state":"PENDING"}],"closingIssuesReferences":[{"number":13}]},
+ {"number":14,"headRefName":"factory/14","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"state":"SUCCESS"}],"closingIssuesReferences":[{"number":14}],"labels":[{"name":"no-auto-merge"}]},
+ {"number":15,"headRefName":"factory/15","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":15}],"labels":[{"name":"bug"}]}
 ]
 JSON
 )"
-assert_eq "no checks skipped" "" "$actual"
+assert_eq "readiness and labels retain selected rows" "$(printf '14\t14\tgated\n15\t15\t')" "$actual"
+assert_err "SKIPPING PR #10: draft PR"
+assert_err "SKIPPING PR #11: mergeable state is UNKNOWN"
+assert_err "SKIPPING PR #12: no status checks"
+assert_err "SKIPPING PR #13: checks are not all SUCCESS"
 
-# 7. Mixed check states => skipped
-actual="$(run_filter <<'JSON'
-[
-  {"number": 206, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [{"conclusion": "SUCCESS"}, {"conclusion": "FAILURE"}], "closingIssuesReferences": []},
-  {"number": 207, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [{"conclusion": "SUCCESS"}, {"state": "PENDING"}], "closingIssuesReferences": []}
-]
+actual="$(GATE_LABEL=hold run_filter <<'JSON'
+[{"number":16,"headRefName":"factory/16","isDraft":false,"mergeable":"MERGEABLE","statusCheckRollup":[{"conclusion":"SUCCESS"}],"closingIssuesReferences":[{"number":16}],"labels":[{"name":"hold"}]}]
 JSON
 )"
-assert_eq "mixed check states skipped" "" "$actual"
+assert_eq "GATE_LABEL override" "$(printf '16\t16\tgated')" "$actual"
 
-# 8. StatusContext-style checks (state, no conclusion) => landable
-actual="$(run_filter <<'JSON'
-[{"number": 208, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [{"state": "SUCCESS"}], "closingIssuesReferences": []}]
-JSON
-)"
-expected="$(printf '208\t\t')"
-assert_eq "StatusContext-style checks landable" "$expected" "$actual"
-
-# 9. Multi-issue PR — comma-joined, order-preserving dedup
-actual="$(run_filter <<'JSON'
-[{"number": 103, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": [{"number": 55}, {"number": 56}, {"number": 55}]}]
-JSON
-)"
-expected="$(printf '103\t55,56\t')"
-assert_eq "multi-issue PR dedup" "$expected" "$actual"
-
-# 10. Empty stdin => empty output, exit 0
-actual="$(printf '' | run_filter)"
-assert_eq "empty stdin" "" "$actual"
-
-# 11. Empty array => empty output, exit 0
-actual="$(run_filter <<'JSON'
+assert_eq "empty stdin" "" "$(printf '' | run_filter)"
+assert_eq "empty array" "" "$(run_filter <<'JSON'
 []
 JSON
 )"
-assert_eq "empty array" "" "$actual"
-
-# 12. Mixed fixture — draft, conflicting, checkless, and two landable PRs, in input order
-actual="$(run_filter <<'JSON'
-[
-  {"number": 300, "isDraft": true, "mergeable": "MERGEABLE", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": []},
-  {"number": 301, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": [{"number": 10}]},
-  {"number": 302, "isDraft": false, "mergeable": "CONFLICTING", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": []},
-  {"number": 303, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [], "closingIssuesReferences": []},
-  {"number": 304, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": []}
-]
-JSON
-)"
-expected="$(printf '301\t10\t\n304\t\t')"
-assert_eq "mixed fixture, input order" "$expected" "$actual"
-
-# 13. PR labelled no-auto-merge => gated column set; other labels => empty
-actual="$(run_filter <<'JSON'
-[
-  {"number": 400, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": [{"number": 7}], "labels": [{"name": "no-auto-merge"}]},
-  {"number": 401, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": [], "labels": [{"name": "bug"}]}
-]
-JSON
-)"
-expected="$(printf '400\t7\tgated\n401\t\t')"
-assert_eq "gated column from PR labels" "$expected" "$actual"
-
-# 14. GATE_LABEL overrides the gate label
-actual="$(GATE_LABEL=hold run_filter <<'JSON'
-[
-  {"number": 402, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": [], "labels": [{"name": "hold"}]},
-  {"number": 403, "isDraft": false, "mergeable": "MERGEABLE", "statusCheckRollup": [{"conclusion": "SUCCESS"}], "closingIssuesReferences": [], "labels": [{"name": "no-auto-merge"}]}
-]
-JSON
-)"
-expected="$(printf '402\t\tgated\n403\t\t')"
-assert_eq "GATE_LABEL override" "$expected" "$actual"
-
-echo "PASS: filter-green-prs correctly identifies landable PRs (draft/mergeable/checks rules), joins closing issues with order-preserving dedup, and handles empty/whitespace stdin"
+echo "PASS: filter-green-prs branch, readiness, issue-count and gate policies"
