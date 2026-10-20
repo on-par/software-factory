@@ -6,19 +6,12 @@ import { join } from 'node:path';
 import type { ModelDiagnosis } from '@on-par/factory-core';
 import { getFactoryPaths, readPortLeases } from '@on-par/factory-core';
 import type { GithubQueue } from '@on-par/factory-core/internal';
-import {
-  RunLockHeldError,
-  parseDecompositionOutput,
-  renderSlicePlanComment,
-  withSliceState,
-} from '@on-par/factory-core/internal';
-import type { SlicePlan } from '@on-par/factory-core/internal';
+import { RunLockHeldError } from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   assertValidProduct,
   CliExitError,
-  createQueuePreflightOps,
   errorDetail,
   formatDoctorReport,
   repoDefinedTag,
@@ -2723,8 +2716,8 @@ describe('cli', () => {
     });
   });
 
-  describe('queue PR preflight', () => {
-    const baseDeps = {
+  describe('claim-time declared prerequisites (#3267)', () => {
+    const preflightDeps = {
       expectedHeadRepoFullName: 'on-par/software-factory',
       findOpenPR: async () => undefined,
       getLandState: async () => ({ isDraft: false, mergeStateStatus: 'CLEAN' }),
@@ -2733,334 +2726,71 @@ describe('cli', () => {
       getPullState: async () => 'open' as const,
       saveSlicePlan: async () => {},
       autoMergeStack: false,
-      getPullRefs: async () => ({ headRef: 'b', baseRef: 'main', headSha: 's' }),
+      getPullRefs: async () => ({ headRef: 'branch', baseRef: 'main', headSha: 'head' }),
     };
 
-    const sliceStory = (n: number) => ({
-      title: `Story ${n}`,
-      role: 'operator',
-      want: `thing ${n} works`,
-      soThat: 'value',
-      problemStatement: `Problem ${n}`,
-      inScope: [`scope ${n}`],
-      outOfScope: ['other'],
-      acceptanceCriteria: [{ name: `ac ${n}`, given: [], when: ['run'], then: ['works'] }],
-      verification: [{ command: 'npm test', passWhen: 'passes' }],
-      tracesTo: ['INT-PROBLEM-01'],
-    });
-    const slicePlan = (): SlicePlan => {
-      const stories = [1, 2, 3].map(sliceStory);
-      const parsed = parseDecompositionOutput(
-        JSON.stringify({
-          epic: { title: 'Epic', why: 'why', doneWhen: ['done'], children: stories.map((st) => st.title) },
-          stories,
-        }),
-      );
-      if (!parsed.ok) throw new Error(parsed.reason);
-      return {
-        issue: 7,
-        slices: parsed.decomposition.stories.map((story, i) => ({
-          index: i + 1,
-          title: story.title,
-          story,
-          state: 'pending' as const,
-        })),
-      };
-    };
-    const prOpenPlan = (): SlicePlan => withSliceState(slicePlan(), 1, 'pr-open', 81);
-    const foundPlan = (plan: SlicePlan) => ({ status: 'found' as const, commentId: 5, plan });
-
-    it('creates GitHub-backed preflight operations with PR identity and head-SHA CI checks', async () => {
-      const calls: any[] = [];
-      const octokit: any = {
-        graphql: async (_query: string, vars: any) => {
-          calls.push(['graphql', vars]);
-          return {
-            repository: {
-              pullRequest: {
-                id: 'PR_kwDO',
-                isDraft: false,
-                mergeStateStatus: 'CLEAN',
-                reviewDecision: 'APPROVED',
-              },
-            },
-          };
-        },
-        rest: {
-          checks: {
-            listForRef: async (opts: any) => {
-              calls.push(['checks', opts]);
-              return { data: { check_runs: [{ status: 'completed', conclusion: 'failure' }] } };
-            },
-          },
-          pulls: {
-            list: async (opts: any) => {
-              calls.push(['pulls', opts]);
-              return {
-                data: [
-                  {
-                    number: 71,
-                    body: 'Closes #7',
-                    head: {
-                      ref: 'ship-it/7-real-branch',
-                      sha: 'head-sha-7',
-                      repo: { full_name: 'on-par/software-factory' },
-                    },
-                  },
-                ],
-              };
-            },
-          },
-        },
-      };
-
-      const ops = createQueuePreflightOps(octokit, 'on-par', 'software-factory');
-
-      await expect(ops.findOpenPR(7)).resolves.toEqual({
-        number: 71,
-        branch: 'ship-it/7-real-branch',
-        headSha: 'head-sha-7',
-        headRepoFullName: 'on-par/software-factory',
-      });
-      await expect(ops.getLandState(71)).resolves.toEqual({
-        id: 'PR_kwDO',
-        isDraft: false,
-        mergeStateStatus: 'CLEAN',
-        reviewDecision: 'APPROVED',
-      });
-      await expect(ops.watch('head-sha-7')).resolves.toBe('failure');
-      expect(ops.expectedHeadRepoFullName).toBe('on-par/software-factory');
-      expect(calls).toEqual([
-        ['pulls', { owner: 'on-par', repo: 'software-factory', state: 'open', per_page: 100, page: 1 }],
-        ['graphql', { owner: 'on-par', repo: 'software-factory', number: 71 }],
-        ['checks', { owner: 'on-par', repo: 'software-factory', ref: 'head-sha-7', per_page: 100, page: 1 }],
-      ]);
-    });
-
-    it('builds when no linked open PR exists', async () => {
-      await expect(
-        preflightQueuedIssue({ number: 7, labels: [] }, { ...baseDeps, findOpenPR: async () => undefined }),
-      ).resolves.toEqual({ kind: 'build' });
-    });
-
-    it('adopts only a green, non-draft PR and preserves its actual head branch', async () => {
+    it('preflight defers a queued issue whose Prerequisite is still open (#3258 on 10/19)', async () => {
+      const touched = vi.fn();
+      const events = vi.fn();
       await expect(
         preflightQueuedIssue(
-          { number: 7, labels: [] },
+          { number: 3258, labels: [] },
           {
-            ...baseDeps,
-            findOpenPR: async () => ({
-              number: 71,
-              branch: 'contributor/real-head',
-              headSha: 'abc123',
-              headRepoFullName: 'on-par/software-factory',
-            }),
-            getLandState: async () => ({ isDraft: false, mergeStateStatus: 'CLEAN' }),
-            watch: async (ref) => {
-              expect(ref).toBe('abc123');
-              return 'success';
-            },
+            ...preflightDeps,
+            readIssueBody: async () => 'Prerequisite: #3256',
+            getPrerequisiteState: async () => ({ state: 'open' as const, mergedClosingPr: false }),
+            findSlicePlan: touched,
+            findOpenPR: touched,
+            watch: touched,
+            onDeferred: events,
           },
         ),
-      ).resolves.toEqual({ kind: 'adopt', branch: 'contributor/real-head' });
+      ).resolves.toEqual({ kind: 'defer' });
+      expect(events).toHaveBeenCalledWith(3258, 'waiting for prerequisites: #3256');
+      expect(touched).not.toHaveBeenCalled();
     });
 
-    it('fails closed to park for red, timeout, draft, lookup-error, and unresolvable PR evidence', async () => {
-      const pr = async () => ({
-        number: 71,
-        branch: 'contributor/real-head',
-        headSha: 'abc123',
-        headRepoFullName: 'on-par/software-factory',
-      });
-      const cases = [
-        { watch: async () => 'failure' as const },
-        { watch: async () => 'timeout' as const },
-        { getLandState: async () => ({ isDraft: true, mergeStateStatus: 'CLEAN' }) },
-        { findOpenPR: async () => Promise.reject(new Error('rate limited')) },
-        { getLandState: async () => ({ isDraft: false, mergeStateStatus: 'UNKNOWN' }) },
-        {
-          findOpenPR: async () => ({
-            number: 71,
-            branch: 'fork-head',
-            headSha: 'def456',
-            headRepoFullName: 'fork/repo',
-          }),
-        },
-      ];
-
-      for (const overrides of cases) {
-        const result = await preflightQueuedIssue(
-          { number: 7, labels: [] },
+    it('claims through preflight after a prerequisite closes with a merged PR', async () => {
+      const make = (state: 'open' | 'closed', mergedClosingPr: boolean) =>
+        preflightQueuedIssue(
+          { number: 3258, labels: [] },
           {
-            ...baseDeps,
-            findOpenPR: pr,
-            getLandState: async () => ({ isDraft: false, mergeStateStatus: 'CLEAN' }),
-            watch: async () => 'success' as const,
-            ...overrides,
+            ...preflightDeps,
+            readIssueBody: async () => 'Prerequisite: #3256',
+            getPrerequisiteState: async () => ({ state, mergedClosingPr }),
           },
         );
-        expect(result.kind).toBe('park');
-      }
+      await expect(make('open', false)).resolves.toEqual({ kind: 'defer' });
+      await expect(make('closed', true)).resolves.toEqual({ kind: 'build' });
     });
 
-    it('defers while the current slice PR is open without any Closes-PR work', async () => {
-      const findOpenPR = vi.fn(async () => undefined);
-      const getLandState = vi.fn();
-      const watch = vi.fn();
-      const saveSlicePlan = vi.fn(async () => {});
+    it('parks a closed unmerged prerequisite with its exact reason', async () => {
       const result = await preflightQueuedIssue(
-        { number: 7, labels: [] },
+        { number: 3258, labels: [] },
         {
-          ...baseDeps,
-          findOpenPR,
-          getLandState,
-          watch,
-          saveSlicePlan,
-          findSlicePlan: async () => foundPlan(prOpenPlan()),
-          getPullState: async () => 'open',
+          ...preflightDeps,
+          readIssueBody: async () => 'Prerequisite: #3256',
+          getPrerequisiteState: async () => ({ state: 'closed' as const, mergedClosingPr: false }),
+        },
+      );
+      expect(result).toEqual({ kind: 'park', reason: 'prerequisite #3256 closed unmerged' });
+    });
+
+    it('defers prerequisite lookup failures without claiming or parking', async () => {
+      const onDeferred = vi.fn();
+      const result = await preflightQueuedIssue(
+        { number: 3258, labels: [] },
+        {
+          ...preflightDeps,
+          readIssueBody: async () => 'Prerequisite: #3256',
+          getPrerequisiteState: async () => {
+            throw new Error('rate limited');
+          },
+          onDeferred,
         },
       );
       expect(result).toEqual({ kind: 'defer' });
-      for (const fn of [findOpenPR, getLandState, watch, saveSlicePlan]) expect(fn).not.toHaveBeenCalled();
-    });
-
-    it('marks the slice merged and builds once its PR merged', async () => {
-      const saveSlicePlan = vi.fn(async (_issue: number, _plan: SlicePlan) => {});
-      const result = await preflightQueuedIssue(
-        { number: 7, labels: [] },
-        {
-          ...baseDeps,
-          saveSlicePlan,
-          findSlicePlan: async () => foundPlan(prOpenPlan()),
-          getPullState: async () => 'merged',
-        },
-      );
-      expect(result).toEqual({ kind: 'build' });
-      expect(saveSlicePlan).toHaveBeenCalledTimes(1);
-      const [issue, plan] = saveSlicePlan.mock.calls[0];
-      expect(issue).toBe(7);
-      expect(plan.slices.map((sl) => [sl.state, sl.prNumber])).toEqual([
-        ['merged', 81],
-        ['pending', undefined],
-        ['pending', undefined],
-      ]);
-    });
-
-    it('parks naming the PR when the slice PR was closed without merging', async () => {
-      const saveSlicePlan = vi.fn(async () => {});
-      const result = await preflightQueuedIssue(
-        { number: 7, labels: [] },
-        {
-          ...baseDeps,
-          saveSlicePlan,
-          findSlicePlan: async () => foundPlan(prOpenPlan()),
-          getPullState: async () => 'closed',
-        },
-      );
-      expect(result.kind).toBe('park');
-      expect(result.kind === 'park' && result.reason).toContain('PR #81');
-      expect(result.kind === 'park' && result.reason).toContain('closed without merging');
-      expect(saveSlicePlan).not.toHaveBeenCalled();
-    });
-
-    it('keeps the Closes-PR decision when there is no slice plan', async () => {
-      const getPullState = vi.fn();
-      const result = await preflightQueuedIssue(
-        { number: 7, labels: [] },
-        {
-          ...baseDeps,
-          getPullState,
-          findOpenPR: async () => ({
-            number: 71,
-            branch: 'contributor/real-head',
-            headSha: 'abc123',
-            headRepoFullName: 'on-par/software-factory',
-          }),
-        },
-      );
-      expect(result).toEqual({ kind: 'adopt', branch: 'contributor/real-head' });
-      expect(getPullState).not.toHaveBeenCalled();
-    });
-
-    it('falls through for pending and all-merged slice plans', async () => {
-      const getPullState = vi.fn();
-      const allMerged = [1, 2, 3].reduce((p, n) => withSliceState(p, n, 'merged'), slicePlan());
-      for (const plan of [slicePlan(), allMerged]) {
-        const result = await preflightQueuedIssue(
-          { number: 7, labels: [] },
-          { ...baseDeps, getPullState, findSlicePlan: async () => foundPlan(plan) },
-        );
-        expect(result).toEqual({ kind: 'build' });
-      }
-      expect(getPullState).not.toHaveBeenCalled();
-    });
-
-    it('parks when slice evidence cannot be read or recorded', async () => {
-      const noNumber = slicePlan();
-      const cases = [
-        { findSlicePlan: async () => Promise.reject(new Error('rate limited')) },
-        { findSlicePlan: async () => ({ status: 'invalid' as const, commentId: 9, error: 'bad data' }) },
-        {
-          findSlicePlan: async () =>
-            foundPlan({
-              ...noNumber,
-              slices: noNumber.slices.map((sl, i) => (i === 0 ? { ...sl, state: 'pr-open' as const } : sl)),
-            }),
-        },
-        {
-          findSlicePlan: async () => foundPlan(prOpenPlan()),
-          getPullState: async () => Promise.reject(new Error('404')),
-        },
-        {
-          findSlicePlan: async () => foundPlan(prOpenPlan()),
-          getPullState: async () => 'merged' as const,
-          saveSlicePlan: async () => Promise.reject(new Error('403')),
-        },
-      ];
-      for (const overrides of cases) {
-        const result = await preflightQueuedIssue({ number: 7, labels: [] }, { ...baseDeps, ...overrides });
-        expect(result.kind).toBe('park');
-      }
-    });
-
-    it('maps slice PR state and reads and rewrites the slice plan comment', async () => {
-      const plan = prOpenPlan();
-      const updateComment = vi.fn(async () => ({ data: {} }));
-      const pulls: Record<number, any> = {
-        1: { state: 'closed', merged: true },
-        2: { state: 'closed', merged: false, merged_at: null },
-        3: { state: 'open', merged: false },
-      };
-      const octokit: any = {
-        rest: {
-          pulls: { get: async (o: any) => ({ data: pulls[o.pull_number] }) },
-          users: { getAuthenticated: async () => ({ data: { id: 42 } }) },
-          issues: {
-            listComments: async () => ({
-              data: [{ id: 555, user: { id: 42 }, body: renderSlicePlanComment(plan) }],
-            }),
-            updateComment,
-            createComment: vi.fn(),
-          },
-        },
-      };
-      const ops = createQueuePreflightOps(octokit, 'on-par', 'software-factory');
-      await expect(ops.getPullState(1)).resolves.toBe('merged');
-      await expect(ops.getPullState(2)).resolves.toBe('closed');
-      await expect(ops.getPullState(3)).resolves.toBe('open');
-      await expect(ops.findSlicePlan(7)).resolves.toMatchObject({ status: 'found', commentId: 555, plan });
-      await ops.saveSlicePlan(7, withSliceState(plan, 1, 'merged', 81));
-      expect(updateComment).toHaveBeenCalledWith(expect.objectContaining({ comment_id: 555 }));
-    });
-
-    it('defers an already factory-owned candidate', async () => {
-      const findSlicePlan = vi.fn();
-      await expect(
-        preflightQueuedIssue({ number: 7, labels: ['factory:in-progress'] }, { ...baseDeps, findSlicePlan }),
-      ).resolves.toEqual({
-        kind: 'defer',
-      });
-      expect(findSlicePlan).not.toHaveBeenCalled();
+      expect(onDeferred).toHaveBeenCalledWith(3258, expect.stringContaining('rate limited'));
     });
   });
 

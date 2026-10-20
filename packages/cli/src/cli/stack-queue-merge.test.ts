@@ -58,6 +58,10 @@ const makeOps = (states: Record<number, SlicePullState>, over: Partial<QueuePref
     getPullState: vi.fn(async (pr: number) => states[pr]),
     saveSlicePlan: vi.fn(async () => {}),
     autoMergeStack: false,
+    readIssueBody: vi.fn(async () => ''),
+    getPrerequisiteState: vi.fn(async () => {
+      throw new Error('unexpected prerequisite lookup');
+    }),
     getPullRefs: vi.fn(async () => ({ headRef: 'factory/7-s2-x', baseRef: 'main', headSha: 'rebased' })),
     ...over,
   };

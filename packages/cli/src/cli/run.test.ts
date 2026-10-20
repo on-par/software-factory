@@ -318,6 +318,57 @@ describe('cli', () => {
       expect(events).not.toContain('kpi-snapshot');
     });
 
+    it('logs each prerequisite deferral once per run and rechecks it on a fresh run', async () => {
+      rmSync(paths().queue, { force: true });
+      const labelsByIssue = new Map([
+        [3258, ['factory:queued', 'factory:lane:app', 'factory:order:1']],
+        [3259, ['factory:queued', 'factory:lane:app', 'factory:order:2']],
+      ]);
+      h.octokit.rest.issues.listForRepo = vi.fn(async () => ({
+        data: [...labelsByIssue].map(([number, labels]) => ({ number, title: `Issue ${number}`, labels })),
+      }));
+      h.octokit.rest.issues.get = vi.fn(async ({ issue_number }: any) => ({
+        data: {
+          number: issue_number,
+          title: `Issue ${issue_number}`,
+          body: `Prerequisite: #${issue_number - 1}`,
+        },
+      }));
+      h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async ({ issue_number }: any) => ({
+        data: (labelsByIssue.get(issue_number) ?? []).map((name) => ({ name })),
+      }));
+      h.octokit.rest.issues.listLabelsForRepo = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.issues.createLabel = vi.fn(async () => ({}));
+      h.octokit.rest.issues.addLabels = vi.fn(async () => ({}));
+      h.octokit.rest.issues.removeLabel = vi.fn(async () => ({}));
+      h.octokit.graphql = vi.fn(async (query: string, variables: any) => {
+        if (!query.includes('QueuePrerequisite')) {
+          return { repository: { pullRequest: { id: 'PR_ID', isDraft: false, mergeStateStatus: 'CLEAN' } } };
+        }
+        if (variables.number === 3257) throw new Error('rate limited');
+        return { repository: { issue: { state: 'OPEN' } } };
+      });
+
+      const firstRun = await runMain('run');
+      expect(firstRun.exited).toBe(false);
+      const firstEvents = readFileSync(paths().events, 'utf-8');
+      const deferredLines = firstEvents.split('\n').filter((line) => line.includes('"type":"issue_deferred"'));
+      expect(deferredLines).toHaveLength(2);
+      expect(deferredLines.join('\n')).toContain('#3257');
+      expect(deferredLines.join('\n')).toContain('#3258');
+      expect(deferredLines.join('\n')).toContain('rate limited');
+      expect(firstEvents).not.toContain('"type":"parked"');
+      expect(firstEvents).not.toContain('"type":"plan"');
+      expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
+      expect(logged()).not.toContain('waiting for prerequisites');
+
+      await runMain('run');
+      const allDeferredLines = readFileSync(paths().events, 'utf-8')
+        .split('\n')
+        .filter((line) => line.includes('"type":"issue_deferred"'));
+      expect(allDeferredLines).toHaveLength(4);
+    });
+
     it('auto-merge flag: factory run --auto-merge records the positive override in run-flags.json', async () => {
       writeFileSync(paths().queue, '# header\n');
       const res = await runMain('run', '--local-queue', '--auto-merge');

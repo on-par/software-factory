@@ -89,6 +89,7 @@ export type EventKind =
   | 'ingest_file_overlap_held'
   | 'ingested'
   | 'issue-title'
+  | 'issue_deferred'
   | 'issue_unparked'
   | 'kpi-snapshot'
   | 'kpi-sweep-skipped'
@@ -345,6 +346,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   ingest_file_overlap_held: { severity: 'warn', isPark: false, isTerminal: false },
   ingested: { severity: 'info', isPark: false, isTerminal: false },
   'issue-title': { severity: 'info', isPark: false, isTerminal: false },
+  issue_deferred: { severity: 'info', isPark: false, isTerminal: false },
   issue_unparked: { severity: 'info', isPark: false, isTerminal: false },
   'kpi-snapshot': { severity: 'info', isPark: false, isTerminal: false },
   // End-of-run KPI sweep not run: the run opened no PR and merged nothing.
@@ -474,9 +476,7 @@ function isEventKind(type: string): type is EventKind {
   return Object.hasOwn(EVENT_TRAITS, type);
 }
 
-/** Classifies any string read off a `FactoryEvent.type` — including one from an
- *  older NDJSON file the current `EventKind` union no longer covers, in which
- *  case it returns `UNKNOWN_EVENT_TRAITS` rather than guessing. */
+/** Classifies a FactoryEvent kind, returning UNKNOWN_EVENT_TRAITS for unknown strings. */
 export function eventTraitsFor(type: string): EventTraits {
   return isEventKind(type) ? EVENT_TRAITS[type] : UNKNOWN_EVENT_TRAITS;
 }
@@ -493,8 +493,7 @@ export function isParkKind(type: string): boolean {
   return eventTraitsFor(type).isPark;
 }
 
-/** Lane status this kind drives in a lane-state reducer, or undefined when the
- *  kind doesn't itself change lane status. */
+/** Lane status this kind drives in a lane-state reducer, or undefined when it doesn't change lane status. */
 export function laneStatusOf(type: string): LaneStatus | undefined {
   return eventTraitsFor(type).laneStatus;
 }
