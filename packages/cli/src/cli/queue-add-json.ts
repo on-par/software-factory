@@ -1,30 +1,7 @@
-import type { EnqueueOutcome, EnqueueResult, OrderCollision } from '@on-par/factory-core/internal';
+import type { EnqueueResult } from '@on-par/factory-core/internal';
+import type { QueueAddIssueJson, QueueAddJson } from './json-contract.js';
 
-/** One issue in `factory queue add --json` (#2275). */
-export interface QueueAddIssueJson {
-  number: number;
-  outcome: EnqueueOutcome;
-  /** 1-based order position; null when failed or the existing order label is unparsable. */
-  order: number | null;
-  labelsAdded: string[];
-  /** Set only when outcome === 'failed'. */
-  detail?: string;
-  /** Set only when this placement bumped past an order held without factory:queued (#2988). */
-  collision?: OrderCollision;
-}
-
-/** `factory queue add --json` payload (#2275). Additive changes only; bump schemaVersion on a breaking change. */
-export interface QueueAddJson {
-  schemaVersion: 1;
-  /** False when any issue failed. */
-  ok: boolean;
-  action: 'queue-add';
-  lane: string;
-  /** Input order (deduped). */
-  issues: QueueAddIssueJson[];
-  /** Union of per-result labelsCreated, first-seen order, deduped. */
-  labelsCreated: string[];
-}
+export type { QueueAddIssueJson, QueueAddJson } from './json-contract.js';
 
 export function buildQueueAddJson(lane: string, results: readonly EnqueueResult[]): QueueAddJson {
   const created = new Set<string>();

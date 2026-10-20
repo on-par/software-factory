@@ -28,6 +28,13 @@ type QueueConflictAliasMatches = Equal<QueueListOrderConflictJson, QueueListJson
 type UsageSourceAliasMatches = Equal<UsageJsonSource, UsageJson['source']>;
 type CostRowAliasMatches = Equal<CostRowJson, CostJson['rows'][number]>;
 type CostModelAliasMatches = Equal<CostModelRowJson, CostJson['perModel'][number]>;
+type LogsKeysMatch = Equal<keyof FactoryEvent, Exclude<keyof LogsLineJson, 'cursor'>>;
+type StatusBuilderMatches = Equal<ReturnType<typeof buildStatusJson>, StatusJson>;
+type LogsBuilderMatches = Equal<ReturnType<typeof buildLogsJson>, LogsLineJson>;
+type QueueAddBuilderMatches = Equal<ReturnType<typeof buildQueueAddJson>, ContractQueueAddJson>;
+type QueueAddIssueAliasMatches = Equal<QueueAddIssueJson, ContractQueueAddIssueJson>;
+type StopResumeBuilderMatches = Equal<ReturnType<typeof buildStopResumeJson>, ContractStopResumeJson>;
+type UnparkProducerMatches = Equal<Awaited<ReturnType<typeof runUnpark>>, UnparkJson>;
 
 function typeContractChecks(): void {
   const invalidDaemon: DaemonStatusJson = {
@@ -99,6 +106,31 @@ const typeChecks: [
 ] = [true, true, true, true, true, true, true, true, true];
 void typeChecks;
 
+const additionalTypeChecks: [
+  LogsKeysMatch,
+  StatusBuilderMatches,
+  LogsBuilderMatches,
+  QueueAddBuilderMatches,
+  QueueAddIssueAliasMatches,
+  StopResumeBuilderMatches,
+  UnparkProducerMatches,
+] = [true, true, true, true, true, true, true];
+void additionalTypeChecks;
+
 it('keeps JSON builder types aligned with their contracts', () => {
-  expect(typeChecks.every(Boolean)).toBe(true);
+  expect([...typeChecks, ...additionalTypeChecks].every(Boolean)).toBe(true);
 });
+import type { FactoryEvent } from '@on-par/factory-core';
+import type { QueueAddIssueJson, buildQueueAddJson } from './queue-add-json.js';
+import type { buildStopResumeJson } from './stop-resume-json.js';
+import type { runUnpark } from './unpark.js';
+import type {
+  LogsLineJson,
+  QueueAddIssueJson as ContractQueueAddIssueJson,
+  QueueAddJson as ContractQueueAddJson,
+  StatusJson,
+  StopResumeJson as ContractStopResumeJson,
+  UnparkJson,
+} from './json-contract.js';
+import type { buildLogsJson } from './logs.js';
+import type { buildStatusJson } from './status-json.js';

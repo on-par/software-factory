@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "action": "unpark",
+  "issue": 42,
+  "lane": "ops",
+  "order": 3,
+  "labelsBefore": ["bug", "factory:parked", "factory:lane:ops"],
+  "labelsAfter": ["bug", "factory:lane:ops", "factory:queued", "factory:order:3"]
+}

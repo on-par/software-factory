@@ -196,6 +196,48 @@ export const runDiffstatJsonSchema = z.object({
   reason: z.enum(['branch-missing', 'base-missing', 'no-branch']).nullable(),
 });
 
+const orderCollisionSchema = z.object({ order: z.number(), heldBy: z.array(z.number()) });
+
+export const queueAddJsonSchema = z.object({
+  schemaVersion: z.literal(1),
+  ok: z.boolean(),
+  action: z.literal('queue-add'),
+  lane: z.string(),
+  issues: z.array(
+    z.object({
+      number: z.number(),
+      outcome: z.enum(['queued', 'already-queued', 'failed']),
+      order: z.number().nullable(),
+      labelsAdded: z.array(z.string()),
+      detail: z.string().optional(),
+      collision: orderCollisionSchema.optional(),
+    }),
+  ),
+  labelsCreated: z.array(z.string()),
+});
+
+const stopResumeFields = {
+  schemaVersion: z.literal(1),
+  ok: z.literal(true),
+  repo: z.string(),
+  stopFlag: z.object({ before: z.boolean(), after: z.boolean() }),
+};
+
+export const stopJsonSchema = z.object({ ...stopResumeFields, action: z.literal('stop') });
+export const resumeJsonSchema = z.object({ ...stopResumeFields, action: z.literal('resume') });
+
+export const unparkJsonSchema = z.object({
+  schemaVersion: z.literal(1),
+  ok: z.literal(true),
+  action: z.literal('unpark'),
+  issue: z.number(),
+  lane: z.string(),
+  order: z.number(),
+  collision: orderCollisionSchema.optional(),
+  labelsBefore: z.array(z.string()),
+  labelsAfter: z.array(z.string()),
+});
+
 export type StatusJson = z.infer<typeof statusJsonSchema>;
 export type LogsLineJson = z.infer<typeof logsLineJsonSchema>;
 export type DaemonStatusJson = z.infer<typeof daemonStatusJsonSchema>;
@@ -204,3 +246,12 @@ export type UsageJson = z.infer<typeof usageJsonSchema>;
 export type CostJson = z.infer<typeof costJsonSchema>;
 export type RunsJson = z.infer<typeof runsJsonSchema>;
 export type RunDiffstatJson = z.infer<typeof runDiffstatJsonSchema>;
+/** One issue in `factory queue add --json` (#2275); order is null for failures or an unparsable existing order label. */
+/** @remarks `detail` is set for failures; `collision` describes an order held without `factory:queued` (#2988). */
+export type QueueAddIssueJson = QueueAddJson['issues'][number];
+/** Queue-add payload (#2275): `ok` is false on failure; issues preserve deduped input order and labelsCreated first-seen order. Additive changes only; bump schemaVersion on a breaking change. */
+export type QueueAddJson = z.infer<typeof queueAddJsonSchema>;
+/** Stop/resume action result (#2276); additive changes require a schemaVersion bump if breaking. */
+export type StopResumeJson = z.infer<typeof stopJsonSchema> | z.infer<typeof resumeJsonSchema>;
+/** Unpark result (#2277): `collision` reports an order held without `factory:queued` (#2988). Additive changes only; bump schemaVersion on a breaking change. */
+export type UnparkJson = z.infer<typeof unparkJsonSchema>;

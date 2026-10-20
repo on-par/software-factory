@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "ok": {
+      "type": "boolean",
+      "const": true
+    },
+    "action": {
+      "type": "string",
+      "const": "unpark"
+    },
+    "issue": {
+      "type": "number"
+    },
+    "lane": {
+      "type": "string"
+    },
+    "order": {
+      "type": "number"
+    },
+    "collision": {
+      "type": "object",
+      "properties": {
+        "order": {
+          "type": "number"
+        },
+        "heldBy": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        }
+      },
+      "required": ["order", "heldBy"],
+      "additionalProperties": false
+    },
+    "labelsBefore": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "labelsAfter": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["schemaVersion", "ok", "action", "issue", "lane", "order", "labelsBefore", "labelsAfter"],
+  "additionalProperties": false
+}

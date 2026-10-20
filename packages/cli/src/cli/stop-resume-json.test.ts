@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { buildStopResumeJson } from './stop-resume-json.js';
+import { resumeJsonSchema, stopJsonSchema } from './json-contract.js';
 
 const fixture = (name: string) =>
   readFileSync(new URL(`../__fixtures__/stop-resume-json/${name}.json`, import.meta.url), 'utf-8');
@@ -19,6 +20,7 @@ describe('buildStopResumeJson', () => {
     });
     expect(Object.keys(built)).toEqual(['schemaVersion', 'ok', 'action', 'repo', 'stopFlag']);
     expect(Object.keys(built.stopFlag)).toEqual(['before', 'after']);
+    expect(stopJsonSchema.parse(built)).toEqual(built);
   });
 
   it.each([
@@ -29,5 +31,6 @@ describe('buildStopResumeJson', () => {
     const text = fixture(action);
     expect(built).toEqual(JSON.parse(text));
     expect(JSON.stringify(built, null, 2) + '\n').toBe(text);
+    expect((action === 'stop' ? stopJsonSchema : resumeJsonSchema).parse(built)).toEqual(built);
   });
 });
