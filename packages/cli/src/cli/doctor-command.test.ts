@@ -1,39 +1,34 @@
 // packages/cli/src/cli/doctor-command.test.ts — factory doctor dispatch tests, moved from cli-commands.test.ts (#2799)
 
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  unlinkSync,
-  utimesSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { HARNESS_SETUP } from './doctor-harness.js';
 import { coreFakes, h, installDoctorHarness, logged, ops, paths, runMainWith } from './test-support/doctor-harness.js';
 
 installDoctorHarness();
 
 const runMain = (...args: string[]) => runMainWith(undefined, ...args);
 
+const resetDoctorAuthEnvironment = (): void => {
+  const home = join(h.repoRoot, 'test-home');
+  const codexHome = join(h.repoRoot, 'no-codex-home');
+  const claudeConfig = join(h.repoRoot, 'no-claude-config');
+  const xdgData = join(h.repoRoot, 'no-xdg-data');
+  for (const directory of [home, codexHome, claudeConfig, xdgData]) mkdirSync(directory, { recursive: true });
+  vi.stubEnv('HOME', home);
+  vi.stubEnv('CODEX_HOME', codexHome);
+  vi.stubEnv('CLAUDE_CONFIG_DIR', claudeConfig);
+  vi.stubEnv('XDG_DATA_HOME', xdgData);
+  for (const key of new Set(HARNESS_SETUP.flatMap(({ envKeys }) => envKeys))) vi.stubEnv(key, '');
+};
+
 describe('cli', () => {
   describe('doctor', () => {
     beforeEach(() => {
-      // Never read the real ~/.codex/auth.json from doctor tests (#2509).
-      vi.stubEnv('CODEX_HOME', join(h.repoRoot, 'no-codex-home'));
-      // Keep real credentials out of the sign-in evidence checks (#2556).
-      mkdirSync(join(h.repoRoot, 'no-claude-config'), { recursive: true });
-      mkdirSync(join(h.repoRoot, 'no-xdg-data'), { recursive: true });
-      vi.stubEnv('CLAUDE_CONFIG_DIR', join(h.repoRoot, 'no-claude-config'));
-      vi.stubEnv('XDG_DATA_HOME', join(h.repoRoot, 'no-xdg-data'));
-      for (const key of ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'CODEX_API_KEY', 'OPENCODE_API_KEY']) {
-        vi.stubEnv(key, '');
-      }
+      resetDoctorAuthEnvironment();
       // Green doctor tests need at least one signed-in agent (#2556); agent sign-in cases override via withAuth.
       writeFileSync(join(h.repoRoot, 'no-claude-config', '.credentials.json'), '{}');
       h.execSyncImpl = (cmd: string) => {
@@ -209,6 +204,38 @@ describe('cli', () => {
         expect(logged()).toContain('another agent is signed in');
       });
 
+      it('logged-out sign-in result ignores agent credentials in the shell and the real home', async () => {
+        const hostHome = join(h.repoRoot, 'host-home');
+        const hostClaudeConfig = join(hostHome, '.claude');
+        const hostCred = join(hostClaudeConfig, '.credentials.json'),
+          hostFailures = join(hostHome, '.factory', 'auth', 'local-auth-failures.json');
+        mkdirSync(hostClaudeConfig, { recursive: true });
+        mkdirSync(join(hostHome, '.factory', 'auth'), { recursive: true });
+        const oauth = { accessToken: 'dummy', refreshToken: 'dummy-r', expiresAt: Date.now() + 3_600_000 };
+        writeFileSync(hostCred, JSON.stringify({ claudeAiOauth: oauth }));
+        utimesSync(hostCred, (Date.now() - 3_600_000) / 1000, (Date.now() - 3_600_000) / 1000);
+        const failureAt = new Date().toISOString();
+        writeFileSync(hostFailures, JSON.stringify({ claude: { agent: 'claude', at: failureAt } }));
+        vi.stubEnv('HOME', hostHome);
+        vi.stubEnv('CLAUDE_CONFIG_DIR', hostClaudeConfig);
+        vi.stubEnv('CODEX_HOME', join(hostHome, '.codex'));
+        vi.stubEnv('XDG_DATA_HOME', join(hostHome, '.local', 'share'));
+        for (const key of new Set(HARNESS_SETUP.flatMap(({ envKeys }) => envKeys)))
+          vi.stubEnv(key, 'dummy-host-credential');
+
+        resetDoctorAuthEnvironment();
+        h.claudeAvailable = true;
+        withAuth(false, false);
+        const res = await runMain('doctor');
+        expect(res.exited).toBeTruthy();
+        expect(logged()).toContain('claude signed in - unverified: no sign-in evidence');
+        expect(logged()).not.toContain('another agent is signed in');
+        expect(logged()).not.toContain(failureAt);
+        expect(process.env.HOME).toBe(join(h.repoRoot, 'test-home'));
+        expect(existsSync(join(h.repoRoot, 'test-home', '.factory', 'auth', 'local-auth-failures.json'))).toBe(false);
+        expect(existsSync(hostCred) && existsSync(hostFailures)).toBe(true);
+      });
+
       const writeCodexHome = (name: string, tokens: Record<string, string>) => {
         const codexHome = join(h.repoRoot, name);
         mkdirSync(codexHome, { recursive: true });
@@ -264,30 +291,25 @@ describe('cli', () => {
       it('fails claude when its last run hit local_auth after the last login, and a new login clears it (#2733)', async () => {
         h.claudeAvailable = true;
         withAuth(false, false);
-        const home = mkdtempSync(join(tmpdir(), 'factory-2733-home-'));
-        try {
-          vi.stubEnv('HOME', home);
-          const cred = join(h.repoRoot, 'no-claude-config', '.credentials.json');
-          writeClaudeCreds({ accessToken: 'dummy', refreshToken: 'dummy-r', expiresAt: Date.now() + 3_600_000 });
-          const loginAt = (Date.now() - 3_600_000) / 1000;
-          utimesSync(cred, loginAt, loginAt);
-          mkdirSync(join(home, '.factory', 'auth'), { recursive: true });
-          writeFileSync(
-            join(home, '.factory', 'auth', 'local-auth-failures.json'),
-            JSON.stringify({ claude: { agent: 'claude', at: new Date(Date.now() - 60_000).toISOString() } }),
-          );
-          const res = await runMain('doctor');
-          expect(res.exited).toBeTruthy();
-          expect(logged()).toContain('re-run claude login');
-          expect(logged()).not.toContain('dummy');
+        const home = join(h.repoRoot, 'test-home');
+        const cred = join(h.repoRoot, 'no-claude-config', '.credentials.json');
+        writeClaudeCreds({ accessToken: 'dummy', refreshToken: 'dummy-r', expiresAt: Date.now() + 3_600_000 });
+        const loginAt = (Date.now() - 3_600_000) / 1000;
+        utimesSync(cred, loginAt, loginAt);
+        mkdirSync(join(home, '.factory', 'auth'), { recursive: true });
+        writeFileSync(
+          join(home, '.factory', 'auth', 'local-auth-failures.json'),
+          JSON.stringify({ claude: { agent: 'claude', at: new Date(Date.now() - 60_000).toISOString() } }),
+        );
+        const res = await runMain('doctor');
+        expect(res.exited).toBeTruthy();
+        expect(logged()).toContain('re-run claude login');
+        expect(logged()).not.toContain('dummy');
 
-          const relogin = Date.now() / 1000;
-          utimesSync(cred, relogin, relogin);
-          const again = await runMain('doctor');
-          expect(again.exited).toBe(false);
-        } finally {
-          rmSync(home, { recursive: true, force: true });
-        }
+        const relogin = Date.now() / 1000;
+        utimesSync(cred, relogin, relogin);
+        const again = await runMain('doctor');
+        expect(again.exited).toBe(false);
       });
 
       it('fails when every installed agent is logged out', async () => {
