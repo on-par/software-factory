@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -207,4 +207,73 @@ describe('BaselineCache timeouts (#3186)', () => {
     await writeFile(file, JSON.stringify(data));
     expect(await cache.get('sha', 'env', 'cfg', 'compile')).toBeUndefined();
   });
+
+  it.each([
+    ['compile', 'make failed: Command timed out after 120000 milliseconds: make'],
+    ['compile', 'timed out after 120s'],
+    ['compile', 'retry timed out after 1.25s while running'],
+    ['tests', 'test command: timed out after 3s (limit)'],
+  ])('ignores legacy timeout entries without a timedOut flag (%s: %s)', async (checker, details) => {
+    const file = await cacheFile();
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        entries: {
+          [`sha:env:${checker}`]: {
+            output: { checker, result: 'FAIL', details },
+            configHash: 'cfg',
+            recordedAt: '2026-01-01T00:00:00.000Z',
+          },
+        },
+      }),
+    );
+    const cache = new BaselineCache(file);
+    expect(await cache.get('sha', 'env', 'cfg', checker)).toBeUndefined();
+  });
+
+  it.each([
+    ['ordinary failure', { checker: 'tests', result: 'FAIL', details: 'assertion failed' }],
+    ['empty details', { checker: 'tests', result: 'FAIL', details: '' }],
+    ['near-match timeout wording', { checker: 'tests', result: 'FAIL', details: 'test named timeout failed' }],
+    ['explicit false', { checker: 'tests', result: 'FAIL', details: 'timed out after 3s', timedOut: false }],
+  ])('preserves ordinary failure entries (%s)', async (_label, output) => {
+    const file = await cacheFile();
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        entries: {
+          'sha:env:tests': { output, configHash: 'cfg', recordedAt: '2026-01-01T00:00:00.000Z' },
+        },
+      }),
+    );
+    const cache = new BaselineCache(file);
+    expect(await cache.get('sha', 'env', 'cfg', 'tests')).toEqual(output);
+  });
+
+  it.each([undefined, null, 42, {}])(
+    'safely reads legacy timeout entries with malformed details (%s)',
+    async (details) => {
+      const file = await cacheFile();
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(
+        file,
+        JSON.stringify({
+          version: 1,
+          entries: {
+            'sha:env:tests': {
+              output: { checker: 'tests', result: 'PASS', details },
+              configHash: 'cfg',
+              recordedAt: '2026-01-01T00:00:00.000Z',
+            },
+          },
+        }),
+      );
+      const cache = new BaselineCache(file);
+      await expect(cache.get('sha', 'env', 'cfg', 'tests')).resolves.toMatchObject({ result: 'PASS' });
+    },
+  );
 });
