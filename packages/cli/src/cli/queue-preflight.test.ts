@@ -1,5 +1,5 @@
 import { parseDecompositionOutput, renderSlicePlanComment, withSliceState } from '@on-par/factory-core/internal';
-import type { SlicePlan } from '@on-par/factory-core/internal';
+import type { SlicePlan, StackPullReviews } from '@on-par/factory-core/internal';
 import { describe, expect, it, vi } from 'vitest';
 import { createQueuePreflightOps, preflightQueuedIssue } from './index.js';
 
@@ -13,13 +13,14 @@ describe('queue PR preflight', () => {
     getPullState: async () => 'open' as const,
     saveSlicePlan: async () => {},
     autoMergeStack: false,
+    stackMode: false,
+    getPullReviews: async (): Promise<StackPullReviews> => Promise.reject(new Error('unexpected review lookup')),
     readIssueBody: async () => '',
     getPrerequisiteState: async () => {
       throw new Error('unexpected prerequisite lookup');
     },
     getPullRefs: async () => ({ headRef: 'b', baseRef: 'main', headSha: 's' }),
   };
-
   const sliceStory = (n: number) => ({
     title: `Story ${n}`,
     role: 'operator',

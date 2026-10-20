@@ -605,6 +605,13 @@ export type {
   LowerSliceChangeDetection,
   ReviewChangeParkResult,
 } from './phases/stack-review-change.js';
+export { readReviewApproval, readStackSliceGate } from './phases/stack-approval.js';
+export type {
+  StackPullReviews,
+  StackSliceGate,
+  StackSliceGateReader,
+  StackSliceReview,
+} from './phases/stack-approval.js';
 export { createShipExecutor } from './daemon/ship-executor.js';
 
 // Review verdict (#1679)

@@ -5,10 +5,12 @@ import type {
   QueuePreflightDecision,
   SlicePlan,
   SlicePlanCommentLookup,
+  StackPullReviews,
 } from '@on-par/factory-core/internal';
 import {
   findDeclaredPrerequisites,
   findSlicePlanComment,
+  readStackSliceGate,
   upsertSlicePlanComment,
   withSliceState,
 } from '@on-par/factory-core/internal';
@@ -39,6 +41,10 @@ export interface QueuePreflightOps {
   saveSlicePlan(issue: number, plan: SlicePlan): Promise<void>;
   /** ADR-0161: sizeGate.mode is `stack` and the merge policy is auto, so preflight may adopt the lowest open stack layer. */
   autoMergeStack: boolean;
+  /** ADR-0161: sizeGate.mode is `stack`, so an approved top slice lets the queue build the next pending slice (#3366). Slice mode keeps waiting for the merge (ADR-0147). */
+  stackMode: boolean;
+  /** Head SHA, the factory's own user id, and the reviews of a slice PR (#3366). */
+  getPullReviews(prNumber: number): Promise<StackPullReviews>;
   readIssueBody(issue: number): Promise<string>;
   getPrerequisiteState(issue: number): Promise<{ state: 'open' | 'closed'; mergedClosingPr: boolean }>;
   onDeferred?: (issue: number, message: string) => void;
@@ -53,11 +59,34 @@ export function makeQueuePreflightOps(
   opts: {
     watch: (ref: string) => Promise<CiOutcome>;
     autoMergeStack?: boolean;
+    stackMode?: boolean;
     onDeferred?: (issue: number, message: string) => void;
   },
 ): QueuePreflightOps {
+  let selfId: Promise<number> | undefined;
   return {
     autoMergeStack: opts.autoMergeStack ?? false,
+    stackMode: opts.stackMode ?? false,
+    getPullReviews: async (prNumber) => {
+      const { data: pull } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
+      selfId ??= octokit.rest.users.getAuthenticated().then(({ data }) => data.id);
+      const id = await selfId;
+      const reviews: StackPullReviews['reviews'] = [];
+      for (let page = 1; ; page++) {
+        const { data } = await octokit.rest.pulls.listReviews({
+          owner,
+          repo,
+          pull_number: prNumber,
+          per_page: 100,
+          page,
+        });
+        for (const r of data) {
+          reviews.push({ reviewerId: r.user?.id ?? null, state: r.state, commitId: r.commit_id ?? null });
+        }
+        if (data.length < 100) break;
+      }
+      return { headSha: pull.head.sha, selfId: id, reviews };
+    },
     onDeferred: opts.onDeferred,
     getPullRefs: async (prNumber) => {
       const { data } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
@@ -152,7 +181,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** ADR-0147/ADR-0161: walk every pr-open slice PR bottom-up. Merged layers are recorded, a closed layer parks
  *  (naming the layers above it), and the lowest open layer defers, or is adopted when stack auto-merge is on and
- *  its base is main with green CI on the rebased head. Returns undefined to fall through to the Closes-PR
+ *  its base is main with green CI on the rebased head. In stack mode a lowest open layer that would defer instead
+ *  builds the next pending slice once the top built slice PR is merged or approved (#3366). Returns undefined to fall through to the Closes-PR
  *  preflight only when no slice PR is still open. */
 async function preflightSlice(issue: number, deps: QueuePreflightOps): Promise<QueuePreflightDecision | undefined> {
   let lookup: SlicePlanCommentLookup;
@@ -186,6 +216,30 @@ async function preflightSlice(issue: number, deps: QueuePreflightOps): Promise<Q
     }
     return undefined;
   };
+  const waitOrBuild = async (): Promise<QueuePreflightDecision> => {
+    if (!deps.stackMode) return { kind: 'defer' };
+    let gate: Awaited<ReturnType<typeof readStackSliceGate>>;
+    try {
+      gate = await readStackSliceGate(next, {
+        getPullState: deps.getPullState,
+        getPullReviews: deps.getPullReviews,
+      });
+    } catch (err) {
+      deps.onDeferred?.(issue, `stack approval lookup failed: ${errorDetail(err)}`);
+      return { kind: 'defer' };
+    }
+    if (gate.status === 'none') return { kind: 'defer' };
+    const above = next.slices.find((s) => s.index === gate.index + 1);
+    if (above?.state !== 'pending') return { kind: 'defer' };
+    if (gate.status === 'approved' || gate.status === 'merged') return { kind: 'build' };
+    deps.onDeferred?.(
+      issue,
+      gate.status === 'changes-requested'
+        ? `slice ${gate.index}/${n} PR #${gate.prNumber} has changes requested`
+        : `waiting for review approval of slice ${gate.index}/${n} PR #${gate.prNumber}`,
+    );
+    return { kind: 'defer' };
+  };
   for (const [at, slice] of open.entries()) {
     const label = `slice ${slice.index}/${n}`;
     if (slice.prNumber === undefined) {
@@ -213,7 +267,7 @@ async function preflightSlice(issue: number, deps: QueuePreflightOps): Promise<Q
     }
     const saved = await save();
     if (saved) return saved;
-    if (!deps.autoMergeStack) return { kind: 'defer' };
+    if (!deps.autoMergeStack) return waitOrBuild();
     let refs: Awaited<ReturnType<QueuePreflightOps['getPullRefs']>>;
     try {
       refs = await deps.getPullRefs(pr);
@@ -221,7 +275,7 @@ async function preflightSlice(issue: number, deps: QueuePreflightOps): Promise<Q
       return { kind: 'park', reason: `${label} PR #${pr} ref lookup failed: ${errorDetail(err)}` };
     }
     // GitHub has not retargeted the layer to main yet: the lower layer is still unmerged.
-    if (refs.baseRef !== 'main') return { kind: 'defer' };
+    if (refs.baseRef !== 'main') return waitOrBuild();
     let outcome: CiOutcome;
     try {
       outcome = await deps.watch(refs.headSha);
@@ -229,7 +283,7 @@ async function preflightSlice(issue: number, deps: QueuePreflightOps): Promise<Q
       return { kind: 'park', reason: `CI watch for ${label} PR #${pr} failed: ${errorDetail(err)}` };
     }
     if (outcome === 'failure') return { kind: 'park', reason: `CI for ${label} PR #${pr} ended failure` };
-    if (outcome !== 'success') return { kind: 'defer' };
+    if (outcome !== 'success') return waitOrBuild();
     return { kind: 'adopt', branch: refs.headRef, stackLayer: { index: slice.index, count: n, prNumber: pr } };
   }
   return (await save()) ?? undefined;

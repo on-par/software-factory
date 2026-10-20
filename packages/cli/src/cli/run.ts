@@ -162,6 +162,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
                   autoMergeStack:
                     resolveSizeGateMode(factoryConfig) === 'stack' &&
                     resolveMergePolicy(factoryConfig, process.env, { auto: opts.autoMerge }).auto,
+                  stackMode: resolveSizeGateMode(factoryConfig) === 'stack',
                   onDeferred: (issue, message) => {
                     if (deferredIssues.has(issue)) return;
                     deferredIssues.add(issue);

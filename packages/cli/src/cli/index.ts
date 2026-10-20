@@ -3500,7 +3500,7 @@ export function createQueuePreflightOps(
   octokit: Octokit,
   owner: string,
   repo: string,
-  opts: { autoMergeStack?: boolean; onDeferred?: (issue: number, message: string) => void } = {},
+  opts: { autoMergeStack?: boolean; stackMode?: boolean; onDeferred?: (issue: number, message: string) => void } = {},
 ): QueuePreflightOps {
   return makeQueuePreflightOps(octokit, owner, repo, {
     watch: (ref) => internalOps.watchChecks({ octokit, owner, repo, ref }),
