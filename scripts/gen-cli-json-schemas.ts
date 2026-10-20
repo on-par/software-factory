@@ -9,10 +9,14 @@ import {
   daemonStatusJsonSchema,
   logsLineJsonSchema,
   queueListJsonSchema,
+  queueAddJsonSchema,
+  resumeJsonSchema,
   runDiffstatJsonSchema,
   runsJsonSchema,
   statusJsonSchema,
   usageJsonSchema,
+  stopJsonSchema,
+  unparkJsonSchema,
 } from '../packages/cli/src/cli/json-contract.js';
 
 const schemas = [
@@ -24,6 +28,10 @@ const schemas = [
   ['cost.schema.json', costJsonSchema],
   ['runs.schema.json', runsJsonSchema],
   ['runs-diffstat.schema.json', runDiffstatJsonSchema],
+  ['queue-add.schema.json', queueAddJsonSchema],
+  ['stop.schema.json', stopJsonSchema],
+  ['resume.schema.json', resumeJsonSchema],
+  ['unpark.schema.json', unparkJsonSchema],
 ] as const;
 
 const [outputArgument, ...surplusArguments] = process.argv.slice(2);

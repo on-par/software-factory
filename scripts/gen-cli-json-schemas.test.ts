@@ -12,13 +12,17 @@ const GUARD = join(ROOT, 'scripts', 'check-cli-json-schemas.sh');
 const COMMITTED = join(ROOT, 'packages', 'cli', 'schemas');
 const tempDirs = createTempDirs();
 const expectedFiles = [
+  'queue-add.schema.json',
   'cost.schema.json',
   'daemon-status.schema.json',
   'logs-line.schema.json',
   'queue-list.schema.json',
   'runs-diffstat.schema.json',
   'runs.schema.json',
+  'resume.schema.json',
   'status.schema.json',
+  'stop.schema.json',
+  'unpark.schema.json',
   'usage.schema.json',
 ].sort();
 
@@ -42,7 +46,7 @@ function copySchemas(destination: string): void {
 }
 
 describe('CLI JSON Schema generator', () => {
-  it('writes exactly the eight read-only schema artifacts deterministically', () => {
+  it('writes exactly the twelve schema artifacts deterministically', () => {
     const first = tempDirs.makeSync('cli-schemas-first-');
     const second = tempDirs.makeSync('cli-schemas-second-');
     expect(runGenerator(first).status).toBe(0);

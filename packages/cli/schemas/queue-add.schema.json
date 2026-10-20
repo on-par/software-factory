@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "action": {
+      "type": "string",
+      "const": "queue-add"
+    },
+    "lane": {
+      "type": "string"
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "number": {
+            "type": "number"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": ["queued", "already-queued", "failed"]
+          },
+          "order": {
+            "type": ["number", "null"]
+          },
+          "labelsAdded": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "detail": {
+            "type": "string"
+          },
+          "collision": {
+            "type": "object",
+            "properties": {
+              "order": {
+                "type": "number"
+              },
+              "heldBy": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              }
+            },
+            "required": ["order", "heldBy"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["number", "outcome", "order", "labelsAdded"],
+        "additionalProperties": false
+      }
+    },
+    "labelsCreated": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["schemaVersion", "ok", "action", "lane", "issues", "labelsCreated"],
+  "additionalProperties": false
+}

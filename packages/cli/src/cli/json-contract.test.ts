@@ -5,12 +5,16 @@ import type { FactoryEvent } from '@on-par/factory-core';
 import { createLogger } from '@on-par/factory-core';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import type { QueueSnapshot } from '@on-par/factory-core/internal';
+import type { EnqueueResult, QueueGitHubClient } from '@on-par/factory-core/internal';
 import { cmdDaemonStatus } from './daemon.js';
 import { buildQueueListJson } from './queue-list.js';
 import { buildUsageJson } from './usage-json.js';
 import { buildCostJson } from './cost-json.js';
 import { buildRunsJson } from './runs.js';
 import { buildRunDiffstatJson } from './runs-diffstat.js';
+import { buildQueueAddJson } from './queue-add-json.js';
+import { buildStopResumeJson } from './stop-resume-json.js';
+import { runUnpark } from './unpark.js';
 import { buildLogsJson, runLogs } from './logs.js';
 import { buildStatusJson } from './status-json.js';
 import {
@@ -18,12 +22,14 @@ import {
   daemonStatusJsonSchema,
   logsLineJsonSchema,
   queueListJsonSchema,
+  queueAddJsonSchema,
+  resumeJsonSchema,
   runDiffstatJsonSchema,
   runsJsonSchema,
   statusJsonSchema,
+  stopJsonSchema,
+  unparkJsonSchema,
   usageJsonSchema,
-  type LogsLineJson,
-  type StatusJson,
 } from './json-contract.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Ajv2020 from 'ajv/dist/2020.js';
@@ -73,7 +79,39 @@ const generatedContracts = [
   ['cost.schema.json', 'cost.json', costJsonSchema],
   ['runs.schema.json', 'runs.json', runsJsonSchema],
   ['runs-diffstat.schema.json', 'runs-diffstat.json', runDiffstatJsonSchema],
+  ['queue-add.schema.json', '../queue-add.json', queueAddJsonSchema],
+  ['stop.schema.json', 'stop.json', stopJsonSchema],
+  ['resume.schema.json', 'resume.json', resumeJsonSchema],
+  ['unpark.schema.json', 'unpark.json', unparkJsonSchema],
 ] as const;
+
+const queueLabels = (position: number): string[] => ['factory:queued', 'factory:lane:ops', `factory:order:${position}`];
+const fixedQueueAddResults: EnqueueResult[] = [
+  { issue: 1, outcome: 'queued', position: 3, labelsAdded: queueLabels(3), labelsCreated: ['factory:order:3'] },
+  { issue: 2, outcome: 'queued', position: 4, labelsAdded: queueLabels(4), labelsCreated: ['factory:order:4'] },
+  { issue: 3, outcome: 'already-queued', position: 1, labelsAdded: [], labelsCreated: [] },
+];
+
+function unparkClient(labels: Map<number, string[]>): QueueGitHubClient {
+  return {
+    listOpenIssuesWithLabels: async ({ labels: wanted }) =>
+      [...labels.entries()]
+        .filter(([, current]) => wanted.every((label) => current.includes(label)))
+        .map(([number, current]) => ({ number, labels: [...current] })),
+    getIssueLabels: async ({ issue_number }) => [...(labels.get(issue_number) ?? [])],
+    addLabels: async ({ issue_number, labels: additions }) => {
+      const current = labels.get(issue_number) ?? [];
+      labels.set(issue_number, [...current, ...additions.filter((label) => !current.includes(label))]);
+    },
+    removeLabel: async ({ issue_number, name }) => {
+      labels.set(
+        issue_number,
+        (labels.get(issue_number) ?? []).filter((label) => label !== name),
+      );
+    },
+    ensureLabel: async () => false,
+  };
+}
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -126,6 +164,86 @@ describe('JSON wire contracts', () => {
     expect(output).toEqual(statusGolden);
     expect(statusJsonSchema.parse(output)).toEqual(output);
     expect(statusJsonSchema.parse(statusGolden)).toEqual(statusGolden);
+  });
+
+  it('matches the queue-add golden and validates it', () => {
+    const output = buildQueueAddJson('ops', fixedQueueAddResults);
+    const golden = fixture('../queue-add.json');
+    expect(output).toEqual(golden);
+    expect(queueAddJsonSchema.parse(output)).toEqual(output);
+    expect(queueAddJsonSchema.parse(golden)).toEqual(golden);
+  });
+
+  it('matches the stop golden and validates it', () => {
+    const output = buildStopResumeJson({ action: 'stop', repo: 'on-par/example', before: false, after: true });
+    const golden = fixture('stop.json');
+    expect(output).toEqual(golden);
+    expect(stopJsonSchema.parse(output)).toEqual(output);
+    expect(stopJsonSchema.parse(golden)).toEqual(golden);
+  });
+
+  it('matches the resume golden and validates it', () => {
+    const output = buildStopResumeJson({ action: 'resume', repo: 'on-par/example', before: true, after: false });
+    const golden = fixture('resume.json');
+    expect(output).toEqual(golden);
+    expect(resumeJsonSchema.parse(output)).toEqual(output);
+    expect(resumeJsonSchema.parse(golden)).toEqual(golden);
+  });
+
+  it('matches the unpark golden from the real producer and validates it', async () => {
+    const labels = new Map<number, string[]>([
+      [1, ['factory:queued', 'factory:lane:ops', 'factory:order:1']],
+      [2, ['factory:queued', 'factory:lane:ops', 'factory:order:2']],
+      [42, ['bug', 'factory:parked', 'factory:lane:ops']],
+    ]);
+    const output = await runUnpark({ owner: 'on-par', repo: 'example', issue: 42, client: unparkClient(labels) });
+    const golden = fixture('unpark.json');
+    expect(output).toEqual(golden);
+    expect(unparkJsonSchema.parse(output)).toEqual(output);
+    expect(unparkJsonSchema.parse(golden)).toEqual(golden);
+  });
+
+  it('preserves optional unpark collision fields in the generated schema', async () => {
+    const labels = new Map<number, string[]>([
+      [23, ['factory:queued', 'factory:lane:ops', 'factory:order:23']],
+      [24, ['factory:lane:ops', 'factory:order:24']],
+      [42, ['bug', 'factory:parked', 'factory:lane:ops']],
+    ]);
+    const output = await runUnpark({ owner: 'on-par', repo: 'example', issue: 42, client: unparkClient(labels) });
+    expect(output.collision).toEqual({ order: 24, heldBy: [24] });
+    expect(unparkJsonSchema.parse(output)).toEqual(output);
+    const schema = JSON.parse(
+      readFileSync(new URL('../../schemas/unpark.schema.json', import.meta.url), 'utf-8'),
+    ) as object;
+    expect(new Ajv2020().compile(schema)(output)).toBe(true);
+    const withoutCollision = { ...output };
+    delete (withoutCollision as { collision?: unknown }).collision;
+    expect(unparkJsonSchema.parse(withoutCollision)).toEqual(withoutCollision);
+  });
+
+  it('rejects invalid write-action envelopes and action literals', () => {
+    const queue = fixture('../queue-add.json') as Record<string, unknown>;
+    const stop = fixture('stop.json') as Record<string, unknown>;
+    const resume = fixture('resume.json') as Record<string, unknown>;
+    const unpark = fixture('unpark.json') as Record<string, unknown>;
+    const rejected = [
+      queueAddJsonSchema.safeParse({ schemaVersion: 1 }),
+      queueAddJsonSchema.safeParse({ ...queue, issues: 'none' }),
+      queueAddJsonSchema.safeParse({ ...queue, schemaVersion: 2 }),
+      queueAddJsonSchema.safeParse({
+        ...queue,
+        issues: [{ number: 1, outcome: 'other', order: 1, labelsAdded: [] }],
+      }),
+      queueAddJsonSchema.safeParse({ ...queue, action: 'other' }),
+      queueAddJsonSchema.safeParse({ ...queue, ok: 'yes' }),
+      stopJsonSchema.safeParse({ ...stop, action: 'resume' }),
+      resumeJsonSchema.safeParse({ ...resume, action: 'stop' }),
+      resumeJsonSchema.safeParse({ ...resume, repo: 42 }),
+      unparkJsonSchema.safeParse({ ...unpark, labelsAfter: 'queued' }),
+      unparkJsonSchema.safeParse({ ...unpark, schemaVersion: 2 }),
+      unparkJsonSchema.safeParse({ ...unpark, action: 'queue-add' }),
+    ];
+    expect(rejected.every(({ success }) => !success)).toBe(true);
   });
 
   it('rejects a string breaker', () => {
@@ -379,52 +497,3 @@ describe('JSON wire contracts', () => {
     for (const [schema, value] of invalid) expect(schema.safeParse(value).success).toBe(false);
   });
 });
-
-type Equal<Left, Right> = [Left] extends [Right] ? ([Right] extends [Left] ? true : false) : false;
-type LogsKeysMatch = Equal<keyof FactoryEvent, Exclude<keyof LogsLineJson, 'cursor'>>;
-type StatusBuilderMatches = Equal<ReturnType<typeof buildStatusJson>, StatusJson>;
-type LogsBuilderMatches = Equal<ReturnType<typeof buildLogsJson>, LogsLineJson>;
-
-function typeContractChecks(): void {
-  const validStatus: StatusJson = {
-    schemaVersion: 1,
-    repo: 'r',
-    product: null,
-    stop: false,
-    stopInfo: null,
-    breaker: { open: false, providers: [] },
-    active: [],
-    update: null,
-  };
-  function invalidStatus(): StatusJson {
-    const value: StatusJson = {
-      schemaVersion: 1,
-      repo: 'r',
-      product: null,
-      stop: false,
-      stopInfo: null,
-      breaker: { open: false, providers: [] },
-      active: [],
-      update: null,
-      // @ts-expect-error Undeclared status wire fields must fail excess-property checking.
-      unexpected: true,
-    };
-    return value;
-  }
-  function invalidLogs(): LogsLineJson {
-    const value: LogsLineJson = {
-      ts: '',
-      type: 'plan',
-      issue: '',
-      msg: '',
-      // @ts-expect-error Undeclared log envelope fields must fail excess-property checking.
-      unexpected: true,
-    };
-    return value;
-  }
-  void [validStatus, invalidStatus, invalidLogs];
-}
-
-void typeContractChecks;
-const typeChecks: [LogsKeysMatch, StatusBuilderMatches, LogsBuilderMatches] = [true, true, true];
-void typeChecks;

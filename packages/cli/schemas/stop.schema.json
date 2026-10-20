@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "ok": {
+      "type": "boolean",
+      "const": true
+    },
+    "repo": {
+      "type": "string"
+    },
+    "stopFlag": {
+      "type": "object",
+      "properties": {
+        "before": {
+          "type": "boolean"
+        },
+        "after": {
+          "type": "boolean"
+        }
+      },
+      "required": ["before", "after"],
+      "additionalProperties": false
+    },
+    "action": {
+      "type": "string",
+      "const": "stop"
+    }
+  },
+  "required": ["schemaVersion", "ok", "repo", "stopFlag", "action"],
+  "additionalProperties": false
+}
