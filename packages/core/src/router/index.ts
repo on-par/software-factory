@@ -28,6 +28,7 @@ import { describeFailureDetail } from './failure-detail.js';
 import { claimOllamaSkipNotice, type OllamaProbeResult, probeOllama } from './ollama-probe.js';
 import { throwIfWorktreeMissing } from './missing-worktree.js';
 import { filterModelsByRequires } from './requires.js';
+import { estimateUsageCost } from './cost.js';
 import { captureWorktreeState, resetWorktreeState } from './worktree-state.js';
 
 export type { ExecFn } from '../utils/exec.js';
@@ -74,11 +75,10 @@ export interface RouterResult {
   /** Why the winning model was reached via failover (undefined if the first model succeeded). */
   failoverReason?: FailoverReason;
   attempts: RouterAttempt[];
+  usage?: HarnessUsage;
 }
 
-/** Failed attempts that actually caused a model switch: the next attempt (or the
- *  final success) ran on a DIFFERENT model. Same-model retries (rate_limit
- *  cooldown, generic-error retry) are not failovers. */
+/** Only switches to a different model count; same-model retries are not failovers. */
 export function failoversFrom(
   attempts: RouterResult['attempts'],
 ): { model: string; reason: FailoverReason; detail?: string }[] {
@@ -638,8 +638,7 @@ export class ModelRouter {
     return key !== undefined && this.authTripped.has(key);
   }
 
-  /** Register a sink told which agent login (claude / codex / opencode) failed local_auth, so doctor can
-   *  flag it until the next login (#2733). Receives only the agent name. */
+  /** Register the agent name whose local_auth failed, so doctor can flag it until login (#2733). */
   setLocalAuthSink(sink: (agent: LocalAuthAgent) => void): void {
     this.localAuthSink = sink;
   }
@@ -662,14 +661,15 @@ export class ModelRouter {
     if (!this.costSink) return;
     const inputTokens = usage?.inputTokens ?? estimateTokens(prompt);
     const outputTokens = usage?.outputTokens ?? estimateTokens(output);
-    const cost = usage?.costUsd ?? this.registry.estimateCost(model, inputTokens, outputTokens);
+    const pricing = estimateUsageCost(this.registry, model, inputTokens, outputTokens, usage);
     this.costSink({
       task,
       model,
       inputTokens,
       outputTokens,
-      cost,
-      ...(cost === null ? { unpriced: true } : {}),
+      cost: pricing.cost,
+      ...(pricing.cachedRateMissing ? { cachedRateMissing: true } : {}),
+      ...(pricing.cost === null ? { unpriced: true } : {}),
       estimated: usage === undefined,
       duration: elapsedMs ?? 0,
       ...(usage?.rawInputTokens !== undefined ? { rawInputTokens: usage.rawInputTokens } : {}),
@@ -970,6 +970,7 @@ export class ModelRouter {
             exitCode: 0,
             ...(failoverReason ? { failoverReason } : {}),
             attempts,
+            ...(usage ? { usage } : {}),
           };
         }
 

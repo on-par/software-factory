@@ -15,6 +15,7 @@ export interface ModelDefaults {
   tier: string | string[];
   costPerMtokInput: number;
   costPerMtokOutput: number;
+  costPerMtokCachedInput?: number;
   contextWindow: number;
   capabilities: string[];
   envKey: string | null;

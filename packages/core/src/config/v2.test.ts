@@ -187,6 +187,7 @@ describe('full v2 config', () => {
           tier: 'boss',
           costPerMtokInput: 5,
           costPerMtokOutput: 25,
+          costPerMtokCachedInput: 0,
           contextWindow: 200000,
           capabilities: ['planning', 'review'],
           envKey: null,
@@ -277,6 +278,8 @@ describe('full v2 config', () => {
   it('round-trips a fully-specified config unchanged', () => {
     const cfg = parseV2Config(full);
     expect(cfg).toEqual(full);
+    expect(cfg.models.registry['claude-opus-5'].costPerMtokCachedInput).toBe(0);
+    expect(cfg.models.registry['gpt-5.6-terra-medium']).not.toHaveProperty('costPerMtokCachedInput');
   });
 
   it('loads a fully-specified config from disk', async () => {

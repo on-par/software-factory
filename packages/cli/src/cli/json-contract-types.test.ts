@@ -68,7 +68,7 @@ function typeContractChecks(): void {
     schemaVersion: 1,
     rows: [],
     perModel: [],
-    total: { cost: 0, unpricedCount: 0 },
+    total: { cost: 0, unpricedCount: 0, cachedRateMissing: 0 },
     // @ts-expect-error Undeclared cost fields must fail excess-property checking.
     unexpected: true,
   };

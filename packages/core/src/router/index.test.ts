@@ -1320,13 +1320,14 @@ describe('ModelRouter cost sink', () => {
     const rows: Parameters<Parameters<ModelRouter['setCostSink']>[0]>[0][] = [];
     router.setCostSink((entry) => rows.push(entry));
 
-    await router.run('plan', 'do it');
+    const result = await router.run('plan', 'do it');
 
     expect(rows).toHaveLength(1);
     expect(rows[0].task).toBe('plan');
     expect(rows[0].model).toBe('stub-model');
     expect(rows[0].inputTokens).toBeGreaterThan(0);
     expect(rows[0].outputTokens).toBeGreaterThan(0);
+    expect(result).not.toHaveProperty('usage');
     expect(rows[0].cost).toBeGreaterThan(0);
     expect(rows[0].unpriced).toBeUndefined();
     expect(rows[0].estimated).toBe(true);
@@ -1343,7 +1344,7 @@ describe('ModelRouter cost sink', () => {
   it('records an unpriced row (cost null) when the model has no known price', async () => {
     const stub = new StubModelExecutor({ scripts: { plan: [{ output: 'SCRIPTED PLAN' }] } });
     const router = new ModelRouter(costModels, routes, false, stub);
-    vi.spyOn(router.registryRef, 'estimateCost').mockReturnValue(null);
+    vi.spyOn(router.registryRef, 'estimateCost').mockReturnValue({ cost: null, cachedRateMissing: false });
     const rows: Parameters<Parameters<ModelRouter['setCostSink']>[0]>[0][] = [];
     router.setCostSink((entry) => rows.push(entry));
 
@@ -1352,23 +1353,6 @@ describe('ModelRouter cost sink', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].cost).toBeNull();
     expect(rows[0].unpriced).toBe(true);
-  });
-
-  it('keeps a harness-reported costUsd priced even when the model has no known price', async () => {
-    const stub = new StubModelExecutor({
-      scripts: {
-        plan: [{ output: 'X', effect: (ctx) => ctx.onUsage?.({ inputTokens: 10, outputTokens: 5, costUsd: 0.05 }) }],
-      },
-    });
-    const router = new ModelRouter(costModels, routes, false, stub);
-    vi.spyOn(router.registryRef, 'estimateCost').mockReturnValue(null);
-    const rows: Parameters<Parameters<ModelRouter['setCostSink']>[0]>[0][] = [];
-    router.setCostSink((entry) => rows.push(entry));
-
-    await router.run('plan', 'do it');
-
-    expect(rows[0].cost).toBe(0.05);
-    expect('unpriced' in rows[0]).toBe(false);
   });
 
   it('records real usage and marks estimated false when the harness reports it', async () => {

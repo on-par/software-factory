@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { collectDesignDiff, type DiffRunner } from '../checkers/design-smells.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import type { HarnessUsage } from '../harness/index.js';
 import { phaseOfCostEntry } from '../kpis/index.js';
 import { agentInvocationsFromEvents } from '../metrics/token-coverage.js';
 import { ModelRouter } from '../router/index.js';
@@ -66,14 +67,14 @@ const VALID = JSON.stringify({
   notInspected: ['tests'],
 });
 
-function makeRouter(output: string | Error) {
+function makeRouter(output: string | Error, usage?: HarnessUsage) {
   const run = vi.fn(async () => {
     if (output instanceof Error) throw output;
-    return { model: 'm-1', output, exitCode: 0, attempts: [] };
+    return { model: 'm-1', output, exitCode: 0, attempts: [], ...(usage ? { usage } : {}) };
   });
   const router = new ModelRouter(MODELS, ROUTES, false, new StubModelExecutor({ scripts: {} }));
   vi.spyOn(router, 'run').mockImplementation(run);
-  vi.spyOn(router.registryRef, 'estimateCost').mockReturnValue(0.01);
+  vi.spyOn(router.registryRef, 'estimateCost').mockReturnValue({ cost: 0.01, cachedRateMissing: false });
   return { router, run };
 }
 
@@ -142,6 +143,24 @@ describe('classifyPrShadow', () => {
     const events = lines.map((msg) => ({ ts: '', type: 'router' as const, issue: '1', msg }));
     const invocations = agentInvocationsFromEvents(events, () => 'stub');
     expect(invocations.map((i) => i.phase)).toEqual(['ship']);
+  });
+
+  it('estimates classifier cost from reported token and cache-read counts', async () => {
+    const { router } = makeRouter(VALID, { inputTokens: 200, outputTokens: 50, cacheReadTokens: 100 });
+    const estimate = vi
+      .spyOn(router.registryRef, 'estimateCost')
+      .mockReturnValue({ cost: 0.25, cachedRateMissing: true });
+    const result = await classifyPrShadow(input(router), deps);
+    expect(estimate).toHaveBeenCalledWith('m-1', { inputTokens: 200, outputTokens: 50, cacheReadTokens: 100 });
+    expect(result.costUsd).toBe(0.25);
+  });
+
+  it('keeps provider classifier cost and skips registry estimation', async () => {
+    const { router } = makeRouter(VALID, { inputTokens: 200, outputTokens: 50, cacheReadTokens: 100, costUsd: 0 });
+    const estimate = vi.spyOn(router.registryRef, 'estimateCost');
+    const result = await classifyPrShadow(input(router), deps);
+    expect(result.costUsd).toBe(0);
+    expect(estimate).not.toHaveBeenCalled();
   });
 
   it('passes the pin as modelOverride and omits it otherwise', async () => {

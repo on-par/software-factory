@@ -48,6 +48,10 @@ const ModelDefSchema = z
       .describe('Tier name, or list of tier names, this model is eligible for.'),
     costPerMtokInput: z.number().describe('USD cost per million input tokens (0 for local/free models).'),
     costPerMtokOutput: z.number().describe('USD cost per million output tokens (0 for local/free models).'),
+    costPerMtokCachedInput: z
+      .number()
+      .optional()
+      .describe('USD cost per million cached input tokens; absent rates use the full input rate.'),
     contextWindow: z.number().describe('Maximum context window in tokens.'),
     capabilities: z.array(z.string()).describe('Capability tags (e.g. planning, implementation, review).'),
     envKey: z

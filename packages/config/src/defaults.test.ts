@@ -14,6 +14,14 @@ import {
 } from './defaults.js';
 
 describe('shipped defaults', () => {
+  it('keeps cached input prices optional and leaves shipped rates unset', () => {
+    const fixture: ModelDefaults = { ...defaultModelsConfig.models['claude-opus-5'], costPerMtokCachedInput: 0 };
+    expect(fixture.costPerMtokCachedInput).toBe(0);
+    expect(Object.values(defaultModelsConfig.models).every((model) => model.costPerMtokCachedInput === undefined)).toBe(
+      true,
+    );
+  });
+
   it('defaults the lane breaker threshold to 2 (#1915)', () => {
     expect(defaultLaneBreakerThreshold).toBe(2);
   });

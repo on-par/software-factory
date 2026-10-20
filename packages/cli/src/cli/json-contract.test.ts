@@ -490,7 +490,8 @@ describe('JSON wire contracts', () => {
           estimateUsd: null,
         },
       ],
-      [costJsonSchema, { schemaVersion: 1, rows: 'none', perModel: [], total: { cost: 0, unpricedCount: 0 } }],
+      // prettier-ignore
+      [costJsonSchema, { schemaVersion: 1, rows: 'none', perModel: [], total: { cost: 0, unpricedCount: 0, cachedRateMissing: 0 } }],
       [runsJsonSchema, { schemaVersion: 2, runs: [] }],
       [runDiffstatJsonSchema, { schemaVersion: 1, issue: 1, branch: null, base: 'main', files: null, totals: null }],
     ] as const;

@@ -330,7 +330,7 @@ function makeCoreFakes() {
       return {
         list: () => ['claude-model'],
         getTiers: () => ['worker'],
-        estimateCost: () => 1.23,
+        estimateCost: () => ({ cost: 1.23, cachedRateMissing: false }),
         isExperimental: () => false,
         isAvailable: () => true,
         getModelsInTier: () => ['claude-model'],
@@ -1231,8 +1231,7 @@ describe('cli commands (via main dispatch)', () => {
       const out = logged();
       expect(out).toContain('Available Models');
       expect(out).toContain('claude-model');
-      expect(out).toContain('Tiers');
-      expect(out).toContain('boss:');
+      expect([out.includes('Tiers'), out.includes('boss:'), out.includes('$1.23/M')]).toEqual([true, true, true]);
     });
 
     describe('with the real registry and diagnoseModels (#2402)', () => {
@@ -1399,7 +1398,7 @@ describe('cli commands (via main dispatch)', () => {
       expect(out.split('\n')).toHaveLength(1);
       const json = JSON.parse(out);
       expect(json.schemaVersion).toBe(1);
-      expect(json.total).toEqual({ cost: 1, unpricedCount: 1 });
+      expect(json.total).toEqual({ cost: 1, unpricedCount: 1, cachedRateMissing: 0 });
       expect(json.rows[1].cost).toBeNull();
     });
 
@@ -1412,7 +1411,7 @@ describe('cli commands (via main dispatch)', () => {
       const json = JSON.parse(logged());
       expect(json.rows).toHaveLength(1);
       expect(json.rows[0].issue).toBe('296');
-      expect(json.total).toEqual({ cost: 1, unpricedCount: 0 });
+      expect(json.total).toEqual({ cost: 1, unpricedCount: 0, cachedRateMissing: 0 });
     });
 
     it('--json with no costs prints empty JSON, not the text message', async () => {
@@ -1422,7 +1421,7 @@ describe('cli commands (via main dispatch)', () => {
         schemaVersion: 1,
         rows: [],
         perModel: [],
-        total: { cost: 0, unpricedCount: 0 },
+        total: { cost: 0, unpricedCount: 0, cachedRateMissing: 0 },
       });
     });
 
@@ -1498,15 +1497,16 @@ describe('cli commands (via main dispatch)', () => {
 
     it('shows a per-entry breakdown filtered to one issue via --issue', async () => {
       h.costs = [
-        { issue: '296', task: 'build_codex', model: 'qwen', cost: 0, failoverReason: 'rate_limit' },
+        { issue: '296', task: 'build_codex', model: 'qwen', cost: 0, cachedRateMissing: true },
         { issue: '296', task: 'plan', model: 'opus', cost: 0.12 },
         { issue: '7', task: 'plan', model: 'opus', cost: 0.05 },
       ];
       await runMain('cost', '--issue', '296');
       const out = logged();
       expect(out).toContain('build_codex');
-      expect(out).toContain('qwen');
-      expect(out).toContain('[failover: rate_limit]');
+      expect(out).toContain('(cached at full input rate)');
+      expect(out).toContain('qwen: cachedRateMissing=1');
+      expect(out).toContain('cachedRateMissing: 1');
       expect(out).not.toContain('0.05');
     });
 

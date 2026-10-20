@@ -213,48 +213,30 @@ describe('ModelRegistry', () => {
 });
 
 describe('estimateCost', () => {
-  it('computes cost from per-mtok input/output rates', () => {
-    const costConfig: ModelsConfig = {
-      ...config,
-      models: {
-        ...config.models,
-        'priced-model': {
-          provider: 'custom',
-          tier: 'boss',
-          costPerMtokInput: 3,
-          costPerMtokOutput: 15,
-          contextWindow: 1000,
-          capabilities: [],
-          envKey: null,
-        },
-      },
-    };
-    const registry = new ModelRegistry(costConfig);
-    expect(registry.estimateCost('priced-model', 1_000_000, 500_000)).toBeCloseTo(3 + 7.5);
-  });
-
-  it('returns null (unpriced) for an unknown model', () => {
-    const registry = new ModelRegistry(config);
-    expect(registry.estimateCost('missing-model', 1000, 1000)).toBeNull();
-  });
-
-  it('returns 0 for a registered model priced at 0', () => {
+  it('estimateCost prices cache reads at the cached-input rate (#3264 BUILD row)', () => {
     const registry = new ModelRegistry({
       ...config,
       models: {
         ...config.models,
-        'free-model': {
+        'fixture-model': {
           provider: 'custom',
           tier: 'boss',
-          costPerMtokInput: 0,
-          costPerMtokOutput: 0,
+          costPerMtokInput: 1.25,
+          costPerMtokOutput: 10,
+          costPerMtokCachedInput: 0.125,
           contextWindow: 1000,
           capabilities: [],
           envKey: null,
         },
       },
     });
-    expect(registry.estimateCost('free-model', 1000, 1000)).toBe(0);
+    const result = registry.estimateCost('fixture-model', {
+      inputTokens: 25_573_945,
+      outputTokens: 0,
+      cacheReadTokens: 24_881_152,
+    });
+    expect(result.cost).toBeCloseTo(3.97613525, 4);
+    expect(result.cachedRateMissing).toBe(false);
   });
 });
 

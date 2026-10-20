@@ -25,6 +25,7 @@ import { hasOpencodeLoginEvidence } from '../utils/opencode-config.js';
 import { isRemoteOllamaBaseUrl, localAuthFailureReason } from './diagnose-helpers.js';
 import { type PiAuthStatus, piAuthOutcome, runPiAuthCheck } from './pi-auth.js';
 import { runHarnessProbe } from './harness-probe.js';
+import { estimateModelCost } from './pricing.js';
 import { applyZdrReview } from './zdr-review.js';
 
 export { localAuthFailureReason };
@@ -178,11 +179,12 @@ export class ModelRegistry {
     return this.get(modelId)?.codexFlag;
   }
 
-  /** Estimate cost for a model given token counts. Null means unpriced (model not registered); 0 means free (#1738). */
-  estimateCost(modelId: string, inputTokens: number, outputTokens: number): number | null {
-    const def = this.get(modelId);
-    if (!def) return null;
-    return (inputTokens / 1_000_000) * def.costPerMtokInput + (outputTokens / 1_000_000) * def.costPerMtokOutput;
+  /** Estimate cost from total input, output, and optional cache-read counts. */
+  estimateCost(
+    modelId: string,
+    usage: { inputTokens: number; outputTokens: number; cacheReadTokens?: number },
+  ): { cost: number | null; cachedRateMissing: boolean } {
+    return estimateModelCost(this.get(modelId), usage);
   }
 
   /** Get all available models for a tier, in priority order */

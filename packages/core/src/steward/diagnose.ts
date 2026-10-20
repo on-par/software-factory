@@ -210,7 +210,15 @@ export function buildStewardCostEntry(
   const usage = reply.usage;
   const inputTokens = usage?.inputTokens ?? estimate(prompt);
   const outputTokens = usage?.outputTokens ?? estimate(reply.text);
-  const cost = usage?.costUsd ?? new ModelRegistry(loadModelsConfig()).estimateCost(model, inputTokens, outputTokens);
+  const estimateResult =
+    usage?.costUsd === undefined || usage.costUsd === null
+      ? new ModelRegistry(loadModelsConfig()).estimateCost(model, {
+          inputTokens,
+          outputTokens,
+          cacheReadTokens: usage?.cacheReadTokens,
+        })
+      : undefined;
+  const cost = usage?.costUsd ?? estimateResult?.cost ?? null;
   return {
     issue: String(issue),
     task: STEWARD_COST_TASK,
@@ -218,6 +226,7 @@ export function buildStewardCostEntry(
     inputTokens,
     outputTokens,
     cost,
+    ...(estimateResult?.cachedRateMissing ? { cachedRateMissing: true } : {}),
     ...(cost === null ? { unpriced: true } : {}),
     estimated: usage === undefined,
     ...(usage?.rawInputTokens !== undefined ? { rawInputTokens: usage.rawInputTokens } : {}),

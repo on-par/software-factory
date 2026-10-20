@@ -15,6 +15,7 @@ export interface ModelDefinition {
   tier: ModelTier | ModelTier[];
   costPerMtokInput: number;
   costPerMtokOutput: number;
+  costPerMtokCachedInput?: number;
   contextWindow: number;
   capabilities: ModelCapability[];
   envKey: string | null;
@@ -387,8 +388,6 @@ export interface FactoryEvent {
   durationMs?: number;
 }
 
-// ---------- Cost Tracking ----------
-
 export interface CostEntry {
   ts: string;
   issue: string;
@@ -397,13 +396,14 @@ export interface CostEntry {
   inputTokens: number;
   outputTokens: number;
   cost: number | null;
+  /** True when positive cache reads used the ordinary input rate without a configured cached rate. */
+  cachedRateMissing?: boolean;
   /** True when no price was known for the model, so cost is null (#1738, ADR-0020). */
   unpriced?: boolean;
   failoverReason?: FailoverReason;
   /** Set when this row is the cost of a retry attempt (#419). */
   retryCause?: RetryCause;
-  /** False when inputTokens/outputTokens came from the provider's own usage
-   *  report; true when they are the character-count heuristic (#424). */
+  /** False for provider counts; true for character-count heuristics (#424). */
   estimated?: boolean;
   /** Uncached input tokens; inputTokens minus the cache split (#490). */
   rawInputTokens?: number;

@@ -42,7 +42,7 @@ describe('buildCostJson', () => {
       ]),
     );
     expect(costJsonSchema.parse(json)).toEqual(json);
-    expect(json.total).toEqual({ cost: 3.5, unpricedCount: 0 });
+    expect(json.total).toEqual({ cost: 3.5, unpricedCount: 0, cachedRateMissing: 0 });
     expect(json.perModel[0]).toMatchObject({ model: 'a', tasks: 2, cost: 1.5 });
     expect(json.rows[0]).toEqual({ ...row({}), cacheReadTokens: 3, cacheCreationTokens: 4, cost: 1 });
   });
@@ -59,14 +59,14 @@ describe('buildCostJson', () => {
     );
     expect(costJsonSchema.parse(json)).toEqual(json);
     expect(json.rows.map((r) => r.cost)).toEqual([2, null, null, null, null]);
-    expect(json.total).toEqual({ cost: 2, unpricedCount: 4 });
+    expect(json.total).toEqual({ cost: 2, unpricedCount: 4, cachedRateMissing: 0 });
     expect(json.perModel.find((m) => m.model === 'u')).toMatchObject({ cost: null, unpricedCount: 1 });
     expect(json.perModel.find((m) => m.model === 'a')).toMatchObject({ cost: 2, unpricedCount: 1 });
   });
 
   it('gives null total when everything is unpriced', () => {
     const json = buildCostJson(load([row({ cost: null, unpriced: true })]));
-    expect(json.total).toEqual({ cost: null, unpricedCount: 1 });
+    expect(json.total).toEqual({ cost: null, unpricedCount: 1, cachedRateMissing: 0 });
   });
 
   it('filters by issue', () => {
@@ -74,15 +74,45 @@ describe('buildCostJson', () => {
     const json = buildCostJson(entries, '2');
     expect(json.rows).toHaveLength(1);
     expect(json.perModel.map((m) => m.model)).toEqual(['b']);
-    expect(json.total).toEqual({ cost: 4, unpricedCount: 0 });
+    expect(json.total).toEqual({ cost: 4, unpricedCount: 0, cachedRateMissing: 0 });
     const none = buildCostJson(entries, '99');
-    expect(none).toEqual({ schemaVersion: 1, rows: [], perModel: [], total: { cost: 0, unpricedCount: 0 } });
+    expect(none).toEqual({
+      schemaVersion: 1,
+      rows: [],
+      perModel: [],
+      total: { cost: 0, unpricedCount: 0, cachedRateMissing: 0 },
+    });
   });
 
   it('handles empty and missing files', () => {
-    const empty = { schemaVersion: 1, rows: [], perModel: [], total: { cost: 0, unpricedCount: 0 } };
+    const empty = {
+      schemaVersion: 1,
+      rows: [],
+      perModel: [],
+      total: { cost: 0, unpricedCount: 0, cachedRateMissing: 0 },
+    };
     expect(buildCostJson(load([]))).toEqual(empty);
     expect(buildCostJson(readCosts(join(dir, 'missing.jsonl')))).toEqual(empty);
+  });
+
+  it('counts cachedRateMissing per model and total after issue filtering', () => {
+    const json = buildCostJson(
+      load([
+        row({ issue: '1', model: 'a', cost: 1, cachedRateMissing: true }),
+        row({ issue: '1', model: 'a', cost: 2, cachedRateMissing: false }),
+        row({ issue: '1', model: 'b', cost: null, unpriced: true, cachedRateMissing: true }),
+        row({ issue: '2', model: 'b', cost: 3, cachedRateMissing: true }),
+        row({ issue: '2', model: 'legacy', cost: 4 }),
+      ]),
+      '1',
+    );
+    expect(costJsonSchema.parse(json)).toEqual(json);
+    expect(json.perModel.map(({ model, cachedRateMissing }) => [model, cachedRateMissing])).toEqual([
+      ['a', 1],
+      ['b', 1],
+    ]);
+    expect(json.total.cachedRateMissing).toBe(2);
+    expect(buildCostJson([], 'missing').total.cachedRateMissing).toBe(0);
   });
 
   it('nulls missing cache fields', () => {

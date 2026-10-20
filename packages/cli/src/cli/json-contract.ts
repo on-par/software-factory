@@ -160,9 +160,10 @@ export const costJsonSchema = z.object({
       outputTokens: z.number(),
       cost: z.number().nullable(),
       unpricedCount: z.number(),
+      cachedRateMissing: z.number(),
     }),
   ),
-  total: z.object({ cost: z.number().nullable(), unpricedCount: z.number() }),
+  total: z.object({ cost: z.number().nullable(), unpricedCount: z.number(), cachedRateMissing: z.number() }),
 });
 
 export const runsJsonSchema = z.object({

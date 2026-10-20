@@ -53,7 +53,6 @@ import {
   type WatchdogPolicySource,
   type WorkRequest,
   acquirePortLease,
-  aggregateCosts,
   appendKpiHistoryLine,
   applyRepoConfig,
   buildPhase,
@@ -130,7 +129,6 @@ import {
   resolveWatchdogPolicy,
   runAutoIngest,
   shipPhase,
-  formatCostTotal,
   validateQueue,
   watchUsage,
   writeLocalRunReport,
@@ -263,6 +261,7 @@ import { setShipRuntime } from './ship-runtime.js';
 import { runQueueClear } from './queue-clear.js';
 import { buildProgram } from './program.js';
 import { buildCostJson } from './cost-json.js';
+import { formatCostSummary, formatIssueCostReport } from './cost-report.js';
 import { buildQueueAddJson } from './queue-add-json.js';
 import { renderQueueAddLines, renderUnparkLines } from './queue-output.js';
 import { buildQueueListJson } from './queue-list.js';
@@ -1313,8 +1312,8 @@ async function cmdModels(opts: { doctor?: boolean } = {}) {
   const byModel = new Map(diagnoses.map((d) => [d.model, d]));
   for (const m of registry.list()) {
     const tiers = registry.getTiers(m).join('/');
-    const est = registry.estimateCost(m, 1_000_000, 1_000_000);
-    const cost = est === null ? 'unpriced' : `$${est.toFixed(2)}/M`;
+    const est = registry.estimateCost(m, { inputTokens: 1_000_000, outputTokens: 1_000_000 });
+    const cost = est.cost === null ? 'unpriced' : `$${est.cost.toFixed(2)}/M`;
     const d = byModel.get(m);
     const avail = d ? modelStatusIcon(d) : styleText('red', '❌');
     const tag = registry.isExperimental(m) ? styleText('yellow', ' [experimental]') : '';
@@ -1349,15 +1348,7 @@ async function cmdCost(opts: { issue?: string; json?: boolean } = {}) {
       console.log(`no cost data for issue ${opts.issue}`);
       return;
     }
-    console.log(styleText('bold', `== Costs for issue ${opts.issue} ==`));
-    for (const c of filtered) {
-      console.log(
-        `  ${c.task} ${c.model} ${c.cost === null || c.cost === undefined ? 'unknown' : `$${c.cost.toFixed(4)}`}${c.failoverReason ? ` [failover: ${c.failoverReason}]` : ''}`,
-      );
-    }
-    const t = aggregateCosts(filtered).total;
-    console.log('  ---');
-    console.log(`  Total: ${formatCostTotal(t.cost, t.unpricedCount)}`);
+    for (const line of formatIssueCostReport(filtered, opts.issue)) console.log(line);
     return;
   }
 
@@ -1366,31 +1357,7 @@ async function cmdCost(opts: { issue?: string; json?: boolean } = {}) {
     return;
   }
 
-  const byModel = new Map<
-    string,
-    { tasks: number; priced: number; pricedCount: number; unpriced: number; failovers: number }
-  >();
-  for (const c of costs) {
-    const e = byModel.get(c.model) ?? { tasks: 0, priced: 0, pricedCount: 0, unpriced: 0, failovers: 0 };
-    e.tasks++;
-    if (c.unpriced === true || c.cost === null || c.cost === undefined) e.unpriced++;
-    else {
-      e.priced += c.cost;
-      e.pricedCount++;
-    }
-    if (c.failoverReason) e.failovers++;
-    byModel.set(c.model, e);
-  }
-
-  console.log(styleText('bold', '== Cost Summary =='));
-  for (const [model, { tasks, priced, pricedCount, unpriced, failovers }] of byModel) {
-    const failoverSuffix = failovers > 0 ? ` (${failovers} failover${failovers === 1 ? '' : 's'})` : '';
-    const modelCost = formatCostTotal(pricedCount === 0 && unpriced > 0 ? null : priced, unpriced);
-    console.log(`  ${model}: ${tasks} tasks, ${modelCost}${failoverSuffix}`);
-  }
-  const grand = aggregateCosts(costs).total;
-  console.log('  ---');
-  console.log(`  Total: ${formatCostTotal(grand.cost, grand.unpricedCount)}`);
+  for (const line of formatCostSummary(costs)) console.log(line);
 }
 
 async function cmdCheck(issueRaw: string, opts: { json?: boolean; deep?: boolean }) {
