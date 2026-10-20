@@ -111,7 +111,14 @@ export async function restackAfterSquashMerge(opts: StackRestackOptions): Promis
       await git(repoRoot, 'fetch', remote, `+refs/heads/${c.branch}:refs/remotes/${remote}/${c.branch}`);
     }
     if (!(await succeeds(repoRoot, 'cat-file', '-e', `${mergedHead}^{commit}`))) {
-      await succeeds(repoRoot, 'fetch', remote, `+refs/pull/${mergedPrNumber}/head`);
+      await git(repoRoot, 'fetch', remote, `+refs/pull/${mergedPrNumber}/head`);
+      if (!(await succeeds(repoRoot, 'cat-file', '-e', `${mergedHead}^{commit}`))) {
+        return park(
+          `merged head ${mergedHead} unavailable after fetching refs/pull/${mergedPrNumber}/head`,
+          candidates[0]!.index,
+          candidates[0]!.prNumber,
+        );
+      }
     }
   } catch (err) {
     return park(
@@ -123,7 +130,20 @@ export async function restackAfterSquashMerge(opts: StackRestackOptions): Promis
 
   const remoteRef = (c: Candidate): string => `refs/remotes/${remote}/${c.branch}`;
   // Contiguous run starting at the lowest slice that still holds the merged head.
-  if (!(await succeeds(repoRoot, 'merge-base', '--is-ancestor', mergedHead, remoteRef(candidates[0]!)))) {
+  let holdsMerged = true;
+  try {
+    await git(repoRoot, 'merge-base', '--is-ancestor', mergedHead, remoteRef(candidates[0]!));
+  } catch (err) {
+    if ((err as { code?: unknown } | null)?.code !== 1) {
+      return park(
+        `could not check whether slice ${candidates[0]!.index} holds slice ${mergedIndex}'s commits: ${detail(err)}`,
+        candidates[0]!.index,
+        candidates[0]!.prNumber,
+      );
+    }
+    holdsMerged = false;
+  }
+  if (!holdsMerged) {
     return {
       status: 'nothing',
       reason: `slice ${candidates[0]!.index} no longer holds slice ${mergedIndex}'s commits`,
