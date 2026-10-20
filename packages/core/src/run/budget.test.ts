@@ -1,19 +1,20 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { readWorktreeKeeps } from '../utils/worktree-keeps.js';
 import { enforceIssueBudget } from './budget.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 
 describe('enforceIssueBudget', () => {
+  const tmp = createTempDirs();
   let dir: string;
   const setup = () => {
-    dir = mkdtempSync(join(tmpdir(), 'budget-'));
+    dir = tmp.makeSync('budget-');
     return join(dir, 'keeps.json');
   };
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => tmp.cleanup());
 
   it.each([
     [10, 30],

@@ -1,5 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -7,13 +6,15 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { formatGcReport, sweepWorktrees } from './worktree-gc.js';
 import type { SweepDeps } from './worktree-gc.js';
 import { readWorktreeKeeps, upsertWorktreeKeep } from './worktree-keeps.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 
 describe('sweepWorktrees honors worktree-keeps.json (#3316)', () => {
+  const tmp = createTempDirs();
   let parentDir: string;
-  afterEach(() => rmSync(parentDir, { recursive: true, force: true }));
+  afterEach(() => tmp.cleanup());
 
   function setup(issue = 3264) {
-    parentDir = mkdtempSync(join(tmpdir(), 'gc-keeps-'));
+    parentDir = tmp.makeSync('gc-keeps-');
     const root = join(parentDir, 'repo');
     mkdirSync(root, { recursive: true });
     const wt = join(parentDir, `${basename(root)}-factory-ship-it-${issue}`);

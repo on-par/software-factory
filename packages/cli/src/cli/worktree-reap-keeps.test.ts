@@ -1,20 +1,20 @@
 // packages/cli/src/cli/worktree-reap-keeps.test.ts — the park-time reap honors a budget-park keep record (#3316)
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { getFactoryPaths } from '@on-par/factory-core';
 import { findWorktreeKeep, type reapLaneWorktree } from '@on-par/factory-core/internal';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { reapParkedLane, type ReapRuntime } from './worktree-reap.js';
 
 describe('reapParkedLane with a keep record', () => {
-  let dir: string;
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  const tmp = createTempDirs();
+  afterEach(() => tmp.cleanup());
 
   function setup() {
-    dir = mkdtempSync(join(tmpdir(), 'reap-keeps-'));
+    const dir = tmp.makeSync('reap-keeps-');
     const repoRoot = join(dir, 'repo');
     const worktreePath = join(dir, 'repo-factory-3264');
     mkdirSync(repoRoot, { recursive: true });

@@ -1,18 +1,19 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { findWorktreeKeep, readWorktreeKeeps, removeWorktreeKeep, upsertWorktreeKeep } from './worktree-keeps.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 
 describe('worktree-keeps store', () => {
+  const tmp = createTempDirs();
   let dir: string;
   const setup = () => {
-    dir = mkdtempSync(join(tmpdir(), 'keeps-'));
+    dir = tmp.makeSync('keeps-');
     return join(dir, 'state', 'worktree-keeps.json');
   };
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => tmp.cleanup());
   const keep = (issue: number, reason = 'budget_exceeded') => ({ issue, path: `/wt/${issue}`, reason, since: 'now' });
 
   it('reads a missing file as empty with no log', () => {
