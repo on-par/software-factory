@@ -64,7 +64,12 @@ describe('fetchRequiredChecksVerdict', () => {
     protection?: unknown;
     rules?: unknown;
     runs?: Array<ReturnType<typeof run> & { check_suite?: { id: number } | null }>;
-    workflowRuns?: Array<{ check_suite_id?: number }>;
+    workflowRuns?: Array<{
+      check_suite_id?: number;
+      name?: string | null;
+      status?: string;
+      conclusion?: string | null;
+    }>;
   }) {
     const settle = (v: unknown) => async () => {
       if (v instanceof Error) throw v;
@@ -141,7 +146,7 @@ describe('fetchRequiredChecksVerdict', () => {
           inSuite('gitleaks', 'success', 1),
           inSuite('pipeline-integration', 'failure', 2),
         ],
-        workflowRuns: [{ check_suite_id: 1 }],
+        workflowRuns: [{ check_suite_id: 1, name: 'CI' }],
       });
       expect(await fetchRequiredChecksVerdict(octokit, args, { pushFallback: true })).toEqual({
         green: true,
@@ -156,7 +161,7 @@ describe('fetchRequiredChecksVerdict', () => {
     it('is not green when a push-suite run failed', async () => {
       const { octokit } = fake({
         runs: [inSuite('ci', 'failure', 1)],
-        workflowRuns: [{ check_suite_id: 1 }],
+        workflowRuns: [{ check_suite_id: 1, name: 'CI' }],
       });
       expect(await fetchRequiredChecksVerdict(octokit, args, { pushFallback: true })).toEqual({
         green: false,
@@ -168,8 +173,95 @@ describe('fetchRequiredChecksVerdict', () => {
       const { octokit } = fake({ runs: [inSuite('ci', 'success', 1), run('vercel', 'completed', 'success')] });
       expect(await fetchRequiredChecksVerdict(octokit, args, { pushFallback: true })).toEqual({
         green: false,
-        reason: 'no push-triggered checks',
+        reason: expect.stringContaining('no code-health checks'),
       });
+    });
+
+    const done = (name: string, id: number, conclusion: string, status = 'completed') => ({
+      name,
+      check_suite_id: id,
+      status,
+      conclusion,
+    });
+
+    it('a failed Release push workflow does not make the base verdict red when CI passed (ship-it 342b1042)', async () => {
+      const { octokit } = fake({
+        protection: httpError(403),
+        rules: httpError(403),
+        runs: [inSuite('drift', 'success', 1), inSuite('ios', 'success', 1), inSuite('release', 'failure', 2)],
+        workflowRuns: [done('CI', 1, 'success'), done('Release', 2, 'failure')],
+      });
+      const spy = vi.fn();
+      const verdict = await fetchRequiredChecksVerdict(octokit, args, {
+        pushFallback: true,
+        onPushWorkflowFailed: spy,
+      });
+      expect(verdict.green).toBe(true);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith({ workflow: 'Release', conclusion: 'failure', sha: args.sha });
+    });
+
+    it('an explicit baseHealth.checks allowlist decides the verdict and names a failed contract run', async () => {
+      const { octokit, getProtection } = (() => {
+        const f = fake({ runs: [inSuite('contract', 'failure', 1), inSuite('ios', 'success', 1)] });
+        return { octokit: f.octokit, getProtection: (f.octokit as any).rest.repos.getStatusChecksProtection };
+      })();
+      expect(
+        await fetchRequiredChecksVerdict(octokit, args, { pushFallback: true, checks: ['contract', 'ios'] }),
+      ).toEqual({ green: false, reason: 'contract failure' });
+      expect(getProtection).not.toHaveBeenCalled();
+      const ok = fake({ runs: [inSuite('contract', 'success', 1), inSuite('ios', 'success', 1)] });
+      expect(
+        (await fetchRequiredChecksVerdict(ok.octokit, args, { pushFallback: true, checks: ['contract', 'ios'] })).basis,
+      ).toBe('base health checks: contract, ios');
+    });
+
+    it('readable required checks beat the push fallback and a failed Release reported via onPushWorkflowFailed does not turn them red', async () => {
+      const { octokit } = fake({
+        protection: { contexts: ['ci'] },
+        runs: [inSuite('ci', 'success', 1), inSuite('release', 'failure', 2)],
+        workflowRuns: [done('CI', 1, 'success'), done('Release', 2, 'failure')],
+      });
+      const spy = vi.fn();
+      const verdict = await fetchRequiredChecksVerdict(octokit, args, {
+        pushFallback: true,
+        onPushWorkflowFailed: spy,
+      });
+      expect(verdict.green).toBe(true);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith(expect.objectContaining({ workflow: 'Release' }));
+    });
+
+    it('fails closed naming the missing code-health checks when there is no allowlist, no required checks and no CI push workflow', async () => {
+      const { octokit } = fake({
+        runs: [inSuite('release', 'success', 2)],
+        workflowRuns: [done('Release', 2, 'success')],
+      });
+      const verdict = await fetchRequiredChecksVerdict(octokit, args, { pushFallback: true });
+      expect(verdict.green).toBe(false);
+      expect(verdict.reason).toContain('baseHealth.checks');
+      expect(verdict.reason).toContain('CI');
+    });
+
+    it('matches the CI workflow case-insensitively and reports only completed failures', async () => {
+      const { octokit } = fake({
+        runs: [inSuite('build', 'success', 1)],
+        workflowRuns: [
+          done(' ci ', 1, 'success'),
+          done('Skipped', 2, 'skipped'),
+          done('Neutral', 3, 'neutral'),
+          done('Running', 4, 'failure', 'in_progress'),
+          done('Deploy', 5, 'timed_out'),
+        ],
+      });
+      const spy = vi.fn();
+      const verdict = await fetchRequiredChecksVerdict(octokit, args, {
+        pushFallback: true,
+        onPushWorkflowFailed: spy,
+      });
+      expect(verdict.green).toBe(true);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith(expect.objectContaining({ workflow: 'Deploy', conclusion: 'timed_out' }));
     });
 
     it('without pushFallback still reports no required checks and skips the workflow-run lookup', async () => {
@@ -277,6 +369,20 @@ describe('fetchRequiredContexts', () => {
       },
     };
     expect(await fetchRequiredContexts(octokit, args)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('treats a 403 from rulesets as no contexts from that source', async () => {
+    const octokit: any = {
+      rest: {
+        repos: {
+          getStatusChecksProtection: async () => ({ data: { contexts: ['a'] } }),
+          getBranchRules: async () => {
+            throw Object.assign(new Error('Forbidden'), { status: 403 });
+          },
+        },
+      },
+    };
+    expect(await fetchRequiredContexts(octokit, args)).toEqual(['a']);
   });
 
   it('returns [] when both lookups 404', async () => {

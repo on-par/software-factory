@@ -1,7 +1,11 @@
-import type { Octokit } from '@octokit/rest';
-import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-import { baseHealthWithCi } from './base-health-ci.js';
+import { createTempDirs } from '@on-par/factory-core/testing';
+import type { Octokit } from '@octokit/rest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { baseChecksVerdict, baseHealthWithCi, resetBasePushWorkflowReports } from './base-health-ci.js';
 
 const forbidden = () => Object.assign(new Error('Forbidden'), { status: 403 });
 
@@ -29,6 +33,47 @@ function octokit403(): Octokit {
   };
   return Object.assign({} as Octokit, { rest });
 }
+
+const tmp = createTempDirs();
+beforeEach(() => resetBasePushWorkflowReports());
+afterEach(() => tmp.cleanup());
+
+describe('baseChecksVerdict (#3290)', () => {
+  it('is green on CI and logs one base_push_workflow_failed event per SHA for a failed Release', async () => {
+    const base = octokit403() as any;
+    base.rest.checks.listForRef = async () => ({
+      data: {
+        check_runs: [
+          { name: 'ci', status: 'completed', conclusion: 'success', check_suite: { id: 1 } },
+          { name: 'release', status: 'completed', conclusion: 'failure', check_suite: { id: 2 } },
+        ],
+      },
+    });
+    base.rest.actions.listWorkflowRunsForRepo = async () => ({
+      data: {
+        workflow_runs: [
+          { name: 'CI', status: 'completed', conclusion: 'success', check_suite_id: 1 },
+          { name: 'Release', status: 'completed', conclusion: 'failure', check_suite_id: 2 },
+        ],
+      },
+    });
+    const events = join(tmp.makeSync('bhci-'), 'events.jsonl');
+    const verdict = baseChecksVerdict(base as Octokit, 'o', 'r', { events, lane: 'lane-1' });
+    const sha = 'd'.repeat(40);
+    expect((await verdict(sha)).green).toBe(true);
+    expect((await verdict(sha)).green).toBe(true);
+    const logged = readFileSync(events, 'utf-8')
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.type === 'base_push_workflow_failed');
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toMatchObject({
+      lane: 'lane-1',
+      msg: expect.stringContaining('push workflow Release failure on dddddddd'),
+    });
+  });
+});
 
 describe('baseHealthWithCi (#3287)', () => {
   it('passes pushFallback so a 403 protection API with green push checks is green', async () => {

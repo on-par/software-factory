@@ -23,11 +23,11 @@ import {
   createGithubQueue,
   createOctokitQueueClient,
   evaluateLoadGuard,
-  fetchRequiredChecksVerdict,
   formatQueueOrderConflict,
   logEvent,
   readHostLoad,
   recordSliceMerged,
+  resolveBaseHealthChecks,
   resolveHostLoadGuard,
   resolveLocalOnly,
   resolveRunUsageHarness,
@@ -36,6 +36,7 @@ import {
 } from '@on-par/factory-core/internal';
 
 import { admissionStateReaderFor } from './admission.js';
+import { baseChecksVerdict } from './base-health-ci.js';
 import { createBaseHoldGate, formatBaseHoldCleared } from './base-hold.js';
 import { keychainPreflightError, type KeychainProbeStatus } from './doctor.js';
 import type {
@@ -187,6 +188,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
     const loadGuardPolicy = resolveHostLoadGuard(factoryConfig);
     let knobs: UsageKnobs;
     let laneBreakerThreshold: number;
+    let baseHealthChecks: string[] | undefined;
     try {
       knobs = rt.resolveUsageKnobs(
         process.env,
@@ -194,6 +196,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
         rt.usageFlagOverrides(opts, 'stopAt'),
       );
       laneBreakerThreshold = resolveLaneBreakerThreshold(rt.configLoaders.loadRepoConfig(repoRoot));
+      baseHealthChecks = resolveBaseHealthChecks(rt.configLoaders.loadRepoConfig(repoRoot));
     } catch (err: any) {
       throw new rt.CliExitError(`factory: ${err.message}`, 2);
     }
@@ -315,11 +318,11 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
                     git: (cmd) => rt.shellOps.exec(cmd, { cwd: repoRoot }).then((r) => r.stdout),
                     requiredChecksVerdict: (sha) => {
                       const [owner, repoName] = ghRepo.split('/');
-                      return fetchRequiredChecksVerdict(
-                        rt.getOctokit(),
-                        { owner, repo: repoName, branch: 'main', sha },
-                        { pushFallback: true },
-                      );
+                      return baseChecksVerdict(rt.getOctokit(), owner, repoName, {
+                        checks: baseHealthChecks,
+                        events: paths.events,
+                        lane: planned.lane,
+                      })(sha);
                     },
                   }),
             commentIssue: async (issue, body) => {

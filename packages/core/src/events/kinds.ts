@@ -28,6 +28,7 @@ export type EventKind =
   | 'awaiting-review'
   | 'base-hold-cleared'
   | 'base_divergence'
+  | 'base_push_workflow_failed'
   | 'benchmark-artifacts'
   | 'benchmark-artifacts-failed'
   | 'blocked'
@@ -197,8 +198,7 @@ export type EventKind =
   | 'worktree-base'
   | 'worktree-gc';
 
-/** Lane state an event kind drives in the TUI/queue dashboard reducers; absent
- *  when the kind doesn't itself change lane status. */
+/** Lane state an event kind drives in the TUI/queue dashboard reducers; absent when the kind doesn't change it. */
 export type LaneStatus = 'running' | 'waiting-merge' | 'ready' | 'merged' | 'failed' | 'parked' | 'stopped';
 
 /** `severity` is widened to `'unknown'` only on the sentinel `UNKNOWN_EVENT_TRAITS`
@@ -272,6 +272,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   // A persisted base hold (#2348) ended: origin/main moved or its CI went green (#2350). Not a park.
   'base-hold-cleared': { severity: 'info', isPark: false, isTerminal: false },
   base_divergence: { severity: 'warn', isPark: false, isTerminal: false }, // local re-run fails, CI green (#3287)
+  base_push_workflow_failed: { severity: 'warn', isPark: false, isTerminal: false }, // non-code push workflow failed (#3290)
   'benchmark-artifacts': { severity: 'info', isPark: false, isTerminal: false },
   'benchmark-artifacts-failed': { severity: 'info', isPark: false, isTerminal: false },
   // Parked while waiting on a filed blocker; the factory resumes it, not a human (#2315).
@@ -482,8 +483,7 @@ export function eventTraitsFor(type: string): EventTraits {
   return isEventKind(type) ? EVENT_TRAITS[type] : UNKNOWN_EVENT_TRAITS;
 }
 
-/** `LogLevel` for a kind; unknown kinds map to `'info'` (matches the historical
- *  default so unrecognized-but-harmless kinds from old logs don't get flagged). */
+/** `LogLevel` for a kind; unknown kinds map to `'info'` (the historical default, so old unrecognized kinds aren't flagged). */
 export function severityOf(type: string): LogLevel {
   const { severity } = eventTraitsFor(type);
   return severity === 'unknown' ? 'info' : severity;

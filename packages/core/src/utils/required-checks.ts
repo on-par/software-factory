@@ -1,4 +1,4 @@
-// src/utils/required-checks.ts — strict "every required check succeeded" verdict for a commit (#3186); #3195 adds an opt-in push-event fallback when no checks are required; #3206 adds a three-way classifier and the shared required-contexts lookup
+// src/utils/required-checks.ts — strict "every required check succeeded" verdict for a commit (#3186); #3195 adds an opt-in push-event fallback when no checks are required; #3206 adds a three-way classifier and the shared required-contexts lookup; #3290 limits the verdict to code-health checks
 
 import type { Octokit } from '@octokit/rest';
 
@@ -107,19 +107,37 @@ export async function fetchRequiredContexts(
       required.push(...(rule.parameters?.required_status_checks ?? []).map((c) => c.context));
     }
   } catch (err) {
-    if (httpStatus(err) !== 404) throw err;
+    if (httpStatus(err) !== 404 && httpStatus(err) !== 403) throw err;
   }
   return [...new Set(required)];
 }
 
-/** Required check contexts from branch protection plus rulesets, checked against the check runs on the exact SHA. Throws on unexpected API errors. */
+export interface PushWorkflowFailure {
+  workflow: string;
+  conclusion: string;
+  sha: string;
+}
+
+const CODE_HEALTH_WORKFLOW = 'ci';
+const NON_FAILURE_CONCLUSIONS = new Set(['success', 'skipped', 'neutral']);
+
+/**
+ * Code-health verdict for a commit (#3290). The deciding set is, in order: `opts.checks`, the branch-protection/ruleset
+ * required contexts, then (with `pushFallback`) the check runs of the push workflow named `CI`. Other failed push
+ * workflows are only reported through `onPushWorkflowFailed` and never change the verdict. Throws on unexpected API errors.
+ */
 export async function fetchRequiredChecksVerdict(
   octokit: Octokit,
   args: { owner: string; repo: string; branch: string; sha: string },
-  opts?: { pushFallback?: boolean },
+  opts?: {
+    pushFallback?: boolean;
+    checks?: readonly string[];
+    onPushWorkflowFailed?: (failure: PushWorkflowFailure) => void;
+  },
 ): Promise<RequiredChecksVerdict> {
   const { owner, repo, branch, sha } = args;
-  const required = await fetchRequiredContexts(octokit, { owner, repo, branch });
+  const explicit = [...new Set(opts?.checks ?? [])];
+  const set = explicit.length > 0 ? explicit : await fetchRequiredContexts(octokit, { owner, repo, branch });
   const { data: checks } = await octokit.rest.checks.listForRef({
     owner,
     repo,
@@ -133,17 +151,53 @@ export async function fetchRequiredChecksVerdict(
     conclusion: r.conclusion,
     suiteId: r.check_suite?.id ?? null,
   }));
-  if (new Set(required).size === 0 && opts?.pushFallback) {
-    const { data: workflowRuns } = await octokit.rest.actions.listWorkflowRunsForRepo({
-      owner,
-      repo,
-      head_sha: sha,
-      event: 'push',
-      per_page: 100,
-    });
-    const suites = new Set<number>();
-    for (const w of workflowRuns.workflow_runs) if (w.check_suite_id !== undefined) suites.add(w.check_suite_id);
-    return evaluatePushChecks(runs.filter((r) => r.suiteId !== null && suites.has(r.suiteId)));
+  const report = opts?.onPushWorkflowFailed;
+  const fallback = set.length === 0 && opts?.pushFallback === true;
+  const workflowRuns =
+    opts?.pushFallback && (set.length === 0 || report)
+      ? (
+          await octokit.rest.actions.listWorkflowRunsForRepo({
+            owner,
+            repo,
+            head_sha: sha,
+            event: 'push',
+            per_page: 100,
+          })
+        ).data.workflow_runs
+      : [];
+  const isCi = (w: { name?: string | null }): boolean => (w.name ?? '').trim().toLowerCase() === CODE_HEALTH_WORKFLOW;
+  const ciSuites = new Set<number>();
+  for (const w of workflowRuns) if (isCi(w) && w.check_suite_id !== undefined) ciSuites.add(w.check_suite_id);
+
+  let verdict: RequiredChecksVerdict;
+  if (set.length > 0) {
+    verdict = evaluateRequiredChecks(set, runs);
+    if (verdict.green && explicit.length > 0) verdict = { ...verdict, basis: `base health checks: ${set.join(', ')}` };
+  } else if (fallback) {
+    if (ciSuites.size === 0) {
+      return {
+        green: false,
+        reason:
+          'no code-health checks: set baseHealth.checks in .factory/config.json, require status checks on main, or name the push workflow "CI"',
+      };
+    }
+    verdict = evaluatePushChecks(runs.filter((r) => r.suiteId !== null && ciSuites.has(r.suiteId)));
+  } else {
+    verdict = evaluateRequiredChecks([], runs);
   }
-  return evaluateRequiredChecks(required, runs);
+
+  if (report) {
+    const setNames = new Set(set);
+    const seen = new Set<string>();
+    for (const w of workflowRuns) {
+      if (w.status !== 'completed' || !w.conclusion || NON_FAILURE_CONCLUSIONS.has(w.conclusion)) continue;
+      if (fallback && isCi(w)) continue;
+      if (!fallback && runs.some((r) => r.suiteId === w.check_suite_id && setNames.has(r.name))) continue;
+      const workflow = w.name ?? '(unnamed)';
+      if (seen.has(workflow)) continue;
+      seen.add(workflow);
+      report({ workflow, conclusion: w.conclusion, sha });
+    }
+  }
+  return verdict;
 }
