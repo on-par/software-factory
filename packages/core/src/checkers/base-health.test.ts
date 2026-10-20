@@ -77,7 +77,8 @@ describe('checkBaseHealth', () => {
   });
 
   it('a cached tests FAIL on a base whose CI is green is re-run once fresh, not re-held (Breaker, c4069f3f)', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'base-health-green-ci-refresh-'));
+    const tempDirs = createTempDirs();
+    const dir = await tempDirs.make('base-health-green-ci-refresh-');
     try {
       const cachePath = join(dir, 'baseline-cache.json');
       const cache = new BaselineCache(cachePath);
@@ -120,7 +121,7 @@ describe('checkBaseHealth', () => {
         details: 'fresh pass',
       });
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await tempDirs.cleanup();
     }
   });
 
