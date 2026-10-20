@@ -14,6 +14,7 @@ import {
   runAllCheckers,
 } from '../checkers/index.js';
 import { detectHeadedModeSignals, detectLiveAppSignal } from './check-environment.js';
+import { markBuildFilesIntentToAdd } from './check-intent-to-add.js';
 import { appendEvidencePlanStep } from './check-evidence.js';
 import type { runEvidencePlan } from '../checkers/evidence-plan.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
@@ -388,6 +389,7 @@ async function checkPhaseImpl(opts: {
     }
   };
 
+  await markBuildFilesIntentToAdd(worktree, log);
   let probe = await probeWorktree(worktree);
   const ctx: CheckerContext = {
     worktree,
@@ -600,6 +602,7 @@ async function checkPhaseImpl(opts: {
       log('steering_applied', describeSteering(steering));
     }
 
+    await markBuildFilesIntentToAdd(worktree, log);
     probe = await probeWorktree(worktree);
     ctx.probe = probe;
     ctx.outputLogDir = roundLogDir(reworkRounds);
