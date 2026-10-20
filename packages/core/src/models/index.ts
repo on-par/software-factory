@@ -2,6 +2,9 @@
 
 import { execSync } from 'node:child_process';
 
+import { computeCost, type CostEstimate, type CostTokens } from './cost.js';
+
+export { priceUsage } from './cost.js';
 import { claudeEndpointIntermediary } from '../config/intermediaries.js';
 import { ModelEffortsSchema, supportsEffort } from '../config/effort.js';
 import type { HarnessDeclaration, ModelsConfig } from '../config/index.js';
@@ -178,11 +181,10 @@ export class ModelRegistry {
     return this.get(modelId)?.codexFlag;
   }
 
-  /** Estimate cost for a model given token counts. Null means unpriced (model not registered); 0 means free (#1738). */
-  estimateCost(modelId: string, inputTokens: number, outputTokens: number): number | null {
+  /** cost null: unpriced (model not registered); 0: free (#1738). Cache reads: see computeCost (#3284). */
+  estimateCost(modelId: string, tokens: CostTokens): CostEstimate {
     const def = this.get(modelId);
-    if (!def) return null;
-    return (inputTokens / 1_000_000) * def.costPerMtokInput + (outputTokens / 1_000_000) * def.costPerMtokOutput;
+    return def ? computeCost(def, tokens) : { cost: null, cachedRateMissing: false };
   }
 
   /** Get all available models for a tier, in priority order */

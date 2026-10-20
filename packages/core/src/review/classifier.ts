@@ -300,11 +300,10 @@ export async function classifyPrShadow(
     let costUsd: number | null = null;
     try {
       costUsd =
-        input.router.registryRef.estimateCost(
-          result.model,
-          Math.ceil(prompt.length / 4),
-          Math.ceil(result.output.length / 4),
-        ) ?? null;
+        input.router.registryRef.estimateCost(result.model, {
+          inputTokens: Math.ceil(prompt.length / 4),
+          outputTokens: Math.ceil(result.output.length / 4),
+        }).cost ?? null;
     } catch {
       costUsd = null;
     }

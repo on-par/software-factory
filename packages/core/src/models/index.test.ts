@@ -230,12 +230,12 @@ describe('estimateCost', () => {
       },
     };
     const registry = new ModelRegistry(costConfig);
-    expect(registry.estimateCost('priced-model', 1_000_000, 500_000)).toBeCloseTo(3 + 7.5);
+    expect(registry.estimateCost('priced-model', { inputTokens: 1e6, outputTokens: 5e5 }).cost).toBeCloseTo(3 + 7.5);
   });
 
   it('returns null (unpriced) for an unknown model', () => {
     const registry = new ModelRegistry(config);
-    expect(registry.estimateCost('missing-model', 1000, 1000)).toBeNull();
+    expect(registry.estimateCost('missing-model', { inputTokens: 1e3, outputTokens: 1e3 }).cost).toBeNull();
   });
 
   it('returns 0 for a registered model priced at 0', () => {
@@ -254,7 +254,7 @@ describe('estimateCost', () => {
         },
       },
     });
-    expect(registry.estimateCost('free-model', 1000, 1000)).toBe(0);
+    expect(registry.estimateCost('free-model', { inputTokens: 1e3, outputTokens: 1e3 }).cost).toBe(0);
   });
 });
 

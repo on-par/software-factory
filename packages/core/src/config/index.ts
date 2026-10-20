@@ -42,6 +42,7 @@ export const ModelDefSchema = z.object({
   tier: z.union([z.string(), z.array(z.string())]),
   costPerMtokInput: z.number(),
   costPerMtokOutput: z.number(),
+  costPerMtokCachedInput: z.number().optional(),
   contextWindow: z.number(),
   capabilities: z.array(z.string()),
   envKey: z.string().nullable(),

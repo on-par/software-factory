@@ -109,7 +109,7 @@ describe('ModelRouter cost sink', () => {
       },
     });
     const router = new ModelRouter(costModels, routes, false, stub);
-    vi.spyOn(router.registryRef, 'estimateCost').mockReturnValue(null);
+    vi.spyOn(router.registryRef, 'estimateCost').mockReturnValue({ cost: null, cachedRateMissing: false });
     const rows: Parameters<Parameters<ModelRouter['setCostSink']>[0]>[0][] = [];
     router.setCostSink((entry) => rows.push(entry));
 
@@ -193,7 +193,7 @@ describe('ModelRouter cost sink', () => {
       },
     });
     const router = new ModelRouter(costModels, routes, false, stub);
-    vi.spyOn(router.registryRef, 'estimateCost').mockReturnValue(null);
+    vi.spyOn(router.registryRef, 'estimateCost').mockReturnValue({ cost: null, cachedRateMissing: false });
     const rows: Parameters<Parameters<ModelRouter['setCostSink']>[0]>[0][] = [];
     router.setCostSink((entry) => rows.push(entry));
 

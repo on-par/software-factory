@@ -15,7 +15,7 @@ import { OllamaAgenticHarness } from '../harness/ollama-agentic.js';
 import { OllamaHttpHarness } from '../harness/ollama-http.js';
 import { OpenCodeHarness } from '../harness/opencode.js';
 import { PiHarness } from '../harness/pi.js';
-import { isHarnessCliPresent, ModelRegistry } from '../models/index.js';
+import { isHarnessCliPresent, ModelRegistry, priceUsage } from '../models/index.js';
 import type { SandboxEventType, SandboxPolicy } from '../sandbox/index.js';
 import { sandboxEventFromError } from '../sandbox/index.js';
 import type { CostEntry, RetryCause, TaskType } from '../types/index.js';
@@ -656,14 +656,14 @@ export class ModelRouter {
     if (!this.costSink) return;
     const inputTokens = usage?.inputTokens ?? estimateTokens(prompt);
     const outputTokens = usage?.outputTokens ?? estimateTokens(output);
-    const cost = usage?.costUsd ?? this.registry.estimateCost(model, inputTokens, outputTokens);
+    const { cost, flags } = priceUsage(this.registry, model, inputTokens, outputTokens, usage);
     this.costSink({
       task,
       model,
       inputTokens,
       outputTokens,
       cost,
-      ...(cost === null ? { unpriced: true } : {}),
+      ...flags,
       estimated: usage === undefined,
       duration: elapsedMs ?? 0,
       ...(usage?.rawInputTokens !== undefined ? { rawInputTokens: usage.rawInputTokens } : {}),

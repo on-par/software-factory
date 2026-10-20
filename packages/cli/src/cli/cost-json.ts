@@ -16,8 +16,17 @@ export function buildCostJson(entries: CostEntry[], issue?: string): CostJson {
   const rows: CostRowJson[] = [];
   const models = new Map<
     string,
-    { tasks: number; inputTokens: number; outputTokens: number; sum: number; priced: number; unpriced: number }
+    {
+      tasks: number;
+      inputTokens: number;
+      outputTokens: number;
+      sum: number;
+      priced: number;
+      unpriced: number;
+      cachedRateMissing: number;
+    }
   >();
+  let cachedRateMissingTotal = 0;
   for (const e of filtered) {
     const cost = e.unpriced === true || e.cost == null ? null : e.cost;
     const inputTokens = e.inputTokens ?? 0;
@@ -35,12 +44,16 @@ export function buildCostJson(entries: CostEntry[], issue?: string): CostJson {
     });
     let m = models.get(e.model);
     if (m === undefined) {
-      m = { tasks: 0, inputTokens: 0, outputTokens: 0, sum: 0, priced: 0, unpriced: 0 };
+      m = { tasks: 0, inputTokens: 0, outputTokens: 0, sum: 0, priced: 0, unpriced: 0, cachedRateMissing: 0 };
       models.set(e.model, m);
     }
     m.tasks += 1;
     m.inputTokens += inputTokens;
     m.outputTokens += outputTokens;
+    if (e.cachedRateMissing === true) {
+      m.cachedRateMissing += 1;
+      cachedRateMissingTotal += 1;
+    }
     if (cost === null) m.unpriced += 1;
     else {
       m.sum += cost;
@@ -54,7 +67,13 @@ export function buildCostJson(entries: CostEntry[], issue?: string): CostJson {
     outputTokens: m.outputTokens,
     cost: m.priced === 0 && m.unpriced > 0 ? null : m.sum,
     unpricedCount: m.unpriced,
+    cachedRateMissingCount: m.cachedRateMissing,
   }));
   const t = aggregateCosts(filtered).total;
-  return { schemaVersion: 1, rows, perModel, total: { cost: t.cost, unpricedCount: t.unpricedCount } };
+  return {
+    schemaVersion: 1,
+    rows,
+    perModel,
+    total: { cost: t.cost, unpricedCount: t.unpricedCount, cachedRateMissingCount: cachedRateMissingTotal },
+  };
 }
