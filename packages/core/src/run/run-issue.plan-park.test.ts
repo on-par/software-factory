@@ -1,7 +1,6 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import type { Octokit } from '@octokit/rest';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
@@ -56,8 +55,9 @@ const MODELS: ModelsConfig = {
   },
 };
 
-const breakerDir = mkdtempSync(join(tmpdir(), 'run-issue-plan-park-'));
-afterAll(() => rmSync(breakerDir, { recursive: true, force: true }));
+const dirs = createTempDirs();
+const breakerDir = dirs.makeSync('run-issue-plan-park-');
+afterAll(() => dirs.cleanup());
 
 const request: RunRequest = {
   issue: 1,

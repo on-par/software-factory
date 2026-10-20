@@ -1,8 +1,8 @@
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
@@ -31,16 +31,14 @@ const models: ModelsConfig = {
 
 const routes: RoutesConfig = { version: 1, routes: { plan: { tier: 'boss', description: 'stub' } } };
 
-const tempDirs = new Set<string>();
+const dirs = createTempDirs();
 
 afterEach(async () => {
-  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
-  tempDirs.clear();
+  await dirs.cleanup();
 });
 
 async function runPlan(issue: number, output: string) {
-  const worktree = await mkdtemp(join(tmpdir(), 'plan-guards-test-'));
-  tempDirs.add(worktree);
+  const worktree = await dirs.make('plan-guards-test-');
   const specPath = join(worktree, `.factory/state/plans/issue-${issue}.md`);
   await mkdir(dirname(specPath), { recursive: true });
   const stub = new StubModelExecutor({ scripts: { plan: [{ output: output.replaceAll('$SPEC', specPath) }] } });
