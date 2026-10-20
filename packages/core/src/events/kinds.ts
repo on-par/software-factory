@@ -27,6 +27,7 @@ export type EventKind =
   | 'await-merge'
   | 'awaiting-review'
   | 'base-hold-cleared'
+  | 'base_divergence'
   | 'benchmark-artifacts'
   | 'benchmark-artifacts-failed'
   | 'blocked'
@@ -270,6 +271,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'awaiting-review': { severity: 'info', isPark: false, isTerminal: false },
   // A persisted base hold (#2348) ended: origin/main moved or its CI went green (#2350). Not a park.
   'base-hold-cleared': { severity: 'info', isPark: false, isTerminal: false },
+  base_divergence: { severity: 'warn', isPark: false, isTerminal: false }, // local re-run fails, CI green (#3287)
   'benchmark-artifacts': { severity: 'info', isPark: false, isTerminal: false },
   'benchmark-artifacts-failed': { severity: 'info', isPark: false, isTerminal: false },
   // Parked while waiting on a filed blocker; the factory resumes it, not a human (#2315).
@@ -305,8 +307,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   design_regression_unresolved: { severity: 'warn', isPark: false, isTerminal: false },
   design_open_questions: { severity: 'warn', isPark: false, isTerminal: false },
   design_shallow: { severity: 'info', isPark: false, isTerminal: false },
-  // factoryd restarted a stale in-process engine (#1178) — operational anomaly
-  // worth surfacing, but not a park (no human action needed) and not terminal.
+  // factoryd restarted a stale in-process engine (#1178) — operational anomaly, not a park or terminal.
   egress_host: { severity: 'info', isPark: false, isTerminal: false },
   egress_summary: { severity: 'info', isPark: false, isTerminal: false },
   'engine-restarted': { severity: 'warn', isPark: false, isTerminal: false },

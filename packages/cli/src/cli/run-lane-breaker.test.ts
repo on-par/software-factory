@@ -277,7 +277,12 @@ describe('cli', () => {
         await rm(holdDir, { recursive: true, force: true });
       });
 
-      const runPause = async (baseHold: string, laneBreakerThreshold?: number, awaitingCi?: boolean) => {
+      const runPause = async (
+        baseHold: string,
+        laneBreakerThreshold?: number,
+        awaitingCi?: boolean,
+        confirmedLocally?: boolean,
+      ) => {
         const shipped: number[] = [];
         const events: any[] = [];
         const released: any[] = [];
@@ -298,6 +303,7 @@ describe('cli', () => {
                 failingChecks: ['tests'],
                 failureSignature: 'sig',
                 awaitingCi,
+                confirmedLocally,
               });
             },
             waitMerge: async () => {},
@@ -354,6 +360,12 @@ describe('cli', () => {
         expect(readBaseHold(holdFile)?.ciRecheckAfter).toBe(
           new Date(Date.parse('2026-03-01T00:00:00.000Z') + BASE_HOLD_CI_RECHECK_MS).toISOString(),
         );
+      });
+
+      it('a confirmedLocally environment pause writes confirmedLocally into the base hold (#3287)', async () => {
+        const holdFile = join(holdDir, 'state', 'base-hold.json');
+        await runPause(holdFile, undefined, undefined, true);
+        expect(readBaseHold(holdFile)?.confirmedLocally).toBe(true);
       });
 
       it.each([

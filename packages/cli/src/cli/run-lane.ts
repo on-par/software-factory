@@ -326,6 +326,7 @@ export async function runLane(
             ...(err.awaitingCi
               ? { ciRecheckAfter: new Date(now().getTime() + BASE_HOLD_CI_RECHECK_MS).toISOString() }
               : {}),
+            ...(err.confirmedLocally ? { confirmedLocally: true as const } : {}),
           });
         } catch {}
         const payload: LanePausedPayload = {

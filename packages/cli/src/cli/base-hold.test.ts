@@ -411,3 +411,51 @@ describe('base hold gate (#3195)', () => {
     expect(await gate()).toEqual({ kind: 'hold', hold: testsHold, ciReason: 'CI lookup failed: 401' });
   });
 });
+
+describe('confirmedLocally base hold (#3287)', () => {
+  const SHA = 'a'.repeat(40);
+  const tempDirs = createTempDirs();
+  let file: string;
+  const confirmed: BaseHold = { ...hold, baseSha: SHA, confirmedLocally: true };
+
+  beforeEach(async () => {
+    file = join(await tempDirs.make('factory-base-hold-confirmed-'), 'state', 'base-hold.json');
+  });
+  afterEach(async () => {
+    await tempDirs.cleanup();
+  });
+
+  it('confirmedLocally round-trips through write/read; a non-true value is dropped', () => {
+    writeBaseHold(file, confirmed);
+    expect(readBaseHold(file)).toEqual(confirmed);
+    expect(formatBaseHoldStatus(confirmed)).toContain('  confirmedLocally: true');
+    writeFileSync(file, JSON.stringify({ ...confirmed, confirmedLocally: 'yes' }));
+    expect(readBaseHold(file)?.confirmedLocally).toBeUndefined();
+    writeFileSync(file, JSON.stringify({ ...confirmed, confirmedLocally: false }));
+    expect(readBaseHold(file)?.confirmedLocally).toBeUndefined();
+  });
+
+  it('a confirmedLocally hold is kept on green CI and cleared only when the SHA changes', async () => {
+    writeBaseHold(file, confirmed);
+    const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'ok' }));
+    const onCleared = vi.fn();
+    const decision = await evaluateBaseHold(file, hold.repo, {
+      currentBaseSha: async () => SHA,
+      requiredChecksVerdict,
+      onCleared,
+    });
+    expect(decision.kind).toBe('hold');
+    expect(requiredChecksVerdict).not.toHaveBeenCalled();
+    expect(existsSync(file)).toBe(true);
+    expect(onCleared).not.toHaveBeenCalled();
+
+    const moved = await evaluateBaseHold(file, hold.repo, {
+      currentBaseSha: async () => 'c'.repeat(40),
+      requiredChecksVerdict,
+      onCleared,
+    });
+    expect(moved).toEqual({ kind: 'claim' });
+    expect(existsSync(file)).toBe(false);
+    expect(onCleared.mock.calls[0][0].reason).toBe('sha-changed');
+  });
+});
