@@ -27,6 +27,7 @@ export type EventKind =
   | 'await-merge'
   | 'awaiting-review'
   | 'base-hold-cleared'
+  | 'base_push_workflow_failed'
   | 'benchmark-artifacts'
   | 'benchmark-artifacts-failed'
   | 'blocked'
@@ -269,6 +270,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'awaiting-review': { severity: 'info', isPark: false, isTerminal: false },
   // A persisted base hold (#2348) ended: origin/main moved or its CI went green (#2350). Not a park.
   'base-hold-cleared': { severity: 'info', isPark: false, isTerminal: false },
+  base_push_workflow_failed: { severity: 'warn', isPark: false, isTerminal: false },
   'benchmark-artifacts': { severity: 'info', isPark: false, isTerminal: false },
   'benchmark-artifacts-failed': { severity: 'info', isPark: false, isTerminal: false },
   // Parked while waiting on a filed blocker; the factory resumes it, not a human (#2315).
@@ -487,12 +489,10 @@ export function severityOf(type: string): LogLevel {
   const { severity } = eventTraitsFor(type);
   return severity === 'unknown' ? 'info' : severity;
 }
-
 /** Whether this kind counts toward human-intervention/park KPIs. */
 export function isParkKind(type: string): boolean {
   return eventTraitsFor(type).isPark;
 }
-
 /** Lane status this kind drives in a lane-state reducer, or undefined when the
  *  kind doesn't itself change lane status. */
 export function laneStatusOf(type: string): LaneStatus | undefined {

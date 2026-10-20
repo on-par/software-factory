@@ -403,7 +403,7 @@ export async function shipIssue(
     checkPhase: phases.checkPhase,
     hostBuildSlot: hostBuildSlotPort(factoryConfig, ghRepo, issueNum, log, ctx?.runSlots),
     shipPhase: shipPhaseForMode,
-    checkBaseHealth: deps.checkBaseHealth ?? baseHealthWithCi(octokit, ghOwner, ghName),
+    checkBaseHealth: deps.checkBaseHealth ?? baseHealthWithCi(octokit, ghOwner, ghName, repoConfig?.baseHealth?.checks),
     resolveConstitution: () =>
       // Resolved once: runIssue reuses it for every phase, so the build worker can't author its own standards.
       // A local-only workspace is caller-provided, not a checkout of repoRoot, so it keeps its own constitution.

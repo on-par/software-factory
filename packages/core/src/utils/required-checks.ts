@@ -9,6 +9,9 @@ export interface RequiredChecksVerdict {
   basis?: string;
 }
 
+type PushWorkflowFailureLogger = (type: 'base_push_workflow_failed', msg: string) => void;
+const observedPushWorkflowFailures = new Set<string>();
+
 interface CheckRunLike {
   name: string;
   status: string | null;
@@ -107,7 +110,7 @@ export async function fetchRequiredContexts(
       required.push(...(rule.parameters?.required_status_checks ?? []).map((c) => c.context));
     }
   } catch (err) {
-    if (httpStatus(err) !== 404) throw err;
+    if (httpStatus(err) !== 404 && httpStatus(err) !== 403) throw err;
   }
   return [...new Set(required)];
 }
@@ -116,10 +119,11 @@ export async function fetchRequiredContexts(
 export async function fetchRequiredChecksVerdict(
   octokit: Octokit,
   args: { owner: string; repo: string; branch: string; sha: string },
-  opts?: { pushFallback?: boolean },
+  opts?: { pushFallback?: boolean; checks?: readonly string[]; log?: PushWorkflowFailureLogger },
 ): Promise<RequiredChecksVerdict> {
   const { owner, repo, branch, sha } = args;
-  const required = await fetchRequiredContexts(octokit, { owner, repo, branch });
+  const explicit = opts?.checks !== undefined;
+  const required = explicit ? [...new Set(opts.checks)] : await fetchRequiredContexts(octokit, { owner, repo, branch });
   const { data: checks } = await octokit.rest.checks.listForRef({
     owner,
     repo,
@@ -133,17 +137,93 @@ export async function fetchRequiredChecksVerdict(
     conclusion: r.conclusion,
     suiteId: r.check_suite?.id ?? null,
   }));
-  if (new Set(required).size === 0 && opts?.pushFallback) {
-    const { data: workflowRuns } = await octokit.rest.actions.listWorkflowRunsForRepo({
+
+  const hasNamedSelection = explicit || required.length > 0;
+  const fallback = !hasNamedSelection && opts?.pushFallback === true;
+  const shouldReadWorkflows = fallback || opts?.log !== undefined;
+  let selected: RequiredChecksVerdict;
+  if (explicit && required.length === 0) {
+    selected = { green: false, reason: 'no code-health checks configured' };
+  } else if (hasNamedSelection) {
+    selected = evaluateRequiredChecks(required, runs);
+  } else if (fallback) {
+    selected = { green: false, reason: 'missing code-health checks from CI' };
+  } else {
+    selected = { green: false, reason: 'no required checks configured' };
+  }
+
+  if (!shouldReadWorkflows) return selected;
+
+  let workflows: Array<{
+    id: number;
+    name?: string | null;
+    status: string | null;
+    conclusion: string | null;
+    check_suite_id?: number;
+  }>;
+  try {
+    const { data } = await octokit.rest.actions.listWorkflowRunsForRepo({
       owner,
       repo,
       head_sha: sha,
       event: 'push',
       per_page: 100,
     });
-    const suites = new Set<number>();
-    for (const w of workflowRuns.workflow_runs) if (w.check_suite_id !== undefined) suites.add(w.check_suite_id);
-    return evaluatePushChecks(runs.filter((r) => r.suiteId !== null && suites.has(r.suiteId)));
+    workflows = data.workflow_runs;
+  } catch (err) {
+    if (fallback) throw err;
+    return selected;
   }
-  return evaluateRequiredChecks(required, runs);
+
+  const selectedSuites = new Set<number>();
+  const ciSuites = new Set<number>();
+  for (const workflow of workflows) {
+    if (workflow.check_suite_id === undefined) continue;
+    if (workflow.name === 'CI') ciSuites.add(workflow.check_suite_id);
+    if (
+      hasNamedSelection &&
+      runs.some((run) => run.suiteId === workflow.check_suite_id && required.includes(run.name))
+    ) {
+      selectedSuites.add(workflow.check_suite_id);
+    }
+  }
+
+  if (fallback) {
+    const selectedRuns = runs.filter((run) => run.suiteId !== null && ciSuites.has(run.suiteId));
+    selected =
+      selectedRuns.length === 0
+        ? { green: false, reason: 'missing code-health checks: no push CI check runs' }
+        : evaluatePushChecks(selectedRuns);
+  }
+
+  if (opts?.log !== undefined) {
+    for (const workflow of workflows) {
+      const isSelected = fallback
+        ? workflow.name === 'CI'
+        : workflow.check_suite_id !== undefined && selectedSuites.has(workflow.check_suite_id);
+      if (
+        isSelected ||
+        workflow.status !== 'completed' ||
+        workflow.conclusion === null ||
+        workflow.conclusion === 'success' ||
+        workflow.conclusion === 'neutral' ||
+        workflow.conclusion === 'skipped'
+      ) {
+        continue;
+      }
+      const workflowName = workflow.name ?? `workflow ${workflow.id}`;
+      const key = `${owner}/${repo}:${sha}:${workflowName}`;
+      if (observedPushWorkflowFailures.has(key)) continue;
+      observedPushWorkflowFailures.add(key);
+      try {
+        opts.log(
+          'base_push_workflow_failed',
+          `${owner}/${repo} ${sha}: push workflow ${workflowName} concluded ${workflow.conclusion}`,
+        );
+      } catch {
+        observedPushWorkflowFailures.delete(key);
+      }
+    }
+  }
+  return selected;
 }

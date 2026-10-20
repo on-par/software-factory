@@ -133,6 +133,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
     writeRunFlagOverrides(paths.runFlags, { autoMerge: opts.autoMerge, prClassifier: opts.prClassifier });
     const ghRepo = await rt.getGitHubRepo();
     const factoryConfig = rt.configLoaders.loadFactoryConfigForRepo(paths.config);
+    const baseHealthChecks = rt.configLoaders.loadRepoConfig(repoRoot, paths.root)?.baseHealth?.checks;
     const keychainErr = keychainPreflightError(rt.probeClaudeKeychain());
     if (keychainErr) {
       logEvent(paths.events, 'environment_warning', 'all', keychainErr);
@@ -312,7 +313,11 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
                       return fetchRequiredChecksVerdict(
                         rt.getOctokit(),
                         { owner, repo: repoName, branch: 'main', sha },
-                        { pushFallback: true },
+                        {
+                          pushFallback: true,
+                          checks: baseHealthChecks,
+                          log: (type, msg) => logEvent(paths.events, type, planned.lane, msg, { lane: planned.lane }),
+                        },
                       );
                     },
                   }),

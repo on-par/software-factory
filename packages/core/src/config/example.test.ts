@@ -84,6 +84,17 @@ describe('docs/config.example.yaml', () => {
     expect(RepoFactoryConfigV2Schema.parse({ version: 2 }).commands).toBeUndefined();
   });
 
+  it('documents baseHealth with a commented exact check-name allowlist', () => {
+    const text = renderConfigExample();
+    expect(text).toMatch(/^# baseHealth:$/m);
+    expect(text).toMatch(/^  # checks: \["<exact check-run name>"\]$/m);
+    expect(
+      RepoFactoryConfigV2Schema.parse(parse('version: 2\nbaseHealth:\n  checks: [contract, ios]\n')).baseHealth,
+    ).toEqual({
+      checks: ['contract', 'ios'],
+    });
+  });
+
   it('parses as YAML into a mapping', () => {
     const parsed: unknown = parse(renderConfigExample());
     expect(parsed).not.toBeNull();

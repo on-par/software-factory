@@ -224,6 +224,12 @@ function modelNamespace(): Node[] {
       children: Object.entries(packagedTiers).map(([tier, ids]) => unset(tier, undefined, ids)),
     },
     { kind: 'object', key: 'providers', doc: doc('providers'), children: leaves(['providers'], true) },
+    {
+      kind: 'object',
+      key: 'baseHealth',
+      doc: doc('baseHealth'),
+      children: [unset('checks', doc('baseHealth', 'checks'), ['<exact check-run name>'])],
+    },
     unset('route', doc('route'), '"<route>"'),
     unset('commands', doc('commands'), '{ test: "vitest run" }'),
     {

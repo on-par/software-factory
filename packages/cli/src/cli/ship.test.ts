@@ -221,6 +221,16 @@ describe('shipIssue (direct)', () => {
     expect(spy).toHaveBeenCalledWith(h.repoRoot, paths().root);
   });
 
+  it('loads the configured base-health allowlist from the repo config', async () => {
+    mkdirSync(paths().root, { recursive: true });
+    writeFileSync(paths().config, JSON.stringify({ version: 2, baseHealth: { checks: ['contract', 'ios'] } }));
+    const spy = vi.fn(FactoryCore.loadRepoConfig);
+
+    await shipIssue(5, {}, ctx(), { loadRepoConfig: spy as never });
+
+    expect(spy.mock.results.at(-1)?.value).toMatchObject({ baseHealth: { checks: ['contract', 'ios'] } });
+  });
+
   it('keeps a claude-cli build pin on the claude route when PLAN picks codex (#1367)', async () => {
     h.modelOverrides = { build: 'claude-sonnet-5' };
     h.modelProviders = { 'claude-sonnet-5': 'anthropic' };

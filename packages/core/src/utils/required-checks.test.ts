@@ -64,14 +64,24 @@ describe('fetchRequiredChecksVerdict', () => {
     protection?: unknown;
     rules?: unknown;
     runs?: Array<ReturnType<typeof run> & { check_suite?: { id: number } | null }>;
-    workflowRuns?: Array<{ check_suite_id?: number }>;
+    workflowRuns?:
+      | Array<{
+          name?: string | null;
+          status?: string;
+          conclusion?: string | null;
+          id?: number;
+          check_suite_id?: number;
+        }>
+      | Error;
   }) {
     const settle = (v: unknown) => async () => {
       if (v instanceof Error) throw v;
       return { data: v };
     };
     const listForRef = vi.fn(settle({ check_runs: opts.runs ?? [] }));
-    const listWorkflowRunsForRepo = vi.fn(settle({ workflow_runs: opts.workflowRuns ?? [] }));
+    const listWorkflowRunsForRepo = vi.fn(
+      settle(opts.workflowRuns instanceof Error ? opts.workflowRuns : { workflow_runs: opts.workflowRuns ?? [] }),
+    );
     const octokit = {
       rest: {
         repos: {
@@ -134,6 +144,164 @@ describe('fetchRequiredChecksVerdict', () => {
       check_suite: { id },
     });
 
+    it('a failed Release push workflow does not make the base verdict red when CI passed (ship-it 342b1042)', async () => {
+      const events: string[] = [];
+      const { octokit } = fake({
+        protection: httpError(403),
+        rules: httpError(403),
+        runs: [inSuite('build', 'success', 1), inSuite('lint', 'success', 1), inSuite('release', 'failure', 2)],
+        workflowRuns: [
+          { name: 'CI', status: 'completed', conclusion: 'success', id: 11, check_suite_id: 1 },
+          { name: 'Release', status: 'completed', conclusion: 'failure', id: 12, check_suite_id: 2 },
+        ],
+      });
+      const verdict = await fetchRequiredChecksVerdict(octokit, args, {
+        pushFallback: true,
+        log: (_type, msg) => events.push(msg),
+      });
+      expect(verdict.green).toBe(true);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toContain('Release');
+      expect(events[0]).toContain(args.sha);
+      expect(events[0]).toContain('o/r');
+    });
+
+    it('an explicit base-health allowlist overrides protection and names a failed contract check', async () => {
+      const { octokit, listWorkflowRunsForRepo } = fake({
+        protection: { contexts: ['required-ok'] },
+        runs: [run('required-ok', 'completed', 'success'), run('contract', 'completed', 'failure')],
+      });
+      expect(
+        await fetchRequiredChecksVerdict(octokit, args, { checks: ['contract', 'ios'], pushFallback: true }),
+      ).toEqual({
+        green: false,
+        reason: 'contract failure',
+      });
+      expect(listWorkflowRunsForRepo).not.toHaveBeenCalled();
+    });
+
+    it('required checks take precedence over CI fallback and a failed Release is logged without changing green', async () => {
+      const events: string[] = [];
+      const uniqueArgs = { ...args, sha: 'c'.repeat(40) };
+      const { octokit } = fake({
+        protection: { contexts: ['required-ok'] },
+        runs: [inSuite('required-ok', 'success', 3), inSuite('release', 'failure', 4)],
+        workflowRuns: [
+          { name: 'CI', status: 'completed', conclusion: 'success', id: 31, check_suite_id: 3 },
+          { name: 'Release', status: 'completed', conclusion: 'failure', id: 32, check_suite_id: 4 },
+        ],
+      });
+      const verdict = await fetchRequiredChecksVerdict(octokit, uniqueArgs, {
+        pushFallback: true,
+        log: (_type, msg) => events.push(msg),
+      });
+      expect(verdict.green).toBe(true);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toContain('Release');
+    });
+
+    it('fails closed naming missing code-health checks when only a successful Release push workflow exists', async () => {
+      const { octokit } = fake({
+        protection: httpError(403),
+        rules: httpError(403),
+        runs: [inSuite('release', 'success', 5)],
+        workflowRuns: [{ name: 'Release', status: 'completed', conclusion: 'success', id: 51, check_suite_id: 5 }],
+      });
+      expect(await fetchRequiredChecksVerdict(octokit, args, { pushFallback: true })).toEqual({
+        green: false,
+        reason: 'missing code-health checks: no push CI check runs',
+      });
+    });
+
+    it('does not fall back when an explicit selected name is missing or the list is empty', async () => {
+      const { octokit } = fake({
+        protection: httpError(403),
+        rules: httpError(403),
+        runs: [inSuite('build', 'success', 6)],
+        workflowRuns: [{ name: 'CI', status: 'completed', conclusion: 'success', id: 61, check_suite_id: 6 }],
+      });
+      expect(await fetchRequiredChecksVerdict(octokit, args, { checks: ['missing'], pushFallback: true })).toEqual({
+        green: false,
+        reason: 'missing missing',
+      });
+      expect(await fetchRequiredChecksVerdict(octokit, args, { checks: [], pushFallback: true })).toEqual({
+        green: false,
+        reason: 'no code-health checks configured',
+      });
+    });
+
+    it.each([
+      ['lowercase ci', 'ci', 8],
+      ['missing suite id', 'CI', undefined],
+      ['schedule workflow', 'Schedule', 8],
+    ])('fails closed for %s without an exact push CI suite', async (_label, name, suiteId) => {
+      const { octokit } = fake({
+        protection: httpError(403),
+        rules: httpError(403),
+        runs: [inSuite('check', 'success', 8)],
+        workflowRuns: [{ name, status: 'completed', conclusion: 'success', id: 81, check_suite_id: suiteId }],
+      });
+      expect((await fetchRequiredChecksVerdict(octokit, args, { pushFallback: true })).green).toBe(false);
+    });
+
+    it.each([
+      ['queued', 'queued', null],
+      ['unknown status', 'completed-ish', 'success'],
+      ['unknown conclusion', 'completed', 'future-result'],
+    ])('keeps selected %s checks red', async (_label, status, conclusion) => {
+      const { octokit } = fake({
+        protection: httpError(403),
+        rules: httpError(403),
+        runs: [run('contract', status, conclusion)],
+      });
+      expect((await fetchRequiredChecksVerdict(octokit, args, { checks: ['contract'] })).green).toBe(false);
+    });
+
+    it('deduplicates failed workflow observations and retries after a logger throws', async () => {
+      const uniqueArgs = { ...args, sha: 'a'.repeat(40) };
+      const { octokit } = fake({
+        protection: { contexts: ['required-ok'] },
+        runs: [run('required-ok', 'completed', 'success')],
+        workflowRuns: [{ name: 'Release', status: 'completed', conclusion: 'failure', id: 71, check_suite_id: 7 }],
+      });
+      const log = vi.fn();
+      await fetchRequiredChecksVerdict(octokit, uniqueArgs, { log });
+      await fetchRequiredChecksVerdict(octokit, uniqueArgs, { log });
+      expect(log).toHaveBeenCalledTimes(1);
+      const throws = vi.fn(() => {
+        throw new Error('telemetry unavailable');
+      });
+      await fetchRequiredChecksVerdict(octokit, { ...args, sha: 'b'.repeat(40) }, { log: throws });
+      await fetchRequiredChecksVerdict(octokit, { ...args, sha: 'b'.repeat(40) }, { log });
+      expect(throws).toHaveBeenCalledTimes(1);
+      expect(log).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not consume observations without a logger and deduplicates concurrent callers', async () => {
+      const uniqueArgs = { ...args, sha: 'e'.repeat(40) };
+      const { octokit } = fake({
+        protection: { contexts: ['required-ok'] },
+        runs: [run('required-ok', 'completed', 'success')],
+        workflowRuns: [{ name: 'Release', status: 'completed', conclusion: 'timed_out', id: 91, check_suite_id: 9 }],
+      });
+      await fetchRequiredChecksVerdict(octokit, uniqueArgs);
+      const log = vi.fn();
+      await Promise.all([
+        fetchRequiredChecksVerdict(octokit, uniqueArgs, { log }),
+        fetchRequiredChecksVerdict(octokit, uniqueArgs, { log }),
+      ]);
+      expect(log).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps named-check verdicts when workflow telemetry lookup fails', async () => {
+      const { octokit } = fake({
+        protection: { contexts: ['required-ok'] },
+        runs: [run('required-ok', 'completed', 'success')],
+        workflowRuns: httpError(500),
+      });
+      await expect(fetchRequiredChecksVerdict(octokit, args, { log: vi.fn() })).resolves.toMatchObject({ green: true });
+    });
+
     it('is green on push-suite runs only, ignoring a failed schedule run', async () => {
       const { octokit, listWorkflowRunsForRepo } = fake({
         runs: [
@@ -141,7 +309,7 @@ describe('fetchRequiredChecksVerdict', () => {
           inSuite('gitleaks', 'success', 1),
           inSuite('pipeline-integration', 'failure', 2),
         ],
-        workflowRuns: [{ check_suite_id: 1 }],
+        workflowRuns: [{ name: 'CI', status: 'completed', conclusion: 'success', id: 1, check_suite_id: 1 }],
       });
       expect(await fetchRequiredChecksVerdict(octokit, args, { pushFallback: true })).toEqual({
         green: true,
@@ -156,7 +324,7 @@ describe('fetchRequiredChecksVerdict', () => {
     it('is not green when a push-suite run failed', async () => {
       const { octokit } = fake({
         runs: [inSuite('ci', 'failure', 1)],
-        workflowRuns: [{ check_suite_id: 1 }],
+        workflowRuns: [{ name: 'CI', status: 'completed', conclusion: 'success', id: 1, check_suite_id: 1 }],
       });
       expect(await fetchRequiredChecksVerdict(octokit, args, { pushFallback: true })).toEqual({
         green: false,
@@ -168,14 +336,14 @@ describe('fetchRequiredChecksVerdict', () => {
       const { octokit } = fake({ runs: [inSuite('ci', 'success', 1), run('vercel', 'completed', 'success')] });
       expect(await fetchRequiredChecksVerdict(octokit, args, { pushFallback: true })).toEqual({
         green: false,
-        reason: 'no push-triggered checks',
+        reason: 'missing code-health checks: no push CI check runs',
       });
     });
 
     it('without pushFallback still reports no required checks and skips the workflow-run lookup', async () => {
       const { octokit, listWorkflowRunsForRepo } = fake({
         runs: [inSuite('ci', 'success', 1)],
-        workflowRuns: [{ check_suite_id: 1 }],
+        workflowRuns: [{ name: 'CI', status: 'completed', conclusion: 'success', id: 1, check_suite_id: 1 }],
       });
       expect((await fetchRequiredChecksVerdict(octokit, args)).reason).toBe('no required checks configured');
       expect(listWorkflowRunsForRepo).not.toHaveBeenCalled();

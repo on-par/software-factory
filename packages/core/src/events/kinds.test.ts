@@ -38,6 +38,10 @@ describe('EVENT_TRAITS', () => {
     expect(EVENT_TRAITS['base-hold-cleared']).toEqual({ severity: 'info', isPark: false, isTerminal: false });
   });
 
+  it('classifies failed excluded push workflows as non-terminal warnings', () => {
+    expect(EVENT_TRAITS.base_push_workflow_failed).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
+  });
+
   it('classifies ci-rescued as non-park info (#2365)', () => {
     expect(EVENT_TRAITS['ci-rescued']).toEqual({ severity: 'info', isPark: false, isTerminal: false });
   });

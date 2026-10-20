@@ -4,15 +4,12 @@
 // provider enable flags, usage cap) without editing the packaged defaults shipped
 // in @on-par/factory-config. Resolution order: repo file > env vars > packaged
 // defaults.
-
 import { existsSync } from 'node:fs';
-
 import { defaultLaneBreakerThreshold } from '@on-par/factory-config';
 import { z } from 'zod';
 import { readRepoConfigFile } from './repo-config-file.js';
 import { runConfigSource } from './run-config-source.js';
 import { toConfigSchemaIssues, type ConfigSchemaIssue } from './index.js';
-
 import type { ModelRegistry } from '../models/index.js';
 import { resolveModelOverrides, retiredModelHint } from '../models/index.js';
 import type { ModelRouter } from '../router/index.js';
@@ -35,9 +32,7 @@ import { ModelEffortsSchema } from './effort.js';
 import { assertAgenticBuildPin } from './repo-build-pin.js';
 import { assertTierMayRoute } from './repo-tier-guard.js';
 import { assertApprovedClaudeEndpoint, assertNoDirectDeepSeek } from './intermediaries.js';
-
 // ---------- Schema ----------
-
 const EVIDENCE_COMMANDS_DESCRIPTION = 'Named evidence commands. Shell-free argv; config overrides scripts.';
 export const RepoFactoryConfigV1Schema = z
   .object({
@@ -77,7 +72,6 @@ export const RepoFactoryConfigV1Schema = z
     commands: z.record(z.string(), z.string()).optional().describe(EVIDENCE_COMMANDS_DESCRIPTION),
   })
   .strict();
-
 // The `.describe()` text below is rendered into docs/config.example.yaml by
 // renderConfigExample (./example.ts), so keep it accurate to the resolvers in this file.
 export const RepoFactoryConfigV2Schema = z
@@ -222,6 +216,18 @@ export const RepoFactoryConfigV2Schema = z
       .strict()
       .optional()
       .describe('Review floor rules for the PR classifier. Unset keys use the packaged floor rules.'),
+    baseHealth: z
+      .object({
+        checks: z
+          .array(z.string())
+          .optional()
+          .describe(
+            'Exact check-run names that determine base health. This explicit list takes precedence over required contexts, which take precedence over push CI workflow checks. An empty list fails closed.',
+          ),
+      })
+      .strict()
+      .optional()
+      .describe('Base health checks. An empty object uses required contexts or the push CI fallback.'),
     /** Repo pins the build route for every issue (e.g. "opencode", or "command" for a declared harness). The plan
      *  phase still writes the spec, but the pinned route wins over the model's
      *  route choice so deepseek workers are actually used when pinned. */
@@ -898,7 +904,6 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
       prClassifier.enabled ? '--pr-classifier' : '--no-pr-classifier',
     )}`,
   );
-
   const watchdog = resolveWatchdogPolicy(repo, env);
   lines.push(
     `Usage watchdog stop-at: ${watchdog.stopAt} ${sourceLabel(watchdog.sources.stopAt, repoConfigPath, 'FACTORY_STOP_AT')}`,
@@ -915,23 +920,18 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
   lines.push(
     `Usage watchdog estimator: ${watchdog.estimator ? 'on' : 'off'} ${sourceLabel(watchdog.sources.estimator, repoConfigPath, 'FACTORY_USAGE_ESTIMATOR')}`,
   );
-
   if (repo?.tiers) {
     for (const [tier, ids] of Object.entries(repo.tiers)) {
       lines.push(`Tier override ${tier}: ${ids.join(' ')} (${repoConfigPath})`);
     }
   }
-
   return lines;
 }
-
 /** Review floor rules for this repo: the classifier section merged onto the packaged rules (#1723). */
 export function resolveReviewFloorRules(repo: RepoFactoryConfig | null): ReviewFloorRuleSet {
   return applyReviewFloorOverrides(repo?.classifier);
 }
-
 export type TrustTier = 'T0' | 'T1' | 'T2';
-
 /** Effective merge trust tier for this repo (ADR-0144, #2131): classifier.trustTier, else T0. */
 export function resolveTrustTier(repo: RepoFactoryConfig | null): TrustTier {
   return repo?.classifier?.trustTier ?? 'T0';

@@ -34,6 +34,15 @@ describe('cli', () => {
       expect(branches[0]).toEqual(expect.stringMatching(/^factory\/\d+-/));
     });
 
+    it('loads base-health names from the committed repo config while preserving local-queue gate bypass', async () => {
+      const loadRepoConfig = vi.fn(() => ({ version: 2, baseHealth: { checks: ['contract', 'ios'] } }) as never);
+      writeFileSync(paths().queue, 'app 5\n');
+      const res = await runMainWith({ loadRepoConfig }, 'run', '--local-queue');
+      expect(res.exited).toBe(false);
+      expect(loadRepoConfig).toHaveBeenCalledWith(h.repoRoot, paths().root);
+      expect(readFileSync(paths().events, 'utf-8')).not.toContain('base_push_workflow_failed');
+    });
+
     it('names the branch and worktree with --branch-prefix sf', async () => {
       writeFileSync(paths().queue, '# header\napp 5\n');
       const calls: string[][] = [];

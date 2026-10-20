@@ -7,10 +7,16 @@ export function baseHealthWithCi(
   octokit: Octokit,
   owner: string,
   repo: string,
+  checks?: readonly string[],
 ): (opts: Parameters<typeof checkBaseHealth>[0]) => ReturnType<typeof checkBaseHealth> {
   return (opts) =>
     checkBaseHealth({
       ...opts,
-      requiredChecksVerdict: (sha) => fetchRequiredChecksVerdict(octokit, { owner, repo, branch: 'main', sha }),
+      requiredChecksVerdict: (sha) =>
+        fetchRequiredChecksVerdict(
+          octokit,
+          { owner, repo, branch: 'main', sha },
+          { pushFallback: true, checks, log: opts.log },
+        ),
     });
 }

@@ -80,6 +80,12 @@ version: 2
   # An explicit value beats the FACTORY_CODEX=0 kill-switch.
   # openai: true
   # ollama: true
+# Base health checks. An empty object uses required contexts or the push CI fallback.
+# baseHealth:
+  # Exact check-run names that determine base health. This explicit list takes precedence over
+  # required contexts, which take precedence over push CI workflow checks. An empty list fails
+  # closed.
+  # checks: ["<exact check-run name>"]
 # Build route for every issue: "codex", "claude", "opencode", or "command" (a declared agentic
 # harness under `harnesses`). Unset: derived from the build pin's harness, else PLAN decides per
 # issue.
