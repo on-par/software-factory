@@ -33,6 +33,7 @@ import type { SizeBudget } from '../readiness/size.js';
 import { describeConstitutionSource } from '../constitutions/index.js';
 import { lintFactoryConfig } from '../config/config-lint.js';
 import { planPhase as planPhaseDefault, type PlanResult } from '../phases/plan.js';
+import { planConfigParkMessage } from '../phases/plan-spec-guards.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
 import { publishParkComment } from './park-comment.js';
 import { gateOpencodeBuildOnBreaker, providerFallbackPreferrer } from './provider-breaker-gate.js';
@@ -712,6 +713,9 @@ async function runIssueOnce(
           return await terminalEscalated(
             `issue #${request.issue} sliced into ${plan.sliced.sliceCount} slice(s): ${plan.escalate ?? 'slice plan recorded'}`,
           );
+        }
+        if (plan.parkReason === 'config') {
+          return await terminalParked('config', planConfigParkMessage(plan, request.issue));
         }
         return await terminalEscalated(`plan escalated: ${plan.escalate ?? 'unknown'}`);
       }
