@@ -71,6 +71,13 @@ export class BaselineCache {
     if (output.result !== 'PASS' && output.result !== 'FAIL') return undefined;
     if (isConfigCheckerOutput(output)) return undefined;
     if (output.timedOut === true) return undefined;
+    if (
+      output.timedOut === undefined &&
+      typeof output.details === 'string' &&
+      /Command timed out after|timed out after \d+(?:\.\d+)?s\b/.test(output.details)
+    ) {
+      return undefined;
+    }
     return output;
   }
 

@@ -337,6 +337,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
         checker: 'tests',
         result: 'FAIL',
         details: await commandFailureDetails(ctx, 'tests', cmd.label, r, describeFailure(r)),
+        ...(r.timedOut ? { timedOut: true } : {}),
       };
     }
 
