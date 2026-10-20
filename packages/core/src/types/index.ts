@@ -348,9 +348,7 @@ export interface QueueReprioritizationRecord {
   rationale: string | null;
 }
 
-/** Why the planner escalated: missing information, a contradiction, or a size/split request (#3275). */
-export type EscalateKind = 'missing-info' | 'contradiction' | 'split';
-
+export type EscalateKind = 'missing-info' | 'contradiction' | 'split'; // why the planner escalated (#3275)
 export interface FactoryEvent {
   ts: string;
   type: EventKind;
@@ -383,7 +381,7 @@ export interface FactoryEvent {
   checkFailure?: CheckFailureInfo;
   /** CI-failure evidence behind a SHIP ci-failed park (#2814). */
   ciFailure?: CiFailureEvidence;
-  escalateKind?: EscalateKind; // kind of a planner ESCALATE (#3275)
+  escalateKind?: EscalateKind;
   model?: string;
   tokens?: { input: number; output: number };
   durationMs?: number;
@@ -490,7 +488,6 @@ export interface IssueRunState {
 }
 
 // ---------- Design artifact (#422; moved to @on-par/contracts in #466; deepened in #480) ----------
-
 export type {
   CallEdge,
   DesignApproach,
