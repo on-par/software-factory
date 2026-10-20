@@ -203,6 +203,7 @@ export async function shipWithCiRework(
       onPgid: ctx.onPgid,
       ...reworkRouteFor(builtRoute, builtModel),
       runId: ctx.runId,
+      onWorkerResult: ctx.checkOpts.onWorkerResult,
       extraInstructions: CI_REWORK_INSTRUCTIONS,
     });
     if (!worked.modelCompleted) {

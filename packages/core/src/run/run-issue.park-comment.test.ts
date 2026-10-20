@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -133,6 +134,65 @@ describe('runIssue — issue park comment (#2314)', () => {
     const { body } = createComment.mock.calls[0][0];
     expect(body).toContain('issue:1 -->');
     expect(body).toContain('reason: fail');
+    expect(body).not.toContain('Run logs:');
+  });
+
+  it('includes a run log location in the comment only after a worker result was written', async () => {
+    const logsDir = join(breakerDir, 'run-logs');
+    vi.mocked(planPhase).mockImplementation(async (opts) => {
+      await opts.onWorkerResult?.({ model: 'plan-model', output: 'plan output', exitCode: 0, attempts: [] });
+      return PLAN_OK;
+    });
+    const { octokit, createComment } = commentOctokit();
+    await runIssue({ ...request, logsDir }, overBudget, parkingPorts(vi.fn<Log>(), octokit));
+    expect(createComment.mock.calls[0][0].body).toContain(`Run logs: ${logsDir}/issue-1/run-`);
+  });
+
+  it('keeps the parked outcome and omits the location when worker log writing fails', async () => {
+    const logsPath = join(breakerDir, 'logs-file');
+    writeFileSync(logsPath, 'not a directory');
+    const planResult = { model: 'plan-model', output: 'plan output', exitCode: 0, attempts: [] };
+    vi.mocked(planPhase).mockImplementation(async (opts) => {
+      await opts.onWorkerResult?.(planResult);
+      return PLAN_OK;
+    });
+    const baseline = await runIssue(request, overBudget, parkingPorts(vi.fn<Log>()));
+    const log = vi.fn<Log>();
+    const outcome = await runIssue({ ...request, logsDir: logsPath }, overBudget, parkingPorts(log));
+    expect(outcome).toEqual(baseline);
+    expect(log.mock.calls.some(([type, message]) => type === 'warn' && message.includes('write failed'))).toBe(true);
+    expect(log.mock.calls.some(([, message]) => message.includes('Run logs:'))).toBe(false);
+  });
+
+  it('runIssue writes plan and build worker logs for a parked run', async () => {
+    const logsDir = join(breakerDir, 'parked-run-logs');
+    vi.mocked(planPhase).mockImplementation(async (opts) => {
+      await opts.onWorkerResult?.({ model: 'plan-model', output: 'valid plan output', exitCode: 0, attempts: [] });
+      return PLAN_OK;
+    });
+    vi.mocked(buildPhase).mockImplementation(async (opts) => {
+      await opts.onWorkerResult?.({
+        model: 'build-model',
+        output: 'distinctive build final line',
+        exitCode: 0,
+        attempts: [],
+      });
+      return BUILD_OK;
+    });
+    vi.mocked(checkPhase).mockRejectedValueOnce(new Error('park after build'));
+    const log = vi.fn<Log>();
+    const outcome = await runIssue({ ...request, logsDir, localOnly: true }, policy, ports(log));
+    expect(outcome.state).toBe('parked');
+    const terminal = log.mock.calls.find(([type, message]) => type === 'fail' && message.includes('Run logs:'))?.[1];
+    if (!terminal) throw new Error('expected the terminal event to include the written log path');
+    const directory = /Run logs: (.+)$/.exec(terminal)?.[1];
+    if (!directory) throw new Error('expected a run log directory');
+    const planLog = await readFile(join(directory, 'plan.log'), 'utf8');
+    const buildLog = await readFile(join(directory, 'build.log'), 'utf8');
+    expect(planLog).toContain('plan-model');
+    expect(planLog).toContain('valid plan output');
+    expect(buildLog).toContain('build-model');
+    expect(buildLog).toContain('distinctive build final line');
   });
 
   it('a failing comment create leaves the parked outcome unchanged and logs environment_warning', async () => {

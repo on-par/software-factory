@@ -242,6 +242,27 @@ describe('cli', () => {
       ]);
     });
 
+    it('includes only the run log location from a pipeline park message', async () => {
+      for (const [message, expected] of [
+        ['parked after build\nRun logs: /state/logs/issue-1/run-abcd', 'Run logs: /state/logs/issue-1/run-abcd'],
+        ['parked without logs', undefined],
+      ] as const) {
+        const events: string[] = [];
+        await runLane('app', [1], '/repo', 'on-par/software-factory', paths, {
+          ship: async () => {
+            throw new LaneParkError(message, 'fail');
+          },
+          pathExists: () => false,
+          emitEvent: (_events, type, _issue, msg) => {
+            if (type === 'parked') events.push(msg);
+          },
+        });
+        expect(events[0]).toContain('issue #1 parked (fail)');
+        if (expected) expect(events[0]).toContain(expected);
+        else expect(events[0]).toBe("issue #1 parked (fail); lane 'app' continuing, 0 issue(s) remaining");
+      }
+    });
+
     it('reports the true remaining count on park via countRemaining and still drains the queue (#1222)', async () => {
       const calls: any[] = [];
       const claims = [buildClaim(21), buildClaim(22)];

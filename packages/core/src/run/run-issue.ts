@@ -37,6 +37,7 @@ import { planConfigParkMessage } from '../phases/plan-spec-guards.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
 import { withRunAttribution, type RunLogFn as LogFn } from './attribution.js';
 import { publishParkComment } from './park-comment.js';
+import { createRunPhaseLogger } from './run-phase-log.js';
 import { gateOpencodeBuildOnBreaker, providerFallbackPreferrer } from './provider-breaker-gate.js';
 import { fileFlakyTests } from './flaky-tests.js';
 import { enterStackSlice, stackWaitOutcome } from './stack-slice-entry.js';
@@ -297,6 +298,12 @@ async function runIssueOnce(
   // 12 hex chars keeps the compiler's Unix-socket pipe path short under macOS $TMPDIR.
   const runId = randomUUID().replace(/-/g, '').slice(0, 12);
   const previousAttemptNote = renderPreviousAttempt(request.previousAttempt);
+  const phaseLogger = createRunPhaseLogger({
+    logsDir: request.logsDir,
+    issue: request.issue,
+    runId,
+    log: (type, message) => log(type, message),
+  });
   const tracker = new ProcessGroupTracker();
   const budgetStop = budgetGuardFor(policy, ports, tracker, request.processGroupGraceMs, log);
   let environment: Environment | undefined;
@@ -379,9 +386,10 @@ async function runIssueOnce(
   };
 
   const terminalEscalated = async (message: string): Promise<RunOutcome> => {
-    log('escalate', message);
-    await writeReports('escalated', 'escalate', message);
-    return { state: 'escalated', reason: message, route, branch: request.branch, reworkRounds };
+    const terminalMessage = phaseLogger.parkMessage(message);
+    log('escalate', terminalMessage);
+    await writeReports('escalated', 'escalate', terminalMessage);
+    return { state: 'escalated', reason: terminalMessage, route, branch: request.branch, reworkRounds };
   };
 
   const terminalParked = async (
@@ -390,11 +398,12 @@ async function runIssueOnce(
     checkFailure?: { failureSignature: string; failingChecks: string[] },
     ciFailure?: CiFailureEvidence,
   ): Promise<RunOutcome> => {
+    const terminalMessage = phaseLogger.parkMessage(message);
     // A blocked park never carries a failure signature, so the ADR-0139 lane breaker and the cross-run stuck check skip it (#2315).
     const failure = reason === 'blocked' ? undefined : checkFailure;
-    log(reason, message, parkLogExtra(failure, ciFailure));
+    log(reason, terminalMessage, parkLogExtra(failure, ciFailure));
     if (reason === 'timeout') {
-      log('stuck', `run exceeded its phase timeout without progressing — ${message}`);
+      log('stuck', `run exceeded its phase timeout without progressing — ${terminalMessage}`);
     }
     if (!request.localOnly) {
       const posted = await publishParkComment({
@@ -404,7 +413,7 @@ async function runIssueOnce(
         input: {
           issue: request.issue,
           reason,
-          message,
+          message: terminalMessage,
           runId,
           branch: request.branch,
           lane: request.lane,
@@ -445,7 +454,7 @@ async function runIssueOnce(
         }
       }
     }
-    await writeReports(reportOutcomeFor(reason), reason, message);
+    await writeReports(reportOutcomeFor(reason), reason, terminalMessage);
     return outcome;
   };
 
@@ -674,6 +683,7 @@ async function runIssueOnce(
           blockUnresolvedRegressions: request.blockUnresolvedRegressions,
           updateIssueBodyOnEnrich: request.readinessUpdateIssueBody,
           preferredRoute: pinnedRoute,
+          onWorkerResult: phaseLogger.plan,
         }));
       route = plan.route;
       if (!plan.ok) {
@@ -819,6 +829,7 @@ async function runIssueOnce(
         modelOverride: buildModel,
         pinnedModel: buildModel !== undefined && buildModel === request.modelPins.build,
         routePinned: request.preferredRoute !== undefined,
+        onWorkerResult: phaseLogger.build,
         codexFallbackModel: request.modelPins.buildFallback ?? ports.router.resolveAll('build_codex')[0],
         onProviderFailure: rememberProviderFailure,
         sandbox: request.sandboxPolicy,
@@ -895,6 +906,7 @@ async function runIssueOnce(
       laneId: request.lane,
       onActivity: ports.onActivity,
       logsDir: request.logsDir,
+      onWorkerResult: phaseLogger.rework,
       baselineCachePath: request.baselineCachePath,
     };
     const check = await checkPhase(checkOpts);
