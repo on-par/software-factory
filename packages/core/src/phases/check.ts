@@ -19,7 +19,7 @@ import { appendEvidencePlanStep } from './check-evidence.js';
 import type { runEvidencePlan } from '../checkers/evidence-plan.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import type { BuildRoutePin } from '../config/repo.js';
-import { laneEnv } from '../environment/index.js';
+import { hermeticGitEnv, laneEnv } from '../environment/index.js';
 import type { EventKind } from '../events/kinds.js';
 import { routerFailureOf } from '../router/executor-error.js';
 import type { ModelRouter, RouterResult } from '../router/index.js';
@@ -338,6 +338,8 @@ async function checkPhaseImpl(opts: {
   runBaseline?: typeof runBaselineCheckers;
   /** Injection seam for tests; defaults to runAllCheckers (#2238). */
   runCheckers?: typeof runAllCheckers;
+  /** Empty global/system git config for checker commands (#3272); default true. */
+  hermeticGit?: boolean;
   /** Injection seam for the flaky re-run command only (#2301); defaults to ctx.runCommand / runVerificationCommand. */
   runCommand?: CheckerContext['runCommand'];
   /** Injection seam for tests; defaults to the frozen evidence-plan runner. */
@@ -372,6 +374,7 @@ async function checkPhaseImpl(opts: {
     baselineCachePath,
     runBaseline,
     runCheckers,
+    hermeticGit = true,
     runCommand,
     runEvidence,
   } = opts;
@@ -397,7 +400,7 @@ async function checkPhaseImpl(opts: {
     specPath,
     diffBase,
     parentBaseRef,
-    env: laneEnv(appPort, process.env, appBaseUrl, worktree, runId),
+    env: { ...laneEnv(appPort, process.env, appBaseUrl, worktree, runId), ...hermeticGitEnv(hermeticGit) },
     onPgid,
     processGroupTracker,
     probe,
@@ -428,6 +431,8 @@ async function checkPhaseImpl(opts: {
 
   log('check', 'Running checkers');
 
+  const hermeticGitNote = `hermetic git: ${hermeticGit ? 'on (GIT_CONFIG_GLOBAL=/dev/null, GIT_CONFIG_NOSYSTEM=1)' : 'off (check.hermeticGit false)'}`;
+  log('check', hermeticGitNote);
   let summary = await (runCheckers ?? runAllCheckers)(ctx, router, constitution, checkTimeoutSeconds);
   summary = await appendEvidencePlanStep(summary, ctx, constitution, runEvidence);
   let reworkRounds = 0;
@@ -606,6 +611,7 @@ async function checkPhaseImpl(opts: {
     probe = await probeWorktree(worktree);
     ctx.probe = probe;
     ctx.outputLogDir = roundLogDir(reworkRounds);
+    log('check', hermeticGitNote);
     summary = await (runCheckers ?? runAllCheckers)(ctx, router, constitution, checkTimeoutSeconds);
     summary = await appendEvidencePlanStep(summary, ctx, constitution, runEvidence);
     log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);

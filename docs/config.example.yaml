@@ -127,6 +127,12 @@ version: 2
   # the branch-protection required checks, else the check runs of the push workflow named CI. Other
   # failed push workflows (Release, deploy) log base_push_workflow_failed and never hold.
   # checks: ["<check-run name>"]
+# CHECK phase settings (#3272).
+# check:
+  # Run CHECK commands with an empty global and system git config (GIT_CONFIG_GLOBAL=/dev/null,
+  # GIT_CONFIG_NOSYSTEM=1), as on a CI runner. Set false when checks need host git settings such as
+  # a credential helper. Unset: true.
+  # hermeticGit: true
 # Merge policy. `factory run` and `supervise` read `auto`; `factory land` reads `admin`. `factory
 # ship` and `run-issue` always stop at a ready-for-review PR.
 # run:

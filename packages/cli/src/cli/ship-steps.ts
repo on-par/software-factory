@@ -44,6 +44,7 @@ import {
   findOpenPR,
   findSlicePlanComment,
   resolveFilingPolicy,
+  resolveHermeticGit,
   resolveReviewFloorRules,
   withFileLock,
   withGitLock,
@@ -73,12 +74,10 @@ export const TERMINAL_EVENT_KINDS = new Set<EventKind>([
 export function stubAwareShipPhase(shipPhase: NonNullable<RunPorts['shipPhase']>): NonNullable<RunPorts['shipPhase']> {
   let shipPhaseForMode = shipPhase;
   if (resolveGitHubMode(process.env) === 'stub') {
-    const base = shipPhase;
     const stubCalls = join(resolve(process.env.FACTORY_GITHUB_STUB_DIR ?? ''), GITHUB_STUB_CALLS_FILE);
     const defaultShipRunner = promisify(execCb);
-    const wrapped: RunPorts['shipPhase'] = (o) =>
-      base({ ...o, run: recordGitPushes(o.run ?? defaultShipRunner, stubCalls, o.branch) });
-    shipPhaseForMode = wrapped;
+    shipPhaseForMode = (o) =>
+      shipPhase({ ...o, run: recordGitPushes(o.run ?? defaultShipRunner, stubCalls, o.branch) });
   }
   return shipPhaseForMode;
 }
@@ -383,6 +382,7 @@ export function buildRunRequest({
     },
     localOnly: Boolean(ctx?.localOnly),
     blockUnresolvedRegressions: resolveDesignRegressionBlock(factoryConfig),
+    hermeticGit: resolveHermeticGit(repoConfig),
     readinessUpdateIssueBody: resolveReadinessUpdateIssueBody(factoryConfig),
     publishFromBuild: resolveBuildPublish(factoryConfig),
     sizeGateMode,

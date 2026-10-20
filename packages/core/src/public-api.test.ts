@@ -515,6 +515,7 @@ const INTERNAL_API_KEYS = [
   'touchesSensitiveScope',
   // Config
   'resolveFilingPolicy',
+  'resolveHermeticGit',
   'resolvePrClassifierPolicy',
   'resolveReviewFloorRules',
   'resolveTrustTier',
