@@ -16,6 +16,7 @@ import {
   renderSlicePlanComment,
   stackSliceBranch,
   withSliceBranchCreated,
+  withSliceState,
   type SlicePlan,
 } from '../readiness/slice-plan.js';
 import { ProviderBreaker } from '../router/breaker.js';
@@ -121,7 +122,7 @@ const freshPlan = (): SlicePlan => ({
 });
 const branch = (k: number) => stackSliceBranch(1, k);
 
-function stackSetup(opts: { recordBranches?: boolean } = {}) {
+function stackSetup(opts: { recordBranches?: boolean; pulls?: unknown } = {}) {
   const recordBranches = opts.recordBranches ?? true;
   planPhase.mockImplementation(async (o) => {
     const index = o.sliceIndex ?? 1;
@@ -138,6 +139,7 @@ function stackSetup(opts: { recordBranches?: boolean } = {}) {
   });
   const octokit: Octokit = {
     rest: {
+      pulls: opts.pulls,
       users: { getAuthenticated: async () => ({ data: { id: 7 } }) },
       issues: {
         listComments: async () => ({ data: [{ id: 99, user: { id: 7 }, body: renderSlicePlanComment(freshPlan()) }] }),
@@ -316,5 +318,50 @@ describe('runIssue — stack mode chains slice branches (ADR-0161)', () => {
 
     expect(planPhase).toHaveBeenCalledTimes(1);
     expect(createSliceBranch).not.toHaveBeenCalled();
+  });
+
+  it("opens slice 2 on slice 1's branch (#3348)", async () => {
+    const { ports } = stackSetup();
+    await runIssue(baseRequest(), policy, ports);
+
+    expect(shipPhase.mock.calls.map((c) => c[0].stack?.base)).toEqual(['main', branch(1), branch(2)]);
+    expect(shipPhase.mock.calls[1]![0].stack).toMatchObject({ index: 2, count: 3 });
+  });
+
+  it('never ships a branch created from a parent slice on main (#3348)', async () => {
+    const { ports, createSliceBranch } = stackSetup();
+    await runIssue(baseRequest(), policy, ports);
+
+    for (const [o] of createSliceBranch.mock.calls) {
+      if (o.startPoint === 'origin/main') continue;
+      const shipped = shipPhase.mock.calls.find((c) => c[0].branch === o.branch);
+      expect(shipped?.[0].stack?.base).toBe(o.startPoint);
+    }
+  });
+
+  it('passes no stack in slice mode', async () => {
+    const { ports } = stackSetup();
+    await runIssue(baseRequest({ sizeGateMode: 'slice' }), policy, ports);
+    expect(shipPhase.mock.calls.every((c) => c[0].stack === undefined)).toBe(true);
+  });
+
+  it("rewrites slice 1's PR when slice 2 opens (#3348)", async () => {
+    const get = vi.fn(async () => ({ data: { body: '## Summary\nHi.' } }));
+    const update = vi.fn(async (_a: unknown) => ({}));
+    const { ports } = stackSetup({ pulls: { get, update } });
+    planPhase.mockImplementation(async (o) => {
+      const index = o.sliceIndex ?? 1;
+      let plan = freshPlan();
+      for (let i = 1; i < index; i++) {
+        plan = withSliceBranchCreated(plan, i, branch(i));
+        plan = withSliceState(plan, i, 'pr-open', 100 + i, branch(i));
+      }
+      return { ...PLAN_OK, slice: { plan, index } };
+    });
+    await runIssue(baseRequest(), policy, ports);
+
+    const arg = update.mock.calls[0]![0] as { pull_number: number; body: string };
+    expect(arg.pull_number).toBe(101);
+    expect(arg.body).toContain('next: slice 2 #102');
   });
 });
