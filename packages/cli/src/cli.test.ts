@@ -2731,6 +2731,7 @@ describe('cli', () => {
         throw new Error('unexpected review lookup');
       },
       getPullRefs: async () => ({ headRef: 'branch', baseRef: 'main', headSha: 'head' }),
+      branchContains: async () => false,
     };
 
     it('preflight defers a queued issue whose Prerequisite is still open (#3258 on 10/19)', async () => {

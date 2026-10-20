@@ -319,7 +319,7 @@ const TAIL = 'InvalidEventCursorError eventSegmentFileName eventSegmentsDir read
 const STEER = 'STEER_SOURCES STEER_PHASES SteerEventError parseSteerEvent appendSteerEvent listSteerEvents'.split(' '); // #3400
 const STEERED = 'collectMergedPrSteers isoWeekKey summarizeSteerability formatSteerabilityReport'.split(' '); // #3403
 const MORE = ['agentInvocationsFromEvents', 'computeTokenCoverage', 'readReviewApproval', 'readStackSliceGate']; // #3126, #3366
-const EXTRA_INTERNAL_KEYS = [...AGENT_JOB_KEYS, ...TAIL, ...MORE, ...STEER, ...STEERED, 'nextStackSlice'];
+const EXTRA_INTERNAL_KEYS = [...AGENT_JOB_KEYS, ...TAIL, ...MORE, ...STEER, ...STEERED, 'nextStackSlice', 'restackAfterSquashMerge'];
 const INTERNAL_API_KEYS = [
   'openCodeVersion',
   'DEFAULT_CI_DEADLINE_MS',

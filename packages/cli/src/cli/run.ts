@@ -23,6 +23,7 @@ import {
   createGithubQueue,
   createOctokitQueueClient,
   evaluateLoadGuard,
+  findSlicePlanComment,
   formatQueueOrderConflict,
   logEvent,
   readHostLoad,
@@ -31,7 +32,9 @@ import {
   resolveHostLoadGuard,
   resolveLocalOnly,
   resolveRunUsageHarness,
+  restackAfterSquashMerge,
   slugify,
+  upsertSlicePlanComment,
   withAdmissionGuard,
 } from '@on-par/factory-core/internal';
 
@@ -347,6 +350,28 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
               ),
             recordStackMerge: (issue, prNumber) =>
               recordSliceMerged({ octokit: rt.getOctokit(), repo: ghRepo, issue, prNumber }).then(() => {}),
+            restack: async (issue, merged) => {
+              const octokit = rt.getOctokit();
+              const lookup = await findSlicePlanComment({ octokit, repo: ghRepo, issue });
+              if (lookup.status === 'not-found') return { status: 'nothing', reason: 'no slice plan to restack' };
+              if (lookup.status === 'invalid') {
+                return {
+                  status: 'park',
+                  reason: 'slice plan unavailable for restack',
+                  index: merged.index,
+                  files: [],
+                };
+              }
+              return restackAfterSquashMerge({
+                repoRoot,
+                octokit,
+                repo: ghRepo,
+                plan: lookup.plan,
+                mergedIndex: merged.index,
+                mergedPrNumber: merged.prNumber,
+                savePlan: (plan) => upsertSlicePlanComment({ octokit, repo: ghRepo, issue, plan }).then(() => {}),
+              });
+            },
             waitMerge: (issue, branch, root, gh, p, d = {}) =>
               waitForMerge(issue, branch, root, gh, p, { ...d, mergeOverrides: { auto: opts.autoMerge } }),
           }),

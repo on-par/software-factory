@@ -63,8 +63,12 @@ slice's branch and, once opened, its PR number. The comment is still the only re
 
 ### Merging
 
-Merges are bottom-up squash merges under the ADR-0144 trust tiers. After each merge GitHub rebases the remaining
-layers. A rebased layer has a new head SHA, so its CI must pass again before ADR-0146 lets it merge. The factory's
+Merges are bottom-up squash merges under the ADR-0144 trust tiers. After each squash merge the factory restacks
+the open layers above it, model-free (`restackAfterSquashMerge`): `git rebase --onto origin/main <merged head>` for the
+next layer and onto the new head of the layer below for higher ones, one atomic push leased on each layer's recorded
+head, the next layer retargeted to `main`, and the new heads recorded in the slice plan. A conflict or lease failure
+pushes nothing and parks the issue naming the slice, PR and files. The restack runs from the queue preflight's
+`restack` decision and right after the lane's own layer merge. A rebased layer has a new head SHA, so its CI must pass again before ADR-0146 lets it merge. The factory's
 auto-merge, where the tier allows it, merges the stack in order and never merges a layer whose lower layer is open.
 
 ### Queue
