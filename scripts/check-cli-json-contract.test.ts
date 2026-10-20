@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
-import { compareCliJsonSchemas, runCliJsonContractCheck } from './check-cli-json-contract.js';
+import { compareCliJsonSchemas, diffCliJsonSchemas, runCliJsonContractCheck } from './check-cli-json-contract.js';
 
 function schema(
   properties: Record<string, unknown>,
@@ -279,5 +279,28 @@ describe('runCliJsonContractCheck', () => {
     expect(ciJob).toContain('CLI_JSON_BASE_SHA: ${{ github.event.pull_request.base.sha }}');
     expect(ciJob).toContain('npx tsx scripts/check-cli-json-contract.ts --base "$CLI_JSON_BASE_SHA"');
     expect(runCliJsonContractCheck).toBeTypeOf('function');
+  });
+});
+
+describe('diffCliJsonSchemas', () => {
+  it('reports added top-level and nested fields', () => {
+    const lanes = (extra: Record<string, unknown>) => ({
+      type: 'array',
+      items: { type: 'object', properties: { id: stringField, ...extra }, required: ['id'] },
+    });
+    const diff = diffCliJsonSchemas(
+      'runs',
+      schema({ lanes: lanes({}) }),
+      schema({ lanes: lanes({ pr: stringField }), total: stringField }),
+    );
+    expect(diff.added).toEqual(['lanes[].pr', 'total']);
+    expect(diff.breaking).toEqual([]);
+    expect([diff.oldVersion, diff.newVersion]).toEqual([1, 1]);
+  });
+
+  it('still reports a retype and both versions when schemaVersion was bumped', () => {
+    const diff = diffCliJsonSchemas('status', schema({ breaker }), schema({ breaker: stringField }, ['breaker'], 2));
+    expect([diff.oldVersion, diff.newVersion]).toEqual([1, 2]);
+    expect(diff.breaking).toEqual([expect.objectContaining({ path: 'breaker', reason: 'field type changed' })]);
   });
 });
