@@ -41,7 +41,10 @@ jobs:
         continue-on-error: true
         run: npm run test:integration
 
+      # Filing must not depend on the `ci` label existing: a missing label once made
+      # `gh issue create --label ci` fail and dropped the alert for 7 nights (#3315).
       - name: File or update the failure issue
+        id: file_issue
         if: steps.integration.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -60,17 +63,27 @@ jobs:
             "lane behavior is broken and should be triaged." \
             "" \
             "Reproduce locally with: \`npm run test:integration\`")
-          existing=$(gh issue list --state open --label ci \
+          gh label create ci --force --color ededed \
+            --description "CI and workflow failures" \
+            || echo "::warning::could not create or update the ci label; filing without it"
+          existing=$(gh issue list --state open --limit 500 \
             --json number,title --jq "[.[] | select(.title == \"$title\")][0].number // empty")
           if [ -n "$existing" ]; then
             gh issue edit "$existing" --body "$body"
             gh issue comment "$existing" --body "Still failing as of $RUN_URL"
           else
-            gh issue create --label ci --title "$title" --body "$body"
+            gh issue create --label ci --title "$title" --body "$body" \
+              || { echo "::warning::gh issue create --label ci failed; retrying without the label"; \
+                   gh issue create --title "$title" --body "$body"; }
           fi
 
       - name: Fail the job when the integration suites failed
-        if: steps.integration.outcome == 'failure'
+        if: always() && steps.integration.outcome == 'failure'
+        env:
+          FILE_OUTCOME: ${{ steps.file_issue.outcome }}
         run: |
           echo "::error::pipeline integration suites failed — see the filed issue"
+          if [ "$FILE_OUTCOME" = "failure" ]; then
+            echo "::error::filing or updating the 'Nightly integration suite failing' issue also failed — see the 'File or update the failure issue' step log"
+          fi
           exit 1
