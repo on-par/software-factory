@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import type { ModelsConfig } from '../config/index.js';
 import type { RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
@@ -216,7 +217,8 @@ describe('CodexCliHarness command shape', () => {
 });
 
 it('codex cost row carries the model-call count and peak context from the session rollout', async () => {
-  const codexHome = await mkdtemp(join(tmpdir(), 'factory-codex-rollout-'));
+  const tempDirs = createTempDirs();
+  const codexHome = await tempDirs.make('factory-codex-rollout-');
   try {
     const threadId = '019ff914-ffab-7d32-9e8d-2b202a31c34f';
     const sessionDir = join(codexHome, 'sessions', '2026', '10', '19');
@@ -280,7 +282,7 @@ it('codex cost row carries the model-call count and peak context from the sessio
     if (rowCost === null) throw new Error('expected a priced cost row');
     expect(rows[0].costPerCallUsd).toBe(rowCost / 3);
   } finally {
-    await rm(codexHome, { recursive: true, force: true });
+    await tempDirs.cleanup();
   }
 });
 

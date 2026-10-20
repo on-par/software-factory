@@ -1,9 +1,9 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { CostEntry } from '../types/index.js';
 import { aggregateCosts, readCostsFile } from '../usage/index.js';
@@ -414,7 +414,8 @@ describe('ModelRouter cost sink', () => {
   });
 
   it('reads and aggregates claude-shaped and codex-shaped cost rows through one schema, no route branch (AC 2)', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'factory-costs-'));
+    const tempDirs = createTempDirs();
+    const dir = await tempDirs.make('factory-costs-');
     const file = join(dir, 'costs.jsonl');
     try {
       const claudeRow: CostEntry = {
@@ -465,7 +466,7 @@ describe('ModelRouter cost sink', () => {
       expect(summary.total.outputTokens).toBe(claudeRow.outputTokens + codexRow.outputTokens);
       expect(summary.total.cost).toBeCloseTo((claudeRow.cost ?? 0) + (codexRow.cost ?? 0), 10);
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await tempDirs.cleanup();
     }
   });
 });

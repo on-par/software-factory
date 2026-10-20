@@ -1,10 +1,10 @@
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile as realWriteFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, rm, writeFile as realWriteFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import type { ModelsConfig } from '../config/index.js';
 import { ModelRegistry } from '../models/index.js';
 import { CodexCliHarness, locateCodexRollout, readCodexRolloutUsage } from './codex-cli.js';
@@ -52,6 +52,9 @@ const modelsConfig: ModelsConfig = {
   routingRules: {},
 };
 const registry = new ModelRegistry(modelsConfig);
+const tempDirs = createTempDirs();
+afterEach(() => tempDirs.cleanup());
+
 function recordingExec(
   result: { stdout?: string; stderr?: string } = {},
   onCmd?: (cmd: string) => Promise<void> | void,
@@ -84,7 +87,7 @@ function tokenEvent(input: number, output: number, total: number, window = 27200
 
 describe('readCodexRolloutUsage', () => {
   it('returns distinct per-call usage, peak input and latest valid window', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'codex-usage-'));
+    const dir = await tempDirs.make('codex-usage-');
     const file = join(dir, 'rollout.jsonl');
     try {
       await realWriteFile(
@@ -112,7 +115,7 @@ describe('readCodexRolloutUsage', () => {
   });
 
   it('returns complete calls before a truncated last line and sees the completed call on reread', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'codex-usage-'));
+    const dir = await tempDirs.make('codex-usage-');
     const file = join(dir, 'rollout.jsonl');
     const first = tokenEvent(10, 2, 12);
     const second = tokenEvent(20, 3, 35);
@@ -128,7 +131,7 @@ describe('readCodexRolloutUsage', () => {
   });
 
   it('ignores unusable records and returns undefined for empty or missing files', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'codex-usage-'));
+    const dir = await tempDirs.make('codex-usage-');
     const file = join(dir, 'rollout.jsonl');
     try {
       await realWriteFile(
@@ -152,7 +155,7 @@ describe('readCodexRolloutUsage', () => {
   });
 
   it('accepts a complete final event without a newline and omits an unavailable window', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'codex-usage-'));
+    const dir = await tempDirs.make('codex-usage-');
     const file = join(dir, 'rollout.jsonl');
     try {
       await realWriteFile(
@@ -182,7 +185,7 @@ describe('readCodexRolloutUsage', () => {
 
 describe('locateCodexRollout', () => {
   it('finds only an exact thread match under nested session dates and rejects ambiguous matches', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'codex-home-'));
+    const home = await tempDirs.make('codex-home-');
     const thread = '019ff914-ffab-7d32-9e8d-2b202a31c34f';
     const nested = join(home, 'sessions', '2026', '10', '19');
     try {
@@ -203,7 +206,7 @@ describe('locateCodexRollout', () => {
 
 describe('CodexCliHarness rollout compatibility', () => {
   it('preserves stdout usage exactly when its thread has no matching rollout', async () => {
-    const home = await mkdtemp(join(tmpdir(), 'codex-home-'));
+    const home = await tempDirs.make('codex-home-');
     const thread = '019ff914-ffab-7d32-9e8d-2b202a31c34f';
     const stdout = `${JSON.stringify({ type: 'thread.started', thread_id: thread })}\n${JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 100, cached_input_tokens: 20, output_tokens: 5 } })}`;
     const rec = recordingExec({ stdout }, async (cmd) => realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT'));
@@ -222,10 +225,7 @@ describe('CodexCliHarness rollout compatibility', () => {
   });
 
   it('uses request CODEX_HOME ahead of the harness environment', async () => {
-    const homes = await Promise.all([
-      mkdtemp(join(tmpdir(), 'codex-home-request-')),
-      mkdtemp(join(tmpdir(), 'codex-home-env-')),
-    ]);
+    const homes = await Promise.all([tempDirs.make('codex-home-request-'), tempDirs.make('codex-home-env-')]);
     const thread = '019ff914-ffab-7d32-9e8d-2b202a31c34f';
     const stdout = `${JSON.stringify({ type: 'thread.started', thread_id: thread })}\n${JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 100, output_tokens: 5 } })}`;
     const rec = recordingExec({ stdout }, async (cmd) => realWriteFile(outFileFromCmd(cmd), 'CODEX OUTPUT'));
