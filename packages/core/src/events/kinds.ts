@@ -6,8 +6,9 @@
 // EventKind is the closed set of kinds the factory emits, and EVENT_TRAITS is the single table
 // every consumer reads instead of maintaining its own classification.
 
-import type { StuckTrigger } from '../steward/detect.js';
 import type { LogLevel } from '../types/index.js';
+
+export type { FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from './payloads.js';
 
 export type EventKind =
   | 'pr-adopt-ambiguous'
@@ -109,6 +110,7 @@ export type EventKind =
   | 'merged'
   | 'model-override'
   | 'model_override_ignored'
+  | 'no-pr-complete'
   | 'overnight-fail'
   | 'overnight-park'
   | 'overnight-preflight'
@@ -211,48 +213,6 @@ export interface EventTraits {
   /** Ends the run/lane's current attempt (success or failure). */
   isTerminal: boolean;
   laneStatus?: LaneStatus;
-}
-
-/** Payload of a `lane-paused` event. Two triggers: the lane circuit breaker
- *  (#1906/#1916) stopped `lane` after `firstIssue` and then `secondIssue` parked in
- *  a row with the same non-empty failure `signature`; or CHECK found every failing
- *  checker also failing on the base (#1928, `cause: 'environment'`), where
- *  `firstIssue === secondIssue` and `signature` is the CHECK failure signature
- *  (`''` when missing). */
-export interface LanePausedPayload {
-  lane: string;
-  /** `failureSignature()` shared by both parks. */
-  signature: string;
-  /** Checker names that failed in both parks (e.g. ['tests','lint']). */
-  failingChecks: string[];
-  firstIssue: number;
-  secondIssue: number;
-  /** Absent for the signature breaker (#1928). */
-  cause?: 'environment';
-  /** Base SHA the failing checkers also failed on; set when `cause` is 'environment'. */
-  baseSha?: string;
-}
-
-/** Payload of a `steward-triggered` event (#2084): `detectStuck` classified a parked run as
- *  stuck per ADR-0155. Emitted after the run's own park event and before the park's reports, so it is not itself a park. */
-export interface StewardTriggeredPayload {
-  /** Which ADR-0155 trigger matched. */
-  trigger: StuckTrigger;
-  /** The run's CHECK failure signature, when the outcome carries one. */
-  failureSignature?: string;
-}
-
-/** Payload of a `flaky_tests` event (#2302): CHECK's serial re-run of the base-red tests checker. */
-export interface FlakyTestsPayload {
-  /** Base SHA the tests checker also failed on. */
-  sha: string;
-  checker: 'tests';
-  mode: 'targeted' | 'full';
-  /** Re-run test names; [] for a full re-run. */
-  tests: string[];
-  verdict: 'passed' | 'reproduced';
-  /** Full-output log of the re-run, when written. */
-  logPath?: string;
 }
 
 /** Every existing `EventKind`, classified once. New kinds must be added here —
@@ -375,6 +335,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   merged: { severity: 'info', isPark: false, isTerminal: true },
   'model-override': { severity: 'info', isPark: false, isTerminal: false },
   model_override_ignored: { severity: 'warn', isPark: false, isTerminal: false },
+  'no-pr-complete': { severity: 'info', isPark: false, isTerminal: true },
   'overnight-fail': { severity: 'info', isPark: false, isTerminal: false },
   'overnight-park': { severity: 'info', isPark: false, isTerminal: false },
   'overnight-preflight': { severity: 'info', isPark: false, isTerminal: false },
