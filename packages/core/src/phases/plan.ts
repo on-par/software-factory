@@ -41,7 +41,7 @@ import type { SandboxPolicy } from '../sandbox/index.js';
 import { failoversFrom } from '../router/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
 import { archiveSpec, readSpec, writeSpec } from '../spec/index.js';
-import type { EscalateKind } from '../types/escalate.js';
+import type { EscalateKind } from '../types/index.js';
 import type { Constitution, DesignArtifact, FailoverReason, ReadinessInfo } from '../types/index.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE, wrapUntrustedIssueBody } from '../utils/untrusted-input.js';

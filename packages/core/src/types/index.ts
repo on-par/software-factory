@@ -348,6 +348,9 @@ export interface QueueReprioritizationRecord {
   rationale: string | null;
 }
 
+/** Why the planner escalated: missing information, a contradiction, or a size/split request (#3275). */
+export type EscalateKind = 'missing-info' | 'contradiction' | 'split';
+
 export interface FactoryEvent {
   ts: string;
   type: EventKind;
@@ -380,7 +383,7 @@ export interface FactoryEvent {
   checkFailure?: CheckFailureInfo;
   /** CI-failure evidence behind a SHIP ci-failed park (#2814). */
   ciFailure?: CiFailureEvidence;
-  escalateKind?: 'missing-info' | 'contradiction' | 'split'; // kind of a planner ESCALATE (#3275)
+  escalateKind?: EscalateKind; // kind of a planner ESCALATE (#3275)
   model?: string;
   tokens?: { input: number; output: number };
   durationMs?: number;

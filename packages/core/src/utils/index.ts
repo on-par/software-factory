@@ -8,7 +8,7 @@ import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredP
 import { createLogger } from '../logger/index.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
 import type { PrLookup } from '../phases/ship.js';
-import type { EscalateKind } from '../types/escalate.js';
+import type { EscalateKind } from '../types/index.js';
 import type {
   CheckFailureInfo,
   CiFailureEvidence,

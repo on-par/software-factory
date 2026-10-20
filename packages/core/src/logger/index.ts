@@ -6,7 +6,7 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-import type { EscalateKind } from '../types/escalate.js';
+import type { EscalateKind } from '../types/index.js';
 import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
 import type {
   CheckFailureInfo,
