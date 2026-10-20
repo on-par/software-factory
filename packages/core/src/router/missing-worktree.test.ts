@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
@@ -65,5 +66,43 @@ describe('ModelRouter missing worktree (#2964)', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it('says "removed while <model> was running" only when the worktree existed at call start', async () => {
+    const tempDirs = createTempDirs();
+    const dir = await tempDirs.make('router-wt-removed-');
+    try {
+      const runModel = vi.fn(async () => {
+        await rm(dir, { recursive: true, force: true });
+        throw new HarnessError('claude CLI process exited ENOENT', 'cli_missing', { code: 'ENOENT' });
+      });
+      const router = new ModelRouter(twoModels, routes, false, { runModel });
+
+      const err: any = await router.run('plan', 'do it', { worktree: dir }).catch((e) => e);
+
+      expect(err).toBeInstanceOf(ModelRouterError);
+      expect(err.message).toBe(
+        `Worktree missing for task 'plan': ${dir} no longer exists (removed while model-a was running) — not a model failure`,
+      );
+      expect(runModel).toHaveBeenCalledTimes(1);
+    } finally {
+      await tempDirs.cleanup();
+    }
+  });
+
+  it('reports a worktree that never existed accurately, with the attempt failure detail', async () => {
+    const never = join(tmpdir(), `never-${Math.random().toString(36).slice(2)}`);
+    const runModel = vi.fn(async () => {
+      throw new Error('StubModelExecutor: no scripted step or defaultOutput for task plan');
+    });
+    const router = new ModelRouter(twoModels, routes, false, { runModel });
+
+    const err: any = await router.run('plan', 'do it', { worktree: never }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ModelRouterError);
+    expect(err.message).toContain(`Worktree missing for task 'plan': ${never} did not exist when the task started`);
+    expect(err.message).toContain('no scripted step or defaultOutput for task plan');
+    expect(err.message).not.toContain('removed while');
+    expect(runModel).toHaveBeenCalledTimes(1);
   });
 });

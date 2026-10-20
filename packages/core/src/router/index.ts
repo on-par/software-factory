@@ -26,7 +26,7 @@ import { type LocalAuthAgent, localAuthAgentFor } from '../utils/local-auth-reco
 import { extractFailoverReason, ModelExecutorError, ModelRouterError, type RouterAttempt } from './executor-error.js';
 import { describeFailureDetail } from './failure-detail.js';
 import { claimOllamaSkipNotice, type OllamaProbeResult, probeOllama } from './ollama-probe.js';
-import { throwIfWorktreeMissing } from './missing-worktree.js';
+import { throwIfWorktreeMissing, worktreeExists } from './missing-worktree.js';
 import { filterModelsByRequires } from './requires.js';
 import { captureWorktreeState, resetWorktreeState } from './worktree-state.js';
 
@@ -781,7 +781,7 @@ export class ModelRouter {
     const cooldownMs = this.registry.failover.cooldownMs;
     const attempts: RouterAttempt[] = [];
     const blockedProviders = new Set<string>();
-
+    const wtAtStart = worktreeExists(options.worktree); // #2964: only a worktree that existed can be "removed"
     const snapshot = taskRequiresAgenticHarness(task)
       ? await captureWorktreeState(this.gitExecFn, worktree, onLog)
       : null;
@@ -865,7 +865,7 @@ export class ModelRouter {
           };
           attempts.push(detail ? { model, reason, ok: false, detail } : { model, reason, ok: false });
           onLog(`${model} failed (${reason}) on ${task}`);
-          await throwIfWorktreeMissing(task, options.worktree, model, attempts, onLog, blockProvider); // #2964
+          await throwIfWorktreeMissing(task, options.worktree, model, attempts, onLog, blockProvider, wtAtStart);
           if (reason === 'local_auth') {
             const key = this.authKey(model);
             if (key !== undefined && !this.authTripped.has(key)) {

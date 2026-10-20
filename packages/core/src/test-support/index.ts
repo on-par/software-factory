@@ -51,8 +51,24 @@ export function makeStubRoutesConfig(): RoutesConfig {
 }
 
 export function specContentFor(issue: number, title = 'Pipeline integration test'): string {
+  // PLAN re-prompts the planner when the spec has no valid design: block (#2803), and the
+  // pipeline suites script exactly one plan step, so the fixture spec must carry one.
   return `---
 route: claude
+design:
+  restatedProblem: Drive the phase pipeline end to end against a throwaway repository.
+  approach:
+    chosen: Let the scripted stub executor mutate the worktree.
+    rejected: []
+  interfacesTouched:
+    - feature.txt
+  behaviorContract:
+    - The pipeline reaches a ready PR.
+  verificationPlan:
+    - command: npm test
+      passWhen: the built-in checker sequence passes
+  riskBlastRadius: Throwaway repository only.
+  openQuestions: []
 ---
 # Spec: ${title} (#${issue})
 ## Goal
