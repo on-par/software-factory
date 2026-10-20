@@ -22,7 +22,6 @@ export const TMPDIR_MKDTEMP_BASELINE: Readonly<Record<string, number>> = {
   'packages/cli/src/cli/daemon-preflight.test.ts': 1,
   'packages/cli/src/cli/daemon-start.test.ts': 1,
   'packages/cli/src/cli/daemon.test.ts': 3,
-  'packages/cli/src/cli/doctor-command.test.ts': 1,
   'packages/cli/src/cli/doctor-config.test.ts': 2,
   'packages/cli/src/cli/filing.test.ts': 1,
   'packages/cli/src/cli/first-run.test.ts': 1,
