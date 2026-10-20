@@ -1,20 +1,17 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { createLogger } from './index.js';
 
-let tmpDir: string | undefined;
+const temps = createTempDirs();
 
-afterEach(async () => {
-  if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
-  tmpDir = undefined;
-});
+afterEach(() => temps.cleanup());
 
 it('includes escalateKind only when passed as extra (#3275)', async () => {
-  tmpDir = await mkdtemp(join(tmpdir(), 'factory-logger-'));
+  const tmpDir = await temps.make('factory-logger-');
   const eventsFile = join(tmpDir, 'events.ndjson');
   const logger = createLogger(eventsFile, { issue: 5 }, { out: { write: () => {} } });
 

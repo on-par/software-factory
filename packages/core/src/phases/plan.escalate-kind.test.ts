@@ -1,10 +1,9 @@
 // Planner size-gate verdict and ESCALATE classification (#3275).
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { buildPlanPrompt, classifyEscalation, planPhase } from './plan.js';
@@ -42,12 +41,9 @@ const routes: RoutesConfig = {
   },
 };
 
-const tempDirs = new Set<string>();
+const temps = createTempDirs();
 
-afterEach(async () => {
-  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
-  tempDirs.clear();
-});
+afterEach(() => temps.cleanup());
 
 const factoryTaskBody =
   '## Problem statement\nToo big.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test';
@@ -147,8 +143,7 @@ describe('classifyEscalation (#3275)', () => {
 
 describe('planPhase size gate and escalateKind (#3275)', () => {
   it('a passed size gate tells the planner so, and an over-budget plan is decomposed by the post-plan gate, not escalated (#3275)', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await temps.make('plan-phase-test-');
     const stub = new StubModelExecutor({
       scripts: {
         plan: [{ output: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n` }],
@@ -189,8 +184,7 @@ describe('planPhase size gate and escalateKind (#3275)', () => {
     ['ESCALATE: contradiction: AC1 vs out of scope', 'contradiction'],
     ['ESCALATE: Please split this issue', 'split'],
   ])('planner escalation %s logs escalateKind %s (#3275)', async (line, kind) => {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await temps.make('plan-phase-test-');
     const stub = new StubModelExecutor({ scripts: { plan: [{ output: `notes\n${line}\nmore text` }] } });
     const router = new ModelRouter(models, routes, false, stub);
     const octokit: any = {
