@@ -10,7 +10,7 @@ import { defaultLaneBreakerThreshold } from '@on-par/factory-config';
 import { z } from 'zod';
 import { readRepoConfigFile } from './repo-config-file.js';
 import { runConfigSource } from './run-config-source.js';
-import { BaseHealthConfigSchema } from './base-health.js';
+import { HealthConfigSections } from './base-health.js';
 import { toConfigSchemaIssues, type ConfigSchemaIssue } from './index.js';
 
 import type { ModelRegistry } from '../models/index.js';
@@ -222,7 +222,7 @@ export const RepoFactoryConfigV2Schema = z
       .strict()
       .optional()
       .describe('Review floor rules for the PR classifier. Unset keys use the packaged floor rules.'),
-    baseHealth: BaseHealthConfigSchema,
+    ...HealthConfigSections,
     /** Repo pins the build route for every issue (e.g. "opencode", or "command" for a declared harness). The plan
      *  phase still writes the spec, but the pinned route wins over the model's
      *  route choice so deepseek workers are actually used when pinned. */

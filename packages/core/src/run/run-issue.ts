@@ -125,6 +125,8 @@ export interface RunRequest {
    *  calls, no label, no event, no evidence-pack section). */
   /** design.blockUnresolvedRegressions resolved (#1819); undefined = off. */
   blockUnresolvedRegressions?: boolean;
+  /** check.hermeticGit resolved (#3272); undefined = on. */
+  hermeticGit?: boolean;
   /** readiness.updateIssueBody resolved (#2385); undefined = on. */
   readinessUpdateIssueBody?: boolean;
   /** build.publishFromBuild resolved (#1867); undefined = off (commit-only BUILD on every route). */
@@ -888,6 +890,7 @@ async function runIssueOnce(
     const priorFailureSignature = await ports.reworkHistory?.priorSignature(request.issue);
     const checkOpts = {
       runId,
+      hermeticGit: request.hermeticGit,
       issue: request.issue,
       worktree: ports.workspace.path,
       specPath: request.specPath,

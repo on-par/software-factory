@@ -320,6 +320,13 @@ export function headlessEnv(parentEnv: Record<string, string | undefined> = proc
  *  SharedCompilationId=factory-<runId>, DiffEngine_Disabled=true,
  *  DOTNET_CLI_TELEMETRY_OPTOUT=1 and DOTNET_NOLOGO=1, each unless the parent
  *  environment already sets it. */
+/** Git config isolation for CHECK's checker commands (#3272): no global or system config, so host
+ *  settings such as init.defaultBranch can't make a test pass locally that fails in CI. Repo-local
+ *  .git/config still applies. {} when disabled. */
+export function hermeticGitEnv(enabled: boolean): Record<string, string> {
+  return enabled ? { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } : {};
+}
+
 export function laneEnv(
   port?: number,
   parentEnv: Record<string, string | undefined> = process.env,

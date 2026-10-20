@@ -267,6 +267,12 @@ function modelNamespace(): Node[] {
       doc: doc('baseHealth'),
       children: [unset('checks', doc('baseHealth', 'checks'), '["<check-run name>"]')],
     },
+    {
+      kind: 'object',
+      key: 'check',
+      doc: doc('check'),
+      children: [unset('hermeticGit', doc('check', 'hermeticGit'), true)],
+    },
   ];
 }
 

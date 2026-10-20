@@ -109,7 +109,7 @@ export {
 export { resolveStateRoot, STATE_ROOT_ENV } from './config/state-root.js';
 export { resolveFilingPolicy, resolvePrClassifierPolicy, type EffectivePrClassifierPolicy } from './config/index.js';
 export type { EffectiveConfig, TrustTier } from './config/repo.js';
-export { resolveBaseHealthChecks } from './config/base-health.js';
+export { resolveBaseHealthChecks, resolveHermeticGit } from './config/base-health.js';
 export { resolveEffectiveConfig, resolveReviewFloorRules, resolveTrustTier } from './config/repo.js';
 export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix, resolveHostMaxBuilds } from './config/index.js';
 export { evaluateLoadGuard, formatLoadHold, readHostLoad, type LoadGuardDecision } from './environment/load-guard.js';
