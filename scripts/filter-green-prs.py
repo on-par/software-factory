@@ -1,32 +1,57 @@
 #!/usr/bin/env python3
-"""Filter `gh pr list --json number,isDraft,mergeable,statusCheckRollup,closingIssuesReferences,labels`
-output down to landable PRs: open, non-draft, MERGEABLE, with at least one CI check and
-every check SUCCESS. Reads the JSON array on stdin; prints one line per landable PR:
-"<number>\t<comma-joined closing issue numbers>\t<gated>" (issue field empty for standalone PRs;
-<gated> is "gated" when the PR's own labels include $GATE_LABEL, default no-auto-merge, else empty).
-Used by scripts/auto-merge-sweep.sh."""
+"""Select factory PRs ready to land through the sweep.
+
+Reads the JSON array from `gh pr list` on stdin. Eligible PRs are printed as
+"<number>\t<closing issue>\t<gated>"; rejected PRs are described on stderr.
+"""
 import json
 import os
 import sys
 
 GATE_LABEL = os.environ.get("GATE_LABEL") or "no-auto-merge"
-
-
-def is_landable(pr):
-    if pr["isDraft"]:
-        return False
-    if pr.get("mergeable") != "MERGEABLE":
-        return False
-    checks = pr.get("statusCheckRollup") or []
-    if not checks:
-        return False
-    states = {c.get("conclusion") or c.get("state") for c in checks}
-    return states == {"SUCCESS"}
+BRANCH_PREFIX = os.environ.get("BRANCH_PREFIX") or "factory/"
 
 
 def closing_issue(pr):
     refs = pr.get("closingIssuesReferences") or []
-    return ",".join(dict.fromkeys(str(r["number"]) for r in refs))
+    numbers = []
+    for ref in refs:
+        number = ref["number"]
+        if not isinstance(number, int) or isinstance(number, bool) or number < 1:
+            raise ValueError("closing issue number must be a positive integer")
+        numbers.append(str(number))
+    return ",".join(dict.fromkeys(numbers))
+
+
+def landability_reason(pr):
+    if pr.get("isDraft"):
+        return "draft PR"
+    if pr.get("mergeable") != "MERGEABLE":
+        return f"mergeable state is {pr.get('mergeable') or 'missing'}"
+    checks = pr.get("statusCheckRollup") or []
+    if not checks:
+        return "no status checks"
+    states = {check.get("conclusion") or check.get("state") for check in checks}
+    if states != {"SUCCESS"}:
+        return "checks are not all SUCCESS"
+
+    head = pr.get("headRefName")
+    if not isinstance(head, str) or not head.startswith(BRANCH_PREFIX):
+        return f"not a factory branch (expected prefix {BRANCH_PREFIX})"
+
+    try:
+        issue_numbers = closing_issue(pr)
+    except (KeyError, TypeError, ValueError):
+        return "invalid closing issue references"
+    if not issue_numbers:
+        return "closes no issue"
+    if "," in issue_numbers:
+        return f"closes multiple issues (#{issue_numbers.replace(',', ', #')})"
+    return None
+
+
+def is_landable(pr):
+    return landability_reason(pr) is None
 
 
 def pr_gated(pr, label):
@@ -37,7 +62,9 @@ def main():
     raw = sys.stdin.read()
     prs = json.loads(raw) if raw.strip() else []
     for pr in prs:
-        if not is_landable(pr):
+        reason = landability_reason(pr)
+        if reason:
+            print(f"SKIPPING PR #{pr.get('number', '?')}: {reason}", file=sys.stderr)
             continue
         gated = "gated" if pr_gated(pr, GATE_LABEL) else ""
         print(f"{pr['number']}\t{closing_issue(pr)}\t{gated}")
