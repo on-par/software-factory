@@ -86,6 +86,10 @@
       "properties": {},
       "additionalProperties": {}
     },
+    "escalateKind": {
+      "type": "string",
+      "enum": ["missing-info", "contradiction", "split"]
+    },
     "model": {
       "type": "string"
     },

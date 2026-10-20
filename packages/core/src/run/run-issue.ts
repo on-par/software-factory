@@ -95,6 +95,7 @@ import { runStatusForPhase, type RunStateUpdate } from './state.js';
 import { shipWithCiRework, type CiReworkPorts } from './ci-rework-loop.js';
 import { parkLogExtra } from './ship-park.js';
 import { enforceIssueBudget } from './budget.js';
+import type { EscalateKind } from '../types/index.js';
 
 /** Everything one run needs decided, as a plain resolved value — the CLI adapter
  *  computes this today; no config/file/path resolution happens in here. */
@@ -180,6 +181,7 @@ type LogFn = (
     prClassification?: PrClassificationRecord;
     checkFailure?: CheckFailureInfo;
     ciFailure?: CiFailureEvidence;
+    escalateKind?: EscalateKind;
     stewardTriggered?: StewardTriggeredPayload;
     flakyTests?: FlakyTestsPayload;
   },

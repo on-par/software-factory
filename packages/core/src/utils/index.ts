@@ -8,6 +8,7 @@ import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredP
 import { createLogger } from '../logger/index.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
 import type { PrLookup } from '../phases/ship.js';
+import type { EscalateKind } from '../types/index.js';
 import type {
   CheckFailureInfo,
   CiFailureEvidence,
@@ -47,6 +48,7 @@ export function logEvent(
     flakyTests?: FlakyTestsPayload;
     checkFailure?: CheckFailureInfo;
     ciFailure?: CiFailureEvidence;
+    escalateKind?: EscalateKind;
     actor?: string;
     model?: string;
     tokens?: { input: number; output: number };
@@ -55,21 +57,7 @@ export function logEvent(
 ): void {
   const logger = createLogger(eventsFile, { issue, lane: extra?.lane, phase: extra?.phase });
   const level = extra?.level ?? levelForType(type);
-  const meta: {
-    failoverReason?: FailoverReason;
-    rework?: ReworkInfo;
-    readiness?: ReadinessInfo;
-    prClassification?: PrClassificationRecord;
-    lanePaused?: LanePausedPayload;
-    stewardTriggered?: StewardTriggeredPayload;
-    flakyTests?: FlakyTestsPayload;
-    checkFailure?: CheckFailureInfo;
-    ciFailure?: CiFailureEvidence;
-    actor?: string;
-    model?: string;
-    tokens?: { input: number; output: number };
-    durationMs?: number;
-  } = {};
+  const meta: Omit<NonNullable<typeof extra>, 'lane' | 'phase' | 'level'> = {};
   if (extra?.failoverReason) meta.failoverReason = extra.failoverReason;
   if (extra?.rework) meta.rework = extra.rework;
   if (extra?.readiness) meta.readiness = extra.readiness;
@@ -79,6 +67,7 @@ export function logEvent(
   if (extra?.flakyTests) meta.flakyTests = extra.flakyTests;
   if (extra?.checkFailure) meta.checkFailure = extra.checkFailure;
   if (extra?.ciFailure) meta.ciFailure = extra.ciFailure;
+  if (extra?.escalateKind) meta.escalateKind = extra.escalateKind;
   if (extra?.actor) meta.actor = extra.actor;
   if (extra?.model) meta.model = extra.model;
   if (extra?.tokens) meta.tokens = extra.tokens;

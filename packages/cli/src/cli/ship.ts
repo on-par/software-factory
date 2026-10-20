@@ -2,19 +2,13 @@
 import { resolve } from 'node:path';
 import { styleText } from 'node:util';
 import type {
-  CheckFailureInfo,
-  CiFailureEvidence,
   EventKind,
-  FailoverReason,
   FailurePhase,
-  FlakyTestsPayload,
   GithubIssueParams,
   LocalOnlyPolicy,
-  ReadinessInfo,
   RunOutcome,
   RunPolicy,
   RunPorts,
-  StewardTriggeredPayload,
   WorkRequest,
   WorkRequestSourceKind,
 } from '@on-par/factory-core';
@@ -50,7 +44,7 @@ import {
   writePhaseSnapshot,
 } from '@on-par/factory-core';
 import { hostBuildSlotPort } from './host-slot.js';
-import type { CheckResumeRecord, PrClassificationRecord, WorktreeSandbox } from '@on-par/factory-core/internal';
+import type { CheckResumeRecord, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
   createCheckResumeStore,
   createGithubLaneClaimStalenessProbe,
@@ -264,37 +258,21 @@ export async function shipIssue(
   const baseHealthOpts = { checks: resolveBaseHealthChecks(repoConfig), events: paths.events, lane };
   let terminalMessage: string | undefined;
   let laneReworkRounds = 0;
-  const mkLog =
-    (phase?: string) =>
-    (
-      type: EventKind,
-      msg: string,
-      extra?: {
-        failoverReason?: FailoverReason;
-        model?: string;
-        tokens?: { input: number; output: number };
-        readiness?: ReadinessInfo;
-        prClassification?: PrClassificationRecord;
-        checkFailure?: CheckFailureInfo;
-        ciFailure?: CiFailureEvidence;
-        stewardTriggered?: StewardTriggeredPayload;
-        flakyTests?: FlakyTestsPayload;
-      },
-    ) => {
-      if (TERMINAL_EVENT_KINDS.has(type)) terminalMessage = msg;
-      if (type === 'rework') laneReworkRounds++;
-      // checkPhase logs each skipped checker as a 'SKIPPED: ' check event — echo it to the terminal.
-      if (type === 'check' && msg.startsWith('SKIPPED: ')) {
-        console.error(styleText('yellow', `  SKIP: ${msg.slice('SKIPPED: '.length)}`));
-      }
-      // Likewise for failing checkers: the parked RunOutcome carries only an aggregate count (#675).
-      if (type === 'check' && msg.startsWith('FAILED: ')) {
-        console.error(styleText('red', `  FAIL: ${msg.slice('FAILED: '.length)}`));
-      }
-      logEvent(paths.events, type, issueNum, msg, { ...extra, lane, phase });
-      // Best-effort lastEvent summary (#1327): a write failure is swallowed, not logged (re-entrancy).
-      touchLastEvent(phaseSnapshotFile(paths.runs, issueNum), summarizeEvent(type, msg)).catch(() => {});
-    };
+  const mkLog = (phase?: string) => (type: EventKind, msg: string, extra?: Parameters<typeof logEvent>[4]) => {
+    if (TERMINAL_EVENT_KINDS.has(type)) terminalMessage = msg;
+    if (type === 'rework') laneReworkRounds++;
+    // checkPhase logs each skipped checker as a 'SKIPPED: ' check event — echo it to the terminal.
+    if (type === 'check' && msg.startsWith('SKIPPED: ')) {
+      console.error(styleText('yellow', `  SKIP: ${msg.slice('SKIPPED: '.length)}`));
+    }
+    // Likewise for failing checkers: the parked RunOutcome carries only an aggregate count (#675).
+    if (type === 'check' && msg.startsWith('FAILED: ')) {
+      console.error(styleText('red', `  FAIL: ${msg.slice('FAILED: '.length)}`));
+    }
+    logEvent(paths.events, type, issueNum, msg, { ...extra, lane, phase });
+    // Best-effort lastEvent summary (#1327): a write failure is swallowed, not logged (re-entrancy).
+    touchLastEvent(phaseSnapshotFile(paths.runs, issueNum), summarizeEvent(type, msg)).catch(() => {});
+  };
   const log = mkLog();
   log('issue-title', issueTitle);
   const repoConfigLabel = repoConfigFileFor(repoRoot, paths.config).relPath;
