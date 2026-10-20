@@ -542,7 +542,7 @@ const INTERNAL_API_KEYS = [
   'resolveExperimental',
   'resolveLocalOnly',
   'resolveHostMaxBuilds',
-  ...'resolveHostLoadGuard evaluateLoadGuard formatLoadHold readHostLoad'.split(' '), // #3048
+  ...'resolveHostLoadGuard evaluateLoadGuard formatLoadHold readHostLoad resolveBaseHealthChecks'.split(' '), // #3048, #3290
   'hostBuildSlotsDir',
   'listHostSlots',
   ...'withHostBuildSlot createRunSlotGate withRunAndHostBuildSlot'.split(' '), // #3049

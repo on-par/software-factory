@@ -60,6 +60,7 @@ import {
   logCost,
   logEvent,
   recordLocalAuthFailure,
+  resolveBaseHealthChecks,
   resolveEffectiveConfig,
   resolvePrClassifierPolicy,
   shouldProxyEgress,
@@ -260,6 +261,7 @@ export async function shipIssue(
   const runStartedAt = new Date().toISOString();
 
   const lane = ctx?.lane;
+  const baseHealthOpts = { checks: resolveBaseHealthChecks(repoConfig), events: paths.events, lane };
   let terminalMessage: string | undefined;
   let laneReworkRounds = 0;
   const mkLog =
@@ -403,10 +405,9 @@ export async function shipIssue(
     checkPhase: phases.checkPhase,
     hostBuildSlot: hostBuildSlotPort(factoryConfig, ghRepo, issueNum, log, ctx?.runSlots),
     shipPhase: shipPhaseForMode,
-    checkBaseHealth: deps.checkBaseHealth ?? baseHealthWithCi(octokit, ghOwner, ghName),
+    checkBaseHealth: deps.checkBaseHealth ?? baseHealthWithCi(octokit, ghOwner, ghName, baseHealthOpts),
     resolveConstitution: () =>
-      // Resolved once: runIssue reuses it for every phase, so the build worker can't author its own standards.
-      // A local-only workspace is caller-provided, not a checkout of repoRoot, so it keeps its own constitution.
+      // Resolved once so the build worker can't author its own standards; a caller-provided local-only workspace keeps its own.
       constitutionLoader.resolve(
         worktree,
         product,
@@ -471,8 +472,7 @@ export async function shipIssue(
       }),
   };
 
-  // #2214: report-only per-lane egress proxy for sandbox-exec. Started here, after worktree setup,
-  // so the finally below is the single place that stops it on every exit path.
+  // #2214: report-only per-lane egress proxy for sandbox-exec, started after worktree setup; the finally below stops it.
   const proxied = shouldProxyEgress(request.sandboxPolicy) ? request.sandboxPolicy : undefined;
   const egressProxy = proxied
     ? await startEgressProxy({

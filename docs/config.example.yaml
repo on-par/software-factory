@@ -121,6 +121,12 @@ version: 2
   # maxDiffLines: 500
   # Merge trust tier for this repo (ADR-0144). Unset: T0, a human merges every PR.
   # trustTier: T0
+# Which checks decide base health (#3290).
+# baseHealth:
+  # Check-run names that decide whether main is green for the base-hold gate and base health. Unset:
+  # the branch-protection required checks, else the check runs of the push workflow named CI. Other
+  # failed push workflows (Release, deploy) log base_push_workflow_failed and never hold.
+  # checks: ["<check-run name>"]
 # Merge policy. `factory run` and `supervise` read `auto`; `factory land` reads `admin`. `factory
 # ship` and `run-issue` always stop at a ready-for-review PR.
 # run:

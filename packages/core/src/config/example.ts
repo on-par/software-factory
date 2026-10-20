@@ -260,6 +260,12 @@ function modelNamespace(): Node[] {
         unset('trustTier', doc('classifier', 'trustTier'), 'T0'),
       ],
     },
+    {
+      kind: 'object',
+      key: 'baseHealth',
+      doc: doc('baseHealth'),
+      children: [unset('checks', doc('baseHealth', 'checks'), '["<check-run name>"]')],
+    },
   ];
 }
 

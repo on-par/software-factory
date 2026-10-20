@@ -1,9 +1,8 @@
 // src/config/repo.ts — Per-repo model/runtime config overrides (.factory/config.json)
 //
-// Lets a consuming repo commit its own model policy (per-phase pins, tier order,
-// provider enable flags, usage cap) without editing the packaged defaults shipped
-// in @on-par/factory-config. Resolution order: repo file > env vars > packaged
-// defaults.
+// Lets a consuming repo commit its own model policy (per-phase pins, tier order, provider enable flags, usage
+// cap) without editing the packaged defaults shipped in @on-par/factory-config. Resolution order: repo file >
+// env vars > packaged defaults.
 
 import { existsSync } from 'node:fs';
 
@@ -11,6 +10,7 @@ import { defaultLaneBreakerThreshold } from '@on-par/factory-config';
 import { z } from 'zod';
 import { readRepoConfigFile } from './repo-config-file.js';
 import { runConfigSource } from './run-config-source.js';
+import { BaseHealthConfigSchema } from './base-health.js';
 import { toConfigSchemaIssues, type ConfigSchemaIssue } from './index.js';
 
 import type { ModelRegistry } from '../models/index.js';
@@ -222,6 +222,7 @@ export const RepoFactoryConfigV2Schema = z
       .strict()
       .optional()
       .describe('Review floor rules for the PR classifier. Unset keys use the packaged floor rules.'),
+    baseHealth: BaseHealthConfigSchema,
     /** Repo pins the build route for every issue (e.g. "opencode", or "command" for a declared harness). The plan
      *  phase still writes the spec, but the pinned route wins over the model's
      *  route choice so deepseek workers are actually used when pinned. */
@@ -245,8 +246,7 @@ export interface EfficiencyPolicy {
   perIssueCapUsd?: number;
 }
 
-/** Resolve bounded-work defaults. Fast path remains opt-in so existing repos retain
- * their PLAN behavior, while checker rework is capped at one retry by default. */
+/** Resolve bounded-work defaults: fast path is opt-in, and checker rework is capped at one retry by default. */
 export function resolveEfficiencyPolicy(repo: RepoFactoryConfig | null): EfficiencyPolicy {
   return {
     fastPath: repo?.budget?.fastPath ?? false,
