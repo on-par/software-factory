@@ -38,7 +38,7 @@ import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
 import { publishParkComment } from './park-comment.js';
 import { gateOpencodeBuildOnBreaker, providerFallbackPreferrer } from './provider-breaker-gate.js';
 import { fileFlakyTests } from './flaky-tests.js';
-import { enterStackSlice, runStackLoop } from './stack-slice-entry.js';
+import { enterStackSlice } from './stack-slice-entry.js';
 import { recordShippedSlice } from './slice-ship-record.js';
 import type { ReviewFloorPathChange, ReviewFloorRuleSet } from '../review/floor.js';
 import {
@@ -101,7 +101,7 @@ import type { EscalateKind } from '../types/index.js';
 /** Everything one run needs decided, as a plain resolved value — the CLI adapter
  *  computes this today; no config/file/path resolution happens in here. */
 export interface RunRequest {
-  /** ADR-0161 stack mode: the 1-based slice to plan. Set by runIssue's stack loop; undefined = the gate's current slice. */
+  /** ADR-0161 stack mode: the 1-based slice to plan; undefined = the gate's choice (stack mode: nextStackSlice). */
   sliceIndex?: number;
   issue: number;
   repo: string;
@@ -293,19 +293,17 @@ function isDecomposeSignal(err: unknown): boolean {
 
 export async function runIssue(request: RunRequest, policy: RunPolicy, ports: RunPorts): Promise<RunOutcome> {
   const log = ports.events();
-  return runStackLoop(request, async (req) => {
-    const observed: { checkSummary?: CheckSummary } = {};
-    let outcome: RunOutcome;
-    try {
-      outcome = await runIssueOnce(req, policy, ports, observed);
-    } catch (err) {
-      const update = thrownRunStateUpdate(isDecomposeSignal(err), req.branch, observed.checkSummary);
-      await safeRecordRunState(ports.recordRunState, log, update);
-      throw err;
-    }
-    await safeRecordRunState(ports.recordRunState, log, terminalRunStateUpdate(outcome, observed.checkSummary));
-    return outcome;
-  });
+  const observed: { checkSummary?: CheckSummary } = {};
+  let outcome: RunOutcome;
+  try {
+    outcome = await runIssueOnce(request, policy, ports, observed);
+  } catch (err) {
+    const update = thrownRunStateUpdate(isDecomposeSignal(err), request.branch, observed.checkSummary);
+    await safeRecordRunState(ports.recordRunState, log, update);
+    throw err;
+  }
+  await safeRecordRunState(ports.recordRunState, log, terminalRunStateUpdate(outcome, observed.checkSummary));
+  return outcome;
 }
 
 async function runIssueOnce(

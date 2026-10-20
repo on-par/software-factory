@@ -1,7 +1,7 @@
-// packages/core/src/run/stack-slice-entry.ts — ADR-0161: stack mode builds every slice in one run, each on its parent's branch.
+// packages/core/src/run/stack-slice-entry.ts — ADR-0161: stack mode builds one slice per run, on its parent's branch (or on main once that parent merged).
 import { upsertSlicePlanComment } from '../readiness/slice-plan-github.js';
 import {
-  DEFAULT_MAX_SLICES,
+  STACK_MAIN_REF,
   parentRefForSlice,
   stackSliceBranch,
   withSliceBranchCreated,
@@ -15,32 +15,6 @@ type PlanSlice = NonNullable<PlanResult['slice']>;
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-/** Runs one pass per slice: while a stack-mode pass is ready and neither the top slice nor the slice cap
- *  (`maxSlices`, ADR-0156), plans the next one. Any non-ready slice outcome (a CHECK park, escalation or
- *  environment release, or any earlier park) ends the chain. That outcome is returned as the run's outcome,
- *  and later slices are never planned, branched or built (#3061). */
-export async function runStackLoop(
-  request: RunRequest,
-  runOnce: (request: RunRequest) => Promise<RunOutcome>,
-): Promise<RunOutcome> {
-  let outcome = await runOnce(request);
-  // The slice-gate parks a fresh plan above the cap at PLAN, so through the gate no slice is built. The
-  // loop enforces the cap too, so it holds if the gate is bypassed: at most min(plan length, maxSlices)
-  // slices are built; the run stops after slice `limit`, returns its ready outcome, and leaves later
-  // slices pending.
-  const stackLimit = (count: number) => Math.min(count, request.maxSlices ?? DEFAULT_MAX_SLICES);
-  while (
-    request.sizeGateMode === 'stack' &&
-    !request.resumeFrom &&
-    outcome.state === 'ready' &&
-    outcome.slice !== undefined &&
-    outcome.slice.index < stackLimit(outcome.slice.count)
-  ) {
-    outcome = await runOnce({ ...request, sliceIndex: outcome.slice.index + 1 });
-  }
-  return outcome;
 }
 
 /** Creates slice k's branch from its parent ref and records it in the slice plan comment, before BUILD.
@@ -82,6 +56,6 @@ export async function enterStackSlice(args: {
   log('plan', `stack slice ${index}/${count}: created ${branch} from ${parent}`);
   return {
     slice: { plan: recorded, index },
-    request: { ...request, branch, ...(index > 1 ? { parentBaseRef: parent } : {}) },
+    request: { ...request, branch, ...(parent !== STACK_MAIN_REF ? { parentBaseRef: parent } : {}) },
   };
 }

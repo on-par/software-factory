@@ -32,7 +32,7 @@ export function stackPositionFor(plan: SlicePlan, index: number, parentBaseRef: 
     index,
     count,
     base,
-    ...(basePr === undefined ? {} : { basePr }),
+    ...(basePr === undefined || base === STACK_BASE_BRANCH ? {} : { basePr }),
     ...(index < count ? { next: { branch: stackSliceBranch(plan.issue, index + 1) } } : {}),
   };
 }

@@ -1,7 +1,7 @@
 import { StorySchema } from '@on-par/contracts';
 import { describe, expect, it, vi } from 'vitest';
 import type { Slice, SlicePlan } from '../readiness/slice-plan.js';
-import { readReviewApproval, readStackSliceGate } from './stack-approval.js';
+import { createOctokitStackSliceGateReader, readReviewApproval, readStackSliceGate } from './stack-approval.js';
 import type { StackPullReviews, StackSliceGateReader, StackSliceReview } from './stack-approval.js';
 
 const review = (reviewerId: number | null, state: string, commitId: string | null = 'head'): StackSliceReview => ({
@@ -122,5 +122,37 @@ describe('readStackSliceGate', () => {
   });
   it('throws when a pr-open slice records no PR number', async () => {
     await expect(readStackSliceGate(planOf(slice(1, 'pr-open')), readerOf('open'))).rejects.toThrow(/no PR number/);
+  });
+});
+
+describe('createOctokitStackSliceGateReader', () => {
+  const stub = (pr: Record<string, unknown>, pages: Array<Array<Record<string, unknown>>>) => {
+    const listReviews = vi.fn(async ({ page }: { page: number }) => ({ data: pages[page - 1] ?? [] }));
+    const get = vi.fn(async () => ({ data: pr }));
+    const getAuthenticated = vi.fn(async () => ({ data: { id: 9 } }));
+    const octokit = { rest: { pulls: { get, listReviews }, users: { getAuthenticated } } } as never;
+    return { octokit, get, listReviews, getAuthenticated };
+  };
+
+  it('maps merged, open and closed pull states', async () => {
+    const read = async (pr: Record<string, unknown>) =>
+      createOctokitStackSliceGateReader(stub(pr, []).octokit, 'o/r').getPullState(5);
+    expect(await read({ merged: true, state: 'closed' })).toBe('merged');
+    expect(await read({ merged: false, merged_at: '2026-01-01', state: 'closed' })).toBe('merged');
+    expect(await read({ merged: false, state: 'open' })).toBe('open');
+    expect(await read({ merged: false, state: 'closed' })).toBe('closed');
+  });
+
+  it('paginates reviews and reads the head sha and own identity', async () => {
+    const full = Array.from({ length: 100 }, (_, i) => ({ user: { id: i }, state: 'COMMENTED', commit_id: 'h' }));
+    const { octokit, listReviews, get } = stub({ head: { sha: 'h' } }, [full, [{ user: null, state: 'APPROVED' }]]);
+    const reader = createOctokitStackSliceGateReader(octokit, 'o/r');
+    const result = await reader.getPullReviews(5);
+
+    expect(listReviews).toHaveBeenCalledTimes(2);
+    expect(get).toHaveBeenCalledWith({ owner: 'o', repo: 'r', pull_number: 5 });
+    expect(result).toMatchObject({ headSha: 'h', selfId: 9 });
+    expect(result.reviews).toHaveLength(101);
+    expect(result.reviews[100]).toEqual({ reviewerId: null, state: 'APPROVED', commitId: null });
   });
 });

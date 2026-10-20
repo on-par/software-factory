@@ -7,6 +7,7 @@ import {
   SLICE_CAP_CEILING,
   SLICE_PLAN_MARKER,
   currentSlice,
+  nextStackSlice,
   overCapReason,
   parseSlicePlanComment,
   renderSlicePlanComment,
@@ -16,7 +17,7 @@ import {
   withSlicesAffected,
   withSlicesNotBuilt,
 } from './slice-plan.js';
-import type { SlicePlan } from './slice-plan.js';
+import type { SlicePlan, SliceState } from './slice-plan.js';
 
 function story(title: string, extra: Partial<Record<string, unknown>> = {}): Story {
   return StorySchema.parse({
@@ -271,5 +272,35 @@ describe('withSlicesAffected and headSha', () => {
   it('still parses a comment without the new fields', () => {
     const parsed = parseSlicePlanComment(renderSlicePlanComment(built(2)));
     expect(parsed?.ok && parsed.plan.slices[0]?.headSha).toBeUndefined();
+  });
+});
+
+describe('nextStackSlice (ADR-0161)', () => {
+  const states = (...list: SliceState[]): SlicePlan =>
+    list.reduce((plan, state, i) => withSliceState(plan, i + 1, state, 10 + i), built(list.length));
+
+  it('returns slice 1 for a fresh plan', () => {
+    expect(nextStackSlice(built(3))?.index).toBe(1);
+  });
+  it('returns slice 2 once slice 1 is merged or pr-open', () => {
+    expect(nextStackSlice(states('merged', 'pending'))?.index).toBe(2);
+    expect(nextStackSlice(states('pr-open', 'pending'))?.index).toBe(2);
+  });
+  it('returns undefined when no pending slice is buildable', () => {
+    expect(nextStackSlice(states('pr-open', 'not-built'))).toBeUndefined();
+    expect(nextStackSlice(states('merged', 'merged'))).toBeUndefined();
+    expect(nextStackSlice(states('pr-open'))).toBeUndefined();
+    expect(nextStackSlice(states('not-built', 'pending'))).toBeUndefined();
+  });
+});
+
+describe('renderSlicePlanComment wait line (ADR-0161)', () => {
+  it('says slice k is waiting when slice k+1 is pending', () => {
+    const plan = withSliceState(built(2), 1, 'pr-open', 10);
+    expect(renderSlicePlanComment(plan)).toContain('PR open #10 — waiting for approval or merge before slice 2');
+  });
+  it('omits the wait line for the final pr-open slice', () => {
+    const plan = withSliceState(withSliceState(built(2), 1, 'merged', 10), 2, 'pr-open', 11);
+    expect(renderSlicePlanComment(plan)).not.toContain('waiting for approval');
   });
 });

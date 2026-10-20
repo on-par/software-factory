@@ -522,6 +522,7 @@ async function planPhaseImpl(opts: {
       oversized: false,
       maxSlices: opts.maxSlices ?? DEFAULT_MAX_SLICES,
       ...(opts.sizeGateMode === 'stack' && opts.sliceIndex !== undefined ? { sliceIndex: opts.sliceIndex } : {}),
+      stackMode: opts.sizeGateMode === 'stack',
       worktree,
       router,
       octokit,

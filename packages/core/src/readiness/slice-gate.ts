@@ -15,6 +15,7 @@ import type { DecomposeDriverDeps } from './decompose.js';
 import {
   SLICE_CAP_CEILING,
   currentSlice,
+  nextStackSlice,
   overCapReason,
   sliceCapExceeded,
   slicePlanFromDecomposition,
@@ -43,9 +44,13 @@ function selectSlice(
   plan: SlicePlan,
   issue: number,
   sliceIndex: number | undefined,
+  stackMode?: boolean,
 ): { kind: 'slice'; slice: Slice } | { kind: 'park'; reason: string } {
   let slice: Slice | undefined;
   if (sliceIndex === undefined) {
+    // Approval of a pr-open lower slice is enforced before the claim: by the queue preflight and the CLI's findSliceIndex.
+    const next = stackMode ? nextStackSlice(plan) : undefined;
+    if (next !== undefined) return { kind: 'slice', slice: next };
     slice = currentSlice(plan);
     if (slice === undefined) {
       return { kind: 'park', reason: `every slice in the slice plan for #${issue} is merged — parked` };
@@ -82,6 +87,8 @@ export async function resolveSliceGate(deps: {
   maxSlices: number;
   /** ADR-0161 stack mode: plan this 1-based slice instead of currentSlice(plan). */
   sliceIndex?: number;
+  /** ADR-0161: with no sliceIndex, pick nextStackSlice(plan) instead of parking on a pr-open currentSlice. */
+  stackMode?: boolean;
   worktree: string;
   router: ModelRouter;
   octokit: Octokit;
@@ -113,7 +120,7 @@ export async function resolveSliceGate(deps: {
         reason: overCapReason(lookup.plan.slices.length, deps.maxSlices),
       };
     }
-    const selected = selectSlice(lookup.plan, issue, deps.sliceIndex);
+    const selected = selectSlice(lookup.plan, issue, deps.sliceIndex, deps.stackMode);
     if (selected.kind === 'park') return selected;
     return { kind: 'slice', plan: lookup.plan, slice: selected.slice, created: false };
   }
@@ -174,7 +181,7 @@ export async function resolveSliceGate(deps: {
     'size-gate-sliced',
     `issue exceeds the size gate (${reasonText}) — sliced into ${built.plan.slices.length} slice(s), slice plan comment ${upserted.commentId}`,
   );
-  const selected = selectSlice(built.plan, issue, deps.sliceIndex);
+  const selected = selectSlice(built.plan, issue, deps.sliceIndex, deps.stackMode);
   if (selected.kind === 'park') return selected;
   return { kind: 'slice', plan: built.plan, slice: selected.slice, created: true };
 }

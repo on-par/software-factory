@@ -21,7 +21,15 @@ export async function resolveRunBranch(opts: {
   eventsFile: string;
 }): Promise<string> {
   const { issueNum, issueTitle, ghRepo, branchPrefix, sizeGateMode, work, ctx, octokit, eventsFile } = opts;
-  const sliceIndex = await findSliceIndex({ sizeGateMode, ctx, work, octokit, ghRepo, issueNum });
+  const sliceIndex = await findSliceIndex({
+    sizeGateMode,
+    ctx,
+    work,
+    octokit,
+    ghRepo,
+    issueNum,
+    log: (msg) => logEvent(eventsFile, 'awaiting-review', issueNum, msg, { lane: ctx?.lane }),
+  });
   if (ctx?.resumeFrom) return ctx.resumeFrom.branch;
   const fresh = branchFor(issueNum, issueTitle, branchPrefix, sliceIndex);
   if (ctx?.localOnly || sliceIndex !== undefined || sizeGateMode === 'stack' || work.kind !== GITHUB_ISSUE_SOURCE) {

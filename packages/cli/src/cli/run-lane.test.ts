@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AwaitingReviewError, LandConflictError } from './land-pr.js';
-import { LaneParkError } from './index.js';
+import { IssueSkippedError, LaneParkError } from './index.js';
 import { runLane } from './run-lane.js';
 
 describe('cli', () => {
@@ -55,6 +55,30 @@ describe('cli', () => {
         ['waitMerge', 7, 'contributor/real-head'],
         ['release', 7, 'done'],
       ]);
+    });
+
+    it.each([
+      ['stack-slice-waiting', 'queued'],
+      ['already-closed', 'done'],
+    ] as const)('an IssueSkippedError (%s) settles %s', async (reason, released) => {
+      const calls: any[] = [];
+      const claims = [buildClaim(5)!];
+      await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+        claimNext: async () => claims.shift() ?? null,
+        ship: async () => {
+          throw new IssueSkippedError('skipped', reason);
+        },
+        waitMerge: async () => {
+          calls.push(['waitMerge']);
+        },
+        releaseIssue: async (issue, outcome) => {
+          calls.push(['release', issue, outcome]);
+        },
+        pathExists: () => false,
+        emitEvent: () => {},
+      });
+
+      expect(calls).toEqual([['release', 5, released]]);
     });
 
     it.each([

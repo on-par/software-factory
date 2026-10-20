@@ -3541,11 +3541,12 @@ export async function planRunLanes(input: {
 }
 
 /** The target issue was already resolved before the run started — a clean skip,
- *  not a park. Callers advance to the next queue entry. (#681) */
+ *  not a park. Callers advance to the next queue entry. (#681) A stack slice waiting on review of the slice
+ *  below is also a clean non-park exit; the lane releases it to the queue. */
 export class IssueSkippedError extends Error {
   constructor(
     message: string,
-    readonly reason: 'already-closed',
+    readonly reason: 'already-closed' | 'stack-slice-waiting',
   ) {
     super(message);
   }

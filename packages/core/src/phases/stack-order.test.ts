@@ -108,3 +108,11 @@ describe('updateParentStackOrder', () => {
     );
   });
 });
+
+describe('stackPositionFor on main after the lower slice merged (#3367)', () => {
+  it('omits basePr when the base is main', () => {
+    const position = stackPositionFor(plan([11]), 2, undefined);
+    expect(position.base).toBe('main');
+    expect(position).not.toHaveProperty('basePr');
+  });
+});

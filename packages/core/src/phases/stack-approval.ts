@@ -1,5 +1,7 @@
 // src/phases/stack-approval.ts — ADR-0161 stack mode: read whether the top built slice PR is approved or merged (#3366).
 
+import type { Octokit } from '@octokit/rest';
+
 import type { SlicePlan } from '../readiness/slice-plan.js';
 
 /** One PR review, reduced to what the approval gate reads. */
@@ -66,4 +68,37 @@ export async function readStackSliceGate(plan: SlicePlan, reader: StackSliceGate
   if (state === 'closed') return { status: 'waiting', index: top.index, prNumber };
   const status = readReviewApproval(await reader.getPullReviews(prNumber));
   return { status, index: top.index, prNumber };
+}
+
+/** Octokit-backed reader for the approval gate; shared by the queue preflight and the CLI's slice claim. */
+export function createOctokitStackSliceGateReader(octokit: Octokit, repo: string): StackSliceGateReader {
+  const [owner, name] = repo.split('/') as [string, string];
+  let selfId: Promise<number> | undefined;
+  return {
+    getPullState: async (prNumber) => {
+      const { data } = await octokit.rest.pulls.get({ owner, repo: name, pull_number: prNumber });
+      if (data.merged || data.merged_at) return 'merged';
+      return data.state === 'open' ? 'open' : 'closed';
+    },
+    getPullReviews: async (prNumber) => {
+      const { data: pull } = await octokit.rest.pulls.get({ owner, repo: name, pull_number: prNumber });
+      selfId ??= octokit.rest.users.getAuthenticated().then(({ data }) => data.id);
+      const id = await selfId;
+      const reviews: StackPullReviews['reviews'] = [];
+      for (let page = 1; ; page++) {
+        const { data } = await octokit.rest.pulls.listReviews({
+          owner,
+          repo: name,
+          pull_number: prNumber,
+          per_page: 100,
+          page,
+        });
+        for (const r of data) {
+          reviews.push({ reviewerId: r.user?.id ?? null, state: r.state, commitId: r.commit_id ?? null });
+        }
+        if (data.length < 100) break;
+      }
+      return { headSha: pull.head.sha, selfId: id, reviews };
+    },
+  };
 }

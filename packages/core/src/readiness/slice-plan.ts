@@ -86,10 +86,11 @@ export function slicePlanFromDecomposition(issue: number, decomposition: Decompo
 
 const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim();
 
-function stateLabel(slice: Slice): string {
+function stateLabel(slice: Slice, next?: Slice): string {
   const pr = slice.prNumber;
   if (slice.state === 'pr-open') {
-    return pr === undefined ? 'PR open' : `PR open #${pr}`;
+    const open = pr === undefined ? 'PR open' : `PR open #${pr}`;
+    return next?.state === 'pending' ? `${open} — waiting for approval or merge before slice ${next.index}` : open;
   }
   if (slice.state === 'merged') {
     return pr === undefined ? 'merged' : `merged (#${pr})`;
@@ -106,8 +107,8 @@ const affectedSuffix = (slice: Slice): string =>
 export function renderSlicePlanComment(plan: SlicePlan): string {
   const n = plan.slices.length;
   const checklist = plan.slices.map(
-    (s) =>
-      `- [${s.state === 'merged' ? 'x' : ' '}] ${s.index}/${n}. ${oneLine(s.title)} — ${stateLabel(s)}${branchSuffix(s)}${affectedSuffix(s)}`,
+    (s, i) =>
+      `- [${s.state === 'merged' ? 'x' : ' '}] ${s.index}/${n}. ${oneLine(s.title)} — ${stateLabel(s, plan.slices[i + 1])}${branchSuffix(s)}${affectedSuffix(s)}`,
   );
   const data = Buffer.from(JSON.stringify(plan), 'utf8').toString('base64');
   return [
@@ -163,13 +164,29 @@ export function stackSliceBranch(issue: number, index: number): string {
   return `factory/${issue}-slice-${index}`;
 }
 
-/** ADR-0161: slice 1 branches from `mainRef`; slice k from slice k-1's recorded branch. Undefined when that
- *  branch is not recorded or `index` is not a slice in the plan, so callers can park. */
-export function parentRefForSlice(plan: SlicePlan, index: number, mainRef = 'origin/main'): string | undefined {
+/** ADR-0161: the ref a stack slice branches from when the slice below is already on main. */
+export const STACK_MAIN_REF = 'origin/main';
+
+/** ADR-0161: the lowest pending slice that can be built now: slice 1, or one whose lower slice is merged or
+ *  pr-open. Undefined when none qualifies (all built, the top slice is open, or a lower slice is not-built). */
+export function nextStackSlice(plan: SlicePlan): Slice | undefined {
+  return plan.slices.find((s) => {
+    if (s.state !== 'pending') return false;
+    if (s.index === 1) return true;
+    const lower = plan.slices.find((l) => l.index === s.index - 1);
+    return lower?.state === 'merged' || lower?.state === 'pr-open';
+  });
+}
+
+/** ADR-0161: slice 1 branches from `mainRef`; slice k from `mainRef` when slice k-1 merged, else from slice
+ *  k-1's recorded branch. Undefined when that branch is not recorded or `index` is not a slice in the plan,
+ *  so callers can park. */
+export function parentRefForSlice(plan: SlicePlan, index: number, mainRef = STACK_MAIN_REF): string | undefined {
   if (!Number.isInteger(index) || index < 1 || index > plan.slices.length) return undefined;
   if (index === 1) return mainRef;
-  const branch = plan.slices.find((s) => s.index === index - 1)?.branch;
-  return branch || undefined;
+  const lower = plan.slices.find((s) => s.index === index - 1);
+  if (lower?.state === 'merged') return mainRef;
+  return lower?.branch || undefined;
 }
 
 /** ADR-0161: records slice `index`'s branch when it is created (default stackSliceBranch), keeping its state. */

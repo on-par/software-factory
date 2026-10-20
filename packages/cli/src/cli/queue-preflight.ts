@@ -8,6 +8,7 @@ import type {
   StackPullReviews,
 } from '@on-par/factory-core/internal';
 import {
+  createOctokitStackSliceGateReader,
   findDeclaredPrerequisites,
   findSlicePlanComment,
   readStackSliceGate,
@@ -63,30 +64,11 @@ export function makeQueuePreflightOps(
     onDeferred?: (issue: number, message: string) => void;
   },
 ): QueuePreflightOps {
-  let selfId: Promise<number> | undefined;
+  const reader = createOctokitStackSliceGateReader(octokit, `${owner}/${repo}`);
   return {
     autoMergeStack: opts.autoMergeStack ?? false,
     stackMode: opts.stackMode ?? false,
-    getPullReviews: async (prNumber) => {
-      const { data: pull } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
-      selfId ??= octokit.rest.users.getAuthenticated().then(({ data }) => data.id);
-      const id = await selfId;
-      const reviews: StackPullReviews['reviews'] = [];
-      for (let page = 1; ; page++) {
-        const { data } = await octokit.rest.pulls.listReviews({
-          owner,
-          repo,
-          pull_number: prNumber,
-          per_page: 100,
-          page,
-        });
-        for (const r of data) {
-          reviews.push({ reviewerId: r.user?.id ?? null, state: r.state, commitId: r.commit_id ?? null });
-        }
-        if (data.length < 100) break;
-      }
-      return { headSha: pull.head.sha, selfId: id, reviews };
-    },
+    getPullReviews: (prNumber) => reader.getPullReviews(prNumber),
     onDeferred: opts.onDeferred,
     getPullRefs: async (prNumber) => {
       const { data } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
@@ -97,11 +79,7 @@ export function makeQueuePreflightOps(
     getLandState: (prNumber) => getPullRequestLandState(octokit, owner, repo, prNumber),
     watch: opts.watch,
     findSlicePlan: (issue) => findSlicePlanComment({ octokit, repo: `${owner}/${repo}`, issue }),
-    getPullState: async (prNumber) => {
-      const { data } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
-      if (data.merged || data.merged_at) return 'merged';
-      return data.state === 'open' ? 'open' : 'closed';
-    },
+    getPullState: (prNumber) => reader.getPullState(prNumber),
     saveSlicePlan: async (issue, plan) => {
       await upsertSlicePlanComment({ octokit, repo: `${owner}/${repo}`, issue, plan });
     },

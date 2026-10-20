@@ -89,7 +89,14 @@ function fake(comments: { id: number; user: { id: number } | null; body?: string
   return { octokit, createComment, updateComment };
 }
 
-function setup(decompose: string[], f: ReturnType<typeof fake>, oversized = true, maxSlices = 10, sliceIndex?: number) {
+function setup(
+  decompose: string[],
+  f: ReturnType<typeof fake>,
+  oversized = true,
+  maxSlices = 10,
+  sliceIndex?: number,
+  stackMode?: boolean,
+) {
   const stub = new StubModelExecutor({ scripts: { decompose: decompose.map((output) => ({ output })) } });
   const router = new ModelRouter(models, routes, false, stub);
   const events: { type: string; msg: string }[] = [];
@@ -103,6 +110,7 @@ function setup(decompose: string[], f: ReturnType<typeof fake>, oversized = true
       sizeReason: 'too many items',
       maxSlices,
       sliceIndex,
+      stackMode,
       worktree: '/tmp/wt',
       router,
       octokit: f.octokit,
@@ -139,6 +147,14 @@ describe('resolveSliceGate', () => {
     const f = fake([], { listThrows: true });
     const { run } = setup([], f);
     expect(await run()).toEqual({ kind: 'park', reason: 'slice plan lookup failed: github down' });
+  });
+
+  it('stack mode selects the next pending slice over a pr-open lower slice (#3367)', async () => {
+    const plan = withSliceState(planOf(2), 1, 'pr-open', 81);
+    const f = fake([{ id: 1, user: { id: BOT }, body: renderSlicePlanComment(plan) }]);
+    const { run } = setup([], f, true, 10, undefined, true);
+    const outcome = await run();
+    expect(outcome.kind === 'slice' && outcome.slice.index).toBe(2);
   });
 
   it('parks without decomposing when the current slice already has an open PR', async () => {

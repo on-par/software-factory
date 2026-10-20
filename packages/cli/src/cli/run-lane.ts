@@ -286,6 +286,13 @@ export async function runLane(
         continue;
       }
       if (err instanceof IssueSkippedError) {
+        if (err.reason === 'stack-slice-waiting') {
+          // findSliceIndex logged the awaiting-review line; the issue goes back to the queue, never parked.
+          awaitingReview++;
+          streak = null;
+          await settle(issue, 'queued');
+          continue;
+        }
         // shipIssue already emitted skipped-already-closed; nothing was attempted.
         skipped++;
         await settle(issue, 'done');

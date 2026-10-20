@@ -605,7 +605,7 @@ export type {
   LowerSliceChangeDetection,
   ReviewChangeParkResult,
 } from './phases/stack-review-change.js';
-export { readReviewApproval, readStackSliceGate } from './phases/stack-approval.js';
+export { createOctokitStackSliceGateReader, readReviewApproval, readStackSliceGate } from './phases/stack-approval.js';
 export type {
   StackPullReviews,
   StackSliceGate,
@@ -732,6 +732,7 @@ export {
   SLICE_PLAN_MARKER,
   currentSlice,
   markSliceMerged,
+  nextStackSlice,
   parentRefForSlice,
   parseSlicePlanComment,
   renderSlicePlanComment,
@@ -748,8 +749,7 @@ export type {
   SlicePlanUpsertResult,
 } from './readiness/slice-plan-github.js';
 export { findSlicePlanComment, recordSliceMerged, upsertSlicePlanComment } from './readiness/slice-plan-github.js';
-export type { SliceGateOutcome } from './readiness/slice-gate.js';
-export { resolveSliceGate } from './readiness/slice-gate.js';
+export { resolveSliceGate, type SliceGateOutcome } from './readiness/slice-gate.js';
 export * from './blockers/index.js';
 export * from './events/tail.js';
 export type { ReadinessGapCriterion, ReadinessGapReport } from './readiness/enrich.js';
