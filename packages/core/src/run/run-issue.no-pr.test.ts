@@ -13,6 +13,7 @@ import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import { createTempDirs } from '../harness/temp-dir.js';
 import { readWorktreeKeeps } from '../utils/worktree-keeps.js';
+import type { CheckResumeStore } from './resume-context.js';
 import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
@@ -156,6 +157,33 @@ describe('runIssue — --no-pr', () => {
     expect(planPhase.mock.calls[0][0]).toMatchObject({ enforceSizeGate: false, updateIssueBodyOnEnrich: false });
     // localOnly also switches routing and prompts; --no-pr must not.
     expect(buildPhase.mock.calls[0][0].localOnly).toBeFalsy();
+  });
+
+  it('a red-base CHECK failure records no check-resume point, so resume can never ship it', async () => {
+    vi.mocked(checkPhase).mockResolvedValue({
+      ...CHECK_OK,
+      passed: false,
+      environment: { baseSha: 'abc1234567890def', failingChecks: ['tests'], cause: 'environment', logPaths: [] },
+    });
+    const checkResume = {
+      load: vi.fn<CheckResumeStore['load']>().mockResolvedValue(null),
+      record: vi.fn<CheckResumeStore['record']>().mockResolvedValue(undefined),
+      clear: vi.fn<CheckResumeStore['clear']>().mockResolvedValue(undefined),
+    };
+    const outcome = await runIssue(noPr, policy, { ...ports(vi.fn<Log>()), checkResume });
+    expect(outcome).not.toHaveProperty('buildPreserved');
+    expect(checkResume.record).not.toHaveBeenCalled();
+  });
+
+  it('a failed keep-record write warns but the run still ends ready', async () => {
+    const log = vi.fn<Log>();
+    const unwritable = { ...noPr, worktreeKeepsPath: join(tmp, 'missing-dir', 'keeps.json', 'x') };
+    rmSync(join(tmp, 'missing-dir'), { recursive: true, force: true });
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(join(tmp, 'missing-dir'), 'a file, so the keeps dir cannot be created');
+    const outcome = await runIssue(unwritable, policy, ports(log));
+    expect(outcome).toMatchObject({ state: 'ready' });
+    expect(log.mock.calls.some(([type, msg]) => type === 'warn' && msg.includes('keep record'))).toBe(true);
   });
 
   it('a park posts no issue comment', async () => {

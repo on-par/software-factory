@@ -977,7 +977,7 @@ async function runIssueOnce(
             log('environment_warning', `could not post the environment-failure comment: ${errorMessage(err)}`);
           }
         }
-        let preserve = ports.checkResume !== undefined && !request.localOnly && !planSlice;
+        let preserve = ports.checkResume !== undefined && !request.localOnly && !request.noPr && !planSlice;
         let fixTarget = '';
         if (preserve && ports.checkResume) {
           fixTarget = preservedFixTarget(env, constitution, request.repoConfigFile);

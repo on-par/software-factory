@@ -38,13 +38,21 @@ export async function finishWithoutShip(
   }
   if (request.noPr) {
     // The worktree is the run's only output: keep it out of the TTL and between-issue sweeps.
-    if (request.worktreeKeepsPath) {
-      upsertWorktreeKeep(request.worktreeKeepsPath, {
-        issue: request.issue,
-        path: worktree,
-        reason: 'no-pr run',
-        since: new Date().toISOString(),
-      });
+    // A failed write only loses the GC protection; the checks still passed.
+    try {
+      if (request.worktreeKeepsPath) {
+        upsertWorktreeKeep(request.worktreeKeepsPath, {
+          issue: request.issue,
+          path: worktree,
+          reason: 'no-pr run',
+          since: new Date().toISOString(),
+        });
+      }
+    } catch (err) {
+      log(
+        'warn',
+        `could not write the --no-pr worktree keep record: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
     log('no-pr-complete', `checks passed in ${worktree} on ${branch} — --no-pr, SHIP skipped`);
     return { state: 'ready', route, branch, reworkRounds };
