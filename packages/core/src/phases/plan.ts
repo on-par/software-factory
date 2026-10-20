@@ -25,6 +25,7 @@ import {
 import type { SizeGateMode } from '../config/index.js';
 import type { BuildRoutePin } from '../config/repo.js';
 import { settlePlanRoute } from './plan-route.js';
+import { blockedNoChangeSpecReason, planSummary, specWriteDeniedResult } from './plan-spec-guards.js';
 import { decomposeOversizedIssue, renderChildIssueBody } from '../readiness/decompose.js';
 import { resolveSliceGate } from '../readiness/slice-gate.js';
 import { DEFAULT_MAX_SLICES, type SlicePlan } from '../readiness/slice-plan.js';
@@ -78,6 +79,8 @@ export interface PlanResult {
   specPath: string;
   model: string;
   escalate?: string;
+  /** Set when the planner could not write its spec (#3269): `ok` is false and the caller parks `config`. */
+  parkReason?: 'config';
   designArtifact: DesignArtifact | null;
   /** Set by either file-mode size gate (pre-flight or post-plan build-scope) when the oversized
    *  issue was decomposed into real filed sub-issues. `ok` stays false: this run is over, but the caller can
@@ -308,20 +311,8 @@ export async function planPhase(opts: Parameters<typeof planPhaseImpl>[0]): Prom
     },
     () => planPhaseImpl(opts),
     (r) => r.ok,
-    (r) => (r.ok ? `plan complete (route ${r.route}, model ${r.model})` : `plan escalated: ${r.escalate ?? 'unknown'}`),
+    planSummary,
   );
-}
-
-function blockedNoChangeSpecReason(body: string): string | null {
-  const looksBlocked = /^\s*Blocked(?::|\s+by\b)/im.test(body);
-  if (!looksBlocked) return null;
-
-  const saysNoChanges = /\bno files? (?:were )?changed\b/i.test(body) || /\bno changes? (?:were )?made\b/i.test(body);
-  const pointsAtSandbox =
-    /\bsandbox\b/i.test(body) || /\boutside (?:the )?(?:worktree|workspace|checkout)\b/i.test(body);
-  if (!saysNoChanges && !pointsAtSandbox) return null;
-
-  return 'PLAN returned a blocked/no-change note instead of a frozen spec';
 }
 
 async function planPhaseImpl(opts: {
@@ -698,6 +689,9 @@ async function planPhaseImpl(opts: {
           failoverReason: f.reason,
         });
       }
+
+      const denied = specWriteDeniedResult(result, specPath, failureRoute, log);
+      if (denied) return denied;
 
       // Check for escalation
       if (isEscalation(result.output)) {
