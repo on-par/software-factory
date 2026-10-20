@@ -821,6 +821,7 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string, env: NodeJ
     baseHold: resolve(state, 'base-hold.json'),
     flakyLedger: resolve(state, 'flaky-tests.json'),
     laneFiles: resolve(state, 'lane-files.json'),
+    worktreeKeeps: resolve(state, 'worktree-keeps.json'),
     /** Per-invocation CLI flag overrides recorded by `factory run` so a separate
      *  `factory status` process can attribute the policy to the flag (#1400). */
     runFlags: resolve(state, 'run-flags.json'),

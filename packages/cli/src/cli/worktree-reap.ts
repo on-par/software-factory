@@ -4,6 +4,7 @@ import type { EventKind, FactoryConfig, getFactoryPaths } from '@on-par/factory-
 import { resolveSandboxPolicy } from '@on-par/factory-core';
 import {
   type LaneWorktreeReapResult,
+  findWorktreeKeep,
   type WorktreeSandbox,
   logEvent,
   resolveEffectiveConfig,
@@ -70,6 +71,17 @@ export async function reapParkedLane(
   reap: typeof reapLaneWorktree,
   args: Parameters<typeof reapUnderLock>[1],
 ): Promise<void> {
+  const [issue, , , paths] = args;
+  const keep = findWorktreeKeep(paths.worktreeKeeps, issue, (type, msg) => logEvent(paths.events, type, issue, msg));
+  if (keep) {
+    logEvent(
+      paths.events,
+      'worktree-gc',
+      issue,
+      `kept ${keep.path} — kept (${keep.reason}); not reaping the parked lane's worktree or branch`,
+    );
+    return;
+  }
   await reapUnderLock(rt, args, 'parked-lane worktree reap failed', (worktreePath, opts) =>
     reap(args[1], worktreePath, opts),
   );

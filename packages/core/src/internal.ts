@@ -21,7 +21,6 @@ export {
   renderGardenJson,
   renderGardenReport,
 } from './garden/harvest.js';
-
 // Garden dedup (#2102)
 export {
   dedupGardenClusters,
@@ -324,7 +323,7 @@ export {
   sweepWorktrees,
   zeroFill,
 } from './utils/worktree-gc.js';
-
+export { findWorktreeKeep } from './utils/worktree-keeps.js';
 // Daemon repo registry (~/.factory/registry.json) (#781)
 export type {
   RepoRegistry,
