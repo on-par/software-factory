@@ -2726,6 +2726,10 @@ describe('cli', () => {
       getPullState: async () => 'open' as const,
       saveSlicePlan: async () => {},
       autoMergeStack: false,
+      stackMode: false,
+      getPullReviews: async (): Promise<never> => {
+        throw new Error('unexpected review lookup');
+      },
       getPullRefs: async () => ({ headRef: 'branch', baseRef: 'main', headSha: 'head' }),
     };
 

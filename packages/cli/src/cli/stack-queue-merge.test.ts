@@ -58,6 +58,10 @@ const makeOps = (states: Record<number, SlicePullState>, over: Partial<QueuePref
     getPullState: vi.fn(async (pr: number) => states[pr]),
     saveSlicePlan: vi.fn(async () => {}),
     autoMergeStack: false,
+    stackMode: false,
+    getPullReviews: vi.fn(async () => {
+      throw new Error('unexpected review lookup');
+    }),
     readIssueBody: vi.fn(async () => ''),
     getPrerequisiteState: vi.fn(async () => {
       throw new Error('unexpected prerequisite lookup');
