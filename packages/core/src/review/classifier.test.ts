@@ -73,7 +73,7 @@ function makeRouter(output: string | Error) {
   });
   const router = new ModelRouter(MODELS, ROUTES, false, new StubModelExecutor({ scripts: {} }));
   vi.spyOn(router, 'run').mockImplementation(run);
-  vi.spyOn(router.registryRef, 'estimateCost').mockReturnValue(0.01);
+  vi.spyOn(router.registryRef, 'estimateCost').mockReturnValue({ cost: 0.01, cachedRateMissing: false });
   return { router, run };
 }
 

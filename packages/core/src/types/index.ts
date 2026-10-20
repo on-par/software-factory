@@ -15,6 +15,7 @@ export interface ModelDefinition {
   tier: ModelTier | ModelTier[];
   costPerMtokInput: number;
   costPerMtokOutput: number;
+  costPerMtokCachedInput?: number; // USD/M cache-read tokens; unset: priced at costPerMtokInput and flagged (#3284)
   contextWindow: number;
   capabilities: ModelCapability[];
   envKey: string | null;
@@ -39,8 +40,7 @@ export interface ModelDefinition {
 }
 
 // ---------- Config types (re-exported from config module) ----------
-// See config/index.ts for the Zod-validated type definitions.
-// These are re-exported here for convenience.
+// See config/index.ts for the Zod-validated type definitions, re-exported here for convenience.
 
 // ---------- Routes ----------
 
@@ -68,8 +68,7 @@ export interface RouteDefinition {
   requires?: string;
 }
 
-// ---------- Factory Config ----------
-// FactoryConfig is also defined via Zod in config/index.ts.
+// ---------- Factory Config (also defined via Zod in config/index.ts) ----------
 
 // ---------- Constitutions ----------
 
@@ -398,6 +397,7 @@ export interface CostEntry {
   cost: number | null;
   /** True when no price was known for the model, so cost is null (#1738, ADR-0020). */
   unpriced?: boolean;
+  cachedRateMissing?: boolean; // cache reads priced at the full input rate: no costPerMtokCachedInput (#3284)
   failoverReason?: FailoverReason;
   /** Set when this row is the cost of a retry attempt (#419). */
   retryCause?: RetryCause;

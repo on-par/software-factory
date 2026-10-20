@@ -57,7 +57,7 @@ function makeDeps(prs: any[], extra: Partial<ClassifierBacktestDeps> = {}) {
   }));
   const router = new ModelRouter(MODELS, ROUTES, false, new StubModelExecutor({ scripts: {} }));
   vi.spyOn(router, 'run').mockImplementation(run);
-  vi.spyOn(router.registryRef, 'estimateCost').mockReturnValue(0.4);
+  vi.spyOn(router.registryRef, 'estimateCost').mockReturnValue({ cost: 0.4, cachedRateMissing: false });
   const octokit = {
     rest: {
       pulls: {

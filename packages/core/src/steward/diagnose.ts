@@ -6,7 +6,7 @@ import type { RouteDefaults } from '@on-par/factory-config';
 import { z, ZodError } from 'zod';
 import { loadModelsConfig } from '../config/index.js';
 import type { HarnessUsage } from '../harness/index.js';
-import { ModelRegistry } from '../models/index.js';
+import { ModelRegistry, priceUsage } from '../models/index.js';
 import type { CostEntry } from '../types/index.js';
 import { logCost } from '../utils/index.js';
 import type { StewardPacket } from './packet.js';
@@ -210,7 +210,8 @@ export function buildStewardCostEntry(
   const usage = reply.usage;
   const inputTokens = usage?.inputTokens ?? estimate(prompt);
   const outputTokens = usage?.outputTokens ?? estimate(reply.text);
-  const cost = usage?.costUsd ?? new ModelRegistry(loadModelsConfig()).estimateCost(model, inputTokens, outputTokens);
+  const registry = new ModelRegistry(loadModelsConfig());
+  const { cost, flags } = priceUsage(registry, model, inputTokens, outputTokens, usage);
   return {
     issue: String(issue),
     task: STEWARD_COST_TASK,
@@ -218,7 +219,7 @@ export function buildStewardCostEntry(
     inputTokens,
     outputTokens,
     cost,
-    ...(cost === null ? { unpriced: true } : {}),
+    ...flags,
     estimated: usage === undefined,
     ...(usage?.rawInputTokens !== undefined ? { rawInputTokens: usage.rawInputTokens } : {}),
     ...(usage?.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),

@@ -257,7 +257,7 @@ function makeCoreFakes() {
       return {
         list: () => ['claude-model'],
         getTiers: () => ['worker'],
-        estimateCost: () => 1.23,
+        estimateCost: () => ({ cost: 1.23, cachedRateMissing: false }),
         isExperimental: () => false,
         isAvailable: () => true,
         getModelsInTier: () => ['claude-model'],

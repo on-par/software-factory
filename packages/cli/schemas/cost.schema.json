@@ -75,9 +75,20 @@
           },
           "unpricedCount": {
             "type": "number"
+          },
+          "cachedRateMissingCount": {
+            "type": "number"
           }
         },
-        "required": ["model", "tasks", "inputTokens", "outputTokens", "cost", "unpricedCount"],
+        "required": [
+          "model",
+          "tasks",
+          "inputTokens",
+          "outputTokens",
+          "cost",
+          "unpricedCount",
+          "cachedRateMissingCount"
+        ],
         "additionalProperties": false
       }
     },
@@ -89,9 +100,12 @@
         },
         "unpricedCount": {
           "type": "number"
+        },
+        "cachedRateMissingCount": {
+          "type": "number"
         }
       },
-      "required": ["cost", "unpricedCount"],
+      "required": ["cost", "unpricedCount", "cachedRateMissingCount"],
       "additionalProperties": false
     }
   },

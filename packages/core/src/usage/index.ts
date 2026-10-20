@@ -315,6 +315,7 @@ function isValidCostEntry(value: unknown): value is CostEntry {
     (v.inputTokens === undefined || Number.isFinite(v.inputTokens)) &&
     (v.outputTokens === undefined || Number.isFinite(v.outputTokens)) &&
     (v.failoverReason === undefined || typeof v.failoverReason === 'string') &&
+    (v.cachedRateMissing === undefined || typeof v.cachedRateMissing === 'boolean') &&
     (v.estimated === undefined || typeof v.estimated === 'boolean') &&
     (v.rawInputTokens === undefined || Number.isFinite(v.rawInputTokens)) &&
     (v.cacheReadTokens === undefined || Number.isFinite(v.cacheReadTokens)) &&

@@ -1305,7 +1305,7 @@ async function cmdModels(opts: { doctor?: boolean } = {}) {
   const byModel = new Map(diagnoses.map((d) => [d.model, d]));
   for (const m of registry.list()) {
     const tiers = registry.getTiers(m).join('/');
-    const est = registry.estimateCost(m, 1_000_000, 1_000_000);
+    const est = registry.estimateCost(m, { inputTokens: 1_000_000, outputTokens: 1_000_000 }).cost;
     const cost = est === null ? 'unpriced' : `$${est.toFixed(2)}/M`;
     const d = byModel.get(m);
     const avail = d ? modelStatusIcon(d) : styleText('red', '❌');
@@ -1319,6 +1319,8 @@ async function cmdModels(opts: { doctor?: boolean } = {}) {
     console.log(`  ${tier}: ${models.join(' ')}`);
   }
 }
+
+const CACHED_RATE_MARKER = ' (cached at full input rate)';
 
 async function cmdCost(opts: { issue?: string; json?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
@@ -1344,7 +1346,7 @@ async function cmdCost(opts: { issue?: string; json?: boolean } = {}) {
     console.log(styleText('bold', `== Costs for issue ${opts.issue} ==`));
     for (const c of filtered) {
       console.log(
-        `  ${c.task} ${c.model} ${c.cost === null || c.cost === undefined ? 'unknown' : `$${c.cost.toFixed(4)}`}${c.failoverReason ? ` [failover: ${c.failoverReason}]` : ''}`,
+        `  ${c.task} ${c.model} ${c.cost === null || c.cost === undefined ? 'unknown' : `$${c.cost.toFixed(4)}`}${c.failoverReason ? ` [failover: ${c.failoverReason}]` : ''}${c.cachedRateMissing === true ? CACHED_RATE_MARKER : ''}`,
       );
     }
     const t = aggregateCosts(filtered).total;
@@ -1360,10 +1362,24 @@ async function cmdCost(opts: { issue?: string; json?: boolean } = {}) {
 
   const byModel = new Map<
     string,
-    { tasks: number; priced: number; pricedCount: number; unpriced: number; failovers: number }
+    {
+      tasks: number;
+      priced: number;
+      pricedCount: number;
+      unpriced: number;
+      failovers: number;
+      cachedRateMissing: number;
+    }
   >();
   for (const c of costs) {
-    const e = byModel.get(c.model) ?? { tasks: 0, priced: 0, pricedCount: 0, unpriced: 0, failovers: 0 };
+    const e = byModel.get(c.model) ?? {
+      tasks: 0,
+      priced: 0,
+      pricedCount: 0,
+      unpriced: 0,
+      failovers: 0,
+      cachedRateMissing: 0,
+    };
     e.tasks++;
     if (c.unpriced === true || c.cost === null || c.cost === undefined) e.unpriced++;
     else {
@@ -1371,14 +1387,16 @@ async function cmdCost(opts: { issue?: string; json?: boolean } = {}) {
       e.pricedCount++;
     }
     if (c.failoverReason) e.failovers++;
+    if (c.cachedRateMissing === true) e.cachedRateMissing++;
     byModel.set(c.model, e);
   }
 
   console.log(styleText('bold', '== Cost Summary =='));
-  for (const [model, { tasks, priced, pricedCount, unpriced, failovers }] of byModel) {
+  for (const [model, { tasks, priced, pricedCount, unpriced, failovers, cachedRateMissing }] of byModel) {
     const failoverSuffix = failovers > 0 ? ` (${failovers} failover${failovers === 1 ? '' : 's'})` : '';
     const modelCost = formatCostTotal(pricedCount === 0 && unpriced > 0 ? null : priced, unpriced);
-    console.log(`  ${model}: ${tasks} tasks, ${modelCost}${failoverSuffix}`);
+    const cachedSuffix = cachedRateMissing > 0 ? CACHED_RATE_MARKER : '';
+    console.log(`  ${model}: ${tasks} tasks, ${modelCost}${failoverSuffix}${cachedSuffix}`);
   }
   const grand = aggregateCosts(costs).total;
   console.log('  ---');

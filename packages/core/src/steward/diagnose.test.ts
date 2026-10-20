@@ -414,6 +414,19 @@ describe('buildStewardCostEntry', () => {
     expect(entry).toMatchObject({ cost: null, unpriced: true });
   });
 
+  it('flags cachedRateMissing when cache reads are priced without a cached rate (#3284)', () => {
+    const entry = buildStewardCostEntry(model, 7, 'p', {
+      text: 'r',
+      usage: { inputTokens: 1000, outputTokens: 10, cacheReadTokens: 900 },
+    });
+    expect(entry.cachedRateMissing).toBe(true);
+    const reported = buildStewardCostEntry(model, 7, 'p', {
+      text: 'r',
+      usage: { inputTokens: 1000, outputTokens: 10, cacheReadTokens: 900, costUsd: 0.5 },
+    });
+    expect(reported).not.toHaveProperty('cachedRateMissing');
+  });
+
   it('omits optional usage fields when undefined', () => {
     const entry = buildStewardCostEntry(model, 7, 'p', {
       text: 'r',

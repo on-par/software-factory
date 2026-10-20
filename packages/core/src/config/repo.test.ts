@@ -527,8 +527,8 @@ describe('Opus 5.5 / Sonnet 5.5 repo pins', () => {
   });
 
   it('prices both models at their per-MTok rates', () => {
-    expect(shippedRegistry.estimateCost('claude-opus-5-5', 1_000_000, 1_000_000)).toBe(24);
-    expect(shippedRegistry.estimateCost('claude-sonnet-5-5', 1_000_000, 1_000_000)).toBe(12);
+    expect(shippedRegistry.estimateCost('claude-opus-5-5', { inputTokens: 1e6, outputTokens: 1e6 }).cost).toBe(24);
+    expect(shippedRegistry.estimateCost('claude-sonnet-5-5', { inputTokens: 1e6, outputTokens: 1e6 }).cost).toBe(12);
   });
 });
 
