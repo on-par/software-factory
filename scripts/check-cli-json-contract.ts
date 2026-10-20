@@ -119,7 +119,14 @@ function addFinding(
   findings.push({ command, path, oldType: typeLabel(before), newType: typeLabel(after), reason });
 }
 
-function compareNodes(findings: ContractFinding[], command: string, path: string, before: Schema, after: Schema): void {
+function compareNodes(
+  findings: ContractFinding[],
+  added: string[],
+  command: string,
+  path: string,
+  before: Schema,
+  after: Schema,
+): void {
   const oldTypes = typeSet(before);
   const newTypes = typeSet(after);
   if (canonical(oldTypes) !== canonical(newTypes)) {
@@ -128,7 +135,7 @@ function compareNodes(findings: ContractFinding[], command: string, path: string
   }
 
   if (!Array.isArray(before.anyOf) && !Array.isArray(after.anyOf)) {
-    compareNodeFields(findings, command, path, before, after);
+    compareNodeFields(findings, added, command, path, before, after);
     return;
   }
   const oldBranches = branches(before);
@@ -136,12 +143,13 @@ function compareNodes(findings: ContractFinding[], command: string, path: string
   for (const oldBranch of oldBranches) {
     const oldBranchTypes = typeSet(oldBranch);
     const matching = newBranches.find((candidate) => canonical(typeSet(candidate)) === canonical(oldBranchTypes));
-    if (matching) compareNodeFields(findings, command, path, oldBranch, matching);
+    if (matching) compareNodeFields(findings, added, command, path, oldBranch, matching);
   }
 }
 
 function compareNodeFields(
   findings: ContractFinding[],
+  added: string[],
   command: string,
   path: string,
   before: Schema,
@@ -169,13 +177,21 @@ function compareNodeFields(
       if (oldRequired.has(key) && !newRequired.has(key)) {
         addFinding(findings, command, childPath, oldChild, newChild, 'required -> optional');
       }
-      if (oldChild) compareNodes(findings, command, childPath, oldChild, newChild);
+      if (oldChild) compareNodes(findings, added, command, childPath, oldChild, newChild);
+    }
+  }
+
+  if (newProps) {
+    for (const key of Object.keys(newProps)) {
+      if (key === 'schemaVersion' && path === '$') continue;
+      if (oldProps && key in oldProps) continue;
+      added.push(path === '$' ? key : `${path}.${key}`);
     }
   }
 
   const oldItems = asSchema(before.items);
   const newItems = asSchema(after.items);
-  if (oldItems && newItems) compareNodes(findings, command, `${path}[]`, oldItems, newItems);
+  if (oldItems && newItems) compareNodes(findings, added, command, `${path}[]`, oldItems, newItems);
   else if (oldItems && !newItems)
     addFinding(findings, command, `${path}[]`, oldItems, undefined, 'array items removed');
 
@@ -187,24 +203,40 @@ function compareNodeFields(
   }
 }
 
-export function compareCliJsonSchemas(command: string, before: unknown, after: unknown): ContractFinding[] {
+export interface CliJsonSchemaDiff {
+  command: string;
+  oldVersion: number;
+  newVersion: number;
+  /** Property paths present at the new ref but not the old one, e.g. `breaker`, `lanes[].pr`. */
+  added: string[];
+  /** Removed / retyped / required->optional / structure-changed findings, computed regardless of version. */
+  breaking: ContractFinding[];
+}
+
+export function diffCliJsonSchemas(command: string, before: unknown, after: unknown): CliJsonSchemaDiff {
   const oldSchema = validateSchema(before, `${command} base`);
   const newSchema = validateSchema(after, `${command} HEAD`);
   const oldVersion = findVersion(command, oldSchema);
   const newVersion = findVersion(command, newSchema);
-  if (newVersion < oldVersion)
+  const breaking: ContractFinding[] = [];
+  const added: string[] = [];
+  compareNodeFields(breaking, added, command, '$', oldSchema, newSchema);
+  return { command, oldVersion, newVersion, added, breaking };
+}
+
+export function compareCliJsonSchemas(command: string, before: unknown, after: unknown): ContractFinding[] {
+  const diff = diffCliJsonSchemas(command, before, after);
+  if (diff.newVersion < diff.oldVersion)
     return [
       {
         command,
         path: '$',
-        oldType: `schemaVersion ${oldVersion}`,
-        newType: `schemaVersion ${newVersion}`,
+        oldType: `schemaVersion ${diff.oldVersion}`,
+        newType: `schemaVersion ${diff.newVersion}`,
         reason: 'schemaVersion must not decrease',
       },
     ];
-  const findings: ContractFinding[] = [];
-  compareNodeFields(findings, command, '$', oldSchema, newSchema);
-  return newVersion > oldVersion ? [] : findings;
+  return diff.newVersion > diff.oldVersion ? [] : diff.breaking;
 }
 
 function parseArgs(argv: readonly string[]): string {
@@ -218,7 +250,7 @@ function defaultGit(cwd: string, args: readonly string[]): string {
   return execFileSync('git', [...args], { cwd, encoding: 'utf8' });
 }
 
-function inventory(ref: string, git: (args: readonly string[]) => string): string[] {
+export function inventory(ref: string, git: (args: readonly string[]) => string): string[] {
   const output = git(['ls-tree', '-r', '--name-only', '-z', ref, '--', 'packages/cli/schemas']);
   return output
     .split('\0')
@@ -226,7 +258,7 @@ function inventory(ref: string, git: (args: readonly string[]) => string): strin
     .sort();
 }
 
-function readSchema(ref: string, path: string, git: (args: readonly string[]) => string): unknown {
+export function readSchema(ref: string, path: string, git: (args: readonly string[]) => string): unknown {
   let raw: string;
   try {
     raw = git(['show', `${ref}:${path}`]);

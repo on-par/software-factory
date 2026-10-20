@@ -130,3 +130,13 @@ The mode is forced to manual and the notice above appears. Update with:
 ```sh
 git pull && npm ci && npm run build
 ```
+
+## Release notes: CLI JSON contract
+
+When cutting a stable `vX.Y.Z` release, generate the client-facing contract section and paste it into the GitHub Release body:
+
+```sh
+npx tsx scripts/cli-json-contract-notes.ts --from <previous vX.Y.Z tag> --to vX.Y.Z
+```
+
+It diffs the committed `packages/cli/schemas/*.schema.json` between the two refs. Breaking commands (schemaVersion bumped) are listed first, then added fields, then new commands; with no differences it prints "No CLI JSON contract changes". The CI gate (`scripts/check-cli-json-contract.ts`) enforces the schemaVersion bumps. Release bodies are not automated yet: `publish.yml` does not write them, so the releaser pastes this by hand.
