@@ -46,6 +46,7 @@ import {
   designArtifactInvalidMessage,
   MAX_DESIGN_ARTIFACT_RETRIES,
 } from './plan-design-retry.js';
+import { blockedNoChangeSpecReason, specWriteDenied } from './plan-spec-write.js';
 import {
   type BuildRouteName,
   CLI_BUILD_ROUTES,
@@ -57,7 +58,6 @@ import {
 
 export { buildDesignArtifactRetryPrompt, MAX_DESIGN_ARTIFACT_RETRIES };
 export { type BuildRouteName, defaultBuildRoute, resolveRunnableBuildRoute, runnableBuildRoutes };
-
 /**
  * REST API version pinned on the readiness-enrichment issues.update call (#2385). GitHub serves 2022-11-28 when no
  * header is sent; it is deprecated (sunset 2028-03-10). Scoped to this call because 2026-03-10 has breaking changes
@@ -71,6 +71,7 @@ export interface PlanResult {
   specPath: string;
   model: string;
   escalate?: string;
+  parkReason?: 'config';
   designArtifact: DesignArtifact | null;
   /** Set by either file-mode size gate (pre-flight or post-plan build-scope) when the oversized
    *  issue was decomposed into real filed sub-issues. `ok` stays false: this run is over, but the caller can
@@ -278,20 +279,13 @@ export async function planPhase(opts: Parameters<typeof planPhaseImpl>[0]): Prom
     },
     () => planPhaseImpl(opts),
     (r) => r.ok,
-    (r) => (r.ok ? `plan complete (route ${r.route}, model ${r.model})` : `plan escalated: ${r.escalate ?? 'unknown'}`),
+    (r) =>
+      r.ok
+        ? `plan complete (route ${r.route}, model ${r.model})`
+        : r.parkReason === 'config'
+          ? `plan blocked by configuration: ${r.escalate ?? 'unknown'}`
+          : `plan escalated: ${r.escalate ?? 'unknown'}`,
   );
-}
-
-function blockedNoChangeSpecReason(body: string): string | null {
-  const looksBlocked = /^\s*Blocked(?::|\s+by\b)/im.test(body);
-  if (!looksBlocked) return null;
-
-  const saysNoChanges = /\bno files? (?:were )?changed\b/i.test(body) || /\bno changes? (?:were )?made\b/i.test(body);
-  const pointsAtSandbox =
-    /\bsandbox\b/i.test(body) || /\boutside (?:the )?(?:worktree|workspace|checkout)\b/i.test(body);
-  if (!saysNoChanges && !pointsAtSandbox) return null;
-
-  return 'PLAN returned a blocked/no-change note instead of a frozen spec';
 }
 
 /** The file-mode size-gate escalation: logs size-gate-decomposed when children were filed and
@@ -692,6 +686,21 @@ async function planPhaseImpl(opts: {
         log('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, {
           failoverReason: f.reason,
         });
+      }
+
+      if (!existsSync(specPath) && specWriteDenied(result.output, specPath)) {
+        const harness = router.registryRef.getHarnessId(result.model) ?? 'unknown harness';
+        const diagnostic = `PLAN could not write frozen spec at ${specPath}: harness ${harness} (model ${result.model}) denied the write; fix the harness writable roots and rerun PLAN.`;
+        log('config', diagnostic);
+        return {
+          ok: false,
+          parkReason: 'config',
+          route: failureRoute,
+          specPath,
+          model: result.model,
+          escalate: diagnostic,
+          designArtifact: null,
+        };
       }
 
       // Check for escalation

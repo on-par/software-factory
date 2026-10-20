@@ -11,7 +11,6 @@
 // CHECK may be resumed on a kept worktree via request.resumeFrom after an environment release (#2564).
 // Every park posts or edits one issue-level park comment behind a hidden marker; a GitHub failure only logs a warning (#2314).
 // A config preflight (#2586) rejects unfilled template tokens before base health and PLAN; any preflight failure parks with the `config` cause (#2587).
-//
 // Path-bound CLI concerns (Octokit, worktree/environment provisioning, the events sink,
 // approval/steering, and reporting hooks) are injected as ports so this file stays free of
 // CLI filesystem layout (ADR-0004). The CLI's shipIssue is a thin adapter that constructs
@@ -179,7 +178,6 @@ type LogFn = (
     flakyTests?: FlakyTestsPayload;
   },
 ) => void;
-
 interface RunReportInfo {
   outcome: 'ready' | 'failed' | 'parked' | 'escalated';
   route?: BuildRoute;
@@ -191,7 +189,6 @@ interface RunReportInfo {
   reportPath?: string;
   diffBase?: string;
 }
-
 /** The injected seams runIssue needs. Effectful, path-bound concerns (Octokit, worktree
  *  layout, approvals/steering directories, report/artifact destinations) are the caller's
  *  responsibility to wire — runIssue only calls the closures it is handed. */
@@ -700,11 +697,15 @@ async function runIssueOnce(
           const childList = decomposedChildren.map((n) => `#${n}`).join(', ');
           return { state: 'escalated', reason: `issue #${request.issue} decomposed into ${childList}`, route };
         }
-        if (plan.sliced) {
+        if (plan.sliced)
           return await terminalEscalated(
             `issue #${request.issue} sliced into ${plan.sliced.sliceCount} slice(s): ${plan.escalate ?? 'slice plan recorded'}`,
           );
-        }
+        if (plan.parkReason === 'config')
+          return await terminalParked(
+            'config',
+            `${plan.escalate ?? `PLAN could not write spec at ${plan.specPath}`}; then fix the harness writable roots and run factory unpark ${request.issue}`,
+          );
         return await terminalEscalated(`plan escalated: ${plan.escalate ?? 'unknown'}`);
       }
       const planBudget = await assertBudget('PLAN');

@@ -172,7 +172,7 @@ export const TMPDIR_MKDTEMP_BASELINE: Readonly<Record<string, number>> = {
   'packages/core/src/run/run-issue.reset-time.test.ts': 1,
   'packages/core/src/run/run-issue.route-pinned.test.ts': 1,
   'packages/core/src/run/run-issue.stack.test.ts': 1,
-  'packages/core/src/run/run-issue.test.ts': 12,
+  'packages/core/src/run/run-issue.test.ts': 11,
   'packages/core/src/run/run-issue.workspace-artifacts.integration.test.ts': 1,
   'packages/core/src/run/stack-slice-branch.test.ts': 1,
   'packages/core/src/run/state.test.ts': 10,

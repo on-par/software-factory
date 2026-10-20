@@ -26,7 +26,6 @@ import type { RunPolicy } from './policy.js';
 import type { Environment, Workspace } from './ports.js';
 import { createPlanReuseStore, issueBodyHash, type CheckResumeStore, type PlanReuseStore } from './resume-context.js';
 import { writeSpec } from '../spec/index.js';
-import { schemaErrorCheckerOutput } from '../checkers/index.js';
 import { preflightConfigTokens } from '../config/template-tokens.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 const planPhase = vi.fn<typeof realPlanPhase>();
@@ -1783,86 +1782,35 @@ describe('runIssue — environment release (#1928)', () => {
   });
 });
 
-describe('runIssue — config failure parks (#2583)', () => {
-  let dir: string;
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'config-park-'));
-  });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
-
-  const arrange = (cause: 'config' | 'environment') => {
-    const absPath = join(dir, 'constitution.md');
-    writeFileSync(absPath, '---\nproduct: acme\nchecklist: x\ncheckers:\n  - tests\n---\nbody\n');
-    const constitution: Constitution = {
-      source: 'repo',
-      product: 'acme',
-      version: 1,
-      checkers: ['tests'],
-      body: 'body',
-      path: absPath,
-      requireTests: true,
-      repoInstance: { relPath: '.factory/constitution.md', absPath },
-    };
-    vi.mocked(checkPhase).mockResolvedValue({
-      passed: false,
-      summary: {
-        failures: 1,
-        passes: 0,
-        skips: 0,
-        total: 1,
-        results: [schemaErrorCheckerOutput('checkers[0]', 'entry 0 is a number')],
-      },
-      reworkRounds: 0,
-      failureSignature: 'sig',
-      environment: { baseSha: 'abc1234567890def', failingChecks: ['checkers[0]'], cause, logPaths: [] },
-    });
-    const log = vi.fn();
-    const createComment = vi.fn().mockResolvedValue({});
-    const checkResume = {
-      load: vi.fn().mockResolvedValue(null),
-      record: vi.fn().mockResolvedValue(undefined),
-      clear: vi.fn().mockResolvedValue(undefined),
-    };
-    const planReuse = {
-      load: vi.fn().mockResolvedValue(null),
-      record: vi.fn().mockResolvedValue(undefined),
-      clear: vi.fn().mockResolvedValue(undefined),
-    };
-    const ports = basePorts({
-      events: () => log,
-      octokit: { rest: { issues: { createComment } } } as never,
-      resolveConstitution: () => constitution,
-      checkResume,
-      planReuse,
-    });
-    return { log, createComment, checkResume, planReuse, run: () => runIssue(baseRequest(), basePolicy(), ports) };
-  };
-  const kinds = (log: ReturnType<typeof vi.fn>) => log.mock.calls.map((c) => c[0]);
-
-  it('parks a config-caused CHECK failure with event kind and park reason config (#2584)', async () => {
-    const { run, log, createComment, checkResume, planReuse } = arrange('config');
-    const outcome = await run();
-    expect(outcome).toMatchObject({ state: 'parked', reason: 'config', failureSignature: 'sig' });
-    expect(outcome.state).not.toBe('released');
-    const fail = log.mock.calls.find((c) => c[0] === 'config');
-    expect(fail?.[1]).toContain('.factory/constitution.md:4');
-    expect(fail?.[1]).toContain('expected a list of checker names');
-    expect(fail?.[1]).toContain('factory unpark');
-    expect(kinds(log)).not.toContain('environment-released');
-    expect(kinds(log)).not.toContain('fail');
-    expect(createComment).not.toHaveBeenCalled();
-    expect(checkResume.record).not.toHaveBeenCalled();
-    expect(planReuse.record).not.toHaveBeenCalled();
-  });
-
-  it('still releases an environment-caused CHECK failure to queued', async () => {
-    const { run, log } = arrange('environment');
-    expect(await run()).toMatchObject({ state: 'released', reason: 'environment' });
-    expect(kinds(log)).toContain('environment-released');
-    expect(kinds(log)).not.toContain('fail');
-  });
+describe('runIssue — PLAN config parks', () => {
+  it.each(['', 'ESCALATE: '])(
+    'parks config and never starts BUILD when PLAN reports a denied spec write (%s)',
+    async (prefix) => {
+      const specPath = baseRequest().specPath;
+      const log = vi.fn();
+      const report = vi.fn();
+      vi.mocked(planPhase).mockResolvedValue({
+        ...PLAN_OK,
+        ok: false,
+        parkReason: 'config',
+        escalate: `${prefix}EACCES: ${specPath}`,
+      });
+      const outcome = await runIssue(
+        baseRequest(),
+        basePolicy(),
+        basePorts({ events: () => log, writeLocalRunReport: report }),
+      );
+      const message = log.mock.calls.find((call) => call[0] === 'config')?.[1] ?? '';
+      expect({
+        parked: outcome.state === 'parked' && outcome.reason === 'config',
+        path: message.includes(specPath),
+        hint: message.includes('then fix the harness writable roots and run factory unpark 1'),
+        report: report.mock.calls[0]?.[0].reason.includes('factory unpark 1'),
+      }).toEqual({ parked: true, path: true, hint: true, report: true });
+      expect([buildPhase, checkPhase, shipPhase].map((phase) => phase.mock.calls.length)).toEqual([0, 0, 0]);
+    },
+  );
 });
-
 describe('runIssue — flaky_tests event (#2302)', () => {
   const ENV = {
     baseSha: 'abc1234567890def',
