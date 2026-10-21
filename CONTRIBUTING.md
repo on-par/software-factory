@@ -54,6 +54,19 @@ The run works in an isolated git worktree and ends at a ready-for-review PR. `fa
 
 File new work with the **Factory task** issue template, [`.github/ISSUE_TEMPLATE/factory-task.yml`](.github/ISSUE_TEMPLATE/factory-task.yml). It asks for the problem statement, in/out of scope, acceptance criteria, and verification that the factory needs to ship an issue on its own. Bugs use `factory-bug.yml`.
 
+## Steer events
+
+When you or a bot steer a factory run, record it with `factory steer`:
+
+```sh
+factory steer 3404 --message "use the new API"
+factory steer 3404 --message "switch BUILD to the v2 client" --source bot --actor <id>
+```
+
+Capture is opt-in emit only: transcripts are not ingested, and steers must not be hidden to
+improve the score. See [docs/ops/steer-events.md](docs/ops/steer-events.md) for the event fields
+and the decisions record.
+
 ## Design decisions
 
 Record significant design decisions as ADRs in [docs/adr/](docs/adr/) (see its README).
