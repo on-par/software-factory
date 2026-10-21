@@ -411,6 +411,9 @@ export function installShipHarness(): void {
         resources: { cpuMs: 300_000, memMb: 4096 },
       },
       sweep: { loopIntervalSeconds: 300, staleThresholdMultiplier: 2 },
+      // Off by default: the guard reads the real os.loadavg(), so a busy host (load5 > 3x CPUs) held remote lanes
+      // and timed tests out. Load-guard tests turn it on explicitly.
+      host: { loadGuard: { enabled: false, retrySeconds: 1 } },
     };
     h.setupWorktreeImpl = async () => {};
     h.claudeAvailable = undefined;

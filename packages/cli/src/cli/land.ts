@@ -198,6 +198,7 @@ export async function landIssue(
       prNumber,
       labels: gateLabels,
       trustTier: resolveTrustTier(repoConfig),
+      ...(riskPolicy.rules ? { rules: riskPolicy.rules } : {}),
       log,
     });
     if (!gate.merge) {

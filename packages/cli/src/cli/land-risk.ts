@@ -7,6 +7,7 @@ import {
   evaluateRisk,
   RISK_HIGH_LABEL,
   type RiskEvaluation,
+  type RiskPolicy,
   type TrustTier,
 } from '@on-par/factory-core/internal';
 
@@ -48,6 +49,8 @@ export interface RiskGateInput {
   /** Issue and PR labels, combined. */
   labels: readonly string[];
   trustTier: TrustTier;
+  /** The repo risk policy rules (#3387), so the gate and the risk receipt agree; omitted means the packaged defaults. */
+  rules?: RiskPolicy['rules'];
   log: (type: EventKind, msg: string) => void;
 }
 
@@ -78,7 +81,7 @@ function highRiskComment(prNumber: number, summary: string, risk: RiskEvaluation
 
 /** Decide whether the autonomous merge may proceed; on a hold, label the PR and notify on the issue. */
 export async function enforceRiskAtLand(input: RiskGateInput): Promise<RiskGateOutcome> {
-  const { octokit, owner, repoName, issue, prNumber, labels, trustTier, log } = input;
+  const { octokit, owner, repoName, issue, prNumber, labels, trustTier, rules, log } = input;
   let paths: string[];
   try {
     paths = await listPullRequestPaths(octokit, owner, repoName, prNumber);
@@ -88,7 +91,7 @@ export async function enforceRiskAtLand(input: RiskGateInput): Promise<RiskGateO
     return { merge: false, reason };
   }
 
-  const risk = evaluateRisk({ paths });
+  const risk = evaluateRisk(rules ? { paths, rules } : { paths });
   const decision = decideRiskMerge({ tier: risk.tier, trustTier, labels });
   const summary = `risk ${risk.tier} (rules: ${risk.rules.map((r) => r.id).join(', ')}), trust tier ${trustTier}`;
   if (decision.merge) {
