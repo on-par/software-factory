@@ -10,8 +10,8 @@ import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { CommandHarness } from './command.js';
 import type { HarnessContractScenarios } from './contract.js';
-import { codingHarnessContractCases } from './contract.js';
-import { HarnessError } from './index.js';
+import { codingHarnessContractCases, makeContractRequest } from './contract.js';
+import { HarnessError, type HarnessRequest } from './index.js';
 
 export interface HarnessCheckOptions {
   id: string;
@@ -28,11 +28,18 @@ export interface HarnessCheckResult {
   rule: string;
   fix: string;
   error?: string;
+  /** When set, the case was not run; `ok` is true so it does not fail the check. */
+  skip?: string;
 }
 
 const PROBE_PROMPT = 'Reply with the single word ok. Do not edit any files.';
 const FAILURE_COMMAND = `sh -c 'echo "rate limit" >&2; exit 1'`;
 const INJECTION_PREFIX = 'handles injected instruction without following it:';
+
+const COMMIT_CASE = 'commits a change in the worktree';
+const COMMIT_FILE = 'HARNESS_CHECK.txt';
+const COMMIT_PROMPT =
+  'Create a file named HARNESS_CHECK.txt in the current directory containing the single line ok, then commit it with git (git add HARNESS_CHECK.txt && git commit -m "harness check"). Commit locally only; do not push.';
 
 const FALLBACK = {
   rule: 'docs/harness-contract.md',
@@ -64,6 +71,10 @@ export const HARNESS_CHECK_RULES: Record<string, { rule: string; fix: string }> 
     rule: 'non-empty failure message (docs/harness-contract.md#failures)',
     fix: 'Write a diagnostic to stderr whenever the CLI fails.',
   },
+  [COMMIT_CASE]: {
+    rule: 'commits locally in the worktree (docs/harness-contract.md#build)',
+    fix: 'BUILD needs the agent to edit files and commit them locally in the worktree (git add + git commit) and not push. Make the CLI run with write access in its cwd and allow git commit.',
+  },
 };
 
 const INJECTION_RULE = {
@@ -87,6 +98,39 @@ function describeError(err: unknown): string {
  *  so a trailing `#` comment in the declared command cannot swallow the sleep. */
 function lingeringExec(execFn: ExecFn): ExecFn {
   return (cmd, o) => execFn(`${cmd}\nsleep 30`, o);
+}
+
+/** Runs the CLI in a fresh scratch repo and checks it left a new commit tracking HARNESS_CHECK.txt.
+ *  Returns undefined on pass, an error string on failure. */
+async function checkCommitsInWorktree(
+  harness: CommandHarness,
+  request: Omit<Partial<HarnessRequest>, 'worktree' | 'prompt'>,
+  execFn: ExecFn,
+): Promise<string | undefined> {
+  const repo = await mkdtemp(join(tmpdir(), 'factory-harness-commit-'));
+  try {
+    await execFn('git init -q', { cwd: repo });
+    // A local identity lets the agent commit on hosts with no global git identity (e.g. CI).
+    await execFn('git config user.name "factory harness check"', { cwd: repo });
+    await execFn('git config user.email "harness-check@factory.invalid"', { cwd: repo });
+    await execFn('git commit -q --allow-empty -m seed', { cwd: repo });
+    const seed = (await execFn('git rev-parse HEAD', { cwd: repo })).stdout.trim();
+    try {
+      await harness.run(makeContractRequest({ ...request, worktree: repo, prompt: COMMIT_PROMPT }));
+    } catch (err) {
+      return describeError(err);
+    }
+    const count = Number((await execFn(`git rev-list --count ${seed}..HEAD`, { cwd: repo })).stdout.trim());
+    if (!(count >= 1)) return 'no new commit was found: HEAD did not advance past the seed commit';
+    try {
+      await execFn(`git ls-files --error-unmatch ${COMMIT_FILE}`, { cwd: repo });
+    } catch {
+      return `${COMMIT_FILE} is not tracked at HEAD`;
+    }
+    return undefined;
+  } finally {
+    await rm(repo, { recursive: true, force: true });
+  }
 }
 
 /** Runs every contract-kit case against the declared harness; never throws for a failing case. */
@@ -121,6 +165,21 @@ export async function runHarnessCheck(opts: HarnessCheckOptions): Promise<Harnes
         results.push({ name: c.name, ok: true, ...meta });
       } catch (err) {
         results.push({ name: c.name, ok: false, ...meta, error: describeError(err) });
+      }
+    }
+    const commitMeta = ruleFor(COMMIT_CASE);
+    if (!declaration.agentic) {
+      results.push({ name: COMMIT_CASE, ok: true, ...commitMeta, skip: 'agentic: false' });
+    } else {
+      try {
+        const error = await checkCommitsInWorktree(real, base, execFn);
+        results.push(
+          error === undefined
+            ? { name: COMMIT_CASE, ok: true, ...commitMeta }
+            : { name: COMMIT_CASE, ok: false, ...commitMeta, error },
+        );
+      } catch (err) {
+        results.push({ name: COMMIT_CASE, ok: false, ...commitMeta, error: describeError(err) });
       }
     }
     return results;
