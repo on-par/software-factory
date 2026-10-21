@@ -68,7 +68,7 @@ describe('CLI JSON Schema generator', () => {
   });
 
   it('rejects missing, empty, surplus, and unwritable output arguments', async () => {
-    for (const args of [[], [''], ['/tmp/unused', 'extra']]) {
+    for (const args of [[], [''], ['unused', 'extra']]) {
       const { status, errors } = await generate(...args);
       expect(status).toBe(2);
       expect(errors).toEqual(['usage: tsx scripts/gen-cli-json-schemas.ts <output-directory>\n']);
