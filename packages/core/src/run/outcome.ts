@@ -62,6 +62,16 @@ export type RunOutcome =
       /** BUILD output was kept and a check-resume record written (#2564). */
       buildPreserved?: boolean;
     }
+  | {
+      /** ADR-0161: the stack slice below (`slice.index`, PR `prNumber`) awaits approval or merge, so the issue goes back to queued and is not parked. */
+      state: 'released';
+      reason: 'stack-wait';
+      route?: BuildRoute;
+      branch?: string;
+      reworkRounds: number;
+      prNumber: number;
+      slice: { index: number; count: number };
+    }
   | { state: 'escalated'; reason: string; route?: BuildRoute; branch?: string; reworkRounds?: number };
 
 /** Core classifies structurally — via a parked RunOutcome on `err.outcome` or a

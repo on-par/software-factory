@@ -1,15 +1,12 @@
-// packages/core/src/run/stack-slice-entry.ts — ADR-0161: stack mode builds every slice in one run, each on its parent's branch.
+// packages/core/src/run/stack-slice-entry.ts — ADR-0161: stack mode builds one slice per run (#3367), on main or on its parent slice's branch.
 import { upsertSlicePlanComment } from '../readiness/slice-plan-github.js';
-import {
-  DEFAULT_MAX_SLICES,
-  parentRefForSlice,
-  stackSliceBranch,
-  withSliceBranchCreated,
-} from '../readiness/slice-plan.js';
+import { parentRefForSlice, stackSliceBranch, withSliceBranchCreated } from '../readiness/slice-plan.js';
 import type { PlanResult } from '../phases/plan.js';
-import type { RunOutcome } from './outcome.js';
+import type { BuildRoute, RunOutcome } from './outcome.js';
 import type { RunPorts, RunRequest } from './run-issue.js';
 import { createStackSliceBranch } from './stack-slice-branch.js';
+
+const MAIN_REF = 'origin/main';
 
 type PlanSlice = NonNullable<PlanResult['slice']>;
 
@@ -17,30 +14,21 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Runs one pass per slice: while a stack-mode pass is ready and neither the top slice nor the slice cap
- *  (`maxSlices`, ADR-0156), plans the next one. Any non-ready slice outcome (a CHECK park, escalation or
- *  environment release, or any earlier park) ends the chain. That outcome is returned as the run's outcome,
- *  and later slices are never planned, branched or built (#3061). */
-export async function runStackLoop(
-  request: RunRequest,
-  runOnce: (request: RunRequest) => Promise<RunOutcome>,
-): Promise<RunOutcome> {
-  let outcome = await runOnce(request);
-  // The slice-gate parks a fresh plan above the cap at PLAN, so through the gate no slice is built. The
-  // loop enforces the cap too, so it holds if the gate is bypassed: at most min(plan length, maxSlices)
-  // slices are built; the run stops after slice `limit`, returns its ready outcome, and leaves later
-  // slices pending.
-  const stackLimit = (count: number) => Math.min(count, request.maxSlices ?? DEFAULT_MAX_SLICES);
-  while (
-    request.sizeGateMode === 'stack' &&
-    !request.resumeFrom &&
-    outcome.state === 'ready' &&
-    outcome.slice !== undefined &&
-    outcome.slice.index < stackLimit(outcome.slice.count)
-  ) {
-    outcome = await runOnce({ ...request, sliceIndex: outcome.slice.index + 1 });
-  }
-  return outcome;
+/** ADR-0161 (#3367): the slice below is not yet approved or merged, so the run releases the issue to queued. */
+export function stackWaitOutcome(
+  wait: NonNullable<PlanResult['stackWait']>,
+  branch: string,
+  route: BuildRoute,
+): RunOutcome {
+  return {
+    state: 'released',
+    reason: 'stack-wait',
+    route,
+    branch,
+    reworkRounds: 0,
+    prNumber: wait.prNumber,
+    slice: { index: wait.index, count: wait.count },
+  };
 }
 
 /** Creates slice k's branch from its parent ref and records it in the slice plan comment, before BUILD.
@@ -55,7 +43,7 @@ export async function enterStackSlice(args: {
   const { slice, request, ports, log, park } = args;
   const { plan: slicePlan, index } = slice;
   const count = slicePlan.slices.length;
-  const parent = parentRefForSlice(slicePlan, index);
+  const parent = parentRefForSlice(slicePlan, index, MAIN_REF);
   if (parent === undefined) {
     return {
       outcome: await park(
@@ -82,6 +70,6 @@ export async function enterStackSlice(args: {
   log('plan', `stack slice ${index}/${count}: created ${branch} from ${parent}`);
   return {
     slice: { plan: recorded, index },
-    request: { ...request, branch, ...(index > 1 ? { parentBaseRef: parent } : {}) },
+    request: { ...request, branch, ...(parent !== MAIN_REF ? { parentBaseRef: parent } : {}) },
   };
 }

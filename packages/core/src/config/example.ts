@@ -59,7 +59,7 @@ const RUNTIME_NOTES: Record<string, string> = {
     'after CHECK. FACTORY_BUILD_PUBLISH=1/0 beats it.',
   sizeGate:
     'Size gate policy at PLAN (ADR-0147, ADR-0156). mode: file (default) files child issues for an oversized issue and parks ' +
-    'when the post-plan gate trips; slice keeps the issue whole, never files issues, records a slice plan comment and ships one slice per run; off skips both gates and sends the whole issue to BUILD; stack (ADR-0161) requests a stacked PR set, and until stacks are built it behaves like slice. ' +
+    'when the post-plan gate trips; slice keeps the issue whole, never files issues, records a slice plan comment and ships one slice per run; off skips both gates and sends the whole issue to BUILD; stack (ADR-0161) ships one stacked slice PR per run and builds the next slice only after the PR below is approved or merged. ' +
     'maxSlices (1-20, default 10) caps a slice plan that has not started: an over-cap plan is recorded and parks, and `--max-slices <n>` beats it for one run. ' +
     "tokenBudget (default 150000) and maxFiles (default 12) (#3350): the post-plan gate splits only when the plan's estimated tokens exceed tokenBudget or its changed files exceed maxFiles; a plan changing 3 files or fewer never splits. " +
     '`factory run-issue --size-gate <mode>` beats mode for one run.',

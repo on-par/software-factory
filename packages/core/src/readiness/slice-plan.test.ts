@@ -7,6 +7,8 @@ import {
   SLICE_CAP_CEILING,
   SLICE_PLAN_MARKER,
   currentSlice,
+  nextStackSlice,
+  parentRefForSlice,
   overCapReason,
   parseSlicePlanComment,
   renderSlicePlanComment,
@@ -271,5 +273,45 @@ describe('withSlicesAffected and headSha', () => {
   it('still parses a comment without the new fields', () => {
     const parsed = parseSlicePlanComment(renderSlicePlanComment(built(2)));
     expect(parsed?.ok && parsed.plan.slices[0]?.headSha).toBeUndefined();
+  });
+});
+
+describe('stack mode helpers (#3367)', () => {
+  const plan3 = (): SlicePlan => ({
+    issue: 5,
+    slices: [1, 2, 3].map((n) => ({ index: n, title: `S${n}`, story: story(`S${n}`), state: 'pending' as const })),
+  });
+
+  it('nextStackSlice returns the lowest pending slice', () => {
+    expect(nextStackSlice(plan3())?.index).toBe(1);
+    const p = withSliceState(withSliceState(plan3(), 1, 'merged'), 2, 'pr-open', 9);
+    expect(nextStackSlice(p)?.index).toBe(3);
+    expect(nextStackSlice(withSliceState(p, 3, 'not-built'))).toBeUndefined();
+  });
+
+  it('parentRefForSlice returns main for a merged parent and the branch for a pr-open parent', () => {
+    const open = withSliceState(plan3(), 1, 'pr-open', 9, 'factory/5-slice-1');
+    expect(parentRefForSlice(open, 2)).toBe('factory/5-slice-1');
+    expect(parentRefForSlice(withSliceState(open, 1, 'merged'), 2)).toBe('origin/main');
+    expect(parentRefForSlice(withSliceState(plan3(), 1, 'merged'), 2, 'main')).toBe('main');
+    expect(parentRefForSlice(plan3(), 2)).toBeUndefined();
+  });
+
+  it('renders the wait label for a stack slice PR whose next slice is not built', () => {
+    const p = withSliceState(plan3(), 1, 'pr-open', 9, 'factory/5-slice-1');
+    expect(renderSlicePlanComment(p)).toContain('PR open #9 — waiting for approval or merge before slice 2');
+  });
+
+  it('keeps the plain label for a slice-mode branch or once slice k+1 has a branch', () => {
+    const sliceMode = withSliceState(plan3(), 1, 'pr-open', 9, 'factory/5-s1-thing');
+    expect(renderSlicePlanComment(sliceMode)).not.toContain('waiting for approval');
+    const started = withSliceState(
+      withSliceState(plan3(), 1, 'pr-open', 9, 'factory/5-slice-1'),
+      2,
+      'pr-open',
+      10,
+      'factory/5-slice-2',
+    );
+    expect(renderSlicePlanComment(started)).not.toContain('PR open #9 — waiting');
   });
 });
