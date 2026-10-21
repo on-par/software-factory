@@ -1682,58 +1682,6 @@ describe('cli', () => {
     expect(calls[0].query).toContain('markPullRequestReadyForReview');
   });
 
-  it('rebases and force-pushes a DIRTY PR before squash-merging it', async () => {
-    const calls: any[] = [];
-    const octokit: any = {
-      graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } } }),
-      rest: {
-        pulls: {
-          get: async () => ({ data: { head: { sha: 'abc123' } } }),
-          merge: async (args: any) => {
-            calls.push(['merge', args]);
-          },
-        },
-        git: {
-          deleteRef: async (args: any) => {
-            calls.push(['deleteRef', args]);
-          },
-        },
-        checks: {
-          listForRef: async () => ({ data: { check_runs: [{ status: 'completed', conclusion: 'success' }] } }),
-        },
-      },
-    };
-    const run = async (command: string, options: any) => {
-      calls.push(['run', command, options]);
-    };
-
-    await landOpenPullRequest({
-      octokit,
-      owner: 'on-par',
-      repoName: 'software-factory',
-      ghRepo: 'on-par/software-factory',
-      repoRoot: '/repo',
-      issue: 20,
-      branch: 'ship-it/20-dirty',
-      worktree: '/repo-factory-20',
-      prNumber: 123,
-      log: (type, msg) => calls.push(['log', type, msg]),
-      run,
-      pathExists: () => true,
-      sleep: async () => {
-        throw new Error('sleep should not be called');
-      },
-      watch: async () => 'success' as const,
-    });
-
-    expect(calls).toEqual([
-      ['run', 'git rebase origin/main', { cwd: '/repo-factory-20' }],
-      ['run', "git push --force-with-lease origin 'ship-it/20-dirty'", { cwd: '/repo-factory-20' }],
-      ['merge', { owner: 'on-par', repo: 'software-factory', pull_number: 123, merge_method: 'squash', sha: 'abc123' }],
-      ['deleteRef', { owner: 'on-par', repo: 'software-factory', ref: 'heads/ship-it/20-dirty' }],
-    ]);
-  });
-
   it('fails closed when the CI watch throws', async () => {
     const calls: any[] = [];
     const octokit: any = {
@@ -2037,7 +1985,7 @@ describe('cli', () => {
     ]);
   });
 
-  it('aborts the rebase, logs conflict with the branch, and skips merge when rebase fails', async () => {
+  it('aborts a merge conflict, logs the paths, and skips merge when sync fails', async () => {
     const calls: any[] = [];
     const octokit: any = {
       graphql: async () => ({ repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } } }),
@@ -2056,7 +2004,16 @@ describe('cli', () => {
     };
     const run = async (command: string, options: any) => {
       calls.push(['run', command, options]);
-      if (command === 'git rebase origin/main') throw new Error('conflict');
+      if (command === 'git status --porcelain -z') return { stdout: '' };
+      if (command.startsWith('git rev-parse --git-path')) return { stdout: '.git/operation' };
+      if (command.startsWith('test -e')) return { stdout: 'no' };
+      if (command === 'git rev-parse --verify HEAD' || command.startsWith('git merge-base'))
+        return { stdout: 'a'.repeat(40) };
+      if (command.startsWith('git diff --diff-filter=A')) return { stdout: '' };
+      if (command === 'git merge --no-edit origin/main') throw new Error('conflict');
+      if (command === 'git diff --name-only --diff-filter=U -z') return { stdout: 'source.ts\0' };
+      if (command === 'git merge --abort') return { stdout: '' };
+      return { stdout: '' };
     };
 
     await expect(
@@ -2080,11 +2037,10 @@ describe('cli', () => {
       }),
     ).rejects.toBeInstanceOf(LandConflictError);
 
-    expect(calls).toEqual([
-      ['run', 'git rebase origin/main', { cwd: '/repo-factory-20' }],
-      ['run', 'git rebase --abort', { cwd: '/repo-factory-20' }],
-      ['log', 'conflict', 'rebase conflict on ship-it/20-dirty — parked'],
-    ]);
+    expect(calls.some((call) => call[1] === 'git merge --abort')).toBe(true);
+    expect(calls.some((call) => call[1] === "git push origin 'ship-it/20-dirty'")).toBe(false);
+    expect(calls.at(-1)?.[1]).toBe('conflict');
+    expect(calls.at(-1)?.[2]).toContain('source.ts');
   });
 
   it('logs conflict and skips merge when a DIRTY PR worktree is gone', async () => {
@@ -2444,7 +2400,7 @@ describe('cli', () => {
     expect(trace).toEqual(['watch', 'lock:acquire', 'merge', 'lock:release']);
   });
 
-  it('releases the lock for the re-watch on the DIRTY path', async () => {
+  it('fetches and syncs main under lock, then releases it for the DIRTY-path re-watch', async () => {
     const trace: string[] = [];
     const withLock = async <T>(fn: () => Promise<T>): Promise<T> => {
       trace.push('lock:acquire');
@@ -2473,8 +2429,16 @@ describe('cli', () => {
       },
     };
     const run = async (command: string) => {
-      if (command === 'git rebase origin/main') trace.push('rebase');
+      if (command === 'git status --porcelain -z') return { stdout: '' };
+      if (command.startsWith('git rev-parse --git-path')) return { stdout: '.git/operation' };
+      if (command.startsWith('test -e')) return { stdout: 'no' };
+      if (command === 'git rev-parse --verify HEAD' || command.startsWith('git merge-base'))
+        return { stdout: 'a'.repeat(40) };
+      if (command.startsWith('git diff --diff-filter=A')) return { stdout: '' };
+      if (command === 'git fetch origin') trace.push('fetch');
+      else if (command === 'git merge --no-edit origin/main') trace.push('merge-main');
       else if (command.startsWith('git push')) trace.push('push');
+      return { stdout: '' };
     };
 
     await landOpenPullRequest({
@@ -2500,7 +2464,8 @@ describe('cli', () => {
     expect(trace).toEqual([
       'watch',
       'lock:acquire',
-      'rebase',
+      'fetch',
+      'merge-main',
       'push',
       'lock:release',
       'watch',
@@ -2510,7 +2475,7 @@ describe('cli', () => {
     ]);
   });
 
-  it('does not rebase when the DIRTY verdict resolves before the lock is acquired', async () => {
+  it('does not sync when the DIRTY verdict resolves before the lock is acquired', async () => {
     const trace: string[] = [];
     const withLock = async <T>(fn: () => Promise<T>): Promise<T> => fn();
     let watchCalls = 0;
@@ -2706,9 +2671,7 @@ describe('cli', () => {
     it('emits only the terminal event for non-timeout park reasons', () => {
       expect(parkEvents(new LaneParkError('x', 'escalate'))).toEqual([{ type: 'escalate', msg: 'x' }]);
       expect(parkEvents(new Error('boom'))).toEqual([{ type: 'fail', msg: 'boom' }]);
-      expect(parkEvents(new LandConflictError('rebase conflict'))).toEqual([
-        { type: 'conflict', msg: 'rebase conflict' },
-      ]);
+      expect(parkEvents(new LandConflictError('sync conflict'))).toEqual([{ type: 'conflict', msg: 'sync conflict' }]);
     });
 
     it('stringifies a non-Error input', () => {
@@ -2731,6 +2694,7 @@ describe('cli', () => {
         throw new Error('unexpected review lookup');
       },
       getPullRefs: async () => ({ headRef: 'branch', baseRef: 'main', headSha: 'head' }),
+      branchContains: async () => false,
     };
 
     it('preflight defers a queued issue whose Prerequisite is still open (#3258 on 10/19)', async () => {
@@ -3627,7 +3591,7 @@ More prose here.
             { number: 11, branch: 'ship-it/11-b', reviewDecision: 'APPROVED' },
           ],
           land: async (issueNum: number) => {
-            if (issueNum === 10) throw new LandConflictError('rebase conflict on ship-it/10-a — parked');
+            if (issueNum === 10) throw new LandConflictError('land sync conflict on ship-it/10-a — parked');
             landed.push(issueNum);
             return { branch: 'ship-it/11-b', prNumber: 11 };
           },
@@ -3641,7 +3605,7 @@ More prose here.
         expect(result.skipped).toEqual([]);
         expect(result.failed).toHaveLength(1);
         expect(result.failed[0]).toMatchObject({ pr: 10, issue: 10 });
-        expect(result.failed[0].reason).toContain('rebase conflict');
+        expect(result.failed[0].reason).toContain('land sync conflict');
 
         const summary = events.find((e) => e[0] === 'resume-approved');
         expect(summary).toBeDefined();

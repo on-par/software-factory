@@ -33,6 +33,8 @@ export interface LogContext {
 }
 
 export interface LogExtra {
+  paths?: string[];
+  mode?: 'mechanical';
   failoverReason?: FailoverReason;
   fingerprint?: string;
   evidence?: EvidencePack;
@@ -107,6 +109,8 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       issue: String(ctx.issue ?? '-'),
       msg,
       level,
+      ...(extra?.paths ? { paths: extra.paths } : {}),
+      ...(extra?.mode ? { mode: extra.mode } : {}),
       ...(ctx.lane ? { lane: ctx.lane } : {}),
       ...(repo ? { repo } : {}),
       ...(ctx.phase ? { phase: ctx.phase } : {}),

@@ -85,6 +85,15 @@ export function registerObserveCommands(program: Command, handlers: ProgramHandl
     .action((opts: { steerability?: boolean; json?: boolean }) => handlers.cmdReport(opts));
 
   program
+    .command('risk <pr>')
+    .description("Print a PR's risk tier and each matched rule (read-only)")
+    .option(
+      '--policy <file>',
+      'Risk policy JSON validated against the risk rule schema (default: the `risk` section of .factory/config.yaml, else the packaged rules)',
+    )
+    .action((pr: string, opts: { policy?: string }) => handlers.cmdRisk(pr, opts));
+
+  program
     .command('garden')
     .description(
       'Read-only report of recurring failure patterns in local events, deduped against open issues by GitHub search',

@@ -35,7 +35,7 @@ The factory's own CHECK phase runs `bash scripts/verify.sh --no-e2e` in the buil
 11. `npm run eval -- --stub`
 12. Shell-script tests: `auto-merge-sweep`, `filter-green-prs`, `repo-merge-settings`, `repo-about`, `repo-issue-optics`, `ruleset-copilot-review`, `launchd/install-sweep-plist`, `publish-workspaces` (guards the publish list `scripts/publish-workspaces.txt` against the workspace graph)
 
-CI (`.github/workflows/ci.yml`) runs the same steps as the full path. It also runs `scripts/quickstart-smoke.sh` in a separate job. It does not run the `install-sweep-plist` test.
+CI (`.github/workflows/ci.yml`) runs the same checks as the full path, split into parallel jobs: `static` (format, build, guards, typecheck, lint, knip) and `test (1/3)`…`test (3/3)` (Vitest shards that write blob reports with raw coverage and no thresholds, via `FACTORY_COVERAGE_SHARD=1`). The required `ci` job fails unless all of them succeeded, then merges the shard reports (`vitest --merge-reports`) and enforces the coverage thresholds, the ratchet, and the stub eval on the merged result. A red `ci` names the failing job; read that job's log. CI also runs `scripts/quickstart-smoke.sh` in a separate job. It does not run the `install-sweep-plist` test.
 
 ## Coverage gate and ratchet
 

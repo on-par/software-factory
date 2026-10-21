@@ -1,11 +1,11 @@
-// packages/cli/src/cli/land-pr.ts — PR-level land: CI watch, rebase, SHA-pinned squash merge (#2784)
+// packages/cli/src/cli/land-pr.ts — PR-level land: CI watch, main sync, SHA-pinned squash merge (#2784)
 
 import { existsSync } from 'node:fs';
 
 import type { Octokit } from '@octokit/rest';
-import type { EventKind, ParkReason } from '@on-par/factory-core';
+import type { EventKind, FactoryEvent, ParkReason } from '@on-par/factory-core';
 import type { CiOutcome, InfraRerunOutcome, WatchChecksOptions } from '@on-par/factory-core/internal';
-import { shellEscape, watchChecksWithInfraRerun } from '@on-par/factory-core/internal';
+import { shellEscape, syncLandBranch, watchChecksWithInfraRerun } from '@on-par/factory-core/internal';
 import { landRuntime } from './land-runtime.js';
 
 export type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
@@ -158,12 +158,12 @@ export async function markPullRequestReady(octokit: Octokit, pullRequestId: stri
   );
 }
 
-export async function rebaseDirtyPullRequest(opts: {
+export async function syncDirtyPullRequest(opts: {
   issue: number;
   branch: string;
   worktree: string;
   prNumber: number;
-  log: (type: EventKind, msg: string) => void;
+  log: (type: EventKind, msg: string, extra?: Pick<FactoryEvent, 'paths' | 'mode'>) => void;
   run?: CommandRunner;
   pathExists?: (path: string) => boolean;
 }): Promise<void> {
@@ -175,14 +175,11 @@ export async function rebaseDirtyPullRequest(opts: {
     throw new LandConflictError(msg);
   }
 
-  try {
-    await run('git rebase origin/main', { cwd: worktree });
-    await run(`git push --force-with-lease origin ${shellEscape(branch)}`, { cwd: worktree });
-  } catch {
-    // Best-effort cleanup: the conflict logged below is the error we surface.
-    await run('git rebase --abort', { cwd: worktree }).catch(() => {});
-    const msg = `rebase conflict on ${branch} — parked`;
-    log('conflict', msg);
+  const result = await syncLandBranch({ worktree, branch, run, log });
+  if (!result.ok) {
+    const suffix = result.paths.length > 0 ? ` (${result.paths.join(', ')})` : '';
+    const msg = `land sync failed on ${branch}${suffix}: ${result.message} — parked`;
+    log('conflict', msg, result.paths.length > 0 ? { paths: result.paths } : undefined);
     throw new LandConflictError(`issue #${issue}: ${msg}`);
   }
 }
@@ -201,7 +198,7 @@ export async function landOpenPullRequest(opts: {
   branch: string;
   worktree: string;
   prNumber: number;
-  log: (type: EventKind, msg: string) => void;
+  log: (type: EventKind, msg: string, extra?: Pick<FactoryEvent, 'paths' | 'mode'>) => void;
   run?: CommandRunner;
   pathExists?: (path: string) => boolean;
   sleep?: (ms: number) => Promise<void>;
@@ -296,16 +293,16 @@ export async function landOpenPullRequest(opts: {
   let state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
 
   if (state.mergeStateStatus === 'DIRTY') {
-    const rebased = await withLock(async () => {
-      // Re-check under the lock: a sibling lane may have landed (or rebased this branch)
+    const synced = await withLock(async () => {
+      // Re-check under the lock: a sibling lane may have landed (or synced this branch)
       // while we waited for it, so the DIRTY verdict read above can be stale.
       state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
       if (state.mergeStateStatus !== 'DIRTY') return false;
       await ensureWorktree?.();
-      await rebaseDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists });
+      await syncDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists });
       return true;
     });
-    if (rebased) {
+    if (synced) {
       if (!skipCI) {
         verifiedSha = await watchCi();
       }
@@ -316,7 +313,7 @@ export async function landOpenPullRequest(opts: {
   for (let attempt = 1; ; attempt++) {
     try {
       await withLock(async () => {
-        // Same rule as the rebase section: whatever we read before taking the lock (or before
+        // Same rule as the sync section: whatever we read before taking the lock (or before
         // the backoff sleep) may be stale, so the attempt decides from a fresh read.
         state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
         if (state.isDraft && state.id) {

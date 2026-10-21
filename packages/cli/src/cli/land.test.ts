@@ -221,7 +221,7 @@ describe('land (via main dispatch)', () => {
     expect(errored()).toContain('no open PR');
   });
 
-  it('exits 3 on a rebase conflict (LandConflictError)', async () => {
+  it('exits 3 on a land sync conflict (LandConflictError)', async () => {
     h.octokit.graphql = vi.fn(async (query: string) =>
       query.trimStart().startsWith('query')
         ? { repository: { pullRequest: { id: 'PR_ID', isDraft: false, mergeStateStatus: 'DIRTY' } } }
@@ -375,13 +375,18 @@ describe('cmdLand (direct invocation)', () => {
     });
   });
 
-  it('materializes a missing adopted PR worktree from its remote head, rebases it, and rechecks CI', async () => {
+  it('materializes a missing adopted PR worktree, syncs it, and rechecks CI', async () => {
     const branch = 'contributor/adopted-pr';
     const worktree = `${h.repoRoot}-factory-5`;
     const commands: string[] = [];
     const originalExec = h.execImpl;
     h.execImpl = (command) => {
       commands.push(command);
+      if (command === 'git status --porcelain -z') return '';
+      if (command.startsWith('git rev-parse --git-path')) return '.git/operation';
+      if (command.startsWith('test -e')) return 'no';
+      if (command === 'git rev-parse --verify HEAD' || command.startsWith('git merge-base')) return 'a'.repeat(40);
+      if (command.startsWith('git diff --diff-filter=A')) return '';
       return originalExec(command);
     };
     h.octokit.rest.pulls.list = vi.fn(async ({ head }: { head?: string }) =>
@@ -396,7 +401,6 @@ describe('cmdLand (direct invocation)', () => {
       mkdirSync(path, { recursive: true });
     };
     ops.watchChecks.mockResolvedValue('success');
-
     try {
       await expect(cmdLand(5)).resolves.toBeUndefined();
       expect(setupWorktree).toHaveBeenCalledWith(
@@ -407,16 +411,11 @@ describe('cmdLand (direct invocation)', () => {
         undefined,
         expect.any(Function),
       );
-      expect(commands).toContain('git rebase origin/main');
-      expect(commands).toContain("git push --force-with-lease origin 'contributor/adopted-pr'");
+      expect(commands).toContain('git fetch origin');
+      expect(commands).toContain('git merge --no-edit origin/main');
+      expect(commands).toContain("git push origin 'contributor/adopted-pr'");
       expect(ops.watchChecks).toHaveBeenCalledTimes(2);
-      expect(h.octokit.rest.pulls.merge).toHaveBeenCalledWith({
-        owner: 'on-par',
-        repo: 'software-factory',
-        pull_number: 77,
-        merge_method: 'squash',
-        sha: 'abc123',
-      });
+      expect(h.octokit.rest.pulls.merge).toHaveBeenCalledWith(expect.objectContaining({ sha: 'abc123' }));
     } finally {
       rmSync(worktree, { recursive: true, force: true });
     }

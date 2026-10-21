@@ -356,12 +356,12 @@ export interface FactoryEvent {
   type: EventKind;
   issue: string;
   msg: string;
+  paths?: string[]; // Conflicted paths on a land conflict_detected/conflict_resolved event (#1886).
+  mode?: 'mechanical';
   level?: LogLevel;
   lane?: string;
-  /** GitHub slug (`owner/name`) of the checkout that emitted this event (#971).
-   *  Absent on events logged before #971 and on any checkout whose git `origin`
-   *  remote cannot be read or does not parse to `owner/name`. Qualifies `lane`,
-   *  whose meaning and format are unchanged. */
+  /** GitHub slug (`owner/name`) of the emitting checkout (#971); absent before #971 and when git `origin`
+   *  can't be read or doesn't parse to `owner/name`. Qualifies `lane`, whose meaning and format are unchanged. */
   repo?: string;
   phase?: string;
   /** Human who performed the action, for human-* event types (#420). */

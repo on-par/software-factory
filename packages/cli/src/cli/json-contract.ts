@@ -64,6 +64,8 @@ export const logsLineJsonSchema = z.object({
   type: z.string(),
   issue: z.string(),
   msg: z.string(),
+  paths: z.array(z.string()).optional(),
+  mode: z.literal('mechanical').optional(),
   level: z.enum(['debug', 'info', 'warn', 'error']).optional(),
   lane: z.string().optional(),
   repo: z.string().optional(),

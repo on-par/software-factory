@@ -3,7 +3,13 @@
 import { existsSync } from 'node:fs';
 
 import type { Octokit } from '@octokit/rest';
-import type { EventKind, FactoryConfig, FailoverReason, MergePolicyOverrides } from '@on-par/factory-core';
+import type {
+  EventKind,
+  FactoryConfig,
+  FactoryEvent,
+  FailoverReason,
+  MergePolicyOverrides,
+} from '@on-par/factory-core';
 import type { getFactoryPaths } from '@on-par/factory-core';
 import {
   LaneFileGuard,
@@ -65,8 +71,11 @@ export async function landIssue(
 ): Promise<{ branch: string; prNumber: number }> {
   const { configLoaders, gitOps, errorDetail, worktreePathFor } = landRuntime();
   const [owner, repoName] = ghRepo.split('/');
-  const log = (type: EventKind, msg: string, extra?: { failoverReason?: FailoverReason }) =>
-    logEvent(paths.events, type, issueNum, msg, extra);
+  const log = (
+    type: EventKind,
+    msg: string,
+    extra?: { failoverReason?: FailoverReason } & Pick<FactoryEvent, 'paths' | 'mode'>,
+  ) => logEvent(paths.events, type, issueNum, msg, extra);
 
   // The issue title may have been edited since the PR was opened, so a
   // freshly-derived branch name can drift from the branch the PR actually

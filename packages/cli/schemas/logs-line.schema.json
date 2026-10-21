@@ -14,6 +14,16 @@
     "msg": {
       "type": "string"
     },
+    "paths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "mode": {
+      "type": "string",
+      "const": "mechanical"
+    },
     "level": {
       "type": "string",
       "enum": ["debug", "info", "warn", "error"]
