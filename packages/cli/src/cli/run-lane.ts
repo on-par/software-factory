@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 
 import { parkReasonFor } from '@on-par/factory-core';
 import type { LanePausedPayload, getFactoryPaths, RunOutcome } from '@on-par/factory-core';
-import { formatLoadHold, logEvent } from '@on-par/factory-core/internal';
+import { formatLoadHold, logEvent, PARKED_LABEL } from '@on-par/factory-core/internal';
 import type {
   LoadGuardDecision,
   QueueClaim,
@@ -181,6 +181,27 @@ export async function runLane(
     await releaseIssue(issue, outcome);
     await sweepFinished(issue).catch(() => {});
   };
+  // A parked release adds factory:parked (#3424). Log the clean park only once the label
+  // landed; a rejected add is surfaced as a fail event naming the issue and label (#3425).
+  const parkAndSettle = async (issue: number, parkedMsg: string): Promise<boolean> => {
+    activeIssues.delete(issue);
+    try {
+      await releaseIssue(issue, 'parked');
+    } catch (err) {
+      emitEvent(
+        paths.events,
+        'fail',
+        issue,
+        `issue #${issue} park failed: could not add label '${PARKED_LABEL}' (${shipRuntime().errorDetail(err)}); lane '${lane}' continuing`,
+        { lane },
+      );
+      await sweepFinished(issue).catch(() => {});
+      return false;
+    }
+    emitEvent(paths.events, 'parked', issue, parkedMsg, { lane });
+    await sweepFinished(issue).catch(() => {});
+    return true;
+  };
   const decide = (guard: () => LoadGuardDecision): LoadGuardDecision => {
     try {
       return guard();
@@ -228,18 +249,11 @@ export async function runLane(
     }
     const parkIssue = async (reason: string): Promise<void> => {
       emitEvent(paths.events, 'escalate', issue, reason, { lane });
-      emitEvent(
-        paths.events,
-        'parked',
-        issue,
-        `issue #${issue} parked (${reason}); lane '${lane}' continuing, ${await remainingAfter(i)} issue(s) remaining`,
-        { lane },
-      );
+      const msg = `issue #${issue} parked (${reason}); lane '${lane}' continuing, ${await remainingAfter(i)} issue(s) remaining`;
       // A preflight-parked issue may still have a stale worktree from a prior run; the reap
       // is fail-closed and must never change lane flow.
       await reapWorktree(issue).catch(() => {});
-      await settle(issue, 'parked');
-      parked++;
+      if (await parkAndSettle(issue, msg)) parked++;
       streak = null;
     };
     const runRestack = async (merged: {
@@ -429,20 +443,13 @@ export async function runLane(
       else if (streak && streak.signature === signature) streak.count++;
       else streak = { signature, firstIssue: issue, failingChecks: checks, count: 1 };
       const tripped = laneBreakerThreshold > 0 && streak !== null && streak.count >= laneBreakerThreshold;
-      emitEvent(
-        paths.events,
-        'parked',
-        issue,
-        `issue #${issue} parked (${reason})${logSuffix ? `; ${logSuffix}` : ''}; ${
-          tripped ? `lane '${lane}' paused (lane breaker)` : `lane '${lane}' continuing`
-        }, ${await remainingAfter(i)} issue(s) remaining`,
-        { lane },
-      );
+      const msg = `issue #${issue} parked (${reason})${logSuffix ? `; ${logSuffix}` : ''}; ${
+        tripped ? `lane '${lane}' paused (lane breaker)` : `lane '${lane}' continuing`
+      }, ${await remainingAfter(i)} issue(s) remaining`;
       // Remove the parked lane's own worktree so a parked issue stops leaving a sibling
       // checkout behind (#1007); fail-closed and never allowed to change lane flow.
       await reapWorktree(issue).catch(() => {});
-      await settle(issue, 'parked');
-      parked++;
+      if (await parkAndSettle(issue, msg)) parked++;
       if (tripped && streak) {
         const { signature: tripSignature, firstIssue, failingChecks: firstChecks } = streak;
         const payload: LanePausedPayload = {
