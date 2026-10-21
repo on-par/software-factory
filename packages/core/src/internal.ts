@@ -147,8 +147,7 @@ export { classifyOpenCodeErrorType, parseOpenCodeJson } from './harness/opencode
 export { type OpenCodeExecFn, OpenCodeHarness } from './harness/opencode.js';
 export { parsePiJson, type PiExecFn, PiHarness } from './harness/pi.js';
 export * as openCodeVersion from './harness/opencode-version.js';
-export type { DockerEngineOptions } from './hosted/docker.js';
-export { createDockerEngine } from './hosted/docker.js';
+export { type DockerEngineOptions, createDockerEngine } from './hosted/docker.js';
 export type { OrphanContainer, ReapedContainer } from './hosted/orphans.js';
 export { listOrphanContainers, reapOrphanContainers } from './hosted/orphans.js';
 // Router
@@ -346,10 +345,8 @@ export {
 export { createGithubLaneClaimStalenessProbe, releaseLaneClaim } from './run/lane-file-guard.js';
 export type { LaneClaimStalenessProbe } from './run/lane-file-guard.js';
 // Daemon lane state resolution (#843)
-export type { DaemonLaneContext } from './daemon/lane-context.js';
-export { createDaemonLaneContext } from './daemon/lane-context.js';
-export type { DaemonOrchestrator } from './daemon/run-repo.js';
-export { runDaemonRepo } from './daemon/run-repo.js';
+export { type DaemonLaneContext, createDaemonLaneContext } from './daemon/lane-context.js';
+export { type DaemonOrchestrator, runDaemonRepo } from './daemon/run-repo.js';
 export type {
   EngineHandle,
   EngineRunner,
@@ -635,6 +632,9 @@ export type {
   ReviewFloorRuleSet,
 } from './review/floor.js';
 export { computeReviewFloor, DEFAULT_REVIEW_FLOOR_RULES } from './review/floor.js';
+
+// Risk tier (#3380)
+export { evaluateRisk, type RiskEvaluation, type RiskEvaluationInput, type RiskMatchedRule } from './review/risk.js';
 
 // PR classifier shadow verdict (#1725)
 export type { PrClassificationRecord, PrClassifierClaim, PrShadowInput, PrShadowVerdict } from './review/classifier.js';

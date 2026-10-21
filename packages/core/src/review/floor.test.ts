@@ -4,6 +4,7 @@ import {
   applyReviewFloorOverrides,
   computeReviewFloor,
   DEFAULT_REVIEW_FLOOR_RULES,
+  globToRegExp,
   type ReviewFloorPathChange,
   type ReviewFloorRuleSet,
 } from './floor.js';
@@ -173,5 +174,13 @@ describe('applyReviewFloorOverrides', () => {
     expect(rules.maxLines).toBe(10);
     expect(computeReviewFloor({ changes: [change('docs/x.md', 11)], rules }).floor).toBe('B');
     expect(applyReviewFloorOverrides({ alwaysHuman: ['x/'] }).maxLines).toBe(DEFAULT_REVIEW_FLOOR_RULES.maxLines);
+  });
+});
+
+describe('globToRegExp', () => {
+  it('compiles a case-insensitive anchored glob', () => {
+    const re = globToRegExp('**/*.md');
+    expect(re.test('a/b/C.MD')).toBe(true);
+    expect(re.test('a.mdx')).toBe(false);
   });
 });
