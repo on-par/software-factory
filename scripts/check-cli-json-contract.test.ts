@@ -273,11 +273,11 @@ describe('runCliJsonContractCheck', () => {
 
   it('does not execute the runner when imported and wires the PR guard in CI', () => {
     const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
-    const ciJob = workflow.slice(workflow.indexOf('  ci:'), workflow.indexOf('  quickstart:'));
-    expect(ciJob).toContain('fetch-depth: 0');
-    expect(ciJob).toContain("if: github.event_name == 'pull_request'");
-    expect(ciJob).toContain('CLI_JSON_BASE_SHA: ${{ github.event.pull_request.base.sha }}');
-    expect(ciJob).toContain('npx tsx scripts/check-cli-json-contract.ts --base "$CLI_JSON_BASE_SHA"');
+    const staticJob = workflow.slice(workflow.indexOf('  static:'), workflow.indexOf('  test:'));
+    expect(staticJob).toContain('fetch-depth: 0');
+    expect(staticJob).toContain("if: github.event_name == 'pull_request'");
+    expect(staticJob).toContain('CLI_JSON_BASE_SHA: ${{ github.event.pull_request.base.sha }}');
+    expect(staticJob).toContain('npx tsx scripts/check-cli-json-contract.ts --base "$CLI_JSON_BASE_SHA"');
     expect(runCliJsonContractCheck).toBeTypeOf('function');
   });
 });

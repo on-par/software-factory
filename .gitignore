@@ -21,6 +21,7 @@
 node_modules/
 dist/
 coverage/
+vitest-blob/
 *.tsbuildinfo
 
 # Stryker mutation-testing HTML/JSON output (#884). Anchored to repo root —
