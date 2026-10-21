@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { runGenCliJsonSchemas } from './gen-cli-json-schemas.ts';
+
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const GENERATOR = join(ROOT, 'scripts', 'gen-cli-json-schemas.ts');
 const GUARD = join(ROOT, 'scripts', 'check-cli-json-schemas.sh');
@@ -30,11 +32,18 @@ afterEach(async () => {
   await tempDirs.cleanup();
 });
 
-function runGenerator(...args: string[]) {
+/** The real `node --import tsx` entry point; one smoke run, every other case runs in-process. */
+function runGeneratorCli(...args: string[]) {
   return spawnSync(process.execPath, ['--import', 'tsx', GENERATOR, ...args], {
     cwd: ROOT,
     encoding: 'utf8',
   });
+}
+
+async function generate(...args: string[]) {
+  const errors: string[] = [];
+  const status = await runGenCliJsonSchemas(args, (text) => void errors.push(text));
+  return { status, errors };
 }
 
 function runGuard(...args: string[]) {
@@ -46,24 +55,27 @@ function copySchemas(destination: string): void {
 }
 
 describe('CLI JSON Schema generator', () => {
-  it('writes exactly the twelve schema artifacts deterministically', () => {
-    const first = tempDirs.makeSync('cli-schemas-first-');
-    const second = tempDirs.makeSync('cli-schemas-second-');
-    expect(runGenerator(first).status).toBe(0);
-    expect(runGenerator(second).status).toBe(0);
-    expect(readdirSync(first).sort()).toEqual(expectedFiles);
+  it('writes exactly the twelve schema artifacts deterministically, in-process and through the CLI', async () => {
+    const cli = tempDirs.makeSync('cli-schemas-cli-');
+    const inProcess = tempDirs.makeSync('cli-schemas-in-process-');
+    expect(runGeneratorCli(cli).status).toBe(0);
+    expect((await generate(inProcess)).status).toBe(0);
+    expect(readdirSync(inProcess).sort()).toEqual(expectedFiles);
+    expect(readdirSync(cli).sort()).toEqual(expectedFiles);
     for (const filename of expectedFiles) {
-      expect(readFileSync(join(first, filename), 'utf8')).toBe(readFileSync(join(second, filename), 'utf8'));
+      expect(readFileSync(join(inProcess, filename), 'utf8')).toBe(readFileSync(join(cli, filename), 'utf8'));
     }
   });
 
-  it('rejects missing, empty, surplus, and unwritable output arguments', () => {
-    expect(runGenerator().status).not.toBe(0);
-    expect(runGenerator('').status).not.toBe(0);
-    expect(runGenerator('/tmp/unused', 'extra').status).not.toBe(0);
+  it('rejects missing, empty, surplus, and unwritable output arguments', async () => {
+    for (const args of [[], [''], ['/tmp/unused', 'extra']]) {
+      const { status, errors } = await generate(...args);
+      expect(status).toBe(2);
+      expect(errors).toEqual(['usage: tsx scripts/gen-cli-json-schemas.ts <output-directory>\n']);
+    }
     const filePath = join(tempDirs.makeSync('cli-schemas-file-'), 'file');
     writeFileSync(filePath, 'file');
-    expect(runGenerator(filePath).status).not.toBe(0);
+    await expect(generate(filePath)).rejects.toThrow();
   });
 
   it('passes when the reference directory matches generated output', () => {
@@ -74,34 +86,20 @@ describe('CLI JSON Schema generator', () => {
     expect(result.stdout).toContain('check-cli-json-schemas: OK');
   });
 
-  it('names a modified status schema and exits nonzero without rewriting it', () => {
-    const reference = tempDirs.makeSync('cli-schemas-modified-');
+  it('names a modified, a missing and an obsolete reference schema and exits nonzero without rewriting them', () => {
+    const reference = tempDirs.makeSync('cli-schemas-drift-');
     copySchemas(reference);
     const statusPath = join(reference, 'status.schema.json');
     writeFileSync(statusPath, `${readFileSync(statusPath, 'utf8')} `);
     const changedText = readFileSync(statusPath, 'utf8');
+    rmSync(join(reference, 'usage.schema.json'));
+    writeFileSync(join(reference, 'old.schema.json'), '{}\n');
     const result = runGuard(reference);
     expect(result.status).not.toBe(0);
-    expect(`${result.stdout}${result.stderr}`).toContain('status.schema.json');
+    for (const filename of ['status.schema.json', 'usage.schema.json', 'old.schema.json']) {
+      expect(`${result.stdout}${result.stderr}`).toContain(filename);
+    }
     expect(readFileSync(statusPath, 'utf8')).toBe(changedText);
-  });
-
-  it('names missing and obsolete reference schemas', () => {
-    const missing = tempDirs.makeSync('cli-schemas-missing-');
-    copySchemas(missing);
-    const deletedFilename = 'usage.schema.json';
-    rmSync(join(missing, deletedFilename));
-    const missingResult = runGuard(missing);
-    expect(missingResult.status).not.toBe(0);
-    expect(`${missingResult.stdout}${missingResult.stderr}`).toContain(deletedFilename);
-
-    const obsolete = tempDirs.makeSync('cli-schemas-obsolete-');
-    copySchemas(obsolete);
-    const obsoleteFilename = 'old.schema.json';
-    writeFileSync(join(obsolete, obsoleteFilename), '{}\n');
-    const obsoleteResult = runGuard(obsolete);
-    expect(obsoleteResult.status).not.toBe(0);
-    expect(`${obsoleteResult.stdout}${obsoleteResult.stderr}`).toContain(obsoleteFilename);
   });
 
   it('rejects empty, nonexistent, and surplus guard arguments', () => {

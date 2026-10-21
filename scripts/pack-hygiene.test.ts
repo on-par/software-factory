@@ -221,23 +221,16 @@ describe('npm pack end to end', () => {
     expect(entry?.files.sort()).toEqual(['LICENSE', 'README.md', 'dist/index.js', 'package.json']);
   });
 
-  it('every published workspace packs README, LICENSE and a clean dist/ (needs `npm run build`)', () => {
-    const names = parseWorkspaceList(readFileSync(PUBLISH_LIST, 'utf8'));
-    const out = execFileSync(
-      'npm',
-      ['pack', '--dry-run', '--json', '--ignore-scripts', ...names.flatMap((n) => ['--workspace', n])],
-      { cwd: ROOT, encoding: 'utf8' },
-    );
-    expect(verifyPack(parsePackJson(out), names)).toEqual([]);
-  });
-
-  it('every published workspace packs a package.json with engines.node >=24.0.0', () => {
+  // One real pack of every published workspace (needs `npm run build`); CI's quickstart-smoke job packs
+  // and verifies the same list again before installing it.
+  it('every published workspace packs README, LICENSE, a clean dist/ and engines.node >=24.0.0', () => {
     const names = parseWorkspaceList(readFileSync(PUBLISH_LIST, 'utf8'));
     const out = execFileSync(
       'npm',
       ['pack', '--json', '--ignore-scripts', '--pack-destination', dir, ...names.flatMap((n) => ['--workspace', n])],
       { cwd: ROOT, encoding: 'utf8' },
     );
+    expect(verifyPack(parsePackJson(out), names)).toEqual([]);
     const packed = JSON.parse(out) as { name: string; filename: string }[];
     expect(packed.map((p) => p.name).sort()).toEqual([...names].sort());
     for (const { name, filename } of packed) {

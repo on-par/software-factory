@@ -1241,21 +1241,9 @@ describe('checkPhase auto rework', () => {
     },
   );
 
-  it('emits a rework event carrying structured cause metadata', { timeout: 120_000 }, async () => {
-    const { worktree, specPath } = await makeFailingWorktree();
-    const { router } = makeRouter();
+  it('emits a rework event carrying structured cause metadata', async () => {
     const logCalls: Array<[string, string, ({ rework?: ReworkInfo } | undefined)?]> = [];
-
-    await checkPhase({
-      issue: 77,
-      worktree,
-      specPath,
-      router,
-      constitution: null,
-      log: (type, msg, extra) => {
-        logCalls.push([type, msg, extra]);
-      },
-    });
+    await captureReworkOptions(77, { log: (type, msg, extra) => void logCalls.push([type, msg, extra]) });
 
     const reworkCalls = logCalls.filter(([type]) => type === 'rework');
     expect(reworkCalls.length).toBeGreaterThan(0);
@@ -1513,45 +1501,72 @@ describe('checkPhase auto rework', () => {
   );
 });
 
+/** A tests-only FAIL summary, the shape a failing `npm test` checker returns. */
+const failingTestsSummary: CheckSummary = {
+  failures: 1,
+  passes: 0,
+  skips: 0,
+  total: 1,
+  results: [{ checker: 'tests', result: 'FAIL', details: 'npm test exited 1' }],
+};
+
+/** Runs one rework round over a failing tests checker and returns every router.run prompt and options object.
+ *  The checkers and the flaky re-run are faked, so no `npm test` is spawned; the real-command
+ *  paths are covered by the auto rework tests above. */
+async function captureReworkOptions(issue: number, extra: Partial<Parameters<typeof checkPhase>[0]> = {}) {
+  const { worktree, specPath } = await makeFailingWorktree();
+  const captured: any[] = [];
+  const prompts: string[] = [];
+  const router = {
+    run: async (_task: string, prompt: string, options: any) => {
+      prompts.push(prompt);
+      captured.push(options);
+      return { model: 'fake-model', output: 'reworked', exitCode: 0, attempts: [] };
+    },
+  } as any;
+  await checkPhase({
+    issue,
+    worktree,
+    specPath,
+    router,
+    constitution: null,
+    log: () => {},
+    maxReworkRounds: 1,
+    runCheckers: async () => failingTestsSummary,
+    runCommand: async (command) => ({
+      command,
+      stdout: '',
+      stderr: 'FAIL',
+      exitCode: 1,
+      killed: false,
+      timedOut: false,
+      ok: false,
+    }),
+    ...extra,
+  });
+  expect(captured.length).toBeGreaterThan(0);
+  return { captured, prompts };
+}
+
 describe('checkPhase sandbox', () => {
-  it('forwards the sandbox policy + onSandboxEvent from reworkWorker to router.run', { timeout: 120_000 }, async () => {
-    const { worktree, specPath } = await makeFailingWorktree();
+  it('forwards the sandbox policy + onSandboxEvent from reworkWorker to router.run', async () => {
     const sandbox: SandboxPolicy = {
       runtime: 'firejail',
-      worktree,
-      writablePaths: [worktree],
+      worktree: '/w',
+      writablePaths: ['/w'],
       writableFilePrefixes: [],
       allowHosts: [],
       cpuMs: 300_000,
       memMb: 4096,
     };
-    const captured: { options: any }[] = [];
-    const fakeRouter = {
-      run: async (_task: string, _prompt: string, options: any) => {
-        captured.push({ options });
-        return { model: 'fake-model', output: 'reworked', exitCode: 0, attempts: [] };
-      },
-    } as any;
     const logs: Array<{ type: string; msg: string }> = [];
+    const { captured } = await captureReworkOptions(96, { sandbox, log: (type, msg) => void logs.push({ type, msg }) });
 
-    await checkPhase({
-      issue: 96,
-      worktree,
-      specPath,
-      router: fakeRouter,
-      constitution: null,
-      log: (type, msg) => {
-        logs.push({ type, msg });
-      },
-      sandbox,
-    });
+    expect(captured[0].sandbox).toBe(sandbox);
+    expect(typeof captured[0].onSandboxEvent).toBe('function');
+    expect(captured[0].retryCause).toBe('checker');
 
-    expect(captured.length).toBeGreaterThan(0);
-    expect(captured[0].options.sandbox).toBe(sandbox);
-    expect(typeof captured[0].options.onSandboxEvent).toBe('function');
-    expect(captured[0].options.retryCause).toBe('checker');
-
-    captured[0].options.onSandboxEvent('resource_limit', 'cpu time limit exceeded');
+    captured[0].onSandboxEvent('resource_limit', 'cpu time limit exceeded');
     expect(logs).toContainEqual({ type: 'resource_limit', msg: 'cpu time limit exceeded' });
   });
 });
@@ -1620,27 +1635,8 @@ describe('checkPhase appPort', () => {
   });
 
   it('includes laneEnv in the rework router.run options when appPort is set', async () => {
-    const { worktree, specPath } = await makeFailingWorktree();
-    const captured: { options: any }[] = [];
-    const fakeRouter = {
-      run: async (_task: string, _prompt: string, options: any) => {
-        captured.push({ options });
-        return { model: 'fake-model', output: 'reworked', exitCode: 0, attempts: [] };
-      },
-    } as any;
-
-    await checkPhase({
-      issue: 99,
-      worktree,
-      specPath,
-      router: fakeRouter,
-      constitution: null,
-      log: () => {},
-      appPort: 3142,
-    });
-
-    expect(captured.length).toBeGreaterThan(0);
-    expect(captured[0].options.env).toEqual({
+    const { captured } = await captureReworkOptions(99, { appPort: 3142 });
+    expect(captured[0].env).toEqual({
       FACTORY_HEADLESS: '1',
       PLAYWRIGHT_HEADLESS: '1',
       PORT: '3142',
@@ -1650,107 +1646,31 @@ describe('checkPhase appPort', () => {
   });
 
   it('reaches the rework router.run options as FACTORY_BASE_URL while FACTORY_APP_PORT stays the raw port, when appBaseUrl is set', async () => {
-    const { worktree, specPath } = await makeFailingWorktree();
-    const captured: { options: any }[] = [];
-    const fakeRouter = {
-      run: async (_task: string, _prompt: string, options: any) => {
-        captured.push({ options });
-        return { model: 'fake-model', output: 'reworked', exitCode: 0, attempts: [] };
-      },
-    } as any;
-
-    await checkPhase({
-      issue: 101,
-      worktree,
-      specPath,
-      router: fakeRouter,
-      constitution: null,
-      log: () => {},
-      appPort: 3142,
-      appBaseUrl: 'http://ship-it-101.factory.localhost',
-    });
-
-    expect(captured.length).toBeGreaterThan(0);
-    expect(captured[0].options.env).toEqual({
+    const appBaseUrl = 'http://ship-it-101.factory.localhost';
+    const { captured } = await captureReworkOptions(101, { appPort: 3142, appBaseUrl });
+    expect(captured[0].env).toEqual({
       FACTORY_HEADLESS: '1',
       PLAYWRIGHT_HEADLESS: '1',
       PORT: '3142',
       FACTORY_APP_PORT: '3142',
-      FACTORY_BASE_URL: 'http://ship-it-101.factory.localhost',
+      FACTORY_BASE_URL: appBaseUrl,
     });
   });
 
   it('carries headless-only env in the rework router.run options when appPort is unset', async () => {
-    const { worktree, specPath } = await makeFailingWorktree();
-    const captured: { options: any }[] = [];
-    const fakeRouter = {
-      run: async (_task: string, _prompt: string, options: any) => {
-        captured.push({ options });
-        return { model: 'fake-model', output: 'reworked', exitCode: 0, attempts: [] };
-      },
-    } as any;
-
-    await checkPhase({
-      issue: 100,
-      worktree,
-      specPath,
-      router: fakeRouter,
-      constitution: null,
-      log: () => {},
-    });
-
-    expect(captured.length).toBeGreaterThan(0);
-    expect(captured[0].options.env).toEqual({ FACTORY_HEADLESS: '1', PLAYWRIGHT_HEADLESS: '1' });
+    const { captured } = await captureReworkOptions(100);
+    expect(captured[0].env).toEqual({ FACTORY_HEADLESS: '1', PLAYWRIGHT_HEADLESS: '1' });
   });
 
   it('forwards onPgid to the rework router.run options', async () => {
-    const { worktree, specPath } = await makeFailingWorktree();
-    const captured: { options: any }[] = [];
-    const fakeRouter = {
-      run: async (_task: string, _prompt: string, options: any) => {
-        captured.push({ options });
-        return { model: 'fake-model', output: 'reworked', exitCode: 0, attempts: [] };
-      },
-    } as any;
     const onPgid = () => {};
-
-    await checkPhase({
-      issue: 103,
-      worktree,
-      specPath,
-      router: fakeRouter,
-      constitution: null,
-      log: () => {},
-      appPort: 3142,
-      onPgid,
-    });
-
-    expect(captured.length).toBeGreaterThan(0);
-    expect(captured[0].options.onPgid).toBe(onPgid);
+    const { captured } = await captureReworkOptions(103, { appPort: 3142, onPgid });
+    expect(captured[0].onPgid).toBe(onPgid);
   });
 
   it('forwards buildTimeoutSeconds to the rework router.run options as timeoutSeconds', async () => {
-    const { worktree, specPath } = await makeFailingWorktree();
-    const captured: { options: any }[] = [];
-    const fakeRouter = {
-      run: async (_task: string, _prompt: string, options: any) => {
-        captured.push({ options });
-        return { model: 'fake-model', output: 'reworked', exitCode: 0, attempts: [] };
-      },
-    } as any;
-
-    await checkPhase({
-      issue: 105,
-      worktree,
-      specPath,
-      router: fakeRouter,
-      constitution: null,
-      log: () => {},
-      buildTimeoutSeconds: 1234,
-    });
-
-    expect(captured.length).toBeGreaterThan(0);
-    expect(captured[0].options.timeoutSeconds).toBe(1234);
+    const { captured } = await captureReworkOptions(105, { buildTimeoutSeconds: 1234 });
+    expect(captured[0].timeoutSeconds).toBe(1234);
   });
 
   it('threads the lane env into the checker ctx so checker commands see it', { timeout: 30_000 }, async () => {
@@ -2336,15 +2256,7 @@ describe('checkPhase steering', () => {
     expect(calls).toBe(2);
   });
 
-  it('applies drained steering to the rework prompt and logs steering_applied', { timeout: 120_000 }, async () => {
-    const { worktree, specPath } = await makeFailingWorktree();
-    const captured: string[] = [];
-    const fakeRouter = {
-      run: async (_task: string, prompt: string, _options: any) => {
-        captured.push(prompt);
-        return { model: 'fake-model', output: 'reworked', exitCode: 0, attempts: [] };
-      },
-    } as any;
+  it('applies drained steering to the rework prompt and logs steering_applied', async () => {
     const logs: Array<{ type: string; msg: string }> = [];
     const drainSteering = () => ({
       messages: [
@@ -2352,79 +2264,30 @@ describe('checkPhase steering', () => {
       ],
       attachments: [],
     });
-
-    await checkPhase({
-      issue: 100,
-      worktree,
-      specPath,
-      router: fakeRouter,
-      constitution: null,
-      log: (type, msg) => logs.push({ type, msg }),
+    const { prompts } = await captureReworkOptions(100, {
+      log: (type, msg) => void logs.push({ type, msg }),
       drainSteering,
       autoRework: true,
     });
 
-    expect(captured[0]).toContain('## Operator guidance (steering)');
-    expect(captured[0]).toContain('focus on the lock file bug');
+    expect(prompts[0]).toContain('## Operator guidance (steering)');
+    expect(prompts[0]).toContain('focus on the lock file bug');
     expect(logs.some((l) => l.type === 'steering_applied' && l.msg.includes('steer-1'))).toBe(true);
   });
 
-  it(
-    'leaves the rework prompt unchanged and logs nothing extra when no drainSteering is passed',
-    { timeout: 120_000 },
-    async () => {
-      const { worktree, specPath } = await makeFailingWorktree();
-      const captured: string[] = [];
-      const fakeRouter = {
-        run: async (_task: string, prompt: string, _options: any) => {
-          captured.push(prompt);
-          return { model: 'fake-model', output: 'reworked', exitCode: 0, attempts: [] };
-        },
-      } as any;
-      const logs: Array<{ type: string; msg: string }> = [];
+  it.each([
+    ['no drainSteering is passed', undefined],
+    ['drainSteering returns empty', () => ({ messages: [], attachments: [] })],
+  ])('leaves the rework prompt unchanged and logs no steering_applied when %s', async (_name, drainSteering) => {
+    const logs: Array<{ type: string; msg: string }> = [];
+    const { prompts } = await captureReworkOptions(101, {
+      log: (type, msg) => void logs.push({ type, msg }),
+      drainSteering,
+    });
 
-      await checkPhase({
-        issue: 101,
-        worktree,
-        specPath,
-        router: fakeRouter,
-        constitution: null,
-        log: (type, msg) => logs.push({ type, msg }),
-      });
-
-      expect(captured[0]).not.toContain('## Operator guidance (steering)');
-      expect(logs.some((l) => l.type === 'steering_applied')).toBe(false);
-    },
-  );
-
-  it(
-    'logs no steering_applied event and leaves the prompt unchanged when drainSteering returns empty',
-    { timeout: 120_000 },
-    async () => {
-      const { worktree, specPath } = await makeFailingWorktree();
-      const captured: string[] = [];
-      const fakeRouter = {
-        run: async (_task: string, prompt: string, _options: any) => {
-          captured.push(prompt);
-          return { model: 'fake-model', output: 'reworked', exitCode: 0, attempts: [] };
-        },
-      } as any;
-      const logs: Array<{ type: string; msg: string }> = [];
-
-      await checkPhase({
-        issue: 102,
-        worktree,
-        specPath,
-        router: fakeRouter,
-        constitution: null,
-        log: (type, msg) => logs.push({ type, msg }),
-        drainSteering: () => ({ messages: [], attachments: [] }),
-      });
-
-      expect(captured[0]).not.toContain('## Operator guidance (steering)');
-      expect(logs.some((l) => l.type === 'steering_applied')).toBe(false);
-    },
-  );
+    expect(prompts[0]).not.toContain('## Operator guidance (steering)');
+    expect(logs.some((l) => l.type === 'steering_applied')).toBe(false);
+  });
 });
 
 describe('checkPhase lifecycle events', () => {

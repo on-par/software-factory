@@ -100,7 +100,7 @@ describe('duplicate factory:order positions (#3101)', () => {
     await main(['node', 'factory', 'queue', 'list', '--json'], {
       exec,
       execSync: () => '',
-      octokit: () => createFactoryOctokit('t'),
+      octokit: () => createFactoryOctokit('t', { throttle: false }),
     });
 
     const line = output.find((l) => l.includes('"schemaVersion"'));
@@ -114,7 +114,7 @@ describe('duplicate factory:order positions (#3101)', () => {
 
   it('the lane claims #3, then #4, then #5', async () => {
     const queue = createGithubQueue({
-      client: createOctokitQueueClient(createFactoryOctokit('t')),
+      client: createOctokitQueueClient(createFactoryOctokit('t', { throttle: false })),
       owner: 'o',
       repo: 'r',
       claimantId: 'aaa-1',

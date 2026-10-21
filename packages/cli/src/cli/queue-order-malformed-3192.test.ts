@@ -97,7 +97,7 @@ describe('missing factory:order label (#3192)', () => {
     await main(['node', 'factory', 'queue', 'list', '--json'], {
       exec,
       execSync: () => '',
-      octokit: () => createFactoryOctokit('t'),
+      octokit: () => createFactoryOctokit('t', { throttle: false }),
     });
 
     expect(process.exitCode).toBeUndefined();
@@ -118,7 +118,7 @@ describe('missing factory:order label (#3192)', () => {
   it('the lane claims #2253 and skips #2319', async () => {
     const seen: unknown[] = [];
     const queue = createGithubQueue({
-      client: createOctokitQueueClient(createFactoryOctokit('t')),
+      client: createOctokitQueueClient(createFactoryOctokit('t', { throttle: false })),
       owner: 'o',
       repo: 'r',
       claimantId: 'aaa-1',

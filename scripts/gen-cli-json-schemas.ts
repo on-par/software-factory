@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { z } from 'zod';
 import { format, resolveConfig } from 'prettier';
@@ -34,12 +34,8 @@ const schemas = [
   ['unpark.schema.json', unparkJsonSchema],
 ] as const;
 
-const [outputArgument, ...surplusArguments] = process.argv.slice(2);
-if (outputArgument === undefined || outputArgument.length === 0 || surplusArguments.length > 0) {
-  process.stderr.write('usage: tsx scripts/gen-cli-json-schemas.ts <output-directory>\n');
-  process.exitCode = 2;
-} else {
-  const outputDirectory = resolve(outputArgument);
+/** Writes every CLI JSON Schema artifact, Prettier-formatted, into outputDirectory (created if absent). */
+async function writeCliJsonSchemas(outputDirectory: string): Promise<void> {
   const formatOptions = (await resolveConfig(fileURLToPath(import.meta.url))) ?? {};
   mkdirSync(outputDirectory, { recursive: true });
   for (const [filename, schema] of schemas) {
@@ -47,4 +43,19 @@ if (outputArgument === undefined || outputArgument.length === 0 || surplusArgume
     const serialized = await format(JSON.stringify(jsonSchema, null, 2), { ...formatOptions, parser: 'json' });
     writeFileSync(join(outputDirectory, filename), serialized);
   }
+}
+
+/** CLI entry: exactly one non-empty output directory argument; returns the exit code. */
+export async function runGenCliJsonSchemas(argv: readonly string[], err: (text: string) => void): Promise<number> {
+  const [outputArgument, ...surplusArguments] = argv;
+  if (outputArgument === undefined || outputArgument.length === 0 || surplusArguments.length > 0) {
+    err('usage: tsx scripts/gen-cli-json-schemas.ts <output-directory>\n');
+    return 2;
+  }
+  await writeCliJsonSchemas(resolve(outputArgument));
+  return 0;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  process.exitCode = await runGenCliJsonSchemas(process.argv.slice(2), (text) => process.stderr.write(text));
 }

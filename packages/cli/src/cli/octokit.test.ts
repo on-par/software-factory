@@ -41,6 +41,16 @@ describe('createFactoryOctokit', () => {
     const octokit = createFactoryOctokit();
     expect(typeof octokit.rest.pulls.list).toBe('function');
   });
+
+  it('spaces writes through the real throttle by default', async () => {
+    const octokit = createFactoryOctokit('t');
+    const fetch = (async () =>
+      new Response('{}', { status: 201, headers: { 'content-type': 'application/json' } })) as typeof globalThis.fetch;
+    const create = () => octokit.rest.issues.create({ owner: 'o', repo: 'r', title: 't', request: { fetch } });
+    const start = Date.now();
+    await Promise.all([create(), create()]);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(900);
+  });
 });
 
 const DOC = 'https://docs.github.com/en/rest/about-the-rest-api/api-versions';
@@ -63,7 +73,7 @@ describe('createFactoryOctokit deprecations (#2218)', () => {
     const stderr = vi.fn();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const octokit = createFactoryOctokit('t', { log, stderr });
+    const octokit = createFactoryOctokit('t', { log, stderr, throttle: false });
     const create = (headers: Record<string, string>, status = 201) =>
       octokit.rest.issues.create({ owner: 'o', repo: 'r', title: 't', request: { fetch: fakeFetch(headers, status) } });
     return { octokit, log, stderr, warn, error, create };
@@ -85,7 +95,7 @@ describe('createFactoryOctokit deprecations (#2218)', () => {
     expect(formatDeprecation(d)).toContain('2028-03-10');
   });
 
-  it('collapses repeats per METHOD route', { timeout: 30_000 }, async () => {
+  it('collapses repeats per METHOD route', async () => {
     const { octokit, log, stderr, create } = setup();
     for (let i = 0; i < 6; i++) await create(DEPRECATED_HEADERS);
     expect(log).toHaveBeenCalledTimes(1);
@@ -154,7 +164,7 @@ describe('createFactoryOctokit request log (#1004)', () => {
 
   it('keeps a failed GET off stderr and still rejects with the GitHub error', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const octokit = createFactoryOctokit('t');
+    const octokit = createFactoryOctokit('t', { throttle: false });
     const notFound = (async () =>
       new Response(JSON.stringify({ message: 'Not Found' }), {
         status: 404,
