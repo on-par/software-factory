@@ -17,7 +17,18 @@ export const OTHER_GROUP = 'Other:';
 export const HELP_GROUPS: readonly HelpGroup[] = [
   {
     heading: 'Run work:',
-    commands: ['ship', 'run-issue', 'run-brief', 'run', 'supervise', 'land', 'resume-approved', 'stop', 'resume'],
+    commands: [
+      'ship',
+      'run-issue',
+      'run-brief',
+      'run',
+      'supervise',
+      'land',
+      'resume-approved',
+      'stop',
+      'resume',
+      'steer',
+    ],
   },
   {
     heading: 'Setup:',
