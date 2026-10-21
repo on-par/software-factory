@@ -260,7 +260,7 @@ import { buildCostJson } from './cost-json.js';
 import { buildQueueAddJson } from './queue-add-json.js';
 import { renderQueueAddLines, renderUnparkLines } from './queue-output.js';
 import { buildQueueListJson } from './queue-list.js';
-import { runSteer, SteerCliError, type SteerOptions } from './steer.js';
+import { cmdSteer, type SteerOptions } from './steer.js';
 import { appendUnparkEvent, runUnpark, UnparkError, type UnparkJson } from './unpark.js';
 import { buildRunsJson, parseRunsLimit } from './runs.js';
 import { buildRunDiffstatJson, NoRunError, parseDiffstatIssue, type RunDiffstatJson } from './runs-diffstat.js';
@@ -4028,24 +4028,17 @@ export async function cmdStop(opts: { json?: boolean } = {}): Promise<void> {
   console.log(STOP_SET_MESSAGE);
 }
 
-export async function cmdSteer(ref: string, opts: SteerOptions = {}): Promise<void> {
-  const gitUser = (await shellOps.exec('git config user.name').catch(() => ({ stdout: '' }))).stdout.trim();
-  let result;
-  try {
-    result = await runSteer(ref, opts, {
-      runsDir: getFactoryPaths(await getRepoRoot()).runs,
-      now: () => new Date().toISOString(),
-      defaultActor: () => gitUser || process.env.USER || 'unknown',
-    });
-  } catch (err) {
-    if (err instanceof SteerCliError) {
-      throw new CliExitError(`factory: steer — ${err.message}`, err.code === 'no-run' ? 1 : 2);
-    }
-    throw new CliExitError(`factory: steer failed — ${errorDetail(err)}`, 1);
-  }
-  console.log(
-    `factory: steer recorded on #${result.issue} (source ${result.event.source}, phase ${result.event.phase}, actor ${result.event.actor})`,
-  );
+/** `factory steer <ref>` (#3401): the handler lives in ./steer.ts; this binds its runtime. */
+function runSteerCommand(ref: string, opts: SteerOptions = {}): Promise<void> {
+  return cmdSteer(ref, opts, {
+    getRepoRoot,
+    gitUserName: async () => (await shellOps.exec('git config user.name')).stdout,
+    env: process.env,
+    now: () => new Date().toISOString(),
+    CliExitError,
+    errorDetail,
+    log: console.log,
+  });
 }
 
 export async function cmdResume(issue?: string, opts: { json?: boolean; from?: string } = {}): Promise<void> {
@@ -4266,7 +4259,7 @@ export const PROGRAM_HANDLERS = {
   cmdSupervise: runSupervise,
   cmdStop,
   cmdResume,
-  cmdSteer,
+  cmdSteer: runSteerCommand,
   parseIssueArg,
   getRepoRoot,
   getCliVersion,

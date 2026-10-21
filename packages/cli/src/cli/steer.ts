@@ -15,6 +15,9 @@ import {
   type SteerPhase,
   type SteerSource,
 } from '@on-par/factory-core/internal';
+import { getFactoryPaths } from '@on-par/factory-core';
+
+import type { CliExitError } from './index.js';
 
 export type SteerRef = { kind: 'issue' | 'pr' | 'any'; number: number; raw: string };
 
@@ -167,4 +170,38 @@ export async function runSteer(rawRef: string, opts: SteerOptions, deps: SteerDe
   }
   await writeIssueRunState(file, next);
   return { issue: state.issue, file, event };
+}
+
+/** What `factory steer` needs from the CLI entry point; index.ts binds it. */
+export interface SteerRuntime {
+  getRepoRoot: () => Promise<string>;
+  /** `git config user.name`; a rejection or blank result falls back to $USER, then 'unknown'. */
+  gitUserName: () => Promise<string>;
+  env: Record<string, string | undefined>;
+  now: () => string;
+  CliExitError: typeof CliExitError;
+  errorDetail: (err: unknown) => string;
+  log: (line: string) => void;
+}
+
+/** `factory steer <ref>`: bad input exits 2, no matching run exits 1, anything else exits 1 with its detail. */
+export async function cmdSteer(ref: string, opts: SteerOptions, rt: SteerRuntime): Promise<void> {
+  let result: SteerResult;
+  try {
+    parseSteerRef(ref); // a bad <ref> exits 2 before any git lookup
+    const gitUser = (await rt.gitUserName().catch(() => '')).trim();
+    result = await runSteer(ref, opts, {
+      runsDir: getFactoryPaths(await rt.getRepoRoot()).runs,
+      now: rt.now,
+      defaultActor: () => gitUser || rt.env.USER || 'unknown',
+    });
+  } catch (err) {
+    if (err instanceof SteerCliError) {
+      throw new rt.CliExitError(`factory: steer — ${err.message}`, err.code === 'no-run' ? 1 : 2);
+    }
+    throw new rt.CliExitError(`factory: steer failed — ${rt.errorDetail(err)}`, 1);
+  }
+  rt.log(
+    `factory: steer recorded on #${result.issue} (source ${result.event.source}, phase ${result.event.phase}, actor ${result.event.actor})`,
+  );
 }

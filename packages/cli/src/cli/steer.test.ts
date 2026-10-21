@@ -8,10 +8,20 @@ import {
   type IssueRunState,
   type RunStatus,
 } from '@on-par/factory-core/internal';
+import { getFactoryPaths } from '@on-par/factory-core';
 import { createTempDirs } from '@on-par/factory-core/testing';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { parseSteerRef, phaseForStatus, runSteer, SteerCliError, type SteerDeps } from './steer.js';
+import { CliExitError, main } from './index.js';
+import {
+  cmdSteer,
+  parseSteerRef,
+  phaseForStatus,
+  runSteer,
+  SteerCliError,
+  type SteerDeps,
+  type SteerRuntime,
+} from './steer.js';
 
 const tmp = createTempDirs();
 let dir: string;
@@ -147,5 +157,79 @@ describe('parseSteerRef', () => {
 
   it.each(['', 'abc', '0', '-3', '#', '1.5', '99999999999999999999'])('rejects %j', (raw) => {
     expect(() => parseSteerRef(raw)).toThrow(SteerCliError);
+  });
+});
+
+describe('cmdSteer runtime wiring', () => {
+  let root: string;
+  let lines: string[];
+  let rt: SteerRuntime;
+  const rootFile = () => runStateFile(getFactoryPaths(root).runs, 42);
+
+  beforeEach(async () => {
+    root = await tmp.make('steer-repo-');
+    await writeIssueRunState(rootFile(), fixture());
+    lines = [];
+    rt = {
+      getRepoRoot: vi.fn(async () => root),
+      gitUserName: async () => ' Pat \n',
+      env: { USER: 'pat-user' },
+      now: () => TS,
+      CliExitError,
+      errorDetail: (err) => (err instanceof Error ? err.message : String(err)),
+      log: (line) => lines.push(line),
+    };
+  });
+
+  it('records the steer under <repo>/.factory/state/runs with the git user as actor', async () => {
+    await cmdSteer('42', { message: 'x' }, rt);
+    expect((await readIssueRunState(rootFile()))?.steers).toEqual([
+      { ts: TS, actor: 'Pat', source: 'cli', phase: 'build', summary: 'x' },
+    ]);
+    expect(lines).toEqual(['factory: steer recorded on #42 (source cli, phase build, actor Pat)']);
+  });
+
+  it('falls back to $USER, then unknown, when git has no user.name', async () => {
+    rt.gitUserName = async () => {
+      throw new Error('no user.name');
+    };
+    await cmdSteer('42', { message: 'x' }, rt);
+    rt.env = {};
+    rt.gitUserName = async () => '  ';
+    await cmdSteer('42', { message: 'y' }, rt);
+    expect((await readIssueRunState(rootFile()))?.steers?.map((s) => s.actor)).toEqual(['pat-user', 'unknown']);
+  });
+
+  it('exits 2 on bad input before any git lookup, 1 on no run, 1 with detail otherwise', async () => {
+    await expect(cmdSteer('abc', { message: 'x' }, rt)).rejects.toMatchObject({
+      name: 'CliExitError',
+      code: 2,
+      message: expect.stringContaining('factory: steer — invalid reference'),
+    });
+    expect(rt.getRepoRoot).not.toHaveBeenCalled();
+    await expect(cmdSteer('999', { message: 'x' }, rt)).rejects.toMatchObject({
+      code: 1,
+      message: 'factory: steer — no run found for 999',
+    });
+    rt.getRepoRoot = async () => {
+      throw new Error('not a git repo');
+    };
+    await expect(cmdSteer('42', { message: 'x' }, rt)).rejects.toMatchObject({
+      code: 1,
+      message: 'factory: steer failed — not a git repo',
+    });
+  });
+
+  it('is wired into the CLI entry point', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.exitCode = undefined;
+    try {
+      await main(['node', 'factory', 'steer', 'abc', '--message', 'x']);
+      expect(process.exitCode).toBe(2);
+      expect(errSpy.mock.calls.flat().join('\n')).toContain("factory: steer — invalid reference 'abc'");
+    } finally {
+      process.exitCode = undefined;
+      errSpy.mockRestore();
+    }
   });
 });
