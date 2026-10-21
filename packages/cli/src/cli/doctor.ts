@@ -47,6 +47,8 @@ import {
   type GreenPrScanResult,
   leaseChecks,
   type LeaseHealthRow,
+  type StatelessLaneScanResult,
+  statelessLaneIssueChecks,
   orphanContainerChecks,
   orphanMicroVmChecks,
   unmergedGreenPrChecks,
@@ -293,23 +295,17 @@ const SIGN_IN_EVIDENCE: Readonly<Record<string, string>> = {
   pi: 'no OPENROUTER_API_KEY, OPENCODE_API_KEY or AZURE_OPENAI_API_KEY set; Pi may still hold a stored /login (factory models --doctor runs pi auth check)',
 };
 
-function safe(fn: (() => boolean) | undefined): boolean {
-  if (!fn) return false;
+function safeOr<T>(fn: (() => T) | undefined, fallback: T): T {
+  if (!fn) return fallback;
   try {
     return fn();
   } catch {
-    return false;
+    return fallback;
   }
 }
 
-function safeState(fn: (() => string) | undefined): string {
-  if (!fn) return 'unknown';
-  try {
-    return fn();
-  } catch {
-    return 'unknown';
-  }
-}
+const safe = (fn: (() => boolean) | undefined): boolean => safeOr(fn, false);
+const safeState = (fn: (() => string) | undefined): string => safeOr(fn, 'unknown');
 
 /** One `<cli> signed in` row per installed harness CLI (#2556, #2631), judged only from local evidence: an env key,
  *  stored credentials, or `codex login status`. Never runs inference and never prints a secret. */
@@ -412,14 +408,7 @@ export function harnessSignInChecks(probes: DoctorEnvProbes): DoctorCheck[] {
   );
 }
 
-function safeList(fn: (() => ConfiguredCommandHarness[]) | undefined): ConfiguredCommandHarness[] {
-  if (!fn) return [];
-  try {
-    return fn();
-  } catch {
-    return [];
-  }
-}
+const safeList = (fn: (() => ConfiguredCommandHarness[]) | undefined): ConfiguredCommandHarness[] => safeOr(fn, []);
 
 /** The executable (first token) of a command template, or null when it cannot be parsed safely (#2691).
  *  Guards `isCommandAvailable`, which interpolates into `command -v` unescaped. */
@@ -908,6 +897,10 @@ export interface DoctorRuntime {
   getOctokit: () => Octokit;
   hasGitHubToken: () => boolean;
   scanGreenPrs: (ghRepo: string | undefined, octokit: Octokit | undefined) => Promise<GreenPrScanResult>;
+  scanStatelessLaneIssues: (
+    ghRepo: string | undefined,
+    octokit: Octokit | undefined,
+  ) => Promise<StatelessLaneScanResult>;
   probeClaudeKeychain: () => KeychainProbeStatus;
   toLeaseRow: (health: LeaseHealth) => LeaseHealthRow;
   gcWorktreeSandbox: (
@@ -1103,6 +1096,7 @@ export async function cmdDoctor(
 
     // Green-and-ready PRs with no merge (#1000). Report only — doctor never lands a PR.
     checks.push(...unmergedGreenPrChecks(await rt.scanGreenPrs(ghRepo, octokit)));
+    checks.push(...statelessLaneIssueChecks(await rt.scanStatelessLaneIssues(ghRepo, octokit)));
 
     if (opts.reconcile) {
       if (orphanContainers.length > 0) {

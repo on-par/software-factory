@@ -184,6 +184,7 @@ import {
   fetchHumanEventSourcesCached,
   FACTORY_RUNTIME_CONFIG_KEYS,
   findUnmergedGreenPrs,
+  listStatelessLaneIssues,
   formatGcReport,
   gitFetch,
   listMicroVms,
@@ -291,7 +292,12 @@ import {
 } from './daemon.js';
 import { checkForUpdate, cmdSelfUpdateCheck, type SelfUpdateDeps } from './self-update.js';
 import { cmdDoctor, type KeychainProbeStatus } from './doctor.js';
-import type { GreenPrScanResult, LeaseHealthRow, UnmergedGreenPrRow } from './doctor-health.js';
+import type {
+  GreenPrScanResult,
+  LeaseHealthRow,
+  StatelessLaneScanResult,
+  UnmergedGreenPrRow,
+} from './doctor-health.js';
 import {
   DOCS_URL,
   formatOverview,
@@ -388,6 +394,7 @@ export type InternalOpKey =
   | 'releaseStaleClaims'
   | 'pollBlockedParks'
   | 'findUnmergedGreenPrs'
+  | 'listStatelessLaneIssues'
   | 'listOrphanContainers'
   | 'reapOrphanContainers'
   | 'listMicroVms'
@@ -404,6 +411,7 @@ const DEFAULT_INTERNAL_OPS: InternalOps = {
   releaseStaleClaims,
   pollBlockedParks,
   findUnmergedGreenPrs,
+  listStatelessLaneIssues,
   listOrphanContainers,
   reapOrphanContainers,
   listMicroVms,
@@ -425,6 +433,7 @@ function resolveInternalOps(overrides: Partial<InternalOps>, base: InternalOps =
     releaseStaleClaims: overrides.releaseStaleClaims ?? base.releaseStaleClaims,
     pollBlockedParks: overrides.pollBlockedParks ?? base.pollBlockedParks,
     findUnmergedGreenPrs: overrides.findUnmergedGreenPrs ?? base.findUnmergedGreenPrs,
+    listStatelessLaneIssues: overrides.listStatelessLaneIssues ?? base.listStatelessLaneIssues,
     listOrphanContainers: overrides.listOrphanContainers ?? base.listOrphanContainers,
     reapOrphanContainers: overrides.reapOrphanContainers ?? base.reapOrphanContainers,
     listMicroVms: overrides.listMicroVms ?? base.listMicroVms,
@@ -3137,10 +3146,12 @@ export async function cmdQueueReconcile(opts: { lane?: string } = {}): Promise<v
   const paths = getFactoryPaths(repoRoot);
   const [owner, repo] = (await getGitHubRepo()).split('/');
   await sweepStaleLaneClaims(paths, `${owner}/${repo}`);
-  const client = createOctokitQueueClient(getOctokit());
+  const octokit = getOctokit();
+  const client = createOctokitQueueClient(octokit);
   const { report, conflicts } = await runQueueReconcile({
     readSnapshot: () => readGithubQueueSnapshot({ client, owner, repo }),
     reader: admissionStateReaderFor(paths.state),
+    readStatelessLaneIssues: () => internalOps.listStatelessLaneIssues({ client, labelClient: octokit, owner, repo }),
     ...(opts.lane === undefined ? {} : { lane: opts.lane }),
   });
   console.log(report);
@@ -3924,6 +3935,25 @@ async function scanGreenPrs(ghRepo: string | undefined, octokit: Octokit | undef
   }
 }
 
+async function scanStatelessLaneIssues(
+  ghRepo: string | undefined,
+  octokit: Octokit | undefined,
+): Promise<StatelessLaneScanResult> {
+  if (!ghRepo || !octokit) return { status: 'skipped', detail: 'skipped — no GitHub repo or token' };
+  const [owner, repoName] = ghRepo.split('/');
+  try {
+    const issues = await internalOps.listStatelessLaneIssues({
+      client: createOctokitQueueClient(octokit),
+      labelClient: octokit,
+      owner,
+      repo: repoName,
+    });
+    return { status: 'ok', issues };
+  } catch (err: any) {
+    return { status: 'failed', detail: err?.message ?? String(err) };
+  }
+}
+
 function probeClaudeKeychain(): KeychainProbeStatus {
   if (process.platform !== 'darwin') return { status: 'skipped', detail: 'skipped — not macOS' };
   if (!coreOps.isCommandAvailable('claude')) return { status: 'skipped', detail: 'skipped — claude CLI not on PATH' };
@@ -3985,6 +4015,7 @@ export interface CliDeps {
   releaseStaleClaims?: typeof releaseStaleClaims;
   pollBlockedParks?: typeof pollBlockedParks;
   findUnmergedGreenPrs?: typeof findUnmergedGreenPrs;
+  listStatelessLaneIssues?: typeof listStatelessLaneIssues;
   listOrphanContainers?: typeof listOrphanContainers;
   reapOrphanContainers?: typeof reapOrphanContainers;
   listMicroVms?: typeof listMicroVms;
@@ -4223,6 +4254,7 @@ function runDoctor(opts: { reconcile?: boolean; probeInference?: boolean } = {})
     getOctokit: () => getOctokit(),
     hasGitHubToken: () => hasGitHubToken(),
     scanGreenPrs,
+    scanStatelessLaneIssues,
     probeClaudeKeychain,
     toLeaseRow,
     gcWorktreeSandbox,
