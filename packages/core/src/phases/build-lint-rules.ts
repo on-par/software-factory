@@ -106,3 +106,7 @@ export async function renderLintRulesInForce(worktree: string): Promise<string> 
     return '';
   }
 }
+
+// BUILD workers read the code before editing instead of writing from the plan alone (#3372, T13).
+export const READ_BEFORE_EDIT_RULE =
+  'Before editing, open the files the spec and its design grounding name, read the code you will change and its direct callers, and reuse the helpers and conventions already there; the spec stays the plan, but do not write from it alone.';

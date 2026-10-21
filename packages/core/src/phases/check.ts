@@ -719,6 +719,10 @@ export interface ReworkWorkerOptions {
   extraInstructions?: string;
 }
 
+// Rework reads the failing code before changing it, staying scoped to the failures (#3372, T13).
+export const REWORK_READ_RULE =
+  'Before changing anything, read the code at each failing location (the file and line in the failure, or the failing test and the code it exercises).';
+
 export async function reworkWorker(opts: ReworkWorkerOptions): Promise<{
   failovers: { model: string; reason: FailoverReason; detail?: string }[];
   /** False when router.run threw — no model produced output for this round (#642). */
@@ -763,7 +767,7 @@ Each failure above is a bounded summary. When it ends with \`full output: <path>
 read that file first — it holds the command's complete stdout and stderr.
 
 ## Instructions
-1. Make one focused repair pass. Change only files necessary to address the listed failures.
+1. ${REWORK_READ_RULE} Then make one focused repair pass. Change only files necessary to address the listed failures.
 2. Do not re-plan, refactor unrelated code, or investigate outside these failures.
 3. Re-run only the failing command or the smallest relevant verification command.
 4. Commit the repair with a clear message.${opts.extraInstructions ? `\n5. ${opts.extraInstructions}` : ''}
