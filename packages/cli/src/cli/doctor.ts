@@ -1002,14 +1002,14 @@ export async function cmdDoctor(
       } else if (policy.runtime === 'docker-sandbox') {
         sandboxDetail = 'skipped: docker-sandbox containment is the microVM, not command wrapping (#653)';
       } else {
-        sandboxed = probeExec(wrapCommandInSandbox(CLAUDE_AUTH_PROBE, policy)) === null ? 'failed' : 'ok';
+        const probe = { ...policy, networkMode: 'report' as const }; // no lane proxy in doctor; enforce would block (#2215)
+        sandboxed = probeExec(wrapCommandInSandbox(CLAUDE_AUTH_PROBE, probe)) === null ? 'failed' : 'ok';
         sandboxDetail =
           sandboxed === 'ok'
             ? `claude -p succeeded under ${policy.runtime}`
             : `claude -p failed under ${policy.runtime} (local_auth)`;
       }
     }
-
     checks.push(...sandboxClaudeAuthChecks({ host, sandboxed, hostDetail, sandboxDetail }));
 
     checks.push(opencodeLiveAuthCheck(runOpencodeAuthProbe(rt, repoRoot)));

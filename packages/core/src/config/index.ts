@@ -200,8 +200,9 @@ const FactoryConfigSchema = z.object({
         .object({
           allow: z.array(z.string()).default(['api.anthropic.com', 'github.com']),
           blockTelemetry: z.boolean().optional(),
+          mode: z.enum(['report', 'enforce']).optional(),
         })
-        .default({ allow: ['api.anthropic.com', 'github.com'], blockTelemetry: false }),
+        .default({ allow: ['api.anthropic.com', 'github.com'], blockTelemetry: false, mode: 'report' }),
       resources: z
         .object({ cpuMs: z.number().positive().default(300_000), memMb: z.number().positive().default(4096) })
         .default({ cpuMs: 300_000, memMb: 4096 }),
@@ -212,7 +213,7 @@ const FactoryConfigSchema = z.object({
       enabled: true,
       runtime: 'auto',
       codexFullAccessTasks: [],
-      network: { allow: ['api.anthropic.com', 'github.com'], blockTelemetry: false },
+      network: { allow: ['api.anthropic.com', 'github.com'], blockTelemetry: false, mode: 'report' },
       resources: { cpuMs: 300_000, memMb: 4096 },
       docker: { rolloutPercent: 0 },
     }),
@@ -333,7 +334,6 @@ const FactoryConfigSchema = z.object({
 });
 
 // ---------- Types ----------
-
 // `harnesses` is always present on a parsed config but optional to construct, so
 // hand-built configs (tests, sims) need not spell out an empty section.
 export type ModelsConfig = Omit<z.infer<typeof ModelsConfigSchema>, 'harnesses'> & {

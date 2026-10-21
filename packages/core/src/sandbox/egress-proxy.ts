@@ -1,7 +1,7 @@
-// src/sandbox/egress-proxy.ts — report-only HTTP CONNECT proxy for sandboxed agent egress (#2214).
+// src/sandbox/egress-proxy.ts — HTTP CONNECT proxy for sandboxed agent egress (#2214).
 //
-// Forwards everything (except telemetry hosts when `blockTelemetry` is set, #2667) and records each
-// distinct host. The evidence it gathers feeds a later slice that enforces `sandbox.network.allow`. The allowlist gains the registry hosts
+// Report-only by default: forwards everything (except telemetry hosts when `blockTelemetry` is set, #2667)
+// and records each distinct host. With `enforce` (#2215) hosts not on `sandbox.network.allow` get 403. The allowlist gains the registry hosts
 // of each detected ecosystem (#2659, #2661 for .NET). Known telemetry hosts are classified
 // separately in the egress logs (#2664).
 
@@ -17,6 +17,10 @@ export interface EgressProxyOptions {
   blockTelemetry?: boolean;
   /** Fired exactly once per distinct (lowercased) host, before the upstream connect. */
   onHost?: (host: string, allowed: boolean) => void;
+  /** Refuse hosts not on allowHosts with 403 (#2215). */
+  enforce?: boolean;
+  /** Fired once per distinct host refused for not being on allowHosts. */
+  onDenied?: (host: string) => void;
   /** Bind address; default '127.0.0.1'. Port is always 0 (ephemeral). */
   bindHost?: string;
 }
@@ -30,12 +34,14 @@ export interface EgressProxy {
   close(): Promise<void>;
 }
 
-// Exact match, plus `*.suffix` entries that match any subdomain of suffix but never suffix itself (#2661).
+// Exact match, plus `*.suffix` entries that match any subdomain of suffix but never suffix itself (#2661),
+// plus `.suffix` entries that match suffix itself and any subdomain (#2215).
 export function isAllowedHost(host: string, allowHosts: readonly string[]): boolean {
   const h = host.trim().toLowerCase();
   return allowHosts.some((raw) => {
     const a = raw.trim().toLowerCase();
     if (a === h) return true;
+    if (a.startsWith('.') && a.length > 1 && (h === a.slice(1) || h.endsWith(a))) return true;
     return a.startsWith('*.') && a.length > 2 && h.endsWith(a.slice(1)) && h.length > a.length - 1;
   });
 }
@@ -250,6 +256,18 @@ export function startEgressProxy(opts: EgressProxyOptions): Promise<EgressProxy>
 
   const blocked = (host: string): boolean => opts.blockTelemetry === true && isTelemetryHost(host);
 
+  const deniedSeen = new Set<string>();
+  const denied = (host: string): boolean => opts.enforce === true && !isAllowedHost(host, opts.allowHosts);
+  const noteDenied = (host: string): void => {
+    if (deniedSeen.has(host)) return;
+    deniedSeen.add(host);
+    try {
+      opts.onDenied?.(host);
+    } catch {
+      // a logging failure must never break traffic
+    }
+  };
+
   const record = (rawHost: string): string => {
     const host = rawHost.toLowerCase().replace(/^\[|\]$/g, '');
     if (!seen.has(host)) {
@@ -275,6 +293,11 @@ export function startEgressProxy(opts: EgressProxyOptions): Promise<EgressProxy>
     }
     const host = record(target.host);
     if (blocked(host)) {
+      rejectSocket(clientSocket, '403 Forbidden');
+      return;
+    }
+    if (denied(host)) {
+      noteDenied(host);
       rejectSocket(clientSocket, '403 Forbidden');
       return;
     }
@@ -312,6 +335,12 @@ export function startEgressProxy(opts: EgressProxyOptions): Promise<EgressProxy>
     }
     const host = record(url.hostname);
     if (blocked(host)) {
+      res.writeHead(403);
+      res.end();
+      return;
+    }
+    if (denied(host)) {
+      noteDenied(host);
       res.writeHead(403);
       res.end();
       return;

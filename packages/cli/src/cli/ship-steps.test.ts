@@ -1,4 +1,4 @@
-import { expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { getFactoryPaths, type FactoryConfig, type SandboxPolicy } from '@on-par/factory-core';
 import { renderSlicePlanComment, withSliceState, type SlicePlan } from '@on-par/factory-core/internal';
@@ -144,4 +144,34 @@ it('findSliceIndex in stack mode returns the lowest pending slice (#3367)', asyn
   const args = { ctx: undefined, work, octokit, ghRepo: 'o/r', issueNum: 9 };
   expect(await findSliceIndex({ ...args, sizeGateMode: 'stack' })).toBe(2);
   expect(await findSliceIndex({ ...args, sizeGateMode: 'slice' })).toBe(1);
+});
+
+describe('logSandboxPolicy egress enforcement (#2215)', () => {
+  const base: SandboxPolicy = {
+    runtime: 'sandbox-exec',
+    worktree: '/tmp/worktree',
+    writablePaths: [],
+    writableFilePrefixes: [],
+    allowHosts: ['api.anthropic.com'],
+    cpuMs: 300_000,
+    memMb: 4096,
+  };
+  const degraded = (log: ReturnType<typeof vi.fn>): boolean =>
+    log.mock.calls.some(([type]) => type === 'sandbox-degraded');
+
+  it('logs no sandbox-degraded for sandbox-exec in enforce mode', () => {
+    const log = vi.fn();
+    const policy = { ...base, networkMode: 'enforce' as const };
+    expect(logSandboxPolicy({}, policy, log)).toBe(policy);
+    expect(degraded(log)).toBe(false);
+  });
+
+  it('still logs sandbox-degraded for sandbox-exec in report mode and for firejail in enforce mode', () => {
+    const report = vi.fn();
+    logSandboxPolicy({}, { ...base, networkMode: 'report' }, report);
+    expect(degraded(report)).toBe(true);
+    const firejail = vi.fn();
+    logSandboxPolicy({}, { ...base, runtime: 'firejail', networkMode: 'enforce' }, firejail);
+    expect(degraded(firejail)).toBe(true);
+  });
 });

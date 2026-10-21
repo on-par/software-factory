@@ -1,8 +1,20 @@
 # Sandbox egress
 
-Under `sandbox-exec` (macOS) with a non-empty `sandbox.network.allow`, each lane's agent traffic goes through a local report-only proxy. The proxy logs every host it sees (`egress_host`) and a per-run summary (`egress_summary`). The allowlist is not enforced yet: hosts that are not on it are still forwarded and reported. Mini egress is currently report-only; enforce mode is tracked in #2215.
+Under `sandbox-exec` (macOS) with a non-empty `sandbox.network.allow`, each lane's agent traffic goes through a local report-only proxy. The proxy logs every host it sees (`egress_host`) and a per-run summary (`egress_summary`). By default (`report` mode) the allowlist is not enforced: hosts that are not on it are still forwarded and reported. Set `sandbox.network.mode: enforce` to enforce it (see below).
 
 An empty `sandbox.network.allow` denies all egress, and the proxy does not run.
+
+Allowlist entries are an exact host, `*.suffix` (subdomains only, never `suffix` itself), or `.suffix` (`suffix` and all its subdomains, e.g. `.nuget.org` matches `nuget.org` and `api.nuget.org` but not `nuget.org.example.com`).
+
+## Enforce mode
+
+Set `sandbox.network.mode: enforce` (or `FACTORY_SANDBOX_NETWORK=enforce`, which overrides the config; only the exact values `report` and `enforce` are honored) to make the allowlist a real control on `sandbox-exec`. The default is `report`.
+
+- The Seatbelt profile denies all outbound network except loopback (where the lane proxy and leased dev servers listen) and the mDNSResponder socket (DNS).
+- The proxy answers `403` to any host not on `sandbox.network.allow` and never connects upstream. It reports each refused host once per run as an `egress_denied` warn event.
+- No `sandbox-degraded` warning is logged, and BUILD reports `net allowlist enforced`.
+
+Known limits: git over ssh, other unix sockets (ssh-agent, docker.sock, gpg-agent), and tools that ignore `HTTPS_PROXY` lose network access. Loopback stays open. `firejail` and `docker-sandbox` are unchanged and `firejail` still logs `sandbox-degraded`.
 
 ## Per-ecosystem registry defaults
 

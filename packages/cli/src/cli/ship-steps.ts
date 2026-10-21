@@ -35,6 +35,7 @@ import {
 import type { CheckResumeRecord, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
   findOpenPR,
+  isEgressEnforced,
   resolveFilingPolicy,
   resolveHermeticGit,
   resolveReviewFloorRules,
@@ -99,7 +100,7 @@ export function logSandboxPolicy(
     // logs the actual outcome ('sandbox' or 'sandbox-unavailable'), so nothing is logged here.
   } else {
     activeSandboxPolicy = sandboxPolicy;
-    if (sandboxPolicy.allowHosts.length > 0) {
+    if (sandboxPolicy.allowHosts.length > 0 && !isEgressEnforced(sandboxPolicy)) {
       log(
         'sandbox-degraded',
         `host-level egress filtering unavailable in v1; intended allowlist: ${sandboxPolicy.allowHosts.join(', ')}`,
