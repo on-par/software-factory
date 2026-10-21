@@ -291,6 +291,18 @@ describe('cli', () => {
       expect(logged()).toContain('issue #939');
     });
 
+    it('reports a lane-labelled issue with no state label as an optional doctor row', async () => {
+      h.claudeAvailable = true;
+      h.statelessLaneIssues = [
+        { issue: 267, lanes: ['mac-v1'], labels: ['enhancement', 'ios', 'factory:lane:mac-v1'] },
+      ];
+
+      const res = await runMain('doctor');
+      expect(res.exited).toBe(false);
+      expect(logged()).toContain('lane issue #267');
+      expect(logged()).toContain('factory:lane:mac-v1');
+    });
+
     it('reports no green-and-ready PRs when there are none', async () => {
       h.claudeAvailable = true;
       h.greenPrs = [];

@@ -14,6 +14,7 @@ import {
   leaseChecks,
   orphanContainerChecks,
   orphanMicroVmChecks,
+  statelessLaneIssueChecks,
   unmergedGreenPrChecks,
   type GreenPrScanResult,
   type LeaseHealthRow,
@@ -369,5 +370,42 @@ describe('formatMicroVmReconcileReport', () => {
     expect(formatMicroVmReconcileReport(rows)).toBe(
       'reconcile: failed to remove sbx VM factory-abc123: sbx rm --force factory-abc123 failed: not found',
     );
+  });
+});
+
+describe('statelessLaneIssueChecks', () => {
+  it('renders one passing optional row when there are none', () => {
+    const checks = statelessLaneIssueChecks({ status: 'ok', issues: [] });
+    expect(checks).toHaveLength(1);
+    expect(checks[0].ok).toBe(true);
+    expect(checks[0].optional).toBe(true);
+    expect(doctorFailed(checks)).toBe(false);
+  });
+
+  it('renders one non-ok optional row per issue', () => {
+    const checks = statelessLaneIssueChecks({
+      status: 'ok',
+      issues: [{ issue: 267, lanes: ['mac-v1', 'web'], labels: [] }],
+    });
+    expect(checks).toHaveLength(1);
+    expect(checks[0].name).toBe('lane issue #267');
+    expect(checks[0].ok).toBe(false);
+    expect(checks[0].optional).toBe(true);
+    expect(checks[0].detail).toContain('factory:lane:mac-v1, factory:lane:web');
+    expect(checks[0].fix).toContain('factory queue add mac-v1 267');
+    expect(doctorFailed(checks)).toBe(false);
+  });
+
+  it('renders a skipped row', () => {
+    const checks = statelessLaneIssueChecks({ status: 'skipped', detail: 'skipped — no GitHub repo or token' });
+    expect(checks[0]).toMatchObject({ ok: true, optional: true, detail: 'skipped — no GitHub repo or token' });
+  });
+
+  it('renders a failed scan as an optional row', () => {
+    const checks = statelessLaneIssueChecks({ status: 'failed', detail: 'boom' });
+    expect(checks[0].ok).toBe(false);
+    expect(checks[0].optional).toBe(true);
+    expect(checks[0].detail).toBe('scan failed: boom');
+    expect(doctorFailed(checks)).toBe(false);
   });
 });

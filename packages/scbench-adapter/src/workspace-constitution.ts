@@ -5,11 +5,14 @@
  *  run injects them into PLAN/BUILD/CHECK exactly as a real repo's
  *  committed constitution would be. Content must stay generic: never a
  *  hidden test name, quoted assertion, or per-problem hint (see
- *  ADR-0078). v2 (#1204) adds cross-checkpoint stability, spec-exact I/O,
- *  minimal-surface and verification standards. */
+ *  ADR-0078). requireTests: true (#1202) makes a checkpoint with no
+ *  runnable test surface fail CHECK and enter rework. v2 (#1204) adds
+ *  cross-checkpoint stability, spec-exact I/O, minimal-surface and
+ *  verification standards. */
 export const WORKSPACE_CONSTITUTION = `---
 product: scbench-workspace
 version: 2
+requireTests: true
 ---
 
 # Engineering standards for this workspace
@@ -65,6 +68,7 @@ specification wins.
 
 ## Verification
 
+- Every change ships runnable pytest tests for the behavior it adds; this constitution sets requireTests, so CHECK fails when the workspace has no runnable test surface.
 - Factory-authored tests for this workspace live under .factory/tests/,
   per ADR-0081.
 - For Python workspaces, run the suite with:

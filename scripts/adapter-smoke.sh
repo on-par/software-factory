@@ -2,6 +2,9 @@
 # Adapter smoke test: installs the packed `factory` CLI the way a user would, builds a temp git
 # repo from scripts/fixtures/smoke-repo/ whose config pins the given agent's recorded shim, and
 # runs `factory doctor` on a PATH where claude cannot be found. Exits 0 only when doctor passes.
+# A missing agent shim fails the run: the agent is left off PATH so doctor fails, and the script
+# exits with doctor's exit code and names the shim. ADAPTER_SMOKE_AGENT_BIN overrides the shim dir
+# (default scripts/fixtures/agents/bin).
 #
 # `codex`, `opencode` and `pi` are supported; command, the ship step and CI wiring are later slices. Assumes `npm ci` and `npm run build` have already run at the repo root.
 set -euo pipefail
@@ -13,6 +16,13 @@ case "$AGENT" in
 esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+AGENT_BIN="${ADAPTER_SMOKE_AGENT_BIN:-$ROOT/scripts/fixtures/agents/bin}"
+SHIM="$AGENT_BIN/$AGENT"
+SHIM_MISSING=0
+if [ ! -x "$SHIM" ]; then
+  SHIM_MISSING=1
+  echo "missing agent shim for $AGENT: $SHIM (doctor should fail: $AGENT is left off PATH)" >&2
+fi
 PACKDIR="$(mktemp -d)"
 INSTALL_DIR="$(mktemp -d)"
 REPO_DIR="$(mktemp -d)"
@@ -63,8 +73,11 @@ git add -A
 git commit -q -m "smoke-repo fixture"
 
 # The agent entry is a wrapper, not a symlink: the shim resolves its fixtures from dirname "$0".
-printf '#!/bin/sh\nexec "%s" "$@"\n' "$ROOT/scripts/fixtures/agents/bin/$AGENT" >"$FAKEBIN/$AGENT"
-chmod +x "$FAKEBIN/$AGENT"
+# With the shim missing no wrapper is written, so the agent is off PATH and doctor must fail.
+if [ "$SHIM_MISSING" -eq 0 ]; then
+  printf '#!/bin/sh\nexec "%s" "$@"\n' "$SHIM" >"$FAKEBIN/$AGENT"
+  chmod +x "$FAKEBIN/$AGENT"
+fi
 cat >"$FAKEBIN/gh" <<'FAKE'
 #!/bin/sh
 case "$1 $2" in
@@ -102,7 +115,12 @@ DOCTOR_EXIT=0
 DOCTOR_OUT="$(env PATH="$AGENT_PATH" "${AGENT_ENV[@]}" FAKE_AGENT_MODE=empty "$FACTORY" doctor 2>&1)" || DOCTOR_EXIT=$?
 echo "$DOCTOR_OUT"
 if [ "$DOCTOR_EXIT" -ne 0 ]; then
+  [ "$SHIM_MISSING" -eq 0 ] || echo "factory doctor failed: missing agent shim for $AGENT: $SHIM" >&2
   echo "expected factory doctor to exit 0 on the $AGENT PATH, got exit $DOCTOR_EXIT" >&2
+  exit "$DOCTOR_EXIT"
+fi
+if [ "$SHIM_MISSING" -ne 0 ]; then
+  echo "expected factory doctor to fail with the $AGENT shim missing ($SHIM), but it passed" >&2
   exit 1
 fi
 echo "$DOCTOR_OUT" | grep -q "coding agent.*found $AGENT" || {

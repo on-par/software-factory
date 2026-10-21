@@ -16,6 +16,7 @@ export const h = Object.assign(shipH, {
   staleClaims: [] as any[],
   blockedParks: [] as any[],
   greenPrs: [] as any[],
+  statelessLaneIssues: [] as any[],
 });
 
 function makeInternalFakes() {
@@ -24,6 +25,7 @@ function makeInternalFakes() {
     releaseStaleClaims: vi.fn(async () => h.staleClaims) as any,
     pollBlockedParks: vi.fn(async () => h.blockedParks) as any,
     findUnmergedGreenPrs: vi.fn(async () => h.greenPrs) as any,
+    listStatelessLaneIssues: vi.fn(async () => h.statelessLaneIssues) as any,
     listOrphanContainers: vi.fn(async () => h.orphanContainers) as any,
     reapOrphanContainers: vi.fn(async () => h.reapedContainers) as any,
     listMicroVms: vi.fn(async () => h.orphanVmNames),
@@ -41,6 +43,7 @@ function makeInternalFakes() {
     | 'releaseStaleClaims'
     | 'pollBlockedParks'
     | 'findUnmergedGreenPrs'
+    | 'listStatelessLaneIssues'
     | 'listOrphanContainers'
     | 'reapOrphanContainers'
     | 'listMicroVms'
@@ -66,6 +69,7 @@ export function installDoctorHarness(): void {
     h.gcReport = { removed: [], kept: 0, dryRun: false };
     h.staleClaims = [];
     h.greenPrs = [];
+    h.statelessLaneIssues = [];
     h.orphanContainers = [];
     h.reapedContainers = [];
     h.orphanVmNames = [];

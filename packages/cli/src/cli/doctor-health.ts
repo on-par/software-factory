@@ -1,5 +1,7 @@
 // packages/cli/src/cli/doctor-health.ts — runtime-health rows and reconcile reports, moved out of doctor.ts (#2799)
 
+import type { StatelessLaneIssue } from '@on-par/factory-core/internal';
+
 import type { DoctorCheck } from './doctor.js';
 
 export interface LeaseHealthRow {
@@ -227,5 +229,47 @@ export function unmergedGreenPrChecks(result: GreenPrScanResult): DoctorCheck[] 
     optional: true,
     detail: `${row.issue === null ? 'owning issue unknown' : `issue #${row.issue}`}: green and ready on ${row.branch}, open ${row.ageHours}h, not merged`,
     fix: `review and merge #${row.number} (or close it); the factory never auto-merges an orphaned PR`,
+  }));
+}
+
+/** Outcome of the stateless-lane-issue scan: it ran, it was skipped (no repo/token), or it failed. */
+export type StatelessLaneScanResult =
+  | { status: 'ok'; issues: StatelessLaneIssue[] }
+  | { status: 'skipped'; detail: string }
+  | { status: 'failed'; detail: string };
+
+const STATELESS_LANE_CHECK = 'lane issues without a state label';
+
+export function statelessLaneIssueChecks(result: StatelessLaneScanResult): DoctorCheck[] {
+  if (result.status === 'skipped') {
+    return [{ name: STATELESS_LANE_CHECK, ok: true, optional: true, detail: result.detail }];
+  }
+  if (result.status === 'failed') {
+    return [
+      {
+        name: STATELESS_LANE_CHECK,
+        ok: false,
+        optional: true,
+        detail: `scan failed: ${result.detail}`,
+        fix: 'check `gh auth status` and network access, then re-run `factory doctor`',
+      },
+    ];
+  }
+  if (result.issues.length === 0) {
+    return [
+      {
+        name: STATELESS_LANE_CHECK,
+        ok: true,
+        optional: true,
+        detail: 'every lane-labelled open issue has a state label',
+      },
+    ];
+  }
+  return result.issues.map((issue) => ({
+    name: `lane issue #${issue.issue}`,
+    ok: false,
+    optional: true,
+    detail: `${issue.lanes.map((lane) => `factory:lane:${lane}`).join(', ')} but no state label (factory:queued, factory:parked or factory:in-progress)`,
+    fix: `re-queue it (\`factory queue add ${issue.lanes[0]} ${issue.issue}\`), park it (add factory:parked), or remove the lane label`,
   }));
 }

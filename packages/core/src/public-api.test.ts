@@ -314,13 +314,13 @@ const PUBLIC_API_KEYS = [
   'watchUsage',
   'fetchSubscriptionUsage',
 ];
-const AGENT_JOB_KEYS = ['resolveHostMaxAgentJobs', 'hostAgentJobsDir', 'withHostAgentJobLease']; // #3047
+const JOB_KEYS = 'resolveHostMaxAgentJobs hostAgentJobsDir withHostAgentJobLease findStatelessLaneIssues'.split(' ');
 const TAIL = 'InvalidEventCursorError eventSegmentFileName eventSegmentsDir readEventsTail readEventsSince'.split(' ');
 const STEER = 'STEER_SOURCES STEER_PHASES SteerEventError parseSteerEvent appendSteerEvent listSteerEvents'.split(' '); // #3400
 const STEERED = 'collectMergedPrSteers isoWeekKey summarizeSteerability formatSteerabilityReport'.split(' '); // #3403
 const MORE = ['agentInvocationsFromEvents', 'computeTokenCoverage', 'readReviewApproval', 'readStackSliceGate']; // #3126, #3366
-const STACK = ['nextStackSlice', 'restackAfterSquashMerge']; // #3366, #3368
-const EXTRA_INTERNAL_KEYS = [...AGENT_JOB_KEYS, ...TAIL, ...MORE, ...STEER, ...STEERED, ...STACK];
+const STACK = 'nextStackSlice restackAfterSquashMerge listRepoLaneLabels listStatelessLaneIssues'.split(' ');
+const EXTRA_INTERNAL_KEYS = [...JOB_KEYS, ...TAIL, ...MORE, ...STEER, ...STEERED, ...STACK];
 const INTERNAL_API_KEYS = [
   'openCodeVersion',
   'DEFAULT_CI_DEADLINE_MS',
