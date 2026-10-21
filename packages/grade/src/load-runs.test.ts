@@ -1,24 +1,22 @@
-import { cp, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { cp, mkdir, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { readIssueRunState } from '@on-par/factory-core/internal';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { loadRuns } from './load-runs.js';
 
 const fixtureRuns = fileURLToPath(new URL('./__fixtures__/three-runs/state/runs', import.meta.url));
-const tmpDirs: string[] = [];
+const tempDirs = createTempDirs();
 
-async function tmp(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'grade-runs-'));
-  tmpDirs.push(dir);
-  return dir;
+function tmp(): Promise<string> {
+  return tempDirs.make('grade-runs-');
 }
 
 afterEach(async () => {
-  await Promise.all(tmpDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  await tempDirs.cleanup();
 });
 
 describe('loadRuns', () => {
