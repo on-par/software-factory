@@ -38,7 +38,7 @@ import {
   type SizeBudget,
 } from '../readiness/size.js';
 import { scoreIssueReadiness } from '../readiness/index.js';
-import type { ModelRouter } from '../router/index.js';
+import type { ModelRouter, RouterResult } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { failoversFrom } from '../router/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
@@ -367,6 +367,7 @@ async function planPhaseImpl(opts: {
   laneId?: string;
   /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
   bus?: LifecycleBus;
+  onWorkerResult?: (result: RouterResult) => Promise<void>;
 }): Promise<PlanResult> {
   const {
     issue,
@@ -690,6 +691,7 @@ async function planPhaseImpl(opts: {
         onProviderFailure,
         onLog: (msg) => log('router', msg),
       });
+      await opts.onWorkerResult?.(result);
 
       for (const f of failoversFrom(result.attempts)) {
         log('failover', `${f.model} failed (${f.reason})${f.detail ? `: ${f.detail}` : ''} — failed over`, {

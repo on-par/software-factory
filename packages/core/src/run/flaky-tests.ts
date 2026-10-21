@@ -36,7 +36,7 @@ function renderFlakyComment(entry: FlakyThresholdEntry, run: string, baseSha: st
 /** Records passing-flake tests in the ledger and files or updates a flaky-test issue for those at
  *  the threshold. Never throws: every ledger or GitHub failure is logged. */
 export async function fileFlakyTests(args: {
-  request: Pick<RunRequest, 'issue' | 'repo' | 'localOnly'>;
+  request: Pick<RunRequest, 'issue' | 'repo' | 'localOnly' | 'noPr'>;
   octokit: Octokit;
   log: ReturnType<RunPorts['events']>;
   file: string;
@@ -54,8 +54,9 @@ export async function fileFlakyTests(args: {
     return;
   }
   for (const hit of hits) {
-    if (request.localOnly) {
-      log('flaky_tests', `flaky test ${hit.test} reached ${hit.runs.length} runs — local-only run, not filing`);
+    if (request.localOnly || request.noPr) {
+      const mode = request.noPr ? '--no-pr' : 'local-only';
+      log('flaky_tests', `flaky test ${hit.test} reached ${hit.runs.length} runs — ${mode} run, not filing`);
       continue;
     }
     const [owner, repoName] = request.repo.split('/');

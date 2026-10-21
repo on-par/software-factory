@@ -39,6 +39,34 @@ export const FACTORY_RUNTIME_TMP_PREFIXES = [
   'factory-command-',
 ] as const;
 
+const SANDBOX_PREFIX = 'factory-test-tmp-';
+const SANDBOX_PID = /^factory-test-tmp-(\d+)-/;
+
+function defaultIsPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+export interface ForeignSandboxOptions {
+  /** This run's pid. Its own sandbox name always counts. */
+  ownPid?: number;
+  isPidAlive?: (pid: number) => boolean;
+}
+
+/** True for a `factory-test-tmp-<pid>-*` sandbox owned by another live process: a concurrent vitest run
+ *  in the same TMPDIR, not a leak from this run. A dead owner's sandbox, or this run's own, still counts. */
+export function isForeignLiveSandbox(name: string, opts: ForeignSandboxOptions = {}): boolean {
+  const match = SANDBOX_PID.exec(name);
+  if (match === null) return false;
+  const pid = Number(match[1]);
+  if (pid === (opts.ownPid ?? process.pid)) return false;
+  return (opts.isPidAlive ?? defaultIsPidAlive)(pid);
+}
+
 export interface TempLeak {
   prefix: string;
   entries: string[];
@@ -51,11 +79,13 @@ export function findLeakedTempEntries(
   after: readonly string[],
   prefixes: readonly string[] = FACTORY_TEST_TMP_PREFIXES,
   ignorePrefixes: readonly string[] = FACTORY_RUNTIME_TMP_PREFIXES,
+  sandboxOpts: ForeignSandboxOptions = {},
 ): TempLeak[] {
   const byPrefix = new Map<string, string[]>();
   for (const name of after) {
     if (before.has(name)) continue;
     if (ignorePrefixes.some((p) => name.startsWith(p))) continue;
+    if (name.startsWith(SANDBOX_PREFIX) && isForeignLiveSandbox(name, sandboxOpts)) continue;
     const prefix = [...prefixes].sort((a, b) => b.length - a.length).find((p) => name.startsWith(p));
     if (prefix === undefined) continue;
     byPrefix.set(prefix, [...(byPrefix.get(prefix) ?? []), name]);

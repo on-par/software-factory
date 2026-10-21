@@ -356,6 +356,7 @@ export async function runLane(
         return;
       }
       const reason = parkReasonFor(err);
+      const logSuffix = /(?:^|\n)(Run logs: [^\r\n]+)$/.exec(String(err instanceof Error ? err.message : ''))?.[1];
       // Terminal reason events (escalate/timeout/fail/conflict) are emitted exactly
       // once by the layer that detects the failure — shipIssue for pipeline failures,
       // the land path for merge failures. runLane owns only lane-lifecycle events
@@ -371,7 +372,7 @@ export async function runLane(
         paths.events,
         'parked',
         issue,
-        `issue #${issue} parked (${reason}); ${
+        `issue #${issue} parked (${reason})${logSuffix ? `; ${logSuffix}` : ''}; ${
           tripped ? `lane '${lane}' paused (lane breaker)` : `lane '${lane}' continuing`
         }, ${await remainingAfter(i)} issue(s) remaining`,
         { lane },

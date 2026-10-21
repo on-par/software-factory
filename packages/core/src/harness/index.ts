@@ -62,6 +62,8 @@ export interface HarnessRequest {
   onPgid?: (pgid: number) => void;
   /** When set, the harness reports cumulative usage while the session runs (Codex only for now). */
   onUsage?: (cumulative: HarnessLiveUsage) => void;
+  /** Codex auto-compact token limit for agentic build tasks; default 120000, 0 turns it off (#3326). */
+  contextCeiling?: number;
 }
 
 /** Provider-reported token usage for one harness invocation (#424). */
