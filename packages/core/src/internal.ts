@@ -30,7 +30,6 @@ export {
   gardenKeyMarker,
   markGardenTrackingUnknown,
 } from './garden/dedup.js';
-
 // Failure fingerprint & evidence
 export { captureFailure, fingerprintFailure, normalizeFailureMessage } from './failure/index.js';
 export type {
@@ -757,6 +756,7 @@ export { buildReadinessGapPrompt, parseReadinessGapOutput } from './readiness/en
 export type { IssueRunState, RunStatus } from './types/index.js';
 export * from './run/state.js';
 export * from './run/steer.js';
+export * from './kpis/steerability.js';
 export { createStackSliceBranch } from './run/stack-slice-branch.js';
 export {
   checkResumePath,

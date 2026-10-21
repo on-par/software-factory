@@ -226,6 +226,7 @@ import {
   readStopMarker,
 } from '@on-par/factory-core/internal';
 import type { StopMarker } from '@on-par/factory-core/internal';
+import { formatSteerabilityReport } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
 import { clearSelfUpdateStop } from './self-update-stop.js';
 import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
@@ -234,6 +235,7 @@ import {
   ClassifierBacktestInputError,
   type ClassifierBacktestOptions,
 } from './classifier-backtest.js';
+import { buildSteerabilityReport } from './steerability-report.js';
 import { runHarnessCheckCommand } from './harness-check.js';
 import { landIssue } from './land.js';
 import { STOP_SET_MESSAGE } from './stop-sentinel.js';
@@ -1538,11 +1540,24 @@ async function cmdClassifierReport(opts: { json?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const report = summarizeClassifierOutcomes(parseClassifierOutcomes(readTextFileOrEmpty(paths.classifierOutcomes)));
+  const steerability = await buildSteerabilityReport(paths);
+  if (opts.json) {
+    console.log(JSON.stringify({ ...report, steerability }));
+    return;
+  }
+  for (const line of formatClassifierReport(report)) console.log(line);
+  console.log('');
+  for (const line of formatSteerabilityReport(steerability)) console.log(line);
+}
+
+async function cmdReport(opts: { steerability?: boolean; json?: boolean } = {}) {
+  if (!opts.steerability) throw new CliExitError('factory: report requires --steerability', 2);
+  const report = await buildSteerabilityReport(getFactoryPaths(await getRepoRoot()));
   if (opts.json) {
     console.log(JSON.stringify(report));
     return;
   }
-  for (const line of formatClassifierReport(report)) console.log(line);
+  for (const line of formatSteerabilityReport(report)) console.log(line);
 }
 
 async function cmdClassifierBacktestEntry(opts: ClassifierBacktestOptions) {
@@ -4191,6 +4206,7 @@ export const PROGRAM_HANDLERS = {
   cmdRuns,
   cmdKpis,
   cmdClassifierReport,
+  cmdReport,
   cmdClassifierBacktestEntry,
   cmdGarden,
   cmdTui,

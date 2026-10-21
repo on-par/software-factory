@@ -78,6 +78,13 @@ export function registerObserveCommands(program: Command, handlers: ProgramHandl
     .action((opts: ClassifierBacktestOptions) => handlers.cmdClassifierBacktestEntry(opts));
 
   program
+    .command('report')
+    .description('Print autonomy reports from local factory state')
+    .option('--steerability', 'Steers per merged PR by lane and ISO week, with min/median/max and a histogram')
+    .option('--json', 'Print one JSON object (schemaVersion 1) instead of text')
+    .action((opts: { steerability?: boolean; json?: boolean }) => handlers.cmdReport(opts));
+
+  program
     .command('garden')
     .description(
       'Read-only report of recurring failure patterns in local events, deduped against open issues by GitHub search',
