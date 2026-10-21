@@ -428,7 +428,8 @@ export interface GithubQueue {
   claimNext(lane: string): Promise<QueueClaim | null>;
   release(issue: number, outcome?: QueueReleaseOutcome): Promise<void>;
   /** Refreshes this claimant's lease on `issue` while its identity label is still present.
-   *  Returns `false` (no-op) when the label is gone — claimed elsewhere, released, or reaped (#1500). */
+   *  Returns `false` (no-op) when the label is gone or the fresh pre-write read lacks in-progress: claimed
+   *  elsewhere, released, or reaped (#1500, #3422). */
   heartbeat(issue: number): Promise<boolean>;
   list(lane: string): Promise<number[]>;
   lanes(): Promise<string[]>;
@@ -547,13 +548,12 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
   }
 
   async function heartbeat(issue: number): Promise<boolean> {
-    const current = await client.getIssueLabels({ owner, repo, issue_number: issue });
-    if (!current.includes(myLabel)) return false;
-
+    if (!(await client.getIssueLabels({ owner, repo, issue_number: issue })).includes(myLabel)) return false;
     const expiresSpec = claimExpiresLabelSpec(leaseExpiresAt());
     await client.ensureLabel({ owner, repo, ...expiresSpec });
-    const stale = current.filter((name) => name.startsWith(CLAIM_EXPIRES_LABEL_PREFIX));
-    for (const name of stale) {
+    const fresh = await client.getIssueLabels({ owner, repo, issue_number: issue });
+    if (!fresh.includes(IN_PROGRESS_LABEL) || !fresh.includes(myLabel)) return false;
+    for (const name of fresh.filter((n) => n.startsWith(CLAIM_EXPIRES_LABEL_PREFIX))) {
       await client.removeLabel({ owner, repo, issue_number: issue, name });
     }
     await client.addLabels({ owner, repo, issue_number: issue, labels: [expiresSpec.name] });
