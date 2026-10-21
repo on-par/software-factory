@@ -20,6 +20,7 @@ import {
   isAutoMergeBlocked,
   LEGACY_BRANCH_PREFIX,
   logEvent,
+  publishRiskReceipt,
   releaseLaneClaim,
   resolveEffectiveConfig,
   resolveFilingPolicy,
@@ -140,6 +141,17 @@ export async function landIssue(
         gateLabel,
       );
     }
+  }
+
+  // Risk receipt (#3386): best-effort, never blocks or changes the merge.
+  try {
+    const receipt = await publishRiskReceipt({ octokit, owner, repo: repoName, prNumber });
+    log(
+      'land',
+      `risk receipt ${receipt.updated ? 'published' : 'unchanged'} on PR #${prNumber}: tier ${receipt.evaluation.tier}`,
+    );
+  } catch (err) {
+    log('warn', `could not publish the risk receipt on PR #${prNumber}: ${errorDetail(err)}`);
   }
 
   const worktree = worktreePathFor(
