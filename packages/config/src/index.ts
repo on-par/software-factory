@@ -38,3 +38,13 @@ export {
   type RouteDefaults,
   type RoutesDefaults,
 } from './defaults.js';
+
+export {
+  DEFAULT_RISK_RULES,
+  parseRiskRules,
+  RISK_TIERS,
+  type RiskRule,
+  RiskRulesError,
+  type RiskRuleSet,
+  type RiskTier,
+} from './risk.js';
