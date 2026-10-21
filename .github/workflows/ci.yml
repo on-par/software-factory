@@ -11,12 +11,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ci:
-    name: ci
+  # The required `ci` check is the gate job at the end. The work runs in parallel
+  # before it: `static` (format, build, guards, typecheck, lint, knip) and three
+  # Vitest shards that each record test results and raw coverage into a blob report.
+  static:
+    name: static
     runs-on: ubuntu-latest
-    # Hard ceiling: a worker that starves the event loop cannot be stopped by
-    # Vitest's own (timer-based) test timeout, only by the runner (#755).
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
@@ -30,8 +31,17 @@ jobs:
       - name: Install
         run: npm ci
 
+      # Prettier's cache lives outside node_modules (npm ci wipes it) and is keyed on
+      # file content, since a fresh checkout resets every mtime.
+      - name: Restore Prettier cache
+        uses: actions/cache@v6
+        with:
+          path: .tmp/prettier-cache
+          key: prettier-${{ runner.os }}-${{ hashFiles('package-lock.json', '.prettierrc*', '.prettierignore') }}-${{ github.sha }}
+          restore-keys: prettier-${{ runner.os }}-${{ hashFiles('package-lock.json', '.prettierrc*', '.prettierignore') }}-
+
       - name: Format check
-        run: npm run format:check
+        run: npm run format:check -- --cache --cache-strategy content --cache-location .tmp/prettier-cache
 
       - name: Build
         run: npm run build
@@ -60,17 +70,102 @@ jobs:
       - name: Knip
         run: npm run knip
 
-      - name: Test & coverage
-        # Exercise the same inherited configuration transport as daemon CHECK runs.
+  test:
+    name: test (${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    # Hard ceiling: a worker that starves the event loop cannot be stopped by
+    # Vitest's own (timer-based) test timeout, only by the runner (#755).
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test shard
         env:
+          # Exercise the same inherited configuration transport as daemon CHECK runs.
           FACTORY_RUN_CONFIG_JSON: '{"version":2}'
-        run: npm run test
+          # Raw coverage only: thresholds apply to the merged report in `ci`, never per shard.
+          FACTORY_COVERAGE_SHARD: '1'
+        run: >-
+          npm run test --
+          --shard=${{ matrix.shard }}/3
+          --reporter=default --reporter=github-actions --reporter=blob
+          --outputFile.blob=vitest-blob/blob-${{ matrix.shard }}-3.json
+
+      - name: Upload blob report
+        uses: actions/upload-artifact@v7
+        with:
+          name: vitest-blob-${{ matrix.shard }}
+          path: vitest-blob/
+          if-no-files-found: error
+          retention-days: 1
+
+  # The required status check. It runs even when a needed job failed or was
+  # cancelled, and fails unless every one of them succeeded, so a red shard or a
+  # red `static` can never yield a green `ci` (a skipped required check counts as
+  # passing). It then merges the shard reports and enforces coverage on the result.
+  ci:
+    name: ci
+    needs: [static, test]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Require static and every test shard to succeed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$NEEDS" | jq -e 'to_entries | all(.value.result == "success")' > /dev/null || {
+            echo "::error::ci: a required job did not succeed (see above)"
+            exit 1
+          }
+
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Download blob reports
+        uses: actions/download-artifact@v8
+        with:
+          pattern: vitest-blob-*
+          path: vitest-blob
+          merge-multiple: true
+
+      - name: Merge reports & coverage
+        id: merge
+        run: npm run test -- --merge-reports=vitest-blob
 
       - name: Coverage ratchet
         run: npm run coverage-ratchet
 
       - name: Coverage summary
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.merge.outcome != 'skipped' }}
         run: |
           if [ -f coverage/coverage-summary.json ]; then
             node -e '
@@ -87,7 +182,7 @@ jobs:
           fi
 
       - name: Upload coverage artifact
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.merge.outcome != 'skipped' }}
         uses: actions/upload-artifact@v7
         with:
           name: coverage
