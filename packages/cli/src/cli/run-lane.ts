@@ -81,20 +81,33 @@ const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
 
 /** Runs `work` while periodically calling `heartbeat(issue)` so a long-running ship or
  *  merge wait keeps this claimant's lease fresh. A heartbeat failure is swallowed — losing
- *  one refresh must never abort the work it is protecting. */
+ *  one refresh must never abort the work it is protecting. Before returning or rethrowing, the
+ *  timer is cleared and any in-flight tick is awaited, so no heartbeat write overlaps the
+ *  caller's release of the claim (#3423). */
 async function withHeartbeat<T>(
   issue: number,
   heartbeat: ((issue: number) => Promise<unknown>) | undefined,
   work: () => Promise<T>,
 ): Promise<T> {
   if (!heartbeat) return work();
+  let inFlight: Promise<void> | undefined;
   const timer = setInterval(() => {
-    heartbeat(issue).catch(() => {});
+    if (inFlight) return;
+    inFlight = Promise.resolve()
+      .then(() => heartbeat(issue))
+      .then(
+        () => {},
+        () => {},
+      )
+      .finally(() => {
+        inFlight = undefined;
+      });
   }, HEARTBEAT_INTERVAL_MS);
   try {
     return await work();
   } finally {
     clearInterval(timer);
+    await inFlight;
   }
 }
 
