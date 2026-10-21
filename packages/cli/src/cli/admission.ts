@@ -7,6 +7,7 @@ import {
   type AdmissionStateReader,
   type QueueCompatibilityVerdict,
   type QueueSnapshot,
+  type StatelessLaneIssue,
 } from '@on-par/factory-core/internal';
 
 export interface QueueAdmissionRow {
@@ -37,11 +38,28 @@ export function formatQueueAdmissionReport(rows: readonly QueueAdmissionRow[]): 
   return lines.join('\n');
 }
 
+export function formatStatelessLaneReport(issues: readonly StatelessLaneIssue[]): string {
+  const lines = [`queue reconcile — ${issues.length} lane-labelled issue(s) with no state label`];
+  if (issues.length === 0) {
+    lines.push('  no lane-labelled issues without a state label');
+    return lines.join('\n');
+  }
+  for (const issue of issues) {
+    for (const lane of issue.lanes) {
+      lines.push(
+        `  [${lane}] #${issue.issue} has factory:lane:${lane} but no state label (factory:queued, factory:parked or factory:in-progress)`,
+      );
+    }
+  }
+  return lines.join('\n');
+}
+
 export async function runQueueReconcile(deps: {
   readSnapshot: () => Promise<QueueSnapshot>;
   reader: AdmissionStateReader;
   lane?: string;
-}): Promise<{ report: string; conflicts: number }> {
+  readStatelessLaneIssues?: () => Promise<StatelessLaneIssue[]>;
+}): Promise<{ report: string; conflicts: number; stateless: number }> {
   const snapshot = await deps.readSnapshot();
   const entries =
     deps.lane === undefined ? snapshot.entries : snapshot.entries.filter((entry) => entry.lane === deps.lane);
@@ -58,5 +76,18 @@ export async function runQueueReconcile(deps: {
   }
 
   const conflicts = rows.filter((row) => row.verdict.kind === 'refuse').length;
-  return { report: formatQueueAdmissionReport(rows), conflicts };
+  let report = formatQueueAdmissionReport(rows);
+  let stateless = 0;
+  if (deps.readStatelessLaneIssues) {
+    try {
+      const all = await deps.readStatelessLaneIssues();
+      const lane = deps.lane;
+      const shown = lane === undefined ? all : all.filter((issue) => issue.lanes.includes(lane));
+      stateless = shown.length;
+      report += `\n${formatStatelessLaneReport(shown)}`;
+    } catch (err) {
+      report += `\nqueue reconcile — lane label scan failed: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+  return { report, conflicts, stateless };
 }
