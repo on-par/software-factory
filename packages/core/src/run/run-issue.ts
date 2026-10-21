@@ -96,7 +96,7 @@ import { isDecomposeSignal } from './run-state-record.js';
 import { runStatusForPhase, type RunStateUpdate } from './state.js';
 import { shipWithCiRework, type CiReworkPorts } from './ci-rework-loop.js';
 import { parkLogExtra } from './ship-park.js';
-import { enforceIssueBudget } from './budget.js';
+import { budgetGuardFor, enforceIssueBudget } from './budget.js';
 import type { EscalateKind, IssueRunState } from '../types/index.js';
 import { renderPreviousAttempt } from './previous-attempt.js';
 
@@ -323,6 +323,7 @@ async function runIssueOnce(
   const runId = randomUUID().replace(/-/g, '').slice(0, 12);
   const previousAttemptNote = renderPreviousAttempt(request.previousAttempt);
   const tracker = new ProcessGroupTracker();
+  const budgetStop = budgetGuardFor(policy, ports, tracker, request.processGroupGraceMs);
   let environment: Environment | undefined;
   let released = false;
   let route: BuildRoute | undefined;
@@ -475,7 +476,7 @@ async function runIssueOnce(
 
   const assertBudget = async (phase: string): Promise<RunOutcome | undefined> => {
     // prettier-ignore
-    const message = enforceIssueBudget({ phase, spend: ports.getIssueSpend?.() ?? 0, cap: policy.budget.perIssueCapUsd, issue: request.issue, worktreePath: ports.workspace.path, keepsFile: request.worktreeKeepsPath, log });
+    const message = enforceIssueBudget({ phase, spend: ports.getIssueSpend?.() ?? 0, cap: policy.budget.perIssueCapUsd, issue: request.issue, worktreePath: ports.workspace.path, keepsFile: request.worktreeKeepsPath, log, stop: budgetStop.stopped() });
     return message === undefined ? undefined : terminalParked('fail', message);
   };
 
@@ -824,6 +825,7 @@ async function runIssueOnce(
       }
 
       const build = await buildPhase({
+        budgetGuard: budgetStop.guard,
         previousAttempt: previousAttemptNote,
         runId,
         issue: request.issue,
@@ -857,7 +859,7 @@ async function runIssueOnce(
         openQuestions: plan.designArtifact?.openQuestions,
       });
       route = build.route;
-      if (!build.ok) {
+      if (!build.ok && build.reason !== 'budget_exceeded') {
         const why = build.noDiffDetail ? `\n\n${build.noDiffDetail}` : '';
         const parkText =
           build.reason === 'no_diff'
@@ -890,6 +892,7 @@ async function runIssueOnce(
     await setPhase('check');
     const priorFailureSignature = await ports.reworkHistory?.priorSignature(request.issue);
     const checkOpts = {
+      budgetGuard: budgetStop.guard,
       runId,
       hermeticGit: request.hermeticGit,
       issue: request.issue,

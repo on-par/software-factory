@@ -11,6 +11,7 @@ import { buildConstitutionContext } from '../constitutions/index.js';
 import { readDesignArtifact, renderDesignGrounding } from '../design/index.js';
 import { laneEnv } from '../environment/index.js';
 import type { EventKind } from '../events/kinds.js';
+import { type BudgetGuard, isBudgetStopError } from '../router/budget-guard.js';
 import { routerFailureOf } from '../router/executor-error.js';
 import { failoversFrom, type ModelRouter, type RouterResult } from '../router/index.js';
 import type { SandboxEventType, SandboxPolicy } from '../sandbox/index.js';
@@ -36,8 +37,9 @@ export interface BuildResult {
   route: BuildRoutePin;
   escalate?: string;
   /** Set on a non-escalation build failure; 'no_diff' = worker produced no diff,
-   *  'junk_only_diff' = worker changed only generated/cache files. */
-  reason?: 'no_diff' | 'junk_only_diff';
+   *  'junk_only_diff' = worker changed only generated/cache files, 'budget_exceeded' = the
+   *  budget guard stopped the worker mid-session (#3320). */
+  reason?: 'no_diff' | 'junk_only_diff' | 'budget_exceeded';
   /** Why an empty-diff build produced nothing (#3273); set only with reason 'no_diff'. */
   noDiffCause?: NoDiffCause;
   /** Rendered cause, open questions and redacted worker tail for the fail event and park message (#3273). */
@@ -60,16 +62,25 @@ export async function buildPhase(opts: Parameters<typeof buildPhaseImpl>[0]): Pr
       worktreePath: opts.worktree,
       log: opts.log,
     },
-    () => buildPhaseImpl(opts),
+    async () => {
+      try {
+        return await buildPhaseImpl(opts);
+      } catch (err) {
+        if (!isBudgetStopError(err)) throw err;
+        return { ok: false, model: err.model, route: opts.route, reason: 'budget_exceeded' };
+      }
+    },
     (r) => r.ok,
     (r) =>
       r.ok
         ? `build complete (model ${r.model})`
-        : r.reason === 'junk_only_diff'
-          ? 'build failed: worker changed only generated/cache files'
-          : r.reason === 'no_diff'
-            ? 'build failed: worker produced no diff'
-            : `build escalated: ${r.escalate ?? 'unknown'}`,
+        : r.reason === 'budget_exceeded'
+          ? 'build stopped: per-issue budget exceeded'
+          : r.reason === 'junk_only_diff'
+            ? 'build failed: worker changed only generated/cache files'
+            : r.reason === 'no_diff'
+              ? 'build failed: worker produced no diff'
+              : `build escalated: ${r.escalate ?? 'unknown'}`,
   );
 }
 
@@ -121,6 +132,8 @@ async function buildPhaseImpl(opts: {
     onQuotaExhausted?: (info: { provider: string; reason: FailoverReason }) => void | Promise<void>;
   };
   onPgid?: (pgid: number) => void;
+  /** Per-issue budget guard (#3320); passed to every BUILD router call. */
+  budgetGuard?: BudgetGuard;
   /** Local-only mode: use the compact local-small prompt on the codex route. */
   localOnly?: boolean;
   /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
@@ -266,6 +279,7 @@ async function buildPhaseImpl(opts: {
     env: laneEnv(appPort, process.env, appBaseUrl, worktree, runId),
     onPgid,
     onProviderFailure,
+    budgetGuard: opts.budgetGuard,
   };
 
   // Captured before the worker runs so the post-build diff has a correct base
