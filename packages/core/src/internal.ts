@@ -635,6 +635,8 @@ export { computeReviewFloor, DEFAULT_REVIEW_FLOOR_RULES } from './review/floor.j
 
 // Risk tier (#3380)
 export { evaluateRisk, type RiskEvaluation, type RiskEvaluationInput, type RiskMatchedRule } from './review/risk.js';
+export * from './review/risk-receipt.js'; // Risk receipt (#3386)
+export { listPrChangedFiles } from './run/ci-rework.js';
 
 // PR classifier shadow verdict (#1725)
 export type { PrClassificationRecord, PrClassifierClaim, PrShadowInput, PrShadowVerdict } from './review/classifier.js';
@@ -770,7 +772,6 @@ export type { CheckResumeRecord, CheckResumeStore, PlanReuseRecord, PlanReuseSto
 // Pre-PLAN base health (#2339)
 export { BASE_HEALTH_CHECKERS, checkBaseHealth, fetchRequiredChecksVerdict } from './checkers/base-health.js';
 export type { BaseHealthOptions, BaseHealthResult, RequiredChecksVerdict } from './checkers/base-health.js';
-
 // Codex ChatGPT session freshness for doctor (#2509)
 export { codexChatgptSessionState, type CodexSessionState } from './utils/codex-config.js';
 

@@ -545,12 +545,12 @@ const INTERNAL_API_KEYS = [
   'resolveExperimental',
   'resolveLocalOnly',
   ...'resolveHostMaxBuilds evaluateRisk'.split(' '), // #3380
+  ...'RISK_RECEIPT_END RISK_RECEIPT_START listPrChangedFiles'.split(' '), // #3386
+  ...'publishRiskReceipt renderRiskReceipt upsertRiskReceipt'.split(' '),
   ...'resolveHostLoadGuard evaluateLoadGuard formatLoadHold readHostLoad resolveBaseHealthChecks'.split(' '), // #3048, #3290
-  'hostBuildSlotsDir',
-  'listHostSlots',
+  ...'hostBuildSlotsDir listHostSlots'.split(' '),
   ...'withHostBuildSlot createRunSlotGate withRunAndHostBuildSlot'.split(' '), // #3049
-  'FACTORY_RUNTIME_CONFIG_KEYS',
-  'isTrustedApprover',
+  ...'FACTORY_RUNTIME_CONFIG_KEYS isTrustedApprover'.split(' '),
   'createOctokitCollaboratorPermissionClient',
   'CONFIG_EXAMPLE_OMITTED_KEYS',
   'renderConfigExample',
