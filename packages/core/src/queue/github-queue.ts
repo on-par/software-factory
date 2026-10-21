@@ -520,6 +520,12 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     return null;
   }
 
+  async function addParked(issue: number): Promise<void> {
+    const spec = queueLabelSpecs('release', claimantId).find((s) => s.name === PARKED_LABEL);
+    if (spec) await client.ensureLabel({ owner, repo, ...spec });
+    await client.addLabels({ owner, repo, issue_number: issue, labels: [PARKED_LABEL] });
+  }
+
   async function release(issue: number, outcome: QueueReleaseOutcome = 'queued'): Promise<void> {
     const current = await client.getIssueLabels({ owner, repo, issue_number: issue });
     const toRemove = current.filter(
@@ -529,6 +535,9 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
         name.startsWith(CLAIM_EXPIRES_LABEL_PREFIX) ||
         (outcome !== 'queued' && (name === QUEUED_LABEL || name.startsWith(QUEUE_ORDER_LABEL_PREFIX))),
     );
+    if (outcome === 'parked' && !current.includes(PARKED_LABEL)) {
+      await addParked(issue).catch(() => addParked(issue)); // one retry; a second failure rejects before any claim label is removed (#3424)
+    }
     for (const name of toRemove) {
       await client.removeLabel({ owner, repo, issue_number: issue, name });
     }
@@ -536,15 +545,6 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     if (outcome === 'done') return;
 
     if (outcome === 'queued') return addQueuedOnRelease(client, owner, repo, issue, current);
-
-    const target = PARKED_LABEL;
-    if (!current.includes(target)) {
-      const spec = queueLabelSpecs('release', claimantId).find((s) => s.name === target);
-      if (spec) {
-        await client.ensureLabel({ owner, repo, ...spec });
-      }
-      await client.addLabels({ owner, repo, issue_number: issue, labels: [target] });
-    }
   }
 
   async function heartbeat(issue: number): Promise<boolean> {
