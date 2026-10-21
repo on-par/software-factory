@@ -5,7 +5,6 @@ import * as publicApi from './index.js';
 import * as internalApi from './internal.js';
 import * as kpisApi from './kpis-entry.js';
 import * as testingApi from './testing.js';
-// Pins each @on-par/factory-core entry point's exact runtime value exports (ADR-0004); types are not listed.
 const PUBLIC_API_KEYS = [
   'FactoryConfigV2Schema',
   'factoryConfigV2JsonSchema',
@@ -318,8 +317,9 @@ const PUBLIC_API_KEYS = [
 const AGENT_JOB_KEYS = ['resolveHostMaxAgentJobs', 'hostAgentJobsDir', 'withHostAgentJobLease']; // #3047
 const TAIL = 'InvalidEventCursorError eventSegmentFileName eventSegmentsDir readEventsTail readEventsSince'.split(' ');
 const STEER = 'STEER_SOURCES STEER_PHASES SteerEventError parseSteerEvent appendSteerEvent listSteerEvents'.split(' '); // #3400
+const STEERED = 'collectMergedPrSteers isoWeekKey summarizeSteerability formatSteerabilityReport'.split(' '); // #3403
 const MORE = ['agentInvocationsFromEvents', 'computeTokenCoverage', 'readReviewApproval', 'readStackSliceGate']; // #3126, #3366
-const EXTRA_INTERNAL_KEYS = [...AGENT_JOB_KEYS, ...TAIL, ...MORE, ...STEER, 'nextStackSlice'];
+const EXTRA_INTERNAL_KEYS = [...AGENT_JOB_KEYS, ...TAIL, ...MORE, ...STEER, ...STEERED, 'nextStackSlice'];
 const INTERNAL_API_KEYS = [
   'openCodeVersion',
   'DEFAULT_CI_DEADLINE_MS',
