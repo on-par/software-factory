@@ -854,21 +854,18 @@ async function runIssueOnce(
         onPgid,
         laneId: request.lane,
         parentBaseRef: request.parentBaseRef,
+        openQuestions: plan.designArtifact?.openQuestions,
       });
       route = build.route;
       if (!build.ok) {
-        if (build.reason === 'no_diff') {
-          return await terminalParked(
-            'fail',
-            'build produced no diff against the base ref — no implementation was produced',
-          );
-        }
-        if (build.reason === 'junk_only_diff') {
-          return await terminalParked(
-            'fail',
-            'build changed only generated/cache files (e.g. __pycache__) — no implementation was produced',
-          );
-        }
+        const why = build.noDiffDetail ? `\n\n${build.noDiffDetail}` : '';
+        const parkText =
+          build.reason === 'no_diff'
+            ? 'build produced no diff against the base ref'
+            : build.reason === 'junk_only_diff'
+              ? 'build changed only generated/cache files (e.g. __pycache__)'
+              : undefined;
+        if (parkText) return await terminalParked('fail', `${parkText} — no implementation was produced${why}`);
         return await terminalEscalated(`build escalated: ${build.escalate ?? 'unknown'}`);
       }
       const buildBudget = await assertBudget('BUILD');

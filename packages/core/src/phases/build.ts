@@ -18,6 +18,7 @@ import { applySteering, type ConsumedSteering } from '../steering/index.js';
 import type { Constitution, FailoverReason } from '../types/index.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
 import type { BuildRoutePin } from '../config/repo.js';
+import { classifyNoDiff, renderNoDiffDetail, workerOutputTail, type NoDiffCause } from './build-no-diff.js';
 import { renderLintRulesInForce } from './build-lint-rules.js';
 import { failOverOpencodeBuild } from './build-opencode-failover.js';
 import {
@@ -37,6 +38,10 @@ export interface BuildResult {
   /** Set on a non-escalation build failure; 'no_diff' = worker produced no diff,
    *  'junk_only_diff' = worker changed only generated/cache files. */
   reason?: 'no_diff' | 'junk_only_diff';
+  /** Why an empty-diff build produced nothing (#3273); set only with reason 'no_diff'. */
+  noDiffCause?: NoDiffCause;
+  /** Rendered cause, open questions and redacted worker tail for the fail event and park message (#3273). */
+  noDiffDetail?: string;
   /** Run-start HEAD SHA captured before the worker ran (#1162) — checkPhase's
    *  fallback diff base for remote-less checkouts (#1211). */
   diffBase?: string;
@@ -120,6 +125,8 @@ async function buildPhaseImpl(opts: {
   localOnly?: boolean;
   /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
   laneId?: string;
+  /** The plan's open questions (#3273); a no-diff build with any is classed open-questions. */
+  openQuestions?: readonly string[];
   /** Rendered "## Previous attempt" note (#3373); empty or absent = first run. */
   previousAttempt?: string;
   /** Per-run id minted by runIssue; becomes SharedCompilationId=factory-<runId> for .NET lanes (#1910). */
@@ -380,8 +387,19 @@ async function buildPhaseImpl(opts: {
     const detail = junkOnly
       ? `worker changed only generated/cache files against ${diff.baseRef} (${diff.excludedPaths!.slice(0, 10).join(', ')}); no implementation was produced`
       : `worker produced no diff against ${diff.baseRef}; no implementation was produced`;
-    log('fail', detail);
-    return { ok: false, model: result.model, route, reason: junkOnly ? 'junk_only_diff' : 'no_diff' };
+    const output = result.output ?? '';
+    const tail = workerOutputTail(output);
+    const cause = junkOnly ? undefined : classifyNoDiff({ output, openQuestions: opts.openQuestions });
+    const noDiffDetail = renderNoDiffDetail({ cause, tail, openQuestions: opts.openQuestions });
+    log('fail', `${detail}\n${noDiffDetail}`);
+    return {
+      ok: false,
+      model: result.model,
+      route,
+      reason: junkOnly ? 'junk_only_diff' : 'no_diff',
+      ...(cause ? { noDiffCause: cause } : {}),
+      noDiffDetail,
+    };
   }
 
   log('build', `Build complete with model ${result.model}`, { model: result.model });
