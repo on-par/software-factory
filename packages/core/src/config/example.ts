@@ -229,6 +229,15 @@ function modelNamespace(): Node[] {
     unset('commands', doc('commands'), '{ test: "vitest run" }'),
     {
       kind: 'object',
+      key: 'risk',
+      doc: doc('risk'),
+      children: [
+        unset('rules', doc('risk', 'rules'), '[{ id: "my-rule", tier: "high", globs: ["<glob>"] }]'),
+        unset('refactorAllowlist', doc('risk', 'refactorAllowlist'), '["<glob>"]'),
+      ],
+    },
+    {
+      kind: 'object',
       key: 'budget',
       children: [
         unset('capUsd', doc('budget', 'capUsd'), resolveUsageCap(null, {}).cap),

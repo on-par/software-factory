@@ -22,7 +22,7 @@ function makeDeps(overrides: Partial<RiskCommandDeps> = {}): RiskCommandDeps & {
     listFiles: async () => ['src/auth/login.ts', 'README.md'],
     readFile: () => '{}',
     fileExists: () => true,
-    loadRepoPolicy: () => ({ source: 'default', rules: DEFAULT_RISK_RULES }),
+    loadRepoPolicy: () => ({ source: 'default', file: '.factory/config.yaml', rules: DEFAULT_RISK_RULES }),
     log: (line) => lines.push(line),
     ...overrides,
     lines,
@@ -142,15 +142,18 @@ describe('cmdRisk runtime wiring', () => {
     rest: { pulls: { listFiles: async () => ({ data: files.map((filename) => ({ filename })) }) } },
   });
 
-  it('uses the repo .factory/risk.yml policy by default', async () => {
+  it('uses the `risk` section of .factory/config.yaml by default', async () => {
     const root = await tmp.make('risk-repo-');
     mkdirSync(join(root, '.factory'));
-    writeFileSync(join(root, '.factory', 'risk.yml'), 'rules:\n  - id: everything\n    tier: low\n    globs: ["**"]\n');
+    writeFileSync(
+      join(root, '.factory', 'config.yaml'),
+      'version: 2\nrisk:\n  rules:\n    - id: everything\n      tier: low\n      globs: ["**"]\n',
+    );
     const { rt, lines } = runtime(root, octokitWithFiles(['src/auth/login.ts']));
     await cmdRisk('#5', {}, rt);
     expect(lines).toEqual([
       'PR #5: tier low',
-      'Policy: .factory/risk.yml',
+      'Policy: .factory/config.yaml `risk`',
       'Matched rules:',
       '  - everything (low): src/auth/login.ts',
     ]);
@@ -171,12 +174,14 @@ describe('cmdRisk runtime wiring', () => {
   it('maps an invalid repo policy to exit 2', async () => {
     const root = await tmp.make('risk-repo-');
     mkdirSync(join(root, '.factory'));
-    writeFileSync(join(root, '.factory', 'risk.yml'), 'rules: nope\n');
+    writeFileSync(join(root, '.factory', 'config.yaml'), 'version: 2\nrisk:\n  rules: nope\n');
     const { rt } = runtime(root);
     await expect(cmdRisk('5', {}, rt)).rejects.toMatchObject({
       name: 'CliExitError',
       code: 2,
-      message: expect.stringMatching(/^factory risk: invalid risk policy \.factory\/risk\.yml — /),
+      message: expect.stringMatching(
+        /^factory risk: invalid risk policy — invalid `risk` section in \.factory\/config\.yaml: /,
+      ),
     });
   });
 

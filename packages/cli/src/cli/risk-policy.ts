@@ -1,10 +1,19 @@
 // packages/cli/src/cli/risk-policy.ts — the doctor risk-policy row and the land risk-policy lines (#3387)
 
-import { formatRiskPolicy, loadRiskPolicy, RISK_POLICY_FILE, type RiskPolicy } from '@on-par/factory-core/internal';
+import { formatRiskPolicy, loadRiskPolicy, riskPolicyConfigFile, type RiskPolicy } from '@on-par/factory-core/internal';
 
 import type { DoctorCheck } from './doctor.js';
 
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+/** The config file to name in a fix hint; the generic name when the path itself cannot resolve. */
+function configFileForHint(repoRoot: string): string {
+  try {
+    return riskPolicyConfigFile(repoRoot);
+  } catch {
+    return '.factory/config.yaml';
+  }
+}
 
 export function riskPolicyCheck(
   repoRoot: string,
@@ -19,8 +28,8 @@ export function riskPolicyCheck(
       section: 'Repo',
       ok: false,
       optional: true,
-      detail: `invalid ${RISK_POLICY_FILE}: ${errorMessage(err)}`,
-      fix: `fix ${RISK_POLICY_FILE} (schema: packages/config/src/risk.ts) or delete it to use the packaged defaults`,
+      detail: errorMessage(err),
+      fix: `fix the \`risk\` section of ${configFileForHint(repoRoot)} (schema: packages/config/src/risk.ts) or remove it to use the packaged defaults`,
     };
   }
 }
@@ -34,10 +43,6 @@ export function riskPolicyLines(
     const [summary, ...rest] = formatRiskPolicy(policy);
     return { lines: [`risk policy: ${summary}`, ...rest.map((l) => `  ${l}`)], rules: policy.rules };
   } catch (err) {
-    return {
-      lines: [
-        `risk policy: invalid ${RISK_POLICY_FILE} (${errorMessage(err)}); the risk receipt uses the packaged defaults`,
-      ],
-    };
+    return { lines: [`risk policy: ${errorMessage(err)}; the risk receipt uses the packaged defaults`] };
   }
 }

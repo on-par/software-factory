@@ -1,8 +1,5 @@
-// src/config/repo.ts — Per-repo model/runtime config overrides (.factory/config.json)
-//
-// Lets a consuming repo commit its own model policy (per-phase pins, tier order, provider enable flags, usage
-// cap) without editing the packaged defaults shipped in @on-par/factory-config. Resolution order: repo file >
-// env vars > packaged defaults.
+// src/config/repo.ts — Per-repo model/runtime config overrides (.factory/config.yaml|yml|json): pins, tiers,
+// providers, budget and more, over the packaged defaults. Resolution order: repo file > env vars > packaged defaults.
 
 import { existsSync } from 'node:fs';
 
@@ -11,6 +8,7 @@ import { z } from 'zod';
 import { readRepoConfigFile } from './repo-config-file.js';
 import { runConfigSource } from './run-config-source.js';
 import { HealthConfigSections } from './base-health.js';
+import { RiskConfigSections } from './risk-section.js';
 import { toConfigSchemaIssues, type ConfigSchemaIssue } from './index.js';
 
 import type { ModelRegistry } from '../models/index.js';
@@ -234,6 +232,7 @@ export const RepoFactoryConfigV2Schema = z
           "Unset: derived from the build pin's harness, else PLAN decides per issue.",
       ),
     commands: z.record(z.string(), z.string()).optional().describe(EVIDENCE_COMMANDS_DESCRIPTION),
+    ...RiskConfigSections,
   })
   .strict();
 

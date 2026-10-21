@@ -10,9 +10,9 @@ import { h, installDoctorHarness, logged, runMainWith } from './test-support/doc
 
 installDoctorHarness();
 
-const writePolicy = (text: string): void => {
+const writeConfig = (name: string, text: string): void => {
   mkdirSync(join(h.repoRoot, '.factory'), { recursive: true });
-  writeFileSync(join(h.repoRoot, '.factory', 'risk.yml'), text);
+  writeFileSync(join(h.repoRoot, '.factory', name), text);
 };
 
 describe('factory doctor risk policy', () => {
@@ -44,38 +44,54 @@ describe('factory doctor risk policy', () => {
     vi.unstubAllEnvs();
   });
 
-  it('shows the configured .factory/risk.yml policy with rule ids per tier', async () => {
+  it('shows the `risk` section of .factory/config.yaml with rule ids per tier', async () => {
     h.claudeAvailable = true;
-    writePolicy(
+    writeConfig(
+      'config.yaml',
       [
-        'rules:',
-        '  - id: sf-auth',
-        '    tier: high',
-        "    globs: ['packages/**/auth/**']",
-        '  - id: sf-docs',
-        '    tier: low',
-        "    globs: ['docs/**']",
+        'version: 2',
+        'risk:',
+        '  rules:',
+        '    - id: sf-auth',
+        '      tier: high',
+        "      globs: ['packages/**/auth/**']",
+        '    - id: sf-docs',
+        '      tier: low',
+        "      globs: ['docs/**']",
       ].join('\n'),
     );
     await runMainWith(undefined, 'doctor');
     const out = logged();
     expect(out).toContain('risk policy');
-    expect(out).toContain('.factory/risk.yml (2 rules)');
+    expect(out).toContain('.factory/config.yaml `risk` (2 rules)');
     expect(out).toContain('high: sf-auth');
     expect(out).toContain('low: sf-docs');
   });
 
-  it('states that no risk policy is configured when .factory/risk.yml is absent', async () => {
+  it('shows the `risk` section of .factory/config.json', async () => {
     h.claudeAvailable = true;
+    writeConfig(
+      'config.json',
+      JSON.stringify({ version: 2, risk: { rules: [{ id: 'sf-docs', tier: 'low', globs: ['docs/**'] }] } }),
+    );
     await runMainWith(undefined, 'doctor');
-    expect(logged()).toContain('no risk policy configured');
+    expect(logged()).toContain('.factory/config.json `risk` (1 rule)');
   });
 
-  it('reports an invalid .factory/risk.yml without failing the doctor exit code', async () => {
+  it('states that no risk policy is configured when the config has no risk section', async () => {
     h.claudeAvailable = true;
-    writePolicy('');
+    writeConfig('config.yaml', 'version: 2\n');
+    await runMainWith(undefined, 'doctor');
+    expect(logged()).toContain('no risk policy configured (no `risk` section in .factory/config.yaml)');
+  });
+
+  it('reports an invalid risk section on the risk row and as a config schema error with its line', async () => {
+    h.claudeAvailable = true;
+    writeConfig('config.yaml', 'version: 2\nrisk:\n  rules:\n    - id: a\n      tier: huge\n      globs: [a]\n');
     const res = await runMainWith(undefined, 'doctor');
-    expect(logged()).toContain('invalid .factory/risk.yml');
-    expect(res.exited).toBe(false);
+    const out = logged();
+    expect(out).toContain('risk policy - invalid `risk` section in .factory/config.yaml');
+    expect(out).toContain("config - .factory/config.yaml:5: schema error at 'risk.rules.0.tier'");
+    expect(res.exited).toBe(true);
   });
 });
