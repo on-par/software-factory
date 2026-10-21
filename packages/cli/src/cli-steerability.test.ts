@@ -1,12 +1,13 @@
 import { execSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { main } from './cli/index.js';
 
+const tmp = createTempDirs();
 let repo: string;
 let cwd: string;
 let logSpy: ReturnType<typeof vi.spyOn>;
@@ -14,7 +15,7 @@ let errSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   cwd = process.cwd();
-  repo = realpathSync(mkdtempSync(join(tmpdir(), 'cli-steerability-')));
+  repo = realpathSync(tmp.makeSync('cli-steerability-'));
   execSync('git init -q', { cwd: repo });
   mkdirSync(join(repo, '.factory', 'state', 'runs'), { recursive: true });
   process.chdir(repo);
@@ -23,9 +24,9 @@ beforeEach(() => {
   process.exitCode = undefined;
 });
 
-afterEach(() => {
+afterEach(async () => {
   process.chdir(cwd);
-  rmSync(repo, { recursive: true, force: true });
+  await tmp.cleanup();
   vi.restoreAllMocks();
   process.exitCode = undefined;
 });

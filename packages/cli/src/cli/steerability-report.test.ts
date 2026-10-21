@@ -1,18 +1,19 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildSteerabilityReport, readRunStates } from './steerability-report.js';
 
+const tmp = createTempDirs();
 let dir: string;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'steerability-'));
+  dir = tmp.makeSync('steerability-');
   mkdirSync(join(dir, 'runs'));
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => tmp.cleanup());
 
 function seed() {
   const steer = { ts: '2026-08-03T00:00:00.000Z', actor: 'a', source: 'cli', phase: 'build', summary: 's' };
