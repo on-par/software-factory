@@ -45,12 +45,15 @@ beforeAll(() => {
   };
   script('ok.sh', 'echo ok');
   script('silent.sh', 'exit 0');
+  // The commit fixtures act only on the commit prompt, like a real agent. Committing on the probe
+  // prompts too would fail in the probe repo on a host with no git identity (CI).
+  const onCommitPrompt = (cmd: string) => `case "$(cat)" in *HARNESS_CHECK*) ${cmd} ;; esac; echo ok`;
   script(
     'commit.sh',
-    "printf 'ok\\n' > HARNESS_CHECK.txt && git add HARNESS_CHECK.txt && git commit -q -m check && echo ok",
+    onCommitPrompt("printf 'ok\\n' > HARNESS_CHECK.txt && git add HARNESS_CHECK.txt && git commit -q -m check"),
   );
   script('edit.sh', "printf 'ok\\n' > HARNESS_CHECK.txt; echo ok");
-  script('other.sh', 'printf ok > other.txt && git add other.txt && git commit -q -m x && echo ok');
+  script('other.sh', onCommitPrompt('printf ok > other.txt && git add other.txt && git commit -q -m x'));
   script('slow.sh', 'sleep 5; echo ok');
 });
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -97,6 +100,12 @@ describe('runHarnessCheck', () => {
     const r = await commitCase('commit.sh');
     expect(r?.ok).toBe(true);
     expect(r?.skip).toBeUndefined();
+  });
+
+  it('passes every case, the commit case included, for an agentic script that commits on the commit prompt', async () => {
+    const results = await runHarnessCheck({ ...base, declaration: decl('commit.sh', true) });
+    expect(results.filter((r) => !r.ok)).toEqual([]);
+    expect(results.filter((r) => r.skip !== undefined)).toEqual([]);
   });
 
   it('fails the commit case when the agent edits but does not commit', async () => {

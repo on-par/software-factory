@@ -73,7 +73,10 @@ describe('runHarnessCheckCommand', () => {
   const line = (output: string) => output.split('\n').find((l) => l.includes(COMMIT)) ?? '';
 
   it('passes the commit case for an agentic fixture that commits HARNESS_CHECK.txt', async () => {
-    const body = "printf 'ok\\n' > HARNESS_CHECK.txt && git add HARNESS_CHECK.txt && git commit -q -m check && echo ok";
+    // Like a real agent, the fixture commits only when the prompt asks. Committing on the probe prompts
+    // too would fail in the probe repo on a host with no git identity (CI) and fail those cases.
+    const body =
+      'case "$(cat)" in *HARNESS_CHECK*) printf \'ok\\n\' > HARNESS_CHECK.txt && git add HARNESS_CHECK.txt && git commit -q -m check ;; esac; echo ok';
     const { output, exitCode } = await runHarnessCheckCommand('my-agent', {}, makeRepo(body, true, true));
     expect(line(output).startsWith('PASS')).toBe(true);
     expect(exitCode).toBe(0);
