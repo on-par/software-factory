@@ -105,6 +105,40 @@ describe('cli', () => {
       ]);
     });
 
+    it.each([
+      [true, [], 'done', '1 awaiting review'],
+      [false, [['waitMerge', 1]], 'done', '1 merged'],
+    ])('a ready outcome with draft=%s decides whether the merge wait runs', async (draft, waits, released, summary) => {
+      const calls: any[] = [];
+      await runLane('app', [1], '/repo', 'on-par/software-factory', paths, {
+        ship: async (issue, _o, c) => {
+          c?.onOutcome?.({
+            state: 'ready',
+            route: 'claude',
+            branch: 'b',
+            reworkRounds: 0,
+            prNumber: 7,
+            ...(draft ? { draft: true } : {}),
+          });
+          return `ship-it/${issue}-x`;
+        },
+        waitMerge: async (issue) => {
+          calls.push(['waitMerge', issue]);
+        },
+        releaseIssue: async (issue, outcome) => {
+          calls.push(['release', issue, outcome]);
+        },
+        pathExists: () => false,
+        emitEvent: (_events: string, type: string, issue: string | number, msg: string) =>
+          calls.push(['event', type, issue, msg]),
+      });
+
+      expect(calls.filter((c) => c[0] === 'waitMerge')).toEqual(waits);
+      expect(calls).toContainEqual(['release', 1, released]);
+      expect(calls.some((c) => c[0] === 'event' && String(c[3]).includes('merge skipped'))).toBe(draft);
+      expect(calls.at(-1)[3]).toContain(summary);
+    });
+
     it('continues to the next issue on an IssueSkippedError instead of parking, and counts it as skipped', async () => {
       const calls: any[] = [];
       await runLane('app', [1, 2], '/repo', 'on-par/software-factory', paths, {

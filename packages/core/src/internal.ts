@@ -107,6 +107,7 @@ export {
 // Config
 export { resolveStateRoot, STATE_ROOT_ENV } from './config/state-root.js';
 export { resolveFilingPolicy, resolvePrClassifierPolicy, type EffectivePrClassifierPolicy } from './config/index.js';
+export { describeDraftPrPolicy, resolveDraftPrPolicy, type EffectiveDraftPrPolicy } from './config/run-section.js';
 export type { EffectiveConfig, TrustTier } from './config/repo.js';
 export { resolveBaseHealthChecks, resolveHermeticGit } from './config/base-health.js';
 export { resolveEffectiveConfig, resolveReviewFloorRules, resolveTrustTier } from './config/repo.js';

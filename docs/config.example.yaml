@@ -141,7 +141,7 @@ version: 2
   # a credential helper. Unset: true.
   # hermeticGit: true
 # Merge policy. `factory run` and `supervise` read `auto`; `factory land` reads `admin`. `factory
-# ship` and `run-issue` always stop at a ready-for-review PR.
+# ship` and `run-issue` stop at a ready-for-review PR unless `pr.draft` / `--draft-pr` is set.
 # run:
   # merge:
     # Squash-merge eligible PRs. Unset: legacy merge.auto, then FACTORY_MERGE=1. --auto-merge /
@@ -152,6 +152,10 @@ version: 2
     # Hold PRs whose review floor is B or C (or cannot be computed) for a human by applying
     # no-auto-merge. Unset: FACTORY_PR_CLASSIFIER=1. --pr-classifier / --no-pr-classifier beat all.
     # classifier: false
+  # pr:
+    # Stop SHIP at a draft PR: skip mark-ready and auto-merge. Unset: off. --draft-pr /
+    # --no-draft-pr beat it.
+    # draft: false
 # Phase timeouts in seconds. tests_seconds caps the tests checker command (scripts/verify.sh, npm
 # test or pytest). compile_seconds caps the compile checker command (npm run build, make or cargo
 # build). FACTORY_PLAN_TIMEOUT, FACTORY_BUILD_TIMEOUT, FACTORY_CHECK_TIMEOUT,

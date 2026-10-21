@@ -9,6 +9,8 @@ export interface RunFlagOverrides {
   autoMerge?: boolean;
   /** `--pr-classifier` / `--no-pr-classifier` (#1724). */
   prClassifier?: boolean;
+  /** --draft-pr / --no-draft-pr on ship, run-issue, run-brief (#3449). */
+  draftPr?: boolean;
 }
 
 /** Read the recorded overrides. Fails soft: a missing, unreadable, non-JSON, non-object,
@@ -23,10 +25,15 @@ export function readRunFlagOverrides(file: string): RunFlagOverrides {
     return {};
   }
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
-  const { autoMerge, prClassifier } = raw as { autoMerge?: unknown; prClassifier?: unknown };
+  const { autoMerge, prClassifier, draftPr } = raw as {
+    autoMerge?: unknown;
+    prClassifier?: unknown;
+    draftPr?: unknown;
+  };
   const overrides: RunFlagOverrides = {};
   if (typeof autoMerge === 'boolean') overrides.autoMerge = autoMerge;
   if (typeof prClassifier === 'boolean') overrides.prClassifier = prClassifier;
+  if (typeof draftPr === 'boolean') overrides.draftPr = draftPr;
   return overrides;
 }
 
@@ -36,10 +43,16 @@ export function writeRunFlagOverrides(file: string, overrides: RunFlagOverrides)
   const recorded: RunFlagOverrides = {};
   if (overrides.autoMerge !== undefined) recorded.autoMerge = overrides.autoMerge;
   if (overrides.prClassifier !== undefined) recorded.prClassifier = overrides.prClassifier;
+  if (overrides.draftPr !== undefined) recorded.draftPr = overrides.draftPr;
   if (Object.keys(recorded).length === 0) {
     rmSync(file, { force: true });
     return;
   }
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, `${JSON.stringify(recorded, null, 2)}\n`);
+}
+
+/** Record this invocation's --draft-pr flag, keeping the other recorded overrides. */
+export function recordDraftPrFlag(file: string, draftPr: boolean | undefined): void {
+  writeRunFlagOverrides(file, { ...readRunFlagOverrides(file), draftPr });
 }

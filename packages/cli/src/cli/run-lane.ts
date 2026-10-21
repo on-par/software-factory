@@ -326,6 +326,19 @@ export async function runLane(
         await settle(issue, 'queued');
         continue;
       }
+      if (shipped?.state === 'ready' && shipped.draft) {
+        emitEvent(
+          paths.events,
+          'ship',
+          issue,
+          `PR #${shipped.prNumber} left as draft — merge skipped (draft wins over auto-merge); mark it ready for review to land it`,
+          { lane },
+        );
+        awaitingReview++;
+        streak = null;
+        await settle(issue, 'done');
+        continue;
+      }
       if (layer) {
         // ADR-0161: land exactly this layer's branch, record it, and re-queue for the next layer.
         await withHeartbeat(issue, heartbeat, () =>

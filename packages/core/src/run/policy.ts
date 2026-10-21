@@ -23,4 +23,6 @@ export interface RunPolicy {
   budget: RunBudget;
   /** Resolved FACTORY_* env-override values one run needs (#668). */
   effective: EffectiveConfig;
+  /** SHIP stops at a draft PR (#3449); undefined = off. */
+  pr?: { draft: boolean };
 }

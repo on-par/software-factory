@@ -28,6 +28,8 @@ import {
   recordLocalAuthFailure,
   resolveEffectiveConfig,
   resolveHostMaxBuilds,
+  describeDraftPrPolicy,
+  resolveDraftPrPolicy,
   resolvePrClassifierPolicy,
   resolveWorktreeRoot,
   readStopMarker,
@@ -227,6 +229,15 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
     })) {
       console.log(`    ${line}`);
     }
+    console.log(
+      `    ${describeDraftPrPolicy(
+        resolveDraftPrPolicy(
+          rt.configLoaders.loadFactoryConfigForRepo(paths.config),
+          readRunFlagOverrides(paths.runFlags).draftPr,
+        ),
+        rt.repoConfigFileFor(repoRoot, paths.config).relPath,
+      )}`,
+    );
   } else {
     console.log('\n  (Effective config and KPIs hidden — run `factory status --kpis` to view)');
   }

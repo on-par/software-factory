@@ -1159,7 +1159,7 @@ async function runIssueOnce(
     await setPhase('ship');
     const shipped = await shipWithCiRework(
       { request, ports, shipPhase, checkPhase, checkOpts, check, constitution, appPort, appBaseUrl, onPgid, runId },
-      { builtRoute, builtModel, reviewRouting, pinNote, planSlice },
+      { builtRoute, builtModel, reviewRouting, pinNote, planSlice, draftPr: policy.pr?.draft },
     );
     const { ship, parked } = shipped;
     if (parked) return await terminalParked(parked.reason, parked.message, parked.checkFailure, parked.ciFailure);
@@ -1184,7 +1184,7 @@ async function runIssueOnce(
     }
     const readyMsg = ship.alreadyDelivered
       ? `already delivered${ship.prNumber !== undefined ? ` by merged PR #${ship.prNumber}` : ' — branch already landed on main'}`
-      : `PR #${ship.prNumber} ready for review`;
+      : `PR #${ship.prNumber} ${ship.draft ? 'left as draft' : 'ready for review'}`;
     log('ready', pinNote ? `${readyMsg} (${pinNote})` : readyMsg);
     await ports.writeLocalRunReport?.({ outcome: 'ready', route, branch: request.branch, reworkRounds });
     return {
@@ -1193,6 +1193,7 @@ async function runIssueOnce(
       branch: request.branch,
       reworkRounds,
       prNumber: ship.prNumber,
+      ...(ship.draft ? { draft: true } : {}),
       ...(planSlice ? { slice: { index: planSlice.index, count: planSlice.plan.slices.length } } : {}),
     };
   } catch (err) {
