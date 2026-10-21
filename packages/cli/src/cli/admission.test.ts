@@ -1,7 +1,7 @@
 // packages/cli/src/cli/admission.test.ts — runQueueReconcile + report formatting (#1497).
 
 import { describe, expect, it } from 'vitest';
-import type { AdmissionLookup, QueueSnapshot } from '@on-par/factory-core/internal';
+import type { AdmissionLookup, QueueSnapshot, StatelessLaneIssue } from '@on-par/factory-core/internal';
 
 import { formatQueueAdmissionReport, runQueueReconcile } from './admission.js';
 
@@ -75,5 +75,54 @@ describe('formatQueueAdmissionReport', () => {
     expect(formatQueueAdmissionReport([])).toBe(
       'queue reconcile — 0 queued issue(s), 0 conflict(s)\n  no Factory App admission conflicts — the GitHub label queue is authoritative here',
     );
+  });
+});
+
+describe('runQueueReconcile stateless lane issues', () => {
+  const issue267: StatelessLaneIssue = {
+    issue: 267,
+    lanes: ['mac-v1'],
+    labels: ['enhancement', 'ios', 'factory:lane:mac-v1'],
+  };
+  const base = { readSnapshot: snapshotWith([]), reader: readerReturning({}) };
+
+  it('reports a lane-labelled issue with no state label', async () => {
+    const { report, stateless, conflicts } = await runQueueReconcile({
+      ...base,
+      readStatelessLaneIssues: async () => [issue267],
+    });
+    expect(report).toContain('[mac-v1] #267 has factory:lane:mac-v1 but no state label');
+    expect(stateless).toBe(1);
+    expect(conflicts).toBe(0);
+  });
+
+  it('reports none when every lane issue has a state label', async () => {
+    const { report, stateless } = await runQueueReconcile({ ...base, readStatelessLaneIssues: async () => [] });
+    expect(report).toContain('no lane-labelled issues without a state label');
+    expect(stateless).toBe(0);
+  });
+
+  it('limits stateless lines to --lane', async () => {
+    const { report, stateless } = await runQueueReconcile({
+      ...base,
+      lane: 'web',
+      readStatelessLaneIssues: async () => [issue267, { issue: 9, lanes: ['web'], labels: ['factory:lane:web'] }],
+    });
+    expect(stateless).toBe(1);
+    expect(report).toContain('[web] #9');
+    expect(report).not.toContain('#267');
+  });
+
+  it('prints the scan failure and keeps the admission report', async () => {
+    const { report, stateless, conflicts } = await runQueueReconcile({
+      ...base,
+      readStatelessLaneIssues: async () => {
+        throw new Error('rate limited');
+      },
+    });
+    expect(report).toContain('no Factory App admission conflicts');
+    expect(report).toContain('queue reconcile — lane label scan failed: rate limited');
+    expect(stateless).toBe(0);
+    expect(conflicts).toBe(0);
   });
 });
