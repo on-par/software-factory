@@ -160,6 +160,15 @@ describe('defaultExecFn GitHub credential isolation', () => {
     expect(err.stderr).toContain('auth [redacted] [redacted]');
   });
 
+  it('ignores onStdout on the non-detached path', async () => {
+    const onStdout = vi.fn();
+
+    const { stdout } = await defaultExecFn('echo hi', { onStdout });
+
+    expect(stdout).toBe('hi\n');
+    expect(onStdout).not.toHaveBeenCalled();
+  });
+
   describe.skipIf(process.platform === 'win32')('onPgid (detached) path', () => {
     it('strips GitHub credentials from the detached child too', async () => {
       stubGitHubCredentials();
@@ -175,6 +184,29 @@ describe('defaultExecFn GitHub credential isolation', () => {
       const { stdout } = await defaultExecFn(PRINT_GITHUB_VARS, { onPgid: () => {}, githubAuth: true });
 
       expect(stdout.trim()).toBe('GH_ENTERPRISE_TOKEN,GH_TOKEN,GITHUB_ENTERPRISE_TOKEN,GITHUB_PAT,GITHUB_TOKEN|string');
+    });
+
+    it('forwards stdout chunks to onStdout', async () => {
+      const chunks: string[] = [];
+
+      const { stdout } = await defaultExecFn("printf 'a\\nb\\n'", {
+        onPgid: () => {},
+        onStdout: (chunk) => chunks.push(chunk),
+      });
+
+      expect(stdout).toBe('a\nb\n');
+      expect(chunks.join('')).toBe(stdout);
+    });
+
+    it('ignores a throwing onStdout', async () => {
+      const { stdout } = await defaultExecFn('echo hi', {
+        onPgid: () => {},
+        onStdout: () => {
+          throw new Error('boom');
+        },
+      });
+
+      expect(stdout).toBe('hi\n');
     });
 
     it('redacts the detached rejection message and stderr', async () => {

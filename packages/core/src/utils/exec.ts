@@ -1,6 +1,7 @@
 // src/utils/exec.ts — Canonical exec seam with an explicit millisecond timeout.
 
 import { exec as execCb, spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import { promisify } from 'node:util';
 
 import { childProcessEnv, redactExecError } from './github-credentials.js';
@@ -22,6 +23,9 @@ export type ExecFn = (
      *  its pid is reported here so a lane can track and later kill the
      *  whole group. */
     onPgid?: (pgid: number) => void;
+    /** Called with each decoded stdout chunk as it arrives. Honoured only on the
+     *  detached (`onPgid`) path; other paths ignore it. */
+    onStdout?: (chunk: string) => void;
     /** Grace period before SIGKILL when sweeping the group after a timeout. */
     killGraceMs?: number;
     /** Pass the parent's GitHub credentials (GITHUB_TOKEN, GH_TOKEN, …) through
@@ -54,7 +58,13 @@ interface ChildResult {
  *  direct child and settle immediately, independent of pipe state. */
 function execDetached(
   cmd: string,
-  opts: { cwd?: string; timeoutMs?: number; maxBuffer?: number; env: NodeJS.ProcessEnv },
+  opts: {
+    cwd?: string;
+    timeoutMs?: number;
+    maxBuffer?: number;
+    env: NodeJS.ProcessEnv;
+    onStdout?: (chunk: string) => void;
+  },
 ): Promise<ChildResult> & { child: ReturnType<typeof spawn> } {
   const maxBuffer = opts.maxBuffer ?? DEFAULT_MAX_BUFFER;
   const env = opts.env;
@@ -66,6 +76,7 @@ function execDetached(
   let stdoutLen = 0;
   let stderrLen = 0;
   const stdoutChunks: Buffer[] = [];
+  const decoder = new StringDecoder('utf8');
   const stderrChunks: Buffer[] = [];
   let maxBufferExceeded = false;
   let timedOut = false;
@@ -89,6 +100,16 @@ function execDetached(
         return;
       }
       stdoutChunks.push(chunk);
+      if (opts.onStdout) {
+        const text = decoder.write(chunk);
+        if (text) {
+          try {
+            opts.onStdout(text);
+          } catch {
+            // a throwing hook must not break the exec
+          }
+        }
+      }
     });
     child.stderr?.on('data', (chunk: Buffer) => {
       if (settled) return;
@@ -173,6 +194,7 @@ export const defaultExecFn: ExecFn = async (cmd, opts) => {
     timeoutMs: opts.timeoutMs,
     maxBuffer: opts.maxBuffer,
     env,
+    onStdout: opts.onStdout,
   });
 
   const pid = child.child.pid;

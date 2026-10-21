@@ -11,6 +11,7 @@ import { shellEscape } from '../utils/index.js';
 import { classifyFailure } from './classify.js';
 import { CODEX_GITHUB_HOSTS, CODEX_GITHUB_NETWORK_TASKS, codexWritableRoots } from './codex-policy.js';
 import type { CodingHarness, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
+import { startCodexLiveUsage, CODEX_THREAD_ID, codexThreadIdFromStdout } from './codex-live-usage.js';
 import { HarnessError, taskRequiresAgenticHarness } from './index.js';
 
 const CODEX_LOGIN_HINT = 'codex is not signed in (401): run `codex login`, then retry';
@@ -23,8 +24,6 @@ export interface CodexRolloutUsage {
   peakInputTokens: number;
   contextWindow?: number;
 }
-
-const CODEX_THREAD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Read the complete token-count calls visible in one rollout snapshot. */
 export async function readCodexRolloutUsage(path: string): Promise<CodexRolloutUsage | undefined> {
@@ -130,6 +129,8 @@ export interface CodexHarnessOptions {
   env?: Record<string, string | undefined>;
   /** Line logger; defaults to writing the line to stderr. */
   log?: (line: string) => void;
+  /** Poll interval for running usage when a request sets onUsage; default 5000. */
+  liveUsageIntervalMs?: number;
 }
 
 /** Runs a model via the Codex CLI. Full access requires a task named in config:
@@ -143,6 +144,7 @@ export class CodexCliHarness implements CodingHarness {
   private readonly unlink: (path: string) => Promise<void>;
   private readonly envSource: Record<string, string | undefined>;
   private readonly log: (line: string) => void;
+  private readonly liveUsageIntervalMs: number | undefined;
   private readonly loggedFullAccess = new Set<string>();
   private readonly loggedRefusals = new Set<string>();
   private readonly loggedWorkspace = new Set<string>();
@@ -154,6 +156,7 @@ export class CodexCliHarness implements CodingHarness {
     options: CodexHarnessOptions = {},
   ) {
     this.envSource = options.env ?? process.env;
+    this.liveUsageIntervalMs = options.liveUsageIntervalMs;
     this.log = options.log ?? ((line) => process.stderr.write(`${line}\n`));
     this.writeFile = fs.writeFile ?? writeFile;
     this.readFile = fs.readFile ?? readFile;
@@ -219,14 +222,29 @@ export class CodexCliHarness implements CodingHarness {
       const cmd = `codex exec --json --sandbox ${codexSandbox} -c approval_policy=never${networkFlags}${rootFlags} -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
       const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
 
+      const selectedHome = env?.CODEX_HOME !== undefined ? env.CODEX_HOME.trim() : this.envSource.CODEX_HOME?.trim();
+      const live = request.onUsage
+        ? startCodexLiveUsage({
+            onUsage: request.onUsage,
+            codexHome: selectedHome || undefined,
+            intervalMs: this.liveUsageIntervalMs,
+            locate: locateCodexRollout,
+            read: readCodexRolloutUsage,
+          })
+        : undefined;
       let execResult: { stdout: string; stderr: string };
       try {
-        execResult = await this.execFn(finalCmd, {
-          timeoutMs: timeoutSeconds * 1000,
-          maxBuffer: 10 * 1024 * 1024,
-          env,
-          onPgid,
-        });
+        try {
+          execResult = await this.execFn(finalCmd, {
+            timeoutMs: timeoutSeconds * 1000,
+            maxBuffer: 10 * 1024 * 1024,
+            env,
+            onPgid,
+            ...(live ? { onStdout: live.onStdout } : {}),
+          });
+        } finally {
+          live?.stop();
+        }
       } catch (err: any) {
         const stdout = typeof err.stdout === 'string' ? err.stdout : '';
         const errorText = `${err.stderr ?? ''}\n${extractCodexErrorText(stdout)}`;
@@ -255,8 +273,6 @@ export class CodexCliHarness implements CodingHarness {
       if (usage !== undefined) {
         const threadId = codexThreadIdFromStdout(execResult.stdout);
         if (threadId !== undefined) {
-          const selectedHome =
-            env?.CODEX_HOME !== undefined ? env.CODEX_HOME.trim() : this.envSource.CODEX_HOME?.trim();
           const rolloutPath = await locateCodexRollout(threadId, selectedHome || undefined).catch(() => undefined);
           const rolloutUsage =
             rolloutPath === undefined ? undefined : await readCodexRolloutUsage(rolloutPath).catch(() => undefined);
@@ -277,20 +293,6 @@ export class CodexCliHarness implements CodingHarness {
       if (outFile !== undefined) await this.unlink(outFile).catch(() => {});
     }
   }
-}
-
-function codexThreadIdFromStdout(stdout: string): string | undefined {
-  for (const line of stdout.split('\n')) {
-    let value: unknown;
-    try {
-      value = JSON.parse(line.trim());
-    } catch {
-      continue;
-    }
-    if (!isRecord(value) || value.type !== 'thread.started' || typeof value.thread_id !== 'string') continue;
-    if (CODEX_THREAD_ID.test(value.thread_id)) return value.thread_id;
-  }
-  return undefined;
 }
 
 const SAFE_SHELL_WORD = /^[\w@%+=:,./-]+$/;

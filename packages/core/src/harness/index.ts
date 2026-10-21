@@ -60,6 +60,8 @@ export interface HarnessRequest {
    *  process group) and its pid reported here so the lane can track and
    *  later kill the whole group. */
   onPgid?: (pgid: number) => void;
+  /** When set, the harness reports cumulative usage while the session runs (Codex only for now). */
+  onUsage?: (cumulative: HarnessLiveUsage) => void;
 }
 
 /** Provider-reported token usage for one harness invocation (#424). */
@@ -84,6 +86,9 @@ export interface HarnessUsage {
   /** Provider-reported total cost in USD, when the CLI reports one. */
   costUsd?: number;
 }
+
+/** Cumulative usage reported while a session is still running (#3319). */
+export type HarnessLiveUsage = HarnessUsage & { calls: number };
 
 export interface HarnessResult {
   /** Always non-empty after trim — empty provider output must throw instead. */
