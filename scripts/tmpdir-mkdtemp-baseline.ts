@@ -138,7 +138,7 @@ export const TMPDIR_MKDTEMP_BASELINE: Readonly<Record<string, number>> = {
   'packages/core/src/phases/plan-design-artifact.test.ts': 1,
   'packages/core/src/phases/plan-route.test.ts': 3,
   'packages/core/src/phases/plan-stack-slice.test.ts': 1,
-  'packages/core/src/phases/plan.test.ts': 65,
+  'packages/core/src/phases/plan.test.ts': 63,
   'packages/core/src/phases/project-board-queue.integration.test.ts': 1,
   'packages/core/src/phases/ship.test.ts': 3,
   'packages/core/src/proxy/index.test.ts': 2,

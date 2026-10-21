@@ -8,7 +8,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { planPhase } from './plan.js';
-import { specWriteDenied } from './plan-spec-guards.js';
+import { blockedNoChangeSpecReason, noBuildReason, specWriteDenied } from './plan-spec-guards.js';
+import { invalidPlanReason } from './plan-spec-validity.js';
 import { specWithDesign, StubModelExecutor } from './plan-test-helpers.js';
 
 const models: ModelsConfig = {
@@ -126,5 +127,28 @@ describe('specWriteDenied', () => {
 
   it('is false for a chat-only spec body mentioning the path', () => {
     expect(specWriteDenied(`---\nroute: claude\n---\n# Spec\nSpec lives at ${specPath}`, specPath)).toBe(false);
+  });
+});
+
+describe('blockedNoChangeSpecReason', () => {
+  it('recognizes blocked no-change and sandbox notes while preserving distinctions', () => {
+    expect(blockedNoChangeSpecReason('Blocked: no files were changed.')).toBe(
+      'PLAN returned a blocked/no-change note instead of a frozen spec',
+    );
+    expect(blockedNoChangeSpecReason('Blocked by sandbox policy outside the worktree.')).toBe(
+      'PLAN returned a blocked/no-change note instead of a frozen spec',
+    );
+    expect(blockedNoChangeSpecReason('Blocked: waiting for an answer.')).toBeNull();
+    expect(blockedNoChangeSpecReason('No files were changed.')).toBeNull();
+  });
+});
+
+describe('noBuildReason', () => {
+  it('prefers the blocked/no-change reason, then the invalid-plan reason, else null', () => {
+    expect(noBuildReason('Blocked: no files were changed.', ['e1'], 3)).toBe(
+      'PLAN returned a blocked/no-change note instead of a frozen spec',
+    );
+    expect(noBuildReason('# Spec\n', ['e1'], 3)).toBe(invalidPlanReason(['e1'], 3));
+    expect(noBuildReason('## Files / approach\nUpdate the parser.', ['e1'], 3)).toBeNull();
   });
 });

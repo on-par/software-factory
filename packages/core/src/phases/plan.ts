@@ -25,7 +25,7 @@ import {
 import type { SizeGateMode } from '../config/index.js';
 import type { BuildRoutePin } from '../config/repo.js';
 import { settlePlanRoute } from './plan-route.js';
-import { blockedNoChangeSpecReason, planSummary, specWriteDeniedResult } from './plan-spec-guards.js';
+import { blockedNoChangeSpecReason, noBuildReason, planSummary, specWriteDeniedResult } from './plan-spec-guards.js';
 import { decomposeOversizedIssue, renderChildIssueBody } from '../readiness/decompose.js';
 import { resolveSliceGate } from '../readiness/slice-gate.js';
 import { octokitStackSliceGateReader } from './stack-approval.js';
@@ -884,7 +884,7 @@ async function planPhaseImpl(opts: {
         return { ok: false, route, specPath, model: result.model, escalate: reason, designArtifact: null };
       }
     } else {
-      const blockedReason = blockedNoChangeSpecReason(parsed.body);
+      const blockedReason = noBuildReason(parsed.body, designErrors, designRetries + 1);
       if (blockedReason) {
         log('escalate', blockedReason);
         return { ok: false, route, specPath, model: result.model, escalate: blockedReason, designArtifact: null };

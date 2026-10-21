@@ -1,3 +1,10 @@
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { ModelRouter } from '../router/index.js';
+import { planPhase } from './plan.js';
 import { StubModelExecutor as BaseStubModelExecutor, type StubModelExecutorOptions } from '../router/stub.js';
 import { MAX_DESIGN_ARTIFACT_RETRIES } from './plan-design-retry.js';
 
@@ -44,4 +51,44 @@ export class StubModelExecutor extends BaseStubModelExecutor {
         : options,
     );
   }
+}
+
+export function withImplementation(frontmatter: string, title = '# Spec'): string {
+  return `---\n${frontmatter}\n---\n${title}\n\n## Files / approach\nUpdate a scoped source file.\n`;
+}
+
+export async function runPlanOutputs(
+  outputs: string[],
+  issue: number,
+  models: ModelsConfig,
+  routes: RoutesConfig,
+  tempDirs: Set<string>,
+) {
+  const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+  tempDirs.add(worktree);
+  const specPath = join(worktree, `issue-${issue}.md`);
+  const stub = new StubModelExecutor({ scripts: { plan: outputs.map((output) => ({ output })) } });
+  const router = new ModelRouter(models, routes, false, stub);
+  const octokit: any = {
+    rest: {
+      issues: {
+        get: async () => ({ data: { title: 'Plan validity', body: 'Body.' } }),
+        listComments: async () => ({ data: [] }),
+        createComment: async (input: { body: string }) => ({ data: { id: 1, body: input.body } }),
+      },
+      users: { getAuthenticated: async () => ({ data: { id: 1 } }) },
+    },
+  };
+  const logs: Array<{ type: string; msg: string }> = [];
+  const result = await planPhase({
+    issue,
+    repo: 'on-par/software-factory',
+    worktree,
+    specPath,
+    router,
+    constitution: null,
+    octokit,
+    log: (type, msg) => logs.push({ type, msg }),
+  });
+  return { result, logs, stub, octokit, worktree, specPath };
 }
