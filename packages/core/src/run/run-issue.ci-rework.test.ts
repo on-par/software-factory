@@ -400,3 +400,41 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     expect(shipPhase.mock.calls[1][0].reentry).toEqual({ prNumber: 9, previousHeadSha: 'sha' });
   });
 });
+
+describe('draft PR (#3449)', () => {
+  it('every CI-rework SHIP re-entry keeps draft and the run ends ready left as draft', async () => {
+    const ciFailure: CiFailureEvidence = {
+      failingChecks: [{ name: 'CodeQL', conclusion: 'failure', summary: '1 new alert' }],
+      alerts: [
+        {
+          ruleId: 'js/request-forgery',
+          location: 'packages/core/src/sandbox/egress-proxy.ts:130',
+          message: 'tainted url',
+        },
+      ],
+      truncated: false,
+    };
+    shipPhase
+      .mockResolvedValueOnce({
+        ok: false,
+        prNumber: 9,
+        reason: 'CI failed for PR #9',
+        ciOutcome: 'failure',
+        ciFailure,
+        headSha: 'sha',
+      })
+      .mockResolvedValueOnce({ ok: true, prNumber: 9, ciOutcome: 'success', draft: true });
+    const log = vi.fn<Log>();
+    const outcome = await runIssue(request, { ...policy, pr: { draft: true } }, ports(log));
+    expect(outcome).toMatchObject({ state: 'ready', prNumber: 9, draft: true });
+    for (const call of shipPhase.mock.calls) expect(call[0].draft).toBe(true);
+    expect(log).toHaveBeenCalledWith('ready', expect.stringContaining('PR #9 left as draft'));
+  });
+
+  it('passes no draft option when the policy has none', async () => {
+    shipPhase.mockResolvedValueOnce({ ok: true, prNumber: 9, ciOutcome: 'success' });
+    const outcome = await runIssue(request, policy, ports(vi.fn<Log>()));
+    expect(outcome).not.toHaveProperty('draft');
+    expect(shipPhase.mock.calls[0][0].draft).toBeUndefined();
+  });
+});

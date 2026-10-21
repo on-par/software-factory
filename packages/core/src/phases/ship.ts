@@ -48,6 +48,8 @@ export interface ShipResult {
   alreadyDelivered?: boolean;
   /** The head SHA watched on a CI rework re-entry (#2816). */
   headSha?: string;
+  /** Draft mode (#3449): mark-ready skipped; callers must not merge. */
+  draft?: boolean;
 }
 
 export async function shipPhase(opts: Parameters<typeof shipPhaseImpl>[0]): Promise<ShipResult> {
@@ -76,6 +78,8 @@ async function shipPhaseImpl(opts: {
   branch: string;
   octokit: Octokit;
   watchCI?: boolean;
+  /** Stop at the draft PR: skip mark-ready (#3449). */
+  draft?: boolean;
   log: (type: EventKind, msg: string) => void;
   run?: CommandRunner;
   /** Runs the gh rerun argv for the CI infra rescue (#2365); default runCommand. */
@@ -496,7 +500,10 @@ async function shipPhaseImpl(opts: {
         return { ok: false, prNumber, reason, ciOutcome };
       } else if (ciOutcome === 'timeout') {
         // Log type must stay 'ship': 'timeout' is a terminal event kind in the CLI.
-        log('ship', `CI did not finish within ${DEFAULT_CI_DEADLINE_MS / 60_000} min; marking PR ready anyway`);
+        log(
+          'ship',
+          `CI did not finish within ${DEFAULT_CI_DEADLINE_MS / 60_000} min; ${opts.draft ? 'leaving PR as draft' : 'marking PR ready anyway'}`,
+        );
       }
     } catch {}
   }
@@ -505,7 +512,9 @@ async function shipPhaseImpl(opts: {
   // undrafting requires the markPullRequestReadyForReview GraphQL mutation.
   try {
     const { data: pr } = await octokit.rest.pulls.get({ owner, repo: repoName, pull_number: prNumber });
-    if (pr.draft) {
+    if (opts.draft && !pr.draft) {
+      log('ship', `PR #${prNumber} is already open and not a draft; draft mode leaves it as is`);
+    } else if (pr.draft && !opts.draft) {
       await octokit.graphql(
         `mutation MarkPullRequestReady($id: ID!) {
           markPullRequestReadyForReview(input: { pullRequestId: $id }) {
@@ -517,17 +526,14 @@ async function shipPhaseImpl(opts: {
     }
   } catch {}
 
-  log(
-    'ready',
-    ciOutcome === 'no-checks'
-      ? `PR #${prNumber} ready for review (CI skipped: no checks found)`
-      : `PR #${prNumber} ready for review`,
-  );
+  const noChecks = ciOutcome === 'no-checks' ? ' (CI skipped: no checks found)' : '';
+  log('ready', `PR #${prNumber} ${opts.draft ? 'left as draft' : 'ready for review'}${noChecks}`);
   return {
     ok: true,
     prNumber,
     ...(ciOutcome === undefined ? {} : { ciOutcome }),
     ...(headSha ? { headSha } : {}),
+    ...(opts.draft ? { draft: true } : {}),
   };
 }
 

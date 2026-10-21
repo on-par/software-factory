@@ -21,6 +21,11 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     )
     .option('--approve-plan', 'Pause after PLAN freezes the spec and wait for approval before BUILD')
     .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
+    .option(
+      '--draft-pr',
+      'Stop SHIP at a draft PR: skip mark-ready and auto-merge, overriding run.pr.draft in the repo config',
+    )
+    .option('--no-draft-pr', 'Mark the PR ready for review after CI, overriding run.pr.draft in the repo config')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .action(async (issueNum, opts) => {
       await handlers.cmdShip(handlers.parseIssueArg(issueNum), opts);
@@ -38,6 +43,11 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     )
     .option('--approve-plan', 'Pause after PLAN freezes the spec and wait for approval before BUILD')
     .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
+    .option(
+      '--draft-pr',
+      'Stop SHIP at a draft PR: skip mark-ready and auto-merge, overriding run.pr.draft in the repo config',
+    )
+    .option('--no-draft-pr', 'Mark the PR ready for review after CI, overriding run.pr.draft in the repo config')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .option(
       '--run-children',
@@ -67,6 +77,11 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     )
     .option('--approve-plan', 'Pause after PLAN freezes the spec and wait for approval before BUILD')
     .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
+    .option(
+      '--draft-pr',
+      'Stop SHIP at a draft PR: skip mark-ready and auto-merge, overriding run.pr.draft in the repo config',
+    )
+    .option('--no-draft-pr', 'Mark the PR ready for review after CI, overriding run.pr.draft in the repo config')
     .option(
       '--workspace <dir>',
       'Local-only: run PLAN/BUILD/CHECK in this caller-provided git workspace and disable PR creation, merging, queue polling, and GitHub mutations',

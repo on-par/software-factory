@@ -54,6 +54,7 @@ import {
   readIssueRunState,
   recordLocalAuthFailure,
   resolveBaseHealthChecks,
+  resolveDraftPrPolicy,
   resolveEffectiveConfig,
   resolvePrClassifierPolicy,
   runStateFile,
@@ -94,6 +95,8 @@ export async function shipIssue(
     maxSlices?: number;
     /** `--pr-classifier` / `--no-pr-classifier` (#1724); undefined defers to config/env. */
     prClassifier?: boolean;
+    /** --draft-pr / --no-draft-pr (#3449); undefined defers to run.pr.draft. */
+    draftPr?: boolean;
     /** `--no-pr` sets false: stop after a clean CHECK with no GitHub writes; undefined = ship as usual. */
     pr?: boolean;
   },
@@ -182,6 +185,7 @@ export async function shipIssue(
     routes: loaders.loadRoutesConfig(),
     sandbox: factoryConfig.sandbox,
     budget: { perIssueCapUsd: efficiency.perIssueCapUsd },
+    pr: { draft: resolveDraftPrPolicy(factoryConfig, opts.draftPr).draft },
     effective:
       opts.branchPrefix === undefined
         ? resolveEffectiveConfig(repoConfig)
