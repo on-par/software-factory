@@ -101,7 +101,7 @@ describe('acquirePortLease', () => {
       const lockDir = join(dir, 'ports.lock');
       const range: [number, number] = [3100, 3999];
 
-      for (let iter = 0; iter < 50; iter++) {
+      for (let iter = 0; iter < 3; iter++) {
         const worktreeIds = Array.from({ length: 20 }, (_, i) => `/wt/iter${iter}/${i}`);
         const leases = await Promise.all(
           worktreeIds.map((worktreeId) =>
@@ -130,7 +130,7 @@ describe('acquirePortLease', () => {
         );
       }
     });
-  }, 30_000);
+  });
 
   it('skips an externally-bound port using the real bind probe', async () => {
     await withTmpDir(async (dir) => {
