@@ -50,6 +50,8 @@ export interface QueuePreflightOps {
   onDeferred?: (issue: number, message: string) => void;
   /** Current head/base refs of a slice PR; the head SHA is the rebased one after GitHub retargets a layer. */
   getPullRefs(prNumber: number): Promise<{ headRef: string; baseRef: string; headSha: string }>;
+  /** True when `branch` still holds commit `sha` (compare status ahead or identical); false for a missing branch (#3368). */
+  branchContains(sha: string, branch: string): Promise<boolean>;
 }
 
 export function makeQueuePreflightOps(
@@ -91,6 +93,19 @@ export function makeQueuePreflightOps(
     getPullRefs: async (prNumber) => {
       const { data } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
       return { headRef: data.head.ref, baseRef: data.base.ref, headSha: data.head.sha };
+    },
+    branchContains: async (sha, branch) => {
+      try {
+        const { data } = await octokit.rest.repos.compareCommitsWithBasehead({
+          owner,
+          repo,
+          basehead: `${sha}...${branch}`,
+        });
+        return data.status === 'ahead' || data.status === 'identical';
+      } catch (err) {
+        if ((err as { status?: unknown }).status === 404) return false;
+        throw err;
+      }
     },
     expectedHeadRepoFullName: `${owner}/${repo}`,
     findOpenPR: (issue) => findOpenPRForIssue(octokit, owner, repo, issue),
@@ -267,12 +282,27 @@ async function preflightSlice(issue: number, deps: QueuePreflightOps): Promise<Q
     }
     const saved = await save();
     if (saved) return saved;
+    let refs: Awaited<ReturnType<QueuePreflightOps['getPullRefs']>> | undefined;
+    // #3368: the layer below was squash-merged but this branch still carries its original commits: restack it.
+    const below = deps.stackMode ? next.slices.find((s) => s.index === slice.index - 1) : undefined;
+    if (below?.state === 'merged' && below.prNumber !== undefined) {
+      try {
+        const mergedRefs = await deps.getPullRefs(below.prNumber);
+        refs = await deps.getPullRefs(pr);
+        if (await deps.branchContains(mergedRefs.headSha, refs.headRef)) {
+          return { kind: 'restack', mergedIndex: below.index, mergedPrNumber: below.prNumber };
+        }
+      } catch (err) {
+        return { kind: 'park', reason: `${label} PR #${pr} restack check failed: ${errorDetail(err)}` };
+      }
+    }
     if (!deps.autoMergeStack) return waitOrBuild();
-    let refs: Awaited<ReturnType<QueuePreflightOps['getPullRefs']>>;
-    try {
-      refs = await deps.getPullRefs(pr);
-    } catch (err) {
-      return { kind: 'park', reason: `${label} PR #${pr} ref lookup failed: ${errorDetail(err)}` };
+    if (refs === undefined) {
+      try {
+        refs = await deps.getPullRefs(pr);
+      } catch (err) {
+        return { kind: 'park', reason: `${label} PR #${pr} ref lookup failed: ${errorDetail(err)}` };
+      }
     }
     // GitHub has not retargeted the layer to main yet: the lower layer is still unmerged.
     if (refs.baseRef !== 'main') return waitOrBuild();

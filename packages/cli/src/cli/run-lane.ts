@@ -5,7 +5,12 @@ import { existsSync } from 'node:fs';
 import { parkReasonFor } from '@on-par/factory-core';
 import type { LanePausedPayload, getFactoryPaths, RunOutcome } from '@on-par/factory-core';
 import { formatLoadHold, logEvent } from '@on-par/factory-core/internal';
-import type { LoadGuardDecision, QueueClaim, QueueReleaseOutcome } from '@on-par/factory-core/internal';
+import type {
+  LoadGuardDecision,
+  QueueClaim,
+  QueueReleaseOutcome,
+  StackRestackOutcome,
+} from '@on-par/factory-core/internal';
 
 import { BASE_HOLD_CI_RECHECK_MS, type BaseHoldDecision, writeBaseHold } from './base-hold.js';
 import { waitForMerge } from './land.js';
@@ -35,6 +40,8 @@ export type RunLaneDeps = {
   waitMerge?: typeof waitForMerge;
   /** ADR-0161: records a landed stack layer as merged in the slice-plan comment. Defaults to a no-op. */
   recordStackMerge?: (issue: number, prNumber: number) => Promise<void>;
+  /** ADR-0161 (#3368): rebases the open layers above a squash-merged layer onto main, model-free. Defaults to a no-op. */
+  restack?: (issue: number, merged: { index: number; prNumber: number }) => Promise<StackRestackOutcome>;
   pathExists?: (path: string) => boolean;
   emitEvent?: typeof logEvent;
   claimNext?: () => Promise<QueueClaim | null>;
@@ -115,6 +122,7 @@ export async function runLane(
     ship = shipIssue,
     waitMerge = waitForMerge,
     recordStackMerge = async () => {},
+    restack = async () => ({ status: 'nothing', reason: 'restack not wired' }),
     pathExists = existsSync,
     emitEvent = logEvent,
     claimNext = async () => null,
@@ -205,13 +213,13 @@ export async function runLane(
       await releaseIssue(issue, 'queued');
       return;
     }
-    if (decision.kind === 'park') {
-      emitEvent(paths.events, 'escalate', issue, decision.reason, { lane });
+    const parkIssue = async (reason: string): Promise<void> => {
+      emitEvent(paths.events, 'escalate', issue, reason, { lane });
       emitEvent(
         paths.events,
         'parked',
         issue,
-        `issue #${issue} parked (${decision.reason}); lane '${lane}' continuing, ${await remainingAfter(i)} issue(s) remaining`,
+        `issue #${issue} parked (${reason}); lane '${lane}' continuing, ${await remainingAfter(i)} issue(s) remaining`,
         { lane },
       );
       // A preflight-parked issue may still have a stale worktree from a prior run; the reap
@@ -220,6 +228,38 @@ export async function runLane(
       await settle(issue, 'parked');
       parked++;
       streak = null;
+    };
+    const runRestack = async (merged: {
+      index: number;
+      prNumber: number;
+    }): Promise<{ parkReason?: string; note: string }> => {
+      try {
+        const out = await withHeartbeat(issue, heartbeat, () => restack(issue, merged));
+        if (out.status === 'park') return { parkReason: out.reason, note: out.reason };
+        return {
+          note:
+            out.status === 'restacked'
+              ? `restacked slice(s) ${out.slices.map((r) => r.index).join(', ')} onto main after slice ${merged.index} merged`
+              : out.reason,
+        };
+      } catch (err) {
+        const reason = `restack failed: ${shipRuntime().errorDetail(err)}`;
+        return { parkReason: reason, note: reason };
+      }
+    };
+    if (decision.kind === 'park') {
+      await parkIssue(decision.reason);
+      continue;
+    }
+    if (decision.kind === 'restack') {
+      const done = await runRestack({ index: decision.mergedIndex, prNumber: decision.mergedPrNumber });
+      if (done.parkReason !== undefined) {
+        await parkIssue(done.parkReason);
+        continue;
+      }
+      emitEvent(paths.events, 'ship', issue, done.note, { lane });
+      streak = null;
+      await settle(issue, 'queued');
       continue;
     }
     const layer = decision.kind === 'adopt' ? decision.stackLayer : undefined;
@@ -274,6 +314,14 @@ export async function runLane(
           ),
         );
         merged++;
+        if (layer.index < layer.count) {
+          const done = await runRestack({ index: layer.index, prNumber: layer.prNumber });
+          if (done.parkReason !== undefined) {
+            await parkIssue(done.parkReason);
+            continue;
+          }
+          emitEvent(paths.events, 'ship', issue, done.note, { lane });
+        }
         streak = null;
         await settle(issue, layer.index < layer.count ? 'queued' : 'done');
         continue;

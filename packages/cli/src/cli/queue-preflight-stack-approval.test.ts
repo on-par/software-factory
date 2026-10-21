@@ -21,6 +21,7 @@ const baseDeps = {
     throw new Error('unexpected prerequisite lookup');
   },
   getPullRefs: async () => ({ headRef: 'b', baseRef: 'main', headSha: 's' }),
+  branchContains: async () => false,
 };
 
 const sliceStory = (n: number) => ({

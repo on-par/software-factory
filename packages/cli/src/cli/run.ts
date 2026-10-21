@@ -56,6 +56,7 @@ import type {
 import { runEndOfRunKpiSnapshot } from './kpi-sweep.js';
 import { waitForMerge } from './land.js';
 import { runLane } from './run-lane.js';
+import { restackFromSlicePlan } from './run-restack.js';
 import { writeRunFlagOverrides } from './run-flags.js';
 import { shipIssue } from './ship.js';
 import { readStopFileStatus, stopSentinelRunSkipMessage } from './stop-sentinel.js';
@@ -347,6 +348,8 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
               ),
             recordStackMerge: (issue, prNumber) =>
               recordSliceMerged({ octokit: rt.getOctokit(), repo: ghRepo, issue, prNumber }).then(() => {}),
+            restack: (issue, merged) =>
+              restackFromSlicePlan({ octokit: rt.getOctokit(), repo: ghRepo, repoRoot, issue, merged }),
             waitMerge: (issue, branch, root, gh, p, d = {}) =>
               waitForMerge(issue, branch, root, gh, p, { ...d, mergeOverrides: { auto: opts.autoMerge } }),
           }),

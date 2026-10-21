@@ -319,7 +319,8 @@ const TAIL = 'InvalidEventCursorError eventSegmentFileName eventSegmentsDir read
 const STEER = 'STEER_SOURCES STEER_PHASES SteerEventError parseSteerEvent appendSteerEvent listSteerEvents'.split(' '); // #3400
 const STEERED = 'collectMergedPrSteers isoWeekKey summarizeSteerability formatSteerabilityReport'.split(' '); // #3403
 const MORE = ['agentInvocationsFromEvents', 'computeTokenCoverage', 'readReviewApproval', 'readStackSliceGate']; // #3126, #3366
-const EXTRA_INTERNAL_KEYS = [...AGENT_JOB_KEYS, ...TAIL, ...MORE, ...STEER, ...STEERED, 'nextStackSlice'];
+const STACK = ['nextStackSlice', 'restackAfterSquashMerge']; // #3366, #3368
+const EXTRA_INTERNAL_KEYS = [...AGENT_JOB_KEYS, ...TAIL, ...MORE, ...STEER, ...STEERED, ...STACK];
 const INTERNAL_API_KEYS = [
   'openCodeVersion',
   'DEFAULT_CI_DEADLINE_MS',
@@ -547,14 +548,13 @@ const INTERNAL_API_KEYS = [
   'resolveLocalOnly',
   ...'resolveHostMaxBuilds evaluateRisk decideRiskMerge NEEDS_HUMAN_LABEL RISK_HIGH_LABEL RISK_MED_LABEL'.split(' '), // #3380, #3381
   ...'RISK_RECEIPT_END RISK_RECEIPT_START listPrChangedFiles publishRiskReceipt renderRiskReceipt'.split(' '), // #3386
-  ...'upsertRiskReceipt RISK_POLICY_FILE loadRiskPolicy formatRiskPolicy'.split(' '), // #3387
+  ...'upsertRiskReceipt riskPolicyConfigFile loadRiskPolicy formatRiskPolicy'.split(' '), // #3387
   ...'resolveHostLoadGuard evaluateLoadGuard formatLoadHold readHostLoad resolveBaseHealthChecks'.split(' '), // #3048, #3290
   ...'hostBuildSlotsDir listHostSlots'.split(' '),
   ...'withHostBuildSlot createRunSlotGate withRunAndHostBuildSlot'.split(' '), // #3049
   ...'FACTORY_RUNTIME_CONFIG_KEYS isTrustedApprover'.split(' '),
   'createOctokitCollaboratorPermissionClient',
-  'CONFIG_EXAMPLE_OMITTED_KEYS',
-  'renderConfigExample',
+  ...'CONFIG_EXAMPLE_OMITTED_KEYS renderConfigExample'.split(' '),
   'resolveEvidenceAllowlist',
   'runEvidencePlan',
   // Design artifact (#422)

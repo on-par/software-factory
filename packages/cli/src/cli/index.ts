@@ -304,6 +304,7 @@ import { cmdHostedSmoke } from './hosted.js';
 import { cmdHostedQueue } from './hosted-queue.js';
 import { cmdHostedRunner } from './hosted-runner.js';
 import { resolveFactoryCheckoutCommit, runFilingPreview } from './filing.js';
+import { cmdRisk } from './risk.js';
 import { buildFeedbackDeps, type FeedbackDeps, resolveFeedbackRepo, runFeedback } from './feedback.js';
 import { ensureFactoryExcluded, writeSampleQueue } from './init-files.js';
 import { cmdLogs } from './logs.js';
@@ -1535,6 +1536,11 @@ function persistClassifierOutcomes(
   const updated = mergeClassifierOutcomes(readTextFileOrEmpty(paths.classifierOutcomes), records);
   ensureDir(paths.state);
   writeFileSync(paths.classifierOutcomes, updated);
+}
+
+/** `factory risk <pr>` (#3385): the handler lives in ./risk.ts; this binds its runtime. */
+function runRisk(pr: string, opts: { policy?: string } = {}): Promise<void> {
+  return cmdRisk(pr, opts, { getRepoRoot, getGitHubRepo, getOctokit, CliExitError, log: console.log });
 }
 
 async function cmdClassifierReport(opts: { json?: boolean } = {}) {
@@ -4239,6 +4245,7 @@ export const PROGRAM_HANDLERS = {
   cmdKpis,
   cmdClassifierReport,
   cmdReport,
+  cmdRisk: runRisk,
   cmdClassifierBacktestEntry,
   cmdGarden,
   cmdTui,

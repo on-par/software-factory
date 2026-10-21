@@ -202,7 +202,6 @@ export type {
   LocalSmallStepPlan,
 } from './local-small/stepwise.js';
 export { applyLocalSmallPatchStep, createLocalSmallDryRun } from './local-small/stepwise.js';
-
 // Eval internals
 export { judgeSpec, median, runJudgeSamples, scoreSpec } from './eval/index.js';
 
@@ -635,7 +634,6 @@ export { computeReviewFloor, DEFAULT_REVIEW_FLOOR_RULES } from './review/floor.j
 export * from './review/risk.js'; // Risk tier (#3380, #3381)
 export * from './review/risk-receipt.js'; // Risk receipt (#3386)
 export { listPrChangedFiles } from './run/ci-rework.js';
-
 // PR classifier shadow verdict (#1725)
 export type { PrClassificationRecord, PrClassifierClaim, PrShadowInput, PrShadowVerdict } from './review/classifier.js';
 export {
@@ -757,6 +755,7 @@ export * from './run/state.js';
 export * from './run/steer.js';
 export * from './kpis/steerability.js';
 export { createStackSliceBranch } from './run/stack-slice-branch.js';
+export { restackAfterSquashMerge, type StackRestackOptions, type StackRestackOutcome } from './run/stack-restack.js';
 export {
   checkResumePath,
   configParkMessage,

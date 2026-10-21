@@ -156,6 +156,7 @@ export type QueuePreflightDecision =
       stackLayer?: { index: number; count: number; prNumber: number };
     }
   | { kind: 'park'; reason: string }
+  | { kind: 'restack'; mergedIndex: number; mergedPrNumber: number }
   | { kind: 'defer' };
 
 export type QueuePreflight = (candidate: QueueIssue) => Promise<QueuePreflightDecision>;
@@ -163,7 +164,7 @@ export type QueuePreflight = (candidate: QueueIssue) => Promise<QueuePreflightDe
 /** A successfully claimed issue and the preflight decision that led to the claim. */
 export interface QueueClaim {
   issue: number;
-  decision: Extract<QueuePreflightDecision, { kind: 'build' | 'adopt' | 'park' }>;
+  decision: Extract<QueuePreflightDecision, { kind: 'build' | 'adopt' | 'park' | 'restack' }>;
 }
 
 export interface QueueGitHubClient {

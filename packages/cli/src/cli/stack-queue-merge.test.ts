@@ -67,6 +67,7 @@ const makeOps = (states: Record<number, SlicePullState>, over: Partial<QueuePref
       throw new Error('unexpected prerequisite lookup');
     }),
     getPullRefs: vi.fn(async () => ({ headRef: 'factory/7-s2-x', baseRef: 'main', headSha: 'rebased' })),
+    branchContains: vi.fn(async () => false),
     ...over,
   };
   return ops satisfies QueuePreflightOps;
