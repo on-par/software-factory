@@ -1,5 +1,6 @@
 // src/types/index.ts — Core type definitions for the Software Factory
 import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
+import type { RunAttribution } from '../run/outcome.js';
 import type { SteerEvent } from '../run/steer.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
 import type { EvidencePlanResult } from '../checkers/evidence-plan.js';
@@ -372,10 +373,9 @@ export interface FactoryEvent {
   readiness?: ReadinessInfo;
   queueReprioritization?: QueueReprioritizationRecord;
   prClassification?: PrClassificationRecord;
-  /** Breaker details on a `lane-paused` event (#1916). */
-  lanePaused?: LanePausedPayload;
-  /** Trigger details on a steward-triggered event (#2086). */
-  stewardTriggered?: StewardTriggeredPayload;
+  lanePaused?: LanePausedPayload; // Breaker details on a `lane-paused` event (#1916).
+  stewardTriggered?: StewardTriggeredPayload; // Trigger details on a steward-triggered event (#2086).
+  attribution?: RunAttribution; // Plan/build model, provider, effort on a run's terminal events (#3321).
   /** Re-run verdict on a flaky_tests event (#2302). */
   flakyTests?: FlakyTestsPayload;
   /** CHECK failure signature behind a park event (#2083). */

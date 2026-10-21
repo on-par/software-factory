@@ -35,6 +35,7 @@ import { lintFactoryConfig } from '../config/config-lint.js';
 import { planPhase as planPhaseDefault, type PlanResult } from '../phases/plan.js';
 import { planConfigParkMessage } from '../phases/plan-spec-guards.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
+import { withRunAttribution, type RunLogFn as LogFn } from './attribution.js';
 import { publishParkComment } from './park-comment.js';
 import { gateOpencodeBuildOnBreaker, providerFallbackPreferrer } from './provider-breaker-gate.js';
 import { fileFlakyTests } from './flaky-tests.js';
@@ -46,7 +47,6 @@ import {
   classifierPolicyVersion,
   classifyPrShadow,
   toClassificationRecord,
-  type PrClassificationRecord,
   type PrShadowInput,
   type PrShadowVerdict,
 } from '../review/classifier.js';
@@ -55,7 +55,6 @@ import { captureDiffBase } from '../checkers/design-smells.js';
 import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings, SizeGateMode } from '../config/index.js';
 import { type EffectiveModelPins, routeForBuildModel } from '../config/repo.js';
-import type { EventKind, FlakyTestsPayload, StewardTriggeredPayload } from '../events/kinds.js';
 import { detectStuck } from '../steward/detect.js';
 import { runSteward, type RunStewardPorts } from '../steward/run.js';
 import { describeDotnetEnv, dotnetEnvReport } from '../environment/dotnet.js';
@@ -64,15 +63,7 @@ import type { ModelRouter } from '../router/index.js';
 import { gateBuildOnBreaker, parseResetCooldownMs, type ProviderBreaker } from '../router/breaker.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { describeSteering, type ConsumedSteering } from '../steering/index.js';
-import type {
-  CheckFailureInfo,
-  CiFailureEvidence,
-  CheckSummary,
-  Constitution,
-  FailoverReason,
-  FailurePhase,
-  ReadinessInfo,
-} from '../types/index.js';
+import type { CiFailureEvidence, CheckSummary, Constitution, FailoverReason, FailurePhase } from '../types/index.js';
 import type { WorkRequest, WorkRequestSourceKind } from '../work/index.js';
 import {
   releaseLaneClaim,
@@ -97,7 +88,7 @@ import { runStatusForPhase, type RunStateUpdate } from './state.js';
 import { shipWithCiRework, type CiReworkPorts } from './ci-rework-loop.js';
 import { parkLogExtra } from './ship-park.js';
 import { budgetGuardFor, enforceIssueBudget } from './budget.js';
-import type { EscalateKind, IssueRunState } from '../types/index.js';
+import type { IssueRunState } from '../types/index.js';
 import { renderPreviousAttempt } from './previous-attempt.js';
 
 /** Everything one run needs decided, as a plain resolved value — the CLI adapter
@@ -176,23 +167,6 @@ export interface RunRequest {
   /** state/worktree-keeps.json (#3316); undefined = a budget park records no keep. */
   worktreeKeepsPath?: string;
 }
-
-type LogFn = (
-  type: EventKind,
-  msg: string,
-  extra?: {
-    failoverReason?: FailoverReason;
-    model?: string;
-    tokens?: { input: number; output: number };
-    readiness?: ReadinessInfo;
-    prClassification?: PrClassificationRecord;
-    checkFailure?: CheckFailureInfo;
-    ciFailure?: CiFailureEvidence;
-    escalateKind?: EscalateKind;
-    stewardTriggered?: StewardTriggeredPayload;
-    flakyTests?: FlakyTestsPayload;
-  },
-) => void;
 
 interface RunReportInfo {
   outcome: 'ready' | 'failed' | 'parked' | 'escalated';
@@ -289,7 +263,8 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export async function runIssue(request: RunRequest, policy: RunPolicy, ports: RunPorts): Promise<RunOutcome> {
+export async function runIssue(request: RunRequest, policy: RunPolicy, rawPorts: RunPorts): Promise<RunOutcome> {
+  const { ports, stamp } = withRunAttribution(rawPorts);
   const log = ports.events();
   const observed: { checkSummary?: CheckSummary } = {};
   let outcome: RunOutcome;
@@ -301,7 +276,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, ports: Ru
     throw err;
   }
   await safeRecordRunState(ports.recordRunState, log, terminalRunStateUpdate(outcome, observed.checkSummary));
-  return outcome;
+  return stamp(outcome);
 }
 
 async function runIssueOnce(

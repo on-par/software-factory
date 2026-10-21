@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
 import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
+import type { RunAttribution } from '../run/outcome.js';
 import { createLogger } from '../logger/index.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
 import type { PrLookup } from '../phases/ship.js';
@@ -53,6 +54,7 @@ export function logEvent(
     model?: string;
     tokens?: { input: number; output: number };
     durationMs?: number;
+    attribution?: RunAttribution;
   },
 ): void {
   const logger = createLogger(eventsFile, { issue, lane: extra?.lane, phase: extra?.phase });
@@ -69,6 +71,7 @@ export function logEvent(
   if (extra?.ciFailure) meta.ciFailure = extra.ciFailure;
   if (extra?.escalateKind) meta.escalateKind = extra.escalateKind;
   if (extra?.actor) meta.actor = extra.actor;
+  if (extra?.attribution) meta.attribution = extra.attribution;
   if (extra?.model) meta.model = extra.model;
   if (extra?.tokens) meta.tokens = extra.tokens;
   if (extra?.durationMs !== undefined) meta.durationMs = extra.durationMs;

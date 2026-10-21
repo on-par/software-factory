@@ -76,6 +76,11 @@
       "properties": {},
       "additionalProperties": {}
     },
+    "attribution": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
     "checkFailure": {
       "type": "object",
       "properties": {},

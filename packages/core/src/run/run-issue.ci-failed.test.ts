@@ -123,7 +123,11 @@ describe('runIssue — SHIP CI failure parks as ci-failed (#2814)', () => {
     const log = vi.fn<Log>();
     const outcome = await runIssue(request, policy, ports(log));
     expect(outcome).toMatchObject({ state: 'parked', reason: 'ci-failed' });
-    expect(log).toHaveBeenCalledWith('ci-failed', 'ship phase failed: CI failed for PR #9', { ciFailure: EVIDENCE });
+    expect(log).toHaveBeenCalledWith(
+      'ci-failed',
+      'ship phase failed: CI failed for PR #9',
+      expect.objectContaining({ ciFailure: EVIDENCE }),
+    );
     expect(log.mock.calls.some(([type]) => type === 'fail')).toBe(false);
   });
 
@@ -132,7 +136,11 @@ describe('runIssue — SHIP CI failure parks as ci-failed (#2814)', () => {
     const log = vi.fn<Log>();
     const outcome = await runIssue(request, policy, ports(log));
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
-    expect(log).toHaveBeenCalledWith('fail', 'ship phase failed: push failed', undefined);
+    expect(log).toHaveBeenCalledWith(
+      'fail',
+      'ship phase failed: push failed',
+      expect.objectContaining({ attribution: expect.anything() }),
+    );
   });
 
   it('keeps ci-infra and escalate parks unchanged', async () => {

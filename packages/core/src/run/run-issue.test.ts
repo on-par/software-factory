@@ -154,6 +154,7 @@ beforeEach(() => {
   vi.mocked(checkPhase).mockReset().mockResolvedValue(CHECK_OK);
   vi.mocked(shipPhase).mockReset().mockResolvedValue(SHIP_OK);
 });
+const STAMPED = expect.objectContaining({ attribution: expect.anything() });
 
 describe('runIssue — recorded remote branch SHA (#1869)', () => {
   it('configures the real router with the state and git roots before PLAN', async () => {
@@ -162,7 +163,7 @@ describe('runIssue — recorded remote branch SHA (#1869)', () => {
     const setPaths = vi.spyOn(router, 'setCodexWorkspacePaths');
     await runIssue(baseRequest({ codexWorkspacePaths: paths }), basePolicy(), basePorts({ router }));
     expect(setPaths).toHaveBeenCalledWith(paths);
-    expect(vi.mocked(planPhase).mock.calls[0][0].router).toBe(router);
+    expect(vi.mocked(planPhase).mock.calls[0][0].router.registryRef).toBe(router.registryRef);
   });
   it('threads the recorded remote SHA into shipPhase, undefined without a record', async () => {
     const sandboxPolicy = { runtime: 'none' } as SandboxPolicy;
@@ -445,7 +446,7 @@ describe('runIssue — slice shipping (ADR-0147)', () => {
     );
 
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
-    expect(events).toHaveBeenCalledWith('fail', expect.stringContaining('PR #55'), undefined);
+    expect(events).toHaveBeenCalledWith('fail', expect.stringContaining('PR #55'), STAMPED);
   });
 
   it('skips the comment write when SHIP returns no PR number', async () => {
@@ -1094,9 +1095,8 @@ describe('runIssue — reporting hooks', () => {
     });
     const log = vi.fn();
     await runIssue(baseRequest(), basePolicy(), basePorts({ events: () => log }));
-    expect(log).toHaveBeenCalledWith('fail', expect.any(String), {
-      checkFailure: { signature: 'sig-1', failingChecks: ['tests'] },
-    });
+    const checkFailure = { signature: 'sig-1', failingChecks: ['tests'] };
+    expect(log).toHaveBeenCalledWith('fail', expect.any(String), expect.objectContaining({ checkFailure }));
 
     vi.mocked(buildPhase).mockResolvedValue({ ok: false, model: 'm', route: 'codex', reason: 'no_diff' });
     vi.mocked(checkPhase).mockReset();
@@ -1104,7 +1104,7 @@ describe('runIssue — reporting hooks', () => {
     await runIssue(baseRequest(), basePolicy(), basePorts({ events: () => buildLog }));
     const parkCalls = buildLog.mock.calls.filter(([type]) => type === 'fail');
     expect(parkCalls.length).toBeGreaterThan(0);
-    for (const call of parkCalls) expect(call[2]).toBeUndefined();
+    for (const call of parkCalls) expect(call[2]?.checkFailure).toBeUndefined();
   });
 
   it('leaves the signature undefined on a non-CHECK park (#1917)', async () => {
@@ -2324,7 +2324,7 @@ describe('runIssue — config template-token preflight (#2586)', () => {
     expect(checkBaseHealth).not.toHaveBeenCalled();
     expect(run).not.toHaveBeenCalled();
     expect(recordPhase).not.toHaveBeenCalledWith('plan');
-    expect(events).toHaveBeenCalledWith('config', expect.stringContaining(expected), undefined);
+    expect(events).toHaveBeenCalledWith('config', expect.stringContaining(expected), STAMPED);
   }
   it('parks before PLAN with file:line when the constitution frontmatter has an unfilled token', async () => {
     await expectParked(
@@ -2406,7 +2406,7 @@ describe('runIssue — preflight config failure ends with the config cause (#258
     const kinds = events.mock.calls.map((c) => c[0]);
     expect(kinds).toContain('config');
     for (const k of ['fail', 'escalate', 'check']) expect(kinds).not.toContain(k);
-    expect(events.mock.calls.find((c) => c[0] === 'config')?.[2]).toBeUndefined();
+    expect(events.mock.calls.find((c) => c[0] === 'config')?.[2]?.checkFailure).toBeUndefined();
   });
 
   it('writes the file:line preflight message into the final run report', async () => {

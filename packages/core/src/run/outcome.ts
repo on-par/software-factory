@@ -9,6 +9,13 @@ import type { BuildRoutePin } from '../config/repo.js';
 
 export type BuildRoute = BuildRoutePin;
 
+/** Which model, provider and effort planned and built a run, stamped on its terminal events (#3321). */
+export interface RunAttribution {
+  plan?: { model: string; provider: string; effort?: string | boolean };
+  build?: { model: string; provider: string; effort?: string | boolean };
+  endedIn?: 'plan' | 'build' | 'check' | 'ship';
+}
+
 /** CHECK/CI rework reruns on the route BUILD completed on, `command` included (#2873):
  *  reworkWorker keeps it when its model can run and reroutes otherwise. */
 export function reworkRouteFor(
@@ -23,7 +30,14 @@ export function reworkRouteFor(
  *  `escalated` are defined here for later stories (#4, #5) that re-point the CLI
  *  supervisor and the sim onto this union. */
 export type RunOutcome =
-  | { state: 'shipped'; route: BuildRoute; branch: string; reworkRounds: number; prNumber: number }
+  | {
+      state: 'shipped';
+      route: BuildRoute;
+      branch: string;
+      reworkRounds: number;
+      prNumber: number;
+      attribution?: RunAttribution;
+    }
   | {
       state: 'ready';
       route: BuildRoute;
@@ -32,6 +46,7 @@ export type RunOutcome =
       prNumber?: number;
       /** the ADR-0147 slice this run shipped */
       slice?: { index: number; count: number };
+      attribution?: RunAttribution;
     }
   | {
       state: 'parked';
@@ -44,6 +59,7 @@ export type RunOutcome =
       failureSignature?: string;
       /** Names of the checkers that FAILed in that CHECK — set only alongside failureSignature. */
       failingChecks?: string[];
+      attribution?: RunAttribution;
     }
   | {
       state: 'released';
@@ -61,6 +77,7 @@ export type RunOutcome =
       failureSignature?: string;
       /** BUILD output was kept and a check-resume record written (#2564). */
       buildPreserved?: boolean;
+      attribution?: RunAttribution;
     }
   | {
       /** ADR-0161: the stack slice below (`slice.index`, PR `prNumber`) awaits approval or merge, so the issue goes back to queued and is not parked. */
@@ -71,8 +88,16 @@ export type RunOutcome =
       reworkRounds: number;
       prNumber: number;
       slice: { index: number; count: number };
+      attribution?: RunAttribution;
     }
-  | { state: 'escalated'; reason: string; route?: BuildRoute; branch?: string; reworkRounds?: number };
+  | {
+      state: 'escalated';
+      reason: string;
+      route?: BuildRoute;
+      branch?: string;
+      reworkRounds?: number;
+      attribution?: RunAttribution;
+    };
 
 /** Core classifies structurally — via a parked RunOutcome on `err.outcome` or a
  *  `parkReason` marker property — rather than `instanceof`, because core cannot import
