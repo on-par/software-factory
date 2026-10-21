@@ -23,7 +23,6 @@ import {
   createGithubQueue,
   createOctokitQueueClient,
   evaluateLoadGuard,
-  findSlicePlanComment,
   formatQueueOrderConflict,
   logEvent,
   readHostLoad,
@@ -32,9 +31,7 @@ import {
   resolveHostLoadGuard,
   resolveLocalOnly,
   resolveRunUsageHarness,
-  restackAfterSquashMerge,
   slugify,
-  upsertSlicePlanComment,
   withAdmissionGuard,
 } from '@on-par/factory-core/internal';
 
@@ -59,6 +56,7 @@ import type {
 import { runEndOfRunKpiSnapshot } from './kpi-sweep.js';
 import { waitForMerge } from './land.js';
 import { runLane } from './run-lane.js';
+import { restackFromSlicePlan } from './run-restack.js';
 import { writeRunFlagOverrides } from './run-flags.js';
 import { shipIssue } from './ship.js';
 import { readStopFileStatus, stopSentinelRunSkipMessage } from './stop-sentinel.js';
@@ -350,28 +348,8 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
               ),
             recordStackMerge: (issue, prNumber) =>
               recordSliceMerged({ octokit: rt.getOctokit(), repo: ghRepo, issue, prNumber }).then(() => {}),
-            restack: async (issue, merged) => {
-              const octokit = rt.getOctokit();
-              const lookup = await findSlicePlanComment({ octokit, repo: ghRepo, issue });
-              if (lookup.status === 'not-found') return { status: 'nothing', reason: 'no slice plan to restack' };
-              if (lookup.status === 'invalid') {
-                return {
-                  status: 'park',
-                  reason: 'slice plan unavailable for restack',
-                  index: merged.index,
-                  files: [],
-                };
-              }
-              return restackAfterSquashMerge({
-                repoRoot,
-                octokit,
-                repo: ghRepo,
-                plan: lookup.plan,
-                mergedIndex: merged.index,
-                mergedPrNumber: merged.prNumber,
-                savePlan: (plan) => upsertSlicePlanComment({ octokit, repo: ghRepo, issue, plan }).then(() => {}),
-              });
-            },
+            restack: (issue, merged) =>
+              restackFromSlicePlan({ octokit: rt.getOctokit(), repo: ghRepo, repoRoot, issue, merged }),
             waitMerge: (issue, branch, root, gh, p, d = {}) =>
               waitForMerge(issue, branch, root, gh, p, { ...d, mergeOverrides: { auto: opts.autoMerge } }),
           }),

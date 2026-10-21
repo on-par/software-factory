@@ -2,7 +2,7 @@ import { withSliceState } from '@on-par/factory-core/internal';
 import type { SlicePlan, StackPullReviews } from '@on-par/factory-core/internal';
 import { describe, expect, it, vi } from 'vitest';
 
-import { preflightQueuedIssue } from './index.js';
+import { createQueuePreflightOps, preflightQueuedIssue } from './index.js';
 
 const baseDeps = {
   expectedHeadRepoFullName: 'on-par/software-factory',
@@ -88,5 +88,41 @@ describe('queue preflight restack detection (#3368)', () => {
       kind: 'park',
       reason: expect.stringContaining('slice 2/3 PR #82 restack check failed: compare down'),
     });
+  });
+});
+
+describe('queue preflight branchContains (#3368)', () => {
+  const opsFor = (compare: (args: { basehead: string }) => Promise<unknown>) =>
+    createQueuePreflightOps({ rest: { repos: { compareCommitsWithBasehead: compare } } } as never, 'o', 'r');
+
+  it('is true when the branch is ahead of or identical to the SHA, false when behind or diverged', async () => {
+    for (const [status, want] of [
+      ['ahead', true],
+      ['identical', true],
+      ['behind', false],
+      ['diverged', false],
+    ] as const) {
+      const compare = vi.fn(async () => ({ data: { status } }));
+      await expect(opsFor(compare).branchContains('abc', 'factory/7-slice-2')).resolves.toBe(want);
+      expect(compare).toHaveBeenCalledWith({ owner: 'o', repo: 'r', basehead: 'abc...factory/7-slice-2' });
+    }
+  });
+
+  it('is false for a missing branch (404) and rethrows any other error', async () => {
+    const missing = opsFor(async () => Promise.reject(Object.assign(new Error('Not Found'), { status: 404 })));
+    await expect(missing.branchContains('abc', 'gone')).resolves.toBe(false);
+    const down = opsFor(async () => Promise.reject(Object.assign(new Error('boom'), { status: 500 })));
+    await expect(down.branchContains('abc', 'b')).rejects.toThrow('boom');
+  });
+
+  it('getPullRefs maps a slice PR to its head ref, base ref and head SHA', async () => {
+    const get = vi.fn(async () => ({ data: { head: { ref: 'factory/7-slice-2', sha: 'h2' }, base: { ref: 'main' } } }));
+    const ops = createQueuePreflightOps({ rest: { pulls: { get } } } as never, 'o', 'r');
+    await expect(ops.getPullRefs(82)).resolves.toEqual({
+      headRef: 'factory/7-slice-2',
+      baseRef: 'main',
+      headSha: 'h2',
+    });
+    expect(get).toHaveBeenCalledWith({ owner: 'o', repo: 'r', pull_number: 82 });
   });
 });
