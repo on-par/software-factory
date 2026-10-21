@@ -224,6 +224,7 @@ import {
   laneSlug,
   formatStopMarker,
   readStopMarker,
+  listPrChangedFiles,
 } from '@on-par/factory-core/internal';
 import type { StopMarker } from '@on-par/factory-core/internal';
 import { formatSteerabilityReport } from '@on-par/factory-core/internal';
@@ -304,6 +305,7 @@ import { cmdHostedSmoke } from './hosted.js';
 import { cmdHostedQueue } from './hosted-queue.js';
 import { cmdHostedRunner } from './hosted-runner.js';
 import { resolveFactoryCheckoutCommit, runFilingPreview } from './filing.js';
+import { RiskCommandError, runRiskCommand } from './risk.js';
 import { buildFeedbackDeps, type FeedbackDeps, resolveFeedbackRepo, runFeedback } from './feedback.js';
 import { ensureFactoryExcluded, writeSampleQueue } from './init-files.js';
 import { cmdLogs } from './logs.js';
@@ -1535,6 +1537,25 @@ function persistClassifierOutcomes(
   const updated = mergeClassifierOutcomes(readTextFileOrEmpty(paths.classifierOutcomes), records);
   ensureDir(paths.state);
   writeFileSync(paths.classifierOutcomes, updated);
+}
+
+async function cmdRisk(pr: string, opts: { policy?: string } = {}) {
+  const repoRoot = await getRepoRoot();
+  const slug = await getGitHubRepo();
+  const [owner, repo] = slug.split('/');
+  const octokit = getOctokit();
+  try {
+    await runRiskCommand(pr, opts, {
+      repo: slug,
+      listFiles: (n) => listPrChangedFiles(octokit, owner!, repo!, n),
+      readFile: (p) => readFileSync(resolve(repoRoot, p), 'utf-8'),
+      fileExists: (p) => existsSync(resolve(repoRoot, p)),
+      log: (line) => console.log(line),
+    });
+  } catch (err) {
+    if (err instanceof RiskCommandError) throw new CliExitError(err.message, err.code);
+    throw err;
+  }
 }
 
 async function cmdClassifierReport(opts: { json?: boolean } = {}) {
@@ -4239,6 +4260,7 @@ export const PROGRAM_HANDLERS = {
   cmdKpis,
   cmdClassifierReport,
   cmdReport,
+  cmdRisk,
   cmdClassifierBacktestEntry,
   cmdGarden,
   cmdTui,

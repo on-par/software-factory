@@ -38,7 +38,7 @@ export const HELP_GROUPS: readonly HelpGroup[] = [
   { heading: 'Queue:', commands: ['queue', 'unpark', 'triage', 'check', 'feedback', 'filing'] },
   {
     heading: 'Observe:',
-    commands: ['status', 'runs', 'logs', 'tui', 'cost', 'usage', 'kpis', 'classifier', 'report', 'garden'],
+    commands: ['status', 'runs', 'logs', 'tui', 'cost', 'usage', 'kpis', 'classifier', 'report', 'risk', 'garden'],
   },
   {
     heading: 'Advanced / experimental:',
