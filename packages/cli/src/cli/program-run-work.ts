@@ -14,6 +14,10 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     .option('--product <name>', 'Override active product constitution')
     .option('--no-auto-rework', 'Disable automatic rework loop')
     .option('--interactive', 'Pause before opening the PR and wait for approval from the TUI')
+    .option(
+      '--no-pr',
+      'Stop after a clean CHECK: no SHIP, push, PR, or other GitHub write (size gate off); the worktree is kept',
+    )
     .option('--approve-plan', 'Pause after PLAN freezes the spec and wait for approval before BUILD')
     .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
@@ -27,6 +31,10 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     .option('--product <name>', 'Override active product constitution')
     .option('--no-auto-rework', 'Disable automatic rework loop')
     .option('--interactive', 'Pause before opening the PR and wait for approval from the TUI')
+    .option(
+      '--no-pr',
+      'Stop after a clean CHECK: no SHIP, push, PR, or other GitHub write (size gate off); the worktree is kept',
+    )
     .option('--approve-plan', 'Pause after PLAN freezes the spec and wait for approval before BUILD')
     .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
@@ -52,6 +60,10 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     .option('--product <name>', 'Override active product constitution')
     .option('--no-auto-rework', 'Disable automatic rework loop')
     .option('--interactive', 'Pause before opening the PR and wait for approval from the TUI')
+    .option(
+      '--no-pr',
+      'Stop after a clean CHECK: no SHIP, push, PR, or other GitHub write (size gate off); the worktree is kept',
+    )
     .option('--approve-plan', 'Pause after PLAN freezes the spec and wait for approval before BUILD')
     .option('--no-sandbox', 'Disable the containment sandbox for agent runs (dangerous)')
     .option(
