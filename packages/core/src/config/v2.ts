@@ -194,6 +194,7 @@ const SandboxSchema = z
   .object({
     enabled: z.boolean().default(true).describe('Contain agentic build runs (disable per-run with FACTORY_SANDBOX=0).'),
     codexFullAccessTasks: z.array(z.string()).default([]).describe('Codex task names allowed danger-full-access.'),
+    writablePaths: z.array(z.string()).default([]).describe('Extra writable dirs (absolute or ~/...).'),
     network: z
       .object({
         allow: z

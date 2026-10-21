@@ -24,6 +24,7 @@ import { runConfigSource } from './run-config-source.js';
 import type { FilingPolicy } from '../filing/policy.js';
 import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
 import type { FailoverReason } from '../types/index.js';
+import { SandboxConfigSchema } from './sandbox-schema.js';
 import { ModelEffortsSchema } from './effort.js';
 import { HarnessDeclarationSchema, type HarnessDeclaration } from './harness-declaration.js';
 
@@ -191,32 +192,7 @@ const FactoryConfigSchema = z.object({
   kpis: z
     .object({ defectWindowDays: z.number().int().positive().default(14), comment: z.string().optional() })
     .default({ defectWindowDays: 14 }),
-  sandbox: z
-    .object({
-      enabled: z.boolean().default(true),
-      runtime: z.enum(['auto', 'sandbox-exec', 'firejail', 'docker-sandbox', 'none']).default('auto'),
-      codexFullAccessTasks: z.array(z.string()).optional(),
-      network: z
-        .object({
-          allow: z.array(z.string()).default(['api.anthropic.com', 'github.com']),
-          blockTelemetry: z.boolean().optional(),
-          mode: z.enum(['report', 'enforce']).optional(),
-        })
-        .default({ allow: ['api.anthropic.com', 'github.com'], blockTelemetry: false, mode: 'report' }),
-      resources: z
-        .object({ cpuMs: z.number().positive().default(300_000), memMb: z.number().positive().default(4096) })
-        .default({ cpuMs: 300_000, memMb: 4096 }),
-      docker: z.object({ rolloutPercent: z.number().min(0).max(100).default(0) }).default({ rolloutPercent: 0 }),
-      comment: z.string().optional(),
-    })
-    .default({
-      enabled: true,
-      runtime: 'auto',
-      codexFullAccessTasks: [],
-      network: { allow: ['api.anthropic.com', 'github.com'], blockTelemetry: false, mode: 'report' },
-      resources: { cpuMs: 300_000, memMb: 4096 },
-      docker: { rolloutPercent: 0 },
-    }),
+  sandbox: SandboxConfigSchema,
   discovery: z
     .object({
       enabled: z.boolean().default(true),

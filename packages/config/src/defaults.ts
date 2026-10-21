@@ -80,6 +80,8 @@ export interface FactoryDefaults {
     enabled: boolean;
     runtime: 'auto' | 'sandbox-exec' | 'firejail' | 'docker-sandbox' | 'none';
     codexFullAccessTasks?: string[];
+    /** Extra directories the sandbox may write (#3454): absolute or `~/…`; not `/`, `~`, or the repo. */
+    writablePaths?: string[];
     network: { allow: string[]; blockTelemetry?: boolean; mode?: 'report' | 'enforce' };
     resources: { cpuMs: number; memMb: number };
     docker?: { rolloutPercent: number };
@@ -657,11 +659,12 @@ export const defaultFactoryConfig: FactoryDefaults = {
     enabled: true,
     runtime: 'auto',
     codexFullAccessTasks: [],
+    writablePaths: [],
     network: { allow: ['api.anthropic.com', 'github.com'], blockTelemetry: false, mode: 'report' },
     resources: { cpuMs: 300000, memMb: 4096 },
     docker: { rolloutPercent: 0 },
     comment:
-      'Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty network.allow denies all egress; non-empty leaves egress open in report mode. Set sandbox.runtime (auto|sandbox-exec|firejail|docker-sandbox|none) or FACTORY_SANDBOX_RUNTIME to pick a runtime; auto probes the host. docker-sandbox is reserved for the microVM runtime and does not contain anything yet (#653). sandbox.docker.rolloutPercent (0-100) deterministically promotes that percentage of unpinned lanes into the docker-sandbox cohort for A/B evidence (#655). sandbox.network.blockTelemetry (default false) makes the egress proxy refuse known telemetry hosts (e.g. *.datadoghq.com) with 403, even if allowlisted; it only takes effect where the egress proxy runs (sandbox-exec with a non-empty allowlist) (#2667). sandbox.network.mode (report|enforce, default report; FACTORY_SANDBOX_NETWORK overrides) — enforce on sandbox-exec denies direct outbound connections and makes the egress proxy refuse hosts not on network.allow with 403 (#2215).',
+      'Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty network.allow denies all egress; non-empty leaves egress open in report mode. Set sandbox.runtime (auto|sandbox-exec|firejail|docker-sandbox|none) or FACTORY_SANDBOX_RUNTIME to pick a runtime; auto probes the host. docker-sandbox is reserved for the microVM runtime and does not contain anything yet (#653). sandbox.docker.rolloutPercent (0-100) deterministically promotes that percentage of unpinned lanes into the docker-sandbox cohort for A/B evidence (#655). sandbox.network.blockTelemetry (default false) makes the egress proxy refuse known telemetry hosts (e.g. *.datadoghq.com) with 403, even if allowlisted; it only takes effect where the egress proxy runs (sandbox-exec with a non-empty allowlist) (#2667). sandbox.network.mode (report|enforce, default report; FACTORY_SANDBOX_NETWORK overrides) — enforce on sandbox-exec denies direct outbound connections and makes the egress proxy refuse hosts not on network.allow with 403 (#2215). sandbox.writablePaths (default []) adds directories BUILD/CHECK may write, e.g. ["~/.nuget"]; entries must be absolute or start with ~/, and may not be /, ~, the home dir, or a path equal to or containing the repo checkout (#3454).',
   },
   discovery: {
     enabled: true,

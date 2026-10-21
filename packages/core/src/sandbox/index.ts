@@ -2,7 +2,7 @@
 //
 // v1 wraps the underlying claude/codex CLI invocation in a platform sandbox
 // (macOS sandbox-exec, Linux firejail) that restricts filesystem writes to the
-// worktree + known state dirs and gates network by an allowlist. Per-host
+// worktree + known state dirs (plus operator-listed sandbox.writablePaths, #3454) and gates network by an allowlist. Per-host
 // network filtering is not expressible in either runtime without a proxy —
 // see resolveSandboxPolicy's caller for the 'sandbox-degraded' warning this
 // implies when the allowlist is non-empty. On sandbox-exec, egress goes through a per-lane proxy
@@ -22,6 +22,7 @@ import { claudeConfigDirOverride } from '../utils/claude-config.js';
 import { shellEscape } from '../utils/index.js';
 
 import { buildEgressAllowlist } from './egress-proxy.js';
+import { resolveConfiguredWritablePaths } from './writable-paths.js';
 
 export type SandboxRuntime = 'sandbox-exec' | 'firejail' | 'docker-sandbox' | 'none';
 
@@ -47,6 +48,8 @@ export interface SandboxPolicy {
   worktree: string;
   /** Absolute paths the agent may write (worktree, repo .git, tmp, agent state dirs). */
   writablePaths: string[];
+  /** sandbox.writablePaths entries, resolved (#3454); also in writablePaths. */
+  configuredWritablePaths?: string[];
   /** Absolute path PREFIXES the agent may write. Covers a home-root state file plus the
    *  sibling temp/backup files an atomic write creates — e.g. ~/.claude.json,
    *  ~/.claude.json.backup, ~/.claude.json.tmp.<pid>.<hash> (#1008). A subpath rule does
@@ -197,6 +200,7 @@ export function resolveSandboxPolicy(
   const fromStateToRepo = factoryState === undefined ? undefined : relative(factoryState, resolve(opts.repoRoot));
   const safeFactoryState =
     fromStateToRepo !== undefined && (fromStateToRepo.startsWith('..') || isAbsolute(fromStateToRepo));
+  const configured = resolveConfiguredWritablePaths(cfg.writablePaths, { home, repoRoot: opts.repoRoot });
   const writablePaths = dedupeAbsolutePaths([
     opts.worktree,
     ...(safeFactoryState && factoryState ? [factoryState] : []),
@@ -220,6 +224,7 @@ export function resolveSandboxPolicy(
           resolve(home, 'Library/Keychains'),
         ]
       : []),
+    ...configured,
   ]);
 
   const writableFilePrefixes = dedupeAbsolutePaths([resolve(home, '.claude.json')]);
@@ -228,6 +233,7 @@ export function resolveSandboxPolicy(
     runtime: effectiveRuntime,
     worktree: opts.worktree,
     writablePaths,
+    configuredWritablePaths: configured,
     writableFilePrefixes,
     allowHosts: buildEgressAllowlist(cfg.network.allow, opts.repoRoot),
     blockTelemetry: cfg.network.blockTelemetry === true,

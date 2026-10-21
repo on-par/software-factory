@@ -33,7 +33,7 @@ it('passes the resolved factory state and primary git directory to Codex', () =>
     opts: {},
     autoRework: false,
     planApprovalEnabled: false,
-    factoryConfig: {} as FactoryConfig,
+    factoryConfig: { sandbox: {} } as FactoryConfig,
     repoConfig: { version: 2 },
     classifierPolicy: { enabled: false },
     loaders: { resolveSkipCI: () => false },
@@ -54,6 +54,56 @@ it('passes the resolved factory state and primary git directory to Codex', () =>
     writableRoots: [paths.state, `${repoRoot}/.git`],
   });
   expect(request.specPath.startsWith(`${paths.state}/plans/`)).toBe(true);
+});
+
+it('buildRunRequest adds sandbox.writablePaths to codex writable roots', () => {
+  const repoRoot = '/tmp/primary';
+  const paths = getFactoryPaths(repoRoot, '/tmp/relocated-factory');
+  const request = buildRunRequest({
+    issueNum: 3454,
+    ghRepo: 'on-par/software-factory',
+    repoRoot,
+    branch: 'issue-3454',
+    specPath: `${paths.plans}/issue-3454.md`,
+    work: { id: 'x', kind: 'github-issue', title: 'T', brief: 'T', acceptanceCriteria: [] },
+    product: undefined,
+    runStartedAt: '2026-10-19T00:00:00Z',
+    lane: undefined,
+    opts: {},
+    autoRework: false,
+    planApprovalEnabled: false,
+    factoryConfig: { sandbox: { writablePaths: ['/opt/nuget'] } } as FactoryConfig,
+    repoConfig: { version: 2 },
+    classifierPolicy: { enabled: false },
+    loaders: { resolveSkipCI: () => false },
+    efficiency: { maxReworkRounds: 0, fastPath: false } as RunRequestInput['efficiency'],
+    sizeGateMode: undefined,
+    maxSlices: undefined,
+    timeouts: { plan: 1, build: 1, check: 1, approval: 1, tests: 1 },
+    modelPins: { sources: {} },
+    codexOff: false,
+    failoverSettings: { enabled: false, cooldownMs: 1, fallbackModel: '' },
+    activeSandboxPolicy: undefined,
+    processGroupGraceMs: 1,
+    paths,
+  } satisfies RunRequestInput);
+  expect(request.codexWorkspacePaths?.writableRoots).toContain('/opt/nuget');
+});
+
+it('logs configured sandbox.writablePaths in the startup log', () => {
+  const policy: SandboxPolicy = {
+    runtime: 'firejail',
+    worktree: '/tmp/worktree',
+    writablePaths: ['/opt/nuget'],
+    configuredWritablePaths: ['/opt/nuget'],
+    writableFilePrefixes: [],
+    allowHosts: [],
+    cpuMs: 300_000,
+    memMb: 4096,
+  };
+  const log = vi.fn();
+  logSandboxPolicy({}, policy, log);
+  expect(log).toHaveBeenCalledWith('sandbox', 'extra writable paths (sandbox.writablePaths): /opt/nuget');
 });
 
 it('retains runtime none for harnesses while --no-sandbox still disables it', () => {
