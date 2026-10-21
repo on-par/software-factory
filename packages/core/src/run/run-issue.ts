@@ -38,7 +38,7 @@ import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
 import { publishParkComment } from './park-comment.js';
 import { gateOpencodeBuildOnBreaker, providerFallbackPreferrer } from './provider-breaker-gate.js';
 import { fileFlakyTests } from './flaky-tests.js';
-import { enterStackSlice, runStackLoop } from './stack-slice-entry.js';
+import { enterStackSlice, stackWaitOutcome } from './stack-slice-entry.js';
 import { recordShippedSlice } from './slice-ship-record.js';
 import type { ReviewFloorPathChange, ReviewFloorRuleSet } from '../review/floor.js';
 import {
@@ -293,19 +293,17 @@ function isDecomposeSignal(err: unknown): boolean {
 
 export async function runIssue(request: RunRequest, policy: RunPolicy, ports: RunPorts): Promise<RunOutcome> {
   const log = ports.events();
-  return runStackLoop(request, async (req) => {
-    const observed: { checkSummary?: CheckSummary } = {};
-    let outcome: RunOutcome;
-    try {
-      outcome = await runIssueOnce(req, policy, ports, observed);
-    } catch (err) {
-      const update = thrownRunStateUpdate(isDecomposeSignal(err), req.branch, observed.checkSummary);
-      await safeRecordRunState(ports.recordRunState, log, update);
-      throw err;
-    }
-    await safeRecordRunState(ports.recordRunState, log, terminalRunStateUpdate(outcome, observed.checkSummary));
-    return outcome;
-  });
+  const observed: { checkSummary?: CheckSummary } = {};
+  let outcome: RunOutcome;
+  try {
+    outcome = await runIssueOnce(request, policy, ports, observed);
+  } catch (err) {
+    const update = thrownRunStateUpdate(isDecomposeSignal(err), request.branch, observed.checkSummary);
+    await safeRecordRunState(ports.recordRunState, log, update);
+    throw err;
+  }
+  await safeRecordRunState(ports.recordRunState, log, terminalRunStateUpdate(outcome, observed.checkSummary));
+  return outcome;
 }
 
 async function runIssueOnce(
@@ -703,6 +701,7 @@ async function runIssueOnce(
         }));
       route = plan.route;
       if (!plan.ok) {
+        if (plan.stackWait) return stackWaitOutcome(plan.stackWait, request.branch, route);
         const decomposedChildren = plan.decomposed?.childIssues ?? [];
         if (decomposedChildren.length > 0) {
           await ports.onDecomposed?.(decomposedChildren);

@@ -26,7 +26,6 @@ import type {
   getFactoryPaths,
 } from '@on-par/factory-core';
 import {
-  GITHUB_ISSUE_SOURCE,
   listQueuedSteering,
   localOnlyWorkspace,
   resolveBuildPublish,
@@ -34,15 +33,12 @@ import {
   resolveReadinessUpdateIssueBody,
   resolveSizeGateBudget,
   rewriteQueueForDecomposition,
-  type SizeGateMode,
   worktreeWorkspace,
   writeBenchmarkArtifacts,
 } from '@on-par/factory-core';
 import type { CheckResumeRecord, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
-  currentSlice,
   findOpenPR,
-  findSlicePlanComment,
   resolveFilingPolicy,
   resolveHermeticGit,
   resolveReviewFloorRules,
@@ -116,43 +112,7 @@ export function logSandboxPolicy(
   return activeSandboxPolicy;
 }
 
-/** ADR-0147: slice k >= 2 builds on its own branch, so the slice plan is read before the worktree exists. */
-export async function findSliceIndex({
-  sizeGateMode,
-  ctx,
-  work,
-  octokit,
-  ghRepo,
-  issueNum,
-}: {
-  sizeGateMode: SizeGateMode;
-  ctx?: { localOnly?: LocalOnlyPolicy; resumeFrom?: CheckResumeRecord };
-  work: WorkRequest;
-  octokit: Octokit;
-  ghRepo: string;
-  issueNum: number;
-}): Promise<number | undefined> {
-  const { errorDetail, LaneParkError } = shipRuntime();
-  let sliceIndex: number | undefined;
-  // ADR-0161: stack runs as slice until stacked PRs are built.
-  if (
-    (sizeGateMode === 'slice' || sizeGateMode === 'stack') &&
-    !ctx?.localOnly &&
-    !ctx?.resumeFrom &&
-    work.kind === GITHUB_ISSUE_SOURCE
-  ) {
-    try {
-      const lookup = await findSlicePlanComment({ octokit, repo: ghRepo, issue: issueNum });
-      if (lookup.status === 'found') sliceIndex = currentSlice(lookup.plan)?.index;
-    } catch (err) {
-      throw new LaneParkError(
-        `slice plan lookup failed for #${issueNum}: ${errorDetail(err)} — parked before creating a worktree`,
-        'escalate',
-      );
-    }
-  }
-  return sliceIndex;
-}
+export { findSliceIndex } from './slice-index.js';
 
 /** Sets up the run's workspace: reuse a kept worktree, create a factory worktree, or wrap the local-only one. */
 export async function setupRunWorkspace({
@@ -275,6 +235,16 @@ export function finishOutcome({
       console.log(styleText('green', `✅ Issue #${issueNum} → ${terminalMessage ?? 'ready'}`));
     }
     return outcome.branch;
+  }
+
+  if (outcome.state === 'released' && outcome.reason === 'stack-wait') {
+    console.log(
+      styleText(
+        'yellow',
+        `⏸ Issue #${issueNum} → waiting for approval or merge of slice ${outcome.slice.index}/${outcome.slice.count} PR #${outcome.prNumber}; released, not parked`,
+      ),
+    );
+    return outcome.branch ?? '';
   }
 
   if (outcome.state === 'released') {

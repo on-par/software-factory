@@ -1,8 +1,15 @@
 import { expect, it, vi } from 'vitest';
 
 import { getFactoryPaths, type FactoryConfig, type SandboxPolicy } from '@on-par/factory-core';
+import { renderSlicePlanComment, withSliceState, type SlicePlan } from '@on-par/factory-core/internal';
 import './index.js';
-import { buildRunRequest, logSandboxPolicy, type RunRequestInput } from './ship-steps.js';
+import {
+  buildRunRequest,
+  findSliceIndex,
+  finishOutcome,
+  logSandboxPolicy,
+  type RunRequestInput,
+} from './ship-steps.js';
 
 it('passes the resolved factory state and primary git directory to Codex', () => {
   const repoRoot = '/tmp/primary';
@@ -69,4 +76,72 @@ it('retains runtime none for harnesses while --no-sandbox still disables it', ()
   const consoleError = vi.spyOn(console, 'error').mockImplementationOnce(() => {});
   expect(logSandboxPolicy({ sandbox: false }, policy, vi.fn())).toBeUndefined();
   consoleError.mockRestore();
+});
+
+it('finishOutcome returns the branch without throwing for a stack-wait release (#3367)', () => {
+  const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    const branch = finishOutcome({
+      outcome: {
+        state: 'released',
+        reason: 'stack-wait',
+        branch: 'factory/9-slice-2',
+        reworkRounds: 0,
+        prNumber: 101,
+        slice: { index: 1, count: 3 },
+      },
+      opts: {},
+      paths: getFactoryPaths('/tmp/primary', '/tmp/relocated-factory'),
+      issueNum: 9,
+      worktree: '/tmp/wt',
+      terminalMessage: undefined,
+      log: () => {},
+    });
+    expect(branch).toBe('factory/9-slice-2');
+    expect(spy.mock.calls.join('\n')).toContain('waiting for approval or merge of slice 1/3 PR #101');
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+it('findSliceIndex in stack mode returns the lowest pending slice (#3367)', async () => {
+  const story = {
+    schemaVersion: 1,
+    kind: 'story',
+    filesLikelyTouched: [],
+    labels: [],
+    title: 'Story',
+    role: 'operator',
+    want: 'thing works',
+    soThat: 'value',
+    problemStatement: 'Problem',
+    inScope: ['Scope'],
+    outOfScope: ['Persistent storage'],
+    acceptanceCriteria: [{ name: 'ac', given: [], when: ['run'], then: ['works'] }],
+    verification: [{ command: 'npm test', passWhen: 'passes' }],
+    tracesTo: ['INT-PROBLEM-01'],
+  } as never;
+  let plan: SlicePlan = {
+    issue: 9,
+    slices: [1, 2, 3].map((n) => ({ index: n, title: `S${n}`, story, state: 'pending' as const })),
+  };
+  plan = withSliceState(plan, 1, 'pr-open', 50, 'factory/9-slice-1');
+  const octokit = {
+    rest: {
+      users: { getAuthenticated: async () => ({ data: { id: 7 } }) },
+      issues: {
+        listComments: async () => ({ data: [{ id: 1, user: { id: 7 }, body: renderSlicePlanComment(plan) }] }),
+      },
+    },
+  } as never;
+  const work = {
+    id: 'github-issue:o/r#9',
+    kind: 'github-issue',
+    title: 't',
+    brief: 'b',
+    acceptanceCriteria: [],
+  } as never;
+  const args = { ctx: undefined, work, octokit, ghRepo: 'o/r', issueNum: 9 };
+  expect(await findSliceIndex({ ...args, sizeGateMode: 'stack' })).toBe(2);
+  expect(await findSliceIndex({ ...args, sizeGateMode: 'slice' })).toBe(1);
 });

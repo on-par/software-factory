@@ -89,6 +89,15 @@ describe('updateParentStackOrder', () => {
     expect(get).not.toHaveBeenCalled();
   });
 
+  it('does not rewrite a merged parent PR (#3367)', async () => {
+    const { octokit, get, update } = make();
+    const merged = plan([41]);
+    const p = { ...merged, slices: merged.slices.map((x) => (x.index === 1 ? { ...x, state: 'merged' as const } : x)) };
+    await updateParentStackOrder({ octokit, repo: 'o/r', plan: p, index: 2, prNumber: 50, log: vi.fn() });
+    expect(get).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it("rewrites the parent PR's body to name the new PR as next", async () => {
     const { octokit, update } = make();
     await updateParentStackOrder({ octokit, repo: 'o/r', plan: plan([41]), index: 2, prNumber: 50, log: vi.fn() });

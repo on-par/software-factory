@@ -75,7 +75,7 @@ export async function updateParentStackOrder(opts: {
   const { octokit, repo, plan, index, prNumber, log } = opts;
   if (index <= 1) return;
   const parent = plan.slices.find((s) => s.index === index - 1);
-  if (parent?.prNumber === undefined) return;
+  if (parent?.prNumber === undefined || parent.state === 'merged') return;
   try {
     const [owner, repoName] = repo.split('/') as [string, string];
     const grandparent = plan.slices.find((s) => s.index === index - 2);

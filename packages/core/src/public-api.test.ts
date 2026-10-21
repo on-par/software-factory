@@ -318,7 +318,7 @@ const PUBLIC_API_KEYS = [
 const AGENT_JOB_KEYS = ['resolveHostMaxAgentJobs', 'hostAgentJobsDir', 'withHostAgentJobLease']; // #3047
 const TAIL = 'InvalidEventCursorError eventSegmentFileName eventSegmentsDir readEventsTail readEventsSince'.split(' ');
 const MORE = ['agentInvocationsFromEvents', 'computeTokenCoverage', 'readReviewApproval', 'readStackSliceGate']; // #3126, #3366
-const EXTRA_INTERNAL_KEYS = [...AGENT_JOB_KEYS, ...TAIL, ...MORE];
+const EXTRA_INTERNAL_KEYS = [...AGENT_JOB_KEYS, ...TAIL, ...MORE, 'nextStackSlice'];
 const INTERNAL_API_KEYS = [
   'openCodeVersion',
   'DEFAULT_CI_DEADLINE_MS',

@@ -717,14 +717,12 @@ export type { UnknownConstitutionChecker } from './checkers/constitution-preflig
 // Readiness deep check (#1732)
 export type { DecompositionOutput } from './readiness/decompose.js';
 export { buildDecompositionPrompt, parseDecompositionOutput, publishDecomposition } from './readiness/decompose.js';
-export type {
-  Slice,
-  SlicePlan,
-  SlicePlanBuildResult,
-  SlicePlanParseResult,
-  SliceState,
-} from './readiness/slice-plan.js';
 export {
+  type Slice,
+  type SlicePlan,
+  type SlicePlanBuildResult,
+  type SlicePlanParseResult,
+  type SliceState,
   DEFAULT_MAX_SLICES,
   SLICE_CAP_CEILING,
   overCapReason,
@@ -732,6 +730,7 @@ export {
   SLICE_PLAN_MARKER,
   currentSlice,
   markSliceMerged,
+  nextStackSlice,
   parentRefForSlice,
   parseSlicePlanComment,
   renderSlicePlanComment,

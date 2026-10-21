@@ -244,6 +244,13 @@ export async function runLane(
               ),
             );
       const shipped = sliceOutcome.value;
+      if (shipped?.state === 'released' && shipped.reason === 'stack-wait') {
+        // ADR-0161: the slice below awaits review, so release the issue and do not park (#3367).
+        awaitingReview++;
+        streak = null;
+        await settle(issue, 'queued');
+        continue;
+      }
       if (shipped?.state === 'ready' && shipped.slice && shipped.slice.index < shipped.slice.count) {
         // ADR-0147: a non-final slice's PR is open; hand the issue back for the next slice
         // instead of waiting for the merge.

@@ -15,7 +15,6 @@ import {
   parseSlicePlanComment,
   renderSlicePlanComment,
   stackSliceBranch,
-  withSliceBranchCreated,
   withSliceState,
   type SlicePlan,
 } from '../readiness/slice-plan.js';
@@ -122,12 +121,16 @@ const freshPlan = (): SlicePlan => ({
 });
 const branch = (k: number) => stackSliceBranch(1, k);
 
-function stackSetup(opts: { recordBranches?: boolean; pulls?: unknown } = {}) {
+/** One slice per run (#3367): the nth planPhase call plans slice n, with slices 1..n-1 recorded below it. */
+function stackSetup(opts: { recordBranches?: boolean; pulls?: unknown; lower?: 'pr-open' | 'merged' } = {}) {
   const recordBranches = opts.recordBranches ?? true;
-  planPhase.mockImplementation(async (o) => {
-    const index = o.sliceIndex ?? 1;
+  let run = 0;
+  planPhase.mockImplementation(async () => {
+    const index = ++run;
     let plan = freshPlan();
-    if (recordBranches) for (let i = 1; i < index; i++) plan = withSliceBranchCreated(plan, i, branch(i));
+    if (recordBranches) {
+      for (let i = 1; i < index; i++) plan = withSliceState(plan, i, opts.lower ?? 'pr-open', 100 + i, branch(i));
+    }
     return { ...PLAN_OK, slice: { plan, index } };
   });
   let pr = 100;
@@ -173,29 +176,64 @@ beforeEach(() => {
   shipPhase.mockReset();
 });
 
-describe('runIssue — stack mode chains slice branches (ADR-0161)', () => {
-  it('builds three slices in one call, branching each from its parent', async () => {
+async function runSlices(ports: RunPorts, count: number, request: RunRequest = baseRequest()) {
+  const outcomes: Awaited<ReturnType<typeof runIssue>>[] = [];
+  for (let i = 0; i < count; i++) outcomes.push(await runIssue(request, policy, ports));
+  return outcomes;
+}
+
+describe('runIssue — stack mode builds one slice per run (ADR-0161)', () => {
+  it('stops after slice 1 and waits for review before slice 2 (#3349)', async () => {
     const { ports, createSliceBranch } = stackSetup();
     const outcome = await runIssue(baseRequest(), policy, ports);
 
-    expect(planPhase.mock.calls.map((c) => c[0].sliceIndex)).toEqual([undefined, 2, 3]);
+    expect(outcome).toMatchObject({ state: 'ready', slice: { index: 1, count: 3 } });
+    expect(createSliceBranch).toHaveBeenCalledTimes(1);
+    expect(planPhase).toHaveBeenCalledTimes(1);
+    expect(buildPhase).toHaveBeenCalledTimes(1);
+  });
+
+  it('builds three slices across three runs, branching each from its parent', async () => {
+    const { ports, createSliceBranch } = stackSetup();
+    const outcomes = await runSlices(ports, 3);
+
     expect(createSliceBranch.mock.calls.map((c) => [c[0].branch, c[0].startPoint])).toEqual([
       [branch(1), 'origin/main'],
       [branch(2), branch(1)],
       [branch(3), branch(2)],
     ]);
     expect(buildPhase.mock.calls.map((c) => c[0].branch)).toEqual([branch(1), branch(2), branch(3)]);
-    expect(outcome).toMatchObject({ state: 'ready', slice: { index: 3, count: 3 } });
+    expect(outcomes.map((o) => (o.state === 'ready' ? o.slice?.index : undefined))).toEqual([1, 2, 3]);
   });
 
-  it('builds at most maxSlices slices when the gate is bypassed', async () => {
-    const { ports, createSliceBranch } = stackSetup();
-    const outcome = await runIssue(baseRequest({ maxSlices: 2 }), policy, ports);
+  it('branches slice 2 from origin/main and opens it on main after slice 1 merged (#3367)', async () => {
+    const { ports, createSliceBranch } = stackSetup({ lower: 'merged' });
+    await runSlices(ports, 2);
 
-    expect(planPhase.mock.calls.map((c) => c[0].sliceIndex)).toEqual([undefined, 2]);
-    expect(buildPhase.mock.calls.map((c) => c[0].branch)).toEqual([branch(1), branch(2)]);
-    expect(createSliceBranch).toHaveBeenCalledTimes(2);
-    expect(outcome).toMatchObject({ state: 'ready', slice: { index: 2, count: 3 } });
+    expect(createSliceBranch.mock.calls[1]![0]).toMatchObject({ branch: branch(2), startPoint: 'origin/main' });
+    expect(checkPhase.mock.calls[1]![0].parentBaseRef).toBeUndefined();
+    expect(buildPhase.mock.calls[1]![0].parentBaseRef).toBeUndefined();
+    expect(shipPhase.mock.calls[1]![0].stack).toMatchObject({ index: 2, base: 'main' });
+  });
+
+  it("releases without branching while slice 1's PR waits for review, and the slice plan says so (#3367)", async () => {
+    const { ports, createSliceBranch, bodies } = stackSetup();
+    await runIssue(baseRequest(), policy, ports);
+    planPhase.mockReset().mockResolvedValue({
+      ok: false,
+      route: 'codex',
+      specPath: '/tmp/wt/spec.md',
+      model: '',
+      escalate: 'slice 2/3 of #1 waits for approval or merge of slice 1/3 PR #101',
+      designArtifact: null,
+      stackWait: { index: 1, count: 3, prNumber: 101 },
+    });
+    const outcome = await runIssue(baseRequest(), policy, ports);
+
+    expect(outcome).toMatchObject({ state: 'released', reason: 'stack-wait', prNumber: 101 });
+    expect(createSliceBranch).toHaveBeenCalledTimes(1);
+    expect(buildPhase).toHaveBeenCalledTimes(1);
+    expect(bodies.at(-1)).toContain('PR open #101 — waiting for approval or merge before slice 2');
   });
 
   it('parks over-cap through the gate and builds no slice', async () => {
@@ -217,7 +255,7 @@ describe('runIssue — stack mode chains slice branches (ADR-0161)', () => {
 
   it('passes the parent slice branch to checkPhase as parentBaseRef', async () => {
     const { ports } = stackSetup();
-    await runIssue(baseRequest(), policy, ports);
+    await runSlices(ports, 3);
 
     expect(checkPhase.mock.calls.map((c) => c[0].parentBaseRef)).toEqual([undefined, branch(1), branch(2)]);
     expect(buildPhase.mock.calls.map((c) => c[0].parentBaseRef)).toEqual([undefined, branch(1), branch(2)]);
@@ -225,7 +263,7 @@ describe('runIssue — stack mode chains slice branches (ADR-0161)', () => {
 
   it('records each slice branch in the plan comment before BUILD', async () => {
     const { ports, record, bodies } = stackSetup();
-    await runIssue(baseRequest(), policy, ports);
+    await runSlices(ports, 3);
 
     for (const k of [1, 2, 3]) {
       const writeIdx = bodies.findIndex((b) => {
@@ -243,10 +281,10 @@ describe('runIssue — stack mode chains slice branches (ADR-0161)', () => {
       .mockReset()
       .mockResolvedValueOnce(CHECK_OK)
       .mockResolvedValue({ passed: false, summary: { ...CHECK_SUMMARY, failures: 1 }, reworkRounds: 0 });
-    const outcome = await runIssue(baseRequest(), policy, ports);
+    const outcomes = await runSlices(ports, 2);
 
     expect(planPhase).toHaveBeenCalledTimes(2);
-    expect(outcome.state).not.toBe('ready');
+    expect(outcomes[1]!.state).not.toBe('ready');
   });
 
   it.each([
@@ -268,9 +306,9 @@ describe('runIssue — stack mode chains slice branches (ADR-0161)', () => {
       },
     };
     checkPhase.mockReset().mockResolvedValueOnce(CHECK_OK).mockResolvedValueOnce(failed);
-    const outcome = await runIssue(baseRequest(), policy, ports);
+    const outcome = (await runSlices(ports, 2))[1];
 
-    expect(planPhase.mock.calls.map((c) => c[0].sliceIndex)).toEqual([undefined, 2]);
+    expect(planPhase).toHaveBeenCalledTimes(2);
     expect(createSliceBranch.mock.calls.map((c) => c[0].branch)).toEqual([branch(1), branch(2)]);
     expect(buildPhase.mock.calls.map((c) => c[0].branch)).toEqual([branch(1), branch(2)]);
     expect(checkPhase).toHaveBeenCalledTimes(2);
@@ -322,7 +360,7 @@ describe('runIssue — stack mode chains slice branches (ADR-0161)', () => {
 
   it("opens slice 2 on slice 1's branch (#3348)", async () => {
     const { ports } = stackSetup();
-    await runIssue(baseRequest(), policy, ports);
+    await runSlices(ports, 3);
 
     expect(shipPhase.mock.calls.map((c) => c[0].stack?.base)).toEqual(['main', branch(1), branch(2)]);
     expect(shipPhase.mock.calls[1]![0].stack).toMatchObject({ index: 2, count: 3 });
@@ -330,7 +368,7 @@ describe('runIssue — stack mode chains slice branches (ADR-0161)', () => {
 
   it('never ships a branch created from a parent slice on main (#3348)', async () => {
     const { ports, createSliceBranch } = stackSetup();
-    await runIssue(baseRequest(), policy, ports);
+    await runSlices(ports, 3);
 
     for (const [o] of createSliceBranch.mock.calls) {
       if (o.startPoint === 'origin/main') continue;
@@ -349,16 +387,7 @@ describe('runIssue — stack mode chains slice branches (ADR-0161)', () => {
     const get = vi.fn(async () => ({ data: { body: '## Summary\nHi.' } }));
     const update = vi.fn(async (_a: unknown) => ({}));
     const { ports } = stackSetup({ pulls: { get, update } });
-    planPhase.mockImplementation(async (o) => {
-      const index = o.sliceIndex ?? 1;
-      let plan = freshPlan();
-      for (let i = 1; i < index; i++) {
-        plan = withSliceBranchCreated(plan, i, branch(i));
-        plan = withSliceState(plan, i, 'pr-open', 100 + i, branch(i));
-      }
-      return { ...PLAN_OK, slice: { plan, index } };
-    });
-    await runIssue(baseRequest(), policy, ports);
+    await runSlices(ports, 2);
 
     const arg = update.mock.calls[0]![0] as { pull_number: number; body: string };
     expect(arg.pull_number).toBe(101);

@@ -28,6 +28,7 @@ import { settlePlanRoute } from './plan-route.js';
 import { blockedNoChangeSpecReason, planSummary, specWriteDeniedResult } from './plan-spec-guards.js';
 import { decomposeOversizedIssue, renderChildIssueBody } from '../readiness/decompose.js';
 import { resolveSliceGate } from '../readiness/slice-gate.js';
+import { octokitStackSliceGateReader } from './stack-approval.js';
 import { DEFAULT_MAX_SLICES, type SlicePlan } from '../readiness/slice-plan.js';
 import {
   DEFAULT_MAX_FILES,
@@ -93,6 +94,8 @@ export interface PlanResult {
   /** Set on an ok result when PLAN planned one slice of a sliced issue (ADR-0147). SHIP titles the PR
    *  from it, and runIssue records the PR in the slice plan comment. */
   slice?: { plan: SlicePlan; index: number };
+  /** ADR-0161: set with `ok: false` when the stack slice below is not yet approved or merged. */
+  stackWait?: { index: number; count: number; prNumber: number };
 }
 
 export interface PlanPromptOpts {
@@ -522,6 +525,7 @@ async function planPhaseImpl(opts: {
       oversized: false,
       maxSlices: opts.maxSlices ?? DEFAULT_MAX_SLICES,
       ...(opts.sizeGateMode === 'stack' && opts.sliceIndex !== undefined ? { sliceIndex: opts.sliceIndex } : {}),
+      ...(opts.sizeGateMode === 'stack' ? { stackReader: octokitStackSliceGateReader(octokit, params.repo) } : {}),
       worktree,
       router,
       octokit,
@@ -540,6 +544,11 @@ async function planPhaseImpl(opts: {
     if (gate.kind === 'park') {
       log('escalate', gate.reason);
       return park(gate.reason);
+    }
+    if (gate.kind === 'wait') {
+      log('plan', gate.reason);
+      const { index, prNumber } = gate;
+      return { ...park(gate.reason), stackWait: { index, count: gate.plan.slices.length, prNumber } };
     }
     if (gate.kind === 'over-cap' || gate.kind === 'unsliceable') {
       log('size-gate-escalated', gate.reason);

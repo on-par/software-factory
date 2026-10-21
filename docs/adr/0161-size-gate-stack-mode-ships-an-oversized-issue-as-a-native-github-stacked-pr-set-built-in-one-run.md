@@ -35,10 +35,15 @@ The default stays `file`, and `slice` and `off` are unchanged.
 with Gherkin acceptance criteria, in build order, capped by `sizeGate.maxSlices`. Each checklist item also records the
 slice's branch and, once opened, its PR number. The comment is still the only record of slice state.
 
-### One run builds the whole stack
+### One slice per run
 
-- Slice 1 is planned and built on `main`. Slice k (k ≥ 2) is planned and built on slice k-1's branch, so it can use
-  what the earlier slices actually did.
+- Each run builds one slice. Slice k+1 is built only after slice k's PR is approved on its head SHA or merged, so
+  review of slice k shapes slice k+1. The next run picks the lowest `pending` slice (#3367).
+- A merged slice below: the slice branches from `origin/main` and its PR targets `main`. An approved open slice
+  below: the slice branches from slice k-1's branch and its PR targets that branch. Slice 1 always uses `main`.
+- Otherwise the run returns a `released` (`stack-wait`) outcome, logs the PR it waits on, and creates no branch.
+  The issue goes back to `factory:queued` and is never parked. The slice-plan comment shows
+  `PR open #N — waiting for approval or merge before slice k+1`.
 - CHECK diffs slice k against its parent branch, not `main`, and the CHECK baseline (ADR-0147's base comparison) runs
   on the parent branch's head.
 - BUILD's no-diff check, CHECK and the review floor diff slice k against its parent branch
@@ -47,19 +52,14 @@ slice's branch and, once opened, its PR number. The comment is still the only re
   run-start HEAD fallback. If it does not resolve, the diff is skipped and never falls back to
   `main`. A slice with no changes beyond its parent parks as `no_diff` (#2717).
 - Both size gates still apply to each slice. A slice is never sliced again.
-- When slice k fails CHECK after rework, the run stops building. Slices 1 to k-1 still open as a shorter stack, and
-  the issue parks with slices k to n recorded as not built.
+- When slice k fails CHECK after rework, the issue parks and slices k to n are recorded as not built.
 
-### SHIP opens one native stack
+### SHIP opens one slice PR
 
-- SHIP pushes every built branch and opens every slice PR at once, linked as one GitHub stack through the API. The
-  bottom PR targets `main`. Each other PR targets the branch below it.
+- SHIP opens slice k's PR on `main` (k = 1, or the slice below merged) or on slice k-1's branch. It writes the
+  stack-order line in the PR body and rewrites the parent PR's next pointer.
 - PR titles end with `slice k/n (#<issue>)`. Slices 1 to n-1 say `Part of #<issue>`. Only the top slice says
   `Closes #<issue>`.
-- When the stack API call fails (API error, preview not enabled for the repository), the run falls back to `slice`
-  mode for this issue. It keeps the bottom slice PR open on `main`, closes the upper slice PRs so no half-linked stack
-  stays open, resets the slice-plan comment so slices 2 to n are pending, and emits one `stack-fallback` warn event
-  with the API error as the reason. That event is not a park.
 
 ### Merging
 
@@ -69,15 +69,13 @@ auto-merge, where the tier allows it, merges the stack in order and never merges
 
 ### Queue
 
-An issue in stack mode has several open PRs. The queue preflight defers the issue while any slice PR in its slice-plan
-comment is open, as `slice` mode already does for one PR.
-Failure rules are collected in the next subsection.
+The queue preflight defers the issue while the top built slice PR waits for review. It claims the issue when that PR
+is approved or merged (#3366). A non-final ready slice is released to `factory:queued`. A waiting slice is released,
+never parked.
 
 ### Failure handling
 
-- Stack API failure: fall back to `slice` as described under SHIP (#2672).
-- A slice fails CHECK after rework: stop building. Slices 1 to k-1 open as a shorter stack, and the issue parks with
-  slices k to n recorded `not-built` in the slice-plan comment.
+- A slice fails CHECK after rework: the issue parks with slices k to n recorded `not-built` in the slice-plan comment.
 - Review changes a lower slice (its PR head SHA differs from the one recorded when the factory opened it,
   `detectLowerSliceChange` and `parkOnLowerSliceChange` in `packages/core/src/phases/stack-review-change.ts`): the
   issue parks and the slice-plan comment names the affected upper slices. The factory does not rebuild them (#2674).
@@ -86,19 +84,13 @@ Failure rules are collected in the next subsection.
 
 ## Consequences
 
-An oversized issue costs one build pass instead of n serial round trips, and reviewers see the whole change as small
-layers at once. Human merges can happen back to back instead of one per run.
+Each slice costs a full PLAN, BUILD, CHECK and SHIP round trip, and slice k+1 waits for a human to approve or merge
+slice k. The trade-off is that review of a lower slice shapes the slices above it, instead of invalidating them.
 
 Later slices are built on code that is not on `main` yet. When review changes a lower layer, the upper layers may no
 longer fit. GitHub's rebase handles textual changes, and CI on each rebased layer catches the rest, but a semantic
 change below can still leave an upper layer wrong in ways CI does not see. The first version parks the issue in that
 case instead of rebuilding.
-
-One run holds the lane for the whole stack build, which is longer than one slice. The lane is released once the stack
-is open.
-
-Stacked PRs are a preview feature, and the API may change. `slice` stays the fallback, so a failure to create a stack
-never strands an issue.
 
 Changing the default mode to `stack`, or rebuilding upper layers automatically, needs a new ADR.
 

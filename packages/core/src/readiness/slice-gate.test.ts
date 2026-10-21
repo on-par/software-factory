@@ -5,6 +5,7 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { parseDecompositionOutput } from './decompose.js';
+import type { StackSliceGateReader } from '../phases/stack-approval.js';
 import { resolveSliceGate } from './slice-gate.js';
 import { SLICE_PLAN_MARKER, renderSlicePlanComment, slicePlanFromDecomposition, withSliceState } from './slice-plan.js';
 import type { SlicePlan } from './slice-plan.js';
@@ -180,6 +181,103 @@ describe('resolveSliceGate', () => {
       const outcome = await run();
       expect(outcome).toMatchObject({ kind: 'slice', created: true });
       expect(outcome.kind === 'slice' && outcome.slice.index).toBe(2);
+    });
+  });
+
+  describe('stack mode reads the slice below the next pending slice (#3367)', () => {
+    const SELF = 7;
+    const reader = (o: {
+      state?: 'open' | 'merged' | 'closed';
+      reviews?: { reviewerId: number | null; state: string; commitId: string | null }[];
+      throws?: boolean;
+    }): StackSliceGateReader => ({
+      getPullState: async () => {
+        if (o.throws) throw new Error('github down');
+        return o.state ?? 'open';
+      },
+      getPullReviews: async () => ({ headSha: 'sha1', selfId: SELF, reviews: o.reviews ?? [] }),
+    });
+    const approved = [{ reviewerId: 9, state: 'APPROVED', commitId: 'sha1' }];
+    const run = (plan: SlicePlan, stackReader?: StackSliceGateReader) => {
+      const f = fake([{ id: 1, user: { id: BOT }, body: renderSlicePlanComment(plan) }]);
+      return resolveSliceGate({
+        issue,
+        repo,
+        title: 't',
+        body: 'b',
+        oversized: false,
+        maxSlices: 10,
+        stackReader,
+        worktree: '/tmp/wt',
+        router: new ModelRouter(models, routes, false, new StubModelExecutor({ scripts: {} })),
+        octokit: f.octokit,
+        log: () => {},
+      });
+    };
+    const slice1Open = () => withSliceState(planOf(3), 1, 'pr-open', 10, 'factory/5-slice-1');
+
+    it("selects slice 2 when slice 1's PR is approved", async () => {
+      const outcome = await run(slice1Open(), reader({ reviews: approved }));
+      expect(outcome).toMatchObject({ kind: 'slice', created: false });
+      expect(outcome.kind === 'slice' && outcome.slice.index).toBe(2);
+    });
+
+    it("waits on slice 1's unapproved PR instead of parking", async () => {
+      const outcome = await run(slice1Open(), reader({}));
+      expect(outcome).toMatchObject({ kind: 'wait', prNumber: 10, index: 1 });
+    });
+
+    it('waits when changes are requested', async () => {
+      const outcome = await run(
+        slice1Open(),
+        reader({ reviews: [{ reviewerId: 9, state: 'CHANGES_REQUESTED', commitId: 'sha1' }] }),
+      );
+      expect(outcome).toMatchObject({ kind: 'wait', reason: expect.stringContaining('changes requested') });
+    });
+
+    it('selects slice 2 and folds in the merge when GitHub says slice 1 merged', async () => {
+      const outcome = await run(slice1Open(), reader({ state: 'merged' }));
+      expect(outcome.kind === 'slice' && outcome.slice.index).toBe(2);
+      expect(outcome.kind === 'slice' && outcome.plan.slices[0]).toMatchObject({ state: 'merged', prNumber: 10 });
+    });
+
+    it('selects slice 2 without a read when slice 1 is merged in the plan', async () => {
+      const outcome = await run(withSliceState(planOf(2), 1, 'merged', 10), reader({ throws: true }));
+      expect(outcome.kind === 'slice' && outcome.slice.index).toBe(2);
+    });
+
+    it('selects slice 1 of a fresh plan without a read', async () => {
+      const outcome = await run(planOf(2), reader({ throws: true }));
+      expect(outcome.kind === 'slice' && outcome.slice.index).toBe(1);
+    });
+
+    it('parks when the reader throws', async () => {
+      const outcome = await run(slice1Open(), reader({ throws: true }));
+      expect(outcome).toMatchObject({ kind: 'park', reason: expect.stringContaining('stack approval lookup failed') });
+    });
+
+    it('parks out of order when a built slice sits above the pending one', async () => {
+      const plan = withSliceState(slice1Open(), 3, 'pr-open', 12, 'factory/5-slice-3');
+      const outcome = await run(plan, reader({ reviews: approved }));
+      expect(outcome).toMatchObject({ kind: 'park', reason: expect.stringContaining('out of order') });
+    });
+
+    it('falls back to selectSlice when slice 1 is not built', async () => {
+      const plan = withSliceState(planOf(2), 1, 'not-built');
+      const outcome = await run(plan, reader({ throws: true }));
+      expect(outcome.kind === 'slice' && outcome.slice.index).toBe(1);
+    });
+
+    it('falls back to selectSlice when no slice is pending', async () => {
+      const plan = withSliceState(withSliceState(planOf(2), 1, 'merged'), 2, 'merged');
+      expect(await run(plan, reader({}))).toMatchObject({
+        kind: 'park',
+        reason: expect.stringContaining('every slice'),
+      });
+    });
+
+    it('keeps the pr-open park without a reader', async () => {
+      expect(await run(slice1Open())).toMatchObject({ kind: 'park', reason: expect.stringContaining('PR #10') });
     });
   });
 
