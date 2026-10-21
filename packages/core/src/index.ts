@@ -290,7 +290,7 @@ export {
 } from './events/kinds.js';
 
 // Run outcome
-export type { BuildRoute, ParkReason, RunOutcome } from './run/outcome.js';
+export type { BuildRoute, ParkReason, RunAttribution, RunOutcome } from './run/outcome.js';
 export { parkEvents, parkReasonFor } from './run/outcome.js';
 
 // Run policy

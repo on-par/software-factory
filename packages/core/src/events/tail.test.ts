@@ -105,6 +105,20 @@ describe('events tail', () => {
     expect(msgs(readEventsSince(file, p1.events[1]!.cursor, { limit: 2 }))).toEqual(['e3', 'e4']);
   });
 
+  it('reads a legacy line without attribution and round-trips one with it through the tail', () => {
+    const attribution = { build: { model: 'm', provider: 'p' }, endedIn: 'build' };
+    writeFileSync(
+      file,
+      JSON.stringify({ ts: 't', type: 'fail', issue: '1', msg: 'old' }) +
+        '\n' +
+        JSON.stringify({ ts: 't', type: 'fail', issue: '1', msg: 'new', attribution }) +
+        '\n',
+    );
+    const [legacy, stamped] = readEventsTail(file, { limit: 2 }).events;
+    expect(legacy!.event.attribution).toBeUndefined();
+    expect(stamped!.event.attribution).toEqual(attribution);
+  });
+
   it('rejects an invalid limit', () => {
     expect(() => readEventsTail(file, { limit: 0 })).toThrow(RangeError);
   });

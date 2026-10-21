@@ -6,6 +6,7 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
+import type { RunAttribution } from '../run/outcome.js';
 import type { EscalateKind } from '../types/index.js';
 import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
 import type {
@@ -48,6 +49,7 @@ export interface LogExtra {
   model?: string;
   tokens?: { input: number; output: number };
   durationMs?: number;
+  attribution?: RunAttribution;
 }
 
 export interface LoggerOptions {
@@ -121,6 +123,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.checkFailure ? { checkFailure: extra.checkFailure } : {}),
       ...(extra?.ciFailure ? { ciFailure: extra.ciFailure } : {}),
       ...(extra?.escalateKind ? { escalateKind: extra.escalateKind } : {}),
+      ...(extra?.attribution ? { attribution: extra.attribution } : {}),
       ...(extra?.model ? { model: extra.model } : {}),
       ...(extra?.tokens ? { tokens: extra.tokens } : {}),
       ...(extra?.durationMs !== undefined ? { durationMs: extra.durationMs } : {}),

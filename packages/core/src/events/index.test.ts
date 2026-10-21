@@ -52,6 +52,17 @@ describe('readEvents', () => {
     expect(events[1].type).toBe('build');
   });
 
+  it('parses a legacy line without attribution as undefined', () => {
+    writeFileSync(file, line({ type: 'fail', msg: 'old' }));
+    expect(readEvents(file)[0].attribution).toBeUndefined();
+  });
+
+  it('round-trips attribution', () => {
+    const attribution = { plan: { model: 'm', provider: 'p' }, endedIn: 'check' as const };
+    writeFileSync(file, line({ type: 'fail', msg: 'new', attribution }));
+    expect(readEvents(file)[0].attribution).toEqual(attribution);
+  });
+
   it('skips malformed lines', () => {
     writeFileSync(file, line({ type: 'plan', msg: 'ok' }) + 'not json\n' + line({ type: 'ship', msg: 'ok2' }));
     const events = readEvents(file);

@@ -179,7 +179,7 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     expect(log).toHaveBeenCalledWith(
       'ci-failed',
       'ship phase failed: CI failed for PR #9 — CI rework budget exhausted after 2 rounds',
-      { ciFailure: ATTRIBUTED },
+      expect.objectContaining({ ciFailure: ATTRIBUTED }),
     );
   });
 
@@ -194,7 +194,7 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     expect(log).toHaveBeenCalledWith(
       'ci-failed',
       'ship phase failed: CI failed for PR #9 — CI rework budget exhausted after 1 round',
-      { ciFailure: ATTRIBUTED },
+      expect.objectContaining({ ciFailure: ATTRIBUTED }),
     );
   });
 
@@ -208,14 +208,14 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     expect(log).toHaveBeenCalledWith(
       'ci-failed',
       'ship phase failed: CI failed for PR #9 — baseline: no CI failure is attributable to this PR',
-      {
+      expect.objectContaining({
         ciFailure: expect.objectContaining({
           attribution: expect.objectContaining({
             baseline: true,
             items: [expect.objectContaining({ kind: 'codeql-alert', attributable: false })],
           }),
         }),
-      },
+      }),
     );
   });
 
@@ -233,9 +233,13 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     expect(await runIssue(request, policy, ports(log))).toMatchObject({ state: 'parked', reason: 'ci-failed' });
     expect(reworkWorker).not.toHaveBeenCalled();
     expect(checkPhase).toHaveBeenCalledTimes(1);
-    expect(log).toHaveBeenCalledWith('ci-failed', expect.stringContaining('baseline'), {
-      ciFailure: expect.objectContaining({ attribution: expect.objectContaining({ baseline: true }) }),
-    });
+    expect(log).toHaveBeenCalledWith(
+      'ci-failed',
+      expect.stringContaining('baseline'),
+      expect.objectContaining({
+        ciFailure: expect.objectContaining({ attribution: expect.objectContaining({ baseline: true }) }),
+      }),
+    );
   });
 
   it('parks ci-failed without baseline and without rework for a check not failing on base', async () => {
@@ -243,9 +247,13 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     const log = vi.fn<Log>();
     expect(await runIssue(request, policy, ports(log))).toMatchObject({ reason: 'ci-failed' });
     expect(reworkWorker).not.toHaveBeenCalled();
-    expect(log).toHaveBeenCalledWith('ci-failed', 'ship phase failed: CI failed for PR #9', {
-      ciFailure: expect.objectContaining({ attribution: expect.objectContaining({ baseline: false }) }),
-    });
+    expect(log).toHaveBeenCalledWith(
+      'ci-failed',
+      'ship phase failed: CI failed for PR #9',
+      expect.objectContaining({
+        ciFailure: expect.objectContaining({ attribution: expect.objectContaining({ baseline: false }) }),
+      }),
+    );
   });
 
   it('parks ci-failed without baseline when the base lookup throws', async () => {
@@ -293,7 +301,7 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     expect(log).toHaveBeenCalledWith(
       'ci-failed',
       'ship phase failed: CI failed for PR #9 — CI rework worker never ran',
-      { ciFailure: ATTRIBUTED },
+      expect.objectContaining({ ciFailure: ATTRIBUTED }),
     );
   });
 
@@ -307,11 +315,12 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     expect(shipPhase).toHaveBeenCalledTimes(1);
   });
 
-  const parkedSuppression = (rule: string) => ({
-    ciFailure: expect.objectContaining({
-      suppressionAttempt: expect.arrayContaining([expect.objectContaining({ rule })]),
-    }),
-  });
+  const parkedSuppression = (rule: string) =>
+    expect.objectContaining({
+      ciFailure: expect.objectContaining({
+        suppressionAttempt: expect.arrayContaining([expect.objectContaining({ rule })]),
+      }),
+    });
 
   it('parks ci-failed suppression-attempt when the CI rework diff adds a suppression comment, without re-CHECK or SHIP re-entry', async () => {
     shipPhase.mockResolvedValueOnce(CI_FAIL);

@@ -79,6 +79,7 @@ export const logsLineJsonSchema = z.object({
   lanePaused: loosePayloadSchema.optional(),
   stewardTriggered: loosePayloadSchema.optional(),
   flakyTests: loosePayloadSchema.optional(),
+  attribution: loosePayloadSchema.optional(),
   checkFailure: loosePayloadSchema.optional(),
   ciFailure: loosePayloadSchema.optional(),
   escalateKind: z.enum(['missing-info', 'contradiction', 'split']).optional(),
