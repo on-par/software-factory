@@ -17,14 +17,22 @@ export async function resolveRunBranch(opts: {
   sizeGateMode: SizeGateMode;
   work: WorkRequest;
   ctx?: { localOnly?: LocalOnlyPolicy; resumeFrom?: CheckResumeRecord; lane?: string };
+  /** --no-pr: always a fresh branch, never an adopted open PR's. */
+  noPr?: boolean;
   octokit: Octokit;
   eventsFile: string;
 }): Promise<string> {
-  const { issueNum, issueTitle, ghRepo, branchPrefix, sizeGateMode, work, ctx, octokit, eventsFile } = opts;
+  const { issueNum, issueTitle, ghRepo, branchPrefix, sizeGateMode, work, ctx, noPr, octokit, eventsFile } = opts;
   const sliceIndex = await findSliceIndex({ sizeGateMode, ctx, work, octokit, ghRepo, issueNum });
   if (ctx?.resumeFrom) return ctx.resumeFrom.branch;
   const fresh = branchFor(issueNum, issueTitle, branchPrefix, sliceIndex);
-  if (ctx?.localOnly || sliceIndex !== undefined || sizeGateMode === 'stack' || work.kind !== GITHUB_ISSUE_SOURCE) {
+  if (
+    ctx?.localOnly ||
+    noPr ||
+    sliceIndex !== undefined ||
+    sizeGateMode === 'stack' ||
+    work.kind !== GITHUB_ISSUE_SOURCE
+  ) {
     return fresh;
   }
   const found = await findAdoptablePr({ octokit, repo: ghRepo, issue: issueNum, branchPrefix });

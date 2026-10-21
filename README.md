@@ -35,6 +35,7 @@ packages/
 ├── contracts/        @on-par/contracts          shared zod schemas (Issue/Epic/Story/Design)
 ├── core/             @on-par/factory-core       engine: router, phases, checkers
 ├── dashboard/        @on-par/factory-dashboard  (private) web dashboard, Vite + React
+├── grade/            @on-par/factory-grade      (private) read-only grader for recorded runs
 ├── product/          @on-par/product            (private) proposer: brain-dump to engineering-ready issues
 ├── repo-context/     @on-par/repo-context       read-only repo reader port (zero deps)
 ├── scbench-adapter/  @on-par/scbench-adapter    (private) SlopCodeBench adapter

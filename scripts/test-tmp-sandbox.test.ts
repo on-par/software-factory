@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import setup, { findLeakedTempEntries, formatTempLeakMessage } from './test-tmp-sandbox.js';
+import setup, { findLeakedTempEntries, formatTempLeakMessage, isForeignLiveSandbox } from './test-tmp-sandbox.js';
 
 describe('findLeakedTempEntries', () => {
   it('reports new prefixed entries by prefix and ignores pre-existing and unprefixed ones', () => {
@@ -31,6 +31,32 @@ describe('findLeakedTempEntries', () => {
 
   it('returns nothing when nothing leaked', () => {
     expect(findLeakedTempEntries(new Set(), ['unrelated'])).toEqual([]);
+  });
+
+  it("skips another live run's sandbox but reports a dead run's and its own", () => {
+    const after = ['factory-test-tmp-200-aaa', 'factory-test-tmp-300-bbb', 'factory-test-tmp-100-own'];
+    const opts = { ownPid: 100, isPidAlive: (pid: number) => pid !== 300 };
+    expect(findLeakedTempEntries(new Set(), after, undefined, undefined, opts)).toEqual([
+      { prefix: 'factory-', entries: ['factory-test-tmp-300-bbb', 'factory-test-tmp-100-own'] },
+    ]);
+  });
+});
+
+describe('isForeignLiveSandbox', () => {
+  const alive = () => true;
+
+  it('is true only for a sandbox name owned by a different live pid', () => {
+    expect(isForeignLiveSandbox('factory-test-tmp-200-x', { ownPid: 100, isPidAlive: alive })).toBe(true);
+    expect(isForeignLiveSandbox('factory-test-tmp-100-x', { ownPid: 100, isPidAlive: alive })).toBe(false);
+    expect(isForeignLiveSandbox('factory-test-tmp-200-x', { ownPid: 100, isPidAlive: () => false })).toBe(false);
+    expect(isForeignLiveSandbox('factory-test-tmp-x', { ownPid: 100, isPidAlive: alive })).toBe(false);
+    expect(isForeignLiveSandbox('factory-other-200-x', { ownPid: 100, isPidAlive: alive })).toBe(false);
+  });
+
+  it('defaults to this process and a real liveness probe', () => {
+    expect(isForeignLiveSandbox(`factory-test-tmp-${process.pid}-x`)).toBe(false);
+    expect(isForeignLiveSandbox(`factory-test-tmp-${process.ppid}-x`)).toBe(true);
+    expect(isForeignLiveSandbox('factory-test-tmp-4999999-x')).toBe(false);
   });
 });
 
@@ -104,6 +130,18 @@ describe('setup', () => {
       execFileSync(process.execPath, ['-e', 'require("node:fs").mkdirSync(process.argv[1])', join(scratch, name)]);
     }
     await expect(teardown()).resolves.toBeUndefined();
+  });
+
+  it("ignores a concurrent live run's sandbox created during the run", async () => {
+    const { teardown } = start();
+    mkdirSync(join(scratch, `factory-test-tmp-${process.ppid}-other`));
+    await expect(teardown()).resolves.toBeUndefined();
+  });
+
+  it("still throws on a sandbox left by a dead run's pid", async () => {
+    const { teardown } = start();
+    mkdirSync(join(scratch, 'factory-test-tmp-4999999-dead'));
+    await expect(teardown()).rejects.toThrow('factory-test-tmp-4999999-dead');
   });
 
   it('still throws on a same-run factory- leak', async () => {

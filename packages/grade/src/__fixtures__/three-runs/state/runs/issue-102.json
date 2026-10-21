@@ -1,0 +1,14 @@
+{
+  "issue": 102,
+  "lane": "lane-102",
+  "repo": "on-par/software-factory",
+  "status": "ready",
+  "branch": "factory/102-fixture",
+  "worktree": "/tmp/fixture/software-factory-102",
+  "specPath": ".factory/state/plans/issue-102.md",
+  "model": "claude-sonnet-5-5",
+  "route": "claude",
+  "attempts": 1,
+  "startedAt": "2026-10-05T00:00:00.000Z",
+  "updatedAt": "2026-10-05T01:00:00.000Z"
+}

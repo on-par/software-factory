@@ -40,6 +40,7 @@ import { publishParkComment } from './park-comment.js';
 import { createRunPhaseLogger } from './run-phase-log.js';
 import { gateOpencodeBuildOnBreaker, providerFallbackPreferrer } from './provider-breaker-gate.js';
 import { fileFlakyTests } from './flaky-tests.js';
+import { finishWithoutShip } from './local-finish.js';
 import { enterStackSlice, stackWaitOutcome } from './stack-slice-entry.js';
 import { recordShippedSlice } from './slice-ship-record.js';
 import type { ReviewFloorPathChange, ReviewFloorRuleSet } from '../review/floor.js';
@@ -118,6 +119,8 @@ export interface RunRequest {
   };
   /** Local-only run (#508): publishing disabled, SHIP is skipped. */
   localOnly?: boolean;
+  /** --no-pr: stop after a clean CHECK with no GitHub writes; unlike localOnly, routing and prompts are unchanged. */
+  noPr?: boolean;
   /** PR classifier gate (#1724). Present only when the setting is on; undefined = off (no git
    *  calls, no label, no event, no evidence-pack section). */
   /** design.blockUnresolvedRegressions resolved (#1819); undefined = off. */
@@ -405,7 +408,7 @@ async function runIssueOnce(
     if (reason === 'timeout') {
       log('stuck', `run exceeded its phase timeout without progressing — ${terminalMessage}`);
     }
-    if (!request.localOnly) {
+    if (!request.localOnly && !request.noPr) {
       const posted = await publishParkComment({
         octokit: ports.octokit,
         repo: request.repo,
@@ -675,13 +678,13 @@ async function runIssueOnce(
           workSource: request.workSource,
           enforceReadiness: true,
           fastPath: request.efficiency.fastPath,
-          enforceSizeGate: (request.sizeGateMode ?? 'file') !== 'off',
+          enforceSizeGate: !request.noPr && (request.sizeGateMode ?? 'file') !== 'off',
           sizeGateMode: request.sizeGateMode,
           sliceIndex: request.sliceIndex,
           maxSlices: request.maxSlices,
           sizeBudget: request.sizeBudget,
           blockUnresolvedRegressions: request.blockUnresolvedRegressions,
-          updateIssueBodyOnEnrich: request.readinessUpdateIssueBody,
+          updateIssueBodyOnEnrich: request.noPr ? false : request.readinessUpdateIssueBody,
           preferredRoute: pinnedRoute,
           onWorkerResult: phaseLogger.plan,
         }));
@@ -824,7 +827,7 @@ async function runIssueOnce(
         log: ports.events('build'),
         timeoutSeconds: request.timeouts.build,
         skipCI: request.skipCI,
-        disablePublish: Boolean(request.localOnly),
+        disablePublish: Boolean(request.localOnly || request.noPr),
         publishFromBuild: request.publishFromBuild,
         modelOverride: buildModel,
         pinnedModel: buildModel !== undefined && buildModel === request.modelPins.build,
@@ -973,7 +976,7 @@ async function runIssueOnce(
             failure,
           );
         }
-        if (!request.localOnly) {
+        if (!request.localOnly && !request.noPr) {
           const [owner, repoName] = request.repo.split('/');
           try {
             await ports.octokit.rest.issues.createComment({
@@ -986,7 +989,7 @@ async function runIssueOnce(
             log('environment_warning', `could not post the environment-failure comment: ${errorMessage(err)}`);
           }
         }
-        let preserve = ports.checkResume !== undefined && !request.localOnly && !planSlice;
+        let preserve = ports.checkResume !== undefined && !request.localOnly && !request.noPr && !planSlice;
         let fixTarget = '';
         if (preserve && ports.checkResume) {
           fixTarget = preservedFixTarget(env, constitution, request.repoConfigFile);
@@ -1067,28 +1070,13 @@ async function runIssueOnce(
     // failure is not mistaken for a repeat of one already resolved.
     await ports.reworkHistory?.clear(request.issue);
 
-    if (request.localOnly) {
-      log(
-        'local-only-complete',
-        `local-only run complete in ${ports.workspace.path} — publishing disabled, no PR created`,
-      );
-      const reportPath = await ports.writeLocalRunReport?.({
-        outcome: 'ready',
-        route,
-        branch: request.branch,
-        reworkRounds,
-      });
-      await ports.writeBenchmarkArtifacts?.({
-        outcome: 'ready',
-        route,
-        branch: request.branch,
-        reworkRounds,
-        checkSummary,
-        reportPath,
-        diffBase: runStartDiffBase,
-      });
-      return { state: 'ready', route, branch: request.branch, reworkRounds };
-    }
+    const unshipped = await finishWithoutShip(request, ports, log, {
+      route,
+      reworkRounds,
+      checkSummary,
+      diffBase: runStartDiffBase,
+    });
+    if (unshipped) return unshipped;
 
     // PR classifier gate (#1724): escalate-only — a B/C floor (or any failure) adds the gate label.
     let reviewRouting: ReviewRouting | undefined;
