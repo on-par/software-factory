@@ -25,6 +25,10 @@ const REAL_CLI_GLOB = '**/*.real-cli.test.{ts,tsx}';
 const integrationOnly = process.env.FACTORY_INTEGRATION_TESTS === '1';
 const realCliOnly = Boolean(process.env.FACTORY_REAL_CLI);
 const maxWorkers = resolveTestMaxWorkers(process.env);
+// A CI test shard (.github/workflows/ci.yml) only records raw coverage into its blob
+// report. It holds a third of the suite, so it skips the coverage reports and every
+// threshold; the `coverage` job applies them to the merged map (`--merge-reports`).
+const coverageShard = process.env.FACTORY_COVERAGE_SHARD === '1';
 
 export default defineConfig({
   // Pin the project root to this config's directory. Without it, vitest run
@@ -72,7 +76,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       // 'text' prints the per-file table; 'text-summary' prints the totals line.
-      reporter: ['text', 'text-summary', 'html', 'json-summary', 'lcov', 'cobertura'],
+      reporter: coverageShard ? [] : ['text', 'text-summary', 'html', 'json-summary', 'lcov', 'cobertura'],
       // scripts/pack-hygiene.ts is the tarball guard behind every package's prepack and
       // the quickstart pack check (#2336); its bin shim (pack-hygiene-cli.ts) stays out.
       include: ['packages/*/src/**/*.{ts,tsx}', 'scripts/pack-hygiene.ts'],
@@ -100,36 +104,38 @@ export default defineConfig({
         // Test-only shipIssue harness for the cli ship*.test.ts suites (#2789).
         'packages/cli/src/**/test-support/**',
       ],
-      thresholds: {
-        // RATCHET: global catch-all. Files matched by the per-package globs below
-        // are REMOVED from this pool (Vitest glob-threshold semantics), so this
-        // now only guards files in any future package that lacks its own glob.
-        // scripts/coverage-ratchet.ts (run by verify.sh and CI) fails the
-        // build if measured coverage exceeds these by >2pts — raise them here
-        // in the same PR when it fires.
-        lines: 97,
-        functions: 95,
-        branches: 91,
-        statements: 96,
-        // RATCHET per package: each metric set at the measured floor. Vitest 4
-        // rebaselines the V8 mapping results, so these values are reset once
-        // here and remain a non-decreasing guard afterwards.
-        'packages/adr-kit/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 92, statements: 98 },
-        'packages/config/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 100, statements: 99 },
-        'packages/contracts/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
-        'packages/repo-context/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 98, statements: 99 },
-        'packages/core/src/**/*.{ts,tsx}': { lines: 97, functions: 96, branches: 90, statements: 96 },
-        // branches: measured 88.72 on main both with and without the integration
-        // suites — this floor was already unmet before #755 touched anything, and
-        // moving the integration suites to nightly does not change any metric here.
-        'packages/cli/src/**/*.{ts,tsx}': { lines: 97, functions: 92, branches: 91, statements: 96.9 },
-        'packages/dashboard/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
-        'packages/product/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 98, statements: 99 },
-        'packages/server/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
-        'packages/grade/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 98 },
-        'packages/scbench-adapter/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 96, statements: 98 },
-        'scripts/pack-hygiene.ts': { lines: 100, functions: 100, branches: 100, statements: 100 },
-      },
+      thresholds: coverageShard
+        ? undefined
+        : {
+            // RATCHET: global catch-all. Files matched by the per-package globs below
+            // are REMOVED from this pool (Vitest glob-threshold semantics), so this
+            // now only guards files in any future package that lacks its own glob.
+            // scripts/coverage-ratchet.ts (run by verify.sh and CI) fails the
+            // build if measured coverage exceeds these by >2pts — raise them here
+            // in the same PR when it fires.
+            lines: 97,
+            functions: 95,
+            branches: 91,
+            statements: 96,
+            // RATCHET per package: each metric set at the measured floor. Vitest 4
+            // rebaselines the V8 mapping results, so these values are reset once
+            // here and remain a non-decreasing guard afterwards.
+            'packages/adr-kit/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 92, statements: 98 },
+            'packages/config/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 100, statements: 99 },
+            'packages/contracts/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
+            'packages/repo-context/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 98, statements: 99 },
+            'packages/core/src/**/*.{ts,tsx}': { lines: 97, functions: 96, branches: 90, statements: 96 },
+            // branches: measured 88.72 on main both with and without the integration
+            // suites — this floor was already unmet before #755 touched anything, and
+            // moving the integration suites to nightly does not change any metric here.
+            'packages/cli/src/**/*.{ts,tsx}': { lines: 97, functions: 92, branches: 91, statements: 96.9 },
+            'packages/dashboard/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
+            'packages/product/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 98, statements: 99 },
+            'packages/server/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
+            'packages/grade/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 98 },
+            'packages/scbench-adapter/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 96, statements: 98 },
+            'scripts/pack-hygiene.ts': { lines: 100, functions: 100, branches: 100, statements: 100 },
+          },
     },
   },
 });

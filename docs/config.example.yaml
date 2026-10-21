@@ -86,6 +86,13 @@ version: 2
 # route: "<route>"
 # Named evidence commands. Shell-free argv; config overrides scripts.
 # commands: { test: "vitest run" }
+# Repo risk policy for the risk receipt and the land risk gate (schema:
+# packages/config/src/risk.ts). Unset: the packaged default rules.
+# risk:
+  # Risk rules. They replace the packaged rules; a path that matches no rule is `med`.
+  # rules: [{ id: "my-rule", tier: "high", globs: ["<glob>"] }]
+  # Globs for allowlisted pure-refactor paths; they fire the low 'allowlisted-refactor' rule.
+  # refactorAllowlist: ["<glob>"]
 # budget:
   # Run-wide usage cap in USD. Beats FACTORY_USAGE_CAP.
   # capUsd: 227

@@ -1,10 +1,17 @@
 // packages/core/src/review/risk-receipt.ts — Risk receipt in the PR body (#3386) and the repo risk policy loader (#3387)
 
-import { join } from 'node:path';
+import { isAbsolute, relative, resolve } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
-import { DEFAULT_RISK_RULES, parseRiskRules, RISK_TIERS, type RiskRuleSet } from '@on-par/factory-config';
+import {
+  DEFAULT_RISK_RULES,
+  parseRiskRules,
+  RISK_TIERS,
+  RiskRulesError,
+  type RiskRuleSet,
+} from '@on-par/factory-config';
 
+import { getFactoryPaths, isPlainObject } from '../config/index.js';
 import { readRepoConfigFile } from '../config/repo-config-file.js';
 import { listPrChangedFiles } from '../run/ci-rework.js';
 import { evaluateRisk, type RiskEvaluation } from './risk.js';
@@ -87,21 +94,37 @@ export async function publishRiskReceipt(opts: {
   return { evaluation, updated: true };
 }
 
-/** Repo-relative path of the repo risk policy file (#3387). */
-export const RISK_POLICY_FILE = '.factory/risk.yml';
+/** Display path of the repo config file that holds the `risk` section (#3387): repo-relative when
+ *  it sits under the repo (`.factory/config.yaml`), else absolute (an outside state root). */
+export function riskPolicyConfigFile(repoRoot: string): string {
+  const path = getFactoryPaths(repoRoot).config;
+  const rel = relative(resolve(repoRoot), path);
+  return rel.startsWith('..') || isAbsolute(rel) ? path : rel;
+}
 
 export interface RiskPolicy {
-  /** 'repo' when RISK_POLICY_FILE exists and validates, 'default' for the packaged rules. */
+  /** 'repo' when the repo config file has a valid `risk` section, 'default' for the packaged rules. */
   source: 'repo' | 'default';
+  /** The repo config file the policy was read from, as riskPolicyConfigFile returns it. */
+  file: string;
   rules: RiskRuleSet;
 }
 
-/** Load <repoRoot>/.factory/risk.yml, or the packaged defaults when it is absent.
- *  YAML errors and RiskRulesError propagate; callers decide how to report them. */
+/** Load the `risk` section of the repo config file (`.factory/config.yaml|yml|json`), or the
+ *  packaged defaults when the file or the section is absent. A malformed file propagates the
+ *  reader's error; an invalid section throws a RiskRulesError naming the file and the `risk` key. */
 export function loadRiskPolicy(repoRoot: string): RiskPolicy {
-  const raw = readRepoConfigFile(join(repoRoot, RISK_POLICY_FILE));
-  if (raw === undefined) return { source: 'default', rules: DEFAULT_RISK_RULES };
-  return { source: 'repo', rules: parseRiskRules(raw) };
+  const file = riskPolicyConfigFile(repoRoot);
+  const raw = readRepoConfigFile(getFactoryPaths(repoRoot).config);
+  const section = isPlainObject(raw) ? raw.risk : undefined;
+  if (section === undefined) return { source: 'default', file, rules: DEFAULT_RISK_RULES };
+  try {
+    return { source: 'repo', file, rules: parseRiskRules(section) };
+  } catch (err) {
+    // parseRiskRules throws only RiskRulesError.
+    const { message, ruleId, index } = err as RiskRulesError;
+    throw new RiskRulesError(`invalid \`risk\` section in ${file}: ${message}`, ruleId, index);
+  }
 }
 
 /** Summary line, one `<tier>: <rule ids>` line per non-empty tier (high first), then the refactor allowlist. */
@@ -110,8 +133,8 @@ export function formatRiskPolicy(policy: RiskPolicy): string[] {
   const count = `${n} ${n === 1 ? 'rule' : 'rules'}`;
   const summary =
     policy.source === 'repo'
-      ? `${RISK_POLICY_FILE} (${count})`
-      : `no risk policy configured (${RISK_POLICY_FILE} not found); using the packaged defaults (${count})`;
+      ? `${policy.file} \`risk\` (${count})`
+      : `no risk policy configured (no \`risk\` section in ${policy.file}); using the packaged defaults (${count})`;
   const lines = [summary];
   for (const tier of [...RISK_TIERS].reverse()) {
     const ids = policy.rules.rules.filter((r) => r.tier === tier).map((r) => r.id);

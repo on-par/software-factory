@@ -8,7 +8,6 @@ import {
   evaluateRisk,
   listPrChangedFiles,
   loadRiskPolicy as loadRepoRiskPolicy,
-  RISK_POLICY_FILE,
   type RiskEvaluation,
   type RiskPolicy,
 } from '@on-par/factory-core/internal';
@@ -30,7 +29,7 @@ export interface RiskCommandDeps {
   listFiles: (pr: number) => Promise<string[]>;
   readFile: (path: string) => string;
   fileExists: (path: string) => boolean;
-  /** The repo policy (`.factory/risk.yml`, else the packaged defaults) used when `--policy` is absent (#3387). */
+  /** The repo policy (the `risk` section of `.factory/config.yaml`, else the packaged defaults) used when `--policy` is absent (#3387). */
   loadRepoPolicy: () => RiskPolicy;
   log: (line: string) => void;
 }
@@ -53,12 +52,14 @@ export function loadRiskPolicy(
   if (path === undefined) {
     try {
       const policy = deps.loadRepoPolicy();
-      return { rules: policy.rules, source: policy.source === 'repo' ? RISK_POLICY_FILE : 'packaged defaults' };
+      return {
+        rules: policy.rules,
+        source: policy.source === 'repo' ? `${policy.file} \`risk\`` : 'packaged defaults',
+      };
     } catch (err) {
+      // The loader's message names the config file (and the `risk` key for an invalid section).
       const detail = err instanceof Error ? err.message : String(err);
-      throw new RiskCommandError(`factory risk: invalid risk policy ${RISK_POLICY_FILE} — ${detail}`, 2, {
-        cause: err,
-      });
+      throw new RiskCommandError(`factory risk: invalid risk policy — ${detail}`, 2, { cause: err });
     }
   }
   if (!deps.fileExists(path)) {

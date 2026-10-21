@@ -157,8 +157,8 @@ describe('landIssue risk gate (#3381)', () => {
   it('uses the repo risk policy, so the gate agrees with the risk receipt', async () => {
     mkdirSync(join(repoRoot, '.factory'), { recursive: true });
     writeFileSync(
-      join(repoRoot, '.factory', 'risk.yml'),
-      "rules:\n  - id: docs-high\n    tier: high\n    globs: ['docs/**']\n",
+      join(repoRoot, '.factory', 'config.yaml'),
+      "version: 2\nrisk:\n  rules:\n    - id: docs-high\n      tier: high\n      globs: ['docs/**']\n",
     );
     octokit = makeOctokit(['docs/readme.md']);
     await expect(land(true)).rejects.toBeInstanceOf(AwaitingReviewError);

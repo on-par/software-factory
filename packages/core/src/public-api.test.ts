@@ -548,7 +548,7 @@ const INTERNAL_API_KEYS = [
   'resolveLocalOnly',
   ...'resolveHostMaxBuilds evaluateRisk decideRiskMerge NEEDS_HUMAN_LABEL RISK_HIGH_LABEL RISK_MED_LABEL'.split(' '), // #3380, #3381
   ...'RISK_RECEIPT_END RISK_RECEIPT_START listPrChangedFiles publishRiskReceipt renderRiskReceipt'.split(' '), // #3386
-  ...'upsertRiskReceipt RISK_POLICY_FILE loadRiskPolicy formatRiskPolicy'.split(' '), // #3387
+  ...'upsertRiskReceipt riskPolicyConfigFile loadRiskPolicy formatRiskPolicy'.split(' '), // #3387
   ...'resolveHostLoadGuard evaluateLoadGuard formatLoadHold readHostLoad resolveBaseHealthChecks'.split(' '), // #3048, #3290
   ...'hostBuildSlotsDir listHostSlots syncLandBranch'.split(' '), // syncLandBranch: #1886
   ...'withHostBuildSlot createRunSlotGate withRunAndHostBuildSlot'.split(' '), // #3049
