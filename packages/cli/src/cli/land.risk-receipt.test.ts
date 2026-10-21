@@ -1,5 +1,5 @@
 // packages/cli/src/cli/land.risk-receipt.test.ts — land publishes the risk receipt before merging (#3386)
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { createTempDirs } from '@on-par/factory-core/testing';
@@ -214,5 +214,24 @@ describe('land risk receipt', () => {
       .split('\n')
       .map((line) => JSON.parse(line));
     expect(events.some((e) => e.type === 'warn' && JSON.stringify(e).includes('risk receipt'))).toBe(true);
+  });
+
+  it('prints the configured risk policy and applies it to the receipt', async () => {
+    mkdirSync(join(h.repoRoot, '.factory'), { recursive: true });
+    writeFileSync(
+      join(h.repoRoot, '.factory', 'risk.yml'),
+      "rules:\n  - id: sf-docs-high\n    tier: high\n    globs: ['docs/**']\n",
+    );
+    await runMain('land', '5');
+    expect(logSpy).toHaveBeenCalledWith('risk policy: .factory/risk.yml (1 rule)');
+    const body = h.octokit.rest.pulls.update.mock.calls[0][0].body;
+    expect(body).toMatch(/\*\*Tier: high\*\*/);
+    expect(body).toContain('sf-docs-high');
+  });
+
+  it('prints that no risk policy is configured', async () => {
+    await runMain('land', '5');
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('no risk policy configured'));
+    expect(h.octokit.rest.pulls.update.mock.calls[0][0].body).toMatch(/\*\*Tier: low\*\*/);
   });
 });

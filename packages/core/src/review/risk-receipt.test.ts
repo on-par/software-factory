@@ -1,8 +1,14 @@
-import type { RiskRuleSet } from '@on-par/factory-config';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { DEFAULT_RISK_RULES, RiskRulesError, type RiskRuleSet } from '@on-par/factory-config';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { RiskEvaluation } from './risk.js';
 import {
+  formatRiskPolicy,
+  loadRiskPolicy,
   publishRiskReceipt,
   renderRiskReceipt,
   RISK_RECEIPT_END,
@@ -118,5 +124,58 @@ describe('publishRiskReceipt', () => {
     await expect(publishRiskReceipt({ octokit: f.octokit, owner: 'o', repo: 'r', prNumber: 5 })).rejects.toThrow(
       'nope',
     );
+  });
+});
+
+describe('loadRiskPolicy / formatRiskPolicy', () => {
+  const tmp = createTempDirs();
+  const repoWith = (text?: string): string => {
+    const root = tmp.makeSync('risk-policy-');
+    if (text !== undefined) {
+      mkdirSync(join(root, '.factory'), { recursive: true });
+      writeFileSync(join(root, '.factory', 'risk.yml'), text);
+    }
+    return root;
+  };
+  const twoRules =
+    'rules:\n  - id: a\n    tier: high\n    globs: ["a/**"]\n  - id: b\n    tier: low\n    globs: ["b/**"]\n';
+
+  it('returns the packaged defaults when the file is absent', () => {
+    expect(loadRiskPolicy(repoWith())).toEqual({ source: 'default', rules: DEFAULT_RISK_RULES });
+  });
+
+  it('loads a valid repo policy', () => {
+    const policy = loadRiskPolicy(repoWith(twoRules));
+    expect(policy.source).toBe('repo');
+    expect(policy.rules.rules.map((r) => r.id)).toEqual(['a', 'b']);
+  });
+
+  it('throws on an empty file, an invalid tier, and malformed YAML', () => {
+    expect(() => loadRiskPolicy(repoWith(''))).toThrow();
+    const badTier = 'rules:\n  - id: a\n    tier: huge\n    globs: ["a/**"]\n';
+    expect(() => loadRiskPolicy(repoWith(badTier))).toThrow(RiskRulesError);
+    expect(() => loadRiskPolicy(repoWith('rules: [\n'))).toThrow('risk.yml');
+  });
+
+  it('formats the default summary with rule ids per tier', () => {
+    const lines = formatRiskPolicy({ source: 'default', rules: DEFAULT_RISK_RULES });
+    expect(lines[0]).toBe(
+      'no risk policy configured (.factory/risk.yml not found); using the packaged defaults (13 rules)',
+    );
+    expect(lines[1]).toMatch(/^high: migrations-schema, auth/);
+  });
+
+  it('formats a repo summary without empty tiers', () => {
+    const lines = formatRiskPolicy(loadRiskPolicy(repoWith(twoRules)));
+    expect(lines).toEqual(['.factory/risk.yml (2 rules)', 'high: a', 'low: b']);
+  });
+
+  it('adds the refactor allowlist only when set and uses the singular rule', () => {
+    const rules = { rules: [{ id: 'a', tier: 'med' as const, globs: ['a/**'] }], refactorAllowlist: ['x/**', 'y/**'] };
+    expect(formatRiskPolicy({ source: 'repo', rules })).toEqual([
+      '.factory/risk.yml (1 rule)',
+      'med: a',
+      'refactor allowlist: x/**, y/**',
+    ]);
   });
 });
