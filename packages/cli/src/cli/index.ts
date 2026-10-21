@@ -260,6 +260,7 @@ import { buildCostJson } from './cost-json.js';
 import { buildQueueAddJson } from './queue-add-json.js';
 import { renderQueueAddLines, renderUnparkLines } from './queue-output.js';
 import { buildQueueListJson } from './queue-list.js';
+import { runSteer, SteerCliError, type SteerOptions } from './steer.js';
 import { appendUnparkEvent, runUnpark, UnparkError, type UnparkJson } from './unpark.js';
 import { buildRunsJson, parseRunsLimit } from './runs.js';
 import { buildRunDiffstatJson, NoRunError, parseDiffstatIssue, type RunDiffstatJson } from './runs-diffstat.js';
@@ -4027,6 +4028,26 @@ export async function cmdStop(opts: { json?: boolean } = {}): Promise<void> {
   console.log(STOP_SET_MESSAGE);
 }
 
+export async function cmdSteer(ref: string, opts: SteerOptions = {}): Promise<void> {
+  const gitUser = (await shellOps.exec('git config user.name').catch(() => ({ stdout: '' }))).stdout.trim();
+  let result;
+  try {
+    result = await runSteer(ref, opts, {
+      runsDir: getFactoryPaths(await getRepoRoot()).runs,
+      now: () => new Date().toISOString(),
+      defaultActor: () => gitUser || process.env.USER || 'unknown',
+    });
+  } catch (err) {
+    if (err instanceof SteerCliError) {
+      throw new CliExitError(`factory: steer — ${err.message}`, err.code === 'no-run' ? 1 : 2);
+    }
+    throw new CliExitError(`factory: steer failed — ${errorDetail(err)}`, 1);
+  }
+  console.log(
+    `factory: steer recorded on #${result.issue} (source ${result.event.source}, phase ${result.event.phase}, actor ${result.event.actor})`,
+  );
+}
+
 export async function cmdResume(issue?: string, opts: { json?: boolean; from?: string } = {}): Promise<void> {
   if (issue === undefined && opts.from !== undefined) {
     throw new CliExitError('factory: resume --from needs an issue number: factory resume <issue> --from check', 2);
@@ -4245,6 +4266,7 @@ export const PROGRAM_HANDLERS = {
   cmdSupervise: runSupervise,
   cmdStop,
   cmdResume,
+  cmdSteer,
   parseIssueArg,
   getRepoRoot,
   getCliVersion,

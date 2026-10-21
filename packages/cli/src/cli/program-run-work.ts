@@ -4,6 +4,7 @@ import type { Command } from 'commander';
 import { LEGACY_BRANCH_PREFIX } from '@on-par/factory-core/internal';
 import { BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION, BRANCH_PREFIX_OPTION_DESCRIPTION } from './branch-prefix.js';
 import type { ProgramHandlers } from './index.js';
+import type { SteerOptions } from './steer.js';
 
 export function registerRunWorkCommands(program: Command, handlers: ProgramHandlers): void {
   program
@@ -171,4 +172,14 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     .option('--json', 'Print one JSON object (schemaVersion 1): action, repo, stopFlag before/after')
     .option('--from <phase>', 'Resume a kept build at this phase (only: check)')
     .action((issue: string | undefined, opts: { json?: boolean; from?: string }) => handlers.cmdResume(issue, opts));
+
+  program
+    .command('steer <ref>')
+    .description('Record a human or bot steer on the run for an issue or PR (appended to state/runs/issue-<n>.json)')
+    .requiredOption('--message <text>', 'One-line summary of the steer')
+    .option('--source <source>', 'Where the steer came from: cli, bot, github-comment', 'cli')
+    .option('--phase <phase>', "Phase the steer applied to: plan, build, check, ship (default: from the run's status)")
+    .option('--actor <id>', 'Who steered (default: git user.name, then $USER; required with --source bot)')
+    .option('--unblocked', 'Mark that this steer unblocked a stuck run')
+    .action((ref: string, opts: SteerOptions) => handlers.cmdSteer(ref, opts));
 }

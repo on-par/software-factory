@@ -1,5 +1,5 @@
 // packages/cli/src/cli/ship-run-state.test.ts — shipIssue persists IssueRunState as the run progresses (#3194)
-import { readIssueRunState, runStateFile, writeIssueRunState } from '@on-par/factory-core/internal';
+import { appendSteerEvent, readIssueRunState, runStateFile, writeIssueRunState } from '@on-par/factory-core/internal';
 import { describe, expect, it } from 'vitest';
 
 import { LaneParkError } from './index.js';
@@ -99,5 +99,27 @@ describe('shipIssue run state (#3194)', () => {
     await shipIssue(42, {}, ctx());
 
     expect(phases.buildPhase).toHaveBeenCalledWith(expect.objectContaining({ previousAttempt: '' }));
+  });
+
+  it('keeps a steer appended to the run file mid-run across the next transition', async () => {
+    h.shipResult = { ok: true, prNumber: 7 };
+    const event = {
+      ts: '2026-10-21T12:00:00.000Z',
+      actor: 'patrick',
+      source: 'cli',
+      phase: 'build',
+      summary: 'use the new API',
+    };
+    phases.buildPhase.mockImplementation(async () => {
+      const file = runStateFile(paths().runs, 42);
+      const state = await readIssueRunState(file);
+      if (state) await writeIssueRunState(file, appendSteerEvent(state, event));
+      return h.buildResult;
+    });
+
+    await shipIssue(42, {}, ctx());
+
+    const final = await readIssueRunState(runStateFile(paths().runs, 42));
+    expect(final?.steers).toEqual([event]);
   });
 });
