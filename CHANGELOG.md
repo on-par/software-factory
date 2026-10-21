@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+### Added
+
+- `ship`, `run-issue` and `run-brief` take `--no-pr`. The run does PLAN, BUILD
+  and CHECK in a normal factory worktree, then stops. It skips SHIP and writes
+  nothing to GitHub: no push, PR, park comment, issue-body enrichment, flaky-test
+  issue, or size-gate child issue (the size gate is off). The worktree and branch
+  are kept, protected from GC by a keep record, for inspection or a later run.
+  Routing and prompts are the same as a normal run, unlike `run-brief --workspace`.
+
 ### Fixed
 
 - Codex PLAN can write its spec under the resolved factory state directory, and

@@ -94,6 +94,12 @@ describe('resolveRunBranch', () => {
     expect(list).not.toHaveBeenCalled();
   });
 
+  it('skips the lookup for --no-pr runs', async () => {
+    const { octokit, list } = stub([pr(7, 'factory/2253-x')]);
+    expect(await run(octokit, { noPr: true })).toBe(branchFor(2253, 'New title', 'factory'));
+    expect(list).not.toHaveBeenCalled();
+  });
+
   it('skips the lookup for stack runs', async () => {
     const { octokit, list } = stub([pr(7, 'factory/2253-x')]);
     const rest = {

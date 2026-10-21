@@ -35,8 +35,6 @@ import {
   resolveSizeGateMode,
   ReworkHistory,
   runIssue,
-  type EffectiveModelPins,
-  type RepoFactoryConfig,
   type SizeGateMode,
   summarizeEvent,
   touchLastEvent,
@@ -69,35 +67,17 @@ import type { CliDeps, ConfigLoaderKey, CoreOpKey, GitOpKey, ShellOpKey } from '
 import { resolveRunBranch } from './run-branch.js';
 import { shipRuntime } from './ship-runtime.js';
 import { runStateRecorder } from './ship-run-state.js';
+import { maybeWriteBenchmarkArtifacts, maybeWriteLocalRunReport } from './ship-reports.js';
+import { modelOverrideMessages } from './model-override-messages.js';
 import {
   buildRunRequest,
   decomposeQueue,
   finishOutcome,
   logSandboxPolicy,
-  maybeWriteBenchmarkArtifacts,
-  maybeWriteLocalRunReport,
   setupRunWorkspace,
   stubAwareShipPhase,
   TERMINAL_EVENT_KINDS,
 } from './ship-steps.js';
-
-/** One `model-override` message per pinned phase, naming the file or env var it came from (#2497). */
-function modelOverrideMessages(
-  pins: EffectiveModelPins,
-  repo: RepoFactoryConfig | null,
-  repoConfigLabel: string,
-): string[] {
-  const label = (source: 'repo' | 'env' | undefined, envVar: string) => (source === 'repo' ? repoConfigLabel : envVar);
-  const repoPins = repo?.models?.pins;
-  return [
-    ...(repoPins?.triage ? [`triage model pinned to ${repoPins.triage} (${repoConfigLabel})`] : []),
-    ...(pins.plan ? [`plan model pinned to ${pins.plan} (${label(pins.sources.plan, 'FACTORY_PLAN_MODEL')})`] : []),
-    ...(pins.build
-      ? [`build model pinned to ${pins.build} (${label(pins.sources.build, 'FACTORY_BUILD_MODEL')})`]
-      : []),
-    ...(repoPins?.checker ? [`checker model pinned to ${repoPins.checker} (${repoConfigLabel})`] : []),
-  ];
-}
 
 export async function shipIssue(
   issueNum: number,
@@ -114,6 +94,8 @@ export async function shipIssue(
     maxSlices?: number;
     /** `--pr-classifier` / `--no-pr-classifier` (#1724); undefined defers to config/env. */
     prClassifier?: boolean;
+    /** `--no-pr` sets false: stop after a clean CHECK with no GitHub writes; undefined = ship as usual. */
+    pr?: boolean;
   },
   ctx?: {
     repoRoot: string;
@@ -243,11 +225,12 @@ export async function shipIssue(
       issue: issueNum,
     } satisfies GithubIssueParams));
   const issueTitle = work.title;
-  const sizeGateMode = opts.sizeGate ?? resolveSizeGateMode(factoryConfig);
+  const noPr = opts.pr === false; // --no-pr never files child issues or slice PRs: size gate off
+  const sizeGateMode = noPr ? 'off' : (opts.sizeGate ?? resolveSizeGateMode(factoryConfig));
   const maxSlices = opts.maxSlices ?? resolveSizeGateMaxSlices(factoryConfig);
   const { branchPrefix } = policy.effective;
   const claim = { issueNum, issueTitle, ghRepo, sizeGateMode, work, ctx, octokit };
-  const branch = await resolveRunBranch({ ...claim, branchPrefix, eventsFile: paths.events });
+  const branch = await resolveRunBranch({ ...claim, branchPrefix, noPr, eventsFile: paths.events });
   const worktree = ctx?.resumeFrom
     ? ctx.resumeFrom.worktree
     : ctx?.localOnly
