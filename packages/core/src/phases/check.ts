@@ -66,9 +66,7 @@ export interface CheckPhaseResult {
    *  re-running a full budget against a root cause a prior run already exhausted
    *  its rework budget on without fixing. Always implies `stuck: true`. */
   crossRunStuck?: boolean;
-  /** Deterministic signature of the final failing checks, for the caller to persist
-   *  via ReworkHistory so a future run can detect a repeat. Present whenever the
-   *  phase ends with `summary.failures > 0`; absent when it passes clean. */
+  /** Signature of the final failing checks, persisted via ReworkHistory to spot repeats; absent on a clean pass. */
   failureSignature?: string;
   /** Round-1 failing checkers re-run on diffBase (#1925); absent when round 1 passed, worker_output failed, or no diffBase. */
   baseline?: BaselineReport;
@@ -307,9 +305,7 @@ async function checkPhaseImpl(opts: {
   onPgid?: (pgid: number) => void;
   budgetGuard?: BudgetGuard; // per-issue budget guard for rework sessions (#3320)
   processGroupTracker?: CheckerContext['processGroupTracker'];
-  /** Failure signature this issue parked/got stuck on in a prior run (ReworkHistory,
-   *  #740). When round one's signature matches, the rework loop is skipped entirely
-   *  instead of re-burning a full budget against an unfixed root cause. */
+  /** Signature a prior run parked on (ReworkHistory, #740); a round-one match skips the rework loop. */
   priorFailureSignature?: string;
   /** Fallback diff base for workerOutputChecker and designSmellsChecker in checkouts
    *  with no remote base ref (#1211, #1212). For localOnly runs this is the run-start
@@ -328,12 +324,11 @@ async function checkPhaseImpl(opts: {
   runId?: string;
   /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
   bus?: LifecycleBus;
-  /** Heartbeat hook (#1326), forwarded to `CheckerContext.onActivity` — bumps the
-   *  persisted run-phase snapshot's `lastActivityAt` around every checker. */
+  /** Heartbeat hook (#1326) for `CheckerContext.onActivity`; bumps the run-phase snapshot's `lastActivityAt`. */
   onActivity?: () => void | Promise<void>;
-  /** Factory logs dir (`.factory/state/logs`). When set, failing checker commands write
-   *  their full output to `<logsDir>/issue-<n>/check-r<round>/` and FAIL details link it. */
+  /** Factory logs dir; failing checker output goes to `<logsDir>/issue-<n>/check-r<round>/` and FAIL links it. */
   logsDir?: string;
+  onWorkerResult?: ReworkWorkerOptions['onWorkerResult'];
   /** state/baseline-cache.json (#1926); when set, baseline results are cached per base SHA + laneEnv hash. */
   baselineCachePath?: string;
   /** Injection seam for tests; defaults to runBaselineCheckers (#1925). */
@@ -594,6 +589,7 @@ async function checkPhaseImpl(opts: {
       reworkRoute,
       reworkModel,
       runId,
+      onWorkerResult: opts.onWorkerResult,
     });
 
     const cause: ReworkCause = classifyReworkCause({
@@ -722,6 +718,8 @@ export interface ReworkWorkerOptions {
   reworkRoute?: BuildRoutePin;
   reworkModel?: string;
   runId?: string;
+  /** Called with each rework worker's router result, e.g. to keep it as a run log (#3274). */
+  onWorkerResult?: (result: RouterResult) => Promise<void>;
   extraInstructions?: string;
 }
 
@@ -805,6 +803,7 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
       modelOverride,
       budgetGuard,
     });
+    await opts.onWorkerResult?.(reworkResult);
     attempts = reworkResult.attempts;
   } catch (err) {
     if (isBudgetStopError(err)) return { failovers: [], modelCompleted: false, budgetStopped: true };

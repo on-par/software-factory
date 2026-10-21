@@ -152,6 +152,7 @@ async function buildPhaseImpl(opts: {
   collectDiff?: typeof collectDesignDiff;
   /** Injectable for tests; defaults to captureDiffBase. */
   captureBase?: typeof captureDiffBase;
+  onWorkerResult?: (result: RouterResult) => Promise<void>;
 }): Promise<BuildResult> {
   const {
     issue,
@@ -381,7 +382,7 @@ async function buildPhaseImpl(opts: {
       failoverReason: f.reason,
     });
   }
-
+  await opts.onWorkerResult?.(result);
   if (isEscalation(result.output)) {
     const escalateLine = escalationLine(result.output);
     log('escalate', escalateLine ?? 'build escalated');

@@ -163,6 +163,7 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     expect(details).toContain('packages/core/src/sandbox/egress-proxy.ts:130');
     expect(details).toContain('tainted url');
     expect(opts.extraInstructions).toMatch(/suppression is forbidden/i);
+    expect(opts.onWorkerResult).toBe(checkPhase.mock.calls[0][0].onWorkerResult);
     expect(checkPhase).toHaveBeenCalledTimes(2);
     expect(shipPhase).toHaveBeenCalledTimes(2);
     expect(shipPhase.mock.calls[1][0].reentry).toEqual({ prNumber: 9, previousHeadSha: 'sha' });
