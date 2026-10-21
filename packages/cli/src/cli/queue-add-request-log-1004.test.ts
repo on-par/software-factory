@@ -88,7 +88,7 @@ describe('queue add request log (#1004)', () => {
       await main(['node', 'factory', 'queue', 'add', 'a b', '1'], {
         exec,
         execSync: () => '',
-        octokit: () => createFactoryOctokit('t'),
+        octokit: () => createFactoryOctokit('t', { throttle: false }),
       });
     } catch (err) {
       const code = (err as { code?: unknown }).code;

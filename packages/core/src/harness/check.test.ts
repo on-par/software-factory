@@ -54,7 +54,8 @@ beforeAll(() => {
   );
   script('edit.sh', "printf 'ok\\n' > HARNESS_CHECK.txt; echo ok");
   script('other.sh', onCommitPrompt('printf ok > other.txt && git add other.txt && git commit -q -m x'));
-  script('slow.sh', 'sleep 5; echo ok');
+  // Still running when the timeout case's 1ms timer fires; every other case waits it out, so keep it short.
+  script('slow.sh', 'sleep 0.2; echo ok');
 });
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 

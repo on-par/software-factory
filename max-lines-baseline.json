@@ -31,7 +31,7 @@
   "packages/core/src/logger/index.test.ts": 510,
   "packages/core/src/models/index.test.ts": 1349,
   "packages/core/src/phases/build.test.ts": 2375,
-  "packages/core/src/phases/check.test.ts": 2900,
+  "packages/core/src/phases/check.test.ts": 2763,
   "packages/core/src/phases/check.ts": 838,
   "packages/core/src/phases/plan.test.ts": 3603,
   "packages/core/src/phases/plan.ts": 953,

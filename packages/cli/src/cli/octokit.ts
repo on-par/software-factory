@@ -50,6 +50,9 @@ export interface FactoryOctokitOptions {
   log?: (deprecation: GitHubApiDeprecation) => void;
   /** Where the short per-route line goes. Defaults to console.error. Injectable for tests. */
   stderr?: (line: string) => void;
+  /** Test-only seam: false turns off @octokit/plugin-throttling, whose write group spaces every
+   *  POST/PATCH/PUT/DELETE about a second apart. Defaults to true; production callers never pass it. */
+  throttle?: boolean;
 }
 
 type ResponseHeaders = Record<string, string | number | undefined>;
@@ -106,7 +109,7 @@ export function createFactoryOctokit(token?: string, options: FactoryOctokitOpti
   };
   const octokit = new FactoryOctokit({
     auth: token,
-    throttle: { onRateLimit, onSecondaryRateLimit },
+    throttle: { enabled: options.throttle ?? true, onRateLimit, onSecondaryRateLimit },
     log,
     // @octokit/request reads its own `request.log` (default console), not the client's `log`.
     request: { log },
