@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { evaluateRisk } from './risk.js';
+import type { RiskTier } from '@on-par/factory-config';
+
+import type { TrustTier } from '../config/repo.js';
+import { decideRiskMerge, evaluateRisk } from './risk.js';
 
 const ids = (r: ReturnType<typeof evaluateRisk>) => r.rules.map((x) => x.id);
 
@@ -109,5 +112,64 @@ describe('evaluateRisk', () => {
     const r = evaluateRisk({ paths: ['docs/auth.md'] });
     expect(r.tier).toBe('high');
     expect(ids(r)).toEqual(expect.arrayContaining(['docs', 'auth']));
+  });
+});
+
+describe('decideRiskMerge', () => {
+  const tiers: TrustTier[] = ['T0', 'T1', 'T2'];
+
+  it('low merges on every trust tier with no labels', () => {
+    for (const trustTier of tiers) {
+      expect(decideRiskMerge({ tier: 'low', trustTier, labels: [] })).toMatchObject({
+        merge: true,
+        addLabels: [],
+        notify: false,
+      });
+    }
+  });
+
+  it('med merges on T2 without needs-human', () => {
+    expect(decideRiskMerge({ tier: 'med', trustTier: 'T2', labels: [] }).merge).toBe(true);
+  });
+
+  it('med holds with risk:med on T0 and T1', () => {
+    for (const trustTier of ['T0', 'T1'] as const) {
+      const d = decideRiskMerge({ tier: 'med', trustTier, labels: [] });
+      expect(d).toMatchObject({ merge: false, addLabels: ['risk:med'], notify: false });
+      expect(d.reason).toContain(`trust tier ${trustTier} is not T2`);
+    }
+  });
+
+  it('med on T2 holds when needs-human is set', () => {
+    const d = decideRiskMerge({ tier: 'med', trustTier: 'T2', labels: ['needs-human'] });
+    expect(d).toMatchObject({ merge: false, addLabels: ['risk:med'] });
+    expect(d.reason).toContain('needs-human is set');
+  });
+
+  it('high holds, labels and notifies on every trust tier', () => {
+    for (const trustTier of tiers) {
+      expect(decideRiskMerge({ tier: 'high', trustTier, labels: [] })).toMatchObject({
+        merge: false,
+        addLabels: ['risk:high', 'needs-human'],
+        notify: true,
+      });
+    }
+  });
+
+  it('treats an unknown tier as high', () => {
+    expect(decideRiskMerge({ tier: 'bogus' as RiskTier, trustTier: 'T2', labels: [] })).toMatchObject({
+      merge: false,
+      addLabels: ['risk:high', 'needs-human'],
+      notify: true,
+    });
+  });
+
+  it('never adds a factory queue label', () => {
+    for (const tier of ['low', 'med', 'high'] as const) {
+      for (const trustTier of tiers) {
+        const d = decideRiskMerge({ tier, trustTier, labels: [] });
+        expect(d.addLabels.some((l) => l.startsWith('factory:'))).toBe(false);
+      }
+    }
   });
 });

@@ -216,6 +216,6 @@ describe('stack queue preflight and merge ordering (ADR-0161)', () => {
       sleep: async () => {},
     });
     expect(land).toHaveBeenCalledTimes(1);
-    expect((land.mock.calls[0] as unknown[])[7]).toEqual({ branch: 'factory/7-s2-x' });
+    expect((land.mock.calls[0] as unknown[])[7]).toEqual({ branch: 'factory/7-s2-x', enforceRisk: true });
   });
 });

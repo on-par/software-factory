@@ -632,8 +632,9 @@ export type {
 } from './review/floor.js';
 export { computeReviewFloor, DEFAULT_REVIEW_FLOOR_RULES } from './review/floor.js';
 
-// Risk tier (#3380)
-export { evaluateRisk, type RiskEvaluation, type RiskEvaluationInput, type RiskMatchedRule } from './review/risk.js';
+// Risk tier (#3380, #3381)
+// prettier-ignore
+export { decideRiskMerge, evaluateRisk, NEEDS_HUMAN_LABEL, RISK_HIGH_LABEL, RISK_MED_LABEL, type RiskEvaluation, type RiskEvaluationInput, type RiskMatchedRule, type RiskMergeDecision, type RiskMergeInput } from './review/risk.js';
 export * from './review/risk-receipt.js'; // Risk receipt (#3386)
 export { listPrChangedFiles } from './run/ci-rework.js';
 

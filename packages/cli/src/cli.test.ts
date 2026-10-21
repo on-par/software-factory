@@ -734,7 +734,7 @@ describe('cli', () => {
       ['event', 'await-merge', 21, 'waiting to merge ship-it/21-self-merge'],
       ['checkMerged', [octokit, 'on-par', 'software-factory', 'ship-it/21-self-merge']],
       ['listIssueLabels', [octokit, 'on-par', 'software-factory', 21]],
-      ['land', [21, '/repo', 'on-par/software-factory', paths, octokit, false]],
+      ['land', [21, '/repo', 'on-par/software-factory', paths, octokit, false, undefined, { enforceRisk: true }]],
     ]);
   });
 
@@ -881,7 +881,7 @@ describe('cli', () => {
 
     expect(calls).toEqual([
       ['listLabelsOnIssue', [{ owner: 'on-par', repo: 'software-factory', issue_number: 21 }]],
-      ['land', [21, '/repo', 'on-par/software-factory', paths, octokit, false]],
+      ['land', [21, '/repo', 'on-par/software-factory', paths, octokit, false, undefined, { enforceRisk: true }]],
     ]);
   });
 

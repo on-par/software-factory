@@ -58,6 +58,7 @@ function defaultOctokit() {
             : { data: [] },
         ),
         get: vi.fn(async () => ({ data: { head: { sha: 'abc123' } } })),
+        listFiles: vi.fn(async () => ({ data: [{ filename: 'docs/readme.md' }] })),
         merge: vi.fn(async () => ({})),
       },
       git: { deleteRef: vi.fn(async () => ({})) },
@@ -208,10 +209,10 @@ describe('land (via main dispatch)', () => {
   });
 
   it('lands an open PR and prints success', async () => {
-    const res = await runMain('land', '5');
-    expect(res.exited).toBe(false);
+    await runMain('land', '5');
     expect(logged()).toContain('Landed PR #77');
     expect(h.octokit.rest.pulls.merge).toHaveBeenCalled();
+    expect(h.octokit.rest.pulls.listFiles).not.toHaveBeenCalled();
   });
 
   it('exits 1 when there is no open PR for the issue', async () => {

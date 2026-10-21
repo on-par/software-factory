@@ -24,6 +24,7 @@ import {
   releaseLaneClaim,
   resolveEffectiveConfig,
   resolveFilingPolicy,
+  resolveTrustTier,
   withFileLock,
   withGitLock,
   worktreeSandboxFor,
@@ -38,6 +39,7 @@ import {
   landOpenPullRequest,
 } from './land-pr.js';
 import type { LandLock } from './land-pr.js';
+import { enforceRiskAtLand } from './land-risk.js';
 import { landRuntime } from './land-runtime.js';
 import { riskPolicyLines } from './risk-policy.js';
 
@@ -59,7 +61,7 @@ export async function landIssue(
   octokit: Octokit,
   skipCI?: boolean,
   branchPrefix?: string,
-  opts: { allowGated?: boolean; branch?: string } = {},
+  opts: { allowGated?: boolean; branch?: string; enforceRisk?: boolean } = {},
 ): Promise<{ branch: string; prNumber: number }> {
   const { configLoaders, gitOps, errorDetail, worktreePathFor } = landRuntime();
   const [owner, repoName] = ghRepo.split('/');
@@ -72,7 +74,9 @@ export async function landIssue(
   // branch from the current title first, but fall back to matching the open
   // PR that references this issue directly and use its real head branch.
   // Legacy-prefix (LEGACY_BRANCH_PREFIX) branches are guessed too, after the resolved prefix (#1708).
-  const resolved = branchPrefix ?? resolveEffectiveConfig(configLoaders.loadRepoConfig(repoRoot)).branchPrefix;
+  const repoConfig =
+    branchPrefix === undefined || opts.enforceRisk ? configLoaders.loadRepoConfig(repoRoot) : undefined;
+  const resolved = branchPrefix ?? resolveEffectiveConfig(repoConfig!).branchPrefix;
   const title = await getIssueTitle(ghRepo, issueNum, octokit);
   // ADR-0161: a stack layer lands by its exact branch, never by title guess or the Closes PR (the top layer).
   const guesses = opts.branch
@@ -116,6 +120,7 @@ export async function landIssue(
   // Every merge path honors the no-auto-merge gate on the issue and on the PR; unreadable labels fail closed (#1720).
   const filingPolicy = resolveFilingPolicy(landFactoryConfig);
   const gateLabel = filingPolicy.selfFixLabel;
+  let gateLabels: string[] = [];
   if (opts.allowGated) {
     console.log(
       `AUDIT factory land #${issueNum}: --allow-gated override — merging PR #${prNumber} past the ${gateLabel} gate`,
@@ -128,6 +133,7 @@ export async function landIssue(
         defaultListIssueLabels(octokit, owner, repoName, issueNum),
         defaultListIssueLabels(octokit, owner, repoName, prNumber),
       ]);
+      gateLabels = [...issueLabels, ...prLabels];
       if (isAutoMergeBlocked(issueLabels, filingPolicy)) where = `issue #${issueNum} is labelled ${gateLabel}`;
       else if (isAutoMergeBlocked(prLabels, filingPolicy)) where = `PR #${prNumber} is labelled ${gateLabel}`;
     } catch (err) {
@@ -183,6 +189,23 @@ export async function landIssue(
         onSteal: (pid) => log('lock-stolen', `stole ${paths.mergeLock} from dead holder pid ${pid ?? 'unknown'}`),
       }),
     );
+
+  if (opts.enforceRisk && !opts.allowGated) {
+    const gate = await enforceRiskAtLand({
+      octokit,
+      owner,
+      repoName,
+      issue: issueNum,
+      prNumber,
+      labels: gateLabels,
+      trustTier: resolveTrustTier(repoConfig ?? null),
+      log,
+    });
+    if (!gate.merge) {
+      await withLandLock(() => gitOps.cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
+      throw new AwaitingReviewError(`PR #${prNumber} held for a human: ${gate.reason}`, prNumber);
+    }
+  }
 
   try {
     try {
@@ -342,7 +365,7 @@ export type WaitForMergeDeps = {
     octokit: Octokit,
     skipCI?: boolean,
     branchPrefix?: string,
-    opts?: { allowGated?: boolean; branch?: string },
+    opts?: { allowGated?: boolean; branch?: string; enforceRisk?: boolean },
   ) => Promise<{ branch: string; prNumber: number }>;
   /** ADR-0161 stack layer: land exactly this head branch. */
   landBranch?: string;
@@ -452,8 +475,12 @@ export async function waitForMerge(
         await sleep(120_000);
         continue;
       }
-      if (landBranch) await land(issue, repoRoot, ghRepo, paths, octokit, skipCI, undefined, { branch: landBranch });
-      else await land(issue, repoRoot, ghRepo, paths, octokit, skipCI);
+      if (landBranch)
+        await land(issue, repoRoot, ghRepo, paths, octokit, skipCI, undefined, {
+          branch: landBranch,
+          enforceRisk: true,
+        });
+      else await land(issue, repoRoot, ghRepo, paths, octokit, skipCI, undefined, { enforceRisk: true });
       await releaseLandedClaim(paths, ghRepo, issue, (type, msg) => emitEvent(paths.events, type, issue, msg));
       return;
     }
