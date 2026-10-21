@@ -1,17 +1,15 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { buildPhase } from './build.js';
 import { workerOutputTail } from './build-no-diff.js';
 
-const tempDirs = new Set<string>();
+const tempDirs = createTempDirs();
 
 afterEach(async () => {
-  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
-  tempDirs.clear();
+  await tempDirs.cleanup();
 });
 
 const fakeRouter = (output: string) =>
@@ -20,8 +18,7 @@ const fakeRouter = (output: string) =>
   }) as any;
 
 async function emptyBuild(output: string, openQuestions?: string[], excludedPaths?: string[]) {
-  const worktree = await mkdtemp(join(tmpdir(), 'build-no-diff-test-'));
-  tempDirs.add(worktree);
+  const worktree = await tempDirs.make('build-no-diff-test-');
   const logs: Array<{ type: string; msg: string }> = [];
   const result = await buildPhase({
     issue: 3273,
