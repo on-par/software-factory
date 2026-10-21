@@ -550,7 +550,7 @@ const INTERNAL_API_KEYS = [
   ...'RISK_RECEIPT_END RISK_RECEIPT_START listPrChangedFiles publishRiskReceipt renderRiskReceipt'.split(' '), // #3386
   ...'upsertRiskReceipt riskPolicyConfigFile loadRiskPolicy formatRiskPolicy'.split(' '), // #3387
   ...'resolveHostLoadGuard evaluateLoadGuard formatLoadHold readHostLoad resolveBaseHealthChecks'.split(' '), // #3048, #3290
-  ...'hostBuildSlotsDir listHostSlots'.split(' '),
+  ...'hostBuildSlotsDir listHostSlots syncLandBranch'.split(' '), // syncLandBranch: #1886
   ...'withHostBuildSlot createRunSlotGate withRunAndHostBuildSlot'.split(' '), // #3049
   ...'FACTORY_RUNTIME_CONFIG_KEYS isTrustedApprover'.split(' '),
   'createOctokitCollaboratorPermissionClient',

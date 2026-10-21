@@ -112,7 +112,7 @@ export function upsertIndexRow(markdown: string, row: AdrIndexRow): string {
   if (!bounds) throw new AdrKitError('no ADR index table found', 'index');
 
   const existingRows = parseBodyRows(lines.slice(bounds.headerIdx + 2, bounds.endIdx));
-  const mergedRows = [...existingRows.filter((existing) => existing.number !== row.number), row].sort(
+  const mergedRows = [...existingRows.filter((existing) => existing.href !== row.href), row].sort(
     (a, b) => a.number - b.number,
   );
   const renderedTable = renderIndexTable(mergedRows).split('\n');

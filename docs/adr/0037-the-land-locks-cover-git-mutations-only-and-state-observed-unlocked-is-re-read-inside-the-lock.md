@@ -23,7 +23,7 @@ rebased, or dirtied the PR in between.
 
 The land locks protect git mutations, nothing else. `landOpenPullRequest` takes an injected
 `LandLock` (`<T>(fn: () => Promise<T>) => Promise<T>`, identity by default) and acquires it
-around exactly three kinds of critical section: the DIRTY-path rebase + force-push, a single
+around exactly three kinds of critical section: the DIRTY-path main sync, a single
 merge attempt (draft-ready flip + `squashMergeAndDelete`), and — in `landIssue` — worktree
 cleanup. `watchChecks`, the `getPullRequestLandState` probes that drive the DIRTY decision,
 and the merge-retry backoff sleep all run with no lock held. Every critical section re-reads
@@ -34,6 +34,11 @@ not rebased. `landIssue` owns lock composition — it builds one `withLandLock` 
 `landOpenPullRequest` stays lock-implementation agnostic and directly testable.
 
 ## Consequences
+
+**Update (ADR-0166):** DIRTY recovery now fetches and merges `origin/main`, mechanically replays
+the ADR index only when it is the sole conflict, and uses a non-force push. This supersedes the
+rebase/force-push mechanism above; the lock scope, locked state re-read, and unlocked CI waits
+remain unchanged.
 
 Positive: a lane's CI watch no longer occupies the process-wide git-lock chain, so sibling
 lanes create worktrees and start issues while a lane lands; merge-lock hold time drops from
