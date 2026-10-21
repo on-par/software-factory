@@ -219,11 +219,11 @@ describe('land risk receipt', () => {
   it('prints the configured risk policy and applies it to the receipt', async () => {
     mkdirSync(join(h.repoRoot, '.factory'), { recursive: true });
     writeFileSync(
-      join(h.repoRoot, '.factory', 'risk.yml'),
-      "rules:\n  - id: sf-docs-high\n    tier: high\n    globs: ['docs/**']\n",
+      join(h.repoRoot, '.factory', 'config.yaml'),
+      "version: 2\nrisk:\n  rules:\n    - id: sf-docs-high\n      tier: high\n      globs: ['docs/**']\n",
     );
     await runMain('land', '5');
-    expect(logSpy).toHaveBeenCalledWith('risk policy: .factory/risk.yml (1 rule)');
+    expect(logSpy).toHaveBeenCalledWith('risk policy: .factory/config.yaml `risk` (1 rule)');
     const body = h.octokit.rest.pulls.update.mock.calls[0][0].body;
     expect(body).toMatch(/\*\*Tier: high\*\*/);
     expect(body).toContain('sf-docs-high');
