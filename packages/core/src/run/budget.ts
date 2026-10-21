@@ -30,8 +30,8 @@ export function budgetGuardFor(
     const spendUsd = (ports.getIssueSpend?.() ?? 0) + runningUsd;
     if (spendUsd <= cap) return false;
     stop = { spendUsd, calls };
-    void tracker.killAll({ graceMs }).catch((err: any) => {
-      log?.('warn', `budget kill failed: ${err?.message ?? String(err)}`);
+    void tracker.killAll({ graceMs }).catch((err: unknown) => {
+      log?.('warn', `budget kill failed: ${err instanceof Error ? err.message : String(err)}`);
     });
     return true;
   };
