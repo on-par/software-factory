@@ -197,7 +197,7 @@ export async function landIssue(
       issue: issueNum,
       prNumber,
       labels: gateLabels,
-      trustTier: resolveTrustTier(repoConfig ?? null),
+      trustTier: resolveTrustTier(repoConfig),
       log,
     });
     if (!gate.merge) {
