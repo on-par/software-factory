@@ -1,6 +1,5 @@
 // packages/cli/src/cli/steer.test.ts — `factory steer` resolution, validation and append (#3401)
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   readIssueRunState,
@@ -9,10 +8,12 @@ import {
   type IssueRunState,
   type RunStatus,
 } from '@on-par/factory-core/internal';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { parseSteerRef, phaseForStatus, runSteer, SteerCliError, type SteerDeps } from './steer.js';
 
+const tmp = createTempDirs();
 let dir: string;
 let deps: SteerDeps;
 const TS = '2026-10-21T12:00:00.000Z';
@@ -36,11 +37,11 @@ const fixture = (status: RunStatus = 'building'): IssueRunState => ({
 const file = () => runStateFile(dir, 42);
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'steer-'));
+  dir = await tmp.make('steer-');
   deps = { runsDir: dir, now: () => TS, defaultActor: () => 'patrick' };
   await writeIssueRunState(file(), fixture());
 });
-afterEach(() => rm(dir, { recursive: true, force: true }));
+afterEach(() => tmp.cleanup());
 
 describe('runSteer', () => {
   it('appends one cli steer with the message as summary to the issue run', async () => {
