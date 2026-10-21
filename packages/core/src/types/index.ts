@@ -1,5 +1,6 @@
 // src/types/index.ts — Core type definitions for the Software Factory
 import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
+import type { SteerEvent } from '../run/steer.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
 import type { EvidencePlanResult } from '../checkers/evidence-plan.js';
 
@@ -467,10 +468,9 @@ export interface RemoteBranchRecord {
 export interface IssueRunState {
   issue: number;
   lane: string;
-  /** GitHub slug (`owner/name`) of the checkout this run belongs to (#972).
-   *  Optional for the same reason `FactoryEvent.repo` is (#971): a checkout with no
-   *  readable `origin` remote has no slug to record. Qualifies `lane`, whose meaning
-   *  and format are unchanged. */
+  /** GitHub slug (`owner/name`) of the checkout this run belongs to (#972). Optional for the same
+   *  reason `FactoryEvent.repo` is (#971): a checkout with no readable `origin` remote has no slug
+   *  to record. Qualifies `lane`, whose meaning and format are unchanged. */
   repo?: string;
   status: RunStatus;
   branch: string;
@@ -485,8 +485,8 @@ export interface IssueRunState {
   /** Pre-existing origin/<branch> found at worktree creation (#1868). */
   remoteBranch?: RemoteBranchRecord;
   failures?: CheckerOutput[];
+  steers?: readonly SteerEvent[]; // Human steers, oldest first. Append-only (#3400); see run/steer.ts.
 }
-
 // ---------- Design artifact (#422; moved to @on-par/contracts in #466; deepened in #480) ----------
 export type {
   CallEdge,

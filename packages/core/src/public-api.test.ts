@@ -317,8 +317,9 @@ const PUBLIC_API_KEYS = [
 ];
 const AGENT_JOB_KEYS = ['resolveHostMaxAgentJobs', 'hostAgentJobsDir', 'withHostAgentJobLease']; // #3047
 const TAIL = 'InvalidEventCursorError eventSegmentFileName eventSegmentsDir readEventsTail readEventsSince'.split(' ');
+const STEER = 'STEER_SOURCES STEER_PHASES SteerEventError parseSteerEvent appendSteerEvent listSteerEvents'.split(' '); // #3400
 const MORE = ['agentInvocationsFromEvents', 'computeTokenCoverage', 'readReviewApproval', 'readStackSliceGate']; // #3126, #3366
-const EXTRA_INTERNAL_KEYS = [...AGENT_JOB_KEYS, ...TAIL, ...MORE, 'nextStackSlice'];
+const EXTRA_INTERNAL_KEYS = [...AGENT_JOB_KEYS, ...TAIL, ...MORE, ...STEER, 'nextStackSlice'];
 const INTERNAL_API_KEYS = [
   'openCodeVersion',
   'DEFAULT_CI_DEADLINE_MS',
@@ -837,8 +838,7 @@ const TESTING_API_KEYS = [
   'simRegressionFixture',
   'simSpecWithObjectInterface',
 ];
-// The root export's "// KPIs" block (PUBLIC_API_KEYS above), re-exported standalone from a
-// Node-dep-free entry point so browser bundlers skip the root's harness/router deps.
+// The root "// KPIs" block (PUBLIC_API_KEYS above), re-exported from a Node-dep-free entry point (no harness/router deps).
 const KPIS_API_KEYS = [
   'appendKpiHistoryLine',
   'computeHealthKpis',

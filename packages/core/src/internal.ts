@@ -749,14 +749,14 @@ export type {
   SlicePlanUpsertResult,
 } from './readiness/slice-plan-github.js';
 export { findSlicePlanComment, recordSliceMerged, upsertSlicePlanComment } from './readiness/slice-plan-github.js';
-export type { SliceGateOutcome } from './readiness/slice-gate.js';
-export { resolveSliceGate } from './readiness/slice-gate.js';
+export { resolveSliceGate, type SliceGateOutcome } from './readiness/slice-gate.js';
 export * from './blockers/index.js';
 export * from './events/tail.js';
 export type { ReadinessGapCriterion, ReadinessGapReport } from './readiness/enrich.js';
 export { buildReadinessGapPrompt, parseReadinessGapOutput } from './readiness/enrich.js';
 export type { IssueRunState, RunStatus } from './types/index.js';
 export * from './run/state.js';
+export * from './run/steer.js';
 export { createStackSliceBranch } from './run/stack-slice-branch.js';
 export {
   checkResumePath,

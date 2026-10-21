@@ -125,5 +125,6 @@ export function nextIssueRunState(
     ...(prNumber === undefined ? {} : { prNumber }),
     ...(update.failures !== undefined && update.failures.length > 0 ? { failures: update.failures } : {}),
     ...(prev?.remoteBranch === undefined ? {} : { remoteBranch: prev.remoteBranch }),
+    ...(prev?.steers === undefined ? {} : { steers: prev.steers }),
   };
 }
