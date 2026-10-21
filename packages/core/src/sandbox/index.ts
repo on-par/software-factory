@@ -5,8 +5,9 @@
 // worktree + known state dirs and gates network by an allowlist. Per-host
 // network filtering is not expressible in either runtime without a proxy —
 // see resolveSandboxPolicy's caller for the 'sandbox-degraded' warning this
-// implies when the allowlist is non-empty. On sandbox-exec, egress is report-only
-// through a per-lane proxy (egress-proxy.ts, #2214): nothing is blocked yet. `docker-sandbox` is a selectable
+// implies when the allowlist is non-empty. On sandbox-exec, egress goes through a per-lane proxy
+// (egress-proxy.ts, #2214): report-only by default, enforced with sandbox.network.mode = enforce (#2215),
+// where the profile denies direct outbound except loopback and the proxy 403s unlisted hosts. `docker-sandbox` is a selectable
 // runtime backed by a microVM lifecycle (create/mount/teardown, #653) owned by
 // utils/microvm.ts and driven from setupWorktree/cleanupWorktree; the VM itself is
 // the containment boundary, so it is not a command prefix and wraps nothing here.
@@ -37,6 +38,10 @@ const SANDBOX_RUNTIME_SETTINGS: readonly SandboxRuntimeSetting[] = [
   'none',
 ];
 
+export type SandboxNetworkMode = 'report' | 'enforce';
+
+const SANDBOX_NETWORK_MODES: readonly SandboxNetworkMode[] = ['report', 'enforce'];
+
 export interface SandboxPolicy {
   runtime: SandboxRuntime;
   worktree: string;
@@ -52,6 +57,8 @@ export interface SandboxPolicy {
   proxyUrl?: string;
   /** Egress proxy refuses telemetry hosts with 403 (#2667); off unless config sets it true. */
   blockTelemetry?: boolean;
+  /** Egress control on sandbox-exec (#2215): report forwards everything; enforce blocks direct egress and unlisted hosts. */
+  networkMode?: SandboxNetworkMode;
   cpuMs: number;
   memMb: number;
 }
@@ -75,6 +82,15 @@ export function detectSandboxRuntime(
 function sandboxRuntimeFromEnv(env: NodeJS.ProcessEnv): SandboxRuntimeSetting | undefined {
   const raw = env.FACTORY_SANDBOX_RUNTIME;
   return SANDBOX_RUNTIME_SETTINGS.find((s) => s === raw);
+}
+
+/** Resolves the egress mode for one run (#2215). FACTORY_SANDBOX_NETWORK wins over
+ *  `sandbox.network.mode` when it is exactly report|enforce; anything else is ignored. */
+export function resolveSandboxNetworkMode(
+  configured: SandboxNetworkMode | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): SandboxNetworkMode {
+  return SANDBOX_NETWORK_MODES.find((m) => m === env.FACTORY_SANDBOX_NETWORK) ?? configured ?? 'report';
 }
 
 /** Resolves the concrete runtime for one run. FACTORY_SANDBOX_RUNTIME wins over the
@@ -215,6 +231,7 @@ export function resolveSandboxPolicy(
     writableFilePrefixes,
     allowHosts: buildEgressAllowlist(cfg.network.allow, opts.repoRoot),
     blockTelemetry: cfg.network.blockTelemetry === true,
+    networkMode: resolveSandboxNetworkMode(cfg.network.mode, env),
     cpuMs: cfg.resources.cpuMs,
     memMb: cfg.resources.memMb,
   };
@@ -240,7 +257,14 @@ export function buildDarwinProfile(policy: SandboxPolicy): string {
   const prefixRules = policy.writableFilePrefixes
     .map((p) => `(allow file-write* (regex ${sbplRegexPrefix(p)}))`)
     .join('\n');
-  const networkDeny = policy.allowHosts.length === 0 ? '\n(deny network-outbound)' : '';
+  let networkDeny = '';
+  if (policy.allowHosts.length === 0) {
+    networkDeny = '\n(deny network-outbound)';
+  } else if (policy.networkMode === 'enforce') {
+    // Loopback (the lane proxy, leased dev servers) and DNS via mDNSResponder stay open; all else is denied (#2215).
+    networkDeny =
+      '\n(deny network-outbound)\n(allow network-outbound (remote ip "localhost:*"))\n(allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))';
+  }
 
   return `(version 1)
 (allow default)
@@ -250,9 +274,14 @@ ${prefixRules}
 (allow file-write* (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr") (subpath "/dev/fd"))${networkDeny}`;
 }
 
-/** True when a report-only egress proxy should run for this policy (#2214). */
+/** True when an egress proxy should run for this policy (#2214). */
 export function shouldProxyEgress(policy: SandboxPolicy | undefined): policy is SandboxPolicy {
   return policy?.runtime === 'sandbox-exec' && policy.allowHosts.length > 0;
+}
+
+/** True when the allowlist is enforced: sandbox-exec, enforce mode, non-empty allowlist (#2215). */
+export function isEgressEnforced(policy: SandboxPolicy | undefined): boolean {
+  return policy?.runtime === 'sandbox-exec' && policy.networkMode === 'enforce' && policy.allowHosts.length > 0;
 }
 
 /** Proxy env vars injected into the sandbox-exec agent command; loopback stays direct. */

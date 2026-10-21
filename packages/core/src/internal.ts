@@ -323,14 +323,12 @@ export {
 } from './utils/worktree-gc.js';
 export { findWorktreeKeep } from './utils/worktree-keeps.js';
 // Daemon repo registry (~/.factory/registry.json) (#781)
-export type {
-  RepoRegistry,
-  RepoRegistryEntry,
-  RepoRegistryListing,
-  RepoState,
-  WriteRegistryOptions,
-} from './daemon/registry.js';
 export {
+  type RepoRegistry,
+  type RepoRegistryEntry,
+  type RepoRegistryListing,
+  type RepoState,
+  type WriteRegistryOptions,
   defaultRegistryPath,
   dispatchableRepos,
   emptyRegistry,
@@ -481,6 +479,8 @@ export { createGithubQueueBackend, type GithubQueueBackendOptions, type QueueBac
 // Stale-claim reaping (#999, lease-based since #1500)
 export type { ReleaseStaleClaimsOptions, StaleClaim, StaleClaimRelease } from './queue/stale-claims.js';
 export { findStaleClaims, releaseStaleClaims } from './queue/stale-claims.js';
+export type { StatelessLaneIssue } from './queue/stateless-lane.js';
+export { findStatelessLaneIssues, listRepoLaneLabels, listStatelessLaneIssues } from './queue/stateless-lane.js';
 export * from './queue/unpark.js';
 
 // Green-and-ready PR reporting (#1000)
@@ -582,7 +582,7 @@ export {
 } from './daemon/repos-detach.js';
 
 // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
-export { wrapCommandInSandbox, shouldProxyEgress } from './sandbox/index.js';
+export { wrapCommandInSandbox, shouldProxyEgress, isEgressEnforced } from './sandbox/index.js';
 export {
   startEgressProxy,
   egressSummaryMessage,

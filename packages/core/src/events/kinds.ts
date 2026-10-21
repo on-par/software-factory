@@ -59,6 +59,7 @@ export type EventKind =
   | 'design_open_questions'
   | 'design_regression_unresolved'
   | 'design_shallow'
+  | 'egress_denied'
   | 'egress_host'
   | 'egress_summary'
   | 'engine-restarted'
@@ -273,6 +274,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   design_open_questions: { severity: 'warn', isPark: false, isTerminal: false },
   design_shallow: { severity: 'info', isPark: false, isTerminal: false },
   // factoryd restarted a stale in-process engine (#1178) — operational anomaly, not a park or terminal.
+  egress_denied: { severity: 'warn', isPark: false, isTerminal: false },
   egress_host: { severity: 'info', isPark: false, isTerminal: false },
   egress_summary: { severity: 'info', isPark: false, isTerminal: false },
   'engine-restarted': { severity: 'warn', isPark: false, isTerminal: false },

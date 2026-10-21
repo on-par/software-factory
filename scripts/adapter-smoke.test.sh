@@ -4,9 +4,10 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BINDIR="$(mktemp -d)"
+EMPTYBIN="$(mktemp -d)"
 
 cleanup() {
-  rm -rf "$BINDIR"
+  rm -rf "$BINDIR" "$EMPTYBIN"
 }
 trap cleanup EXIT
 
@@ -55,3 +56,11 @@ for agent in codex opencode pi; do
   ! echo "$OUT" | grep -q 'usage:' || fail "$agent printed a usage line"
 done
 echo "PASS: accepts codex, opencode and pi and reaches packing"
+
+: >"$NPM_LOG"
+RC=0
+OUT=$(ADAPTER_SMOKE_AGENT_BIN="$EMPTYBIN" bash "$SCRIPT" codex 2>&1) || RC=$?
+[ "$RC" -ne 0 ] || fail "missing codex shim exited 0"
+echo "$OUT" | grep -q 'missing agent shim for codex' || fail "missing shim message absent"
+echo "$OUT" | grep -qF "$EMPTYBIN/codex" || fail "missing shim path not named"
+echo "PASS: missing codex shim exits non-zero and names the shim"
