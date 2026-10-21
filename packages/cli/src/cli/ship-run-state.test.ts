@@ -1,5 +1,5 @@
 // packages/cli/src/cli/ship-run-state.test.ts — shipIssue persists IssueRunState as the run progresses (#3194)
-import { readIssueRunState, runStateFile } from '@on-par/factory-core/internal';
+import { readIssueRunState, runStateFile, writeIssueRunState } from '@on-par/factory-core/internal';
 import { describe, expect, it } from 'vitest';
 
 import { LaneParkError } from './index.js';
@@ -67,5 +67,37 @@ describe('shipIssue run state (#3194)', () => {
     const row = json.runs.find((r) => r.issue === 42);
     expect(firstStartedAt).toBeDefined();
     expect(row).toMatchObject({ status: 'parked', startedAt: firstStartedAt });
+  });
+
+  it('hands a re-dispatched parked issue its previous attempt before the recorder overwrites it (#3373)', async () => {
+    await writeIssueRunState(runStateFile(paths().runs, 42), {
+      issue: 42,
+      lane: 'bugfix',
+      status: 'parked',
+      branch: 'b',
+      worktree: '/w',
+      specPath: '/s.md',
+      model: 'm',
+      route: 'claude',
+      attempts: 1,
+      startedAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      failures: [{ checker: 'tests', result: 'FAIL', details: 'boom' }],
+    });
+    h.shipResult = { ok: true, prNumber: 7 };
+
+    await shipIssue(42, {}, ctx());
+
+    const note = expect.stringContaining('## Previous attempt');
+    expect(phases.buildPhase).toHaveBeenCalledWith(expect.objectContaining({ previousAttempt: note }));
+    expect(phases.planPhase).toHaveBeenCalledWith(expect.objectContaining({ previousAttempt: note }));
+  });
+
+  it('passes an empty previous attempt when there is no prior record', async () => {
+    h.shipResult = { ok: true, prNumber: 7 };
+
+    await shipIssue(42, {}, ctx());
+
+    expect(phases.buildPhase).toHaveBeenCalledWith(expect.objectContaining({ previousAttempt: '' }));
   });
 });

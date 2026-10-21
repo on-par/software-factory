@@ -53,3 +53,9 @@ export function thrownRunStateUpdate(
     ...(decompose || failures.length === 0 ? {} : { failures }),
   };
 }
+
+/** Structural marker for the decompose-hook's thrown signal (core cannot import the
+ *  CLI's IssueDecomposedError; see outcome.ts's parkReasonFor for the same convention). */
+export function isDecomposeSignal(err: unknown): boolean {
+  return Array.isArray((err as { childIssues?: unknown } | null | undefined)?.childIssues);
+}

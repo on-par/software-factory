@@ -47,6 +47,7 @@ import type { EscalateKind } from '../types/index.js';
 import type { Constitution, DesignArtifact, FailoverReason, ReadinessInfo } from '../types/index.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE, wrapUntrustedIssueBody } from '../utils/untrusted-input.js';
+import { RIGHT_SIZE_STEP, RIGHT_SIZE_STEP_GATE_PASSED } from './plan-steps.js';
 import { GITHUB_ISSUE_SOURCE, type GithubIssueParams } from '../work/github-issue.js';
 import { createDefaultWorkSourceRegistry, type WorkRequestSourceKind, type WorkSourceRegistry } from '../work/index.js';
 
@@ -109,24 +110,9 @@ export interface PlanPromptOpts {
   runnableRoutes?: readonly BuildRouteName[];
   /** Pre-flight size-gate verdict (#3275). passed && enforced drops step 4's size ESCALATE. */
   sizeGate?: { passed: boolean; reason?: string; enforced: boolean };
+  /** Rendered "## Previous attempt" note (#3373); empty or absent = first run. */
+  previousAttempt?: string;
 }
-
-const RIGHT_SIZE_STEP = `4. RIGHT-SIZE THE SLICE. A single BUILD pass must be bounded: aim for roughly
-   5-15 minutes of agent work, a handful of files, at most ~6 target types /
-   ~8 signatures / ~10 call edges in the design block. If the issue genuinely
-   needs more surface than that, do NOT write a mega-spec — instead print a line
-   starting with ESCALATE: asking to split the issue into smaller slices first,
-   and do not write the spec file. A slice that takes 40 minutes to build is a
-   planning failure, not a build problem.`;
-
-const RIGHT_SIZE_STEP_GATE_PASSED = `4. RIGHT-SIZE THE SLICE. The factory's deterministic size gate passed this issue: size is
-   the gate's call, not yours. Do NOT print ESCALATE: about size or to ask for a split.
-   Still aim for a bounded BUILD pass (roughly 5-15 minutes of agent work, a handful of
-   files). If the scope really is bigger, write the full design block anyway: the factory's
-   post-plan build-scope gate measures it and slices or decomposes it. You may escalate only
-   for missing information or a contradiction, and must name which, as
-   "ESCALATE: missing-info: <question>" or "ESCALATE: contradiction: <what conflicts>";
-   then do not write the spec file.`;
 
 /** Classify a planner ESCALATE line for the escalate event (#3275). */
 export function classifyEscalation(line: string | undefined): EscalateKind | undefined {
@@ -170,7 +156,7 @@ ${UNTRUSTED_ISSUE_BODY_NOTICE}
 
 ${wrapUntrustedIssueBody(issueBody)}
 
-Steps:
+${opts.previousAttempt ? `${opts.previousAttempt}\n\n` : ''}Steps:
 1. Read the issue above fully. Read CONTEXT.md if present. Any Accepted ADRs in this checkout
    are already summarized above — treat them as binding constraints and open docs/adr/<file>
    only if you need the full text. (Any CLAUDE.md/AGENTS.md standards are already included
@@ -319,6 +305,8 @@ export async function planPhase(opts: Parameters<typeof planPhaseImpl>[0]): Prom
 }
 
 async function planPhaseImpl(opts: {
+  /** Rendered "## Previous attempt" note (#3373); empty or absent = first run. */
+  previousAttempt?: string;
   issue: number;
   repo: string;
   worktree: string;
@@ -664,7 +652,17 @@ async function planPhaseImpl(opts: {
   let replans = 0;
   while (true) {
     const basePrompt = applySteering(
-      buildPlanPrompt({ issue, issueTitle, issueBody, specPath, constitutionCtx, adrCtx, runnableRoutes, sizeGate }),
+      buildPlanPrompt({
+        issue,
+        issueTitle,
+        issueBody,
+        specPath,
+        constitutionCtx,
+        adrCtx,
+        runnableRoutes,
+        sizeGate,
+        previousAttempt: opts.previousAttempt,
+      }),
       steering,
     );
 

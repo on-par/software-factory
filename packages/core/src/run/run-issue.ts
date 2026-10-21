@@ -92,15 +92,19 @@ import {
 } from './resume-context.js';
 import type { Environment, Workspace } from './ports.js';
 import { safeRecordRunState, terminalRunStateUpdate, thrownRunStateUpdate } from './run-state-record.js';
+import { isDecomposeSignal } from './run-state-record.js';
 import { runStatusForPhase, type RunStateUpdate } from './state.js';
 import { shipWithCiRework, type CiReworkPorts } from './ci-rework-loop.js';
 import { parkLogExtra } from './ship-park.js';
 import { enforceIssueBudget } from './budget.js';
-import type { EscalateKind } from '../types/index.js';
+import type { EscalateKind, IssueRunState } from '../types/index.js';
+import { renderPreviousAttempt } from './previous-attempt.js';
 
 /** Everything one run needs decided, as a plain resolved value — the CLI adapter
  *  computes this today; no config/file/path resolution happens in here. */
 export interface RunRequest {
+  /** Prior run's persisted record, read before this run's first write (#3373); null/absent = none. */
+  previousAttempt?: IssueRunState | null;
   /** ADR-0161 stack mode: the 1-based slice to plan. Set by runIssue's stack loop; undefined = the gate's current slice. */
   sliceIndex?: number;
   issue: number;
@@ -285,12 +289,6 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Structural marker for the decompose-hook's thrown signal (core cannot import the
- *  CLI's IssueDecomposedError; see outcome.ts's parkReasonFor for the same convention). */
-function isDecomposeSignal(err: unknown): boolean {
-  return Array.isArray((err as { childIssues?: unknown } | null | undefined)?.childIssues);
-}
-
 export async function runIssue(request: RunRequest, policy: RunPolicy, ports: RunPorts): Promise<RunOutcome> {
   const log = ports.events();
   const observed: { checkSummary?: CheckSummary } = {};
@@ -323,6 +321,7 @@ async function runIssueOnce(
   // One id per run: BUILD, CHECK and rework share a per-run VBCSCompiler server (#1910).
   // 12 hex chars keeps the compiler's Unix-socket pipe path short under macOS $TMPDIR.
   const runId = randomUUID().replace(/-/g, '').slice(0, 12);
+  const previousAttemptNote = renderPreviousAttempt(request.previousAttempt);
   const tracker = new ProcessGroupTracker();
   let environment: Environment | undefined;
   let released = false;
@@ -665,6 +664,7 @@ async function runIssueOnce(
       const plan =
         (await reusablePlan()) ??
         (await planPhase({
+          previousAttempt: previousAttemptNote,
           issue: request.issue,
           repo: request.repo,
           worktree: ports.workspace.path,
@@ -824,6 +824,7 @@ async function runIssueOnce(
       }
 
       const build = await buildPhase({
+        previousAttempt: previousAttemptNote,
         runId,
         issue: request.issue,
         repo: request.repo,
