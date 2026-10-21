@@ -124,7 +124,7 @@ describe('planPhase command route (#2872)', () => {
       scripts: {
         plan: [
           {
-            output: '---\nroute: codex\n---\n# Spec\n',
+            output: '---\nroute: codex\n---\n# Spec\n\n## Files / approach\nUpdate a scoped source file.\n',
             effect: (ctx) => {
               seenSandbox = ctx.sandbox;
             },
@@ -170,7 +170,11 @@ Status output has an extra blank line.
 ## Verification
 npm test`;
     const stub = new StubModelExecutor({
-      scripts: { plan: [{ output: `---\nroute: ${plannerRoute}\n---\n# Spec\n` }] },
+      scripts: {
+        plan: [
+          { output: `---\nroute: ${plannerRoute}\n---\n# Spec\n\n## Files / approach\nUpdate a scoped source file.\n` },
+        ],
+      },
     });
     const router = new ModelRouter(models, routes, false, stub);
 
@@ -233,7 +237,9 @@ npm test`;
       routes: { ...routes.routes, build_command: { tier: 'worker', description: 'stub', requires: 'command' } },
     };
     const stub = new StubModelExecutor({
-      scripts: { plan: [{ output: '---\nroute: command\n---\n# Spec\n' }] },
+      scripts: {
+        plan: [{ output: '---\nroute: command\n---\n# Spec\n\n## Files / approach\nUpdate a scoped source file.\n' }],
+      },
     });
     const router = new ModelRouter(declaredModels, declaredRoutes, false, stub);
 

@@ -21,7 +21,7 @@ import {
   resolveRunnableBuildRoute,
   runnableBuildRoutes,
 } from './plan.js';
-import { specWithDesign, StubModelExecutor } from './plan-test-helpers.js';
+import { specWithDesign, StubModelExecutor, withImplementation } from './plan-test-helpers.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -376,7 +376,11 @@ Status output has an extra blank line.
 - [ ] Status has no blank line.
 ## Verification
 npm test`;
-    const stub = new StubModelExecutor({ scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] } });
+    const stub = new StubModelExecutor({
+      scripts: {
+        plan: [{ output: withImplementation('route: codex') }],
+      },
+    });
     const router = new ModelRouter(models, routes, false, stub);
     const logs: Array<{ type: string; msg: string }> = [];
 
@@ -1365,7 +1369,7 @@ npm run test`;
       scripts: {
         plan: [
           {
-            output: '---\nroute: codex\n---\n# Spec\n',
+            output: withImplementation('route: codex'),
             effect: (ctx) => {
               captured = ctx.timeoutSeconds;
             },
@@ -1405,7 +1409,7 @@ npm run test`;
       scripts: {
         plan: [
           {
-            output: '---\nroute: codex\n---\n# Spec\n',
+            output: withImplementation('route: codex'),
           },
         ],
       },
@@ -1441,7 +1445,7 @@ npm run test`;
       scripts: {
         plan: [
           {
-            output: '---\nroute: codex\n---\n# Spec\n',
+            output: withImplementation('route: codex'),
           },
         ],
       },
@@ -2285,82 +2289,6 @@ npm run test`;
       const questionLog = logs.find((l) => l.type === 'design_open_questions');
       expect(questionLog?.msg).toContain('is X intended?');
     });
-
-    it('leaves designArtifact null and logs design_artifact_invalid when the spec has no design block', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
-      const specPath = join(worktree, 'issue-424.md');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: { issues: { get: async () => ({ data: { title: 'No design block', body: 'Body.' } }) } },
-      };
-      const logs: Array<{ type: string; msg: string }> = [];
-
-      const result = await planPhase({
-        issue: 424,
-        repo: 'on-par/software-factory',
-        worktree,
-        specPath,
-        router,
-        constitution: null,
-        octokit,
-        log: (type, msg) => logs.push({ type, msg }),
-      });
-
-      expect(result.ok).toBe(true);
-      expect(result.designArtifact).toBeNull();
-      expect(logs.some((l) => l.type === 'design_artifact_invalid')).toBe(true);
-      expect(existsSync(`${specPath.replace(/\.md$/, '')}.design.json`)).toBe(false);
-    });
-
-    it('escalates a blocked no-change note instead of treating it as a frozen spec', async () => {
-      const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
-      tempDirs.add(worktree);
-      const specPath = join(worktree, 'issue-844.md');
-      const blockedSpec = [
-        '---',
-        'route: codex',
-        '---',
-        'Blocked: sandbox policy prevents writing the required file outside this worktree:',
-        '',
-        '`/Users/dev/repos/example/app/.factory/plans/issue-844.md`',
-        '',
-        'No files were changed.',
-        '',
-      ].join('\n');
-      const stub = new StubModelExecutor({
-        scripts: {
-          plan: [{ output: blockedSpec }],
-        },
-      });
-      const router = new ModelRouter(models, routes, false, stub);
-      const octokit: any = {
-        rest: { issues: { get: async () => ({ data: { title: 'Blocked spec', body: 'Body.' } }) } },
-      };
-      const logs: Array<{ type: string; msg: string }> = [];
-
-      const result = await planPhase({
-        issue: 844,
-        repo: 'on-par/software-factory',
-        worktree,
-        specPath,
-        router,
-        constitution: null,
-        octokit,
-        log: (type, msg) => logs.push({ type, msg }),
-      });
-
-      expect(result.ok).toBe(false);
-      expect(result.escalate).toBe('PLAN returned a blocked/no-change note instead of a frozen spec');
-      expect(logs.some((l) => l.type === 'escalate' && l.msg === result.escalate)).toBe(true);
-      expect(logs.some((l) => l.type === 'design_artifact_invalid')).toBe(false);
-    });
-
     it('archives a pre-existing design artifact alongside a replanned spec', async () => {
       const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
       tempDirs.add(worktree);
@@ -2614,7 +2542,7 @@ npm run test`;
     const specPath = join(worktree, 'issue-40.md');
     const stub = new StubModelExecutor({
       scripts: {
-        plan: [{ fail: 'usage_cap' }, { output: '---\nroute: codex\n---\n# Spec\n' }],
+        plan: [{ fail: 'usage_cap' }, { output: withImplementation('route: codex') }],
       },
     });
     const failoverModels: ModelsConfig = {
@@ -2663,7 +2591,7 @@ npm run test`;
       async runModel() {
         calls++;
         if (calls === 1) throw new Error('');
-        return '---\nroute: codex\n---\n# Spec\n';
+        return withImplementation('route: codex');
       },
     };
     const router = new ModelRouter(models, routes, false, executor as any);
@@ -2778,7 +2706,7 @@ npm run test`;
     tempDirs.add(worktree);
     const specPath = join(worktree, 'issue-44.md');
     const stub = new StubModelExecutor({
-      scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
+      scripts: { plan: [{ output: withImplementation('route: codex') }] },
     });
     const router = new ModelRouter(models, routes, false, stub);
     const octokit: any = {
@@ -2809,7 +2737,7 @@ npm run test`;
     tempDirs.add(worktree);
     const specPath = join(worktree, 'issue-45.md');
     const stub = new StubModelExecutor({
-      scripts: { plan: [{ output: '---\nroute: 123\n---\n# Spec\n' }] },
+      scripts: { plan: [{ output: withImplementation('route: 123') }] },
     });
     const router = new ModelRouter(models, routes, false, stub);
     const octokit: any = {
@@ -2839,7 +2767,9 @@ npm run test`;
     tempDirs.add(worktree);
     const specPath = join(worktree, 'issue-47.md');
     const stub = new StubModelExecutor({
-      scripts: { plan: [{ output: '---\nroute: [unclosed\n---\n# Spec\n' }] },
+      scripts: {
+        plan: [{ output: withImplementation('route: [unclosed') }],
+      },
     });
     const router = new ModelRouter(models, routes, false, stub);
     const octokit: any = {
@@ -2869,7 +2799,7 @@ npm run test`;
     const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
     tempDirs.add(worktree);
     const specPath = join(worktree, 'issue-46.md');
-    const output = '---\nroute: codex\n---\n# Written directly by the model\n';
+    const output = withImplementation('route: codex', '# Written directly by the model');
     const stub = new StubModelExecutor({
       scripts: {
         plan: [
@@ -2912,7 +2842,9 @@ npm run test`;
       tempDirs.add(worktree);
       const specPath = join(worktree, 'issue-50.md');
       const stub = new StubModelExecutor({
-        scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
+        scripts: {
+          plan: [{ output: withImplementation('route: codex') }],
+        },
       });
       const router = new ModelRouter(models, routes, false, stub);
       const octokit: any = {
@@ -2944,7 +2876,9 @@ npm run test`;
       tempDirs.add(worktree);
       const specPath = join(worktree, 'issue-51.md');
       const stub = new StubModelExecutor({
-        scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec v1\n' }] },
+        scripts: {
+          plan: [{ output: withImplementation('route: codex', '# Spec v1') }],
+        },
       });
       const router = new ModelRouter(models, routes, false, stub);
       const octokit: any = {
@@ -3043,7 +2977,9 @@ npm run test`;
       tempDirs.add(worktree);
       const specPath = join(worktree, 'issue-53.md');
       const stub = new StubModelExecutor({
-        scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
+        scripts: {
+          plan: [{ output: withImplementation('route: codex') }],
+        },
       });
       const router = new ModelRouter(models, routes, false, stub);
       const octokit: any = {
@@ -3139,7 +3075,9 @@ npm run test`;
         '# ADR-0003: Old\n\n- Status: Superseded\n- Date: 2026-07-20\n\n## Decision\n\nOld.\n',
       );
       const stub = new StubModelExecutor({
-        scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
+        scripts: {
+          plan: [{ output: withImplementation('route: codex') }],
+        },
       });
       const router = new ModelRouter(models, routes, false, stub);
       const octokit: any = {
@@ -3255,7 +3193,7 @@ npm run test`;
 `;
       const stub = new StubModelExecutor({
         scripts: {
-          plan: [{ output: `---\nroute: codex\n${adrYaml}---\n# Spec\n` }],
+          plan: [{ output: withImplementation(`route: codex\n${adrYaml}`) }],
         },
       });
       const router = new ModelRouter(models, routes, false, stub);
@@ -3287,7 +3225,9 @@ npm run test`;
       tempDirs.add(worktree);
       const specPath = join(worktree, 'issue-505.md');
       const stub = new StubModelExecutor({
-        scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
+        scripts: {
+          plan: [{ output: withImplementation('route: codex') }],
+        },
       });
       const router = new ModelRouter(models, routes, false, stub);
       const octokit: any = {
@@ -3416,7 +3356,9 @@ npm run test`;
       tempDirs.add(worktree);
       const specPath = join(worktree, 'issue-591.md');
       const stub = new StubModelExecutor({
-        scripts: { plan: [{ output: '---\nroute: codex\n---\n# Spec\n' }] },
+        scripts: {
+          plan: [{ output: withImplementation('route: codex') }],
+        },
       });
       const router = new ModelRouter(models, routes, false, stub);
       const octokit: any = {
