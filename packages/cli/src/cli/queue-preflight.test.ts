@@ -20,6 +20,7 @@ describe('queue PR preflight', () => {
       throw new Error('unexpected prerequisite lookup');
     },
     getPullRefs: async () => ({ headRef: 'b', baseRef: 'main', headSha: 's' }),
+    branchContains: async () => false,
   };
   const sliceStory = (n: number) => ({
     title: `Story ${n}`,
@@ -54,7 +55,6 @@ describe('queue PR preflight', () => {
   };
   const prOpenPlan = (): SlicePlan => withSliceState(slicePlan(), 1, 'pr-open', 81);
   const foundPlan = (plan: SlicePlan) => ({ status: 'found' as const, commentId: 5, plan });
-
   it('creates GitHub-backed preflight operations with PR identity and head-SHA CI checks', async () => {
     const calls: any[] = [];
     const octokit: any = {

@@ -37,6 +37,15 @@ export function stackPositionFor(plan: SlicePlan, index: number, parentBaseRef: 
   };
 }
 
+/** The position of slice `index` once its parent is squash-merged: stacked on `main` with no parent PR (#3368). */
+export function retargetedStackPosition(plan: SlicePlan, index: number): StackPosition {
+  const { basePr: _basePr, ...position } = stackPositionFor(plan, index, undefined);
+  const nextPr = plan.slices.find((s) => s.index === index + 1)?.prNumber;
+  return position.next && nextPr !== undefined
+    ? { ...position, next: { ...position.next, prNumber: nextPr } }
+    : position;
+}
+
 export function renderStackOrderLine(p: StackPosition): string {
   const stackedOn = p.basePr ? `#${p.basePr} (\`${p.base}\`)` : `\`${p.base}\``;
   const next = p.next

@@ -33,6 +33,105 @@ describe('cli', () => {
     const buildClaim = (issue: number | undefined) =>
       issue === undefined ? null : { issue, decision: { kind: 'build' as const } };
 
+    describe('stack restack (#3368)', () => {
+      const parkedOutcome = {
+        status: 'park' as const,
+        reason: 'restack of slice 2/3 PR #12 onto origin/main conflicted in: a.ts; nothing was pushed',
+        index: 2,
+        prNumber: 12,
+        files: ['a.ts'],
+      };
+      const restackedOutcome = {
+        status: 'restacked' as const,
+        plan: { issue: 7, slices: [] },
+        slices: [{ index: 2, prNumber: 12, branch: 'factory/7-slice-2', headSha: 'abc' }],
+        retargeted: true,
+      };
+      const run = async (claims: any[], restack: any, extra: any = {}) => {
+        const calls: any[] = [];
+        await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+          claimNext: async () => claims.shift() ?? null,
+          ship: async () => {
+            calls.push(['ship']);
+            return 'b';
+          },
+          waitMerge: async () => {},
+          restack: async (issue: number, merged: any) => {
+            calls.push(['restack', issue, merged]);
+            return restack();
+          },
+          releaseIssue: async (issue, outcome) => {
+            calls.push(['release', issue, outcome]);
+          },
+          pathExists: () => false,
+          emitEvent: (_f: any, type: any, _i: any, msg: any) => calls.push(['event', type, msg]),
+          ...extra,
+        });
+        return calls;
+      };
+      const restackClaim = () => [
+        { issue: 7, decision: { kind: 'restack' as const, mergedIndex: 1, mergedPrNumber: 11 } },
+      ];
+
+      it('runs the restack for a restack decision and re-queues the issue', async () => {
+        const calls = await run(restackClaim(), () => restackedOutcome);
+        expect(calls).toContainEqual(['restack', 7, { index: 1, prNumber: 11 }]);
+        expect(calls).toContainEqual(['release', 7, 'queued']);
+        expect(calls.some((c) => c[0] === 'ship')).toBe(false);
+      });
+
+      it('re-queues on a nothing outcome', async () => {
+        const calls = await run(restackClaim(), () => ({ status: 'nothing', reason: 'already restacked' }));
+        expect(calls).toContainEqual(['release', 7, 'queued']);
+      });
+
+      it('parks with the restack reason and does not ship', async () => {
+        const calls = await run(restackClaim(), () => parkedOutcome);
+        expect(calls).toContainEqual(['release', 7, 'parked']);
+        expect(calls.some((c) => c[0] === 'event' && c[1] === 'escalate' && c[2] === parkedOutcome.reason)).toBe(true);
+        expect(calls.some((c) => c[0] === 'ship')).toBe(false);
+      });
+
+      it('parks when the restack throws', async () => {
+        const calls = await run(restackClaim(), () => {
+          throw new Error('boom');
+        });
+        expect(calls).toContainEqual(['release', 7, 'parked']);
+        expect(
+          calls.some((c) => c[0] === 'event' && c[1] === 'escalate' && String(c[2]).includes('restack failed')),
+        ).toBe(true);
+      });
+
+      const layerClaim = (index: number) => [
+        {
+          issue: 7,
+          decision: {
+            kind: 'adopt' as const,
+            branch: `factory/7-slice-${index}`,
+            stackLayer: { index, count: 3, prNumber: 10 + index },
+          },
+        },
+      ];
+
+      it('restacks after a non-top stack layer merges', async () => {
+        const calls = await run(layerClaim(1), () => restackedOutcome);
+        expect(calls).toContainEqual(['restack', 7, { index: 1, prNumber: 11 }]);
+        expect(calls).toContainEqual(['release', 7, 'queued']);
+      });
+
+      it('parks instead of re-queuing when the post-merge restack parks', async () => {
+        const calls = await run(layerClaim(1), () => parkedOutcome);
+        expect(calls).toContainEqual(['release', 7, 'parked']);
+        expect(calls).not.toContainEqual(['release', 7, 'queued']);
+      });
+
+      it('does not restack after the top stack layer merges', async () => {
+        const calls = await run(layerClaim(3), () => restackedOutcome);
+        expect(calls.some((c) => c[0] === 'restack')).toBe(false);
+        expect(calls).toContainEqual(['release', 7, 'done']);
+      });
+    });
+
     it('lands an adopted claim through its real branch without calling shipIssue', async () => {
       const calls: any[] = [];
       const claims = [{ issue: 7, decision: { kind: 'adopt' as const, branch: 'contributor/real-head' } }];

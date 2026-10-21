@@ -202,7 +202,6 @@ export type {
   LocalSmallStepPlan,
 } from './local-small/stepwise.js';
 export { applyLocalSmallPatchStep, createLocalSmallDryRun } from './local-small/stepwise.js';
-
 // Eval internals
 export { judgeSpec, median, runJudgeSamples, scoreSpec } from './eval/index.js';
 
@@ -756,6 +755,7 @@ export * from './run/state.js';
 export * from './run/steer.js';
 export * from './kpis/steerability.js';
 export { createStackSliceBranch } from './run/stack-slice-branch.js';
+export { restackAfterSquashMerge, type StackRestackOptions, type StackRestackOutcome } from './run/stack-restack.js';
 export {
   checkResumePath,
   configParkMessage,

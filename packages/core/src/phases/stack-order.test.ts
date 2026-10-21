@@ -5,6 +5,7 @@ import type { SlicePlan } from '../readiness/slice-plan.js';
 import {
   renderStackOrderLine,
   replaceStackOrderLine,
+  retargetedStackPosition,
   STACK_ORDER_MARKER,
   stackPositionFor,
   updateParentStackOrder,
@@ -115,5 +116,20 @@ describe('updateParentStackOrder', () => {
       'ship',
       expect.stringContaining('could not update the stack order on slice 1 PR #41'),
     );
+  });
+});
+
+describe('retargetedStackPosition', () => {
+  it('stacks the slice on main with no parent PR and names the next PR', () => {
+    const p = retargetedStackPosition(plan([41, 42, 43]), 2);
+    expect(p.base).toBe('main');
+    expect(p.basePr).toBeUndefined();
+    expect(p.next).toEqual({ branch: 'factory/7-slice-3', prNumber: 43 });
+    expect(renderStackOrderLine(p)).toContain('stacked on `main`; next: slice 3 #43');
+  });
+
+  it('leaves the next PR unnamed when unrecorded, and has no next for the top slice', () => {
+    expect(retargetedStackPosition(plan([41, 42]), 2).next).toEqual({ branch: 'factory/7-slice-3' });
+    expect(retargetedStackPosition(plan([41, 42, 43]), 3).next).toBeUndefined();
   });
 });
