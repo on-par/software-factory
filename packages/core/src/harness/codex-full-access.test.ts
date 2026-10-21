@@ -89,7 +89,7 @@ describe('CodexCliHarness full-access config', () => {
 
     expect(rec.calls[0].cmd).toContain('--sandbox danger-full-access');
     expect(rec.calls[0].cmd).not.toContain('sandbox_workspace_write.network_access');
-    expect(lines).toEqual([
+    expect(lines.filter((line) => !line.startsWith('codex: context ceiling'))).toEqual([
       'codex: --sandbox danger-full-access for task build_codex (config sandbox.codexFullAccessTasks opt-in)',
     ]);
   });

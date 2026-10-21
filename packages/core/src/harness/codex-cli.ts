@@ -9,6 +9,7 @@ import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { shellEscape } from '../utils/index.js';
 import { classifyFailure } from './classify.js';
+import { CODEX_COMPACT_PROMPT, resolveCodexContextCeiling } from './codex-context-ceiling.js';
 import { CODEX_GITHUB_HOSTS, CODEX_GITHUB_NETWORK_TASKS, codexWritableRoots } from './codex-policy.js';
 import type { CodingHarness, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
 import { startCodexLiveUsage, CODEX_THREAD_ID, codexThreadIdFromStdout } from './codex-live-usage.js';
@@ -172,10 +173,31 @@ export class CodexCliHarness implements CodingHarness {
 
     let tmpFile: string | undefined;
     let outFile: string | undefined;
+    let compactFile: string | undefined;
     try {
       tmpFile = await mktemp(join(tmpdir(), 'factory-codex-'), this.writeFile);
       outFile = await mktemp(join(tmpdir(), 'factory-codex-out-'), this.writeFile);
       await this.writeFile(tmpFile, prompt);
+
+      // Agentic build sessions compact early with a handoff prompt instead of near the full window (#3326).
+      const ceiling = resolveCodexContextCeiling(
+        request.task,
+        request.contextCeiling,
+        registry.get(model)?.contextWindow,
+      );
+      if (taskRequiresAgenticHarness(request.task)) {
+        this.log(
+          ceiling.on
+            ? `codex: context ceiling ${ceiling.limit} for ${request.task}`
+            : `codex: context ceiling off (${ceiling.why}) for ${request.task}`,
+        );
+      }
+      let compactFlags = '';
+      if (ceiling.on) {
+        compactFile = await mktemp(join(tmpdir(), 'factory-codex-compact-'), this.writeFile);
+        await this.writeFile(compactFile, CODEX_COMPACT_PROMPT);
+        compactFlags = ` -c ${shellEscape(`model_auto_compact_token_limit=${ceiling.limit}`)} -c ${shellEscape(`experimental_compact_prompt_file=${compactFile}`)}`;
+      }
 
       // Codex always contains its own writes, even without an outer sandbox policy (#834).
       const fullAccessOptIn = request.codexFullAccessTasks?.includes(request.task) === true;
@@ -219,7 +241,7 @@ export class CodexCliHarness implements CodingHarness {
           `codex: workspace-write for task ${request.task} (network ${network}, writable roots: ${roots.join(', ') || '(none)'})`,
         );
       }
-      const cmd = `codex exec --json --sandbox ${codexSandbox} -c approval_policy=never${networkFlags}${rootFlags} -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
+      const cmd = `codex exec --json --sandbox ${codexSandbox} -c approval_policy=never${networkFlags}${rootFlags}${compactFlags} -C ${shellEscape(worktree)} ${extraFlag} -o ${shellEscape(outFile)} - < ${shellEscape(tmpFile)}`;
       const finalCmd = sandbox ? wrapCommandInSandbox(cmd, sandbox) : cmd;
 
       const selectedHome = env?.CODEX_HOME !== undefined ? env.CODEX_HOME.trim() : this.envSource.CODEX_HOME?.trim();
@@ -291,6 +313,7 @@ export class CodexCliHarness implements CodingHarness {
       // Cleanup temp files (remove, don't zero out)
       if (tmpFile !== undefined) await this.unlink(tmpFile).catch(() => {});
       if (outFile !== undefined) await this.unlink(outFile).catch(() => {});
+      if (compactFile !== undefined) await this.unlink(compactFile).catch(() => {});
     }
   }
 }
