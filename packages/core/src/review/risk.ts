@@ -5,6 +5,7 @@
 
 import { DEFAULT_RISK_RULES, RISK_TIERS, type RiskRuleSet, type RiskTier } from '@on-par/factory-config';
 
+import type { TrustTier } from '../config/repo.js';
 import { globToRegExp } from './floor.js';
 
 export interface RiskEvaluationInput {
@@ -78,4 +79,42 @@ export function evaluateRisk(input: RiskEvaluationInput): RiskEvaluation {
   let top = 0;
   for (const r of rules) top = Math.max(top, RISK_TIERS.indexOf(r.tier));
   return { tier: RISK_TIERS[top]!, rules };
+}
+
+export const RISK_MED_LABEL = 'risk:med';
+export const RISK_HIGH_LABEL = 'risk:high';
+export const NEEDS_HUMAN_LABEL = 'needs-human';
+
+export interface RiskMergeInput {
+  tier: RiskTier;
+  trustTier: TrustTier;
+  /** Labels on the issue and the PR, combined. */
+  labels: readonly string[];
+}
+
+export interface RiskMergeDecision {
+  merge: boolean;
+  /** Labels to add to the PR. Only risk:med, risk:high and needs-human, never a queue label. */
+  addLabels: string[];
+  notify: boolean;
+  reason: string;
+}
+
+/** Whether an autonomous merge may proceed for a risk tier under a trust tier. Unknown tiers fail closed as high. */
+export function decideRiskMerge(input: RiskMergeInput): RiskMergeDecision {
+  const { tier, trustTier, labels } = input;
+  if (tier === 'low') return { merge: true, addLabels: [], notify: false, reason: 'risk low' };
+  if (tier === 'med') {
+    const needsHuman = labels.includes(NEEDS_HUMAN_LABEL);
+    if (trustTier === 'T2' && !needsHuman)
+      return { merge: true, addLabels: [], notify: false, reason: 'risk med on T2' };
+    const cause = trustTier === 'T2' ? `${NEEDS_HUMAN_LABEL} is set` : `trust tier ${trustTier} is not T2`;
+    return { merge: false, addLabels: [RISK_MED_LABEL], notify: false, reason: `risk med: ${cause}` };
+  }
+  return {
+    merge: false,
+    addLabels: [RISK_HIGH_LABEL, NEEDS_HUMAN_LABEL],
+    notify: true,
+    reason: tier === 'high' ? 'risk high' : `unknown risk tier ${String(tier)} treated as high`,
+  };
 }

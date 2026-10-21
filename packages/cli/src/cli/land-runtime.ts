@@ -17,8 +17,11 @@ export interface LandRuntime {
 
 let get: (() => LandRuntime) | undefined;
 
-export function setLandRuntime(fn: () => LandRuntime): void {
+/** Register the accessor; returns the previous one so a caller (a test) can put it back. */
+export function setLandRuntime(fn: () => LandRuntime): (() => LandRuntime) | undefined {
+  const previous = get;
   get = fn;
+  return previous;
 }
 
 export function landRuntime(): LandRuntime {
