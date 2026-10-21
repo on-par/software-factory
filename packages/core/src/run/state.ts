@@ -9,6 +9,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
 import { resolveRepoSlug } from '../logger/repo-slug.js';
+export * from './steer.js'; // exposed via internal.ts's `export * from './run/state.js'` (#3400); internal.ts is at its line ceiling
 import type { CheckerOutput, FailurePhase, IssueRunState, RunStatus } from '../types/index.js';
 import type { BuildRoute, RunOutcome } from './outcome.js';
 
@@ -125,5 +126,6 @@ export function nextIssueRunState(
     ...(prNumber === undefined ? {} : { prNumber }),
     ...(update.failures !== undefined && update.failures.length > 0 ? { failures: update.failures } : {}),
     ...(prev?.remoteBranch === undefined ? {} : { remoteBranch: prev.remoteBranch }),
+    ...(prev?.steers === undefined ? {} : { steers: prev.steers }),
   };
 }

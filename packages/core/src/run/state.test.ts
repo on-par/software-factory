@@ -214,5 +214,20 @@ describe('run/state', () => {
       });
       expect(Object.keys(second)).not.toContain('failures');
     });
+
+    it('carries prev.steers forward (#3400)', () => {
+      const steer = {
+        ts: '2026-10-20T12:00:00.000Z',
+        actor: 'octocat',
+        source: 'cli' as const,
+        phase: 'build' as const,
+        summary: 'nudge',
+      };
+      const first = { ...nextIssueRunState(undefined, base, { status: 'building' }, 't1'), steers: [steer] };
+      const second = nextIssueRunState(first, base, { status: 'checking' }, 't2');
+      expect(second.steers).toEqual([steer]);
+      const plain = nextIssueRunState(undefined, base, { status: 'building' }, 't1');
+      expect(Object.keys(nextIssueRunState(plain, base, { status: 'checking' }, 't2'))).not.toContain('steers');
+    });
   });
 });
