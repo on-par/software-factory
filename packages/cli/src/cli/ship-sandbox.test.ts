@@ -125,6 +125,38 @@ describe('shipIssue (direct)', () => {
       expect(await refused(port)).toBe('ECONNREFUSED');
     });
 
+    it('logs one egress_denied warn event naming the denied host in enforce mode', async () => {
+      h.factoryConfig = {
+        ...h.factoryConfig,
+        sandbox: { ...h.factoryConfig.sandbox, network: { allow: ['api.anthropic.com'], mode: 'enforce' } },
+      };
+      const replies: string[] = [];
+      phases.buildPhase.mockImplementationOnce(async (opts) => {
+        const port = Number(new URL(opts.sandbox!.proxyUrl!).port);
+        for (let i = 0; i < 2; i++) {
+          replies.push(
+            await new Promise<string>((res) => {
+              const sock = connect(port, '127.0.0.1');
+              let data = '';
+              sock.on('data', (d) => (data += d.toString()));
+              sock.on('close', () => res(data));
+              sock.on('error', () => res(data));
+              sock.write('CONNECT api.nuget.org:443 HTTP/1.1\r\nHost: x\r\n\r\n');
+            }),
+          );
+        }
+        return h.buildResult;
+      });
+      await shipIssue(5, {}, ctx());
+      expect(replies.every((r) => r.includes('403'))).toBe(true);
+      const denied = readFileSync(paths().events, 'utf-8')
+        .split('\n')
+        .filter((l) => l.includes('egress_denied'));
+      expect(denied).toHaveLength(1);
+      expect(denied[0]).toContain('api.nuget.org');
+      expect(readFileSync(paths().events, 'utf-8')).not.toContain('sandbox-degraded');
+    });
+
     it('closes the proxy when the build phase throws', async () => {
       let port = 0;
       phases.buildPhase.mockImplementationOnce(async (opts) => {

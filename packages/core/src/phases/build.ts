@@ -14,7 +14,7 @@ import type { EventKind } from '../events/kinds.js';
 import { type BudgetGuard, isBudgetStopError } from '../router/budget-guard.js';
 import { routerFailureOf } from '../router/executor-error.js';
 import { failoversFrom, type ModelRouter, type RouterResult } from '../router/index.js';
-import type { SandboxEventType, SandboxPolicy } from '../sandbox/index.js';
+import { isEgressEnforced, type SandboxEventType, type SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering } from '../steering/index.js';
 import type { Constitution, FailoverReason } from '../types/index.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
@@ -50,6 +50,11 @@ export interface BuildResult {
   /** Why the build ran on a model other than the one first tried (cross-harness or in-tier
    *  failover), so a summary can say a pin was not used (#2511). */
   failoverReason?: FailoverReason;
+}
+
+function netLabel(sandbox: SandboxPolicy): string {
+  if (sandbox.allowHosts.length === 0) return 'deny-all';
+  return isEgressEnforced(sandbox) ? 'allowlist enforced' : 'open (report-only)';
 }
 
 export async function buildPhase(opts: Parameters<typeof buildPhaseImpl>[0]): Promise<BuildResult> {
@@ -264,10 +269,7 @@ async function buildPhaseImpl(opts: {
 
   log('build', `Starting build phase (route: ${route})`);
   if (sandbox) {
-    log(
-      'sandbox',
-      `containment active (runtime ${sandbox.runtime}, net ${sandbox.allowHosts.length ? 'open (report-only)' : 'deny-all'})`,
-    );
+    log('sandbox', `containment active (runtime ${sandbox.runtime}, net ${netLabel(sandbox)})`);
   }
 
   const runOpts = {

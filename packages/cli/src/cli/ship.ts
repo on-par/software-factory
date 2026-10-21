@@ -440,12 +440,14 @@ export async function shipIssue(
       }),
   };
 
-  // #2214: report-only per-lane egress proxy for sandbox-exec, started after worktree setup; the finally below stops it.
+  // #2214: per-lane egress proxy for sandbox-exec (report-only; enforce refuses unlisted hosts, #2215), started after worktree setup; the finally below stops it.
   const proxied = shouldProxyEgress(request.sandboxPolicy) ? request.sandboxPolicy : undefined;
   const egressProxy = proxied
     ? await startEgressProxy({
         allowHosts: proxied.allowHosts,
         blockTelemetry: proxied.blockTelemetry,
+        enforce: proxied.networkMode === 'enforce',
+        onDenied: (host) => log('egress_denied', `${host} refused: not on sandbox.network.allow`),
         onHost: (host, allowed) => log('egress_host', egressHostMessage(host, allowed)),
       })
     : undefined;

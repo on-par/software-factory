@@ -581,7 +581,7 @@ export {
 } from './daemon/repos-detach.js';
 
 // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
-export { wrapCommandInSandbox, shouldProxyEgress } from './sandbox/index.js';
+export { wrapCommandInSandbox, shouldProxyEgress, isEgressEnforced } from './sandbox/index.js';
 export {
   startEgressProxy,
   egressSummaryMessage,
