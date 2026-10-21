@@ -2185,6 +2185,8 @@ async function cmdShip(
     product?: string;
     autoRework?: boolean;
     interactive?: boolean;
+    /** `--no-pr` sets false: stop after CHECK, no GitHub writes. */
+    pr?: boolean;
     sandbox?: boolean;
     approvePlan?: boolean;
     branchPrefix?: string;
@@ -2227,7 +2229,13 @@ async function cmdShip(
       return await shipIssue(issueNum, { ...opts, branchPrefix });
     } catch (err: any) {
       if (err instanceof IssueSkippedError) return;
-      if (ghRepo && !(err instanceof InvalidWorkRequestInputError) && !(err instanceof LaneEnvironmentPauseError)) {
+      // A --no-pr run keeps its worktree either way: inspecting it is the point.
+      if (
+        ghRepo &&
+        opts.pr !== false &&
+        !(err instanceof InvalidWorkRequestInputError) &&
+        !(err instanceof LaneEnvironmentPauseError)
+      ) {
         await reapPrlessShipWorktree(issueNum, repoRoot, ghRepo, paths, branchPrefix);
       }
       // #2492: a pull request number is a usage error, not a failed ship.
@@ -2243,6 +2251,8 @@ async function cmdRunIssue(
     product?: string;
     autoRework?: boolean;
     interactive?: boolean;
+    /** `--no-pr` sets false: stop after CHECK, no GitHub writes. */
+    pr?: boolean;
     sandbox?: boolean;
     approvePlan?: boolean;
     branchPrefix?: string;
@@ -2264,6 +2274,12 @@ async function cmdRunIssue(
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const sizeGate = sizeGateOrExit(rawSizeGate);
   const maxSlices = maxSlicesOrExit(rawMaxSlices);
+  if (opts.pr === false && ((sizeGate !== undefined && sizeGate !== 'off') || runChildren)) {
+    throw new CliExitError(
+      'factory: --no-pr runs with the size gate off — drop --size-gate/--run-children or drop --no-pr',
+      2,
+    );
+  }
 
   await withRepoRunLock(paths, 'factory run-issue', async () => {
     const ghRepo = await getGitHubRepo();
@@ -2407,6 +2423,8 @@ async function cmdRunBrief(
     product?: string;
     autoRework?: boolean;
     interactive?: boolean;
+    /** `--no-pr` sets false: stop after CHECK, no GitHub writes. */
+    pr?: boolean;
     sandbox?: boolean;
     approvePlan?: boolean;
     workspace?: string;
