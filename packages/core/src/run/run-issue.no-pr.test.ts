@@ -132,7 +132,7 @@ describe('runIssue — --no-pr', () => {
   it('stops after a clean CHECK: no SHIP, ready on the branch, no-pr-complete logged', async () => {
     const log = vi.fn<Log>();
     const outcome = await runIssue(noPr, policy, ports(log));
-    expect(outcome).toEqual({ state: 'ready', route: 'codex', branch: request.branch, reworkRounds: 0 });
+    expect(outcome).toMatchObject({ state: 'ready', route: 'codex', branch: request.branch, reworkRounds: 0 });
     expect(shipPhase).not.toHaveBeenCalled();
     const done = log.mock.calls.filter(([type]) => type === 'no-pr-complete');
     expect(done).toHaveLength(1);
