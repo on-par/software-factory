@@ -442,7 +442,7 @@ export function collectBaselineTrials(runsDir: string, deps: BaselineFsDeps = RE
 /** Pass/total for one named group, defaulting an absent key to 0 (vacuous
  *  0/0 counts as equal, matching upstream's PassPolicy.CORE_CASES). Single
  *  source of truth so every render of a group's counts agrees. */
-function groupCounts(evaluation: ScbenchEvaluation, group: string): { passed: number; total: number } {
+export function groupCounts(evaluation: ScbenchEvaluation, group: string): { passed: number; total: number } {
   return { passed: evaluation.pass_counts[group] ?? 0, total: evaluation.total_counts[group] ?? 0 };
 }
 
@@ -453,7 +453,7 @@ function coreCounts(evaluation: ScbenchEvaluation): { passed: number; total: num
 /** Fixed, deterministic render order for SCBench's four native test groups
  *  (#1255). A group whose total is 0 renders as 'none' rather than a
  *  fraction or 100%, since 0/0 is a vacuous pass, not a measured result. */
-const REPORT_GROUPS = ['Core', 'Functionality', 'Regression', 'Error'] as const;
+export const REPORT_GROUPS = ['Core', 'Functionality', 'Regression', 'Error'] as const;
 
 function renderGroupCounts(evaluation: ScbenchEvaluation): string {
   return REPORT_GROUPS.map((group) => {
