@@ -1,7 +1,15 @@
 // packages/scbench-adapter/src/compare.test.ts — regression comparison between two retained measured SCBench runs (#1135).
+import { cpSync } from 'node:fs';
+
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { describe, expect, it } from 'vitest';
 
-import type { BaselineTrial, BaselineTrialEvidence, ScbenchEvaluation } from './baseline.js';
+import {
+  collectBaselineTrials,
+  type BaselineTrial,
+  type BaselineTrialEvidence,
+  type ScbenchEvaluation,
+} from './baseline.js';
 import { compareTrialSets, renderComparisonReport } from './compare.js';
 import { minimalManifest } from './manifest-fixture.js';
 
@@ -239,5 +247,94 @@ describe('renderComparisonReport', () => {
       0,
     );
     expect(renderComparisonReport(result)).toContain('2 infrastructure failures');
+  });
+});
+
+function groupTrial(id: string, counts: Record<string, [number, number]>): BaselineTrial {
+  const pass_counts: Record<string, number> = {};
+  const total_counts: Record<string, number> = {};
+  for (const [group, [passed, total]] of Object.entries(counts)) {
+    pass_counts[group] = passed;
+    total_counts[group] = total;
+  }
+  return makeTrial(id, { evaluation: minimalEvaluation({ pass_counts, total_counts }) });
+}
+
+describe('compareTrialSets', () => {
+  it('all-groups rate never counts missing evidence', () => {
+    const good = (n: number) => groupTrial(`p/c/t${n}`, { Core: [3, 3], Regression: [5, 5] });
+    const missing = makeTrial('p/c/t2');
+
+    const candMissing = compareTrialSets([good(1), good(2)], [good(1), missing], 0).entries[0];
+    expect(candMissing).toMatchObject({
+      candidateGroups: {
+        Core: { passed: 3, total: 6 },
+        Regression: { passed: 5, total: 10 },
+        allGroups: { passed: 1, total: 2 },
+      },
+    });
+
+    const baseMissing = compareTrialSets([good(1), missing], [good(1), good(2)], 0).entries[0];
+    expect(baseMissing).toMatchObject({
+      baselineGroups: {
+        Core: { passed: 3, total: 6 },
+        Regression: { passed: 5, total: 10 },
+        allGroups: { passed: 1, total: 2 },
+      },
+    });
+  });
+});
+
+describe('renderComparisonReport', () => {
+  it('renders per-group deltas without gating', () => {
+    const mk = (n: number, regressionPassed: number) =>
+      groupTrial(`p/c/t${n}`, { Core: [1, 1], Regression: [regressionPassed, 17] });
+    const baseline = [1, 2, 3, 4].map((n) => mk(n, 17));
+    const candidate = [mk(1, 17), mk(2, 17), mk(3, 13), mk(4, 13)];
+
+    const result = compareTrialSets(baseline, candidate, 0);
+    const report = renderComparisonReport(result);
+
+    expect(result.exceedsThreshold).toBe(false);
+    expect(result.maxRegressionPoints).toBe(0);
+    expect(result.entries[0]?.status).toBe('no-change');
+    expect(report).toContain('Verdict: OK — no measured core-cases regression.');
+    expect(report).toContain('Regression: 100.0% → 88.2% (report-only');
+    expect(report).toContain('Core: 100.0% → 100.0% (report-only');
+    expect(report).toContain('Functionality: none (report-only)');
+    expect(report).toContain('Error: none (report-only)');
+    expect(report).toContain('All groups: 100.0% → 50.0%');
+  });
+
+  it('one-sided groups render counts only', () => {
+    const result = compareTrialSets([], [groupTrial('p/c/t1', { Core: [3, 3], Regression: [2, 4] })], 0);
+    const report = renderComparisonReport(result);
+
+    expect(report).toContain('new in candidate');
+    expect(report).toContain('Core: 3/3 (100.0%) (report-only)');
+    expect(report).toContain('Regression: 2/4 (50.0%) (report-only)');
+    expect(report.split('\n').filter((l) => /(Core|Regression):/.test(l) && l.includes('delta'))).toEqual([]);
+    expect(result.exceedsThreshold).toBe(false);
+    expect(result.maxRegressionPoints).toBe(0);
+  });
+
+  it('fixture replay of the committed cfgpipe runs yields zero deltas and exit 0', async () => {
+    const runs = 'evals/scbench-baseline/runs';
+    const dirs = createTempDirs();
+    const tmp = dirs.makeSync('scbench-replay-');
+    try {
+      cpSync(runs, tmp, { recursive: true });
+      const result = compareTrialSets(collectBaselineTrials(runs), collectBaselineTrials(tmp), 0);
+      const deltaLines = renderComparisonReport(result)
+        .split('\n')
+        .filter((l) => l.includes('delta '));
+
+      expect(deltaLines.length).toBeGreaterThan(0);
+      for (const line of deltaLines) expect(line).toContain('delta 0.0 points');
+      expect(result.exceedsThreshold).toBe(false);
+      for (const entry of result.entries) expect(entry.status).toBe('no-change');
+    } finally {
+      await dirs.cleanup();
+    }
   });
 });
