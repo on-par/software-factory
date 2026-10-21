@@ -50,14 +50,18 @@ export function resolveHarnessCheckTarget(
 export function formatHarnessCheckResults(results: HarnessCheckResult[]): string {
   const lines: string[] = [];
   for (const r of results) {
-    if (r.ok) {
+    if (r.skip !== undefined) {
+      lines.push(`SKIP ${r.name} (${r.skip})`);
+    } else if (r.ok) {
       lines.push(`PASS ${r.name}`);
     } else {
       lines.push(`FAIL ${r.name}: ${r.error ?? 'failed'}`, `    rule: ${r.rule}`, `    fix: ${r.fix}`);
     }
   }
-  const passed = results.filter((r) => r.ok).length;
-  lines.push(`${passed} passed, ${results.length - passed} failed`);
+  const skipped = results.filter((r) => r.skip !== undefined).length;
+  const passed = results.filter((r) => r.ok && r.skip === undefined).length;
+  const failed = results.filter((r) => !r.ok).length;
+  lines.push(`${passed} passed, ${failed} failed${skipped > 0 ? `, ${skipped} skipped` : ''}`);
   return lines.join('\n');
 }
 

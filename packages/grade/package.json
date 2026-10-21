@@ -1,0 +1,32 @@
+{
+  "name": "@on-par/factory-grade",
+  "private": true,
+  "version": "0.9.4",
+  "description": "Grade: read-only grader for recorded factory runs. Loads runs through the @on-par/factory-core run store and emits a versioned GradeReport.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@on-par/factory-core": "^0.9.4",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5"
+  }
+}

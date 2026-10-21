@@ -260,6 +260,7 @@ import { buildCostJson } from './cost-json.js';
 import { buildQueueAddJson } from './queue-add-json.js';
 import { renderQueueAddLines, renderUnparkLines } from './queue-output.js';
 import { buildQueueListJson } from './queue-list.js';
+import { cmdSteer, type SteerOptions } from './steer.js';
 import { appendUnparkEvent, runUnpark, UnparkError, type UnparkJson } from './unpark.js';
 import { buildRunsJson, parseRunsLimit } from './runs.js';
 import { buildRunDiffstatJson, NoRunError, parseDiffstatIssue, type RunDiffstatJson } from './runs-diffstat.js';
@@ -4045,6 +4046,19 @@ export async function cmdStop(opts: { json?: boolean } = {}): Promise<void> {
   console.log(STOP_SET_MESSAGE);
 }
 
+/** `factory steer <ref>` (#3401): the handler lives in ./steer.ts; this binds its runtime. */
+function runSteerCommand(ref: string, opts: SteerOptions = {}): Promise<void> {
+  return cmdSteer(ref, opts, {
+    getRepoRoot,
+    gitUserName: async () => (await shellOps.exec('git config user.name')).stdout,
+    env: process.env,
+    now: () => new Date().toISOString(),
+    CliExitError,
+    errorDetail,
+    log: console.log,
+  });
+}
+
 export async function cmdResume(issue?: string, opts: { json?: boolean; from?: string } = {}): Promise<void> {
   if (issue === undefined && opts.from !== undefined) {
     throw new CliExitError('factory: resume --from needs an issue number: factory resume <issue> --from check', 2);
@@ -4263,6 +4277,7 @@ export const PROGRAM_HANDLERS = {
   cmdSupervise: runSupervise,
   cmdStop,
   cmdResume,
+  cmdSteer: runSteerCommand,
   parseIssueArg,
   getRepoRoot,
   getCliVersion,
