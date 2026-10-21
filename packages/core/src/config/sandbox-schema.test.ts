@@ -1,20 +1,23 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
+
 import { loadFactoryConfig, loadFactoryConfigForRepo } from './index.js';
+
+const tempDirs = createTempDirs();
 
 describe('sandbox.writablePaths config (#3454)', () => {
   let dir: string;
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'factory-sandbox-schema-'));
+    dir = await tempDirs.make('factory-sandbox-schema-');
   });
 
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await tempDirs.cleanup();
   });
 
   it('loadFactoryConfigForRepo rejects an invalid sandbox.writablePaths entry', async () => {
