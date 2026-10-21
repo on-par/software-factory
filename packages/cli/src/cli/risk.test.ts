@@ -1,6 +1,19 @@
-import { describe, expect, it, vi } from 'vitest';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-import { parsePrArg, RiskCommandError, runRiskCommand, type RiskCommandDeps } from './risk.js';
+import { DEFAULT_RISK_RULES } from '@on-par/factory-config';
+import { createTempDirs } from '@on-par/factory-core/testing';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { CliExitError, main } from './index.js';
+import {
+  cmdRisk,
+  parsePrArg,
+  RiskCommandError,
+  runRiskCommand,
+  type RiskCommandDeps,
+  type RiskRuntime,
+} from './risk.js';
 
 function makeDeps(overrides: Partial<RiskCommandDeps> = {}): RiskCommandDeps & { lines: string[] } {
   const lines: string[] = [];
@@ -9,6 +22,7 @@ function makeDeps(overrides: Partial<RiskCommandDeps> = {}): RiskCommandDeps & {
     listFiles: async () => ['src/auth/login.ts', 'README.md'],
     readFile: () => '{}',
     fileExists: () => true,
+    loadRepoPolicy: () => ({ source: 'default', rules: DEFAULT_RISK_RULES }),
     log: (line) => lines.push(line),
     ...overrides,
     lines,
@@ -102,5 +116,91 @@ describe('factory risk', () => {
     const deps = makeDeps({ listFiles: async () => [] });
     await runRiskCommand('1', {}, deps);
     expect(deps.lines).toContain('  - empty-diff (med): (no changed files)');
+  });
+});
+
+describe('cmdRisk runtime wiring', () => {
+  const tmp = createTempDirs();
+  afterEach(async () => {
+    await tmp.cleanup();
+    vi.restoreAllMocks();
+  });
+
+  function runtime(repoRoot: string, octokit: unknown = {}) {
+    const lines: string[] = [];
+    const rt: RiskRuntime = {
+      getRepoRoot: vi.fn(async () => repoRoot),
+      getGitHubRepo: vi.fn(async () => 'o/r'),
+      getOctokit: () => octokit as ReturnType<RiskRuntime['getOctokit']>,
+      CliExitError,
+      log: (line) => lines.push(line),
+    };
+    return { rt, lines };
+  }
+
+  const octokitWithFiles = (files: string[]) => ({
+    rest: { pulls: { listFiles: async () => ({ data: files.map((filename) => ({ filename })) }) } },
+  });
+
+  it('uses the repo .factory/risk.yml policy by default', async () => {
+    const root = await tmp.make('risk-repo-');
+    mkdirSync(join(root, '.factory'));
+    writeFileSync(join(root, '.factory', 'risk.yml'), 'rules:\n  - id: everything\n    tier: low\n    globs: ["**"]\n');
+    const { rt, lines } = runtime(root, octokitWithFiles(['src/auth/login.ts']));
+    await cmdRisk('#5', {}, rt);
+    expect(lines).toEqual([
+      'PR #5: tier low',
+      'Policy: .factory/risk.yml',
+      'Matched rules:',
+      '  - everything (low): src/auth/login.ts',
+    ]);
+  });
+
+  it('falls back to the packaged defaults and reads --policy relative to the repo root', async () => {
+    const root = await tmp.make('risk-repo-');
+    const { rt, lines } = runtime(root, octokitWithFiles(['src/auth/login.ts']));
+    await cmdRisk('5', {}, rt);
+    expect(lines.slice(0, 2)).toEqual(['PR #5: tier high', 'Policy: packaged defaults']);
+
+    writeFileSync(join(root, 'p.json'), JSON.stringify({ rules: [{ id: 'all', tier: 'med', globs: ['**'] }] }));
+    lines.length = 0;
+    await cmdRisk('5', { policy: 'p.json' }, rt);
+    expect(lines.slice(0, 2)).toEqual(['PR #5: tier med', 'Policy: p.json']);
+  });
+
+  it('maps an invalid repo policy to exit 2', async () => {
+    const root = await tmp.make('risk-repo-');
+    mkdirSync(join(root, '.factory'));
+    writeFileSync(join(root, '.factory', 'risk.yml'), 'rules: nope\n');
+    const { rt } = runtime(root);
+    await expect(cmdRisk('5', {}, rt)).rejects.toMatchObject({
+      name: 'CliExitError',
+      code: 2,
+      message: expect.stringMatching(/^factory risk: invalid risk policy \.factory\/risk\.yml — /),
+    });
+  });
+
+  it('exits 2 on a bad <pr> before any repo lookup, and rethrows unexpected errors', async () => {
+    const { rt } = runtime('/nonexistent');
+    await expect(cmdRisk('abc', {}, rt)).rejects.toMatchObject({ name: 'CliExitError', code: 2 });
+    expect(rt.getRepoRoot).not.toHaveBeenCalled();
+
+    const boom = new Error('no repo');
+    rt.getRepoRoot = async () => {
+      throw boom;
+    };
+    await expect(cmdRisk('5', {}, rt)).rejects.toBe(boom);
+  });
+
+  it('is wired into the CLI entry point', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.exitCode = undefined;
+    try {
+      await main(['node', 'factory', 'risk', 'abc']);
+      expect(process.exitCode).toBe(2);
+      expect(errSpy.mock.calls.flat().join('\n')).toContain("factory risk: invalid PR argument 'abc'");
+    } finally {
+      process.exitCode = undefined;
+    }
   });
 });

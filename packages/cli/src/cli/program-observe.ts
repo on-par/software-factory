@@ -87,7 +87,10 @@ export function registerObserveCommands(program: Command, handlers: ProgramHandl
   program
     .command('risk <pr>')
     .description("Print a PR's risk tier and each matched rule (read-only)")
-    .option('--policy <file>', 'Risk policy JSON validated against the risk rule schema (default: packaged rules)')
+    .option(
+      '--policy <file>',
+      'Risk policy JSON validated against the risk rule schema (default: .factory/risk.yml, else the packaged rules)',
+    )
     .action((pr: string, opts: { policy?: string }) => handlers.cmdRisk(pr, opts));
 
   program
