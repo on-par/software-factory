@@ -1,8 +1,11 @@
-// packages/core/src/review/risk-receipt.ts — Risk receipt in the PR body (#3386)
+// packages/core/src/review/risk-receipt.ts — Risk receipt in the PR body (#3386) and the repo risk policy loader (#3387)
+
+import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
-import type { RiskRuleSet } from '@on-par/factory-config';
+import { DEFAULT_RISK_RULES, parseRiskRules, RISK_TIERS, type RiskRuleSet } from '@on-par/factory-config';
 
+import { readRepoConfigFile } from '../config/repo-config-file.js';
 import { listPrChangedFiles } from '../run/ci-rework.js';
 import { evaluateRisk, type RiskEvaluation } from './risk.js';
 
@@ -82,4 +85,39 @@ export async function publishRiskReceipt(opts: {
   if (next === (data.body ?? '')) return { evaluation, updated: false };
   await octokit.rest.pulls.update({ owner, repo, pull_number: prNumber, body: next });
   return { evaluation, updated: true };
+}
+
+/** Repo-relative path of the repo risk policy file (#3387). */
+export const RISK_POLICY_FILE = '.factory/risk.yml';
+
+export interface RiskPolicy {
+  /** 'repo' when RISK_POLICY_FILE exists and validates, 'default' for the packaged rules. */
+  source: 'repo' | 'default';
+  rules: RiskRuleSet;
+}
+
+/** Load <repoRoot>/.factory/risk.yml, or the packaged defaults when it is absent.
+ *  YAML errors and RiskRulesError propagate; callers decide how to report them. */
+export function loadRiskPolicy(repoRoot: string): RiskPolicy {
+  const raw = readRepoConfigFile(join(repoRoot, RISK_POLICY_FILE));
+  if (raw === undefined) return { source: 'default', rules: DEFAULT_RISK_RULES };
+  return { source: 'repo', rules: parseRiskRules(raw) };
+}
+
+/** Summary line, one `<tier>: <rule ids>` line per non-empty tier (high first), then the refactor allowlist. */
+export function formatRiskPolicy(policy: RiskPolicy): string[] {
+  const n = policy.rules.rules.length;
+  const count = `${n} ${n === 1 ? 'rule' : 'rules'}`;
+  const summary =
+    policy.source === 'repo'
+      ? `${RISK_POLICY_FILE} (${count})`
+      : `no risk policy configured (${RISK_POLICY_FILE} not found); using the packaged defaults (${count})`;
+  const lines = [summary];
+  for (const tier of [...RISK_TIERS].reverse()) {
+    const ids = policy.rules.rules.filter((r) => r.tier === tier).map((r) => r.id);
+    if (ids.length > 0) lines.push(`${tier}: ${ids.join(', ')}`);
+  }
+  const globs = policy.rules.refactorAllowlist ?? [];
+  if (globs.length > 0) lines.push(`refactor allowlist: ${globs.join(', ')}`);
+  return lines;
 }

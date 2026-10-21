@@ -39,6 +39,7 @@ import {
 } from './land-pr.js';
 import type { LandLock } from './land-pr.js';
 import { landRuntime } from './land-runtime.js';
+import { riskPolicyLines } from './risk-policy.js';
 
 async function releaseLandedClaim(
   paths: ReturnType<typeof getFactoryPaths>,
@@ -143,9 +144,17 @@ export async function landIssue(
     }
   }
 
-  // Risk receipt (#3386): best-effort, never blocks or changes the merge.
+  // Risk policy (#3387) and receipt (#3386): best-effort, never blocks or changes the merge.
+  const riskPolicy = riskPolicyLines(repoRoot);
+  for (const line of riskPolicy.lines) console.log(line);
   try {
-    const receipt = await publishRiskReceipt({ octokit, owner, repo: repoName, prNumber });
+    const receipt = await publishRiskReceipt({
+      octokit,
+      owner,
+      repo: repoName,
+      prNumber,
+      ...(riskPolicy.rules ? { rules: riskPolicy.rules } : {}),
+    });
     log(
       'land',
       `risk receipt ${receipt.updated ? 'published' : 'unchanged'} on PR #${prNumber}: tier ${receipt.evaluation.tier}`,

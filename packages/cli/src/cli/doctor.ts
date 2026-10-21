@@ -59,6 +59,7 @@ import { failMissingAgentCheck as failMissing } from './doctor-harness.js';
 export { HARNESS_SETUP, harnessInstallChecks, readyAgents };
 import { availableAgentClis, CLAUDE_CODE_URL, CODEX_CLI_URL, GITHUB_TOKENS_URL } from './first-run.js';
 import type { CliDeps } from './index.js';
+import { riskPolicyCheck } from './risk-policy.js';
 import { distFreshnessProbe } from './staleness.js';
 import { readStopFileStatus, stopSentinelCheck } from './stop-sentinel.js';
 import { checkSweepHeartbeat, defaultSweepHeartbeatDeps, sweepHeartbeatCheck } from './sweep-heartbeat.js';
@@ -1065,6 +1066,7 @@ export async function cmdDoctor(
     checks.push(
       ...configLintChecks({ constitution, configFile: rt.repoConfigFileFor(repoRoot, paths.config) }, loadError),
     );
+    checks.push(riskPolicyCheck(repoRoot));
 
     // A malformed config never aborts doctor; a merge failure is reported once, below.
     const view = harnessView ?? { declaredIds: [] };
