@@ -1,0 +1,45 @@
+// src/events/payloads.ts — structured payloads carried by specific EventKinds, split from kinds.ts
+
+import type { StuckTrigger } from '../steward/detect.js';
+
+/** Payload of a `lane-paused` event. Two triggers: the lane circuit breaker
+ *  (#1906/#1916) stopped `lane` after `firstIssue` and then `secondIssue` parked in
+ *  a row with the same non-empty failure `signature`; or CHECK found every failing
+ *  checker also failing on the base (#1928, `cause: 'environment'`), where
+ *  `firstIssue === secondIssue` and `signature` is the CHECK failure signature
+ *  (`''` when missing). */
+export interface LanePausedPayload {
+  lane: string;
+  /** `failureSignature()` shared by both parks. */
+  signature: string;
+  /** Checker names that failed in both parks (e.g. ['tests','lint']). */
+  failingChecks: string[];
+  firstIssue: number;
+  secondIssue: number;
+  /** Absent for the signature breaker (#1928). */
+  cause?: 'environment';
+  /** Base SHA the failing checkers also failed on; set when `cause` is 'environment'. */
+  baseSha?: string;
+}
+
+/** Payload of a `steward-triggered` event (#2084): `detectStuck` classified a parked run as
+ *  stuck per ADR-0155. Emitted after the run's own park event and before the park's reports, so it is not itself a park. */
+export interface StewardTriggeredPayload {
+  /** Which ADR-0155 trigger matched. */
+  trigger: StuckTrigger;
+  /** The run's CHECK failure signature, when the outcome carries one. */
+  failureSignature?: string;
+}
+
+/** Payload of a `flaky_tests` event (#2302): CHECK's serial re-run of the base-red tests checker. */
+export interface FlakyTestsPayload {
+  /** Base SHA the tests checker also failed on. */
+  sha: string;
+  checker: 'tests';
+  mode: 'targeted' | 'full';
+  /** Re-run test names; [] for a full re-run. */
+  tests: string[];
+  verdict: 'passed' | 'reproduced';
+  /** Full-output log of the re-run, when written. */
+  logPath?: string;
+}

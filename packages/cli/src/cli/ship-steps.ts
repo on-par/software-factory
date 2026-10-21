@@ -1,4 +1,4 @@
-// packages/cli/src/cli/ship-steps.ts — named steps of the ship flow: run-report/benchmark writers, sandbox logging, RunRequest builder (#2788)
+// packages/cli/src/cli/ship-steps.ts — named steps of the ship flow: sandbox logging, workspace setup, RunRequest builder (#2788)
 
 import { exec as execCb } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
@@ -7,8 +7,6 @@ import { promisify, styleText } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
 import type {
-  BenchmarkRunFailure,
-  CheckSummary,
   EventKind,
   FactoryConfig,
   ParkReason,
@@ -22,7 +20,6 @@ import type {
   WorkRequestSourceKind,
   resolveEfficiencyPolicy,
   resolveSandboxPolicy,
-  writeLocalRunReport,
   getFactoryPaths,
 } from '@on-par/factory-core';
 import {
@@ -34,7 +31,6 @@ import {
   resolveSizeGateBudget,
   rewriteQueueForDecomposition,
   worktreeWorkspace,
-  writeBenchmarkArtifacts,
 } from '@on-par/factory-core';
 import type { CheckResumeRecord, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
@@ -55,6 +51,7 @@ import { shipRuntime } from './ship-runtime.js';
 // RunOutcome's parked variant carries only the ParkReason enum, not free text.
 export const TERMINAL_EVENT_KINDS = new Set<EventKind>([
   'ready',
+  'no-pr-complete',
   'environment-released',
   'fail',
   'escalate',
@@ -280,7 +277,7 @@ export interface RunRequestInput {
   product: string | undefined;
   runStartedAt: string;
   lane: string | undefined;
-  opts: { interactive?: boolean; sandbox?: boolean };
+  opts: { interactive?: boolean; sandbox?: boolean; pr?: boolean };
   ctx?: {
     workSource?: { kind: WorkRequestSourceKind; params: unknown };
     localOnly?: LocalOnlyPolicy;
@@ -351,6 +348,7 @@ export function buildRunRequest({
       sandboxDisabled: opts.sandbox === false,
     },
     localOnly: Boolean(ctx?.localOnly),
+    noPr: opts.pr === false,
     blockUnresolvedRegressions: resolveDesignRegressionBlock(factoryConfig),
     hermeticGit: resolveHermeticGit(repoConfig),
     readinessUpdateIssueBody: resolveReadinessUpdateIssueBody(factoryConfig),
@@ -393,78 +391,4 @@ export function buildRunRequest({
     flakyLedgerPath: paths.flakyLedger,
     worktreeKeepsPath: paths.worktreeKeeps,
   };
-}
-
-export async function maybeWriteLocalRunReport(opts: {
-  issueNum: number;
-  paths: ReturnType<typeof getFactoryPaths>;
-  startedAt: string;
-  outcome: 'ready' | 'failed' | 'parked' | 'escalated';
-  branch?: string;
-  worktree?: string;
-  specPath?: string;
-  route?: string;
-  reason?: string;
-  writeLocalRunReport?: typeof writeLocalRunReport;
-}): Promise<string | undefined> {
-  if (process.env.FACTORY_LOCAL_ONLY !== '1') return undefined;
-  const report = await (opts.writeLocalRunReport ?? shipRuntime().defaultWriteLocalRunReport())({
-    issue: opts.issueNum,
-    eventsFile: opts.paths.events,
-    reportsDir: opts.paths.reports,
-    startedAt: opts.startedAt,
-    outcome: opts.outcome,
-    profile: 'local-only',
-    branch: opts.branch,
-    worktree: opts.worktree,
-    specPath: opts.specPath,
-    route: opts.route,
-    reason: opts.reason,
-  });
-  console.log(styleText('cyan', `local-only report: ${report.path}`));
-  return report.path;
-}
-
-export async function maybeWriteBenchmarkArtifacts(opts: {
-  issueNum: number;
-  paths: ReturnType<typeof getFactoryPaths>;
-  ctx?: { localOnly?: LocalOnlyPolicy; artifactsDir?: string; workRequest?: WorkRequest };
-  startedAt: string;
-  outcome: 'ready' | 'failed' | 'escalated';
-  branch?: string;
-  specPath?: string;
-  route?: string;
-  checkSummary?: CheckSummary;
-  reworkRounds?: number;
-  failure?: BenchmarkRunFailure;
-  reportPath?: string;
-  diffBase?: string;
-  log: (type: EventKind, msg: string) => void;
-}): Promise<void> {
-  if (!opts.ctx?.localOnly || !opts.ctx.artifactsDir) return;
-  try {
-    const { manifestPath } = await writeBenchmarkArtifacts({
-      issue: opts.issueNum,
-      artifactsDir: opts.ctx.artifactsDir,
-      eventsFile: opts.paths.events,
-      costsFile: opts.paths.costs,
-      startedAt: opts.startedAt,
-      outcome: opts.outcome,
-      workspace: opts.ctx.localOnly.workspace,
-      branch: opts.branch,
-      specPath: opts.specPath,
-      route: opts.route,
-      request: opts.ctx.workRequest,
-      checkSummary: opts.checkSummary,
-      reworkRounds: opts.reworkRounds,
-      failure: opts.failure,
-      reportPath: opts.reportPath,
-      diffBase: opts.diffBase,
-    });
-    opts.log('benchmark-artifacts', `manifest written to ${manifestPath}`);
-    console.log(styleText('cyan', `benchmark artifacts: ${manifestPath}`));
-  } catch (err: any) {
-    // Never let artifact emission mask the run outcome.
-    opts.log('benchmark-artifacts-failed', `could not write benchmark artifacts: ${err.message}`);
-  }
 }
