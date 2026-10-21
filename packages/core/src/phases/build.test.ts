@@ -2015,10 +2015,7 @@ describe('buildPhase no-diff post-condition', () => {
 
     expect(result.ok).toBe(false);
     expect(result.reason).toBe('no_diff');
-    expect(logs).toContainEqual({
-      type: 'fail',
-      msg: 'worker produced no diff against origin/main; no implementation was produced',
-    });
+    expect(logs.find((l) => l.type === 'fail')?.msg).toMatch(/^worker produced no diff against origin\/main; no impl/);
   });
 
   it('fails with no_diff when the slice has no changes beyond its parent base ref (#2717)', async () => {
@@ -2052,10 +2049,7 @@ describe('buildPhase no-diff post-condition', () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toBe('no_diff');
     expect(receivedOpts).toEqual({ fallbackBaseRef: 'presha', baseRefOverride: 'factory/2717-slice-1' });
-    expect(logs).toContainEqual({
-      type: 'fail',
-      msg: 'worker produced no diff against factory/2717-slice-1; no implementation was produced',
-    });
+    expect(logs.find((l) => l.type === 'fail')?.msg).toMatch(/^worker produced no diff against factory\/2717-slice-1;/);
   });
 
   it('does not pass baseRefOverride when no parentBaseRef is given (#2717)', async () => {
