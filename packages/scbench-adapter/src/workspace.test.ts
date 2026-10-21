@@ -4,6 +4,8 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { ConstitutionLoader } from '@on-par/factory-core';
+
 import { AdapterError } from './checkpoint.js';
 import { WORKSPACE_CONSTITUTION } from './workspace-constitution.js';
 import { commitCheckpoint, createExecaExec, prepareWorkspace, type ExecFn } from './workspace.js';
@@ -59,6 +61,16 @@ describe('prepareWorkspace', () => {
 
     const content = readFileSync(join(dir, '.factory', 'constitution.md'), 'utf-8');
     expect(content).toBe(WORKSPACE_CONSTITUTION);
+  });
+
+  it('prepareWorkspace writes a constitution core parses with requireTests true', async () => {
+    const { exec } = fakeExec();
+
+    await prepareWorkspace(dir, { exec });
+
+    const constitution = new ConstitutionLoader().loadRepoConstitution(dir);
+    expect(constitution?.requireTests).toBe(true);
+    expect(constitution?.product).toBe('scbench-workspace');
   });
 
   it('leaves a pre-existing .factory/config.json byte-identical', async () => {
