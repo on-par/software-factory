@@ -93,6 +93,11 @@ describe('restackAfterSquashMerge', () => {
     baseRef = {};
     git(dir, 'init', '--bare', '-b', 'main', remote);
     git(dir, 'clone', remote, root);
+    // The restack's own rebase runs without the -c identity above; give the fixture repo one so it
+    // does not depend on the host's global git config (CI runners have none).
+    git(root, 'config', 'user.name', 'T');
+    git(root, 'config', 'user.email', 't@example.com');
+    git(root, 'config', 'commit.gpgsign', 'false');
     git(root, 'checkout', '-b', 'main');
     commit(root, 'a.txt', 'base\n', 'base');
     git(root, 'push', 'origin', 'main');
