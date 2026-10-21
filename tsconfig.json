@@ -22,6 +22,9 @@
       "path": "packages/core/tsconfig.build.json"
     },
     {
+      "path": "packages/grade/tsconfig.build.json"
+    },
+    {
       "path": "packages/tui/tsconfig.build.json"
     },
     {

@@ -1,0 +1,14 @@
+{
+  "issue": 103,
+  "lane": "lane-103",
+  "repo": "on-par/software-factory",
+  "status": "merged",
+  "branch": "factory/103-fixture",
+  "worktree": "/tmp/fixture/software-factory-103",
+  "specPath": ".factory/state/plans/issue-103.md",
+  "model": "claude-sonnet-5-5",
+  "route": "claude",
+  "attempts": 1,
+  "startedAt": "2026-10-08T14:30:00.000Z",
+  "updatedAt": "2026-10-08T15:30:00.000Z"
+}
