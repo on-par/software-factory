@@ -20,6 +20,7 @@ export function budgetGuardFor(
   ports: { getIssueSpend?: () => number },
   tracker: Pick<ProcessGroupTracker, 'killAll'>,
   graceMs?: number,
+  log?: (type: EventKind, msg: string) => void,
 ): { guard: BudgetGuard | undefined; stopped: () => SessionBudgetStop | undefined } {
   const cap = policy.budget.perIssueCapUsd;
   if (cap === undefined) return { guard: undefined, stopped: () => undefined };
@@ -29,7 +30,9 @@ export function budgetGuardFor(
     const spendUsd = (ports.getIssueSpend?.() ?? 0) + runningUsd;
     if (spendUsd <= cap) return false;
     stop = { spendUsd, calls };
-    void tracker.killAll({ graceMs }).catch(() => undefined);
+    void tracker.killAll({ graceMs }).catch((err: any) => {
+      log?.('warn', `budget kill failed: ${err?.message ?? String(err)}`);
+    });
     return true;
   };
   return { guard, stopped: () => stop };

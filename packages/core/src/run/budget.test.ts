@@ -124,9 +124,12 @@ describe('budgetGuardFor', () => {
     expect(stopped()).toEqual({ spendUsd: 30.21, calls: 183 });
   });
 
-  it('counts only the running spend without a cost sink and swallows a failing kill', () => {
+  it('counts only the running spend without a cost sink and logs a failing kill', async () => {
     const killAll = vi.fn().mockRejectedValue(new Error('gone'));
-    const { guard } = budgetGuardFor({ budget: { perIssueCapUsd: 1 } }, {}, { killAll });
+    const log = vi.fn();
+    const { guard } = budgetGuardFor({ budget: { perIssueCapUsd: 1 } }, {}, { killAll }, undefined, log);
     expect(guard?.(2, 1)).toBe(true);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(log).toHaveBeenCalledWith('warn', 'budget kill failed: gone');
   });
 });

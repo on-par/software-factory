@@ -145,7 +145,7 @@ describe.skipIf(process.platform === 'win32')('runIssue — mid-session budget s
     let aliveAtFirstCall = false;
     vi.mocked(buildPhase).mockImplementation(async (opts) => {
       opts.onPgid?.(pid);
-      const guard = (opts as any).budgetGuard as ((usd: number, calls: number) => boolean) | undefined;
+      const guard = opts.budgetGuard;
       if (!guard) {
         spend += 29;
         return BUILD_OK;
@@ -190,7 +190,7 @@ describe.skipIf(process.platform === 'win32')('runIssue — mid-session budget s
       let aliveDuringBuild = false;
       vi.mocked(buildPhase).mockImplementation(async (opts) => {
         opts.onPgid?.(child.pid as number);
-        guard = (opts as any).budgetGuard;
+        guard = opts.budgetGuard;
         await new Promise((resolve) => setTimeout(resolve, 100));
         aliveDuringBuild = alive(child.pid as number);
         return BUILD_OK;

@@ -323,7 +323,7 @@ async function runIssueOnce(
   const runId = randomUUID().replace(/-/g, '').slice(0, 12);
   const previousAttemptNote = renderPreviousAttempt(request.previousAttempt);
   const tracker = new ProcessGroupTracker();
-  const budgetStop = budgetGuardFor(policy, ports, tracker, request.processGroupGraceMs);
+  const budgetStop = budgetGuardFor(policy, ports, tracker, request.processGroupGraceMs, log);
   let environment: Environment | undefined;
   let released = false;
   let route: BuildRoute | undefined;
