@@ -31,17 +31,8 @@ jobs:
       - name: Install
         run: npm ci
 
-      # Prettier's cache lives outside node_modules (npm ci wipes it) and is keyed on
-      # file content, since a fresh checkout resets every mtime.
-      - name: Restore Prettier cache
-        uses: actions/cache@v6
-        with:
-          path: .tmp/prettier-cache
-          key: prettier-${{ runner.os }}-${{ hashFiles('package-lock.json', '.prettierrc*', '.prettierignore') }}-${{ github.sha }}
-          restore-keys: prettier-${{ runner.os }}-${{ hashFiles('package-lock.json', '.prettierrc*', '.prettierignore') }}-
-
       - name: Format check
-        run: npm run format:check -- --cache --cache-strategy content --cache-location .tmp/prettier-cache
+        run: npm run format:check
 
       - name: Build
         run: npm run build
