@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { readWorktreeKeeps } from '../utils/worktree-keeps.js';
-import { enforceIssueBudget } from './budget.js';
+import { budgetGuardFor, enforceIssueBudget } from './budget.js';
 import { createTempDirs } from '../harness/temp-dir.js';
 
 describe('enforceIssueBudget', () => {
@@ -74,5 +74,62 @@ describe('enforceIssueBudget', () => {
     });
     expect(message).toContain('per-issue budget exceeded after BUILD');
     expect(log.mock.calls.map((c) => c[0])).toEqual(['budget_exceeded', 'warn']);
+  });
+});
+
+describe('enforceIssueBudget with a live stop (#3320)', () => {
+  const stopTmp = createTempDirs();
+  afterEach(() => stopTmp.cleanup());
+  it('renders the during message, logs budget_exceeded and records a keep', () => {
+    const keepsFile = join(stopTmp.makeSync('budget-stop-'), 'keeps.json');
+    const log = vi.fn();
+    const message = enforceIssueBudget({
+      phase: 'BUILD',
+      spend: 1.21,
+      cap: 30,
+      issue: 3320,
+      worktreePath: '/wt',
+      keepsFile,
+      log,
+      stop: { spendUsd: 30.21, calls: 183 },
+    });
+    expect(message).toBe('per-issue budget exceeded during BUILD: $30.21 > $30.00 (stopped at model call 183)');
+    expect(log).toHaveBeenCalledWith('budget_exceeded', message);
+    expect(readWorktreeKeeps(keepsFile).map((k) => k.path)).toEqual(['/wt']);
+  });
+});
+
+describe('budgetGuardFor', () => {
+  it('returns no guard without a cap', () => {
+    const { guard, stopped } = budgetGuardFor({ budget: {} }, {}, { killAll: vi.fn() });
+    expect(guard).toBeUndefined();
+    expect(stopped()).toBeUndefined();
+  });
+
+  it('stays quiet at or under the cap, then kills once over it and keeps returning true', () => {
+    const killAll = vi.fn().mockResolvedValue([]);
+    const { guard, stopped } = budgetGuardFor(
+      { budget: { perIssueCapUsd: 30 } },
+      { getIssueSpend: () => 1.21 },
+      { killAll },
+      50,
+    );
+    expect(guard?.(28.79, 100)).toBe(false);
+    expect(killAll).not.toHaveBeenCalled();
+    expect(guard?.(29, 183)).toBe(true);
+    expect(killAll).toHaveBeenCalledTimes(1);
+    expect(killAll).toHaveBeenCalledWith({ graceMs: 50 });
+    expect(guard?.(40, 190)).toBe(true);
+    expect(killAll).toHaveBeenCalledTimes(1);
+    expect(stopped()).toEqual({ spendUsd: 30.21, calls: 183 });
+  });
+
+  it('counts only the running spend without a cost sink and logs a failing kill', async () => {
+    const killAll = vi.fn().mockRejectedValue(new Error('gone'));
+    const log = vi.fn();
+    const { guard } = budgetGuardFor({ budget: { perIssueCapUsd: 1 } }, {}, { killAll }, undefined, log);
+    expect(guard?.(2, 1)).toBe(true);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(log).toHaveBeenCalledWith('warn', 'budget kill failed: gone');
   });
 });

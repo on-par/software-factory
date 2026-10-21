@@ -9,13 +9,13 @@ import { classifyFailure } from '../harness/classify.js';
 import { ClaudeCliHarness } from '../harness/claude-cli.js';
 import { CodexCliHarness } from '../harness/codex-cli.js';
 import { CommandHarness } from '../harness/command.js';
-import type { CodingHarness, HarnessFailureReason, HarnessUsage } from '../harness/index.js';
+import type { CodingHarness, HarnessFailureReason, HarnessLiveUsage, HarnessUsage } from '../harness/index.js';
 import { HarnessError, isRetryableFailure, taskRequiresAgenticHarness } from '../harness/index.js';
 import { OllamaAgenticHarness } from '../harness/ollama-agentic.js';
 import { OllamaHttpHarness } from '../harness/ollama-http.js';
 import { OpenCodeHarness } from '../harness/opencode.js';
 import { PiHarness } from '../harness/pi.js';
-import { isHarnessCliPresent, ModelRegistry, priceUsage } from '../models/index.js';
+import { isHarnessCliPresent, ModelRegistry } from '../models/index.js';
 import type { SandboxEventType, SandboxPolicy } from '../sandbox/index.js';
 import { sandboxEventFromError } from '../sandbox/index.js';
 import type { CostEntry, RetryCause, TaskType } from '../types/index.js';
@@ -23,6 +23,8 @@ import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { shellEscape } from '../utils/index.js';
 import { type LocalAuthAgent, localAuthAgentFor } from '../utils/local-auth-record.js';
+import { BudgetStopError, type BudgetGuard, watchBudget } from './budget-guard.js';
+import { costRow } from './cost-row.js';
 import { extractFailoverReason, ModelExecutorError, ModelRouterError, type RouterAttempt } from './executor-error.js';
 import { describeFailureDetail } from './failure-detail.js';
 import { claimOllamaSkipNotice, type OllamaProbeResult, probeOllama } from './ollama-probe.js';
@@ -113,6 +115,8 @@ export interface ModelExecutorContext {
   /** Reports provider-reported token usage for the attempt, when the harness
    *  surfaces one (#424). Called at most once per runModel call. */
   onUsage?: (usage: HarnessUsage) => void;
+  /** Cumulative usage while the session runs (#3320); forwarded to HarnessRequest.onUsage. */
+  onLiveUsage?: (cumulative: HarnessLiveUsage) => void;
 }
 
 /** Execute one model; failure and empty output must surface as typed errors. */
@@ -229,6 +233,7 @@ export class CliModelExecutor implements ModelExecutor {
       | 'env'
       | 'onPgid'
       | 'onUsage'
+      | 'onLiveUsage'
     >,
   ): Promise<string> {
     const { output, usage } = await harness.run({
@@ -244,6 +249,7 @@ export class CliModelExecutor implements ModelExecutor {
       codexFullAccessTasks: ctx.codexFullAccessTasks,
       env: ctx.env,
       onPgid: ctx.onPgid,
+      onUsage: ctx.onLiveUsage,
     });
     if (usage) ctx.onUsage?.(usage);
     return output;
@@ -550,13 +556,6 @@ Return next JSON command action. If committed, return {"commands":[],"done":true
 /** Cost sink for router runs. `issue`/`ts` are filled by the caller/logCost. */
 export type CostSink = (entry: Omit<CostEntry, 'ts' | 'issue'>) => void;
 
-/** Rough token estimate for cost accounting (~4 chars/token). Fallback only:
- *  used when the harness doesn't report real usage (claude-cli does; other
- *  harnesses don't yet, #424) — the resulting cost row is marked `estimated: true`. */
-function estimateTokens(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 4));
-}
-
 export class ModelRouter {
   private registry: ModelRegistry;
   private costSink?: CostSink;
@@ -654,36 +653,9 @@ export class ModelRouter {
     elapsedMs?: number,
   ): void {
     if (!this.costSink) return;
-    const inputTokens = usage?.inputTokens ?? estimateTokens(prompt);
-    const outputTokens = usage?.outputTokens ?? estimateTokens(output);
-    const { cost, flags } = priceUsage(this.registry, model, inputTokens, outputTokens, usage);
-    this.costSink({
-      task,
-      model,
-      inputTokens,
-      outputTokens,
-      cost,
-      ...flags,
-      estimated: usage === undefined,
-      duration: elapsedMs ?? 0,
-      ...(usage?.rawInputTokens !== undefined ? { rawInputTokens: usage.rawInputTokens } : {}),
-      ...(usage?.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),
-      ...(usage?.cacheCreationTokens !== undefined ? { cacheCreationTokens: usage.cacheCreationTokens } : {}),
-      ...(usage?.numTurns !== undefined ? { numTurns: usage.numTurns } : {}),
-      ...(usage?.peakInputTokens !== undefined ? { peakInputTokens: usage.peakInputTokens } : {}),
-      ...(usage?.contextWindow !== undefined ? { contextWindow: usage.contextWindow } : {}),
-      ...(usage?.numTurns !== undefined &&
-      usage.numTurns > 0 &&
-      Number.isFinite(usage.numTurns) &&
-      cost !== null &&
-      Number.isFinite(cost)
-        ? { costPerCallUsd: cost / usage.numTurns }
-        : {}),
-      ...(usage?.durationMs !== undefined ? { durationMs: usage.durationMs } : {}),
-      ...(usage?.durationApiMs !== undefined ? { durationApiMs: usage.durationApiMs } : {}),
-      ...(failoverReason ? { failoverReason } : {}),
-      ...(retryCause ? { retryCause } : {}),
-    });
+    this.costSink(
+      costRow(this.registry, { task, model, prompt, output, failoverReason, retryCause, usage, elapsedMs }),
+    );
   }
   /** Resolve a task type to its tier */
   getTier(task: TaskType): string | undefined {
@@ -734,6 +706,8 @@ export class ModelRouter {
       env?: Record<string, string>;
       onPgid?: (pgid: number) => void;
       retryCause?: RetryCause;
+      /** Per-issue budget guard for BUILD/rework (#3320). */
+      budgetGuard?: BudgetGuard;
     } = {},
   ): Promise<RouterResult> {
     const {
@@ -826,6 +800,7 @@ export class ModelRouter {
         let usage: HarnessUsage | undefined;
         let output: string;
         const attemptStartedAt = Date.now();
+        const budget = options.budgetGuard ? watchBudget(this.registry, model, options.budgetGuard) : undefined;
         try {
           output = await this.executor.runModel(model, prompt, {
             worktree,
@@ -841,8 +816,15 @@ export class ModelRouter {
             onUsage: (u) => {
               usage = u;
             },
+            onLiveUsage: budget?.onLiveUsage,
           });
+          budget?.throwIfStopped();
         } catch (err) {
+          if (budget?.stop) {
+            const elapsed = Date.now() - attemptStartedAt;
+            this.recordCost(task, model, prompt, '', undefined, retryCause, usage ?? budget.stop.usage, elapsed);
+            throw new BudgetStopError(model, budget.stop, attempts);
+          }
           if (sandbox && sandbox.runtime !== 'none') {
             const sandboxEvent = sandboxEventFromError(err);
             if (sandboxEvent) options.onSandboxEvent?.(sandboxEvent.type, sandboxEvent.detail);

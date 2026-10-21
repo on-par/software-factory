@@ -21,6 +21,7 @@ import { buildConstitutionContext } from '../constitutions/index.js';
 import type { BuildRoutePin } from '../config/repo.js';
 import { hermeticGitEnv, laneEnv } from '../environment/index.js';
 import type { EventKind } from '../events/kinds.js';
+import { type BudgetGuard, isBudgetStopError } from '../router/budget-guard.js';
 import { routerFailureOf } from '../router/executor-error.js';
 import type { ModelRouter, RouterResult } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
@@ -304,6 +305,7 @@ async function checkPhaseImpl(opts: {
   /** Stable lane URL from the factory proxy (e.g. http://<lane>.factory.localhost), when running. */
   appBaseUrl?: string;
   onPgid?: (pgid: number) => void;
+  budgetGuard?: BudgetGuard; // per-issue budget guard for rework sessions (#3320)
   processGroupTracker?: CheckerContext['processGroupTracker'];
   /** Failure signature this issue parked/got stuck on in a prior run (ReworkHistory,
    *  #740). When round one's signature matches, the rework loop is skipped entirely
@@ -362,6 +364,7 @@ async function checkPhaseImpl(opts: {
     appPort,
     appBaseUrl,
     onPgid,
+    budgetGuard,
     processGroupTracker,
     priorFailureSignature,
     diffBase,
@@ -573,7 +576,7 @@ async function checkPhaseImpl(opts: {
 
     const steering = drainSteering?.();
 
-    const { failovers, modelCompleted, failureReason } = await reworkWorker({
+    const { failovers, modelCompleted, failureReason, budgetStopped } = await reworkWorker({
       issue,
       worktree,
       specPath,
@@ -587,6 +590,7 @@ async function checkPhaseImpl(opts: {
       appPort,
       appBaseUrl,
       onPgid,
+      budgetGuard,
       reworkRoute,
       reworkModel,
       runId,
@@ -603,6 +607,7 @@ async function checkPhaseImpl(opts: {
       `round ${reworkRounds}/${maxRounds}: ${summary.failures} failing (${failingChecks.join(', ')}) — cause=${cause}`,
       { rework: { round: reworkRounds, failingChecks, cause, ...evidence } },
     );
+    if (budgetStopped) break;
     if (steering && steering.messages.length > 0) {
       log('steering_applied', describeSteering(steering));
     }
@@ -713,6 +718,7 @@ export interface ReworkWorkerOptions {
   appPort?: number;
   appBaseUrl?: string;
   onPgid?: (pgid: number) => void;
+  budgetGuard?: BudgetGuard;
   reworkRoute?: BuildRoutePin;
   reworkModel?: string;
   runId?: string;
@@ -728,6 +734,7 @@ export async function reworkWorker(opts: ReworkWorkerOptions): Promise<{
   /** False when router.run threw — no model produced output for this round (#642). */
   modelCompleted: boolean;
   failureReason?: FailoverReason;
+  budgetStopped?: boolean;
 }> {
   const {
     issue,
@@ -743,6 +750,7 @@ export async function reworkWorker(opts: ReworkWorkerOptions): Promise<{
     appPort,
     appBaseUrl,
     onPgid,
+    budgetGuard,
     reworkRoute = 'claude',
     reworkModel,
     runId,
@@ -795,9 +803,11 @@ Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`
       onPgid,
       retryCause: 'checker',
       modelOverride,
+      budgetGuard,
     });
     attempts = reworkResult.attempts;
   } catch (err) {
+    if (isBudgetStopError(err)) return { failovers: [], modelCompleted: false, budgetStopped: true };
     // ModelRouter.run only throws once every eligible model is exhausted, and the
     // error carries the reason + attempts. Swallowing it made a provider outage
     // look like a factory fault (#642).
