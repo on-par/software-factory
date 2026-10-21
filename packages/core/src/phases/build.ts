@@ -12,15 +12,14 @@ import { readDesignArtifact, renderDesignGrounding } from '../design/index.js';
 import { laneEnv } from '../environment/index.js';
 import type { EventKind } from '../events/kinds.js';
 import { routerFailureOf } from '../router/executor-error.js';
-import type { ModelRouter, RouterResult } from '../router/index.js';
-import { failoversFrom } from '../router/index.js';
+import { failoversFrom, type ModelRouter, type RouterResult } from '../router/index.js';
 import type { SandboxEventType, SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering } from '../steering/index.js';
 import type { Constitution, FailoverReason } from '../types/index.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE } from '../utils/untrusted-input.js';
 import type { BuildRoutePin } from '../config/repo.js';
-import { renderLintRulesInForce } from './build-lint-rules.js';
+import { READ_BEFORE_EDIT_RULE, renderLintRulesInForce } from './build-lint-rules.js';
 import { failOverOpencodeBuild } from './build-opencode-failover.js';
 
 export interface BuildResult {
@@ -423,6 +422,7 @@ ${UNTRUSTED_ISSUE_BODY_NOTICE}
 ${spec}
 
 ## Rules
+- ${READ_BEFORE_EDIT_RULE}
 - Match the surrounding code style. Add or update the tests in the spec's Tests section.
 - ${verifyRule(lintCommands)}
 - Commit atomically: one commit per independently testable functional change, with a clear conventional message. Never mix unrelated functional changes in one commit. A single-slice task yields exactly ONE commit.
@@ -454,6 +454,7 @@ The frozen, approved spec is at ${specPath}. Read it and follow it as the plan. 
 
 ${UNTRUSTED_ISSUE_BODY_NOTICE}
 
+- ${READ_BEFORE_EDIT_RULE}
 - ${verifyRule(lintCommands)}
 - Commit atomically: one commit per independently testable functional change, with a clear conventional message. Never mix unrelated functional changes in one commit.
 - Do NOT merge (the factory merges). Your session ends when you end your turn, so do not stop until: (1) branch ${branch} is pushed, (2) an open PR exists with 'Closes #${issue}' in its body, ${skipCI ? '(3) local verify passes (CI is intentionally skipped: do not block on GitHub Actions CI or escalate if CI cannot run), (4) the PR is ready.' : '(3) CI is green, (4) the PR is ready.'}

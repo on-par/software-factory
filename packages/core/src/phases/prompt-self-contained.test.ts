@@ -4,7 +4,10 @@
 
 import { describe, expect, it } from 'vitest';
 
+import type { CheckSummary } from '../types/index.js';
 import { buildClaudePrompt, buildCommitOnlyPrompt, buildLocalSmallPrompt, buildOpencodePrompt } from './build.js';
+import { READ_BEFORE_EDIT_RULE } from './build-lint-rules.js';
+import { REWORK_READ_RULE, reworkWorker } from './check.js';
 import { buildPlanPrompt } from './plan.js';
 
 // Known Claude Code skills that live under ~/.claude/skills and must never be
@@ -91,5 +94,43 @@ describe('factory prompt builders are self-contained', () => {
     });
     expect(prompt).not.toMatch(skillReference('ship-it'));
     expect(prompt).toContain('ALREADY inside the isolated git worktree');
+  });
+});
+
+describe('BUILD and rework prompts ask the worker to read the code before editing (T13)', () => {
+  it('renders the read-before-edit rule once in each BUILD prompt and the rework prompt', async () => {
+    const specPath = '.factory/plans/issue-962.md';
+    const commitOnly = buildCommitOnlyPrompt({ issue: 962, specPath, constitutionCtx: '', spec: '# spec' });
+    const claude = buildClaudePrompt({ issue: 962, branch: 'ship-it/962-x', specPath, constitutionCtx: '' });
+    for (const prompt of [commitOnly, claude]) {
+      expect(prompt.split(READ_BEFORE_EDIT_RULE).length).toBe(2);
+      expect(prompt).toContain('read the code you will change');
+    }
+
+    const summary: CheckSummary = {
+      failures: 1,
+      passes: 0,
+      skips: 0,
+      total: 1,
+      results: [{ checker: 'tests', result: 'FAIL', details: 'FAIL src/a.test.ts > adds\n  at src/a.ts:12' }],
+    };
+    const prompts: string[] = [];
+    const router = {
+      run: async (_task: string, prompt: string) => {
+        prompts.push(prompt);
+        return { model: 'm', output: 'ok', exitCode: 0, attempts: [] };
+      },
+    } as any;
+    await reworkWorker({
+      issue: 962,
+      worktree: '/tmp/wt',
+      specPath,
+      summary,
+      constitution: null,
+      router,
+      log: () => {},
+    });
+    expect(prompts[0].split(REWORK_READ_RULE).length).toBe(2);
+    expect(prompts[0]).toContain('read the code at each failing location');
   });
 });
