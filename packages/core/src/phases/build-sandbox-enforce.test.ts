@@ -1,7 +1,6 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, expect, it } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
@@ -31,16 +30,14 @@ const models: ModelsConfig = {
 
 const routes: RoutesConfig = { version: 1, routes: { build_claude: { tier: 'worker', description: 'stub' } } };
 
-const tempDirs = new Set<string>();
+const tempDirs = createTempDirs();
 
 afterEach(async () => {
-  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
-  tempDirs.clear();
+  await tempDirs.cleanup();
 });
 
 it('logs an allowlist-enforced sandbox start event in enforce mode (#2215)', async () => {
-  const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-  tempDirs.add(worktree);
+  const worktree = await tempDirs.make('build-phase-test-');
   const specPath = join(worktree, 'issue-94.md');
   const sandbox: SandboxPolicy = {
     runtime: 'sandbox-exec',
