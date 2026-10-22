@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-09-15
+- Amended: 2026-10-21 (#3442)
 
 ## Context
 
@@ -53,3 +54,24 @@ is itself part of core's public claim-lease vocabulary.
 - [Issue #1501 — Extend lease-based reaping to worktree-gc's no-active-claim check](https://github.com/on-par/software-factory/issues/1501)
 - [ADR-0104 — Claim staleness is a TTL lease with heartbeat, not host-pid liveness](0104-claim-staleness-is-a-ttl-lease-with-heartbeat-not-host-pid-liveness.md)
 - [ADR-0090 — worktree-gc real mode quarantines the two heuristic stale reasons instead of deleting](0090-worktree-gc-real-mode-quarantines-the-two-heuristic-stale-reasons-instead-of-deleting.md)
+
+## Amendment (2026-10-21, #3442)
+
+`claimLiveness` in `queue/claim-liveness.ts` is now the one place claim liveness is decided.
+`findStaleClaims`, worktree GC's `dispositionOf`/`claimOf` and the lane-file guard's staleness
+probe all go through it, so the three can no longer disagree.
+
+| Verdict     | Labels (at `now`)                                                           | Live? |
+| ----------- | --------------------------------------------------------------------------- | ----- |
+| `expired`   | at least one lease label, every one parses and is `<= floor(now/1000)`      | no    |
+| `live`      | any lease label that is unexpired or malformed (fail-safe)                  | yes   |
+| `no-lease`  | no lease label, but `factory:in-progress` or a `factory:claimed-by:*` label | yes   |
+| `unclaimed` | none of the above                                                           | no    |
+
+- **In-progress but expired** is `expired`. All three treat it as not live, and the lane-file guard
+  no longer keeps a claim just because `factory:in-progress` is present.
+- **claimed-by (or in-progress) with no lease** is `no-lease`. All three treat it as live, keeping
+  the "no lease label means never releasable" rule.
+- A malformed lease is `live` (fail-safe).
+- GC now also reads an in-progress-only issue, or a lease-only live issue, as claimed. Before, it
+  needed `claimed-by`.

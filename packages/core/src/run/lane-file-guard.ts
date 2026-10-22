@@ -12,8 +12,7 @@ import type { Octokit } from '@octokit/rest';
 
 import { defaultIsPidAlive } from '../environment/index.js';
 import type { EventKind } from '../events/kinds.js';
-import { CLAIM_EXPIRES_LABEL_PREFIX, IN_PROGRESS_LABEL } from '../queue/github-queue.js';
-import { findStaleClaims } from '../queue/stale-claims.js';
+import { claimIsLive, claimLiveness } from '../queue/claim-liveness.js';
 import type { DesignArtifact } from '../types/index.js';
 import { branchFor } from '../utils/index.js';
 
@@ -243,8 +242,8 @@ export async function releaseLaneClaim(
 }
 
 /** GitHub-backed staleness probe (#3063). Fails safe: any lookup error, a live holder
- *  (in-progress label, unexpired lease, open PR, or a live recorded pid) or any lookup error returns
- *  undefined. No PR plus an absent or dead pid returns 'holder-not-running' (#1618). */
+ *  (claimLiveness says live or no-lease (#3442), an open PR, or a live recorded pid) or any lookup
+ *  error returns undefined. No PR plus an absent or dead pid returns 'holder-not-running' (#1618). */
 export function createGithubLaneClaimStalenessProbe(opts: {
   octokit: Pick<Octokit, 'rest'>;
   branchPrefix?: string;
@@ -258,13 +257,7 @@ export function createGithubLaneClaimStalenessProbe(opts: {
       const { data } = await octokit.rest.issues.get({ owner, repo: repoName, issue_number: claim.issue });
       if (data.state === 'closed') return 'issue-closed';
       const labels = (data.labels ?? []).map((l) => (typeof l === 'string' ? l : (l?.name ?? '')));
-      if (labels.includes(IN_PROGRESS_LABEL)) return undefined;
-      if (
-        labels.some((l) => l.startsWith(CLAIM_EXPIRES_LABEL_PREFIX)) &&
-        findStaleClaims([{ number: claim.issue, labels }], { now }).length === 0
-      ) {
-        return undefined;
-      }
+      if (claimIsLive(claimLiveness(labels, (now ?? Date.now)()))) return undefined;
       const branch = branchFor(claim.issue, data.title, branchPrefix);
       const { data: prs } = await octokit.rest.pulls.list({
         owner,
