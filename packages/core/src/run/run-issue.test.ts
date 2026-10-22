@@ -144,6 +144,7 @@ function basePorts(overrides: Partial<RunPorts> = {}): RunPorts {
     buildPhase,
     checkPhase,
     shipPhase,
+    installLaneDependencies: vi.fn(async () => ({ status: 'skipped' as const, reason: 'stub' })),
     ...overrides,
   };
 }

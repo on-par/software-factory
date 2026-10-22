@@ -101,6 +101,8 @@ export type EventKind =
   | 'land'
   | 'lane_file_claim_reaped'
   | 'lane_file_release_failed'
+  | 'lane_install'
+  | 'lane_install_failed'
   | 'landed'
   | 'lane-done'
   | 'lane-paused'
@@ -324,6 +326,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   land: { severity: 'info', isPark: false, isTerminal: false },
   lane_file_claim_reaped: { severity: 'info', isPark: false, isTerminal: false },
   lane_file_release_failed: { severity: 'warn', isPark: false, isTerminal: false },
+  lane_install: { severity: 'info', isPark: false, isTerminal: false },
+  lane_install_failed: { severity: 'warn', isPark: false, isTerminal: false },
   landed: { severity: 'info', isPark: false, isTerminal: true, laneStatus: 'merged' },
   'lane-done': { severity: 'info', isPark: false, isTerminal: false },
   // The lane circuit breaker stopped claiming issues (#1906). Not a park: both
