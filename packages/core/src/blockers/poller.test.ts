@@ -12,6 +12,7 @@ import {
   MAX_AUTO_UNPARKS,
   pollBlockedParks,
 } from './poller.js';
+import { fakeIssueComments } from '../queue/fake-issue-comments.js';
 
 function fakeClient(labels: Map<number, string[]>) {
   const addLabels = vi.fn(async ({ issue_number, labels: add }: { issue_number: number; labels: string[] }) => {
@@ -32,6 +33,7 @@ function fakeClient(labels: Map<number, string[]>) {
     getIssueLabels: async ({ issue_number }) => [...(labels.get(issue_number) ?? [])],
     addLabels,
     removeLabel,
+    ...fakeIssueComments(),
     ensureLabel: async () => false,
   };
   return { client, addLabels, removeLabel };

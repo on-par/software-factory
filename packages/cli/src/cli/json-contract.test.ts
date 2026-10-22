@@ -5,7 +5,8 @@ import type { FactoryEvent } from '@on-par/factory-core';
 import { createLogger, loadFactoryConfig } from '@on-par/factory-core';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import type { QueueSnapshot } from '@on-par/factory-core/internal';
-import type { EnqueueResult, QueueGitHubClient } from '@on-par/factory-core/internal';
+import type { EnqueueResult } from '@on-par/factory-core/internal';
+import { unparkClient } from './test-support/unpark-client.js';
 import { cmdDaemonStatus } from './daemon.js';
 import { buildQueueListJson } from './queue-list.js';
 import { buildUsageJson } from './usage-json.js';
@@ -91,27 +92,6 @@ const fixedQueueAddResults: EnqueueResult[] = [
   { issue: 2, outcome: 'queued', position: 4, labelsAdded: queueLabels(4), labelsCreated: ['factory:order:4'] },
   { issue: 3, outcome: 'already-queued', position: 1, labelsAdded: [], labelsCreated: [] },
 ];
-
-function unparkClient(labels: Map<number, string[]>): QueueGitHubClient {
-  return {
-    listOpenIssuesWithLabels: async ({ labels: wanted }) =>
-      [...labels.entries()]
-        .filter(([, current]) => wanted.every((label) => current.includes(label)))
-        .map(([number, current]) => ({ number, labels: [...current] })),
-    getIssueLabels: async ({ issue_number }) => [...(labels.get(issue_number) ?? [])],
-    addLabels: async ({ issue_number, labels: additions }) => {
-      const current = labels.get(issue_number) ?? [];
-      labels.set(issue_number, [...current, ...additions.filter((label) => !current.includes(label))]);
-    },
-    removeLabel: async ({ issue_number, name }) => {
-      labels.set(
-        issue_number,
-        (labels.get(issue_number) ?? []).filter((label) => label !== name),
-      );
-    },
-    ensureLabel: async () => false,
-  };
-}
 
 afterEach(async () => {
   vi.restoreAllMocks();

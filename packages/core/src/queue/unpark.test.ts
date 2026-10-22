@@ -5,6 +5,7 @@ import { createTempDirs } from '../harness/temp-dir.js';
 import type { QueueGitHubClient } from './github-queue.js';
 import { runUnpark, UnparkError } from './unpark.js';
 import { readWorktreeKeeps, upsertWorktreeKeep } from '../worktree/worktree-keeps.js';
+import { fakeIssueComments } from './fake-issue-comments.js';
 
 function fakeClient(labels: Map<number, string[]>) {
   const addLabels = vi.fn(async ({ issue_number, labels: add }: { issue_number: number; labels: string[] }) => {
@@ -25,6 +26,7 @@ function fakeClient(labels: Map<number, string[]>) {
     getIssueLabels: async ({ issue_number }) => [...(labels.get(issue_number) ?? [])],
     addLabels,
     removeLabel,
+    ...fakeIssueComments(),
     ensureLabel: async () => false,
   };
   return { client, addLabels, removeLabel };

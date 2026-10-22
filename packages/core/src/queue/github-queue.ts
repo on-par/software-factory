@@ -5,6 +5,8 @@ import { hostname } from 'node:os';
 
 import type { Octokit } from '@octokit/rest';
 
+import { labelExistsError } from './github-errors.js';
+import { createOctokitComments, type QueueCommentClient } from './issue-comments.js';
 import { knownRepoLabels } from './label-cache.js';
 import { orderCollisionAt, scanLaneOrders, type OrderCollision } from './order-collision.js';
 import { addQueuedOnRelease } from './release-queued.js';
@@ -167,7 +169,7 @@ export interface QueueClaim {
   decision: Extract<QueuePreflightDecision, { kind: 'build' | 'adopt' | 'park' | 'restack' }>;
 }
 
-export interface QueueGitHubClient {
+export interface QueueGitHubClient extends QueueCommentClient {
   /** Open issues carrying ALL of `labels`. Pull requests must be excluded. */
   listOpenIssuesWithLabels(input: { owner: string; repo: string; labels: string[] }): Promise<QueueIssue[]>;
   /** Current label names on one issue. */
@@ -176,11 +178,6 @@ export interface QueueGitHubClient {
   removeLabel(input: { owner: string; repo: string; issue_number: number; name: string }): Promise<void>;
   /** Create the label if missing. Must be idempotent — an already-existing label is not an error. Resolves `true` when it created the label, `false` when it already existed. */
   ensureLabel(input: { owner: string; repo: string } & QueueLabelSpec): Promise<boolean>;
-}
-
-function labelExistsError(err: unknown): boolean {
-  const view = err as { status?: unknown };
-  return view.status === 422;
 }
 
 export function queueOrderLabelSpec(position: number): QueueLabelSpec {
@@ -280,6 +277,7 @@ export async function readGithubQueueSnapshot(input: {
 
 export function createOctokitQueueClient(octokit: Octokit): QueueGitHubClient {
   return {
+    ...createOctokitComments(octokit),
     async listOpenIssuesWithLabels({ owner, repo, labels }) {
       const { data } = await octokit.rest.issues.listForRepo({
         owner,
