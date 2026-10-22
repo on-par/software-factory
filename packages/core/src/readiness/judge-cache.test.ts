@@ -1,21 +1,22 @@
 // #3467
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { judgeReadiness } from './judge.js';
 import type { ReadinessVerdict } from './judge.js';
 import { readCachedVerdict, readinessCacheKey, writeCachedVerdict } from './judge-cache.js';
 
 const verdict: ReadinessVerdict = { schemaVersion: 1, verdict: 'ready', summary: 's', assumptions: [], questions: [] };
+const tempDirs = createTempDirs();
 let dir: string;
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'jcache-'));
+  dir = tempDirs.makeSync('jcache-');
 });
-afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+afterEach(async () => {
+  await tempDirs.cleanup();
 });
 
 const entryFor = (key: string) => ({

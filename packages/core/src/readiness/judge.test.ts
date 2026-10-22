@@ -1,10 +1,10 @@
 // #3467
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE } from '../utils/untrusted-input.js';
 import {
   READINESS_INPUT_CAP,
@@ -27,11 +27,12 @@ function fakeRunner(...outputs: string[]) {
 }
 
 let dir: string;
+const tempDirs = createTempDirs();
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'judge-'));
+  dir = tempDirs.makeSync('judge-');
 });
-afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+afterEach(async () => {
+  await tempDirs.cleanup();
 });
 
 const jsonFiles = () => readdirSync(dir).filter((f) => f.endsWith('.json'));
