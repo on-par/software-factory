@@ -385,6 +385,18 @@ const INTERNAL_API_KEYS = [
   ...Object.keys(await import('./run/pr-lookup.js')), // open-PR lookup (#3439)
   ...(await Promise.all([import('./blockers/index.js'), import('./queue/unpark.js')])).flatMap(Object.keys), // blockers (#2316), unpark (#2318)
   'buildReadinessGapPrompt',
+  'READINESS_INPUT_CAP',
+  'READINESS_PROMPT_VERSION',
+  'ReadinessVerdictSchema',
+  'buildReadinessJudgePrompt',
+  'buildReadinessJudgeRepairPrompt',
+  'detectEpic',
+  'judgeReadiness',
+  'parseReadinessVerdict',
+  'prepareReadinessInput',
+  'readCachedVerdict',
+  'readinessCacheKey',
+  'writeCachedVerdict',
   'parseReadinessGapOutput',
   // Slice plan model (ADR-0147)
   'DEFAULT_MAX_SLICES',

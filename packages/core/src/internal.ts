@@ -748,8 +748,7 @@ export { findSlicePlanComment, recordSliceMerged, upsertSlicePlanComment } from 
 export { resolveSliceGate, type SliceGateOutcome } from './readiness/slice-gate.js';
 export * from './blockers/index.js';
 export * from './events/tail.js';
-export type { ReadinessGapCriterion, ReadinessGapReport } from './readiness/enrich.js';
-export { buildReadinessGapPrompt, parseReadinessGapOutput } from './readiness/enrich.js';
+export * from './readiness/internal-exports.js';
 export type { IssueRunState, RunStatus } from './types/index.js';
 export * from './run/state.js';
 export * from './run/steer.js';
