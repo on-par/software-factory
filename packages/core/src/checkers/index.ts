@@ -108,7 +108,15 @@ export interface CheckerRunCtx extends CheckerContext {
 // ---------- Built-in Checkers ----------
 
 const DEFAULT_COMPILE_TIMEOUT_SECONDS = 120;
-
+/** Worktree facts the lint and compile resolvers read — a subset of CheckerContext so BUILD and doctor can call them with just `{ worktree }`. */
+export type LintCommandSource = Pick<CheckerContext, 'worktree' | 'packageJson' | 'probe'>;
+export type CompileCommand = { argv: string[]; source: 'package.json' | 'Makefile' | 'Cargo.toml' };
+export async function resolveCompileCommand(ctx: LintCommandSource): Promise<CompileCommand | null> {
+  const w = ctx.worktree;
+  if ((await getPackageJson(ctx))?.scripts?.build) return { argv: ['npm', 'run', 'build'], source: 'package.json' };
+  if (await fileExists(join(w, 'Makefile'))) return { argv: ['make'], source: 'Makefile' };
+  return (await fileExists(join(w, 'Cargo.toml'))) ? { argv: ['cargo', 'build'], source: 'Cargo.toml' } : null;
+}
 export const compileChecker: CheckerFn = async (ctx) => {
   const run = ctx.runCommand ?? runCommand;
   const timeoutSeconds = ctx.compileTimeoutSeconds ?? DEFAULT_COMPILE_TIMEOUT_SECONDS;
@@ -120,11 +128,7 @@ export const compileChecker: CheckerFn = async (ctx) => {
     return tail === 'timed out' ? head : `${head}\n${tail}`;
   };
   try {
-    const pkg = await getPackageJson(ctx);
-    let argv: string[] | null = null;
-    if (pkg?.scripts?.build) argv = ['npm', 'run', 'build'];
-    else if (await fileExists(join(ctx.worktree, 'Makefile'))) argv = ['make'];
-    else if (await fileExists(join(ctx.worktree, 'Cargo.toml'))) argv = ['cargo', 'build'];
+    const argv = (await resolveCompileCommand(ctx))?.argv;
     if (!argv) return { checker: 'compile', result: 'PASS', details: 'no build system detected — skipped' };
 
     const label = argv.join(' ');
@@ -248,7 +252,7 @@ export interface TestsCommand {
 /** The CHECK command for a repo whose gate is scripts/verify.ps1; BUILD renders the same argv (#3471). */
 export const VERIFY_PS1_ARGV = ['pwsh', '-NoProfile', '-NonInteractive', '-File', 'scripts/verify.ps1'] as const;
 
-export async function resolveTestsCommand(ctx: CheckerContext): Promise<TestsCommand> {
+export async function resolveTestsCommand(ctx: LintCommandSource): Promise<TestsCommand> {
   if (await fileExists(join(ctx.worktree, 'scripts/verify.sh')))
     return { runner: 'verify', argv: ['bash', 'scripts/verify.sh', '--no-e2e'], label: 'verify.sh' };
   if (await fileExists(join(ctx.worktree, 'scripts/verify.ps1')))
@@ -265,9 +269,6 @@ export async function resolveTestsCommand(ctx: CheckerContext): Promise<TestsCom
     label: 'pytest',
   };
 }
-
-/** Worktree facts the lint resolver reads — a subset of CheckerContext so BUILD can call it with just `{ worktree }`. */
-export type LintCommandSource = Pick<CheckerContext, 'worktree' | 'packageJson' | 'probe'>;
 
 /** One lint-family command the `lint` checker runs; label names it in details and the log file. */
 export interface LintCommand {
