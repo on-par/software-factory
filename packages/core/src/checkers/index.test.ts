@@ -71,6 +71,7 @@ const tempDirs = new Set<string>();
 afterEach(async () => {
   await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
   tempDirs.clear();
+  vi.unstubAllEnvs();
 });
 
 async function makeWorktree(files: Record<string, string> = {}): Promise<string> {
@@ -681,6 +682,18 @@ assert.ok(process.env.PATH);
       }
     },
   );
+
+  it("keeps the supervisor's merge flags out of verification subprocesses", { timeout: 30000 }, async () => {
+    for (const k of ['FACTORY_MERGE', 'FACTORY_MERGE_ADMIN', 'FACTORY_LOCAL_ONLY', 'FACTORY_SKIP_CI'])
+      vi.stubEnv(k, '1');
+    const worktree = await makeWorktree({
+      'scripts/verify.sh': `#!/bin/bash
+[ -z "$FACTORY_MERGE$FACTORY_MERGE_ADMIN$FACTORY_LOCAL_ONLY$FACTORY_SKIP_CI" ] && [ "$PORT" = "3142" ]
+`,
+    });
+    const result = await testsChecker({ ...makeContext(worktree), env: { ...LANE_ENV } });
+    expect(result.result, result.details).toBe('PASS');
+  });
 
   it('forwards ctx.env through scripts/verify.sh', { timeout: 30000 }, async () => {
     const worktree = await makeWorktree({

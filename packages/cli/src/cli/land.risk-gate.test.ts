@@ -87,8 +87,9 @@ beforeEach(() => {
   mkdirSync(join(repoRoot, '.git', 'info'), { recursive: true });
   mkdirSync(paths().plans, { recursive: true });
   trustTier = undefined;
-  // The factory's own env sets FACTORY_MERGE_ADMIN=1, which would route the merge through `gh --admin`, not octokit.
-  vi.stubEnv('FACTORY_MERGE_ADMIN', '');
+  // The factory's own env (FACTORY_MERGE_ADMIN=1, ...) would change how land merges; isolate the suite from it (#3428).
+  for (const k of ['FACTORY_LOCAL_ONLY', 'FACTORY_MERGE', 'FACTORY_MERGE_ADMIN', 'FACTORY_SKIP_CI'])
+    vi.stubEnv(k, undefined);
   restore = setLandRuntime(() => {
     const rt = restore!();
     return {
