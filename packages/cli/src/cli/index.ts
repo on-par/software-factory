@@ -325,6 +325,7 @@ import { DeepCheckError, createDeepModelRunner, runIssueCheck, type DeepCheckMod
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
 import { readRunFlagOverrides, recordDraftPrFlag } from './run-flags.js';
 import { runStalenessGuard } from './staleness.js';
+import { runWorktreeKeep, runWorktreeRelease } from './worktree-keep.js';
 import { gcWorktreeSandbox, reapParkedLane, reapPrlessShip } from './worktree-reap.js';
 
 export type ConfigLoaderKey =
@@ -2776,6 +2777,34 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string; 
   console.log(internalOps.formatGcReport(report));
 }
 
+/** `factory worktree keep <issue>` (#3318): protect the lane worktree from GC while finishing by hand. */
+export async function cmdWorktreeKeep(issueArg: string, opts: { reason?: string; branchPrefix?: string }) {
+  const issue = parseIssueArg(issueArg);
+  const repoRoot = await getRepoRoot();
+  const paths = getFactoryPaths(repoRoot);
+  const ghRepo = await getGitHubRepo();
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
+  await runWorktreeKeep(
+    issue,
+    { reason: opts.reason },
+    {
+      keepsFile: paths.worktreeKeeps,
+      worktreePath: (n) => worktreePathFor(repoRoot, ghRepo, n, branchPrefix),
+      withLock: (fn) => withFileLock(paths.gitLock, fn),
+    },
+  );
+}
+
+/** `factory worktree release <issue>` (#3318): drop the issue's keep record. */
+export async function cmdWorktreeRelease(issueArg: string) {
+  const issue = parseIssueArg(issueArg);
+  const paths = getFactoryPaths(await getRepoRoot());
+  await runWorktreeRelease(issue, {
+    keepsFile: paths.worktreeKeeps,
+    withLock: (fn) => withFileLock(paths.gitLock, fn),
+  });
+}
+
 /** `factory reset <issue...>` (#1787): wipes an issue's local state; see reset.ts. */
 export async function cmdReset(
   issues: string[],
@@ -3099,6 +3128,8 @@ export async function cmdUnpark(issueArg: string, opts: { lane?: string; json?: 
   try {
     const [owner, repo] = (await getGitHubRepo()).split('/');
     result = await runUnpark({
+      keepsFile: getFactoryPaths(await getRepoRoot()).worktreeKeeps,
+      warn: (msg) => console.error(styleText('yellow', `factory: ${msg}`)),
       client: createOctokitQueueClient(getOctokit()),
       owner,
       repo,
@@ -4333,6 +4364,8 @@ export const PROGRAM_HANDLERS = {
   cmdDaemonLogs,
   cmdSelfUpdateCheck,
   cmdWorktreeGc,
+  cmdWorktreeKeep,
+  cmdWorktreeRelease,
   cmdReset,
   cmdSupervise: runSupervise,
   cmdStop,

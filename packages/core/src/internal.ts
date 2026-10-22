@@ -322,7 +322,7 @@ export {
   sweepWorktrees,
   zeroFill,
 } from './worktree/worktree-gc.js';
-export { findWorktreeKeep } from './worktree/worktree-keeps.js';
+export { findWorktreeKeep, removeWorktreeKeep, upsertWorktreeKeep } from './worktree/worktree-keeps.js';
 // Daemon repo registry (~/.factory/registry.json) (#781)
 export {
   type RepoRegistry,

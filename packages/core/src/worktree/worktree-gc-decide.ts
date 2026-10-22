@@ -12,7 +12,7 @@ export type GcDecision =
   | { action: 'remove' | 'quarantine'; reason: GcReason; branchReapable: boolean }
   | {
       action: 'keep';
-      why: 'protected' | 'keep-record' | 'live-claim' | 'held' | 'no-evidence';
+      why: 'protected' | 'keep-record' | 'live-claim' | 'held' | 'held-untracked' | 'no-evidence';
       held?: string;
     };
 
@@ -88,7 +88,7 @@ function decideHeuristic(e: WorktreeEvidence, policy: GcPolicy): GcDecision {
 }
 
 /** Decides remove / quarantine / keep for one worktree from its evidence alone. Rule order:
- *  protected, keep record, live claim, TTL, issue disposition, decomposed hold, PR/local chain,
+ *  protected, keep record, live claim, parked-untracked hold, TTL, issue disposition, decomposed hold, PR/local chain,
  *  heuristic quarantine. */
 export function decideWorktree(e: WorktreeEvidence, policy: GcPolicy): GcDecision {
   const g = e.git;
@@ -97,6 +97,9 @@ export function decideWorktree(e: WorktreeEvidence, policy: GcPolicy): GcDecisio
   if (keepRecordHolds(e.keep, e.disposition, g.clean)) return { action: 'keep', why: 'keep-record' };
   // A live claim outranks every reap tier, TTL included (#2964).
   if (e.disposition === 'keep-claimed') return { action: 'keep', why: 'live-claim' };
+  // An unkept parked worktree with new files (or an unverifiable probe) is held, never deleted (#3318).
+  if (e.disposition === 'reap-parked' && !e.keep && g.untracked !== false)
+    return { action: 'keep', why: 'held-untracked' };
   if (e.ageDays > policy.ttlDays && !e.keep) return reap('ttl-expired', false);
 
   if ((e.disposition === 'reap-parked' || e.disposition === 'reap-closed') && g.clean) {

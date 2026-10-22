@@ -135,4 +135,52 @@ describe('sweepWorktrees honors worktree-keeps.json (#3316)', () => {
     );
     expect(report.removed[0].reason).toBe('issue-parked');
   });
+
+  describe('untracked files (#3318)', () => {
+    const untrackedRunner = (root: string, wt: string, status: string) => {
+      const base = runner(root, wt, 'ship-it/3264-x');
+      return async (cmd: string) => (cmd.includes('--untracked-files=normal') ? { stdout: status } : base(cmd));
+    };
+
+    it('an unkept parked worktree with an untracked file is held and listed as held (untracked files)', async () => {
+      const { root, wt, keepsFile } = setup();
+      const messages: string[] = [];
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, repo: 'o/r', keepsFile },
+        {
+          runCommand: untrackedRunner(root, wt, '?? NEW.txt\n'),
+          octokit: octokitFor('open', ['factory:parked']),
+          log: (type, msg) => {
+            if (type === 'worktree-gc') messages.push(msg);
+          },
+        },
+      );
+      expect(report.removed).toEqual([]);
+      expect(existsSync(wt)).toBe(true);
+      expect(report.heldUntracked?.[0].path).toBe(wt);
+      expect(formatGcReport(report)).toContain('held (untracked files)');
+      expect(messages.some((m) => m.includes(wt))).toBe(true);
+    });
+
+    it('an unkept parked worktree with only ignored/no untracked files is still reaped as issue-parked', async () => {
+      const { root, wt, keepsFile } = setup();
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 7, repo: 'o/r', keepsFile },
+        { runCommand: untrackedRunner(root, wt, ''), octokit: octokitFor('open', ['factory:parked']) },
+      );
+      expect(report.removed[0].reason).toBe('issue-parked');
+    });
+
+    it('a held untracked parked worktree older than gcTtlDays is not removed as ttl-expired', async () => {
+      const { root, wt, keepsFile } = setup();
+      const old = new Date(Date.now() - 30 * 86_400_000);
+      utimesSync(join(wt, '.git'), old, old);
+      const report = await sweepWorktrees(
+        { repoRoot: root, ttlDays: 1, repo: 'o/r', keepsFile },
+        { runCommand: untrackedRunner(root, wt, '?? NEW.txt\n'), octokit: octokitFor('open', ['factory:parked']) },
+      );
+      expect(report.removed).toEqual([]);
+      expect(existsSync(wt)).toBe(true);
+    });
+  });
 });

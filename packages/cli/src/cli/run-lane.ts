@@ -15,6 +15,7 @@ import type {
 import { BASE_HOLD_CI_RECHECK_MS, type BaseHoldDecision, writeBaseHold } from './base-hold.js';
 import { waitForMerge } from './land.js';
 import { AwaitingReviewError } from './land-pr.js';
+import { releaseKeepOnRequeue } from './worktree-keep.js';
 import { shipIssue } from './ship.js';
 import { shipRuntime } from './ship-runtime.js';
 
@@ -179,6 +180,8 @@ export async function runLane(
     // Drop the in-flight mark first so this lane's own finished worktree stays reapable.
     activeIssues.delete(issue);
     await releaseIssue(issue, outcome);
+    if (outcome === 'queued')
+      releaseKeepOnRequeue(paths.worktreeKeeps, issue, (m) => emitEvent(paths.events, 'warn', issue, m, { lane }));
     await sweepFinished(issue).catch(() => {});
   };
   // A parked release adds factory:parked (#3424). Log the clean park only once the label

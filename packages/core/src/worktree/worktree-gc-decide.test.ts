@@ -28,6 +28,7 @@ function evidence(o: Overrides = {}): WorktreeEvidence {
       headIsAncestorOfMain: false,
       mainTip: 'bbb',
       unpushedCount: 0,
+      untracked: false,
       ...git,
     },
   };
@@ -58,6 +59,36 @@ const rows: Array<[string, Overrides, GcDecision, typeof policy?]> = [
     keep('keep-record'),
   ],
   ['ttl-expired', { ageDays: 8 }, rm('ttl-expired')],
+  [
+    'parked + untracked files is held',
+    { disposition: 'reap-parked', git: { untracked: true } },
+    keep('held-untracked'),
+  ],
+  [
+    'parked + unverifiable untracked probe is held',
+    { disposition: 'reap-parked', git: { untracked: null } },
+    keep('held-untracked'),
+  ],
+  [
+    'parked + no untracked files is reaped',
+    { disposition: 'reap-parked', git: { untracked: false } },
+    rm('issue-parked', true),
+  ],
+  [
+    'parked + keep record + untracked still reports keep-record',
+    { disposition: 'reap-parked', keep: { issue: 1, reason: 'r' }, git: { untracked: true } },
+    keep('keep-record'),
+  ],
+  [
+    'closed + untracked is still reaped',
+    { disposition: 'reap-closed', git: { untracked: true } },
+    rm('issue-closed', true),
+  ],
+  [
+    'parked + untracked + older than ttl is held, not ttl-expired',
+    { disposition: 'reap-parked', ageDays: 99, git: { untracked: true } },
+    keep('held-untracked'),
+  ],
   ['ttl at the limit', { ageDays: 7 }, keep('no-evidence')],
   ['issue-closed, branch reapable via PR', { disposition: 'reap-closed', prState: 'open' }, rm('issue-closed', true)],
   ['issue-closed, reapable via remote branch', { disposition: 'reap-closed' }, rm('issue-closed', true)],
