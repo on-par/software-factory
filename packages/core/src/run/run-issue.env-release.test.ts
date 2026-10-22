@@ -1,5 +1,3 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
@@ -10,6 +8,7 @@ import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
 import type { shipPhase as realShipPhase } from '../phases/ship.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import type { WorkRequest } from '../work/index.js';
@@ -78,8 +77,9 @@ const policy: RunPolicy = {
   effective: {} as RunPolicy['effective'],
 };
 
-const breakerDir = mkdtempSync(join(tmpdir(), 'run-issue-env-release-'));
-afterAll(() => rmSync(breakerDir, { recursive: true, force: true }));
+const tempDirs = createTempDirs();
+const breakerDir = tempDirs.makeSync('run-issue-env-release-');
+afterAll(() => tempDirs.cleanup());
 
 type Log = ReturnType<RunPorts['events']>;
 
