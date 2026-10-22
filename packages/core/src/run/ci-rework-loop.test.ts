@@ -7,7 +7,7 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.js';
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
-import type { shipPhase as realShipPhase } from '../phases/ship.js';
+import type { ShipResult, shipPhase as realShipPhase } from '../phases/ship.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { createTempDirs } from '../harness/temp-dir.js';
 import { ModelRouter } from '../router/index.js';
@@ -26,6 +26,8 @@ const shipPhase = vi.fn<typeof realShipPhase>();
 const reworkWorker = vi.fn<typeof realReworkWorker>();
 const readWorktreeHead = vi.fn<(worktree: string) => Promise<string>>();
 const readReworkDiff = vi.fn<(worktree: string, fromSha: string) => Promise<string>>();
+const mergeBaseIntoWorktree = vi.fn<NonNullable<RunPorts['mergeBaseIntoWorktree']>>();
+const collectFailingJobLogs = vi.fn<NonNullable<RunPorts['collectFailingJobLogs']>>();
 const listPrChangedFiles = vi.fn<(...args: unknown[]) => Promise<string[]>>();
 const listBaseFailingChecks =
   vi.fn<(...args: unknown[]) => Promise<{ baseRef: string; baseSha: string; failing: string[] }>>();
@@ -109,6 +111,8 @@ function ports(log: Log): RunPorts {
     readReworkDiff,
     listPrChangedFiles: listPrChangedFiles as RunPorts['listPrChangedFiles'],
     listBaseFailingChecks: listBaseFailingChecks as RunPorts['listBaseFailingChecks'],
+    mergeBaseIntoWorktree,
+    collectFailingJobLogs,
   };
 }
 
@@ -122,6 +126,13 @@ beforeEach(() => {
   readReworkDiff.mockReset().mockResolvedValue('');
   listPrChangedFiles.mockReset().mockResolvedValue(['packages/core/src/sandbox/egress-proxy.ts']);
   listBaseFailingChecks.mockReset().mockResolvedValue({ baseRef: 'main', baseSha: 'b'.repeat(40), failing: [] });
+  mergeBaseIntoWorktree.mockReset().mockResolvedValue({ ok: true, merged: true });
+  collectFailingJobLogs.mockReset().mockResolvedValue({
+    jobLogs: [
+      { name: 'test (2/3)', jobId: 7, excerpt: 'FAIL scripts/x.test.ts expected 1 to be 78', truncated: false },
+    ],
+    errors: [],
+  });
 });
 
 afterEach(() => {
@@ -231,5 +242,130 @@ describe('shipWithCiRework — re-CHECK parity with the first CHECK (#3435)', ()
     );
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
     expect(shipPhase).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('shipWithCiRework — attributable non-CodeQL checks (#3537)', () => {
+  const TEST_FAIL: ShipResult = {
+    ok: false,
+    prNumber: 9,
+    reason: 'CI failed for PR #9',
+    ciOutcome: 'failure',
+    ciFailure: {
+      failingChecks: [{ name: 'test (2/3)', conclusion: 'failure' }],
+      alerts: [],
+      truncated: false,
+    },
+    headSha: 'sha',
+  };
+  const SUCCESS: ShipResult = { ok: true, prNumber: 9, ciOutcome: 'success' };
+
+  it('an attributable non-CodeQL failing check gets a CI rework round', async () => {
+    shipPhase.mockResolvedValueOnce(TEST_FAIL).mockResolvedValueOnce(SUCCESS);
+    const log = vi.fn<Log>();
+    const outcome = await runIssue(request, policy, ports(log));
+    expect(outcome).toMatchObject({ state: 'ready' });
+    expect(reworkWorker).toHaveBeenCalledTimes(1);
+    const details = reworkWorker.mock.calls[0][0].summary.results[0].details;
+    expect(details).toContain('test (2/3)');
+    expect(details).toContain('expected 1 to be 78');
+    expect(checkPhase).toHaveBeenCalledTimes(2);
+    expect(shipPhase).toHaveBeenCalledTimes(2);
+    expect(shipPhase.mock.calls[1][0]).toMatchObject({ reentry: { prNumber: 9 } });
+    expect(log).toHaveBeenCalledWith(
+      'rework',
+      expect.stringContaining('CI rework round 1/2: attributable failing check(s) test (2/3)'),
+      expect.anything(),
+    );
+  });
+
+  it('a non-CodeQL CI rework round merges the PR base into the worktree before the rework worker runs', async () => {
+    shipPhase.mockResolvedValueOnce(TEST_FAIL).mockResolvedValueOnce(SUCCESS);
+    await runIssue(request, policy, ports(vi.fn<Log>()));
+    expect(mergeBaseIntoWorktree).toHaveBeenCalledWith('/tmp/wt', 'main');
+    const merged = mergeBaseIntoWorktree.mock.invocationCallOrder[0];
+    expect(merged).toBeLessThan(reworkWorker.mock.invocationCallOrder[0]);
+    expect(merged).toBeLessThan(readWorktreeHead.mock.invocationCallOrder[0]);
+  });
+
+  it('a conflicting base merge parks conflict and runs no rework worker', async () => {
+    shipPhase.mockResolvedValueOnce(TEST_FAIL);
+    mergeBaseIntoWorktree.mockResolvedValue({ ok: false, conflict: true, paths: ['a.ts'] });
+    expect(await runIssue(request, policy, ports(vi.fn<Log>()))).toMatchObject({
+      state: 'parked',
+      reason: 'conflict',
+    });
+    expect(reworkWorker).not.toHaveBeenCalled();
+    expect(shipPhase).toHaveBeenCalledTimes(1);
+  });
+
+  it('a non-conflict merge failure parks ci-failed with the merge error and runs no rework', async () => {
+    shipPhase.mockResolvedValueOnce(TEST_FAIL);
+    mergeBaseIntoWorktree.mockResolvedValue({ ok: false, conflict: false, message: 'network down' });
+    const log = vi.fn<Log>();
+    expect(await runIssue(request, policy, ports(log))).toMatchObject({ state: 'parked', reason: 'ci-failed' });
+    expect(reworkWorker).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(
+      'ci-failed',
+      expect.stringContaining('could not merge origin/main: network down'),
+      expect.anything(),
+    );
+  });
+
+  it('a non-CodeQL rework diff that raises a max-lines ceiling parks ci-failed suppression-attempt without SHIP re-entry', async () => {
+    shipPhase.mockResolvedValueOnce(TEST_FAIL);
+    readReworkDiff.mockResolvedValue(
+      [
+        'diff --git a/max-lines-baseline.json b/max-lines-baseline.json',
+        '--- a/max-lines-baseline.json',
+        '+++ b/max-lines-baseline.json',
+        '@@ -3 +3 @@',
+        '-  "packages/core/src/internal.ts": 789,',
+        '+  "packages/core/src/internal.ts": 790,',
+        '',
+      ].join('\n'),
+    );
+    expect(await runIssue(request, policy, ports(vi.fn<Log>()))).toMatchObject({
+      state: 'parked',
+      reason: 'ci-failed',
+    });
+    expect(shipPhase).toHaveBeenCalledTimes(1);
+    expect(checkPhase).toHaveBeenCalledTimes(1);
+  });
+
+  it('a non-CodeQL failure still red after the budget parks ci-failed as exhausted after 2 rounds', async () => {
+    shipPhase.mockResolvedValue(TEST_FAIL);
+    const log = vi.fn<Log>();
+    expect(await runIssue(request, policy, ports(log))).toMatchObject({ state: 'parked', reason: 'ci-failed' });
+    expect(reworkWorker).toHaveBeenCalledTimes(2);
+    expect(log).toHaveBeenCalledWith(
+      'ci-failed',
+      'ship phase failed: CI failed for PR #9 — CI rework budget exhausted after 2 rounds',
+      expect.anything(),
+    );
+  });
+
+  it('FACTORY_MAX_CI_REWORK_ROUNDS=0 runs no non-CodeQL rework round and no base merge', async () => {
+    vi.stubEnv('FACTORY_MAX_CI_REWORK_ROUNDS', '0');
+    shipPhase.mockResolvedValue(TEST_FAIL);
+    expect(await runIssue(request, policy, ports(vi.fn<Log>()))).toMatchObject({
+      state: 'parked',
+      reason: 'ci-failed',
+    });
+    expect(reworkWorker).not.toHaveBeenCalled();
+    expect(mergeBaseIntoWorktree).not.toHaveBeenCalled();
+  });
+
+  it('a failing CodeQL check with no alerts gets no non-CodeQL rework', async () => {
+    shipPhase.mockResolvedValue({
+      ...TEST_FAIL,
+      ciFailure: { failingChecks: [{ name: 'CodeQL', conclusion: 'failure' }], alerts: [], truncated: false },
+    });
+    expect(await runIssue(request, policy, ports(vi.fn<Log>()))).toMatchObject({
+      state: 'parked',
+      reason: 'ci-failed',
+    });
+    expect(reworkWorker).not.toHaveBeenCalled();
+    expect(mergeBaseIntoWorktree).not.toHaveBeenCalled();
   });
 });

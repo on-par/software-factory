@@ -26,6 +26,8 @@ const shipPhase = vi.fn<typeof realShipPhase>();
 const reworkWorker = vi.fn<typeof realReworkWorker>();
 const readWorktreeHead = vi.fn<(worktree: string) => Promise<string>>();
 const readReworkDiff = vi.fn<(worktree: string, fromSha: string) => Promise<string>>();
+const mergeBaseIntoWorktree = vi.fn<NonNullable<RunPorts['mergeBaseIntoWorktree']>>();
+const collectFailingJobLogs = vi.fn<NonNullable<RunPorts['collectFailingJobLogs']>>();
 const listPrChangedFiles = vi.fn<(...args: unknown[]) => Promise<string[]>>();
 const listBaseFailingChecks =
   vi.fn<(...args: unknown[]) => Promise<{ baseRef: string; baseSha: string; failing: string[] }>>();
@@ -108,6 +110,8 @@ function ports(log: Log): RunPorts {
     readReworkDiff,
     listPrChangedFiles: listPrChangedFiles as RunPorts['listPrChangedFiles'],
     listBaseFailingChecks: listBaseFailingChecks as RunPorts['listBaseFailingChecks'],
+    mergeBaseIntoWorktree,
+    collectFailingJobLogs,
   };
 }
 
@@ -121,6 +125,8 @@ beforeEach(() => {
   readReworkDiff.mockReset().mockResolvedValue('');
   listPrChangedFiles.mockReset().mockResolvedValue(['packages/core/src/sandbox/egress-proxy.ts']);
   listBaseFailingChecks.mockReset().mockResolvedValue({ baseRef: 'main', baseSha: 'b'.repeat(40), failing: [] });
+  mergeBaseIntoWorktree.mockReset().mockResolvedValue({ ok: true, merged: false });
+  collectFailingJobLogs.mockReset().mockResolvedValue({ jobLogs: [], errors: [] });
 });
 
 afterEach(() => {
@@ -251,6 +257,7 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     const log = vi.fn<Log>();
     expect(await runIssue(request, policy, ports(log))).toMatchObject({ state: 'parked', reason: 'ci-failed' });
     expect(reworkWorker).not.toHaveBeenCalled();
+    expect(mergeBaseIntoWorktree).not.toHaveBeenCalled();
     expect(checkPhase).toHaveBeenCalledTimes(1);
     expect(log).toHaveBeenCalledWith(
       'ci-failed',
@@ -261,18 +268,10 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     );
   });
 
-  it('parks ci-failed without baseline and without rework for a check not failing on base', async () => {
-    shipPhase.mockResolvedValue(TEST_FAIL);
-    const log = vi.fn<Log>();
-    expect(await runIssue(request, policy, ports(log))).toMatchObject({ reason: 'ci-failed' });
-    expect(reworkWorker).not.toHaveBeenCalled();
-    expect(log).toHaveBeenCalledWith(
-      'ci-failed',
-      'ship phase failed: CI failed for PR #9',
-      expect.objectContaining({
-        ciFailure: expect.objectContaining({ attribution: expect.objectContaining({ baseline: false }) }),
-      }),
-    );
+  it('reworks a check not failing on base', async () => {
+    shipPhase.mockResolvedValueOnce(TEST_FAIL).mockResolvedValueOnce({ ok: true, prNumber: 9, ciOutcome: 'success' });
+    expect(await runIssue(request, policy, ports(vi.fn<Log>()))).toMatchObject({ state: 'ready' });
+    expect(reworkWorker).toHaveBeenCalledTimes(1);
   });
 
   it('parks ci-failed without baseline when the base lookup throws', async () => {
@@ -281,6 +280,7 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     const log = vi.fn<Log>();
     expect(await runIssue(request, policy, ports(log))).toMatchObject({ reason: 'ci-failed' });
     expect(reworkWorker).not.toHaveBeenCalled();
+    expect(mergeBaseIntoWorktree).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith('ci-failed', 'ship phase failed: CI failed for PR #9', expect.anything());
   });
 

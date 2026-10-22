@@ -8,7 +8,9 @@ import type {
   CiAttribution,
   CiAttributionItem,
   CiCodeScanningAlert,
+  CiFailingCheck,
   CiFailureEvidence,
+  CiJobLogExcerpt,
 } from '../types/index.js';
 
 export const MAX_CI_REWORK_ROUNDS = 2;
@@ -21,6 +23,12 @@ export const CI_REWORK_INSTRUCTIONS =
   'CI (CodeQL) flagged the alerts above on files this PR changed. Fix the root cause in the code at the listed file:line. ' +
   'Suppression is forbidden: do not add `// codeql[...]`, `lgtm`, `eslint-disable` or `@ts-ignore` comments, do not exclude queries or paths in any config, and do not dismiss alerts. ' +
   'Commit the fix.';
+
+export const CI_CHECK_REWORK_INSTRUCTIONS =
+  'CI jobs above failed on this PR (merged with the latest base branch, which is now merged into your worktree). ' +
+  'Reproduce the failure locally, fix the root cause in code or tests, and commit. ' +
+  'Suppression is forbidden: do not raise any max-lines-baseline.json ceiling, do not lower coverage thresholds in vitest.config.ts, ' +
+  'do not skip, delete or weaken failing tests, do not edit .github/workflows, and do not add eslint-disable or @ts-ignore comments.';
 
 /** Non-negative integer from FACTORY_MAX_CI_REWORK_ROUNDS (0 disables CI rework); anything else falls back to the default. */
 export function resolveMaxCiReworkRounds(env: NodeJS.ProcessEnv = process.env): number {
@@ -127,6 +135,31 @@ export function ciReworkSummary(alerts: readonly CiCodeScanningAlert[]): CheckSu
     skips: 0,
     total: 1,
     results: [{ checker: 'ci_codeql', result: 'FAIL', details }],
+  };
+}
+
+/** The same CheckSummary shape, with one FAIL `ci_checks` result listing failing jobs and their log tails (#3537). */
+export function ciCheckReworkSummary(
+  checks: readonly CiFailingCheck[],
+  jobLogs: readonly CiJobLogExcerpt[],
+  errors: readonly string[],
+): CheckSummary {
+  const lines = checks.map((c) => `- ${c.name} (${c.conclusion})${c.summary ? ` — ${c.summary}` : ''}`);
+  const logs = jobLogs.map(
+    (l) => `\n--- ${l.name} log tail (job ${l.jobId})${l.truncated ? ', truncated' : ''} ---\n${l.excerpt}`,
+  );
+  const details = [
+    'CI jobs failing on this PR (not failing on the base branch):',
+    ...lines,
+    ...logs,
+    ...(errors.length > 0 ? [`Log fetch errors: ${errors.join('; ')}`] : []),
+  ].join('\n');
+  return {
+    failures: 1,
+    passes: 0,
+    skips: 0,
+    total: 1,
+    results: [{ checker: 'ci_checks', result: 'FAIL', details }],
   };
 }
 

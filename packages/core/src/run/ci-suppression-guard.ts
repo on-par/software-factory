@@ -46,12 +46,23 @@ function pathRules(path: string): string[] {
   return rules;
 }
 
-/** Scans a unified git diff for suppression comments (added lines) and protected paths (any file header). */
+const MAX_LINES_ENTRY = /^\s*"(.+)"\s*:\s*(\d+)\s*,?\s*$/;
+const VITEST_CONFIG = /^vitest\.config\.[cm]?[jt]s$/;
+const THRESHOLD = /\b(lines|functions|branches|statements)\s*:\s*(\d+(?:\.\d+)?)/g;
+
+function thresholds(text: string): [string, number][] {
+  return [...text.matchAll(THRESHOLD)].map((m) => [m[1], Number(m[2])]);
+}
+
+/**
+ * Scans a unified git diff for suppression comments (added lines), protected paths (any file header)
+ * and ratchet tampering: a raised max-lines-baseline.json ceiling or a lowered vitest coverage threshold (#3537).
+ */
 export function scanReworkDiff(diff: string): CiSuppressionFinding[] {
   const findings: CiSuppressionFinding[] = [];
   const seen = new Set<string>();
   const add = (f: CiSuppressionFinding): void => {
-    const key = `${f.kind}|${f.rule}|${f.file}|${f.line ?? ''}|${f.kind === 'path' ? f.match : ''}`;
+    const key = `${f.kind}|${f.rule}|${f.file}|${f.line ?? ''}|${f.kind === 'comment' ? '' : f.match}`;
     if (seen.has(key)) return;
     seen.add(key);
     findings.push(f);
@@ -64,9 +75,55 @@ export function scanReworkDiff(diff: string): CiSuppressionFinding[] {
   let file = '(unknown)';
   let line: number | undefined;
   let inHunk = false;
+  const basename = (): string => file.split('/').pop() ?? file;
+  let baselineRemoved = new Map<string, number>();
+  let baselineAdded: [string, number][] = [];
+  let hunkRemoved: string[] = [];
+  let hunkAdded: { text: string; line: number | undefined }[] = [];
+  const flushHunk = (): void => {
+    if (VITEST_CONFIG.test(basename())) {
+      const removed = thresholds(hunkRemoved.join('\n'));
+      const addedByKey = new Map<string, number[]>();
+      for (const [key, value] of thresholds(hunkAdded.map((a) => a.text).join('\n'))) {
+        addedByKey.set(key, [...(addedByKey.get(key) ?? []), value]);
+      }
+      const used = new Map<string, number>();
+      const hitLine = hunkAdded[0]?.line;
+      for (const [key, old] of removed) {
+        const idx = used.get(key) ?? 0;
+        used.set(key, idx + 1);
+        const next = addedByKey.get(key)?.[idx];
+        if (next === undefined || next < old) {
+          add({
+            kind: 'ratchet',
+            rule: 'coverage-threshold',
+            file,
+            ...(hitLine !== undefined ? { line: hitLine } : {}),
+            match: `${key} ${old} -> ${next ?? 'removed'}`,
+          });
+        }
+      }
+    }
+    hunkRemoved = [];
+    hunkAdded = [];
+  };
+  const flushFile = (): void => {
+    flushHunk();
+    if (basename() === 'max-lines-baseline.json') {
+      for (const [key, n] of baselineAdded) {
+        const old = baselineRemoved.get(key);
+        if (old === undefined || n > old) {
+          add({ kind: 'ratchet', rule: 'max-lines-ceiling', file, match: `"${key}" ${old ?? 'new'} -> ${n}` });
+        }
+      }
+    }
+    baselineRemoved = new Map();
+    baselineAdded = [];
+  };
   for (const raw of diff.split('\n')) {
     const header = /^diff --git a\/(.+) b\/(.+)$/.exec(raw);
     if (header) {
+      flushFile();
       inHunk = false;
       line = undefined;
       file = header[2];
@@ -94,6 +151,7 @@ export function scanReworkDiff(diff: string): CiSuppressionFinding[] {
     }
     const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
     if (hunk) {
+      flushHunk();
       inHunk = true;
       line = Number(hunk[1]);
       continue;
@@ -111,11 +169,20 @@ export function scanReworkDiff(diff: string): CiSuppressionFinding[] {
           });
         }
       }
+      hunkAdded.push({ text, line });
+      const entry = MAX_LINES_ENTRY.exec(text);
+      if (entry) baselineAdded.push([entry[1], Number(entry[2])]);
       if (line !== undefined) line++;
+    } else if (inHunk && raw.startsWith('-')) {
+      const text = raw.slice(1);
+      hunkRemoved.push(text);
+      const entry = MAX_LINES_ENTRY.exec(text);
+      if (entry) baselineRemoved.set(entry[1], Number(entry[2]));
     } else if (raw.startsWith(' ') && line !== undefined) {
       line++;
     }
   }
+  flushFile();
   return findings;
 }
 
@@ -143,4 +210,42 @@ export function describeSuppression(findings: readonly CiSuppressionFinding[]): 
   });
   const more = findings.length > MAX_LISTED ? `, +${findings.length - MAX_LISTED} more` : '';
   return `${SUPPRESSION_ATTEMPT}: ${findings.length} finding(s): ${items.join(', ')}${more}`;
+}
+
+export type BaseMergeResult =
+  | { ok: true; merged: boolean }
+  | { ok: false; conflict: true; paths: string[] }
+  | { ok: false; conflict: false; message: string };
+
+const gitMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+/**
+ * Fetches origin/<baseRef> and merges it into the worktree branch without pushing (#3537). A conflict
+ * is aborted and reported with its paths; any other failure is reported as a message. Never throws.
+ */
+export async function mergeBaseIntoWorktree(worktree: string, baseRef: string): Promise<BaseMergeResult> {
+  const opts = { cwd: worktree };
+  let before: string;
+  try {
+    await execGit(['fetch', 'origin', baseRef], opts);
+    before = (await execGit(['rev-parse', 'HEAD'], opts)).stdout.trim();
+  } catch (err) {
+    return { ok: false, conflict: false, message: gitMessage(err) };
+  }
+  try {
+    await execGit(['merge', '--no-edit', `origin/${baseRef}`], opts);
+    const after = (await execGit(['rev-parse', 'HEAD'], opts)).stdout.trim();
+    return { ok: true, merged: after !== before };
+  } catch (err) {
+    let paths: string[] = [];
+    try {
+      const { stdout } = await execGit(['diff', '--name-only', '--diff-filter=U'], opts);
+      paths = stdout.split('\n').filter(Boolean);
+    } catch {
+      // fall through to a non-conflict failure
+    }
+    if (paths.length === 0) return { ok: false, conflict: false, message: gitMessage(err) };
+    await execGit(['merge', '--abort'], opts).catch(() => undefined);
+    return { ok: false, conflict: true, paths };
+  }
 }

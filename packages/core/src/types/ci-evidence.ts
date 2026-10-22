@@ -32,10 +32,18 @@ export interface CiAttribution {
   items: CiAttributionItem[];
 }
 
+/** Tail of one failing Actions job's log, fed to non-CodeQL CI rework (#3537). */
+export interface CiJobLogExcerpt {
+  name: string;
+  jobId: number;
+  excerpt: string;
+  truncated: boolean;
+}
+
 /** One suppression-guard hit in a SHIP CI rework diff (#2818). */
 export interface CiSuppressionFinding {
-  kind: 'comment' | 'path';
-  /** e.g. 'codeql-comment', 'lgtm-comment', 'nosec-comment', 'eslint-disable-security', 'workflow-path', 'codeql-path', 'sarif-path', 'guard-error'. */
+  kind: 'comment' | 'path' | 'ratchet';
+  /** e.g. 'codeql-comment', 'lgtm-comment', 'nosec-comment', 'eslint-disable-security', 'workflow-path', 'codeql-path', 'sarif-path', 'guard-error', 'max-lines-ceiling', 'coverage-threshold'. */
   rule: string;
   /** Repo-relative path, '(unknown)' when the diff had no file header. */
   file: string;
@@ -57,4 +65,6 @@ export interface CiFailureEvidence {
   attribution?: CiAttribution;
   /** Suppression-guard hits that parked a CI rework round (#2818). */
   suppressionAttempt?: CiSuppressionFinding[];
+  /** Log tails of the failing jobs fed to a non-CodeQL CI rework round (#3537). */
+  jobLogs?: CiJobLogExcerpt[];
 }
