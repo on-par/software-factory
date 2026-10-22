@@ -16,6 +16,7 @@ import {
   CommandHarness,
   extractJsonlLastMessage,
   matchErrorPattern,
+  matchErrorPatternFailure,
   parseJsonlUsage,
 } from './command.js';
 import { codingHarnessContractCases, makeContractRequest } from './contract.js';
@@ -191,6 +192,40 @@ describe('matchErrorPattern', () => {
     expect(matchErrorPattern({}, 'a', 'b')).toBeUndefined();
     expect(matchErrorPattern([], 'a', 'b')).toBeUndefined();
     expect(matchErrorPattern({ error: 'a' }, undefined as any, undefined as any)).toBeUndefined();
+  });
+});
+
+describe('matchErrorPatternFailure', () => {
+  const patterns = { usage_cap: 'limit reached, resets at (?<reset>\\S+)' };
+
+  it('turns a named reset group into resetAt', () => {
+    expect(matchErrorPatternFailure(patterns, 'limit reached, resets at 2026-11-01T00:00:00Z', '')).toEqual({
+      reason: 'usage_cap',
+      resetAt: '2026-11-01T00:00:00.000Z',
+    });
+    expect(
+      matchErrorPatternFailure(
+        ['limit reached, resets at (?<reset>\\S+)'],
+        '',
+        'limit reached, resets at 2026-11-01T00:00:00Z',
+      ),
+    ).toMatchObject({
+      resetAt: '2026-11-01T00:00:00.000Z',
+    });
+  });
+
+  it('omits resetAt when the capture is not a date or there is no reset group', () => {
+    expect(matchErrorPatternFailure(patterns, 'limit reached, resets at soon', '')).toEqual({ reason: 'usage_cap' });
+    expect(matchErrorPatternFailure({ error: 'boom' }, 'boom', '')).toEqual({ reason: 'error' });
+    expect(matchErrorPattern(patterns, 'limit reached, resets at soon', '')).toBe('usage_cap');
+  });
+
+  it('CommandHarness puts kind and resetAt on the HarnessError details', async () => {
+    const harness = new CommandHarness('my-agent', declare({ errorPatterns: patterns }), async () => {
+      throw Object.assign(new Error('boom'), { code: 1, stderr: 'limit reached, resets at 2026-11-01T00:00:00Z' });
+    });
+    const err: any = await harness.run(makeContractRequest()).catch((e) => e);
+    expect(err.details).toMatchObject({ kind: 'usage_cap', resetAt: '2026-11-01T00:00:00.000Z' });
   });
 });
 

@@ -9,7 +9,9 @@ import { CodexCliHarness } from '../harness/codex-cli.js';
 import { DEFAULT_CODEX_CONTEXT_CEILING } from '../harness/codex-context-ceiling.js';
 import { CommandHarness } from '../harness/command.js';
 import type { CodingHarness, HarnessFailureReason, HarnessLiveUsage, HarnessUsage } from '../harness/index.js';
-import { isRetryableFailure, taskRequiresAgenticHarness } from '../harness/index.js';
+import { taskRequiresAgenticHarness } from '../harness/index.js';
+import type { ProviderFailure, ProviderFailureKind } from '../harness/provider-failure.js';
+import { providerFailureOf } from '../harness/provider-failure.js';
 import { OllamaAgenticHarness } from '../harness/ollama-agentic.js';
 import { OllamaHttpHarness } from '../harness/ollama-http.js';
 import { OpenCodeHarness } from '../harness/opencode.js';
@@ -24,7 +26,7 @@ import { type LocalAuthAgent, localAuthAgentFor } from '../utils/local-auth-reco
 import { BudgetStopError, type BudgetGuard, watchBudget } from './budget-guard.js';
 import { type ContextCeilingNotice, contextCeilingFor, contextCeilingNotice } from './context-ceiling.js';
 import { costRow } from './cost-row.js';
-import { extractFailoverReason, ModelRouterError, type RouterAttempt } from './executor-error.js';
+import { ModelRouterError, type RouterAttempt } from './executor-error.js';
 import { describeFailureDetail } from './failure-detail.js';
 import { claimOllamaSkipNotice, type OllamaProbeResult, probeOllama } from './ollama-probe.js';
 import { throwIfWorktreeMissing, worktreeExists } from './missing-worktree.js';
@@ -37,9 +39,21 @@ export { ModelExecutorError, ModelRouterError } from './executor-error.js';
 
 const PROVIDER_LEVEL_FAILURES = new Set<FailoverReason>(['usage_cap', 'rate_limit', 'timeout', 'unavailable']);
 
-function isProviderLevelFailure(reason: FailoverReason): boolean {
-  return PROVIDER_LEVEL_FAILURES.has(reason);
+/** Whether a failure opens the provider breaker. Deliberately the explicit reason set plus kind `auth`, not every
+ *  kind: `unavailable` also covers error/unknown/empty_response/cli_missing/local_auth, which fail over without
+ *  blocking the provider (#3225). */
+function opensProviderBreaker(failure: ProviderFailure): boolean {
+  return PROVIDER_LEVEL_FAILURES.has(failure.reason) || failure.kind === 'auth';
 }
+
+export type ProviderFailureInfo = {
+  provider: string;
+  reason: FailoverReason;
+  /** Always set by the router; optional so callers that synthesize a failure (tests, bookkeeping) may omit it. */
+  kind?: ProviderFailureKind;
+  resetAt?: string;
+  detail?: string;
+};
 
 export type SleepFn = (ms: number) => Promise<void>;
 
@@ -403,7 +417,7 @@ export class ModelRouter {
       /** Called when a provider-level failure should temporarily remove that provider from rotation.
        *  `detail` is the sanitized failure detail (see describeFailureDetail), forwarded so callers
        *  can extract provider-reported cooldown hints (e.g. "Resets in 3hr 17min"). */
-      onProviderFailure?: (info: { provider: string; reason: FailoverReason; detail?: string }) => void | Promise<void>;
+      onProviderFailure?: (info: ProviderFailureInfo) => void | Promise<void>;
       onLog?: (msg: string) => void;
       sandbox?: SandboxPolicy;
       onSandboxEvent?: (type: SandboxEventType, detail: string) => void;
@@ -560,14 +574,21 @@ export class ModelRouter {
             const sandboxEvent = sandboxEventFromError(err);
             if (sandboxEvent) options.onSandboxEvent?.(sandboxEvent.type, sandboxEvent.detail);
           }
-          const reason = extractFailoverReason(err) ?? this.classifyFailure(errStderr(err), errExitCode(err));
+          const failure = providerFailureOf(err);
+          const reason = failure.reason;
           const provider = this.registry.get(model)?.provider;
           const detail = describeFailureDetail(err);
           const blockProvider = async (): Promise<void> => {
-            if (!provider || !isProviderLevelFailure(reason)) return;
+            if (!provider || !opensProviderBreaker(failure)) return;
             blockedProviders.add(provider);
             try {
-              await onProviderFailure?.({ provider, reason, detail: detail || undefined });
+              await onProviderFailure?.({
+                provider,
+                reason,
+                kind: failure.kind,
+                ...(failure.resetAt ? { resetAt: failure.resetAt } : {}),
+                detail: detail || undefined,
+              });
             } catch (callbackErr) {
               onLog(
                 `Provider breaker bookkeeping failed for ${provider} (${reason}); continuing failover: ${
@@ -598,7 +619,7 @@ export class ModelRouter {
 
           // Deterministic failure — another model cannot plausibly help; do not
           // burn the next tier. Reason + attempts are preserved for event logs.
-          if (!isRetryableFailure(reason)) {
+          if (failure.kind === 'other') {
             await blockProvider();
             onLog(`${model} failed (${reason}) on ${task} — non-retryable, not failing over`);
             throw new ModelRouterError(
@@ -739,12 +760,4 @@ export class ModelRouter {
 }
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-function errStderr(err: unknown): string {
-  const stderr = (err as { stderr?: unknown } | null)?.stderr;
-  return typeof stderr === 'string' ? stderr : '';
-}
-function errExitCode(err: unknown): number {
-  const exitCode = (err as { exitCode?: unknown } | null)?.exitCode;
-  return typeof exitCode === 'number' ? exitCode : 1;
 }

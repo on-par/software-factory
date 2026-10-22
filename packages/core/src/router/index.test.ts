@@ -1535,3 +1535,63 @@ describe('OpenCode Zen failover guard (#3334)', () => {
     expect(logs.filter((l) => l.startsWith('metered_primary_route:'))).toHaveLength(1);
   });
 });
+
+describe('provider failure kinds', () => {
+  const failingExecutor = (err: Error) => ({
+    runModel: vi.fn(async (model: string) => {
+      if (model === 'claude-preferred') throw err;
+      return 'FROM GPT';
+    }),
+  });
+  const runWith = async (err: Error) => {
+    const router = new ModelRouter(providerModels, routes, false, failingExecutor(err));
+    const infos: unknown[] = [];
+    const result = await router.run('plan', 'do it', {
+      modelOverride: 'claude-preferred',
+      modelFallbacks: ['gpt-fallback'],
+      onProviderFailure: async (info) => {
+        infos.push(info);
+      },
+    });
+    return { result, infos };
+  };
+
+  it('forwards kind and resetAt from a HarnessError to onProviderFailure', async () => {
+    const { infos } = await runWith(
+      new HarnessError('cap', 'usage_cap', { kind: 'usage_cap', resetAt: '2026-10-20T12:00:00.000Z' }),
+    );
+    expect(infos).toEqual([
+      expect.objectContaining({
+        provider: 'anthropic',
+        reason: 'usage_cap',
+        kind: 'usage_cap',
+        resetAt: '2026-10-20T12:00:00.000Z',
+      }),
+    ]);
+  });
+
+  it('error and local_auth fail over without calling onProviderFailure', async () => {
+    for (const reason of ['error', 'local_auth'] as const) {
+      const { result, infos } = await runWith(new HarnessError('x', reason));
+      expect(result.model).toBe('gpt-fallback');
+      expect(infos).toEqual([]);
+    }
+  });
+
+  it('stops failover on kind other', async () => {
+    const router = new ModelRouter(
+      providerModels,
+      routes,
+      false,
+      failingExecutor(new HarnessError('x', 'schema_invalid')),
+    );
+    await expect(
+      router.run('plan', 'do it', { modelOverride: 'claude-preferred', modelFallbacks: ['gpt-fallback'] }),
+    ).rejects.toBeInstanceOf(ModelRouterError);
+  });
+
+  it('opens the breaker for kind auth even when the reason is error', async () => {
+    const { infos } = await runWith(new HarnessError('x', 'error', { kind: 'auth' }));
+    expect(infos).toEqual([expect.objectContaining({ kind: 'auth' })]);
+  });
+});

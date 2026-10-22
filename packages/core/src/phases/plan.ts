@@ -38,7 +38,7 @@ import {
   type SizeBudget,
 } from '../readiness/size.js';
 import { scoreIssueReadiness } from '../readiness/index.js';
-import type { ModelRouter, RouterResult } from '../router/index.js';
+import type { ModelRouter, ProviderFailureInfo, RouterResult } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { failoversFrom } from '../router/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
@@ -330,7 +330,7 @@ async function planPhaseImpl(opts: {
   timeoutSeconds?: number;
   modelOverride?: string;
   modelFallbacks?: string[];
-  onProviderFailure?: (info: { provider: string; reason: FailoverReason; detail?: string }) => void | Promise<void>;
+  onProviderFailure?: (info: ProviderFailureInfo) => void | Promise<void>;
   branch?: string;
   approvalGate?: ApprovalGate;
   drainSteering?: () => ConsumedSteering;

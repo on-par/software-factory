@@ -29,6 +29,9 @@ const ABSOLUTE_RESET_PATTERN =
 
 /** Longest cooldown the breaker accepts from a provider-reported reset hint (31 days),
  *  so a typo'd or hostile far-future date can't park a provider indefinitely. */
+/** Padding added to a provider-reported reset time so the breaker doesn't reopen just before the real reset. */
+export const RESET_BUFFER_MS = 2 * 60_000;
+
 export const MAX_REPORTED_COOLDOWN_MS = 31 * 24 * 60 * 60_000;
 
 /** Extracts a provider-reported reset time so the breaker can cool down for as
@@ -42,7 +45,11 @@ export const MAX_REPORTED_COOLDOWN_MS = 31 * 24 * 60 * 60_000;
  *  to its own default. `bufferMs` pads the parsed duration so the breaker
  *  doesn't reopen a few seconds before the real reset. Results are capped at
  *  MAX_REPORTED_COOLDOWN_MS. */
-export function parseResetCooldownMs(text: string, bufferMs = 2 * 60_000, now: number = Date.now()): number | null {
+export function parseResetCooldownMs(
+  text: string,
+  bufferMs = RESET_BUFFER_MS,
+  now: number = Date.now(),
+): number | null {
   const match = RESET_HINT_PATTERN.exec(text);
   if (match) {
     const hours = match[1] ? Number(match[1]) : 0;
@@ -56,6 +63,19 @@ export function parseResetCooldownMs(text: string, bufferMs = 2 * 60_000, now: n
   const resetAt = Date.parse(absolute[1]);
   if (Number.isNaN(resetAt) || resetAt <= now) return null;
   return Math.min(resetAt - now + bufferMs, MAX_REPORTED_COOLDOWN_MS);
+}
+
+/** Cooldown for a provider failure: the structured `resetAt` (ISO instant, plus the buffer) when it is a valid future
+ *  time, else the text hint in `detail`, else null so the caller uses its default (#3225). */
+export function reportedCooldownMs(
+  resetAt: string | undefined,
+  detail: string | undefined,
+  now = Date.now(),
+): number | null {
+  const resetMs = resetAt ? Date.parse(resetAt) : Number.NaN;
+  if (Number.isFinite(resetMs) && resetMs > now)
+    return Math.min(resetMs - now + RESET_BUFFER_MS, MAX_REPORTED_COOLDOWN_MS);
+  return parseResetCooldownMs(detail ?? '', RESET_BUFFER_MS, now);
 }
 
 export class ProviderBreaker {

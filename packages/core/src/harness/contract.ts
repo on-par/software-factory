@@ -5,6 +5,7 @@ import { ModelRegistry } from '../models/index.js';
 import type { CodingHarness, HarnessFailureReason, HarnessRequest } from './index.js';
 import { HarnessError } from './index.js';
 import { loadInjectionFixtures } from './injection-fixtures.js';
+import { defaultClassifyError, PROVIDER_FAILURE_KINDS } from './provider-failure.js';
 
 const HARNESS_FAILURE_REASONS: ReadonlySet<HarnessFailureReason> = new Set<HarnessFailureReason>([
   'rate_limit',
@@ -154,6 +155,22 @@ export function codingHarnessContractCases(scenarios: HarnessContractScenarios):
             assert.ok(err.message.trim().length > 0, `harness rejected with an empty message (reason=${err.reason})`),
           );
         }
+      },
+    },
+    {
+      name: 'failure classifies to a valid ProviderFailure',
+      async run() {
+        const scenario = scenarios.failure();
+        await expectHarnessError(scenario, (err) => {
+          const failure = scenario.harness.classifyError
+            ? scenario.harness.classifyError(err)
+            : defaultClassifyError(err);
+          assert.ok((PROVIDER_FAILURE_KINDS as readonly string[]).includes(failure.kind));
+          assert.ok(HARNESS_FAILURE_REASONS.has(failure.reason));
+          if (failure.resetAt !== undefined) {
+            assert.equal(new Date(failure.resetAt).toISOString(), failure.resetAt);
+          }
+        });
       },
     },
     ...injectionCases,

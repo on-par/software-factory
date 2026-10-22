@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { codingHarnessContractCases, makeContractRequest } from './contract.js';
+import type { CodingHarness } from './index.js';
 import { HarnessError } from './index.js';
+import { defaultClassifyError } from './provider-failure.js';
 import { StubCodingHarness } from './stub.js';
 
 describe('CodingHarness contract: StubCodingHarness', () => {
@@ -50,5 +52,14 @@ describe('StubCodingHarness', () => {
     const harness = new StubCodingHarness([], { id: 'fake-ollama', agentic: false });
     expect(harness.id).toBe('fake-ollama');
     expect(harness.agentic).toBe(false);
+  });
+});
+
+describe('classifyError contract case', () => {
+  it('passes a harness without classifyError through defaultClassifyError', async () => {
+    const harness = new StubCodingHarness([{ fail: 'usage_cap' }]);
+    expect((harness as CodingHarness).classifyError).toBeUndefined();
+    const err = await harness.run(makeContractRequest()).catch((e) => e);
+    expect(defaultClassifyError(err)).toMatchObject({ reason: 'usage_cap', kind: 'usage_cap' });
   });
 });
