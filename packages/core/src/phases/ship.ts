@@ -21,6 +21,7 @@ import {
   shortDetail,
   verifyRemoteHead,
 } from './ship-git.js';
+import { markPrReadyWithRetry } from './ship-ready.js';
 import { readRisk, readSpecBody } from './ship-spec.js';
 import type { CheckSummary, CiFailureEvidence } from '../types/index.js';
 import { collectCiFailureEvidence } from '../utils/ci-evidence.js';
@@ -503,21 +504,25 @@ async function shipPhaseImpl(opts: {
 
   // Mark ready for review (if draft). REST pulls.update ignores `draft`;
   // undrafting requires the markPullRequestReadyForReview GraphQL mutation.
-  try {
-    const { data: pr } = await octokit.rest.pulls.get({ owner, repo: repoName, pull_number: prNumber });
-    if (opts.draft && !pr.draft) {
-      log('ship', `PR #${prNumber} is already open and not a draft; draft mode leaves it as is`);
-    } else if (pr.draft && !opts.draft) {
-      await octokit.graphql(
-        `mutation MarkPullRequestReady($id: ID!) {
-          markPullRequestReadyForReview(input: { pullRequestId: $id }) {
-            pullRequest { isDraft }
-          }
-        }`,
-        { id: pr.node_id },
-      );
+  if (opts.draft) {
+    try {
+      const { data: pr } = await octokit.rest.pulls.get({ owner, repo: repoName, pull_number: prNumber });
+      if (!pr.draft) log('ship', `PR #${prNumber} is already open and not a draft; draft mode leaves it as is`);
+    } catch {}
+  } else {
+    const flip = await markPrReadyWithRetry(octokit, owner, repoName, prNumber);
+    if (!flip.ok) {
+      const reason = `could not mark PR #${prNumber} ready for review after one retry: ${flip.detail}`;
+      log('warn', reason);
+      return {
+        ok: false,
+        prNumber,
+        reason,
+        ...(ciOutcome === undefined ? {} : { ciOutcome }),
+        ...(headSha ? { headSha } : {}),
+      };
     }
-  } catch {}
+  }
 
   const noChecks = ciOutcome === 'no-checks' ? ' (CI skipped: no checks found)' : '';
   log('ready', `PR #${prNumber} ${opts.draft ? 'left as draft' : 'ready for review'}${noChecks}`);

@@ -65,6 +65,8 @@ export type RunLaneDeps = {
   /** Eager park-time worktree reap (#1007). Defaults to a no-op so injected-deps callers and
    *  tests are unaffected; cmdRun wires it to reapParkedLaneWorktree. */
   reapWorktree?: (issue: number) => Promise<void>;
+  /** Settles the park's PR (closes it with the park reason, keeping the branch) when a park is raised while landing; default no-op. */
+  closeParkedPr?: (issue: number, branch: string, reason: ParkReason) => Promise<void>;
   /** Between-issues worktree GC pass (#1757), run after every terminal outcome before the
    *  lane moves on. Defaults to a no-op so injected-deps callers and tests are unaffected;
    *  cmdRun wires it to sweepBetweenLaneIssues. */
@@ -118,6 +120,7 @@ export async function runLane(
     releaseIssue = async () => {},
     heartbeat,
     reapWorktree = async () => {},
+    closeParkedPr = async () => {},
     sweepFinished = async () => {},
     activeIssues = new Set<number>(),
     countRemaining,
@@ -284,6 +287,7 @@ export async function runLane(
     const layer = decision.kind === 'adopt' ? decision.stackLayer : undefined;
     const sliceOutcome: { value?: RunOutcome } = {};
     let landBranch: string | undefined;
+    let landing: string | undefined;
     try {
       const branch =
         decision.kind === 'adopt'
@@ -336,6 +340,7 @@ export async function runLane(
       }
       if (layer) {
         // ADR-0161: land exactly this layer's branch, record it, and re-queue for the next layer.
+        landing = branch;
         await withHeartbeat(issue, heartbeat, () =>
           waitMerge(issue, branch, repoRoot, ghRepo, paths, { landBranch: branch }),
         );
@@ -361,6 +366,7 @@ export async function runLane(
         await settle(issue, layer.index < layer.count ? 'queued' : 'done');
         continue;
       }
+      landing = branch;
       await withHeartbeat(issue, heartbeat, () => waitMerge(issue, branch, repoRoot, ghRepo, paths));
       merged++;
       streak = null;
@@ -465,6 +471,7 @@ export async function runLane(
       }
       // Remove the parked lane's own worktree so a parked issue stops leaving a sibling
       // checkout behind (#1007); fail-closed and never allowed to change lane flow.
+      if (landing !== undefined) await closeParkedPr(issue, landing, reason).catch(() => {});
       await reapWorktree(issue).catch(() => {});
       if (await parkAndSettle(issue, msg, parkPayload(reason, issue, lane, queuedBehind(i)))) parked++;
       if (tripped && streak) {
