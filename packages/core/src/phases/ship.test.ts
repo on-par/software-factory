@@ -362,7 +362,7 @@ describe('shipPhase self-healing', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: false });
+    expect(result).toEqual({ ok: false, reason: 'no commits ahead of origin/main' });
     expect(commands).toEqual([
       'git fetch origin main',
       'git status --porcelain',
@@ -397,9 +397,30 @@ describe('shipPhase self-healing', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: false });
+    expect(result).toEqual({ ok: false, reason: 'git push failed (unknown): remote rejected' });
     expect(logs).toContainEqual(['ship', 'git push failed (unknown): remote rejected — aborting before PR creation']);
     expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
+  });
+
+  it('returns the open-PR lookup error as the reason', async () => {
+    const { octokit } = createOctokit();
+    octokit.rest.pulls.list = async () => {
+      throw new Error('boom');
+    };
+    const logs: Array<[string, string]> = [];
+    const result = await shipPhase({
+      issue: 23,
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-23',
+      branch: 'ship-it/23-self-heal',
+      octokit: octokit as any,
+      watchCI: false,
+      log: (type, msg) => logs.push([type, msg]),
+      run: async () => ({ stdout: '' }),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('could not determine whether an open PR exists for ship-it/23-self-heal');
+    expect(logs.some(([type, msg]) => type === 'ship' && msg.includes(result.reason ?? '\0'))).toBe(true);
   });
 
   it('does not emit the ready log line or touch the PR when the push fails', async () => {
@@ -425,7 +446,7 @@ describe('shipPhase self-healing', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: false });
+    expect(result).toEqual({ ok: false, reason: expect.any(String) });
     expect(logs.map(([type]) => type)).not.toContain('ready');
     expect(logs.map(([type]) => type)).not.toContain('recovered');
     expect(logs.map(([type]) => type)).not.toContain('pr_opened');
@@ -463,7 +484,7 @@ describe('shipPhase self-healing', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: false });
+    expect(result).toEqual({ ok: false, reason: expect.any(String) });
     const shipLog = logs.find(([, msg]) => msg.startsWith('git push failed'));
     expect(shipLog?.[1]).toMatch(/^git push failed \(non-fast-forward\): ! \[rejected\]/);
     expect(shipLog?.[1]).toContain('failed to push some refs');
@@ -500,7 +521,7 @@ describe('shipPhase self-healing', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: false });
+    expect(result).toEqual({ ok: false, reason: expect.any(String) });
     const shipLog = logs.find(([, msg]) => msg.startsWith('git push failed'));
     expect(shipLog?.[1]).toContain('git push failed (network):');
     expect(shipLog?.[1]).toContain('Could not resolve host');
@@ -531,7 +552,7 @@ describe('shipPhase self-healing', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: false });
+    expect(result).toEqual({ ok: false, reason: expect.any(String) });
     expect(logs).toContainEqual(['ship', 'git push failed (unknown): boom — aborting before PR creation']);
     expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
   });
@@ -559,7 +580,7 @@ describe('shipPhase self-healing', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: false });
+    expect(result).toEqual({ ok: false, reason: expect.any(String) });
     expect(logs).toContainEqual(['ship', 'git push failed (unknown): no error output — aborting before PR creation']);
     expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
   });
@@ -592,7 +613,7 @@ describe('shipPhase self-healing', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: false });
+    expect(result).toEqual({ ok: false, reason: expect.any(String) });
     expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
     expect(
       logs.some(
@@ -695,7 +716,7 @@ describe('shipPhase self-healing', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: false });
+    expect(result).toEqual({ ok: false, reason: expect.any(String) });
     expect(logs).toContainEqual(['fail', 'Could not create or find PR for ship-it/23-self-heal']);
   });
 });
@@ -761,7 +782,7 @@ describe('shipPhase remote head verification (#735)', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: false });
+    expect(result).toEqual({ ok: false, reason: expect.any(String) });
     expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
     expect(logs).toContainEqual([
       'ship',
@@ -793,7 +814,7 @@ describe('shipPhase remote head verification (#735)', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: false });
+    expect(result).toEqual({ ok: false, reason: expect.any(String) });
     expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
     expect(
       logs.some(
@@ -824,7 +845,7 @@ describe('shipPhase remote head verification (#735)', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: false });
+    expect(result).toEqual({ ok: false, reason: expect.any(String) });
     expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
     expect(
       logs.some(([type, msg]) => type === 'ship' && msg.includes('no refs/heads/ship-it/23-self-heal on origin')),
@@ -858,7 +879,7 @@ describe('shipPhase remote head verification (#735)', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: false });
+    expect(result).toEqual({ ok: false, reason: expect.any(String) });
     expect(calls).not.toContainEqual(['pulls.create', expect.anything()]);
     expect(commands.some((c) => c.startsWith('git ls-remote'))).toBe(false);
   });
@@ -1946,10 +1967,8 @@ describe('shipPhase ambiguous-lookup fail-closed (#641)', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: false });
-    expect(
-      logs.some(([type, msg]) => type === 'ship' && msg.includes('could not determine whether it was already merged')),
-    ).toBe(true);
+    expect(result).toEqual({ ok: false, reason: expect.any(String) });
+    expect(logs.some(([type, msg]) => type === 'ship' && msg.includes('was already merged'))).toBe(true);
   });
 
   it('a proven-landed tree overrides a merged-PR lookup error', async () => {
@@ -2122,7 +2141,7 @@ describe('shipPhase pulls.create 422 already-exists recovery (#641)', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: false });
+    expect(result).toEqual({ ok: false, reason: expect.any(String) });
     expect(logs.some(([type, msg]) => type === 'ship' && msg.includes('re-querying did not find it'))).toBe(true);
   });
 });

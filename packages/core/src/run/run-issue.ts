@@ -39,7 +39,7 @@ import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
 import { classifyCheckFailure } from './check-verdict.js';
 import { withSingleTerminalEvent } from './terminal-events.js';
 import { withRunAttribution, type RunLogFn as LogFn } from './attribution.js';
-import { publishParkComment } from './park-comment.js';
+import { environmentReleaseMarker, publishParkComment, upsertMarkerComment } from './park-comment.js';
 import { createRunPhaseLogger } from './run-phase-log.js';
 import { gateOpencodeBuildOnBreaker, providerFallbackPreferrer } from './provider-breaker-gate.js';
 import { fileFlakyTests } from './flaky-tests.js';
@@ -970,13 +970,14 @@ async function runIssueOnce(
           );
         }
         if (!request.localOnly && !request.noPr) {
-          const [owner, repoName] = request.repo.split('/');
           try {
-            await ports.octokit.rest.issues.createComment({
-              owner,
-              repo: repoName,
-              issue_number: request.issue,
-              body: renderEnvironmentReleaseComment(env),
+            const marker = environmentReleaseMarker(request.issue);
+            await upsertMarkerComment({
+              octokit: ports.octokit,
+              repo: request.repo,
+              issue: request.issue,
+              marker,
+              body: `${renderEnvironmentReleaseComment(env)}\n${marker}`,
             });
           } catch (err) {
             log('environment_warning', `could not post the environment-failure comment: ${errorMessage(err)}`);

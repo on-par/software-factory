@@ -1,4 +1,5 @@
-// src/run/park-comment.ts — upsert one issue comment with the park state behind a hidden factory-issue-state marker (#2314, ADR-0130)
+// src/run/park-comment.ts — upsert one issue comment with the park state behind a hidden factory-issue-state marker (#2314, ADR-0130);
+// also upserts the environment-release comment behind its own factory-environment-release marker (#3440)
 //
 // Every runIssue park edits one comment per issue in place (#728). Anyone can post the marker, so only a
 // marker comment written by the authenticated identity is trusted (same rule as readiness/slice-plan-github.ts).
@@ -48,6 +49,10 @@ const MARKER_RE = new RegExp(`<!-- factory-issue-state ${ISSUE_STATE_MARKER_VERS
 
 export function issueStateMarker(issue: number): string {
   return `<!-- factory-issue-state ${ISSUE_STATE_MARKER_VERSION} issue:${issue} -->`;
+}
+
+export function environmentReleaseMarker(issue: number): string {
+  return `<!-- factory-environment-release ${ISSUE_STATE_MARKER_VERSION} issue:${issue} -->`;
 }
 
 const PARK_HINTS: Record<ParkReason, string> = {
@@ -187,15 +192,15 @@ export function readParkState(comments: readonly ParkStateComment[], issue?: num
   return parseStateBlock(marked[0].body);
 }
 
-/** The lowest-id marker comment written by the authenticated user, or undefined. */
-export async function findOwnParkComment(deps: {
+/** The lowest-id comment containing `marker` written by the authenticated user, or undefined. */
+export async function findOwnMarkerComment(deps: {
   octokit: Octokit;
   repo: string;
   issue: number;
+  marker: string;
 }): Promise<ParkStateComment | undefined> {
-  const { octokit, repo, issue } = deps;
+  const { octokit, repo, issue, marker } = deps;
   const [owner, name] = repo.split('/');
-  const marker = issueStateMarker(issue);
   const { data: me } = await octokit.rest.users.getAuthenticated();
   let existing: ParkStateComment | undefined;
   for (let page = 1; ; page++) {
@@ -214,6 +219,35 @@ export async function findOwnParkComment(deps: {
     if (data.length < PAGE_SIZE) break;
   }
   return existing;
+}
+
+/** The lowest-id park-state comment written by the authenticated user, or undefined. */
+export async function findOwnParkComment(deps: {
+  octokit: Octokit;
+  repo: string;
+  issue: number;
+}): Promise<ParkStateComment | undefined> {
+  return findOwnMarkerComment({ ...deps, marker: issueStateMarker(deps.issue) });
+}
+
+/** Edits the authenticated user's marker comment in place, or creates it; appends `marker` to `body` when absent. */
+export async function upsertMarkerComment(deps: {
+  octokit: Octokit;
+  repo: string;
+  issue: number;
+  marker: string;
+  body: string;
+}): Promise<{ commentId: number; created: boolean }> {
+  const { octokit, repo, issue, marker } = deps;
+  const [owner, name] = repo.split('/');
+  const body = deps.body.includes(marker) ? deps.body : `${deps.body}\n${marker}`;
+  const existing = await findOwnMarkerComment({ octokit, repo, issue, marker });
+  if (existing !== undefined) {
+    await octokit.rest.issues.updateComment({ owner, repo: name, comment_id: existing.id, body });
+    return { commentId: existing.id, created: false };
+  }
+  const { data } = await octokit.rest.issues.createComment({ owner, repo: name, issue_number: issue, body });
+  return { commentId: data.id, created: true };
 }
 
 export async function upsertParkComment(deps: {

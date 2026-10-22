@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ParkReason } from './outcome.js';
 import {
+  environmentReleaseMarker,
   findOwnParkComment,
   issueStateMarker,
   patchParkComment,
@@ -10,6 +11,7 @@ import {
   publishParkComment,
   readParkState,
   renderParkComment,
+  upsertMarkerComment,
   upsertParkComment,
   type ParkCommentInput,
 } from './park-comment.js';
@@ -364,5 +366,41 @@ describe('upsertParkComment auto-unparks counter', () => {
     const f = fakeOctokit([{ id: 1, body: issueStateMarker(7), user: { id: ME } }]);
     await upsertParkComment({ octokit: f.octokit, repo: 'o/r', input: input() });
     expect(f.store[0].body).not.toContain('auto-unparks');
+  });
+});
+
+describe('upsertMarkerComment', () => {
+  const marker = environmentReleaseMarker(7);
+
+  it('has a marker distinct from the park-state marker', () => {
+    expect(marker).toBe('<!-- factory-environment-release v1 issue:7 -->');
+    expect(marker).not.toBe(issueStateMarker(7));
+  });
+
+  it('creates when no own marker comment exists, appending a missing marker', async () => {
+    const f = fakeOctokit([{ id: 1, body: `foreign ${marker}`, user: { id: 5 } }]);
+    const result = await upsertMarkerComment({ octokit: f.octokit, repo: 'o/r', issue: 7, marker, body: 'hello' });
+    expect(result).toEqual({ commentId: 1000, created: true });
+    expect(f.updateComment).not.toHaveBeenCalled();
+    expect(f.store[1].body).toBe(`hello\n${marker}`);
+  });
+
+  it('updates the lowest-id own comment when one exists', async () => {
+    const f = fakeOctokit([
+      { id: 600, body: marker, user: { id: ME } },
+      { id: 500, body: marker, user: { id: ME } },
+    ]);
+    const body = `new\n${marker}`;
+    const result = await upsertMarkerComment({ octokit: f.octokit, repo: 'o/r', issue: 7, marker, body });
+    expect(result).toEqual({ commentId: 500, created: false });
+    expect(f.createComment).not.toHaveBeenCalled();
+    expect(f.store.find((c) => c.id === 500)?.body).toBe(body);
+  });
+
+  it('does not touch a park-state comment', async () => {
+    const f = fakeOctokit([{ id: 1, body: issueStateMarker(7), user: { id: ME } }]);
+    const result = await upsertMarkerComment({ octokit: f.octokit, repo: 'o/r', issue: 7, marker, body: 'x' });
+    expect(result.created).toBe(true);
+    expect(f.store[0].body).toBe(issueStateMarker(7));
   });
 });
