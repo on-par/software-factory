@@ -15,6 +15,7 @@ import {
   type QueueIssue,
 } from './github-queue.js';
 import { createGithubQueueBackend, type QueueBackend } from './queue-backend.js';
+import { fakeIssueComments } from './fake-issue-comments.js';
 
 const NOW_MS = 1_700_000_000_000;
 const NOW_SECONDS = Math.floor(NOW_MS / 1000);
@@ -44,6 +45,7 @@ function createFakeStore(issues: Array<{ number: number; labels: string[] }>) {
     async removeLabel({ issue_number, name }) {
       state.get(issue_number)?.delete(name);
     },
+    ...fakeIssueComments(),
     async ensureLabel() {
       return false;
     },

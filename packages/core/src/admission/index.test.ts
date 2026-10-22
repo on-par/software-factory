@@ -13,6 +13,7 @@ import {
   type AdmissionLookup,
   type QueueCompatibilityVerdict,
 } from './index.js';
+import { fakeIssueComments } from '../queue/fake-issue-comments.js';
 
 describe('classifyQueueCompatibility', () => {
   it('absent lookup is claimable', () => {
@@ -246,6 +247,7 @@ describe('withAdmissionGuard', () => {
       async removeLabel() {
         calls.push('removeLabel');
       },
+      ...fakeIssueComments(),
       async ensureLabel() {
         calls.push('ensureLabel');
         return false;

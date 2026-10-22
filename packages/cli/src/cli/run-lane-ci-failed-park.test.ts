@@ -59,6 +59,13 @@ async function runCiFailedPark(opts: { failParkedAddOnce: boolean }) {
     async removeLabel({ issue_number, name }) {
       store.get(issue_number)?.delete(name);
     },
+    async createIssueComment() {
+      return { id: 1 };
+    },
+    async listIssueComments() {
+      return [];
+    },
+    async deleteIssueComment() {},
     async ensureLabel(params) {
       if (hbArmed && params.name.startsWith(CLAIM_EXPIRES_LABEL_PREFIX)) {
         hbArmed = false;

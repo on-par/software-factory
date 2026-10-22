@@ -16,6 +16,7 @@ import {
   type QueueIssue,
 } from './github-queue.js';
 import { releaseStaleClaims } from './stale-claims.js';
+import { fakeIssueComments } from './fake-issue-comments.js';
 
 function createFakeStore(issues: Array<{ number: number; labels: string[] }>) {
   const state = new Map<number, Set<string>>(issues.map((i) => [i.number, new Set(i.labels)]));
@@ -39,6 +40,7 @@ function createFakeStore(issues: Array<{ number: number; labels: string[] }>) {
     async removeLabel({ issue_number, name }) {
       state.get(issue_number)?.delete(name);
     },
+    ...fakeIssueComments(),
     async ensureLabel() {
       return false;
     },
