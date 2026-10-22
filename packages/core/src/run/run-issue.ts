@@ -40,7 +40,7 @@ import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
 import { classifyCheckFailure } from './check-verdict.js';
 import { withSingleTerminalEvent } from './terminal-events.js';
 import { withRunAttribution, type RunLogFn as LogFn } from './attribution.js';
-import { environmentReleaseMarker, publishParkComment, upsertMarkerComment } from './park-comment.js';
+import { environmentReleaseMarker, parkPayload, publishParkComment, upsertMarkerComment } from './park-comment.js';
 import { createRunPhaseLogger } from './run-phase-log.js';
 import { gateOpencodeBuildOnBreaker, providerFallbackPreferrer } from './provider-breaker-gate.js';
 import { fileFlakyTests } from './flaky-tests.js';
@@ -115,6 +115,8 @@ export interface RunRequest {
   product?: string;
   startedAt: string;
   lane?: string;
+  /** Issues still queued behind this one on its lane, for the park payload (#3511); absent = none. */
+  blockedBehind?: number[];
   options: {
     interactive: boolean;
     autoRework: boolean;
@@ -412,7 +414,10 @@ async function runIssueOnce(
     const terminalMessage = phaseLogger.parkMessage(message);
     // A blocked park never carries a failure signature, so the ADR-0139 lane breaker and the cross-run stuck check skip it (#2315).
     const failure = reason === 'blocked' ? undefined : checkFailure;
-    log(reason, terminalMessage, parkLogExtra(failure, ciFailure));
+    log(reason, terminalMessage, {
+      ...parkLogExtra(failure, ciFailure),
+      park: parkPayload(reason, request.issue, request.lane, request.blockedBehind ?? []),
+    });
     if (reason === 'timeout') {
       log('stuck', `run exceeded its phase timeout without progressing — ${terminalMessage}`);
     }

@@ -6,6 +6,7 @@
 
 import type { Octokit } from '@octokit/rest';
 
+import type { ParkPayload } from '../events/kinds.js';
 import { fenceExcerpt, stripHiddenContent } from '../filing/sanitize.js';
 import { readWorktreeHead } from './ci-suppression-guard.js';
 import type { ParkReason } from './outcome.js';
@@ -70,6 +71,16 @@ const PARK_HINTS: Record<ParkReason, string> = {
 
 export function parkUnblockHint(reason: ParkReason, issue: number): string {
   return PARK_HINTS[reason].replaceAll('<n>', String(issue));
+}
+
+/** Structured park payload for a park event (#3511); decision is the park comment's unblock hint. */
+export function parkPayload(
+  reason: ParkReason,
+  issue: number,
+  lane: string | undefined,
+  blockedBehind: readonly number[],
+): ParkPayload {
+  return { reason, decision: parkUnblockHint(reason, issue), lane: lane ?? '', blockedBehind: [...blockedBehind] };
 }
 
 function clean(v: string): string {

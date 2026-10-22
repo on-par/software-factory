@@ -76,6 +76,11 @@
       "properties": {},
       "additionalProperties": {}
     },
+    "park": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
     "stewardTriggered": {
       "type": "object",
       "properties": {},

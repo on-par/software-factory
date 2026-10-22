@@ -1,6 +1,6 @@
 // src/run/attribution.ts — plan/build model attribution stamped on a run's terminal events (#3321).
 
-import type { EventKind, FlakyTestsPayload, StewardTriggeredPayload } from '../events/kinds.js';
+import type { EventKind, FlakyTestsPayload, ParkPayload, StewardTriggeredPayload } from '../events/kinds.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
 import type {
   CheckFailureInfo,
@@ -27,6 +27,7 @@ export type RunLogFn = (
     escalateKind?: EscalateKind;
     stewardTriggered?: StewardTriggeredPayload;
     flakyTests?: FlakyTestsPayload;
+    park?: ParkPayload;
     attribution?: RunAttribution;
   },
 ) => void;

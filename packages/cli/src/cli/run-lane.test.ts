@@ -324,7 +324,7 @@ describe('cli', () => {
       expect(events[0][1]).toBe('parked');
       expect(events[0][2]).toBe(7);
       expect(events[0][3]).toContain('(escalate)');
-      expect(events[0][4]).toEqual({ lane: 'app' });
+      expect(events[0][4]).toMatchObject({ lane: 'app' });
       expect(events.some((e) => e[1] === 'escalate')).toBe(false);
       expect(events.at(-1)).toEqual([
         'event',

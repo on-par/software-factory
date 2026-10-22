@@ -8,7 +8,13 @@ import { dirname, resolve } from 'node:path';
 
 import type { RunAttribution } from '../run/outcome.js';
 import type { EscalateKind } from '../types/index.js';
-import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
+import type {
+  EventKind,
+  FlakyTestsPayload,
+  LanePausedPayload,
+  ParkPayload,
+  StewardTriggeredPayload,
+} from '../events/kinds.js';
 import type {
   CheckFailureInfo,
   CiFailureEvidence,
@@ -42,6 +48,7 @@ export interface LogExtra {
   readiness?: ReadinessInfo;
   queueReprioritization?: QueueReprioritizationRecord;
   lanePaused?: LanePausedPayload;
+  park?: ParkPayload;
   stewardTriggered?: StewardTriggeredPayload;
   flakyTests?: FlakyTestsPayload;
   checkFailure?: CheckFailureInfo;
@@ -122,6 +129,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.readiness ? { readiness: extra.readiness } : {}),
       ...(extra?.queueReprioritization !== undefined ? { queueReprioritization: extra.queueReprioritization } : {}),
       ...(extra?.lanePaused ? { lanePaused: extra.lanePaused } : {}),
+      ...(extra?.park ? { park: extra.park } : {}),
       ...(extra?.stewardTriggered ? { stewardTriggered: extra.stewardTriggered } : {}),
       ...(extra?.flakyTests ? { flakyTests: extra.flakyTests } : {}),
       ...(extra?.checkFailure ? { checkFailure: extra.checkFailure } : {}),
