@@ -10,7 +10,9 @@ import { shellEscape } from '../utils/index.js';
 import { classifyFailure } from './classify.js';
 import type { CodingHarness, HarnessFailureReason, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
 import { HarnessError } from './index.js';
+import { classifyOpenCodeFailure } from './opencode-error.js';
 import { type OpenCodeVersionProbe, probeOpenCodeMajor } from './opencode-version.js';
+import { defaultClassifyError, type ProviderFailure } from './provider-failure.js';
 
 export type OpenCodeExecFn = ExecFn;
 
@@ -237,6 +239,30 @@ export function buildOpenCodeIsolationArgs(major: number | undefined): string {
 }
 
 /** Runs a model via the OpenCode CLI: opencode run --auto --format json [--standalone] (v2+ only) [--model <p/m>[#<effort>]] [--variant <effort>] (v1 only) < prompt-file, executed with cwd = worktree. */
+interface OpenCodeExecErrorLike {
+  killed?: unknown;
+  code?: unknown;
+  stderr?: unknown;
+  stdout?: unknown;
+}
+
+/** stderr plus the parsed stdout error text, newline-joined: the text failures are classified on. */
+function openCodeExecClassifyText(err: OpenCodeExecErrorLike): string {
+  const parsed = typeof err.stdout === 'string' ? parseOpenCodeJson(err.stdout) : undefined;
+  return [typeof err.stderr === 'string' ? err.stderr : '', parsed?.errorText ?? ''].filter(Boolean).join('\n');
+}
+
+/** Failure reason of a rejected exec: killed > typed error.type (unless exit 124) > classifyFailure. */
+export function openCodeExecFailureReason(err: OpenCodeExecErrorLike): HarnessFailureReason {
+  if (err.killed) return 'timeout';
+  const parsed = typeof err.stdout === 'string' ? parseOpenCodeJson(err.stdout) : undefined;
+  const code = typeof err.code === 'number' ? err.code : 1;
+  return (
+    (err.code === 124 ? undefined : classifyOpenCodeErrorType(parsed?.errorType)) ??
+    classifyFailure(openCodeExecClassifyText(err), code)
+  );
+}
+
 export class OpenCodeHarness implements CodingHarness {
   readonly id = 'opencode';
   readonly agentic = true;
@@ -247,8 +273,29 @@ export class OpenCodeHarness implements CodingHarness {
   constructor(
     private execFn: OpenCodeExecFn = defaultExecFn,
     versionProbe?: OpenCodeVersionProbe,
+    private now: () => number = () => Date.now(),
   ) {
     this.versionProbe = versionProbe ?? (() => probeOpenCodeMajor(this.execFn));
+  }
+
+  /** Re-classifies a thrown error; an error this harness already tagged keeps its kind and resetAt. */
+  classifyError(err: unknown): ProviderFailure {
+    if (err instanceof HarnessError && err.details.kind !== undefined) return defaultClassifyError(err);
+    const obj: Record<string, unknown> = typeof err === 'object' && err !== null ? { ...err } : {};
+    const str = (v: unknown) => (typeof v === 'string' ? v : '');
+    const details: Record<string, unknown> = err instanceof HarnessError ? err.details : {};
+    const text = [
+      str(details.diagnostic),
+      str(details.stderr),
+      str(details.stdout),
+      str(obj.stderr),
+      openCodeExecClassifyText({ stdout: obj.stdout }),
+      err instanceof Error ? err.message : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const reason = err instanceof HarnessError ? err.reason : openCodeExecFailureReason(obj);
+    return classifyOpenCodeFailure(reason, text, this.now());
   }
 
   /** Probed once per harness instance; an undefined result is cached too. */
@@ -315,10 +362,8 @@ export class OpenCodeHarness implements CodingHarness {
           const parsedErr = typeof err.stdout === 'string' ? parseOpenCodeJson(err.stdout) : undefined;
           const jsonErr = parsedErr?.errorText ?? '';
           const classifyText = [err.stderr ?? '', jsonErr].filter(Boolean).join('\n');
-          const reason = err.killed
-            ? 'timeout'
-            : ((err.code === 124 ? undefined : classifyOpenCodeErrorType(parsedErr?.errorType)) ??
-              classifyFailure(classifyText, err.code ?? 1));
+          const reason = openCodeExecFailureReason(err);
+          const failure = classifyOpenCodeFailure(reason, classifyText, this.now());
           throw new HarnessError(err.message ?? String(err), reason, {
             exitCode: typeof err.code === 'number' ? err.code : undefined,
             stderr: err.stderr,
@@ -326,6 +371,8 @@ export class OpenCodeHarness implements CodingHarness {
             signal: typeof err.signal === 'string' ? err.signal : undefined,
             killed: err.killed === true ? true : undefined,
             ...(jsonErr ? { diagnostic: jsonErr } : {}),
+            kind: failure.kind,
+            ...(failure.resetAt ? { resetAt: failure.resetAt } : {}),
           });
         }
 
@@ -353,11 +400,15 @@ export class OpenCodeHarness implements CodingHarness {
           // OpenCode can exit 0 with the session error only on stdout. Do not
           // nudge-retry into a usage cap or rate limit; let the router fail over.
           const classifyText = [stderr, parsed.errorText].filter(Boolean).join('\n');
-          throw new HarnessError(
-            `opencode run reported an error event: ${parsed.errorText.split('\n')[0]}`,
-            classifyOpenCodeErrorType(parsed.errorType) ?? classifyFailure(classifyText, 1),
-            { exitCode: 0, stderr: stderr || undefined, diagnostic: parsed.errorText },
-          );
+          const reason = classifyOpenCodeErrorType(parsed.errorType) ?? classifyFailure(classifyText, 1);
+          const failure = classifyOpenCodeFailure(reason, classifyText, this.now());
+          throw new HarnessError(`opencode run reported an error event: ${parsed.errorText.split('\n')[0]}`, reason, {
+            exitCode: 0,
+            stderr: stderr || undefined,
+            diagnostic: parsed.errorText,
+            kind: failure.kind,
+            ...(failure.resetAt ? { resetAt: failure.resetAt } : {}),
+          });
         }
       }
 

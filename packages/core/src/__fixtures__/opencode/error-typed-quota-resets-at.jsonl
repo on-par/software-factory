@@ -1,0 +1,2 @@
+{"type":"step_start","timestamp":1700000000000,"sessionID":"ses_fixture","part":{"type":"step-start"}}
+{"type":"error","timestamp":1700000000000,"sessionID":"ses_fixture","error":{"type":"provider.quota","status":402,"name":"ProviderError","data":{"message":"OpenCode Go monthly usage limit reached. Your limit resets at 2026-11-01T00:00:00Z."}}}
