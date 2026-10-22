@@ -12,6 +12,7 @@
 // ADRs shipped with these changes.
 
 import http from 'node:http';
+import { DEFAULT_FACTORYD_PORT } from '../constants.js';
 import { RunRequestError, type RunRuntime } from './run-runtime.js';
 
 import { getFactoryPaths, isPlainObject } from '../config/index.js';
@@ -31,8 +32,7 @@ import { type DaemonRunDeps, type DaemonRunExecutor, executeDaemonRun, submitDae
 import { daemonRuntimePaths } from './runtime-state.js';
 import { dirname } from 'node:path';
 
-/** Default TCP port for the foreground factoryd listener. */
-export const DEFAULT_FACTORYD_PORT = 8787;
+export { DEFAULT_FACTORYD_PORT };
 
 /** POST request body cap — requests are a couple of short strings; 64
  *  KiB is generous headroom while still bounding the read. */

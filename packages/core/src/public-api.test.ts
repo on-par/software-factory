@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import * as constantsApi from './constants.js';
 import * as publicApi from './index.js';
 import * as internalApi from './internal.js';
 import * as kpisApi from './kpis-entry.js';
@@ -829,10 +830,26 @@ describe('public API surface (ADR-0004)', () => {
     expect(Object.keys(kpisApi).sort()).toEqual([...KPIS_API_KEYS].sort());
     for (const key of KPIS_API_KEYS) expect(Object.keys(publicApi)).toContain(key);
   });
-  it('package.json declares exactly the four documented entry points', () => {
+  it('./constants exposes exactly the five light constants, equal to the ./internal values, with no imports', () => {
+    expect(Object.keys(constantsApi).sort()).toEqual(
+      [
+        'DEFAULT_FACTORYD_PORT',
+        'DEFAULT_GARDEN_MAX_CLUSTERS',
+        'DEFAULT_GARDEN_SINCE',
+        'LEGACY_BRANCH_PREFIX',
+        'STATE_ROOT_ENV',
+      ].sort(),
+    );
+    for (const [key, value] of Object.entries(constantsApi)) {
+      expect(internalApi).toHaveProperty(key, value);
+    }
+    const source = readFileSync(fileURLToPath(new URL('./constants.ts', import.meta.url)), 'utf8');
+    expect(source).not.toMatch(/^\s*import\b/m);
+  });
+  it('package.json declares exactly the five documented entry points', () => {
     const pkgPath = fileURLToPath(new URL('../package.json', import.meta.url));
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { exports: Record<string, Record<string, string>> };
-    expect(Object.keys(pkg.exports).sort()).toEqual(['.', './internal', './kpis', './testing'].sort());
+    expect(Object.keys(pkg.exports).sort()).toEqual(['.', './constants', './internal', './kpis', './testing'].sort());
     for (const entry of Object.values(pkg.exports))
       expect(Object.keys(entry).sort()).toEqual(['development', 'import', 'types']);
   });

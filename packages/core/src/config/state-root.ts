@@ -6,7 +6,9 @@ import { isAbsolute, join, resolve } from 'node:path';
 
 import { resolveRepoSlug } from '../logger/repo-slug.js';
 
-export const STATE_ROOT_ENV = 'FACTORY_STATE_ROOT';
+import { STATE_ROOT_ENV } from '../constants.js';
+
+export { STATE_ROOT_ENV };
 
 /** Maps a raw state-root value to an absolute root: unset/blank → undefined, `auto` →
  *  `<home>/.factory/<owner>/<name>` from the checkout's origin, `~`/`~/x` → under home, an

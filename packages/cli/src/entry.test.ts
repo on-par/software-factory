@@ -1,10 +1,66 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, type Mock, vi } from 'vitest';
-import { type EntryIo, readCliVersion, runEntry } from './entry.js';
+import { type EntryIo, isVersionRequest, readCliVersion, runEntry } from './entry.js';
 
-function recordingIo(): EntryIo & { error: Mock<(msg: string) => void>; exit: Mock<(code: number) => void> } {
-  return { error: vi.fn(), exit: vi.fn() };
+function recordingIo(): EntryIo & {
+  log: Mock<(msg: string) => void>;
+  error: Mock<(msg: string) => void>;
+  exit: Mock<(code: number) => void>;
+} {
+  return { log: vi.fn(), error: vi.fn(), exit: vi.fn() };
 }
+
+describe('runEntry --version fast path (#3251)', () => {
+  const run = (args: string[], cliVersion = '1.2.3', nodeVersion = 'v24.0.0') => {
+    const io = recordingIo();
+    const main = vi.fn(async () => {});
+    return runEntry(main, io, nodeVersion, cliVersion, {}, args).then(() => ({ io, main }));
+  };
+
+  it.each([['--version'], ['-V']])('%s logs the version and never calls main', async (flag) => {
+    const { io, main } = await run([flag]);
+    expect(io.log).toHaveBeenCalledWith('1.2.3');
+    expect(main).not.toHaveBeenCalled();
+    expect(io.exit).not.toHaveBeenCalled();
+  });
+
+  it.each([[['--version', 'x']], [['tui', '--version']], [[]], [['-v']], [['--VERSION']]])(
+    '%j falls through to main',
+    async (args) => {
+      const { io, main } = await run(args);
+      expect(main).toHaveBeenCalledTimes(1);
+      expect(io.log).not.toHaveBeenCalled();
+    },
+  );
+
+  it('falls through to main when the version is unreadable', async () => {
+    const { io, main } = await run(['--version'], '');
+    expect(main).toHaveBeenCalledTimes(1);
+    expect(io.log).not.toHaveBeenCalled();
+  });
+
+  it('lets the Node gate win over --version', async () => {
+    const { io, main } = await run(['--version'], '1.2.3', 'v20.11.1');
+    expect(main).not.toHaveBeenCalled();
+    expect(io.log).not.toHaveBeenCalled();
+    expect(io.error).toHaveBeenCalledTimes(1);
+    expect(io.exit).toHaveBeenCalledWith(1);
+  });
+});
+
+describe('isVersionRequest', () => {
+  it.each([
+    [['--version'], true],
+    [['-V'], true],
+    [[], false],
+    [['--version', 'extra'], false],
+    [['--state-root', '/x', '--version'], false],
+    [['-v'], false],
+    [['--VERSION'], false],
+  ])('%j -> %s', (args, expected) => {
+    expect(isVersionRequest(args)).toBe(expected);
+  });
+});
 
 describe('runEntry', () => {
   it('runs main once and does not error or exit when main resolves', async () => {

@@ -8,7 +8,6 @@ import { registerObserveCommands } from './program-observe.js';
 import { registerQueueCommands } from './program-queue.js';
 import { registerRunWorkCommands } from './program-run-work.js';
 import { registerSetupCommands } from './program-setup.js';
-import { applyStateRootOption } from './state-root.js';
 
 export function buildProgram(handlers: ProgramHandlers, deps: CliDeps): Command {
   const program = new Command();
@@ -28,6 +27,7 @@ export function buildProgram(handlers: ProgramHandlers, deps: CliDeps): Command 
     const flag = program.opts<{ stateRoot?: string }>().stateRoot;
     if (flag === undefined && !process.env.FACTORY_STATE_ROOT?.trim()) return;
     try {
+      const { applyStateRootOption } = await import('./state-root.js');
       applyStateRootOption(flag, await handlers.getRepoRoot());
     } catch (e) {
       throw new handlers.CliExitError(`factory: ${(e as Error).message}`, 2);

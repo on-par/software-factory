@@ -1,8 +1,8 @@
 // packages/cli/src/cli/program-queue.ts — registers the Queue help-group commands (#2793)
 
 import type { Command } from 'commander';
-import { BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION } from './branch-prefix.js';
 import type { ProgramHandlers } from './index.js';
+import { BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION } from './light.js';
 
 export function registerQueueCommands(program: Command, handlers: ProgramHandlers): void {
   program

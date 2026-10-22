@@ -1,12 +1,9 @@
 // packages/cli/src/cli/program-advanced.ts — registers the Advanced / experimental help-group commands (#2793)
 
 import type { Command } from 'commander';
-import { DEFAULT_FACTORYD_PORT } from '@on-par/factory-core/internal';
-import { AgentJobUsageError, cmdAgentJob } from './agent-job.js';
-import { BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION } from './branch-prefix.js';
-import { DaemonCtlError } from './daemon.js';
+import { DEFAULT_FACTORYD_PORT } from '@on-par/factory-core/constants';
 import type { CliDeps, ProgramHandlers } from './index.js';
-import { cmdSelfUpdateApply } from './self-update-apply.js';
+import { BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION } from './light.js';
 
 export function registerAdvancedCommands(program: Command, handlers: ProgramHandlers, deps: CliDeps): void {
   const hosted = program
@@ -111,7 +108,8 @@ export function registerAdvancedCommands(program: Command, handlers: ProgramHand
       handlers.cmdFactoryd(opts),
     );
   const daemonCtl = <T>(fn: () => Promise<T>) =>
-    fn().catch((err: unknown) => {
+    fn().catch(async (err: unknown) => {
+      const { DaemonCtlError } = await import('./daemon.js');
       if (err instanceof DaemonCtlError) throw new handlers.CliExitError(err.message, err.code);
       throw err;
     });
@@ -163,6 +161,7 @@ export function registerAdvancedCommands(program: Command, handlers: ProgramHand
         }
         if (opts.to !== undefined) {
           const to = opts.to;
+          const { cmdSelfUpdateApply } = await import('./self-update-apply.js');
           process.exitCode = await daemonCtl(() =>
             cmdSelfUpdateApply(
               { to, json: opts.json, dryRun: opts.dryRun, force: opts.force, restart: opts.restart },
@@ -223,6 +222,7 @@ export function registerAdvancedCommands(program: Command, handlers: ProgramHand
     .option('--repo <slug>', 'owner/repo recorded on the lease')
     .option('--issue <n>', 'Issue number recorded on the lease')
     .action(async (command: string[], opts: { kind?: string; repo?: string; issue?: string }) => {
+      const { AgentJobUsageError, cmdAgentJob } = await import('./agent-job.js');
       try {
         process.exitCode = await cmdAgentJob(command, opts);
       } catch (err) {

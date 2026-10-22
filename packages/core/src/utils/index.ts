@@ -4,6 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
+import { LEGACY_BRANCH_PREFIX } from '../constants.js';
 import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
 import type { ParkPayload } from '../events/payloads.js';
 import type { RunAttribution } from '../run/outcome.js';
@@ -428,8 +429,7 @@ export function slugify(s: string): string {
     .replace(/-$/, '');
 }
 
-/** Prefix of factory branches (`ship-it/<n>-…`) created before the default became `factory` (#1714). Still recognized, never created. */
-export const LEGACY_BRANCH_PREFIX = 'ship-it';
+export { LEGACY_BRANCH_PREFIX };
 
 export function branchPrefixSlug(prefix?: string): string {
   return slugify(prefix || LEGACY_BRANCH_PREFIX) || LEGACY_BRANCH_PREFIX;

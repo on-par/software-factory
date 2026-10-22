@@ -438,7 +438,12 @@ describe('garden report is read-only and handles empty input (#2088)', () => {
   it('harvest.ts imports only local, read-only modules', () => {
     const src = readFileSync(fileURLToPath(new URL('./harvest.ts', import.meta.url)), 'utf-8');
     const specifiers = [...src.matchAll(/^\s*import\s[^;]*?from\s+'([^']+)'/gm)].map((m) => m[1]);
-    expect([...new Set(specifiers)].sort()).toEqual(['../events/kinds.js', '../types/index.js', 'node:fs']);
+    expect([...new Set(specifiers)].sort()).toEqual([
+      '../constants.js',
+      '../events/kinds.js',
+      '../types/index.js',
+      'node:fs',
+    ]);
     expect(src).not.toMatch(/fetch\(/);
     expect(src).not.toMatch(/octokit/i);
   });

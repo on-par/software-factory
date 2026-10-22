@@ -2,6 +2,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 
+import { DEFAULT_GARDEN_MAX_CLUSTERS, DEFAULT_GARDEN_SINCE } from '../constants.js';
 import { eventTraitsFor, isParkKind } from '../events/kinds.js';
 import type { FactoryEvent } from '../types/index.js';
 
@@ -219,8 +220,7 @@ export interface GardenReportMeta {
   maxClusters: number;
 }
 
-export const DEFAULT_GARDEN_SINCE = '14d';
-export const DEFAULT_GARDEN_MAX_CLUSTERS = 10;
+export { DEFAULT_GARDEN_SINCE, DEFAULT_GARDEN_MAX_CLUSTERS };
 
 const DURATION_UNIT_MS = { h: 3_600_000, d: 86_400_000, w: 604_800_000 } as const;
 

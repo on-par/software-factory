@@ -1,12 +1,10 @@
 // packages/cli/src/cli/program-observe.ts — registers the Observe help-group commands (#2793)
 
 import type { Command } from 'commander';
-import { getFactoryPaths } from '@on-par/factory-core';
-import { DEFAULT_GARDEN_MAX_CLUSTERS, DEFAULT_GARDEN_SINCE } from '@on-par/factory-core/internal';
-import { runTui } from '@on-par/factory-tui';
-import { BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION } from './branch-prefix.js';
+import { DEFAULT_GARDEN_MAX_CLUSTERS, DEFAULT_GARDEN_SINCE } from '@on-par/factory-core/constants';
 import type { ClassifierBacktestOptions } from './classifier-backtest.js';
 import type { CliDeps, ProgramHandlers } from './index.js';
+import { BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION } from './light.js';
 
 export function registerObserveCommands(program: Command, handlers: ProgramHandlers, deps: CliDeps): void {
   program
@@ -119,7 +117,7 @@ export function registerObserveCommands(program: Command, handlers: ProgramHandl
     .command('tui')
     .description('Live read-only view of the current run (q to quit)')
     .option('--local-queue', 'Read .factory/queue instead of claiming issues from GitHub Issues')
-    .action((opts: { localQueue?: boolean }) => handlers.cmdTui(opts, deps.runTui ?? runTui));
+    .action((opts: { localQueue?: boolean }) => handlers.cmdTui(opts, deps.runTui));
 
   program
     .command('logs')
@@ -135,6 +133,7 @@ export function registerObserveCommands(program: Command, handlers: ProgramHandl
     )
     .option('--since <cursor>', 'Only events after this cursor (the "cursor" field of a previous --json line)')
     .action(async (opts: { follow?: boolean; json?: boolean; issue?: string; limit?: string; since?: string }) => {
+      const { getFactoryPaths } = await import('@on-par/factory-core');
       const repoRoot = await handlers.getRepoRoot();
       const paths = getFactoryPaths(repoRoot);
       const { limit, ...rest } = opts;
