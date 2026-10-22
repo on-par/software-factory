@@ -5,6 +5,7 @@ import { parse } from 'yaml';
 
 interface Step {
   name?: string;
+  if?: string;
   run?: string;
   env?: Record<string, string>;
 }
@@ -54,6 +55,13 @@ describe('.github/workflows/ci.yml', () => {
     expect(ciRuns).toContain('npm run test -- --merge-reports=vitest-blob');
     expect(ciRuns).toContain('npm run coverage-ratchet');
     expect(JSON.stringify(jobs['ci'])).not.toContain('FACTORY_COVERAGE_SHARD');
+  });
+
+  it('runs the max-lines baseline guard on pull requests in the static job (#3466)', () => {
+    const step = jobs['static']?.steps.find((s) => s.run?.includes('scripts/max-lines-baseline-guard.ts --base'));
+    expect(step?.if).toBe("github.event_name == 'pull_request'");
+    expect(step?.env).toHaveProperty('GH_TOKEN');
+    expect(step?.env).toHaveProperty('MAX_LINES_BOT_LOGINS');
   });
 
   it('caps every job with timeout-minutes (#755)', () => {

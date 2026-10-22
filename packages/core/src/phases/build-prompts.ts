@@ -2,6 +2,7 @@
 
 import type { LintCommand } from '../checkers/index.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE } from '../utils/untrusted-input.js';
+import { MAX_LINES_OVERRIDE_RULE } from '../run/max-lines-override.js';
 import { READ_BEFORE_EDIT_RULE } from './build-lint-rules.js';
 
 export function buildLocalSmallPrompt(opts: { issue: number; branch: string; spec: string }): string {
@@ -66,6 +67,7 @@ ${previousAttempt ? `${previousAttempt}\n\n` : ''}## Rules
 - ${READ_BEFORE_EDIT_RULE}
 - Match the surrounding code style. Add or update the tests in the spec's Tests section.
 - ${verifyRule(lintCommands)}
+- ${MAX_LINES_OVERRIDE_RULE}
 - Commit atomically: one commit per independently testable functional change, with a clear conventional message. Never mix unrelated functional changes in one commit. A single-slice task yields exactly ONE commit.
 - Do NOT push, do NOT open a pull request, do NOT merge. CHECK and SHIP run next.
 - If something is genuinely ambiguous, print a line starting exactly with "ESCALATE:" followed by the question, then stop. If you are stuck, commit what safely builds and passes, say what is blocked in the commit message, and stop.
@@ -99,6 +101,7 @@ ${UNTRUSTED_ISSUE_BODY_NOTICE}
 
 ${previousAttempt ? `${previousAttempt}\n\n` : ''}- ${READ_BEFORE_EDIT_RULE}
 - ${verifyRule(lintCommands)}
+- ${MAX_LINES_OVERRIDE_RULE}
 - Commit atomically: one commit per independently testable functional change, with a clear conventional message. Never mix unrelated functional changes in one commit.
 - Do NOT merge (the factory merges). Your session ends when you end your turn, so do not stop until: (1) branch ${branch} is pushed, (2) an open PR exists with 'Closes #${issue}' in its body, ${skipCI ? '(3) local verify passes (CI is intentionally skipped: do not block on GitHub Actions CI or escalate if CI cannot run), (4) the PR is ready.' : '(3) CI is green, (4) the PR is ready.'}
 - If and only if something is genuinely ambiguous, print a line starting exactly with "ESCALATE:" followed by the question, then stop.

@@ -49,6 +49,15 @@ jobs:
           CLI_JSON_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: npx tsx scripts/check-cli-json-contract.ts --base "$CLI_JSON_BASE_SHA"
 
+      - name: Max-lines baseline guard
+        if: github.event_name == 'pull_request'
+        env:
+          MAX_LINES_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MAX_LINES_PR_NUMBER: ${{ github.event.pull_request.number }}
+          MAX_LINES_BOT_LOGINS: ${{ vars.FACTORY_BOT_LOGINS }}
+          GH_TOKEN: ${{ github.token }}
+        run: npx tsx scripts/max-lines-baseline-guard.ts --base "$MAX_LINES_BASE_SHA" --pr "$MAX_LINES_PR_NUMBER"
+
       - name: Oxlint plugin version guard
         run: bash scripts/check-oxlint-plugin-version.sh
 

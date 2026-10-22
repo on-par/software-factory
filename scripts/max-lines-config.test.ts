@@ -117,4 +117,13 @@ describe('max-lines lint guard (#2776, #2777, #2778)', () => {
     expect(doc).toContain('### Baseline file grew');
     expect(doc).toContain('### Baseline file shrank or was deleted');
   });
+
+  it('documents the human override under the max-lines guard (#3466)', () => {
+    const doc = readFileSync(resolve(REPO_ROOT, '.claude/skills/verify/SKILL.md'), 'utf8');
+    const start = doc.indexOf('## Max-lines guard');
+    const end = doc.indexOf('\n## ', start + 1);
+    const section = doc.slice(start, end);
+    expect(section).toContain('### Human override');
+    expect(section.slice(section.indexOf('### Human override'))).toContain('max-lines:override');
+  });
 });
