@@ -15,6 +15,7 @@ import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
+import { parkUnblockHint } from './park-comment.js';
 import type { Workspace } from './ports.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
@@ -212,6 +213,35 @@ describe('runIssue — issue park comment (#2314)', () => {
     await runIssue({ ...request, localOnly: true }, overBudget, parkingPorts(vi.fn<Log>(), octokit));
     expect(createComment).not.toHaveBeenCalled();
     expect(getAuthenticated).not.toHaveBeenCalled();
+  });
+
+  it('terminalParked logs a structured park payload with reason, decision, lane and blockedBehind (#3511)', async () => {
+    const log = vi.fn<Log>();
+    const outcome = await runIssue(
+      { ...request, lane: 'app', blockedBehind: [2, 3] },
+      overBudget,
+      parkingPorts(log, commentOctokit().octokit),
+    );
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
+    expect(log).toHaveBeenCalledWith(
+      'fail',
+      expect.any(String),
+      expect.objectContaining({
+        park: { reason: 'fail', decision: parkUnblockHint('fail', 1), lane: 'app', blockedBehind: [2, 3] },
+      }),
+    );
+  });
+
+  it("defaults the park payload lane to '' and blockedBehind to [] when the request has neither (#3511)", async () => {
+    const log = vi.fn<Log>();
+    await runIssue(request, overBudget, parkingPorts(log, commentOctokit().octokit));
+    expect(log).toHaveBeenCalledWith(
+      'fail',
+      expect.any(String),
+      expect.objectContaining({
+        park: { reason: 'fail', decision: parkUnblockHint('fail', 1), lane: '', blockedBehind: [] },
+      }),
+    );
   });
 
   it('parks blocked with no failure signature when a phase throws a blocked marker (#2315)', async () => {

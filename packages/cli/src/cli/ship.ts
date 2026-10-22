@@ -106,6 +106,8 @@ export async function shipIssue(
     /** Resolved factory state paths, supplied by daemon lanes with an external state root. */
     paths?: ReturnType<typeof getFactoryPaths>;
     lane?: string;
+    /** Issues still queued behind this one on its lane, for the park payload (#3511). */
+    blockedBehind?: number[];
     workRequest?: WorkRequest;
     /** Receives the core RunOutcome before shipIssue maps it to a return/throw — lets
      *  `run-issue --run-children` read the PR number as data (#1747). */

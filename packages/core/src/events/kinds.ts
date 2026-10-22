@@ -8,7 +8,7 @@
 
 import type { LogLevel } from '../types/index.js';
 
-export type { FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from './payloads.js';
+export type { FlakyTestsPayload, LanePausedPayload, ParkPayload, StewardTriggeredPayload } from './payloads.js';
 
 export type EventKind =
   | 'pr-adopt-ambiguous'

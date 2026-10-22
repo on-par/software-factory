@@ -1,6 +1,18 @@
 // src/events/payloads.ts — structured payloads carried by specific EventKinds, split from kinds.ts
 
+import type { ParkReason } from '../run/outcome.js';
 import type { StuckTrigger } from '../steward/detect.js';
+
+/** Payload of a park event (#3511): why the issue parked, what a human must do, and what waits behind it. */
+export interface ParkPayload {
+  reason: ParkReason;
+  /** parkUnblockHint(reason, issue): the same text as the park comment's "What unblocks this" line. */
+  decision: string;
+  /** Lane the issue parked on; '' when the run had no lane. */
+  lane: string;
+  /** Issue numbers still queued behind the parked issue on this lane, in order. */
+  blockedBehind: number[];
+}
 
 /** Payload of a `lane-paused` event. Two triggers: the lane circuit breaker
  *  (#1906/#1916) stopped `lane` after `firstIssue` and then `secondIssue` parked in

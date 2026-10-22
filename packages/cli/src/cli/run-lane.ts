@@ -3,8 +3,8 @@
 import { existsSync } from 'node:fs';
 
 import { parkReasonFor } from '@on-par/factory-core';
-import type { LanePausedPayload, getFactoryPaths, RunOutcome } from '@on-par/factory-core';
-import { formatLoadHold, logEvent, PARKED_LABEL } from '@on-par/factory-core/internal';
+import type { LanePausedPayload, getFactoryPaths, ParkPayload, RunOutcome } from '@on-par/factory-core';
+import { formatLoadHold, logEvent, PARKED_LABEL, parkPayload } from '@on-par/factory-core/internal';
 import type {
   LoadGuardDecision,
   QueueClaim,
@@ -17,6 +17,7 @@ import { waitForMerge } from './land.js';
 import { AwaitingReviewError } from './land-pr.js';
 import { releaseKeepOnRequeue } from './worktree-keep.js';
 import { shipIssue } from './ship.js';
+import { withHeartbeat } from './lane-heartbeat.js';
 import { shipRuntime } from './ship-runtime.js';
 
 export type RunLaneDeps = {
@@ -35,6 +36,8 @@ export type RunLaneDeps = {
       ghRepo: string;
       paths: ReturnType<typeof getFactoryPaths>;
       lane?: string;
+      /** Issues still pending behind this one on the lane, for the park payload (#3511). */
+      blockedBehind?: number[];
       onOutcome?: (outcome: RunOutcome) => void;
     },
   ) => Promise<string>;
@@ -74,43 +77,6 @@ export type RunLaneDeps = {
   /** Injectable clock for the logged retry time. Default: () => new Date(). */
   now?: () => Date;
 };
-
-/** How often an in-flight issue's claim lease is refreshed (#1500). Well inside the
- *  15-minute default lease (github-queue.ts's DEFAULT_CLAIM_LEASE_MS) so a normal poll
- *  cadence never lets the lease lapse mid-ship. */
-const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
-
-/** Runs `work` while periodically calling `heartbeat(issue)` so a long-running ship or
- *  merge wait keeps this claimant's lease fresh. A heartbeat failure is swallowed — losing
- *  one refresh must never abort the work it is protecting. Before returning or rethrowing, the
- *  timer is cleared and any in-flight tick is awaited, so no heartbeat write overlaps the
- *  caller's release of the claim (#3423). */
-async function withHeartbeat<T>(
-  issue: number,
-  heartbeat: ((issue: number) => Promise<unknown>) | undefined,
-  work: () => Promise<T>,
-): Promise<T> {
-  if (!heartbeat) return work();
-  let inFlight: Promise<void> | undefined;
-  const timer = setInterval(() => {
-    if (inFlight) return;
-    inFlight = Promise.resolve()
-      .then(() => heartbeat(issue))
-      .then(
-        () => {},
-        () => {},
-      )
-      .finally(() => {
-        inFlight = undefined;
-      });
-  }, HEARTBEAT_INTERVAL_MS);
-  try {
-    return await work();
-  } finally {
-    clearInterval(timer);
-    await inFlight;
-  }
-}
 
 export function renderLanePausedComment(payload: LanePausedPayload): string {
   const checks = payload.failingChecks.length
@@ -161,6 +127,8 @@ export async function runLane(
   let parked = 0;
   const buildClaim = (issue: number): QueueClaim => ({ issue, decision: { kind: 'build' } });
   const pending: QueueClaim[] = issues.map(buildClaim);
+  // Issues still pending on this lane after `index`, in queue order (#3511).
+  const queuedBehind = (index: number): number[] => pending.slice(index + 1).map((c) => c.issue);
   const seen = new Set(issues);
   // Truthful park-time remaining count (#1222): local pending plus the lane's still-queued
   // remote issues. Fail-closed — a count lookup may never change the message beyond the
@@ -186,7 +154,7 @@ export async function runLane(
   };
   // A parked release adds factory:parked (#3424). Log the clean park only once the label
   // landed; a rejected add is surfaced as a fail event naming the issue and label (#3425).
-  const parkAndSettle = async (issue: number, parkedMsg: string): Promise<boolean> => {
+  const parkAndSettle = async (issue: number, parkedMsg: string, park: ParkPayload): Promise<boolean> => {
     activeIssues.delete(issue);
     try {
       await releaseIssue(issue, 'parked');
@@ -201,7 +169,7 @@ export async function runLane(
       await sweepFinished(issue).catch(() => {});
       return false;
     }
-    emitEvent(paths.events, 'parked', issue, parkedMsg, { lane });
+    emitEvent(paths.events, 'parked', issue, parkedMsg, { lane, park });
     await sweepFinished(issue).catch(() => {});
     return true;
   };
@@ -256,7 +224,7 @@ export async function runLane(
       // A preflight-parked issue may still have a stale worktree from a prior run; the reap
       // is fail-closed and must never change lane flow.
       await reapWorktree(issue).catch(() => {});
-      if (await parkAndSettle(issue, msg)) parked++;
+      if (await parkAndSettle(issue, msg, parkPayload('escalate', issue, lane, queuedBehind(i)))) parked++;
       streak = null;
     };
     const runRestack = async (merged: {
@@ -307,6 +275,7 @@ export async function runLane(
                   ghRepo,
                   paths,
                   lane,
+                  blockedBehind: queuedBehind(i),
                   onOutcome: (o) => {
                     sliceOutcome.value = o;
                   },
@@ -465,7 +434,7 @@ export async function runLane(
       // Remove the parked lane's own worktree so a parked issue stops leaving a sibling
       // checkout behind (#1007); fail-closed and never allowed to change lane flow.
       await reapWorktree(issue).catch(() => {});
-      if (await parkAndSettle(issue, msg)) parked++;
+      if (await parkAndSettle(issue, msg, parkPayload(reason, issue, lane, queuedBehind(i)))) parked++;
       if (tripped && streak) {
         const { signature: tripSignature, firstIssue, failingChecks: firstChecks } = streak;
         const payload: LanePausedPayload = {

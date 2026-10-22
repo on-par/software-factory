@@ -290,6 +290,7 @@ export interface RunRequestInput {
   lane: string | undefined;
   opts: { interactive?: boolean; sandbox?: boolean; pr?: boolean };
   ctx?: {
+    blockedBehind?: number[];
     workSource?: { kind: WorkRequestSourceKind; params: unknown };
     localOnly?: LocalOnlyPolicy;
     resumeFrom?: CheckResumeRecord;
@@ -352,6 +353,7 @@ export function buildRunRequest({
     product,
     startedAt: runStartedAt,
     lane,
+    blockedBehind: ctx?.blockedBehind,
     options: {
       interactive: Boolean(opts.interactive),
       autoRework,

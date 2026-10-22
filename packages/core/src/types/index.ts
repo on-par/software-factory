@@ -1,6 +1,13 @@
 // src/types/index.ts — Core type definitions for the Software Factory
-import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
+import type {
+  EventKind,
+  FlakyTestsPayload,
+  LanePausedPayload,
+  ParkPayload,
+  StewardTriggeredPayload,
+} from '../events/kinds.js';
 import type { RunAttribution } from '../run/outcome.js';
+import type { CiFailureEvidence } from './ci-evidence.js';
 import type { SteerEvent } from '../run/steer.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
 import type { EvidencePlanResult } from '../checkers/evidence-plan.js';
@@ -235,66 +242,16 @@ export type ReworkCauseTag = 'merge-conflict' | 'checker-failure' | 'other';
  *  from the GitHub API at report time by reconstructHumanEvents(). */
 export type HumanEventType = 'human-approved' | 'human-edited' | 'human-restarted' | 'human-merged' | 'human-abandoned';
 
+export type {
+  CiAttribution,
+  CiAttributionItem,
+  CiCodeScanningAlert,
+  CiFailingCheck,
+  CiFailureEvidence,
+  CiSuppressionFinding,
+} from './ci-evidence.js';
+
 /** CHECK failure that caused a park, carried on the park event (#2083). */
-/** One failing CI check run in CiFailureEvidence (#2814). */
-export interface CiFailingCheck {
-  name: string;
-  conclusion: string;
-  summary?: string;
-}
-
-/** One open code-scanning alert on the PR head (#2814). `location` is "path:line" (or "path" without a line). */
-export interface CiCodeScanningAlert {
-  ruleId: string;
-  location: string;
-  message: string;
-}
-
-/** One CI-failure item's attribution to the PR (#2817). */
-export interface CiAttributionItem {
-  kind: 'codeql-alert' | 'check';
-  /** Alert: "ruleId at path:line"; check: the check name. */
-  ref: string;
-  attributable: boolean;
-  /** e.g. 'file changed by this PR', 'also failing on base main@abc123def456', 'base checks unavailable'. */
-  reason: string;
-}
-
-/** Attribution of a SHIP CI failure (#2817). baseline = no item is attributable to the PR. */
-export interface CiAttribution {
-  baseline: boolean;
-  baseRef?: string;
-  baseSha?: string;
-  items: CiAttributionItem[];
-}
-
-/** One suppression-guard hit in a SHIP CI rework diff (#2818). */
-export interface CiSuppressionFinding {
-  kind: 'comment' | 'path';
-  /** e.g. 'codeql-comment', 'lgtm-comment', 'nosec-comment', 'eslint-disable-security', 'workflow-path', 'codeql-path', 'sarif-path', 'guard-error'. */
-  rule: string;
-  /** Repo-relative path, '(unknown)' when the diff had no file header. */
-  file: string;
-  /** New-file line number for comment hits, when the hunk header gave one. */
-  line?: number;
-  /** The offending added line (trimmed, max 200 chars) or the touched path. */
-  match: string;
-}
-
-/** Bounded CI-failure evidence carried on a SHIP ci-failed park event (#2814). */
-export interface CiFailureEvidence {
-  failingChecks: CiFailingCheck[];
-  alerts: CiCodeScanningAlert[];
-  /** True when checks/alerts were dropped past the caps or a text field was cut. */
-  truncated: boolean;
-  /** Best-effort collection errors ("checks: …", "code-scanning: …"); omitted when none. */
-  errors?: string[];
-  /** Which failing items the PR caused versus baseline failures (#2817). */
-  attribution?: CiAttribution;
-  /** Suppression-guard hits that parked a CI rework round (#2818). */
-  suppressionAttempt?: CiSuppressionFinding[];
-}
-
 export interface CheckFailureInfo {
   /** `stuckSignature()` of the final CHECK, the same string as RunOutcome.failureSignature. */
   signature: string;
@@ -373,6 +330,7 @@ export interface FactoryEvent {
   readiness?: ReadinessInfo;
   queueReprioritization?: QueueReprioritizationRecord;
   prClassification?: PrClassificationRecord;
+  park?: ParkPayload; // Structured park reason/decision/lane/queue on a park event (#3511).
   lanePaused?: LanePausedPayload; // Breaker details on a `lane-paused` event (#1916).
   stewardTriggered?: StewardTriggeredPayload; // Trigger details on a steward-triggered event (#2086).
   attribution?: RunAttribution; // Plan/build model, provider, effort on a run's terminal events (#3321).

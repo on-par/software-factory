@@ -278,6 +278,7 @@ export type {
   FlakyTestsPayload,
   LanePausedPayload,
   LaneStatus,
+  ParkPayload,
   StewardTriggeredPayload,
 } from './events/kinds.js';
 export {

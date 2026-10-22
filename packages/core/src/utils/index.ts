@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
 import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
+import type { ParkPayload } from '../events/payloads.js';
 import type { RunAttribution } from '../run/outcome.js';
 import { createLogger } from '../logger/index.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
@@ -46,6 +47,7 @@ export function logEvent(
     readiness?: ReadinessInfo;
     prClassification?: PrClassificationRecord;
     lanePaused?: LanePausedPayload;
+    park?: ParkPayload;
     stewardTriggered?: StewardTriggeredPayload;
     flakyTests?: FlakyTestsPayload;
     checkFailure?: CheckFailureInfo;
@@ -68,6 +70,7 @@ export function logEvent(
   if (extra?.readiness) meta.readiness = extra.readiness;
   if (extra?.prClassification) meta.prClassification = extra.prClassification;
   if (extra?.lanePaused) meta.lanePaused = extra.lanePaused;
+  if (extra?.park) meta.park = extra.park;
   if (extra?.stewardTriggered) meta.stewardTriggered = extra.stewardTriggered;
   if (extra?.flakyTests) meta.flakyTests = extra.flakyTests;
   if (extra?.checkFailure) meta.checkFailure = extra.checkFailure;

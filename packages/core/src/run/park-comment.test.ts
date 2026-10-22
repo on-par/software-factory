@@ -7,6 +7,7 @@ import {
   findOwnParkComment,
   issueStateMarker,
   patchParkComment,
+  parkPayload,
   parkUnblockHint,
   publishParkComment,
   readParkState,
@@ -85,6 +86,24 @@ describe('parkUnblockHint', () => {
     expect(hint).not.toContain('\n');
     expect(hint).toContain('42');
     expect(hint).not.toContain('<n>');
+  });
+});
+
+describe('parkPayload (#3511)', () => {
+  it('carries the reason, the unblock hint as decision, the lane and a copy of blockedBehind', () => {
+    const behind = [8, 9];
+    const payload = parkPayload('escalate', 7, 'app', behind);
+    expect(payload).toEqual({
+      reason: 'escalate',
+      decision: parkUnblockHint('escalate', 7),
+      lane: 'app',
+      blockedBehind: [8, 9],
+    });
+    expect(payload.blockedBehind).not.toBe(behind);
+  });
+
+  it("defaults the lane to ''", () => {
+    expect(parkPayload('fail', 3, undefined, []).lane).toBe('');
   });
 });
 

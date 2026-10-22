@@ -79,6 +79,7 @@ export const logsLineJsonSchema = z.object({
   queueReprioritization: loosePayloadSchema.optional(),
   prClassification: loosePayloadSchema.optional(),
   lanePaused: loosePayloadSchema.optional(),
+  park: loosePayloadSchema.optional(),
   stewardTriggered: loosePayloadSchema.optional(),
   flakyTests: loosePayloadSchema.optional(),
   attribution: loosePayloadSchema.optional(),

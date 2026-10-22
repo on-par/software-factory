@@ -631,9 +631,9 @@ export type {
   ReviewFloorRuleSet,
 } from './review/floor.js';
 export { computeReviewFloor, DEFAULT_REVIEW_FLOOR_RULES } from './review/floor.js';
-
 export * from './review/risk.js'; // Risk tier (#3380, #3381)
 export * from './review/risk-receipt.js'; // Risk receipt (#3386)
+export { parkPayload, parkUnblockHint } from './run/park-comment.js';
 export { listPrChangedFiles } from './run/ci-rework.js';
 // PR classifier shadow verdict (#1725)
 export type { PrClassificationRecord, PrClassifierClaim, PrShadowInput, PrShadowVerdict } from './review/classifier.js';
