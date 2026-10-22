@@ -258,8 +258,8 @@ describe('README update and setup text', () => {
     expect({ root: updatingProblems(rootReadme), cli: updatingProblems(cliReadme) }).toEqual({ root: [], cli: [] });
   });
 
-  it('Linux Quick start says to install firejail first and why', () => {
-    expect(linuxFirejailProblems(section(rootReadme, '## Quick start'))).toEqual([]);
+  it('Linux setup says to install firejail first and why', () => {
+    expect(linuxFirejailProblems(section(agentsGuide, '## Codex'))).toEqual([]);
     expect(linuxFirejailProblems(section(cliReadme, '## Install'))).toEqual([]);
   });
 
@@ -378,18 +378,6 @@ function quickStartAgentParityProblems(readme: string, agents: string[]): string
   return missing.length === agents.length ? [] : missing.map((a) => `missing ### Use ${a}`);
 }
 
-function claudeCodeSubsectionProblems(readme: string): string[] {
-  const lines = (section(readme, '## Quick start') ?? '').split('\n');
-  const start = lines.indexOf('### Use Claude Code');
-  if (start < 0) return ['missing ### Use Claude Code'];
-  const rest = lines.slice(start + 1);
-  const end = rest.findIndex((l) => l.startsWith('### ') || l.startsWith('## '));
-  const block = (end < 0 ? rest : rest.slice(0, end)).join('\n');
-  return ['/login', 'ANTHROPIC_API_KEY', 'factory doctor', '](docs/agents.md)']
-    .filter((needle) => !block.includes(needle))
-    .map((needle) => `Use Claude Code does not mention ${needle}`);
-}
-
 describe('README Quick start agent parity', () => {
   it('every supported coding agent in docs/agents.md has a Use <Agent> Quick start subsection when any does', () => {
     const agents = supportedCodingAgents(agentsGuide);
@@ -397,8 +385,9 @@ describe('README Quick start agent parity', () => {
     expect(quickStartAgentParityProblems(rootReadme, agents)).toEqual([]);
   });
 
-  it('Use Claude Code subsection names /login, ANTHROPIC_API_KEY, factory doctor and links docs/agents.md', () => {
-    expect(claudeCodeSubsectionProblems(rootReadme)).toEqual([]);
+  it('docs/agents.md Claude Code section names /login, ANTHROPIC_API_KEY and factory doctor', () => {
+    const claude = section(agentsGuide, '## Claude Code') ?? '';
+    for (const needle of ['/login', 'ANTHROPIC_API_KEY', 'factory doctor']) expect(claude).toContain(needle);
   });
 });
 
@@ -433,17 +422,6 @@ describe('README Quick start agent parity guard self-test', () => {
     expect(quickStartAgentParityProblems('## Quick start\n', [])).toEqual([
       'no supported coding agents found in docs/agents.md',
     ]);
-  });
-
-  it('rejects a Use Claude Code subsection with no login or doctor check', () => {
-    const readme = '## Quick start\n\n### Use Claude Code\n\nInstall it.\n\n### Safety\n\n`/login`';
-    expect(claudeCodeSubsectionProblems(readme)).toEqual([
-      'Use Claude Code does not mention /login',
-      'Use Claude Code does not mention ANTHROPIC_API_KEY',
-      'Use Claude Code does not mention factory doctor',
-      'Use Claude Code does not mention ](docs/agents.md)',
-    ]);
-    expect(claudeCodeSubsectionProblems('## Quick start\n')).toEqual(['missing ### Use Claude Code']);
   });
 });
 

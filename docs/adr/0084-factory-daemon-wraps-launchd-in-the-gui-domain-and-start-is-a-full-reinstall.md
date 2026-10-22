@@ -14,6 +14,10 @@ not idempotent, and operators migrating incrementally still have other
 repos on the legacy cron relaunch script, so nothing may assume the
 daemon owns every repo on the machine.
 
+> Note (2026-10-22, #1568): the login-keychain constraint applies only to Claude subscription logins on macOS.
+> Workers using `ANTHROPIC_API_KEY`, another provider, or a non-macOS host do not need it. See the optional
+> recipe in [macos-keychain-launchagent.md](../runbooks/macos-keychain-launchagent.md).
+
 ## Decision
 
 `factory daemon start` always performs a full reinstall: it regenerates
