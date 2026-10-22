@@ -18,5 +18,5 @@
       "path": "../repo-context/tsconfig.build.json"
     }
   ],
-  "exclude": ["dist", "node_modules", "src/**/*.test.ts", "src/test-support/**"]
+  "exclude": ["dist", "node_modules", "src/**/*.test.ts", "src/test-support/**", "src/**/test-support/**"]
 }

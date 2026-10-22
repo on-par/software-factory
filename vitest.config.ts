@@ -101,6 +101,8 @@ export default defineConfig({
         // integration suites; it is scaffolding, not product code, and its fake
         // branches would only dilute the gate.
         'packages/core/src/test-support/**',
+        // Test-only multi-claimant queue simulator (#3150); scaffolding, not product code.
+        'packages/core/src/queue/test-support/**',
         // Test-only shipIssue harness for the cli ship*.test.ts suites (#2789).
         'packages/cli/src/**/test-support/**',
       ],
