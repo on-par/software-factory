@@ -307,7 +307,7 @@ function runtimeNamespace(): Node[] {
       key: 'run',
       doc:
         'Merge policy. `factory run` and `supervise` read `auto`; `factory land` reads `admin`. ' +
-        '`factory ship` and `run-issue` always stop at a ready-for-review PR.',
+        '`factory ship` and `run-issue` stop at a ready-for-review PR unless `pr.draft` / `--draft-pr` is set.',
       children: [
         {
           kind: 'object',
@@ -329,6 +329,18 @@ function runtimeNamespace(): Node[] {
               kind: 'unset',
               key: 'classifier',
               doc: 'Hold PRs whose review floor is B or C (or cannot be computed) for a human by applying no-auto-merge. Unset: FACTORY_PR_CLASSIFIER=1. --pr-classifier / --no-pr-classifier beat all.',
+              example: 'false',
+            },
+          ],
+        },
+        {
+          kind: 'object',
+          key: 'pr',
+          children: [
+            {
+              kind: 'unset',
+              key: 'draft',
+              doc: 'Stop SHIP at a draft PR: skip mark-ready and auto-merge. Unset: off. --draft-pr / --no-draft-pr beat it.',
               example: 'false',
             },
           ],

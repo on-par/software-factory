@@ -44,6 +44,8 @@ export type RunOutcome =
       branch: string;
       reworkRounds: number;
       prNumber?: number;
+      /** SHIP stopped at a draft PR (#3449); lanes must not merge it. */
+      draft?: boolean;
       /** the ADR-0147 slice this run shipped */
       slice?: { index: number; count: number };
       attribution?: RunAttribution;

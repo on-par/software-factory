@@ -205,6 +205,8 @@ import {
   resolveEffectiveConfig,
   resolveExperimental,
   resolveLocalOnly,
+  describeDraftPrPolicy,
+  resolveDraftPrPolicy,
   resolvePrClassifierPolicy,
   resolveReviewFloorRules,
   RunLockHeldError,
@@ -319,7 +321,7 @@ import { selectOctokit } from './github-stub.js';
 import { createFactoryOctokit, type FactoryOctokitOptions } from './octokit.js';
 import { DeepCheckError, createDeepModelRunner, runIssueCheck, type DeepCheckModelRunner } from './ready-check.js';
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
-import { readRunFlagOverrides } from './run-flags.js';
+import { readRunFlagOverrides, recordDraftPrFlag } from './run-flags.js';
 import { runStalenessGuard } from './staleness.js';
 import { gcWorktreeSandbox, reapParkedLane, reapPrlessShip } from './worktree-reap.js';
 
@@ -1927,6 +1929,15 @@ async function cmdTui(opts: { localQueue?: boolean } = {}, runTuiImpl: typeof ru
       classifier: readRunFlagOverrides(paths.runFlags).prClassifier,
     }),
   });
+  effectiveConfigLines.push(
+    describeDraftPrPolicy(
+      resolveDraftPrPolicy(
+        configLoaders.loadFactoryConfigForRepo(paths.config),
+        readRunFlagOverrides(paths.runFlags).draftPr,
+      ),
+      repoConfigFileFor(repoRoot, paths.config).relPath,
+    ),
+  );
 
   await runTuiImpl({
     eventsFile: paths.events,
@@ -2205,6 +2216,7 @@ async function cmdShip(
     sandbox?: boolean;
     approvePlan?: boolean;
     branchPrefix?: string;
+    draftPr?: boolean;
   },
 ) {
   if (availableAgentClis(coreOps.isCommandAvailable).length === 0) {
@@ -2225,6 +2237,7 @@ async function cmdShip(
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
 
   return withRepoRunLock(paths, 'factory ship', async () => {
+    recordDraftPrFlag(paths.runFlags, opts.draftPr);
     let ghRepo: string | null = null;
     try {
       ghRepo = await getGitHubRepo();
@@ -2274,6 +2287,7 @@ async function cmdRunIssue(
     runChildren?: boolean;
     sizeGate?: string;
     maxSlices?: string;
+    draftPr?: boolean;
   },
 ) {
   if (availableAgentClis(coreOps.isCommandAvailable).length === 0) {
@@ -2297,6 +2311,7 @@ async function cmdRunIssue(
   }
 
   await withRepoRunLock(paths, 'factory run-issue', async () => {
+    recordDraftPrFlag(paths.runFlags, opts.draftPr);
     const ghRepo = await getGitHubRepo();
 
     // Pre-flight: resolve the issue through the canonical work-request seam
@@ -2445,6 +2460,7 @@ async function cmdRunBrief(
     workspace?: string;
     artifacts?: string;
     branchPrefix?: string;
+    draftPr?: boolean;
   },
 ) {
   if (availableAgentClis(coreOps.isCommandAvailable).length === 0) {
@@ -2459,6 +2475,7 @@ async function cmdRunBrief(
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
 
   await withRepoRunLock(paths, 'factory run-brief', async () => {
+    recordDraftPrFlag(paths.runFlags, opts.draftPr);
     let localOnly: LocalOnlyPolicy | undefined;
     if (opts.workspace !== undefined) {
       try {

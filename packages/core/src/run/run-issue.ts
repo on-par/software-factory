@@ -92,6 +92,7 @@ import { parkLogExtra } from './ship-park.js';
 import { budgetGuardFor, enforceIssueBudget } from './budget.js';
 import type { IssueRunState } from '../types/index.js';
 import { renderPreviousAttempt } from './previous-attempt.js';
+import { maxLinesOverrideHint, withoutHumanOnlyLabels } from './max-lines-override.js';
 
 /** Everything one run needs decided, as a plain resolved value — the CLI adapter
  *  computes this today; no config/file/path resolution happens in here. */
@@ -1062,8 +1063,13 @@ async function runIssueOnce(
         showstoppers.length > 0
           ? `${message}\nremaining showstoppers:\n${showstoppers.map((s) => `- ${s}`).join('\n')}`
           : message;
+      const overrideHint = maxLinesOverrideHint(check.summary);
       await clearCheckResume();
-      return await terminalParked(reason, parkedMessage, checkFailure);
+      return await terminalParked(
+        reason,
+        overrideHint ? `${parkedMessage}\n${overrideHint}` : parkedMessage,
+        checkFailure,
+      );
     }
     await clearCheckResume();
     // Clean check — clear stale cross-run history so a future, genuinely different
@@ -1091,13 +1097,11 @@ async function runIssueOnce(
       if (reviewRouting.gated) {
         const label = request.prClassifier.gateLabel;
         const [owner, repoName] = request.repo.split('/');
+        const labels = withoutHumanOnlyLabels([label]);
         try {
-          await ports.octokit.rest.issues.addLabels({
-            owner,
-            repo: repoName,
-            issue_number: request.issue,
-            labels: [label],
-          });
+          if (labels.length > 0) {
+            await ports.octokit.rest.issues.addLabels({ owner, repo: repoName, issue_number: request.issue, labels });
+          }
         } catch (err) {
           return await terminalParked(
             'held',
@@ -1159,7 +1163,7 @@ async function runIssueOnce(
     await setPhase('ship');
     const shipped = await shipWithCiRework(
       { request, ports, shipPhase, checkPhase, checkOpts, check, constitution, appPort, appBaseUrl, onPgid, runId },
-      { builtRoute, builtModel, reviewRouting, pinNote, planSlice },
+      { builtRoute, builtModel, reviewRouting, pinNote, planSlice, draftPr: policy.pr?.draft },
     );
     const { ship, parked } = shipped;
     if (parked) return await terminalParked(parked.reason, parked.message, parked.checkFailure, parked.ciFailure);
@@ -1184,7 +1188,7 @@ async function runIssueOnce(
     }
     const readyMsg = ship.alreadyDelivered
       ? `already delivered${ship.prNumber !== undefined ? ` by merged PR #${ship.prNumber}` : ' — branch already landed on main'}`
-      : `PR #${ship.prNumber} ready for review`;
+      : `PR #${ship.prNumber} ${ship.draft ? 'left as draft' : 'ready for review'}`;
     log('ready', pinNote ? `${readyMsg} (${pinNote})` : readyMsg);
     await ports.writeLocalRunReport?.({ outcome: 'ready', route, branch: request.branch, reworkRounds });
     return {
@@ -1193,6 +1197,7 @@ async function runIssueOnce(
       branch: request.branch,
       reworkRounds,
       prNumber: ship.prNumber,
+      ...(ship.draft ? { draft: true } : {}),
       ...(planSlice ? { slice: { index: planSlice.index, count: planSlice.plan.slices.length } } : {}),
     };
   } catch (err) {

@@ -62,6 +62,8 @@ export interface CiReworkShipInputs {
   reviewRouting: ReviewRouting | undefined;
   pinNote: string | undefined;
   planSlice: PlanResult['slice'];
+  /** Stop SHIP at a draft PR (#3449); kept on every CI-rework re-entry. */
+  draftPr?: boolean;
 }
 
 export interface ShipWithCiReworkResult {
@@ -111,6 +113,7 @@ export async function shipWithCiRework(
     recordedRemoteSha: ports.workspace.remoteBranch?.sha,
     octokit: ports.octokit,
     watchCI: !request.skipCI,
+    ...(inputs.draftPr ? { draft: true } : {}),
     log: ports.events('ship'),
     approvalGate: request.options.interactive ? ports.createApprovalGate?.() : undefined,
     specPath: request.specPath,

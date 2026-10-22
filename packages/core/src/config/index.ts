@@ -20,6 +20,7 @@ import { resolveStateRoot, STATE_ROOT_ENV } from './state-root.js';
 import { DEFAULT_MAX_SLICES, SLICE_CAP_CEILING } from '../readiness/slice-plan.js';
 import { DEFAULT_MAX_FILES, DEFAULT_TOKEN_BUDGET, type SizeBudget } from '../readiness/size.js';
 import { runConfigSource } from './run-config-source.js';
+import { RunConfigSectionSchema } from './run-section.js';
 
 import type { FilingPolicy } from '../filing/policy.js';
 import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
@@ -136,19 +137,7 @@ const FactoryConfigSchema = z.object({
    *  is authoritative over the legacy top-level `merge.*` fields above (see
    *  `resolveMergePolicy`). Left optional with no defaults so "unset" survives parsing
    *  and is distinguishable from an explicit `false`. */
-  run: z
-    .object({
-      merge: z
-        .object({
-          auto: z.boolean().optional(),
-          admin: z.boolean().optional(),
-          classifier: z.boolean().optional(),
-        })
-        .strict()
-        .optional(),
-    })
-    .strict()
-    .optional(),
+  run: RunConfigSectionSchema,
   worktree: z.object({
     parent: z.string(),
     comment: z.string(),

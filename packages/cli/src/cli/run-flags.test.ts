@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { readRunFlagOverrides, writeRunFlagOverrides } from './run-flags.js';
+import { readRunFlagOverrides, recordDraftPrFlag, writeRunFlagOverrides } from './run-flags.js';
 
 describe('run-flags', () => {
   let dir: string;
@@ -75,5 +75,22 @@ describe('run-flags', () => {
     const wrongType = join(dir, 'wrong-type.json');
     writeFileSync(wrongType, JSON.stringify({ autoMerge: 'yes' }));
     expect(readRunFlagOverrides(wrongType)).toEqual({});
+  });
+
+  it('draft-pr flag: round-trips, coexists with other flags, and recordDraftPrFlag keeps them', () => {
+    const file = join(dir, 'run-flags.json');
+
+    writeRunFlagOverrides(file, { draftPr: false });
+    expect(readRunFlagOverrides(file)).toEqual({ draftPr: false });
+
+    writeRunFlagOverrides(file, { autoMerge: true });
+    recordDraftPrFlag(file, true);
+    expect(readRunFlagOverrides(file)).toEqual({ autoMerge: true, draftPr: true });
+
+    recordDraftPrFlag(file, undefined);
+    expect(readRunFlagOverrides(file)).toEqual({ autoMerge: true });
+
+    writeFileSync(file, JSON.stringify({ draftPr: 'yes' }));
+    expect(readRunFlagOverrides(file)).toEqual({});
   });
 });

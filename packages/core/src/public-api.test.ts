@@ -302,7 +302,7 @@ const PUBLIC_API_KEYS = [
   'runEval',
   'summaryToHistoryRecord',
   'toBaseline',
-  'createLogger',
+  'createLogger', // Logger
   // Usage
   'aggregateCosts',
   'formatCostTotal',
@@ -319,8 +319,8 @@ const STEER = 'STEER_SOURCES STEER_PHASES SteerEventError parseSteerEvent append
 const STEERED = 'collectMergedPrSteers isoWeekKey summarizeSteerability formatSteerabilityReport'.split(' '); // #3403
 const MORE = ['agentInvocationsFromEvents', 'computeTokenCoverage', 'readReviewApproval', 'readStackSliceGate']; // #3126, #3366
 const STACK = 'nextStackSlice restackAfterSquashMerge listRepoLaneLabels listStatelessLaneIssues'.split(' ');
-const SANDBOX = ['isEgressEnforced', 'resolveConfiguredWritablePaths']; // #2215, #3454
-const EXTRA_INTERNAL_KEYS = [...JOB_KEYS, ...TAIL, ...MORE, ...STEER, ...STEERED, ...STACK, ...SANDBOX];
+const POLICY = 'isEgressEnforced describeDraftPrPolicy resolveDraftPrPolicy resolveConfiguredWritablePaths'.split(' '); // #2215, #3449, #3454
+const EXTRA_INTERNAL_KEYS = [...JOB_KEYS, ...TAIL, ...MORE, ...STEER, ...STEERED, ...STACK, ...POLICY];
 const INTERNAL_API_KEYS = [
   'openCodeVersion',
   'DEFAULT_CI_DEADLINE_MS',
