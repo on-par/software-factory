@@ -40,7 +40,6 @@ export type {
   FailureSignatureInput,
   FingerprintedFailure,
 } from './types/index.js';
-
 // Auto-file a fingerprinted bug (#373)
 export type {
   CandidateIssue,
@@ -132,6 +131,7 @@ export type { RepoConfigYamlMigration } from './config/repo-config-file.js';
 export { CONFIG_EXAMPLE_OMITTED_KEYS, renderConfigExample } from './config/example.js';
 export { resolveEvidenceAllowlist, type EvidenceAllowlist } from './checkers/evidence-allowlist.js';
 export { runEvidencePlan, type EvidencePlanResult, type EvidenceRunnerContext } from './checkers/evidence-plan.js';
+export { summarizeCommandRun, type SummarizeCommandRunOptions } from './checkers/command-output.js';
 // Design artifact (#422)
 export { DesignArtifactSchema, parseDesignArtifact, readDesignArtifact, renderDesignArtifact } from './design/index.js';
 // Concrete coding harnesses
