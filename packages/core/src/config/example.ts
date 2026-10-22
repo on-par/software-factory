@@ -300,6 +300,15 @@ function runtimeNamespace(): Node[] {
   const sweep = section('sweep');
   if (sweep.kind === 'object') sweep.children.unshift({ kind: 'unset', key: 'heartbeatFile', example: '"<path>"' });
 
+  const ci = section('ci');
+  if (ci.kind === 'object')
+    ci.children.push({
+      kind: 'unset',
+      key: 'watchMinutes',
+      doc: 'Minutes SHIP waits for CI before reporting CI pending and leaving the PR as draft. Unset: 10.',
+      example: '10',
+    });
+
   const intake = section('intake');
   if (intake.kind === 'object')
     intake.children.unshift({
@@ -361,7 +370,7 @@ function runtimeNamespace(): Node[] {
     section('readiness'),
     section('build'),
     section('sizeGate'),
-    section('ci'),
+    ci,
     section('worktree'),
     section('workspace'),
     section('sandbox'),
