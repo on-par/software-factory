@@ -42,6 +42,7 @@ function seedRun(issue: number, lane: string, steerTs: string[]) {
       issue,
       lane,
       repo: 'o/r',
+      startedAt: '2026-08-01T00:00:00.000Z',
       updatedAt: '2026-08-01T00:00:00.000Z',
       steers: steerTs.map((ts) => ({ ts, actor: 'a', source: 'cli', phase: 'build', summary: 's' })),
     }),

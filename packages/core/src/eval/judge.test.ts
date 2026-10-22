@@ -5,7 +5,7 @@ import { ModelRouter } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import type { StubModelExecutorOptions } from '../router/stub.js';
 import { StubModelExecutor } from '../router/stub.js';
-import { extractVerdict, judgeSpec, median, runJudgeSamples, runJudgeSpec } from './judge.js';
+import { extractVerdict, judgeSpec, runJudgeSamples, runJudgeSpec } from './judge.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -121,14 +121,6 @@ describe('runJudgeSpec', () => {
 
     expect(bool.malformed).toBe(true);
     expect(emptyString.malformed).toBe(true);
-  });
-});
-
-describe('median', () => {
-  it('returns the median for odd, even, and single-value inputs', () => {
-    expect(median([8, 3, 7])).toBe(7);
-    expect(median([7, 8])).toBe(7.5);
-    expect(median([5])).toBe(5);
   });
 });
 

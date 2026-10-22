@@ -3376,7 +3376,10 @@ bash scripts/verify.sh
     const runsDir = (): string => FactoryCore.getFactoryPaths(h.repoRoot).runs;
     const writeRun = (n: number, updatedAt: string): void => {
       mkdirSync(runsDir(), { recursive: true });
-      writeFileSync(join(runsDir(), `issue-${n}.json`), JSON.stringify({ issue: n, lane: 'daw', updatedAt }));
+      writeFileSync(
+        join(runsDir(), `issue-${n}.json`),
+        JSON.stringify({ issue: n, lane: 'daw', startedAt: updatedAt, updatedAt }),
+      );
     };
 
     beforeEach(() => {

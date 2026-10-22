@@ -3,11 +3,13 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { clearRepoSlugCache } from '../logger/repo-slug.js';
 import type { IssueRunState } from '../types/index.js';
 import {
+  listIssueRuns,
   nextIssueRunState,
   readIssueRunState,
   runStateFile,
@@ -229,5 +231,69 @@ describe('run/state', () => {
       const plain = nextIssueRunState(undefined, base, { status: 'building' }, 't1');
       expect(Object.keys(nextIssueRunState(plain, base, { status: 'checking' }, 't2'))).not.toContain('steers');
     });
+  });
+});
+
+describe('listIssueRuns', () => {
+  const dirs = createTempDirs();
+  afterEach(() => dirs.cleanup());
+
+  const record = (issue: number, extra: Record<string, unknown> = {}): string =>
+    JSON.stringify({
+      issue,
+      lane: 'a',
+      branch: 'b',
+      worktree: 'w',
+      specPath: 's',
+      status: 'building',
+      attempts: 1,
+      startedAt: `2026-01-${String(issue).padStart(2, '0')}T00:00:00.000Z`,
+      updatedAt: '2026-02-01T00:00:00.000Z',
+      ...extra,
+    });
+
+  function fixtureDir(): string {
+    const dir = dirs.makeSync('list-runs-');
+    writeFileSync(join(dir, 'issue-10.json'), record(10));
+    writeFileSync(join(dir, 'issue-2.json'), record(2));
+    writeFileSync(join(dir, 'issue-3.json'), record(3));
+    writeFileSync(join(dir, 'issue-5.json'), '{not json');
+    writeFileSync(join(dir, 'issue-6.json'), record(6, { startedAt: undefined }));
+    writeFileSync(join(dir, 'issue-7.json'), record(8));
+    writeFileSync(join(dir, 'issue-9.json'), '[]');
+    writeFileSync(join(dir, 'issue-3.phase.json'), '{}');
+    writeFileSync(join(dir, 'issue-4.json.tmp'), '{}');
+    writeFileSync(join(dir, 'notes.txt'), 'x');
+    return dir;
+  }
+
+  it('returns valid runs sorted by issue and names malformed files in skipped', async () => {
+    const { runs, skipped } = await listIssueRuns(fixtureDir());
+    expect(runs.map((r) => r.issue)).toEqual([2, 3, 10]);
+    expect(skipped).toEqual(['issue-5.json', 'issue-6.json', 'issue-7.json', 'issue-9.json']);
+  });
+
+  it('returns an empty result for a missing runs dir', async () => {
+    const dir = join(dirs.makeSync('list-runs-'), 'nope');
+    expect(await listIssueRuns(dir)).toEqual({ runs: [], skipped: [] });
+  });
+
+  it('filters by since on startedAt and rejects an invalid since', async () => {
+    const dir = fixtureDir();
+    const { runs } = await listIssueRuns(dir, { since: new Date('2026-01-03T00:00:00.000Z') });
+    expect(runs.map((r) => r.issue)).toEqual([3, 10]);
+    await expect(listIssueRuns(dir, { since: new Date('nope') })).rejects.toThrow(RangeError);
+  });
+
+  it('uses an injected readRun', async () => {
+    const dir = fixtureDir();
+    const { runs, skipped } = await listIssueRuns(dir, { readRun: async () => null });
+    expect(runs).toEqual([]);
+    expect(skipped).toHaveLength(7);
+  });
+
+  it('rethrows non-ENOENT readdir errors', async () => {
+    const dir = fixtureDir();
+    await expect(listIssueRuns(join(dir, 'notes.txt'))).rejects.toThrow();
   });
 });

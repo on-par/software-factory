@@ -2,6 +2,7 @@
 
 import type { CostEntry, FactoryEvent, ReadinessInfo, ReworkCauseTag, RetryCause } from '../types/index.js';
 import { isHumanEvent } from './human.js';
+import { median } from '../utils/median.js';
 import { phaseOfCostEntry } from './phase.js';
 
 export { phaseOfCostEntry } from './phase.js';
@@ -65,13 +66,6 @@ function percentileFromSorted(sorted: number[], p: number): number | null {
   const hi = Math.ceil(idx);
   if (lo === hi) return sorted[lo];
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
-}
-
-function percentile(values: number[], p: number): number | null {
-  return percentileFromSorted(
-    [...values].sort((a, b) => a - b),
-    p,
-  );
 }
 
 function mean(values: number[]): number | null {
@@ -513,7 +507,7 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
   ];
   const phaseDurations: Record<string, number> = {};
   for (const phase of orderedPhases) {
-    phaseDurations[phase] = percentile(phaseSamples.get(phase)!, 0.5)!;
+    phaseDurations[phase] = median(phaseSamples.get(phase)!)!;
   }
 
   const configuredLanes = allLanes.size;
@@ -544,19 +538,19 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     costRows,
     costScoredMergedRuns: mergedRunCosts.length,
     costPerMergedPr: mean(mergedRunCosts),
-    medianCostPerMergedPr: percentile(mergedRunCosts, 0.5),
+    medianCostPerMergedPr: median(mergedRunCosts),
     observedInvocations,
     costCoverage: observedInvocations === 0 ? null : costRows / observedInvocations,
     estimatedCostShare: costRows === 0 ? null : totalCost === 0 ? 0 : estimatedCost / totalCost,
     costByRoute,
-    medianCycleTimeMs: percentileFromSorted(sortedCycleTimes, 0.5),
+    medianCycleTimeMs: median(sortedCycleTimes),
     p90CycleTimeMs: percentileFromSorted(sortedCycleTimes, 0.9),
     phaseDurations,
     phaseCosts,
-    queueWaitMs: percentile(queueWaits, 0.5),
+    queueWaitMs: median(queueWaits),
     cycleTimeExcludedRuns: runs - cycleTimes.length,
     totalRetries,
-    retriesPerRun: runs === 0 ? null : percentile(perRunRetryCounts, 0.5),
+    retriesPerRun: runs === 0 ? null : median(perRunRetryCounts),
     retriesByCause,
     retryCostShare: totalCost === 0 ? 0 : retryCost / totalCost,
     readinessScoredRuns: readinessScores.length,
@@ -568,12 +562,12 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
             ready: {
               runs: readyRetries.length,
               meanRetries: mean(readyRetries),
-              medianCycleTimeMs: percentile(readyCycleTimes, 0.5),
+              medianCycleTimeMs: median(readyCycleTimes),
             },
             notReady: {
               runs: notReadyRetries.length,
               meanRetries: mean(notReadyRetries),
-              medianCycleTimeMs: percentile(notReadyCycleTimes, 0.5),
+              medianCycleTimeMs: median(notReadyCycleTimes),
             },
           },
     sizeScoredRuns: sizeScores.length,
