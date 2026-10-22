@@ -17,7 +17,16 @@ afterEach(() => tmp.cleanup());
 
 function seed() {
   const steer = { ts: '2026-08-03T00:00:00.000Z', actor: 'a', source: 'cli', phase: 'build', summary: 's' };
-  writeFileSync(join(dir, 'runs', 'issue-1.json'), JSON.stringify({ issue: 1, lane: 'small', steers: [steer] }));
+  writeFileSync(
+    join(dir, 'runs', 'issue-1.json'),
+    JSON.stringify({
+      issue: 1,
+      lane: 'small',
+      startedAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+      steers: [steer],
+    }),
+  );
   writeFileSync(join(dir, 'runs', 'issue-1.phase.json'), JSON.stringify({ issue: 1 }));
   writeFileSync(join(dir, 'runs', 'issue-2.json'), '{not json');
   const outcomes = join(dir, 'outcomes.jsonl');

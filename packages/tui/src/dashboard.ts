@@ -1,8 +1,14 @@
-import { laneStatusOf, type EvidencePack, type FactoryEvent, type FailoverReason } from '@on-par/factory-core';
+import {
+  laneStatusOf,
+  type EvidencePack,
+  type FactoryEvent,
+  type FailoverReason,
+  type LaneStatus,
+} from '@on-par/factory-core';
 
 import { initialState, type PhaseName, reduceEvent, type RunState } from './state.js';
 
-export type LaneStatus = 'running' | 'waiting-merge' | 'ready' | 'merged' | 'failed' | 'parked' | 'stopped';
+export type { LaneStatus };
 
 export interface LaneFailureEvidence {
   reason: FailoverReason;

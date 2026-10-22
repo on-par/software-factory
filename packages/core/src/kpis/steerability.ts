@@ -2,6 +2,7 @@
 
 import { listSteerEvents } from '../run/steer.js';
 import type { IssueRunState } from '../types/index.js';
+import { median } from '../utils/median.js';
 import type { ClassifierOutcomeRecord } from './classifier-outcomes.js';
 
 export interface MergedPrSteers {
@@ -105,8 +106,8 @@ function bucket(key: string, counts: number[]): SteerBucket {
   const sorted = [...counts].sort((a, b) => a - b);
   const min = sorted[0];
   const max = sorted[mergedPrs - 1];
-  const mid = mergedPrs >> 1;
-  const median = mergedPrs % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  // mergedPrs > 0 here, so median() is never null; the fallback is unreachable.
+  const medianSteers = median(sorted) ?? 0;
   const histogram: Record<string, number> = {};
   for (let i = 0; i <= max; i++) histogram[String(i)] = 0;
   for (const c of counts) histogram[String(c)]++;
@@ -115,7 +116,7 @@ function bucket(key: string, counts: number[]): SteerBucket {
     mergedPrs,
     steers,
     steersPerMergedPr: steers / mergedPrs,
-    distribution: { min, median, max, histogram },
+    distribution: { min, median: medianSteers, max, histogram },
   };
 }
 

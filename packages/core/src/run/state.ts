@@ -5,8 +5,8 @@
 // reliably inside the repo it describes. The resolver and the remote parser are the
 // same ones FactoryEvent.repo uses (#971/#984) — one slug source for both envelopes.
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 
 import { resolveRepoSlug } from '../logger/repo-slug.js';
 import type { CheckerOutput, FailurePhase, IssueRunState, RunStatus } from '../types/index.js';
@@ -53,6 +53,72 @@ export async function readIssueRunState(file: string): Promise<IssueRunState | n
     return rest as IssueRunState;
   }
   return record;
+}
+
+export interface ListIssueRunsOptions {
+  /** Keep only runs whose startedAt is on or after this instant. Invalid date → RangeError. */
+  since?: Date;
+  /** Run-store reader; defaults to readIssueRunState. Injected by tests. */
+  readRun?: (file: string) => Promise<IssueRunState | null>;
+}
+
+export interface ListIssueRunsResult {
+  /** Valid runs, sorted by issue ascending. */
+  runs: IssueRunState[];
+  /** issue-<n>.json file names that did not read as a valid run record, sorted by issue. */
+  skipped: string[];
+}
+
+/** The one validity rule for a persisted run record (#3448): an object whose `issue` is an
+ *  integer equal to the number in its file name, with string `startedAt` and `updatedAt`. */
+export function isValidIssueRunState(state: IssueRunState | null, issue: number): state is IssueRunState {
+  return (
+    state !== null &&
+    Number.isInteger(state.issue) &&
+    state.issue === issue &&
+    typeof state.startedAt === 'string' &&
+    typeof state.updatedAt === 'string'
+  );
+}
+
+/** Reads every `issue-<n>.json` in `runsDir` — the single owner of "which runs exist" (#3448).
+ *  Names that are not `issue-<n>.json` (phase snapshots, .tmp files) are ignored; names that
+ *  fail isValidIssueRunState are listed in `skipped`. A missing dir is an empty result. */
+export async function listIssueRuns(runsDir: string, options: ListIssueRunsOptions = {}): Promise<ListIssueRunsResult> {
+  const { since, readRun = readIssueRunState } = options;
+  if (since !== undefined && Number.isNaN(since.getTime())) throw new RangeError('invalid since date');
+
+  let names: string[];
+  try {
+    names = await readdir(runsDir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { runs: [], skipped: [] };
+    throw err;
+  }
+
+  const files: { name: string; issue: number }[] = [];
+  for (const name of names) {
+    const m = /^issue-(\d+)\.json$/.exec(name);
+    if (m !== null) files.push({ name, issue: Number(m[1]) });
+  }
+  files.sort((a, b) => a.issue - b.issue || (a.name < b.name ? -1 : 1));
+
+  const runs: IssueRunState[] = [];
+  const skipped: string[] = [];
+  for (const { name, issue } of files) {
+    const state = await readRun(join(runsDir, name));
+    if (!isValidIssueRunState(state, issue)) {
+      skipped.push(name);
+      continue;
+    }
+    if (since !== undefined) {
+      const started = Date.parse(state.startedAt);
+      if (Number.isNaN(started) || started < since.getTime()) continue;
+    }
+    runs.push(state);
+  }
+  runs.sort((a, b) => a.issue - b.issue);
+  return { runs, skipped };
 }
 
 /** What runIssue knows at a transition (#3194). Absent fields keep the previous record's value. */

@@ -2,7 +2,7 @@ import { cp, mkdir, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { readIssueRunState } from '@on-par/factory-core/internal';
+import { listIssueRuns, readIssueRunState } from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -66,7 +66,8 @@ describe('loadRuns', () => {
 
   it('keeps an unparsable startedAt without since and drops it with since, ties sort by issue', async () => {
     const dir = await tmp();
-    const run = (issue: number, startedAt: string): string => JSON.stringify({ issue, startedAt });
+    const run = (issue: number, startedAt: string): string =>
+      JSON.stringify({ issue, startedAt, updatedAt: startedAt });
     await writeFile(join(dir, 'issue-5.json'), run(5, 'garbage'));
     await writeFile(join(dir, 'issue-4.json'), run(4, '2026-10-05T00:00:00.000Z'));
     await writeFile(join(dir, 'issue-3.json'), run(3, '2026-10-05T00:00:00.000Z'));
@@ -81,5 +82,20 @@ describe('loadRuns', () => {
     await mkdir(dir, { recursive: true });
     await writeFile(file, 'x');
     await expect(loadRuns(file)).rejects.toMatchObject({ code: 'ENOTDIR' });
+  });
+
+  it('counts the same runs as listIssueRuns on the shared fixture', async () => {
+    const dir = await tmp();
+    await cp(fixtureRuns, dir, { recursive: true });
+    const base = JSON.parse(await (await import('node:fs/promises')).readFile(join(dir, 'issue-101.json'), 'utf-8'));
+    const { updatedAt: _dropped, ...noUpdatedAt } = { ...base, issue: 104 };
+    await writeFile(join(dir, 'issue-104.json'), JSON.stringify(noUpdatedAt));
+
+    const loaded = await loadRuns(dir);
+    const listed = await listIssueRuns(dir);
+
+    expect(new Set(loaded.runs.map((r) => r.issue))).toEqual(new Set(listed.runs.map((r) => r.issue)));
+    expect(loaded.skipped).toEqual(listed.skipped);
+    expect(loaded.skipped).toEqual(['issue-104.json']);
   });
 });

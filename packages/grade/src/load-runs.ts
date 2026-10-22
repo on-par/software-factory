@@ -1,8 +1,5 @@
 // packages/grade/src/load-runs.ts — loads recorded runs through core's run store reader; read-only, never writes.
-import { readdir } from 'node:fs/promises';
-import { join } from 'node:path';
-
-import { readIssueRunState, type IssueRunState } from '@on-par/factory-core/internal';
+import { listIssueRuns, type IssueRunState } from '@on-par/factory-core/internal';
 
 export interface LoadRunsOptions {
   /** Keep only runs whose startedAt is on or after this instant. */
@@ -22,32 +19,7 @@ export interface LoadRunsResult {
  * startedAt then issue. A missing dir is an empty result; unreadable records are named in `skipped`.
  */
 export async function loadRuns(runsDir: string, options: LoadRunsOptions = {}): Promise<LoadRunsResult> {
-  const { since, readRun = readIssueRunState } = options;
-  if (since !== undefined && Number.isNaN(since.getTime())) throw new RangeError('invalid since date');
-
-  let names: string[];
-  try {
-    names = await readdir(runsDir);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { runs: [], skipped: [] };
-    throw err;
-  }
-
-  const files = names.filter((name) => /^issue-(\d+)\.json$/.test(name)).sort();
-  const runs: IssueRunState[] = [];
-  const skipped: string[] = [];
-  for (const name of files) {
-    const run = await readRun(join(runsDir, name));
-    if (run === null || typeof run.startedAt !== 'string') {
-      skipped.push(name);
-      continue;
-    }
-    if (since !== undefined) {
-      const started = Date.parse(run.startedAt);
-      if (Number.isNaN(started) || started < since.getTime()) continue;
-    }
-    runs.push(run);
-  }
+  const { runs, skipped } = await listIssueRuns(runsDir, options);
 
   const time = (run: IssueRunState): number => {
     const t = Date.parse(run.startedAt);

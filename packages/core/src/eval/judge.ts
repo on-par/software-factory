@@ -1,5 +1,6 @@
 import type { ModelRouter, RouterResult } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
+import { median } from '../utils/median.js';
 
 export interface JudgeSpecOpts {
   sandbox?: SandboxPolicy;
@@ -35,12 +36,6 @@ export interface JudgeAggregate {
   malformedCount: number;
   results: RouterResult[];
   prompt: string;
-}
-
-export function median(values: number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 export function extractVerdict(output: string): { score: number; reasons: string } | null {
@@ -155,7 +150,7 @@ export async function runJudgeSamples(router: ModelRouter, opts: JudgeSpecOpts, 
   const validScores = validSamples.map((sample) => sample.score as number);
   const validCount = validScores.length;
   const malformedCount = n - validCount;
-  const score = validCount > 0 ? median(validScores) : undefined;
+  const score = validCount > 0 ? (median(validScores) ?? undefined) : undefined;
   const reasons =
     score === undefined
       ? ''

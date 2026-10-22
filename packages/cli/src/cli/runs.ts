@@ -2,7 +2,7 @@ import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { readPhaseSnapshot, type RunPhaseSnapshot } from '@on-par/factory-core';
-import { readIssueRunState, type IssueRunState } from '@on-par/factory-core/internal';
+import { listIssueRuns } from '@on-par/factory-core/internal';
 import type { RunsJson } from './json-contract.js';
 
 /** `factory runs --json` payload (#2271); additive changes bump schemaVersion only when breaking. */
@@ -30,7 +30,7 @@ function time(iso: string): number {
 }
 
 /**
- * Merge `issue-<n>.json` (IssueRunState) and `issue-<n>.phase.json` (RunPhaseSnapshot)
+ * Merge `issue-<n>.json` (IssueRunState, read through core's listIssueRuns) and `issue-<n>.phase.json` (RunPhaseSnapshot)
  * in `runsDir` into one row per issue, newest `updatedAt` first, capped at `limit`.
  * A missing dir is an empty list; malformed files are skipped and named in `skipped`.
  */
@@ -45,6 +45,10 @@ export async function buildRunsJson(
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { json: { schemaVersion: 1, runs: [] }, skipped: [] };
     throw err;
   }
+
+  const { runs: validRuns, skipped: skippedRunFiles } = await listIssueRuns(runsDir);
+  const stateByIssue = new Map(validRuns.map((run) => [run.issue, run]));
+  const badRunFiles = new Set(skippedRunFiles);
 
   const byIssue = new Map<number, { run?: string; phase?: string }>();
   for (const name of names) {
@@ -70,15 +74,9 @@ export async function buildRunsJson(
     issues.map(async (issue) => {
       const files = byIssue.get(issue) ?? {};
       const bad: string[] = [];
-      let state: IssueRunState | null = null;
+      const state = stateByIssue.get(issue) ?? null;
       let snapshot: RunPhaseSnapshot | null = null;
-      if (files.run !== undefined) {
-        state = await readIssueRunState(join(runsDir, files.run));
-        if (state === null || typeof state.updatedAt !== 'string') {
-          state = null;
-          bad.push(files.run);
-        }
-      }
+      if (files.run !== undefined && badRunFiles.has(files.run)) bad.push(files.run);
       if (files.phase !== undefined) {
         snapshot = await readPhaseSnapshot(join(runsDir, files.phase));
         if (snapshot === null) bad.push(files.phase);

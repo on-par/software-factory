@@ -1,10 +1,9 @@
-import { readdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readFile } from 'node:fs/promises';
 
 import { parseClassifierOutcomes } from '@on-par/factory-core';
 import {
   collectMergedPrSteers,
-  readIssueRunState,
+  listIssueRuns,
   summarizeSteerability,
   type IssueRunState,
   type SteerabilityReport,
@@ -19,13 +18,9 @@ async function readOrEmpty<T>(read: () => Promise<T>, empty: T): Promise<T> {
   }
 }
 
-/** Every parseable `issue-<n>.json` run state in `runsDir`; phase snapshots and malformed files are skipped. */
+/** Every parseable `issue-<n>.json` run state in `runsDir`; phase snapshots and invalid records are skipped (core's listIssueRuns). */
 export async function readRunStates(runsDir: string): Promise<IssueRunState[]> {
-  const names = await readOrEmpty(() => readdir(runsDir), [] as string[]);
-  const states = await Promise.all(
-    names.filter((name) => /^issue-(\d+)\.json$/.test(name)).map((name) => readIssueRunState(join(runsDir, name))),
-  );
-  return states.filter((s): s is IssueRunState => s !== null && typeof s.issue === 'number');
+  return (await listIssueRuns(runsDir)).runs;
 }
 
 /** Steers per merged PR from local run states and classifier-outcomes.jsonl (#3403). */

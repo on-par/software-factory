@@ -1,8 +1,7 @@
 // packages/cli/src/cli/steer.ts — `factory steer <ref>`: append a human or bot steer to a run (#3401).
-import { readdir } from 'node:fs/promises';
-import { join } from 'node:path';
 import {
   appendSteerEvent,
+  listIssueRuns,
   readIssueRunState,
   runStateFile,
   STEER_PHASES,
@@ -78,17 +77,9 @@ export async function resolveSteerRun(runsDir: string, ref: SteerRef): Promise<{
     if (state) return { file, state };
   }
   if (ref.kind !== 'issue') {
-    let names: string[];
-    try {
-      names = await readdir(runsDir);
-    } catch {
-      names = [];
-    }
-    for (const name of names.filter((n) => /^issue-(\d+)\.json$/.test(n)).sort()) {
-      const file = join(runsDir, name);
-      const state = await readIssueRunState(file);
-      if (state?.prNumber === ref.number) return { file, state };
-    }
+    const { runs } = await listIssueRuns(runsDir);
+    const state = runs.find((r) => r.prNumber === ref.number);
+    if (state) return { file: runStateFile(runsDir, state.issue), state };
   }
   throw new SteerCliError(`no run found for ${ref.raw}`, 'no-run');
 }

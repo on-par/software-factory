@@ -1,4 +1,5 @@
 import { aggregateCosts, type CostEntry, type IssueCostRow } from '@on-par/factory-core';
+import { median } from '@on-par/factory-core/internal';
 
 import type { LaneState } from '../dashboard.js';
 
@@ -25,13 +26,6 @@ export interface RunCostsSummary {
   medianMergedCost: number | null;
   mergedCount: number;
   allTime: { cost: number | null; unpricedCount: number };
-}
-
-function median(values: number[]): number | null {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 /** Scopes cost rows to the current run (ts >= the earliest lane start) and rolls them up per issue and lane (#1739). */
