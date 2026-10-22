@@ -4,6 +4,7 @@
 import type { ModelRegistry } from '../models/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import type { FailoverReason, TaskType } from '../types/index.js';
+import type { ProviderFailure, ProviderFailureKind } from './provider-failure.js';
 
 /** Router's FailoverReason is a type alias of HarnessFailureReason (see
  *  ../router/index.ts) so the two unions can never drift. */
@@ -114,6 +115,10 @@ export class HarnessError extends Error {
       code?: string | number;
       signal?: string;
       killed?: boolean;
+      /** Provider-agnostic failure kind set by the adapter (#3225). */
+      kind?: ProviderFailureKind;
+      /** ISO instant at which the provider says it recovers, when it reported one (#3225). */
+      resetAt?: string;
     } = {},
   ) {
     super(message);
@@ -137,7 +142,12 @@ export interface CodingHarness {
    *  require this); false for prompt-only harnesses like Ollama HTTP. */
   readonly agentic: boolean;
   run(request: HarnessRequest): Promise<HarnessResult>;
+  /** Classifies a failure this harness threw into the provider-agnostic shape. Harnesses without one get
+   *  `defaultClassifyError` (reason from the error, kind by the reason map). */
+  classifyError?(err: unknown): ProviderFailure;
 }
+
+export type { ProviderFailure, ProviderFailureKind } from './provider-failure.js';
 
 export type { HarnessCatalogEntry } from './catalog.js';
 export { HARNESS_CATALOG, isAgenticHarness, KNOWN_HARNESS_IDS } from './catalog.js';

@@ -20,10 +20,9 @@ import type { Epic, Story } from '@on-par/contracts';
 import { z } from 'zod';
 
 import type { EventKind } from '../events/kinds.js';
-import type { ModelRouter } from '../router/index.js';
+import type { ModelRouter, ProviderFailureInfo } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { DECOMPOSED_LABEL } from '../queue/github-queue.js';
-import type { FailoverReason } from '../types/index.js';
 import { findDuplicateStory } from './duplicate-guard.js';
 import type { SiblingIssue } from './duplicate-guard.js';
 import { buildDecompositionPrompt, buildDecompositionRetryPrompt } from './decompose-prompt.js';
@@ -531,7 +530,7 @@ export interface DecomposeDriverDeps {
    *  circuit breaker the same way plan/build failures do (#745) — without this,
    *  decompose never reports into the breaker, so a lane keeps re-attempting a
    *  known-capped provider on every relaunch cycle with no gating at all. */
-  onProviderFailure?: (info: { provider: string; reason: FailoverReason; detail?: string }) => void | Promise<void>;
+  onProviderFailure?: (info: ProviderFailureInfo) => void | Promise<void>;
   /** File the decomposition as real GitHub issues linked as native sub-issues of the
    *  original issue, instead of only commenting. Off by default: both
    *  file-mode PLAN size gates (pre-flight and post-plan build-scope) opt in (#823, #2662). */

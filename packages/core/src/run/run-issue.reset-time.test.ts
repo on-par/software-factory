@@ -10,6 +10,9 @@ import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
 import type { ShipResult, shipPhase as realShipPhase } from '../phases/ship.js';
+import { ClaudeCliHarness } from '../harness/claude-cli.js';
+import { providerFailureOf } from '../harness/provider-failure.js';
+import { makeContractRequest } from '../harness/contract.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import type { WorkRequest } from '../work/index.js';
@@ -144,5 +147,111 @@ describe('runIssue — absolute provider reset time (#2884)', () => {
     } finally {
       nowSpy.mockRestore();
     }
+  });
+});
+
+describe('runIssue provider reset time', () => {
+  const run = async (
+    failure: Parameters<NonNullable<Parameters<typeof realPlanPhase>[0]['onProviderFailure']>>[0],
+    now: string,
+    cooldownMs = 999,
+  ) => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(Date.parse(now));
+    try {
+      const events: Array<[string, string]> = [];
+      const breaker = new ProviderBreaker(join(breakerDir, `breaker-${Math.random()}.json`));
+      const planPhase = vi.fn<typeof realPlanPhase>().mockImplementation(async (opts) => {
+        await opts.onProviderFailure?.(failure);
+        return {
+          ok: true,
+          route: 'claude',
+          specPath: '/tmp/wt/spec.md',
+          model: 'm',
+          designArtifact: null,
+        } satisfies PlanResult;
+      });
+      const ports: RunPorts = {
+        router: new ModelRouter(MODELS, ROUTES),
+        octokit: {} as Octokit,
+        workspace: { path: '/tmp/wt', dispose: async () => {} } as Workspace,
+        events: () => (type: string, msg: string) => events.push([type, msg]),
+        breaker,
+        resolveConstitution: () => null,
+        planPhase,
+        buildPhase: vi
+          .fn<typeof realBuildPhase>()
+          .mockResolvedValue({ ok: true, model: 'my-model', route: 'command' } satisfies BuildResult),
+        checkPhase: vi.fn<typeof realCheckPhase>().mockResolvedValue({
+          passed: true,
+          summary: { failures: 0, passes: 1, skips: 0, total: 1, results: [] },
+          reworkRounds: 0,
+        } satisfies CheckPhaseResult),
+        shipPhase: vi.fn<typeof realShipPhase>().mockResolvedValue({ ok: true, prNumber: 42 } satisfies ShipResult),
+      };
+      await runIssue({ ...request, failover: { ...request.failover, cooldownMs } }, policy, ports);
+      return { events, status: await breaker.status(failure.provider) };
+    } finally {
+      nowSpy.mockRestore();
+    }
+  };
+
+  it('a Claude weekly-limit error holds the claude breaker until the reported reset', async () => {
+    const now = '2026-10-18T22:39:00Z';
+    const weekly = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: true,
+      result: "You've hit your weekly limit · resets Oct 20 at 7am (America/Chicago)",
+      duration_api_ms: 50,
+      usage: { input_tokens: 3, output_tokens: 4 },
+    });
+    const harness = new ClaudeCliHarness(
+      async () => ({ stdout: weekly, stderr: '' }),
+      () => Date.now(),
+    );
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(Date.parse(now));
+    let failure;
+    try {
+      const err = await harness.run(makeContractRequest()).catch((e) => e);
+      failure = providerFailureOf(err);
+    } finally {
+      nowSpy.mockRestore();
+    }
+    expect(failure.kind).toBe('usage_cap');
+    const { events, status } = await run(
+      {
+        provider: 'anthropic',
+        reason: failure.reason,
+        kind: failure.kind,
+        resetAt: failure.resetAt,
+        detail: failure.detail,
+      },
+      now,
+    );
+    expect(events.some(([t, m]) => t === 'provider_breaker_open' && m.includes('provider-reported reset time'))).toBe(
+      true,
+    );
+    if (!status.open) throw new Error('expected an open breaker');
+    expect(Date.parse(status.entry.openedAt) + status.entry.cooldownMs).toBe(Date.parse('2026-10-20T12:02:00Z'));
+  });
+
+  it('falls back to the detail hint then the default cooldown', async () => {
+    const hinted = await run(
+      { provider: 'opencode', reason: 'usage_cap', kind: 'usage_cap', detail: 'Resets in 3hr 17min' },
+      '2026-10-18T22:39:00Z',
+    );
+    expect(hinted.events.some(([, m]) => m.includes('provider-reported reset time') && m.includes('199m'))).toBe(true);
+    const plain = await run(
+      { provider: 'opencode', reason: 'usage_cap', kind: 'usage_cap', detail: 'no hint here' },
+      '2026-10-18T22:39:00Z',
+      600_000,
+    );
+    expect(plain.events.some(([, m]) => m.includes('default cooldown') && m.includes('10m'))).toBe(true);
+    const past = await run(
+      { provider: 'opencode', reason: 'usage_cap', kind: 'usage_cap', resetAt: '2026-10-01T00:00:00.000Z' },
+      '2026-10-18T22:39:00Z',
+      600_000,
+    );
+    expect(past.events.some(([, m]) => m.includes('default cooldown'))).toBe(true);
   });
 });

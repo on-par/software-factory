@@ -14,7 +14,7 @@ import type { EventKind } from '../events/kinds.js';
 import { type BudgetGuard, isBudgetStopError } from '../router/budget-guard.js';
 import { routerFailureOf } from '../router/executor-error.js';
 import { type ContextCeilingNotice, formatContextCeilingNotice } from '../router/context-ceiling.js';
-import { failoversFrom, type ModelRouter, type RouterResult } from '../router/index.js';
+import { failoversFrom, type ModelRouter, type ProviderFailureInfo, type RouterResult } from '../router/index.js';
 import { isEgressEnforced, type SandboxEventType, type SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering } from '../steering/index.js';
 import type { Constitution, FailoverReason } from '../types/index.js';
@@ -125,7 +125,7 @@ async function buildPhaseImpl(opts: {
   routePinned?: boolean;
   /** Cross-provider Codex fallback used when a Claude worker is capped or unavailable. */
   codexFallbackModel?: string;
-  onProviderFailure?: (info: { provider: string; reason: FailoverReason }) => void | Promise<void>;
+  onProviderFailure?: (info: ProviderFailureInfo) => void | Promise<void>;
   sandbox?: SandboxPolicy;
   steering?: ConsumedSteering;
   appPort?: number;

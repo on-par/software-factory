@@ -6,7 +6,13 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { gateBuildOnBreaker, MAX_REPORTED_COOLDOWN_MS, parseResetCooldownMs, ProviderBreaker } from './breaker.js';
+import {
+  gateBuildOnBreaker,
+  MAX_REPORTED_COOLDOWN_MS,
+  parseResetCooldownMs,
+  ProviderBreaker,
+  reportedCooldownMs,
+} from './breaker.js';
 
 const tempDirs = new Set<string>();
 
@@ -252,5 +258,22 @@ describe('parseResetCooldownMs', () => {
     expect(parseResetCooldownMs('resets at 2026-13-45T99:00:00Z', undefined, now)).toBeNull();
     expect(parseResetCooldownMs('resets at 2026-11-01T00:00:00', undefined, now)).toBeNull();
     expect(parseResetCooldownMs('resets at noon', undefined, now)).toBeNull();
+  });
+});
+
+describe('reportedCooldownMs', () => {
+  const now = Date.parse('2026-10-18T22:39:00Z');
+
+  it('prefers a future resetAt plus the buffer, capped', () => {
+    expect(reportedCooldownMs('2026-10-20T12:00:00.000Z', 'Resets in 1hr', now)).toBe(
+      Date.parse('2026-10-20T12:02:00Z') - now,
+    );
+    expect(reportedCooldownMs('2099-01-01T00:00:00Z', undefined, now)).toBe(MAX_REPORTED_COOLDOWN_MS);
+  });
+
+  it('falls back to the detail hint, then null', () => {
+    expect(reportedCooldownMs('2026-10-01T00:00:00Z', 'Resets in 1hr', now)).toBe(62 * 60_000);
+    expect(reportedCooldownMs('garbage', 'nothing', now)).toBeNull();
+    expect(reportedCooldownMs(undefined, undefined, now)).toBeNull();
   });
 });

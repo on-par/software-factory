@@ -65,8 +65,8 @@ import { detectStuck } from '../steward/detect.js';
 import { runSteward, type RunStewardPorts } from '../steward/run.js';
 import { describeDotnetEnv, dotnetEnvReport } from '../environment/dotnet.js';
 import { ProcessGroupTracker } from '../environment/process-groups.js';
-import type { ModelRouter } from '../router/index.js';
-import { gateBuildOnBreaker, parseResetCooldownMs, type ProviderBreaker } from '../router/breaker.js';
+import type { ModelRouter, ProviderFailureInfo } from '../router/index.js';
+import { gateBuildOnBreaker, reportedCooldownMs, type ProviderBreaker } from '../router/breaker.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { describeSteering, type ConsumedSteering } from '../steering/index.js';
 import type { CiFailureEvidence, CheckSummary, Constitution, FailoverReason, FailurePhase } from '../types/index.js';
@@ -478,20 +478,18 @@ async function runIssueOnce(
   const rememberProviderFailure = async ({
     provider,
     reason,
+    kind,
+    resetAt,
     detail,
-  }: {
-    provider: string;
-    reason: FailoverReason;
-    detail?: string;
-  }): Promise<void> => {
-    const reportedMs = parseResetCooldownMs(detail ?? '');
+  }: ProviderFailureInfo): Promise<void> => {
+    const reportedMs = reportedCooldownMs(resetAt, detail);
     const cooldownMs = reportedMs ?? request.failover.cooldownMs;
     await ports.breaker.open(provider, reason, cooldownMs);
     const cooldownNote = reportedMs !== null ? 'provider-reported reset time' : 'default cooldown';
     log(
       'provider_breaker_open',
       `breaker opened for ${provider} (${reason}) — provider skipped until cooldown ends (${cooldownNote}, ${Math.ceil(cooldownMs / 60_000)}m)`,
-      { failoverReason: reason },
+      { failoverReason: reason, ...(kind ? { providerFailureKind: kind } : {}) },
     );
   };
 

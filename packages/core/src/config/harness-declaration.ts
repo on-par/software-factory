@@ -34,6 +34,8 @@ function isValidRegExp(source: string): boolean {
   }
 }
 
+/** An errorPatterns regex may include a named `(?<reset>…)` group; when its capture parses as a date it becomes the
+ *  failure's `resetAt`, so the breaker holds the provider until then. */
 const RegexString = z.string().refine(isValidRegExp, 'errorPatterns entries must be valid regular expressions');
 
 export const HarnessDeclarationSchema = z

@@ -8,9 +8,11 @@ import { wrapCommandInSandbox } from '../sandbox/index.js';
 import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { shellEscape } from '../utils/index.js';
-import { classifyFailure } from './classify.js';
+import { classifyClaudeFailure } from './claude-error.js';
 import type { CodingHarness, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
 import { HarnessError } from './index.js';
+import type { ProviderFailure } from './provider-failure.js';
+import { defaultClassifyError, failureKindForReason } from './provider-failure.js';
 import { withTempDir } from './temp-dir.js';
 
 export type ClaudeExecFn = ExecFn;
@@ -149,7 +151,20 @@ export class ClaudeCliHarness implements CodingHarness {
   readonly id = 'claude-cli';
   readonly agentic = true;
 
-  constructor(private execFn: ClaudeExecFn = defaultExecFn) {}
+  constructor(
+    private execFn: ClaudeExecFn = defaultExecFn,
+    private now: () => number = () => Date.now(),
+  ) {}
+
+  /** Re-classifies a thrown error from its diagnostic text; an error this harness already tagged keeps its kind. */
+  classifyError(err: unknown): ProviderFailure {
+    if (err instanceof HarnessError && err.details.kind !== undefined) return defaultClassifyError(err);
+    const d = (err as { details?: { diagnostic?: unknown; stderr?: unknown; stdout?: unknown } } | null)?.details;
+    const parts = [d?.diagnostic, d?.stderr, d?.stdout, (err as { message?: unknown } | null)?.message];
+    const text = parts.filter((part): part is string => typeof part === 'string' && part.length > 0).join('\n');
+    const exitCode = (err as { details?: { exitCode?: unknown } } | null)?.details?.exitCode;
+    return classifyClaudeFailure(text, typeof exitCode === 'number' ? exitCode : 1, this.now());
+  }
 
   async run(request: HarnessRequest): Promise<HarnessResult> {
     const { model, prompt, worktree, timeoutSeconds, registry, sandbox, env, onPgid } = request;
@@ -183,7 +198,9 @@ export class ClaudeCliHarness implements CodingHarness {
         const diagnosticText = [stderrDiagnostic, stdoutDiagnostic ?? stdout]
           .filter((text) => typeof text === 'string')
           .join('\n');
-        const reason = err.killed ? 'timeout' : classifyFailure(diagnosticText, err.code ?? 1);
+        const failure = err.killed ? undefined : classifyClaudeFailure(diagnosticText, err.code ?? 1, this.now());
+        const reason = failure?.reason ?? 'timeout';
+        const kind = failure?.kind ?? failureKindForReason('timeout');
         const codeText = typeof err.code === 'number' || typeof err.code === 'string' ? ` ${err.code}` : '';
         throw new HarnessError(`claude CLI process exited${codeText}`.trim(), reason, {
           exitCode: typeof err.code === 'number' ? err.code : undefined,
@@ -193,6 +210,8 @@ export class ClaudeCliHarness implements CodingHarness {
           code: typeof err.code === 'string' || typeof err.code === 'number' ? err.code : undefined,
           signal: typeof err.signal === 'string' ? err.signal : undefined,
           killed: err.killed === true ? true : undefined,
+          kind,
+          ...(failure?.resetAt ? { resetAt: failure.resetAt } : {}),
         });
       }
     });
@@ -206,16 +225,18 @@ export class ClaudeCliHarness implements CodingHarness {
     }
     if (isError) {
       const unavailable = usage?.inputTokens === 0 && usage.outputTokens === 0 && usage.durationApiMs === 0;
-      throw new HarnessError(
-        unavailable
+      const failure = classifyClaudeFailure(output, 0, this.now(), { zeroTokenResult: unavailable });
+      const message =
+        unavailable && failure.reason === 'unavailable'
           ? 'claude CLI returned a zero-token, zero-API-duration error result — provider unavailable'
-          : `claude CLI returned an error result${subtype ? ` (${subtype})` : ''}`,
-        unavailable ? 'unavailable' : 'error',
-        {
-          exitCode: 0,
-          stdout: output,
-        },
-      );
+          : `claude CLI returned an error result${subtype ? ` (${subtype})` : ''}${failure.reason === 'error' ? '' : `: ${failure.reason}`}`;
+      throw new HarnessError(message, failure.reason, {
+        exitCode: 0,
+        stdout: output,
+        diagnostic: output,
+        kind: failure.kind,
+        ...(failure.resetAt ? { resetAt: failure.resetAt } : {}),
+      });
     }
     if (output.trim().length === 0) {
       throw new HarnessError('claude CLI returned empty output', 'empty_response', { exitCode: 0 });

@@ -12,6 +12,7 @@ import { shellEscape } from '../utils/index.js';
 import { classifyFailure } from './classify.js';
 import type { CodingHarness, HarnessFailureReason, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
 import { HarnessError } from './index.js';
+import { failureKindForReason } from './provider-failure.js';
 
 /**
  * Substitute {model}, {worktree} and {outFile} in a declared command template with
@@ -64,17 +65,26 @@ export function extractJsonlLastMessage(stdout: string): string {
   return '';
 }
 
+/** `resetAt` ISO instant from a `(?<reset>…)` group of an errorPatterns match, when the capture parses as a date. */
+function resetAtFromMatch(match: RegExpExecArray): string | undefined {
+  const captured = match.groups?.reset;
+  if (!captured) return undefined;
+  const ms = Date.parse(captured);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : undefined;
+}
+
 /**
- * Failure reason selected by a declaration's `errorPatterns`, or undefined when none match.
+ * Failure reason (and optional reset time) selected by a declaration's `errorPatterns`, or undefined when none match.
  * Patterns are tested case-insensitively (as classifyFailure does), stderr before stdout.
  * Record form: the first matching entry in declaration order returns its key. Array form:
  * the first match is classified by classifyFailure, with 'unknown' mapped to 'error'.
+ * A named `reset` group yields `resetAt` when its capture parses as a date.
  */
-export function matchErrorPattern(
+export function matchErrorPatternFailure(
   patterns: HarnessDeclaration['errorPatterns'],
   stderr: string,
   stdout: string,
-): HarnessFailureReason | undefined {
+): { reason: HarnessFailureReason; resetAt?: string } | undefined {
   if (!patterns) return undefined;
   const texts = [typeof stderr === 'string' ? stderr : '', typeof stdout === 'string' ? stdout : ''];
   if (Array.isArray(patterns)) {
@@ -83,8 +93,9 @@ export function matchErrorPattern(
       for (const text of texts) {
         const match = re.exec(text);
         if (match) {
-          const reason = classifyFailure(match[0], 1);
-          return reason === 'unknown' ? 'error' : reason;
+          const classified = classifyFailure(match[0], 1);
+          const resetAt = resetAtFromMatch(match);
+          return { reason: classified === 'unknown' ? 'error' : classified, ...(resetAt ? { resetAt } : {}) };
         }
       }
     }
@@ -92,9 +103,24 @@ export function matchErrorPattern(
   }
   for (const [reason, source] of Object.entries(patterns)) {
     const re = new RegExp(source, 'i');
-    if (texts.some((text) => re.test(text))) return reason as HarnessFailureReason;
+    for (const text of texts) {
+      const match = re.exec(text);
+      if (match) {
+        const resetAt = resetAtFromMatch(match);
+        return { reason: reason as HarnessFailureReason, ...(resetAt ? { resetAt } : {}) };
+      }
+    }
   }
   return undefined;
+}
+
+/** Failure reason selected by a declaration's `errorPatterns`, or undefined when none match. */
+export function matchErrorPattern(
+  patterns: HarnessDeclaration['errorPatterns'],
+  stderr: string,
+  stdout: string,
+): HarnessFailureReason | undefined {
+  return matchErrorPatternFailure(patterns, stderr, stdout)?.reason;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -174,10 +200,12 @@ export class CommandHarness implements CodingHarness {
           onPgid,
         }));
       } catch (err: any) {
-        const reason = err.killed
+        const matched = err.killed
+          ? undefined
+          : matchErrorPatternFailure(this.declaration.errorPatterns, err.stderr ?? '', err.stdout ?? '');
+        const reason: HarnessFailureReason = err.killed
           ? 'timeout'
-          : (matchErrorPattern(this.declaration.errorPatterns, err.stderr ?? '', err.stdout ?? '') ??
-            classifyFailure(err.stderr ?? '', err.code ?? 1));
+          : (matched?.reason ?? classifyFailure(err.stderr ?? '', err.code ?? 1));
         throw new HarnessError(err.message ?? String(err), reason, {
           exitCode: typeof err.code === 'number' ? err.code : undefined,
           stderr: err.stderr,
@@ -185,6 +213,8 @@ export class CommandHarness implements CodingHarness {
           code: typeof err.code === 'string' || typeof err.code === 'number' ? err.code : undefined,
           signal: typeof err.signal === 'string' ? err.signal : undefined,
           killed: err.killed === true ? true : undefined,
+          kind: failureKindForReason(reason),
+          ...(matched?.resetAt ? { resetAt: matched.resetAt } : {}),
         });
       }
 
