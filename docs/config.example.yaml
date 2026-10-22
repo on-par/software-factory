@@ -99,6 +99,8 @@ version: 2
 # route: "<route>"
 # Named evidence commands. Shell-free argv; config overrides scripts.
 # commands: { test: "vitest run" }
+# App smoke commands for the opt-in app_smoke checker.
+# qa: { start: ["npm", "start"], smoke: ["npm", "run", "smoke"] }
 # Repo risk policy for the risk receipt and the land risk gate (schema:
 # packages/config/src/risk.ts). Unset: the packaged default rules.
 # risk:

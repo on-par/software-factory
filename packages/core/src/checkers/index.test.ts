@@ -1606,7 +1606,7 @@ describe('listBuiltInCheckers', () => {
     const worktree = await makeWorktree();
     const router = new ModelRouter(models, routes, false, new StubModelExecutor({ scripts: {} }));
     const summary = await runAllCheckers(makeContext(worktree), router, null);
-    expect(listBuiltInCheckers().map((c) => c.name)).toEqual(summary.results.map((r) => r.checker));
+    expect(listBuiltInCheckers().map((c) => c.name)).toEqual([...summary.results.map((r) => r.checker), 'app_smoke']);
   });
 
   it('gives every checker a non-empty single-line description', () => {

@@ -1,6 +1,6 @@
 // src/checkers/index.ts — Checker framework: built-in + custom checkers
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { EventKind } from '../events/kinds.js';
@@ -10,8 +10,13 @@ import type { SandboxPolicy } from '../sandbox/index.js';
 import type { CheckerOutput, CheckSummary, Constitution, RegressionFinding } from '../types/index.js';
 import { type CommandResult, type RunCommandOptions } from '../utils/command-runner.js';
 import { runVerificationCommand as runCommand } from './run-command.js';
+import type { QaConfig } from '../config/qa-section.js';
 import { isTemplateToken } from '../config/template-tokens.js';
 import { extractJsonObjects } from '../utils/json.js';
+import { APP_SMOKE_CHECKER, appSmokeChecker } from './app-smoke.js';
+import { stripAnsi, writeCommandLog } from './command-log.js';
+
+export { writeCommandLog };
 import {
   DESIGN_SMELLS_CHECKER,
   designSmellsChecker,
@@ -39,6 +44,8 @@ export interface CheckerContext {
   sandbox?: SandboxPolicy;
   worktree: string;
   specPath: string;
+  /** Test seam; when undefined, app_smoke reads `qa` from the worktree's .factory/config.json. */
+  qa?: QaConfig | null;
   /** Run-start HEAD SHA captured by buildPhase before the worker ran — the diff base
    *  for checkouts with no origin/main or origin/master (#1162, #1211). */
   diffBase?: string;
@@ -137,14 +144,6 @@ export const compileChecker: CheckerFn = async (ctx) => {
 
 const COMMANDER_REQUIRED_OPTION_PATTERN = /^error: required option '.+' not specified$/gm;
 
-/** Removes terminal escape sequences: SGR/CSI (`ESC[1;31m`, `ESC[2K`) and charset selects (`ESC(B`). */
-function stripAnsi(text: string): string {
-  return text
-    .split(String.fromCharCode(27))
-    .map((part, index) => (index === 0 ? part : part.replace(/^\[[0-9;?]*[A-Za-z]|^[()][A-Za-z0-9]/, '')))
-    .join('');
-}
-
 function stripIncidentalCommanderNoise(text: string): string {
   return text
     .replace(COMMANDER_REQUIRED_OPTION_PATTERN, '')
@@ -216,33 +215,6 @@ function describeTestFailure(r: CommandResult, maxChars: number): string {
   if (stderrEvidence) return stderrEvidence.slice(0, maxChars);
 
   return describeCommandFailureTail(r, maxChars);
-}
-
-/** Writes a failed command's full stdout/stderr under ctx.outputLogDir. Returns the path,
- *  or null when no log dir is set or the write fails — the log is a diagnostic side
- *  channel and must never change a checker's verdict. */
-export async function writeCommandLog(ctx: CheckerContext, name: string, r: CommandResult): Promise<string | null> {
-  if (!ctx.outputLogDir) return null;
-  const path = join(ctx.outputLogDir, `${name.replace(/[^A-Za-z0-9.]+/g, '-')}.log`);
-  try {
-    await mkdir(ctx.outputLogDir, { recursive: true });
-    await writeFile(
-      path,
-      [
-        `$ ${r.command.join(' ')}`,
-        `exit code: ${r.exitCode}${r.timedOut ? ' (timed out)' : ''}`,
-        '',
-        '--- stdout ---',
-        stripAnsi(r.stdout),
-        '--- stderr ---',
-        stripAnsi(r.stderr),
-        '',
-      ].join('\n'),
-    );
-    return path;
-  } catch {
-    return null;
-  }
 }
 
 /** FAIL details for a checker command: `<label> failed: <summary>`, plus the full-output
@@ -554,7 +526,7 @@ Steps:
 // ---------- Runner: run all checkers for a product ----------
 
 /** The unified registry: every checker — built-in, agent-backed, custom, unknown — runs through the same fail-closed path. */
-const BUILT_IN_CHECKERS: readonly (Checker & { description: string })[] = [
+const BUILT_IN_CHECKERS: readonly (Checker & { description: string; optIn?: boolean })[] = [
   {
     name: WORKER_OUTPUT_CHECKER,
     run: (ctx) => workerOutputChecker(ctx),
@@ -589,6 +561,12 @@ const BUILT_IN_CHECKERS: readonly (Checker & { description: string })[] = [
     name: DESIGN_SMELLS_CHECKER,
     run: (ctx) => designSmellsChecker(ctx, ctx.router, ctx.timeoutSeconds),
     description: 'model-judged review of the diff for design smells',
+  },
+  {
+    name: APP_SMOKE_CHECKER,
+    run: (ctx) => appSmokeChecker(ctx),
+    description: 'opt-in: starts the app on the lane port (qa.start) and runs qa.smoke',
+    optIn: true,
   },
 ];
 
@@ -675,6 +653,7 @@ function buildCheckers(constitution: Constitution | null): Checker[] {
   }
   const checkers = new Map<string, Checker>();
   for (const checker of BUILT_IN_CHECKERS) {
+    if (!hasDeclaration && checker.optIn) continue;
     if (hasDeclaration && checker.name !== WORKER_OUTPUT_CHECKER && !declared.includes(checker.name)) continue;
     checkers.set(checker.name, checker);
   }
