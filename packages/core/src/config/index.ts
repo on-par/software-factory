@@ -121,7 +121,7 @@ const RoutesConfigSchema = z.object({
   ),
 });
 
-const FactoryConfigSchema = z.object({
+export const FactoryConfigSchema = z.object({
   version: z.number(),
   paths: z.object({
     constitutions: z.string(),
