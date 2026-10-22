@@ -59,7 +59,7 @@ import { resolveReviewRouting, type ReviewRouting } from '../review/routing.js';
 import { captureDiffBase } from '../checkers/design-smells.js';
 import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings, SizeGateMode } from '../config/index.js';
-import { type EffectiveModelPins, routeForBuildModel } from '../config/repo.js';
+import { decideBuildRoute, type EffectiveModelPins, routeForBuildModel } from '../config/repo.js';
 import { detectStuck } from '../steward/detect.js';
 import { runSteward, type RunStewardPorts } from '../steward/run.js';
 import { describeDotnetEnv, dotnetEnvReport } from '../environment/dotnet.js';
@@ -610,21 +610,16 @@ async function runIssueOnce(
       );
       // A pinned build model determines the route (#1367): an explicit repo `route` still wins, but
       // without one the pin's harness decides, so PLAN cannot send an Anthropic-pinned build to Codex.
-      // Two guards keep the pin from resurrecting a route the operator turned off: local-only mode
-      // forces codex in PLAN and a pin must not undo that; and a codex pin while codex is disabled
-      // cannot force codex — PLAN's codex→claude fallback applies and the compatibility check below
-      // drops the pin, exactly as on main.
-      let derivedRoute =
-        request.preferredRoute || request.localOnly
-          ? undefined
-          : routeForBuildModel(ports.router.registryRef, request.modelPins.build);
-      if (derivedRoute === 'codex' && request.codexDisabled) {
-        log(
-          'model-override',
-          `pinned build model ${request.modelPins.build} needs the codex route but codex is disabled — the pin cannot force it`,
-        );
-        derivedRoute = undefined;
-      }
+      // decideBuildRoute holds the guards (local-only forces codex in PLAN and a pin must not undo it;
+      // a codex pin cannot force codex while codex is disabled) so status and the watchdog agree.
+      const decision = decideBuildRoute(ports.router.registryRef, {
+        repoRoute: request.preferredRoute,
+        buildPin: request.modelPins.build,
+        localOnly: request.localOnly,
+        codexDisabled: request.codexDisabled,
+      });
+      if (decision.note && decision.source === 'plan') log('model-override', decision.note);
+      const derivedRoute = decision.source === 'build-pin' ? decision.route : undefined;
       const pinnedRoute = request.preferredRoute ?? derivedRoute;
       if (derivedRoute) {
         log(
@@ -797,15 +792,7 @@ async function runIssueOnce(
         }
       }
       if (buildModel) {
-        const harnessId = ports.router.registryRef.getHarnessId(buildModel);
-        const compatible =
-          buildRoute === 'codex'
-            ? ports.router.registryRef.isCodexModel(buildModel)
-            : buildRoute === 'opencode'
-              ? harnessId === 'opencode'
-              : buildRoute === 'command'
-                ? routeForBuildModel(ports.router.registryRef, buildModel) === 'command'
-                : harnessId === 'claude-cli';
+        const compatible = routeForBuildModel(ports.router.registryRef, buildModel) === buildRoute;
         if (!compatible) {
           log(
             'model_override_ignored',

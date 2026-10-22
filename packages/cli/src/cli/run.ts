@@ -223,15 +223,17 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
         const repoConfig = rt.configLoaders.loadRepoConfig(repoRoot);
         const registry = new rt.coreOps.ModelRegistry(applyRepoConfig(rt.configLoaders.loadModelsConfig(), repoConfig));
         const pins = rt.configLoaders.resolveEffectiveModelPins(registry, repoConfig, process.env);
-        const build = resolveEffectiveBuildRoute(registry, repoConfig, pins);
+        const localOnly = resolveLocalOnly();
+        const codexDisabled = resolveCodexDisabled(repoConfig);
+        const build = resolveEffectiveBuildRoute(registry, repoConfig, pins, { localOnly, codexDisabled });
         watchdogHarness = resolveRunUsageHarness({
           buildRoute: build.route,
           buildRouteSource: build.source,
           planHarnesses: [pins.plan, pins.planFallback]
             .filter((m): m is string => !!m)
             .map((m) => registry.getHarnessId(m)),
-          codexDisabled: resolveCodexDisabled(repoConfig),
-          localOnly: resolveLocalOnly(),
+          codexDisabled,
+          localOnly,
         });
       } catch {
         watchdogHarness = undefined; // unresolvable config keeps today's Claude gating

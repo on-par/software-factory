@@ -62,12 +62,12 @@ export type {
   WatchdogPolicyOverrides,
   WatchdogPolicySource,
 } from './config/repo.js';
+export { decideBuildRoute, resolveEffectiveBuildRoute, type BuildRouteDecisionInput } from './config/build-route.js';
 export {
   applyRepoConfig,
   describeEffectiveConfig,
   loadRepoConfig,
   resolveCodexDisabled,
-  resolveEffectiveBuildRoute,
   resolveEffectiveModelPins,
   resolveEfficiencyPolicy,
   resolveLaneBreakerThreshold,
