@@ -11,6 +11,7 @@ import {
 import type { OrderCollision } from './order-collision.js';
 
 export type { OrderCollision };
+export * from './prerequisite-order.js';
 
 export type UnparkErrorCode = 'not-parked' | 'lane-required' | 'unpark-failed';
 
