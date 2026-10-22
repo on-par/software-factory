@@ -59,12 +59,13 @@ describe('worktreeWorkspace', () => {
       branch: 'issue-9',
       worktreePath: '/repo/.worktrees/issue-9',
       findOpenPr,
+      keepsFile: '/state/worktree-keeps.json',
       setup,
       cleanup: vi.fn(),
     });
 
     expect(ws.remoteBranch).toEqual({ sha: 'abc' });
-    expect(setup.mock.calls[0][6]).toEqual({ findOpenPr });
+    expect(setup.mock.calls[0][6]).toEqual({ findOpenPr, keepsFile: '/state/worktree-keeps.json' });
   });
 
   it('leaves remoteBranch absent when the setup result has none', async () => {

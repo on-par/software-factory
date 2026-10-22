@@ -4,7 +4,6 @@ import type { EventKind, FactoryConfig, getFactoryPaths } from '@on-par/factory-
 import { resolveSandboxPolicy } from '@on-par/factory-core';
 import {
   type LaneWorktreeReapResult,
-  findWorktreeKeep,
   type WorktreeSandbox,
   logEvent,
   resolveEffectiveConfig,
@@ -54,7 +53,9 @@ async function reapUnderLock<R>(
     const log = (type: EventKind, msg: string) => logEvent(paths.events, type, issue, msg);
     const sandbox = gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
     const result = await withGitLock(repoRoot, () =>
-      withFileLock(paths.gitLock, () => reap(resolved, { issue, branchPrefix, log, sandbox })),
+      withFileLock(paths.gitLock, () =>
+        reap(resolved, { issue, branchPrefix, log, sandbox, keepsFile: paths.worktreeKeeps }),
+      ),
     );
     return { worktreePath, result };
   } catch (err: any) {
@@ -64,24 +65,13 @@ async function reapUnderLock<R>(
 }
 
 /** Eagerly reaps a parked lane's own worktree inside `factory run` (#1007). All the safety
- *  gates live in reapLaneWorktree. A reap failure is logged as a warn and never surfaces —
+ *  gates, the keep record included, live in reapLaneWorktree. A reap failure is logged as a warn and never surfaces —
  *  parking must always succeed. */
 export async function reapParkedLane(
   rt: ReapRuntime,
   reap: typeof reapLaneWorktree,
   args: Parameters<typeof reapUnderLock>[1],
 ): Promise<void> {
-  const [issue, , , paths] = args;
-  const keep = findWorktreeKeep(paths.worktreeKeeps, issue, (type, msg) => logEvent(paths.events, type, issue, msg));
-  if (keep) {
-    logEvent(
-      paths.events,
-      'worktree-gc',
-      issue,
-      `kept ${keep.path} — kept (${keep.reason}); not reaping the parked lane's worktree or branch`,
-    );
-    return;
-  }
   await reapUnderLock(rt, args, 'parked-lane worktree reap failed', (worktreePath, opts) =>
     reap(args[1], worktreePath, opts),
   );
@@ -98,6 +88,8 @@ export function formatShipReapLine(worktreePath: string, result: LaneWorktreeRea
       return `🧹 Removed worktree ${worktreePath}${result.branchDeleted ? ` and branch ${result.branch}` : ''} — no PR was opened and nothing was committed`;
     case 'kept-dirty':
       return `📌 Kept worktree ${worktreePath}${withBranch} — it has uncommitted changes`;
+    case 'kept-record':
+      return `📌 Kept worktree ${worktreePath}${withBranch} — it has a keep record`;
     case 'kept-committed':
       return `📌 Kept worktree ${worktreePath}${withBranch} — it has commits beyond the base`;
     case 'kept-branch-mismatch':

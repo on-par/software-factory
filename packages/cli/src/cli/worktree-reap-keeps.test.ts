@@ -1,5 +1,5 @@
 // packages/cli/src/cli/worktree-reap-keeps.test.ts — the park-time reap honors a budget-park keep record (#3316)
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { getFactoryPaths } from '@on-par/factory-core';
@@ -33,7 +33,7 @@ describe('reapParkedLane with a keep record', () => {
     return { repoRoot, worktreePath, paths, rt, reapSpy };
   }
 
-  it('a budget park writes a keep record and the park-time reap leaves the worktree and branch in place', async () => {
+  it('a budget park writes a keep record and the park-time reap hands it to reapLaneWorktree, which keeps the worktree', async () => {
     const { repoRoot, worktreePath, paths, rt, reapSpy } = setup();
     // The record enforceIssueBudget writes on a budget park (budget.test.ts covers the writer).
     mkdirSync(dirname(paths.worktreeKeeps), { recursive: true });
@@ -45,9 +45,9 @@ describe('reapParkedLane with a keep record', () => {
     );
     await reapParkedLane(rt, reapSpy, [3264, repoRoot, 'o/r', paths, undefined]);
     expect(findWorktreeKeep(paths.worktreeKeeps, 3264)?.reason).toBe('budget_exceeded');
-    expect(reapSpy).not.toHaveBeenCalled();
+    expect(reapSpy).toHaveBeenCalledTimes(1);
+    expect(reapSpy.mock.calls[0][2]).toMatchObject({ issue: 3264, keepsFile: paths.worktreeKeeps });
     expect(existsSync(worktreePath)).toBe(true);
-    expect(readFileSync(paths.events, 'utf8')).toContain('kept (budget_exceeded)');
   });
 
   it('reaps normally when the issue has no keep record', async () => {

@@ -59,6 +59,8 @@ export async function worktreeWorkspace(opts: {
   log?: (type: EventKind, msg: string) => void;
   sandbox?: WorktreeSandbox;
   findOpenPr?: (branch: string) => Promise<PrLookup>;
+  /** worktree-keeps.json setup consults before replacing an existing worktree. */
+  keepsFile?: string;
   setup?: typeof setupWorktree;
   cleanup?: typeof cleanupWorktree;
 }): Promise<Workspace> {
@@ -66,6 +68,7 @@ export async function worktreeWorkspace(opts: {
   const cleanup = opts.cleanup ?? cleanupWorktree;
   const result = await setup(opts.repoRoot, opts.branch, opts.worktreePath, opts.startPoint, opts.sandbox, opts.log, {
     findOpenPr: opts.findOpenPr,
+    keepsFile: opts.keepsFile,
   });
   return {
     path: opts.worktreePath,

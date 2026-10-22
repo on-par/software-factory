@@ -22,6 +22,7 @@ import type {
 } from '../types/index.js';
 import { levelForType } from './format.js';
 import { execGit } from './git-exec.js';
+import { assertLaneReplaceable, laneReapKept } from './lane-removal.js';
 import { createMicroVm, removeMicroVm, type WorktreeSandbox } from './microvm.js';
 import { ensureWorktreeParentExcluded } from './worktree-location.js';
 
@@ -149,6 +150,10 @@ export interface WorktreeSetupOptions {
   /** Looks up an open PR whose head is `branch`; only called when origin/<branch> exists.
    *  When it reports an open PR and no startPoint is given, the worktree is based on origin/<branch> (#3099). */
   findOpenPr?: (branch: string) => Promise<PrLookup>;
+  /** worktree-keeps.json to consult before replacing an existing lane worktree; defaults to the repo's state dir. */
+  keepsFile?: string;
+  /** The lane issue; defaults to the number in a `<prefix>/<n>-` branch. */
+  issue?: number;
 }
 
 export interface WorktreeSetupResult {
@@ -202,6 +207,7 @@ export async function setupWorktree(
     log?.('remote-branch-preexisting', `origin/${branch} already exists @ ${remoteSha}; ${prText}`);
   }
   const base = startPoint ?? (openPrBranch ? `origin/${branch}` : await defaultRemoteBase(repoRoot));
+  await assertLaneReplaceable(repoRoot, branch, worktreePath, opts, log ?? (() => {}));
   await execGit(['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot }).catch(() => {});
   await execGit(['branch', '-D', branch], { cwd: repoRoot }).catch(() => {});
   mkdirSync(dirname(worktreePath), { recursive: true });
@@ -239,7 +245,8 @@ export async function cleanupWorktree(
 }
 
 export interface LaneWorktreeReapResult {
-  outcome: 'removed' | 'kept-dirty' | 'kept-committed' | 'kept-branch-mismatch' | 'kept-unverified' | 'absent';
+  outcome:
+    'removed' | 'kept-dirty' | 'kept-record' | 'kept-committed' | 'kept-branch-mismatch' | 'kept-unverified' | 'absent';
   branch: string | null;
   branchDeleted: boolean;
 }
@@ -247,7 +254,8 @@ export interface LaneWorktreeReapResult {
 /**
  * Eagerly removes a lane's own worktree when the lane parks or fails (#1007), fail-closed:
  * the checked-out branch must match `<prefix>/<issue>-*` (a human checkout squatting the lane
- * path is left alone), the tree must have no modified tracked files, and the local branch is
+ * path is left alone), the issue must have no keep record (#3316), the tree must have no modified tracked files (both
+ * decided by decideLaneRemoval), and the local branch is
  * deleted only when its content is provably on the remote — an unpushed parked attempt's
  * branch survives as its only handle. Every probe failure means keep. A registered-but-deleted
  * path returns `absent` (pruning it is sweepWorktrees' job).
@@ -260,6 +268,7 @@ export async function reapLaneWorktree(
     branchPrefix?: string;
     log?: (type: EventKind, msg: string) => void;
     sandbox?: WorktreeSandbox;
+    keepsFile?: string;
   },
 ): Promise<LaneWorktreeReapResult> {
   const log = opts.log ?? (() => {});
@@ -280,16 +289,8 @@ export async function reapLaneWorktree(
     return { outcome: 'kept-branch-mismatch', branch, branchDeleted: false };
   }
 
-  const status = await execGit(['status', '--porcelain', '--untracked-files=no'], { cwd: worktreePath }).catch(
-    () => null,
-  );
-  if (status === null || status.stdout.trim() !== '') {
-    log(
-      'warn',
-      `parked worktree ${worktreePath} has modified tracked files — kept; review it or run 'factory worktree gc' / 'factory doctor --reconcile'`,
-    );
-    return { outcome: 'kept-dirty', branch, branchDeleted: false };
-  }
+  const kept = await laneReapKept(repoRoot, worktreePath, opts, log);
+  if (kept) return { outcome: kept, branch, branchDeleted: false };
 
   const tip = await execGit(['rev-parse', 'HEAD'], { cwd: worktreePath }).then(
     (r) => r.stdout.trim(),
