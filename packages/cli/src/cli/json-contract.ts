@@ -158,6 +158,7 @@ export const costJsonSchema = z.object({
       model: z.string(),
       inputTokens: z.number(),
       outputTokens: z.number(),
+      rawInputTokens: z.number().nullable(),
       cacheReadTokens: z.number().nullable(),
       cacheCreationTokens: z.number().nullable(),
       cost: z.number().nullable(),
@@ -169,12 +170,26 @@ export const costJsonSchema = z.object({
       tasks: z.number(),
       inputTokens: z.number(),
       outputTokens: z.number(),
+      rawInputTokens: z.number(),
+      cacheReadTokens: z.number(),
+      cacheCreationTokens: z.number(),
       cost: z.number().nullable(),
       unpricedCount: z.number(),
       cachedRateMissingCount: z.number(),
     }),
   ),
-  total: z.object({ cost: z.number().nullable(), unpricedCount: z.number(), cachedRateMissingCount: z.number() }),
+  total: z.object({
+    cost: z.number().nullable(),
+    unpricedCount: z.number(),
+    cachedRateMissingCount: z.number(),
+    tokens: z.object({
+      input: z.number(),
+      output: z.number(),
+      rawInput: z.number(),
+      cacheRead: z.number(),
+      cacheCreation: z.number(),
+    }),
+  }),
 });
 
 export const runsJsonSchema = z.object({
