@@ -705,11 +705,10 @@ export {
   describeReviewConstitutionSource,
 } from './constitutions/index.js';
 export { listBuiltInCheckers, type BuiltInCheckerInfo } from './checkers/index.js';
-export { findTemplateTokens, isTemplateToken } from './config/template-tokens.js';
+export { findTemplateTokens, isTemplateToken, type TemplateTokenFinding } from './config/template-tokens.js';
 export { lintFactoryConfig } from './config/config-lint.js';
 export { findConfigSchemaErrors, type ConfigSchemaFinding } from './config/config-schema-lint.js';
 export type { ConfigLintFinding, ConfigLintInput, ConfigLintResult, ConfigLintVerdict } from './config/config-lint.js';
-export type { TemplateTokenFinding } from './config/template-tokens.js';
 export { findUnknownConstitutionCheckers, formatUnknownCheckerMessage } from './checkers/constitution-preflight.js';
 export type { UnknownConstitutionChecker } from './checkers/constitution-preflight.js';
 
@@ -787,3 +786,4 @@ export { syncLandBranch, type LandSyncOptions, type LandSyncResult } from './lan
 export { fetchHumanEventSourcesCached, runProducedPrOrMerge } from './kpis/sweep.js';
 export type { AgentInvocation, TokenCoverage, TokenCoverageEntry } from './metrics/token-coverage.js';
 export { agentInvocationsFromEvents, computeTokenCoverage } from './metrics/token-coverage.js';
+export { partitionGithubClaimsByActivity, type GithubActiveClaim } from './queue/activity.js';

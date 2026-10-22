@@ -317,7 +317,7 @@ const PUBLIC_API_KEYS = [
 const JOB_KEYS = 'resolveHostMaxAgentJobs hostAgentJobsDir withHostAgentJobLease findStatelessLaneIssues'.split(' ');
 const TAIL = 'InvalidEventCursorError eventSegmentFileName eventSegmentsDir readEventsTail readEventsSince'.split(' ');
 const STEER = 'STEER_SOURCES STEER_PHASES SteerEventError parseSteerEvent appendSteerEvent listSteerEvents'.split(' '); // #3400
-const STEERED = 'collectMergedPrSteers isoWeekKey summarizeSteerability formatSteerabilityReport'.split(' '); // #3403
+const STEERED = 'collectMergedPrSteers isoWeekKey summarizeSteerability formatSteerabilityReport fileBug'.split(' '); // #3403
 const MORE = ['agentInvocationsFromEvents', 'computeTokenCoverage', 'readReviewApproval', 'readStackSliceGate']; // #3126, #3366
 const STACK = 'nextStackSlice restackAfterSquashMerge listRepoLaneLabels listStatelessLaneIssues'.split(' ');
 const POLICY = 'isEgressEnforced describeDraftPrPolicy resolveDraftPrPolicy resolveConfiguredWritablePaths'.split(' '); // #2215, #3449, #3454
@@ -485,7 +485,7 @@ const INTERNAL_API_KEYS = [
   // Auto-file a fingerprinted bug (#373)
   'createOctokitFilingClient',
   'DEFAULT_BUG_LABELS',
-  'fileBug',
+  'partitionGithubClaimsByActivity',
   'findIssueByMarker',
   'findMatchingIssue',
   'fingerprintMarker',

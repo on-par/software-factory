@@ -71,6 +71,21 @@ describe('buildStatusJson', () => {
     expect(statusJsonSchema.parse(out)).toEqual(out);
   });
 
+  it('maps a GitHub-label-queue row (lane, issue, phase, lastActivityAt) to an active row with ageSec (#3344)', () => {
+    const out = buildStatusJson({
+      repo: 'o/r',
+      product: null,
+      stop: false,
+      stopInfo: null,
+      breakers: [],
+      active: [{ lane: 'bugfix', issue: 3316, phase: 'check', lastActivityAt: new Date(now - 90_000).toISOString() }],
+      update: null,
+      now,
+    });
+    expect(out.active).toEqual([{ lane: 'bugfix', issue: 3316, phase: 'check', ageSec: 90 }]);
+    expect(statusJsonSchema.parse(out)).toEqual(out);
+  });
+
   it('clamps future and unparsable activity times to 0', () => {
     const out = buildStatusJson({
       repo: 'o/r',

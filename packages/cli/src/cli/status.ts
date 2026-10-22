@@ -16,7 +16,7 @@ import {
   readEvents,
   resolveMergePolicy,
 } from '@on-par/factory-core';
-import type { QueueDiagnostic } from '@on-par/factory-core';
+import type { ActiveQueueClaim, QueueDiagnostic } from '@on-par/factory-core';
 import {
   createGithubQueue,
   createOctokitQueueClient,
@@ -24,7 +24,9 @@ import {
   formatQueueOrderConflict,
   formatWorktreeLocation,
   hostBuildSlotsDir,
+  IN_PROGRESS_LABEL,
   listHostSlots,
+  partitionGithubClaimsByActivity,
   recordLocalAuthFailure,
   resolveEffectiveConfig,
   resolveHostMaxBuilds,
@@ -80,6 +82,64 @@ function formatClaimAge(lastActivityAt: string, now: number): string {
   return minutes < 1 ? '<1m' : `${minutes}m`;
 }
 
+interface ActiveClaimsView {
+  hasQueueFile: boolean;
+  active: Array<Pick<ActiveQueueClaim, 'lane' | 'issue' | 'phase' | 'lastActivityAt'>>;
+  staleCount: number;
+  diagnostics: QueueDiagnostic[];
+  /** A token was present and the GitHub lookup ran. */
+  githubChecked: boolean;
+  githubError: string | null;
+}
+
+/** Reads both Active sources once: the local queue file and GitHub-label-queue claims (#3344).
+ *  An issue already in the local queue file is judged from that entry only. */
+async function readActiveClaims(
+  paths: ReturnType<typeof getFactoryPaths>,
+  ghRepo: string,
+  rt: StatusRuntime,
+): Promise<ActiveClaimsView> {
+  const view: ActiveClaimsView = {
+    hasQueueFile: existsSync(paths.queue),
+    active: [],
+    staleCount: 0,
+    diagnostics: [],
+    githubChecked: false,
+    githubError: null,
+  };
+  const localIssues = new Set<number>();
+  if (view.hasQueueFile) {
+    const { entries, diagnostics } = parseQueue(readFileSync(paths.queue, 'utf-8'));
+    view.diagnostics = diagnostics;
+    for (const e of entries) localIssues.add(e.issue);
+    if (entries.length > 0) {
+      const local = await partitionLocalQueueByActivity(entries, paths.runs);
+      view.active.push(...local.active);
+      view.staleCount += local.staleCount;
+    }
+  }
+  if (rt.hasGitHubToken()) {
+    view.githubChecked = true;
+    try {
+      const [owner, repo] = ghRepo.split('/');
+      const inProgress = await createOctokitQueueClient(rt.getOctokit()).listOpenIssuesWithLabels({
+        owner,
+        repo,
+        labels: [IN_PROGRESS_LABEL],
+      });
+      const github = await partitionGithubClaimsByActivity(
+        inProgress.filter((i) => !localIssues.has(i.number)),
+        paths.runs,
+      );
+      view.active.push(...github.active);
+      view.staleCount += github.staleCount;
+    } catch (err) {
+      view.githubError = rt.errorDetail(err);
+    }
+  }
+  return view;
+}
+
 export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise<void> {
   if (opts.json) {
     // `--kpis` is deliberately ignored here: the JSON shape is fixed (#1101).
@@ -87,12 +147,8 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
     const paths = getFactoryPaths(repoRoot);
     if (!existsSync(paths.root)) throw new rt.CliExitError(`factory: ${notInitializedMessage()}`, 2);
     const ghRepo = await rt.getGitHubRepo();
-    let active: Awaited<ReturnType<typeof partitionLocalQueueByActivity>>['active'] = [];
-    if (existsSync(paths.queue)) {
-      const { entries, diagnostics } = parseQueue(readFileSync(paths.queue, 'utf-8'));
-      if (entries.length > 0) ({ active } = await partitionLocalQueueByActivity(entries, paths.runs));
-      rt.warnQueueDiagnostics(diagnostics);
-    }
+    const view = await readActiveClaims(paths, ghRepo, rt);
+    rt.warnQueueDiagnostics(view.diagnostics);
     const marker = readStopMarker(paths.stop);
     console.log(
       JSON.stringify(
@@ -102,7 +158,7 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
           stop: existsSync(paths.stop),
           stopInfo: marker ? { source: marker.source, setAt: marker.at ?? null } : null,
           breakers: await new ProviderBreaker(paths.breaker).list(),
-          active,
+          active: view.active,
           update: buildStatusUpdateJson(readUpdateState(updateStatePath(daemonRuntimePaths().dir))),
           now: Date.now(),
         }),
@@ -140,28 +196,22 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
   );
 
   console.log(styleText('bold', '\n== Active =='));
-  if (existsSync(paths.queue)) {
-    const { entries, diagnostics } = parseQueue(readFileSync(paths.queue, 'utf-8'));
-    if (entries.length > 0) {
-      const { active, staleCount } = await partitionLocalQueueByActivity(entries, paths.runs);
-      if (active.length === 0) {
-        console.log('  (idle — no active claims)');
-      } else {
-        const now = Date.now();
-        for (const e of active) {
-          console.log(`  ${e.lane} ${e.issue}  [${e.phase}, ${formatClaimAge(e.lastActivityAt, now)} ago]`);
-        }
-      }
-      if (staleCount > 0) {
-        console.log(`  (${staleCount} stale entr${staleCount === 1 ? 'y' : 'ies'} hidden — no recent activity)`);
-      }
-    } else if (diagnostics.length === 0) {
-      console.log('  (idle — no active claims)');
+  const view = await readActiveClaims(paths, ghRepo, rt);
+  if (view.active.length > 0) {
+    const now = Date.now();
+    for (const e of view.active) {
+      console.log(`  ${e.lane} #${e.issue}  [${e.phase}, ${formatClaimAge(e.lastActivityAt, now)} ago]`);
     }
-    rt.warnQueueDiagnostics(diagnostics);
-  } else {
+  } else if (!view.hasQueueFile && !view.githubChecked) {
     console.log('  (no queue file)');
+  } else if (view.diagnostics.length === 0 || view.githubChecked) {
+    console.log('  (idle — no active claims)');
   }
+  if (view.staleCount > 0) {
+    console.log(`  (${view.staleCount} stale entr${view.staleCount === 1 ? 'y' : 'ies'} hidden — no recent activity)`);
+  }
+  if (view.githubError) console.log(`  (GitHub claim lookup failed — ${view.githubError})`);
+  rt.warnQueueDiagnostics(view.diagnostics);
 
   const baseHold = readBaseHold(paths.baseHold);
   if (baseHold !== null && baseHold.repo === ghRepo) {
