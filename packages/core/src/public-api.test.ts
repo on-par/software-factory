@@ -434,6 +434,7 @@ const INTERNAL_API_KEYS = [
   'DEFAULT_CODE_CONSTITUTION',
   'describeConstitutionSource',
   'listBuiltInCheckers',
+  'summarizeCommandRun',
   'findUnknownConstitutionCheckers',
   'findTemplateTokens',
   'isTemplateToken',
