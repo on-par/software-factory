@@ -6,7 +6,8 @@
 //   3. the acquired Environment is released exactly once on every exit path.
 //   4. a failed environment lease degrades (appPort undefined) rather than parking the run.
 //   5. exactly one terminal event sequence is emitted per run, matching the returned RunOutcome
-//      (including the non-park `released` exit for an environment-caused CHECK failure, #1928; a config cause parks, #2583).
+//      (including the non-park `released` exit for an environment-caused CHECK failure, #1928; a config cause parks, #2583;
+//      phase-scoped loggers cannot emit a terminal kind: withSingleTerminalEvent demotes them, #3435).
 // PLAN may be skipped by the planReuse port after an environment release (#2340).
 // CHECK may be resumed on a kept worktree via request.resumeFrom after an environment release (#2564).
 // Every park posts or edits one issue-level park comment behind a hidden marker; a GitHub failure only logs a warning (#2314).
@@ -26,7 +27,7 @@ import { laneEnv } from '../environment/index.js';
 import { buildPhase as buildPhaseDefault } from '../phases/build.js';
 import {
   checkPhase as checkPhaseDefault,
-  remainingShowstoppers,
+  type CheckPhaseResult,
   renderEnvironmentReleaseComment,
 } from '../phases/check.js';
 import type { SizeBudget } from '../readiness/size.js';
@@ -35,6 +36,8 @@ import { lintFactoryConfig } from '../config/config-lint.js';
 import { planPhase as planPhaseDefault, type PlanResult } from '../phases/plan.js';
 import { planConfigParkMessage } from '../phases/plan-spec-guards.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
+import { classifyCheckFailure } from './check-verdict.js';
+import { withSingleTerminalEvent } from './terminal-events.js';
 import { withRunAttribution, type RunLogFn as LogFn } from './attribution.js';
 import { publishParkComment } from './park-comment.js';
 import { createRunPhaseLogger } from './run-phase-log.js';
@@ -268,7 +271,8 @@ function errorMessage(err: unknown): string {
 }
 
 export async function runIssue(request: RunRequest, policy: RunPolicy, rawPorts: RunPorts): Promise<RunOutcome> {
-  const { ports, stamp } = withRunAttribution(rawPorts);
+  const { ports: attributed, stamp } = withRunAttribution(rawPorts);
+  const ports = withSingleTerminalEvent(attributed);
   const log = ports.events();
   const observed: { checkSummary?: CheckSummary } = {};
   let outcome: RunOutcome;
@@ -952,24 +956,25 @@ async function runIssueOnce(
         log('environment_warning', `could not clear the check-resume point: ${errorMessage(err)}`);
       }
     };
-    const checkBudget = await assertBudget('CHECK');
-    if (checkBudget) return checkBudget;
-    if (!check.passed) {
-      if (check.environment) {
-        const env = check.environment;
+    const finishFailedCheck = async (
+      failed: CheckPhaseResult,
+      opts: { ciReworkRound?: number } = {},
+    ): Promise<RunOutcome> => {
+      if (failed.environment) {
+        const env = failed.environment;
         if (env.cause === 'config') {
           // A config failure fails the same way on every requeue (#2583): park with file, line and fix.
           await clearCheckResume();
           const failure =
-            check.failureSignature !== undefined
-              ? { failureSignature: check.failureSignature, failingChecks: env.failingChecks }
+            failed.failureSignature !== undefined
+              ? { failureSignature: failed.failureSignature, failingChecks: env.failingChecks }
               : undefined;
-          return await terminalParked(
+          return terminalParked(
             'config',
             configParkMessage({
               issue: request.issue,
               failure: env,
-              summary: check.summary,
+              summary: failed.summary,
               constitution,
               configFile: request.repoConfigFile,
             }),
@@ -989,7 +994,12 @@ async function runIssueOnce(
             log('environment_warning', `could not post the environment-failure comment: ${errorMessage(err)}`);
           }
         }
-        let preserve = ports.checkResume !== undefined && !request.localOnly && !request.noPr && !planSlice;
+        let preserve =
+          ports.checkResume !== undefined &&
+          !request.localOnly &&
+          !request.noPr &&
+          !planSlice &&
+          opts.ciReworkRound === undefined;
         let fixTarget = '';
         if (preserve && ports.checkResume) {
           fixTarget = preservedFixTarget(env, constitution, request.repoConfigFile);
@@ -1037,34 +1047,30 @@ async function runIssueOnce(
           reworkRounds: 0,
           baseSha: env.baseSha,
           failingChecks: env.failingChecks,
-          ...(check.failureSignature !== undefined ? { failureSignature: check.failureSignature } : {}),
+          ...(failed.failureSignature !== undefined ? { failureSignature: failed.failureSignature } : {}),
           ...(preserve ? { buildPreserved: true } : {}),
         };
       }
-      const checkFailure =
-        check.failureSignature !== undefined
-          ? {
-              failureSignature: check.failureSignature,
-              failingChecks: check.summary.results.filter((r) => r.result === 'FAIL').map((r) => r.checker),
-            }
-          : undefined;
-      if (checkFailure) {
-        await ports.reworkHistory?.record(request.issue, checkFailure.failureSignature, checkFailure.failingChecks);
+      const verdict = classifyCheckFailure(failed, opts);
+      if (verdict.checkFailure) {
+        await ports.reworkHistory?.record(
+          request.issue,
+          verdict.checkFailure.failureSignature,
+          verdict.checkFailure.failingChecks,
+        );
       }
-      const reason: ParkReason = check.crossRunStuck ? 'held' : check.stuck ? 'escalate' : 'fail';
-      const message = check.crossRunStuck
-        ? `issue held: identical failure signature parked this lane in a prior run too (${check.reworkRounds} rework rounds burned there, 0 here) — needs a human decision`
-        : check.stuck
-          ? `lane stuck after ${check.reworkRounds} rework rounds (identical failures) — escalated`
-          : `${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`;
-      const showstoppers = remainingShowstoppers(check.summary);
-      const parkedMessage =
-        showstoppers.length > 0
-          ? `${message}\nremaining showstoppers:\n${showstoppers.map((s) => `- ${s}`).join('\n')}`
-          : message;
       await clearCheckResume();
-      return await terminalParked(reason, parkedMessage, checkFailure);
-    }
+      return terminalParked(verdict.reason, verdict.message, verdict.checkFailure);
+    };
+    const onRecheck = async (recheck: CheckPhaseResult, round: number): Promise<RunOutcome | undefined> => {
+      observed.checkSummary = recheck.summary;
+      const recheckBudget = await assertBudget('CHECK');
+      if (recheckBudget) return recheckBudget;
+      return recheck.passed ? undefined : finishFailedCheck(recheck, { ciReworkRound: round });
+    };
+    const checkBudget = await assertBudget('CHECK');
+    if (checkBudget) return checkBudget;
+    if (!check.passed) return await finishFailedCheck(check);
     await clearCheckResume();
     // Clean check — clear stale cross-run history so a future, genuinely different
     // failure is not mistaken for a repeat of one already resolved.
@@ -1158,9 +1164,23 @@ async function runIssueOnce(
     // SHIP
     await setPhase('ship');
     const shipped = await shipWithCiRework(
-      { request, ports, shipPhase, checkPhase, checkOpts, check, constitution, appPort, appBaseUrl, onPgid, runId },
+      {
+        request,
+        ports,
+        shipPhase,
+        checkPhase,
+        checkOpts,
+        check,
+        constitution,
+        appPort,
+        appBaseUrl,
+        onPgid,
+        runId,
+        onRecheck,
+      },
       { builtRoute, builtModel, reviewRouting, pinNote, planSlice, draftPr: policy.pr?.draft },
     );
+    if (shipped.outcome) return shipped.outcome;
     const { ship, parked } = shipped;
     if (parked) return await terminalParked(parked.reason, parked.message, parked.checkFailure, parked.ciFailure);
 
