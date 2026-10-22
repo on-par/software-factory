@@ -1,13 +1,7 @@
 // packages/core/src/queue/stale-claims.ts — Release expired-lease claims back to factory:queued (#1500).
 
-import {
-  CLAIM_EXPIRES_LABEL_PREFIX,
-  createGithubQueue,
-  IN_PROGRESS_LABEL,
-  parseClaimExpiresLabel,
-  type QueueGitHubClient,
-  type QueueIssue,
-} from './github-queue.js';
+import { claimLiveness } from './claim-liveness.js';
+import { createGithubQueue, IN_PROGRESS_LABEL, type QueueGitHubClient, type QueueIssue } from './github-queue.js';
 
 /** One open issue whose claim lease has expired. */
 export interface StaleClaim {
@@ -34,26 +28,14 @@ export interface ReleaseStaleClaimsOptions {
 }
 
 export function findStaleClaims(issues: readonly QueueIssue[], opts: { now?: () => number } = {}): StaleClaim[] {
-  const now = opts.now ?? Date.now;
-  const nowSeconds = Math.floor(now() / 1000);
+  const nowMs = (opts.now ?? Date.now)();
   const stale: StaleClaim[] = [];
 
   for (const issue of issues) {
-    const expiresLabels = issue.labels.filter((name) => name.startsWith(CLAIM_EXPIRES_LABEL_PREFIX));
-    // No lease label ⇒ no expiry evidence ⇒ never releasable (#999 out of scope: other claim states).
-    if (expiresLabels.length === 0) continue;
-
-    let expired: StaleClaim | null = null;
-    for (const label of expiresLabels) {
-      const expiresAt = parseClaimExpiresLabel(label);
-      // A malformed or still-live lease means somebody may still be working this issue.
-      if (expiresAt === null || expiresAt > nowSeconds) {
-        expired = null;
-        break;
-      }
-      expired ??= { issue: issue.number, label, expiresAt };
+    const liveness = claimLiveness(issue.labels, nowMs);
+    if (liveness.verdict === 'expired') {
+      stale.push({ issue: issue.number, label: liveness.label, expiresAt: liveness.expiresAt });
     }
-    if (expired) stale.push(expired);
   }
 
   return stale;

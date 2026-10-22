@@ -102,6 +102,18 @@ describe('LaneFileGuard holder-not-running', () => {
     }
   });
 
+  it('reaps a no-PR claim whose holder is factory:in-progress with an expired lease (#3442)', async () => {
+    const past = Math.floor(Date.now() / 1000) - 3600;
+    const { guard, events, check } = await setup(
+      { state: 'open', labels: ['factory:in-progress', `factory:claim-expires:${past}`], title: 'Do thing' },
+      () => false,
+      { pid: 4242 },
+    );
+    await expect(check()).resolves.toBeUndefined();
+    expect(await guard.claimsForIssue(1)).toEqual([]);
+    expect(events[0][1]).toContain('holder-not-running');
+  });
+
   it('keeps the claim when isPidAlive throws', async () => {
     const { guard, check } = await setup(
       open,

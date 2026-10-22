@@ -1,7 +1,7 @@
 // GitHub issue lookups worktree-gc consults before reaping a lane worktree (split out of worktree-gc.ts).
 import type { EventKind } from '../events/kinds.js';
-import { CLAIMED_BY_LABEL_PREFIX, DECOMPOSED_LABEL, PARKED_LABEL } from '../queue/github-queue.js';
-import { findStaleClaims } from '../queue/stale-claims.js';
+import { claimIsLive, claimLiveness } from '../queue/claim-liveness.js';
+import { DECOMPOSED_LABEL, PARKED_LABEL } from '../queue/github-queue.js';
 import type { IssueWarnDedup, SweepDeps } from './worktree-gc-types.js';
 
 /** The owning issue's verdict on a lane worktree. `null` means "no verdict" (no client/repo,
@@ -43,19 +43,16 @@ export async function fetchIssueRecord(
   }
 }
 
-function hasLiveClaim(labels: string[], issue: number): boolean {
-  return (
-    labels.some((name) => name.startsWith(CLAIMED_BY_LABEL_PREFIX)) &&
-    findStaleClaims([{ number: issue, labels }]).length === 0
-  );
+function hasLiveClaim(labels: string[]): boolean {
+  return claimIsLive(claimLiveness(labels, Date.now()));
 }
 
 /** The disposition resolveIssueDisposition computes, from an already-fetched record. */
-export function dispositionOf(record: IssueRecord, issue: number): IssueDisposition | null {
+export function dispositionOf(record: IssueRecord, _issue: number): IssueDisposition | null {
   if (record.kind !== 'ok') return null;
   if (record.state === 'closed') return 'reap-closed';
-  // A lapsed lease is stale (findStaleClaims) and does not protect (#2964).
-  if (hasLiveClaim(record.labels, issue)) return 'keep-claimed';
+  // A lapsed lease is expired in the shared claim verdict and does not protect (#2964, #3442).
+  if (hasLiveClaim(record.labels)) return 'keep-claimed';
   if (record.labels.includes(PARKED_LABEL)) return 'reap-parked';
   if (record.labels.includes(DECOMPOSED_LABEL)) return 'reap-decomposed';
   return 'keep';
@@ -66,7 +63,7 @@ export function existenceOf(record: IssueRecord): 'exists' | 'not-found' | 'erro
   return record.kind;
 }
 
-export function claimOf(record: IssueRecord, issue: number): 'claimed' | 'unclaimed' | 'unknown' {
+export function claimOf(record: IssueRecord, _issue: number): 'claimed' | 'unclaimed' | 'unknown' {
   if (record.kind !== 'ok') return 'unknown';
-  return hasLiveClaim(record.labels, issue) ? 'claimed' : 'unclaimed';
+  return hasLiveClaim(record.labels) ? 'claimed' : 'unclaimed';
 }
