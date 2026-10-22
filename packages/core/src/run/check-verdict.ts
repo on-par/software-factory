@@ -1,5 +1,6 @@
 // packages/core/src/run/check-verdict.ts — one interpretation of a failed, non-environment CHECK (#3435).
 import { remainingShowstoppers, type CheckPhaseResult } from '../phases/check.js';
+import { maxLinesOverrideHint } from './max-lines-override.js';
 
 export interface CheckFailureVerdict {
   reason: 'held' | 'escalate' | 'fail';
@@ -27,9 +28,11 @@ export function classifyCheckFailure(
         ? `${check.summary.failures} check failures after CI rework round ${opts.ciReworkRound}`
         : `${check.summary.failures} check failures after ${check.reworkRounds} rework rounds`;
   const showstoppers = remainingShowstoppers(check.summary);
-  const full =
+  const withShowstoppers =
     showstoppers.length > 0
       ? `${message}\nremaining showstoppers:\n${showstoppers.map((s) => `- ${s}`).join('\n')}`
       : message;
+  const overrideHint = maxLinesOverrideHint(check.summary);
+  const full = overrideHint ? `${withShowstoppers}\n${overrideHint}` : withShowstoppers;
   return { reason, message: full, ...(checkFailure ? { checkFailure } : {}) };
 }

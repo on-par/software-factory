@@ -703,6 +703,7 @@ describe('claimNext', () => {
         const labels = state.get(input.issue_number)!;
         if (readCount === 2) {
           labels.add(claimedByLabel('aaa-0'));
+          labels.add(claimExpiresLabel(1_700_000_000));
         }
         return client.getIssueLabels(input);
       },
@@ -717,7 +718,14 @@ describe('claimNext', () => {
 
     expect(await queue.claimNext('build')).toBeNull();
     expect(state.get(1)).toEqual(
-      new Set([QUEUED_LABEL, laneLabel('build'), queueOrderLabel(1), IN_PROGRESS_LABEL, claimedByLabel('aaa-0')]),
+      new Set([
+        QUEUED_LABEL,
+        laneLabel('build'),
+        queueOrderLabel(1),
+        IN_PROGRESS_LABEL,
+        claimedByLabel('aaa-0'),
+        claimExpiresLabel(1_700_000_000),
+      ]),
     );
   });
 
