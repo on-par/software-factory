@@ -1,10 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { ModelRegistry } from '../models/index.js';
 import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.js';
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
@@ -133,8 +133,9 @@ const WORK: WorkRequest = {
   acceptanceCriteria: [],
 };
 
-const dir = mkdtempSync(join(tmpdir(), 'build-route-'));
-afterAll(() => rmSync(dir, { recursive: true, force: true }));
+const tempDirs = createTempDirs();
+const dir = tempDirs.makeSync('build-route-');
+afterAll(() => tempDirs.cleanup());
 
 /** Runs runIssue with a PLAN stub that settles the route through the real settlePlanRoute and returns the
  *  route BUILD receives. */
