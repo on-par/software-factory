@@ -310,7 +310,7 @@ export type {
   GcReport,
   SweepDeps,
   WorktreeListEntry,
-} from './utils/worktree-gc.js';
+} from './worktree/worktree-gc.js';
 export {
   countUnpushedCommits,
   findCredentialFiles,
@@ -320,8 +320,8 @@ export {
   scrubFile,
   sweepWorktrees,
   zeroFill,
-} from './utils/worktree-gc.js';
-export { findWorktreeKeep } from './utils/worktree-keeps.js';
+} from './worktree/worktree-gc.js';
+export { findWorktreeKeep } from './worktree/worktree-keeps.js';
 // Daemon repo registry (~/.factory/registry.json) (#781)
 export {
   type RepoRegistry,
