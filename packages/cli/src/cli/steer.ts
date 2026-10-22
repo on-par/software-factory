@@ -18,7 +18,7 @@ import { getFactoryPaths } from '@on-par/factory-core';
 
 import type { CliExitError } from './index.js';
 
-export type SteerRef = { kind: 'issue' | 'pr' | 'any'; number: number; raw: string };
+export type SteerRef = { kind: 'issue' | 'pr' | 'any'; number: number; raw: string; repo?: string };
 
 export interface SteerOptions {
   message?: string;
@@ -51,23 +51,50 @@ export class SteerCliError extends Error {
   }
 }
 
-export function parseSteerRef(raw: string): SteerRef {
-  const text = raw.trim();
-  const found: [SteerRef['kind'], RegExpMatchArray | null][] = [
-    ['any', text.match(/^#?(\d+)$/)],
-    ['issue', text.match(/\/issues\/(\d+)\/?$/)],
-    ['pr', text.match(/\/pull\/(\d+)\/?$/)],
-  ];
-  for (const [kind, match] of found) {
-    if (!match) continue;
-    const n = Number(match[1]);
-    if (Number.isSafeInteger(n) && n >= 1) return { kind, number: n, raw };
-    break;
-  }
-  throw new SteerCliError(
+function invalidRef(raw: string): SteerCliError {
+  return new SteerCliError(
     `invalid reference '${raw}' — expected an issue or PR number (42, #42) or a GitHub issue/pull URL`,
     'bad-input',
   );
+}
+
+function repoMismatch(ref: SteerRef, slug: string): SteerCliError {
+  return new SteerCliError(`reference is for ${ref.repo}, this repo is ${slug}`, 'bad-input');
+}
+
+export function parseSteerRef(raw: string): SteerRef {
+  const text = raw.trim();
+  const bare = text.match(/^#?(\d+)$/);
+  if (bare) {
+    const n = Number(bare[1]);
+    if (Number.isSafeInteger(n) && n >= 1) return { kind: 'any', number: n, raw };
+    throw invalidRef(raw);
+  }
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    throw invalidRef(raw);
+  }
+  const host = url.hostname.toLowerCase();
+  if ((url.protocol !== 'https:' && url.protocol !== 'http:') || (host !== 'github.com' && host !== 'www.github.com')) {
+    throw invalidRef(raw);
+  }
+  const segments = url.pathname.split('/').slice(1);
+  if (segments.length === 5 && segments[4] === '') segments.pop();
+  const [owner, repo, type, digits] = segments;
+  if (
+    segments.length !== 4 ||
+    !owner ||
+    !repo ||
+    (type !== 'issues' && type !== 'pull') ||
+    !/^\d+$/.test(digits ?? '')
+  ) {
+    throw invalidRef(raw);
+  }
+  const n = Number(digits);
+  if (!Number.isSafeInteger(n) || n < 1) throw invalidRef(raw);
+  return { kind: type === 'pull' ? 'pr' : 'issue', number: n, raw, repo: `${owner}/${repo}`.toLowerCase() };
 }
 
 export async function resolveSteerRun(runsDir: string, ref: SteerRef): Promise<{ file: string; state: IssueRunState }> {
@@ -109,6 +136,7 @@ export function phaseForStatus(status: RunStatus): SteerPhase | null {
 function requireMessage(opts: SteerOptions): string {
   const message = opts.message?.trim() ?? '';
   if (message === '') throw new SteerCliError('--message must not be empty', 'bad-input');
+  if (/[\r\n]/.test(message)) throw new SteerCliError('--message must be one line', 'bad-input');
   return message;
 }
 
@@ -150,7 +178,14 @@ export function buildSteerEvent(
 export async function runSteer(rawRef: string, opts: SteerOptions, deps: SteerDeps): Promise<SteerResult> {
   const ref = parseSteerRef(rawRef);
   requireMessage(opts);
+  if (ref.repo) {
+    const { runs } = await listIssueRuns(deps.runsDir);
+    const known = new Set<string>();
+    for (const r of runs) if (r.repo) known.add(r.repo.toLowerCase());
+    if (known.size > 0 && !known.has(ref.repo)) throw repoMismatch(ref, [...known].join(', '));
+  }
   const { file, state } = await resolveSteerRun(deps.runsDir, ref);
+  if (ref.repo && state.repo && state.repo.toLowerCase() !== ref.repo) throw repoMismatch(ref, state.repo);
   const event = buildSteerEvent(state, opts, deps);
   let next: IssueRunState;
   try {

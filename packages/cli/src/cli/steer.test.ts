@@ -70,14 +70,16 @@ describe('runSteer', () => {
     ]);
   });
 
-  it.each(['https://github.com/o/r/pull/7', '7'])(
-    'resolves PR reference %s to the run with that prNumber',
-    async (ref) => {
-      const result = await runSteer(ref, { message: 'x' }, deps);
-      expect(result.issue).toBe(42);
-      expect((await readIssueRunState(file()))?.steers).toHaveLength(1);
-    },
-  );
+  it.each([
+    'https://github.com/o/r/pull/7',
+    'https://github.com/O/R/pull/7#x',
+    'https://www.GitHub.com/o/r/pull/7?x=1#issuecomment-1',
+    '7',
+  ])('resolves PR reference %s to the run with that prNumber', async (ref) => {
+    const result = await runSteer(ref, { message: 'x' }, deps);
+    expect(result.issue).toBe(42);
+    expect((await readIssueRunState(file()))?.steers).toHaveLength(1);
+  });
 
   it.each([
     ['empty message', '42', { message: '' }, 'bad-input', '--message must not be empty'],
@@ -95,6 +97,16 @@ describe('runSteer', () => {
     ['unknown phase', '42', { message: 'x', phase: 'deploy' }, 'bad-input', "invalid --phase 'deploy'"],
     ['non-numeric ref', 'abc', { message: 'x' }, 'bad-input', 'invalid reference'],
     ['zero ref', '0', { message: 'x' }, 'bad-input', 'invalid reference'],
+    ['multi-line message', '42', { message: 'line1\nline2' }, 'bad-input', '--message must be one line'],
+    ['CRLF message', '42', { message: 'line1\r\nline2' }, 'bad-input', '--message must be one line'],
+    ['gitlab URL', 'https://gitlab.com/x/y/issues/42', { message: 'x' }, 'bad-input', 'invalid reference'],
+    [
+      'other-repo URL, no such PR',
+      'https://github.com/c/d/pull/999',
+      { message: 'x' },
+      'bad-input',
+      'reference is for c/d',
+    ],
     ['unmatched issue', '999', { message: 'x' }, 'no-run', 'no run found for 999'],
     ['unmatched PR', 'https://github.com/o/r/pull/999', { message: 'x' }, 'no-run', 'no run found'],
   ])('rejects bad input and unmatched refs without touching the run file: %s', async (_n, ref, opts, code, text) => {
@@ -107,6 +119,39 @@ describe('runSteer', () => {
     expect((err as SteerCliError).code).toBe(code);
     expect((err as SteerCliError).message).toContain(text);
     expect(await readFile(file(), 'utf8')).toBe(before);
+  });
+
+  it('rejects a PR URL from another repo', async () => {
+    await writeIssueRunState(file(), { ...fixture(), repo: 'a/b', prNumber: 2 });
+    const before = await readFile(file(), 'utf8');
+    const err = await runSteer('https://github.com/c/d/pull/2', { message: 'x' }, deps).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(SteerCliError);
+    expect((err as SteerCliError).code).toBe('bad-input');
+    expect((err as SteerCliError).message).toContain('reference is for c/d, this repo is a/b');
+    expect(await readFile(file(), 'utf8')).toBe(before);
+  });
+
+  it('rejects a non-URL string ending in /pull/2', async () => {
+    await writeIssueRunState(file(), { ...fixture(), repo: 'a/b', prNumber: 2 });
+    const before = await readFile(file(), 'utf8');
+    await expect(runSteer('not a url at all /pull/2', { message: 'x' }, deps)).rejects.toMatchObject({
+      code: 'bad-input',
+    });
+    expect(await readFile(file(), 'utf8')).toBe(before);
+  });
+
+  it('accepts a github.com URL when the run has no repo', async () => {
+    await writeIssueRunState(file(), { ...fixture(), repo: undefined });
+    await runSteer('https://github.com/any/where/pull/7', { message: 'x' }, deps);
+    expect((await readIssueRunState(file()))?.steers).toHaveLength(1);
+  });
+
+  it('keeps a trailing-newline message as one line', async () => {
+    await runSteer('42', { message: 'x\n' }, deps);
+    expect((await readIssueRunState(file()))?.steers?.[0]?.summary).toBe('x');
   });
 
   it('asks for --phase when the run status has no phase', async () => {
@@ -149,13 +194,34 @@ describe('parseSteerRef', () => {
   it.each([
     ['#42', 'any', 42],
     ['42', 'any', 42],
-    ['https://github.com/o/r/issues/42', 'issue', 42],
-    ['https://github.com/o/r/pull/42/', 'pr', 42],
   ] as const)('parses %s', (raw, kind, number) => {
     expect(parseSteerRef(raw)).toEqual({ kind, number, raw });
   });
 
-  it.each(['', 'abc', '0', '-3', '#', '1.5', '99999999999999999999'])('rejects %j', (raw) => {
+  it.each([
+    ['https://github.com/o/r/issues/42', 'issue', 42],
+    ['https://github.com/o/r/pull/42/', 'pr', 42],
+    ['https://www.GitHub.com/O/R/pull/7#issuecomment-1', 'pr', 7],
+  ] as const)('parses URL %s', (raw, kind, number) => {
+    expect(parseSteerRef(raw)).toEqual({ kind, number, raw, repo: 'o/r' });
+  });
+
+  it.each([
+    '',
+    'abc',
+    '0',
+    '-3',
+    '#',
+    '1.5',
+    '99999999999999999999',
+    'https://gitlab.com/x/y/issues/7',
+    'not a url at all /pull/2',
+    'github.com/o/r/pull/2',
+    'https://github.com/o/pull/2',
+    'https://github.com/o/r/pull/2/files',
+    'ftp://github.com/o/r/pull/2',
+    'https://github.com/o/r/pull/0',
+  ])('rejects %j', (raw) => {
     expect(() => parseSteerRef(raw)).toThrow(SteerCliError);
   });
 });
@@ -217,6 +283,13 @@ describe('cmdSteer runtime wiring', () => {
     await expect(cmdSteer('42', { message: 'x' }, rt)).rejects.toMatchObject({
       code: 1,
       message: 'factory: steer failed — not a git repo',
+    });
+  });
+
+  it('exits 2 for a URL from another repo', async () => {
+    await expect(cmdSteer('https://github.com/c/d/pull/7', { message: 'x' }, rt)).rejects.toMatchObject({
+      code: 2,
+      message: expect.stringContaining('reference is for c/d'),
     });
   });
 
