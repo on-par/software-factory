@@ -9,11 +9,11 @@ Run every command from the repo root. Tests only resolve from there.
 
 ## Which path to run
 
-| When                                         | Command                           |
-| -------------------------------------------- | --------------------------------- |
-| Before every commit (fast loop)              | `bash scripts/verify.sh --no-e2e` |
-| Before you push (matches CI coverage checks) | `bash scripts/verify.sh`          |
-| Pipeline integration suites (on demand)      | `npm run test:integration`        |
+| When                                        | Command                           |
+| ------------------------------------------- | --------------------------------- |
+| Before every commit (fast loop)             | `bash scripts/verify.sh --no-e2e` |
+| Before you push (adds the coverage ratchet) | `bash scripts/verify.sh`          |
+| Pipeline integration suites (on demand)     | `npm run test:integration`        |
 
 The factory's own CHECK phase runs `bash scripts/verify.sh --no-e2e` in the build worktree (`packages/core/src/checkers/index.ts`).
 
@@ -30,7 +30,7 @@ The factory's own CHECK phase runs `bash scripts/verify.sh --no-e2e` in the buil
 9. `npm run knip` — dead code and unused dependencies
 10. Tests:
     - full path: `npm run test` (Vitest with coverage thresholds), then `npm run coverage-ratchet`
-    - `--no-e2e`: `npx vitest run` (no coverage, no ratchet)
+    - `--no-e2e`: `npm run test` (Vitest with coverage thresholds), no ratchet
     - after the tests, `npm run slowest-tests` prints the 5 slowest files and `npm run test-budget` compares the test-step wall-clock time against `TEST_BUDGET_SECONDS` in `scripts/test-budget.ts` (450s; override for one run with `FACTORY_TEST_BUDGET_SECONDS`). It prints `test-budget: PASS` within budget, a warning plus the slowest files when over locally, and fails verify in CI (`CI` set, e.g. `CI=true`) with `test-budget: FAIL` plus the slowest files
 11. `npm run eval -- --stub`
 12. Shell-script tests: `auto-merge-sweep`, `filter-green-prs`, `repo-merge-settings`, `repo-about`, `repo-issue-optics`, `ruleset-copilot-review`, `launchd/install-sweep-plist`, `publish-workspaces` (guards the publish list `scripts/publish-workspaces.txt` against the workspace graph)

@@ -2,7 +2,13 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { claimExpiresLabel, IN_PROGRESS_LABEL, type QueueGitHubClient, type QueueIssue } from './github-queue.js';
+import {
+  claimedByLabel,
+  claimExpiresLabel,
+  IN_PROGRESS_LABEL,
+  type QueueGitHubClient,
+  type QueueIssue,
+} from './github-queue.js';
 import { findStaleClaims, releaseStaleClaims } from './stale-claims.js';
 import { fakeIssueComments } from './fake-issue-comments.js';
 
@@ -95,7 +101,7 @@ describe('releaseStaleClaims', () => {
 
     const results = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now });
 
-    expect(results).toEqual([{ issue: 1, label, expiresAt: NOW_SECONDS - 60, released: true }]);
+    expect(results).toEqual([{ issue: 1, label, expiresAt: NOW_SECONDS - 60, released: true, outcome: 'released' }]);
     expect([...state.get(1)!].sort()).toEqual(['factory:lane:default', 'factory:order:3', 'factory:queued'].sort());
   });
 
@@ -127,8 +133,8 @@ describe('releaseStaleClaims', () => {
     const results = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now });
 
     expect(results).toEqual([
-      { issue: 1, label: label1, expiresAt: NOW_SECONDS - 60, released: false, detail: 'boom' },
-      { issue: 2, label: label2, expiresAt: NOW_SECONDS - 30, released: true },
+      { issue: 1, label: label1, expiresAt: NOW_SECONDS - 60, released: false, outcome: 'failed', detail: 'boom' },
+      { issue: 2, label: label2, expiresAt: NOW_SECONDS - 30, released: true, outcome: 'released' },
     ]);
     expect(state.get(2)!.has('factory:queued')).toBe(true);
   });
@@ -145,5 +151,40 @@ describe('releaseStaleClaims', () => {
 
     expect(results[0]?.released).toBe(true);
     expect([...(state.get(1) ?? [])].sort()).toEqual(['factory:lane:self-repair', 'factory:parked']);
+  });
+
+  it('removes the stale claimant labels, in-progress and the expired lease and reports released', async () => {
+    const label = claimExpiresLabel(NOW_SECONDS - 60);
+    const { state, client } = createFakeStore([
+      {
+        number: 42,
+        labels: [IN_PROGRESS_LABEL, claimedByLabel('host-a-1'), label, 'factory:lane:default', 'factory:order:1'],
+      },
+    ]);
+
+    const results = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now });
+
+    expect(results).toEqual([{ issue: 42, label, expiresAt: NOW_SECONDS - 60, released: true, outcome: 'released' }]);
+    expect([...state.get(42)!].sort()).toEqual(['factory:lane:default', 'factory:order:1', 'factory:queued']);
+  });
+
+  it('skips and reports renewed when the fresh read shows a heartbeat-renewed lease', async () => {
+    const stale = claimExpiresLabel(NOW_SECONDS - 60);
+    const renewed = claimExpiresLabel(NOW_SECONDS + 600);
+    const { state, client } = createFakeStore([
+      { number: 42, labels: [IN_PROGRESS_LABEL, claimedByLabel('host-a-1'), renewed] },
+    ]);
+    client.listOpenIssuesWithLabels = async () => [
+      { number: 42, labels: [IN_PROGRESS_LABEL, claimedByLabel('host-a-1'), stale] },
+    ];
+    const removeLabel = vi.spyOn(client, 'removeLabel');
+
+    const results = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now });
+
+    expect(results).toEqual([
+      { issue: 42, label: stale, expiresAt: NOW_SECONDS - 60, released: false, outcome: 'renewed' },
+    ]);
+    expect(removeLabel).not.toHaveBeenCalled();
+    expect([...state.get(42)!].sort()).toEqual([IN_PROGRESS_LABEL, claimedByLabel('host-a-1'), renewed].sort());
   });
 });

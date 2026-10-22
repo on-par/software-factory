@@ -20,7 +20,7 @@ function fakeOctokit(runs: unknown[] | Error, alerts?: unknown[] | Error | null)
 const base = { owner: 'o', repo: 'r', ref: 'branch', prNumber: 123 };
 
 describe('collectCiFailureEvidence (#2814)', () => {
-  it('collects failing checks and CodeQL alerts', async () => {
+  it('collects failing checks and CodeQL alerts from the PR merge ref', async () => {
     const message = 'The URL of this request depends on a user-provided value.';
     const { octokit, listAlertsForRepo } = fakeOctokit(
       [
@@ -47,7 +47,7 @@ describe('collectCiFailureEvidence (#2814)', () => {
     expect(evidence.truncated).toBe(false);
     expect(evidence.errors).toBeUndefined();
     expect(listAlertsForRepo).toHaveBeenCalledWith(
-      expect.objectContaining({ ref: 'refs/pull/123/head', state: 'open' }),
+      expect.objectContaining({ ref: 'refs/pull/123/merge', state: 'open' }),
     );
   });
 

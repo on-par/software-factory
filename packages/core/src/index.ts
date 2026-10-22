@@ -48,6 +48,7 @@ export {
   resolveMergePolicy,
   resolvePlanApproval,
   resolveProcessGroupGraceMs,
+  resolveCiWatchDeadlineMs,
   resolveSkipCI,
   resolveTimeouts,
 } from './config/index.js';
@@ -302,8 +303,7 @@ export type { Environment, Workspace } from './run/ports.js';
 export { acquireLaneEnvironment, localOnlyWorkspace, worktreeWorkspace } from './run/ports.js';
 
 // Run composition (#675)
-export type { RunPorts, RunRequest } from './run/run-issue.js';
-export { runIssue } from './run/run-issue.js';
+export { runIssue, type RunPorts, type RunRequest } from './run/run-issue.js';
 
 // Run phase snapshot (#1325, #1326, #1327)
 export type { RunPhaseSnapshot } from './run/phase-snapshot.js';

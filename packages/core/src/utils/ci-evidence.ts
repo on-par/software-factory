@@ -12,7 +12,8 @@ const errorMessage = (err: unknown): string => (err instanceof Error ? err.messa
 
 /**
  * Re-list the branch's check runs after the CI watch ended 'failure' and summarise the ones that did
- * not pass. When a failing check is CodeQL, also list the open code-scanning alerts on the PR head.
+ * not pass. When a failing check is CodeQL, also list the open code-scanning alerts on the PR's merge ref:
+ * CodeQL on pull_request analyzes refs/pull/<n>/merge, so refs/pull/<n>/head returns no alerts.
  * Best-effort and GET-only: it never throws and never changes the park reason.
  */
 export async function collectCiFailureEvidence(opts: {
@@ -54,7 +55,7 @@ export async function collectCiFailureEvidence(opts: {
       const { data } = await octokit.rest.codeScanning.listAlertsForRepo({
         owner,
         repo,
-        ref: `refs/pull/${prNumber}/head`,
+        ref: `refs/pull/${prNumber}/merge`,
         state: 'open',
         per_page: 100,
       });

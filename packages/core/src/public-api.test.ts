@@ -35,6 +35,7 @@ const PUBLIC_API_KEYS = [
   'resolveReadinessUpdateIssueBody',
   'resolvePlanApproval',
   'resolveProcessGroupGraceMs',
+  'resolveCiWatchDeadlineMs',
   'resolveSkipCI',
   'resolveTimeouts',
   // Repo config (.factory/config.json)
@@ -638,6 +639,7 @@ const INTERNAL_API_KEYS = [
   'createFactorydServer',
   'createRunRuntime',
   'findOpenPR',
+  'settleParkedPullRequest',
   'detectLowerSliceChange',
   'parkOnLowerSliceChange',
   'parkPayload',
