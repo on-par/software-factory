@@ -32,6 +32,7 @@ import {
   resolveLocalOnly,
   resolveQueueClaimSettleMs,
   resolveRunUsageHarness,
+  settleParkedPullRequest,
   slugify,
   withAdmissionGuard,
 } from '@on-par/factory-core/internal';
@@ -356,6 +357,16 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
                 paths,
                 opts.branchPrefix === undefined ? undefined : branchPrefix,
               ),
+            closeParkedPr: (issue, branch, reason) =>
+              settleParkedPullRequest({
+                octokit: rt.getOctokit(),
+                repo: ghRepo,
+                issue,
+                branch,
+                reason,
+                greenAndChecked: false,
+                log: (type, msg) => logEvent(paths.events, type, issue, msg, { lane: planned.lane }),
+              }).then(() => {}),
             recordStackMerge: (issue, prNumber) =>
               recordSliceMerged({ octokit: rt.getOctokit(), repo: ghRepo, issue, prNumber }).then(() => {}),
             restack: (issue, merged) =>

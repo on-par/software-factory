@@ -339,7 +339,6 @@ export {
   upsertRepo,
   writeRegistry,
 } from './daemon/registry.js';
-
 export { createGithubLaneClaimStalenessProbe, releaseLaneClaim } from './run/lane-file-guard.js';
 export type { LaneClaimStalenessProbe } from './run/lane-file-guard.js';
 // Daemon lane state resolution (#843)
@@ -594,6 +593,7 @@ export {
 } from './sandbox/egress-proxy.js';
 export { createRunRuntime, type RunRuntime } from './daemon/run-runtime.js';
 export { findOpenPR, type PrLookup } from './phases/ship.js';
+export { settleParkedPullRequest, type ParkedPrDisposition } from './run/park-pr.js';
 export * from './run/adopt-pr.js'; // findAdoptablePr + the shared open-PR lookup (#3439)
 export { detectLowerSliceChange, parkOnLowerSliceChange } from './phases/stack-review-change.js';
 export type {
