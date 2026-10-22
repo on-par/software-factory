@@ -8,6 +8,7 @@
       "model": "model-a",
       "inputTokens": 120,
       "outputTokens": 20,
+      "rawInputTokens": null,
       "cacheReadTokens": 12,
       "cacheCreationTokens": 3,
       "cost": 1.2345
@@ -19,6 +20,7 @@
       "model": "model-b",
       "inputTokens": 80,
       "outputTokens": 10,
+      "rawInputTokens": null,
       "cacheReadTokens": null,
       "cacheCreationTokens": null,
       "cost": null
@@ -30,6 +32,9 @@
       "tasks": 1,
       "inputTokens": 120,
       "outputTokens": 20,
+      "rawInputTokens": 0,
+      "cacheReadTokens": 12,
+      "cacheCreationTokens": 3,
       "cost": 1.2345,
       "unpricedCount": 0,
       "cachedRateMissingCount": 0
@@ -39,10 +44,18 @@
       "tasks": 1,
       "inputTokens": 80,
       "outputTokens": 10,
+      "rawInputTokens": 0,
+      "cacheReadTokens": 0,
+      "cacheCreationTokens": 0,
       "cost": null,
       "unpricedCount": 1,
       "cachedRateMissingCount": 0
     }
   ],
-  "total": { "cost": 1.2345, "unpricedCount": 1, "cachedRateMissingCount": 0 }
+  "total": {
+    "cost": 1.2345,
+    "unpricedCount": 1,
+    "cachedRateMissingCount": 0,
+    "tokens": { "input": 200, "output": 30, "rawInput": 0, "cacheRead": 12, "cacheCreation": 3 }
+  }
 }

@@ -29,6 +29,9 @@
           "outputTokens": {
             "type": "number"
           },
+          "rawInputTokens": {
+            "type": ["number", "null"]
+          },
           "cacheReadTokens": {
             "type": ["number", "null"]
           },
@@ -46,6 +49,7 @@
           "model",
           "inputTokens",
           "outputTokens",
+          "rawInputTokens",
           "cacheReadTokens",
           "cacheCreationTokens",
           "cost"
@@ -70,6 +74,15 @@
           "outputTokens": {
             "type": "number"
           },
+          "rawInputTokens": {
+            "type": "number"
+          },
+          "cacheReadTokens": {
+            "type": "number"
+          },
+          "cacheCreationTokens": {
+            "type": "number"
+          },
           "cost": {
             "type": ["number", "null"]
           },
@@ -85,6 +98,9 @@
           "tasks",
           "inputTokens",
           "outputTokens",
+          "rawInputTokens",
+          "cacheReadTokens",
+          "cacheCreationTokens",
           "cost",
           "unpricedCount",
           "cachedRateMissingCount"
@@ -103,9 +119,31 @@
         },
         "cachedRateMissingCount": {
           "type": "number"
+        },
+        "tokens": {
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": "number"
+            },
+            "output": {
+              "type": "number"
+            },
+            "rawInput": {
+              "type": "number"
+            },
+            "cacheRead": {
+              "type": "number"
+            },
+            "cacheCreation": {
+              "type": "number"
+            }
+          },
+          "required": ["input", "output", "rawInput", "cacheRead", "cacheCreation"],
+          "additionalProperties": false
         }
       },
-      "required": ["cost", "unpricedCount", "cachedRateMissingCount"],
+      "required": ["cost", "unpricedCount", "cachedRateMissingCount", "tokens"],
       "additionalProperties": false
     }
   },

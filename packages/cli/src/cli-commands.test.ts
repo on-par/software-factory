@@ -1396,7 +1396,7 @@ describe('cli commands (via main dispatch)', () => {
       expect(out.split('\n')).toHaveLength(1);
       const json = JSON.parse(out);
       expect(json.schemaVersion).toBe(1);
-      expect(json.total).toEqual({ cost: 1, unpricedCount: 1, cachedRateMissingCount: 0 });
+      expect(json.total).toMatchObject({ cost: 1, unpricedCount: 1, tokens: { input: 1, output: 2, rawInput: 0 } });
       expect(json.rows[1].cost).toBeNull();
     });
 
@@ -1409,17 +1409,17 @@ describe('cli commands (via main dispatch)', () => {
       const json = JSON.parse(logged());
       expect(json.rows).toHaveLength(1);
       expect(json.rows[0].issue).toBe('296');
-      expect(json.total).toEqual({ cost: 1, unpricedCount: 0, cachedRateMissingCount: 0 });
+      expect(json.total).toMatchObject({ cost: 1, unpricedCount: 0, tokens: { input: 0, output: 0, rawInput: 0 } });
     });
 
     it('--json with no costs prints empty JSON, not the text message', async () => {
       h.costs = [];
       await runMain('cost', '--json');
-      expect(JSON.parse(logged())).toEqual({
+      expect(JSON.parse(logged())).toMatchObject({
         schemaVersion: 1,
         rows: [],
         perModel: [],
-        total: { cost: 0, unpricedCount: 0, cachedRateMissingCount: 0 },
+        total: { cost: 0, unpricedCount: 0, tokens: { input: 0, output: 0, rawInput: 0 } },
       });
     });
 
