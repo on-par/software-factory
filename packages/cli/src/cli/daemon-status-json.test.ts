@@ -1,16 +1,18 @@
 // packages/cli/src/cli/daemon-status-json.test.ts — `factory daemon status --json` off macOS and its
 // load snapshot (#3201); the helper units live here too.
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { loadFactoryConfig, type FactoryConfig } from '@on-par/factory-core';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { cmdDaemonStatus, type DaemonCtlDeps, type LaunchctlExec } from './daemon.js';
 import { readDaemonLoad, readDaemonPidFile } from './daemon-load.js';
 import { daemonStatusJsonSchema } from './json-contract.js';
+
+const tmp = createTempDirs();
 
 const RUNS_FIXTURE = [
   { run: { status: 'running' }, executionPid: 4242, log: '', truncated: false },
@@ -27,9 +29,9 @@ function configWithSlots(maxAgentJobs: number): FactoryConfig {
 describe('readDaemonPidFile', () => {
   let dir: string;
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'daemon-pid-'));
+    dir = tmp.makeSync('daemon-pid-');
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => tmp.cleanup());
 
   it.each([
     ['abc', null],
@@ -51,9 +53,9 @@ describe('readDaemonPidFile', () => {
 describe('readDaemonLoad', () => {
   let dir: string;
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'daemon-load-'));
+    dir = tmp.makeSync('daemon-load-');
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => tmp.cleanup());
   const run = (content: string | undefined, loadConfig: () => FactoryConfig = () => configWithSlots(2)) => {
     const runsFile = join(dir, 'runs.json');
     if (content !== undefined) writeFileSync(runsFile, content);
@@ -91,14 +93,14 @@ describe('daemon status --json load and non-darwin support (#3201)', () => {
   let output: string;
   let calls: string[];
   beforeEach(() => {
-    home = mkdtempSync(join(tmpdir(), 'daemon-status-json-'));
+    home = tmp.makeSync('daemon-status-json-');
     mkdirSync(join(home, '.factory'), { recursive: true });
     output = '';
     calls = [];
     process.exitCode = undefined;
   });
-  afterEach(() => {
-    rmSync(home, { recursive: true, force: true });
+  afterEach(async () => {
+    await tmp.cleanup();
     process.exitCode = undefined;
   });
 
