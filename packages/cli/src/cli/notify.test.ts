@@ -1,10 +1,10 @@
 // packages/cli/src/cli/notify.test.ts — opt-in --notify command tests (#3512)
 
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { ParkPayload } from '@on-par/factory-core';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createNotifier, type Notifier, type NotifySummary, resolveNotifyCommand, withParkNotify } from './notify.js';
@@ -13,12 +13,13 @@ const park: ParkPayload = { reason: 'fail', decision: 'park', lane: 'app', block
 const parkSummary: NotifySummary = { kind: 'park', ts: 't1', issue: 7, lane: 'app', message: 'parked', park };
 const drainSummary: NotifySummary = { kind: 'drain', ts: 't2', message: 'queue drained', parked: 1 };
 
+const tmp = createTempDirs();
 let dir: string;
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'factory-notify-'));
+  dir = tmp.makeSync('factory-notify-');
 });
-afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+afterEach(async () => {
+  await tmp.cleanup();
 });
 
 describe('resolveNotifyCommand', () => {
