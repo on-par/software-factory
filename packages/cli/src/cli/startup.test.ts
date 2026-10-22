@@ -1,9 +1,9 @@
 // Startup budget for the light CLI paths (#3251): runs the built dist/cli.js, so `npm run build` must come first.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const CLI = fileURLToPath(new URL('../../dist/cli.js', import.meta.url));
@@ -13,13 +13,14 @@ const VERSION = (
 const HEAVY = /node_modules\/(@on-par\/factory-(core|tui)|ink|react|execa|zod)\/|packages\/(core|tui)\//;
 const ENGINE = /node_modules\/(@on-par\/factory-tui|ink|react|execa|zod)\/|packages\/tui\//;
 
+const tempDirs = createTempDirs();
 let dir = '';
 let countHook = '';
 let denyHook = '';
 
 beforeAll(() => {
   if (!existsSync(CLI)) throw new Error('run npm run build first');
-  dir = mkdtempSync(join(tmpdir(), 'factory-startup-'));
+  dir = tempDirs.makeSync('factory-startup-');
   countHook = join(dir, 'count-hook.mjs');
   denyHook = join(dir, 'deny-hook.mjs');
   writeFileSync(
@@ -43,8 +44,8 @@ require('node:net').Socket.prototype.connect = deny;
   );
 });
 
-afterAll(() => {
-  if (dir) rmSync(dir, { recursive: true, force: true });
+afterAll(async () => {
+  await tempDirs.cleanup();
 });
 
 const env = { ...process.env, NODE_DISABLE_COMPILE_CACHE: '1' };
