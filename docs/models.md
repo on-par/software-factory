@@ -17,7 +17,7 @@ Models whose agent CLI is not on PATH are skipped, so a machine with only the Co
 
 **Stuck-run steward.** The steward has no packaged model and no Claude requirement. It uses the steward route's `model` pin when set, otherwise the first runnable boss-tier model (models whose CLI is missing are skipped), so a Codex-only machine uses `gpt-5.6-terra-high`. The boss tier has no OpenCode model, so on an OpenCode-only machine pin the steward route model (e.g. `opencode-deepseek-v4-flash`); otherwise the steward fails closed with a `route-misconfigured` escalation.
 
-Local Ollama models cost $0 and lead every tier. `FACTORY_LOCAL_ONLY=1` restricts routing to local models entirely. Experimental models (glm-5.2, qwen-3.5-coder, opencode-sonnet, opencode-deepseek-v4-flash, opencode-deepseek-v4-pro, opencode-deepseek-v4-flash-free) exist in `defaults.ts` but are only routed when `FACTORY_EXPERIMENTAL=1`.
+Local Ollama models cost $0 and lead every tier. `FACTORY_LOCAL_ONLY=1` restricts routing to local models entirely. Experimental models (glm-5.2, qwen-3.5-coder, opencode-sonnet, opencode-deepseek-v4-flash, opencode-deepseek-v4-pro) exist in `defaults.ts` but are only routed when `FACTORY_EXPERIMENTAL=1`.
 
 **Codex GPT phase profiles.** Whenever Codex GPT is the selected provider path (e.g. `providers.anthropic`/`providers.ollama` disabled, or an explicit pin), PLAN defaults to `gpt-5.6-terra-high` (`model_reasoning_effort=high`) and BUILD (`build_codex`) defaults to `gpt-5.6-terra-medium` (`model_reasoning_effort=medium`); the generic `gpt-5.6-sol` → `gpt-5.1-codex` profiles remain as failover. Override per repo with `.factory/config.yaml` (`models.pins.plan` / `models.pins.build`) or per run with `FACTORY_PLAN_MODEL` / `FACTORY_BUILD_MODEL`; the repo file wins over env.
 
@@ -30,7 +30,7 @@ models:
   efforts:
     gpt-6-astra: { plan: high, build_codex: medium }
     claude-opus-5: high
-    opencode-deepseek-v4-flash-free: low
+    opencode-deepseek-v4-flash: low
     'qwen3.5:9b': false
 route: codex
 ```
@@ -57,14 +57,13 @@ What a harness receives, must return and how its failures are classified is spec
 
 Use this profile when the OpenCode CLI is the only agent CLI on the machine. Every packaged OpenCode model is experimental. Only `opencode-sonnet` is tiered, and only in `worker`. The rest are pin-only and in no tier, so the default tiers never pick one for PLAN, checker or triage.
 
-| Model                             | Tiered or pin-only |
-| --------------------------------- | ------------------ |
-| `opencode-sonnet`                 | tiered (`worker`)  |
-| `opencode-deepseek-v4-flash`      | pin-only           |
-| `opencode-deepseek-v4-pro`        | pin-only           |
-| `opencode-deepseek-v4-flash-free` | pin-only           |
+| Model                        | Tiered or pin-only |
+| ---------------------------- | ------------------ |
+| `opencode-sonnet`            | tiered (`worker`)  |
+| `opencode-deepseek-v4-flash` | pin-only           |
+| `opencode-deepseek-v4-pro`   | pin-only           |
 
-`opencode-deepseek-v4-flash-free` carries `trainsOnPrompts: true` (its provider may use request data for training), so no tier may list it and a repo `tiers` entry naming it fails to load. It can only be pinned.
+A model declared with `trainsOnPrompts: true` (its provider may use request data for training) may not be in any tier, and a repo `tiers` entry naming it fails to load. It can only be pinned.
 
 A registry model on the `claude-cli` harness may set `endpoint` (an https URL) to run through an approved Anthropic-compatible zero-retention intermediary (ADR-0163; today only `openrouter.ai`). It needs a non-null `envKey`, and repo config load rejects any other host. For that model's calls only, the harness sets `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` (read from `process.env[envKey]`, never argv), `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL` (the last five from `claudeFlag`) and unsets `ANTHROPIC_API_KEY`. The OpenRouter key must have ZDR enforced.
 
@@ -113,7 +112,22 @@ route: opencode
 
 `opencode-deepseek-v4-flash` is served as `opencode-go/deepseek-v4.1-flash` at $0.30/$1.20 per 1M tokens. `opencode-deepseek-v4-pro` (`opencode-go/deepseek-v4-pro`, $1.74/$3.48 per 1M) is a pin-only, stronger option for any phase, with a lower Go monthly quota.
 
-Pin `opencode-deepseek-v4-flash-free` (pin-only; OpenCode Zen free promo tier, no subscription quota, but request data may be used for training) or `opencode-sonnet` for any phase. `FACTORY_PLAN_MODEL` / `FACTORY_BUILD_MODEL` still override plan/build per run, and the repo file wins over env.
+Pin `opencode-sonnet` for any phase. `FACTORY_PLAN_MODEL` / `FACTORY_BUILD_MODEL` still override plan/build per run, and the repo file wins over env.
+
+## Provider order
+
+`models.providerOrder` lists, per role (`boss`, `worker`, `checker`, `triage`), the subscription providers in failover order as model ids, at most one per provider (claude, codex, opencode-go). An unset role keeps today's tier order for that role with opencode-go last:
+
+| Role      | Order                                                                   |
+| --------- | ----------------------------------------------------------------------- |
+| `boss`    | `claude-opus-5`, `gpt-5.6-terra-high`, `opencode-deepseek-v4-flash`     |
+| `worker`  | `gpt-5.6-terra-medium`, `claude-sonnet-5`, `opencode-deepseek-v4-flash` |
+| `checker` | `claude-sonnet-5`, `gpt-5.6-luna-high`, `opencode-deepseek-v4-flash`    |
+| `triage`  | `claude-sonnet-5`, `gpt-5.6-luna-high`, `opencode-deepseek-v4-flash`    |
+
+An entry that is unknown, not a subscription CLI model, or a second model of a provider already listed fails config load. Nothing uses the lists to switch providers yet.
+
+OpenCode Zen (`opencode/`, metered pay-per-use) models are never shipped, never a `providerOrder` entry, and never a failover target (the router logs `provider_failover_zen_skip`). An explicit Zen primary pin still runs, with one `metered_primary_route` warning. Declare your own model in `models.registry` if you need one.
 
 ## Failover Triggers
 

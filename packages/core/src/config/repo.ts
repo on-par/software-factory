@@ -36,6 +36,12 @@ import {
 } from './index.js';
 import { assertRegistryHarness, RepoHarnessesSchema, resolveRepoHarnesses } from './repo-harnesses.js';
 import { ModelEffortsSchema } from './effort.js';
+import {
+  deriveProviderOrder,
+  PROVIDER_ORDER_DESCRIPTION,
+  ProviderOrderOverrideSchema,
+  providerOrderIssues,
+} from './provider-order.js';
 import { resolveEffectiveBuildRoute } from './build-route.js';
 import { assertAgenticBuildPin } from './repo-build-pin.js';
 import { assertTierMayRoute } from './repo-tier-guard.js';
@@ -124,6 +130,7 @@ export const RepoFactoryConfigV2Schema = z
           .strict()
           .optional()
           .describe('Per-phase model pins. Each value is a model id from `factory models`. Unset: tier resolution.'),
+        providerOrder: ProviderOrderOverrideSchema.optional().describe(PROVIDER_ORDER_DESCRIPTION),
       })
       .strict()
       .optional(),
@@ -439,10 +446,21 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
     }
   }
 
+  // Only the roles the repo overrides need checking: the base order is the packaged one.
+  const orderOverride = repo.models?.providerOrder;
+  const orderIssues = providerOrderIssues({ ...orderOverride }, mergedModels);
+  if (orderIssues.length > 0) {
+    throw new Error(`.factory/config.json: ${orderIssues.map((i) => i.message).join('; ')}`);
+  }
+  const providerOrder = orderOverride
+    ? { ...(models.providerOrder ?? deriveProviderOrder(models.tiers, models.models)), ...orderOverride }
+    : models.providerOrder;
+
   return {
     ...models,
     models: mergedModels,
     tiers,
+    ...(providerOrder ? { providerOrder } : {}),
     ...harnessPatch,
     ...(repo.models?.efforts ? { efforts: { ...models.efforts, ...repo.models.efforts } } : {}),
   };

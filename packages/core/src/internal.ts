@@ -40,7 +40,7 @@ export type {
   FailureSignatureInput,
   FingerprintedFailure,
 } from './types/index.js';
-
+export * from './config/provider-order-exports.js';
 // Auto-file a fingerprinted bug (#373)
 export type {
   CandidateIssue,

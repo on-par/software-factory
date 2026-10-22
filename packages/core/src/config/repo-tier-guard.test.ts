@@ -4,7 +4,21 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ModelRegistry } from '../models/index.js';
 import { applyRepoConfig, resolveEffectiveModelPins } from './repo.js';
 
-const free = 'opencode-deepseek-v4-flash-free';
+const free = 'my-free-model';
+const freeRegistry = {
+  [free]: {
+    provider: 'custom',
+    tier: 'worker',
+    costPerMtokInput: 0,
+    costPerMtokOutput: 0,
+    contextWindow: 1000,
+    capabilities: [],
+    envKey: null,
+    harness: 'opencode',
+    providerModel: 'my-provider/free',
+    trainsOnPrompts: true,
+  },
+};
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -12,9 +26,10 @@ afterEach(() => {
 
 describe('trainsOnPrompts models (#2899)', () => {
   it('throws naming a trainsOnPrompts model in a repo tier and says to pin it instead', () => {
-    expect(() => applyRepoConfig(defaultModelsConfig, { version: 2, tiers: { worker: [free] } })).toThrow(
-      /tier 'worker'.*opencode-deepseek-v4-flash-free.*pin it instead/is,
-    );
+    const repo = { version: 2, models: { registry: freeRegistry }, tiers: { worker: [free] } } as NonNullable<
+      Parameters<typeof applyRepoConfig>[1]
+    >;
+    expect(() => applyRepoConfig(defaultModelsConfig, repo)).toThrow(/tier 'worker'.*my-free-model.*pin it instead/is);
   });
 
   it('refuses a models.registry model declared with trainsOnPrompts in a repo tier', () => {
@@ -46,17 +61,19 @@ describe('trainsOnPrompts models (#2899)', () => {
   });
 
   it('resolves a build pin to a trainsOnPrompts model', () => {
-    const pins = resolveEffectiveModelPins(
-      new ModelRegistry(defaultModelsConfig),
-      { version: 2, models: { pins: { build: free } } },
-      {},
-    );
+    const repo = { version: 2, models: { registry: freeRegistry, pins: { build: free } } } as NonNullable<
+      Parameters<typeof applyRepoConfig>[1]
+    >;
+    const pins = resolveEffectiveModelPins(new ModelRegistry(applyRepoConfig(defaultModelsConfig, repo)), repo, {});
     expect(pins.build).toBe(free);
   });
 
   it('keeps a trainsOnPrompts checker pin routable', () => {
     vi.stubEnv('OPENCODE_API_KEY', 'test-key');
-    const result = applyRepoConfig(defaultModelsConfig, { version: 2, models: { pins: { checker: free } } });
+    const result = applyRepoConfig(defaultModelsConfig, {
+      version: 2,
+      models: { registry: freeRegistry, pins: { checker: free } },
+    } as NonNullable<Parameters<typeof applyRepoConfig>[1]>);
     expect(new ModelRegistry(result).getAvailableModelsForTier('checker', false, true)).toEqual([free]);
   });
 });

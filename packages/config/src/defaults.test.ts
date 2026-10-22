@@ -66,9 +66,9 @@ describe('shipped defaults', () => {
     expect(defaultModelsConfig.models[retired?.replacement ?? '']).toBeDefined();
   });
 
-  it('has 26 models with the expected harness-bearing spot checks', () => {
+  it('has 25 models with the expected harness-bearing spot checks', () => {
     const modelIds = Object.keys(defaultModelsConfig.models);
-    expect(modelIds).toHaveLength(26);
+    expect(modelIds).toHaveLength(25);
 
     for (const id of [
       'claude-opus-5',
@@ -82,7 +82,7 @@ describe('shipped defaults', () => {
       'gpt-6-astra',
       'gpt-5.6-sol',
       'gpt-5.1-codex',
-      'opencode-deepseek-v4-flash-free',
+      'opencode-deepseek-v4-flash',
       'opencode-deepseek-v4-pro',
       'pi-openrouter-deepseek-v4-flash',
       'pi-openrouter-deepseek-v4-pro',
@@ -96,7 +96,7 @@ describe('shipped defaults', () => {
     expect(defaultModelsConfig.models['gpt-5.6-luna-high'].harness).toBe('codex-cli');
     expect(defaultModelsConfig.models['qwen3.5:9b'].harness).toBe('ollama-http');
     expect(defaultModelsConfig.models['codex-ollama-qwen3.5:9b'].harness).toBe('ollama-agentic');
-    expect(defaultModelsConfig.models['opencode-deepseek-v4-flash-free'].harness).toBe('opencode');
+    expect(defaultModelsConfig.models['opencode-deepseek-v4-flash'].harness).toBe('opencode');
     expect(defaultModelsConfig.models['pi-openrouter-deepseek-v4-flash'].harness).toBe('pi');
   });
 
@@ -238,8 +238,24 @@ describe('shipped defaults', () => {
     expect(defaultModelsConfig.tiers.triage).toHaveLength(4);
   });
 
-  it('flags opencode-deepseek-v4-flash-free as trainsOnPrompts and lists it in no tier', () => {
-    expect(defaultModelsConfig.models['opencode-deepseek-v4-flash-free'].trainsOnPrompts).toBe(true);
+  it('ships no OpenCode Zen (opencode/) model (#3334)', () => {
+    for (const [id, def] of Object.entries(defaultModelsConfig.models)) {
+      expect(id.startsWith('opencode/'), id).toBe(false);
+      expect(def.providerModel?.startsWith('opencode/') ?? false, id).toBe(false);
+    }
+    expect(defaultModelsConfig.models['opencode-deepseek-v4-flash-free']).toBeUndefined();
+  });
+
+  it('ships the per-role providerOrder lists (#3334)', () => {
+    expect(defaultModelsConfig.providerOrder).toEqual({
+      boss: ['claude-opus-5', 'gpt-5.6-terra-high', 'opencode-deepseek-v4-flash'],
+      worker: ['gpt-5.6-terra-medium', 'claude-sonnet-5', 'opencode-deepseek-v4-flash'],
+      checker: ['claude-sonnet-5', 'gpt-5.6-luna-high', 'opencode-deepseek-v4-flash'],
+      triage: ['claude-sonnet-5', 'gpt-5.6-luna-high', 'opencode-deepseek-v4-flash'],
+    });
+  });
+
+  it('lists no trainsOnPrompts model in a tier', () => {
     const tiered = new Set(Object.values(defaultModelsConfig.tiers).flat());
     expect(tiered.has('opencode-deepseek-v4-flash-free')).toBe(false);
     for (const [id, def] of Object.entries(defaultModelsConfig.models)) {

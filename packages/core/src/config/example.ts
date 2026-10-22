@@ -199,6 +199,12 @@ function modelNamespace(): Node[] {
           doc: doc('models', 'pins'),
           children: leaves(['models', 'pins'], '"<model id>"'),
         },
+        {
+          kind: 'object',
+          key: 'providerOrder',
+          doc: doc('models', 'providerOrder'),
+          children: leaves(['models', 'providerOrder'], '["<model id>", ...]'),
+        },
       ],
     },
     {
