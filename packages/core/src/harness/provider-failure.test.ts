@@ -55,3 +55,30 @@ describe('defaultClassifyError', () => {
     expect(defaultClassifyError('weird').reason).toBeDefined();
   });
 });
+
+describe('rejected credential vs signed out (#3232)', () => {
+  it('signed-out text stays kind unavailable while a rejected key is kind auth', () => {
+    expect(
+      defaultClassifyError(new HarnessError('authentication_error: invalid x-api-key', 'local_auth')),
+    ).toMatchObject({
+      kind: 'auth',
+      reason: 'local_auth',
+    });
+    for (const text of ['Please run /login', 'no auth credentials found', 'missing bearer']) {
+      expect(defaultClassifyError(new HarnessError(text, 'local_auth'))).toMatchObject({ kind: 'unavailable' });
+    }
+  });
+
+  it('reads a rejected key from stderr, including for a plain error', () => {
+    expect(defaultClassifyError(Object.assign(new Error('x'), { stderr: 'Incorrect API key provided' })).kind).toBe(
+      'auth',
+    );
+    const err = new HarnessError('x', 'local_auth', undefined);
+    expect(defaultClassifyError(Object.assign(err, { stderr: 'authentication_error' })).kind).toBe('auth');
+  });
+
+  it('an adapter-set details.kind wins', () => {
+    const err = new HarnessError('invalid x-api-key', 'local_auth', { kind: 'usage_cap' });
+    expect(defaultClassifyError(err).kind).toBe('usage_cap');
+  });
+});

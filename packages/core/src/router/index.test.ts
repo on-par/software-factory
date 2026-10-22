@@ -1590,6 +1590,43 @@ describe('provider failure kinds', () => {
     ).rejects.toBeInstanceOf(ModelRouterError);
   });
 
+  it('a rejected key reports kind auth with model and harness, then fails over (#3232)', async () => {
+    const { result, infos } = await runWith(new HarnessError('authentication_error: invalid x-api-key', 'local_auth'));
+    expect(result.model).toBe('gpt-fallback');
+    expect(infos).toEqual([expect.objectContaining({ kind: 'auth', model: 'claude-preferred' })]);
+  });
+
+  it('a signed-out failure does not call onProviderFailure (#3232)', async () => {
+    const { result, infos } = await runWith(new HarnessError('Please run /login', 'local_auth'));
+    expect(result.model).toBe('gpt-fallback');
+    expect(infos).toEqual([]);
+  });
+
+  it('skips a provider the gate reports open, without calling the executor (#3232)', async () => {
+    const executor = failingExecutor(new Error('should not run'));
+    const router = new ModelRouter(providerModels, routes, false, executor);
+    router.setProviderGate(async (provider) => provider === 'anthropic');
+    const result = await router.run('plan', 'do it', {
+      modelOverride: 'claude-preferred',
+      modelFallbacks: ['gpt-fallback'],
+    });
+    expect(result.model).toBe('gpt-fallback');
+    expect(executor.runModel).not.toHaveBeenCalledWith('claude-preferred', expect.anything(), expect.anything());
+    expect(executor.runModel.mock.calls.map((c) => c[0])).toEqual(['gpt-fallback']);
+  });
+
+  it('a throwing gate never blocks a model (#3232)', async () => {
+    const router = new ModelRouter(providerModels, routes, false, failingExecutor(new Error('boom')));
+    router.setProviderGate(async () => {
+      throw new Error('gate down');
+    });
+    const result = await router.run('plan', 'do it', {
+      modelOverride: 'claude-preferred',
+      modelFallbacks: ['gpt-fallback'],
+    });
+    expect(result.model).toBe('gpt-fallback');
+  });
+
   it('opens the breaker for kind auth even when the reason is error', async () => {
     const { infos } = await runWith(new HarnessError('x', 'error', { kind: 'auth' }));
     expect(infos).toEqual([expect.objectContaining({ kind: 'auth' })]);

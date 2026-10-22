@@ -2,6 +2,7 @@
 
 import type { ProviderCappedPayload } from '../events/kinds.js';
 import { DEFAULT_CAP_PROBE_MS, reportedCooldownMs, type ProviderBreaker } from '../router/breaker.js';
+import { redactText } from '../filing/redact.js';
 import { redactSecrets } from '../router/failure-detail.js';
 import type { ProviderFailureInfo } from '../router/index.js';
 import type { RunLogFn } from './attribution.js';
@@ -20,8 +21,36 @@ export interface ProviderFailureRecorderDeps {
 export const providerFailureRecorder =
   (deps: ProviderFailureRecorderDeps) =>
   (stage: ProviderCappedPayload['stage']) =>
-  async ({ provider, reason, kind, resetAt, detail }: ProviderFailureInfo): Promise<void> => {
+  async ({ provider, reason, kind, resetAt, detail, model, harness }: ProviderFailureInfo): Promise<void> => {
     const { breaker, log, issue, defaultCooldownMs } = deps;
+    if (kind === 'auth') {
+      // A rejected credential holds the breaker until the credentials change; announced once per closed-to-open (#3232).
+      const { wasOpen } = await breaker.openAuth(provider, reason);
+      log(
+        'provider_breaker_open',
+        `breaker opened for ${provider} (${reason}) — provider skipped until its credentials change or \`factory breaker reset ${provider}\``,
+        { failoverReason: reason, ...(kind ? { providerFailureKind: kind } : {}) },
+      );
+      if (!wasOpen) {
+        log(
+          'provider_auth_rejected',
+          `${provider} rejected its credentials during ${stage} — failing over; fix the credentials or run \`factory breaker reset ${provider}\``,
+          {
+            failoverReason: reason,
+            providerAuthRejected: {
+              provider,
+              ...(harness ? { harness } : {}),
+              ...(model ? { model } : {}),
+              stage,
+              issue,
+              at: new Date().toISOString(),
+              detail: redactText(detail ?? ''),
+            },
+          },
+        );
+      }
+      return;
+    }
     const now = Date.now();
     const reportedMs = reportedCooldownMs(resetAt, detail, now);
     const capped = (kind ?? (reason === 'usage_cap' ? 'usage_cap' : undefined)) === 'usage_cap';
@@ -47,4 +76,19 @@ export const providerFailureRecorder =
         providerCapped: { provider, stage, issue, cappedUntil, source, detail: redactSecrets(detail ?? '') },
       });
     }
+  };
+
+/** Router gate: true when the provider's breaker is an open auth entry, so the router skips it without a call.
+ *  Logs `provider_breaker_close` when a credentials change just closed it. Timed entries never gate here (#3226). */
+export const authBreakerGate =
+  (deps: { breaker: ProviderBreaker; log: RunLogFn }) =>
+  async (provider: string): Promise<boolean> => {
+    const status = await deps.breaker.status(provider);
+    if (status.open) return status.entry.until === 'credentials-change';
+    if (status.justClosed && status.closeCause === 'creds_changed') {
+      deps.log('provider_breaker_close', `breaker closed for ${provider}: credentials changed`, {
+        providerBreakerClose: { provider, cause: 'creds_changed' },
+      });
+    }
+    return false;
   };

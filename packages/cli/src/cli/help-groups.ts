@@ -45,6 +45,7 @@ export const HELP_GROUPS: readonly HelpGroup[] = [
     commands: [
       'worktree',
       'reset',
+      'breaker',
       'daemon',
       'self-update',
       'proxy',

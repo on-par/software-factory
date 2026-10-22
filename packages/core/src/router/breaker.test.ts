@@ -104,6 +104,7 @@ describe('ProviderBreaker', () => {
     const firstStatus = await breaker.status('openai');
     expect(firstStatus).toEqual({
       open: false,
+      closeCause: 'cooldown',
       justClosed: { reason: 'usage_cap', openedAt: expect.any(String), cooldownMs: 1_800_000 },
     });
 
@@ -201,7 +202,7 @@ describe('gateBuildOnBreaker', () => {
 
     expect(result.codexBlocked).toBe(false);
     expect(logs).toEqual([
-      ['provider_breaker_close', 'breaker closed for openai after cooldown — codex workers eligible again'],
+      ['provider_breaker_close', 'breaker closed for openai (cause=cooldown) — codex workers eligible again'],
     ]);
   });
 
@@ -309,5 +310,105 @@ describe('reportedCooldownMs', () => {
     expect(reportedCooldownMs('2026-10-01T00:00:00Z', 'Resets in 1hr', now)).toBe(62 * 60_000);
     expect(reportedCooldownMs('garbage', 'nothing', now)).toBeNull();
     expect(reportedCooldownMs(undefined, undefined, now)).toBeNull();
+  });
+});
+
+describe('auth entries (#3232)', () => {
+  const HOUR = 60 * 60_000;
+
+  it('openAuth stores until and the fingerprint, and reports wasOpen false then true', async () => {
+    const file = await tmpFile();
+    const breaker = new ProviderBreaker(
+      file,
+      () => 0,
+      async () => 'fp-1',
+    );
+    expect(await breaker.openAuth('anthropic', 'local_auth')).toEqual({ wasOpen: false });
+    expect(await breaker.openAuth('anthropic', 'local_auth')).toEqual({ wasOpen: true });
+    const raw = JSON.parse(await readFile(file, 'utf8')) as { providers: Record<string, Record<string, unknown>> };
+    expect(raw.providers.anthropic).toMatchObject({
+      until: 'credentials-change',
+      credentialFingerprint: 'fp-1',
+      cooldownMs: 0,
+    });
+  });
+
+  it('openAuth announces again when the stored fingerprint differs', async () => {
+    const file = await tmpFile();
+    let fp = 'fp-1';
+    const breaker = new ProviderBreaker(
+      file,
+      () => 0,
+      async () => fp,
+    );
+    await breaker.openAuth('anthropic', 'local_auth');
+    fp = 'fp-2';
+    expect(await breaker.openAuth('anthropic', 'local_auth')).toEqual({ wasOpen: false });
+  });
+
+  it('an auth entry stays open after 48h until the credential fingerprint changes, then closes with creds_changed', async () => {
+    const file = await tmpFile();
+    let t = 0;
+    let fp = 'fp-1';
+    const breaker = new ProviderBreaker(
+      file,
+      () => t,
+      async () => fp,
+    );
+    await breaker.openAuth('anthropic', 'local_auth');
+    t = 48 * HOUR;
+    const open = await breaker.status('anthropic');
+    expect(open).toMatchObject({ open: true, remainingMs: MAX_REPORTED_COOLDOWN_MS });
+    fp = 'fp-2';
+    const closed = await breaker.status('anthropic');
+    expect(closed).toMatchObject({ open: false, closeCause: 'creds_changed' });
+    expect(await breaker.status('anthropic')).toEqual({ open: false });
+  });
+
+  it('reset removes the entry and returns it, or undefined when absent', async () => {
+    const breaker = new ProviderBreaker(
+      await tmpFile(),
+      () => 0,
+      async () => 'fp',
+    );
+    expect(await breaker.reset('anthropic')).toBeUndefined();
+    await breaker.openAuth('anthropic', 'local_auth');
+    expect(await breaker.reset('anthropic')).toMatchObject({ until: 'credentials-change' });
+    expect(await breaker.status('anthropic')).toEqual({ open: false });
+  });
+
+  it('list includes auth entries with until, and leaves timed entries unchanged', async () => {
+    const breaker = new ProviderBreaker(
+      await tmpFile(),
+      () => 0,
+      async () => 'fp',
+    );
+    await breaker.openAuth('anthropic', 'local_auth');
+    await breaker.open('openai', 'rate_limit', 1000);
+    const list = await breaker.list();
+    expect(list.find((b) => b.provider === 'anthropic')).toMatchObject({ until: 'credentials-change' });
+    expect(list.find((b) => b.provider === 'openai')).toMatchObject({ remainingMs: 1000 });
+    expect(list.find((b) => b.provider === 'openai')?.until).toBeUndefined();
+  });
+
+  it('a timed close carries closeCause cooldown', async () => {
+    let t = 0;
+    const breaker = new ProviderBreaker(await tmpFile(), () => t);
+    await breaker.open('openai', 'rate_limit', 1000);
+    t = 1001;
+    expect(await breaker.status('openai')).toMatchObject({ open: false, closeCause: 'cooldown' });
+  });
+
+  it('gateBuildOnBreaker prints "until credentials change" for an auth entry', async () => {
+    const breaker = new ProviderBreaker(
+      await tmpFile(),
+      () => 0,
+      async () => 'fp',
+    );
+    await breaker.openAuth('openai', 'local_auth');
+    const logs: string[] = [];
+    const result = await gateBuildOnBreaker({ breaker, providers: ['openai'], log: (_t, msg) => logs.push(msg) });
+    expect(result.codexBlocked).toBe(true);
+    expect(logs[0]).toContain('until credentials change');
   });
 });

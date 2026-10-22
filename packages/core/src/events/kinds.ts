@@ -12,6 +12,8 @@ export type {
   FlakyTestsPayload,
   LanePausedPayload,
   ParkPayload,
+  ProviderAuthRejectedPayload,
+  ProviderBreakerClosePayload,
   ProviderCappedPayload,
   StewardTriggeredPayload,
 } from './payloads.js';
@@ -152,6 +154,7 @@ export type EventKind =
   | 'provider_breaker_skip'
   | 'provider_breaker_pinned'
   | 'provider_capped'
+  | 'provider_auth_rejected' // once per breaker open, #3232
   | 'readiness'
   | 'readiness_enrichment_failed'
   | 'readiness_enrichment_started'
@@ -384,6 +387,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   provider_breaker_skip: { severity: 'info', isPark: false, isTerminal: false },
   provider_breaker_pinned: { severity: 'info', isPark: false, isTerminal: false },
   provider_capped: { severity: 'warn', isPark: false, isTerminal: false },
+  provider_auth_rejected: { severity: 'warn', isPark: false, isTerminal: false }, // once per breaker open, #3232
   readiness: { severity: 'info', isPark: false, isTerminal: false },
   readiness_enrichment_failed: { severity: 'info', isPark: false, isTerminal: false },
   readiness_enrichment_started: { severity: 'info', isPark: false, isTerminal: false },

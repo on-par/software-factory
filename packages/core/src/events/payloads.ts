@@ -56,6 +56,31 @@ export interface FlakyTestsPayload {
   logPath?: string;
 }
 
+/** Payload of a `provider_auth_rejected` event (#3232): a provider rejected its credential and its breaker opened
+ *  until the credentials change. `detail` passes through `redactText`, so it carries no key material. */
+export interface ProviderAuthRejectedPayload {
+  provider: string;
+  harness?: string;
+  model?: string;
+  stage: 'plan' | 'build';
+  issue: number;
+  at: string;
+  detail: string;
+}
+
+/** Payload of a `provider_breaker_close` event when a breaker closes other than by cooldown (#3232). */
+export interface ProviderBreakerClosePayload {
+  provider: string;
+  cause: 'cooldown' | 'creds_changed' | 'manual_reset';
+}
+
+/** The provider-breaker payload fields an event record may carry. */
+export interface ProviderEventExtra {
+  providerCapped?: ProviderCappedPayload;
+  providerAuthRejected?: ProviderAuthRejectedPayload;
+  providerBreakerClose?: ProviderBreakerClosePayload;
+}
+
 /** Payload of a `provider_capped` event (#3337): a usage cap opened the provider's breaker until `cappedUntil`. */
 export interface ProviderCappedPayload {
   provider: string;

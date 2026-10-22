@@ -53,6 +53,8 @@ export type ProviderFailureInfo = {
   kind?: ProviderFailureKind;
   resetAt?: string;
   detail?: string;
+  model?: string;
+  harness?: string;
 };
 
 export type SleepFn = (ms: number) => Promise<void>;
@@ -274,6 +276,7 @@ export class ModelRouter {
   /** Models already warned about resolving through a retired harness id; once per run (#3445). */
   private readonly retiredHarnessNoticed = new Set<string>();
   private localAuthSink?: (agent: LocalAuthAgent) => void;
+  private providerGate?: (provider: string) => Promise<boolean>;
   private codexFullAccessTasks: readonly string[] = [];
   private contextCeilings: Readonly<Record<string, number>> = { 'codex-cli': DEFAULT_CODEX_CONTEXT_CEILING };
   private codexWorkspacePaths?: { primaryRepoRoot: string; writableRoots: readonly string[] };
@@ -355,6 +358,11 @@ export class ModelRouter {
    *  flag it until the next login (#2733). Receives only the agent name. */
   setLocalAuthSink(sink: (agent: LocalAuthAgent) => void): void {
     this.localAuthSink = sink;
+  }
+  /** Register a gate consulted before each model: when it resolves true for the model's provider, that provider is
+   *  skipped without a call (an auth breaker is open, #3232). A throwing gate never blocks a model. */
+  setProviderGate(gate: ((provider: string) => Promise<boolean>) | undefined): void {
+    this.providerGate = gate;
   }
   /** Register a sink that receives one cost row per successful run(). */
   setCostSink(sink: CostSink): void {
@@ -528,6 +536,19 @@ export class ModelRouter {
         onLog(`Skipping ${model} for ${task}: provider ${modelProvider} is on cooldown`);
         continue;
       }
+      if (modelProvider && this.providerGate) {
+        try {
+          if (await this.providerGate(modelProvider)) {
+            blockedProviders.add(modelProvider);
+            onLog(
+              `Skipping ${model} for ${task}: provider ${modelProvider} breaker is open until its credentials change`,
+            );
+            continue;
+          }
+        } catch {
+          // a gate error never blocks a model
+        }
+      }
       let retries = 0;
       this.noticeRetiredHarness(model, onLog);
 
@@ -588,6 +609,8 @@ export class ModelRouter {
                 kind: failure.kind,
                 ...(failure.resetAt ? { resetAt: failure.resetAt } : {}),
                 detail: detail || undefined,
+                model,
+                ...(harnessId ? { harness: harnessId } : {}),
               });
             } catch (callbackErr) {
               onLog(

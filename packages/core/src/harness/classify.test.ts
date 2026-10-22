@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { classifyFailure } from './classify.js';
+import { classifyFailure, isRejectedCredential } from './classify.js';
 
 describe('classifyFailure', () => {
   it.each([
@@ -90,4 +90,21 @@ describe('classifyFailure provider 401 wording (#2901)', () => {
   it('does not treat unrelated "invalid api ..." text as auth', () => {
     expect(classifyFailure('invalid api version', 1)).not.toBe('local_auth');
   });
+});
+
+describe('isRejectedCredential (#3232)', () => {
+  it.each(['authentication_error', 'invalid x-api-key', 'Incorrect API key provided: sk-...'])(
+    'is true for %s',
+    (t) => {
+      expect(isRejectedCredential(t)).toBe(true);
+      expect(classifyFailure(t, 1)).toBe('local_auth');
+    },
+  );
+  it.each(['Please run /login', 'No auth credentials found', 'missing bearer', '401 Unauthorized'])(
+    'is false for %s, which is still local_auth',
+    (t) => {
+      expect(isRejectedCredential(t)).toBe(false);
+      expect(classifyFailure(t, 1)).toBe('local_auth');
+    },
+  );
 });

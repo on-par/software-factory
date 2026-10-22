@@ -213,6 +213,12 @@ export function registerAdvancedCommands(program: Command, handlers: ProgramHand
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
     .action(handlers.cmdReset);
 
+  const breakerCmd = program.command('breaker').description('Inspect and reset provider circuit breakers');
+  breakerCmd
+    .command('reset <provider>')
+    .description('Close a provider breaker now (e.g. after fixing its credentials)')
+    .action((provider: string) => handlers.cmdBreakerReset(provider));
+
   program
     .command('agent-job')
     .description(

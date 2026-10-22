@@ -42,7 +42,7 @@ import { withSingleTerminalEvent } from './terminal-events.js';
 import { withRunAttribution, type RunLogFn as LogFn } from './attribution.js';
 import { environmentReleaseMarker, parkPayload, publishParkComment, upsertMarkerComment } from './park-comment.js';
 import { createRunPhaseLogger } from './run-phase-log.js';
-import { providerFailureRecorder } from './provider-failure-recorder.js';
+import { authBreakerGate, providerFailureRecorder } from './provider-failure-recorder.js';
 import { gateOpencodeBuildOnBreaker, providerFallbackPreferrer } from './provider-breaker-gate.js';
 import { fileFlakyTests } from './flaky-tests.js';
 import { finishWithoutShip } from './local-finish.js';
@@ -485,6 +485,8 @@ async function runIssueOnce(
     issue: request.issue,
     defaultCooldownMs: request.failover.cooldownMs,
   });
+
+  ports.router.setProviderGate?.(authBreakerGate({ breaker: ports.breaker, log }));
 
   const gateDeps = { router: ports.router, breaker: ports.breaker, log };
   const preferFallbackWhenProviderIsOpen = providerFallbackPreferrer(gateDeps);

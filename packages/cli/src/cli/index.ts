@@ -21,6 +21,7 @@ import { promisify, styleText } from 'node:util';
 import type { Octokit } from '@octokit/rest';
 import { LaneEnvironmentPauseError } from './lane-environment-pause-error.js';
 import { INVALID_BRANCH_PREFIX_MESSAGE, resolveBranchPrefixOption } from './branch-prefix.js';
+import { cmdBreakerReset } from './breaker.js';
 import { sweepLaneClaims, warnQueueDiagnostics } from './queue-startup.js';
 import { proposeTriageQueue } from './triage-open-prs.js';
 import { makeQueuePreflightOps, preflightQueuedIssue, type QueuePreflightOps } from './queue-preflight.js';
@@ -4369,6 +4370,7 @@ export const PROGRAM_HANDLERS = {
   cmdWorktreeKeep,
   cmdWorktreeRelease,
   cmdReset,
+  cmdBreakerReset: (provider: string) => cmdBreakerReset(provider, { getRepoRoot }),
   cmdSupervise: runSupervise,
   cmdStop,
   cmdResume,

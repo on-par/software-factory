@@ -3,7 +3,7 @@
 
 import { ModelExecutorError } from '../router/executor-error.js';
 import { describeFailureDetail } from '../router/failure-detail.js';
-import { classifyFailure } from './classify.js';
+import { classifyFailure, isRejectedCredential } from './classify.js';
 import type { HarnessFailureReason } from './index.js';
 import { HarnessError } from './index.js';
 
@@ -67,6 +67,11 @@ function exitCodeOf(err: unknown): number {
   return typeof exitCode === 'number' ? exitCode : 1;
 }
 
+/** Kind for a reason; a `local_auth` whose text says the credential was rejected (not signed out) is `auth` (#3232). */
+function kindFor(reason: HarnessFailureReason, text: string): ProviderFailureKind {
+  return reason === 'local_auth' && isRejectedCredential(text) ? 'auth' : failureKindForReason(reason);
+}
+
 /** Classifier for harnesses without their own `classifyError`: the typed reason (or classifyFailure on
  *  stderr/exit code) mapped to a kind, plus any kind/resetAt the adapter left on `details`. */
 export function defaultClassifyError(err: unknown): ProviderFailure {
@@ -75,14 +80,21 @@ export function defaultClassifyError(err: unknown): ProviderFailure {
     const details = detailsOf(err);
     const resetAt = normalizeIsoInstant(details.resetAt);
     return {
-      kind: isProviderFailureKind(details.kind) ? details.kind : failureKindForReason(err.reason),
+      kind: isProviderFailureKind(details.kind)
+        ? details.kind
+        : kindFor(
+            err.reason,
+            [err.message, stderrOf(err), typeof details.diagnostic === 'string' ? details.diagnostic : '', detail].join(
+              '\n',
+            ),
+          ),
       ...(resetAt ? { resetAt } : {}),
       reason: err.reason,
       detail,
     };
   }
   const reason = classifyFailure(stderrOf(err), exitCodeOf(err));
-  return { kind: failureKindForReason(reason), reason, detail };
+  return { kind: kindFor(reason, `${stderrOf(err)}\n${detail}`), reason, detail };
 }
 
 /** What the router calls for a thrown error. Adapters have already put kind/resetAt on `details`. */
