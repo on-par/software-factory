@@ -656,7 +656,7 @@ describe('shipPhase self-healing', () => {
     ]);
   });
 
-  it('still completes and logs ready when marking the PR ready for review throws', async () => {
+  it('fails with a warn naming the PR, and logs no ready, when marking the PR ready for review throws (#3551)', async () => {
     const { octokit, calls } = createOctokit();
     octokit.rest.pulls.get = async (args: any) => {
       calls.push(['pulls.get', args]);
@@ -684,8 +684,9 @@ describe('shipPhase self-healing', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: true, prNumber: 123 });
-    expect(logs).toContainEqual(['ready', 'PR #123 ready for review']);
+    expect(result).toMatchObject({ ok: false, prNumber: 123 });
+    expect(logs.some(([type, msg]) => type === 'warn' && msg.includes('PR #123'))).toBe(true);
+    expect(logs.some(([type]) => type === 'ready')).toBe(false);
   });
 
   it('reports fail and returns not ok when a PR cannot be created or found', async () => {

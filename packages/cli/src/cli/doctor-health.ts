@@ -173,6 +173,7 @@ export interface ReleasedClaim {
   issue: number;
   expiresAt: number;
   released: boolean;
+  outcome?: 'released' | 'renewed' | 'failed';
   detail?: string;
 }
 
@@ -181,9 +182,11 @@ export function formatClaimReconcileReport(released: ReleasedClaim[]): string {
 
   return released
     .map((c) =>
-      c.released
-        ? `reconcile: released issue #${c.issue} back to factory:queued (lease expired at ${c.expiresAt})`
-        : `reconcile: failed to release issue #${c.issue} (lease expired at ${c.expiresAt}): ${c.detail ?? 'unknown error'}`,
+      c.outcome === 'renewed'
+        ? `reconcile: skipped issue #${c.issue}: lease renewed since the stale read (was expired at ${c.expiresAt})`
+        : c.released
+          ? `reconcile: released issue #${c.issue} back to factory:queued (lease expired at ${c.expiresAt})`
+          : `reconcile: failed to release issue #${c.issue} (lease expired at ${c.expiresAt}): ${c.detail ?? 'unknown error'}`,
     )
     .join('\n');
 }

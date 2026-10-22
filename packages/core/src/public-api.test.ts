@@ -638,6 +638,7 @@ const INTERNAL_API_KEYS = [
   'createFactorydServer',
   'createRunRuntime',
   'findOpenPR',
+  'settleParkedPullRequest',
   'detectLowerSliceChange',
   'parkOnLowerSliceChange',
   'parkPayload',

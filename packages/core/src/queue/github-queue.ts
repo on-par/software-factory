@@ -8,10 +8,10 @@ import type { Octokit } from '@octokit/rest';
 import { createEnqueuers, type ChildEnqueueResult } from './github-queue-enqueue.js';
 import { labelExistsError } from './github-errors.js';
 import { createOctokitComments, type QueueCommentClient } from './issue-comments.js';
+import { createClaimReleaser } from './claim-release.js';
 import { createClaimSettler, type ClaimSettleOptions, type ClaimSettler } from './claim-settle.js';
 import { knownRepoLabels } from './label-cache.js';
 import type { OrderCollision } from './order-collision.js';
-import { addQueuedOnRelease } from './release-queued.js';
 import type { QueueEntry, QueueSnapshot, QueueSnapshotEntry } from './index.js';
 import {
   formatQueueOrderConflict,
@@ -424,9 +424,17 @@ export interface GithubQueueOptions extends ClaimSettleOptions {
   onOrderConflict?: (conflict: QueueOrderConflict) => void;
 }
 
+/** Outcome of the reaper path: 'renewed' means the fresh read no longer showed an expired lease, so nothing was written. */
+export type StaleReleaseOutcome = 'released' | 'renewed';
+
 export interface GithubQueue extends ClaimSettler {
   claimNext(lane: string): Promise<QueueClaim | null>;
+  /** Removes only this claimant's `claimed-by` label while another claimant's remains, leaving the issue to them (#3240);
+   *  with no other claimant it tears down the claim state and applies `outcome`. */
   release(issue: number, outcome?: QueueReleaseOutcome): Promise<void>;
+  /** Reaper path (#3240): re-reads `issue` and removes `staleLabels` (claimed-by labels from the stale read), in-progress and
+   *  the expired lease only when the fresh read's lease is still expired; otherwise writes nothing and returns 'renewed'. */
+  releaseStale(issue: number, staleLabels: readonly string[]): Promise<StaleReleaseOutcome>;
   /** Refreshes this claimant's lease on `issue` while its identity label is still present.
    *  Returns `false` (no-op) when the label is gone or the fresh pre-write read lacks in-progress: claimed
    *  elsewhere, released, or reaped (#1500, #3422). */
@@ -450,6 +458,7 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
   const { client, owner, repo } = options;
   const claimantId = options.claimantId ?? defaultClaimantId();
   const myLabel = claimedByLabel(claimantId);
+  const { release, releaseStale } = createClaimReleaser(client, owner, repo, claimantId, options.now ?? Date.now);
   const leaseMs = options.leaseMs ?? DEFAULT_CLAIM_LEASE_MS;
   const now = options.now ?? Date.now;
   const settler = createClaimSettler(options);
@@ -521,33 +530,6 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
       }
     }
     return null;
-  }
-
-  async function addParked(issue: number): Promise<void> {
-    const spec = queueLabelSpecs('release', claimantId).find((s) => s.name === PARKED_LABEL);
-    if (spec) await client.ensureLabel({ owner, repo, ...spec });
-    await client.addLabels({ owner, repo, issue_number: issue, labels: [PARKED_LABEL] });
-  }
-
-  async function release(issue: number, outcome: QueueReleaseOutcome = 'queued'): Promise<void> {
-    const current = await client.getIssueLabels({ owner, repo, issue_number: issue });
-    const toRemove = current.filter(
-      (name) =>
-        name === IN_PROGRESS_LABEL ||
-        name.startsWith(CLAIMED_BY_LABEL_PREFIX) ||
-        name.startsWith(CLAIM_EXPIRES_LABEL_PREFIX) ||
-        (outcome !== 'queued' && (name === QUEUED_LABEL || name.startsWith(QUEUE_ORDER_LABEL_PREFIX))),
-    );
-    if (outcome === 'parked' && !current.includes(PARKED_LABEL)) {
-      await addParked(issue).catch(() => addParked(issue)); // one retry; a second failure rejects before any claim label is removed (#3424)
-    }
-    for (const name of toRemove) {
-      await client.removeLabel({ owner, repo, issue_number: issue, name });
-    }
-
-    if (outcome === 'done') return;
-
-    if (outcome === 'queued') return addQueuedOnRelease(client, owner, repo, issue, current);
   }
 
   async function heartbeat(issue: number): Promise<boolean> {
@@ -635,6 +617,7 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     ...settler,
     claimNext,
     release,
+    releaseStale,
     heartbeat,
     list,
     lanes,

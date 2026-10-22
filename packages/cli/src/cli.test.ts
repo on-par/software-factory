@@ -2967,6 +2967,7 @@ describe('cli', () => {
         release: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
         },
+        releaseStale: async () => 'released',
         heartbeat: async () => true,
         list: async () => [],
         lanes: async () => ['app', 'infra'],
@@ -3007,6 +3008,7 @@ describe('cli', () => {
         settle: async () => {},
         claimNext: async () => null,
         release: async () => {},
+        releaseStale: async () => 'released',
         heartbeat: async () => true,
         list: async () => [],
         lanes: async () => [],
@@ -3042,6 +3044,7 @@ describe('cli', () => {
         release: async (issue, outcome) => {
           calls.push(['release', issue, outcome]);
         },
+        releaseStale: async () => 'released',
         heartbeat: async (issue) => {
           calls.push(['heartbeat', issue]);
           return true;
