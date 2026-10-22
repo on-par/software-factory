@@ -210,6 +210,13 @@ describe('formatClaimReconcileReport', () => {
     expect(report).toBe('reconcile: failed to release issue #42 (lease expired at 1700000000): boom');
   });
 
+  it('reports a renewed claim as skipped, not a failure', () => {
+    const report = formatClaimReconcileReport([
+      { issue: 42, expiresAt: 1_700_000_000, released: false, outcome: 'renewed' },
+    ]);
+    expect(report).toBe('reconcile: skipped issue #42: lease renewed since the stale read (was expired at 1700000000)');
+  });
+
   it('joins multiple entries with a single newline', () => {
     const report = formatClaimReconcileReport([
       { issue: 42, expiresAt: 1_700_000_000, released: true },
