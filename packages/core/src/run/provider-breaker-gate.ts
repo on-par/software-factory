@@ -1,5 +1,5 @@
 import { pickOpencodeFallback } from '../phases/build-opencode-failover.js';
-import type { ProviderBreaker } from '../router/breaker.js';
+import { describeBreakerRemaining, type ProviderBreaker } from '../router/breaker.js';
 import type { ModelRouter } from '../router/index.js';
 import type { EventKind } from '../events/kinds.js';
 import type { FailoverReason } from '../types/index.js';
@@ -20,10 +20,9 @@ async function preferFallbackWhenProviderIsOpen(
   if (!provider) return primary;
   const status = await deps.breaker.status(provider);
   if (!status.open) return primary;
-  const minutes = Math.ceil(status.remainingMs / 60_000);
   deps.log(
     'provider_breaker_skip',
-    `breaker open for ${provider} (${status.entry.reason}) — using ${fallback} for ${phase}, ${minutes}m remaining`,
+    `breaker open for ${provider} (${status.entry.reason}) — using ${fallback} for ${phase}, ${describeBreakerRemaining(status.remainingMs)}`,
   );
   return fallback;
 }
@@ -41,7 +40,7 @@ export type OpencodeBreakerGate =
       model: string;
       reason: FailoverReason;
     }
-  | { kind: 'blocked'; reason: FailoverReason; resetAt: string; message: string };
+  | { kind: 'blocked'; reason: FailoverReason; resetAt?: string; message: string };
 
 /**
  * Pre-BUILD breaker gate for the opencode route (#2891, #3035). Unpinned: returns a swap to the first
@@ -63,14 +62,22 @@ export async function gateOpencodeBuildOnBreaker(
     const reason = status.entry.reason;
     log(
       'provider_breaker_pinned',
-      `breaker open for ${provider} (${reason}) — keeping the opencode route pinned by .factory/config.json, ${Math.ceil(status.remainingMs / 60_000)}m remaining`,
+      `breaker open for ${provider} (${reason}) — keeping the opencode route pinned by .factory/config.json, ${describeBreakerRemaining(status.remainingMs)}`,
     );
+    const pinned = 'not failing over: build route pinned to opencode in .factory/config.json (ADR-0092)';
+    if (!Number.isFinite(status.remainingMs)) {
+      return {
+        kind: 'blocked',
+        reason,
+        message: `OpenCode build workers blocked (${reason}); ${pinned}; blocked until its credentials change (or \`factory breaker reset\`)`,
+      };
+    }
     const resetAt = new Date((opts.now ?? Date.now()) + status.remainingMs).toISOString();
     return {
       kind: 'blocked',
       reason,
       resetAt,
-      message: `OpenCode build workers capped (${reason}); not failing over: build route pinned to opencode in .factory/config.json (ADR-0092); resets at ${resetAt}`,
+      message: `OpenCode build workers capped (${reason}); ${pinned}; resets at ${resetAt}`,
     };
   }
   const target = pickOpencodeFallback(router, opts.codexDisabled);
@@ -79,7 +86,7 @@ export async function gateOpencodeBuildOnBreaker(
   if (!status.open) return undefined;
   log(
     'provider_breaker_skip',
-    `breaker open for ${provider} (${status.entry.reason}) — using ${target.model} for BUILD, ${Math.ceil(status.remainingMs / 60_000)}m remaining`,
+    `breaker open for ${provider} (${status.entry.reason}) — using ${target.model} for BUILD, ${describeBreakerRemaining(status.remainingMs)}`,
   );
   log(
     'worker_failover',

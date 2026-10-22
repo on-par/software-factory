@@ -36,12 +36,14 @@ import { captureWorktreeState, resetWorktreeState } from './worktree-state.js';
 export type { ExecFn } from '../utils/exec.js';
 export type { OllamaProbeResult } from './ollama-probe.js';
 export { ModelExecutorError, ModelRouterError } from './executor-error.js';
+export { describeBreakerRemaining } from './breaker.js';
 
 const PROVIDER_LEVEL_FAILURES = new Set<FailoverReason>(['usage_cap', 'rate_limit', 'timeout', 'unavailable']);
 
-/** Whether a failure opens the provider breaker. Deliberately the explicit reason set plus kind `auth`, not every
- *  kind: `unavailable` also covers error/unknown/empty_response/cli_missing/local_auth, which fail over without
- *  blocking the provider (#3225). */
+/** Whether a failure opens the provider breaker. Deliberately the explicit reason set (usage_cap, rate_limit,
+ *  timeout, unavailable) plus kind `auth`, not every kind: `unavailable` also covers
+ *  error/unknown/empty_response/cli_missing/signed-out local_auth, which fail over without blocking the provider
+ *  (#3225). Don't simplify this to "every kind" (#3232). */
 function opensProviderBreaker(failure: ProviderFailure): boolean {
   return PROVIDER_LEVEL_FAILURES.has(failure.reason) || failure.kind === 'auth';
 }
@@ -53,6 +55,11 @@ export type ProviderFailureInfo = {
   kind?: ProviderFailureKind;
   resetAt?: string;
   detail?: string;
+  /** The model whose call failed. */
+  model?: string;
+  /** Harness id that ran it. */
+  harness?: string;
+  task?: TaskType;
 };
 
 export type SleepFn = (ms: number) => Promise<void>;
@@ -586,6 +593,9 @@ export class ModelRouter {
                 provider,
                 reason,
                 kind: failure.kind,
+                model,
+                ...(harnessId ? { harness: harnessId } : {}),
+                task,
                 ...(failure.resetAt ? { resetAt: failure.resetAt } : {}),
                 detail: detail || undefined,
               });

@@ -3,7 +3,7 @@
 
 import { ModelExecutorError } from '../router/executor-error.js';
 import { describeFailureDetail } from '../router/failure-detail.js';
-import { classifyFailure } from './classify.js';
+import { classifyFailure, isRejectedCredential } from './classify.js';
 import type { HarnessFailureReason } from './index.js';
 import { HarnessError } from './index.js';
 
@@ -74,15 +74,20 @@ export function defaultClassifyError(err: unknown): ProviderFailure {
   if (err instanceof HarnessError || err instanceof ModelExecutorError) {
     const details = detailsOf(err);
     const resetAt = normalizeIsoInstant(details.resetAt);
+    const text = [err.message, details.stderr, details.diagnostic, detail]
+      .filter((t) => typeof t === 'string')
+      .join('\n');
+    const rejected = err.reason === 'local_auth' && isRejectedCredential(text);
     return {
-      kind: isProviderFailureKind(details.kind) ? details.kind : failureKindForReason(err.reason),
+      kind: isProviderFailureKind(details.kind) ? details.kind : rejected ? 'auth' : failureKindForReason(err.reason),
       ...(resetAt ? { resetAt } : {}),
       reason: err.reason,
       detail,
     };
   }
   const reason = classifyFailure(stderrOf(err), exitCodeOf(err));
-  return { kind: failureKindForReason(reason), reason, detail };
+  const rejected = reason === 'local_auth' && isRejectedCredential(stderrOf(err));
+  return { kind: rejected ? 'auth' : failureKindForReason(reason), reason, detail };
 }
 
 /** What the router calls for a thrown error. Adapters have already put kind/resetAt on `details`. */

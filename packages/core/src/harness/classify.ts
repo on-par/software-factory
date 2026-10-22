@@ -2,6 +2,12 @@
 
 import type { HarnessFailureReason } from './index.js';
 
+/** Whether `text` is a provider rejecting a credential (Anthropic `authentication_error`, "invalid x-api-key", OpenAI
+ *  "Incorrect API key provided") as opposed to a signed-out CLI. Deliberately excludes "no auth credentials found" (#3232). */
+export function isRejectedCredential(text: string): boolean {
+  return /\bauthentication_error\b|(?:invalid|incorrect) (?:x-)?api[\s_-]?key/.test(text.toLowerCase());
+}
+
 /** Classify a failure from provider output/exit code. Shared by harnesses and the router. */
 export function classifyFailure(stderr: string, exitCode: number): HarnessFailureReason {
   if (exitCode === 124) return 'timeout';
@@ -11,6 +17,7 @@ export function classifyFailure(stderr: string, exitCode: number): HarnessFailur
     return 'local_auth';
   // Codex CLI without a login: `unexpected status 401 Unauthorized: Missing bearer ...` (#2494).
   if (/missing bearer|\b401\b[^\n]{0,20}unauthori[sz]ed/.test(text)) return 'local_auth';
+  // Rejected credentials are told apart from signed-out ones by isRejectedCredential (#3232).
   // Provider 401 bodies as surfaced by Pi: Anthropic `authentication_error`, OpenAI
   // "Incorrect API key provided", OpenRouter "No auth credentials found" (#2901).
   if (/\bauthentication_error\b|(?:invalid|incorrect) (?:x-)?api[\s_-]?key|no auth credentials found/.test(text))

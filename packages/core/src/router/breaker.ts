@@ -7,15 +7,57 @@ import { dirname } from 'node:path';
 
 import type { EventKind } from '../events/kinds.js';
 import type { FailoverReason } from '../types/index.js';
+import { credentialFingerprint } from './credential-fingerprint.js';
 
-export interface BreakerEntry {
+/** Opens for a fixed cooldown. Old breaker files hold only these. */
+export interface TimedBreakerEntry {
   reason: FailoverReason;
   openedAt: string;
   cooldownMs: number;
 }
 
+/** Opens until the provider's credentials change (kind `auth`, #3232). Holds only the sha256 fingerprint. */
+export interface CredentialsBreakerEntry {
+  reason: FailoverReason;
+  openedAt: string;
+  until: 'credentials-change';
+  credentialFingerprint: string;
+}
+
+export type BreakerEntry = TimedBreakerEntry | CredentialsBreakerEntry;
+
+export function isCredentialsEntry(entry: BreakerEntry): entry is CredentialsBreakerEntry {
+  return 'until' in entry && entry.until === 'credentials-change';
+}
+
+export interface BreakerCloseEvent {
+  provider: string;
+  entry: BreakerEntry;
+  cause: 'creds_changed' | 'manual_reset';
+}
+
+export interface ProviderBreakerOptions {
+  fingerprint?: (provider: string) => Promise<string>;
+  onClose?: (event: BreakerCloseEvent) => void;
+}
+
 export type BreakerStatus =
   { open: true; entry: BreakerEntry; remainingMs: number } | { open: false; justClosed?: BreakerEntry };
+
+export interface BreakerListing {
+  provider: string;
+  reason: FailoverReason;
+  openedAt: string;
+  remainingMs: number;
+  until?: 'credentials-change';
+}
+
+/** "12m remaining" for a timed entry; the credentials wording when remainingMs is not finite (untimed entry). */
+export function describeBreakerRemaining(remainingMs: number): string {
+  return Number.isFinite(remainingMs)
+    ? `${Math.ceil(remainingMs / 60_000)}m remaining`
+    : 'until credentials change (or `factory breaker reset`)';
+}
 
 interface BreakerFile {
   version: 1;
@@ -78,11 +120,22 @@ export function reportedCooldownMs(
   return parseResetCooldownMs(detail ?? '', RESET_BUFFER_MS, now);
 }
 
+function remainingOf(entry: TimedBreakerEntry, now: number): number {
+  return new Date(entry.openedAt).getTime() + entry.cooldownMs - now;
+}
+
 export class ProviderBreaker {
+  private fingerprint: (provider: string) => Promise<string>;
+  private onClose?: (event: BreakerCloseEvent) => void;
+
   constructor(
     private file: string,
     private now: () => number = () => Date.now(),
-  ) {}
+    opts: ProviderBreakerOptions = {},
+  ) {
+    this.fingerprint = opts.fingerprint ?? ((provider) => credentialFingerprint(provider));
+    this.onClose = opts.onClose;
+  }
 
   /** Upsert (refresh openedAt on repeat trips). Atomic write: mkdir parent, write `${file}.tmp`, rename. */
   async open(provider: string, reason: FailoverReason, cooldownMs: number): Promise<void> {
@@ -91,16 +144,49 @@ export class ProviderBreaker {
     await this.write(data);
   }
 
+  /** Opens an untimed entry keyed on the provider's credential fingerprint (#3232). Returns true only on a
+   *  transition into the auth-open state (a timed or absent entry is replaced); false when already auth-open. */
+  async openUntilCredentialsChange(provider: string, reason: FailoverReason): Promise<boolean> {
+    const data = await this.read();
+    const existing = data.providers[provider];
+    if (existing && isCredentialsEntry(existing)) return false;
+    data.providers[provider] = {
+      reason,
+      openedAt: new Date(this.now()).toISOString(),
+      until: 'credentials-change',
+      credentialFingerprint: await this.fingerprint(provider),
+    };
+    await this.write(data);
+    return true;
+  }
+
   /** Reads the file. If the entry's openedAt + cooldownMs <= now(), prune it
    *  (rewrite the file without it) and return { open: false, justClosed: entry }
    *  so the caller can emit provider_breaker_close exactly once per observer.
+   *  An untimed entry stays open (remainingMs Infinity) until its fingerprint changes: then it is pruned and
+   *  onClose fires with cause creds_changed (no justClosed, so gateBuildOnBreaker does not log twice).
    *  Missing/corrupt/unparsable file => { open: false }. */
   async status(provider: string): Promise<BreakerStatus> {
     const data = await this.read();
     const entry = data.providers[provider];
     if (!entry) return { open: false };
 
-    const remainingMs = new Date(entry.openedAt).getTime() + entry.cooldownMs - this.now();
+    if (isCredentialsEntry(entry)) {
+      const stored: unknown = entry.credentialFingerprint;
+      if (typeof stored === 'string' && stored === (await this.fingerprint(provider))) {
+        return { open: true, entry, remainingMs: Number.POSITIVE_INFINITY };
+      }
+      delete data.providers[provider];
+      await this.write(data);
+      try {
+        this.onClose?.({ provider, entry, cause: 'creds_changed' });
+      } catch {
+        // Close logging must not break the gate.
+      }
+      return { open: false };
+    }
+
+    const remainingMs = remainingOf(entry, this.now());
     if (remainingMs > 0) return { open: true, entry, remainingMs };
 
     delete data.providers[provider];
@@ -108,13 +194,37 @@ export class ProviderBreaker {
     return { open: false, justClosed: entry };
   }
 
-  /** Read-only (never rewrites the file — factory status must not mutate state).
-   *  Returns only still-open entries with computed remainingMs. */
-  async list(): Promise<Array<{ provider: string; reason: FailoverReason; openedAt: string; remainingMs: number }>> {
+  /** Removes the provider's entry (open or not) and returns it, else undefined. Does not call onClose: the
+   *  caller (`factory breaker reset`) logs the manual_reset close itself. */
+  async reset(provider: string): Promise<BreakerEntry | undefined> {
     const data = await this.read();
-    const out: Array<{ provider: string; reason: FailoverReason; openedAt: string; remainingMs: number }> = [];
+    const entry = data.providers[provider];
+    if (!entry) return undefined;
+    delete data.providers[provider];
+    await this.write(data);
+    return entry;
+  }
+
+  /** Read-only (never rewrites the file — factory status must not mutate state).
+   *  Returns only still-open entries with computed remainingMs (Infinity + `until` for untimed entries whose
+   *  fingerprint still matches). */
+  async list(): Promise<BreakerListing[]> {
+    const data = await this.read();
+    const out: BreakerListing[] = [];
     for (const [provider, entry] of Object.entries(data.providers)) {
-      const remainingMs = new Date(entry.openedAt).getTime() + entry.cooldownMs - this.now();
+      if (isCredentialsEntry(entry)) {
+        if (entry.credentialFingerprint === (await this.fingerprint(provider))) {
+          out.push({
+            provider,
+            reason: entry.reason,
+            openedAt: entry.openedAt,
+            remainingMs: Number.POSITIVE_INFINITY,
+            until: 'credentials-change',
+          });
+        }
+        continue;
+      }
+      const remainingMs = remainingOf(entry, this.now());
       if (remainingMs > 0) {
         out.push({ provider, reason: entry.reason, openedAt: entry.openedAt, remainingMs });
       }
@@ -158,10 +268,9 @@ export async function gateBuildOnBreaker(opts: {
     const status = await breaker.status(provider);
     if (status.open) {
       codexBlocked = true;
-      const m = Math.ceil(status.remainingMs / 60_000);
       log(
         'provider_breaker_skip',
-        `breaker open for ${provider} (${status.entry.reason}) — routing build to claude fallback, ${m}m remaining`,
+        `breaker open for ${provider} (${status.entry.reason}) — routing build to claude fallback, ${describeBreakerRemaining(status.remainingMs)}`,
       );
     } else if (status.justClosed) {
       log('provider_breaker_close', `breaker closed for ${provider} after cooldown — codex workers eligible again`);

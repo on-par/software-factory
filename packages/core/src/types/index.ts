@@ -1,9 +1,11 @@
 // src/types/index.ts — Core type definitions for the Software Factory
 import type {
+  BreakerClosePayload,
   EventKind,
   FlakyTestsPayload,
   LanePausedPayload,
   ParkPayload,
+  ProviderAuthRejectedPayload,
   StewardTriggeredPayload,
 } from '../events/kinds.js';
 import type { RunAttribution } from '../run/outcome.js';
@@ -330,6 +332,8 @@ export interface FactoryEvent {
   readiness?: ReadinessInfo;
   queueReprioritization?: QueueReprioritizationRecord;
   prClassification?: PrClassificationRecord;
+  providerAuthRejected?: ProviderAuthRejectedPayload; // Rejected-credential details on a provider_auth_rejected event (#3232).
+  breakerClose?: BreakerClosePayload; // Why a provider breaker closed (#3232).
   park?: ParkPayload; // Structured park reason/decision/lane/queue on a park event (#3511).
   lanePaused?: LanePausedPayload; // Breaker details on a `lane-paused` event (#1916).
   stewardTriggered?: StewardTriggeredPayload; // Trigger details on a steward-triggered event (#2086).

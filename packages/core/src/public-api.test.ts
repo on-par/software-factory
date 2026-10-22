@@ -62,6 +62,7 @@ const PUBLIC_API_KEYS = [
   'defaultIsPidAlive',
   'defaultIsPortFree',
   'defaultIsProcessGroupAlive',
+  'describeBreakerRemaining',
   'headlessEnv',
   'inspectPortLeases',
   'killProcessGroup',

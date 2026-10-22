@@ -9,6 +9,16 @@ import type { CliDeps, ProgramHandlers } from './index.js';
 import { cmdSelfUpdateApply } from './self-update-apply.js';
 
 export function registerAdvancedCommands(program: Command, handlers: ProgramHandlers, deps: CliDeps): void {
+  const breaker = program.command('breaker').description('Inspect and reset provider circuit breakers');
+  breaker
+    .command('reset <provider>')
+    .description(
+      'Close an open provider breaker (e.g. after fixing a rejected credential) and log provider_breaker_close cause manual_reset',
+    )
+    .action(async (provider: string) => {
+      await handlers.cmdBreakerReset(provider);
+    });
+
   const hosted = program
     .command('hosted')
     .description('Experimental remote-runner execution (needs FACTORY_HOSTED_EXEC=1)');

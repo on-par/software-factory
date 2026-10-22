@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,12 +7,15 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  describeBreakerRemaining,
+  type BreakerCloseEvent,
   gateBuildOnBreaker,
   MAX_REPORTED_COOLDOWN_MS,
   parseResetCooldownMs,
   ProviderBreaker,
   reportedCooldownMs,
 } from './breaker.js';
+import { credentialFingerprint } from './credential-fingerprint.js';
 
 const tempDirs = new Set<string>();
 
@@ -275,5 +278,138 @@ describe('reportedCooldownMs', () => {
     expect(reportedCooldownMs('2026-10-01T00:00:00Z', 'Resets in 1hr', now)).toBe(62 * 60_000);
     expect(reportedCooldownMs('garbage', 'nothing', now)).toBeNull();
     expect(reportedCooldownMs(undefined, undefined, now)).toBeNull();
+  });
+});
+
+describe('untimed credentials entries (#3232)', () => {
+  const HOUR = 60 * 60_000;
+
+  async function authSetup() {
+    const file = await tmpFile();
+    const dir = join(file, '..');
+    const closes: BreakerCloseEvent[] = [];
+    let t = Date.parse('2026-10-20T00:00:00Z');
+    const authFile = join(dir, '.credentials.json');
+    await writeFile(authFile, '{"token":"one"}');
+    const breaker = new ProviderBreaker(file, () => t, {
+      fingerprint: (p) => credentialFingerprint(p, { env: { CLAUDE_CONFIG_DIR: dir }, homedir: () => dir }),
+      onClose: (e) => closes.push(e),
+    });
+    return { file, breaker, closes, authFile, advance: (ms: number) => (t += ms) };
+  }
+
+  it('stays open after 48h with an unchanged fingerprint and closes with creds_changed when the auth file changes', async () => {
+    const { file, breaker, closes, authFile, advance } = await authSetup();
+    expect(await breaker.openUntilCredentialsChange('anthropic', 'local_auth')).toBe(true);
+    advance(48 * HOUR);
+    const open = await breaker.status('anthropic');
+    expect(open).toMatchObject({ open: true, remainingMs: Number.POSITIVE_INFINITY });
+    const stored = JSON.parse(readFileSync(file, 'utf-8')).providers.anthropic;
+    expect(stored).toMatchObject({ until: 'credentials-change' });
+    expect(stored.cooldownMs).toBeUndefined();
+    expect(closes).toEqual([]);
+
+    await writeFile(authFile, '{"token":"two"}');
+    expect(await breaker.status('anthropic')).toEqual({ open: false });
+    expect(closes).toHaveLength(1);
+    expect(closes[0]).toMatchObject({ provider: 'anthropic', cause: 'creds_changed' });
+    expect(JSON.parse(readFileSync(file, 'utf-8')).providers.anthropic).toBeUndefined();
+  });
+
+  it('openUntilCredentialsChange returns true then false, and replaces a timed entry', async () => {
+    const { file, breaker } = await authSetup();
+    await breaker.open('anthropic', 'rate_limit', 60_000);
+    expect(await breaker.openUntilCredentialsChange('anthropic', 'local_auth')).toBe(true);
+    const first = JSON.parse(readFileSync(file, 'utf-8')).providers.anthropic;
+    expect(first.until).toBe('credentials-change');
+    expect(await breaker.openUntilCredentialsChange('anthropic', 'local_auth')).toBe(false);
+    expect(JSON.parse(readFileSync(file, 'utf-8')).providers.anthropic).toEqual(first);
+  });
+
+  it('reset returns the removed entry, and undefined for an absent one', async () => {
+    const { breaker } = await authSetup();
+    expect(await breaker.reset('anthropic')).toBeUndefined();
+    await breaker.openUntilCredentialsChange('anthropic', 'local_auth');
+    expect(await breaker.reset('anthropic')).toMatchObject({ reason: 'local_auth', until: 'credentials-change' });
+    expect(await breaker.status('anthropic')).toEqual({ open: false });
+  });
+
+  it('list includes a matching untimed entry and omits a changed one without rewriting the file', async () => {
+    const { file, breaker, authFile } = await authSetup();
+    await breaker.openUntilCredentialsChange('anthropic', 'local_auth');
+    expect(await breaker.list()).toEqual([
+      expect.objectContaining({
+        provider: 'anthropic',
+        until: 'credentials-change',
+        remainingMs: Number.POSITIVE_INFINITY,
+      }),
+    ]);
+    await writeFile(authFile, 'changed');
+    const before = readFileSync(file, 'utf-8');
+    expect(await breaker.list()).toEqual([]);
+    expect(readFileSync(file, 'utf-8')).toBe(before);
+  });
+
+  it('still honours a pre-change timed file with no until field', async () => {
+    const { file, breaker, advance } = await authSetup();
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        providers: {
+          openai: {
+            reason: 'usage_cap',
+            openedAt: new Date(Date.parse('2026-10-20T00:00:00Z')).toISOString(),
+            cooldownMs: 60_000,
+          },
+        },
+      }),
+    );
+    expect(await breaker.status('openai')).toMatchObject({ open: true, remainingMs: 60_000 });
+    advance(2 * 60_000);
+    expect(await breaker.status('openai')).toMatchObject({ open: false, justClosed: { reason: 'usage_cap' } });
+  });
+
+  it('prunes a malformed auth entry with no fingerprint', async () => {
+    const { file, breaker, closes } = await authSetup();
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        providers: { anthropic: { reason: 'local_auth', openedAt: 'x', until: 'credentials-change' } },
+      }),
+    );
+    expect(await breaker.status('anthropic')).toEqual({ open: false });
+    expect(closes).toHaveLength(1);
+  });
+
+  it('swallows an onClose that throws', async () => {
+    const file = await tmpFile();
+    let fp = 'a';
+    const breaker = new ProviderBreaker(file, undefined, {
+      fingerprint: async () => fp,
+      onClose: () => {
+        throw new Error('log down');
+      },
+    });
+    await breaker.openUntilCredentialsChange('anthropic', 'local_auth');
+    fp = 'b';
+    expect(await breaker.status('anthropic')).toEqual({ open: false });
+  });
+
+  it('gateBuildOnBreaker words an untimed skip without a minute count', async () => {
+    const file = await tmpFile();
+    const breaker = new ProviderBreaker(file, undefined, { fingerprint: async () => 'fp' });
+    await breaker.openUntilCredentialsChange('anthropic', 'local_auth');
+    const logs: string[] = [];
+    const r = await gateBuildOnBreaker({ breaker, providers: ['anthropic'], log: (_t, m) => logs.push(m) });
+    expect(r.codexBlocked).toBe(true);
+    expect(logs[0]).toContain('until credentials change');
+    expect(logs[0]).not.toContain('Infinity');
+  });
+
+  it('describeBreakerRemaining covers finite and infinite remaining time', () => {
+    expect(describeBreakerRemaining(90_000)).toBe('2m remaining');
+    expect(describeBreakerRemaining(Number.POSITIVE_INFINITY)).toContain('until credentials change');
   });
 });

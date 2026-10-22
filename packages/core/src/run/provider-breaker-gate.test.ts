@@ -63,7 +63,7 @@ const CODEX_ONLY = {
 
 async function setup(open: boolean, models: Record<string, ModelDef> = CLAUDE_MODELS) {
   counter += 1;
-  const breaker = new ProviderBreaker(join(dir, `b-${counter}.json`), () => NOW);
+  const breaker = new ProviderBreaker(join(dir, `b-${counter}.json`), () => NOW, { fingerprint: async () => 'fp' });
   if (open) await breaker.open('opencode-go', 'usage_cap', 30 * 60_000);
   const events: Array<[EventKind, string]> = [];
   const deps = { router: routerWith(models), breaker, log: (t: EventKind, m: string) => events.push([t, m]) };
@@ -107,6 +107,17 @@ describe('gateOpencodeBuildOnBreaker', () => {
     expect(gate.message).toContain('ADR-0092');
     expect(gate.message).toContain(`resets at ${gate.resetAt}`);
     expect(events.some(([t]) => t === 'provider_breaker_pinned')).toBe(true);
+  });
+
+  it('blocks a pinned route on an untimed auth entry without a reset time', async () => {
+    const { deps, events } = await setup(false);
+    await deps.breaker.openUntilCredentialsChange('opencode-go', 'local_auth');
+    const gate = await gateOpencodeBuildOnBreaker(deps, { ...base, routePinned: true });
+    expect(gate).toMatchObject({ kind: 'blocked', reason: 'local_auth' });
+    if (gate?.kind !== 'blocked') return;
+    expect(gate.resetAt).toBeUndefined();
+    expect(gate.message).toContain('credentials change');
+    expect(events.find(([t]) => t === 'provider_breaker_pinned')?.[1]).toContain('until credentials change');
   });
 
   it('returns undefined for a pinned closed breaker', async () => {

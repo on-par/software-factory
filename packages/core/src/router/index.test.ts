@@ -1578,6 +1578,20 @@ describe('provider failure kinds', () => {
     }
   });
 
+  it('forwards kind auth, model, harness and task for a rejected credential', async () => {
+    const { result, infos } = await runWith(new HarnessError('authentication_error: invalid x-api-key', 'local_auth'));
+    expect(result.model).toBe('gpt-fallback');
+    expect(infos).toEqual([
+      expect.objectContaining({
+        provider: 'anthropic',
+        reason: 'local_auth',
+        kind: 'auth',
+        model: 'claude-preferred',
+        task: 'plan',
+      }),
+    ]);
+  });
+
   it('stops failover on kind other', async () => {
     const router = new ModelRouter(
       providerModels,

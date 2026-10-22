@@ -53,6 +53,37 @@ describe('buildStatusJson', () => {
     expect(statusJsonSchema.parse(out)).toEqual(out);
   });
 
+  it('reports an untimed breaker as remainingSec 0 with until credentials-change (#3232)', () => {
+    const out = buildStatusJson({
+      repo: 'o/r',
+      product: null,
+      stop: false,
+      stopInfo: null,
+      breakers: [
+        {
+          provider: 'anthropic',
+          reason: 'local_auth',
+          openedAt: '2026-01-01T00:00:00.000Z',
+          remainingMs: Number.POSITIVE_INFINITY,
+          until: 'credentials-change',
+        },
+      ],
+      active: [],
+      update: null,
+      now,
+    });
+    expect(out.breaker.providers).toEqual([
+      {
+        provider: 'anthropic',
+        reason: 'local_auth',
+        openedAt: '2026-01-01T00:00:00.000Z',
+        remainingSec: 0,
+        until: 'credentials-change',
+      },
+    ]);
+    expect(statusJsonSchema.parse(out)).toEqual(out);
+  });
+
   it('reports closed breaker, no claims and null product', () => {
     const out = buildStatusJson({
       repo: 'o/r',

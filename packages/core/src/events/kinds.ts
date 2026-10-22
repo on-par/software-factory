@@ -8,7 +8,14 @@
 
 import type { LogLevel } from '../types/index.js';
 
-export type { FlakyTestsPayload, LanePausedPayload, ParkPayload, StewardTriggeredPayload } from './payloads.js';
+export type {
+  BreakerClosePayload,
+  FlakyTestsPayload,
+  LanePausedPayload,
+  ParkPayload,
+  ProviderAuthRejectedPayload,
+  StewardTriggeredPayload,
+} from './payloads.js';
 
 export type EventKind =
   | 'pr-adopt-ambiguous'
@@ -141,6 +148,7 @@ export type EventKind =
   | 'queue_rationale_comment_failed'
   | 'project_queue_refresh_failed'
   | 'project_queue_refresh_succeeded'
+  | 'provider_auth_rejected'
   | 'provider_breaker_close'
   | 'provider_breaker_open'
   | 'provider_breaker_skip'
@@ -372,6 +380,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   queue_rationale_comment_failed: { severity: 'warn', isPark: false, isTerminal: false },
   project_queue_refresh_failed: { severity: 'warn', isPark: false, isTerminal: false },
   project_queue_refresh_succeeded: { severity: 'info', isPark: false, isTerminal: false },
+  // A provider rejected the credential (#3232): warn, not a park; the run fails over.
+  provider_auth_rejected: { severity: 'warn', isPark: false, isTerminal: false },
   provider_breaker_close: { severity: 'info', isPark: false, isTerminal: false },
   provider_breaker_open: { severity: 'info', isPark: false, isTerminal: false },
   provider_breaker_skip: { severity: 'info', isPark: false, isTerminal: false },

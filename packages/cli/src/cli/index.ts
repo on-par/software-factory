@@ -266,6 +266,7 @@ import { buildQueueAddJson } from './queue-add-json.js';
 import { renderQueueAddLines, renderUnparkLines } from './queue-output.js';
 import { buildQueueListJson } from './queue-list.js';
 import { cmdSteer, type SteerOptions } from './steer.js';
+import { runBreakerReset } from './breaker.js';
 import { appendUnparkEvent, runUnpark, UnparkError, type UnparkJson } from './unpark.js';
 import { buildRunsJson, parseRunsLimit } from './runs.js';
 import { buildRunDiffstatJson, NoRunError, parseDiffstatIssue, type RunDiffstatJson } from './runs-diffstat.js';
@@ -3122,6 +3123,18 @@ async function recordQueueAdded(lane: string, results: readonly EnqueueResult[])
   }
 }
 
+export async function cmdBreakerReset(provider: string): Promise<void> {
+  const paths = getFactoryPaths(await getRepoRoot());
+  const result = await runBreakerReset({ breakerFile: paths.breaker, eventsFile: paths.events, provider });
+  if (!result.ok) {
+    throw new CliExitError(
+      `factory: breaker reset ${provider} — no open breaker. Open: ${result.open.join(', ') || '(none)'}`,
+      1,
+    );
+  }
+  console.log(styleText('green', `breaker reset for ${provider} (was ${result.entry.reason})`));
+}
+
 export async function cmdUnpark(issueArg: string, opts: { lane?: string; json?: boolean } = {}): Promise<void> {
   const issue = parseIssueArg(issueArg);
   let result: UnparkJson;
@@ -4339,6 +4352,7 @@ export const PROGRAM_HANDLERS = {
   cmdTriage,
   cmdTriageAccept,
   cmdUnpark,
+  cmdBreakerReset,
   cmdQueueMigrate,
   cmdQueueAdd,
   cmdQueueReconcile,

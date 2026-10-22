@@ -178,7 +178,16 @@ export async function shipIssue(
   const classifierPolicy = resolvePrClassifierPolicy(factoryConfig, process.env, { classifier: opts.prClassifier });
   const timeouts = loaders.resolveTimeouts(factoryConfig);
   const failoverSettings = resolveAutoFailover(factoryConfig);
-  const breaker = new ProviderBreaker(paths.breaker);
+  const breaker = new ProviderBreaker(paths.breaker, undefined, {
+    onClose: ({ provider, cause }) =>
+      logEvent(
+        paths.events,
+        'provider_breaker_close',
+        issueNum,
+        `breaker closed for ${provider} (cause=${cause}) — provider eligible again`,
+        { lane: ctx?.lane, breakerClose: { provider, cause } },
+      ),
+  });
   const reworkHistory = new ReworkHistory(paths.reworkHistory);
   const laneFileGuard = new LaneFileGuard(paths.laneFiles);
   const efficiency = resolveEfficiencyPolicy(repoConfig);

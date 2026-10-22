@@ -352,7 +352,7 @@ export type {
   RouterResult,
   SleepFn,
 } from './router/index.js';
-export { failoversFrom, ModelRouter } from './router/index.js';
+export { describeBreakerRemaining, failoversFrom, ModelRouter } from './router/index.js';
 
 // Provider circuit breaker
 export type { BreakerEntry, BreakerStatus } from './router/breaker.js';

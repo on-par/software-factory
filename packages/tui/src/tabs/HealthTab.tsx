@@ -1,4 +1,10 @@
-import { computeHealthKpis, type CostEntry, type FactoryEvent, formatKpiLines } from '@on-par/factory-core';
+import {
+  computeHealthKpis,
+  type CostEntry,
+  describeBreakerRemaining,
+  type FactoryEvent,
+  formatKpiLines,
+} from '@on-par/factory-core';
 import { Box, Text } from 'ink';
 import { type JSX, useMemo } from 'react';
 
@@ -59,7 +65,7 @@ export function HealthTab({
         breakers.map((b) => (
           <Text key={b.provider} color="yellow">
             {'Breaker:'.padEnd(22)}
-            {b.provider}: OPEN ({b.reason}) — {Math.ceil(b.remainingMs / 60_000)}m remaining
+            {b.provider}: OPEN ({b.reason}) — {describeBreakerRemaining(b.remainingMs)}
           </Text>
         ))
       )}

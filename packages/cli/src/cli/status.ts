@@ -12,6 +12,7 @@ import {
   getFactoryPaths,
   parseQueue,
   partitionLocalQueueByActivity,
+  describeBreakerRemaining,
   ProviderBreaker,
   readEvents,
   resolveMergePolicy,
@@ -298,7 +299,7 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
     console.log('    (closed)');
   } else {
     for (const b of openBreakers) {
-      console.log(`    ${b.provider}: OPEN (${b.reason}) — ${Math.ceil(b.remainingMs / 60_000)}m remaining`);
+      console.log(`    ${b.provider}: OPEN (${b.reason}) — ${describeBreakerRemaining(b.remainingMs)}`);
     }
   }
 

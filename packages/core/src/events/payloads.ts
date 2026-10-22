@@ -14,6 +14,24 @@ export interface ParkPayload {
   blockedBehind: number[];
 }
 
+/** Payload of a `provider_auth_rejected` event (#3232): which provider rejected the credential, where, and why. */
+export interface ProviderAuthRejectedPayload {
+  provider: string;
+  harness: string;
+  model: string;
+  stage: string;
+  issue: number | string;
+  at: string;
+  /** Provider error text, already passed through redactText. */
+  detail: string;
+}
+
+/** Payload of a `provider_breaker_close` event: why the breaker closed. */
+export interface BreakerClosePayload {
+  provider: string;
+  cause: 'cooldown' | 'creds_changed' | 'manual_reset';
+}
+
 /** Payload of a `lane-paused` event. Two triggers: the lane circuit breaker
  *  (#1906/#1916) stopped `lane` after `firstIssue` and then `secondIssue` parked in
  *  a row with the same non-empty failure `signature`; or CHECK found every failing

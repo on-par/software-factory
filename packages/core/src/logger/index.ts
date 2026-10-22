@@ -13,6 +13,8 @@ import type {
   FlakyTestsPayload,
   LanePausedPayload,
   ParkPayload,
+  ProviderAuthRejectedPayload,
+  BreakerClosePayload,
   StewardTriggeredPayload,
 } from '../events/kinds.js';
 import type {
@@ -49,6 +51,8 @@ export interface LogExtra {
   queueReprioritization?: QueueReprioritizationRecord;
   lanePaused?: LanePausedPayload;
   park?: ParkPayload;
+  providerAuthRejected?: ProviderAuthRejectedPayload;
+  breakerClose?: BreakerClosePayload;
   stewardTriggered?: StewardTriggeredPayload;
   flakyTests?: FlakyTestsPayload;
   checkFailure?: CheckFailureInfo;
@@ -130,6 +134,8 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.queueReprioritization !== undefined ? { queueReprioritization: extra.queueReprioritization } : {}),
       ...(extra?.lanePaused ? { lanePaused: extra.lanePaused } : {}),
       ...(extra?.park ? { park: extra.park } : {}),
+      ...(extra?.providerAuthRejected ? { providerAuthRejected: extra.providerAuthRejected } : {}),
+      ...(extra?.breakerClose ? { breakerClose: extra.breakerClose } : {}),
       ...(extra?.stewardTriggered ? { stewardTriggered: extra.stewardTriggered } : {}),
       ...(extra?.flakyTests ? { flakyTests: extra.flakyTests } : {}),
       ...(extra?.checkFailure ? { checkFailure: extra.checkFailure } : {}),

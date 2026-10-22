@@ -231,7 +231,7 @@ describe('runIssue provider reset time', () => {
     expect(events.some(([t, m]) => t === 'provider_breaker_open' && m.includes('provider-reported reset time'))).toBe(
       true,
     );
-    if (!status.open) throw new Error('expected an open breaker');
+    if (!status.open || !('cooldownMs' in status.entry)) throw new Error('expected an open timed breaker');
     expect(Date.parse(status.entry.openedAt) + status.entry.cooldownMs).toBe(Date.parse('2026-10-20T12:02:00Z'));
   });
 
