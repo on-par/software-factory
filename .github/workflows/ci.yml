@@ -242,3 +242,9 @@ jobs:
         run: bash scripts/publish-release.test.sh
       - name: set-release-version unit test
         run: bash scripts/set-release-version.test.sh
+      - name: Install actionlint
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7 "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: factory-run wrapper and workflow test
+        run: bash scripts/factory-run.test.sh

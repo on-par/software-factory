@@ -1,0 +1,71 @@
+# Reusable workflow (#3197): run one allowlisted factory command on a GitHub-hosted runner.
+# Callers pin it by tag; see docs/runbooks/github-actions-run.md.
+# FACTORY_CLI_VERSION must equal the lockstep package version (guarded by scripts/factory-run.test.sh).
+name: Factory run
+on:
+  workflow_call:
+    inputs:
+      command:
+        description: Factory command (allowlist run-issue, ship, doctor)
+        type: string
+        required: false
+        default: run-issue
+      issue:
+        description: Issue number (required for run-issue and ship)
+        type: string
+        required: false
+        default: ''
+    secrets:
+      FACTORY_GITHUB_TOKEN:
+        required: true
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: false
+      ANTHROPIC_API_KEY:
+        required: false
+
+env:
+  FACTORY_CLI_VERSION: 0.9.4
+  CLAUDE_CODE_VERSION: 2.1.308
+
+jobs:
+  run:
+    name: factory-run
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@v7
+        with:
+          repository: on-par/software-factory
+          ref: v${{ env.FACTORY_CLI_VERSION }}
+          path: .factory-action
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install factory and Claude Code CLIs
+        run: npm install -g "@on-par/factory-cli@${FACTORY_CLI_VERSION}" "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+      - name: Run factory
+        env:
+          COMMAND: ${{ inputs.command }}
+          ISSUE: ${{ inputs.issue }}
+          FACTORY_GITHUB_TOKEN: ${{ secrets.FACTORY_GITHUB_TOKEN }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          FACTORY_RUN_LOG: ${{ runner.temp }}/factory-run.log
+        run: bash .factory-action/scripts/factory-run.sh
+      - name: Upload run log and events
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: factory-run-log
+          path: |
+            ${{ runner.temp }}/factory-run.log
+            .factory/events.ndjson
+          if-no-files-found: warn
+          retention-days: 14
