@@ -14,7 +14,7 @@ import type {
 } from '@on-par/factory-core/internal';
 
 import { BASE_HOLD_CI_RECHECK_MS, type BaseHoldDecision, writeBaseHold } from './base-hold.js';
-import { tryPublishParkComment } from './lane-park-comment.js';
+import { laneParkCommenter } from './lane-park-comment.js';
 import { waitForMerge } from './land.js';
 import { AwaitingReviewError } from './land-pr.js';
 import { releaseKeepOnRequeue } from './worktree-keep.js';
@@ -23,8 +23,7 @@ import { withHeartbeat } from './lane-heartbeat.js';
 import { shipRuntime } from './ship-runtime.js';
 
 export type RunLaneDeps = {
-  /** Octokit for the issue park comment of a park raised outside runIssue (#3534). Absent = no
-   *  comment is written (local queue, injected-deps tests). */
+  /** Octokit for the park comment of a park raised outside runIssue (#3534). Absent = no comment. */
   octokit?: () => Octokit;
   /** The run id written to the park comment's `run:` line. Defaults to '-'. */
   runId?: string;
@@ -168,13 +167,9 @@ export async function runLane(
     await sweepFinished(issue).catch(() => {});
   };
   // A park raised outside runIssue upserts the issue park comment (#3534); fail-closed, never changes lane flow.
-  const postParkComment = async (issue: number, reason: ParkReason, message: string, branch?: string) => {
-    if (!getOctokit) return;
-    const readHead = () => (branch ? readParkSha(branch) : Promise.reject(new Error('no branch')));
-    const input = { issue, reason, message, runId, branch: branch || '-', lane, blockers: [] };
-    const failed = await tryPublishParkComment(getOctokit, ghRepo, repoRoot, readHead, input);
-    if (failed) emitEvent(paths.events, 'warn', issue, failed, { lane });
-  };
+  const postParkComment = laneParkCommenter({ getOctokit, ghRepo, repoRoot, runId, lane, readParkSha }, (issue, m) =>
+    emitEvent(paths.events, 'warn', issue, m, { lane }),
+  );
   // A parked release adds factory:parked (#3424). Log the clean park only once the label
   // landed; a rejected add is surfaced as a fail event naming the issue and label (#3425).
   const parkAndSettle = async (issue: number, parkedMsg: string, park: ParkPayload): Promise<boolean> => {
@@ -286,7 +281,7 @@ export async function runLane(
     }
     const layer = decision.kind === 'adopt' ? decision.stackLayer : undefined;
     const sliceOutcome: { value?: RunOutcome } = {};
-    let landBranch: string | undefined;
+    let landBranch = decision.kind === 'adopt' ? decision.branch : undefined;
     let landing: string | undefined;
     try {
       const branch =
@@ -462,12 +457,7 @@ export async function runLane(
       }, ${await remainingAfter(i)} issue(s) remaining`;
       // runIssue's terminalParked already wrote the comment for a run it parked (#2314).
       if (sliceOutcome.value?.state !== 'parked') {
-        await postParkComment(
-          issue,
-          reason,
-          err instanceof Error ? err.message : String(err),
-          landBranch ?? (decision.kind === 'adopt' ? decision.branch : undefined),
-        );
+        await postParkComment(issue, reason, err instanceof Error ? err.message : String(err), landBranch);
       }
       // Remove the parked lane's own worktree so a parked issue stops leaving a sibling
       // checkout behind (#1007); fail-closed and never allowed to change lane flow.
