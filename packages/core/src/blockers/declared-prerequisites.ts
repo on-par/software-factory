@@ -14,7 +14,7 @@ export function findDeclaredPrerequisites(body: string): number[] {
       fence = { marker: opening[1][0] as '`' | '~', length: opening[1].length };
       continue;
     }
-    const declaration = /^\s*Prerequisite:\s*#([1-9]\d*)\s*$/i.exec(line);
+    const declaration = /^\s*(?:[-*+]\s+)?Prerequisite:\s*#([1-9]\d*)(?!\d)/i.exec(line);
     if (!declaration) continue;
     const issue = Number(declaration[1]);
     if (Number.isSafeInteger(issue)) found.add(issue);
