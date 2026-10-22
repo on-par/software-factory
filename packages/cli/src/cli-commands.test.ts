@@ -104,6 +104,7 @@ const h = vi.hoisted(() => {
 
 import { listBuiltInCheckers } from '@on-par/factory-core/internal';
 
+import { openPrFixture } from './cli/__fixtures__/open-pr.js';
 import { FACTORYD_LABEL, factorydFiles, type DaemonCtlDeps } from './cli/daemon.js';
 import { HELP_GROUPS, OTHER_GROUP } from './cli/help-groups.js';
 
@@ -182,11 +183,7 @@ function defaultOctokit() {
       users: { getAuthenticated: vi.fn(async () => ({ data: { id: 7 } })) },
       rateLimit: { get: vi.fn(async () => ({ data: { resources: { core: { limit: 5000, remaining: 5000 } } } })) },
       pulls: {
-        list: vi.fn(async ({ state }: any) =>
-          state === 'open'
-            ? { data: [{ number: 77, head: { ref: 'ship-it/5-fix-the-bug' }, body: 'Closes #5' }] }
-            : { data: [] },
-        ),
+        list: vi.fn(async ({ state, head }: any) => ({ data: state === 'open' ? [openPrFixture(head)] : [] })),
         get: vi.fn(async () => ({ data: { head: { sha: 'abc123' } } })),
         merge: vi.fn(async () => ({})),
       },

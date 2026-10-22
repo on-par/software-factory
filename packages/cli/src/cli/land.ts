@@ -18,7 +18,7 @@ import {
   resolveSandboxPolicy,
   touchRunActivity,
 } from '@on-par/factory-core';
-import type { WorktreeSandbox } from '@on-par/factory-core/internal';
+import type { OpenPrLookup, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
   branchFor,
   factoryBranchPrefixes,
@@ -26,6 +26,8 @@ import {
   isAutoMergeBlocked,
   LEGACY_BRANCH_PREFIX,
   logEvent,
+  lookupOpenPrByBranch,
+  lookupOpenPrByIssue,
   publishRiskReceipt,
   releaseLaneClaim,
   resolveEffectiveConfig,
@@ -92,37 +94,38 @@ export async function landIssue(
     : factoryBranchPrefixes(resolved).map((p) => branchFor(issueNum, title, p));
   const guessedBranch = guesses[0];
 
-  let branch = guessedBranch;
-  let prNumber: number | undefined;
+  let lookup: OpenPrLookup = { status: 'none' };
   try {
-    const findByGuess = async (): Promise<number | undefined> => {
+    const findByGuess = async (): Promise<OpenPrLookup> => {
       for (const guess of guesses) {
-        const found = await findOpenPRNumber(octokit, owner, repoName, guess);
-        if (found) {
-          branch = guess;
-          return found;
-        }
+        const found = await lookupOpenPrByBranch({ octokit, repo: ghRepo, branch: guess });
+        if (found.status !== 'none') return found;
       }
-      return undefined;
+      return { status: 'none' };
     };
-    [, prNumber] = await Promise.all([gitOps.gitFetch(repoRoot), findByGuess()]);
-    if (!prNumber && !opts.branch) {
-      const fallback = await findOpenPRForIssue(octokit, owner, repoName, issueNum);
-      if (fallback) {
-        branch = fallback.branch;
-        prNumber = fallback.number;
-      }
+    [, lookup] = await Promise.all([gitOps.gitFetch(repoRoot), findByGuess()]);
+    if (lookup.status === 'none' && !opts.branch) {
+      lookup = await lookupOpenPrByIssue({ octokit, repo: ghRepo, issue: issueNum });
     }
+    if (lookup.status === 'error') throw new Error(lookup.detail);
   } catch (err) {
     const failure = prLookupFailure(issueNum, guessedBranch, err);
     log('fail', failure.message);
     throw failure;
   }
 
-  if (!prNumber) {
+  if (lookup.status === 'ambiguous') {
+    const list = lookup.prs.map((p) => `#${p.prNumber} (${p.branch})`).join(', ');
+    const msg = `${lookup.prs.length} open PRs in ${ghRepo} match issue #${issueNum}: ${list} — re-run \`factory land ${issueNum} --branch <branch>\` to pick one`;
+    log('fail', `ambiguous PR lookup: ${msg}`);
+    throw new LandFailureError(`ambiguous PR for issue #${issueNum}: ${msg}`, 1);
+  }
+  if (lookup.status !== 'found') {
     log('fail', `no open PR for ${guessedBranch}`);
     throw new LandFailureError(`no open PR for issue #${issueNum} (${guessedBranch})`, 1);
   }
+  const branch = lookup.branch;
+  const prNumber = lookup.prNumber;
 
   const landFactoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
   // Every merge path honors the no-auto-merge gate on the issue and on the PR; unreadable labels fail closed (#1720).
@@ -227,7 +230,7 @@ export async function landIssue(
         issue: issueNum,
         branch,
         worktree,
-        prNumber: prNumber!,
+        prNumber,
         log,
         skipCI,
         adminMerge: resolveMergePolicy(landFactoryConfig).admin,
@@ -285,21 +288,7 @@ export async function isPrMerged(octokit: Octokit, owner: string, repoName: stri
   return Boolean(latest.merged_at);
 }
 
-export async function findOpenPRNumber(
-  octokit: Octokit,
-  owner: string,
-  repoName: string,
-  branch: string,
-): Promise<number | undefined> {
-  const { data: prs } = await octokit.rest.pulls.list({
-    owner,
-    repo: repoName,
-    state: 'open',
-    head: `${owner}:${branch}`,
-  });
-  return prs[0]?.number;
-}
-
+/** queue-preflight only (it must see fork PRs to park them); land uses the core lookup (#3439). */
 export async function findOpenPRForIssue(
   octokit: Octokit,
   owner: string,
@@ -318,16 +307,12 @@ export async function findOpenPRForIssue(
     });
     const pr = prs.find((p: any) => matches.test(p.body ?? ''));
     if (pr) {
-      const headRepoFullName = pr.head.repo?.full_name ?? null;
-      if (headRepoFullName !== `${owner}/${repoName}`) {
-        return {
-          number: pr.number,
-          branch: pr.head.ref,
-          headSha: pr.head.sha,
-          headRepoFullName,
-        };
-      }
-      return { number: pr.number, branch: pr.head.ref, headSha: pr.head.sha, headRepoFullName };
+      return {
+        number: pr.number,
+        branch: pr.head.ref,
+        headSha: pr.head.sha,
+        headRepoFullName: pr.head.repo?.full_name ?? null,
+      };
     }
     if (prs.length < perPage) return undefined;
   }

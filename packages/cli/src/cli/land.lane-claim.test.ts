@@ -61,7 +61,19 @@ function defaultOctokit() {
       pulls: {
         list: vi.fn(async ({ state }: any) =>
           state === 'open'
-            ? { data: [{ number: 77, head: { ref: 'ship-it/5-fix-the-bug' }, body: 'Closes #5' }] }
+            ? {
+                data: [
+                  {
+                    number: 77,
+                    head: {
+                      ref: 'ship-it/5-fix-the-bug',
+                      repo: { full_name: 'on-par/software-factory' },
+                      sha: 'abc123',
+                    },
+                    body: 'Closes #5',
+                  },
+                ],
+              }
             : { data: [] },
         ),
         get: vi.fn(async () => ({ data: { head: { sha: 'abc123' } } })),
@@ -205,7 +217,15 @@ describe('land lane file claim release (#3067)', () => {
   function openPrForIssue1() {
     h.octokit.rest.pulls.list = vi.fn(async ({ state }: any) =>
       state === 'open'
-        ? { data: [{ number: 77, head: { ref: 'ship-it/1-fix-the-bug' }, body: 'Closes #1' }] }
+        ? {
+            data: [
+              {
+                number: 77,
+                head: { ref: 'ship-it/1-fix-the-bug', repo: { full_name: 'on-par/software-factory' }, sha: 'abc123' },
+                body: 'Closes #1',
+              },
+            ],
+          }
         : { data: [] },
     );
   }

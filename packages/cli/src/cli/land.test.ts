@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { openPrFixture } from './__fixtures__/open-pr.js';
 import { type CliDeps, cmdLand as cliCmdLand, main } from './index.js';
 
 // Shared mutable state the fakes read from. Reset per test in beforeEach.
@@ -52,11 +53,7 @@ function defaultOctokit() {
       },
       users: { getAuthenticated: vi.fn(async () => ({ data: { id: 7 } })) },
       pulls: {
-        list: vi.fn(async ({ state }: any) =>
-          state === 'open'
-            ? { data: [{ number: 77, head: { ref: 'ship-it/5-fix-the-bug' }, body: 'Closes #5' }] }
-            : { data: [] },
-        ),
+        list: vi.fn(async ({ state, head }: any) => ({ data: state === 'open' ? [openPrFixture(head)] : [] })),
         get: vi.fn(async () => ({ data: { head: { sha: 'abc123' } } })),
         merge: vi.fn(async () => ({})),
       },
@@ -389,9 +386,9 @@ describe('cmdLand (direct invocation)', () => {
       if (command.startsWith('git diff --diff-filter=A')) return '';
       return originalExec(command);
     };
-    h.octokit.rest.pulls.list = vi.fn(async ({ head }: { head?: string }) =>
-      head ? { data: [] } : { data: [{ number: 77, head: { ref: branch }, body: 'Closes #5' }] },
-    );
+    h.octokit.rest.pulls.list = vi.fn(async ({ head }: { head?: string }) => ({
+      data: head ? [] : [openPrFixture(`on-par:${branch}`)],
+    }));
     h.octokit.graphql = vi.fn(async (query: string) =>
       query.trimStart().startsWith('query')
         ? { repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } } }

@@ -49,7 +49,7 @@ import {
   withRepoRunLock,
 } from './cli/index.js';
 // prettier-ignore
-import { findOpenPRForIssue, findOpenPRNumber, isPermanentMergeCheckError, isPrMerged, MERGE_CHECK_FAILURE_BUDGET_MS, MERGE_CHECK_MAX_CONSECUTIVE_FAILURES, prLookupFailure, waitForMerge } from './cli/land.js';
+import { findOpenPRForIssue, isPermanentMergeCheckError, isPrMerged, MERGE_CHECK_FAILURE_BUDGET_MS, MERGE_CHECK_MAX_CONSECUTIVE_FAILURES, prLookupFailure, waitForMerge } from './cli/land.js';
 // prettier-ignore
 import { AwaitingReviewError, CiFailedError, CiInfraError, CiUnverifiedError, getPullRequestLandState, isHeadModifiedMergeError, isReviewRequiredMergeError, LandConflictError, LandFailureError, landOpenPullRequest, markPullRequestReady, squashMergeAndDelete } from './cli/land-pr.js';
 
@@ -479,42 +479,6 @@ describe('cli', () => {
       },
     };
     await expect(isPrMerged(octokit, 'on-par', 'software-factory', 'ship-it/22-x')).rejects.toThrow('rate limited');
-  });
-
-  it('finds an open PR number for the matching head branch', async () => {
-    const octokit: any = {
-      rest: {
-        pulls: {
-          list: async ({ head }: any) =>
-            head === 'on-par:ship-it/19-land' ? { data: [{ number: 123 }] } : { data: [] },
-        },
-      },
-    };
-
-    expect(await findOpenPRNumber(octokit, 'on-par', 'software-factory', 'ship-it/19-land')).toBe(123);
-  });
-
-  it('returns undefined when no open PR exists for the head branch', async () => {
-    const octokit: any = {
-      rest: { pulls: { list: async () => ({ data: [] }) } },
-    };
-
-    expect(await findOpenPRNumber(octokit, 'on-par', 'software-factory', 'ship-it/19-land')).toBeUndefined();
-  });
-
-  it('propagates API failures from findOpenPRNumber instead of treating them as no-PR', async () => {
-    const octokit: any = {
-      rest: {
-        pulls: {
-          list: async () => {
-            throw new Error('rate limited');
-          },
-        },
-      },
-    };
-    await expect(findOpenPRNumber(octokit, 'on-par', 'software-factory', 'ship-it/19-land')).rejects.toThrow(
-      'rate limited',
-    );
   });
 
   it('falls back to matching the open PR that references the issue in its body', async () => {
