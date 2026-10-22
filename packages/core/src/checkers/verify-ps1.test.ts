@@ -1,23 +1,21 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import type { CommandResult } from '../utils/command-runner.js';
 import { type CheckerContext, resolveTestsCommand, testsChecker } from './index.js';
 
-const tempDirs = new Set<string>();
+const tempDirs = createTempDirs();
 const PS1_ARGV = ['pwsh', '-NoProfile', '-NonInteractive', '-File', 'scripts/verify.ps1'];
 
 afterEach(async () => {
-  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
-  tempDirs.clear();
+  await tempDirs.cleanup();
 });
 
 async function makeWorktree(files: Record<string, string> = {}): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'verify-ps1-test-'));
-  tempDirs.add(dir);
+  const dir = await tempDirs.make('verify-ps1-test-');
   for (const [path, contents] of Object.entries(files)) {
     const fullPath = join(dir, path);
     await mkdir(dirname(fullPath), { recursive: true });
