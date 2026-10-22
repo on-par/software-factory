@@ -56,6 +56,8 @@ export interface QueuePreflightOps {
   /** #3375: number of a PR that closes `issue` by reference, merged into the default branch and not reverted by a merged `Reverts owner/repo#N` PR; undefined when none. */
   getMergedClosingPr(issue: number): Promise<number | undefined>;
   onDeferred?: (issue: number, message: string) => void;
+  /** #3576: the in-flight issue and file this issue was deferred behind, while that claim is still live; undefined when none. */
+  laneFileHold?: (issue: number) => Promise<{ holder: number; file: string } | undefined>;
   /** Backoff before each merge-state re-read (#3323). Defaults to setTimeout. */
   sleep?: (ms: number) => Promise<void>;
   /** Current head/base refs of a slice PR; the head SHA is the rebased one after GitHub retargets a layer. */
@@ -73,6 +75,7 @@ export function makeQueuePreflightOps(
     autoMergeStack?: boolean;
     stackMode?: boolean;
     onDeferred?: (issue: number, message: string) => void;
+    laneFileHold?: (issue: number) => Promise<{ holder: number; file: string } | undefined>;
     sleep?: (ms: number) => Promise<void>;
   },
 ): QueuePreflightOps {
@@ -101,6 +104,7 @@ export function makeQueuePreflightOps(
       return { headSha: pull.head.sha, selfId: id, reviews };
     },
     onDeferred: opts.onDeferred,
+    laneFileHold: opts.laneFileHold,
     sleep: opts.sleep ?? defaultSleep,
     getPullRefs: async (prNumber) => {
       const { data } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
@@ -364,6 +368,17 @@ export async function preflightQueuedIssue(
   deps: QueuePreflightOps,
 ): Promise<QueuePreflightDecision> {
   if (issue.labels.includes('factory:in-progress')) return { kind: 'defer' };
+
+  let hold: { holder: number; file: string } | undefined;
+  try {
+    hold = await deps.laneFileHold?.(issue.number);
+  } catch {
+    hold = undefined; // a failed lookup builds; runIssue's lane guard re-checks after PLAN
+  }
+  if (hold) {
+    deps.onDeferred?.(issue.number, `waiting for in-flight issue #${hold.holder} to release ${hold.file}`);
+    return { kind: 'defer' };
+  }
 
   let body: string;
   try {
