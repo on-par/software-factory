@@ -105,6 +105,19 @@ function loadQa(ctx: CheckerContext): QaConfig | null {
 }
 
 export async function appSmokeChecker(ctx: CheckerContext, deps: Partial<AppSmokeDeps> = {}): Promise<CheckerOutput> {
+  let killError: string | undefined;
+  const out = await runAppSmoke(ctx, deps, (msg) => {
+    killError = msg;
+  });
+  if (killError === undefined) return out;
+  return { ...out, details: `${out.details}\nstart process group not killed: ${killError}` };
+}
+
+async function runAppSmoke(
+  ctx: CheckerContext,
+  deps: Partial<AppSmokeDeps>,
+  onKillError: (msg: string) => void,
+): Promise<CheckerOutput> {
   const { startApp, probeReady, killGroup, sleep, now } = { ...DEFAULT_DEPS, ...deps };
 
   let qa: QaConfig | null;
@@ -194,6 +207,7 @@ export async function appSmokeChecker(ctx: CheckerContext, deps: Partial<AppSmok
     }
     return { checker: APP_SMOKE_CHECKER, result: 'PASS', details: `app ready on ${url}; smoke passed` };
   } finally {
-    if (startPgid !== undefined) await killGroup(startPgid).catch(() => {});
+    if (startPgid !== undefined)
+      await killGroup(startPgid).catch((err: unknown) => onKillError(err instanceof Error ? err.message : String(err)));
   }
 }

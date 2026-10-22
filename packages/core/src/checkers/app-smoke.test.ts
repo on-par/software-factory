@@ -1,19 +1,23 @@
-import { mkdir, mkdtemp, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { QaConfig } from '../config/qa-section.js';
 import { defaultIsProcessGroupAlive, killProcessGroup } from '../environment/process-groups.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import type { Constitution } from '../types/index.js';
 import type { CommandResult } from '../utils/command-runner.js';
 import { appSmokeChecker, defaultStartApp, type AppSmokeDeps, type StartedApp } from './app-smoke.js';
 import { runAllCheckers, type CheckerContext } from './index.js';
+
+const tempDirs = createTempDirs();
+afterEach(() => tempDirs.cleanup());
 
 const never = new Promise<never>(() => {});
 
@@ -77,7 +81,7 @@ describe('appSmokeChecker', () => {
   });
 
   it('app_smoke fails with smoke exit code and writes both command logs', async () => {
-    const outputLogDir = await mkdtemp(join(tmpdir(), 'app-smoke-logs-'));
+    const outputLogDir = await tempDirs.make('app-smoke-logs-');
     const out = await appSmokeChecker(
       ctxOf({ outputLogDir, runCommand: async () => result({ exitCode: 3, ok: false, stderr: 'smoke broke' }) }),
       { startApp: fakeApp(null, 'server log'), probeReady: async () => 200, killGroup: async () => {} },
@@ -132,7 +136,7 @@ describe('appSmokeChecker', () => {
   });
 
   it('fails closed on an invalid .factory/config.json', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'app-smoke-wt-'));
+    const worktree = await tempDirs.make('app-smoke-wt-');
     await mkdir(join(worktree, '.factory'), { recursive: true });
     await writeFile(join(worktree, '.factory', 'config.json'), JSON.stringify({ version: 2, qa: { bogus: 1 } }));
     const { qa: _qa, ...rest } = ctxOf({ worktree });
@@ -218,7 +222,7 @@ function constitutionWith(checkers: string[]): Constitution {
 describe('app_smoke registry opt-in', () => {
   it('app_smoke is opt-in and skips without a qa block or leased port', { timeout: 60000 }, async () => {
     const router = new ModelRouter(models, routes, false, new StubModelExecutor({ scripts: {} }));
-    const worktree = await mkdtemp(join(tmpdir(), 'app-smoke-reg-'));
+    const worktree = await tempDirs.make('app-smoke-reg-');
     const ctx = ctxOf({ worktree, qa: null });
     const names = async (c: Constitution | null) =>
       (await runAllCheckers(ctx, router, c)).results.map((r) => r.checker);
