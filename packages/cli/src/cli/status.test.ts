@@ -285,7 +285,7 @@ describe('cli', () => {
       const out = logged();
       expect(out).toContain('on-par/software-factory');
       expect(out).toContain('Product: alpha');
-      expect(out).toMatch(/app 1 {2}\[build, .+ ago\]/);
+      expect(out).toMatch(/app #1 {2}\[build, .+ ago\]/);
       expect(out).toContain('(1 stale entry hidden — no recent activity)');
       expect(out).toContain('ready #1: done');
       expect(out).toContain('== Health ==');
@@ -361,7 +361,7 @@ describe('cli', () => {
         lastActivityAt: new Date(Date.now() - 2 * 60_000).toISOString(),
       });
       await runMain('status');
-      expect(logged()).toMatch(/app 1 {2}\[build, 2m ago\]/);
+      expect(logged()).toMatch(/app #1 {2}\[build, 2m ago\]/);
       const err = errored();
       expect(err).toContain('malformed');
       expect(err).toContain('line 2');
@@ -376,16 +376,17 @@ describe('cli', () => {
       await runMain('status');
       const out = logged();
 
-      expect(out).not.toMatch(/ {2}app \d+$/m);
+      expect(out).not.toMatch(/ {2}app #?\d+/m);
       expect(out).toContain('(idle — no active claims)');
       expect(out).toContain('(60 stale entries hidden — no recent activity)');
       expect(readFileSync(paths().queue, 'utf-8')).toBe(before);
     });
 
-    it('prints "(no queue file)" when the local queue does not exist', async () => {
+    it('prints the idle line, not "(no queue file)", on a GitHub-queue repo with no queue file (#3344)', async () => {
       const res = await runMain('status');
       expect(res.exited).toBe(false);
-      expect(logged()).toContain('(no queue file)');
+      expect(logged()).toContain('(idle — no active claims)');
+      expect(logged()).not.toContain('(no queue file)');
     });
 
     it('lists only claimable GitHub-backed work in the Queue band (#1344)', async () => {
@@ -420,7 +421,7 @@ describe('cli', () => {
       const res = await runMain('status');
       expect(res.exited).toBe(false);
       const out = logged();
-      expect(out).toContain('(no queue file)');
+      expect(out).toContain('(idle — no active claims)');
       const queueBand = out.slice(out.indexOf('== Queue =='), out.indexOf('== Health =='));
       expect(queueBand).not.toContain('(empty)');
       expect(queueBand).not.toContain('(no claimable work)');
