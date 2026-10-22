@@ -154,7 +154,8 @@ describe('runIssue — plan/build attribution on terminal events (#3321)', () =>
       endedIn: 'check',
     };
     const fails = callsOf(log, 'fail');
-    expect(fails.length).toBeGreaterThanOrEqual(2);
+    // The phase's own 'fail' is demoted to a non-terminal 'check' event; runIssue logs the only terminal (#3435).
+    expect(fails).toHaveLength(1);
     for (const call of fails) expect(call[2].attribution).toEqual(expected);
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail', attribution: expected });
   });

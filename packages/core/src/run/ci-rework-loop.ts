@@ -1,6 +1,10 @@
 // packages/core/src/run/ci-rework-loop.ts — SHIP with a bounded CI rework loop (#2816)
 
-import { type checkPhase as checkPhaseDefault, reworkWorker as reworkWorkerDefault } from '../phases/check.js';
+import {
+  type checkPhase as checkPhaseDefault,
+  type CheckPhaseResult,
+  reworkWorker as reworkWorkerDefault,
+} from '../phases/check.js';
 import type { PlanResult } from '../phases/plan.js';
 import { stackPositionFor } from '../phases/stack-order.js';
 import type { shipPhase as shipPhaseDefault, ShipResult } from '../phases/ship.js';
@@ -23,7 +27,7 @@ import {
   readWorktreeHead as readWorktreeHeadDefault,
   scanReworkDiff,
 } from './ci-suppression-guard.js';
-import { reworkRouteFor, type BuildRoute, type ParkReason } from './outcome.js';
+import { reworkRouteFor, type BuildRoute, type ParkReason, type RunOutcome } from './outcome.js';
 import type { RunPorts, RunRequest } from './run-issue.js';
 import { shipParkReason } from './ship-park.js';
 
@@ -54,6 +58,8 @@ export interface CiReworkLoopContext {
   appBaseUrl: string | undefined;
   onPgid: (pgid: number) => void;
   runId: string;
+  /** Records a re-CHECK's summary, asserts the budget and interprets a failure like the first CHECK (#3435). */
+  onRecheck: (recheck: CheckPhaseResult, round: number) => Promise<RunOutcome | undefined>;
 }
 
 export interface CiReworkShipInputs {
@@ -68,7 +74,9 @@ export interface CiReworkShipInputs {
 
 export interface ShipWithCiReworkResult {
   ship: ShipResult;
-  /** Set when the run must park: a failed re-CHECK or a SHIP that did not succeed. */
+  /** Set when a re-CHECK ended the run; its terminal event is already logged. */
+  outcome?: RunOutcome;
+  /** Set when the run must park: a SHIP that did not succeed, or a suppression attempt. */
   parked?: {
     reason: ParkReason;
     message: string;
@@ -221,17 +229,8 @@ export async function shipWithCiRework(
     }
     if (findings.length > 0) return suppressionPark(findings);
     const recheck = await checkPhase(ctx.checkOpts);
-    if (!recheck.passed) {
-      const checkFailure =
-        recheck.failureSignature !== undefined
-          ? {
-              failureSignature: recheck.failureSignature,
-              failingChecks: recheck.summary.results.filter((r) => r.result === 'FAIL').map((r) => r.checker),
-            }
-          : undefined;
-      const message = `${recheck.summary.failures} check failures after CI rework round ${rounds}`;
-      return { ship, parked: { reason: 'fail', message, ...(checkFailure ? { checkFailure } : {}) } };
-    }
+    const ended = await ctx.onRecheck(recheck, rounds);
+    if (ended) return { ship, outcome: ended };
     ship = await shipPhase({
       ...shipOpts,
       checkSummary: recheck.summary,
