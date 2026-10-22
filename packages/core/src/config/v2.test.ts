@@ -2,7 +2,10 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { defaultModelsConfig } from '@on-par/factory-config';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { subscriptionProviderOf } from './provider-order.js';
 
 import {
   FactoryConfigV2Schema,
@@ -43,6 +46,7 @@ describe('zero-config: { version: 2 }', () => {
     expect(cfg.models.registry).toEqual({});
     expect(cfg.models.tiers).toEqual({});
     expect(cfg.models.pins).toEqual({});
+    expect(cfg.models.providerOrder).toEqual(defaultModelsConfig.providerOrder);
     expect(cfg.models.providers).toEqual({});
     expect(cfg.models.failover).toEqual({
       triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
@@ -209,6 +213,12 @@ describe('full v2 config', () => {
       },
       tiers: { boss: ['claude-opus-5'], worker: ['gpt-5.6-terra-medium'] },
       pins: { plan: 'claude-opus-5', build: 'gpt-5.6-terra-medium' },
+      providerOrder: {
+        boss: ['claude-opus-5'],
+        worker: ['gpt-5.6-terra-medium'],
+        checker: ['claude-sonnet-5'],
+        triage: ['claude-sonnet-5'],
+      },
       providers: { anthropic: true, openai: true, ollama: false },
       failover: {
         triggers: ['rate_limit', 'usage_cap'],
@@ -434,5 +444,41 @@ describe('FactoryConfigV2Schema description', () => {
   it("names On PAR Dev's Software Factory without em dashes (#2388)", () => {
     expect(FactoryConfigV2Schema.description).toContain("On PAR Dev's Software Factory");
     expect(FactoryConfigV2Schema.description).not.toContain('—');
+  });
+});
+
+describe('models.providerOrder (#3334)', () => {
+  const providersOf = (ids: string[]) => ids.map((id) => subscriptionProviderOf(id, defaultModelsConfig.models[id]));
+  const orderError = (providerOrder: unknown) => () => parseV2Config({ version: 2, models: { providerOrder } });
+
+  it("providerOrder defaults per role from today's tiers with opencode-go last and rejects OpenCode Zen (2026-10-20)", () => {
+    const order = parseV2Config({ version: 2 }).models.providerOrder;
+    expect(providersOf(order.worker)).toEqual(['codex', 'claude', 'opencode-go']);
+    for (const role of ['boss', 'checker', 'triage'] as const) {
+      expect(providersOf(order[role])).toEqual(['claude', 'codex', 'opencode-go']);
+    }
+    for (const [id, def] of Object.entries(defaultModelsConfig.models)) {
+      expect(id.startsWith('opencode/') || def.providerModel?.startsWith('opencode/'), id).toBeFalsy();
+    }
+
+    expect(orderError({ worker: ['gpt-5.6-terra-medium', 'claude-sonnet-5', 'opencode/claude-sonnet-5'] })).toThrow(
+      /models\.providerOrder\.worker\[2\].*OpenCode Zen/,
+    );
+  });
+
+  it('keeps the packaged list for a role the overlay leaves unset', () => {
+    const order = parseV2Config({ version: 2, models: { providerOrder: { checker: ['gpt-5.6-luna-high'] } } }).models
+      .providerOrder;
+    expect(order.checker).toEqual(['gpt-5.6-luna-high']);
+    expect(order.worker).toEqual(defaultModelsConfig.providerOrder.worker);
+  });
+
+  it.each([
+    ['unknown model', { worker: ['nope'] }, /worker\[0\]: unknown model 'nope'/],
+    ['duplicate codex', { worker: ['gpt-5.6-terra-medium', 'gpt-5.6-sol'] }, /worker\[1\].*second codex model/],
+    ['non-subscription model', { worker: ['qwen3:8b'] }, /not a subscription CLI model/],
+    ['empty list', { worker: [] }, /models\.providerOrder\.worker/],
+  ])('rejects %s', (_name, providerOrder, pattern) => {
+    expect(orderError(providerOrder)).toThrow(pattern);
   });
 });

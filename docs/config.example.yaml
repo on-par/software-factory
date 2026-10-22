@@ -57,6 +57,19 @@ version: 2
     # PR classifier model (classify_pr route). Unset: the checker tier. Changing it demotes the
     # classifier (ADR-0121).
     # classifier: "<model id>"
+  # Per role (boss, worker, checker, triage): subscription providers in failover order, as model
+  # ids, at most one per provider (claude, codex, opencode-go). Unset role: today's tier order for
+  # that role with opencode-go last. OpenCode Zen (opencode/) models are refused. Not used for
+  # run-time failover yet.
+  # providerOrder:
+    # Boss providers in failover order.
+    # boss: ["<model id>", ...]
+    # Worker providers in failover order.
+    # worker: ["<model id>", ...]
+    # Checker providers in failover order.
+    # checker: ["<model id>", ...]
+    # Triage providers in failover order.
+    # triage: ["<model id>", ...]
 # Repo-declared agent CLIs: harness id -> declaration (command, prompt, output, agentic, usage,
 # optional errorPatterns and probe). Run through the built-in `command` harness. Reference an id
 # from a models.registry entry's `harness`. Built-in harness ids cannot be redeclared.

@@ -1,6 +1,7 @@
 // src/router/index.ts — Model router with cost-tier routing and automatic failover
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { isOpenCodeZenModel } from '../config/provider-order.js';
 import { harnessCliCommand, retiredHarnessNotice } from '../harness/catalog.js';
 import { classifyFailure } from '../harness/classify.js';
 import { ClaudeCliHarness } from '../harness/claude-cli.js';
@@ -251,6 +252,7 @@ export class ModelRouter {
   /** Agent CLIs (harness ids) that failed local_auth during this router's run (#2495). One
    *  router serves one run, so a signed-out CLI is tried once and then skipped by every later
    *  task, and PLAN stops offering its build route. */
+  private readonly meteredPrimaryNoticed = new Set<string>();
   private readonly authTripped = new Set<string>();
   /** Harness ids already reported as missing their CLI. One router serves one run, so each
    *  harness is logged at most once per run (#2629). */
@@ -472,6 +474,20 @@ export class ModelRouter {
     let ceilingNoticed = false;
 
     for (const model of models) {
+      if (isOpenCodeZenModel(model, this.registry.get(model))) {
+        if (model !== models[0]) {
+          onLog(
+            `provider_failover_zen_skip: skipping ${model} for ${task}: OpenCode Zen (opencode/) models are never failover targets`,
+          );
+          continue;
+        }
+        if (!this.meteredPrimaryNoticed.has(model)) {
+          this.meteredPrimaryNoticed.add(model);
+          onLog(
+            `metered_primary_route: ${model} for ${task} is OpenCode Zen (metered pay-per-use); it runs only because it is the explicit primary`,
+          );
+        }
+      }
       const modelProvider = this.registry.get(model)?.provider;
       if (modelProvider === 'ollama' && this.executor.probeOllama) {
         ollamaProbe ??= await this.executor.probeOllama();

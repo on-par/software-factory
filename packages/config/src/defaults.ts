@@ -36,6 +36,8 @@ export interface ModelsDefaults {
   version: number;
   models: Record<string, ModelDefaults>;
   tiers: Record<string, string[]>;
+  /** Per role: subscription providers in failover order as model ids, one per provider (claude, codex, opencode-go) (#3334). Derived from the tiers with opencode-go last. OpenCode Zen (opencode/) models are never listed. */
+  providerOrder: Record<'boss' | 'worker' | 'checker' | 'triage', string[]>;
   failover: { triggers: string[]; maxRetries: number; cooldownMs: number; escalateAfterTierExhausted: boolean };
   routingRules: Record<string, unknown>;
 }
@@ -396,7 +398,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       providerModel: 'anthropic/claude-sonnet-5',
       experimental: true,
     },
-    /** Added 2026-08-12 for OpenCode Go subscriptions (OPENCODE_API_KEY env var). Served via OpenCode Go (https://opencode.ai/zen/go/v1), a distinct provider from OpenCode Zen (opencode/... prefix, pay-per-use; do not confuse the two, the same env var backs both). Confirmed working live: `opencode run --model opencode-go/deepseek-v4-flash "..."` returns real output. Updated 2026-10-14 (#2898): DeepSeek now serves V4.1 Flash (the old `deepseek-v4-flash` name routes there). Go id `opencode-go/deepseek-v4.1-flash` per https://opencode.ai/docs/go (taken from the docs page; `opencode models opencode-go` needs a Go login); prices $0.30/$1.20 per 1M per https://opencode.ai/docs/zen (Go bills $0.15/$0.60 off-peak, $0.30/$1.20 peak), checked 2026-10-14. opt in with FACTORY_EXPERIMENTAL=1. */
+    /** Added 2026-08-12 for OpenCode Go subscriptions (OPENCODE_API_KEY env var). Served via OpenCode Go (https://opencode.ai/zen/go/v1), a distinct provider from OpenCode Zen (opencode/... prefix, pay-per-use; do not confuse the two, the same env var backs both; Zen models are refused in defaults, providerOrder and failover, #3334). Confirmed working live: `opencode run --model opencode-go/deepseek-v4-flash "..."` returns real output. Updated 2026-10-14 (#2898): DeepSeek now serves V4.1 Flash (the old `deepseek-v4-flash` name routes there). Go id `opencode-go/deepseek-v4.1-flash` per https://opencode.ai/docs/go (taken from the docs page; `opencode models opencode-go` needs a Go login); prices $0.30/$1.20 per 1M per https://opencode.ai/docs/zen (Go bills $0.15/$0.60 off-peak, $0.30/$1.20 peak), checked 2026-10-14. opt in with FACTORY_EXPERIMENTAL=1. */
     'opencode-deepseek-v4-flash': {
       provider: 'custom',
       tier: ['worker'],
@@ -421,20 +423,6 @@ export const defaultModelsConfig: ModelsDefaults = {
       harness: 'opencode',
       providerModel: 'opencode-go/deepseek-v4-pro',
       experimental: true,
-    },
-    /** Added 2026-08-17: OpenCode Go's monthly usage cap ($60/mo) hit 100% and doesn't reset until 2026-09-13, blocking opencode-deepseek-v4-flash. This is OpenCode Zen's (not Go's) promo-period free tier for the same model, opencode/... prefix, no balance or subscription quota involved. Anoma.ly's privacy notice: during the free promo, request data may be used to improve the model (not the zero-retention terms Go/paid Zen get) — acceptable for skunkworks throwaway prototypes, reconsider before using on anything with real user/client data. Free tier may be pulled without notice; if `opencode/deepseek-v4-flash-free` starts erroring, check https://opencode.ai/docs/zen/ for current free-tier availability. Confirmed working live: `opencode run --model opencode/deepseek-v4-flash-free "..."` returns real output. opt in with FACTORY_EXPERIMENTAL=1. trainsOnPrompts: in no tier, pin-only (#2899). */
-    'opencode-deepseek-v4-flash-free': {
-      provider: 'custom',
-      tier: ['worker'],
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
-      contextWindow: 1000000,
-      capabilities: ['implementation', 'coding'],
-      envKey: 'OPENCODE_API_KEY',
-      harness: 'opencode',
-      providerModel: 'opencode/deepseek-v4-flash-free',
-      experimental: true,
-      trainsOnPrompts: true,
     },
     /** Added 2026-10-14 (#2904): DeepSeek V4.1 Flash on the Pi harness via OpenRouter, an approved zero-retention intermediary (ADR-0163). The OPENROUTER_API_KEY must have zero data retention (ZDR) enforced in OpenRouter's privacy settings; without ZDR this model must not be used. OpenRouter id `deepseek/deepseek-v4.1-flash` and prices $0.01584/$0.891 per 1M per https://openrouter.ai/api/v1/models, checked 2026-10-14 (ids came from the OpenRouter API only; `pi` was not installed to confirm with `pi --list-models`). Pin-only: in no tier. opt in with FACTORY_EXPERIMENTAL=1. */
     'pi-openrouter-deepseek-v4-flash': {
@@ -511,6 +499,12 @@ export const defaultModelsConfig: ModelsDefaults = {
       'glm-5.2',
     ],
     triage: ['qwen2.5-coder:14b', 'claude-sonnet-5', 'glm-5.2', 'gpt-5.6-luna-high'],
+  },
+  providerOrder: {
+    boss: ['claude-opus-5', 'gpt-5.6-terra-high', 'opencode-deepseek-v4-flash'],
+    worker: ['gpt-5.6-terra-medium', 'claude-sonnet-5', 'opencode-deepseek-v4-flash'],
+    checker: ['claude-sonnet-5', 'gpt-5.6-luna-high', 'opencode-deepseek-v4-flash'],
+    triage: ['claude-sonnet-5', 'gpt-5.6-luna-high', 'opencode-deepseek-v4-flash'],
   },
   failover: {
     triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],

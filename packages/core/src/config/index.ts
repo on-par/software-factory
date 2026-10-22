@@ -19,6 +19,7 @@ import { readRepoConfigFile, resolveRepoConfigPath } from './repo-config-file.js
 import { resolveStateRoot, STATE_ROOT_ENV } from './state-root.js';
 import { DEFAULT_MAX_SLICES, SLICE_CAP_CEILING } from '../readiness/slice-plan.js';
 import { DEFAULT_MAX_FILES, DEFAULT_TOKEN_BUDGET, type SizeBudget } from '../readiness/size.js';
+import { isOpenCodeZenModel } from './provider-order.js';
 import { runConfigSource } from './run-config-source.js';
 import { RunConfigSectionSchema } from './run-section.js';
 
@@ -67,6 +68,7 @@ const ModelsConfigSchema = z
     models: z.record(z.string(), ModelDefSchema),
     efforts: ModelEffortsSchema.optional(),
     tiers: z.record(z.string(), z.array(z.string())),
+    providerOrder: z.record(z.string(), z.array(z.string())).optional(),
     failover: z.object({
       triggers: z.array(z.string()),
       maxRetries: z.number(),
@@ -321,7 +323,15 @@ export type FactoryConfig = z.infer<typeof FactoryConfigSchema>;
 
 export function loadModelsConfig(path?: string): ModelsConfig {
   const raw = path === undefined ? defaultModelsConfig : JSON.parse(readFileSync(path, 'utf-8'));
-  return ModelsConfigSchema.parse(raw);
+  const parsed = ModelsConfigSchema.parse(raw);
+  if (path === undefined) {
+    for (const [id, def] of Object.entries(parsed.models)) {
+      if (isOpenCodeZenModel(id, def)) {
+        throw new Error(`Packaged model '${id}' is an OpenCode Zen (opencode/) model; Zen is never shipped (#3334)`);
+      }
+    }
+  }
+  return parsed;
 }
 
 export function loadRoutesConfig(path?: string): RoutesConfig {

@@ -1481,3 +1481,57 @@ describe('missing harness CLI (#2629)', () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+describe('OpenCode Zen failover guard (#3334)', () => {
+  const base = {
+    provider: 'custom' as const,
+    tier: 'boss',
+    costPerMtokInput: 0,
+    costPerMtokOutput: 0,
+    contextWindow: 1000,
+  };
+  const zenModels: ModelsConfig = {
+    ...models,
+    models: {
+      'claude-m': { ...base, provider: 'anthropic' as const, capabilities: [], envKey: null, harness: 'claude-cli' },
+      'zen-model': {
+        ...base,
+        capabilities: [],
+        envKey: null,
+        harness: 'opencode',
+        providerModel: 'opencode/x',
+      },
+      'codex-m': { ...base, provider: 'openai' as const, capabilities: [], envKey: null, harness: 'codex-cli' },
+    },
+    tiers: { boss: ['claude-m', 'zen-model', 'codex-m'] },
+  };
+
+  it('never calls a Zen failover candidate and logs provider_failover_zen_skip', async () => {
+    const stub = new StubModelExecutor({ scripts: { plan: [{ fail: 'usage_cap' }, { output: 'FROM CODEX' }] } });
+    const router = new ModelRouter(zenModels, routes, false, stub);
+    const logs: string[] = [];
+
+    const result = await router.run('plan', 'do it', {
+      modelOverride: 'claude-m',
+      modelFallbacks: ['zen-model', 'codex-m'],
+      onLog: (line) => logs.push(line),
+    });
+
+    expect(result.model).toBe('codex-m');
+    expect(stub.calls.map((c) => c.model)).toEqual(['claude-m', 'codex-m']);
+    expect(logs.some((l) => l.startsWith('provider_failover_zen_skip:') && l.includes('zen-model'))).toBe(true);
+  });
+
+  it('runs an explicit Zen primary with one metered_primary_route warning', async () => {
+    const stub = new StubModelExecutor({ scripts: { plan: [{ output: 'A' }, { output: 'B' }] } });
+    const router = new ModelRouter(zenModels, routes, false, stub);
+    const logs: string[] = [];
+
+    for (let i = 0; i < 2; i++) {
+      const result = await router.run('plan', 'do it', { modelOverride: 'zen-model', onLog: (l) => logs.push(l) });
+      expect(result.model).toBe('zen-model');
+    }
+
+    expect(logs.filter((l) => l.startsWith('metered_primary_route:'))).toHaveLength(1);
+  });
+});

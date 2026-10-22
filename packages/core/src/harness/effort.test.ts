@@ -58,7 +58,7 @@ it.each(['low', 'medium', 'high', 'xhigh', 'max', 'ultra'] as const)(
 
 it.each([
   ['claude-opus-5', 'high', "--effort 'high'"],
-  ['opencode-deepseek-v4-flash-free', 'low', "--variant 'low'"],
+  ['opencode-deepseek-v4-flash', 'low', "--variant 'low'"],
 ] as const)('passes model and effort to %s without losing the lane environment', async (model, effort, flag) => {
   const registry = new ModelRegistry(
     applyRepoConfig(loadModelsConfig(), {
