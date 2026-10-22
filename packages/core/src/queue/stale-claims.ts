@@ -1,7 +1,13 @@
 // packages/core/src/queue/stale-claims.ts — Release expired-lease claims back to factory:queued (#1500).
 
 import { claimLiveness } from './claim-liveness.js';
-import { createGithubQueue, IN_PROGRESS_LABEL, type QueueGitHubClient, type QueueIssue } from './github-queue.js';
+import {
+  CLAIMED_BY_LABEL_PREFIX,
+  createGithubQueue,
+  IN_PROGRESS_LABEL,
+  type QueueGitHubClient,
+  type QueueIssue,
+} from './github-queue.js';
 
 /** One open issue whose claim lease has expired. */
 export interface StaleClaim {
@@ -14,8 +20,11 @@ export interface StaleClaim {
 
 /** The result of attempting to put one stale claim back in the queue. */
 export interface StaleClaimRelease extends StaleClaim {
-  /** False when the release call threw; `detail` then carries the error message. */
+  /** True only when `outcome` is 'released'. */
   released: boolean;
+  /** 'renewed': the fresh read no longer showed an expired lease, so nothing was written (#3240).
+   *  'failed': the release call threw; `detail` then carries the error message. */
+  outcome: 'released' | 'renewed' | 'failed';
   detail?: string;
 }
 
@@ -47,14 +56,21 @@ export async function releaseStaleClaims(opts: ReleaseStaleClaimsOptions): Promi
   const stale = findStaleClaims(claimed, { now: opts.now });
   if (stale.length === 0) return [];
 
-  const queue = createGithubQueue({ client, owner, repo });
+  const labelsByIssue = new Map(claimed.map((i) => [i.number, i.labels]));
+  const queue = createGithubQueue({ client, owner, repo, now: opts.now });
   const results: StaleClaimRelease[] = [];
   for (const claim of stale) {
     try {
-      await queue.release(claim.issue, 'queued');
-      results.push({ ...claim, released: true });
+      const staleLabels = (labelsByIssue.get(claim.issue) ?? []).filter((n) => n.startsWith(CLAIMED_BY_LABEL_PREFIX));
+      const outcome = await queue.releaseStale(claim.issue, staleLabels);
+      results.push({ ...claim, released: outcome === 'released', outcome });
     } catch (err) {
-      results.push({ ...claim, released: false, detail: err instanceof Error ? err.message : String(err) });
+      results.push({
+        ...claim,
+        released: false,
+        outcome: 'failed',
+        detail: err instanceof Error ? err.message : String(err),
+      });
     }
   }
   return results;
