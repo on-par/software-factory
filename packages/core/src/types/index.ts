@@ -249,6 +249,7 @@ export type {
   CiCodeScanningAlert,
   CiFailingCheck,
   CiFailureEvidence,
+  CiJobLogExcerpt,
   CiSuppressionFinding,
 } from './ci-evidence.js';
 
