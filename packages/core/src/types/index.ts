@@ -4,6 +4,7 @@ import type {
   FlakyTestsPayload,
   LanePausedPayload,
   ParkPayload,
+  PrRefreshPayload,
   ProviderCappedPayload,
   StewardTriggeredPayload,
 } from '../events/kinds.js';
@@ -333,6 +334,7 @@ export interface FactoryEvent {
   prClassification?: PrClassificationRecord;
   providerCapped?: ProviderCappedPayload; // Usage-cap details on a provider_capped event (#3337).
   park?: ParkPayload; // Structured park reason/decision/lane/queue on a park event (#3511).
+  prRefresh?: PrRefreshPayload; // Land merge-main sync on a pr_refresh event (#3324).
   lanePaused?: LanePausedPayload; // Breaker details on a `lane-paused` event (#1916).
   stewardTriggered?: StewardTriggeredPayload; // Trigger details on a steward-triggered event (#2086).
   attribution?: RunAttribution; // Plan/build model, provider, effort on a run's terminal events (#3321).

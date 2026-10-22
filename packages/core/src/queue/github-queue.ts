@@ -156,6 +156,8 @@ export type QueuePreflightDecision =
       kind: 'adopt';
       branch: string;
       /** ADR-0161: the adopted PR is this stack layer; land it by exact branch and re-queue the issue unless it is the top layer. */
+      /** #3324: the PR is DIRTY or still UNKNOWN; land merges origin/main into it before watching CI. */
+      syncMain?: true;
       stackLayer?: { index: number; count: number; prNumber: number };
     }
   | { kind: 'park'; reason: string }

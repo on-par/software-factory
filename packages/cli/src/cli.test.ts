@@ -2049,7 +2049,9 @@ describe('cli', () => {
       }),
     ).rejects.toBeInstanceOf(LandConflictError);
 
-    expect(calls).toEqual([['log', 'conflict', 'PR #123 DIRTY on ship-it/20-dirty and worktree gone']]);
+    expect(calls.filter(([, type]) => type === 'conflict')).toEqual([
+      ['log', 'conflict', 'PR #123 DIRTY on ship-it/20-dirty and worktree gone'],
+    ]);
   });
 
   it('re-issues the ready flip when the PR is still a draft, then merges', async () => {

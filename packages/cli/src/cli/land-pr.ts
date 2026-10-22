@@ -163,7 +163,7 @@ export async function syncDirtyPullRequest(opts: {
   branch: string;
   worktree: string;
   prNumber: number;
-  log: (type: EventKind, msg: string, extra?: Pick<FactoryEvent, 'paths' | 'mode'>) => void;
+  log: (type: EventKind, msg: string, extra?: Pick<FactoryEvent, 'paths' | 'mode' | 'prRefresh'>) => void;
   run?: CommandRunner;
   pathExists?: (path: string) => boolean;
 }): Promise<void> {
@@ -198,7 +198,7 @@ export async function landOpenPullRequest(opts: {
   branch: string;
   worktree: string;
   prNumber: number;
-  log: (type: EventKind, msg: string, extra?: Pick<FactoryEvent, 'paths' | 'mode'>) => void;
+  log: (type: EventKind, msg: string, extra?: Pick<FactoryEvent, 'paths' | 'mode' | 'prRefresh'>) => void;
   run?: CommandRunner;
   pathExists?: (path: string) => boolean;
   sleep?: (ms: number) => Promise<void>;
@@ -209,6 +209,8 @@ export async function landOpenPullRequest(opts: {
   withLock?: LandLock;
   /** Materializes an adopted branch only after its locked state re-read confirms it needs rebasing. */
   ensureWorktree?: () => Promise<void>;
+  /** #3324: merge origin/main into the branch before the first CI watch, even when not DIRTY. */
+  syncMain?: boolean;
 }): Promise<void> {
   const {
     octokit,
@@ -228,6 +230,7 @@ export async function landOpenPullRequest(opts: {
     rerun,
     withLock = (fn) => fn(),
     ensureWorktree,
+    syncMain = false,
   } = opts;
   const { errorDetail } = landRuntime();
 
@@ -287,6 +290,22 @@ export async function landOpenPullRequest(opts: {
     throw new CiUnverifiedError(msg, prNumber);
   };
 
+  const syncUnderLock = async (status: string | undefined) => {
+    await ensureWorktree?.();
+    const mergeStateStatus = status ?? 'UNKNOWN';
+    log('pr_refresh', `merging origin/main into PR #${prNumber} on ${branch} (mergeStateStatus=${mergeStateStatus})`, {
+      prRefresh: { pr: prNumber, mergeStateStatus, action: 'merge-main' },
+    });
+    await syncDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists });
+  };
+
+  if (syncMain) {
+    await withLock(async () => {
+      const locked = await getPullRequestLandState(octokit, owner, repoName, prNumber);
+      await syncUnderLock(locked.mergeStateStatus);
+    });
+  }
+
   // The CI watch is a 10-20 minute wait, not a mutation: it must never run under the land
   // locks, or every other lane's setupWorktree serializes behind it (#645).
   let verifiedSha = skipCI ? undefined : await watchCi();
@@ -298,8 +317,7 @@ export async function landOpenPullRequest(opts: {
       // while we waited for it, so the DIRTY verdict read above can be stale.
       state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
       if (state.mergeStateStatus !== 'DIRTY') return false;
-      await ensureWorktree?.();
-      await syncDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists });
+      await syncUnderLock(state.mergeStateStatus);
       return true;
     });
     if (synced) {

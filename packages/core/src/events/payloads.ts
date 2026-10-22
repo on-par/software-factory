@@ -3,6 +3,14 @@
 import type { ParkReason } from '../run/outcome.js';
 import type { StuckTrigger } from '../steward/detect.js';
 
+/** Payload of a `pr_refresh` event (#3324): land merged origin/main into an open PR's branch. */
+export interface PrRefreshPayload {
+  pr: number;
+  /** mergeStateStatus read under the land lock just before the sync; 'UNKNOWN' when absent. */
+  mergeStateStatus: string;
+  action: 'merge-main';
+}
+
 /** Payload of a park event (#3511): why the issue parked, what a human must do, and what waits behind it. */
 export interface ParkPayload {
   reason: ParkReason;

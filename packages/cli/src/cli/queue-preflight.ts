@@ -439,16 +439,16 @@ export async function preflightQueuedIssue(
       if (!unknown(state)) break;
     }
     if (unknown(state)) {
-      deps.onDeferred?.(
-        issue.number,
-        `PR #${pr.number} merge state still UNKNOWN after ${MERGE_STATE_REREAD_DELAYS_MS.length} re-reads`,
-      );
-      return { kind: 'defer' };
+      // #3324: GitHub never settled, so adopt and let land's merge-main sync force a recompute.
+      return { kind: 'adopt', branch: pr.branch, syncMain: true };
     }
     if (state.isDraft !== false) {
       return { kind: 'park', reason: `PR #${pr.number} is draft or its draft state is unavailable` };
     }
   }
+
+  // #3324: a DIRTY head's CI verdict is stale once main is merged in, so skip the watch and let land sync first.
+  if (state.mergeStateStatus === 'DIRTY') return { kind: 'adopt', branch: pr.branch, syncMain: true };
 
   let outcome: CiOutcome;
   try {

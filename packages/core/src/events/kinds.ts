@@ -12,6 +12,7 @@ export type {
   FlakyTestsPayload,
   LanePausedPayload,
   ParkPayload,
+  PrRefreshPayload,
   ProviderCappedPayload,
   StewardTriggeredPayload,
 } from './payloads.js';
@@ -140,6 +141,7 @@ export type EventKind =
   | 'plan_rejected'
   | 'post-merge-defect'
   | 'pr_opened'
+  | 'pr_refresh'
   | 'queue_admission_conflict'
   | 'queue_order_conflict'
   | 'queue_added'
@@ -372,6 +374,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   plan_rejected: { severity: 'info', isPark: false, isTerminal: false },
   'post-merge-defect': { severity: 'info', isPark: false, isTerminal: false },
   pr_opened: { severity: 'info', isPark: false, isTerminal: false },
+  pr_refresh: { severity: 'info', isPark: false, isTerminal: false },
   queue_added: { severity: 'info', isPark: false, isTerminal: false },
   queue_admission_conflict: { severity: 'warn', isPark: false, isTerminal: false },
   queue_order_conflict: { severity: 'warn', isPark: false, isTerminal: false },
