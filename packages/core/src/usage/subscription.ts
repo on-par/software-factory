@@ -1,6 +1,6 @@
 // src/usage/subscription.ts — real Claude subscription usage (OAuth /usage endpoint)
 //
-// Reads the same 5-hour rate-limit window Claude Code's own /usage UI shows,
+// Reads the same 5-hour (and, when present, weekly seven_day) rate-limit windows Claude Code's own /usage UI shows,
 // using the OAuth access token already stored on the machine. Never reads or
 // uses the refresh token, never refreshes, never logs/throws the token.
 
@@ -15,6 +15,9 @@ import { claudeConfigDirPath, claudeKeychainService } from '../utils/claude-conf
 export interface SubscriptionUsage {
   fiveHourUtilization: number;
   fiveHourResetsAt: string | null;
+  /** Weekly (seven_day) window, percent 0-100; null when the response has no usable seven_day. */
+  sevenDayUtilization?: number | null;
+  sevenDayResetsAt?: string | null;
 }
 
 export interface SubscriptionUsageDeps {
@@ -59,6 +62,12 @@ const UsageResponseSchema = z
     }),
   })
   .loose();
+
+// Parsed separately so a malformed seven_day degrades to nulls instead of failing the 5h reading.
+const SevenDayWindowSchema = z.object({
+  utilization: z.number(),
+  resets_at: z.string().nullish(),
+});
 
 export async function readClaudeAccessToken(deps: SubscriptionUsageDeps = {}): Promise<string | null> {
   const env = deps.env ?? process.env;
@@ -125,9 +134,13 @@ export async function fetchSubscriptionUsage(deps: SubscriptionUsageDeps = {}): 
     const parsed = UsageResponseSchema.safeParse(body);
     if (!parsed.success) return null;
 
+    const sevenDay = SevenDayWindowSchema.safeParse(parsed.data.seven_day);
+
     return {
       fiveHourUtilization: parsed.data.five_hour.utilization,
       fiveHourResetsAt: parsed.data.five_hour.resets_at ?? null,
+      sevenDayUtilization: sevenDay.success ? sevenDay.data.utilization : null,
+      sevenDayResetsAt: sevenDay.success ? (sevenDay.data.resets_at ?? null) : null,
     };
   } catch {
     return null;

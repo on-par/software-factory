@@ -12,6 +12,12 @@ const validCreds = JSON.stringify({
   },
 });
 
+// Reported shape of /api/oauth/usage; replace with a captured real response before merge.
+const WEEKLY_USAGE_FIXTURE = {
+  five_hour: { utilization: 20, resets_at: '2026-10-19T03:00:00Z' },
+  seven_day: { utilization: 96, resets_at: '2026-10-20T12:00:00Z' },
+};
+
 describe('readClaudeAccessToken', () => {
   it('prefers an injected readKeychain over an injected exec', async () => {
     const readKeychain = vi.fn().mockResolvedValue(validCreds);
@@ -109,7 +115,12 @@ describe('fetchSubscriptionUsage', () => {
 
     const result = await fetchSubscriptionUsage(deps({ fetchImpl }));
 
-    expect(result).toEqual({ fiveHourUtilization: 42, fiveHourResetsAt: '2026-07-15T18:00:00Z' });
+    expect(result).toEqual({
+      fiveHourUtilization: 42,
+      fiveHourResetsAt: '2026-07-15T18:00:00Z',
+      sevenDayUtilization: null,
+      sevenDayResetsAt: null,
+    });
     expect(fetchImpl).toHaveBeenCalledWith(
       'https://api.anthropic.com/api/oauth/usage',
       expect.objectContaining({
@@ -174,6 +185,62 @@ describe('fetchSubscriptionUsage', () => {
 
     const result = await fetchSubscriptionUsage(deps({ fetchImpl }));
 
-    expect(result).toEqual({ fiveHourUtilization: 10, fiveHourResetsAt: null });
+    expect(result).toEqual({
+      fiveHourUtilization: 10,
+      fiveHourResetsAt: null,
+      sevenDayUtilization: null,
+      sevenDayResetsAt: null,
+    });
+  });
+
+  it('returns null weekly fields when seven_day is absent', async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl.mockResolvedValue(Response.json({ five_hour: { utilization: 5 } }));
+
+    const result = await fetchSubscriptionUsage(deps({ fetchImpl }));
+
+    expect(result?.sevenDayUtilization).toBeNull();
+    expect(result?.sevenDayResetsAt).toBeNull();
+  });
+
+  it('parses an optional seven_day window into sevenDayUtilization and sevenDayResetsAt', async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl.mockResolvedValue(Response.json(WEEKLY_USAGE_FIXTURE));
+
+    const result = await fetchSubscriptionUsage(deps({ fetchImpl }));
+
+    expect(result).toEqual({
+      fiveHourUtilization: 20,
+      fiveHourResetsAt: '2026-10-19T03:00:00Z',
+      sevenDayUtilization: 96,
+      sevenDayResetsAt: '2026-10-20T12:00:00Z',
+    });
+  });
+
+  it.each([{ seven_day: null }, { seven_day: { utilization: '96' } }, { seven_day: 'x' }])(
+    'degrades a malformed or null seven_day to null weekly fields without failing the reading (%j)',
+    async (extra) => {
+      const fetchImpl = vi.fn<typeof fetch>();
+      fetchImpl.mockResolvedValue(Response.json({ five_hour: { utilization: 20 }, ...extra }));
+
+      const result = await fetchSubscriptionUsage(deps({ fetchImpl }));
+
+      expect(result).toEqual({
+        fiveHourUtilization: 20,
+        fiveHourResetsAt: null,
+        sevenDayUtilization: null,
+        sevenDayResetsAt: null,
+      });
+    },
+  );
+
+  it('defaults sevenDayResetsAt to null when seven_day.resets_at is absent', async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl.mockResolvedValue(Response.json({ five_hour: { utilization: 20 }, seven_day: { utilization: 70 } }));
+
+    const result = await fetchSubscriptionUsage(deps({ fetchImpl }));
+
+    expect(result?.sevenDayUtilization).toBe(70);
+    expect(result?.sevenDayResetsAt).toBeNull();
   });
 });

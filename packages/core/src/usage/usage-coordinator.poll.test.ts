@@ -71,7 +71,12 @@ describe('createUsageCoordinator', () => {
 
     await coordinator.start();
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(coordinator.read()).toEqual({ fiveHourUtilization: 0.1, fiveHourResetsAt: null });
+    expect(coordinator.read()).toEqual({
+      fiveHourUtilization: 0.1,
+      fiveHourResetsAt: null,
+      sevenDayUtilization: null,
+      sevenDayResetsAt: null,
+    });
 
     await vi.advanceTimersByTimeAsync(DEFAULT_USAGE_POLL_MS);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
@@ -109,7 +114,12 @@ describe('createUsageCoordinator', () => {
     const engineOneView = coordinator.read();
     const engineTwoView = coordinator.read();
     expect(engineOneView).toEqual(engineTwoView);
-    expect(engineOneView).toEqual({ fiveHourUtilization: utilization, fiveHourResetsAt: null });
+    expect(engineOneView).toEqual({
+      fiveHourUtilization: utilization,
+      fiveHourResetsAt: null,
+      sevenDayUtilization: null,
+      sevenDayResetsAt: null,
+    });
     expect(fetchImpl).toHaveBeenCalledTimes(callsBeforeReads);
 
     coordinator.stop();
@@ -162,11 +172,21 @@ describe('createUsageCoordinator', () => {
     });
 
     await coordinator.start();
-    expect(coordinator.read()).toEqual({ fiveHourUtilization: 0.2, fiveHourResetsAt: null });
+    expect(coordinator.read()).toEqual({
+      fiveHourUtilization: 0.2,
+      fiveHourResetsAt: null,
+      sevenDayUtilization: null,
+      sevenDayResetsAt: null,
+    });
     const fileAfterFirstPoll = await readFile(statePath, 'utf-8');
 
     await vi.advanceTimersByTimeAsync(DEFAULT_USAGE_POLL_MS);
-    expect(coordinator.read()).toEqual({ fiveHourUtilization: 0.2, fiveHourResetsAt: null });
+    expect(coordinator.read()).toEqual({
+      fiveHourUtilization: 0.2,
+      fiveHourResetsAt: null,
+      sevenDayUtilization: null,
+      sevenDayResetsAt: null,
+    });
     expect(await readFile(statePath, 'utf-8')).toEqual(fileAfterFirstPoll);
     expect(warnings.some((w) => w.type === 'usage_coordinator_poll_empty')).toBe(true);
 

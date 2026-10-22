@@ -107,7 +107,12 @@ describe('createLocalUsageCoordinator', () => {
 
       expect(coordinator.read()).toBeNull();
       await coordinator.start();
-      expect(coordinator.read()).toEqual({ fiveHourUtilization: 42, fiveHourResetsAt: null });
+      expect(coordinator.read()).toEqual({
+        fiveHourUtilization: 42,
+        fiveHourResetsAt: null,
+        sevenDayUtilization: null,
+        sevenDayResetsAt: null,
+      });
     });
 
     it('read() reflects the snapshot after pollNow(), and returns a distinct object copy', async () => {
@@ -117,12 +122,22 @@ describe('createLocalUsageCoordinator', () => {
 
       await coordinator.pollNow();
       const first = coordinator.read();
-      expect(first).toEqual({ fiveHourUtilization: 7, fiveHourResetsAt: null });
+      expect(first).toEqual({
+        fiveHourUtilization: 7,
+        fiveHourResetsAt: null,
+        sevenDayUtilization: null,
+        sevenDayResetsAt: null,
+      });
 
       // Mutating the returned copy must not affect the next read().
       (first as { fiveHourUtilization: number }).fiveHourUtilization = 999;
       const second = coordinator.read();
-      expect(second).toEqual({ fiveHourUtilization: 7, fiveHourResetsAt: null });
+      expect(second).toEqual({
+        fiveHourUtilization: 7,
+        fiveHourResetsAt: null,
+        sevenDayUtilization: null,
+        sevenDayResetsAt: null,
+      });
       expect(second).not.toBe(first);
     });
 
