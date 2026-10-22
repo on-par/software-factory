@@ -1,20 +1,17 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { loadModelsConfig } from './index.js';
 
-let tmpDir: string | undefined;
+const temp = createTempDirs();
 
-afterEach(async () => {
-  if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
-  tmpDir = undefined;
-});
+afterEach(() => temp.cleanup());
 
 async function writeConfig(harness?: string, harnesses?: Record<string, unknown>): Promise<string> {
-  tmpDir = await mkdtemp(join(tmpdir(), 'factory-retired-harness-'));
+  const tmpDir = await temp.make('factory-retired-harness-');
   const config = {
     version: 1,
     models: {
