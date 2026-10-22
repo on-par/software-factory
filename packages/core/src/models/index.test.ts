@@ -334,8 +334,8 @@ describe('getHarnessId', () => {
     expect(registry.getHarnessId('declared-harness-model')).toBe('codex-cli');
   });
 
-  it('infers ollama-command-agent for codex+ollama models', () => {
-    expect(registry.getHarnessId('codex-ollama-model')).toBe('ollama-command-agent');
+  it('resolves the legacy codex+ollama inference to ollama-agentic', () => {
+    expect(registry.getHarnessId('codex-ollama-model')).toBe('ollama-agentic');
   });
 
   it('infers codex-cli for codex models', () => {
@@ -835,7 +835,7 @@ describe('diagnoseModels', () => {
       true,
     );
     expect(d.reachable).toBe(true);
-    expect(d.reason).toBe('ok (ollama native command agent)');
+    expect(d.reason).toBe('ok (ollama agentic)');
   });
 
   it('marks an ollama model unreachable when the native model is missing', () => {

@@ -1,16 +1,13 @@
 // src/router/index.ts — Model router with cost-tier routing and automatic failover
 
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
-import { harnessCliCommand } from '../harness/catalog.js';
+import { harnessCliCommand, retiredHarnessNotice } from '../harness/catalog.js';
 import { classifyFailure } from '../harness/classify.js';
 import { ClaudeCliHarness } from '../harness/claude-cli.js';
 import { CodexCliHarness } from '../harness/codex-cli.js';
 import { CommandHarness } from '../harness/command.js';
 import type { CodingHarness, HarnessFailureReason, HarnessLiveUsage, HarnessUsage } from '../harness/index.js';
-import { HarnessError, isRetryableFailure, taskRequiresAgenticHarness } from '../harness/index.js';
+import { isRetryableFailure, taskRequiresAgenticHarness } from '../harness/index.js';
 import { OllamaAgenticHarness } from '../harness/ollama-agentic.js';
 import { OllamaHttpHarness } from '../harness/ollama-http.js';
 import { OpenCodeHarness } from '../harness/opencode.js';
@@ -21,11 +18,10 @@ import { sandboxEventFromError } from '../sandbox/index.js';
 import type { CostEntry, RetryCause, TaskType } from '../types/index.js';
 import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
-import { shellEscape } from '../utils/index.js';
 import { type LocalAuthAgent, localAuthAgentFor } from '../utils/local-auth-record.js';
 import { BudgetStopError, type BudgetGuard, watchBudget } from './budget-guard.js';
 import { costRow } from './cost-row.js';
-import { extractFailoverReason, ModelExecutorError, ModelRouterError, type RouterAttempt } from './executor-error.js';
+import { extractFailoverReason, ModelRouterError, type RouterAttempt } from './executor-error.js';
 import { describeFailureDetail } from './failure-detail.js';
 import { claimOllamaSkipNotice, type OllamaProbeResult, probeOllama } from './ollama-probe.js';
 import { throwIfWorktreeMissing, worktreeExists } from './missing-worktree.js';
@@ -59,13 +55,6 @@ export type FetchFn = (
   text(): Promise<string>;
   json(): Promise<unknown>;
 }>;
-
-interface LocalAgentTrace {
-  tracePath: string;
-  retryPromptPath: string;
-  malformedReason: 'empty_response' | 'invalid_json';
-  rawResponseSummary: string;
-}
 
 export type FailoverReason = HarnessFailureReason;
 
@@ -126,10 +115,8 @@ export interface ModelExecutor {
   probeOllama?(): Promise<OllamaProbeResult>;
 }
 
-/** Executor-internal harness seam; empty output must raise an error. */
-export interface ExecutorHarness {
-  run(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string>;
-}
+/** Builds the CodingHarness that runs one model; looked up by harness id. */
+type HarnessFactory = (harnessId: string, ctx: ModelExecutorContext, model: string) => CodingHarness;
 
 export class CliModelExecutor implements ModelExecutor {
   private claudeHarness: ClaudeCliHarness;
@@ -138,12 +125,12 @@ export class CliModelExecutor implements ModelExecutor {
   private opencodeHarness: OpenCodeHarness;
   private piHarness: PiHarness;
   private ollamaAgenticHarness: OllamaAgenticHarness;
-  private harnesses: Record<string, ExecutorHarness>;
+  private harnesses: Record<string, HarnessFactory>;
 
   constructor(
     private execFn: ExecFn = defaultExecFn,
     private fetchFn: FetchFn = globalThis.fetch,
-    harnessOverrides: Record<string, ExecutorHarness> = {},
+    harnessOverrides: Record<string, CodingHarness> = {},
   ) {
     this.claudeHarness = new ClaudeCliHarness(execFn);
     this.codexHarness = new CodexCliHarness(execFn);
@@ -152,31 +139,23 @@ export class CliModelExecutor implements ModelExecutor {
     this.piHarness = new PiHarness(execFn);
     this.ollamaAgenticHarness = new OllamaAgenticHarness(fetchFn, execFn);
     this.harnesses = {
-      'claude-cli': { run: (m, p, c) => this.runViaHarness(this.claudeHarness, m, p, c) },
-      'codex-cli': { run: (m, p, c) => this.runViaHarness(this.codexHarness, m, p, c) },
-      'ollama-http': { run: (m, p, c) => this.runViaHarness(this.ollamaHarness, m, p, c) },
-      'ollama-command-agent': {
-        run: (m, p, c) =>
-          this.runOllamaCommandAgent(m, p, c.worktree, c.timeoutSeconds, c.registry, c.task, c.env, c.onPgid),
+      'claude-cli': () => this.claudeHarness,
+      'codex-cli': () => this.codexHarness,
+      'ollama-http': () => this.ollamaHarness,
+      opencode: () => this.opencodeHarness,
+      pi: () => this.piHarness,
+      'ollama-agentic': () => this.ollamaAgenticHarness,
+      command: (harnessId, ctx, model) => {
+        const declaration = ctx.registry.getHarnessDeclaration(harnessId);
+        if (!declaration) {
+          throw new Error(
+            `Model '${model}' uses the command harness, which needs a matching entry under 'harnesses' (none declared for '${harnessId}')`,
+          );
+        }
+        return new CommandHarness(harnessId, declaration, this.execFn);
       },
-      opencode: { run: (m, p, c) => this.runViaHarness(this.opencodeHarness, m, p, c) },
-      pi: { run: (m, p, c) => this.runViaHarness(this.piHarness, m, p, c) },
-      'ollama-agentic': { run: (m, p, c) => this.runViaHarness(this.ollamaAgenticHarness, m, p, c) },
-      command: { run: (m, p, c) => this.runCommandHarness(m, p, c) },
-      ...harnessOverrides,
+      ...Object.fromEntries(Object.entries(harnessOverrides).map(([id, h]) => [id, () => h])),
     };
-  }
-
-  /** Run a model whose harness id is declared under `harnesses` through the generic command harness. */
-  private runCommandHarness(model: string, prompt: string, ctx: ModelExecutorContext): Promise<string> {
-    const harnessId = ctx.registry.getHarnessId(model) ?? '';
-    const declaration = ctx.registry.getHarnessDeclaration(harnessId);
-    if (!declaration) {
-      throw new Error(
-        `Model '${model}' uses the command harness, which needs a matching entry under 'harnesses' (none declared for '${harnessId}')`,
-      );
-    }
-    return this.runViaHarness(new CommandHarness(harnessId, declaration, this.execFn), model, prompt, ctx);
   }
 
   /** Harness ids this executor can dispatch — the defaults plus any injected
@@ -199,9 +178,9 @@ export class CliModelExecutor implements ModelExecutor {
     if (!harnessId) {
       throw new Error(`Model '${model}' has no resolvable harness id — declare a 'harness' in models.json`);
     }
-    const entry =
+    const factory =
       this.harnesses[harnessId] ?? (ctx.registry.getHarnessDeclaration(harnessId) ? this.harnesses.command : undefined);
-    if (!entry) {
+    if (!factory) {
       throw new Error(
         `Model '${model}' declares unknown harness '${harnessId}' (known harnesses: ${Object.keys(this.harnesses).join(', ')})`,
       );
@@ -211,7 +190,7 @@ export class CliModelExecutor implements ModelExecutor {
         `Model '${model}' uses non-agentic harness '${harnessId}', which cannot edit files — rejected for build task '${ctx.task}'`,
       );
     }
-    return entry.run(model, prompt, ctx);
+    return this.runViaHarness(factory(harnessId, ctx, model), model, prompt, ctx);
   }
 
   /** Delegate to a harness while preserving the CodingHarness contract:
@@ -254,303 +233,6 @@ export class CliModelExecutor implements ModelExecutor {
     if (usage) ctx.onUsage?.(usage);
     return output;
   }
-
-  /** Run a small local command loop for Ollama worker models. */
-  private async runOllamaCommandAgent(
-    model: string,
-    prompt: string,
-    worktree: string,
-    timeoutSeconds: number,
-    registry: ModelRegistry,
-    task: TaskType,
-    env?: Record<string, string>,
-    onPgid?: (pgid: number) => void,
-  ): Promise<string> {
-    const transcript: string[] = [];
-    const initialStatus = await this.execFn('git status --short', {
-      cwd: worktree,
-      timeoutMs: 30_000,
-      maxBuffer: 1024 * 1024,
-    })
-      .then((result) => result.stdout)
-      .catch(() => '');
-    const initiallyDirty = new Set(parseGitStatusPaths(initialStatus));
-    let conversation = `${prompt}
-
-You are a local command worker. You act only by returning commands.
-Return JSON only: {"commands":["..."],"done":false,"final":"short status"}
-First inspect, then edit, then run one cheap check, then git add/commit.
-    Use at most 3 commands per turn. No markdown.`;
-
-    for (let step = 0; step < 8; step++) {
-      let output: string;
-      try {
-        output = await this.callOllamaForCommandAgent(model, conversation, timeoutSeconds, registry, worktree, task);
-      } catch (err) {
-        const reason = extractFailoverReason(err) ?? 'error';
-        const message = err instanceof Error ? err.message : String(err);
-        const trace = await this.writeLocalAgentCallFailureTrace({
-          model,
-          worktree,
-          prompt,
-          conversation,
-          attempt: step + 1,
-          failureReason: reason,
-          errorMessage: message,
-        });
-        throw new ModelExecutorError(
-          `local command-agent model call failed (${reason}); trace written to ${trace.tracePath}; error: ${message}`,
-          reason,
-          { tracePath: trace.tracePath },
-        );
-      }
-      transcript.push(`MODEL STEP ${step + 1}:\n${output}`);
-      const action = await this.parseLocalAgentActionWithRepair({
-        model,
-        prompt,
-        conversation,
-        output,
-        worktree,
-        timeoutSeconds,
-        registry,
-        task,
-        step,
-      });
-      if (action.repairTranscript) transcript.push(action.repairTranscript);
-
-      if (action.commands.length === 0) {
-        if (action.done) break;
-        const trace =
-          action.traceForFailure ??
-          (await this.writeLocalAgentTrace({
-            model,
-            worktree,
-            prompt,
-            conversation,
-            attempt: step + 1,
-            rawResponse: output,
-            malformedReason: action.malformedReason ?? 'empty_response',
-          }));
-        throw new ModelExecutorError(
-          `local command-agent malformed output (${trace.malformedReason}); trace written to ${trace.tracePath}; retry prompt ${trace.retryPromptPath}`,
-          'empty_response',
-          { tracePath: trace.tracePath },
-        );
-      }
-
-      const commandOutputs: string[] = [];
-      for (const command of action.commands.slice(0, 3)) {
-        try {
-          const { stdout, stderr } = await this.execFn(command, {
-            cwd: worktree,
-            timeoutMs: Math.max(30_000, Math.floor((timeoutSeconds * 1000) / 4)),
-            maxBuffer: 10 * 1024 * 1024,
-            env,
-            onPgid,
-          });
-          commandOutputs.push(`$ ${command}\nEXIT_CODE: 0\nSTDOUT:\n${stdout}\nSTDERR:\n${stderr}`);
-        } catch (err: any) {
-          const exitCode = typeof err.code === 'number' ? err.code : err.killed ? 124 : 1;
-          commandOutputs.push(
-            `$ ${command}\nEXIT_CODE: ${exitCode}\nSTDOUT:\n${err.stdout ?? ''}\nSTDERR:\n${err.stderr ?? err.message ?? ''}`,
-          );
-        }
-      }
-      transcript.push(commandOutputs.join('\n\n'));
-      conversation = `${prompt}
-
-Previous command output:
-${commandOutputs.join('\n\n').slice(-5000)}
-
-Return next JSON command action. If committed, return {"commands":[],"done":true,"final":"done"}.`;
-    }
-
-    const status = await this.execFn('git status --short', {
-      cwd: worktree,
-      timeoutMs: 30_000,
-      maxBuffer: 1024 * 1024,
-    });
-    const changedPaths = parseGitStatusPaths(status.stdout).filter((path) => !initiallyDirty.has(path));
-    if (changedPaths.length > 0) {
-      await this.execFn(
-        `git add -- ${changedPaths.map(shellEscape).join(' ')} && git commit -m "feat: implement factory issue"`,
-        {
-          cwd: worktree,
-          timeoutMs: 120_000,
-          maxBuffer: 10 * 1024 * 1024,
-        },
-      );
-      transcript.push(`AUTO-COMMIT: committed ${changedPaths.length} changed path(s).`);
-    }
-
-    return transcript.join('\n\n');
-  }
-
-  private async parseLocalAgentActionWithRepair(opts: {
-    model: string;
-    prompt: string;
-    conversation: string;
-    output: string;
-    worktree: string;
-    timeoutSeconds: number;
-    registry: ModelRegistry;
-    task: TaskType;
-    step: number;
-  }): Promise<
-    ReturnType<typeof parseLocalAgentAction> & {
-      repairTranscript?: string;
-      traceForFailure?: LocalAgentTrace;
-    }
-  > {
-    const action = parseLocalAgentAction(opts.output);
-    if (action.commands.length > 0 || action.done) return action;
-
-    const trace = await this.writeLocalAgentTrace({
-      model: opts.model,
-      worktree: opts.worktree,
-      prompt: opts.prompt,
-      conversation: opts.conversation,
-      attempt: opts.step + 1,
-      rawResponse: opts.output,
-      malformedReason: action.malformedReason ?? 'empty_response',
-    });
-    const repairPrompt = buildLocalAgentRepairPrompt({
-      retryPromptPath: trace.retryPromptPath,
-      malformedReason: trace.malformedReason,
-      rawSummary: trace.rawResponseSummary,
-    });
-    await writeFile(trace.retryPromptPath, repairPrompt);
-
-    let repairedOutput: string;
-    try {
-      repairedOutput = await this.callOllamaForCommandAgent(
-        opts.model,
-        repairPrompt,
-        opts.timeoutSeconds,
-        opts.registry,
-        opts.worktree,
-        opts.task,
-      );
-    } catch (err) {
-      const reason = extractFailoverReason(err) ?? 'error';
-      const message = err instanceof Error ? err.message : String(err);
-      throw new ModelExecutorError(
-        `local command-agent repair failed after malformed output (${trace.malformedReason}); trace written to ${trace.tracePath}; retry prompt ${trace.retryPromptPath}; repair error: ${message}`,
-        reason,
-        { tracePath: trace.tracePath },
-      );
-    }
-    const repairedAction = parseLocalAgentAction(repairedOutput);
-    return {
-      ...repairedAction,
-      traceForFailure: repairedAction.commands.length === 0 && !repairedAction.done ? trace : undefined,
-      repairTranscript: [
-        `REPAIR STEP ${opts.step + 1}:`,
-        `TRACE: ${trace.tracePath}`,
-        `RETRY PROMPT: ${trace.retryPromptPath}`,
-        repairedOutput,
-      ].join('\n'),
-    };
-  }
-
-  private async writeLocalAgentTrace(opts: {
-    model: string;
-    worktree: string;
-    prompt: string;
-    conversation: string;
-    attempt: number;
-    rawResponse: string;
-    malformedReason: 'empty_response' | 'invalid_json';
-  }): Promise<LocalAgentTrace> {
-    const traceDir = join(opts.worktree, '.factory', 'local-agent-traces');
-    await mkdir(traceDir, { recursive: true });
-    const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const retryPromptPath = join(traceDir, `${stamp}-repair-prompt.md`);
-    const tracePath = join(traceDir, `${stamp}.json`);
-    const rawResponseSummary = summarizeRawResponse(opts.rawResponse);
-    await writeFile(
-      tracePath,
-      `${JSON.stringify(
-        {
-          model: opts.model,
-          attempt: opts.attempt,
-          promptSize: opts.prompt.length,
-          conversationSize: opts.conversation.length,
-          malformedReason: opts.malformedReason,
-          rawResponseSummary,
-          retryPromptPath,
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    return { tracePath, retryPromptPath, malformedReason: opts.malformedReason, rawResponseSummary };
-  }
-
-  private async writeLocalAgentCallFailureTrace(opts: {
-    model: string;
-    worktree: string;
-    prompt: string;
-    conversation: string;
-    attempt: number;
-    failureReason: FailoverReason;
-    errorMessage: string;
-  }): Promise<{ tracePath: string }> {
-    const traceDir = join(opts.worktree, '.factory', 'local-agent-traces');
-    await mkdir(traceDir, { recursive: true });
-    const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const tracePath = join(traceDir, `${stamp}-call-failure.json`);
-    await writeFile(
-      tracePath,
-      `${JSON.stringify(
-        {
-          model: opts.model,
-          attempt: opts.attempt,
-          promptSize: opts.prompt.length,
-          conversationSize: opts.conversation.length,
-          failureReason: opts.failureReason,
-          errorMessage: opts.errorMessage,
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    return { tracePath };
-  }
-
-  private async callOllama(
-    model: string,
-    prompt: string,
-    timeoutSeconds: number,
-    registry: ModelRegistry,
-    worktree: string,
-    task: TaskType,
-  ): Promise<string> {
-    return this.runViaHarness(this.ollamaHarness, model, prompt, { worktree, timeoutSeconds, task, registry });
-  }
-
-  /** Command-agent-only seam: the local command loop owns empty-output handling
-   *  (it feeds '' into its malformed-output repair prompt), so an
-   *  empty_response from a clean exit is returned as '' here instead of
-   *  propagating. Every other path must let HarnessError('empty_response')
-   *  propagate — ModelExecutor.runModel never resolves empty output. */
-  private async callOllamaForCommandAgent(
-    model: string,
-    prompt: string,
-    timeoutSeconds: number,
-    registry: ModelRegistry,
-    worktree: string,
-    task: TaskType,
-  ): Promise<string> {
-    try {
-      return await this.callOllama(model, prompt, timeoutSeconds, registry, worktree, task);
-    } catch (err) {
-      if (err instanceof HarnessError && err.reason === 'empty_response' && err.details.exitCode === 0) {
-        return '';
-      }
-      throw err;
-    }
-  }
 }
 
 /** Cost sink for router runs. `issue`/`ts` are filled by the caller/logCost. */
@@ -567,6 +249,8 @@ export class ModelRouter {
   /** Harness ids already reported as missing their CLI. One router serves one run, so each
    *  harness is logged at most once per run (#2629). */
   private readonly missingHarnessNoticed = new Set<string>();
+  /** Models already warned about resolving through a retired harness id; once per run (#3445). */
+  private readonly retiredHarnessNoticed = new Set<string>();
   private localAuthSink?: (agent: LocalAuthAgent) => void;
   private codexFullAccessTasks: readonly string[] = [];
   private codexWorkspacePaths?: { primaryRepoRoot: string; writableRoots: readonly string[] };
@@ -625,6 +309,12 @@ export class ModelRouter {
     onLog(
       `Skipping ${harnessId} models for the rest of this run: ${harnessCliCommand(harnessId)} CLI not found on PATH`,
     );
+  }
+  private noticeRetiredHarness(model: string, onLog: (msg: string) => void): void {
+    const retired = this.registry.retiredHarnessId(model);
+    if (!retired || this.retiredHarnessNoticed.has(model)) return;
+    this.retiredHarnessNoticed.add(model);
+    onLog(retiredHarnessNotice(model, retired));
   }
   private authKey(model: string): string | undefined {
     return this.registry.getHarnessId(model) ?? this.registry.get(model)?.provider;
@@ -793,6 +483,7 @@ export class ModelRouter {
         continue;
       }
       let retries = 0;
+      this.noticeRetiredHarness(model, onLog);
 
       while (retries <= maxRetries) {
         onLog(`Trying ${model} for ${task} (attempt ${retries + 1})`);
@@ -1016,92 +707,4 @@ function errStderr(err: unknown): string {
 function errExitCode(err: unknown): number {
   const exitCode = (err as { exitCode?: unknown } | null)?.exitCode;
   return typeof exitCode === 'number' ? exitCode : 1;
-}
-function parseLocalAgentAction(output: string): {
-  commands: string[];
-  done: boolean;
-  final: string;
-  malformedReason?: 'empty_response' | 'invalid_json';
-} {
-  if (output.trim().length === 0) {
-    return { commands: [], done: false, final: '', malformedReason: 'empty_response' };
-  }
-  const jsonText = extractJsonObject(output);
-  if (jsonText) {
-    try {
-      const parsed = JSON.parse(jsonText) as { commands?: unknown; done?: unknown; final?: unknown };
-      return {
-        commands: Array.isArray(parsed.commands) ? parsed.commands.flatMap(normalizeLocalCommand) : [],
-        done: parsed.done === true,
-        final: typeof parsed.final === 'string' ? parsed.final : '',
-      };
-    } catch {
-      return { commands: [], done: false, final: output.trim(), malformedReason: 'invalid_json' };
-    }
-  }
-  const fenced = [...output.matchAll(/```(?:bash|sh|zsh|shell)?\n([\s\S]*?)```/g)]
-    .map((match) => match[1].trim())
-    .filter(Boolean);
-  if (fenced.length > 0) return { commands: fenced, done: false, final: '' };
-
-  return { commands: [], done: false, final: output.trim(), malformedReason: 'invalid_json' };
-}
-function normalizeLocalCommand(value: unknown): string[] {
-  if (typeof value === 'string') {
-    const command = value.trim();
-    return command ? [command] : [];
-  }
-  if (!isPlainObject(value)) return [];
-
-  const commandValue =
-    typeof value.command === 'string' ? value.command : typeof value.name === 'string' ? value.name : '';
-  const command = commandValue.trim();
-  if (!command) return [];
-  if (!Array.isArray(value.args) || value.args.length === 0) return [command];
-  const args = value.args.filter((arg): arg is string => typeof arg === 'string');
-  if (args.length !== value.args.length) return [];
-  return [`${command} ${args.map(shellEscape).join(' ')}`];
-}
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-function buildLocalAgentRepairPrompt(opts: {
-  retryPromptPath: string;
-  malformedReason: 'empty_response' | 'invalid_json';
-  rawSummary: string;
-}): string {
-  return `Your previous local command-agent response was malformed: ${opts.malformedReason}.
-Trace retry prompt path: ${opts.retryPromptPath}
-Raw response summary: ${opts.rawSummary}
-
-Return exactly one JSON object, no markdown, no prose:
-{"commands":["one safe shell command"],"done":false,"final":"short status"}
-
-If the task is already complete, return:
-{"commands":[],"done":true,"final":"done"}`;
-}
-function summarizeRawResponse(raw: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed) return '<empty>';
-  return trimmed.replace(/\s+/g, ' ').slice(0, 500);
-}
-function extractJsonObject(output: string): string | undefined {
-  const fenced = output.match(/```(?:json)?\n([\s\S]*?)```/);
-  if (fenced) return fenced[1].trim();
-
-  const start = output.indexOf('{');
-  const end = output.lastIndexOf('}');
-  if (start >= 0 && end > start) return output.slice(start, end + 1);
-  return undefined;
-}
-function parseGitStatusPaths(status: string): string[] {
-  return status
-    .split('\n')
-    .map((line) => line.trimEnd())
-    .filter(Boolean)
-    .map((line) => {
-      const path = line.slice(3).trim();
-      return path.includes(' -> ') ? path.split(' -> ').pop()!.trim() : path;
-    })
-    .filter(Boolean);
 }

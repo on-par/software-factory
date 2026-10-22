@@ -5,6 +5,8 @@ import {
   harnessCliCommand,
   isAgenticHarness,
   KNOWN_HARNESS_IDS,
+  retiredHarnessNotice,
+  retiredHarnessReplacement,
   usesGenericBuildRoute,
 } from './catalog.js';
 
@@ -18,16 +20,7 @@ describe('HARNESS_CATALOG', () => {
   it('exposes KNOWN_HARNESS_IDS as the catalog keys, including the known harnesses', () => {
     expect(KNOWN_HARNESS_IDS).toEqual(Object.keys(HARNESS_CATALOG));
     expect(KNOWN_HARNESS_IDS).toEqual(
-      expect.arrayContaining([
-        'claude-cli',
-        'codex-cli',
-        'ollama-http',
-        'opencode',
-        'pi',
-        'ollama-agentic',
-        'ollama-command-agent',
-        'command',
-      ]),
+      expect.arrayContaining(['claude-cli', 'codex-cli', 'ollama-http', 'opencode', 'pi', 'ollama-agentic', 'command']),
     );
   });
 
@@ -73,7 +66,7 @@ describe('HARNESS_CATALOG', () => {
   });
 
   it('gives every ollama-family harness an ollama probe', () => {
-    for (const id of ['ollama-http', 'ollama-agentic', 'ollama-command-agent']) {
+    for (const id of ['ollama-http', 'ollama-agentic']) {
       expect(HARNESS_CATALOG[id].probe.kind).toBe('ollama');
     }
   });
@@ -100,5 +93,24 @@ describe('usesGenericBuildRoute', () => {
     for (const id of ['claude-cli', 'ollama-agentic', 'command', '']) {
       expect(usesGenericBuildRoute(id)).toBe(false);
     }
+  });
+});
+
+describe('retired harness aliases', () => {
+  it('keeps ollama-command-agent out of the known harness ids', () => {
+    expect(KNOWN_HARNESS_IDS).not.toContain('ollama-command-agent');
+  });
+
+  it('maps ollama-command-agent to ollama-agentic and nothing else', () => {
+    expect(retiredHarnessReplacement('ollama-command-agent')).toBe('ollama-agentic');
+    expect(retiredHarnessReplacement('claude-cli')).toBeUndefined();
+    expect(retiredHarnessReplacement('toString')).toBeUndefined();
+  });
+
+  it('names the replacement in the notice', () => {
+    const notice = retiredHarnessNotice('my-model', 'ollama-command-agent');
+    expect(notice).toContain('my-model');
+    expect(notice).toContain('retired');
+    expect(notice).toContain('ollama-agentic');
   });
 });

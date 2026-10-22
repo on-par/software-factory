@@ -26,7 +26,6 @@ export function supportsEffort(harness: string | undefined, effort: z.infer<type
       return ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(String(effort));
     case 'ollama-http':
     case 'ollama-agentic':
-    case 'ollama-command-agent':
       return typeof effort === 'boolean' || ['low', 'medium', 'high', 'max'].includes(effort);
     default:
       return false;

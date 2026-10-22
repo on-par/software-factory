@@ -136,40 +136,14 @@ it('retains defaults for omitted tasks and other models', () => {
   expect(registry.getEffort('constructor', 'plan')).toBeUndefined();
 });
 
-it('preserves task effort through the legacy Ollama command agent and its repair call', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'factory-effort-'));
-  try {
-    const config = loadModelsConfig();
-    const model = 'qwen3.5:9b';
-    config.models[model] = { ...config.models[model], harness: 'ollama-command-agent' };
-    config.efforts = { [model]: { plan: 'high', build_codex: 'low' } };
-    const bodies: { think: string }[] = [];
-    const executor = new CliModelExecutor(
-      async () => ({ stdout: '', stderr: '' }),
-      async (_url, init) => {
-        bodies.push(JSON.parse(init!.body!));
-        return {
-          ok: true,
-          status: 200,
-          statusText: 'OK',
-          text: async () => '',
-          json: async () => ({
-            message: { content: bodies.length === 1 ? 'malformed' : '{"commands":[],"done":true,"final":"done"}' },
-          }),
-        };
-      },
-    );
-    await executor.runModel(model, 'test', {
-      task: 'plan',
-      registry: new ModelRegistry(config),
-      routesConfig: loadRoutesConfig(),
-      worktree: root,
-      timeoutSeconds: 5,
-    });
-    expect(bodies.map((body) => body.think)).toEqual(['high', 'high']);
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
+it('accepts task effort on a retired ollama-command-agent model, resolved through ollama-agentic', () => {
+  const config = loadModelsConfig();
+  const model = 'qwen3.5:9b';
+  config.models[model] = { ...config.models[model], harness: 'ollama-command-agent' };
+  config.efforts = { [model]: { plan: 'high', build_codex: 'low' } };
+  const registry = new ModelRegistry(config);
+  expect(registry.getHarnessId(model)).toBe('ollama-agentic');
+  expect(registry.getEffort(model, 'plan')).toBe('high');
 });
 
 it('preserves arbitrary Codex profile flags and appends effort with final precedence', async () => {

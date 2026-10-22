@@ -12,7 +12,9 @@ import {
   HARNESS_CATALOG,
   harnessCliCommand,
   isAgenticHarness,
+  inferHarnessId,
   KNOWN_HARNESS_IDS,
+  retiredHarnessIdOf,
   usesGenericBuildRoute,
 } from '../harness/catalog.js';
 import type { ModelDefinition, ModelTier } from '../types/index.js';
@@ -110,16 +112,14 @@ export class ModelRegistry {
     );
   }
 
-  /** Harness id for a model: the config-declared `harness`, else inferred from
-   *  legacy provider/codex flags (pre-#187 dispatch behavior). */
+  /** Harness id for a model: the declared `harness`, else inferred from legacy provider/codex flags. */
   getHarnessId(modelId: string): string | undefined {
-    const def = this.get(modelId);
-    if (!def) return undefined;
-    if (def.harness) return def.harness;
-    if (def.codex && def.provider === 'ollama') return 'ollama-command-agent';
-    if (def.codex) return 'codex-cli';
-    if (def.provider === 'ollama') return 'ollama-http';
-    return 'claude-cli';
+    return inferHarnessId(this.get(modelId));
+  }
+
+  /** The retired harness id a model came through (declared, or the legacy codex+ollama inference), if any (#3445). */
+  retiredHarnessId(modelId: string): string | undefined {
+    return retiredHarnessIdOf(this.get(modelId));
   }
 
   /** Check if a model is speculative/unproven (excluded from routing unless opted in) */

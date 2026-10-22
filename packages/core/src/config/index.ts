@@ -23,7 +23,7 @@ import { runConfigSource } from './run-config-source.js';
 import { RunConfigSectionSchema } from './run-section.js';
 
 import type { FilingPolicy } from '../filing/policy.js';
-import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
+import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS, retiredHarnessReplacement } from '../harness/catalog.js';
 import type { FailoverReason } from '../types/index.js';
 import { SandboxConfigSchema } from './sandbox-schema.js';
 import { ModelEffortsSchema } from './effort.js';
@@ -79,7 +79,7 @@ const ModelsConfigSchema = z
   .superRefine((config, ctx) => {
     const declared = Object.keys(config.harnesses);
     for (const id of declared) {
-      if (KNOWN_HARNESS_IDS.includes(id)) {
+      if (KNOWN_HARNESS_IDS.includes(id) || retiredHarnessReplacement(id) !== undefined) {
         ctx.addIssue({
           code: 'custom',
           path: ['harnesses', id],
@@ -89,7 +89,11 @@ const ModelsConfigSchema = z
     }
     const valid = [...KNOWN_HARNESS_IDS, ...declared.filter((id) => !KNOWN_HARNESS_IDS.includes(id))];
     for (const [name, def] of Object.entries(config.models)) {
-      if (def.harness !== undefined && !valid.includes(def.harness)) {
+      if (
+        def.harness !== undefined &&
+        !valid.includes(def.harness) &&
+        retiredHarnessReplacement(def.harness) === undefined
+      ) {
         ctx.addIssue({
           code: 'custom',
           path: ['models', name, 'harness'],

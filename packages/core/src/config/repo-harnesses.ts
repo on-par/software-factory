@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS } from '../harness/catalog.js';
+import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS, retiredHarnessReplacement } from '../harness/catalog.js';
 import { HarnessDeclarationSchema, type ModelsConfig } from './index.js';
 
 export const RepoHarnessesSchema = z
@@ -12,7 +12,7 @@ export const RepoHarnessesSchema = z
 
 /** Throws when a registry model declares a harness that is neither built in nor declared under `harnesses`. */
 export function assertRegistryHarness(id: string, harness: string | undefined, valid: string[]): void {
-  if (harness !== undefined && !valid.includes(harness)) {
+  if (harness !== undefined && !valid.includes(harness) && retiredHarnessReplacement(harness) === undefined) {
     throw new Error(
       `.factory/config.json: models.registry.${id} declares unknown harness '${harness}' (valid harnesses: ${valid.join(', ')})`,
     );
@@ -27,7 +27,7 @@ export function resolveRepoHarnesses(
   repoHarnesses: z.infer<typeof RepoHarnessesSchema>,
 ): { valid: string[]; patch: Pick<ModelsConfig, 'harnesses'> | Record<string, never> } {
   for (const id of Object.keys(repoHarnesses ?? {})) {
-    if (KNOWN_HARNESS_IDS.includes(id)) {
+    if (KNOWN_HARNESS_IDS.includes(id) || retiredHarnessReplacement(id) !== undefined) {
       throw new Error(`.factory/config.json: harnesses.${id}: ${builtInHarnessRedeclaredMessage(id)}`);
     }
   }

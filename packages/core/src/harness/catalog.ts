@@ -61,14 +61,6 @@ const CATALOG_ENTRIES: HarnessCatalogEntry[] = [
     probe: { kind: 'command', command: 'pi', okLabel: 'pi CLI', auth: 'cli' },
   },
   { id: 'ollama-agentic', agentic: true, probe: { kind: 'ollama', okLabel: 'ollama agentic' } },
-  // Local command-loop worker (runOllamaCommandAgent). Not yet extracted into a
-  // contract-verified CodingHarness (out of scope here); dispatched via an
-  // internal adapter in CliModelExecutor.
-  {
-    id: 'ollama-command-agent',
-    agentic: true,
-    probe: { kind: 'ollama', okLabel: 'ollama native command agent' },
-  },
   // Generic adapter that user-declared `harnesses:` ids dispatch to. Declared ids are probed
   // through their own `probe` by probeDeclaredHarnesses; this entry is used only when a model
   // names `command` directly.
@@ -84,6 +76,43 @@ export const HARNESS_CATALOG: Record<string, HarnessCatalogEntry> = Object.fromE
 );
 
 export const KNOWN_HARNESS_IDS = Object.keys(HARNESS_CATALOG);
+
+/** Harness id the pre-#187 codex+ollama inference used; now only a retired alias (#3445, ADR-0003). */
+export const LEGACY_CODEX_OLLAMA_HARNESS = 'ollama-command-agent';
+
+/** Retired built-in harness ids and the contract-verified harness each now runs on. */
+export const RETIRED_HARNESS_ALIASES: Readonly<Record<string, string>> = {
+  [LEGACY_CODEX_OLLAMA_HARNESS]: 'ollama-agentic',
+};
+
+export function retiredHarnessReplacement(id: string): string | undefined {
+  return Object.hasOwn(RETIRED_HARNESS_ALIASES, id) ? RETIRED_HARNESS_ALIASES[id] : undefined;
+}
+
+type HarnessInferenceInput = { harness?: string; codex?: boolean; provider: string };
+
+/** The retired id a model came through: a declared alias, or the legacy codex+ollama inference. */
+export function retiredHarnessIdOf(def: HarnessInferenceInput | undefined): string | undefined {
+  if (!def) return undefined;
+  if (def.harness) return retiredHarnessReplacement(def.harness) ? def.harness : undefined;
+  return def.codex && def.provider === 'ollama' ? LEGACY_CODEX_OLLAMA_HARNESS : undefined;
+}
+
+/** Harness id for a model: the declared `harness`, else inferred from legacy provider/codex flags
+ *  (pre-#187 dispatch behavior). Retired aliases resolve to their replacement. */
+export function inferHarnessId(def: HarnessInferenceInput | undefined): string | undefined {
+  if (!def) return undefined;
+  const retired = retiredHarnessIdOf(def);
+  if (retired) return retiredHarnessReplacement(retired) ?? retired;
+  if (def.harness) return def.harness;
+  if (def.codex) return 'codex-cli';
+  return def.provider === 'ollama' ? 'ollama-http' : 'claude-cli';
+}
+
+export function retiredHarnessNotice(model: string, retiredId: string): string {
+  const replacement = retiredHarnessReplacement(retiredId) ?? retiredId;
+  return `Model '${model}' resolves to the retired '${retiredId}' harness; running it on '${replacement}' instead — set "harness": "${replacement}" in its config`;
+}
 
 /** Shared by the models-config and repo-config checks so the two cannot drift. */
 export function builtInHarnessRedeclaredMessage(id: string): string {
