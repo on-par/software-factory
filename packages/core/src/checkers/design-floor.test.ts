@@ -121,6 +121,8 @@ describe('readDesignFloorChanges', () => {
       expect.arrayContaining(['--numstat', '--no-renames', 'origin/main...HEAD', ...DIFF_EXCLUDES]),
     );
     expect(seen[1]).toEqual(expect.arrayContaining(['--numstat', '--no-renames', 'HEAD', ...DIFF_EXCLUDES]));
-    expect(await readDesignFloorChanges('/w', 'origin/main', async () => ({ ok: false, stdout: '' }), DIFF_EXCLUDES)).toBeNull();
+    expect(
+      await readDesignFloorChanges('/w', 'origin/main', async () => ({ ok: false, stdout: '' }), DIFF_EXCLUDES),
+    ).toBeNull();
   });
 });

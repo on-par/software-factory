@@ -21,10 +21,7 @@ export async function readDesignFloorChanges(
     ['git', 'diff', '--numstat', '--no-renames', `${baseRef}...HEAD`, '--', '.', ...excludes],
     worktree,
   );
-  const uncommitted = await run(
-    ['git', 'diff', '--numstat', '--no-renames', 'HEAD', '--', '.', ...excludes],
-    worktree,
-  );
+  const uncommitted = await run(['git', 'diff', '--numstat', '--no-renames', 'HEAD', '--', '.', ...excludes], worktree);
   if (!committed.ok || !uncommitted.ok) return null;
   return [...parseNumstat(committed.stdout), ...parseNumstat(uncommitted.stdout)];
 }
