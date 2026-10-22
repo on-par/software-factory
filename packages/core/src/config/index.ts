@@ -20,7 +20,7 @@ import { resolveStateRoot, STATE_ROOT_ENV } from './state-root.js';
 import { DEFAULT_MAX_SLICES, SLICE_CAP_CEILING } from '../readiness/slice-plan.js';
 import { DEFAULT_MAX_FILES, DEFAULT_TOKEN_BUDGET, type SizeBudget } from '../readiness/size.js';
 import { isOpenCodeZenModel } from './provider-order.js';
-import { DEFAULT_CI_DEADLINE_MS } from '../utils/ci-watch.js';
+import { DEFAULT_CI_DEADLINE_MS } from '../utils/ci-deadline.js';
 import { runConfigSource } from './run-config-source.js';
 import { RunConfigSectionSchema } from './run-section.js';
 
