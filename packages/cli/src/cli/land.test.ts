@@ -389,9 +389,12 @@ describe('cmdLand (direct invocation)', () => {
     h.octokit.rest.pulls.list = vi.fn(async ({ head }: { head?: string }) => ({
       data: head ? [] : [openPrFixture(`on-par:${branch}`)],
     }));
+    const pushed = () => commands.some((c) => c.startsWith('git push'));
     h.octokit.graphql = vi.fn(async (query: string) =>
       query.trimStart().startsWith('query')
-        ? { repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } } }
+        ? {
+            repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: pushed() ? 'CLEAN' : 'DIRTY' } },
+          }
         : {},
     );
     h.setupWorktreeImpl = async (_repoRoot, _branch, path) => {
@@ -411,7 +414,7 @@ describe('cmdLand (direct invocation)', () => {
       expect(commands).toContain('git fetch origin');
       expect(commands).toContain('git merge --no-edit origin/main');
       expect(commands).toContain("git push origin 'contributor/adopted-pr'");
-      expect(ops.watchChecks).toHaveBeenCalledTimes(2);
+      expect(ops.watchChecks).toHaveBeenCalledTimes(1);
       expect(h.octokit.rest.pulls.merge).toHaveBeenCalledWith(expect.objectContaining({ sha: 'abc123' }));
     } finally {
       rmSync(worktree, { recursive: true, force: true });
