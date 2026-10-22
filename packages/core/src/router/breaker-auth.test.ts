@@ -1,8 +1,7 @@
 // Regression for #3232: a rejected credential opens an untimed breaker and writes one provider_auth_rejected.
 
 import { readFileSync } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -45,13 +44,14 @@ const T0 = Date.parse('2026-10-20T00:00:00Z');
 
 let tmp: string;
 let events: string;
+const tempDirs = createTempDirs();
 let t: number;
 let breaker: ProviderBreaker;
 let router: ModelRouter;
 let claudeCalls: number;
 
 beforeEach(async () => {
-  tmp = await mkdtemp(join(tmpdir(), 'breaker-auth-'));
+  tmp = await tempDirs.make('breaker-auth-');
   events = join(tmp, 'events.ndjson');
   t = T0;
   claudeCalls = 0;
@@ -68,7 +68,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await rm(tmp, { recursive: true, force: true });
+  await tempDirs.cleanup();
 });
 
 const run = (model: string) =>
