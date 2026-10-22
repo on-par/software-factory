@@ -171,6 +171,8 @@ const FAILED_TEST_MARKERS: readonly { pattern: RegExp; lines: number }[] = [
   { pattern: /^\s*--- FAIL:\s+\S+/, lines: 12 },
   // pytest short summary: "FAILED tests/test_x.py::test_y - AssertionError"
   { pattern: /^FAILED\s+\S+::\S+/, lines: 8 },
+  // vitest coverage thresholds: "ERROR: Coverage for statements (96.83%) does not meet "glob" threshold (96.9%)"
+  { pattern: /Coverage for \w+ \([\d.]+%\) does not meet .*threshold/, lines: 8 },
 ];
 
 /** npm echoes the script it runs at column 0 (`> node -e "..."`); that text is the command, not its output. */
