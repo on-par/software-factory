@@ -325,6 +325,7 @@ const PO =
   'resolveRoleModel isOpenCodeZenModel subscriptionProviderOf PROVIDER_ORDER_ROLES SUBSCRIPTION_PROVIDERS'.split(' '); // #3334
 const EXTRA_INTERNAL_KEYS = [...JOB_KEYS, ...TAIL, ...MORE, ...STEER, ...STEERED, ...STACK, ...POLICY, ...PO];
 const INTERNAL_API_KEYS = [
+  ...'resolveCompileCommand resolveLintCommands resolveTestsCommand'.split(' '), // #3473
   'openCodeVersion',
   'DEFAULT_CI_DEADLINE_MS',
   'DEFAULT_CI_NO_CHECKS_GRACE_MS',
@@ -443,6 +444,7 @@ const INTERNAL_API_KEYS = [
   'isHarnessCliPresent',
   'lintFactoryConfig',
   'findConfigSchemaErrors',
+  'findUnknownConfigKeyWarnings',
   'formatUnknownCheckerMessage',
   'describePullRequestAccessError',
   'describeReviewConstitutionSource',

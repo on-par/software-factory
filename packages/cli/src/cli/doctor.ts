@@ -35,7 +35,7 @@ import {
   wrapCommandInSandbox,
 } from '@on-par/factory-core/internal';
 
-import { MIN_NODE_MAJOR } from '../node-version.js';
+import { npmCheck, resolveVerifyCommands, verifyCommandChecks, withPathResults } from './doctor-verify.js';
 import { configLintChecks, declaredHarnessChecks, modelsRegistryChecks } from './doctor-config.js';
 import {
   analyzeEventLog,
@@ -592,16 +592,8 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
     }
   }
 
-  checks.push(
-    commandAvailable('npm')
-      ? { name: 'npm', ok: true, detail: 'found on PATH' }
-      : {
-          name: 'npm',
-          ok: false,
-          detail: 'not found on PATH',
-          fix: `install Node.js >= ${MIN_NODE_MAJOR} (which ships npm): https://nodejs.org`,
-        },
-  );
+  const hasPackageJson = repoRoot === null || pathExists(resolve(repoRoot, 'package.json'));
+  checks.push(npmCheck(commandAvailable('npm'), hasPackageJson));
 
   if (repoRoot === null) {
     checks.push({
@@ -912,7 +904,7 @@ export interface DoctorRuntime {
 }
 
 export async function cmdDoctor(
-  opts: { reconcile?: boolean; probeInference?: boolean },
+  opts: { reconcile?: boolean; probeInference?: boolean; json?: boolean },
   rt: DoctorRuntime,
 ): Promise<void> {
   let repoRoot: string | null;
@@ -1018,6 +1010,7 @@ export async function cmdDoctor(
   checks.push(...claudeKeychainChecks(process.platform, rt.probeClaudeKeychain));
   checks.splice(0, checks.length, ...reconcileAgentAuthChecks(checks));
 
+  let verifyRows: ReturnType<typeof withPathResults> = [];
   if (repoRoot !== null) {
     const paths = getFactoryPaths(repoRoot);
     let factoryConfig: FactoryConfig;
@@ -1058,6 +1051,14 @@ export async function cmdDoctor(
     }
     checks.push(
       ...configLintChecks({ constitution, configFile: rt.repoConfigFileFor(repoRoot, paths.config) }, loadError),
+    );
+    const verify = await resolveVerifyCommands(repoRoot);
+    verifyRows = withPathResults(verify.rows, rt.coreOps.isCommandAvailable);
+    checks.push(
+      ...verifyCommandChecks(verify, {
+        requireTests: constitution?.requireTests === true,
+        commandAvailable: rt.coreOps.isCommandAvailable,
+      }),
     );
     checks.push(riskPolicyCheck(repoRoot));
 
@@ -1147,6 +1148,7 @@ export async function cmdDoctor(
     }
   }
 
-  console.log(formatDoctorChecks(checks, { inRepo: repoRoot !== null }));
+  const text = formatDoctorChecks(checks, { inRepo: repoRoot !== null });
+  console.log(opts.json ? JSON.stringify({ ok: !doctorFailed(checks), checks, verify: verifyRows }, null, 2) : text);
   if (doctorFailed(checks)) process.exit(1);
 }
