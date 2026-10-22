@@ -34,6 +34,9 @@ export interface OpenPullRequestEvidence {
 /** A slice PR's state as the queue preflight sees it (ADR-0147). */
 export type SlicePullState = 'open' | 'merged' | 'closed';
 
+/** Reports the in-flight issue holding a file this issue needs, if any. */
+export type LaneFileHoldLookup = (issue: number) => Promise<{ holder: number; file: string } | undefined>;
+
 export interface QueuePreflightOps {
   expectedHeadRepoFullName: string;
   findOpenPR(issue: number): Promise<OpenPullRequestEvidence | undefined>;
@@ -57,7 +60,7 @@ export interface QueuePreflightOps {
   getMergedClosingPr(issue: number): Promise<number | undefined>;
   onDeferred?: (issue: number, message: string) => void;
   /** #3576: the in-flight issue and file this issue was deferred behind, while that claim is still live; undefined when none. */
-  laneFileHold?: (issue: number) => Promise<{ holder: number; file: string } | undefined>;
+  laneFileHold?: LaneFileHoldLookup;
   /** Backoff before each merge-state re-read (#3323). Defaults to setTimeout. */
   sleep?: (ms: number) => Promise<void>;
   /** Current head/base refs of a slice PR; the head SHA is the rebased one after GitHub retargets a layer. */
@@ -75,7 +78,7 @@ export function makeQueuePreflightOps(
     autoMergeStack?: boolean;
     stackMode?: boolean;
     onDeferred?: (issue: number, message: string) => void;
-    laneFileHold?: (issue: number) => Promise<{ holder: number; file: string } | undefined>;
+    laneFileHold?: LaneFileHoldLookup;
     sleep?: (ms: number) => Promise<void>;
   },
 ): QueuePreflightOps {
@@ -369,10 +372,11 @@ export async function preflightQueuedIssue(
 ): Promise<QueuePreflightDecision> {
   if (issue.labels.includes('factory:in-progress')) return { kind: 'defer' };
 
-  let hold: { holder: number; file: string } | undefined;
+  let hold: Awaited<ReturnType<LaneFileHoldLookup>>;
   try {
     hold = await deps.laneFileHold?.(issue.number);
-  } catch {
+  } catch (err) {
+    deps.onDeferred?.(issue.number, `lane-file hold lookup failed: ${errorDetail(err)}`);
     hold = undefined; // a failed lookup builds; runIssue's lane guard re-checks after PLAN
   }
   if (hold) {
