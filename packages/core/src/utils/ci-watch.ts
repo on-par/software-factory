@@ -3,6 +3,7 @@ import type { Octokit } from '@octokit/rest';
 import { runCommand } from './command-runner.js';
 import { commitStatusCount, detectNoCiConfigured } from './ci-watch-no-ci.js';
 import { type RequiredWaitingFor, readRequiredState, resolveRequiredContexts } from './ci-watch-required.js';
+import { DEFAULT_CI_DEADLINE_MS } from './ci-deadline.js';
 
 export { detectNoCiConfigured };
 
@@ -16,7 +17,7 @@ export { detectNoCiConfigured };
  *  rejects. */
 export type CiOutcome = 'success' | 'failure' | 'timeout' | 'no-checks';
 
-export const DEFAULT_CI_DEADLINE_MS = 600_000;
+export { DEFAULT_CI_DEADLINE_MS };
 export const DEFAULT_CI_NO_CHECKS_GRACE_MS = 90_000;
 const DEFAULT_CI_INITIAL_INTERVAL_MS = 15_000;
 const DEFAULT_CI_MAX_INTERVAL_MS = 60_000;

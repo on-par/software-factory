@@ -155,6 +155,8 @@ export interface RunRequest {
   modelPins: EffectiveModelPins;
   codexDisabled: boolean;
   skipCI: boolean;
+  /** SHIP's CI watch deadline in ms (#3569); unset = 10 min. */
+  ciDeadlineMs?: number;
   failover: AutoFailoverSettings;
   efficiency: { maxReworkRounds: number; fastPath: boolean };
   /** Sandbox containment already resolved against this run's worktree/repoRoot. */
@@ -1199,7 +1201,7 @@ async function runIssueOnce(
     }
     const readyMsg = ship.alreadyDelivered
       ? `already delivered${ship.prNumber !== undefined ? ` by merged PR #${ship.prNumber}` : ' — branch already landed on main'}`
-      : `PR #${ship.prNumber} ${ship.draft ? 'left as draft' : 'ready for review'}`;
+      : `PR #${ship.prNumber} ${ship.draft ? 'left as draft' : 'ready for review'}${ship.ciPending ? ' (CI pending)' : ''}`;
     log('ready', pinNote ? `${readyMsg} (${pinNote})` : readyMsg);
     await ports.writeLocalRunReport?.({ outcome: 'ready', route, branch: request.branch, reworkRounds });
     return {
@@ -1209,6 +1211,7 @@ async function runIssueOnce(
       reworkRounds,
       prNumber: ship.prNumber,
       ...(ship.draft ? { draft: true } : {}),
+      ...(ship.ciPending ? { ciPending: true } : {}),
       ...(planSlice ? { slice: { index: planSlice.index, count: planSlice.plan.slices.length } } : {}),
     };
   } catch (err) {
