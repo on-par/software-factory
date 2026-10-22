@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { EventKind } from '../events/kinds.js';
+import type { ReviewFloorRuleSet } from '../review/floor.js';
 import type { ModelRouter } from '../router/index.js';
 import type { ProcessGroupTracker } from '../environment/process-groups.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
@@ -52,6 +53,8 @@ export interface CheckerContext {
   /** Parent ref of a stacked slice branch (e.g. 'slice-1'); when set, base-ref checkers diff against it
    *  instead of origin/main, with no fallback (#2716). Set by checkPhase. */
   parentBaseRef?: string;
+  /** Review floor rules (packaged + repo classifier overrides, #1723); design_smells skips a class A diff (#3374). Defaults to DEFAULT_REVIEW_FLOOR_RULES. */
+  reviewFloorRules?: ReviewFloorRuleSet;
   /** Set by runAllCheckers from the resolved constitution — the single source of the standards text */
   constitutionBody?: string;
   packageJson?: PackageJson | null;

@@ -369,6 +369,7 @@ export function buildRunRequest({
     sizeGateMode,
     maxSlices,
     sizeBudget: resolveSizeGateBudget(factoryConfig),
+    reviewFloorRules: resolveReviewFloorRules(repoConfig),
     prClassifier: classifierPolicy.enabled
       ? {
           rules: resolveReviewFloorRules(repoConfig),

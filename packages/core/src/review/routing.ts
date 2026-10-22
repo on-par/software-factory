@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { BASE_REF_CANDIDATES, defaultDiffRunner, type DiffRunner } from '../checkers/design-smells.js';
 import {
   computeReviewFloor,
+  parseNumstat,
   type ReviewClass,
   type ReviewFloorFiredRule,
   type ReviewFloorPathChange,
@@ -13,6 +14,8 @@ import {
   type ReviewFloorRuleSet,
 } from './floor.js';
 import type { PrShadowVerdict } from './classifier.js';
+
+export { parseNumstat } from './floor.js';
 
 /** The classifier's pre-SHIP decision for one run (#1724). */
 export interface ReviewRouting {
@@ -30,18 +33,6 @@ export interface ReviewRouting {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-/** Parse `git diff --numstat` output. A binary file's `-` counts become NaN, which
- *  computeReviewFloor treats as invalid input ⇒ class C (fail closed). */
-export function parseNumstat(stdout: string): ReviewFloorPathChange[] {
-  const changes: ReviewFloorPathChange[] = [];
-  for (const line of stdout.split('\n')) {
-    if (line.trim() === '') continue;
-    const [added = '', removed = '', ...rest] = line.split('\t');
-    changes.push({ path: rest.join('\t'), added: Number(added), removed: Number(removed) });
-  }
-  return changes;
 }
 
 function countLines(text: string): number {

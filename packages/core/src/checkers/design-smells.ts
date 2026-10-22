@@ -7,6 +7,7 @@ import { z } from 'zod';
 
 import { readAdrContext, renderAdrConstraints } from '../adr/index.js';
 import { readDesignArtifact, renderDesignGrounding } from '../design/index.js';
+import { designFloorSkip } from './design-floor.js';
 import type { ModelRouter } from '../router/index.js';
 import type { CheckerOutput } from '../types/index.js';
 import { runVerificationCommand as runCommand } from './run-command.js';
@@ -388,7 +389,7 @@ export async function designSmellsChecker(
   ctx: CheckerContext,
   router: ModelRouter,
   timeoutSeconds?: number,
-  deps?: { collectDiff?: typeof collectDesignDiff; env?: NodeJS.ProcessEnv },
+  deps?: { collectDiff?: typeof collectDesignDiff; env?: NodeJS.ProcessEnv; diffRunner?: DiffRunner },
 ): Promise<CheckerOutput> {
   if (!designSmellsEnabled(deps?.env)) {
     return { checker: DESIGN_SMELLS_CHECKER, result: 'SKIP', details: 'disabled by FACTORY_DESIGN_SMELLS=0' };
@@ -410,6 +411,9 @@ export async function designSmellsChecker(
       details: `no diff against ${diff.baseRef} — nothing to critique`,
     };
   }
+
+  const floorSkip = await designFloorSkip(ctx, diff.baseRef ?? 'HEAD', deps?.diffRunner ?? defaultDiffRunner);
+  if (floorSkip) return { checker: DESIGN_SMELLS_CHECKER, result: 'SKIP', details: floorSkip };
 
   const specText = await readFile(ctx.specPath, 'utf-8').catch(() => '(no spec)');
 
