@@ -1,24 +1,41 @@
 // src/environment/dotnet.ts — .NET worktree detection and runtime env for lanes.
-// Root-marker detection only; replaceable by toolchain discovery (#1896).
+// Bounded nested detection (root + 3 levels); replaceable by toolchain discovery (#1896).
 
-import { readdirSync } from 'node:fs';
+import { readdirSync, type Dirent } from 'node:fs';
+import { join } from 'node:path';
 
-const DOTNET_MARKER_EXTENSIONS = ['.sln', '.slnx', '.csproj'];
+const DOTNET_MARKER_EXTENSIONS = ['.sln', '.slnx', '.csproj', '.fsproj', '.vbproj'];
+const DOTNET_SKIP_DIRS = new Set(['node_modules', 'bin', 'obj', '.git']);
+const DOTNET_MAX_DEPTH = 3;
 
-/** True when `root` directly contains a *.sln, *.slnx, *.csproj or global.json file.
- *  Never throws: a missing or unreadable directory is not a .NET worktree. */
-export function isDotnetWorktree(root: string): boolean {
-  let entries;
-  try {
-    entries = readdirSync(root, { withFileTypes: true });
-  } catch {
-    return false;
+/** True when `root`, or a directory up to 3 levels below it, contains a *.sln, *.slnx, *.csproj,
+ *  *.fsproj, *.vbproj or global.json file (case-insensitive). node_modules, bin, obj and .git are
+ *  skipped and symlinks are not followed. The one .NET detector for the lane env and egress (#3472).
+ *  Never throws: a missing or unreadable directory is not .NET. */
+export function detectDotnetProject(root: string): boolean {
+  if (root === '') return false;
+  let level: string[] = [root];
+  for (let depth = 0; depth <= DOTNET_MAX_DEPTH && level.length > 0; depth++) {
+    const next: string[] = [];
+    for (const dir of level) {
+      let entries: Dirent[];
+      try {
+        entries = readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const e of entries) {
+        if (e.isFile()) {
+          const name = e.name.toLowerCase();
+          if (name === 'global.json' || DOTNET_MARKER_EXTENSIONS.some((ext) => name.endsWith(ext))) return true;
+        } else if (e.isDirectory() && !DOTNET_SKIP_DIRS.has(e.name.toLowerCase())) {
+          next.push(join(dir, e.name));
+        }
+      }
+    }
+    level = next;
   }
-  return entries.some((e) => {
-    if (!e.isFile()) return false;
-    const name = e.name.toLowerCase();
-    return name === 'global.json' || DOTNET_MARKER_EXTENSIONS.some((ext) => name.endsWith(ext));
-  });
+  return false;
 }
 
 /** What dotnetEnv applied for a .NET worktree, and which wanted keys the parent env already set. */
@@ -46,7 +63,7 @@ export function dotnetEnvReport(
   parentEnv: Record<string, string | undefined> = process.env,
   runId?: string,
 ): DotnetEnvReport | null {
-  if (!isDotnetWorktree(root)) return null;
+  if (!detectDotnetProject(root)) return null;
   const wanted: Record<string, string> = { DOTNET_TieredPGO: '0', MSBUILDDISABLENODEREUSE: '1' };
   if (runId) wanted.SharedCompilationId = `factory-${runId}`;
   wanted.DiffEngine_Disabled = 'true';

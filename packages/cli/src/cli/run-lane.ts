@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { parkReasonFor } from '@on-par/factory-core';
 import type { LanePausedPayload, getFactoryPaths, ParkPayload, ParkReason, RunOutcome } from '@on-par/factory-core';
 import { formatLoadHold, logEvent, PARKED_LABEL, parkPayload } from '@on-par/factory-core/internal';
+import type { Octokit } from '@octokit/rest';
 import type {
   LoadGuardDecision,
   QueueClaim,
@@ -13,6 +14,7 @@ import type {
 } from '@on-par/factory-core/internal';
 
 import { BASE_HOLD_CI_RECHECK_MS, type BaseHoldDecision, writeBaseHold } from './base-hold.js';
+import { laneParkCommenter } from './lane-park-comment.js';
 import { waitForMerge } from './land.js';
 import { AwaitingReviewError } from './land-pr.js';
 import { releaseKeepOnRequeue } from './worktree-keep.js';
@@ -22,6 +24,12 @@ import { type ChildEnqueueResult, queueDecomposedChildren } from './run-lane-dec
 import { shipRuntime } from './ship-runtime.js';
 
 export type RunLaneDeps = {
+  /** Octokit for the park comment of a park raised outside runIssue (#3534). Absent = no comment. */
+  octokit?: () => Octokit;
+  /** The run id written to the park comment's `run:` line. Defaults to '-'. */
+  runId?: string;
+  /** Returns the park SHA for a branch. The default rejects, which gives `park-sha: -`. */
+  readParkSha?: (branch: string) => Promise<string>;
   /** Lane circuit breaker (#1918): pause after this many consecutive parks with the same
    *  non-empty failure signature. 0 or absent = off; cmdRun wires the resolved
    *  budget.laneBreakerThreshold. */
@@ -126,6 +134,9 @@ export async function runLane(
     now = () => new Date(),
     laneBreakerThreshold = 0,
     commentIssue = async () => {},
+    octokit: getOctokit,
+    runId = '-',
+    readParkSha = () => Promise.reject(new Error('no park sha reader')),
   } = deps;
   let streak: { signature: string; firstIssue: number; failingChecks: string[]; count: number } | null = null;
   let merged = 0;
@@ -160,6 +171,10 @@ export async function runLane(
       releaseKeepOnRequeue(paths.worktreeKeeps, issue, (m) => emitEvent(paths.events, 'warn', issue, m, { lane }));
     await sweepFinished(issue).catch(() => {});
   };
+  // A park raised outside runIssue upserts the issue park comment (#3534); fail-closed, never changes lane flow.
+  const postParkComment = laneParkCommenter({ getOctokit, ghRepo, repoRoot, runId, lane, readParkSha }, (issue, m) =>
+    emitEvent(paths.events, 'warn', issue, m, { lane }),
+  );
   // A parked release adds factory:parked (#3424). Log the clean park only once the label
   // landed; a rejected add is surfaced as a fail event naming the issue and label (#3425).
   const parkAndSettle = async (issue: number, parkedMsg: string, park: ParkPayload): Promise<boolean> => {
@@ -229,6 +244,7 @@ export async function runLane(
     const parkIssue = async (reason: string): Promise<void> => {
       emitEvent(paths.events, 'escalate', issue, reason, { lane });
       const msg = `issue #${issue} parked (${reason}); lane '${lane}' continuing, ${await remainingAfter(i)} issue(s) remaining`;
+      await postParkComment(issue, 'escalate', reason, decision.kind === 'adopt' ? decision.branch : undefined);
       // A preflight-parked issue may still have a stale worktree from a prior run; the reap
       // is fail-closed and must never change lane flow.
       await reapWorktree(issue).catch(() => {});
@@ -269,9 +285,10 @@ export async function runLane(
       continue;
     }
     const layer = decision.kind === 'adopt' ? decision.stackLayer : undefined;
+    const sliceOutcome: { value?: RunOutcome } = {};
+    let landBranch = decision.kind === 'adopt' ? decision.branch : undefined;
     let landing: string | undefined;
     try {
-      const sliceOutcome: { value?: RunOutcome } = {};
       const branch =
         decision.kind === 'adopt'
           ? decision.branch
@@ -291,6 +308,7 @@ export async function runLane(
                 },
               ),
             );
+      landBranch = branch;
       const shipped = sliceOutcome.value;
       if (shipped?.state === 'released' && shipped.reason === 'stack-wait') {
         // ADR-0161: the slice below awaits review, so release the issue and do not park (#3367).
@@ -458,6 +476,10 @@ export async function runLane(
       const msg = `issue #${issue} parked (${reason})${logSuffix ? `; ${logSuffix}` : ''}; ${
         tripped ? `lane '${lane}' paused (lane breaker)` : `lane '${lane}' continuing`
       }, ${await remainingAfter(i)} issue(s) remaining`;
+      // runIssue's terminalParked already wrote the comment for a run it parked (#2314).
+      if (sliceOutcome.value?.state !== 'parked') {
+        await postParkComment(issue, reason, err instanceof Error ? err.message : String(err), landBranch);
+      }
       // Remove the parked lane's own worktree so a parked issue stops leaving a sibling
       // checkout behind (#1007); fail-closed and never allowed to change lane flow.
       if (landing !== undefined) await closeParkedPr(issue, landing, reason).catch(() => {});

@@ -41,6 +41,7 @@ export function buildCommitOnlyPrompt(opts: {
   appBaseUrl?: string;
   designGrounding?: string;
   lintCommands?: readonly LintCommand[];
+  verifyCommand?: string;
   previousAttempt?: string;
 }): string {
   const {
@@ -52,6 +53,7 @@ export function buildCommitOnlyPrompt(opts: {
     appBaseUrl,
     designGrounding,
     lintCommands,
+    verifyCommand,
     previousAttempt,
   } = opts;
   return `Implement issue #${issue} from the frozen spec below (also saved at ${specPath}). It is the approved plan: follow it and stay within its scope, with no unrelated refactors or drive-by changes.
@@ -66,7 +68,7 @@ ${spec}
 ${previousAttempt ? `${previousAttempt}\n\n` : ''}## Rules
 - ${READ_BEFORE_EDIT_RULE}
 - Match the surrounding code style. Add or update the tests in the spec's Tests section.
-- ${verifyRule(lintCommands)}
+- ${verifyRule(lintCommands, verifyCommand)}
 - ${MAX_LINES_OVERRIDE_RULE}
 - Commit atomically: one commit per independently testable functional change, with a clear conventional message. Never mix unrelated functional changes in one commit. A single-slice task yields exactly ONE commit.
 - Do NOT push, do NOT open a pull request, do NOT merge. CHECK and SHIP run next.
@@ -86,10 +88,22 @@ export function buildClaudePrompt(opts: {
   appBaseUrl?: string;
   designGrounding?: string;
   lintCommands?: readonly LintCommand[];
+  verifyCommand?: string;
   previousAttempt?: string;
 }): string {
   const { previousAttempt } = opts;
-  const { issue, branch, specPath, constitutionCtx, skipCI, appPort, appBaseUrl, designGrounding, lintCommands } = opts;
+  const {
+    issue,
+    branch,
+    specPath,
+    constitutionCtx,
+    skipCI,
+    appPort,
+    appBaseUrl,
+    designGrounding,
+    lintCommands,
+    verifyCommand,
+  } = opts;
   return `Run fully autonomously in headless mode for issue #${issue}, BUILD phase.
 You are ALREADY inside the isolated git worktree for branch ${branch} (cwd). Nobody is watching: never pause for permission or input.
 
@@ -100,7 +114,7 @@ The frozen, approved spec is at ${specPath}. Read it and follow it as the plan. 
 ${UNTRUSTED_ISSUE_BODY_NOTICE}
 
 ${previousAttempt ? `${previousAttempt}\n\n` : ''}- ${READ_BEFORE_EDIT_RULE}
-- ${verifyRule(lintCommands)}
+- ${verifyRule(lintCommands, verifyCommand)}
 - ${MAX_LINES_OVERRIDE_RULE}
 - Commit atomically: one commit per independently testable functional change, with a clear conventional message. Never mix unrelated functional changes in one commit.
 - Do NOT merge (the factory merges). Your session ends when you end your turn, so do not stop until: (1) branch ${branch} is pushed, (2) an open PR exists with 'Closes #${issue}' in its body, ${skipCI ? '(3) local verify passes (CI is intentionally skipped: do not block on GitHub Actions CI or escalate if CI cannot run), (4) the PR is ready.' : '(3) CI is green, (4) the PR is ready.'}
@@ -115,11 +129,15 @@ const VERIFY_RULE_BASE =
   'otherwise the test script (`npm test`) or pytest, plus any verify command the constitution names. ' +
   'Fix failures before finishing and report the exact command and its output.';
 
-// Names the lint checker's commands (resolveLintCommands) when the repo has no verify.sh (#2829).
-function verifyRule(lintCommands: readonly LintCommand[] = []): string {
-  if (lintCommands.length === 0) return VERIFY_RULE_BASE;
+// Names the lint checker's commands (resolveLintCommands) when the repo has no verify.sh (#2829);
+// a verifyCommand (verify.ps1-only repo, #3471) replaces the base with the pwsh command CHECK runs.
+function verifyRule(lintCommands: readonly LintCommand[] = [], verifyCommand?: string): string {
+  const base = verifyCommand
+    ? `Verify with the command CHECK runs: \`${verifyCommand}\` (this repo's gate is scripts/verify.ps1), plus any verify command the constitution names. Fix failures before finishing and report the exact command and its output.`
+    : VERIFY_RULE_BASE;
+  if (lintCommands.length === 0) return base;
   const cmds = lintCommands.map((c) => `\`${c.argv.join(' ')}\``).join(' and ');
-  return `${VERIFY_RULE_BASE} Also run ${cmds} (CHECK's lint checker runs them) and fix their failures before finishing.`;
+  return `${base} Also run ${cmds} (CHECK's lint checker runs them) and fix their failures before finishing.`;
 }
 
 function promptTail(appPort?: number, appBaseUrl?: string, designGrounding?: string): string {

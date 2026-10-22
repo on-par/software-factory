@@ -51,6 +51,8 @@ export interface ShipResult {
   headSha?: string;
   /** Draft mode (#3449): mark-ready skipped; callers must not merge. */
   draft?: boolean;
+  /** CI watch timed out before a verdict (#3569): the PR was left as draft. */
+  ciPending?: boolean;
 }
 
 export async function shipPhase(opts: Parameters<typeof shipPhaseImpl>[0]): Promise<ShipResult> {
@@ -112,6 +114,8 @@ async function shipPhaseImpl(opts: {
   recordedRemoteSha?: string;
   /** SHIP re-entry after a CI rework round (#2816): same open PR, plain push, watch the pushed SHA. */
   reentry?: { prNumber: number; previousHeadSha?: string };
+  /** CI watch deadline (#3569); default DEFAULT_CI_DEADLINE_MS. */
+  ciDeadlineMs?: number;
 }): Promise<ShipResult> {
   const {
     issue,
@@ -445,6 +449,7 @@ async function shipPhaseImpl(opts: {
     } catch {}
 
   let ciOutcome: InfraRerunOutcome | undefined;
+  const ciDeadlineMs = opts.ciDeadlineMs ?? DEFAULT_CI_DEADLINE_MS;
 
   // Watch CI (best-effort)
   if (watchCI) {
@@ -456,7 +461,7 @@ async function shipPhaseImpl(opts: {
         repo: repoName,
         ref: watchRef,
         rerun,
-        deadlineMs: DEFAULT_CI_DEADLINE_MS,
+        deadlineMs: ciDeadlineMs,
         probeNoCi: true,
         requiredChecks: { branch: SHIP_BASE_BRANCH },
         onProgress: ({ total, completed, pending, remainingMs, waitingFor }) =>
@@ -496,15 +501,17 @@ async function shipPhaseImpl(opts: {
         // Log type must stay 'ship': 'timeout' is a terminal event kind in the CLI.
         log(
           'ship',
-          `CI did not finish within ${DEFAULT_CI_DEADLINE_MS / 60_000} min; ${opts.draft ? 'leaving PR as draft' : 'marking PR ready anyway'}`,
+          `CI pending for PR #${prNumber}: CI did not finish within ${ciDeadlineMs / 60_000} min; leaving PR as draft`,
         );
       }
     } catch {}
   }
 
+  const ciPending = ciOutcome === 'timeout';
+
   // Mark ready for review (if draft). REST pulls.update ignores `draft`;
   // undrafting requires the markPullRequestReadyForReview GraphQL mutation.
-  if (opts.draft) {
+  if (opts.draft || ciPending) {
     try {
       const { data: pr } = await octokit.rest.pulls.get({ owner, repo: repoName, pull_number: prNumber });
       if (!pr.draft) log('ship', `PR #${prNumber} is already open and not a draft; draft mode leaves it as is`);
@@ -525,13 +532,15 @@ async function shipPhaseImpl(opts: {
   }
 
   const noChecks = ciOutcome === 'no-checks' ? ' (CI skipped: no checks found)' : '';
-  log('ready', `PR #${prNumber} ${opts.draft ? 'left as draft' : 'ready for review'}${noChecks}`);
+  const readyLabel = opts.draft || ciPending ? `left as draft${ciPending ? ' (CI pending)' : ''}` : 'ready for review';
+  log('ready', `PR #${prNumber} ${readyLabel}${noChecks}`);
   return {
     ok: true,
     prNumber,
     ...(ciOutcome === undefined ? {} : { ciOutcome }),
     ...(headSha ? { headSha } : {}),
-    ...(opts.draft ? { draft: true } : {}),
+    ...(opts.draft || ciPending ? { draft: true } : {}),
+    ...(ciPending ? { ciPending: true } : {}),
   };
 }
 

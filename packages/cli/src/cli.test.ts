@@ -2364,8 +2364,9 @@ describe('cli', () => {
     expect(trace).toEqual(['watch', 'lock:acquire', 'merge', 'lock:release']);
   });
 
-  it('fetches and syncs main under lock, then releases it for the DIRTY-path re-watch', async () => {
+  it('fetches and syncs main under lock before the first watch, then watches outside the lock', async () => {
     const trace: string[] = [];
+    let pushed = false;
     const withLock = async <T>(fn: () => Promise<T>): Promise<T> => {
       trace.push('lock:acquire');
       try {
@@ -2380,7 +2381,7 @@ describe('cli', () => {
     };
     const octokit: any = {
       graphql: async () => ({
-        repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: 'DIRTY' } },
+        repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: pushed ? 'CLEAN' : 'DIRTY' } },
       }),
       rest: {
         pulls: {
@@ -2401,7 +2402,10 @@ describe('cli', () => {
       if (command.startsWith('git diff --diff-filter=A')) return { stdout: '' };
       if (command === 'git fetch origin') trace.push('fetch');
       else if (command === 'git merge --no-edit origin/main') trace.push('merge-main');
-      else if (command.startsWith('git push')) trace.push('push');
+      else if (command.startsWith('git push')) {
+        pushed = true;
+        trace.push('push');
+      }
       return { stdout: '' };
     };
 
@@ -2426,7 +2430,6 @@ describe('cli', () => {
     });
 
     expect(trace).toEqual([
-      'watch',
       'lock:acquire',
       'fetch',
       'merge-main',

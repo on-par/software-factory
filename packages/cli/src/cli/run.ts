@@ -316,6 +316,12 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
             ...planned.deps,
             ...(notifier ? { emitEvent: withParkNotify(logEvent, notifier) } : {}),
             laneBreakerThreshold,
+            octokit: opts.localQueue === true ? undefined : () => rt.getOctokit(),
+            runId,
+            readParkSha: (branch) =>
+              rt.shellOps
+                .exec(`git rev-parse --verify ${JSON.stringify(`refs/remotes/origin/${branch}`)}`, { cwd: repoRoot })
+                .then((r) => r.stdout.trim()),
             activeIssues: inFlightIssues,
             loadGuard: opts.localQueue === true ? undefined : () => evaluateLoadGuard(loadGuardPolicy, readHostLoad()),
             baseHoldGate:
