@@ -148,6 +148,10 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
       "Override .factory/config.yaml and FACTORY_STOP_AT for this run's usage threshold",
     )
     .option('--usage-poll <seconds>', "Override .factory/config.yaml and FACTORY_USAGE_POLL for this run's usage poll")
+    .option(
+      '--notify <cmd>',
+      'Shell command spawned once per park and once when the queue drains, with a JSON summary on stdin; overrides FACTORY_NOTIFY_CMD',
+    )
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .action(
       (opts: {
@@ -157,6 +161,7 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
         usageThreshold?: string;
         usagePoll?: string;
         branchPrefix?: string;
+        notify?: string;
       }) => handlers.cmdRun(opts),
     );
 
@@ -180,6 +185,10 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
       "Override .factory/config.yaml and FACTORY_RESUME_AT for this run's usage threshold",
     )
     .option('--usage-poll <seconds>', "Override .factory/config.yaml and FACTORY_USAGE_POLL for this run's usage poll")
+    .option(
+      '--notify <cmd>',
+      'Shell command spawned once per park and once when the queue drains, with a JSON summary on stdin; overrides FACTORY_NOTIFY_CMD',
+    )
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .action(async (opts) => {
       await handlers.cmdSupervise(opts);

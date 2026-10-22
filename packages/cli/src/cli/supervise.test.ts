@@ -1,6 +1,7 @@
 // packages/cli/src/cli/supervise.test.ts — factory supervise tests, moved from cli-commands.test.ts and cli.test.ts (#2797)
 
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { resolveBranchPrefix } from '@on-par/factory-core/internal';
 import { describe, expect, it } from 'vitest';
@@ -44,6 +45,14 @@ describe('cli', () => {
       expect(calls[0][0]).toEqual(expect.stringMatching(/^sf\/\d+-/));
       expect(calls[0][1]).toContain('-factory-sf-');
     });
+    it('forwards --notify to the run it starts', async () => {
+      const file = join(paths().state, 'notify.ndjson');
+      writeFileSync(paths().queue, 'app 1\n');
+      const res = await runMain('supervise', '--now', '--local-queue', '--notify', `cat >> ${file}`);
+      expect(res.exited).toBe(false);
+      expect(readFileSync(file, 'utf-8')).toContain('"kind":"drain"');
+    });
+
     it('exits 2 when the queue is empty', async () => {
       writeFileSync(paths().queue, '# just comments\n');
       const res = await runMain('supervise', '--now', '--local-queue');

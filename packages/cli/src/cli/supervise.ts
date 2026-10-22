@@ -26,6 +26,7 @@ export interface SuperviseOptions {
   usageThreshold?: string;
   usagePoll?: string;
   branchPrefix?: string;
+  notify?: string;
 }
 
 /** index.ts's helpers for `factory supervise`, built at call time so main() deps injection reaches the handler. */
@@ -106,6 +107,7 @@ export async function cmdSupervise(opts: SuperviseOptions, rt: SuperviseRuntime)
             usageThreshold: opts.usageThreshold,
             usagePoll: opts.usagePoll,
             branchPrefix: opts.branchPrefix,
+            notify: opts.notify,
           }),
         pendingCount: countPending,
       }),
