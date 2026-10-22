@@ -81,6 +81,15 @@ export interface ProviderEventExtra {
   providerBreakerClose?: ProviderBreakerClosePayload;
 }
 
+/** The provider-breaker fields present on `extra`, so each sink copies them in one place. */
+export function pickProviderEvent(extra?: ProviderEventExtra): ProviderEventExtra {
+  return {
+    ...(extra?.providerCapped ? { providerCapped: extra.providerCapped } : {}),
+    ...(extra?.providerAuthRejected ? { providerAuthRejected: extra.providerAuthRejected } : {}),
+    ...(extra?.providerBreakerClose ? { providerBreakerClose: extra.providerBreakerClose } : {}),
+  };
+}
+
 /** Payload of a `provider_capped` event (#3337): a usage cap opened the provider's breaker until `cappedUntil`. */
 export interface ProviderCappedPayload {
   provider: string;

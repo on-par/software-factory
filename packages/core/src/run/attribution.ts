@@ -4,11 +4,9 @@ import type {
   EventKind,
   FlakyTestsPayload,
   ParkPayload,
-  ProviderAuthRejectedPayload,
-  ProviderBreakerClosePayload,
-  ProviderCappedPayload,
   StewardTriggeredPayload,
 } from '../events/kinds.js';
+import type { ProviderEventExtra } from '../events/payloads.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
 import type {
   CheckFailureInfo,
@@ -24,7 +22,7 @@ import type { RunPorts } from './run-issue.js';
 export type RunLogFn = (
   type: EventKind,
   msg: string,
-  extra?: {
+  extra?: ProviderEventExtra & {
     failoverReason?: FailoverReason;
     model?: string;
     tokens?: { input: number; output: number };
@@ -36,9 +34,6 @@ export type RunLogFn = (
     stewardTriggered?: StewardTriggeredPayload;
     flakyTests?: FlakyTestsPayload;
     park?: ParkPayload;
-    providerCapped?: ProviderCappedPayload;
-    providerAuthRejected?: ProviderAuthRejectedPayload;
-    providerBreakerClose?: ProviderBreakerClosePayload;
     attribution?: RunAttribution;
   },
 ) => void;

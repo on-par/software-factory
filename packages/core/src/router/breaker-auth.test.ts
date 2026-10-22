@@ -1,14 +1,14 @@
 // Regression for #3232: a rejected credential fails over, holds the provider's breaker open, and is announced once.
 
 import { appendFileSync, readFileSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { HarnessError } from '../harness/index.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { authBreakerGate, providerFailureRecorder } from '../run/provider-failure-recorder.js';
 import type { RunLogFn } from '../run/attribution.js';
 import { logEvent } from '../utils/index.js';
@@ -40,14 +40,11 @@ const models: ModelsConfig = {
 };
 const routes: RoutesConfig = { version: 1, routes: { plan: { tier: 'boss', description: 'stub' } } };
 
-const dirs: string[] = [];
-afterEach(async () => {
-  for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true });
-});
+const tmp = createTempDirs();
+afterEach(() => tmp.cleanup());
 
 async function setup() {
-  const dir = await mkdtemp(join(tmpdir(), 'breaker-auth-'));
-  dirs.push(dir);
+  const dir = await tmp.make('breaker-auth-');
   const authFile = join(dir, '.credentials.json');
   await writeFile(authFile, '{"key":"one"}');
   const eventsFile = join(dir, 'events.ndjson');
