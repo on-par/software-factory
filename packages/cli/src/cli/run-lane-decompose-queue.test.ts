@@ -12,6 +12,7 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import { IssueDecomposedError, laneQueueDeps } from './index.js';
+import { queueDecomposedChildren } from './run-lane-decompose.js';
 import { runLane } from './run-lane.js';
 
 const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
@@ -151,5 +152,62 @@ describe('runLane decomposition on the GitHub queue (#3539)', () => {
     expect(env.events.some((e) => e.type === 'decompose_filed')).toBe(false);
     expect(env.events.find((e) => e.message.startsWith('lane complete'))?.message).toContain('0 decomposed');
     expect(run.shipped).toContain(B);
+  });
+});
+
+describe('queueDecomposedChildren (#3539)', () => {
+  const failEvents = () => {
+    const events: Array<{ type: string; issue: unknown; message: string; lane: unknown }> = [];
+    const emitEvent: any = (_p: string, type: string, issue: unknown, message: unknown, extra: { lane?: unknown }) => {
+      events.push({ type, issue, message: String(message), lane: extra?.lane });
+    };
+    return { events, emitEvent };
+  };
+
+  it('a failed shift of later order labels emits a fail on the parent and is not clean, though every child queued', async () => {
+    const { events, emitEvent } = failEvents();
+    const res = await queueDecomposedChildren(
+      async (_parent, children) => ({
+        results: children.map((issue, i) => ({ issue, outcome: 'queued' as const, position: 5 + i })),
+        placement: 'tail',
+        detail: 'remove boom',
+      }),
+      P,
+      [A, B],
+      'bugfix',
+      paths.events,
+      emitEvent,
+    );
+
+    expect(res).toEqual({ unwritten: [], clean: false });
+    expect(events).toEqual([
+      {
+        type: 'fail',
+        issue: P,
+        lane: 'bugfix',
+        message: `decomposed children of #${P} queued at the tail of lane 'bugfix', not behind #${P}: shifting later factory:order labels failed (remove boom)`,
+      },
+    ]);
+  });
+
+  it('a thrown enqueue emits one fail on the parent naming every child and leaves them all unwritten', async () => {
+    const { events, emitEvent } = failEvents();
+    const res = await queueDecomposedChildren(
+      async () => {
+        throw new Error('github 502');
+      },
+      P,
+      [A, B, C],
+      'bugfix',
+      paths.events,
+      emitEvent,
+    );
+
+    expect(res).toEqual({ unwritten: [A, B, C], clean: false });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'fail', issue: P, lane: 'bugfix' });
+    expect(events[0]?.message).toContain(`decomposed children #${A}, #${B}, #${C} of #${P} not queued`);
+    expect(events[0]?.message).toContain(`could not add label '${QUEUED_LABEL}' on lane 'bugfix'`);
+    expect(events[0]?.message).toContain('github 502');
   });
 });
