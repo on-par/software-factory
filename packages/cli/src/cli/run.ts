@@ -55,6 +55,7 @@ import type {
 } from './index.js';
 import { runEndOfRunKpiSnapshot } from './kpi-sweep.js';
 import { waitForMerge } from './land.js';
+import { DRAIN_MESSAGE, createNotifier, resolveNotifyCommand, withParkNotify } from './notify.js';
 import { runLane } from './run-lane.js';
 import { restackFromSlicePlan } from './run-restack.js';
 import { writeRunFlagOverrides } from './run-flags.js';
@@ -69,6 +70,7 @@ export interface RunOptions {
   usageThreshold?: string;
   usagePoll?: string;
   branchPrefix?: string;
+  notify?: string;
 }
 
 /** index.ts's helpers for `factory run`, built at call time so main() deps injection reaches the handler. */
@@ -133,6 +135,9 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
       logEvent(paths.events, 'stopped', 'all', msg);
       return;
     }
+    const notifier = createNotifier(resolveNotifyCommand(opts.notify, process.env), {
+      onError: (m) => logEvent(paths.events, 'warn', '-', m),
+    });
     writeRunFlagOverrides(paths.runFlags, { autoMerge: opts.autoMerge, prClassifier: opts.prClassifier });
     const ghRepo = await rt.getGitHubRepo();
     const factoryConfig = rt.configLoaders.loadFactoryConfigForRepo(paths.config);
@@ -306,6 +311,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
         pids.push(
           runLane(planned.lane, planned.issues, repoRoot, ghRepo, paths, {
             ...planned.deps,
+            ...(notifier ? { emitEvent: withParkNotify(logEvent, notifier) } : {}),
             laneBreakerThreshold,
             activeIssues: inFlightIssues,
             loadGuard: opts.localQueue === true ? undefined : () => evaluateLoadGuard(loadGuardPolicy, readHostLoad()),
@@ -362,6 +368,15 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
       controller.abort();
       await watchdog;
       logEvent(paths.events, 'run-done', 'all', 'all lanes finished');
+      if (notifier) {
+        notifier.notify({
+          kind: 'drain',
+          ts: new Date().toISOString(),
+          message: DRAIN_MESSAGE,
+          parked: notifier.parked,
+        });
+        await notifier.settle();
+      }
     } finally {
       if (proxy) {
         await proxy.stop();
