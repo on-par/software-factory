@@ -2,7 +2,7 @@
 //
 // v1 wraps the underlying claude/codex CLI invocation in a platform sandbox
 // (macOS sandbox-exec, Linux firejail) that restricts filesystem writes to the
-// worktree + known state dirs (plus operator-listed sandbox.writablePaths, #3454) and gates network by an allowlist. Per-host
+// worktree + known state dirs (plus ecosystem cache defaults, #3567, and operator-listed sandbox.writablePaths, #3454) and gates network by an allowlist. Per-host
 // network filtering is not expressible in either runtime without a proxy —
 // see resolveSandboxPolicy's caller for the 'sandbox-degraded' warning this
 // implies when the allowlist is non-empty. On sandbox-exec, egress goes through a per-lane proxy
@@ -22,7 +22,7 @@ import { claudeConfigDirOverride } from '../utils/claude-config.js';
 import { shellEscape } from '../utils/index.js';
 
 import { buildEgressAllowlist } from './egress-proxy.js';
-import { resolveConfiguredWritablePaths } from './writable-paths.js';
+import { resolveConfiguredWritablePaths, resolveEcosystemWritablePaths } from './writable-paths.js';
 
 export type SandboxRuntime = 'sandbox-exec' | 'firejail' | 'docker-sandbox' | 'none';
 
@@ -200,6 +200,7 @@ export function resolveSandboxPolicy(
   const fromStateToRepo = factoryState === undefined ? undefined : relative(factoryState, resolve(opts.repoRoot));
   const safeFactoryState =
     fromStateToRepo !== undefined && (fromStateToRepo.startsWith('..') || isAbsolute(fromStateToRepo));
+  const ecosystemPaths = resolveEcosystemWritablePaths(opts.worktree, { home, repoRoot: opts.repoRoot });
   const configured = resolveConfiguredWritablePaths(cfg.writablePaths, { home, repoRoot: opts.repoRoot });
   const writablePaths = dedupeAbsolutePaths([
     opts.worktree,
@@ -224,6 +225,7 @@ export function resolveSandboxPolicy(
           resolve(home, 'Library/Keychains'),
         ]
       : []),
+    ...ecosystemPaths,
     ...configured,
   ]);
 
