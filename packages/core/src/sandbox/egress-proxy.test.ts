@@ -384,7 +384,7 @@ describe('detectEcosystems', () => {
 });
 
 describe('detectEcosystems (.NET)', () => {
-  it.each(['App.sln', 'App.slnx', 'App.csproj', 'App.fsproj', 'App.vbproj', 'APP.SLN'])(
+  it.each(['App.sln', 'App.slnx', 'App.csproj', 'App.fsproj', 'App.vbproj', 'APP.SLN', 'global.json'])(
     'detects dotnet from a root %s file',
     (name) => {
       const dir = makeRepo('empty');
@@ -397,12 +397,8 @@ describe('detectEcosystems (.NET)', () => {
     expect(detectEcosystems(makeRepo('node-dotnet'))).toEqual(['node', 'dotnet']);
   });
 
-  it('does not detect dotnet for a .sln directory or a nested csproj', () => {
+  it('does not detect dotnet for a .sln directory', () => {
     expect(detectEcosystems(makeRepo('sln-dir'))).toEqual([]);
-    const dir = makeRepo('empty');
-    mkdirSync(join(dir, 'src', 'App'), { recursive: true });
-    writeFileSync(join(dir, 'src', 'App', 'App.csproj'), '');
-    expect(detectEcosystems(dir)).toEqual([]);
   });
 });
 

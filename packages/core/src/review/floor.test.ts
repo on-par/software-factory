@@ -44,6 +44,26 @@ describe('computeReviewFloor', () => {
     expect(dep.rules[0]).toEqual({ id: 'dependencies', class: 'C', paths: ['package-lock.json'] });
   });
 
+  it.each([
+    'Directory.Packages.props',
+    'src/App/App.csproj',
+    'Directory.Build.props',
+    'packages.lock.json',
+    'nuget.config',
+    'NuGet.Config',
+    'global.json',
+    'src/Lib/Lib.fsproj',
+    'src/Vb/Vb.vbproj',
+  ])('treats .NET manifest %s as a dependency change', (path) => {
+    const r = floorOf(path);
+    expect(r.floor).toBe('C');
+    expect(r.rules).toContainEqual({ id: 'dependencies', class: 'C', paths: [path] });
+  });
+
+  it('does not treat src/App/App.csproj.user as a dependency change', () => {
+    expect(ids(floorOf('src/App/App.csproj.user'))).not.toContain('dependencies');
+  });
+
   it('size escalates strictly above maxLines', () => {
     const max = DEFAULT_REVIEW_FLOOR_RULES.maxLines;
     const over = computeReviewFloor({ changes: [change('docs/a.md', max, 1)] });

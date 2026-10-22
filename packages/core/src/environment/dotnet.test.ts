@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { describeDotnetEnv, dotnetEnv, dotnetEnvReport, isDotnetWorktree } from './dotnet.js';
+import { describeDotnetEnv, dotnetEnv, dotnetEnvReport, detectDotnetProject } from './dotnet.js';
 
 const roots: string[] = [];
 
@@ -24,37 +24,77 @@ afterEach(() => {
   for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true });
 });
 
-describe('isDotnetWorktree', () => {
-  it.each(['App.sln', 'App.slnx', 'App.csproj', 'global.json'])('is true when the root contains %s', (marker) => {
-    expect(isDotnetWorktree(makeRoot([marker]))).toBe(true);
-  });
+describe('detectDotnetProject', () => {
+  it.each(['App.sln', 'App.slnx', 'App.csproj', 'App.fsproj', 'App.vbproj', 'global.json'])(
+    'is true when the root contains %s',
+    (marker) => {
+      expect(detectDotnetProject(makeRoot([marker]))).toBe(true);
+    },
+  );
 
   it('matches marker extensions case-insensitively', () => {
-    expect(isDotnetWorktree(makeRoot(['App.CSPROJ']))).toBe(true);
+    expect(detectDotnetProject(makeRoot(['App.CSPROJ']))).toBe(true);
   });
 
   it('is false for a non-.NET root', () => {
-    expect(isDotnetWorktree(makeRoot(['package.json']))).toBe(false);
+    expect(detectDotnetProject(makeRoot(['package.json']))).toBe(false);
   });
 
   it('is false for an empty directory', () => {
-    expect(isDotnetWorktree(makeRoot())).toBe(false);
+    expect(detectDotnetProject(makeRoot())).toBe(false);
   });
 
   it('is false for a non-existent path without throwing', () => {
-    expect(isDotnetWorktree(join(tmpdir(), 'dotnet-env-does-not-exist'))).toBe(false);
+    expect(detectDotnetProject(join(tmpdir(), 'dotnet-env-does-not-exist'))).toBe(false);
   });
 
-  it('is false when the only project file is nested', () => {
-    expect(isDotnetWorktree(makeRoot(['src/App/App.csproj']))).toBe(false);
+  it('detects a nested src/App/App.csproj', () => {
+    expect(detectDotnetProject(makeRoot(['src/App/App.csproj']))).toBe(true);
+  });
+
+  it('searches up to 3 levels below the root', () => {
+    expect(detectDotnetProject(makeRoot(['a/b/c/App.csproj']))).toBe(true);
+    expect(detectDotnetProject(makeRoot(['a/b/c/d/App.csproj']))).toBe(false);
+  });
+
+  it.each([
+    'node_modules/pkg/App.csproj',
+    'bin/App.csproj',
+    'obj/App.csproj',
+    '.git/App.csproj',
+    'src/App/bin/Debug/App.csproj',
+  ])('ignores a project under %s', (file) => {
+    expect(detectDotnetProject(makeRoot([file]))).toBe(false);
+  });
+
+  it('returns false for an empty-string root and a file root without throwing', () => {
+    expect(detectDotnetProject('')).toBe(false);
+    const root = makeRoot(['App.csproj']);
+    expect(detectDotnetProject(join(root, 'App.csproj'))).toBe(false);
+  });
+
+  it('ignores near-miss file names', () => {
+    expect(detectDotnetProject(makeRoot(['App.csproj.user', 'App.sln.bak', 'global.json.bak']))).toBe(false);
+  });
+
+  it('ignores an empty directory named App.sln', () => {
+    expect(detectDotnetProject(makeRoot([], ['App.sln']))).toBe(false);
   });
 
   it('ignores a directory named global.json', () => {
-    expect(isDotnetWorktree(makeRoot([], ['global.json']))).toBe(false);
+    expect(detectDotnetProject(makeRoot([], ['global.json']))).toBe(false);
   });
 });
 
 describe('dotnetEnv', () => {
+  it('adds the .NET vars for a repo whose only project is src/App/App.csproj', () => {
+    expect(dotnetEnv(makeRoot(['src/App/App.csproj']), {})).toMatchObject({ DOTNET_TieredPGO: '0' });
+  });
+
+  it.each(['global.json', 'App.fsproj'])('adds the .NET vars for a root %s', (marker) => {
+    expect(dotnetEnv(makeRoot([marker]), {})).toMatchObject({ DOTNET_TieredPGO: '0' });
+  });
+
   it('adds all isolation and quiet keys for a .NET root with a runId', () => {
     expect(dotnetEnv(makeRoot(['App.sln']), {}, 'abc123')).toEqual({
       DOTNET_TieredPGO: '0',
