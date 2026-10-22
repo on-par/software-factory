@@ -17,7 +17,6 @@ import {
   setRepoConfigValue,
 } from './repo-config-file.js';
 import { loadRepoConfig } from './repo.js';
-import { loadV2Config } from './v2.js';
 
 const YAML_TEXT = '# why we pin\nversion: 2\nmerge:\n  auto: true # human-free\n';
 const EXPECTED = { version: 2, merge: { auto: true } };
@@ -121,14 +120,10 @@ describe('repo-config-file', () => {
       expect(loadRepoConfig(root)).toMatchObject({ version: 2 });
       expect(loadFactoryConfigForRepo(p).merge.auto).toBe(true);
       expect(resolveSafeRepoPolicy(p)).toBeDefined();
-      expect(loadV2Config(p).version).toBe(2);
     });
     it('rejects an empty yaml document', () => {
       const p = write('config.yaml', '# nothing\n');
       expect(() => loadFactoryConfigForRepo(p)).toThrow(/expected a JSON object/);
-    });
-    it('loadV2Config throws on a missing file', () => {
-      expect(() => loadV2Config(join(factory, 'config.yaml'))).toThrow(/file not found/);
     });
   });
 

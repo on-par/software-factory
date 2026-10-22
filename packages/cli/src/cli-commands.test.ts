@@ -107,6 +107,7 @@ import { listBuiltInCheckers } from '@on-par/factory-core/internal';
 import { openPrFixture } from './cli/__fixtures__/open-pr.js';
 import { FACTORYD_LABEL, factorydFiles, type DaemonCtlDeps } from './cli/daemon.js';
 import { HELP_GROUPS, OTHER_GROUP } from './cli/help-groups.js';
+import { parsedConfigSections } from './cli/test-support/config-sections.js';
 
 import {
   buildInitConfig,
@@ -506,6 +507,7 @@ beforeEach(() => {
       resources: { cpuMs: 300_000, memMb: 4096 },
     },
     sweep: { loopIntervalSeconds: 300, staleThresholdMultiplier: 2 },
+    ...parsedConfigSections,
   };
   h.gcReport = { removed: [], kept: 0, dryRun: false };
   h.staleClaims = [];

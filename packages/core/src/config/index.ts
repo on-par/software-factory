@@ -118,7 +118,7 @@ const RoutesConfigSchema = z.object({
   ),
 });
 
-const FactoryConfigSchema = z.object({
+export const FactoryConfigSchema = z.object({
   version: z.number(),
   paths: z.object({
     constitutions: z.string(),
@@ -138,7 +138,7 @@ const FactoryConfigSchema = z.object({
     compile_seconds: z.number().default(120),
   }),
   merge: z.object({ auto: z.boolean(), admin: z.boolean().default(false), comment: z.string() }),
-  /** `run.merge.*` mirrors FactoryConfigV2Schema's `run.merge` naming and, when present,
+  /** `run.merge.*` uses the `run.merge` naming and, when present,
    *  is authoritative over the legacy top-level `merge.*` fields above (see
    *  `resolveMergePolicy`). Left optional with no defaults so "unset" survives parsing
    *  and is distinguishable from an explicit `false`. */
@@ -333,7 +333,8 @@ export function loadFactoryConfig(path?: string): FactoryConfig {
  *  The rest of the file belongs to RepoFactoryConfigSchema's model-routing namespace in
  *  ./repo.ts, and each loader ignores the other's keys. `version` is deliberately absent:
  *  it is the repo namespace's literal, and FactoryConfig's version comes from the defaults.
- *  Adding a new top-level section to FactoryConfigSchema means adding it here too. */
+ *  Adding a new top-level section to FactoryConfigSchema means adding it here too; a parity test in
+ *  index.test.ts enforces that. */
 export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'paths',
   'timeouts',
@@ -459,12 +460,12 @@ export function resolveTimeouts(
   };
 
   return {
-    plan: fromEnv(env.FACTORY_PLAN_TIMEOUT) ?? config.timeouts.plan_seconds ?? 1800,
-    build: fromEnv(env.FACTORY_BUILD_TIMEOUT) ?? config.timeouts.build_seconds ?? 7200,
-    check: fromEnv(env.FACTORY_CHECK_TIMEOUT) ?? config.timeouts.check_seconds ?? 1800,
-    approval: fromEnv(env.FACTORY_APPROVAL_TIMEOUT) ?? config.timeouts.approval_seconds ?? 1800,
-    tests: fromEnv(env.FACTORY_TESTS_TIMEOUT) ?? config.timeouts.tests_seconds ?? 300,
-    compile: fromEnv(env.FACTORY_COMPILE_TIMEOUT) ?? config.timeouts.compile_seconds ?? 120,
+    plan: fromEnv(env.FACTORY_PLAN_TIMEOUT) ?? config.timeouts.plan_seconds,
+    build: fromEnv(env.FACTORY_BUILD_TIMEOUT) ?? config.timeouts.build_seconds,
+    check: fromEnv(env.FACTORY_CHECK_TIMEOUT) ?? config.timeouts.check_seconds,
+    approval: fromEnv(env.FACTORY_APPROVAL_TIMEOUT) ?? config.timeouts.approval_seconds,
+    tests: fromEnv(env.FACTORY_TESTS_TIMEOUT) ?? config.timeouts.tests_seconds,
+    compile: fromEnv(env.FACTORY_COMPILE_TIMEOUT) ?? config.timeouts.compile_seconds,
   };
 }
 
@@ -541,7 +542,7 @@ export function resolveAdrMandate(config: FactoryConfig, env: NodeJS.ProcessEnv 
 export function resolveDefectWindowDays(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): number {
   const n = Number(env.FACTORY_DEFECT_WINDOW_DAYS);
   if (Number.isFinite(n) && n > 0) return n;
-  return config.kpis?.defectWindowDays ?? 14;
+  return config.kpis.defectWindowDays;
 }
 
 export interface IngestSettings {
@@ -554,10 +555,10 @@ export interface IngestSettings {
 export function resolveIngestConfig(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): IngestSettings {
   const i = config.ingest;
   return {
-    enabled: resolveEnabledFlag(env, 'FACTORY_AUTO_INGEST', i?.enabled ?? false),
-    label: i?.label ?? 'ready',
-    lane: i?.lane ?? 'auto',
-    maxPerCycle: i?.maxPerCycle ?? 20,
+    enabled: resolveEnabledFlag(env, 'FACTORY_AUTO_INGEST', i.enabled),
+    label: i.label,
+    lane: i.lane,
+    maxPerCycle: i.maxPerCycle,
   };
 }
 
@@ -655,7 +656,7 @@ export function resolveBranchPrefix(): string {
 /** Grace period (ms) between SIGTERM and SIGKILL when sweeping a lane's
  *  process groups on terminal state or reaping a dead lane's orphans. */
 export function resolveProcessGroupGraceMs(config: FactoryConfig): number {
-  return config.environment?.processGroups?.graceMs ?? 5000;
+  return config.environment.processGroups.graceMs;
 }
 
 /** Where a resolved merge decision came from. `'flag'` is an explicit per-invocation CLI
@@ -801,13 +802,3 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string, env: NodeJ
 export function getConstitutionsDir(): string {
   return resolveConfigPath('constitutions');
 }
-
-// ---------- Unified v2 config schema (additive; v1 loaders above are untouched) ----------
-
-export {
-  FactoryConfigV2Schema,
-  factoryConfigV2JsonSchema,
-  loadV2Config,
-  parseV2Config,
-  type FactoryConfigV2,
-} from './v2.js';

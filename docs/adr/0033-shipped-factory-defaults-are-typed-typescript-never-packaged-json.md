@@ -35,7 +35,7 @@ fails exactly where an invalid JSON file used to. The loaders keep their optiona
 parameter: an explicit path still reads and validates an external JSON config, which is
 how a consuming repo or a test supplies its own. Documentation for a default is a JSDoc
 comment on the value, never a `comment` or `note` field — except the four `comment`
-strings FactoryConfigSchema still declares required, which the v2-schema work removes.
+strings FactoryConfigSchema still declares required.
 
 ## Consequences
 

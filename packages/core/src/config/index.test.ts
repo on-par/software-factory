@@ -1629,12 +1629,6 @@ describe('resolveProcessGroupGraceMs', () => {
       }),
     ).toBe(12000);
   });
-
-  it('falls back to 5000 when environment is entirely absent', () => {
-    const config = loadFactoryConfig();
-    const { environment: _environment, ...rest } = config;
-    expect(resolveProcessGroupGraceMs(rest as typeof config)).toBe(5000);
-  });
 });
 
 describe('resolvePlanApproval', () => {
@@ -1895,19 +1889,6 @@ describe('resolveTimeouts', () => {
   it('lets FACTORY_APPROVAL_TIMEOUT override config', () => {
     const config = loadFactoryConfig();
     expect(resolveTimeouts(config, { FACTORY_APPROVAL_TIMEOUT: '60' }).approval).toBe(60);
-  });
-
-  it('falls back to the hard-coded defaults when config.timeouts fields are all absent', () => {
-    const config = loadFactoryConfig();
-    const emptyTimeouts = { ...config, timeouts: {} as typeof config.timeouts };
-
-    expect(resolveTimeouts(emptyTimeouts, {})).toMatchObject({
-      plan: 1800,
-      build: 7200,
-      check: 1800,
-      approval: 1800,
-      tests: 300,
-    });
   });
 
   it('reads from process.env when no env argument is passed', () => {

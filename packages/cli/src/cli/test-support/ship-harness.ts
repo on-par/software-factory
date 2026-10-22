@@ -7,6 +7,7 @@ import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, vi } from 'vitest';
 
 import { type CliDeps, main, shipIssue as cliShipIssue } from '../index.js';
+import { parsedConfigSections } from './config-sections.js';
 
 const tmp = createTempDirs();
 
@@ -411,6 +412,7 @@ export function installShipHarness(): void {
         resources: { cpuMs: 300_000, memMb: 4096 },
       },
       sweep: { loopIntervalSeconds: 300, staleThresholdMultiplier: 2 },
+      ...parsedConfigSections,
       // Off by default: the guard reads the real os.loadavg(), so a busy host (load5 > 3x CPUs) held remote lanes
       // and timed tests out. Load-guard tests turn it on explicitly.
       host: { loadGuard: { enabled: false, retrySeconds: 1 } },

@@ -235,7 +235,7 @@ describe('shipIssue (direct)', () => {
 
     h.factoryConfig = {
       ...h.factoryConfig,
-      environment: { ports: { enabled: true, range: [busyPort, busyPort + 1] } },
+      environment: { ...h.factoryConfig.environment, ports: { enabled: true, range: [busyPort, busyPort + 1] } },
     };
     h.portListeners = [{ pid: 777, pgid: 888, command: 'some-other-proc' }];
 
@@ -259,7 +259,7 @@ describe('shipIssue (direct)', () => {
 
     h.factoryConfig = {
       ...h.factoryConfig,
-      environment: { ports: { enabled: true, range: [busyPort, busyPort + 1] } },
+      environment: { ...h.factoryConfig.environment, ports: { enabled: true, range: [busyPort, busyPort + 1] } },
     };
     h.portListeners = [];
 
@@ -283,7 +283,7 @@ describe('shipIssue (direct)', () => {
 
     h.factoryConfig = {
       ...h.factoryConfig,
-      environment: { ports: { enabled: true, range: [busyPort, busyPort] } },
+      environment: { ...h.factoryConfig.environment, ports: { enabled: true, range: [busyPort, busyPort] } },
     };
     coreFakes.defaultFindPortListeners.mockRejectedValueOnce(new Error('lsof unavailable'));
 
@@ -300,7 +300,10 @@ describe('shipIssue (direct)', () => {
   });
 
   it('logs that port leasing is disabled when environment.ports.enabled is false', async () => {
-    h.factoryConfig = { ...h.factoryConfig, environment: { ports: { enabled: false, range: [3100, 3999] } } };
+    h.factoryConfig = {
+      ...h.factoryConfig,
+      environment: { ...h.factoryConfig.environment, ports: { enabled: false, range: [3100, 3999] } },
+    };
 
     await shipIssue(5, {}, ctx());
 
@@ -312,6 +315,7 @@ describe('shipIssue (direct)', () => {
     h.factoryConfig = {
       ...h.factoryConfig,
       environment: {
+        ...h.factoryConfig.environment,
         ports: { enabled: true, range: [20100, 20150] },
         proxy: { enabled: true, port: 80, domain: 'factory.localhost' },
       },
@@ -338,6 +342,7 @@ describe('shipIssue (direct)', () => {
     h.factoryConfig = {
       ...h.factoryConfig,
       environment: {
+        ...h.factoryConfig.environment,
         ports: { enabled: true, range: [20200, 20250] },
         proxy: { enabled: true, port: 80, domain: 'factory.localhost' },
       },

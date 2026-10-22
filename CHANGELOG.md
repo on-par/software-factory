@@ -13,6 +13,13 @@ All notable changes to this project are documented in this file.
   are kept, protected from GC by a keep record, for inspection or a later run.
   Routing and prompts are the same as a normal run, unlike `run-brief --workspace`.
 
+### Removed
+
+- **Breaking:** `@on-par/factory-core` no longer exports the unused v2 config schema:
+  `FactoryConfigV2Schema`, `factoryConfigV2JsonSchema`, `loadV2Config`, `parseV2Config` and the
+  `FactoryConfigV2` type. Nothing in the factory loaded it; `.factory/config.json` keeps validating
+  against the runtime and repo schemas (#3444). Ships in a 0.x minor.
+
 ### Fixed
 
 - Codex PLAN can write its spec under the resolved factory state directory, and

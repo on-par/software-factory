@@ -6,16 +6,12 @@ import * as internalApi from './internal.js';
 import * as kpisApi from './kpis-entry.js';
 import * as testingApi from './testing.js';
 const PUBLIC_API_KEYS = [
-  'FactoryConfigV2Schema',
-  'factoryConfigV2JsonSchema',
   'getConstitutionsDir',
   'getFactoryPaths',
   'loadFactoryConfig',
   'loadFactoryConfigForRepo',
   'loadModelsConfig',
   'loadRoutesConfig',
-  'loadV2Config',
-  'parseV2Config',
   'resolveAdrMandate',
   'resolveAutoFailover',
   'resolveDefectWindowDays',

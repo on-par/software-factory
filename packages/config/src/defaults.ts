@@ -566,6 +566,12 @@ export const defaultEvidenceCaps: EvidenceCapsDefaults = {
 /** Lane circuit breaker threshold (#1915): default for `budget.laneBreakerThreshold`. 0 turns the breaker off. */
 export const defaultLaneBreakerThreshold = 2;
 
+/** Usage cap in USD: default for repo `budget.capUsd` when FACTORY_USAGE_CAP is unset too. */
+export const defaultUsageCapUsd = 227;
+
+/** Usage watchdog stop threshold (fraction in (0, 1]): default for `budget.watchdog.stopAt`. */
+export const defaultWatchdogStopAt = 0.75;
+
 /** Global factory configuration: paths, timeouts, merge/worktree/budget/intake defaults. */
 export const defaultFactoryConfig: FactoryDefaults = {
   version: 1,

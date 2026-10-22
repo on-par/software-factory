@@ -3,7 +3,7 @@
 
 import { z } from 'zod';
 
-/** `run.merge.*` mirrors FactoryConfigV2Schema's `run.merge`; `run.pr.draft` stops SHIP at a
+/** `run.merge.*` is the authoritative merge policy; `run.pr.draft` stops SHIP at a
  *  draft PR. Everything is optional with no defaults so "unset" survives parsing. */
 export const RunConfigSectionSchema = z
   .object({

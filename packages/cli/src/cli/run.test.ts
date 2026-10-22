@@ -16,6 +16,7 @@ import {
   runMainWith,
   trackEnv,
 } from './test-support/ship-harness.js';
+import { parsedConfigSections } from './test-support/config-sections.js';
 
 installShipHarness();
 
@@ -67,6 +68,7 @@ describe('cli', () => {
       h.factoryConfig = {
         merge: { auto: false, comment: '' },
         worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: true },
+        ...parsedConfigSections,
       };
       writeFileSync(paths().queue, '# header\napp 1\n');
       const res = await runMain('run', '--local-queue');
@@ -82,6 +84,7 @@ describe('cli', () => {
       h.factoryConfig = {
         merge: { auto: false, comment: '' },
         worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: false },
+        ...parsedConfigSections,
       };
       writeFileSync(paths().queue, '# header\napp 1\n');
       const res = await runMain('run', '--local-queue');
@@ -93,6 +96,7 @@ describe('cli', () => {
       h.factoryConfig = {
         merge: { auto: false, comment: '' },
         worktree: { parent: '../', gcTtlDays: 7, autoGcOnRun: true },
+        ...parsedConfigSections,
       };
       ops.sweepWorktrees.mockRejectedValueOnce(new Error('gc boom'));
       writeFileSync(paths().queue, '# header\napp 1\n');

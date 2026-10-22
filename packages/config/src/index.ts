@@ -27,6 +27,8 @@ export {
   defaultEvidenceCaps,
   defaultFactoryConfig,
   defaultLaneBreakerThreshold,
+  defaultUsageCapUsd,
+  defaultWatchdogStopAt,
   defaultModelsConfig,
   defaultRoutesConfig,
   type EvidenceCapsDefaults,

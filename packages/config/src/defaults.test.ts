@@ -7,6 +7,8 @@ import {
   defaultEvidenceCaps,
   defaultFactoryConfig,
   defaultLaneBreakerThreshold,
+  defaultUsageCapUsd,
+  defaultWatchdogStopAt,
   defaultModelsConfig,
   defaultRoutesConfig,
   retiredModels,
@@ -16,6 +18,8 @@ import {
 describe('shipped defaults', () => {
   it('defaults the lane breaker threshold to 2 (#1915)', () => {
     expect(defaultLaneBreakerThreshold).toBe(2);
+    expect(defaultUsageCapUsd).toBe(227);
+    expect(defaultWatchdogStopAt).toBe(0.75);
   });
 
   it('describes build_claude as driving its own commits without publishing (#1870)', () => {
