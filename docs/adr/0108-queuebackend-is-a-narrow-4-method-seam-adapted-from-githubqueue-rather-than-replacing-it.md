@@ -42,3 +42,7 @@ related but distinct types now exist for the GitHub queue (`GithubQueue` and
 construct a `createGithubQueueBackend(...)` alongside (or instead of)
 `createGithubQueue(...)` rather than getting both from one factory — wiring any real
 caller to the new seam is left to a follow-up issue.
+
+## See also
+
+- ADR-0167 records the tracker-source decision: a repo reads tickets from one configured tracker, and the queue stays GitHub-only in v1. A tracker-backed `QueueBackend` needs its own ADR.
