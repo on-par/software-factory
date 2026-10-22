@@ -53,11 +53,12 @@ export function eventSegmentFileName(segmentId: number): string {
   return `events-${String(segmentId).padStart(16, '0')}.ndjson`;
 }
 
-interface Segment {
+export interface EventSegment {
   id: number;
   size: number;
   path: string;
 }
+type Segment = EventSegment;
 
 function listSegments(dir: string): Segment[] {
   let names: string[];
@@ -78,6 +79,17 @@ function listSegments(dir: string): Segment[] {
     }
   }
   return segments.sort((a, b) => a.id - b.id);
+}
+
+/** Rotated segments of an events file, oldest first. */
+export function listEventSegments(eventsFile: string): EventSegment[] {
+  return listSegments(eventSegmentsDir(eventsFile));
+}
+
+/** The live file's segment id: newest rotated id + its size, or 0 when none exist. */
+export function liveSegmentId(segments: EventSegment[]): number {
+  const last = segments[segments.length - 1];
+  return last ? last.id + last.size : 0;
 }
 
 function fileSize(path: string): number {
@@ -179,8 +191,7 @@ function scanBackward(seg: Segment, end: number, need: number, opts: EventReadOp
 }
 
 function liveSegment(eventsFile: string, rotated: Segment[]): Segment {
-  const last = rotated[rotated.length - 1];
-  return { id: last ? last.id + last.size : 0, size: fileSize(eventsFile), path: eventsFile };
+  return { id: liveSegmentId(rotated), size: fileSize(eventsFile), path: eventsFile };
 }
 
 /** The newest `limit` matching events (oldest first), found by reading the log backwards in chunks. */

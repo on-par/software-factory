@@ -7,6 +7,7 @@ import {
   InvalidEventCursorError,
   eventSegmentFileName,
   eventSegmentsDir,
+  listEventSegments,
   readEventsSince,
   readEventsTail,
 } from './tail.js';
@@ -131,3 +132,21 @@ function eventsRotated(file: string, ids: number[]): number {
   writeFileSync(join(eventSegmentsDir(file), eventSegmentFileName(0)), body);
   return body.length;
 }
+
+describe('listEventSegments', () => {
+  afterEach(() => tmp.cleanup());
+
+  it('lists segments oldest first and ignores non-matching names', () => {
+    const file = join(tmp.makeSync('factory-tail-list-'), 'events.ndjson');
+    const dir = eventSegmentsDir(file);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, eventSegmentFileName(10)), 'bbb\n');
+    writeFileSync(join(dir, eventSegmentFileName(0)), 'aa\n');
+    writeFileSync(join(dir, 'events-1.ndjson'), 'x');
+    expect(listEventSegments(file).map((s) => [s.id, s.size])).toEqual([
+      [0, 3],
+      [10, 4],
+    ]);
+    expect(listEventSegments(join(tmp.makeSync('factory-tail-none-'), 'events.ndjson'))).toEqual([]);
+  });
+});

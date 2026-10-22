@@ -270,7 +270,7 @@ export type { LocalOnlyPolicy } from './work/local-only.js';
 export { InvalidWorkspaceError, resolveLocalOnlyPolicy } from './work/local-only.js';
 
 // Events
-export type { FollowEventsOptions } from './events/index.js';
+export type { FollowEventsOptions, ReadEventsOptions } from './events/index.js';
 export { followEvents, readEvents } from './events/index.js';
 export type {
   EventKind,

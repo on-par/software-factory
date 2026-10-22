@@ -554,7 +554,7 @@ const INTERNAL_API_KEYS = [
   ...'resolveHostLoadGuard evaluateLoadGuard formatLoadHold readHostLoad resolveBaseHealthChecks'.split(' '), // #3048, #3290
   ...'hostBuildSlotsDir listHostSlots syncLandBranch isValidIssueRunState listIssueRuns'.split(' '), // syncLandBranch: #1886; run readers: #3448
   ...'withHostBuildSlot createRunSlotGate withRunAndHostBuildSlot'.split(' '), // #3049
-  ...'FACTORY_RUNTIME_CONFIG_KEYS isTrustedApprover'.split(' '),
+  ...'FACTORY_RUNTIME_CONFIG_KEYS isTrustedApprover listEventSegments liveSegmentId'.split(' '),
   'createOctokitCollaboratorPermissionClient',
   ...'CONFIG_EXAMPLE_OMITTED_KEYS renderConfigExample'.split(' '),
   'resolveEvidenceAllowlist',

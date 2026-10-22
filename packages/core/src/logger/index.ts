@@ -20,8 +20,10 @@ import type {
   ReadinessInfo,
   ReworkInfo,
 } from '../types/index.js';
+import type { EventLogRotation } from '../config/index.js';
 import { colorEnabled, formatEventLine } from '../utils/format.js';
 import { withFileLockSync } from '../utils/lock.js';
+import { rotateEventLogIfNeeded, resolveLoggerRotation } from './rotate.js';
 import { resolveRepoSlug } from './repo-slug.js';
 
 export interface LogContext {
@@ -59,6 +61,8 @@ export interface LoggerOptions {
   env?: NodeJS.ProcessEnv;
   /** Event-log lock tuning; tests lower these. */
   lock?: { timeoutMs?: number; pollMs?: number };
+  /** Overrides event-log rotation settings; otherwise env, repo config, then defaults (10 MB, keep all). */
+  rotation?: Partial<EventLogRotation>;
 }
 
 export interface FactoryLogger {
@@ -76,7 +80,12 @@ function resolveThreshold(env: NodeJS.ProcessEnv): LogLevel {
   return raw === 'debug' || raw === 'info' || raw === 'warn' || raw === 'error' ? raw : 'info';
 }
 
-function appendLine(eventsFile: string, line: string, lock?: { timeoutMs?: number; pollMs?: number }): void {
+function appendLine(
+  eventsFile: string,
+  line: string,
+  rotation: EventLogRotation,
+  lock?: { timeoutMs?: number; pollMs?: number },
+): void {
   const doAppend = () => {
     try {
       appendFileSync(eventsFile, line);
@@ -85,8 +94,16 @@ function appendLine(eventsFile: string, line: string, lock?: { timeoutMs?: numbe
       appendFileSync(eventsFile, line);
     }
   };
+  const doRotateAndAppend = () => {
+    try {
+      rotateEventLogIfNeeded(eventsFile, Buffer.byteLength(line), rotation);
+    } catch {
+      // never lose the event over a failed rotation
+    }
+    doAppend();
+  };
   try {
-    withFileLockSync(`${eventsFile}.lock`, doAppend, {
+    withFileLockSync(`${eventsFile}.lock`, doRotateAndAppend, {
       timeoutMs: lock?.timeoutMs ?? 10_000,
       pollMs: lock?.pollMs ?? 5,
     });
@@ -100,6 +117,7 @@ function appendLine(eventsFile: string, line: string, lock?: { timeoutMs?: numbe
 export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: LoggerOptions = {}): FactoryLogger {
   const out = opts.out ?? process.stdout;
   const env = opts.env ?? process.env;
+  const rotation: EventLogRotation = { ...resolveLoggerRotation(eventsFile, env), ...opts.rotation };
   const repo = ctx.repo ?? resolveRepoSlug(dirname(eventsFile));
 
   function write(level: LogLevel, type: EventKind, msg: string, extra?: LogExtra): void {
@@ -133,7 +151,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.durationMs !== undefined ? { durationMs: extra.durationMs } : {}),
     };
     const line = JSON.stringify(event) + '\n';
-    appendLine(eventsFile, line, opts.lock);
+    appendLine(eventsFile, line, rotation, opts.lock);
 
     if (LEVEL_RANK[level] < LEVEL_RANK[resolveThreshold(env)]) return;
 

@@ -71,6 +71,8 @@ const RUNTIME_NOTES: Record<string, string> = {
   environment: 'Per-lane runtime environment.',
   'environment.processGroups': "Grace period in ms between SIGTERM and SIGKILL when a lane's process group is swept.",
   workspace: 'Lane workspace backend: "host" (git worktrees) or "disposable-docker" (a managed container per lane).',
+  events:
+    'Event-log rotation: events.ndjson rolls into <state>/logs/events/ segments once it would pass maxBytes (default 10485760). All segments are kept unless maxSegments is set. FACTORY_EVENTS_MAX_BYTES and FACTORY_EVENTS_MAX_SEGMENTS beat these values.',
 };
 
 function wrap(text: string, width: number): string[] {
@@ -364,6 +366,7 @@ function runtimeNamespace(): Node[] {
     section('ci'),
     section('worktree'),
     section('workspace'),
+    section('events'),
     section('sandbox'),
     section('environment'),
     section('host'),

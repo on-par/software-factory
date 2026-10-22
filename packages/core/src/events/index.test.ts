@@ -1,10 +1,23 @@
-import { appendFileSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { FactoryEvent } from '../types/index.js';
+import { createTempDirs } from '../harness/temp-dir.js';
+import { createLogger } from '../logger/index.js';
+import { eventSegmentFileName, eventSegmentsDir } from './tail.js';
 import { followEvents, readEvents } from './index.js';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -236,5 +249,58 @@ describe('followEvents', () => {
     appendFileSync(file, line({ type: 'build', msg: 'new' }));
     await waitFor(() => seen.length === 1);
     expect(seen.map((e) => e.msg)).toEqual(['new']);
+  });
+});
+
+const segTmp = createTempDirs();
+
+describe('readEvents with includeSegments (#1631)', () => {
+  afterEach(() => segTmp.cleanup());
+
+  it('returns segments oldest first then the live file; default is live only', () => {
+    const dir = segTmp.makeSync('factory-events-seg-');
+    {
+      const file = join(dir, 'events.ndjson');
+      const segDir = eventSegmentsDir(file);
+      mkdirSync(segDir, { recursive: true });
+      const a = line({ type: 'plan', msg: 'a' });
+      writeFileSync(join(segDir, eventSegmentFileName(0)), a);
+      writeFileSync(join(segDir, eventSegmentFileName(Buffer.byteLength(a))), line({ type: 'plan', msg: 'b' }));
+      writeFileSync(file, line({ type: 'plan', msg: 'c' }));
+      expect(readEvents(file, { includeSegments: true }).map((e) => e.msg)).toEqual(['a', 'b', 'c']);
+      expect(readEvents(file).map((e) => e.msg)).toEqual(['c']);
+      rmSync(file);
+      expect(readEvents(file, { includeSegments: true }).map((e) => e.msg)).toEqual(['a', 'b']);
+    }
+  });
+});
+
+describe('followEvents across rotation (#1631)', () => {
+  afterEach(() => segTmp.cleanup());
+
+  it('emits every event exactly once across a logger rotation, including lines written to the old file after the last poll', async () => {
+    const dir = segTmp.makeSync('factory-events-rot-');
+    const file = join(dir, 'events.ndjson');
+    const log = createLogger(file, {}, { out: { write: () => true }, env: {}, rotation: { maxBytes: 600 } });
+    const seen: string[] = [];
+    const stop = followEvents(file, (e) => seen.push(e.msg), { pollMs: 10 });
+    try {
+      const written: string[] = [];
+      for (let burst = 0; burst < 4; burst++) {
+        // Several writes between polls so a rotation lands with unread lines in the old file.
+        for (let i = 0; i < 5; i++) {
+          const msg = `m${burst}-${i}`;
+          written.push(msg);
+          log.info('plan', msg);
+        }
+        await delay(25);
+      }
+      await waitFor(() => seen.length >= written.length);
+      await delay(40);
+      expect(seen).toEqual(written);
+      expect(readdirSync(eventSegmentsDir(file)).length).toBeGreaterThan(0);
+    } finally {
+      stop();
+    }
   });
 });

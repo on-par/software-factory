@@ -12,10 +12,14 @@ const EVENTS_PER_LANE = 125;
 
 function runChild(childPath: string, eventsFile: string, lane: string): Promise<{ code: number; stderr: string }> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(process.execPath, ['--import', 'tsx', childPath, eventsFile, lane], {
-      cwd: repoRoot,
-      stdio: ['ignore', 'ignore', 'pipe'],
-    });
+    const child = spawn(
+      process.execPath,
+      ['--conditions=development', '--import', 'tsx', childPath, eventsFile, lane],
+      {
+        cwd: repoRoot,
+        stdio: ['ignore', 'ignore', 'pipe'],
+      },
+    );
     let stderr = '';
     child.stderr.on('data', (chunk) => {
       stderr += chunk.toString();

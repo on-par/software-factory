@@ -1698,7 +1698,7 @@ async function cmdKpis(opts: { branchPrefix?: string } = {}) {
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const events = existsSync(paths.events) ? readEvents(paths.events) : [];
+  const events = readEvents(paths.events, { includeSegments: true });
   const costs = existsSync(paths.costs) ? internalOps.readCosts(paths.costs) : [];
 
   const recon = await reconstructHumanEventsForKpis(events, branchPrefix);

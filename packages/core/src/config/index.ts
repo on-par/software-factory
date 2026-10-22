@@ -298,6 +298,14 @@ const FactoryConfigSchema = z.object({
     })
     .default({ enabled: true, cooldown_minutes: 30, fallback_model: 'claude-sonnet-5' }),
   adr: z.object({ mandate: z.boolean().default(false), comment: z.string().optional() }).default({ mandate: false }),
+  /** Event-log rotation (#1631). Lenient: invalid values fall back to defaults (ADR-0160). */
+  events: z
+    .object({
+      maxBytes: z.number().int().positive().optional().catch(undefined),
+      maxSegments: z.number().int().positive().optional().catch(undefined),
+    })
+    .optional()
+    .catch(undefined),
   /** Ship-it lane workspace isolation (#1535). `'host'` is the existing sibling-worktree
    *  behavior; `'disposable-docker'` opts a repo into a managed, labeled container per
    *  lane via the existing hosted ContainerEngine. Default-off — every existing repo is
@@ -376,6 +384,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'auto_failover',
   'adr',
   'workspace',
+  'events',
 ];
 
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -558,6 +567,8 @@ export function resolveDefectWindowDays(config: FactoryConfig, env: NodeJS.Proce
   if (Number.isFinite(n) && n > 0) return n;
   return config.kpis?.defectWindowDays ?? 14;
 }
+
+export { DEFAULT_EVENT_LOG_MAX_BYTES, resolveEventLogRotation, type EventLogRotation } from './event-log-rotation.js';
 
 export interface IngestSettings {
   enabled: boolean;

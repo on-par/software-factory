@@ -238,6 +238,7 @@ worktree:
 # lane).
 workspace:
   backend: "host"
+events: undefined
 # Containment for agentic build runs. Disable per-run with --no-sandbox or FACTORY_SANDBOX=0. Empty
 # network.allow denies all egress; non-empty leaves egress open in report mode. Set sandbox.runtime
 # (auto|sandbox-exec|firejail|docker-sandbox|none) or FACTORY_SANDBOX_RUNTIME to pick a runtime;
