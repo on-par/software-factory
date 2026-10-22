@@ -1995,12 +1995,12 @@ describe('resolveBuildPublish', () => {
   });
 
   it('FACTORY_BUILD_PUBLISH=0 wins over config true', () => {
-    const on = { ...config, build: { publishFromBuild: true } };
+    const on = { ...config, build: { ...config.build, publishFromBuild: true } };
     expect(resolveBuildPublish(on, { FACTORY_BUILD_PUBLISH: '0' })).toBe(false);
   });
 
   it('falls back to config when env is unset', () => {
-    const on = { ...config, build: { publishFromBuild: true } };
+    const on = { ...config, build: { ...config.build, publishFromBuild: true } };
     expect(resolveBuildPublish(on, {})).toBe(true);
   });
 });

@@ -13,6 +13,7 @@ import { laneEnv } from '../environment/index.js';
 import type { EventKind } from '../events/kinds.js';
 import { type BudgetGuard, isBudgetStopError } from '../router/budget-guard.js';
 import { routerFailureOf } from '../router/executor-error.js';
+import { type ContextCeilingNotice, formatContextCeilingNotice } from '../router/context-ceiling.js';
 import { failoversFrom, type ModelRouter, type RouterResult } from '../router/index.js';
 import { isEgressEnforced, type SandboxEventType, type SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering } from '../steering/index.js';
@@ -283,6 +284,7 @@ async function buildPhaseImpl(opts: {
     onPgid,
     onProviderFailure,
     budgetGuard: opts.budgetGuard,
+    onContextCeiling: (n: ContextCeilingNotice) => log('context_ceiling', formatContextCeilingNotice(n)),
   };
 
   // Captured before the worker runs so the post-build diff has a correct base

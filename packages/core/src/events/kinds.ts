@@ -45,6 +45,7 @@ export type EventKind =
   | 'conflict_resolved'
   | 'config'
   | 'constitution'
+  | 'context_ceiling'
   | 'decompose_comment_posted'
   | 'decompose_duplicate_skipped'
   | 'decompose_failed'
@@ -256,6 +257,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   conflict: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   conflict_detected: { severity: 'warn', isPark: false, isTerminal: false },
   conflict_resolved: { severity: 'info', isPark: false, isTerminal: false },
+  context_ceiling: { severity: 'info', isPark: false, isTerminal: false },
   // A config-caused CHECK failure parked with file, line and fix (#2583/#2584): fails the same way on every requeue.
   config: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
   constitution: { severity: 'info', isPark: false, isTerminal: false },

@@ -56,7 +56,8 @@ const RUNTIME_NOTES: Record<string, string> = {
   build:
     'BUILD policy. publishFromBuild: true lets the claude BUILD worker push, open a PR and wait for CI before ' +
     'CHECK (the old behavior). Default false keeps BUILD commit-only on every route; SHIP pushes and opens the PR ' +
-    'after CHECK. FACTORY_BUILD_PUBLISH=1/0 beats it.',
+    'after CHECK. FACTORY_BUILD_PUBLISH=1/0 beats it. ' +
+    'contextCeiling (default { codex-cli: 120000 }) is the per-harness context ceiling for BUILD and rework: Codex compacts the session at that many tokens; 0 turns it off; only codex-cli honours it today (#3327).',
   sizeGate:
     'Size gate policy at PLAN (ADR-0147, ADR-0156). mode: file (default) files child issues for an oversized issue and parks ' +
     'when the post-plan gate trips; slice keeps the issue whole, never files issues, records a slice plan comment and ships one slice per run; off skips both gates and sends the whole issue to BUILD; stack (ADR-0161) ships one stacked slice PR per run and builds the next slice only after the PR below is approved or merged. ' +
