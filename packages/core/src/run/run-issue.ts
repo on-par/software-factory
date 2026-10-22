@@ -147,6 +147,8 @@ export interface RunRequest {
   sizeBudget?: SizeBudget;
   /** steward.enabled resolved (#2086); undefined = off (no steward-triggered event). */
   stewardEnabled?: boolean;
+  /** Review floor rules for CHECK's design critic class-A skip (#3374); set regardless of the classifier gate. */
+  reviewFloorRules?: ReviewFloorRuleSet;
   prClassifier?: { rules: ReviewFloorRuleSet; gateLabel: string; modelPin?: string };
   timeouts: { plan: number; build: number; check: number; approval: number; tests: number; compile?: number };
   modelPins: EffectiveModelPins;
@@ -903,6 +905,7 @@ async function runIssueOnce(
       priorFailureSignature,
       diffBase: request.localOnly ? runStartDiffBase : buildDiffBase,
       parentBaseRef: request.parentBaseRef,
+      reviewFloorRules: request.reviewFloorRules,
       ...reworkRouteFor(builtRoute, builtModel),
       laneId: request.lane,
       onActivity: ports.onActivity,

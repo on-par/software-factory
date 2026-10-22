@@ -314,6 +314,7 @@ async function checkPhaseImpl(opts: {
   diffBase?: string;
   /** Parent ref of a stacked slice (#2716); forwarded to CheckerContext.parentBaseRef. */
   parentBaseRef?: string;
+  reviewFloorRules?: CheckerContext['reviewFloorRules']; // design_smells class-A skip (#3374)
   /** Worker route that completed BUILD (`command` included, #2873); direct callers retain Claude rework by default. */
   reworkRoute?: BuildRoutePin;
   /** Worker model that completed BUILD, retained as the compatible rework override. */
@@ -379,7 +380,6 @@ async function checkPhaseImpl(opts: {
   const roundLogDir = (round: number): string | undefined =>
     logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, `check-r${round}`);
   const checkBaseDir = logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, 'check-base');
-
   // Each failing checker is logged individually, the same way SKIPs are: the parked
   // outcome only carries an aggregate count, so without this the checker/details pairs
   // that name WHY a run parked are never surfaced to the operator (#675).
@@ -398,6 +398,7 @@ async function checkPhaseImpl(opts: {
     specPath,
     diffBase,
     parentBaseRef,
+    reviewFloorRules: opts.reviewFloorRules,
     env: { ...laneEnv(appPort, process.env, appBaseUrl, worktree, runId), ...hermeticGitEnv(hermeticGit) },
     onPgid,
     processGroupTracker,

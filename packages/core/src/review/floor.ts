@@ -244,3 +244,15 @@ export function applyReviewFloorOverrides(
   }
   return { rules, maxLines: overrides.maxDiffLines ?? base.maxLines };
 }
+
+/** Parse `git diff --numstat` output. A binary file's `-` counts become NaN, which
+ *  computeReviewFloor treats as invalid input ⇒ class C (fail closed). */
+export function parseNumstat(stdout: string): ReviewFloorPathChange[] {
+  const changes: ReviewFloorPathChange[] = [];
+  for (const line of stdout.split('\n')) {
+    if (line.trim() === '') continue;
+    const [added = '', removed = '', ...rest] = line.split('\t');
+    changes.push({ path: rest.join('\t'), added: Number(added), removed: Number(removed) });
+  }
+  return changes;
+}
