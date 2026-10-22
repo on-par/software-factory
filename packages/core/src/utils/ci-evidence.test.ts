@@ -3,7 +3,11 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { CI_EVIDENCE_LIMITS, collectCiFailureEvidence } from './ci-evidence.js';
 
-function fakeOctokit(runs: unknown[] | Error, alerts?: unknown[] | Error | null) {
+function fakeOctokit(
+  runs: unknown[] | Error,
+  alerts?: unknown[] | Error | null,
+  downloadLogs?: (args: { job_id: number }) => Promise<{ data: unknown }>,
+) {
   const listForRef = vi.fn(async () => {
     if (runs instanceof Error) throw runs;
     return { data: { check_runs: runs } };
@@ -12,9 +16,14 @@ function fakeOctokit(runs: unknown[] | Error, alerts?: unknown[] | Error | null)
     if (alerts instanceof Error) throw alerts;
     return { data: alerts ?? [] };
   });
-  const rest = { checks: { listForRef }, ...(alerts !== null ? { codeScanning: { listAlertsForRepo } } : {}) };
+  const downloadJobLogsForWorkflowRun = vi.fn(downloadLogs ?? (async () => ({ data: '' })));
+  const rest = {
+    checks: { listForRef },
+    ...(alerts !== null ? { codeScanning: { listAlertsForRepo } } : {}),
+    ...(downloadLogs ? { actions: { downloadJobLogsForWorkflowRun } } : {}),
+  };
   const octokit: Octokit = Object.assign(Object.create(null), { rest });
-  return { octokit, listForRef, listAlertsForRepo };
+  return { octokit, listForRef, listAlertsForRepo, downloadJobLogsForWorkflowRun };
 }
 
 const base = { owner: 'o', repo: 'r', ref: 'branch', prNumber: 123 };
@@ -116,5 +125,61 @@ describe('collectCiFailureEvidence (#2814)', () => {
     const c = await collectCiFailureEvidence({ octokit: missing.octokit, ...base });
     expect(c.failingChecks).toHaveLength(1);
     expect(c.errors?.[0]).toMatch(/^code-scanning: /);
+  });
+});
+
+describe('collectCiFailureEvidence job logs (#3537)', () => {
+  const run = (id: number | undefined, name = `job ${id}`) => ({
+    id,
+    name,
+    status: 'completed',
+    conclusion: 'failure',
+  });
+
+  it('caps the tail at 150 lines and strips timestamps', async () => {
+    const log = Array.from({ length: 200 }, (_, i) => `2026-01-01T00:00:00.123Z line ${i}`).join('\n');
+    const { octokit } = fakeOctokit([run(1)], [], async () => ({ data: log }));
+    const evidence = await collectCiFailureEvidence({ octokit, ...base });
+    const excerpt = evidence.failingChecks[0].logExcerpt ?? '';
+    expect(excerpt.startsWith('…line 50\n')).toBe(true);
+    expect(excerpt.endsWith('line 199')).toBe(true);
+    expect(excerpt).not.toContain('2026-01-01');
+    expect(evidence.truncated).toBe(true);
+  });
+
+  it('fetches at most 3 jobs and skips CodeQL and id-less checks', async () => {
+    const { octokit, downloadJobLogsForWorkflowRun } = fakeOctokit(
+      [run(1, 'CodeQL'), run(undefined, 'noid'), run(2), run(3), run(4), run(5)],
+      [],
+      async () => ({ data: 'boom' }),
+    );
+    const evidence = await collectCiFailureEvidence({ octokit, ...base });
+    expect(downloadJobLogsForWorkflowRun.mock.calls.map(([a]) => a.job_id)).toEqual([2, 3, 4]);
+    expect(evidence.failingChecks.find((c) => c.name === 'job 2')?.logExcerpt).toBe('boom');
+    expect(evidence.failingChecks.find((c) => c.name === 'job 5')?.logExcerpt).toBeUndefined();
+  });
+
+  it('records a log error in logErrors, not errors', async () => {
+    const { octokit } = fakeOctokit([run(1)], [], async () => {
+      throw new Error('Not Found');
+    });
+    const evidence = await collectCiFailureEvidence({ octokit, ...base });
+    expect(evidence.logErrors).toEqual(['logs job 1: Not Found']);
+    expect(evidence.errors).toBeUndefined();
+  });
+
+  it('records a missing actions API in logErrors', async () => {
+    const { octokit } = fakeOctokit([run(1)], []);
+    const evidence = await collectCiFailureEvidence({ octokit, ...base });
+    expect(evidence.logErrors).toHaveLength(1);
+    expect(evidence.errors).toBeUndefined();
+  });
+
+  it('applies the char cap and decodes an ArrayBuffer', async () => {
+    const long = 'x'.repeat(CI_EVIDENCE_LIMITS.maxLogChars + 50);
+    const { octokit } = fakeOctokit([run(1)], [], async () => ({ data: new TextEncoder().encode(long).buffer }));
+    const evidence = await collectCiFailureEvidence({ octokit, ...base });
+    expect(evidence.failingChecks[0].logExcerpt).toHaveLength(CI_EVIDENCE_LIMITS.maxLogChars + 1);
+    expect(evidence.truncated).toBe(true);
   });
 });

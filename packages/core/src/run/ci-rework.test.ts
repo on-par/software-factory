@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { CiFailureEvidence } from '../types/index.js';
 import {
   attributableCodeqlAlerts,
+  attributableFailingChecks,
   attributeCiFailure,
   ciReworkSummary,
   listBaseFailingChecks,
@@ -178,5 +179,61 @@ describe('listBaseFailingChecks', () => {
       baseSha: 'deadbeef',
       failing: ['test'],
     });
+  });
+});
+
+describe('CI job rework (#3537)', () => {
+  const checks = [{ name: 'test (2/3)', conclusion: 'failure', logExcerpt: 'FAIL x' }];
+
+  it('ciReworkSummary with checks only has one ci_job result', () => {
+    const s = ciReworkSummary([], checks);
+    expect(s.results).toEqual([{ checker: 'ci_job', result: 'FAIL', details: expect.stringContaining('FAIL x') }]);
+    expect(s).toMatchObject({ failures: 1, total: 1 });
+  });
+
+  it('ciReworkSummary with both has ci_codeql then ci_job', () => {
+    const s = ciReworkSummary([alert('a.ts:1')], checks);
+    expect(s.results.map((r) => r.checker)).toEqual(['ci_codeql', 'ci_job']);
+    expect(s.total).toBe(2);
+  });
+
+  it('ciReworkSummary falls back to the summary then a placeholder', () => {
+    expect(ciReworkSummary([], [{ name: 'a', conclusion: 'failure', summary: 'sum' }]).results[0].details).toContain(
+      'sum',
+    );
+    expect(ciReworkSummary([], [{ name: 'a', conclusion: 'failure' }]).results[0].details).toContain(
+      '(no log available)',
+    );
+  });
+
+  it('ciReworkSummary with alerts only is unchanged', () => {
+    expect(ciReworkSummary([alert('a.ts:1')])).toEqual({
+      failures: 1,
+      passes: 0,
+      skips: 0,
+      total: 1,
+      results: [
+        {
+          checker: 'ci_codeql',
+          result: 'FAIL',
+          details: 'CodeQL alerts on files this PR changed:\n- js/xss at a.ts:1 — msg',
+        },
+      ],
+    });
+  });
+
+  it('attributableFailingChecks excludes non-attributable and CodeQL-named checks', () => {
+    const ev: CiFailureEvidence = {
+      failingChecks: [
+        { name: 'test (1/3)', conclusion: 'failure' },
+        { name: 'static', conclusion: 'failure' },
+        { name: 'CodeQL', conclusion: 'failure' },
+      ],
+      alerts: [],
+      truncated: false,
+    };
+    const attribution = attributeCiFailure(ev, [], { baseRef: 'main', baseSha: 'b'.repeat(40), failing: ['static'] });
+    expect(attributableFailingChecks(ev, attribution).map((c) => c.name)).toEqual(['test (1/3)']);
+    expect(attributableFailingChecks(undefined, attribution)).toEqual([]);
   });
 });

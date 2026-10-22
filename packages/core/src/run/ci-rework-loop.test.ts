@@ -17,6 +17,7 @@ import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
 import type { reworkWorker as realReworkWorker } from '../phases/check.js';
+import type { mergeBaseIntoWorktree as realMergeBase } from './ci-base-sync.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
 const planPhase = vi.fn<typeof realPlanPhase>();
@@ -26,6 +27,7 @@ const shipPhase = vi.fn<typeof realShipPhase>();
 const reworkWorker = vi.fn<typeof realReworkWorker>();
 const readWorktreeHead = vi.fn<(worktree: string) => Promise<string>>();
 const readReworkDiff = vi.fn<(worktree: string, fromSha: string) => Promise<string>>();
+const mergeBaseIntoWorktree = vi.fn<typeof realMergeBase>();
 const listPrChangedFiles = vi.fn<(...args: unknown[]) => Promise<string[]>>();
 const listBaseFailingChecks =
   vi.fn<(...args: unknown[]) => Promise<{ baseRef: string; baseSha: string; failing: string[] }>>();
@@ -107,6 +109,7 @@ function ports(log: Log): RunPorts {
     reworkWorker,
     readWorktreeHead,
     readReworkDiff,
+    mergeBaseIntoWorktree,
     listPrChangedFiles: listPrChangedFiles as RunPorts['listPrChangedFiles'],
     listBaseFailingChecks: listBaseFailingChecks as RunPorts['listBaseFailingChecks'],
   };
@@ -120,6 +123,7 @@ beforeEach(() => {
   reworkWorker.mockReset().mockResolvedValue({ failovers: [], modelCompleted: true });
   readWorktreeHead.mockReset().mockResolvedValue('a'.repeat(40));
   readReworkDiff.mockReset().mockResolvedValue('');
+  mergeBaseIntoWorktree.mockReset().mockResolvedValue({ ok: true, merged: true });
   listPrChangedFiles.mockReset().mockResolvedValue(['packages/core/src/sandbox/egress-proxy.ts']);
   listBaseFailingChecks.mockReset().mockResolvedValue({ baseRef: 'main', baseSha: 'b'.repeat(40), failing: [] });
 });
@@ -230,6 +234,128 @@ describe('shipWithCiRework — re-CHECK parity with the first CHECK (#3435)', ()
       { ...ports(vi.fn<Log>()), getIssueSpend: () => spend },
     );
     expect(outcome).toMatchObject({ state: 'parked', reason: 'fail' });
+    expect(shipPhase).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('shipWithCiRework — attributable non-CodeQL checks (#3537)', () => {
+  const EVIDENCE: CiFailureEvidence = {
+    failingChecks: [
+      { name: 'test (2/3)', conclusion: 'failure', logExcerpt: 'FAIL scripts/x.test.ts expected 1 to be 78' },
+    ],
+    alerts: [],
+    truncated: false,
+  };
+  const CI_FAIL = {
+    ok: false,
+    prNumber: 9,
+    reason: 'CI failed for PR #9',
+    ciOutcome: 'failure',
+    ciFailure: EVIDENCE,
+    headSha: 'sha',
+  } as const;
+  const SHIP_OK = { ok: true, prNumber: 9, headSha: 'sha2' };
+
+  it('an attributable non-CodeQL failing check gets a CI rework round', async () => {
+    shipPhase.mockResolvedValueOnce(CI_FAIL).mockResolvedValueOnce(SHIP_OK);
+    const log = vi.fn<Log>();
+    await runIssue(request, policy, ports(log));
+    expect(reworkWorker).toHaveBeenCalledTimes(1);
+    const summary = reworkWorker.mock.calls[0][0].summary;
+    const job = summary.results.find((r) => r.checker === 'ci_job');
+    expect(job?.details).toContain('FAIL scripts/x.test.ts expected 1 to be 78');
+    expect(job?.details).toContain('test (2/3)');
+    expect(checkPhase).toHaveBeenCalledTimes(2);
+    expect(shipPhase).toHaveBeenCalledTimes(2);
+    expect(shipPhase.mock.calls[1][0]).toHaveProperty('reentry');
+    expect(
+      log.mock.calls.some(
+        ([kind, msg]) => kind === 'rework' && /CI rework round 1\/2: .*test \(2\/3\)/.test(String(msg)),
+      ),
+    ).toBe(true);
+  });
+
+  it('a non-CodeQL CI rework round merges the base into the branch before the rework worker runs', async () => {
+    shipPhase.mockResolvedValueOnce(CI_FAIL).mockResolvedValueOnce(SHIP_OK);
+    await runIssue(request, policy, ports(vi.fn<Log>()));
+    expect(mergeBaseIntoWorktree).toHaveBeenCalledWith('/tmp/wt', 'main');
+    const merged = mergeBaseIntoWorktree.mock.invocationCallOrder[0];
+    expect(merged).toBeLessThan(readWorktreeHead.mock.invocationCallOrder[0]);
+    expect(merged).toBeLessThan(reworkWorker.mock.invocationCallOrder[0]);
+  });
+
+  it('a conflicting base merge parks conflict and runs no rework worker', async () => {
+    shipPhase.mockResolvedValue(CI_FAIL);
+    mergeBaseIntoWorktree.mockResolvedValue({
+      ok: false,
+      conflicts: ['a.ts'],
+      message: 'merging origin/main conflicted: a.ts',
+    });
+    expect(await runIssue(request, policy, ports(vi.fn<Log>()))).toMatchObject({ state: 'parked', reason: 'conflict' });
+    expect(reworkWorker).not.toHaveBeenCalled();
+  });
+
+  it('an attributable non-CodeQL failure that stays red parks after the CI rework budget is exhausted', async () => {
+    shipPhase.mockResolvedValue(CI_FAIL);
+    const log = vi.fn<Log>();
+    const outcome = await runIssue(request, policy, ports(log));
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'ci-failed' });
+    expect(
+      log.mock.calls.some(
+        ([kind, msg]) => kind === 'ci-failed' && String(msg).includes('CI rework budget exhausted after 2 rounds'),
+      ),
+    ).toBe(true);
+    expect(reworkWorker).toHaveBeenCalledTimes(2);
+  });
+
+  it('a non-CodeQL failing check that also fails on base runs no rework round', async () => {
+    shipPhase.mockResolvedValue(CI_FAIL);
+    listBaseFailingChecks.mockResolvedValue({ baseRef: 'main', baseSha: 'b'.repeat(40), failing: ['test (2/3)'] });
+    await runIssue(request, policy, ports(vi.fn<Log>()));
+    expect(reworkWorker).not.toHaveBeenCalled();
+    expect(mergeBaseIntoWorktree).not.toHaveBeenCalled();
+  });
+
+  it('FACTORY_MAX_CI_REWORK_ROUNDS=0 runs no rework round for an attributable non-CodeQL failure', async () => {
+    vi.stubEnv('FACTORY_MAX_CI_REWORK_ROUNDS', '0');
+    shipPhase.mockResolvedValue(CI_FAIL);
+    await runIssue(request, policy, ports(vi.fn<Log>()));
+    expect(reworkWorker).not.toHaveBeenCalled();
+    expect(mergeBaseIntoWorktree).not.toHaveBeenCalled();
+  });
+
+  it('a CodeQL-only failure does not merge the base', async () => {
+    shipPhase
+      .mockResolvedValueOnce({
+        ...CI_FAIL,
+        ciFailure: {
+          failingChecks: [{ name: 'CodeQL', conclusion: 'failure' }],
+          alerts: [{ ruleId: 'js/xss', location: 'packages/core/src/sandbox/egress-proxy.ts:1', message: 'x' }],
+          truncated: false,
+        },
+      })
+      .mockResolvedValueOnce(SHIP_OK);
+    await runIssue(request, policy, ports(vi.fn<Log>()));
+    expect(reworkWorker).toHaveBeenCalledTimes(1);
+    expect(mergeBaseIntoWorktree).not.toHaveBeenCalled();
+  });
+
+  it('a rework diff that raises a max-lines ceiling parks ci-failed suppression-attempt and does not re-ship', async () => {
+    shipPhase.mockResolvedValue(CI_FAIL);
+    readReworkDiff.mockResolvedValue(
+      'diff --git a/max-lines-baseline.json b/max-lines-baseline.json\n--- a/max-lines-baseline.json\n+++ b/max-lines-baseline.json\n@@ -1 +1 @@\n-  "a.ts": 10,\n+  "a.ts": 20,\n',
+    );
+    const log = vi.fn<Log>();
+    const outcome = await runIssue(request, policy, ports(log));
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'ci-failed' });
+    expect(
+      log.mock.calls.some(
+        ([kind, , data]) =>
+          kind === 'ci-failed' &&
+          (data as { ciFailure?: CiFailureEvidence } | undefined)?.ciFailure?.suppressionAttempt?.[0]?.rule ===
+            'max-lines-ceiling-raised',
+      ),
+    ).toBe(true);
     expect(shipPhase).toHaveBeenCalledTimes(1);
   });
 });

@@ -136,3 +136,52 @@ describe('git readers', () => {
     }
   });
 });
+
+describe('scanReworkDiff flags threshold changes (#3537)', () => {
+  const diff = (file: string, removed: string[], addedLines: string[]): string =>
+    `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -1 +1 @@\n` +
+    [...removed.map((l) => `-${l}`), ...addedLines.map((l) => `+${l}`)].join('\n') +
+    '\n';
+  const rules = (d: string): string[] => scanReworkDiff(d).map((f) => `${f.rule} ${f.match}`);
+
+  it('flags a raised max-lines-baseline.json ceiling and a lowered vitest.config.ts threshold', () => {
+    expect(rules(diff('max-lines-baseline.json', ['  "a.ts": 10,'], ['  "a.ts": 20,']))).toEqual([
+      'max-lines-ceiling-raised a.ts 10 -> 20',
+    ]);
+    expect(rules(diff('vitest.config.ts', ['  lines: 80,'], ['  lines: 70,']))).toEqual([
+      'coverage-threshold-lowered |lines 80 -> 70',
+    ]);
+  });
+
+  it('flags a new baseline key but not a lowered or deleted one', () => {
+    expect(rules(diff('max-lines-baseline.json', [], ['  "b.ts": 5']))).toEqual([
+      'max-lines-ceiling-raised b.ts (new) -> 5',
+    ]);
+    expect(rules(diff('max-lines-baseline.json', ['  "a.ts": 10,'], ['  "a.ts": 9,']))).toEqual([]);
+    expect(rules(diff('max-lines-baseline.json', ['  "a.ts": 10,'], []))).toEqual([]);
+  });
+
+  it('does not flag a raised vitest threshold or a non-threshold edit, but flags a removed metric', () => {
+    expect(rules(diff('vitest.config.ts', ['  lines: 80,'], ['  lines: 85,']))).toEqual([]);
+    expect(rules(diff('vitest.config.ts', ['  reporter: "x",'], ['  reporter: "y",']))).toEqual([]);
+    expect(rules(diff('vitest.config.ts', ['  branches: 70,'], []))).toEqual([
+      'coverage-threshold-lowered |branches 70 -> (removed)',
+    ]);
+  });
+
+  it('compares per-glob rows per glob', () => {
+    const found = rules(
+      diff(
+        'vitest.config.ts',
+        ["  'a/**': { lines: 90 },", "  'b/**': { lines: 90 },"],
+        ["  'a/**': { lines: 90 },", "  'b/**': { lines: 80 },"],
+      ),
+    );
+    expect(found).toEqual(['coverage-threshold-lowered b/**|lines 90 -> 80']);
+  });
+
+  it('describeSuppression renders a threshold finding', () => {
+    const f = scanReworkDiff(diff('vitest.config.ts', ['  lines: 80,'], ['  lines: 70,']));
+    expect(describeSuppression(f)).toContain('coverage-threshold-lowered |lines 80 -> 70');
+  });
+});

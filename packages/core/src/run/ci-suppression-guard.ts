@@ -46,12 +46,66 @@ function pathRules(path: string): string[] {
   return rules;
 }
 
+const BASELINE_FILE = 'max-lines-baseline.json';
+const VITEST_CONFIG = /^vitest\.config\.(ts|mts|cts|js|mjs)$/;
+
+/** Ceilings raised or added in max-lines-baseline.json, and coverage thresholds lowered or removed in vitest.config.*. */
+function thresholdFindings(file: string, removed: readonly string[], added: readonly string[]): CiSuppressionFinding[] {
+  const out: CiSuppressionFinding[] = [];
+  if (file.split('/').pop() === BASELINE_FILE) {
+    const parse = (lines: readonly string[]): Map<string, number> => {
+      const m = new Map<string, number>();
+      for (const l of lines) {
+        const hit = /^\s*"([^"]+)"\s*:\s*(\d+)/.exec(l);
+        if (hit) m.set(hit[1], Number(hit[2]));
+      }
+      return m;
+    };
+    const oldV = parse(removed);
+    for (const [k, v] of parse(added)) {
+      const prev = oldV.get(k);
+      if (prev === undefined || v > prev) {
+        out.push({
+          kind: 'threshold',
+          rule: 'max-lines-ceiling-raised',
+          file,
+          match: `${k} ${prev ?? '(new)'} -> ${v}`,
+        });
+      }
+    }
+    return out;
+  }
+  const parse = (lines: readonly string[]): Map<string, number> => {
+    const m = new Map<string, number>();
+    for (const l of lines) {
+      const prefix = /^\s*['"]([^'"]+)['"]\s*:/.exec(l)?.[1] ?? '';
+      for (const hit of l.matchAll(/\b(lines|functions|branches|statements)\s*:\s*(\d+(?:\.\d+)?)/g)) {
+        m.set(`${prefix}|${hit[1]}`, Number(hit[2]));
+      }
+    }
+    return m;
+  };
+  const newV = parse(added);
+  for (const [k, v] of parse(removed)) {
+    const next = newV.get(k);
+    if (next === undefined || next < v) {
+      out.push({
+        kind: 'threshold',
+        rule: 'coverage-threshold-lowered',
+        file,
+        match: `${k} ${v} -> ${next ?? '(removed)'}`,
+      });
+    }
+  }
+  return out;
+}
+
 /** Scans a unified git diff for suppression comments (added lines) and protected paths (any file header). */
 export function scanReworkDiff(diff: string): CiSuppressionFinding[] {
   const findings: CiSuppressionFinding[] = [];
   const seen = new Set<string>();
   const add = (f: CiSuppressionFinding): void => {
-    const key = `${f.kind}|${f.rule}|${f.file}|${f.line ?? ''}|${f.kind === 'path' ? f.match : ''}`;
+    const key = `${f.kind}|${f.rule}|${f.file}|${f.line ?? ''}|${f.kind === 'comment' ? '' : f.match}`;
     if (seen.has(key)) return;
     seen.add(key);
     findings.push(f);
@@ -64,6 +118,14 @@ export function scanReworkDiff(diff: string): CiSuppressionFinding[] {
   let file = '(unknown)';
   let line: number | undefined;
   let inHunk = false;
+  const edits = new Map<string, { removed: string[]; added: string[] }>();
+  const editsFor = (path: string): { removed: string[]; added: string[] } | undefined => {
+    const base = path.split('/').pop() ?? '';
+    if (base !== BASELINE_FILE && !VITEST_CONFIG.test(base)) return undefined;
+    let e = edits.get(path);
+    if (!e) edits.set(path, (e = { removed: [], added: [] }));
+    return e;
+  };
   for (const raw of diff.split('\n')) {
     const header = /^diff --git a\/(.+) b\/(.+)$/.exec(raw);
     if (header) {
@@ -98,8 +160,10 @@ export function scanReworkDiff(diff: string): CiSuppressionFinding[] {
       line = Number(hunk[1]);
       continue;
     }
+    if (inHunk && raw.startsWith('-')) editsFor(file)?.removed.push(raw.slice(1));
     if (raw.startsWith('+')) {
       const text = raw.slice(1);
+      if (inHunk) editsFor(file)?.added.push(text);
       for (const { rule, test } of SUPPRESSION_COMMENT_RULES) {
         if (test(text)) {
           add({
@@ -116,6 +180,7 @@ export function scanReworkDiff(diff: string): CiSuppressionFinding[] {
       line++;
     }
   }
+  for (const [path, e] of edits) for (const f of thresholdFindings(path, e.removed, e.added)) add(f);
   return findings;
 }
 

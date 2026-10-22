@@ -106,6 +106,7 @@ function ports(log: Log): RunPorts {
     reworkWorker,
     readWorktreeHead,
     readReworkDiff,
+    mergeBaseIntoWorktree: async () => ({ ok: true, merged: false }),
     listPrChangedFiles: listPrChangedFiles as RunPorts['listPrChangedFiles'],
     listBaseFailingChecks: listBaseFailingChecks as RunPorts['listBaseFailingChecks'],
   };
@@ -261,27 +262,31 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     );
   });
 
-  it('parks ci-failed without baseline and without rework for a check not failing on base', async () => {
+  it('reworks a check not failing on base (#3537) and parks without baseline once the budget is spent', async () => {
     shipPhase.mockResolvedValue(TEST_FAIL);
     const log = vi.fn<Log>();
     expect(await runIssue(request, policy, ports(log))).toMatchObject({ reason: 'ci-failed' });
-    expect(reworkWorker).not.toHaveBeenCalled();
+    expect(reworkWorker).toHaveBeenCalledTimes(2);
     expect(log).toHaveBeenCalledWith(
       'ci-failed',
-      'ship phase failed: CI failed for PR #9',
+      'ship phase failed: CI failed for PR #9 — CI rework budget exhausted after 2 rounds',
       expect.objectContaining({
         ciFailure: expect.objectContaining({ attribution: expect.objectContaining({ baseline: false }) }),
       }),
     );
   });
 
-  it('parks ci-failed without baseline when the base lookup throws', async () => {
+  it('reworks every check as attributable when the base lookup throws (#3537)', async () => {
     listBaseFailingChecks.mockRejectedValue(new Error('nope'));
     shipPhase.mockResolvedValue(TEST_FAIL);
     const log = vi.fn<Log>();
     expect(await runIssue(request, policy, ports(log))).toMatchObject({ reason: 'ci-failed' });
-    expect(reworkWorker).not.toHaveBeenCalled();
-    expect(log).toHaveBeenCalledWith('ci-failed', 'ship phase failed: CI failed for PR #9', expect.anything());
+    expect(reworkWorker).toHaveBeenCalledTimes(2);
+    expect(log).toHaveBeenCalledWith(
+      'ci-failed',
+      'ship phase failed: CI failed for PR #9 — CI rework budget exhausted after 2 rounds',
+      expect.anything(),
+    );
   });
 
   it('reworks the attributable alert in a mixed failure and marks the base-failing check non-attributable in the evidence', async () => {

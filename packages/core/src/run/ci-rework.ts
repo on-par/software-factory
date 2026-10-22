@@ -8,6 +8,7 @@ import type {
   CiAttribution,
   CiAttributionItem,
   CiCodeScanningAlert,
+  CiFailingCheck,
   CiFailureEvidence,
 } from '../types/index.js';
 
@@ -20,6 +21,12 @@ const LIST_FILES_MAX_PAGES = 30;
 export const CI_REWORK_INSTRUCTIONS =
   'CI (CodeQL) flagged the alerts above on files this PR changed. Fix the root cause in the code at the listed file:line. ' +
   'Suppression is forbidden: do not add `// codeql[...]`, `lgtm`, `eslint-disable` or `@ts-ignore` comments, do not exclude queries or paths in any config, and do not dismiss alerts. ' +
+  'Commit the fix.';
+
+export const CI_JOB_REWORK_INSTRUCTIONS =
+  'The CI jobs listed above failed on this PR merged with the current base, and the base is already merged into your branch. ' +
+  'Reproduce the failure locally (run the failing test or script) and fix the root cause. ' +
+  'Suppression is forbidden: do not skip or delete tests, do not add `.skip` or `.only`, do not raise a `max-lines-baseline.json` ceiling, do not lower a `vitest.config.ts` threshold, and do not edit CI workflows. ' +
   'Commit the fix.';
 
 /** Non-negative integer from FACTORY_MAX_CI_REWORK_ROUNDS (0 disables CI rework); anything else falls back to the default. */
@@ -117,17 +124,40 @@ export async function listBaseFailingChecks(
   return { baseRef, baseSha, failing: [...failing] };
 }
 
-/** The same CheckSummary shape local CHECK rework consumes, with one FAIL `ci_codeql` result. */
-export function ciReworkSummary(alerts: readonly CiCodeScanningAlert[]): CheckSummary {
-  const lines = alerts.map((a) => `- ${a.ruleId} at ${a.location} — ${a.message}`);
-  const details = ['CodeQL alerts on files this PR changed:', ...lines].join('\n');
-  return {
-    failures: 1,
-    passes: 0,
-    skips: 0,
-    total: 1,
-    results: [{ checker: 'ci_codeql', result: 'FAIL', details }],
-  };
+/** Failing non-CodeQL checks attributed to this PR (not also failing on base), with their log excerpts. */
+export function attributableFailingChecks(
+  evidence: CiFailureEvidence | undefined,
+  attribution: CiAttribution,
+): CiFailingCheck[] {
+  if (!evidence) return [];
+  const names = new Set(
+    attribution.items.filter((i) => i.kind === 'check' && i.attributable && !/codeql/i.test(i.ref)).map((i) => i.ref),
+  );
+  return evidence.failingChecks.filter((c) => names.has(c.name) && !/codeql/i.test(c.name));
+}
+
+/** The same CheckSummary shape local CHECK rework consumes: a FAIL `ci_codeql` result for alerts and one `ci_job` per failing job. */
+export function ciReworkSummary(
+  alerts: readonly CiCodeScanningAlert[],
+  checks: readonly CiFailingCheck[] = [],
+): CheckSummary {
+  const results: CheckSummary['results'] = [];
+  if (alerts.length > 0) {
+    const lines = alerts.map((a) => `- ${a.ruleId} at ${a.location} — ${a.message}`);
+    results.push({
+      checker: 'ci_codeql',
+      result: 'FAIL',
+      details: ['CodeQL alerts on files this PR changed:', ...lines].join('\n'),
+    });
+  }
+  for (const c of checks) {
+    results.push({
+      checker: 'ci_job',
+      result: 'FAIL',
+      details: `CI job "${c.name}" (${c.conclusion}) failed on the PR merge ref. Last log lines:\n${c.logExcerpt ?? c.summary ?? '(no log available)'}`,
+    });
+  }
+  return { failures: results.length, passes: 0, skips: 0, total: results.length, results };
 }
 
 export async function listPrChangedFiles(

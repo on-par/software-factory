@@ -5,6 +5,8 @@ export interface CiFailingCheck {
   name: string;
   conclusion: string;
   summary?: string;
+  /** The job's failed-log tail, already capped (#3537). */
+  logExcerpt?: string;
 }
 
 /** One open code-scanning alert on the PR head (#2814). `location` is "path:line" (or "path" without a line). */
@@ -34,8 +36,8 @@ export interface CiAttribution {
 
 /** One suppression-guard hit in a SHIP CI rework diff (#2818). */
 export interface CiSuppressionFinding {
-  kind: 'comment' | 'path';
-  /** e.g. 'codeql-comment', 'lgtm-comment', 'nosec-comment', 'eslint-disable-security', 'workflow-path', 'codeql-path', 'sarif-path', 'guard-error'. */
+  kind: 'comment' | 'path' | 'threshold';
+  /** e.g. 'codeql-comment', 'lgtm-comment', 'nosec-comment', 'eslint-disable-security', 'workflow-path', 'codeql-path', 'sarif-path', 'guard-error', 'max-lines-ceiling-raised', 'coverage-threshold-lowered'. */
   rule: string;
   /** Repo-relative path, '(unknown)' when the diff had no file header. */
   file: string;
@@ -53,6 +55,8 @@ export interface CiFailureEvidence {
   truncated: boolean;
   /** Best-effort collection errors ("checks: …", "code-scanning: …"); omitted when none. */
   errors?: string[];
+  /** Best-effort job-log fetch failures (#3537); kept out of `errors` so they never change attribution. */
+  logErrors?: string[];
   /** Which failing items the PR caused versus baseline failures (#2817). */
   attribution?: CiAttribution;
   /** Suppression-guard hits that parked a CI rework round (#2818). */
