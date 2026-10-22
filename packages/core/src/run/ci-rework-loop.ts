@@ -9,12 +9,15 @@ import type { PlanResult } from '../phases/plan.js';
 import { stackPositionFor } from '../phases/stack-order.js';
 import type { shipPhase as shipPhaseDefault, ShipResult } from '../phases/ship.js';
 import type { ReviewRouting } from '../review/routing.js';
-import type { CiFailureEvidence, CiSuppressionFinding, Constitution } from '../types/index.js';
+import type { CiFailingCheck, CiFailureEvidence, CiSuppressionFinding, Constitution } from '../types/index.js';
+import { collectFailingJobLogs as collectFailingJobLogsDefault } from '../utils/ci-evidence.js';
 import {
   attributableCodeqlAlerts,
   attributeCiFailure,
   type BaseFailingChecks,
+  CI_CHECK_REWORK_INSTRUCTIONS,
   CI_REWORK_INSTRUCTIONS,
+  ciCheckReworkSummary,
   ciReworkSummary,
   listBaseFailingChecks as listBaseFailingChecksDefault,
   listPrChangedFiles as listPrChangedFilesDefault,
@@ -23,6 +26,7 @@ import {
 } from './ci-rework.js';
 import {
   describeSuppression,
+  mergeBaseIntoWorktree as mergeBaseIntoWorktreeDefault,
   readReworkDiff as readReworkDiffDefault,
   readWorktreeHead as readWorktreeHeadDefault,
   scanReworkDiff,
@@ -43,6 +47,10 @@ export interface CiReworkPorts {
   readWorktreeHead?: typeof readWorktreeHeadDefault;
   /** Reads the diff a CI rework round produced (#2818); defaults to git diff <before> HEAD. */
   readReworkDiff?: typeof readReworkDiffDefault;
+  /** Fetches and merges origin/<PR base> into the worktree before a non-CodeQL CI rework round (#3537); no push. */
+  mergeBaseIntoWorktree?: typeof mergeBaseIntoWorktreeDefault;
+  /** Downloads the failing Actions jobs' log tails for a non-CodeQL CI rework round (#3537). */
+  collectFailingJobLogs?: typeof collectFailingJobLogsDefault;
 }
 
 export interface CiReworkLoopContext {
@@ -87,6 +95,16 @@ export interface ShipWithCiReworkResult {
 
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
+/** Failing checks the PR caused (not failing on base) that are not CodeQL, in ship.ciFailure order. */
+function attributableNonCodeqlChecks(
+  evidence: CiFailureEvidence | undefined,
+  items: readonly { kind: string; ref: string; attributable: boolean }[],
+): CiFailingCheck[] {
+  if (!evidence) return [];
+  const names = new Set(items.filter((i) => i.kind === 'check' && i.attributable).map((i) => i.ref));
+  return evidence.failingChecks.filter((c) => names.has(c.name) && !/codeql/i.test(c.name));
+}
+
 const guardError = (match: string): CiSuppressionFinding => ({
   kind: 'path',
   rule: 'guard-error',
@@ -98,6 +116,9 @@ const guardError = (match: string): CiSuppressionFinding => ({
  * Runs SHIP. When the CI watch fails on CodeQL alerts in files the PR changed, feeds them to the
  * BUILD rework worker, re-runs CHECK and re-enters SHIP on the same PR, up to
  * resolveMaxCiReworkRounds() rounds — a counter separate from CHECK's own rework rounds.
+ * When there are no such alerts but a non-CodeQL check fails that is not failing on the PR base (#3537),
+ * each round first merges origin/<base> into the worktree (a conflict parks `conflict`) and feeds the
+ * failing jobs' log tails to the worker, under the same budget and guard.
  * After each rework round the committed diff is scanned for suppression attempts (#2818); any hit,
  * or an unreadable diff, parks ci-failed before the re-CHECK, push or re-watch.
  */
@@ -111,6 +132,8 @@ export async function shipWithCiRework(
   const listBase = ports.listBaseFailingChecks ?? listBaseFailingChecksDefault;
   const readHead = ports.readWorktreeHead ?? readWorktreeHeadDefault;
   const readDiff = ports.readReworkDiff ?? readReworkDiffDefault;
+  const mergeBase = ports.mergeBaseIntoWorktree ?? mergeBaseIntoWorktreeDefault;
+  const collectLogs = ports.collectFailingJobLogs ?? collectFailingJobLogsDefault;
   const { builtRoute, builtModel, planSlice } = inputs;
   const log = ports.events();
   const shipOpts = {
@@ -172,16 +195,22 @@ export async function shipWithCiRework(
       break;
     }
     const attributable = attributableCodeqlAlerts(ship.ciFailure, changed);
-    if (attributable.length === 0) break;
+    const failingChecks =
+      attributable.length === 0 && base ? attributableNonCodeqlChecks(ship.ciFailure, attribution.items) : [];
+    if (attributable.length === 0 && failingChecks.length === 0) break;
     if (rounds >= maxRounds) {
       suffix = ` — CI rework budget exhausted after ${rounds} round${rounds === 1 ? '' : 's'}`;
       break;
     }
     rounds++;
     const skipped = attribution.items.filter((i) => !i.attributable).map((i) => i.ref);
+    const what =
+      attributable.length > 0
+        ? `${attributable.length} attributable CodeQL alert(s)`
+        : `attributable failing check(s) ${failingChecks.map((c) => c.name).join(', ')}`;
     log(
       'rework',
-      `CI rework round ${rounds}/${maxRounds}: ${attributable.length} attributable CodeQL alert(s) on PR #${ship.prNumber}` +
+      `CI rework round ${rounds}/${maxRounds}: ${what} on PR #${ship.prNumber}` +
         (skipped.length > 0 ? `; non-attributable: ${skipped.join(', ')}` : ''),
       lastCiFailure ? { ciFailure: lastCiFailure } : undefined,
     );
@@ -194,6 +223,36 @@ export async function shipWithCiRework(
       const base = lastCiFailure ?? { failingChecks: [], alerts: [], truncated: false };
       return { ship, parked: { reason: 'ci-failed', message, ciFailure: { ...base, suppressionAttempt: findings } } };
     };
+    let logs: Awaited<ReturnType<typeof collectLogs>> = { jobLogs: [], errors: [] };
+    if (attributable.length === 0 && base) {
+      const merge = await mergeBase(ports.workspace.path, base.baseRef);
+      if (!merge.ok && merge.conflict) {
+        const message = `merge of origin/${base.baseRef} into ${request.branch} conflicts before CI rework round ${rounds}: ${merge.paths.join(', ')}`;
+        ports.events('ship')('ship', message);
+        return { ship, parked: { reason: 'conflict', message, ciFailure: lastCiFailure } };
+      }
+      if (!merge.ok) {
+        suffix = ` — could not merge origin/${base.baseRef}: ${merge.message}`;
+        break;
+      }
+      if (merge.merged) {
+        ports.events('ship')(
+          'ship',
+          `merged origin/${base.baseRef} into ${request.branch} before CI rework round ${rounds}`,
+        );
+      }
+      logs = await collectLogs({
+        octokit: ports.octokit,
+        owner,
+        repo: repoName,
+        ref: ship.headSha ?? request.branch,
+        checkNames: failingChecks.map((c) => c.name),
+      });
+      lastCiFailure = {
+        ...(lastCiFailure ?? { failingChecks: [], alerts: [], truncated: false }),
+        jobLogs: logs.jobLogs,
+      };
+    }
     let beforeSha: string;
     try {
       beforeSha = await readHead(ports.workspace.path);
@@ -204,7 +263,10 @@ export async function shipWithCiRework(
       issue: request.issue,
       worktree: ports.workspace.path,
       specPath: request.specPath,
-      summary: ciReworkSummary(attributable),
+      summary:
+        attributable.length > 0
+          ? ciReworkSummary(attributable)
+          : ciCheckReworkSummary(failingChecks, logs.jobLogs, logs.errors),
       constitution: ctx.constitution,
       router: ports.router,
       log: ports.events('build'),
@@ -216,7 +278,7 @@ export async function shipWithCiRework(
       ...reworkRouteFor(builtRoute, builtModel),
       runId: ctx.runId,
       onWorkerResult: ctx.checkOpts.onWorkerResult,
-      extraInstructions: CI_REWORK_INSTRUCTIONS,
+      extraInstructions: attributable.length > 0 ? CI_REWORK_INSTRUCTIONS : CI_CHECK_REWORK_INSTRUCTIONS,
     });
     if (!worked.modelCompleted) {
       suffix = ' — CI rework worker never ran';
