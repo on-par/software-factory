@@ -2957,6 +2957,8 @@ describe('cli', () => {
     it('GitHub mode builds one planned lane per discovered lane, wired to that lane via the queue', async () => {
       const calls: any[] = [];
       const fakeQueue: GithubQueue = {
+        claimSettleMs: 0,
+        settle: async () => {},
         claimNext: async (lane) => {
           calls.push(['claimNext', lane]);
           return { issue: 42, decision: { kind: 'build' } };
@@ -2999,6 +3001,8 @@ describe('cli', () => {
 
     it('GitHub mode returns no lanes when nothing is queued', async () => {
       const fakeQueue: GithubQueue = {
+        claimSettleMs: 0,
+        settle: async () => {},
         claimNext: async () => null,
         release: async () => {},
         heartbeat: async () => true,
@@ -3026,6 +3030,8 @@ describe('cli', () => {
     it('binds claimNext, releaseIssue, heartbeat, and countRemaining to the given lane through the queue', async () => {
       const calls: any[] = [];
       const fakeQueue: GithubQueue = {
+        claimSettleMs: 0,
+        settle: async () => {},
         claimNext: async (lane) => {
           calls.push(['claimNext', lane]);
           return { issue: 3, decision: { kind: 'build' } };

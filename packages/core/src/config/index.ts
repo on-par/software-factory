@@ -297,6 +297,19 @@ const FactoryConfigSchema = z.object({
       comment: z.string().optional(),
     })
     .default({ enabled: true, cooldown_minutes: 30, fallback_model: 'claude-sonnet-5' }),
+  queue: z
+    .object({
+      claim_settle_ms: z
+        .number()
+        .int()
+        .nonnegative()
+        .default(3000)
+        .describe(
+          'Milliseconds a lane waits after writing its claim before confirming it (#3145). 0 turns the wait off.',
+        ),
+      comment: z.string().optional(),
+    })
+    .default({ claim_settle_ms: 3000 }),
   adr: z.object({ mandate: z.boolean().default(false), comment: z.string().optional() }).default({ mandate: false }),
   /** Ship-it lane workspace isolation (#1535). `'host'` is the existing sibling-worktree
    *  behavior; `'disposable-docker'` opts a repo into a managed, labeled container per
@@ -374,6 +387,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'environment',
   'host',
   'auto_failover',
+  'queue',
   'adr',
   'workspace',
 ];

@@ -368,6 +368,7 @@ function runtimeNamespace(): Node[] {
     section('environment'),
     section('host'),
     section('auto_failover'),
+    section('queue'),
     section('ingest'),
     intake,
     section('filing'),

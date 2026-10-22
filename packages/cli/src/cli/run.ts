@@ -30,6 +30,7 @@ import {
   resolveBaseHealthChecks,
   resolveHostLoadGuard,
   resolveLocalOnly,
+  resolveQueueClaimSettleMs,
   resolveRunUsageHarness,
   slugify,
   withAdmissionGuard,
@@ -159,6 +160,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
           client: createOctokitQueueClient(octokit),
           owner,
           repo,
+          claimSettleMs: resolveQueueClaimSettleMs(factoryConfig),
           preflight: withAdmissionGuard({
             reader: admissionStateReaderFor(paths.state),
             preflight: (issue) =>
