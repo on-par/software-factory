@@ -5,11 +5,12 @@
 // of each detected ecosystem (#2659, #2661 for .NET). Known telemetry hosts are classified
 // separately in the egress logs (#2664).
 
-import { readdirSync, statSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import { join } from 'node:path';
 import type { Duplex } from 'node:stream';
+import { detectDotnetProject } from '../environment/dotnet.js';
 
 export interface EgressProxyOptions {
   allowHosts: readonly string[];
@@ -83,9 +84,7 @@ export const ECOSYSTEM_ALLOW_HOSTS: Readonly<Record<Ecosystem, readonly string[]
   dotnet: ['api.nuget.org', '*.nuget.org'],
 };
 
-const DOTNET_PROJECT_EXTENSIONS = ['.sln', '.slnx', '.csproj', '.fsproj', '.vbproj'];
-
-/** A root package.json file is Node; a root .sln/.slnx/.csproj/.fsproj/.vbproj file is .NET.
+/** A root package.json file is Node; .NET is decided by detectDotnetProject (root or up to 3 levels deep, #3472).
  *  A missing dir or unreadable path detects nothing. */
 export function detectEcosystems(repoDir: string): Ecosystem[] {
   if (repoDir === '') return [];
@@ -95,16 +94,7 @@ export function detectEcosystems(repoDir: string): Ecosystem[] {
   } catch {
     // no package.json
   }
-  try {
-    const entries = readdirSync(repoDir, { withFileTypes: true });
-    if (
-      entries.some((e) => e.isFile() && DOTNET_PROJECT_EXTENSIONS.some((ext) => e.name.toLowerCase().endsWith(ext)))
-    ) {
-      found.push('dotnet');
-    }
-  } catch {
-    // unreadable dir
-  }
+  if (detectDotnetProject(repoDir)) found.push('dotnet');
   return found;
 }
 

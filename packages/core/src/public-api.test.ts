@@ -35,6 +35,7 @@ const PUBLIC_API_KEYS = [
   'resolveReadinessUpdateIssueBody',
   'resolvePlanApproval',
   'resolveProcessGroupGraceMs',
+  'resolveCiWatchDeadlineMs',
   'resolveSkipCI',
   'resolveTimeouts',
   // Repo config (.factory/config.json)
