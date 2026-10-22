@@ -25,6 +25,7 @@ import type { ApprovalGate } from '../approvals/index.js';
 import type { checkBaseHealth } from '../checkers/base-health.js';
 import { laneEnv } from '../environment/index.js';
 import { buildPhase as buildPhaseDefault } from '../phases/build.js';
+import { installLaneDependencies as installLaneDependenciesDefault } from './lane-install.js';
 import {
   checkPhase as checkPhaseDefault,
   type CheckPhaseResult,
@@ -250,6 +251,8 @@ export interface RunPorts extends CiReworkPorts {
    *  the real runIssue sequencing/breaker/budget/constitution logic instead of reimplementing it. */
   planPhase?: typeof planPhaseDefault;
   buildPhase?: typeof buildPhaseDefault;
+  /** Frozen JS dependency install in the lane worktree before BUILD (#3370). Defaults to installLaneDependencies; never throws. */
+  installLaneDependencies?: typeof installLaneDependenciesDefault;
   checkPhase?: typeof checkPhaseDefault;
   hostBuildSlot?: <T>(phase: 'build' | 'check', fn: () => Promise<T>) => Promise<T>;
   shipPhase?: typeof shipPhaseDefault;
@@ -744,6 +747,16 @@ async function runIssueOnce(
 
       // BUILD
       await setPhase('build');
+      await (ports.installLaneDependencies ?? installLaneDependenciesDefault)({
+        worktree: ports.workspace.path,
+        env: laneEnv(appPort, process.env, appBaseUrl, ports.workspace.path, runId),
+        sandbox: request.sandboxPolicy,
+        localOnly: request.localOnly,
+        onPgid,
+        log: ports.events('build'),
+      }).catch((err: unknown) => {
+        ports.events('build')('lane_install_failed', `install threw — continuing to BUILD: ${String(err)}`);
+      });
       let buildSteering: ConsumedSteering | undefined;
       if (request.options.interactive) {
         buildSteering = ports.drainSteering?.();

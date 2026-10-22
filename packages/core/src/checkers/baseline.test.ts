@@ -11,7 +11,7 @@ import type { ModelRouter } from '../router/index.js';
 import type { CheckerOutput, Constitution } from '../types/index.js';
 import { runCommand } from '../utils/command-runner.js';
 import { BaselineCache, hashBaselineCheckerConfig, hashBaselineEnv } from './baseline-cache.js';
-import { baseInstallCommand, compareBaseline, extractFailingTestNames, runBaselineCheckers } from './baseline.js';
+import { dependencyInstallCommand, compareBaseline, extractFailingTestNames, runBaselineCheckers } from './baseline.js';
 import { type CheckerContext, type runAllCheckers, summarizeCheckerOutputs } from './index.js';
 
 const execFile = promisify(execFileCb);
@@ -96,7 +96,7 @@ describe('extractFailingTestNames', () => {
   });
 });
 
-describe('baseInstallCommand', () => {
+describe('dependencyInstallCommand', () => {
   async function dirWith(...files: string[]): Promise<string> {
     const dir = await mkdtemp(join(tmpdir(), 'baseline-install-'));
     tempDirs.add(dir);
@@ -105,27 +105,27 @@ describe('baseInstallCommand', () => {
   }
 
   it('is null without package.json', async () => {
-    expect(baseInstallCommand(await dirWith('pyproject.toml'))).toBeNull();
+    expect(dependencyInstallCommand(await dirWith('pyproject.toml'))).toBeNull();
   });
 
   it('picks the frozen install for the lockfile', async () => {
-    expect(baseInstallCommand(await dirWith('package.json', 'package-lock.json'))).toEqual([
+    expect(dependencyInstallCommand(await dirWith('package.json', 'package-lock.json'))).toEqual([
       'npm',
       'ci',
       '--no-audit',
       '--no-fund',
     ]);
-    expect(baseInstallCommand(await dirWith('package.json', 'pnpm-lock.yaml'))).toEqual([
+    expect(dependencyInstallCommand(await dirWith('package.json', 'pnpm-lock.yaml'))).toEqual([
       'pnpm',
       'install',
       '--frozen-lockfile',
     ]);
-    expect(baseInstallCommand(await dirWith('package.json', 'yarn.lock'))).toEqual([
+    expect(dependencyInstallCommand(await dirWith('package.json', 'yarn.lock'))).toEqual([
       'yarn',
       'install',
       '--frozen-lockfile',
     ]);
-    expect(baseInstallCommand(await dirWith('package.json', 'bun.lockb'))).toEqual([
+    expect(dependencyInstallCommand(await dirWith('package.json', 'bun.lockb'))).toEqual([
       'bun',
       'install',
       '--frozen-lockfile',
@@ -133,7 +133,7 @@ describe('baseInstallCommand', () => {
   });
 
   it('falls back to npm install without writing a lockfile', async () => {
-    expect(baseInstallCommand(await dirWith('package.json'))).toEqual([
+    expect(dependencyInstallCommand(await dirWith('package.json'))).toEqual([
       'npm',
       'install',
       '--no-audit',
