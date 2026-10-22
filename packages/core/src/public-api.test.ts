@@ -549,7 +549,9 @@ const INTERNAL_API_KEYS = [
   'resolveEffectiveConfig',
   'resolveExperimental',
   'resolveLocalOnly',
-  ...'resolveHostMaxBuilds evaluateRisk decideRiskMerge NEEDS_HUMAN_LABEL RISK_HIGH_LABEL RISK_MED_LABEL'.split(' '), // #3380, #3381
+  ...'resolveHostMaxBuilds resolveQueueClaimSettleMs evaluateRisk decideRiskMerge NEEDS_HUMAN_LABEL RISK_HIGH_LABEL RISK_MED_LABEL'.split(
+    ' ',
+  ), // #3380, #3381
   ...'RISK_RECEIPT_END RISK_RECEIPT_START listPrChangedFiles publishRiskReceipt renderRiskReceipt'.split(' '), // #3386
   ...'upsertRiskReceipt riskPolicyConfigFile loadRiskPolicy formatRiskPolicy'.split(' '), // #3387
   ...'resolveHostLoadGuard evaluateLoadGuard formatLoadHold readHostLoad resolveBaseHealthChecks'.split(' '), // #3048, #3290
@@ -757,6 +759,7 @@ const INTERNAL_API_KEYS = [
   'createOctokitQueueClient',
   'defaultClaimantId',
   'DEFAULT_CLAIM_LEASE_MS',
+  'DEFAULT_CLAIM_SETTLE_MS',
   'IN_PROGRESS_LABEL',
   'LANE_LABEL_PREFIX',
   'laneLabel',

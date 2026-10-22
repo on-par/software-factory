@@ -121,6 +121,7 @@ export interface FactoryDefaults {
     comment?: string;
   };
   auto_failover: { enabled: boolean; cooldown_minutes: number; fallback_model: string; comment?: string };
+  queue: { claim_settle_ms: number; comment?: string };
 }
 
 /** Model registry: providers, costs, capabilities, tiers and failover chains. */
@@ -716,5 +717,10 @@ export const defaultFactoryConfig: FactoryDefaults = {
     fallback_model: 'claude-sonnet-5',
     comment:
       'Supervisor circuit breaker for cross-harness build failover. On a quota trip (usage_cap/rate_limit) the Codex provider is skipped for cooldown_minutes: the lane that trips it falls over to fallback_model (when available); every later lane during the cooldown is routed straight to claude via the existing codexDisabled path (default tier order, not necessarily fallback_model). Configure enabled, cooldown_minutes and fallback_model in .factory/config.json; environment variables do not override this policy.',
+  },
+  queue: {
+    claim_settle_ms: 3000,
+    comment:
+      'GitHub-labels queue settings. claim_settle_ms is how long a lane waits after writing its claim before it confirms the claim, so a lane on another host racing for the same issue is seen (#3145). Non-negative integer milliseconds; 0 turns the wait off.',
   },
 };

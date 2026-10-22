@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import type { Octokit } from '@octokit/rest';
 import { getFactoryPaths, parseQueue, resolveIngestConfig } from '@on-par/factory-core';
 import type { QueueDiagnostic } from '@on-par/factory-core';
-import { createGithubQueue, createOctokitQueueClient } from '@on-par/factory-core/internal';
+import { createGithubQueue, createOctokitQueueClient, resolveQueueClaimSettleMs } from '@on-par/factory-core/internal';
 
 import type {
   CliDeps,
@@ -53,7 +53,8 @@ export async function cmdSupervise(opts: SuperviseOptions, rt: SuperviseRuntime)
   const branchPrefix = rt.branchPrefixOrExit(opts.branchPrefix);
   const repoRoot = await rt.getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const ingestCfg = resolveIngestConfig(rt.configLoaders.loadFactoryConfigForRepo(paths.config));
+  const factoryConfig = rt.configLoaders.loadFactoryConfigForRepo(paths.config);
+  const ingestCfg = resolveIngestConfig(factoryConfig);
 
   const countPending = async (): Promise<number> => {
     if (opts.localQueue === true) {
@@ -63,7 +64,12 @@ export async function cmdSupervise(opts: SuperviseOptions, rt: SuperviseRuntime)
       return parsed.entries.length;
     }
     const [owner, repo] = (await rt.getGitHubRepo()).split('/');
-    const gq = createGithubQueue({ client: createOctokitQueueClient(rt.getOctokit()), owner, repo });
+    const gq = createGithubQueue({
+      client: createOctokitQueueClient(rt.getOctokit()),
+      owner,
+      repo,
+      claimSettleMs: resolveQueueClaimSettleMs(factoryConfig),
+    });
     const lanes = await gq.lanes();
     const counts = await Promise.all(lanes.map((lane) => gq.list(lane)));
     return counts.reduce((total, issues) => total + issues.length, 0);

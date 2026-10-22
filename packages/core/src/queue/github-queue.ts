@@ -7,6 +7,7 @@ import type { Octokit } from '@octokit/rest';
 
 import { labelExistsError } from './github-errors.js';
 import { createOctokitComments, type QueueCommentClient } from './issue-comments.js';
+import { createClaimSettler, type ClaimSettleOptions, type ClaimSettler } from './claim-settle.js';
 import { knownRepoLabels } from './label-cache.js';
 import { orderCollisionAt, scanLaneOrders, type OrderCollision } from './order-collision.js';
 import { addQueuedOnRelease } from './release-queued.js';
@@ -406,7 +407,7 @@ function classifyQueueClear(issues: readonly QueueIssue[]): QueueClearPreview {
   return { entries, wouldClear: entries.length - wouldSkip, wouldSkip };
 }
 
-export interface GithubQueueOptions {
+export interface GithubQueueOptions extends ClaimSettleOptions {
   client: QueueGitHubClient;
   owner: string;
   repo: string;
@@ -422,7 +423,7 @@ export interface GithubQueueOptions {
   onOrderConflict?: (conflict: QueueOrderConflict) => void;
 }
 
-export interface GithubQueue {
+export interface GithubQueue extends ClaimSettler {
   claimNext(lane: string): Promise<QueueClaim | null>;
   release(issue: number, outcome?: QueueReleaseOutcome): Promise<void>;
   /** Refreshes this claimant's lease on `issue` while its identity label is still present.
@@ -448,6 +449,7 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
   const myLabel = claimedByLabel(claimantId);
   const leaseMs = options.leaseMs ?? DEFAULT_CLAIM_LEASE_MS;
   const now = options.now ?? Date.now;
+  const settler = createClaimSettler(options);
   const ensuredLanes = new Set<string>();
   const deferred = new Set<number>();
 
@@ -676,5 +678,5 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     return { entries, cleared: count('cleared'), skipped: count('skipped'), failed: count('failed') };
   }
 
-  return { claimNext, release, heartbeat, list, lanes, migrateLocalQueue, enqueue, previewClear, clear };
+  return { ...settler, claimNext, release, heartbeat, list, lanes, migrateLocalQueue, enqueue, previewClear, clear };
 }
