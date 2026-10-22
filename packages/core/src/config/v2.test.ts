@@ -69,6 +69,7 @@ describe('zero-config: { version: 2 }', () => {
     expect(cfg.run.sandbox).toEqual({
       enabled: true,
       codexFullAccessTasks: [],
+      writablePaths: [],
       network: { allow: ['api.anthropic.com', 'github.com'] },
       resources: { cpuMs: 300_000, memMb: 4096 },
     });
@@ -235,6 +236,7 @@ describe('full v2 config', () => {
       sandbox: {
         enabled: false,
         codexFullAccessTasks: ['build_codex'],
+        writablePaths: [],
         network: { allow: [] },
         resources: { cpuMs: 100, memMb: 512 },
       },

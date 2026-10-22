@@ -2,6 +2,7 @@
 
 import { exec as execCb } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify, styleText } from 'node:util';
 
@@ -37,6 +38,7 @@ import {
   findOpenPR,
   isEgressEnforced,
   resolveFilingPolicy,
+  resolveConfiguredWritablePaths,
   resolveHermeticGit,
   resolveReviewFloorRules,
   withFileLock,
@@ -76,6 +78,11 @@ export function stubAwareShipPhase(shipPhase: NonNullable<RunPorts['shipPhase']>
   return shipPhaseForMode;
 }
 
+function logConfiguredWritablePaths(policy: SandboxPolicy, log: (type: EventKind, msg: string) => void): void {
+  const extra = policy.configuredWritablePaths ?? [];
+  if (extra.length > 0) log('sandbox', `extra writable paths (sandbox.writablePaths): ${extra.join(', ')}`);
+}
+
 /** Logs the sandbox state for this run and returns the policy to pass to harnesses, if any. */
 export function logSandboxPolicy(
   opts: { sandbox?: boolean },
@@ -94,12 +101,14 @@ export function logSandboxPolicy(
       'sandbox',
       'outer sandbox off; harness sandbox in use (codex --sandbox workspace-write; harnesses without their own sandbox run unwrapped)',
     );
+    logConfiguredWritablePaths(sandboxPolicy, log);
   } else if (sandboxPolicy.runtime === 'docker-sandbox') {
     // Containment is the microVM created by worktreeWorkspace in shipIssue (#653), not a command-prefix
     // wrap: activeSandboxPolicy stays undefined (wrapCommandInSandbox is a no-op here) and createMicroVm
     // logs the actual outcome ('sandbox' or 'sandbox-unavailable'), so nothing is logged here.
   } else {
     activeSandboxPolicy = sandboxPolicy;
+    logConfiguredWritablePaths(sandboxPolicy, log);
     if (sandboxPolicy.allowHosts.length > 0 && !isEgressEnforced(sandboxPolicy)) {
       log(
         'sandbox-degraded',
@@ -371,7 +380,14 @@ export function buildRunRequest({
     failover: failoverSettings,
     efficiency: { maxReworkRounds: efficiency.maxReworkRounds, fastPath: efficiency.fastPath },
     sandboxPolicy: activeSandboxPolicy,
-    codexWorkspacePaths: { primaryRepoRoot: repoRoot, writableRoots: [paths.state, resolve(repoRoot, '.git')] },
+    codexWorkspacePaths: {
+      primaryRepoRoot: repoRoot,
+      writableRoots: [
+        paths.state,
+        resolve(repoRoot, '.git'),
+        ...resolveConfiguredWritablePaths(factoryConfig.sandbox.writablePaths, { home: homedir(), repoRoot }),
+      ],
+    },
     processGroupGraceMs,
     preferredRoute: repoConfig?.route,
     ...(ctx?.resumeFrom

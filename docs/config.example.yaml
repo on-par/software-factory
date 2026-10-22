@@ -230,11 +230,14 @@ workspace:
 # runs (sandbox-exec with a non-empty allowlist) (#2667). sandbox.network.mode (report|enforce,
 # default report; FACTORY_SANDBOX_NETWORK overrides) — enforce on sandbox-exec denies direct
 # outbound connections and makes the egress proxy refuse hosts not on network.allow with 403
-# (#2215).
+# (#2215). sandbox.writablePaths (default []) adds directories BUILD/CHECK may write, e.g.
+# ["~/.nuget"]; entries must be absolute or start with ~/, and may not be /, ~, the home dir, or a
+# path equal to or containing the repo checkout (#3454).
 sandbox:
   enabled: true
   runtime: "auto"
   codexFullAccessTasks: []
+  writablePaths: []
   network:
     allow: ["api.anthropic.com", "github.com"]
     blockTelemetry: false

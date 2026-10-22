@@ -319,7 +319,7 @@ const STEER = 'STEER_SOURCES STEER_PHASES SteerEventError parseSteerEvent append
 const STEERED = 'collectMergedPrSteers isoWeekKey summarizeSteerability formatSteerabilityReport'.split(' '); // #3403
 const MORE = ['agentInvocationsFromEvents', 'computeTokenCoverage', 'readReviewApproval', 'readStackSliceGate']; // #3126, #3366
 const STACK = 'nextStackSlice restackAfterSquashMerge listRepoLaneLabels listStatelessLaneIssues'.split(' ');
-const POLICY = 'isEgressEnforced describeDraftPrPolicy resolveDraftPrPolicy'.split(' '); // #2215, #3449
+const POLICY = 'isEgressEnforced describeDraftPrPolicy resolveDraftPrPolicy resolveConfiguredWritablePaths'.split(' '); // #2215, #3449, #3454
 const EXTRA_INTERNAL_KEYS = [...JOB_KEYS, ...TAIL, ...MORE, ...STEER, ...STEERED, ...STACK, ...POLICY];
 const INTERNAL_API_KEYS = [
   'openCodeVersion',
