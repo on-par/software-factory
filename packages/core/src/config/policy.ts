@@ -1,14 +1,16 @@
 // packages/core/src/config/policy.ts — the settings API's allow-list of repo policy fields
 // safe for the dashboard to edit, plus the resolver that reports each field's effective
-// value and the source that decided it (flag > env > config > packaged default) and the
+// value and the source that decided it (flag › repo › env › default, read straight from
+// the engine's `resolveMergePolicy`) and the
 // writer that persists one allow-listed field into the repo config file, in that file's own
 // format (YAML edited in place, comments kept). See ADR-0094:
 // this allow-list IS the authorization model for the loopback settings write surface.
 
-import { isPlainObject, loadFactoryConfig } from './index.js';
+import { isPlainObject, loadFactoryConfigForRepo, resolveMergePolicy } from './index.js';
+import type { ConfigSource } from './precedence.js';
 import { readRepoConfigFile, setRepoConfigValue } from './repo-config-file.js';
 
-export type PolicySource = 'flag' | 'config' | 'env' | 'default';
+export type PolicySource = ConfigSource;
 
 export type SafePolicyFieldId = 'merge.auto' | 'merge.admin';
 
@@ -29,11 +31,8 @@ export interface SafePolicyFieldSpec {
   configPath: readonly string[];
   envVar: string;
   flag: string;
-  /** true: an env var of '1' forces the value on even when the config key is present —
-   *  `merge.auto`'s legacy `config.merge.auto || FACTORY_MERGE === '1'` OR read. Omitted/
-   *  false: a present config value is authoritative over the env var, matching
-   *  `resolveMergePolicy`'s `run.merge.admin` read. */
-  envForcesValue?: boolean;
+  /** The slot of `EffectiveMergePolicy` this field reads. */
+  policyKey: 'auto' | 'admin';
   /** Present only for fields where *enabling* requires the distinct confirmation gate. */
   confirmEnable?: PolicyConfirmation;
 }
@@ -43,16 +42,17 @@ export const SAFE_POLICY_FIELDS: readonly SafePolicyFieldSpec[] = [
     id: 'merge.auto',
     label: 'Auto-merge',
     description: 'Squash-merge a shipped PR automatically once CI is green.',
-    configPath: ['merge', 'auto'],
+    configPath: ['run', 'merge', 'auto'],
+    policyKey: 'auto',
     envVar: 'FACTORY_MERGE',
-    flag: '--merge',
-    envForcesValue: true,
+    flag: '--auto-merge',
   },
   {
     id: 'merge.admin',
     label: 'Admin-merge (bypass required checks)',
     description: 'Merge a shipped PR using GitHub admin privileges even when required checks have not passed.',
     configPath: ['run', 'merge', 'admin'],
+    policyKey: 'admin',
     envVar: 'FACTORY_MERGE_ADMIN',
     flag: '--admin-merge',
     confirmEnable: {
@@ -107,13 +107,23 @@ function readRawConfig(configPath: string): Record<string, unknown> | null {
   return raw;
 }
 
-function readAtPath(raw: Record<string, unknown>, configPath: readonly string[]): unknown {
-  let current: unknown = raw;
-  for (const key of configPath) {
-    if (!isPlainObject(current)) return undefined;
-    current = current[key];
+function sourceDetailFor(
+  field: SafePolicyFieldSpec,
+  source: PolicySource,
+  config: ReturnType<typeof loadFactoryConfigForRepo>,
+): string {
+  switch (source) {
+    case 'flag':
+      return field.flag;
+    case 'env':
+      return `env: ${field.envVar}=1`;
+    case 'default':
+      return 'built-in default';
+    case 'repo':
+      // A legacy top-level `merge.auto: true` also counts as a repo signal for auto-merge.
+      if (field.policyKey === 'auto' && config.run?.merge?.auto === undefined) return 'merge.auto';
+      return field.configPath.join('.');
   }
-  return current;
 }
 
 export function resolveSafeRepoPolicy(
@@ -121,7 +131,9 @@ export function resolveSafeRepoPolicy(
   env: NodeJS.ProcessEnv = process.env,
   flags: Partial<Record<SafePolicyFieldId, boolean>> = {},
 ): SafeRepoPolicySnapshot {
-  const raw = readRawConfig(configPath);
+  readRawConfig(configPath);
+  const config = loadFactoryConfigForRepo(configPath);
+  const policy = resolveMergePolicy(config, env, { auto: flags['merge.auto'] });
 
   const fields = SAFE_POLICY_FIELDS.map((field): EffectivePolicyField => {
     const base = {
@@ -131,39 +143,16 @@ export function resolveSafeRepoPolicy(
       ...(field.confirmEnable ? { confirmEnable: field.confirmEnable } : {}),
     };
 
+    // `resolveMergePolicy` has no admin override, so an admin flag is applied here.
     const flagValue = flags[field.id];
-    if (flagValue !== undefined) {
+    if (field.policyKey === 'admin' && flagValue !== undefined) {
       return { ...base, value: flagValue, source: 'flag', sourceDetail: field.flag, editable: false };
     }
 
-    const envForced = () => ({
-      ...base,
-      value: true,
-      source: 'env' as const,
-      sourceDetail: `env: ${field.envVar}=1`,
-      editable: false,
-    });
-
-    // `merge.auto`'s engine read is `config.merge.auto || FACTORY_MERGE === '1'`: an
-    // explicit FACTORY_MERGE=1 forces the value on regardless of the file. Other fields
-    // (e.g. `merge.admin`, via `resolveMergePolicy`) treat a present config value as
-    // authoritative over the env var instead — see `envForcesValue` on the spec.
-    if (field.envForcesValue && env[field.envVar] === '1') {
-      return envForced();
-    }
-
-    const rawValue = raw === null ? undefined : readAtPath(raw, field.configPath);
-    if (typeof rawValue === 'boolean') {
-      return { ...base, value: rawValue, source: 'config', sourceDetail: field.configPath.join('.'), editable: true };
-    }
-
-    if (env[field.envVar] === '1') {
-      return envForced();
-    }
-
-    const defaults = loadFactoryConfig();
-    const defaultValue = Boolean(isPlainObject(defaults) ? readAtPath(defaults, field.configPath) : undefined);
-    return { ...base, value: defaultValue, source: 'default', sourceDetail: 'built-in default', editable: true };
+    const value = policy[field.policyKey];
+    const source = policy.sources[field.policyKey];
+    const editable = source === 'repo' || source === 'default';
+    return { ...base, value, source, sourceDetail: sourceDetailFor(field, source, config), editable };
   });
 
   return { configPath, fields };

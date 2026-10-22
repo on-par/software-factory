@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { getFactoryPaths } from './index.js';
+import { getFactoryPaths, loadFactoryConfigForRepo, resolveMergePolicy } from './index.js';
 import { loadRepoConfig } from './repo.js';
 import { readRepoConfigFile } from './repo-config-file.js';
 import {
@@ -48,19 +48,39 @@ describe('config/policy', () => {
       expect(snapshot.configPath).toBe(configPath);
     });
 
-    it('reports source config when the raw key is present and true', async () => {
+    it('reports source repo for a legacy merge.auto: true', async () => {
       await writeFile(configPath, JSON.stringify({ version: 2, merge: { auto: true } }));
       const snapshot = resolveSafeRepoPolicy(configPath, {});
-      expect(snapshot.fields[0]).toMatchObject({ value: true, source: 'config', sourceDetail: 'merge.auto' });
+      expect(snapshot.fields[0]).toMatchObject({ value: true, source: 'repo', sourceDetail: 'merge.auto' });
+    });
+
+    it('reports run.merge.auto as the repo detail', async () => {
+      await writeFile(configPath, JSON.stringify({ version: 2, run: { merge: { auto: true } } }));
+      const snapshot = resolveSafeRepoPolicy(configPath, {});
+      expect(snapshot.fields[0]).toMatchObject({ value: true, source: 'repo', sourceDetail: 'run.merge.auto' });
+    });
+
+    it('matches resolveMergePolicy when run.merge.auto is false and FACTORY_MERGE=1', async () => {
+      await writeFile(configPath, JSON.stringify({ version: 2, run: { merge: { auto: false } } }));
+      const env = { FACTORY_MERGE: '1' };
+      const snapshot = resolveSafeRepoPolicy(configPath, env);
+      expect(snapshot.fields[0]).toMatchObject({
+        value: false,
+        source: 'repo',
+        sourceDetail: 'run.merge.auto',
+        editable: true,
+      });
+      const policy = resolveMergePolicy(loadFactoryConfigForRepo(configPath), env);
+      expect(snapshot.fields[0]).toMatchObject({ value: policy.auto, source: policy.sources.auto });
     });
 
     it('distinguishes a config-written false from the packaged default false', async () => {
-      await writeFile(configPath, JSON.stringify({ version: 2, merge: { auto: false } }));
+      await writeFile(configPath, JSON.stringify({ version: 2, run: { merge: { auto: false } } }));
       const snapshot = resolveSafeRepoPolicy(configPath, {});
-      expect(snapshot.fields[0]).toMatchObject({ value: false, source: 'config' });
+      expect(snapshot.fields[0]).toMatchObject({ value: false, source: 'repo' });
     });
 
-    it('FACTORY_MERGE=1 forces true regardless of the config value, and is not editable', async () => {
+    it('FACTORY_MERGE=1 decides when only a legacy merge.auto: false is present, and is not editable', async () => {
       await writeFile(configPath, JSON.stringify({ version: 2, merge: { auto: false } }));
       const snapshot = resolveSafeRepoPolicy(configPath, { FACTORY_MERGE: '1' });
       expect(snapshot.fields[0]).toMatchObject({
@@ -72,9 +92,9 @@ describe('config/policy', () => {
     });
 
     it('FACTORY_MERGE=0 lets the config value decide (matches the engine read)', async () => {
-      await writeFile(configPath, JSON.stringify({ version: 2, merge: { auto: true } }));
+      await writeFile(configPath, JSON.stringify({ version: 2, run: { merge: { auto: true } } }));
       const snapshot = resolveSafeRepoPolicy(configPath, { FACTORY_MERGE: '0' });
-      expect(snapshot.fields[0]).toMatchObject({ value: true, source: 'config' });
+      expect(snapshot.fields[0]).toMatchObject({ value: true, source: 'repo' });
     });
 
     it('a flag override wins over env and config, and is not editable', async () => {
@@ -83,7 +103,7 @@ describe('config/policy', () => {
       expect(snapshot.fields[0]).toMatchObject({
         value: false,
         source: 'flag',
-        sourceDetail: '--merge',
+        sourceDetail: '--auto-merge',
         editable: false,
       });
     });
@@ -103,11 +123,20 @@ describe('config/policy', () => {
 
       const snapshot = setSafeRepoPolicyField(configPath, 'merge.auto', true, { env: {} });
 
-      expect(snapshot.fields[0]).toMatchObject({ value: true, source: 'config' });
+      expect(snapshot.fields[0]).toMatchObject({ value: true, source: 'repo' });
       const onDisk = JSON.parse(await readFile(configPath, 'utf-8'));
       expect(onDisk.models).toEqual({ pins: { build: 'claude-sonnet-5' } });
       expect(onDisk.tiers).toEqual({ worker: ['a'] });
-      expect(onDisk.merge.auto).toBe(true);
+      expect(onDisk.run.merge.auto).toBe(true);
+    });
+
+    it('turning merge.auto off writes run.merge.auto false and resolveMergePolicy returns false', async () => {
+      await writeFile(configPath, JSON.stringify({ version: 2, run: { merge: { auto: true } } }));
+
+      setSafeRepoPolicyField(configPath, 'merge.auto', false, { env: {} });
+
+      expect((readRepoConfigFile(configPath) as any).run.merge.auto).toBe(false);
+      expect(resolveMergePolicy(loadFactoryConfigForRepo(configPath), {}).auto).toBe(false);
     });
 
     it('preserves a sibling merge.comment key', async () => {
@@ -116,7 +145,8 @@ describe('config/policy', () => {
       setSafeRepoPolicyField(configPath, 'merge.auto', true, { env: {} });
 
       const onDisk = JSON.parse(await readFile(configPath, 'utf-8'));
-      expect(onDisk.merge).toEqual({ auto: true, comment: 'keep me' });
+      expect(onDisk.merge).toEqual({ auto: false, comment: 'keep me' });
+      expect(onDisk.run.merge.auto).toBe(true);
     });
 
     it('creates a minimal version:2 file when none exists, still parseable by loadRepoConfig', () => {
@@ -124,7 +154,7 @@ describe('config/policy', () => {
 
       const onDisk = JSON.parse(readFileSync(configPath, 'utf-8'));
       expect(onDisk.version).toBe(2);
-      expect(onDisk.merge.auto).toBe(true);
+      expect(onDisk.run.merge.auto).toBe(true);
       expect(loadRepoConfig(dir)).not.toBeNull();
     });
 
@@ -163,7 +193,7 @@ describe('config/policy', () => {
         });
 
         const field = snapshot.fields.find((f) => f.id === 'merge.admin');
-        expect(field).toMatchObject({ value: true, source: 'config' });
+        expect(field).toMatchObject({ value: true, source: 'repo' });
         const onDisk = JSON.parse(readFileSync(configPath, 'utf-8'));
         expect(onDisk.run.merge.admin).toBe(true);
       });
@@ -177,7 +207,7 @@ describe('config/policy', () => {
         const snapshot = setSafeRepoPolicyField(configPath, 'merge.admin', false, { env: {} });
 
         const field = snapshot.fields.find((f) => f.id === 'merge.admin');
-        expect(field).toMatchObject({ value: false, source: 'config' });
+        expect(field).toMatchObject({ value: false, source: 'repo' });
       });
     });
   });
@@ -197,14 +227,14 @@ describe('config/policy', () => {
       await writeFile(configPath, JSON.stringify({ version: 2, run: { merge: { admin: true } } }));
       const snapshot = resolveSafeRepoPolicy(configPath, {});
       const field = snapshot.fields.find((f) => f.id === 'merge.admin');
-      expect(field).toMatchObject({ value: true, source: 'config', sourceDetail: 'run.merge.admin' });
+      expect(field).toMatchObject({ value: true, source: 'repo', sourceDetail: 'run.merge.admin' });
     });
 
     it('a present config value wins over FACTORY_MERGE_ADMIN=1 (opposite precedence from merge.auto)', async () => {
       await writeFile(configPath, JSON.stringify({ version: 2, run: { merge: { admin: false } } }));
       const snapshot = resolveSafeRepoPolicy(configPath, { FACTORY_MERGE_ADMIN: '1' });
       const field = snapshot.fields.find((f) => f.id === 'merge.admin');
-      expect(field).toMatchObject({ value: false, source: 'config' });
+      expect(field).toMatchObject({ value: false, source: 'repo' });
     });
 
     it('FACTORY_MERGE_ADMIN=1 forces true when no config value is present, and is not editable', () => {
@@ -238,8 +268,9 @@ describe('config/policy', () => {
         '  # keep this',
         '  limit: 3',
         '',
-        'merge:',
-        '  auto: false # flip me',
+        'run:',
+        '  merge:',
+        '    auto: false # flip me',
         '',
       ].join('\n');
       await writeFile(yamlPath, input);
@@ -270,7 +301,7 @@ describe('config/policy', () => {
       await writeFile(configPath, JSON.stringify({ version: 2 }));
       setSafeRepoPolicyField(configPath, 'merge.auto', true, { env: {} });
       const text = readFileSync(configPath, 'utf-8');
-      expect(text).toBe(`${JSON.stringify({ version: 2, merge: { auto: true } }, null, 2)}\n`);
+      expect(text).toBe(`${JSON.stringify({ version: 2, run: { merge: { auto: true } } }, null, 2)}\n`);
       expect(existsSync(yamlPath)).toBe(false);
     });
   });

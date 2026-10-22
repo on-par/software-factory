@@ -27,6 +27,7 @@ import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS } from '../harness/c
 import type { FailoverReason } from '../types/index.js';
 import { SandboxConfigSchema } from './sandbox-schema.js';
 import { ModelEffortsSchema } from './effort.js';
+import { resolvePrecedence, type ConfigSource } from './precedence.js';
 import { HarnessDeclarationSchema, type HarnessDeclaration } from './harness-declaration.js';
 
 export {
@@ -655,7 +656,7 @@ export function resolveProcessGroupGraceMs(config: FactoryConfig): number {
 
 /** Where a resolved merge decision came from. `'flag'` is an explicit per-invocation CLI
  *  flag (`--auto-merge`/`--no-auto-merge`) and outranks every other source. */
-export type MergePolicySource = 'flag' | 'repo' | 'env' | 'default';
+export type MergePolicySource = ConfigSource;
 
 export interface EffectiveMergePolicy {
   auto: boolean;
@@ -682,10 +683,15 @@ export function resolvePrClassifierPolicy(
   env: NodeJS.ProcessEnv = process.env,
   overrides: MergePolicyOverrides = {},
 ): EffectivePrClassifierPolicy {
-  if (overrides.classifier !== undefined) return { enabled: overrides.classifier, source: 'flag' };
-  if (config.run?.merge?.classifier !== undefined) return { enabled: config.run.merge.classifier, source: 'repo' };
-  if (env.FACTORY_PR_CLASSIFIER === '1') return { enabled: true, source: 'env' };
-  return { enabled: false, source: 'default' };
+  const { value, source } = resolvePrecedence<boolean>(
+    [
+      { source: 'flag', read: () => overrides.classifier },
+      { source: 'repo', read: () => config.run?.merge?.classifier },
+      { source: 'env', read: () => (env.FACTORY_PR_CLASSIFIER === '1' ? true : undefined) },
+    ],
+    false,
+  );
+  return { enabled: value, source };
 }
 
 /** Resolve auto-merge/admin-merge: an explicit per-invocation `overrides.auto` (from
@@ -699,39 +705,24 @@ export function resolveMergePolicy(
   env: NodeJS.ProcessEnv = process.env,
   overrides: MergePolicyOverrides = {},
 ): EffectiveMergePolicy {
-  let auto: boolean;
-  let autoSource: MergePolicySource;
-  if (overrides.auto !== undefined) {
-    auto = overrides.auto;
-    autoSource = 'flag';
-  } else if (config.run?.merge?.auto !== undefined) {
-    auto = config.run.merge.auto;
-    autoSource = 'repo';
-  } else if (config.merge.auto) {
-    auto = true;
-    autoSource = 'repo';
-  } else if (env.FACTORY_MERGE === '1') {
-    auto = true;
-    autoSource = 'env';
-  } else {
-    auto = false;
-    autoSource = 'default';
-  }
+  const auto = resolvePrecedence<boolean>(
+    [
+      { source: 'flag', read: () => overrides.auto },
+      { source: 'repo', read: () => config.run?.merge?.auto },
+      { source: 'repo', read: () => (config.merge.auto ? true : undefined) },
+      { source: 'env', read: () => (env.FACTORY_MERGE === '1' ? true : undefined) },
+    ],
+    false,
+  );
+  const admin = resolvePrecedence<boolean>(
+    [
+      { source: 'repo', read: () => config.run?.merge?.admin },
+      { source: 'env', read: () => (env.FACTORY_MERGE_ADMIN === '1' ? true : undefined) },
+    ],
+    false,
+  );
 
-  let admin: boolean;
-  let adminSource: MergePolicySource;
-  if (config.run?.merge?.admin !== undefined) {
-    admin = config.run.merge.admin;
-    adminSource = 'repo';
-  } else if (env.FACTORY_MERGE_ADMIN === '1') {
-    admin = true;
-    adminSource = 'env';
-  } else {
-    admin = false;
-    adminSource = 'default';
-  }
-
-  return { auto, admin, sources: { auto: autoSource, admin: adminSource } };
+  return { auto: auto.value, admin: admin.value, sources: { auto: auto.source, admin: admin.source } };
 }
 
 export function resolveFilingPolicy(config: FactoryConfig): FilingPolicy {

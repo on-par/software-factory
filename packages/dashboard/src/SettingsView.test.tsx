@@ -21,8 +21,8 @@ function fixtureSnapshot(overrides: Partial<RepoPolicySnapshot['fields'][number]
         label: 'Auto-merge',
         description: 'Squash-merge a shipped PR automatically once CI is green.',
         value: false,
-        source: 'config',
-        sourceDetail: 'merge.auto',
+        source: 'repo',
+        sourceDetail: 'run.merge.auto',
         editable: true,
         ...overrides,
       },
@@ -69,7 +69,7 @@ describe('SettingsView', () => {
 
     expect(await screen.findByText('Auto-merge')).toBeDefined();
     expect(screen.getByText('Squash-merge a shipped PR automatically once CI is green.')).toBeDefined();
-    expect(screen.getByText('Source: merge.auto')).toBeDefined();
+    expect(screen.getByText('Source: run.merge.auto')).toBeDefined();
   });
 
   it('renders the built-in default source badge for a default-sourced field', async () => {
@@ -110,7 +110,7 @@ describe('SettingsView', () => {
   it('clicking the checkbox calls save and re-renders the returned snapshot', async () => {
     const save = vi
       .fn()
-      .mockResolvedValue(fixtureSnapshot({ value: true, source: 'config', sourceDetail: 'merge.auto' }));
+      .mockResolvedValue(fixtureSnapshot({ value: true, source: 'repo', sourceDetail: 'run.merge.auto' }));
     render(<SettingsView client={fakeClient({ save })} />);
 
     await screen.findByText('Auto-merge');
@@ -180,7 +180,7 @@ describe('SettingsView', () => {
     });
 
     it('confirming calls save with the confirmation token and shows the audit text in a role=status banner', async () => {
-      const save = vi.fn().mockResolvedValue(adminSnapshot({ value: true, source: 'config' }));
+      const save = vi.fn().mockResolvedValue(adminSnapshot({ value: true, source: 'repo' }));
       const client: RepoPolicyClient = { load: () => Promise.resolve(adminSnapshot()), save };
       render(<SettingsView client={client} />);
 
@@ -193,9 +193,9 @@ describe('SettingsView', () => {
     });
 
     it('disabling an already-enabled admin-merge saves immediately with no confirmation step', async () => {
-      const save = vi.fn().mockResolvedValue(adminSnapshot({ value: false, source: 'config' }));
+      const save = vi.fn().mockResolvedValue(adminSnapshot({ value: false, source: 'repo' }));
       const client: RepoPolicyClient = {
-        load: () => Promise.resolve(adminSnapshot({ value: true, source: 'config' })),
+        load: () => Promise.resolve(adminSnapshot({ value: true, source: 'repo' })),
         save,
       };
       render(<SettingsView client={client} />);
