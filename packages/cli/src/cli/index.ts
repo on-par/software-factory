@@ -3902,10 +3902,11 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
       } else {
         pct = reading.pct;
         source = reading.source;
+        let detail = reading.detail;
         if (cycle > 1 || !now) {
           while (pct >= resumeAt) {
             writeLine(
-              `[factory] supervise: trailing usage (${source}) ${Math.round(pct * 100)}% >= resume gate ${Math.round(resumeAt * 100)}% — waiting ${pollMs / 1000}s`,
+              `[factory] supervise: trailing usage (${source}) ${Math.round(pct * 100)}% >= resume gate ${Math.round(resumeAt * 100)}% (${detail}) — waiting ${pollMs / 1000}s`,
             );
             await sleep(pollMs);
             reading = await readUsageFn();
@@ -3917,6 +3918,7 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
             }
             pct = reading.pct;
             source = reading.source;
+            detail = reading.detail;
           }
         }
       }

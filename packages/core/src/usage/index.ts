@@ -131,6 +131,7 @@ export interface ReadUsageOptions {
 /**
  * Prefers the real Anthropic subscription rate-limit signal over the list-price
  * transcript heuristic, which cannot be calibrated against the real 5h window.
+ * Of the 5h and weekly windows, the binding (higher) one sets `pct` and `detail`.
  * The estimator is opt-in only (FACTORY_USAGE_ESTIMATOR=1) and used solely when
  * the subscription signal is unavailable (expired/missing token, offline, etc).
  */
@@ -147,6 +148,13 @@ export async function readUsage(opts: ReadUsageOptions): Promise<UsageReading | 
 
   const subscription = await fetchSubscription();
   if (subscription !== null) {
+    const weekly = subscription.sevenDayUtilization;
+    if (typeof weekly === 'number' && weekly > subscription.fiveHourUtilization) {
+      const weeklyDetail =
+        `weekly subscription window at ${Math.round(weekly)}%` +
+        (subscription.sevenDayResetsAt ? `, resets ${subscription.sevenDayResetsAt}` : '');
+      return { pct: weekly / 100, source: 'subscription', detail: weeklyDetail };
+    }
     const detail =
       `5h subscription window at ${Math.round(subscription.fiveHourUtilization)}%` +
       (subscription.fiveHourResetsAt ? `, resets ${subscription.fiveHourResetsAt}` : '');

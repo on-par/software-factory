@@ -35,6 +35,29 @@ describe('watchUsage default setStop (#3209)', () => {
     }
   });
 
+  it('writes a usage-watchdog marker when the weekly window is the binding one', async () => {
+    const dir = temp.makeSync('wd-stop-');
+    const file = join(dir, 'STOP');
+    await expect(
+      watchUsage({
+        cap: 1,
+        stopAt: 0.95,
+        pollMs: 1,
+        stopFile: file,
+        eventsFile: join(dir, 'events.ndjson'),
+        subscription: {
+          platform: 'linux',
+          readCredentialsFile: () =>
+            JSON.stringify({ claudeAiOauth: { accessToken: 'tok', expiresAt: Date.now() + 3_600_000 } }),
+          fetchImpl: async () => Response.json({ five_hour: { utilization: 20 }, seven_day: { utilization: 96 } }),
+        },
+        emitEvent: () => {},
+        sleep: async () => {},
+      }),
+    ).resolves.toBe('stopped');
+    expect(readStopMarker(file)?.source).toBe('usage-watchdog');
+  });
+
   it('does not overwrite an existing manual STOP', async () => {
     const dir = temp.makeSync('wd-stop-');
     try {
