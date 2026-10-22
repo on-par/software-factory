@@ -9,10 +9,24 @@ describe('findDeclaredPrerequisites', () => {
 
   it('ignores other dependency syntax, malformed values, and formatted references', () => {
     expect(
-      findDeclaredPrerequisites(
-        'Related: #2\nPrerequisite: #0\nPrerequisite: #3, #4\nPrerequisite: #5 details\n- Prerequisite: #6\n> Prerequisite: #7\nPrerequisite: org/repo#8',
-      ),
+      findDeclaredPrerequisites('Related: #2\nPrerequisite: #0\n> Prerequisite: #7\nPrerequisite: org/repo#8'),
     ).toEqual([]);
+  });
+
+  it('accepts the bullet form with trailing text (#3264, 2026-10-20)', () => {
+    expect(findDeclaredPrerequisites('Notes\n- Prerequisite: #3263 (Slice A runner on main).\n')).toEqual([3263]);
+  });
+
+  it('counts only the first reference and accepts indented list markers', () => {
+    expect(findDeclaredPrerequisites('Prerequisite: #12 and #13\n  * Prerequisite: #4')).toEqual([12, 4]);
+    expect(findDeclaredPrerequisites('- Prerequisite: #6\n+ Prerequisite: #5 details\nPrerequisite: #3, #4')).toEqual([
+      6, 5, 3,
+    ]);
+  });
+
+  it('ignores blockquoted and fenced bullet declarations', () => {
+    expect(findDeclaredPrerequisites('> - Prerequisite: #7')).toEqual([]);
+    expect(findDeclaredPrerequisites('```\n- Prerequisite: #5\n```')).toEqual([]);
   });
 
   it('ignores fenced examples and respects marker and opening length', () => {
