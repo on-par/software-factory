@@ -11,7 +11,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { LaneParkError } from './index.js';
 import { CiInfraError, CiUnverifiedError, LandConflictError } from './land-pr.js';
-import { runLane } from './run-lane.js';
+import { tryPublishParkComment } from './lane-park-comment.js';
+import { runLane, type RunLaneDeps } from './run-lane.js';
 
 const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
 const N = 3534;
@@ -61,7 +62,12 @@ async function seedComment(reason: 'fail' | 'blocked', fake: ReturnType<typeof f
   fake.createComment.mockClear();
 }
 
-async function park(err: Error, fake: ReturnType<typeof fakeOctokit>, ship?: (c: any) => void) {
+async function park(
+  err: Error,
+  fake: ReturnType<typeof fakeOctokit>,
+  ship?: (c: any) => void,
+  overrides: RunLaneDeps = {},
+) {
   const events: { kind: string; message: string }[] = [];
   const releaseIssue = vi.fn(async () => {});
   await runLane('app', [N], '/repo', 'on-par/software-factory', paths, {
@@ -79,6 +85,7 @@ async function park(err: Error, fake: ReturnType<typeof fakeOctokit>, ship?: (c:
       events.push({ kind, message });
     }) as any,
     pathExists: () => false,
+    ...overrides,
   });
   return { events, releaseIssue };
 }
@@ -121,6 +128,33 @@ describe('land-time park comment', () => {
     expect(events.some((e) => e.kind === 'warn' && e.message.includes('could not post the issue park comment'))).toBe(
       true,
     );
+  });
+
+  it('a land-time park with no park sha reader wired still upserts the comment with park-sha unset', async () => {
+    const fake = fakeOctokit([]);
+    await seedComment('fail', fake);
+    const { events } = await park(new CiUnverifiedError('CI unverified', 353), fake, undefined, {
+      readParkSha: undefined,
+    });
+    expect(stateLine(fake.comments, 'reason')).toBe('ci-failed');
+    expect(stateLine(fake.comments, 'park-sha')).toBe('-');
+    expect(events.some((e) => e.kind === 'warn')).toBe(false);
+  });
+
+  it.each([
+    [new Error('no token'), 'no token'],
+    ['bare string', 'bare string'],
+  ])('a throwing octokit getter returns the warning text instead of throwing (%s)', async (thrown, detail) => {
+    const out = await tryPublishParkComment(
+      () => {
+        throw thrown;
+      },
+      'on-par/software-factory',
+      '/repo',
+      async () => 'abc123',
+      { issue: N, reason: 'ci-failed', message: 'm', runId: 'r', branch: 'b' },
+    );
+    expect(out).toBe(`could not post the issue park comment for #${N}: ${detail}`);
   });
 
   it('a land-time ci-failed park over a stale blocked comment makes pollBlockedParks skip the issue', async () => {
