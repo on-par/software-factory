@@ -37,8 +37,51 @@
         "required": ["slug", "checkoutPath", "state"],
         "additionalProperties": false
       }
+    },
+    "load": {
+      "type": "object",
+      "properties": {
+        "activeRuns": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maxSlots": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "queueDepth": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["activeRuns", "maxSlots", "queueDepth"],
+      "additionalProperties": false
     }
   },
-  "required": ["schemaVersion", "running", "pid", "uptimeSec", "plistInstalled", "repos"],
+  "required": ["schemaVersion", "running", "pid", "uptimeSec", "plistInstalled", "repos", "load"],
   "additionalProperties": false
 }

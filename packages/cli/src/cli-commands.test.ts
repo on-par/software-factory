@@ -4041,13 +4041,13 @@ bash scripts/verify.sh
         uptimeSec: 62,
         plistInstalled: false,
         repos: [],
+        load: expect.objectContaining({ maxSlots: expect.any(Number) }),
       });
     });
 
-    it('daemon status --json on linux exits 2 with nothing on stdout', async () => {
+    it('daemon status (plain text) on linux exits 2 with nothing on stdout', async () => {
       h.daemonPlatform = 'linux';
-      const res = await runMain('daemon', 'status', '--json');
-      expect(res.exited).toBe(true);
+      const res = await runMain('daemon', 'status');
       expect(res.code).toBe(2);
       expect(h.daemonOut).toEqual([]);
       expect(errored()).toContain('requires macOS launchd');

@@ -7,5 +7,6 @@
   "repos": [
     { "slug": "acme/api", "checkoutPath": "/checkouts/api", "state": "active" },
     { "slug": "acme/web", "checkoutPath": "/checkouts/web", "state": "paused" }
-  ]
+  ],
+  "load": { "activeRuns": null, "maxSlots": 1, "queueDepth": null }
 }

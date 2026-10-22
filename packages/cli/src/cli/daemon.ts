@@ -26,9 +26,10 @@ import {
   readRunLockHolder,
   type RunRuntime,
 } from '@on-par/factory-core/internal';
-import { defaultIsPidAlive, getFactoryPaths } from '@on-par/factory-core';
+import { defaultIsPidAlive, getFactoryPaths, type FactoryConfig } from '@on-par/factory-core';
 
 import { bootstrapFailureMessage, reloadLaunchAgent } from './daemon-launchctl.js';
+import { defaultLoadConfig, readDaemonLoad, readLiveDaemonPid } from './daemon-load.js';
 import type { DaemonStatusJson } from './json-contract.js';
 export type { DaemonStatusJson } from './json-contract.js';
 import { runSelfUpdateCommand } from './self-update-exec.js';
@@ -81,6 +82,9 @@ export interface DaemonCtlDeps {
   pollMs?: number;
   /** Default setTimeout-based sleep. Tests pass a no-op. */
   sleep?: (ms: number) => Promise<void>;
+  /** status --json seams: pid liveness (default defaultIsPidAlive) and the config behind load.maxSlots (default: cwd repo, else packaged). */
+  isPidAlive?: (pid: number) => boolean;
+  loadConfig?: () => FactoryConfig;
 }
 
 /** Where a given home directory keeps the LaunchAgent plist and the daemon log. */
@@ -335,6 +339,8 @@ interface ResolvedDeps {
   registryFile: string;
   pollMs: number;
   sleep: (ms: number) => Promise<void>;
+  isPidAlive: (pid: number) => boolean;
+  loadConfig: () => FactoryConfig;
 }
 
 function resolveDeps(deps: DaemonCtlDeps): ResolvedDeps {
@@ -349,6 +355,8 @@ function resolveDeps(deps: DaemonCtlDeps): ResolvedDeps {
     registryFile: deps.registryFile ?? defaultRegistryPath(),
     pollMs: deps.pollMs ?? 250,
     sleep: deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms))),
+    isPidAlive: deps.isPidAlive ?? defaultIsPidAlive,
+    loadConfig: deps.loadConfig ?? defaultLoadConfig,
   };
 }
 
@@ -401,15 +409,17 @@ export async function cmdDaemonStop(deps: DaemonCtlDeps = {}): Promise<void> {
 
 /** Report running/not-loaded, pid + uptime, plist install state, and the
  *  attached repos from the registry. Exit code 0 when running, 1 when not.
- *  With `opts.json`, print one DaemonStatusJson object instead of text. */
+ *  With `opts.json`, print one DaemonStatusJson instead of text (any platform). */
 export async function cmdDaemonStatus(deps: DaemonCtlDeps = {}, opts: { json?: boolean } = {}): Promise<void> {
   const d = resolveDeps(deps);
-  requireDarwin(d.platform);
   const { plistPath, logPath } = factorydFiles(d.home);
 
   if (opts.json) {
-    const printed = await d.exec('launchctl', ['print', `gui/${d.uid}/${FACTORYD_LABEL}`]);
-    const pid = printed.code === 0 ? parseLaunchctlPid(printed.stdout) : null;
+    let pid = d.platform === 'darwin' ? null : readLiveDaemonPid(d.home, d.isPidAlive);
+    if (d.platform === 'darwin') {
+      const printed = await d.exec('launchctl', ['print', `gui/${d.uid}/${FACTORYD_LABEL}`]);
+      pid = printed.code === 0 ? parseLaunchctlPid(printed.stdout) : null;
+    }
     const uptimeSec =
       pid === null ? null : parseEtime((await d.exec('ps', ['-o', 'etime=', '-p', String(pid)])).stdout);
     const payload: DaemonStatusJson = {
@@ -423,12 +433,17 @@ export async function cmdDaemonStatus(deps: DaemonCtlDeps = {}, opts: { json?: b
         checkoutPath: r.path,
         state: r.state,
       })),
+      load: readDaemonLoad({
+        runsFile: join(dirname(d.registryFile), 'runs.json'),
+        isPidAlive: d.isPidAlive,
+        loadConfig: d.loadConfig,
+      }),
     };
     d.out.write(`${JSON.stringify(payload)}\n`);
     if (pid === null) process.exitCode = 1;
     return;
   }
-
+  requireDarwin(d.platform);
   const print = await d.exec('launchctl', ['print', `gui/${d.uid}/${FACTORYD_LABEL}`]);
   if (print.code !== 0) {
     d.out.write('factoryd: not loaded\n');

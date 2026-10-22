@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { FactoryEvent } from '@on-par/factory-core';
-import { createLogger } from '@on-par/factory-core';
+import { createLogger, loadFactoryConfig } from '@on-par/factory-core';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import type { QueueSnapshot } from '@on-par/factory-core/internal';
 import type { EnqueueResult, QueueGitHubClient } from '@on-par/factory-core/internal';
@@ -336,6 +336,7 @@ describe('JSON wire contracts', () => {
         uid: 501,
         home,
         registryFile,
+        loadConfig: () => loadFactoryConfig(),
         out: { write: (line) => output.push(line) },
         exec: async (cmd) =>
           cmd === 'launchctl'
