@@ -2972,6 +2972,7 @@ describe('cli', () => {
         lanes: async () => ['app', 'infra'],
         migrateLocalQueue: async () => {},
         enqueue: async () => [],
+        enqueueAfter: async () => ({ results: [], placement: 'after-parent' }),
         previewClear: async () => ({ entries: [], wouldClear: 0, wouldSkip: 0 }),
         clear: async () => ({ entries: [], cleared: 0, skipped: 0, failed: 0 }),
       };
@@ -3011,6 +3012,7 @@ describe('cli', () => {
         lanes: async () => [],
         migrateLocalQueue: async () => {},
         enqueue: async () => [],
+        enqueueAfter: async () => ({ results: [], placement: 'after-parent' }),
         previewClear: async () => ({ entries: [], wouldClear: 0, wouldSkip: 0 }),
         clear: async () => ({ entries: [], cleared: 0, skipped: 0, failed: 0 }),
       };
@@ -3051,6 +3053,7 @@ describe('cli', () => {
         lanes: async () => [],
         migrateLocalQueue: async () => {},
         enqueue: async () => [],
+        enqueueAfter: async () => ({ results: [], placement: 'after-parent' }),
         previewClear: async () => ({ entries: [], wouldClear: 0, wouldSkip: 0 }),
         clear: async () => ({ entries: [], cleared: 0, skipped: 0, failed: 0 }),
       };

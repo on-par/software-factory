@@ -5,11 +5,12 @@ import { hostname } from 'node:os';
 
 import type { Octokit } from '@octokit/rest';
 
+import { createEnqueuers, type ChildEnqueueResult } from './github-queue-enqueue.js';
 import { labelExistsError } from './github-errors.js';
 import { createOctokitComments, type QueueCommentClient } from './issue-comments.js';
 import { createClaimSettler, type ClaimSettleOptions, type ClaimSettler } from './claim-settle.js';
 import { knownRepoLabels } from './label-cache.js';
-import { orderCollisionAt, scanLaneOrders, type OrderCollision } from './order-collision.js';
+import type { OrderCollision } from './order-collision.js';
 import { addQueuedOnRelease } from './release-queued.js';
 import type { QueueEntry, QueueSnapshot, QueueSnapshotEntry } from './index.js';
 import {
@@ -35,8 +36,8 @@ export const MAX_LABEL_NAME_LENGTH = 50;
 /** Default claim lease duration, refreshed by `GithubQueue.heartbeat` (#1500). */
 export const DEFAULT_CLAIM_LEASE_MS = 15 * 60 * 1000;
 
-const QUEUED_LABEL_COLOR = '0e8a16';
-const LANE_LABEL_COLOR = '1d76db';
+export const QUEUED_LABEL_COLOR = '0e8a16';
+export const LANE_LABEL_COLOR = '1d76db';
 const QUEUE_ORDER_LABEL_COLOR = '0052cc';
 const IN_PROGRESS_LABEL_COLOR = 'fbca04';
 const CLAIMED_BY_LABEL_COLOR = '5319e7';
@@ -434,6 +435,8 @@ export interface GithubQueue extends ClaimSettler {
   lanes(): Promise<string[]>;
   migrateLocalQueue(entries: readonly QueueEntry[]): Promise<void>;
   enqueue(lane: string, issues: readonly number[]): Promise<EnqueueResult[]>;
+  /** Queues decomposed children right behind `parent`'s order, shifting later in-lane issues up (#3539). */
+  enqueueAfter(lane: string, parent: number, issues: readonly number[]): Promise<ChildEnqueueResult>;
   /** Read-only preview of what clearing the queue would touch: one list call, never writes. Covers every open
    *  queued issue, or only those labelled `factory:lane:<lane>` when `lane` is given. */
   previewClear(lane?: string): Promise<QueueClearPreview>;
@@ -583,57 +586,7 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     }
   }
 
-  async function enqueue(lane: string, issues: readonly number[]): Promise<EnqueueResult[]> {
-    const routeLabel = laneLabel(lane);
-    const members = await client.listOpenIssuesWithLabels({ owner, repo, labels: [routeLabel] });
-    const scan = scanLaneOrders(members, QUEUED_LABEL, QUEUE_ORDER_LABEL_PREFIX); // tolerant, every open in-lane holder (#2987, #2988)
-    let next = scan.maxPos + 1;
-    let naive = scan.queuedMax + 1;
-
-    const results: EnqueueResult[] = [];
-    for (const issue of issues) {
-      try {
-        const current = await client.getIssueLabels({ owner, repo, issue_number: issue });
-        if (current.some((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX))) {
-          const orderLabel = current.find((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX)) ?? '';
-          const existing = Number(orderLabel.slice(QUEUE_ORDER_LABEL_PREFIX.length));
-          results.push({
-            issue,
-            outcome: 'already-queued',
-            ...(Number.isSafeInteger(existing) && existing > 0 ? { position: existing } : {}),
-            labelsAdded: [],
-            labelsCreated: [],
-          });
-          continue;
-        }
-        const specs: QueueLabelSpec[] = [
-          { name: QUEUED_LABEL, color: QUEUED_LABEL_COLOR, description: 'Eligible to be claimed by a factory lane' },
-          { name: routeLabel, color: LANE_LABEL_COLOR, description: `Routed to factory lane ${lane}` },
-          queueOrderLabelSpec(next),
-        ];
-        const created: string[] = [];
-        for (const spec of specs) {
-          if (await client.ensureLabel({ owner, repo, ...spec })) created.push(spec.name);
-        }
-        await client.addLabels({ owner, repo, issue_number: issue, labels: specs.map((s) => s.name) });
-        const collision = orderCollisionAt(scan, naive);
-        results.push({
-          issue,
-          outcome: 'queued',
-          position: next,
-          labelsAdded: specs.map((s) => s.name).filter((name) => !current.includes(name)),
-          labelsCreated: created,
-          ...(collision ? { collision } : {}),
-        });
-        next += 1;
-        naive += 1;
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
-        results.push({ issue, outcome: 'failed', detail });
-      }
-    }
-    return results;
-  }
+  const { enqueue, enqueueAfter } = createEnqueuers(client, owner, repo);
 
   function clearLabels(lane: string | undefined): string[] {
     return lane === undefined ? [QUEUED_LABEL] : [QUEUED_LABEL, laneLabel(lane)];
@@ -678,5 +631,17 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     return { entries, cleared: count('cleared'), skipped: count('skipped'), failed: count('failed') };
   }
 
-  return { ...settler, claimNext, release, heartbeat, list, lanes, migrateLocalQueue, enqueue, previewClear, clear };
+  return {
+    ...settler,
+    claimNext,
+    release,
+    heartbeat,
+    list,
+    lanes,
+    migrateLocalQueue,
+    enqueue,
+    enqueueAfter,
+    previewClear,
+    clear,
+  };
 }
