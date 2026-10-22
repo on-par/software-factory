@@ -173,7 +173,12 @@ const FactoryConfigSchema = z.object({
     .object({ blockUnresolvedRegressions: z.boolean().default(false) })
     .default({ blockUnresolvedRegressions: false }),
   readiness: z.object({ updateIssueBody: z.boolean().default(true) }).default({ updateIssueBody: true }),
-  build: z.object({ publishFromBuild: z.boolean().default(false) }).default({ publishFromBuild: false }),
+  build: z
+    .object({
+      publishFromBuild: z.boolean().default(false),
+      contextCeiling: z.record(z.string(), z.number().int().nonnegative()).default({ 'codex-cli': 120000 }),
+    })
+    .default({ publishFromBuild: false, contextCeiling: { 'codex-cli': 120000 } }),
   // Plain string on purpose: an unknown mode must load and resolve to `file`, not throw.
   sizeGate: z
     .object({

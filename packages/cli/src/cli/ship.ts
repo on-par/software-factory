@@ -200,6 +200,7 @@ export async function shipIssue(
     policy.effective.localOnly,
   );
   router.setCodexFullAccessTasks?.(policy.sandbox.codexFullAccessTasks);
+  router.setContextCeilings?.(factoryConfig.build.contextCeiling);
   router.setLocalAuthSink?.(recordLocalAuthFailure);
   router.skipMissingHarnessClis(core.isCommandAvailable);
   let issueSpend = 0;

@@ -5,6 +5,7 @@ import { harnessCliCommand, retiredHarnessNotice } from '../harness/catalog.js';
 import { classifyFailure } from '../harness/classify.js';
 import { ClaudeCliHarness } from '../harness/claude-cli.js';
 import { CodexCliHarness } from '../harness/codex-cli.js';
+import { DEFAULT_CODEX_CONTEXT_CEILING } from '../harness/codex-context-ceiling.js';
 import { CommandHarness } from '../harness/command.js';
 import type { CodingHarness, HarnessFailureReason, HarnessLiveUsage, HarnessUsage } from '../harness/index.js';
 import { isRetryableFailure, taskRequiresAgenticHarness } from '../harness/index.js';
@@ -20,6 +21,7 @@ import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { type LocalAuthAgent, localAuthAgentFor } from '../utils/local-auth-record.js';
 import { BudgetStopError, type BudgetGuard, watchBudget } from './budget-guard.js';
+import { type ContextCeilingNotice, contextCeilingFor, contextCeilingNotice } from './context-ceiling.js';
 import { costRow } from './cost-row.js';
 import { extractFailoverReason, ModelRouterError, type RouterAttempt } from './executor-error.js';
 import { describeFailureDetail } from './failure-detail.js';
@@ -95,6 +97,8 @@ export interface ModelExecutorContext {
   writableRoots?: readonly string[];
   primaryRepoRoot?: string;
   codexFullAccessTasks?: readonly string[];
+  /** Codex auto-compact limit for agentic build tasks, from build.contextCeiling (#3327). */
+  contextCeiling?: number;
   /** Extra child-env vars (e.g. the lane's PORT lease) merged over the parent env. */
   env?: Record<string, string>;
   /** When set, the harness's exec child is spawned detached (its own
@@ -209,6 +213,7 @@ export class CliModelExecutor implements ModelExecutor {
       | 'writableRoots'
       | 'primaryRepoRoot'
       | 'codexFullAccessTasks'
+      | 'contextCeiling'
       | 'env'
       | 'onPgid'
       | 'onUsage'
@@ -226,6 +231,7 @@ export class CliModelExecutor implements ModelExecutor {
       writableRoots: ctx.writableRoots,
       primaryRepoRoot: ctx.primaryRepoRoot,
       codexFullAccessTasks: ctx.codexFullAccessTasks,
+      contextCeiling: ctx.contextCeiling,
       env: ctx.env,
       onPgid: ctx.onPgid,
       onUsage: ctx.onLiveUsage,
@@ -253,6 +259,7 @@ export class ModelRouter {
   private readonly retiredHarnessNoticed = new Set<string>();
   private localAuthSink?: (agent: LocalAuthAgent) => void;
   private codexFullAccessTasks: readonly string[] = [];
+  private contextCeilings: Readonly<Record<string, number>> = { 'codex-cli': DEFAULT_CODEX_CONTEXT_CEILING };
   private codexWorkspacePaths?: { primaryRepoRoot: string; writableRoots: readonly string[] };
 
   constructor(
@@ -275,6 +282,11 @@ export class ModelRouter {
   /** Resolved config allowlist, available even when the OS sandbox is disabled. */
   setCodexFullAccessTasks(tasks: readonly string[] | undefined): void {
     this.codexFullAccessTasks = [...(tasks ?? [])];
+  }
+
+  /** Per-harness context ceilings from build.contextCeiling; undefined restores the packaged default (#3327). */
+  setContextCeilings(ceilings: Readonly<Record<string, number>> | undefined): void {
+    this.contextCeilings = ceilings ? { ...ceilings } : { 'codex-cli': DEFAULT_CODEX_CONTEXT_CEILING };
   }
 
   /** Factory paths resolved for this run, separate from the OS sandbox's broader paths. */
@@ -398,6 +410,8 @@ export class ModelRouter {
       retryCause?: RetryCause;
       /** Per-issue budget guard for BUILD/rework (#3320). */
       budgetGuard?: BudgetGuard;
+      /** Called once per agentic-task run with the context ceiling of the first attempted model (#3327). */
+      onContextCeiling?: (notice: ContextCeilingNotice) => void;
     } = {},
   ): Promise<RouterResult> {
     const {
@@ -455,6 +469,8 @@ export class ModelRouter {
     let skippedForMissingCli = false;
     const missingClis: string[] = [];
 
+    let ceilingNoticed = false;
+
     for (const model of models) {
       const modelProvider = this.registry.get(model)?.provider;
       if (modelProvider === 'ollama' && this.executor.probeOllama) {
@@ -491,6 +507,13 @@ export class ModelRouter {
         let usage: HarnessUsage | undefined;
         let output: string;
         const attemptStartedAt = Date.now();
+        const harnessId = this.registry.getHarnessId(model);
+        if (!ceilingNoticed && taskRequiresAgenticHarness(task)) {
+          ceilingNoticed = true;
+          options.onContextCeiling?.(
+            contextCeilingNotice(task, model, harnessId, this.contextCeilings, this.registry.get(model)?.contextWindow),
+          );
+        }
         const budget = options.budgetGuard ? watchBudget(this.registry, model, options.budgetGuard) : undefined;
         try {
           output = await this.executor.runModel(model, prompt, {
@@ -502,6 +525,7 @@ export class ModelRouter {
             sandbox,
             ...this.codexWorkspacePaths,
             codexFullAccessTasks: this.codexFullAccessTasks,
+            contextCeiling: contextCeilingFor(task, harnessId, this.contextCeilings),
             env,
             onPgid,
             onUsage: (u) => {
