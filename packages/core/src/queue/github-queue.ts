@@ -503,18 +503,18 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
         deferred.add(candidate.number);
         continue;
       }
-      await client.addLabels({ owner, repo, issue_number: candidate.number, labels: [IN_PROGRESS_LABEL, myLabel] });
-      const after = await client.getIssueLabels({ owner, repo, issue_number: candidate.number });
-      const claims = after.filter((name) => name.startsWith(CLAIMED_BY_LABEL_PREFIX)).sort();
-      if (claims.length > 0 && claims[0] === myLabel) {
-        const expiresSpec = claimExpiresLabelSpec(leaseExpiresAt());
-        await client.ensureLabel({ owner, repo, ...expiresSpec });
-        await client.addLabels({ owner, repo, issue_number: candidate.number, labels: [expiresSpec.name] });
-        await client.removeLabel({ owner, repo, issue_number: candidate.number, name: QUEUED_LABEL });
+      const expiresSpec = claimExpiresLabelSpec(leaseExpiresAt());
+      const target = { owner, repo, issue_number: candidate.number };
+      await client.ensureLabel({ owner, repo, ...expiresSpec }); // minted, then claim + lease in one write (#1623, #3434)
+      await client.addLabels({ ...target, labels: [IN_PROGRESS_LABEL, myLabel, expiresSpec.name] });
+      const after = await client.getIssueLabels(target);
+      if (after.filter((name) => name.startsWith(CLAIMED_BY_LABEL_PREFIX)).sort()[0] === myLabel) {
+        await client.removeLabel({ ...target, name: QUEUED_LABEL });
         return { issue: candidate.number, decision };
       }
-      if (after.includes(myLabel)) {
-        await client.removeLabel({ owner, repo, issue_number: candidate.number, name: myLabel });
+      const rivalLease = after.some((n) => n.startsWith(CLAIM_EXPIRES_LABEL_PREFIX) && n !== expiresSpec.name); // same-named may be the winner's
+      for (const name of rivalLease ? [myLabel, expiresSpec.name] : [myLabel]) {
+        if (after.includes(name)) await client.removeLabel({ ...target, name });
       }
     }
     return null;
@@ -553,10 +553,10 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     await client.ensureLabel({ owner, repo, ...expiresSpec });
     const fresh = await client.getIssueLabels({ owner, repo, issue_number: issue });
     if (!fresh.includes(IN_PROGRESS_LABEL) || !fresh.includes(myLabel)) return false;
-    for (const name of fresh.filter((n) => n.startsWith(CLAIM_EXPIRES_LABEL_PREFIX))) {
+    await client.addLabels({ owner, repo, issue_number: issue, labels: [expiresSpec.name] }); // add first (#3434)
+    for (const name of fresh.filter((n) => n.startsWith(CLAIM_EXPIRES_LABEL_PREFIX) && n !== expiresSpec.name)) {
       await client.removeLabel({ owner, repo, issue_number: issue, name });
     }
-    await client.addLabels({ owner, repo, issue_number: issue, labels: [expiresSpec.name] });
     return true;
   }
 
