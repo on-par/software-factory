@@ -2102,8 +2102,7 @@ describe('checkPhase success paths', () => {
     expect(check.summary.failures).toBe(0);
     // Worker is never invoked when nothing fails.
     expect(stub.calls).toHaveLength(0);
-    // worker_output and design_smells skip in this non-git temp worktree.
-    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (4 skipped)' });
+    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (6 skipped)' });
   });
 
   it(
@@ -2150,8 +2149,9 @@ describe('checkPhase success paths', () => {
     expect(check.passed).toBe(true);
     expect(stub.calls).toHaveLength(0);
     expect(logs.some((l) => l.type === 'check' && l.msg.startsWith('SKIPPED: tests'))).toBe(true);
-    // worker_output and design_smells also skip in this non-git temp worktree.
-    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (5 skipped)' });
+    // compile and tests both skipped: the summary must not read green (#3566).
+    expect(logs.find((l) => l.msg.startsWith('Nothing was built or tested — '))?.msg).toContain('checkers ran');
+    expect(logs.some((l) => l.msg.includes('All checkers passed'))).toBe(false);
   });
 
   it(
@@ -2228,8 +2228,8 @@ describe('checkPhase success paths', () => {
     // Only one rework round was needed, so the worker was invoked exactly once.
     expect(stub.calls).toHaveLength(1);
     expect(logs).toContainEqual({ type: 'check', msg: 'Rework round 1: 0 failures remaining' });
-    // worker_output and design_smells skip in this non-git temp worktree.
-    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (4 skipped)' });
+    // worker_output, compile, lint and design_smells skip in this non-git temp worktree.
+    expect(logs).toContainEqual({ type: 'check', msg: 'All checkers passed (6 skipped)' });
   });
 });
 

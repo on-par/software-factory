@@ -165,12 +165,12 @@ describe('compileChecker', () => {
     expect(result.details).toContain('npm run build failed');
   });
 
-  it('passes when there is no package.json and no other build system detected', async () => {
+  it('skips when there is no package.json and no other build system detected', async () => {
     const worktree = await makeWorktree();
 
     const result = await compileChecker(makeContext(worktree));
 
-    expect(result.result).toBe('PASS');
+    expect(result.result).toBe('SKIP');
     expect(result.details).toContain('no build system detected — skipped');
   });
 
@@ -233,7 +233,7 @@ describe('compileChecker', () => {
 
     const result = await compileChecker(makeContext(worktree));
 
-    expect(result.result).toBe('PASS');
+    expect(result.result).toBe('SKIP');
     expect(result.details).toContain('no build system detected — skipped');
   });
 
@@ -816,7 +816,7 @@ describe('lintChecker', () => {
 
     const result = await lintChecker(makeContext(worktree));
 
-    expect(result.result).toBe('PASS');
+    expect(result.result).toBe('SKIP');
     expect(result.details).toContain('no linting configured — skipped');
   });
 

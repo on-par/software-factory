@@ -129,7 +129,7 @@ export const compileChecker: CheckerFn = async (ctx) => {
   };
   try {
     const argv = (await resolveCompileCommand(ctx))?.argv;
-    if (!argv) return { checker: 'compile', result: 'PASS', details: 'no build system detected — skipped' };
+    if (!argv) return { checker: 'compile', result: 'SKIP', details: 'no build system detected — skipped' };
 
     const label = argv.join(' ');
     const r = await run(argv, { cwd: ctx.worktree, timeoutMs, env: ctx.env, onPgid: ctx.onPgid });
@@ -367,7 +367,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
 
 export const lintChecker: CheckerFn = async (ctx) => {
   const details: string[] = [];
-  let result: 'PASS' | 'FAIL' = 'PASS';
+  let result: CheckerOutput['result'] = 'PASS';
 
   for (const cmd of await resolveLintCommands(ctx)) {
     const r = await runCommand(cmd.argv, {
@@ -383,8 +383,8 @@ export const lintChecker: CheckerFn = async (ctx) => {
       details.push(await commandFailureDetails(ctx, 'lint', cmd.label, r, describeCommandFailureTail(r, 300)));
     }
   }
-
   if (details.length === 0) {
+    result = 'SKIP';
     details.push('no linting configured — skipped');
   }
 
