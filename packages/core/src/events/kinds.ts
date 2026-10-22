@@ -50,6 +50,7 @@ export type EventKind =
   | 'conflict_detected'
   | 'conflict_resolved'
   | 'config'
+  | 'config_unknown_key'
   | 'constitution'
   | 'context_ceiling'
   | 'decompose_comment_posted'
@@ -269,6 +270,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   context_ceiling: { severity: 'info', isPark: false, isTerminal: false },
   // A config-caused CHECK failure parked with file, line and fix (#2583/#2584): fails the same way on every requeue.
   config: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
+  // An unknown nested config key stripped by the runtime schema, warned once per key at run start (#3568).
+  config_unknown_key: { severity: 'warn', isPark: false, isTerminal: false },
   constitution: { severity: 'info', isPark: false, isTerminal: false },
   decompose_comment_posted: { severity: 'info', isPark: false, isTerminal: false },
   decompose_duplicate_skipped: { severity: 'warn', isPark: false, isTerminal: false },

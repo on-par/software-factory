@@ -443,6 +443,7 @@ const INTERNAL_API_KEYS = [
   'isHarnessCliPresent',
   'lintFactoryConfig',
   'findConfigSchemaErrors',
+  'findUnknownConfigKeyWarnings',
   'formatUnknownCheckerMessage',
   'describePullRequestAccessError',
   'describeReviewConstitutionSource',

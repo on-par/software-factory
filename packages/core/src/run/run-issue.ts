@@ -34,6 +34,7 @@ import {
 import type { SizeBudget } from '../readiness/size.js';
 import { describeConstitutionSource } from '../constitutions/index.js';
 import { lintFactoryConfig } from '../config/config-lint.js';
+import { unknownConfigKeyMessages } from '../config/config-schema-lint.js';
 import { planPhase as planPhaseDefault, type PlanResult } from '../phases/plan.js';
 import { planConfigParkMessage } from '../phases/plan-spec-guards.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
@@ -530,6 +531,10 @@ async function runIssueOnce(
           `then run factory unpark ${request.issue}`,
         ].join('\n'),
       );
+    }
+    // Unknown nested config keys are stripped by the runtime schema; warn once per key, never block (#3568, ADR-0160).
+    if (request.repoConfigFile) {
+      for (const m of unknownConfigKeyMessages(request.repoConfigFile)) log('config_unknown_key', m);
     }
 
     // Pre-PLAN base health (#2339): a red origin/main releases the issue before any model spend;

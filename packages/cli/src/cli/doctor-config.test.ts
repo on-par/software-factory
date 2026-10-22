@@ -122,7 +122,7 @@ describe('configLintChecks (#2610, #2612)', () => {
   const PLACEHOLDER_CONSTITUTION =
     '---\nproduct: acme\nversion: 1\ncheckers:\n  - <checker-name>\n  - compile\n---\nbody\n';
   const VALID_CONSTITUTION = PLACEHOLDER_CONSTITUTION.replace('<checker-name>', 'compile');
-  const VALID_CONFIG = 'sweep:\n  enabled: false\n';
+  const VALID_CONFIG = 'sweep:\n  loopIntervalSeconds: 300\n';
 
   function setup(constitution: string, config: string): ConfigLintInput {
     const dir = mkdtempSync(join(tmpdir(), 'doctor-config-'));
@@ -162,6 +162,19 @@ describe('configLintChecks (#2610, #2612)', () => {
   it('passes the config check for a valid YAML config', () => {
     const rows = configLintChecks(setup(VALID_CONSTITUTION, VALID_CONFIG));
     expect(rows.every((r) => r.ok)).toBe(true);
+  });
+
+  it('warns, without failing, on an unknown nested key sandbox.foo (#3568)', () => {
+    const rows = configLintChecks(setup(VALID_CONSTITUTION, 'sandbox:\n  foo: 1\n'));
+    expect(rows.some((r) => r.ok)).toBe(true);
+    const warning = rows.find((r) => r.detail.includes('unknown key'));
+    expect(warning).toMatchObject({ name: 'config', ok: false, optional: true, section: REPO_SECTION });
+    expect(warning!.detail).toContain('sandbox.foo');
+  });
+
+  it('prints no unknown-key row for a config of known keys (#3568)', () => {
+    const rows = configLintChecks(setup(VALID_CONSTITUTION, VALID_CONFIG));
+    expect(rows.some((r) => r.detail.includes('unknown key'))).toBe(false);
   });
 
   it('flags a placeholder checker with file:line and the fix', () => {
