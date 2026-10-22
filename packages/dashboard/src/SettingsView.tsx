@@ -59,7 +59,7 @@ function sourceLabel(field: EffectivePolicyField): string {
     case 'flag':
       return `CLI flag ${field.sourceDetail}`;
     case 'env':
-    case 'config':
+    case 'repo':
       return field.sourceDetail;
     case 'default':
       return 'built-in default';

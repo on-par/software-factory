@@ -6,10 +6,17 @@ import { existsSync } from 'node:fs';
 import { defaultLaneBreakerThreshold } from '@on-par/factory-config';
 import { z } from 'zod';
 import { readRepoConfigFile } from './repo-config-file.js';
+import { resolvePrecedence, type ConfigSource } from './precedence.js';
 import { runConfigSource } from './run-config-source.js';
 import { HealthConfigSections } from './base-health.js';
 import { RiskConfigSections } from './risk-section.js';
-import { toConfigSchemaIssues, type ConfigSchemaIssue } from './index.js';
+import {
+  loadFactoryConfig,
+  resolveMergePolicy,
+  resolvePrClassifierPolicy,
+  toConfigSchemaIssues,
+  type ConfigSchemaIssue,
+} from './index.js';
 
 import type { ModelRegistry } from '../models/index.js';
 import { resolveModelOverrides, retiredModelHint } from '../models/index.js';
@@ -25,7 +32,6 @@ import {
   resolveLocalOnly,
   type EffectiveMergePolicy,
   type EffectivePrClassifierPolicy,
-  type MergePolicySource,
   type ModelsConfig,
 } from './index.js';
 import { assertRegistryHarness, RepoHarnessesSchema, resolveRepoHarnesses } from './repo-harnesses.js';
@@ -571,24 +577,31 @@ export function resolveUsageCap(
   repo: RepoFactoryConfig | null,
   env: NodeJS.ProcessEnv = process.env,
 ): EffectiveUsageCap {
-  if (repo?.budget?.capUsd !== undefined) {
-    return { cap: repo.budget.capUsd, source: 'repo' };
-  }
-  if (env.FACTORY_USAGE_CAP !== undefined) {
-    const cap = Number(env.FACTORY_USAGE_CAP);
-    if (!Number.isFinite(cap) || cap <= 0) {
-      throw new Error('FACTORY_USAGE_CAP must be a positive number');
-    }
-    return { cap, source: 'env' };
-  }
-  return { cap: 227, source: 'default' };
+  const { value, source } = resolvePrecedence<number, 'repo' | 'env'>(
+    [
+      { source: 'repo', read: () => repo?.budget?.capUsd },
+      {
+        source: 'env',
+        read: () => {
+          if (env.FACTORY_USAGE_CAP === undefined) return undefined;
+          const cap = Number(env.FACTORY_USAGE_CAP);
+          if (!Number.isFinite(cap) || cap <= 0) {
+            throw new Error('FACTORY_USAGE_CAP must be a positive number');
+          }
+          return cap;
+        },
+      },
+    ],
+    227,
+  );
+  return { cap: value, source };
 }
 
 // ---------- Usage watchdog policy ----------
 
 /** Where a resolved watchdog knob came from. `'flag'` is an explicit per-invocation CLI
  *  flag and outranks every other source. */
-export type WatchdogPolicySource = 'flag' | 'repo' | 'env' | 'default';
+export type WatchdogPolicySource = ConfigSource;
 
 /** Per-invocation CLI overrides. A field left `undefined` means "the flag was not
  *  supplied" and changes nothing; supplied values win over config file and env alike. */
@@ -626,113 +639,104 @@ export function resolveWatchdogPolicy(
 ): EffectiveWatchdogPolicy {
   const wd = repo?.budget?.watchdog;
 
-  let stopAt: number;
-  let stopAtSource: WatchdogPolicySource;
-  if (overrides.stopAt !== undefined) {
-    stopAt = overrides.stopAt;
-    if (!Number.isFinite(stopAt) || stopAt <= 0 || stopAt > 1) {
-      throw new Error('--usage-threshold must be a number in (0, 1]');
-    }
-    stopAtSource = 'flag';
-  } else if (wd?.stopAt !== undefined) {
-    stopAt = wd.stopAt;
-    stopAtSource = 'repo';
-  } else if (env.FACTORY_STOP_AT !== undefined) {
-    stopAt = Number(env.FACTORY_STOP_AT);
-    if (!Number.isFinite(stopAt) || stopAt <= 0 || stopAt > 1) {
-      throw new Error('FACTORY_STOP_AT must be a number in (0, 1]');
-    }
-    stopAtSource = 'env';
-  } else {
-    stopAt = 0.75;
-    stopAtSource = 'default';
-  }
+  const fraction = (value: number, message: string): number => {
+    if (!Number.isFinite(value) || value <= 0 || value > 1) throw new Error(message);
+    return value;
+  };
+  const positive = (value: number, message: string): number => {
+    if (!Number.isFinite(value) || value <= 0) throw new Error(message);
+    return value;
+  };
+  const envNumber = (raw: string | undefined, check: (n: number) => number): number | undefined =>
+    raw === undefined ? undefined : check(Number(raw));
 
-  let resumeAt: number;
-  let resumeAtSource: WatchdogPolicySource;
-  if (overrides.resumeAt !== undefined) {
-    resumeAt = overrides.resumeAt;
-    if (!Number.isFinite(resumeAt) || resumeAt <= 0 || resumeAt > 1) {
-      throw new Error('--usage-threshold must be a number in (0, 1]');
-    }
-    resumeAtSource = 'flag';
-  } else if (wd?.resumeAt !== undefined) {
-    resumeAt = wd.resumeAt;
-    resumeAtSource = 'repo';
-  } else if (env.FACTORY_RESUME_AT !== undefined) {
-    resumeAt = Number(env.FACTORY_RESUME_AT);
-    if (!Number.isFinite(resumeAt) || resumeAt <= 0 || resumeAt > 1) {
-      throw new Error('FACTORY_RESUME_AT must be a number in (0, 1]');
-    }
-    resumeAtSource = 'env';
-  } else {
-    resumeAt = 0.65;
-    resumeAtSource = 'default';
-  }
-
-  let pollSeconds: number;
-  let pollSource: WatchdogPolicySource;
-  if (overrides.pollSeconds !== undefined) {
-    pollSeconds = overrides.pollSeconds;
-    if (!Number.isFinite(pollSeconds) || pollSeconds <= 0) {
-      throw new Error('--usage-poll must be a positive number');
-    }
-    pollSource = 'flag';
-  } else if (wd?.pollSeconds !== undefined) {
-    pollSeconds = wd.pollSeconds;
-    pollSource = 'repo';
-  } else if (env.FACTORY_USAGE_POLL !== undefined) {
-    pollSeconds = Number(env.FACTORY_USAGE_POLL);
-    if (!Number.isFinite(pollSeconds) || pollSeconds <= 0) {
-      throw new Error('FACTORY_USAGE_POLL must be a positive number');
-    }
-    pollSource = 'env';
-  } else {
-    pollSeconds = 180;
-    pollSource = 'default';
-  }
-
-  let watch: boolean;
-  let watchSource: WatchdogPolicySource;
-  if (overrides.watch !== undefined) {
-    watch = overrides.watch;
-    watchSource = 'flag';
-  } else if (wd?.watch !== undefined) {
-    watch = wd.watch;
-    watchSource = 'repo';
-  } else if (env.FACTORY_USAGE_WATCH !== undefined) {
-    watch = env.FACTORY_USAGE_WATCH !== '0';
-    watchSource = 'env';
-  } else {
-    watch = true;
-    watchSource = 'default';
-  }
-
-  let estimator: boolean;
-  let estimatorSource: WatchdogPolicySource;
-  if (wd?.estimator !== undefined) {
-    estimator = wd.estimator;
-    estimatorSource = 'repo';
-  } else if (env.FACTORY_USAGE_ESTIMATOR !== undefined) {
-    estimator = env.FACTORY_USAGE_ESTIMATOR === '1';
-    estimatorSource = 'env';
-  } else {
-    estimator = false;
-    estimatorSource = 'default';
-  }
+  const stopAt = resolvePrecedence<number>(
+    [
+      {
+        source: 'flag',
+        read: () =>
+          overrides.stopAt === undefined
+            ? undefined
+            : fraction(overrides.stopAt, '--usage-threshold must be a number in (0, 1]'),
+      },
+      { source: 'repo', read: () => wd?.stopAt },
+      {
+        source: 'env',
+        read: () => envNumber(env.FACTORY_STOP_AT, (n) => fraction(n, 'FACTORY_STOP_AT must be a number in (0, 1]')),
+      },
+    ],
+    0.75,
+  );
+  const resumeAt = resolvePrecedence<number>(
+    [
+      {
+        source: 'flag',
+        read: () =>
+          overrides.resumeAt === undefined
+            ? undefined
+            : fraction(overrides.resumeAt, '--usage-threshold must be a number in (0, 1]'),
+      },
+      { source: 'repo', read: () => wd?.resumeAt },
+      {
+        source: 'env',
+        read: () =>
+          envNumber(env.FACTORY_RESUME_AT, (n) => fraction(n, 'FACTORY_RESUME_AT must be a number in (0, 1]')),
+      },
+    ],
+    0.65,
+  );
+  const pollSeconds = resolvePrecedence<number>(
+    [
+      {
+        source: 'flag',
+        read: () =>
+          overrides.pollSeconds === undefined
+            ? undefined
+            : positive(overrides.pollSeconds, '--usage-poll must be a positive number'),
+      },
+      { source: 'repo', read: () => wd?.pollSeconds },
+      {
+        source: 'env',
+        read: () =>
+          envNumber(env.FACTORY_USAGE_POLL, (n) => positive(n, 'FACTORY_USAGE_POLL must be a positive number')),
+      },
+    ],
+    180,
+  );
+  const watch = resolvePrecedence<boolean>(
+    [
+      { source: 'flag', read: () => overrides.watch },
+      { source: 'repo', read: () => wd?.watch },
+      {
+        source: 'env',
+        read: () => (env.FACTORY_USAGE_WATCH !== undefined ? env.FACTORY_USAGE_WATCH !== '0' : undefined),
+      },
+    ],
+    true,
+  );
+  const estimator = resolvePrecedence<boolean>(
+    [
+      { source: 'repo', read: () => wd?.estimator },
+      {
+        source: 'env',
+        read: () => (env.FACTORY_USAGE_ESTIMATOR !== undefined ? env.FACTORY_USAGE_ESTIMATOR === '1' : undefined),
+      },
+    ],
+    false,
+  );
 
   return {
-    stopAt,
-    resumeAt,
-    pollMs: pollSeconds * 1000,
-    watch,
-    estimator,
+    stopAt: stopAt.value,
+    resumeAt: resumeAt.value,
+    pollMs: pollSeconds.value * 1000,
+    watch: watch.value,
+    estimator: estimator.value,
     sources: {
-      stopAt: stopAtSource,
-      resumeAt: resumeAtSource,
-      pollMs: pollSource,
-      watch: watchSource,
-      estimator: estimatorSource,
+      stopAt: stopAt.source,
+      resumeAt: resumeAt.source,
+      pollMs: pollSeconds.source,
+      watch: watch.source,
+      estimator: estimator.source,
     },
   };
 }
@@ -755,14 +759,8 @@ export interface DescribeEffectiveConfigOpts {
   prClassifier?: EffectivePrClassifierPolicy;
 }
 
-function defaultMergePolicy(env: NodeJS.ProcessEnv): EffectiveMergePolicy {
-  const auto = env.FACTORY_MERGE === '1';
-  const admin = env.FACTORY_MERGE_ADMIN === '1';
-  return { auto, admin, sources: { auto: auto ? 'env' : 'default', admin: admin ? 'env' : 'default' } };
-}
-
 function sourceLabel(
-  source: MergePolicySource | undefined,
+  source: ConfigSource | undefined,
   repoConfigPath: string,
   envVar: string,
   flagLabel?: string,
@@ -847,7 +845,7 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
   const usage = resolveUsageCap(repo, env);
   lines.push(`Usage cap: $${usage.cap} ${sourceLabel(usage.source, repoConfigPath, 'FACTORY_USAGE_CAP')}`);
 
-  const mergePolicy = opts.mergePolicy ?? defaultMergePolicy(env);
+  const mergePolicy = opts.mergePolicy ?? resolveMergePolicy(loadFactoryConfig(), env);
   lines.push(
     `Merge auto: ${mergePolicy.auto ? 'on' : 'off'} ${sourceLabel(
       mergePolicy.sources.auto,
@@ -860,8 +858,7 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
     `Merge admin: ${mergePolicy.admin ? 'on' : 'off'} ${sourceLabel(mergePolicy.sources.admin, repoConfigPath, 'FACTORY_MERGE_ADMIN')}`,
   );
   const prClassifier: EffectivePrClassifierPolicy =
-    opts.prClassifier ??
-    (env.FACTORY_PR_CLASSIFIER === '1' ? { enabled: true, source: 'env' } : { enabled: false, source: 'default' });
+    opts.prClassifier ?? resolvePrClassifierPolicy(loadFactoryConfig(), env);
   lines.push(
     `PR classifier: ${prClassifier.enabled ? 'on' : 'off'} ${sourceLabel(
       prClassifier.source,

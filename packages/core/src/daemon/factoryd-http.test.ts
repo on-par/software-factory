@@ -565,17 +565,17 @@ describe('createFactorydServer', () => {
       );
       expect(putResult.status).toBe(200);
       expect(JSON.parse(putResult.body).fields).toEqual([
-        expect.objectContaining({ id: 'merge.auto', value: true, source: 'config' }),
+        expect.objectContaining({ id: 'merge.auto', value: true, source: 'repo' }),
         expect.objectContaining({ id: 'merge.admin', value: false, source: 'default' }),
       ]);
 
       const configPath = getFactoryPaths(checkoutDir).config;
       const onDisk = readRepoConfigFile(configPath) as any;
-      expect(onDisk.merge.auto).toBe(true);
+      expect(onDisk.run.merge.auto).toBe(true);
 
       const getResult = await get(factoryd.port, '/repos/on-par/software-factory/policy');
       expect(JSON.parse(getResult.body).fields).toEqual([
-        expect.objectContaining({ id: 'merge.auto', value: true, source: 'config' }),
+        expect.objectContaining({ id: 'merge.auto', value: true, source: 'repo' }),
         expect.objectContaining({ id: 'merge.admin', value: false, source: 'default' }),
       ]);
     });
@@ -678,7 +678,7 @@ describe('createFactorydServer', () => {
         expect(status).toBe(200);
         expect(JSON.parse(body).fields).toEqual([
           expect.objectContaining({ id: 'merge.auto', value: false, source: 'default' }),
-          expect.objectContaining({ id: 'merge.admin', value: true, source: 'config' }),
+          expect.objectContaining({ id: 'merge.admin', value: true, source: 'repo' }),
         ]);
 
         const configPath = getFactoryPaths(checkoutDir).config;
@@ -707,7 +707,7 @@ describe('createFactorydServer', () => {
         expect(status).toBe(200);
         expect(JSON.parse(body).fields).toEqual([
           expect.objectContaining({ id: 'merge.auto', value: false, source: 'default' }),
-          expect.objectContaining({ id: 'merge.admin', value: false, source: 'config' }),
+          expect.objectContaining({ id: 'merge.admin', value: false, source: 'repo' }),
         ]);
       });
     });
