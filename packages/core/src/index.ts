@@ -344,7 +344,6 @@ export {
 
 // Router
 export type {
-  ExecutorHarness,
   FailoverReason,
   ModelExecutor,
   ModelExecutorContext,

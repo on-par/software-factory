@@ -429,7 +429,7 @@ function claudeCliOffenders(models: Record<string, ModelDefaults>): string[] {
       const harness =
         def.harness ??
         (def.codex && def.provider === 'ollama'
-          ? 'ollama-command-agent'
+          ? 'ollama-agentic'
           : def.codex
             ? 'codex-cli'
             : def.provider === 'ollama'

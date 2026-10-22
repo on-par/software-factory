@@ -52,6 +52,17 @@ describe('repo harnesses (#2869)', () => {
     );
   });
 
+  it('rejects a repo harness that redeclares the retired ollama-command-agent id', () => {
+    expect(() => applyRepoConfig(models, { version: 2, harnesses: { 'ollama-command-agent': decl } })).toThrow(
+      "Harness 'ollama-command-agent' is built in and cannot be redeclared under harnesses",
+    );
+  });
+
+  it('accepts a registry model naming the retired ollama-command-agent alias', () => {
+    const retired = baseModel({ provider: 'ollama', tier: 'worker', harness: 'ollama-command-agent' });
+    expect(() => applyRepoConfig(models, { version: 2, models: { registry: { 'my-model': retired } } })).not.toThrow();
+  });
+
   it('accepts a registry model on a repo-declared harness', () => {
     const merged = applyRepoConfig(models, {
       version: 2,
