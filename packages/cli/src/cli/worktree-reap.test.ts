@@ -1,7 +1,12 @@
 // packages/cli/src/cli/worktree-reap.test.ts — formatShipReapLine run-output lines (#3009)
-import { describe, expect, it } from 'vitest';
+import { join } from 'node:path';
 
-import { formatShipReapLine } from './worktree-reap.js';
+import { getFactoryPaths } from '@on-par/factory-core';
+import type { reapCleanShipWorktree } from '@on-par/factory-core/internal';
+import { createTempDirs } from '@on-par/factory-core/testing';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { formatShipReapLine, reapPrlessShip, type ReapRuntime } from './worktree-reap.js';
 
 const WT = '/wt/5';
 const BR = 'factory/5-fix';
@@ -52,5 +57,49 @@ describe('formatShipReapLine', () => {
 
   it('prints nothing for an absent worktree', () => {
     expect(formatShipReapLine(WT, { outcome: 'absent', branch: null, branchDeleted: false })).toBeNull();
+  });
+});
+
+describe('reapPrlessShip', () => {
+  const tmp = createTempDirs();
+  afterEach(async () => {
+    await tmp.cleanup();
+    vi.restoreAllMocks();
+  });
+
+  function setup(rt: Partial<ReapRuntime['configLoaders']>, worktreePathFor: ReapRuntime['worktreePathFor']) {
+    const dir = tmp.makeSync('reap-prless-');
+    const repoRoot = join(dir, 'repo');
+    const paths = getFactoryPaths(repoRoot, join(dir, 'state'));
+    const runtime: ReapRuntime = {
+      configLoaders: { loadFactoryConfigForRepo: () => ({}) as never, loadRepoConfig: () => ({}) as never, ...rt },
+      worktreePathFor,
+    };
+    const reap = vi.fn<typeof reapCleanShipWorktree>(async () => {
+      throw new Error('reap failed');
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const args: [number, string, string, typeof paths, undefined] = [999998, repoRoot, 'o/r', paths, undefined];
+    return { runtime, reap, log, args };
+  }
+
+  it('prints no kept-worktree line when the config could not be loaded', async () => {
+    const { runtime, reap, log, args } = setup(
+      {
+        loadFactoryConfigForRepo: () => {
+          throw new Error('expected object, received null');
+        },
+      },
+      () => '/never',
+    );
+    await reapPrlessShip(runtime, reap, args);
+    expect(reap).not.toHaveBeenCalled();
+    expect(log.mock.calls.flat().join('\n')).not.toMatch(/Kept (the )?worktree/);
+  });
+
+  it('still reports an unverified worktree when the path resolved and the reap threw', async () => {
+    const { runtime, reap, log, args } = setup({}, () => '/wt/999998');
+    await reapPrlessShip(runtime, reap, args);
+    expect(log.mock.calls.flat().join('\n')).toContain('Kept worktree /wt/999998 — its state could not be verified');
   });
 });

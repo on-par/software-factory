@@ -29,8 +29,21 @@ describe('findConfigSchemaErrors (#2611)', () => {
     expect(findConfigSchemaErrors({ absPath: '/nonexistent/config.yaml', relPath: 'config.yaml' })).toEqual([]);
   });
 
-  it('returns nothing for an empty file', () => {
-    expect(run('config.yaml', '')).toEqual([]);
+  it.each(['', '  \n\n', '# all commented out\n'])(
+    'reports an empty, whitespace-only or comment-only file at the root',
+    (text) => {
+      const f = run('config.yaml', text);
+      expect(f).toHaveLength(1);
+      expect(f[0]).toMatchObject({ file: '.factory/config.yaml', line: 1, path: '(root)' });
+      expect(f[0].fix).toContain('delete the file');
+    },
+  );
+
+  it('reports a JSON null document at the root without a line', () => {
+    const f = run('config.json', 'null');
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({ path: '(root)' });
+    expect(f[0].line).toBeUndefined();
   });
 
   it('reports a wrong type at its line with a fix', () => {

@@ -69,7 +69,17 @@ export function findConfigSchemaErrors(configFile: { absPath: string; relPath: s
     ? parseDocument(readFileSync(absPath, 'utf8').replace(/^\uFEFF/, ''), { lineCounter: lc })
     : undefined;
 
-  if (raw === null || raw === undefined) return [];
+  if (raw === null || raw === undefined) {
+    return [
+      {
+        file: relPath,
+        line: isYaml ? 1 : undefined,
+        path: '(root)',
+        message: 'the file is empty or only comments; expected a mapping of config keys',
+        fix: `add config keys (${EXAMPLE}) or delete the file to use the defaults`,
+      },
+    ];
+  }
   if (!isPlainObject(raw)) {
     return [
       {
