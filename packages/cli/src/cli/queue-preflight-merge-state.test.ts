@@ -34,6 +34,7 @@ const harness = (results: Array<LandState | Error>) => {
       throw new Error('unexpected review lookup');
     },
     readIssueBody: async () => '',
+    getMergedClosingPr: async () => undefined,
     getPrerequisiteState: async () => {
       throw new Error('unexpected prerequisite lookup');
     },

@@ -17,6 +17,7 @@ import {
 import { errorDetail } from './index.js';
 import { findOpenPRForIssue } from './land.js';
 import { getPullRequestLandState } from './land-pr.js';
+import { findMergedClosingPr } from './queue-merged-closing-pr.js';
 
 /** Backoff before each merge-state re-read (#3323): GitHub reports UNKNOWN while it recomputes mergeability. */
 export const MERGE_STATE_REREAD_DELAYS_MS: readonly number[] = [2_000, 5_000, 10_000];
@@ -52,6 +53,8 @@ export interface QueuePreflightOps {
   getPullReviews(prNumber: number): Promise<StackPullReviews>;
   readIssueBody(issue: number): Promise<string>;
   getPrerequisiteState(issue: number): Promise<{ state: 'open' | 'closed'; mergedClosingPr: boolean }>;
+  /** #3375: number of a PR that closes `issue` by reference, merged into the default branch and not reverted by a merged `Reverts owner/repo#N` PR; undefined when none. */
+  getMergedClosingPr(issue: number): Promise<number | undefined>;
   onDeferred?: (issue: number, message: string) => void;
   /** Backoff before each merge-state re-read (#3323). Defaults to setTimeout. */
   sleep?: (ms: number) => Promise<void>;
@@ -141,6 +144,7 @@ export function makeQueuePreflightOps(
       }
       return data.body ?? '';
     },
+    getMergedClosingPr: (issue) => findMergedClosingPr(octokit, owner, repo, issue),
     getPrerequisiteState: async (issue) => {
       let after: string | null = null;
       let mergedClosingPr = false;
@@ -207,22 +211,35 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  *  (naming the layers above it), and the lowest open layer defers, or is adopted when stack auto-merge is on and
  *  its base is main with green CI on the rebased head. In stack mode a lowest open layer that would defer instead
  *  builds the next pending slice once the top built slice PR is merged or approved (#3366). Returns undefined to fall through to the Closes-PR
- *  preflight only when no slice PR is still open. */
-async function preflightSlice(issue: number, deps: QueuePreflightOps): Promise<QueuePreflightDecision | undefined> {
+ *  preflight only when no slice PR is still open. `hasPlan` is true when a slice plan was found (#3375). */
+async function preflightSlice(
+  issue: number,
+  deps: QueuePreflightOps,
+): Promise<{ decision?: QueuePreflightDecision; hasPlan: boolean }> {
   let lookup: SlicePlanCommentLookup;
   try {
     lookup = await deps.findSlicePlan(issue);
   } catch (err) {
-    return { kind: 'park', reason: `slice plan lookup failed: ${errorDetail(err)}` };
+    return { decision: { kind: 'park', reason: `slice plan lookup failed: ${errorDetail(err)}` }, hasPlan: false };
   }
   if (lookup.status === 'invalid') {
     return {
-      kind: 'park',
-      reason: `slice plan comment ${lookup.commentId} on #${issue} is unreadable (${lookup.error})`,
+      decision: {
+        kind: 'park',
+        reason: `slice plan comment ${lookup.commentId} on #${issue} is unreadable (${lookup.error})`,
+      },
+      hasPlan: true,
     };
   }
-  if (lookup.status === 'not-found') return undefined;
-  const { plan } = lookup;
+  if (lookup.status === 'not-found') return { hasPlan: false };
+  return { decision: await sliceDecision(issue, lookup.plan, deps), hasPlan: true };
+}
+
+async function sliceDecision(
+  issue: number,
+  plan: SlicePlan,
+  deps: QueuePreflightOps,
+): Promise<QueuePreflightDecision | undefined> {
   const n = plan.slices.length;
   const open = plan.slices.filter((s) => s.state === 'pr-open');
   if (open.length === 0) return undefined;
@@ -328,6 +345,19 @@ async function preflightSlice(issue: number, deps: QueuePreflightOps): Promise<Q
   return (await save()) ?? undefined;
 }
 
+/** #3375: park when a merged PR already closes the issue; a lookup error builds as on main. */
+async function alreadyLanded(issue: number, deps: QueuePreflightOps): Promise<QueuePreflightDecision> {
+  try {
+    const merged = await deps.getMergedClosingPr(issue);
+    if (merged !== undefined) {
+      return { kind: 'park', reason: `work already landed: merged PR #${merged} closes #${issue}` };
+    }
+  } catch {
+    // a failed lookup builds, as on main
+  }
+  return { kind: 'build' };
+}
+
 /** Resolve queued work from GitHub evidence without consuming model or worktree resources. */
 export async function preflightQueuedIssue(
   issue: QueueIssue,
@@ -374,7 +404,7 @@ export async function preflightQueuedIssue(
   }
 
   const slice = await preflightSlice(issue.number, deps);
-  if (slice) return slice;
+  if (slice.decision) return slice.decision;
 
   let pr: OpenPullRequestEvidence | undefined;
   try {
@@ -382,7 +412,7 @@ export async function preflightQueuedIssue(
   } catch (err) {
     return { kind: 'park', reason: `PR lookup failed: ${errorDetail(err)}` };
   }
-  if (!pr) return { kind: 'build' };
+  if (!pr) return slice.hasPlan ? { kind: 'build' } : alreadyLanded(issue.number, deps);
   if (pr.headRepoFullName !== deps.expectedHeadRepoFullName) {
     return { kind: 'park', reason: `PR #${pr.number} head is not in ${deps.expectedHeadRepoFullName}` };
   }
