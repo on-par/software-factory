@@ -6,7 +6,7 @@ import {
   parseNumstat,
   type ReviewFloorPathChange,
 } from '../review/floor.js';
-import { DIFF_EXCLUDES, type DiffRunner } from './design-smells.js';
+import type { DiffRunner } from './design-smells.js';
 import type { CheckerContext } from './index.js';
 
 /** Per-file line counts for the same diff the critic sees (committed + uncommitted, DIFF_EXCLUDES);
@@ -15,13 +15,14 @@ export async function readDesignFloorChanges(
   worktree: string,
   baseRef: string,
   run: DiffRunner,
+  excludes: readonly string[],
 ): Promise<ReviewFloorPathChange[] | null> {
   const committed = await run(
-    ['git', 'diff', '--numstat', '--no-renames', `${baseRef}...HEAD`, '--', '.', ...DIFF_EXCLUDES],
+    ['git', 'diff', '--numstat', '--no-renames', `${baseRef}...HEAD`, '--', '.', ...excludes],
     worktree,
   );
   const uncommitted = await run(
-    ['git', 'diff', '--numstat', '--no-renames', 'HEAD', '--', '.', ...DIFF_EXCLUDES],
+    ['git', 'diff', '--numstat', '--no-renames', 'HEAD', '--', '.', ...excludes],
     worktree,
   );
   if (!committed.ok || !uncommitted.ok) return null;
@@ -30,10 +31,15 @@ export async function readDesignFloorChanges(
 
 /** SKIP details when the diff is review floor A (docs-only / tests-only: no program design to critique);
  *  null when the critic should run, including on any read failure (fail closed). */
-export async function designFloorSkip(ctx: CheckerContext, baseRef: string, run: DiffRunner): Promise<string | null> {
+export async function designFloorSkip(
+  ctx: CheckerContext,
+  baseRef: string,
+  run: DiffRunner,
+  excludes: readonly string[],
+): Promise<string | null> {
   let changes: ReviewFloorPathChange[] | null;
   try {
-    changes = await readDesignFloorChanges(ctx.worktree, baseRef, run);
+    changes = await readDesignFloorChanges(ctx.worktree, baseRef, run, excludes);
   } catch {
     return null;
   }

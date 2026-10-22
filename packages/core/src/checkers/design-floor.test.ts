@@ -102,7 +102,7 @@ describe('designFloorSkip', () => {
     const run: DiffRunner = async () => {
       throw new Error('boom');
     };
-    expect(await designFloorSkip({ worktree: '/w', specPath: '/s' }, 'origin/main', run)).toBeNull();
+    expect(await designFloorSkip({ worktree: '/w', specPath: '/s' }, 'origin/main', run, DIFF_EXCLUDES)).toBeNull();
   });
 });
 
@@ -113,7 +113,7 @@ describe('readDesignFloorChanges', () => {
       seen.push([...argv]);
       return { ok: true, stdout: '1\t2\ta.ts\n' };
     };
-    expect(await readDesignFloorChanges('/w', 'origin/main', run)).toEqual([
+    expect(await readDesignFloorChanges('/w', 'origin/main', run, DIFF_EXCLUDES)).toEqual([
       { path: 'a.ts', added: 1, removed: 2 },
       { path: 'a.ts', added: 1, removed: 2 },
     ]);
@@ -121,6 +121,6 @@ describe('readDesignFloorChanges', () => {
       expect.arrayContaining(['--numstat', '--no-renames', 'origin/main...HEAD', ...DIFF_EXCLUDES]),
     );
     expect(seen[1]).toEqual(expect.arrayContaining(['--numstat', '--no-renames', 'HEAD', ...DIFF_EXCLUDES]));
-    expect(await readDesignFloorChanges('/w', 'origin/main', async () => ({ ok: false, stdout: '' }))).toBeNull();
+    expect(await readDesignFloorChanges('/w', 'origin/main', async () => ({ ok: false, stdout: '' }), DIFF_EXCLUDES)).toBeNull();
   });
 });

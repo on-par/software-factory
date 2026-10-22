@@ -412,7 +412,7 @@ export async function designSmellsChecker(
     };
   }
 
-  const floorSkip = await designFloorSkip(ctx, diff.baseRef ?? 'HEAD', deps?.diffRunner ?? defaultDiffRunner);
+  const floorSkip = await designFloorSkip(ctx, diff.baseRef ?? 'HEAD', deps?.diffRunner ?? defaultDiffRunner, DIFF_EXCLUDES);
   if (floorSkip) return { checker: DESIGN_SMELLS_CHECKER, result: 'SKIP', details: floorSkip };
 
   const specText = await readFile(ctx.specPath, 'utf-8').catch(() => '(no spec)');
