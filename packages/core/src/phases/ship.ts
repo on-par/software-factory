@@ -151,11 +151,9 @@ async function shipPhaseImpl(opts: {
   // Check if a PR already exists (claude route may have created one)
   const openLookup = await findOpenPR(octokit, owner, repoName, branch);
   if (openLookup.status === 'error') {
-    log(
-      'ship',
-      `could not determine whether an open PR exists for ${branch} (${openLookup.detail}) — aborting before PR creation`,
-    );
-    return { ok: false };
+    const reason = `could not determine whether an open PR exists for ${branch} (${openLookup.detail})`;
+    log('ship', `${reason} — aborting before PR creation`);
+    return { ok: false, reason };
   }
   let prNumber: number | undefined = openLookup.status === 'found' ? openLookup.prNumber : undefined;
   const reentry = opts.reentry;
@@ -283,11 +281,9 @@ async function shipPhaseImpl(opts: {
       // empty ahead-count (merge commit / fast-forward). That is delivery, not recovery.
       const mergedLookup = await findMergedPR(octokit, owner, repoName, branch);
       if (mergedLookup.status === 'error' && !recoveryState.landed) {
-        log(
-          'ship',
-          `not recovering ${branch}: could not determine whether it was already merged (${mergedLookup.detail})`,
-        );
-        return { ok: false };
+        const reason = `could not determine whether ${branch} was already merged (${mergedLookup.detail})`;
+        log('ship', `not recovering ${branch}: ${reason}`);
+        return { ok: false, reason };
       }
       const mergedPr = mergedLookup.status === 'found' ? mergedLookup.prNumber : undefined;
       if (mergedPr !== undefined || recoveryState.landed) {
@@ -297,8 +293,9 @@ async function shipPhaseImpl(opts: {
         );
         return { ok: true, prNumber: mergedPr, alreadyDelivered: true };
       }
-      log('ship', `not recovering ${branch}: no commits ahead of origin/main`);
-      return { ok: false };
+      const reason = 'no commits ahead of origin/main';
+      log('ship', `not recovering ${branch}: ${reason}`);
+      return { ok: false, reason };
     }
 
     // Push branch. A rejected push means the remote head does not contain this run's
@@ -334,28 +331,25 @@ async function shipPhaseImpl(opts: {
     // push-failure abort (#734).
     const pushed = await pushAndVerifyRemoteHead(run, worktree, branch, pushCmd);
     if (pushed.status === 'push-failed') {
-      log('ship', `git push failed (${pushed.kind}): ${pushed.detail} — aborting before PR creation`);
+      const pushReason = `git push failed (${pushed.kind}): ${pushed.detail}`;
+      log('ship', `${pushReason} — aborting before PR creation`);
       if (leased) {
         return {
           ok: false,
           reason: `leased push of ${branch} over recorded ${recorded} was rejected (${pushed.kind})`,
         };
       }
-      return { ok: false };
+      return { ok: false, reason: pushReason };
     }
     if (pushed.status === 'mismatch') {
-      log(
-        'ship',
-        `remote head ${pushed.remoteSha} does not match local HEAD ${pushed.localSha} for ${branch} — aborting before PR creation`,
-      );
-      return { ok: false };
+      const reason = `remote head ${pushed.remoteSha} does not match local HEAD ${pushed.localSha} for ${branch}`;
+      log('ship', `${reason} — aborting before PR creation`);
+      return { ok: false, reason };
     }
     if (pushed.status === 'unreadable') {
-      log(
-        'ship',
-        `could not verify the remote head for ${branch} (${pushed.detail}); local HEAD ${pushed.localSha ?? 'unknown'} — aborting before PR creation`,
-      );
-      return { ok: false };
+      const reason = `could not verify the remote head for ${branch} (${pushed.detail}); local HEAD ${pushed.localSha ?? 'unknown'}`;
+      log('ship', `${reason} — aborting before PR creation`);
+      return { ok: false, reason };
     }
     log('ship', `remote head ${pushed.remoteSha} matches local HEAD ${pushed.localSha} for ${branch}`);
 
@@ -412,11 +406,9 @@ async function shipPhaseImpl(opts: {
       if (!isPullAlreadyExistsError(err)) throw err;
       const existing = await findOpenPR(octokit, owner, repoName, branch);
       if (existing.status !== 'found') {
-        log(
-          'ship',
-          `pulls.create reported an existing PR for ${branch} but re-querying did not find it (${existing.status === 'error' ? existing.detail : 'no open PR listed'}) — aborting`,
-        );
-        return { ok: false };
+        const reason = `pulls.create reported an existing PR for ${branch} but re-querying did not find it (${existing.status === 'error' ? existing.detail : 'no open PR listed'})`;
+        log('ship', `${reason} — aborting`);
+        return { ok: false, reason };
       }
       prNumber = existing.prNumber;
       log('recovered', `PR #${prNumber} already existed for ${branch}; reusing it`);
@@ -424,8 +416,9 @@ async function shipPhaseImpl(opts: {
   }
 
   if (!prNumber) {
-    log('fail', `Could not create or find PR for ${branch}`);
-    return { ok: false };
+    const reason = `Could not create or find PR for ${branch}`;
+    log('fail', reason);
+    return { ok: false, reason };
   }
 
   if (!reentry)

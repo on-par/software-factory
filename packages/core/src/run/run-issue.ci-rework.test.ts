@@ -170,6 +170,24 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
     expect(shipPhase.mock.calls[0][0].reentry).toBeUndefined();
   });
 
+  it('a CI rework re-ship failure parks with the ship reason in the park comment', async () => {
+    const reason = 'remote head X does not match local HEAD Y for b';
+    shipPhase.mockResolvedValueOnce(CI_FAIL).mockResolvedValueOnce({ ok: false, reason });
+    const createComment = vi.fn(async (_args: { body: string }) => ({ data: { id: 1 } }));
+    const octokit = Object.assign({} as Octokit, {
+      rest: {
+        users: { getAuthenticated: vi.fn(async () => ({ data: { id: 9 } })) },
+        issues: { listComments: vi.fn(async () => ({ data: [] })), createComment, updateComment: vi.fn() },
+      },
+    });
+    const log = vi.fn<Log>();
+    const outcome = await runIssue(request, policy, { ...ports(log), octokit });
+    expect(outcome).toMatchObject({ state: 'parked' });
+    expect(log.mock.calls.some(([, msg]) => msg.includes(`ship phase failed: ${reason}`))).toBe(true);
+    expect(createComment).toHaveBeenCalledTimes(1);
+    expect(createComment.mock.calls[0][0].body).toContain(reason);
+  });
+
   it('parks ci-failed as exhausted with evidence after the second CI rework round and runs no third rework', async () => {
     shipPhase.mockResolvedValue(CI_FAIL);
     const log = vi.fn<Log>();

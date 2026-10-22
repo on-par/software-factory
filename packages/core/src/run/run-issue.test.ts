@@ -1735,14 +1735,12 @@ describe('runIssue — environment release (#1928)', () => {
       failureSignature: 'sig',
     });
     const log = vi.fn();
-    const reworkHistory = {
-      priorSignature: vi.fn().mockResolvedValue(undefined),
-      record: vi.fn().mockResolvedValue(undefined),
-      clear: vi.fn().mockResolvedValue(undefined),
-    };
+    const reworkHistory = { priorSignature: vi.fn(), record: vi.fn(), clear: vi.fn() };
+    const me = { data: { id: 9 } };
+    const issues = { listComments: vi.fn().mockResolvedValue({ data: [] }), createComment };
     const ports = basePorts({
       events: () => log,
-      octokit: { rest: { issues: { createComment } } } as never,
+      octokit: { rest: { users: { getAuthenticated: vi.fn().mockResolvedValue(me) }, issues } } as never,
       reworkHistory: reworkHistory as never,
     });
     return { log, createComment, reworkHistory, run: () => runIssue(baseRequest(request), basePolicy(), ports) };

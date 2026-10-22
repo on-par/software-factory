@@ -387,7 +387,8 @@ async function runSimIssue(
       watchCI: false,
       log: log('ship'),
     });
-    if (!ship.ok) return finish('parked', 'ship', 'ship phase failed');
+    if (!ship.ok)
+      return finish('parked', 'ship', ship.reason ? `ship phase failed: ${ship.reason}` : 'ship phase failed');
     // `shipped` means a PR was opened. shipPhase also returns ok for the alreadyDelivered
     // path (branch has no commits ahead of origin/main) — reachable here when an injected
     // BUILD failure left the worktree unchanged. That is not a ship.
