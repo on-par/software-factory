@@ -18,6 +18,11 @@ import { errorDetail } from './index.js';
 import { findOpenPRForIssue } from './land.js';
 import { getPullRequestLandState } from './land-pr.js';
 
+/** Backoff before each merge-state re-read (#3323): GitHub reports UNKNOWN while it recomputes mergeability. */
+export const MERGE_STATE_REREAD_DELAYS_MS: readonly number[] = [2_000, 5_000, 10_000];
+
+const defaultSleep = (ms: number): Promise<void> => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 export interface OpenPullRequestEvidence {
   number: number;
   branch: string;
@@ -48,6 +53,8 @@ export interface QueuePreflightOps {
   readIssueBody(issue: number): Promise<string>;
   getPrerequisiteState(issue: number): Promise<{ state: 'open' | 'closed'; mergedClosingPr: boolean }>;
   onDeferred?: (issue: number, message: string) => void;
+  /** Backoff before each merge-state re-read (#3323). Defaults to setTimeout. */
+  sleep?: (ms: number) => Promise<void>;
   /** Current head/base refs of a slice PR; the head SHA is the rebased one after GitHub retargets a layer. */
   getPullRefs(prNumber: number): Promise<{ headRef: string; baseRef: string; headSha: string }>;
   /** True when `branch` still holds commit `sha` (compare status ahead or identical); false for a missing branch (#3368). */
@@ -63,6 +70,7 @@ export function makeQueuePreflightOps(
     autoMergeStack?: boolean;
     stackMode?: boolean;
     onDeferred?: (issue: number, message: string) => void;
+    sleep?: (ms: number) => Promise<void>;
   },
 ): QueuePreflightOps {
   let selfId: Promise<number> | undefined;
@@ -90,6 +98,7 @@ export function makeQueuePreflightOps(
       return { headSha: pull.head.sha, selfId: id, reviews };
     },
     onDeferred: opts.onDeferred,
+    sleep: opts.sleep ?? defaultSleep,
     getPullRefs: async (prNumber) => {
       const { data } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
       return { headRef: data.head.ref, baseRef: data.base.ref, headSha: data.head.sha };
@@ -387,8 +396,28 @@ export async function preflightQueuedIssue(
   if (state.isDraft !== false) {
     return { kind: 'park', reason: `PR #${pr.number} is draft or its draft state is unavailable` };
   }
-  if (!state.mergeStateStatus || state.mergeStateStatus === 'UNKNOWN') {
-    return { kind: 'park', reason: `PR #${pr.number} merge state is unavailable` };
+  const unknown = (s: typeof state) => !s.mergeStateStatus || s.mergeStateStatus === 'UNKNOWN';
+  if (unknown(state)) {
+    const sleep = deps.sleep ?? defaultSleep;
+    for (const delay of MERGE_STATE_REREAD_DELAYS_MS) {
+      await sleep(delay);
+      try {
+        state = await deps.getLandState(pr.number);
+      } catch {
+        continue; // a failed re-read counts as UNKNOWN for this attempt
+      }
+      if (!unknown(state)) break;
+    }
+    if (unknown(state)) {
+      deps.onDeferred?.(
+        issue.number,
+        `PR #${pr.number} merge state still UNKNOWN after ${MERGE_STATE_REREAD_DELAYS_MS.length} re-reads`,
+      );
+      return { kind: 'defer' };
+    }
+    if (state.isDraft !== false) {
+      return { kind: 'park', reason: `PR #${pr.number} is draft or its draft state is unavailable` };
+    }
   }
 
   let outcome: CiOutcome;
