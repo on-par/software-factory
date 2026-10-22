@@ -9,7 +9,7 @@ import { readRepoConfigFile } from './repo-config-file.js';
 import { resolvePrecedence, type ConfigSource } from './precedence.js';
 import { runConfigSource } from './run-config-source.js';
 import { HealthConfigSections } from './base-health.js';
-import { RiskConfigSections } from './risk-section.js';
+import { OptionalConfigSections } from './optional-sections.js';
 import {
   loadFactoryConfig,
   resolveMergePolicy,
@@ -246,7 +246,7 @@ export const RepoFactoryConfigV2Schema = z
           "Unset: derived from the build pin's harness, else PLAN decides per issue.",
       ),
     commands: z.record(z.string(), z.string()).optional().describe(EVIDENCE_COMMANDS_DESCRIPTION),
-    ...RiskConfigSections,
+    ...OptionalConfigSections,
   })
   .strict();
 

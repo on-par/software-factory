@@ -234,6 +234,7 @@ function modelNamespace(): Node[] {
     { kind: 'object', key: 'providers', doc: doc('providers'), children: leaves(['providers'], true) },
     unset('route', doc('route'), '"<route>"'),
     unset('commands', doc('commands'), '{ test: "vitest run" }'),
+    unset('qa', doc('qa'), '{ start: ["npm", "start"], smoke: ["npm", "run", "smoke"] }'),
     {
       kind: 'object',
       key: 'risk',

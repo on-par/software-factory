@@ -50,7 +50,7 @@ describe('findUnknownConstitutionCheckers', () => {
 });
 
 describe('formatUnknownCheckerMessage', () => {
-  const allowed = 'worker_output, compile, tests, lint, links, accessibility, design_smells, custom_*';
+  const allowed = 'worker_output, compile, tests, lint, links, accessibility, design_smells, app_smoke, custom_*';
   it('formats with and without a line', () => {
     expect(formatUnknownCheckerMessage('.factory/constitution.md', { name: 'typecheck', line: 5 })).toBe(
       `.factory/constitution.md:5: unknown checker 'typecheck'. Remove the line or use one of: ${allowed}`,
