@@ -312,7 +312,6 @@ describe('queue PR preflight', () => {
       { watch: async () => 'timeout' as const },
       { getLandState: async () => ({ isDraft: true, mergeStateStatus: 'CLEAN' }) },
       { findOpenPR: async () => Promise.reject(new Error('rate limited')) },
-      { getLandState: async () => ({ isDraft: false, mergeStateStatus: 'UNKNOWN' }) },
       {
         findOpenPR: async () => ({
           number: 71,
