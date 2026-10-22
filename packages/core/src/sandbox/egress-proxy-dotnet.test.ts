@@ -1,19 +1,16 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { buildEgressAllowlist, detectEcosystems } from './egress-proxy.js';
 
-const dirs: string[] = [];
-afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-});
+const tempDirs = createTempDirs();
+afterEach(() => tempDirs.cleanup());
 
 function repoWith(...files: string[]): string {
-  const dir = mkdtempSync(join(tmpdir(), 'egress-dotnet-'));
-  dirs.push(dir);
+  const dir = tempDirs.makeSync('egress-dotnet-');
   for (const f of files) {
     mkdirSync(join(dir, f, '..'), { recursive: true });
     writeFileSync(join(dir, f), '');
