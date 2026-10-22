@@ -1,24 +1,19 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import type { CheckerOutput } from '../types/index.js';
 import { describeCheckOutcome } from './check-outcome.js';
 import { type CheckerContext, compileChecker, lintChecker, summarizeCheckerOutputs, testsChecker } from './index.js';
 
-const tempDirs = new Set<string>();
+const tempDirs = createTempDirs();
 
-afterEach(async () => {
-  await Promise.all([...tempDirs].map((d) => rm(d, { recursive: true, force: true })));
-  tempDirs.clear();
-});
+afterEach(() => tempDirs.cleanup());
 
 async function makeRepo(files: Record<string, string>): Promise<CheckerContext> {
-  const worktree = await mkdtemp(join(tmpdir(), 'no-build-system-'));
-  tempDirs.add(worktree);
-  await mkdir(worktree, { recursive: true });
+  const worktree = await tempDirs.make('no-build-system-');
   for (const [name, contents] of Object.entries(files)) await writeFile(join(worktree, name), contents);
   return { worktree, specPath: join(worktree, 'no-such-spec.md'), constitutionBody: 'test constitution' };
 }
