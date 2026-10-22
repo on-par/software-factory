@@ -49,42 +49,41 @@ Packages marked (private) are not published to npm. For the dependency graph and
 
 **Prerequisites**
 
-- Node.js ≥ 24 (the `engines.node` field in `packages/cli/package.json`)
-- `git`
-- One supported coding agent CLI (see [docs/agents.md](docs/agents.md)), on your PATH and signed in. Any one of them runs the whole loop (triage, PLAN, BUILD, CHECK and SHIP).
-- The GitHub CLI `gh`, signed in with `gh auth login`. The factory uses `gh repo view` to detect your repo.
-- A GitHub token. The factory reads `GITHUB_TOKEN`, then `GH_TOKEN`, and falls back to `gh auth token` when neither is set, so `gh auth login` is usually enough.
-- Optional: `ollama` for experimental local models. When Ollama is not running, the factory skips local models and says so once in the log.
+- Node.js ≥ 24 and `git`. On older Node versions, the CLI stops and tells you which version it needs. Commits need a git identity: set it globally or with repo-local `git config`.
+- One supported coding agent CLI (see [docs/agents.md](docs/agents.md)) on your PATH and signed in. That guide covers install and sign-in for each agent.
+- `gh`, signed in with `gh auth login`. It also supplies the GitHub token (`GITHUB_TOKEN` or `GH_TOKEN` override it). `factory doctor` checks all of this and prints a fix for anything missing.
+- Optional: `ollama` for experimental local models.
 
-Two terms used in the steps below:
+Before you start, read [Safety](#safety): the factory runs agents with permission prompts off.
 
-- **Constitution**: the written standard that defines "done right" for your repo. It lives in `.factory/constitution.md`, and every build is checked against it. See [Constitutions](#constitutions).
-- **Triage**: the step where a model reads your open GitHub issues and proposes an ordered work queue in `.factory/state/queue.proposed`. You review the proposal and accept it with `factory triage accept`, and `factory run` then works through the accepted queue.
+**Step 1: Install**
 
-Run `factory doctor` after installing (Step 1) to check all of this.
+```bash
+npm install -g @on-par/factory-cli   # Requires Node.js 24 or newer
+factory --version
+factory doctor                       # run this before you continue
+```
 
-### Use Codex
+**Step 2: Point it at your repo**
 
-On Linux, install `firejail` first (for example `sudo apt install firejail`), before you set up an agent. It is the OS sandbox the factory wraps agent runs in. Without it, Codex still uses its own `--sandbox workspace-write` containment.
+```bash
+cd /path/to/your/repo        # any git repo with a GitHub remote and open issues
+factory init                 # creates .factory/ with the default-code constitution
+```
 
-Install the Codex CLI and sign in once:
+`.factory/` is excluded via `.git/info/exclude`. That keeps `.factory/` local to this clone. It isn't committed, so copy it yourself if you work from another machine or clone. For other constitutions, see [Constitutions](#constitutions).
 
-- `codex login` signs in with ChatGPT and uses your Plus or Pro plan, with no API key. Runs count toward your plan limits; manage them in ChatGPT settings.
-- `codex login --with-api-key` uses API billing instead, which suits automation and CI.
-- `codex login --device-auth` signs in on a headless machine.
+**Step 3: Triage, then ship**
 
-`factory doctor` shows a `codex signed in` line with the sign-in method. Models whose CLI is not installed are skipped, so on a machine with only Codex every phase runs on Codex models and PLAN picks the codex build route. With both CLIs installed, pin a phase in `.factory/config.json` (`models.pins.plan`, `build`, `checker`, `triage`), set `route`, or reorder `tiers`; `factory triage --model <id>` picks the triage model for one run. See [docs/models.md](docs/models.md).
+```bash
+factory triage               # a model proposes an ordered queue from your open issues
+factory triage accept        # promotes the proposal to the queue
+factory ship 42              # PLAN → BUILD → CHECK → SHIP one issue
+```
 
-### Use Claude Code
+While SHIP waits for CI, a PR with no checks reported yet counts as pending. `factory ship` ends at a green, ready-for-review PR. Merging stays with you: merge it, or run `factory land <N>`. `factory run` processes the whole queue in parallel lanes.
 
-Install the Claude Code CLI, for example `npm install -g @anthropic-ai/claude-code`, and sign in once:
-
-- Run `claude` and complete `/login` to use your Claude subscription.
-- Or set `ANTHROPIC_API_KEY` to use API billing instead, which suits automation and CI.
-
-`factory doctor` shows a `claude installed` line with the CLI version and a `claude signed in` line. Run `factory doctor --probe-inference` to also send one real `claude -p` prompt. On a machine with only Claude Code, every phase runs on Claude models and PLAN picks the claude build route. For a minimal config and the other agents, see [docs/agents.md](docs/agents.md).
-
-### Safety
+## Safety
 
 To run unattended, the factory starts agent CLIs with their permission prompts turned off:
 
@@ -96,51 +95,6 @@ Each build runs in a separate git worktree (under `~/.factory/worktrees/<owner>/
 The factory never merges by default. `factory ship` and `factory run-issue` never merge; they stop at the PR, which is marked ready for review once CI passes. `factory run` and `factory supervise` merge only if you turn auto-merge on (`FACTORY_MERGE=1`, `run.merge.auto: true`, or `--auto-merge`). `FACTORY_MERGE_ADMIN=1` lets the token merge through unmet branch protection; set it only when you mean to. Full rules: [docs/config.example.yaml](docs/config.example.yaml).
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md).
-
-**Step 1: Install**
-
-```bash
-npm install -g @on-par/factory-cli   # Requires Node.js 24 or newer
-factory --version
-factory doctor
-```
-
-On older Node versions, the CLI stops and tells you which version it needs. `factory doctor` checks git, your git identity (`user.name` and `user.email`, which commits need; set them with `git config --global`, or repo-local `git config` in the target repo works too), your coding agent CLI, `gh` auth, the GitHub token, npm and the sandbox, and prints a fix for anything missing. It works from any directory, including outside a repo. To run from a clone instead, see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-**Step 2: Point it at your repo**
-
-```bash
-cd /path/to/your/repo        # any git repo with a GitHub remote and open issues
-factory init                 # creates .factory/ (config.yaml, constitution.md, .gitignore, state/)
-```
-
-`factory init` seeds `.factory/constitution.md` from the bundled `default-code` constitution and adds `.factory/` to `.git/info/exclude`. That keeps `.factory/` local to this clone. It isn't committed, so copy it yourself if you work from another machine or clone. Every run reads `.factory/constitution.md` from this main checkout, including builds that run in a lane worktree.
-
-**Step 3 (optional): Pick a different constitution**
-
-```bash
-factory constitution --list                    # bundled constitutions and their checkers
-factory constitution --checkers                # every built-in checker, one line each
-```
-
-For a code repo, skip this step. The `default-code` scaffold works as is. `--product` replaces the scaffold without `--force` while it is still untouched. Once you edit `.factory/constitution.md`, `--product` refuses, and only `--force` overwrites it.
-
-**Step 4: Triage the backlog**
-
-```bash
-factory triage               # proposes .factory/state/queue.proposed from your open issues; review it, then:
-factory triage accept        # validates the proposal and promotes it to .factory/state/queue
-```
-
-**Step 5: Ship your first issue**
-
-```bash
-factory ship 42              # PLAN → BUILD → CHECK → SHIP one issue (use an issue number from your repo)
-```
-
-While SHIP waits for CI, it logs progress. On a repo with no CI configured (no workflow files and no checks on recent default-branch commits), it skips the wait at once. Otherwise a PR with no checks reported yet counts as pending: SHIP and land keep waiting for the base branch's required checks, naming any still missing, until the 10 min CI timeout. When PLAN enriches an incomplete issue, it keeps your text and appends a `factory:enriched` section. Set `readiness.updateIssueBody: false` in `.factory/config.yaml` to keep enrichment out of the issue.
-
-`factory ship` ends at a green, ready-for-review PR that closes the issue (it prints `✅ Issue #N → PR #M ready for review`). Merging stays with you: review the PR and merge it, or run `factory land <N>` to squash-merge and clean up the worktree. To process the whole triaged queue in parallel lanes instead, run `factory run` (after accepting a triage proposal with `factory triage accept`). `FACTORY_MERGE` and `FACTORY_MERGE_ADMIN` apply to `factory run`, `factory supervise` and `factory land` only; `factory ship` warns and ignores them.
 
 ## Configuration
 

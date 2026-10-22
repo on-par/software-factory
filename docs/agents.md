@@ -19,12 +19,23 @@ see [Bring your own agent](#bring-your-own-agent).
 
 `ollama-command-agent` is a retired alias. Models that name it, or set `codex: true` with `provider: ollama` and no `harness`, run on `ollama-agentic`, and the router logs a one-time warning (#3445).
 
+## Choosing and routing agents
+
+Models whose CLI is not installed are skipped. On a machine with one CLI, every phase runs on that CLI's
+models and PLAN picks its build route. With several CLIs, pin a phase in `.factory/config.json`
+(`models.pins.plan`, `build`, `checker`, `triage`), set `route`, or reorder `tiers`.
+`factory triage --model <id>` picks the triage model for one run. See [models.md](models.md).
+
 ## Claude Code
 
 ### Install and log in
 
 Install the CLI, for example `npm install -g @anthropic-ai/claude-code`. Then run `claude` and complete
-`/login`, or set `ANTHROPIC_API_KEY`.
+`/login` to use your Claude subscription, or set `ANTHROPIC_API_KEY` to use API billing, which suits
+automation and CI.
+
+On macOS, an unattended service (LaunchAgent) that uses a subscription login needs login-keychain access: see
+[the optional recipe](runbooks/macos-keychain-launchagent.md). An API key or a non-macOS host does not need it.
 
 ### Minimal `.factory/config.yaml`
 
@@ -50,8 +61,15 @@ Version tested: 2.1.296 (Claude Code)
 
 ### Install and log in
 
-Install the CLI, for example `npm install -g @openai/codex`. Then run `codex login` (ChatGPT),
-`codex login --with-api-key`, or `codex login --device-auth`.
+On Linux, install `firejail` first (for example `sudo apt install firejail`). It is the OS sandbox the factory
+wraps agent runs in. Without it, Codex still uses `--sandbox workspace-write`.
+
+Install the CLI, for example `npm install -g @openai/codex`, and sign in once:
+
+- `codex login` signs in with ChatGPT and uses your Plus or Pro plan, with no API key. Runs count toward your
+  plan limits; manage them in ChatGPT settings.
+- `codex login --with-api-key` uses API billing instead, which suits automation and CI.
+- `codex login --device-auth` signs in on a headless machine.
 
 ### Minimal `.factory/config.yaml`
 

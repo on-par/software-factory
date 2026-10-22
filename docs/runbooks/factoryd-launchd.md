@@ -1,10 +1,12 @@
 # factoryd as a launchd LaunchAgent
 
-Reference: #1179 (epic #764). `factory daemon start` installs
+Reference: #1179 (epic #764). launchd is the macOS service option for factoryd. On Linux or
+other hosts, run `factory daemon` under your own service manager. `factory daemon start` installs
 `~/Library/LaunchAgents/com.onpar.factoryd.plist` with `KeepAlive` + `RunAtLoad`, so
 launchd relaunches factoryd after any crash and starts it at login. The agent runs in
-the `gui/<uid>` domain so the daemon's Claude Max workers keep login-keychain access
-for OAuth refresh — see [macos-keychain-launchagent.md](./macos-keychain-launchagent.md).
+the `gui/<uid>` domain, which keeps login-keychain access. That is needed only when workers
+use a Claude subscription login on macOS; with `ANTHROPIC_API_KEY` or another provider it is
+not. See [the optional keychain recipe](./macos-keychain-launchagent.md).
 launchd redirects factoryd's stdout/stderr to `~/.factory/daemon.log`.
 
 ## Install & verify KeepAlive

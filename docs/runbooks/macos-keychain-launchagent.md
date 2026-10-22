@@ -1,6 +1,8 @@
-# macOS Claude keychain access with a LaunchAgent
+# Optional: unattended Claude subscription login on macOS (LaunchAgent and keychain)
 
-Reference: #1014. This is the Mini factory operations path for Claude Max workers on macOS.
+You need this only if you run the factory unattended on macOS with a Claude subscription (`/login`), for
+example under tmux or a LaunchAgent. With `ANTHROPIC_API_KEY`, another coding agent, or a non-macOS host, skip it.
+Reference: #1014.
 
 ## Symptom
 

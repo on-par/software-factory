@@ -39,10 +39,10 @@ function quickStartProblems(text: string): string[] {
     problems.push('Quick start code block contains factory constitution --product');
   }
 
-  const step3 = section(text, '**Step 3', '**Step 4');
-  if (step3 === undefined) {
-    problems.push('missing Step 3');
-  } else {
+  // The short Quick start has no constitution step; when a README still carries one, it must stay read-only.
+  const step3 = section(text, '**Step 3', '**Step 4') ?? section(text, '**Step 3', '## Configuration');
+  const hasConstitutionStep = step3 !== undefined && /constitution/i.test(step3.split('\n')[0] ?? '');
+  if (step3 !== undefined && hasConstitutionStep) {
     const cmds = codeBlocks(step3).flatMap(commands);
     const expected = ['factory constitution --list', 'factory constitution --checkers'];
     if (JSON.stringify(cmds) !== JSON.stringify(expected)) {
@@ -53,10 +53,10 @@ function quickStartProblems(text: string): string[] {
     }
   }
 
-  const prereqs = section(text, '**Prerequisites**', '**Step 3');
-  if (prereqs === undefined) {
+  const prereqs = hasConstitutionStep ? section(text, '**Prerequisites**', '**Step 3') : undefined;
+  if (hasConstitutionStep && prereqs === undefined) {
     problems.push('missing Prerequisites before Step 3');
-  } else {
+  } else if (prereqs !== undefined) {
     if (!/^- \*\*Constitution\*\*: /m.test(prereqs)) {
       problems.push('Constitution is not defined before Step 3');
     }
