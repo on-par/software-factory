@@ -396,6 +396,7 @@ const INTERNAL_API_KEYS = [
   'markSliceMerged',
   'parseSlicePlanComment',
   'publishDecomposition',
+  'publishParkComment',
   'recordSliceMerged',
   'renderSlicePlanComment',
   'resolveSliceGate',
