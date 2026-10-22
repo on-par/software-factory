@@ -1,8 +1,8 @@
 // packages/product/src/judge/rubric.ts — the deterministic default judge + reworker (#474).
 
+import { checkStoryInvest } from '@on-par/contracts';
 import type { Story } from '@on-par/contracts';
 
-import { checkInvest } from '../decompose/index.js';
 import type { IntentDoc } from '../intent/index.js';
 import type { IntentDimension } from '../interview/index.js';
 import type { JudgeVerdict, RubricCheck } from './verdict.js';
@@ -28,7 +28,7 @@ export function judgeStoryAgainstIntent(story: Story, doc: IntentDoc): JudgeVerd
 
   const untracedCriteria = story.acceptanceCriteria.filter((c) => c.tracesTo.length === 0);
 
-  const investReport = checkInvest(story);
+  const investReport = checkStoryInvest(story);
 
   const checks: readonly RubricCheck[] = [
     {

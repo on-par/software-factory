@@ -1,10 +1,9 @@
 // packages/product/src/decompose/decompose.ts — the intent-to-artifacts transform (#472).
 
 import type { Epic, Story, Traceable } from '@on-par/contracts';
-import { CONTRACTS_SCHEMA_VERSION } from '@on-par/contracts';
+import { CONTRACTS_SCHEMA_VERSION, checkStoryInvest } from '@on-par/contracts';
 
 import type { IntentDoc } from '../intent/index.js';
-import { checkInvest } from './invest.js';
 import { isVerticalSlice, planSlices } from './slices.js';
 
 export interface Decomposition {
@@ -102,7 +101,7 @@ export function decomposeIntent(doc: IntentDoc): DecomposeResult {
       tracesTo: [slice.scope.id, ...slice.audience.map((s) => s.id), ...slice.outcome.map((s) => s.id)],
     };
 
-    const investReport = checkInvest(story);
+    const investReport = checkStoryInvest(story);
     if (!investReport.ok) {
       for (const violation of investReport.violations) {
         blockers.push(`story "${story.title}" fails INVEST (${violation.letter}): ${violation.reason}`);

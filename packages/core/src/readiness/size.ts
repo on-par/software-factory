@@ -1,18 +1,14 @@
 // packages/core/src/readiness/size.ts — the INVEST "small" rule, applied to a raw
-// factory-task issue body (#605). Deliberately duplicates the thresholds in
-// packages/product/src/decompose/invest.ts (MAX_IN_SCOPE / MAX_ACCEPTANCE_CRITERIA):
-// core must not depend on the private @on-par/product package, and checkInvest()
-// needs a parsed Story that does not exist at readiness-scoring time. Change both
-// files together. The 5/5 counts now only produce a `size_hint` and no longer gate PLAN (#3350).
+// factory-task issue body (#605). The thresholds come from @on-par/contracts (ADR-0167);
+// checkStoryInvest() needs a parsed Story that does not exist at readiness-scoring time.
+// The 5/5 counts only produce a `size_hint` and no longer gate PLAN (#3350, ADR-0165).
 
 import { statSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
+import { MAX_ACCEPTANCE_CRITERIA_ITEMS, MAX_IN_SCOPE_ITEMS } from '@on-par/contracts';
 import type { DesignArtifact } from '../types/index.js';
 
-/** More in-scope bullets than this and the issue has stopped being one slice. */
-export const MAX_IN_SCOPE_ITEMS = 5;
-/** More acceptance criteria than this and the issue is really several issues. */
-export const MAX_ACCEPTANCE_CRITERIA_ITEMS = 5;
+export { MAX_ACCEPTANCE_CRITERIA_ITEMS, MAX_IN_SCOPE_ITEMS } from '@on-par/contracts';
 
 export const DEFAULT_TOKEN_BUDGET = 150_000;
 export const DEFAULT_MAX_FILES = 12;

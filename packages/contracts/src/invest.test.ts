@@ -1,9 +1,9 @@
-// packages/product/src/decompose/invest.test.ts (#472).
+// src/invest.test.ts (#472).
 
-import type { Story } from '@on-par/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { checkInvest, MAX_ACCEPTANCE_CRITERIA, MAX_IN_SCOPE } from './invest.js';
+import { checkStoryInvest, MAX_ACCEPTANCE_CRITERIA_ITEMS, MAX_IN_SCOPE_ITEMS } from './invest.js';
+import type { Story } from './issue.js';
 
 function cleanStory(overrides: Partial<Story> = {}): Story {
   return {
@@ -33,59 +33,59 @@ function cleanStory(overrides: Partial<Story> = {}): Story {
   };
 }
 
-describe('checkInvest', () => {
+describe('checkStoryInvest', () => {
   it('reports ok: true with no violations for a clean story', () => {
-    expect(checkInvest(cleanStory())).toEqual({ ok: true, violations: [] });
+    expect(checkStoryInvest(cleanStory())).toEqual({ ok: true, violations: [] });
   });
 
   it('flags independent when want or an inScope entry names a dependency cue', () => {
-    const report = checkInvest(cleanStory({ want: 'once the export ships, build the retry button' }));
+    const report = checkStoryInvest(cleanStory({ want: 'once the export ships, build the retry button' }));
     expect(report.ok).toBe(false);
     expect(report.violations.map((v) => v.letter)).toContain('independent');
   });
 
   it('flags negotiable when outOfScope is empty', () => {
-    const report = checkInvest(cleanStory({ outOfScope: [] }));
+    const report = checkStoryInvest(cleanStory({ outOfScope: [] }));
     expect(report.violations.map((v) => v.letter)).toContain('negotiable');
   });
 
   it('flags valuable when tracesTo is empty', () => {
-    const report = checkInvest(cleanStory({ tracesTo: [] }));
+    const report = checkStoryInvest(cleanStory({ tracesTo: [] }));
     expect(report.violations.map((v) => v.letter)).toContain('valuable');
   });
 
   it('flags valuable when soThat is blank', () => {
-    const report = checkInvest(cleanStory({ soThat: '   ' }));
+    const report = checkStoryInvest(cleanStory({ soThat: '   ' }));
     expect(report.violations.map((v) => v.letter)).toContain('valuable');
   });
 
   it('flags estimable when there are no acceptance criteria', () => {
-    const report = checkInvest(cleanStory({ acceptanceCriteria: [] }));
+    const report = checkStoryInvest(cleanStory({ acceptanceCriteria: [] }));
     expect(report.violations.map((v) => v.letter)).toContain('estimable');
   });
 
   it('flags estimable when there is no verification step', () => {
-    const report = checkInvest(cleanStory({ verification: [] }));
+    const report = checkStoryInvest(cleanStory({ verification: [] }));
     expect(report.violations.map((v) => v.letter)).toContain('estimable');
   });
 
-  it('flags small when inScope exceeds MAX_IN_SCOPE', () => {
-    const report = checkInvest(
-      cleanStory({ inScope: Array.from({ length: MAX_IN_SCOPE + 1 }, (_, i) => `item ${i}`) }),
+  it('flags small when inScope exceeds MAX_IN_SCOPE_ITEMS', () => {
+    const report = checkStoryInvest(
+      cleanStory({ inScope: Array.from({ length: MAX_IN_SCOPE_ITEMS + 1 }, (_, i) => `item ${i}`) }),
     );
     expect(report.violations.map((v) => v.letter)).toContain('small');
   });
 
-  it('flags small when acceptanceCriteria exceeds MAX_ACCEPTANCE_CRITERIA', () => {
+  it('flags small when acceptanceCriteria exceeds MAX_ACCEPTANCE_CRITERIA_ITEMS', () => {
     const criterion = { name: 'n', given: [], when: ['w'], then: ['t'], tracesTo: [] };
-    const report = checkInvest(
-      cleanStory({ acceptanceCriteria: Array.from({ length: MAX_ACCEPTANCE_CRITERIA + 1 }, () => criterion) }),
+    const report = checkStoryInvest(
+      cleanStory({ acceptanceCriteria: Array.from({ length: MAX_ACCEPTANCE_CRITERIA_ITEMS + 1 }, () => criterion) }),
     );
     expect(report.violations.map((v) => v.letter)).toContain('small');
   });
 
   it('flags testable when a criterion has no When or no Then', () => {
-    const report = checkInvest(
+    const report = checkStoryInvest(
       cleanStory({
         acceptanceCriteria: [{ name: 'Broken', given: [], when: [], then: ['t'], tracesTo: [] }],
       }),

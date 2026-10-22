@@ -1,6 +1,6 @@
 # ADR-0010: The readiness size gate re-implements the INVEST "small" rule inside core
 
-- Status: Accepted
+- Status: Superseded by ADR-0167
 - Date: 2026-08-09
 
 ## Context

@@ -8,14 +8,11 @@
 // advisory and non-fatal (a failure logs decompose_failed), but the issue is always
 // parked for decomposition afterwards; the driver never throws to its caller.
 //
-// The INVEST gate is owned by core because core must not depend on the private
-// @on-par/product leaf (ADR-0010 already settled this for the size gate). checkStoryInvest
-// deliberately duplicates product's checkInvest (packages/product/src/decompose/invest.ts)
-// predicate-for-predicate and reuses the size.ts constants; the two files carry this
-// comment and MUST change together.
+// The INVEST gate is the shared checkStoryInvest from @on-par/contracts (ADR-0167): core and
+// the product decomposer call the same function, so the predicates cannot drift.
 
 import type { Octokit } from '@octokit/rest';
-import { CONTRACTS_SCHEMA_VERSION, EpicSchema, StorySchema } from '@on-par/contracts';
+import { CONTRACTS_SCHEMA_VERSION, EpicSchema, StorySchema, checkStoryInvest } from '@on-par/contracts';
 import type { Epic, Story } from '@on-par/contracts';
 import { z } from 'zod';
 
@@ -29,11 +26,11 @@ import type { SiblingIssue } from './duplicate-guard.js';
 import { buildDecompositionPrompt, buildDecompositionRetryPrompt } from './decompose-prompt.js';
 import { describeSliceOverlap, measureSliceOverlap } from './slice-overlap.js';
 import type { SliceOverlap } from './slice-overlap.js';
-import { MAX_ACCEPTANCE_CRITERIA_ITEMS, MAX_IN_SCOPE_ITEMS } from './size.js';
 
 const errorDetail = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 export { buildDecompositionPrompt, buildDecompositionRetryPrompt };
+export { checkStoryInvest } from '@on-par/contracts';
 
 // ---------------------------------------------------------------------------
 // LLM output parsing (zod) — purpose-built, looser than the contracts schemas so
@@ -174,77 +171,6 @@ export function parseDecompositionOutput(
       reason: `output fails the contracts schema: ${errorDetail(error)}`,
     };
   }
-}
-
-// ---------------------------------------------------------------------------
-// Core-owned INVEST gate (mirror of packages/product/src/decompose/invest.ts)
-// ---------------------------------------------------------------------------
-
-export type InvestLetter = 'independent' | 'negotiable' | 'valuable' | 'estimable' | 'small' | 'testable';
-
-export interface InvestViolation {
-  letter: InvestLetter;
-  reason: string;
-}
-
-export interface InvestReport {
-  ok: boolean;
-  violations: readonly InvestViolation[];
-}
-
-/** Lowercase substrings that mark a story as depending on other work. Copied verbatim
- *  from packages/product/src/decompose/invest.ts — change both together. */
-const DEPENDENCY_CUES: readonly string[] = ['depends on', 'after we', 'once the', 'blocked by', 'requires story'];
-
-function firstDependencyHit(story: Story): string | undefined {
-  return [story.want, ...story.inScope].find((text) => DEPENDENCY_CUES.some((cue) => text.toLowerCase().includes(cue)));
-}
-
-function firstUntestableCriterion(story: Story): Story['acceptanceCriteria'][number] | undefined {
-  return story.acceptanceCriteria.find((criterion) => criterion.when.length === 0 || criterion.then.length === 0);
-}
-
-/**
- * Six predicates, each decidable on a bare Story. Deliberately mirrors
- * packages/product/src/decompose/invest.ts predicate-for-predicate (same reasons,
- * same wording), but the "small" thresholds come from ./size.ts so the two core gates
- * share one threshold pair. Both files MUST change together.
- */
-export function checkStoryInvest(story: Story): InvestReport {
-  const violations: InvestViolation[] = [];
-
-  const dependencyHit = firstDependencyHit(story);
-  if (dependencyHit !== undefined) {
-    violations.push({ letter: 'independent', reason: `depends on other work: "${dependencyHit}"` });
-  }
-
-  if (story.outOfScope.length === 0) {
-    violations.push({ letter: 'negotiable', reason: 'no out-of-scope boundary — nothing left to negotiate' });
-  }
-
-  if (!(story.tracesTo.length > 0 && story.soThat.trim() !== '')) {
-    violations.push({ letter: 'valuable', reason: 'does not trace to intent, or has no "so that" value' });
-  }
-
-  if (!(story.acceptanceCriteria.length > 0 && story.verification.length > 0)) {
-    violations.push({ letter: 'estimable', reason: 'no acceptance criteria or no verification step to size against' });
-  }
-
-  if (!(
-    story.inScope.length <= MAX_IN_SCOPE_ITEMS && story.acceptanceCriteria.length <= MAX_ACCEPTANCE_CRITERIA_ITEMS
-  )) {
-    violations.push({
-      letter: 'small',
-      reason: `too big: ${story.inScope.length} in-scope items, ${story.acceptanceCriteria.length} acceptance criteria`,
-    });
-  }
-
-  const untestable = firstUntestableCriterion(story);
-  if (untestable !== undefined) {
-    violations.push({ letter: 'testable', reason: `criterion "${untestable.name}" has no When or no Then` });
-  }
-
-  return { ok: violations.length === 0, violations };
 }
 
 /** Runs the INVEST gate over every story, collecting one line per violation. */

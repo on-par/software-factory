@@ -1,6 +1,6 @@
-// packages/product/src/decompose/invest.ts — the INVEST gate (#472).
+// src/invest.ts — the Story INVEST rule set shared by core and product (#3447, ADR-0167).
 
-import type { Story } from '@on-par/contracts';
+import type { Story } from './issue.js';
 
 export type InvestLetter = 'independent' | 'negotiable' | 'valuable' | 'estimable' | 'small' | 'testable';
 
@@ -15,9 +15,9 @@ export interface InvestReport {
 }
 
 /** A story with more in-scope bullets than this has stopped being one slice. */
-export const MAX_IN_SCOPE = 5;
+export const MAX_IN_SCOPE_ITEMS = 5;
 /** More acceptance criteria than this and the story is really several stories. */
-export const MAX_ACCEPTANCE_CRITERIA = 5;
+export const MAX_ACCEPTANCE_CRITERIA_ITEMS = 5;
 
 /** Lowercase substrings that mark a story as depending on other work. */
 const DEPENDENCY_CUES: readonly string[] = ['depends on', 'after we', 'once the', 'blocked by', 'requires story'];
@@ -31,7 +31,7 @@ function firstUntestableCriterion(story: Story): Story['acceptanceCriteria'][num
 }
 
 /** Six predicates, each decidable on a bare Story. Every branch is independently reachable. */
-export function checkInvest(story: Story): InvestReport {
+export function checkStoryInvest(story: Story): InvestReport {
   const violations: InvestViolation[] = [];
 
   const dependencyHit = firstDependencyHit(story);
@@ -51,7 +51,9 @@ export function checkInvest(story: Story): InvestReport {
     violations.push({ letter: 'estimable', reason: 'no acceptance criteria or no verification step to size against' });
   }
 
-  if (!(story.inScope.length <= MAX_IN_SCOPE && story.acceptanceCriteria.length <= MAX_ACCEPTANCE_CRITERIA)) {
+  if (!(
+    story.inScope.length <= MAX_IN_SCOPE_ITEMS && story.acceptanceCriteria.length <= MAX_ACCEPTANCE_CRITERIA_ITEMS
+  )) {
     violations.push({
       letter: 'small',
       reason: `too big: ${story.inScope.length} in-scope items, ${story.acceptanceCriteria.length} acceptance criteria`,

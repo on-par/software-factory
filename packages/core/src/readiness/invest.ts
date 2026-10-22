@@ -1,6 +1,6 @@
 // packages/core/src/readiness/invest.ts — deterministic INVEST report for a raw issue in factory check (#1731). Pure — no I/O.
 import { assessAcceptanceCriteria } from './criteria.js';
-import type { InvestLetter } from './decompose.js';
+import type { InvestLetter } from '@on-par/contracts';
 import { extractIssueSections, findSection } from './index.js';
 import { checkIssueSize } from './size.js';
 
