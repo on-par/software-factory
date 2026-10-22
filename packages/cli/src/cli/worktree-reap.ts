@@ -112,10 +112,9 @@ export async function reapPrlessShip(
   const done = await reapUnderLock(rt, args, 'PR-less ship worktree cleanup failed', (worktreePath, opts) =>
     reap(args[1], worktreePath, opts),
   );
-  if (done.worktreePath === undefined) {
-    console.log(`📌 Kept the worktree for issue #${args[0]} — its state could not be verified, so nothing was removed`);
-    return;
-  }
+  // No path means the config load failed, so ship never resolved (or created) a worktree here;
+  // the failure is already logged as a warn event by reapUnderLock.
+  if (done.worktreePath === undefined) return;
   const line = formatShipReapLine(done.worktreePath, done.result);
   if (line !== null) console.log(line);
 }

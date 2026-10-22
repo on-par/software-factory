@@ -4,8 +4,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { ConstitutionLoader } from '@on-par/factory-core';
+import { ConstitutionLoader, loadRepoConfig } from '@on-par/factory-core';
 import { type ConfigLintInput, lintFactoryConfig } from '@on-par/factory-core/internal';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { doctorFailed, formatDoctorChecks, REPO_SECTION } from './doctor.js';
@@ -264,7 +265,9 @@ describe('configLintChecks (#2610, #2612)', () => {
 
 describe('config lint parity with the run preflight (#2612)', () => {
   const dirs: string[] = [];
-  afterEach(() => {
+  const tmpDirs = createTempDirs();
+  afterEach(async () => {
+    await tmpDirs.cleanup();
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
@@ -342,5 +345,26 @@ describe('config lint parity with the run preflight (#2612)', () => {
     const doctor = doctorFailed(configLintChecks(input));
     expect(doctor).toBe(preflight);
     expect(lintFactoryConfig(input).verdict).toBe(verdict);
+  });
+
+  it.each([
+    { name: 'empty config', config: '' },
+    { name: 'whitespace config', config: '  \n\n' },
+    { name: 'comment-only config', config: '# all commented out\n' },
+  ])('doctor fails and loadRepoConfig throws on $name', ({ config }) => {
+    const dir = tmpDirs.makeSync('doctor-parity-');
+    mkdirSync(join(dir, '.factory'));
+    writeFileSync(join(dir, '.factory', 'constitution.md'), fm('\n  - compile'));
+    const y = join(dir, '.factory', 'config.yaml');
+    writeFileSync(y, config);
+    const checks = configLintChecks({
+      constitution: new ConstitutionLoader().loadRepoConstitution(dir),
+      configFile: { absPath: y, relPath: '.factory/config.yaml' },
+    });
+    expect(doctorFailed(checks)).toBe(true);
+    const failing = checks.find((c) => c.name === 'config' && !c.ok);
+    expect(JSON.stringify(failing)).toContain('.factory/config.yaml');
+    expect(JSON.stringify(failing)).toContain('(root)');
+    expect(() => loadRepoConfig(dir)).toThrow(/expected object, received null/);
   });
 });
