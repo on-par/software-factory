@@ -57,7 +57,6 @@
   "packages/core/src/utils/index.test.ts": 1041,
   "packages/core/src/utils/lock.test.ts": 667,
   "packages/core/src/utils/worktree-gc.test.ts": 2494,
-  "packages/core/src/utils/worktree-gc.ts": 1003,
   "packages/scbench-adapter/src/baseline.test.ts": 1422,
   "packages/scbench-adapter/src/baseline.ts": 861,
   "packages/scbench-adapter/src/cli-run.test.ts": 1531,
