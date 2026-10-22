@@ -3,18 +3,42 @@ import { describe, expect, it } from 'vitest';
 import './index.js';
 import { LandConflictError, landOpenPullRequest } from './land-pr.js';
 
-function setup(initial: 'DIRTY' | 'MERGEABLE', conflict = false) {
+function setup(
+  initial: 'DIRTY' | 'MERGEABLE',
+  conflict = false,
+  { dirtyFromRead = Infinity, skipCI = false }: { dirtyFromRead?: number; skipCI?: boolean } = {},
+) {
   const trace: string[] = [];
   const merges: string[] = [];
   let synced = false;
   let inLock = false;
+  let reads = 0;
+  // A PR that starts MERGEABLE turns DIRTY from the Nth land-state read on (main moved).
+  const dirtyNow = () => !synced && (initial === 'DIRTY' || reads >= dirtyFromRead);
   const octokit: any = {
-    graphql: async () => ({
-      repository: { pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: synced ? 'MERGEABLE' : initial } },
-    }),
+    graphql: async () => {
+      reads++;
+      return {
+        repository: {
+          pullRequest: { id: 'PR_1', isDraft: false, mergeStateStatus: dirtyNow() ? 'DIRTY' : 'MERGEABLE' },
+        },
+      };
+    },
     rest: {
       pulls: {
-        get: async () => ({ data: { head: { sha: synced || initial !== 'DIRTY' ? 'synced-sha' : 'stale-sha' } } }),
+        get: async () => ({
+          data: {
+            head: {
+              sha: synced
+                ? 'synced-sha'
+                : initial === 'DIRTY'
+                  ? 'stale-sha'
+                  : dirtyFromRead < Infinity
+                    ? 'pre-sync-sha'
+                    : 'synced-sha',
+            },
+          },
+        }),
         merge: async (args: any) => {
           merges.push(args.sha);
         },
@@ -72,6 +96,7 @@ function setup(initial: 'DIRTY' | 'MERGEABLE', conflict = false) {
       adminMerge: false,
       watch: watch as any,
       withLock,
+      skipCI,
     });
   return { trace, merges, land };
 }
@@ -102,5 +127,24 @@ describe('landOpenPullRequest: DIRTY PR before the CI watch (#3533)', () => {
     expect(err).toBeInstanceOf(LandConflictError);
     expect((err as LandConflictError).parkReason).toBe('conflict');
     expect(watches(trace)).toEqual([]);
+  });
+
+  it('a PR that turns DIRTY during the CI watch is synced under the lock and CI is watched again', async () => {
+    const { trace, merges, land } = setup('MERGEABLE', false, { dirtyFromRead: 2 });
+    await expect(land()).resolves.toBeUndefined();
+    expect(trace.filter((t) => t === 'sync:push')).toHaveLength(1);
+    expect(watches(trace)).toEqual(['watch:pre-sync-sha', 'watch:synced-sha']);
+    expect(trace.indexOf('sync:push')).toBeGreaterThan(trace.indexOf('watch:pre-sync-sha'));
+    expect(trace.indexOf('sync:push')).toBeLessThan(trace.indexOf('watch:synced-sha'));
+    // The merge is pinned to the re-verified head, not the pre-sync commit.
+    expect(merges).toEqual(['synced-sha']);
+  });
+
+  it('with skipCI, a PR that turns DIRTY after land start is synced and merged without any CI watch', async () => {
+    const { trace, merges, land } = setup('MERGEABLE', false, { dirtyFromRead: 2, skipCI: true });
+    await expect(land()).resolves.toBeUndefined();
+    expect(trace.filter((t) => t === 'sync:push')).toHaveLength(1);
+    expect(watches(trace)).toEqual([]);
+    expect(merges).toEqual([undefined]);
   });
 });
