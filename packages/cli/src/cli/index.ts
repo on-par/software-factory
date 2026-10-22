@@ -625,7 +625,7 @@ export function ghRepoViewFailureMessage(stderr: string | undefined): string {
   return 'factory: no GitHub remote detected (gh repo view failed)';
 }
 
-async function getGitHubRepo(shell: ShellOps = shellOps): Promise<string> {
+export async function getGitHubRepo(shell: ShellOps = shellOps): Promise<string> {
   try {
     const { stdout } = await shell.exec('gh repo view --json nameWithOwner --jq .nameWithOwner');
     return stdout.trim();
@@ -650,7 +650,7 @@ function resolveGitHubToken(shell: ShellOps = shellOps): string | undefined {
 /** Octokit factory for the current main() or cmdLand invocation (CliDeps.octokit); unset outside them. */
 let octokitFactory: (() => Octokit) | undefined;
 
-function getOctokit(shell: ShellOps = shellOps, options?: FactoryOctokitOptions): Octokit {
+export function getOctokit(shell: ShellOps = shellOps, options?: FactoryOctokitOptions): Octokit {
   return octokitFactory
     ? octokitFactory()
     : selectOctokit(process.env, () => createFactoryOctokit(resolveGitHubToken(shell), options));
@@ -3841,6 +3841,7 @@ export interface SuperviseDeps {
   /** When set, run once per cycle before draining the queue; returns count appended. Its presence
    *  also switches the loop into perpetual-poll mode (see superviseLoop). */
   ingest?: () => Promise<number>;
+  ratchet?: () => Promise<void>;
 }
 
 const USAGE_UNAVAILABLE_LINE =
@@ -3869,6 +3870,7 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
     emitEvent = logEvent,
     writeLine = (line: string) => console.log(line),
     ingest,
+    ratchet,
   } = deps;
 
   let cycle = 0;
@@ -3940,6 +3942,7 @@ export async function superviseLoop(deps: SuperviseDeps): Promise<void> {
       );
       while (pathExists(stopFile)) await sleep(pollMs);
     }
+    await ratchet?.();
     if (ingest) {
       const appended = await ingest();
       if (appended > 0) writeLine(`[factory] supervise: auto-ingest appended ${appended} ready issue(s)`);

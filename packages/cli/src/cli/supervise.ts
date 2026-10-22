@@ -5,7 +5,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import type { Octokit } from '@octokit/rest';
 import { getFactoryPaths, parseQueue, resolveIngestConfig } from '@on-par/factory-core';
 import type { QueueDiagnostic } from '@on-par/factory-core';
-import { createGithubQueue, createOctokitQueueClient, resolveQueueClaimSettleMs } from '@on-par/factory-core/internal';
+import {
+  createGithubQueue,
+  createOctokitQueueClient,
+  resolveQueueClaimSettleMs,
+  resolveRatchetConfig,
+} from '@on-par/factory-core/internal';
 
 import type {
   CliDeps,
@@ -17,6 +22,8 @@ import type {
   superviseLoop,
   withRepoRunLock,
 } from './index.js';
+
+import { createRatchetHook } from './ratchet-hook.js';
 
 export interface SuperviseOptions {
   now?: boolean;
@@ -75,6 +82,13 @@ export async function cmdSupervise(opts: SuperviseOptions, rt: SuperviseRuntime)
     return counts.reduce((total, issues) => total + issues.length, 0);
   };
 
+  const ratchet =
+    resolveRatchetConfig(factoryConfig).lists.length > 0
+      ? createRatchetHook(repoRoot, paths, factoryConfig)
+      : undefined;
+  // A freshly filed ratchet issue must count as pending, so fire the hook before the empty-queue check.
+  await ratchet?.();
+
   if ((await countPending()) === 0 && !ingestCfg.enabled) {
     throw new rt.CliExitError('queue empty — run factory init + triage first', 2);
   }
@@ -117,6 +131,7 @@ export async function cmdSupervise(opts: SuperviseOptions, rt: SuperviseRuntime)
           }),
         pendingCount: countPending,
       }),
+      ratchet,
       ingest: ingestCfg.enabled ? rt.createIngestHook(repoRoot, paths, ingestCfg, { branchPrefix }) : undefined,
     }),
   );

@@ -23,7 +23,7 @@ import { isOpenCodeZenModel } from './provider-order.js';
 import { DEFAULT_CI_DEADLINE_MS } from '../utils/ci-deadline.js';
 import { runConfigSource } from './run-config-source.js';
 import { RunConfigSectionSchema } from './run-section.js';
-
+import { RatchetConfigSchema } from './ratchet-section.js';
 import type { FilingPolicy } from '../filing/policy.js';
 import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS, retiredHarnessReplacement } from '../harness/catalog.js';
 import type { FailoverReason } from '../types/index.js';
@@ -241,6 +241,7 @@ export const FactoryConfigSchema = z.object({
       comment: z.string().optional(),
     })
     .default({ enabled: false, label: 'ready', lane: 'auto', maxPerCycle: 20 }),
+  ratchet: RatchetConfigSchema,
   intake: z
     .object({
       trustedApprovers: z.array(z.string().min(1)).optional(),
@@ -385,6 +386,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'discovery',
   'filing',
   'ingest',
+  'ratchet',
   'intake',
   'environment',
   'host',

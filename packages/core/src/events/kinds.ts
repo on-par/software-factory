@@ -105,6 +105,9 @@ export type EventKind =
   | 'issue_unparked'
   | 'kpi-snapshot'
   | 'kpi-sweep-skipped'
+  | 'ratchet-done'
+  | 'ratchet-skipped'
+  | 'ratchet-filed'
   | 'land'
   | 'lane_file_claim_reaped'
   | 'lane_file_release_failed'
@@ -333,6 +336,9 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'kpi-snapshot': { severity: 'info', isPark: false, isTerminal: false },
   // End-of-run KPI sweep not run: the run opened no PR and merged nothing.
   'kpi-sweep-skipped': { severity: 'info', isPark: false, isTerminal: false },
+  'ratchet-done': { severity: 'info', isPark: false, isTerminal: false },
+  'ratchet-skipped': { severity: 'info', isPark: false, isTerminal: false },
+  'ratchet-filed': { severity: 'info', isPark: false, isTerminal: false },
   land: { severity: 'info', isPark: false, isTerminal: false },
   lane_file_claim_reaped: { severity: 'info', isPark: false, isTerminal: false },
   lane_file_release_failed: { severity: 'warn', isPark: false, isTerminal: false },

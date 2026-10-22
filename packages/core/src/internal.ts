@@ -104,7 +104,6 @@ export {
   rollDay,
   touchesSensitiveScope,
 } from './filing/policy.js';
-// Config
 export { resolveStateRoot, STATE_ROOT_ENV } from './config/state-root.js';
 export { resolveFilingPolicy, resolvePrClassifierPolicy, type EffectivePrClassifierPolicy } from './config/index.js';
 export { describeDraftPrPolicy, resolveDraftPrPolicy, type EffectiveDraftPrPolicy } from './config/run-section.js';
@@ -787,3 +786,4 @@ export { fetchHumanEventSourcesCached, runProducedPrOrMerge } from './kpis/sweep
 export type { AgentInvocation, TokenCoverage, TokenCoverageEntry } from './metrics/token-coverage.js';
 export { agentInvocationsFromEvents, computeTokenCoverage } from './metrics/token-coverage.js';
 export { partitionGithubClaimsByActivity, type GithubActiveClaim } from './queue/activity.js';
+export * from './ratchet/index.js';

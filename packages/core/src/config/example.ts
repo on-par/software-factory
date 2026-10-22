@@ -45,6 +45,10 @@ const WRAP = 100;
 
 /** Docs for runtime-policy sections whose packaged defaults carry no `comment`. */
 const RUNTIME_NOTES: Record<string, string> = {
+  ratchet:
+    'Daily ratchet (#3542). lists is an array of { name, file, check }: file is an exception list (one entry per line, # comments), check is the command that must pass once an entry is removed. ' +
+    'Once per UTC day while `factory supervise` runs, one entry becomes one issue queued on lane; a list with an open ratchet issue gets none. ' +
+    'The issue carries the filing.selfFixLabel (no-auto-merge) label, so a human merges the PR.',
   design:
     'Design-artifact gates at PLAN. blockUnresolvedRegressions: true stops PLAN before BUILD when a worse/unknown ' +
     'behaviorDelta row is not in openQuestions (default false logs design_regression_unresolved only). ' +
@@ -379,6 +383,7 @@ function runtimeNamespace(): Node[] {
     section('auto_failover'),
     section('queue'),
     section('ingest'),
+    section('ratchet'),
     intake,
     section('filing'),
     section('kpis'),

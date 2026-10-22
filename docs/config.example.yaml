@@ -326,6 +326,14 @@ ingest:
   label: "ready"
   lane: "auto"
   maxPerCycle: 20
+# Daily ratchet (#3542). lists is an array of { name, file, check }: file is an exception list (one
+# entry per line, # comments), check is the command that must pass once an entry is removed. Once
+# per UTC day while `factory supervise` runs, one entry becomes one issue queued on lane; a list
+# with an open ratchet issue gets none. The issue carries the filing.selfFixLabel (no-auto-merge)
+# label, so a human merges the PR.
+ratchet:
+  lists: []
+  lane: "auto"
 intake:
   # GitHub logins whose approval counts. Unset: users with admin permission on the repo.
   # trustedApprovers: ["<login>"]
