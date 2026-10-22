@@ -9,6 +9,8 @@ import { decideLaneRemoval } from '../worktree/worktree-gc-decide.js';
 import { findWorktreeKeep } from '../worktree/worktree-keeps.js';
 import { execGit } from './git-exec.js';
 
+export type LaneReapKeptOutcome = 'kept-record' | 'kept-dirty' | 'kept-untracked' | 'kept-unverified';
+
 type Log = (type: EventKind, msg: string) => void;
 
 function laneIssueFromBranch(branch: string): number | null {
@@ -67,9 +69,25 @@ export async function laneReapKept(
   worktreePath: string,
   opts: { issue: number; keepsFile?: string },
   log: Log,
-): Promise<'kept-record' | 'kept-dirty' | null> {
+): Promise<LaneReapKeptOutcome | null> {
   const { keep, decision } = await laneRemovalDecision(repoRoot, worktreePath, opts.issue, opts.keepsFile, log);
-  if (decision.action === 'remove') return null;
+  if (decision.action === 'remove') {
+    const status = await execGit(['status', '--porcelain', '--untracked-files=normal'], { cwd: worktreePath }).catch(
+      () => null,
+    );
+    if (status === null) {
+      log('warn', `could not check ${worktreePath} for untracked files — kept`);
+      return 'kept-unverified';
+    }
+    if (status.stdout.split('\n').some((line) => line.startsWith('?? '))) {
+      log(
+        'warn',
+        `parked worktree ${worktreePath} has untracked files — held, not deleted; review it, or run 'factory worktree keep ${opts.issue}'`,
+      );
+      return 'kept-untracked';
+    }
+    return null;
+  }
   if (decision.why === 'keep-record') {
     log(
       'worktree-gc',

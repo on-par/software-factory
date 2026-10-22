@@ -177,7 +177,9 @@ export function registerAdvancedCommands(program: Command, handlers: ProgramHand
       },
     );
 
-  const worktreeCmd = program.command('worktree').description('Clean up stale factory worktrees (gc)');
+  const worktreeCmd = program
+    .command('worktree')
+    .description('Clean up stale factory worktrees (gc) and keep/release one for manual work');
   worktreeCmd
     .command('gc')
     .description('Remove stale factory worktrees (merged/closed branches or older than TTL) and scrub credentials')
@@ -185,6 +187,18 @@ export function registerAdvancedCommands(program: Command, handlers: ProgramHand
     .option('--ttl-days <n>', 'Override worktree.gcTtlDays from .factory/config.yaml (default 7)')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
     .action(handlers.cmdWorktreeGc);
+  worktreeCmd
+    .command('keep <issue>')
+    .description(
+      "Protect an issue's lane worktree from worktree GC while you finish it by hand (until the issue closes or you release it)",
+    )
+    .option('--reason <text>', 'Why it is kept, shown by worktree gc (default: manual)')
+    .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
+    .action(handlers.cmdWorktreeKeep);
+  worktreeCmd
+    .command('release <issue>')
+    .description("Drop an issue's keep record so the next worktree GC treats its worktree normally")
+    .action(handlers.cmdWorktreeRelease);
 
   program
     .command('reset <issue...>')

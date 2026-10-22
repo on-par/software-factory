@@ -88,6 +88,8 @@ export function formatShipReapLine(worktreePath: string, result: LaneWorktreeRea
       return `🧹 Removed worktree ${worktreePath}${result.branchDeleted ? ` and branch ${result.branch}` : ''} — no PR was opened and nothing was committed`;
     case 'kept-dirty':
       return `📌 Kept worktree ${worktreePath}${withBranch} — it has uncommitted changes`;
+    case 'kept-untracked':
+      return `📌 Kept worktree ${worktreePath}${withBranch} — it has untracked files`;
     case 'kept-record':
       return `📌 Kept worktree ${worktreePath}${withBranch} — it has a keep record`;
     case 'kept-committed':

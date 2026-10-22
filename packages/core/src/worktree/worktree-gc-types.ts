@@ -118,6 +118,8 @@ export interface GcReport {
   held: GcHeldCandidate[];
   /** Worktrees kept by a worktree-keeps.json record (#3316); also counted in kept. */
   keptByRecord?: GcKeptCandidate[];
+  /** Parked, unkept worktrees held because they have untracked files (#3318); also counted in kept. */
+  heldUntracked?: GcHeldCandidate[];
 }
 
 export interface SweepDeps {

@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it, vi } from 'vitest';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createTempDirs } from '../harness/temp-dir.js';
 import type { QueueGitHubClient } from './github-queue.js';
 import { runUnpark, UnparkError } from './unpark.js';
+import { readWorktreeKeeps, upsertWorktreeKeep } from '../worktree/worktree-keeps.js';
 
 function fakeClient(labels: Map<number, string[]>) {
   const addLabels = vi.fn(async ({ issue_number, labels: add }: { issue_number: number; labels: string[] }) => {
@@ -34,6 +37,9 @@ const peers = (): [number, string[]][] => [
 ];
 
 describe('runUnpark', () => {
+  const tmp = createTempDirs();
+  afterEach(() => tmp.cleanup());
+
   it('re-queues a parked issue at lane max + 1 and removes factory:parked', async () => {
     const labels = new Map([...peers(), [42, ['bug', 'factory:parked', 'factory:lane:ops']] as [number, string[]]]);
     const { client } = fakeClient(labels);
@@ -112,6 +118,26 @@ describe('runUnpark', () => {
     const { client } = fakeClient(labels);
     const res = await runUnpark({ ...base, client, issue: 5 });
     expect(res).not.toHaveProperty('collision');
+  });
+
+  it("removes the issue's keep record once the issue is re-queued", async () => {
+    const keepsFile = join(tmp.makeSync('unpark-keeps-'), 'worktree-keeps.json');
+    upsertWorktreeKeep(keepsFile, { issue: 5, path: '/wt', reason: 'manual', since: 'now' });
+    upsertWorktreeKeep(keepsFile, { issue: 6, path: '/wt6', reason: 'manual', since: 'now' });
+    const { client } = fakeClient(new Map([[5, ['factory:parked', 'factory:lane:ops']], ...peers()]));
+    await runUnpark({ ...base, client, issue: 5, keepsFile });
+    expect(readWorktreeKeeps(keepsFile).map((k) => k.issue)).toEqual([6]);
+  });
+
+  it('leaves the keep record when the unpark fails', async () => {
+    const keepsFile = join(tmp.makeSync('unpark-keeps-'), 'worktree-keeps.json');
+    upsertWorktreeKeep(keepsFile, { issue: 5, path: '/wt', reason: 'manual', since: 'now' });
+    const { client } = fakeClient(new Map([[5, ['factory:parked', 'factory:lane:ops']]]));
+    client.addLabels = async () => {
+      throw new Error('api down');
+    };
+    await expect(runUnpark({ ...base, client, issue: 5, keepsFile })).rejects.toMatchObject({ code: 'unpark-failed' });
+    expect(readWorktreeKeeps(keepsFile)).toHaveLength(1);
   });
 
   it('keeps factory:parked when enqueue fails so a retry is possible', async () => {

@@ -8,6 +8,7 @@ import {
   QUEUE_ORDER_LABEL_PREFIX,
   type QueueGitHubClient,
 } from './github-queue.js';
+import { removeWorktreeKeep } from '../worktree/worktree-keeps.js';
 import type { OrderCollision } from './order-collision.js';
 
 export type { OrderCollision };
@@ -46,6 +47,8 @@ export interface UnparkInput {
   repo: string;
   issue: number;
   lane?: string;
+  /** worktree-keeps.json; a successful unpark drops the issue's keep record because the factory owns the worktree again (#3318). */
+  keepsFile?: string;
 }
 
 function message(err: unknown): string {
@@ -93,6 +96,13 @@ export async function runUnpark(input: UnparkInput): Promise<UnparkJson> {
 
     // Remove the parked label last so a failed run can simply be repeated.
     await client.removeLabel({ ...ref, name: PARKED_LABEL });
+    if (input.keepsFile) {
+      try {
+        removeWorktreeKeep(input.keepsFile, issue);
+      } catch {
+        // best-effort: never fail an unpark
+      }
+    }
     const labelsAfter = await client.getIssueLabels(ref);
     return {
       schemaVersion: 1,

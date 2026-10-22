@@ -22,7 +22,7 @@ import type {
 } from '../types/index.js';
 import { levelForType } from './format.js';
 import { execGit } from './git-exec.js';
-import { assertLaneReplaceable, laneReapKept } from './lane-removal.js';
+import { assertLaneReplaceable, laneReapKept, type LaneReapKeptOutcome } from './lane-removal.js';
 import { createMicroVm, removeMicroVm, type WorktreeSandbox } from './microvm.js';
 import { ensureWorktreeParentExcluded } from './worktree-location.js';
 
@@ -245,8 +245,7 @@ export async function cleanupWorktree(
 }
 
 export interface LaneWorktreeReapResult {
-  outcome:
-    'removed' | 'kept-dirty' | 'kept-record' | 'kept-committed' | 'kept-branch-mismatch' | 'kept-unverified' | 'absent';
+  outcome: 'removed' | LaneReapKeptOutcome | 'kept-committed' | 'kept-branch-mismatch' | 'absent';
   branch: string | null;
   branchDeleted: boolean;
 }

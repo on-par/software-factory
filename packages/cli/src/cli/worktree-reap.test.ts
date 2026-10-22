@@ -36,6 +36,12 @@ describe('formatShipReapLine', () => {
     expect(line).toContain('keep record');
   });
 
+  it('explains an untracked-files keep', () => {
+    const line = formatShipReapLine(WT, { outcome: 'kept-untracked', branch: BR, branchDeleted: false });
+    expect(line).toContain(WT);
+    expect(line).toContain('untracked files');
+  });
+
   it('explains a committed keep', () => {
     const line = formatShipReapLine(WT, { outcome: 'kept-committed', branch: BR, branchDeleted: false });
     expect(line).toContain(WT);

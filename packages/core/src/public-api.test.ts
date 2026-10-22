@@ -738,7 +738,7 @@ const INTERNAL_API_KEYS = [
   'scrubFile',
   'sweepWorktrees',
   'zeroFill',
-  'findWorktreeKeep',
+  ...'findWorktreeKeep removeWorktreeKeep upsertWorktreeKeep'.split(' '), // #3318
   'checkRatchetDrift',
   'checkScopedRatchetDrift',
   'DEFAULT_RATCHET_SLACK',

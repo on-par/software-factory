@@ -194,6 +194,7 @@ export async function sweepWorktrees(
   const keepsFile = opts.keepsFile ?? getFactoryPaths(repoRoot).worktreeKeeps;
   const keeps = new Map<number, WorktreeKeep>(readWorktreeKeeps(keepsFile, log).map((k) => [k.issue, k]));
   const keptByRecord: GcKeptCandidate[] = [];
+  const heldUntracked: GcHeldCandidate[] = [];
   const releasedKeeps = new Map<string, number>();
 
   const mainTip = candidates.length > 0 ? await resolveMainTip(runCommand, repoRoot) : null;
@@ -218,6 +219,12 @@ export async function sweepWorktrees(
         });
       } else if (decision.why === 'held' && evidence.issue !== null) {
         held.push({ path: entry.path, branch: entry.branch, issue: evidence.issue, why: decision.held ?? '' });
+      } else if (decision.why === 'held-untracked' && evidence.issue !== null) {
+        heldUntracked.push({ path: entry.path, branch: entry.branch, issue: evidence.issue, why: 'untracked files' });
+        log(
+          'worktree-gc',
+          `held ${entry.path} — parked issue #${evidence.issue} has untracked files; not reaping (commit or remove them, or run 'factory worktree keep ${evidence.issue}')`,
+        );
       }
       continue;
     }
@@ -236,7 +243,7 @@ export async function sweepWorktrees(
 
   if (dryRun) {
     const diagnostics = buildDryRunDiagnostics(evidences, log);
-    return { removed, kept, dryRun: true, ...diagnostics, held, keptByRecord };
+    return { removed, kept, dryRun: true, ...diagnostics, held, keptByRecord, heldUntracked };
   }
 
   for (const candidate of removed) {
@@ -312,6 +319,7 @@ export async function sweepWorktrees(
     noActiveClaim: [],
     held,
     keptByRecord,
+    heldUntracked,
   };
 }
 
@@ -364,6 +372,8 @@ export function formatGcReport(report: GcReport): string {
   for (const c of report.keptByRecord ?? []) {
     lines.push(`${c.path} (${c.branch ?? 'detached'}) — kept (${c.reason})`);
   }
+  for (const c of report.heldUntracked ?? [])
+    lines.push(`${c.path} (${c.branch ?? 'detached'}) — held (untracked files)`);
   if (report.issueNotFound.length > 0) {
     lines.push(`${report.issueNotFound.length} worktree(s) flagged — owning issue not found (404):`);
     for (const c of report.issueNotFound) {

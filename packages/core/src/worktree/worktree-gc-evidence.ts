@@ -123,6 +123,16 @@ export async function isWorktreeClean(
   return result !== null && result.stdout.trim() === '';
 }
 
+/** True when the worktree has untracked, non-ignored files; null when the probe failed (⇒ hold).
+ *  Ignored files are excluded because there is no `--ignored` (#3318). */
+export async function hasUntrackedFiles(
+  runCommand: NonNullable<SweepDeps['runCommand']>,
+  worktreePath: string,
+): Promise<boolean | null> {
+  const result = await safeExec(runCommand, 'git status --porcelain --untracked-files=normal', { cwd: worktreePath });
+  return result === null ? null : result.stdout.split('\n').some((l) => l.startsWith('?? '));
+}
+
 /** Commits reachable from `rev` that are on no `origin` ref; null when the probe fails or is unparseable (⇒ keep). */
 export async function countUnpushedCommits(
   runCommand: NonNullable<SweepDeps['runCommand']>,
@@ -193,6 +203,8 @@ export interface WorktreeEvidence {
     headIsAncestorOfMain: boolean;
     mainTip: string | null;
     unpushedCount: number | null;
+    /** Probed only for an unkept reap-parked candidate; false = not probed or none; null = probe failed. */
+    untracked: boolean | null;
   };
 }
 
@@ -270,12 +282,14 @@ const NO_GIT: WorktreeEvidence['git'] = {
   headIsAncestorOfMain: false,
   mainTip: null,
   unpushedCount: null,
+  untracked: false,
 };
 
 async function gatherGitEvidence(
   ctx: EvidenceContext,
   entry: WorktreeListEntry,
   prState: GcHeadPrState | null,
+  probeUntracked: boolean,
 ): Promise<WorktreeEvidence['git']> {
   const { runCommand, repoRoot } = ctx;
   const { branch, head } = entry;
@@ -298,6 +312,7 @@ async function gatherGitEvidence(
     headIsAncestorOfMain: ancestor !== null,
     mainTip: ctx.mainTip,
     unpushedCount: head ? await countUnpushedCommits(runCommand, repoRoot, head) : null,
+    untracked: probeUntracked ? await hasUntrackedFiles(runCommand, entry.path) : false,
   };
 }
 
@@ -332,6 +347,6 @@ export async function gatherWorktreeEvidence(
     ageDays: computeAgeDays(entry.path, ctx.now, ctx.log),
     ...issueFields,
     prState,
-    git: await gatherGitEvidence(ctx, entry, prState),
+    git: await gatherGitEvidence(ctx, entry, prState, !keep && issueFields.disposition === 'reap-parked'),
   };
 }
