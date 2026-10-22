@@ -115,6 +115,37 @@ export function setRepoConfigValue(configPath: string, keyPath: readonly string[
   writeAtomic(configPath, `${JSON.stringify(next, null, 2)}\n`);
 }
 
+/** Replace the whole repo config value, in the file's own format (ADR-0120). YAML is edited in place
+ *  through the Document API: unchanged top-level keys keep their comments, keys absent from `next`
+ *  are deleted, changed or new keys are set. JSON is rewritten as two-space JSON. */
+export function rewriteRepoConfigFile(configPath: string, next: Record<string, unknown>): void {
+  if (!isYamlPath(configPath)) {
+    writeAtomic(configPath, `${JSON.stringify(next, null, 2)}\n`);
+    return;
+  }
+  let doc: Document;
+  if (existsSync(configPath)) {
+    doc = parseDocument(readFileSync(configPath, 'utf-8'));
+    if (doc.errors.length > 0) throw new Error(`Failed to parse ${configPath}: ${doc.errors[0]!.message}`);
+  } else {
+    doc = new Document({});
+    doc.commentBefore = REPO_CONFIG_YAML_HEADER.replace(/^#/, '').replace(/\n$/, '');
+  }
+  if (!isMap(doc.contents)) {
+    doc.contents = doc.createNode(next);
+  } else {
+    const current: unknown = doc.toJS();
+    const currentObj = isObject(current) ? current : {};
+    for (const key of Object.keys(currentObj)) {
+      if (!(key in next)) doc.delete(key);
+    }
+    for (const [key, value] of Object.entries(next)) {
+      if (!isDeepStrictEqual(currentObj[key], value)) doc.set(key, doc.createNode(value));
+    }
+  }
+  writeAtomic(configPath, doc.toString());
+}
+
 export type RepoConfigYamlMigration =
   | { status: 'migrated'; from: string; to: string }
   | { status: 'would-migrate'; from: string; to: string }

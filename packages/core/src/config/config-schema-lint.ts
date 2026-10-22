@@ -1,7 +1,9 @@
 // packages/core/src/config/config-schema-lint.ts — doctor-only schema check for the repo config file (#2611); the run loaders already throw on these.
+// Reads through readRepoConfigFile (ADR-0119), so a file the loaders reject is never passed here.
 import { existsSync, readFileSync } from 'node:fs';
-import { isMap, isScalar, isSeq, LineCounter, parseDocument, type Document } from 'yaml';
+import { isMap, isScalar, isSeq, LineCounter, parseDocument, YAMLParseError, type Document } from 'yaml';
 import { factoryRuntimeConfigIssues, isPlainObject, type ConfigSchemaIssue } from './index.js';
+import { readRepoConfigFile } from './repo-config-file.js';
 import { repoRoutingConfigIssues } from './repo.js';
 
 export interface ConfigSchemaFinding {
@@ -44,34 +46,28 @@ function yamlLineForPath(doc: Document, lc: LineCounter, path: (string | number)
 export function findConfigSchemaErrors(configFile: { absPath: string; relPath: string }): ConfigSchemaFinding[] {
   const { absPath, relPath } = configFile;
   if (!existsSync(absPath)) return [];
-  const text = readFileSync(absPath, 'utf8').replace(/^﻿/, '');
   const isYaml = /\.ya?ml$/i.test(absPath);
 
   let raw: unknown;
-  let doc: Document | undefined;
-  const lc = new LineCounter();
-  if (isYaml) {
-    doc = parseDocument(text, { lineCounter: lc });
-    if (doc.errors.length > 0) {
-      const err = doc.errors[0]!;
-      return [
-        {
-          file: relPath,
-          line: err.linePos?.[0]?.line,
-          path: '(syntax)',
-          message: err.message,
-          fix: 'fix the YAML syntax',
-        },
-      ];
+  try {
+    raw = readRepoConfigFile(absPath);
+  } catch (err) {
+    const message = (err as Error).message;
+    const cause = (err as Error).cause;
+    if (cause instanceof YAMLParseError) {
+      return [{ file: relPath, line: cause.linePos?.[0]?.line, path: '(syntax)', message, fix: 'fix the YAML syntax' }];
     }
-    raw = doc.toJS();
-  } else {
-    try {
-      raw = JSON.parse(text);
-    } catch (err) {
-      return [{ file: relPath, path: '(syntax)', message: (err as Error).message, fix: 'fix the JSON syntax' }];
-    }
+    if (cause !== undefined) return [{ file: relPath, path: '(syntax)', message, fix: 'fix the JSON syntax' }];
+    return [
+      { file: relPath, path: '(file)', message, fix: 'keep only one repo config file (config.yaml is preferred)' },
+    ];
   }
+
+  // Already parsed cleanly by the shared reader; the Document is only for line mapping.
+  const lc = new LineCounter();
+  const doc: Document | undefined = isYaml
+    ? parseDocument(readFileSync(absPath, 'utf8').replace(/^\uFEFF/, ''), { lineCounter: lc })
+    : undefined;
 
   if (raw === null || raw === undefined) return [];
   if (!isPlainObject(raw)) {

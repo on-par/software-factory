@@ -601,11 +601,11 @@ const INTERNAL_API_KEYS = [
   'applyLocalSmallPatchStep',
   'createLocalSmallDryRun',
   'runOvernightQueue',
-  // Repo config file reader
   'REPO_CONFIG_FILENAMES',
   'REPO_CONFIG_YAML_HEADER',
   'migrateRepoConfigToYaml',
   'setRepoConfigValue',
+  'rewriteRepoConfigFile',
   'readRepoConfigFile',
   'resolveRepoConfigPath',
   // Eval internals

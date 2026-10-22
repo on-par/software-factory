@@ -125,6 +125,7 @@ export {
   REPO_CONFIG_YAML_HEADER,
   readRepoConfigFile,
   resolveRepoConfigPath,
+  rewriteRepoConfigFile,
   setRepoConfigValue,
 } from './config/repo-config-file.js';
 export type { RepoConfigYamlMigration } from './config/repo-config-file.js';
