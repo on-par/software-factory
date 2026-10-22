@@ -143,3 +143,19 @@ export function hasClaudeLoginEvidence(deps: ClaudeLoginEvidenceDeps = {}): bool
     return false;
   }
 }
+
+/** How Claude Code on this machine profile is billed, judged from auth alone (#3214). */
+export type ClaudePlan = 'subscription' | 'api' | 'unknown';
+
+/** 'api' when ANTHROPIC_API_KEY is set (non-empty), matching doctor's API-key-first order;
+ *  else 'subscription' when hasClaudeLoginEvidence; else 'unknown'. Never reads or logs a
+ *  credential value, never runs claude, never throws. */
+export function detectClaudePlan(deps: ClaudeLoginEvidenceDeps = {}): ClaudePlan {
+  try {
+    const env = deps.env ?? process.env;
+    if (env.ANTHROPIC_API_KEY?.trim()) return 'api';
+    return hasClaudeLoginEvidence(deps) ? 'subscription' : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}

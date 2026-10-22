@@ -281,7 +281,7 @@ export {
   claudeStoredSessionState,
   hasClaudeLoginEvidence,
 } from './utils/claude-config.js';
-export type { ClaudeSessionState } from './utils/claude-config.js';
+export { detectClaudePlan, type ClaudePlan, type ClaudeSessionState } from './utils/claude-config.js';
 export { formatStopMarker, readStopMarker, type StopMarker, type StopSource } from './utils/stop-marker.js';
 export { hasOpencodeLoginEvidence } from './utils/opencode-config.js';
 export type { MicroVmLifecycleOptions, ReapedMicroVm, WorktreeSandbox } from './utils/microvm.js';
@@ -771,8 +771,8 @@ export type { CheckResumeRecord, CheckResumeStore, PlanReuseRecord, PlanReuseSto
 export { BASE_HEALTH_CHECKERS, checkBaseHealth, fetchRequiredChecksVerdict } from './checkers/base-health.js';
 export type { BaseHealthOptions, BaseHealthResult, RequiredChecksVerdict } from './checkers/base-health.js';
 // Codex ChatGPT session freshness for doctor (#2509)
-export { codexChatgptSessionState, type CodexSessionState } from './utils/codex-config.js';
-
+export { codexChatgptSessionState, codexHasApiKey, type CodexSessionState } from './utils/codex-config.js';
+export { detectProviderPlan, type ProviderPlanDeps } from './utils/provider-plan.js';
 // Last run-time local_auth failure per agent, read by doctor (#2733)
 export {
   localAuthAgentFor,

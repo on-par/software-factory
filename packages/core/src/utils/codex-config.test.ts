@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { codexChatgptSessionState, hasCodexLoginEvidence } from './codex-config.js';
+import { codexChatgptSessionState, codexHasApiKey, hasCodexLoginEvidence } from './codex-config.js';
 
 const noFile = () => {
   throw new Error('ENOENT');
@@ -88,5 +88,30 @@ describe('codexChatgptSessionState (#2509)', () => {
     });
     const body = { tokens: { access_token: jwt(NOW / 1000 + 3600), refresh_token: 'r' } };
     expect(hasCodexLoginEvidence({ ...deps(body), exec })).toBe(false);
+  });
+});
+
+describe('codexHasApiKey', () => {
+  const file = (body: string) => ({ env: { CODEX_HOME: '/c' }, readFile: () => body });
+
+  it('is true for an env key without reading the file', () => {
+    const readFile = vi.fn(noFile);
+    expect(codexHasApiKey({ env: { OPENAI_API_KEY: 'k' }, readFile })).toBe(true);
+    expect(readFile).not.toHaveBeenCalled();
+  });
+
+  it('is true for an auth.json key and reads it from CODEX_HOME', () => {
+    const readFile = vi.fn(() => JSON.stringify({ OPENAI_API_KEY: 'k' }));
+    expect(codexHasApiKey({ env: { CODEX_HOME: '/c' }, readFile })).toBe(true);
+    expect(readFile).toHaveBeenCalledWith('/c/auth.json');
+  });
+
+  it('is false for whitespace, non-string, missing or unparseable keys', () => {
+    expect(codexHasApiKey({ env: { OPENAI_API_KEY: '  ' }, readFile: noFile })).toBe(false);
+    expect(codexHasApiKey(file(JSON.stringify({ OPENAI_API_KEY: ' ' })))).toBe(false);
+    expect(codexHasApiKey(file(JSON.stringify({ OPENAI_API_KEY: 5 })))).toBe(false);
+    expect(codexHasApiKey(file('null'))).toBe(false);
+    expect(codexHasApiKey({ env: {}, homedir: () => '/h', readFile: noFile })).toBe(false);
+    expect(codexHasApiKey(file('{not json'))).toBe(false);
   });
 });

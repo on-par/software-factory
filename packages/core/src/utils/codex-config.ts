@@ -34,6 +34,10 @@ const EXPIRY_SKEW_MS = 5 * 60 * 1000;
  *  per-run breaker in #2495). Reads only: no network call and no refresh. Never throws. */
 export type CodexSessionState = 'ok' | 'refresh-pending' | 'unusable' | 'unknown';
 
+function codexHomeDir(env: NodeJS.ProcessEnv, homedir: () => string): string {
+  return env.CODEX_HOME?.trim() || join(homedir(), '.codex');
+}
+
 export function codexChatgptSessionState(deps: CodexLoginEvidenceDeps = {}): CodexSessionState {
   const env = deps.env ?? process.env;
   const homedir = deps.homedir ?? osHomedir;
@@ -41,8 +45,7 @@ export function codexChatgptSessionState(deps: CodexLoginEvidenceDeps = {}): Cod
   const now = deps.now ?? Date.now;
   let text: string;
   try {
-    const dir = env.CODEX_HOME?.trim() || join(homedir(), '.codex');
-    text = readFile(join(dir, 'auth.json'));
+    text = readFile(join(codexHomeDir(env, homedir), 'auth.json'));
   } catch {
     return 'unknown';
   }
@@ -86,6 +89,23 @@ export function hasCodexLoginEvidence(deps: CodexLoginEvidenceDeps = {}): boolea
   try {
     exec('codex', ['login', 'status']);
     return codexChatgptSessionState(deps) !== 'unusable';
+  } catch {
+    return false;
+  }
+}
+
+/** True when an OpenAI API key is configured: OPENAI_API_KEY in env, or a non-empty string in
+ *  `$CODEX_HOME/auth.json` (#3214). Presence only: the value is never returned. Never throws. */
+export function codexHasApiKey(deps: CodexLoginEvidenceDeps = {}): boolean {
+  try {
+    const env = deps.env ?? process.env;
+    if (env.OPENAI_API_KEY?.trim()) return true;
+    const homedir = deps.homedir ?? osHomedir;
+    const readFile = deps.readFile ?? ((path: string) => readFileSync(path, 'utf8'));
+    const auth = JSON.parse(readFile(join(codexHomeDir(env, homedir), 'auth.json'))) as {
+      OPENAI_API_KEY?: unknown;
+    } | null;
+    return typeof auth?.OPENAI_API_KEY === 'string' && auth.OPENAI_API_KEY.trim().length > 0;
   } catch {
     return false;
   }

@@ -21,8 +21,13 @@
     },
     "estimateUsd": {
       "type": ["number", "null"]
+    },
+    "plan": {
+      "type": "string",
+      "enum": ["subscription", "api", "unknown"],
+      "description": "Detected from this machine profile's Claude Code auth (API key over login); a hint the client may override."
     }
   },
-  "required": ["schemaVersion", "source", "utilizationPct", "resetsAt", "windowHours", "estimateUsd"],
+  "required": ["schemaVersion", "source", "utilizationPct", "resetsAt", "windowHours", "estimateUsd", "plan"],
   "additionalProperties": false
 }

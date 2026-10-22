@@ -372,11 +372,8 @@ describe('JSON wire contracts', () => {
   });
 
   it('matches the usage golden and validates its unrounded subscription reading', () => {
-    const output = buildUsageJson(
-      { fiveHourUtilization: 47.25, fiveHourResetsAt: '2026-01-01T05:00:00.000Z' },
-      12.345,
-      100,
-    );
+    const reading = { fiveHourUtilization: 47.25, fiveHourResetsAt: '2026-01-01T05:00:00.000Z' };
+    const output = buildUsageJson(reading, 12.345, 100, 'subscription');
     const golden = fixture('usage.json');
     expect(output).toEqual(golden);
     expect(usageJsonSchema.parse(output)).toEqual(output);

@@ -321,7 +321,8 @@ const STEERED = 'collectMergedPrSteers isoWeekKey summarizeSteerability formatSt
 const MORE = ['agentInvocationsFromEvents', 'computeTokenCoverage', 'readReviewApproval', 'readStackSliceGate']; // #3126, #3366
 const STACK = 'nextStackSlice restackAfterSquashMerge listRepoLaneLabels listStatelessLaneIssues'.split(' ');
 const POLICY = 'isEgressEnforced describeDraftPrPolicy resolveDraftPrPolicy resolveConfiguredWritablePaths'.split(' '); // #2215, #3449, #3454
-const EXTRA_INTERNAL_KEYS = [...JOB_KEYS, ...TAIL, ...MORE, ...STEER, ...STEERED, ...STACK, ...POLICY];
+const AUTH = 'codexChatgptSessionState hasClaudeLoginEvidence claudeStoredSessionState detectClaudePlan'.split(' '); // #3214
+const EXTRA_INTERNAL_KEYS = [...AUTH, ...JOB_KEYS, ...TAIL, ...MORE, ...STEER, ...STEERED, ...STACK, ...POLICY];
 const INTERNAL_API_KEYS = [
   'openCodeVersion',
   'DEFAULT_CI_DEADLINE_MS',
@@ -331,9 +332,8 @@ const INTERNAL_API_KEYS = [
   'fetchRequiredChecksVerdict', // #3186 CI lookup for a timed-out compile; base health (#2339) follows
   'BASE_HEALTH_CHECKERS',
   'checkBaseHealth',
-  'codexChatgptSessionState',
-  'hasClaudeLoginEvidence',
-  'claudeStoredSessionState',
+  'codexHasApiKey',
+  'detectProviderPlan',
   // Last run-time local_auth failure per agent (#2733)
   'localAuthAgentFor',
   'localAuthCredentialPath',

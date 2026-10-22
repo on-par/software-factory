@@ -229,6 +229,7 @@ import {
   laneSlug,
   formatStopMarker,
   readStopMarker,
+  detectClaudePlan,
 } from '@on-par/factory-core/internal';
 import type { StopMarker } from '@on-par/factory-core/internal';
 import { formatSteerabilityReport } from '@on-par/factory-core/internal';
@@ -1826,7 +1827,7 @@ export async function cmdUsage(
     } catch {
       estimate = null;
     }
-    console.log(JSON.stringify(buildUsageJson(subscription, estimate, knobs.cap)));
+    console.log(JSON.stringify(buildUsageJson(subscription, estimate, knobs.cap, detectClaudePlan())));
     return;
   }
 

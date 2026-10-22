@@ -7,6 +7,7 @@ import {
   claudeConfigDirPath,
   claudeKeychainService,
   claudeStoredSessionState,
+  detectClaudePlan,
   hasClaudeLoginEvidence,
 } from './claude-config.js';
 
@@ -228,5 +229,44 @@ describe('hasClaudeLoginEvidence with an expired stored login (#2721)', () => {
     const readFile = vi.fn(() => '{}');
     expect(hasClaudeLoginEvidence({ ...base, env: { CLAUDE_CODE_OAUTH_TOKEN: 't' }, readFile })).toBe(true);
     expect(readFile).not.toHaveBeenCalled();
+  });
+});
+
+describe('detectClaudePlan', () => {
+  const NOW = 1_700_000_000_000;
+  const creds = () => JSON.stringify({ claudeAiOauth: { accessToken: 'a', expiresAt: NOW + 3_600_000 } });
+  const base = { platform: 'linux' as const, fileExists: () => true, readFile: creds, now: () => NOW };
+
+  it('detectClaudePlan prefers an API key over a stored login', () => {
+    expect(detectClaudePlan({ ...base, env: { ANTHROPIC_API_KEY: 'x' } })).toBe('api');
+    expect(detectClaudePlan({ ...base, env: {} })).toBe('subscription');
+    expect(detectClaudePlan({ env: {}, platform: 'linux', fileExists: () => false })).toBe('unknown');
+  });
+
+  it('treats a whitespace API key as unset', () => {
+    expect(detectClaudePlan({ ...base, env: { ANTHROPIC_API_KEY: '  ' } })).toBe('subscription');
+  });
+
+  it('reports subscription for CLAUDE_CODE_OAUTH_TOKEN', () => {
+    expect(
+      detectClaudePlan({ env: { CLAUDE_CODE_OAUTH_TOKEN: 't' }, platform: 'linux', fileExists: () => false }),
+    ).toBe('subscription');
+  });
+
+  it('never calls exec on the api branch', () => {
+    const exec = vi.fn();
+    expect(detectClaudePlan({ ...base, env: { ANTHROPIC_API_KEY: 'x' }, platform: 'darwin', exec })).toBe('api');
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('does not throw when exec or readFile throws', () => {
+    const boom = () => {
+      throw new Error('boom');
+    };
+    expect(detectClaudePlan({ env: {}, platform: 'darwin', exec: boom, fileExists: () => false })).toBe('unknown');
+    expect(detectClaudePlan({ env: {}, platform: 'linux', fileExists: () => true, readFile: boom })).toBe(
+      'subscription',
+    );
+    expect(detectClaudePlan({ env: {}, platform: 'linux', fileExists: boom })).toBe('unknown');
   });
 });

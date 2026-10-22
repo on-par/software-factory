@@ -11,11 +11,13 @@ export const USAGE_WINDOW_HOURS = TRAILING_WINDOW_MS / 3_600_000;
 export type UsageJsonSource = UsageJson['source'];
 
 /** Builds the `factory usage --json` payload: the real subscription reading when present, else the
- *  list-price heuristic against `cap`, else an explicit `unavailable` record. Numbers are not rounded. */
+ *  list-price heuristic against `cap`, else an explicit `unavailable` record. Numbers are not rounded.
+ *  `plan` (#3214) is the detected billing plan and rides on every source. */
 export function buildUsageJson(
   subscription: SubscriptionUsage | null,
   estimateUsd: number | null,
   cap: number,
+  plan: UsageJson['plan'],
 ): UsageJson {
   if (subscription !== null) {
     return {
@@ -25,6 +27,7 @@ export function buildUsageJson(
       resetsAt: subscription.fiveHourResetsAt,
       windowHours: USAGE_WINDOW_HOURS,
       estimateUsd,
+      plan,
     };
   }
   if (estimateUsd !== null) {
@@ -35,6 +38,7 @@ export function buildUsageJson(
       resetsAt: null,
       windowHours: USAGE_WINDOW_HOURS,
       estimateUsd,
+      plan,
     };
   }
   return {
@@ -44,5 +48,6 @@ export function buildUsageJson(
     resetsAt: null,
     windowHours: USAGE_WINDOW_HOURS,
     estimateUsd: null,
+    plan,
   };
 }
