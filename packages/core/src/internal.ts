@@ -594,7 +594,7 @@ export {
 } from './sandbox/egress-proxy.js';
 export { createRunRuntime, type RunRuntime } from './daemon/run-runtime.js';
 export { findOpenPR, type PrLookup } from './phases/ship.js';
-export { findAdoptablePr, type AdoptablePrLookup } from './run/adopt-pr.js';
+export * from './run/adopt-pr.js'; // findAdoptablePr + the shared open-PR lookup (#3439)
 export { detectLowerSliceChange, parkOnLowerSliceChange } from './phases/stack-review-change.js';
 export type {
   LowerSliceChange,
