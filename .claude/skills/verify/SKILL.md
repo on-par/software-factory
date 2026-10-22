@@ -48,7 +48,7 @@ CI (`.github/workflows/ci.yml`) runs the same checks as the full path, split int
 
 No lintable file may exceed 500 lines. Tests count, and so do blank lines and comments. The limit is set in `oxlint.config.ts` and enforced by `npm run lint` (step 8). `scripts/max-lines-config.test.ts` enforces it again in the test step.
 
-`max-lines-baseline.json` grandfathers files that were already over the limit. It is a flat JSON object that maps a repo-relative path to the line count recorded when the file was grandfathered. That count is the file's own ceiling, so the file may shrink but never grow. Never add a new entry and never raise a count.
+`max-lines-baseline.json` grandfathers files that were already over the limit. It is a flat JSON object that maps a repo-relative path to the line count recorded when the file was grandfathered. That count is the file's own ceiling, so the file may shrink but never grow. Never add a new entry and never raise a count. CI enforces this; see [Human override](#human-override).
 
 ### New file over 500 lines
 
@@ -61,6 +61,16 @@ Lint fails for the file, and the test step reports it grew past its recorded cei
 ### Baseline file shrank or was deleted
 
 The test step names the file in a `remove it from max-lines-baseline.json` message. Delete its line from `max-lines-baseline.json` so the default 500 ceiling applies again.
+
+### Human override
+
+The CI `static` job's "Max-lines baseline guard" step diffs `max-lines-baseline.json` against the PR base. It fails on a raised count or a new entry.
+
+Only a human may approve one, by applying the `max-lines:override` label to the PR. Then re-run the failed `static` job (or push), because a label change does not re-trigger CI. A label applied by a bot or app identity, or by a login in the `FACTORY_BOT_LOGINS` repo variable, does not count. Lowering or removing entries never needs the label.
+
+Agents must never apply the label, never raise a count themselves, and never compact unrelated code to fit. They split the file, or ask a human for the label in the PR body or park comment.
+
+Local `verify.sh` does not enforce this.
 
 ## Integration tests
 

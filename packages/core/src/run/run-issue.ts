@@ -92,6 +92,7 @@ import { parkLogExtra } from './ship-park.js';
 import { budgetGuardFor, enforceIssueBudget } from './budget.js';
 import type { IssueRunState } from '../types/index.js';
 import { renderPreviousAttempt } from './previous-attempt.js';
+import { maxLinesOverrideHint, withoutHumanOnlyLabels } from './max-lines-override.js';
 
 /** Everything one run needs decided, as a plain resolved value — the CLI adapter
  *  computes this today; no config/file/path resolution happens in here. */
@@ -1062,8 +1063,13 @@ async function runIssueOnce(
         showstoppers.length > 0
           ? `${message}\nremaining showstoppers:\n${showstoppers.map((s) => `- ${s}`).join('\n')}`
           : message;
+      const overrideHint = maxLinesOverrideHint(check.summary);
       await clearCheckResume();
-      return await terminalParked(reason, parkedMessage, checkFailure);
+      return await terminalParked(
+        reason,
+        overrideHint ? `${parkedMessage}\n${overrideHint}` : parkedMessage,
+        checkFailure,
+      );
     }
     await clearCheckResume();
     // Clean check — clear stale cross-run history so a future, genuinely different
@@ -1091,13 +1097,11 @@ async function runIssueOnce(
       if (reviewRouting.gated) {
         const label = request.prClassifier.gateLabel;
         const [owner, repoName] = request.repo.split('/');
+        const labels = withoutHumanOnlyLabels([label]);
         try {
-          await ports.octokit.rest.issues.addLabels({
-            owner,
-            repo: repoName,
-            issue_number: request.issue,
-            labels: [label],
-          });
+          if (labels.length > 0) {
+            await ports.octokit.rest.issues.addLabels({ owner, repo: repoName, issue_number: request.issue, labels });
+          }
         } catch (err) {
           return await terminalParked(
             'held',

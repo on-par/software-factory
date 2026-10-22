@@ -10,6 +10,12 @@ export const MAX_LINES_LIMIT = 500;
 /** Where the max-lines guard and its fix-up steps are documented (#2779). */
 export const MAX_LINES_DOCS = '.claude/skills/verify/SKILL.md#max-lines-guard';
 
+/** The PR label a human applies to approve a raised or added baseline entry (#3466). */
+export const MAX_LINES_OVERRIDE_LABEL = 'max-lines:override';
+
+/** Where the human override is documented (#3466). */
+export const MAX_LINES_OVERRIDE_DOCS = '.claude/skills/verify/SKILL.md#human-override';
+
 /** Message for a file over the limit that is not in the baseline. */
 export function oversizedFileMessage(path: string, count: number): string {
   return `${path} is ${count} lines (limit ${MAX_LINES_LIMIT}); split it into files of ${MAX_LINES_LIMIT} lines or fewer, never add it to max-lines-baseline.json; see ${MAX_LINES_DOCS}`;
@@ -17,7 +23,7 @@ export function oversizedFileMessage(path: string, count: number): string {
 
 /** Message for a baseline file that grew past its recorded ceiling. */
 export function grownBaselineMessage(path: string, count: number, recorded: number): string {
-  return `${path} grew to ${count} lines, over its max-lines-baseline.json ceiling of ${recorded}; shrink or split it back to ${recorded} or fewer, never raise the ceiling; see ${MAX_LINES_DOCS}`;
+  return `${path} grew to ${count} lines, over its max-lines-baseline.json ceiling of ${recorded}; shrink or split it back to ${recorded} or fewer, never raise the ceiling, or ask a human to apply the ${MAX_LINES_OVERRIDE_LABEL} label (${MAX_LINES_OVERRIDE_DOCS}); see ${MAX_LINES_DOCS}`;
 }
 
 /**
