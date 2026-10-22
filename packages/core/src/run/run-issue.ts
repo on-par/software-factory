@@ -42,6 +42,7 @@ import { withSingleTerminalEvent } from './terminal-events.js';
 import { withRunAttribution, type RunLogFn as LogFn } from './attribution.js';
 import { environmentReleaseMarker, parkPayload, publishParkComment, upsertMarkerComment } from './park-comment.js';
 import { createRunPhaseLogger } from './run-phase-log.js';
+import { providerFailureRecorder } from './provider-failure-recorder.js';
 import { gateOpencodeBuildOnBreaker, providerFallbackPreferrer } from './provider-breaker-gate.js';
 import { fileFlakyTests } from './flaky-tests.js';
 import { finishWithoutShip } from './local-finish.js';
@@ -65,8 +66,8 @@ import { detectStuck } from '../steward/detect.js';
 import { runSteward, type RunStewardPorts } from '../steward/run.js';
 import { describeDotnetEnv, dotnetEnvReport } from '../environment/dotnet.js';
 import { ProcessGroupTracker } from '../environment/process-groups.js';
-import type { ModelRouter, ProviderFailureInfo } from '../router/index.js';
-import { gateBuildOnBreaker, reportedCooldownMs, type ProviderBreaker } from '../router/breaker.js';
+import type { ModelRouter } from '../router/index.js';
+import { gateBuildOnBreaker, type ProviderBreaker } from '../router/breaker.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { describeSteering, type ConsumedSteering } from '../steering/index.js';
 import type { CiFailureEvidence, CheckSummary, Constitution, FailoverReason, FailurePhase } from '../types/index.js';
@@ -480,23 +481,12 @@ async function runIssueOnce(
     return message === undefined ? undefined : terminalParked('fail', message);
   };
 
-  const rememberProviderFailure = async ({
-    provider,
-    reason,
-    kind,
-    resetAt,
-    detail,
-  }: ProviderFailureInfo): Promise<void> => {
-    const reportedMs = reportedCooldownMs(resetAt, detail);
-    const cooldownMs = reportedMs ?? request.failover.cooldownMs;
-    await ports.breaker.open(provider, reason, cooldownMs);
-    const cooldownNote = reportedMs !== null ? 'provider-reported reset time' : 'default cooldown';
-    log(
-      'provider_breaker_open',
-      `breaker opened for ${provider} (${reason}) — provider skipped until cooldown ends (${cooldownNote}, ${Math.ceil(cooldownMs / 60_000)}m)`,
-      { failoverReason: reason, ...(kind ? { providerFailureKind: kind } : {}) },
-    );
-  };
+  const rememberProviderFailureFor = providerFailureRecorder({
+    breaker: ports.breaker,
+    log,
+    issue: request.issue,
+    defaultCooldownMs: request.failover.cooldownMs,
+  });
 
   const gateDeps = { router: ports.router, breaker: ports.breaker, log };
   const preferFallbackWhenProviderIsOpen = providerFallbackPreferrer(gateDeps);
@@ -674,7 +664,7 @@ async function runIssueOnce(
             planModel === request.modelPins.plan && request.modelPins.planFallback
               ? [request.modelPins.planFallback]
               : undefined,
-          onProviderFailure: rememberProviderFailure,
+          onProviderFailure: rememberProviderFailureFor('plan'),
           branch: request.branch,
           approvalGate: request.options.approvePlan ? ports.createApprovalGate?.() : undefined,
           drainSteering: request.options.approvePlan ? ports.drainSteering : undefined,
@@ -842,7 +832,7 @@ async function runIssueOnce(
         routePinned: request.preferredRoute !== undefined,
         onWorkerResult: phaseLogger.build,
         codexFallbackModel: request.modelPins.buildFallback ?? ports.router.resolveAll('build_codex')[0],
-        onProviderFailure: rememberProviderFailure,
+        onProviderFailure: rememberProviderFailureFor('build'),
         sandbox: request.sandboxPolicy,
         steering: buildSteering,
         appPort,

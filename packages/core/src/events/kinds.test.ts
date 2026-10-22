@@ -125,6 +125,11 @@ describe('severityOf', () => {
     expect(severityOf('sandbox_auth_denied')).toBe('warn');
     expect(isParkKind('sandbox_auth_denied')).toBe(false);
   });
+
+  it('maps provider_capped to a non-park, non-terminal warn (#3337)', () => {
+    expect(EVENT_TRAITS.provider_capped).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
+    expect(isParkKind('provider_capped')).toBe(false);
+  });
 });
 
 describe('isParkKind', () => {

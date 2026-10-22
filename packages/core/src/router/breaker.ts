@@ -12,6 +12,10 @@ export interface BreakerEntry {
   reason: FailoverReason;
   openedAt: string;
   cooldownMs: number;
+  /** ISO instant a usage cap holds the provider until; set only for usage caps (#3337). */
+  cappedUntil?: string;
+  /** True when the cap reported no reset, so the provider is re-probed at cappedUntil (#3337). */
+  probeDue?: boolean;
 }
 
 export type BreakerStatus =
@@ -31,6 +35,9 @@ const ABSOLUTE_RESET_PATTERN =
  *  so a typo'd or hostile far-future date can't park a provider indefinitely. */
 /** Padding added to a provider-reported reset time so the breaker doesn't reopen just before the real reset. */
 export const RESET_BUFFER_MS = 2 * 60_000;
+
+/** A usage cap with no reported reset is re-probed after 1 hour (#3337). */
+export const DEFAULT_CAP_PROBE_MS = 60 * 60_000;
 
 export const MAX_REPORTED_COOLDOWN_MS = 31 * 24 * 60 * 60_000;
 
@@ -84,11 +91,26 @@ export class ProviderBreaker {
     private now: () => number = () => Date.now(),
   ) {}
 
-  /** Upsert (refresh openedAt on repeat trips). Atomic write: mkdir parent, write `${file}.tmp`, rename. */
-  async open(provider: string, reason: FailoverReason, cooldownMs: number): Promise<void> {
+  /** Upsert (refresh openedAt on repeat trips). Atomic write: mkdir parent, write `${file}.tmp`, rename.
+   *  Reports whether the provider was already open, so callers can emit once-per-transition events. */
+  async open(
+    provider: string,
+    reason: FailoverReason,
+    cooldownMs: number,
+    cap?: { cappedUntil: string; probeDue?: boolean },
+  ): Promise<{ wasOpen: boolean }> {
     const data = await this.read();
-    data.providers[provider] = { reason, openedAt: new Date(this.now()).toISOString(), cooldownMs };
+    const now = this.now();
+    const existing = data.providers[provider];
+    const wasOpen = existing !== undefined && new Date(existing.openedAt).getTime() + existing.cooldownMs - now > 0;
+    data.providers[provider] = {
+      reason,
+      openedAt: new Date(now).toISOString(),
+      cooldownMs,
+      ...(cap ? { cappedUntil: cap.cappedUntil, ...(cap.probeDue ? { probeDue: true } : {}) } : {}),
+    };
     await this.write(data);
+    return { wasOpen };
   }
 
   /** Reads the file. If the entry's openedAt + cooldownMs <= now(), prune it

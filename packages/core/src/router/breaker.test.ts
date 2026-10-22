@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  DEFAULT_CAP_PROBE_MS,
   gateBuildOnBreaker,
   MAX_REPORTED_COOLDOWN_MS,
   parseResetCooldownMs,
@@ -43,6 +44,39 @@ function opencodeCapMessage(): string {
 }
 
 describe('ProviderBreaker', () => {
+  it('open reports wasOpen false first, true on a repeat in the window, false after expiry', async () => {
+    const file = await tmpFile();
+    let t = 1_000_000;
+    const breaker = new ProviderBreaker(file, () => t);
+
+    expect(await breaker.open('openai', 'usage_cap', 1000)).toEqual({ wasOpen: false });
+    t += 500;
+    expect(await breaker.open('openai', 'usage_cap', 1000)).toEqual({ wasOpen: true });
+    t += 1000;
+    expect(await breaker.open('openai', 'usage_cap', 1000)).toEqual({ wasOpen: false });
+  });
+
+  it('open stores cappedUntil and probeDue only when a cap is passed (#3337)', async () => {
+    const file = await tmpFile();
+    const breaker = new ProviderBreaker(file, () => 1_000_000);
+    const cappedUntil = new Date(1_000_000 + 5000).toISOString();
+
+    await breaker.open('a', 'usage_cap', 5000, { cappedUntil, probeDue: true });
+    await breaker.open('b', 'usage_cap', 5000, { cappedUntil });
+    await breaker.open('c', 'rate_limit', 5000);
+
+    const { providers } = JSON.parse(await readFile(file, 'utf-8'));
+    expect(providers.a).toMatchObject({ cappedUntil, probeDue: true });
+    expect(providers.b.cappedUntil).toBe(cappedUntil);
+    expect(providers.b).not.toHaveProperty('probeDue');
+    expect(providers.c).not.toHaveProperty('cappedUntil');
+    expect(providers.c).not.toHaveProperty('probeDue');
+  });
+
+  it('DEFAULT_CAP_PROBE_MS is one hour', () => {
+    expect(DEFAULT_CAP_PROBE_MS).toBe(3_600_000);
+  });
+
   it('reports open with remainingMs within the cooldown window', async () => {
     const file = await tmpFile();
     let t = 1_000_000;

@@ -8,7 +8,13 @@
 
 import type { LogLevel } from '../types/index.js';
 
-export type { FlakyTestsPayload, LanePausedPayload, ParkPayload, StewardTriggeredPayload } from './payloads.js';
+export type {
+  FlakyTestsPayload,
+  LanePausedPayload,
+  ParkPayload,
+  ProviderCappedPayload,
+  StewardTriggeredPayload,
+} from './payloads.js';
 
 export type EventKind =
   | 'pr-adopt-ambiguous'
@@ -145,6 +151,7 @@ export type EventKind =
   | 'provider_breaker_open'
   | 'provider_breaker_skip'
   | 'provider_breaker_pinned'
+  | 'provider_capped'
   | 'readiness'
   | 'readiness_enrichment_failed'
   | 'readiness_enrichment_started'
@@ -376,6 +383,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   provider_breaker_open: { severity: 'info', isPark: false, isTerminal: false },
   provider_breaker_skip: { severity: 'info', isPark: false, isTerminal: false },
   provider_breaker_pinned: { severity: 'info', isPark: false, isTerminal: false },
+  provider_capped: { severity: 'warn', isPark: false, isTerminal: false },
   readiness: { severity: 'info', isPark: false, isTerminal: false },
   readiness_enrichment_failed: { severity: 'info', isPark: false, isTerminal: false },
   readiness_enrichment_started: { severity: 'info', isPark: false, isTerminal: false },
