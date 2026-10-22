@@ -704,7 +704,7 @@ export {
   describeConstitutionSource,
   describeReviewConstitutionSource,
 } from './constitutions/index.js';
-export { listBuiltInCheckers, type BuiltInCheckerInfo } from './checkers/index.js';
+export * from './checkers/internal-exports.js';
 export { findTemplateTokens, isTemplateToken, type TemplateTokenFinding } from './config/template-tokens.js';
 export { lintFactoryConfig } from './config/config-lint.js';
 export { findConfigSchemaErrors, type ConfigSchemaFinding } from './config/config-schema-lint.js';

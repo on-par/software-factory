@@ -61,7 +61,7 @@ export function registerSetupCommands(program: Command, handlers: ProgramHandler
   program
     .command('doctor')
     .description(
-      'Check your environment (git, agent install and sign-in, gh auth, GitHub token, npm, sandbox, .factory/)',
+      'Check your environment (git, agent install and sign-in, gh auth, GitHub token, npm, sandbox, .factory/, and the build/test/lint commands CHECK will run)',
     )
     .option(
       '--reconcile',
@@ -71,5 +71,6 @@ export function registerSetupCommands(program: Command, handlers: ProgramHandler
       '--probe-inference',
       'Also send one real prompt with claude -p (host and sandbox) and opencode run to verify Claude and OpenCode auth (uses quota)',
     )
-    .action((opts: { reconcile?: boolean; probeInference?: boolean }) => handlers.cmdDoctor(opts));
+    .option('--json', 'Print the checks and the build/test/lint commands CHECK will run as JSON')
+    .action((opts: { reconcile?: boolean; probeInference?: boolean; json?: boolean }) => handlers.cmdDoctor(opts));
 }

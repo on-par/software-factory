@@ -4299,7 +4299,7 @@ function runRun(opts: RunOptions = {}): Promise<void> {
 }
 
 /** `factory doctor` (#2799): the handler lives in ./doctor.ts; this binds its runtime. */
-function runDoctor(opts: { reconcile?: boolean; probeInference?: boolean } = {}): Promise<void> {
+function runDoctor(opts: { reconcile?: boolean; probeInference?: boolean; json?: boolean } = {}): Promise<void> {
   return cmdDoctor(opts, {
     shellOps,
     coreOps,

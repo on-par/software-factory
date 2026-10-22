@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTempDirs } from '../harness/temp-dir.js';
 import type { CommandResult } from '../utils/command-runner.js';
 import { checkBaseHealth, type BaseHealthOptions } from './base-health.js';
-import { compileChecker, type CheckerContext } from './index.js';
+import { compileChecker, resolveCompileCommand, type CheckerContext } from './index.js';
 
 const tmp = createTempDirs();
 
@@ -127,5 +127,23 @@ describe('checkBaseHealth compile timeout (#3185)', () => {
     expect(timeoutMs).toBe(1000);
     expect(compile?.result).toBe('FAIL');
     expect(compile?.details).toContain('FACTORY_COMPILE_TIMEOUT');
+  });
+});
+
+describe('resolveCompileCommand (#3473)', () => {
+  it('prefers package.json build, then Makefile, then Cargo.toml, else null', async () => {
+    const both = await makeWorktree({ 'package.json': BUILD_PKG, Makefile: '', 'Cargo.toml': '' });
+    expect(await resolveCompileCommand({ worktree: both })).toEqual({
+      argv: ['npm', 'run', 'build'],
+      source: 'package.json',
+    });
+    const make = await makeWorktree({ Makefile: '', 'Cargo.toml': '' });
+    expect(await resolveCompileCommand({ worktree: make })).toEqual({ argv: ['make'], source: 'Makefile' });
+    const cargo = await makeWorktree({ 'Cargo.toml': '' });
+    expect(await resolveCompileCommand({ worktree: cargo })).toEqual({
+      argv: ['cargo', 'build'],
+      source: 'Cargo.toml',
+    });
+    expect(await resolveCompileCommand({ worktree: await makeWorktree({}) })).toBeNull();
   });
 });
