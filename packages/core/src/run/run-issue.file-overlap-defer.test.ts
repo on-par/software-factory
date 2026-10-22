@@ -1,10 +1,9 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.js';
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
@@ -58,8 +57,9 @@ const MODELS: ModelsConfig = {
   },
 };
 
-const breakerDir = mkdtempSync(join(tmpdir(), 'run-issue-file-overlap-'));
-afterAll(() => rmSync(breakerDir, { recursive: true, force: true }));
+const tempDirs = createTempDirs();
+const breakerDir = tempDirs.makeSync('run-issue-file-overlap-');
+afterAll(() => tempDirs.cleanup());
 
 const request: RunRequest = {
   issue: 1,
