@@ -1,5 +1,3 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
@@ -11,6 +9,7 @@ import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/c
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
 import type { shipPhase as realShipPhase } from '../phases/ship.js';
 import { ProviderBreaker } from '../router/breaker.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { ModelRouter } from '../router/index.js';
 import type { CiFailureEvidence } from '../types/index.js';
 import { ReworkHistory } from '../checkers/rework-history.js';
@@ -87,8 +86,9 @@ const policy: RunPolicy = {
   effective: {} as RunPolicy['effective'],
 };
 
-const breakerDir = mkdtempSync(join(tmpdir(), 'run-issue-ci-rework-'));
-afterAll(() => rmSync(breakerDir, { recursive: true, force: true }));
+const tmp = createTempDirs();
+const breakerDir = tmp.makeSync('run-issue-ci-rework-');
+afterAll(() => tmp.cleanup());
 
 type Log = ReturnType<RunPorts['events']>;
 

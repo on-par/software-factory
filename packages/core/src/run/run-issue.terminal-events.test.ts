@@ -1,5 +1,3 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
@@ -14,6 +12,7 @@ import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/c
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
 import type { shipPhase as realShipPhase } from '../phases/ship.js';
 import { ProviderBreaker } from '../router/breaker.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { ModelRouter } from '../router/index.js';
 import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
@@ -88,8 +87,9 @@ const policy: RunPolicy = {
   effective: {} as RunPolicy['effective'],
 };
 
-const breakerDir = mkdtempSync(join(tmpdir(), 'run-issue-ci-rework-'));
-afterAll(() => rmSync(breakerDir, { recursive: true, force: true }));
+const tmp = createTempDirs();
+const breakerDir = tmp.makeSync('run-issue-ci-rework-');
+afterAll(() => tmp.cleanup());
 
 type Log = ReturnType<RunPorts['events']>;
 
@@ -134,7 +134,7 @@ const terminals = (log: ReturnType<typeof vi.fn<Log>>): string[] =>
 
 describe('runIssue logs exactly one terminal event (#3435)', () => {
   it('build escalation (real buildPhase) logs one escalate', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'terminal-events-'));
+    const dir = tmp.makeSync('terminal-events-');
     try {
       const models: ModelsConfig = {
         ...MODELS,
@@ -165,7 +165,7 @@ describe('runIssue logs exactly one terminal event (#3435)', () => {
       expect(outcome).toMatchObject({ state: 'escalated' });
       expect(terminals(log)).toEqual(['escalate']);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await tmp.cleanup();
     }
   });
 
