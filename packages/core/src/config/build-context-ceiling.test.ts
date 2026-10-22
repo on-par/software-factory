@@ -1,18 +1,17 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { loadFactoryConfig, loadFactoryConfigForRepo } from './index.js';
 
+const tempDirs = createTempDirs();
 let dir: string;
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'factory-config-ceiling-'));
+  dir = await tempDirs.make('factory-config-ceiling-');
 });
-afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
-});
+afterEach(() => tempDirs.cleanup());
 
 describe('build.contextCeiling (#3327)', () => {
   const load = async (cfg: unknown) => {

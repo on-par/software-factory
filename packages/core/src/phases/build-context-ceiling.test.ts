@@ -1,21 +1,16 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { buildPhase } from './build.js';
 
-const tempDirs = new Set<string>();
-afterEach(async () => {
-  await Promise.all([...tempDirs].map((d) => rm(d, { recursive: true, force: true })));
-  tempDirs.clear();
-});
+const tempDirs = createTempDirs();
+afterEach(() => tempDirs.cleanup());
 
 describe('buildPhase context_ceiling event', () => {
   it('logs a context_ceiling event when the router reports a ceiling (#3327)', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await tempDirs.make('build-phase-test-');
     const fakeRouter = {
       run: async (_task: string, _prompt: string, options: any) => {
         options.onContextCeiling({ task: 'build_codex', model: 'm', harness: 'codex-cli', value: 90000 });

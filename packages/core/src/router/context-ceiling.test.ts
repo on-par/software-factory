@@ -1,10 +1,10 @@
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { loadFactoryConfigForRepo, loadModelsConfig, loadRoutesConfig } from '../config/index.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import type { ExecFn } from '../utils/exec.js';
 import {
   contextCeilingFor,
@@ -17,12 +17,11 @@ import { CliModelExecutor, type ModelExecutor, type ModelExecutorContext, ModelR
 const fakeGitExec: ExecFn = async () => ({ stdout: '', stderr: '' });
 
 let tmp: string;
+const tempDirs = createTempDirs();
 beforeEach(async () => {
-  tmp = await mkdtemp(join(tmpdir(), 'ctx-ceiling-'));
+  tmp = await tempDirs.make('ctx-ceiling-');
 });
-afterEach(async () => {
-  await rm(tmp, { recursive: true, force: true });
-});
+afterEach(() => tempDirs.cleanup());
 
 async function configFor(build?: unknown) {
   await mkdir(join(tmp, '.factory'), { recursive: true });
