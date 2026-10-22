@@ -43,6 +43,7 @@ const PUBLIC_API_KEYS = [
   'resolveCodexDisabled',
   'resolveEfficiencyPolicy',
   'resolveLaneBreakerThreshold',
+  'decideBuildRoute',
   'resolveEffectiveBuildRoute',
   'resolveEffectiveModelPins',
   'resolveUsageCap',
@@ -890,10 +891,8 @@ describe('public API surface (ADR-0004)', () => {
       expect(Object.keys(publicApi)).not.toContain(key);
     }
   });
-  it('./internal exposes exactly the documented internal API', () => {
+  it('./internal and ./testing expose exactly the documented APIs', () => {
     expect(Object.keys(internalApi).sort()).toEqual([...INTERNAL_API_KEYS, ...EXTRA_INTERNAL_KEYS].sort());
-  });
-  it('./testing exposes exactly the documented testing API', () => {
     expect(Object.keys(testingApi).sort()).toEqual([...TESTING_API_KEYS, 'createTempDirs', 'withTempDir'].sort());
   });
   it('./kpis exposes exactly the documented KPI subset, and nothing beyond the root API', () => {

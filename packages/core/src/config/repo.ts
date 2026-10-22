@@ -30,6 +30,7 @@ import {
 } from './index.js';
 import { assertRegistryHarness, RepoHarnessesSchema, resolveRepoHarnesses } from './repo-harnesses.js';
 import { ModelEffortsSchema } from './effort.js';
+import { resolveEffectiveBuildRoute } from './build-route.js';
 import { assertAgenticBuildPin } from './repo-build-pin.js';
 import { assertTierMayRoute } from './repo-tier-guard.js';
 import { assertApprovedClaudeEndpoint, assertNoDirectDeepSeek } from './intermediaries.js';
@@ -522,41 +523,6 @@ export function resolveEffectiveModelPins(
 }
 
 // ---------- Effective build route ----------
-/** Same literal union as run/outcome.ts's BuildRoute; kept local so config/ never imports run/. */
-export type BuildRoutePin = 'codex' | 'claude' | 'opencode' | 'command';
-
-/** The build route a pinned build model implies, read from its harness: declared agentic harness or Pi →
- *  command (wins over `codex: true`), codex-harness → codex, opencode → opencode, claude-cli → claude.
- *  `undefined` when there is no pin or the harness has no dedicated route (#1367). */
-export function routeForBuildModel(registry: ModelRegistry, modelId: string | undefined): BuildRoutePin | undefined {
-  if (!modelId || !registry.get(modelId)) return undefined;
-  const harness = registry.getHarnessId(modelId);
-  if (harness && registry.ridesCommandRoute(harness)) return 'command';
-  if (registry.isCodexModel(modelId)) return 'codex';
-  if (harness === 'opencode') return 'opencode';
-  return harness === 'claude-cli' ? 'claude' : undefined;
-}
-
-export interface EffectiveBuildRoute {
-  route?: BuildRoutePin;
-  /** 'repo' = explicit `route` in .factory/config.json; 'build-pin' = derived from the pinned
-   *  build model's harness; 'plan' = nothing pinned, the PLAN model decides per issue. */
-  source: 'repo' | 'build-pin' | 'plan';
-}
-
-/** An explicit repo `route` wins; otherwise a pinned build model determines the route, so an
- *  operator who pins an Anthropic worker keeps BUILD on Anthropic without also learning about
- *  `route`. With neither, PLAN decides (#1367). */
-export function resolveEffectiveBuildRoute(
-  registry: ModelRegistry,
-  repo: RepoFactoryConfig | null,
-  pins: EffectiveModelPins,
-): EffectiveBuildRoute {
-  if (repo?.route) return { route: repo.route, source: 'repo' };
-  const derived = routeForBuildModel(registry, pins.build);
-  return derived ? { route: derived, source: 'build-pin' } : { source: 'plan' };
-}
-
 /** Whether Codex/OpenAI routes should be disabled. Repo `providers.openai`, when
  *  explicitly set, wins; otherwise falls back to the FACTORY_CODEX=0 kill-switch. */
 export function resolveCodexDisabled(repo: RepoFactoryConfig | null, env: NodeJS.ProcessEnv = process.env): boolean {
@@ -824,16 +790,23 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
   const buildModel = pins.build ?? router.resolve('build_claude') ?? 'none';
   lines.push(`Build model: ${buildModel} ${sourceLabel(pins.sources.build, repoConfigPath, 'FACTORY_BUILD_MODEL')}`);
   if (pins.buildFallback) lines.push(`Build fallback: ${pins.buildFallback} (${repoConfigPath})`);
-  const buildRoute = resolveEffectiveBuildRoute(router.registryRef, repo, pins);
-  lines.push(
-    `Build route: ${buildRoute.route ?? 'plan decides'} ${
-      buildRoute.source === 'repo'
-        ? `(${repoConfigPath})`
-        : buildRoute.source === 'build-pin'
-          ? `(derived from build pin ${pins.build})`
-          : '(default)'
-    }`,
-  );
+  const buildRoute = resolveEffectiveBuildRoute(router.registryRef, repo, pins, {
+    localOnly: resolveLocalOnly(env),
+    codexDisabled: resolveCodexDisabled(repo, env),
+  });
+  const routeLabel = (): string => {
+    switch (buildRoute.source) {
+      case 'repo':
+        return `(${repoConfigPath})`;
+      case 'local-only':
+        return buildRoute.note ? '(local-only, codex disabled)' : '(local-only)';
+      case 'build-pin':
+        return `(derived from build pin ${pins.build})`;
+      case 'plan':
+        return buildRoute.note ? `(${buildRoute.note})` : '(default)';
+    }
+  };
+  lines.push(`Build route: ${buildRoute.route ?? 'plan decides'} ${routeLabel()}`);
 
   const checkerModel = repo?.models?.pins?.checker ?? router.resolve('check_tests') ?? 'none';
   lines.push(
@@ -935,3 +908,6 @@ export type TrustTier = 'T0' | 'T1' | 'T2';
 export function resolveTrustTier(repo: RepoFactoryConfig | null): TrustTier {
   return repo?.classifier?.trustTier ?? 'T0';
 }
+
+export { decideBuildRoute, resolveEffectiveBuildRoute, routeForBuildModel } from './build-route.js';
+export type { BuildRouteDecisionInput, BuildRoutePin, EffectiveBuildRoute } from './build-route.js';
