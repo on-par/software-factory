@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import { captureDiffBase, collectDesignDiff } from '../checkers/design-smells.js';
-import { resolveLintCommands } from '../checkers/index.js';
+import { resolveLintCommands, VERIFY_PS1_ARGV } from '../checkers/index.js';
 import { fileExists } from '../checkers/probe.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { readDesignArtifact, renderDesignGrounding } from '../design/index.js';
@@ -191,9 +191,11 @@ async function buildPhaseImpl(opts: {
   const designArtifact = await readDesignArtifact(specPath);
   const designGrounding = designArtifact ? renderDesignGrounding(designArtifact) : '';
   // BUILD names the lint checker's commands only when verify.sh does not already cover them (#2829).
-  const lintCommands = (await fileExists(join(worktree, 'scripts/verify.sh')))
-    ? []
-    : await resolveLintCommands({ worktree }).catch(() => []);
+  const hasVerifySh = await fileExists(join(worktree, 'scripts/verify.sh'));
+  // A verify.ps1-only repo is verified with the pwsh command CHECK runs (#3471).
+  const verifyCommand =
+    !hasVerifySh && (await fileExists(join(worktree, 'scripts/verify.ps1'))) ? VERIFY_PS1_ARGV.join(' ') : undefined;
+  const lintCommands = hasVerifySh ? [] : await resolveLintCommands({ worktree }).catch(() => []);
   const promptOpts = {
     issue,
     specPath,
@@ -203,6 +205,7 @@ async function buildPhaseImpl(opts: {
     appBaseUrl,
     designGrounding,
     lintCommands,
+    verifyCommand,
     previousAttempt,
   };
   if (designArtifact) {
@@ -230,6 +233,7 @@ async function buildPhaseImpl(opts: {
           appBaseUrl,
           designGrounding,
           lintCommands,
+          verifyCommand,
           previousAttempt,
         })
       : buildCommitOnlyPrompt(promptOpts);

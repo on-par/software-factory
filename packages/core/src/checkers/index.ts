@@ -1,7 +1,7 @@
 // src/checkers/index.ts — Checker framework: built-in + custom checkers
 
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 
 import type { EventKind } from '../events/kinds.js';
 import type { ReviewFloorRuleSet } from '../review/floor.js';
@@ -233,19 +233,24 @@ async function commandFailureDetails(
   return logPath ? `${label} failed: ${summary}\nfull output: ${logPath}` : `${label} failed: ${summary}`;
 }
 
-export type TestsRunner = 'verify' | 'npm' | 'pytest' | 'none';
+export type TestsRunner = 'verify' | 'verify-ps1' | 'npm' | 'pytest' | 'none';
 
 /** The command the `tests` checker runs for a worktree; argv is [] when runner is 'none'. */
 export interface TestsCommand {
   runner: TestsRunner;
   argv: string[];
-  /** Label used in FAIL details and the output-log name (`verify.sh`, `npm test`, `pytest`, `''` for none). */
+  /** Label used in FAIL details and the output-log name (`verify.sh`, `verify.ps1`, `npm test`, `pytest`, `''` for none). */
   label: string;
 }
+
+/** The CHECK command for a repo whose gate is scripts/verify.ps1; BUILD renders the same argv (#3471). */
+export const VERIFY_PS1_ARGV = ['pwsh', '-NoProfile', '-NonInteractive', '-File', 'scripts/verify.ps1'] as const;
 
 export async function resolveTestsCommand(ctx: CheckerContext): Promise<TestsCommand> {
   if (await fileExists(join(ctx.worktree, 'scripts/verify.sh')))
     return { runner: 'verify', argv: ['bash', 'scripts/verify.sh', '--no-e2e'], label: 'verify.sh' };
+  if (await fileExists(join(ctx.worktree, 'scripts/verify.ps1')))
+    return { runner: 'verify-ps1', argv: [...VERIFY_PS1_ARGV], label: 'verify.ps1' };
   const pkg = await getPackageJson(ctx);
   if (pkg?.scripts?.test) return { runner: 'npm', argv: ['npm', 'test'], label: 'npm test' };
   const pythonSurface = ctx.probe?.pythonTestSurface ?? (await detectPythonTestSurface(ctx.worktree));
@@ -280,11 +285,21 @@ export async function resolveLintCommands(ctx: LintCommandSource): Promise<LintC
 
 const TESTS_PASS_DETAILS = {
   verify: 'scripts/verify.sh: OK',
+  'verify-ps1': 'scripts/verify.ps1: OK',
   npm: 'npm test: OK',
   pytest: 'python3 -m pytest: OK',
 } as const;
 
 const DEFAULT_TESTS_TIMEOUT_SECONDS = 300;
+
+async function onPath(bin: string, env?: NodeJS.ProcessEnv): Promise<boolean> {
+  const names = process.platform === 'win32' ? [bin, `${bin}.exe`] : [bin];
+  for (const dir of (env?.PATH ?? process.env.PATH ?? '').split(delimiter)) {
+    if (!dir) continue;
+    for (const name of names) if (await fileExists(join(dir, name))) return true;
+  }
+  return false;
+}
 
 export const testsChecker: CheckerFn = async (ctx) => {
   try {
@@ -299,6 +314,14 @@ export const testsChecker: CheckerFn = async (ctx) => {
       return evidence === 'timed out' ? head : `${head}\n${evidence}`;
     };
     const cmd = await resolveTestsCommand(ctx);
+    if (cmd.runner === 'verify-ps1' && !(await onPath('pwsh', ctx.env))) {
+      return {
+        checker: 'tests',
+        result: 'FAIL',
+        details:
+          'verify.ps1 failed: pwsh (PowerShell 7) is not on PATH — scripts/verify.ps1 needs it. Install PowerShell: https://aka.ms/powershell (macOS: brew install --cask powershell; Linux: see the same page).',
+      };
+    }
     if (cmd.runner !== 'none') {
       const r = await run(cmd.argv, {
         cwd: ctx.worktree,
@@ -321,13 +344,14 @@ export const testsChecker: CheckerFn = async (ctx) => {
         checker: 'tests',
         result: 'FAIL',
         details:
-          'no verification command was run — constitution requires tests (requireTests: true) but the worktree has no pytest, scripts/verify.sh, or npm-test surface',
+          'no verification command was run — constitution requires tests (requireTests: true) but the worktree has no pytest, scripts/verify.sh, scripts/verify.ps1, or npm-test surface',
       };
     }
     return {
       checker: 'tests',
       result: 'SKIP',
-      details: 'no verification command was run — no scripts/verify.sh and no package.json test script found',
+      details:
+        'no verification command was run — no scripts/verify.sh, no scripts/verify.ps1 and no package.json test script found',
     };
   } catch (e: any) {
     return {
