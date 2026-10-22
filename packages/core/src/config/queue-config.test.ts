@@ -1,23 +1,24 @@
 // packages/core/src/config/queue-config.test.ts — queue.claim_settle_ms in the factory config (#3239).
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { loadFactoryConfigForRepo } from './index.js';
 import { resolveQueueClaimSettleMs } from '../queue/claim-settle.js';
 
 describe('loadFactoryConfigForRepo queue.claim_settle_ms', () => {
+  const temp = createTempDirs();
   let dir: string;
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'factory-queue-config-'));
+    dir = await temp.make('factory-queue-config-');
   });
 
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await temp.cleanup();
   });
 
   it('queue.claim_settle_ms defaults to 3000 and accepts 0', async () => {

@@ -1,7 +1,6 @@
 // packages/cli/src/cli/run-claim-settle.test.ts — factory run passes queue.claim_settle_ms to the lane queue (#3239)
 
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { Octokit } from '@octokit/rest';
@@ -9,6 +8,7 @@ import { defaultFactoryConfig } from '@on-par/factory-config';
 import { loadFactoryConfig, loadModelsConfig, loadRepoConfig, resolveEffectiveModelPins } from '@on-par/factory-core';
 import type { FactoryConfig } from '@on-par/factory-core';
 import type { GithubQueue } from '@on-par/factory-core/internal';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { cmdRun } from './run.js';
@@ -17,15 +17,16 @@ import type { RunRuntime } from './run.js';
 class StopAtPlan extends Error {}
 
 describe('factory run claim settle delay (#3239)', () => {
+  const temp = createTempDirs();
   let root: string;
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'run-claim-settle-'));
+    root = temp.makeSync('run-claim-settle-');
     mkdirSync(join(root, '.factory'), { recursive: true });
   });
 
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
+  afterEach(async () => {
+    await temp.cleanup();
   });
 
   /** Runs cmdRun up to planRunLanes and builds the lane queue it would hand over. */
