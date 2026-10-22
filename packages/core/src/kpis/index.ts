@@ -3,6 +3,7 @@
 import type { CostEntry, FactoryEvent, ReadinessInfo, ReworkCauseTag, RetryCause } from '../types/index.js';
 import { isHumanEvent } from './human.js';
 import { median } from '../utils/median.js';
+import { computeParkKpis, type ParkKpis } from './park.js';
 import { phaseOfCostEntry } from './phase.js';
 
 export { phaseOfCostEntry } from './phase.js';
@@ -83,7 +84,7 @@ function formatDurationMs(ms: number): string {
   return `${s}s`;
 }
 
-export interface HealthKpis {
+export interface HealthKpis extends ParkKpis {
   runs: number;
   merged: number;
   /** Runs that entered the rework loop at least once (breadth: run-level boolean —
@@ -203,6 +204,9 @@ export interface HealthKpis {
    *  but not actually running in parallel) even when raw throughput looks fine (#657).
    *  0 when configuredLanes is 0 or achievedConcurrency.mean is null. */
   parallelEfficiency: number;
+  // openParked (#3513): distinct real issues whose latest park has no later `merged`.
+  // parkToHumanSamples (#3513): parks answered by a later `issue_unparked` or human-* event.
+  // medianParkToHumanMs (#3513): median wait over those samples; null when there are none.
 }
 
 interface RunStats {
@@ -582,6 +586,7 @@ export function computeHealthKpis(events: FactoryEvent[], costs: CostEntry[]): H
     configuredLanes,
     achievedConcurrency,
     parallelEfficiency,
+    ...computeParkKpis(events),
   };
 }
 
@@ -639,6 +644,12 @@ export function formatKpiLines(kpis: HealthKpis): string[] {
     lines.push(`Phase medians: ${phaseEntries.map(([p, ms]) => `${p} ${formatDurationMs(ms)}`).join(' · ')}`);
   }
   lines.push(`Queue wait (median): ${kpis.queueWaitMs === null ? 'n/a' : formatDurationMs(kpis.queueWaitMs)}`);
+  lines.push(
+    `Open parked: ${kpis.openParked}`,
+    kpis.medianParkToHumanMs === null
+      ? 'Park-to-human (median): n/a (0 parks answered)'
+      : `Park-to-human (median): ${formatDurationMs(kpis.medianParkToHumanMs)} (${kpis.parkToHumanSamples} park${kpis.parkToHumanSamples === 1 ? '' : 's'} answered)`,
+  );
 
   lines.push(
     `Throughput: ${kpis.prsPerHour === null ? 'n/a' : `${kpis.prsPerHour.toFixed(2)} PRs/hour`} · achieved concurrency: mean ${kpis.achievedConcurrency.mean === null ? 'n/a' : kpis.achievedConcurrency.mean.toFixed(2)}, max ${kpis.achievedConcurrency.max} (of ${kpis.configuredLanes} configured lane${kpis.configuredLanes === 1 ? '' : 's'}) · parallel efficiency ${formatPercent(kpis.parallelEfficiency)}`,
