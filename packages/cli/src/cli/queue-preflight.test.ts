@@ -16,6 +16,7 @@ describe('queue PR preflight', () => {
     stackMode: false,
     getPullReviews: async (): Promise<StackPullReviews> => Promise.reject(new Error('unexpected review lookup')),
     readIssueBody: async () => '',
+    getMergedClosingPr: async () => undefined,
     getPrerequisiteState: async () => {
       throw new Error('unexpected prerequisite lookup');
     },

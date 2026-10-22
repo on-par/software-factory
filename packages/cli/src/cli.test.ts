@@ -2646,6 +2646,7 @@ describe('cli', () => {
   describe('claim-time declared prerequisites (#3267)', () => {
     const preflightDeps = {
       expectedHeadRepoFullName: 'on-par/software-factory',
+      getMergedClosingPr: async () => undefined,
       findOpenPR: async () => undefined,
       getLandState: async () => ({ isDraft: false, mergeStateStatus: 'CLEAN' }),
       watch: async () => 'success' as const,
