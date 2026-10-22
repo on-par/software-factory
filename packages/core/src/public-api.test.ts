@@ -497,6 +497,7 @@ const INTERNAL_API_KEYS = [
   'renderUpstreamOccurrenceComment',
   // Evidence sanitizer for untrusted text (#1841, #1852)
   'stripHiddenContent',
+  'summarizeCommandRun', // #3328
   'REDACTION_PLACEHOLDERS',
   'redactText',
   'buildUpstreamReport',

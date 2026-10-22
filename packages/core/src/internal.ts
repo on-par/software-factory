@@ -65,7 +65,6 @@ export {
 
 // Evidence sanitizer for untrusted text (#1841, #1852)
 export { stripHiddenContent } from './filing/sanitize.js';
-
 // Redacted upstream factory report (#1858)
 export { REDACTION_PLACEHOLDERS, redactText, type RedactionClass, type RedactionContext } from './filing/redact.js';
 export type { UpstreamEnvironment, UpstreamReport, UpstreamReportInput } from './filing/upstream.js';
@@ -130,6 +129,7 @@ export {
 } from './config/repo-config-file.js';
 export type { RepoConfigYamlMigration } from './config/repo-config-file.js';
 export { CONFIG_EXAMPLE_OMITTED_KEYS, renderConfigExample } from './config/example.js';
+export { summarizeCommandRun, type SummarizeCommandRunOptions } from './checkers/command-output.js';
 export { resolveEvidenceAllowlist, type EvidenceAllowlist } from './checkers/evidence-allowlist.js';
 export { runEvidencePlan, type EvidencePlanResult, type EvidenceRunnerContext } from './checkers/evidence-plan.js';
 // Design artifact (#422)
