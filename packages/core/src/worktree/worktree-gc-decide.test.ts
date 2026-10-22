@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { decideWorktree, type GcDecision } from './worktree-gc-decide.js';
+import { decideLaneRemoval, decideWorktree, type GcDecision } from './worktree-gc-decide.js';
 import type { WorktreeEvidence } from './worktree-gc-evidence.js';
 
 type Overrides = Partial<Omit<WorktreeEvidence, 'git'>> & { git?: Partial<WorktreeEvidence['git']> };
@@ -174,5 +174,19 @@ describe('decideWorktree', () => {
 
   it('keeps a live-claimed worktree that is also past its TTL', () => {
     expect(decideWorktree(evidence({ disposition: 'keep-claimed', ageDays: 99 }), policy)).toEqual(keep('live-claim'));
+  });
+});
+
+describe('decideLaneRemoval', () => {
+  const rec = { issue: 7, reason: 'budget_exceeded' };
+  it.each([
+    ['keep record, clean tree', rec, true, { action: 'keep', why: 'keep-record' }],
+    ['keep record, dirty tree', rec, false, { action: 'keep', why: 'keep-record' }],
+    ['keep record, failed probe', rec, null, { action: 'keep', why: 'keep-record' }],
+    ['no record, failed probe', null, null, { action: 'keep', why: 'unverified' }],
+    ['no record, dirty tree', null, false, { action: 'keep', why: 'dirty' }],
+    ['no record, clean tree', null, true, { action: 'remove' }],
+  ] as const)('%s', (_name, keepRecord, clean, expected) => {
+    expect(decideLaneRemoval({ keep: keepRecord, clean })).toEqual(expected);
   });
 });

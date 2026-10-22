@@ -159,6 +159,7 @@ export async function setupRunWorkspace({
       log,
       sandbox: worktreeSandbox,
       findOpenPr: (br) => findOpenPR(octokit, ghOwner, ghName, br),
+      keepsFile: paths.worktreeKeeps,
       setup: (root, br, wt, sp, sandbox, setupLog, setupOpts) =>
         withGitLock(root, () =>
           withFileLock(

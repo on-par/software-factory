@@ -24,6 +24,13 @@ describe('formatShipReapLine', () => {
     expect(line).toContain('uncommitted changes');
   });
 
+  it('explains a keep-record keep', () => {
+    const line = formatShipReapLine(WT, { outcome: 'kept-record', branch: BR, branchDeleted: false });
+    expect(line).toContain(WT);
+    expect(line).toContain(BR);
+    expect(line).toContain('keep record');
+  });
+
   it('explains a committed keep', () => {
     const line = formatShipReapLine(WT, { outcome: 'kept-committed', branch: BR, branchDeleted: false });
     expect(line).toContain(WT);

@@ -90,6 +90,9 @@ export async function resetIssue(issue: number, deps: ResetDeps): Promise<ResetR
         }
       }
       try {
+        // factory reset is the human "start over" path (ADR-0152, narrowed by #1789): it deliberately does not consult
+        // the GC decision or worktree-keeps.json — only its own dirty/unpushed guard, which --force overrides.
+        // Automatic removals go through decideLaneRemoval / decideWorktree.
         if (!dry) await deps.removeWorktree(entry.path);
         removed.push(`worktree ${entry.path}`);
         removedWorktrees.add(entry.path);

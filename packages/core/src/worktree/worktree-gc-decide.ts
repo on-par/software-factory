@@ -24,6 +24,16 @@ function reap(reason: GcReason, branchReapable: boolean): GcDecision {
   return { action: QUARANTINE_REASONS.has(reason) ? 'quarantine' : 'remove', reason, branchReapable };
 }
 
+/** The one keep-record rule (#3316): a record protects the worktree from every removal except a
+ *  closed issue with a clean tree. Lane setup/reap pass a null disposition, so a record always holds. */
+function keepRecordHolds(
+  keep: { reason: string } | null,
+  disposition: WorktreeEvidence['disposition'] | null,
+  clean: boolean,
+): boolean {
+  return keep !== null && !(disposition === 'reap-closed' && clean);
+}
+
 const KEEP: GcDecision = { action: 'keep', why: 'no-evidence' };
 
 /** Decomposed parent (#1756): reap only a clean, fully-pushed tree with no open PR. Null means
@@ -84,7 +94,7 @@ export function decideWorktree(e: WorktreeEvidence, policy: GcPolicy): GcDecisio
   const g = e.git;
   if (e.protected) return { action: 'keep', why: 'protected' };
   // A keep record protects the worktree from every reason except a closed issue with a clean tree.
-  if (e.keep && !(e.disposition === 'reap-closed' && g.clean)) return { action: 'keep', why: 'keep-record' };
+  if (keepRecordHolds(e.keep, e.disposition, g.clean)) return { action: 'keep', why: 'keep-record' };
   // A live claim outranks every reap tier, TTL included (#2964).
   if (e.disposition === 'keep-claimed') return { action: 'keep', why: 'live-claim' };
   if (e.ageDays > policy.ttlDays && !e.keep) return reap('ttl-expired', false);
@@ -108,4 +118,22 @@ export function decideWorktree(e: WorktreeEvidence, policy: GcPolicy): GcDecisio
     if (chain.action !== 'keep') return chain;
   }
   return decideHeuristic(e, policy);
+}
+
+/** What a lane's own removal (setupWorktree's replace step, reapLaneWorktree) knows about the worktree. */
+export interface LaneRemovalEvidence {
+  keep: { issue: number; reason: string } | null;
+  /** No modified tracked files; null when the probe failed. */
+  clean: boolean | null;
+}
+
+export type LaneRemovalDecision =
+  { action: 'remove' } | { action: 'keep'; why: 'keep-record' | 'dirty' | 'unverified' };
+
+/** Remove / keep for a lane removing its own worktree. Rule order: keep record, unverified, dirty. */
+export function decideLaneRemoval(e: LaneRemovalEvidence): LaneRemovalDecision {
+  if (keepRecordHolds(e.keep, null, e.clean === true)) return { action: 'keep', why: 'keep-record' };
+  if (e.clean === null) return { action: 'keep', why: 'unverified' };
+  if (!e.clean) return { action: 'keep', why: 'dirty' };
+  return { action: 'remove' };
 }
