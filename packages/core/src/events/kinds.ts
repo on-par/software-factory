@@ -12,8 +12,6 @@ export type {
   FlakyTestsPayload,
   LanePausedPayload,
   ParkPayload,
-  ProviderAuthRejectedPayload,
-  ProviderBreakerClosePayload,
   ProviderCappedPayload,
   StewardTriggeredPayload,
 } from './payloads.js';
