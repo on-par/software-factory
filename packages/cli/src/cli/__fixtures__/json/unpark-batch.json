@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "action": "unpark-batch",
+  "results": [
+    {
+      "schemaVersion": 1,
+      "ok": true,
+      "action": "unpark",
+      "issue": 41,
+      "lane": "ops",
+      "order": 3,
+      "labelsBefore": ["bug", "factory:parked", "factory:lane:ops"],
+      "labelsAfter": ["bug", "factory:lane:ops", "factory:queued", "factory:order:3"]
+    },
+    {
+      "schemaVersion": 1,
+      "ok": false,
+      "action": "unpark",
+      "issue": 43,
+      "error": { "code": "not-parked", "message": "issue #43 is not parked" }
+    },
+    {
+      "schemaVersion": 1,
+      "ok": true,
+      "action": "unpark",
+      "issue": 42,
+      "lane": "ops",
+      "order": 4,
+      "labelsBefore": ["bug", "factory:parked", "factory:lane:ops"],
+      "labelsAfter": ["bug", "factory:lane:ops", "factory:queued", "factory:order:4"]
+    }
+  ],
+  "summary": { "ok": 2, "failed": 1 }
+}

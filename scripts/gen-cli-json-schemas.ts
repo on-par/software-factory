@@ -16,6 +16,7 @@ import {
   statusJsonSchema,
   usageJsonSchema,
   stopJsonSchema,
+  unparkBatchJsonSchema,
   unparkJsonSchema,
 } from '../packages/cli/src/cli/json-contract.js';
 
@@ -32,6 +33,7 @@ const schemas = [
   ['stop.schema.json', stopJsonSchema],
   ['resume.schema.json', resumeJsonSchema],
   ['unpark.schema.json', unparkJsonSchema],
+  ['unpark-batch.schema.json', unparkBatchJsonSchema],
 ] as const;
 
 /** Writes every CLI JSON Schema artifact, Prettier-formatted, into outputDirectory (created if absent). */

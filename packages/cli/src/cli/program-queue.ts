@@ -37,17 +37,17 @@ export function registerQueueCommands(program: Command, handlers: ProgramHandler
     });
 
   program
-    .command('unpark <issue>')
+    .command('unpark <issues...>')
     .description(
-      'Unpark a factory:parked issue: remove factory:parked and re-queue it in its lane with a fresh order label (same path as `queue add`)',
+      'Unpark a factory:parked issue: remove factory:parked and re-queue it in its lane with a fresh order label (same path as `queue add`); several issues are queued prerequisite-first and a prerequisite cycle is refused',
     )
     .option('--lane <lane>', "Lane to re-queue into (default: the issue's existing factory:lane:* label)")
     .option(
       '--json',
-      'Print one JSON object (schemaVersion 1): ok, action, issue, lane, order, labelsBefore, labelsAfter',
+      'One issue: one JSON object (schemaVersion 1): ok, action, issue, lane, order, labelsBefore, labelsAfter. Several issues: one envelope { schemaVersion, action: unpark-batch, results, summary }',
     )
-    .action(async (issue: string, opts: { lane?: string; json?: boolean }) => {
-      await handlers.cmdUnpark(issue, opts);
+    .action(async (issues: string[], opts: { lane?: string; json?: boolean }) => {
+      await handlers.cmdUnpark(issues, opts);
     });
 
   const queue = program

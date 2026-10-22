@@ -24,6 +24,7 @@ const expectedFiles = [
   'resume.schema.json',
   'status.schema.json',
   'stop.schema.json',
+  'unpark-batch.schema.json',
   'unpark.schema.json',
   'usage.schema.json',
 ].sort();

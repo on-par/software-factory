@@ -29,6 +29,7 @@ import {
   runsJsonSchema,
   statusJsonSchema,
   stopJsonSchema,
+  unparkBatchJsonSchema,
   unparkJsonSchema,
   usageJsonSchema,
 } from './json-contract.js';
@@ -84,6 +85,7 @@ const generatedContracts = [
   ['stop.schema.json', 'stop.json', stopJsonSchema],
   ['resume.schema.json', 'resume.json', resumeJsonSchema],
   ['unpark.schema.json', 'unpark.json', unparkJsonSchema],
+  ['unpark-batch.schema.json', 'unpark-batch.json', unparkBatchJsonSchema],
 ] as const;
 
 const queueLabels = (position: number): string[] => ['factory:queued', 'factory:lane:ops', `factory:order:${position}`];

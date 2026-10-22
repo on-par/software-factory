@@ -266,7 +266,7 @@ import { buildQueueAddJson } from './queue-add-json.js';
 import { renderQueueAddLines, renderUnparkLines } from './queue-output.js';
 import { buildQueueListJson } from './queue-list.js';
 import { cmdSteer, type SteerOptions } from './steer.js';
-import { appendUnparkEvent, runUnpark, UnparkError, type UnparkJson } from './unpark.js';
+import { appendUnparkEvent, cmdUnparkBatch, runUnpark, UnparkError, type UnparkJson } from './unpark.js';
 import { buildRunsJson, parseRunsLimit } from './runs.js';
 import { buildRunDiffstatJson, NoRunError, parseDiffstatIssue, type RunDiffstatJson } from './runs-diffstat.js';
 import {
@@ -589,7 +589,7 @@ function isCommandAvailableViaShell(shell: ShellOps, cmd: string): boolean {
   }
 }
 
-async function getRepoRoot(shell: ShellOps = shellOps): Promise<string> {
+export async function getRepoRoot(shell: ShellOps = shellOps): Promise<string> {
   try {
     const { stdout } = await shell.exec('git rev-parse --show-toplevel');
     return stdout.trim();
@@ -625,7 +625,7 @@ export function ghRepoViewFailureMessage(stderr: string | undefined): string {
   return 'factory: no GitHub remote detected (gh repo view failed)';
 }
 
-async function getGitHubRepo(shell: ShellOps = shellOps): Promise<string> {
+export async function getGitHubRepo(shell: ShellOps = shellOps): Promise<string> {
   try {
     const { stdout } = await shell.exec('gh repo view --json nameWithOwner --jq .nameWithOwner');
     return stdout.trim();
@@ -650,7 +650,7 @@ function resolveGitHubToken(shell: ShellOps = shellOps): string | undefined {
 /** Octokit factory for the current main() or cmdLand invocation (CliDeps.octokit); unset outside them. */
 let octokitFactory: (() => Octokit) | undefined;
 
-function getOctokit(shell: ShellOps = shellOps, options?: FactoryOctokitOptions): Octokit {
+export function getOctokit(shell: ShellOps = shellOps, options?: FactoryOctokitOptions): Octokit {
   return octokitFactory
     ? octokitFactory()
     : selectOctokit(process.env, () => createFactoryOctokit(resolveGitHubToken(shell), options));
@@ -3122,8 +3122,10 @@ async function recordQueueAdded(lane: string, results: readonly EnqueueResult[])
   }
 }
 
-export async function cmdUnpark(issueArg: string, opts: { lane?: string; json?: boolean } = {}): Promise<void> {
-  const issue = parseIssueArg(issueArg);
+export async function cmdUnpark(issueArgs: string[], opts: { lane?: string; json?: boolean } = {}): Promise<void> {
+  const issues = [...new Set(issueArgs.map(parseIssueArg))]; // exit 2 before any GitHub call
+  if (issues.length > 1) return cmdUnparkBatch(issues, opts);
+  const issue = issues[0];
   let result: UnparkJson;
   try {
     const [owner, repo] = (await getGitHubRepo()).split('/');

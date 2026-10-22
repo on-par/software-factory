@@ -267,6 +267,21 @@ export const unparkJsonSchema = z.object({
   labelsAfter: z.array(z.string()),
 });
 
+export const unparkFailureJsonSchema = z.object({
+  schemaVersion: z.literal(1),
+  ok: z.literal(false),
+  action: z.literal('unpark'),
+  issue: z.number(),
+  error: z.object({ code: z.enum(['not-parked', 'lane-required', 'unpark-failed']), message: z.string() }),
+});
+
+export const unparkBatchJsonSchema = z.object({
+  schemaVersion: z.literal(1),
+  action: z.literal('unpark-batch'),
+  results: z.array(z.union([unparkJsonSchema, unparkFailureJsonSchema])),
+  summary: z.object({ ok: z.number(), failed: z.number() }),
+});
+
 export type StatusJson = z.infer<typeof statusJsonSchema>;
 export type LogsLineJson = z.infer<typeof logsLineJsonSchema>;
 export type DaemonLoadJson = z.infer<typeof daemonLoadJsonSchema>;
@@ -285,3 +300,5 @@ export type QueueAddJson = z.infer<typeof queueAddJsonSchema>;
 export type StopResumeJson = z.infer<typeof stopJsonSchema> | z.infer<typeof resumeJsonSchema>;
 /** Unpark result (#2277): `collision` reports an order held without `factory:queued` (#2988). Additive changes only; bump schemaVersion on a breaking change. */
 export type UnparkJson = z.infer<typeof unparkJsonSchema>;
+/** Batch unpark envelope (#3331): results in queue order; success entries are exactly UnparkJson. Additive changes only. */
+export type UnparkBatchJson = z.infer<typeof unparkBatchJsonSchema>;
