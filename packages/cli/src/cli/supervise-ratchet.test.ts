@@ -1,11 +1,11 @@
 // packages/cli/src/cli/supervise-ratchet.test.ts — daily ratchet hook and its supervise wiring (#3542)
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { getFactoryPaths, loadFactoryConfig } from '@on-par/factory-core';
 import type { RatchetTriggerResult } from '@on-par/factory-core/internal';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { superviseLoop } from './index.js';
@@ -13,12 +13,14 @@ import { createRatchetHook, octokitRatchetGitHub } from './ratchet-hook.js';
 
 const list = { name: 'max-lines', file: 'a.txt', check: 'npm run lint' };
 
+const tmp = createTempDirs();
+
 describe('createRatchetHook', () => {
   let root: string;
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'ratchet-hook-'));
+    root = tmp.makeSync('ratchet-hook-');
   });
-  afterEach(() => rmSync(root, { recursive: true, force: true }));
+  afterEach(() => tmp.cleanup());
 
   function setup(result: RatchetTriggerResult | Error, startDate = '2026-10-22') {
     const paths = { ...getFactoryPaths(root), state: join(root, 'state') };
