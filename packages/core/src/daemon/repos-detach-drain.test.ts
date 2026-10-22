@@ -1,23 +1,21 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { emptyRegistry, loadRegistry, upsertRepo, writeRegistry } from './registry.js';
 import { drainAndDetach } from './repos-detach.js';
 import { setRepoState } from './repos-pause-resume.js';
 
-const tmpDirs: string[] = [];
+const tempDirs = createTempDirs();
 
 async function tmpFile(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'repos-detach-drain-test-'));
-  tmpDirs.push(dir);
+  const dir = await tempDirs.make('repos-detach-drain-test-');
   return join(dir, 'registry.json');
 }
 
 afterEach(async () => {
-  await Promise.all(tmpDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  await tempDirs.cleanup();
 });
 
 describe('drainAndDetach under the registry lock', () => {

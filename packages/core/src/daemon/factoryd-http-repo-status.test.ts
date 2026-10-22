@@ -1,10 +1,10 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import http from 'node:http';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { createFactorydServer, type FactorydServer } from './factoryd-http.js';
 
 function post(port: number, path: string): Promise<{ status: number; body: string }> {
@@ -20,19 +20,20 @@ function post(port: number, path: string): Promise<{ status: number; body: strin
 }
 
 describe('POST /repos/<owner>/<name>/pause|resume', () => {
+  const tempDirs = createTempDirs();
   let dir: string;
   let registryFile: string;
   let factoryd: FactorydServer | undefined;
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'factoryd-http-repo-status-'));
+    dir = await tempDirs.make('factoryd-http-repo-status-');
     registryFile = join(dir, 'registry.json');
   });
 
   afterEach(async () => {
     await factoryd?.stop();
     factoryd = undefined;
-    await rm(dir, { recursive: true, force: true });
+    await tempDirs.cleanup();
   });
 
   it('answers 409 with reason draining for pause and resume on a draining repo', async () => {
