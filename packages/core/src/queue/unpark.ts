@@ -49,6 +49,8 @@ export interface UnparkInput {
   lane?: string;
   /** worktree-keeps.json; a successful unpark drops the issue's keep record because the factory owns the worktree again (#3318). */
   keepsFile?: string;
+  /** Reports a best-effort keep-record release that failed; the unpark still succeeds. */
+  warn?: (msg: string) => void;
 }
 
 function message(err: unknown): string {
@@ -99,8 +101,8 @@ export async function runUnpark(input: UnparkInput): Promise<UnparkJson> {
     if (input.keepsFile) {
       try {
         removeWorktreeKeep(input.keepsFile, issue);
-      } catch {
-        // best-effort: never fail an unpark
+      } catch (err) {
+        input.warn?.(`could not release the keep record for #${issue}: ${message(err)}`);
       }
     }
     const labelsAfter = await client.getIssueLabels(ref);

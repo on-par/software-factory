@@ -123,6 +123,11 @@ export async function isWorktreeClean(
   return result !== null && result.stdout.trim() === '';
 }
 
+/** True when `git status --porcelain --untracked-files=normal` output lists an untracked path. */
+export function hasUntrackedLine(stdout: string): boolean {
+  return stdout.split('\n').some((l) => l.startsWith('?? '));
+}
+
 /** True when the worktree has untracked, non-ignored files; null when the probe failed (⇒ hold).
  *  Ignored files are excluded because there is no `--ignored` (#3318). */
 export async function hasUntrackedFiles(
@@ -130,7 +135,7 @@ export async function hasUntrackedFiles(
   worktreePath: string,
 ): Promise<boolean | null> {
   const result = await safeExec(runCommand, 'git status --porcelain --untracked-files=normal', { cwd: worktreePath });
-  return result === null ? null : result.stdout.split('\n').some((l) => l.startsWith('?? '));
+  return result === null ? null : hasUntrackedLine(result.stdout);
 }
 
 /** Commits reachable from `rev` that are on no `origin` ref; null when the probe fails or is unparseable (⇒ keep). */

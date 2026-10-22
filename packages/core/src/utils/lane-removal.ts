@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { getFactoryPaths } from '../config/index.js';
 import type { EventKind } from '../events/kinds.js';
+import { hasUntrackedLine } from '../worktree/worktree-gc-evidence.js';
 import { decideLaneRemoval } from '../worktree/worktree-gc-decide.js';
 import { findWorktreeKeep } from '../worktree/worktree-keeps.js';
 import { execGit } from './git-exec.js';
@@ -79,7 +80,7 @@ export async function laneReapKept(
       log('warn', `could not check ${worktreePath} for untracked files — kept`);
       return 'kept-unverified';
     }
-    if (status.stdout.split('\n').some((line) => line.startsWith('?? '))) {
+    if (hasUntrackedLine(status.stdout)) {
       log(
         'warn',
         `parked worktree ${worktreePath} has untracked files — held, not deleted; review it, or run 'factory worktree keep ${opts.issue}'`,

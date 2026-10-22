@@ -3129,6 +3129,7 @@ export async function cmdUnpark(issueArg: string, opts: { lane?: string; json?: 
     const [owner, repo] = (await getGitHubRepo()).split('/');
     result = await runUnpark({
       keepsFile: getFactoryPaths(await getRepoRoot()).worktreeKeeps,
+      warn: (msg) => console.error(styleText('yellow', `factory: ${msg}`)),
       client: createOctokitQueueClient(getOctokit()),
       owner,
       repo,

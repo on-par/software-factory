@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { chmodSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTempDirs } from '../harness/temp-dir.js';
@@ -127,6 +127,22 @@ describe('runUnpark', () => {
     const { client } = fakeClient(new Map([[5, ['factory:parked', 'factory:lane:ops']], ...peers()]));
     await runUnpark({ ...base, client, issue: 5, keepsFile });
     expect(readWorktreeKeeps(keepsFile).map((k) => k.issue)).toEqual([6]);
+  });
+
+  it('warns, and still succeeds, when the keep record cannot be released', async () => {
+    const dir = tmp.makeSync('unpark-keeps-');
+    const keepsFile = join(dir, 'worktree-keeps.json');
+    upsertWorktreeKeep(keepsFile, { issue: 5, path: '/wt', reason: 'manual', since: 'now' });
+    const { client } = fakeClient(new Map([[5, ['factory:parked', 'factory:lane:ops']], ...peers()]));
+    const warn = vi.fn();
+    chmodSync(dir, 0o500);
+    try {
+      const res = await runUnpark({ ...base, client, issue: 5, keepsFile, warn });
+      expect(res.ok).toBe(true);
+    } finally {
+      chmodSync(dir, 0o700);
+    }
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not release the keep record for #5'));
   });
 
   it('leaves the keep record when the unpark fails', async () => {
