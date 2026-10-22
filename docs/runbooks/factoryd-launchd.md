@@ -26,6 +26,12 @@ Re-run it after moving or upgrading the CLI in place — the recorded paths go s
 - `factory daemon status` — pid, uptime, plist install state, and each attached repo
   (slug + state) from `~/.factory/registry.json`. Exit 0 when running, 1 when not.
 - `factory daemon status --json` — prints one JSON object (schemaVersion 1) for tools
+  (`running`, `pid`, `uptimeSec`, `plistInstalled`, `repos`, `load`). `load.activeRuns` counts
+  `~/.factory/runs.json` entries whose `executionPid` is alive, `load.queueDepth` counts entries with
+  status `queued`, and `load.maxSlots` is `host.maxAgentJobs` from the factory config (default 1);
+  each is `null` when it cannot be computed (it never fails the command). Unlike `start`, `stop` and
+  plain `status` (macOS-only), `--json` also works on Linux: the pid comes from `~/.factory/daemon.pid`
+  (counted only if the process is alive) and `plistInstalled` is false.
 - `factory daemon logs [-n N] [-f]` — last N lines (default 100) of
   `~/.factory/daemon.log`; `-f` keeps tailing.
 - `factory daemon stop` — unloads the agent (launchd stops relaunching). The plist

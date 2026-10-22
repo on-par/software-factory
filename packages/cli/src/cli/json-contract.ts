@@ -91,6 +91,12 @@ export const logsLineJsonSchema = z.object({
   cursor: z.string().optional(),
 });
 
+export const daemonLoadJsonSchema = z.object({
+  activeRuns: z.number().int().nonnegative().nullable(),
+  maxSlots: z.number().int().positive().nullable(),
+  queueDepth: z.number().int().nonnegative().nullable(),
+});
+
 export const daemonStatusJsonSchema = z.object({
   schemaVersion: z.literal(1),
   running: z.boolean(),
@@ -104,6 +110,7 @@ export const daemonStatusJsonSchema = z.object({
       state: z.enum(['active', 'paused', 'draining', 'detached']),
     }),
   ),
+  load: daemonLoadJsonSchema,
 });
 
 export const queueListJsonSchema = z.object({
@@ -245,6 +252,7 @@ export const unparkJsonSchema = z.object({
 
 export type StatusJson = z.infer<typeof statusJsonSchema>;
 export type LogsLineJson = z.infer<typeof logsLineJsonSchema>;
+export type DaemonLoadJson = z.infer<typeof daemonLoadJsonSchema>;
 export type DaemonStatusJson = z.infer<typeof daemonStatusJsonSchema>;
 export type QueueListJson = z.infer<typeof queueListJsonSchema>;
 export type UsageJson = z.infer<typeof usageJsonSchema>;

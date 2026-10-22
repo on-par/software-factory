@@ -4,7 +4,7 @@ import { chmodSync, mkdtempSync, appendFileSync, existsSync, mkdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { getFactoryPaths } from '@on-par/factory-core';
+import { getFactoryPaths, loadFactoryConfig } from '@on-par/factory-core';
 import {
   DEFAULT_FACTORYD_PORT,
   defaultRegistryPath,
@@ -468,6 +468,8 @@ describe('daemon control commands', () => {
       nodePath: '/usr/local/bin/node',
       cliScriptPath: '/opt/factory/dist/cli/index.js',
       registryFile: join(home, '.factory', 'registry.json'),
+      isPidAlive: () => false,
+      loadConfig: () => loadFactoryConfig(),
     };
   }
 
@@ -539,6 +541,7 @@ describe('daemon control commands', () => {
             { slug: 'on-par/other', checkoutPath: '/tmp/other', state: 'paused' },
             { slug: 'on-par/software-factory', checkoutPath: '/tmp/sf', state: 'active' },
           ],
+          load: { activeRuns: null, maxSlots: 1, queueDepth: null },
         });
         expect(process.exitCode).toBeUndefined();
         expect(calls.map((c) => c.cmd)).toEqual(['launchctl', 'ps']);
@@ -760,18 +763,6 @@ describe('daemon control commands', () => {
       expect((err as DaemonCtlError).code).toBe(2);
       expect((err as DaemonCtlError).message).toContain('requires macOS launchd');
       expect(calls).toEqual([]);
-    });
-
-    it('daemon status --json throws DaemonCtlError(2) off macOS with empty stdout', async () => {
-      const { exec, calls } = makeFakeExec();
-      const { out, text } = makeOut();
-      const err = await cmdDaemonStatus({ ...baseDeps(exec, out), platform: 'linux' }, { json: true }).catch(
-        (e: unknown) => e,
-      );
-      expect(err).toBeInstanceOf(DaemonCtlError);
-      expect((err as DaemonCtlError).code).toBe(2);
-      expect(calls).toEqual([]);
-      expect(text()).toBe('');
     });
 
     it('daemon logs still works off macOS (it only reads a file)', async () => {
