@@ -80,6 +80,7 @@ export const logsLineJsonSchema = z.object({
   prClassification: loosePayloadSchema.optional(),
   lanePaused: loosePayloadSchema.optional(),
   park: loosePayloadSchema.optional(),
+  providerCapped: loosePayloadSchema.optional(),
   stewardTriggered: loosePayloadSchema.optional(),
   flakyTests: loosePayloadSchema.optional(),
   attribution: loosePayloadSchema.optional(),

@@ -55,3 +55,16 @@ export interface FlakyTestsPayload {
   /** Full-output log of the re-run, when written. */
   logPath?: string;
 }
+
+/** Payload of a `provider_capped` event (#3337): a usage cap opened the provider's breaker until `cappedUntil`. */
+export interface ProviderCappedPayload {
+  provider: string;
+  stage: 'plan' | 'build';
+  issue: number;
+  /** ISO instant the breaker holds the provider until. */
+  cappedUntil: string;
+  /** 'reported' when the provider gave a reset time; 'default-1h' when it did not and the provider is re-probed after 1 hour. */
+  source: 'reported' | 'default-1h';
+  /** Provider error detail, passed through redactSecrets. */
+  detail: string;
+}

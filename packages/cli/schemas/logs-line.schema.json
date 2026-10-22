@@ -81,6 +81,11 @@
       "properties": {},
       "additionalProperties": {}
     },
+    "providerCapped": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
     "stewardTriggered": {
       "type": "object",
       "properties": {},
