@@ -7,7 +7,7 @@
 // orphaned. Neither function touches the target repo's own `.factory/`
 // directory (#780, epic #761).
 
-import { getRepo, loadRegistry, type RepoRegistryListing, upsertRepo, writeRegistry } from './registry.js';
+import { getRepo, loadRegistry, type RepoRegistryListing, updateRegistry, upsertRepo } from './registry.js';
 import type { RunStatus } from '../types/index.js';
 
 /** A lane in one of these statuses is actively mutating the checkout and must
@@ -59,21 +59,24 @@ export const DEFAULT_DRAIN_TIMEOUT_MS = 30 * 60_000;
  *  slug is idempotent with no write; otherwise writes `detached` (forced) or
  *  `draining` (the default, awaiting drainAndDetach). */
 export async function beginDetach(registryFile: string, slug: string, force: boolean): Promise<BeginDetachResult> {
-  const registry = await loadRegistry(registryFile);
-  const existing = getRepo(registry, slug);
+  return updateRegistry<BeginDetachResult>(registryFile, (registry) => {
+    const existing = getRepo(registry, slug);
 
-  if (existing === undefined) {
-    return { ok: false, reason: 'unknown-repo', detail: `${slug} is not attached` };
-  }
+    if (existing === undefined) {
+      return { result: { ok: false, reason: 'unknown-repo', detail: `${slug} is not attached` } };
+    }
 
-  if (existing.state === 'detached') {
-    return { ok: true, entry: { slug, ...existing }, draining: false };
-  }
+    if (existing.state === 'detached') {
+      return { result: { ok: true, entry: { slug, ...existing }, draining: false } };
+    }
 
-  const state = force ? ('detached' as const) : ('draining' as const);
-  const entry = { ...existing, state };
-  await writeRegistry(registryFile, upsertRepo(registry, slug, entry));
-  return { ok: true, entry: { slug, ...entry }, draining: !force };
+    const state = force ? ('detached' as const) : ('draining' as const);
+    const entry = { ...existing, state };
+    return {
+      next: upsertRepo(registry, slug, entry),
+      result: { ok: true, entry: { slug, ...entry }, draining: !force },
+    };
+  });
 }
 
 /** The background half of a detach: polls `deps.readLaneStatuses` until the
@@ -101,8 +104,12 @@ export async function drainAndDetach(
 
     const statuses = await read(entry.path);
     if (isDrainSafe(statuses)) {
-      await writeRegistry(registryFile, upsertRepo(registry, slug, { ...entry, state: 'detached' }));
-      return 'detached';
+      // Re-check under the lock; the lock is never held across the poll sleep.
+      return updateRegistry<DrainOutcome>(registryFile, (fresh) => {
+        const cur = getRepo(fresh, slug);
+        if (cur === undefined || cur.state !== 'draining') return { result: 'superseded' };
+        return { next: upsertRepo(fresh, slug, { ...cur, state: 'detached' }), result: 'detached' };
+      });
     }
 
     if (now() >= deadline) return 'timed-out';

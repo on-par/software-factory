@@ -620,13 +620,13 @@ const INTERNAL_API_KEYS = [
   'resolveRunUsageHarness',
   'USAGE_NOT_AVAILABLE_FOR_AGENT',
   'readClaudeAccessToken',
-  // Daemon repo registry (#781)
   'defaultRegistryPath',
   'dispatchableRepos',
   'emptyRegistry',
   'getRepo',
   'listRepos',
   'loadRegistry',
+  'updateRegistry',
   'upsertRepo',
   'writeRegistry',
   // Daemon control-plane HTTP server (#777)

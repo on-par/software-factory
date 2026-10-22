@@ -335,6 +335,7 @@ export {
   getRepo,
   listRepos,
   loadRegistry,
+  updateRegistry,
   upsertRepo,
   writeRegistry,
 } from './daemon/registry.js';

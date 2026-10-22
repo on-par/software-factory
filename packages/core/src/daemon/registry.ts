@@ -1,12 +1,16 @@
 // src/daemon/registry.ts — The user-scoped repo registry backing `factoryd`
 // (~/.factory/registry.json): which repos the daemon is attached to and what
 // state each is in. Load is tolerant (missing/corrupt => empty, never throws);
-// write is atomic (tmp file + same-dir rename) so a crash mid-write can never
-// replace a good file with a partial one (#781, epic #761).
+// write is atomic (unique tmp file + same-dir rename) so a crash mid-write can
+// never replace a good file with a partial one (#781, epic #761). Every
+// read-modify-write goes through updateRegistry, which serializes under a file
+// lock so concurrent updates never lose a change (#1620).
 
+import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { withFileLock } from '../utils/lock.js';
 
 /** Attachment state of a repo in the daemon registry. `draining` is the
  *  interim state a detach writes before it waits for in-flight lanes;
@@ -42,6 +46,10 @@ export interface WriteRegistryOptions {
   writeFile?: (file: string, data: string) => Promise<void>;
   rename?: (from: string, to: string) => Promise<void>;
 }
+
+/** Short poll: registry updates are quick, and HTTP routes wait on this lock. */
+const REGISTRY_LOCK_POLL_MS = 20;
+const REGISTRY_LOCK_TIMEOUT_MS = 60_000;
 
 const REPO_STATES = new Set<string>(['active', 'paused', 'draining', 'detached']);
 
@@ -130,7 +138,7 @@ export function dispatchableRepos(registry: RepoRegistry): RepoRegistryListing[]
   return listRepos(registry).filter((entry) => entry.state === 'active');
 }
 
-/** Atomic write: mkdir the parent, serialize to `${file}.tmp`, then rename it
+/** Atomic write: mkdir the parent, serialize to a unique `${file}.<pid>.<uuid>.tmp`, then rename it
  *  onto `file`. The rename is the commit point — a crash before it leaves any
  *  previously written `file` byte-for-byte intact, and a crash during it leaves
  *  either the old file or the new one, never a partial. Mirrors
@@ -143,7 +151,32 @@ export async function writeRegistry(
   const write = opts.writeFile ?? ((f: string, data: string) => writeFile(f, data));
   const move = opts.rename ?? ((from: string, to: string) => rename(from, to));
   await mkdir(dirname(file), { recursive: true });
-  const tmp = `${file}.tmp`;
+  const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
   await write(tmp, `${JSON.stringify(registry, null, 2)}\n`);
   await move(tmp, file);
+}
+
+/** What an updateRegistry callback returns: `next` is written when set; `result` is returned to the caller. */
+export interface RegistryUpdate<T> {
+  next?: RepoRegistry;
+  result: T;
+}
+
+/** Locked read-modify-write: takes withFileLock on `${file}.lock`, loads the registry inside
+ *  the lock, runs `fn`, and writes `next` (when set) via writeRegistry before releasing. A
+ *  callback that returns no `next` is a rejection and never writes. */
+export async function updateRegistry<T>(
+  file: string,
+  fn: (registry: RepoRegistry) => Promise<RegistryUpdate<T>> | RegistryUpdate<T>,
+  opts: WriteRegistryOptions = {},
+): Promise<T> {
+  return withFileLock(
+    `${file}.lock`,
+    async () => {
+      const { next, result } = await fn(await loadRegistry(file));
+      if (next !== undefined) await writeRegistry(file, next, opts);
+      return result;
+    },
+    { pollMs: REGISTRY_LOCK_POLL_MS, timeoutMs: REGISTRY_LOCK_TIMEOUT_MS },
+  );
 }

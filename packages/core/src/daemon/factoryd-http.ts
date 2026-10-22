@@ -24,6 +24,7 @@ import {
 import { type AttachRepoDeps, attachRepo } from './repos-attach.js';
 import { createDaemonLaneContext } from './lane-context.js';
 import { beginDetach, type DetachRepoDeps, drainAndDetach } from './repos-detach.js';
+import { repoFailureStatus } from './repo-route-status.js';
 import { setRepoState } from './repos-pause-resume.js';
 import { defaultRegistryPath, listRepos, loadRegistry, type RepoRegistryListing } from './registry.js';
 import { daemonRunFile, isValidRunId, readDaemonRun } from './run-store.js';
@@ -266,8 +267,7 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
         }
         const result = await attachRepo(registryFile, body.value, opts.attachDeps);
         if (!result.ok) {
-          const status = result.reason === 'draining' || result.reason === 'state-root-mismatch' ? 409 : 400;
-          send(res, req, status, { error: result.detail, reason: result.reason });
+          send(res, req, repoFailureStatus(result.reason), { error: result.detail, reason: result.reason });
           return;
         }
         if (result.created) {
@@ -337,7 +337,7 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
       const slug = `${segments[1]}/${segments[2]}`;
       const result = await setRepoState(registryFile, slug, segments[3] === 'pause' ? 'paused' : 'active');
       if (!result.ok) {
-        send(res, req, result.reason === 'detached' ? 409 : 404, { error: result.detail, reason: result.reason });
+        send(res, req, repoFailureStatus(result.reason), { error: result.detail, reason: result.reason });
         return;
       }
       send(res, req, 200, { repo: result.entry });
@@ -416,7 +416,7 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
       const force = parseForce(req.url);
       const result = await beginDetach(registryFile, slug, force);
       if (!result.ok) {
-        send(res, req, 404, { error: result.detail, reason: result.reason });
+        send(res, req, repoFailureStatus(result.reason), { error: result.detail, reason: result.reason });
         return;
       }
       if (result.draining) {

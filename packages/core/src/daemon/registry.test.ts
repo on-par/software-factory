@@ -14,9 +14,17 @@ import {
   loadRegistry,
   type RepoRegistry,
   type RepoRegistryEntry,
+  updateRegistry,
   upsertRepo,
   writeRegistry,
 } from './registry.js';
+import { attachRepo } from './repos-attach.js';
+import { beginDetach } from './repos-detach.js';
+import { setRepoState } from './repos-pause-resume.js';
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 const tmpDirs: string[] = [];
 
@@ -191,7 +199,7 @@ describe('writeRegistry + loadRegistry round trip', () => {
     expect(loaded).toEqual(v1);
   });
 
-  it('writes through `${file}.tmp`, never aimed at `file` directly', async () => {
+  it('writes through a unique `${file}.<pid>.<uuid>.tmp`, never aimed at `file` directly', async () => {
     const file = await tmpFile();
     const registry = upsertRepo(emptyRegistry(), 'owner/example-app', goodEntry);
     let recordedPath: string | undefined;
@@ -203,7 +211,24 @@ describe('writeRegistry + loadRegistry round trip', () => {
       },
     });
 
-    expect(recordedPath).toBe(`${file}.tmp`);
+    expect(recordedPath).toMatch(new RegExp(`^${escapeRegExp(file)}\\.${process.pid}\\.[0-9a-f-]{36}\\.tmp$`));
+  });
+
+  it('stages two concurrent writes through different tmp paths', async () => {
+    const file = await tmpFile();
+    const registry = upsertRepo(emptyRegistry(), 'owner/example-app', goodEntry);
+    const paths: string[] = [];
+    const opts = {
+      writeFile: async (f: string, data: string) => {
+        paths.push(f);
+        await writeFile(f, data);
+      },
+    };
+
+    await Promise.all([writeRegistry(file, registry, opts), writeRegistry(file, registry, opts)]);
+
+    expect(paths).toHaveLength(2);
+    expect(paths[0]).not.toBe(paths[1]);
   });
 });
 
@@ -268,5 +293,70 @@ describe('defaultRegistryPath', () => {
 
   it('falls back to the real home directory', () => {
     expect(defaultRegistryPath()).toContain(join('.factory', 'registry.json'));
+  });
+});
+
+describe('updateRegistry', () => {
+  it('keeps both changes from two parallel setRepoState calls on different repos', async () => {
+    const file = await tmpFile();
+    await writeRegistry(file, upsertRepo(upsertRepo(emptyRegistry(), 'on-par/a', goodEntry), 'on-par/b', goodEntry));
+
+    const results = await Promise.all([
+      setRepoState(file, 'on-par/a', 'paused'),
+      setRepoState(file, 'on-par/b', 'paused'),
+    ]);
+
+    expect(results.map((r) => r.ok)).toEqual([true, true]);
+    const loaded = await loadRegistry(file);
+    expect(getRepo(loaded, 'on-par/a')?.state).toBe('paused');
+    expect(getRepo(loaded, 'on-par/b')?.state).toBe('paused');
+  });
+
+  it('keeps both changes when repo B is attached while repo A is detached concurrently', async () => {
+    const file = await tmpFile();
+    await writeRegistry(file, upsertRepo(emptyRegistry(), 'on-par/a', goodEntry));
+
+    const [attached, detached] = await Promise.all([
+      attachRepo(
+        file,
+        { repo: 'on-par/b', path: '/tmp/b' },
+        {
+          readOrigin: async () => {
+            await new Promise((r) => setTimeout(r, 50));
+            return 'git@github.com:on-par/b.git';
+          },
+          fileExists: async () => true,
+        },
+      ),
+      beginDetach(file, 'on-par/a', true),
+    ]);
+
+    expect(attached.ok).toBe(true);
+    expect(detached.ok).toBe(true);
+    const loaded = await loadRegistry(file);
+    expect(getRepo(loaded, 'on-par/a')?.state).toBe('detached');
+    expect(getRepo(loaded, 'on-par/b')?.state).toBe('active');
+    expect(dispatchableRepos(loaded).map((r) => r.slug)).toEqual(['on-par/b']);
+  });
+
+  it('returns the callback result and writes nothing when no `next` is returned', async () => {
+    const file = await tmpFile();
+
+    const result = await updateRegistry(file, (registry) => ({ result: Object.keys(registry.repos).length }));
+
+    expect(result).toBe(0);
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it('writes `next` and returns the result', async () => {
+    const file = await tmpFile();
+
+    const result = await updateRegistry(file, (registry) => ({
+      next: upsertRepo(registry, 'on-par/a', goodEntry),
+      result: 'done',
+    }));
+
+    expect(result).toBe('done');
+    expect(getRepo(await loadRegistry(file), 'on-par/a')).toEqual(goodEntry);
   });
 });

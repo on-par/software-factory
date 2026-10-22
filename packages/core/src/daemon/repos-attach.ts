@@ -10,7 +10,7 @@ import {
   type CheckoutValidationFailureReason,
   validateCheckout,
 } from './checkout-validation.js';
-import { getRepo, loadRegistry, type RepoRegistryListing, upsertRepo, writeRegistry } from './registry.js';
+import { getRepo, type RepoRegistryListing, updateRegistry, upsertRepo } from './registry.js';
 
 export { parseRemoteSlug } from './remote-slug.js';
 export { readOriginUrl } from './checkout-validation.js';
@@ -36,45 +36,54 @@ export async function attachRepo(
   body: unknown,
   deps: AttachRepoDeps = {},
 ): Promise<AttachRepoResult> {
-  const registry = await loadRegistry(registryFile);
-  const slugKey = (body as { repo?: unknown } | null)?.repo;
-  const existingStateRoot = typeof slugKey === 'string' ? registry.repos[slugKey]?.stateRoot : undefined;
-  const validation = await validateCheckout(body, deps satisfies CheckoutValidationDeps, existingStateRoot);
-  if (!validation.ok) return { ok: false, reason: validation.reason, detail: validation.detail };
+  return updateRegistry<AttachRepoResult>(registryFile, async (registry) => {
+    const slugKey = (body as { repo?: unknown } | null)?.repo;
+    const existingStateRoot = typeof slugKey === 'string' ? registry.repos[slugKey]?.stateRoot : undefined;
+    const validation = await validateCheckout(body, deps satisfies CheckoutValidationDeps, existingStateRoot);
+    if (!validation.ok) return { result: { ok: false, reason: validation.reason, detail: validation.detail } };
 
-  const { repo, dir, stateRoot } = validation.checkout;
-  const existing = getRepo(registry, repo);
+    const { repo, dir, stateRoot } = validation.checkout;
+    const existing = getRepo(registry, repo);
 
-  if (existing === undefined || existing.state === 'detached') {
-    const attachedAt = (deps.now?.() ?? new Date()).toISOString();
-    const entry = {
-      path: dir,
-      ...(stateRoot ? { stateRoot } : {}),
-      attachedAt,
-      state: 'active' as const,
-    };
-    await writeRegistry(registryFile, upsertRepo(registry, repo, entry));
-    return { ok: true, entry: { slug: repo, ...entry }, created: true };
-  }
+    if (existing === undefined || existing.state === 'detached') {
+      const attachedAt = (deps.now?.() ?? new Date()).toISOString();
+      const entry = {
+        path: dir,
+        ...(stateRoot ? { stateRoot } : {}),
+        attachedAt,
+        state: 'active' as const,
+      };
+      return {
+        next: upsertRepo(registry, repo, entry),
+        result: { ok: true, entry: { slug: repo, ...entry }, created: true },
+      };
+    }
 
-  if (existing.state === 'draining') {
+    if (existing.state === 'draining') {
+      return {
+        result: {
+          ok: false,
+          reason: 'draining',
+          detail: `${repo} is draining; wait for the detach to finish before re-attaching`,
+        },
+      };
+    }
+    if (stateRoot !== existing.stateRoot) {
+      return {
+        result: {
+          ok: false,
+          reason: 'state-root-mismatch',
+          detail: `${repo} is attached with stateRoot ${existing.stateRoot ?? '(none)'}; refusing to re-point it to ${stateRoot ?? '(none)'}`,
+        },
+      };
+    }
+    if (existing.path === dir) {
+      return { result: { ok: true, entry: { slug: repo, ...existing }, created: false, changed: false } };
+    }
+    const entry = { ...existing, path: dir };
     return {
-      ok: false,
-      reason: 'draining',
-      detail: `${repo} is draining; wait for the detach to finish before re-attaching`,
+      next: upsertRepo(registry, repo, entry),
+      result: { ok: true, entry: { slug: repo, ...entry }, created: false, changed: true },
     };
-  }
-  if (stateRoot !== existing.stateRoot) {
-    return {
-      ok: false,
-      reason: 'state-root-mismatch',
-      detail: `${repo} is attached with stateRoot ${existing.stateRoot ?? '(none)'}; refusing to re-point it to ${stateRoot ?? '(none)'}`,
-    };
-  }
-  if (existing.path === dir) {
-    return { ok: true, entry: { slug: repo, ...existing }, created: false, changed: false };
-  }
-  const entry = { ...existing, path: dir };
-  await writeRegistry(registryFile, upsertRepo(registry, repo, entry));
-  return { ok: true, entry: { slug: repo, ...entry }, created: false, changed: true };
+  });
 }
