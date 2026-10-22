@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { YAMLParseError } from 'yaml';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { getFactoryPaths, loadFactoryConfigForRepo } from './index.js';
 import { resolveSafeRepoPolicy } from './policy.js';
 import {
@@ -12,6 +13,7 @@ import {
   readRepoConfigFile,
   REPO_CONFIG_YAML_HEADER,
   resolveRepoConfigPath,
+  rewriteRepoConfigFile,
   setRepoConfigValue,
 } from './repo-config-file.js';
 import { loadRepoConfig } from './repo.js';
@@ -222,5 +224,42 @@ describe('repo-config-file', () => {
       expect(r).toMatchObject({ status: 'round-trip-failed', reason: 'boom' });
       expect(existsSync(join(factory, 'config.json'))).toBe(true);
     });
+  });
+});
+
+describe('rewriteRepoConfigFile', () => {
+  const temp = createTempDirs();
+  afterEach(() => temp.cleanup());
+  function file(name: string, text: string): string {
+    const dir = temp.makeSync('rewrite-config-');
+    const path = join(dir, name);
+    writeFileSync(path, text);
+    return path;
+  }
+
+  it('edits YAML in place: keeps comments, deletes removed keys, updates and appends keys', () => {
+    const path = file(
+      'config.yaml',
+      '# head\nversion: 1 # ver\nusage:\n  capUsd: 5\nmerge:\n  auto: true # human-free\n',
+    );
+    rewriteRepoConfigFile(path, { version: 2, merge: { auto: true }, budget: { capUsd: 5 } });
+    const text = readFileSync(path, 'utf-8');
+    expect(text).toContain('# head');
+    expect(text).toContain('# human-free');
+    expect(text).not.toContain('usage');
+    expect(text.indexOf('version: 2')).toBeLessThan(text.indexOf('merge:'));
+    expect(text.indexOf('budget:')).toBeGreaterThan(text.indexOf('merge:'));
+    expect(readRepoConfigFile(path)).toEqual({ version: 2, merge: { auto: true }, budget: { capUsd: 5 } });
+  });
+
+  it('writes two-space JSON plus a newline', () => {
+    const path = file('config.json', '{"version":1}');
+    rewriteRepoConfigFile(path, { version: 2 });
+    expect(readFileSync(path, 'utf-8')).toBe('{\n  "version": 2\n}\n');
+  });
+
+  it('throws on malformed YAML', () => {
+    const path = file('config.yaml', 'a: [unclosed\n');
+    expect(() => rewriteRepoConfigFile(path, { version: 2 })).toThrow('Failed to parse');
   });
 });

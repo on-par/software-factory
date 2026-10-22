@@ -2,12 +2,15 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { findConfigSchemaErrors } from './config-schema-lint.js';
 
 describe('findConfigSchemaErrors (#2611)', () => {
   const dirs: string[] = [];
-  afterEach(() => {
+  const temp = createTempDirs();
+  afterEach(async () => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+    await temp.cleanup();
   });
 
   function run(name: string, content: string) {
@@ -67,5 +70,27 @@ describe('findConfigSchemaErrors (#2611)', () => {
     const f = run('config.yaml', '- a\n');
     expect(f).toHaveLength(1);
     expect(f[0]).toMatchObject({ path: '(root)', line: 1 });
+  });
+
+  it('reports a YAML syntax error with a line through the shared reader', () => {
+    const [f] = run('config.yaml', 'a: [unclosed\n');
+    expect(f).toMatchObject({ path: '(syntax)', fix: 'fix the YAML syntax' });
+    expect(f!.message).toContain('Failed to parse');
+    expect(f!.line).toBeDefined();
+  });
+
+  it('reports a BOM-prefixed config.json as a syntax error', () => {
+    const [f] = run('config.json', '\uFEFF{"version":2}');
+    expect(f).toMatchObject({ path: '(syntax)', fix: 'fix the JSON syntax' });
+  });
+
+  it('reports config.yaml beside config.json as a file finding naming both', () => {
+    const dir = temp.makeSync('schema-lint-');
+    writeFileSync(join(dir, 'config.yaml'), 'version: 2\n');
+    writeFileSync(join(dir, 'config.json'), '{"version":2}');
+    const [f] = findConfigSchemaErrors({ absPath: join(dir, 'config.yaml'), relPath: '.factory/config.yaml' });
+    expect(f).toMatchObject({ path: '(file)' });
+    expect(f!.message).toContain('config.yaml');
+    expect(f!.message).toContain('config.json');
   });
 });

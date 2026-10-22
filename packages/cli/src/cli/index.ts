@@ -163,6 +163,8 @@ import {
   renderGardenReport,
   laneWorktreePath,
   migrateRepoConfigToYaml,
+  readRepoConfigFile,
+  rewriteRepoConfigFile,
   REPO_CONFIG_YAML_HEADER,
   claudeConfigDirOverride,
   claudeKeychainService,
@@ -811,6 +813,10 @@ async function cmdInit(opts: { force?: boolean; yes?: boolean } = {}) {
   );
 }
 
+function isRecord(x: unknown): x is Record<string, unknown> {
+  return typeof x === 'object' && x !== null && !Array.isArray(x);
+}
+
 /** Rewrite a checkout's legacy `.factory/` inputs and runtime files to the v2
  * layout. Every write is idempotent so it is safe to run this more than once. */
 export async function runMigrate(
@@ -847,6 +853,15 @@ export async function runMigrate(
         );
     }
   }
+  // Read the config first so a malformed or ambiguous file fails before any state is moved.
+  let rawConfig: unknown;
+  try {
+    rawConfig = readRepoConfigFile(paths.config);
+  } catch (err) {
+    throw new CliExitError(`factory: ${(err as Error).message}`, 1);
+  }
+  const configName = `.factory/${basename(paths.config)}`;
+
   const isRuntimePath = (path: string) => {
     const fromState = relative(paths.state, path);
     return fromState !== '' && !fromState.startsWith('..') && !resolve(paths.state, fromState).startsWith('..');
@@ -866,42 +881,31 @@ export async function runMigrate(
     }
   }
 
-  let rawConfig: Record<string, unknown> | undefined;
-  try {
-    rawConfig = JSON.parse(readFileSync(paths.config, 'utf-8'));
-  } catch (err: any) {
-    if (err.code !== 'ENOENT') throw err;
-  }
-  if (!rawConfig) {
+  if (rawConfig === undefined || rawConfig === null) {
     console.log('no .factory/config.json — nothing to rewrite');
-  } else if (rawConfig.version === 2) {
-    console.log('config.json already v2');
+  } else if (isRecord(rawConfig) && rawConfig.version === 2) {
+    console.log(`${basename(paths.config)} already v2`);
   } else {
     const v2 = configLoaders.loadRepoConfig(repoRoot);
     if (!v2) throw new Error(`Expected ${paths.config} to exist`);
     const { $schema: _schema, version: _version, ...rest } = v2;
     // loadRepoConfig only returns the model-routing namespace; carry the runtime-policy
     // keys (sweep, run, timeouts, ...) over verbatim so the rewrite does not drop them.
-    const source = rawConfig;
+    const source = isRecord(rawConfig) ? rawConfig : {};
     const runtime = Object.fromEntries(
       FACTORY_RUNTIME_CONFIG_KEYS.filter((key) => key in source).map((key) => [key, source[key]]),
     );
-    const content =
-      JSON.stringify(
-        {
-          ...(typeof rawConfig.$schema === 'string' ? { $schema: rawConfig.$schema } : {}),
-          version: 2,
-          ...rest,
-          ...runtime,
-        },
-        null,
-        2,
-      ) + '\n';
+    const next = {
+      ...(typeof source.$schema === 'string' ? { $schema: source.$schema } : {}),
+      version: 2,
+      ...rest,
+      ...runtime,
+    };
     if (dryRun) {
-      console.log('would rewrite .factory/config.json to v2');
+      console.log(`would rewrite ${configName} to v2`);
     } else {
-      writeFileSync(paths.config, content);
-      console.log('rewrote .factory/config.json to v2');
+      rewriteRepoConfigFile(paths.config, next);
+      console.log(`rewrote ${configName} to v2`);
     }
   }
 

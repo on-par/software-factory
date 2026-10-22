@@ -136,6 +136,33 @@ describe('configLintChecks (#2610, #2612)', () => {
     };
   }
 
+  function setupFile(name: string, config: string, extra?: [string, string]): ConfigLintInput {
+    const input = setup(VALID_CONSTITUTION, VALID_CONFIG);
+    const dir = join(input.configFile!.absPath, '..');
+    rmSync(input.configFile!.absPath);
+    writeFileSync(join(dir, name), config);
+    if (extra) writeFileSync(join(dir, extra[0]), extra[1]);
+    return { ...input, configFile: { absPath: join(dir, name), relPath: `.factory/${name}` } };
+  }
+
+  it('fails the config check when config.yaml and config.json both exist', () => {
+    const rows = configLintChecks(setupFile('config.yaml', VALID_CONFIG, ['config.json', '{"version":2}']));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ name: 'config', ok: false });
+    expect(rows[0].detail).toContain('config.json');
+  });
+
+  it('fails the config check for a BOM-prefixed config.json', () => {
+    const rows = configLintChecks(setupFile('config.json', '\uFEFF{"version":2}'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ name: 'config', ok: false });
+  });
+
+  it('passes the config check for a valid YAML config', () => {
+    const rows = configLintChecks(setup(VALID_CONSTITUTION, VALID_CONFIG));
+    expect(rows.every((r) => r.ok)).toBe(true);
+  });
+
   it('flags a placeholder checker with file:line and the fix', () => {
     const rows = configLintChecks(setup(PLACEHOLDER_CONSTITUTION, VALID_CONFIG));
     expect(rows).toHaveLength(1);
