@@ -5,7 +5,8 @@
   "ignoreExportsUsedInFile": true,
   // The anti-slop plugin is vendored, not authored here (#795): its files are loaded by
   // oxlint through a config specifier string, which knip cannot follow.
-  "ignore": ["tools/oxlint/anti-slop/**"],
+  // scripts/verify-env-probe.mjs is run by scripts/verify.sh, not imported (#3332).
+  "ignore": ["tools/oxlint/anti-slop/**", "scripts/verify-env-probe.mjs"],
   "workspaces": {
     "packages/cli": {
       // `ollama` is an external runtime binary the CLI shells out to;

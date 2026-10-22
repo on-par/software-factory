@@ -16,6 +16,7 @@ import type { BaselineReport } from '../checkers/baseline.js';
 import { BaselineCache } from '../checkers/baseline-cache.js';
 import type { EvidencePlanResult } from '../checkers/evidence-plan.js';
 import { schemaErrorCheckerOutput, unfilledPlaceholderCheckerOutput, unknownCheckerOutput } from '../checkers/index.js';
+import { environmentLogPaths } from './check-environment.js';
 import type { CheckSummary, Constitution, ReworkInfo } from '../types/index.js';
 import { renderEvidencePack } from '../reports/evidence-pack.js';
 import {
@@ -23,7 +24,6 @@ import {
   checkPhase,
   type EnvironmentFailure,
   excludeBaseFailing,
-  environmentLogPaths,
   isEnvironmentFailure,
   markTestsFlaky,
   LENS_REVIEW_CHECKER,

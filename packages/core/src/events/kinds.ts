@@ -161,6 +161,7 @@ export type EventKind =
   | 'sandbox'
   | 'sandbox-degraded'
   | 'sandbox-disabled'
+  | 'sandbox-env'
   | 'sandbox-unavailable'
   | 'sandbox_auth_denied'
   | 'sandbox_violation'
@@ -390,6 +391,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   sandbox: { severity: 'info', isPark: false, isTerminal: false },
   'sandbox-degraded': { severity: 'warn', isPark: false, isTerminal: false },
   'sandbox-disabled': { severity: 'warn', isPark: false, isTerminal: false },
+  // A sandbox denied a loopback bind (#3332): an environment park, not a code failure; not an ADR-0155 steward trigger.
+  'sandbox-env': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
   'sandbox-unavailable': { severity: 'warn', isPark: false, isTerminal: false },
   sandbox_auth_denied: { severity: 'warn', isPark: false, isTerminal: false },
   sandbox_violation: { severity: 'warn', isPark: false, isTerminal: false },

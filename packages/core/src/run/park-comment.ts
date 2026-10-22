@@ -56,6 +56,8 @@ export function environmentReleaseMarker(issue: number): string {
 }
 
 const PARK_HINTS: Record<ParkReason, string> = {
+  'sandbox-env':
+    'the sandbox denied a loopback bind (EPERM), an environment error, not a code failure. Fix the sandbox mode (see #3081), then run `factory unpark <n>`.',
   fail: 'fix the failing checks on the branch or clarify the issue, then run `factory unpark <n>`.',
   blocked:
     'waiting on a filed blocker. The factory resumes it once the blocker closes; run `factory unpark <n>` to retry sooner.',

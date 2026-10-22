@@ -33,6 +33,7 @@ export type RunLogFn = (
 
 const STAMPED: Record<ParkReason, true> = {
   escalate: true,
+  'sandbox-env': true,
   timeout: true,
   fail: true,
   conflict: true,

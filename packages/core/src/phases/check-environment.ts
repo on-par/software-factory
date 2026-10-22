@@ -1,4 +1,5 @@
 import type { WorktreeProbe } from '../checkers/index.js';
+import type { CheckSummary } from '../types/index.js';
 
 /** Human-readable e2e signal ("playwright.config.ts", "package.json script 'e2e'"), or null when the worktree shows no live-app testing. */
 export function detectLiveAppSignal(probe: WorktreeProbe): string | null {
@@ -37,4 +38,14 @@ export function detectHeadedModeSignals(probe: WorktreeProbe): string[] {
   }
 
   return signals;
+}
+
+/** Full-output log files named by round-1 FAIL results, then the base-run log dir; deduped, first-seen order. */
+export function environmentLogPaths(summary: CheckSummary, baseLogDir: string | undefined): string[] {
+  const paths: string[] = [];
+  for (const r of summary.results.filter((x) => x.result === 'FAIL')) {
+    for (const m of r.details.matchAll(/^full output: (.+)$/gm)) paths.push(m[1]);
+  }
+  if (baseLogDir !== undefined) paths.push(baseLogDir);
+  return [...new Set(paths)];
 }

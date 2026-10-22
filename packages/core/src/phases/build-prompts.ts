@@ -113,7 +113,9 @@ ${promptTail(appPort, appBaseUrl, designGrounding)}`;
 const VERIFY_RULE_BASE =
   'Verify with the command CHECK runs: `bash scripts/verify.sh --no-e2e` if scripts/verify.sh exists, ' +
   'otherwise the test script (`npm test`) or pytest, plus any verify command the constitution names. ' +
-  'Fix failures before finishing and report the exact command and its output.';
+  'Fix failures before finishing and report the exact command and its output. ' +
+  'If verify.sh prints `verify: ENVIRONMENT ERROR: loopback bind denied (EPERM)` (exit 78), that is a sandbox environment error, not a code failure: ' +
+  'do not re-run verify.sh or work around it (TMPDIR changes, skipping tests); print one line starting `ENV-ERROR:` followed by that line, and stop.';
 
 // Names the lint checker's commands (resolveLintCommands) when the repo has no verify.sh (#2829).
 function verifyRule(lintCommands: readonly LintCommand[] = []): string {

@@ -27,6 +27,15 @@ export FACTORY_TEST_MAX_WORKERS="${FACTORY_TEST_MAX_WORKERS:-1}"
 echo "verify: FACTORY_TEST_MAX_WORKERS=${FACTORY_TEST_MAX_WORKERS}"
 echo "verify: CI=${CI:-} (test budget overrun fails verify when CI is set)"
 
+# Environment probe (#3332): a sandbox that denies loopback binds is an environment error, not a code failure.
+probe_rc=0
+probe_out=$(node scripts/verify-env-probe.mjs) || probe_rc=$?
+if [ "$probe_rc" -eq 78 ]; then
+  echo "verify: ENVIRONMENT ERROR: loopback bind denied (EPERM)"
+  echo "verify: ${probe_out}"
+  exit 78
+fi
+
 npm ci
 npm run format:check
 npm run build

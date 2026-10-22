@@ -13,7 +13,8 @@ import {
   renderCheckerFindings,
   runAllCheckers,
 } from '../checkers/index.js';
-import { detectHeadedModeSignals, detectLiveAppSignal } from './check-environment.js';
+import { detectHeadedModeSignals, detectLiveAppSignal, environmentLogPaths } from './check-environment.js';
+import { sandboxEnvStop } from './check-sandbox-env.js';
 import { markBuildFilesIntentToAdd } from './check-intent-to-add.js';
 import { appendEvidencePlanStep } from './check-evidence.js';
 import type { runEvidencePlan } from '../checkers/evidence-plan.js';
@@ -75,6 +76,8 @@ export interface CheckPhaseResult {
   environment?: EnvironmentFailure;
   /** Serial re-run of the failing tests checker on an environment failure (#2301, #2302). On 'passed', tests counts as PASS in summary and the run continues unless another checker still fails on base; absent when tests did not fail or the cause is not environment. */
   flakeRerun?: FlakeRerun;
+  /** Set when a checker reported the verify.sh sandbox marker (#3332): no baseline, no rework; the caller parks sandbox-env. */
+  sandboxEnv?: string;
 }
 
 export const MAX_REWORK_ROUNDS = 3;
@@ -138,16 +141,6 @@ export function remainingShowstoppers(summary: CheckSummary): string[] {
     .split('\n')
     .filter((line) => SHOWSTOPPER_LINE.test(line))
     .map((line) => line.trim());
-}
-
-/** Full-output log files named by round-1 FAIL results, then the base-run log dir; deduped, first-seen order. */
-export function environmentLogPaths(summary: CheckSummary, baseLogDir: string | undefined): string[] {
-  const paths: string[] = [];
-  for (const r of summary.results.filter((x) => x.result === 'FAIL')) {
-    for (const m of r.details.matchAll(/^full output: (.+)$/gm)) paths.push(m[1]);
-  }
-  if (baseLogDir !== undefined) paths.push(baseLogDir);
-  return [...new Set(paths)];
 }
 
 export function renderEnvironmentReleaseComment(failure: EnvironmentFailure): string {
@@ -442,6 +435,9 @@ async function checkPhaseImpl(opts: {
     return { passed: false, summary, reworkRounds: 0, failureSignature: signature };
   }
 
+  const envStop = sandboxEnvStop(summary, 0, failureSignature(summary), log);
+  if (envStop) return envStop;
+
   let baseline: BaselineReport | undefined;
   if (
     summary.results.some(
@@ -616,6 +612,8 @@ async function checkPhaseImpl(opts: {
     summary = await (runCheckers ?? runAllCheckers)(ctx, router, constitution, checkTimeoutSeconds);
     summary = await appendEvidencePlanStep(summary, ctx, constitution, runEvidence);
     log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);
+    const envStop = sandboxEnvStop(summary, reworkRounds, failureSignature(summary), log);
+    if (envStop) return envStop;
     // When no model ran this round (modelCompleted === false), an unchanged failure
     // signature is not evidence of a stuck worker — leave the streak untouched
     // (neither advanced nor reset) rather than treat a provider outage as no-progress (#642).

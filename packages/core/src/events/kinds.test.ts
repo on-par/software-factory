@@ -60,6 +60,7 @@ describe('EVENT_TRAITS', () => {
     });
     expect(EVENT_TRAITS['ci-rescue-failed']).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
     expect(isParkKind('ci-infra')).toBe(true);
+    expect(isParkKind('sandbox-env')).toBe(true);
     expect(isParkKind('ci-rescue-failed')).toBe(false);
   });
 

@@ -86,6 +86,12 @@ describe('parkUnblockHint', () => {
     expect(hint).toContain('42');
     expect(hint).not.toContain('<n>');
   });
+
+  it('points a sandbox-env park at #3081 and factory unpark (#3332)', () => {
+    const hint = parkUnblockHint('sandbox-env', 7);
+    expect(hint).toContain('#3081');
+    expect(hint).toContain('factory unpark 7');
+  });
 });
 
 describe('renderParkComment', () => {

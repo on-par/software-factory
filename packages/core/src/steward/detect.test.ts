@@ -19,6 +19,10 @@ describe('detectStuck', () => {
     ).toBeNull();
   });
 
+  it('returns null for a sandbox-env park (#3332): an environment error is never a steward trigger', () => {
+    expect(detectStuck({ state: 'parked', reason: 'sandbox-env' })).toBeNull();
+  });
+
   it('flags a parked fail at the rework budget with a signature as check-exhausted', () => {
     const outcome: RunOutcome = {
       state: 'parked',

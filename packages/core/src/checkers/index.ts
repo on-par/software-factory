@@ -8,6 +8,7 @@ import type { ModelRouter } from '../router/index.js';
 import type { ProcessGroupTracker } from '../environment/process-groups.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import type { CheckerOutput, CheckSummary, Constitution, RegressionFinding } from '../types/index.js';
+import { sandboxEnvMarkerLine } from '../environment/sandbox-env.js';
 import { type CommandResult, type RunCommandOptions } from '../utils/command-runner.js';
 import { runVerificationCommand as runCommand } from './run-command.js';
 import { isTemplateToken } from '../config/template-tokens.js';
@@ -338,6 +339,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
         result: 'FAIL',
         details: await commandFailureDetails(ctx, 'tests', cmd.label, r, describeFailure(r)),
         ...(r.timedOut ? { timedOut: true } : {}),
+        ...(cmd.runner === 'verify' && sandboxEnvMarkerLine(r) ? { sandboxEnv: sandboxEnvMarkerLine(r) } : {}),
       };
     }
 

@@ -54,6 +54,7 @@ import { shipRuntime } from './ship-runtime.js';
 // RunOutcome's parked variant carries only the ParkReason enum, not free text.
 export const TERMINAL_EVENT_KINDS = new Set<EventKind>([
   'ready',
+  'sandbox-env',
   'no-pr-complete',
   'environment-released',
   'fail',

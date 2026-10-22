@@ -24,6 +24,7 @@ import type { Octokit } from '@octokit/rest';
 import type { ApprovalGate } from '../approvals/index.js';
 import type { checkBaseHealth } from '../checkers/base-health.js';
 import { laneEnv } from '../environment/index.js';
+import { sandboxEnvParkMessage } from '../environment/sandbox-env.js';
 import { buildPhase as buildPhaseDefault } from '../phases/build.js';
 import {
   checkPhase as checkPhaseDefault,
@@ -841,6 +842,9 @@ async function runIssueOnce(
       });
       route = build.route;
       if (!build.ok && build.reason !== 'budget_exceeded') {
+        if (build.reason === 'sandbox_env') {
+          return await terminalParked('sandbox-env', sandboxEnvParkMessage('BUILD', build.envError ?? 'ENV-ERROR'));
+        }
         const why = build.noDiffDetail ? `\n\n${build.noDiffDetail}` : '';
         const parkText =
           build.reason === 'no_diff'
@@ -948,6 +952,10 @@ async function runIssueOnce(
       failed: CheckPhaseResult,
       opts: { ciReworkRound?: number } = {},
     ): Promise<RunOutcome> => {
+      if (failed.sandboxEnv) {
+        await clearCheckResume();
+        return terminalParked('sandbox-env', sandboxEnvParkMessage('CHECK', failed.sandboxEnv));
+      }
       if (failed.environment) {
         const env = failed.environment;
         if (env.cause === 'config') {

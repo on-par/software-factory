@@ -2313,13 +2313,13 @@ describe('BUILD prompt required elements (#1976)', () => {
   });
 
   it('does not regress the slimmed fixed instruction text length', () => {
-    // before: 2472 chars (now ~1924). Caps include the #3372 read-before-edit bullet (+237) and the #3466 max-lines rule bullet (+335), the only allowed growth. The 60% target is unreachable: the mandated notice and headless note alone are ~700.
+    // before: 2472 chars (now ~1924). Caps include the #3372 read-before-edit bullet (+237) and the #3466 max-lines rule bullet (+335), the only allowed growth, plus the #3332 ENV-ERROR verify rule (+~320 in both prompts). The 60% target is unreachable: the mandated notice and headless note alone are ~700.
     expect(
       buildCommitOnlyPrompt({ issue: 1, specPath: 's', constitutionCtx: '', spec: '' }).length,
-    ).toBeLessThanOrEqual(2522);
+    ).toBeLessThanOrEqual(2850);
     // before: 2144 chars (now ~2040)
     expect(buildClaudePrompt({ issue: 1, branch: 'b', specPath: 's', constitutionCtx: '' }).length).toBeLessThanOrEqual(
-      2642,
+      2970,
     );
   });
 });

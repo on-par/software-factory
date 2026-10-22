@@ -115,6 +115,8 @@ export interface CheckerOutput {
   unavailable?: boolean;
   /** True when the checker's command ended by timeout (#3186): inconclusive, never cached. */
   timedOut?: boolean;
+  /** verify.sh environment marker line (#3332): exit 78 + EPERM marker; CHECK parks sandbox-env. */
+  sandboxEnv?: string;
   evidencePlanResults?: EvidencePlanResult[];
 }
 
@@ -130,8 +132,7 @@ export interface CheckSummary {
 
 // ---------- Failover ----------
 
-/** Why the router abandoned a model. Matches the harness failure classification
- *  (harness/index.ts aliases HarnessFailureReason to this type). */
+/** Why the router abandoned a model. Matches the harness failure classification (harness/index.ts aliases HarnessFailureReason to it). */
 export type FailoverReason =
   | 'rate_limit'
   | 'usage_cap'
@@ -206,8 +207,7 @@ export interface FingerprintedFailure {
 
 // ---------- Repo (#969) ----------
 
-/** A GitHub repository slug in `owner/name` form (e.g. `owner/example-app`).
- *  The same shape parseRemoteSlug() resolves from a git origin remote. */
+/** A GitHub repository slug in `owner/name` form (e.g. `owner/example-app`), as parseRemoteSlug() resolves from a git origin remote. */
 export type RepoSlug = string;
 
 // ---------- Events ----------
