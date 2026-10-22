@@ -23,8 +23,15 @@ export async function mergeBaseIntoWorktree(worktree: string, baseRef: string): 
   } catch (err) {
     let conflicts: string[] = [];
     try {
-      const { stdout } = await execGit(['diff', '--name-only', '--diff-filter=U'], { cwd });
-      conflicts = stdout.split('\n').filter(Boolean).sort();
+      const { stdout } = await execGit(['ls-files', '--unmerged'], { cwd });
+      conflicts = [
+        ...new Set(
+          stdout
+            .split('\n')
+            .filter(Boolean)
+            .map((line) => line.slice(line.indexOf('\t') + 1)),
+        ),
+      ].sort();
     } catch {
       // unmerged paths are best-effort
     }

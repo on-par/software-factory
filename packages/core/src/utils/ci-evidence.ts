@@ -79,12 +79,13 @@ export async function collectCiFailureEvidence(opts: {
   }
 
   const logTargets = failingRuns
-    .map((r, i) => ({ id: r.id, check: failingChecks[i] }))
-    .filter((t) => typeof t.id === 'number' && !/codeql/i.test(t.check.name))
+    .flatMap((r, i) =>
+      typeof r.id === 'number' && !/codeql/i.test(failingChecks[i].name) ? [{ id: r.id, check: failingChecks[i] }] : [],
+    )
     .slice(0, CI_EVIDENCE_LIMITS.maxLogJobs);
   for (const { id, check } of logTargets) {
     try {
-      const { data } = await octokit.rest.actions.downloadJobLogsForWorkflowRun({ owner, repo, job_id: id as number });
+      const { data } = await octokit.rest.actions.downloadJobLogsForWorkflowRun({ owner, repo, job_id: id });
       const tail = tailJobLog(data);
       if (tail.cut) truncated = true;
       if (tail.text) check.logExcerpt = tail.text;
