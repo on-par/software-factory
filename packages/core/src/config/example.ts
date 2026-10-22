@@ -382,6 +382,25 @@ function runtimeNamespace(): Node[] {
     intake,
     section('filing'),
     section('kpis'),
+    {
+      kind: 'object',
+      key: 'events',
+      doc: 'Size rotation of state/events.ndjson into state/logs/events/ segments.',
+      children: [
+        {
+          kind: 'unset',
+          key: 'maxBytes',
+          doc: 'Rotate once the live file passes this many bytes. Unset: 10485760 (10 MiB). FACTORY_EVENTS_MAX_BYTES beats it.',
+          example: '10485760',
+        },
+        {
+          kind: 'unset',
+          key: 'maxSegments',
+          doc: 'Keep only the newest N rotated segments. Unset: keep all. FACTORY_EVENTS_MAX_SEGMENTS beats it.',
+          example: '20',
+        },
+      ],
+    },
     sweep,
     {
       kind: 'object',

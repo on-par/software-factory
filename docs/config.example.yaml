@@ -348,6 +348,13 @@ filing:
 # FACTORY_DEFECT_WINDOW_DAYS.
 kpis:
   defectWindowDays: 14
+# Size rotation of state/events.ndjson into state/logs/events/ segments.
+# events:
+  # Rotate once the live file passes this many bytes. Unset: 10485760 (10 MiB).
+  # FACTORY_EVENTS_MAX_BYTES beats it.
+  # maxBytes: 10485760
+  # Keep only the newest N rotated segments. Unset: keep all. FACTORY_EVENTS_MAX_SEGMENTS beats it.
+  # maxSegments: 20
 # Optional: set sweep.heartbeatFile (or export HEARTBEAT_FILE) to the path an auto-merge-sweep loop
 # writes an ISO8601 timestamp to once per pass (see scripts/auto-merge-sweep.sh,
 # docs/runbooks/sweep-heartbeat.md). factory doctor/status fail when it is older than

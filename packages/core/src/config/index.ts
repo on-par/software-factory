@@ -28,6 +28,7 @@ import type { FilingPolicy } from '../filing/policy.js';
 import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS, retiredHarnessReplacement } from '../harness/catalog.js';
 import type { FailoverReason } from '../types/index.js';
 import { SandboxConfigSchema } from './sandbox-schema.js';
+import { EventsConfigSchema } from '../events/rotation.js';
 import { ModelEffortsSchema } from './effort.js';
 import { resolvePrecedence, type ConfigSource } from './precedence.js';
 import { HarnessDeclarationSchema, type HarnessDeclaration } from './harness-declaration.js';
@@ -196,6 +197,7 @@ const FactoryConfigSchema = z.object({
     .object({ defectWindowDays: z.number().int().positive().default(14), comment: z.string().optional() })
     .default({ defectWindowDays: 14 }),
   sandbox: SandboxConfigSchema,
+  events: EventsConfigSchema,
   discovery: z
     .object({
       enabled: z.boolean().default(true),
@@ -392,6 +394,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'queue',
   'adr',
   'workspace',
+  'events',
 ];
 
 export function isPlainObject(value: unknown): value is Record<string, unknown> {

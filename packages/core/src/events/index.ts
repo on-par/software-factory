@@ -3,11 +3,11 @@
 import { closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
 
 import type { FactoryEvent } from '../types/index.js';
+import { findEventSegmentByIno, listEventSegmentPaths } from './tail.js';
 
-/** Parse all events currently in the file. Missing file → []. Malformed lines are skipped. */
-export function readEvents(eventsFile: string): FactoryEvent[] {
-  if (!existsSync(eventsFile)) return [];
-  return readFileSync(eventsFile, 'utf-8')
+function parseFile(path: string): FactoryEvent[] {
+  if (!existsSync(path)) return [];
+  return readFileSync(path, 'utf-8')
     .trim()
     .split('\n')
     .filter(Boolean)
@@ -18,6 +18,13 @@ export function readEvents(eventsFile: string): FactoryEvent[] {
         return [];
       }
     });
+}
+
+/** Parse all events currently in the file. Missing file → []. Malformed lines are skipped.
+ *  `includeSegments` prepends the rotated segments (oldest first) for full-history readers (#1631). */
+export function readEvents(eventsFile: string, opts: { includeSegments?: boolean } = {}): FactoryEvent[] {
+  if (!opts.includeSegments) return parseFile(eventsFile);
+  return [...listEventSegmentPaths(eventsFile).flatMap(parseFile), ...parseFile(eventsFile)];
 }
 
 export interface FollowEventsOptions {
@@ -61,6 +68,53 @@ export function followEvents(
     }
   }
 
+  const emitLines = (chunk: string): string => {
+    const lines = chunk.split('\n');
+    const rest = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        onEvent(JSON.parse(line) as FactoryEvent);
+      } catch {
+        // skip malformed line
+      }
+    }
+    return rest;
+  };
+
+  /** Read [from, size) of an open fd, emit its complete lines, and return the new offset and carry. */
+  const readFrom = (fd: number, size: number, from: number, prevCarry: string): { offset: number; carry: string } => {
+    if (size <= from) return { offset: from, carry: prevCarry };
+    const toRead = size - from;
+    const buf = Buffer.alloc(toRead);
+    const bytesRead = readSync(fd, buf, 0, toRead, from);
+    return { offset: from + bytesRead, carry: emitLines(prevCarry + buf.toString('utf-8', 0, bytesRead)) };
+  };
+
+  const readWholePath = (path: string, from: number, prevCarry: string): void => {
+    let fd: number;
+    try {
+      fd = openSync(path, 'r');
+    } catch {
+      return;
+    }
+    try {
+      readFrom(fd, fstatSync(fd).size, from, prevCarry);
+    } finally {
+      closeSync(fd);
+    }
+  };
+
+  // The file we were reading went missing (rotation renamed it and the logger has not recreated it yet).
+  let pending: { ino: number; offset: number; carry: string } | undefined;
+
+  const drainRotated = (prev: { ino: number; offset: number; carry: string }): void => {
+    const found = findEventSegmentByIno(eventsFile, prev.ino);
+    if (!found) return;
+    readWholePath(found.path, prev.offset, prev.carry);
+    for (const path of found.newer) readWholePath(path, 0, '');
+  };
+
   const tick = (): void => {
     // Open first and take size/inode from the open fd, so the stat and the
     // read always describe the same file even if it is rotated in between.
@@ -69,6 +123,7 @@ export function followEvents(
       fd = openFile(eventsFile);
     } catch {
       // Missing file: treat it as empty so a recreated file is read from the start.
+      if (ino !== undefined && !pending) pending = { ino, offset, carry };
       offset = 0;
       carry = '';
       ino = undefined;
@@ -83,31 +138,17 @@ export function followEvents(
       // reached or exceeded the old offset before the next poll.
       const recreated = ino !== undefined && stat.ino !== ino;
 
+      const prev = recreated ? { ino: ino as number, offset, carry } : pending;
+      if (prev && prev.ino !== stat.ino) drainRotated(prev);
+      pending = undefined;
+
       if (recreated || stat.size < offset) {
         offset = 0;
         carry = '';
       }
       ino = stat.ino;
 
-      if (stat.size <= offset) return;
-
-      const toRead = stat.size - offset;
-      const buf = Buffer.alloc(toRead);
-      const bytesRead = readSync(fd, buf, 0, toRead, offset);
-      offset += bytesRead;
-
-      const chunk = carry + buf.toString('utf-8', 0, bytesRead);
-      const lines = chunk.split('\n');
-      carry = lines.pop() ?? '';
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          onEvent(JSON.parse(line) as FactoryEvent);
-        } catch {
-          // skip malformed line
-        }
-      }
+      ({ offset, carry } = readFrom(fd, stat.size, offset, carry));
     } finally {
       closeSync(fd);
     }

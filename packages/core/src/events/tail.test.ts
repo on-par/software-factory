@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -7,8 +7,11 @@ import {
   InvalidEventCursorError,
   eventSegmentFileName,
   eventSegmentsDir,
+  findEventSegmentByIno,
+  listEventSegmentPaths,
   readEventsSince,
   readEventsTail,
+  rotateEventLog,
 } from './tail.js';
 import { createTempDirs } from '../harness/temp-dir.js';
 
@@ -26,7 +29,9 @@ describe('events tail', () => {
     dir = tmp.makeSync('factory-tail-');
     file = join(dir, 'events.ndjson');
   });
-  afterEach(() => tmp.cleanup());
+  afterEach(async () => {
+    await tmp.cleanup();
+  });
 
   it('names segments by zero-padded start offset', () => {
     expect(eventSegmentFileName(0)).toBe('events-0000000000000000.ndjson');
@@ -131,3 +136,67 @@ function eventsRotated(file: string, ids: number[]): number {
   writeFileSync(join(eventSegmentsDir(file), eventSegmentFileName(0)), body);
   return body.length;
 }
+
+describe('rotateEventLog (#1631)', () => {
+  let file: string;
+  beforeEach(() => {
+    file = join(tmp.makeSync('factory-rotate-'), 'state', 'events.ndjson');
+    mkdirSync(join(file, '..'), { recursive: true });
+  });
+  afterEach(async () => {
+    await tmp.cleanup();
+  });
+
+  it('names segments by the id chain and leaves no live file', () => {
+    writeFileSync(file, ev(1) + ev(2));
+    const first = rotateEventLog(file);
+    expect(first).toBe(join(eventSegmentsDir(file), eventSegmentFileName(0)));
+    expect(existsSync(file)).toBe(false);
+    const size1 = ev(1).length + ev(2).length;
+    writeFileSync(file, ev(3));
+    expect(rotateEventLog(file)).toBe(join(eventSegmentsDir(file), eventSegmentFileName(size1)));
+    expect(listEventSegmentPaths(file)).toHaveLength(2);
+  });
+
+  it('returns undefined for an empty or missing live file, and refuses to overwrite a segment', () => {
+    expect(rotateEventLog(file)).toBeUndefined();
+    writeFileSync(file, ev(1));
+    mkdirSync(eventSegmentsDir(file), { recursive: true });
+    const clash = join(eventSegmentsDir(file), eventSegmentFileName(0));
+    // an id-0 segment of size 0 makes the live id 0 again
+    writeFileSync(clash, '');
+    expect(rotateEventLog(file)).toBeUndefined();
+    expect(existsSync(file)).toBe(true);
+  });
+
+  it('never deletes the newest segment, even with maxSegments 1', () => {
+    for (let i = 0; i < 3; i++) {
+      writeFileSync(file, ev(i));
+      rotateEventLog(file, { maxSegments: 1 });
+    }
+    const left = listEventSegmentPaths(file);
+    expect(left).toHaveLength(1);
+    expect(left[0]).toContain(eventSegmentFileName(ev(0).length + ev(1).length));
+  });
+
+  it('keeps pre-rotation cursors valid for readEventsSince', () => {
+    writeFileSync(file, ev(1) + ev(2));
+    const cursor = readEventsTail(file, { limit: 1 }).events[0]!.cursor;
+    writeFileSync(file, ev(1) + ev(2) + ev(3));
+    rotateEventLog(file);
+    appendFileSync(file, ev(4));
+    expect(msgs(readEventsSince(file, cursor))).toEqual(['e3', 'e4']);
+  });
+
+  it('findEventSegmentByIno locates a renamed file and its newer segments', () => {
+    writeFileSync(file, ev(1));
+    const ino = statSync(file).ino;
+    rotateEventLog(file);
+    writeFileSync(file, ev(2));
+    rotateEventLog(file);
+    const found = findEventSegmentByIno(file, ino)!;
+    expect(found.path).toContain(eventSegmentFileName(0));
+    expect(found.newer).toHaveLength(1);
+    expect(findEventSegmentByIno(file, -1)).toBeUndefined();
+  });
+});

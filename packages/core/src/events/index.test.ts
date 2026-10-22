@@ -6,6 +6,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { FactoryEvent } from '../types/index.js';
 import { followEvents, readEvents } from './index.js';
+import { createTempDirs } from '../harness/temp-dir.js';
+import { rotateEventLog } from './tail.js';
+
+const tmp = createTempDirs();
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -237,4 +241,79 @@ describe('followEvents', () => {
     await waitFor(() => seen.length === 1);
     expect(seen.map((e) => e.msg)).toEqual(['new']);
   });
+});
+
+describe('readEvents includeSegments (#1631)', () => {
+  afterEach(async () => {
+    await tmp.cleanup();
+  });
+
+  it('returns segments oldest first then live; default is live only', () => {
+    const dir = tmp.makeSync('factory-events-seg-');
+    try {
+      const f = join(dir, 'events.ndjson');
+      for (const m of ['a', 'b']) {
+        writeFileSync(f, line({ type: 'plan', msg: m }));
+        rotateEventLog(f);
+      }
+      writeFileSync(f, line({ type: 'plan', msg: 'c' }));
+      expect(readEvents(f, { includeSegments: true }).map((e) => e.msg)).toEqual(['a', 'b', 'c']);
+      expect(readEvents(f).map((e) => e.msg)).toEqual(['c']);
+    } finally {
+      /* dir removed by cleanup below */
+    }
+  });
+});
+
+describe('followEvents across rotation (#1631)', () => {
+  let dir: string;
+  let file: string;
+  const stops: Array<() => void> = [];
+  beforeEach(() => {
+    dir = tmp.makeSync('factory-events-follow-rot-');
+    file = join(dir, 'events.ndjson');
+  });
+  afterEach(async () => {
+    while (stops.length) stops.pop()!();
+    await tmp.cleanup();
+  });
+
+  const run = async (missingBetween: boolean) => {
+    writeFileSync(file, line({ type: 'plan', msg: 'e1' }));
+    let hook: (() => void) | undefined;
+    let failNext = false;
+    const openFile = (path: string): number => {
+      const h = hook;
+      hook = undefined;
+      h?.();
+      if (failNext) {
+        failNext = false;
+        throw new Error('ENOENT');
+      }
+      return openSync(path, 'r');
+    };
+    const seen: FactoryEvent[] = [];
+    stops.push(followEvents(file, (e) => seen.push(e), { fromStart: true, pollMs: 10, openFile }));
+    await waitFor(() => seen.length >= 1);
+
+    hook = () => {
+      appendFileSync(file, line({ type: 'plan', msg: 'e2' }) + line({ type: 'plan', msg: 'e3' }));
+      rotateEventLog(file);
+      if (missingBetween) failNext = true;
+      else appendFileSync(file, line({ type: 'plan', msg: 'e4' }));
+    };
+    if (missingBetween) {
+      await waitFor(() => hook === undefined, 2000);
+      await delay(40);
+      appendFileSync(file, line({ type: 'plan', msg: 'e4' }));
+    }
+    await waitFor(() => seen.length >= 4);
+    await delay(50);
+    expect(seen.map((e) => e.msg)).toEqual(['e1', 'e2', 'e3', 'e4']);
+  };
+
+  it('delivers every event exactly once across a logger rotation, including lines appended to the old file after its last poll', () =>
+    run(false));
+
+  it('still drains the rotated tail when the live file is missing for a poll', () => run(true));
 });
