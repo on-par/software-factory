@@ -15,6 +15,26 @@ on:
         type: string
         required: false
         default: ''
+      provider:
+        description: Agent provider (claude-cli, codex-cli, opencode, pi)
+        type: string
+        required: false
+        default: claude-cli
+      experimental:
+        description: Required true for the experimental providers opencode and pi
+        type: boolean
+        required: false
+        default: false
+      plan_model:
+        description: Override FACTORY_PLAN_MODEL (default per provider)
+        type: string
+        required: false
+        default: ''
+      build_model:
+        description: Override FACTORY_BUILD_MODEL (default per provider)
+        type: string
+        required: false
+        default: ''
     secrets:
       FACTORY_GITHUB_TOKEN:
         required: true
@@ -22,10 +42,17 @@ on:
         required: false
       ANTHROPIC_API_KEY:
         required: false
+      OPENAI_API_KEY:
+        required: false
+      CODEX_API_KEY:
+        required: false
+      OPENCODE_API_KEY:
+        required: false
+      OPENROUTER_API_KEY:
+        required: false
 
 env:
   FACTORY_CLI_VERSION: 0.9.4
-  CLAUDE_CODE_VERSION: 2.1.308
 
 jobs:
   run:
@@ -48,15 +75,23 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - name: Install factory and Claude Code CLIs
-        run: npm install -g "@on-par/factory-cli@${FACTORY_CLI_VERSION}" "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+      - name: Install factory CLI
+        run: npm install -g "@on-par/factory-cli@${FACTORY_CLI_VERSION}"
       - name: Run factory
         env:
           COMMAND: ${{ inputs.command }}
           ISSUE: ${{ inputs.issue }}
           FACTORY_GITHUB_TOKEN: ${{ secrets.FACTORY_GITHUB_TOKEN }}
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PROVIDER: ${{ inputs.provider }}
+          EXPERIMENTAL: ${{ inputs.experimental }}
+          FACTORY_PLAN_MODEL: ${{ inputs.plan_model }}
+          FACTORY_BUILD_MODEL: ${{ inputs.build_model }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.provider == 'claude-cli' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          ANTHROPIC_API_KEY: ${{ inputs.provider == 'claude-cli' && secrets.ANTHROPIC_API_KEY || '' }}
+          OPENAI_API_KEY: ${{ inputs.provider == 'codex-cli' && secrets.OPENAI_API_KEY || '' }}
+          CODEX_API_KEY: ${{ inputs.provider == 'codex-cli' && secrets.CODEX_API_KEY || '' }}
+          OPENCODE_API_KEY: ${{ inputs.provider == 'opencode' && secrets.OPENCODE_API_KEY || '' }}
+          OPENROUTER_API_KEY: ${{ inputs.provider == 'pi' && secrets.OPENROUTER_API_KEY || '' }}
           FACTORY_RUN_LOG: ${{ runner.temp }}/factory-run.log
         run: bash .factory-action/scripts/factory-run.sh
       - name: Upload run log and events
