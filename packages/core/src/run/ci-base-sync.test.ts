@@ -22,6 +22,8 @@ async function setup(): Promise<{ origin: string; wt: string }> {
   await git(origin, 'add', '.');
   await git(origin, 'commit', '-m', 'init');
   await execGit(['clone', origin, wt]);
+  await git(wt, 'config', 'user.name', 't');
+  await git(wt, 'config', 'user.email', 't@t');
   await git(wt, 'checkout', '-b', 'feature');
   return { origin, wt };
 }
