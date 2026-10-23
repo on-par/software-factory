@@ -28,10 +28,9 @@ async function writeConfig(harness?: string, harnesses?: Record<string, unknown>
     },
     tiers: { boss: ['some-model'] },
     failover: {
-      triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+      triggers: ['rate_limit', 'unavailable', 'auth'],
       maxRetries: 2,
       cooldownMs: 0,
-      escalateAfterTierExhausted: true,
     },
     routingRules: {},
     ...(harnesses ? { harnesses } : {}),

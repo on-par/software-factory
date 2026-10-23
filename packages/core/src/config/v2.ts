@@ -30,6 +30,7 @@
 
 import { z } from 'zod';
 
+import { failoverConfigWarnings } from './failover-triggers.js';
 import { HarnessDeclarationSchema } from './harness-declaration.js';
 import { ModelsSectionSchema } from './v2-models.js';
 import { readRepoConfigFile } from './repo-config-file.js';
@@ -363,6 +364,12 @@ export function parseV2Config(raw: unknown): FactoryConfigV2 {
   if (!result.success) {
     const issues = result.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
     throw new Error(`Invalid v2 config: ${issues}`);
+  }
+  for (const w of failoverConfigWarnings(
+    (raw as { models?: { failover?: unknown } } | null)?.models?.failover,
+    'models.failover',
+  )) {
+    console.warn(`factory: ${w}`);
   }
   return result.data;
 }

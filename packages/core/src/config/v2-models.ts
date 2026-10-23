@@ -4,6 +4,7 @@
 import { defaultModelsConfig } from '@on-par/factory-config';
 import { z } from 'zod';
 
+import { DEFAULT_FAILOVER_TRIGGERS, FailoverTriggersSchema } from './failover-triggers.js';
 import { ModelEffortsSchema } from './effort.js';
 import { PROVIDER_ORDER_DESCRIPTION, providerOrderIssues, type ProviderOrderRole } from './provider-order.js';
 
@@ -59,18 +60,13 @@ const ModelDefSchema = z
 
 const ModelFailoverSchema = z
   .object({
-    triggers: z
-      .array(z.string())
-      .default(['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'])
-      .describe('Failure reasons that trigger failover to the next model in the tier.'),
-    maxRetries: z.number().default(2).describe('Maximum retries before the tier is considered exhausted.'),
+    triggers: FailoverTriggersSchema.default([...DEFAULT_FAILOVER_TRIGGERS]).describe(
+      'Failure kinds (rate_limit, unavailable, auth) that let the router fall back to the next model at the same provider inside one call. A usage cap always ends the call; other providers are tried only at a phase boundary.',
+    ),
+    maxRetries: z.number().default(2).describe('Same-model retries on rate_limit before falling back.'),
     cooldownMs: z.number().default(5000).describe('Delay in milliseconds between failover attempts.'),
-    escalateAfterTierExhausted: z
-      .boolean()
-      .default(true)
-      .describe('When a tier is exhausted, escalate to the next-higher tier instead of failing.'),
   })
-  .describe('Model-level failover: how the router walks a tier when a model fails.');
+  .describe('Model-level failover: which failures fall back to another model at the same provider inside one call.');
 
 const ModelPinsSchema = z
   .object({

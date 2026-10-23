@@ -47,10 +47,9 @@ const models: ModelsConfig = {
   },
   tiers: { boss: ['stub-model', 'pinned-model'] },
   failover: {
-    triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+    triggers: ['rate_limit', 'unavailable', 'auth'],
     maxRetries: 2,
     cooldownMs: 0,
-    escalateAfterTierExhausted: true,
   },
   routingRules: {},
 };
@@ -2542,17 +2541,10 @@ npm run test`;
     const specPath = join(worktree, 'issue-40.md');
     const stub = new StubModelExecutor({
       scripts: {
-        plan: [{ fail: 'usage_cap' }, { output: withImplementation('route: codex') }],
+        plan: [{ fail: 'timeout' }, { output: withImplementation('route: codex') }],
       },
     });
-    const failoverModels: ModelsConfig = {
-      ...models,
-      models: {
-        ...models.models,
-        'pinned-model': { ...models.models['pinned-model'], provider: 'openai' },
-      },
-    };
-    const router = new ModelRouter(failoverModels, routes, false, stub);
+    const router = new ModelRouter(models, routes, false, stub);
     const octokit: any = {
       rest: {
         issues: {
@@ -2575,11 +2567,7 @@ npm run test`;
       },
     });
 
-    expect(logCalls).toContainEqual([
-      'failover',
-      expect.stringContaining('usage_cap'),
-      { failoverReason: 'usage_cap' },
-    ]);
+    expect(logCalls).toContainEqual(['failover', expect.stringContaining('timeout'), { failoverReason: 'timeout' }]);
   });
 
   it('omits the detail suffix from the failover log when the failed attempt carries no descriptive detail', async () => {

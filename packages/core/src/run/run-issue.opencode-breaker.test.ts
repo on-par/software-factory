@@ -59,7 +59,7 @@ function routerWith(defs: Record<string, ModelDef>): ModelRouter {
       ]),
     ),
     tiers: { worker: Object.keys(defs) },
-    failover: { triggers: [], maxRetries: 0, cooldownMs: 0, escalateAfterTierExhausted: false },
+    failover: { triggers: [], maxRetries: 0, cooldownMs: 0 },
     routingRules: {},
   };
   return new ModelRouter(models, ROUTES);

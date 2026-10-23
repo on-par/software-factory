@@ -21,13 +21,12 @@ const model = (provider: 'anthropic' | 'openai') => ({
 
 const twoModels: ModelsConfig = {
   version: 1,
-  models: { 'model-a': model('anthropic'), 'model-b': model('openai') },
+  models: { 'model-a': model('anthropic'), 'model-b': model('anthropic') },
   tiers: { boss: ['model-a', 'model-b'] },
   failover: {
-    triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+    triggers: ['rate_limit', 'unavailable', 'auth'],
     maxRetries: 2,
     cooldownMs: 0,
-    escalateAfterTierExhausted: true,
   },
   routingRules: {},
 };

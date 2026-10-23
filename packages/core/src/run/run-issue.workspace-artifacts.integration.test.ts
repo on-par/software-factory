@@ -109,7 +109,7 @@ describe('runIssue — workspace artifacts integration (#1213)', () => {
         },
       },
       tiers: { boss: ['stub-boss'], worker: ['stub-worker'] },
-      failover: { triggers: [], maxRetries: 0, cooldownMs: 0, escalateAfterTierExhausted: false },
+      failover: { triggers: [], maxRetries: 0, cooldownMs: 0 },
       routingRules: {},
     };
     const routes: RoutesConfig = {

@@ -28,7 +28,7 @@ const registry = new ModelRegistry({
     },
   },
   tiers: { boss: ['codex'] },
-  failover: { triggers: [], maxRetries: 0, cooldownMs: 0, escalateAfterTierExhausted: false },
+  failover: { triggers: [], maxRetries: 0, cooldownMs: 0 },
   routingRules: {},
 });
 

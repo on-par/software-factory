@@ -30,10 +30,9 @@ const models: ModelsConfig = {
   models: { 'claude-a': entry('anthropic'), 'gpt-b': { ...entry('openai'), codex: true } },
   tiers: { boss: ['claude-a', 'gpt-b'] },
   failover: {
-    triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+    triggers: ['rate_limit', 'unavailable', 'auth'],
     maxRetries: 2,
     cooldownMs: 0,
-    escalateAfterTierExhausted: true,
   },
   routingRules: {},
 };
@@ -78,7 +77,8 @@ const countRejected = (runLog: Array<{ type: string }>) =>
 describe('rejected credential holds the breaker (#3232)', () => {
   it('a rejected key opens an untimed breaker and one provider_auth_rejected event', async () => {
     const t = await setup(`authentication_error: invalid x-api-key ${FAKE_KEY}`);
-    expect((await t.run()).model).toBe('gpt-b');
+    // The rejected key ends the first call (no mid-call move to openai, #3228); later runs skip the tripped harness.
+    await expect(t.run()).rejects.toMatchObject({ reason: 'local_auth' });
     expect((await t.run()).model).toBe('gpt-b');
     t.clock.now += 48 * 3_600_000;
 
@@ -104,7 +104,7 @@ describe('rejected credential holds the breaker (#3232)', () => {
 
   it('an open auth breaker skips anthropic on three more runs and writes no further provider_auth_rejected', async () => {
     const t = await setup('authentication_error: invalid x-api-key');
-    await t.run();
+    await t.run().catch(() => undefined);
     t.router.setProviderHold(async (p) => {
       const s = await t.breaker.status(p);
       return s.open && s.entry.until === 'credentials-change';
@@ -120,19 +120,19 @@ describe('rejected credential holds the breaker (#3232)', () => {
     t.router.setProviderHold(async () => {
       throw new Error('boom');
     });
-    await t.run();
+    await t.run().catch(() => undefined);
     expect(t.calls).toContain('claude-a');
     const fresh = await setup('authentication_error: invalid x-api-key');
     fresh.router.setProviderHold(async () => true);
     fresh.router.setProviderHold(undefined);
-    await fresh.run();
+    await fresh.run().catch(() => undefined);
     expect(fresh.calls).toContain('claude-a');
   });
 
   describe('signed-out', () => {
     it.each(['Please run /login', 'No auth credentials found'])('%s opens no auth breaker', async (text) => {
       const t = await setup(text);
-      expect((await t.run()).model).toBe('gpt-b');
+      await expect(t.run()).rejects.toMatchObject({ reason: 'local_auth' });
       expect(countRejected(t.runLog)).toBe(0);
       expect(await readFile(join(t.dir, 'breaker.json'), 'utf-8').catch(() => '{}')).not.toContain(
         'credentials-change',

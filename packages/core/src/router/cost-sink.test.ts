@@ -32,16 +32,14 @@ describe('ModelRouter cost sink', () => {
     },
     tiers: { boss: ['stub-model'] },
     failover: {
-      triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+      triggers: ['rate_limit', 'unavailable', 'auth'],
       maxRetries: 2,
       cooldownMs: 0,
-      escalateAfterTierExhausted: true,
     },
     routingRules: {},
   };
 
-  // Two providers, for the same reason twoModels above uses two: a failover
-  // assertion cannot be written against a same-provider pair since #554.
+  // Both models share a provider: failover stays at one provider inside a call (#3228).
   const costTwoModels: ModelsConfig = {
     version: 1,
     models: {
@@ -55,7 +53,7 @@ describe('ModelRouter cost sink', () => {
         envKey: null,
       },
       'model-b': {
-        provider: 'openai',
+        provider: 'anthropic',
         tier: 'boss',
         costPerMtokInput: 3,
         costPerMtokOutput: 15,
@@ -66,10 +64,9 @@ describe('ModelRouter cost sink', () => {
     },
     tiers: { boss: ['model-a', 'model-b'] },
     failover: {
-      triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+      triggers: ['rate_limit', 'unavailable', 'auth'],
       maxRetries: 2,
       cooldownMs: 0,
-      escalateAfterTierExhausted: true,
     },
     routingRules: {},
   };
@@ -289,7 +286,7 @@ describe('ModelRouter cost sink', () => {
   it('records failoverReason on the row when a failover occurred', async () => {
     const stub = new StubModelExecutor({
       scripts: {
-        plan: [{ fail: 'usage_cap' }, { output: 'FROM B' }],
+        plan: [{ fail: 'timeout' }, { output: 'FROM B' }],
       },
     });
     const router = new ModelRouter(costTwoModels, routes, false, stub);
@@ -301,14 +298,14 @@ describe('ModelRouter cost sink', () => {
     expect(result.model).toBe('model-b');
     expect(rows).toHaveLength(1);
     expect(rows[0].model).toBe('model-b');
-    expect(rows[0].failoverReason).toBe('usage_cap');
+    expect(rows[0].failoverReason).toBe('timeout');
   });
 
   it('carries real usage through a failover onto the successful attempt row', async () => {
     const stub = new StubModelExecutor({
       scripts: {
         plan: [
-          { fail: 'usage_cap' },
+          { fail: 'timeout' },
           {
             output: 'FROM B',
             effect: (ctx) => ctx.onUsage?.({ inputTokens: 10, outputTokens: 20 }),
@@ -324,7 +321,7 @@ describe('ModelRouter cost sink', () => {
 
     expect(result.model).toBe('model-b');
     expect(rows).toHaveLength(1);
-    expect(rows[0].failoverReason).toBe('usage_cap');
+    expect(rows[0].failoverReason).toBe('timeout');
     expect(rows[0].inputTokens).toBe(10);
     expect(rows[0].estimated).toBe(false);
   });
@@ -333,7 +330,7 @@ describe('ModelRouter cost sink', () => {
     const stub = new StubModelExecutor({
       scripts: {
         plan: [
-          { fail: 'usage_cap' },
+          { fail: 'timeout' },
           {
             output: 'FROM B',
             effect: (ctx) =>
@@ -355,7 +352,7 @@ describe('ModelRouter cost sink', () => {
 
     expect(result.model).toBe('model-b');
     expect(rows).toHaveLength(1);
-    expect(rows[0].failoverReason).toBe('usage_cap');
+    expect(rows[0].failoverReason).toBe('timeout');
     expect(rows[0].estimated).toBe(false);
     expect(rows[0].inputTokens).toBe(15785);
     expect(rows[0].outputTokens).toBe(5);
@@ -372,7 +369,7 @@ describe('ModelRouter cost sink', () => {
       scripts: {
         plan: [
           {
-            fail: 'usage_cap',
+            fail: 'timeout',
             effect: (ctx) => ctx.onUsage?.({ inputTokens: 999, outputTokens: 999 }),
           },
           { output: 'FROM B' },

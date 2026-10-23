@@ -46,10 +46,9 @@ const models: ModelsConfig = {
   },
   tiers: { boss: ['stub-model'] },
   failover: {
-    triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+    triggers: ['rate_limit', 'unavailable', 'auth'],
     maxRetries: 2,
     cooldownMs: 0,
-    escalateAfterTierExhausted: true,
   },
   routingRules: {},
 };
@@ -102,7 +101,7 @@ const twoModels: ModelsConfig = {
   models: {
     ...models.models,
     'second-model': {
-      provider: 'custom',
+      provider: 'openai',
       tier: 'boss',
       costPerMtokInput: 0,
       costPerMtokOutput: 0,
@@ -1339,7 +1338,7 @@ describe('checkPhase auto rework', () => {
     async () => {
       const { worktree, specPath } = await makeFailingWorktree();
       const stub = new StubModelExecutor({
-        scripts: { build_claude: [{ fail: 'usage_cap' }, { output: 'rework complete' }] },
+        scripts: { build_claude: [{ fail: 'timeout' }, { output: 'rework complete' }] },
         defaultOutput: 'rework complete',
       });
       const router = new ModelRouter(twoModels, routes, false, stub);
@@ -1356,11 +1355,7 @@ describe('checkPhase auto rework', () => {
         },
       });
 
-      expect(logCalls).toContainEqual([
-        'failover',
-        expect.stringContaining('usage_cap'),
-        { failoverReason: 'usage_cap' },
-      ]);
+      expect(logCalls).toContainEqual(['failover', expect.stringContaining('timeout'), { failoverReason: 'timeout' }]);
     },
   );
 
@@ -1440,7 +1435,7 @@ describe('checkPhase auto rework', () => {
     async () => {
       const { worktree, specPath } = await makeFailingWorktree();
       const stub = new StubModelExecutor({
-        scripts: { build_claude: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }] },
+        scripts: { build_claude: [{ fail: 'timeout' }, { fail: 'timeout' }] },
         defaultOutput: 'rework complete',
       });
       const router = new ModelRouter(twoModels, routes, false, stub);
@@ -1458,11 +1453,7 @@ describe('checkPhase auto rework', () => {
         maxReworkRounds: 1,
       });
 
-      expect(logCalls).toContainEqual([
-        'failover',
-        expect.stringContaining('usage_cap'),
-        { failoverReason: 'usage_cap' },
-      ]);
+      expect(logCalls).toContainEqual(['failover', expect.stringContaining('timeout'), { failoverReason: 'timeout' }]);
       expect(logCalls.some(([type]) => type === 'rework_model_failed')).toBe(true);
     },
   );

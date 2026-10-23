@@ -29,10 +29,9 @@ const models: ModelsConfig = {
   },
   tiers: { boss: ['stub-model'] },
   failover: {
-    triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+    triggers: ['rate_limit', 'unavailable', 'auth'],
     maxRetries: 2,
     cooldownMs: 0,
-    escalateAfterTierExhausted: true,
   },
   routingRules: {},
 };
@@ -70,19 +69,15 @@ const experimentalFirstModels: ModelsConfig = {
   },
   tiers: { boss: ['exp-model', 'real-model'] },
   failover: {
-    triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+    triggers: ['rate_limit', 'unavailable', 'auth'],
     maxRetries: 2,
     cooldownMs: 0,
-    escalateAfterTierExhausted: true,
   },
   routingRules: {},
 };
 
-// The two models sit on different providers deliberately. Cross-provider
-// failover (#554) blocks a whole provider once one of its models reports a
-// provider-level failure (rate_limit/usage_cap/timeout/unavailable), so a
-// same-provider pair can no longer exercise failover at all — the second model
-// is correctly skipped rather than tried.
+// Both models sit on the same provider: failover stays at one provider inside
+// a call (#3228), so a cross-provider pair would never reach the second model.
 const twoModels: ModelsConfig = {
   version: 1,
   models: {
@@ -96,7 +91,7 @@ const twoModels: ModelsConfig = {
       envKey: null,
     },
     'model-b': {
-      provider: 'openai',
+      provider: 'anthropic',
       tier: 'boss',
       costPerMtokInput: 0,
       costPerMtokOutput: 0,
@@ -107,10 +102,9 @@ const twoModels: ModelsConfig = {
   },
   tiers: { boss: ['model-a', 'model-b'] },
   failover: {
-    triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+    triggers: ['rate_limit', 'unavailable', 'auth'],
     maxRetries: 2,
     cooldownMs: 0,
-    escalateAfterTierExhausted: true,
   },
   routingRules: {},
 };
@@ -122,6 +116,15 @@ const providerModels: ModelsConfig = {
     'gpt-fallback': { ...twoModels.models['model-b'], provider: 'openai', codex: true },
   },
   tiers: { boss: ['claude-preferred', 'gpt-fallback'] },
+};
+
+const sameProviderModels: ModelsConfig = {
+  ...twoModels,
+  models: {
+    'claude-preferred': { ...twoModels.models['model-a'], provider: 'anthropic' },
+    'claude-sibling': { ...twoModels.models['model-b'], provider: 'anthropic' },
+  },
+  tiers: { boss: ['claude-preferred', 'claude-sibling'] },
 };
 
 /**
@@ -197,7 +200,7 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
     };
   }
 
-  it('fails over from a Claude model with local_auth to a reachable Codex model', async () => {
+  it('does not move from a signed-out Claude model to Codex inside one call (#3228)', async () => {
     const calls: string[] = [];
     const router: ModelRouter = new ModelRouter(
       realModels,
@@ -205,10 +208,9 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
       false,
       executor(() => router, calls),
     );
-    const result = await router.run('readiness_enrich', 'enrich');
-    expect(calls.some((m) => harnessOf(router, m) === 'claude-cli')).toBe(true);
-    expect(harnessOf(router, result.model)).toBe('codex-cli');
-    expect(result.output).toBe('ENRICHED');
+    await expect(router.run('readiness_enrich', 'enrich')).rejects.toMatchObject({ reason: 'local_auth' });
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls.every((m) => harnessOf(router, m) === 'claude-cli')).toBe(true);
   });
 
   it('tries a signed-out Claude once per run, then skips it and drops its build route (#2495)', async () => {
@@ -220,7 +222,7 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
       executor(() => router, calls),
     );
     const logs: string[] = [];
-    await router.run('readiness_enrich', 'enrich', { onLog: (m) => logs.push(m) });
+    await router.run('readiness_enrich', 'enrich', { onLog: (m) => logs.push(m) }).catch(() => undefined);
     await router.run('plan', 'plan', { onLog: (m) => logs.push(m) });
     await router.run('triage', 'triage', { onLog: (m) => logs.push(m) });
     expect(calls.filter((m) => harnessOf(router, m) === 'claude-cli')).toHaveLength(1);
@@ -238,7 +240,7 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
     );
     const sink = vi.fn();
     router.setLocalAuthSink(sink);
-    await router.run('readiness_enrich', 'enrich');
+    await router.run('readiness_enrich', 'enrich').catch(() => undefined);
     await router.run('plan', 'plan');
     expect(sink).toHaveBeenCalledTimes(1);
     expect(sink).toHaveBeenCalledWith('claude');
@@ -254,7 +256,8 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
     router.setLocalAuthSink(() => {
       throw new Error('disk full');
     });
-    const result = await router.run('readiness_enrich', 'enrich');
+    await expect(router.run('readiness_enrich', 'enrich')).rejects.toMatchObject({ reason: 'local_auth' });
+    const result = await router.run('plan', 'plan');
     expect(result.output).toBe('ENRICHED');
   });
 
@@ -265,7 +268,7 @@ describe('readiness_enrich failover to Codex (#2466)', () => {
       false,
       executor(() => router, []),
     );
-    await router.run('readiness_enrich', 'enrich');
+    await router.run('readiness_enrich', 'enrich').catch(() => undefined);
     await expect(router.run('build_claude', 'build')).rejects.toMatchObject({ reason: 'local_auth' });
   });
 
@@ -314,50 +317,55 @@ describe('ModelRouter with StubModelExecutor', () => {
     expect('cost' in result).toBe(false);
   });
 
-  it('opens a failed provider to the caller and continues with an explicit cross-provider fallback', async () => {
+  it('opens a failed provider to the caller and ends the call instead of using a cross-provider fallback (#3228)', async () => {
     const stub = new StubModelExecutor({ scripts: { plan: [{ fail: 'usage_cap' }, { output: 'FROM GPT' }] } });
     const router = new ModelRouter(providerModels, routes, false, stub);
     const failures: Array<{ provider: string; reason: string }> = [];
 
-    const result = await router.run('plan', 'do it', {
-      modelOverride: 'claude-preferred',
-      modelFallbacks: ['gpt-fallback'],
-      onProviderFailure: async ({ provider, reason }) => {
-        failures.push({ provider, reason });
-      },
-    });
+    await expect(
+      router.run('plan', 'do it', {
+        modelOverride: 'claude-preferred',
+        modelFallbacks: ['gpt-fallback'],
+        onProviderFailure: async ({ provider, reason }) => {
+          failures.push({ provider, reason });
+        },
+      }),
+    ).rejects.toMatchObject({ reason: 'usage_cap' });
 
-    expect(result.model).toBe('gpt-fallback');
+    expect(stub.calls).toHaveLength(1);
     expect(failures).toEqual([{ provider: 'anthropic', reason: 'usage_cap' }]);
   });
 
   it('does not retry a model that failed local_auth (#2494)', async () => {
     const stub = new StubModelExecutor({
-      scripts: { plan: [{ fail: 'local_auth' }, { output: 'SAME MODEL AGAIN' }, { output: 'FROM GPT' }] },
+      scripts: { plan: [{ fail: 'local_auth' }, { output: 'SAME MODEL AGAIN' }, { output: 'FROM SIBLING' }] },
     });
-    const router = new ModelRouter(providerModels, routes, false, stub);
-    const result = await router.run('plan', 'do it', {
-      modelOverride: 'claude-preferred',
-      modelFallbacks: ['gpt-fallback'],
-    });
-    expect(result.attempts.map((a) => a.model)).toEqual(['claude-preferred', 'gpt-fallback']);
+    const router = new ModelRouter(sameProviderModels, routes, false, stub);
+    const err: any = await router
+      .run('plan', 'do it', { modelOverride: 'claude-preferred', modelFallbacks: ['claude-sibling'] })
+      .catch((e) => e);
+    // The signed-out harness is tripped, so neither the same model nor its same-provider sibling runs again.
+    expect(err).toBeInstanceOf(ModelRouterError);
+    expect(err.reason).toBe('local_auth');
+    expect(err.attempts.map((a: { model: string }) => a.model)).toEqual(['claude-preferred']);
+    expect(stub.calls).toHaveLength(1);
   });
 
   it('does not open provider breaker bookkeeping for local auth failures', async () => {
-    const stub = new StubModelExecutor({ scripts: { plan: [{ fail: 'local_auth' }, { output: 'FROM GPT' }] } });
-    const router = new ModelRouter(providerModels, routes, false, stub);
+    const stub = new StubModelExecutor({ scripts: { plan: [{ fail: 'local_auth' }, { output: 'FROM SIBLING' }] } });
+    const router = new ModelRouter(sameProviderModels, routes, false, stub);
     const failures: Array<{ provider: string; reason: string }> = [];
 
-    const result = await router.run('plan', 'do it', {
-      modelOverride: 'claude-preferred',
-      modelFallbacks: ['gpt-fallback'],
-      onProviderFailure: async ({ provider, reason }) => {
-        failures.push({ provider, reason });
-      },
-    });
+    await expect(
+      router.run('plan', 'do it', {
+        modelOverride: 'claude-preferred',
+        modelFallbacks: ['claude-sibling'],
+        onProviderFailure: async ({ provider, reason }) => {
+          failures.push({ provider, reason });
+        },
+      }),
+    ).rejects.toMatchObject({ reason: 'local_auth' });
 
-    expect(result.model).toBe('gpt-fallback');
-    expect(result.failoverReason).toBe('local_auth');
     expect(failures).toEqual([]);
   });
 
@@ -531,25 +539,23 @@ describe('ModelRouter with StubModelExecutor', () => {
     expect(stub.calls).toHaveLength(0);
   });
 
-  it('fails over immediately on usage cap without retrying the same model', async () => {
+  it('ends the call immediately on usage cap without retrying or falling back (#3228)', async () => {
     const stub = new StubModelExecutor({
       scripts: { plan: [{ fail: 'usage_cap' }, { output: 'RECOVERED' }] },
     });
     const router = new ModelRouter(twoModels, routes, false, stub);
 
-    const result = await router.run('plan', 'do it');
+    const err: any = await router.run('plan', 'do it').catch((e) => e);
 
-    expect(result.output).toBe('RECOVERED');
-    expect(result.model).toBe('model-b');
-    expect(stub.calls.map((call) => call.model)).toEqual(['model-a', 'model-b']);
-    expect(result.attempts).toEqual([
+    expect(err).toBeInstanceOf(ModelRouterError);
+    expect(err.reason).toBe('usage_cap');
+    expect(stub.calls.map((call) => call.model)).toEqual(['model-a']);
+    expect(err.attempts).toEqual([
       { model: 'model-a', reason: 'usage_cap', ok: false, detail: 'msg="stub failure: usage_cap" exitCode=1' },
-      { model: 'model-b', reason: null, ok: true },
     ]);
-    expect(result.failoverReason).toBe('usage_cap');
   });
 
-  it('throws a typed error when every eligible model is usage-capped', async () => {
+  it('throws a typed error after one attempt when the first eligible model is usage-capped', async () => {
     const stub = new StubModelExecutor({
       scripts: { plan: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }] },
     });
@@ -559,11 +565,11 @@ describe('ModelRouter with StubModelExecutor', () => {
 
     expect(err).toBeInstanceOf(ModelRouterError);
     expect(err.reason).toBe('usage_cap');
-    expect(err.attempts).toHaveLength(2);
-    expect(stub.calls.map((call) => call.model)).toEqual(['model-a', 'model-b']);
+    expect(err.attempts).toHaveLength(1);
+    expect(stub.calls.map((call) => call.model)).toEqual(['model-a']);
   });
 
-  it.each(['usage_cap', 'timeout', 'empty_response'] as const)(
+  it.each(['timeout', 'empty_response'] as const)(
     'surfaces failoverReason %s on the winning result when the first model fails over to the second',
     async (reason) => {
       const stub = new StubModelExecutor({
@@ -1507,18 +1513,19 @@ describe('OpenCode Zen failover guard (#3334)', () => {
   };
 
   it('never calls a Zen failover candidate and logs provider_failover_zen_skip', async () => {
-    const stub = new StubModelExecutor({ scripts: { plan: [{ fail: 'usage_cap' }, { output: 'FROM CODEX' }] } });
+    const stub = new StubModelExecutor({ scripts: { plan: [{ fail: 'timeout' }, { output: 'FROM CODEX' }] } });
     const router = new ModelRouter(zenModels, routes, false, stub);
     const logs: string[] = [];
 
-    const result = await router.run('plan', 'do it', {
-      modelOverride: 'claude-m',
-      modelFallbacks: ['zen-model', 'codex-m'],
-      onLog: (line) => logs.push(line),
-    });
+    await expect(
+      router.run('plan', 'do it', {
+        modelOverride: 'claude-m',
+        modelFallbacks: ['zen-model', 'codex-m'],
+        onLog: (line) => logs.push(line),
+      }),
+    ).rejects.toMatchObject({ reason: 'timeout' });
 
-    expect(result.model).toBe('codex-m');
-    expect(stub.calls.map((c) => c.model)).toEqual(['claude-m', 'codex-m']);
+    expect(stub.calls.map((c) => c.model)).toEqual(['claude-m']);
     expect(logs.some((l) => l.startsWith('provider_failover_zen_skip:') && l.includes('zen-model'))).toBe(true);
   });
 
@@ -1540,26 +1547,33 @@ describe('provider failure kinds', () => {
   const failingExecutor = (err: Error) => ({
     runModel: vi.fn(async (model: string) => {
       if (model === 'claude-preferred') throw err;
-      return 'FROM GPT';
+      return 'FROM SIBLING';
     }),
   });
   const runWith = async (err: Error) => {
-    const router = new ModelRouter(providerModels, routes, false, failingExecutor(err));
+    const router = new ModelRouter(sameProviderModels, routes, false, failingExecutor(err));
     const infos: unknown[] = [];
-    const result = await router.run('plan', 'do it', {
-      modelOverride: 'claude-preferred',
-      modelFallbacks: ['gpt-fallback'],
-      onProviderFailure: async (info) => {
-        infos.push(info);
-      },
-    });
-    return { result, infos };
+    let result: Awaited<ReturnType<ModelRouter['run']>> | undefined;
+    let error: unknown;
+    try {
+      result = await router.run('plan', 'do it', {
+        modelOverride: 'claude-preferred',
+        modelFallbacks: ['claude-sibling'],
+        onProviderFailure: async (info) => {
+          infos.push(info);
+        },
+      });
+    } catch (err) {
+      error = err;
+    }
+    return { result, error, infos };
   };
 
   it('forwards kind and resetAt from a HarnessError to onProviderFailure', async () => {
-    const { infos } = await runWith(
+    const { infos, error } = await runWith(
       new HarnessError('cap', 'usage_cap', { kind: 'usage_cap', resetAt: '2026-10-20T12:00:00.000Z' }),
     );
+    expect(error).toMatchObject({ reason: 'usage_cap' });
     expect(infos).toEqual([
       expect.objectContaining({
         provider: 'anthropic',
@@ -1570,12 +1584,16 @@ describe('provider failure kinds', () => {
     ]);
   });
 
-  it('error and local_auth fail over without calling onProviderFailure', async () => {
-    for (const reason of ['error', 'local_auth'] as const) {
-      const { result, infos } = await runWith(new HarnessError('x', reason));
-      expect(result.model).toBe('gpt-fallback');
-      expect(infos).toEqual([]);
-    }
+  it('error fails over to the same-provider sibling without calling onProviderFailure', async () => {
+    const { result, infos } = await runWith(new HarnessError('x', 'error'));
+    expect(result?.model).toBe('claude-sibling');
+    expect(infos).toEqual([]);
+  });
+
+  it('local_auth ends the call (the signed-out harness is tripped) without calling onProviderFailure', async () => {
+    const { error, infos } = await runWith(new HarnessError('x', 'local_auth'));
+    expect(error).toMatchObject({ reason: 'local_auth' });
+    expect(infos).toEqual([]);
   });
 
   it('stops failover on kind other', async () => {
@@ -1591,8 +1609,7 @@ describe('provider failure kinds', () => {
   });
 
   it('reports a rejected key as kind auth with model and harness (#3232)', async () => {
-    const { result, infos } = await runWith(new HarnessError('authentication_error: invalid x-api-key', 'local_auth'));
-    expect(result.model).toBe('gpt-fallback');
+    const { infos } = await runWith(new HarnessError('authentication_error: invalid x-api-key', 'local_auth'));
     expect(infos).toEqual([
       expect.objectContaining({ provider: 'anthropic', reason: 'local_auth', kind: 'auth', model: 'claude-preferred' }),
     ]);
@@ -1609,12 +1626,149 @@ describe('provider failure kinds', () => {
     router.setProviderHold(async () => {
       throw new Error('boom');
     });
-    await router.run('plan', 'do it', opts);
+    await router.run('plan', 'do it', opts).catch(() => undefined);
     expect(executor.runModel.mock.calls.map((c) => c[0])).toContain('claude-preferred');
   });
 
   it('opens the breaker for kind auth even when the reason is error', async () => {
     const { infos } = await runWith(new HarnessError('x', 'error', { kind: 'auth' }));
     expect(infos).toEqual([expect.objectContaining({ kind: 'auth' })]);
+  });
+});
+
+const modelDef = (provider: 'anthropic' | 'openai') => ({
+  provider,
+  tier: 'boss',
+  costPerMtokInput: 0,
+  costPerMtokOutput: 0,
+  contextWindow: 1000,
+  capabilities: [],
+  envKey: null,
+});
+const sameProviderThenOther = (triggers: string[] = ['rate_limit', 'unavailable', 'auth']): ModelsConfig => ({
+  version: 1,
+  models: {
+    'anth-a': modelDef('anthropic'),
+    'anth-b': modelDef('anthropic'),
+    'oai-x': modelDef('openai'),
+  },
+  tiers: { boss: ['anth-a', 'anth-b', 'oai-x'] },
+  failover: { triggers, maxRetries: 2, cooldownMs: 0 },
+  routingRules: {},
+});
+
+/** Executor failing the named models with the given error and answering everything else. */
+function scripted(failures: Record<string, () => Error>) {
+  const seen: string[] = [];
+  return {
+    seen,
+    runModel: async (model: string) => {
+      seen.push(model);
+      const fail = failures[model];
+      if (fail) throw fail();
+      return `OUT ${model}`;
+    },
+  };
+}
+
+describe('router failover scope (#3228)', () => {
+  it('a usage cap ends the call and non-cap failover stays at one provider (2026-10-20)', async () => {
+    const exec = scripted({ 'model-a': () => new HarnessError('cap', 'usage_cap') });
+    const router = new ModelRouter(
+      {
+        ...twoModels,
+        models: { ...twoModels.models, 'model-b': { ...twoModels.models['model-b'], provider: 'openai' } },
+      },
+      routes,
+      false,
+      exec,
+    );
+    const onProviderFailure = vi.fn();
+
+    const err: any = await router.run('plan', 'p', { onProviderFailure }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ModelRouterError);
+    expect(err.reason).toBe('usage_cap');
+    expect(err.attempts).toHaveLength(1);
+    expect(exec.seen).toEqual(['model-a']);
+    expect(onProviderFailure).toHaveBeenCalledTimes(1);
+    expect(onProviderFailure).toHaveBeenCalledWith(expect.objectContaining({ provider: 'anthropic' }));
+  });
+});
+
+describe('failover.triggers (#3228)', () => {
+  const run = (exec: ReturnType<typeof scripted>, triggers?: string[], opts: Record<string, unknown> = {}) =>
+    new ModelRouter(sameProviderThenOther(triggers), routes, false, exec).run('plan', 'p', opts);
+
+  it('falls back to the next same-provider model on unavailable and never calls the other provider', async () => {
+    const first = scripted({ 'anth-a': () => new HarnessError('5xx', 'unavailable') });
+    expect((await run(first)).model).toBe('anth-b');
+
+    const both = scripted({
+      'anth-a': () => new HarnessError('5xx', 'unavailable'),
+      'anth-b': () => new HarnessError('5xx', 'unavailable'),
+    });
+    await expect(run(both)).rejects.toBeInstanceOf(ModelRouterError);
+    expect(both.seen).not.toContain('oai-x');
+  });
+
+  it('throws on a kind not in triggers without calling the next same-provider model', async () => {
+    const exec = scripted({ 'anth-a': () => new HarnessError('slow', 'timeout') });
+    await expect(run(exec, ['rate_limit'])).rejects.toMatchObject({ reason: 'timeout' });
+    expect(exec.seen).toEqual(['anth-a']);
+  });
+
+  it('empty triggers never fall back', async () => {
+    const exec = scripted({ 'anth-a': () => new HarnessError('5xx', 'unavailable') });
+    await expect(run(exec, [])).rejects.toMatchObject({ reason: 'unavailable' });
+    expect(exec.seen).toEqual(['anth-a']);
+  });
+
+  it('rate_limit retries the same model maxRetries times then falls back within the provider', async () => {
+    const exec = scripted({ 'anth-a': () => new HarnessError('429', 'rate_limit') });
+    const result = await run(exec);
+    expect(exec.seen).toEqual(['anth-a', 'anth-a', 'anth-a', 'anth-b']);
+    expect(result.model).toBe('anth-b');
+  });
+
+  it("auth kind (details.kind 'auth') falls back within the provider", async () => {
+    const exec = scripted({ 'anth-a': () => new HarnessError('bad key', 'error', { kind: 'auth' }) });
+    expect((await run(exec)).model).toBe('anth-b');
+    expect(exec.seen).not.toContain('oai-x');
+  });
+
+  it('the empty-output backstop throws when unavailable is not in triggers', async () => {
+    const seen: string[] = [];
+    const exec = {
+      seen,
+      runModel: async (model: string) => {
+        seen.push(model);
+        return '  ';
+      },
+    };
+    await expect(run(exec, ['rate_limit'])).rejects.toMatchObject({ reason: 'empty_response' });
+    expect(seen).toEqual(['anth-a']);
+    seen.length = 0;
+    await expect(run(exec)).rejects.toMatchObject({ reason: 'empty_response' });
+    expect(seen).toEqual(['anth-a', 'anth-b']);
+  });
+
+  it('a cross-provider modelFallbacks entry is skipped with a log line', async () => {
+    const exec = scripted({ 'anth-a': () => new HarnessError('5xx', 'unavailable') });
+    const logs: string[] = [];
+    await expect(
+      run(exec, undefined, { modelOverride: 'anth-a', modelFallbacks: ['oai-x'], onLog: (l: string) => logs.push(l) }),
+    ).rejects.toBeInstanceOf(ModelRouterError);
+    expect(exec.seen).not.toContain('oai-x');
+    expect(logs.some((l) => l.includes('Skipping oai-x') && l.includes('openai differs from anthropic'))).toBe(true);
+  });
+
+  it('models skipped before any attempt (held provider) do not pin the provider', async () => {
+    const exec = scripted({});
+    const router = new ModelRouter(sameProviderThenOther(), routes, false, exec);
+    router.setProviderHold(async (p) => p === 'anthropic');
+    const result = await router.run('plan', 'p');
+    expect(result.model).toBe('oai-x');
+    expect(exec.seen).toEqual(['oai-x']);
   });
 });

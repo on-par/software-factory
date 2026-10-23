@@ -14,10 +14,9 @@ import { checkPhase, reworkWorker } from './check.js';
 import { runnableBuildRoutes } from './plan-routes.js';
 
 const failover: ModelsConfig['failover'] = {
-  triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+  triggers: ['rate_limit', 'unavailable', 'auth'],
   maxRetries: 2,
   cooldownMs: 0,
-  escalateAfterTierExhausted: true,
 };
 
 const commandModels: ModelsConfig = {

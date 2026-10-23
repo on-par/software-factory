@@ -4,6 +4,8 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
+
 import {
   getConstitutionsDir,
   getFactoryPaths,
@@ -59,10 +61,9 @@ function writeModelsConfig(dir: string, harness?: string, harnesses?: Record<str
     },
     tiers: { boss: ['some-model'] },
     failover: {
-      triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+      triggers: ['rate_limit', 'unavailable', 'auth'],
       maxRetries: 2,
       cooldownMs: 0,
-      escalateAfterTierExhausted: true,
     },
     routingRules: {},
     ...(harnesses !== undefined ? { harnesses } : {}),
@@ -1818,5 +1819,64 @@ describe('factoryRuntimeConfigIssues (#2611)', () => {
   it('returns the path of a bad value', () => {
     const issues = factoryRuntimeConfigIssues({ sweep: { loopIntervalSeconds: 'soon' } });
     expect(issues.map((i) => i.path.join('.'))).toContain('sweep.loopIntervalSeconds');
+  });
+});
+
+describe('failover config (#3228)', () => {
+  const tmp = createTempDirs();
+  let dir: string;
+  let warn: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(async () => {
+    dir = await tmp.make('failover-config-');
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(async () => {
+    warn.mockRestore();
+    await tmp.cleanup();
+  });
+
+  async function loadWithFailover(failover: Record<string, unknown>) {
+    const path = join(dir, 'models.json');
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 1,
+        models: { 'some-model': baseModelDef() },
+        tiers: { boss: ['some-model'] },
+        failover: { maxRetries: 2, cooldownMs: 0, ...failover },
+        routingRules: {},
+      }),
+    );
+    return loadModelsConfig(path);
+  }
+
+  it.each(['bogus', 'other'])('rejects the %s trigger naming the entry', async (entry) => {
+    await expect(loadWithFailover({ triggers: [entry] })).rejects.toThrow(new RegExp(`'${entry}'`));
+    await expect(loadWithFailover({ triggers: [entry] })).rejects.toThrow(/triggers/);
+  });
+
+  it('rejects a legacy reason name with the kind it maps to', async () => {
+    await expect(loadWithFailover({ triggers: ['timeout'] })).rejects.toThrow(/use 'unavailable'/);
+  });
+
+  it('loads a usage_cap trigger with exactly one warning', async () => {
+    const config = await loadWithFailover({ triggers: ['usage_cap', 'rate_limit'] });
+    expect(config.failover.triggers).toEqual(['usage_cap', 'rate_limit']);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('usage_cap');
+  });
+
+  it('strips escalateAfterTierExhausted and warns once', async () => {
+    const config = await loadWithFailover({ triggers: ['rate_limit'], escalateAfterTierExhausted: true });
+    expect(config.failover).not.toHaveProperty('escalateAfterTierExhausted');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('escalateAfterTierExhausted');
+  });
+
+  it('packaged defaults load without warnings and use kind triggers', () => {
+    expect(loadModelsConfig().failover.triggers).toEqual(['rate_limit', 'unavailable', 'auth']);
+    expect(warn).not.toHaveBeenCalled();
   });
 });

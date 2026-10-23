@@ -24,7 +24,7 @@ const models: ModelsConfig = {
     },
   },
   tiers: { worker: ['stub-worker'] },
-  failover: { triggers: ['error'], maxRetries: 2, cooldownMs: 0, escalateAfterTierExhausted: true },
+  failover: { triggers: ['error'], maxRetries: 2, cooldownMs: 0 },
   routingRules: {},
 };
 
