@@ -171,7 +171,7 @@ describe('compileChecker', () => {
     const result = await compileChecker(makeContext(worktree));
 
     expect(result.result).toBe('SKIP');
-    expect(result.details).toContain('no build system detected — skipped');
+    expect(result.details).toMatch(/^no build system detected \(no checks\.build in .*\) — skipped$/);
   });
 
   it('fails closed when package.json cannot be read', async () => {
@@ -234,7 +234,7 @@ describe('compileChecker', () => {
     const result = await compileChecker(makeContext(worktree));
 
     expect(result.result).toBe('SKIP');
-    expect(result.details).toContain('no build system detected — skipped');
+    expect(result.details).toMatch(/^no build system detected \(no checks\.build in .*\) — skipped$/);
   });
 
   it('prefers make over cargo when both manifests are present', { timeout: 30000 }, async () => {
@@ -817,7 +817,7 @@ describe('lintChecker', () => {
     const result = await lintChecker(makeContext(worktree));
 
     expect(result.result).toBe('SKIP');
-    expect(result.details).toContain('no linting configured — skipped');
+    expect(result.details).toMatch(/^no linting configured \(no checks\.lint in .*\) — skipped$/);
   });
 
   it('forwards ctx.env to npm run lint', { timeout: 30000 }, async () => {

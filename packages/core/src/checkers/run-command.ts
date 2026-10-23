@@ -4,6 +4,7 @@ import { runCommand, type RunCommandOptions } from '../utils/command-runner.js';
  * They must never change a repo's verification result (#3428). */
 export const VERIFICATION_SCRUBBED_ENV_VARS = [
   'FACTORY_RUN_CONFIG_JSON',
+  'FACTORY_RUN_CONFIG_ORIGIN',
   'FACTORY_MERGE',
   'FACTORY_MERGE_ADMIN',
   'FACTORY_LOCAL_ONLY',

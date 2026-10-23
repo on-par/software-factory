@@ -1,6 +1,11 @@
 // packages/cli/src/cli/doctor-verify.ts — `factory doctor` Verify section: the build/test/lint commands CHECK will run (#3473)
 
-import { resolveCompileCommand, resolveLintCommands, resolveTestsCommand } from '@on-par/factory-core/internal';
+import {
+  describeChecksProbe,
+  resolveCompileCommand,
+  resolveLintCommands,
+  resolveTestsCommand,
+} from '@on-par/factory-core/internal';
 
 import { MIN_NODE_MAJOR } from '../node-version.js';
 import type { DoctorCheck } from './doctor.js';
@@ -24,6 +29,8 @@ export interface VerifyCommandRow {
 export interface ResolvedVerifyCommands {
   rows: VerifyCommandRow[];
   error?: string;
+  /** The config file probed for `checks`, named in the missing-command rows (#3600). */
+  checksProbe?: string;
 }
 
 const TEST_SOURCES = {
@@ -45,6 +52,7 @@ const emptyRow = (kind: VerifyKind): VerifyCommandRow => ({ kind, command: null,
  *  failure (for example a malformed package.json) comes back as `error`, never a throw. */
 export async function resolveVerifyCommands(repoRoot: string): Promise<ResolvedVerifyCommands> {
   const src = { worktree: repoRoot };
+  const checksProbe = describeChecksProbe(src, 'source checkout');
   try {
     const build = await resolveCompileCommand(src);
     const tests = await resolveTestsCommand(src);
@@ -59,6 +67,7 @@ export async function resolveVerifyCommands(repoRoot: string): Promise<ResolvedV
           ? lint.map((c) => rowFor('lint', c.argv, c.label === 'checks.lint' ? c.source! : LINT_SOURCES[c.label]))
           : [emptyRow('lint')]),
       ],
+      checksProbe,
     };
   } catch (err) {
     return { rows: [], error: err instanceof Error ? err.message : String(err) };
@@ -75,18 +84,18 @@ export function withPathResults(
 
 const NO_TESTS_FIX =
   'run `factory init --detect-checks` to find and declare your test command under `checks` in .factory/config.json (or add scripts/verify.sh, scripts/verify.ps1, or a package.json "test" script)';
-const NO_TESTS_DETAIL =
-  'no checks.test in .factory/config.json, scripts/verify.sh, scripts/verify.ps1, package.json test script or pytest surface';
+const DEFAULT_CHECKS_PROBE = '.factory/config.yaml|yml|json';
 
-function missingRow(row: VerifyCommandRow, requireTests: boolean): DoctorCheck {
+function missingRow(row: VerifyCommandRow, requireTests: boolean, probe = DEFAULT_CHECKS_PROBE): DoctorCheck {
   const section = VERIFY_SECTION;
+  const noTestsDetail = `no checks.test in ${probe}, scripts/verify.sh, scripts/verify.ps1, package.json test script or pytest surface`;
   if (row.kind === 'test') {
     return requireTests
       ? {
           name: 'verify test',
           section,
           ok: false,
-          detail: `CHECK will run no tests, but the constitution sets requireTests: true; ${NO_TESTS_DETAIL}`,
+          detail: `CHECK will run no tests, but the constitution sets requireTests: true; ${noTestsDetail}`,
           fix: NO_TESTS_FIX,
         }
       : {
@@ -94,7 +103,7 @@ function missingRow(row: VerifyCommandRow, requireTests: boolean): DoctorCheck {
           section,
           ok: false,
           optional: true,
-          detail: `CHECK will run no tests; ${NO_TESTS_DETAIL}`,
+          detail: `CHECK will run no tests; ${noTestsDetail}`,
           fix: NO_TESTS_FIX,
         };
   }
@@ -104,8 +113,7 @@ function missingRow(row: VerifyCommandRow, requireTests: boolean): DoctorCheck {
       section,
       ok: false,
       optional: true,
-      detail:
-        'no build system detected (checks.build in .factory/config.json, package.json build script, Makefile, Cargo.toml); CHECK skips compile',
+      detail: `no build system detected (checks.build in ${probe}, package.json build script, Makefile, Cargo.toml); CHECK skips compile`,
       fix: 'run `factory init --detect-checks` to declare a build command',
     };
   }
@@ -114,8 +122,7 @@ function missingRow(row: VerifyCommandRow, requireTests: boolean): DoctorCheck {
     section,
     ok: true,
     optional: true,
-    detail:
-      'no lint command (checks.lint in .factory/config.json, package.json lint script, tsconfig.json); CHECK skips lint',
+    detail: `no lint command (checks.lint in ${probe}, package.json lint script, tsconfig.json); CHECK skips lint`,
   };
 }
 
@@ -139,7 +146,7 @@ export function verifyCommandChecks(
   }
   return resolved.rows.map((row): DoctorCheck => {
     const { command, source, executable } = row;
-    if (command === null || executable === null) return missingRow(row, opts.requireTests);
+    if (command === null || executable === null) return missingRow(row, opts.requireTests, resolved.checksProbe);
     const name = row.kind === 'lint' ? `verify lint (${source})` : `verify ${row.kind}`;
     if (opts.commandAvailable(executable)) {
       return { name, section, ok: true, detail: `\`${command}\` (from ${source}); ${executable} found on PATH` };

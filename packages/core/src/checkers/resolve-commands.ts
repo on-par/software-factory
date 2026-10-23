@@ -1,12 +1,15 @@
 // src/checkers/resolve-commands.ts — the build/test/lint commands CHECK runs for a worktree. A command the repo
 // declares under `checks` in its config file wins; otherwise each resolver falls back to file-based guesses.
 
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 
 import { checkCommandArgv, type CheckKind, type ChecksConfig } from '../config/checks-section.js';
 import { getFactoryPaths } from '../config/index.js';
 import { loadRepoConfig } from '../config/repo.js';
+import { REPO_CONFIG_FILENAMES } from '../config/repo-config-file.js';
+import { runConfigOrigin, runConfigSource } from '../config/run-config-source.js';
 import { detectPythonTestSurface, fileExists, type WorktreeProbe } from './probe.js';
 
 export interface PackageJson {
@@ -32,7 +35,26 @@ function declaredCheck(ctx: LintCommandSource, kind: CheckKind): { argv: string[
     return argv ? { argv, source: '.factory/config.json' } : null;
   }
   const argv = checkCommandArgv(loadRepoConfig(ctx.worktree)?.checks, kind);
-  return argv ? { argv, source: `.factory/${basename(getFactoryPaths(ctx.worktree).config)}` } : null;
+  if (!argv) return null;
+  // A run config snapshot is read instead of the worktree's file (#3600): label the file it came from.
+  const file = runConfigSource() === undefined ? getFactoryPaths(ctx.worktree).config : runConfigOrigin();
+  return { argv, source: `.factory/${file === undefined ? 'config (run config snapshot)' : basename(file)}` };
+}
+
+/** Where the resolvers look for `checks`, for SKIP details (#3600): the run config snapshot, or the
+ *  config file under `ctx.worktree` (`checkout` names that directory: the worktree for CHECK, the source checkout for doctor). */
+export function describeChecksProbe(ctx: LintCommandSource, checkout = 'worktree'): string {
+  if (ctx.checks !== undefined) return 'the checks passed to CHECK';
+  if (runConfigSource() !== undefined) {
+    const origin = runConfigOrigin();
+    return origin === undefined
+      ? 'the daemon run config snapshot (FACTORY_RUN_CONFIG_JSON)'
+      : `the run config snapshot of ${origin}`;
+  }
+  const file = getFactoryPaths(ctx.worktree).config;
+  if (existsSync(file)) return `${file} (${checkout})`;
+  const others = REPO_CONFIG_FILENAMES.filter((name) => name !== basename(file));
+  return `${file} (${checkout}; also probed ${others.join(', ')})`;
 }
 
 export type CompileCommand = {

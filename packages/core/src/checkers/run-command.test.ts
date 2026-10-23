@@ -12,6 +12,7 @@ describe('runVerificationCommand', () => {
     vi.stubEnv('FACTORY_LOCAL_ONLY', '1');
     vi.stubEnv('FACTORY_SKIP_CI', '1');
     vi.stubEnv('FACTORY_RUN_CONFIG_JSON', '{}');
+    vi.stubEnv('FACTORY_RUN_CONFIG_ORIGIN', '/src/.factory/config.yaml');
     vi.stubEnv('HTTPS_PROXY', 'http://proxy:1');
     vi.stubEnv('NODE_OPTIONS', '--max-old-space-size=2048');
 
@@ -30,13 +31,14 @@ describe('runVerificationCommand', () => {
     expect(process.env.FACTORY_MERGE_ADMIN).toBe('1');
   });
 
-  it('scrubs exactly the run-config snapshot and the four merge flags', () => {
+  it('scrubs exactly the run-config snapshot, its origin and the four merge flags', () => {
     expect([...VERIFICATION_SCRUBBED_ENV_VARS].sort()).toEqual(
       [
         'FACTORY_LOCAL_ONLY',
         'FACTORY_MERGE',
         'FACTORY_MERGE_ADMIN',
         'FACTORY_RUN_CONFIG_JSON',
+        'FACTORY_RUN_CONFIG_ORIGIN',
         'FACTORY_SKIP_CI',
       ].sort(),
     );

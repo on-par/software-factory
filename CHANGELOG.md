@@ -15,6 +15,12 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- One-shot runs (`ship`, `run-issue`, `run-brief`, `run` lanes) snapshot the
+  source checkout's `.factory/config.*` for the whole run, as the daemon does.
+  CHECK now runs the declared `checks.build`, `checks.test` and `checks.lint`
+  when `.factory/` is untracked and so missing from the worktree (#3600). SKIP
+  details name the file and directory probed, and `factory doctor` warns when
+  `.factory/` is git-ignored or excluded.
 - Codex PLAN can write its spec under the resolved factory state directory, and
   worktree commits can update the primary repo's `.git` metadata. Codex grants
   GitHub egress to PLAN and publishing build tasks, keeps the configured
