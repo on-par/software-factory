@@ -420,7 +420,7 @@ describe('runIssue — SHIP CI rework loop (#2816)', () => {
 });
 
 describe('draft PR (#3449)', () => {
-  it('every CI-rework SHIP re-entry keeps draft and the run ends ready left as draft', async () => {
+  it.each(['Custom footer', ''])('every CI-rework SHIP re-entry keeps draft and footer %j', async (footer) => {
     const ciFailure: CiFailureEvidence = {
       failingChecks: [{ name: 'CodeQL', conclusion: 'failure', summary: '1 new alert' }],
       alerts: [
@@ -443,9 +443,12 @@ describe('draft PR (#3449)', () => {
       })
       .mockResolvedValueOnce({ ok: true, prNumber: 9, ciOutcome: 'success', draft: true });
     const log = vi.fn<Log>();
-    const outcome = await runIssue(request, { ...policy, pr: { draft: true } }, ports(log));
+    const outcome = await runIssue(request, { ...policy, pr: { draft: true, footer } }, ports(log));
     expect(outcome).toMatchObject({ state: 'ready', prNumber: 9, draft: true });
-    for (const call of shipPhase.mock.calls) expect(call[0].draft).toBe(true);
+    for (const call of shipPhase.mock.calls) {
+      expect(call[0].draft).toBe(true);
+      expect(call[0].footer).toBe(footer);
+    }
     expect(log).toHaveBeenCalledWith('ready', expect.stringContaining('PR #9 left as draft'));
   });
 
@@ -454,5 +457,6 @@ describe('draft PR (#3449)', () => {
     const outcome = await runIssue(request, policy, ports(vi.fn<Log>()));
     expect(outcome).not.toHaveProperty('draft');
     expect(shipPhase.mock.calls[0][0].draft).toBeUndefined();
+    expect(shipPhase.mock.calls[0][0].footer).toBeUndefined();
   });
 });

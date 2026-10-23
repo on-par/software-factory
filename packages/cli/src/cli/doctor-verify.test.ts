@@ -150,6 +150,20 @@ describe('verifyCommandChecks', () => {
     expect(checks.find((c) => c.name === 'verify lint')).toMatchObject({ ok: true, optional: true });
   });
 
+  it('missing rows name the config file probed in the source checkout (#3600)', async () => {
+    const dir = repo({ 'App.csproj': '' });
+    const probed = `${dir}/.factory/config.yaml (source checkout; also probed config.yml, config.json)`;
+    const checks = verifyCommandChecks(await resolveVerifyCommands(dir), opts);
+    expect(checks.find((c) => c.name === 'verify build')!.detail).toContain(`checks.build in ${probed},`);
+    expect(checks.find((c) => c.name === 'verify test')!.detail).toContain(`no checks.test in ${probed},`);
+    expect(checks.find((c) => c.name === 'verify lint')!.detail).toContain(`checks.lint in ${probed},`);
+    const bare = verifyCommandChecks(
+      { rows: [{ kind: 'build', command: null, source: null, executable: null }] },
+      opts,
+    );
+    expect(bare[0]!.detail).toContain('checks.build in .factory/config.yaml|yml|json,');
+  });
+
   it('a verify.ps1 repo without pwsh on PATH fails the test row and names pwsh', async () => {
     const resolved = await resolveVerifyCommands(repo({ 'scripts/verify.ps1': '' }));
     const checks = verifyCommandChecks(resolved, { ...opts, commandAvailable: (c) => c !== 'pwsh' });

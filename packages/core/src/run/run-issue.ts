@@ -1177,7 +1177,7 @@ async function runIssueOnce(
         runId,
         onRecheck,
       },
-      { builtRoute, builtModel, reviewRouting, pinNote, planSlice, draftPr: policy.pr?.draft },
+      { builtRoute, builtModel, reviewRouting, pinNote, planSlice, pr: policy.pr },
     );
     runPrNumber = shipped.ship.prNumber;
     shippedGreen = shipped.ship.ok && !shipped.ship.alreadyDelivered && shipped.ship.ciOutcome === 'success';

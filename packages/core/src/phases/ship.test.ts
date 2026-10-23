@@ -1346,7 +1346,11 @@ describe('shipPhase evidence pack', () => {
 });
 
 describe('shipPhase PR description', () => {
-  it('opens the PR with a short what-changed summary ahead of the diff stat', async () => {
+  it.each([
+    [undefined, 'This PR was made by Software Factory'],
+    ['  Custom {{repo}} footer  ', '  Custom {{repo}} footer  '],
+    ['', 'Closes #23'],
+  ] as const)('opens the PR with a short summary and footer %j', async (footer, ending) => {
     const dir = await mkdtemp(join(tmpdir(), 'ship-pr-body-test-'));
     try {
       const specPath = join(dir, 'issue-23.md');
@@ -1388,6 +1392,7 @@ describe('shipPhase PR description', () => {
         log: () => {},
         run,
         specPath,
+        footer,
       });
 
       expect(result).toEqual({ ok: true, prNumber: 123 });
@@ -1399,7 +1404,8 @@ describe('shipPhase PR description', () => {
       expect(body).not.toContain('route: codex');
       expect(body).not.toContain('Recovering uncommitted work.');
       expect(body.indexOf('## What changed')).toBeLessThan(body.indexOf('ship.ts | 12'));
-      expect(body.split('\n').at(-1)).toBe("This PR made possible by On PAR Dev's Software Factory.");
+      expect(body.endsWith(ending)).toBe(true);
+      if (footer !== undefined) expect(body).not.toContain('This PR was made by Software Factory');
       expect(body).toContain('Closes #23');
     } finally {
       await rm(dir, { recursive: true, force: true });

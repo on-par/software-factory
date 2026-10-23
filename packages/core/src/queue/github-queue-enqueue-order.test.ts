@@ -125,3 +125,47 @@ describe('enqueue order selection', () => {
     expect(res).not.toHaveProperty('collision');
   });
 });
+
+describe('enqueue options (#3554)', () => {
+  const lane = (skip: number[] = []) => queuedPeers(10).filter((i) => !skip.includes(i.number));
+
+  it('requireMember fails every issue without writing when the scan omits it', async () => {
+    const client = createStore([...lane(), { number: 50, labels: [laneLabel('L')] }]);
+    let writes = 0;
+    const add = client.addLabels;
+    client.addLabels = async (a) => {
+      writes += 1;
+      return add(a);
+    };
+    const res = await queueFor(client).enqueue('L', [60, 61], { requireMember: 60 });
+    expect(res.map((r) => r.outcome)).toEqual(['failed', 'failed']);
+    expect(res[0]?.detail).toContain('#60');
+    expect(writes).toBe(0);
+  });
+
+  it('requireMember places normally when the scan lists the issue', async () => {
+    const client = createStore([...lane(), { number: 50, labels: [laneLabel('L')] }]);
+    const [res] = await queueFor(client).enqueue('L', [50], { requireMember: 50 });
+    expect(res).toMatchObject({ outcome: 'queued', position: 11 });
+  });
+
+  it('preferOrder takes a free order', async () => {
+    const client = createStore(lane([5]));
+    const [res] = await queueFor(client).enqueue('L', [60], { preferOrder: 5 });
+    expect(res).toMatchObject({ outcome: 'queued', position: 5 });
+    expect(res).not.toHaveProperty('preferredOrderHeldBy');
+    expect(await client.getIssueLabels({ owner: 'o', repo: 'r', issue_number: 60 })).toContain(queueOrderLabel(5));
+  });
+
+  it('preferOrder goes to the back and reports the holders when taken', async () => {
+    const client = createStore(lane());
+    const [res] = await queueFor(client).enqueue('L', [60], { preferOrder: 5 });
+    expect(res).toMatchObject({ outcome: 'queued', position: 11, preferredOrderHeldBy: [5] });
+  });
+
+  it('preferOrder is ignored for multi-issue calls', async () => {
+    const client = createStore(lane([5]));
+    const res = await queueFor(client).enqueue('L', [60, 61], { preferOrder: 5 });
+    expect(res.map((r) => r.position)).toEqual([11, 12]);
+  });
+});

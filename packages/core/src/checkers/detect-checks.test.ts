@@ -34,6 +34,15 @@ describe('detectCheckHeuristics', () => {
     }
   });
 
+  it('an .editorconfig beside the solution adds dotnet format --verify-no-changes as lint (#3600)', async () => {
+    expect((await detectCheckHeuristics(repo({ 'App.sln': '', '.editorconfig': 'root = true\n' }))).guessed).toEqual({
+      build: 'dotnet build App.sln',
+      test: 'dotnet test App.sln',
+      lint: 'dotnet format App.sln --verify-no-changes',
+    });
+    expect((await detectCheckHeuristics(repo({ '.editorconfig': '' }))).guessed).toEqual({});
+  });
+
   it('quotes a solution name with spaces, and falls back to a lone project file', async () => {
     expect((await detectCheckHeuristics(repo({ 'My App.sln': '' }))).guessed.test).toBe('dotnet test "My App.sln"');
     expect((await detectCheckHeuristics(repo({ 'App.csproj': '' }))).guessed.build).toBe('dotnet build App.csproj');

@@ -3120,7 +3120,7 @@ bash scripts/verify.sh
         labels = labels.filter((l) => l !== name);
         return {};
       });
-      h.octokit.rest.issues.listForRepo = vi.fn(async () => ({ data: [] }));
+      h.octokit.rest.issues.listForRepo = vi.fn(async () => ({ data: [{ number: 12, labels: [labels[1]] }] }));
       h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async () => ({ data: labels.map((name) => ({ name })) }));
     });
 

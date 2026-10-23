@@ -14,6 +14,10 @@ import {
 } from './defaults.js';
 
 describe('shipped defaults', () => {
+  it('ships the default PR footer', () => {
+    expect(defaultFactoryConfig.pr.footer).toBe('This PR was made by Software Factory');
+  });
+
   it('defaults the lane breaker threshold to 2 (#1915)', () => {
     expect(defaultLaneBreakerThreshold).toBe(2);
   });

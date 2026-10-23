@@ -343,6 +343,15 @@ export interface EnqueueResult {
   detail?: string;
   /** Set only on 'queued' when order-only in-lane issues held the slot a queued-only scan would have used (#2988). */
   collision?: OrderCollision;
+  /** Set only when preferOrder was asked for and other lane members held it; the issue went to the back (#3554). */
+  preferredOrderHeldBy?: number[];
+}
+
+export interface EnqueueOptions {
+  /** Fail every issue (outcome 'failed', no label written) when the lane scan does not list this issue: it carries the lane label, so its absence proves an empty or partial listing (#3554). */
+  requireMember?: number;
+  /** Place a single-issue enqueue at this order when no other open lane member holds it; otherwise at the back (#3554). */
+  preferOrder?: number;
 }
 
 export type QueueClearAction = 'would-clear' | 'would-skip';
@@ -444,7 +453,7 @@ export interface GithubQueue extends ClaimSettler {
   list(lane: string): Promise<number[]>;
   lanes(): Promise<string[]>;
   migrateLocalQueue(entries: readonly QueueEntry[]): Promise<void>;
-  enqueue(lane: string, issues: readonly number[]): Promise<EnqueueResult[]>;
+  enqueue(lane: string, issues: readonly number[], options?: EnqueueOptions): Promise<EnqueueResult[]>;
   /** Queues decomposed children right behind `parent`'s order, shifting later in-lane issues up (#3539). */
   enqueueAfter(lane: string, parent: number, issues: readonly number[]): Promise<ChildEnqueueResult>;
   /** Read-only preview of what clearing the queue would touch: one list call, never writes. Covers every open

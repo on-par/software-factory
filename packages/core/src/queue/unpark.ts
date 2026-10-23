@@ -1,4 +1,4 @@
-// packages/core/src/queue/unpark.ts — re-queue a factory:parked issue; parked label removed last (#2277, #2318, ADR-0044).
+// packages/core/src/queue/unpark.ts — re-queue a factory:parked issue at the back of its lane; parked label removed last; fails closed on an incomplete lane scan; --keep-order restores a free park-time order (#2277, #2318, #3554, ADR-0044).
 
 import {
   createGithubQueue,
@@ -52,6 +52,10 @@ export interface UnparkInput {
   keepsFile?: string;
   /** Reports a best-effort keep-record release that failed; the unpark still succeeds. */
   warn?: (msg: string) => void;
+  /** `--keep-order`: restore the park-time order when no other lane member holds it (#3554). */
+  keepOrder?: boolean;
+  /** Reads the order recorded in the issue's park state; only called when keepOrder is set. */
+  readParkedOrder?: () => Promise<number | undefined>;
 }
 
 function message(err: unknown): string {
@@ -86,15 +90,38 @@ export async function runUnpark(input: UnparkInput): Promise<UnparkJson> {
     }
 
     const keepLane = laneLabel(lane);
+    const isMember = labelsBefore.includes(keepLane);
+    let preferOrder: number | undefined;
+    if (input.keepOrder) {
+      try {
+        preferOrder = await input.readParkedOrder?.();
+        if (preferOrder === undefined) {
+          input.warn?.(`--keep-order: #${issue} has no recorded park-time order; queuing at the back`);
+        }
+      } catch (err) {
+        input.warn?.(
+          `--keep-order: could not read the park-time order for #${issue}: ${message(err)}; queuing at the back`,
+        );
+      }
+    }
     for (const name of labelsBefore) {
       if (name.startsWith(QUEUE_ORDER_LABEL_PREFIX) || (name.startsWith(LANE_LABEL_PREFIX) && name !== keepLane)) {
         await client.removeLabel({ ...ref, name });
       }
     }
 
-    const [r] = await createGithubQueue({ client, owner, repo }).enqueue(lane, [issue]);
+    const [r] = await createGithubQueue({ client, owner, repo }).enqueue(lane, [issue], {
+      ...(isMember ? { requireMember: issue } : {}),
+      ...(preferOrder === undefined ? {} : { preferOrder }),
+    });
     if (r === undefined || r.outcome !== 'queued' || r.position === undefined) {
       throw new UnparkError('unpark-failed', r?.detail ?? `enqueue returned ${r?.outcome}`);
+    }
+
+    if (r.preferredOrderHeldBy) {
+      input.warn?.(
+        `--keep-order: order ${preferOrder} is held by ${r.preferredOrderHeldBy.map((n) => `#${n}`).join(', ')}; queued #${issue} at the back (order ${r.position})`,
+      );
     }
 
     // Remove the parked label last so a failed run can simply be repeated.

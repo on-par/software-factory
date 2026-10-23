@@ -121,9 +121,22 @@ describe('renderPrBody', () => {
 
     for (const body of [full, bare]) {
       const lines = body.split('\n');
-      expect(lines.at(-1)).toBe("This PR made possible by On PAR Dev's Software Factory.");
+      expect(lines.at(-1)).toBe('This PR was made by Software Factory');
       expect(lines.slice(0, -1).some((l) => l.includes('Software Factory'))).toBe(false);
     }
+  });
+
+  it.each(['  Custom {{repo}} footer  ', 'First line\nSecond line', '   '])('uses footer %j verbatim', (footer) => {
+    const body = renderPrBody({ summaryLine: 'x', diffStat: '', closes: 42, footer });
+    expect(body).toBe(`${renderPrBody({ summaryLine: 'x', diffStat: '', closes: 42, footer: '' })}\n\n${footer}`);
+    expect(body).not.toContain(PR_BODY_FOOTER);
+  });
+
+  it.each([{ closes: 42 }, { partOf: 42 }, {}])('removes an empty footer and its separator after %j', (issue) => {
+    const body = renderPrBody({ summaryLine: 'x', diffStat: '', ...issue, footer: '' });
+    const lastSection = 'closes' in issue ? 'Closes #42' : 'partOf' in issue ? 'Part of #42' : '</details>';
+    expect(body.endsWith(lastSection)).toBe(true);
+    expect(body).not.toContain(PR_BODY_FOOTER);
   });
 
   it('renders a one-line Proof, with not run and 0 rounds by default', () => {

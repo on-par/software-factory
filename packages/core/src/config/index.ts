@@ -23,6 +23,8 @@ import { isOpenCodeZenModel } from './provider-order.js';
 import { DEFAULT_CI_DEADLINE_MS } from '../utils/ci-deadline.js';
 import { runConfigSource } from './run-config-source.js';
 import { RunConfigSectionSchema } from './run-section.js';
+import { PrConfigSections } from './pr-section.js';
+import { FACTORY_RUNTIME_CONFIG_KEYS } from './runtime-config-keys.js';
 
 import type { FilingPolicy } from '../filing/policy.js';
 import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS, retiredHarnessReplacement } from '../harness/catalog.js';
@@ -146,6 +148,7 @@ export const FactoryConfigSchema = z.object({
    *  `resolveMergePolicy`). Left optional with no defaults so "unset" survives parsing
    *  and is distinguishable from an explicit `false`. */
   run: RunConfigSectionSchema,
+  ...PrConfigSections,
   worktree: z.object({
     parent: z.string(),
     comment: z.string(),
@@ -364,35 +367,7 @@ export function loadFactoryConfig(path?: string): FactoryConfig {
  *  ./repo.ts, and each loader ignores the other's keys. `version` is deliberately absent:
  *  it is the repo namespace's literal, and FactoryConfig's version comes from the defaults.
  *  Adding a new top-level section to FactoryConfigSchema means adding it here too. */
-export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
-  'paths',
-  'timeouts',
-  'merge',
-  'run',
-  'worktree',
-  'byok',
-  'notifications',
-  'cost_tracking',
-  'ci',
-  'sweep',
-  'plan_approval',
-  'design',
-  'readiness',
-  'build',
-  'sizeGate',
-  'kpis',
-  'sandbox',
-  'discovery',
-  'filing',
-  'ingest',
-  'intake',
-  'environment',
-  'host',
-  'auto_failover',
-  'queue',
-  'adr',
-  'workspace',
-];
+export { FACTORY_RUNTIME_CONFIG_KEYS } from './runtime-config-keys.js';
 
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

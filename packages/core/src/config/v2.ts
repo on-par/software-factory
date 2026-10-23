@@ -33,6 +33,7 @@ import { z } from 'zod';
 import { HarnessDeclarationSchema } from './harness-declaration.js';
 import { ModelsSectionSchema } from './v2-models.js';
 import { readRepoConfigFile } from './repo-config-file.js';
+import { PrConfigSections } from './pr-section.js';
 
 // ---------- Routes ----------
 
@@ -330,6 +331,7 @@ const StewardSectionSchema = z
 export const FactoryConfigV2Schema = z
   .object({
     version: z.literal(2).describe('Config schema version. Must be 2.'),
+    ...PrConfigSections,
     models: ModelsSectionSchema.prefault({}),
     harnesses: z
       .record(z.string(), HarnessDeclarationSchema)
