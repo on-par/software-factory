@@ -9,11 +9,13 @@ import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
 import { shellEscape } from '../utils/index.js';
 import { classifyFailure } from './classify.js';
+import { classifyCodexFailure, extractCodexErrorText } from './codex-error.js';
 import { CODEX_COMPACT_PROMPT, resolveCodexContextCeiling } from './codex-context-ceiling.js';
 import { CODEX_GITHUB_HOSTS, CODEX_GITHUB_NETWORK_TASKS, codexWritableRoots } from './codex-policy.js';
-import type { CodingHarness, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
+import type { CodingHarness, HarnessFailureReason, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
 import { startCodexLiveUsage, CODEX_THREAD_ID, codexThreadIdFromStdout } from './codex-live-usage.js';
 import { HarnessError, taskRequiresAgenticHarness } from './index.js';
+import { defaultClassifyError, type ProviderFailure } from './provider-failure.js';
 
 const CODEX_LOGIN_HINT = 'codex is not signed in (401): run `codex login`, then retry';
 
@@ -132,6 +134,10 @@ export interface CodexHarnessOptions {
   log?: (line: string) => void;
   /** Poll interval for running usage when a request sets onUsage; default 5000. */
   liveUsageIntervalMs?: number;
+  /** Clock for reset times; defaults to Date.now. */
+  now?: () => number;
+  /** IANA zone for `try again at h:mm`; defaults to the box zone. */
+  timeZone?: string;
 }
 
 /** Runs a model via the Codex CLI. Full access requires a task named in config:
@@ -146,6 +152,8 @@ export class CodexCliHarness implements CodingHarness {
   private readonly envSource: Record<string, string | undefined>;
   private readonly log: (line: string) => void;
   private readonly liveUsageIntervalMs: number | undefined;
+  private readonly now: () => number;
+  private readonly timeZone: string;
   private readonly loggedFullAccess = new Set<string>();
   private readonly loggedRefusals = new Set<string>();
   private readonly loggedWorkspace = new Set<string>();
@@ -158,10 +166,32 @@ export class CodexCliHarness implements CodingHarness {
   ) {
     this.envSource = options.env ?? process.env;
     this.liveUsageIntervalMs = options.liveUsageIntervalMs;
+    this.now = options.now ?? Date.now;
+    this.timeZone = options.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
     this.log = options.log ?? ((line) => process.stderr.write(`${line}\n`));
     this.writeFile = fs.writeFile ?? writeFile;
     this.readFile = fs.readFile ?? readFile;
     this.unlink = fs.unlink ?? unlink;
+  }
+
+  /** Re-classifies a thrown error from stderr and codex error events only (#425); a tagged error keeps its kind. */
+  classifyError(err: unknown): ProviderFailure {
+    if (err instanceof HarnessError && err.details.kind !== undefined) return defaultClassifyError(err);
+    const obj: Record<string, unknown> =
+      typeof err === 'object' && err !== null ? (err as Record<string, unknown>) : {};
+    const details: Record<string, unknown> = err instanceof HarnessError ? err.details : {};
+    const parts: unknown[] = [
+      details.stderr,
+      typeof details.stdout === 'string' ? extractCodexErrorText(details.stdout) : undefined,
+      obj.stderr,
+      typeof obj.stdout === 'string' ? extractCodexErrorText(obj.stdout) : undefined,
+    ];
+    const text = parts.filter((p): p is string => typeof p === 'string' && p.length > 0).join('\n');
+    let reason: HarnessFailureReason;
+    if (err instanceof HarnessError) reason = err.reason;
+    else if (obj.killed === true) reason = 'timeout';
+    else reason = classifyFailure(text, typeof obj.code === 'number' ? obj.code : 1);
+    return classifyCodexFailure(reason, text, this.now(), this.timeZone);
   }
 
   async run(request: HarnessRequest): Promise<HarnessResult> {
@@ -271,10 +301,13 @@ export class CodexCliHarness implements CodingHarness {
         const stdout = typeof err.stdout === 'string' ? err.stdout : '';
         const errorText = `${err.stderr ?? ''}\n${extractCodexErrorText(stdout)}`;
         const reason = err.killed ? 'timeout' : classifyFailure(errorText, err.code ?? 1);
+        const failure = classifyCodexFailure(reason, errorText, this.now(), this.timeZone);
+        const tags = { kind: failure.kind, ...(failure.resetAt ? { resetAt: failure.resetAt } : {}) };
         if (reason === 'local_auth') {
           // One actionable line instead of codex's raw 401 JSON (#2494).
           throw new HarnessError(CODEX_LOGIN_HINT, 'local_auth', {
             exitCode: typeof err.code === 'number' ? err.code : undefined,
+            ...tags,
           });
         }
         throw new HarnessError(err.message ?? String(err), reason, {
@@ -284,6 +317,7 @@ export class CodexCliHarness implements CodingHarness {
           code: typeof err.code === 'string' || typeof err.code === 'number' ? err.code : undefined,
           signal: typeof err.signal === 'string' ? err.signal : undefined,
           killed: err.killed === true ? true : undefined,
+          ...tags,
         });
       }
       assertServedModelMatches(extraFlag, execResult.stderr);
@@ -438,33 +472,4 @@ export function parseCodexUsage(stdout: string): HarnessUsage | undefined {
     rawInputTokens: Math.max(0, inputTokens - cacheReadTokens),
     cacheReadTokens,
   };
-}
-
-/** Error text codex emits on stdout under `--json`. Only error-bearing events are
- *  included — the agent transcript is excluded so that prose or command output
- *  mentioning a limit cannot manufacture a rate_limit/usage_cap verdict (#425). */
-function extractCodexErrorText(stdout: string): string {
-  const messages: string[] = [];
-  for (const line of stdout.split('\n')) {
-    const trimmed = line.trim();
-    if (trimmed.length === 0) continue;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(trimmed);
-    } catch {
-      continue;
-    }
-    if (typeof parsed !== 'object' || parsed === null) continue;
-    const event = parsed as Record<string, unknown>;
-    if (event.type === 'error' && typeof event.message === 'string') {
-      messages.push(event.message);
-    } else if (event.type === 'turn.failed') {
-      const err = event.error as Record<string, unknown> | undefined;
-      if (err && typeof err.message === 'string') messages.push(err.message);
-    } else if (event.type === 'item.completed') {
-      const item = event.item as Record<string, unknown> | undefined;
-      if (item && item.type === 'error' && typeof item.message === 'string') messages.push(item.message);
-    }
-  }
-  return messages.join('\n');
 }

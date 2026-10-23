@@ -27,7 +27,7 @@ function zoneFormatter(zone: string): Intl.DateTimeFormat {
   });
 }
 
-function zoneParts(
+export function zoneParts(
   utcMs: number,
   zone: string,
 ): { y: number; m: number; d: number; h: number; min: number; s: number } {
@@ -44,7 +44,7 @@ function zoneOffsetMs(utcMs: number, zone: string): number {
 }
 
 /** UTC ms of the wall-clock time y-m-d h:min in `zone`; the second pass settles DST transitions. */
-function zonedToUtc(y: number, m: number, d: number, h: number, min: number, zone: string): number {
+export function zonedToUtc(y: number, m: number, d: number, h: number, min: number, zone: string): number {
   const guess = Date.UTC(y, m - 1, d, h, min);
   const first = guess - zoneOffsetMs(guess, zone);
   return guess - zoneOffsetMs(first, zone);
