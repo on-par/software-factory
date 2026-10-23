@@ -119,6 +119,7 @@ export { createRunSlotGate, withRunAndHostBuildSlot, type RunSlotGate } from './
 export { FACTORY_RUNTIME_CONFIG_KEYS, resolveHostLoadGuard, resolveHostMaxAgentJobs } from './config/index.js';
 export { isTrustedApprover, createOctokitCollaboratorPermissionClient } from './queue/approval.js';
 export type { CollaboratorPermissionClient, TrustedApproverOptions } from './queue/approval.js';
+export * from './queue/review-rework-trigger.js';
 export {
   migrateRepoConfigToYaml,
   REPO_CONFIG_FILENAMES,

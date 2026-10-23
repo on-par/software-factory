@@ -822,6 +822,7 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string, env: NodeJ
     proxyState: resolve(state, 'proxy.json'),
     breaker: resolve(state, 'breaker.json'),
     reworkHistory: resolve(state, 'rework-history.json'),
+    reviewRework: resolve(state, 'review-rework.json'),
     baselineCache: resolve(state, 'baseline-cache.json'),
     readinessCache: resolve(state, 'readiness-cache'),
     baseHold: resolve(state, 'base-hold.json'),

@@ -167,6 +167,7 @@ export type EventKind =
   | 'resource_limit'
   | 'resume-approved'
   | 'resumed'
+  | 'review_rework_queued'
   | 'rework'
   | 'rework_model_failed'
   | 'router'
@@ -403,6 +404,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   resource_limit: { severity: 'warn', isPark: false, isTerminal: false },
   'resume-approved': { severity: 'info', isPark: false, isTerminal: false },
   resumed: { severity: 'info', isPark: false, isTerminal: false },
+  // A trusted changes-requested review queued its issue for review rework (#3563). Not a park.
+  review_rework_queued: { severity: 'info', isPark: false, isTerminal: false },
   rework: { severity: 'warn', isPark: false, isTerminal: false, laneStatus: 'running' },
   rework_model_failed: { severity: 'warn', isPark: false, isTerminal: false },
   router: { severity: 'info', isPark: false, isTerminal: false },

@@ -33,6 +33,29 @@ describe('cli', () => {
     const buildClaim = (issue: number | undefined) =>
       issue === undefined ? null : { issue, decision: { kind: 'build' as const } };
 
+    it('pollReviewRework runs before each remote claim and a rejection only warns', async () => {
+      const calls: string[] = [];
+      const events: any[] = [];
+      await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
+        pathExists: () => false,
+        emitEvent: (...args: any[]) => {
+          events.push(args);
+        },
+        pollReviewRework: async () => {
+          calls.push('poll');
+          throw new Error('boom');
+        },
+        claimNext: async () => {
+          calls.push('claimNext');
+          return null;
+        },
+      });
+      expect(calls).toEqual(['poll', 'claimNext']);
+      expect(events.some((e) => e[1] === 'warn' && String(e[3]).includes('review-rework poll failed: boom'))).toBe(
+        true,
+      );
+    });
+
     it('claims issues one at a time from claimNext and releases each as done on the green path', async () => {
       const calls: any[] = [];
       const toClaim = [1, 2];

@@ -59,6 +59,9 @@ export type RunLaneDeps = {
   pathExists?: (path: string) => boolean;
   emitEvent?: typeof logEvent;
   claimNext?: () => Promise<QueueClaim | null>;
+  /** #3563: polls open factory PRs for trusted changes-requested reviews and queues their issues; run before every remote claim.
+   *  Fail-closed: a rejection is logged as a warn and never changes lane flow. Absent for local lanes. */
+  pollReviewRework?: () => Promise<void>;
   releaseIssue?: (issue: number, outcome: QueueReleaseOutcome) => Promise<void>;
   /** Writes decomposed children into the GitHub queue (queued, lane, order right behind the parent)
    *  before the lane moves on, so a restart never loses them (#3539). Absent for static local lanes. */
@@ -109,6 +112,7 @@ export async function runLane(
     pathExists = existsSync,
     emitEvent = logEvent,
     claimNext = async () => null,
+    pollReviewRework,
     releaseIssue = async () => {},
     queueChildren,
     heartbeat,
@@ -218,6 +222,13 @@ export async function runLane(
         return;
       }
       if (loadGuard && (await holdForLoad(loadGuard)) === 'stopped') break;
+      if (pollReviewRework) {
+        await pollReviewRework().catch((err) =>
+          emitEvent(paths.events, 'warn', lane, `review-rework poll failed: ${shipRuntime().errorDetail(err)}`, {
+            lane,
+          }),
+        );
+      }
       const claimed = await claimNext();
       if (claimed === null) break;
       seen.add(claimed.issue);

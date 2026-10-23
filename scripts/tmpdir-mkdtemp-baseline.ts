@@ -63,7 +63,7 @@ export const TMPDIR_MKDTEMP_BASELINE: Readonly<Record<string, number>> = {
   'packages/core/src/config/config-lint.test.ts': 1,
   'packages/core/src/config/config-schema-lint.test.ts': 1,
   'packages/core/src/config/example.test.ts': 1,
-  'packages/core/src/config/index.test.ts': 37,
+  'packages/core/src/config/index.test.ts': 35,
   'packages/core/src/config/models-doc.test.ts': 1,
   'packages/core/src/config/policy.test.ts': 1,
   'packages/core/src/config/repo-build-pin.test.ts': 1,
