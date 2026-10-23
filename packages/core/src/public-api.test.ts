@@ -341,6 +341,10 @@ const INTERNAL_API_KEYS = [
   'checkBaseHealth',
   'codexChatgptSessionState',
   'hasClaudeLoginEvidence',
+  // #3214
+  'detectClaudePlan',
+  'codexHasApiKey',
+  'detectProviderPlan',
   'claudeStoredSessionState',
   // Last run-time local_auth failure per agent (#2733)
   'localAuthAgentFor',

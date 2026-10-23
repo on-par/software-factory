@@ -7,6 +7,7 @@ import {
   claudeConfigDirPath,
   claudeKeychainService,
   claudeStoredSessionState,
+  detectClaudePlan,
   hasClaudeLoginEvidence,
 } from './claude-config.js';
 
@@ -228,5 +229,63 @@ describe('hasClaudeLoginEvidence with an expired stored login (#2721)', () => {
     const readFile = vi.fn(() => '{}');
     expect(hasClaudeLoginEvidence({ ...base, env: { CLAUDE_CODE_OAUTH_TOKEN: 't' }, readFile })).toBe(true);
     expect(readFile).not.toHaveBeenCalled();
+  });
+});
+
+describe('detectClaudePlan (#3214)', () => {
+  const NOW = 1_800_000_000_000;
+  const login = JSON.stringify({
+    claudeAiOauth: { accessToken: 'a', refreshToken: 'r', expiresAt: NOW + 3_600_000 },
+  });
+  const base = { platform: 'linux' as const, fileExists: () => true, readFile: () => login, now: () => NOW };
+
+  it('detectClaudePlan prefers an API key over a stored login', () => {
+    expect(detectClaudePlan({ ...base, env: { ANTHROPIC_API_KEY: 'x' } })).toBe('api');
+    expect(detectClaudePlan({ ...base, env: {} })).toBe('subscription');
+    const none = {
+      ...base,
+      env: {},
+      fileExists: () => false,
+      readFile: () => {
+        throw new Error('ENOENT');
+      },
+    };
+    expect(detectClaudePlan(none)).toBe('unknown');
+  });
+
+  it('is subscription for CLAUDE_CODE_OAUTH_TOKEN without an API key', () => {
+    expect(detectClaudePlan({ ...base, fileExists: () => false, env: { CLAUDE_CODE_OAUTH_TOKEN: 'tok' } })).toBe(
+      'subscription',
+    );
+  });
+
+  it('treats a blank or whitespace ANTHROPIC_API_KEY as unset', () => {
+    expect(detectClaudePlan({ ...base, env: { ANTHROPIC_API_KEY: '' } })).toBe('subscription');
+    expect(detectClaudePlan({ ...base, env: { ANTHROPIC_API_KEY: '   ' } })).toBe('subscription');
+  });
+
+  it('is unknown on darwin when the keychain probe throws and there is no file', () => {
+    const exec = vi.fn(() => {
+      throw new Error('not found');
+    });
+    expect(detectClaudePlan({ ...base, platform: 'darwin', env: {}, fileExists: () => false, exec })).toBe('unknown');
+    expect(exec).toHaveBeenCalled();
+  });
+
+  it('does not probe the keychain when an API key is set', () => {
+    const exec = vi.fn();
+    expect(detectClaudePlan({ ...base, platform: 'darwin', env: { ANTHROPIC_API_KEY: 'x' }, exec })).toBe('api');
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('is unknown for an unusable credentials file', () => {
+    const readFile = () => JSON.stringify({ claudeAiOauth: { accessToken: 'a', expiresAt: NOW - 1 } });
+    expect(detectClaudePlan({ ...base, env: {}, readFile })).toBe('unknown');
+  });
+
+  it('never contains the key value', () => {
+    expect(JSON.stringify(detectClaudePlan({ ...base, env: { ANTHROPIC_API_KEY: 'x-secret' } }))).not.toContain(
+      'x-secret',
+    );
   });
 });

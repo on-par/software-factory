@@ -234,6 +234,7 @@ import {
   laneSlug,
   formatStopMarker,
   readStopMarker,
+  detectClaudePlan,
 } from '@on-par/factory-core/internal';
 import type { StopMarker } from '@on-par/factory-core/internal';
 import { formatSteerabilityReport } from '@on-par/factory-core/internal';
@@ -285,7 +286,7 @@ import {
   writeUpdateState,
 } from './update-state.js';
 import { buildStopResumeJson } from './stop-resume-json.js';
-import { buildUsageJson } from './usage-json.js';
+import { collectUsageJson } from './usage-json.js';
 import { parseResetIssues, runReset } from './reset.js';
 import {
   cmdDaemonLogs,
@@ -502,6 +503,7 @@ export type CoreOpKey =
   | 'formatUsageReport'
   | 'watchUsage'
   | 'fetchSubscriptionUsage'
+  | 'detectClaudePlan'
   | 'diagnoseModels'
   | 'probeDeclaredHarnesses'
   | 'writeLocalRunReport';
@@ -518,6 +520,7 @@ const DEFAULT_CORE_OPS: CoreOps = {
   formatUsageReport,
   watchUsage,
   fetchSubscriptionUsage,
+  detectClaudePlan,
   diagnoseModels,
   probeDeclaredHarnesses,
   writeLocalRunReport,
@@ -539,6 +542,7 @@ function resolveCoreOps(overrides: Partial<CoreOps>, base: CoreOps = coreOps): C
     formatUsageReport: overrides.formatUsageReport ?? base.formatUsageReport,
     watchUsage: overrides.watchUsage ?? base.watchUsage,
     fetchSubscriptionUsage: overrides.fetchSubscriptionUsage ?? base.fetchSubscriptionUsage,
+    detectClaudePlan: overrides.detectClaudePlan ?? base.detectClaudePlan,
     diagnoseModels: overrides.diagnoseModels ?? base.diagnoseModels,
     probeDeclaredHarnesses: overrides.probeDeclaredHarnesses ?? base.probeDeclaredHarnesses,
     writeLocalRunReport: overrides.writeLocalRunReport ?? base.writeLocalRunReport,
@@ -1813,7 +1817,10 @@ export function usageWatchSourceLabel(
 }
 
 export async function cmdUsage(
-  deps: Pick<CliDeps, ShellOpKey | 'fetchSubscriptionUsage' | 'estimateTrailingSpend' | 'formatUsageReport'> = {},
+  deps: Pick<
+    CliDeps,
+    ShellOpKey | 'fetchSubscriptionUsage' | 'estimateTrailingSpend' | 'formatUsageReport' | 'detectClaudePlan'
+  > = {},
   opts: { json?: boolean } = {},
 ) {
   const ops = resolveCoreOps(deps);
@@ -1826,15 +1833,7 @@ export async function cmdUsage(
   }
 
   if (opts.json) {
-    const subscription = await ops.fetchSubscriptionUsage();
-    let estimate: number | null;
-    try {
-      const spend = ops.estimateTrailingSpend();
-      estimate = Number.isFinite(spend) ? spend : null;
-    } catch {
-      estimate = null;
-    }
-    console.log(JSON.stringify(buildUsageJson(subscription, estimate, knobs.cap)));
+    console.log(JSON.stringify(await collectUsageJson(ops, knobs.cap)));
     return;
   }
 
@@ -4101,6 +4100,7 @@ export interface CliDeps {
   formatUsageReport?: typeof formatUsageReport;
   watchUsage?: typeof watchUsage;
   fetchSubscriptionUsage?: typeof fetchSubscriptionUsage;
+  detectClaudePlan?: typeof detectClaudePlan;
   diagnoseModels?: typeof diagnoseModels;
   probeDeclaredHarnesses?: typeof probeDeclaredHarnesses;
   writeLocalRunReport?: typeof writeLocalRunReport;

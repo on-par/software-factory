@@ -16,6 +16,7 @@
 //
 // hasClaudeLoginEvidence answers "is there a stored login?" without running `claude` or
 // reading any secret (env var, keychain entry existence, credentials file existence).
+// detectClaudePlan sits on top of it: an API key wins, else a login means a subscription.
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -141,5 +142,22 @@ export function hasClaudeLoginEvidence(deps: ClaudeLoginEvidenceDeps = {}): bool
     return claudeStoredSessionState(deps) !== 'unusable';
   } catch {
     return false;
+  }
+}
+
+/** How a provider's calls are billed on this machine: a flat subscription login, a metered API key, or unknown. */
+export type ProviderPlan = 'subscription' | 'api' | 'unknown';
+
+/** The selected Claude Code profile's billing plan (#3214): 'api' when ANTHROPIC_API_KEY is set (non-empty),
+ *  even when a stored login also exists (the order doctor and Claude Code use); else 'subscription'
+ *  when hasClaudeLoginEvidence finds a login; else 'unknown'. Never reads or logs a credential value,
+ *  never runs `claude`, never throws. */
+export function detectClaudePlan(deps: ClaudeLoginEvidenceDeps = {}): ProviderPlan {
+  try {
+    const env = deps.env ?? process.env;
+    if (env.ANTHROPIC_API_KEY?.trim()) return 'api';
+    return hasClaudeLoginEvidence(deps) ? 'subscription' : 'unknown';
+  } catch {
+    return 'unknown';
   }
 }
