@@ -123,7 +123,6 @@ import {
   resolveDefectWindowDays,
   parseSizeGateMode,
   parseMaxSlices,
-  ProviderBreaker,
   SIZE_GATE_MODES,
   type SizeGateMode,
   resolveEffectiveModelPins,
@@ -331,7 +330,7 @@ import { DeepCheckError, createDeepModelRunner, runIssueCheck, type DeepCheckMod
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
 import { readRunFlagOverrides, recordDraftPrFlag } from './run-flags.js';
 import { runStalenessGuard } from './staleness.js';
-import { runBreakerReset } from './breaker.js';
+import { cmdBreakerReset } from './breaker.js';
 import { runWorktreeKeep, runWorktreeRelease } from './worktree-keep.js';
 import { gcWorktreeSandbox, reapParkedLane, reapPrlessShip } from './worktree-reap.js';
 
@@ -2809,15 +2808,6 @@ export async function cmdWorktreeRelease(issueArg: string) {
   await runWorktreeRelease(issue, {
     keepsFile: paths.worktreeKeeps,
     withLock: (fn) => withFileLock(paths.gitLock, fn),
-  });
-}
-
-/** `factory breaker reset <provider>` (#3232): close a provider's breaker now. */
-export async function cmdBreakerReset(provider: string) {
-  const paths = getFactoryPaths(await getRepoRoot());
-  await runBreakerReset(provider, {
-    breaker: new ProviderBreaker(paths.breaker),
-    log: (type, msg, extra) => logEvent(paths.events, type, '-', msg, extra),
   });
 }
 

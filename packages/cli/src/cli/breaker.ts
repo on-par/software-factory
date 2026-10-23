@@ -1,8 +1,9 @@
 // packages/cli/src/cli/breaker.ts — `factory breaker reset <provider>` (#3232)
 
-import type { EventKind, ProviderBreaker } from '@on-par/factory-core';
+import { type EventKind, getFactoryPaths, ProviderBreaker } from '@on-par/factory-core';
+import { logEvent } from '@on-par/factory-core/internal';
 
-import { CliExitError } from './index.js';
+import { CliExitError, PROGRAM_HANDLERS } from './index.js';
 
 export interface BreakerResetDeps {
   breaker: ProviderBreaker;
@@ -29,4 +30,24 @@ export async function runBreakerReset(provider: string, deps: BreakerResetDeps):
     providerBreakerClose: { provider, cause: 'manual_reset' },
   });
   out(`reset the ${provider} breaker (${entry.reason})`);
+}
+
+export interface BreakerResetCommandDeps {
+  getRepoRoot: () => Promise<string>;
+  out?: (line: string) => void;
+}
+
+/** Resets the provider's breaker in the repo's factory state, logging to its events file. */
+export async function runBreakerResetCommand(provider: string, deps: BreakerResetCommandDeps): Promise<void> {
+  const paths = getFactoryPaths(await deps.getRepoRoot());
+  await runBreakerReset(provider, {
+    breaker: new ProviderBreaker(paths.breaker),
+    log: (type, msg, extra) => logEvent(paths.events, type, '-', msg, extra),
+    out: deps.out,
+  });
+}
+
+/** `factory breaker reset <provider>` (#3232): close a provider's breaker now. */
+export async function cmdBreakerReset(provider: string): Promise<void> {
+  await runBreakerResetCommand(provider, { getRepoRoot: () => PROGRAM_HANDLERS.getRepoRoot() });
 }
