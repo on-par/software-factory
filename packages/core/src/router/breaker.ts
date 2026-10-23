@@ -6,7 +6,9 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import type { EventKind } from '../events/kinds.js';
+import type { ProviderBreakerClosePayload } from '../events/payloads.js';
 import type { FailoverReason } from '../types/index.js';
+import { credentialFingerprint } from './credential-fingerprint.js';
 
 export interface BreakerEntry {
   reason: FailoverReason;
@@ -16,10 +18,28 @@ export interface BreakerEntry {
   cappedUntil?: string;
   /** True when the cap reported no reset, so the provider is re-probed at cappedUntil (#3337). */
   probeDue?: boolean;
+  /** Untimed hold: a rejected credential keeps the provider out until its credentials change (#3232). */
+  until?: 'credentials-change';
+  /** sha256 fingerprint of the provider's credential sources when the entry opened; no key material. */
+  credentialFingerprint?: string;
 }
 
 export type BreakerStatus =
-  { open: true; entry: BreakerEntry; remainingMs: number } | { open: false; justClosed?: BreakerEntry };
+  | { open: true; entry: BreakerEntry; remainingMs: number }
+  | { open: false; justClosed?: BreakerEntry; closeCause?: 'cooldown' | 'creds_changed' };
+
+export interface BreakerListEntry {
+  provider: string;
+  reason: FailoverReason;
+  openedAt: string;
+  remainingMs: number;
+  until?: 'credentials-change';
+}
+
+/** "12m remaining", or "until credentials change" for an untimed entry (remainingMs is Infinity). */
+export function formatBreakerRemaining(remainingMs: number): string {
+  return Number.isFinite(remainingMs) ? `${Math.ceil(remainingMs / 60_000)}m remaining` : 'until credentials change';
+}
 
 interface BreakerFile {
   version: 1;
@@ -89,7 +109,53 @@ export class ProviderBreaker {
   constructor(
     private file: string,
     private now: () => number = () => Date.now(),
-  ) {}
+    opts: { fingerprint?: (provider: string) => string } = {},
+  ) {
+    const fingerprint = opts.fingerprint ?? ((p: string) => credentialFingerprint(p));
+    this.fingerprint = (p) => {
+      try {
+        return fingerprint(p);
+      } catch {
+        return '<error>';
+      }
+    };
+  }
+
+  private fingerprint: (provider: string) => string;
+
+  private isOpen(provider: string, entry: BreakerEntry, now: number): boolean {
+    if (entry.until === 'credentials-change')
+      return entry.credentialFingerprint !== undefined && entry.credentialFingerprint === this.fingerprint(provider);
+    return new Date(entry.openedAt).getTime() + entry.cooldownMs - now > 0;
+  }
+
+  /** Opens an untimed entry held until the provider's credentials change or `reset()` (#3232). `wasOpen` is true only
+   *  while the existing entry (timed or untimed) is still open, so a provider already held for a cap logs no duplicate. */
+  async openUntilCredentialsChange(provider: string, reason: FailoverReason): Promise<{ wasOpen: boolean }> {
+    const data = await this.read();
+    const now = this.now();
+    const existing = data.providers[provider];
+    const wasOpen = existing !== undefined && this.isOpen(provider, existing, now);
+    data.providers[provider] = {
+      reason,
+      openedAt: new Date(now).toISOString(),
+      cooldownMs: 0,
+      until: 'credentials-change',
+      credentialFingerprint: this.fingerprint(provider),
+    };
+    await this.write(data);
+    return { wasOpen };
+  }
+
+  /** Removes the provider's entry (open or not). Returns the removed entry, or undefined when there was none. */
+  async reset(provider: string): Promise<BreakerEntry | undefined> {
+    const data = await this.read();
+    const entry = data.providers[provider];
+    if (!entry) return undefined;
+    delete data.providers[provider];
+    await this.write(data);
+    return entry;
+  }
 
   /** Upsert (refresh openedAt on repeat trips). Atomic write: mkdir parent, write `${file}.tmp`, rename.
    *  Reports whether the provider was already open, so callers can emit once-per-transition events. */
@@ -102,7 +168,7 @@ export class ProviderBreaker {
     const data = await this.read();
     const now = this.now();
     const existing = data.providers[provider];
-    const wasOpen = existing !== undefined && new Date(existing.openedAt).getTime() + existing.cooldownMs - now > 0;
+    const wasOpen = existing !== undefined && this.isOpen(provider, existing, now);
     data.providers[provider] = {
       reason,
       openedAt: new Date(now).toISOString(),
@@ -122,20 +188,46 @@ export class ProviderBreaker {
     const entry = data.providers[provider];
     if (!entry) return { open: false };
 
+    if (entry.until === 'credentials-change') {
+      if (this.isOpen(provider, entry, this.now())) return { open: true, entry, remainingMs: Number.POSITIVE_INFINITY };
+      delete data.providers[provider];
+      await this.write(data);
+      return { open: false, justClosed: entry, closeCause: 'creds_changed' };
+    }
+
     const remainingMs = new Date(entry.openedAt).getTime() + entry.cooldownMs - this.now();
     if (remainingMs > 0) return { open: true, entry, remainingMs };
 
     delete data.providers[provider];
     await this.write(data);
-    return { open: false, justClosed: entry };
+    return { open: false, justClosed: entry, closeCause: 'cooldown' };
+  }
+
+  /** Read-only (never prunes, so the close event stays for `status()` observers): true while the provider is held
+   *  until its credentials change and the credentials have not changed. */
+  async isHeldUntilCredentialsChange(provider: string): Promise<boolean> {
+    const entry = (await this.read()).providers[provider];
+    return entry?.until === 'credentials-change' && this.isOpen(provider, entry, this.now());
   }
 
   /** Read-only (never rewrites the file — factory status must not mutate state).
    *  Returns only still-open entries with computed remainingMs. */
-  async list(): Promise<Array<{ provider: string; reason: FailoverReason; openedAt: string; remainingMs: number }>> {
+  async list(): Promise<BreakerListEntry[]> {
     const data = await this.read();
-    const out: Array<{ provider: string; reason: FailoverReason; openedAt: string; remainingMs: number }> = [];
+    const out: BreakerListEntry[] = [];
     for (const [provider, entry] of Object.entries(data.providers)) {
+      if (entry.until === 'credentials-change') {
+        if (this.isOpen(provider, entry, this.now())) {
+          out.push({
+            provider,
+            reason: entry.reason,
+            openedAt: entry.openedAt,
+            remainingMs: Number.POSITIVE_INFINITY,
+            until: 'credentials-change',
+          });
+        }
+        continue;
+      }
       const remainingMs = new Date(entry.openedAt).getTime() + entry.cooldownMs - this.now();
       if (remainingMs > 0) {
         out.push({ provider, reason: entry.reason, openedAt: entry.openedAt, remainingMs });
@@ -171,7 +263,7 @@ export class ProviderBreaker {
 export async function gateBuildOnBreaker(opts: {
   breaker: ProviderBreaker;
   providers: string[];
-  log: (type: EventKind, msg: string) => void;
+  log: (type: EventKind, msg: string, extra?: { providerBreakerClose?: ProviderBreakerClosePayload }) => void;
 }): Promise<{ codexBlocked: boolean }> {
   const { breaker, providers, log } = opts;
   let codexBlocked = false;
@@ -180,13 +272,15 @@ export async function gateBuildOnBreaker(opts: {
     const status = await breaker.status(provider);
     if (status.open) {
       codexBlocked = true;
-      const m = Math.ceil(status.remainingMs / 60_000);
       log(
         'provider_breaker_skip',
-        `breaker open for ${provider} (${status.entry.reason}) — routing build to claude fallback, ${m}m remaining`,
+        `breaker open for ${provider} (${status.entry.reason}) — routing build to claude fallback, ${formatBreakerRemaining(status.remainingMs)}`,
       );
     } else if (status.justClosed) {
-      log('provider_breaker_close', `breaker closed for ${provider} after cooldown — codex workers eligible again`);
+      const cause = status.closeCause ?? 'cooldown';
+      log('provider_breaker_close', `breaker closed for ${provider} (${cause}) — codex workers eligible again`, {
+        providerBreakerClose: { provider, cause },
+      });
     }
   }
 

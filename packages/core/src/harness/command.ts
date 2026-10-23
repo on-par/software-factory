@@ -12,7 +12,7 @@ import { shellEscape } from '../utils/index.js';
 import { classifyFailure } from './classify.js';
 import type { CodingHarness, HarnessFailureReason, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
 import { HarnessError } from './index.js';
-import { failureKindForReason } from './provider-failure.js';
+import { failureKindFor } from './provider-failure.js';
 
 /**
  * Substitute {model}, {worktree} and {outFile} in a declared command template with
@@ -213,7 +213,7 @@ export class CommandHarness implements CodingHarness {
           code: typeof err.code === 'string' || typeof err.code === 'number' ? err.code : undefined,
           signal: typeof err.signal === 'string' ? err.signal : undefined,
           killed: err.killed === true ? true : undefined,
-          kind: failureKindForReason(reason),
+          kind: failureKindFor(reason, `${err.message ?? ''} ${err.stderr ?? ''}`),
           ...(matched?.resetAt ? { resetAt: matched.resetAt } : {}),
         });
       }

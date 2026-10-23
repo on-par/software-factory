@@ -35,6 +35,7 @@ import {
   resolvePrClassifierPolicy,
   resolveWorktreeRoot,
   readStopMarker,
+  formatBreakerRemaining,
 } from '@on-par/factory-core/internal';
 import type { QueueOrderConflict } from '@on-par/factory-core/internal';
 
@@ -298,7 +299,7 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
     console.log('    (closed)');
   } else {
     for (const b of openBreakers) {
-      console.log(`    ${b.provider}: OPEN (${b.reason}) — ${Math.ceil(b.remainingMs / 60_000)}m remaining`);
+      console.log(`    ${b.provider}: OPEN (${b.reason}) — ${formatBreakerRemaining(b.remainingMs)}`);
     }
   }
 

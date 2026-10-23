@@ -1590,6 +1590,29 @@ describe('provider failure kinds', () => {
     ).rejects.toBeInstanceOf(ModelRouterError);
   });
 
+  it('reports a rejected key as kind auth with model and harness (#3232)', async () => {
+    const { result, infos } = await runWith(new HarnessError('authentication_error: invalid x-api-key', 'local_auth'));
+    expect(result.model).toBe('gpt-fallback');
+    expect(infos).toEqual([
+      expect.objectContaining({ provider: 'anthropic', reason: 'local_auth', kind: 'auth', model: 'claude-preferred' }),
+    ]);
+    expect(infos[0]).toHaveProperty('harness');
+  });
+
+  it('setProviderHold skips a held provider, and a throwing hold counts as not held (#3232)', async () => {
+    const executor = failingExecutor(new HarnessError('x', 'error'));
+    const router = new ModelRouter(providerModels, routes, false, executor);
+    const opts = { modelOverride: 'claude-preferred', modelFallbacks: ['gpt-fallback'] };
+    router.setProviderHold(async (p) => p === 'anthropic');
+    await router.run('plan', 'do it', opts);
+    expect(executor.runModel.mock.calls.map((c) => c[0])).toEqual(['gpt-fallback']);
+    router.setProviderHold(async () => {
+      throw new Error('boom');
+    });
+    await router.run('plan', 'do it', opts);
+    expect(executor.runModel.mock.calls.map((c) => c[0])).toContain('claude-preferred');
+  });
+
   it('opens the breaker for kind auth even when the reason is error', async () => {
     const { infos } = await runWith(new HarnessError('x', 'error', { kind: 'auth' }));
     expect(infos).toEqual([expect.objectContaining({ kind: 'auth' })]);

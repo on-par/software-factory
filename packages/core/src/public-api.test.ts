@@ -804,6 +804,7 @@ const INTERNAL_API_KEYS = [
   'releaseLaneClaim',
   'FACTORY_APP_REPAIR_HINT',
   'formatAdmissionConflict',
+  'formatBreakerRemaining',
   'withAdmissionGuard',
   // Backend-agnostic queue seam (#1499)
   'createGithubQueueBackend',

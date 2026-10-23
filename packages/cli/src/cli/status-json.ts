@@ -21,7 +21,13 @@ export function buildStatusJson(input: {
   product: string | null;
   stop: boolean;
   stopInfo: StatusStopInfoJson | null;
-  breakers: ReadonlyArray<{ provider: string; reason: string; openedAt: string; remainingMs: number }>;
+  breakers: ReadonlyArray<{
+    provider: string;
+    reason: string;
+    openedAt: string;
+    remainingMs: number;
+    until?: 'credentials-change';
+  }>;
   active: ReadonlyArray<Pick<ActiveQueueClaim, 'lane' | 'issue' | 'phase' | 'lastActivityAt'>>;
   update: StatusUpdateJson | null;
   now: number;
@@ -30,7 +36,8 @@ export function buildStatusJson(input: {
     provider: b.provider,
     reason: b.reason,
     openedAt: b.openedAt,
-    remainingSec: Math.ceil(b.remainingMs / 1000),
+    remainingSec: Number.isFinite(b.remainingMs) ? Math.ceil(b.remainingMs / 1000) : 0,
+    ...(b.until ? { until: b.until } : {}),
   }));
   const active: StatusActiveRowJson[] = input.active.map((c) => {
     const ageSec = Math.floor((input.now - Date.parse(c.lastActivityAt)) / 1000);
