@@ -312,9 +312,17 @@ export const FactoryConfigSchema = z.object({
         .describe(
           'Milliseconds a lane waits after writing its claim before confirming it (#3145). 0 turns the wait off.',
         ),
+      max_review_rework_runs: z
+        .number()
+        .int()
+        .nonnegative()
+        .default(2)
+        .describe(
+          'Review-rework runs allowed per issue (#3565). At the cap a trusted changes-requested review starts no run and parks the issue. 0 always parks.',
+        ),
       comment: z.string().optional(),
     })
-    .default({ claim_settle_ms: 3000 }),
+    .default({ claim_settle_ms: 3000, max_review_rework_runs: 2 }),
   adr: z.object({ mandate: z.boolean().default(false), comment: z.string().optional() }).default({ mandate: false }),
   /** Ship-it lane workspace isolation (#1535). `'host'` is the existing sibling-worktree
    *  behavior; `'disposable-docker'` opts a repo into a managed, labeled container per
