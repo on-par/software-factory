@@ -4,6 +4,11 @@
 # `npx tsc --noEmit` when package.json and tsconfig.json have them. Declare `checks` to override.
 version: 2
 
+# PR body footer: unset uses the text below; a non-empty string is used verbatim.
+# Use footer: "" to remove the footer and its separator. No templating or token substitution.
+# pr:
+#   footer: 'This PR was made by Software Factory'
+
 # What CHECK runs after every BUILD. Each command is one shell-free command line run from the
 # repo root (no pipes, `&&`, `$VARS` or globs); point at a script when you need a shell.
 checks:

@@ -35,6 +35,18 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+describe('pr.footer', () => {
+  it.each(['Custom {{repo}} footer', ''])('accepts string %j unchanged', (footer) => {
+    expect(parseV2Config({ version: 2, pr: { footer } }).pr?.footer).toBe(footer);
+  });
+  it.each([false, 1, null, [], {}])('rejects non-string %j', (footer) => {
+    expect(() => parseV2Config({ version: 2, pr: { footer } })).toThrow('pr.footer');
+  });
+  it('keeps an unset footer optional', () => {
+    expect(parseV2Config({ version: 2 }).pr?.footer).toBeUndefined();
+  });
+});
+
 describe('zero-config: { version: 2 }', () => {
   it('validates and fills every section with defaults', () => {
     const cfg = parseV2Config({ version: 2 });
@@ -401,6 +413,7 @@ describe('exported schema shape', () => {
         'intake',
         'models',
         'notifications',
+        'pr',
         'routes',
         'run',
         'steward',

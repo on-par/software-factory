@@ -1,6 +1,8 @@
 // src/reports/pr-body.ts — the PR description SHIP opens with. It is short: a 1-3 sentence summary
 // of the frozen spec's Goal and approach, a one-line proof (checker counts, rework rounds), an
-// optional risk line, the collapsed diff stat, the Closes / Part of line, and a fixed footer.
+// optional risk line, the collapsed diff stat, the Closes / Part of line, and a configurable footer.
+
+import { defaultFactoryConfig } from '@on-par/factory-config';
 
 import type { CheckSummary } from '../types/index.js';
 
@@ -8,10 +10,12 @@ const SECTION_LIMIT = 4000;
 const WHAT_CHANGED_LIMIT = 600;
 const WHAT_CHANGED_SENTENCES = 3;
 
-/** Fixed last line of every PR body. */
-export const PR_BODY_FOOTER = "This PR made possible by On PAR Dev's Software Factory.";
+/** Default last line of a PR body. */
+export const PR_BODY_FOOTER = defaultFactoryConfig.pr.footer;
 
 export interface PrBodyInput {
+  /** Undefined uses the default footer; an empty string omits the footer. Otherwise rendered verbatim. */
+  footer?: string;
   /** One line naming the work item, e.g. "Implements #23.". */
   summaryLine: string;
   /** Frozen spec body with the frontmatter stripped; intent sections are omitted when absent. */
@@ -57,7 +61,7 @@ export function renderPrBody(input: PrBodyInput): string {
       : input.partOf !== undefined
         ? `Part of #${input.partOf}`
         : undefined,
-    PR_BODY_FOOTER,
+    input.footer === '' ? undefined : (input.footer ?? PR_BODY_FOOTER),
   ]
     .filter((part): part is string => part !== undefined)
     .join('\n\n');

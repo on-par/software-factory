@@ -207,7 +207,7 @@ async function shipIssueFrom(
     routes: loaders.loadRoutesConfig(),
     sandbox: factoryConfig.sandbox,
     budget: { perIssueCapUsd: efficiency.perIssueCapUsd },
-    pr: { draft: resolveDraftPrPolicy(factoryConfig, opts.draftPr).draft },
+    pr: { draft: resolveDraftPrPolicy(factoryConfig, opts.draftPr).draft, footer: factoryConfig.pr?.footer },
     effective:
       opts.branchPrefix === undefined
         ? resolveEffectiveConfig(repoConfig)

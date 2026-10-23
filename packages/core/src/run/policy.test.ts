@@ -22,6 +22,8 @@ describe('RunPolicy', () => {
     expect(policy.routes.version).toBe(1);
     expect(policy.budget.perIssueCapUsd).toBe(5);
     expect(policy.effective.branchPrefix).toBe('ship-it');
+    policy.pr = { draft: false, footer: '' };
+    expect(policy.pr.footer).toBe('');
   });
 
   it('allows an uncapped budget', () => {

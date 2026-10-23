@@ -57,6 +57,7 @@ export interface FactoryDefaults {
     tests_seconds: number;
     compile_seconds: number;
   };
+  pr: { footer: string };
   merge: { auto: boolean; comment: string };
   worktree: { parent: string; comment: string; gcTtlDays: number; autoGcOnRun: boolean };
   byok: { enabled: boolean; comment: string };
@@ -564,6 +565,7 @@ export const defaultLaneBreakerThreshold = 2;
 /** Global factory configuration: paths, timeouts, merge/worktree/budget/intake defaults. */
 export const defaultFactoryConfig: FactoryDefaults = {
   version: 1,
+  pr: { footer: 'This PR was made by Software Factory' },
   paths: {
     constitutions: 'constitutions/',
     checkers: 'lib/checkers/',

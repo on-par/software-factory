@@ -10,6 +10,7 @@ import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import type { EventKind } from '../events/kinds.js';
 import { gatherEvidencePack } from '../reports/evidence-pack.js';
 import { renderPrBody } from '../reports/pr-body.js';
+import { computeDiffStat } from './ship-diff-stat.js';
 import { renderStackOrderLine, type StackPosition } from './stack-order.js';
 import type { ReviewRouting } from '../review/routing.js';
 import {
@@ -81,6 +82,8 @@ async function shipPhaseImpl(opts: {
   branch: string;
   octokit: Octokit;
   watchCI?: boolean;
+  /** Resolved pr.footer; undefined uses the default, empty string omits it. */
+  footer?: string;
   /** Stop at the draft PR: skip mark-ready (#3449). */
   draft?: boolean;
   log: (type: EventKind, msg: string) => void;
@@ -394,6 +397,7 @@ async function shipPhaseImpl(opts: {
         draft: true,
         body: renderPrBody({
           summaryLine,
+          footer: opts.footer,
           stackOrder: stack ? renderStackOrderLine(stack) : undefined,
           specBody: await readSpecBody(opts.specPath),
           diffStat: stat,
@@ -542,15 +546,6 @@ async function shipPhaseImpl(opts: {
     ...(opts.draft || ciPending ? { draft: true } : {}),
     ...(ciPending ? { ciPending: true } : {}),
   };
-}
-
-async function computeDiffStat(run: CommandRunner, worktree: string): Promise<string> {
-  try {
-    const { stdout } = await run('git diff --stat origin/main...HEAD', { cwd: worktree });
-    return stdout.split('\n').slice(-20).join('\n');
-  } catch {
-    return '';
-  }
 }
 
 export async function findOpenPR(octokit: Octokit, owner: string, repo: string, branch: string): Promise<PrLookup> {

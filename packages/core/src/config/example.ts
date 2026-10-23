@@ -234,6 +234,12 @@ function modelNamespace(): Node[] {
     { kind: 'object', key: 'providers', doc: doc('providers'), children: leaves(['providers'], true) },
     unset('route', doc('route'), '"<route>"'),
     unset('commands', doc('commands'), '{ test: "vitest run" }'),
+    {
+      kind: 'object',
+      key: 'pr',
+      doc: doc('pr'),
+      children: [unset('footer', doc('pr', 'footer'), inline(loadFactoryConfig().pr?.footer))],
+    },
     unset(
       'checks',
       doc('checks'),
