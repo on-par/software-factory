@@ -1,4 +1,5 @@
 import type { ActiveQueueClaim } from '@on-par/factory-core';
+import type { StatusDisk } from './status-disk.js';
 import type { StatusJson } from './json-contract.js';
 import type { StatusUpdateJson } from './update-state.js';
 
@@ -23,6 +24,7 @@ export function buildStatusJson(input: {
   stopInfo: StatusStopInfoJson | null;
   breakers: ReadonlyArray<{ provider: string; reason: string; openedAt: string; remainingMs: number }>;
   active: ReadonlyArray<Pick<ActiveQueueClaim, 'lane' | 'issue' | 'phase' | 'lastActivityAt'>>;
+  disk: StatusJson['disk'];
   update: StatusUpdateJson | null;
   now: number;
 }): StatusJson {
@@ -45,6 +47,12 @@ export function buildStatusJson(input: {
     stopInfo: input.stopInfo,
     breaker,
     active,
+    disk: input.disk,
     update: input.update,
   };
+}
+
+/** The `disk` field of `factory status --json`; null when the probe failed. */
+export function statusDiskJson(disk: StatusDisk | null): StatusJson['disk'] {
+  return disk ? { freeGb: disk.freeGb, thresholdGb: disk.thresholdGb, low: disk.decision.kind === 'low' } : null;
 }

@@ -68,6 +68,29 @@
       "required": ["open", "providers"],
       "additionalProperties": false
     },
+    "disk": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "freeGb": {
+              "type": "number"
+            },
+            "thresholdGb": {
+              "type": "number"
+            },
+            "low": {
+              "type": "boolean"
+            }
+          },
+          "required": ["freeGb", "thresholdGb", "low"],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "active": {
       "type": "array",
       "items": {
@@ -195,6 +218,6 @@
       ]
     }
   },
-  "required": ["schemaVersion", "repo", "product", "stop", "stopInfo", "breaker", "active", "update"],
+  "required": ["schemaVersion", "repo", "product", "stop", "stopInfo", "breaker", "disk", "active", "update"],
   "additionalProperties": false
 }

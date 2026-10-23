@@ -22,6 +22,7 @@ describe('buildStatusJson', () => {
         { provider: 'openai', reason: 'usage_cap', openedAt: '2026-01-01T00:00:00.000Z', remainingMs: 90_500 },
       ],
       active: [{ lane: 'app', issue: 7, phase: 'build', lastActivityAt: new Date(now - 125_000).toISOString() }],
+      disk: null,
       update: null,
       now,
     });
@@ -38,6 +39,7 @@ describe('buildStatusJson', () => {
         ],
       },
       active: [{ lane: 'app', issue: 7, phase: 'build', ageSec: 125 }],
+      disk: null,
       update: null,
     });
     expect(Object.keys(out)).toEqual([
@@ -48,6 +50,7 @@ describe('buildStatusJson', () => {
       'stopInfo',
       'breaker',
       'active',
+      'disk',
       'update',
     ]);
     expect(statusJsonSchema.parse(out)).toEqual(out);
@@ -61,6 +64,7 @@ describe('buildStatusJson', () => {
       stopInfo: null,
       breakers: [],
       active: [],
+      disk: null,
       update: null,
       now,
     });
@@ -79,6 +83,7 @@ describe('buildStatusJson', () => {
       stopInfo: null,
       breakers: [],
       active: [{ lane: 'bugfix', issue: 3316, phase: 'check', lastActivityAt: new Date(now - 90_000).toISOString() }],
+      disk: null,
       update: null,
       now,
     });
@@ -97,6 +102,7 @@ describe('buildStatusJson', () => {
         { lane: 'a', issue: 1, phase: 'build', lastActivityAt: new Date(now + 60_000).toISOString() },
         { lane: 'b', issue: 2, phase: 'build', lastActivityAt: 'garbage' },
       ],
+      disk: null,
       update: null,
       now,
     });
@@ -123,6 +129,7 @@ describe('buildStatusJson', () => {
         stopInfo: null,
         breakers: [],
         active: [],
+        disk: null,
         update,
         now,
       }).update,
@@ -142,6 +149,7 @@ describe('buildStatusJson', () => {
         stopInfo: marker ? { source: marker.source, setAt: marker.at ?? null } : null,
         breakers: [],
         active: [],
+        disk: null,
         update: null,
         now,
       });

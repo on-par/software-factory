@@ -41,6 +41,7 @@ import {
   touchRunActivity,
   writePhaseSnapshot,
 } from '@on-par/factory-core';
+import { diskGatedSlotPort, type DiskGuard } from './disk-guard.js';
 import { hostBuildSlotPort } from './host-slot.js';
 import type { CheckResumeRecord, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
@@ -118,6 +119,8 @@ export async function shipIssue(
     localOnly?: LocalOnlyPolicy;
     /** Per-run BUILD/CHECK slot gate shared by every lane of one run (#3049); absent = host cap only. */
     runSlots?: Parameters<typeof hostBuildSlotPort>[4];
+    /** Disk guard (#2284): BUILD and CHECK wait for free space before taking a host slot. */
+    diskGuard?: Pick<DiskGuard, 'waitForSpace'>;
     /** Benchmark artifact directory (#509) — only set for local-only runs. */
     artifactsDir?: string;
     resumeFrom?: CheckResumeRecord; // Resume at CHECK on a kept worktree (#2564).
@@ -378,7 +381,11 @@ export async function shipIssue(
     planPhase: phases.planPhase,
     buildPhase: phases.buildPhase,
     checkPhase: phases.checkPhase,
-    hostBuildSlot: hostBuildSlotPort(factoryConfig, ghRepo, issueNum, log, ctx?.runSlots),
+    hostBuildSlot: diskGatedSlotPort(
+      hostBuildSlotPort(factoryConfig, ghRepo, issueNum, log, ctx?.runSlots),
+      ctx?.diskGuard,
+      issueNum,
+    ),
     shipPhase: shipPhaseForMode,
     checkBaseHealth: deps.checkBaseHealth ?? baseHealthWithCi(octokit, ghOwner, ghName, baseHealthOpts),
     resolveConstitution: () =>

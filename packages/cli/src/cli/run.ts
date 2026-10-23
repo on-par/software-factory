@@ -28,10 +28,12 @@ import {
   readHostLoad,
   recordSliceMerged,
   resolveBaseHealthChecks,
+  resolveDiskMinFreeGb,
   resolveHostLoadGuard,
   resolveLocalOnly,
   resolveQueueClaimSettleMs,
   resolveRunUsageHarness,
+  resolveWorktreeRoot,
   settleParkedPullRequest,
   slugify,
   withAdmissionGuard,
@@ -40,6 +42,7 @@ import {
 import { admissionStateReaderFor } from './admission.js';
 import { baseChecksVerdict } from './base-health-ci.js';
 import { createBaseHoldGate, formatBaseHoldCleared } from './base-hold.js';
+import { createDiskGuard } from './disk-guard.js';
 import { keychainPreflightError, type KeychainProbeStatus } from './doctor.js';
 import type {
   CliDeps,
@@ -247,6 +250,14 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
         watchdogHarness = undefined; // unresolvable config keeps today's Claude gating
       }
     }
+    const diskGuard = createDiskGuard({
+      minFreeGb: resolveDiskMinFreeGb(factoryConfig),
+      paths: [resolveWorktreeRoot({ repoRoot, parent: factoryConfig.worktree.parent, repo: ghRepo }), paths.state],
+      retryMs: knobs.pollMs,
+      eventsFile: paths.events,
+      stopFile: paths.stop,
+      notifier,
+    });
     const controller = new AbortController();
     const watchdog = knobs.watch
       ? rt.coreOps
@@ -323,6 +334,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
                 .exec(`git rev-parse --verify ${JSON.stringify(`refs/remotes/origin/${branch}`)}`, { cwd: repoRoot })
                 .then((r) => r.stdout.trim()),
             activeIssues: inFlightIssues,
+            diskGuard,
             loadGuard: opts.localQueue === true ? undefined : () => evaluateLoadGuard(loadGuardPolicy, readHostLoad()),
             baseHoldGate:
               opts.localQueue === true
@@ -348,7 +360,8 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
               const [owner, repoName] = ghRepo.split('/');
               await rt.getOctokit().rest.issues.createComment({ owner, repo: repoName, issue_number: issue, body });
             },
-            ship: (issue, o, c) => shipIssue(issue, { ...o, branchPrefix, prClassifier: opts.prClassifier }, c),
+            ship: (issue, o, c) =>
+              shipIssue(issue, { ...o, branchPrefix, prClassifier: opts.prClassifier }, c && { ...c, diskGuard }),
             sweepFinished: (issue) =>
               rt
                 .sweepBetweenLaneIssues(issue, planned.lane, repoRoot, ghRepo, paths, {

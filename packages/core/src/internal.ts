@@ -113,6 +113,7 @@ export { resolveBaseHealthChecks, resolveHermeticGit } from './config/base-healt
 export { resolveEffectiveConfig, resolveReviewFloorRules, resolveTrustTier } from './config/repo.js';
 export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix, resolveHostMaxBuilds } from './config/index.js';
 export { evaluateLoadGuard, formatLoadHold, readHostLoad, type LoadGuardDecision } from './environment/load-guard.js';
+export * from './environment/disk-guard.js';
 export { hostAgentJobsDir, hostBuildSlotsDir, listHostSlots, withHostAgentJobLease } from './environment/host-slots.js';
 export { withHostBuildSlot, type HostAgentJobKind, type HostSlotStatus } from './environment/host-slots.js';
 export { createRunSlotGate, withRunAndHostBuildSlot, type RunSlotGate } from './environment/run-slots.js';
@@ -553,7 +554,7 @@ export { createLocalUsageCoordinator, type LocalUsageCoordinatorOptions } from '
 export { selectUsageCoordinator, type SelectUsageCoordinatorOptions } from './usage/select-coordinator.js';
 
 // Local queue reprioritization audit records (#869)
-export type { QueueReprioritizationRecord } from './types/index.js';
+export type { IssueRunState, QueueReprioritizationRecord, RunStatus } from './types/index.js';
 export { createQueueRationaleAuditor, type QueueRationaleAuditor } from './queue/reprioritization-audit.js';
 
 // Publish only coarse daemon lifecycle status to configured ProjectV2 items (#868)
@@ -750,7 +751,6 @@ export * from './blockers/index.js';
 export * from './events/tail.js';
 export type { ReadinessGapCriterion, ReadinessGapReport } from './readiness/enrich.js';
 export { buildReadinessGapPrompt, parseReadinessGapOutput } from './readiness/enrich.js';
-export type { IssueRunState, RunStatus } from './types/index.js';
 export * from './run/state.js';
 export * from './run/steer.js';
 export * from './kpis/steerability.js';

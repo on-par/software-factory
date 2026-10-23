@@ -23,6 +23,7 @@ import {
   daemonRuntimePaths,
   formatQueueOrderConflict,
   formatWorktreeLocation,
+  formatDiskLow,
   hostBuildSlotsDir,
   IN_PROGRESS_LABEL,
   listHostSlots,
@@ -43,8 +44,9 @@ import { notInitializedMessage } from './first-run.js';
 import type { CliDeps, CliExitError, readActiveProduct } from './index.js';
 import { readRunFlagOverrides } from './run-flags.js';
 import { readStopFileStatus, stopSentinelStatusLine } from './stop-sentinel.js';
+import { probeDisk } from './status-disk.js';
 import { formatHostSlotsSection } from './status-host-slots.js';
-import { buildStatusJson } from './status-json.js';
+import { buildStatusJson, statusDiskJson } from './status-json.js';
 import { checkSweepHeartbeat, defaultSweepHeartbeatDeps, formatSweepHeartbeatStatusLine } from './sweep-heartbeat.js';
 import { buildStatusUpdateJson, formatUpdateStatusLine, readUpdateState, updateStatePath } from './update-state.js';
 
@@ -159,6 +161,9 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
           stopInfo: marker ? { source: marker.source, setAt: marker.at ?? null } : null,
           breakers: await new ProviderBreaker(paths.breaker).list(),
           active: view.active,
+          disk: statusDiskJson(
+            probeDisk(repoRoot, ghRepo, paths.state, rt.configLoaders.loadFactoryConfigForRepo(paths.config)),
+          ),
           update: buildStatusUpdateJson(readUpdateState(updateStatePath(daemonRuntimePaths().dir))),
           now: Date.now(),
         }),
@@ -225,6 +230,12 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
     for (const line of formatHostSlotsSection(listHostSlots(hostBuildSlotsDir()), maxBuilds)) console.log(line);
   } catch (err) {
     console.log(`  (host slot lookup failed — ${rt.errorDetail(err)})`);
+  }
+  try {
+    const disk = probeDisk(repoRoot, ghRepo, paths.state, rt.configLoaders.loadFactoryConfigForRepo(paths.config));
+    if (disk?.decision.kind === 'low') console.log(styleText('yellow', `DISK LOW ${formatDiskLow(disk.decision)}`));
+  } catch {
+    // a disk probe failure must not break status
   }
 
   console.log(styleText('bold', '\n== Queue =='));

@@ -18,6 +18,11 @@
       }
     ]
   },
+  "disk": {
+    "freeGb": 42.5,
+    "thresholdGb": 10,
+    "low": false
+  },
   "active": [
     {
       "lane": "app",

@@ -376,6 +376,7 @@ function runtimeNamespace(): Node[] {
     section('sandbox'),
     section('environment'),
     section('host'),
+    section('disk'),
     section('auto_failover'),
     section('queue'),
     section('ingest'),

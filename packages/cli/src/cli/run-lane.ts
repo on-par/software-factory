@@ -14,6 +14,7 @@ import type {
 } from '@on-par/factory-core/internal';
 
 import type { BaseHoldDecision } from './base-hold.js';
+import type { DiskGuard } from './disk-guard.js';
 import { laneParkCommenter } from './lane-park-comment.js';
 import { pauseLaneForBrokenBase, tripLaneBreaker } from './lane-pause.js';
 import { waitForMerge } from './land.js';
@@ -49,6 +50,7 @@ export type RunLaneDeps = {
       /** Issues still pending behind this one on the lane, for the park payload (#3511). */
       blockedBehind?: number[];
       onOutcome?: (outcome: RunOutcome) => void;
+      diskGuard?: Pick<DiskGuard, 'waitForSpace'>;
     },
   ) => Promise<string>;
   waitMerge?: typeof waitForMerge;
@@ -87,6 +89,9 @@ export type RunLaneDeps = {
   /** Host load guard (#3048): consulted before every remote claim, after the base-hold gate; 'hold'
    *  waits retryMs and re-checks. Absent = always claim (local lanes, injected-deps callers, tests). */
   loadGuard?: () => LoadGuardDecision;
+  /** Disk guard (#2284): consulted at the top of every lane iteration, before any claim or start; it
+   *  waits while free space is low and returns 'stopped' on STOP. Absent = no guard. */
+  diskGuard?: Pick<DiskGuard, 'waitForSpace'>;
   /** Injectable for tests. Default: setTimeout-based sleep. */
   sleep?: (ms: number) => Promise<void>;
   /** Injectable clock for the logged retry time. Default: () => new Date(). */
@@ -119,6 +124,7 @@ export async function runLane(
     countRemaining,
     baseHoldGate,
     loadGuard,
+    diskGuard,
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     now = () => new Date(),
     laneBreakerThreshold = 0,
@@ -203,6 +209,7 @@ export async function runLane(
     return 'claim';
   };
   for (let i = 0; ; i++) {
+    if (diskGuard && (await diskGuard.waitForSpace(`lane '${lane}'`)) === 'stopped') break;
     if (i >= pending.length) {
       // A persisted base hold on the unchanged origin/main SHA means the base is still broken
       // (#2349): claiming would just cycle an issue again, so stop this lane without claiming.

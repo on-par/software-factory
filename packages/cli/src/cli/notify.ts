@@ -10,6 +10,15 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 
 export type NotifySummary =
   | { kind: 'park'; ts: string; issue: number | string; lane: string; message: string; park: ParkPayload }
+  | {
+      kind: 'disk_low';
+      ts: string;
+      host: string;
+      message: string;
+      freeGb: number;
+      thresholdGb: number;
+      path: string;
+    }
   | { kind: 'drain'; ts: string; message: string; parked: number };
 
 export interface Notifier {

@@ -48,6 +48,7 @@ const statusInput = {
   active: [
     { lane: 'app', issue: 3175, phase: 'build' as const, lastActivityAt: new Date(fixedNow - 125_000).toISOString() },
   ],
+  disk: { freeGb: 42.5, thresholdGb: 10, low: false },
   update: {
     mode: 'stable' as const,
     channel: 'latest' as const,

@@ -325,6 +325,9 @@ const PO =
   'resolveRoleModel isOpenCodeZenModel subscriptionProviderOf PROVIDER_ORDER_ROLES SUBSCRIPTION_PROVIDERS'.split(' '); // #3334
 const EXTRA_INTERNAL_KEYS = [...JOB_KEYS, ...TAIL, ...MORE, ...STEER, ...STEERED, ...STACK, ...POLICY, ...PO];
 const INTERNAL_API_KEYS = [
+  ...'claimDiskAlertSlot evaluateDiskGuard formatDiskLow hostDiskAlertFile readFreeSpace resolveDiskMinFreeGb'.split(
+    ' ',
+  ), // #2284
   ...'resolveCompileCommand resolveLintCommands resolveTestsCommand'.split(' '), // #3473
   'openCodeVersion',
   'DEFAULT_CI_DEADLINE_MS',

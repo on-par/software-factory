@@ -24,6 +24,7 @@ export const statusJsonSchema = z.object({
       }),
     ),
   }),
+  disk: z.object({ freeGb: z.number(), thresholdGb: z.number(), low: z.boolean() }).nullable(),
   active: z.array(
     z.object({
       lane: z.string(),

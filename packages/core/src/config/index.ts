@@ -28,6 +28,7 @@ import type { FilingPolicy } from '../filing/policy.js';
 import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS, retiredHarnessReplacement } from '../harness/catalog.js';
 import type { FailoverReason } from '../types/index.js';
 import { SandboxConfigSchema } from './sandbox-schema.js';
+import { DiskConfigSchema } from './disk-section.js';
 import { ModelEffortsSchema } from './effort.js';
 import { resolvePrecedence, type ConfigSource } from './precedence.js';
 import { HarnessDeclarationSchema, type HarnessDeclaration } from './harness-declaration.js';
@@ -291,6 +292,7 @@ export const FactoryConfigSchema = z.object({
       comment: z.string().optional(),
     })
     .default({ maxBuilds: 2, maxAgentJobs: 1, loadGuard: { enabled: true, retrySeconds: 60 } }),
+  disk: DiskConfigSchema,
   auto_failover: z
     .object({
       enabled: z.boolean().default(true),
@@ -388,6 +390,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'intake',
   'environment',
   'host',
+  'disk',
   'auto_failover',
   'queue',
   'adr',
