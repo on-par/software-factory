@@ -753,6 +753,7 @@ const INTERNAL_API_KEYS = [
   'isTelemetryHost',
   'TELEMETRY_HOST_PATTERNS',
   'shouldProxyEgress',
+  'claimReviewRework',
   'classifyCiFailure',
   'collectCiFailureEvidence',
   'watchChecks',

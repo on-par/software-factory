@@ -36,12 +36,16 @@ export interface ReviewReworkRecord {
   lane: string;
   reviewer: string;
   queuedAt: string;
+  /** Set when a lane claimed the record for a review-rework run (#3564). */
+  startedAt?: string;
 }
 
 export interface ReviewReworkStore {
   has(reviewId: number): boolean;
   record(entry: ReviewReworkRecord): void;
   list(): ReviewReworkRecord[];
+  /** Stamp `startedAt` on a record; an unknown id does nothing. */
+  markStarted(reviewId: number, at: string): void;
 }
 
 export type ReviewReworkOutcome = 'queued' | 'already-queued' | 'skipped' | 'error';
@@ -198,17 +202,42 @@ export function createFileReviewReworkStore(file: string): ReviewReworkStore {
     }
     return entries;
   };
+  const persist = (map: Map<number, ReviewReworkRecord>): void => {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(`${file}.tmp`, `${JSON.stringify({ reviews: [...map.values()] }, null, 2)}\n`);
+    renameSync(`${file}.tmp`, file);
+  };
   return {
     has: (reviewId) => load().has(reviewId),
     list: () => [...load().values()],
     record(entry) {
       const map = load();
       map.set(entry.reviewId, entry);
-      mkdirSync(dirname(file), { recursive: true });
-      writeFileSync(`${file}.tmp`, `${JSON.stringify({ reviews: [...map.values()] }, null, 2)}\n`);
-      renameSync(`${file}.tmp`, file);
+      persist(map);
+    },
+    markStarted(reviewId, at) {
+      const map = load();
+      const entry = map.get(reviewId);
+      if (!entry) return;
+      map.set(reviewId, { ...entry, startedAt: at });
+      persist(map);
     },
   };
+}
+
+/** Claim the newest unstarted record for the issue (by queuedAt, then reviewId) and stamp startedAt on it (#3564). */
+export function claimReviewRework(
+  store: ReviewReworkStore,
+  issue: number,
+  now: () => Date = () => new Date(),
+): ReviewReworkRecord | undefined {
+  const pending = store.list().filter((r) => r.issue === issue && !r.startedAt);
+  pending.sort((a, b) => (a.queuedAt === b.queuedAt ? b.reviewId - a.reviewId : a.queuedAt < b.queuedAt ? 1 : -1));
+  const picked = pending[0];
+  if (!picked) return undefined;
+  const startedAt = now().toISOString();
+  store.markStarted(picked.reviewId, startedAt);
+  return { ...picked, startedAt };
 }
 
 function isRecord(value: unknown): value is ReviewReworkRecord {

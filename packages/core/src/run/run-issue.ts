@@ -95,6 +95,7 @@ import { isDecomposeSignal } from './run-state-record.js';
 import { runStatusForPhase, type RunStateUpdate } from './state.js';
 import { type ParkedPrDisposition, settleParkedPullRequest } from './park-pr.js';
 import { runParkSteward } from './park-steward.js';
+import { reviewReworkResume, runRequestedReviewRework, type ReviewReworkTarget } from './review-rework.js';
 import { shipWithCiRework, type CiReworkPorts } from './ci-rework-loop.js';
 import { parkLogExtra } from './ship-park.js';
 import { budgetGuardFor, enforceIssueBudget } from './budget.js';
@@ -174,6 +175,8 @@ export interface RunRequest {
   /** Resume at CHECK on a kept worktree (#2564): PLAN and BUILD are skipped. */
   /** Parent ref of a stacked slice branch (#2716); CHECK and the review floor diff against it. Absent = origin/main. */
   parentBaseRef?: string;
+  /** Review rework (#3564): skip PLAN/BUILD, rework this review on the adopted PR branch, then CHECK. */
+  reviewRework?: ReviewReworkTarget;
   resumeFrom?: { phase: 'check'; diffBase?: string; route: BuildRoute; model: string; buildMinutes: number };
   /** Resolved factory-state paths shipPhase reads/writes directly (unchanged from today —
    *  shipPhase's own surface already takes plain path strings, not a path-resolution port). */
@@ -583,8 +586,8 @@ async function runIssueOnce(
     let builtModel: string;
     let pinNote: string | undefined;
     let buildMinutes: number;
-    if (request.resumeFrom) {
-      const resumed = request.resumeFrom;
+    const resumed = request.resumeFrom ?? reviewReworkResume(request);
+    if (resumed) {
       ports.events('check')(
         'check',
         `resuming #${request.issue} from CHECK on kept branch ${request.branch} — PLAN and BUILD skipped`,
@@ -911,6 +914,7 @@ async function runIssueOnce(
       baselineCacheTtlHours: request.baselineCacheTtlHours,
       requiredChecksVerdict: ports.requiredChecksVerdict,
     };
+    await runRequestedReviewRework(request, ports, checkOpts);
     const check = await checkPhase(checkOpts);
     checkSummary = check.summary;
     observed.checkSummary = check.summary;
