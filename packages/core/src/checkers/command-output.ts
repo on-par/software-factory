@@ -101,7 +101,7 @@ export interface CommandRunCounts {
   problems?: number;
 }
 
-const COUNT_PART = /(\d+) (failed|passed|skipped|errors?)\b/g;
+const COUNT_PART = /\b(\d+) (failed|passed|skipped|errors?)\b/g;
 const BLOCK_CHAR_CAP = 1000;
 const TSC_ERROR_LINE = /error TS\d+:/;
 const ESLINT_ERROR_LINE = /^\s+\d+:\d+\s+error\s/;
@@ -124,17 +124,30 @@ function countParts(text: string): { line: string; counts: Partial<CommandRunCou
 
 /** Pass/fail counts from vitest, jest, pytest, tsc or eslint output; null when no format matches. */
 export function parseCommandCounts(output: string): CommandRunCounts | null {
-  const vitest = /^\s*Tests\s+(.+?)(?:\s+\(\d+\))?\s*$/m.exec(output);
-  const vitestParts = vitest ? countParts(vitest[1]!) : null;
-  if (vitestParts) return { format: 'vitest', line: vitestParts.line, ...vitestParts.counts };
+  const lines = output.split(/\r?\n/);
 
-  const jest = /^Tests:\s+(.+?),\s*(\d+) total/m.exec(output);
-  const jestParts = jest ? countParts(jest[1]!) : null;
-  if (jestParts) return { format: 'jest', line: jestParts.line, ...jestParts.counts };
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (/^Tests\s/.test(line)) {
+      const parts = countParts(line.slice(5));
+      if (parts) return { format: 'vitest', line: parts.line, ...parts.counts };
+    }
+  }
 
-  const pytest = /^=+ (.*\d+ (?:failed|passed|skipped|errors?)\b.*?) in [\d.]+s\b.*=+\s*$/m.exec(output);
-  const pytestParts = pytest ? countParts(pytest[1]!) : null;
-  if (pytestParts) return { format: 'pytest', line: pytestParts.line, ...pytestParts.counts };
+  for (const line of lines) {
+    if (line.startsWith('Tests:') && / total\b/.test(line)) {
+      const parts = countParts(line.slice(6));
+      if (parts) return { format: 'jest', line: parts.line, ...parts.counts };
+    }
+  }
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    if (line.startsWith('=') && line.endsWith('=') && /\bin [\d.]+s\b/.test(line)) {
+      const parts = countParts(line);
+      if (parts) return { format: 'pytest', line: parts.line, ...parts.counts };
+    }
+  }
 
   const found = /^Found (\d+) errors?(?: in \d+ files?)?\.?/m.exec(output);
   const tscCount = found
