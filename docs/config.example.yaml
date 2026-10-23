@@ -103,6 +103,12 @@ version: 2
 # Named evidence commands for design-artifact evidence plans (not the CHECK build/test/lint
 # commands; see `checks`). Shell-free argv; config overrides scripts.
 # commands: { test: "vitest run" }
+# PR body presentation.
+# pr:
+  # Last line of the PR body. Unset: "This PR was made by Software Factory". A non-empty string
+  # replaces it verbatim; "" removes the footer and its separator. Plain string only, with no
+  # templating or token substitution.
+  # footer: "This PR was made by Software Factory"
 # CHECK commands for this repo (build, test, lint). Each beats the file-based guess; `factory init
 # --detect-checks` writes them.
 # checks: { build: "dotnet build", test: "dotnet test", lint: "dotnet format --verify-no-changes" }

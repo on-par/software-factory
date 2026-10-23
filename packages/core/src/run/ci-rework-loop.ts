@@ -33,6 +33,7 @@ import {
 } from './ci-suppression-guard.js';
 import { reworkRouteFor, type BuildRoute, type ParkReason, type RunOutcome } from './outcome.js';
 import type { RunPorts, RunRequest } from './run-issue.js';
+import type { RunPolicy } from './policy.js';
 import { shipParkReason } from './ship-park.js';
 
 /** Injectable seams for the CI rework loop; RunPorts extends this. */
@@ -76,8 +77,8 @@ export interface CiReworkShipInputs {
   reviewRouting: ReviewRouting | undefined;
   pinNote: string | undefined;
   planSlice: PlanResult['slice'];
-  /** Stop SHIP at a draft PR (#3449); kept on every CI-rework re-entry. */
-  draftPr?: boolean;
+  /** PR presentation policy, kept on every CI-rework re-entry. */
+  pr?: RunPolicy['pr'];
 }
 
 export interface ShipWithCiReworkResult {
@@ -145,7 +146,8 @@ export async function shipWithCiRework(
     octokit: ports.octokit,
     watchCI: !request.skipCI,
     ...(request.ciDeadlineMs === undefined ? {} : { ciDeadlineMs: request.ciDeadlineMs }),
-    ...(inputs.draftPr ? { draft: true } : {}),
+    ...(inputs.pr?.draft ? { draft: true } : {}),
+    footer: inputs.pr?.footer,
     log: ports.events('ship'),
     approvalGate: request.options.interactive ? ports.createApprovalGate?.() : undefined,
     specPath: request.specPath,

@@ -84,6 +84,14 @@ describe('docs/config.example.yaml', () => {
     expect(RepoFactoryConfigV2Schema.parse({ version: 2 }).commands).toBeUndefined();
   });
 
+  it('documents the optional PR footer and its removal semantics', () => {
+    const text = renderConfigExample();
+    expect(text).toMatch(/^# pr:$/m);
+    expect(text).toMatch(/^  # footer: "This PR was made by Software Factory"$/m);
+    expect(text).toContain('"" removes the footer and its separator');
+    expect(text.replace(/\s*#\s*/g, ' ').replace(/\s+/g, ' ')).toContain('no templating or token substitution');
+  });
+
   it('parses as YAML into a mapping', () => {
     const parsed: unknown = parse(renderConfigExample());
     expect(parsed).not.toBeNull();

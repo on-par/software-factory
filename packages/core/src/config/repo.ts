@@ -47,6 +47,7 @@ import { assertAgenticBuildPin } from './repo-build-pin.js';
 import { assertTierMayRoute } from './repo-tier-guard.js';
 import { assertApprovedClaudeEndpoint, assertNoDirectDeepSeek } from './intermediaries.js';
 import { ChecksConfigSections } from './checks-section.js';
+import { PrConfigSections } from './pr-section.js';
 
 // ---------- Schema ----------
 
@@ -89,6 +90,7 @@ export const RepoFactoryConfigV1Schema = z
     route: z.enum(['codex', 'claude', 'opencode', 'command']).optional(),
     commands: z.record(z.string(), z.string()).optional().describe(EVIDENCE_COMMANDS_DESCRIPTION),
     ...ChecksConfigSections,
+    ...PrConfigSections,
   })
   .strict();
 
@@ -250,6 +252,7 @@ export const RepoFactoryConfigV2Schema = z
       ),
     commands: z.record(z.string(), z.string()).optional().describe(EVIDENCE_COMMANDS_DESCRIPTION),
     ...ChecksConfigSections,
+    ...PrConfigSections,
     ...OptionalConfigSections,
   })
   .strict();
@@ -311,6 +314,7 @@ export function adaptV1ToV2(v1: RepoFactoryConfigV1Input): RepoFactoryConfig {
     ...(v1.route !== undefined ? { route: v1.route } : {}),
     ...(v1.commands !== undefined ? { commands: v1.commands } : {}),
     ...(v1.checks !== undefined ? { checks: v1.checks } : {}),
+    ...(v1.pr !== undefined ? { pr: v1.pr } : {}),
   };
 }
 
