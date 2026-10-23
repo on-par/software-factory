@@ -55,10 +55,9 @@ const models: ModelsConfig = {
   },
   tiers: { worker: ['stub-codex', 'stub-worker', 'pinned-model'] },
   failover: {
-    triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+    triggers: ['rate_limit', 'unavailable', 'auth'],
     maxRetries: 2,
     cooldownMs: 0,
-    escalateAfterTierExhausted: true,
   },
   routingRules: {},
 };
@@ -824,6 +823,9 @@ describe('buildPhase steering', () => {
   });
 });
 
+// Failover stays at one provider inside a call (#3228): a same-provider pair of workers.
+const sameProviderModels: ModelsConfig = { ...models, tiers: { worker: ['stub-worker', 'pinned-model'] } };
+
 describe('buildPhase failover events', () => {
   it('emits a structured failover event when the router fails over to a different model', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
@@ -831,10 +833,10 @@ describe('buildPhase failover events', () => {
     const specPath = join(worktree, 'issue-90.md');
     const stub = new StubModelExecutor({
       scripts: {
-        build_claude: [{ fail: 'usage_cap' }, { output: 'claude output' }],
+        build_claude: [{ fail: 'timeout' }, { output: 'claude output' }],
       },
     });
-    const router = new ModelRouter(models, routes, false, stub);
+    const router = new ModelRouter(sameProviderModels, routes, false, stub);
     const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
 
     const result = await buildPhase({
@@ -852,11 +854,7 @@ describe('buildPhase failover events', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(logCalls).toContainEqual([
-      'failover',
-      expect.stringContaining('usage_cap'),
-      { failoverReason: 'usage_cap' },
-    ]);
+    expect(logCalls).toContainEqual(['failover', expect.stringContaining('timeout'), { failoverReason: 'timeout' }]);
   });
 
   it('omits the detail suffix from the failover log when the failed attempt carries no descriptive detail', async () => {
@@ -871,7 +869,7 @@ describe('buildPhase failover events', () => {
         return 'claude output';
       },
     };
-    const router = new ModelRouter(models, routes, false, executor as any);
+    const router = new ModelRouter(sameProviderModels, routes, false, executor as any);
     const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
 
     const result = await buildPhase({
@@ -1366,10 +1364,9 @@ describe('buildPhase cross-harness failover', () => {
     },
     tiers: { worker: ['codex-a', 'codex-b', 'claude-sonnet-5'] },
     failover: {
-      triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+      triggers: ['rate_limit', 'unavailable', 'auth'],
       maxRetries: 2,
       cooldownMs: 0,
-      escalateAfterTierExhausted: true,
     },
     routingRules: {},
   };
@@ -1724,7 +1721,7 @@ describe('buildPhase cross-harness failover', () => {
         },
         autoFailover: { enabled: false },
       }),
-    ).rejects.toThrow(/All models failed for task 'build_codex'/);
+    ).rejects.toThrow(/Usage cap \(usage_cap\).* task 'build_codex'/);
 
     expect(stub.calls.every((c) => c.task === 'build_codex')).toBe(true);
     expect(logCalls.some(([type]) => type === 'worker_failover')).toBe(false);

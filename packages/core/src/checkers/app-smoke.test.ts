@@ -210,7 +210,7 @@ const models: ModelsConfig = {
     },
   },
   tiers: { boss: ['stub-model'] },
-  failover: { triggers: ['error'], maxRetries: 1, cooldownMs: 0, escalateAfterTierExhausted: true },
+  failover: { triggers: ['error'], maxRetries: 1, cooldownMs: 0 },
   routingRules: {},
 };
 const routes: RoutesConfig = { version: 1, routes: { check_custom: { tier: 'boss', description: 'stub' } } };

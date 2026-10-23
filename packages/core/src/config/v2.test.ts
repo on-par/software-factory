@@ -61,10 +61,9 @@ describe('zero-config: { version: 2 }', () => {
     expect(cfg.models.providerOrder).toEqual(defaultModelsConfig.providerOrder);
     expect(cfg.models.providers).toEqual({});
     expect(cfg.models.failover).toEqual({
-      triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+      triggers: ['rate_limit', 'unavailable', 'auth'],
       maxRetries: 2,
       cooldownMs: 5000,
-      escalateAfterTierExhausted: true,
     });
     expect(cfg.models.routingRules).toEqual({});
 
@@ -233,10 +232,9 @@ describe('full v2 config', () => {
       },
       providers: { anthropic: true, openai: true, ollama: false },
       failover: {
-        triggers: ['rate_limit', 'usage_cap'],
+        triggers: ['rate_limit', 'auth'],
         maxRetries: 3,
         cooldownMs: 1000,
-        escalateAfterTierExhausted: false,
       },
       routingRules: { codex_available: { if: 'command -v codex' } },
     },

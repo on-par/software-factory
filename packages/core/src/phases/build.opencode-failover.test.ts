@@ -38,10 +38,9 @@ describe('buildPhase opencode failover (#2885)', () => {
       },
       tiers: { worker: tier },
       failover: {
-        triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+        triggers: ['rate_limit', 'unavailable', 'auth'],
         maxRetries: 1,
         cooldownMs: 0,
-        escalateAfterTierExhausted: true,
       },
       routingRules: {},
     }) as ModelsConfig;

@@ -131,13 +131,17 @@ OpenCode Zen (`opencode/`, metered pay-per-use) models are never shipped, never 
 
 ## Failover Triggers
 
-| Trigger                     | Behavior                                   |
-| --------------------------- | ------------------------------------------ |
-| `rate_limit` (429)          | Retry with cooldown (max 2), then failover |
-| `usage_cap` (quota/billing) | Failover immediately to next model         |
-| `timeout`                   | Failover immediately                       |
-| `error`                     | Retry once, then failover                  |
-| `empty_response`            | Failover immediately                       |
+`failover.triggers` lists failure **kinds**. Inside one call the router falls back only to a later model at the same provider as the first model it attempted; it never moves to another provider mid-call.
+
+| Kind                                                                                                     | Behavior                                                                                                     |
+| -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `usage_cap`                                                                                              | Always ends the call. The phase reruns on the next provider (`models.providerOrder`) at the phase boundary.  |
+| `rate_limit`                                                                                             | Retry the same model with cooldown up to `maxRetries`, then, if listed, the next model at the same provider. |
+| `unavailable` (timeout, 5xx, empty response, CLI missing, generic error after one retry, signed-out CLI) | Next model at the same provider, if listed.                                                                  |
+| `auth` (rejected or revoked credentials)                                                                 | Next model at the same provider, if listed.                                                                  |
+| `other` (deterministic, e.g. schema or verify failures)                                                  | Never falls back; cannot be listed.                                                                          |
+
+The default is `['rate_limit', 'unavailable', 'auth']`. An entry that is not one of `rate_limit`, `auth`, `unavailable` or `usage_cap` (including `other` and legacy reason names such as `timeout`) fails config load. Listing `usage_cap` loads with one warning and has no effect. The unread `escalateAfterTierExhausted` key was removed; a config that still sets it loads with one deprecation warning.
 
 ## Declaring a custom harness
 

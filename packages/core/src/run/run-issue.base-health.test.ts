@@ -45,7 +45,7 @@ const MODELS: ModelsConfig = {
     },
   },
   tiers: { worker: ['my-model'] },
-  failover: { triggers: [], maxRetries: 0, cooldownMs: 0, escalateAfterTierExhausted: false },
+  failover: { triggers: [], maxRetries: 0, cooldownMs: 0 },
   routingRules: {},
   harnesses: {
     'my-agent': { command: 'my-agent {model}', prompt: 'stdin', output: 'stdout', agentic: true, usage: 'none' },

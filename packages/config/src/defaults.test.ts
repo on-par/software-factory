@@ -283,10 +283,9 @@ describe('shipped defaults', () => {
 
   it('has the expected failover policy', () => {
     expect(defaultModelsConfig.failover).toEqual({
-      triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+      triggers: ['rate_limit', 'unavailable', 'auth'],
       maxRetries: 2,
       cooldownMs: 5000,
-      escalateAfterTierExhausted: true,
     });
   });
 

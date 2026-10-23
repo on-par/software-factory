@@ -25,7 +25,7 @@ describe('ModelRouter.resolveAll requires command', () => {
         'codex-model': { ...base, codex: true },
       },
       tiers: { worker: ['declared-agentic', 'declared-chat', 'claude-model', 'codex-model'] },
-      failover: { triggers: [], maxRetries: 0, cooldownMs: 0, escalateAfterTierExhausted: false },
+      failover: { triggers: [], maxRetries: 0, cooldownMs: 0 },
       routingRules: {},
       harnesses: {
         'my-agent': { ...declared, agentic: true },
@@ -59,7 +59,7 @@ describe('ModelRouter.resolveAll requires command', () => {
         'claude-model': { ...base, provider: 'anthropic' },
       },
       tiers: { worker: ['pi-model', 'ollama-model', 'agentic-ollama', 'claude-model'] },
-      failover: { triggers: [], maxRetries: 0, cooldownMs: 0, escalateAfterTierExhausted: false },
+      failover: { triggers: [], maxRetries: 0, cooldownMs: 0 },
       routingRules: {},
     };
     const routes: RoutesConfig = {

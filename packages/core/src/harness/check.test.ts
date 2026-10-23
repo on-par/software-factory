@@ -29,7 +29,7 @@ const CONFIG: ModelsConfig = {
     },
   },
   tiers: { worker: ['fx-model'] },
-  failover: { triggers: [], maxRetries: 0, cooldownMs: 0, escalateAfterTierExhausted: false },
+  failover: { triggers: [], maxRetries: 0, cooldownMs: 0 },
   routingRules: {},
   harnesses: {},
 };

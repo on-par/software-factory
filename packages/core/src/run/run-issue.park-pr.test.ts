@@ -51,7 +51,7 @@ const MODELS: ModelsConfig = {
   version: 1,
   models: {},
   tiers: {},
-  failover: { triggers: [], maxRetries: 0, cooldownMs: 0, escalateAfterTierExhausted: false },
+  failover: { triggers: [], maxRetries: 0, cooldownMs: 0 },
   routingRules: {},
 };
 

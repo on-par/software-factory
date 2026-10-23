@@ -1,4 +1,4 @@
-// src/router/index.ts — Model router with cost-tier routing and automatic failover
+// src/router/index.ts — Model router with cost-tier routing and same-provider failover
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { isOpenCodeZenModel } from '../config/provider-order.js';
@@ -482,7 +482,9 @@ export class ModelRouter {
     const maxRetries = this.registry.failover.maxRetries;
     const cooldownMs = this.registry.failover.cooldownMs;
     const attempts: RouterAttempt[] = [];
-    const blockedProviders = new Set<string>();
+    const triggers = new Set<string>(this.registry.failover.triggers);
+    let callProvider: string | undefined;
+    let providerPinned = false;
     const wtAtStart = worktreeExists(options.worktree); // #2964: only a worktree that existed can be "removed"
     const snapshot = taskRequiresAgenticHarness(task)
       ? await captureWorktreeState(this.gitExecFn, worktree, onLog)
@@ -532,8 +534,10 @@ export class ModelRouter {
         onLog(`Skipping ${model} for ${task}: ${this.authKey(model)} failed sign-in earlier in this run`);
         continue;
       }
-      if (modelProvider && blockedProviders.has(modelProvider)) {
-        onLog(`Skipping ${model} for ${task}: provider ${modelProvider} is on cooldown`);
+      if (providerPinned && modelProvider !== callProvider) {
+        onLog(
+          `Skipping ${model} for ${task}: provider ${modelProvider ?? 'unknown'} differs from ${callProvider ?? 'unknown'}; providers change only at a phase boundary`,
+        );
         continue;
       }
       const providerHeld =
@@ -550,6 +554,10 @@ export class ModelRouter {
           `Skipping ${model} for ${task}: provider ${modelProvider} credentials were rejected (factory breaker reset ${modelProvider} to retry)`,
         );
         continue;
+      }
+      if (!providerPinned) {
+        providerPinned = true;
+        callProvider = modelProvider;
       }
       let retries = 0;
       this.noticeRetiredHarness(model, onLog);
@@ -603,7 +611,6 @@ export class ModelRouter {
           const detail = describeFailureDetail(err);
           const blockProvider = async (): Promise<void> => {
             if (!provider || !opensProviderBreaker(failure)) return;
-            blockedProviders.add(provider);
             try {
               await onProviderFailure?.({
                 provider,
@@ -671,26 +678,23 @@ export class ModelRouter {
             }
           }
 
+          // A usage cap ends the call: the phase reruns on the next provider at the boundary.
+          if (failure.kind === 'usage_cap') {
+            await blockProvider();
+            onLog(`Usage cap hit on ${model} for ${task} — ending the call; the phase reruns at the boundary`);
+            throw new ModelRouterError(
+              `Usage cap (${reason}) from ${model} for task '${task}'${detail ? `: ${detail}` : ''}`,
+              'usage_cap',
+              attempts,
+            );
+          }
+
           // Rate limit → retry with cooldown
           if (reason === 'rate_limit' && retries < maxRetries) {
             retries++;
             onLog(`Rate limited — cooldown ${cooldownMs}ms before retry`);
             await this.sleepFn(cooldownMs);
             continue;
-          }
-
-          // Usage cap → failover immediately
-          if (reason === 'usage_cap') {
-            await blockProvider();
-            onLog(`Usage cap hit on ${model} — failing over to next model`);
-            break;
-          }
-
-          // Timeout → failover
-          if (reason === 'timeout') {
-            await blockProvider();
-            onLog(`${model} timed out on ${task} — failing over`);
-            break;
           }
 
           // Generic error → retry once, then failover
@@ -700,12 +704,23 @@ export class ModelRouter {
           }
 
           await blockProvider();
+          if (!triggers.has(failure.kind)) {
+            onLog(
+              `${model} failed (${reason}, kind ${failure.kind}) on ${task} — kind not in failover.triggers, not falling back`,
+            );
+            throw new ModelRouterError(
+              `Failover not triggered for ${failure.kind} (${reason}) from ${model} for task '${task}'${detail ? `: ${detail}` : ''}`,
+              reason,
+              attempts,
+            );
+          }
+          onLog(`${model} failed (${reason}) on ${task} — falling back to the next ${callProvider ?? ''} model`);
 
           // This is the documented empty-output path: a harness throws
           // HarnessError('empty_response'), the executor propagates it
           // (CliModelExecutor no longer catches and resolves ''), it's
           // classified as retryable here, one attempt is recorded above,
-          // and we fail over to the next model.
+          // and we fail over to the next same-provider model.
           break;
         }
 
@@ -755,6 +770,9 @@ export class ModelRouter {
               attempts,
             );
           }
+        }
+        if (!triggers.has('unavailable')) {
+          throw new ModelRouterError(`Empty response from ${model} for task '${task}'`, 'empty_response', attempts);
         }
         break;
       }

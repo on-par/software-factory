@@ -15,6 +15,7 @@ import {
   resolveConfigPath,
 } from '@on-par/factory-config';
 import { z } from 'zod';
+import { failoverConfigWarnings, FailoverTriggersSchema } from './failover-triggers.js';
 import { readRepoConfigFile, resolveRepoConfigPath } from './repo-config-file.js';
 import { resolveStateRoot, STATE_ROOT_ENV } from './state-root.js';
 import { DEFAULT_MAX_SLICES, SLICE_CAP_CEILING } from '../readiness/slice-plan.js';
@@ -73,10 +74,9 @@ const ModelsConfigSchema = z
     tiers: z.record(z.string(), z.array(z.string())),
     providerOrder: z.record(z.string(), z.array(z.string())).optional(),
     failover: z.object({
-      triggers: z.array(z.string()),
+      triggers: FailoverTriggersSchema,
       maxRetries: z.number(),
       cooldownMs: z.number(),
-      escalateAfterTierExhausted: z.boolean(),
     }),
     routingRules: z.record(z.string(), z.unknown()).default({}),
     harnesses: z.record(z.string(), HarnessDeclarationSchema).default({}),
@@ -342,6 +342,9 @@ export type FactoryConfig = z.infer<typeof FactoryConfigSchema>;
 export function loadModelsConfig(path?: string): ModelsConfig {
   const raw = path === undefined ? defaultModelsConfig : JSON.parse(readFileSync(path, 'utf-8'));
   const parsed = ModelsConfigSchema.parse(raw);
+  for (const w of failoverConfigWarnings((raw as { failover?: unknown } | null)?.failover, 'failover')) {
+    console.warn(`factory: ${w}`);
+  }
   if (path === undefined) {
     for (const [id, def] of Object.entries(parsed.models)) {
       if (isOpenCodeZenModel(id, def)) {

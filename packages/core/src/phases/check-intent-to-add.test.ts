@@ -46,7 +46,7 @@ const models: ModelsConfig = {
     },
   },
   tiers: { boss: ['stub'] },
-  failover: { triggers: ['error'], maxRetries: 0, cooldownMs: 0, escalateAfterTierExhausted: true },
+  failover: { triggers: ['error'], maxRetries: 0, cooldownMs: 0 },
   routingRules: {},
 };
 const routes: RoutesConfig = {

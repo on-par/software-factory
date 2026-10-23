@@ -42,7 +42,7 @@ const models: ModelsConfig = {
     'ollama-model': baseModel({ provider: 'ollama' }),
   },
   tiers: { boss: ['claude-model'], worker: ['gpt-model-a', 'ollama-model'] },
-  failover: { triggers: [], maxRetries: 0, cooldownMs: 0, escalateAfterTierExhausted: false },
+  failover: { triggers: [], maxRetries: 0, cooldownMs: 0 },
   routingRules: {},
 };
 

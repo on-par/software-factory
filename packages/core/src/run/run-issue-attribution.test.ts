@@ -52,7 +52,7 @@ const MODELS: ModelsConfig = {
     'gpt-6-luna-high': model('openai', 'codex-cli'),
   },
   tiers: { worker: ['claude-opus-5-5', 'gpt-6-luna-high'] },
-  failover: { triggers: [], maxRetries: 0, cooldownMs: 0, escalateAfterTierExhausted: false },
+  failover: { triggers: [], maxRetries: 0, cooldownMs: 0 },
   routingRules: {},
   efforts: { 'claude-opus-5-5': 'high', 'gpt-6-luna-high': 'xhigh' },
 };

@@ -38,7 +38,8 @@ export interface ModelsDefaults {
   tiers: Record<string, string[]>;
   /** Per role: subscription providers in failover order as model ids, one per provider (claude, codex, opencode-go) (#3334). Derived from the tiers with opencode-go last. OpenCode Zen (opencode/) models are never listed. */
   providerOrder: Record<'boss' | 'worker' | 'checker' | 'triage', string[]>;
-  failover: { triggers: string[]; maxRetries: number; cooldownMs: number; escalateAfterTierExhausted: boolean };
+  /** `triggers` are provider failure kinds (rate_limit, unavailable, auth) that fall back to the next model at the same provider. */
+  failover: { triggers: string[]; maxRetries: number; cooldownMs: number };
   routingRules: Record<string, unknown>;
 }
 
@@ -509,10 +510,9 @@ export const defaultModelsConfig: ModelsDefaults = {
     triage: ['claude-sonnet-5', 'gpt-5.6-luna-high', 'opencode-deepseek-v4-flash'],
   },
   failover: {
-    triggers: ['rate_limit', 'usage_cap', 'timeout', 'error', 'empty_response'],
+    triggers: ['rate_limit', 'unavailable', 'auth'],
     maxRetries: 2,
     cooldownMs: 5000,
-    escalateAfterTierExhausted: true,
   },
   routingRules: {
     codex_available: {
