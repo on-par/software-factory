@@ -56,10 +56,10 @@ async function guessEcosystems(
   } else {
     const target = solutions[0] ?? (projects.length === 1 ? projects[0] : undefined);
     if (target) {
-      found.push({
-        name: '.NET',
-        proposal: { build: `dotnet build ${quoteToken(target)}`, test: `dotnet test ${quoteToken(target)}` },
-      });
+      const t = quoteToken(target);
+      // An .editorconfig carries the repo's style rules; `dotnet format` enforces them (#3600).
+      const lint = entries.includes('.editorconfig') ? { lint: `dotnet format ${t} --verify-no-changes` } : {};
+      found.push({ name: '.NET', proposal: { build: `dotnet build ${t}`, test: `dotnet test ${t}`, ...lint } });
     } else if (projects.length > 1) {
       ambiguities.push(`several project files at the root and no solution (${projects.join(', ')})`);
     }

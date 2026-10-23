@@ -81,6 +81,10 @@ function actualOutput(output: string): string {
   return output.length <= 600 ? output : `…[truncated]${output.slice(-600)}`;
 }
 
+/** SKIP reason for evidence text the shell-free tokenizer rejects, distinct from a command missing from the allowlist (#3600). */
+const UNSUPPORTED_SHELL_SYNTAX =
+  'unsupported shell syntax (evidence runs one shell-free command: no pipes, redirects, ;, &, $, backticks, globs or VAR= prefixes)';
+
 function resolveArgv(text: string, allowlist: EvidenceAllowlist): string[] | null {
   const parts = tokenizeEvidenceCommand(text);
   if (!parts) return null;
@@ -201,6 +205,10 @@ export async function runEvidencePlan(
       results.push(result(entry, 'SKIP', entry.reason));
       continue;
     }
+    if (entry.kind === 'command' && !tokenizeEvidenceCommand(entry.command)) {
+      results.push(result(entry, 'SKIP', UNSUPPORTED_SHELL_SYNTAX));
+      continue;
+    }
     const argv = entry.kind === 'command' ? resolveArgv(entry.command, allowlist) : resolveArgv('test', allowlist);
     if (!argv) {
       results.push(result(entry, 'SKIP', 'not allowlisted'));
@@ -209,7 +217,7 @@ export async function runEvidencePlan(
     if (entry.kind === 'fail-to-pass-test') {
       const selector = tokenizeEvidenceCommand(entry.test);
       if (!selector) {
-        results.push(result(entry, 'SKIP', 'not allowlisted'));
+        results.push(result(entry, 'SKIP', UNSUPPORTED_SHELL_SYNTAX));
         continue;
       }
       const npmScript = argv[0] === 'npm' && argv[1] === 'run';

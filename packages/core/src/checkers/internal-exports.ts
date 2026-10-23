@@ -2,6 +2,7 @@
 
 export { listBuiltInCheckers, type BuiltInCheckerInfo } from './index.js';
 export {
+  describeChecksProbe,
   resolveCompileCommand,
   resolveLintCommands,
   resolveTestsCommand,
@@ -10,6 +11,8 @@ export {
   type TestsCommand,
 } from './index.js';
 export { type ChecksConfigSource } from './index.js';
+// The source-checkout config snapshot every CHECK resolver reads in a one-shot run (#3600).
+export { holdRunConfigSnapshot } from '../config/run-config-source.js';
 export {
   buildDetectChecksPrompt,
   CHECK_KINDS,

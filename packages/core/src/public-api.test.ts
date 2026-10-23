@@ -326,6 +326,7 @@ const PO =
 const EXTRA_INTERNAL_KEYS = [...JOB_KEYS, ...TAIL, ...MORE, ...STEER, ...STEERED, ...STACK, ...POLICY, ...PO];
 const INTERNAL_API_KEYS = [
   ...'resolveCompileCommand resolveLintCommands resolveTestsCommand'.split(' '), // #3473
+  ...'describeChecksProbe holdRunConfigSnapshot'.split(' '), // #3600
   // `factory init --detect-checks`: heuristics, agent prompt and reply, shell-free tokenizer
   ...'CHECK_KINDS buildDetectChecksPrompt detectCheckHeuristics heuristicProposal parseDetectedChecks'.split(' '),
   'tokenizeEvidenceCommand',

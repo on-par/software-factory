@@ -49,6 +49,7 @@ import {
   createPlanReuseStore,
   egressHostMessage,
   egressSummaryMessage,
+  holdRunConfigSnapshot,
   logCost,
   logEvent,
   readIssueRunState,
@@ -80,7 +81,28 @@ import {
   TERMINAL_EVENT_KINDS,
 } from './ship-steps.js';
 
+type ShipArgs = Parameters<typeof shipIssueFrom> extends [string, ...infer Rest] ? Rest : never;
+
+/** Every one-shot entry point (ship, run-issue, run-brief, run lanes, resume --from check) runs here with the source
+ *  checkout's repo config snapshotted, so CHECK in a worktree without `.factory/` runs its `checks` (#3600). */
 export async function shipIssue(
+  issueNum: ShipArgs[0],
+  opts: ShipArgs[1],
+  ctx?: ShipArgs[2],
+  deps: ShipArgs[3] = {},
+): Promise<string> {
+  const runtime = shipRuntime();
+  const repoRoot = ctx?.repoRoot ?? (await runtime.getRepoRoot(runtime.resolveShellOps(deps)));
+  const release = holdRunConfigSnapshot((ctx?.paths ?? getFactoryPaths(repoRoot)).config);
+  try {
+    return await shipIssueFrom(repoRoot, issueNum, opts, ctx, deps);
+  } finally {
+    release();
+  }
+}
+
+async function shipIssueFrom(
+  repoRoot: string,
   issueNum: number,
   opts: {
     product?: string;
@@ -142,7 +164,6 @@ export async function shipIssue(
     resolveShellOps,
     resolveCoreOps,
     resolvePhaseOps,
-    getRepoRoot,
     getGitHubRepo,
     repoConfigFileFor,
     getOctokit,
@@ -159,7 +180,6 @@ export async function shipIssue(
   const core = resolveCoreOps(deps);
   const phases = resolvePhaseOps(deps);
   const shipPhaseForMode = stubAwareShipPhase(phases.shipPhase);
-  const repoRoot = ctx?.repoRoot ?? (await getRepoRoot(shell));
   const ghRepo = ctx?.ghRepo ?? (await getGitHubRepo(shell));
   const paths = ctx?.paths ?? getFactoryPaths(repoRoot);
   // GitHub REST deprecations seen on this run's client become one warn event per route (#2218).
