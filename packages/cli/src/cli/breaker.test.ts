@@ -1,21 +1,19 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { ProviderBreaker } from '@on-par/factory-core';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { runBreakerReset } from './breaker.js';
 import { CliExitError } from './index.js';
 
-const dirs: string[] = [];
+const tmp = createTempDirs();
 afterEach(async () => {
-  for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true });
+  await tmp.cleanup();
 });
 
 async function setup() {
-  const dir = await mkdtemp(join(tmpdir(), 'cli-breaker-'));
-  dirs.push(dir);
+  const dir = await tmp.make('cli-breaker-');
   const breaker = new ProviderBreaker(join(dir, 'breaker.json'), () => 1, { fingerprint: () => 'fp' });
   const logs: unknown[] = [];
   const out: string[] = [];

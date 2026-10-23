@@ -1,21 +1,19 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import type { RunLogFn } from './attribution.js';
 import { providerFailureRecorder } from './provider-failure-recorder.js';
 
-const dirs: string[] = [];
+const tmp = createTempDirs();
 afterEach(async () => {
-  for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true });
+  await tmp.cleanup();
 });
 
 async function setup() {
-  const dir = await mkdtemp(join(tmpdir(), 'recorder-test-'));
-  dirs.push(dir);
+  const dir = await tmp.make('recorder-test-');
   const breaker = new ProviderBreaker(join(dir, 'breaker.json'), () => 1, { fingerprint: () => 'fp' });
   const logs: Array<{ type: string; extra?: Parameters<RunLogFn>[2] }> = [];
   const log: RunLogFn = (type, _msg, extra) => logs.push({ type, extra });

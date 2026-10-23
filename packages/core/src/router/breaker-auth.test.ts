@@ -1,14 +1,14 @@
 // Regression for #3232: a rejected credential fails over, holds the breaker until the credentials change, and
 // announces itself with exactly one provider_auth_rejected event.
 
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { HarnessError } from '../harness/index.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { providerFailureRecorder } from '../run/provider-failure-recorder.js';
 import { logEvent } from '../utils/index.js';
 import { ProviderBreaker } from './breaker.js';
@@ -39,14 +39,13 @@ const models: ModelsConfig = {
 };
 const routes: RoutesConfig = { version: 1, routes: { plan: { tier: 'boss', description: 'stub' } } };
 
-const dirs: string[] = [];
+const tmp = createTempDirs();
 afterEach(async () => {
-  for (const d of dirs.splice(0)) await rm(d, { recursive: true, force: true });
+  await tmp.cleanup();
 });
 
 async function setup(anthropicError: string) {
-  const dir = await mkdtemp(join(tmpdir(), 'breaker-auth-'));
-  dirs.push(dir);
+  const dir = await tmp.make('breaker-auth-');
   const clock = { now: Date.parse('2026-10-20T00:00:00Z') };
   const breaker = new ProviderBreaker(join(dir, 'breaker.json'), () => clock.now, { fingerprint: () => 'fp' });
   const eventsFile = join(dir, 'events.ndjson');
