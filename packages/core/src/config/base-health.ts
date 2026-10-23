@@ -23,10 +23,24 @@ export const CheckConfigSchema = z
       .describe(
         'Run CHECK commands with an empty global and system git config (GIT_CONFIG_GLOBAL=/dev/null, GIT_CONFIG_NOSYSTEM=1), as on a CI runner. Set false when checks need host git settings such as a credential helper. Unset: true.',
       ),
+    baselineCacheTtlHours: z
+      .number()
+      .positive()
+      .optional()
+      .describe(
+        'Hours a cached baseline (base SHA) checker result is reused before CHECK and base health re-run it (#3540). Unset: 24.',
+      ),
   })
   .strict()
   .optional()
-  .describe('CHECK phase settings (#3272).');
+  .describe('CHECK phase settings (#3272, #3540).');
+
+export const DEFAULT_BASELINE_CACHE_TTL_HOURS = 24;
+
+/** Hours a cached baseline checker result is reused (#3540); 24 unless the repo sets check.baselineCacheTtlHours. */
+export function resolveBaselineCacheTtlHours(repo: { check?: { baselineCacheTtlHours?: number } } | null): number {
+  return repo?.check?.baselineCacheTtlHours ?? DEFAULT_BASELINE_CACHE_TTL_HOURS;
+}
 
 /** Repo-config keys for base health and CHECK settings, spread into the V2 schema. */
 export const HealthConfigSections = { baseHealth: BaseHealthConfigSchema, check: CheckConfigSchema };

@@ -99,6 +99,8 @@ import { shipWithCiRework, type CiReworkPorts } from './ci-rework-loop.js';
 import { parkLogExtra } from './ship-park.js';
 import { budgetGuardFor, enforceIssueBudget } from './budget.js';
 import type { IssueRunState } from '../types/index.js';
+import type { RequiredChecksVerdict } from '../utils/required-checks.js';
+import type { RunReportInfo } from './run-report-info.js';
 import { renderPreviousAttempt } from './previous-attempt.js';
 import { withoutHumanOnlyLabels } from './max-lines-override.js';
 
@@ -179,24 +181,14 @@ export interface RunRequest {
   logsDir?: string;
   /** state/baseline-cache.json (#1926), forwarded to checkPhase. */
   baselineCachePath?: string;
+  /** check.baselineCacheTtlHours (#3540); undefined = 24. */
+  baselineCacheTtlHours?: number;
   /** The repo config file (`.factory/config.yaml|yml|json`) to scan in the pre-PLAN template-token preflight (#2586); undefined = constitution only. */
   repoConfigFile?: { absPath: string; relPath: string };
   /** state/flaky-tests.json (#2303); undefined = no flake ledger or filing. */
   flakyLedgerPath?: string;
   /** state/worktree-keeps.json (#3316); undefined = a budget park records no keep. */
   worktreeKeepsPath?: string;
-}
-
-interface RunReportInfo {
-  outcome: 'ready' | 'failed' | 'parked' | 'escalated';
-  route?: BuildRoute;
-  branch?: string;
-  reworkRounds?: number;
-  checkSummary?: CheckSummary;
-  reason?: string;
-  failure?: { phase: FailurePhase; reason: string; message: string };
-  reportPath?: string;
-  diffBase?: string;
 }
 
 /** The injected seams runIssue needs. Effectful, path-bound concerns (Octokit, worktree
@@ -268,6 +260,8 @@ export interface RunPorts extends CiReworkPorts {
   shipPhase?: typeof shipPhaseDefault;
   /** Pre-PLAN health check of origin/main (#2339). Absent = skipped (existing callers/tests unchanged). */
   checkBaseHealth?: typeof checkBaseHealth;
+  /** GitHub CI verdict for a base SHA (#3540), forwarded to CHECK's baseline cache cross-check. Absent = no cross-check. */
+  requiredChecksVerdict?: (sha: string) => Promise<RequiredChecksVerdict>;
   /** Frozen-plan reuse after an environment release (#2340). Absent = always plan (existing callers/tests unchanged). */
   planReuse?: PlanReuseStore;
   /** Check-resume record (#2564). Absent = no preservation (existing callers/tests unchanged). */
@@ -548,6 +542,7 @@ async function runIssueOnce(
           router: ports.router,
           env: laneEnv(appPort, process.env, appBaseUrl, ports.workspace.path, runId),
           cachePath: request.baselineCachePath,
+          cacheTtlHours: request.baselineCacheTtlHours,
           timeoutSeconds: request.timeouts.check,
           testsTimeoutSeconds: request.timeouts.tests,
           compileTimeoutSeconds: request.timeouts.compile,
@@ -913,6 +908,8 @@ async function runIssueOnce(
       logsDir: request.logsDir,
       onWorkerResult: phaseLogger.rework,
       baselineCachePath: request.baselineCachePath,
+      baselineCacheTtlHours: request.baselineCacheTtlHours,
+      requiredChecksVerdict: ports.requiredChecksVerdict,
     };
     const check = await checkPhase(checkOpts);
     checkSummary = check.summary;

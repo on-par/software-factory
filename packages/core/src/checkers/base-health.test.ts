@@ -401,3 +401,70 @@ describe('checkBaseHealth compile timeout (#3186)', () => {
     }
   });
 });
+
+describe('checkBaseHealth baseline cache invalidation (#3540)', () => {
+  const tempDirs = createTempDirs();
+  afterEach(() => tempDirs.cleanup());
+
+  const out = (checker: string, result: 'PASS' | 'FAIL', details = '') => ({ checker, result, details });
+
+  async function setup() {
+    const dir = await tempDirs.make('base-health-3540-');
+    const cachePath = join(dir, 'baseline-cache.json');
+    const env = hashBaselineEnv({ A: '1' });
+    const seed = new BaselineCache(cachePath);
+    await seed.set(SHA, env, hashBaselineCheckerConfig(null), [
+      out('compile', 'PASS'),
+      out('lint', 'PASS'),
+      out('tests', 'FAIL', 'stale'),
+    ]);
+    const runCheckers = vi.fn(async () => ({
+      failures: 0,
+      passes: 1,
+      skips: 0,
+      total: 1,
+      results: [out('tests', 'PASS')],
+    }));
+    const baselineDeps = {
+      runCommand: vi.fn(async () => cmd('')),
+      runCheckers: runCheckers as never,
+      makeTempDir: () => mkdtemp(join(dir, 'p-')),
+    };
+    return { cachePath, env, baselineDeps, runCheckers };
+  }
+
+  const green = async () => ({ green: true, reason: 'all 2 required checks succeeded' });
+
+  it('a cached FAIL with green CI is deleted from the cache file and logs baseline-cache-invalidated with the SHA, checker and reason', async () => {
+    const { cachePath, baselineDeps, runCheckers } = await setup();
+    const deleteSpy = vi.spyOn(BaselineCache.prototype, 'delete');
+    try {
+      const res = await checkBaseHealth(
+        opts({ baselineDeps, confirmed: new Set() }, { cachePath, requiredChecksVerdict: green }),
+      );
+      expect(res.kind).toBe('green');
+      expect(deleteSpy).toHaveBeenCalledWith(SHA, hashBaselineEnv({ A: '1' }), 'tests');
+    } finally {
+      deleteSpy.mockRestore();
+    }
+    const events = log.mock.calls.filter((c) => c[0] === 'baseline-cache-invalidated');
+    expect(events).toHaveLength(1);
+    const msg = String(events[0][1]);
+    expect(msg).toContain(SHA);
+    expect(msg).toContain('tests');
+    expect(msg).toContain('GitHub CI is green');
+    expect(runCheckers).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes cacheTtlHours to BaselineCache: an entry older than the TTL is not reused', async () => {
+    const { cachePath, baselineDeps, runCheckers } = await setup();
+    const res = await checkBaseHealth(opts({ baselineDeps, memo: new Map() }, { cachePath, cacheTtlHours: 0.000001 }));
+    await new Promise((r) => setTimeout(r, 5));
+    expect(res.kind).toBeDefined();
+    const second = await checkBaseHealth(
+      opts({ baselineDeps, memo: new Map() }, { cachePath, cacheTtlHours: 0.000001 }),
+    );
+    expect(second.kind).toBe('green');
+    expect(runCheckers.mock.calls.length).toBeGreaterThanOrEqual(1);
+  });
+});

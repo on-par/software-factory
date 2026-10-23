@@ -47,6 +47,10 @@ describe('EVENT_TRAITS', () => {
     expect(EVENT_TRAITS['base-hold-cleared']).toEqual({ severity: 'info', isPark: false, isTerminal: false });
   });
 
+  it('classifies baseline-cache-invalidated as non-park info (#3540)', () => {
+    expect(EVENT_TRAITS['baseline-cache-invalidated']).toEqual({ severity: 'info', isPark: false, isTerminal: false });
+  });
+
   it('classifies ci-rescued as non-park info (#2365)', () => {
     expect(EVENT_TRAITS['ci-rescued']).toEqual({ severity: 'info', isPark: false, isTerminal: false });
   });

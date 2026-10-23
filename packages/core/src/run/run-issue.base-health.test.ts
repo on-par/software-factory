@@ -110,4 +110,24 @@ describe('runIssue — pre-PLAN base health tests timeout (#3095)', () => {
       compileTimeoutSeconds: 900,
     });
   });
+
+  it('passes check.baselineCacheTtlHours to the port as cacheTtlHours (#3540)', async () => {
+    const checkBaseHealth = vi.fn<NonNullable<RunPorts['checkBaseHealth']>>().mockResolvedValue({
+      kind: 'red',
+      baseSha: 'a'.repeat(40),
+      failingChecks: ['tests'],
+      cached: false,
+    });
+    const ports: RunPorts = {
+      router: new ModelRouter(MODELS, ROUTES),
+      octokit: {} as Octokit,
+      workspace: { path: '/tmp/wt', dispose: async () => {} } as Workspace,
+      events: () => () => {},
+      breaker: new ProviderBreaker(join(breakerDir, 'breaker.json')),
+      resolveConstitution: () => null,
+      checkBaseHealth,
+    };
+    await runIssue({ ...request, baselineCacheTtlHours: 6 }, policy, ports);
+    expect(checkBaseHealth.mock.calls[0][0]).toMatchObject({ cacheTtlHours: 6 });
+  });
 });
