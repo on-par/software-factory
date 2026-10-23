@@ -18,6 +18,10 @@ describe('shipped defaults', () => {
     expect(defaultFactoryConfig.pr.footer).toBe('This PR was made by Software Factory');
   });
 
+  it('defaults the review-rework cap to 2 (#3565)', () => {
+    expect(defaultFactoryConfig.queue.max_review_rework_runs).toBe(2);
+  });
+
   it('defaults the lane breaker threshold to 2 (#1915)', () => {
     expect(defaultLaneBreakerThreshold).toBe(2);
   });

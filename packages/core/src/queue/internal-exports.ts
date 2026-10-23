@@ -2,3 +2,4 @@
 export { isTrustedApprover, createOctokitCollaboratorPermissionClient } from './approval.js';
 export type { CollaboratorPermissionClient, TrustedApproverOptions } from './approval.js';
 export * from './review-rework-trigger.js';
+export * from '../run/review-rework-cap.js';

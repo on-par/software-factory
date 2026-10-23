@@ -29,12 +29,15 @@ import {
   evaluateLoadGuard,
   formatQueueOrderConflict,
   logEvent,
+  parkPayload,
   pollReviewRework,
+  publishParkComment,
   readHostLoad,
   recordSliceMerged,
   resolveBaseHealthChecks,
   resolveHostLoadGuard,
   resolveLocalOnly,
+  resolveMaxReviewReworkRuns,
   resolveQueueClaimSettleMs,
   resolveRunUsageHarness,
   settleParkedPullRequest,
@@ -296,6 +299,8 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
           trustedApprovers: factoryConfig.intake?.trustedApprovers,
           permissions: createOctokitCollaboratorPermissionClient(octokit),
           store: createFileReviewReworkStore(paths.reviewRework),
+          maxRuns: resolveMaxReviewReworkRuns(factoryConfig),
+          publishParkComment: (input) => publishParkComment({ octokit, repo: ghRepo, input }),
         });
         for (const r of results) {
           if (r.outcome === 'queued') {
@@ -305,6 +310,14 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
               r.issue,
               `#${r.issue} queued for review rework on lane '${r.lane}' — PR #${r.pr} review ${r.reviewIds.join(', ')} by ${r.reviewer}`,
               { lane: r.lane },
+            );
+          } else if (r.outcome === 'capped') {
+            logEvent(
+              paths.events,
+              'escalate',
+              r.issue,
+              `#${r.issue} parked: review rework cap ${r.cap} reached (${r.count} runs) — PR #${r.pr} review ${r.reviewIds.join(', ')}`,
+              parkPayload('escalate', r.issue, r.lane, []),
             );
           } else if (r.outcome === 'error') {
             logEvent(paths.events, 'warn', r.issue, `review-rework poll for PR #${r.pr} failed: ${r.detail}`);

@@ -32,6 +32,19 @@ describe('loadFactoryConfigForRepo queue.claim_settle_ms', () => {
     expect(resolveQueueClaimSettleMs(config)).toBe(0);
   });
 
+  it('queue.max_review_rework_runs defaults to 2 and a configured value overrides it', async () => {
+    const path = join(dir, 'config.json');
+    expect(loadFactoryConfigForRepo(join(dir, 'missing.json')).queue.max_review_rework_runs).toBe(2);
+    await writeFile(path, JSON.stringify({ queue: { max_review_rework_runs: 5 } }));
+    expect(loadFactoryConfigForRepo(path).queue.max_review_rework_runs).toBe(5);
+  });
+
+  it.each([-1, '2', 1.5])('queue.max_review_rework_runs rejects %j naming the key path', async (value) => {
+    const path = join(dir, 'config.json');
+    await writeFile(path, JSON.stringify({ queue: { max_review_rework_runs: value } }));
+    expect(() => loadFactoryConfigForRepo(path)).toThrow(/queue\.max_review_rework_runs/);
+  });
+
   it.each([-1, '3s', 1.5])('queue.claim_settle_ms rejects %j naming the key path', async (value) => {
     const path = join(dir, 'config.json');
     await writeFile(path, JSON.stringify({ queue: { claim_settle_ms: value } }));
