@@ -16,6 +16,7 @@ const tempDirs = createTempDirs();
 const expectedFiles = [
   'queue-add.schema.json',
   'cost.schema.json',
+  'kpis.schema.json',
   'daemon-status.schema.json',
   'logs-line.schema.json',
   'queue-list.schema.json',
@@ -55,7 +56,7 @@ function copySchemas(destination: string): void {
 }
 
 describe('CLI JSON Schema generator', () => {
-  it('writes exactly the twelve schema artifacts deterministically, in-process and through the CLI', async () => {
+  it('writes exactly the thirteen schema artifacts deterministically, in-process and through the CLI', async () => {
     const cli = tempDirs.makeSync('cli-schemas-cli-');
     const inProcess = tempDirs.makeSync('cli-schemas-in-process-');
     expect(runGeneratorCli(cli).status).toBe(0);

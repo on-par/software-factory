@@ -1,6 +1,7 @@
 // src/checkers/base-health.ts — pre-PLAN health check of origin/main, cached per base SHA (#2339).
 // #3287: a cached non-timeout FAIL whose SHA GitHub CI calls green is re-run once, fresh; a fresh
 // FAIL is `confirmedLocally` (logged as base_divergence) and never re-run for that SHA in-process.
+// #3540: that cached FAIL is also deleted from the cache file and logged as baseline-cache-invalidated.
 
 import type { EventKind } from '../events/kinds.js';
 import type { ModelRouter } from '../router/index.js';
@@ -47,6 +48,8 @@ export interface BaseHealthOptions {
   env: Record<string, string>;
   /** state/baseline-cache.json; undefined = no file cache. */
   cachePath?: string;
+  /** check.baselineCacheTtlHours (#3540); undefined = 24. */
+  cacheTtlHours?: number;
   /** Custom-checker timeout in seconds (`request.timeouts.check`). */
   timeoutSeconds?: number;
   /** Tests checker timeout in seconds (`request.timeouts.tests`, #3095); undefined = the tests checker's 300s default. */
@@ -123,7 +126,7 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
           router,
           constitution,
           customCheckerTimeoutSeconds: timeoutSeconds,
-          cache: cachePath === undefined ? undefined : new BaselineCache(cachePath),
+          cache: cachePath === undefined ? undefined : new BaselineCache(cachePath, undefined, opts.cacheTtlHours),
           deps: deps.baselineDeps,
         }),
       );
@@ -194,6 +197,17 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
           'check',
           `base health: cached FAIL (${cachedFailing.join(', ')}) on origin/main ${sha8} but GitHub CI is green (${verdict.reason}) — re-running once with the cache bypassed`,
         );
+        for (const checker of cachedFailing) {
+          if (cachePath !== undefined) {
+            await new BaselineCache(cachePath, undefined, opts.cacheTtlHours)
+              .delete(baseSha, hashBaselineEnv(env), checker)
+              .catch(() => false);
+          }
+          log(
+            'baseline-cache-invalidated',
+            `baseline cache invalidated: ${baseSha} ${checker} — cached FAIL but GitHub CI is green (${verdict.reason})`,
+          );
+        }
         const captured: CheckerOutput[] = [];
         const innerRun = deps.baselineDeps?.runCheckers ?? runAllCheckers;
         const capture: typeof runAllCheckers = async (...args) => {
@@ -211,7 +225,7 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
             router,
             constitution,
             customCheckerTimeoutSeconds: timeoutSeconds,
-            cache: cachePath === undefined ? undefined : new BaselineCache(cachePath),
+            cache: cachePath === undefined ? undefined : new BaselineCache(cachePath, undefined, opts.cacheTtlHours),
             deps: { ...deps.baselineDeps, runCheckers: capture },
             bypassCache: true,
           });

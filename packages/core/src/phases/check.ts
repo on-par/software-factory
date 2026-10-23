@@ -3,7 +3,6 @@
 import { join } from 'node:path';
 
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
-import { BaselineCache } from '../checkers/baseline-cache.js';
 import { type BaselineReport, extractFailingTestNames, runBaselineCheckers } from '../checkers/baseline.js';
 import { type FlakeRerun, rerunTestsChecker } from '../checkers/flaky-rerun.js';
 import {
@@ -28,6 +27,8 @@ import type { ModelRouter, RouterResult } from '../router/index.js';
 import { failoversFrom } from '../router/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
+import type { RequiredChecksVerdict } from '../utils/required-checks.js';
+import { baselineCacheOptions, describeBaseline } from './check-baseline.js';
 import { resolveReworkRoute } from './plan-routes.js';
 import type {
   BaseFailureCause,
@@ -333,6 +334,10 @@ async function checkPhaseImpl(opts: {
   onWorkerResult?: ReworkWorkerOptions['onWorkerResult'];
   /** state/baseline-cache.json (#1926); when set, baseline results are cached per base SHA + laneEnv hash. */
   baselineCachePath?: string;
+  /** check.baselineCacheTtlHours (#3540); undefined = 24. */
+  baselineCacheTtlHours?: number;
+  /** GitHub CI verdict for the base SHA (#3540); absent = cached FAILs are never cross-checked. */
+  requiredChecksVerdict?: (sha: string) => Promise<RequiredChecksVerdict>;
   /** Injection seam for tests; defaults to runBaselineCheckers (#1925). */
   runBaseline?: typeof runBaselineCheckers;
   /** Injection seam for tests; defaults to runAllCheckers (#2238). */
@@ -372,6 +377,8 @@ async function checkPhaseImpl(opts: {
     onActivity,
     logsDir,
     baselineCachePath,
+    baselineCacheTtlHours,
+    requiredChecksVerdict,
     runBaseline,
     runCheckers,
     hermeticGit = true,
@@ -466,7 +473,9 @@ async function checkPhaseImpl(opts: {
         router,
         constitution,
         customCheckerTimeoutSeconds: checkTimeoutSeconds,
-        cache: baselineCachePath === undefined ? undefined : new BaselineCache(baselineCachePath),
+        ...baselineCacheOptions(baselineCachePath, baselineCacheTtlHours, requiredChecksVerdict, (checker, reason) =>
+          log('baseline-cache-invalidated', `baseline cache invalidated: ${diffBase} ${checker} — ${reason}`),
+        ),
       }).catch((e: any) => ({ baseSha: diffBase, checkers: [], error: String(e?.message ?? e).slice(0, 300) }));
       log('check', describeBaseline(baseline));
     }
@@ -681,23 +690,6 @@ async function checkPhaseImpl(opts: {
     ...(baseline ? { baseline } : {}),
     ...(flakeRerun ? { flakeRerun } : {}),
   };
-}
-
-/** One-line summary of the baseline comparison for the CHECK log. */
-function describeBaseline(report: BaselineReport): string {
-  const parts = report.checkers.map((c) => {
-    if (c.verdict === 'fails-on-base') {
-      const counts =
-        c.sharedFailingTests && c.newFailingTests
-          ? ` (${c.sharedFailingTests.length} shared, ${c.newFailingTests.length} new failing tests)`
-          : '';
-      return `${c.checker} also fails on base${counts}${c.cached ? ' (cached)' : ''}`;
-    }
-    if (c.verdict === 'clean-on-base') return `${c.checker} clean on base${c.cached ? ' (cached)' : ''}`;
-    return `${c.checker} not run on base (${c.reason ?? 'unknown'})`;
-  });
-  const body = parts.length > 0 ? parts.join('; ') : 'no checkers compared';
-  return `baseline at ${report.baseSha.slice(0, 8)}: ${body}${report.error ? ` — error: ${report.error}` : ''}`;
 }
 
 export interface ReworkWorkerOptions {

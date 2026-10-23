@@ -329,6 +329,7 @@ const INTERNAL_API_KEYS = [
   // `factory init --detect-checks`: heuristics, agent prompt and reply, shell-free tokenizer
   ...'CHECK_KINDS buildDetectChecksPrompt detectCheckHeuristics heuristicProposal parseDetectedChecks'.split(' '),
   'tokenizeEvidenceCommand',
+  ...'BaselineCache resolveBaselineCacheTtlHours'.split(' '), // #3540
   'openCodeVersion',
   'DEFAULT_CI_DEADLINE_MS',
   'DEFAULT_CI_NO_CHECKS_GRACE_MS',
@@ -350,6 +351,10 @@ const INTERNAL_API_KEYS = [
   // Persisted per-issue run state (#2271)
   'readIssueRunState',
   'nextIssueRunState',
+  // Open factory draft PR count (#3553)
+  'summarizeOpenFactoryDrafts',
+  'readOpenFactoryDrafts',
+  'formatOpenFactoryDraftsLine',
   'runStateFile',
   'runStatusForPhase',
   'terminalRunStatus',

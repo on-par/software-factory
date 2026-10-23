@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTempDirs } from '@on-par/factory-core/testing';
 
-import { resolveHermeticGit } from './base-health.js';
+import { resolveBaselineCacheTtlHours, resolveHermeticGit } from './base-health.js';
 import { loadRepoConfig } from './repo.js';
 
 const tempDirs = createTempDirs();
@@ -38,5 +38,22 @@ describe('check.hermeticGit (#3272)', () => {
     expect(() => loadRepoConfig(bad)).toThrow(/hermeticGit/);
     const unknown = await repoWith({ version: 2, check: { hermetic: true } });
     expect(() => loadRepoConfig(unknown)).toThrow(/check/);
+  });
+});
+
+describe('check.baselineCacheTtlHours (#3540)', () => {
+  it('defaults to 24 and an explicit value wins', async () => {
+    expect(resolveBaselineCacheTtlHours(null)).toBe(24);
+    expect(resolveBaselineCacheTtlHours({ check: {} })).toBe(24);
+    expect(
+      resolveBaselineCacheTtlHours(loadRepoConfig(await repoWith({ version: 2, check: { baselineCacheTtlHours: 6 } }))),
+    ).toBe(6);
+  });
+
+  it('rejects zero and a non-number', async () => {
+    for (const bad of [0, 'x']) {
+      const dir = await repoWith({ version: 2, check: { baselineCacheTtlHours: bad } });
+      expect(() => loadRepoConfig(dir)).toThrow(/baselineCacheTtlHours/);
+    }
   });
 });

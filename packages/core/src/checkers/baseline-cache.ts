@@ -5,12 +5,14 @@
 // cache is keyed by base SHA + a hash of the applied laneEnv + checker name. Each
 // entry also carries a hash of the constitution's checker config, compared on read,
 // so a config fix invalidates it (#2563). Config-validation FAILs are never cached.
+// Entries expire after a TTL, a cached FAIL is dropped when CI is green, and `factory baseline clear` empties it (#3540).
 
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import type { CheckerOutput, Constitution } from '../types/index.js';
+import { DEFAULT_BASELINE_CACHE_TTL_HOURS } from '../config/base-health.js';
 import { isConfigCheckerOutput } from './index.js';
 
 /** laneEnv keys that differ per lane lease or per run and do not describe the environment contract. */
@@ -58,6 +60,7 @@ export class BaselineCache {
   constructor(
     private file: string,
     private now: () => number = () => Date.now(),
+    private ttlHours: number = DEFAULT_BASELINE_CACHE_TTL_HOURS,
   ) {}
 
   /** Cached base result for the checker, or undefined on a miss. */
@@ -65,6 +68,8 @@ export class BaselineCache {
     const data = await this.read();
     const entry = data.entries[entryKey(baseSha, envHash, checker)];
     if (entry?.configHash !== configHash) return undefined;
+    const recorded = Date.parse(entry.recordedAt);
+    if (!Number.isFinite(recorded) || this.now() - recorded > this.ttlHours * 3_600_000) return undefined;
     const output = entry.output;
     if (typeof output !== 'object' || output === null) return undefined;
     if (output.checker !== checker) return undefined;
@@ -93,6 +98,29 @@ export class BaselineCache {
       data.entries[entryKey(baseSha, envHash, output.checker)] = { output, configHash, recordedAt };
     }
     await this.write(data);
+  }
+
+  /** Removes one entry; false (and no write) when it is absent. */
+  async delete(baseSha: string, envHash: string, checker: string): Promise<boolean> {
+    const data = await this.read();
+    const key = entryKey(baseSha, envHash, checker);
+    if (!(key in data.entries)) return false;
+    delete data.entries[key];
+    await this.write(data);
+    return true;
+  }
+
+  /** Removes every entry, or those whose base SHA starts with `baseSha`; returns the count and writes only when > 0. */
+  async clear(baseSha?: string): Promise<number> {
+    const data = await this.read();
+    const prefix = baseSha?.toLowerCase();
+    const matches = Object.keys(data.entries).filter(
+      (key) => prefix === undefined || key.slice(0, key.indexOf(':')).toLowerCase().startsWith(prefix),
+    );
+    if (matches.length === 0) return 0;
+    for (const key of matches) delete data.entries[key];
+    await this.write(data);
+    return matches.length;
   }
 
   private async read(): Promise<BaselineCacheFile> {

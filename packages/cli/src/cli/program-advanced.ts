@@ -184,6 +184,14 @@ export function registerAdvancedCommands(program: Command, handlers: ProgramHand
     .description('Close a provider breaker now (e.g. after fixing a rejected credential)')
     .action(handlers.cmdBreakerReset);
 
+  program
+    .command('baseline')
+    .description('Inspect and clear the baseline (base SHA) checker result cache')
+    .command('clear')
+    .description('Remove cached baseline results (all, or one base SHA) so CHECK and base health re-run them')
+    .option('--sha <sha>', 'Only remove entries for this base SHA (full or prefix)')
+    .action(handlers.cmdBaselineClear);
+
   const worktreeCmd = program
     .command('worktree')
     .description('Clean up stale factory worktrees (gc) and keep/release one for manual work');

@@ -34,6 +34,7 @@ export type EventKind =
   | 'await-merge'
   | 'awaiting-review'
   | 'base-hold-cleared'
+  | 'baseline-cache-invalidated'
   | 'base_divergence'
   | 'base_push_workflow_failed'
   | 'benchmark-artifacts'
@@ -250,6 +251,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'awaiting-review': { severity: 'info', isPark: false, isTerminal: false },
   // A persisted base hold (#2348) ended: origin/main moved or its CI went green (#2350). Not a park.
   'base-hold-cleared': { severity: 'info', isPark: false, isTerminal: false },
+  'baseline-cache-invalidated': { severity: 'info', isPark: false, isTerminal: false }, // cached base FAIL dropped: GitHub CI green (#3540)
   base_divergence: { severity: 'warn', isPark: false, isTerminal: false }, // local re-run fails, CI green (#3287)
   base_push_workflow_failed: { severity: 'warn', isPark: false, isTerminal: false }, // non-code push workflow failed (#3290)
   'benchmark-artifacts': { severity: 'info', isPark: false, isTerminal: false },

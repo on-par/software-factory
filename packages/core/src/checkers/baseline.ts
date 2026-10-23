@@ -7,6 +7,7 @@ import { join } from 'node:path';
 
 import type { ModelRouter } from '../router/index.js';
 import type { CheckerOutput, CheckResult, Constitution } from '../types/index.js';
+import type { RequiredChecksVerdict } from '../utils/required-checks.js';
 import { runCommand } from '../utils/command-runner.js';
 import { GIT_COMMAND_TIMEOUT_MS } from '../utils/git-exec.js';
 import { type BaselineCache, hashBaselineCheckerConfig, hashBaselineEnv } from './baseline-cache.js';
@@ -62,6 +63,10 @@ export interface BaselineOptions {
   cache?: BaselineCache;
   /** Skip cache reads; fresh results are still written (#3287). */
   bypassCache?: boolean;
+  /** GitHub CI verdict for the base SHA (#3540); a cached non-timeout FAIL on a green SHA is dropped and re-run. */
+  requiredChecksVerdict?: (sha: string) => Promise<RequiredChecksVerdict>;
+  /** Called once per cache entry dropped because CI disagrees (#3540). */
+  onCacheInvalidated?: (checker: string, reason: string) => void;
 }
 
 /** Checkers that grade the change diff, which is empty at the base SHA. */
@@ -157,6 +162,8 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
     deps = {},
     cache,
     bypassCache,
+    requiredChecksVerdict,
+    onCacheInvalidated,
   } = opts;
   const runnable = failing
     .filter((o) => o.result === 'FAIL' && notRunnableReason(o.checker) === null)
@@ -167,12 +174,25 @@ export async function runBaselineCheckers(opts: BaselineOptions): Promise<Baseli
   const configHash = hashBaselineCheckerConfig(constitution);
   const cachedOutputs: CheckerOutput[] = [];
   const toRun: string[] = [];
+  let ciLookup: Promise<RequiredChecksVerdict> | undefined;
   for (const name of runnable) {
     let hit: CheckerOutput | undefined;
     try {
       hit = bypassCache === true ? undefined : await cache?.get(baseSha, envHash, configHash, name);
     } catch {
       hit = undefined; // a cache read error is a miss
+    }
+    if (hit?.result === 'FAIL' && hit.timedOut !== true && requiredChecksVerdict) {
+      ciLookup ??= requiredChecksVerdict(baseSha).catch((err: unknown) => ({
+        green: false,
+        reason: `CI lookup failed: ${err instanceof Error ? err.message : String(err)}`,
+      }));
+      const verdict = await ciLookup;
+      if (verdict.green) {
+        await cache?.delete(baseSha, envHash, name).catch(() => false);
+        onCacheInvalidated?.(name, `cached FAIL but GitHub CI is green (${verdict.reason})`);
+        hit = undefined;
+      }
     }
     if (hit) cachedOutputs.push(hit);
     else toRun.push(name);

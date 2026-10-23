@@ -261,6 +261,8 @@ import { setLandRuntime } from './land-runtime.js';
 import { cmdRun, type RunOptions } from './run.js';
 import type { RunLaneDeps } from './run-lane.js';
 import { shipIssue } from './ship.js';
+import type { KpisJson } from './json-contract.js';
+import { readKpisDrafts } from './kpis-drafts.js';
 import { cmdStatus, type StatusOptions } from './status.js';
 import { cmdSupervise, type SuperviseOptions } from './supervise.js';
 import { setShipRuntime } from './ship-runtime.js';
@@ -332,6 +334,7 @@ import { DeepCheckError, createDeepModelRunner, runIssueCheck, type DeepCheckMod
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
 import { readRunFlagOverrides, recordDraftPrFlag } from './run-flags.js';
 import { runStalenessGuard } from './staleness.js';
+import { cmdBaselineClear } from './baseline.js';
 import { cmdBreakerReset } from './breaker.js';
 import { runWorktreeKeep, runWorktreeRelease } from './worktree-keep.js';
 import { gcWorktreeSandbox, reapParkedLane, reapPrlessShip } from './worktree-reap.js';
@@ -1690,7 +1693,7 @@ async function cmdGarden(
   else for (const line of text.split('\n')) console.log(line);
 }
 
-async function cmdKpis(opts: { branchPrefix?: string } = {}) {
+async function cmdKpis(opts: { branchPrefix?: string; json?: boolean } = {}) {
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
@@ -1740,6 +1743,14 @@ async function cmdKpis(opts: { branchPrefix?: string } = {}) {
     history = existing ? parseKpiHistory(existing) : [];
   }
 
+  if (opts.json) {
+    const openFactoryDrafts = hasGitHubToken()
+      ? await readKpisDrafts({ getGitHubRepo, getOctokit }, branchPrefix)
+      : null;
+    const out: KpisJson = { schemaVersion: 1, kpis: { ...kpis }, openFactoryDrafts };
+    console.log(JSON.stringify(out));
+    return;
+  }
   console.log(renderKpiReport(kpis));
   console.log(renderKpiTrend(history));
 }
@@ -4370,6 +4381,7 @@ export const PROGRAM_HANDLERS = {
   cmdWorktreeGc,
   cmdWorktreeKeep,
   cmdWorktreeRelease,
+  cmdBaselineClear,
   cmdBreakerReset,
   cmdReset,
   cmdSupervise: runSupervise,

@@ -3,10 +3,14 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import type { ModelRouter } from '../router/index.js';
+import type { CommandResult } from '../utils/command-runner.js';
 
 import type { CheckerOutput, Constitution } from '../types/index.js';
 import { BaselineCache, hashBaselineCheckerConfig, hashBaselineEnv } from './baseline-cache.js';
+import { runBaselineCheckers } from './baseline.js';
 import { schemaErrorCheckerOutput, unfilledPlaceholderCheckerOutput, unknownCheckerOutput } from './index.js';
 
 const tempDirs = new Set<string>();
@@ -229,7 +233,7 @@ describe('BaselineCache timeouts (#3186)', () => {
         },
       }),
     );
-    const cache = new BaselineCache(file);
+    const cache = new BaselineCache(file, () => Date.parse('2026-01-01T00:00:00.000Z'));
     expect(await cache.get('sha', 'env', 'cfg', checker)).toBeUndefined();
   });
 
@@ -250,7 +254,7 @@ describe('BaselineCache timeouts (#3186)', () => {
         },
       }),
     );
-    const cache = new BaselineCache(file);
+    const cache = new BaselineCache(file, () => Date.parse('2026-01-01T00:00:00.000Z'));
     expect(await cache.get('sha', 'env', 'cfg', 'tests')).toEqual(output);
   });
 
@@ -272,8 +276,126 @@ describe('BaselineCache timeouts (#3186)', () => {
           },
         }),
       );
-      const cache = new BaselineCache(file);
+      const cache = new BaselineCache(file, () => Date.parse('2026-01-01T00:00:00.000Z'));
       await expect(cache.get('sha', 'env', 'cfg', 'tests')).resolves.toMatchObject({ result: 'PASS' });
     },
   );
+});
+
+const cmdOk = (): CommandResult => ({
+  command: [],
+  stdout: '',
+  stderr: '',
+  exitCode: 0,
+  killed: false,
+  timedOut: false,
+  ok: true,
+});
+
+describe('BaselineCache TTL (#3540)', () => {
+  const HOUR = 3_600_000;
+  const T0 = Date.UTC(2026, 0, 1);
+  const SHA = 'c'.repeat(40);
+  const env = hashBaselineEnv({ A: '1' });
+  const cfg = hashBaselineCheckerConfig(null);
+
+  it('ignores an entry older than the default 24h TTL and runBaselineCheckers re-runs the checker', async () => {
+    const file = await cacheFile();
+    await new BaselineCache(file, () => T0).set(SHA, env, cfg, [out('tests', 'FAIL')]);
+    const cache = new BaselineCache(file, () => T0 + 24 * HOUR + 1);
+    expect(await cache.get(SHA, env, cfg, 'tests')).toBeUndefined();
+    const dir = dirname(file);
+    const runCheckers = vi.fn(async () => ({
+      failures: 0,
+      passes: 1,
+      skips: 0,
+      total: 1,
+      results: [out('tests', 'PASS')],
+    }));
+    await runBaselineCheckers({
+      baseSha: SHA,
+      laneWorktree: dir,
+      failing: [out('tests', 'FAIL')],
+      ctx: { worktree: dir, specPath: '', env: { A: '1' } },
+      router: {} as ModelRouter,
+      constitution: null,
+      cache,
+      deps: {
+        runCommand: vi.fn(async () => cmdOk()),
+        runCheckers: runCheckers as never,
+        makeTempDir: () => mkdtemp(join(dir, 'p-')),
+      },
+    });
+    expect(runCheckers).toHaveBeenCalledTimes(1);
+    expect((runCheckers.mock.calls[0] as unknown[])[4]).toEqual(['tests']);
+  });
+
+  it('reuses a PASS younger than the TTL without running checkers', async () => {
+    const file = await cacheFile();
+    await new BaselineCache(file, () => T0).set(SHA, env, cfg, [out('tests', 'PASS')]);
+    const cache = new BaselineCache(file, () => T0 + 23 * HOUR);
+    expect((await cache.get(SHA, env, cfg, 'tests'))?.result).toBe('PASS');
+    const dir = dirname(file);
+    const runCheckers = vi.fn();
+    const runCommand = vi.fn(async () => cmdOk());
+    const report = await runBaselineCheckers({
+      baseSha: SHA,
+      laneWorktree: dir,
+      failing: [out('tests', 'FAIL')],
+      ctx: { worktree: dir, specPath: '', env: { A: '1' } },
+      router: {} as ModelRouter,
+      constitution: null,
+      cache,
+      deps: { runCommand, runCheckers: runCheckers as never, makeTempDir: () => mkdtemp(join(dir, 'p-')) },
+    });
+    expect(runCheckers).not.toHaveBeenCalled();
+    expect(runCommand).not.toHaveBeenCalled();
+    expect(report.checkers[0]).toMatchObject({ cached: true, verdict: 'clean-on-base' });
+  });
+
+  it('honours a custom ttlHours', async () => {
+    const file = await cacheFile();
+    await new BaselineCache(file, () => T0).set(SHA, env, cfg, [out('tests', 'PASS')]);
+    expect(await new BaselineCache(file, () => T0 + 2 * HOUR, 1).get(SHA, env, cfg, 'tests')).toBeUndefined();
+    expect(await new BaselineCache(file, () => T0 + 2 * HOUR, 3).get(SHA, env, cfg, 'tests')).toBeDefined();
+  });
+
+  it('treats an unparseable recordedAt as expired', async () => {
+    const file = await cacheFile();
+    await mkdir(dirname(file), { recursive: true });
+    const entry = { output: out('tests', 'PASS'), configHash: cfg, recordedAt: 'not-a-date' };
+    await writeFile(file, JSON.stringify({ version: 1, entries: { [`${SHA}:${env}:tests`]: entry } }));
+    expect(await new BaselineCache(file, () => T0).get(SHA, env, cfg, 'tests')).toBeUndefined();
+  });
+
+  it('delete removes only that key, and returns false without creating the file when absent', async () => {
+    const file = await cacheFile();
+    const cache = new BaselineCache(file, () => T0);
+    expect(await cache.delete(SHA, env, 'tests')).toBe(false);
+    expect(existsSync(file)).toBe(false);
+    await cache.set(SHA, env, cfg, [out('tests', 'FAIL'), out('lint', 'PASS')]);
+    expect(await cache.delete(SHA, env, 'tests')).toBe(true);
+    expect(await cache.get(SHA, env, cfg, 'tests')).toBeUndefined();
+    expect(await cache.get(SHA, env, cfg, 'lint')).toBeDefined();
+  });
+
+  it('clear removes all entries, or those whose SHA prefix matches (case-insensitive)', async () => {
+    const file = await cacheFile();
+    const cache = new BaselineCache(file, () => T0);
+    const other = 'd'.repeat(40);
+    await cache.set(SHA, env, cfg, [out('tests', 'FAIL'), out('lint', 'PASS')]);
+    await cache.set(other, env, cfg, [out('tests', 'FAIL')]);
+    expect(await cache.clear('CCCC')).toBe(2);
+    expect(await cache.get(SHA, env, cfg, 'tests')).toBeUndefined();
+    expect(await cache.get(other, env, cfg, 'tests')).toBeDefined();
+    expect(await cache.clear('ffff')).toBe(0);
+    expect(await cache.clear()).toBe(1);
+    expect(await cache.clear()).toBe(0);
+  });
+
+  it('clear on a missing file returns 0 and creates nothing', async () => {
+    const file = await cacheFile();
+    expect(await new BaselineCache(file).clear()).toBe(0);
+    expect(existsSync(file)).toBe(false);
+  });
 });
