@@ -9,3 +9,9 @@ export {
   type LintCommand,
   type TestsCommand,
 } from './index.js';
+export {
+  summarizeCommandRun,
+  parseCommandCounts,
+  type CommandRunCounts,
+  type SummarizeCommandRunOptions,
+} from './command-output.js';
