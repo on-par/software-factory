@@ -590,26 +590,33 @@ export type {
   LocalSmallScoreboardReport,
   LocalSmallScoreboardRow,
   LocalSmallScoreboardRun,
+  ReadinessBaseline,
+  ReadinessCase,
+  ReadinessCaseResult,
   RegressionIssue,
   RunEvalOpts,
 } from './eval/index.js';
 export {
   appendHistoryLine,
   buildLocalSmallScoreboard,
+  compareReadinessToBaseline,
   compareToBaseline,
   formatRegressionIssue,
   isRouteAsserted,
   loadGoldenCases,
+  loadReadinessCases,
   parseHistory,
+  readinessStubSteps,
   REGRESSION_ISSUE_MARKER,
   REGRESSION_ISSUE_TITLE,
   renderLocalSmallScoreboardMarkdown,
   renderTrend,
   runEval,
+  runReadinessEval,
   summaryToHistoryRecord,
   toBaseline,
+  toReadinessBaseline,
 } from './eval/index.js';
-export * from './eval/readiness.js';
 // Logger
 export type { FactoryLogger, LogContext, LogExtra, LoggerOptions } from './logger/index.js';
 export { createLogger } from './logger/index.js';

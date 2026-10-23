@@ -1,10 +1,10 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import {
@@ -81,8 +81,11 @@ function build(cases: ReadinessCase[], extra: Record<string, { output: string }[
 }
 
 describe('loadReadinessCases', () => {
+  const tempDirs = createTempDirs();
+  afterEach(() => tempDirs.cleanup());
+
   it('parses frontmatter, title, body and stub-output with default acceptableVerdicts', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'readiness-'));
+    const dir = await tempDirs.make('readiness-');
     await writeFile(
       join(dir, 'a.md'),
       '---\nexpectedVerdict: not-ready\nmustAsk: [which]\nlabels: [x]\n---\n# T\n\nBody here\n\n```stub-output\n{"a":1}\n```\n',
@@ -102,7 +105,7 @@ describe('loadReadinessCases', () => {
   });
 
   it('allows an empty body', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'readiness-'));
+    const dir = await tempDirs.make('readiness-');
     await writeFile(join(dir, 'a.md'), '---\nexpectedVerdict: not-ready\n---\n# Only title\n');
     const [c] = await loadReadinessCases(dir);
     expect(c.body).toBe('');
@@ -110,7 +113,7 @@ describe('loadReadinessCases', () => {
   });
 
   it('throws on an invalid expectedVerdict, acceptableVerdict or non-array mustAsk', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'readiness-'));
+    const dir = await tempDirs.make('readiness-');
     await writeFile(join(dir, 'a.md'), '---\nexpectedVerdict: maybe\n---\n# T\n');
     await expect(loadReadinessCases(dir)).rejects.toThrow("invalid expectedVerdict 'maybe'");
     await writeFile(join(dir, 'a.md'), '---\nexpectedVerdict: ready\nacceptableVerdicts: [nope]\n---\n# T\n');
