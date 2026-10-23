@@ -3,7 +3,7 @@
 
 import { ModelExecutorError } from '../router/executor-error.js';
 import { describeFailureDetail } from '../router/failure-detail.js';
-import { classifyFailure } from './classify.js';
+import { classifyFailure, isRejectedCredentialText } from './classify.js';
 import type { HarnessFailureReason } from './index.js';
 import { HarnessError } from './index.js';
 
@@ -41,6 +41,12 @@ export function failureKindForReason(reason: HarnessFailureReason): ProviderFail
   return KIND_BY_REASON[reason];
 }
 
+/** Like failureKindForReason, but a local_auth failure whose text reports a rejected credential is kind `auth`,
+ *  so the breaker holds the provider until its credentials change (#3232). Signed-out text stays `unavailable`. */
+export function failureKindFor(reason: HarnessFailureReason, text: string): ProviderFailureKind {
+  return reason === 'local_auth' && isRejectedCredentialText(text) ? 'auth' : failureKindForReason(reason);
+}
+
 function isProviderFailureKind(value: unknown): value is ProviderFailureKind {
   return typeof value === 'string' && (PROVIDER_FAILURE_KINDS as readonly string[]).includes(value);
 }
@@ -75,14 +81,14 @@ export function defaultClassifyError(err: unknown): ProviderFailure {
     const details = detailsOf(err);
     const resetAt = normalizeIsoInstant(details.resetAt);
     return {
-      kind: isProviderFailureKind(details.kind) ? details.kind : failureKindForReason(err.reason),
+      kind: isProviderFailureKind(details.kind) ? details.kind : failureKindFor(err.reason, detail),
       ...(resetAt ? { resetAt } : {}),
       reason: err.reason,
       detail,
     };
   }
   const reason = classifyFailure(stderrOf(err), exitCodeOf(err));
-  return { kind: failureKindForReason(reason), reason, detail };
+  return { kind: failureKindFor(reason, stderrOf(err)), reason, detail };
 }
 
 /** What the router calls for a thrown error. Adapters have already put kind/resetAt on `details`. */

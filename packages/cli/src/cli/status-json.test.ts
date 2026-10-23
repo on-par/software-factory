@@ -151,4 +151,27 @@ describe('buildStatusJson', () => {
       await temp.cleanup();
     }
   });
+
+  it('reports an untimed auth entry as remainingSec 0 with until', () => {
+    const out = buildStatusJson({
+      repo: 'o/r',
+      product: null,
+      stop: false,
+      stopInfo: null,
+      breakers: [
+        {
+          provider: 'anthropic',
+          reason: 'local_auth',
+          openedAt: '2026-01-01T00:00:00.000Z',
+          remainingMs: Number.POSITIVE_INFINITY,
+          until: 'credentials-change',
+        },
+      ],
+      active: [],
+      update: null,
+      now,
+    });
+    expect(out.breaker.providers[0]).toMatchObject({ remainingSec: 0, until: 'credentials-change' });
+    expect(statusJsonSchema.safeParse(out).success).toBe(true);
+  });
 });

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { FailoverReason } from '../types/index.js';
 import { ModelExecutorError } from '../router/executor-error.js';
 import { HarnessError } from './index.js';
-import { defaultClassifyError, failureKindForReason, providerFailureOf } from './provider-failure.js';
+import { defaultClassifyError, failureKindFor, failureKindForReason, providerFailureOf } from './provider-failure.js';
 
 describe('defaultClassifyError', () => {
   it('maps every FailoverReason one way onto a kind', () => {
@@ -53,5 +53,41 @@ describe('defaultClassifyError', () => {
     expect(f).toMatchObject({ reason: 'usage_cap', kind: 'usage_cap' });
     expect(f.resetAt).toBeUndefined();
     expect(defaultClassifyError('weird').reason).toBeDefined();
+  });
+});
+
+describe('rejected credentials (#3232)', () => {
+  it('classifies a rejected key as kind auth with reason local_auth', () => {
+    for (const text of ['authentication_error: invalid x-api-key', 'Incorrect API key provided']) {
+      expect(defaultClassifyError(new HarnessError(text, 'local_auth'))).toMatchObject({
+        kind: 'auth',
+        reason: 'local_auth',
+      });
+    }
+  });
+
+  it('classifies a rejected key on a plain exec error as kind auth', () => {
+    const err = Object.assign(new Error('boom'), { stderr: 'authentication_error invalid x-api-key', exitCode: 1 });
+    expect(defaultClassifyError(err)).toMatchObject({ kind: 'auth', reason: 'local_auth' });
+  });
+
+  it('keeps the adapter details.kind over the text', () => {
+    const unavailable = new HarnessError('invalid x-api-key', 'local_auth', { kind: 'unavailable' });
+    expect(defaultClassifyError(unavailable).kind).toBe('unavailable');
+    expect(defaultClassifyError(new HarnessError('x', 'error', { kind: 'auth' })).kind).toBe('auth');
+  });
+
+  it('leaves non-local_auth reasons on the reason map', () => {
+    expect(failureKindFor('error', 'invalid x-api-key')).toBe('unavailable');
+  });
+
+  describe('signed-out', () => {
+    it.each(['Please run /login', 'No auth credentials found', 'oauth session expired', 'missing bearer', ''])(
+      'stays unavailable: %s',
+      (text) => {
+        expect(defaultClassifyError(new HarnessError(text, 'local_auth')).kind).toBe('unavailable');
+        expect(failureKindFor('local_auth', text)).toBe('unavailable');
+      },
+    );
   });
 });

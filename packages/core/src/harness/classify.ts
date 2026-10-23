@@ -2,6 +2,14 @@
 
 import type { HarnessFailureReason } from './index.js';
 
+/** A provider rejected a credential it was given (revoked or wrong key), as opposed to a signed-out CLI (#3232). */
+const REJECTED_CREDENTIAL_RE = /\bauthentication_error\b|(?:invalid|incorrect) (?:x-)?api[\s_-]?key/;
+
+/** True when the text reports a rejected credential; signed-out text such as "no auth credentials found" is false. */
+export function isRejectedCredentialText(text: string): boolean {
+  return REJECTED_CREDENTIAL_RE.test(text.toLowerCase());
+}
+
 /** Classify a failure from provider output/exit code. Shared by harnesses and the router. */
 export function classifyFailure(stderr: string, exitCode: number): HarnessFailureReason {
   if (exitCode === 124) return 'timeout';
@@ -13,8 +21,9 @@ export function classifyFailure(stderr: string, exitCode: number): HarnessFailur
   if (/missing bearer|\b401\b[^\n]{0,20}unauthori[sz]ed/.test(text)) return 'local_auth';
   // Provider 401 bodies as surfaced by Pi: Anthropic `authentication_error`, OpenAI
   // "Incorrect API key provided", OpenRouter "No auth credentials found" (#2901).
-  if (/\bauthentication_error\b|(?:invalid|incorrect) (?:x-)?api[\s_-]?key|no auth credentials found/.test(text))
-    return 'local_auth';
+  if (REJECTED_CREDENTIAL_RE.test(text)) return 'local_auth';
+  // Signed out (no credentials configured at all): still local_auth, but not a rejected credential (#3232).
+  if (/no auth credentials found/.test(text)) return 'local_auth';
   // Codex/ChatGPT limit patterns below target Codex CLI (ChatGPT plan/usage-cap) output.
   // Codex CLI version: 0.144.6 as of 2026-07-20. Revisit when Codex changes its wording;
   // real samples can be harvested from .factory/events.ndjson (failoverReason/stderr fields).

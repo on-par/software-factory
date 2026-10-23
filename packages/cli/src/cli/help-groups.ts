@@ -44,6 +44,7 @@ export const HELP_GROUPS: readonly HelpGroup[] = [
     heading: 'Advanced / experimental:',
     commands: [
       'worktree',
+      'breaker',
       'reset',
       'daemon',
       'self-update',

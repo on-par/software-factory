@@ -2,6 +2,7 @@
 
 import type { ProviderCappedPayload } from '../events/kinds.js';
 import { DEFAULT_CAP_PROBE_MS, reportedCooldownMs, type ProviderBreaker } from '../router/breaker.js';
+import { redactText } from '../filing/redact.js';
 import { redactSecrets } from '../router/failure-detail.js';
 import type { ProviderFailureInfo } from '../router/index.js';
 import type { RunLogFn } from './attribution.js';
@@ -12,6 +13,8 @@ export interface ProviderFailureRecorderDeps {
   issue: number;
   /** Cooldown for failures that are not usage caps and report no reset time. */
   defaultCooldownMs: number;
+  /** Clock for the `at` stamp of provider_auth_rejected. Default: Date.now. */
+  now?: () => number;
 }
 
 /** Builds the per-stage `onProviderFailure` callback. A usage cap is held until its reported reset (plus the buffer),
@@ -20,8 +23,35 @@ export interface ProviderFailureRecorderDeps {
 export const providerFailureRecorder =
   (deps: ProviderFailureRecorderDeps) =>
   (stage: ProviderCappedPayload['stage']) =>
-  async ({ provider, reason, kind, resetAt, detail }: ProviderFailureInfo): Promise<void> => {
+  async ({ provider, reason, kind, resetAt, detail, model, harness }: ProviderFailureInfo): Promise<void> => {
     const { breaker, log, issue, defaultCooldownMs } = deps;
+    if (kind === 'auth') {
+      const { wasOpen } = await breaker.openUntilCredentialsChange(provider, reason);
+      log(
+        'provider_breaker_open',
+        `breaker opened for ${provider} (${reason}) — credentials rejected; provider skipped until its credentials change or 'factory breaker reset ${provider}'`,
+        { failoverReason: reason },
+      );
+      if (!wasOpen) {
+        log(
+          'provider_auth_rejected',
+          `${provider} rejected the credentials during ${stage} — failing over; fix the credentials or run 'factory breaker reset ${provider}'`,
+          {
+            failoverReason: reason,
+            providerAuthRejected: {
+              provider,
+              harness: harness ?? '',
+              model: model ?? '',
+              stage,
+              issue,
+              at: new Date((deps.now ?? Date.now)()).toISOString(),
+              detail: redactText(redactSecrets(detail ?? '')),
+            },
+          },
+        );
+      }
+      return;
+    }
     const now = Date.now();
     const reportedMs = reportedCooldownMs(resetAt, detail, now);
     const capped = (kind ?? (reason === 'usage_cap' ? 'usage_cap' : undefined)) === 'usage_cap';

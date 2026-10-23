@@ -4,7 +4,7 @@
 
 import { classifyFailure } from './classify.js';
 import type { HarnessFailureReason } from './index.js';
-import { failureKindForReason, type ProviderFailure } from './provider-failure.js';
+import { failureKindFor, type ProviderFailure } from './provider-failure.js';
 
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
@@ -116,5 +116,5 @@ export function classifyClaudeFailure(
     reason = classifyFailure(text, exitCode === 0 ? 1 : exitCode);
     if (reason === 'unknown' && exitCode === 0) reason = 'error';
   }
-  return { kind: failureKindForReason(reason), reason, detail };
+  return { kind: failureKindFor(reason, text), reason, detail };
 }

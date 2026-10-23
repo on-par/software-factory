@@ -86,6 +86,16 @@
       "properties": {},
       "additionalProperties": {}
     },
+    "providerAuthRejected": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
+    "providerBreakerClose": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
     "stewardTriggered": {
       "type": "object",
       "properties": {},

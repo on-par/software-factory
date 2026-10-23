@@ -58,6 +58,10 @@
               },
               "remainingSec": {
                 "type": "number"
+              },
+              "until": {
+                "type": "string",
+                "const": "credentials-change"
               }
             },
             "required": ["provider", "reason", "openedAt", "remainingSec"],

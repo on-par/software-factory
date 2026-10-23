@@ -7,7 +7,7 @@ import type { Octokit } from '@octokit/rest';
 import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
 import type { ParkPayload, ProviderCappedPayload } from '../events/payloads.js';
 import type { RunAttribution } from '../run/outcome.js';
-import { createLogger } from '../logger/index.js';
+import { createLogger, type LogExtra } from '../logger/index.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
 import type { PrLookup } from '../phases/ship.js';
 import type { EscalateKind } from '../types/index.js';
@@ -61,7 +61,7 @@ export function logEvent(
     attribution?: RunAttribution;
     paths?: string[];
     mode?: 'mechanical';
-  },
+  } & Pick<LogExtra, 'providerAuthRejected' | 'providerBreakerClose'>,
 ): void {
   const logger = createLogger(eventsFile, { issue, lane: extra?.lane, phase: extra?.phase });
   const level = extra?.level ?? levelForType(type);
@@ -73,6 +73,8 @@ export function logEvent(
   if (extra?.lanePaused) meta.lanePaused = extra.lanePaused;
   if (extra?.park) meta.park = extra.park;
   if (extra?.providerCapped) meta.providerCapped = extra.providerCapped;
+  if (extra?.providerAuthRejected) meta.providerAuthRejected = extra.providerAuthRejected;
+  if (extra?.providerBreakerClose) meta.providerBreakerClose = extra.providerBreakerClose;
   if (extra?.stewardTriggered) meta.stewardTriggered = extra.stewardTriggered;
   if (extra?.flakyTests) meta.flakyTests = extra.flakyTests;
   if (extra?.checkFailure) meta.checkFailure = extra.checkFailure;
