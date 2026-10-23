@@ -823,6 +823,7 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string, env: NodeJ
     breaker: resolve(state, 'breaker.json'),
     reworkHistory: resolve(state, 'rework-history.json'),
     baselineCache: resolve(state, 'baseline-cache.json'),
+    readinessCache: resolve(state, 'readiness-cache'),
     baseHold: resolve(state, 'base-hold.json'),
     flakyLedger: resolve(state, 'flaky-tests.json'),
     laneFiles: resolve(state, 'lane-files.json'),

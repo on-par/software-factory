@@ -107,6 +107,7 @@ describe('getFactoryPaths', () => {
       breaker: resolve(state, 'breaker.json'),
       reworkHistory: resolve(state, 'rework-history.json'),
       baselineCache: resolve(state, 'baseline-cache.json'),
+      readinessCache: resolve(state, 'readiness-cache'),
       baseHold: resolve(state, 'base-hold.json'),
       flakyLedger: resolve(state, 'flaky-tests.json'),
       laneFiles: resolve(state, 'lane-files.json'),
@@ -198,6 +199,7 @@ describe('getFactoryPaths', () => {
       'breaker',
       'reworkHistory',
       'baselineCache',
+      'readinessCache',
       'baseHold',
       'flakyLedger',
       'laneFiles',
@@ -217,9 +219,7 @@ describe('getFactoryPaths', () => {
       'classifierOutcomes',
     ] as const;
 
-    for (const key of runtimeKeys) {
-      expect(paths[key].startsWith(paths.state)).toBe(true);
-    }
+    for (const key of runtimeKeys) expect(paths[key].startsWith(paths.state)).toBe(true);
     expect(paths.config.startsWith(paths.root)).toBe(true);
     expect(paths.config.startsWith(paths.state)).toBe(false);
   });
