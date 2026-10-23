@@ -106,6 +106,7 @@ function setup(
   return { octokit, store, writes, events };
 }
 
+const tmp = createTempDirs();
 let dir: string;
 beforeEach(async () => {
   dir = await tmp.make('orphan-drafts-');
