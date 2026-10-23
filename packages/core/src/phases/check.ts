@@ -13,6 +13,7 @@ import {
   renderCheckerFindings,
   runAllCheckers,
 } from '../checkers/index.js';
+import { describeCheckOutcome } from '../checkers/check-outcome.js';
 import { detectHeadedModeSignals, detectLiveAppSignal } from './check-environment.js';
 import { markBuildFilesIntentToAdd } from './check-intent-to-add.js';
 import { appendEvidencePlanStep } from './check-evidence.js';
@@ -664,9 +665,7 @@ async function checkPhaseImpl(opts: {
       `${summary.failures} check failures after ${reworkRounds} rework rounds — parking` +
         (showstoppers.length > 0 ? `\nremaining showstoppers:\n${showstoppers.map((x) => `- ${x}`).join('\n')}` : ''),
     );
-  } else {
-    log('check', summary.skips > 0 ? `All checkers passed (${summary.skips} skipped)` : 'All checkers passed');
-  }
+  } else log('check', describeCheckOutcome(summary));
 
   const finalHeadedSignals = reworkRounds > 0 ? detectHeadedModeSignals(probe) : headedSignals;
   if (finalHeadedSignals.length > 0) {

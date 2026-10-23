@@ -4,6 +4,7 @@ import type { CiFailureEvidence } from '../types/index.js';
 import {
   attributableCodeqlAlerts,
   attributeCiFailure,
+  ciCheckReworkSummary,
   ciReworkSummary,
   listBaseFailingChecks,
   listPrChangedFiles,
@@ -178,5 +179,30 @@ describe('listBaseFailingChecks', () => {
       baseSha: 'deadbeef',
       failing: ['test'],
     });
+  });
+});
+
+describe('ciCheckReworkSummary (#3537)', () => {
+  it('lists the failing jobs, their log tails and the fetch errors in one FAIL result', () => {
+    const summary = ciCheckReworkSummary(
+      [
+        { name: 'test (2/3)', conclusion: 'failure', summary: '1 failed' },
+        { name: 'static', conclusion: 'failure' },
+      ],
+      [{ name: 'test (2/3)', jobId: 7, excerpt: 'expected 1 to be 78', truncated: true }],
+      ['static: no job id'],
+    );
+    expect(summary).toMatchObject({ failures: 1, total: 1 });
+    const result = summary.results[0];
+    expect(result).toMatchObject({ checker: 'ci_checks', result: 'FAIL' });
+    expect(result.details).toContain('- test (2/3) (failure) — 1 failed');
+    expect(result.details).toContain('- static (failure)');
+    expect(result.details).toContain('--- test (2/3) log tail (job 7), truncated ---\nexpected 1 to be 78');
+    expect(result.details).toContain('Log fetch errors: static: no job id');
+  });
+
+  it('omits the error line when there are none', () => {
+    const summary = ciCheckReworkSummary([{ name: 'ci', conclusion: 'failure' }], [], []);
+    expect(summary.results[0].details).not.toContain('Log fetch errors');
   });
 });

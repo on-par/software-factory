@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTempDirs } from '../harness/temp-dir.js';
-import { findConfigSchemaErrors } from './config-schema-lint.js';
+import { findConfigSchemaErrors, findUnknownConfigKeyWarnings } from './config-schema-lint.js';
 
 describe('findConfigSchemaErrors (#2611)', () => {
   const dirs: string[] = [];
@@ -105,5 +105,38 @@ describe('findConfigSchemaErrors (#2611)', () => {
     expect(f).toMatchObject({ path: '(file)' });
     expect(f!.message).toContain('config.yaml');
     expect(f!.message).toContain('config.json');
+  });
+});
+
+describe('findUnknownConfigKeyWarnings (#3568)', () => {
+  const temp = createTempDirs();
+  afterEach(() => temp.cleanup());
+
+  function warn(name: string, content?: string) {
+    const dir = temp.makeSync('unknown-keys-');
+    if (content !== undefined) writeFileSync(join(dir, name), content);
+    return findUnknownConfigKeyWarnings({ absPath: join(dir, name), relPath: `.factory/${name}` });
+  }
+
+  it('reports sandbox.foo with its line and nothing for a config of known keys', () => {
+    const [f, ...rest] = warn('config.yaml', 'sandbox:\n  writablePaths: []\n  foo: 1\n');
+    expect(rest).toEqual([]);
+    expect(f).toMatchObject({ file: '.factory/config.yaml', path: 'sandbox.foo', line: 3 });
+    expect(f!.message).toContain("unknown key 'sandbox.foo'");
+    expect(f!.fix).toContain("remove 'sandbox.foo'");
+    expect(warn('config.yaml', 'sandbox:\n  writablePaths: []\n')).toEqual([]);
+  });
+
+  it('reports a JSON config without a line', () => {
+    const [f] = warn('config.json', '{"sandbox":{"foo":1}}');
+    expect(f).toMatchObject({ path: 'sandbox.foo' });
+    expect(f!.line).toBeUndefined();
+  });
+
+  it('returns nothing for a missing, empty, non-mapping or unparsable file', () => {
+    expect(warn('config.yaml')).toEqual([]);
+    expect(warn('config.yaml', '')).toEqual([]);
+    expect(warn('config.yaml', '- a\n')).toEqual([]);
+    expect(warn('config.yaml', 'a: [unclosed\n')).toEqual([]);
   });
 });

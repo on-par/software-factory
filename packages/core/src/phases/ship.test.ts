@@ -656,7 +656,7 @@ describe('shipPhase self-healing', () => {
     ]);
   });
 
-  it('still completes and logs ready when marking the PR ready for review throws', async () => {
+  it('fails with a warn naming the PR, and logs no ready, when marking the PR ready for review throws (#3551)', async () => {
     const { octokit, calls } = createOctokit();
     octokit.rest.pulls.get = async (args: any) => {
       calls.push(['pulls.get', args]);
@@ -684,8 +684,9 @@ describe('shipPhase self-healing', () => {
       run,
     });
 
-    expect(result).toEqual({ ok: true, prNumber: 123 });
-    expect(logs).toContainEqual(['ready', 'PR #123 ready for review']);
+    expect(result).toMatchObject({ ok: false, prNumber: 123 });
+    expect(logs.some(([type, msg]) => type === 'warn' && msg.includes('PR #123'))).toBe(true);
+    expect(logs.some(([type]) => type === 'ready')).toBe(false);
   });
 
   it('reports fail and returns not ok when a PR cannot be created or found', async () => {
@@ -1129,10 +1130,10 @@ describe('shipPhase CI watch', () => {
       await vi.runAllTimersAsync();
       const result = await promise;
 
-      expect(result).toEqual({ ok: true, prNumber: 123, ciOutcome: 'timeout' });
+      expect(result).toEqual({ ok: true, prNumber: 123, ciOutcome: 'timeout', draft: true, ciPending: true });
       expect(logs.some(([, msg]) => msg.includes('CI green'))).toBe(false);
       expect(logs.some(([, msg]) => msg.includes('CI failed'))).toBe(false);
-      expect(logs).toContainEqual(['ready', 'PR #123 ready for review']);
+      expect(logs).toContainEqual(['ready', 'PR #123 left as draft (CI pending)']);
       expect(callCount()).toBeGreaterThan(0);
       expect(callCount()).toBeLessThanOrEqual(15); // backoff → far fewer polls than fixed 15s (~40)
     } finally {
@@ -1177,12 +1178,15 @@ describe('shipPhase CI watch', () => {
       expect(logs.some(([, msg]) => msg.includes('skipping CI wait'))).toBe(false);
     });
 
-    it('logs a CI timeout line and still marks the PR ready', async () => {
+    it('logs a CI pending line and leaves the PR as draft', async () => {
       const { result, logs } = await runShip([pending]);
 
-      expect(result).toEqual({ ok: true, prNumber: 123, ciOutcome: 'timeout' });
-      expect(logs).toContainEqual(['ship', 'CI did not finish within 10 min; marking PR ready anyway']);
-      expect(logs).toContainEqual(['ready', 'PR #123 ready for review']);
+      expect(result).toEqual({ ok: true, prNumber: 123, ciOutcome: 'timeout', draft: true, ciPending: true });
+      expect(logs).toContainEqual([
+        'ship',
+        'CI pending for PR #123: CI did not finish within 10 min; leaving PR as draft',
+      ]);
+      expect(logs).toContainEqual(['ready', 'PR #123 left as draft (CI pending)']);
       expect(logs.some(([type]) => type === 'timeout')).toBe(false);
     });
 
@@ -1198,7 +1202,7 @@ describe('shipPhase CI watch', () => {
     });
   });
 
-  it('still logs ready when watching CI throws on every poll (fail-closed retry exhausts as timeout, never rejects)', async () => {
+  it('still logs CI pending when watching CI throws on every poll (fail-closed retry exhausts as timeout, never rejects)', async () => {
     const { octokit } = createWatchOctokit([allSuccess]);
     octokit.rest.checks.listForRef = async () => {
       throw new Error('checks API unavailable');
@@ -1221,8 +1225,8 @@ describe('shipPhase CI watch', () => {
       await vi.runAllTimersAsync();
       const result = await promise;
 
-      expect(result).toEqual({ ok: true, prNumber: 123, ciOutcome: 'timeout' });
-      expect(logs).toContainEqual(['ready', 'PR #123 ready for review']);
+      expect(result).toEqual({ ok: true, prNumber: 123, ciOutcome: 'timeout', draft: true, ciPending: true });
+      expect(logs).toContainEqual(['ready', 'PR #123 left as draft (CI pending)']);
     } finally {
       vi.useRealTimers();
     }

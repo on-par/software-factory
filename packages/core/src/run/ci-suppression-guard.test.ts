@@ -4,8 +4,15 @@ import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { execGit } from '../utils/git-exec.js';
-import { describeSuppression, readReworkDiff, readWorktreeHead, scanReworkDiff } from './ci-suppression-guard.js';
+import {
+  describeSuppression,
+  mergeBaseIntoWorktree,
+  readReworkDiff,
+  readWorktreeHead,
+  scanReworkDiff,
+} from './ci-suppression-guard.js';
 
 const added = (file: string, line: string): string =>
   `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -1,0 +7,1 @@\n+${line}\n`;
@@ -109,6 +116,52 @@ describe('describeSuppression', () => {
   });
 });
 
+const edit = (file: string, removed: string[], added: string[]): string =>
+  `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -3,${removed.length} +3,${added.length} @@\n` +
+  removed.map((l) => `-${l}\n`).join('') +
+  added.map((l) => `+${l}\n`).join('');
+
+describe('scanReworkDiff flags ratchet tampering (#3537)', () => {
+  const baseline = 'max-lines-baseline.json';
+  it('flags a raised max-lines ceiling', () => {
+    expect(scanReworkDiff(edit(baseline, ['  "a.ts": 789,'], ['  "a.ts": 790,']))).toEqual([
+      { kind: 'ratchet', rule: 'max-lines-ceiling', file: baseline, match: '"a.ts" 789 -> 790' },
+    ]);
+  });
+  it('flags a newly added max-lines entry', () => {
+    expect(scanReworkDiff(edit(baseline, [], ['  "b.ts": 600']))).toEqual([
+      expect.objectContaining({ rule: 'max-lines-ceiling', match: '"b.ts" new -> 600' }),
+    ]);
+  });
+  it('flags a raise that spans separate hunks', () => {
+    const diff = edit(baseline, ['  "a.ts": 5,'], []) + '@@ -9,0 +9,1 @@\n+  "a.ts": 6,\n';
+    expect(scanReworkDiff(diff)).toHaveLength(1);
+  });
+  it('allows a lowered or removed max-lines entry', () => {
+    expect(scanReworkDiff(edit(baseline, ['  "a.ts": 789,'], ['  "a.ts": 700,']))).toEqual([]);
+    expect(scanReworkDiff(edit(baseline, ['  "a.ts": 789,'], []))).toEqual([]);
+  });
+  it('flags a lowered or removed vitest threshold', () => {
+    expect(scanReworkDiff(edit('vitest.config.ts', ['      lines: 80,'], ['      lines: 78,']))).toEqual([
+      expect.objectContaining({ kind: 'ratchet', rule: 'coverage-threshold', match: 'lines 80 -> 78', line: 3 }),
+    ]);
+    expect(scanReworkDiff(edit('packages/x/vitest.config.mts', ['      branches: 70,'], []))).toEqual([
+      expect.objectContaining({ rule: 'coverage-threshold', match: 'branches 70 -> removed' }),
+    ]);
+  });
+  it('allows a raised vitest threshold', () => {
+    expect(scanReworkDiff(edit('vitest.config.ts', ['      lines: 80,'], ['      lines: 82,']))).toEqual([]);
+  });
+  it('ignores max-lines- and threshold-shaped lines in other files', () => {
+    expect(scanReworkDiff(edit('src/a.json', ['  "a.ts": 1,'], ['  "a.ts": 2,']))).toEqual([]);
+    expect(scanReworkDiff(edit('src/a.ts', ['lines: 80'], ['lines: 10']))).toEqual([]);
+  });
+  it('describeSuppression renders a ratchet finding', () => {
+    const findings = scanReworkDiff(edit(baseline, ['  "a.ts": 1,'], ['  "a.ts": 2,']));
+    expect(describeSuppression(findings)).toBe('suppression-attempt: 1 finding(s): max-lines-ceiling "a.ts" 1 -> 2');
+  });
+});
+
 describe('git readers', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ci-suppression-guard-'));
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -134,5 +187,59 @@ describe('git readers', () => {
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }
+  });
+
+  describe('mergeBaseIntoWorktree', () => {
+    const tmp = createTempDirs();
+    const root = tmp.makeSync('ci-merge-base-');
+    afterAll(() => tmp.cleanup());
+    const gitIn = (cwd: string, ...args: string[]) =>
+      execGit(['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd });
+
+    async function setup(name: string) {
+      const origin = join(root, `${name}-origin.git`);
+      const clone = join(root, `${name}-clone`);
+      const other = join(root, `${name}-other`);
+      await execGit(['init', '-q', '--bare', '-b', 'main', origin], { cwd: root });
+      await execGit(['clone', '-q', origin, clone], { cwd: root });
+      await execGit(['clone', '-q', origin, other], { cwd: root });
+      writeFileSync(join(clone, 'a.txt'), 'one\n');
+      await gitIn(clone, 'add', '.');
+      await gitIn(clone, 'commit', '-q', '-m', 'init');
+      await gitIn(clone, 'push', '-q', 'origin', 'main');
+      await gitIn(other, 'pull', '-q', 'origin', 'main');
+      await gitIn(clone, 'checkout', '-q', '-b', 'lane');
+      return { clone, other };
+    }
+
+    it('merges new base commits, then reports up to date', async () => {
+      const { clone, other } = await setup('clean');
+      writeFileSync(join(other, 'b.txt'), 'base\n');
+      await gitIn(other, 'add', '.');
+      await gitIn(other, 'commit', '-q', '-m', 'base change');
+      await gitIn(other, 'push', '-q', 'origin', 'main');
+      await gitIn(clone, 'config', 'user.name', 't');
+      await gitIn(clone, 'config', 'user.email', 't@t');
+      expect(await mergeBaseIntoWorktree(clone, 'main')).toEqual({ ok: true, merged: true });
+      expect(await mergeBaseIntoWorktree(clone, 'main')).toEqual({ ok: true, merged: false });
+    });
+
+    it('aborts a conflicting merge and returns the paths', async () => {
+      const { clone, other } = await setup('conflict');
+      await gitIn(clone, 'config', 'user.name', 't');
+      await gitIn(clone, 'config', 'user.email', 't@t');
+      writeFileSync(join(clone, 'a.txt'), 'lane\n');
+      await gitIn(clone, 'commit', '-q', '-am', 'lane change');
+      writeFileSync(join(other, 'a.txt'), 'base\n');
+      await gitIn(other, 'commit', '-q', '-am', 'base change');
+      await gitIn(other, 'push', '-q', 'origin', 'main');
+      expect(await mergeBaseIntoWorktree(clone, 'main')).toEqual({ ok: false, conflict: true, paths: ['a.txt'] });
+      await expect(gitIn(clone, 'rev-parse', '-q', '--verify', 'MERGE_HEAD')).rejects.toThrow();
+    });
+
+    it('reports a failed fetch of a missing ref as a non-conflict error', async () => {
+      const { clone } = await setup('missing');
+      expect(await mergeBaseIntoWorktree(clone, 'no-such-branch')).toMatchObject({ ok: false, conflict: false });
+    });
   });
 });

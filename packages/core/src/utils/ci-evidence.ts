@@ -2,17 +2,26 @@
 
 import type { Octokit } from '@octokit/rest';
 
-import type { CiCodeScanningAlert, CiFailingCheck, CiFailureEvidence } from '../types/index.js';
+import type { CiCodeScanningAlert, CiFailingCheck, CiFailureEvidence, CiJobLogExcerpt } from '../types/index.js';
 
 import { isPassingConclusion, listAllCheckRuns } from './ci-watch.js';
 
-export const CI_EVIDENCE_LIMITS = { maxChecks: 10, maxAlerts: 10, maxSummaryChars: 500, maxMessageChars: 300 } as const;
+export const CI_EVIDENCE_LIMITS = {
+  maxChecks: 10,
+  maxAlerts: 10,
+  maxSummaryChars: 500,
+  maxMessageChars: 300,
+  maxJobLogs: 3,
+  maxLogLines: 150,
+  maxLogChars: 16000,
+} as const;
 
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /**
  * Re-list the branch's check runs after the CI watch ended 'failure' and summarise the ones that did
- * not pass. When a failing check is CodeQL, also list the open code-scanning alerts on the PR head.
+ * not pass. When a failing check is CodeQL, also list the open code-scanning alerts on the PR's merge ref:
+ * CodeQL on pull_request analyzes refs/pull/<n>/merge, so refs/pull/<n>/head returns no alerts.
  * Best-effort and GET-only: it never throws and never changes the park reason.
  */
 export async function collectCiFailureEvidence(opts: {
@@ -54,7 +63,7 @@ export async function collectCiFailureEvidence(opts: {
       const { data } = await octokit.rest.codeScanning.listAlertsForRepo({
         owner,
         repo,
-        ref: `refs/pull/${prNumber}/head`,
+        ref: `refs/pull/${prNumber}/merge`,
         state: 'open',
         per_page: 100,
       });
@@ -77,4 +86,56 @@ export async function collectCiFailureEvidence(opts: {
   }
 
   return { failingChecks, alerts, truncated, ...(errors.length > 0 ? { errors } : {}) };
+}
+
+const LOG_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T[\d:.]+Z /;
+const ANSI_ESCAPE = new RegExp(String.fromCharCode(27) + '\\[[0-9;]*m', 'g');
+
+/**
+ * Download the log tails of the named failing Actions jobs on `ref` for non-CodeQL CI rework (#3537).
+ * A check run's id is the Actions job id. Best-effort and GET-only: it never throws; a listing or
+ * per-job failure is returned in `errors` and the remaining jobs are still fetched.
+ */
+export async function collectFailingJobLogs(opts: {
+  octokit: Octokit;
+  owner: string;
+  repo: string;
+  ref: string;
+  checkNames: readonly string[];
+}): Promise<{ jobLogs: CiJobLogExcerpt[]; errors: string[] }> {
+  const { octokit, owner, repo, ref, checkNames } = opts;
+  const jobLogs: CiJobLogExcerpt[] = [];
+  const errors: string[] = [];
+  let runs;
+  try {
+    const all = await listAllCheckRuns(octokit, owner, repo, ref, 100, 10);
+    runs = all
+      .filter((r) => r.status === 'completed' && !isPassingConclusion(r.conclusion))
+      .filter((r) => r.name !== undefined && r.name !== null && checkNames.includes(r.name))
+      .slice(0, CI_EVIDENCE_LIMITS.maxJobLogs);
+  } catch (err) {
+    return { jobLogs, errors: [`checks: ${errorMessage(err)}`] };
+  }
+  for (const run of runs) {
+    const name = run.name ?? '(unnamed)';
+    if (typeof run.id !== 'number') {
+      errors.push(`${name}: no job id`);
+      continue;
+    }
+    try {
+      const { data } = await octokit.rest.actions.downloadJobLogsForWorkflowRun({ owner, repo, job_id: run.id });
+      const text = typeof data === 'string' ? data : String(data);
+      const lines = text.split('\n').map((l) => l.replace(LOG_TIMESTAMP, '').replace(ANSI_ESCAPE, ''));
+      let truncated = lines.length > CI_EVIDENCE_LIMITS.maxLogLines;
+      let excerpt = lines.slice(-CI_EVIDENCE_LIMITS.maxLogLines).join('\n');
+      if (excerpt.length > CI_EVIDENCE_LIMITS.maxLogChars) {
+        excerpt = excerpt.slice(-CI_EVIDENCE_LIMITS.maxLogChars);
+        truncated = true;
+      }
+      jobLogs.push({ name, jobId: run.id, excerpt, truncated });
+    } catch (err) {
+      errors.push(`${name}: ${errorMessage(err)}`);
+    }
+  }
+  return { jobLogs, errors };
 }

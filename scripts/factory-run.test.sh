@@ -12,7 +12,9 @@ WF="$ROOT/.github/workflows/factory-run.yml"
 RUNBOOK="$ROOT/docs/runbooks/github-actions-run.md"
 SHIM_LOG="$BINDIR/shim.log"
 RUN_LOG="$BINDIR/run.log"
-SENTINELS=(sentinel-pat-XYZ sentinel-oauth-XYZ sentinel-anthropic-XYZ gh-actions-token)
+SENTINELS=(sentinel-pat-XYZ sentinel-oauth-XYZ sentinel-anthropic-XYZ gh-actions-token
+  sentinel-openai-XYZ sentinel-codex-XYZ sentinel-opencode-XYZ sentinel-openrouter-XYZ)
+INSTALL_LOG="$BINDIR/install.log"
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
@@ -20,10 +22,25 @@ cat >"$BINDIR/factory" <<'EOF2'
 #!/usr/bin/env bash
 for a in "$@"; do echo "arg=$a" >>"$FACTORY_SHIM_LOG"; done
 if [ "${GITHUB_TOKEN:-}" = "${FACTORY_GITHUB_TOKEN:-}" ]; then echo "token_match=yes" >>"$FACTORY_SHIM_LOG"; else echo "token_match=no" >>"$FACTORY_SHIM_LOG"; fi
+for n in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY OPENAI_API_KEY CODEX_API_KEY OPENCODE_API_KEY OPENROUTER_API_KEY; do
+  [ -z "${!n:-}" ] || echo "has=$n" >>"$FACTORY_SHIM_LOG"
+done
+echo "plan=${FACTORY_PLAN_MODEL:-}" >>"$FACTORY_SHIM_LOG"
+echo "build=${FACTORY_BUILD_MODEL:-}" >>"$FACTORY_SHIM_LOG"
+echo "experimental=${FACTORY_EXPERIMENTAL:-unset}" >>"$FACTORY_SHIM_LOG"
+if [ -n "${CODEX_API_KEY:-}" ]; then echo "codex_sum=$(printf %s "$CODEX_API_KEY" | cksum)" >>"$FACTORY_SHIM_LOG"; fi
 echo "shim ran"
 exit "${FACTORY_SHIM_RC:-0}"
 EOF2
-chmod +x "$BINDIR/factory"
+cat >"$BINDIR/npm" <<'EOF2'
+#!/usr/bin/env bash
+echo "npm $*" >>"$FACTORY_INSTALL_LOG"
+EOF2
+cat >"$BINDIR/codex" <<'EOF2'
+#!/usr/bin/env bash
+echo "codex $* stdin_sum=$(cat | cksum)" >>"$FACTORY_INSTALL_LOG"
+EOF2
+chmod +x "$BINDIR/factory" "$BINDIR/npm" "$BINDIR/codex"
 
 RC=0
 ALL_OUT="$BINDIR/all-output.txt"
@@ -31,10 +48,12 @@ ALL_OUT="$BINDIR/all-output.txt"
 
 run() {
   : >"$SHIM_LOG"
+  : >"$INSTALL_LOG"
   rm -f "$RUN_LOG"
   RC=0
-  env -i PATH="$BINDIR:$PATH" HOME="$BINDIR" FACTORY_SHIM_LOG="$SHIM_LOG" FACTORY_RUN_LOG="$RUN_LOG" "$@" \
+  env -i PATH="$BINDIR:$PATH" HOME="$BINDIR" FACTORY_SHIM_LOG="$SHIM_LOG" FACTORY_INSTALL_LOG="$INSTALL_LOG" FACTORY_RUN_LOG="$RUN_LOG" "$@" \
     bash "$ROOT/scripts/factory-run.sh" >"$BINDIR/out.txt" 2>"$BINDIR/err.txt" || RC=$?
+  [ -z "${NO_ALL_OUT:-}" ] || return 0
   cat "$BINDIR/out.txt" "$BINDIR/err.txt" >>"$ALL_OUT"
   [ ! -f "$RUN_LOG" ] || cat "$RUN_LOG" >>"$ALL_OUT"
 }
@@ -45,7 +64,10 @@ expect_reject() {
   [ "$RC" -eq 2 ] || fail "expected exit 2 for $*, got $RC"
   grep -qF -- "$msg" "$BINDIR/err.txt" || fail "missing message '$msg' for $*"
   [ ! -s "$SHIM_LOG" ] || fail "factory was called for $*"
+  [ ! -s "$INSTALL_LOG" ] || fail "something was installed for $*"
 }
+
+shimargs() { grep -E '^(arg|token_match)=' "$SHIM_LOG"; }
 
 TOK=FACTORY_GITHUB_TOKEN=sentinel-pat-XYZ
 
@@ -67,19 +89,93 @@ echo "PASS requires FACTORY_GITHUB_TOKEN"
 run "$TOK" GITHUB_TOKEN=gh-actions-token CLAUDE_CODE_OAUTH_TOKEN=sentinel-oauth-XYZ \
   ANTHROPIC_API_KEY=sentinel-anthropic-XYZ COMMAND=run-issue ISSUE=42
 [ "$RC" -eq 0 ] || fail "run-issue 42 exited $RC"
-[ "$(cat "$SHIM_LOG")" = "$(printf 'arg=run-issue\narg=42\ntoken_match=yes')" ] || fail "unexpected shim log: $(cat "$SHIM_LOG")"
+[ "$(shimargs)" = "$(printf 'arg=run-issue\narg=42\ntoken_match=yes')" ] || fail "unexpected shim log: $(cat "$SHIM_LOG")"
 grep -qF "shim ran" "$RUN_LOG" || fail "run log missing shim output"
 echo "PASS runs factory run-issue 42 with GITHUB_TOKEN from FACTORY_GITHUB_TOKEN"
 
-run "$TOK" COMMAND=ship ISSUE=7
-[ "$RC" -eq 0 ] && [ "$(cat "$SHIM_LOG")" = "$(printf 'arg=ship\narg=7\ntoken_match=yes')" ] || fail "ship argv wrong"
-run "$TOK" COMMAND=doctor
-[ "$RC" -eq 0 ] && [ "$(cat "$SHIM_LOG")" = "$(printf 'arg=doctor\ntoken_match=yes')" ] || fail "doctor argv wrong"
+run "$TOK" CLAUDE_CODE_OAUTH_TOKEN=sentinel-oauth-XYZ COMMAND=ship ISSUE=7
+[ "$RC" -eq 0 ] && [ "$(shimargs)" = "$(printf 'arg=ship\narg=7\ntoken_match=yes')" ] || fail "ship argv wrong"
+run "$TOK" CLAUDE_CODE_OAUTH_TOKEN=sentinel-oauth-XYZ COMMAND=doctor
+[ "$RC" -eq 0 ] && [ "$(shimargs)" = "$(printf 'arg=doctor\ntoken_match=yes')" ] || fail "doctor argv wrong"
 echo "PASS doctor and ship argv"
 
-run "$TOK" COMMAND=doctor FACTORY_SHIM_RC=3
+run "$TOK" CLAUDE_CODE_OAUTH_TOKEN=sentinel-oauth-XYZ COMMAND=doctor FACTORY_SHIM_RC=3
 [ "$RC" -eq 3 ] || fail "exit code not propagated, got $RC"
 echo "PASS propagates factory exit code"
+
+OAUTH=CLAUDE_CODE_OAUTH_TOKEN=sentinel-oauth-XYZ
+CODEX_SUM() { printf %s "$1" | cksum; }
+
+# --- providers ---
+expect_reject "provider codex-cli needs repo secret OPENAI_API_KEY (or CODEX_API_KEY)" "$TOK" COMMAND=run-issue ISSUE=42 PROVIDER=codex-cli
+expect_reject "provider codex-cli needs repo secret" "$TOK" COMMAND=run-issue ISSUE=42 PROVIDER=codex-cli OPENAI_API_KEY= CODEX_API_KEY=
+run "$TOK" COMMAND=run-issue ISSUE=42 PROVIDER=codex-cli CODEX_API_KEY=sentinel-codex-XYZ
+[ "$RC" -eq 0 ] || fail "codex alias run exited $RC"
+grep -qxF "codex_sum=$(CODEX_SUM sentinel-codex-XYZ)" "$SHIM_LOG" || fail "codex alias key not exported"
+grep -qF "codex login --with-api-key stdin_sum=$(CODEX_SUM sentinel-codex-XYZ)" "$INSTALL_LOG" || fail "codex login stdin wrong"
+grep -qxF "npm install -g @openai/codex" "$INSTALL_LOG" || fail "codex not installed"
+run "$TOK" COMMAND=run-issue ISSUE=42 PROVIDER=codex-cli OPENAI_API_KEY=sentinel-openai-XYZ CODEX_API_KEY=sentinel-codex-XYZ
+[ "$RC" -eq 0 ] || fail "codex precedence run exited $RC"
+grep -qE '::warning::.*OPENAI_API_KEY.*CODEX_API_KEY' "$BINDIR/out.txt" "$BINDIR/err.txt" || fail "missing codex warning"
+grep -qxF "codex_sum=$(CODEX_SUM sentinel-openai-XYZ)" "$SHIM_LOG" || fail "OPENAI_API_KEY did not win"
+run "$TOK" COMMAND=run-issue ISSUE=42 PROVIDER=codex-cli OPENAI_API_KEY=sentinel-openai-XYZ CODEX_API_KEY=sentinel-openai-XYZ
+! grep -qF '::warning::' "$BINDIR/out.txt" || fail "warned for equal codex keys"
+echo "PASS codex-cli secret preflight, alias and precedence"
+
+run "$TOK" "$OAUTH" COMMAND=run-issue ISSUE=42
+[ "$RC" -eq 0 ] && [ "$(shimargs)" = "$(printf 'arg=run-issue\narg=42\ntoken_match=yes')" ] || fail "claude oauth run failed"
+run "$TOK" ANTHROPIC_API_KEY=sentinel-anthropic-XYZ COMMAND=run-issue ISSUE=42 PROVIDER=claude-cli
+[ "$RC" -eq 0 ] && grep -qxF 'arg=42' "$SHIM_LOG" || fail "claude anthropic run failed"
+grep -qxF "npm install -g @anthropic-ai/claude-code@2.1.308" "$INSTALL_LOG" || fail "claude-code not installed"
+expect_reject "provider claude-cli needs repo secret" "$TOK" COMMAND=run-issue ISSUE=42
+for bad in copilot ollama-http command Codex-CLI 'pi ' '$(id)'; do
+  expect_reject "provider not allowed" "$TOK" "$OAUTH" COMMAND=run-issue ISSUE=42 "PROVIDER=$bad"
+done
+echo "PASS claude-cli secrets and provider allowlist"
+
+run "$TOK" COMMAND=run-issue ISSUE=42 PROVIDER=codex-cli OPENAI_API_KEY=sentinel-openai-XYZ
+grep -qxF 'plan=gpt-5.6-terra-high' "$SHIM_LOG" && grep -qxF 'build=gpt-5.6-sol' "$SHIM_LOG" || fail "codex model defaults wrong"
+run "$TOK" "$OAUTH" COMMAND=run-issue ISSUE=42 FACTORY_PLAN_MODEL=claude-opus-5 FACTORY_BUILD_MODEL=
+grep -qxF 'plan=claude-opus-5' "$SHIM_LOG" && grep -qxF 'build=claude-sonnet-5' "$SHIM_LOG" || fail "empty model not defaulted"
+run "$TOK" COMMAND=run-issue ISSUE=42 PROVIDER=codex-cli OPENAI_API_KEY=sentinel-openai-XYZ FACTORY_BUILD_MODEL=gpt-5.6-luna-high
+grep -qxF 'plan=gpt-5.6-terra-high' "$SHIM_LOG" && grep -qxF 'build=gpt-5.6-luna-high' "$SHIM_LOG" || fail "explicit build model not kept"
+echo "PASS provider model defaults and explicit overrides"
+
+for p in opencode pi; do
+  expect_reject "is experimental: set experimental: true" "$TOK" COMMAND=run-issue ISSUE=42 "PROVIDER=$p" OPENCODE_API_KEY=sentinel-opencode-XYZ OPENROUTER_API_KEY=sentinel-openrouter-XYZ
+  expect_reject "is experimental: set experimental: true" "$TOK" COMMAND=run-issue ISSUE=42 "PROVIDER=$p" EXPERIMENTAL=false OPENCODE_API_KEY=sentinel-opencode-XYZ OPENROUTER_API_KEY=sentinel-openrouter-XYZ
+done
+expect_reject "experimental must be true or false" "$TOK" "$OAUTH" COMMAND=run-issue ISSUE=42 EXPERIMENTAL=yes
+expect_reject "provider opencode needs repo secret OPENCODE_API_KEY" "$TOK" COMMAND=run-issue ISSUE=42 PROVIDER=opencode EXPERIMENTAL=true
+run "$TOK" "$OAUTH" COMMAND=run-issue ISSUE=42 FACTORY_EXPERIMENTAL=1
+grep -qxF 'experimental=unset' "$SHIM_LOG" || fail "inherited FACTORY_EXPERIMENTAL leaked"
+ALLSEC=(CLAUDE_CODE_OAUTH_TOKEN=sentinel-oauth-XYZ ANTHROPIC_API_KEY=sentinel-anthropic-XYZ OPENAI_API_KEY=sentinel-openai-XYZ
+  CODEX_API_KEY=sentinel-codex-XYZ OPENCODE_API_KEY=sentinel-opencode-XYZ OPENROUTER_API_KEY=sentinel-openrouter-XYZ)
+run "$TOK" COMMAND=run-issue ISSUE=42 PROVIDER=pi EXPERIMENTAL=true "${ALLSEC[@]}"
+[ "$RC" -eq 0 ] || fail "pi run exited $RC"
+grep -qxF 'experimental=1' "$SHIM_LOG" || fail "experimental not exported"
+[ "$(grep '^has=' "$SHIM_LOG")" = "has=OPENROUTER_API_KEY" ] || fail "pi saw other secrets: $(grep '^has=' "$SHIM_LOG")"
+grep -qF "@earendil-works/pi-coding-agent@1.2.0" "$INSTALL_LOG" || fail "pi not installed"
+run "$TOK" COMMAND=run-issue ISSUE=42 PROVIDER=opencode EXPERIMENTAL=true "${ALLSEC[@]}"
+[ "$(grep '^has=' "$SHIM_LOG")" = "has=OPENCODE_API_KEY" ] || fail "opencode saw other secrets"
+grep -qF "npm install -g opencode-ai@1.18.28" "$INSTALL_LOG" || fail "opencode not installed"
+echo "PASS experimental gate and per-provider secret isolation"
+
+NO_ALL_OUT=1 run "$TOK" GITHUB_ACTIONS=true COMMAND=run-issue ISSUE=42 PROVIDER=codex-cli OPENAI_API_KEY=sentinel-openai-XYZ
+[ "$RC" -eq 0 ] || fail "mask run exited $RC"
+grep -qxF '::add-mask::sentinel-openai-XYZ' "$BINDIR/out.txt" || fail "secret not masked"
+! grep -F 'sentinel-' "$BINDIR/out.txt" | grep -qv '^::add-mask::' || fail "unmasked sentinel in stdout"
+echo "PASS add-mask under GITHUB_ACTIONS"
+
+# model ids in the wrapper table exist in defaults.ts with the matching harness
+DEFAULTS="$ROOT/packages/config/src/defaults.ts"
+for pair in claude-opus-5:claude-cli claude-sonnet-5:claude-cli gpt-5.6-terra-high:codex-cli gpt-5.6-sol:codex-cli \
+  opencode-deepseek-v4-flash:opencode pi-openrouter-deepseek-v4-flash:pi; do
+  id="${pair%%:*}"; h="${pair##*:}"
+  [ "$(awk -v id="'$id': {" 'index($0,id){f=1} f&&/harness:/{print $2; exit}' "$DEFAULTS")" = "'$h'," ] || fail "model $id is not harness $h in defaults.ts"
+  grep -qF "$id" "$ROOT/scripts/factory-run.sh" || fail "wrapper lacks default $id"
+done
+echo "PASS wrapper model defaults match defaults.ts"
 
 for s in "${SENTINELS[@]}"; do
   ! grep -qF -- "$s" "$ALL_OUT" || fail "secret $s leaked into output or log"
@@ -115,6 +211,17 @@ RUNS="$(awk '
 ! grep -qF '${{ inputs.' <<<"$RUNS" || fail "run block interpolates inputs"
 ! grep -qF 'github.token' "$WF" || fail "workflow references github.token"
 [ "$(awk '/^  FACTORY_CLI_VERSION:/{print $2}' "$WF")" = "$(bash "$ROOT/scripts/set-release-version.sh" --current)" ] || fail "FACTORY_CLI_VERSION != lockstep version"
+for i in provider experimental plan_model build_model; do
+  grep -qE "^      $i:" "$WF" || fail "workflow lacks input $i"
+done
+for sec in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY OPENAI_API_KEY CODEX_API_KEY OPENCODE_API_KEY OPENROUTER_API_KEY; do
+  [ "$(awk -v k="      $sec:" '/^    secrets:/{f=1} f&&$0==k{g=1;next} g&&NF{print $1,$2;exit}' "$WF")" = "required: false" ] || fail "$sec must be required: false"
+done
+for pair in CLAUDE_CODE_OAUTH_TOKEN:claude-cli ANTHROPIC_API_KEY:claude-cli OPENAI_API_KEY:codex-cli CODEX_API_KEY:codex-cli \
+  OPENCODE_API_KEY:opencode OPENROUTER_API_KEY:pi; do
+  grep -F "inputs.provider == '${pair##*:}' && secrets.${pair%%:*}" "$WF" | grep -qF "          ${pair%%:*}:" || fail "run step must map ${pair%%:*} only for ${pair##*:}"
+done
+! grep -qF '@anthropic-ai/claude-code' "$WF" || fail "workflow still installs claude-code"
 echo "PASS factory-run.yml shape"
 
 lint() {

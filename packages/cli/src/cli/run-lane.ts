@@ -3,8 +3,9 @@
 import { existsSync } from 'node:fs';
 
 import { parkReasonFor } from '@on-par/factory-core';
-import type { LanePausedPayload, getFactoryPaths, ParkPayload, RunOutcome } from '@on-par/factory-core';
+import type { getFactoryPaths, ParkPayload, ParkReason, RunOutcome } from '@on-par/factory-core';
 import { formatLoadHold, logEvent, PARKED_LABEL, parkPayload } from '@on-par/factory-core/internal';
+import type { Octokit } from '@octokit/rest';
 import type {
   LoadGuardDecision,
   QueueClaim,
@@ -12,15 +13,24 @@ import type {
   StackRestackOutcome,
 } from '@on-par/factory-core/internal';
 
-import { BASE_HOLD_CI_RECHECK_MS, type BaseHoldDecision, writeBaseHold } from './base-hold.js';
+import type { BaseHoldDecision } from './base-hold.js';
+import { laneParkCommenter } from './lane-park-comment.js';
+import { pauseLaneForBrokenBase, tripLaneBreaker } from './lane-pause.js';
 import { waitForMerge } from './land.js';
 import { AwaitingReviewError } from './land-pr.js';
 import { releaseKeepOnRequeue } from './worktree-keep.js';
 import { shipIssue } from './ship.js';
 import { withHeartbeat } from './lane-heartbeat.js';
+import { type ChildEnqueueResult, queueDecomposedChildren } from './run-lane-decompose.js';
 import { shipRuntime } from './ship-runtime.js';
 
 export type RunLaneDeps = {
+  /** Octokit for the park comment of a park raised outside runIssue (#3534). Absent = no comment. */
+  octokit?: () => Octokit;
+  /** The run id written to the park comment's `run:` line. Defaults to '-'. */
+  runId?: string;
+  /** Returns the park SHA for a branch. The default rejects, which gives `park-sha: -`. */
+  readParkSha?: (branch: string) => Promise<string>;
   /** Lane circuit breaker (#1918): pause after this many consecutive parks with the same
    *  non-empty failure signature. 0 or absent = off; cmdRun wires the resolved
    *  budget.laneBreakerThreshold. */
@@ -50,12 +60,17 @@ export type RunLaneDeps = {
   emitEvent?: typeof logEvent;
   claimNext?: () => Promise<QueueClaim | null>;
   releaseIssue?: (issue: number, outcome: QueueReleaseOutcome) => Promise<void>;
+  /** Writes decomposed children into the GitHub queue (queued, lane, order right behind the parent)
+   *  before the lane moves on, so a restart never loses them (#3539). Absent for static local lanes. */
+  queueChildren?: (parent: number, children: number[]) => Promise<ChildEnqueueResult>;
   /** Refreshes the claim lease every HEARTBEAT_INTERVAL_MS while an issue is in flight
    *  (#1500). Absent for static local-queue lanes, which carry no remote claim to lease. */
   heartbeat?: (issue: number) => Promise<unknown>;
   /** Eager park-time worktree reap (#1007). Defaults to a no-op so injected-deps callers and
    *  tests are unaffected; cmdRun wires it to reapParkedLaneWorktree. */
   reapWorktree?: (issue: number) => Promise<void>;
+  /** Settles the park's PR (closes it with the park reason, keeping the branch) when a park is raised while landing; default no-op. */
+  closeParkedPr?: (issue: number, branch: string, reason: ParkReason) => Promise<void>;
   /** Between-issues worktree GC pass (#1757), run after every terminal outcome before the
    *  lane moves on. Defaults to a no-op so injected-deps callers and tests are unaffected;
    *  cmdRun wires it to sweepBetweenLaneIssues. */
@@ -78,18 +93,6 @@ export type RunLaneDeps = {
   now?: () => Date;
 };
 
-export function renderLanePausedComment(payload: LanePausedPayload): string {
-  const checks = payload.failingChecks.length
-    ? payload.failingChecks.map((c) => `\`${c}\``).join(', ')
-    : 'none recorded';
-  return [
-    `Lane '${payload.lane}' is paused: this issue and #${payload.firstIssue} parked with the same failure signature, so the factory stopped claiming issues on this lane.`,
-    `Shared failing checks: ${checks}`,
-    `To resume: fix the shared failure (often on the base branch), then re-run \`factory run\` to resume lane '${payload.lane}'.`,
-    `Failure signature: \`${payload.signature}\``,
-  ].join('\n\n');
-}
-
 export async function runLane(
   lane: string,
   issues: number[],
@@ -107,8 +110,10 @@ export async function runLane(
     emitEvent = logEvent,
     claimNext = async () => null,
     releaseIssue = async () => {},
+    queueChildren,
     heartbeat,
     reapWorktree = async () => {},
+    closeParkedPr = async () => {},
     sweepFinished = async () => {},
     activeIssues = new Set<number>(),
     countRemaining,
@@ -118,6 +123,9 @@ export async function runLane(
     now = () => new Date(),
     laneBreakerThreshold = 0,
     commentIssue = async () => {},
+    octokit: getOctokit,
+    runId = '-',
+    readParkSha = () => Promise.reject(new Error('no park sha reader')),
   } = deps;
   let streak: { signature: string; firstIssue: number; failingChecks: string[]; count: number } | null = null;
   let merged = 0;
@@ -152,6 +160,11 @@ export async function runLane(
       releaseKeepOnRequeue(paths.worktreeKeeps, issue, (m) => emitEvent(paths.events, 'warn', issue, m, { lane }));
     await sweepFinished(issue).catch(() => {});
   };
+  // A park raised outside runIssue upserts the issue park comment (#3534); fail-closed, never changes lane flow.
+  const postParkComment = laneParkCommenter({ getOctokit, ghRepo, repoRoot, runId, lane, readParkSha }, (issue, m) =>
+    emitEvent(paths.events, 'warn', issue, m, { lane }),
+  );
+  const pauseCtx = { lane, paths, emitEvent };
   // A parked release adds factory:parked (#3424). Log the clean park only once the label
   // landed; a rejected add is surfaced as a fail event naming the issue and label (#3425).
   const parkAndSettle = async (issue: number, parkedMsg: string, park: ParkPayload): Promise<boolean> => {
@@ -221,6 +234,7 @@ export async function runLane(
     const parkIssue = async (reason: string): Promise<void> => {
       emitEvent(paths.events, 'escalate', issue, reason, { lane });
       const msg = `issue #${issue} parked (${reason}); lane '${lane}' continuing, ${await remainingAfter(i)} issue(s) remaining`;
+      await postParkComment(issue, 'escalate', reason, decision.kind === 'adopt' ? decision.branch : undefined);
       // A preflight-parked issue may still have a stale worktree from a prior run; the reap
       // is fail-closed and must never change lane flow.
       await reapWorktree(issue).catch(() => {});
@@ -261,8 +275,10 @@ export async function runLane(
       continue;
     }
     const layer = decision.kind === 'adopt' ? decision.stackLayer : undefined;
+    const sliceOutcome: { value?: RunOutcome } = {};
+    let landBranch = decision.kind === 'adopt' ? decision.branch : undefined;
+    let landing: string | undefined;
     try {
-      const sliceOutcome: { value?: RunOutcome } = {};
       const branch =
         decision.kind === 'adopt'
           ? decision.branch
@@ -282,6 +298,7 @@ export async function runLane(
                 },
               ),
             );
+      landBranch = branch;
       const shipped = sliceOutcome.value;
       if (shipped?.state === 'released' && shipped.reason === 'stack-wait') {
         // ADR-0161: the slice below awaits review, so release the issue and do not park (#3367).
@@ -313,6 +330,7 @@ export async function runLane(
       }
       if (layer) {
         // ADR-0161: land exactly this layer's branch, record it, and re-queue for the next layer.
+        landing = branch;
         await withHeartbeat(issue, heartbeat, () =>
           waitMerge(issue, branch, repoRoot, ghRepo, paths, { landBranch: branch }),
         );
@@ -338,6 +356,7 @@ export async function runLane(
         await settle(issue, layer.index < layer.count ? 'queued' : 'done');
         continue;
       }
+      landing = branch;
       await withHeartbeat(issue, heartbeat, () => waitMerge(issue, branch, repoRoot, ghRepo, paths));
       merged++;
       streak = null;
@@ -361,17 +380,33 @@ export async function runLane(
       if (err instanceof IssueDecomposedError) {
         // shipIssue already rewrote the queue — splice the children in after the
         // current issue so this same lane run ships them, deduping ones already queued.
-        const fresh = err.childIssues.filter((n) => !seen.has(n));
+        // On a GitHub lane the children are first written to the tracker (#3539); only the ones
+        // that were not written are spliced in-memory, the rest are claimed next through claimNext.
+        let clean = true;
+        let unwritten = err.childIssues;
+        if (queueChildren && err.childIssues.length > 0) {
+          ({ unwritten, clean } = await queueDecomposedChildren(
+            queueChildren,
+            issue,
+            err.childIssues,
+            lane,
+            paths.events,
+            emitEvent,
+          ));
+        }
+        const fresh = unwritten.filter((n) => !seen.has(n));
         for (const n of fresh) seen.add(n);
         pending.splice(i + 1, 0, ...fresh.map(buildClaim));
-        decomposed++;
-        emitEvent(
-          paths.events,
-          'decompose_filed',
-          issue,
-          `lane '${lane}' continuing with ${fresh.length} child issue(s) in place of #${issue}`,
-          { lane },
-        );
+        if (clean) {
+          decomposed++;
+          emitEvent(
+            paths.events,
+            'decompose_filed',
+            issue,
+            `lane '${lane}' continuing with ${fresh.length} child issue(s) in place of #${issue}`,
+            { lane },
+          );
+        }
         await settle(issue, 'done');
         continue;
       }
@@ -382,36 +417,7 @@ export async function runLane(
         // A preserved build is kept for `factory resume --from check` (#2564).
         if (!err.buildPreserved) await reapWorktree(issue).catch(() => {});
         await settle(issue, 'queued');
-        // Persist the hold so a restarted supervisor remembers the broken base (#2348);
-        // best-effort, never allowed to change lane flow.
-        try {
-          writeBaseHold(paths.baseHold, {
-            repo: ghRepo,
-            baseSha: err.baseSha,
-            failingChecks: err.failingChecks,
-            since: new Date().toISOString(),
-            ...(err.awaitingCi
-              ? { ciRecheckAfter: new Date(now().getTime() + BASE_HOLD_CI_RECHECK_MS).toISOString() }
-              : {}),
-            ...(err.confirmedLocally ? { confirmedLocally: true as const } : {}),
-          });
-        } catch {}
-        const payload: LanePausedPayload = {
-          lane,
-          signature: err.failureSignature ?? '',
-          failingChecks: err.failingChecks,
-          firstIssue: issue,
-          secondIssue: issue,
-          cause: 'environment',
-          baseSha: err.baseSha,
-        };
-        emitEvent(
-          paths.events,
-          'lane-paused',
-          lane,
-          `lane '${lane}' paused: #${issue} failed only on checkers that also fail on base ${err.baseSha.slice(0, 8)} (${err.failingChecks.join(', ')}); #${issue} released to queued`,
-          { lane, lanePaused: payload },
-        );
+        pauseLaneForBrokenBase(pauseCtx, issue, err, ghRepo, now);
         activeIssues.delete(issue);
         return;
       }
@@ -431,28 +437,17 @@ export async function runLane(
       const msg = `issue #${issue} parked (${reason})${logSuffix ? `; ${logSuffix}` : ''}; ${
         tripped ? `lane '${lane}' paused (lane breaker)` : `lane '${lane}' continuing`
       }, ${await remainingAfter(i)} issue(s) remaining`;
+      // runIssue's terminalParked already wrote the comment for a run it parked (#2314).
+      if (sliceOutcome.value?.state !== 'parked') {
+        await postParkComment(issue, reason, err instanceof Error ? err.message : String(err), landBranch);
+      }
       // Remove the parked lane's own worktree so a parked issue stops leaving a sibling
       // checkout behind (#1007); fail-closed and never allowed to change lane flow.
+      if (landing !== undefined) await closeParkedPr(issue, landing, reason).catch(() => {});
       await reapWorktree(issue).catch(() => {});
       if (await parkAndSettle(issue, msg, parkPayload(reason, issue, lane, queuedBehind(i)))) parked++;
       if (tripped && streak) {
-        const { signature: tripSignature, firstIssue, failingChecks: firstChecks } = streak;
-        const payload: LanePausedPayload = {
-          lane,
-          signature: tripSignature,
-          failingChecks: checks.filter((c) => firstChecks.includes(c)),
-          firstIssue,
-          secondIssue: issue,
-        };
-        emitEvent(
-          paths.events,
-          'lane-paused',
-          lane,
-          `lane '${lane}' paused: #${payload.firstIssue} and #${payload.secondIssue} parked with the same failure signature (${payload.failingChecks.join(', ') || 'no failing checks'})`,
-          { lane, lanePaused: payload },
-        );
-        // Tell the developer on GitHub why the lane stopped (#1919); fail-closed, never changes lane flow.
-        await commentIssue(payload.secondIssue, renderLanePausedComment(payload)).catch(() => {});
+        await tripLaneBreaker(pauseCtx, streak, issue, checks, commentIssue);
         return;
       }
       continue;

@@ -39,7 +39,7 @@
   "packages/core/src/phases/ship.ts": 680,
   "packages/core/src/public-api.test.ts": 910,
   "packages/core/src/queue/github-queue.test.ts": 1233,
-  "packages/core/src/queue/github-queue.ts": 682,
+  "packages/core/src/queue/github-queue.ts": 647,
   "packages/core/src/readiness/decompose.test.ts": 1107,
   "packages/core/src/readiness/decompose.ts": 697,
   "packages/core/src/reports/benchmark-artifacts.test.ts": 604,

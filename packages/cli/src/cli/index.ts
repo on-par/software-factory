@@ -3581,18 +3581,19 @@ export interface PlannedLane {
   lane: string;
   /** Seed issues to work before claiming. Always empty in GitHub-queue mode. */
   issues: number[];
-  deps: Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'heartbeat' | 'countRemaining'>;
+  deps: Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'heartbeat' | 'countRemaining' | 'queueChildren'>;
 }
 
 export function laneQueueDeps(
   queue: GithubQueue,
   lane: string,
-): Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'heartbeat' | 'countRemaining'> {
+): Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'heartbeat' | 'countRemaining' | 'queueChildren'> {
   return {
     claimNext: () => queue.claimNext(lane),
     releaseIssue: (issue, outcome) => queue.release(issue, outcome),
     heartbeat: (issue) => queue.heartbeat(issue),
     countRemaining: async () => (await queue.list(lane)).length,
+    queueChildren: (parent, children) => queue.enqueueAfter(lane, parent, children),
   };
 }
 
@@ -4298,7 +4299,7 @@ function runRun(opts: RunOptions = {}): Promise<void> {
 }
 
 /** `factory doctor` (#2799): the handler lives in ./doctor.ts; this binds its runtime. */
-function runDoctor(opts: { reconcile?: boolean; probeInference?: boolean } = {}): Promise<void> {
+function runDoctor(opts: { reconcile?: boolean; probeInference?: boolean; json?: boolean } = {}): Promise<void> {
   return cmdDoctor(opts, {
     shellOps,
     coreOps,

@@ -126,7 +126,9 @@ describe('createGithubQueueBackend', () => {
 
     const results = await backend.reap();
 
-    expect(results).toEqual([{ issue: 1, label: expiresLabel, expiresAt: NOW_SECONDS - 60, released: true }]);
+    expect(results).toEqual([
+      { issue: 1, label: expiresLabel, expiresAt: NOW_SECONDS - 60, released: true, outcome: 'released' },
+    ]);
     expect(state.get(1)!.has(QUEUED_LABEL)).toBe(true);
   });
 

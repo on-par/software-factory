@@ -48,3 +48,5 @@ export {
   type RiskRuleSet,
   type RiskTier,
 } from './risk.js';
+
+export { ANY_CONFIG_KEY, findUnknownConfigKeys, type KnownConfigKeys } from './unknown-keys.js';

@@ -46,6 +46,8 @@ export type RunOutcome =
       prNumber?: number;
       /** SHIP stopped at a draft PR (#3449); lanes must not merge it. */
       draft?: boolean;
+      /** SHIP's CI watch timed out (#3569); the PR was left as draft. */
+      ciPending?: boolean;
       /** the ADR-0147 slice this run shipped */
       slice?: { index: number; count: number };
       attribution?: RunAttribution;

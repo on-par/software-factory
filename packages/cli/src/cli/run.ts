@@ -32,6 +32,7 @@ import {
   resolveLocalOnly,
   resolveQueueClaimSettleMs,
   resolveRunUsageHarness,
+  settleParkedPullRequest,
   slugify,
   withAdmissionGuard,
 } from '@on-par/factory-core/internal';
@@ -315,6 +316,12 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
             ...planned.deps,
             ...(notifier ? { emitEvent: withParkNotify(logEvent, notifier) } : {}),
             laneBreakerThreshold,
+            octokit: opts.localQueue === true ? undefined : () => rt.getOctokit(),
+            runId,
+            readParkSha: (branch) =>
+              rt.shellOps
+                .exec(`git rev-parse --verify ${JSON.stringify(`refs/remotes/origin/${branch}`)}`, { cwd: repoRoot })
+                .then((r) => r.stdout.trim()),
             activeIssues: inFlightIssues,
             loadGuard: opts.localQueue === true ? undefined : () => evaluateLoadGuard(loadGuardPolicy, readHostLoad()),
             baseHoldGate:
@@ -356,6 +363,16 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
                 paths,
                 opts.branchPrefix === undefined ? undefined : branchPrefix,
               ),
+            closeParkedPr: (issue, branch, reason) =>
+              settleParkedPullRequest({
+                octokit: rt.getOctokit(),
+                repo: ghRepo,
+                issue,
+                branch,
+                reason,
+                greenAndChecked: false,
+                log: (type, msg) => logEvent(paths.events, type, issue, msg, { lane: planned.lane }),
+              }).then(() => {}),
             recordStackMerge: (issue, prNumber) =>
               recordSliceMerged({ octokit: rt.getOctokit(), repo: ghRepo, issue, prNumber }).then(() => {}),
             restack: (issue, merged) =>

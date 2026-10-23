@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { BASE_HOLD_CI_RECHECK_MS, type BaseHold, createBaseHoldGate, readBaseHold } from './base-hold.js';
 import { LaneEnvironmentPauseError, LaneParkError } from './index.js';
-import { renderLanePausedComment, runLane } from './run-lane.js';
+import { renderLanePausedComment } from './lane-pause.js';
+import { runLane } from './run-lane.js';
 
 describe('cli', () => {
   const originalFactoryMerge = process.env.FACTORY_MERGE;

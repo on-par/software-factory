@@ -1,7 +1,7 @@
 // src/checkers/index.ts — Checker framework: built-in + custom checkers
 
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 
 import type { EventKind } from '../events/kinds.js';
 import type { ReviewFloorRuleSet } from '../review/floor.js';
@@ -108,7 +108,15 @@ export interface CheckerRunCtx extends CheckerContext {
 // ---------- Built-in Checkers ----------
 
 const DEFAULT_COMPILE_TIMEOUT_SECONDS = 120;
-
+/** Worktree facts the lint and compile resolvers read — a subset of CheckerContext so BUILD and doctor can call them with just `{ worktree }`. */
+export type LintCommandSource = Pick<CheckerContext, 'worktree' | 'packageJson' | 'probe'>;
+export type CompileCommand = { argv: string[]; source: 'package.json' | 'Makefile' | 'Cargo.toml' };
+export async function resolveCompileCommand(ctx: LintCommandSource): Promise<CompileCommand | null> {
+  const w = ctx.worktree;
+  if ((await getPackageJson(ctx))?.scripts?.build) return { argv: ['npm', 'run', 'build'], source: 'package.json' };
+  if (await fileExists(join(w, 'Makefile'))) return { argv: ['make'], source: 'Makefile' };
+  return (await fileExists(join(w, 'Cargo.toml'))) ? { argv: ['cargo', 'build'], source: 'Cargo.toml' } : null;
+}
 export const compileChecker: CheckerFn = async (ctx) => {
   const run = ctx.runCommand ?? runCommand;
   const timeoutSeconds = ctx.compileTimeoutSeconds ?? DEFAULT_COMPILE_TIMEOUT_SECONDS;
@@ -120,12 +128,8 @@ export const compileChecker: CheckerFn = async (ctx) => {
     return tail === 'timed out' ? head : `${head}\n${tail}`;
   };
   try {
-    const pkg = await getPackageJson(ctx);
-    let argv: string[] | null = null;
-    if (pkg?.scripts?.build) argv = ['npm', 'run', 'build'];
-    else if (await fileExists(join(ctx.worktree, 'Makefile'))) argv = ['make'];
-    else if (await fileExists(join(ctx.worktree, 'Cargo.toml'))) argv = ['cargo', 'build'];
-    if (!argv) return { checker: 'compile', result: 'PASS', details: 'no build system detected — skipped' };
+    const argv = (await resolveCompileCommand(ctx))?.argv;
+    if (!argv) return { checker: 'compile', result: 'SKIP', details: 'no build system detected — skipped' };
 
     const label = argv.join(' ');
     const r = await run(argv, { cwd: ctx.worktree, timeoutMs, env: ctx.env, onPgid: ctx.onPgid });
@@ -171,6 +175,8 @@ const FAILED_TEST_MARKERS: readonly { pattern: RegExp; lines: number }[] = [
   { pattern: /^\s*--- FAIL:\s+\S+/, lines: 12 },
   // pytest short summary: "FAILED tests/test_x.py::test_y - AssertionError"
   { pattern: /^FAILED\s+\S+::\S+/, lines: 8 },
+  // vitest coverage thresholds: "ERROR: Coverage for statements (96.83%) does not meet "glob" threshold (96.9%)"
+  { pattern: /Coverage for \w+ \([\d.]+%\) does not meet .*threshold/, lines: 8 },
 ];
 
 /** npm echoes the script it runs at column 0 (`> node -e "..."`); that text is the command, not its output. */
@@ -233,19 +239,24 @@ async function commandFailureDetails(
   return logPath ? `${label} failed: ${summary}\nfull output: ${logPath}` : `${label} failed: ${summary}`;
 }
 
-export type TestsRunner = 'verify' | 'npm' | 'pytest' | 'none';
+export type TestsRunner = 'verify' | 'verify-ps1' | 'npm' | 'pytest' | 'none';
 
 /** The command the `tests` checker runs for a worktree; argv is [] when runner is 'none'. */
 export interface TestsCommand {
   runner: TestsRunner;
   argv: string[];
-  /** Label used in FAIL details and the output-log name (`verify.sh`, `npm test`, `pytest`, `''` for none). */
+  /** Label used in FAIL details and the output-log name (`verify.sh`, `verify.ps1`, `npm test`, `pytest`, `''` for none). */
   label: string;
 }
 
-export async function resolveTestsCommand(ctx: CheckerContext): Promise<TestsCommand> {
+/** The CHECK command for a repo whose gate is scripts/verify.ps1; BUILD renders the same argv (#3471). */
+export const VERIFY_PS1_ARGV = ['pwsh', '-NoProfile', '-NonInteractive', '-File', 'scripts/verify.ps1'] as const;
+
+export async function resolveTestsCommand(ctx: LintCommandSource): Promise<TestsCommand> {
   if (await fileExists(join(ctx.worktree, 'scripts/verify.sh')))
     return { runner: 'verify', argv: ['bash', 'scripts/verify.sh', '--no-e2e'], label: 'verify.sh' };
+  if (await fileExists(join(ctx.worktree, 'scripts/verify.ps1')))
+    return { runner: 'verify-ps1', argv: [...VERIFY_PS1_ARGV], label: 'verify.ps1' };
   const pkg = await getPackageJson(ctx);
   if (pkg?.scripts?.test) return { runner: 'npm', argv: ['npm', 'test'], label: 'npm test' };
   const pythonSurface = ctx.probe?.pythonTestSurface ?? (await detectPythonTestSurface(ctx.worktree));
@@ -258,9 +269,6 @@ export async function resolveTestsCommand(ctx: CheckerContext): Promise<TestsCom
     label: 'pytest',
   };
 }
-
-/** Worktree facts the lint resolver reads — a subset of CheckerContext so BUILD can call it with just `{ worktree }`. */
-export type LintCommandSource = Pick<CheckerContext, 'worktree' | 'packageJson' | 'probe'>;
 
 /** One lint-family command the `lint` checker runs; label names it in details and the log file. */
 export interface LintCommand {
@@ -280,11 +288,21 @@ export async function resolveLintCommands(ctx: LintCommandSource): Promise<LintC
 
 const TESTS_PASS_DETAILS = {
   verify: 'scripts/verify.sh: OK',
+  'verify-ps1': 'scripts/verify.ps1: OK',
   npm: 'npm test: OK',
   pytest: 'python3 -m pytest: OK',
 } as const;
 
 const DEFAULT_TESTS_TIMEOUT_SECONDS = 300;
+
+async function onPath(bin: string, env?: NodeJS.ProcessEnv): Promise<boolean> {
+  const names = process.platform === 'win32' ? [bin, `${bin}.exe`] : [bin];
+  for (const dir of (env?.PATH ?? process.env.PATH ?? '').split(delimiter)) {
+    if (!dir) continue;
+    for (const name of names) if (await fileExists(join(dir, name))) return true;
+  }
+  return false;
+}
 
 export const testsChecker: CheckerFn = async (ctx) => {
   try {
@@ -299,6 +317,14 @@ export const testsChecker: CheckerFn = async (ctx) => {
       return evidence === 'timed out' ? head : `${head}\n${evidence}`;
     };
     const cmd = await resolveTestsCommand(ctx);
+    if (cmd.runner === 'verify-ps1' && !(await onPath('pwsh', ctx.env))) {
+      return {
+        checker: 'tests',
+        result: 'FAIL',
+        details:
+          'verify.ps1 failed: pwsh (PowerShell 7) is not on PATH — scripts/verify.ps1 needs it. Install PowerShell: https://aka.ms/powershell (macOS: brew install --cask powershell; Linux: see the same page).',
+      };
+    }
     if (cmd.runner !== 'none') {
       const r = await run(cmd.argv, {
         cwd: ctx.worktree,
@@ -321,13 +347,14 @@ export const testsChecker: CheckerFn = async (ctx) => {
         checker: 'tests',
         result: 'FAIL',
         details:
-          'no verification command was run — constitution requires tests (requireTests: true) but the worktree has no pytest, scripts/verify.sh, or npm-test surface',
+          'no verification command was run — constitution requires tests (requireTests: true) but the worktree has no pytest, scripts/verify.sh, scripts/verify.ps1, or npm-test surface',
       };
     }
     return {
       checker: 'tests',
       result: 'SKIP',
-      details: 'no verification command was run — no scripts/verify.sh and no package.json test script found',
+      details:
+        'no verification command was run — no scripts/verify.sh, no scripts/verify.ps1 and no package.json test script found',
     };
   } catch (e: any) {
     return {
@@ -340,7 +367,7 @@ export const testsChecker: CheckerFn = async (ctx) => {
 
 export const lintChecker: CheckerFn = async (ctx) => {
   const details: string[] = [];
-  let result: 'PASS' | 'FAIL' = 'PASS';
+  let result: CheckerOutput['result'] = 'PASS';
 
   for (const cmd of await resolveLintCommands(ctx)) {
     const r = await runCommand(cmd.argv, {
@@ -356,8 +383,8 @@ export const lintChecker: CheckerFn = async (ctx) => {
       details.push(await commandFailureDetails(ctx, 'lint', cmd.label, r, describeCommandFailureTail(r, 300)));
     }
   }
-
   if (details.length === 0) {
+    result = 'SKIP';
     details.push('no linting configured — skipped');
   }
 

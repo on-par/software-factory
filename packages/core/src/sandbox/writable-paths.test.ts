@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-import { resolveConfiguredWritablePaths, writablePathError } from './writable-paths.js';
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { createTempDirs } from '../harness/temp-dir.js';
+
+import { resolveConfiguredWritablePaths, resolveEcosystemWritablePaths, writablePathError } from './writable-paths.js';
 
 const opts = { home: '/home/factory', repoRoot: '/home/factory/repos/app' };
 
@@ -27,5 +32,21 @@ describe('resolveConfiguredWritablePaths', () => {
   it('skips the repo rule when no repoRoot is given', () => {
     expect(writablePathError('/home/factory/repos', { home: opts.home })).toBeUndefined();
     expect(writablePathError('foo', { home: opts.home })).toMatch(/absolute/);
+  });
+});
+
+describe('resolveEcosystemWritablePaths (#3567)', () => {
+  const opts = { home: '/home/factory', repoRoot: '/tmp/some-repo' };
+  const tempDirs = createTempDirs();
+  afterEach(() => tempDirs.cleanup());
+
+  it('returns the NuGet and dotnet caches for a dotnet directory', () => {
+    const dir = tempDirs.makeSync('eco-writable-');
+    writeFileSync(join(dir, 'App.csproj'), '');
+    expect(resolveEcosystemWritablePaths(dir, opts)).toEqual(['/home/factory/.nuget', '/home/factory/.dotnet']);
+  });
+
+  it('returns nothing when no ecosystem is detected', () => {
+    expect(resolveEcosystemWritablePaths('', opts)).toEqual([]);
   });
 });

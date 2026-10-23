@@ -1,0 +1,163 @@
+// packages/core/src/queue/github-queue-enqueue.ts — GitHub queue enqueue paths: tail append and right-behind-the-parent placement (#3539).
+
+import { orderCollisionAt, scanLaneOrders } from './order-collision.js';
+import { QUEUE_ORDER_LABEL_PREFIX } from './queue-order.js';
+import {
+  laneLabel,
+  QUEUED_LABEL,
+  QUEUED_LABEL_COLOR,
+  LANE_LABEL_COLOR,
+  queueOrderLabelSpec,
+  type EnqueueResult,
+  type QueueGitHubClient,
+  type QueueLabelSpec,
+} from './github-queue.js';
+
+export interface ChildEnqueueResult {
+  /** One per input issue, in input (build) order. */
+  results: EnqueueResult[];
+  /** 'after-parent': children took orders p+1..p+k behind the parent's factory:order:p.
+   *  'tail': parent had no single valid order label, or the shift failed; children were appended via enqueue. */
+  placement: 'after-parent' | 'tail';
+  /** Set only when the shift of later in-lane issues failed (placement is then 'tail'). */
+  detail?: string;
+}
+
+function queueSpecs(lane: string, position: number): QueueLabelSpec[] {
+  return [
+    { name: QUEUED_LABEL, color: QUEUED_LABEL_COLOR, description: 'Eligible to be claimed by a factory lane' },
+    { name: laneLabel(lane), color: LANE_LABEL_COLOR, description: `Routed to factory lane ${lane}` },
+    queueOrderLabelSpec(position),
+  ];
+}
+
+/** The position in a `factory:order:<n>` label, or undefined when it is not a positive safe integer. */
+function orderOf(label: string): number | undefined {
+  const n = Number(label.slice(QUEUE_ORDER_LABEL_PREFIX.length));
+  return Number.isSafeInteger(n) && n > 0 ? n : undefined;
+}
+
+const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+export function createEnqueuers(client: QueueGitHubClient, owner: string, repo: string) {
+  async function enqueue(lane: string, issues: readonly number[]): Promise<EnqueueResult[]> {
+    const members = await client.listOpenIssuesWithLabels({ owner, repo, labels: [laneLabel(lane)] });
+    const scan = scanLaneOrders(members, QUEUED_LABEL, QUEUE_ORDER_LABEL_PREFIX); // tolerant, every open in-lane holder (#2987, #2988)
+    let next = scan.maxPos + 1;
+    let naive = scan.queuedMax + 1;
+
+    const results: EnqueueResult[] = [];
+    for (const issue of issues) {
+      try {
+        const current = await client.getIssueLabels({ owner, repo, issue_number: issue });
+        if (current.some((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX))) {
+          const orderLabel = current.find((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX)) ?? '';
+          const existing = Number(orderLabel.slice(QUEUE_ORDER_LABEL_PREFIX.length));
+          results.push({
+            issue,
+            outcome: 'already-queued',
+            ...(Number.isSafeInteger(existing) && existing > 0 ? { position: existing } : {}),
+            labelsAdded: [],
+            labelsCreated: [],
+          });
+          continue;
+        }
+        const specs = queueSpecs(lane, next);
+        const created: string[] = [];
+        for (const spec of specs) {
+          if (await client.ensureLabel({ owner, repo, ...spec })) created.push(spec.name);
+        }
+        await client.addLabels({ owner, repo, issue_number: issue, labels: specs.map((s) => s.name) });
+        const collision = orderCollisionAt(scan, naive);
+        results.push({
+          issue,
+          outcome: 'queued',
+          position: next,
+          labelsAdded: specs.map((s) => s.name).filter((name) => !current.includes(name)),
+          labelsCreated: created,
+          ...(collision ? { collision } : {}),
+        });
+        next += 1;
+        naive += 1;
+      } catch (err) {
+        results.push({ issue, outcome: 'failed', detail: errorMessage(err) });
+      }
+    }
+    return results;
+  }
+
+  async function enqueueAfter(lane: string, parent: number, issues: readonly number[]): Promise<ChildEnqueueResult> {
+    const parentLabels = await client.getIssueLabels({ owner, repo, issue_number: parent });
+    const parentOrders = parentLabels.filter((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX));
+    const p = parentOrders.length === 1 ? orderOf(parentOrders[0] ?? '') : undefined;
+    if (p === undefined) return { results: await enqueue(lane, issues), placement: 'tail' };
+
+    const members = await client.listOpenIssuesWithLabels({ owner, repo, labels: [laneLabel(lane)] });
+    const done = new Map<number, EnqueueResult>();
+    const toQueue: number[] = [];
+    for (const issue of issues) {
+      try {
+        const current = await client.getIssueLabels({ owner, repo, issue_number: issue });
+        const orderLabel = current.find((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX));
+        if (orderLabel === undefined) {
+          toQueue.push(issue);
+          continue;
+        }
+        const existing = orderOf(orderLabel);
+        done.set(issue, {
+          issue,
+          outcome: 'already-queued',
+          ...(existing === undefined ? {} : { position: existing }),
+          labelsAdded: [],
+          labelsCreated: [],
+        });
+      } catch (err) {
+        done.set(issue, { issue, outcome: 'failed', detail: errorMessage(err) });
+      }
+    }
+    const inOrder = (): EnqueueResult[] => issues.flatMap((issue) => done.get(issue) ?? []);
+    const k = toQueue.length;
+    if (k === 0) return { results: inOrder(), placement: 'after-parent' };
+
+    // Members with a malformed or multiple order label are left alone: they are already unclaimable.
+    const skip = new Set<number>([parent, ...issues]);
+    const shifted = members
+      .filter((m) => !skip.has(m.number))
+      .flatMap((m) => {
+        const orders = m.labels.filter((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX));
+        const pos = orders.length === 1 ? orderOf(orders[0] ?? '') : undefined;
+        return pos !== undefined && pos > p ? [{ issue: m.number, pos, old: orders[0] ?? '' }] : [];
+      })
+      .sort((a, b) => b.pos - a.pos || a.issue - b.issue);
+    try {
+      // Highest order first, new label before the old one is removed: a partial failure shows as a conflict, not a loss.
+      for (const item of shifted) {
+        const spec = queueOrderLabelSpec(item.pos + k);
+        await client.ensureLabel({ owner, repo, ...spec });
+        await client.addLabels({ owner, repo, issue_number: item.issue, labels: [spec.name] });
+        await client.removeLabel({ owner, repo, issue_number: item.issue, name: item.old });
+      }
+    } catch (err) {
+      for (const r of await enqueue(lane, toQueue)) done.set(r.issue, r);
+      return { results: inOrder(), placement: 'tail', detail: errorMessage(err) };
+    }
+
+    for (const [j, issue] of toQueue.entries()) {
+      try {
+        const specs = queueSpecs(lane, p + 1 + j);
+        const created: string[] = [];
+        for (const spec of specs) {
+          if (await client.ensureLabel({ owner, repo, ...spec })) created.push(spec.name);
+        }
+        const names = specs.map((s) => s.name);
+        await client.addLabels({ owner, repo, issue_number: issue, labels: names });
+        done.set(issue, { issue, outcome: 'queued', position: p + 1 + j, labelsAdded: names, labelsCreated: created });
+      } catch (err) {
+        done.set(issue, { issue, outcome: 'failed', detail: errorMessage(err) });
+      }
+    }
+    return { results: inOrder(), placement: 'after-parent' };
+  }
+
+  return { enqueue, enqueueAfter };
+}

@@ -20,6 +20,7 @@ import { resolveStateRoot, STATE_ROOT_ENV } from './state-root.js';
 import { DEFAULT_MAX_SLICES, SLICE_CAP_CEILING } from '../readiness/slice-plan.js';
 import { DEFAULT_MAX_FILES, DEFAULT_TOKEN_BUDGET, type SizeBudget } from '../readiness/size.js';
 import { isOpenCodeZenModel } from './provider-order.js';
+import { DEFAULT_CI_DEADLINE_MS } from '../utils/ci-deadline.js';
 import { runConfigSource } from './run-config-source.js';
 import { RunConfigSectionSchema } from './run-section.js';
 
@@ -120,7 +121,7 @@ const RoutesConfigSchema = z.object({
   ),
 });
 
-const FactoryConfigSchema = z.object({
+export const FactoryConfigSchema = z.object({
   version: z.number(),
   paths: z.object({
     constitutions: z.string(),
@@ -157,6 +158,7 @@ const FactoryConfigSchema = z.object({
   ci: z
     .object({
       skip: z.boolean().default(false),
+      watchMinutes: z.number().optional().catch(undefined),
       comment: z.string().default('Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging'),
     })
     .default({ skip: false, comment: 'Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging' }),
@@ -508,6 +510,12 @@ function resolveEnabledFlag(env: NodeJS.ProcessEnv, envVar: string, fallback: bo
 
 export function resolveSkipCI(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): boolean {
   return resolveEnabledFlag(env, 'FACTORY_SKIP_CI', config.ci?.skip ?? false);
+}
+
+/** SHIP's CI watch deadline (#3569): ci.watchMinutes as ms; unset, non-finite or <= 0 → DEFAULT_CI_DEADLINE_MS. */
+export function resolveCiWatchDeadlineMs(config: { ci?: { watchMinutes?: number } }): number {
+  const m = config.ci?.watchMinutes;
+  return typeof m === 'number' && Number.isFinite(m) && m > 0 ? Math.round(m * 60_000) : DEFAULT_CI_DEADLINE_MS;
 }
 
 /**

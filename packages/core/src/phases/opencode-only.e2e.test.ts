@@ -10,6 +10,7 @@ import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { loadRoutesConfig, type ModelsConfig } from '../config/index.js';
+import { OPENCODE_PINNED_VERSION } from '../harness/opencode-version.js';
 import { ModelRouter } from '../router/index.js';
 import { makeFakeOctokit, PipelineTestKit } from '../test-support/index.js';
 import { branchFor, setupWorktree } from '../utils/index.js';
@@ -61,11 +62,18 @@ function opencodeOnlyModels(): ModelsConfig {
 
 // Fake opencode: answers PLAN with a spec that asks for the claude route, makes the first BUILD
 // leave a failing verify script and the rework fix it, and answers anything else with PASS.
+// Only `opencode run` (cwd = worktree) touches files. The harness's `opencode --version` probe runs
+// with the test's cwd, the real repo: treating it as a BUILD committed a stub scripts/verify.sh there.
 const FAKE_OPENCODE = `#!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.FAKE_AGENT_LOG, 'opencode ' + args.slice(0, 1).join(' ') + '\\n');
+if (args[0] === '--version') {
+  console.log('${OPENCODE_PINNED_VERSION}');
+  process.exit(0);
+}
+if (args[0] !== 'run') process.exit(1);
 const cwd = process.cwd();
 const prompt = fs.readFileSync(0, 'utf-8');
 const commit = (msg) =>
@@ -203,6 +211,7 @@ describe('OpenCode-only pipeline with a fake opencode CLI (#2635)', () => {
       await expect(exec(`git -C '${worktree}' log --oneline`)).resolves.toBeTruthy();
 
       const spawned = readFileSync(agentLog, 'utf-8');
+      expect(spawned).toContain('opencode --version');
       expect(spawned).toContain('opencode run');
       expect(spawned).not.toContain('claude');
       expect(existsSync(join(worktree, 'feature.txt'))).toBe(true);

@@ -1,7 +1,7 @@
 import type { Octokit } from '@octokit/rest';
 import { describe, expect, it, vi } from 'vitest';
 
-import { CI_EVIDENCE_LIMITS, collectCiFailureEvidence } from './ci-evidence.js';
+import { CI_EVIDENCE_LIMITS, collectCiFailureEvidence, collectFailingJobLogs } from './ci-evidence.js';
 
 function fakeOctokit(runs: unknown[] | Error, alerts?: unknown[] | Error | null) {
   const listForRef = vi.fn(async () => {
@@ -20,7 +20,7 @@ function fakeOctokit(runs: unknown[] | Error, alerts?: unknown[] | Error | null)
 const base = { owner: 'o', repo: 'r', ref: 'branch', prNumber: 123 };
 
 describe('collectCiFailureEvidence (#2814)', () => {
-  it('collects failing checks and CodeQL alerts', async () => {
+  it('collects failing checks and CodeQL alerts from the PR merge ref', async () => {
     const message = 'The URL of this request depends on a user-provided value.';
     const { octokit, listAlertsForRepo } = fakeOctokit(
       [
@@ -47,7 +47,7 @@ describe('collectCiFailureEvidence (#2814)', () => {
     expect(evidence.truncated).toBe(false);
     expect(evidence.errors).toBeUndefined();
     expect(listAlertsForRepo).toHaveBeenCalledWith(
-      expect.objectContaining({ ref: 'refs/pull/123/head', state: 'open' }),
+      expect.objectContaining({ ref: 'refs/pull/123/merge', state: 'open' }),
     );
   });
 
@@ -116,5 +116,80 @@ describe('collectCiFailureEvidence (#2814)', () => {
     const c = await collectCiFailureEvidence({ octokit: missing.octokit, ...base });
     expect(c.failingChecks).toHaveLength(1);
     expect(c.errors?.[0]).toMatch(/^code-scanning: /);
+  });
+});
+
+describe('collectFailingJobLogs (#3537)', () => {
+  function logOctokit(runs: unknown[] | Error, logs: Record<number, unknown>) {
+    const listForRef = vi.fn(async () => {
+      if (runs instanceof Error) throw runs;
+      return { data: { check_runs: runs } };
+    });
+    const downloadJobLogsForWorkflowRun = vi.fn(async ({ job_id }: { job_id: number }) => {
+      const log = logs[job_id];
+      if (log instanceof Error) throw log;
+      return { data: log };
+    });
+    const octokit: Octokit = Object.assign(Object.create(null), {
+      rest: { checks: { listForRef }, actions: { downloadJobLogsForWorkflowRun } },
+    });
+    return { octokit, downloadJobLogsForWorkflowRun };
+  }
+  const run = (id: number | undefined, name: string, conclusion = 'failure') => ({
+    ...(id === undefined ? {} : { id }),
+    name,
+    status: 'completed',
+    conclusion,
+  });
+  const args = { owner: 'o', repo: 'r', ref: 'sha' };
+
+  it('tails to 150 lines and strips timestamps and ANSI escapes', async () => {
+    const text = Array.from({ length: 200 }, (_, i) => `2026-01-01T00:00:00.000Z \u001b[31mline ${i}\u001b[0m`).join(
+      '\n',
+    );
+    const { octokit } = logOctokit([run(1, 'test (1/3)')], { 1: text });
+    const { jobLogs, errors } = await collectFailingJobLogs({ octokit, ...args, checkNames: ['test (1/3)'] });
+    expect(errors).toEqual([]);
+    expect(jobLogs).toHaveLength(1);
+    const lines = jobLogs[0].excerpt.split('\n');
+    expect(lines).toHaveLength(CI_EVIDENCE_LIMITS.maxLogLines);
+    expect(lines.at(-1)).toBe('line 199');
+    expect(jobLogs[0]).toMatchObject({ name: 'test (1/3)', jobId: 1, truncated: true });
+  });
+
+  it('caps to 3 jobs and only fetches the named failing checks', async () => {
+    const runs = [run(1, 'a'), run(2, 'b'), run(3, 'c'), run(4, 'd'), run(5, 'other'), run(6, 'e', 'success')];
+    const logs = Object.fromEntries([1, 2, 3, 4, 5, 6].map((i) => [i, `log ${i}`]));
+    const { octokit, downloadJobLogsForWorkflowRun } = logOctokit(runs, logs);
+    const { jobLogs } = await collectFailingJobLogs({ octokit, ...args, checkNames: ['a', 'b', 'c', 'd', 'e'] });
+    expect(jobLogs.map((j) => j.name)).toEqual(['a', 'b', 'c']);
+    expect(downloadJobLogsForWorkflowRun).toHaveBeenCalledTimes(3);
+    expect(jobLogs[0]).toMatchObject({ excerpt: 'log 1', truncated: false });
+  });
+
+  it('records a missing job id and a download error without throwing', async () => {
+    const { octokit } = logOctokit([run(undefined, 'a'), run(2, 'b'), run(3, 'c')], {
+      2: new Error('gone'),
+      3: 'ok',
+    });
+    const { jobLogs, errors } = await collectFailingJobLogs({ octokit, ...args, checkNames: ['a', 'b', 'c'] });
+    expect(errors).toEqual(['a: no job id', 'b: gone']);
+    expect(jobLogs.map((j) => j.name)).toEqual(['c']);
+  });
+
+  it('records a listing error', async () => {
+    const { octokit } = logOctokit(new Error('boom'), {});
+    expect(await collectFailingJobLogs({ octokit, ...args, checkNames: ['a'] })).toEqual({
+      jobLogs: [],
+      errors: ['checks: boom'],
+    });
+  });
+
+  it('stringifies non-string data and applies the char cap', async () => {
+    const { octokit } = logOctokit([run(1, 'a'), run(2, 'b')], { 1: 'x'.repeat(20000), 2: 5 });
+    const { jobLogs } = await collectFailingJobLogs({ octokit, ...args, checkNames: ['a', 'b'] });
+    expect(jobLogs[0].excerpt).toHaveLength(CI_EVIDENCE_LIMITS.maxLogChars);
+    expect(jobLogs[0].truncated).toBe(true);
+    expect(jobLogs[1].excerpt).toBe('5');
   });
 });

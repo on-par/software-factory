@@ -3,10 +3,12 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-# --no-e2e: skip the full-suite coverage run. Used by the CHECK-phase checker
-# for a fast agent-facing pass; real CI (.github/workflows/ci.yml) runs
-# `npm run test` directly, unaffected by this flag, so full coverage still
-# runs on every PR.
+# --no-e2e: run the same coverage-enforcing test command as the full path
+# (`npm run test`, i.e. `vitest run --coverage` with the thresholds in
+# vitest.config.ts) and skip only `coverage-ratchet`. The CHECK-phase tests
+# checker runs this, so a PR under a coverage threshold fails CHECK instead of
+# parking as ci-failed. CI (.github/workflows/ci.yml) runs `npm run test`
+# sharded and enforces the thresholds on the merged report.
 #
 # The pipeline integration suites (real git worktrees, whole
 # plan->build->check->ship cycles) are excluded from BOTH paths now: vitest's
@@ -52,16 +54,12 @@ fi
 # (CI env var set, e.g. CI=true on GitHub Actions; #2771).
 rm -f "$VITEST_REPORT"
 TEST_STEP_START=$SECONDS
-if [ "$NO_E2E" = "1" ]; then
-  npx vitest run --maxWorkers="$FACTORY_TEST_MAX_WORKERS" "${REPORTER_ARGS[@]}"
-  TEST_STEP_SECONDS=$((SECONDS - TEST_STEP_START))
-  npm run --silent slowest-tests -- "$VITEST_REPORT" || true
-  npm run --silent test-budget -- "$TEST_STEP_SECONDS" "$VITEST_REPORT"
-else
-  npm run test -- --maxWorkers="$FACTORY_TEST_MAX_WORKERS" "${REPORTER_ARGS[@]}"
-  TEST_STEP_SECONDS=$((SECONDS - TEST_STEP_START))
-  npm run --silent slowest-tests -- "$VITEST_REPORT" || true
-  npm run --silent test-budget -- "$TEST_STEP_SECONDS" "$VITEST_REPORT"
+npm run test -- --maxWorkers="$FACTORY_TEST_MAX_WORKERS" "${REPORTER_ARGS[@]}"
+TEST_STEP_SECONDS=$((SECONDS - TEST_STEP_START))
+npm run --silent slowest-tests -- "$VITEST_REPORT" || true
+npm run --silent test-budget -- "$TEST_STEP_SECONDS" "$VITEST_REPORT"
+# The ratchet (thresholds must not lag measured coverage) is full-path only; --no-e2e skips it.
+if [ "$NO_E2E" != "1" ]; then
   npm run coverage-ratchet
 fi
 npm run eval -- --stub

@@ -34,6 +34,7 @@ import {
 import type { SizeBudget } from '../readiness/size.js';
 import { describeConstitutionSource } from '../constitutions/index.js';
 import { lintFactoryConfig } from '../config/config-lint.js';
+import { unknownConfigKeyMessages } from '../config/config-schema-lint.js';
 import { planPhase as planPhaseDefault, type PlanResult } from '../phases/plan.js';
 import { planConfigParkMessage } from '../phases/plan-spec-guards.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
@@ -62,8 +63,7 @@ import { captureDiffBase } from '../checkers/design-smells.js';
 import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings, SizeGateMode } from '../config/index.js';
 import { decideBuildRoute, type EffectiveModelPins, routeForBuildModel } from '../config/repo.js';
-import { detectStuck } from '../steward/detect.js';
-import { runSteward, type RunStewardPorts } from '../steward/run.js';
+import type { RunStewardPorts } from '../steward/run.js';
 import { describeDotnetEnv, dotnetEnvReport } from '../environment/dotnet.js';
 import { ProcessGroupTracker } from '../environment/process-groups.js';
 import type { ModelRouter } from '../router/index.js';
@@ -92,6 +92,8 @@ import type { Environment, Workspace } from './ports.js';
 import { safeRecordRunState, terminalRunStateUpdate, thrownRunStateUpdate } from './run-state-record.js';
 import { isDecomposeSignal } from './run-state-record.js';
 import { runStatusForPhase, type RunStateUpdate } from './state.js';
+import { type ParkedPrDisposition, settleParkedPullRequest } from './park-pr.js';
+import { runParkSteward } from './park-steward.js';
 import { shipWithCiRework, type CiReworkPorts } from './ci-rework-loop.js';
 import { parkLogExtra } from './ship-park.js';
 import { budgetGuardFor, enforceIssueBudget } from './budget.js';
@@ -154,6 +156,8 @@ export interface RunRequest {
   modelPins: EffectiveModelPins;
   codexDisabled: boolean;
   skipCI: boolean;
+  /** SHIP's CI watch deadline in ms (#3569); unset = 10 min. */
+  ciDeadlineMs?: number;
   failover: AutoFailoverSettings;
   efficiency: { maxReworkRounds: number; fastPath: boolean };
   /** Sandbox containment already resolved against this run's worktree/repoRoot. */
@@ -408,6 +412,10 @@ async function runIssueOnce(
     return { state: 'escalated', reason: terminalMessage, route, branch: request.branch, reworkRounds };
   };
 
+  let shipStarted = false;
+  let runPrNumber: number | undefined;
+  let shippedGreen = false;
+
   const terminalParked = async (
     reason: ParkReason,
     message: string,
@@ -424,6 +432,7 @@ async function runIssueOnce(
     if (reason === 'timeout') {
       log('stuck', `run exceeded its phase timeout without progressing — ${terminalMessage}`);
     }
+    let settled: ParkedPrDisposition | undefined;
     if (!request.localOnly && !request.noPr) {
       const posted = await publishParkComment({
         octokit: ports.octokit,
@@ -440,6 +449,18 @@ async function runIssueOnce(
         },
       });
       if (!posted.ok) log('environment_warning', `could not post the issue park comment: ${posted.error}`);
+      if (shipStarted) {
+        settled = await settleParkedPullRequest({
+          octokit: ports.octokit,
+          repo: request.repo,
+          issue: request.issue,
+          branch: request.branch,
+          reason,
+          prNumber: runPrNumber,
+          greenAndChecked: shippedGreen,
+          log,
+        });
+      }
     }
     const outcome: RunOutcome = {
       state: 'parked',
@@ -447,32 +468,10 @@ async function runIssueOnce(
       route,
       branch: request.branch,
       reworkRounds,
+      ...(settled?.prNumber === undefined ? {} : { prNumber: settled.prNumber }),
       ...failure,
     };
-    // The steward runs after the park event and before the reports and the return, so it finishes
-    // before the CLI raises LaneParkError or pauses the lane (#2124).
-    if (request.stewardEnabled === true) {
-      const stuck = detectStuck(outcome);
-      if (stuck) {
-        log(
-          'steward-triggered',
-          `stuck run picked up for the steward: ${stuck.trigger}${stuck.failureSignature ? ` (signature ${stuck.failureSignature})` : ''}`,
-          { stewardTriggered: stuck },
-        );
-        if (ports.steward) {
-          await runSteward(
-            {
-              runId,
-              repo: request.repo,
-              issue: { number: request.issue, title: request.work.title, body: request.work.brief },
-              stuck,
-              planPath: request.specPath,
-            },
-            ports.steward,
-          );
-        }
-      }
-    }
+    await runParkSteward(outcome, request, runId, ports, log);
     await writeReports(reportOutcomeFor(reason), reason, terminalMessage);
     return outcome;
   };
@@ -532,6 +531,10 @@ async function runIssueOnce(
           `then run factory unpark ${request.issue}`,
         ].join('\n'),
       );
+    }
+    // Unknown nested config keys are stripped by the runtime schema; warn once per key, never block (#3568, ADR-0160).
+    if (request.repoConfigFile) {
+      for (const m of unknownConfigKeyMessages(request.repoConfigFile)) log('config_unknown_key', m);
     }
 
     // Pre-PLAN base health (#2339): a red origin/main releases the issue before any model spend;
@@ -1159,6 +1162,7 @@ async function runIssueOnce(
 
     // SHIP
     await setPhase('ship');
+    shipStarted = true;
     const shipped = await shipWithCiRework(
       {
         request,
@@ -1176,6 +1180,8 @@ async function runIssueOnce(
       },
       { builtRoute, builtModel, reviewRouting, pinNote, planSlice, draftPr: policy.pr?.draft },
     );
+    runPrNumber = shipped.ship.prNumber;
+    shippedGreen = shipped.ship.ok && !shipped.ship.alreadyDelivered && shipped.ship.ciOutcome === 'success';
     if (shipped.outcome) return shipped.outcome;
     const { ship, parked } = shipped;
     if (parked) return await terminalParked(parked.reason, parked.message, parked.checkFailure, parked.ciFailure);
@@ -1200,7 +1206,7 @@ async function runIssueOnce(
     }
     const readyMsg = ship.alreadyDelivered
       ? `already delivered${ship.prNumber !== undefined ? ` by merged PR #${ship.prNumber}` : ' — branch already landed on main'}`
-      : `PR #${ship.prNumber} ${ship.draft ? 'left as draft' : 'ready for review'}`;
+      : `PR #${ship.prNumber} ${ship.draft ? 'left as draft' : 'ready for review'}${ship.ciPending ? ' (CI pending)' : ''}`;
     log('ready', pinNote ? `${readyMsg} (${pinNote})` : readyMsg);
     await ports.writeLocalRunReport?.({ outcome: 'ready', route, branch: request.branch, reworkRounds });
     return {
@@ -1210,6 +1216,7 @@ async function runIssueOnce(
       reworkRounds,
       prNumber: ship.prNumber,
       ...(ship.draft ? { draft: true } : {}),
+      ...(ship.ciPending ? { ciPending: true } : {}),
       ...(planSlice ? { slice: { index: planSlice.index, count: planSlice.plan.slices.length } } : {}),
     };
   } catch (err) {

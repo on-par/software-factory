@@ -81,12 +81,15 @@ describe('shipPhase draft PR (#3449)', () => {
     try {
       const promise = ship(octokit, logs, true);
       await vi.runAllTimersAsync();
-      expect(await promise).toMatchObject({ ok: true, ciOutcome: 'timeout', draft: true });
+      expect(await promise).toMatchObject({ ok: true, ciOutcome: 'timeout', draft: true, ciPending: true });
     } finally {
       vi.useRealTimers();
     }
     expect(calls.map(([name]) => name)).not.toContain('graphql');
-    expect(logs).toContainEqual(['ship', 'CI did not finish within 10 min; leaving PR as draft']);
-    expect(logs).toContainEqual(['ready', 'PR #123 left as draft']);
+    expect(logs).toContainEqual([
+      'ship',
+      'CI pending for PR #123: CI did not finish within 10 min; leaving PR as draft',
+    ]);
+    expect(logs).toContainEqual(['ready', 'PR #123 left as draft (CI pending)']);
   });
 });

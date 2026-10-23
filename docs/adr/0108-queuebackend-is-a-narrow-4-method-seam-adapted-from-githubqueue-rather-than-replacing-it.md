@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-09-15
+- See also: [ADR-0168](0168-a-repo-reads-tickets-from-one-configured-tracker-and-a-workkey-string-replaces-the-numeric-issue.md) records the tracker-source decision: one configured tracker per repo, a WorkKey identity, and a tracker-backed queue deferred to its own ADR.
 
 ## Context
 
