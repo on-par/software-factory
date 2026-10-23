@@ -42,11 +42,10 @@ import {
   writePhaseSnapshot,
 } from '@on-par/factory-core';
 import { hostBuildSlotPort } from './host-slot.js';
+import { claimReviewReworkRequest as claimRework } from './ship-review-rework.js';
 import type { CheckResumeRecord, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
-  claimReviewRework,
   createCheckResumeStore,
-  createFileReviewReworkStore,
   createGithubLaneClaimStalenessProbe,
   createPlanReuseStore,
   egressHostMessage,
@@ -354,16 +353,7 @@ async function shipIssueFrom(
 
   // Read before runIssue: the run-state recorder overwrites this file on its first update (#3373).
   const previousAttempt = await readIssueRunState(runStateFile(paths.runs, issueNum));
-  const reviewRecord =
-    ctx?.resumeFrom || ctx?.localOnly || noPr
-      ? undefined
-      : claimReviewRework(createFileReviewReworkStore(paths.reviewRework), issueNum);
-  if (reviewRecord) {
-    log(
-      'rework',
-      `review rework of PR #${reviewRecord.pr} review ${reviewRecord.reviewId} by @${reviewRecord.reviewer} — PLAN and BUILD skipped (#3564)`,
-    );
-  }
+  const reviewRework = claimRework(paths.reviewRework, issueNum, ctx?.resumeFrom || ctx?.localOnly || noPr, log);
   const request = {
     ...buildRunRequest({
       issueNum,
@@ -395,11 +385,7 @@ async function shipIssueFrom(
       paths,
     }),
     previousAttempt,
-    ...(reviewRecord
-      ? {
-          reviewRework: { prNumber: reviewRecord.pr, reviewId: reviewRecord.reviewId, reviewer: reviewRecord.reviewer },
-        }
-      : {}),
+    ...reviewRework,
   };
 
   const ports: RunPorts = {
@@ -451,9 +437,7 @@ async function shipIssueFrom(
       startedAt: runStartedAt,
     }),
     onActivity: () => touchRunActivity(phaseSnapshotFile(paths.runs, issueNum), new Date().toISOString()),
-    onDecomposed: (childIssues) => {
-      decomposeQueue({ issueNum, childIssues, paths, planLog: mkLog('plan') });
-    },
+    onDecomposed: (childIssues) => void decomposeQueue({ issueNum, childIssues, paths, planLog: mkLog('plan') }),
     writeLocalRunReport: (info) =>
       maybeWriteLocalRunReport({
         issueNum,
