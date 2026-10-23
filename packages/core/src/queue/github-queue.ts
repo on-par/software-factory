@@ -5,7 +5,7 @@ import { hostname } from 'node:os';
 
 import type { Octokit } from '@octokit/rest';
 
-import { createEnqueuers, type ChildEnqueueResult } from './github-queue-enqueue.js';
+import { createEnqueuers, type ChildEnqueueResult, type FrontEnqueueResult } from './github-queue-enqueue.js';
 import { labelExistsError } from './github-errors.js';
 import { createOctokitComments, type QueueCommentClient } from './issue-comments.js';
 import { createClaimReleaser } from './claim-release.js';
@@ -447,6 +447,8 @@ export interface GithubQueue extends ClaimSettler {
   enqueue(lane: string, issues: readonly number[]): Promise<EnqueueResult[]>;
   /** Queues decomposed children right behind `parent`'s order, shifting later in-lane issues up (#3539). */
   enqueueAfter(lane: string, parent: number, issues: readonly number[]): Promise<ChildEnqueueResult>;
+  /** Queues issues at orders 1..k of the lane, shifting every other in-lane order up (#3552). */
+  enqueueFront(lane: string, issues: readonly number[]): Promise<FrontEnqueueResult>;
   /** Read-only preview of what clearing the queue would touch: one list call, never writes. Covers every open
    *  queued issue, or only those labelled `factory:lane:<lane>` when `lane` is given. */
   previewClear(lane?: string): Promise<QueueClearPreview>;
@@ -570,7 +572,7 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     }
   }
 
-  const { enqueue, enqueueAfter } = createEnqueuers(client, owner, repo);
+  const { enqueue, enqueueAfter, enqueueFront } = createEnqueuers(client, owner, repo);
 
   function clearLabels(lane: string | undefined): string[] {
     return lane === undefined ? [QUEUED_LABEL] : [QUEUED_LABEL, laneLabel(lane)];
@@ -626,6 +628,7 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     migrateLocalQueue,
     enqueue,
     enqueueAfter,
+    enqueueFront,
     previewClear,
     clear,
   };

@@ -30,7 +30,7 @@ describe('factory run claim settle delay (#3239)', () => {
   });
 
   /** Runs cmdRun up to planRunLanes and builds the lane queue it would hand over. */
-  async function laneQueueFor(factoryConfig: FactoryConfig): Promise<GithubQueue> {
+  async function laneQueueFor(factoryConfig: FactoryConfig, overrides: Partial<RunRuntime> = {}): Promise<GithubQueue> {
     let built: GithubQueue | undefined;
     const partial: Partial<RunRuntime> = {
       configLoaders: {
@@ -47,10 +47,12 @@ describe('factory run claim settle delay (#3239)', () => {
       probeClaudeKeychain: () => ({ status: 'skipped', detail: 'test' }),
       runAutoWorktreeGc: async () => {},
       sweepStaleLaneClaims: async () => {},
+      sweepOrphanDrafts: async () => {},
       planRunLanes: async (input) => {
         built = input.queue();
         throw new StopAtPlan('stop');
       },
+      ...overrides,
     };
     // cmdRun stops at planRunLanes, so only the members above are ever read.
     const rt = partial as RunRuntime;
@@ -70,5 +72,23 @@ describe('factory run claim settle delay (#3239)', () => {
     expect((await laneQueueFor(config as FactoryConfig)).claimSettleMs).toBe(
       defaultFactoryConfig.queue.claim_settle_ms,
     );
+  });
+
+  it('cmdRun runs the orphan draft sweep after the lane-claim sweep', async () => {
+    const calls: string[] = [];
+    const base = { ...loadFactoryConfig() };
+    await laneQueueFor(base, {
+      sweepStaleLaneClaims: async () => {
+        calls.push('claims');
+      },
+      sweepOrphanDrafts: async () => {
+        calls.push('drafts');
+      },
+      planRunLanes: async () => {
+        calls.push('plan');
+        throw new StopAtPlan('stop');
+      },
+    }).catch(() => undefined);
+    expect(calls).toEqual(['claims', 'drafts', 'plan']);
   });
 });

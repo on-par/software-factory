@@ -121,6 +121,8 @@ export type EventKind =
   | 'lock-stolen'
   | 'merge-gated'
   | 'merge-gated-override'
+  | 'orphan_draft_closed'
+  | 'orphan_draft_sweep_capped'
   | 'pr-classified'
   | 'pr_refresh'
   | 'merged'
@@ -358,6 +360,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'pr-adopt-lookup-failed': { severity: 'warn', isPark: false, isTerminal: false },
   'pr-adopted': { severity: 'info', isPark: false, isTerminal: false },
   'pr-classified': { severity: 'info', isPark: false, isTerminal: false },
+  orphan_draft_closed: { severity: 'info', isPark: false, isTerminal: false },
+  orphan_draft_sweep_capped: { severity: 'warn', isPark: false, isTerminal: false },
   pr_refresh: { severity: 'info', isPark: false, isTerminal: false },
   merged: { severity: 'info', isPark: false, isTerminal: true },
   'model-override': { severity: 'info', isPark: false, isTerminal: false },
