@@ -9,6 +9,7 @@ import type { Octokit } from '@octokit/rest';
 import type { ParkPayload } from '../events/kinds.js';
 import { fenceExcerpt, stripHiddenContent } from '../filing/sanitize.js';
 import { readWorktreeHead } from './ci-suppression-guard.js';
+import { QUEUE_ORDER_LABEL_PREFIX } from '../queue/queue-order.js';
 import type { ParkReason } from './outcome.js';
 
 export const ISSUE_STATE_MARKER_VERSION = 'v1';
@@ -24,6 +25,8 @@ export interface ParkCommentInput {
   blockers?: readonly number[];
   autoUnparks?: number;
   status?: string;
+  /** factory:order held when the issue parked (#3554). */
+  order?: number;
 }
 
 /** `reason` is a plain string because the parser reads untrusted text. */
@@ -37,6 +40,8 @@ export interface ParkState {
   /** Times the blocked-park poller re-queued this issue; 0 when the line is absent or malformed. */
   autoUnparks: number;
   status?: string;
+  /** factory:order held when the issue parked (#3554). */
+  order?: number;
 }
 
 export interface ParkStateComment {
@@ -99,6 +104,9 @@ export function renderParkComment(input: ParkCommentInput): string {
     `park-sha: ${(input.parkSha && clean(input.parkSha)) || '-'}`,
     `blockers: ${blockers.length > 0 ? blockers.map((n) => `#${n}`).join(', ') : '-'}`,
   ];
+  if (input.order !== undefined && Number.isSafeInteger(input.order) && input.order > 0) {
+    stateLines.push(`order: ${input.order}`);
+  }
   if (input.autoUnparks !== undefined && input.autoUnparks > 0) stateLines.push(`auto-unparks: ${input.autoUnparks}`);
   if (input.status) stateLines.push(`status: ${clean(input.status)}`);
   const stateBlock = stateLines.join('\n');
@@ -151,6 +159,10 @@ function parseStateBlock(body: string): ParkState | null {
   const rawAutoUnparks = values.get('auto-unparks') ?? '';
   const autoUnparks =
     /^\d+$/.test(rawAutoUnparks) && Number.isSafeInteger(Number(rawAutoUnparks)) ? Number(rawAutoUnparks) : 0;
+  const rawOrder = values.get('order') ?? '';
+  const parsedOrder = /^\d+$/.test(rawOrder) ? Number(rawOrder) : undefined;
+  const order =
+    parsedOrder !== undefined && Number.isSafeInteger(parsedOrder) && parsedOrder > 0 ? parsedOrder : undefined;
   return {
     reason,
     lane: optional('lane'),
@@ -160,6 +172,7 @@ function parseStateBlock(body: string): ParkState | null {
     blockers,
     autoUnparks,
     status: optional('status'),
+    ...(order === undefined ? {} : { order }),
   };
 }
 
@@ -271,7 +284,8 @@ export async function upsertParkComment(deps: {
   const existing = await findOwnParkComment({ octokit, repo, issue: input.issue });
   const autoUnparks =
     input.autoUnparks ?? (existing === undefined ? 0 : (readParkState([existing], input.issue)?.autoUnparks ?? 0));
-  const body = renderParkComment({ ...input, autoUnparks });
+  const order = input.order ?? (existing === undefined ? undefined : readParkState([existing], input.issue)?.order);
+  const body = renderParkComment({ ...input, autoUnparks, order });
   if (existing !== undefined) {
     await octokit.rest.issues.updateComment({ owner, repo: name, comment_id: existing.id, body });
     return { commentId: existing.id, created: false };
@@ -280,15 +294,49 @@ export async function upsertParkComment(deps: {
   return { commentId: data.id, created: true };
 }
 
+/** The one valid factory:order an issue holds, or undefined for zero, several or malformed labels. */
+async function readSingleOrderLabel(octokit: Octokit, repo: string, issue: number): Promise<number | undefined> {
+  const [owner, name] = repo.split('/');
+  const { data } = await octokit.rest.issues.listLabelsOnIssue({
+    owner,
+    repo: name,
+    issue_number: issue,
+    per_page: 100,
+  });
+  const orders = data.map((l) => l.name).filter((n) => n.startsWith(QUEUE_ORDER_LABEL_PREFIX));
+  if (orders.length !== 1) return undefined;
+  const raw = orders[0].slice(QUEUE_ORDER_LABEL_PREFIX.length);
+  const n = Number(raw);
+  return /^\d+$/.test(raw) && Number.isSafeInteger(n) && n > 0 ? n : undefined;
+}
+
+/** The factory:order recorded in the authenticated user's park-state comment, or undefined (#3554). */
+export async function readParkedOrder(deps: {
+  octokit: Octokit;
+  repo: string;
+  issue: number;
+}): Promise<number | undefined> {
+  const comment = await findOwnParkComment(deps);
+  return comment === undefined ? undefined : readParkState([comment], deps.issue)?.order;
+}
+
 /** Never throws: a GitHub or git failure comes back as `{ ok: false, error }`. */
 export async function publishParkComment(deps: {
   octokit: Octokit;
   repo: string;
   worktree?: string;
-  input: Omit<ParkCommentInput, 'parkSha'>;
+  input: Omit<ParkCommentInput, 'parkSha' | 'order'>;
   readHead?: (worktree: string) => Promise<string>;
+  readOrder?: (issue: number) => Promise<number | undefined>;
 }): Promise<{ ok: true; commentId: number; created: boolean } | { ok: false; error: string }> {
   const { octokit, repo, worktree, input, readHead = readWorktreeHead } = deps;
+  const readOrder = deps.readOrder ?? ((issue: number) => readSingleOrderLabel(octokit, repo, issue));
+  let order: number | undefined;
+  try {
+    order = await readOrder(input.issue);
+  } catch {
+    order = undefined;
+  }
   let parkSha: string | undefined;
   if (worktree) {
     try {
@@ -298,7 +346,7 @@ export async function publishParkComment(deps: {
     }
   }
   try {
-    const result = await upsertParkComment({ octokit, repo, input: { ...input, parkSha } });
+    const result = await upsertParkComment({ octokit, repo, input: { ...input, parkSha, order } });
     return { ok: true, ...result };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };

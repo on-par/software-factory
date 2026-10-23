@@ -52,6 +52,15 @@ describe('buildProgram', () => {
     expect(program.options.some((o) => o.long === '--state-root')).toBe(true);
   });
 
+  it('unpark registers --keep-order and passes keepOrder to cmdUnpark (#3554)', async () => {
+    const cmdUnpark = vi.fn(async () => {});
+    const handlers = { ...PROGRAM_HANDLERS, cmdUnpark };
+    const unpark = buildProgram(handlers, {}).commands.find((c) => c.name() === 'unpark');
+    expect(unpark?.options.some((o) => o.long === '--keep-order')).toBe(true);
+    await buildProgram(handlers, {}).parseAsync(['node', 'factory', 'unpark', '12', '--keep-order']);
+    expect(cmdUnpark).toHaveBeenCalledWith('12', expect.objectContaining({ keepOrder: true }));
+  });
+
   it('hosted smoke, runner and queue pass their options to their handlers', async () => {
     const cmdHostedSmoke = vi.fn(async () => {});
     const cmdHostedRunner = vi.fn(async () => {});

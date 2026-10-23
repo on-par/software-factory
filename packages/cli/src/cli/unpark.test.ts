@@ -1,8 +1,9 @@
+import type { Octokit } from '@octokit/rest';
 import { createOctokitQueueClient } from '@on-par/factory-core/internal';
 import { describe, expect, it, vi } from 'vitest';
 
 import { renderUnparkLines } from './queue-output.js';
-import { runUnpark } from './unpark.js';
+import { keepOrderInput, runUnpark } from './unpark.js';
 
 const names = (...n: string[]) => n.map((name) => ({ name }));
 
@@ -36,5 +37,15 @@ describe('unpark order-label-kept-after-queued-removed', () => {
     expect(added).toContain('factory:order:25');
     expect(added).not.toContain('factory:order:24');
     expect(renderUnparkLines(json).join('\n')).toContain('factory:order:24 held by #24');
+  });
+});
+
+describe('keepOrderInput (#3554)', () => {
+  it('is empty without --keep-order and wires the park-comment reader with it', async () => {
+    const octokit = {} as Octokit;
+    expect(keepOrderInput(undefined, octokit, 'o/r', 7)).toEqual({});
+    const input = keepOrderInput(true, octokit, 'o/r', 7);
+    expect(input.keepOrder).toBe(true);
+    expect(typeof input.readParkedOrder).toBe('function');
   });
 });
