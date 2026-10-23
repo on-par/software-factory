@@ -22,10 +22,14 @@ import type { FactoryEvent, HealthKpis, KpiReconstruction, QueueDiagnostic } fro
 import {
   createDockerEngine,
   createGithubQueue,
+  createFileReviewReworkStore,
+  createOctokitCollaboratorPermissionClient,
   createOctokitQueueClient,
+  createOctokitReviewReworkGitHub,
   evaluateLoadGuard,
   formatQueueOrderConflict,
   logEvent,
+  pollReviewRework,
   readHostLoad,
   recordSliceMerged,
   resolveBaseHealthChecks,
@@ -279,6 +283,39 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
       const pids: Promise<void>[] = [];
       // Issues in flight on any lane of this run; every lane's between-issues sweep protects them (#2964).
       const inFlightIssues = new Set<number>();
+      // #3563: one shared, coalesced review-rework poll for every lane's pre-claim step (GitHub queue only).
+      const runReviewReworkPoll = async (): Promise<void> => {
+        const [owner = '', repo = ''] = ghRepo.split('/');
+        const octokit = rt.getOctokit();
+        const results = await pollReviewRework({
+          github: createOctokitReviewReworkGitHub(octokit, owner, repo),
+          queue: createOctokitQueueClient(octokit),
+          owner,
+          repo,
+          branchPrefix,
+          trustedApprovers: factoryConfig.intake?.trustedApprovers,
+          permissions: createOctokitCollaboratorPermissionClient(octokit),
+          store: createFileReviewReworkStore(paths.reviewRework),
+        });
+        for (const r of results) {
+          if (r.outcome === 'queued') {
+            logEvent(
+              paths.events,
+              'review_rework_queued',
+              r.issue,
+              `#${r.issue} queued for review rework on lane '${r.lane}' — PR #${r.pr} review ${r.reviewIds.join(', ')} by ${r.reviewer}`,
+              { lane: r.lane },
+            );
+          } else if (r.outcome === 'error') {
+            logEvent(paths.events, 'warn', r.issue, `review-rework poll for PR #${r.pr} failed: ${r.detail}`);
+          }
+        }
+      };
+      let reviewPoll: Promise<void> | null = null;
+      const pollReviewReworkOnce = (): Promise<void> =>
+        (reviewPoll ??= runReviewReworkPoll().finally(() => {
+          reviewPoll = null;
+        }));
       for (const planned of lanes) {
         logEvent(
           paths.events,
@@ -319,6 +356,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
             ...(notifier ? { emitEvent: withParkNotify(logEvent, notifier) } : {}),
             laneBreakerThreshold,
             octokit: opts.localQueue === true ? undefined : () => rt.getOctokit(),
+            pollReviewRework: opts.localQueue === true ? undefined : pollReviewReworkOnce,
             runId,
             readParkSha: (branch) =>
               rt.shellOps
