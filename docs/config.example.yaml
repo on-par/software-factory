@@ -10,6 +10,9 @@
 # var, so leave it out to keep env control. The value shown is the default, or a <placeholder>
 # when there is none. `factory status --kpis` prints the effective config.
 #
+# Starter configs for typical repos: docs/config.example.dotnet.yaml, docs/config.example.node.yaml,
+# docs/config.example.python.yaml. `factory init --detect-checks` fills in `checks` for you.
+#
 # Accepted but not shown:
 #   $schema — accepted and ignored.
 #   policy — written by `factory migrate`; not read at runtime.
@@ -97,8 +100,12 @@ version: 2
 # harness under `harnesses`). Unset: derived from the build pin's harness, else PLAN decides per
 # issue.
 # route: "<route>"
-# Named evidence commands. Shell-free argv; config overrides scripts.
+# Named evidence commands for design-artifact evidence plans (not the CHECK build/test/lint
+# commands; see `checks`). Shell-free argv; config overrides scripts.
 # commands: { test: "vitest run" }
+# CHECK commands for this repo (build, test, lint). Each beats the file-based guess; `factory init
+# --detect-checks` writes them.
+# checks: { build: "dotnet build", test: "dotnet test", lint: "dotnet format --verify-no-changes" }
 # App smoke commands for the opt-in app_smoke checker.
 # qa: { start: ["npm", "start"], smoke: ["npm", "run", "smoke"] }
 # Repo risk policy for the risk receipt and the land risk gate (schema:

@@ -61,7 +61,7 @@ function getManager(manifest: Record<string, unknown>, lockfiles: readonly strin
 
 export function resolveEvidenceAllowlist(
   packageJson: unknown,
-  repoConfig: Pick<RepoFactoryConfig, 'commands'> | null | undefined,
+  repoConfig: Pick<RepoFactoryConfig, 'commands' | 'checks'> | null | undefined,
   lockfiles: readonly string[] = [],
 ): EvidenceAllowlist {
   const result = new Map<string, readonly string[]>();
@@ -76,6 +76,11 @@ export function resolveEvidenceAllowlist(
   const manager = getManager(manifest, lockfiles);
   for (const [name, body] of Object.entries(scripts)) {
     if (isValidName(name) && typeof body === 'string') result.set(name, [manager, 'run', name]);
+  }
+  // Declared CHECK commands (`checks.build|test|lint`) beat same-named scripts; explicit `commands` beat both.
+  for (const [name, body] of Object.entries(repoConfig?.checks ?? {})) {
+    const argv = typeof body === 'string' ? tokenizeEvidenceCommand(body) : null;
+    if (argv) result.set(name, argv);
   }
   const commands = repoConfig?.commands;
   if (commands && typeof commands === 'object') {

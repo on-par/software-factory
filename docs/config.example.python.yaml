@@ -1,0 +1,17 @@
+# Starter .factory/config.yaml for a Python repo (pyproject.toml + pytest). Copy it, then trim.
+# Every key is optional; see docs/config.example.yaml for the full reference.
+# With no `checks`, CHECK runs `python3 -m pytest` when it finds a pytest surface.
+version: 2
+
+# What CHECK runs after every BUILD. Each command is one shell-free command line run from the
+# repo root (no pipes, `&&`, `$VARS` or globs); point at a script when you need a shell.
+checks:
+  build: python3 -m compileall -q src
+  test: python3 -m pytest
+  lint: ruff check .
+
+# Paths that always need a human reviewer.
+classifier:
+  alwaysHuman:
+    - 'migrations/**'
+    - 'pyproject.toml'

@@ -38,6 +38,11 @@ describe('resolveTestMaxWorkers', () => {
     expect(config).toContain('resolveTestMaxWorkers');
   });
 
+  it('verify.sh defaults to the same 4 workers instead of a serial run', () => {
+    const verify = readFileSync(`${ROOT}scripts/verify.sh`, 'utf8');
+    expect(verify).toContain('FACTORY_TEST_MAX_WORKERS="${FACTORY_TEST_MAX_WORKERS:-4}"');
+  });
+
   it('vitest.config.ts documents the default worker count and FACTORY_TEST_MAX_WORKERS', () => {
     const config = readFileSync(`${ROOT}vitest.config.ts`, 'utf8');
     expect(config).toContain('FACTORY_TEST_MAX_WORKERS');

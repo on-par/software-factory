@@ -81,6 +81,47 @@ describe('resolveVerifyCommands', () => {
     ]);
   });
 
+  it('shows commands declared under checks in .factory/config.json ahead of the file-based guesses', async () => {
+    const dir = repo({
+      '.factory/config.json': JSON.stringify({
+        version: 2,
+        checks: {
+          build: 'dotnet build App.sln',
+          test: 'pwsh ./.githooks/run-tests.ps1',
+          lint: 'dotnet format --verify-no-changes',
+        },
+      }),
+      'scripts/verify.sh': '',
+      'package.json': JSON.stringify({ scripts: { build: 'b', test: 't', lint: 'l' } }),
+      'tsconfig.json': '{}',
+    });
+    const { rows } = await resolveVerifyCommands(dir);
+    expect(rows.map((r) => [r.kind, r.command, r.source, r.executable])).toEqual([
+      ['build', 'dotnet build App.sln', '.factory/config.json', 'dotnet'],
+      ['test', 'pwsh ./.githooks/run-tests.ps1', '.factory/config.json', 'pwsh'],
+      ['lint', 'dotnet format --verify-no-changes', '.factory/config.json', 'dotnet'],
+    ]);
+    const test = verifyCommandChecks({ rows }, { requireTests: false, commandAvailable: allOnPath })[1]!;
+    expect(test.detail).toBe('`pwsh ./.githooks/run-tests.ps1` (from .factory/config.json); pwsh found on PATH');
+  });
+
+  it('names a YAML repo config as the source', async () => {
+    const dir = repo({ '.factory/config.yaml': 'version: 2\nchecks:\n  test: dotnet test\n' });
+    expect(rowOf((await resolveVerifyCommands(dir)).rows, 'test')).toMatchObject({
+      command: 'dotnet test',
+      source: '.factory/config.yaml',
+    });
+  });
+
+  it('an invalid checks command comes back as an error naming the config file', async () => {
+    const dir = repo({
+      '.factory/config.json': JSON.stringify({ version: 2, checks: { test: 'dotnet test | tee x' } }),
+    });
+    const resolved = await resolveVerifyCommands(dir);
+    expect(resolved.rows).toEqual([]);
+    expect(resolved.error).toContain('checks.test');
+  });
+
   it('a malformed package.json comes back as an error, not a throw', async () => {
     const resolved = await resolveVerifyCommands(repo({ 'package.json': '{ nope' }));
     expect(resolved.rows).toEqual([]);
@@ -104,6 +145,7 @@ describe('verifyCommandChecks', () => {
     expect(test).toMatchObject({ ok: false, optional: true });
     expect(test.detail).toContain('CHECK will run no tests');
     expect(test.fix).toContain('scripts/verify.sh');
+    expect(test.fix).toContain('factory init --detect-checks');
     expect(checks.find((c) => c.name === 'verify build')).toMatchObject({ ok: false, optional: true });
     expect(checks.find((c) => c.name === 'verify lint')).toMatchObject({ ok: true, optional: true });
   });

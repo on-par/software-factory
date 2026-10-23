@@ -46,10 +46,12 @@ import { resolveEffectiveBuildRoute } from './build-route.js';
 import { assertAgenticBuildPin } from './repo-build-pin.js';
 import { assertTierMayRoute } from './repo-tier-guard.js';
 import { assertApprovedClaudeEndpoint, assertNoDirectDeepSeek } from './intermediaries.js';
+import { ChecksConfigSections } from './checks-section.js';
 
 // ---------- Schema ----------
 
-const EVIDENCE_COMMANDS_DESCRIPTION = 'Named evidence commands. Shell-free argv; config overrides scripts.';
+const EVIDENCE_COMMANDS_DESCRIPTION =
+  'Named evidence commands for design-artifact evidence plans (not the CHECK build/test/lint commands; see `checks`). Shell-free argv; config overrides scripts.';
 export const RepoFactoryConfigV1Schema = z
   .object({
     $schema: z.string().optional(),
@@ -86,6 +88,7 @@ export const RepoFactoryConfigV1Schema = z
       .optional(),
     route: z.enum(['codex', 'claude', 'opencode', 'command']).optional(),
     commands: z.record(z.string(), z.string()).optional().describe(EVIDENCE_COMMANDS_DESCRIPTION),
+    ...ChecksConfigSections,
   })
   .strict();
 
@@ -246,6 +249,7 @@ export const RepoFactoryConfigV2Schema = z
           "Unset: derived from the build pin's harness, else PLAN decides per issue.",
       ),
     commands: z.record(z.string(), z.string()).optional().describe(EVIDENCE_COMMANDS_DESCRIPTION),
+    ...ChecksConfigSections,
     ...OptionalConfigSections,
   })
   .strict();
@@ -306,6 +310,7 @@ export function adaptV1ToV2(v1: RepoFactoryConfigV1Input): RepoFactoryConfig {
     ...(Object.keys(budget).length > 0 ? { budget } : {}),
     ...(v1.route !== undefined ? { route: v1.route } : {}),
     ...(v1.commands !== undefined ? { commands: v1.commands } : {}),
+    ...(v1.checks !== undefined ? { checks: v1.checks } : {}),
   };
 }
 

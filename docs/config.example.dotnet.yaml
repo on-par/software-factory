@@ -1,0 +1,18 @@
+# Starter .factory/config.yaml for a .NET repo (solution + test projects). Copy it, then trim.
+# Every key is optional; see docs/config.example.yaml for the full reference.
+# `factory init --detect-checks` finds these commands for you and dry-runs each one.
+version: 2
+
+# What CHECK runs after every BUILD. Each command is one shell-free command line run from the
+# repo root (no pipes, `&&`, `$VARS` or globs); point at a script when you need a shell.
+checks:
+  build: dotnet build App.sln
+  # Use your own test script when the README or CI uses one, e.g. `pwsh ./.githooks/run-tests.ps1`.
+  test: dotnet test App.sln
+  lint: dotnet format App.sln --verify-no-changes
+
+# Paths that always need a human reviewer.
+classifier:
+  alwaysHuman:
+    - '**/Migrations/**'
+    - '*.csproj'

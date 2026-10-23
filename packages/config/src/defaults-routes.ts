@@ -115,5 +115,12 @@ export const defaultRoutesConfig: RoutesDefaults = {
       tier: 'triage',
       description: 'Issue triage and queue building',
     },
+    detect_checks: {
+      tier: 'triage',
+      description:
+        '`factory init --detect-checks`: one tool-less call over the repo docs, CI workflows and scripts, returning the build/test/lint commands as one JSON object',
+      allowedTools: [],
+      output: 'json',
+    },
   },
 };
