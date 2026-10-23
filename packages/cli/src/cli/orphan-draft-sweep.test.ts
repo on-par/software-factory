@@ -1,26 +1,27 @@
 // packages/cli/src/cli/orphan-draft-sweep.test.ts — the startup orphan draft sweep never throws (#3552)
 
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { getFactoryPaths } from '@on-par/factory-core';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { runOrphanDraftSweep } from './orphan-draft-sweep.js';
 
+const tmp = createTempDirs();
 let dir: string;
 let paths: ReturnType<typeof getFactoryPaths>;
 
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'factory-orphan-draft-sweep-'));
+  dir = await tmp.make('factory-orphan-draft-sweep-');
   paths = { events: join(dir, 'events.jsonl'), orphanDraftSweep: join(dir, 'sweep.json') } as ReturnType<
     typeof getFactoryPaths
   >;
 });
 
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
+  await tmp.cleanup();
 });
 
 describe('runOrphanDraftSweep', () => {
