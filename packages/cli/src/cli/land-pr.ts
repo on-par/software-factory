@@ -209,6 +209,8 @@ export async function landOpenPullRequest(opts: {
   withLock?: LandLock;
   /** Materializes an adopted branch only after its locked state re-read confirms it needs rebasing. */
   ensureWorktree?: () => Promise<void>;
+  /** #3324: preflight adopted a DIRTY or still-UNKNOWN PR; sync with main before the first CI watch even when the state is not DIRTY. */
+  syncMain?: boolean;
 }): Promise<void> {
   const {
     octokit,
@@ -228,6 +230,7 @@ export async function landOpenPullRequest(opts: {
     rerun,
     withLock = (fn) => fn(),
     ensureWorktree,
+    syncMain = false,
   } = opts;
   const { errorDetail } = landRuntime();
 
@@ -292,18 +295,22 @@ export async function landOpenPullRequest(opts: {
   let state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
 
   /** Syncs a DIRTY PR with main under the land lock. Returns true when it synced. */
-  const syncIfStillDirty = () =>
+  const syncIfStillDirty = (force = false) =>
     withLock(async () => {
       // Re-check under the lock: a sibling lane may have landed (or synced this branch)
       // while we waited for it, so the DIRTY verdict read before the lock can be stale.
       state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
-      if (state.mergeStateStatus !== 'DIRTY') return false;
+      if (!force && state.mergeStateStatus !== 'DIRTY') return false;
       await ensureWorktree?.();
+      log(
+        'pr_refresh',
+        `PR #${prNumber} refreshed: mergeStateStatus=${state.mergeStateStatus ?? 'UNKNOWN'} action=merge-main`,
+      );
       await syncDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists });
       return true;
     });
 
-  if (state.mergeStateStatus === 'DIRTY') await syncIfStillDirty();
+  if (syncMain || state.mergeStateStatus === 'DIRTY') await syncIfStillDirty(syncMain);
 
   // The CI watch is a 10-20 minute wait, not a mutation: it must never run under the land
   // locks, or every other lane's setupWorktree serializes behind it (#645).

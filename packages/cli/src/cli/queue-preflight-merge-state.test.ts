@@ -61,18 +61,26 @@ describe('queue preflight merge-state re-read (#3323)', () => {
     expect(h.sleep.mock.calls).toEqual([[2000]]);
   });
 
-  it('defers and logs the PR and re-read count when the merge state stays UNKNOWN on all 4 reads', async () => {
+  it('adopts with syncMain when the merge state stays UNKNOWN on all 4 reads', async () => {
     const h = harness([unknown, unknown, unknown, unknown]);
-    await expect(preflightQueuedIssue(issue, h.deps)).resolves.toEqual({ kind: 'defer' });
-    expect(h.onDeferred).toHaveBeenCalledWith(7, 'PR #315 merge state still UNKNOWN after 3 re-reads');
+    await expect(preflightQueuedIssue(issue, h.deps)).resolves.toEqual({
+      kind: 'adopt',
+      branch: 'factory/7-x',
+      syncMain: true,
+    });
+    expect(h.onDeferred).not.toHaveBeenCalled();
     expect(h.sleep.mock.calls).toEqual([[2000], [5000], [10000]]);
     expect(h.getLandState).toHaveBeenCalledTimes(4);
     expect(h.watch).not.toHaveBeenCalled();
   });
 
-  it('defers when mergeStateStatus is missing on all reads', async () => {
+  it('adopts with syncMain when mergeStateStatus is missing on all reads', async () => {
     const h = harness([{ isDraft: false }, { isDraft: false }, { isDraft: false }, { isDraft: false }]);
-    await expect(preflightQueuedIssue(issue, h.deps)).resolves.toEqual({ kind: 'defer' });
+    await expect(preflightQueuedIssue(issue, h.deps)).resolves.toEqual({
+      kind: 'adopt',
+      branch: 'factory/7-x',
+      syncMain: true,
+    });
   });
 
   it('a re-read that throws counts as UNKNOWN', async () => {
@@ -82,7 +90,11 @@ describe('queue preflight merge-state re-read (#3323)', () => {
       branch: 'factory/7-x',
     });
     const failing = harness([unknown, new Error('a'), new Error('b'), new Error('c')]);
-    await expect(preflightQueuedIssue(issue, failing.deps)).resolves.toEqual({ kind: 'defer' });
+    await expect(preflightQueuedIssue(issue, failing.deps)).resolves.toEqual({
+      kind: 'adopt',
+      branch: 'factory/7-x',
+      syncMain: true,
+    });
   });
 
   it('parks when the first land-state read throws', async () => {
@@ -93,11 +105,32 @@ describe('queue preflight merge-state re-read (#3323)', () => {
     expect(h.sleep).not.toHaveBeenCalled();
   });
 
-  it('behaves as on main when the merge state is DIRTY on the first read', async () => {
+  it('adopts DIRTY with syncMain and skips the CI watch', async () => {
     const h = harness([{ isDraft: false, mergeStateStatus: 'DIRTY' }]);
-    await expect(preflightQueuedIssue(issue, h.deps)).resolves.toEqual({ kind: 'adopt', branch: 'factory/7-x' });
+    await expect(preflightQueuedIssue(issue, h.deps)).resolves.toEqual({
+      kind: 'adopt',
+      branch: 'factory/7-x',
+      syncMain: true,
+    });
+    expect(h.watch).not.toHaveBeenCalled();
     expect(h.getLandState).toHaveBeenCalledTimes(1);
     expect(h.sleep).not.toHaveBeenCalled();
+  });
+
+  it('adopts with syncMain, without a watch, when a re-read reveals DIRTY after UNKNOWN', async () => {
+    const h = harness([unknown, { isDraft: false, mergeStateStatus: 'DIRTY' }]);
+    await expect(preflightQueuedIssue(issue, h.deps)).resolves.toEqual({
+      kind: 'adopt',
+      branch: 'factory/7-x',
+      syncMain: true,
+    });
+    expect(h.watch).not.toHaveBeenCalled();
+  });
+
+  it('parks a draft revealed by a re-read while the state is still UNKNOWN', async () => {
+    const h = harness([unknown, unknown, unknown, { isDraft: true, mergeStateStatus: 'UNKNOWN' }]);
+    const out = await preflightQueuedIssue(issue, h.deps);
+    expect(out.kind).toBe('park');
   });
 
   it('parks a draft revealed by a re-read', async () => {
