@@ -1,12 +1,11 @@
 // packages/core/src/run/review-rework.test.ts — a queued review rework runs BUILD rework on the PR branch with only that review's comments, then CHECK (#3564)
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.js';
 import type {
   CheckPhaseResult,
@@ -86,8 +85,9 @@ const policy: RunPolicy = {
   effective: {} as RunPolicy['effective'],
 };
 
-const breakerDir = mkdtempSync(join(tmpdir(), 'review-rework-'));
-afterAll(() => rmSync(breakerDir, { recursive: true, force: true }));
+const tempDirs = createTempDirs();
+const breakerDir = tempDirs.makeSync('review-rework-');
+afterAll(() => tempDirs.cleanup());
 
 const comment = (id: number, review: number, body: string, extra: Record<string, unknown> = {}) => ({
   id,
