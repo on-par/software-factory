@@ -9,6 +9,12 @@ import { waitForMerge } from './land.js';
 import { LandConflictError, landOpenPullRequest } from './land-pr.js';
 import { preflightQueuedIssue } from './queue-preflight.js';
 
+/** Partial test double standing in for a full dependency type. */
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- T is the caller-chosen double type
+function stub<T>(value: unknown): T {
+  return value as T;
+}
+
 function setup(initial: 'DIRTY' | 'CLEAN', { conflict = false, syncMain = false } = {}) {
   const commands: string[] = [];
   const watched: string[] = [];
@@ -52,7 +58,7 @@ function setup(initial: 'DIRTY' | 'CLEAN', { conflict = false, syncMain = false 
   };
   const land = (extra: { syncMain?: boolean } = { syncMain }) =>
     landOpenPullRequest({
-      octokit: octokit as unknown as Parameters<typeof landOpenPullRequest>[0]['octokit'],
+      octokit: stub<Parameters<typeof landOpenPullRequest>[0]['octokit']>(octokit),
       owner: 'on-par',
       repoName: 'software-factory',
       ghRepo: 'on-par/software-factory',
@@ -66,10 +72,10 @@ function setup(initial: 'DIRTY' | 'CLEAN', { conflict = false, syncMain = false 
       pathExists: () => true,
       sleep: async () => {},
       adminMerge: false,
-      watch: (async (o: { ref: string }) => {
+      watch: stub<Parameters<typeof landOpenPullRequest>[0]['watch']>(async (o: { ref: string }) => {
         watched.push(o.ref);
         return 'success';
-      }) as unknown as Parameters<typeof landOpenPullRequest>[0]['watch'],
+      }),
       withLock: (fn) => fn(),
       ...extra,
     });
@@ -159,25 +165,25 @@ describe('syncMain adopt (#3324)', () => {
   it('waitForMerge forwards syncMain to land only when set', async () => {
     const tmp = createTempDirs();
     const root = await tmp.make('sync-main-wait-');
-    const paths = {
+    const paths = stub<Parameters<typeof waitForMerge>[4]>({
       events: join(root, 'events.ndjson'),
       stop: join(root, 'STOP'),
       runs: join(root, 'runs'),
       laneFiles: join(root, 'lane-files.json'),
-    } as unknown as Parameters<typeof waitForMerge>[4];
+    });
     const run = async (syncMain?: boolean) => {
       const land = vi.fn(async (..._args: unknown[]) => ({ branch: 'factory/20-x', prNumber: 123 }));
       await waitForMerge(20, 'factory/20-x', '/repo', 'on-par/software-factory', paths, {
-        createOctokit: () => ({}) as unknown as ReturnType<NonNullable<WaitDeps['createOctokit']>>,
+        createOctokit: () => stub<ReturnType<NonNullable<WaitDeps['createOctokit']>>>({}),
         pathExists: () => false,
         checkMerged: async () => false,
         mergeEnabled: () => true,
-        loadConfig: (() => ({
+        loadConfig: stub<WaitDeps['loadConfig']>(() => ({
           merge: { auto: true, comment: '' },
           filing: { enabled: false, selfFixLabel: 'no-auto-merge' },
-        })) as unknown as WaitDeps['loadConfig'],
+        })),
         listIssueLabels: async () => [],
-        land: land as unknown as WaitDeps['land'],
+        land: stub<WaitDeps['land']>(land),
         emitEvent: () => {},
         sleep: async () => {},
         ...(syncMain ? { syncMain } : {}),
