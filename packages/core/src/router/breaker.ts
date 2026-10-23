@@ -203,6 +203,13 @@ export class ProviderBreaker {
     return { open: false, justClosed: entry, closeCause: 'cooldown' };
   }
 
+  /** Read-only (never prunes, so the close event stays for `status()` observers): true while the provider is held
+   *  until its credentials change and the credentials have not changed. */
+  async isHeldUntilCredentialsChange(provider: string): Promise<boolean> {
+    const entry = (await this.read()).providers[provider];
+    return entry?.until === 'credentials-change' && this.isOpen(provider, entry, this.now());
+  }
+
   /** Read-only (never rewrites the file — factory status must not mutate state).
    *  Returns only still-open entries with computed remainingMs. */
   async list(): Promise<BreakerListEntry[]> {

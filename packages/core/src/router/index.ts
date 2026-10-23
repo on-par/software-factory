@@ -536,7 +536,16 @@ export class ModelRouter {
         onLog(`Skipping ${model} for ${task}: provider ${modelProvider} is on cooldown`);
         continue;
       }
-      if (modelProvider && this.providerHold && (await this.providerHold(modelProvider).catch(() => false))) {
+      const providerHeld =
+        modelProvider && this.providerHold
+          ? await this.providerHold(modelProvider).catch((err: unknown) => {
+              onLog(
+                `Hold check failed for ${modelProvider}, treating as not held: ${err instanceof Error ? err.message : String(err)}`,
+              );
+              return false;
+            })
+          : false;
+      if (modelProvider && providerHeld) {
         onLog(
           `Skipping ${model} for ${task}: provider ${modelProvider} credentials were rejected (factory breaker reset ${modelProvider} to retry)`,
         );

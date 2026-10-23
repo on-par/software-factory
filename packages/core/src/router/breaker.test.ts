@@ -339,6 +339,18 @@ describe('auth entries (#3232)', () => {
     expect(JSON.parse(await readFile(file, 'utf-8')).providers).toEqual({});
   });
 
+  it('isHeldUntilCredentialsChange reads without pruning, so status() still reports creds_changed once', async () => {
+    const file = await tmpFile();
+    let fp = 'fp1';
+    const breaker = new ProviderBreaker(file, () => 5, { fingerprint: () => fp });
+    expect(await breaker.isHeldUntilCredentialsChange('anthropic')).toBe(false);
+    await breaker.openUntilCredentialsChange('anthropic', 'local_auth');
+    expect(await breaker.isHeldUntilCredentialsChange('anthropic')).toBe(true);
+    fp = 'fp2';
+    expect(await breaker.isHeldUntilCredentialsChange('anthropic')).toBe(false);
+    expect(await breaker.status('anthropic')).toMatchObject({ open: false, closeCause: 'creds_changed' });
+  });
+
   it('stores only the fingerprint, no cooldown semantics', async () => {
     const file = await tmpFile();
     const breaker = new ProviderBreaker(file, () => 5, { fingerprint: () => 'abc' });
