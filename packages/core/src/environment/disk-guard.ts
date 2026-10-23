@@ -68,8 +68,8 @@ export function claimDiskAlertSlot(file: string, now: Date, intervalMs: number =
     // missing or garbled stamp counts as never alerted
   }
   try {
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, JSON.stringify({ lastAlertAt: now.toISOString(), host: hostname() }));
+    mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+    writeFileSync(file, JSON.stringify({ lastAlertAt: now.toISOString(), host: hostname() }), { mode: 0o600 });
   } catch {
     // a full disk must not block the alert
   }
