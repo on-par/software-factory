@@ -307,6 +307,12 @@ export async function runLane(
         await settle(issue, 'queued');
         continue;
       }
+      if (shipped?.state === 'released' && shipped.reason === 'file-overlap') {
+        // #3576: another live lane owns a file this issue touches; re-queue it, never park.
+        streak = null;
+        await settle(issue, 'queued');
+        continue;
+      }
       if (shipped?.state === 'ready' && shipped.slice && shipped.slice.index < shipped.slice.count) {
         // ADR-0147: a non-final slice's PR is open; hand the issue back for the next slice
         // instead of waiting for the merge.

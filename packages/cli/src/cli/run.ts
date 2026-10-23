@@ -6,6 +6,7 @@ import { styleText } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
 import {
+  LaneFileGuard,
   applyRepoConfig,
   clearProxyState,
   getFactoryPaths,
@@ -172,6 +173,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
                     resolveSizeGateMode(factoryConfig) === 'stack' &&
                     resolveMergePolicy(factoryConfig, process.env, { auto: opts.autoMerge }).auto,
                   stackMode: resolveSizeGateMode(factoryConfig) === 'stack',
+                  laneFileHold: (n) => new LaneFileGuard(paths.laneFiles).liveHold(ghRepo, n),
                   onDeferred: (issue, message) => {
                     if (deferredIssues.has(issue)) return;
                     deferredIssues.add(issue);

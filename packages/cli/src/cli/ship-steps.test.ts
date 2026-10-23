@@ -154,6 +154,32 @@ it('finishOutcome returns the branch without throwing for a stack-wait release (
   }
 });
 
+it('finishOutcome returns the branch without throwing for a file-overlap release (#3576)', () => {
+  const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    const branch = finishOutcome({
+      outcome: {
+        state: 'released',
+        reason: 'file-overlap',
+        holder: 3232,
+        file: 'src/a.ts',
+        branch: 'factory/9-x',
+        reworkRounds: 0,
+      },
+      opts: {},
+      paths: getFactoryPaths('/tmp/primary', '/tmp/relocated-factory'),
+      issueNum: 9,
+      worktree: '/tmp/wt',
+      terminalMessage: undefined,
+      log: () => {},
+    });
+    expect(branch).toBe('factory/9-x');
+    expect(spy.mock.calls.join('\n')).toContain('src/a.ts is claimed by in-flight issue #3232');
+  } finally {
+    spy.mockRestore();
+  }
+});
+
 it('findSliceIndex in stack mode returns the lowest pending slice (#3367)', async () => {
   const story = {
     schemaVersion: 1,
