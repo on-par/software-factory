@@ -62,6 +62,7 @@ import type {
 } from './index.js';
 import { runEndOfRunKpiSnapshot } from './kpi-sweep.js';
 import { waitForMerge } from './land.js';
+import { replaceConflictedPr } from './land-rebuild.js';
 import { DRAIN_MESSAGE, createNotifier, resolveNotifyCommand, withParkNotify } from './notify.js';
 import { runLane } from './run-lane.js';
 import { restackFromSlicePlan } from './run-restack.js';
@@ -403,6 +404,8 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
                 paths,
                 opts.branchPrefix === undefined ? undefined : branchPrefix,
               ),
+            replacePr: (issue, oldPr, newPr, ps) =>
+              replaceConflictedPr({ octokit: rt.getOctokit(), repo: ghRepo, issue, oldPr, newPr, paths: ps }),
             closeParkedPr: (issue, branch, reason) =>
               settleParkedPullRequest({
                 octokit: rt.getOctokit(),

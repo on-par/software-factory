@@ -15,7 +15,8 @@ export interface LandSyncOptions {
   log: (type: EventKind, msg: string, extra?: Pick<FactoryEvent, 'paths' | 'mode'>) => void;
 }
 
-export type LandSyncResult = { ok: true } | { ok: false; message: string; paths: string[] };
+type LandSyncFailure = { ok: false; message: string; paths: string[]; conflict?: true };
+export type LandSyncResult = { ok: true } | LandSyncFailure;
 
 const TIMEOUT = 120_000;
 const ADR_INDEX_PATH = 'docs/adr/README.md';
@@ -42,7 +43,7 @@ function errorText(error: unknown): string {
 export async function syncLandBranch(opts: LandSyncOptions): Promise<LandSyncResult> {
   const run = (command: string) => opts.run(command, { cwd: opts.worktree, timeout: TIMEOUT });
   let mergeStarted = false;
-  const abort = async (message: string, paths: string[] = []): Promise<LandSyncResult> => {
+  const abort = async (message: string, paths: string[] = []): Promise<LandSyncFailure> => {
     if (mergeStarted) {
       try {
         await run('git merge --abort');
@@ -100,7 +101,10 @@ export async function syncLandBranch(opts: LandSyncOptions): Promise<LandSyncRes
       opts.log('conflict_detected', `land sync conflicts: ${conflicts.join(', ')}`, { paths: conflicts });
       const otherPaths = conflicts.filter((path) => path !== ADR_INDEX_PATH);
       if (otherPaths.length > 0) {
-        return await abort(`unresolved merge conflicts: ${otherPaths.join(', ')}`, otherPaths);
+        return {
+          ...(await abort(`unresolved merge conflicts: ${otherPaths.join(', ')}`, otherPaths)),
+          conflict: true,
+        };
       }
 
       let replayFailure: string | undefined;

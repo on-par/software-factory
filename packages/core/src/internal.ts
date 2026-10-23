@@ -754,17 +754,7 @@ export * from './run/steer.js';
 export * from './kpis/steerability.js';
 export { createStackSliceBranch } from './run/stack-slice-branch.js';
 export { restackAfterSquashMerge, type StackRestackOptions, type StackRestackOutcome } from './run/stack-restack.js';
-export {
-  checkResumePath,
-  configParkMessage,
-  createCheckResumeStore,
-  createPlanReuseStore,
-  formatPreservedBuildMessage,
-  issueBodyHash,
-  planReusePath,
-  preservedFixTarget,
-} from './run/resume-context.js';
-export type { CheckResumeRecord, CheckResumeStore, PlanReuseRecord, PlanReuseStore } from './run/resume-context.js';
+export * from './run/resume-context.js';
 // Pre-PLAN base health (#2339)
 export { BaselineCache } from './checkers/baseline-cache.js';
 export { BASE_HEALTH_CHECKERS, checkBaseHealth, fetchRequiredChecksVerdict } from './checkers/base-health.js';

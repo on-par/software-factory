@@ -56,6 +56,29 @@ export class LandConflictError extends Error {
   readonly parkReason: ParkReason = 'conflict';
 }
 
+/** #3325: a merge-main conflict on a real path; the lane rebuilds the issue on a fresh branch instead of parking. */
+export class LandRebuildRequiredError extends LandConflictError {
+  constructor(
+    message: string,
+    readonly prNumber: number,
+    readonly branch: string,
+    readonly paths: string[],
+    readonly mergeStateStatus: string,
+  ) {
+    super(message);
+    this.name = 'LandRebuildRequiredError';
+  }
+}
+
+/** `rebuildOnConflict` (#3325): a real-path merge-main conflict throws LandRebuildRequiredError, not a park. */
+export type LandIssueOpts = {
+  allowGated?: boolean;
+  branch?: string;
+  enforceRisk?: boolean;
+  syncMain?: boolean;
+  rebuildOnConflict?: boolean;
+};
+
 export class AwaitingReviewError extends Error {
   constructor(
     message: string,
@@ -166,6 +189,9 @@ export async function syncDirtyPullRequest(opts: {
   log: (type: EventKind, msg: string, extra?: Pick<FactoryEvent, 'paths' | 'mode'>) => void;
   run?: CommandRunner;
   pathExists?: (path: string) => boolean;
+  /** #3325: throw LandRebuildRequiredError on a real-path merge conflict instead of a plain LandConflictError. */
+  rebuildOnConflict?: boolean;
+  mergeStateStatus?: string;
 }): Promise<void> {
   const { issue, branch, worktree, prNumber, log, run = landRuntime().shellOps.exec, pathExists = existsSync } = opts;
 
@@ -180,6 +206,15 @@ export async function syncDirtyPullRequest(opts: {
     const suffix = result.paths.length > 0 ? ` (${result.paths.join(', ')})` : '';
     const msg = `land sync failed on ${branch}${suffix}: ${result.message} — parked`;
     log('conflict', msg, result.paths.length > 0 ? { paths: result.paths } : undefined);
+    if (opts.rebuildOnConflict && result.conflict) {
+      throw new LandRebuildRequiredError(
+        `issue #${issue}: merge with origin/main conflicts on ${result.paths.join(', ')} — rebuild required`,
+        prNumber,
+        branch,
+        result.paths,
+        opts.mergeStateStatus ?? 'UNKNOWN',
+      );
+    }
     throw new LandConflictError(`issue #${issue}: ${msg}`);
   }
 }
@@ -198,7 +233,7 @@ export async function landOpenPullRequest(opts: {
   branch: string;
   worktree: string;
   prNumber: number;
-  log: (type: EventKind, msg: string, extra?: Pick<FactoryEvent, 'paths' | 'mode'>) => void;
+  log: (type: EventKind, msg: string, extra?: Pick<FactoryEvent, 'paths' | 'mode' | 'prRefresh'>) => void;
   run?: CommandRunner;
   pathExists?: (path: string) => boolean;
   sleep?: (ms: number) => Promise<void>;
@@ -211,6 +246,8 @@ export async function landOpenPullRequest(opts: {
   ensureWorktree?: () => Promise<void>;
   /** #3324: preflight adopted a DIRTY or still-UNKNOWN PR; sync with main before the first CI watch even when the state is not DIRTY. */
   syncMain?: boolean;
+  /** #3325: a real-path merge-main conflict throws LandRebuildRequiredError so the lane can rebuild. */
+  rebuildOnConflict?: boolean;
 }): Promise<void> {
   const {
     octokit,
@@ -231,6 +268,7 @@ export async function landOpenPullRequest(opts: {
     withLock = (fn) => fn(),
     ensureWorktree,
     syncMain = false,
+    rebuildOnConflict = false,
   } = opts;
   const { errorDetail } = landRuntime();
 
@@ -305,8 +343,19 @@ export async function landOpenPullRequest(opts: {
       log(
         'pr_refresh',
         `PR #${prNumber} refreshed: mergeStateStatus=${state.mergeStateStatus ?? 'UNKNOWN'} action=merge-main`,
+        { prRefresh: { pr: prNumber, mergeStateStatus: state.mergeStateStatus ?? 'UNKNOWN', action: 'merge-main' } },
       );
-      await syncDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists });
+      await syncDirtyPullRequest({
+        issue,
+        branch,
+        worktree,
+        prNumber,
+        log,
+        run,
+        pathExists,
+        rebuildOnConflict,
+        mergeStateStatus: state.mergeStateStatus ?? 'UNKNOWN',
+      });
       return true;
     });
 

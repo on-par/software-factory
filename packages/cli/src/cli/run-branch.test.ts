@@ -118,4 +118,12 @@ describe('resolveRunBranch', () => {
     expect(await run(octokit, { work })).toBe(branchFor(2253, 'New title', 'factory'));
     expect(list).not.toHaveBeenCalled();
   });
+
+  it('returns the rebuild branch without an adopt lookup (#3325)', async () => {
+    const { octokit, list } = stub([pr(7, 'factory/2253-old-title')]);
+    expect(await run(octokit, { ctx: { rebuild: { branch: 'factory/2253-old-title-rebuild' } } })).toBe(
+      'factory/2253-old-title-rebuild',
+    );
+    expect(list).not.toHaveBeenCalled();
+  });
 });

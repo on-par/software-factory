@@ -66,6 +66,7 @@ import {
 import { baseChecksVerdict, baseHealthWithCi } from './base-health-ci.js';
 import { formatDeprecation } from './octokit.js';
 import type { CliDeps, ConfigLoaderKey, CoreOpKey, GitOpKey, ShellOpKey } from './index.js';
+import { frozenPlanPorts } from './land-rebuild.js';
 import { resolveRunBranch } from './run-branch.js';
 import { shipRuntime } from './ship-runtime.js';
 import { runStateRecorder } from './ship-run-state.js';
@@ -143,6 +144,7 @@ async function shipIssueFrom(
     /** Benchmark artifact directory (#509) — only set for local-only runs. */
     artifactsDir?: string;
     resumeFrom?: CheckResumeRecord; // Resume at CHECK on a kept worktree (#2564).
+    rebuild?: { branch: string }; // Lane rebuild after a merge-main conflict: fresh branch, frozen spec, no PLAN (#3325).
   },
   deps: Pick<
     CliDeps,
@@ -397,6 +399,7 @@ async function shipIssueFrom(
     planReuse: ctx?.localOnly ? undefined : createPlanReuseStore(specPath),
     checkResume: ctx?.localOnly ? undefined : createCheckResumeStore(specPath),
     planPhase: phases.planPhase,
+    ...(ctx?.rebuild ? frozenPlanPorts(specPath) : {}),
     buildPhase: phases.buildPhase,
     checkPhase: phases.checkPhase,
     hostBuildSlot: hostBuildSlotPort(factoryConfig, ghRepo, issueNum, log, ctx?.runSlots),
@@ -434,9 +437,7 @@ async function shipIssueFrom(
       startedAt: runStartedAt,
     }),
     onActivity: () => touchRunActivity(phaseSnapshotFile(paths.runs, issueNum), new Date().toISOString()),
-    onDecomposed: (childIssues) => {
-      decomposeQueue({ issueNum, childIssues, paths, planLog: mkLog('plan') });
-    },
+    onDecomposed: (childIssues) => decomposeQueue({ issueNum, childIssues, paths, planLog: mkLog('plan') }),
     writeLocalRunReport: (info) =>
       maybeWriteLocalRunReport({
         issueNum,

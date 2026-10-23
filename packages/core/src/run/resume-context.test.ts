@@ -4,11 +4,13 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { schemaErrorCheckerOutput } from '../checkers/index.js';
 import { writeSpec } from '../spec/index.js';
 import {
   checkResumePath,
   createCheckResumeStore,
+  createFrozenPlanStore,
   createPlanReuseStore,
   formatPreservedBuildMessage,
   issueBodyHash,
@@ -50,6 +52,28 @@ describe('issueBodyHash / planReusePath', () => {
   it('maps the spec path to its resume sidecar', () => {
     expect(planReusePath('/x/issue-7.md')).toBe('/x/issue-7.resume.json');
     expect(planReusePath('/x/issue-7')).toBe('/x/issue-7.resume.json');
+  });
+});
+
+describe('createFrozenPlanStore', () => {
+  const dirs = createTempDirs();
+  let specPath: string;
+  beforeEach(async () => {
+    specPath = join(await dirs.make('resume-context-frozen-'), 'issue-7.md');
+  });
+  afterEach(() => dirs.cleanup());
+
+  it('loads the frozen spec with no record file, whatever the body hash', async () => {
+    await writeSpec(specPath, { body: '# spec', data: { route: 'claude', design: DESIGN } });
+    const store = createFrozenPlanStore(specPath);
+    expect(await store.load('any-hash')).toMatchObject({ ok: true, route: 'claude', model: 'plan-reused', specPath });
+    await store.record(record('h1'));
+    await store.clear();
+    expect(await readFile(specPath, 'utf8')).toContain('# spec');
+  });
+
+  it('returns null when the spec is missing', async () => {
+    expect(await createFrozenPlanStore(specPath).load('h')).toBeNull();
   });
 });
 

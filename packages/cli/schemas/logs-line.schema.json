@@ -81,6 +81,11 @@
       "properties": {},
       "additionalProperties": {}
     },
+    "prRefresh": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
     "providerCapped": {
       "type": "object",
       "properties": {},

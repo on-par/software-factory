@@ -312,6 +312,14 @@ export interface QueueReprioritizationRecord {
 }
 
 export type EscalateKind = 'missing-info' | 'contradiction' | 'split'; // why the planner escalated (#3275)
+/** Structured details of a `pr_refresh` event: a merge-main sync or a rebuild on a fresh branch (#3325). */
+export interface PrRefreshPayload {
+  pr: number;
+  mergeStateStatus: string;
+  action: 'merge-main' | 'rebuild';
+  newPr?: number;
+}
+
 export interface FactoryEvent {
   ts: string;
   type: EventKind;
@@ -337,6 +345,7 @@ export interface FactoryEvent {
   providerAuthRejected?: ProviderAuthRejectedPayload; // Rejected-credential details on a provider_auth_rejected event (#3232).
   providerBreakerClose?: ProviderBreakerClosePayload; // Close cause on a provider_breaker_close event (#3232).
   providerCapped?: ProviderCappedPayload; // Usage-cap details on a provider_capped event (#3337).
+  prRefresh?: PrRefreshPayload; // Structured pr_refresh details (#3325).
   park?: ParkPayload; // Structured park reason/decision/lane/queue on a park event (#3511).
   lanePaused?: LanePausedPayload; // Breaker details on a `lane-paused` event (#1916).
   stewardTriggered?: StewardTriggeredPayload; // Trigger details on a steward-triggered event (#2086).

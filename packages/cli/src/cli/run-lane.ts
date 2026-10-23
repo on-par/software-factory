@@ -18,6 +18,7 @@ import { laneParkCommenter } from './lane-park-comment.js';
 import { pauseLaneForBrokenBase, tripLaneBreaker } from './lane-pause.js';
 import { waitForMerge } from './land.js';
 import { AwaitingReviewError } from './land-pr.js';
+import { landWithOneRebuild } from './run-lane-rebuild.js';
 import { releaseKeepOnRequeue } from './worktree-keep.js';
 import { shipIssue } from './ship.js';
 import { withHeartbeat } from './lane-heartbeat.js';
@@ -48,9 +49,11 @@ export type RunLaneDeps = {
       lane?: string;
       /** Issues still pending behind this one on the lane, for the park payload (#3511). */
       blockedBehind?: number[];
+      rebuild?: { branch: string };
       onOutcome?: (outcome: RunOutcome) => void;
     },
   ) => Promise<string>;
+  replacePr?: (issue: number, oldPr: number, newPr: number, paths: string[]) => Promise<void>;
   waitMerge?: typeof waitForMerge;
   /** ADR-0161: records a landed stack layer as merged in the slice-plan comment. Defaults to a no-op. */
   recordStackMerge?: (issue: number, prNumber: number) => Promise<void>;
@@ -374,11 +377,24 @@ export async function runLane(
         continue;
       }
       landing = branch;
-      await withHeartbeat(issue, heartbeat, () =>
-        waitMerge(issue, branch, repoRoot, ghRepo, paths, {
-          syncMain: decision.kind === 'adopt' && decision.syncMain === true,
-        }),
-      );
+      await landWithOneRebuild({
+        issue,
+        branch,
+        syncMain: decision.kind === 'adopt' && decision.syncMain === true,
+        heartbeat,
+        land: (target, landOpts) => waitMerge(issue, target, repoRoot, ghRepo, paths, landOpts),
+        rebuild: {
+          lane,
+          paths,
+          ship: (rebuild, onOutcome) =>
+            ship(issue, {}, { repoRoot, ghRepo, paths, lane, blockedBehind: queuedBehind(i), rebuild, onOutcome }),
+          replacePr: deps.replacePr,
+          emitEvent,
+        },
+        onRebuilt: (rebuilt) => {
+          landBranch = landing = rebuilt;
+        },
+      });
       merged++;
       streak = null;
       await settle(issue, 'done');

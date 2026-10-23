@@ -16,7 +16,7 @@ export async function resolveRunBranch(opts: {
   branchPrefix?: string;
   sizeGateMode: SizeGateMode;
   work: WorkRequest;
-  ctx?: { localOnly?: LocalOnlyPolicy; resumeFrom?: CheckResumeRecord; lane?: string };
+  ctx?: { localOnly?: LocalOnlyPolicy; resumeFrom?: CheckResumeRecord; lane?: string; rebuild?: { branch: string } };
   /** --no-pr: always a fresh branch, never an adopted open PR's. */
   noPr?: boolean;
   octokit: Octokit;
@@ -25,6 +25,8 @@ export async function resolveRunBranch(opts: {
   const { issueNum, issueTitle, ghRepo, branchPrefix, sizeGateMode, work, ctx, noPr, octokit, eventsFile } = opts;
   const sliceIndex = await findSliceIndex({ sizeGateMode, ctx, work, octokit, ghRepo, issueNum });
   if (ctx?.resumeFrom) return ctx.resumeFrom.branch;
+  // #3325: a lane rebuild ships on its own fresh branch; the conflicted PR is still open, so never adopt it.
+  if (ctx?.rebuild) return ctx.rebuild.branch;
   const fresh = branchFor(issueNum, issueTitle, branchPrefix, sliceIndex);
   if (
     ctx?.localOnly ||

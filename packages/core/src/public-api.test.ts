@@ -788,6 +788,7 @@ const INTERNAL_API_KEYS = [
   'createGithubQueue',
   'createOctokitQueueClient',
   'createFileReviewReworkStore',
+  'createFrozenPlanStore',
   'createOctokitReviewReworkGitHub',
   'latestDecisiveReviews',
   'pollReviewRework',

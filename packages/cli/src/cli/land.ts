@@ -43,10 +43,11 @@ import {
   CiFailedError,
   LandConflictError,
   LandFailureError,
+  LandRebuildRequiredError,
   MergeGatedError,
   landOpenPullRequest,
 } from './land-pr.js';
-import type { LandLock } from './land-pr.js';
+import type { LandIssueOpts, LandLock } from './land-pr.js';
 import { enforceRiskAtLand } from './land-risk.js';
 import { landRuntime } from './land-runtime.js';
 import { riskPolicyLines } from './risk-policy.js';
@@ -69,7 +70,7 @@ export async function landIssue(
   octokit: Octokit,
   skipCI?: boolean,
   branchPrefix?: string,
-  opts: { allowGated?: boolean; branch?: string; enforceRisk?: boolean; syncMain?: boolean } = {},
+  opts: LandIssueOpts = {},
 ): Promise<{ branch: string; prNumber: number }> {
   const { configLoaders, gitOps, errorDetail, worktreePathFor } = landRuntime();
   const [owner, repoName] = ghRepo.split('/');
@@ -234,6 +235,7 @@ export async function landIssue(
         log,
         skipCI,
         syncMain: opts.syncMain,
+        rebuildOnConflict: opts.rebuildOnConflict,
         adminMerge: resolveMergePolicy(landFactoryConfig).admin,
         withLock: withLandLock,
         ensureWorktree: async () => {
@@ -243,7 +245,12 @@ export async function landIssue(
         },
       });
     } catch (err) {
-      if (err instanceof AwaitingReviewError || err instanceof CiFailedError) {
+      // A rebuild needs the worktree path free for the fresh branch (#3325); the remote branch stays.
+      if (
+        err instanceof AwaitingReviewError ||
+        err instanceof CiFailedError ||
+        err instanceof LandRebuildRequiredError
+      ) {
         await withLandLock(() => gitOps.cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
       }
       throw err;
@@ -360,12 +367,14 @@ export type WaitForMergeDeps = {
     octokit: Octokit,
     skipCI?: boolean,
     branchPrefix?: string,
-    opts?: { allowGated?: boolean; branch?: string; enforceRisk?: boolean; syncMain?: boolean },
+    opts?: LandIssueOpts,
   ) => Promise<{ branch: string; prNumber: number }>;
   /** ADR-0161 stack layer: land exactly this head branch. */
   landBranch?: string;
   /** #3324: forwarded to land. */
   syncMain?: boolean;
+  /** #3325: forwarded to land; a real-path merge-main conflict throws LandRebuildRequiredError. */
+  rebuildOnConflict?: boolean;
   listIssueLabels?: (octokit: Octokit, owner: string, repo: string, issue: number) => Promise<string[]>;
   sleep?: (ms: number) => Promise<void>;
   emitEvent?: typeof logEvent;
@@ -407,6 +416,7 @@ export async function waitForMerge(
     mergeOverrides,
     landBranch,
     syncMain,
+    rebuildOnConflict,
   } = deps;
   const { configLoaders, errorDetail, LaneParkError } = landRuntime();
   const factoryConfig = loadConfig(paths.config);
@@ -477,6 +487,7 @@ export async function waitForMerge(
         ...(landBranch ? { branch: landBranch } : {}),
         enforceRisk: true,
         ...(syncMain ? { syncMain } : {}),
+        ...(rebuildOnConflict ? { rebuildOnConflict } : {}),
       });
       await releaseLandedClaim(paths, ghRepo, issue, (type, msg) => emitEvent(paths.events, type, issue, msg));
       return;

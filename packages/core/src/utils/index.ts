@@ -30,6 +30,7 @@ import { ensureWorktreeParentExcluded } from './worktree-location.js';
 export type { WorktreeSandbox } from './microvm.js';
 
 export { colorEnabled, formatEventLine, levelForType } from './format.js';
+export { shellEscape } from './shell-escape.js';
 
 // ---------- Event Logging ----------
 
@@ -61,7 +62,7 @@ export function logEvent(
     attribution?: RunAttribution;
     paths?: string[];
     mode?: 'mechanical';
-  } & Pick<LogExtra, 'providerAuthRejected' | 'providerBreakerClose'>,
+  } & Pick<LogExtra, 'providerAuthRejected' | 'providerBreakerClose' | 'prRefresh'>,
 ): void {
   const logger = createLogger(eventsFile, { issue, lane: extra?.lane, phase: extra?.phase });
   const level = extra?.level ?? levelForType(type);
@@ -73,6 +74,7 @@ export function logEvent(
   if (extra?.lanePaused) meta.lanePaused = extra.lanePaused;
   if (extra?.park) meta.park = extra.park;
   if (extra?.providerCapped) meta.providerCapped = extra.providerCapped;
+  if (extra?.prRefresh) meta.prRefresh = extra.prRefresh;
   if (extra?.providerAuthRejected) meta.providerAuthRejected = extra.providerAuthRejected;
   if (extra?.providerBreakerClose) meta.providerBreakerClose = extra.providerBreakerClose;
   if (extra?.stewardTriggered) meta.stewardTriggered = extra.stewardTriggered;
@@ -467,12 +469,6 @@ export async function getIssueTitle(repo: string, issue: number, octokit: Pick<O
     issue_number: issue,
   });
   return data.title;
-}
-
-// ---------- Shell helpers ----------
-
-export function shellEscape(s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
 // ---------- File helpers ----------

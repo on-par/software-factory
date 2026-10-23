@@ -50,6 +50,28 @@ function isEnoent(err: unknown): boolean {
   return (err as NodeJS.ErrnoException | null)?.code === 'ENOENT';
 }
 
+async function loadFrozenPlan(specPath: string): Promise<PlanResult | null> {
+  let spec;
+  try {
+    spec = await readSpec(specPath);
+  } catch (err) {
+    if (isEnoent(err)) return null;
+    throw err;
+  }
+  if (spec.route === null) return null;
+  const { artifact } = parseDesignArtifact(spec.data);
+  return { ok: true, route: spec.route, specPath, model: 'plan-reused', designArtifact: artifact };
+}
+
+/** #3325: a lane rebuild reuses the frozen spec whatever the body hash; nothing is recorded or cleared. */
+export function createFrozenPlanStore(specPath: string): PlanReuseStore {
+  return {
+    load: () => loadFrozenPlan(specPath),
+    async record() {},
+    async clear() {},
+  };
+}
+
 export function createPlanReuseStore(specPath: string): PlanReuseStore {
   const path = planReusePath(specPath);
   return {
@@ -64,16 +86,7 @@ export function createPlanReuseStore(specPath: string): PlanReuseStore {
       if (typeof stored !== 'object' || stored === null || (stored as { bodyHash?: unknown }).bodyHash !== bodyHash) {
         return null;
       }
-      let spec;
-      try {
-        spec = await readSpec(specPath);
-      } catch (err) {
-        if (isEnoent(err)) return null;
-        throw err;
-      }
-      if (spec.route === null) return null;
-      const { artifact } = parseDesignArtifact(spec.data);
-      return { ok: true, route: spec.route, specPath, model: 'plan-reused', designArtifact: artifact };
+      return loadFrozenPlan(specPath);
     },
     async record(entry) {
       await mkdir(dirname(path), { recursive: true });

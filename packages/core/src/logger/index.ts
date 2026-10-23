@@ -7,7 +7,7 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
 import type { RunAttribution } from '../run/outcome.js';
-import type { EscalateKind } from '../types/index.js';
+import type { EscalateKind, PrRefreshPayload } from '../types/index.js';
 import type {
   EventKind,
   FlakyTestsPayload,
@@ -52,6 +52,7 @@ export interface LogExtra {
   queueReprioritization?: QueueReprioritizationRecord;
   lanePaused?: LanePausedPayload;
   park?: ParkPayload;
+  prRefresh?: PrRefreshPayload;
   providerCapped?: ProviderCappedPayload;
   providerAuthRejected?: ProviderAuthRejectedPayload;
   providerBreakerClose?: ProviderBreakerClosePayload;
@@ -136,6 +137,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.queueReprioritization !== undefined ? { queueReprioritization: extra.queueReprioritization } : {}),
       ...(extra?.lanePaused ? { lanePaused: extra.lanePaused } : {}),
       ...(extra?.park ? { park: extra.park } : {}),
+      ...(extra?.prRefresh ? { prRefresh: extra.prRefresh } : {}),
       ...(extra?.providerCapped ? { providerCapped: extra.providerCapped } : {}),
       ...(extra?.providerAuthRejected ? { providerAuthRejected: extra.providerAuthRejected } : {}),
       ...(extra?.providerBreakerClose ? { providerBreakerClose: extra.providerBreakerClose } : {}),

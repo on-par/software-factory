@@ -143,7 +143,12 @@ describe('syncLandBranch', () => {
       run,
       log: (...args) => events.push(args),
     });
-    expect(result).toEqual({ ok: false, message: 'unresolved merge conflicts: source.txt', paths: ['source.txt'] });
+    expect(result).toEqual({
+      ok: false,
+      message: 'unresolved merge conflicts: source.txt',
+      paths: ['source.txt'],
+      conflict: true,
+    });
     expect(git(lane, 'rev-parse', 'HEAD')).toBe(before);
     expect(() => git(lane, 'rev-parse', '--verify', 'MERGE_HEAD')).toThrow();
     expect(events).toContainEqual([
