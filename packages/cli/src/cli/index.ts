@@ -332,6 +332,7 @@ import { DeepCheckError, createDeepModelRunner, runIssueCheck, type DeepCheckMod
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
 import { readRunFlagOverrides, recordDraftPrFlag } from './run-flags.js';
 import { runStalenessGuard } from './staleness.js';
+import { cmdBaselineClear } from './baseline.js';
 import { cmdBreakerReset } from './breaker.js';
 import { runWorktreeKeep, runWorktreeRelease } from './worktree-keep.js';
 import { gcWorktreeSandbox, reapParkedLane, reapPrlessShip } from './worktree-reap.js';
@@ -4370,6 +4371,7 @@ export const PROGRAM_HANDLERS = {
   cmdWorktreeGc,
   cmdWorktreeKeep,
   cmdWorktreeRelease,
+  cmdBaselineClear,
   cmdBreakerReset,
   cmdReset,
   cmdSupervise: runSupervise,

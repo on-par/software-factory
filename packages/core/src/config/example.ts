@@ -293,7 +293,10 @@ function modelNamespace(): Node[] {
       kind: 'object',
       key: 'check',
       doc: doc('check'),
-      children: [unset('hermeticGit', doc('check', 'hermeticGit'), true)],
+      children: [
+        unset('hermeticGit', doc('check', 'hermeticGit'), true),
+        unset('baselineCacheTtlHours', doc('check', 'baselineCacheTtlHours'), 24),
+      ],
     },
   ];
 }
