@@ -1518,11 +1518,11 @@ describe('runIssue — #1515: same-file lane guard', () => {
       basePorts({ laneFileGuard: guard, events: () => logB }),
     );
 
-    expect(outcomeB).toMatchObject({ state: 'parked', reason: 'held' });
+    expect(outcomeB).toMatchObject({ state: 'released', reason: 'file-overlap', holder: 100, file: 'src/shared.ts' });
     expect(
       eventsB.some(
         ([type, msg]) =>
-          type === 'held' && msg.includes('#200') && msg.includes('#100') && msg.includes('src/shared.ts'),
+          type === 'issue_deferred' && msg.includes('#200') && msg.includes('#100') && msg.includes('src/shared.ts'),
       ),
     ).toBe(true);
 

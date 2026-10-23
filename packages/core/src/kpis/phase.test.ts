@@ -9,6 +9,10 @@ function cost(task: string, extra: Partial<CostEntry> = {}): CostEntry {
 }
 
 describe('phase attribution (#3126)', () => {
+  it('maps readiness_judge to plan (#3467)', () => {
+    expect(phaseOfTask('readiness_judge')).toBe('plan');
+  });
+
   it('maps build_opencode, build_command, readiness_enrich, decompose and steward rows to their phase', () => {
     expect(phaseOfCostEntry(cost('build_opencode'))).toBe('build');
     expect(phaseOfCostEntry(cost('build_command'))).toBe('build');

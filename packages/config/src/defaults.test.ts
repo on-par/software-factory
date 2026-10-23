@@ -286,9 +286,9 @@ describe('shipped defaults', () => {
     });
   });
 
-  it('has 22 routes, each pointing at a known tier', () => {
+  it('has 23 routes, each pointing at a known tier', () => {
     const routeIds = Object.keys(defaultRoutesConfig.routes);
-    expect(routeIds).toHaveLength(22);
+    expect(routeIds).toHaveLength(23);
 
     const tierIds = new Set(Object.keys(defaultModelsConfig.tiers));
     for (const [route, def] of Object.entries(defaultRoutesConfig.routes)) {
@@ -413,6 +413,17 @@ describe('detect_checks route', () => {
   });
 });
 
+describe('readiness_judge route (#3467)', () => {
+  const route = defaultRoutesConfig.routes.readiness_judge;
+
+  it('is a tool-less JSON route on the triage tier with no model pin', () => {
+    expect(route?.tier).toBe('triage');
+    expect(route?.model).toBeUndefined();
+    expect(route?.allowedTools).toEqual([]);
+    expect(route?.output).toBe('json');
+  });
+});
+
 describe('steward route (#2111)', () => {
   const route = defaultRoutesConfig.routes.steward;
 
@@ -429,10 +440,10 @@ describe('steward route (#2111)', () => {
     expect(route?.output).toBe('json');
   });
 
-  it('leaves every route without a model pin, and every route but steward and detect_checks without allowedTools/output', () => {
+  it('leaves every route without a model pin, and every route but steward, detect_checks and readiness_judge without allowedTools/output', () => {
     for (const [id, def] of Object.entries(defaultRoutesConfig.routes)) {
       expect(def.model, id).toBeUndefined();
-      if (id === 'steward' || id === 'detect_checks') continue;
+      if (id === 'steward' || id === 'detect_checks' || id === 'readiness_judge') continue;
       expect(def.allowedTools, id).toBeUndefined();
       expect(def.output, id).toBeUndefined();
     }

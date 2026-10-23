@@ -18,7 +18,8 @@ import type { LintCommand, PackageJson } from './resolve-commands.js';
 import { isTemplateToken } from '../config/template-tokens.js';
 import { extractJsonObjects } from '../utils/json.js';
 import { APP_SMOKE_CHECKER, appSmokeChecker } from './app-smoke.js';
-import { stripAnsi, writeCommandLog } from './command-log.js';
+import { writeCommandLog } from './command-log.js';
+import { describeCommandFailureTail, describeTestFailure } from './command-output.js';
 
 export { writeCommandLog };
 import {
@@ -143,83 +144,6 @@ export const compileChecker: CheckerFn = async (ctx) => {
     };
   }
 };
-
-const COMMANDER_REQUIRED_OPTION_PATTERN = /^error: required option '.+' not specified$/gm;
-
-function stripIncidentalCommanderNoise(text: string): string {
-  return text
-    .replace(COMMANDER_REQUIRED_OPTION_PATTERN, '')
-    .split(/\r?\n/)
-    .map((line) => line.trimEnd())
-    .filter((line) => line.trim() !== '')
-    .join('\n');
-}
-
-/** Where a failing test announces itself, per runner, and how many lines of its message to keep.
- *  Checked in order, so a vitest FAIL line wins over a vitest suite summary. */
-const FAILED_TEST_MARKERS: readonly { pattern: RegExp; lines: number }[] = [
-  // vitest: " FAIL  file > suite > test"
-  { pattern: /\bFAIL\s+.+\s+>/, lines: 12 },
-  // vitest suite summary: " > file (6 tests | 1 failed) 15ms"
-  { pattern: /^\s*\S+\s+.+\(\d+ tests?\s+\|\s+\d+ failed\)/, lines: 8 },
-  // .NET Microsoft.Testing.Platform: "failed Namespace.Class.Test (46ms)"
-  { pattern: /^\s*failed\s+\S+\s+\((?:\d+(?:\.\d+)?\s*(?:ms|s|m)\s*)+\)\s*$/, lines: 12 },
-  // .NET VSTest: "  Failed Namespace.Class.Test [46 ms]"
-  { pattern: /^\s*Failed\s+\S+\s+\[[^\]]+\]\s*$/, lines: 12 },
-  // go test: "--- FAIL: TestName (0.00s)"
-  { pattern: /^\s*--- FAIL:\s+\S+/, lines: 12 },
-  // pytest short summary: "FAILED tests/test_x.py::test_y - AssertionError"
-  { pattern: /^FAILED\s+\S+::\S+/, lines: 8 },
-  // vitest coverage thresholds: "ERROR: Coverage for statements (96.83%) does not meet "glob" threshold (96.9%)"
-  { pattern: /Coverage for \w+ \([\d.]+%\) does not meet .*threshold/, lines: 8 },
-];
-
-/** npm echoes the script it runs at column 0 (`> node -e "..."`); that text is the command, not its output. */
-const NPM_SCRIPT_ECHO = /^> /;
-
-function extractFailedTestEvidence(output: string): string | null {
-  const lines = stripAnsi(output).split(/\r?\n/);
-  for (const { pattern, lines: keep } of FAILED_TEST_MARKERS) {
-    const start = lines.findIndex((line) => !NPM_SCRIPT_ECHO.test(line) && pattern.test(line));
-    if (start >= 0) {
-      return lines
-        .slice(start, start + keep)
-        .join('\n')
-        .trim();
-    }
-  }
-  return null;
-}
-
-/** Bounded tail of command output. Runners print banners first and failures and summaries
- *  last, so a head slice keeps the banner and drops the error. */
-function outputTail(text: string, maxChars: number): string {
-  const clean = stripAnsi(text).trim();
-  if (clean.length <= maxChars) return clean;
-  const tail = clean.slice(-maxChars);
-  // Drop the partial first line, unless that would throw away most of the tail.
-  const lineStart = tail.indexOf('\n');
-  return `…${lineStart >= 0 && lineStart < maxChars / 2 ? tail.slice(lineStart + 1) : tail}`;
-}
-
-function describeCommandFailureTail(r: CommandResult, maxChars: number): string {
-  const output = r.stderr.trim() !== '' ? r.stderr : r.stdout;
-  return outputTail(output, maxChars) || (r.timedOut ? 'timed out' : `exit code ${r.exitCode}`);
-}
-
-/** Failed-test evidence when a known runner format is found on stdout or stderr, else the output's tail. */
-function describeTestFailure(r: CommandResult, maxChars: number): string {
-  const stdoutEvidence = extractFailedTestEvidence(r.stdout);
-  if (stdoutEvidence) {
-    const stderr = stripIncidentalCommanderNoise(stripAnsi(r.stderr));
-    return (stderr ? `${stdoutEvidence}\nstderr:\n${stderr}` : stdoutEvidence).slice(0, maxChars);
-  }
-
-  const stderrEvidence = extractFailedTestEvidence(r.stderr);
-  if (stderrEvidence) return stderrEvidence.slice(0, maxChars);
-
-  return describeCommandFailureTail(r, maxChars);
-}
 
 /** FAIL details for a checker command: `<label> failed: <summary>`, plus the full-output
  *  log path when one was written. The path sits after the bounded summary so the cap never cuts it. */

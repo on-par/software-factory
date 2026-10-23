@@ -21,3 +21,9 @@ export {
   type DetectedChecks,
 } from './detect-checks.js';
 export { tokenizeEvidenceCommand } from './evidence-allowlist.js';
+export {
+  summarizeCommandRun,
+  parseCommandCounts,
+  type CommandRunCounts,
+  type SummarizeCommandRunOptions,
+} from './command-output.js';

@@ -73,6 +73,7 @@ import { describeSteering, type ConsumedSteering } from '../steering/index.js';
 import type { CiFailureEvidence, CheckSummary, Constitution, FailoverReason, FailurePhase } from '../types/index.js';
 import type { WorkRequest, WorkRequestSourceKind } from '../work/index.js';
 import {
+  deferOnLaneCollision,
   releaseLaneClaim,
   touchedFilesFrom,
   type LaneClaimStalenessProbe,
@@ -230,7 +231,7 @@ export interface RunPorts extends CiReworkPorts {
   createApprovalGate?: () => ApprovalGate;
   drainSteering?: () => ConsumedSteering;
   reworkHistory?: ReworkHistory;
-  /** Same-file lane guard (#1515): parks a run whose PLAN-reported touched files collide
+  /** Same-file lane guard (#1515): defers (re-queues) a run whose PLAN-reported touched files collide
    *  with another in-flight run's claim in the same repo. Optional and a no-op when
    *  undefined, so existing callers/tests that don't wire it see no behavior change.
    *  `laneClaimStaleness` (#3063) lets it reap provably finished holders; undefined = never reap. */
@@ -718,10 +719,7 @@ async function runIssueOnce(
         const staleOpts = ports.laneClaimStaleness && { isStale: ports.laneClaimStaleness, log: ports.events('plan') };
         const collision = await ports.laneFileGuard.findCollision(request.repo, request.issue, touchedFiles, staleOpts);
         if (collision) {
-          return await terminalParked(
-            'held',
-            `issue held: #${request.issue} touches ${collision.file}, already claimed by in-flight issue #${collision.issue} — held until that lane finishes`,
-          );
+          return await deferOnLaneCollision(ports.laneFileGuard, request, collision, route, log);
         }
         if (touchedFiles.length > 0) {
           await ports.laneFileGuard.register(request.repo, request.issue, touchedFiles);

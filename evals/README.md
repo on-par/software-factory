@@ -79,16 +79,21 @@ baseline at `evals/baseline.json`, and fails the job if any case regresses beyon
 its tolerance. The run report is always uploaded as a build artifact, even on
 failure.
 
+The workflow authenticates the Claude CLI with the `CLAUDE_CODE_OAUTH_TOKEN`
+repo secret (a Claude subscription token from `claude setup-token`) or, if set
+instead, `ANTHROPIC_API_KEY` (API billing). The preflight step fails when
+neither is configured.
+
 Run the same pinned real eval locally:
 
 ```
-npm run eval -- --judge-k 3 --plan-model claude-fable-5 --judge-model claude-sonnet-5 --report eval-report.json --baseline evals/baseline.json
+npm run eval -- --judge-k 3 --plan-model claude-fable-5 --judge-model claude-sonnet-5-5 --report eval-report.json --baseline evals/baseline.json
 ```
 
 Refresh the baseline after an intentional prompt or golden-set change:
 
 ```
-npm run eval -- --plan-model claude-fable-5 --judge-model claude-sonnet-5 --write-baseline evals/baseline.json
+npm run eval -- --plan-model claude-fable-5 --judge-model claude-sonnet-5-5 --write-baseline evals/baseline.json
 ```
 
 Run this in real mode (no `--stub`) locally, or copy the numbers from a weekly

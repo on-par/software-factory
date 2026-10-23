@@ -340,7 +340,7 @@ export {
   writeRegistry,
 } from './daemon/registry.js';
 export { createGithubLaneClaimStalenessProbe, releaseLaneClaim } from './run/lane-file-guard.js';
-export type { LaneClaimStalenessProbe } from './run/lane-file-guard.js';
+export type { LaneClaimStalenessProbe, LaneFileHold } from './run/lane-file-guard.js';
 // Daemon lane state resolution (#843)
 export { type DaemonLaneContext, createDaemonLaneContext } from './daemon/lane-context.js';
 export { type DaemonOrchestrator, runDaemonRepo } from './daemon/run-repo.js';
@@ -748,8 +748,7 @@ export { findSlicePlanComment, recordSliceMerged, upsertSlicePlanComment } from 
 export { resolveSliceGate, type SliceGateOutcome } from './readiness/slice-gate.js';
 export * from './blockers/index.js';
 export * from './events/tail.js';
-export type { ReadinessGapCriterion, ReadinessGapReport } from './readiness/enrich.js';
-export { buildReadinessGapPrompt, parseReadinessGapOutput } from './readiness/enrich.js';
+export * from './readiness/internal-exports.js';
 export type { IssueRunState, RunStatus } from './types/index.js';
 export * from './run/state.js';
 export * from './run/steer.js';

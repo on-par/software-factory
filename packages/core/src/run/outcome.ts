@@ -95,6 +95,17 @@ export type RunOutcome =
       attribution?: RunAttribution;
     }
   | {
+      /** #3576: PLAN touched `file`, which in-flight issue `holder` still claims; the issue goes back to queued, not parked. */
+      state: 'released';
+      reason: 'file-overlap';
+      holder: number;
+      file: string;
+      route?: BuildRoute;
+      branch?: string;
+      reworkRounds: number;
+      attribution?: RunAttribution;
+    }
+  | {
       state: 'escalated';
       reason: string;
       route?: BuildRoute;
