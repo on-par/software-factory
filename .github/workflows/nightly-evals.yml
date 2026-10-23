@@ -29,12 +29,13 @@ jobs:
       - name: Install Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
 
-      - name: Preflight — require ANTHROPIC_API_KEY
+      - name: Preflight — require Claude credentials
         env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          if [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "::error::ANTHROPIC_API_KEY repo secret is not configured — the Claude CLI cannot authenticate, so the real eval run would fail on every case. Add the secret in repo settings."
+          if [ -z "$CLAUDE_CODE_OAUTH_TOKEN" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::Neither CLAUDE_CODE_OAUTH_TOKEN (subscription, from \`claude setup-token\`) nor ANTHROPIC_API_KEY (API billing) is configured — the Claude CLI cannot authenticate, so the real eval run would fail on every case. Add one in repo settings."
             exit 1
           fi
 
@@ -42,11 +43,12 @@ jobs:
         id: eval
         continue-on-error: true
         env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: >
           npm run eval -- --judge-k 3
           --plan-model claude-fable-5
-          --judge-model claude-sonnet-5
+          --judge-model claude-sonnet-5-5
           --report eval-report.json
           --baseline evals/baseline.json
 

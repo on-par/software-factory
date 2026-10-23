@@ -340,7 +340,7 @@ export {
   writeRegistry,
 } from './daemon/registry.js';
 export { createGithubLaneClaimStalenessProbe, releaseLaneClaim } from './run/lane-file-guard.js';
-export type { LaneClaimStalenessProbe } from './run/lane-file-guard.js';
+export type { LaneClaimStalenessProbe, LaneFileHold } from './run/lane-file-guard.js';
 // Daemon lane state resolution (#843)
 export { type DaemonLaneContext, createDaemonLaneContext } from './daemon/lane-context.js';
 export { type DaemonOrchestrator, runDaemonRepo } from './daemon/run-repo.js';

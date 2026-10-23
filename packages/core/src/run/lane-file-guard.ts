@@ -2,7 +2,8 @@
 // each in-flight run's PLAN-reported touched files, mirroring ProviderBreaker's
 // (router/breaker.ts) constructor(file) + read/write-tmp-and-rename shape so it works
 // across concurrent lane processes within one `factory run` invocation the same way the
-// breaker already does. Parks the second lane to claim an already-owned file, rather than
+// breaker already does. Defers the second lane to claim an already-owned file (#3576: re-queues it
+// with a recorded hold, never parks it), rather than
 // letting two lanes' BUILD phases race to write conflicting diffs to the same path.
 
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
@@ -15,6 +16,7 @@ import type { EventKind } from '../events/kinds.js';
 import { claimIsLive, claimLiveness } from '../queue/claim-liveness.js';
 import type { DesignArtifact } from '../types/index.js';
 import { branchFor } from '../utils/index.js';
+import type { BuildRoute, RunOutcome } from './outcome.js';
 
 export interface LaneFileClaim {
   repo: string;
@@ -25,10 +27,22 @@ export interface LaneFileClaim {
   pid?: number;
 }
 
+/** #3576: a deferred issue waiting for `holder` to release `file`. */
+export interface LaneFileHold {
+  repo: string;
+  issue: number;
+  holder: number;
+  file: string;
+  heldAt: string;
+}
+
 interface LaneFileGuardFile {
   version: 1;
   claims: Record<string, LaneFileClaim>;
+  holds?: Record<string, LaneFileHold>;
 }
+
+type ReadLaneFileGuardFile = LaneFileGuardFile & { holds: Record<string, LaneFileHold> };
 
 export interface LaneFileCollision {
   issue: number;
@@ -82,6 +96,7 @@ export class LaneFileGuard {
   async register(repo: string, issue: number, files: string[]): Promise<void> {
     if (files.length === 0) return;
     const data = await this.read();
+    delete data.holds[runKeyFor(repo, issue)];
     data.claims[runKeyFor(repo, issue)] = {
       repo,
       issue,
@@ -101,6 +116,32 @@ export class LaneFileGuard {
     await this.write(data);
   }
 
+  /** Records that `issue` was deferred behind `collision.issue`'s claim on `collision.file` (#3576). */
+  async recordHold(repo: string, issue: number, collision: LaneFileCollision): Promise<void> {
+    const data = await this.read();
+    data.holds[runKeyFor(repo, issue)] = {
+      repo,
+      issue,
+      holder: collision.issue,
+      file: collision.file,
+      heldAt: new Date().toISOString(),
+    };
+    await this.write(data);
+  }
+
+  /** The hold for `issue` while the holder's claim still lists the held file. A hold whose
+   *  holder claim is gone (released, parked, reaped) or no longer lists the file is deleted. */
+  async liveHold(repo: string, issue: number): Promise<LaneFileHold | undefined> {
+    const data = await this.read();
+    const key = runKeyFor(repo, issue);
+    const hold = data.holds[key];
+    if (!hold) return undefined;
+    if (data.claims[runKeyFor(hold.repo, hold.holder)]?.files.includes(hold.file)) return hold;
+    delete data.holds[key];
+    await this.write(data);
+    return undefined;
+  }
+
   /** Every claim for `issue`, whatever its repo. Read-only — for `factory reset --dry-run`. */
   async claimsForIssue(issue: number): Promise<LaneFileClaim[]> {
     const data = await this.read();
@@ -115,6 +156,11 @@ export class LaneFileGuard {
     for (const [key, claim] of Object.entries(data.claims)) {
       if (claim.issue !== issue) continue;
       delete data.claims[key];
+      removed = true;
+    }
+    for (const [key, hold] of Object.entries(data.holds)) {
+      if (hold.issue !== issue) continue;
+      delete data.holds[key];
       removed = true;
     }
     if (removed) await this.write(data);
@@ -203,13 +249,13 @@ export class LaneFileGuard {
     return removed.map(({ claim, reason }) => ({ claim, reason }));
   }
 
-  private async read(): Promise<LaneFileGuardFile> {
+  private async read(): Promise<ReadLaneFileGuardFile> {
     try {
       const raw = await readFile(this.file, 'utf-8');
       const parsed = JSON.parse(raw) as Partial<LaneFileGuardFile>;
-      return { version: 1, claims: parsed.claims ?? {} };
+      return { version: 1, claims: parsed.claims ?? {}, holds: parsed.holds ?? {} };
     } catch {
-      return { version: 1, claims: {} };
+      return { version: 1, claims: {}, holds: {} };
     }
   }
 
@@ -219,6 +265,40 @@ export class LaneFileGuard {
     await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`);
     await rename(tmp, this.file);
   }
+}
+
+/** #3576: defer `issue` behind a live same-file collision. Records the hold best-effort (a
+ *  failed write is logged and the run still defers), logs `issue_deferred`, and returns the
+ *  released outcome — no park comment, no `factory:parked`. */
+export async function deferOnLaneCollision(
+  guard: LaneFileGuard,
+  request: { repo: string; issue: number; branch: string },
+  collision: LaneFileCollision,
+  route: BuildRoute | undefined,
+  log: (type: EventKind, msg: string) => void,
+): Promise<Extract<RunOutcome, { reason: 'file-overlap' }>> {
+  const { repo, issue, branch } = request;
+  try {
+    await guard.recordHold(repo, issue, collision);
+  } catch (err) {
+    log(
+      'environment_warning',
+      `could not record lane-file hold for #${issue}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  log(
+    'issue_deferred',
+    `issue deferred: #${issue} touches ${collision.file}, already claimed by in-flight issue #${collision.issue} — re-queued until that lane finishes`,
+  );
+  return {
+    state: 'released',
+    reason: 'file-overlap',
+    holder: collision.issue,
+    file: collision.file,
+    route,
+    branch,
+    reworkRounds: 0,
+  };
 }
 
 /** Best-effort claim release (#3067): a failing lane-files.json write is logged as
