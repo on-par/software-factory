@@ -37,6 +37,7 @@ import {
 
 import { npmCheck, resolveVerifyCommands, verifyCommandChecks, withPathResults } from './doctor-verify.js';
 import { configLintChecks, declaredHarnessChecks, modelsRegistryChecks } from './doctor-config.js';
+import { factoryIgnoredChecks } from './doctor-factory-ignored.js';
 import {
   analyzeEventLog,
   eventLogCheck,
@@ -637,6 +638,7 @@ export function runDoctorChecks(probes: DoctorEnvProbes): DoctorCheck[] {
     });
   } else if (pathExists(resolve(repoRoot, '.factory'))) {
     checks.push({ name: '.factory initialized', ok: true, detail: '.factory/ present', ...repoSection });
+    checks.push(...factoryIgnoredChecks(repoRoot, tryExec, pathExists).map((c) => ({ ...c, ...repoSection })));
   } else {
     checks.push({
       name: '.factory initialized',

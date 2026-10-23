@@ -13,7 +13,12 @@ import { type CommandResult, type RunCommandOptions } from '../utils/command-run
 import { runVerificationCommand as runCommand } from './run-command.js';
 import type { QaConfig } from '../config/qa-section.js';
 import type { ChecksConfig } from '../config/checks-section.js';
-import { resolveCompileCommand, resolveLintCommands, resolveTestsCommand } from './resolve-commands.js';
+import {
+  describeChecksProbe,
+  resolveCompileCommand,
+  resolveLintCommands,
+  resolveTestsCommand,
+} from './resolve-commands.js';
 import type { LintCommand, PackageJson } from './resolve-commands.js';
 import { isTemplateToken } from '../config/template-tokens.js';
 import { extractJsonObjects } from '../utils/json.js';
@@ -32,6 +37,7 @@ import { countPlaceholderLinks, fileExists, findHtmlFiles, probeWorktree, type W
 
 export type { WorktreeProbe } from './probe.js';
 export {
+  describeChecksProbe,
   getPackageJson,
   resolveCompileCommand,
   resolveLintCommands,
@@ -125,7 +131,10 @@ export const compileChecker: CheckerFn = async (ctx) => {
   };
   try {
     const argv = (await resolveCompileCommand(ctx))?.argv;
-    if (!argv) return { checker: 'compile', result: 'SKIP', details: 'no build system detected — skipped' };
+    if (!argv) {
+      const probed = `no checks.build in ${describeChecksProbe(ctx)}, no package.json build script, Makefile or Cargo.toml`;
+      return { checker: 'compile', result: 'SKIP', details: `no build system detected (${probed}) — skipped` };
+    }
 
     const label = argv.join(' ');
     const r = await run(argv, { cwd: ctx.worktree, timeoutMs, env: ctx.env, onPgid: ctx.onPgid });
@@ -219,15 +228,13 @@ export const testsChecker: CheckerFn = async (ctx) => {
       return {
         checker: 'tests',
         result: 'FAIL',
-        details:
-          'no verification command was run — constitution requires tests (requireTests: true) but the worktree has no checks.test in .factory/config.json, pytest, scripts/verify.sh, scripts/verify.ps1, or npm-test surface (run `factory init --detect-checks`)',
+        details: `no verification command was run — constitution requires tests (requireTests: true) but there is no checks.test in ${describeChecksProbe(ctx)} and the worktree has no pytest, scripts/verify.sh, scripts/verify.ps1, or npm-test surface (run \`factory init --detect-checks\`)`,
       };
     }
     return {
       checker: 'tests',
       result: 'SKIP',
-      details:
-        'no verification command was run — no checks.test in .factory/config.json, no scripts/verify.sh, no scripts/verify.ps1 and no package.json test script found',
+      details: `no verification command was run — no checks.test in ${describeChecksProbe(ctx)}, no scripts/verify.sh, no scripts/verify.ps1 and no package.json test script found`,
     };
   } catch (e: any) {
     return {
@@ -268,7 +275,9 @@ export const lintChecker: CheckerFn = async (ctx) => {
   }
   if (details.length === 0) {
     result = 'SKIP';
-    details.push('no linting configured — skipped');
+    details.push(
+      `no linting configured (no checks.lint in ${describeChecksProbe(ctx)}, no package.json lint script, no tsconfig.json) — skipped`,
+    );
   }
 
   return { checker: 'lint', result, details: details.join('; ') };

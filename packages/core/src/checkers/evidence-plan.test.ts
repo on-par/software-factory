@@ -110,8 +110,18 @@ describe('evidence plan runner', () => {
         },
       },
     );
-    expect(result[0]).toMatchObject({ status: 'SKIP', reason: 'not allowlisted' });
+    expect(result[0]).toMatchObject({ status: 'SKIP' });
+    expect(result[0]!.reason).toMatch(/^unsupported shell syntax \(.*no pipes/);
     expect(calls).toBe(0);
+  });
+
+  it('a fail-to-pass selector with shell syntax SKIPs as unsupported shell syntax, not as not allowlisted', async () => {
+    const result = await runEvidencePlan(
+      [entry('fail-to-pass-test', { test: 'a.test.ts > out.txt' })],
+      new Map([['test', ['npm', 'test']]]),
+      { worktree: '/tmp/lane', sandbox: policy(), runCommand: async () => commandResult(0) },
+    );
+    expect(result[0]!.reason).toMatch(/^unsupported shell syntax/);
   });
 
   it('evidence runner skips unsupported evidence without spawning', async () => {

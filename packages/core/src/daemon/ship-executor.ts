@@ -51,6 +51,7 @@ export function createShipExecutor(options: {
       };
       // A request snapshot wins over inherited routing policy. Local submissions keep the CLI defaults.
       delete env.FACTORY_RUN_CONFIG_JSON;
+      delete env.FACTORY_RUN_CONFIG_ORIGIN;
       if (run.executionConfig) {
         env.FACTORY_RUN_CONFIG_JSON = JSON.stringify(run.executionConfig);
         for (const key of [
