@@ -1,5 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -7,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { defaultFactoryConfig } from '@on-par/factory-config';
 
 import { FactoryConfigSchema } from '../config/index.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import {
   claimDiskAlertSlot,
   evaluateDiskGuard,
@@ -17,15 +17,11 @@ import {
 } from './disk-guard.js';
 
 const GIB = 1024 ** 3;
-const dirs: string[] = [];
-afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+const tempDirs = createTempDirs();
+afterEach(async () => {
+  await tempDirs.cleanup();
 });
-const tmp = (): string => {
-  const d = mkdtempSync(join(tmpdir(), 'disk-guard-'));
-  dirs.push(d);
-  return d;
-};
+const tmp = (): string => tempDirs.makeSync('disk-guard-');
 
 describe('readFreeSpace', () => {
   it('multiplies bavail by bsize for number and bigint fields', () => {
