@@ -1,11 +1,10 @@
 // packages/core/src/queue/orphan-drafts.test.ts — the hourly sweep closes stale orphan factory drafts and requeues their issues (#3552).
 
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import type { EventKind } from '../events/kinds.js';
 import { fakeIssueComments } from './fake-issue-comments.js';
 import {
@@ -109,10 +108,10 @@ function setup(
 
 let dir: string;
 beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'orphan-drafts-'));
+  dir = await tmp.make('orphan-drafts-');
 });
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
+  await tmp.cleanup();
 });
 
 async function run(s: ReturnType<typeof setup>, extra: { now?: number; cap?: number } = {}) {
