@@ -23,7 +23,12 @@ import { LaneEnvironmentPauseError } from './lane-environment-pause-error.js';
 import { INVALID_BRANCH_PREFIX_MESSAGE, resolveBranchPrefixOption } from './branch-prefix.js';
 import { sweepLaneClaims, warnQueueDiagnostics } from './queue-startup.js';
 import { proposeTriageQueue } from './triage-open-prs.js';
-import { makeQueuePreflightOps, preflightQueuedIssue, type QueuePreflightOps } from './queue-preflight.js';
+import {
+  makeQueuePreflightOps,
+  preflightQueuedIssue,
+  type LaneFileHoldLookup,
+  type QueuePreflightOps,
+} from './queue-preflight.js';
 import {
   type Environment,
   type EnvironmentProxySettings,
@@ -3604,7 +3609,12 @@ export function createQueuePreflightOps(
   octokit: Octokit,
   owner: string,
   repo: string,
-  opts: { autoMergeStack?: boolean; stackMode?: boolean; onDeferred?: (issue: number, message: string) => void } = {},
+  opts: {
+    autoMergeStack?: boolean;
+    stackMode?: boolean;
+    onDeferred?: (issue: number, message: string) => void;
+    laneFileHold?: LaneFileHoldLookup;
+  } = {},
 ): QueuePreflightOps {
   return makeQueuePreflightOps(octokit, owner, repo, {
     watch: (ref) => internalOps.watchChecks({ octokit, owner, repo, ref }),

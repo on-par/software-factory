@@ -382,6 +382,9 @@ const INTERNAL_API_KEYS = [
   // Readiness deep check (#1732)
   'buildDecompositionPrompt',
   'parseDecompositionOutput',
+  // Command-run summary (#3328)
+  'summarizeCommandRun',
+  'parseCommandCounts',
   ...Object.keys(await import('./run/pr-lookup.js')), // open-PR lookup (#3439)
   ...(await Promise.all([import('./blockers/index.js'), import('./queue/unpark.js')])).flatMap(Object.keys), // blockers (#2316), unpark (#2318)
   'buildReadinessGapPrompt',

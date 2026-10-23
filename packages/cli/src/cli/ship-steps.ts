@@ -256,6 +256,16 @@ export function finishOutcome({
     return outcome.branch ?? '';
   }
 
+  if (outcome.state === 'released' && outcome.reason === 'file-overlap') {
+    console.log(
+      styleText(
+        'yellow',
+        `⏸ Issue #${issueNum} → deferred: ${outcome.file} is claimed by in-flight issue #${outcome.holder}; re-queued, not parked`,
+      ),
+    );
+    return outcome.branch ?? '';
+  }
+
   if (outcome.state === 'released') {
     throw new LaneEnvironmentPauseError(terminalMessage ?? 'environment failure on base', {
       baseSha: outcome.baseSha,
