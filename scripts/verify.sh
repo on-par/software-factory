@@ -22,10 +22,9 @@ for arg in "$@"; do
   fi
 done
 
-# The repo default (npm test / CI) is 4 workers. verify.sh opts out to 1 (serial)
-# by default because the shared factory host runs at very high load. Set
-# FACTORY_TEST_MAX_WORKERS=N to override.
-export FACTORY_TEST_MAX_WORKERS="${FACTORY_TEST_MAX_WORKERS:-1}"
+# Same default as npm test / CI: 4 workers (scripts/test-workers.ts). On a heavily loaded
+# shared host, set FACTORY_TEST_MAX_WORKERS=1 to run serially, or any N to override.
+export FACTORY_TEST_MAX_WORKERS="${FACTORY_TEST_MAX_WORKERS:-4}"
 echo "verify: FACTORY_TEST_MAX_WORKERS=${FACTORY_TEST_MAX_WORKERS}"
 echo "verify: CI=${CI:-} (test budget overrun fails verify when CI is set)"
 
