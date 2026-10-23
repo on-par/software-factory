@@ -40,7 +40,7 @@ export async function loadGoldenCases(dir: string): Promise<GoldenCase[]> {
   );
 }
 
-function extractStubOutput(content: string): { content: string; stubOutput?: string } {
+export function extractStubOutput(content: string): { content: string; stubOutput?: string } {
   const stubMatch = content.match(/```stub-output\r?\n([\s\S]*?)\r?\n```/);
   if (!stubMatch) return { content };
 
@@ -50,7 +50,7 @@ function extractStubOutput(content: string): { content: string; stubOutput?: str
   };
 }
 
-function extractTitleAndBody(content: string, path: string): { title: string; body: string } {
+export function extractTitleAndBody(content: string, path: string): { title: string; body: string } {
   const titleMatch = content.match(/^# (.+)$/m);
   if (!titleMatch || titleMatch.index === undefined) {
     throw new Error(`${path}: missing first '# ' issue title heading`);

@@ -1,16 +1,30 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import type { Baseline, ModelsConfig, RoutesConfig } from '@on-par/factory-core';
+import type {
+  Baseline,
+  CaseResult,
+  GoldenCase,
+  ModelsConfig,
+  ReadinessBaseline,
+  ReadinessCase,
+  ReadinessCaseResult,
+  RoutesConfig,
+} from '@on-par/factory-core';
 import {
+  compareReadinessToBaseline,
   compareToBaseline,
   isRouteAsserted,
   loadGoldenCases,
+  loadReadinessCases,
   loadModelsConfig,
   loadRoutesConfig,
   ModelRouter,
+  readinessStubSteps,
   runEval,
+  runReadinessEval,
   toBaseline,
+  toReadinessBaseline,
 } from '@on-par/factory-core';
 import { StubModelExecutor } from '@on-par/factory-core/testing';
 
@@ -18,23 +32,32 @@ interface Args {
   stub: boolean;
   judge: boolean;
   filter?: string;
-  dir: string;
+  suite: 'plan' | 'readiness';
+  dir?: string;
   report?: string;
   baseline?: string;
   writeBaseline?: string;
   judgeK: number;
   planModel?: string;
   judgeModel?: string;
+  readinessModel?: string;
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { stub: false, judge: true, dir: 'evals/golden', judgeK: 1 };
+  const args: Args = { stub: false, judge: true, suite: 'plan', judgeK: 1 };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--stub') args.stub = true;
     else if (arg === '--no-judge') args.judge = false;
     else if (arg === '--filter') args.filter = argv[++i];
     else if (arg === '--dir') args.dir = argv[++i] ?? args.dir;
+    else if (arg === '--suite') {
+      const suite = argv[++i];
+      if (suite !== 'plan' && suite !== 'readiness') {
+        throw new Error(`invalid --suite '${suite ?? ''}' (expected plan or readiness)`);
+      }
+      args.suite = suite;
+    } else if (arg === '--readiness-model') args.readinessModel = argv[++i];
     else if (arg === '--report') args.report = argv[++i];
     else if (arg === '--baseline') args.baseline = argv[++i];
     else if (arg === '--write-baseline') args.writeBaseline = argv[++i];
@@ -52,48 +75,53 @@ function parseArgs(argv: string[]): Args {
 }
 
 const args = parseArgs(process.argv.slice(2));
-const allCases = await loadGoldenCases(resolve(args.dir));
-const cases = args.filter ? allCases.filter((c) => c.id.includes(args.filter!)) : allCases;
-const router = args.stub ? buildStubRouter(cases) : buildRealRouter(args);
-const summary = await runEval({
-  cases,
-  router,
-  judge: args.stub ? false : args.judge,
-  judgeK: args.stub ? 1 : args.judgeK,
-  worktree: process.cwd(),
-});
+if (args.suite === 'readiness') await runReadinessSuite();
+else await runPlanSuite();
 
-printTable(summary.results, new Map(cases.map((c) => [c.id, c.expectedRoute])));
-const routeCorrectCount = summary.results.filter(
-  (result) => isRouteAsserted(result.expectedRoute) && result.routeCorrect,
-).length;
-console.log(
-  `pass-rate ${summary.passed}/${summary.total} (${Math.round(summary.passRate * 100)}%) · ` +
-    `route-accuracy ${Math.round(summary.routeAccuracy * 100)}% (${routeCorrectCount}/${summary.routeAsserted}) · ` +
-    `est. cost $${summary.totalCostEstimate.toFixed(4)} · ` +
-    `total latency ${(summary.totalLatencyMs / 1000).toFixed(2)}s`,
-);
+async function runPlanSuite(): Promise<void> {
+  const allCases = await loadGoldenCases(resolve(args.dir ?? 'evals/golden'));
+  const cases = args.filter ? allCases.filter((c) => c.id.includes(args.filter!)) : allCases;
+  const router = args.stub ? buildStubRouter(cases) : buildRealRouter(args);
+  const summary = await runEval({
+    cases,
+    router,
+    judge: args.stub ? false : args.judge,
+    judgeK: args.stub ? 1 : args.judgeK,
+    worktree: process.cwd(),
+  });
 
-if (args.report) {
-  writeFileSync(args.report, JSON.stringify(summary, null, 2) + '\n');
-}
-
-if (args.writeBaseline) {
-  const existing = readExistingBaseline(args.writeBaseline);
-  writeFileSync(
-    args.writeBaseline,
-    JSON.stringify(toBaseline(summary, existing?.tolerance, existing?.budgets), null, 2) + '\n',
+  printTable(summary.results, new Map(cases.map((c) => [c.id, c.expectedRoute])));
+  const routeCorrectCount = summary.results.filter(
+    (result) => isRouteAsserted(result.expectedRoute) && result.routeCorrect,
+  ).length;
+  console.log(
+    `pass-rate ${summary.passed}/${summary.total} (${Math.round(summary.passRate * 100)}%) · ` +
+      `route-accuracy ${Math.round(summary.routeAccuracy * 100)}% (${routeCorrectCount}/${summary.routeAsserted}) · ` +
+      `est. cost $${summary.totalCostEstimate.toFixed(4)} · ` +
+      `total latency ${(summary.totalLatencyMs / 1000).toFixed(2)}s`,
   );
-}
 
-if (args.baseline) {
-  const baseline: Baseline = JSON.parse(readFileSync(args.baseline, 'utf8'));
-  const comparison = compareToBaseline(summary, baseline);
-  for (const note of comparison.notes) console.log(`NOTE: ${note}`);
-  for (const regression of comparison.regressions) console.log(`REGRESSION: ${regression}`);
-  process.exitCode = comparison.ok ? 0 : 1;
-} else if (summary.failed > 0) {
-  process.exitCode = 1;
+  if (args.report) {
+    writeFileSync(args.report, JSON.stringify(summary, null, 2) + '\n');
+  }
+
+  if (args.writeBaseline) {
+    const existing = readExistingBaseline(args.writeBaseline);
+    writeFileSync(
+      args.writeBaseline,
+      JSON.stringify(toBaseline(summary, existing?.tolerance, existing?.budgets), null, 2) + '\n',
+    );
+  }
+
+  if (args.baseline) {
+    const baseline: Baseline = JSON.parse(readFileSync(args.baseline, 'utf8'));
+    const comparison = compareToBaseline(summary, baseline);
+    for (const note of comparison.notes) console.log(`NOTE: ${note}`);
+    for (const regression of comparison.regressions) console.log(`REGRESSION: ${regression}`);
+    process.exitCode = comparison.ok ? 0 : 1;
+  } else if (summary.failed > 0) {
+    process.exitCode = 1;
+  }
 }
 
 function readExistingBaseline(path: string): Baseline | undefined {
@@ -104,7 +132,7 @@ function readExistingBaseline(path: string): Baseline | undefined {
   }
 }
 
-function buildStubRouter(cases: typeof allCases): ModelRouter {
+function buildStubRouter(cases: GoldenCase[]): ModelRouter {
   const models: ModelsConfig = {
     version: 1,
     models: {
@@ -147,8 +175,9 @@ function buildRealRouter(args: Args): ModelRouter {
 
   assertKnownModel(models, args.planModel, '--plan-model');
   assertKnownModel(models, args.judgeModel, '--judge-model');
+  assertKnownModel(models, args.readinessModel, '--readiness-model');
 
-  if (!args.planModel && !args.judgeModel) return new ModelRouter(models, routes);
+  if (!args.planModel && !args.judgeModel && !args.readinessModel) return new ModelRouter(models, routes);
 
   const pinnedModels: ModelsConfig = {
     ...models,
@@ -156,6 +185,7 @@ function buildRealRouter(args: Args): ModelRouter {
       ...models.tiers,
       ...(args.planModel ? { boss: [args.planModel] } : {}),
       ...(args.judgeModel ? { checker: [args.judgeModel] } : {}),
+      ...(args.readinessModel ? { triage: [args.readinessModel] } : {}),
     },
   };
 
@@ -168,7 +198,7 @@ function assertKnownModel(models: ModelsConfig, model: string | undefined, flag:
   }
 }
 
-function printTable(results: typeof summary.results, expectedRoutes: Map<string, string>) {
+function printTable(results: CaseResult[], expectedRoutes: Map<string, string>) {
   console.log(
     [
       'id'.padEnd(28),
@@ -199,6 +229,134 @@ function printTable(results: typeof summary.results, expectedRoutes: Map<string,
         `$${result.costEstimate.toFixed(4)}`,
       ].join(' '),
     );
+    if (result.error) console.log(`  error: ${result.error}`);
+  }
+}
+
+async function runReadinessSuite(): Promise<void> {
+  const allCases = await loadReadinessCases(resolve(args.dir ?? 'evals/readiness'));
+  const cases = args.filter ? allCases.filter((c) => c.id.includes(args.filter!)) : allCases;
+  const router = args.stub ? buildReadinessStubRouter(cases) : buildRealRouter(args);
+  const summary = await runReadinessEval({
+    cases,
+    router,
+    judge: args.stub ? false : args.judge,
+    judgeK: args.stub ? 1 : args.judgeK,
+    worktree: process.cwd(),
+  });
+
+  printReadinessTable(summary.results);
+  const pct = (x: number): string => `${Math.round(x * 100)}%`;
+  console.log(
+    `pass-rate ${summary.passed}/${summary.total} (${pct(summary.accuracy)}) · ` +
+      `false-ready ${pct(summary.falseReadyRate)} · ` +
+      `false-not-ready ${pct(summary.falseNotReadyRate)} · ` +
+      `must-ask ${pct(summary.mustAskHitRate)} · ` +
+      `judge-errors ${summary.judgeErrors} · ` +
+      `est. cost $${summary.totalCostEstimate.toFixed(4)} · ` +
+      `total latency ${(summary.totalLatencyMs / 1000).toFixed(2)}s`,
+  );
+
+  if (args.report) {
+    writeFileSync(args.report, JSON.stringify(summary, null, 2) + '\n');
+  }
+
+  if (args.writeBaseline) {
+    const existing = readExistingReadinessBaseline(args.writeBaseline);
+    writeFileSync(
+      args.writeBaseline,
+      JSON.stringify(toReadinessBaseline(summary, existing?.tolerance, existing?.budgets), null, 2) + '\n',
+    );
+  }
+
+  if (args.baseline) {
+    const baseline: ReadinessBaseline = JSON.parse(readFileSync(args.baseline, 'utf8'));
+    const comparison = compareReadinessToBaseline(summary, baseline);
+    for (const note of comparison.notes) console.log(`NOTE: ${note}`);
+    for (const regression of comparison.regressions) console.log(`REGRESSION: ${regression}`);
+    process.exitCode = comparison.ok ? 0 : 1;
+  } else if (summary.failed > 0) {
+    process.exitCode = 1;
+  }
+}
+
+function readExistingReadinessBaseline(path: string): ReadinessBaseline | undefined {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
+function buildReadinessStubRouter(cases: ReadinessCase[]): ModelRouter {
+  const models: ModelsConfig = {
+    version: 1,
+    models: {
+      'stub-model': {
+        provider: 'custom',
+        tier: ['boss', 'checker'],
+        costPerMtokInput: 0,
+        costPerMtokOutput: 0,
+        contextWindow: 1000,
+        capabilities: [],
+        envKey: null,
+      },
+    },
+    tiers: { boss: ['stub-model'], checker: ['stub-model'] },
+    failover: {
+      triggers: ['rate_limit', 'unavailable', 'auth'],
+      maxRetries: 0,
+      cooldownMs: 0,
+    },
+    routingRules: {},
+  };
+  const routes: RoutesConfig = {
+    version: 1,
+    routes: {
+      readiness_judge: { tier: 'checker', description: 'stub readiness judge' },
+      eval_judge: { tier: 'checker', description: 'stub judge' },
+    },
+  };
+  const executor = new StubModelExecutor({
+    scripts: { readiness_judge: cases.flatMap(readinessStubSteps) },
+  });
+  return new ModelRouter(models, routes, false, executor);
+}
+
+function printReadinessTable(results: ReadinessCaseResult[]): void {
+  console.log(
+    [
+      'id'.padEnd(32),
+      'verdict'.padEnd(24),
+      'expected'.padEnd(24),
+      'checks'.padEnd(8),
+      'rubric'.padEnd(10),
+      'latency'.padEnd(10),
+      'cost',
+    ].join(' '),
+  );
+
+  for (const result of results) {
+    const checksPassed = `${result.checks.filter((c) => c.pass).length}/${result.checks.length}`;
+    const rubric = result.judgeMalformed
+      ? 'MALFORMED'
+      : result.rubricScore === undefined
+        ? '—'
+        : result.rubricScore.toFixed(1);
+    console.log(
+      [
+        result.id.padEnd(32),
+        result.verdict.padEnd(24),
+        result.expectedVerdict.padEnd(24),
+        checksPassed.padEnd(8),
+        rubric.padEnd(10),
+        `${result.latencyMs}ms`.padEnd(10),
+        `$${result.costEstimate.toFixed(4)}`,
+      ].join(' '),
+    );
+    if (!result.pass) {
+      for (const check of result.checks.filter((c) => !c.pass)) console.log(`  ${check.name}: ${check.details}`);
+    }
     if (result.error) console.log(`  error: ${result.error}`);
   }
 }

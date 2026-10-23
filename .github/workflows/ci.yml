@@ -195,6 +195,9 @@ jobs:
       - name: Eval (deterministic, stub)
         run: npm run eval -- --stub
 
+      - name: Eval readiness (deterministic, stub)
+        run: npm run eval -- --stub --suite readiness
+
   quickstart:
     name: quickstart-smoke
     runs-on: ubuntu-latest

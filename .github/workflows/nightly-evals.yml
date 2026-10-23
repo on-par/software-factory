@@ -59,6 +59,26 @@ jobs:
           name: eval-report
           path: eval-report.json
 
+      - name: Readiness eval run
+        id: readiness_eval
+        continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: >
+          npm run eval -- --suite readiness --judge-k 3
+          --readiness-model claude-sonnet-5-5
+          --judge-model claude-sonnet-5-5
+          --report readiness-eval-report.json
+          --baseline evals/readiness-baseline.json
+
+      - name: Upload readiness report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: readiness-eval-report
+          path: readiness-eval-report.json
+
       - name: Download previous eval history
         if: always()
         env:
@@ -126,4 +146,10 @@ jobs:
         if: steps.eval.outcome == 'failure'
         run: |
           echo "weekly prompt eval step failed (regression or infra) — marking job red"
+          exit 1
+
+      - name: Fail the job on readiness eval regression
+        if: steps.readiness_eval.outcome == 'failure'
+        run: |
+          echo "weekly readiness eval step failed (regression or infra) — marking job red"
           exit 1
