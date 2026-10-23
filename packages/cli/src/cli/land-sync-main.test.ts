@@ -1,6 +1,6 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+import { createTempDirs } from '@on-par/factory-core/testing';
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -155,7 +155,8 @@ describe('syncMain adopt (#3324)', () => {
   });
 
   it('waitForMerge forwards syncMain to land only when set', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'sync-main-wait-'));
+    const tmp = createTempDirs();
+    const root = await tmp.make('sync-main-wait-');
     const paths: any = {
       events: join(root, 'events.ndjson'),
       stop: join(root, 'STOP'),
@@ -181,6 +182,6 @@ describe('syncMain adopt (#3324)', () => {
     };
     expect(await run(true)).toMatchObject({ syncMain: true });
     expect(await run()).toEqual({ enforceRisk: true });
-    await rm(root, { recursive: true, force: true });
+    await tmp.cleanup();
   });
 });
