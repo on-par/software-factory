@@ -69,7 +69,7 @@ export async function landIssue(
   octokit: Octokit,
   skipCI?: boolean,
   branchPrefix?: string,
-  opts: { allowGated?: boolean; branch?: string; enforceRisk?: boolean } = {},
+  opts: { allowGated?: boolean; branch?: string; enforceRisk?: boolean; syncMain?: boolean } = {},
 ): Promise<{ branch: string; prNumber: number }> {
   const { configLoaders, gitOps, errorDetail, worktreePathFor } = landRuntime();
   const [owner, repoName] = ghRepo.split('/');
@@ -233,6 +233,7 @@ export async function landIssue(
         prNumber,
         log,
         skipCI,
+        syncMain: opts.syncMain,
         adminMerge: resolveMergePolicy(landFactoryConfig).admin,
         withLock: withLandLock,
         ensureWorktree: async () => {
@@ -359,10 +360,12 @@ export type WaitForMergeDeps = {
     octokit: Octokit,
     skipCI?: boolean,
     branchPrefix?: string,
-    opts?: { allowGated?: boolean; branch?: string; enforceRisk?: boolean },
+    opts?: { allowGated?: boolean; branch?: string; enforceRisk?: boolean; syncMain?: boolean },
   ) => Promise<{ branch: string; prNumber: number }>;
   /** ADR-0161 stack layer: land exactly this head branch. */
   landBranch?: string;
+  /** #3324: forwarded to land. */
+  syncMain?: boolean;
   listIssueLabels?: (octokit: Octokit, owner: string, repo: string, issue: number) => Promise<string[]>;
   sleep?: (ms: number) => Promise<void>;
   emitEvent?: typeof logEvent;
@@ -403,6 +406,7 @@ export async function waitForMerge(
     now = () => Date.now(),
     mergeOverrides,
     landBranch,
+    syncMain,
   } = deps;
   const { configLoaders, errorDetail, LaneParkError } = landRuntime();
   const factoryConfig = loadConfig(paths.config);
@@ -473,8 +477,13 @@ export async function waitForMerge(
         await land(issue, repoRoot, ghRepo, paths, octokit, skipCI, undefined, {
           branch: landBranch,
           enforceRisk: true,
+          ...(syncMain ? { syncMain } : {}),
         });
-      else await land(issue, repoRoot, ghRepo, paths, octokit, skipCI, undefined, { enforceRisk: true });
+      else
+        await land(issue, repoRoot, ghRepo, paths, octokit, skipCI, undefined, {
+          enforceRisk: true,
+          ...(syncMain ? { syncMain } : {}),
+        });
       await releaseLandedClaim(paths, ghRepo, issue, (type, msg) => emitEvent(paths.events, type, issue, msg));
       return;
     }

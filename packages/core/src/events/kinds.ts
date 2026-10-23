@@ -120,6 +120,7 @@ export type EventKind =
   | 'merge-gated'
   | 'merge-gated-override'
   | 'pr-classified'
+  | 'pr_refresh'
   | 'merged'
   | 'model-override'
   | 'model_override_ignored'
@@ -354,6 +355,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'pr-adopt-lookup-failed': { severity: 'warn', isPark: false, isTerminal: false },
   'pr-adopted': { severity: 'info', isPark: false, isTerminal: false },
   'pr-classified': { severity: 'info', isPark: false, isTerminal: false },
+  pr_refresh: { severity: 'info', isPark: false, isTerminal: false },
   merged: { severity: 'info', isPark: false, isTerminal: true },
   'model-override': { severity: 'info', isPark: false, isTerminal: false },
   model_override_ignored: { severity: 'warn', isPark: false, isTerminal: false },

@@ -438,17 +438,14 @@ export async function preflightQueuedIssue(
       }
       if (!unknown(state)) break;
     }
-    if (unknown(state)) {
-      deps.onDeferred?.(
-        issue.number,
-        `PR #${pr.number} merge state still UNKNOWN after ${MERGE_STATE_REREAD_DELAYS_MS.length} re-reads`,
-      );
-      return { kind: 'defer' };
-    }
     if (state.isDraft !== false) {
       return { kind: 'park', reason: `PR #${pr.number} is draft or its draft state is unavailable` };
     }
+    // #3324: still UNKNOWN after the re-reads, so the head may be stale; land merges main in before its CI watch.
+    if (unknown(state)) return { kind: 'adopt', branch: pr.branch, syncMain: true };
   }
+  // #3324: no pull_request CI runs on a conflicting head, so skip the watch and let land merge main in first.
+  if (state.mergeStateStatus === 'DIRTY') return { kind: 'adopt', branch: pr.branch, syncMain: true };
 
   let outcome: CiOutcome;
   try {

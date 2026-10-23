@@ -357,7 +357,11 @@ export async function runLane(
         continue;
       }
       landing = branch;
-      await withHeartbeat(issue, heartbeat, () => waitMerge(issue, branch, repoRoot, ghRepo, paths));
+      await withHeartbeat(issue, heartbeat, () =>
+        decision.kind === 'adopt' && decision.syncMain
+          ? waitMerge(issue, branch, repoRoot, ghRepo, paths, { syncMain: true })
+          : waitMerge(issue, branch, repoRoot, ghRepo, paths),
+      );
       merged++;
       streak = null;
       await settle(issue, 'done');
