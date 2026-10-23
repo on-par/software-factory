@@ -10,8 +10,12 @@ export function registerSetupCommands(program: Command, handlers: ProgramHandler
       'Set up .factory/ in this repo (config, constitution, queue file, .gitignore) and check model reachability',
     )
     .option('--force', 'Overwrite an existing .factory config, constitution, and .gitignore')
-    .option('-y, --yes', 'Accept defaults without prompting (init never prompts; accepted for scripts and CI)')
-    .action((opts: { force?: boolean; yes?: boolean }) => handlers.cmdInit(opts));
+    .option('-y, --yes', 'Accept defaults without prompting (with --detect-checks: write the commands that passed)')
+    .option(
+      '--detect-checks',
+      'Find the build/test/lint commands CHECK should run (heuristics, then an agent over the docs, CI and scripts), dry-run each, and write them under `checks` on confirmation',
+    )
+    .action((opts: { force?: boolean; yes?: boolean; detectChecks?: boolean }) => handlers.cmdInit(opts));
 
   program
     .command('migrate')

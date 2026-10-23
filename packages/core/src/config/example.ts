@@ -234,6 +234,11 @@ function modelNamespace(): Node[] {
     { kind: 'object', key: 'providers', doc: doc('providers'), children: leaves(['providers'], true) },
     unset('route', doc('route'), '"<route>"'),
     unset('commands', doc('commands'), '{ test: "vitest run" }'),
+    unset(
+      'checks',
+      doc('checks'),
+      '{ build: "dotnet build", test: "dotnet test", lint: "dotnet format --verify-no-changes" }',
+    ),
     unset('qa', doc('qa'), '{ start: ["npm", "start"], smoke: ["npm", "run", "smoke"] }'),
     {
       kind: 'object',
@@ -404,6 +409,9 @@ const HEADER = [
   'Commented-out keys are unset by default. Setting one outranks the matching FACTORY_* env',
   'var, so leave it out to keep env control. The value shown is the default, or a <placeholder>',
   'when there is none. `factory status --kpis` prints the effective config.',
+  '',
+  'Starter configs for typical repos: docs/config.example.dotnet.yaml, docs/config.example.node.yaml,',
+  'docs/config.example.python.yaml. `factory init --detect-checks` fills in `checks` for you.',
   '',
   'Accepted but not shown:',
 ];

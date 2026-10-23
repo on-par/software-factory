@@ -15,6 +15,19 @@ describe('evidence allowlist', () => {
     expect([...resolveEvidenceAllowlist(null, null)]).toEqual([]);
   });
 
+  it('declared checks beat same-named scripts, and explicit commands beat checks', () => {
+    const actual = resolveEvidenceAllowlist(
+      { scripts: { test: 'vitest', lint: 'oxlint' } },
+      {
+        checks: { build: 'dotnet build App.sln', test: 'pwsh ./.githooks/run-tests.ps1', lint: 'dotnet format' },
+        commands: { lint: 'node tools/lint.mjs' },
+      },
+    );
+    expect(actual.get('build')).toEqual(['dotnet', 'build', 'App.sln']);
+    expect(actual.get('test')).toEqual(['pwsh', './.githooks/run-tests.ps1']);
+    expect(actual.get('lint')).toEqual(['node', 'tools/lint.mjs']);
+  });
+
   it('selects managers from packageManager before lockfiles and uses deterministic lockfile precedence', () => {
     expect(resolveEvidenceAllowlist({ packageManager: 'bun@1.2.0', scripts: { test: '' } }, null).get('test')).toEqual([
       'bun',

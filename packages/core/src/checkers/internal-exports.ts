@@ -9,3 +9,15 @@ export {
   type LintCommand,
   type TestsCommand,
 } from './index.js';
+export { type ChecksConfigSource } from './index.js';
+export {
+  buildDetectChecksPrompt,
+  CHECK_KINDS,
+  detectCheckHeuristics,
+  heuristicProposal,
+  parseDetectedChecks,
+  type CheckHeuristics,
+  type CheckProposal,
+  type DetectedChecks,
+} from './detect-checks.js';
+export { tokenizeEvidenceCommand } from './evidence-allowlist.js';

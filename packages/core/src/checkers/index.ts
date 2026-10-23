@@ -12,6 +12,9 @@ import type { CheckerOutput, CheckSummary, Constitution, RegressionFinding } fro
 import { type CommandResult, type RunCommandOptions } from '../utils/command-runner.js';
 import { runVerificationCommand as runCommand } from './run-command.js';
 import type { QaConfig } from '../config/qa-section.js';
+import type { ChecksConfig } from '../config/checks-section.js';
+import { resolveCompileCommand, resolveLintCommands, resolveTestsCommand } from './resolve-commands.js';
+import type { LintCommand, PackageJson } from './resolve-commands.js';
 import { isTemplateToken } from '../config/template-tokens.js';
 import { extractJsonObjects } from '../utils/json.js';
 import { APP_SMOKE_CHECKER, appSmokeChecker } from './app-smoke.js';
@@ -24,22 +27,21 @@ import {
   workerOutputChecker,
   WORKER_OUTPUT_CHECKER,
 } from './design-smells.js';
-import {
-  countPlaceholderLinks,
-  detectPythonTestSurface,
-  fileExists,
-  findHtmlFiles,
-  probeWorktree,
-  type WorktreeProbe,
-} from './probe.js';
+import { countPlaceholderLinks, fileExists, findHtmlFiles, probeWorktree, type WorktreeProbe } from './probe.js';
 
 export type { WorktreeProbe } from './probe.js';
+export {
+  getPackageJson,
+  resolveCompileCommand,
+  resolveLintCommands,
+  resolveTestsCommand,
+  VERIFY_PS1_ARGV,
+  type ChecksConfigSource,
+  type CompileCommand,
+  type LintCommand,
+  type TestsCommand,
+} from './resolve-commands.js';
 export { probeWorktree } from './probe.js';
-
-interface PackageJson {
-  scripts?: Record<string, string>;
-  [k: string]: unknown;
-}
 
 export interface CheckerContext {
   sandbox?: SandboxPolicy;
@@ -47,6 +49,8 @@ export interface CheckerContext {
   specPath: string;
   /** Test seam; when undefined, app_smoke reads `qa` from the worktree's .factory/config.json. */
   qa?: QaConfig | null;
+  /** Test seam; when undefined, the build/test/lint resolvers read `checks` from the worktree's .factory/config.json. */
+  checks?: ChecksConfig | null;
   /** Run-start HEAD SHA captured by buildPhase before the worker ran — the diff base
    *  for checkouts with no origin/main or origin/master (#1162, #1211). */
   diffBase?: string;
@@ -108,15 +112,6 @@ export interface CheckerRunCtx extends CheckerContext {
 // ---------- Built-in Checkers ----------
 
 const DEFAULT_COMPILE_TIMEOUT_SECONDS = 120;
-/** Worktree facts the lint and compile resolvers read — a subset of CheckerContext so BUILD and doctor can call them with just `{ worktree }`. */
-export type LintCommandSource = Pick<CheckerContext, 'worktree' | 'packageJson' | 'probe'>;
-export type CompileCommand = { argv: string[]; source: 'package.json' | 'Makefile' | 'Cargo.toml' };
-export async function resolveCompileCommand(ctx: LintCommandSource): Promise<CompileCommand | null> {
-  const w = ctx.worktree;
-  if ((await getPackageJson(ctx))?.scripts?.build) return { argv: ['npm', 'run', 'build'], source: 'package.json' };
-  if (await fileExists(join(w, 'Makefile'))) return { argv: ['make'], source: 'Makefile' };
-  return (await fileExists(join(w, 'Cargo.toml'))) ? { argv: ['cargo', 'build'], source: 'Cargo.toml' } : null;
-}
 export const compileChecker: CheckerFn = async (ctx) => {
   const run = ctx.runCommand ?? runCommand;
   const timeoutSeconds = ctx.compileTimeoutSeconds ?? DEFAULT_COMPILE_TIMEOUT_SECONDS;
@@ -239,54 +234,8 @@ async function commandFailureDetails(
   return logPath ? `${label} failed: ${summary}\nfull output: ${logPath}` : `${label} failed: ${summary}`;
 }
 
-export type TestsRunner = 'verify' | 'verify-ps1' | 'npm' | 'pytest' | 'none';
-
-/** The command the `tests` checker runs for a worktree; argv is [] when runner is 'none'. */
-export interface TestsCommand {
-  runner: TestsRunner;
-  argv: string[];
-  /** Label used in FAIL details and the output-log name (`verify.sh`, `verify.ps1`, `npm test`, `pytest`, `''` for none). */
-  label: string;
-}
-
-/** The CHECK command for a repo whose gate is scripts/verify.ps1; BUILD renders the same argv (#3471). */
-export const VERIFY_PS1_ARGV = ['pwsh', '-NoProfile', '-NonInteractive', '-File', 'scripts/verify.ps1'] as const;
-
-export async function resolveTestsCommand(ctx: LintCommandSource): Promise<TestsCommand> {
-  if (await fileExists(join(ctx.worktree, 'scripts/verify.sh')))
-    return { runner: 'verify', argv: ['bash', 'scripts/verify.sh', '--no-e2e'], label: 'verify.sh' };
-  if (await fileExists(join(ctx.worktree, 'scripts/verify.ps1')))
-    return { runner: 'verify-ps1', argv: [...VERIFY_PS1_ARGV], label: 'verify.ps1' };
-  const pkg = await getPackageJson(ctx);
-  if (pkg?.scripts?.test) return { runner: 'npm', argv: ['npm', 'test'], label: 'npm test' };
-  const pythonSurface = ctx.probe?.pythonTestSurface ?? (await detectPythonTestSurface(ctx.worktree));
-  if (!pythonSurface.present) return { runner: 'none', argv: [], label: '' };
-  return {
-    runner: 'pytest',
-    argv: pythonSurface.sources.includes('.factory/tests/')
-      ? ['python3', '-m', 'pytest', '.factory/tests']
-      : ['python3', '-m', 'pytest'],
-    label: 'pytest',
-  };
-}
-
-/** One lint-family command the `lint` checker runs; label names it in details and the log file. */
-export interface LintCommand {
-  label: 'lint' | 'tsc';
-  argv: string[];
-}
-
-/** Lint commands that apply, in run order: `npm run lint` (package.json lint script), then `npx tsc --noEmit` (tsconfig.json). */
-export async function resolveLintCommands(ctx: LintCommandSource): Promise<LintCommand[]> {
-  const commands: LintCommand[] = [];
-  const pkg = await getPackageJson(ctx);
-  if (pkg?.scripts?.lint) commands.push({ label: 'lint', argv: ['npm', 'run', 'lint'] });
-  if (await fileExists(join(ctx.worktree, 'tsconfig.json')))
-    commands.push({ label: 'tsc', argv: ['npx', 'tsc', '--noEmit'] });
-  return commands;
-}
-
 const TESTS_PASS_DETAILS = {
+  config: 'checks.test: OK',
   verify: 'scripts/verify.sh: OK',
   'verify-ps1': 'scripts/verify.ps1: OK',
   npm: 'npm test: OK',
@@ -347,14 +296,14 @@ export const testsChecker: CheckerFn = async (ctx) => {
         checker: 'tests',
         result: 'FAIL',
         details:
-          'no verification command was run — constitution requires tests (requireTests: true) but the worktree has no pytest, scripts/verify.sh, scripts/verify.ps1, or npm-test surface',
+          'no verification command was run — constitution requires tests (requireTests: true) but the worktree has no checks.test in .factory/config.json, pytest, scripts/verify.sh, scripts/verify.ps1, or npm-test surface (run `factory init --detect-checks`)',
       };
     }
     return {
       checker: 'tests',
       result: 'SKIP',
       details:
-        'no verification command was run — no scripts/verify.sh, no scripts/verify.ps1 and no package.json test script found',
+        'no verification command was run — no checks.test in .factory/config.json, no scripts/verify.sh, no scripts/verify.ps1 and no package.json test script found',
     };
   } catch (e: any) {
     return {
@@ -369,7 +318,17 @@ export const lintChecker: CheckerFn = async (ctx) => {
   const details: string[] = [];
   let result: CheckerOutput['result'] = 'PASS';
 
-  for (const cmd of await resolveLintCommands(ctx)) {
+  let commands: LintCommand[];
+  try {
+    commands = await resolveLintCommands(ctx);
+  } catch (e: any) {
+    return {
+      checker: 'lint',
+      result: 'FAIL',
+      details: `unexpected checker error: ${String(e?.message ?? e).slice(0, 500)}`,
+    };
+  }
+  for (const cmd of commands) {
     const r = await runCommand(cmd.argv, {
       cwd: ctx.worktree,
       timeoutMs: 120_000,
@@ -813,33 +772,4 @@ export function summarizeCheckerOutputs(results: CheckerOutput[]): CheckSummary 
     total: results.length,
     results,
   };
-}
-
-// ---------- Helpers ----------
-
-async function loadPackageJson(worktree: string): Promise<PackageJson | null> {
-  let raw: string;
-  try {
-    raw = await readFile(join(worktree, 'package.json'), 'utf-8');
-  } catch (e: any) {
-    if (e?.code === 'ENOENT') return null; // no package.json is a legitimate skip, not an error
-    throw e;
-  }
-  return JSON.parse(raw) as PackageJson;
-}
-
-export async function getPackageJson(ctx: LintCommandSource): Promise<PackageJson | null> {
-  if (ctx.packageJson !== undefined) return ctx.packageJson;
-  const p = ctx.probe?.packageJson;
-  if (p) {
-    switch (p.status) {
-      case 'loaded':
-        return p.value;
-      case 'absent':
-        return null;
-      case 'unreadable':
-        throw p.error;
-    }
-  }
-  return loadPackageJson(ctx.worktree);
 }

@@ -1,0 +1,23 @@
+# Starter .factory/config.yaml for a Node.js / TypeScript repo. Copy it, then trim.
+# Every key is optional; see docs/config.example.yaml for the full reference.
+# With no `checks`, CHECK already runs `npm run build`, `npm test`, `npm run lint` and
+# `npx tsc --noEmit` when package.json and tsconfig.json have them. Declare `checks` to override.
+version: 2
+
+# What CHECK runs after every BUILD. Each command is one shell-free command line run from the
+# repo root (no pipes, `&&`, `$VARS` or globs); point at a script when you need a shell.
+checks:
+  build: npm run build
+  test: npm test
+  lint: npm run lint
+
+# Opt-in app smoke test: start the built app on $PORT, then run the smoke command.
+qa:
+  start: ['npm', 'start']
+  smoke: ['npm', 'run', 'smoke']
+
+# Paths that always need a human reviewer.
+classifier:
+  alwaysHuman:
+    - 'package-lock.json'
+    - '.github/workflows/**'

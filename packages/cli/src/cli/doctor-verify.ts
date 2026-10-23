@@ -13,7 +13,7 @@ export interface VerifyCommandRow {
   kind: VerifyKind;
   /** The command CHECK runs, space-joined argv; null when none resolves. */
   command: string | null;
-  /** Where it came from: scripts/verify.sh, scripts/verify.ps1, package.json, pytest, Makefile, Cargo.toml, tsconfig.json; null when none. */
+  /** Where it came from: .factory/config.json (`checks`), scripts/verify.sh, scripts/verify.ps1, package.json, pytest, Makefile, Cargo.toml, tsconfig.json; null when none. */
   source: string | null;
   /** argv[0]; null when there is no command. */
   executable: string | null;
@@ -52,8 +52,12 @@ export async function resolveVerifyCommands(repoRoot: string): Promise<ResolvedV
     return {
       rows: [
         build ? rowFor('build', build.argv, build.source) : emptyRow('build'),
-        tests.runner === 'none' ? emptyRow('test') : rowFor('test', tests.argv, TEST_SOURCES[tests.runner]),
-        ...(lint.length > 0 ? lint.map((c) => rowFor('lint', c.argv, LINT_SOURCES[c.label])) : [emptyRow('lint')]),
+        tests.runner === 'none'
+          ? emptyRow('test')
+          : rowFor('test', tests.argv, tests.runner === 'config' ? tests.source! : TEST_SOURCES[tests.runner]),
+        ...(lint.length > 0
+          ? lint.map((c) => rowFor('lint', c.argv, c.label === 'checks.lint' ? c.source! : LINT_SOURCES[c.label]))
+          : [emptyRow('lint')]),
       ],
     };
   } catch (err) {
@@ -70,8 +74,9 @@ export function withPathResults(
 }
 
 const NO_TESTS_FIX =
-  'add scripts/verify.sh (or scripts/verify.ps1, or a package.json "test" script) that runs your tests';
-const NO_TESTS_DETAIL = 'no scripts/verify.sh, scripts/verify.ps1, package.json test script or pytest surface';
+  'run `factory init --detect-checks` to find and declare your test command under `checks` in .factory/config.json (or add scripts/verify.sh, scripts/verify.ps1, or a package.json "test" script)';
+const NO_TESTS_DETAIL =
+  'no checks.test in .factory/config.json, scripts/verify.sh, scripts/verify.ps1, package.json test script or pytest surface';
 
 function missingRow(row: VerifyCommandRow, requireTests: boolean): DoctorCheck {
   const section = VERIFY_SECTION;
@@ -99,7 +104,9 @@ function missingRow(row: VerifyCommandRow, requireTests: boolean): DoctorCheck {
       section,
       ok: false,
       optional: true,
-      detail: 'no build system detected (package.json build script, Makefile, Cargo.toml); CHECK skips compile',
+      detail:
+        'no build system detected (checks.build in .factory/config.json, package.json build script, Makefile, Cargo.toml); CHECK skips compile',
+      fix: 'run `factory init --detect-checks` to declare a build command',
     };
   }
   return {
@@ -107,7 +114,8 @@ function missingRow(row: VerifyCommandRow, requireTests: boolean): DoctorCheck {
     section,
     ok: true,
     optional: true,
-    detail: 'no lint command (package.json lint script, tsconfig.json); CHECK skips lint',
+    detail:
+      'no lint command (checks.lint in .factory/config.json, package.json lint script, tsconfig.json); CHECK skips lint',
   };
 }
 
@@ -125,7 +133,7 @@ export function verifyCommandChecks(
         section,
         ok: false,
         detail: `cannot resolve CHECK commands: ${resolved.error}`,
-        fix: 'fix package.json so it parses',
+        fix: 'fix package.json and .factory/config.json so they parse',
       },
     ];
   }
