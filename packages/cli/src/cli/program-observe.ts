@@ -28,7 +28,7 @@ export function registerObserveCommands(program: Command, handlers: ProgramHandl
     .option('--kpis', 'Also show the full health KPIs and the effective config')
     .option(
       '--json',
-      'Print one JSON object (schemaVersion 1): repo, product, stop, breaker, active claims, update; --kpis is ignored',
+      'Print one JSON object (schemaVersion 1): repo, product, stop, breaker, active claims, update, open factory drafts; --kpis is ignored',
     )
     .action((opts: { kpis?: boolean; json?: boolean }) => handlers.cmdStatus(opts));
 
@@ -49,6 +49,7 @@ export function registerObserveCommands(program: Command, handlers: ProgramHandl
     .command('kpis')
     .description('Compute factory health KPIs and record a trend snapshot')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
+    .option('--json', 'Print one JSON object (schemaVersion 1): the health KPIs and openFactoryDrafts')
     .action(async (opts) => {
       await handlers.cmdKpis(opts);
     });

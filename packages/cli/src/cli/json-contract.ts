@@ -2,6 +2,11 @@ import { z } from 'zod';
 
 const loosePayloadSchema = z.object({}).catchall(z.any());
 
+/** Open draft PRs on factory branches (#3553); null when the PR listing was unreadable. */
+export const openFactoryDraftsJsonSchema = z
+  .object({ count: z.number(), oldestHours: z.number().nullable() })
+  .nullable();
+
 export const statusJsonSchema = z.object({
   schemaVersion: z.literal(1),
   repo: z.string(),
@@ -58,7 +63,17 @@ export const statusJsonSchema = z.object({
         .nullable(),
     })
     .nullable(),
+  openFactoryDrafts: openFactoryDraftsJsonSchema,
 });
+
+/** `factory kpis --json` (#3553). */
+export const kpisJsonSchema = z.object({
+  schemaVersion: z.literal(1),
+  kpis: loosePayloadSchema,
+  openFactoryDrafts: openFactoryDraftsJsonSchema,
+});
+
+export type KpisJson = z.infer<typeof kpisJsonSchema>;
 
 export const logsLineJsonSchema = z.object({
   ts: z.string(),

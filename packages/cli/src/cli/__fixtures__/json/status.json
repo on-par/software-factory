@@ -44,5 +44,9 @@
       "target": "0.9.5",
       "stopFiles": ["/tmp/lane-a/STOP"]
     }
+  },
+  "openFactoryDrafts": {
+    "count": 3,
+    "oldestHours": 30
   }
 }

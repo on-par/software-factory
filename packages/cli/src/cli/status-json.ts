@@ -1,4 +1,6 @@
 import type { ActiveQueueClaim } from '@on-par/factory-core';
+import type { OpenFactoryDrafts } from '@on-par/factory-core/internal';
+
 import type { StatusJson } from './json-contract.js';
 import type { StatusUpdateJson } from './update-state.js';
 
@@ -30,6 +32,7 @@ export function buildStatusJson(input: {
   }>;
   active: ReadonlyArray<Pick<ActiveQueueClaim, 'lane' | 'issue' | 'phase' | 'lastActivityAt'>>;
   update: StatusUpdateJson | null;
+  openFactoryDrafts: OpenFactoryDrafts | null;
   now: number;
 }): StatusJson {
   const providers: StatusBreakerProviderJson[] = input.breakers.map((b) => ({
@@ -53,5 +56,6 @@ export function buildStatusJson(input: {
     breaker,
     active,
     update: input.update,
+    openFactoryDrafts: input.openFactoryDrafts,
   };
 }

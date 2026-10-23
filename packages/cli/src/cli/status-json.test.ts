@@ -23,6 +23,7 @@ describe('buildStatusJson', () => {
       ],
       active: [{ lane: 'app', issue: 7, phase: 'build', lastActivityAt: new Date(now - 125_000).toISOString() }],
       update: null,
+      openFactoryDrafts: { count: 2, oldestHours: 5 },
       now,
     });
     expect(out).toEqual({
@@ -39,6 +40,7 @@ describe('buildStatusJson', () => {
       },
       active: [{ lane: 'app', issue: 7, phase: 'build', ageSec: 125 }],
       update: null,
+      openFactoryDrafts: { count: 2, oldestHours: 5 },
     });
     expect(Object.keys(out)).toEqual([
       'schemaVersion',
@@ -49,6 +51,7 @@ describe('buildStatusJson', () => {
       'breaker',
       'active',
       'update',
+      'openFactoryDrafts',
     ]);
     expect(statusJsonSchema.parse(out)).toEqual(out);
   });
@@ -62,6 +65,7 @@ describe('buildStatusJson', () => {
       breakers: [],
       active: [],
       update: null,
+      openFactoryDrafts: null,
       now,
     });
     expect(out.breaker).toEqual({ open: false, providers: [] });
@@ -80,6 +84,7 @@ describe('buildStatusJson', () => {
       breakers: [],
       active: [{ lane: 'bugfix', issue: 3316, phase: 'check', lastActivityAt: new Date(now - 90_000).toISOString() }],
       update: null,
+      openFactoryDrafts: null,
       now,
     });
     expect(out.active).toEqual([{ lane: 'bugfix', issue: 3316, phase: 'check', ageSec: 90 }]);
@@ -98,6 +103,7 @@ describe('buildStatusJson', () => {
         { lane: 'b', issue: 2, phase: 'build', lastActivityAt: 'garbage' },
       ],
       update: null,
+      openFactoryDrafts: null,
       now,
     });
     expect(out.active.map((r) => r.ageSec)).toEqual([0, 0]);
@@ -124,6 +130,7 @@ describe('buildStatusJson', () => {
         breakers: [],
         active: [],
         update,
+        openFactoryDrafts: null,
         now,
       }).update,
     ).toEqual(update);
@@ -143,6 +150,7 @@ describe('buildStatusJson', () => {
         breakers: [],
         active: [],
         update: null,
+        openFactoryDrafts: null,
         now,
       });
       expect(out.stopInfo?.source).toBe('unknown');
@@ -169,6 +177,7 @@ describe('buildStatusJson', () => {
       ],
       active: [],
       update: null,
+      openFactoryDrafts: null,
       now,
     });
     expect(out.breaker.providers[0]).toMatchObject({ remainingSec: 0, until: 'credentials-change' });

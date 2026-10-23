@@ -350,6 +350,10 @@ const INTERNAL_API_KEYS = [
   // Persisted per-issue run state (#2271)
   'readIssueRunState',
   'nextIssueRunState',
+  // Open factory draft PR count (#3553)
+  'summarizeOpenFactoryDrafts',
+  'readOpenFactoryDrafts',
+  'formatOpenFactoryDraftsLine',
   'runStateFile',
   'runStatusForPhase',
   'terminalRunStatus',
