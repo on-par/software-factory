@@ -473,17 +473,11 @@ export async function waitForMerge(
         await sleep(120_000);
         continue;
       }
-      if (landBranch)
-        await land(issue, repoRoot, ghRepo, paths, octokit, skipCI, undefined, {
-          branch: landBranch,
-          enforceRisk: true,
-          ...(syncMain ? { syncMain } : {}),
-        });
-      else
-        await land(issue, repoRoot, ghRepo, paths, octokit, skipCI, undefined, {
-          enforceRisk: true,
-          ...(syncMain ? { syncMain } : {}),
-        });
+      await land(issue, repoRoot, ghRepo, paths, octokit, skipCI, undefined, {
+        ...(landBranch ? { branch: landBranch } : {}),
+        enforceRisk: true,
+        ...(syncMain ? { syncMain } : {}),
+      });
       await releaseLandedClaim(paths, ghRepo, issue, (type, msg) => emitEvent(paths.events, type, issue, msg));
       return;
     }

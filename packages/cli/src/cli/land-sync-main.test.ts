@@ -15,7 +15,7 @@ function setup(initial: 'DIRTY' | 'CLEAN', { conflict = false, syncMain = false 
   const merges: Array<string | undefined> = [];
   const logs: Array<{ type: string; msg: string }> = [];
   let synced = false;
-  const octokit: any = {
+  const octokit = {
     graphql: async () => ({
       repository: {
         pullRequest: {
@@ -30,7 +30,7 @@ function setup(initial: 'DIRTY' | 'CLEAN', { conflict = false, syncMain = false 
         get: async () => ({
           data: { head: { sha: initial === 'DIRTY' ? (synced ? 'new-sha' : 'old-sha') : 'same-sha' } },
         }),
-        merge: async (args: any) => {
+        merge: async (args: { sha?: string }) => {
           merges.push(args.sha);
         },
       },
@@ -52,7 +52,7 @@ function setup(initial: 'DIRTY' | 'CLEAN', { conflict = false, syncMain = false 
   };
   const land = (extra: { syncMain?: boolean } = { syncMain }) =>
     landOpenPullRequest({
-      octokit,
+      octokit: octokit as unknown as Parameters<typeof landOpenPullRequest>[0]['octokit'],
       owner: 'on-par',
       repoName: 'software-factory',
       ghRepo: 'on-par/software-factory',
@@ -69,7 +69,7 @@ function setup(initial: 'DIRTY' | 'CLEAN', { conflict = false, syncMain = false 
       watch: (async (o: { ref: string }) => {
         watched.push(o.ref);
         return 'success';
-      }) as any,
+      }) as unknown as Parameters<typeof landOpenPullRequest>[0]['watch'],
       withLock: (fn) => fn(),
       ...extra,
     });
@@ -105,6 +105,8 @@ const preflightDeps = (mergeStateStatus: string) => ({
   branchContains: async () => false,
   sleep: async () => {},
 });
+
+type WaitDeps = NonNullable<Parameters<typeof waitForMerge>[5]>;
 
 describe('syncMain adopt (#3324)', () => {
   it('a DIRTY open PR is synced by merging origin/main and a plain push, never a force-push', async () => {
@@ -157,23 +159,25 @@ describe('syncMain adopt (#3324)', () => {
   it('waitForMerge forwards syncMain to land only when set', async () => {
     const tmp = createTempDirs();
     const root = await tmp.make('sync-main-wait-');
-    const paths: any = {
+    const paths = {
       events: join(root, 'events.ndjson'),
       stop: join(root, 'STOP'),
       runs: join(root, 'runs'),
       laneFiles: join(root, 'lane-files.json'),
-    };
+    } as unknown as Parameters<typeof waitForMerge>[4];
     const run = async (syncMain?: boolean) => {
       const land = vi.fn(async (..._args: unknown[]) => ({ branch: 'factory/20-x', prNumber: 123 }));
       await waitForMerge(20, 'factory/20-x', '/repo', 'on-par/software-factory', paths, {
-        createOctokit: () => ({}) as any,
+        createOctokit: () => ({}) as unknown as ReturnType<NonNullable<WaitDeps['createOctokit']>>,
         pathExists: () => false,
         checkMerged: async () => false,
         mergeEnabled: () => true,
-        loadConfig: () =>
-          ({ merge: { auto: true, comment: '' }, filing: { enabled: false, selfFixLabel: 'no-auto-merge' } }) as any,
+        loadConfig: (() => ({
+          merge: { auto: true, comment: '' },
+          filing: { enabled: false, selfFixLabel: 'no-auto-merge' },
+        })) as unknown as WaitDeps['loadConfig'],
         listIssueLabels: async () => [],
-        land: land as any,
+        land: land as unknown as WaitDeps['land'],
         emitEvent: () => {},
         sleep: async () => {},
         ...(syncMain ? { syncMain } : {}),

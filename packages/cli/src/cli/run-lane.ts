@@ -358,9 +358,9 @@ export async function runLane(
       }
       landing = branch;
       await withHeartbeat(issue, heartbeat, () =>
-        decision.kind === 'adopt' && decision.syncMain
-          ? waitMerge(issue, branch, repoRoot, ghRepo, paths, { syncMain: true })
-          : waitMerge(issue, branch, repoRoot, ghRepo, paths),
+        waitMerge(issue, branch, repoRoot, ghRepo, paths, {
+          syncMain: decision.kind === 'adopt' && decision.syncMain === true,
+        }),
       );
       merged++;
       streak = null;
