@@ -323,6 +323,7 @@ import { cmdRisk } from './risk.js';
 import { buildFeedbackDeps, type FeedbackDeps, resolveFeedbackRepo, runFeedback } from './feedback.js';
 import { ensureFactoryExcluded, writeSampleQueue } from './init-files.js';
 import { detectChecksForInit } from './detect-checks.js';
+import { newRepoRouter } from './repo-router.js';
 import { cmdLogs } from './logs.js';
 import { mergeScopeNotice } from './merge-scope.js';
 import { selectOctokit } from './github-stub.js';
@@ -815,7 +816,8 @@ async function cmdInit(opts: { force?: boolean; yes?: boolean; detectChecks?: bo
   }
 
   console.log(styleText('green', `Initialized ${paths.root}`));
-  if (opts.detectChecks) await detectChecksForInit(repoRoot, newRepoRouter(repoRoot), opts.yes === true);
+  if (opts.detectChecks)
+    await detectChecksForInit(repoRoot, newRepoRouter(repoRoot, configLoaders, coreOps.ModelRouter), opts.yes === true);
   console.log(
     'Next: factory doctor, then factory triage (optional: factory constitution --product <name> to swap the default constitution)',
   );
@@ -1430,25 +1432,6 @@ async function cmdCost(opts: { issue?: string; json?: boolean } = {}) {
   console.log(`  Total: ${formatCostTotal(grand.cost, grand.unpricedCount)}`);
 }
 
-/** A model router for a one-off CLI model call in this repo (repo config, sandbox and local-auth applied). */
-function newRepoRouter(repoRoot: string): ModelRouter {
-  const repoConfig = configLoaders.loadRepoConfig(repoRoot);
-  const effective = resolveEffectiveConfig(repoConfig);
-  const router = new coreOps.ModelRouter(
-    applyRepoConfig(configLoaders.loadModelsConfig(), repoConfig),
-    configLoaders.loadRoutesConfig(),
-    false,
-    undefined,
-    effective.allowExperimental,
-    effective.localOnly,
-  );
-  router.setCodexFullAccessTasks?.(
-    configLoaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox.codexFullAccessTasks,
-  );
-  router.setLocalAuthSink?.(recordLocalAuthFailure);
-  return router;
-}
-
 async function cmdCheck(issueRaw: string, opts: { json?: boolean; deep?: boolean }) {
   const issueNum = parseIssueArg(issueRaw);
   const ghRepo = await getGitHubRepo();
@@ -1456,7 +1439,7 @@ async function cmdCheck(issueRaw: string, opts: { json?: boolean; deep?: boolean
   let runModel: DeepCheckModelRunner | undefined;
   if (opts.deep) {
     const repoRoot = await getRepoRoot();
-    runModel = createDeepModelRunner(newRepoRouter(repoRoot), repoRoot);
+    runModel = createDeepModelRunner(newRepoRouter(repoRoot, configLoaders, coreOps.ModelRouter), repoRoot);
   }
   let report;
   try {
