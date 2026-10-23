@@ -117,9 +117,7 @@ export { hostAgentJobsDir, hostBuildSlotsDir, listHostSlots, withHostAgentJobLea
 export { withHostBuildSlot, type HostAgentJobKind, type HostSlotStatus } from './environment/host-slots.js';
 export { createRunSlotGate, withRunAndHostBuildSlot, type RunSlotGate } from './environment/run-slots.js';
 export { FACTORY_RUNTIME_CONFIG_KEYS, resolveHostLoadGuard, resolveHostMaxAgentJobs } from './config/index.js';
-export { isTrustedApprover, createOctokitCollaboratorPermissionClient } from './queue/approval.js';
-export type { CollaboratorPermissionClient, TrustedApproverOptions } from './queue/approval.js';
-export * from './queue/review-rework-trigger.js';
+export * from './queue/internal-exports.js';
 export {
   migrateRepoConfigToYaml,
   REPO_CONFIG_FILENAMES,
