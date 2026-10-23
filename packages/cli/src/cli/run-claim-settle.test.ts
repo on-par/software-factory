@@ -60,7 +60,7 @@ describe('factory run claim settle delay (#3239)', () => {
   }
 
   it('factory run builds the lane queue with claimSettleMs from queue.claim_settle_ms', async () => {
-    const config = { ...loadFactoryConfig(), queue: { claim_settle_ms: 500 } };
+    const config = { ...loadFactoryConfig(), queue: { claim_settle_ms: 500, max_review_rework_runs: 2 } };
     expect((await laneQueueFor(config)).claimSettleMs).toBe(500);
   });
 

@@ -88,7 +88,9 @@ describe('claim settle delay (#3239)', () => {
 
 describe('resolveQueueClaimSettleMs (#3239)', () => {
   it('reads queue.claim_settle_ms from the config', () => {
-    expect(resolveQueueClaimSettleMs({ ...loadFactoryConfig(), queue: { claim_settle_ms: 0 } })).toBe(0);
+    expect(
+      resolveQueueClaimSettleMs({ ...loadFactoryConfig(), queue: { claim_settle_ms: 0, max_review_rework_runs: 2 } }),
+    ).toBe(0);
   });
 
   it('falls back to 3000 for a config with no queue section', () => {

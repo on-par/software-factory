@@ -2,8 +2,11 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+import { defaultFactoryConfig } from '@on-par/factory-config';
 import type { Octokit } from '@octokit/rest';
 
+import { countReviewReworkRuns, parkAtReviewReworkCap } from '../run/review-rework-cap.js';
+import type { ParkCommentInput } from '../run/park-comment.js';
 import { factoryBranchIssue } from '../utils/index.js';
 import { isTrustedApprover, type CollaboratorPermissionClient } from './approval.js';
 import { IN_PROGRESS_LABEL, LANE_LABEL_PREFIX, PARKED_LABEL, type QueueGitHubClient } from './github-queue.js';
@@ -38,6 +41,8 @@ export interface ReviewReworkRecord {
   queuedAt: string;
   /** Set when a lane claimed the record for a review-rework run (#3564). */
   startedAt?: string;
+  /** Set when the review arrived at the cap and parked the issue instead of queuing (#3565). */
+  cappedAt?: string;
 }
 
 export interface ReviewReworkStore {
@@ -48,7 +53,7 @@ export interface ReviewReworkStore {
   markStarted(reviewId: number, at: string): void;
 }
 
-export type ReviewReworkOutcome = 'queued' | 'already-queued' | 'skipped' | 'error';
+export type ReviewReworkOutcome = 'queued' | 'already-queued' | 'capped' | 'skipped' | 'error';
 
 export interface ReviewReworkPollResult {
   pr: number;
@@ -58,6 +63,8 @@ export interface ReviewReworkPollResult {
   reviewer?: string;
   lane?: string;
   detail?: string;
+  cap?: number;
+  count?: number;
 }
 
 export interface PollReviewReworkOptions {
@@ -70,6 +77,9 @@ export interface PollReviewReworkOptions {
   permissions: CollaboratorPermissionClient;
   store: ReviewReworkStore;
   now?: () => Date;
+  /** Review-rework runs allowed per issue; default defaultFactoryConfig.queue.max_review_rework_runs. */
+  maxRuns?: number;
+  publishParkComment?: (input: Omit<ParkCommentInput, 'parkSha' | 'order'>) => Promise<unknown>;
 }
 
 const DECISIVE_STATES = new Set(['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED']);
@@ -126,6 +136,38 @@ async function pollPull(
   if (lanes.length === 0) return skipped('no lane label');
   if (lanes.length > 1) return skipped(`several lane labels: ${lanes.join(', ')}`);
   const lane = lanes[0] ?? '';
+
+  const cap = opts.maxRuns ?? defaultFactoryConfig.queue.max_review_rework_runs;
+  const count = countReviewReworkRuns(store, issue);
+  if (count >= cap) {
+    // Record before parking: a failed park is not retried (and re-commented) on the next poll.
+    const at = (opts.now ?? (() => new Date()))().toISOString();
+    for (const review of trusted) {
+      store.record({
+        reviewId: review.id,
+        pr: pull.number,
+        issue,
+        lane,
+        reviewer: review.login,
+        queuedAt: at,
+        cappedAt: at,
+      });
+    }
+    await parkAtReviewReworkCap({
+      queue,
+      owner,
+      repo,
+      issue,
+      pr: pull.number,
+      lane,
+      branch: pull.headRef,
+      cap,
+      count,
+      reviewIds,
+      publishComment: opts.publishParkComment,
+    });
+    return { pr: pull.number, issue, outcome: 'capped', reviewIds, reviewer: trusted[0]?.login, lane, cap, count };
+  }
 
   const [res] = await createEnqueuers(queue, owner, repo).enqueue(lane, [issue]);
   if (res === undefined || res.outcome === 'failed') {
@@ -231,7 +273,7 @@ export function claimReviewRework(
   issue: number,
   now: () => Date = () => new Date(),
 ): ReviewReworkRecord | undefined {
-  const pending = store.list().filter((r) => r.issue === issue && !r.startedAt);
+  const pending = store.list().filter((r) => r.issue === issue && !r.startedAt && !r.cappedAt);
   pending.sort((a, b) => (a.queuedAt === b.queuedAt ? b.reviewId - a.reviewId : a.queuedAt < b.queuedAt ? 1 : -1));
   const picked = pending[0];
   if (!picked) return undefined;

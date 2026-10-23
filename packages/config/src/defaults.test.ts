@@ -481,3 +481,9 @@ function claudeCliOffenders(models: Record<string, ModelDefaults>): string[] {
     })
     .map(([id]) => id);
 }
+
+describe('queue defaults', () => {
+  it('defaults the review-rework cap to 2 (#3565)', () => {
+    expect(defaultFactoryConfig.queue.max_review_rework_runs).toBe(2);
+  });
+});
