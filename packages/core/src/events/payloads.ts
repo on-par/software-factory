@@ -56,6 +56,24 @@ export interface FlakyTestsPayload {
   logPath?: string;
 }
 
+/** Payload of a `provider_auth_rejected` event (#3232): a provider rejected a credential and its breaker is held until the credentials change. */
+export interface ProviderAuthRejectedPayload {
+  provider: string;
+  harness: string;
+  model: string;
+  stage: 'plan' | 'build';
+  issue: number;
+  at: string;
+  /** Provider error detail, passed through redactText. */
+  detail: string;
+}
+
+/** Payload of a `provider_breaker_close` event (#3232): why the breaker closed. */
+export interface ProviderBreakerClosePayload {
+  provider: string;
+  cause: 'cooldown' | 'creds_changed' | 'manual_reset';
+}
+
 /** Payload of a `provider_capped` event (#3337): a usage cap opened the provider's breaker until `cappedUntil`. */
 export interface ProviderCappedPayload {
   provider: string;

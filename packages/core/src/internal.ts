@@ -154,7 +154,7 @@ export { listOrphanContainers, reapOrphanContainers } from './hosted/orphans.js'
 // Router
 export { harnessCliCommand } from './harness/catalog.js';
 export { isHarnessCliPresent } from './models/index.js';
-export { CliModelExecutor } from './router/index.js';
+export { CliModelExecutor, formatBreakerRemaining } from './router/index.js';
 
 // Phase helpers
 export { buildPlanPrompt, type PlanPromptOpts } from './phases/plan.js';

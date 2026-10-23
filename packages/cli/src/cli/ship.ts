@@ -204,6 +204,7 @@ export async function shipIssue(
   router.setCodexFullAccessTasks?.(policy.sandbox.codexFullAccessTasks);
   router.setContextCeilings?.(factoryConfig.build.contextCeiling);
   router.setLocalAuthSink?.(recordLocalAuthFailure);
+  router.setProviderHold?.((p) => breaker.isHeldUntilCredentialsChange(p));
   router.skipMissingHarnessClis(core.isCommandAvailable);
   let issueSpend = 0;
   let laneSandboxRuntime = 'none';

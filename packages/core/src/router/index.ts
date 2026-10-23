@@ -36,12 +36,13 @@ import { captureWorktreeState, resetWorktreeState } from './worktree-state.js';
 export type { ExecFn } from '../utils/exec.js';
 export type { OllamaProbeResult } from './ollama-probe.js';
 export { ModelExecutorError, ModelRouterError } from './executor-error.js';
+export { formatBreakerRemaining } from './breaker.js';
 
 const PROVIDER_LEVEL_FAILURES = new Set<FailoverReason>(['usage_cap', 'rate_limit', 'timeout', 'unavailable']);
 
 /** Whether a failure opens the provider breaker. Deliberately the explicit reason set plus kind `auth`, not every
  *  kind: `unavailable` also covers error/unknown/empty_response/cli_missing/local_auth, which fail over without
- *  blocking the provider (#3225). */
+ *  blocking the provider (#3225). Kind `auth` (a rejected credential) opens an untimed breaker (#3232). */
 function opensProviderBreaker(failure: ProviderFailure): boolean {
   return PROVIDER_LEVEL_FAILURES.has(failure.reason) || failure.kind === 'auth';
 }
@@ -53,6 +54,8 @@ export type ProviderFailureInfo = {
   kind?: ProviderFailureKind;
   resetAt?: string;
   detail?: string;
+  model?: string;
+  harness?: string;
 };
 
 export type SleepFn = (ms: number) => Promise<void>;
@@ -262,6 +265,7 @@ export type CostSink = (entry: Omit<CostEntry, 'ts' | 'issue'>) => void;
 export class ModelRouter {
   private registry: ModelRegistry;
   private costSink?: CostSink;
+  private providerHold?: (provider: string) => Promise<boolean>;
   private harnessCliAvailable?: (harnessId: string) => boolean;
   /** Agent CLIs (harness ids) that failed local_auth during this router's run (#2495). One
    *  router serves one run, so a signed-out CLI is tried once and then skipped by every later
@@ -355,6 +359,10 @@ export class ModelRouter {
    *  flag it until the next login (#2733). Receives only the agent name. */
   setLocalAuthSink(sink: (agent: LocalAuthAgent) => void): void {
     this.localAuthSink = sink;
+  }
+  /** Register a check telling whether a provider is held for rejected credentials; held providers are skipped. */
+  setProviderHold(check: ((provider: string) => Promise<boolean>) | undefined): void {
+    this.providerHold = check;
   }
   /** Register a sink that receives one cost row per successful run(). */
   setCostSink(sink: CostSink): void {
@@ -528,6 +536,21 @@ export class ModelRouter {
         onLog(`Skipping ${model} for ${task}: provider ${modelProvider} is on cooldown`);
         continue;
       }
+      const providerHeld =
+        modelProvider && this.providerHold
+          ? await this.providerHold(modelProvider).catch((err: unknown) => {
+              onLog(
+                `Hold check failed for ${modelProvider}, treating as not held: ${err instanceof Error ? err.message : String(err)}`,
+              );
+              return false;
+            })
+          : false;
+      if (modelProvider && providerHeld) {
+        onLog(
+          `Skipping ${model} for ${task}: provider ${modelProvider} credentials were rejected (factory breaker reset ${modelProvider} to retry)`,
+        );
+        continue;
+      }
       let retries = 0;
       this.noticeRetiredHarness(model, onLog);
 
@@ -588,6 +611,8 @@ export class ModelRouter {
                 kind: failure.kind,
                 ...(failure.resetAt ? { resetAt: failure.resetAt } : {}),
                 detail: detail || undefined,
+                model,
+                harness: this.registry.getHarnessId(model) ?? '',
               });
             } catch (callbackErr) {
               onLog(

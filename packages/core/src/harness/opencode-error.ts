@@ -4,7 +4,7 @@
 
 import { parseResetCooldownMs } from '../router/breaker.js';
 import type { HarnessFailureReason } from './index.js';
-import { failureKindForReason, type ProviderFailure } from './provider-failure.js';
+import { failureKindFor, type ProviderFailure } from './provider-failure.js';
 
 const DETAIL_LIMIT = 400;
 
@@ -18,7 +18,7 @@ export function parseOpenCodeResetAt(text: string, now: number): string | undefi
 
 /** Maps a failure reason onto a ProviderFailure; resetAt only for usage_cap and rate_limit. */
 export function classifyOpenCodeFailure(reason: HarnessFailureReason, text: string, now: number): ProviderFailure {
-  const kind = failureKindForReason(reason);
+  const kind = failureKindFor(reason, text);
   const resetAt = kind === 'usage_cap' || kind === 'rate_limit' ? parseOpenCodeResetAt(text, now) : undefined;
   return { kind, ...(resetAt ? { resetAt } : {}), reason, detail: text.trim().slice(0, DETAIL_LIMIT) };
 }

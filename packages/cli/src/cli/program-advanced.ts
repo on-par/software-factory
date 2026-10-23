@@ -177,6 +177,13 @@ export function registerAdvancedCommands(program: Command, handlers: ProgramHand
       },
     );
 
+  program
+    .command('breaker')
+    .description('Inspect and reset provider circuit breakers')
+    .command('reset <provider>')
+    .description('Close a provider breaker now (e.g. after fixing a rejected credential)')
+    .action(handlers.cmdBreakerReset);
+
   const worktreeCmd = program
     .command('worktree')
     .description('Clean up stale factory worktrees (gc) and keep/release one for manual work');

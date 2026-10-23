@@ -4,6 +4,8 @@ import type {
   EventKind,
   FlakyTestsPayload,
   ParkPayload,
+  ProviderAuthRejectedPayload,
+  ProviderBreakerClosePayload,
   ProviderCappedPayload,
   StewardTriggeredPayload,
 } from '../events/kinds.js';
@@ -35,6 +37,8 @@ export type RunLogFn = (
     flakyTests?: FlakyTestsPayload;
     park?: ParkPayload;
     providerCapped?: ProviderCappedPayload;
+    providerAuthRejected?: ProviderAuthRejectedPayload;
+    providerBreakerClose?: ProviderBreakerClosePayload;
     attribution?: RunAttribution;
   },
 ) => void;

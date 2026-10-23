@@ -347,3 +347,9 @@ describe('blocked park kind (#2315)', () => {
     expect(laneStatusOf('blocked')).toBe('parked');
   });
 });
+
+describe('provider_auth_rejected kind (#3232)', () => {
+  it('is a warn, non-park, non-terminal event', () => {
+    expect(EVENT_TRAITS.provider_auth_rejected).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
+  });
+});
