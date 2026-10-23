@@ -39,14 +39,18 @@ export function registerQueueCommands(program: Command, handlers: ProgramHandler
   program
     .command('unpark <issue>')
     .description(
-      'Unpark a factory:parked issue: remove factory:parked and re-queue it in its lane with a fresh order label (same path as `queue add`)',
+      'Unpark a factory:parked issue: remove factory:parked and re-queue it at the back of its lane with a fresh order label (same path as `queue add`)',
     )
     .option('--lane <lane>', "Lane to re-queue into (default: the issue's existing factory:lane:* label)")
+    .option(
+      '--keep-order',
+      'Restore the order the issue held when it parked, if no open lane issue holds it; otherwise queue at the back and warn (default: always the back of the lane)',
+    )
     .option(
       '--json',
       'Print one JSON object (schemaVersion 1): ok, action, issue, lane, order, labelsBefore, labelsAfter',
     )
-    .action(async (issue: string, opts: { lane?: string; json?: boolean }) => {
+    .action(async (issue: string, opts: { lane?: string; json?: boolean; keepOrder?: boolean }) => {
       await handlers.cmdUnpark(issue, opts);
     });
 

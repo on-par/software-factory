@@ -8,6 +8,7 @@ import {
   QUEUED_LABEL_COLOR,
   LANE_LABEL_COLOR,
   queueOrderLabelSpec,
+  type EnqueueOptions,
   type EnqueueResult,
   type QueueGitHubClient,
   type QueueLabelSpec,
@@ -40,8 +41,35 @@ function orderOf(label: string): number | undefined {
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 export function createEnqueuers(client: QueueGitHubClient, owner: string, repo: string) {
-  async function enqueue(lane: string, issues: readonly number[]): Promise<EnqueueResult[]> {
+  async function enqueue(
+    lane: string,
+    issues: readonly number[],
+    options: EnqueueOptions = {},
+  ): Promise<EnqueueResult[]> {
     const members = await client.listOpenIssuesWithLabels({ owner, repo, labels: [laneLabel(lane)] });
+    const { requireMember, preferOrder } = options;
+    if (requireMember !== undefined && !members.some((m) => m.number === requireMember)) {
+      return issues.map((issue) => ({
+        issue,
+        outcome: 'failed' as const,
+        detail: `lane scan for ${laneLabel(lane)} returned ${members.length} issue(s) and omitted #${requireMember}, which carries the lane label; refusing to place it (fail closed, #3554)`,
+      }));
+    }
+    // A single issue may take its park-time order when no other lane member holds it (#3554).
+    const only = issues.length === 1 ? issues[0] : undefined;
+    const wantsOrder =
+      only !== undefined && preferOrder !== undefined && Number.isSafeInteger(preferOrder) && preferOrder > 0;
+    const holders = wantsOrder
+      ? members
+          .filter(
+            (m) =>
+              m.number !== only &&
+              m.labels.some((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX) && orderOf(label) === preferOrder),
+          )
+          .map((m) => m.number)
+          .sort((a, b) => a - b)
+      : [];
+    const useRequested = wantsOrder && holders.length === 0;
     const scan = scanLaneOrders(members, QUEUED_LABEL, QUEUE_ORDER_LABEL_PREFIX); // tolerant, every open in-lane holder (#2987, #2988)
     let next = scan.maxPos + 1;
     let naive = scan.queuedMax + 1;
@@ -62,7 +90,8 @@ export function createEnqueuers(client: QueueGitHubClient, owner: string, repo: 
           });
           continue;
         }
-        const specs = queueSpecs(lane, next);
+        const position = useRequested ? (preferOrder ?? next) : next;
+        const specs = queueSpecs(lane, position);
         const created: string[] = [];
         for (const spec of specs) {
           if (await client.ensureLabel({ owner, repo, ...spec })) created.push(spec.name);
@@ -72,13 +101,16 @@ export function createEnqueuers(client: QueueGitHubClient, owner: string, repo: 
         results.push({
           issue,
           outcome: 'queued',
-          position: next,
+          position,
           labelsAdded: specs.map((s) => s.name).filter((name) => !current.includes(name)),
           labelsCreated: created,
-          ...(collision ? { collision } : {}),
+          ...(collision && !useRequested ? { collision } : {}),
+          ...(wantsOrder && holders.length > 0 ? { preferredOrderHeldBy: holders } : {}),
         });
-        next += 1;
-        naive += 1;
+        if (!useRequested) {
+          next += 1;
+          naive += 1;
+        }
       } catch (err) {
         results.push({ issue, outcome: 'failed', detail: errorMessage(err) });
       }

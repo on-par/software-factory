@@ -701,6 +701,7 @@ const INTERNAL_API_KEYS = [
   'attachRepo',
   'parseRemoteSlug',
   'readOriginUrl',
+  'readParkedOrder',
   // Daemon checkout validation gate (#1398)
   'parseCheckoutRequest',
   'validateCheckout',
