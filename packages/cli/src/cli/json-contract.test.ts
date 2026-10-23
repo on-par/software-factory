@@ -359,6 +359,7 @@ describe('JSON wire contracts', () => {
       { fiveHourUtilization: 47.25, fiveHourResetsAt: '2026-01-01T05:00:00.000Z' },
       12.345,
       100,
+      'subscription',
     );
     const golden = fixture('usage.json');
     expect(output).toEqual(golden);

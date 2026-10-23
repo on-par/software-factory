@@ -90,3 +90,25 @@ export function hasCodexLoginEvidence(deps: CodexLoginEvidenceDeps = {}): boolea
     return false;
   }
 }
+
+/** True when a Codex API key is configured (OPENAI_API_KEY or CODEX_API_KEY in env, or a non-empty
+ *  OPENAI_API_KEY string in `$CODEX_HOME/auth.json`), which makes calls metered (#3214). Boolean only,
+ *  never the key. Never throws. */
+export function codexHasApiKey(deps: CodexLoginEvidenceDeps = {}): boolean {
+  try {
+    const env = deps.env ?? process.env;
+    if (env.OPENAI_API_KEY?.trim() || env.CODEX_API_KEY?.trim()) return true;
+    const homedir = deps.homedir ?? osHomedir;
+    const readFile = deps.readFile ?? ((path: string) => readFileSync(path, 'utf8'));
+    const dir = env.CODEX_HOME?.trim() || join(homedir(), '.codex');
+    const auth = JSON.parse(readFile(join(dir, 'auth.json'))) as { OPENAI_API_KEY?: unknown } | null;
+    return (
+      typeof auth === 'object' &&
+      auth !== null &&
+      typeof auth.OPENAI_API_KEY === 'string' &&
+      auth.OPENAI_API_KEY.trim().length > 0
+    );
+  } catch {
+    return false;
+  }
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { codexChatgptSessionState, hasCodexLoginEvidence } from './codex-config.js';
+import { codexChatgptSessionState, codexHasApiKey, hasCodexLoginEvidence } from './codex-config.js';
 
 const noFile = () => {
   throw new Error('ENOENT');
@@ -88,5 +88,39 @@ describe('codexChatgptSessionState (#2509)', () => {
     });
     const body = { tokens: { access_token: jwt(NOW / 1000 + 3600), refresh_token: 'r' } };
     expect(hasCodexLoginEvidence({ ...deps(body), exec })).toBe(false);
+  });
+});
+
+describe('codexHasApiKey (#3214)', () => {
+  const homedir = () => '/home/u';
+  const withAuth = (body: unknown) => ({ env: {}, homedir, readFile: () => JSON.stringify(body) });
+
+  it('is true for OPENAI_API_KEY or CODEX_API_KEY in env', () => {
+    expect(codexHasApiKey({ env: { OPENAI_API_KEY: 'k' }, homedir, readFile: noFile })).toBe(true);
+    expect(codexHasApiKey({ env: { CODEX_API_KEY: 'k' }, homedir, readFile: noFile })).toBe(true);
+  });
+
+  it('is true for an OPENAI_API_KEY string in auth.json', () => {
+    expect(codexHasApiKey(withAuth({ OPENAI_API_KEY: 'sk-x' }))).toBe(true);
+  });
+
+  it('reads auth.json under CODEX_HOME, falling back to ~/.codex when blank', () => {
+    const readFile = vi.fn(() => '{}');
+    codexHasApiKey({ env: { CODEX_HOME: '/c' }, homedir, readFile });
+    expect(readFile).toHaveBeenCalledWith('/c/auth.json');
+    codexHasApiKey({ env: { CODEX_HOME: ' ' }, homedir, readFile });
+    expect(readFile).toHaveBeenLastCalledWith('/home/u/.codex/auth.json');
+  });
+
+  it('is false for a null, blank or non-string key', () => {
+    expect(codexHasApiKey(withAuth({ OPENAI_API_KEY: null, tokens: { refresh_token: 'r' } }))).toBe(false);
+    expect(codexHasApiKey(withAuth({ OPENAI_API_KEY: '  ' }))).toBe(false);
+    expect(codexHasApiKey(withAuth({ OPENAI_API_KEY: 5 }))).toBe(false);
+    expect(codexHasApiKey(withAuth(null))).toBe(false);
+  });
+
+  it('is false for a missing or unparseable file and blank env keys', () => {
+    expect(codexHasApiKey({ env: { OPENAI_API_KEY: ' ', CODEX_API_KEY: '' }, homedir, readFile: noFile })).toBe(false);
+    expect(codexHasApiKey({ env: {}, homedir, readFile: () => 'not json' })).toBe(false);
   });
 });

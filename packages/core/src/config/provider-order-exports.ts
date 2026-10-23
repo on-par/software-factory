@@ -6,4 +6,5 @@ export {
   SUBSCRIPTION_PROVIDERS,
   subscriptionProviderOf,
 } from './provider-order.js';
+export * from '../utils/provider-plan.js'; // detectProviderPlan, detectClaudePlan, codexHasApiKey (#3214)
 export type { ProviderOrder, ProviderOrderRole, SubscriptionProviderId } from './provider-order.js';

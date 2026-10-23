@@ -166,6 +166,11 @@ export const usageJsonSchema = z.object({
   resetsAt: z.string().nullable(),
   windowHours: z.number(),
   estimateUsd: z.number().nullable(),
+  plan: z
+    .enum(['subscription', 'api', 'unknown'])
+    .describe(
+      "How this machine profile's Claude Code is signed in: 'api' when ANTHROPIC_API_KEY is set (API key over login), 'subscription' for a stored Claude login, else 'unknown'. Detected from auth without reading a secret; a hint the client may override (#3214).",
+    ),
 });
 
 export const costJsonSchema = z.object({
