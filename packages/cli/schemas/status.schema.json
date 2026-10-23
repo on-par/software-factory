@@ -197,8 +197,38 @@
           "type": "null"
         }
       ]
+    },
+    "openFactoryDrafts": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "count": {
+              "type": "number"
+            },
+            "oldestHours": {
+              "type": ["number", "null"]
+            }
+          },
+          "required": ["count", "oldestHours"],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
-  "required": ["schemaVersion", "repo", "product", "stop", "stopInfo", "breaker", "active", "update"],
+  "required": [
+    "schemaVersion",
+    "repo",
+    "product",
+    "stop",
+    "stopInfo",
+    "breaker",
+    "active",
+    "update",
+    "openFactoryDrafts"
+  ],
   "additionalProperties": false
 }

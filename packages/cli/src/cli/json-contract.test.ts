@@ -21,6 +21,7 @@ import { buildStatusJson } from './status-json.js';
 import {
   costJsonSchema,
   daemonStatusJsonSchema,
+  kpisJsonSchema,
   logsLineJsonSchema,
   queueListJsonSchema,
   queueAddJsonSchema,
@@ -63,6 +64,7 @@ const statusInput = {
     },
     draining: { since: '2026-01-01T00:05:00.000Z', target: '0.9.5', stopFiles: ['/tmp/lane-a/STOP'] },
   },
+  openFactoryDrafts: { count: 3, oldestHours: 30 },
   now: fixedNow,
 };
 
@@ -73,6 +75,7 @@ const fixture = (name: string): unknown =>
   JSON.parse(readFileSync(new URL(`./__fixtures__/json/${name}`, import.meta.url), 'utf-8')) as unknown;
 const generatedContracts = [
   ['status.schema.json', 'status.json', statusJsonSchema],
+  ['kpis.schema.json', 'kpis.json', kpisJsonSchema],
   ['logs-line.schema.json', 'logs-line.json', logsLineJsonSchema],
   ['daemon-status.schema.json', 'daemon-status.json', daemonStatusJsonSchema],
   ['queue-list.schema.json', 'queue-list.json', queueListJsonSchema],

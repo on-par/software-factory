@@ -36,8 +36,11 @@ import {
   resolveWorktreeRoot,
   readStopMarker,
   formatBreakerRemaining,
+  formatOpenFactoryDraftsLine,
+  readOpenFactoryDrafts,
+  resolveBranchPrefix,
 } from '@on-par/factory-core/internal';
-import type { QueueOrderConflict } from '@on-par/factory-core/internal';
+import type { OpenFactoryDrafts, QueueOrderConflict } from '@on-par/factory-core/internal';
 
 import { formatBaseHoldStatus, readBaseHold } from './base-hold.js';
 import { notInitializedMessage } from './first-run.js';
@@ -141,6 +144,13 @@ async function readActiveClaims(
   return view;
 }
 
+/** Open factory drafts for the Health band and JSON (#3553); null when no token or the listing fails. */
+async function readDrafts(ghRepo: string, rt: StatusRuntime): Promise<OpenFactoryDrafts | null> {
+  if (!rt.hasGitHubToken()) return null;
+  const [owner, repo] = ghRepo.split('/');
+  return readOpenFactoryDrafts({ octokit: rt.getOctokit(), owner, repo, prefix: resolveBranchPrefix() });
+}
+
 export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise<void> {
   if (opts.json) {
     // `--kpis` is deliberately ignored here: the JSON shape is fixed (#1101).
@@ -161,6 +171,7 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
           breakers: await new ProviderBreaker(paths.breaker).list(),
           active: view.active,
           update: buildStatusUpdateJson(readUpdateState(updateStatePath(daemonRuntimePaths().dir))),
+          openFactoryDrafts: await readDrafts(ghRepo, rt),
           now: Date.now(),
         }),
       ),
@@ -264,6 +275,7 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
   console.log(styleText('bold', '\n== Health =='));
   const update = buildStatusUpdateJson(readUpdateState(updateStatePath(daemonRuntimePaths().dir)));
   console.log(`  ${formatUpdateStatusLine(update)}`);
+  console.log(`  ${formatOpenFactoryDraftsLine(await readDrafts(ghRepo, rt))}`);
 
   if (opts.kpis) {
     console.log(styleText('bold', '\n  Effective config:'));

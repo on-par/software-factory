@@ -7,6 +7,7 @@ import { format, resolveConfig } from 'prettier';
 import {
   costJsonSchema,
   daemonStatusJsonSchema,
+  kpisJsonSchema,
   logsLineJsonSchema,
   queueListJsonSchema,
   queueAddJsonSchema,
@@ -21,6 +22,7 @@ import {
 
 const schemas = [
   ['status.schema.json', statusJsonSchema],
+  ['kpis.schema.json', kpisJsonSchema],
   ['logs-line.schema.json', logsLineJsonSchema],
   ['daemon-status.schema.json', daemonStatusJsonSchema],
   ['queue-list.schema.json', queueListJsonSchema],

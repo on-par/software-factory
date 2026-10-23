@@ -786,3 +786,4 @@ export { fetchHumanEventSourcesCached, runProducedPrOrMerge } from './kpis/sweep
 export type { AgentInvocation, TokenCoverage, TokenCoverageEntry } from './metrics/token-coverage.js';
 export { agentInvocationsFromEvents, computeTokenCoverage } from './metrics/token-coverage.js';
 export { partitionGithubClaimsByActivity, type GithubActiveClaim } from './queue/activity.js';
+export * from './utils/open-factory-drafts.js';
