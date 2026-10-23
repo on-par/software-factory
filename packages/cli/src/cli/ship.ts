@@ -44,7 +44,9 @@ import {
 import { hostBuildSlotPort } from './host-slot.js';
 import type { CheckResumeRecord, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
+  claimReviewRework,
   createCheckResumeStore,
+  createFileReviewReworkStore,
   createGithubLaneClaimStalenessProbe,
   createPlanReuseStore,
   egressHostMessage,
@@ -332,6 +334,16 @@ export async function shipIssue(
 
   // Read before runIssue: the run-state recorder overwrites this file on its first update (#3373).
   const previousAttempt = await readIssueRunState(runStateFile(paths.runs, issueNum));
+  const reviewRecord =
+    ctx?.resumeFrom || ctx?.localOnly || noPr
+      ? undefined
+      : claimReviewRework(createFileReviewReworkStore(paths.reviewRework), issueNum);
+  if (reviewRecord) {
+    log(
+      'rework',
+      `review rework of PR #${reviewRecord.pr} review ${reviewRecord.reviewId} by @${reviewRecord.reviewer} — PLAN and BUILD skipped (#3564)`,
+    );
+  }
   const request = {
     ...buildRunRequest({
       issueNum,
@@ -363,6 +375,11 @@ export async function shipIssue(
       paths,
     }),
     previousAttempt,
+    ...(reviewRecord
+      ? {
+          reviewRework: { prNumber: reviewRecord.pr, reviewId: reviewRecord.reviewId, reviewer: reviewRecord.reviewer },
+        }
+      : {}),
   };
 
   const ports: RunPorts = {

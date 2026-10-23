@@ -11,6 +11,7 @@ import { createOctokitCollaboratorPermissionClient } from './approval.js';
 import { fakeIssueComments } from './fake-issue-comments.js';
 import { IN_PROGRESS_LABEL, laneLabel, PARKED_LABEL, QUEUED_LABEL, type QueueGitHubClient } from './github-queue.js';
 import {
+  claimReviewRework,
   createFileReviewReworkStore,
   createOctokitReviewReworkGitHub,
   latestDecisiveReviews,
@@ -264,5 +265,48 @@ describe('latestDecisiveReviews', () => {
   });
   it('ignores PENDING, unknown states and empty logins', () => {
     expect(latestDecisiveReviews([r(1, 'PENDING'), r(2, 'WEIRD'), r(3, ''), r(4, 'APPROVED', '')])).toEqual([]);
+  });
+});
+
+describe('claimReviewRework (#3564)', () => {
+  const dirs = createTempDirs();
+  afterEach(() => dirs.cleanup());
+  const rec = (reviewId: number, issue: number, queuedAt: string, startedAt?: string) => ({
+    reviewId,
+    pr: 9,
+    issue,
+    lane: 'bugfix',
+    reviewer: 'alice',
+    queuedAt,
+    ...(startedAt ? { startedAt } : {}),
+  });
+
+  it('claims the newest unstarted record for the issue and persists startedAt', () => {
+    const file = join(dirs.makeSync('claim-'), 's.json');
+    const store = createFileReviewReworkStore(file);
+    store.record(rec(1, 42, '2026-01-01T00:00:00.000Z'));
+    store.record(rec(2, 42, '2026-01-02T00:00:00.000Z'));
+    store.record(rec(4, 42, '2026-01-03T00:00:00.000Z', '2026-01-03T01:00:00.000Z'));
+    store.record(rec(5, 7, '2026-01-04T00:00:00.000Z'));
+    const now = () => new Date('2026-02-01T00:00:00.000Z');
+    expect(claimReviewRework(store, 42, now)).toMatchObject({ reviewId: 2, startedAt: '2026-02-01T00:00:00.000Z' });
+    const reread = createFileReviewReworkStore(file);
+    expect(reread.list().find((r) => r.reviewId === 2)?.startedAt).toBe('2026-02-01T00:00:00.000Z');
+    expect(claimReviewRework(reread, 42, now)?.reviewId).toBe(1);
+    expect(claimReviewRework(reread, 42, now)).toBeUndefined();
+  });
+
+  it('breaks a queuedAt tie by the highest review id and ignores an unknown id', () => {
+    const store = createFileReviewReworkStore(join(dirs.makeSync('claim-'), 's.json'));
+    store.record(rec(1, 42, '2026-01-01T00:00:00.000Z'));
+    store.record(rec(3, 42, '2026-01-01T00:00:00.000Z'));
+    store.markStarted(99, 'x');
+    expect(claimReviewRework(store, 42)?.reviewId).toBe(3);
+  });
+
+  it('returns undefined when nothing is pending', () => {
+    expect(
+      claimReviewRework(createFileReviewReworkStore(join(dirs.makeSync('claim-'), 'none.json')), 42),
+    ).toBeUndefined();
   });
 });

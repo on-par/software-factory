@@ -1,5 +1,6 @@
 // packages/cli/src/cli/ship.test.ts — Ship flow (direct) tests: worktree, config seams, slice branch, standards logging (#2789)
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import * as FactoryCore from '@on-par/factory-core';
 import { renderSlicePlanComment } from '@on-par/factory-core/internal';
@@ -390,5 +391,47 @@ describe('shipIssue (direct)', () => {
     await shipIssue(5, {}, ctx());
     const events = readFileSync(paths().events, 'utf-8');
     expect(events).toContain("bundled constitution 'beta'");
+  });
+});
+
+describe('shipIssue review rework (#3564)', () => {
+  const ctx = () => ({ repoRoot: h.repoRoot, ghRepo: h.ghRepo });
+  const seed = (extra: Record<string, unknown> = {}) =>
+    writeFileSync(
+      join(paths().state, 'review-rework.json'),
+      JSON.stringify({
+        reviews: [
+          {
+            reviewId: 200,
+            pr: 77,
+            issue: 5,
+            lane: 'bugfix',
+            reviewer: 'alice',
+            queuedAt: '2026-01-01T00:00:00.000Z',
+            ...extra,
+          },
+        ],
+      }),
+    );
+  const closedPr = () => {
+    const fake = defaultOctokit() as any;
+    fake.rest.pulls.get = vi.fn(async () => ({ data: { state: 'closed', head: { ref: 'factory/5-fix-the-bug' } } }));
+    return fake;
+  };
+
+  it('claims a pending record: skips PLAN, sends reviewRework on the request and marks it started', async () => {
+    seed();
+    const fake = closedPr();
+    await expect(shipIssue(5, {}, ctx(), { octokit: () => fake })).rejects.toThrow(/PR #77 must be open/);
+    expect(phases.planPhase).not.toHaveBeenCalled();
+    expect(fake.rest.pulls.get).toHaveBeenCalledWith(expect.objectContaining({ pull_number: 77 }));
+    const saved = JSON.parse(readFileSync(join(paths().state, 'review-rework.json'), 'utf-8'));
+    expect(saved.reviews[0].startedAt).toEqual(expect.any(String));
+  });
+
+  it('runs normally when the record is already started or absent', async () => {
+    seed({ startedAt: '2026-01-02T00:00:00.000Z' });
+    await shipIssue(5, {}, ctx());
+    expect(phases.planPhase).toHaveBeenCalled();
   });
 });
