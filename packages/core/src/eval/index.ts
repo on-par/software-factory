@@ -21,11 +21,3 @@ export type { HistoryRecord } from './trend.js';
 export { appendHistoryLine, parseHistory, renderTrend, summaryToHistoryRecord } from './trend.js';
 export type { CaseResult, DeterministicCheck, EvalSummary, ExpectedRoute, GoldenCase } from './types.js';
 export { isRouteAsserted } from './types.js';
-export type { ReadinessBaseline, ReadinessCase, ReadinessCaseResult } from './readiness.js';
-export {
-  compareReadinessToBaseline,
-  loadReadinessCases,
-  readinessStubSteps,
-  runReadinessEval,
-  toReadinessBaseline,
-} from './readiness.js';
