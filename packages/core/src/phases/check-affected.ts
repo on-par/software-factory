@@ -15,10 +15,17 @@ import type { CheckSummary, Constitution } from '../types/index.js';
 export type AffectedSelection = AffectedTestsResolution & { round: number };
 
 /** The repo's `tests.affected` config, or null when unset or unreadable. */
-export function loadAffectedConfig(worktree: string): TestsAffectedConfig | null {
+export function loadAffectedConfig(
+  worktree: string,
+  log?: (type: EventKind, msg: string) => void,
+): TestsAffectedConfig | null {
   try {
     return loadRepoConfig(worktree)?.tests?.affected ?? null;
-  } catch {
+  } catch (err) {
+    log?.(
+      'affected_tests',
+      `tests.affected config unreadable, running the full suite: ${err instanceof Error ? err.message : String(err)}`,
+    );
     return null;
   }
 }
@@ -31,7 +38,7 @@ export function createAffectedSelector(deps: {
   config: TestsAffectedConfig | null | undefined;
   log: (type: EventKind, msg: string) => void;
 }): (round: number) => Promise<AffectedSelection | undefined> {
-  const config = deps.config === undefined ? loadAffectedConfig(deps.worktree) : deps.config;
+  const config = deps.config === undefined ? loadAffectedConfig(deps.worktree, deps.log) : deps.config;
   return async (round) => {
     if (!config) return undefined;
     const changed = deps.diffBase === undefined ? null : await listChangedFiles(deps.worktree, deps.diffBase);
