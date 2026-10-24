@@ -60,7 +60,7 @@ export async function designCheckpointPark(
   if (!label.present) return undefined;
   if (ports.planReuse) {
     try {
-      const baseSha = await readWorktreeHead(ports.workspace.path).catch(() => '');
+      const baseSha = await readWorktreeHead(ports.workspace.path);
       await ports.planReuse.record({
         bodyHash: issueBodyHash(request.work.brief),
         baseSha,
