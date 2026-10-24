@@ -1,22 +1,17 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ProviderRestoredPayload } from '../events/payloads.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { ProviderBreaker, restoredCause } from './breaker.js';
 
-const tempDirs = new Set<string>();
+const tempDirs = createTempDirs();
 
-afterEach(async () => {
-  for (const dir of tempDirs) await rm(dir, { recursive: true, force: true });
-  tempDirs.clear();
-});
+afterEach(() => tempDirs.cleanup());
 
 async function tmpFile(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'breaker-restored-test-'));
-  tempDirs.add(dir);
+  const dir = await tempDirs.make('breaker-restored-test-');
   return join(dir, 'breaker.json');
 }
 
