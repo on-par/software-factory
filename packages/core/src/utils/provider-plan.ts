@@ -30,3 +30,52 @@ export function detectProviderPlan(id: string, deps: ProviderPlanDeps = {}): Pro
     return 'unknown';
   }
 }
+
+/** The registry fields providerPlan reads. Never a credential. */
+export interface ProviderPlanModel {
+  harness?: string;
+  providerModel?: string;
+  endpoint?: string;
+}
+
+/** The billing plan of one routed model (#3234). The harness wins; with no harness, provider
+ *  'anthropic' means claude-cli and 'openai' means codex-cli. Zen (opencode/) is 'api', opencode-go/
+ *  is 'subscription', a claude-cli model with an endpoint and any other harness (pi, ollama, command)
+ *  is 'unknown'. Never throws, never reads a credential value into a return or log. */
+export function providerPlan(
+  provider: string | undefined,
+  model: ProviderPlanModel | undefined,
+  deps: ProviderPlanDeps = {},
+): ProviderPlan {
+  try {
+    const harness =
+      model?.harness ?? (provider === 'anthropic' ? 'claude-cli' : provider === 'openai' ? 'codex-cli' : undefined);
+    if (model?.providerModel?.startsWith('opencode/')) return 'api';
+    if (harness === 'opencode') return detectProviderPlan(model?.providerModel ?? '', deps);
+    if (harness === 'claude-cli') return model?.endpoint ? 'unknown' : detectProviderPlan('claude', deps);
+    if (harness === 'codex-cli') return detectProviderPlan('codex', deps);
+    return 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** One `metered_primary_route:` line per pinned plan/build route whose model is not on a subscription (#3234). */
+export function meteredPrimaryRouteWarnings(
+  pins: { plan?: string; build?: string },
+  lookup: (model: string) => (ProviderPlanModel & { provider?: string }) | undefined,
+  deps: ProviderPlanDeps = {},
+): string[] {
+  const lines = new Set<string>();
+  for (const route of ['plan', 'build'] as const) {
+    const model = pins[route];
+    if (!model) continue;
+    const def = lookup(model);
+    const plan = providerPlan(def?.provider, def, deps);
+    if (plan === 'subscription') continue;
+    lines.add(
+      `metered_primary_route: ${route} is pinned to ${model} (plan ${plan}, metered); it runs because it is the explicit primary, and is never used as a failover target`,
+    );
+  }
+  return [...lines];
+}

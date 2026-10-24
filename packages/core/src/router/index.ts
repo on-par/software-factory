@@ -22,6 +22,8 @@ import { sandboxEventFromError } from '../sandbox/index.js';
 import type { CostEntry, RetryCause, TaskType } from '../types/index.js';
 import type { ExecFn } from '../utils/exec.js';
 import { defaultExecFn } from '../utils/exec.js';
+import type { ProviderPlan } from '../utils/claude-config.js';
+import { providerPlan, type ProviderPlanDeps } from '../utils/provider-plan.js';
 import { type LocalAuthAgent, localAuthAgentFor } from '../utils/local-auth-record.js';
 import { BudgetStopError, type BudgetGuard, watchBudget } from './budget-guard.js';
 import { type ContextCeilingNotice, contextCeilingFor, contextCeilingNotice } from './context-ceiling.js';
@@ -266,6 +268,8 @@ export class ModelRouter {
   private registry: ModelRegistry;
   private costSink?: CostSink;
   private providerHold?: (provider: string) => Promise<boolean>;
+  private providerPlanDeps?: ProviderPlanDeps;
+  private readonly planCache = new Map<string, ProviderPlan>();
   private harnessCliAvailable?: (harnessId: string) => boolean;
   /** Agent CLIs (harness ids) that failed local_auth during this router's run (#2495). One
    *  router serves one run, so a signed-out CLI is tried once and then skipped by every later
@@ -363,6 +367,25 @@ export class ModelRouter {
   /** Register a check telling whether a provider is held for rejected credentials; held providers are skipped. */
   setProviderHold(check: ((provider: string) => Promise<boolean>) | undefined): void {
     this.providerHold = check;
+  }
+  /** Turn on the metered failover guard (#3234): failover targets whose plan is not 'subscription' are skipped.
+   *  undefined turns it off (the default, so tests and sim stay hermetic). Clears the plan cache. */
+  setProviderPlanDeps(deps: ProviderPlanDeps | undefined): void {
+    this.providerPlanDeps = deps;
+    this.planCache.clear();
+  }
+  private planOf(model: string): ProviderPlan {
+    let plan = this.planCache.get(model);
+    if (plan === undefined) {
+      const def = this.registry.get(model);
+      plan = providerPlan(
+        def?.provider,
+        { harness: this.registry.getHarnessId(model), providerModel: def?.providerModel, endpoint: def?.endpoint },
+        this.providerPlanDeps,
+      );
+      this.planCache.set(model, plan);
+    }
+    return plan;
   }
   /** Register a sink that receives one cost row per successful run(). */
   setCostSink(sink: CostSink): void {
@@ -496,6 +519,7 @@ export class ModelRouter {
     const missingClis: string[] = [];
 
     let ceilingNoticed = false;
+    const meteredSkips: { model: string; provider: string; plan: ProviderPlan }[] = [];
 
     for (const model of models) {
       if (isOpenCodeZenModel(model, this.registry.get(model))) {
@@ -503,6 +527,7 @@ export class ModelRouter {
           onLog(
             `provider_failover_zen_skip: skipping ${model} for ${task}: OpenCode Zen (opencode/) models are never failover targets`,
           );
+          meteredSkips.push({ model, provider: 'opencode', plan: 'api' });
           continue;
         }
         if (!this.meteredPrimaryNoticed.has(model)) {
@@ -510,6 +535,18 @@ export class ModelRouter {
           onLog(
             `metered_primary_route: ${model} for ${task} is OpenCode Zen (metered pay-per-use); it runs only because it is the explicit primary`,
           );
+        }
+      }
+      const failoverTarget = model !== models[0] || retryCause === 'failover';
+      if (this.providerPlanDeps && failoverTarget) {
+        const plan = this.planOf(model);
+        if (plan !== 'subscription') {
+          const provider = this.registry.get(model)?.provider ?? 'unknown';
+          meteredSkips.push({ model, provider, plan });
+          onLog(
+            `provider_failover_metered_skip: skipping ${model} for ${task}: provider=${provider} plan=${plan} is metered; automatic failover never moves onto a metered provider`,
+          );
+          continue;
         }
       }
       const modelProvider = this.registry.get(model)?.provider;
@@ -778,6 +815,16 @@ export class ModelRouter {
       }
     }
 
+    const summary = attempts.map((a) => `${a.model}(${a.reason}${a.detail ? `: ${a.detail}` : ''})`).join(', ');
+    if (meteredSkips.length > 0) {
+      const skipped = meteredSkips.map((s) => `${s.model}(${s.provider}, ${s.plan})`).join(', ');
+      throw new ModelRouterError(
+        `Only metered models left for task '${task}': skipped ${skipped}${attempts.length ? `; tried ${summary}` : ''}`,
+        attempts.at(-1)?.reason ?? 'unavailable',
+        attempts,
+        'only_metered_left',
+      );
+    }
     if (attempts.length === 0 && skippedForMissingCli && !skippedForOllama) {
       const cmds = [...new Set(missingClis)].sort().join(', ');
       throw new ModelRouterError(
@@ -793,7 +840,6 @@ export class ModelRouter {
         attempts,
       );
     }
-    const summary = attempts.map((a) => `${a.model}(${a.reason}${a.detail ? `: ${a.detail}` : ''})`).join(', ');
     throw new ModelRouterError(
       `All models failed for task '${task}': ${summary}`,
       attempts[attempts.length - 1]?.reason ?? 'error',

@@ -25,12 +25,16 @@ export interface RouterAttempt {
   detail?: string;
 }
 
+/** Why a ModelRouterError ended the run, beyond its reason: every remaining failover target was metered (#3234). */
+export type RouterErrorDetail = 'only_metered_left';
+
 /** Typed terminal failure thrown by ModelRouter after an exhausted or guarded-abort run. */
 export class ModelRouterError extends Error {
   constructor(
     message: string,
     readonly reason: HarnessFailureReason,
     readonly attempts: RouterAttempt[],
+    readonly detail?: RouterErrorDetail,
   ) {
     super(message);
     this.name = 'ModelRouterError';
@@ -39,7 +43,9 @@ export class ModelRouterError extends Error {
 
 /** Read the router failure payload structurally so compatible cross-boundary
  *  errors remain useful without relying on a class identity. */
-export function routerFailureOf(err: unknown): { reason: HarnessFailureReason; attempts: RouterAttempt[] } | undefined {
+export function routerFailureOf(
+  err: unknown,
+): { reason: HarnessFailureReason; attempts: RouterAttempt[]; detail?: RouterErrorDetail } | undefined {
   if (
     typeof err !== 'object' ||
     err === null ||
@@ -48,8 +54,9 @@ export function routerFailureOf(err: unknown): { reason: HarnessFailureReason; a
   ) {
     return undefined;
   }
-  const failure = err as { reason: HarnessFailureReason; attempts: RouterAttempt[] };
-  return { reason: failure.reason, attempts: failure.attempts };
+  const failure = err as { reason: HarnessFailureReason; attempts: RouterAttempt[]; detail?: unknown };
+  const base = { reason: failure.reason, attempts: failure.attempts };
+  return typeof failure.detail === 'string' ? { ...base, detail: failure.detail as RouterErrorDetail } : base;
 }
 
 /** Type-safe read of a failover reason: only typed failures

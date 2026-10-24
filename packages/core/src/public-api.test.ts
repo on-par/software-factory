@@ -354,6 +354,8 @@ const INTERNAL_API_KEYS = [
   'detectClaudePlan',
   'codexHasApiKey',
   'detectProviderPlan',
+  'meteredPrimaryRouteWarnings',
+  'providerPlan',
   'claudeStoredSessionState',
   // Last run-time local_auth failure per agent (#2733)
   'localAuthAgentFor',
