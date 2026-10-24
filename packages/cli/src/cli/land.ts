@@ -41,10 +41,10 @@ import {
 import type { OpenPullRequestEvidence } from './index.js';
 import {
   AwaitingReviewError,
-  CiFailedError,
   LandConflictError,
   LandFailureError,
   MergeGatedError,
+  isLandLeftOpen,
   landOpenPullRequest,
 } from './land-pr.js';
 import type { LandLock } from './land-pr.js';
@@ -244,7 +244,7 @@ export async function landIssue(
         },
       });
     } catch (err) {
-      if (err instanceof AwaitingReviewError || err instanceof CiFailedError) {
+      if (isLandLeftOpen(err)) {
         await withLandLock(() => gitOps.cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
       }
       throw err;
@@ -253,8 +253,7 @@ export async function landIssue(
     await releaseLandedClaim(paths, ghRepo, issueNum, log);
     await withLandLock(() => gitOps.cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
   } catch (err: any) {
-    if (err instanceof LandConflictError || err instanceof AwaitingReviewError || err instanceof CiFailedError)
-      throw err;
+    if (err instanceof LandConflictError || isLandLeftOpen(err)) throw err;
     log('fail', `merge failed: ${err.message}`);
     throw new LandFailureError(`merge failed for issue #${issueNum}: ${err.message}`, 5);
   }

@@ -1,8 +1,8 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import {
   awaitingCiFile,
   clearAwaitingCi,
@@ -14,6 +14,8 @@ import {
 } from './awaiting-ci.js';
 
 const MIN = 60_000;
+const dirs = createTempDirs();
+afterEach(() => dirs.cleanup());
 const rec = (issue: number, extra: Partial<AwaitingCiRecord> = {}): AwaitingCiRecord => ({
   issue,
   prNumber: issue + 100,
@@ -56,7 +58,7 @@ describe('resolveAwaitingCiCapMs', () => {
 });
 
 describe('awaiting-ci store', () => {
-  const dir = () => mkdtempSync(join(tmpdir(), 'awaiting-ci-'));
+  const dir = () => dirs.makeSync('awaiting-ci-');
 
   it('round-trips, replaces by issue and clears', async () => {
     const file = awaitingCiFile({ state: dir() });

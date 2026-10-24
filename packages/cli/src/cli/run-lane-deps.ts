@@ -2,6 +2,7 @@
 
 import type { getFactoryPaths, ParkReason, ProviderBreaker, RunOutcome } from '@on-par/factory-core';
 import type {
+  AwaitingCiRecord,
   logEvent,
   LoadGuardDecision,
   QueueClaim,
@@ -10,6 +11,7 @@ import type {
 } from '@on-par/factory-core/internal';
 import type { Octokit } from '@octokit/rest';
 
+import type { AwaitingCiLaneOps } from './awaiting-ci-recheck.js';
 import type { BaseHoldDecision } from './base-hold.js';
 import type { ChildEnqueueResult } from './run-lane-decompose.js';
 import type { waitForMerge } from './land.js';
@@ -52,6 +54,11 @@ export type RunLaneDeps = {
   /** #3563: polls open factory PRs for trusted changes-requested reviews and queues their issues; run before every remote claim.
    *  Fail-closed: a rejection is logged as a warn and never changes lane flow. Absent for local lanes. */
   pollReviewRework?: () => Promise<void>;
+  /** #3208: persists the record of a PR whose CI never started (the AwaitingCiError outcome). A rejection is logged as a warn. */
+  recordAwaitingCi?: (rec: AwaitingCiRecord) => Promise<void>;
+  /** #3208: re-checks due awaiting-ci PRs before every claim, parking through the lane's own park path via `ops`.
+   *  Fail-closed: a rejection is logged as a warn and never changes lane flow. */
+  recheckAwaitingCi?: (ops: AwaitingCiLaneOps) => Promise<void>;
   releaseIssue?: (issue: number, outcome: QueueReleaseOutcome) => Promise<void>;
   /** Writes decomposed children into the GitHub queue (queued, lane, order right behind the parent)
    *  before the lane moves on, so a restart never loses them (#3539). Absent for static local lanes. */
