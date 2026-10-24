@@ -96,6 +96,8 @@ export interface Constitution {
   disableEvidencePlan?: boolean;
   /** Constitution checkers allowed to skip when no model can run them (frontmatter: optionalCheckers). */
   optionalCheckers?: string[];
+  /** Extra globs forcing the full suite for tests.affected (frontmatter: affectedTestsFullOn, #3260). */
+  affectedTestsFullOn?: string[];
   body: string;
   path: string;
   /** Where the standards came from: the target repo's own instruction files, or a bundled <product>.md */

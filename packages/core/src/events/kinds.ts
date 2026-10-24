@@ -7,21 +7,10 @@
 import type { EventTraits, LaneStatus } from './event-traits.js';
 
 export type { EventTraits, LaneStatus };
-export type {
-  AllProvidersDownPayload,
-  FlakyTestsPayload,
-  LanePausedPayload,
-  ParkPayload,
-  ProviderAuthRejectedPayload,
-  ProviderBreakerClosePayload,
-  ProviderCappedPayload,
-  ProviderFailoverPayload,
-  ProviderRefusedPayload,
-  ProviderRestoredPayload,
-  StewardTriggeredPayload,
-} from './payloads.js';
+export type * from './payloads.js'; // every payload type; one line keeps this file under the max-lines ceiling
 
 export type EventKind =
+  | 'affected_tests'
   | 'pr-adopt-ambiguous'
   | 'pr-adopt-lookup-failed'
   | 'pr-adopted'
@@ -245,6 +234,7 @@ export type EventKind =
 /** Every existing `EventKind`, classified once. New kinds must be added here —
  *  omitting one is a compile error, which is the point (#663). */
 export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
+  affected_tests: { severity: 'info', isPark: false, isTerminal: false }, // affected-test selection per CHECK round (#3260)
   activity_touch_failed: { severity: 'info', isPark: false, isTerminal: false },
   adr_context: { severity: 'info', isPark: false, isTerminal: false },
   adr_context_empty: { severity: 'info', isPark: false, isTerminal: false },

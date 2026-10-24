@@ -22,6 +22,7 @@ import { envErrorLine, sandboxEnvParkMessage } from '../environment/sandbox-env.
 import { escalationLine, isEscalation } from '../utils/index.js';
 import type { BuildRoutePin } from '../config/repo.js';
 import { classifyNoDiff, renderNoDiffDetail, workerOutputTail, type NoDiffCause } from './build-no-diff.js';
+import { loadAffectedConfig } from './check-affected.js';
 import { renderLintRulesInForce } from './build-lint-rules.js';
 import { failOverOpencodeBuild } from './build-opencode-failover.js';
 import {
@@ -203,6 +204,7 @@ async function buildPhaseImpl(opts: {
   const verifyCommand =
     !hasVerifySh && (await fileExists(join(worktree, 'scripts/verify.ps1'))) ? VERIFY_PS1_ARGV.join(' ') : undefined;
   const lintCommands = hasVerifySh ? [] : await resolveLintCommands({ worktree }).catch(() => []);
+  const affectedTestsCommand = loadAffectedConfig(worktree)?.command;
   const promptOpts = {
     issue,
     specPath,
@@ -213,6 +215,7 @@ async function buildPhaseImpl(opts: {
     designGrounding,
     lintCommands,
     verifyCommand,
+    affectedTestsCommand,
     previousAttempt,
   };
   if (designArtifact) {
@@ -241,6 +244,7 @@ async function buildPhaseImpl(opts: {
           designGrounding,
           lintCommands,
           verifyCommand,
+          affectedTestsCommand,
           previousAttempt,
         })
       : buildCommitOnlyPrompt(promptOpts);
