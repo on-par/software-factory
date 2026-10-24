@@ -30,6 +30,8 @@ export type EventKind =
   | 'adr_inject_started'
   | 'adr_read_degraded'
   | 'adr_skipped'
+  | 'agent_memory_loaded'
+  | 'agent_memory_oversized'
   | 'approval_granted'
   | 'approval_requested'
   | 'await-merge'
@@ -235,6 +237,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   adr_inject_started: { severity: 'info', isPark: false, isTerminal: false },
   adr_read_degraded: { severity: 'info', isPark: false, isTerminal: false },
   adr_skipped: { severity: 'info', isPark: false, isTerminal: false },
+  agent_memory_loaded: { severity: 'info', isPark: false, isTerminal: false },
+  agent_memory_oversized: { severity: 'warn', isPark: false, isTerminal: false },
   approval_granted: { severity: 'info', isPark: false, isTerminal: false },
   approval_requested: { severity: 'warn', isPark: false, isTerminal: false },
   'await-merge': { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'waiting-merge' },

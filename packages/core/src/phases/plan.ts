@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises';
 import type { Octokit } from '@octokit/rest';
 import { createFsReader } from '@on-par/repo-context';
 
+import { loadAgentMemoryCtx } from '../agent-memory/index.js';
 import { adrLabel, readAdrContext, renderAdrConstraints } from '../adr/index.js';
 import type { ApprovalGate } from '../approvals/index.js';
 import { PLAN_SPEC_PREVIEW_BYTES } from '../approvals/index.js';
@@ -84,6 +85,8 @@ export interface PlanPromptOpts {
   specPath: string;
   constitutionCtx: string;
   adrCtx?: string;
+  /** Rendered "## Lane memory" section (#3624); empty or absent = no lane memory. */
+  agentMemoryCtx?: string;
   /** Build routes with at least one runnable model on this machine. Empty or omitted = the CLI routes; command only when listed. */
   runnableRoutes?: readonly BuildRouteName[];
   /** Pre-flight size-gate verdict (#3275). passed && enforced drops step 4's size ESCALATE. */
@@ -128,7 +131,7 @@ Do NOT implement anything. You are already inside the isolated worktree (cwd).
 
 ${constitutionCtx}
 ${adrCtx ?? ''}
-## Issue #${issue}: ${issueTitle}
+${opts.agentMemoryCtx ? `${opts.agentMemoryCtx}\n` : ''}## Issue #${issue}: ${issueTitle}
 
 ${UNTRUSTED_ISSUE_BODY_NOTICE}
 
@@ -630,6 +633,8 @@ async function planPhaseImpl(opts: {
     durationMs: Date.now() - adrInjectStartedAt,
   });
 
+  const agentMemoryCtx = opts.laneId ? await loadAgentMemoryCtx(worktree, opts.laneId, log) : '';
+
   let steering: ConsumedSteering | undefined;
   let replans = 0;
   while (true) {
@@ -641,6 +646,7 @@ async function planPhaseImpl(opts: {
         specPath,
         constitutionCtx,
         adrCtx,
+        agentMemoryCtx,
         runnableRoutes,
         sizeGate,
         previousAttempt: opts.previousAttempt,

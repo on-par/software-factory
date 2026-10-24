@@ -38,6 +38,7 @@ import {
 import { npmCheck, resolveVerifyCommands, verifyCommandChecks, withPathResults } from './doctor-verify.js';
 import { configLintChecks, declaredHarnessChecks, modelsRegistryChecks } from './doctor-config.js';
 import { failoverProviderChecks } from './doctor-failover-providers.js';
+import { agentMemoryChecks } from './doctor-agent-memory.js';
 import { factoryIgnoredChecks } from './doctor-factory-ignored.js';
 import {
   analyzeEventLog,
@@ -1064,7 +1065,7 @@ export async function cmdDoctor(
         commandAvailable: rt.coreOps.isCommandAvailable,
       }),
     );
-    checks.push(riskPolicyCheck(repoRoot));
+    checks.push(riskPolicyCheck(repoRoot), ...(await agentMemoryChecks(repoRoot)));
 
     // A malformed config never aborts doctor; a merge failure is reported once, below.
     const view = harnessView ?? { declaredIds: [] };

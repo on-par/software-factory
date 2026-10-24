@@ -346,6 +346,8 @@ const EXTRA_INTERNAL_KEYS = [
   ...GATE,
 ];
 const INTERNAL_API_KEYS = [
+  ...'AGENT_MEMORY_DIR AGENT_MEMORY_MAX_BYTES agentMemoryPath readAgentMemory'.split(' '), // #3624
+  ...'renderAgentMemory scanAgentMemory loadAgentMemoryCtx'.split(' '),
   ...'resolveCompileCommand resolveLintCommands resolveTestsCommand'.split(' '), // #3473
   ...'describeChecksProbe holdRunConfigSnapshot'.split(' '), // #3600
   // `factory init --detect-checks`: heuristics, agent prompt and reply, shell-free tokenizer
