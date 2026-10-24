@@ -6,6 +6,7 @@ import * as internalApi from './internal.js';
 import * as kpisApi from './kpis-entry.js';
 import * as testingApi from './testing.js';
 import { KPIS_API_KEYS, TESTING_API_KEYS } from './public-api-keys.js';
+import * as agentMemory from './agent-memory/index.js';
 const PUBLIC_API_KEYS = [
   'FactoryConfigV2Schema',
   'factoryConfigV2JsonSchema',
@@ -890,7 +891,9 @@ describe('public API surface (ADR-0004)', () => {
     }
   });
   it('./internal and ./testing expose exactly the documented APIs', () => {
-    expect(Object.keys(internalApi).sort()).toEqual([...INTERNAL_API_KEYS, ...EXTRA_INTERNAL_KEYS].sort());
+    expect(Object.keys(internalApi).sort()).toEqual(
+      [...INTERNAL_API_KEYS, ...EXTRA_INTERNAL_KEYS, ...Object.keys(agentMemory)].sort(),
+    );
     expect(Object.keys(testingApi).sort()).toEqual([...TESTING_API_KEYS, 'createTempDirs', 'withTempDir'].sort());
   });
   it('./kpis exposes exactly the documented KPI subset, and nothing beyond the root API', () => {
