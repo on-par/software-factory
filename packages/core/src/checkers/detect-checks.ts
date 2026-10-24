@@ -70,6 +70,19 @@ async function guessEcosystems(
   if (entries.includes('Cargo.toml')) {
     found.push({ name: 'Rust', proposal: { build: 'cargo build', test: 'cargo test' } });
   }
+  if (entries.includes('package.json')) {
+    const packageJson = await readFile(join(repoRoot, 'package.json'), 'utf-8')
+      .then((text) => JSON.parse(text) as { scripts?: Record<string, unknown> })
+      .catch(() => null);
+    const scripts = packageJson?.scripts;
+    if (scripts && typeof scripts === 'object' && !Array.isArray(scripts)) {
+      const proposal: CheckProposal = {};
+      if (typeof scripts.build === 'string') proposal.build = 'npm run build';
+      if (typeof scripts.test === 'string') proposal.test = 'npm test';
+      if (typeof scripts.lint === 'string') proposal.lint = 'npm run lint';
+      if (Object.keys(proposal).length > 0) found.push({ name: 'npm', proposal });
+    }
+  }
   if (entries.includes('gradlew') && (await fileExists(join(repoRoot, 'gradlew')))) {
     found.push({ name: 'Gradle', proposal: { build: './gradlew assemble', test: './gradlew test' } });
   } else if (entries.includes('pom.xml')) {

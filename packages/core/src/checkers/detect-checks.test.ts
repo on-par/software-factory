@@ -68,6 +68,14 @@ describe('detectCheckHeuristics', () => {
     expect((await detectCheckHeuristics(repo({ 'pom.xml': '' }))).guessed.test).toBe('mvn -B test');
   });
 
+  it('uses package.json build, test, and lint scripts as deterministic npm checks', async () => {
+    const h = await detectCheckHeuristics(
+      repo({ 'package.json': JSON.stringify({ scripts: { build: 'tsc', test: 'node --test', lint: 'eslint .' } }) }),
+    );
+    expect(h.ambiguities).toEqual([]);
+    expect(heuristicProposal(h)).toEqual({ build: 'npm run build', test: 'npm test', lint: 'npm run lint' });
+  });
+
   it('several build systems are ambiguous', async () => {
     const h = await detectCheckHeuristics(repo({ 'go.mod': '', 'Cargo.toml': '' }));
     expect(h.ambiguities).toContain('several build systems (Go, Rust)');
