@@ -28,6 +28,7 @@ export {
   defaultFactoryConfig,
   defaultLaneBreakerThreshold,
   defaultModelsConfig,
+  defaultPrWalkthrough,
   defaultRoutesConfig,
   type EvidenceCapsDefaults,
   type FactoryDefaults,

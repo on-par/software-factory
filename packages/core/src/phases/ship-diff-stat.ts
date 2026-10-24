@@ -8,3 +8,9 @@ export async function computeDiffStat(run: CommandRunner, worktree: string): Pro
     return '';
   }
 }
+
+/** Raw `git diff --numstat`; unlike computeDiffStat, a git failure propagates to the caller. */
+export async function computeNumstat(run: CommandRunner, worktree: string): Promise<string> {
+  const { stdout } = await run('git diff --numstat origin/main...HEAD', { cwd: worktree });
+  return stdout;
+}

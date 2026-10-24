@@ -23,6 +23,6 @@ export interface RunPolicy {
   budget: RunBudget;
   /** Resolved FACTORY_* env-override values one run needs (#668). */
   effective: EffectiveConfig;
-  /** PR presentation: draft mode (#3449) and the resolved footer. Undefined uses the defaults. */
-  pr?: { draft: boolean; footer?: string };
+  /** PR presentation: draft mode (#3449), the resolved footer, and the large-PR walkthrough thresholds (#3623). Undefined uses the defaults. */
+  pr?: { draft: boolean; footer?: string; walkthrough?: { minLines?: number; minFiles?: number } };
 }

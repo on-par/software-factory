@@ -12,3 +12,16 @@ describe('PR section validation', () => {
     expect(PrConfigSections.pr.safeParse('footer').success).toBe(false);
   });
 });
+
+describe('pr.walkthrough (#3623)', () => {
+  it('accepts partial non-negative integer thresholds', () => {
+    expect(PrConfigSections.pr.parse({ walkthrough: { minLines: 100 } })).toEqual({ walkthrough: { minLines: 100 } });
+    expect(PrConfigSections.pr.safeParse({ walkthrough: { minLines: 0, minFiles: 0 } }).success).toBe(true);
+  });
+
+  it('rejects negative, fractional and unknown keys', () => {
+    expect(PrConfigSections.pr.safeParse({ walkthrough: { minLines: -1 } }).success).toBe(false);
+    expect(PrConfigSections.pr.safeParse({ walkthrough: { minFiles: 1.5 } }).success).toBe(false);
+    expect(PrConfigSections.pr.safeParse({ walkthrough: { other: 1 } }).success).toBe(false);
+  });
+});

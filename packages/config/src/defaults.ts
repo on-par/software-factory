@@ -562,6 +562,9 @@ export const defaultEvidenceCaps: EvidenceCapsDefaults = {
 /** Lane circuit breaker threshold (#1915): default for `budget.laneBreakerThreshold`. 0 turns the breaker off. */
 export const defaultLaneBreakerThreshold = 2;
 
+/** Large-PR walkthrough thresholds (#3623): defaults for `pr.walkthrough`. Both must be met. */
+export const defaultPrWalkthrough = { minLines: 300, minFiles: 5 } as const;
+
 /** Global factory configuration: paths, timeouts, merge/worktree/budget/intake defaults. */
 export const defaultFactoryConfig: FactoryDefaults = {
   version: 1,
