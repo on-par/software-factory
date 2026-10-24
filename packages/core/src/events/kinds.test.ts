@@ -136,6 +136,13 @@ describe('severityOf', () => {
   });
 });
 
+describe('provider_refused (#3335)', () => {
+  it('is a non-park, non-terminal warn', () => {
+    expect(EVENT_TRAITS.provider_refused).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
+    expect(isParkKind('provider_refused')).toBe(false);
+  });
+});
+
 describe('isParkKind', () => {
   it('is true for every ParkReason-shaped kind', () => {
     for (const kind of ['escalate', 'timeout', 'fail', 'conflict', 'ci-failed', 'parked', 'stuck']) {

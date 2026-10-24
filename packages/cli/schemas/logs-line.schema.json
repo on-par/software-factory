@@ -86,6 +86,11 @@
       "properties": {},
       "additionalProperties": {}
     },
+    "providerRefused": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
     "providerAuthRejected": {
       "type": "object",
       "properties": {},

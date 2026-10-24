@@ -1,10 +1,8 @@
 // src/events/kinds.ts — Closed vocabulary for FactoryEvent.type (#663)
 //
-// FactoryEvent.type used to be a free-form string, classified independently by six hand-maintained
-// sets (format.ts, tui/dashboard.ts, tui/state.ts, kpis/human.ts, kpis/index.ts, cli's ParkReason),
-// with no seam forcing a newly-emitted kind to be registered anywhere. This module is that seam:
-// EventKind is the closed set of kinds the factory emits, and EVENT_TRAITS is the single table
-// every consumer reads instead of maintaining its own classification.
+// FactoryEvent.type was free-form, classified by six hand-maintained sets with no seam forcing a
+// newly-emitted kind to be registered. EventKind is the closed set of kinds the factory emits, and
+// EVENT_TRAITS is the single table every consumer reads instead of keeping its own classification.
 
 import type { LogLevel } from '../types/index.js';
 
@@ -15,6 +13,7 @@ export type {
   ProviderAuthRejectedPayload,
   ProviderBreakerClosePayload,
   ProviderCappedPayload,
+  ProviderRefusedPayload,
   StewardTriggeredPayload,
 } from './payloads.js';
 
@@ -160,6 +159,7 @@ export type EventKind =
   | 'provider_breaker_skip'
   | 'provider_breaker_pinned'
   | 'provider_capped'
+  | 'provider_refused'
   | 'readiness'
   | 'readiness_enrichment_failed'
   | 'readiness_enrichment_started'
@@ -400,6 +400,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   provider_breaker_pinned: { severity: 'info', isPark: false, isTerminal: false },
   provider_auth_rejected: { severity: 'warn', isPark: false, isTerminal: false },
   provider_capped: { severity: 'warn', isPark: false, isTerminal: false },
+  provider_refused: { severity: 'warn', isPark: false, isTerminal: false },
   readiness: { severity: 'info', isPark: false, isTerminal: false },
   readiness_enrichment_failed: { severity: 'info', isPark: false, isTerminal: false },
   readiness_enrichment_started: { severity: 'info', isPark: false, isTerminal: false },
