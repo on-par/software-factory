@@ -2,7 +2,7 @@
 // cooldown state so a quota-tripped provider is skipped by subsequent lanes
 // until the cooldown expires (#369).
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import type { EventKind } from '../events/kinds.js';
@@ -59,6 +59,9 @@ export const RESET_BUFFER_MS = 2 * 60_000;
 /** A usage cap with no reported reset is re-probed after 1 hour (#3337). */
 export const DEFAULT_CAP_PROBE_MS = 60 * 60_000;
 
+/** A restore-probe claim older than this (twice the 60s probe timeout) is from a dead lane and can be reclaimed (#3339). */
+export const PROBE_CLAIM_STALE_MS = 2 * 60_000;
+
 export const MAX_REPORTED_COOLDOWN_MS = 31 * 24 * 60 * 60_000;
 
 /** Extracts a provider-reported reset time so the breaker can cool down for as
@@ -106,7 +109,9 @@ export function reportedCooldownMs(
 }
 
 /** Maps a breaker close cause to the `provider_restored` cause (#3236). */
-export function restoredCause(cause: 'cooldown' | 'creds_changed' | 'manual_reset'): ProviderRestoredPayload['cause'] {
+export function restoredCause(
+  cause: 'cooldown' | 'creds_changed' | 'manual_reset' | 'probe',
+): ProviderRestoredPayload['cause'] {
   return cause === 'cooldown' ? 'timed_reset' : cause;
 }
 
@@ -131,7 +136,7 @@ export class ProviderBreaker {
   private onClose: ((restored: ProviderRestoredPayload) => void) | undefined;
 
   /** Tells `onClose` the breaker closed (#3236). A throwing observer never changes breaker gating. */
-  private notifyClose(provider: string, cause: 'cooldown' | 'creds_changed' | 'manual_reset'): void {
+  private notifyClose(provider: string, cause: 'cooldown' | 'creds_changed' | 'manual_reset' | 'probe'): void {
     try {
       this.onClose?.({ provider, at: new Date(this.now()).toISOString(), cause: restoredCause(cause) });
     } catch {
@@ -216,11 +221,108 @@ export class ProviderBreaker {
 
     const remainingMs = new Date(entry.openedAt).getTime() + entry.cooldownMs - this.now();
     if (remainingMs > 0) return { open: true, entry, remainingMs };
+    // another lane is probing this past-due cap: stay open so no reader time-closes it meanwhile (#3339)
+    if (this.dueCap(entry) !== undefined && (await this.freshClaim(provider, entry))) {
+      return { open: true, entry, remainingMs: 0 };
+    }
 
     delete data.providers[provider];
     await this.write(data);
     this.notifyClose(provider, 'cooldown');
     return { open: false, justClosed: entry, closeCause: 'cooldown' };
+  }
+
+  private claimPath(provider: string, cappedUntilMs: number): string {
+    return `${this.file}.probe-${provider}-${cappedUntilMs}`;
+  }
+
+  /** The cap's instant when the entry is a timed usage cap whose `cappedUntil` has passed, else undefined (#3339). */
+  private dueCap(entry: BreakerEntry): number | undefined {
+    if (!entry.cappedUntil || entry.until === 'credentials-change') return undefined;
+    const at = Date.parse(entry.cappedUntil);
+    return Number.isFinite(at) && at <= this.now() ? at : undefined;
+  }
+
+  private async freshClaim(provider: string, entry: BreakerEntry): Promise<boolean> {
+    const at = this.dueCap(entry);
+    if (at === undefined) return false;
+    try {
+      const claimedAt = Number(await readFile(this.claimPath(provider, at), 'utf-8'));
+      return Number.isFinite(claimedAt) && this.now() - claimedAt <= PROBE_CLAIM_STALE_MS;
+    } catch {
+      return false;
+    }
+  }
+
+  private async removeClaim(provider: string, entry: BreakerEntry | undefined): Promise<void> {
+    const at = entry?.cappedUntil ? Date.parse(entry.cappedUntil) : Number.NaN;
+    if (!Number.isFinite(at)) return;
+    await unlink(this.claimPath(provider, at)).catch(() => undefined);
+  }
+
+  /** Read-only: the entry when it is a usage cap whose `cappedUntil` has passed and is due a restore probe (#3339). */
+  async probeDue(provider: string): Promise<BreakerEntry | undefined> {
+    const entry = (await this.read()).providers[provider];
+    return entry && this.dueCap(entry) !== undefined ? entry : undefined;
+  }
+
+  /** Takes the one cross-lane probe claim for the provider's current cap: an exclusive-create claim file next to the
+   *  breaker file. A claim older than PROBE_CLAIM_STALE_MS (a dead lane) is reclaimed (#3339). */
+  async claimProbe(provider: string): Promise<'claimed' | 'taken' | 'not-due'> {
+    const entry = (await this.read()).providers[provider];
+    const at = entry ? this.dueCap(entry) : undefined;
+    if (at === undefined) return 'not-due';
+    const path = this.claimPath(provider, at);
+    const tryClaim = async (): Promise<'claimed' | 'exists'> => {
+      try {
+        await mkdir(dirname(this.file), { recursive: true });
+        await writeFile(path, String(this.now()), { flag: 'wx' });
+        return 'claimed';
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'EEXIST') return 'exists';
+        throw err;
+      }
+    };
+    try {
+      if ((await tryClaim()) === 'claimed') return 'claimed';
+      const claimedAt = Number(await readFile(path, 'utf-8'));
+      if (Number.isFinite(claimedAt) && this.now() - claimedAt <= PROBE_CLAIM_STALE_MS) return 'taken';
+      await unlink(path);
+      return (await tryClaim()) === 'claimed' ? 'claimed' : 'taken';
+    } catch {
+      return 'taken'; // fail safe: neither probe nor time-close
+    }
+  }
+
+  /** A passed probe: prunes the entry, drops the claim and reports `provider_restored` with cause `probe` (#3339). */
+  async closeAfterProbe(provider: string): Promise<void> {
+    const data = await this.read();
+    const entry = data.providers[provider];
+    if (entry) {
+      delete data.providers[provider];
+      await this.write(data);
+    }
+    await this.removeClaim(provider, entry);
+    this.notifyClose(provider, 'probe');
+  }
+
+  /** A failed probe: re-opens the cap from the error's reported reset (else DEFAULT_CAP_PROBE_MS) without a
+   *  `provider_capped` event, which only providerFailureRecorder emits (#3339). */
+  async recapAfterProbe(
+    provider: string,
+    opts: { reason?: FailoverReason; detail?: string } = {},
+  ): Promise<{ cappedUntil: string }> {
+    const now = this.now();
+    const existing = (await this.read()).providers[provider];
+    const reportedMs = reportedCooldownMs(undefined, opts.detail, now);
+    const cooldownMs = reportedMs ?? DEFAULT_CAP_PROBE_MS;
+    const cappedUntil = new Date(now + cooldownMs).toISOString();
+    await this.open(provider, opts.reason ?? existing?.reason ?? 'usage_cap', cooldownMs, {
+      cappedUntil,
+      probeDue: reportedMs === null,
+    });
+    await this.removeClaim(provider, existing);
+    return { cappedUntil };
   }
 
   /** Read-only (never prunes, so the close event stays for `status()` observers): true while the provider is held

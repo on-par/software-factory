@@ -118,6 +118,7 @@ import { budgetGuardFor, enforceIssueBudget } from './budget.js';
 import type { IssueRunState } from '../types/index.js';
 import type { RequiredChecksVerdict } from '../utils/required-checks.js';
 import type { RunReportInfo } from './run-report-info.js';
+import { providerProbe, type ProviderProbe } from './provider-probe.js';
 import { renderPreviousAttempt } from './previous-attempt.js';
 import { withoutHumanOnlyLabels } from './max-lines-override.js';
 
@@ -239,6 +240,7 @@ export interface RunPorts extends CiReworkPorts {
    *  caller before it hands `router` to runIssue); absent means no budget cap in effect. */
   getIssueSpend?: () => number;
   breaker: ProviderBreaker;
+  probeProvider?: ProviderProbe; // Restore probe for a past-due capped provider (#3339); default: a 60s triage call.
   /** Resolves the constitution. Called exactly once, before BUILD (Invariant 1). */
   resolveConstitution: () => Constitution | null;
   createApprovalGate?: () => ApprovalGate;
@@ -511,10 +513,10 @@ async function runIssueOnce(
     defaultCooldownMs: request.failover.cooldownMs,
   });
 
-  const gateDeps = { router: ports.router, breaker: ports.breaker, log };
+  const gateDeps = { router: ports.router, breaker: ports.breaker, log, probe: providerProbe(ports) };
   const runStage = providerStageRunner({ ...gateDeps, issue: request.issue }, request.providerOrder);
   const gitExec = ports.gitExec ?? defaultExecFn;
-  const capGate = providerCapGate(ports.router, ports.breaker, request, log);
+  const capGate = providerCapGate(ports.router, ports.breaker, request, log, gateDeps.probe);
 
   try {
     if (ports.acquireEnvironment) {

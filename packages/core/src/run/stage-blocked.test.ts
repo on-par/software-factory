@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
 import type { EventKind } from '../events/kinds.js';
@@ -347,5 +347,31 @@ describe('providerCapGate under models.providerOrder (#3340)', () => {
     expect((await gate.afterFailure(capped('rate_limit'), 'check', 'claude'))?.released).toMatchObject({
       providers: ['anthropic', 'openai'],
     });
+  });
+
+  it('enterPlan probes a past-due provider before reading status, and only when a probe is given (#3339)', async () => {
+    let t = NOW - 2 * HOUR;
+    const mk = async () => {
+      counter += 1;
+      const breaker = new ProviderBreaker(join(dir, `breaker-${counter}.json`), () => t);
+      await breaker.open('anthropic', 'usage_cap', HOUR, { cappedUntil: new Date(NOW - HOUR).toISOString() });
+      return breaker;
+    };
+    const probed = await mk();
+    t = NOW;
+    const probe = vi.fn(async () => {});
+    const router = {
+      registryRef: {
+        get: (id: string) => (id === 'claude-a' ? { provider: 'anthropic', harness: 'claude-cli' } : undefined),
+      },
+      resolveAll: () => [],
+    } as never;
+    const verdict = await providerCapGate(router, probed, request, () => {}, probe).enterPlan(undefined, () => {});
+    expect(probe).toHaveBeenCalledWith('claude-a');
+    expect(verdict.released).toBeUndefined();
+    expect((await probed.status('anthropic')).open).toBe(false);
+    const unprobed = await mk();
+    await providerCapGate(router, unprobed, request, () => {}).enterPlan(undefined, () => {});
+    expect(probe).toHaveBeenCalledTimes(1);
   });
 });

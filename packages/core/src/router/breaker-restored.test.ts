@@ -22,6 +22,7 @@ describe('provider_restored: onClose fires once per close with creds_changed, ma
     expect(restoredCause('cooldown')).toBe('timed_reset');
     expect(restoredCause('creds_changed')).toBe('creds_changed');
     expect(restoredCause('manual_reset')).toBe('manual_reset');
+    expect(restoredCause('probe')).toBe('probe');
   });
 
   it('fires timed_reset once when the cooldown ends', async () => {

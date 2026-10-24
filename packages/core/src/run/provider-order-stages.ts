@@ -18,6 +18,7 @@ import {
   type FailoverStage,
   type ProviderPick,
 } from './provider-breaker-gate.js';
+import type { ProviderProbe } from './provider-probe.js';
 
 type StageLog = (type: EventKind, msg: string, extra?: { providerFailover?: ProviderFailoverPayload }) => void;
 
@@ -29,7 +30,7 @@ export type StageRunner = <T>(
 
 /** Runs a stage through the provider failover loop when `order` is set; otherwise just once with no pick (today's call). */
 export function providerStageRunner(
-  deps: { router: ModelRouter; breaker: ProviderBreaker; log: StageLog; issue: number },
+  deps: { router: ModelRouter; breaker: ProviderBreaker; probe?: ProviderProbe; log: StageLog; issue: number },
   order: ProviderOrder | undefined,
 ): StageRunner {
   return (stage, attempt, hooks) =>
@@ -122,7 +123,7 @@ export async function worktreeRestorer(
  */
 export async function runCheckStage<O extends { reworkRoute?: BuildRoute; reworkModel?: string }, R>(
   run: StageRunner,
-  deps: { router: ModelRouter; breaker: ProviderBreaker; order: ProviderOrder },
+  deps: { router: ModelRouter; breaker: ProviderBreaker; probe?: ProviderProbe; log?: StageLog; order: ProviderOrder },
   checkPhase: (opts: O) => Promise<R>,
   opts: O,
   restore: () => Promise<boolean>,

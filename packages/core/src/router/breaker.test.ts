@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import type { ProviderOrder } from '../config/provider-order.js';
+import { pickOrderedProvider } from '../run/provider-breaker-gate.js';
 
 import {
   DEFAULT_CAP_PROBE_MS,
@@ -437,5 +440,39 @@ describe('auth entries (#3232)', () => {
       type: 'provider_breaker_close',
       extra: { providerBreakerClose: { provider: 'openai', cause: 'cooldown' } },
     });
+  });
+});
+
+describe('restore probe claim across lanes (#3339)', () => {
+  const CAPPED_UNTIL = '2026-10-20T12:00:00.000Z'; // 07:00 CT
+  const T_0705 = Date.parse('2026-10-20T12:05:00Z');
+
+  async function lanes() {
+    const file = await tmpFile();
+    let t = T_0705 - 35 * 60_000;
+    const a = new ProviderBreaker(file, () => t);
+    const b = new ProviderBreaker(file, () => t);
+    await a.open('anthropic', 'usage_cap', 30 * 60_000, { cappedUntil: CAPPED_UNTIL });
+    t = T_0705;
+    return { a, b };
+  }
+
+  it("two lanes sharing the breaker file at 07:05 CT run exactly one probe for claude's cappedUntil", async () => {
+    const { a, b } = await lanes();
+    const claims = await Promise.all([a.claimProbe('anthropic'), b.claimProbe('anthropic')]);
+    expect([...claims].sort()).toEqual(['claimed', 'taken']);
+    expect(await b.status('anthropic')).toMatchObject({ open: true, remainingMs: 0 });
+    expect(await b.probeDue('anthropic')).toBeDefined();
+
+    const { a: c, b: d } = await lanes();
+    const probe = vi.fn(async () => {});
+    const registryRef = { get: () => ({ provider: 'anthropic', harness: 'claude-cli' }) } as never;
+    const order: ProviderOrder = { boss: [], worker: ['claude-w'], checker: [], triage: [] };
+    await Promise.all(
+      [c, d].map((breaker) =>
+        pickOrderedProvider({ router: { registryRef }, breaker, probe }, order, 'build', new Set()),
+      ),
+    );
+    expect(probe).toHaveBeenCalledTimes(1);
   });
 });
