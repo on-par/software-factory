@@ -24,6 +24,7 @@ describe('buildStatusJson', () => {
       active: [{ lane: 'app', issue: 7, phase: 'build', lastActivityAt: new Date(now - 125_000).toISOString() }],
       update: null,
       openFactoryDrafts: { count: 2, oldestHours: 5 },
+      disk: null,
       now,
     });
     expect(out).toEqual({
@@ -41,6 +42,7 @@ describe('buildStatusJson', () => {
       active: [{ lane: 'app', issue: 7, phase: 'build', ageSec: 125 }],
       update: null,
       openFactoryDrafts: { count: 2, oldestHours: 5 },
+      disk: null,
       providers: [],
       activeAlerts: [],
     });
@@ -54,6 +56,7 @@ describe('buildStatusJson', () => {
       'active',
       'update',
       'openFactoryDrafts',
+      'disk',
       'providers',
       'activeAlerts',
     ]);
@@ -70,6 +73,7 @@ describe('buildStatusJson', () => {
       active: [],
       update: null,
       openFactoryDrafts: null,
+      disk: null,
       now,
     });
     expect(out.breaker).toEqual({ open: false, providers: [] });
@@ -89,6 +93,7 @@ describe('buildStatusJson', () => {
       active: [{ lane: 'bugfix', issue: 3316, phase: 'check', lastActivityAt: new Date(now - 90_000).toISOString() }],
       update: null,
       openFactoryDrafts: null,
+      disk: null,
       now,
     });
     expect(out.active).toEqual([{ lane: 'bugfix', issue: 3316, phase: 'check', ageSec: 90 }]);
@@ -108,6 +113,7 @@ describe('buildStatusJson', () => {
       ],
       update: null,
       openFactoryDrafts: null,
+      disk: null,
       now,
     });
     expect(out.active.map((r) => r.ageSec)).toEqual([0, 0]);
@@ -135,6 +141,7 @@ describe('buildStatusJson', () => {
         active: [],
         update,
         openFactoryDrafts: null,
+        disk: null,
         now,
       }).update,
     ).toEqual(update);
@@ -155,6 +162,7 @@ describe('buildStatusJson', () => {
         active: [],
         update: null,
         openFactoryDrafts: null,
+        disk: null,
         now,
       });
       expect(out.stopInfo?.source).toBe('unknown');
@@ -182,6 +190,7 @@ describe('buildStatusJson', () => {
       active: [],
       update: null,
       openFactoryDrafts: null,
+      disk: null,
       now,
     });
     expect(out.breaker.providers[0]).toMatchObject({ remainingSec: 0, until: 'credentials-change' });
@@ -198,6 +207,7 @@ describe('provider alerts (#3236)', () => {
     active: [],
     update: null,
     openFactoryDrafts: null,
+    disk: null,
     now: Date.parse('2026-10-23T11:00:00.000Z'),
   };
   const openedAt = '2026-10-23T10:00:00.000Z';

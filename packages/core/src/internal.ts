@@ -126,7 +126,7 @@ export {
   type DiskGuardDecision,
   type DiskSample,
 } from './environment/disk-guard.js';
-export { resolveDiskGuard, type DiskGuardPolicy } from './config/index.js';
+export { resolveDiskGuard, type DiskGuardPolicy } from './config/disk-policy.js';
 export { hostAgentJobsDir, hostBuildSlotsDir, listHostSlots, withHostAgentJobLease } from './environment/host-slots.js';
 export { withHostBuildSlot, type HostAgentJobKind, type HostSlotStatus } from './environment/host-slots.js';
 export { createRunSlotGate, withRunAndHostBuildSlot, type RunSlotGate } from './environment/run-slots.js';

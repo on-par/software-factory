@@ -2,7 +2,8 @@ import { defaultFactoryConfig } from '@on-par/factory-config';
 import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_USAGE_POLL_MS } from '../usage/constants.js';
-import { FactoryConfigSchema, factoryRuntimeConfigIssues, resolveDiskGuard } from './index.js';
+import { resolveDiskGuard } from './disk-policy.js';
+import { FactoryConfigSchema, factoryRuntimeConfigIssues } from './index.js';
 
 const config = (minFreeGb?: number) =>
   FactoryConfigSchema.parse(

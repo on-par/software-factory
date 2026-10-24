@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { defaultFactoryConfig } from '@on-par/factory-config';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { FactoryConfigSchema, type DiskGuardPolicy } from '../config/index.js';
+import type { DiskGuardPolicy } from '../config/disk-policy.js';
+import { FactoryConfigSchema } from '../config/index.js';
 import { createTempDirs } from '../harness/temp-dir.js';
 import {
   BYTES_PER_GB,
@@ -104,7 +105,13 @@ describe('createDiskGuard', () => {
 
   it('holds and reports status when low, checking worktree root and state root', async () => {
     const root = await tmp.make('disk-');
-    const guard = createDiskGuard(config, { repoRoot: root, ghRepo: 'o/r', stateRoot: root, env: {}, statfs: fake(3.14) });
+    const guard = createDiskGuard(config, {
+      repoRoot: root,
+      ghRepo: 'o/r',
+      stateRoot: root,
+      env: {},
+      statfs: fake(3.14),
+    });
     expect(guard.paths).toHaveLength(2);
     expect(guard.check().kind).toBe('hold');
     expect(guard.status()).toEqual({ freeGb: 3.1, thresholdGb: 10, low: true });

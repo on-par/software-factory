@@ -4,10 +4,9 @@ import { existsSync, statSync } from 'node:fs';
 
 import { parkReasonFor } from '@on-par/factory-core';
 import type { EventKind, getFactoryPaths, ParkPayload, RunOutcome } from '@on-par/factory-core';
-import { formatDiskHold, formatLoadHold, logEvent, nextRecheckAt, PARKED_LABEL, parkPayload } from '@on-par/factory-core/internal';
+import { formatLoadHold, logEvent, nextRecheckAt, PARKED_LABEL, parkPayload } from '@on-par/factory-core/internal';
 import type {
   AwaitingCiRecord,
-  DiskGuardDecision,
   LoadGuardDecision,
   QueueClaim,
   QueueReleaseOutcome,
@@ -15,6 +14,7 @@ import type {
 
 import type { AwaitingCiParkReason } from './awaiting-ci-recheck.js';
 import { formatBaseHoldKept, type BaseHoldDecision } from './base-hold.js';
+import { holdForDisk } from './run-lane-disk-hold.js';
 import { laneParkCommenter } from './lane-park-comment.js';
 import {
   pauseLaneForAllProvidersDown,
@@ -163,7 +163,8 @@ export async function runLane(
     }
     parked++;
   };
-  const decide = <D extends { kind: 'claim' | 'hold' }>(guard: () => D): D | { kind: 'claim' } => {
+  const diskIo = { lane, paths, emitEvent, now, sleep, pathExists };
+  const decide = (guard: () => LoadGuardDecision): LoadGuardDecision => {
     try {
       return guard();
     } catch {
@@ -174,19 +175,6 @@ export async function runLane(
     for (let d = decide(guard); d.kind === 'hold'; d = decide(guard)) {
       const retryAt = new Date(now().getTime() + d.retryMs);
       emitEvent(paths.events, 'warn', lane, formatLoadHold(lane, d, retryAt), { lane });
-      await sleep(d.retryMs);
-      if (pathExists(paths.stop)) return 'stopped';
-    }
-    return 'claim';
-  };
-  const holdForDisk = async (guard: () => DiskGuardDecision): Promise<'claim' | 'stopped'> => {
-    let first = true;
-    for (let d = decide(guard); d.kind === 'hold'; d = decide(guard)) {
-      const retryAt = new Date(now().getTime() + d.retryMs);
-      emitEvent(paths.events, first ? 'disk_low' : 'warn', lane, formatDiskHold(`lane '${lane}' not claiming:`, d, retryAt), {
-        lane,
-      });
-      first = false;
       await sleep(d.retryMs);
       if (pathExists(paths.stop)) return 'stopped';
     }
@@ -212,7 +200,7 @@ export async function runLane(
         return;
       }
       if (loadGuard && (await holdForLoad(loadGuard)) === 'stopped') break;
-      if (diskGuard && (await holdForDisk(diskGuard)) === 'stopped') break;
+      if (diskGuard && (await holdForDisk(diskGuard, diskIo)) === 'stopped') break;
       if (pollReviewRework) {
         await pollReviewRework().catch((err) =>
           emitEvent(paths.events, 'warn', lane, `review-rework poll failed: ${shipRuntime().errorDetail(err)}`, {

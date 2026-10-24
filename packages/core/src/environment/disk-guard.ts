@@ -4,7 +4,8 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statfsSync, writeFileS
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { resolveDiskGuard, type DiskGuardPolicy, type FactoryConfig } from '../config/index.js';
+import { resolveDiskGuard, type DiskGuardPolicy } from '../config/disk-policy.js';
+import type { FactoryConfig } from '../config/index.js';
 import { resolveWorktreeRoot } from '../utils/worktree-location.js';
 
 export const BYTES_PER_GB = 1024 ** 3;

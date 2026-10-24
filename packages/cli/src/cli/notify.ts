@@ -132,7 +132,13 @@ export function withDiskLowNotify(
       try {
         const at = now();
         if (claimDiskAlert(alertFile, at)) {
-          notifier.notify({ kind: 'disk_low', ts: at.toISOString(), host, lane: extra?.lane ?? String(issue), message: msg });
+          notifier.notify({
+            kind: 'disk_low',
+            ts: at.toISOString(),
+            host,
+            lane: extra?.lane ?? String(issue),
+            message: msg,
+          });
         }
       } catch {
         // notify must never break the event log

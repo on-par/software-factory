@@ -85,6 +85,7 @@ export function buildStatusJson(input: {
   active: ReadonlyArray<Pick<ActiveQueueClaim, 'lane' | 'issue' | 'phase' | 'lastActivityAt'>>;
   update: StatusUpdateJson | null;
   openFactoryDrafts: OpenFactoryDrafts | null;
+  disk: StatusJson['disk'];
   now: number;
 }): StatusJson {
   const breakerProviders: StatusBreakerProviderJson[] = input.breakers.map((b) => ({
@@ -146,6 +147,7 @@ export function buildStatusJson(input: {
     active,
     update: input.update,
     openFactoryDrafts: input.openFactoryDrafts,
+    disk: input.disk,
     providers,
     activeAlerts,
   };

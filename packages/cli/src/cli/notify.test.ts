@@ -7,7 +7,14 @@ import type { ParkPayload } from '@on-par/factory-core';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createNotifier, type Notifier, type NotifySummary, resolveNotifyCommand, withDiskLowNotify, withParkNotify } from './notify.js';
+import {
+  createNotifier,
+  type Notifier,
+  type NotifySummary,
+  resolveNotifyCommand,
+  withDiskLowNotify,
+  withParkNotify,
+} from './notify.js';
 
 const park: ParkPayload = { reason: 'fail', decision: 'park', lane: 'app', blockedBehind: [] };
 const parkSummary: NotifySummary = { kind: 'park', ts: 't1', issue: 7, lane: 'app', message: 'parked', park };

@@ -3,7 +3,13 @@
 
 import type { EventKind, FactoryConfig, RunPorts } from '@on-par/factory-core';
 import type { DiskGuard, RunSlotGate } from '@on-par/factory-core/internal';
-import { formatDiskHold, hostBuildSlotsDir, resolveHostMaxBuilds, withRunAndHostBuildSlot } from '@on-par/factory-core/internal';
+import {
+  createDiskGuard,
+  formatDiskHold,
+  hostBuildSlotsDir,
+  resolveHostMaxBuilds,
+  withRunAndHostBuildSlot,
+} from '@on-par/factory-core/internal';
 
 /** Gates each BUILD and CHECK call on one of `host.maxBuilds` slots shared by every runner on this host, and on `runSlots` when supplied. */
 export function hostBuildSlotPort(
@@ -41,4 +47,15 @@ export function hostBuildSlotPort(
       fn,
     );
   };
+}
+
+/** `hostBuildSlotPort` for a ship run, guarded by the host disk guard on the worktree root and state root (#2284). */
+export function shipHostBuildSlot(
+  config: FactoryConfig,
+  issue: number,
+  log: (kind: EventKind, message: string) => void,
+  where: { repoRoot: string; ghRepo: string; paths: { root: string }; slots?: RunSlotGate },
+): NonNullable<RunPorts['hostBuildSlot']> {
+  const guard = createDiskGuard(config, { ...where, stateRoot: where.paths.root });
+  return hostBuildSlotPort(config, where.ghRepo, issue, log, where.slots, { guard });
 }

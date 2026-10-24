@@ -27,19 +27,15 @@ import {
   createOctokitCollaboratorPermissionClient,
   createOctokitQueueClient,
   createOctokitIterateGitHub,
-  createDiskGuard,
   createOctokitReviewReworkGitHub,
-  evaluateLoadGuard,
   formatQueueOrderConflict,
   logEvent,
   parkPayload,
   pollIterateCommands,
   pollReviewRework,
   publishParkComment,
-  readHostLoad,
   recordSliceMerged,
   resolveBaseHealthChecks,
-  resolveHostLoadGuard,
   resolveLocalOnly,
   resolveMaxReviewReworkRuns,
   resolveQueueClaimSettleMs,
@@ -70,6 +66,7 @@ import type {
 import { awaitingCiLaneDeps } from './awaiting-ci-wiring.js';
 import { runEndOfRunKpiSnapshot } from './kpi-sweep.js';
 import { waitForMerge } from './land.js';
+import { hostClaimGuards } from './host-claim-guards.js';
 import { DRAIN_MESSAGE, createNotifier, resolveNotifyCommand, withDiskLowNotify, withParkNotify } from './notify.js';
 import { runLane } from './run-lane.js';
 import { restackFromSlicePlan } from './run-restack.js';
@@ -211,8 +208,6 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
     });
     rt.warnQueueDiagnostics(diagnostics);
 
-    const loadGuardPolicy = resolveHostLoadGuard(factoryConfig);
-    const diskGuard = createDiskGuard(factoryConfig, { repoRoot, ghRepo, stateRoot: paths.root });
     let knobs: UsageKnobs;
     let laneBreakerThreshold: number;
     let baseHealthChecks: string[] | undefined;
@@ -417,8 +412,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
                 .exec(`git rev-parse --verify ${JSON.stringify(`refs/remotes/origin/${branch}`)}`, { cwd: repoRoot })
                 .then((r) => r.stdout.trim()),
             activeIssues: inFlightIssues,
-            loadGuard: opts.localQueue === true ? undefined : () => evaluateLoadGuard(loadGuardPolicy, readHostLoad()),
-            diskGuard: opts.localQueue === true ? undefined : () => diskGuard.check(),
+            ...hostClaimGuards(factoryConfig, { repoRoot, ghRepo, stateRoot: paths.root }, opts.localQueue === true),
             baseHoldGate:
               opts.localQueue === true
                 ? undefined

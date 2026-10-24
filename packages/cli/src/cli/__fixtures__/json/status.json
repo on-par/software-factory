@@ -49,6 +49,11 @@
     "count": 3,
     "oldestHours": 30
   },
+  "disk": {
+    "freeGb": 42.5,
+    "thresholdGb": 10,
+    "low": false
+  },
   "providers": [],
   "activeAlerts": []
 }
