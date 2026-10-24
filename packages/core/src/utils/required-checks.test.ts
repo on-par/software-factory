@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  classifyHeadChecks,
   classifyRequiredChecks,
   evaluatePushChecks,
   evaluateRequiredChecks,
   fetchRequiredChecksVerdict,
   fetchRequiredContexts,
+  warnNoBranchProtectionOnce,
 } from './required-checks.js';
 
 const run = (name: string, status: string | null, conclusion: string | null) => ({ name, status, conclusion });
@@ -399,5 +401,32 @@ describe('fetchRequiredContexts', () => {
       },
     };
     expect(await fetchRequiredContexts(octokit, args)).toEqual([]);
+  });
+});
+
+describe('no required checks gates on all checks on head (#3208)', () => {
+  const passing = (c: string | null) => c === 'success';
+
+  it('is pending with zero runs or a run still going, then green once both finish', () => {
+    expect(classifyHeadChecks([], passing).state).toBe('pending');
+    const going = [run('lint', 'completed', 'success'), run('test', 'in_progress', null)];
+    expect(classifyHeadChecks(going, passing)).toEqual({ state: 'pending', pending: ['test'], failed: [] });
+    const done = [run('lint', 'completed', 'success'), run('test', 'completed', 'success')];
+    expect(classifyHeadChecks(done, passing)).toEqual({ state: 'green', pending: [], failed: [] });
+  });
+
+  it('is failed when a completed run is not passing', () => {
+    const runs = [run('lint', 'completed', 'success'), run('test', 'completed', 'cancelled')];
+    expect(classifyHeadChecks(runs, passing)).toEqual({ state: 'failed', pending: [], failed: ['test'] });
+  });
+
+  it('warns once per repo across PRs, and again for another repo', () => {
+    const seen = new Set<string>();
+    const warn = vi.fn();
+    expect(warnNoBranchProtectionOnce('on-par/a', 'main', warn, seen)).toBe(true);
+    expect(warnNoBranchProtectionOnce('on-par/a', 'main', warn, seen)).toBe(false);
+    expect(warnNoBranchProtectionOnce('on-par/b', 'main', warn, seen)).toBe(true);
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledWith('no branch protection on on-par/a@main; using all checks on head');
   });
 });

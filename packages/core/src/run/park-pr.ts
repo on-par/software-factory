@@ -25,6 +25,8 @@ export function parkedPrAction(reason: ParkReason, greenAndChecked: boolean): 'c
     case 'fail':
     case 'timeout':
       return greenAndChecked ? 'ready' : 'close';
+    case 'ci-never-started':
+      return 'leave';
     case 'escalate':
     case 'held':
     case 'config':

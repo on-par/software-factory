@@ -163,6 +163,7 @@ export const FactoryConfigSchema = z.object({
     .object({
       skip: z.boolean().default(false),
       watchMinutes: z.number().optional().catch(undefined),
+      awaitingCiCapHours: z.number().optional().catch(undefined),
       comment: z.string().default('Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging'),
     })
     .default({ skip: false, comment: 'Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging' }),
@@ -504,6 +505,12 @@ export function resolveSkipCI(config: FactoryConfig, env: NodeJS.ProcessEnv = pr
 export function resolveCiWatchDeadlineMs(config: { ci?: { watchMinutes?: number } }): number {
   const m = config.ci?.watchMinutes;
   return typeof m === 'number' && Number.isFinite(m) && m > 0 ? Math.round(m * 60_000) : DEFAULT_CI_DEADLINE_MS;
+}
+
+/** Hours an awaiting-ci PR is re-checked before it parks as ci-never-started (#3208), as ms; unset, non-finite or <= 0 → 24h. */
+export function resolveAwaitingCiCapMs(config: { ci?: { awaitingCiCapHours?: number } }): number {
+  const h = config.ci?.awaitingCiCapHours;
+  return typeof h === 'number' && Number.isFinite(h) && h > 0 ? Math.round(h * 3_600_000) : 24 * 3_600_000;
 }
 
 /**

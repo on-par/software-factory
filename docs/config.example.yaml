@@ -242,6 +242,7 @@ sizeGate:
 # Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging
 ci:
   skip: false
+  awaitingCiCapHours: 24
   # Minutes SHIP waits for CI before reporting CI pending and leaving the PR as draft. Unset: 10.
   # watchMinutes: 10
 # Where lane worktrees are created. "~/..." or an absolute path is a shared root, namespaced as

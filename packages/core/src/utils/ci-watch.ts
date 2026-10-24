@@ -2,10 +2,12 @@
 import type { Octokit } from '@octokit/rest';
 import { runCommand } from './command-runner.js';
 import { commitStatusCount, detectNoCiConfigured } from './ci-watch-no-ci.js';
+import { classifyHeadChecks } from './required-checks.js';
 import { type RequiredWaitingFor, readRequiredState, resolveRequiredContexts } from './ci-watch-required.js';
 import { DEFAULT_CI_DEADLINE_MS } from './ci-deadline.js';
 
 export { detectNoCiConfigured };
+export { warnNoBranchProtectionOnce } from './required-checks.js';
 
 /** watchChecks reports exactly one of four outcomes: 'success' (every check run passed and the
  *  set was final — see `settleMs` / `minChecks`), 'failure' (a completed check run reported a
@@ -72,6 +74,11 @@ export interface WatchChecksOptions {
    *  is missing or running the watch keeps polling. Unset, or a branch with none, keeps the
    *  all-check-runs rule. */
   requiredChecks?: { branch: string };
+  /** Called once at the real deadline (not a maxPollErrors exit) with whether no check run and no commit
+   *  status was ever seen on the ref (#3208). An unknown status count reports false (fail closed). */
+  onDeadline?: (info: { neverStarted: boolean }) => void;
+  /** Called once per watch when `requiredChecks.branch` is set and resolves to no required contexts (#3208). */
+  onNoRequiredChecks?: (info: { branch: string }) => void;
   /** Run the #2488 no-CI probe without the grace-elapsed exit. Default false. */
   probeNoCi?: boolean;
   /** Minimum gap between onProgress calls. Default 60_000. */
@@ -225,6 +232,8 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
     progressIntervalMs = DEFAULT_PROGRESS_INTERVAL_MS,
     onProgress,
     onNoChecks,
+    onDeadline,
+    onNoRequiredChecks,
     sleep = (ms) => new Promise<void>((r) => setTimeout(r, ms)),
     now = () => Date.now(),
   } = opts;
@@ -241,11 +250,20 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
   let stableSince = now();
   let noCiProbed = false;
   let required: string[] | undefined;
+  let sawRuns = false;
   while (now() < deadline) {
-    required ??= await resolveRequiredContexts(octokit, owner, repo, requiredChecks?.branch);
+    if (required === undefined) {
+      required = await resolveRequiredContexts(octokit, owner, repo, requiredChecks?.branch);
+      if (required.length === 0 && requiredChecks?.branch) {
+        try {
+          onNoRequiredChecks?.({ branch: requiredChecks.branch });
+        } catch {}
+      }
+    }
     try {
       const runs = await listAllCheckRuns(octokit, owner, repo, ref, perPage, maxPages);
       consecutiveErrors = 0;
+      if (runs.length > 0) sawRuns = true;
       if (runs.length !== stableCount) {
         stableCount = runs.length;
         stableSince = now();
@@ -281,14 +299,14 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
       const req = required.length > 0 ? await readRequiredState(octokit, owner, repo, ref, required, runs) : undefined;
       if (req?.statusFailed) return 'failure';
       const rs = req?.rs;
-      if (runs.length > 0 && runs.every((r) => r.status === 'completed')) {
+      const head = classifyHeadChecks(runs, isPassingConclusion);
+      if (runs.length > 0 && head.pending.length === 0) {
         // Fail closed: only an explicitly passing conclusion counts as green. `cancelled`,
         // `timed_out`, `action_required`, `stale`, a null conclusion on a completed run, and any
         // conclusion GitHub adds later all block the merge (ADR-0014).
-        const allPassed = runs.every((r) => isPassingConclusion(r.conclusion));
         // A red verdict needs no settle: a check run that registers later cannot turn a
         // completed check green.
-        if (!allPassed) return 'failure';
+        if (head.state === 'failed') return 'failure';
         if (rs) {
           // The required set is known, so there is nothing to settle: done once none is missing or running.
           if (rs.missing.length === 0 && rs.pending.length === 0) return 'success';
@@ -323,6 +341,12 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
     }
     await sleep(interval);
     interval = Math.min(interval * 2, maxIntervalMs);
+  }
+  if (onDeadline) {
+    const statuses = sawRuns ? null : await commitStatusCount(octokit, owner, repo, ref);
+    try {
+      onDeadline({ neverStarted: !sawRuns && statuses?.total === 0 });
+    } catch {}
   }
   return 'timeout';
 }

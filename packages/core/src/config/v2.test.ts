@@ -98,7 +98,7 @@ describe('zero-config: { version: 2 }', () => {
     expect(cfg.run.environment.proxy).toEqual({ enabled: false, port: 80, domain: 'factory.localhost' });
     expect(cfg.run.autoFailover).toEqual({ enabled: true, cooldownMinutes: 30, fallbackModel: 'claude-sonnet-5' });
     expect(cfg.run.efficiency).toEqual({ fastPath: false, maxReworkRounds: 1 });
-    expect(cfg.run.ci).toEqual({ skip: false });
+    expect(cfg.run.ci).toEqual({ skip: false, awaitingCiCapHours: 24 });
     expect(cfg.run.planApproval).toEqual({ enabled: false });
     expect(cfg.run).not.toHaveProperty('branchPrefix');
     expect(cfg.run.byok).toEqual({ enabled: false });
@@ -268,7 +268,7 @@ describe('full v2 config', () => {
       },
       autoFailover: { enabled: false, cooldownMinutes: 5, fallbackModel: 'claude-sonnet-5' },
       efficiency: { fastPath: true, maxReworkRounds: 0, perIssueCapUsd: 10 },
-      ci: { skip: true },
+      ci: { skip: true, awaitingCiCapHours: 24 },
       planApproval: { enabled: true },
       byok: { enabled: true },
     },

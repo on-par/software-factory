@@ -34,6 +34,7 @@ import {
   publishParkComment,
   readHostLoad,
   recordSliceMerged,
+  resolveAwaitingCiCapMs,
   resolveBaseHealthChecks,
   resolveHostLoadGuard,
   resolveLocalOnly,
@@ -46,6 +47,7 @@ import {
 } from '@on-par/factory-core/internal';
 
 import { admissionStateReaderFor } from './admission.js';
+import { awaitingCiFile, createAwaitingCiLaneDeps } from './awaiting-ci.js';
 import { baseChecksVerdict } from './base-health-ci.js';
 import { createBaseHoldGate, formatBaseHoldCleared } from './base-hold.js';
 import { keychainPreflightError, type KeychainProbeStatus } from './doctor.js';
@@ -326,6 +328,19 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
           }
         }
       };
+      const mergePolicy = resolveMergePolicy(factoryConfig, process.env, { auto: opts.autoMerge });
+      const awaitingCi =
+        opts.localQueue === true
+          ? undefined
+          : createAwaitingCiLaneDeps({
+              file: awaitingCiFile(paths),
+              octokit: rt.getOctokit(),
+              ghRepo,
+              capMs: resolveAwaitingCiCapMs(factoryConfig),
+              admin: mergePolicy.admin,
+              mergeEnabled: mergePolicy.auto,
+              log: logEvent.bind(null, paths.events),
+            });
       let reviewPoll: Promise<void> | null = null;
       const pollReviewReworkOnce = (): Promise<void> =>
         (reviewPoll ??= runReviewReworkPoll().finally(() => {
@@ -372,6 +387,8 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
             laneBreakerThreshold,
             octokit: opts.localQueue === true ? undefined : () => rt.getOctokit(),
             pollReviewRework: opts.localQueue === true ? undefined : pollReviewReworkOnce,
+            recordAwaitingCi: awaitingCi?.recordAwaitingCi,
+            recheckAwaitingCi: awaitingCi?.recheckAwaitingCi,
             runId,
             readParkSha: (branch) =>
               rt.shellOps

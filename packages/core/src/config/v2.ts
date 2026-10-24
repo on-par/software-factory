@@ -189,6 +189,13 @@ const RunSectionSchema = z
           .boolean()
           .default(false)
           .describe('Skip waiting for GitHub Actions CI before merging (FACTORY_SKIP_CI=1).'),
+        awaitingCiCapHours: z
+          .number()
+          .positive()
+          .default(24)
+          .describe(
+            'Hours an awaiting-ci PR (no CI run ever registered) is re-checked before it parks as ci-never-started.',
+          ),
       })
       .prefault({})
       .describe('CI gating before merge.'),

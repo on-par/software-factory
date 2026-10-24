@@ -5,7 +5,12 @@ import { existsSync } from 'node:fs';
 import type { Octokit } from '@octokit/rest';
 import type { EventKind, FactoryEvent, ParkReason } from '@on-par/factory-core';
 import type { CiOutcome, InfraRerunOutcome, WatchChecksOptions } from '@on-par/factory-core/internal';
-import { shellEscape, syncLandBranch, watchChecksWithInfraRerun } from '@on-par/factory-core/internal';
+import {
+  shellEscape,
+  syncLandBranch,
+  warnNoBranchProtectionOnce,
+  watchChecksWithInfraRerun,
+} from '@on-par/factory-core/internal';
 import { landRuntime } from './land-runtime.js';
 
 export type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
@@ -60,6 +65,18 @@ export class AwaitingReviewError extends Error {
   constructor(
     message: string,
     readonly prNumber: number,
+  ) {
+    super(message);
+  }
+}
+
+/** Thrown when land's CI deadline passes and no check run or commit status ever registered on the head SHA
+ *  (#3208). Not a CiFailedError: nothing failed, so the lane re-checks the open PR with backoff instead of parking. */
+export class AwaitingCiError extends Error {
+  constructor(
+    message: string,
+    readonly prNumber: number,
+    readonly headSha: string,
   ) {
     super(message);
   }
@@ -239,6 +256,7 @@ export async function landOpenPullRequest(opts: {
   const watchCi = async (): Promise<string> => {
     let headSha: string;
     let outcome: InfraRerunOutcome;
+    let neverStarted = false;
     try {
       const { data: pr } = await octokit.rest.pulls.get({ owner, repo: repoName, pull_number: prNumber });
       headSha = pr.head.sha;
@@ -251,6 +269,11 @@ export async function landOpenPullRequest(opts: {
         watch,
         rerun,
         ...(baseRef ? { requiredChecks: { branch: baseRef } } : {}),
+        onDeadline: (info) => {
+          neverStarted = info.neverStarted;
+        },
+        onNoRequiredChecks: ({ branch: base }) =>
+          warnNoBranchProtectionOnce(`${owner}/${repoName}`, base, (m) => log('warn', m)),
         onProgress: ({ total, completed, pending, remainingMs, waitingFor }) =>
           log(
             'land',
@@ -284,6 +307,11 @@ export async function landOpenPullRequest(opts: {
       const msg = `CI failed for PR #${prNumber} on ${branch} — refusing to merge with a failing check`;
       log('ci-failed', msg);
       throw new CiFailedError(msg, prNumber);
+    }
+    if (outcome === 'timeout' && neverStarted) {
+      const msg = `PR #${prNumber}: no CI run or status registered on ${headSha.slice(0, 12)} by the CI deadline — awaiting CI, will re-check`;
+      log('awaiting-ci', msg);
+      throw new AwaitingCiError(msg, prNumber, headSha);
     }
     const msg = `CI watch for ${branch} ended ${outcome} — refusing to merge without a green verdict`;
     log('ci-failed', msg);

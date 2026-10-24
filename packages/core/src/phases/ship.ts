@@ -27,6 +27,7 @@ import { readRisk, readSpecBody } from './ship-spec.js';
 import type { CheckSummary, CiFailureEvidence } from '../types/index.js';
 import { collectCiFailureEvidence } from '../utils/ci-evidence.js';
 import { DEFAULT_CI_DEADLINE_MS, type InfraRerunOutcome, watchChecksWithInfraRerun } from '../utils/ci-watch.js';
+import { warnNoBranchProtectionOnce } from '../utils/required-checks.js';
 import { shellEscape } from '../utils/index.js';
 import { GITHUB_ISSUE_SOURCE } from '../work/github-issue.js';
 import type { WorkRequest } from '../work/index.js';
@@ -468,6 +469,8 @@ async function shipPhaseImpl(opts: {
         deadlineMs: ciDeadlineMs,
         probeNoCi: true,
         requiredChecks: { branch: SHIP_BASE_BRANCH },
+        onNoRequiredChecks: ({ branch: base }) =>
+          warnNoBranchProtectionOnce(`${owner}/${repoName}`, base, (m) => log('warn', m)),
         onProgress: ({ total, completed, pending, remainingMs, waitingFor }) =>
           log(
             'ship',

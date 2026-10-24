@@ -250,6 +250,7 @@ import { runHarnessCheckCommand } from './harness-check.js';
 import { landIssue } from './land.js';
 import { STOP_SET_MESSAGE } from './stop-sentinel.js';
 import {
+  AwaitingCiError,
   AwaitingReviewError,
   CiFailedError,
   CiUnverifiedError,
@@ -2876,10 +2877,9 @@ export async function cmdLand(
       });
       console.log(styleText('green', `✅ Landed PR #${result.prNumber} for issue #${issueNum}`));
     } catch (err: any) {
-      if (err instanceof AwaitingReviewError) {
-        console.log(
-          styleText('yellow', `⏸ PR #${err.prNumber} for issue #${issueNum} awaiting human review — left open`),
-        );
+      if (err instanceof AwaitingReviewError || err instanceof AwaitingCiError) {
+        const what = err instanceof AwaitingCiError ? 'CI to start' : 'human review';
+        console.log(styleText('yellow', `⏸ PR #${err.prNumber} for issue #${issueNum} awaiting ${what} — left open`));
         return;
       }
       if (err instanceof CiUnverifiedError) {

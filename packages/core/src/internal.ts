@@ -212,20 +212,7 @@ export { harnessHasUsageSignal, resolveRunUsageHarness, USAGE_NOT_AVAILABLE_FOR_
 export { readClaudeAccessToken } from './usage/subscription.js';
 
 // Utils
-export type {
-  CiFailureClass,
-  CiJobLike,
-  CiJobStepLike,
-  CiNoChecksInfo,
-  CiOutcome,
-  CiRerunBudget,
-  CiRescue,
-  CiRescueFailure,
-  CiWatchProgress,
-  InfraRerunOutcome,
-  InfraRerunWatchOptions,
-  WatchChecksOptions,
-} from './utils/ci-watch.js';
+export { resolveAwaitingCiCapMs } from './config/index.js';
 export { collectCiFailureEvidence } from './utils/ci-evidence.js';
 export {
   classifyCiFailure,
@@ -236,6 +223,19 @@ export {
   resolveCiNoChecksGraceMs,
   watchChecks,
   watchChecksWithInfraRerun,
+  warnNoBranchProtectionOnce,
+  type CiFailureClass,
+  type CiJobLike,
+  type CiJobStepLike,
+  type CiNoChecksInfo,
+  type CiOutcome,
+  type CiRerunBudget,
+  type CiRescue,
+  type CiRescueFailure,
+  type CiWatchProgress,
+  type InfraRerunOutcome,
+  type InfraRerunWatchOptions,
+  type WatchChecksOptions,
 } from './utils/ci-watch.js';
 export type { CommandResult, RunCommandOptions } from './utils/command-runner.js';
 export { describeCommandFailure, runCommand } from './utils/command-runner.js';

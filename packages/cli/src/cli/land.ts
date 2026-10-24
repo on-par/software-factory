@@ -39,6 +39,7 @@ import {
 } from '@on-par/factory-core/internal';
 import type { OpenPullRequestEvidence } from './index.js';
 import {
+  AwaitingCiError,
   AwaitingReviewError,
   CiFailedError,
   LandConflictError,
@@ -243,7 +244,7 @@ export async function landIssue(
         },
       });
     } catch (err) {
-      if (err instanceof AwaitingReviewError || err instanceof CiFailedError) {
+      if (err instanceof AwaitingCiError || err instanceof AwaitingReviewError || err instanceof CiFailedError) {
         await withLandLock(() => gitOps.cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
       }
       throw err;
@@ -252,7 +253,12 @@ export async function landIssue(
     await releaseLandedClaim(paths, ghRepo, issueNum, log);
     await withLandLock(() => gitOps.cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
   } catch (err: any) {
-    if (err instanceof LandConflictError || err instanceof AwaitingReviewError || err instanceof CiFailedError)
+    if (
+      err instanceof LandConflictError ||
+      err instanceof AwaitingCiError ||
+      err instanceof AwaitingReviewError ||
+      err instanceof CiFailedError
+    )
       throw err;
     log('fail', `merge failed: ${err.message}`);
     throw new LandFailureError(`merge failed for issue #${issueNum}: ${err.message}`, 5);

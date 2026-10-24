@@ -201,3 +201,33 @@ export async function fetchRequiredChecksVerdict(
   }
   return verdict;
 }
+
+type HeadCheckRun = { name?: string | null; status?: string | null; conclusion?: string | null };
+
+/** Verdict over every check run on a head SHA, for a branch with no required checks (#3208). Zero runs is
+ *  `pending`; any run not `completed` is `pending` (named); otherwise any non-passing conclusion is `failed`.
+ *  The pass rule is injected so ADR-0014's single allow-list stays in ci-watch.ts. */
+export function classifyHeadChecks(
+  runs: readonly HeadCheckRun[],
+  isPassing: (conclusion: string | null) => boolean,
+): { state: 'green' | 'pending' | 'failed'; pending: string[]; failed: string[] } {
+  const pending = runs.filter((r) => r.status !== 'completed').map((r) => r.name ?? '');
+  if (runs.length === 0 || pending.length > 0) return { state: 'pending', pending, failed: [] };
+  const failed = runs.filter((r) => !isPassing(r.conclusion ?? null)).map((r) => r.name ?? '');
+  return { state: failed.length > 0 ? 'failed' : 'green', pending, failed };
+}
+
+const WARNED_NO_PROTECTION = new Set<string>();
+
+/** Logs the no-branch-protection fallback once per repo per process (#3208). Returns true when it warned. */
+export function warnNoBranchProtectionOnce(
+  repo: string,
+  branch: string,
+  warn: (msg: string) => void,
+  seen: Set<string> = WARNED_NO_PROTECTION,
+): boolean {
+  if (seen.has(repo)) return false;
+  seen.add(repo);
+  warn(`no branch protection on ${repo}@${branch}; using all checks on head`);
+  return true;
+}
