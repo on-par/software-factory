@@ -5,7 +5,7 @@ import { readStopMarker } from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { describe, expect, it } from 'vitest';
 
-import { buildStatusJson } from './status-json.js';
+import { buildStatusJson, statusProviderInputs } from './status-json.js';
 import { statusJsonSchema } from './json-contract.js';
 
 const temp = createTempDirs();
@@ -41,6 +41,8 @@ describe('buildStatusJson', () => {
       active: [{ lane: 'app', issue: 7, phase: 'build', ageSec: 125 }],
       update: null,
       openFactoryDrafts: { count: 2, oldestHours: 5 },
+      providers: [],
+      activeAlerts: [],
     });
     expect(Object.keys(out)).toEqual([
       'schemaVersion',
@@ -52,6 +54,8 @@ describe('buildStatusJson', () => {
       'active',
       'update',
       'openFactoryDrafts',
+      'providers',
+      'activeAlerts',
     ]);
     expect(statusJsonSchema.parse(out)).toEqual(out);
   });
@@ -182,5 +186,109 @@ describe('buildStatusJson', () => {
     });
     expect(out.breaker.providers[0]).toMatchObject({ remainingSec: 0, until: 'credentials-change' });
     expect(statusJsonSchema.safeParse(out).success).toBe(true);
+  });
+});
+
+describe('provider alerts (#3236)', () => {
+  const base = {
+    repo: 'o/r',
+    product: null,
+    stop: false,
+    stopInfo: null,
+    active: [],
+    update: null,
+    openFactoryDrafts: null,
+    now: Date.parse('2026-10-23T11:00:00.000Z'),
+  };
+  const openedAt = '2026-10-23T10:00:00.000Z';
+  const providers = [
+    { id: 'anthropic', plan: 'subscription' as const },
+    { id: 'openai', plan: 'api' as const },
+  ];
+  const stages = [{ stage: 'plan' as const, providers: ['anthropic', 'openai'] }];
+  const auth = {
+    provider: 'anthropic',
+    reason: 'local_auth',
+    openedAt,
+    remainingMs: Number.POSITIVE_INFINITY,
+    until: 'credentials-change' as const,
+  };
+
+  it('status --json lists providers and derives activeAlerts from breaker state', () => {
+    // events.ndjson is empty: the builder never reads it, so alerts come from breaker state alone
+    writeFileSync(join(temp.makeSync('status-alerts-'), 'events.ndjson'), '');
+    const out = buildStatusJson({ ...base, breakers: [auth], providers, stages });
+    expect(out.providers).toEqual([
+      { id: 'anthropic', plan: 'subscription', breaker: 'open', openedReason: 'local_auth', openedAt },
+      { id: 'openai', plan: 'api', breaker: 'closed', openedReason: null, openedAt: null },
+    ]);
+    expect('resetAt' in out.providers[0]).toBe(false);
+    expect(out.activeAlerts).toEqual([
+      expect.objectContaining({ kind: 'provider_auth_rejected', provider: 'anthropic', since: openedAt }),
+    ]);
+    expect(statusJsonSchema.parse(out)).toEqual(out);
+  });
+
+  it('raises all_providers_down for a stage whose providers are all untimed-open', () => {
+    const out = buildStatusJson({
+      ...base,
+      breakers: [auth, { provider: 'openai', reason: 'timeout', openedAt, remainingMs: 60_000 }],
+      providers,
+      stages,
+    });
+    expect(out.activeAlerts.map((a) => a.kind)).toEqual(['provider_auth_rejected', 'all_providers_down']);
+    expect(out.activeAlerts[1]).toMatchObject({ stage: 'plan', since: openedAt });
+    expect(statusJsonSchema.parse(out)).toEqual(out);
+  });
+
+  it('a timed usage_cap breaker sets resetAt and suppresses all_providers_down', () => {
+    const out = buildStatusJson({
+      ...base,
+      breakers: [auth, { provider: 'openai', reason: 'usage_cap', openedAt, remainingMs: 3_600_000 }],
+      providers,
+      stages,
+    });
+    expect(out.providers[1].resetAt).toBe('2026-10-23T12:00:00.000Z');
+    expect(out.activeAlerts.map((a) => a.kind)).toEqual(['provider_auth_rejected']);
+    expect(out.schemaVersion).toBe(1);
+  });
+
+  it('keeps an unregistered provider out of providers[] but still alerts, and ignores empty stages', () => {
+    const out = buildStatusJson({
+      ...base,
+      breakers: [auth],
+      providers: [],
+      stages: [{ stage: 'build', providers: [] }],
+    });
+    expect(out.providers).toEqual([]);
+    expect(out.activeAlerts).toHaveLength(1);
+  });
+
+  it('statusProviderInputs lists distinct providers in registry order and dedupes stage providers', () => {
+    const defs: Record<string, { provider?: string }> = {
+      a1: { provider: 'anthropic' },
+      a2: { provider: 'anthropic' },
+      o1: { provider: 'openai' },
+      none: {},
+    };
+    const router = {
+      registryRef: { list: () => Object.keys(defs), get: (id: string) => defs[id] },
+      resolveAll: (task: string) => (task === 'plan' ? ['a1', 'a2', 'o1'] : task === 'build_claude' ? ['a1'] : ['o1']),
+    };
+    const plan = (p: string) => (p === 'anthropic' ? ('subscription' as const) : ('api' as const));
+    expect(statusProviderInputs(router, { failoverEnabled: true, plan })).toEqual({
+      providers: [
+        { id: 'anthropic', plan: 'subscription' },
+        { id: 'openai', plan: 'api' },
+      ],
+      stages: [
+        { stage: 'plan', providers: ['anthropic', 'openai'] },
+        { stage: 'build', providers: ['anthropic', 'openai'] },
+      ],
+    });
+    expect(statusProviderInputs(router, { failoverEnabled: false, plan }).stages).toEqual([
+      { stage: 'plan', providers: ['anthropic'] },
+      { stage: 'build', providers: ['anthropic'] },
+    ]);
   });
 });

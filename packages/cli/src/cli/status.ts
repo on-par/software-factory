@@ -14,6 +14,7 @@ import {
   partitionLocalQueueByActivity,
   ProviderBreaker,
   readEvents,
+  resolveAutoFailover,
   resolveMergePolicy,
 } from '@on-par/factory-core';
 import type { ActiveQueueClaim, QueueDiagnostic } from '@on-par/factory-core';
@@ -48,7 +49,7 @@ import type { CliDeps, CliExitError, readActiveProduct } from './index.js';
 import { readRunFlagOverrides } from './run-flags.js';
 import { readStopFileStatus, stopSentinelStatusLine } from './stop-sentinel.js';
 import { formatHostSlotsSection } from './status-host-slots.js';
-import { buildStatusJson } from './status-json.js';
+import { buildStatusJson, statusProviderInputs } from './status-json.js';
 import { checkSweepHeartbeat, defaultSweepHeartbeatDeps, formatSweepHeartbeatStatusLine } from './sweep-heartbeat.js';
 import { buildStatusUpdateJson, formatUpdateStatusLine, readUpdateState, updateStatePath } from './update-state.js';
 
@@ -161,6 +162,23 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
     const view = await readActiveClaims(paths, ghRepo, rt);
     rt.warnQueueDiagnostics(view.diagnostics);
     const marker = readStopMarker(paths.stop);
+    let inputs: ReturnType<typeof statusProviderInputs> = { providers: [], stages: [] };
+    try {
+      const repoConfig = rt.configLoaders.loadRepoConfig(repoRoot);
+      const effective = resolveEffectiveConfig(repoConfig);
+      const router = new rt.ModelRouter(
+        applyRepoConfig(rt.configLoaders.loadModelsConfig(), repoConfig),
+        rt.configLoaders.loadRoutesConfig(),
+        false,
+        undefined,
+        effective.allowExperimental,
+        effective.localOnly,
+      );
+      const failoverEnabled = resolveAutoFailover(rt.configLoaders.loadFactoryConfigForRepo(paths.config)).enabled;
+      inputs = statusProviderInputs(router, { failoverEnabled });
+    } catch {
+      // config unreadable: report no providers rather than failing status --json
+    }
     console.log(
       JSON.stringify(
         buildStatusJson({
@@ -169,6 +187,8 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
           stop: existsSync(paths.stop),
           stopInfo: marker ? { source: marker.source, setAt: marker.at ?? null } : null,
           breakers: await new ProviderBreaker(paths.breaker).list(),
+          providers: inputs.providers,
+          stages: inputs.stages,
           active: view.active,
           update: buildStatusUpdateJson(readUpdateState(updateStatePath(daemonRuntimePaths().dir))),
           openFactoryDrafts: await readDrafts(ghRepo, rt),

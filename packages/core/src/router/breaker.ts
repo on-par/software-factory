@@ -6,7 +6,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import type { EventKind } from '../events/kinds.js';
-import type { ProviderBreakerClosePayload } from '../events/payloads.js';
+import type { ProviderBreakerClosePayload, ProviderRestoredPayload } from '../events/payloads.js';
 import type { FailoverReason } from '../types/index.js';
 import { credentialFingerprint } from './credential-fingerprint.js';
 
@@ -105,12 +105,18 @@ export function reportedCooldownMs(
   return parseResetCooldownMs(detail ?? '', RESET_BUFFER_MS, now);
 }
 
+/** Maps a breaker close cause to the `provider_restored` cause (#3236). */
+export function restoredCause(cause: 'cooldown' | 'creds_changed' | 'manual_reset'): ProviderRestoredPayload['cause'] {
+  return cause === 'cooldown' ? 'timed_reset' : cause;
+}
+
 export class ProviderBreaker {
   constructor(
     private file: string,
     private now: () => number = () => Date.now(),
-    opts: { fingerprint?: (provider: string) => string } = {},
+    opts: { fingerprint?: (provider: string) => string; onClose?: (restored: ProviderRestoredPayload) => void } = {},
   ) {
+    this.onClose = opts.onClose;
     const fingerprint = opts.fingerprint ?? ((p: string) => credentialFingerprint(p));
     this.fingerprint = (p) => {
       try {
@@ -122,6 +128,16 @@ export class ProviderBreaker {
   }
 
   private fingerprint: (provider: string) => string;
+  private onClose: ((restored: ProviderRestoredPayload) => void) | undefined;
+
+  /** Tells `onClose` the breaker closed (#3236). A throwing observer never changes breaker gating. */
+  private notifyClose(provider: string, cause: 'cooldown' | 'creds_changed' | 'manual_reset'): void {
+    try {
+      this.onClose?.({ provider, at: new Date(this.now()).toISOString(), cause: restoredCause(cause) });
+    } catch {
+      // logging must never change gating
+    }
+  }
 
   private isOpen(provider: string, entry: BreakerEntry, now: number): boolean {
     if (entry.until === 'credentials-change')
@@ -154,6 +170,7 @@ export class ProviderBreaker {
     if (!entry) return undefined;
     delete data.providers[provider];
     await this.write(data);
+    this.notifyClose(provider, 'manual_reset');
     return entry;
   }
 
@@ -182,6 +199,7 @@ export class ProviderBreaker {
   /** Reads the file. If the entry's openedAt + cooldownMs <= now(), prune it
    *  (rewrite the file without it) and return { open: false, justClosed: entry }
    *  so the caller can emit provider_breaker_close exactly once per observer.
+   *  The pruning observer also calls `onClose` (provider_restored, #3236).
    *  Missing/corrupt/unparsable file => { open: false }. */
   async status(provider: string): Promise<BreakerStatus> {
     const data = await this.read();
@@ -192,6 +210,7 @@ export class ProviderBreaker {
       if (this.isOpen(provider, entry, this.now())) return { open: true, entry, remainingMs: Number.POSITIVE_INFINITY };
       delete data.providers[provider];
       await this.write(data);
+      this.notifyClose(provider, 'creds_changed');
       return { open: false, justClosed: entry, closeCause: 'creds_changed' };
     }
 
@@ -200,6 +219,7 @@ export class ProviderBreaker {
 
     delete data.providers[provider];
     await this.write(data);
+    this.notifyClose(provider, 'cooldown');
     return { open: false, justClosed: entry, closeCause: 'cooldown' };
   }
 

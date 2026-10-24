@@ -217,6 +217,63 @@
           "type": "null"
         }
       ]
+    },
+    "providers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "plan": {
+            "type": "string",
+            "enum": ["subscription", "api", "unknown"]
+          },
+          "breaker": {
+            "type": "string",
+            "enum": ["closed", "open"]
+          },
+          "openedReason": {
+            "type": ["string", "null"]
+          },
+          "openedAt": {
+            "type": ["string", "null"]
+          },
+          "resetAt": {
+            "type": "string"
+          }
+        },
+        "required": ["id", "plan", "breaker", "openedReason", "openedAt"],
+        "additionalProperties": false
+      }
+    },
+    "activeAlerts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["provider_auth_rejected", "all_providers_down"]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string",
+            "enum": ["plan", "build"]
+          },
+          "since": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          }
+        },
+        "required": ["kind", "since", "detail"],
+        "additionalProperties": false
+      }
     }
   },
   "required": [
@@ -228,7 +285,9 @@
     "breaker",
     "active",
     "update",
-    "openFactoryDrafts"
+    "openFactoryDrafts",
+    "providers",
+    "activeAlerts"
   ],
   "additionalProperties": false
 }

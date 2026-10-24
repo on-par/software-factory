@@ -62,7 +62,13 @@ export async function runLane(
     octokit: getOctokit,
     runId = '-',
     readParkSha = () => Promise.reject(new Error('no park sha reader')),
-    providerBreaker = new ProviderBreaker(paths.breaker),
+    providerBreaker = new ProviderBreaker(paths.breaker, undefined, {
+      onClose: (r) =>
+        emitEvent(paths.events, 'provider_restored', '-', `provider ${r.provider} restored (${r.cause})`, {
+          lane,
+          providerRestored: r,
+        }),
+    }),
     configStamp = () => {
       try {
         const st = statSync(paths.config);

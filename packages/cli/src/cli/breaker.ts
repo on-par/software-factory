@@ -41,7 +41,12 @@ export interface BreakerResetCommandDeps {
 export async function runBreakerResetCommand(provider: string, deps: BreakerResetCommandDeps): Promise<void> {
   const paths = getFactoryPaths(await deps.getRepoRoot());
   await runBreakerReset(provider, {
-    breaker: new ProviderBreaker(paths.breaker),
+    breaker: new ProviderBreaker(paths.breaker, undefined, {
+      onClose: (r) =>
+        logEvent(paths.events, 'provider_restored', '-', `provider ${r.provider} restored (${r.cause})`, {
+          providerRestored: r,
+        }),
+    }),
     log: (type, msg, extra) => logEvent(paths.events, type, '-', msg, extra),
     out: deps.out,
   });

@@ -61,7 +61,7 @@ export function logEvent(
     attribution?: RunAttribution;
     paths?: string[];
     mode?: 'mechanical';
-  } & Pick<LogExtra, 'providerAuthRejected' | 'providerBreakerClose'>,
+  } & Pick<LogExtra, 'providerAuthRejected' | 'providerBreakerClose' | 'providerRestored'>,
 ): void {
   const logger = createLogger(eventsFile, { issue, lane: extra?.lane, phase: extra?.phase });
   const level = extra?.level ?? levelForType(type);
@@ -76,6 +76,7 @@ export function logEvent(
   if (extra?.allProvidersDown) meta.allProvidersDown = extra.allProvidersDown;
   if (extra?.providerAuthRejected) meta.providerAuthRejected = extra.providerAuthRejected;
   if (extra?.providerBreakerClose) meta.providerBreakerClose = extra.providerBreakerClose;
+  if (extra?.providerRestored) meta.providerRestored = extra.providerRestored;
   if (extra?.stewardTriggered) meta.stewardTriggered = extra.stewardTriggered;
   if (extra?.flakyTests) meta.flakyTests = extra.flakyTests;
   if (extra?.checkFailure) meta.checkFailure = extra.checkFailure;
