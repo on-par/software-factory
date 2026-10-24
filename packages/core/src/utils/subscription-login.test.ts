@@ -38,8 +38,8 @@ function harness(env: NodeJS.ProcessEnv, failExec: readonly string[] = []) {
   return { exec, log, deps };
 }
 
-afterEach(() => {
-  tempDirs.cleanup();
+afterEach(async () => {
+  await tempDirs.cleanup();
 });
 
 describe('subscriptionLogin', () => {
