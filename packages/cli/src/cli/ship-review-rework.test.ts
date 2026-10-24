@@ -1,20 +1,20 @@
 // packages/cli/src/cli/ship-review-rework.test.ts — ship claims a queued review rework or `/factory iterate` record for the issue (#3564, #3625).
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { createFileIterateStore, createFileReviewReworkStore } from '@on-par/factory-core/internal';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { claimIterateRequest, claimReviewReworkRequest, claimReworkRequests } from './ship-review-rework.js';
 
+const tmp = createTempDirs();
 let dir: string;
 let paths: { reviewRework: string; iterate: string };
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'ship-rework-'));
+  dir = tmp.makeSync('ship-rework-');
   paths = { reviewRework: join(dir, 'review.json'), iterate: join(dir, 'iterate.json') };
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => tmp.cleanup());
 
 const queueIterate = () =>
   createFileIterateStore(paths.iterate).record({
