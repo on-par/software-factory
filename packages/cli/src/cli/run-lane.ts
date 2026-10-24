@@ -122,7 +122,7 @@ export async function runLane(
   const postParkComment = laneParkCommenter({ getOctokit, ghRepo, repoRoot, runId, lane, readParkSha }, (issue, m) =>
     emitEvent(paths.events, 'warn', issue, m, { lane }),
   );
-  const pauseCtx = { lane, paths, emitEvent };
+  const pauseCtx = { lane, paths, emitEvent, now };
   // A parked release adds factory:parked (#3424). Log the clean park once the label landed; a rejected add fails (#3425).
   const parkAndSettle = async (issue: number, parkedMsg: string, park: ParkPayload): Promise<boolean> => {
     activeIssues.delete(issue);

@@ -5,7 +5,13 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { createTempDirs } from '../harness/temp-dir.js';
 import type { EventKind } from '../events/kinds.js';
 import { ProviderBreaker } from '../router/breaker.js';
-import { allProvidersDown, allProvidersDownMessage, providerCapGate, stageBlocked } from './stage-blocked.js';
+import {
+  allProvidersDown,
+  allProvidersDownMessage,
+  allProvidersDownReleasePayload,
+  providerCapGate,
+  stageBlocked,
+} from './stage-blocked.js';
 
 const NOW = Date.parse('2026-10-19T05:00:00.000Z');
 const HOUR = 60 * 60_000;
@@ -267,5 +273,79 @@ describe('providerCapGate', () => {
     await breaker.open('openai', 'usage_cap', HOUR);
     const gate = providerCapGate(router, breaker, { ...request, failover: { enabled: false } }, () => {});
     expect((await gate.enterBuild('claude', 'claude-a', undefined, false)).released).toBeUndefined();
+  });
+});
+
+describe('allProvidersDownReleasePayload (#3340)', () => {
+  const timed = { provider: 'anthropic', reason: 'usage_cap', until: '2026-10-19T06:00:00.000Z' };
+  const auth = { provider: 'openai', reason: 'auth', until: 'credentials-change' };
+
+  it('is all_capped when every down reason is timed, with the earliest reset and the injected clock', () => {
+    const payload = allProvidersDownReleasePayload(
+      'plan',
+      [timed, { ...timed, provider: 'openai', reason: 'rate_limit' }],
+      timed.until,
+      7,
+      () => NOW,
+    );
+    expect(payload).toMatchObject({
+      stage: 'plan',
+      detail: 'all_capped',
+      nextAvailableAt: timed.until,
+      issue: 7,
+      at: new Date(NOW).toISOString(),
+    });
+  });
+
+  it('is reset_pending when any down provider has an untimed reason', () => {
+    expect(allProvidersDownReleasePayload('build', [timed, auth], timed.until, 7).detail).toBe('reset_pending');
+  });
+});
+
+describe('providerCapGate under models.providerOrder (#3340)', () => {
+  const ORDER = { boss: ['claude-a'], worker: ['gpt-a'], checker: ['claude-b', 'gpt-a'], triage: [] };
+  const request = {
+    issue: 7,
+    branch: 'issue-7',
+    codexDisabled: false,
+    failover: { enabled: false },
+    modelPins: {},
+    providerOrder: ORDER,
+  };
+  const capped = (reason: string) => Object.assign(new Error('x'), { reason, attempts: [] });
+
+  it('enterPlan counts the boss list, not the tier, and attaches the payload on release', async () => {
+    const breaker = freshBreaker();
+    await breaker.open('anthropic', 'usage_cap', HOUR);
+    const gate = providerCapGate(router, breaker, request, () => {});
+    const verdict = await gate.enterPlan(undefined, () => {});
+    expect(verdict.released).toMatchObject({
+      reason: 'provider-cap',
+      providers: ['anthropic'],
+      allProvidersDown: { stage: 'plan', detail: 'all_capped', issue: 7 },
+    });
+  });
+
+  it('enterBuild counts the worker list, unless the route is pinned', async () => {
+    const breaker = freshBreaker();
+    await breaker.open('openai', 'usage_cap', HOUR);
+    const ordered = providerCapGate(router, breaker, request, () => {});
+    expect((await ordered.enterBuild('claude', 'claude-a', undefined, false)).released).toMatchObject({
+      providers: ['openai'],
+    });
+    const pinned = providerCapGate(router, breaker, { ...request, preferredRoute: 'claude' as const }, () => {});
+    expect((await pinned.enterBuild('claude', 'claude-a', undefined, false)).released).toBeUndefined();
+  });
+
+  it('watchCheck and afterFailure count the checker list', async () => {
+    const breaker = freshBreaker();
+    await breaker.open('anthropic', 'rate_limit', HOUR);
+    const gate = providerCapGate(router, breaker, request, () => {});
+    gate.watchCheck('claude', 'claude-a');
+    expect(await gate.afterFailure(capped('rate_limit'), 'check', 'claude')).toBeUndefined();
+    await breaker.open('openai', 'rate_limit', HOUR);
+    expect((await gate.afterFailure(capped('rate_limit'), 'check', 'claude'))?.released).toMatchObject({
+      providers: ['anthropic', 'openai'],
+    });
   });
 });

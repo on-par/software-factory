@@ -6,7 +6,9 @@ import { routerFailureOf } from '../router/executor-error.js';
 import type { ModelRouter } from '../router/index.js';
 import type { AllProvidersDownPayload, EventKind } from '../events/kinds.js';
 import type { FailoverReason, FailurePhase } from '../types/index.js';
+import type { ProviderOrder } from '../config/provider-order.js';
 import type { BuildRoute, RunOutcome } from './outcome.js';
+import { STAGE_ROLE } from './provider-breaker-gate.js';
 
 type ParkedProvidersDown = Extract<RunOutcome, { state: 'parked' }>['providersDown'];
 
@@ -24,6 +26,9 @@ export const PROVIDER_LEVEL_REASONS: ReadonlySet<string> = new Set([
 ]);
 
 export type AllProvidersDownDetail = 'untimed_breakers' | 'only_metered_left';
+
+/** Details of an `all_providers_down` release to queued (#3340). */
+export type AllProvidersDownReleaseDetail = 'all_capped' | 'reset_pending';
 
 /** One provider that is down: its breaker reason (or 'metered'), and when it is back (ISO, 'credentials-change', or unknown). */
 export interface ProviderDown {
@@ -143,6 +148,22 @@ export function allProvidersDownPayload(
   return { ...down, nextAvailableAt: null, issue, at: new Date().toISOString() };
 }
 
+/** The `all_providers_down` payload for a release to queued (#3340): `nextAvailableAt` is the earliest reset. */
+export function allProvidersDownReleasePayload(
+  stage: GateStage,
+  providers: ProviderDown[],
+  earliestResetAt: string,
+  issue: number,
+  now: () => number = Date.now,
+): AllProvidersDownPayload {
+  const detail: AllProvidersDownReleaseDetail = providers.every((p) =>
+    TIMED_BREAKER_REASONS.has(p.reason as FailoverReason),
+  )
+    ? 'all_capped'
+    : 'reset_pending';
+  return { stage, providers, detail, nextAvailableAt: earliestResetAt, issue, at: new Date(now()).toISOString() };
+}
+
 /** What the lane watches after the park: the breaker-open providers, never the metered ones. */
 export function providersDownOf(down: NonNullable<StageGateVerdict['down']>): NonNullable<ParkedProvidersDown> {
   return { ...down, providers: down.providers.filter((p) => p.reason !== 'metered').map((p) => p.provider) };
@@ -190,6 +211,10 @@ export interface GateRequest {
   codexDisabled: boolean;
   failover: { enabled: boolean };
   modelPins: { plan?: string; planFallback?: string; buildFallback?: string };
+  /** models.providerOrder (#3338): when set, each stage counts the order's providers for its role (#3340). */
+  providerOrder?: ProviderOrder;
+  /** A repo-pinned build route: keeps BUILD on its route candidates even under providerOrder. */
+  preferredRoute?: BuildRoute;
 }
 
 /**
@@ -204,7 +229,8 @@ export function providerCapGate(
   log: GateLog,
 ) {
   const { issue, branch } = request;
-  const failoverEnabled = request.failover.enabled;
+  const order = request.providerOrder;
+  const failoverEnabled = request.failover.enabled || order !== undefined;
   let current: { stage: GateStage; candidates: string[] } | undefined;
   const decide = (stage: GateStage, gate: AllProvidersDownResult, route: BuildRoute | undefined): StageGateVerdict => {
     if (!gate.down) return { skip: gate.skip };
@@ -224,6 +250,7 @@ export function providerCapGate(
       reworkRounds: 0,
       providers,
       resetAt: gate.earliestResetAt,
+      allProvidersDown: allProvidersDownReleasePayload(stage, gate.providers, gate.earliestResetAt, issue),
     };
     return { skip: gate.skip, released };
   };
@@ -243,10 +270,10 @@ export function providerCapGate(
   return {
     /** CHECK has no boundary gate (BUILD just succeeded); record it for the catch path. */
     watchCheck(route: BuildRoute, model: string | undefined): void {
-      current = { stage: 'check', candidates: buildCandidates(router, route, model) };
+      current = { stage: 'check', candidates: order ? order[STAGE_ROLE.check] : buildCandidates(router, route, model) };
     },
     enterPlan(route: BuildRoute | undefined, stageLog: GateLog): Promise<StageGateVerdict> {
-      return enter('plan', planCandidates(router, request.modelPins), route, stageLog);
+      return enter('plan', order ? order[STAGE_ROLE.plan] : planCandidates(router, request.modelPins), route, stageLog);
     },
     /** Release only: BUILD's own gates log skips and its ladder stays (#1449). */
     enterBuild(
@@ -257,7 +284,11 @@ export function providerCapGate(
     ): Promise<StageGateVerdict> {
       const codexOff = request.codexDisabled || breakerBlocked;
       const ladder = failoverEnabled ? { buildFallback: request.modelPins.buildFallback, codexOff } : undefined;
-      return enter('build', buildCandidates(router, buildRoute, model, ladder), route);
+      const candidates =
+        order && request.preferredRoute === undefined
+          ? order[STAGE_ROLE.build]
+          : buildCandidates(router, buildRoute, model, ladder);
+      return enter('build', candidates, route);
     },
     async afterFailure(
       err: unknown,
