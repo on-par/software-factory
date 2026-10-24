@@ -12,6 +12,7 @@ import { resolveEventLogRotation, type EventLogRotation } from '../events/rotati
 import type { RunAttribution } from '../run/outcome.js';
 import type { EscalateKind } from '../types/index.js';
 import type {
+  AllProvidersDownPayload,
   EventKind,
   FlakyTestsPayload,
   LanePausedPayload,
@@ -57,6 +58,7 @@ export interface LogExtra {
   lanePaused?: LanePausedPayload;
   park?: ParkPayload;
   providerCapped?: ProviderCappedPayload;
+  allProvidersDown?: AllProvidersDownPayload;
   providerRefused?: ProviderRefusedPayload;
   providerAuthRejected?: ProviderAuthRejectedPayload;
   providerBreakerClose?: ProviderBreakerClosePayload;
@@ -168,6 +170,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.lanePaused ? { lanePaused: extra.lanePaused } : {}),
       ...(extra?.park ? { park: extra.park } : {}),
       ...(extra?.providerCapped ? { providerCapped: extra.providerCapped } : {}),
+      ...(extra?.allProvidersDown ? { allProvidersDown: extra.allProvidersDown } : {}),
       ...(extra?.providerRefused ? { providerRefused: extra.providerRefused } : {}),
       ...(extra?.providerAuthRejected ? { providerAuthRejected: extra.providerAuthRejected } : {}),
       ...(extra?.providerBreakerClose ? { providerBreakerClose: extra.providerBreakerClose } : {}),

@@ -62,6 +62,8 @@ export function environmentReleaseMarker(issue: number): string {
 }
 
 const PARK_HINTS: Record<ParkReason, string> = {
+  all_providers_down:
+    'every provider for the stage is down with no known reset. Fix the provider credentials or run `factory breaker reset <provider>`, then run `factory unpark <n>`.',
   fail: 'fix the failing checks on the branch or clarify the issue, then run `factory unpark <n>`.',
   blocked:
     'waiting on a filed blocker. The factory resumes it once the blocker closes; run `factory unpark <n>` to retry sooner.',

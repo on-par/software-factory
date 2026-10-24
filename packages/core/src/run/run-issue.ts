@@ -46,7 +46,13 @@ import { createRunPhaseLogger } from './run-phase-log.js';
 import { providerFailureRecorder } from './provider-failure-recorder.js';
 import { gateOpencodeBuildOnBreaker, providerFallbackPreferrer } from './provider-breaker-gate.js';
 import { loadReusablePlan } from './plan-reuse-load.js';
-import { providerCapGate } from './stage-blocked.js';
+import {
+  allProvidersDownMessage,
+  allProvidersDownPayload,
+  providerCapGate,
+  providersDownOf,
+  type StageGateVerdict,
+} from './stage-blocked.js';
 import { fileFlakyTests } from './flaky-tests.js';
 import { finishWithoutShip } from './local-finish.js';
 import { enterStackSlice, stackWaitOutcome } from './stack-slice-entry.js';
@@ -421,6 +427,7 @@ async function runIssueOnce(
     message: string,
     checkFailure?: { failureSignature: string; failingChecks: string[] },
     ciFailure?: CiFailureEvidence,
+    down?: StageGateVerdict['down'],
   ): Promise<RunOutcome> => {
     const terminalMessage = phaseLogger.parkMessage(message);
     // A blocked park never carries a failure signature, so the ADR-0139 lane breaker and the cross-run stuck check skip it (#2315).
@@ -428,6 +435,7 @@ async function runIssueOnce(
     log(reason, terminalMessage, {
       ...parkLogExtra(failure, ciFailure),
       park: parkPayload(reason, request.issue, request.lane, request.blockedBehind ?? []),
+      ...(down ? { allProvidersDown: allProvidersDownPayload(down, request.issue) } : {}),
     });
     if (reason === 'timeout') {
       log('stuck', `run exceeded its phase timeout without progressing — ${terminalMessage}`);
@@ -470,11 +478,15 @@ async function runIssueOnce(
       reworkRounds,
       ...(settled?.prNumber === undefined ? {} : { prNumber: settled.prNumber }),
       ...failure,
+      ...(down ? { providersDown: providersDownOf(down) } : {}),
     };
     await runParkSteward(outcome, request, runId, ports, log);
     await writeReports(reportOutcomeFor(reason), reason, terminalMessage);
     return outcome;
   };
+
+  const parkAllProvidersDown = (down: NonNullable<StageGateVerdict['down']>): Promise<RunOutcome> =>
+    terminalParked('all_providers_down', allProvidersDownMessage(down, request.issue), undefined, undefined, down);
 
   const assertBudget = async (phase: string): Promise<RunOutcome | undefined> => {
     // prettier-ignore
@@ -629,6 +641,7 @@ async function runIssueOnce(
       const reused = await loadReusablePlan(ports.planReuse, request, log, ports.events('plan'));
       const planGate = reused ? undefined : await capGate.enterPlan(route, ports.events('plan'));
       if (planGate?.released) return planGate.released;
+      if (planGate?.down) return await parkAllProvidersDown(planGate.down);
       const plan =
         reused ??
         (await planPhase({
@@ -791,6 +804,7 @@ async function runIssueOnce(
 
       const buildGate = await capGate.enterBuild(buildRoute, buildModel, route, breakerBlocked);
       if (buildGate.released) return buildGate.released;
+      if (buildGate.down) return await parkAllProvidersDown(buildGate.down);
       const build = await buildPhase({
         budgetGuard: budgetStop.guard,
         previousAttempt: previousAttemptNote,
@@ -1210,7 +1224,8 @@ async function runIssueOnce(
       );
     }
     const capped = await capGate.afterFailure(err, failurePhase, route);
-    if (capped) return capped;
+    if (capped?.released) return capped.released;
+    if (capped?.down) return await parkAllProvidersDown(capped.down);
     return await terminalParked(parkReasonFor(err), errorMessage(err));
   } finally {
     await release();

@@ -9,6 +9,7 @@ import type { LogLevel } from '../types/index.js';
 
 export type { EventTraits, LaneStatus };
 export type {
+  AllProvidersDownPayload,
   FlakyTestsPayload,
   LanePausedPayload,
   ParkPayload,
@@ -30,6 +31,7 @@ export type EventKind =
   | 'adr_inject_started'
   | 'adr_read_degraded'
   | 'adr_skipped'
+  | 'all_providers_down'
   | 'agent_memory_loaded'
   | 'agent_memory_oversized'
   | 'approval_granted'
@@ -237,6 +239,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   adr_inject_started: { severity: 'info', isPark: false, isTerminal: false },
   adr_read_degraded: { severity: 'info', isPark: false, isTerminal: false },
   adr_skipped: { severity: 'info', isPark: false, isTerminal: false },
+  // every provider of the stage is down with no known reset; the issue parks once (#3235)
+  all_providers_down: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
   agent_memory_loaded: { severity: 'info', isPark: false, isTerminal: false },
   agent_memory_oversized: { severity: 'warn', isPark: false, isTerminal: false },
   approval_granted: { severity: 'info', isPark: false, isTerminal: false },

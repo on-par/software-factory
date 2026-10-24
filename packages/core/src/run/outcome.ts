@@ -2,7 +2,16 @@ import type { EventKind } from '../events/kinds.js';
 
 export type ParkReason = Extract<
   EventKind,
-  'escalate' | 'timeout' | 'fail' | 'conflict' | 'ci-failed' | 'ci-infra' | 'held' | 'config' | 'blocked'
+  | 'escalate'
+  | 'timeout'
+  | 'fail'
+  | 'conflict'
+  | 'ci-failed'
+  | 'ci-infra'
+  | 'held'
+  | 'config'
+  | 'blocked'
+  | 'all_providers_down'
 >;
 
 import type { BuildRoutePin } from '../config/repo.js';
@@ -63,6 +72,12 @@ export type RunOutcome =
       failureSignature?: string;
       /** Names of the checkers that FAILed in that CHECK — set only alongside failureSignature. */
       failingChecks?: string[];
+      /** Set on an `all_providers_down` park (#3235): the breaker-open providers the lane watches (metered ones excluded). */
+      providersDown?: {
+        stage: 'plan' | 'build' | 'check';
+        providers: string[];
+        detail: 'untimed_breakers' | 'only_metered_left';
+      };
       attribution?: RunAttribution;
     }
   | {

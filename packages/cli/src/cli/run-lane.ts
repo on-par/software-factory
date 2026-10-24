@@ -1,105 +1,32 @@
 // packages/cli/src/cli/run-lane.ts — the lane loop, moved out of index.ts (#2800)
 
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 
-import { parkReasonFor } from '@on-par/factory-core';
-import type { getFactoryPaths, ParkPayload, ParkReason, RunOutcome } from '@on-par/factory-core';
+import { parkReasonFor, ProviderBreaker } from '@on-par/factory-core';
+import type { getFactoryPaths, ParkPayload, RunOutcome } from '@on-par/factory-core';
 import { formatLoadHold, logEvent, PARKED_LABEL, parkPayload } from '@on-par/factory-core/internal';
-import type { Octokit } from '@octokit/rest';
-import type {
-  LoadGuardDecision,
-  QueueClaim,
-  QueueReleaseOutcome,
-  StackRestackOutcome,
-} from '@on-par/factory-core/internal';
+import type { LoadGuardDecision, QueueClaim, QueueReleaseOutcome } from '@on-par/factory-core/internal';
 
 import type { BaseHoldDecision } from './base-hold.js';
 import { laneParkCommenter } from './lane-park-comment.js';
 import {
+  pauseLaneForAllProvidersDown,
   pauseLaneForBrokenBase,
   pauseLaneForProviderCap,
   tripLaneBreaker,
   waitForProviderReset,
+  waitForProvidersRestored,
 } from './lane-pause.js';
 import { waitForMerge } from './land.js';
 import { AwaitingReviewError } from './land-pr.js';
 import { releaseKeepOnRequeue } from './worktree-keep.js';
 import { shipIssue } from './ship.js';
 import { withHeartbeat } from './lane-heartbeat.js';
-import { type ChildEnqueueResult, queueDecomposedChildren } from './run-lane-decompose.js';
+import { queueDecomposedChildren } from './run-lane-decompose.js';
+import type { RunLaneDeps } from './run-lane-deps.js';
 import { shipRuntime } from './ship-runtime.js';
 
-export type RunLaneDeps = {
-  /** Octokit for the park comment of a park raised outside runIssue (#3534). Absent = no comment. */
-  octokit?: () => Octokit;
-  /** The run id written to the park comment's `run:` line. Defaults to '-'. */
-  runId?: string;
-  /** Returns the park SHA for a branch. The default rejects, which gives `park-sha: -`. */
-  readParkSha?: (branch: string) => Promise<string>;
-  /** Lane circuit breaker (#1918): pause after this many consecutive parks with the same
-   *  non-empty failure signature. 0 or absent = off; cmdRun wires the resolved
-   *  budget.laneBreakerThreshold. */
-  laneBreakerThreshold?: number;
-  /** Posts the lane-paused comment on the tripping issue (#1919). Defaults to a no-op so
-   *  injected-deps callers and tests are unaffected; cmdRun wires it to issues.createComment. */
-  commentIssue?: (issue: number, body: string) => Promise<void>;
-  ship?: (
-    issue: number,
-    opts: { product?: string; autoRework?: boolean; interactive?: boolean; approvePlan?: boolean },
-    ctx?: {
-      repoRoot: string;
-      ghRepo: string;
-      paths: ReturnType<typeof getFactoryPaths>;
-      lane?: string;
-      /** Issues still pending behind this one on the lane, for the park payload (#3511). */
-      blockedBehind?: number[];
-      onOutcome?: (outcome: RunOutcome) => void;
-    },
-  ) => Promise<string>;
-  waitMerge?: typeof waitForMerge;
-  /** ADR-0161: records a landed stack layer as merged in the slice-plan comment. Defaults to a no-op. */
-  recordStackMerge?: (issue: number, prNumber: number) => Promise<void>;
-  /** ADR-0161 (#3368): rebases the open layers above a squash-merged layer onto main, model-free. Defaults to a no-op. */
-  restack?: (issue: number, merged: { index: number; prNumber: number }) => Promise<StackRestackOutcome>;
-  pathExists?: (path: string) => boolean;
-  emitEvent?: typeof logEvent;
-  claimNext?: () => Promise<QueueClaim | null>;
-  /** #3563: polls open factory PRs for trusted changes-requested reviews and queues their issues; run before every remote claim.
-   *  Fail-closed: a rejection is logged as a warn and never changes lane flow. Absent for local lanes. */
-  pollReviewRework?: () => Promise<void>;
-  releaseIssue?: (issue: number, outcome: QueueReleaseOutcome) => Promise<void>;
-  /** Writes decomposed children into the GitHub queue (queued, lane, order right behind the parent)
-   *  before the lane moves on, so a restart never loses them (#3539). Absent for static local lanes. */
-  queueChildren?: (parent: number, children: number[]) => Promise<ChildEnqueueResult>;
-  /** Refreshes the claim lease every HEARTBEAT_INTERVAL_MS while an issue is in flight
-   *  (#1500). Absent for static local-queue lanes, which carry no remote claim to lease. */
-  heartbeat?: (issue: number) => Promise<unknown>;
-  /** Eager park-time worktree reap (#1007). Defaults to a no-op so injected-deps callers and
-   *  tests are unaffected; cmdRun wires it to reapParkedLaneWorktree. */
-  reapWorktree?: (issue: number) => Promise<void>;
-  /** Settles the park's PR (closes it with the park reason, keeping the branch) when a park is raised while landing; default no-op. */
-  closeParkedPr?: (issue: number, branch: string, reason: ParkReason) => Promise<void>;
-  /** Between-issues worktree GC pass (#1757), run after every terminal outcome before the
-   *  lane moves on. Defaults to a no-op so injected-deps callers and tests are unaffected;
-   *  cmdRun wires it to sweepBetweenLaneIssues. */
-  sweepFinished?: (issue: number) => Promise<void>;
-  /** Issues in flight on any lane of this run — shared across every lane of one run; an issue is in
-   *  it from start to settle so no lane's sweep reaps it (#2964). */
-  activeIssues?: Set<number>;
-  /** Number of issues still claimable on this lane's remote queue (#1222). Absent for
-   *  static local lanes, whose pending list is the whole truth. */
-  countRemaining?: () => Promise<number>;
-  /** Base-hold claim gate (#2349): consulted before every remote claim; 'hold' stops the lane
-   *  without claiming. Absent = always claim (local lanes, injected-deps callers, tests). */
-  baseHoldGate?: () => Promise<BaseHoldDecision>;
-  /** Host load guard (#3048): consulted before every remote claim, after the base-hold gate; 'hold'
-   *  waits retryMs and re-checks. Absent = always claim (local lanes, injected-deps callers, tests). */
-  loadGuard?: () => LoadGuardDecision;
-  /** Injectable for tests. Default: setTimeout-based sleep. */
-  sleep?: (ms: number) => Promise<void>;
-  /** Injectable clock for the logged retry time. Default: () => new Date(). */
-  now?: () => Date;
-};
+export type { RunLaneDeps };
 
 export async function runLane(
   lane: string,
@@ -135,9 +62,20 @@ export async function runLane(
     octokit: getOctokit,
     runId = '-',
     readParkSha = () => Promise.reject(new Error('no park sha reader')),
+    providerBreaker = new ProviderBreaker(paths.breaker),
+    configStamp = () => {
+      try {
+        const st = statSync(paths.config);
+        return `${st.mtimeMs}:${st.size}`;
+      } catch {
+        return '';
+      }
+    },
   } = deps;
   /** Epoch ms of the earliest provider reset after a provider-cap release; the lane claims nothing before it (#3226). */
   let providerPauseUntil: number | undefined;
+  /** Breaker-open providers (and the config stamp) to watch after an all_providers_down park; the lane claims nothing until one closes (#3235). */
+  let providersDownWatch: { providers: string[]; configStamp: string } | undefined;
   let streak: { signature: string; firstIssue: number; failingChecks: string[]; count: number } | null = null;
   let merged = 0;
   let awaitingReview = 0;
@@ -216,6 +154,14 @@ export async function runLane(
   for (let i = 0; ; i++) {
     if (await waitForProviderReset(pauseCtx, providerPauseUntil, now, sleep, pathExists)) return;
     providerPauseUntil = undefined;
+    const watch = providersDownWatch;
+    if (
+      watch &&
+      (await waitForProvidersRestored(pauseCtx, watch, { breaker: providerBreaker, configStamp, sleep, pathExists }))
+    ) {
+      return;
+    }
+    providersDownWatch = undefined;
     if (i >= pending.length) {
       // A persisted base hold on the unchanged origin/main SHA means the base is still broken
       // (#2349): claiming would just cycle an issue again, so stop this lane without claiming.
@@ -483,6 +429,12 @@ export async function runLane(
       if (landing !== undefined) await closeParkedPr(issue, landing, reason).catch(() => {});
       await reapWorktree(issue).catch(() => {});
       if (await parkAndSettle(issue, msg, parkPayload(reason, issue, lane, queuedBehind(i)))) parked++;
+      const down = sliceOutcome.value?.state === 'parked' ? sliceOutcome.value.providersDown : undefined;
+      if (reason === 'all_providers_down' && down) {
+        pauseLaneForAllProvidersDown(pauseCtx, issue, down);
+        providersDownWatch = { providers: down.providers, configStamp: configStamp() };
+        continue;
+      }
       if (tripped && streak) {
         await tripLaneBreaker(pauseCtx, streak, issue, checks, commentIssue);
         return;

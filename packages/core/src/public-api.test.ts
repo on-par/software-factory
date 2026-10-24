@@ -332,7 +332,7 @@ const POLICY = 'isEgressEnforced describeDraftPrPolicy resolveDraftPrPolicy reso
 const PO =
   'resolveRoleModel isOpenCodeZenModel subscriptionProviderOf PROVIDER_ORDER_ROLES SUBSCRIPTION_PROVIDERS'.split(' '); // #3334
 const PO2 = 'OPENCODE_GO_DEFAULT_MODEL subscriptionLogin filterRefusedProviders'.split(' '); // #3335
-const GATE = ['stageBlocked', 'PROVIDER_LEVEL_REASONS', 'TIMED_BREAKER_REASONS']; // #3226
+const GATE = ['allProvidersDown', 'stageBlocked', 'PROVIDER_LEVEL_REASONS', 'TIMED_BREAKER_REASONS']; // #3226
 const EXTRA_INTERNAL_KEYS = [
   ...JOB_KEYS,
   ...TAIL,

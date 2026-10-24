@@ -1,6 +1,7 @@
 // src/run/attribution.ts — plan/build model attribution stamped on a run's terminal events (#3321).
 
 import type {
+  AllProvidersDownPayload,
   EventKind,
   FlakyTestsPayload,
   ParkPayload,
@@ -37,6 +38,7 @@ export type RunLogFn = (
     flakyTests?: FlakyTestsPayload;
     park?: ParkPayload;
     providerCapped?: ProviderCappedPayload;
+    allProvidersDown?: AllProvidersDownPayload;
     providerAuthRejected?: ProviderAuthRejectedPayload;
     providerBreakerClose?: ProviderBreakerClosePayload;
     attribution?: RunAttribution;
@@ -53,6 +55,7 @@ const STAMPED: Record<ParkReason, true> = {
   held: true,
   config: true,
   blocked: true,
+  all_providers_down: true,
 };
 
 type Slot = NonNullable<RunAttribution['plan']>;

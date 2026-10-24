@@ -1,9 +1,10 @@
-import { join } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { getFactoryPaths, ProviderBreaker } from '@on-par/factory-core';
-import { stageBlocked } from '@on-par/factory-core/internal';
+import { allProvidersDown, stageBlocked } from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
 
 import { runLane } from './run-lane.js';
@@ -157,5 +158,121 @@ describe('runLane provider-cap release (#3226)', () => {
       emitEvent: () => {},
     });
     expect(claimed).toEqual([1, 2]);
+  });
+
+  describe('all providers down with no known reset (#3235)', () => {
+    let n = 0;
+    const setup = async () => {
+      n += 1;
+      const breaker = new ProviderBreaker(join(dir, `down-${n}.json`), () => 1, { fingerprint: () => 'fp' });
+      await breaker.openUntilCredentialsChange('anthropic', 'error');
+      await breaker.openUntilCredentialsChange('openai', 'error');
+      const claims = [buildClaim(1), buildClaim(2)];
+      const calls: any[] = [];
+      const events: Array<{ type: string; extra?: any }> = [];
+      let claimCalls = 0;
+      let polls = 0;
+      const deps = (onPoll: (poll: number) => Promise<void> | void) => ({
+        claimNext: async () => {
+          claimCalls++;
+          return claims.shift() ?? null;
+        },
+        providerBreaker: breaker,
+        configStamp: () => 'cfg',
+        ship: async (issue: number, _opts: unknown, ctx?: { onOutcome?: (o: any) => void }) => {
+          const gate = await allProvidersDown('plan', {
+            router: registry,
+            breaker,
+            candidates: ['claude-plan', 'gpt-plan'],
+            failoverEnabled: true,
+          });
+          if (gate.down && !gate.earliestResetAt) {
+            const outcome = {
+              state: 'parked' as const,
+              reason: 'all_providers_down' as const,
+              providersDown: {
+                stage: 'plan' as const,
+                detail: 'untimed_breakers' as const,
+                providers: gate.providers.map((p) => p.provider),
+              },
+            };
+            ctx?.onOutcome?.(outcome);
+            events.push({ type: 'all_providers_down' });
+            throw Object.assign(new Error('every PLAN provider is down'), { outcome });
+          }
+          calls.push(['ran', issue]);
+          return 'b';
+        },
+        waitMerge: async () => {},
+        releaseIssue: async (issue: number, outcome: string) => {
+          calls.push(['release', issue, outcome]);
+        },
+        pathExists: () => polls >= 3,
+        sleep: async () => {
+          polls++;
+          await onPoll(polls);
+        },
+        emitEvent: ((_file: string, type: string, _subject: unknown, _msg: string, extra?: any) => {
+          events.push({ type, extra });
+        }) as never,
+      });
+      return { breaker, calls, events, deps, claimCalls: () => claimCalls };
+    };
+
+    it('all providers down with no known reset parks once and pauses the lane', async () => {
+      const t = await setup();
+      await runLane(
+        'app',
+        [],
+        '/repo',
+        'on-par/software-factory',
+        paths,
+        t.deps(() => {}),
+      );
+      expect(t.calls).toEqual([['release', 1, 'parked']]);
+      expect(t.claimCalls()).toBe(1);
+      expect(t.events.filter((e) => e.type === 'all_providers_down')).toHaveLength(1);
+      const paused = t.events.filter((e) => e.type === 'lane-paused');
+      expect(paused).toHaveLength(1);
+      expect(paused[0].extra.lanePaused).toMatchObject({
+        cause: 'all_providers_down',
+        providers: ['anthropic', 'openai'],
+      });
+      expect(t.events.some((e) => e.type === 'stopped')).toBe(true);
+    });
+
+    it('defaults to the repo breaker file and config stamp, and resumes when the config file changes', async () => {
+      const t = await setup();
+      const real = getFactoryPaths(dir, join(dir, 'default-state'));
+      mkdirSync(dirname(real.config), { recursive: true });
+      const down = { ...t.deps(() => {}), providerBreaker: undefined, configStamp: undefined };
+      // The default breaker file is absent, so the watched providers read closed: the lane resumes at once.
+      await runLane('app', [], dir, 'on-par/software-factory', real, down as never);
+      expect(t.claimCalls()).toBeGreaterThanOrEqual(2);
+      writeFileSync(real.config, 'x');
+      const again = await setup();
+      await runLane('app', [], dir, 'on-par/software-factory', real, {
+        ...again.deps(() => {}),
+        providerBreaker: undefined,
+        configStamp: undefined,
+      } as never);
+      expect(again.claimCalls()).toBeGreaterThanOrEqual(2);
+    });
+
+    it('a breaker reset ends the all_providers_down pause and the lane claims on its next poll', async () => {
+      const t = await setup();
+      await runLane(
+        'app',
+        [],
+        '/repo',
+        'on-par/software-factory',
+        paths,
+        t.deps(async (poll) => {
+          if (poll === 2) await t.breaker.reset('openai');
+        }),
+      );
+      expect(t.claimCalls()).toBeGreaterThanOrEqual(2);
+      expect(t.calls).toContainEqual(['ran', 2]);
+    });
   });
 });

@@ -1,11 +1,11 @@
 // src/utils/index.ts — Shared utilities: logging, git ops, cost tracking, shell helpers
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
 import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
-import type { ParkPayload, ProviderCappedPayload } from '../events/payloads.js';
+import type { AllProvidersDownPayload, ParkPayload, ProviderCappedPayload } from '../events/payloads.js';
 import type { RunAttribution } from '../run/outcome.js';
 import { createLogger, type LogExtra } from '../logger/index.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
@@ -14,7 +14,6 @@ import type { EscalateKind } from '../types/index.js';
 import type {
   CheckFailureInfo,
   CiFailureEvidence,
-  CostEntry,
   FailoverReason,
   LogLevel,
   ReadinessInfo,
@@ -49,6 +48,7 @@ export function logEvent(
     lanePaused?: LanePausedPayload;
     park?: ParkPayload;
     providerCapped?: ProviderCappedPayload;
+    allProvidersDown?: AllProvidersDownPayload;
     stewardTriggered?: StewardTriggeredPayload;
     flakyTests?: FlakyTestsPayload;
     checkFailure?: CheckFailureInfo;
@@ -73,6 +73,7 @@ export function logEvent(
   if (extra?.lanePaused) meta.lanePaused = extra.lanePaused;
   if (extra?.park) meta.park = extra.park;
   if (extra?.providerCapped) meta.providerCapped = extra.providerCapped;
+  if (extra?.allProvidersDown) meta.allProvidersDown = extra.allProvidersDown;
   if (extra?.providerAuthRejected) meta.providerAuthRejected = extra.providerAuthRejected;
   if (extra?.providerBreakerClose) meta.providerBreakerClose = extra.providerBreakerClose;
   if (extra?.stewardTriggered) meta.stewardTriggered = extra.stewardTriggered;
@@ -90,33 +91,7 @@ export function logEvent(
   logger[level](type, msg, Object.keys(meta).length > 0 ? meta : undefined);
 }
 
-// ---------- Cost Tracking ----------
-
-export function logCost(costsFile: string, entry: Omit<CostEntry, 'ts'>): void {
-  const full: CostEntry = { ...entry, ts: new Date().toISOString() };
-  const line = JSON.stringify(full) + '\n';
-  try {
-    appendFileSync(costsFile, line);
-  } catch {
-    mkdirSync(resolve(costsFile, '..'), { recursive: true });
-    appendFileSync(costsFile, line);
-  }
-}
-
-export function readCosts(costsFile: string): CostEntry[] {
-  if (!existsSync(costsFile)) return [];
-  return readFileSync(costsFile, 'utf-8')
-    .trim()
-    .split('\n')
-    .filter(Boolean)
-    .flatMap((l) => {
-      try {
-        return [JSON.parse(l) as CostEntry];
-      } catch {
-        return [];
-      }
-    });
-}
+export { logCost, readCosts } from './cost-log.js';
 
 // ---------- Git Operations ----------
 
