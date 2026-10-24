@@ -1,5 +1,8 @@
 // packages/cli/src/cli/doctor-verify.ts — `factory doctor` Verify section: the build/test/lint commands CHECK will run (#3473)
 
+import { basename } from 'node:path';
+
+import { getFactoryPaths } from '@on-par/factory-core';
 import {
   describeChecksProbe,
   resolveCompileCommand,
@@ -18,7 +21,7 @@ export interface VerifyCommandRow {
   kind: VerifyKind;
   /** The command CHECK runs, space-joined argv; null when none resolves. */
   command: string | null;
-  /** Where it came from: .factory/config.json (`checks`), scripts/verify.sh, scripts/verify.ps1, package.json, pytest, Makefile, Cargo.toml, tsconfig.json; null when none. */
+  /** Where it came from: the repo config file (`checks`), scripts/verify.sh, scripts/verify.ps1, package.json, pytest, Makefile, Cargo.toml, tsconfig.json; null when none. */
   source: string | null;
   /** argv[0]; null when there is no command. */
   executable: string | null;
@@ -31,6 +34,8 @@ export interface ResolvedVerifyCommands {
   error?: string;
   /** The config file probed for `checks`, named in the missing-command rows (#3600). */
   checksProbe?: string;
+  /** The repo config file name shown in fix hints, e.g. `.factory/config.yaml` (#3604). */
+  configFile?: string;
 }
 
 const TEST_SOURCES = {
@@ -53,6 +58,7 @@ const emptyRow = (kind: VerifyKind): VerifyCommandRow => ({ kind, command: null,
 export async function resolveVerifyCommands(repoRoot: string): Promise<ResolvedVerifyCommands> {
   const src = { worktree: repoRoot };
   const checksProbe = describeChecksProbe(src, 'source checkout');
+  const configFile = `.factory/${basename(getFactoryPaths(repoRoot).config)}`;
   try {
     const build = await resolveCompileCommand(src);
     const tests = await resolveTestsCommand(src);
@@ -68,9 +74,10 @@ export async function resolveVerifyCommands(repoRoot: string): Promise<ResolvedV
           : [emptyRow('lint')]),
       ],
       checksProbe,
+      configFile,
     };
   } catch (err) {
-    return { rows: [], error: err instanceof Error ? err.message : String(err) };
+    return { rows: [], error: err instanceof Error ? err.message : String(err), checksProbe, configFile };
   }
 }
 
@@ -82,11 +89,17 @@ export function withPathResults(
   return rows.map((r) => ({ ...r, onPath: r.executable === null ? null : commandAvailable(r.executable) }));
 }
 
-const NO_TESTS_FIX =
-  'run `factory init --detect-checks` to find and declare your test command under `checks` in .factory/config.json (or add scripts/verify.sh, scripts/verify.ps1, or a package.json "test" script)';
-const DEFAULT_CHECKS_PROBE = '.factory/config.yaml|yml|json';
+const noTestsFix = (configFile: string) =>
+  `run \`factory init --detect-checks\` to find and declare your test command under \`checks\` in ${configFile} (or add scripts/verify.sh, scripts/verify.ps1, or a package.json "test" script)`;
+const DEFAULT_CONFIG_FILE = '.factory/config.yaml|yml|json';
+const DEFAULT_CHECKS_PROBE = DEFAULT_CONFIG_FILE;
 
-function missingRow(row: VerifyCommandRow, requireTests: boolean, probe = DEFAULT_CHECKS_PROBE): DoctorCheck {
+function missingRow(
+  row: VerifyCommandRow,
+  requireTests: boolean,
+  probe = DEFAULT_CHECKS_PROBE,
+  configFile = DEFAULT_CONFIG_FILE,
+): DoctorCheck {
   const section = VERIFY_SECTION;
   const noTestsDetail = `no checks.test in ${probe}, scripts/verify.sh, scripts/verify.ps1, package.json test script or pytest surface`;
   if (row.kind === 'test') {
@@ -96,7 +109,7 @@ function missingRow(row: VerifyCommandRow, requireTests: boolean, probe = DEFAUL
           section,
           ok: false,
           detail: `CHECK will run no tests, but the constitution sets requireTests: true; ${noTestsDetail}`,
-          fix: NO_TESTS_FIX,
+          fix: noTestsFix(configFile),
         }
       : {
           name: 'verify test',
@@ -104,7 +117,7 @@ function missingRow(row: VerifyCommandRow, requireTests: boolean, probe = DEFAUL
           ok: false,
           optional: true,
           detail: `CHECK will run no tests; ${noTestsDetail}`,
-          fix: NO_TESTS_FIX,
+          fix: noTestsFix(configFile),
         };
   }
   if (row.kind === 'build') {
@@ -140,13 +153,14 @@ export function verifyCommandChecks(
         section,
         ok: false,
         detail: `cannot resolve CHECK commands: ${resolved.error}`,
-        fix: 'fix package.json and .factory/config.json so they parse',
+        fix: `fix package.json and ${resolved.configFile ?? DEFAULT_CONFIG_FILE} so they parse`,
       },
     ];
   }
   return resolved.rows.map((row): DoctorCheck => {
     const { command, source, executable } = row;
-    if (command === null || executable === null) return missingRow(row, opts.requireTests, resolved.checksProbe);
+    if (command === null || executable === null)
+      return missingRow(row, opts.requireTests, resolved.checksProbe, resolved.configFile);
     const name = row.kind === 'lint' ? `verify lint (${source})` : `verify ${row.kind}`;
     if (opts.commandAvailable(executable)) {
       return { name, section, ok: true, detail: `\`${command}\` (from ${source}); ${executable} found on PATH` };

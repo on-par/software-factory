@@ -2,6 +2,7 @@
 // providers, budget and more, over the packaged defaults. Resolution order: repo file > env vars > packaged defaults.
 
 import { existsSync } from 'node:fs';
+import { basename } from 'node:path';
 
 import { defaultLaneBreakerThreshold } from '@on-par/factory-config';
 import { z } from 'zod';
@@ -18,8 +19,7 @@ import {
   type ConfigSchemaIssue,
 } from './index.js';
 
-import type { ModelRegistry } from '../models/index.js';
-import { resolveModelOverrides, retiredModelHint } from '../models/index.js';
+import { retiredModelHint } from '../models/index.js';
 import type { ModelRouter } from '../router/index.js';
 import { applyReviewFloorOverrides, type ReviewFloorRuleSet } from '../review/floor.js';
 import {
@@ -34,6 +34,7 @@ import {
   type EffectivePrClassifierPolicy,
   type ModelsConfig,
 } from './index.js';
+import { recordRepoConfigLabel, repoConfigLabel } from './repo-config-label.js';
 import { assertRegistryHarness, RepoHarnessesSchema, resolveRepoHarnesses } from './repo-harnesses.js';
 import { ModelEffortsSchema } from './effort.js';
 import {
@@ -43,7 +44,6 @@ import {
   providerOrderIssues,
 } from './provider-order.js';
 import { resolveEffectiveBuildRoute } from './build-route.js';
-import { assertAgenticBuildPin } from './repo-build-pin.js';
 import { assertTierMayRoute } from './repo-tier-guard.js';
 import { assertApprovedClaudeEndpoint, assertNoDirectDeepSeek } from './intermediaries.js';
 import { ChecksConfigSections } from './checks-section.js';
@@ -360,7 +360,8 @@ export function loadRepoConfig(repoRoot: string, stateRoot?: string): RepoFactor
       .join('; ');
     throw new Error(`Invalid ${path}: ${issues}`);
   }
-  if (result.data.version === 2) return result.data;
+  const label = `.factory/${basename(path)}`;
+  if (result.data.version === 2) return recordRepoConfigLabel(result.data, label);
 
   if (!warnedV1ConfigPaths.has(path)) {
     console.warn(
@@ -368,7 +369,7 @@ export function loadRepoConfig(repoRoot: string, stateRoot?: string): RepoFactor
     );
     warnedV1ConfigPaths.add(path);
   }
-  return adaptV1ToV2(result.data);
+  return recordRepoConfigLabel(adaptV1ToV2(result.data), label);
 }
 
 // ---------- Applying to ModelsConfig ----------
@@ -380,18 +381,19 @@ export function loadRepoConfig(repoRoot: string, stateRoot?: string): RepoFactor
  *  Anthropic-compatible intermediary or lacks an envKey, or a registry model reaching DeepSeek directly (ADR-0163). */
 export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | null): ModelsConfig {
   if (!repo) return models;
+  const label = repoConfigLabel(repo);
 
   const registry = repo.models?.registry ?? {};
-  const { valid: validHarnesses, patch: harnessPatch } = resolveRepoHarnesses(models, repo.harnesses);
+  const { valid: validHarnesses, patch: harnessPatch } = resolveRepoHarnesses(models, repo.harnesses, label);
   for (const [id, def] of Object.entries(registry)) {
     if (Object.hasOwn(models.models, id)) {
       throw new Error(
-        `.factory/config.json: models.registry.${id} redefines packaged model '${id}'; packaged model ids cannot be redefined. Register it under a new id (for example '${id}-custom') and pin or tier that id instead`,
+        `${label}: models.registry.${id} redefines packaged model '${id}'; packaged model ids cannot be redefined. Register it under a new id (for example '${id}-custom') and pin or tier that id instead`,
       );
     }
-    assertRegistryHarness(id, def.harness, validHarnesses);
-    assertApprovedClaudeEndpoint(id, def);
-    assertNoDirectDeepSeek(id, def);
+    assertRegistryHarness(id, def.harness, validHarnesses, label);
+    assertApprovedClaudeEndpoint(id, def, label);
+    assertNoDirectDeepSeek(id, def, label);
   }
   const mergedModels = { ...models.models, ...registry };
   const knownModels = Object.keys(mergedModels).join(', ');
@@ -402,10 +404,10 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
       for (const id of modelIds) {
         if (!mergedModels[id]) {
           throw new Error(
-            `.factory/config.json: tier '${tierName}' references unknown model '${id}' (known models: ${knownModels})${retiredModelHint(id)}`,
+            `${label}: tier '${tierName}' references unknown model '${id}' (known models: ${knownModels})${retiredModelHint(id)}`,
           );
         }
-        assertTierMayRoute(tierName, id, mergedModels[id]);
+        assertTierMayRoute(tierName, id, mergedModels[id], label);
       }
       tiers[tierName] = [...modelIds];
     }
@@ -427,7 +429,7 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
   if (repo.models?.pins?.checker) {
     if (!mergedModels[repo.models.pins.checker]) {
       throw new Error(
-        `.factory/config.json: models.pins.checker references unknown model '${repo.models.pins.checker}' (known models: ${knownModels})${retiredModelHint(repo.models.pins.checker)}`,
+        `${label}: models.pins.checker references unknown model '${repo.models.pins.checker}' (known models: ${knownModels})${retiredModelHint(repo.models.pins.checker)}`,
       );
     }
     tiers = { ...tiers, checker: [repo.models.pins.checker] };
@@ -435,14 +437,14 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
   if (repo.models?.pins?.triage) {
     if (!mergedModels[repo.models.pins.triage]) {
       throw new Error(
-        `.factory/config.json: models.pins.triage references unknown model '${repo.models.pins.triage}' (known models: ${knownModels})${retiredModelHint(repo.models.pins.triage)}`,
+        `${label}: models.pins.triage references unknown model '${repo.models.pins.triage}' (known models: ${knownModels})${retiredModelHint(repo.models.pins.triage)}`,
       );
     }
     tiers = { ...tiers, triage: [repo.models.pins.triage] };
   }
   if (repo.models?.pins?.classifier && !mergedModels[repo.models.pins.classifier]) {
     throw new Error(
-      `.factory/config.json: models.pins.classifier references unknown model '${repo.models.pins.classifier}' (known models: ${knownModels})${retiredModelHint(repo.models.pins.classifier)}`,
+      `${label}: models.pins.classifier references unknown model '${repo.models.pins.classifier}' (known models: ${knownModels})${retiredModelHint(repo.models.pins.classifier)}`,
     );
   }
 
@@ -450,7 +452,7 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
     const original = models.tiers[tierName];
     if (original && original.length > 0 && modelIds.length === 0) {
       throw new Error(
-        `.factory/config.json: tier '${tierName}' has no models left after repo overrides (check 'providers' and 'tiers' settings)`,
+        `${label}: tier '${tierName}' has no models left after repo overrides (check 'providers' and 'tiers' settings)`,
       );
     }
   }
@@ -459,7 +461,7 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
   const orderOverride = repo.models?.providerOrder;
   const orderIssues = providerOrderIssues({ ...orderOverride }, mergedModels);
   if (orderIssues.length > 0) {
-    throw new Error(`.factory/config.json: ${orderIssues.map((i) => i.message).join('; ')}`);
+    throw new Error(`${label}: ${orderIssues.map((i) => i.message).join('; ')}`);
   }
   const providerOrder = orderOverride
     ? { ...(models.providerOrder ?? deriveProviderOrder(models.tiers, models.models)), ...orderOverride }
@@ -477,83 +479,8 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
 
 // ---------- Effective plan/build pins ----------
 
-export interface EffectiveModelPins {
-  plan?: string;
-  planFallback?: string;
-  build?: string;
-  buildFallback?: string;
-  sources: { plan?: 'repo' | 'env'; planFallback?: 'repo'; build?: 'repo' | 'env'; buildFallback?: 'repo' };
-}
-
-/** Resolve plan/build model pins: repo file overrides env vars
- *  (FACTORY_PLAN_MODEL/FACTORY_BUILD_MODEL), which override no pin at all.
- *  `resolveModelOverrides` itself is untouched; this layers the repo file on top. */
-export function resolveEffectiveModelPins(
-  registry: ModelRegistry,
-  repo: RepoFactoryConfig | null,
-  env: NodeJS.ProcessEnv = process.env,
-): EffectiveModelPins {
-  const envOverrides = resolveModelOverrides(registry, env);
-  const sources: EffectiveModelPins['sources'] = {};
-  let plan = envOverrides.plan;
-  if (plan) sources.plan = 'env';
-  let build = envOverrides.build;
-  if (build) sources.build = 'env';
-
-  if (repo?.models?.pins?.plan) {
-    if (!registry.get(repo.models.pins.plan)) {
-      throw new Error(
-        `.factory/config.json: models.pins.plan references unknown model '${repo.models.pins.plan}' (known models: ${registry.list().join(', ')})${retiredModelHint(repo.models.pins.plan)}`,
-      );
-    }
-    plan = repo.models.pins.plan;
-    sources.plan = 'repo';
-  }
-  let planFallback: string | undefined;
-  if (repo?.models?.pins?.planFallback) {
-    if (!registry.get(repo.models.pins.planFallback)) {
-      throw new Error(
-        `.factory/config.json: models.pins.planFallback references unknown model '${repo.models.pins.planFallback}' (known models: ${registry.list().join(', ')})${retiredModelHint(repo.models.pins.planFallback)}`,
-      );
-    }
-    planFallback = repo.models.pins.planFallback;
-    sources.planFallback = 'repo';
-  }
-  if (repo?.models?.pins?.build) {
-    if (!registry.get(repo.models.pins.build)) {
-      throw new Error(
-        `.factory/config.json: models.pins.build references unknown model '${repo.models.pins.build}' (known models: ${registry.list().join(', ')})${retiredModelHint(repo.models.pins.build)}`,
-      );
-    }
-    build = repo.models.pins.build;
-    sources.build = 'repo';
-  }
-  if (build) assertAgenticBuildPin(registry, build, sources.build);
-  let buildFallback: string | undefined;
-  if (repo?.models?.pins?.buildFallback) {
-    if (!registry.get(repo.models.pins.buildFallback)) {
-      throw new Error(
-        `.factory/config.json: models.pins.buildFallback references unknown model '${repo.models.pins.buildFallback}' (known models: ${registry.list().join(', ')})${retiredModelHint(repo.models.pins.buildFallback)}`,
-      );
-    }
-    if (!registry.isCodexModel(repo.models.pins.buildFallback)) {
-      throw new Error(
-        `.factory/config.json: models.pins.buildFallback must be a Codex-capable model because it is used after Claude build failure`,
-      );
-    }
-    assertAgenticBuildPin(registry, repo.models.pins.buildFallback, 'repo', 'buildFallback');
-    buildFallback = repo.models.pins.buildFallback;
-    sources.buildFallback = 'repo';
-  }
-
-  return {
-    ...(plan ? { plan } : {}),
-    ...(planFallback ? { planFallback } : {}),
-    ...(build ? { build } : {}),
-    ...(buildFallback ? { buildFallback } : {}),
-    sources,
-  };
-}
+export { resolveEffectiveModelPins, type EffectiveModelPins } from './repo-pins.js';
+import { resolveEffectiveModelPins } from './repo-pins.js';
 
 // ---------- Effective build route ----------
 /** Whether Codex/OpenAI routes should be disabled. Repo `providers.openai`, when

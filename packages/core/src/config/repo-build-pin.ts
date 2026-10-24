@@ -1,6 +1,7 @@
 // src/config/repo-build-pin.ts — BUILD pin validation, split out of repo.ts (max-lines baseline).
 
 import type { ModelRegistry } from '../models/index.js';
+import { DEFAULT_REPO_CONFIG_LABEL } from './repo-config-label.js';
 
 /** BUILD edits files, so a build pin must run on an agentic harness (#2871). */
 export function assertAgenticBuildPin(
@@ -8,8 +9,9 @@ export function assertAgenticBuildPin(
   model: string,
   source: 'repo' | 'env' | undefined,
   field: 'build' | 'buildFallback' = 'build',
+  configLabel = DEFAULT_REPO_CONFIG_LABEL,
 ): void {
-  const label = source === 'env' ? 'FACTORY_BUILD_MODEL' : `.factory/config.json: models.pins.${field}`;
+  const label = source === 'env' ? 'FACTORY_BUILD_MODEL' : `${configLabel}: models.pins.${field}`;
   const harnessId = registry.getHarnessId(model) ?? '';
   if (registry.isAgenticHarnessId(harnessId)) return;
   const fix = registry.getHarnessDeclaration(harnessId)
