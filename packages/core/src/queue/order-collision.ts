@@ -48,3 +48,32 @@ export function orderCollisionAt(scan: LaneOrderScan, order: number): OrderColli
   const list = scan.holders.get(order);
   return list && list.length > 0 ? { order, heldBy: [...list] } : undefined;
 }
+
+/** One shared-position repair: `moved` left `from` for `to` because it shared the slot with `kept` (#3147). */
+export interface OrderCollisionRepair {
+  lane: string;
+  position: number;
+  moved: number;
+  kept: number;
+  from: number;
+  to: number;
+  attempt: number;
+}
+
+/** Keeps the lowest valid order label; every other prefixed label (malformed included) is removable. No valid label: nothing to keep or remove. */
+export function lowestOrderLabel(
+  labels: readonly string[],
+  orderPrefix: string,
+): { keep: string | undefined; remove: string[] } {
+  const prefixed = labels.filter((label) => label.startsWith(orderPrefix));
+  let keep: string | undefined;
+  let keepPos = Infinity;
+  for (const label of prefixed) {
+    const n = Number(label.slice(orderPrefix.length));
+    if (Number.isSafeInteger(n) && n > 0 && n < keepPos) {
+      keep = label;
+      keepPos = n;
+    }
+  }
+  return { keep, remove: keep === undefined ? [] : prefixed.filter((label) => label !== keep) };
+}

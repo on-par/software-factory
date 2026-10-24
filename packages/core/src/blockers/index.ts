@@ -14,7 +14,13 @@ export {
   renderBlockerBody,
 } from './file-blocker.js';
 export type { BlockerClaim, BlockerRefusalReason, FileBlockerDeps, FileBlockerResult } from './file-blocker.js';
-export { MAX_AUTO_UNPARKS, createOctokitBlockedParkStore, pollBlockedParks } from './poller.js';
+export {
+  MAX_AUTO_UNPARKS,
+  createOctokitBlockedParkStore,
+  isFleetLeader,
+  pollBlockedParks,
+  resolveFleetLeader,
+} from './poller.js';
 export type {
   BlockedParkOutcome,
   BlockedParkPollResult,

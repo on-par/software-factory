@@ -1,6 +1,7 @@
 import { createGithubQueue, createOctokitQueueClient } from '@on-par/factory-core/internal';
 import { describe, expect, it, vi } from 'vitest';
 
+import { statefulIssueLabels } from './stateful-issue-labels.js';
 import { buildQueueAddJson } from './queue-add-json.js';
 
 const names = (...n: string[]) => n.map((name) => ({ name }));
@@ -9,15 +10,14 @@ const names = (...n: string[]) => n.map((name) => ({ name }));
 function opsOctokit() {
   const issues = {
     createLabel: vi.fn(async () => ({})),
-    addLabels: vi.fn(async () => ({})),
     removeLabel: vi.fn(async () => ({})),
+    ...statefulIssueLabels(),
     listForRepo: vi.fn(async () => ({
       data: [
         { number: 23, labels: names('factory:queued', 'factory:lane:ops', 'factory:order:23') },
         { number: 24, labels: names('factory:lane:ops', 'factory:order:24') },
       ],
     })),
-    listLabelsOnIssue: vi.fn(async () => ({ data: [] })),
   };
   return { issues, octokit: { rest: { issues } } as never };
 }

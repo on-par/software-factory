@@ -11,7 +11,8 @@ import { createOctokitComments, type QueueCommentClient } from './issue-comments
 import { createClaimReleaser } from './claim-release.js';
 import { createClaimSettler, type ClaimSettleOptions, type ClaimSettler } from './claim-settle.js';
 import { knownRepoLabels } from './label-cache.js';
-import type { OrderCollision } from './order-collision.js';
+import type { OrderCollision, OrderCollisionRepair } from './order-collision.js';
+import { listIssuesPaged } from './list-issues-paged.js';
 import type { QueueEntry, QueueSnapshot, QueueSnapshotEntry } from './index.js';
 import {
   formatQueueOrderConflict,
@@ -283,22 +284,7 @@ export function createOctokitQueueClient(octokit: Octokit): QueueGitHubClient {
   return {
     ...createOctokitComments(octokit),
     async listOpenIssuesWithLabels({ owner, repo, labels }) {
-      const { data } = await octokit.rest.issues.listForRepo({
-        owner,
-        repo,
-        state: 'open',
-        labels: labels.join(','),
-        per_page: 100,
-      });
-      return data
-        .filter((issue: { pull_request?: unknown }) => !issue.pull_request)
-        .map((issue: { number: number; title?: string; labels: Array<string | { name?: string }> }) => ({
-          number: issue.number,
-          labels: (issue.labels ?? [])
-            .map((label) => (typeof label === 'string' ? label : (label.name ?? '')))
-            .filter((name) => name !== ''),
-          ...(typeof issue.title === 'string' ? { title: issue.title } : {}),
-        }));
+      return listIssuesPaged(octokit, { owner, repo, labels });
     },
     async getIssueLabels({ owner, repo, issue_number }) {
       const { data } = await octokit.rest.issues.listLabelsOnIssue({ owner, repo, issue_number, per_page: 100 });
@@ -345,6 +331,8 @@ export interface EnqueueResult {
   collision?: OrderCollision;
   /** Set only when preferOrder was asked for and other lane members held it; the issue went to the back (#3554). */
   preferredOrderHeldBy?: number[];
+  /** Set only when a shared position was repaired after the write (#3147). */
+  repairs?: OrderCollisionRepair[];
 }
 
 export interface EnqueueOptions {
@@ -433,6 +421,8 @@ export interface GithubQueueOptions extends ClaimSettleOptions {
   now?: () => number;
   /** Called once per duplicated `factory:order:<n>` position seen by list/claimNext; those issues are claimed in issue-number order (#3101). Also receives issues with a missing, multiple or malformed order label, which are skipped and not claimed (#3192). */
   onOrderConflict?: (conflict: QueueOrderConflict) => void;
+  /** Called once per enqueue repair that moved an issue off a position shared with another lane member (#3147). */
+  onOrderCollisionRepaired?: (repair: OrderCollisionRepair) => void;
 }
 
 /** Outcome of the reaper path: 'renewed' means the fresh read no longer showed an expired lease, so nothing was written. */
@@ -581,7 +571,12 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     }
   }
 
-  const { enqueue, enqueueAfter, enqueueFront } = createEnqueuers(client, owner, repo);
+  const { enqueue, enqueueAfter, enqueueFront } = createEnqueuers(
+    client,
+    owner,
+    repo,
+    options.onOrderCollisionRepaired,
+  );
 
   function clearLabels(lane: string | undefined): string[] {
     return lane === undefined ? [QUEUED_LABEL] : [QUEUED_LABEL, laneLabel(lane)];

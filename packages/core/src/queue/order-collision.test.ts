@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { orderCollisionAt, scanLaneOrders } from './order-collision.js';
+import { lowestOrderLabel, orderCollisionAt, scanLaneOrders } from './order-collision.js';
 
 const Q = 'factory:queued';
 const P = 'factory:order:';
@@ -52,5 +52,29 @@ describe('orderCollisionAt', () => {
 
   it('returns undefined for a free slot', () => {
     expect(orderCollisionAt(scan, 25)).toBeUndefined();
+  });
+});
+
+describe('lowestOrderLabel', () => {
+  it('keeps nothing when there is no order label', () => {
+    expect(lowestOrderLabel(['factory:queued'], P)).toEqual({ keep: undefined, remove: [] });
+  });
+  it('keeps a single valid label', () => {
+    expect(lowestOrderLabel(['factory:order:4', 'x'], P)).toEqual({ keep: 'factory:order:4', remove: [] });
+  });
+  it('keeps the lowest of many and removes the rest', () => {
+    expect(lowestOrderLabel(['factory:order:9', 'factory:order:2', 'factory:order:5'], P)).toEqual({
+      keep: 'factory:order:2',
+      remove: ['factory:order:9', 'factory:order:5'],
+    });
+  });
+  it('removes nothing when every order label is malformed', () => {
+    expect(lowestOrderLabel(['factory:order:x', 'factory:order:0'], P)).toEqual({ keep: undefined, remove: [] });
+  });
+  it('removes a malformed label next to a valid one', () => {
+    expect(lowestOrderLabel(['factory:order:x', 'factory:order:3'], P)).toEqual({
+      keep: 'factory:order:3',
+      remove: ['factory:order:x'],
+    });
   });
 });

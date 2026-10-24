@@ -2,6 +2,7 @@ import type { Octokit } from '@octokit/rest';
 import { createOctokitQueueClient } from '@on-par/factory-core/internal';
 import { describe, expect, it, vi } from 'vitest';
 
+import { statefulIssueLabels } from './stateful-issue-labels.js';
 import { renderUnparkLines } from './queue-output.js';
 import { keepOrderInput, runUnpark } from './unpark.js';
 
@@ -11,8 +12,8 @@ const names = (...n: string[]) => n.map((name) => ({ name }));
 function opsOctokit() {
   const issues = {
     createLabel: vi.fn(async () => ({})),
-    addLabels: vi.fn(async () => ({})),
     removeLabel: vi.fn(async () => ({})),
+    ...statefulIssueLabels({ 12: ['factory:parked', 'factory:lane:ops'] }),
     listForRepo: vi.fn(async () => ({
       data: [
         { number: 23, labels: names('factory:queued', 'factory:lane:ops', 'factory:order:23') },
@@ -20,7 +21,6 @@ function opsOctokit() {
         { number: 12, labels: names('factory:parked', 'factory:lane:ops') },
       ],
     })),
-    listLabelsOnIssue: vi.fn(async () => ({ data: names('factory:parked', 'factory:lane:ops') })),
   };
   return { issues, octokit: { rest: { issues } } as never };
 }

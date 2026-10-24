@@ -3,6 +3,8 @@
 // Deterministic: reads the trusted park comment plus GitHub `blocked_by`, never an LLM. Unknown or malformed
 // input fails closed (stays parked or goes `held`), never unparks.
 
+import { hostname } from 'node:os';
+
 import type { Octokit } from '@octokit/rest';
 
 import { PARKED_LABEL, type QueueGitHubClient } from '../queue/github-queue.js';
@@ -44,7 +46,22 @@ export interface PollBlockedParksOptions {
   repo: string;
   store: BlockedParkStore;
   /** Event sink; the CLI wires it to the events log. Defaults to a no-op. */
-  logEvent?: (kind: 'issue_unparked' | 'warn', issue: number, message: string) => void;
+  logEvent?: (kind: 'issue_unparked' | 'warn' | 'order_collision_repaired', issue: number, message: string) => void;
+  /** Host allowed to poll (#3147). Defaults to resolveFleetLeader(); unset means every host polls. */
+  fleetLeader?: string;
+  /** This host's name for the leader check. Defaults to os.hostname(). */
+  host?: string;
+}
+
+/** The configured fleet leader (FACTORY_FLEET_LEADER), or undefined when unset or blank. */
+export function resolveFleetLeader(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const leader = env.FACTORY_FLEET_LEADER?.trim();
+  return leader === undefined || leader === '' ? undefined : leader;
+}
+
+/** True when no leader is configured, or `host` is the leader (case-insensitive, trimmed). */
+export function isFleetLeader(leader: string | undefined, host: string = hostname()): boolean {
+  return leader === undefined || leader.trim().toLowerCase() === host.trim().toLowerCase();
 }
 
 function message(err: unknown): string {
@@ -89,7 +106,18 @@ async function pollOne(opts: PollBlockedParksOptions, n: number): Promise<Blocke
 
   let result;
   try {
-    result = await runUnpark({ client, owner, repo, issue: n });
+    result = await runUnpark({
+      client,
+      owner,
+      repo,
+      issue: n,
+      onOrderCollisionRepaired: (r) =>
+        logEvent(
+          'order_collision_repaired',
+          r.moved,
+          `#${r.moved} moved from order ${r.from} to ${r.to} in lane ${r.lane}: shared with #${r.kept}`,
+        ),
+    });
   } catch (err) {
     if (err instanceof UnparkError && err.code === 'not-parked') {
       return { issue: n, outcome: 'raced', detail: err.message };
@@ -113,6 +141,7 @@ async function pollOne(opts: PollBlockedParksOptions, n: number): Promise<Blocke
 /** One failing parent never stops the poll of the others. */
 export async function pollBlockedParks(opts: PollBlockedParksOptions): Promise<BlockedParkPollResult[]> {
   const { client, owner, repo } = opts;
+  if (!isFleetLeader(opts.fleetLeader ?? resolveFleetLeader(), opts.host)) return [];
   const parked = await client.listOpenIssuesWithLabels({ owner, repo, labels: [PARKED_LABEL] });
   const results: BlockedParkPollResult[] = [];
   for (const { number } of parked) {

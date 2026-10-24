@@ -254,7 +254,23 @@ describe('cli', () => {
       expect(() => {
         logEvent('issue_unparked', 7, '#7 auto-unparked');
         logEvent('warn', 7, 'park comment not updated');
+        logEvent('order_collision_repaired', 7, '#7 moved');
       }).not.toThrow();
+    });
+
+    it('--reconcile skips blocked parks when this host is not the fleet leader', async () => {
+      h.claudeAvailable = true;
+      vi.stubEnv('FACTORY_FLEET_LEADER', 'not-this-host');
+      try {
+        const res = await runMain('doctor', '--reconcile');
+        expect(res.exited).toBe(false);
+        expect(logged()).toContain(
+          'reconcile: skipping blocked parks: this host is not the fleet leader (not-this-host)',
+        );
+        expect(ops.pollBlockedParks).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllEnvs();
+      }
     });
 
     it('--reconcile survives a rejected pollBlockedParks', async () => {

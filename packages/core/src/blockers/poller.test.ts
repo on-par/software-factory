@@ -9,8 +9,10 @@ import {
   type BlockedParkStore,
   type BlockerEvidence,
   createOctokitBlockedParkStore,
+  isFleetLeader,
   MAX_AUTO_UNPARKS,
   pollBlockedParks,
+  resolveFleetLeader,
 } from './poller.js';
 import { fakeIssueComments } from '../queue/fake-issue-comments.js';
 
@@ -383,5 +385,29 @@ describe('createOctokitBlockedParkStore', () => {
     });
     const got = await createOctokitBlockedParkStore(octokit, 'o/r').readParkComment(5);
     expect(got?.id).toBe(2);
+  });
+});
+
+describe('fleet leader gate (#3147)', () => {
+  it('resolveFleetLeader trims and treats blank as unset', () => {
+    expect(resolveFleetLeader({})).toBeUndefined();
+    expect(resolveFleetLeader({ FACTORY_FLEET_LEADER: '   ' })).toBeUndefined();
+    expect(resolveFleetLeader({ FACTORY_FLEET_LEADER: ' Box-1 ' })).toBe('Box-1');
+  });
+
+  it('isFleetLeader is true when unset or matching case-insensitively, false for another host', () => {
+    expect(isFleetLeader(undefined, 'me')).toBe(true);
+    expect(isFleetLeader(' ME ', 'me')).toBe(true);
+    expect(isFleetLeader('other', 'me')).toBe(false);
+    expect(typeof isFleetLeader(undefined)).toBe('boolean');
+  });
+
+  it('pollBlockedParks returns [] without listing parked issues on a non-leader host', async () => {
+    const { client } = fakeClient(new Map());
+    const list = vi.spyOn(client, 'listOpenIssuesWithLabels');
+    const store = {} as BlockedParkStore;
+    const res = await pollBlockedParks({ client, owner: 'o', repo: 'r', store, fleetLeader: 'other', host: 'me' });
+    expect(res).toEqual([]);
+    expect(list).not.toHaveBeenCalled();
   });
 });

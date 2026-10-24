@@ -7,19 +7,7 @@
 import type { EventTraits, LaneStatus } from './event-traits.js';
 
 export type { EventTraits, LaneStatus };
-export type {
-  AllProvidersDownPayload,
-  FlakyTestsPayload,
-  LanePausedPayload,
-  ParkPayload,
-  ProviderAuthRejectedPayload,
-  ProviderBreakerClosePayload,
-  ProviderCappedPayload,
-  ProviderFailoverPayload,
-  ProviderRefusedPayload,
-  ProviderRestoredPayload,
-  StewardTriggeredPayload,
-} from './payloads.js';
+export type * from './payloads.js';
 
 export type EventKind =
   | 'pr-adopt-ambiguous'
@@ -138,6 +126,7 @@ export type EventKind =
   | 'lock-stolen'
   | 'merge-gated'
   | 'merge-gated-override'
+  | 'order_collision_repaired'
   | 'orphan_draft_closed'
   | 'orphan_draft_sweep_capped'
   | 'pr-classified'
@@ -384,6 +373,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'pr-adopt-lookup-failed': { severity: 'warn', isPark: false, isTerminal: false },
   'pr-adopted': { severity: 'info', isPark: false, isTerminal: false },
   'pr-classified': { severity: 'info', isPark: false, isTerminal: false },
+  order_collision_repaired: { severity: 'warn', isPark: false, isTerminal: false },
   orphan_draft_closed: { severity: 'info', isPark: false, isTerminal: false },
   orphan_draft_sweep_capped: { severity: 'warn', isPark: false, isTerminal: false },
   pr_refresh: { severity: 'info', isPark: false, isTerminal: false },

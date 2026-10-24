@@ -1096,6 +1096,7 @@ describe('createOctokitQueueClient', () => {
       state: 'open',
       labels: 'factory:queued',
       per_page: 100,
+      page: 1,
     });
     expect(result).toEqual([
       { number: 1, labels: ['factory:queued', 'factory:lane:build'], title: 'Build the thing' },

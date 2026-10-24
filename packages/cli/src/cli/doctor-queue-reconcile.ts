@@ -2,7 +2,12 @@
 
 import type { Octokit } from '@octokit/rest';
 import { createLogger } from '@on-par/factory-core';
-import { createOctokitBlockedParkStore, createOctokitQueueClient } from '@on-par/factory-core/internal';
+import {
+  createOctokitBlockedParkStore,
+  createOctokitQueueClient,
+  isFleetLeader,
+  resolveFleetLeader,
+} from '@on-par/factory-core/internal';
 
 import { formatClaimReconcileReport } from './doctor-health.js';
 import type { CliDeps } from './index.js';
@@ -34,7 +39,10 @@ export async function reconcileQueue(
 
   // Blocked-park poll (#2318): parents parked `blocked` resume once their blockers close.
   try {
-    if (ghRepo && octokit) {
+    const leader = resolveFleetLeader();
+    if (!isFleetLeader(leader)) {
+      console.log(`reconcile: skipping blocked parks: this host is not the fleet leader (${leader})`);
+    } else if (ghRepo && octokit) {
       const results = await ops.pollBlockedParks({
         client: createOctokitQueueClient(octokit),
         owner,
@@ -43,6 +51,7 @@ export async function reconcileQueue(
         logEvent: (kind, issue, msg) => {
           const log = createLogger(eventsFile, { issue }, { out: { write: () => true } });
           if (kind === 'warn') log.warn('warn', msg);
+          else if (kind === 'order_collision_repaired') log.warn('order_collision_repaired', msg);
           else log.info('issue_unparked', msg);
         },
       });

@@ -9,7 +9,7 @@ import {
   type QueueGitHubClient,
 } from './github-queue.js';
 import { removeWorktreeKeep } from '../worktree/worktree-keeps.js';
-import type { OrderCollision } from './order-collision.js';
+import type { OrderCollision, OrderCollisionRepair } from './order-collision.js';
 
 export type { OrderCollision };
 export * from './prerequisite-order.js';
@@ -57,6 +57,8 @@ export interface UnparkInput {
   keepOrder?: boolean;
   /** Reads the order recorded in the issue's park state; only called when keepOrder is set. */
   readParkedOrder?: () => Promise<number | undefined>;
+  /** Called when enqueue moved an issue off a position shared with another lane member (#3147). */
+  onOrderCollisionRepaired?: (repair: OrderCollisionRepair) => void;
 }
 
 function message(err: unknown): string {
@@ -107,15 +109,25 @@ export async function runUnpark(input: UnparkInput): Promise<UnparkJson> {
     }
     for (const name of labelsBefore) {
       if (name.startsWith(QUEUE_ORDER_LABEL_PREFIX) || (name.startsWith(LANE_LABEL_PREFIX) && name !== keepLane)) {
-        await client.removeLabel({ ...ref, name });
+        try {
+          await client.removeLabel({ ...ref, name });
+        } catch (err) {
+          if ((err as { status?: number } | null)?.status !== 404) throw err; // a concurrent unpark removed it
+        }
       }
     }
 
-    const [r] = await createGithubQueue({ client, owner, repo }).enqueue(lane, [issue], {
+    const [r] = await createGithubQueue({
+      client,
+      owner,
+      repo,
+      ...(input.onOrderCollisionRepaired ? { onOrderCollisionRepaired: input.onOrderCollisionRepaired } : {}),
+    }).enqueue(lane, [issue], {
       ...(isMember ? { requireMember: issue } : {}),
       ...(preferOrder === undefined ? {} : { preferOrder }),
     });
-    if (r === undefined || r.outcome !== 'queued' || r.position === undefined) {
+    // 'already-queued' with a position: a concurrent unpark won the race and queued it.
+    if (r === undefined || (r.outcome !== 'queued' && r.outcome !== 'already-queued') || r.position === undefined) {
       throw new UnparkError('unpark-failed', r?.detail ?? `enqueue returned ${r?.outcome}`);
     }
 

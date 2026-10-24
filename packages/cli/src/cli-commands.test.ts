@@ -1,4 +1,5 @@
 import type * as ChildProcess from 'node:child_process';
+import { statefulIssueLabels } from './cli/stateful-issue-labels.js';
 import { createHash } from 'node:crypto';
 import {
   appendFileSync,
@@ -2958,9 +2959,8 @@ bash scripts/verify.sh
         return '';
       };
       h.octokit.rest.issues.createLabel = vi.fn(async () => ({}));
-      h.octokit.rest.issues.addLabels = vi.fn(async () => ({}));
+      Object.assign(h.octokit.rest.issues, statefulIssueLabels());
       h.octokit.rest.issues.listForRepo = vi.fn(async () => ({ data: [] }));
-      h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async () => ({ data: [] }));
     });
 
     it.each(['', '   '])('exits 2 for an empty or whitespace lane before any GitHub call', async (lane) => {
@@ -2999,10 +2999,7 @@ bash scripts/verify.sh
     });
 
     it('exits nonzero and reports a per-issue failure without dropping the successful issue', async () => {
-      h.octokit.rest.issues.addLabels = vi.fn(async ({ issue_number }: any) => {
-        if (issue_number === 10) throw new Error('label API down');
-        return {};
-      });
+      Object.assign(h.octokit.rest.issues, statefulIssueLabels({}, 10));
 
       const res = await runMain('queue', 'add', 'daw', '10', '11');
 

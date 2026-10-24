@@ -1,6 +1,6 @@
 // packages/core/src/queue/github-queue-enqueue.ts — GitHub queue enqueue paths: tail append and right-behind-the-parent placement (#3539).
 
-import { orderCollisionAt, scanLaneOrders } from './order-collision.js';
+import { lowestOrderLabel, orderCollisionAt, scanLaneOrders, type OrderCollisionRepair } from './order-collision.js';
 import { QUEUE_ORDER_LABEL_PREFIX } from './queue-order.js';
 import {
   laneLabel,
@@ -48,7 +48,67 @@ function orderOf(label: string): number | undefined {
 
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-export function createEnqueuers(client: QueueGitHubClient, owner: string, repo: string) {
+const MAX_ORDER_REPAIR_ATTEMPTS = 3;
+
+const isNotFound = (err: unknown): boolean => (err as { status?: number } | null)?.status === 404;
+
+export function createEnqueuers(
+  client: QueueGitHubClient,
+  owner: string,
+  repo: string,
+  onRepaired?: (repair: OrderCollisionRepair) => void,
+) {
+  async function removeOrderLabel(issue: number, name: string): Promise<void> {
+    try {
+      await client.removeLabel({ owner, repo, issue_number: issue, name });
+    } catch (err) {
+      if (!isNotFound(err)) throw err; // another host already removed it
+    }
+  }
+
+  /** Re-reads `issue` and removes every order label but the lowest valid one (#3147). Returns the kept position. */
+  async function dedupe(issue: number): Promise<number | undefined> {
+    const labels = await client.getIssueLabels({ owner, repo, issue_number: issue });
+    const { keep, remove } = lowestOrderLabel(labels, QUEUE_ORDER_LABEL_PREFIX);
+    for (const name of remove) await removeOrderLabel(issue, name);
+    return keep === undefined ? undefined : orderOf(keep);
+  }
+
+  /** Moves the higher-numbered issue of a shared position to max+1; bounded re-scan so concurrent hosts converge (#3147). */
+  async function repair(
+    lane: string,
+    issue: number,
+    start: number,
+  ): Promise<{ position: number; repairs: OrderCollisionRepair[] }> {
+    let position = start;
+    const repairs: OrderCollisionRepair[] = [];
+    for (let attempt = 1; attempt <= MAX_ORDER_REPAIR_ATTEMPTS; attempt += 1) {
+      const members = await client.listOpenIssuesWithLabels({ owner, repo, labels: [laneLabel(lane)] });
+      const sharers = members
+        .filter((m) => {
+          if (m.number === issue) return false;
+          const orders = m.labels.filter((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX));
+          return orders.length === 1 && orderOf(orders[0] ?? '') === position;
+        })
+        .map((m) => m.number);
+      if (sharers.length === 0) break;
+      const contenders = [issue, ...sharers];
+      const mover = Math.max(...contenders);
+      const kept = Math.min(...contenders);
+      const to = scanLaneOrders(members, QUEUED_LABEL, QUEUE_ORDER_LABEL_PREFIX).maxPos + 1;
+      const spec = queueOrderLabelSpec(to);
+      await client.ensureLabel({ owner, repo, ...spec });
+      await client.addLabels({ owner, repo, issue_number: mover, labels: [spec.name] });
+      await removeOrderLabel(mover, queueOrderLabelSpec(position).name);
+      await dedupe(mover);
+      const entry: OrderCollisionRepair = { lane, position, moved: mover, kept, from: position, to, attempt };
+      repairs.push(entry);
+      onRepaired?.(entry);
+      if (mover === issue) position = to;
+    }
+    return { position, repairs };
+  }
+
   async function enqueue(
     lane: string,
     issues: readonly number[],
@@ -87,8 +147,12 @@ export function createEnqueuers(client: QueueGitHubClient, owner: string, repo: 
       try {
         const current = await client.getIssueLabels({ owner, repo, issue_number: issue });
         if (current.some((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX))) {
-          const orderLabel = current.find((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX)) ?? '';
-          const existing = Number(orderLabel.slice(QUEUE_ORDER_LABEL_PREFIX.length));
+          const orderLabels = current.filter((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX));
+          const orderLabel = orderLabels[0] ?? '';
+          const existing =
+            orderLabels.length > 1
+              ? ((await dedupe(issue)) ?? NaN)
+              : Number(orderLabel.slice(QUEUE_ORDER_LABEL_PREFIX.length));
           results.push({
             issue,
             outcome: 'already-queued',
@@ -105,15 +169,22 @@ export function createEnqueuers(client: QueueGitHubClient, owner: string, repo: 
           if (await client.ensureLabel({ owner, repo, ...spec })) created.push(spec.name);
         }
         await client.addLabels({ owner, repo, issue_number: issue, labels: specs.map((s) => s.name) });
+        const kept = await dedupe(issue);
+        if (kept === undefined) {
+          results.push({ issue, outcome: 'failed', detail: 'order label vanished or malformed after write' });
+          continue;
+        }
+        const fixed = await repair(lane, issue, kept);
         const collision = orderCollisionAt(scan, naive);
         results.push({
           issue,
           outcome: 'queued',
-          position,
+          position: fixed.position,
           labelsAdded: specs.map((s) => s.name).filter((name) => !current.includes(name)),
           labelsCreated: created,
           ...(collision && !useRequested ? { collision } : {}),
           ...(wantsOrder && holders.length > 0 ? { preferredOrderHeldBy: holders } : {}),
+          ...(fixed.repairs.length > 0 ? { repairs: fixed.repairs } : {}),
         });
         if (!useRequested) {
           next += 1;

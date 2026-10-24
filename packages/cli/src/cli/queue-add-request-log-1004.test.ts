@@ -29,6 +29,7 @@ const FORBIDDEN = {
 
 /** GitHub double: repo has no queued issues, issue #1 has no labels, createLabel answers `createLabel`. */
 function githubFetch(createLabel: { status: number; body: unknown }): typeof fetch {
+  let written: string[] = []; // labels POSTed to #1, read back by enqueue's post-write verify (#3147)
   return (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
     const method = (init?.method ?? 'GET').toUpperCase();
@@ -38,8 +39,16 @@ function githubFetch(createLabel: { status: number; body: unknown }): typeof fet
         headers: { 'content-type': 'application/json', 'x-github-request-id': 'E5FD:1004' },
       });
     if (method === 'POST' && url.pathname === '/repos/o/r/labels') return reply(createLabel.status, createLabel.body);
-    if (method === 'POST' && url.pathname === '/repos/o/r/issues/1/labels') return reply(200, []);
-    if (method === 'GET' && url.pathname === '/repos/o/r/issues/1/labels') return reply(200, []);
+    if (method === 'POST' && url.pathname === '/repos/o/r/issues/1/labels') {
+      written = JSON.parse(String(init?.body)).labels;
+      return reply(200, []);
+    }
+    if (method === 'GET' && url.pathname === '/repos/o/r/issues/1/labels') {
+      return reply(
+        200,
+        written.map((name) => ({ name })),
+      );
+    }
     if (method === 'GET' && url.pathname === '/repos/o/r/issues') return reply(200, []);
     return reply(404, { message: `unmocked ${method} ${url.pathname}` });
   }) as typeof fetch;

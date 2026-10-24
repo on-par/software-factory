@@ -54,6 +54,33 @@ describe('runUnpark', () => {
     expect(res.labelsAfter.filter((l) => l.startsWith('factory:order:'))).toEqual(['factory:order:3']);
   });
 
+  it('succeeds when a concurrent unpark already queued the issue (already-queued with a position)', async () => {
+    const labels = new Map<number, string[]>([
+      [42, ['factory:parked', 'factory:queued', 'factory:lane:ops', 'factory:order:5']],
+    ]);
+    const { client } = fakeClient(labels);
+    const orig = client.removeLabel;
+    client.removeLabel = async (i) => {
+      await orig(i);
+      if (i.name === 'factory:order:5') labels.set(42, [...(labels.get(42) ?? []), 'factory:order:6']);
+    };
+    const res = await runUnpark({ ...base, client, issue: 42 });
+    expect(res.order).toBeGreaterThan(0);
+    expect(labels.get(42)).not.toContain('factory:parked');
+  });
+
+  it('ignores a 404 when removing an order label a concurrent unpark already removed', async () => {
+    const labels = new Map<number, string[]>([[42, ['factory:parked', 'factory:lane:ops', 'factory:order:5']]]);
+    const { client } = fakeClient(labels);
+    const orig = client.removeLabel;
+    client.removeLabel = async (i) => {
+      if (i.name === 'factory:order:5') throw Object.assign(new Error('Not Found'), { status: 404 });
+      await orig(i);
+    };
+    const res = await runUnpark({ ...base, client, issue: 42 });
+    expect(res.order).toBeGreaterThan(0);
+  });
+
   it('replaces a stale order label with exactly one fresh one', async () => {
     const labels = new Map([
       ...peers(),
