@@ -2,7 +2,7 @@ import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { getFactoryPaths, ProviderBreaker, type ModelRouter } from '@on-par/factory-core';
+import { getFactoryPaths, ProviderBreaker } from '@on-par/factory-core';
 import { stageBlocked } from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
 
@@ -10,19 +10,14 @@ import { runLane } from './run-lane.js';
 
 const HOUR = 60 * 60_000;
 const PROVIDERS: Record<string, string> = { 'claude-plan': 'anthropic', 'gpt-plan': 'openai' };
-const registry = { registryRef: { get: (id: string) => ({ provider: PROVIDERS[id] }) } } as unknown as Pick<
-  ModelRouter,
-  'registryRef'
->;
+const registry = { registryRef: { get: (id: string) => ({ provider: PROVIDERS[id] }) } } as never;
 
 const tempDirs = createTempDirs();
 const dir = tempDirs.makeSync('run-lane-provider-cap-');
 afterAll(() => tempDirs.cleanup());
 
 describe('runLane provider-cap release (#3226)', () => {
-  const paths = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' } as unknown as ReturnType<
-    typeof getFactoryPaths
-  >;
+  const paths = getFactoryPaths('/repo', '/repo/.factory');
   const buildClaim = (issue: number) => ({ issue, decision: { kind: 'build' as const } });
 
   it('a capped provider fails over, and an all-blocked stage releases to queued', async () => {
