@@ -255,7 +255,7 @@ import { STOP_SET_MESSAGE } from './stop-sentinel.js';
 import {
   AwaitingReviewError,
   CiFailedError,
-  CiUnverifiedError,
+  isCiNotGreen,
   LandConflictError,
   LandFailureError,
   MergeGatedError,
@@ -2861,7 +2861,7 @@ export async function cmdLand(
         );
         return;
       }
-      if (err instanceof CiUnverifiedError) {
+      if (isCiNotGreen(err)) {
         console.log(
           styleText(
             'yellow',

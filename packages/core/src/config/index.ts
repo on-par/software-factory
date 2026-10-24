@@ -163,6 +163,7 @@ export const FactoryConfigSchema = z.object({
     .object({
       skip: z.boolean().default(false),
       watchMinutes: z.number().optional().catch(undefined),
+      awaitingCiCapHours: z.number().optional().catch(undefined),
       comment: z.string().default('Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging'),
     })
     .default({ skip: false, comment: 'Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging' }),

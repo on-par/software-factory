@@ -89,6 +89,39 @@ export function classifyRequiredChecks(
   return result;
 }
 
+// Mirrors ci-watch's isPassingConclusion allow-list (ADR-0014); ci-watch imports this module, so it cannot be imported here.
+const PASSING_HEAD_CONCLUSIONS = new Set(['success', 'neutral', 'skipped']);
+
+/**
+ * Verdict on a head commit (#3208). With required contexts it is classifyRequiredChecks. With none, every check run on the
+ * head counts as required: zero runs or any incomplete run is pending, any non-passing completed run is failed, else green.
+ */
+export function classifyHeadChecks(
+  required: readonly string[],
+  runs: readonly CheckRunLike[],
+): RequiredChecksState & { basis: 'required' | 'all-on-head'; total: number } {
+  if (new Set(required).size > 0)
+    return { ...classifyRequiredChecks(required, runs), basis: 'required', total: runs.length };
+  const result: RequiredChecksState = { state: 'pending', missing: [], pending: [], failed: [] };
+  for (const run of runs) {
+    if (run.status !== 'completed') result.pending.push(run.name);
+    else if (!PASSING_HEAD_CONCLUSIONS.has(run.conclusion ?? '')) result.failed.push(run.name);
+  }
+  if (result.failed.length > 0) result.state = 'failed';
+  else if (runs.length > 0 && result.pending.length === 0) result.state = 'green';
+  return { ...result, basis: 'all-on-head', total: runs.length };
+}
+
+const warnedNoProtection = new Set<string>();
+
+/** Logs the no-branch-protection fallback warning the first time per repo in this process; returns whether it warned. */
+export function warnNoBranchProtectionOnce(repo: string, branch: string, warn: (msg: string) => void): boolean {
+  if (warnedNoProtection.has(repo)) return false;
+  warnedNoProtection.add(repo);
+  warn(`no branch protection on ${repo}@${branch}; using all checks on head`);
+  return true;
+}
+
 /** Required check contexts from branch protection plus rulesets (deduped). Throws on unexpected API errors. */
 export async function fetchRequiredContexts(
   octokit: Octokit,

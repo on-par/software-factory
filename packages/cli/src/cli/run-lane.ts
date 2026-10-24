@@ -3,10 +3,16 @@
 import { existsSync, statSync } from 'node:fs';
 
 import { parkReasonFor } from '@on-par/factory-core';
-import type { getFactoryPaths, ParkPayload, RunOutcome } from '@on-par/factory-core';
-import { formatLoadHold, logEvent, PARKED_LABEL, parkPayload } from '@on-par/factory-core/internal';
-import type { LoadGuardDecision, QueueClaim, QueueReleaseOutcome } from '@on-par/factory-core/internal';
+import type { EventKind, getFactoryPaths, ParkPayload, RunOutcome } from '@on-par/factory-core';
+import { formatLoadHold, logEvent, nextRecheckAt, PARKED_LABEL, parkPayload } from '@on-par/factory-core/internal';
+import type {
+  AwaitingCiRecord,
+  LoadGuardDecision,
+  QueueClaim,
+  QueueReleaseOutcome,
+} from '@on-par/factory-core/internal';
 
+import type { AwaitingCiParkReason } from './awaiting-ci-recheck.js';
 import { formatBaseHoldKept, type BaseHoldDecision } from './base-hold.js';
 import { laneParkCommenter } from './lane-park-comment.js';
 import {
@@ -18,7 +24,7 @@ import {
   waitForProvidersRestored,
 } from './lane-pause.js';
 import { waitForMerge } from './land.js';
-import { AwaitingReviewError } from './land-pr.js';
+import { AwaitingCiError, AwaitingReviewError } from './land-pr.js';
 import { restoredLoggingBreaker } from './provider-restored-log.js';
 import { releaseKeepOnRequeue } from './worktree-keep.js';
 import { shipIssue } from './ship.js';
@@ -46,6 +52,8 @@ export async function runLane(
     emitEvent = logEvent,
     claimNext = async () => null,
     pollReviewRework,
+    recordAwaitingCi,
+    recheckAwaitingCi,
     releaseIssue = async () => {},
     queueChildren,
     heartbeat,
@@ -136,6 +144,23 @@ export async function runLane(
     await sweepFinished(issue).catch(() => {});
     return true;
   };
+  const emitAwaitingCi = (kind: EventKind, issue: number, message: string): void =>
+    emitEvent(paths.events, kind, issue, message, { lane });
+  // #3208: parks an awaiting-ci PR through the lane's park path: reason event, issue comment, worktree reap, label.
+  const parkAwaitingCi = async (
+    rec: AwaitingCiRecord,
+    reason: AwaitingCiParkReason,
+    message: string,
+  ): Promise<void> => {
+    emitAwaitingCi(reason, rec.issue, message);
+    await postParkComment(rec.issue, reason, message, rec.branch);
+    await reapWorktree(rec.issue).catch(() => {});
+    const msg = `issue #${rec.issue} parked (${reason}); lane '${lane}' continuing`;
+    if (!(await parkAndSettle(rec.issue, msg, parkPayload(reason, rec.issue, lane, [])))) {
+      throw new Error(`could not park issue #${rec.issue}`);
+    }
+    parked++;
+  };
   const decide = (guard: () => LoadGuardDecision): LoadGuardDecision => {
     try {
       return guard();
@@ -175,6 +200,13 @@ export async function runLane(
       if (pollReviewRework) {
         await pollReviewRework().catch((err) =>
           emitEvent(paths.events, 'warn', lane, `review-rework poll failed: ${shipRuntime().errorDetail(err)}`, {
+            lane,
+          }),
+        );
+      }
+      if (recheckAwaitingCi) {
+        await recheckAwaitingCi({ park: parkAwaitingCi, emit: emitAwaitingCi }).catch((err) =>
+          emitEvent(paths.events, 'warn', lane, `awaiting-ci recheck failed: ${shipRuntime().errorDetail(err)}`, {
             lane,
           }),
         );
@@ -347,6 +379,23 @@ export async function runLane(
         awaitingReview++;
         streak = null;
         await settle(issue, layer && layer.index < layer.count ? 'queued' : 'done');
+        continue;
+      }
+      if (err instanceof AwaitingCiError) {
+        // #3208: no CI run ever registered. Keep the PR open and record it for the backoff re-check; never a park.
+        const firstSeenAt = now().getTime();
+        const rec = { issue, prNumber: err.prNumber, branch: landBranch ?? '', headSha: err.headSha, firstSeenAt };
+        await recordAwaitingCi?.({ ...rec, attempts: 0, nextRecheckAt: nextRecheckAt(firstSeenAt, 0) }).catch((e) =>
+          emitAwaitingCi(
+            'warn',
+            issue,
+            `could not record awaiting-ci for PR #${err.prNumber}: ${shipRuntime().errorDetail(e)}`,
+          ),
+        );
+        emitAwaitingCi('awaiting-ci', issue, `PR #${err.prNumber} awaiting CI on ${err.headSha}; re-checking soon`);
+        awaitingReview++;
+        streak = null;
+        await settle(issue, 'done');
         continue;
       }
       if (err instanceof IssueSkippedError) {

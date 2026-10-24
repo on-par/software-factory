@@ -66,6 +66,7 @@ import type {
   usageWatchSourceLabel,
   withRepoRunLock,
 } from './index.js';
+import { awaitingCiLaneDeps } from './awaiting-ci-wiring.js';
 import { runEndOfRunKpiSnapshot } from './kpi-sweep.js';
 import { waitForMerge } from './land.js';
 import { DRAIN_MESSAGE, createNotifier, resolveNotifyCommand, withParkNotify } from './notify.js';
@@ -405,6 +406,9 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
             laneBreakerThreshold,
             octokit: opts.localQueue === true ? undefined : () => rt.getOctokit(),
             pollReviewRework: opts.localQueue === true ? undefined : pollReviewReworkOnce,
+            ...(opts.localQueue === true
+              ? {}
+              : awaitingCiLaneDeps(() => rt.getOctokit(), ghRepo, paths, factoryConfig)),
             runId,
             readParkSha: (branch) =>
               rt.shellOps

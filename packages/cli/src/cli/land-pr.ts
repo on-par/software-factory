@@ -5,7 +5,13 @@ import { existsSync } from 'node:fs';
 import type { Octokit } from '@octokit/rest';
 import type { EventKind, FactoryEvent, ParkReason } from '@on-par/factory-core';
 import type { CiOutcome, InfraRerunOutcome, WatchChecksOptions } from '@on-par/factory-core/internal';
-import { shellEscape, syncLandBranch, watchChecksWithInfraRerun } from '@on-par/factory-core/internal';
+import {
+  hasAnyCiSignal,
+  shellEscape,
+  syncLandBranch,
+  warnNoBranchProtectionOnce,
+  watchChecksWithInfraRerun,
+} from '@on-par/factory-core/internal';
 import { landRuntime } from './land-runtime.js';
 
 export type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
@@ -65,6 +71,18 @@ export class AwaitingReviewError extends Error {
   }
 }
 
+/** Thrown when the CI deadline passed with no check run and no commit status on the PR head (#3208). Not a
+ *  CiFailedError: the PR stays open, nothing parks, and the runner re-checks it with backoff. */
+export class AwaitingCiError extends Error {
+  constructor(
+    message: string,
+    readonly prNumber: number,
+    readonly headSha: string,
+  ) {
+    super(message);
+  }
+}
+
 export class LandFailureError extends Error {
   constructor(
     message: string,
@@ -99,6 +117,16 @@ export class CiUnverifiedError extends CiFailedError {}
  *  'ci-infra', which the ADR-0155 steward skips. */
 export class CiInfraError extends CiFailedError {
   override readonly parkReason: ParkReason = 'ci-infra';
+}
+
+/** True for the errors that leave the PR open and unmerged without a land failure: awaiting review, CI red or unverified, or CI not started. */
+export function isLandLeftOpen(err: unknown): boolean {
+  return err instanceof AwaitingReviewError || err instanceof CiFailedError || err instanceof AwaitingCiError;
+}
+
+/** True when CI never reached a green verdict: unverified, or never started. */
+export function isCiNotGreen(err: unknown): boolean {
+  return err instanceof CiUnverifiedError || err instanceof AwaitingCiError;
 }
 
 const MAX_MERGE_ATTEMPTS = 5;
@@ -251,6 +279,8 @@ export async function landOpenPullRequest(opts: {
         watch,
         rerun,
         ...(baseRef ? { requiredChecks: { branch: baseRef } } : {}),
+        onNoRequiredChecks: ({ branch: b }) =>
+          warnNoBranchProtectionOnce(`${owner}/${repoName}`, b, (m) => log('warn', m)),
         onProgress: ({ total, completed, pending, remainingMs, waitingFor }) =>
           log(
             'land',
@@ -284,6 +314,12 @@ export async function landOpenPullRequest(opts: {
       const msg = `CI failed for PR #${prNumber} on ${branch} — refusing to merge with a failing check`;
       log('ci-failed', msg);
       throw new CiFailedError(msg, prNumber);
+    }
+    // A probe error (undefined) or any run or status keeps the unverified park: only proven silence waits.
+    if (outcome === 'timeout' && (await hasAnyCiSignal(octokit, owner, repoName, headSha)) === false) {
+      const msg = `no CI run or status registered on ${headSha} for PR #${prNumber} by the CI deadline — leaving the PR open and re-checking later`;
+      log('awaiting-ci', msg);
+      throw new AwaitingCiError(msg, prNumber, headSha);
     }
     const msg = `CI watch for ${branch} ended ${outcome} — refusing to merge without a green verdict`;
     log('ci-failed', msg);

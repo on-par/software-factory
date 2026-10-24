@@ -74,13 +74,24 @@ export const KPIS_API_KEYS = [
   'renderKpiTrend',
 ];
 
-/** ./internal names added by the `/factory iterate` trigger (#3625). */
+/** ./internal names added by the `/factory iterate` trigger (#3625) and the awaiting-ci re-check (#3208). */
 export const ITERATE_INTERNAL_KEYS = [
   'claimIterateCommand',
   'parseFactoryCommand',
   'pollIterateCommands',
   'createOctokitIterateGitHub',
   'createFileIterateStore',
+  'awaitingCiFile',
+  'clearAwaitingCi',
+  'nextRecheckAt',
+  'readAwaitingCi',
+  'resolveAwaitingCiCapMs',
+  'upsertAwaitingCi',
+  'hasAnyCiSignal',
+  'listAllCheckRuns',
+  'classifyHeadChecks',
+  'fetchRequiredContexts',
+  'warnNoBranchProtectionOnce',
 ];
 
 /** Root names added by the WorkKey identity (ADR-0168, #3639). */

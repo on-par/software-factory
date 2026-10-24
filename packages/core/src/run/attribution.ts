@@ -54,6 +54,7 @@ const STAMPED: Record<ParkReason, true> = {
   conflict: true,
   'ci-failed': true,
   'ci-infra': true,
+  'ci-never-started': true,
   held: true,
   config: true,
   blocked: true,

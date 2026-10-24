@@ -8,6 +8,7 @@ export type ParkReason = Extract<
   | 'conflict'
   | 'ci-failed'
   | 'ci-infra'
+  | 'ci-never-started'
   | 'held'
   | 'config'
   | 'blocked'
