@@ -24,6 +24,8 @@ export interface EvidencePackRenderInput {
   pinNotes?: string[];
   /** Local HEAD SHA the checks ran on (#1812); the line is omitted when undefined or blank. */
   headSha?: string;
+  /** Large-PR walkthrough markdown (#3623); the section is omitted when undefined. */
+  walkthrough?: string;
 }
 
 export interface EvidencePackGatherInput {
@@ -39,10 +41,22 @@ export interface EvidencePackGatherInput {
   pinNotes?: string[];
   /** Local HEAD SHA the checks ran on (#1812); the line is omitted when undefined or blank. */
   headSha?: string;
+  /** Large-PR walkthrough markdown (#3623); the section is omitted when undefined. */
+  walkthrough?: string;
 }
 
 export function renderEvidencePack(input: EvidencePackRenderInput): string {
-  const { checkSummary, reworkRounds, designMarkdown, events, logFiles, reviewRouting, pinNotes, headSha } = input;
+  const {
+    checkSummary,
+    reworkRounds,
+    designMarkdown,
+    events,
+    logFiles,
+    reviewRouting,
+    pinNotes,
+    headSha,
+    walkthrough,
+  } = input;
 
   const summaryParts = [
     checkSummary
@@ -64,6 +78,7 @@ export function renderEvidencePack(input: EvidencePackRenderInput): string {
     summaryParts.length > 0 ? summaryParts.join(' · ') : 'No verification data available.',
     '',
     ...(headSha && headSha.trim() !== '' ? [`Checked commit: \`${headSha.trim()}\``, ''] : []),
+    ...(walkthrough ? [section('PR walkthrough', walkthrough)] : []),
     section(
       'Checker verdicts',
       checkSummary && checkSummary.results.length > 0
@@ -152,6 +167,7 @@ export function gatherEvidencePack(input: EvidencePackGatherInput): string {
     reviewRouting: input.reviewRouting,
     pinNotes: input.pinNotes,
     headSha: input.headSha,
+    walkthrough: input.walkthrough,
   });
 }
 

@@ -175,6 +175,21 @@ describe('renderPrBody', () => {
   });
 });
 
+describe('renderPrBody walkthrough (#3623)', () => {
+  const base = { summaryLine: 'Implements #1.', diffStat: ' a.ts | 1 +', closes: 1 };
+
+  it('embeds a Walkthrough section when a walkthrough is given', () => {
+    const body = renderPrBody({ ...base, walkthrough: '### Intent\n- x' });
+    expect(body).toContain('## Walkthrough\n### Intent\n- x');
+    expect(body.indexOf('## Walkthrough')).toBeLessThan(body.indexOf('<summary>Changed files</summary>'));
+  });
+
+  it('renders the same output when walkthrough is undefined', () => {
+    expect(renderPrBody({ ...base, walkthrough: undefined })).toBe(renderPrBody(base));
+    expect(renderPrBody(base)).not.toContain('Walkthrough');
+  });
+});
+
 describe('renderPrBody stack order (#3348)', () => {
   it('renders stackOrder right after the Summary', () => {
     const body = renderPrBody({

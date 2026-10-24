@@ -148,6 +148,7 @@ export async function shipWithCiRework(
     ...(request.ciDeadlineMs === undefined ? {} : { ciDeadlineMs: request.ciDeadlineMs }),
     ...(inputs.pr?.draft ? { draft: true } : {}),
     footer: inputs.pr?.footer,
+    ...(inputs.pr?.walkthrough ? { walkthrough: inputs.pr.walkthrough } : {}),
     log: ports.events('ship'),
     approvalGate: request.options.interactive ? ports.createApprovalGate?.() : undefined,
     specPath: request.specPath,

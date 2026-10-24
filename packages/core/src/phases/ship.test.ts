@@ -163,6 +163,7 @@ describe('shipPhase self-healing', () => {
       'git rev-parse HEAD',
       "git ls-remote --heads origin 'ship-it/23-self-heal'",
       'git diff --stat origin/main...HEAD',
+      'git diff --numstat origin/main...HEAD',
       'git rev-parse HEAD',
     ]);
     expect(calls).toContainEqual([

@@ -190,6 +190,22 @@ describe('renderEvidencePack', () => {
   });
 });
 
+describe('renderEvidencePack — walkthrough (#3623)', () => {
+  it('renders byte-identical output when no walkthrough is given and appends a PR walkthrough section when one is', () => {
+    const input = { issue: 385, checkSummary, reworkRounds: 1, events, logFiles: ['a.log'] };
+    const baseline = renderEvidencePack(input);
+    expect(renderEvidencePack({ ...input, walkthrough: undefined })).toBe(baseline);
+    expect(baseline).not.toContain('PR walkthrough');
+
+    const withWalkthrough = renderEvidencePack({ ...input, walkthrough: '### Intent\n- x' });
+    expect(withWalkthrough).toContain('<summary>PR walkthrough</summary>');
+    for (const summary of ['Checker verdicts', 'Design artifact', 'Rework & verification', 'Logs']) {
+      expect(withWalkthrough).toContain(`<summary>${summary}</summary>`);
+    }
+    expect(withWalkthrough.indexOf('PR walkthrough')).toBeLessThan(withWalkthrough.indexOf('Checker verdicts'));
+  });
+});
+
 describe('renderEvidencePack — review routing (#1724)', () => {
   const base = { issue: 1, events: [], logFiles: [] };
 

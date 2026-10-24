@@ -443,11 +443,16 @@ describe('draft PR (#3449)', () => {
       })
       .mockResolvedValueOnce({ ok: true, prNumber: 9, ciOutcome: 'success', draft: true });
     const log = vi.fn<Log>();
-    const outcome = await runIssue(request, { ...policy, pr: { draft: true, footer } }, ports(log));
+    const outcome = await runIssue(
+      request,
+      { ...policy, pr: { draft: true, footer, walkthrough: { minLines: 7 } } },
+      ports(log),
+    );
     expect(outcome).toMatchObject({ state: 'ready', prNumber: 9, draft: true });
     for (const call of shipPhase.mock.calls) {
       expect(call[0].draft).toBe(true);
       expect(call[0].footer).toBe(footer);
+      expect(call[0].walkthrough).toEqual({ minLines: 7 });
     }
     expect(log).toHaveBeenCalledWith('ready', expect.stringContaining('PR #9 left as draft'));
   });
@@ -458,5 +463,6 @@ describe('draft PR (#3449)', () => {
     expect(outcome).not.toHaveProperty('draft');
     expect(shipPhase.mock.calls[0][0].draft).toBeUndefined();
     expect(shipPhase.mock.calls[0][0].footer).toBeUndefined();
+    expect(shipPhase.mock.calls[0][0].walkthrough).toBeUndefined();
   });
 });

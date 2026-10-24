@@ -32,6 +32,8 @@ export interface PrBodyInput {
   partOf?: number;
   /** Stack-mode (ADR-0161) stack-order line, rendered right after the Summary. */
   stackOrder?: string;
+  /** Large-PR walkthrough markdown (#3623), rendered as a Walkthrough section; omitted when undefined. */
+  walkthrough?: string;
 }
 
 export interface SpecIntent {
@@ -55,6 +57,7 @@ export function renderPrBody(input: PrBodyInput): string {
     whatChanged === undefined ? undefined : section('What changed', whatChanged),
     section('Proof', proof),
     risk ? `**Risk:** ${risk}` : undefined,
+    input.walkthrough ? section('Walkthrough', input.walkthrough) : undefined,
     ['<details>', '<summary>Changed files</summary>', '', '```', input.diffStat, '```', '', '</details>'].join('\n'),
     input.closes !== undefined
       ? `Closes #${input.closes}`

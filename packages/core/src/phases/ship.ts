@@ -11,6 +11,7 @@ import type { EventKind } from '../events/kinds.js';
 import { gatherEvidencePack } from '../reports/evidence-pack.js';
 import { renderPrBody } from '../reports/pr-body.js';
 import { computeDiffStat } from './ship-diff-stat.js';
+import { lazyWalkthrough, type WalkthroughShipOpts } from './ship-walkthrough.js';
 import { renderStackOrderLine, type StackPosition } from './stack-order.js';
 import type { ReviewRouting } from '../review/routing.js';
 import {
@@ -119,6 +120,7 @@ async function shipPhaseImpl(opts: {
   reentry?: { prNumber: number; previousHeadSha?: string };
   /** CI watch deadline (#3569); default DEFAULT_CI_DEADLINE_MS. */
   ciDeadlineMs?: number;
+  walkthrough?: WalkthroughShipOpts['walkthrough'];
 }): Promise<ShipResult> {
   const {
     issue,
@@ -134,6 +136,7 @@ async function shipPhaseImpl(opts: {
     checkSummary,
   } = opts;
   const [owner, repoName] = repo.split('/');
+  const getWalkthrough = lazyWalkthrough(run, worktree, opts, log);
 
   let diffStat: string | undefined;
 
@@ -404,6 +407,7 @@ async function shipPhaseImpl(opts: {
           checkSummary,
           reworkRounds: opts.reworkRounds,
           risk: await readRisk(opts.specPath),
+          walkthrough: await getWalkthrough(),
           closes: inlineWork || !finalSlice ? undefined : issue,
           partOf: !inlineWork && !finalSlice ? issue : undefined,
         }),
@@ -447,6 +451,7 @@ async function shipPhaseImpl(opts: {
         reviewRouting: opts.reviewRouting,
         pinNotes: opts.pinNotes,
         headSha: checkedSha,
+        walkthrough: await getWalkthrough(),
       });
       await octokit.rest.issues.createComment({ owner, repo: repoName, issue_number: prNumber, body });
       log('evidence', `posted evidence pack to PR #${prNumber}`);
