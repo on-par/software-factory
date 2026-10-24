@@ -1,5 +1,7 @@
 // src/config/intermediaries.ts — Approved zero-retention intermediaries for DeepSeek models (ADR-0163)
 
+import { DEFAULT_REPO_CONFIG_LABEL } from './repo-config-label.js';
+
 export interface Intermediary {
   name: string;
   /** providerModel prefix that routes through this intermediary, e.g. 'openrouter/'. */
@@ -42,19 +44,23 @@ export function claudeEndpointIntermediary(endpoint: string): Intermediary | und
 
 /** Throws unless a registry model's `endpoint` (when set) is an approved Anthropic-compatible intermediary and the
  *  model names an envKey (#2906, ADR-0163). */
-export function assertApprovedClaudeEndpoint(id: string, def: { endpoint?: string; envKey: string | null }): void {
+export function assertApprovedClaudeEndpoint(
+  id: string,
+  def: { endpoint?: string; envKey: string | null },
+  configLabel = DEFAULT_REPO_CONFIG_LABEL,
+): void {
   if (def.endpoint === undefined) return;
   if (!claudeEndpointIntermediary(def.endpoint)) {
     const allowed = APPROVED_INTERMEDIARIES.filter((i) => i.status === 'approved' && i.anthropicCompatible).map(
       (i) => i.host,
     );
     throw new Error(
-      `.factory/config.json: models.registry.${id}.endpoint '${def.endpoint}' is not an approved Anthropic-compatible intermediary (allowed hosts: ${allowed.join(', ')}; https only). DeepSeek and other non-Anthropic models are reached only through approved zero-retention intermediaries (ADR-0163)`,
+      `${configLabel}: models.registry.${id}.endpoint '${def.endpoint}' is not an approved Anthropic-compatible intermediary (allowed hosts: ${allowed.join(', ')}; https only). DeepSeek and other non-Anthropic models are reached only through approved zero-retention intermediaries (ADR-0163)`,
     );
   }
   if (def.envKey === null) {
     throw new Error(
-      `.factory/config.json: models.registry.${id} sets an endpoint but envKey is null; an endpoint needs envKey naming the intermediary's API key variable`,
+      `${configLabel}: models.registry.${id} sets an endpoint but envKey is null; an endpoint needs envKey naming the intermediary's API key variable`,
     );
   }
 }
@@ -118,6 +124,7 @@ export function assertNoDirectDeepSeek(
     claudeFlag?: string;
     providerOptions?: Record<string, unknown>;
   },
+  configLabel = DEFAULT_REPO_CONFIG_LABEL,
 ): void {
   const reason = directDeepSeekReason(def);
   if (reason === undefined) return;
@@ -125,6 +132,6 @@ export function assertNoDirectDeepSeek(
     .map((i) => `${i.name} (${i.prefix})`)
     .join(', ');
   throw new Error(
-    `.factory/config.json: models.registry.${id} reaches DeepSeek's first-party API: ${reason}. DeepSeek models are reached only through approved zero-retention intermediaries (ADR-0163): ${approved}`,
+    `${configLabel}: models.registry.${id} reaches DeepSeek's first-party API: ${reason}. DeepSeek models are reached only through approved zero-retention intermediaries (ADR-0163): ${approved}`,
   );
 }

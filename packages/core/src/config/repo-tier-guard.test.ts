@@ -2,6 +2,7 @@ import { defaultModelsConfig } from '@on-par/factory-config';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ModelRegistry } from '../models/index.js';
+import { assertTierMayRoute } from './repo-tier-guard.js';
 import { applyRepoConfig, resolveEffectiveModelPins } from './repo.js';
 
 const free = 'my-free-model';
@@ -52,6 +53,14 @@ describe('trainsOnPrompts models (#2899)', () => {
       tiers: { worker: ['train-model'] },
     } as NonNullable<Parameters<typeof applyRepoConfig>[1]>;
     expect(() => applyRepoConfig(defaultModelsConfig, repo)).toThrow(/train-model.*pin it instead/is);
+  });
+
+  it('names the config label it is given', () => {
+    const def = freeRegistry[free] as Parameters<typeof assertTierMayRoute>[2];
+    expect(() => assertTierMayRoute('worker', free, def, '.factory/config.yaml')).toThrow(
+      /^\.factory\/config\.yaml: tier/,
+    );
+    expect(() => assertTierMayRoute('worker', free, def)).toThrow(/^\.factory\/config\.json: tier/);
   });
 
   it('still fires the unknown-model error first for an unknown id', () => {

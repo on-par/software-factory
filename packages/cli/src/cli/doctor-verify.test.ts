@@ -194,6 +194,26 @@ describe('verifyCommandChecks', () => {
     expect(verifyCommandChecks(resolved, opts).map((c) => c.name)).toContain('verify lint (tsconfig.json)');
   });
 
+  it('verify rows name the loaded config.yaml, never config.json', async () => {
+    const missing = verifyCommandChecks(
+      await resolveVerifyCommands(repo({ '.factory/config.yaml': 'version: 2\n', 'App.csproj': '' })),
+      opts,
+    );
+    const broken = verifyCommandChecks(await resolveVerifyCommands(repo({ '.factory/config.yaml': '' })), opts);
+    for (const row of [...missing, ...broken]) {
+      // the #3600 probe detail legitimately lists "also probed config.yml, config.json"; hints must not name it
+      expect(`${row.name} ${row.fix ?? ''}`).not.toContain('.factory/config.json');
+      expect(row.detail.replace(/also probed [^)]*/, '')).not.toContain('.factory/config.json');
+    }
+    expect(missing.find((c) => c.name === 'verify test')!.fix).toContain('in .factory/config.yaml (or add');
+    expect(broken).toEqual([
+      expect.objectContaining({
+        name: 'verify commands',
+        fix: 'fix package.json and .factory/config.yaml so they parse',
+      }),
+    ]);
+  });
+
   it('a resolver error is one failed verify commands row', () => {
     const checks = verifyCommandChecks({ rows: [], error: 'bad json' }, opts);
     expect(checks).toEqual([expect.objectContaining({ name: 'verify commands', ok: false, section: VERIFY_SECTION })]);
