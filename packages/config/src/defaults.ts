@@ -69,7 +69,7 @@ export interface FactoryDefaults {
   // data anyway: dropping them would desync loadFactoryConfig()'s no-path output from what the deleted
   // factory.json produced, breaking the byte-identical behavior contract (#716).
   kpis: { defectWindowDays: number; comment?: string };
-  ci: { skip: boolean; comment?: string };
+  ci: { skip: boolean; awaitingCiCapHours: number; comment?: string };
   sweep: { heartbeatFile?: string; loopIntervalSeconds: number; staleThresholdMultiplier: number; comment?: string };
   plan_approval: { enabled: boolean; comment?: string };
   /** PLAN design-artifact gates (#1819). */
@@ -623,7 +623,9 @@ export const defaultFactoryConfig: FactoryDefaults = {
   },
   ci: {
     skip: false,
-    comment: 'Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging',
+    awaitingCiCapHours: 24,
+    comment:
+      'Set FACTORY_SKIP_CI=1 to skip waiting for GitHub Actions CI before merging. An awaiting-ci PR parks as ci-never-started after awaitingCiCapHours hours with no CI run.',
   },
   sweep: {
     loopIntervalSeconds: 300,

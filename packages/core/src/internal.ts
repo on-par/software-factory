@@ -226,6 +226,15 @@ export type {
   InfraRerunWatchOptions,
   WatchChecksOptions,
 } from './utils/ci-watch.js';
+export type { AwaitingCiRecord } from './utils/awaiting-ci.js';
+export {
+  awaitingCiFile,
+  clearAwaitingCi,
+  nextRecheckAt,
+  readAwaitingCi,
+  resolveAwaitingCiCapMs,
+  upsertAwaitingCi,
+} from './utils/awaiting-ci.js';
 export { collectCiFailureEvidence } from './utils/ci-evidence.js';
 export {
   classifyCiFailure,

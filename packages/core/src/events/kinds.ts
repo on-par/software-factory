@@ -37,6 +37,7 @@ export type EventKind =
   | 'approval_granted'
   | 'approval_requested'
   | 'await-merge'
+  | 'awaiting-ci'
   | 'awaiting-review'
   | 'base-hold-cleared'
   | 'baseline-cache-invalidated'
@@ -52,6 +53,7 @@ export type EventKind =
   | 'checker_started'
   | 'ci-failed'
   | 'ci-infra'
+  | 'ci-never-started'
   | 'ci-rescued'
   | 'ci-rescue-failed'
   | 'conflict'
@@ -251,6 +253,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   approval_granted: { severity: 'info', isPark: false, isTerminal: false },
   approval_requested: { severity: 'warn', isPark: false, isTerminal: false },
   'await-merge': { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'waiting-merge' },
+  // A PR whose CI never registered a run waits for a backoff re-check (#3208). Not a park.
+  'awaiting-ci': { severity: 'info', isPark: false, isTerminal: false },
   'awaiting-review': { severity: 'info', isPark: false, isTerminal: false },
   // A persisted base hold (#2348) ended: origin/main moved or its CI went green (#2350). Not a park.
   'base-hold-cleared': { severity: 'info', isPark: false, isTerminal: false },
@@ -272,6 +276,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'ci-failed': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   // A PR whose one infra rerun also failed for infra on the same SHA (#2366). Parks; not an ADR-0155 steward trigger.
   'ci-infra': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
+  // An awaiting-ci PR still had no CI run at ci.awaitingCiCapHours (#3208). Parks; a CI or config problem, not a failing build.
+  'ci-never-started': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   // The one-shot infra rerun (#2365) did not go green (#2366). Not a park.
   'ci-rescue-failed': { severity: 'warn', isPark: false, isTerminal: false },
   conflict: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
