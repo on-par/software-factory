@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { BaselineReport } from '../checkers/baseline.js';
@@ -32,18 +32,18 @@ const models: ModelsConfig = {
 };
 const routes: RoutesConfig = { version: 1, routes: { build_claude: { tier: 'boss', description: 'stub' } } };
 
+const tempDirs = createTempDirs();
 const dirs: string[] = [];
 afterEach(async () => {
-  await Promise.all(
-    dirs.splice(0).flatMap((d) => [rm(d, { recursive: true, force: true }), rm(`${d}.spec.md`, { force: true })]),
-  );
+  await Promise.all(dirs.splice(0).map((d) => rm(`${d}.spec.md`, { force: true })));
+  await tempDirs.cleanup();
 });
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
 
 /** A git worktree whose one committed change since `base` is `files` (default `src/my widget.ts`). */
 async function makeRepo(files = ['src/my widget.ts']): Promise<{ worktree: string; base: string }> {
-  const worktree = await mkdtemp(join(tmpdir(), 'check-affected-'));
+  const worktree = await tempDirs.make('check-affected-');
   dirs.push(worktree);
   git(worktree, 'init', '-q');
   git(worktree, 'config', 'user.email', 't@t');
