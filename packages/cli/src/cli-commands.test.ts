@@ -4843,7 +4843,7 @@ bash scripts/verify.sh
 
         expect(res.exited).toBe(false);
         const issues = h.octokit.rest.issues.get.mock.calls.map((c: any[]) => c[0].issue_number);
-        expect(issues.slice(0, 3)).toEqual([5, 10, 11]);
+        expect(issues.slice(0, 3)).toEqual([5, 10, 10]);
         expect(phases.planPhase).toHaveBeenCalledTimes(3);
         expect(phases.buildPhase).toHaveBeenCalledTimes(2);
         expect(phases.checkPhase).toHaveBeenCalledTimes(2);
@@ -4910,7 +4910,7 @@ bash scripts/verify.sh
         const res = await runMain('run-issue', '5', '--run-children');
         expect(res.exited).toBe(false);
         const issues = h.octokit.rest.issues.get.mock.calls.map((c: any[]) => c[0].issue_number);
-        expect(issues.slice(0, 5)).toEqual([5, 10, 20, 21, 11]);
+        expect(issues.slice(0, 5)).toEqual([5, 10, 20, 20, 21]);
         expect(phases.planPhase).toHaveBeenCalledTimes(5);
         expect(phases.shipPhase).toHaveBeenCalledTimes(3);
         expect(logged()).toContain('#10 → decomposed into #20, #21');

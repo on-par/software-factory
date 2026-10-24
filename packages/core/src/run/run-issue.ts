@@ -46,6 +46,7 @@ import { createRunPhaseLogger } from './run-phase-log.js';
 import { providerFailureRecorder } from './provider-failure-recorder.js';
 import { gateOpencodeBuildOnBreaker, providerFallbackPreferrer } from './provider-breaker-gate.js';
 import { loadReusablePlan } from './plan-reuse-load.js';
+import { designCheckpointPark } from './design-checkpoint.js';
 import {
   allProvidersDownMessage,
   allProvidersDownPayload,
@@ -700,6 +701,9 @@ async function runIssueOnce(
       }
       const planBudget = await assertBudget('PLAN');
       if (planBudget) return planBudget;
+      // Opt-in design checkpoint (#3621): a factory:needs-design issue parks after PLAN with the plan kept for reuse.
+      const designReceipt = await designCheckpointPark(request, ports, plan.route, log);
+      if (designReceipt) return await terminalParked('held', designReceipt);
 
       // Same-file lane guard (#1515): before this run claims BUILD, make sure no other
       // in-flight run in this repo already owns a file PLAN just said this run will touch.

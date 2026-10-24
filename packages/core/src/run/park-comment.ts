@@ -72,7 +72,7 @@ const PARK_HINTS: Record<ParkReason, string> = {
   conflict: 'rebase the branch onto main, then run `factory unpark <n>`.',
   'ci-failed': 'fix CI on the PR, then run `factory unpark <n>`.',
   'ci-infra': 'CI infrastructure failed. Re-run CI, then run `factory unpark <n>`.',
-  held: 'the same failure parked a prior run. A human must change the approach before `factory unpark <n>`.',
+  held: 'a human must act first. Follow the instructions above, then run `factory unpark <n>`.',
   config: 'fix the named config file and line, then run `factory unpark <n>`.',
 };
 
