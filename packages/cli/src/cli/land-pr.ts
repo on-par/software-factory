@@ -12,6 +12,7 @@ import {
   warnNoBranchProtectionOnce,
   watchChecksWithInfraRerun,
 } from '@on-par/factory-core/internal';
+import { MAX_LAND_SYNC_ROUNDS, probeHeadBehindBase } from './land-behind.js';
 import { landRuntime } from './land-runtime.js';
 
 export type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
@@ -251,6 +252,8 @@ export async function landOpenPullRequest(opts: {
   ensureWorktree?: () => Promise<void>;
   /** #3324: preflight adopted a DIRTY or still-UNKNOWN PR; sync with main before the first CI watch even when the state is not DIRTY. */
   syncMain?: boolean;
+  /** #3654: answers whether a head lacks commits from the base; undefined when unknown. Defaults to the GitHub compare API. */
+  behindProbe?: (headSha: string, baseRef: string) => Promise<boolean | undefined>;
 }): Promise<void> {
   const {
     octokit,
@@ -271,6 +274,7 @@ export async function landOpenPullRequest(opts: {
     withLock = (fn) => fn(),
     ensureWorktree,
     syncMain = false,
+    behindProbe = (sha: string, base: string) => probeHeadBehindBase(octokit, owner, repoName, base, sha),
   } = opts;
   const { errorDetail } = landRuntime();
 
@@ -342,71 +346,120 @@ export async function landOpenPullRequest(opts: {
   // first watch. Watching it first would wait out the deadline and park as ci-failed (#3533).
   let state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
 
-  /** Syncs a DIRTY PR with main under the land lock. Returns true when it synced. */
-  const syncIfStillDirty = (force = false) =>
+  const needsSync = (s: { mergeStateStatus?: string }) =>
+    s.mergeStateStatus === 'DIRTY' || s.mergeStateStatus === 'BEHIND';
+  let syncRounds = 0;
+
+  /** True when `sha` (default: the PR's current head) lacks commits from the base. GitHub reports BEHIND only
+   *  under strict protection, which the lander bypasses, so ask the compare API (#3654). An unknown
+   *  answer warns and falls back to the mergeStateStatus rule. */
+  const headIsBehind = async (sha?: string): Promise<boolean> => {
+    let behind: boolean | undefined;
+    try {
+      const { data: pr } = await octokit.rest.pulls.get({ owner, repo: repoName, pull_number: prNumber });
+      behind = await behindProbe(sha ?? pr.head.sha, pr.base?.ref ?? 'main');
+    } catch {
+      behind = undefined;
+    }
+    if (behind === undefined)
+      log('warn', `behind check for PR #${prNumber} unavailable — falling back to mergeStateStatus`);
+    return behind === true;
+  };
+
+  /** Why the PR must sync with main now, or undefined when it need not. Reads `state`. */
+  const syncReason = async (sha?: string): Promise<'dirty' | 'behind' | undefined> => {
+    if (state.mergeStateStatus === 'DIRTY') return 'dirty';
+    if (needsSync(state) || (await headIsBehind(sha))) return 'behind';
+    return undefined;
+  };
+
+  /** Merges main into the branch, bounded to MAX_LAND_SYNC_ROUNDS. Call under the land lock. */
+  const syncNow = async (reason: string): Promise<void> => {
+    if (syncRounds >= MAX_LAND_SYNC_ROUNDS) {
+      const msg = `PR #${prNumber} on ${branch}: base kept moving — synced ${MAX_LAND_SYNC_ROUNDS} times and origin/main moved again; refusing to merge an unverified head`;
+      log('ci-failed', msg);
+      throw new CiUnverifiedError(msg, prNumber);
+    }
+    syncRounds++;
+    await ensureWorktree?.();
+    log(
+      'pr_refresh',
+      `PR #${prNumber} refreshed: mergeStateStatus=${state.mergeStateStatus ?? 'UNKNOWN'} action=merge-main reason=${reason} round=${syncRounds}/${MAX_LAND_SYNC_ROUNDS}`,
+    );
+    await syncDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists });
+  };
+
+  /** Syncs a DIRTY or behind PR with main under the land lock. Returns true when it synced. */
+  const syncIfStillBehind = (force = false) =>
     withLock(async () => {
       // Re-check under the lock: a sibling lane may have landed (or synced this branch)
-      // while we waited for it, so the DIRTY verdict read before the lock can be stale.
+      // while we waited for it, so the verdict read before the lock can be stale.
       state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
-      if (!force && state.mergeStateStatus !== 'DIRTY') return false;
-      await ensureWorktree?.();
-      log(
-        'pr_refresh',
-        `PR #${prNumber} refreshed: mergeStateStatus=${state.mergeStateStatus ?? 'UNKNOWN'} action=merge-main`,
-      );
-      await syncDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists });
+      const reason = await syncReason();
+      if (!force && !reason) return false;
+      await syncNow(reason ?? 'forced');
       return true;
     });
 
-  if (syncMain || state.mergeStateStatus === 'DIRTY') await syncIfStillDirty(syncMain);
+  if (syncMain || needsSync(state) || (await headIsBehind())) await syncIfStillBehind(syncMain);
+
+  let verifiedSha: string | undefined;
+
+  /** One locked pass: re-checks the CI-verified head against main, then merges it. Returns false when it
+   *  synced instead (the head changed, so the caller must re-watch CI before merging again). */
+  const mergeVerifiedHead = async (): Promise<boolean> => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const outcome = await withLock(async () => {
+          // Whatever we read before taking the lock (or before the backoff sleep) may be stale,
+          // so the attempt decides from a fresh read.
+          state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
+          const reason = await syncReason(verifiedSha);
+          if (reason) {
+            await syncNow(reason);
+            return 'resynced' as const;
+          }
+          if (state.isDraft && state.id) {
+            log('land', `PR #${prNumber} still a draft — re-issuing ready-for-review (attempt ${attempt})`);
+            await markPullRequestReady(octokit, state.id).catch((err: unknown) =>
+              log('warn', `ready-for-review flip failed for PR #${prNumber}: ${errorDetail(err)}`),
+            );
+          }
+          await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber, {
+            admin: adminMerge,
+            run,
+            sha: verifiedSha,
+          });
+          return 'merged' as const;
+        });
+        return outcome === 'merged';
+      } catch (err: any) {
+        if (err instanceof CiFailedError || err instanceof LandConflictError) throw err;
+        if (verifiedSha && isHeadModifiedMergeError(err)) {
+          const msg = `PR #${prNumber} head moved past CI-verified commit ${verifiedSha} — refusing to merge an unverified head`;
+          log('ci-failed', msg);
+          throw new CiUnverifiedError(msg, prNumber);
+        }
+        if (isReviewRequiredMergeError(err, state)) {
+          log('awaiting-review', `PR #${prNumber} blocked on human review — leaving open for approval`);
+          throw new AwaitingReviewError(`PR #${prNumber} awaiting review: ${err.message}`, prNumber);
+        }
+        if (attempt >= MAX_MERGE_ATTEMPTS) throw err;
+        log(
+          'land',
+          `merge attempt ${attempt}/${MAX_MERGE_ATTEMPTS} failed (${err.message}); mergeStateStatus=${state.mergeStateStatus ?? 'unknown'} — retrying with backoff`,
+        );
+        // Backoff outside the lock: waiting is not a mutation (#645).
+        await sleep(MERGE_RETRY_BASE_MS * 2 ** (attempt - 1));
+      }
+    }
+  };
 
   // The CI watch is a 10-20 minute wait, not a mutation: it must never run under the land
-  // locks, or every other lane's setupWorktree serializes behind it (#645).
-  let verifiedSha = skipCI ? undefined : await watchCi();
-  state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
-
-  // Main may have moved while CI ran: a PR that turned DIRTY during the watch is synced and re-watched.
-  if (state.mergeStateStatus === 'DIRTY' && (await syncIfStillDirty())) {
-    if (!skipCI) verifiedSha = await watchCi();
-    state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
-  }
-
-  for (let attempt = 1; ; attempt++) {
-    try {
-      await withLock(async () => {
-        // Same rule as the sync section: whatever we read before taking the lock (or before
-        // the backoff sleep) may be stale, so the attempt decides from a fresh read.
-        state = await getPullRequestLandState(octokit, owner, repoName, prNumber);
-        if (state.isDraft && state.id) {
-          log('land', `PR #${prNumber} still a draft — re-issuing ready-for-review (attempt ${attempt})`);
-          await markPullRequestReady(octokit, state.id).catch((err: unknown) =>
-            log('warn', `ready-for-review flip failed for PR #${prNumber}: ${errorDetail(err)}`),
-          );
-        }
-        await squashMergeAndDelete(octokit, owner, repoName, branch, prNumber, {
-          admin: adminMerge,
-          run,
-          sha: verifiedSha,
-        });
-      });
-      return;
-    } catch (err: any) {
-      if (verifiedSha && isHeadModifiedMergeError(err)) {
-        const msg = `PR #${prNumber} head moved past CI-verified commit ${verifiedSha} — refusing to merge an unverified head`;
-        log('ci-failed', msg);
-        throw new CiUnverifiedError(msg, prNumber);
-      }
-      if (isReviewRequiredMergeError(err, state)) {
-        log('awaiting-review', `PR #${prNumber} blocked on human review — leaving open for approval`);
-        throw new AwaitingReviewError(`PR #${prNumber} awaiting review: ${err.message}`, prNumber);
-      }
-      if (attempt >= MAX_MERGE_ATTEMPTS) throw err;
-      log(
-        'land',
-        `merge attempt ${attempt}/${MAX_MERGE_ATTEMPTS} failed (${err.message}); mergeStateStatus=${state.mergeStateStatus ?? 'unknown'} — retrying with backoff`,
-      );
-      // Backoff outside the lock: waiting is not a mutation (#645).
-      await sleep(MERGE_RETRY_BASE_MS * 2 ** (attempt - 1));
-    }
+  // locks, or every other lane's setupWorktree serializes behind it (#645). Main may move while
+  // CI runs: a head found behind under the merge lock is synced, then watched again.
+  for (;;) {
+    verifiedSha = skipCI ? undefined : await watchCi();
+    if (await mergeVerifiedHead()) return;
   }
 }
