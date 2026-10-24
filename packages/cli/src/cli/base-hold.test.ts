@@ -185,9 +185,23 @@ describe('base hold gate (#2349)', () => {
   });
 
   describe('createBaseHoldGate', () => {
-    it('claims when origin/main moved off the held SHA', async () => {
+    it('holds when origin/main moved off the held SHA and the new SHA is not green (#3620)', async () => {
       writeBaseHold(file, gateHold);
-      const requiredChecksVerdict = vi.fn(async () => ({ green: false, reason: 'x' }));
+      const requiredChecksVerdict = vi.fn(async () => ({ green: false, reason: 'ci pending' }));
+      const gate = createBaseHoldGate({
+        file,
+        repo: hold.repo,
+        git: async () => `${SHA_NEW}\trefs/heads/main\n`,
+        requiredChecksVerdict,
+      });
+      expect(await gate()).toEqual({ kind: 'hold', hold: gateHold, ciReason: 'ci pending', currentSha: SHA_NEW });
+      expect(existsSync(file)).toBe(true);
+      expect(requiredChecksVerdict).toHaveBeenCalledWith(SHA_NEW);
+    });
+
+    it('claims when origin/main moved off the held SHA and the new SHA is green', async () => {
+      writeBaseHold(file, gateHold);
+      const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'ok' }));
       const gate = createBaseHoldGate({
         file,
         repo: hold.repo,
@@ -196,7 +210,7 @@ describe('base hold gate (#2349)', () => {
       });
       expect(await gate()).toEqual({ kind: 'claim' });
       expect(existsSync(file)).toBe(false);
-      expect(requiredChecksVerdict).toHaveBeenCalledTimes(0);
+      expect(requiredChecksVerdict).toHaveBeenCalledTimes(1);
     });
 
     it('claims when the held SHA is unchanged but its CI is green', async () => {
@@ -300,7 +314,8 @@ describe('ci-awaiting base hold (#3186)', () => {
   it('a moved SHA clears with sha-changed before any backoff', async () => {
     writeBaseHold(file, awaiting);
     const onCleared = vi.fn();
-    const d = deps({ currentBaseSha: async () => 'c'.repeat(40), now: () => T0, onCleared });
+    const requiredChecksVerdict = vi.fn(async () => ({ green: true, reason: 'ok' }));
+    const d = deps({ currentBaseSha: async () => 'c'.repeat(40), now: () => T0, onCleared, requiredChecksVerdict });
     expect(await evaluateBaseHold(file, hold.repo, d)).toEqual({ kind: 'claim' });
     expect(onCleared.mock.calls[0][0].reason).toBe('sha-changed');
   });
@@ -454,6 +469,7 @@ describe('confirmedLocally base hold (#3287)', () => {
       requiredChecksVerdict,
       onCleared,
     });
+    expect(requiredChecksVerdict).toHaveBeenCalledWith('c'.repeat(40));
     expect(moved).toEqual({ kind: 'claim' });
     expect(existsSync(file)).toBe(false);
     expect(onCleared.mock.calls[0][0].reason).toBe('sha-changed');

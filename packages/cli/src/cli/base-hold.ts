@@ -6,6 +6,7 @@
 // compile backs off and is re-checked with the strict required-checks verdict, not the lenient one.
 // #3287 adds `confirmedLocally`: a hold whose fresh local re-run failed while CI was green is
 // never cleared by CI green, only when origin/main moves.
+// #3620: a moved origin/main clears the hold only when the new SHA's code-health CI is green.
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -95,9 +96,25 @@ export function clearBaseHold(file: string, baseSha: string): boolean {
 export function formatBaseHoldCleared(c: BaseHoldCleared): string {
   const held = c.hold.baseSha.slice(0, 8);
   const now = c.currentSha.slice(0, 8);
-  return c.reason === 'sha-changed'
-    ? `base hold on ${held} cleared (reason: sha-changed): origin/main moved to ${now}`
-    : `base hold on ${held} cleared (reason: ci-green): main CI on ${now} is green (${c.basis ?? 'required checks'})`;
+  if (c.reason === 'sha-changed') {
+    if (c.basis === undefined) return `base hold on ${held} cleared (reason: sha-changed): origin/main moved to ${now}`;
+    return c.basis.startsWith('no ')
+      ? `base hold on ${held} cleared (reason: sha-changed): origin/main moved to ${now} (${c.basis})`
+      : `base hold on ${held} cleared (reason: sha-changed): origin/main moved to ${now} and its code-health CI is green (${c.basis})`;
+  }
+  return `base hold on ${held} cleared (reason: ci-green): main CI on ${now} is green (${c.basis ?? 'required checks'})`;
+}
+
+/** Lane warn text for a kept hold; names the current SHA when origin/main moved (#3620). */
+export function formatBaseHoldKept(lane: string, d: Extract<BaseHoldDecision, { kind: 'hold' }>): string {
+  const held = d.hold.baseSha.slice(0, 8);
+  const checks = d.hold.failingChecks.join(', ');
+  const reason = d.ciReason ? ` (${d.ciReason})` : '';
+  const prefix = `lane '${lane}' not claiming: base hold on ${held} (${checks}) — `;
+  if (d.currentSha !== undefined && d.currentSha !== d.hold.baseSha) {
+    return `${prefix}origin/main moved to ${d.currentSha.slice(0, 8)} but its code-health CI is not green${reason}`;
+  }
+  return `${prefix}origin/main unchanged and its CI is not green${reason}`;
 }
 
 /** `factory status` lines for an active hold (#2351). */
@@ -113,7 +130,8 @@ export function formatBaseHoldStatus(hold: BaseHold): string[] {
   return lines;
 }
 
-export type BaseHoldDecision = { kind: 'claim' } | { kind: 'hold'; hold: BaseHold; ciReason?: string };
+export type BaseHoldDecision =
+  { kind: 'claim' } | { kind: 'hold'; hold: BaseHold; ciReason?: string; currentSha?: string };
 
 export interface BaseHoldGateDeps {
   /** Current origin/main SHA; null (or a throw) means unknown. */
@@ -126,9 +144,10 @@ export interface BaseHoldGateDeps {
   onCleared?: (cleared: BaseHoldCleared) => void;
 }
 
-/** Decides whether a lane may claim: hold only while origin/main is still at the held SHA and
- *  its CI is not green. Unknown origin/main fails open; a failed CI lookup counts as not green.
- *  Clears the hold when origin/main moved or its CI is green (#2350). */
+/** Decides whether a lane may claim: hold while the held SHA's CI is not green, and, when
+ *  origin/main moved, while the new SHA's code-health CI is not green (#3620). Unknown origin/main
+ *  fails open; a failed CI lookup counts as not green. A repo with no code-health checks, or a gate
+ *  with no CI lookup, clears on a moved SHA as before. Clears the hold on green (#2350). */
 export async function evaluateBaseHold(file: string, repo: string, deps: BaseHoldGateDeps): Promise<BaseHoldDecision> {
   const hold = readBaseHold(file);
   if (hold === null || hold.repo !== repo) return { kind: 'claim' };
@@ -148,8 +167,16 @@ export async function evaluateBaseHold(file: string, repo: string, deps: BaseHol
     }
   };
   if (sha !== hold.baseSha) {
-    clear('sha-changed', sha);
-    return { kind: 'claim' };
+    if (!deps.requiredChecksVerdict) {
+      clear('sha-changed', sha, 'no CI lookup configured');
+      return { kind: 'claim' };
+    }
+    const moved = await strictVerdict(deps, sha);
+    if (moved.green || moved.noCodeHealthChecks === true) {
+      clear('sha-changed', sha, moved.green ? moved.basis : 'no code-health checks configured');
+      return { kind: 'claim' };
+    }
+    return { kind: 'hold', hold, ciReason: moved.reason, currentSha: sha };
   }
   if (hold.confirmedLocally === true) {
     return { kind: 'hold', hold, ciReason: 'confirmed locally: a fresh base re-run failed while CI was green' };

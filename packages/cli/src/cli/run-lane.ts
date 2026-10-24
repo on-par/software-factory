@@ -7,7 +7,7 @@ import type { getFactoryPaths, ParkPayload, RunOutcome } from '@on-par/factory-c
 import { formatLoadHold, logEvent, PARKED_LABEL, parkPayload } from '@on-par/factory-core/internal';
 import type { LoadGuardDecision, QueueClaim, QueueReleaseOutcome } from '@on-par/factory-core/internal';
 
-import type { BaseHoldDecision } from './base-hold.js';
+import { formatBaseHoldKept, type BaseHoldDecision } from './base-hold.js';
 import { laneParkCommenter } from './lane-park-comment.js';
 import {
   pauseLaneForAllProvidersDown,
@@ -167,13 +167,7 @@ export async function runLane(
       // (#2349): claiming would just cycle an issue again, so stop this lane without claiming.
       const gate = baseHoldGate ? await baseHoldGate().catch((): BaseHoldDecision => ({ kind: 'claim' })) : null;
       if (gate?.kind === 'hold') {
-        emitEvent(
-          paths.events,
-          'warn',
-          lane,
-          `lane '${lane}' not claiming: base hold on ${gate.hold.baseSha.slice(0, 8)} (${gate.hold.failingChecks.join(', ')}) — origin/main unchanged and its CI is not green${gate.ciReason ? ` (${gate.ciReason})` : ''}`,
-          { lane },
-        );
+        emitEvent(paths.events, 'warn', lane, formatBaseHoldKept(lane, gate), { lane });
         return;
       }
       if (loadGuard && (await holdForLoad(loadGuard)) === 'stopped') break;

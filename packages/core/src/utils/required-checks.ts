@@ -7,6 +7,8 @@ export interface RequiredChecksVerdict {
   reason: string;
   /** Set when green; what the verdict was based on. */
   basis?: string;
+  /** Set when not green because nothing decides code health (no deciding set); a moved base can never turn green (#3620). */
+  noCodeHealthChecks?: true;
 }
 
 interface CheckRunLike {
@@ -21,7 +23,7 @@ export function evaluateRequiredChecks(
   runs: readonly CheckRunLike[],
 ): RequiredChecksVerdict {
   const contexts = [...new Set(required)];
-  if (contexts.length === 0) return { green: false, reason: 'no required checks configured' };
+  if (contexts.length === 0) return { green: false, reason: 'no required checks configured', noCodeHealthChecks: true };
   for (const ctx of contexts) {
     const matching = runs.filter((r) => r.name === ctx);
     if (matching.length === 0) return { green: false, reason: `missing ${ctx}` };
@@ -179,6 +181,7 @@ export async function fetchRequiredChecksVerdict(
         green: false,
         reason:
           'no code-health checks: set baseHealth.checks in .factory/config.json, require status checks on main, or name the push workflow "CI"',
+        noCodeHealthChecks: true,
       };
     }
     verdict = evaluatePushChecks(runs.filter((r) => r.suiteId !== null && ciSuites.has(r.suiteId)));
