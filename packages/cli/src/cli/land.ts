@@ -49,9 +49,6 @@ import {
   landOpenPullRequest,
 } from './land-pr.js';
 import type { LandLock } from './land-pr.js';
-import { isPrMerged, latestPrForBranch } from './land-pr-lookup.js';
-
-export { isPrMerged, latestPrForBranch };
 import { enforceRiskAtLand } from './land-risk.js';
 import { landRuntime } from './land-runtime.js';
 import { riskPolicyLines } from './risk-policy.js';
@@ -272,6 +269,29 @@ export function prLookupFailure(issueNum: number, branch: string, err: unknown):
   );
 }
 
+export async function latestPrForBranch(
+  octokit: Octokit,
+  owner: string,
+  repoName: string,
+  branch: string,
+): Promise<{ number: number; merged: boolean } | null> {
+  const { data: prs } = await octokit.rest.pulls.list({
+    owner,
+    repo: repoName,
+    state: 'all',
+    head: `${owner}:${branch}`,
+  });
+  if (prs.length === 0) return null;
+  // Branch names get reused across runs; PR numbers only increase, so the highest-numbered PR is the current one
+  // (a stale merged PR under the same name must not make a new open PR look merged).
+  const latest = prs.reduce((newest: any, pr: any) => (pr.number > newest.number ? pr : newest));
+  return { number: latest.number, merged: Boolean(latest.merged_at) };
+}
+
+export async function isPrMerged(octokit: Octokit, owner: string, repoName: string, branch: string): Promise<boolean> {
+  return (await latestPrForBranch(octokit, owner, repoName, branch))?.merged ?? false;
+}
+
 /** queue-preflight only (it must see fork PRs to park them); land uses the core lookup (#3439). */
 export async function findOpenPRForIssue(
   octokit: Octokit,
@@ -471,16 +491,9 @@ export async function waitForMerge(
     writeLine(`[factory] #${issue} awaiting human merge (poll 120s)`);
     await sleep(120_000);
   }
-  // STOP ended the wait (#3291): a merged PR still lands as before; an open one is handed back
-  // to the queue so the next run's preflight adopts it, never released as done.
+  // STOP ended the wait (#3291): a merged PR still lands; an open one goes back to the queue, never released as done.
   const pr = await lookupPr(octokit, owner, repoName, branch).catch(() => null);
-  if (pr?.merged) {
-    emitEvent(paths.events, 'landed', issue, 'PR merged');
-    return;
-  }
-  throw new AwaitMergeStoppedError(
-    `STOP during await-merge: ${pr ? `PR #${pr.number}` : 'PR'} on ${branch} left open`,
-    branch,
-    pr?.number ?? null,
-  );
+  if (!pr?.merged)
+    throw new AwaitMergeStoppedError(`STOP during await-merge: PR on ${branch} left open`, branch, pr?.number ?? null);
+  emitEvent(paths.events, 'landed', issue, 'PR merged');
 }

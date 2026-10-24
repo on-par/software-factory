@@ -1,13 +1,12 @@
 // packages/cli/src/cli/awaiting-ci-wiring.ts — production RunLaneDeps for the awaiting-ci record and re-check (#3208)
 
-import type { EventKind, FactoryConfig, getFactoryPaths } from '@on-par/factory-core';
+import type { FactoryConfig, getFactoryPaths } from '@on-par/factory-core';
 import { resolveMergePolicy } from '@on-par/factory-core';
 import {
   awaitingCiFile,
   classifyHeadChecks,
   fetchRequiredContexts,
   listAllCheckRuns,
-  nextRecheckAt,
   resolveAwaitingCiCapMs,
   upsertAwaitingCi,
   warnNoBranchProtectionOnce,
@@ -15,10 +14,8 @@ import {
 import type { Octokit } from '@octokit/rest';
 
 import { recheckDueAwaitingCi, type AwaitingCiLaneOps } from './awaiting-ci-recheck.js';
-import type { AwaitingCiError } from './land-pr.js';
 import { squashMergeAndDelete } from './land-pr.js';
 import type { RunLaneDeps } from './run-lane-deps.js';
-import { shipRuntime } from './ship-runtime.js';
 
 /** Binds the awaiting-ci store, cap and GitHub lookups into the two RunLaneDeps that use them. */
 export function awaitingCiLaneDeps(
@@ -64,22 +61,4 @@ export function awaitingCiLaneDeps(
       });
     },
   };
-}
-
-/** #3208: records an awaiting-ci PR for the backoff re-check and logs it; a failed record only warns. */
-export async function noteAwaitingCi(
-  err: AwaitingCiError,
-  issue: number,
-  branch: string,
-  firstSeenAt: number,
-  record: RunLaneDeps['recordAwaitingCi'],
-  emit: (kind: EventKind, issue: number, message: string) => void,
-): Promise<void> {
-  const rec = { issue, prNumber: err.prNumber, branch, headSha: err.headSha, firstSeenAt };
-  try {
-    await record?.({ ...rec, attempts: 0, nextRecheckAt: nextRecheckAt(firstSeenAt, 0) });
-  } catch (e) {
-    emit('warn', issue, `could not record awaiting-ci for PR #${err.prNumber}: ${shipRuntime().errorDetail(e)}`);
-  }
-  emit('awaiting-ci', issue, `PR #${err.prNumber} awaiting CI on ${err.headSha}; re-checking soon`);
 }

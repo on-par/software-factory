@@ -4,7 +4,7 @@ import { existsSync, statSync } from 'node:fs';
 
 import { parkReasonFor } from '@on-par/factory-core';
 import type { EventKind, getFactoryPaths, ParkPayload, RunOutcome } from '@on-par/factory-core';
-import { formatLoadHold, logEvent, PARKED_LABEL, parkPayload } from '@on-par/factory-core/internal';
+import { formatLoadHold, logEvent, nextRecheckAt, PARKED_LABEL, parkPayload } from '@on-par/factory-core/internal';
 import type {
   AwaitingCiRecord,
   LoadGuardDecision,
@@ -25,7 +25,6 @@ import {
   waitForProvidersRestored,
 } from './lane-pause.js';
 import { waitForMerge } from './land.js';
-import { noteAwaitingCi } from './awaiting-ci-wiring.js';
 import { AwaitMergeStoppedError, AwaitingCiError, AwaitingReviewError } from './land-pr.js';
 import { restoredLoggingBreaker } from './provider-restored-log.js';
 import { releaseKeepOnRequeue } from './worktree-keep.js';
@@ -99,9 +98,8 @@ export async function runLane(
   // Issues still pending on this lane after `index`, in queue order (#3511).
   const queuedBehind = (index: number): number[] => pending.slice(index + 1).map((c) => c.issue);
   const seen = new Set(issues);
-  // Truthful park-time remaining count (#1222): local pending plus the lane's still-queued
-  // remote issues. Fail-closed — a count lookup may never change the message beyond the
-  // local truth, and never lane flow.
+  // Truthful park-time remaining count (#1222): local pending plus the lane's still-queued remote issues.
+  // Fail-closed — a count lookup may never change the message beyond the local truth, nor lane flow.
   const remainingAfter = async (index: number): Promise<number> => {
     const local = pending.length - index - 1;
     if (!countRemaining) return local;
@@ -111,8 +109,7 @@ export async function runLane(
       return local;
     }
   };
-  // Every terminal outcome releases the claim, then gives finished worktrees a GC pass before
-  // the lane moves on (#1757). The pass is fail-closed and must never change lane flow.
+  // Every terminal outcome releases the claim, then GCs finished worktrees (#1757); fail-closed, never changes flow.
   const settle = async (issue: number, outcome: QueueReleaseOutcome): Promise<void> => {
     // Drop the in-flight mark first so this lane's own finished worktree stays reapable.
     activeIssues.delete(issue);
@@ -126,8 +123,7 @@ export async function runLane(
     emitEvent(paths.events, 'warn', issue, m, { lane }),
   );
   const pauseCtx = { lane, paths, emitEvent };
-  // A parked release adds factory:parked (#3424). Log the clean park only once the label
-  // landed; a rejected add is surfaced as a fail event naming the issue and label (#3425).
+  // A parked release adds factory:parked (#3424). Log the clean park once the label landed; a rejected add fails (#3425).
   const parkAndSettle = async (issue: number, parkedMsg: string, park: ParkPayload): Promise<boolean> => {
     activeIssues.delete(issue);
     try {
@@ -193,8 +189,8 @@ export async function runLane(
     }
     providersDownWatch = undefined;
     if (i >= pending.length) {
-      // A persisted base hold on the unchanged origin/main SHA means the base is still broken
-      // (#2349): claiming would just cycle an issue again, so stop this lane without claiming.
+      // A persisted base hold on the unchanged origin/main SHA means the base is still broken (#2349):
+      // stop this lane without claiming.
       const gate = baseHoldGate ? await baseHoldGate().catch((): BaseHoldDecision => ({ kind: 'claim' })) : null;
       if (gate?.kind === 'hold') {
         emitEvent(paths.events, 'warn', lane, formatBaseHoldKept(lane, gate), { lane });
@@ -379,8 +375,7 @@ export async function runLane(
     } catch (err: any) {
       const { LaneParkError, LaneEnvironmentPauseError, IssueSkippedError, IssueDecomposedError } = shipRuntime();
       if (err instanceof AwaitingReviewError) {
-        // The land path already emitted the awaiting-review event and cleaned the
-        // worktree — this is a clean outcome, not a park; move to the next issue.
+        // The land path already emitted awaiting-review and cleaned the worktree: a clean outcome, not a park.
         awaitingReview++;
         streak = null;
         await settle(issue, layer && layer.index < layer.count ? 'queued' : 'done');
@@ -388,15 +383,23 @@ export async function runLane(
       }
       if (err instanceof AwaitingCiError) {
         // #3208: no CI run ever registered. Keep the PR open and record it for the backoff re-check; never a park.
-        await noteAwaitingCi(err, issue, landBranch ?? '', now().getTime(), recordAwaitingCi, emitAwaitingCi);
+        const firstSeenAt = now().getTime();
+        const rec = { issue, prNumber: err.prNumber, branch: landBranch ?? '', headSha: err.headSha, firstSeenAt };
+        await recordAwaitingCi?.({ ...rec, attempts: 0, nextRecheckAt: nextRecheckAt(firstSeenAt, 0) }).catch((e) =>
+          emitAwaitingCi(
+            'warn',
+            issue,
+            `could not record awaiting-ci for PR #${err.prNumber}: ${shipRuntime().errorDetail(e)}`,
+          ),
+        );
+        emitAwaitingCi('awaiting-ci', issue, `PR #${err.prNumber} awaiting CI on ${err.headSha}; re-checking soon`);
         awaitingReview++;
         streak = null;
         await settle(issue, 'done');
         continue;
       }
       if (err instanceof AwaitMergeStoppedError) {
-        // #3291: STOP ended the merge wait with the PR open; re-queue so the next run adopts and lands it.
-        emitEvent(paths.events, 'await-merge-stopped', issue, `${err.message}; issue re-queued`, { lane });
+        emitEvent(paths.events, 'await-merge-stopped', issue, `${err.message}; re-queued (#3291)`, { lane });
         streak = null;
         await settle(issue, 'queued');
         continue;
@@ -453,10 +456,8 @@ export async function runLane(
       }
       const reason = parkReasonFor(err);
       const logSuffix = /(?:^|\n)(Run logs: [^\r\n]+)$/.exec(String(err instanceof Error ? err.message : ''))?.[1];
-      // Terminal reason events (escalate/timeout/fail/conflict) are emitted exactly
-      // once by the layer that detects the failure — shipIssue for pipeline failures,
-      // the land path for merge failures. runLane owns only lane-lifecycle events
-      // (stopped/parked/lane-done), so injected ship functions never change ownership.
+      // Terminal reason events (escalate/timeout/fail/conflict) are emitted once by the detecting layer (shipIssue
+      // for pipeline failures, the land path for merge failures); runLane owns only lane-lifecycle events.
       // A blocked park waits on a filed blocker (#2315); it never counts toward the lane breaker.
       const signature = err instanceof LaneParkError && err.reason !== 'blocked' ? err.failureSignature : undefined;
       const checks = err instanceof LaneParkError ? (err.failingChecks ?? []) : [];
