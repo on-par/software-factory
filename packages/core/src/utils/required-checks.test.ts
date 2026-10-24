@@ -20,10 +20,16 @@ describe('evaluateRequiredChecks', () => {
     });
   });
 
+  it('does not flag noCodeHealthChecks on green or missing-check verdicts (#3620)', () => {
+    expect(evaluateRequiredChecks(['a'], [run('a', 'completed', 'success')])).not.toHaveProperty('noCodeHealthChecks');
+    expect(evaluateRequiredChecks(['a'], [])).not.toHaveProperty('noCodeHealthChecks');
+  });
+
   it('fails closed on an empty required set', () => {
     expect(evaluateRequiredChecks([], [run('a', 'completed', 'success')])).toEqual({
       green: false,
       reason: 'no required checks configured',
+      noCodeHealthChecks: true,
     });
   });
 
@@ -115,6 +121,7 @@ describe('fetchRequiredChecksVerdict', () => {
     expect(await fetchRequiredChecksVerdict(octokit, args)).toEqual({
       green: false,
       reason: 'no required checks configured',
+      noCodeHealthChecks: true,
     });
   });
 
@@ -123,6 +130,7 @@ describe('fetchRequiredChecksVerdict', () => {
     expect(await fetchRequiredChecksVerdict(octokit, args)).toEqual({
       green: false,
       reason: 'no required checks configured',
+      noCodeHealthChecks: true,
     });
   });
 
@@ -174,6 +182,7 @@ describe('fetchRequiredChecksVerdict', () => {
       expect(await fetchRequiredChecksVerdict(octokit, args, { pushFallback: true })).toEqual({
         green: false,
         reason: expect.stringContaining('no code-health checks'),
+        noCodeHealthChecks: true,
       });
     });
 
