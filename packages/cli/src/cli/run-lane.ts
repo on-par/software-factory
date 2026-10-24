@@ -4,9 +4,10 @@ import { existsSync, statSync } from 'node:fs';
 
 import { parkReasonFor } from '@on-par/factory-core';
 import type { EventKind, getFactoryPaths, ParkPayload, RunOutcome } from '@on-par/factory-core';
-import { formatLoadHold, logEvent, nextRecheckAt, PARKED_LABEL, parkPayload } from '@on-par/factory-core/internal';
+import { formatDiskHold, formatLoadHold, logEvent, nextRecheckAt, PARKED_LABEL, parkPayload } from '@on-par/factory-core/internal';
 import type {
   AwaitingCiRecord,
+  DiskGuardDecision,
   LoadGuardDecision,
   QueueClaim,
   QueueReleaseOutcome,
@@ -64,6 +65,7 @@ export async function runLane(
     countRemaining,
     baseHoldGate,
     loadGuard,
+    diskGuard,
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     now = () => new Date(),
     laneBreakerThreshold = 0,
@@ -161,7 +163,7 @@ export async function runLane(
     }
     parked++;
   };
-  const decide = (guard: () => LoadGuardDecision): LoadGuardDecision => {
+  const decide = <D extends { kind: 'claim' | 'hold' }>(guard: () => D): D | { kind: 'claim' } => {
     try {
       return guard();
     } catch {
@@ -172,6 +174,19 @@ export async function runLane(
     for (let d = decide(guard); d.kind === 'hold'; d = decide(guard)) {
       const retryAt = new Date(now().getTime() + d.retryMs);
       emitEvent(paths.events, 'warn', lane, formatLoadHold(lane, d, retryAt), { lane });
+      await sleep(d.retryMs);
+      if (pathExists(paths.stop)) return 'stopped';
+    }
+    return 'claim';
+  };
+  const holdForDisk = async (guard: () => DiskGuardDecision): Promise<'claim' | 'stopped'> => {
+    let first = true;
+    for (let d = decide(guard); d.kind === 'hold'; d = decide(guard)) {
+      const retryAt = new Date(now().getTime() + d.retryMs);
+      emitEvent(paths.events, first ? 'disk_low' : 'warn', lane, formatDiskHold(`lane '${lane}' not claiming:`, d, retryAt), {
+        lane,
+      });
+      first = false;
       await sleep(d.retryMs);
       if (pathExists(paths.stop)) return 'stopped';
     }
@@ -197,6 +212,7 @@ export async function runLane(
         return;
       }
       if (loadGuard && (await holdForLoad(loadGuard)) === 'stopped') break;
+      if (diskGuard && (await holdForDisk(diskGuard)) === 'stopped') break;
       if (pollReviewRework) {
         await pollReviewRework().catch((err) =>
           emitEvent(paths.events, 'warn', lane, `review-rework poll failed: ${shipRuntime().errorDetail(err)}`, {

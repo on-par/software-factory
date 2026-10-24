@@ -58,6 +58,7 @@ import {
   resolveDraftPrPolicy,
   resolveEffectiveConfig,
   resolvePrClassifierPolicy,
+  createDiskGuard,
   runStateFile,
   shouldProxyEgress,
   startEgressProxy,
@@ -402,7 +403,9 @@ async function shipIssueFrom(
     planPhase: phases.planPhase,
     buildPhase: phases.buildPhase,
     checkPhase: phases.checkPhase,
-    hostBuildSlot: hostBuildSlotPort(factoryConfig, ghRepo, issueNum, log, ctx?.runSlots),
+    hostBuildSlot: hostBuildSlotPort(factoryConfig, ghRepo, issueNum, log, ctx?.runSlots, {
+      guard: createDiskGuard(factoryConfig, { repoRoot, ghRepo, stateRoot: paths.root }),
+    }),
     shipPhase: shipPhaseForMode,
     requiredChecksVerdict: baseChecksVerdict(octokit, ghOwner, ghName, baseHealthOpts),
     checkBaseHealth: deps.checkBaseHealth ?? baseHealthWithCi(octokit, ghOwner, ghName, baseHealthOpts),

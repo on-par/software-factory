@@ -7,7 +7,7 @@ import type { ParkPayload } from '@on-par/factory-core';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createNotifier, type Notifier, type NotifySummary, resolveNotifyCommand, withParkNotify } from './notify.js';
+import { createNotifier, type Notifier, type NotifySummary, resolveNotifyCommand, withDiskLowNotify, withParkNotify } from './notify.js';
 
 const park: ParkPayload = { reason: 'fail', decision: 'park', lane: 'app', blockedBehind: [] };
 const parkSummary: NotifySummary = { kind: 'park', ts: 't1', issue: 7, lane: 'app', message: 'parked', park };
@@ -132,5 +132,48 @@ describe('withParkNotify', () => {
     const wrapped = withParkNotify(emit, notifier);
     expect(() => wrapped('e', 'parked', 1, 'm', { lane: 'app', park })).not.toThrow();
     expect(emit).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('withDiskLowNotify (#2284)', () => {
+  const tmp = createTempDirs();
+  afterEach(() => tmp.cleanup());
+
+  it('withDiskLowNotify sends one disk_low alert per host per hour', async () => {
+    const alertFile = join(await tmp.make('notify-'), 'disk-alert.json');
+    const emit = vi.fn();
+    const notify = vi.fn();
+    const notifier: Notifier = { notify, settle: async () => {}, parked: 0 };
+    let t = new Date('2026-10-16T12:00:00.000Z');
+    const wrapped = withDiskLowNotify(emit as any, notifier, { alertFile, now: () => t, host: 'mini' });
+    wrapped('/e', 'disk_low', 'all', 'disk low', { lane: 'app' } as any);
+    t = new Date('2026-10-16T12:30:00.000Z');
+    wrapped('/e', 'disk_low', 'all', 'disk low', { lane: 'app' } as any);
+    expect(emit).toHaveBeenCalledTimes(2);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith({
+      kind: 'disk_low',
+      ts: '2026-10-16T12:00:00.000Z',
+      host: 'mini',
+      lane: 'app',
+      message: 'disk low',
+    });
+    t = new Date('2026-10-16T13:01:00.000Z');
+    wrapped('/e', 'disk_low', 'all', 'disk low', { lane: 'app' } as any);
+    expect(notify).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores other events and survives a throwing notifier', async () => {
+    const alertFile = join(await tmp.make('notify-'), 'disk-alert.json');
+    const notify = vi.fn(() => {
+      throw new Error('nope');
+    });
+    const notifier: Notifier = { notify, settle: async () => {}, parked: 0 };
+    const emit = vi.fn(() => 'r');
+    const wrapped = withDiskLowNotify(emit as any, notifier, { alertFile });
+    wrapped('/e', 'warn', 'all', 'x');
+    expect(notify).not.toHaveBeenCalled();
+    expect(() => wrapped('/e', 'disk_low', 'all', 'x')).not.toThrow();
+    expect(notify).toHaveBeenCalledTimes(1);
   });
 });
