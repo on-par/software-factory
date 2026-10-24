@@ -4823,11 +4823,11 @@ bash scripts/verify.sh
 
       it('runs children in order, prints the summary, takes no labels/merge, and holds the lock', async () => {
         const { existsSync } = await import('node:fs');
-        const lockPath = join(paths().state, 'run.lock');
+        const childLocks = [10, 11].map((n) => join(paths().state, 'locks', 'run', String(n)));
         writeFileSync(paths().queue, 'app 7\n');
         const lockSeen: boolean[] = [];
         const recordLock = async () => {
-          lockSeen.push(existsSync(lockPath));
+          lockSeen.push(existsSync(childLocks[lockSeen.length] as string));
           return h.planResult;
         };
         phases.planPhase
@@ -4855,7 +4855,7 @@ bash scripts/verify.sh
         expect(logged()).toContain('#11 → PR #102 ready for review');
         expect(logged()).toContain('2/2 children ready for review');
         expect(lockSeen).toEqual([true, true]);
-        expect(existsSync(lockPath)).toBe(false);
+        expect(childLocks.some((l) => existsSync(l))).toBe(false);
       });
 
       it('continues past a failed child and exits 1', async () => {

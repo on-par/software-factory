@@ -2,15 +2,9 @@
 import { execFile } from 'node:child_process';
 import { delimiter, join } from 'node:path';
 
-import {
-  daemonRuntimePaths,
-  defaultRegistryPath,
-  listRepos,
-  loadRegistry,
-  readRunLockHolder,
-} from '@on-par/factory-core/internal';
-import { defaultIsPidAlive, getFactoryPaths } from '@on-par/factory-core';
+import { daemonRuntimePaths, defaultRegistryPath, listRepos, loadRegistry } from '@on-par/factory-core/internal';
 
+import { repoHasLiveRunLock } from './repo-live-run-lock.js';
 import { detectInstall, type InstallKind } from './daemon.js';
 import { EXIT_UP_TO_DATE, PACKAGE_NAME, parseSemver, type SelfUpdateDeps } from './self-update.js';
 import { recordUpdateResult, updateStatePath, type UpdateOutcome } from './update-state.js';
@@ -49,13 +43,12 @@ export interface SelfUpdateApplyResult {
 export type ApplyExec = NonNullable<SelfUpdateDeps['exec']>;
 export type SelfUpdateApplyDeps = SelfUpdateDeps;
 
-/** Slugs of attached repos whose run lock is held by a live pid. */
+/** Slugs of attached repos whose run lock (checkout or per-issue) is held by a live pid. */
 export async function attachedRunLocks(registryFile: string = defaultRegistryPath()): Promise<string[]> {
   const active: string[] = [];
   for (const e of listRepos(await loadRegistry(registryFile))) {
     if (e.state === 'detached') continue;
-    const holder = readRunLockHolder(getFactoryPaths(e.path, e.stateRoot).runLock);
-    if (holder && defaultIsPidAlive(holder.pid)) active.push(e.slug);
+    if (repoHasLiveRunLock(e)) active.push(e.slug);
   }
   return active;
 }

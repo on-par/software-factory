@@ -1125,6 +1125,14 @@ describe('auto-update (#1939)', () => {
       expect(await deps.activeRuns()).toEqual(['acme/app']);
     });
 
+    it('counts a repo whose only live lock is a per-issue run lock as active', async () => {
+      const { deps, repo } = setup();
+      const lock = join(getFactoryPaths(repo).runLocks, '7');
+      mkdirSync(lock, { recursive: true });
+      writeFileSync(join(lock, 'pid'), String(process.pid));
+      expect(await deps.activeRuns()).toEqual(['acme/app']);
+    });
+
     it('logs a STOP it cannot write and keeps going', async () => {
       const { deps, repo, logs } = setup();
       rmSync(repo, { recursive: true });

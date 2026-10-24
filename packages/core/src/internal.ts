@@ -294,8 +294,7 @@ export {
 } from './utils/microvm.js';
 export type { FileLockOptions, SyncFileLockOptions } from './utils/lock.js';
 export { withFileLock, withFileLockSync, withGitLock } from './utils/lock.js';
-export type { RunLockHolder, RunLockOptions } from './utils/run-lock.js';
-export { readRunLockHolder, RunLockHeldError, withRunLock } from './utils/run-lock.js';
+export * from './utils/run-lock.js';
 export {
   ensureWorktreeParentExcluded,
   formatWorktreeLocation,

@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { ModelDiagnosis } from '@on-par/factory-core';
-import { getFactoryPaths, readPortLeases } from '@on-par/factory-core';
+import { getFactoryPaths, readPortLeases, workKeyFromIssue } from '@on-par/factory-core';
 import type { GithubQueue } from '@on-par/factory-core/internal';
-import { RunLockHeldError } from '@on-par/factory-core/internal';
+import { RunLockHeldError, type withScopedRunLock } from '@on-par/factory-core/internal';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -3606,7 +3606,7 @@ describe('withRepoRunLock', () => {
 
   it('returns the wrapped function value when the lock is free', async () => {
     const result = await withRepoRunLock(paths, 'factory run', async () => 'ok', {
-      runLock: async (_dir, fn) => fn(),
+      runLock: async (_paths, _scope, fn) => fn(),
     });
 
     expect(result).toBe('ok');
@@ -3639,6 +3639,28 @@ describe('withRepoRunLock', () => {
     expect(events[0]).toMatchObject({ eventsFile: paths.events, type: 'run_lock_conflict' });
   });
 
+  it('uses checkout scope by default and forwards an issue scope, naming the conflicting lock dir in the remedy', async () => {
+    const scopes: unknown[] = [];
+    const runLock: typeof withScopedRunLock = async (_paths, scope, fn) => {
+      scopes.push(scope);
+      return fn();
+    };
+    await withRepoRunLock(paths, 'factory run', async () => 'ok', { runLock });
+    const issueScope = { kind: 'issue', key: workKeyFromIssue(5) } as const;
+    await withRepoRunLock(paths, 'factory ship', async () => 'ok', { runLock, scope: issueScope });
+    expect(scopes).toEqual([{ kind: 'checkout' }, issueScope]);
+
+    const conflictDir = '/repo/.factory/locks/run/5';
+    const err = await withRepoRunLock(paths, 'factory ship', async () => 'unreachable', {
+      scope: issueScope,
+      runLock: async () => {
+        throw new RunLockHeldError(conflictDir, { pid: 99 });
+      },
+      emitEvent: () => {},
+    }).catch((e: unknown) => e);
+    expect((err as CliExitError).message).toContain(`remove ${conflictDir}`);
+  });
+
   it('passes through a non-RunLockHeldError failure unchanged, without emitting an event', async () => {
     const emitEvent = vi.fn();
 
@@ -3658,7 +3680,7 @@ describe('withRepoRunLock', () => {
     const events: any[] = [];
 
     await withRepoRunLock(paths, 'factory supervise', async () => 'ok', {
-      runLock: async (_dir, fn, opts: any) => {
+      runLock: async (_paths, _scope, fn, opts: any) => {
         opts.onReclaim(4321);
         return fn();
       },

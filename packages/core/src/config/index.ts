@@ -796,6 +796,7 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string, env: NodeJ
     mergeLock: resolve(state, 'merge.lock'),
     gitLock: resolve(state, 'git.lock'),
     runLock: resolve(state, 'run.lock'),
+    runLocks: resolve(state, 'locks', 'run'),
     product: resolve(state, 'product'),
     stop: resolve(state, 'STOP'),
     costs: resolve(state, 'costs.jsonl'),
