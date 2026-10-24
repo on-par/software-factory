@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { createTempDirs } from '../harness/temp-dir.js';
 import type { EventKind } from '../events/kinds.js';
 import { ProviderBreaker } from '../router/breaker.js';
-import { providerCapGate, stageBlocked } from './stage-blocked.js';
+import { allProvidersDown, allProvidersDownMessage, providerCapGate, stageBlocked } from './stage-blocked.js';
 
 const NOW = Date.parse('2026-10-19T05:00:00.000Z');
 const HOUR = 60 * 60_000;
@@ -114,7 +114,7 @@ describe('stageBlocked', () => {
     await breaker.open('anthropic', 'usage_cap', HOUR);
     for (const candidates of [[], ['nope']]) {
       const r = await stageBlocked('plan', { router, breaker, candidates, failoverEnabled: true, now: () => NOW });
-      expect(r).toEqual({ blocked: false, providers: [], skip: new Set() });
+      expect(r).toEqual({ blocked: false, providers: [], open: [], skip: new Set() });
     }
   });
 
@@ -130,6 +130,39 @@ describe('stageBlocked', () => {
     });
     expect(r.blocked).toBe(false);
     expect(r.providers).toEqual([]);
+  });
+});
+
+describe('allProvidersDown', () => {
+  it('allProvidersDown returns the earliest known reset when one down provider is timed and the other untimed', async () => {
+    const breaker = freshBreaker();
+    const resetAt = Date.parse('2026-10-19T12:00:00.000Z');
+    await breaker.open('anthropic', 'usage_cap', resetAt - NOW);
+    await breaker.openUntilCredentialsChange('openai', 'error');
+    const r = await allProvidersDown('plan', {
+      router,
+      breaker,
+      candidates: ['claude-a', 'gpt-a'],
+      failoverEnabled: true,
+      now: () => NOW,
+    });
+    expect(r.down).toBe(true);
+    expect(r.earliestResetAt).toBe(new Date(resetAt).toISOString());
+    expect(r.providers).toEqual([
+      { provider: 'anthropic', reason: 'usage_cap', until: new Date(resetAt).toISOString() },
+      { provider: 'openai', reason: 'error', until: 'credentials-change' },
+    ]);
+  });
+
+  it('is down without a reset when every open provider is untimed, and not down for a zero-provider stage', async () => {
+    const breaker = freshBreaker();
+    await breaker.openUntilCredentialsChange('anthropic', 'error');
+    await breaker.open('openai', 'timeout', HOUR);
+    const deps = { router, breaker, failoverEnabled: true, now: () => NOW };
+    const r = await allProvidersDown('plan', { ...deps, candidates: ['claude-a', 'gpt-a'] });
+    expect(r.down).toBe(true);
+    expect(r.earliestResetAt).toBeUndefined();
+    expect((await allProvidersDown('plan', { ...deps, candidates: ['unknown'] })).down).toBe(false);
   });
 });
 
@@ -151,7 +184,7 @@ describe('providerCapGate', () => {
     expect(open.released).toBeUndefined();
     await breaker.open('anthropic', 'usage_cap', HOUR);
     await breaker.open('openai', 'usage_cap', 2 * HOUR);
-    const after = await gate.afterFailure(capped('usage_cap'), 'plan', 'claude');
+    const after = (await gate.afterFailure(capped('usage_cap'), 'plan', 'claude'))?.released;
     expect(after).toMatchObject({ state: 'released', reason: 'provider-cap', route: 'claude', branch: 'issue-7' });
     expect(logs).toContain('provider-cap-released');
   });
@@ -166,8 +199,42 @@ describe('providerCapGate', () => {
     expect(await gate.afterFailure(capped('error'), 'plan', undefined)).toBeUndefined();
     expect(await gate.afterFailure(new Error('plain'), 'plan', undefined)).toBeUndefined();
     expect(await gate.afterFailure(capped('usage_cap'), 'ship', undefined)).toBeUndefined();
+  });
+
+  it('afterFailure parks only_metered_left as all_providers_down, naming the metered providers', async () => {
+    const breaker = freshBreaker();
+    await breaker.open('anthropic', 'usage_cap', HOUR);
+    const gate = providerCapGate(router, breaker, request, () => {});
+    await gate.enterPlan(undefined, () => {});
     const metered = Object.assign(capped('usage_cap'), { detail: 'only_metered_left' });
-    expect(await gate.afterFailure(metered, 'plan', undefined)).toBeUndefined();
+    const verdict = await gate.afterFailure(metered, 'plan', undefined);
+    expect(verdict?.released).toBeUndefined();
+    expect(verdict?.down).toEqual({
+      stage: 'plan',
+      detail: 'only_metered_left',
+      providers: [
+        { provider: 'anthropic', reason: 'usage_cap', until: expect.any(String) },
+        { provider: 'openai', reason: 'metered', until: null },
+      ],
+    });
+    expect(allProvidersDownMessage(verdict!.down!, 7)).toContain('metered and are never used');
+    expect(
+      await gate.afterFailure(Object.assign(capped('usage_cap'), { detail: 'other' }), 'plan', undefined),
+    ).toBeUndefined();
+  });
+
+  it('enter returns a down verdict when every provider is untimed-open, and a release when one is timed', async () => {
+    const breaker = freshBreaker();
+    await breaker.openUntilCredentialsChange('anthropic', 'error');
+    await breaker.openUntilCredentialsChange('openai', 'error');
+    const gate = providerCapGate(router, breaker, request, () => {});
+    const verdict = await gate.enterPlan(undefined, () => {});
+    expect(verdict.released).toBeUndefined();
+    expect(verdict.down).toMatchObject({ stage: 'plan', detail: 'untimed_breakers' });
+    expect(allProvidersDownMessage(verdict.down!, 7)).toContain('until credentials change');
+    expect((await gate.afterFailure(capped('unavailable'), 'plan', undefined))?.down?.detail).toBe('untimed_breakers');
+    await breaker.open('anthropic', 'usage_cap', HOUR);
+    expect((await gate.enterPlan(undefined, () => {})).released).toMatchObject({ reason: 'provider-cap' });
   });
 
   it('watchCheck gates the CHECK stage on the build route models', async () => {
@@ -176,7 +243,9 @@ describe('providerCapGate', () => {
     await breaker.open('openai', 'rate_limit', HOUR);
     const gate = providerCapGate(router, breaker, request, () => {});
     gate.watchCheck('codex', 'gpt-a');
-    expect(await gate.afterFailure(capped('rate_limit'), 'check', 'codex')).toMatchObject({ reason: 'provider-cap' });
+    expect((await gate.afterFailure(capped('rate_limit'), 'check', 'codex'))?.released).toMatchObject({
+      reason: 'provider-cap',
+    });
     gate.watchCheck('command', undefined);
     expect(await gate.afterFailure(capped('rate_limit'), 'check', 'command')).toBeUndefined();
   });

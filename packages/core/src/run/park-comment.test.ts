@@ -29,6 +29,7 @@ const REASONS: ParkReason[] = [
   'held',
   'config',
   'blocked',
+  'all_providers_down',
 ];
 
 function input(overrides: Partial<ParkCommentInput> = {}): ParkCommentInput {

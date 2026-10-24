@@ -29,6 +29,7 @@ export function parkedPrAction(reason: ParkReason, greenAndChecked: boolean): 'c
     case 'held':
     case 'config':
     case 'blocked':
+    case 'all_providers_down':
       return greenAndChecked ? 'ready' : 'leave';
     default: {
       const unreachable: never = reason;

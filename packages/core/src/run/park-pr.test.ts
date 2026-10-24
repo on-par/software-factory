@@ -14,6 +14,7 @@ const ALL: ParkReason[] = [
   'held',
   'config',
   'blocked',
+  'all_providers_down',
 ];
 
 function fake(opts: { open?: boolean; draft?: boolean; updateError?: Error } = {}) {

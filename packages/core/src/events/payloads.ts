@@ -29,12 +29,12 @@ export interface LanePausedPayload {
   firstIssue: number;
   secondIssue: number;
   /** Absent for the signature breaker (#1928). */
-  cause?: 'environment' | 'provider-cap';
+  cause?: 'environment' | 'provider-cap' | 'all_providers_down';
   /** Base SHA the failing checkers also failed on; set when `cause` is 'environment'. */
   baseSha?: string;
   /** Earliest provider reset (ISO) the lane waits for; set when `cause` is 'provider-cap' (#3226). */
   resetAt?: string;
-  /** Capped providers of the blocked stage; set when `cause` is 'provider-cap' (#3226). */
+  /** Capped providers of the blocked stage; set when `cause` is 'provider-cap' (#3226) or 'all_providers_down' (#3235, the breaker-open ones the lane watches). */
   providers?: string[];
 }
 
@@ -83,6 +83,18 @@ export interface ProviderRefusedPayload {
   provider: string;
   login: 'api' | 'unknown';
   /** ISO instant of the refusal. */
+  at: string;
+}
+
+/** Payload of an `all_providers_down` event (#3235): every provider of the stage is down and no reset time is known. */
+export interface AllProvidersDownPayload {
+  stage: 'plan' | 'build' | 'check';
+  /** Each provider with its breaker reason (or 'metered'); `until` is an ISO instant, 'credentials-change', or null. */
+  providers: { provider: string; reason: string; until: string | null }[];
+  detail: 'untimed_breakers' | 'only_metered_left';
+  /** Always null: no reset time is known, that is why the issue parked instead of re-queuing. */
+  nextAvailableAt: string | null;
+  issue: number;
   at: string;
 }
 

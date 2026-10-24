@@ -11,6 +11,7 @@ import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/c
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
 import type { ShipResult, shipPhase as realShipPhase } from '../phases/ship.js';
 import { ProviderBreaker } from '../router/breaker.js';
+import { ModelRouterError } from '../router/executor-error.js';
 import { ModelRouter } from '../router/index.js';
 import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
@@ -91,7 +92,11 @@ const policy: RunPolicy = {
 
 interface Setup {
   open?: Record<string, number>;
+  /** Providers opened until credentials change: an untimed `auth` entry (#3232). */
+  openAuth?: string[];
   failClaude?: HarnessError | Error;
+  /** Rejects planPhase itself, as a router that exhausted its runnable models does. */
+  failPlan?: Error;
   request?: Partial<RunRequest>;
 }
 
@@ -101,8 +106,10 @@ async function run(setup: Setup = {}) {
   for (const [provider, cooldownMs] of Object.entries(setup.open ?? {})) {
     await breaker.open(provider, 'usage_cap', cooldownMs);
   }
+  for (const provider of setup.openAuth ?? []) await breaker.openUntilCredentialsChange(provider, 'error');
   const called: string[] = [];
   const events: Array<[string, string]> = [];
+  const extras: Array<[string, unknown]> = [];
   const executor = {
     runModel: async (model: string) => {
       called.push(model);
@@ -112,6 +119,7 @@ async function run(setup: Setup = {}) {
   };
   const router = new ModelRouter(modelsConfig(), ROUTES, false, executor);
   const planPhase = vi.fn<typeof realPlanPhase>(async (opts) => {
+    if (setup.failPlan) throw setup.failPlan;
     const result = await router.run('plan', 'p', {
       modelOverride: opts.modelOverride,
       modelFallbacks: opts.modelFallbacks,
@@ -134,7 +142,10 @@ async function run(setup: Setup = {}) {
     router,
     octokit: {} as Octokit,
     workspace: { path: '/tmp/wt', dispose: async () => {} } as Workspace,
-    events: () => (type: string, msg: string) => events.push([type, msg]),
+    events: () => (type: string, msg: string, extra?: { allProvidersDown?: unknown }) => {
+      events.push([type, msg]);
+      if (extra?.allProvidersDown) extras.push([type, extra.allProvidersDown]);
+    },
     breaker,
     resolveConstitution: () => null,
     planPhase,
@@ -148,7 +159,7 @@ async function run(setup: Setup = {}) {
   };
   const before = Date.now();
   const outcome = await runIssue({ ...request, ...setup.request }, policy, ports);
-  return { outcome, called, events, planPhase, buildPhase, before, after: Date.now() };
+  return { outcome, called, events, extras, planPhase, buildPhase, before, after: Date.now() };
 }
 
 const types = (events: Array<[string, string]>) => events.map(([t]) => t);
@@ -207,40 +218,49 @@ describe('runIssue — stage-boundary provider gate (#3226)', () => {
     }
   });
 
-  it('all providers open on untimed reasons does not release', async () => {
-    counter += 1;
-    const breaker = new ProviderBreaker(join(dir, `breaker-${counter}.json`));
-    await breaker.open('anthropic', 'timeout', HOUR);
-    await breaker.open('openai', 'unavailable', HOUR);
-    const executor = { runModel: async () => 'planned' };
-    const router = new ModelRouter(modelsConfig(), ROUTES, false, executor);
-    const planPhase = vi.fn<typeof realPlanPhase>().mockResolvedValue({
-      ok: true,
-      route: 'claude',
-      specPath: '/tmp/wt/spec.md',
-      model: 'm',
-      designArtifact: null,
-    } satisfies PlanResult);
-    const ports: RunPorts = {
-      router,
-      octokit: {} as Octokit,
-      workspace: { path: '/tmp/wt', dispose: async () => {} } as Workspace,
-      events: () => () => {},
-      breaker,
-      resolveConstitution: () => null,
-      planPhase,
-      buildPhase: vi.fn<typeof realBuildPhase>().mockResolvedValue({ ok: true, model: 'm', route: 'claude' }),
-      checkPhase: vi.fn<typeof realCheckPhase>().mockResolvedValue({
-        passed: true,
-        summary: { failures: 0, passes: 1, skips: 0, total: 1, results: [] },
-        reworkRounds: 0,
-      } satisfies CheckPhaseResult),
-      shipPhase: vi.fn<typeof realShipPhase>().mockResolvedValue({ ok: true, prNumber: 42 } satisfies ShipResult),
-    };
-    const outcome = await runIssue(request, policy, ports);
-    expect(outcome.state).not.toBe('released');
-    expect(planPhase).toHaveBeenCalled();
-    expect(planPhase.mock.calls[0][0].skipProviders).toBeUndefined();
+  it('every plan provider auth-open parks all_providers_down before any model call', async () => {
+    const { outcome, called, events, extras, planPhase } = await run({ openAuth: ['anthropic', 'openai'] });
+    expect(called).toEqual([]);
+    expect(planPhase).not.toHaveBeenCalled();
+    expect(outcome).toMatchObject({
+      state: 'parked',
+      reason: 'all_providers_down',
+      providersDown: { stage: 'plan', detail: 'untimed_breakers', providers: ['anthropic', 'openai'] },
+    });
+    expect(types(events).filter((t) => t === 'all_providers_down')).toHaveLength(1);
+    expect(types(events)).not.toContain('fail');
+    expect(extras).toEqual([
+      [
+        'all_providers_down',
+        expect.objectContaining({
+          stage: 'plan',
+          detail: 'untimed_breakers',
+          nextAvailableAt: null,
+          issue: request.issue,
+          providers: [
+            { provider: 'anthropic', reason: 'error', until: 'credentials-change' },
+            { provider: 'openai', reason: 'error', until: 'credentials-change' },
+          ],
+        }),
+      ],
+    ]);
+  });
+
+  it('only_metered_left from PLAN parks all_providers_down with one event', async () => {
+    const { outcome, events, extras } = await run({
+      failPlan: new ModelRouterError('only metered providers left', 'usage_cap', [], 'only_metered_left'),
+      request: { modelPins: { sources: {}, plan: 'claude-plan' } },
+    });
+    expect(outcome).toMatchObject({
+      state: 'parked',
+      reason: 'all_providers_down',
+      providersDown: { stage: 'plan', detail: 'only_metered_left', providers: [] },
+    });
+    expect(types(events).filter((t) => t === 'all_providers_down')).toHaveLength(1);
+    expect(extras[0][1]).toMatchObject({
+      detail: 'only_metered_left',
+      providers: [{ provider: 'anthropic', reason: 'metered', until: null }],
+    });
   });
 
   it('a blocked BUILD releases before buildPhase when every build candidate is timed-open', async () => {

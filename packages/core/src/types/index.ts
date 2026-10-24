@@ -1,5 +1,6 @@
 // src/types/index.ts — Core type definitions for the Software Factory
 import type {
+  AllProvidersDownPayload,
   EventKind,
   FlakyTestsPayload,
   LanePausedPayload,
@@ -337,6 +338,7 @@ export interface FactoryEvent {
   prClassification?: PrClassificationRecord;
   providerAuthRejected?: ProviderAuthRejectedPayload; // Rejected-credential details on a provider_auth_rejected event (#3232).
   providerBreakerClose?: ProviderBreakerClosePayload; // Close cause on a provider_breaker_close event (#3232).
+  allProvidersDown?: AllProvidersDownPayload; // Stage, providers and detail on an all_providers_down park (#3235).
   providerCapped?: ProviderCappedPayload; // Usage-cap details on a provider_capped event (#3337).
   providerRefused?: ProviderRefusedPayload; // Refused metered login on a provider_refused event (#3335).
   park?: ParkPayload; // Structured park reason/decision/lane/queue on a park event (#3511).

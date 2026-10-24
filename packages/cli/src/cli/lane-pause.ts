@@ -1,6 +1,6 @@
 // packages/cli/src/cli/lane-pause.ts — the lane-paused event, base hold, and comment, moved out of run-lane.ts
 
-import type { getFactoryPaths, LanePausedPayload } from '@on-par/factory-core';
+import type { getFactoryPaths, LanePausedPayload, ProviderBreaker } from '@on-par/factory-core';
 import type { logEvent } from '@on-par/factory-core/internal';
 
 import { BASE_HOLD_CI_RECHECK_MS, writeBaseHold } from './base-hold.js';
@@ -105,6 +105,64 @@ export async function waitForProviderReset(
     await sleep(Math.min(until - now().getTime(), 60_000));
   }
   return false;
+}
+
+/** How often the all_providers_down pause re-reads the breaker and the config stamp (#3235). */
+export const ALL_PROVIDERS_DOWN_POLL_MS = 60_000;
+
+/** Emits the lane-paused event for an all_providers_down park: claiming resumes when a breaker closes or the config changes (#3235). */
+export function pauseLaneForAllProvidersDown(
+  ctx: LanePauseContext,
+  issue: number,
+  down: { stage: string; providers: string[]; detail: string },
+): void {
+  const { lane, paths, emitEvent } = ctx;
+  const payload: LanePausedPayload = {
+    lane,
+    signature: '',
+    failingChecks: [],
+    firstIssue: issue,
+    secondIssue: issue,
+    cause: 'all_providers_down',
+    providers: down.providers,
+  };
+  emitEvent(
+    paths.events,
+    'lane-paused',
+    lane,
+    `lane '${lane}' paused: every ${down.stage.toUpperCase()} provider is down with no known reset (${down.providers.join(', ') || down.detail}); #${issue} parked all_providers_down — claiming resumes when a breaker closes (\`factory breaker reset <provider>\` or new credentials) or the config changes`,
+    { lane, lanePaused: payload },
+  );
+}
+
+/** Waits (STOP-aware) until a watched provider's breaker closes or the config stamp changes; true when STOP ended the wait (#3235).
+ *  A breaker read that throws counts as closed so a broken file never strands the lane. */
+export async function waitForProvidersRestored(
+  ctx: LanePauseContext,
+  watch: { providers: string[]; configStamp: string },
+  deps: {
+    breaker: Pick<ProviderBreaker, 'status'>;
+    configStamp: () => string;
+    sleep: (ms: number) => Promise<void>;
+    pathExists: (path: string) => boolean;
+  },
+): Promise<boolean> {
+  const closed = async (provider: string): Promise<boolean> => {
+    try {
+      return !(await deps.breaker.status(provider)).open;
+    } catch {
+      return true;
+    }
+  };
+  for (;;) {
+    if (deps.pathExists(ctx.paths.stop)) {
+      ctx.emitEvent(ctx.paths.events, 'stopped', ctx.lane, 'STOP file present', { lane: ctx.lane });
+      return true;
+    }
+    for (const provider of watch.providers) if (await closed(provider)) return false;
+    if (deps.configStamp() !== watch.configStamp) return false;
+    await deps.sleep(ALL_PROVIDERS_DOWN_POLL_MS);
+  }
 }
 
 /** Emits the lane-breaker lane-paused event and posts the lane-paused comment (#1918, #1919). */

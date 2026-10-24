@@ -59,6 +59,7 @@ export const TERMINAL_EVENT_KINDS = new Set<EventKind>([
   'no-pr-complete',
   'environment-released',
   'provider-cap-released',
+  'all_providers_down',
   'fail',
   'escalate',
   'held',
