@@ -18,6 +18,7 @@ import { failoversFrom, type ModelRouter, type ProviderFailureInfo, type RouterR
 import { isEgressEnforced, type SandboxEventType, type SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering } from '../steering/index.js';
 import type { Constitution, FailoverReason } from '../types/index.js';
+import { envErrorLine, sandboxEnvParkMessage } from '../environment/sandbox-env.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
 import type { BuildRoutePin } from '../config/repo.js';
 import { classifyNoDiff, renderNoDiffDetail, workerOutputTail, type NoDiffCause } from './build-no-diff.js';
@@ -40,7 +41,9 @@ export interface BuildResult {
   /** Set on a non-escalation build failure; 'no_diff' = worker produced no diff,
    *  'junk_only_diff' = worker changed only generated/cache files, 'budget_exceeded' = the
    *  budget guard stopped the worker mid-session (#3320). */
-  reason?: 'no_diff' | 'junk_only_diff' | 'budget_exceeded';
+  reason?: 'no_diff' | 'junk_only_diff' | 'budget_exceeded' | 'sandbox_env';
+  /** Park message when the worker printed an ENV-ERROR: line (#3332). */
+  sandboxEnv?: string;
   /** Why an empty-diff build produced nothing (#3273); set only with reason 'no_diff'. */
   noDiffCause?: NoDiffCause;
   /** Rendered cause, open questions and redacted worker tail for the fail event and park message (#3273). */
@@ -82,11 +85,13 @@ export async function buildPhase(opts: Parameters<typeof buildPhaseImpl>[0]): Pr
         ? `build complete (model ${r.model})`
         : r.reason === 'budget_exceeded'
           ? 'build stopped: per-issue budget exceeded'
-          : r.reason === 'junk_only_diff'
-            ? 'build failed: worker changed only generated/cache files'
-            : r.reason === 'no_diff'
-              ? 'build failed: worker produced no diff'
-              : `build escalated: ${r.escalate ?? 'unknown'}`,
+          : r.reason === 'sandbox_env'
+            ? 'build stopped: sandbox environment error'
+            : r.reason === 'junk_only_diff'
+              ? 'build failed: worker changed only generated/cache files'
+              : r.reason === 'no_diff'
+                ? 'build failed: worker produced no diff'
+                : `build escalated: ${r.escalate ?? 'unknown'}`,
   );
 }
 
@@ -391,6 +396,12 @@ async function buildPhaseImpl(opts: {
     });
   }
   await opts.onWorkerResult?.(result);
+  const envLine = envErrorLine(result.output ?? '');
+  if (envLine) {
+    log('build', `worker reported a sandbox environment error: ${envLine}`);
+    const sandboxEnv = sandboxEnvParkMessage('build', envLine);
+    return { ok: false, model: result.model, route, reason: 'sandbox_env', sandboxEnv };
+  }
   if (isEscalation(result.output)) {
     const escalateLine = escalationLine(result.output);
     log('escalate', escalateLine ?? 'build escalated');

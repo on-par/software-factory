@@ -128,6 +128,8 @@ export interface CheckerOutput {
   unavailable?: boolean;
   /** True when the checker's command ended by timeout (#3186): inconclusive, never cached. */
   timedOut?: boolean;
+  /** The verify.sh sandbox marker line when the tests command exited 78 with it (#3332); CHECK parks sandbox-env. */
+  sandboxEnv?: string;
   evidencePlanResults?: EvidencePlanResult[];
 }
 

@@ -844,6 +844,7 @@ async function runIssueOnce(
       });
       route = build.route;
       if (!build.ok && build.reason !== 'budget_exceeded') {
+        if (build.sandboxEnv) return await terminalParked('sandbox-env', build.sandboxEnv);
         const why = build.noDiffDetail ? `\n\n${build.noDiffDetail}` : '';
         const parkText =
           build.reason === 'no_diff'
@@ -956,6 +957,7 @@ async function runIssueOnce(
       failed: CheckPhaseResult,
       opts: { ciReworkRound?: number } = {},
     ): Promise<RunOutcome> => {
+      if (failed.sandboxEnv) return terminalParked('sandbox-env', failed.sandboxEnv);
       if (failed.environment) {
         const env = failed.environment;
         if (env.cause === 'config') {

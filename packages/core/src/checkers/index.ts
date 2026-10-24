@@ -23,6 +23,7 @@ import type { LintCommand, PackageJson } from './resolve-commands.js';
 import { isTemplateToken } from '../config/template-tokens.js';
 import { extractJsonObjects } from '../utils/json.js';
 import { APP_SMOKE_CHECKER, appSmokeChecker } from './app-smoke.js';
+import { sandboxEnvMarkerLine } from '../environment/sandbox-env.js';
 import { writeCommandLog } from './command-log.js';
 import { describeCommandFailureTail, describeTestFailure } from './command-output.js';
 
@@ -216,11 +217,13 @@ export const testsChecker: CheckerFn = async (ctx) => {
       });
       if (r.ok) return { checker: 'tests', result: 'PASS', details: TESTS_PASS_DETAILS[cmd.runner] };
       // For pytest, fail closed: a surface that cannot run (pytest missing, import error) is FAIL, never SKIP
+      const marker = sandboxEnvMarkerLine(r);
       return {
         checker: 'tests',
         result: 'FAIL',
         details: await commandFailureDetails(ctx, 'tests', cmd.label, r, describeFailure(r)),
         ...(r.timedOut ? { timedOut: true } : {}),
+        ...(marker ? { sandboxEnv: marker } : {}),
       };
     }
 

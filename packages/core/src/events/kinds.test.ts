@@ -67,6 +67,16 @@ describe('EVENT_TRAITS', () => {
     expect(isParkKind('ci-rescue-failed')).toBe(false);
   });
 
+  it('classifies sandbox-env as a parked terminal event (#3332)', () => {
+    expect(EVENT_TRAITS['sandbox-env']).toEqual({
+      severity: 'error',
+      isPark: true,
+      isTerminal: true,
+      laneStatus: 'parked',
+    });
+    expect(isParkKind('sandbox-env')).toBe(true);
+  });
+
   it('classifies flaky_tests as non-park evidence (#2302)', () => {
     expect(EVENT_TRAITS.flaky_tests).toEqual({ severity: 'info', isPark: false, isTerminal: false });
   });
