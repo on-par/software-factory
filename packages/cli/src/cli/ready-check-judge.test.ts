@@ -1,8 +1,5 @@
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
-import { describe, expect, it, vi } from 'vitest';
+import { createTempDirs } from '@on-par/factory-core/testing';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   DeepCheckError,
@@ -47,7 +44,9 @@ function judgeRunner(judgeOutputs: string[], calls: Array<[string, string]> = []
   });
 }
 
-const cacheDir = () => mkdtempSync(join(tmpdir(), 'ready-check-cache-'));
+const tmp = createTempDirs();
+afterEach(() => tmp.cleanup());
+const cacheDir = () => tmp.makeSync('ready-check-cache-');
 const PLAIN = 'Customers cannot reset their password from the login page. Add a reset link that emails a token.';
 
 describe('runIssueCheck readiness judge', () => {
