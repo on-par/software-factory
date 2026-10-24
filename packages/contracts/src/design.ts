@@ -1,6 +1,6 @@
 // src/design.ts — DesignArtifact: the structured design block PLAN emits and BUILD
 // consumes (originally #422; moved here in #466 so both apps share one definition;
-// deepened in #480).
+// deepened in #480; outline added in #3622 (additive, optional key; no schema version)).
 import { z } from 'zod';
 
 export const VerificationStepSchema = z.object({
@@ -114,6 +114,18 @@ export const EvidencePlanEntrySchema = z.discriminatedUnion('kind', [
   NoEvidenceSchema,
 ]);
 
+// Vertical-slice outline (#3622): ordered build steps, each ending in one testable result.
+// Additive and optional at the schema level, so pre-#3622 artifacts still parse (no version bump).
+export const OutlineStepSchema = z.object({
+  result: z.string().min(1),
+  files: z.array(stringListItem).min(1),
+  automatedChecks: z.array(stringListItem).min(1),
+  manualChecks: z
+    .array(stringListItem)
+    .nullish()
+    .transform((v) => v ?? []),
+});
+
 // A bare YAML key parses to null, which must not fail the whole parse; and unlike
 // targetTypes the key stays optional in the inferred type (no [] default injected).
 const optionalList = <T extends z.ZodType>(item: T) => z.preprocess((v) => v ?? undefined, z.array(item).optional());
@@ -145,6 +157,7 @@ export const DesignArtifactSchema = z.object({
   behaviorDelta: optionalList(BehaviorDeltaRowSchema),
   externalLists: optionalList(ExternalListSchema),
   evidencePlan: optionalList(EvidencePlanEntrySchema),
+  outline: z.preprocess((v) => v ?? undefined, z.array(OutlineStepSchema).min(1).optional()),
 });
 
 export type VerificationStep = z.infer<typeof VerificationStepSchema>;
@@ -162,6 +175,7 @@ export type CommandEvidence = z.infer<typeof CommandEvidenceSchema>;
 export type ScreenshotEvidence = z.infer<typeof ScreenshotEvidenceSchema>;
 export type NoEvidence = z.infer<typeof NoEvidenceSchema>;
 export type EvidencePlanEntry = z.infer<typeof EvidencePlanEntrySchema>;
+export type OutlineStep = z.infer<typeof OutlineStepSchema>;
 export type DesignArtifact = z.infer<typeof DesignArtifactSchema>;
 
 const STRING_LIST_FIELDS = ['interfacesTouched', 'behaviorContract', 'openQuestions', 'edgeInputs'] as const;
@@ -184,6 +198,15 @@ export function findCoercedDesignItems(design: unknown): string[] {
     d.externalLists.forEach((row, i) => {
       if (typeof row === 'object' && row !== null) {
         walk((row as Record<string, unknown>).gaps, `externalLists[${i}].gaps`);
+      }
+    });
+  }
+  if (Array.isArray(d.outline)) {
+    d.outline.forEach((step, i) => {
+      if (typeof step === 'object' && step !== null) {
+        for (const key of ['files', 'automatedChecks', 'manualChecks']) {
+          walk((step as Record<string, unknown>)[key], `outline[${i}].${key}`);
+        }
       }
     });
   }
