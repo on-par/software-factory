@@ -31,6 +31,7 @@ Periodic renewal that pushes a claim lease's expiry forward so a live run is not
 ### Park
 
 Stopping a run without shipping, with a `ParkReason`, the `factory:parked` label and one park comment saying why. See [packages/core/src/run/outcome.ts](packages/core/src/run/outcome.ts), [packages/core/src/run/park-comment.ts](packages/core/src/run/park-comment.ts), `PARKED_LABEL` in [packages/core/src/queue/github-queue.ts](packages/core/src/queue/github-queue.ts), and [ADR-0054](docs/adr/0054-runoutcome-is-a-core-owned-value-type-park-classification-is-structural-not-instanceof.md).
+Issues labeled `factory:needs-design` park as `held` after PLAN; see [approve-design-checkpoint](docs/runbooks/approve-design-checkpoint.md).
 
 ### Release
 
