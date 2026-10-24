@@ -1,7 +1,7 @@
 import { createGithubQueue, createOctokitQueueClient } from '@on-par/factory-core/internal';
 import { describe, expect, it, vi } from 'vitest';
 
-import { statefulIssueLabels } from './stateful-issue-labels.js';
+import { statefulIssueLabels } from './test-support/stateful-issue-labels.js';
 import { buildQueueAddJson } from './queue-add-json.js';
 
 const names = (...n: string[]) => n.map((name) => ({ name }));

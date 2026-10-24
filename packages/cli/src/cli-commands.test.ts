@@ -1,5 +1,5 @@
 import type * as ChildProcess from 'node:child_process';
-import { statefulIssueLabels } from './cli/stateful-issue-labels.js';
+import { statefulIssueLabels } from './cli/test-support/stateful-issue-labels.js';
 import { createHash } from 'node:crypto';
 import {
   appendFileSync,
