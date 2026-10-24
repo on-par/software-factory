@@ -71,7 +71,7 @@ import { resolveRunBranch } from './run-branch.js';
 import { shipRuntime } from './ship-runtime.js';
 import { runStateRecorder } from './ship-run-state.js';
 import { maybeWriteBenchmarkArtifacts, maybeWriteLocalRunReport } from './ship-reports.js';
-import { modelOverrideMessages } from './model-override-messages.js';
+import { applyMeteredGuard, modelOverrideMessages } from './model-override-messages.js';
 import {
   buildRunRequest,
   decomposeQueue,
@@ -291,7 +291,7 @@ async function shipIssueFrom(
   log('issue-title', issueTitle);
   const repoConfigLabel = repoConfigFileFor(repoRoot, paths.config).relPath;
   for (const msg of modelOverrideMessages(modelPins, repoConfig, repoConfigLabel)) log('model-override', msg);
-
+  applyMeteredGuard(router, modelPins, log);
   const skipReason = closedWorkSkipReason(work);
   if (skipReason) {
     log('skipped-already-closed', skipReason);

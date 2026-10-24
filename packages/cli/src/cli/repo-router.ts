@@ -38,3 +38,9 @@ export function newRepoRouter(repoRoot: string, loaders: RepoRouterLoaders, Rout
   router.setLocalAuthSink?.(recordLocalAuthFailure);
   return router;
 }
+
+/** The router wiring every CLI model router shares: the local-auth sink and the metered failover guard (#3234). */
+export function applyRouterGuards(router: ModelRouter): void {
+  router.setLocalAuthSink?.(recordLocalAuthFailure);
+  router.setProviderPlanDeps?.({});
+}

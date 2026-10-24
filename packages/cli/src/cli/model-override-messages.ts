@@ -1,6 +1,7 @@
 // packages/cli/src/cli/model-override-messages.ts — the `model-override` lines shipIssue logs, split from ship.ts
 
-import type { EffectiveModelPins, RepoFactoryConfig } from '@on-par/factory-core';
+import type { EffectiveModelPins, ModelRouter, RepoFactoryConfig } from '@on-par/factory-core';
+import { meteredPrimaryRouteWarnings } from '@on-par/factory-core/internal';
 
 /** One `model-override` message per pinned phase, naming the file or env var it came from (#2497). */
 export function modelOverrideMessages(
@@ -18,4 +19,19 @@ export function modelOverrideMessages(
       : []),
     ...(repoPins?.checker ? [`checker model pinned to ${repoPins.checker} (${repoConfigLabel})`] : []),
   ];
+}
+
+/** Turn on the metered failover guard and log one `metered_primary_route` warning per metered plan/build pin (#3234). */
+export function applyMeteredGuard(
+  router: ModelRouter,
+  pins: EffectiveModelPins,
+  log: (type: 'warn', msg: string) => void,
+): void {
+  router.setProviderPlanDeps?.({});
+  const registry = router.registryRef;
+  const lookup = (m: string) => {
+    const def = registry?.get(m);
+    return def && { ...def, harness: registry?.getHarnessId(m) };
+  };
+  for (const msg of meteredPrimaryRouteWarnings(pins, lookup)) log('warn', msg);
 }

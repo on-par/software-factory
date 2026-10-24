@@ -89,3 +89,15 @@ describe('extractFailoverReason', () => {
     expect(extractFailoverReason('boom')).toBeUndefined();
   });
 });
+
+describe('router error detail (#3234)', () => {
+  it('keeps detail and returns it from routerFailureOf', () => {
+    const err = new ModelRouterError('only metered', 'unavailable', [], 'only_metered_left');
+    expect(err.detail).toBe('only_metered_left');
+    expect(routerFailureOf(err)).toEqual({ reason: 'unavailable', attempts: [], detail: 'only_metered_left' });
+  });
+
+  it('omits the detail key when there is none', () => {
+    expect(routerFailureOf(new ModelRouterError('x', 'error', []))).not.toHaveProperty('detail');
+  });
+});

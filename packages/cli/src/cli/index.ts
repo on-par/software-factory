@@ -230,7 +230,6 @@ import {
   writePortFile,
   buildTriagePrompt,
   parseTriageCandidates,
-  recordLocalAuthFailure,
   laneSlug,
   formatStopMarker,
   readStopMarker,
@@ -327,7 +326,7 @@ import { cmdRisk } from './risk.js';
 import { buildFeedbackDeps, type FeedbackDeps, resolveFeedbackRepo, runFeedback } from './feedback.js';
 import { ensureFactoryExcluded, writeSampleQueue } from './init-files.js';
 import { detectChecksForInit } from './detect-checks.js';
-import { newRepoRouter } from './repo-router.js';
+import { applyRouterGuards, newRepoRouter } from './repo-router.js';
 import { cmdLogs } from './logs.js';
 import { mergeScopeNotice } from './merge-scope.js';
 import { selectOctokit } from './github-stub.js';
@@ -1603,7 +1602,7 @@ async function cmdClassifierBacktestEntry(opts: ClassifierBacktestOptions) {
     effective.localOnly,
   );
   router.setCodexFullAccessTasks?.(configLoaders.loadFactoryConfigForRepo(paths.config).sandbox.codexFullAccessTasks);
-  router.setLocalAuthSink?.(recordLocalAuthFailure);
+  applyRouterGuards(router);
   try {
     await cmdClassifierBacktest(
       { ...opts, branchPrefix },
@@ -1929,7 +1928,7 @@ async function cmdTui(opts: { localQueue?: boolean } = {}, runTuiImpl: typeof ru
     effective.localOnly,
   );
   router.setCodexFullAccessTasks?.(configLoaders.loadFactoryConfigForRepo(paths.config).sandbox.codexFullAccessTasks);
-  router.setLocalAuthSink?.(recordLocalAuthFailure);
+  applyRouterGuards(router);
   const effectiveConfigLines = describeEffectiveConfig({
     router,
     repo: repoConfig,
@@ -2943,7 +2942,7 @@ async function cmdTriage(opts: { product?: string; model?: string }) {
     effective.localOnly,
   );
   router.setCodexFullAccessTasks?.(configLoaders.loadFactoryConfigForRepo(paths.config).sandbox.codexFullAccessTasks);
-  router.setLocalAuthSink?.(recordLocalAuthFailure);
+  applyRouterGuards(router);
   router.skipMissingHarnessClis(coreOps.isCommandAvailable);
   router.setCostSink((entry) => logCost(paths.costs, { ...entry, issue: '-' }));
 
