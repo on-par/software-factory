@@ -72,6 +72,9 @@ export interface WatchChecksOptions {
    *  is missing or running the watch keeps polling. Unset, or a branch with none, keeps the
    *  all-check-runs rule. */
   requiredChecks?: { branch: string };
+  /** Called once per watch when `requiredChecks.branch` resolves to zero required contexts, so the gate falls back to all
+   *  checks on the head (#3208). A throw is swallowed. */
+  onNoRequiredChecks?: (info: { branch: string }) => void;
   /** Run the #2488 no-CI probe without the grace-elapsed exit. Default false. */
   probeNoCi?: boolean;
   /** Minimum gap between onProgress calls. Default 60_000. */
@@ -205,6 +208,24 @@ export async function listAllCheckRuns(
   return runs;
 }
 
+/** Whether the ref has any check run or commit status at all (#3208). `false` only when both counts are zero;
+ *  `undefined` when either lookup fails, so callers fail closed. */
+export async function hasAnyCiSignal(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  ref: string,
+): Promise<boolean | undefined> {
+  try {
+    if ((await listAllCheckRuns(octokit, owner, repo, ref, 1, 1)).length > 0) return true;
+  } catch {
+    return undefined;
+  }
+  const statuses = await commitStatusCount(octokit, owner, repo, ref);
+  if (!statuses) return undefined;
+  return statuses.total > 0;
+}
+
 export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> {
   const {
     octokit,
@@ -225,6 +246,7 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
     progressIntervalMs = DEFAULT_PROGRESS_INTERVAL_MS,
     onProgress,
     onNoChecks,
+    onNoRequiredChecks,
     sleep = (ms) => new Promise<void>((r) => setTimeout(r, ms)),
     now = () => Date.now(),
   } = opts;
@@ -242,7 +264,14 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
   let noCiProbed = false;
   let required: string[] | undefined;
   while (now() < deadline) {
-    required ??= await resolveRequiredContexts(octokit, owner, repo, requiredChecks?.branch);
+    if (!required) {
+      required = await resolveRequiredContexts(octokit, owner, repo, requiredChecks?.branch);
+      if (required.length === 0 && requiredChecks?.branch) {
+        try {
+          onNoRequiredChecks?.({ branch: requiredChecks.branch });
+        } catch {}
+      }
+    }
     try {
       const runs = await listAllCheckRuns(octokit, owner, repo, ref, perPage, maxPages);
       consecutiveErrors = 0;

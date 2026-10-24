@@ -87,6 +87,11 @@ export const ITERATE_INTERNAL_KEYS = [
   'readAwaitingCi',
   'resolveAwaitingCiCapMs',
   'upsertAwaitingCi',
+  'hasAnyCiSignal',
+  'listAllCheckRuns',
+  'classifyHeadChecks',
+  'fetchRequiredContexts',
+  'warnNoBranchProtectionOnce',
 ];
 
 /** Root names added by the WorkKey identity (ADR-0168, #3639). */

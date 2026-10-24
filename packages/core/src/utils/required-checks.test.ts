@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  classifyHeadChecks,
   classifyRequiredChecks,
   evaluatePushChecks,
   evaluateRequiredChecks,
   fetchRequiredChecksVerdict,
   fetchRequiredContexts,
+  warnNoBranchProtectionOnce,
 } from './required-checks.js';
 
 const run = (name: string, status: string | null, conclusion: string | null) => ({ name, status, conclusion });
@@ -408,5 +410,42 @@ describe('fetchRequiredContexts', () => {
       },
     };
     expect(await fetchRequiredContexts(octokit, args)).toEqual([]);
+  });
+});
+
+describe('classifyHeadChecks and warnNoBranchProtectionOnce (#3208)', () => {
+  it('no required checks uses all checks on head, pending until both pass, then green, warning once', () => {
+    const lint = run('lint', 'completed', 'success');
+    expect(classifyHeadChecks([], [lint, run('test', 'in_progress', null)])).toMatchObject({
+      state: 'pending',
+      pending: ['test'],
+      basis: 'all-on-head',
+      total: 2,
+    });
+    expect(classifyHeadChecks([], [lint, run('test', 'completed', 'success')])).toMatchObject({
+      state: 'green',
+      basis: 'all-on-head',
+    });
+
+    const warn = vi.fn();
+    expect(warnNoBranchProtectionOnce('acme/once', 'main', warn)).toBe(true);
+    expect(warnNoBranchProtectionOnce('acme/once', 'main', warn)).toBe(false);
+    expect(warnNoBranchProtectionOnce('acme/other', 'main', warn)).toBe(true);
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenNthCalledWith(1, 'no branch protection on acme/once@main; using all checks on head');
+  });
+
+  it('is pending with zero runs and failed on any non-passing completed run', () => {
+    expect(classifyHeadChecks([], [])).toMatchObject({ state: 'pending', total: 0 });
+    const failed = classifyHeadChecks([], [run('lint', 'completed', 'success'), run('test', 'completed', 'cancelled')]);
+    expect(failed).toMatchObject({ state: 'failed', failed: ['test'] });
+    expect(classifyHeadChecks([], [run('a', 'completed', 'skipped'), run('b', 'completed', 'neutral')]).state).toBe(
+      'green',
+    );
+  });
+
+  it('delegates to classifyRequiredChecks when contexts are required', () => {
+    const runs = [run('verify', 'completed', 'success'), run('extra', 'completed', 'failure')];
+    expect(classifyHeadChecks(['verify'], runs)).toMatchObject({ state: 'green', basis: 'required', total: 2 });
   });
 });

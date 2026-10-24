@@ -240,12 +240,15 @@ export {
   classifyCiFailure,
   DEFAULT_CI_DEADLINE_MS,
   DEFAULT_CI_NO_CHECKS_GRACE_MS,
+  hasAnyCiSignal,
   isPassingConclusion,
+  listAllCheckRuns,
   noChecksVerdictMs,
   resolveCiNoChecksGraceMs,
   watchChecks,
   watchChecksWithInfraRerun,
 } from './utils/ci-watch.js';
+export { classifyHeadChecks, fetchRequiredContexts, warnNoBranchProtectionOnce } from './utils/required-checks.js';
 export type { CommandResult, RunCommandOptions } from './utils/command-runner.js';
 export { describeCommandFailure, runCommand } from './utils/command-runner.js';
 export type { CoverageMetrics, RatchetCheckResult, RatchetDrift } from './utils/coverage-ratchet.js';
