@@ -1,11 +1,22 @@
-import { appendFileSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { FactoryEvent } from '../types/index.js';
+import { createLogger } from '../logger/index.js';
 import { followEvents, readEvents } from './index.js';
+import { eventSegmentFileName, eventSegmentsDir, rotateEventLog } from './tail.js';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -237,4 +248,48 @@ describe('followEvents', () => {
     await waitFor(() => seen.length === 1);
     expect(seen.map((e) => e.msg)).toEqual(['new']);
   });
+
+  it('emits every event exactly once when the logger rotates the file mid-tail, including lines written to the old file after the last poll (#1631)', async () => {
+    const seen: FactoryEvent[] = [];
+    stops.push(followEvents(file, (e) => seen.push(e), { pollMs: 10 }));
+    const log = createLogger(file, {}, { out: { write: () => true }, env: {}, rotation: { maxBytes: 300 } });
+    log.info('plan', 'e0');
+    await waitFor(() => seen.length >= 1);
+    for (let i = 1; i < 20; i++) log.info('plan', `e${i}`);
+    await waitFor(() => seen.length >= 20);
+    await delay(50);
+    expect(seen.map((e) => e.msg)).toEqual(Array.from({ length: 20 }, (_, i) => `e${i}`));
+  });
+
+  it('drains a line appended to the old file just before it is rotated away (#1631)', async () => {
+    writeFileSync(file, line({ type: 'plan', msg: 'first' }));
+    let beforeOpen: (() => void) | undefined;
+    const openFile = (path: string): number => {
+      const hook = beforeOpen;
+      beforeOpen = undefined;
+      hook?.();
+      return openSync(path, 'r');
+    };
+    const seen: FactoryEvent[] = [];
+    stops.push(followEvents(file, (e) => seen.push(e), { pollMs: 10, openFile }));
+    await waitFor(() => seen.length >= 1);
+
+    beforeOpen = () => {
+      appendFileSync(file, line({ type: 'build', msg: 'late' }));
+      rotateEventLog(file);
+      writeFileSync(file, line({ type: 'check', msg: 'fresh' }));
+    };
+    await waitFor(() => seen.length >= 3);
+    await delay(50);
+    expect(seen.map((e) => e.msg)).toEqual(['first', 'late', 'fresh']);
+  });
+
+  it('readEvents with includeSegments works when the live file is missing', () => {
+    mkdirSync(eventsDirOf(file), { recursive: true });
+    writeFileSync(join(eventsDirOf(file), eventSegmentFileName(0)), line({ type: 'plan', msg: 'seg' }));
+    expect(readEvents(file, { includeSegments: true }).map((e) => e.msg)).toEqual(['seg']);
+    expect(readEvents(file)).toEqual([]);
+  });
 });
+
+const eventsDirOf = eventSegmentsDir;

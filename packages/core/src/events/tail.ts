@@ -7,8 +7,20 @@
 //     Renaming the live file to eventSegmentFileName(liveId) and appending to a fresh live file therefore
 //     keeps every old cursor valid.
 //   - Retention (#1631) must not delete the newest rotated segment, or the live id chain breaks.
+//   - Rotation is implemented by rotateEventLog (the logger calls it under the event-log lock).
 
-import { closeSync, openSync, readdirSync, readSync, statSync } from 'node:fs';
+import {
+  closeSync,
+  fstatSync,
+  linkSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import type { FactoryEvent } from '../types/index.js';
@@ -181,6 +193,67 @@ function scanBackward(seg: Segment, end: number, need: number, opts: EventReadOp
 function liveSegment(eventsFile: string, rotated: Segment[]): Segment {
   const last = rotated[rotated.length - 1];
   return { id: last ? last.id + last.size : 0, size: fileSize(eventsFile), path: eventsFile };
+}
+
+/** Rotated segment paths, oldest first. */
+export function listEventSegmentPaths(eventsFile: string): string[] {
+  return listSegments(eventSegmentsDir(eventsFile)).map((s) => s.path);
+}
+
+/** Move the live file into logs/events/ as the next segment (#1631). Caller holds the event-log lock.
+ *  Returns the segment path, or undefined when nothing was rotated. The next append creates the live file.
+ *  With maxSegments set, the oldest segments beyond it are removed; the newest is always kept. */
+export function rotateEventLog(eventsFile: string, opts: { maxSegments?: number } = {}): string | undefined {
+  const dir = eventSegmentsDir(eventsFile);
+  const live = liveSegment(eventsFile, listSegments(dir));
+  if (live.size === 0) return undefined;
+  mkdirSync(dir, { recursive: true });
+  const target = join(dir, eventSegmentFileName(live.id));
+  try {
+    // A hard link keeps the inode (like a rename) but fails with EEXIST instead of clobbering a segment.
+    linkSync(eventsFile, target);
+  } catch {
+    return undefined;
+  }
+  try {
+    unlinkSync(eventsFile);
+  } catch {
+    rmSync(target, { force: true });
+    return undefined;
+  }
+  const keep = opts.maxSegments;
+  if (keep !== undefined && Number.isInteger(keep) && keep >= 1) {
+    const segments = listSegments(dir);
+    for (const seg of segments.slice(0, Math.max(0, segments.length - keep))) {
+      try {
+        rmSync(seg.path, { force: true });
+      } catch {
+        // best effort retention
+      }
+    }
+  }
+  return target;
+}
+
+/** The rotated segment whose inode is `ino` (link/rename keep it), plus the segments newer than it. */
+export function findEventSegmentByIno(eventsFile: string, ino: number): { path: string; newer: string[] } | undefined {
+  const segments = listSegments(eventSegmentsDir(eventsFile));
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const seg = segments[i]!;
+    let segIno: number;
+    try {
+      const fd = openSync(seg.path, 'r');
+      try {
+        segIno = fstatSync(fd).ino;
+      } finally {
+        closeSync(fd);
+      }
+    } catch {
+      continue;
+    }
+    if (segIno === ino) return { path: seg.path, newer: segments.slice(i + 1).map((s) => s.path) };
+  }
+  return undefined;
 }
 
 /** The newest `limit` matching events (oldest first), found by reading the log backwards in chunks. */

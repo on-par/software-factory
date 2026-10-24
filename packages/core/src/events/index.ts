@@ -1,13 +1,18 @@
 // src/events/index.ts — Read and tail the .factory/events.ndjson append log
 
-import { closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
+import { closeSync, fstatSync, openSync, readFileSync, readSync, statSync } from 'node:fs';
 
 import type { FactoryEvent } from '../types/index.js';
+import { findEventSegmentByIno, listEventSegmentPaths } from './tail.js';
 
-/** Parse all events currently in the file. Missing file → []. Malformed lines are skipped. */
-export function readEvents(eventsFile: string): FactoryEvent[] {
-  if (!existsSync(eventsFile)) return [];
-  return readFileSync(eventsFile, 'utf-8')
+function parseFile(path: string): FactoryEvent[] {
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf-8');
+  } catch {
+    return [];
+  }
+  return text
     .trim()
     .split('\n')
     .filter(Boolean)
@@ -18,6 +23,14 @@ export function readEvents(eventsFile: string): FactoryEvent[] {
         return [];
       }
     });
+}
+
+/** Parse all events currently in the file. Missing file → []. Malformed lines are skipped.
+ *  With `includeSegments`, rotated segments (#1631) come first, oldest to newest, then the live file —
+ *  the full history, for readers such as KPIs. */
+export function readEvents(eventsFile: string, opts: { includeSegments?: boolean } = {}): FactoryEvent[] {
+  if (!opts.includeSegments) return parseFile(eventsFile);
+  return [...listEventSegmentPaths(eventsFile).flatMap(parseFile), ...parseFile(eventsFile)];
 }
 
 export interface FollowEventsOptions {
@@ -61,6 +74,47 @@ export function followEvents(
     }
   }
 
+  /** Read [from, size) of an open fd, emit its complete lines, return the new offset and partial-line carry. */
+  const drain = (fd: number, from: number, size: number, prevCarry: string): { offset: number; carry: string } => {
+    if (size <= from) return { offset: from, carry: prevCarry };
+    const toRead = size - from;
+    const buf = Buffer.alloc(toRead);
+    const bytesRead = readSync(fd, buf, 0, toRead, from);
+    const lines = (prevCarry + buf.toString('utf-8', 0, bytesRead)).split('\n');
+    const carry = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        onEvent(JSON.parse(line) as FactoryEvent);
+      } catch {
+        // skip malformed line
+      }
+    }
+    return { offset: from + bytesRead, carry };
+  };
+
+  const drainPath = (path: string, from: number, prevCarry: string): void => {
+    let fd: number;
+    try {
+      fd = openSync(path, 'r');
+    } catch {
+      return;
+    }
+    try {
+      drain(fd, from, fstatSync(fd).size, prevCarry);
+    } finally {
+      closeSync(fd);
+    }
+  };
+
+  /** Rotation moved the old inode into a segment: finish it, then any newer segments, before the new file. */
+  const drainRotated = (oldIno: number, from: number, prevCarry: string): void => {
+    const found = findEventSegmentByIno(eventsFile, oldIno);
+    if (!found) return;
+    drainPath(found.path, from, prevCarry);
+    for (const path of found.newer) drainPath(path, 0, '');
+  };
+
   const tick = (): void => {
     // Open first and take size/inode from the open fd, so the stat and the
     // read always describe the same file even if it is rotated in between.
@@ -69,6 +123,8 @@ export function followEvents(
       fd = openFile(eventsFile);
     } catch {
       // Missing file: treat it as empty so a recreated file is read from the start.
+      // The live name vanished: a rotation unlinked it and no event has recreated it yet.
+      if (ino !== undefined) drainRotated(ino, offset, carry);
       offset = 0;
       carry = '';
       ino = undefined;
@@ -83,31 +139,15 @@ export function followEvents(
       // reached or exceeded the old offset before the next poll.
       const recreated = ino !== undefined && stat.ino !== ino;
 
+      if (recreated) drainRotated(ino as number, offset, carry);
+
       if (recreated || stat.size < offset) {
         offset = 0;
         carry = '';
       }
       ino = stat.ino;
 
-      if (stat.size <= offset) return;
-
-      const toRead = stat.size - offset;
-      const buf = Buffer.alloc(toRead);
-      const bytesRead = readSync(fd, buf, 0, toRead, offset);
-      offset += bytesRead;
-
-      const chunk = carry + buf.toString('utf-8', 0, bytesRead);
-      const lines = chunk.split('\n');
-      carry = lines.pop() ?? '';
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          onEvent(JSON.parse(line) as FactoryEvent);
-        } catch {
-          // skip malformed line
-        }
-      }
+      ({ offset, carry } = drain(fd, offset, stat.size, carry));
     } finally {
       closeSync(fd);
     }

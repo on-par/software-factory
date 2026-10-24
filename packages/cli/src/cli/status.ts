@@ -338,7 +338,7 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
 
   if (opts.kpis) {
     console.log(styleText('bold', '\n  KPIs:'));
-    const kpiEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
+    const kpiEvents = readEvents(paths.events, { includeSegments: true });
     const kpiCosts = existsSync(paths.costs) ? rt.readCosts(paths.costs) : [];
     for (const line of formatKpiLines(computeHealthKpis(kpiEvents, kpiCosts))) {
       console.log(`    ${line}`);

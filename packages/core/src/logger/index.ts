@@ -2,10 +2,13 @@
 // `.factory/events.ndjson` is the canonical structured sink (see ADR-0002); pino was
 // deliberately not adopted for this log path — see
 // docs/adr/0002-structured-logging-via-event-log.md.
+// The live file rotates by size into `state/logs/events/` segments, under the event-log lock (#1631).
 
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { closeSync, fstatSync, mkdirSync, openSync, writeSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
+import { rotateEventLog } from '../events/tail.js';
+import { resolveEventLogRotation, type EventLogRotation } from '../events/rotation.js';
 import type { RunAttribution } from '../run/outcome.js';
 import type { EscalateKind } from '../types/index.js';
 import type {
@@ -72,6 +75,8 @@ export interface LoggerOptions {
   env?: NodeJS.ProcessEnv;
   /** Event-log lock tuning; tests lower these. */
   lock?: { timeoutMs?: number; pollMs?: number };
+  /** Size rotation of the events file (#1631); overrides env and repo config. Tests pass a small maxBytes. */
+  rotation?: Partial<EventLogRotation>;
 }
 
 export interface FactoryLogger {
@@ -89,20 +94,43 @@ function resolveThreshold(env: NodeJS.ProcessEnv): LogLevel {
   return raw === 'debug' || raw === 'info' || raw === 'warn' || raw === 'error' ? raw : 'info';
 }
 
-function appendLine(eventsFile: string, line: string, lock?: { timeoutMs?: number; pollMs?: number }): void {
-  const doAppend = () => {
+function appendLine(
+  eventsFile: string,
+  line: string,
+  rotation: EventLogRotation,
+  lock?: { timeoutMs?: number; pollMs?: number },
+): void {
+  const writeOnce = (): number => {
+    const fd = openSync(eventsFile, 'a');
     try {
-      appendFileSync(eventsFile, line);
+      writeSync(fd, line);
+      return fstatSync(fd).size;
+    } finally {
+      closeSync(fd);
+    }
+  };
+  const doAppend = (): number => {
+    try {
+      return writeOnce();
     } catch {
       mkdirSync(resolve(eventsFile, '..'), { recursive: true });
-      appendFileSync(eventsFile, line);
+      return writeOnce();
     }
   };
   try {
-    withFileLockSync(`${eventsFile}.lock`, doAppend, {
-      timeoutMs: lock?.timeoutMs ?? 10_000,
-      pollMs: lock?.pollMs ?? 5,
-    });
+    withFileLockSync(
+      `${eventsFile}.lock`,
+      () => {
+        const size = doAppend();
+        if (size <= rotation.maxBytes) return;
+        try {
+          rotateEventLog(eventsFile, { maxSegments: rotation.maxSegments });
+        } catch {
+          // the event is written; never fail a log call over rotation
+        }
+      },
+      { timeoutMs: lock?.timeoutMs ?? 10_000, pollMs: lock?.pollMs ?? 5 },
+    );
   } catch {
     // Lock stuck past timeout: a possibly-torn line beats a lost event or a
     // crashed lane. Dead holders are already stolen by the lock itself.
@@ -113,6 +141,7 @@ function appendLine(eventsFile: string, line: string, lock?: { timeoutMs?: numbe
 export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: LoggerOptions = {}): FactoryLogger {
   const out = opts.out ?? process.stdout;
   const env = opts.env ?? process.env;
+  const rotation = resolveEventLogRotation(eventsFile, env, opts.rotation);
   const repo = ctx.repo ?? resolveRepoSlug(dirname(eventsFile));
 
   function write(level: LogLevel, type: EventKind, msg: string, extra?: LogExtra): void {
@@ -150,7 +179,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.durationMs !== undefined ? { durationMs: extra.durationMs } : {}),
     };
     const line = JSON.stringify(event) + '\n';
-    appendLine(eventsFile, line, opts.lock);
+    appendLine(eventsFile, line, rotation, opts.lock);
 
     if (LEVEL_RANK[level] < LEVEL_RANK[resolveThreshold(env)]) return;
 
