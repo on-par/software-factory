@@ -1,6 +1,7 @@
 // src/phases/build-prompts.ts — BUILD prompt builders, split out of build.ts to stay under the max-lines ceiling (#3373)
 
 import type { LintCommand } from '../checkers/index.js';
+import { ENV_ERROR_PREFIX, VERIFY_SANDBOX_ENV_MARKER } from '../environment/sandbox-env.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE } from '../utils/untrusted-input.js';
 import { MAX_LINES_OVERRIDE_RULE } from '../run/max-lines-override.js';
 import { READ_BEFORE_EDIT_RULE } from './build-lint-rules.js';
@@ -127,7 +128,8 @@ ${promptTail(appPort, appBaseUrl, designGrounding)}`;
 const VERIFY_RULE_BASE =
   'Verify with the command CHECK runs: `bash scripts/verify.sh --no-e2e` if scripts/verify.sh exists, ' +
   'otherwise the test script (`npm test`) or pytest, plus any verify command the constitution names. ' +
-  'Fix failures before finishing and report the exact command and its output.';
+  'Fix failures before finishing and report the exact command and its output.' +
+  ` If verify.sh prints \`${VERIFY_SANDBOX_ENV_MARKER}\` (exit 78), that is a sandbox environment error, not a code failure: do not re-run verify.sh or work around it (no TMPDIR or port changes); print a line starting \`${ENV_ERROR_PREFIX}\` followed by that line, then stop.`;
 
 // Names the lint checker's commands (resolveLintCommands) when the repo has no verify.sh (#2829);
 // a verifyCommand (verify.ps1-only repo, #3471) replaces the base with the pwsh command CHECK runs.

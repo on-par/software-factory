@@ -81,6 +81,7 @@ describe('detectStuck', () => {
     ['parked timeout', { state: 'parked', reason: 'timeout' }],
     ['parked ci-infra', { state: 'parked', reason: 'ci-infra', prNumber: 5 }],
     ['parked conflict', { state: 'parked', reason: 'conflict' }],
+    ['parked sandbox-env', { state: 'parked', reason: 'sandbox-env' }],
     ['parked held', { state: 'parked', reason: 'held', reworkRounds: 3, failureSignature: 'sig' }],
     ['parked escalate', { state: 'parked', reason: 'escalate', reworkRounds: 3, failureSignature: 'sig' }],
     ['budget-style parked fail', { state: 'parked', reason: 'fail', reworkRounds: 3 }],

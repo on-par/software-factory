@@ -30,6 +30,7 @@ const REASONS: ParkReason[] = [
   'config',
   'blocked',
   'all_providers_down',
+  'sandbox-env',
 ];
 
 function input(overrides: Partial<ParkCommentInput> = {}): ParkCommentInput {
@@ -173,6 +174,13 @@ describe('readParkState', () => {
   it('reads a state block with only a reason line as no lane, SHA or blockers', () => {
     const body = `**Park state**\n\n\`\`\`\`\`\nreason: fail\n\`\`\`\`\`\n${issueStateMarker(7)}`;
     expect(readParkState([{ id: 1, body }])).toEqual({ reason: 'fail', blockers: [], autoUnparks: 0 });
+  });
+
+  it('names the denied loopback bind and #3081 in the sandbox-env hint (#3332)', () => {
+    const hint = parkUnblockHint('sandbox-env', 7);
+    expect(hint).toContain('EPERM');
+    expect(hint).toContain('#3081');
+    expect(hint).toContain('factory unpark 7');
   });
 
   it('lets the lowest id win among marked comments', () => {

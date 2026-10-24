@@ -20,6 +20,7 @@ import type { runEvidencePlan } from '../checkers/evidence-plan.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import type { BuildRoutePin } from '../config/repo.js';
 import { hermeticGitEnv, laneEnv } from '../environment/index.js';
+import { sandboxEnvFromSummary, sandboxEnvParkMessage } from '../environment/sandbox-env.js';
 import type { EventKind } from '../events/kinds.js';
 import { type BudgetGuard, isBudgetStopError } from '../router/budget-guard.js';
 import { routerFailureOf } from '../router/executor-error.js';
@@ -77,6 +78,8 @@ export interface CheckPhaseResult {
   environment?: EnvironmentFailure;
   /** Serial re-run of the failing tests checker on an environment failure (#2301, #2302). On 'passed', tests counts as PASS in summary and the run continues unless another checker still fails on base; absent when tests did not fail or the cause is not environment. */
   flakeRerun?: FlakeRerun;
+  /** Set when tests hit the verify.sh sandbox marker (#3332): the park message; no baseline or rework ran. */
+  sandboxEnv?: string;
 }
 
 export const MAX_REWORK_ROUNDS = 3;
@@ -449,6 +452,12 @@ async function checkPhaseImpl(opts: {
     const signature = failureSignature(summary);
     log('fail', 'worker produced no implementation diff — parking before rework');
     return { passed: false, summary, reworkRounds: 0, failureSignature: signature };
+  }
+
+  const sandboxLine = sandboxEnvFromSummary(summary);
+  if (sandboxLine) {
+    const sandboxEnv = sandboxEnvParkMessage('check', sandboxLine);
+    return { passed: false, summary, reworkRounds: 0, failureSignature: failureSignature(summary), sandboxEnv };
   }
 
   let baseline: BaselineReport | undefined;
