@@ -17,6 +17,11 @@ import type { Workspace } from './ports.js';
 import { issueBodyHash, type PlanReuseStore } from './resume-context.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
+vi.mock('./ci-suppression-guard.js', async (orig) => ({
+  ...(await orig<typeof import('./ci-suppression-guard.js')>()),
+  readWorktreeHead: vi.fn(async () => 'abc123'),
+}));
+
 const WORK: WorkRequest = {
   id: 'github-issue:o/r#1',
   kind: 'github-issue',
