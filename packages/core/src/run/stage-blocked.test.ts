@@ -1,17 +1,17 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import type { EventKind } from '../events/kinds.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { providerCapGate, stageBlocked } from './stage-blocked.js';
 
 const NOW = Date.parse('2026-10-19T05:00:00.000Z');
 const HOUR = 60 * 60_000;
-const dir = mkdtempSync(join(tmpdir(), 'stage-blocked-'));
-afterAll(() => rmSync(dir, { recursive: true, force: true }));
+const tempDirs = createTempDirs();
+const dir = tempDirs.makeSync('stage-blocked-');
+afterAll(() => tempDirs.cleanup());
 let counter = 0;
 
 const PROVIDERS: Record<string, string> = { 'claude-a': 'anthropic', 'claude-b': 'anthropic', 'gpt-a': 'openai' };

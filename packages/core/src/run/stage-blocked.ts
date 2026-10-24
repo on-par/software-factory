@@ -192,8 +192,10 @@ export function providerCapGate(
       const { stage, candidates } = current;
       try {
         return release(stage, await stageBlocked(stage, { router, breaker, candidates, failoverEnabled }), route);
-      } catch {
-        return undefined; // an unreadable breaker must not change how the failure parks
+      } catch (e) {
+        // an unreadable breaker must not change how the failure parks, but it must be visible
+        log('environment_warning', `provider-cap check failed: ${e instanceof Error ? e.message : String(e)}`);
+        return undefined;
       }
     },
   };

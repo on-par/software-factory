@@ -1,5 +1,3 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
@@ -7,6 +5,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { HarnessError } from '../harness/index.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.js';
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
@@ -54,8 +53,9 @@ function modelsConfig(): ModelsConfig {
   };
 }
 
-const dir = mkdtempSync(join(tmpdir(), 'run-issue-provider-cap-'));
-afterAll(() => rmSync(dir, { recursive: true, force: true }));
+const tempDirs = createTempDirs();
+const dir = tempDirs.makeSync('run-issue-provider-cap-');
+afterAll(() => tempDirs.cleanup());
 let counter = 0;
 
 const request: RunRequest = {
