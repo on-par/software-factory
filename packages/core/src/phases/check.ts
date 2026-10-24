@@ -21,6 +21,7 @@ import { appendEvidencePlanStep } from './check-evidence.js';
 import type { runEvidencePlan } from '../checkers/evidence-plan.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import type { BuildRoutePin } from '../config/repo.js';
+import type { TestsAffectedConfig } from '../config/tests-section.js';
 import { hermeticGitEnv, laneEnv } from '../environment/index.js';
 import { sandboxEnvFromSummary, sandboxEnvParkMessage } from '../environment/sandbox-env.js';
 import type { EventKind } from '../events/kinds.js';
@@ -32,7 +33,11 @@ import type { SandboxPolicy } from '../sandbox/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
 import type { RequiredChecksVerdict } from '../utils/required-checks.js';
 import { baselineCacheOptions, describeBaseline } from './check-baseline.js';
+import { LENS_REVIEW_CHECKER, lensShowstopperRefs, remainingShowstoppers } from './check-showstoppers.js';
+import { affectedVerifyInstruction, createAffectedSelector, fullTestsBeforeShip } from './check-affected.js';
 import { resolveReworkRoute } from './plan-routes.js';
+
+export { LENS_REVIEW_CHECKER, lensShowstopperRefs, remainingShowstoppers };
 import type {
   BaseFailureCause,
   CheckerOutput,
@@ -88,9 +93,6 @@ export interface CheckPhaseResult {
 
 export const MAX_REWORK_ROUNDS = 3;
 
-/** Checker name of the model-judged showstopper review (#2236); signed by file:line, not prose (#2238). */
-export const LENS_REVIEW_CHECKER = 'lens_review';
-
 /** Consecutive no-progress rework rounds before the lane is declared stuck. */
 const STUCK_THRESHOLD = 2;
 
@@ -124,29 +126,6 @@ function signatureDetail(r: CheckerOutput): string {
 
 function normalizeDetail(details: string): string {
   return details.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ').trim().slice(0, 200);
-}
-
-/** Matches one lens_review showstopper line: optional bullet, `file:line`, then a dash separator (#2238). */
-const SHOWSTOPPER_LINE = /^\s*(?:[-*•]\s+)?(\S.*?:\d+)\s+[—–-]\s+\S/;
-
-/** Sorted, de-duplicated `file:line` refs of the showstoppers in lens_review FAIL details. */
-export function lensShowstopperRefs(details: string): string[] {
-  const refs = new Set<string>();
-  for (const line of details.split('\n')) {
-    const m = SHOWSTOPPER_LINE.exec(line);
-    if (m) refs.add(m[1].trim());
-  }
-  return [...refs].sort();
-}
-
-/** The showstopper lines of a lens_review FAIL in `summary`, for park messages (#2238); empty when none. */
-export function remainingShowstoppers(summary: CheckSummary): string[] {
-  const lens = summary.results.find((r) => r.checker === LENS_REVIEW_CHECKER && r.result === 'FAIL');
-  if (!lens) return [];
-  return lens.details
-    .split('\n')
-    .filter((line) => SHOWSTOPPER_LINE.test(line))
-    .map((line) => line.trim());
 }
 
 function failingCheckerNames(summary: CheckSummary): string[] {
@@ -327,6 +306,8 @@ async function checkPhaseImpl(opts: {
   runCommand?: CheckerContext['runCommand'];
   /** Injection seam for tests; defaults to the frozen evidence-plan runner. */
   runEvidence?: typeof runEvidencePlan;
+  /** Test seam; undefined reads `tests.affected` from the worktree's repo config (#3260). */
+  testsAffected?: TestsAffectedConfig | null;
 }): Promise<CheckPhaseResult> {
   const {
     issue,
@@ -367,6 +348,7 @@ async function checkPhaseImpl(opts: {
   const roundLogDir = (round: number): string | undefined =>
     logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, `check-r${round}`);
   const checkBaseDir = logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, 'check-base');
+  const selectAffected = createAffectedSelector({ worktree, diffBase, constitution, config: opts.testsAffected, log });
   const checkTriageDir = logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, 'check-triage');
   // Each failing checker is logged individually, the same way SKIPs are: the parked
   // outcome only carries an aggregate count, so without this the checker/details pairs
@@ -591,6 +573,7 @@ async function checkPhaseImpl(opts: {
 
     const steering = drainSteering?.();
 
+    const verifyInstruction = await affectedVerifyInstruction(await selectAffected(reworkRounds), ctx);
     const { failovers, modelCompleted, failureReason, budgetStopped } = await reworkWorker({
       issue,
       worktree,
@@ -610,6 +593,7 @@ async function checkPhaseImpl(opts: {
       reworkModel,
       runId,
       onWorkerResult: opts.onWorkerResult,
+      verifyInstruction,
     });
 
     const cause: ReworkCause = classifyReworkCause({
@@ -632,8 +616,11 @@ async function checkPhaseImpl(opts: {
     probe = await probeWorktree(worktree);
     ctx.probe = probe;
     ctx.outputLogDir = roundLogDir(reworkRounds);
+    ctx.affectedTests = await selectAffected(reworkRounds);
     log('check', hermeticGitNote);
     summary = await (runCheckers ?? runAllCheckers)(ctx, router, constitution, checkTimeoutSeconds);
+    summary = await fullTestsBeforeShip(summary, ctx, reworkRounds, log);
+    ctx.affectedTests = undefined;
     summary = await appendEvidencePlanStep(summary, ctx, constitution, runEvidence);
     log('check', `Rework round ${reworkRounds}: ${summary.failures} failures remaining`);
     // When no model ran this round (modelCompleted === false), an unchanged failure
@@ -722,6 +709,8 @@ export interface ReworkWorkerOptions {
   /** Called with each rework worker's router result, e.g. to keep it as a run log (#3274). */
   onWorkerResult?: (result: RouterResult) => Promise<void>;
   extraInstructions?: string;
+  /** Replaces rework instruction 3 (#3260); undefined keeps the default text. */
+  verifyInstruction?: string;
 }
 
 // Rework reads the failing code before changing it, staying scoped to the failures (#3372, T13).
@@ -776,7 +765,7 @@ read that file first — it holds the command's complete stdout and stderr.
 ## Instructions
 1. ${REWORK_READ_RULE} Then make one focused repair pass. Change only files necessary to address the listed failures.
 2. Do not re-plan, refactor unrelated code, or investigate outside these failures.
-3. Re-run only the failing command or the smallest relevant verification command.
+3. ${opts.verifyInstruction ?? 'Re-run only the failing command or the smallest relevant verification command.'}
 4. Commit the repair with a clear message.${opts.extraInstructions ? `\n5. ${opts.extraInstructions}` : ''}
 
 Do not push, do not open a PR. Just fix and commit. The checker will re-verify.`;

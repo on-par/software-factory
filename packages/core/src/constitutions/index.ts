@@ -56,6 +56,7 @@ function parseConstitution(raw: string, path: string, fallbackProduct: string): 
     requireTests: data.requireTests === true,
     disableEvidencePlan: data.disableEvidencePlan === true,
     optionalCheckers: Array.isArray(data.optionalCheckers) ? data.optionalCheckers.map(String) : [],
+    affectedTestsFullOn: Array.isArray(data.affectedTestsFullOn) ? data.affectedTestsFullOn.map(String) : [],
     body: content,
     path,
     source: 'bundled',
@@ -203,6 +204,7 @@ export class ConstitutionLoader {
         requireTests: bundled.requireTests,
         disableEvidencePlan: bundled.disableEvidencePlan,
         optionalCheckers: bundled.optionalCheckers,
+        affectedTestsFullOn: bundled.affectedTestsFullOn,
         repoInstance: bundled.repoInstance,
       };
     }

@@ -12,7 +12,11 @@ describe('reworkWorker extraInstructions (#2816)', () => {
     results: [{ checker: 'ci_codeql', result: 'FAIL', details: 'js/xss at a.ts:3 — bad' }],
   };
 
-  async function promptFor(extraInstructions?: string, s: CheckSummary = summary): Promise<string> {
+  async function promptFor(
+    extraInstructions?: string,
+    s: CheckSummary = summary,
+    verifyInstruction?: string,
+  ): Promise<string> {
     const prompts: string[] = [];
     const router = {
       run: async (_task: string, prompt: string) => {
@@ -29,6 +33,7 @@ describe('reworkWorker extraInstructions (#2816)', () => {
       router,
       log: () => {},
       ...(extraInstructions ? { extraInstructions } : {}),
+      ...(verifyInstruction ? { verifyInstruction } : {}),
     });
     return prompts[0];
   }
@@ -56,5 +61,16 @@ describe('reworkWorker extraInstructions (#2816)', () => {
     expect(prompt).toContain(`1. ${REWORK_READ_RULE} Then make one focused repair pass.`);
     expect(prompt).toContain('Change only files necessary to address the listed failures.');
     expect(prompt.split(REWORK_READ_RULE).length).toBe(2);
+  });
+
+  it('keeps the exact default instruction 3 when verifyInstruction is unset (#3260)', async () => {
+    const prompt = await promptFor();
+    expect(prompt).toContain('3. Re-run only the failing command or the smallest relevant verification command.\n4.');
+  });
+
+  it('replaces instruction 3 with verifyInstruction (#3260)', async () => {
+    const prompt = await promptFor(undefined, summary, 'Re-run only the affected tests: `x`.');
+    expect(prompt).toContain('3. Re-run only the affected tests: `x`.\n4. Commit');
+    expect(prompt).not.toContain('smallest relevant verification command');
   });
 });

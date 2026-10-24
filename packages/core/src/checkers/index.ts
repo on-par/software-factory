@@ -25,7 +25,13 @@ import { extractJsonObjects } from '../utils/json.js';
 import { APP_SMOKE_CHECKER, appSmokeChecker } from './app-smoke.js';
 import { sandboxEnvMarkerLine } from '../environment/sandbox-env.js';
 import { writeCommandLog } from './command-log.js';
-import { describeCommandFailureTail, describeTestFailure } from './command-output.js';
+import {
+  describeCommandFailureTail,
+  describeTestFailure,
+  extractFailedTestEvidence,
+  parseCommandCounts,
+} from './command-output.js';
+import { type AffectedTestsResolution, describeAffectedResolution } from './affected-tests.js';
 
 export { writeCommandLog };
 import {
@@ -101,6 +107,8 @@ export interface CheckerContext {
   testsTimeoutSeconds?: number;
   /** Timeout for the compile checker command, in seconds (`timeouts.compile_seconds`, #3185). Defaults to 120. */
   compileTimeoutSeconds?: number;
+  /** Affected-test selection for this round (#3260) — set by checkPhase on rework rounds only; undefined = full suite. */
+  affectedTests?: AffectedTestsResolution & { round: number };
 }
 
 export type CheckerFn = (ctx: CheckerContext) => Promise<CheckerOutput>;
@@ -187,7 +195,7 @@ async function onPath(bin: string, env?: NodeJS.ProcessEnv): Promise<boolean> {
   return false;
 }
 
-export const testsChecker: CheckerFn = async (ctx) => {
+const runFullTests: CheckerFn = async (ctx) => {
   try {
     const run = ctx.runCommand ?? runCommand;
     const timeoutSeconds = ctx.testsTimeoutSeconds ?? DEFAULT_TESTS_TIMEOUT_SECONDS;
@@ -246,6 +254,45 @@ export const testsChecker: CheckerFn = async (ctx) => {
       details: `unexpected checker error: ${(e?.stderr || e?.message || String(e)).slice(0, 500)}`,
     };
   }
+};
+
+/** Runs the rework round's affected-tests argv (#3260). A clean pass or a real failure is final; anything else (zero or unknown count, tool error) falls back to the full suite. */
+export const testsChecker: CheckerFn = async (ctx) => {
+  const sel = ctx.affectedTests;
+  if (sel?.kind !== 'affected') return runFullTests(ctx);
+  const timeoutSeconds = ctx.testsTimeoutSeconds ?? DEFAULT_TESTS_TIMEOUT_SECONDS;
+  let r: CommandResult | undefined;
+  try {
+    r = await (ctx.runCommand ?? runCommand)(sel.argv, {
+      cwd: ctx.worktree,
+      timeoutMs: timeoutSeconds * 1000,
+      env: ctx.env,
+      onPgid: ctx.onPgid,
+    });
+  } catch {
+    // a spawn error is a tool error: fall back below
+  }
+  if (r) {
+    const output = `${r.stdout}\n${r.stderr}`;
+    const counts = parseCommandCounts(output);
+    if (r.ok && counts && (counts.passed ?? 0) > 0 && !counts.failed) {
+      return { checker: 'tests', result: 'PASS', details: `affected tests: OK (${counts.line}) — ${sel.command}` };
+    }
+    if (!r.ok && !r.timedOut && extractFailedTestEvidence(output) !== null) {
+      return {
+        checker: 'tests',
+        result: 'FAIL',
+        details: await commandFailureDetails(ctx, 'tests', 'affected', r, describeTestFailure(r, 500)),
+      };
+    }
+  }
+  const fallback: AffectedTestsResolution = {
+    kind: 'full',
+    reason: r?.ok ? 'zero-tests' : 'tool-error',
+    fileCount: sel.fileCount,
+  };
+  ctx.log?.('affected_tests', describeAffectedResolution(fallback, sel.round));
+  return runFullTests(ctx);
 };
 
 export const lintChecker: CheckerFn = async (ctx) => {

@@ -31,3 +31,22 @@ describe('verify rule', () => {
     }
   });
 });
+
+describe('verify rule with tests.affected (#3260)', () => {
+  const affectedTestsCommand = 'npx vitest related --run {files}';
+
+  it('names the affected template and says CHECK runs the full suite before SHIP', () => {
+    for (const prompt of [
+      buildCommitOnlyPrompt({ ...base, affectedTestsCommand }),
+      buildClaudePrompt({ ...claudeBase, affectedTestsCommand }),
+    ]) {
+      expect(prompt).toContain(`\`${affectedTestsCommand}\``);
+      expect(prompt).toContain('CHECK runs the full suite before SHIP');
+    }
+  });
+
+  it('is byte-identical to the default prompt when unset', () => {
+    expect(buildCommitOnlyPrompt({ ...base, affectedTestsCommand: undefined })).toBe(buildCommitOnlyPrompt(base));
+    expect(buildCommitOnlyPrompt(base)).not.toContain('affected tests');
+  });
+});
