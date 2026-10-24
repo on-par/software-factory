@@ -24,12 +24,13 @@ import {
 } from '../readiness/enrich.js';
 import type { SizeGateMode } from '../config/index.js';
 import type { BuildRoutePin } from '../config/repo.js';
+import type { PlanResult } from './plan-result.js';
 import { settlePlanRoute } from './plan-route.js';
 import { blockedNoChangeSpecReason, noBuildReason, planSummary, specWriteDeniedResult } from './plan-spec-guards.js';
 import { decomposeOversizedIssue, renderChildIssueBody } from '../readiness/decompose.js';
 import { resolveSliceGate } from '../readiness/slice-gate.js';
 import { octokitStackSliceGateReader } from './stack-approval.js';
-import { DEFAULT_MAX_SLICES, type SlicePlan } from '../readiness/slice-plan.js';
+import { DEFAULT_MAX_SLICES } from '../readiness/slice-plan.js';
 import {
   DEFAULT_MAX_FILES,
   DEFAULT_TOKEN_BUDGET,
@@ -44,7 +45,7 @@ import { failoversFrom } from '../router/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
 import { archiveSpec, readSpec, writeSpec } from '../spec/index.js';
 import type { EscalateKind } from '../types/index.js';
-import type { Constitution, DesignArtifact, FailoverReason, ReadinessInfo } from '../types/index.js';
+import type { Constitution, FailoverReason, ReadinessInfo } from '../types/index.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE, wrapUntrustedIssueBody } from '../utils/untrusted-input.js';
 import { RIGHT_SIZE_STEP, RIGHT_SIZE_STEP_GATE_PASSED } from './plan-steps.js';
@@ -65,6 +66,7 @@ import {
   runnableBuildRoutes,
 } from './plan-routes.js';
 
+export type { PlanResult };
 export { buildDesignArtifactRetryPrompt, MAX_DESIGN_ARTIFACT_RETRIES };
 export { type BuildRouteName, defaultBuildRoute, resolveRunnableBuildRoute, runnableBuildRoutes };
 
@@ -74,30 +76,6 @@ export { type BuildRouteName, defaultBuildRoute, resolveRunnableBuildRoute, runn
  * on other endpoints (e.g. merge_commit_sha, singular assignee).
  */
 const GITHUB_ISSUE_UPDATE_API_VERSION = '2026-03-10';
-
-export interface PlanResult {
-  ok: boolean;
-  route: BuildRoutePin;
-  specPath: string;
-  model: string;
-  escalate?: string;
-  /** Set when the planner could not write its spec (#3269): `ok` is false and the caller parks `config`. */
-  parkReason?: 'config';
-  designArtifact: DesignArtifact | null;
-  /** Set by either file-mode size gate (pre-flight or post-plan build-scope) when the oversized
-   *  issue was decomposed into real filed sub-issues. `ok` stays false: this run is over, but the caller can
-   *  continue the lane with these children instead of parking (#823). */
-  decomposed?: { childIssues: number[] };
-  /** Set only by the post-plan build-scope gate in sizeGate.mode 'slice' (ADR-0147) when the whole
-   *  issue was sliced and its slice plan comment recorded. `ok` stays false: this run ends before
-   *  BUILD, and the next run plans the current slice from the comment. */
-  sliced?: { sliceCount: number };
-  /** Set on an ok result when PLAN planned one slice of a sliced issue (ADR-0147). SHIP titles the PR
-   *  from it, and runIssue records the PR in the slice plan comment. */
-  slice?: { plan: SlicePlan; index: number };
-  /** ADR-0161: set with `ok: false` when the stack slice below is not yet approved or merged. */
-  stackWait?: { index: number; count: number; prNumber: number };
-}
 
 export interface PlanPromptOpts {
   issue: number;
@@ -330,6 +308,8 @@ async function planPhaseImpl(opts: {
   timeoutSeconds?: number;
   modelOverride?: string;
   modelFallbacks?: string[];
+  /** Providers whose breaker is open at the stage boundary (#3226). */
+  skipProviders?: ReadonlySet<string>;
   onProviderFailure?: (info: ProviderFailureInfo) => void | Promise<void>;
   branch?: string;
   approvalGate?: ApprovalGate;
@@ -381,6 +361,7 @@ async function planPhaseImpl(opts: {
     timeoutSeconds,
     modelOverride,
     modelFallbacks,
+    skipProviders,
     onProviderFailure,
     branch,
     approvalGate,
@@ -688,6 +669,7 @@ async function planPhaseImpl(opts: {
         timeoutSeconds: timeoutSeconds ?? 1800,
         modelOverride,
         modelFallbacks,
+        skipProviders,
         onProviderFailure,
         onLog: (msg) => log('router', msg),
       });

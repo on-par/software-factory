@@ -15,7 +15,12 @@ import type {
 
 import type { BaseHoldDecision } from './base-hold.js';
 import { laneParkCommenter } from './lane-park-comment.js';
-import { pauseLaneForBrokenBase, tripLaneBreaker } from './lane-pause.js';
+import {
+  pauseLaneForBrokenBase,
+  pauseLaneForProviderCap,
+  tripLaneBreaker,
+  waitForProviderReset,
+} from './lane-pause.js';
 import { waitForMerge } from './land.js';
 import { AwaitingReviewError } from './land-pr.js';
 import { releaseKeepOnRequeue } from './worktree-keep.js';
@@ -131,6 +136,8 @@ export async function runLane(
     runId = '-',
     readParkSha = () => Promise.reject(new Error('no park sha reader')),
   } = deps;
+  /** Epoch ms of the earliest provider reset after a provider-cap release; the lane claims nothing before it (#3226). */
+  let providerPauseUntil: number | undefined;
   let streak: { signature: string; firstIssue: number; failingChecks: string[]; count: number } | null = null;
   let merged = 0;
   let awaitingReview = 0;
@@ -207,6 +214,8 @@ export async function runLane(
     return 'claim';
   };
   for (let i = 0; ; i++) {
+    if (await waitForProviderReset(pauseCtx, providerPauseUntil, now, sleep, pathExists)) return;
+    providerPauseUntil = undefined;
     if (i >= pending.length) {
       // A persisted base hold on the unchanged origin/main SHA means the base is still broken
       // (#2349): claiming would just cycle an issue again, so stop this lane without claiming.
@@ -322,6 +331,13 @@ export async function runLane(
         // #3576: another live lane owns a file this issue touches; re-queue it, never park.
         streak = null;
         await settle(issue, 'queued');
+        continue;
+      }
+      if (shipped?.state === 'released' && shipped.reason === 'provider-cap') {
+        streak = null;
+        await settle(issue, 'queued');
+        pauseLaneForProviderCap(pauseCtx, issue, shipped);
+        providerPauseUntil = Date.parse(shipped.resetAt); // #3226: re-queued; claim nothing until then (NaN never waits)
         continue;
       }
       if (shipped?.state === 'ready' && shipped.slice && shipped.slice.index < shipped.slice.count) {

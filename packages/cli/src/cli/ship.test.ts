@@ -329,7 +329,9 @@ describe('shipIssue (direct)', () => {
 
     h.triggerPlanProviderFailure = null;
     await shipIssue(6, {}, ctx());
-    expect(phases.planPhase.mock.calls.at(-1)?.[0]).toMatchObject({ modelOverride: 'gpt-plan' });
+    const planCall = phases.planPhase.mock.calls.at(-1)?.[0];
+    expect(planCall).toMatchObject({ modelOverride: 'claude-plan', modelFallbacks: ['gpt-plan'] });
+    expect([...(planCall?.skipProviders ?? [])]).toEqual(['anthropic']);
   });
 
   it('cools down a weekly-usage-cap provider for the reported reset time, not the flat default', async () => {

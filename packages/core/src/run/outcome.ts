@@ -106,6 +106,19 @@ export type RunOutcome =
       attribution?: RunAttribution;
     }
   | {
+      /** #3226: every provider of the stage is capped; the issue goes back to queued (not parked) and the lane waits for `resetAt`. */
+      state: 'released';
+      reason: 'provider-cap';
+      route?: BuildRoute;
+      branch?: string;
+      reworkRounds: number;
+      /** Open providers of the blocked stage. */
+      providers: string[];
+      /** Earliest timed reset, ISO. */
+      resetAt: string;
+      attribution?: RunAttribution;
+    }
+  | {
       state: 'escalated';
       reason: string;
       route?: BuildRoute;

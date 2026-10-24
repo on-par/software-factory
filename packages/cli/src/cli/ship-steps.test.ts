@@ -251,3 +251,30 @@ describe('logSandboxPolicy egress enforcement (#2215)', () => {
     expect(degraded(firejail)).toBe(true);
   });
 });
+
+it('finishOutcome returns the branch without throwing for a provider-cap release (#3226)', () => {
+  const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    const branch = finishOutcome({
+      outcome: {
+        state: 'released',
+        reason: 'provider-cap',
+        branch: 'factory/9-x',
+        reworkRounds: 0,
+        providers: ['anthropic', 'openai'],
+        resetAt: '2026-10-19T12:00:00.000Z',
+      },
+      opts: {},
+      paths: getFactoryPaths('/tmp/primary', '/tmp/relocated-factory'),
+      issueNum: 9,
+      worktree: '/tmp/wt',
+      terminalMessage: undefined,
+      log: () => {},
+    });
+    expect(branch).toBe('factory/9-x');
+    expect(spy.mock.calls.join('\n')).toContain('anthropic, openai');
+    expect(spy.mock.calls.join('\n')).toContain('re-queued until 2026-10-19T12:00:00.000Z, not parked');
+  } finally {
+    spy.mockRestore();
+  }
+});
