@@ -1,21 +1,20 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { defaultModelsConfig } from '@on-par/factory-config';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { resolveRoleModel, type ProviderOrder } from '../config/provider-order.js';
 import { filterRefusedProviders, subscriptionLogin, type SubscriptionLoginDeps } from './subscription-login.js';
 
 const models = defaultModelsConfig.models;
 const order = defaultModelsConfig.providerOrder as ProviderOrder;
 const NOW = Date.parse('2026-10-20T12:00:00Z');
-const dirs: string[] = [];
+const tempDirs = createTempDirs();
 
 function codexHome(auth: unknown): string {
-  const dir = mkdtempSync(join(tmpdir(), 'codex-home-'));
-  dirs.push(dir);
+  const dir = tempDirs.makeSync('codex-home-');
   if (auth !== undefined) writeFileSync(join(dir, 'auth.json'), JSON.stringify(auth));
   return dir;
 }
@@ -40,7 +39,7 @@ function harness(env: NodeJS.ProcessEnv, failExec: readonly string[] = []) {
 }
 
 afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  tempDirs.cleanup();
 });
 
 describe('subscriptionLogin', () => {

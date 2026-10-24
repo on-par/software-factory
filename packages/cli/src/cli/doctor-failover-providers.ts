@@ -60,7 +60,7 @@ export function refusedProviderChecks(refused: readonly RefusedProvider[]): Doct
   });
 }
 
-/** Refused-provider rows for the merged provider order. A config problem adds no rows; doctor keeps going. */
+/** Refused-provider rows for the merged provider order. A config problem yields one optional row; doctor keeps going. */
 export function failoverProviderChecks(rt: DoctorRuntime, repoRoot: string | null): DoctorCheck[] {
   try {
     const base = rt.configLoaders.loadModelsConfig();
@@ -74,6 +74,15 @@ export function failoverProviderChecks(rt: DoctorRuntime, repoRoot: string | nul
       filterRefusedProviders(order, merged.models, { exec, fileExists: existsSync }).refused,
     );
   } catch {
-    return [];
+    return [
+      {
+        name: 'failover providers',
+        ok: false,
+        optional: true,
+        section: PROVIDER_REFUSAL_SECTION,
+        detail: 'could not evaluate models.providerOrder (see the config error reported elsewhere in this doctor run)',
+        fix: 'fix the models config error reported above, then re-run factory doctor',
+      },
+    ];
   }
 }
