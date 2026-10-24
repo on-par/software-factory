@@ -146,6 +146,13 @@ describe('severityOf', () => {
   });
 });
 
+describe('provider_failover (#3338)', () => {
+  it('is a non-park, non-terminal warn', () => {
+    expect(EVENT_TRAITS.provider_failover).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
+    expect(isParkKind('provider_failover')).toBe(false);
+  });
+});
+
 describe('provider_refused (#3335)', () => {
   it('is a non-park, non-terminal warn', () => {
     expect(EVENT_TRAITS.provider_refused).toEqual({ severity: 'warn', isPark: false, isTerminal: false });

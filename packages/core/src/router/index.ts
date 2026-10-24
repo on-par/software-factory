@@ -40,6 +40,16 @@ export type { OllamaProbeResult } from './ollama-probe.js';
 export { ModelExecutorError, ModelRouterError } from './executor-error.js';
 export { formatBreakerRemaining } from './breaker.js';
 
+/** The union of the per-call and stage-wide skip sets, or undefined when both are empty. */
+function mergeSkipProviders(
+  perCall: ReadonlySet<string> | undefined,
+  stage: ReadonlySet<string> | undefined,
+): ReadonlySet<string> | undefined {
+  if (!perCall?.size) return stage?.size ? stage : undefined;
+  if (!stage?.size) return perCall;
+  return new Set([...perCall, ...stage]);
+}
+
 const PROVIDER_LEVEL_FAILURES = new Set<FailoverReason>(['usage_cap', 'rate_limit', 'timeout', 'unavailable']);
 
 /** Whether a failure opens the provider breaker. Deliberately the explicit reason set plus kind `auth`, not every
@@ -284,6 +294,7 @@ export class ModelRouter {
   private localAuthSink?: (agent: LocalAuthAgent) => void;
   private codexFullAccessTasks: readonly string[] = [];
   private contextCeilings: Readonly<Record<string, number>> = { 'codex-cli': DEFAULT_CODEX_CONTEXT_CEILING };
+  private stageSkipProviders?: ReadonlySet<string>;
   private codexWorkspacePaths?: { primaryRepoRoot: string; writableRoots: readonly string[] };
 
   constructor(
@@ -358,6 +369,10 @@ export class ModelRouter {
   private isAuthTripped(model: string): boolean {
     const key = this.authKey(model);
     return key !== undefined && this.authTripped.has(key);
+  }
+  /** Providers every run() skips until cleared (#3338): CHECK's capped providers ahead of the ordered pick. undefined clears. */
+  setStageSkipProviders(providers: ReadonlySet<string> | undefined): void {
+    this.stageSkipProviders = providers?.size ? new Set(providers) : undefined;
   }
   /** Register a sink told which agent login (claude / codex / opencode) failed local_auth, so doctor can
    *  flag it until the next login (#2733). Receives only the agent name. */
@@ -474,8 +489,8 @@ export class ModelRouter {
       env,
       onPgid,
       retryCause,
-      skipProviders,
     } = options;
+    const skipProviders = mergeSkipProviders(options.skipProviders, this.stageSkipProviders);
 
     if (!modelOverride && this.harnessCliAvailable) {
       const tier = this.getTier(task);

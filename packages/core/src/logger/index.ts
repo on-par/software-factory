@@ -20,6 +20,7 @@ import type {
   ProviderAuthRejectedPayload,
   ProviderBreakerClosePayload,
   ProviderCappedPayload,
+  ProviderFailoverPayload,
   ProviderRefusedPayload,
   ProviderRestoredPayload,
   StewardTriggeredPayload,
@@ -59,6 +60,7 @@ export interface LogExtra {
   lanePaused?: LanePausedPayload;
   park?: ParkPayload;
   providerCapped?: ProviderCappedPayload;
+  providerFailover?: ProviderFailoverPayload;
   allProvidersDown?: AllProvidersDownPayload;
   providerRefused?: ProviderRefusedPayload;
   providerAuthRejected?: ProviderAuthRejectedPayload;
@@ -172,6 +174,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.lanePaused ? { lanePaused: extra.lanePaused } : {}),
       ...(extra?.park ? { park: extra.park } : {}),
       ...(extra?.providerCapped ? { providerCapped: extra.providerCapped } : {}),
+      ...(extra?.providerFailover ? { providerFailover: extra.providerFailover } : {}),
       ...(extra?.allProvidersDown ? { allProvidersDown: extra.allProvidersDown } : {}),
       ...(extra?.providerRefused ? { providerRefused: extra.providerRefused } : {}),
       ...(extra?.providerAuthRejected ? { providerAuthRejected: extra.providerAuthRejected } : {}),

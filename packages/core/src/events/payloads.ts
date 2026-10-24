@@ -106,6 +106,16 @@ export interface AllProvidersDownPayload {
   at: string;
 }
 
+/** Payload of a `provider_failover` event (#3338): a capped phase reruns from its start on the next provider in `models.providerOrder`. */
+export interface ProviderFailoverPayload {
+  stage: 'plan' | 'build' | 'check';
+  /** Subscription provider id (claude, codex, opencode-go) that hit the cap. */
+  from: string;
+  /** Subscription provider id the phase reruns on. */
+  to: string;
+  issue: number;
+}
+
 /** Payload of a `provider_capped` event (#3337): a usage cap opened the provider's breaker until `cappedUntil`. */
 export interface ProviderCappedPayload {
   provider: string;

@@ -9,6 +9,7 @@ import type {
   ProviderBreakerClosePayload,
   ProviderRestoredPayload,
   ProviderCappedPayload,
+  ProviderFailoverPayload,
   StewardTriggeredPayload,
 } from '../events/kinds.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
@@ -39,6 +40,7 @@ export type RunLogFn = (
     flakyTests?: FlakyTestsPayload;
     park?: ParkPayload;
     providerCapped?: ProviderCappedPayload;
+    providerFailover?: ProviderFailoverPayload;
     allProvidersDown?: AllProvidersDownPayload;
     providerAuthRejected?: ProviderAuthRejectedPayload;
     providerBreakerClose?: ProviderBreakerClosePayload;

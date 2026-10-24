@@ -71,7 +71,7 @@ import { resolveRunBranch } from './run-branch.js';
 import { shipRuntime } from './ship-runtime.js';
 import { runStateRecorder } from './ship-run-state.js';
 import { maybeWriteBenchmarkArtifacts, maybeWriteLocalRunReport } from './ship-reports.js';
-import { applyMeteredGuard, modelOverrideMessages } from './model-override-messages.js';
+import { applyMeteredGuard, modelOverrideMessages, resolveProviderOrder } from './model-override-messages.js';
 import {
   buildRunRequest,
   decomposeQueue,
@@ -328,7 +328,6 @@ async function shipIssueFrom(
 
   const planApprovalEnabled = opts.approvePlan ?? resolvePlanApproval(factoryConfig);
   const processGroupGraceMs = resolveProcessGroupGraceMs(factoryConfig);
-
   const portsSettings = resolveEnvironmentPorts(factoryConfig);
   if (!portsSettings.enabled) {
     log('environment_lease', 'port leasing disabled (environment.ports.enabled=false or FACTORY_ENV_PORTS=0)');
@@ -383,6 +382,7 @@ async function shipIssueFrom(
       activeSandboxPolicy,
       processGroupGraceMs,
       paths,
+      providerOrder: resolveProviderOrder(repoConfig, policy.models, log),
     }),
     previousAttempt,
     ...reworkClaim,

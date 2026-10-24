@@ -2,8 +2,9 @@
 //
 // `models.providerOrder` lists, per role, the subscription providers (claude, codex,
 // opencode-go) in failover order as model ids, at most one model per provider. Pure
-// classification, derivation, validation and lookup; nothing here does I/O. Nothing
-// switches providers from it yet (#3338).
+// classification, derivation, validation and lookup; nothing here does I/O. runIssue
+// picks a provider from it at each phase boundary and reruns a capped phase on the
+// next one (#3338).
 
 import { defaultModelsConfig } from '@on-par/factory-config';
 import { z } from 'zod';
@@ -33,7 +34,7 @@ export interface ProviderOrderIssue {
 export const OPENCODE_GO_DEFAULT_MODEL = 'opencode-deepseek-v4-flash';
 
 export const PROVIDER_ORDER_DESCRIPTION =
-  "Per role (boss, worker, checker, triage): subscription providers in failover order, as model ids, at most one per provider (claude, codex, opencode-go). Unset role: today's tier order for that role with opencode-go last. OpenCode Zen (opencode/) models are refused. Not used for run-time failover yet.";
+  "Per role (boss, worker, checker, triage): subscription providers in failover order, as model ids, at most one per provider (claude, codex, opencode-go). Unset role: today's tier order for that role with opencode-go last. OpenCode Zen (opencode/) models are refused. When set in the repo file, a phase that hits a usage cap reruns from its start on the next uncapped provider.";
 
 /** Per-role override shape for the repo file: every role optional, unknown roles rejected. */
 export const ProviderOrderOverrideSchema = z

@@ -5,7 +5,12 @@ import { dirname } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
 import type { EventKind, FlakyTestsPayload, LanePausedPayload, StewardTriggeredPayload } from '../events/kinds.js';
-import type { AllProvidersDownPayload, ParkPayload, ProviderCappedPayload } from '../events/payloads.js';
+import type {
+  AllProvidersDownPayload,
+  ParkPayload,
+  ProviderCappedPayload,
+  ProviderFailoverPayload,
+} from '../events/payloads.js';
 import type { RunAttribution } from '../run/outcome.js';
 import { createLogger, type LogExtra } from '../logger/index.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
@@ -49,6 +54,7 @@ export function logEvent(
     lanePaused?: LanePausedPayload;
     park?: ParkPayload;
     providerCapped?: ProviderCappedPayload;
+    providerFailover?: ProviderFailoverPayload;
     allProvidersDown?: AllProvidersDownPayload;
     stewardTriggered?: StewardTriggeredPayload;
     flakyTests?: FlakyTestsPayload;
@@ -62,7 +68,7 @@ export function logEvent(
     attribution?: RunAttribution;
     paths?: string[];
     mode?: 'mechanical';
-  } & Pick<LogExtra, 'providerAuthRejected' | 'providerBreakerClose' | 'providerRestored'>,
+  } & Pick<LogExtra, 'providerAuthRejected' | 'providerBreakerClose' | 'providerRestored' | 'providerRefused'>,
 ): void {
   const logger = createLogger(eventsFile, { issue, lane: extra?.lane, phase: extra?.phase });
   const level = extra?.level ?? levelForType(type);
@@ -74,10 +80,12 @@ export function logEvent(
   if (extra?.lanePaused) meta.lanePaused = extra.lanePaused;
   if (extra?.park) meta.park = extra.park;
   if (extra?.providerCapped) meta.providerCapped = extra.providerCapped;
+  if (extra?.providerFailover) meta.providerFailover = extra.providerFailover;
   if (extra?.allProvidersDown) meta.allProvidersDown = extra.allProvidersDown;
   if (extra?.providerAuthRejected) meta.providerAuthRejected = extra.providerAuthRejected;
   if (extra?.providerBreakerClose) meta.providerBreakerClose = extra.providerBreakerClose;
   if (extra?.providerRestored) meta.providerRestored = extra.providerRestored;
+  if (extra?.providerRefused) meta.providerRefused = extra.providerRefused;
   if (extra?.stewardTriggered) meta.stewardTriggered = extra.stewardTriggered;
   if (extra?.flakyTests) meta.flakyTests = extra.flakyTests;
   if (extra?.checkFailure) meta.checkFailure = extra.checkFailure;

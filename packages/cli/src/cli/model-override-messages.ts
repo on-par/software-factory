@@ -1,7 +1,12 @@
 // packages/cli/src/cli/model-override-messages.ts — the `model-override` lines shipIssue logs, split from ship.ts
 
-import type { EffectiveModelPins, ModelRouter, RepoFactoryConfig } from '@on-par/factory-core';
-import { meteredPrimaryRouteWarnings } from '@on-par/factory-core/internal';
+import type { EffectiveModelPins, ModelRouter, ModelsConfig, RepoFactoryConfig } from '@on-par/factory-core';
+import {
+  filterRefusedProviders,
+  meteredPrimaryRouteWarnings,
+  type ProviderOrder,
+  type SubscriptionLoginDeps,
+} from '@on-par/factory-core/internal';
 
 /** One `model-override` message per pinned phase, naming the file or env var it came from (#2497). */
 export function modelOverrideMessages(
@@ -34,4 +39,16 @@ export function applyMeteredGuard(
     return def && { ...def, harness: registry?.getHarnessId(m) };
   };
   for (const msg of meteredPrimaryRouteWarnings(pins, lookup)) log('warn', msg);
+}
+
+/** The run's provider order (#3338): only when the repo file sets `models.providerOrder`, with refused providers
+ *  filtered out (#3335); undefined leaves every phase on today's routing. */
+export function resolveProviderOrder(
+  repo: RepoFactoryConfig | null,
+  models: ModelsConfig,
+  log: SubscriptionLoginDeps['log'],
+): ProviderOrder | undefined {
+  // applyRepoConfig merges the repo's override over the derived order, so it is set whenever the repo file sets the key.
+  if (!repo?.models?.providerOrder || !models.providerOrder) return undefined;
+  return filterRefusedProviders(models.providerOrder as ProviderOrder, models.models, { log }).order;
 }

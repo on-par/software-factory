@@ -86,6 +86,11 @@
       "properties": {},
       "additionalProperties": {}
     },
+    "providerFailover": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
     "allProvidersDown": {
       "type": "object",
       "properties": {},

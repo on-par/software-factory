@@ -15,6 +15,7 @@ export type {
   ProviderAuthRejectedPayload,
   ProviderBreakerClosePayload,
   ProviderCappedPayload,
+  ProviderFailoverPayload,
   ProviderRefusedPayload,
   ProviderRestoredPayload,
   StewardTriggeredPayload,
@@ -169,6 +170,7 @@ export type EventKind =
   | 'provider_breaker_skip'
   | 'provider_breaker_pinned'
   | 'provider_capped'
+  | 'provider_failover'
   | 'provider_refused'
   | 'provider_restored'
   | 'readiness'
@@ -403,6 +405,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   provider_breaker_pinned: { severity: 'info', isPark: false, isTerminal: false },
   provider_auth_rejected: { severity: 'warn', isPark: false, isTerminal: false },
   provider_capped: { severity: 'warn', isPark: false, isTerminal: false },
+  provider_failover: { severity: 'warn', isPark: false, isTerminal: false },
   provider_refused: { severity: 'warn', isPark: false, isTerminal: false },
   provider_restored: { severity: 'info', isPark: false, isTerminal: false },
   readiness: { severity: 'info', isPark: false, isTerminal: false },

@@ -62,8 +62,8 @@ version: 2
     # classifier: "<model id>"
   # Per role (boss, worker, checker, triage): subscription providers in failover order, as model
   # ids, at most one per provider (claude, codex, opencode-go). Unset role: today's tier order for
-  # that role with opencode-go last. OpenCode Zen (opencode/) models are refused. Not used for
-  # run-time failover yet.
+  # that role with opencode-go last. OpenCode Zen (opencode/) models are refused. When set in the
+  # repo file, a phase that hits a usage cap reruns from its start on the next uncapped provider.
   # providerOrder:
     # Boss providers in failover order.
     # boss: ["<model id>", ...]
