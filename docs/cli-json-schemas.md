@@ -1,6 +1,6 @@
 # CLI JSON Schemas
 
-The CLI publishes JSON Schemas for thirteen `--json` output contracts: twelve versioned envelopes and one legacy unversioned log record. The schemas use JSON Schema draft 2020-12, which is the default output of [Zod's JSON Schema conversion](https://zod.dev/json-schema). Validate them with a draft 2020-12 implementation such as Ajv's [`Ajv2020` class](https://ajv.js.org/json-schema.html#draft-2020-12).
+The CLI publishes JSON Schemas for fourteen `--json` output contracts: thirteen versioned envelopes and one legacy unversioned log record. The schemas use JSON Schema draft 2020-12, which is the default output of [Zod's JSON Schema conversion](https://zod.dev/json-schema). Validate them with a draft 2020-12 implementation such as Ajv's [`Ajv2020` class](https://ajv.js.org/json-schema.html#draft-2020-12).
 
 Each schema is generated from the corresponding named Zod export in `packages/cli/src/cli/json-contract.ts`. The canonical fixtures live in [`packages/cli/src/cli/__fixtures__/json/`](../packages/cli/src/cli/__fixtures__/json/), except queue add, whose fixture remains at [`packages/cli/src/cli/__fixtures__/queue-add.json`](../packages/cli/src/cli/__fixtures__/queue-add.json).
 
@@ -19,8 +19,9 @@ Each schema is generated from the corresponding named Zod export in `packages/cl
 | `factory stop --json`                     | [`stop.schema.json`](../packages/cli/schemas/stop.schema.json)                   | [`stop.json`](../packages/cli/src/cli/__fixtures__/json/stop.json)                   | `schemaVersion` is `1`                                                                                                                        |
 | `factory resume --json`                   | [`resume.schema.json`](../packages/cli/schemas/resume.schema.json)               | [`resume.json`](../packages/cli/src/cli/__fixtures__/json/resume.json)               | `schemaVersion` is `1`                                                                                                                        |
 | `factory unpark --json`                   | [`unpark.schema.json`](../packages/cli/schemas/unpark.schema.json)               | [`unpark.json`](../packages/cli/src/cli/__fixtures__/json/unpark.json)               | `schemaVersion` is `1`                                                                                                                        |
+| `factory check --json`                    | [`check.schema.json`](../packages/cli/schemas/check.schema.json)                 | [`check.json`](../packages/cli/src/cli/__fixtures__/json/check.json)                 | `schemaVersion` is `1`; `verdict` is null with `--no-judge`                                                                                   |
 
-The twelve versioned envelopes generate a `schemaVersion` constant of `1`. Logs output is one NDJSON record per line and deliberately remains unversioned. Its optional event payloads permit arbitrary object keys as defined by the existing CLI contract. Future JSON support for `land` (#2279), `metrics` (#3130), and `requeue` (#2278) must add a schema and golden fixture.
+The thirteen versioned envelopes generate a `schemaVersion` constant of `1`. Logs output is one NDJSON record per line and deliberately remains unversioned. Its optional event payloads permit arbitrary object keys as defined by the existing CLI contract. Future JSON support for `land` (#2279), `metrics` (#3130), and `requeue` (#2278) must add a schema and golden fixture.
 
 Regenerate schemas from the repository root with:
 

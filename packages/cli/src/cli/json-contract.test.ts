@@ -19,6 +19,7 @@ import { runUnpark } from './unpark.js';
 import { buildLogsJson, runLogs } from './logs.js';
 import { buildStatusJson } from './status-json.js';
 import {
+  checkJsonSchema,
   costJsonSchema,
   daemonStatusJsonSchema,
   kpisJsonSchema,
@@ -87,6 +88,7 @@ const generatedContracts = [
   ['stop.schema.json', 'stop.json', stopJsonSchema],
   ['resume.schema.json', 'resume.json', resumeJsonSchema],
   ['unpark.schema.json', 'unpark.json', unparkJsonSchema],
+  ['check.schema.json', 'check.json', checkJsonSchema],
 ] as const;
 
 const queueLabels = (position: number): string[] => ['factory:queued', 'factory:lane:ops', `factory:order:${position}`];
