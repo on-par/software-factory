@@ -60,6 +60,7 @@ const STAMPED: Record<ParkReason, true> = {
   blocked: true,
   all_providers_down: true,
   'sandbox-env': true,
+  'check-infra': true,
 };
 
 type Slot = NonNullable<RunAttribution['plan']>;

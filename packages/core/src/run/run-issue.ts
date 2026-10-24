@@ -26,11 +26,8 @@ import type { checkBaseHealth } from '../checkers/base-health.js';
 import { laneEnv } from '../environment/index.js';
 import { buildPhase as buildPhaseDefault } from '../phases/build.js';
 import { installLaneDependencies as installLaneDependenciesDefault } from './lane-install.js';
-import {
-  checkPhase as checkPhaseDefault,
-  type CheckPhaseResult,
-  renderEnvironmentReleaseComment,
-} from '../phases/check.js';
+import { checkPhase as checkPhaseDefault, type CheckPhaseResult } from '../phases/check.js';
+import { renderEnvironmentReleaseComment } from '../phases/environment-release.js';
 import type { SizeBudget } from '../readiness/size.js';
 import { describeConstitutionSource } from '../constitutions/index.js';
 import { lintFactoryConfig } from '../config/config-lint.js';
@@ -958,6 +955,7 @@ async function runIssueOnce(
       opts: { ciReworkRound?: number } = {},
     ): Promise<RunOutcome> => {
       if (failed.sandboxEnv) return terminalParked('sandbox-env', failed.sandboxEnv);
+      if (failed.infra) return terminalParked('check-infra', failed.infra);
       if (failed.environment) {
         const env = failed.environment;
         if (env.cause === 'config') {

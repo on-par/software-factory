@@ -49,6 +49,8 @@ export type EventKind =
   | 'budget_exceeded'
   | 'build'
   | 'check'
+  | 'check-infra'
+  | 'check_triage'
   | 'checker_completed'
   | 'checker_started'
   | 'ci-failed'
@@ -269,6 +271,9 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   budget_exceeded: { severity: 'warn', isPark: false, isTerminal: false },
   build: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
   check: { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'running' },
+  // #3371
+  'check-infra': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
+  check_triage: { severity: 'info', isPark: false, isTerminal: false },
   checker_completed: { severity: 'info', isPark: false, isTerminal: false },
   checker_started: { severity: 'info', isPark: false, isTerminal: false },
   // An infra-classified CI failure was rerun once and the re-watch went green (#2365). Not a park.

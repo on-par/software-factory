@@ -16,6 +16,7 @@ const ALL: ParkReason[] = [
   'blocked',
   'all_providers_down',
   'sandbox-env',
+  'check-infra',
 ];
 
 function fake(opts: { open?: boolean; draft?: boolean; updateError?: Error } = {}) {
