@@ -212,8 +212,9 @@ export function rotateEventLog(eventsFile: string, opts: { maxSegments?: number 
   try {
     // A hard link keeps the inode (like a rename) but fails with EEXIST instead of clobbering a segment.
     linkSync(eventsFile, target);
-  } catch {
-    return undefined;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return undefined;
+    throw err;
   }
   try {
     unlinkSync(eventsFile);

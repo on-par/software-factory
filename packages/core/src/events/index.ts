@@ -139,7 +139,7 @@ export function followEvents(
       // reached or exceeded the old offset before the next poll.
       const recreated = ino !== undefined && stat.ino !== ino;
 
-      if (recreated) drainRotated(ino as number, offset, carry);
+      if (ino !== undefined && stat.ino !== ino) drainRotated(ino, offset, carry);
 
       if (recreated || stat.size < offset) {
         offset = 0;
