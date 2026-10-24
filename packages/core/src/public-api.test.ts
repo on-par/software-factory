@@ -320,7 +320,10 @@ const PUBLIC_API_KEYS = [
   'fetchSubscriptionUsage',
 ];
 const JOB_KEYS = 'resolveHostMaxAgentJobs hostAgentJobsDir withHostAgentJobLease findStatelessLaneIssues'.split(' ');
-const TAIL = 'InvalidEventCursorError eventSegmentFileName eventSegmentsDir readEventsTail readEventsSince'.split(' ');
+const TAIL =
+  'InvalidEventCursorError eventSegmentFileName eventSegmentsDir readEventsTail readEventsSince rotateEventLog listEventSegmentPaths findEventSegmentByIno'.split(
+    ' ',
+  );
 const STEER = 'STEER_SOURCES STEER_PHASES SteerEventError parseSteerEvent appendSteerEvent listSteerEvents'.split(' '); // #3400
 const STEERED = 'collectMergedPrSteers isoWeekKey summarizeSteerability formatSteerabilityReport fileBug'.split(' '); // #3403
 const MORE = ['agentInvocationsFromEvents', 'computeTokenCoverage', 'readReviewApproval', 'readStackSliceGate']; // #3126, #3366
@@ -408,7 +411,6 @@ const INTERNAL_API_KEYS = [
   'parseCommandCounts',
   ...Object.keys(await import('./run/pr-lookup.js')), // open-PR lookup (#3439)
   ...(await Promise.all([import('./blockers/index.js'), import('./queue/unpark.js')])).flatMap(Object.keys), // blockers (#2316), unpark (#2318)
-  'buildReadinessGapPrompt',
   'READINESS_INPUT_CAP',
   'READINESS_PROMPT_VERSION',
   'ReadinessVerdictSchema',
@@ -421,7 +423,6 @@ const INTERNAL_API_KEYS = [
   'readCachedVerdict',
   'readinessCacheKey',
   'writeCachedVerdict',
-  'parseReadinessGapOutput',
   // Slice plan model (ADR-0147)
   'DEFAULT_MAX_SLICES',
   'SLICE_CAP_CEILING',

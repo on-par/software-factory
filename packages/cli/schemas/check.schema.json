@@ -1,0 +1,305 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "issue": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "schemaVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "verdict": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": ["ready", "ready-with-assumptions", "not-ready"]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "summary": {
+      "type": ["string", "null"]
+    },
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "aspect": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": ["aspect", "text"],
+        "additionalProperties": false
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "aspect": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": ["aspect", "text"],
+        "additionalProperties": false
+      }
+    },
+    "judge": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "cost": {
+              "type": ["number", "null"]
+            },
+            "unpriced": {
+              "type": "boolean"
+            },
+            "cached": {
+              "type": "boolean"
+            },
+            "promptVersion": {
+              "type": "string"
+            },
+            "bodyHash": {
+              "type": "string"
+            }
+          },
+          "required": ["model", "cost", "unpriced", "cached", "promptVersion", "bodyHash"],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "judgeSkipped": {
+      "type": "string",
+      "const": "epic"
+    },
+    "template": {
+      "type": "string",
+      "description": "advisory"
+    },
+    "score": {
+      "type": "number",
+      "description": "advisory"
+    },
+    "fields": {
+      "type": "object",
+      "properties": {
+        "pass": {
+          "type": "boolean"
+        },
+        "missing": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["pass", "missing"],
+      "additionalProperties": false,
+      "description": "advisory"
+    },
+    "criteria": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "findings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "index": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "grade": {
+                    "type": "string",
+                    "enum": ["structured", "unstructured", "empty"]
+                  },
+                  "observable": {
+                    "type": "boolean"
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                },
+                "required": ["index", "text", "grade", "observable"],
+                "additionalProperties": false
+              }
+            },
+            "verificationCommand": {
+              "type": ["boolean", "null"]
+            },
+            "problems": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "pass": {
+              "type": "boolean"
+            }
+          },
+          "required": ["findings", "verificationCommand", "problems", "pass"],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "advisory"
+    },
+    "size": {
+      "type": "object",
+      "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": ["runs-as-is", "would-split"]
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": ["verdict"],
+      "additionalProperties": false
+    },
+    "invest": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "findings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "letter": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["pass", "warn", "not-checked"]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": ["letter", "status", "reason"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["findings"],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "advisory"
+    },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "exitCode": {
+      "anyOf": [
+        {
+          "type": "number",
+          "const": 0
+        },
+        {
+          "type": "number",
+          "const": 1
+        },
+        {
+          "type": "number",
+          "const": 3
+        }
+      ]
+    },
+    "deep": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "split"
+        },
+        "model": {
+          "type": "string"
+        },
+        "cost": {
+          "type": ["number", "null"]
+        },
+        "unpriced": {
+          "type": "boolean"
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "acceptanceCriteria": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["title", "acceptanceCriteria"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["kind", "model", "cost", "unpriced", "children"],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "issue",
+    "schemaVersion",
+    "verdict",
+    "summary",
+    "questions",
+    "assumptions",
+    "judge",
+    "template",
+    "score",
+    "fields",
+    "criteria",
+    "size",
+    "invest",
+    "reasons",
+    "exitCode"
+  ],
+  "additionalProperties": false
+}

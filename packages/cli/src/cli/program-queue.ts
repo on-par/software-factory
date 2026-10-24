@@ -108,15 +108,17 @@ export function registerQueueCommands(program: Command, handlers: ProgramHandler
     .command('check <issue>')
     .alias('ready')
     .description(
-      'Check an issue before queuing: required fields and whether the size gate runs it as-is or would split it, plus an advisory INVEST report (read-only, optional --deep model review; exit 0 ready, 1 missing fields or ungradeable criteria, 2 invalid --deep output, 3 would split)',
+      'Check an issue before queuing: the model readiness verdict (ready, ready-with-assumptions, not-ready) with its questions or assumptions, plus advisory fields, criteria, size and INVEST (read-only; exit 0 ready, 1 not-ready, 2 judge or --deep error, 3 would split; --no-judge: heading check, exit 1 missing fields)',
     )
     .option(
       '--json',
-      'Print one JSON object with fields, criteria findings, size verdict, INVEST findings, and reasons',
+      'Print one JSON object (schemaVersion 1) with the verdict, questions, assumptions, fields, criteria findings, size verdict, INVEST findings, and reasons',
     )
     .option(
       '--deep',
-      'Also call the triage-tier model once: preview the proposed split when the issue would split, otherwise suggest missing criteria and scope concerns (prints model id and cost; never files anything; exit 2 on invalid model output)',
+      'Also preview the proposed split when the issue would split (one decompose call; prints model id and cost; never files anything; exit 2 on invalid model output)',
     )
+    .option('--no-judge', 'Skip the model judge (free, offline): heading-based exit 0/1/3 as before')
+    .option('--rejudge', 'Bypass the readiness cache and call the judge again')
     .action(handlers.cmdCheck);
 }

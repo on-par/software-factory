@@ -1,6 +1,4 @@
 // Readiness exports re-exported from internal.ts (keeps that file under its max-lines ceiling)
-export type { ReadinessGapCriterion, ReadinessGapReport } from './enrich.js';
-export { buildReadinessGapPrompt, parseReadinessGapOutput } from './enrich.js';
 export type {
   JudgeReadinessResult,
   ReadinessErrorKind,

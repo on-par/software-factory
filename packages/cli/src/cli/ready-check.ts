@@ -13,15 +13,14 @@ import {
 } from '@on-par/factory-core';
 import {
   buildDecompositionPrompt,
-  buildReadinessGapPrompt,
+  judgeReadiness,
   parseDecompositionOutput,
-  parseReadinessGapOutput,
-  type ReadinessGapReport,
+  type JudgeReadinessResult,
 } from '@on-par/factory-core/internal';
 
 export type IssueSizeVerdict = 'runs-as-is' | 'would-split';
 
-export type DeepCheckTask = 'decompose' | 'triage';
+export type DeepCheckTask = 'decompose' | 'readiness_judge';
 export type DeepCheckModelRunner = (
   task: DeepCheckTask,
   prompt: string,
@@ -31,9 +30,13 @@ export interface DeepSplitChild {
   title: string;
   acceptanceCriteria: string[];
 }
-export type IssueDeepCheck =
-  | { kind: 'split'; model: string; cost: number | null; unpriced: boolean; children: DeepSplitChild[] }
-  | { kind: 'gaps'; model: string; cost: number | null; unpriced: boolean; gaps: ReadinessGapReport };
+export interface IssueDeepCheck {
+  kind: 'split';
+  model: string;
+  cost: number | null;
+  unpriced: boolean;
+  children: DeepSplitChild[];
+}
 
 /** Minimal router surface the deep check needs (a ModelRouter satisfies it). */
 export interface DeepCheckRouter {
@@ -65,13 +68,49 @@ export class DeepCheckError extends Error {
   }
 }
 
+/** The readiness judge failed (model error or unparseable output after one repair); `check` exits 2. */
+export class ReadinessJudgeError extends Error {
+  constructor(
+    readonly errorKind: string,
+    detail: string,
+  ) {
+    super(`readiness judge failed (${errorKind}): ${detail}`);
+    this.name = 'ReadinessJudgeError';
+  }
+}
+
+export type CheckVerdict = 'ready' | 'ready-with-assumptions' | 'not-ready';
+export interface CheckVerdictItem {
+  aspect: string;
+  text: string;
+}
+
 export interface IssueCheckReport {
   issue: number;
+  schemaVersion: 1;
+  /** Model readiness verdict; null with --no-judge or for a skipped epic. */
+  verdict: CheckVerdict | null;
+  summary: string | null;
+  questions: CheckVerdictItem[];
+  assumptions: CheckVerdictItem[];
+  /** Judge call metadata; null with --no-judge or for a skipped epic. */
+  judge: {
+    model: string;
+    cost: number | null;
+    unpriced: boolean;
+    cached: boolean;
+    promptVersion: string;
+    bodyHash: string;
+  } | null;
+  /** Present only when the issue is an epic, which the judge does not grade. */
+  judgeSkipped?: 'epic';
+  /** Advisory when the judge ran. */
   template: ReadinessTemplate;
-  /** 0..100, rounded. */
+  /** 0..100, rounded. Advisory when the judge ran. */
   score: number;
+  /** Advisory when the judge ran. */
   fields: { pass: boolean; missing: string[] };
-  /** Per-criterion findings for factory-task issues; null for epic/factory-bug. */
+  /** Per-criterion findings for factory-task issues; null for epic/factory-bug. Advisory when the judge ran. */
   criteria: CriteriaReport | null;
   size: { verdict: IssueSizeVerdict; reason?: string };
   /** Advisory INVEST findings for factory-task issues; null for epic/factory-bug. Never affects exitCode. */
@@ -85,11 +124,15 @@ export interface IssueCheckReport {
 
 export interface IssueCheckDeps {
   /** Read-only issue fetch — the only GitHub access this command has. */
-  getIssue(issue: number): Promise<{ title: string; body: string | null }>;
+  getIssue(
+    issue: number,
+  ): Promise<{ title: string; body: string | null; labels?: ReadonlyArray<string | { name?: string | null }> }>;
   /** Read-only state lookup for dependencies cited in the issue body. */
   getIssueState?(issue: number): Promise<'open' | 'closed'>;
-  /** Single model call for `--deep`; absent otherwise. */
+  /** Model calls for the readiness judge and `--deep`; absent with `--no-judge` and no `--deep`. */
   runModel?: DeepCheckModelRunner;
+  /** Per-state-root readiness verdict cache directory; no caching when absent. */
+  readinessCacheDir?: string;
   log(line: string): void;
 }
 
@@ -109,6 +152,12 @@ export function buildIssueCheckReport(
   if (size.reason) reasons.push(size.reason);
   return {
     issue,
+    schemaVersion: 1,
+    verdict: null,
+    summary: null,
+    questions: [],
+    assumptions: [],
+    judge: null,
     template: readiness.template,
     score: Math.round(readiness.score * 100),
     fields: { pass: readiness.pass, missing: [...readiness.missing] },
@@ -120,10 +169,58 @@ export function buildIssueCheckReport(
   };
 }
 
+/** Folds a readiness judge result into the heading-based report; the verdict decides exit 1. */
+export function applyJudgeResult(
+  report: IssueCheckReport,
+  result: JudgeReadinessResult,
+  unpriced: boolean,
+): IssueCheckReport {
+  if (result.kind === 'skipped') return { ...report, judgeSkipped: 'epic' };
+  if (result.kind === 'error') throw new ReadinessJudgeError(result.errorKind, result.detail);
+  const { verdict } = result;
+  const fresh = unpriced && !result.cached;
+  const reasons =
+    verdict.verdict === 'not-ready' ? verdict.questions.map((q) => `question: [${q.aspect}] ${q.text}`) : [];
+  if (report.size.reason) reasons.push(report.size.reason);
+  return {
+    ...report,
+    verdict: verdict.verdict,
+    summary: verdict.summary,
+    questions: verdict.questions.map((q) => ({ aspect: q.aspect, text: q.text })),
+    assumptions: verdict.assumptions.map((a) => ({ aspect: a.aspect, text: a.text })),
+    judge: {
+      model: result.model,
+      cost: fresh ? null : result.cost,
+      unpriced: fresh,
+      cached: result.cached,
+      promptVersion: result.promptVersion,
+      bodyHash: result.bodyHash,
+    },
+    reasons,
+    exitCode: verdict.verdict === 'not-ready' ? 1 : report.size.verdict === 'would-split' ? 3 : 0,
+  };
+}
+
+function numberedItems(label: string, items: CheckVerdictItem[]): string[] {
+  if (items.length === 0) return [];
+  return [`${label}:`, ...items.map((item, i) => `  ${i + 1}. [${item.aspect}] ${item.text}`)];
+}
+
 export function formatIssueCheckLines(report: IssueCheckReport): string[] {
   const lines: string[] = [];
-  const state = report.exitCode === 1 ? 'is not factory-ready' : 'is factory-ready';
-  lines.push(`issue #${report.issue} ${state} (${report.template}, score ${report.score}%)`);
+  if (report.judge) {
+    const j = report.judge;
+    lines.push(
+      `issue #${report.issue}: ${report.verdict} (${j.model}, ${j.cached ? 'cached' : 'fresh'}, ${formatCostTotal(j.cost, j.unpriced ? 1 : 0)})`,
+    );
+    lines.push(`summary: ${report.summary}`);
+    lines.push(...numberedItems('questions', report.questions), ...numberedItems('assumptions', report.assumptions));
+    lines.push(`advisory: ${report.template}, score ${report.score}%`);
+  } else {
+    const state = report.exitCode === 1 ? 'is not factory-ready' : 'is factory-ready';
+    lines.push(`issue #${report.issue} ${state} (${report.template}, score ${report.score}%)`);
+    if (report.judgeSkipped) lines.push('judge - skipped (epic)');
+  }
   for (const field of report.fields.missing) lines.push(`  missing: ${field}`);
   if (report.criteria) {
     lines.push('criteria:');
@@ -147,67 +244,40 @@ export function formatGapCriterion(c: { name: string; when: readonly string[]; t
 }
 
 export async function runDeepCheck(
-  input: { title: string; body: string; wouldSplit: boolean },
+  input: { title: string; body: string },
   runModel: DeepCheckModelRunner,
 ): Promise<IssueDeepCheck> {
-  const task: DeepCheckTask = input.wouldSplit ? 'decompose' : 'triage';
-  const prompt = input.wouldSplit
-    ? buildDecompositionPrompt({ title: input.title, body: input.body })
-    : buildReadinessGapPrompt({ title: input.title, body: input.body });
   let result: { model: string; output: string; cost: number | null };
   try {
-    result = await runModel(task, prompt);
+    result = await runModel('decompose', buildDecompositionPrompt({ title: input.title, body: input.body }));
   } catch (err) {
     throw new DeepCheckError(`model call failed: ${err instanceof Error ? err.message : String(err)}`);
   }
-  const unpriced = result.cost === null;
-  if (input.wouldSplit) {
-    const parsed = parseDecompositionOutput(result.output);
-    if (!parsed.ok) throw new DeepCheckError(`model returned invalid output: ${parsed.reason}`);
-    const children = parsed.decomposition.stories.map((s) => ({
-      title: s.title,
-      acceptanceCriteria: s.acceptanceCriteria.map(formatGapCriterion),
-    }));
-    return { kind: 'split', model: result.model, cost: result.cost, unpriced, children };
-  }
-  const parsed = parseReadinessGapOutput(result.output);
+  const parsed = parseDecompositionOutput(result.output);
   if (!parsed.ok) throw new DeepCheckError(`model returned invalid output: ${parsed.reason}`);
-  return { kind: 'gaps', model: result.model, cost: result.cost, unpriced, gaps: parsed.gaps };
+  const children = parsed.decomposition.stories.map((s) => ({
+    title: s.title,
+    acceptanceCriteria: s.acceptanceCriteria.map(formatGapCriterion),
+  }));
+  return { kind: 'split', model: result.model, cost: result.cost, unpriced: result.cost === null, children };
 }
 
 export function formatDeepCheckLines(deep: IssueDeepCheck): string[] {
-  const lines: string[] = [];
-  if (deep.kind === 'split') {
-    lines.push(`deep: proposed split (preview only — nothing filed), ${deep.children.length} child stories`);
-    deep.children.forEach((child, i) => {
-      lines.push(`  ${i + 1}. ${child.title}`);
-      for (const c of child.acceptanceCriteria) lines.push(`     - ${c}`);
-    });
-  } else {
-    lines.push('deep: suggested missing criteria');
-    if (deep.gaps.missingCriteria.length === 0) lines.push('  (none)');
-    for (const c of deep.gaps.missingCriteria) lines.push(`  - ${formatGapCriterion(c)}`);
-    const sections: Array<[string, string[]]> = [
-      ['unclear scope:', deep.gaps.unclearScope],
-      ['negotiable:', deep.gaps.negotiable],
-      ['estimable:', deep.gaps.estimable],
-    ];
-    for (const [label, items] of sections) {
-      if (items.length === 0) continue;
-      lines.push(label);
-      for (const item of items) lines.push(`  - ${item}`);
-    }
-  }
+  const lines = [`deep: proposed split (preview only — nothing filed), ${deep.children.length} child stories`];
+  deep.children.forEach((child, i) => {
+    lines.push(`  ${i + 1}. ${child.title}`);
+    for (const c of child.acceptanceCriteria) lines.push(`     - ${c}`);
+  });
   lines.push(`model: ${deep.model}, cost: ${formatCostTotal(deep.cost, deep.unpriced ? 1 : 0)}`);
   return lines;
 }
 
 export async function runIssueCheck(
   issue: number,
-  opts: { json?: boolean; deep?: boolean },
+  opts: { json?: boolean; deep?: boolean; judge?: boolean; rejudge?: boolean },
   deps: IssueCheckDeps,
 ): Promise<IssueCheckReport> {
-  const { title, body } = await deps.getIssue(issue);
+  const { title, body, labels } = await deps.getIssue(issue);
   const readiness = scoreIssueReadiness({ title, body: body ?? '' });
   const criteria = readiness.template === 'factory-task' ? gradeIssueCriteria(body ?? '') : null;
   let invest: IssueInvestReport | null = null;
@@ -226,19 +296,55 @@ export async function runIssueCheck(
     );
     invest = gradeIssueInvest(body ?? '', states);
   }
-  const report = buildIssueCheckReport(issue, readiness, criteria, invest);
-  if (opts.deep) {
+  let report = buildIssueCheckReport(issue, readiness, criteria, invest);
+  if (opts.judge !== false) {
+    const runModel = deps.runModel;
+    if (!runModel) throw new ReadinessJudgeError('model-error', 'no model runner configured');
+    let unpriced = false;
+    const result = await judgeReadiness({
+      title,
+      body: body ?? '',
+      labels: (labels ?? []).map((l) => (typeof l === 'string' ? l : (l.name ?? ''))).filter(Boolean),
+      run: async (prompt) => {
+        const r = await runModel('readiness_judge', prompt);
+        if (r.cost === null) unpriced = true;
+        return { model: r.model, output: r.output, cost: r.cost ?? 0 };
+      },
+      cache: deps.readinessCacheDir ? { dir: deps.readinessCacheDir } : undefined,
+      rejudge: opts.rejudge,
+    });
+    report = applyJudgeResult(report, result, unpriced);
+  }
+  if (opts.deep && report.size.verdict === 'would-split') {
     if (!deps.runModel) throw new DeepCheckError('no model runner configured');
-    report.deep = await runDeepCheck(
-      { title, body: body ?? '', wouldSplit: report.size.verdict === 'would-split' },
-      deps.runModel,
-    );
+    report.deep = await runDeepCheck({ title, body: body ?? '' }, deps.runModel);
   }
   if (opts.json) {
     deps.log(JSON.stringify(report));
   } else {
     for (const line of formatIssueCheckLines(report)) deps.log(line);
     if (report.deep) for (const line of formatDeepCheckLines(report.deep)) deps.log(line);
+    else if (opts.deep) deps.log('deep: runs as-is, no split preview');
   }
   return report;
+}
+
+/** Maps a judge or `--deep` failure to the CLI exit (2); null for any other error. */
+export function checkErrorExit(err: unknown): { message: string; code: 2 } | null {
+  if (err instanceof ReadinessJudgeError)
+    return { message: `factory: readiness judge failed — ${err.message}`, code: 2 };
+  if (err instanceof DeepCheckError) return { message: `factory: --deep failed — ${err.message}`, code: 2 };
+  return null;
+}
+
+/** Maps a finished report to the CLI exit: 1 not-ready (or missing fields with --no-judge), 3 would split. */
+export function checkReportExit(report: IssueCheckReport): { message: string; code: 1 | 3 } | null {
+  if (report.exitCode === 1) {
+    const state = report.verdict ?? 'not factory-ready';
+    return { message: `factory: issue #${report.issue} is ${state} — ${report.reasons.join('; ')}`, code: 1 };
+  }
+  if (report.exitCode === 3) {
+    return { message: `factory: issue #${report.issue} would split — ${report.size.reason}`, code: 3 };
+  }
+  return null;
 }

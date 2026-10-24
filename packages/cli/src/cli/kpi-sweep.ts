@@ -19,7 +19,7 @@ export async function runEndOfRunKpiSnapshot(
   rt: Pick<RunRuntime, 'readCosts' | 'reconstructHumanEventsForKpis' | 'appendKpiSnapshot'>,
 ): Promise<void> {
   try {
-    const events = existsSync(paths.events) ? readEvents(paths.events) : [];
+    const events = readEvents(paths.events, { includeSegments: true });
     if (!runProducedPrOrMerge(events, runStartedAt)) {
       logEvent(paths.events, 'kpi-sweep-skipped', 'all', KPI_SWEEP_NOOP_MESSAGE);
       return;

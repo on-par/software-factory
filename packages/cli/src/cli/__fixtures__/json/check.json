@@ -1,0 +1,67 @@
+{
+  "issue": 7,
+  "schemaVersion": 1,
+  "verdict": "ready",
+  "summary": "Clear.",
+  "questions": [],
+  "assumptions": [],
+  "judge": {
+    "model": "fake-model",
+    "cost": 0.02,
+    "unpriced": false,
+    "cached": false,
+    "promptVersion": "readiness-judge/v1",
+    "bodyHash": "b39bcb0edc325bf6a69d03b86e06eb1d"
+  },
+  "template": "factory-task",
+  "score": 0,
+  "fields": {
+    "pass": false,
+    "missing": ["Problem statement", "In scope", "Out of scope", "Acceptance criteria", "Verification"]
+  },
+  "criteria": {
+    "findings": [],
+    "verificationCommand": null,
+    "problems": [],
+    "pass": true
+  },
+  "size": {
+    "verdict": "runs-as-is"
+  },
+  "invest": {
+    "findings": [
+      {
+        "letter": "independent",
+        "status": "pass",
+        "reason": "no dependencies named"
+      },
+      {
+        "letter": "negotiable",
+        "status": "not-checked",
+        "reason": "needs model judgement"
+      },
+      {
+        "letter": "valuable",
+        "status": "warn",
+        "reason": "no Problem statement"
+      },
+      {
+        "letter": "estimable",
+        "status": "not-checked",
+        "reason": "needs model judgement"
+      },
+      {
+        "letter": "small",
+        "status": "pass",
+        "reason": "within the size gate"
+      },
+      {
+        "letter": "testable",
+        "status": "warn",
+        "reason": "no acceptance criteria"
+      }
+    ]
+  },
+  "reasons": [],
+  "exitCode": 0
+}

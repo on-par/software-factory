@@ -331,7 +331,7 @@ import { cmdLogs } from './logs.js';
 import { mergeScopeNotice } from './merge-scope.js';
 import { selectOctokit } from './github-stub.js';
 import { createFactoryOctokit, type FactoryOctokitOptions } from './octokit.js';
-import { DeepCheckError, createDeepModelRunner, runIssueCheck, type DeepCheckModelRunner } from './ready-check.js';
+import { checkErrorExit, checkReportExit, createDeepModelRunner, runIssueCheck } from './ready-check.js';
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
 import { readRunFlagOverrides, recordDraftPrFlag } from './run-flags.js';
 import { runStalenessGuard } from './staleness.js';
@@ -1440,22 +1440,25 @@ async function cmdCost(opts: { issue?: string; json?: boolean } = {}) {
   console.log(`  Total: ${formatCostTotal(grand.cost, grand.unpricedCount)}`);
 }
 
-async function cmdCheck(issueRaw: string, opts: { json?: boolean; deep?: boolean }) {
+async function cmdCheck(
+  issueRaw: string,
+  opts: { json?: boolean; deep?: boolean; judge?: boolean; rejudge?: boolean },
+) {
   const issueNum = parseIssueArg(issueRaw);
-  const ghRepo = await getGitHubRepo();
-  const [owner, repoName] = ghRepo.split('/');
-  let runModel: DeepCheckModelRunner | undefined;
-  if (opts.deep) {
-    const repoRoot = await getRepoRoot();
-    runModel = createDeepModelRunner(newRepoRouter(repoRoot, configLoaders, coreOps.ModelRouter), repoRoot);
-  }
+  const [owner, repoName] = (await getGitHubRepo()).split('/');
+  const repoRoot = await getRepoRoot();
+  const runModel =
+    opts.judge !== false || opts.deep
+      ? createDeepModelRunner(newRepoRouter(repoRoot, configLoaders, coreOps.ModelRouter), repoRoot)
+      : undefined;
   let report;
   try {
     report = await runIssueCheck(issueNum, opts, {
       runModel,
+      readinessCacheDir: getFactoryPaths(repoRoot).readinessCache,
       getIssue: async (n) => {
         const { data } = await getOctokit().rest.issues.get({ owner, repo: repoName, issue_number: n });
-        return { title: data.title, body: data.body ?? null };
+        return { title: data.title, body: data.body ?? null, labels: data.labels };
       },
       getIssueState: async (n) => {
         const { data } = await getOctokit().rest.issues.get({ owner, repo: repoName, issue_number: n });
@@ -1464,15 +1467,12 @@ async function cmdCheck(issueRaw: string, opts: { json?: boolean; deep?: boolean
       log: (line) => console.log(line),
     });
   } catch (err) {
-    if (err instanceof DeepCheckError) throw new CliExitError(`factory: --deep failed — ${err.message}`, 2);
+    const exit = checkErrorExit(err);
+    if (exit) throw new CliExitError(exit.message, exit.code);
     throw err;
   }
-  if (report.exitCode === 1) {
-    throw new CliExitError(`factory: issue #${issueNum} is not factory-ready — ${report.reasons.join('; ')}`, 1);
-  }
-  if (report.exitCode === 3) {
-    throw new CliExitError(`factory: issue #${issueNum} would split — ${report.size.reason}`, 3);
-  }
+  const exit = checkReportExit(report);
+  if (exit) throw new CliExitError(exit.message, exit.code);
 }
 
 async function currentCommitSha(): Promise<string | null> {
@@ -1701,7 +1701,7 @@ async function cmdKpis(opts: { branchPrefix?: string; json?: boolean } = {}) {
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const events = existsSync(paths.events) ? readEvents(paths.events) : [];
+  const events = readEvents(paths.events, { includeSegments: true });
   const costs = existsSync(paths.costs) ? internalOps.readCosts(paths.costs) : [];
 
   const recon = await reconstructHumanEventsForKpis(events, branchPrefix);

@@ -17,6 +17,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'build',
   'sizeGate',
   'kpis',
+  'events',
   'sandbox',
   'discovery',
   'filing',
