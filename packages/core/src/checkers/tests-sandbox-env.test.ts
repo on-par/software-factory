@@ -1,22 +1,18 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { VERIFY_SANDBOX_ENV_MARKER } from '../environment/sandbox-env.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import type { CommandResult } from '../utils/command-runner.js';
 import { testsChecker } from './index.js';
 
-const tempDirs = new Set<string>();
-afterEach(async () => {
-  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
-  tempDirs.clear();
-});
+const tempDirs = createTempDirs();
+afterEach(() => tempDirs.cleanup());
 
 async function verifyWorktree(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'checker-test-'));
-  tempDirs.add(dir);
+  const dir = await tempDirs.make('checker-test-');
   await mkdir(join(dir, 'scripts'));
   await writeFile(join(dir, 'scripts', 'verify.sh'), '#!/usr/bin/env bash\n');
   return dir;

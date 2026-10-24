@@ -1,10 +1,9 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { buildPhase } from './build.js';
@@ -28,11 +27,8 @@ const models: ModelsConfig = {
 };
 const routes: RoutesConfig = { version: 1, routes: { build_claude: { tier: 'worker', description: 'stub' } } };
 
-const tempDirs = new Set<string>();
-afterEach(async () => {
-  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
-  tempDirs.clear();
-});
+const tempDirs = createTempDirs();
+afterEach(() => tempDirs.cleanup());
 
 const ENV_LINE = 'ENV-ERROR: verify: ENVIRONMENT ERROR: loopback bind denied (EPERM)';
 
@@ -41,8 +37,7 @@ describe('buildPhase sandbox environment error (#3332)', () => {
     ['ENV-ERROR only', ENV_LINE],
     ['ENV-ERROR and ESCALATE', `ESCALATE: what now?\n${ENV_LINE}`],
   ])('returns sandbox_env without diffing when the worker prints an ENV-ERROR line (%s)', async (_name, output) => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await tempDirs.make('build-phase-test-');
     const stub = new StubModelExecutor({ scripts: { build_claude: [{ output }] } });
     const router = new ModelRouter(models, routes, false, stub);
     const collectDiff = vi.fn();
