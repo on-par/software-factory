@@ -21,7 +21,7 @@ import { promisify, styleText } from 'node:util';
 import type { Octokit } from '@octokit/rest';
 import { LaneEnvironmentPauseError } from './lane-environment-pause-error.js';
 import { INVALID_BRANCH_PREFIX_MESSAGE, resolveBranchPrefixOption } from './branch-prefix.js';
-import { sweepLaneClaims, warnQueueDiagnostics } from './queue-startup.js';
+import { startupSweeps, warnQueueDiagnostics } from './queue-startup.js';
 import { proposeTriageQueue } from './triage-open-prs.js';
 import {
   makeQueuePreflightOps,
@@ -2112,8 +2112,7 @@ export function resolveEnvironmentAcquirer(opts: {
   };
 }
 
-const sweepStaleLaneClaims = (paths: ReturnType<typeof getFactoryPaths>, ghRepo: string) =>
-  sweepLaneClaims(paths, ghRepo, () => (hasGitHubToken() ? getOctokit() : undefined));
+const { sweepStaleLaneClaims, sweepOrphanDrafts } = startupSweeps(() => (hasGitHubToken() ? getOctokit() : undefined));
 
 /** The autoGcOnRun-gated worktree sweep every pipeline entry point runs before shipping
  *  (`factory run`, and since #1756 the one-shot `factory ship` / `factory run-issue`). Never
@@ -4295,6 +4294,7 @@ function runRun(opts: RunOptions = {}): Promise<void> {
     withRepoRunLock,
     runAutoWorktreeGc,
     sweepStaleLaneClaims,
+    sweepOrphanDrafts,
     planRunLanes,
     preflightQueuedIssue,
     createQueuePreflightOps,

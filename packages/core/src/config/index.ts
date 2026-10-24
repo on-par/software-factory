@@ -801,6 +801,7 @@ export function getFactoryPaths(repoRoot: string, stateRoot?: string, env: NodeJ
     steering: resolve(state, 'steering'),
     kpiHistory: resolve(state, 'kpi-history.jsonl'),
     kpiSweepCache: resolve(state, 'kpi-sweep-cache.json'),
+    orphanDraftSweep: resolve(state, 'orphan-draft-sweep.json'),
     classifierOutcomes: resolve(state, 'classifier-outcomes.jsonl'),
     ingestWatermark: resolve(state, 'ingest-watermark'),
     ports: resolve(process.env.FACTORY_DAEMON_PORTS_DIR ?? state, 'ports.json'),
