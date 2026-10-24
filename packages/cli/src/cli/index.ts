@@ -234,9 +234,11 @@ import {
   readStopMarker,
   detectClaudePlan,
 } from '@on-par/factory-core/internal';
+import { CliExitError } from './errors.js';
 import { withRepoRunLock } from './repo-run-lock.js';
 
-export { withRepoRunLock };
+
+export { CliExitError, withRepoRunLock };
 import type { StopMarker } from '@on-par/factory-core/internal';
 import { formatSteerabilityReport } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
@@ -969,17 +971,6 @@ async function cmdMigrate(opts: { dryRun?: boolean; toYaml?: boolean } = {}): Pr
 }
 
 export class InvalidProductNameError extends Error {}
-
-/** Expected user-facing CLI failure. Thrown by command helpers; only main() maps it to a process exit code. */
-export class CliExitError extends Error {
-  constructor(
-    message: string,
-    readonly code: number,
-  ) {
-    super(message);
-    this.name = 'CliExitError';
-  }
-}
 
 /** Parse a CLI <issue> argument; rejects unsafe integers (#2836), also used by reset. Throws CliExitError(2) before any git/GitHub work runs. */
 export function parseIssueArg(raw: string): number {

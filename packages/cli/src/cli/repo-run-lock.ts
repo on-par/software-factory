@@ -8,7 +8,7 @@ import {
 } from '@on-par/factory-core/internal';
 import type { getFactoryPaths } from '@on-par/factory-core';
 
-import { CliExitError } from './index.js';
+import { CliExitError } from './errors.js';
 
 /** Fences a whole run behind a run lock (#598, #3643): by default the checkout-wide
  *  `.factory/run.lock`, or with `deps.scope` a per-issue `.factory/locks/run/<WorkKey>` lock

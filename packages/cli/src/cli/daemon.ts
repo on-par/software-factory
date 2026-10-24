@@ -23,10 +23,10 @@ import {
   defaultRegistryPath,
   listRepos,
   loadRegistry,
-  listLiveRunLocks,
   type RunRuntime,
 } from '@on-par/factory-core/internal';
 import { defaultIsPidAlive, getFactoryPaths, type FactoryConfig } from '@on-par/factory-core';
+import { repoHasLiveRunLock } from './repo-live-run-lock.js';
 
 import { bootstrapFailureMessage, reloadLaunchAgent } from './daemon-launchctl.js';
 import { defaultLoadConfig, readDaemonLoad, readLiveDaemonPid } from './daemon-load.js';
@@ -782,14 +782,7 @@ export function createAutoUpdateDeps(opts: {
         .filter((r) => r.status === 'queued' || r.status === 'running')
         .map((r) => `daemon:${r.repo}#${r.issue}`);
       for (const e of await attached()) {
-        // An unreadable issue-locks dir fails closed: treat the repo as active.
-        let held: boolean;
-        try {
-          held = listLiveRunLocks(getFactoryPaths(e.path, e.stateRoot), defaultIsPidAlive).length > 0;
-        } catch {
-          held = true;
-        }
-        if (held) active.push(e.slug);
+        if (repoHasLiveRunLock(e)) active.push(e.slug);
       }
       return active;
     },
