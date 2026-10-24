@@ -3,7 +3,7 @@
 import type { Octokit } from '@octokit/rest';
 
 import type { RunLogFn } from './attribution.js';
-import { readWorktreeHead } from './ci-suppression-guard.js';
+import { readWorktreeHead as readWorktreeHeadDefault } from './ci-suppression-guard.js';
 import type { RunPorts, RunRequest } from './run-issue.js';
 import { issueBodyHash, type PlanReuseRecord } from './resume-context.js';
 
@@ -48,7 +48,7 @@ export function designCheckpointMessage(input: { issue: number; specPath: string
  */
 export async function designCheckpointPark(
   request: Pick<RunRequest, 'repo' | 'issue' | 'work' | 'specPath' | 'branch' | 'localOnly'>,
-  ports: Pick<RunPorts, 'octokit' | 'workspace' | 'planReuse'>,
+  ports: Pick<RunPorts, 'octokit' | 'workspace' | 'planReuse' | 'readWorktreeHead'>,
   route: PlanReuseRecord['route'],
   log: RunLogFn,
 ): Promise<string | undefined> {
@@ -60,7 +60,7 @@ export async function designCheckpointPark(
   if (!label.present) return undefined;
   if (ports.planReuse) {
     try {
-      const baseSha = await readWorktreeHead(ports.workspace.path);
+      const baseSha = await (ports.readWorktreeHead ?? readWorktreeHeadDefault)(ports.workspace.path);
       await ports.planReuse.record({
         bodyHash: issueBodyHash(request.work.brief),
         baseSha,
