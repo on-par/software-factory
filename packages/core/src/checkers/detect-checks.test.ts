@@ -73,6 +73,35 @@ describe('detectCheckHeuristics', () => {
     expect(h.ambiguities).toContain('several build systems (Go, Rust)');
   });
 
+  it('a package.json test script is a deterministic heuristic, not an ambiguity', async () => {
+    const h = await detectCheckHeuristics(repo({ 'package.json': '{"scripts":{"test":"node --test"}}' }));
+    expect(h.ambiguities).not.toContain('no test command found');
+    expect(h.ambiguities).toEqual([]);
+    expect(heuristicProposal(h)).toEqual({ test: 'npm test' });
+  });
+
+  it('package.json build and lint scripts map to npm run', async () => {
+    const scripts = { test: 'vitest', build: 'tsc', lint: 'oxlint' };
+    const h = await detectCheckHeuristics(repo({ 'package.json': JSON.stringify({ scripts }) }));
+    expect(heuristicProposal(h)).toEqual({ build: 'npm run build', test: 'npm test', lint: 'npm run lint' });
+  });
+
+  it("package.json is a fallback that never adds ambiguity or overrides CHECK's verify script", async () => {
+    const pkg = '{"scripts":{"test":"node --test"}}';
+    const withGo = await detectCheckHeuristics(repo({ 'go.mod': '', 'package.json': pkg }));
+    expect(withGo.guessed.test).toBe('go test ./...');
+    expect(withGo.ambiguities.some((a) => a.includes('several build systems'))).toBe(false);
+    const placeholder = '{"scripts":{"test":"echo \\"Error - no test specified\\" && exit 1"}}';
+    const cases: Record<string, string>[] = [
+      { 'package.json': placeholder },
+      { 'package.json': pkg, 'scripts/verify.sh': 'exit 0' },
+      { 'package.json': '{ nope' },
+    ];
+    for (const files of cases) {
+      expect((await detectCheckHeuristics(repo(files))).ambiguities).toEqual(['no test command found']);
+    }
+  });
+
   it('no test command at all is ambiguous', async () => {
     expect((await detectCheckHeuristics(repo({ 'README.md': 'hi' }))).ambiguities).toEqual(['no test command found']);
   });

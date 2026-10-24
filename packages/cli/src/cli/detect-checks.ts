@@ -4,14 +4,16 @@
 import { basename } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 
-import { getFactoryPaths, isCommandAvailable } from '@on-par/factory-core';
+import { getFactoryPaths, isCommandAvailable, type CostEntry } from '@on-par/factory-core';
 import {
   buildDetectChecksPrompt,
   CHECK_KINDS,
   detectCheckHeuristics,
   heuristicProposal,
+  logCost,
   parseDetectedChecks,
   readRepoConfigFile,
+  resolveTestsCommand,
   runCommand,
   setRepoConfigValue,
   tokenizeEvidenceCommand,
@@ -80,13 +82,22 @@ async function propose(deps: DetectChecksDeps): Promise<{ proposal: CheckProposa
   return { proposal: fallback, source: 'heuristics' };
 }
 
+/** The closing line when nothing was found: what CHECK still runs, so it never claims no test command exists (#3603). */
+async function nothingToDeclareMessage(repoRoot: string): Promise<string> {
+  const tests = await resolveTestsCommand({ worktree: repoRoot }).catch(() => null);
+  if (!tests || tests.runner === 'none') {
+    return 'No build, test or lint command found. Declare them by hand under `checks` in the repo config.';
+  }
+  return `No build, test or lint command to declare. CHECK will run \`${tests.argv.join(' ')}\` (${tests.label}) for tests; declare other commands by hand under \`checks\` in the repo config.`;
+}
+
 /** Detect, dry-run, confirm and write the repo's CHECK commands. Never throws for a failed agent or dry-run. */
 export async function runDetectChecks(deps: DetectChecksDeps): Promise<DetectChecksOutcome> {
   const { configPath, log } = deps;
   const { proposal, source } = await propose(deps);
   const dryRuns: DetectChecksOutcome['dryRuns'] = {};
   if (Object.keys(proposal).length === 0) {
-    log('No build, test or lint command found. Declare them by hand under `checks` in the repo config.');
+    log(await nothingToDeclareMessage(deps.repoRoot));
     return { proposal, source, dryRuns, written: null };
   }
 
@@ -131,11 +142,17 @@ export interface DetectChecksRouter {
 /** `factory init --detect-checks`: detect with the repo's router (missing harness CLIs skipped) into its config file. */
 export async function detectChecksForInit(
   repoRoot: string,
-  router: DetectChecksRouter & { skipMissingHarnessClis(available: (cmd: string) => boolean): void },
+  router: DetectChecksRouter & {
+    skipMissingHarnessClis(available: (cmd: string) => boolean): void;
+    setCostSink(sink: (entry: Omit<CostEntry, 'ts' | 'issue'>) => void): void;
+  },
   yes: boolean,
   tty?: Parameters<typeof detectChecksIo>[2],
 ): Promise<DetectChecksOutcome> {
   router.skipMissingHarnessClis(isCommandAvailable);
+  // The detect_checks call's spend goes to the cost ledger like `factory triage` (#3603).
+  const costs = getFactoryPaths(repoRoot).costs;
+  router.setCostSink((entry) => logCost(costs, { ...entry, issue: '-' }));
   const io = detectChecksIo(repoRoot, router, tty);
   return runDetectChecks({ ...io, configPath: getFactoryPaths(repoRoot).config, yes });
 }

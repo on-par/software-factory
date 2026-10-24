@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
+import { getFactoryPaths } from '@on-par/factory-core';
 import { resolveTestsCommand } from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -217,6 +218,7 @@ describe('detectChecksForInit', () => {
       skipMissingHarnessClis: () => {
         skipped = true;
       },
+      setCostSink: () => {},
       run: async (task: string) => (tasks.push(task), { output: '{"test": "node -e process.exitCode=0"}' }),
     };
     const outcome = await detectChecksForInit(dir, router, true);
@@ -226,5 +228,65 @@ describe('detectChecksForInit', () => {
     expect(readFileSync(join(dir, '.factory', 'config.yaml'), 'utf-8')).toMatch(
       /checks:\n\s+test: node -e process.exitCode=0/,
     );
+  });
+
+  it('logs the detect_checks call to the cost ledger', async () => {
+    const dir = tmp.makeSync('detect-checks-cost-');
+    mkdirSync(join(dir, '.factory'));
+    writeFileSync(join(dir, '.factory', 'config.yaml'), 'version: 2\n');
+    let captured: Parameters<Parameters<typeof detectChecksForInit>[1]['setCostSink']>[0] | undefined;
+    const router = {
+      skipMissingHarnessClis: () => {},
+      setCostSink: (sink: typeof captured) => {
+        captured = sink;
+      },
+      run: async () => {
+        captured?.({ task: 'detect_checks', model: 'm', inputTokens: 1, outputTokens: 1, cost: 0.01 });
+        return { output: '{"test": "node -e process.exitCode=0"}' };
+      },
+    };
+    await detectChecksForInit(dir, router, true);
+    const rows = readFileSync(getFactoryPaths(dir).costs, 'utf-8').trim().split('\n');
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0]!)).toMatchObject({ task: 'detect_checks', issue: '-' });
+  });
+});
+
+describe('runDetectChecks on a package.json repo', () => {
+  it('runDetectChecks on a package.json repo makes no detect_checks route call', async () => {
+    const dir = tmp.makeSync('detect-checks-node-');
+    writeFileSync(join(dir, 'package.json'), '{"scripts":{"test":"node --test"}}');
+    mkdirSync(join(dir, '.factory'));
+    const configPath = join(dir, '.factory', 'config.json');
+    writeFileSync(configPath, JSON.stringify({ version: 2 }));
+    const calls: string[] = [];
+    const router = {
+      run: async (task: string): Promise<{ output: string }> => {
+        calls.push(task);
+        throw new Error('detect_checks route must not be called');
+      },
+    };
+    const io = detectChecksIo(dir, router);
+    const { d, lines } = deps(dir, configPath, {
+      runAgent: io.runAgent,
+      dryRun: async () => ({ ok: true, summary: 'ok' }),
+    });
+    const outcome = await runDetectChecks(d);
+    expect(calls).toEqual([]);
+    expect(outcome.source).toBe('heuristics');
+    expect(outcome.written).toEqual({ test: 'npm test' });
+    expect(lines.join('\n')).not.toMatch(/ambiguous/);
+  });
+
+  it('with nothing to declare, the closing message names the test command CHECK will run', async () => {
+    const dir = tmp.makeSync('detect-checks-verify-');
+    writeFileSync(join(dir, 'package.json'), '{"scripts":{"test":"node --test"}}');
+    mkdirSync(join(dir, 'scripts'));
+    writeFileSync(join(dir, 'scripts', 'verify.sh'), 'exit 0');
+    const { d, lines } = deps(dir, join(dir, '.factory', 'config.json'));
+    await runDetectChecks(d);
+    const text = lines.join('\n');
+    expect(text).toContain('CHECK will run `bash scripts/verify.sh --no-e2e`');
+    expect(text).not.toContain('No build, test or lint command found');
   });
 });
