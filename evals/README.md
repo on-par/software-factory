@@ -100,3 +100,21 @@ Run this in real mode (no `--stub`) locally, or copy the numbers from a weekly
 artifact, then commit the updated file. The committed seed baseline was generated
 from the stub run, so per-case rubric-score comparison stays dormant until a
 maintainer commits a baseline generated from a real run.
+
+## Readiness suite
+
+`evals/readiness/*.md` are fixtures for the readiness judge (`judgeReadiness`, route `readiness_judge`, ADR-0167). The plan suite is untouched; select this one with `--suite readiness`.
+
+Frontmatter: `expectedVerdict` (required: `ready`, `ready-with-assumptions`, `not-ready`, or `judge-error`), `acceptableVerdicts` (array, defaults to `[expectedVerdict]`), `mustAsk` (keywords; for not-ready cases at least one must appear, case-insensitively, in a question text), `labels`, `rubric`, `minRubricScore` (default 7), and `id`. The first `# ` heading is the ticket title and the rest is the body; an empty body is allowed.
+
+Offline runs need a fenced `stub-output` block holding the canned verdict JSON. If it does not parse, the runner scripts it twice, because the judge makes one repair call after an unparseable reply. Use `expectedVerdict: judge-error` for a case that must end in a judge error (`stub-malformed-json`).
+
+Metrics: accuracy (passed / total), a confusion matrix of expected vs actual verdict, false-ready rate (not-ready tickets judged ready or ready-with-assumptions), false-not-ready rate (ready or ready-with-assumptions tickets judged not-ready), must-ask hit rate, and `judgeErrors`. Each case also runs the deterministic checks `prompt-wraps-body`, `verdict-parsed`, `verdict-correct` and `must-ask`. In real mode the LLM judge scores each verdict against the case rubric.
+
+`evals/readiness-baseline.json` tolerances: false-ready rate 0 (any rise fails), false-not-ready rate 0.10, rubric score 1.0, plus a `totalCostEstimate` budget. The weekly workflow runs the real suite and uploads `readiness-eval-report`.
+
+```
+npm run eval -- --stub --suite readiness
+npm run eval -- --stub --suite readiness --baseline evals/readiness-baseline.json
+npm run eval -- --suite readiness --judge-k 3 --readiness-model claude-sonnet-5-5 --judge-model claude-sonnet-5-5 --baseline evals/readiness-baseline.json
+```

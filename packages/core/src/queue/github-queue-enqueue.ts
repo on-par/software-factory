@@ -24,6 +24,14 @@ export interface ChildEnqueueResult {
   detail?: string;
 }
 
+export interface FrontEnqueueResult {
+  /** One per input issue, in input order. */
+  results: EnqueueResult[];
+  /** 'front': issues took orders 1..k and every other in-lane order moved up; 'tail': the shift failed and they were appended. */
+  placement: 'front' | 'tail';
+  detail?: string;
+}
+
 function queueSpecs(lane: string, position: number): QueueLabelSpec[] {
   return [
     { name: QUEUED_LABEL, color: QUEUED_LABEL_COLOR, description: 'Eligible to be claimed by a factory lane' },
@@ -118,12 +126,13 @@ export function createEnqueuers(client: QueueGitHubClient, owner: string, repo: 
     return results;
   }
 
-  async function enqueueAfter(lane: string, parent: number, issues: readonly number[]): Promise<ChildEnqueueResult> {
-    const parentLabels = await client.getIssueLabels({ owner, repo, issue_number: parent });
-    const parentOrders = parentLabels.filter((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX));
-    const p = parentOrders.length === 1 ? orderOf(parentOrders[0] ?? '') : undefined;
-    if (p === undefined) return { results: await enqueue(lane, issues), placement: 'tail' };
-
+  /** Queues `issues` at orders p+1..p+k of the lane, shifting later in-lane orders (not in `exclude`) up by k. */
+  async function insertAfter(
+    lane: string,
+    p: number,
+    issues: readonly number[],
+    exclude: ReadonlySet<number>,
+  ): Promise<{ results: EnqueueResult[]; tail: boolean; detail?: string }> {
     const members = await client.listOpenIssuesWithLabels({ owner, repo, labels: [laneLabel(lane)] });
     const done = new Map<number, EnqueueResult>();
     const toQueue: number[] = [];
@@ -149,12 +158,11 @@ export function createEnqueuers(client: QueueGitHubClient, owner: string, repo: 
     }
     const inOrder = (): EnqueueResult[] => issues.flatMap((issue) => done.get(issue) ?? []);
     const k = toQueue.length;
-    if (k === 0) return { results: inOrder(), placement: 'after-parent' };
+    if (k === 0) return { results: inOrder(), tail: false };
 
     // Members with a malformed or multiple order label are left alone: they are already unclaimable.
-    const skip = new Set<number>([parent, ...issues]);
     const shifted = members
-      .filter((m) => !skip.has(m.number))
+      .filter((m) => !exclude.has(m.number))
       .flatMap((m) => {
         const orders = m.labels.filter((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX));
         const pos = orders.length === 1 ? orderOf(orders[0] ?? '') : undefined;
@@ -171,7 +179,7 @@ export function createEnqueuers(client: QueueGitHubClient, owner: string, repo: 
       }
     } catch (err) {
       for (const r of await enqueue(lane, toQueue)) done.set(r.issue, r);
-      return { results: inOrder(), placement: 'tail', detail: errorMessage(err) };
+      return { results: inOrder(), tail: true, detail: errorMessage(err) };
     }
 
     for (const [j, issue] of toQueue.entries()) {
@@ -188,8 +196,30 @@ export function createEnqueuers(client: QueueGitHubClient, owner: string, repo: 
         done.set(issue, { issue, outcome: 'failed', detail: errorMessage(err) });
       }
     }
-    return { results: inOrder(), placement: 'after-parent' };
+    return { results: inOrder(), tail: false };
   }
 
-  return { enqueue, enqueueAfter };
+  async function enqueueAfter(lane: string, parent: number, issues: readonly number[]): Promise<ChildEnqueueResult> {
+    const parentLabels = await client.getIssueLabels({ owner, repo, issue_number: parent });
+    const parentOrders = parentLabels.filter((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX));
+    const p = parentOrders.length === 1 ? orderOf(parentOrders[0] ?? '') : undefined;
+    if (p === undefined) return { results: await enqueue(lane, issues), placement: 'tail' };
+    const out = await insertAfter(lane, p, issues, new Set([parent, ...issues]));
+    return {
+      results: out.results,
+      placement: out.tail ? 'tail' : 'after-parent',
+      ...(out.detail ? { detail: out.detail } : {}),
+    };
+  }
+
+  async function enqueueFront(lane: string, issues: readonly number[]): Promise<FrontEnqueueResult> {
+    const out = await insertAfter(lane, 0, issues, new Set(issues));
+    return {
+      results: out.results,
+      placement: out.tail ? 'tail' : 'front',
+      ...(out.detail ? { detail: out.detail } : {}),
+    };
+  }
+
+  return { enqueue, enqueueAfter, enqueueFront };
 }

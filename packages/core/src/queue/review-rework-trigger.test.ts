@@ -304,6 +304,12 @@ describe('claimReviewRework (#3564)', () => {
     expect(claimReviewRework(store, 42)?.reviewId).toBe(3);
   });
 
+  it('never claims a record the cap parked (#3565)', () => {
+    const store = createFileReviewReworkStore(join(dirs.makeSync('claim-'), 'cap.json'));
+    store.record({ ...rec(1, 42, '2026-01-01T00:00:00.000Z'), cappedAt: '2026-01-01T00:00:00.000Z' });
+    expect(claimReviewRework(store, 42)).toBeUndefined();
+  });
+
   it('returns undefined when nothing is pending', () => {
     expect(
       claimReviewRework(createFileReviewReworkStore(join(dirs.makeSync('claim-'), 'none.json')), 42),

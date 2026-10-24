@@ -4,6 +4,7 @@ import type { Octokit } from '@octokit/rest';
 
 import { LaneFileGuard, type getFactoryPaths, type QueueDiagnostic } from '@on-par/factory-core';
 import { createGithubLaneClaimStalenessProbe, logEvent, resolveBranchPrefix } from '@on-par/factory-core/internal';
+import { runOrphanDraftSweep } from './orphan-draft-sweep.js';
 
 export function warnQueueDiagnostics(diagnostics: QueueDiagnostic[]): void {
   for (const d of diagnostics) {
@@ -30,4 +31,13 @@ export async function sweepLaneClaims(
   } catch (err: any) {
     logEvent(paths.events, 'warn', 'all', `lane claim sweep failed: ${err?.message ?? String(err)}`);
   }
+}
+
+/** The `factory run` startup sweeps bound to one octokit getter (undefined without a GitHub token). */
+export function startupSweeps(getOctokit: () => Octokit | undefined) {
+  type Paths = ReturnType<typeof getFactoryPaths>;
+  return {
+    sweepStaleLaneClaims: (paths: Paths, ghRepo: string) => sweepLaneClaims(paths, ghRepo, getOctokit),
+    sweepOrphanDrafts: (paths: Paths, ghRepo: string) => runOrphanDraftSweep(paths, ghRepo, getOctokit),
+  };
 }

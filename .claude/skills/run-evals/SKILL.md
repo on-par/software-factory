@@ -61,3 +61,13 @@ npm run eval-history -- --report eval-report.json --history history.jsonl
 ## Reading the output
 
 Each run prints a per-case table, then one summary line: `pass-rate P/T (…%) · route-accuracy …% (C/A) · est. cost $… · total latency …s`. Non-zero exit means a failed case or a baseline regression — fix or explain before committing.
+
+## Readiness suite
+
+```bash
+npm run eval -- --stub --suite readiness
+npm run eval -- --stub --suite readiness --baseline evals/readiness-baseline.json
+npm run eval -- --suite readiness --readiness-model <id> --judge-model <id> --baseline evals/readiness-baseline.json
+```
+
+`--suite plan|readiness` selects the suite (default `plan`; any other value is rejected). The readiness suite runs `evals/readiness/*.md` through the `readiness_judge` route, and `--readiness-model <id>` pins the model for it. The stub run is also in `bash scripts/verify.sh` and CI. It prints accuracy, false-ready, false-not-ready, must-ask and judge-errors. Any rise in false-ready fails the baseline comparison; false-not-ready tolerates 0.10. Refresh with `--write-baseline evals/readiness-baseline.json`. Case format: `evals/README.md`.
