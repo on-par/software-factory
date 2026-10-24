@@ -1444,6 +1444,7 @@ describe('cli', () => {
           },
           merge,
         },
+        repos: { compareCommitsWithBasehead: async () => ({ data: { behind_by: 0 } }) },
         git: { deleteRef: async () => {} },
       },
     });
@@ -1476,9 +1477,12 @@ describe('cli', () => {
         },
       });
 
+      // get: pre-watch behind check, the CI watch head read, and the under-lock behind check (#3654).
       expect(calls).toEqual([
         ['get', 123],
+        ['get', 123],
         ['watch', 'abc123'],
+        ['get', 123],
         ['merge', 'abc123'],
       ]);
     });
@@ -1627,7 +1631,7 @@ describe('cli', () => {
 
       await landOpenPullRequest({ ...baseOpts, octokit, log: () => {}, skipCI: true });
 
-      expect(calls).toEqual([['merge', undefined]]);
+      expect(calls.filter((c) => c[0] === 'merge')).toEqual([['merge', undefined]]);
     });
   });
 
@@ -1932,6 +1936,7 @@ describe('cli', () => {
             calls.push(['merge', args]);
           },
         },
+        repos: { compareCommitsWithBasehead: async () => ({ data: { behind_by: 0 } }) },
         git: { deleteRef: async (args: any) => calls.push(['deleteRef', args]) },
         checks: {
           listForRef: async () => ({ data: { check_runs: [{ status: 'completed', conclusion: 'success' }] } }),
@@ -2068,7 +2073,7 @@ describe('cli', () => {
     ).rejects.toBeInstanceOf(LandConflictError);
 
     expect(calls).toEqual([
-      ['log', 'pr_refresh', 'PR #123 refreshed: mergeStateStatus=DIRTY action=merge-main'],
+      ['log', 'pr_refresh', 'PR #123 refreshed: mergeStateStatus=DIRTY action=merge-main reason=dirty round=1/3'],
       ['log', 'conflict', 'PR #123 DIRTY on ship-it/20-dirty and worktree gone'],
     ]);
   });
