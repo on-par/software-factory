@@ -497,5 +497,4 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'worktree-base': { severity: 'info', isPark: false, isTerminal: false },
   'worktree-gc': { severity: 'info', isPark: false, isTerminal: false },
 };
-
 export { eventTraitsFor, isParkKind, laneStatusOf, severityOf, UNKNOWN_EVENT_TRAITS } from './kind-lookup.js';
