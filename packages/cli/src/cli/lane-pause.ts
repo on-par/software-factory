@@ -1,15 +1,21 @@
 // packages/cli/src/cli/lane-pause.ts — the lane-paused event, base hold, and comment, moved out of run-lane.ts
 
-import type { getFactoryPaths, LanePausedPayload, ProviderBreaker } from '@on-par/factory-core';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+
+import type { getFactoryPaths, LanePausedPayload, ProviderBreaker, RunOutcome } from '@on-par/factory-core';
 import type { logEvent } from '@on-par/factory-core/internal';
 
 import { BASE_HOLD_CI_RECHECK_MS, writeBaseHold } from './base-hold.js';
 import type { LaneEnvironmentPauseError } from './lane-environment-pause-error.js';
 
+type AllProvidersDownPayload = NonNullable<Extract<RunOutcome, { reason: 'provider-cap' }>['allProvidersDown']>;
+
 type LanePauseContext = {
   lane: string;
   paths: ReturnType<typeof getFactoryPaths>;
   emitEvent: typeof logEvent;
+  now?: () => Date;
 };
 
 export function renderLanePausedComment(payload: LanePausedPayload): string {
@@ -63,13 +69,48 @@ export function pauseLaneForBrokenBase(
   );
 }
 
+/** Latch for the all_providers_down alert (#3340): false only when the same reset is already announced and still ahead.
+ *  Any read or parse error fails open (emit); the write is best-effort. */
+function shouldAlertAllProvidersDown(file: string, nextAvailableAt: string, nowMs: number): boolean {
+  try {
+    const stored: unknown = JSON.parse(readFileSync(file, 'utf8'));
+    const prior =
+      typeof stored === 'object' && stored !== null
+        ? (stored as { nextAvailableAt?: unknown }).nextAvailableAt
+        : undefined;
+    if (prior === nextAvailableAt && Date.parse(nextAvailableAt) > nowMs) return false;
+  } catch {}
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ nextAvailableAt, at: new Date(nowMs).toISOString() }));
+  } catch {}
+  return true;
+}
+
 /** Emits the provider-cap lane-paused event: the issue went back to queued and claiming resumes at `resetAt` (#3226). */
 export function pauseLaneForProviderCap(
   ctx: LanePauseContext,
   issue: number,
-  cap: { providers: string[]; resetAt: string },
+  cap: { providers: string[]; resetAt: string; allProvidersDown?: AllProvidersDownPayload },
 ): void {
   const { lane, paths, emitEvent } = ctx;
+  const down = cap.allProvidersDown;
+  const nowMs = (ctx.now ?? (() => new Date()))().getTime();
+  if (
+    down?.nextAvailableAt &&
+    shouldAlertAllProvidersDown(join(paths.state, 'all-providers-down.json'), down.nextAvailableAt, nowMs)
+  ) {
+    const list = down.providers
+      .map((p) => `${p.provider} (${p.reason}${p.until ? `, until ${p.until}` : ''})`)
+      .join(', ');
+    emitEvent(
+      paths.events,
+      'all_providers_down',
+      issue,
+      `every ${down.stage.toUpperCase()} provider is down (${down.detail}): ${list} — no model call; #${issue} released to queued until ${down.nextAvailableAt}`,
+      { lane, allProvidersDown: down },
+    );
+  }
   const payload: LanePausedPayload = {
     lane,
     signature: '',

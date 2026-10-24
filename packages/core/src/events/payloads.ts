@@ -94,13 +94,13 @@ export interface ProviderRefusedPayload {
   at: string;
 }
 
-/** Payload of an `all_providers_down` event (#3235): every provider of the stage is down and no reset time is known. */
+/** Payload of an `all_providers_down` event: every provider of the stage is down. A park (#3235) has no known reset; a release to queued (#3340) carries the earliest one. */
 export interface AllProvidersDownPayload {
   stage: 'plan' | 'build' | 'check';
   /** Each provider with its breaker reason (or 'metered'); `until` is an ISO instant, 'credentials-change', or null. */
   providers: { provider: string; reason: string; until: string | null }[];
-  detail: 'untimed_breakers' | 'only_metered_left';
-  /** Always null: no reset time is known, that is why the issue parked instead of re-queuing. */
+  detail: 'untimed_breakers' | 'only_metered_left' | 'all_capped' | 'reset_pending';
+  /** The earliest reset (ISO) on a release (#3340); null on a park (#3235), where no reset is known. */
   nextAvailableAt: string | null;
   issue: number;
   at: string;

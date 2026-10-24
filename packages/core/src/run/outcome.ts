@@ -1,4 +1,4 @@
-import type { EventKind } from '../events/kinds.js';
+import type { AllProvidersDownPayload, EventKind } from '../events/kinds.js';
 
 export type ParkReason = Extract<
   EventKind,
@@ -134,6 +134,8 @@ export type RunOutcome =
       providers: string[];
       /** Earliest timed reset, ISO. */
       resetAt: string;
+      /** #3340: the `all_providers_down` alert the lane emits once per transition into all-down. */
+      allProvidersDown?: AllProvidersDownPayload;
       attribution?: RunAttribution;
     }
   | {
