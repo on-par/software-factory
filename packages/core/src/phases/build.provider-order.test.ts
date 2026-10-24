@@ -1,10 +1,9 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import { buildPhase } from './build.js';
@@ -37,14 +36,11 @@ const routes: RoutesConfig = {
   },
 };
 
-const dirs: string[] = [];
-afterEach(async () => {
-  await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
-});
+const tempDirs = createTempDirs();
+afterEach(() => tempDirs.cleanup());
 
 async function buildOnClaude(crossProviderLadder?: boolean) {
-  const worktree = await mkdtemp(join(tmpdir(), 'build-provider-order-'));
-  dirs.push(worktree);
+  const worktree = await tempDirs.make('build-provider-order-');
   const stub = new StubModelExecutor({
     scripts: { build_claude: [{ fail: 'usage_cap' }], build_codex: [{ output: 'codex output' }] },
   });
