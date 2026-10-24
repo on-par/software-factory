@@ -14,6 +14,7 @@ import {
   resolveWorktreeRoot,
 } from './worktree-location.js';
 import { worktreeDirName } from './worktree-name.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 
 describe('resolveWorktreeRoot', () => {
   const repoRoot = '/code/software-factory';
@@ -51,7 +52,7 @@ describe('laneWorktreePath', () => {
     repoRoot: '/code/r',
     parent: '~/.factory/worktrees',
     repo: 'o/r',
-    issue: 12,
+    key: workKeyFromIssue(12),
     prefix: 'factory',
     home: '/h',
   };
@@ -73,7 +74,7 @@ describe('laneWorktreePath', () => {
   it('names the lane with worktreeDirName (no repeated factory segment)', () => {
     const path = laneWorktreePath({ ...base, exists: () => false });
     expect(path).toBe('/h/.factory/worktrees/o/r/r-factory-12');
-    expect(basename(path)).toBe(worktreeDirName('r', 12, 'factory'));
+    expect(basename(path)).toBe(worktreeDirName('r', workKeyFromIssue(12), 'factory'));
   });
 
   describe('software-factory (#2763)', () => {
@@ -81,7 +82,7 @@ describe('laneWorktreePath', () => {
       ...base,
       repoRoot: '/code/software-factory',
       repo: 'on-par/software-factory',
-      issue: 2149,
+      key: workKeyFromIssue(2149),
     };
     const root = '/h/.factory/worktrees/on-par/software-factory';
 

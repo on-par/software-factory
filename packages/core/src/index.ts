@@ -267,8 +267,8 @@ export type { GithubIssueParams, WorkIssueClient } from './work/github-issue.js'
 export { createGithubIssueAdapter, createOctokitIssueClient, GITHUB_ISSUE_SOURCE } from './work/github-issue.js';
 export type { BriefFileReader, LocalBriefParams } from './work/local-brief.js';
 export { createFsBriefReader, createLocalBriefAdapter, LOCAL_BRIEF_SOURCE } from './work/local-brief.js';
-export type { LocalOnlyPolicy } from './work/local-only.js';
-export { InvalidWorkspaceError, resolveLocalOnlyPolicy } from './work/local-only.js';
+export { type LocalOnlyPolicy, InvalidWorkspaceError, resolveLocalOnlyPolicy } from './work/local-only.js';
+export { type WorkKey, isNumericWorkKey, issueNumberOf, toWorkKey, workKeyFromIssue } from './work/work-key.js';
 
 // Events
 export type { FollowEventsOptions } from './events/index.js';

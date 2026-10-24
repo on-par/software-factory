@@ -1,5 +1,11 @@
 import type { Octokit } from '@octokit/rest';
-import { GITHUB_ISSUE_SOURCE, type LocalOnlyPolicy, type SizeGateMode, type WorkRequest } from '@on-par/factory-core';
+import {
+  GITHUB_ISSUE_SOURCE,
+  type LocalOnlyPolicy,
+  type SizeGateMode,
+  type WorkRequest,
+  workKeyFromIssue,
+} from '@on-par/factory-core';
 import { branchFor, findAdoptablePr, logEvent, type CheckResumeRecord } from '@on-par/factory-core/internal';
 import { findSliceIndex } from './ship-steps.js';
 import { shipRuntime } from './ship-runtime.js';
@@ -25,7 +31,7 @@ export async function resolveRunBranch(opts: {
   const { issueNum, issueTitle, ghRepo, branchPrefix, sizeGateMode, work, ctx, noPr, octokit, eventsFile } = opts;
   const sliceIndex = await findSliceIndex({ sizeGateMode, ctx, work, octokit, ghRepo, issueNum });
   if (ctx?.resumeFrom) return ctx.resumeFrom.branch;
-  const fresh = branchFor(issueNum, issueTitle, branchPrefix, sliceIndex);
+  const fresh = branchFor(workKeyFromIssue(issueNum), issueTitle, branchPrefix, sliceIndex);
   if (
     ctx?.localOnly ||
     noPr ||

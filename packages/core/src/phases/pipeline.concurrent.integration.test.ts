@@ -18,6 +18,7 @@ import {
 } from '../test-support/index.js';
 import { branchFor, gitFetch, setupWorktree } from '../utils/index.js';
 import { withGitLock } from '../utils/lock.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 import { buildPhase } from './build.js';
 import { checkPhase } from './check.js';
 import { planPhase } from './plan.js';
@@ -62,7 +63,7 @@ describe('concurrent lanes integration', () => {
         const router = new ModelRouter(makeStubModelsConfig(), makeStubRoutesConfig(), false, stub);
         const constitution = null;
 
-        const branch = branchFor(issue, titles[issue]);
+        const branch = branchFor(workKeyFromIssue(issue), titles[issue]);
         const worktree = kit.trackWorktree(repoRoot, issue);
         const specPath = await kit.makeSpecPath(issue);
 
@@ -177,7 +178,7 @@ describe('concurrent lanes integration', () => {
         const router = new ModelRouter(makeStubModelsConfig(), makeStubRoutesConfig(), false, stub);
         const constitution = null;
 
-        const branch = branchFor(issue, `Env lane ${issue}`);
+        const branch = branchFor(workKeyFromIssue(issue), `Env lane ${issue}`);
         const worktree = kit.trackWorktree(repoRoot, issue);
         const specPath = await kit.makeSpecPath(issue);
 

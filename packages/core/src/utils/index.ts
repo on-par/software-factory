@@ -10,6 +10,7 @@ import type { RunAttribution } from '../run/outcome.js';
 import { createLogger, type LogExtra } from '../logger/index.js';
 import type { PrClassificationRecord } from '../review/classifier.js';
 import type { PrLookup } from '../phases/ship.js';
+import type { WorkKey } from '../work/work-key.js';
 import type { EscalateKind } from '../types/index.js';
 import type {
   CheckFailureInfo,
@@ -430,9 +431,9 @@ export function factoryBranchIssue(branch: string, prefix?: string): number | nu
   return null;
 }
 
-export function branchFor(issue: number, title: string, prefix?: string, slice?: number): string {
-  if (slice !== undefined && slice >= 2) return `${branchPrefixSlug(prefix)}/${issue}-s${slice}-${slugify(title)}`;
-  return `${branchPrefixSlug(prefix)}/${issue}-${slugify(title)}`;
+export function branchFor(key: WorkKey, title: string, prefix?: string, slice?: number): string {
+  if (slice !== undefined && slice >= 2) return `${branchPrefixSlug(prefix)}/${key}-s${slice}-${slugify(title)}`;
+  return `${branchPrefixSlug(prefix)}/${key}-${slugify(title)}`;
 }
 
 export async function getIssueTitle(repo: string, issue: number, octokit: Pick<Octokit, 'rest'>): Promise<string> {

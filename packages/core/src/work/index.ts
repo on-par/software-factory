@@ -3,7 +3,10 @@
 import type { Octokit } from '@octokit/rest';
 
 import { createGithubIssueAdapter, createOctokitIssueClient } from './github-issue.js';
+import type { WorkKey } from './work-key.js';
 import { type BriefFileReader, createFsBriefReader, createLocalBriefAdapter } from './local-brief.js';
+
+export * from './work-key.js';
 
 /** Registered input sources. Open-ended by design — adapters register by string key. */
 export type WorkRequestSourceKind = 'github-issue' | 'local-brief' | (string & {});
@@ -35,6 +38,8 @@ export interface WorkRequest {
    *  stateless sources (a local Markdown brief) and when the source omitted it. */
   state?: WorkRequestState;
   reference?: WorkRequestReference;
+  /** Tracker-native key (ADR-0168); set by tracker sources, absent for a local brief until #3640. */
+  key?: WorkKey;
 }
 
 /**

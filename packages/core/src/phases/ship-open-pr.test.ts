@@ -19,6 +19,7 @@ import { branchFor, setupWorktree } from '../utils/index.js';
 import { buildPhase } from './build.js';
 import { planPhase } from './plan.js';
 import { findOpenPR, shipPhase } from './ship.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 
 const exec = promisify(execCb);
 const owner = 'on-par';
@@ -37,7 +38,7 @@ describe('ship on an issue with an open factory PR (#3099)', () => {
     async () => {
       const title = 'Open PR rerun';
       const { origin, repoRoot } = await kit.makeThrowawayRepo();
-      const branch = branchFor(issue, title);
+      const branch = branchFor(workKeyFromIssue(issue), title);
       const worktree = kit.trackWorktree(repoRoot, issue);
       const specPath = await kit.makeSpecPath(issue);
 

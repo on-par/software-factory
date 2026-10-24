@@ -5,7 +5,7 @@ import * as publicApi from './index.js';
 import * as internalApi from './internal.js';
 import * as kpisApi from './kpis-entry.js';
 import * as testingApi from './testing.js';
-import { ITERATE_INTERNAL_KEYS, KPIS_API_KEYS, TESTING_API_KEYS } from './public-api-keys.js';
+import { ITERATE_INTERNAL_KEYS, KPIS_API_KEYS, TESTING_API_KEYS, WORK_KEY_API_KEYS } from './public-api-keys.js';
 const PUBLIC_API_KEYS = [
   'FactoryConfigV2Schema',
   'factoryConfigV2JsonSchema',
@@ -874,7 +874,7 @@ const INTERNAL_API_KEYS = [
 ];
 describe('public API surface (ADR-0004)', () => {
   it('root export exposes exactly the documented public API', () => {
-    expect(Object.keys(publicApi).sort()).toEqual([...PUBLIC_API_KEYS].sort());
+    expect(Object.keys(publicApi).sort()).toEqual([...PUBLIC_API_KEYS, ...WORK_KEY_API_KEYS].sort());
   });
   it('root export has no internal or testing symbols', () => {
     for (const key of [

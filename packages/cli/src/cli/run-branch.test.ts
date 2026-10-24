@@ -7,6 +7,7 @@ import { branchFor } from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { resolveRunBranch } from './run-branch.js';
 import { LaneParkError } from './index.js';
+import { workKeyFromIssue } from '@on-par/factory-core';
 
 const REPO = 'acme/widgets';
 const pr = (number: number, ref: string) => ({ number, head: { ref, sha: `sha${number}`, repo: { full_name: REPO } } });
@@ -51,7 +52,7 @@ describe('resolveRunBranch', () => {
     const { octokit, list } = stub([pr(7, 'factory/2253-old-title')]);
     const branch = await run(octokit);
     expect(branch).toBe('factory/2253-old-title');
-    expect(branch).not.toBe(branchFor(2253, 'New title', 'factory'));
+    expect(branch).not.toBe(branchFor(workKeyFromIssue(2253), 'New title', 'factory'));
     const adopted = events().find((e) => e.type === 'pr-adopted');
     expect(adopted.msg).toContain('#7');
     expect(adopted.msg).toContain('sha7');
@@ -71,12 +72,12 @@ describe('resolveRunBranch', () => {
 
   it('returns branchFor(issue, title, prefix) when no open factory PR matches', async () => {
     const { octokit } = stub([pr(1, 'factory/22530-x')]);
-    expect(await run(octokit)).toBe(branchFor(2253, 'New title', 'factory'));
+    expect(await run(octokit)).toBe(branchFor(workKeyFromIssue(2253), 'New title', 'factory'));
   });
 
   it('falls back to branchFor and logs when the lookup fails', async () => {
     const { octokit } = stub(new Error('403'));
-    expect(await run(octokit)).toBe(branchFor(2253, 'New title', 'factory'));
+    expect(await run(octokit)).toBe(branchFor(workKeyFromIssue(2253), 'New title', 'factory'));
     expect(events().find((e) => e.type === 'pr-adopt-lookup-failed').msg).toContain('403');
   });
 
@@ -90,13 +91,13 @@ describe('resolveRunBranch', () => {
   it('skips the lookup for localOnly runs', async () => {
     const { octokit, list } = stub([pr(7, 'factory/2253-x')]);
     const localOnly = { workspace: dir } as any;
-    expect(await run(octokit, { ctx: { localOnly } })).toBe(branchFor(2253, 'New title', 'factory'));
+    expect(await run(octokit, { ctx: { localOnly } })).toBe(branchFor(workKeyFromIssue(2253), 'New title', 'factory'));
     expect(list).not.toHaveBeenCalled();
   });
 
   it('skips the lookup for --no-pr runs', async () => {
     const { octokit, list } = stub([pr(7, 'factory/2253-x')]);
-    expect(await run(octokit, { noPr: true })).toBe(branchFor(2253, 'New title', 'factory'));
+    expect(await run(octokit, { noPr: true })).toBe(branchFor(workKeyFromIssue(2253), 'New title', 'factory'));
     expect(list).not.toHaveBeenCalled();
   });
 
@@ -108,14 +109,16 @@ describe('resolveRunBranch', () => {
       issues: { listComments: async () => ({ data: [] }) },
     };
     const stackOctokit = { rest } as any;
-    expect(await run(stackOctokit, { sizeGateMode: 'stack' })).toBe(branchFor(2253, 'New title', 'factory'));
+    expect(await run(stackOctokit, { sizeGateMode: 'stack' })).toBe(
+      branchFor(workKeyFromIssue(2253), 'New title', 'factory'),
+    );
     expect(list).not.toHaveBeenCalled();
   });
 
   it('skips the lookup for non-github work', async () => {
     const { octokit, list } = stub([pr(7, 'factory/2253-x')]);
     const work = { kind: 'local', title: 'New title' } as any;
-    expect(await run(octokit, { work })).toBe(branchFor(2253, 'New title', 'factory'));
+    expect(await run(octokit, { work })).toBe(branchFor(workKeyFromIssue(2253), 'New title', 'factory'));
     expect(list).not.toHaveBeenCalled();
   });
 });

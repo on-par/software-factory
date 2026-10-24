@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, appendFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
+import type { WorkKey } from '../work/work-key.js';
 import { execGit } from './git-exec.js';
 import { legacyWorktreeDirName, worktreeDirName } from './worktree-name.js';
 
@@ -30,18 +31,16 @@ export function laneWorktreePath(opts: {
   repoRoot: string;
   parent: string;
   repo: string;
-  issue: number;
+  key: WorkKey;
   prefix?: string;
   home?: string;
   exists?: (path: string) => boolean;
 }): string {
-  const { repoRoot, parent, repo, issue, prefix, home, exists = existsSync } = opts;
+  const { repoRoot, parent, repo, key, prefix, home, exists = existsSync } = opts;
   const repoBase = basename(resolve(repoRoot));
   const root = resolveWorktreeRoot({ repoRoot, parent, repo, home });
   const sibling = dirname(resolve(repoRoot));
-  const names = [
-    ...new Set([worktreeDirName(repoBase, issue, prefix), legacyWorktreeDirName(repoBase, issue, prefix)]),
-  ];
+  const names = [...new Set([worktreeDirName(repoBase, key, prefix), legacyWorktreeDirName(repoBase, key, prefix)])];
   const primary = join(root, names[0]!);
   const fallbacks = [...names.slice(1).map((n) => join(root, n)), ...names.map((n) => join(sibling, n))];
   if (exists(primary)) return primary;
