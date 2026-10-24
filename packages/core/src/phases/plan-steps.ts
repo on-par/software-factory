@@ -1,4 +1,4 @@
-// src/phases/plan-steps.ts — PLAN prompt step 4 variants, split out of plan.ts to stay under the max-lines ceiling (#3373)
+// src/phases/plan-steps.ts — PLAN prompt step 4 variants and the step 8 outline block, split out of plan.ts to stay under the max-lines ceiling (#3373)
 
 export const RIGHT_SIZE_STEP = `4. RIGHT-SIZE THE SLICE. A single BUILD pass must be bounded: aim for roughly
    5-15 minutes of agent work, a handful of files, at most ~6 target types /
@@ -16,3 +16,20 @@ export const RIGHT_SIZE_STEP_GATE_PASSED = `4. RIGHT-SIZE THE SLICE. The factory
    for missing information or a contradiction, and must name which, as
    "ESCALATE: missing-info: <question>" or "ESCALATE: contradiction: <what conflicts>";
    then do not write the spec file.`;
+
+// Vertical-slice outline (#3622): prompt step 8 and its design-block template.
+export const OUTLINE_STEP = `8. VERTICAL-SLICE OUTLINE. Break the work into an ordered outline of at least one vertical
+   slice. Each step ends in one testable result and names:
+   - result: the one observable, testable outcome of the step.
+   - files: the files it touches (at least one).
+   - automatedChecks: commands or tests that prove it (at least one).
+   - manualChecks: what a human could check by hand; [] when there is nothing.
+   The outline complements evidencePlan (per acceptance criterion); do not copy it.`;
+
+export const OUTLINE_TEMPLATE = `  outline:        # at least one step — see step 8
+    - result: <one testable result>
+      files:
+        - <file this step touches>
+      automatedChecks:
+        - <command or test that proves the result>
+      manualChecks: []   # optional human checks; empty list if none`;

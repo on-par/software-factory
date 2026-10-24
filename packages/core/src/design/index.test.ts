@@ -1,10 +1,12 @@
+import { readFileSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { specPaths } from '../spec/index.js';
+import { parseSpec, specPaths } from '../spec/index.js';
 import type { DesignArtifact } from '../types/index.js';
 import { buildFastPathSpec } from '../efficiency/fast-path.js';
 import {
@@ -352,5 +354,31 @@ describe('findUnresolvedRegressions', () => {
         '## Problem statement\nx\n## In scope\n- Update packages/cli/src/status.ts\n## Out of scope\n- y\n## Acceptance criteria\n- [ ] z\n## Verification\nnpm test',
     });
     expect(findUnresolvedRegressions(spec.frontmatter.design)).toEqual([]);
+  });
+});
+
+describe('vertical-slice outline (#3622)', () => {
+  it('multi-slice outline golden parses and renders into the BUILD grounding block', () => {
+    const raw = readFileSync(
+      fileURLToPath(new URL('../__fixtures__/design-outline/multi-slice-spec.md', import.meta.url)),
+      'utf8',
+    );
+    const spec = parseSpec(raw);
+    const { artifact, errors } = parseDesignArtifact(spec.data);
+    expect(errors).toEqual([]);
+    expect(artifact?.outline).toHaveLength(3);
+    expect(artifact?.outline?.[2]?.manualChecks).toEqual([]);
+
+    const grounding = renderDesignGrounding(artifact!);
+    expect(grounding).toContain('Vertical-slice outline');
+    for (const step of artifact!.outline!) expect(grounding).toContain(step.result);
+    expect(renderDesignArtifact(artifact!, 3622)).toContain('### Vertical-slice outline');
+  });
+
+  it('renders no outline section when the artifact has none', () => {
+    const artifact = parseDesignArtifact({ design: validDesign }).artifact!;
+    expect(artifact.outline).toBeUndefined();
+    expect(renderDesignArtifact(artifact, 1)).not.toContain('Vertical-slice outline');
+    expect(renderDesignGrounding(artifact)).not.toContain('Vertical-slice outline');
   });
 });

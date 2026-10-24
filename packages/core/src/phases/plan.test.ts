@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { LaneLifecycleEventSchema } from '@on-par/contracts';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createLifecycleBus } from '../bus/index.js';
@@ -97,6 +98,18 @@ describe('buildPlanPrompt', () => {
     expect(prompt).toContain(UNTRUSTED_ISSUE_BODY_NOTICE);
     expect(prompt.indexOf(UNTRUSTED_ISSUE_BODY_NOTICE)).toBeLessThan(prompt.indexOf('<untrusted-issue-body>\n'));
     expect(prompt.split(body).length).toBe(2);
+  });
+
+  it('requires a vertical-slice outline step and template block', () => {
+    const prompt = buildPlanPrompt({
+      issue: 3622,
+      issueTitle: 'Outline',
+      issueBody: 'Body.',
+      specPath: '/tmp/spec.md',
+      constitutionCtx: '',
+    });
+    expect(prompt).toContain('VERTICAL-SLICE OUTLINE');
+    expect(prompt).toContain('outline:');
   });
 
   it('requires edgeInputs, behaviorDelta, and externalLists for risky changes', () => {
@@ -2147,6 +2160,51 @@ npm run test`;
         expect(result.ok).toBe(true);
         expect(result.designArtifact?.externalLists?.[0]?.gaps).toEqual(['npm-shrinkwrap.json']);
       });
+    });
+
+    const outlineTempDirs = createTempDirs();
+    afterEach(() => outlineTempDirs.cleanup());
+
+    const planOnce = async (issue: number, extra: string) => {
+      const worktree = await outlineTempDirs.make('plan-phase-test-');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{ output: `---\nroute: codex\n${validDesignYaml}  openQuestions: []\n${extra}---\n# Spec\n` }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const octokit: any = {
+        rest: { issues: { get: async () => ({ data: { title: 'Outline', body: 'Body.' } }) } },
+      };
+      const logs: Array<{ type: string; msg: string }> = [];
+      const result = await planPhase({
+        issue,
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath: join(worktree, `issue-${issue}.md`),
+        router,
+        constitution: null,
+        octokit,
+        log: (type, msg) => logs.push({ type, msg }),
+      });
+      return { result, logs, stub };
+    };
+
+    it('logs design_outline_missing and still completes without pausing when the design has no outline', async () => {
+      const { result, logs, stub } = await planOnce(3622, '');
+      expect(result.ok).toBe(true);
+      expect(result.designArtifact).not.toBeNull();
+      expect(logs.some((l) => l.type === 'design_outline_missing')).toBe(true);
+      expect(stub.calls.filter((c) => c.task === 'plan')).toHaveLength(1);
+    });
+
+    it('does not log design_outline_missing when the design carries an outline', async () => {
+      const outline =
+        '  outline:\n    - result: One step.\n      files:\n        - a.ts\n      automatedChecks:\n        - npm test\n';
+      const { result, logs } = await planOnce(3623, outline);
+      expect(result.ok).toBe(true);
+      expect(result.designArtifact?.outline).toHaveLength(1);
+      expect(logs.some((l) => l.type === 'design_outline_missing')).toBe(false);
     });
 
     it('logs design_shallow when the design block carries no targetTypes, signatures, or callGraph', async () => {

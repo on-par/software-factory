@@ -308,3 +308,40 @@ describe('evidencePlan', () => {
     expect(nul.data?.evidencePlan).toBeUndefined();
   });
 });
+
+describe('outline', () => {
+  const step = {
+    result: 'Schema accepts outlines.',
+    files: ['packages/contracts/src/design.ts'],
+    automatedChecks: ['npx vitest run packages/contracts/src/design.test.ts'],
+  };
+
+  it('outline: rejects an empty outline and a step missing result, files or automatedChecks; accepts empty manualChecks', () => {
+    const parse = (outline: unknown) => DesignArtifactSchema.safeParse({ ...validDesign, outline });
+    expect(parse([]).success).toBe(false);
+    expect(parse([{ ...step, result: undefined }]).success).toBe(false);
+    expect(parse([{ ...step, files: [] }]).success).toBe(false);
+    expect(parse([{ ...step, automatedChecks: undefined }]).success).toBe(false);
+    const withEmpty = parse([{ ...step, manualChecks: [] }]);
+    expect(withEmpty.success).toBe(true);
+    expect(withEmpty.data?.outline?.[0]?.manualChecks).toEqual([]);
+    const omitted = parse([step]);
+    expect(omitted.success).toBe(true);
+    expect(omitted.data?.outline?.[0]?.manualChecks).toEqual([]);
+  });
+
+  it('outline: a legacy artifact without outline still parses and outline stays undefined', () => {
+    const parsed = DesignArtifactSchema.parse(validDesign);
+    expect(parsed.outline).toBeUndefined();
+    const nul = DesignArtifactSchema.safeParse({ ...validDesign, outline: null });
+    expect(nul.success).toBe(true);
+    expect(nul.data?.outline).toBeUndefined();
+  });
+
+  it('findCoercedDesignItems reports map items inside outline steps', () => {
+    expect(findCoercedDesignItems({ outline: [{ ...step, files: [{ 'a: b': 'c' }] }] })).toEqual([
+      'outline[0].files[0]',
+    ]);
+    expect(findCoercedDesignItems({ outline: ['not a step', null] })).toEqual([]);
+  });
+});

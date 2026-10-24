@@ -8,7 +8,7 @@ import { DesignArtifactSchema, findCoercedDesignItems } from '@on-par/contracts'
 
 import { specPaths } from '../spec/index.js';
 import type { DesignArtifact } from '../types/index.js';
-import type { BehaviorDeltaRow, EvidencePlanEntry } from '@on-par/contracts';
+import type { BehaviorDeltaRow, EvidencePlanEntry, OutlineStep } from '@on-par/contracts';
 
 export { DesignArtifactSchema };
 
@@ -49,6 +49,16 @@ function renderEvidenceEntry(entry: EvidencePlanEntry): string {
   }
 }
 
+function renderOutlineStep(step: OutlineStep, i: number): string {
+  const manual = step.manualChecks.length > 0 ? step.manualChecks.join('; ') : '_none_';
+  return [
+    `${i + 1}. ${step.result}`,
+    `   - Files: ${step.files.join(', ')}`,
+    `   - Automated checks: ${step.automatedChecks.join('; ')}`,
+    `   - Manual checks: ${manual}`,
+  ].join('\n');
+}
+
 export function renderDesignArtifact(artifact: DesignArtifact, issue: number): string {
   const rejectedList =
     artifact.approach.rejected.length > 0
@@ -58,6 +68,10 @@ export function renderDesignArtifact(artifact: DesignArtifact, issue: number): s
   const evidencePlan = artifact.evidencePlan ?? [];
   const evidenceSection =
     evidencePlan.length > 0 ? ['### Evidence plan', '', evidencePlan.map(renderEvidenceEntry).join('\n'), ''] : [];
+
+  const outline = artifact.outline ?? [];
+  const outlineSection =
+    outline.length > 0 ? ['### Vertical-slice outline', '', outline.map(renderOutlineStep).join('\n'), ''] : [];
 
   const openQuestionsBody =
     artifact.openQuestions.length > 0
@@ -103,6 +117,7 @@ export function renderDesignArtifact(artifact: DesignArtifact, issue: number): s
     '',
     artifact.behaviorContract.map((b) => `- ${b}`).join('\n'),
     '',
+    ...outlineSection,
     '### Verification plan',
     '',
     artifact.verificationPlan.map((v) => `- \`${v.command}\` — pass when: ${v.passWhen}`).join('\n'),
@@ -127,7 +142,14 @@ export function renderDesignArtifact(artifact: DesignArtifact, issue: number): s
 export function renderDesignGrounding(artifact: DesignArtifact): string {
   const { targetTypes, signatures, callGraph } = artifact;
   const evidencePlan = artifact.evidencePlan ?? [];
-  if (targetTypes.length === 0 && signatures.length === 0 && callGraph.length === 0 && evidencePlan.length === 0) {
+  const outline = artifact.outline ?? [];
+  if (
+    targetTypes.length === 0 &&
+    signatures.length === 0 &&
+    callGraph.length === 0 &&
+    evidencePlan.length === 0 &&
+    outline.length === 0
+  ) {
     return '';
   }
 
@@ -144,6 +166,11 @@ export function renderDesignGrounding(artifact: DesignArtifact): string {
   if (callGraph.length > 0) {
     lines.push('', 'Call graph sketch:', '');
     lines.push(...callGraph.map((e) => `- ${e.from} → ${e.to}${e.note ? ` — ${e.note}` : ''}`));
+  }
+
+  if (outline.length > 0) {
+    lines.push('', 'Vertical-slice outline — build these in order; each step ends in its testable result:', '');
+    lines.push(...outline.map(renderOutlineStep));
   }
 
   if (evidencePlan.length > 0) {

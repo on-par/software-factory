@@ -5,7 +5,6 @@
 // EVENT_TRAITS is the single table every consumer reads instead of keeping its own classification.
 
 import type { EventTraits, LaneStatus } from './event-traits.js';
-import type { LogLevel } from '../types/index.js';
 
 export type { EventTraits, LaneStatus };
 export type {
@@ -74,6 +73,7 @@ export type EventKind =
   | 'design_artifact_invalid'
   | 'design_artifact_received'
   | 'design_open_questions'
+  | 'design_outline_missing'
   | 'design_regression_unresolved'
   | 'design_shallow'
   | 'egress_denied'
@@ -291,6 +291,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   design_artifact_emitted: { severity: 'info', isPark: false, isTerminal: false },
   design_artifact_invalid: { severity: 'warn', isPark: false, isTerminal: false },
   design_artifact_received: { severity: 'info', isPark: false, isTerminal: false },
+  design_outline_missing: { severity: 'warn', isPark: false, isTerminal: false },
   design_regression_unresolved: { severity: 'warn', isPark: false, isTerminal: false },
   design_open_questions: { severity: 'warn', isPark: false, isTerminal: false },
   design_shallow: { severity: 'info', isPark: false, isTerminal: false },
@@ -470,31 +471,4 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'worktree-gc': { severity: 'info', isPark: false, isTerminal: false },
 };
 
-/** Returned by `eventTraitsFor` for a string outside `EventKind` (e.g. from an older factory version).
- *  Deliberately not `info`: an unrecognized kind must never silently read as routine/successful. */
-export const UNKNOWN_EVENT_TRAITS: EventTraits = { severity: 'unknown', isPark: false, isTerminal: false };
-
-function isEventKind(type: string): type is EventKind {
-  return Object.hasOwn(EVENT_TRAITS, type);
-}
-
-/** Classifies a FactoryEvent kind, returning UNKNOWN_EVENT_TRAITS for unknown strings. */
-export function eventTraitsFor(type: string): EventTraits {
-  return isEventKind(type) ? EVENT_TRAITS[type] : UNKNOWN_EVENT_TRAITS;
-}
-
-/** `LogLevel` for a kind; unknown kinds map to `'info'` (the historical default, so old unrecognized kinds aren't flagged). */
-export function severityOf(type: string): LogLevel {
-  const { severity } = eventTraitsFor(type);
-  return severity === 'unknown' ? 'info' : severity;
-}
-
-/** Whether this kind counts toward human-intervention/park KPIs. */
-export function isParkKind(type: string): boolean {
-  return eventTraitsFor(type).isPark;
-}
-
-/** Lane status this kind drives in a lane-state reducer, or undefined when it doesn't change lane status. */
-export function laneStatusOf(type: string): LaneStatus | undefined {
-  return eventTraitsFor(type).laneStatus;
-}
+export { eventTraitsFor, isParkKind, laneStatusOf, severityOf, UNKNOWN_EVENT_TRAITS } from './kind-lookup.js';

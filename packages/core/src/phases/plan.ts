@@ -49,7 +49,7 @@ import type { EscalateKind } from '../types/index.js';
 import type { Constitution, FailoverReason, ReadinessInfo } from '../types/index.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE, wrapUntrustedIssueBody } from '../utils/untrusted-input.js';
-import { RIGHT_SIZE_STEP, RIGHT_SIZE_STEP_GATE_PASSED } from './plan-steps.js';
+import { OUTLINE_STEP, OUTLINE_TEMPLATE, RIGHT_SIZE_STEP, RIGHT_SIZE_STEP_GATE_PASSED } from './plan-steps.js';
 import { GITHUB_ISSUE_SOURCE, type GithubIssueParams } from '../work/github-issue.js';
 import { createDefaultWorkSourceRegistry, type WorkRequestSourceKind, type WorkSourceRegistry } from '../work/index.js';
 
@@ -178,6 +178,7 @@ ${constitutionCtx ? '5. The constitution above defines the standards for this pr
    - Use none with a reason instead of weak proof. A command that only shows the code
      compiles, or a test that would pass without the change, is weak proof.
    If the issue lists no acceptance criteria, write one entry per behaviorContract item.
+${OUTLINE_STEP}
 
 Write EXACTLY ONE file, at ${specPath}, in this shape:
 ---
@@ -228,6 +229,7 @@ design:
     - kind: none
       claim: <acceptance criterion>
       reason: <why no honest evidence exists>
+${OUTLINE_TEMPLATE}
   edgeInputs:     # OPTIONAL — required by step 6 for dispatch/default-branch/external-flag changes
     - <input that reaches the default/fallthrough branch>
   behaviorDelta:  # OPTIONAL — required by step 6
@@ -768,6 +770,12 @@ async function planPhaseImpl(opts: {
         log(
           'design_shallow',
           'design artifact has no targetTypes, signatures, or callGraph — BUILD will run without design grounding',
+        );
+      }
+      if (!designArtifact.outline) {
+        log(
+          'design_outline_missing',
+          'design artifact has no vertical-slice outline — BUILD will run without per-step files and checks',
         );
       }
       if (designArtifact.openQuestions.length > 0) {
