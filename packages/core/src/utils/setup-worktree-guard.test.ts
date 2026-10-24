@@ -88,3 +88,77 @@ describe('lane worktree removal guards (#3443)', () => {
     expect(log).toHaveBeenCalledWith('worktree-gc', expect.stringContaining('kept (budget_exceeded)'));
   });
 });
+
+describe('kept lane branch name collision (#3651)', () => {
+  const kit = new PipelineTestKit();
+  afterEach(async () => {
+    await kit.cleanup();
+  });
+  const branch = 'factory/3325-land-when-merging-origin-main-in';
+  const now = () => new Date('2026-10-24T12:00:00Z');
+  const bak = `${branch}.bak-20261024`;
+
+  async function git(cwd: string, ...args: string[]): Promise<string> {
+    const { stdout } = await execFile('git', args, { cwd });
+    return stdout.trim();
+  }
+
+  /** A kept lane branch with one extra commit, optionally pushed, and held by a second worktree so -D fails. */
+  async function stuckBranch(push: boolean) {
+    const { repoRoot, origin } = await kit.makeThrowawayRepo();
+    await git(repoRoot, 'branch', branch, 'origin/main');
+    const holder = `${repoRoot}-holder-3325`;
+    await git(repoRoot, 'worktree', 'add', holder, branch);
+    kit.trackWorktree(repoRoot, 3325);
+    writeFileSync(join(holder, 'KEPT.txt'), 'kept\n');
+    await git(holder, 'add', 'KEPT.txt');
+    await git(holder, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-m', 'kept work');
+    const oldTip = await git(repoRoot, 'rev-parse', branch);
+    if (push) await git(repoRoot, 'push', 'origin', branch);
+    return { repoRoot, origin, oldTip, holder, worktree: `${repoRoot}-wt-3325` };
+  }
+
+  it('kept factory/<n>-* branch with no open PR does not fail setupWorktree with already exists', async () => {
+    const { repoRoot, oldTip, worktree } = await stuckBranch(false);
+    const res = await setupWorktree(repoRoot, branch, worktree, undefined, undefined, undefined, {
+      findOpenPr: async () => ({ status: 'absent' }),
+      now,
+    });
+    expect(await git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe(branch);
+    expect(res.head).toBe(await git(repoRoot, 'rev-parse', 'origin/main'));
+    expect(await git(repoRoot, 'rev-parse', bak)).toBe(oldTip);
+  });
+
+  it('renames a kept branch with a closed PR aside locally and on origin, then creates a fresh lane worktree from the base', async () => {
+    const { repoRoot, origin, worktree } = await stuckBranch(true);
+    const log = vi.fn();
+    const res = await setupWorktree(repoRoot, branch, worktree, undefined, undefined, log, {
+      findOpenPr: async () => ({ status: 'absent' }),
+      now,
+    });
+    expect(await git(origin, 'ls-remote', '--heads', origin, bak)).not.toBe('');
+    expect(await git(origin, 'ls-remote', '--heads', origin, branch)).toBe('');
+    expect(res.base).toBe('origin/main');
+    expect(log).toHaveBeenCalledWith('warn', expect.stringContaining('.bak-20261024'));
+  });
+
+  it('open PR owning a stuck lane branch continues on origin/<branch> and leaves origin untouched', async () => {
+    const { repoRoot, origin, worktree } = await stuckBranch(true);
+    const originSha = await git(origin, 'rev-parse', branch);
+    const res = await setupWorktree(repoRoot, branch, worktree, undefined, undefined, undefined, {
+      findOpenPr: async () => ({ status: 'found', prNumber: 42 }),
+      now,
+    });
+    expect(res.base).toBe(`origin/${branch}`);
+    expect(res.head).toBe(originSha);
+    expect(await git(origin, 'ls-remote', '--heads', origin, branch)).not.toBe('');
+    expect(await git(origin, 'ls-remote', '--heads', origin, bak)).toBe('');
+  });
+
+  it('a second rename on the same day uses -2', async () => {
+    const { repoRoot, worktree } = await stuckBranch(false);
+    await git(repoRoot, 'branch', bak, 'origin/main');
+    await setupWorktree(repoRoot, branch, worktree, undefined, undefined, undefined, { now });
+    expect(await git(repoRoot, 'rev-parse', '--verify', `${bak}-2`)).not.toBe('');
+  });
+});

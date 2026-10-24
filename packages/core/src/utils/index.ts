@@ -28,6 +28,7 @@ import type {
 } from '../types/index.js';
 import { levelForType } from './format.js';
 import { execGit } from './git-exec.js';
+import { moveLaneBranchAside } from './lane-branch-aside.js';
 import { assertLaneReplaceable, laneReapKept, type LaneReapKeptOutcome } from './lane-removal.js';
 import { createMicroVm, removeMicroVm, type WorktreeSandbox } from './microvm.js';
 import { ensureWorktreeParentExcluded } from './worktree-location.js';
@@ -146,6 +147,8 @@ export interface WorktreeSetupOptions {
   keepsFile?: string;
   /** The lane issue; defaults to the number in a `<prefix>/<n>-` branch. */
   issue?: number;
+  /** Clock for the `.bak-YYYYMMDD` rename-aside suffix (#3651); defaults to the current time. */
+  now?: () => Date;
 }
 
 export interface WorktreeSetupResult {
@@ -173,6 +176,7 @@ export async function setupWorktree(
   // SHIP pushes fast-forward to that PR. Otherwise it is never adopted or discarded here.
   let openPrBranch = false;
   let remoteBranch: RemoteBranchRecord | null = null;
+  let prStatus: PrLookup['status'] | null = null;
   const remoteSha = await detectRemoteBranch(repoRoot, branch);
   if (remoteSha) {
     remoteBranch = { sha: remoteSha };
@@ -184,6 +188,7 @@ export async function setupWorktree(
       } catch (err) {
         lookup = { status: 'error', detail: err instanceof Error ? err.message : String(err) };
       }
+      prStatus = lookup.status;
       if (lookup.status === 'found') {
         remoteBranch.prNumber = lookup.prNumber;
         openPrBranch = true;
@@ -202,6 +207,13 @@ export async function setupWorktree(
   await assertLaneReplaceable(repoRoot, branch, worktreePath, opts, log ?? (() => {}));
   await execGit(['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot }).catch(() => {});
   await execGit(['branch', '-D', branch], { cwd: repoRoot }).catch(() => {});
+  // A kept lane branch that -D could not clear (checked out elsewhere) is moved aside, never fatal (#3651).
+  const stuck = await execGit(['rev-parse', '--verify', '-q', `refs/heads/${branch}`], { cwd: repoRoot }).then(
+    () => true,
+    () => false,
+  );
+  if (stuck)
+    await moveLaneBranchAside(repoRoot, branch, { remoteSha, prStatus, now: opts?.now, log: log ?? (() => {}) });
   mkdirSync(dirname(worktreePath), { recursive: true });
   await ensureWorktreeParentExcluded(repoRoot, dirname(worktreePath));
   await execGit(['worktree', 'add', '-b', branch, worktreePath, base], { cwd: repoRoot });
