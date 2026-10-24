@@ -200,6 +200,25 @@ describe('compareCliJsonSchemas', () => {
   });
 });
 
+describe('compareCliJsonSchemas anyOf const branches', () => {
+  it('treats an unchanged schema with same-type const branches as compatible', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        schemaVersion: { type: 'number', const: 1 },
+        exitCode: {
+          anyOf: [
+            { type: 'number', const: 0 },
+            { type: 'number', const: 1 },
+          ],
+        },
+      },
+      required: ['schemaVersion', 'exitCode'],
+    };
+    expect(compareCliJsonSchemas('check', schema, structuredClone(schema))).toEqual([]);
+  });
+});
+
 describe('runCliJsonContractCheck', () => {
   it.each([[], ['--base'], ['--base', ' '], ['--base', '-main'], ['--unknown', 'main'], ['--base', 'main', 'extra']])(
     'rejects invalid args %j without invoking Git',

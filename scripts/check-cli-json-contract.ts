@@ -142,7 +142,9 @@ function compareNodes(
   const newBranches = branches(after);
   for (const oldBranch of oldBranches) {
     const oldBranchTypes = typeSet(oldBranch);
-    const matching = newBranches.find((candidate) => canonical(typeSet(candidate)) === canonical(oldBranchTypes));
+    const matching =
+      newBranches.find((candidate) => canonical(candidate) === canonical(oldBranch)) ??
+      newBranches.find((candidate) => canonical(typeSet(candidate)) === canonical(oldBranchTypes));
     if (matching) compareNodeFields(findings, added, command, path, oldBranch, matching);
   }
 }
