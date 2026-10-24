@@ -237,7 +237,6 @@ import {
 import { CliExitError } from './errors.js';
 import { withRepoRunLock } from './repo-run-lock.js';
 
-
 export { CliExitError, withRepoRunLock };
 import type { StopMarker } from '@on-par/factory-core/internal';
 import { formatSteerabilityReport } from '@on-par/factory-core/internal';

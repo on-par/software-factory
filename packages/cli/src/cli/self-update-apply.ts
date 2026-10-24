@@ -2,12 +2,7 @@
 import { execFile } from 'node:child_process';
 import { delimiter, join } from 'node:path';
 
-import {
-  daemonRuntimePaths,
-  defaultRegistryPath,
-  listRepos,
-  loadRegistry,
-} from '@on-par/factory-core/internal';
+import { daemonRuntimePaths, defaultRegistryPath, listRepos, loadRegistry } from '@on-par/factory-core/internal';
 
 import { repoHasLiveRunLock } from './repo-live-run-lock.js';
 import { detectInstall, type InstallKind } from './daemon.js';
