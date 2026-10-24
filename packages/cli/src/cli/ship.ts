@@ -41,7 +41,7 @@ import {
   writePhaseSnapshot,
 } from '@on-par/factory-core';
 import { hostBuildSlotPort } from './host-slot.js';
-import { claimReviewReworkRequest as claimRework } from './ship-review-rework.js';
+import { claimReworkRequests } from './ship-review-rework.js';
 import type { CheckResumeRecord, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
   createCheckResumeStore,
@@ -353,7 +353,7 @@ async function shipIssueFrom(
 
   // Read before runIssue: the run-state recorder overwrites this file on its first update (#3373).
   const previousAttempt = await readIssueRunState(runStateFile(paths.runs, issueNum));
-  const reviewRework = claimRework(paths.reviewRework, issueNum, ctx?.resumeFrom || ctx?.localOnly || noPr, log);
+  const reworkClaim = claimReworkRequests(paths, issueNum, ctx?.resumeFrom || ctx?.localOnly || noPr, log);
   const request = {
     ...buildRunRequest({
       issueNum,
@@ -385,7 +385,7 @@ async function shipIssueFrom(
       paths,
     }),
     previousAttempt,
-    ...reviewRework,
+    ...reworkClaim,
   };
 
   const ports: RunPorts = {

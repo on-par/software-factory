@@ -12,6 +12,21 @@ export interface ReviewReworkTarget {
   reviewer: string;
 }
 
+/** #3625: a trusted `/factory iterate` comment; the run re-runs CHECK/rework on the PR branch. */
+export interface IterateTarget {
+  prNumber: number;
+  commentId: number;
+  actor: string;
+}
+
+/** The rework triggers a RunRequest can carry; either one skips PLAN/BUILD (#3564, #3625). */
+export interface ReworkRequestFields {
+  /** Review rework (#3564): skip PLAN/BUILD, rework this review on the adopted PR branch, then CHECK. */
+  reviewRework?: ReviewReworkTarget;
+  /** #3625: a /factory iterate comment — skip PLAN/BUILD and re-run CHECK/rework on the PR branch. */
+  iterate?: IterateTarget;
+}
+
 export interface ReviewFeedback {
   prNumber: number;
   reviewId: number;
@@ -101,9 +116,9 @@ export function reviewReworkSummary(feedback: ReviewFeedback): CheckSummary {
 
 /** A synthetic CHECK resume: skips PLAN and BUILD for a review-rework run. */
 export function reviewReworkResume(
-  request: Pick<RunRequest, 'reviewRework' | 'preferredRoute' | 'modelPins'>,
+  request: Pick<RunRequest, 'reviewRework' | 'iterate' | 'preferredRoute' | 'modelPins'>,
 ): NonNullable<RunRequest['resumeFrom']> | undefined {
-  if (!request.reviewRework) return undefined;
+  if (!request.reviewRework && !request.iterate) return undefined;
   return {
     phase: 'check',
     route: request.preferredRoute ?? 'claude',
@@ -173,13 +188,42 @@ export async function runReviewReworkBuild(opts: {
   return { feedback };
 }
 
+/** Iterate fails closed unless the PR is still open with the run branch as head, so SHIP can never open a new PR. */
+async function guardIterateTarget(
+  target: IterateTarget,
+  request: Pick<RunRequest, 'repo' | 'branch'>,
+  octokit: Pick<Octokit, 'rest'>,
+  checkOpts: Parameters<typeof checkPhase>[0],
+): Promise<void> {
+  const [owner = '', name = ''] = request.repo.split('/');
+  try {
+    const { data: pull } = await octokit.rest.pulls.get({ owner, repo: name, pull_number: target.prNumber });
+    if (pull.state !== 'open' || pull.head.ref !== request.branch) {
+      throw new ReviewReworkError(
+        `PR #${target.prNumber} must be open with head ${request.branch}; found ${pull.state} with head ${pull.head.ref}`,
+      );
+    }
+  } catch (err) {
+    if (err instanceof ReviewReworkError) throw err;
+    throw new ReviewReworkError(`could not read PR #${target.prNumber}: ${errorMessage(err)}`, { cause: err });
+  }
+  checkOpts.log(
+    'rework',
+    `iterate: PR #${target.prNumber} by @${target.actor} (comment ${target.commentId}) — re-running CHECK on ${request.branch}`,
+  );
+}
+
 /** runIssue's hook before the first CHECK: reworks the requested review unless a CHECK resume was asked for. */
 export async function runRequestedReviewRework(
-  request: Pick<RunRequest, 'reviewRework' | 'resumeFrom' | 'repo' | 'branch'>,
+  request: Pick<RunRequest, 'reviewRework' | 'iterate' | 'resumeFrom' | 'repo' | 'branch'>,
   ports: Pick<RunPorts, 'octokit' | 'reworkWorker'>,
   checkOpts: Parameters<typeof checkPhase>[0],
 ): Promise<void> {
-  if (!request.reviewRework || request.resumeFrom) return;
+  if (request.resumeFrom) return;
+  if (!request.reviewRework) {
+    if (request.iterate) await guardIterateTarget(request.iterate, request, ports.octokit, checkOpts);
+    return;
+  }
   await runReviewReworkBuild({
     target: request.reviewRework,
     repo: request.repo,

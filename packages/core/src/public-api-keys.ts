@@ -73,3 +73,12 @@ export const KPIS_API_KEYS = [
   'renderKpiReport',
   'renderKpiTrend',
 ];
+
+/** ./internal names added by the `/factory iterate` trigger (#3625). */
+export const ITERATE_INTERNAL_KEYS = [
+  'claimIterateCommand',
+  'parseFactoryCommand',
+  'pollIterateCommands',
+  'createOctokitIterateGitHub',
+  'createFileIterateStore',
+];

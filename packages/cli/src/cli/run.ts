@@ -22,14 +22,17 @@ import type { FactoryEvent, HealthKpis, KpiReconstruction, QueueDiagnostic } fro
 import {
   createDockerEngine,
   createGithubQueue,
+  createFileIterateStore,
   createFileReviewReworkStore,
   createOctokitCollaboratorPermissionClient,
   createOctokitQueueClient,
+  createOctokitIterateGitHub,
   createOctokitReviewReworkGitHub,
   evaluateLoadGuard,
   formatQueueOrderConflict,
   logEvent,
   parkPayload,
+  pollIterateCommands,
   pollReviewRework,
   publishParkComment,
   readHostLoad,
@@ -324,6 +327,36 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
           } else if (r.outcome === 'error') {
             logEvent(paths.events, 'warn', r.issue, `review-rework poll for PR #${r.pr} failed: ${r.detail}`);
           }
+        }
+        // #3625: `/factory iterate` comments; a failure only warns so the review-rework results above stand.
+        try {
+          const iterated = await pollIterateCommands({
+            github: createOctokitIterateGitHub(octokit, owner, repo),
+            queue: createOctokitQueueClient(octokit),
+            owner,
+            repo,
+            branchPrefix,
+            trustedApprovers: factoryConfig.intake?.trustedApprovers,
+            permissions: createOctokitCollaboratorPermissionClient(octokit),
+            store: createFileIterateStore(paths.iterate),
+          });
+          for (const r of iterated) {
+            if (r.outcome === 'queued' || r.outcome === 'already-queued') {
+              logEvent(
+                paths.events,
+                'iterate_queued',
+                r.issue,
+                `#${r.issue} queued for iterate on lane '${r.lane}' — PR #${r.pr} comment ${r.commentId} by ${r.actor}`,
+                { lane: r.lane },
+              );
+            } else if (r.outcome === 'rejected') {
+              logEvent(paths.events, 'iterate_rejected', r.issue, `iterate on PR #${r.pr} rejected: ${r.detail}`);
+            } else {
+              logEvent(paths.events, 'warn', r.issue, `iterate poll for PR #${r.pr} failed: ${r.detail}`);
+            }
+          }
+        } catch (err) {
+          logEvent(paths.events, 'warn', 0, `iterate poll failed: ${err instanceof Error ? err.message : String(err)}`);
         }
       };
       let reviewPoll: Promise<void> | null = null;

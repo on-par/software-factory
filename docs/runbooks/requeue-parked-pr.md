@@ -23,3 +23,4 @@ Resume, local-only, slice and stack runs keep their own branch selection and ski
 
 - A requeue is a new claim, not a CI re-run. CI runs again only after BUILD/SHIP pushes a new commit (#1882); failed security jobs are never re-run without one.
 - The CI rework caps from #2252 still apply on the adopted run.
+- To re-run CHECK and rework on a PR's branch without touching labels, comment `/factory iterate` on the PR; see [iterate-pr-comment.md](./iterate-pr-comment.md).

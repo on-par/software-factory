@@ -19,7 +19,12 @@ import { ModelRouter } from '../router/index.js';
 import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
-import { renderReviewFeedback, ReviewReworkError, runReviewReworkBuild } from './review-rework.js';
+import {
+  renderReviewFeedback,
+  ReviewReworkError,
+  runRequestedReviewRework,
+  runReviewReworkBuild,
+} from './review-rework.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
 const planPhase = vi.fn<typeof realPlanPhase>();
@@ -249,5 +254,55 @@ describe('review rework (#3564)', () => {
     expect(planPhase).toHaveBeenCalled();
     expect(buildPhase).toHaveBeenCalled();
     expect(reworkWorker).not.toHaveBeenCalled();
+  });
+});
+
+describe('iterate (#3625)', () => {
+  const iterateRequest: RunRequest = { ...request, iterate: { prNumber: 7, commentId: 300, actor: 'alice' } };
+
+  it('an iterate request skips PLAN and BUILD and runs CHECK on the PR branch', async () => {
+    const { octokit } = fakeOctokit();
+    const outcome = await runIssue(iterateRequest, policy, ports(octokit));
+    expect(outcome).toMatchObject({ state: 'ready' });
+    expect(planPhase).not.toHaveBeenCalled();
+    expect(buildPhase).not.toHaveBeenCalled();
+    expect(reworkWorker).not.toHaveBeenCalled();
+    expect(checkPhase).toHaveBeenCalledTimes(1);
+    expect(checkPhase.mock.calls[0][0].worktree).toBe('/tmp/wt');
+    expect(shipPhase.mock.calls[0][0].branch).toBe(BRANCH);
+    expect(pullsCreate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['closed', { state: 'closed', head: { ref: BRANCH } }],
+    ['retargeted', { state: 'open', head: { ref: 'other' } }],
+  ])('throws ReviewReworkError and never ships when the PR is %s', async (_name, pull) => {
+    const { octokit } = fakeOctokit(pull);
+    expect(await runIssue(iterateRequest, policy, ports(octokit))).toMatchObject({ state: 'parked' });
+    expect(checkPhase).not.toHaveBeenCalled();
+    expect(shipPhase).not.toHaveBeenCalled();
+    expect(pullsCreate).not.toHaveBeenCalled();
+  });
+
+  it('wraps a PR read error as ReviewReworkError', async () => {
+    const { octokit } = fakeOctokit();
+    vi.mocked(octokit.rest.pulls.get).mockRejectedValueOnce(new Error('Not Found'));
+    expect(await runIssue(iterateRequest, policy, ports(octokit))).toMatchObject({ state: 'parked' });
+    expect(shipPhase).not.toHaveBeenCalled();
+  });
+
+  it('runRequestedReviewRework rejects with ReviewReworkError directly', async () => {
+    const { octokit } = fakeOctokit({ state: 'closed', head: { ref: BRANCH } });
+    await expect(
+      runRequestedReviewRework(iterateRequest, { octokit, reworkWorker }, { log: vi.fn() } as never),
+    ).rejects.toThrow(ReviewReworkError);
+  });
+
+  it('resumeFrom wins over iterate', async () => {
+    const { octokit } = fakeOctokit({ state: 'closed', head: { ref: BRANCH } });
+    const resumeFrom = { phase: 'check' as const, route: 'claude' as const, model: 'm', buildMinutes: 1 };
+    await runIssue({ ...iterateRequest, resumeFrom }, policy, ports(octokit));
+    expect(octokit.rest.pulls.get).not.toHaveBeenCalled();
+    expect(checkPhase).toHaveBeenCalled();
   });
 });
