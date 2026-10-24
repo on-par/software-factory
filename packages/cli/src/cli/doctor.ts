@@ -37,6 +37,7 @@ import {
 
 import { npmCheck, resolveVerifyCommands, verifyCommandChecks, withPathResults } from './doctor-verify.js';
 import { configLintChecks, declaredHarnessChecks, modelsRegistryChecks } from './doctor-config.js';
+import { failoverProviderChecks } from './doctor-failover-providers.js';
 import { factoryIgnoredChecks } from './doctor-factory-ignored.js';
 import {
   analyzeEventLog,
@@ -953,6 +954,7 @@ export async function cmdDoctor(
     opencodeLoggedIn: () => hasOpencodeLoginEvidence(),
     commandHarnesses: () => (harnessView?.merged ? repoCommandHarnesses(harnessView.merged, harnessView.registry) : []),
   });
+  checks.push(...failoverProviderChecks(rt, repoRoot));
 
   // Only with --probe-inference: these send a real prompt (claude, opencode; uses quota). Plain doctor makes no inference call.
   if (opts.probeInference) {

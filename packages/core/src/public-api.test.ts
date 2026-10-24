@@ -323,7 +323,8 @@ const STACK = 'nextStackSlice restackAfterSquashMerge listRepoLaneLabels listSta
 const POLICY = 'isEgressEnforced describeDraftPrPolicy resolveDraftPrPolicy resolveConfiguredWritablePaths'.split(' '); // #2215, #3449, #3454
 const PO =
   'resolveRoleModel isOpenCodeZenModel subscriptionProviderOf PROVIDER_ORDER_ROLES SUBSCRIPTION_PROVIDERS'.split(' '); // #3334
-const EXTRA_INTERNAL_KEYS = [...JOB_KEYS, ...TAIL, ...MORE, ...STEER, ...STEERED, ...STACK, ...POLICY, ...PO];
+const PO2 = 'OPENCODE_GO_DEFAULT_MODEL subscriptionLogin filterRefusedProviders'.split(' '); // #3335
+const EXTRA_INTERNAL_KEYS = [...JOB_KEYS, ...TAIL, ...MORE, ...STEER, ...STEERED, ...STACK, ...POLICY, ...PO, ...PO2];
 const INTERNAL_API_KEYS = [
   ...'resolveCompileCommand resolveLintCommands resolveTestsCommand'.split(' '), // #3473
   ...'describeChecksProbe holdRunConfigSnapshot'.split(' '), // #3600
