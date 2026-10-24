@@ -1,20 +1,16 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { agentMemoryChecks } from './doctor-agent-memory.js';
 
-const dirs: string[] = [];
-async function repo(): Promise<string> {
-  const d = await mkdtemp(join(tmpdir(), 'doctor-agent-memory-'));
-  dirs.push(d);
-  return d;
-}
+const tmp = createTempDirs();
+const repo = (): Promise<string> => tmp.make('doctor-agent-memory-');
 
 afterEach(async () => {
-  await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+  await tmp.cleanup();
 });
 
 describe('agentMemoryChecks', () => {

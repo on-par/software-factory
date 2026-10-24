@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { ModelRouter } from '../router/index.js';
 import { buildPlanPrompt, planPhase } from './plan.js';
 import { specWithDesign, StubModelExecutor } from './plan-test-helpers.js';
@@ -76,8 +76,10 @@ API.
 ## Verification
 npm test`;
 
+  const tmp = createTempDirs();
+
   async function runLane(memory: { lane: string; content: string } | null, laneId: string | undefined) {
-    const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
+    const worktree = await tmp.make('plan-phase-test-');
     try {
       if (memory) {
         await mkdir(join(worktree, '.factory/agent-memory'), { recursive: true });
@@ -99,7 +101,7 @@ npm test`;
       });
       return { prompt: stub.calls.find((c) => c.task === 'plan')?.prompt ?? '', logs };
     } finally {
-      await rm(worktree, { recursive: true, force: true });
+      await tmp.cleanup();
     }
   }
 

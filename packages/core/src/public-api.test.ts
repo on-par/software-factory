@@ -6,7 +6,6 @@ import * as internalApi from './internal.js';
 import * as kpisApi from './kpis-entry.js';
 import * as testingApi from './testing.js';
 import { KPIS_API_KEYS, TESTING_API_KEYS } from './public-api-keys.js';
-import * as agentMemory from './agent-memory/index.js';
 const PUBLIC_API_KEYS = [
   'FactoryConfigV2Schema',
   'factoryConfigV2JsonSchema',
@@ -334,7 +333,17 @@ const PO =
   'resolveRoleModel isOpenCodeZenModel subscriptionProviderOf PROVIDER_ORDER_ROLES SUBSCRIPTION_PROVIDERS'.split(' '); // #3334
 const PO2 = 'OPENCODE_GO_DEFAULT_MODEL subscriptionLogin filterRefusedProviders'.split(' '); // #3335
 const GATE = ['stageBlocked', 'PROVIDER_LEVEL_REASONS', 'TIMED_BREAKER_REASONS']; // #3226
+const AGENT_MEMORY_KEYS = [
+  'AGENT_MEMORY_DIR',
+  'AGENT_MEMORY_MAX_BYTES',
+  'agentMemoryPath',
+  'readAgentMemory',
+  'renderAgentMemory',
+  'scanAgentMemory',
+  'loadAgentMemoryCtx',
+]; // #3624
 const EXTRA_INTERNAL_KEYS = [
+  ...AGENT_MEMORY_KEYS,
   ...JOB_KEYS,
   ...TAIL,
   ...MORE,
@@ -891,9 +900,7 @@ describe('public API surface (ADR-0004)', () => {
     }
   });
   it('./internal and ./testing expose exactly the documented APIs', () => {
-    expect(Object.keys(internalApi).sort()).toEqual(
-      [...INTERNAL_API_KEYS, ...EXTRA_INTERNAL_KEYS, ...Object.keys(agentMemory)].sort(),
-    );
+    expect(Object.keys(internalApi).sort()).toEqual([...INTERNAL_API_KEYS, ...EXTRA_INTERNAL_KEYS].sort());
     expect(Object.keys(testingApi).sort()).toEqual([...TESTING_API_KEYS, 'createTempDirs', 'withTempDir'].sort());
   });
   it('./kpis exposes exactly the documented KPI subset, and nothing beyond the root API', () => {

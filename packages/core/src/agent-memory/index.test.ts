@@ -1,21 +1,20 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { AGENT_MEMORY_DIR, agentMemoryPath, readAgentMemory, renderAgentMemory, scanAgentMemory } from './index.js';
 
-const dirs: string[] = [];
+const tmp = createTempDirs();
 async function root(): Promise<string> {
-  const d = await mkdtemp(join(tmpdir(), 'agent-memory-'));
-  dirs.push(d);
+  const d = await tmp.make('agent-memory-');
   await mkdir(join(d, AGENT_MEMORY_DIR), { recursive: true });
   return d;
 }
 
 afterEach(async () => {
-  await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+  await tmp.cleanup();
 });
 
 describe('readAgentMemory', () => {
@@ -70,8 +69,7 @@ describe('agentMemoryPath', () => {
 
 describe('scanAgentMemory', () => {
   it('returns [] for a missing directory', async () => {
-    const d = await mkdtemp(join(tmpdir(), 'agent-memory-'));
-    dirs.push(d);
+    const d = await tmp.make('agent-memory-');
     expect(await scanAgentMemory(d)).toEqual([]);
   });
 
