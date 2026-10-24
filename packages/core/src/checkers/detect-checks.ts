@@ -1,5 +1,5 @@
 // src/checkers/detect-checks.ts — `factory init --detect-checks`: find a repo's build/test/lint commands.
-// Deterministic heuristics run first (solution files, go.mod, Cargo.toml, ...) plus a scan of the docs for
+// Deterministic heuristics run first (solution files, go.mod, Cargo.toml, package.json scripts, ...) plus a scan of the docs for
 // commands that call a real script in the repo. When that is ambiguous, an agent reads the docs, CI
 // workflows and scripts gathered here and proposes the commands; the CLI dry-runs and confirms them.
 
@@ -43,6 +43,31 @@ interface Ecosystem {
   proposal: CheckProposal;
 }
 
+const NPM_PLACEHOLDER_TEST = /no test specified/i;
+
+/** package.json scripts as a Node proposal, matching CHECK's resolve-commands (#3603). */
+async function nodeProposal(repoRoot: string, entries: readonly string[]): Promise<CheckProposal> {
+  if (!entries.includes('package.json')) return {};
+  let scripts: unknown;
+  try {
+    const pkg: unknown = JSON.parse(await readFile(join(repoRoot, 'package.json'), 'utf-8'));
+    scripts = typeof pkg === 'object' && pkg !== null ? (pkg as { scripts?: unknown }).scripts : undefined;
+  } catch {
+    return {};
+  }
+  if (typeof scripts !== 'object' || scripts === null || Array.isArray(scripts)) return {};
+  const s = scripts as Record<string, unknown>;
+  const has = (k: string): boolean => typeof s[k] === 'string' && (s[k] as string).trim() !== '';
+  const proposal: CheckProposal = {};
+  if (has('build')) proposal.build = 'npm run build';
+  // CHECK prefers scripts/verify.sh|ps1 over npm test; a declared checks.test would override it.
+  const verify =
+    (await fileExists(join(repoRoot, 'scripts/verify.sh'))) || (await fileExists(join(repoRoot, 'scripts/verify.ps1')));
+  if (has('test') && !NPM_PLACEHOLDER_TEST.test(s.test as string) && !verify) proposal.test = 'npm test';
+  if (has('lint')) proposal.lint = 'npm run lint';
+  return proposal;
+}
+
 async function guessEcosystems(
   repoRoot: string,
   entries: readonly string[],
@@ -74,6 +99,11 @@ async function guessEcosystems(
     found.push({ name: 'Gradle', proposal: { build: './gradlew assemble', test: './gradlew test' } });
   } else if (entries.includes('pom.xml')) {
     found.push({ name: 'Maven', proposal: { build: 'mvn -B compile', test: 'mvn -B test' } });
+  }
+  // package.json is a fallback: a tooling package.json beside another build system does not make it ambiguous.
+  if (found.length === 0) {
+    const node = await nodeProposal(repoRoot, entries);
+    if (Object.keys(node).length > 0) found.push({ name: 'Node', proposal: node });
   }
   return found;
 }
