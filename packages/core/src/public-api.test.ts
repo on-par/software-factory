@@ -333,17 +333,7 @@ const PO =
   'resolveRoleModel isOpenCodeZenModel subscriptionProviderOf PROVIDER_ORDER_ROLES SUBSCRIPTION_PROVIDERS'.split(' '); // #3334
 const PO2 = 'OPENCODE_GO_DEFAULT_MODEL subscriptionLogin filterRefusedProviders'.split(' '); // #3335
 const GATE = ['stageBlocked', 'PROVIDER_LEVEL_REASONS', 'TIMED_BREAKER_REASONS']; // #3226
-const AGENT_MEMORY_KEYS = [
-  'AGENT_MEMORY_DIR',
-  'AGENT_MEMORY_MAX_BYTES',
-  'agentMemoryPath',
-  'readAgentMemory',
-  'renderAgentMemory',
-  'scanAgentMemory',
-  'loadAgentMemoryCtx',
-]; // #3624
 const EXTRA_INTERNAL_KEYS = [
-  ...AGENT_MEMORY_KEYS,
   ...JOB_KEYS,
   ...TAIL,
   ...MORE,
@@ -356,6 +346,8 @@ const EXTRA_INTERNAL_KEYS = [
   ...GATE,
 ];
 const INTERNAL_API_KEYS = [
+  ...'AGENT_MEMORY_DIR AGENT_MEMORY_MAX_BYTES agentMemoryPath readAgentMemory'.split(' '), // #3624
+  ...'renderAgentMemory scanAgentMemory loadAgentMemoryCtx'.split(' '),
   ...'resolveCompileCommand resolveLintCommands resolveTestsCommand'.split(' '), // #3473
   ...'describeChecksProbe holdRunConfigSnapshot'.split(' '), // #3600
   // `factory init --detect-checks`: heuristics, agent prompt and reply, shell-free tokenizer
