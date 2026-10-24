@@ -104,7 +104,7 @@ import { isDecomposeSignal } from './run-state-record.js';
 import { runStatusForPhase, type RunStateUpdate } from './state.js';
 import { type ParkedPrDisposition, settleParkedPullRequest } from './park-pr.js';
 import { runParkSteward } from './park-steward.js';
-import { reviewReworkResume, runRequestedReviewRework, type ReviewReworkTarget } from './review-rework.js';
+import { reviewReworkResume, runRequestedReviewRework, type ReworkRequestFields } from './review-rework.js';
 import { shipWithCiRework, type CiReworkPorts } from './ci-rework-loop.js';
 import { parkLogExtra } from './ship-park.js';
 import { budgetGuardFor, enforceIssueBudget } from './budget.js';
@@ -116,7 +116,7 @@ import { withoutHumanOnlyLabels } from './max-lines-override.js';
 
 /** Everything one run needs decided, as a plain resolved value — the CLI adapter
  *  computes this today; no config/file/path resolution happens in here. */
-export interface RunRequest {
+export interface RunRequest extends ReworkRequestFields {
   /** Prior run's persisted record, read before this run's first write (#3373); null/absent = none. */
   previousAttempt?: IssueRunState | null;
   /** ADR-0161 stack mode: the 1-based slice to plan. Set by runIssue's stack loop; undefined = the gate's current slice. */
@@ -184,8 +184,6 @@ export interface RunRequest {
   /** Resume at CHECK on a kept worktree (#2564): PLAN and BUILD are skipped. */
   /** Parent ref of a stacked slice branch (#2716); CHECK and the review floor diff against it. Absent = origin/main. */
   parentBaseRef?: string;
-  /** Review rework (#3564): skip PLAN/BUILD, rework this review on the adopted PR branch, then CHECK. */
-  reviewRework?: ReviewReworkTarget;
   resumeFrom?: { phase: 'check'; diffBase?: string; route: BuildRoute; model: string; buildMinutes: number };
   /** Resolved factory-state paths shipPhase reads/writes directly (unchanged from today —
    *  shipPhase's own surface already takes plain path strings, not a path-resolution port). */

@@ -5,7 +5,7 @@ import * as publicApi from './index.js';
 import * as internalApi from './internal.js';
 import * as kpisApi from './kpis-entry.js';
 import * as testingApi from './testing.js';
-import { KPIS_API_KEYS, TESTING_API_KEYS } from './public-api-keys.js';
+import { ITERATE_INTERNAL_KEYS, KPIS_API_KEYS, TESTING_API_KEYS } from './public-api-keys.js';
 const PUBLIC_API_KEYS = [
   'FactoryConfigV2Schema',
   'factoryConfigV2JsonSchema',
@@ -344,6 +344,7 @@ const EXTRA_INTERNAL_KEYS = [
   ...PO,
   ...PO2,
   ...GATE,
+  ...ITERATE_INTERNAL_KEYS,
 ];
 const INTERNAL_API_KEYS = [
   ...'AGENT_MEMORY_DIR AGENT_MEMORY_MAX_BYTES agentMemoryPath readAgentMemory'.split(' '), // #3624

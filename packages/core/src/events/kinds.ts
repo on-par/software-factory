@@ -113,6 +113,8 @@ export type EventKind =
   | 'issue-title'
   | 'issue_deferred'
   | 'issue_unparked'
+  | 'iterate_queued'
+  | 'iterate_rejected'
   | 'kpi-snapshot'
   | 'kpi-sweep-skipped'
   | 'land'
@@ -413,6 +415,9 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'resume-approved': { severity: 'info', isPark: false, isTerminal: false },
   resumed: { severity: 'info', isPark: false, isTerminal: false },
   // A trusted changes-requested review queued its issue for review rework (#3563). Not a park.
+  // A trusted `/factory iterate` comment queued (or was rejected for) its issue (#3625). Not a park.
+  iterate_queued: { severity: 'info', isPark: false, isTerminal: false },
+  iterate_rejected: { severity: 'warn', isPark: false, isTerminal: false },
   review_rework_queued: { severity: 'info', isPark: false, isTerminal: false },
   rework: { severity: 'warn', isPark: false, isTerminal: false, laneStatus: 'running' },
   rework_model_failed: { severity: 'warn', isPark: false, isTerminal: false },
