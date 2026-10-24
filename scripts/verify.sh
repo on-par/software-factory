@@ -62,6 +62,7 @@ if [ "$NO_E2E" != "1" ]; then
   npm run coverage-ratchet
 fi
 npm run eval -- --stub
+npm run eval -- --stub --suite readiness
 bash scripts/auto-merge-sweep.test.sh
 bash scripts/filter-green-prs.test.sh
 bash scripts/repo-merge-settings.test.sh

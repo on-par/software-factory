@@ -134,7 +134,7 @@ export async function runEval(opts: RunEvalOpts): Promise<EvalSummary> {
   };
 }
 
-function estimateCost(router: ModelRouter, model: string, input: string, output: string): number {
+export function estimateCost(router: ModelRouter, model: string, input: string, output: string): number {
   const def = router.registryRef.get(model);
   if (!def) return 0;
   return (
