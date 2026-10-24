@@ -113,6 +113,20 @@ export { resolveBaseHealthChecks, resolveBaselineCacheTtlHours, resolveHermeticG
 export { resolveEffectiveConfig, resolveReviewFloorRules, resolveTrustTier } from './config/repo.js';
 export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix, resolveHostMaxBuilds } from './config/index.js';
 export { evaluateLoadGuard, formatLoadHold, readHostLoad, type LoadGuardDecision } from './environment/load-guard.js';
+export {
+  BYTES_PER_GB,
+  claimDiskAlert,
+  createDiskGuard,
+  DISK_ALERT_INTERVAL_MS,
+  evaluateDiskGuard,
+  formatDiskHold,
+  hostDiskAlertFile,
+  readDiskFree,
+  type DiskGuard,
+  type DiskGuardDecision,
+  type DiskSample,
+} from './environment/disk-guard.js';
+export { resolveDiskGuard, type DiskGuardPolicy } from './config/disk-policy.js';
 export { hostAgentJobsDir, hostBuildSlotsDir, listHostSlots, withHostAgentJobLease } from './environment/host-slots.js';
 export { withHostBuildSlot, type HostAgentJobKind, type HostSlotStatus } from './environment/host-slots.js';
 export { createRunSlotGate, withRunAndHostBuildSlot, type RunSlotGate } from './environment/run-slots.js';

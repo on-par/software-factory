@@ -26,6 +26,7 @@ import { EventsConfigSchema } from '../events/rotation.js';
 import { runConfigSource } from './run-config-source.js';
 import { RunConfigSectionSchema } from './run-section.js';
 import { PrConfigSections } from './pr-section.js';
+import { DiskConfigSchema } from './disk-policy.js';
 import { FACTORY_RUNTIME_CONFIG_KEYS } from './runtime-config-keys.js';
 
 import type { FilingPolicy } from '../filing/policy.js';
@@ -297,6 +298,7 @@ export const FactoryConfigSchema = z.object({
       comment: z.string().optional(),
     })
     .default({ maxBuilds: 2, maxAgentJobs: 1, loadGuard: { enabled: true, retrySeconds: 60 } }),
+  disk: DiskConfigSchema,
   auto_failover: z
     .object({
       enabled: z.boolean().default(true),

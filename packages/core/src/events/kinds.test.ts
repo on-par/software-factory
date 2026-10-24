@@ -304,6 +304,15 @@ describe('config park (#2584)', () => {
   });
 });
 
+describe('disk_low', () => {
+  it('is a warn, non-park, non-terminal kind', () => {
+    expect(EVENT_TRAITS.disk_low).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
+    expect(eventTraitsFor('disk_low')).not.toBe(UNKNOWN_EVENT_TRAITS);
+    expect(isParkKind('disk_low')).toBe(false);
+    expect(laneStatusOf('disk_low')).toBeUndefined();
+  });
+});
+
 describe('lane-paused', () => {
   it('is registered in EVENT_TRAITS', () => {
     expect(Object.hasOwn(EVENT_TRAITS, 'lane-paused')).toBe(true);

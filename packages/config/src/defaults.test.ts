@@ -351,6 +351,7 @@ describe('docs live as JSDoc, not as note/comment data', () => {
     'auto_failover',
     'queue',
     'host',
+    'disk',
   ]);
   const ALLOWED_COMMENT_PATHS = new Set([...REQUIRED_COMMENT_PATHS, ...OPTIONAL_PRESERVED_COMMENT_PATHS]);
 

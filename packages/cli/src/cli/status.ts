@@ -35,13 +35,14 @@ import {
   resolveDraftPrPolicy,
   resolvePrClassifierPolicy,
   resolveWorktreeRoot,
+  createDiskGuard,
   readStopMarker,
   formatBreakerRemaining,
   formatOpenFactoryDraftsLine,
   readOpenFactoryDrafts,
   resolveBranchPrefix,
 } from '@on-par/factory-core/internal';
-import type { OpenFactoryDrafts, QueueOrderConflict } from '@on-par/factory-core/internal';
+import type { DiskGuard, OpenFactoryDrafts, QueueOrderConflict } from '@on-par/factory-core/internal';
 
 import { formatBaseHoldStatus, readBaseHold } from './base-hold.js';
 import { notInitializedMessage } from './first-run.js';
@@ -152,6 +153,21 @@ async function readDrafts(ghRepo: string, rt: StatusRuntime): Promise<OpenFactor
   return readOpenFactoryDrafts({ octokit: rt.getOctokit(), owner, repo, prefix: resolveBranchPrefix() });
 }
 
+/** Disk state for the Health band and JSON (#2284); null when unreadable. */
+function readStatusDisk(
+  repoRoot: string,
+  ghRepo: string,
+  paths: ReturnType<typeof getFactoryPaths>,
+  rt: StatusRuntime,
+): ReturnType<DiskGuard['status']> {
+  try {
+    const config = rt.configLoaders.loadFactoryConfigForRepo(paths.config);
+    return createDiskGuard(config, { repoRoot, ghRepo, stateRoot: paths.root }).status();
+  } catch {
+    return null;
+  }
+}
+
 export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise<void> {
   if (opts.json) {
     // `--kpis` is deliberately ignored here: the JSON shape is fixed (#1101).
@@ -192,6 +208,7 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
           active: view.active,
           update: buildStatusUpdateJson(readUpdateState(updateStatePath(daemonRuntimePaths().dir))),
           openFactoryDrafts: await readDrafts(ghRepo, rt),
+          disk: readStatusDisk(repoRoot, ghRepo, paths, rt),
           now: Date.now(),
         }),
       ),
@@ -296,6 +313,10 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
   const update = buildStatusUpdateJson(readUpdateState(updateStatePath(daemonRuntimePaths().dir)));
   console.log(`  ${formatUpdateStatusLine(update)}`);
   console.log(`  ${formatOpenFactoryDraftsLine(await readDrafts(ghRepo, rt))}`);
+  const disk = readStatusDisk(repoRoot, ghRepo, paths, rt);
+  if (disk?.low) {
+    console.log(styleText('red', `  DISK LOW: free=${disk.freeGb} GB threshold=${disk.thresholdGb} GB`));
+  }
 
   if (opts.kpis) {
     console.log(styleText('bold', '\n  Effective config:'));

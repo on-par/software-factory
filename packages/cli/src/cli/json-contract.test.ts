@@ -66,6 +66,7 @@ const statusInput = {
     draining: { since: '2026-01-01T00:05:00.000Z', target: '0.9.5', stopFiles: ['/tmp/lane-a/STOP'] },
   },
   openFactoryDrafts: { count: 3, oldestHours: 30 },
+  disk: { freeGb: 42.5, thresholdGb: 10, low: false },
   now: fixedNow,
 };
 

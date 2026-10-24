@@ -70,3 +70,35 @@ describe('hostBuildSlotPort with a run gate (#3049)', () => {
     expect(log).toHaveBeenCalledWith('environment_lease', 'waiting for run build slot (1/1 in use)');
   });
 });
+
+describe('hostBuildSlotPort with a disk guard (#2284)', () => {
+  const hold = { kind: 'hold' as const, freeGb: 2, thresholdGb: 10, path: '/w', retryMs: 300_000 };
+
+  it('waits at the check boundary while disk is low and runs fn only after recovery', async () => {
+    const decisions = [hold, hold, { kind: 'claim' as const }];
+    const guard: any = { check: () => decisions.shift() };
+    const order: string[] = [];
+    const log = vi.fn((kind: string) => order.push(`log:${kind}`));
+    const sleep = vi.fn(async () => {
+      order.push('sleep');
+    });
+    const port = hostBuildSlotPort(loadFactoryConfig(), 'o/r', 7, log as any, undefined, { guard, sleep });
+    await port('check', async () => {
+      order.push('fn');
+      expect((await readdir(dir)).filter((f) => f.startsWith('slot-'))).toEqual(['slot-0.json']);
+    });
+    expect(order).toEqual(['log:disk_low', 'sleep', 'log:warn', 'sleep', 'fn']);
+    expect(sleep).toHaveBeenCalledWith(300_000);
+    expect(log).toHaveBeenCalledWith('disk_low', expect.stringContaining('#7 check waiting:'));
+  });
+
+  it('treats a throwing guard as claim and takes no slot while held', async () => {
+    const guard: any = {
+      check: () => {
+        throw new Error('boom');
+      },
+    };
+    const port = hostBuildSlotPort(loadFactoryConfig(), 'o/r', 7, vi.fn(), undefined, { guard });
+    await expect(port('build', async () => 'ok')).resolves.toBe('ok');
+  });
+});

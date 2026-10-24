@@ -40,7 +40,7 @@ import {
   touchRunActivity,
   writePhaseSnapshot,
 } from '@on-par/factory-core';
-import { hostBuildSlotPort } from './host-slot.js';
+import { shipHostBuildSlot } from './host-slot.js';
 import { claimReworkRequests } from './ship-review-rework.js';
 import type { CheckResumeRecord, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
@@ -140,7 +140,7 @@ async function shipIssueFrom(
     /** Local-only policy (#508): run in this caller-provided workspace, no worktree, no publishing, no SHIP phase. */
     localOnly?: LocalOnlyPolicy;
     /** Per-run BUILD/CHECK slot gate shared by every lane of one run (#3049); absent = host cap only. */
-    runSlots?: Parameters<typeof hostBuildSlotPort>[4];
+    runSlots?: Parameters<typeof shipHostBuildSlot>[3]['slots'];
     /** Benchmark artifact directory (#509) — only set for local-only runs. */
     artifactsDir?: string;
     resumeFrom?: CheckResumeRecord; // Resume at CHECK on a kept worktree (#2564).
@@ -402,7 +402,7 @@ async function shipIssueFrom(
     planPhase: phases.planPhase,
     buildPhase: phases.buildPhase,
     checkPhase: phases.checkPhase,
-    hostBuildSlot: hostBuildSlotPort(factoryConfig, ghRepo, issueNum, log, ctx?.runSlots),
+    hostBuildSlot: shipHostBuildSlot(factoryConfig, issueNum, log, { repoRoot, ghRepo, paths, slots: ctx?.runSlots }),
     shipPhase: shipPhaseForMode,
     requiredChecksVerdict: baseChecksVerdict(octokit, ghOwner, ghName, baseHealthOpts),
     checkBaseHealth: deps.checkBaseHealth ?? baseHealthWithCi(octokit, ghOwner, ghName, baseHealthOpts),

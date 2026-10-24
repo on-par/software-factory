@@ -25,6 +25,7 @@ export const FACTORY_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'intake',
   'environment',
   'host',
+  'disk',
   'auto_failover',
   'queue',
   'adr',

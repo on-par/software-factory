@@ -218,6 +218,29 @@
         }
       ]
     },
+    "disk": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "freeGb": {
+              "type": "number"
+            },
+            "thresholdGb": {
+              "type": "number"
+            },
+            "low": {
+              "type": "boolean"
+            }
+          },
+          "required": ["freeGb", "thresholdGb", "low"],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "providers": {
       "type": "array",
       "items": {
@@ -286,6 +309,7 @@
     "active",
     "update",
     "openFactoryDrafts",
+    "disk",
     "providers",
     "activeAlerts"
   ],

@@ -4,6 +4,7 @@ import type { getFactoryPaths, ParkReason, ProviderBreaker, RunOutcome } from '@
 import type {
   AwaitingCiRecord,
   logEvent,
+  DiskGuardDecision,
   LoadGuardDecision,
   QueueClaim,
   QueueReleaseOutcome,
@@ -87,6 +88,9 @@ export type RunLaneDeps = {
   /** Host load guard (#3048): consulted before every remote claim, after the base-hold gate; 'hold'
    *  waits retryMs and re-checks. Absent = always claim (local lanes, injected-deps callers, tests). */
   loadGuard?: () => LoadGuardDecision;
+  /** Host disk guard (#2284): consulted before every remote claim, after the load guard; 'hold' waits
+   *  retryMs and re-checks (one `disk_low` event per episode). Absent = always claim. */
+  diskGuard?: () => DiskGuardDecision;
   /** Breaker read while the lane is paused for all_providers_down (#3235). Defaults to the repo's breaker file. */
   providerBreaker?: Pick<ProviderBreaker, 'status'>;
   /** Stamp of the repo config file; a change ends the all_providers_down pause (#3235). Defaults to its mtime and size. */

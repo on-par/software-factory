@@ -64,6 +64,7 @@ export const statusJsonSchema = z.object({
     })
     .nullable(),
   openFactoryDrafts: openFactoryDraftsJsonSchema,
+  disk: z.object({ freeGb: z.number(), thresholdGb: z.number(), low: z.boolean() }).nullable(),
   providers: z.array(
     z.object({
       id: z.string(),

@@ -1,7 +1,9 @@
 // packages/cli/src/cli/notify.ts — opt-in --notify command fired on park and drain (#3512)
 import { spawn } from 'node:child_process';
+import { hostname } from 'node:os';
 
 import type { ParkPayload } from '@on-par/factory-core';
+import { claimDiskAlert, hostDiskAlertFile } from '@on-par/factory-core/internal';
 import type { logEvent } from '@on-par/factory-core/internal';
 
 export const NOTIFY_ENV = 'FACTORY_NOTIFY_CMD';
@@ -10,6 +12,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 
 export type NotifySummary =
   | { kind: 'park'; ts: string; issue: number | string; lane: string; message: string; park: ParkPayload }
+  | { kind: 'disk_low'; ts: string; host: string; lane: string; message: string }
   | { kind: 'drain'; ts: string; message: string; parked: number };
 
 export interface Notifier {
@@ -107,6 +110,36 @@ export function withParkNotify(emit: typeof logEvent, notifier: Notifier): typeo
           message: msg,
           park: extra.park,
         });
+      } catch {
+        // notify must never break the event log
+      }
+    }
+    return result;
+  };
+}
+
+/** Wraps an event emitter so a `disk_low` event also fires one alert per host per hour (#2284). */
+export function withDiskLowNotify(
+  emit: typeof logEvent,
+  notifier: Notifier,
+  opts: { alertFile?: string; now?: () => Date; host?: string } = {},
+): typeof logEvent {
+  const { alertFile = hostDiskAlertFile(), now = () => new Date(), host = hostname() } = opts;
+  return (...args: Parameters<typeof logEvent>): ReturnType<typeof logEvent> => {
+    const result = emit(...args);
+    const [, type, issue, msg, extra] = args;
+    if (type === 'disk_low') {
+      try {
+        const at = now();
+        if (claimDiskAlert(alertFile, at)) {
+          notifier.notify({
+            kind: 'disk_low',
+            ts: at.toISOString(),
+            host,
+            lane: extra?.lane ?? String(issue),
+            message: msg,
+          });
+        }
       } catch {
         // notify must never break the event log
       }

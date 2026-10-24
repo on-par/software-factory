@@ -14,6 +14,7 @@ import type {
 
 import type { AwaitingCiParkReason } from './awaiting-ci-recheck.js';
 import { formatBaseHoldKept, type BaseHoldDecision } from './base-hold.js';
+import { holdForDisk } from './run-lane-disk-hold.js';
 import { laneParkCommenter } from './lane-park-comment.js';
 import {
   pauseLaneForAllProvidersDown,
@@ -64,6 +65,7 @@ export async function runLane(
     countRemaining,
     baseHoldGate,
     loadGuard,
+    diskGuard,
     sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     now = () => new Date(),
     laneBreakerThreshold = 0,
@@ -161,6 +163,7 @@ export async function runLane(
     }
     parked++;
   };
+  const diskIo = { lane, paths, emitEvent, now, sleep, pathExists };
   const decide = (guard: () => LoadGuardDecision): LoadGuardDecision => {
     try {
       return guard();
@@ -197,6 +200,7 @@ export async function runLane(
         return;
       }
       if (loadGuard && (await holdForLoad(loadGuard)) === 'stopped') break;
+      if (diskGuard && (await holdForDisk(diskGuard, diskIo)) === 'stopped') break;
       if (pollReviewRework) {
         await pollReviewRework().catch((err) =>
           emitEvent(paths.events, 'warn', lane, `review-rework poll failed: ${shipRuntime().errorDetail(err)}`, {

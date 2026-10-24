@@ -612,8 +612,9 @@ const INTERNAL_API_KEYS = [
   ...'upsertRiskReceipt riskPolicyConfigFile loadRiskPolicy formatRiskPolicy'.split(' '), // #3387
   ...'resolveHostLoadGuard evaluateLoadGuard formatLoadHold readHostLoad resolveBaseHealthChecks'.split(' '), // #3048, #3290
   ...'hostBuildSlotsDir listHostSlots syncLandBranch isValidIssueRunState listIssueRuns'.split(' '), // syncLandBranch: #1886; run readers: #3448
-  ...'withHostBuildSlot createRunSlotGate withRunAndHostBuildSlot'.split(' '), // #3049
-  ...'FACTORY_RUNTIME_CONFIG_KEYS isTrustedApprover'.split(' '),
+  ...'withHostBuildSlot createRunSlotGate withRunAndHostBuildSlot readDiskFree formatDiskHold'.split(' '), // #3049, #2284
+  ...'BYTES_PER_GB DISK_ALERT_INTERVAL_MS claimDiskAlert createDiskGuard evaluateDiskGuard'.split(' '), // #2284
+  ...'FACTORY_RUNTIME_CONFIG_KEYS isTrustedApprover resolveDiskGuard hostDiskAlertFile'.split(' '),
   'createOctokitCollaboratorPermissionClient',
   ...'CONFIG_EXAMPLE_OMITTED_KEYS renderConfigExample'.split(' '),
   'resolveEvidenceAllowlist',
