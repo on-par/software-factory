@@ -255,9 +255,7 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
     if (required === undefined) {
       required = await resolveRequiredContexts(octokit, owner, repo, requiredChecks?.branch);
       if (required.length === 0 && requiredChecks?.branch) {
-        try {
-          onNoRequiredChecks?.({ branch: requiredChecks.branch });
-        } catch {}
+        onNoRequiredChecks?.({ branch: requiredChecks.branch });
       }
     }
     try {
@@ -344,9 +342,7 @@ export async function watchChecks(opts: WatchChecksOptions): Promise<CiOutcome> 
   }
   if (onDeadline) {
     const statuses = sawRuns ? null : await commitStatusCount(octokit, owner, repo, ref);
-    try {
-      onDeadline({ neverStarted: !sawRuns && statuses?.total === 0 });
-    } catch {}
+    onDeadline({ neverStarted: !sawRuns && statuses?.total === 0 });
   }
   return 'timeout';
 }

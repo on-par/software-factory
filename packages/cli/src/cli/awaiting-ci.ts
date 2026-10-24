@@ -186,7 +186,9 @@ export async function runAwaitingCiRechecks(deps: AwaitingCiRecheckDeps): Promis
       );
       try {
         reschedule(rec.headSha);
-      } catch {}
+      } catch (e) {
+        log('warn', issue, `awaiting-ci reschedule failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
   }
   return results;

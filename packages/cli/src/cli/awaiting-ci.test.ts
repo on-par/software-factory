@@ -1,9 +1,9 @@
 // packages/cli/src/cli/awaiting-ci.test.ts — awaiting-ci record store, backoff schedule and re-check runner (#3208)
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -23,14 +23,16 @@ const HOUR = 60 * MIN;
 const T0 = Date.parse('2026-10-17T00:00:00Z');
 const rec = { issue: 7, prNumber: 70, headSha: 'a'.repeat(40), branch: 'ship-it/7-x' };
 
+const tmp = createTempDirs();
+
 describe('awaiting-ci', () => {
   let dir: string;
   let file: string;
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'awaiting-ci-'));
+    dir = tmp.makeSync('awaiting-ci-');
     file = join(dir, 'awaiting-ci.json');
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => tmp.cleanup());
 
   const harness = (over: Partial<AwaitingCiRecheckDeps> & { verdicts?: AwaitingCiVerdict[] } = {}) => {
     let now = T0;

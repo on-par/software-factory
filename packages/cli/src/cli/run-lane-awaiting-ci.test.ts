@@ -1,10 +1,9 @@
 // packages/cli/src/cli/run-lane-awaiting-ci.test.ts — runLane's awaiting-ci outcome and its re-check backoff (#3208)
 
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { resolveAwaitingCiCapMs } from '@on-par/factory-core/internal';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { type AwaitingCiRecord, readAwaitingCi, recordAwaitingCi, runAwaitingCiRechecks } from './awaiting-ci.js';
@@ -15,12 +14,14 @@ const MIN = 60_000;
 const T0 = Date.parse('2026-10-17T00:00:00Z');
 const paths: any = { events: '/repo/.factory/events.ndjson', stop: '/repo/.factory/STOP' };
 
+const tmp = createTempDirs();
+
 describe('runLane awaiting-ci', () => {
   let dir: string;
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'lane-awaiting-ci-'));
+    dir = tmp.makeSync('lane-awaiting-ci-');
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => tmp.cleanup());
 
   it('a PR whose CI never started waits as awaiting-ci and merges when CI arrives late', async () => {
     const events: string[] = [];
