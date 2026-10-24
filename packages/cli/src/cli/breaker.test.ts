@@ -80,6 +80,9 @@ describe('runBreakerResetCommand', () => {
       issue: '-',
       providerBreakerClose: { provider: 'anthropic', cause: 'manual_reset' },
     });
+    const restored = readEvents(paths.events).filter((e) => e.type === 'provider_restored');
+    expect(restored).toHaveLength(1);
+    expect(restored[0]).toMatchObject({ providerRestored: { provider: 'anthropic', cause: 'manual_reset' } });
   });
 });
 

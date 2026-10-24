@@ -7,6 +7,7 @@ import type {
   ParkPayload,
   ProviderAuthRejectedPayload,
   ProviderBreakerClosePayload,
+  ProviderRestoredPayload,
   ProviderCappedPayload,
   StewardTriggeredPayload,
 } from '../events/kinds.js';
@@ -41,6 +42,7 @@ export type RunLogFn = (
     allProvidersDown?: AllProvidersDownPayload;
     providerAuthRejected?: ProviderAuthRejectedPayload;
     providerBreakerClose?: ProviderBreakerClosePayload;
+    providerRestored?: ProviderRestoredPayload;
     attribution?: RunAttribution;
   },
 ) => void;

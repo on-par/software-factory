@@ -21,6 +21,7 @@ import type {
   ProviderBreakerClosePayload,
   ProviderCappedPayload,
   ProviderRefusedPayload,
+  ProviderRestoredPayload,
   StewardTriggeredPayload,
 } from '../events/kinds.js';
 import type {
@@ -62,6 +63,7 @@ export interface LogExtra {
   providerRefused?: ProviderRefusedPayload;
   providerAuthRejected?: ProviderAuthRejectedPayload;
   providerBreakerClose?: ProviderBreakerClosePayload;
+  providerRestored?: ProviderRestoredPayload;
   stewardTriggered?: StewardTriggeredPayload;
   flakyTests?: FlakyTestsPayload;
   checkFailure?: CheckFailureInfo;
@@ -174,6 +176,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.providerRefused ? { providerRefused: extra.providerRefused } : {}),
       ...(extra?.providerAuthRejected ? { providerAuthRejected: extra.providerAuthRejected } : {}),
       ...(extra?.providerBreakerClose ? { providerBreakerClose: extra.providerBreakerClose } : {}),
+      ...(extra?.providerRestored ? { providerRestored: extra.providerRestored } : {}),
       ...(extra?.stewardTriggered ? { stewardTriggered: extra.stewardTriggered } : {}),
       ...(extra?.flakyTests ? { flakyTests: extra.flakyTests } : {}),
       ...(extra?.checkFailure ? { checkFailure: extra.checkFailure } : {}),

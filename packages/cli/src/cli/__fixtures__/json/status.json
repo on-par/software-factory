@@ -48,5 +48,7 @@
   "openFactoryDrafts": {
     "count": 3,
     "oldestHours": 30
-  }
+  },
+  "providers": [],
+  "activeAlerts": []
 }

@@ -22,7 +22,6 @@ import {
   GITHUB_ISSUE_SOURCE,
   LaneFileGuard,
   phaseSnapshotFile,
-  ProviderBreaker,
   resolveAutoFailover,
   resolveCodexDisabled,
   resolveEfficiencyPolicy,
@@ -66,6 +65,7 @@ import {
 } from '@on-par/factory-core/internal';
 import { baseChecksVerdict, baseHealthWithCi } from './base-health-ci.js';
 import { formatDeprecation } from './octokit.js';
+import { restoredLoggingBreaker } from './provider-restored-log.js';
 import type { CliDeps, ConfigLoaderKey, CoreOpKey, GitOpKey, ShellOpKey } from './index.js';
 import { resolveRunBranch } from './run-branch.js';
 import { shipRuntime } from './ship-runtime.js';
@@ -199,7 +199,7 @@ async function shipIssueFrom(
   const classifierPolicy = resolvePrClassifierPolicy(factoryConfig, process.env, { classifier: opts.prClassifier });
   const timeouts = loaders.resolveTimeouts(factoryConfig);
   const failoverSettings = resolveAutoFailover(factoryConfig);
-  const breaker = new ProviderBreaker(paths.breaker);
+  const breaker = restoredLoggingBreaker(paths.breaker, paths.events, issueNum, ctx?.lane);
   const reworkHistory = new ReworkHistory(paths.reworkHistory);
   const laneFileGuard = new LaneFileGuard(paths.laneFiles);
   const efficiency = resolveEfficiencyPolicy(repoConfig);

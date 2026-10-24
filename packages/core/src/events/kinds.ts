@@ -17,6 +17,7 @@ export type {
   ProviderBreakerClosePayload,
   ProviderCappedPayload,
   ProviderRefusedPayload,
+  ProviderRestoredPayload,
   StewardTriggeredPayload,
 } from './payloads.js';
 
@@ -167,6 +168,7 @@ export type EventKind =
   | 'provider_breaker_pinned'
   | 'provider_capped'
   | 'provider_refused'
+  | 'provider_restored'
   | 'readiness'
   | 'readiness_enrichment_failed'
   | 'readiness_enrichment_started'
@@ -398,6 +400,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   provider_auth_rejected: { severity: 'warn', isPark: false, isTerminal: false },
   provider_capped: { severity: 'warn', isPark: false, isTerminal: false },
   provider_refused: { severity: 'warn', isPark: false, isTerminal: false },
+  provider_restored: { severity: 'info', isPark: false, isTerminal: false },
   readiness: { severity: 'info', isPark: false, isTerminal: false },
   readiness_enrichment_failed: { severity: 'info', isPark: false, isTerminal: false },
   readiness_enrichment_started: { severity: 'info', isPark: false, isTerminal: false },

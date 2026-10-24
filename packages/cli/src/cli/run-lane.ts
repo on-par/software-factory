@@ -2,7 +2,7 @@
 
 import { existsSync, statSync } from 'node:fs';
 
-import { parkReasonFor, ProviderBreaker } from '@on-par/factory-core';
+import { parkReasonFor } from '@on-par/factory-core';
 import type { getFactoryPaths, ParkPayload, RunOutcome } from '@on-par/factory-core';
 import { formatLoadHold, logEvent, PARKED_LABEL, parkPayload } from '@on-par/factory-core/internal';
 import type { LoadGuardDecision, QueueClaim, QueueReleaseOutcome } from '@on-par/factory-core/internal';
@@ -19,6 +19,7 @@ import {
 } from './lane-pause.js';
 import { waitForMerge } from './land.js';
 import { AwaitingReviewError } from './land-pr.js';
+import { restoredLoggingBreaker } from './provider-restored-log.js';
 import { releaseKeepOnRequeue } from './worktree-keep.js';
 import { shipIssue } from './ship.js';
 import { withHeartbeat } from './lane-heartbeat.js';
@@ -62,7 +63,7 @@ export async function runLane(
     octokit: getOctokit,
     runId = '-',
     readParkSha = () => Promise.reject(new Error('no park sha reader')),
-    providerBreaker = new ProviderBreaker(paths.breaker),
+    providerBreaker = restoredLoggingBreaker(paths.breaker, paths.events, '-', lane, emitEvent),
     configStamp = () => {
       try {
         const st = statSync(paths.config);

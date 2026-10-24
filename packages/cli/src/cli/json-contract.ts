@@ -64,6 +64,25 @@ export const statusJsonSchema = z.object({
     })
     .nullable(),
   openFactoryDrafts: openFactoryDraftsJsonSchema,
+  providers: z.array(
+    z.object({
+      id: z.string(),
+      plan: z.enum(['subscription', 'api', 'unknown']),
+      breaker: z.enum(['closed', 'open']),
+      openedReason: z.string().nullable(),
+      openedAt: z.string().nullable(),
+      resetAt: z.string().optional(),
+    }),
+  ),
+  activeAlerts: z.array(
+    z.object({
+      kind: z.enum(['provider_auth_rejected', 'all_providers_down']),
+      provider: z.string().optional(),
+      stage: z.enum(['plan', 'build']).optional(),
+      since: z.string(),
+      detail: z.string(),
+    }),
+  ),
 });
 
 /** `factory kpis --json` (#3553). */
@@ -101,6 +120,7 @@ export const logsLineJsonSchema = z.object({
   providerRefused: loosePayloadSchema.optional(),
   providerAuthRejected: loosePayloadSchema.optional(),
   providerBreakerClose: loosePayloadSchema.optional(),
+  providerRestored: loosePayloadSchema.optional(),
   stewardTriggered: loosePayloadSchema.optional(),
   flakyTests: loosePayloadSchema.optional(),
   attribution: loosePayloadSchema.optional(),

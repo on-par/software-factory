@@ -9,6 +9,7 @@ import type {
   ProviderBreakerClosePayload,
   ProviderCappedPayload,
   ProviderRefusedPayload,
+  ProviderRestoredPayload,
   StewardTriggeredPayload,
 } from '../events/kinds.js';
 import type { RunAttribution } from '../run/outcome.js';
@@ -337,6 +338,7 @@ export interface FactoryEvent {
   queueReprioritization?: QueueReprioritizationRecord;
   prClassification?: PrClassificationRecord;
   providerAuthRejected?: ProviderAuthRejectedPayload; // Rejected-credential details on a provider_auth_rejected event (#3232).
+  providerRestored?: ProviderRestoredPayload; // Close cause on a provider_restored event (#3236).
   providerBreakerClose?: ProviderBreakerClosePayload; // Close cause on a provider_breaker_close event (#3232).
   allProvidersDown?: AllProvidersDownPayload; // Stage, providers and detail on an all_providers_down park (#3235).
   providerCapped?: ProviderCappedPayload; // Usage-cap details on a provider_capped event (#3337).

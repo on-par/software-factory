@@ -1,9 +1,10 @@
 // packages/cli/src/cli/breaker.ts — `factory breaker reset <provider>` (#3232)
 
-import { type EventKind, getFactoryPaths, ProviderBreaker } from '@on-par/factory-core';
+import { type EventKind, getFactoryPaths, type ProviderBreaker } from '@on-par/factory-core';
 import { logEvent } from '@on-par/factory-core/internal';
 
 import { CliExitError, PROGRAM_HANDLERS } from './index.js';
+import { restoredLoggingBreaker } from './provider-restored-log.js';
 
 export interface BreakerResetDeps {
   breaker: ProviderBreaker;
@@ -41,7 +42,7 @@ export interface BreakerResetCommandDeps {
 export async function runBreakerResetCommand(provider: string, deps: BreakerResetCommandDeps): Promise<void> {
   const paths = getFactoryPaths(await deps.getRepoRoot());
   await runBreakerReset(provider, {
-    breaker: new ProviderBreaker(paths.breaker),
+    breaker: restoredLoggingBreaker(paths.breaker, paths.events, '-'),
     log: (type, msg, extra) => logEvent(paths.events, type, '-', msg, extra),
     out: deps.out,
   });
