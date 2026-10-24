@@ -290,6 +290,74 @@ export const unparkJsonSchema = z.object({
   labelsAfter: z.array(z.string()),
 });
 
+const checkItemSchema = z.object({ aspect: z.string(), text: z.string() });
+
+/** `factory check --json` (#3469). Heading-based fields, criteria, invest are advisory when the judge ran. */
+export const checkJsonSchema = z.object({
+  issue: z.number().int(),
+  schemaVersion: z.literal(1),
+  verdict: z.enum(['ready', 'ready-with-assumptions', 'not-ready']).nullable(),
+  summary: z.string().nullable(),
+  questions: z.array(checkItemSchema),
+  assumptions: z.array(checkItemSchema),
+  judge: z
+    .object({
+      model: z.string(),
+      cost: z.number().nullable(),
+      unpriced: z.boolean(),
+      cached: z.boolean(),
+      promptVersion: z.string(),
+      bodyHash: z.string(),
+    })
+    .nullable(),
+  judgeSkipped: z.literal('epic').optional(),
+  template: z.string().describe('advisory'),
+  score: z.number().describe('advisory'),
+  fields: z.object({ pass: z.boolean(), missing: z.array(z.string()) }).describe('advisory'),
+  criteria: z
+    .object({
+      findings: z.array(
+        z.object({
+          index: z.number().int(),
+          text: z.string(),
+          grade: z.enum(['structured', 'unstructured', 'empty']),
+          observable: z.boolean(),
+          note: z.string().optional(),
+        }),
+      ),
+      verificationCommand: z.boolean().nullable(),
+      problems: z.array(z.string()),
+      pass: z.boolean(),
+    })
+    .nullable()
+    .describe('advisory'),
+  size: z.object({ verdict: z.enum(['runs-as-is', 'would-split']), reason: z.string().optional() }),
+  invest: z
+    .object({
+      findings: z.array(
+        z.object({
+          letter: z.string(),
+          status: z.enum(['pass', 'warn', 'not-checked']),
+          reason: z.string(),
+        }),
+      ),
+    })
+    .nullable()
+    .describe('advisory'),
+  reasons: z.array(z.string()),
+  exitCode: z.union([z.literal(0), z.literal(1), z.literal(3)]),
+  deep: z
+    .object({
+      kind: z.literal('split'),
+      model: z.string(),
+      cost: z.number().nullable(),
+      unpriced: z.boolean(),
+      children: z.array(z.object({ title: z.string(), acceptanceCriteria: z.array(z.string()) })),
+    })
+    .optional(),
+});
+
+export type CheckJson = z.infer<typeof checkJsonSchema>;
 export type StatusJson = z.infer<typeof statusJsonSchema>;
 export type LogsLineJson = z.infer<typeof logsLineJsonSchema>;
 export type DaemonLoadJson = z.infer<typeof daemonLoadJsonSchema>;

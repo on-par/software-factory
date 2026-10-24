@@ -139,7 +139,8 @@ factory models [--doctor]           List models with tiers, cost, and availabili
 # Queue
 factory triage [--product <p>]      Have a model propose a queue into .factory/state/queue.proposed
 factory queue add <lane> <N...>     Queue GitHub issues into a lane (factory:queued labels)
-factory check <N> [--json]          Read-only pre-flight: missing fields, and whether the size gate runs it as-is or would split it (alias: ready)
+factory check <N> [--json] [--no-judge] [--rejudge] [--deep]
+                                    Read-only pre-flight: model readiness verdict with its questions or assumptions, plus advisory fields and size (alias: ready)
 
 # Observe
 factory status                      Show active runs, the GitHub queue, provider health, and recent events
@@ -150,7 +151,7 @@ factory cost                        Show recorded model spend by model
 factory usage                       Report 5-hour subscription usage
 ```
 
-`factory check` exits 0 when the issue is ready and runs as-is, 1 when fields are missing, and 3 when it would split.
+`factory check` exits 0 when the verdict is ready or ready-with-assumptions, 1 when it is not-ready, 2 on a judge error, and 3 when it would split. `--no-judge` restores the free heading check (1 = missing fields).
 
 ### `factory run-issue --run-children`
 

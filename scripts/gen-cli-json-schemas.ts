@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { format, resolveConfig } from 'prettier';
 import {
+  checkJsonSchema,
   costJsonSchema,
   daemonStatusJsonSchema,
   kpisJsonSchema,
@@ -34,6 +35,7 @@ const schemas = [
   ['stop.schema.json', stopJsonSchema],
   ['resume.schema.json', resumeJsonSchema],
   ['unpark.schema.json', unparkJsonSchema],
+  ['check.schema.json', checkJsonSchema],
 ] as const;
 
 /** Writes every CLI JSON Schema artifact, Prettier-formatted, into outputDirectory (created if absent). */
