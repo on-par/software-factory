@@ -157,7 +157,7 @@ factory usage                       Report 5-hour subscription usage
 
 When the size gate decides an issue is too big, it files child issues and stops the run. Without the flag, `run-issue` exits 1, names the children, and suggests re-running with `--run-children`. With the flag, it runs those children itself:
 
-- **Order.** Children run one at a time, in the build order the size gate filed them, under the same run lock as the parent.
+- **Order.** Children run one at a time, in the build order the size gate filed them, each under its own issue run lock, inside the parent's.
 - **Nested splits.** If a child is decomposed again, its new children replace it and run before the remaining siblings. No issue runs twice.
 - **Closed children** are skipped.
 - **Failures don't stop the run.** A child that fails or escalates is recorded, and the next child still runs.

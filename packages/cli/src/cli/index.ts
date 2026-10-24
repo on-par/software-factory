@@ -217,7 +217,6 @@ import {
   resolveDraftPrPolicy,
   resolvePrClassifierPolicy,
   resolveReviewFloorRules,
-  RunLockHeldError,
   runOvernightQueue,
   parseRemoteSlug,
   setupWorktree,
@@ -227,7 +226,6 @@ import {
   watchChecks,
   withFileLock,
   withGitLock,
-  withRunLock,
   writePortFile,
   buildTriagePrompt,
   parseTriageCandidates,
@@ -236,6 +234,9 @@ import {
   readStopMarker,
   detectClaudePlan,
 } from '@on-par/factory-core/internal';
+import { withRepoRunLock } from './repo-run-lock.js';
+
+export { withRepoRunLock };
 import type { StopMarker } from '@on-par/factory-core/internal';
 import { formatSteerabilityReport } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
@@ -2247,41 +2248,46 @@ async function cmdShip(
 
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
 
-  return withRepoRunLock(paths, 'factory ship', async () => {
-    recordDraftPrFlag(paths.runFlags, opts.draftPr);
-    let ghRepo: string | null = null;
-    try {
-      ghRepo = await getGitHubRepo();
-    } catch {
-      /* shipIssue reports repo resolution itself */
-    }
-    if (ghRepo) await runAutoWorktreeGc(repoRoot, paths, ghRepo, issueNum);
-
-    const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
-    if (hasUnresolvedPark(priorEvents, String(issueNum))) {
-      logEvent(paths.events, 'human-restarted', issueNum, 'manual retry of a previously parked/failed run', {
-        actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
-      });
-    }
-
-    try {
-      return await shipIssue(issueNum, { ...opts, branchPrefix });
-    } catch (err: any) {
-      if (err instanceof IssueSkippedError) return;
-      // A --no-pr run keeps its worktree either way: inspecting it is the point.
-      if (
-        ghRepo &&
-        opts.pr !== false &&
-        !(err instanceof InvalidWorkRequestInputError) &&
-        !(err instanceof LaneEnvironmentPauseError)
-      ) {
-        await reapPrlessShipWorktree(issueNum, repoRoot, ghRepo, paths, branchPrefix);
+  return withRepoRunLock(
+    paths,
+    'factory ship',
+    async () => {
+      recordDraftPrFlag(paths.runFlags, opts.draftPr);
+      let ghRepo: string | null = null;
+      try {
+        ghRepo = await getGitHubRepo();
+      } catch {
+        /* shipIssue reports repo resolution itself */
       }
-      // #2492: a pull request number is a usage error, not a failed ship.
-      if (err instanceof InvalidWorkRequestInputError) throw new CliExitError(`factory: ${err.message}`, 2);
-      throw new CliExitError(`Ship failed for issue #${issueNum}: ${err.message}`, 1);
-    }
-  });
+      if (ghRepo) await runAutoWorktreeGc(repoRoot, paths, ghRepo, issueNum);
+
+      const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
+      if (hasUnresolvedPark(priorEvents, String(issueNum))) {
+        logEvent(paths.events, 'human-restarted', issueNum, 'manual retry of a previously parked/failed run', {
+          actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
+        });
+      }
+
+      try {
+        return await shipIssue(issueNum, { ...opts, branchPrefix });
+      } catch (err: any) {
+        if (err instanceof IssueSkippedError) return;
+        // A --no-pr run keeps its worktree either way: inspecting it is the point.
+        if (
+          ghRepo &&
+          opts.pr !== false &&
+          !(err instanceof InvalidWorkRequestInputError) &&
+          !(err instanceof LaneEnvironmentPauseError)
+        ) {
+          await reapPrlessShipWorktree(issueNum, repoRoot, ghRepo, paths, branchPrefix);
+        }
+        // #2492: a pull request number is a usage error, not a failed ship.
+        if (err instanceof InvalidWorkRequestInputError) throw new CliExitError(`factory: ${err.message}`, 2);
+        throw new CliExitError(`Ship failed for issue #${issueNum}: ${err.message}`, 1);
+      }
+    },
+    { scope: { kind: 'issue', key: workKeyFromIssue(issueNum) } },
+  );
 }
 
 async function cmdRunIssue(
@@ -2321,66 +2327,71 @@ async function cmdRunIssue(
     );
   }
 
-  await withRepoRunLock(paths, 'factory run-issue', async () => {
-    recordDraftPrFlag(paths.runFlags, opts.draftPr);
-    const ghRepo = await getGitHubRepo();
+  await withRepoRunLock(
+    paths,
+    'factory run-issue',
+    async () => {
+      recordDraftPrFlag(paths.runFlags, opts.draftPr);
+      const ghRepo = await getGitHubRepo();
 
-    // Pre-flight: resolve the issue through the canonical work-request seam
-    // BEFORE any worktree or PR exists — a bad issue exits here.
-    const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit() });
-    let work: WorkRequest;
-    try {
-      work = await workSources.resolve(GITHUB_ISSUE_SOURCE, {
-        repo: ghRepo,
-        issue: issueNum,
-      } satisfies GithubIssueParams);
-    } catch (err) {
-      if (err instanceof InvalidWorkRequestInputError) {
-        throw new CliExitError(`factory: ${err.message}`, 2);
-      }
-      throw new CliExitError(
-        `factory: could not resolve issue #${issueNum} in ${ghRepo} (${errorDetail(err)}) — no worktree or PR was created`,
-        2,
-      );
-    }
-    console.log(styleText('cyan', `one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
-    await runAutoWorktreeGc(repoRoot, paths, ghRepo, issueNum);
-
-    const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
-    if (hasUnresolvedPark(priorEvents, String(issueNum))) {
-      logEvent(paths.events, 'human-restarted', issueNum, 'manual retry of a previously parked/failed run', {
-        actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
-      });
-    }
-
-    try {
-      await shipIssue(
-        issueNum,
-        { ...shipOpts, branchPrefix, sizeGate, maxSlices },
-        { repoRoot, ghRepo, workRequest: work },
-      );
-    } catch (err: any) {
-      if (err instanceof IssueSkippedError) return;
-      if (err instanceof IssueDecomposedError && runChildren) {
-        await runDecomposedChildren(
-          issueNum,
-          err.childIssues,
-          { ...shipOpts, branchPrefix, sizeGate, maxSlices },
-          { repoRoot, ghRepo, workSources },
-        );
-        return;
-      }
-      if (err instanceof IssueDecomposedError && !runChildren) {
-        const children = err.childIssues.map((n) => `#${n}`).join(', ');
+      // Pre-flight: resolve the issue through the canonical work-request seam
+      // BEFORE any worktree or PR exists — a bad issue exits here.
+      const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit() });
+      let work: WorkRequest;
+      try {
+        work = await workSources.resolve(GITHUB_ISSUE_SOURCE, {
+          repo: ghRepo,
+          issue: issueNum,
+        } satisfies GithubIssueParams);
+      } catch (err) {
+        if (err instanceof InvalidWorkRequestInputError) {
+          throw new CliExitError(`factory: ${err.message}`, 2);
+        }
         throw new CliExitError(
-          `Run failed for issue #${issueNum}: the size gate decomposed it into ${children} — no child issue was run. ` +
-            `Re-run with \`factory run-issue ${issueNum} --run-children\` to run them.`,
-          1,
+          `factory: could not resolve issue #${issueNum} in ${ghRepo} (${errorDetail(err)}) — no worktree or PR was created`,
+          2,
         );
       }
-      throw new CliExitError(`Run failed for issue #${issueNum}: ${err.message}`, 1);
-    }
-  });
+      console.log(styleText('cyan', `one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
+      await runAutoWorktreeGc(repoRoot, paths, ghRepo, issueNum);
+
+      const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
+      if (hasUnresolvedPark(priorEvents, String(issueNum))) {
+        logEvent(paths.events, 'human-restarted', issueNum, 'manual retry of a previously parked/failed run', {
+          actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
+        });
+      }
+
+      try {
+        await shipIssue(
+          issueNum,
+          { ...shipOpts, branchPrefix, sizeGate, maxSlices },
+          { repoRoot, ghRepo, workRequest: work },
+        );
+      } catch (err: any) {
+        if (err instanceof IssueSkippedError) return;
+        if (err instanceof IssueDecomposedError && runChildren) {
+          await runDecomposedChildren(
+            issueNum,
+            err.childIssues,
+            { ...shipOpts, branchPrefix, sizeGate, maxSlices },
+            { repoRoot, ghRepo, workSources },
+          );
+          return;
+        }
+        if (err instanceof IssueDecomposedError && !runChildren) {
+          const children = err.childIssues.map((n) => `#${n}`).join(', ');
+          throw new CliExitError(
+            `Run failed for issue #${issueNum}: the size gate decomposed it into ${children} — no child issue was run. ` +
+              `Re-run with \`factory run-issue ${issueNum} --run-children\` to run them.`,
+            1,
+          );
+        }
+        throw new CliExitError(`Run failed for issue #${issueNum}: ${err.message}`, 1);
+      }
+    },
+    { scope: { kind: 'issue', key: workKeyFromIssue(issueNum) } },
+  );
 }
 
 /** Runs each decomposed child through the one-shot pipeline in build order, inside the caller's
@@ -2412,14 +2423,20 @@ async function runDecomposedChildren(
       console.log(styleText('cyan', `one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
       let outcome: RunOutcome | undefined;
       try {
-        await shipIssue(child, opts, {
-          repoRoot: env.repoRoot,
-          ghRepo: env.ghRepo,
-          workRequest: work,
-          onOutcome: (o) => {
-            outcome = o;
-          },
-        });
+        await withRepoRunLock(
+          paths,
+          'factory run-issue',
+          () =>
+            shipIssue(child, opts, {
+              repoRoot: env.repoRoot,
+              ghRepo: env.ghRepo,
+              workRequest: work,
+              onOutcome: (o) => {
+                outcome = o;
+              },
+            }),
+          { scope: { kind: 'issue', key: workKeyFromIssue(child) } },
+        );
       } catch (err: any) {
         if (err instanceof IssueDecomposedError) {
           const again = err.childIssues.map((n) => `#${n}`).join(', ');
@@ -2485,88 +2502,94 @@ async function cmdRunBrief(
 
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
 
-  await withRepoRunLock(paths, 'factory run-brief', async () => {
-    recordDraftPrFlag(paths.runFlags, opts.draftPr);
-    let localOnly: LocalOnlyPolicy | undefined;
-    if (opts.workspace !== undefined) {
-      try {
-        localOnly = resolveLocalOnlyPolicy(opts.workspace);
-      } catch (err) {
-        if (err instanceof InvalidWorkspaceError) throw new CliExitError(`factory: ${err.message}`, 2);
-        throw err;
-      }
-    }
-
-    let artifactsDir: string | undefined;
-    if (opts.artifacts !== undefined) {
-      if (!localOnly) {
-        throw new CliExitError('factory: --artifacts requires --workspace (local-only runs only)', 2);
-      }
-      try {
-        artifactsDir = resolveArtifactsDir(opts.artifacts);
-      } catch (err) {
-        if (err instanceof InvalidArtifactsDirError) throw new CliExitError(`factory: ${err.message}`, 2);
-        throw err;
-      }
-      console.log(styleText('cyan', `local-only: benchmark artifacts will be written to ${artifactsDir}`));
-    }
-
-    // Local-only runs never touch GitHub — no remote required, no mutation possible.
-    const ghRepo = localOnly ? 'local/workspace' : await getGitHubRepo();
-
-    // Pre-flight: resolve the brief through the canonical work-request seam
-    // BEFORE any worktree or PR exists — a malformed brief exits here, so BUILD never starts.
-    const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit() });
-    let work: WorkRequest;
+  let localOnly: LocalOnlyPolicy | undefined;
+  if (opts.workspace !== undefined) {
     try {
-      work = await workSources.resolve(LOCAL_BRIEF_SOURCE, { path: briefPath } satisfies LocalBriefParams);
+      localOnly = resolveLocalOnlyPolicy(opts.workspace);
     } catch (err) {
-      if (err instanceof InvalidWorkRequestInputError) {
-        throw new CliExitError(`factory: ${err.message}`, 2);
-      }
-      throw new CliExitError(
-        `factory: could not resolve brief at ${briefPath} (${errorDetail(err)}) — no worktree or PR was created`,
-        2,
-      );
+      if (err instanceof InvalidWorkspaceError) throw new CliExitError(`factory: ${err.message}`, 2);
+      throw err;
     }
-    const digest = work.reference?.externalId ?? '';
-    const runNum = briefRunNumber(digest);
-    console.log(styleText('cyan', `one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
-    logEvent(paths.events, 'work-source', runNum, `inline local brief ${briefPath} (sha256 ${digest})`);
-    if (localOnly) {
-      console.log(styleText('cyan', `local-only: workspace ${localOnly.workspace} — publishing disabled`));
-      logEvent(
-        paths.events,
-        'local-only',
-        runNum,
-        `caller-provided workspace ${localOnly.workspace} — publishing disabled`,
-      );
-    }
+  }
 
-    const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
-    if (hasUnresolvedPark(priorEvents, String(runNum))) {
-      logEvent(paths.events, 'human-restarted', runNum, 'manual retry of a previously parked/failed run', {
-        actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
-      });
+  let artifactsDir: string | undefined;
+  if (opts.artifacts !== undefined) {
+    if (!localOnly) {
+      throw new CliExitError('factory: --artifacts requires --workspace (local-only runs only)', 2);
     }
-
     try {
-      await shipIssue(
-        runNum,
-        { ...opts, branchPrefix },
-        {
-          repoRoot,
-          ghRepo,
-          workRequest: work,
-          workSource: { kind: LOCAL_BRIEF_SOURCE, params: { path: briefPath } satisfies LocalBriefParams },
-          localOnly,
-          artifactsDir,
-        },
-      );
-    } catch (err: any) {
-      throw new CliExitError(`Run failed for brief ${briefPath}: ${err.message}`, 1);
+      artifactsDir = resolveArtifactsDir(opts.artifacts);
+    } catch (err) {
+      if (err instanceof InvalidArtifactsDirError) throw new CliExitError(`factory: ${err.message}`, 2);
+      throw err;
     }
-  });
+    console.log(styleText('cyan', `local-only: benchmark artifacts will be written to ${artifactsDir}`));
+  }
+
+  // Local-only runs never touch GitHub — no remote required, no mutation possible.
+  const ghRepo = localOnly ? 'local/workspace' : await getGitHubRepo();
+
+  // Pre-flight: resolve the brief through the canonical work-request seam
+  // BEFORE any worktree or PR exists — a malformed brief exits here, so BUILD never starts.
+  const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit() });
+  let work: WorkRequest;
+  try {
+    work = await workSources.resolve(LOCAL_BRIEF_SOURCE, { path: briefPath } satisfies LocalBriefParams);
+  } catch (err) {
+    if (err instanceof InvalidWorkRequestInputError) {
+      throw new CliExitError(`factory: ${err.message}`, 2);
+    }
+    throw new CliExitError(
+      `factory: could not resolve brief at ${briefPath} (${errorDetail(err)}) — no worktree or PR was created`,
+      2,
+    );
+  }
+  const digest = work.reference?.externalId ?? '';
+  const runNum = briefRunNumber(digest);
+
+  await withRepoRunLock(
+    paths,
+    'factory run-brief',
+    async () => {
+      recordDraftPrFlag(paths.runFlags, opts.draftPr);
+      console.log(styleText('cyan', `one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
+      logEvent(paths.events, 'work-source', runNum, `inline local brief ${briefPath} (sha256 ${digest})`);
+      if (localOnly) {
+        console.log(styleText('cyan', `local-only: workspace ${localOnly.workspace} — publishing disabled`));
+        logEvent(
+          paths.events,
+          'local-only',
+          runNum,
+          `caller-provided workspace ${localOnly.workspace} — publishing disabled`,
+        );
+      }
+
+      const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
+      if (hasUnresolvedPark(priorEvents, String(runNum))) {
+        logEvent(paths.events, 'human-restarted', runNum, 'manual retry of a previously parked/failed run', {
+          actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
+        });
+      }
+
+      try {
+        await shipIssue(
+          runNum,
+          { ...opts, branchPrefix },
+          {
+            repoRoot,
+            ghRepo,
+            workRequest: work,
+            workSource: { kind: LOCAL_BRIEF_SOURCE, params: { path: briefPath } satisfies LocalBriefParams },
+            localOnly,
+            artifactsDir,
+          },
+        );
+      } catch (err: any) {
+        throw new CliExitError(`Run failed for brief ${briefPath}: ${err.message}`, 1);
+      }
+    },
+    { scope: { kind: 'issue', key: workKeyFromIssue(runNum) } },
+  );
 }
 
 async function cmdLocalSmallDryRun(issueNum: number, opts: { spec?: string; output?: string }) {
@@ -2691,41 +2714,6 @@ function worktreePathFor(
     key: workKeyFromIssue(issueNum),
     prefix,
   });
-}
-
-/** Fences a whole run behind the checkout's `.factory/run.lock` (#598). A live holder is
- *  refused immediately — never queued behind a multi-hour run — and a dead holder's lock is
- *  reclaimed by withRunLock. Nested acquisition inside one process is a pass-through, so
- *  `factory supervise` can hold this across its loop. */
-export async function withRepoRunLock<T>(
-  paths: ReturnType<typeof getFactoryPaths>,
-  command: string,
-  fn: () => Promise<T>,
-  deps: { runLock?: typeof withRunLock; emitEvent?: typeof logEvent } = {},
-): Promise<T> {
-  const { runLock = withRunLock, emitEvent = logEvent } = deps;
-  try {
-    return await runLock(paths.runLock, fn, {
-      command,
-      onReclaim: (pid) =>
-        emitEvent(
-          paths.events,
-          'lock-stolen',
-          '-',
-          `reclaimed ${paths.runLock} from dead holder pid ${pid ?? 'unknown'}`,
-        ),
-    });
-  } catch (err) {
-    if (err instanceof RunLockHeldError) {
-      emitEvent(paths.events, 'run_lock_conflict', '-', `${command} refused: ${err.message}`);
-      throw new CliExitError(
-        `factory: ${err.message} — stop that run (or wait for it to finish) before starting another. ` +
-          `A dead run's lock is reclaimed automatically; remove ${paths.runLock} only if you are sure no factory run is live.`,
-        2,
-      );
-    }
-    throw err;
-  }
 }
 
 export async function reapParkedLaneWorktree(
@@ -4213,31 +4201,36 @@ async function resumeFromCheck(issueNum: number): Promise<void> {
     );
   }
 
-  await withRepoRunLock(paths, 'factory resume', async () => {
-    const ghRepo = await getGitHubRepo();
-    const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit() });
-    let work: WorkRequest;
-    try {
-      work = await workSources.resolve(GITHUB_ISSUE_SOURCE, {
-        repo: ghRepo,
-        issue: issueNum,
-      } satisfies GithubIssueParams);
-    } catch (err) {
-      if (err instanceof InvalidWorkRequestInputError) {
-        throw new CliExitError(`factory: ${err.message}`, 2);
+  await withRepoRunLock(
+    paths,
+    'factory resume',
+    async () => {
+      const ghRepo = await getGitHubRepo();
+      const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit() });
+      let work: WorkRequest;
+      try {
+        work = await workSources.resolve(GITHUB_ISSUE_SOURCE, {
+          repo: ghRepo,
+          issue: issueNum,
+        } satisfies GithubIssueParams);
+      } catch (err) {
+        if (err instanceof InvalidWorkRequestInputError) {
+          throw new CliExitError(`factory: ${err.message}`, 2);
+        }
+        throw new CliExitError(
+          `factory: could not resolve issue #${issueNum} in ${ghRepo} (${errorDetail(err)}) — nothing was resumed`,
+          2,
+        );
       }
-      throw new CliExitError(
-        `factory: could not resolve issue #${issueNum} in ${ghRepo} (${errorDetail(err)}) — nothing was resumed`,
-        2,
-      );
-    }
-    try {
-      await shipIssue(issueNum, {}, { repoRoot, ghRepo, workRequest: work, resumeFrom: record });
-    } catch (err: any) {
-      if (err instanceof IssueSkippedError) return;
-      throw new CliExitError(`Resume failed for issue #${issueNum}: ${err.message}`, 1);
-    }
-  });
+      try {
+        await shipIssue(issueNum, {}, { repoRoot, ghRepo, workRequest: work, resumeFrom: record });
+      } catch (err: any) {
+        if (err instanceof IssueSkippedError) return;
+        throw new CliExitError(`Resume failed for issue #${issueNum}: ${err.message}`, 1);
+      }
+    },
+    { scope: { kind: 'issue', key: workKeyFromIssue(issueNum) } },
+  );
 }
 
 /** index.ts bindings the commander registrations in program*.ts call (#2793); type-only imports there avoid a runtime cycle. */

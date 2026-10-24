@@ -30,6 +30,7 @@ describe('getFactoryPaths', () => {
       mergeLock: resolve(state, 'merge.lock'),
       gitLock: resolve(state, 'git.lock'),
       runLock: resolve(state, 'run.lock'),
+      runLocks: resolve(state, 'locks', 'run'),
       product: resolve(state, 'product'),
       stop: resolve(state, 'STOP'),
       worktreeKeeps: resolve(state, 'worktree-keeps.json'),
@@ -152,6 +153,7 @@ describe('getFactoryPaths', () => {
       'mergeLock',
       'gitLock',
       'runLock',
+      'runLocks',
       'queue',
       'queueProposed',
       'events',
@@ -183,6 +185,7 @@ describe('getFactoryPaths', () => {
       'mergeLock',
       'gitLock',
       'runLock',
+      'runLocks',
     ] as const;
 
     const assertRooted = (base: string) => {

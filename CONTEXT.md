@@ -16,6 +16,10 @@ The numeric daemon lane (`run.laneId`, default 1) that serialises runs in [packa
 
 One attempt to take one issue through PLAN → BUILD → CHECK → SHIP, ending in a `RunOutcome` (shipped, parked, ...). See [packages/core/src/run/run-issue.ts](packages/core/src/run/run-issue.ts), [packages/core/src/run/outcome.ts](packages/core/src/run/outcome.ts) ([ADR-0054](docs/adr/0054-runoutcome-is-a-core-owned-value-type-park-classification-is-structural-not-instanceof.md)); daemon run records live in [packages/core/src/daemon/run-store.ts](packages/core/src/daemon/run-store.ts).
 
+### Run lock
+
+A fail-fast (never queued) lock that stops two processes from force-recreating the same per-issue worktree and branch. It has two tiers. The checkout tier is `.factory/run.lock`, taken by `run`, `supervise` and `local-small-overnight`, which pick issues dynamically. The issue tier is `.factory/locks/run/<WorkKey>`, taken by `ship`, `run-issue`, `run-brief`, `resume` and each `--run-children` child. Each tier refuses while a live holder of the other exists, so parallel one-shot CLI runs mean different issues, still bounded by claims and `host.maxBuilds` slots. See [docs/ops/run-lock.md](docs/ops/run-lock.md) and [packages/core/src/utils/run-lock.ts](packages/core/src/utils/run-lock.ts).
+
 ### Claim
 
 Taking a queued issue for one claimant via a label CAS (`factory:in-progress` plus `factory:claimed-by:<id>`), verified by re-fetch; the smallest claimant id wins. See `claimNext` in [packages/core/src/queue/github-queue.ts](packages/core/src/queue/github-queue.ts) and [ADR-0044](docs/adr/0044-claiming-a-queued-issue-is-a-label-cas-verified-by-re-fetch-and-the-smallest-claimant-id-wins.md).

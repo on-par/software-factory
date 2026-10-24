@@ -23,7 +23,7 @@ import {
   defaultRegistryPath,
   listRepos,
   loadRegistry,
-  readRunLockHolder,
+  listLiveRunLocks,
   type RunRuntime,
 } from '@on-par/factory-core/internal';
 import { defaultIsPidAlive, getFactoryPaths, type FactoryConfig } from '@on-par/factory-core';
@@ -782,8 +782,7 @@ export function createAutoUpdateDeps(opts: {
         .filter((r) => r.status === 'queued' || r.status === 'running')
         .map((r) => `daemon:${r.repo}#${r.issue}`);
       for (const e of await attached()) {
-        const holder = readRunLockHolder(getFactoryPaths(e.path, e.stateRoot).runLock);
-        if (holder && defaultIsPidAlive(holder.pid)) active.push(e.slug);
+        if (listLiveRunLocks(getFactoryPaths(e.path, e.stateRoot), defaultIsPidAlive).length > 0) active.push(e.slug);
       }
       return active;
     },

@@ -7,7 +7,7 @@ import {
   defaultRegistryPath,
   listRepos,
   loadRegistry,
-  readRunLockHolder,
+  listLiveRunLocks,
 } from '@on-par/factory-core/internal';
 import { defaultIsPidAlive, getFactoryPaths } from '@on-par/factory-core';
 
@@ -49,13 +49,12 @@ export interface SelfUpdateApplyResult {
 export type ApplyExec = NonNullable<SelfUpdateDeps['exec']>;
 export type SelfUpdateApplyDeps = SelfUpdateDeps;
 
-/** Slugs of attached repos whose run lock is held by a live pid. */
+/** Slugs of attached repos whose run lock (checkout or per-issue) is held by a live pid. */
 export async function attachedRunLocks(registryFile: string = defaultRegistryPath()): Promise<string[]> {
   const active: string[] = [];
   for (const e of listRepos(await loadRegistry(registryFile))) {
     if (e.state === 'detached') continue;
-    const holder = readRunLockHolder(getFactoryPaths(e.path, e.stateRoot).runLock);
-    if (holder && defaultIsPidAlive(holder.pid)) active.push(e.slug);
+    if (listLiveRunLocks(getFactoryPaths(e.path, e.stateRoot), defaultIsPidAlive).length > 0) active.push(e.slug);
   }
   return active;
 }

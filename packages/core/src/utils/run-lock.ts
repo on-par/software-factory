@@ -1,4 +1,4 @@
-// src/utils/run-lock.ts — Exclusive per-checkout run lock (#598)
+// src/utils/run-lock.ts — Exclusive run lock: checkout tier plus per-WorkKey issue tier (#598, #3643)
 //
 // Every lock in the factory until this one is a *queueing* lock: contenders wait
 // through withFileLock's poll/timeout path, and a stale holder is stolen under the
@@ -11,11 +11,12 @@
 // live run's in-flight work while both processes believed they owned the lane. A
 // run lasts hours, so queueing behind it would look hung; this lock refuses instead.
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 
 import { defaultIsPidAlive } from '../environment/index.js';
+import type { WorkKey } from '../work/work-key.js';
 import { withFileLock } from './lock.js';
 
 /** Who currently holds a run lock. `pid` comes from withFileLock's own `pid` file
@@ -158,4 +159,68 @@ export async function withRunLock<T>(lockDir: string, fn: () => Promise<T>, opts
   } finally {
     held.delete(lockDir);
   }
+}
+
+/** Which lock a run takes: the checkout-wide fence (`run`, `supervise`,
+ *  `local-small-overnight`) or a per-WorkKey lock (one-shot runs, #3643). */
+export type RunLockScope = { kind: 'checkout' } | { kind: 'issue'; key: WorkKey };
+
+export interface RunLockPaths {
+  runLock: string;
+  runLocks: string;
+}
+
+export function runLockDirFor(paths: RunLockPaths, scope: RunLockScope): string {
+  return scope.kind === 'checkout' ? paths.runLock : join(paths.runLocks, scope.key);
+}
+
+/** Live holders of the checkout lock and every issue lock. Never throws. */
+export function listLiveRunLocks(
+  paths: RunLockPaths,
+  isPidAlive: (pid: number) => boolean = defaultIsPidAlive,
+): Array<{ lockDir: string; holder: RunLockHolder }> {
+  const dirs = [paths.runLock];
+  try {
+    for (const entry of readdirSync(paths.runLocks, { withFileTypes: true })) {
+      if (entry.isDirectory()) dirs.push(join(paths.runLocks, entry.name));
+    }
+  } catch {
+    // no issue locks dir yet — only the checkout lock can be live.
+  }
+  const live: Array<{ lockDir: string; holder: RunLockHolder }> = [];
+  for (const lockDir of dirs) {
+    const holder = readRunLockHolder(lockDir);
+    if (holder && isPidAlive(holder.pid)) live.push({ lockDir, holder });
+  }
+  return live;
+}
+
+/**
+ * Takes the lock for `scope` through `withRunLock`, then cross-checks the other tier:
+ * an issue lock is refused while another process holds the checkout lock, and the
+ * checkout lock is refused while another process holds any issue lock. Acquire first,
+ * check second, so two racing tiers can both refuse but never both proceed.
+ */
+export async function withScopedRunLock<T>(
+  paths: RunLockPaths,
+  scope: RunLockScope,
+  fn: () => Promise<T>,
+  opts: RunLockOptions = {},
+): Promise<T> {
+  const isPidAlive = opts.isPidAlive ?? defaultIsPidAlive;
+  const own = runLockDirFor(paths, scope);
+  return withRunLock(
+    own,
+    async () => {
+      const conflict = listLiveRunLocks(paths, isPidAlive).find(
+        ({ lockDir, holder }) =>
+          lockDir !== own &&
+          holder.pid !== process.pid &&
+          (scope.kind === 'checkout' ? lockDir !== paths.runLock : lockDir === paths.runLock),
+      );
+      if (conflict) throw new RunLockHeldError(conflict.lockDir, conflict.holder);
+      return fn();
+    },
+    opts,
+  );
 }
