@@ -14,6 +14,7 @@ export type ParkReason = Extract<
   | 'blocked'
   | 'all_providers_down'
   | 'sandbox-env'
+  | 'check-infra'
 >;
 
 import type { BuildRoutePin } from '../config/repo.js';

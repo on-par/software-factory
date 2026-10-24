@@ -14,6 +14,8 @@ import {
 } from '../checkers/index.js';
 import { describeCheckOutcome } from '../checkers/check-outcome.js';
 import { detectHeadedModeSignals, detectLiveAppSignal } from './check-environment.js';
+import { environmentLogPaths } from './environment-release.js';
+import { infraTriage } from './check-infra-triage.js';
 import { markBuildFilesIntentToAdd } from './check-intent-to-add.js';
 import { appendEvidencePlanStep } from './check-evidence.js';
 import type { runEvidencePlan } from '../checkers/evidence-plan.js';
@@ -80,6 +82,8 @@ export interface CheckPhaseResult {
   flakeRerun?: FlakeRerun;
   /** Set when tests hit the verify.sh sandbox marker (#3332): the park message; no baseline or rework ran. */
   sandboxEnv?: string;
+  /** Set when every lane-owned FAIL was infra and a network/missing-tool failure repeated on the one free re-run (#3371): the park message; no rework ran. */
+  infra?: string;
 }
 
 export const MAX_REWORK_ROUNDS = 3;
@@ -143,34 +147,6 @@ export function remainingShowstoppers(summary: CheckSummary): string[] {
     .split('\n')
     .filter((line) => SHOWSTOPPER_LINE.test(line))
     .map((line) => line.trim());
-}
-
-/** Full-output log files named by round-1 FAIL results, then the base-run log dir; deduped, first-seen order. */
-export function environmentLogPaths(summary: CheckSummary, baseLogDir: string | undefined): string[] {
-  const paths: string[] = [];
-  for (const r of summary.results.filter((x) => x.result === 'FAIL')) {
-    for (const m of r.details.matchAll(/^full output: (.+)$/gm)) paths.push(m[1]);
-  }
-  if (baseLogDir !== undefined) paths.push(baseLogDir);
-  return [...new Set(paths)];
-}
-
-export function renderEnvironmentReleaseComment(failure: EnvironmentFailure): string {
-  return [
-    '### Factory: CHECK failure caused by the base, not this issue',
-    '',
-    `Every failing checker also fails on base \`${failure.baseSha}\`, so no rework was run. This issue was released back to \`factory:queued\` and the lane is paused until the base is fixed.`,
-    '',
-    'Failing checkers:',
-    ...failure.failingChecks.map((c) => `- \`${c}\``),
-    '',
-    `Base SHA: \`${failure.baseSha}\``,
-    '',
-    ...(failure.logPaths.length > 0
-      ? ['Logs:', ...failure.logPaths.map((p) => `- \`${p}\``)]
-      : ['No log paths were recorded (logsDir not set).']),
-    '',
-  ].join('\n');
 }
 
 function failingCheckerNames(summary: CheckSummary): string[] {
@@ -391,6 +367,7 @@ async function checkPhaseImpl(opts: {
   const roundLogDir = (round: number): string | undefined =>
     logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, `check-r${round}`);
   const checkBaseDir = logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, 'check-base');
+  const checkTriageDir = logsDir === undefined ? undefined : join(logsDir, `issue-${issue}`, 'check-triage');
   // Each failing checker is logged individually, the same way SKIPs are: the parked
   // outcome only carries an aggregate count, so without this the checker/details pairs
   // that name WHY a run parked are never surfaced to the operator (#675).
@@ -546,6 +523,29 @@ async function checkPhaseImpl(opts: {
 
   const baseFailing = baseFailingCheckers(baseline);
   if (baseFailing.size > 0) log('check', `dropping base-failing checkers from rework: ${[...baseFailing].join(', ')}`);
+
+  const triaged = await infraTriage(
+    summary,
+    (s) => excludeBaseFailing(s, baseFailing),
+    async () => {
+      ctx.outputLogDir = checkTriageDir;
+      const rerun = await (runCheckers ?? runAllCheckers)(ctx, router, constitution, checkTimeoutSeconds);
+      return appendEvidencePlanStep(rerun, ctx, constitution, runEvidence);
+    },
+    log,
+    logFailures,
+  );
+  summary = triaged.summary;
+  if (triaged.infra !== undefined) {
+    return {
+      passed: false,
+      summary,
+      reworkRounds: 0,
+      failureSignature: failureSignature(summary),
+      infra: triaged.infra,
+      ...(baseline ? { baseline } : {}),
+    };
+  }
 
   // Cross-run stuck (#740): round one already reproduces the exact failure a
   // prior run parked on. Skip the rework loop entirely rather than re-burning

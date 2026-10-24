@@ -77,6 +77,18 @@ describe('EVENT_TRAITS', () => {
     expect(isParkKind('sandbox-env')).toBe(true);
   });
 
+  it('classifies check-infra as a parked terminal event and check_triage as info (#3371)', () => {
+    expect(EVENT_TRAITS['check-infra']).toEqual({
+      severity: 'error',
+      isPark: true,
+      isTerminal: true,
+      laneStatus: 'parked',
+    });
+    expect(isParkKind('check-infra')).toBe(true);
+    expect(EVENT_TRAITS.check_triage).toEqual({ severity: 'info', isPark: false, isTerminal: false });
+    expect(isParkKind('check_triage')).toBe(false);
+  });
+
   it('classifies flaky_tests as non-park evidence (#2302)', () => {
     expect(EVENT_TRAITS.flaky_tests).toEqual({ severity: 'info', isPark: false, isTerminal: false });
   });

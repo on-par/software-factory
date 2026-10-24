@@ -23,13 +23,12 @@ import {
   checkPhase,
   type EnvironmentFailure,
   excludeBaseFailing,
-  environmentLogPaths,
   isEnvironmentFailure,
   markTestsFlaky,
   LENS_REVIEW_CHECKER,
-  renderEnvironmentReleaseComment,
   stuckSignature,
 } from './check.js';
+import { environmentLogPaths, renderEnvironmentReleaseComment } from './environment-release.js';
 
 const models: ModelsConfig = {
   version: 1,
