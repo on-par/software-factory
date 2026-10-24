@@ -1,28 +1,25 @@
 // src/config/repo-config-label.test.ts — validation errors name the repo config file that was loaded (#3604)
 
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { ModelRegistry } from '../models/index.js';
 import { loadModelsConfig } from './index.js';
 import { applyRepoConfig, loadRepoConfig, resolveEffectiveModelPins } from './repo.js';
 
-const roots: string[] = [];
+const tempDirs = createTempDirs();
 
 async function repoWith(file: string, contents: string): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), 'repo-config-label-'));
-  roots.push(root);
+  const root = await tempDirs.make('repo-config-label-');
   await mkdir(join(root, '.factory'), { recursive: true });
   await writeFile(join(root, '.factory', file), contents);
   return root;
 }
 
-afterEach(async () => {
-  await Promise.all(roots.splice(0).map((r) => rm(r, { recursive: true, force: true })));
-});
+afterEach(() => tempDirs.cleanup());
 
 describe('repo config file label (#3604)', () => {
   it('models config errors name the loaded yaml file', async () => {
