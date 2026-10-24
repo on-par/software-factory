@@ -21,6 +21,7 @@ import { resolveStateRoot, STATE_ROOT_ENV } from './state-root.js';
 import { DEFAULT_MAX_SLICES, SLICE_CAP_CEILING } from '../readiness/slice-plan.js';
 import { DEFAULT_MAX_FILES, DEFAULT_TOKEN_BUDGET, type SizeBudget } from '../readiness/size.js';
 import { isOpenCodeZenModel } from './provider-order.js';
+import { DEFAULT_USAGE_POLL_MS } from '../usage/constants.js';
 import { DEFAULT_CI_DEADLINE_MS } from '../utils/ci-deadline.js';
 import { EventsConfigSchema } from '../events/rotation.js';
 import { runConfigSource } from './run-config-source.js';
@@ -297,6 +298,12 @@ export const FactoryConfigSchema = z.object({
       comment: z.string().optional(),
     })
     .default({ maxBuilds: 2, maxAgentJobs: 1, loadGuard: { enabled: true, retrySeconds: 60 } }),
+  disk: z
+    .object({
+      minFreeGb: z.number().nonnegative().default(10),
+      comment: z.string().optional(),
+    })
+    .default({ minFreeGb: 10 }),
   auto_failover: z
     .object({
       enabled: z.boolean().default(true),
@@ -659,6 +666,23 @@ export function resolveHostLoadGuard(config: FactoryConfig, env: NodeJS.ProcessE
     maxLoad: g?.maxLoad,
     retryMs: (g?.retrySeconds ?? d.retrySeconds) * 1000,
   };
+}
+
+/** Host disk guard policy (#2284). FACTORY_MIN_FREE_GB beats disk.minFreeGb; 0 disables. */
+export interface DiskGuardPolicy {
+  enabled: boolean;
+  minFreeGb: number;
+  retryMs: number;
+}
+
+export function resolveDiskGuard(config: FactoryConfig, env: NodeJS.ProcessEnv = process.env): DiskGuardPolicy {
+  const raw = env.FACTORY_MIN_FREE_GB?.trim();
+  const fromEnv = raw ? Number(raw) : Number.NaN;
+  const minFreeGb =
+    Number.isFinite(fromEnv) && fromEnv >= 0
+      ? fromEnv
+      : (config.disk?.minFreeGb ?? defaultFactoryConfig.disk.minFreeGb);
+  return { enabled: minFreeGb > 0, minFreeGb, retryMs: DEFAULT_USAGE_POLL_MS };
 }
 
 /** Local-only mode: restrict routing to local worker models and force the

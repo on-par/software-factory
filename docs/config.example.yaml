@@ -320,6 +320,11 @@ host:
   loadGuard:
     enabled: true
     retrySeconds: 60
+# Host disk guard (#2284): lanes hold new claims and BUILD/CHECK phases wait while free space on the
+# worktree root or state root volume is below minFreeGb (GiB), re-checking every 5 minutes. 0 or
+# FACTORY_MIN_FREE_GB=0 turns it off.
+disk:
+  minFreeGb: 10
 # Supervisor circuit breaker for cross-harness build failover. On a quota trip
 # (usage_cap/rate_limit) the Codex provider is skipped for cooldown_minutes: the lane that trips it
 # falls over to fallback_model (when available); every later lane during the cooldown is routed

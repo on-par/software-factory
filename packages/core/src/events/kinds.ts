@@ -72,6 +72,7 @@ export type EventKind =
   | 'decompose_filed'
   | 'decompose_started'
   | 'defect-window-closed'
+  | 'disk_low'
   | 'design_artifact_coerced'
   | 'design_artifact_emitted'
   | 'design_artifact_invalid'
@@ -301,6 +302,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   decompose_filed: { severity: 'info', isPark: false, isTerminal: false },
   decompose_started: { severity: 'info', isPark: false, isTerminal: false },
   'defect-window-closed': { severity: 'info', isPark: false, isTerminal: false },
+  disk_low: { severity: 'warn', isPark: false, isTerminal: false },
   design_artifact_coerced: { severity: 'warn', isPark: false, isTerminal: false },
   design_artifact_emitted: { severity: 'info', isPark: false, isTerminal: false },
   design_artifact_invalid: { severity: 'warn', isPark: false, isTerminal: false },
