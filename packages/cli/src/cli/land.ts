@@ -60,7 +60,7 @@ async function releaseLandedClaim(
   log: (type: EventKind, msg: string) => void,
 ): Promise<void> {
   if (!paths.laneFiles) return;
-  await releaseLaneClaim(new LaneFileGuard(paths.laneFiles), ghRepo, issue, log);
+  await releaseLaneClaim(new LaneFileGuard(paths.laneFiles), ghRepo, workKeyFromIssue(issue), log);
 }
 
 export async function landIssue(
@@ -107,7 +107,7 @@ export async function landIssue(
     };
     [, lookup] = await Promise.all([gitOps.gitFetch(repoRoot), findByGuess()]);
     if (lookup.status === 'none' && !opts.branch) {
-      lookup = await lookupOpenPrByIssue({ octokit, repo: ghRepo, issue: issueNum });
+      lookup = await lookupOpenPrByIssue({ octokit, repo: ghRepo, issue: workKeyFromIssue(issueNum) });
     }
     if (lookup.status === 'error') throw new Error(lookup.detail);
   } catch (err) {
@@ -428,7 +428,8 @@ export async function waitForMerge(
   while (!pathExists(paths.stop)) {
     // The merge wait logs nothing on its happy path, so each poll bumps the per-issue heartbeat:
     // status/TUI staleness rules (ADR-0086, ADR-0093) otherwise read a live wait as a dead run.
-    if (paths.runs) touchRunActivity(phaseSnapshotFile(paths.runs, issue), new Date().toISOString()).catch(() => {});
+    const key = workKeyFromIssue(issue);
+    if (paths.runs) touchRunActivity(phaseSnapshotFile(paths.runs, key), new Date().toISOString()).catch(() => {});
     let merged = false;
     try {
       merged = await checkMerged(octokit, owner, repoName, branch);

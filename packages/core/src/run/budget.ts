@@ -1,5 +1,6 @@
 // packages/core/src/run/budget.ts — per-issue budget enforcement (#3316)
 
+import { type WorkKey, issueNumberOf } from '../work/work-key.js';
 import type { ProcessGroupTracker } from '../environment/process-groups.js';
 import type { EventKind } from '../events/kinds.js';
 import type { BudgetGuard } from '../router/budget-guard.js';
@@ -44,7 +45,7 @@ export function enforceIssueBudget(input: {
   phase: string;
   spend: number;
   cap: number | undefined;
-  issue: number;
+  issue: WorkKey;
   worktreePath: string;
   keepsFile?: string;
   log: (type: EventKind, msg: string) => void;
@@ -61,7 +62,7 @@ export function enforceIssueBudget(input: {
   if (keepsFile) {
     try {
       upsertWorktreeKeep(keepsFile, {
-        issue,
+        issue: issueNumberOf(issue),
         path: worktreePath,
         reason: BUDGET_KEEP_REASON,
         since: (now?.() ?? new Date()).toISOString(),

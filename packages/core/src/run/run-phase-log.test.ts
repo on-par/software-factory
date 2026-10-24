@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { mkdir, readFile, readdir, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -24,7 +25,7 @@ describe('run phase logs', () => {
     const logsDir = await root();
     const path = await writeRunPhaseLog({
       logsDir,
-      issue: 17,
+      issue: workKeyFromIssue(17),
       runId: 'abc',
       phase: 'build',
       result: result('\u001b[32mghp_123456789012345678901234567890\u001b[0m'),
@@ -38,7 +39,12 @@ describe('run phase logs', () => {
   });
 
   it('appends PLAN results and assigns unique rework files', async () => {
-    const logger = createRunPhaseLogger({ logsDir: await root(), issue: 17, runId: 'abc', log: vi.fn() });
+    const logger = createRunPhaseLogger({
+      logsDir: await root(),
+      issue: workKeyFromIssue(17),
+      runId: 'abc',
+      log: vi.fn(),
+    });
     await logger.plan(result('first'));
     await logger.plan(result('second'));
     await logger.rework(result('check repair'));
@@ -52,7 +58,7 @@ describe('run phase logs', () => {
 
   it('caps total UTF-8 bytes and increases a single truncation marker on append', async () => {
     const logsDir = await root();
-    const opts = { logsDir, issue: 17, runId: 'large', phase: 'plan' as const, log: vi.fn() };
+    const opts = { logsDir, issue: workKeyFromIssue(17), runId: 'large', phase: 'plan' as const, log: vi.fn() };
     await writeRunPhaseLog({ ...opts, result: result('🙂'.repeat(300_000)) });
     await writeRunPhaseLog({ ...opts, result: { ...result('later'), attempts: [] } });
     const text = await readFile(join(logsDir, 'issue-17/run-large/plan.log'), 'utf8');
@@ -72,7 +78,14 @@ describe('run phase logs', () => {
       const time = new Date(1_700_000_000_000 + i * 1000);
       await utimes(directory, time, time);
     }
-    await writeRunPhaseLog({ logsDir, issue: 17, runId: '5', phase: 'build', result: result('new'), log: vi.fn() });
+    await writeRunPhaseLog({
+      logsDir,
+      issue: workKeyFromIssue(17),
+      runId: '5',
+      phase: 'build',
+      result: result('new'),
+      log: vi.fn(),
+    });
     const names = await readdir(issueDir);
     expect(names.filter((name) => name.startsWith('run-')).sort()).toEqual([
       'run-1',
@@ -88,11 +101,11 @@ describe('run phase logs', () => {
     const logsDir = await root();
     await writeFile(join(logsDir, 'issue-17'), 'file blocks directory creation');
     const warn = vi.fn();
-    const logger = createRunPhaseLogger({ logsDir, issue: 17, runId: 'bad', log: warn });
+    const logger = createRunPhaseLogger({ logsDir, issue: workKeyFromIssue(17), runId: 'bad', log: warn });
     await logger.build(result('output'));
     expect(logger.parkMessage('parked')).toBe('parked');
     expect(warn).toHaveBeenCalledWith('warn', expect.stringContaining('write failed'));
-    const disabled = createRunPhaseLogger({ issue: 17, runId: 'none', log: warn });
+    const disabled = createRunPhaseLogger({ issue: workKeyFromIssue(17), runId: 'none', log: warn });
     await disabled.plan(result(''));
     expect(disabled.parkMessage('parked')).toBe('parked');
   });
@@ -101,7 +114,7 @@ describe('run phase logs', () => {
     const logsDir = await root();
     await writeRunPhaseLog({
       logsDir,
-      issue: 17,
+      issue: workKeyFromIssue(17),
       runId: 'empty',
       phase: 'build',
       result: { ...result(''), attempts: [] },

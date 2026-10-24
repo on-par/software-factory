@@ -1,4 +1,5 @@
 // packages/core/src/queue/review-rework-trigger.ts — a trusted CHANGES_REQUESTED review on a factory PR queues its issue for review rework, once per review id (#3563, ADR-0128 trust).
+import { workKeyFromIssue } from '../work/work-key.js';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -141,7 +142,7 @@ async function pollPull(
   const now = (opts.now ?? (() => new Date()))().toISOString();
 
   const cap = opts.maxRuns ?? defaultFactoryConfig.queue.max_review_rework_runs;
-  const count = countReviewReworkRuns(store, issue);
+  const count = countReviewReworkRuns(store, workKeyFromIssue(issue));
   if (count >= cap) {
     // Record first so a park that fails part-way is not commented on again by the next poll.
     for (const review of trusted) {
@@ -159,7 +160,7 @@ async function pollPull(
       queue,
       owner,
       repo,
-      issue,
+      issue: workKeyFromIssue(issue),
       pr: pull.number,
       lane,
       branch: pull.headRef,

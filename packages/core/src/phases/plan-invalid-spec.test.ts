@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { existsSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 
@@ -100,7 +101,7 @@ describe('PLAN with no valid design artifact (#3270)', () => {
       worktree,
       readHead: async () => 'head-sha',
       input: {
-        issue: 4243,
+        issue: workKeyFromIssue(4243),
         reason: 'escalate',
         message: `plan escalated: ${result.escalate}`,
         runId: 'run-4243',

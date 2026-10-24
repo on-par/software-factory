@@ -5,6 +5,7 @@
 // reliably inside the repo it describes. The resolver and the remote parser are the
 // same ones FactoryEvent.repo uses (#971/#984) — one slug source for both envelopes.
 
+import { type WorkKey, issueNumberOf, workKeyFromIssue } from '../work/work-key.js';
 import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
@@ -14,7 +15,7 @@ import type { BuildRoute, RunOutcome } from './outcome.js';
 
 /** Path of one issue's persisted run state inside `runsDir`
  *  (`getFactoryPaths(repoRoot).runs`). */
-export function runStateFile(runsDir: string, issue: number): string {
+export function runStateFile(runsDir: string, issue: WorkKey): string {
   return resolve(runsDir, `issue-${issue}.json`);
 }
 
@@ -71,11 +72,11 @@ export interface ListIssueRunsResult {
 
 /** The one validity rule for a persisted run record (#3448): an object whose `issue` is an
  *  integer equal to the number in its file name, with string `startedAt` and `updatedAt`. */
-export function isValidIssueRunState(state: IssueRunState | null, issue: number): state is IssueRunState {
+export function isValidIssueRunState(state: IssueRunState | null, issue: WorkKey): state is IssueRunState {
   return (
     state !== null &&
     Number.isInteger(state.issue) &&
-    state.issue === issue &&
+    state.issue === issueNumberOf(issue) &&
     typeof state.startedAt === 'string' &&
     typeof state.updatedAt === 'string'
   );
@@ -107,7 +108,7 @@ export async function listIssueRuns(runsDir: string, options: ListIssueRunsOptio
   const skipped: string[] = [];
   for (const { name, issue } of files) {
     const state = await readRun(join(runsDir, name));
-    if (!isValidIssueRunState(state, issue)) {
+    if (!isValidIssueRunState(state, workKeyFromIssue(issue))) {
       skipped.push(name);
       continue;
     }
@@ -134,7 +135,7 @@ export interface RunStateUpdate {
 
 /** Fields the CLI fixes once per run. */
 export interface IssueRunStateBase {
-  issue: number;
+  issue: WorkKey;
   lane: string;
   branch: string;
   worktree: string;
@@ -179,6 +180,7 @@ export function nextIssueRunState(
   const prNumber = update.prNumber ?? prev?.prNumber;
   return {
     ...base,
+    issue: issueNumberOf(base.issue),
     branch: update.branch ?? prev?.branch ?? base.branch,
     status: update.status,
     // IssueRunState.route is required, so before PLAN picks a route the packaged default

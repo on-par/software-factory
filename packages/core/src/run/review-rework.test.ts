@@ -1,4 +1,5 @@
 // packages/core/src/run/review-rework.test.ts — a queued review rework runs BUILD rework on the PR branch with only that review's comments, then CHECK (#3564)
+import { workKeyFromIssue } from '../work/work-key.js';
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
@@ -51,7 +52,7 @@ const WORK: WorkRequest = {
 const BRANCH = 'factory/42-x';
 
 const request: RunRequest = {
-  issue: 42,
+  issue: workKeyFromIssue(42),
   repo: 'o/r',
   branch: BRANCH,
   specPath: '/tmp/wt/spec.md',

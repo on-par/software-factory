@@ -1,3 +1,4 @@
+import { type WorkKey, issueNumberOf } from '../work/work-key.js';
 import type { Octokit } from '@octokit/rest';
 import { factoryBranchIssue } from '../utils/index.js';
 import { lookupOpenPrs } from './pr-lookup.js';
@@ -18,16 +19,17 @@ export type AdoptablePrLookup =
 export async function findAdoptablePr(opts: {
   octokit: Pick<Octokit, 'rest'>;
   repo: string;
-  issue: number;
+  issue: WorkKey;
   branchPrefix?: string;
   maxPages?: number;
 }): Promise<AdoptablePrLookup> {
   const { octokit, repo, issue, branchPrefix, maxPages } = opts;
+  const issueNumber = issueNumberOf(issue);
   const lookup = await lookupOpenPrs({
     octokit,
     repo,
     maxPages,
-    matches: (pr) => factoryBranchIssue(pr.head?.ref ?? '', branchPrefix) === issue,
+    matches: (pr) => factoryBranchIssue(pr.head?.ref ?? '', branchPrefix) === issueNumber,
   });
   switch (lookup.status) {
     case 'none':

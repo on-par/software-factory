@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '@on-par/factory-core';
 import { execSync } from 'node:child_process';
 import {
   chmodSync,
@@ -63,7 +64,7 @@ async function seedHistory(state: string) {
   const h = new ReworkHistory(join(state, 'rework-history.json'));
   await h.record(192, 'sig-192', ['tests']);
   await h.record(7, 'sig-7', ['tests']);
-  await new LaneFileGuard(join(state, 'lane-files.json')).register('o/r', 192, ['a.ts']);
+  await new LaneFileGuard(join(state, 'lane-files.json')).register('o/r', workKeyFromIssue(192), ['a.ts']);
 }
 
 beforeEach(() => {
@@ -100,7 +101,9 @@ describe('runReset', () => {
     const history = new ReworkHistory(join(state, 'rework-history.json'));
     expect(await history.priorSignature(192)).toBeUndefined();
     expect(await history.priorSignature(7)).toBe('sig-7');
-    expect(await new LaneFileGuard(join(state, 'lane-files.json')).findCollision('o/r', 1, ['a.ts'])).toBeUndefined();
+    expect(
+      await new LaneFileGuard(join(state, 'lane-files.json')).findCollision('o/r', workKeyFromIssue(1), ['a.ts']),
+    ).toBeUndefined();
   });
 
   it('prints one summary line per issue', async () => {

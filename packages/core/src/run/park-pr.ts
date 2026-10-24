@@ -1,5 +1,6 @@
 // src/run/park-pr.ts — settle a parked run's PR: close it with the park reason, or mark it ready
 
+import type { WorkKey } from '../work/work-key.js';
 import type { Octokit } from '@octokit/rest';
 
 import type { EventKind } from '../events/kinds.js';
@@ -41,7 +42,7 @@ export function parkedPrAction(reason: ParkReason, greenAndChecked: boolean): 'c
   }
 }
 
-export function renderParkedPrComment(input: { issue: number; reason: ParkReason; branch: string }): string {
+export function renderParkedPrComment(input: { issue: WorkKey; reason: ParkReason; branch: string }): string {
   const { issue, reason, branch } = input;
   return [
     `The factory closed this PR because the run for #${issue} parked with reason \`${reason}\`.`,
@@ -55,7 +56,7 @@ export function renderParkedPrComment(input: { issue: number; reason: ParkReason
 export async function settleParkedPullRequest(deps: {
   octokit: Octokit;
   repo: string;
-  issue: number;
+  issue: WorkKey;
   branch: string;
   reason: ParkReason;
   prNumber?: number;

@@ -5,6 +5,7 @@ import type { PlanResult } from '../phases/plan.js';
 import type { BuildRoute, RunOutcome } from './outcome.js';
 import type { RunPorts, RunRequest } from './run-issue.js';
 import { createStackSliceBranch } from './stack-slice-branch.js';
+import { issueNumberOf } from '../work/work-key.js';
 
 const MAIN_REF = 'origin/main';
 
@@ -51,7 +52,7 @@ export async function enterStackSlice(args: {
       ),
     };
   }
-  const branch = stackSliceBranch(request.issue, index);
+  const branch = stackSliceBranch(issueNumberOf(request.issue), index);
   try {
     await (ports.createSliceBranch ?? createStackSliceBranch)({
       worktree: ports.workspace.path,
@@ -63,7 +64,12 @@ export async function enterStackSlice(args: {
   }
   const recorded = withSliceBranchCreated(slicePlan, index, branch);
   try {
-    await upsertSlicePlanComment({ octokit: ports.octokit, repo: request.repo, issue: request.issue, plan: recorded });
+    await upsertSlicePlanComment({
+      octokit: ports.octokit,
+      repo: request.repo,
+      issue: issueNumberOf(request.issue),
+      plan: recorded,
+    });
   } catch (err) {
     return { outcome: await park(`could not record ${branch} in the slice plan comment: ${errorMessage(err)}`) };
   }

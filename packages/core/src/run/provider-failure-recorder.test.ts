@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -17,7 +18,13 @@ async function setup() {
   const breaker = new ProviderBreaker(join(dir, 'breaker.json'), () => 1, { fingerprint: () => 'fp' });
   const logs: Array<{ type: string; extra?: Parameters<RunLogFn>[2] }> = [];
   const log: RunLogFn = (type, _msg, extra) => logs.push({ type, extra });
-  const record = providerFailureRecorder({ breaker, log, issue: 7, defaultCooldownMs: 1000, now: () => 0 })('plan');
+  const record = providerFailureRecorder({
+    breaker,
+    log,
+    issue: workKeyFromIssue(7),
+    defaultCooldownMs: 1000,
+    now: () => 0,
+  })('plan');
   return { breaker, logs, record };
 }
 

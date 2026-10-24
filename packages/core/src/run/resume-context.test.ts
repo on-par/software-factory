@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -189,9 +190,9 @@ describe('check resume store (#2564)', () => {
   });
 
   it('formats the preserved-build sentence', () => {
-    expect(formatPreservedBuildMessage({ issue: 7, branch: 'b', buildMinutes: 40, fixTarget: 'f:1' })).toBe(
-      '40 min of build preserved at b; fix f:1 then run factory resume 7 --from check',
-    );
+    expect(
+      formatPreservedBuildMessage({ issue: workKeyFromIssue(7), branch: 'b', buildMinutes: 40, fixTarget: 'f:1' }),
+    ).toBe('40 min of build preserved at b; fix f:1 then run factory resume 7 --from check');
   });
 
   describe('preservedFixTarget', () => {
@@ -248,7 +249,7 @@ describe('check resume store (#2564)', () => {
       const file = join(dir, 'constitution.md');
       await writeFile(file, '---\nversion: 1\ncheckers:\n  - bogus\n---\n');
       const msg = configParkMessage({
-        issue: 7,
+        issue: workKeyFromIssue(7),
         failure,
         summary: emptySummary,
         constitution: constitutionAt(file, ['bogus']),
@@ -264,7 +265,7 @@ describe('check resume store (#2564)', () => {
       const file = join(dir, 'constitution.md');
       await writeFile(file, '# C\n\ncheckers:\n  - tests\n');
       const msg = configParkMessage({
-        issue: 7,
+        issue: workKeyFromIssue(7),
         failure,
         summary: { ...emptySummary, results: [schemaErrorCheckerOutput('checkers[0]', 'entry 0 is a number')] },
         constitution: constitutionAt(file, ['tests']),
@@ -274,7 +275,7 @@ describe('check resume store (#2564)', () => {
     });
 
     it('falls back to a generic target and fix with no constitution', () => {
-      const msg = configParkMessage({ issue: 7, failure, summary: emptySummary, constitution: null });
+      const msg = configParkMessage({ issue: workKeyFromIssue(7), failure, summary: emptySummary, constitution: null });
       expect(msg).toContain('file: the constitution checkers list');
       expect(msg).toContain('fix: fix the constitution checkers list so every entry is a known checker name');
     });

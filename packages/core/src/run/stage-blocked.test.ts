@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
@@ -5,7 +6,13 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { createTempDirs } from '../harness/temp-dir.js';
 import type { EventKind } from '../events/kinds.js';
 import { ProviderBreaker } from '../router/breaker.js';
-import { allProvidersDown, allProvidersDownMessage, providerCapGate, stageBlocked } from './stage-blocked.js';
+import {
+  allProvidersDown,
+  allProvidersDownMessage,
+  allProvidersDownPayload,
+  providerCapGate,
+  stageBlocked,
+} from './stage-blocked.js';
 
 const NOW = Date.parse('2026-10-19T05:00:00.000Z');
 const HOUR = 60 * 60_000;
@@ -168,7 +175,7 @@ describe('allProvidersDown', () => {
 
 describe('providerCapGate', () => {
   const request = {
-    issue: 7,
+    issue: workKeyFromIssue(7),
     branch: 'issue-7',
     codexDisabled: false,
     failover: { enabled: true },
@@ -217,7 +224,8 @@ describe('providerCapGate', () => {
         { provider: 'openai', reason: 'metered', until: null },
       ],
     });
-    expect(allProvidersDownMessage(verdict!.down!, 7)).toContain('metered and are never used');
+    expect(allProvidersDownMessage(verdict!.down!, workKeyFromIssue(7))).toContain('metered and are never used');
+    expect(allProvidersDownPayload(verdict!.down!, workKeyFromIssue(9)).issue).toBe(9);
     expect(
       await gate.afterFailure(Object.assign(capped('usage_cap'), { detail: 'other' }), 'plan', undefined),
     ).toBeUndefined();
@@ -231,7 +239,7 @@ describe('providerCapGate', () => {
     const verdict = await gate.enterPlan(undefined, () => {});
     expect(verdict.released).toBeUndefined();
     expect(verdict.down).toMatchObject({ stage: 'plan', detail: 'untimed_breakers' });
-    expect(allProvidersDownMessage(verdict.down!, 7)).toContain('until credentials change');
+    expect(allProvidersDownMessage(verdict.down!, workKeyFromIssue(7))).toContain('until credentials change');
     expect((await gate.afterFailure(capped('unavailable'), 'plan', undefined))?.down?.detail).toBe('untimed_breakers');
     await breaker.open('anthropic', 'usage_cap', HOUR);
     expect((await gate.enterPlan(undefined, () => {})).released).toMatchObject({ reason: 'provider-cap' });

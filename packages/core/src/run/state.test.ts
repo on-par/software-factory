@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -52,7 +53,7 @@ describe('run/state', () => {
 
   describe('runStateFile', () => {
     it('names the file issue-<n>.json inside runsDir', () => {
-      expect(runStateFile('/tmp/runs', 972)).toBe('/tmp/runs/issue-972.json');
+      expect(runStateFile('/tmp/runs', workKeyFromIssue(972))).toBe('/tmp/runs/issue-972.json');
     });
   });
 
@@ -61,7 +62,7 @@ describe('run/state', () => {
       const worktree = mkdtempSync(join(tmpdir(), 'run-state-worktree-'));
       initGitRepo(worktree);
       const runsDir = join(mkdtempSync(join(tmpdir(), 'run-state-runs-')), 'nested', 'runs');
-      const file = runStateFile(runsDir, 972);
+      const file = runStateFile(runsDir, workKeyFromIssue(972));
 
       const returned = await writeIssueRunState(file, fixtureState(worktree));
 
@@ -75,7 +76,7 @@ describe('run/state', () => {
       const worktree = mkdtempSync(join(tmpdir(), 'run-state-worktree-'));
       initGitRepo(worktree);
       const runsDir = mkdtempSync(join(tmpdir(), 'run-state-runs-'));
-      const file = runStateFile(runsDir, 972);
+      const file = runStateFile(runsDir, workKeyFromIssue(972));
 
       const returned = await writeIssueRunState(file, fixtureState(worktree, { repo: 'acme/widgets' }));
 
@@ -87,7 +88,7 @@ describe('run/state', () => {
     it('omits the repo key entirely when the slug cannot be resolved, without throwing', async () => {
       const worktree = mkdtempSync(join(tmpdir(), 'run-state-worktree-'));
       const runsDir = mkdtempSync(join(tmpdir(), 'run-state-runs-'));
-      const file = runStateFile(runsDir, 972);
+      const file = runStateFile(runsDir, workKeyFromIssue(972));
 
       const returned = await writeIssueRunState(file, fixtureState(worktree));
 
@@ -102,7 +103,7 @@ describe('run/state', () => {
       const worktree = mkdtempSync(join(tmpdir(), 'run-state-worktree-'));
       initGitRepo(worktree);
       const runsDir = mkdtempSync(join(tmpdir(), 'run-state-runs-'));
-      const file = runStateFile(runsDir, 972);
+      const file = runStateFile(runsDir, workKeyFromIssue(972));
       await writeIssueRunState(file, fixtureState(worktree));
 
       const read = await readIssueRunState(file);
@@ -115,7 +116,7 @@ describe('run/state', () => {
 
     it('reads a legacy record with no repo field back with repo undefined', async () => {
       const runsDir = mkdtempSync(join(tmpdir(), 'run-state-runs-'));
-      const file = runStateFile(runsDir, 972);
+      const file = runStateFile(runsDir, workKeyFromIssue(972));
       const legacy = fixtureState('/nonexistent');
       writeFileSync(file, JSON.stringify(legacy));
 
@@ -173,7 +174,7 @@ describe('run/state', () => {
 
   describe('nextIssueRunState', () => {
     const base: IssueRunStateBase = {
-      issue: 42,
+      issue: workKeyFromIssue(42),
       lane: 'bugfix',
       branch: 'factory/42-fix',
       worktree: '/w',

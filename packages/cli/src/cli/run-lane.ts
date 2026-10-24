@@ -4,7 +4,7 @@ import { existsSync, statSync } from 'node:fs';
 
 import { parkReasonFor } from '@on-par/factory-core';
 import type { EventKind, getFactoryPaths, ParkPayload, RunOutcome } from '@on-par/factory-core';
-import { formatLoadHold, logEvent, nextRecheckAt, PARKED_LABEL, parkPayload } from '@on-par/factory-core/internal';
+import { formatLoadHold, logEvent, nextRecheckAt, PARKED_LABEL } from '@on-par/factory-core/internal';
 import type {
   AwaitingCiRecord,
   LoadGuardDecision,
@@ -15,7 +15,7 @@ import type {
 import type { AwaitingCiParkReason } from './awaiting-ci-recheck.js';
 import { formatBaseHoldKept, type BaseHoldDecision } from './base-hold.js';
 import { holdForDisk } from './run-lane-disk-hold.js';
-import { laneParkCommenter } from './lane-park-comment.js';
+import { laneParkCommenter, laneParkPayload } from './lane-park-comment.js';
 import {
   pauseLaneForAllProvidersDown,
   pauseLaneForBrokenBase,
@@ -155,7 +155,7 @@ export async function runLane(
     await postParkComment(rec.issue, reason, message, rec.branch);
     await reapWorktree(rec.issue).catch(() => {});
     const msg = `issue #${rec.issue} parked (${reason}); lane '${lane}' continuing`;
-    if (!(await parkAndSettle(rec.issue, msg, parkPayload(reason, rec.issue, lane, [])))) {
+    if (!(await parkAndSettle(rec.issue, msg, laneParkPayload(reason, rec.issue, lane, [])))) {
       throw new Error(`could not park issue #${rec.issue}`);
     }
     parked++;
@@ -232,7 +232,7 @@ export async function runLane(
       // A preflight-parked issue may still have a stale worktree from a prior run; the reap
       // is fail-closed and must never change lane flow.
       await reapWorktree(issue).catch(() => {});
-      if (await parkAndSettle(issue, msg, parkPayload('escalate', issue, lane, queuedBehind(i)))) parked++;
+      if (await parkAndSettle(issue, msg, laneParkPayload('escalate', issue, lane, queuedBehind(i)))) parked++;
       streak = null;
     };
     const runRestack = async (merged: {
@@ -476,7 +476,7 @@ export async function runLane(
       // checkout behind (#1007); fail-closed and never allowed to change lane flow.
       if (landing !== undefined) await closeParkedPr(issue, landing, reason).catch(() => {});
       await reapWorktree(issue).catch(() => {});
-      if (await parkAndSettle(issue, msg, parkPayload(reason, issue, lane, queuedBehind(i)))) parked++;
+      if (await parkAndSettle(issue, msg, laneParkPayload(reason, issue, lane, queuedBehind(i)))) parked++;
       const down = sliceOutcome.value?.state === 'parked' ? sliceOutcome.value.providersDown : undefined;
       if (reason === 'all_providers_down' && down) {
         pauseLaneForAllProvidersDown(pauseCtx, issue, down);

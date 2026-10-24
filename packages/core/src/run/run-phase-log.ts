@@ -1,3 +1,4 @@
+import type { WorkKey } from '../work/work-key.js';
 import { constants } from 'node:fs';
 import { readdir, mkdir, open, stat, rm } from 'node:fs/promises';
 import { stripVTControlCharacters } from 'node:util';
@@ -11,7 +12,7 @@ const MARKER = /\n\[truncated (\d+) bytes\]$/;
 
 export interface RunPhaseLogOptions {
   logsDir?: string;
-  issue: number;
+  issue: WorkKey;
   runId: string;
   phase: 'plan' | 'build' | `build-r${number}`;
   result: RouterResult;
@@ -128,7 +129,7 @@ function appendCapped(prior: string, section: string): string {
 
 export function createRunPhaseLogger(opts: {
   logsDir?: string;
-  issue: number;
+  issue: WorkKey;
   runId: string;
   log: (type: 'warn', message: string) => void;
 }): RunPhaseLogger {

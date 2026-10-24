@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -143,7 +144,7 @@ async function runBuildRoute(pin: string, flags: { localOnly?: boolean; codexDis
   const specPath = join(dir, 'spec.md');
   writeFileSync(specPath, '---\nroute: claude\n---\n# Spec\n');
   const request: RunRequest = {
-    issue: 1,
+    issue: workKeyFromIssue(1),
     repo: 'o/r',
     branch: 'issue-1-fix-the-thing',
     specPath,

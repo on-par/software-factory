@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import type { Octokit } from '@octokit/rest';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -44,7 +45,7 @@ const parked = (...extra: string[]) => [PARKED_LABEL, laneLabel('build'), ...ext
 
 function comment(issue: number, over: { reason?: 'blocked' | 'fail'; autoUnparks?: number } = {}) {
   return renderParkComment({
-    issue,
+    issue: workKeyFromIssue(issue),
     reason: over.reason ?? 'blocked',
     message: 'blocked',
     runId: 'r1',

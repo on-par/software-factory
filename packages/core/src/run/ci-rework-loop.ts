@@ -33,6 +33,7 @@ import {
 } from './ci-suppression-guard.js';
 import { reworkRouteFor, type BuildRoute, type ParkReason, type RunOutcome } from './outcome.js';
 import type { RunPorts, RunRequest } from './run-issue.js';
+import { issueNumberOf } from '../work/work-key.js';
 import type { RunPolicy } from './policy.js';
 import { shipParkReason } from './ship-park.js';
 
@@ -138,7 +139,7 @@ export async function shipWithCiRework(
   const { builtRoute, builtModel, planSlice } = inputs;
   const log = ports.events();
   const shipOpts = {
-    issue: request.issue,
+    issue: issueNumberOf(request.issue),
     repo: request.repo,
     worktree: ports.workspace.path,
     branch: request.branch,
@@ -263,7 +264,7 @@ export async function shipWithCiRework(
       return suppressionPark([guardError(`could not read the worktree HEAD: ${errorMessage(err)}`)]);
     }
     const worked = await rework({
-      issue: request.issue,
+      issue: issueNumberOf(request.issue),
       worktree: ports.workspace.path,
       specPath: request.specPath,
       summary:

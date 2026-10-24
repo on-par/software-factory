@@ -1,5 +1,6 @@
 // src/run/design-checkpoint.ts — opt-in post-PLAN design checkpoint (#3621)
 
+import { type WorkKey, issueNumberOf } from '../work/work-key.js';
 import type { Octokit } from '@octokit/rest';
 
 import type { RunLogFn } from './attribution.js';
@@ -18,11 +19,11 @@ function errorMessage(err: unknown): string {
 export async function readNeedsDesignLabel(
   octokit: Octokit,
   repo: string,
-  issue: number,
+  issue: WorkKey,
 ): Promise<{ present: boolean; error?: string }> {
   try {
     const [owner, name] = repo.split('/');
-    const { data } = await octokit.rest.issues.get({ owner, repo: name, issue_number: issue });
+    const { data } = await octokit.rest.issues.get({ owner, repo: name, issue_number: issueNumberOf(issue) });
     const present = data.labels.some(
       (label) => (typeof label === 'string' ? label : (label.name ?? '')).trim().toLowerCase() === NEEDS_DESIGN_LABEL,
     );
@@ -33,7 +34,7 @@ export async function readNeedsDesignLabel(
 }
 
 /** The park message: why the run paused, where the plan is, and how to approve. */
-export function designCheckpointMessage(input: { issue: number; specPath: string; branch: string }): string {
+export function designCheckpointMessage(input: { issue: WorkKey; specPath: string; branch: string }): string {
   return (
     `design checkpoint: issue #${input.issue} is labeled ${NEEDS_DESIGN_LABEL}, so the run paused after PLAN for a human design review. ` +
     `Plan artifact: ${input.specPath} (branch ${input.branch}). ` +

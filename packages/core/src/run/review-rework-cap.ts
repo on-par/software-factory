@@ -1,4 +1,5 @@
 // packages/core/src/run/review-rework-cap.ts — cap review-rework runs per issue and park with one comment naming the cap (#3565)
+import { type WorkKey, issueNumberOf } from '../work/work-key.js';
 import { defaultFactoryConfig } from '@on-par/factory-config';
 
 import type { FactoryConfig } from '../config/index.js';
@@ -11,12 +12,12 @@ export function resolveMaxReviewReworkRuns(config: Pick<FactoryConfig, 'queue'>)
 }
 
 /** A record counts as a run once a lane stamped `startedAt`; the store file persists across runs. */
-export function countReviewReworkRuns(store: Pick<ReviewReworkStore, 'list'>, issue: number): number {
-  return store.list().filter((r) => r.issue === issue && r.startedAt).length;
+export function countReviewReworkRuns(store: Pick<ReviewReworkStore, 'list'>, issue: WorkKey): number {
+  return store.list().filter((r) => r.issue === issueNumberOf(issue) && r.startedAt).length;
 }
 
 export function reviewReworkCapMessage(input: {
-  issue: number;
+  issue: WorkKey;
   pr: number;
   cap: number;
   count: number;
@@ -30,7 +31,7 @@ export async function parkAtReviewReworkCap(deps: {
   queue: QueueGitHubClient;
   owner: string;
   repo: string;
-  issue: number;
+  issue: WorkKey;
   pr: number;
   lane: string;
   branch: string;
@@ -42,7 +43,7 @@ export async function parkAtReviewReworkCap(deps: {
   const { queue, owner, repo, issue } = deps;
   const parked = queueLabelSpecs(deps.lane, '-').find((s) => s.name === PARKED_LABEL);
   if (parked) await queue.ensureLabel({ owner, repo, ...parked });
-  await queue.addLabels({ owner, repo, issue_number: issue, labels: [PARKED_LABEL] });
+  await queue.addLabels({ owner, repo, issue_number: issueNumberOf(issue), labels: [PARKED_LABEL] });
   const input = {
     issue,
     reason: 'escalate' as const,
@@ -58,5 +59,5 @@ export async function parkAtReviewReworkCap(deps: {
     }
     return;
   }
-  await queue.createIssueComment({ owner, repo, issue_number: issue, body: renderParkComment(input) });
+  await queue.createIssueComment({ owner, repo, issue_number: issueNumberOf(issue), body: renderParkComment(input) });
 }

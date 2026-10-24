@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -81,8 +82,8 @@ describe('LaneFileGuard', () => {
     const file = await tmpFile();
     const guard = new LaneFileGuard(file);
 
-    await guard.register('acme/repo', 100, ['src/shared.ts']);
-    const collision = await guard.findCollision('acme/repo', 200, ['src/shared.ts', 'src/other.ts']);
+    await guard.register('acme/repo', workKeyFromIssue(100), ['src/shared.ts']);
+    const collision = await guard.findCollision('acme/repo', workKeyFromIssue(200), ['src/shared.ts', 'src/other.ts']);
 
     expect(collision).toEqual({ issue: 100, file: 'src/shared.ts' });
   });
@@ -91,8 +92,8 @@ describe('LaneFileGuard', () => {
     const file = await tmpFile();
     const guard = new LaneFileGuard(file);
 
-    await guard.register('acme/repo', 100, ['src/shared.ts']);
-    const collision = await guard.findCollision('acme/repo', 200, ['src/unrelated.ts']);
+    await guard.register('acme/repo', workKeyFromIssue(100), ['src/shared.ts']);
+    const collision = await guard.findCollision('acme/repo', workKeyFromIssue(200), ['src/unrelated.ts']);
 
     expect(collision).toBeUndefined();
   });
@@ -101,8 +102,8 @@ describe('LaneFileGuard', () => {
     const file = await tmpFile();
     const guard = new LaneFileGuard(file);
 
-    await guard.register('acme/repo', 100, ['src/shared.ts']);
-    const collision = await guard.findCollision('acme/repo', 100, ['src/shared.ts']);
+    await guard.register('acme/repo', workKeyFromIssue(100), ['src/shared.ts']);
+    const collision = await guard.findCollision('acme/repo', workKeyFromIssue(100), ['src/shared.ts']);
 
     expect(collision).toBeUndefined();
   });
@@ -111,8 +112,8 @@ describe('LaneFileGuard', () => {
     const file = await tmpFile();
     const guard = new LaneFileGuard(file);
 
-    await guard.register('acme/repo-a', 100, ['src/shared.ts']);
-    const collision = await guard.findCollision('acme/repo-b', 200, ['src/shared.ts']);
+    await guard.register('acme/repo-a', workKeyFromIssue(100), ['src/shared.ts']);
+    const collision = await guard.findCollision('acme/repo-b', workKeyFromIssue(200), ['src/shared.ts']);
 
     expect(collision).toBeUndefined();
   });
@@ -121,8 +122,8 @@ describe('LaneFileGuard', () => {
     const file = await tmpFile();
     const guard = new LaneFileGuard(file);
 
-    await guard.register('acme/repo', 100, []);
-    const collision = await guard.findCollision('acme/repo', 200, []);
+    await guard.register('acme/repo', workKeyFromIssue(100), []);
+    const collision = await guard.findCollision('acme/repo', workKeyFromIssue(200), []);
 
     expect(collision).toBeUndefined();
   });
@@ -131,9 +132,9 @@ describe('LaneFileGuard', () => {
     const file = await tmpFile();
     const guard = new LaneFileGuard(file);
 
-    await guard.register('acme/repo', 100, ['src/shared.ts']);
-    await guard.release('acme/repo', 100);
-    const collision = await guard.findCollision('acme/repo', 200, ['src/shared.ts']);
+    await guard.register('acme/repo', workKeyFromIssue(100), ['src/shared.ts']);
+    await guard.release('acme/repo', workKeyFromIssue(100));
+    const collision = await guard.findCollision('acme/repo', workKeyFromIssue(200), ['src/shared.ts']);
 
     expect(collision).toBeUndefined();
   });
@@ -142,39 +143,42 @@ describe('LaneFileGuard', () => {
     const file = await tmpFile();
     const guard = new LaneFileGuard(file);
 
-    await expect(guard.release('acme/repo', 999)).resolves.toBeUndefined();
+    await expect(guard.release('acme/repo', workKeyFromIssue(999))).resolves.toBeUndefined();
   });
 
   it('releaseIssue removes the issue claims across repos and leaves others alone', async () => {
     const guard = new LaneFileGuard(await tmpFile());
-    await guard.register('acme/repo', 100, ['src/a.ts']);
-    await guard.register('other/repo', 100, ['src/b.ts']);
-    await guard.register('acme/repo', 200, ['src/a.ts']);
+    await guard.register('acme/repo', workKeyFromIssue(100), ['src/a.ts']);
+    await guard.register('other/repo', workKeyFromIssue(100), ['src/b.ts']);
+    await guard.register('acme/repo', workKeyFromIssue(200), ['src/a.ts']);
 
-    await expect(guard.releaseIssue(100)).resolves.toBe(true);
+    await expect(guard.releaseIssue(workKeyFromIssue(100))).resolves.toBe(true);
 
-    expect(await guard.findCollision('acme/repo', 300, ['src/b.ts'])).toBeUndefined();
-    expect(await guard.findCollision('acme/repo', 300, ['src/a.ts'])).toEqual({ issue: 200, file: 'src/a.ts' });
+    expect(await guard.findCollision('acme/repo', workKeyFromIssue(300), ['src/b.ts'])).toBeUndefined();
+    expect(await guard.findCollision('acme/repo', workKeyFromIssue(300), ['src/a.ts'])).toEqual({
+      issue: 200,
+      file: 'src/a.ts',
+    });
   });
 
   it('claimsForIssue returns the issue claims across repos without changing the file', async () => {
     const file = await tmpFile();
     const guard = new LaneFileGuard(file);
-    await guard.register('acme/repo', 100, ['src/a.ts']);
-    await guard.register('other/repo', 100, ['src/b.ts']);
-    await guard.register('acme/repo', 200, ['src/a.ts']);
+    await guard.register('acme/repo', workKeyFromIssue(100), ['src/a.ts']);
+    await guard.register('other/repo', workKeyFromIssue(100), ['src/b.ts']);
+    await guard.register('acme/repo', workKeyFromIssue(200), ['src/a.ts']);
     const before = await readFile(file, 'utf-8');
 
-    const claims = await guard.claimsForIssue(100);
+    const claims = await guard.claimsForIssue(workKeyFromIssue(100));
 
     expect(claims.map((c) => c.repo).sort()).toEqual(['acme/repo', 'other/repo']);
-    expect(await guard.claimsForIssue(999)).toEqual([]);
+    expect(await guard.claimsForIssue(workKeyFromIssue(999))).toEqual([]);
     expect(await readFile(file, 'utf-8')).toBe(before);
   });
 
   it('releaseIssue resolves false when the issue has no claim', async () => {
     const guard = new LaneFileGuard(await tmpFile());
-    await expect(guard.releaseIssue(999)).resolves.toBe(false);
+    await expect(guard.releaseIssue(workKeyFromIssue(999))).resolves.toBe(false);
   });
 });
 
@@ -185,7 +189,7 @@ describe('LaneFileGuard stale claims', () => {
   async function setup(issue: Issue | Error, prs: Pr[] = []) {
     const file = await tmpFile();
     const guard = new LaneFileGuard(file);
-    await guard.register('acme/repo', 1, ['a.swift']);
+    await guard.register('acme/repo', workKeyFromIssue(1), ['a.swift']);
     const get = vi.fn(async () => {
       if (issue instanceof Error) throw issue;
       return { data: issue };
@@ -195,7 +199,7 @@ describe('LaneFileGuard stale claims', () => {
     const events: Array<[string, string]> = [];
     const log = (type: string, msg: string) => events.push([type, msg]);
     const check = (now?: () => number) =>
-      guard.findCollision('acme/repo', 2, ['a.swift'], {
+      guard.findCollision('acme/repo', workKeyFromIssue(2), ['a.swift'], {
         isStale: createGithubLaneClaimStalenessProbe({ octokit, branchPrefix: 'factory', now }),
         log,
       });
@@ -205,7 +209,7 @@ describe('LaneFileGuard stale claims', () => {
   it('reaps a claim whose holder issue is closed and emits lane_file_claim_reaped (issue-closed)', async () => {
     const { guard, list, events, check } = await setup({ state: 'closed', labels: [], title: 'X' });
     await expect(check()).resolves.toBeUndefined();
-    expect(await guard.claimsForIssue(1)).toEqual([]);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toEqual([]);
     expect(events).toHaveLength(1);
     expect(events[0][0]).toBe('lane_file_claim_reaped');
     expect(events[0][1]).toContain('#1');
@@ -218,7 +222,7 @@ describe('LaneFileGuard stale claims', () => {
       { state: 'closed', merged_at: '2026-01-01T00:00:00Z' },
     ]);
     await expect(check()).resolves.toBeUndefined();
-    expect(await guard.claimsForIssue(1)).toEqual([]);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toEqual([]);
     expect(events[0][1]).toContain('#1');
     expect(events[0][1]).toContain('pr-merged');
     expect(list).toHaveBeenCalledWith(expect.objectContaining({ head: 'acme:factory/1-do-thing', state: 'all' }));
@@ -229,7 +233,7 @@ describe('LaneFileGuard stale claims', () => {
       { state: 'closed', merged_at: null },
     ]);
     await expect(check()).resolves.toBeUndefined();
-    expect(await guard.claimsForIssue(1)).toEqual([]);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toEqual([]);
     expect(events[0][1]).toContain('pr-closed');
   });
 
@@ -239,7 +243,7 @@ describe('LaneFileGuard stale claims', () => {
       [{ state: 'closed', merged_at: null }],
     );
     await expect(check()).resolves.toEqual({ issue: 1, file: 'a.swift' });
-    expect(await guard.claimsForIssue(1)).toHaveLength(1);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toHaveLength(1);
     expect(events).toEqual([]);
   });
 
@@ -250,7 +254,7 @@ describe('LaneFileGuard stale claims', () => {
       [{ state: 'closed', merged_at: null }],
     );
     await expect(check()).resolves.toEqual({ issue: 1, file: 'a.swift' });
-    expect(await guard.claimsForIssue(1)).toHaveLength(1);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toHaveLength(1);
   });
 
   it('keeps a claim when the holder has an open PR', async () => {
@@ -259,14 +263,14 @@ describe('LaneFileGuard stale claims', () => {
       { state: 'closed', merged_at: null },
     ]);
     await expect(check()).resolves.toEqual({ issue: 1, file: 'a.swift' });
-    expect(await guard.claimsForIssue(1)).toHaveLength(1);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toHaveLength(1);
   });
 
   it('keeps a claim when no PR is found and the recorded pid is alive', async () => {
     const { file, guard, check } = await setup({ state: 'open', labels: [], title: 'Do thing' }, []);
     expect(JSON.parse(await readFile(file, 'utf-8')).claims['acme/repo#1'].pid).toBe(process.pid);
     await expect(check()).resolves.toEqual({ issue: 1, file: 'a.swift' });
-    expect(await guard.claimsForIssue(1)).toHaveLength(1);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toHaveLength(1);
   });
 
   it('keeps a claim, file untouched and no event, when the lookup fails', async () => {
@@ -280,40 +284,40 @@ describe('LaneFileGuard stale claims', () => {
   it('reaps a closed claim and still collides with a live one in the same call', async () => {
     const file = await tmpFile();
     const guard = new LaneFileGuard(file);
-    await guard.register('acme/repo', 1, ['a.swift']);
-    await guard.register('acme/repo', 3, ['a.swift']);
+    await guard.register('acme/repo', workKeyFromIssue(1), ['a.swift']);
+    await guard.register('acme/repo', workKeyFromIssue(3), ['a.swift']);
     const isStale = async (c: { issue: number }) => (c.issue === 1 ? ('issue-closed' as const) : undefined);
     const events: string[] = [];
-    const result = await guard.findCollision('acme/repo', 2, ['a.swift'], {
+    const result = await guard.findCollision('acme/repo', workKeyFromIssue(2), ['a.swift'], {
       isStale,
       log: (type) => events.push(type),
     });
     expect(result).toEqual({ issue: 3, file: 'a.swift' });
-    expect(await guard.claimsForIssue(1)).toEqual([]);
-    expect(await guard.claimsForIssue(3)).toHaveLength(1);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toEqual([]);
+    expect(await guard.claimsForIssue(workKeyFromIssue(3))).toHaveLength(1);
     expect(events).toEqual(['lane_file_claim_reaped']);
   });
 
   it('keeps the collision when the probe throws', async () => {
     const guard = new LaneFileGuard(await tmpFile());
-    await guard.register('acme/repo', 1, ['a.swift']);
-    const result = await guard.findCollision('acme/repo', 2, ['a.swift'], {
+    await guard.register('acme/repo', workKeyFromIssue(1), ['a.swift']);
+    const result = await guard.findCollision('acme/repo', workKeyFromIssue(2), ['a.swift'], {
       isStale: async () => {
         throw new Error('boom');
       },
     });
     expect(result).toEqual({ issue: 1, file: 'a.swift' });
-    expect(await guard.claimsForIssue(1)).toHaveLength(1);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toHaveLength(1);
   });
 
   it('does not reap a claim that was re-registered after it was probed', async () => {
     const guard = new LaneFileGuard(await tmpFile());
-    await guard.register('acme/repo', 1, ['a.swift']);
+    await guard.register('acme/repo', workKeyFromIssue(1), ['a.swift']);
     const events: string[] = [];
-    const result = await guard.findCollision('acme/repo', 2, ['a.swift'], {
+    const result = await guard.findCollision('acme/repo', workKeyFromIssue(2), ['a.swift'], {
       isStale: async () => {
         await new Promise((r) => setTimeout(r, 5));
-        await guard.register('acme/repo', 1, ['a.swift']);
+        await guard.register('acme/repo', workKeyFromIssue(1), ['a.swift']);
         return 'issue-closed';
       },
       log: (type) => events.push(type),
@@ -325,9 +329,12 @@ describe('LaneFileGuard stale claims', () => {
   it('without opts never writes the file', async () => {
     const file = await tmpFile();
     const guard = new LaneFileGuard(file);
-    await guard.register('acme/repo', 1, ['a.swift']);
+    await guard.register('acme/repo', workKeyFromIssue(1), ['a.swift']);
     const before = await readFile(file, 'utf-8');
-    await expect(guard.findCollision('acme/repo', 2, ['a.swift'])).resolves.toEqual({ issue: 1, file: 'a.swift' });
+    await expect(guard.findCollision('acme/repo', workKeyFromIssue(2), ['a.swift'])).resolves.toEqual({
+      issue: 1,
+      file: 'a.swift',
+    });
     expect(await readFile(file, 'utf-8')).toBe(before);
   });
 });
@@ -336,7 +343,7 @@ describe('LaneFileGuard.sweepStale', () => {
   async function seed(...issues: number[]) {
     const file = await tmpFile();
     const guard = new LaneFileGuard(file);
-    for (const n of issues) await guard.register('acme/repo', n, [`f${n}.swift`]);
+    for (const n of issues) await guard.register('acme/repo', workKeyFromIssue(n), [`f${n}.swift`]);
     const events: Array<[string, string]> = [];
     const log = (type: string, msg: string) => events.push([type, msg]);
     return { file, guard, events, log };
@@ -357,7 +364,7 @@ describe('LaneFileGuard.sweepStale', () => {
       isStale: createGithubLaneClaimStalenessProbe({ octokit, branchPrefix: 'factory' }),
       log,
     });
-    expect(await guard.claimsForIssue(1)).toEqual([]);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toEqual([]);
     expect(reaped).toHaveLength(1);
     expect(reaped[0]).toMatchObject({ claim: { issue: 1 }, reason: 'pr-merged' });
     expect(events).toHaveLength(1);
@@ -373,7 +380,7 @@ describe('LaneFileGuard.sweepStale', () => {
       isStale: createGithubLaneClaimStalenessProbe({ octokit, branchPrefix: 'factory' }),
       log,
     });
-    expect(await guard.claimsForIssue(1)).toEqual([]);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toEqual([]);
     expect(events[0][1]).toContain('issue-closed');
   });
 
@@ -384,8 +391,8 @@ describe('LaneFileGuard.sweepStale', () => {
       log,
     });
     expect(reaped.map((r) => r.claim.issue)).toEqual([1]);
-    expect(await guard.claimsForIssue(1)).toEqual([]);
-    expect(await guard.claimsForIssue(3)).toHaveLength(1);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toEqual([]);
+    expect(await guard.claimsForIssue(workKeyFromIssue(3))).toHaveLength(1);
     expect(events.some(([, msg]) => msg.includes('#3'))).toBe(false);
   });
 
@@ -419,12 +426,12 @@ describe('LaneFileGuard.sweepStale', () => {
 
   it('scopes to opts.repo: other repos are neither probed nor removed', async () => {
     const { guard } = await seed(1);
-    await guard.register('other/repo', 5, ['z.swift']);
+    await guard.register('other/repo', workKeyFromIssue(5), ['z.swift']);
     const probe = vi.fn(async () => 'issue-closed' as const);
     await guard.sweepStale({ isStale: probe, repo: 'acme/repo' });
     expect(probe).toHaveBeenCalledTimes(1);
-    expect(await guard.claimsForIssue(1)).toEqual([]);
-    expect(await guard.claimsForIssue(5)).toHaveLength(1);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toEqual([]);
+    expect(await guard.claimsForIssue(workKeyFromIssue(5))).toHaveLength(1);
   });
 
   it('keeps a claim that was re-registered after it was probed', async () => {
@@ -432,35 +439,35 @@ describe('LaneFileGuard.sweepStale', () => {
     const reaped = await guard.sweepStale({
       isStale: async () => {
         await new Promise((r) => setTimeout(r, 5));
-        await guard.register('acme/repo', 1, ['f1.swift']);
+        await guard.register('acme/repo', workKeyFromIssue(1), ['f1.swift']);
         return 'issue-closed';
       },
       log,
     });
     expect(reaped).toEqual([]);
     expect(events).toEqual([]);
-    expect(await guard.claimsForIssue(1)).toHaveLength(1);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toHaveLength(1);
   });
 });
 
 describe('releaseLaneClaim', () => {
   it('releaseLaneClaim removes the #1 claim and resolves true without logging', async () => {
     const guard = new LaneFileGuard(await tmpFile());
-    await guard.register('o/r', 1, ['src/a.ts']);
+    await guard.register('o/r', workKeyFromIssue(1), ['src/a.ts']);
     const events: Array<[string, string]> = [];
-    const ok = await releaseLaneClaim(guard, 'o/r', 1, (type, msg) => events.push([type, msg]));
+    const ok = await releaseLaneClaim(guard, 'o/r', workKeyFromIssue(1), (type, msg) => events.push([type, msg]));
     expect(ok).toBe(true);
-    expect(await guard.claimsForIssue(1)).toEqual([]);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toEqual([]);
     expect(events).toEqual([]);
   });
 
   it('releaseLaneClaim logs lane_file_release_failed naming #1, resolves false and keeps the claim when the write fails', async () => {
     const file = await tmpFile();
     const guard = new LaneFileGuard(file);
-    await guard.register('o/r', 1, ['src/a.ts']);
+    await guard.register('o/r', workKeyFromIssue(1), ['src/a.ts']);
     await mkdir(`${file}.tmp`);
     const events: Array<[string, string]> = [];
-    const ok = await releaseLaneClaim(guard, 'o/r', 1, (type, msg) => events.push([type, msg]));
+    const ok = await releaseLaneClaim(guard, 'o/r', workKeyFromIssue(1), (type, msg) => events.push([type, msg]));
     expect(ok).toBe(false);
     const failed = events.filter(([type]) => type === 'lane_file_release_failed');
     expect(failed).toHaveLength(1);
@@ -472,7 +479,7 @@ describe('releaseLaneClaim', () => {
     const file = await tmpFile();
     const guard = new LaneFileGuard(file);
     const events: Array<[string, string]> = [];
-    const ok = await releaseLaneClaim(guard, 'o/r', 7, (type, msg) => events.push([type, msg]));
+    const ok = await releaseLaneClaim(guard, 'o/r', workKeyFromIssue(7), (type, msg) => events.push([type, msg]));
     expect(ok).toBe(true);
     expect(events).toEqual([]);
     await expect(readFile(file, 'utf8')).rejects.toThrow();

@@ -1,9 +1,9 @@
 // packages/cli/src/cli/ship.ts — issue-level ship flow: resolve config, build RunRequest/RunPorts, run runIssue, map the outcome (#2788)
+import { workKeyFromIssue } from '@on-par/factory-core';
 import { resolve } from 'node:path';
 import { styleText } from 'node:util';
 import type {
   EventKind,
-  FailurePhase,
   GithubIssueParams,
   LocalOnlyPolicy,
   RunOutcome,
@@ -21,7 +21,6 @@ import {
   getFactoryPaths,
   GITHUB_ISSUE_SOURCE,
   LaneFileGuard,
-  phaseSnapshotFile,
   resolveAutoFailover,
   resolveCodexDisabled,
   resolveEfficiencyPolicy,
@@ -35,12 +34,9 @@ import {
   ReworkHistory,
   runIssue,
   type SizeGateMode,
-  summarizeEvent,
-  touchLastEvent,
-  touchRunActivity,
-  writePhaseSnapshot,
 } from '@on-par/factory-core';
 import { shipHostBuildSlot } from './host-slot.js';
+import { phaseSnapshotPorts } from './ship-phase-snapshot.js';
 import { claimReworkRequests } from './ship-review-rework.js';
 import type { CheckResumeRecord, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
@@ -272,6 +268,7 @@ async function shipIssueFrom(
   const baseHealthOpts = { checks: resolveBaseHealthChecks(repoConfig), events: paths.events, lane };
   let terminalMessage: string | undefined;
   let laneReworkRounds = 0;
+  const snapshots = phaseSnapshotPorts(paths.runs, issueNum);
   const mkLog = (phase?: string) => (type: EventKind, msg: string, extra?: Parameters<typeof logEvent>[4]) => {
     if (TERMINAL_EVENT_KINDS.has(type)) terminalMessage = msg;
     if (type === 'rework') laneReworkRounds++;
@@ -285,7 +282,7 @@ async function shipIssueFrom(
     }
     logEvent(paths.events, type, issueNum, msg, { ...extra, lane, phase });
     // Best-effort lastEvent summary (#1327): a write failure is swallowed, not logged (re-entrancy).
-    touchLastEvent(phaseSnapshotFile(paths.runs, issueNum), summarizeEvent(type, msg)).catch(() => {});
+    snapshots.touchLastEvent(type, msg).catch(() => {});
   };
   const log = mkLog();
   log('issue-title', issueTitle);
@@ -352,7 +349,7 @@ async function shipIssueFrom(
   const resolveBaseUrl = (appPort: number | undefined) => resolveLaneBaseUrl(paths, proxySettings, worktree, appPort);
 
   // Read before runIssue: the run-state recorder overwrites this file on its first update (#3373).
-  const previousAttempt = await readIssueRunState(runStateFile(paths.runs, issueNum));
+  const previousAttempt = await readIssueRunState(runStateFile(paths.runs, workKeyFromIssue(issueNum)));
   const reworkClaim = claimReworkRequests(paths, issueNum, ctx?.resumeFrom || ctx?.localOnly || noPr, log);
   const request = {
     ...buildRunRequest({
@@ -419,24 +416,16 @@ async function shipIssueFrom(
     reworkHistory,
     laneFileGuard,
     laneClaimStaleness: createGithubLaneClaimStalenessProbe({ octokit, branchPrefix: policy.effective.branchPrefix }),
-    recordPhase: (phase: FailurePhase) => {
-      const now = new Date().toISOString();
-      return writePhaseSnapshot(phaseSnapshotFile(paths.runs, issueNum), {
-        issue: issueNum,
-        phase,
-        updatedAt: now,
-        lastActivityAt: now,
-      });
-    },
+    recordPhase: snapshots.recordPhase,
     recordRunState: runStateRecorder(paths.runs, {
-      issue: issueNum,
+      issue: workKeyFromIssue(issueNum),
       lane: lane ?? '',
       branch,
       worktree,
       specPath,
       startedAt: runStartedAt,
     }),
-    onActivity: () => touchRunActivity(phaseSnapshotFile(paths.runs, issueNum), new Date().toISOString()),
+    onActivity: snapshots.onActivity,
     onDecomposed: (childIssues) => void decomposeQueue({ issueNum, childIssues, paths, planLog: mkLog('plan') }),
     writeLocalRunReport: (info) =>
       maybeWriteLocalRunReport({

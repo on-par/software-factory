@@ -1,12 +1,13 @@
 // src/run/plan-reuse-load.ts — PLAN reuse after an environment release (#2340): load, then always clear, the record.
 
+import type { WorkKey } from '../work/work-key.js';
 import { issueBodyHash, type PlanReuseStore } from './resume-context.js';
 import type { RunLogFn } from './attribution.js';
 
 /** The frozen plan to reuse when the issue body is unchanged since the environment release, else null. */
 export async function loadReusablePlan(
   store: PlanReuseStore | undefined,
-  request: { issue: number; specPath: string; work: { brief: string } },
+  request: { issue: WorkKey; specPath: string; work: { brief: string } },
   log: RunLogFn,
   planLog: RunLogFn,
 ): Promise<Awaited<ReturnType<PlanReuseStore['load']>>> {

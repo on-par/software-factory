@@ -1,5 +1,6 @@
 // packages/cli/src/cli/run-lane-land-park-comment.test.ts — a park raised after runIssue (land error, preflight) upserts the issue park comment (#3534)
 
+import { workKeyFromIssue } from '@on-par/factory-core';
 import {
   PARKED_LABEL,
   pollBlockedParks,
@@ -55,7 +56,7 @@ async function seedComment(reason: 'fail' | 'blocked', fake: ReturnType<typeof f
     repo: 'on-par/software-factory',
     readHead: async () => '228c2401',
     worktree: '/repo',
-    input: { issue: N, reason, message: 'old', runId: 'r0', branch: 'old' },
+    input: { issue: workKeyFromIssue(N), reason, message: 'old', runId: 'r0', branch: 'old' },
   });
   fake.comments[0].id = 42;
   fake.updateComment.mockClear();
@@ -152,7 +153,7 @@ describe('land-time park comment', () => {
       'on-par/software-factory',
       '/repo',
       async () => 'abc123',
-      { issue: N, reason: 'ci-failed', message: 'm', runId: 'r', branch: 'b' },
+      { issue: workKeyFromIssue(N), reason: 'ci-failed', message: 'm', runId: 'r', branch: 'b' },
     );
     expect(out).toBe(`could not post the issue park comment for #${N}: ${detail}`);
   });

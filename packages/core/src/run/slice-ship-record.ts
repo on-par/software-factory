@@ -1,6 +1,7 @@
 // src/run/slice-ship-record.ts — records a shipped ADR-0147 slice in the slice-plan comment and, in stack mode,
 // points the parent slice's PR at it.
 
+import { type WorkKey, issueNumberOf } from '../work/work-key.js';
 import type { Octokit } from '@octokit/rest';
 
 import type { EventKind } from '../events/kinds.js';
@@ -12,7 +13,7 @@ import { type SlicePlan, withSliceState } from '../readiness/slice-plan.js';
 export async function recordShippedSlice(opts: {
   octokit: Octokit;
   repo: string;
-  issue: number;
+  issue: WorkKey;
   branch: string;
   plan: SlicePlan;
   index: number;
@@ -31,7 +32,7 @@ export async function recordShippedSlice(opts: {
     await upsertSlicePlanComment({
       octokit,
       repo,
-      issue,
+      issue: issueNumberOf(issue),
       plan: withSliceState(plan, index, state, ship.prNumber, branch),
     });
   } catch (err) {

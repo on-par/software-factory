@@ -1,6 +1,7 @@
 // Regression for #3232: a rejected credential fails over, holds the breaker until the credentials change, and
 // announces itself with exactly one provider_auth_rejected event.
 
+import { workKeyFromIssue } from '../work/work-key.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -60,7 +61,7 @@ async function setup(anthropicError: string) {
   const router = new ModelRouter(models, routes, false, executor);
   const record = providerFailureRecorder({
     breaker,
-    issue: 3232,
+    issue: workKeyFromIssue(3232),
     defaultCooldownMs: 1000,
     log: (type, msg, extra) => {
       runLog.push({ type, extra });

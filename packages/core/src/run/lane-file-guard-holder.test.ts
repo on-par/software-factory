@@ -1,5 +1,6 @@
 // packages/core/src/run/lane-file-guard-holder.test.ts — a claim left by a crashed run is reaped (#1618)
 
+import { workKeyFromIssue } from '../work/work-key.js';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -38,7 +39,7 @@ describe('LaneFileGuard holder-not-running', () => {
     const events: Array<[string, string]> = [];
     const log = (type: string, msg: string) => events.push([type, msg]);
     const probe = createGithubLaneClaimStalenessProbe({ octokit, branchPrefix: 'factory', isPidAlive });
-    const check = () => guard.findCollision('acme/repo', 2, ['a.swift'], { isStale: probe, log });
+    const check = () => guard.findCollision('acme/repo', workKeyFromIssue(2), ['a.swift'], { isStale: probe, log });
     return { file, guard, events, log, probe, check };
   }
 
@@ -51,7 +52,7 @@ describe('LaneFileGuard holder-not-running', () => {
       { issue: 247, pid: 999999 },
     );
     await expect(check()).resolves.toBeUndefined();
-    expect(await guard.claimsForIssue(247)).toEqual([]);
+    expect(await guard.claimsForIssue(workKeyFromIssue(247))).toEqual([]);
     expect(events).toHaveLength(1);
     expect(events[0][0]).toBe('lane_file_claim_reaped');
     expect(events[0][1]).toContain('#247');
@@ -62,7 +63,7 @@ describe('LaneFileGuard holder-not-running', () => {
     const isPidAlive = vi.fn(() => true);
     const { guard, events, check } = await setup(open, isPidAlive, {});
     await expect(check()).resolves.toBeUndefined();
-    expect(await guard.claimsForIssue(1)).toEqual([]);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toEqual([]);
     expect(events[0][1]).toContain('holder-not-running');
     expect(isPidAlive).not.toHaveBeenCalled();
   });
@@ -73,7 +74,7 @@ describe('LaneFileGuard holder-not-running', () => {
       pid,
     });
     await expect(check()).resolves.toBeUndefined();
-    expect(await guard.claimsForIssue(1)).toEqual([]);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toEqual([]);
     expect(events[0][1]).toContain('holder-not-running');
     expect(isPidAlive).not.toHaveBeenCalled();
   });
@@ -84,7 +85,7 @@ describe('LaneFileGuard holder-not-running', () => {
       pid: 4242,
     });
     await expect(check()).resolves.toEqual({ issue: 1, file: 'a.swift' });
-    expect(await guard.claimsForIssue(1)).toHaveLength(1);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toHaveLength(1);
     expect(isPidAlive).toHaveBeenCalledWith(4242);
     expect(events).toEqual([]);
   });
@@ -97,7 +98,7 @@ describe('LaneFileGuard holder-not-running', () => {
         pid: 4242,
       });
       await expect(check()).resolves.toEqual({ issue: 1, file: 'a.swift' });
-      expect(await guard.claimsForIssue(1)).toHaveLength(1);
+      expect(await guard.claimsForIssue(workKeyFromIssue(1))).toHaveLength(1);
       expect(isPidAlive).not.toHaveBeenCalled();
     }
   });
@@ -110,7 +111,7 @@ describe('LaneFileGuard holder-not-running', () => {
       { pid: 4242 },
     );
     await expect(check()).resolves.toBeUndefined();
-    expect(await guard.claimsForIssue(1)).toEqual([]);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toEqual([]);
     expect(events[0][1]).toContain('holder-not-running');
   });
 
@@ -123,7 +124,7 @@ describe('LaneFileGuard holder-not-running', () => {
       { pid: 4242 },
     );
     await expect(check()).resolves.toEqual({ issue: 1, file: 'a.swift' });
-    expect(await guard.claimsForIssue(1)).toHaveLength(1);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toHaveLength(1);
   });
 
   it('sweepStale reaps a crash-left claim (holder-not-running)', async () => {
@@ -134,7 +135,7 @@ describe('LaneFileGuard holder-not-running', () => {
     const reaped = await guard.sweepStale({ isStale: probe, log });
     expect(reaped).toHaveLength(1);
     expect(reaped[0]).toMatchObject({ claim: { issue: 1 }, reason: 'holder-not-running' });
-    expect(await guard.claimsForIssue(1)).toEqual([]);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toEqual([]);
     expect(events[0][1]).toContain('holder-not-running');
   });
 });

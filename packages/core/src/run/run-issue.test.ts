@@ -20,7 +20,7 @@ import type { SandboxPolicy } from '../sandbox/index.js';
 import type { CheckSummary, Constitution, DesignArtifact } from '../types/index.js';
 import type { StewardCommentGitHubClient, StewardIssueComment } from '../steward/comment.js';
 import type { RunStewardPorts } from '../steward/run.js';
-import type { WorkRequest } from '../work/index.js';
+import { workKeyFromIssue as wk, type WorkRequest } from '../work/index.js';
 import { LaneFileGuard } from './lane-file-guard.js';
 import type { RunPolicy } from './policy.js';
 import type { Environment, Workspace } from './ports.js';
@@ -47,9 +47,9 @@ const WORK: WorkRequest = {
   acceptanceCriteria: [],
 };
 
-function baseRequest(overrides: Partial<RunRequest> = {}): RunRequest {
+function baseRequest({ issue = 1, ...rest }: Omit<Partial<RunRequest>, 'issue'> & { issue?: number } = {}): RunRequest {
   return {
-    issue: 1,
+    issue: wk(issue),
     repo: 'o/r',
     branch: 'issue-1-fix-the-thing',
     specPath: '/tmp/wt/spec.md',
@@ -63,7 +63,7 @@ function baseRequest(overrides: Partial<RunRequest> = {}): RunRequest {
     failover: { enabled: false, cooldownMs: 60_000, fallbackModel: 'claude-sonnet-5' },
     efficiency: { maxReworkRounds: 1, fastPath: false },
     processGroupGraceMs: 50,
-    ...overrides,
+    ...rest,
   };
 }
 
@@ -1727,7 +1727,7 @@ describe('runIssue — environment release (#1928)', () => {
     cause: 'environment' as const,
     logPaths: ['/logs/a.log', '/logs/check-base'],
   };
-  const arrange = (request: Partial<RunRequest> = {}, createComment = vi.fn().mockResolvedValue({})) => {
+  const arrange = (request: Parameters<typeof baseRequest>[0] = {}, createComment = vi.fn().mockResolvedValue({})) => {
     vi.mocked(checkPhase).mockResolvedValue({
       passed: false,
       summary: CHECK_SUMMARY,
@@ -1960,7 +1960,7 @@ describe('runIssue — flaky ledger and issue filing (#2303)', () => {
   });
   const arrange = (
     check: CheckPhaseResult,
-    req: Partial<RunRequest> = {},
+    req: Parameters<typeof baseRequest>[0] = {},
     create = vi.fn().mockResolvedValue({ data: { number: 77 } }),
     createComment = vi.fn().mockResolvedValue({}),
   ) => {

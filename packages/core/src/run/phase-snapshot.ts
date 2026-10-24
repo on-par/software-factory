@@ -4,6 +4,7 @@
 // JSON file per issue under getFactoryPaths(...).runs, written atomically the same way
 // writeIssueRunState (./state.ts) does.
 
+import type { WorkKey } from '../work/work-key.js';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
@@ -40,7 +41,7 @@ const PHASES: ReadonlySet<FailurePhase> = new Set<FailurePhase>(['plan', 'build'
 
 /** Path of one issue's persisted phase snapshot inside `runsDir`
  *  (`getFactoryPaths(repoRoot).runs`). */
-export function phaseSnapshotFile(runsDir: string, issue: number): string {
+export function phaseSnapshotFile(runsDir: string, issue: WorkKey): string {
   return resolve(runsDir, `issue-${issue}.phase.json`);
 }
 

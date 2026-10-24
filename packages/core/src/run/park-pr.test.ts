@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import type { Octokit } from '@octokit/rest';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -42,7 +43,7 @@ function fake(opts: { open?: boolean; draft?: boolean; updateError?: Error } = {
   return { octokit, createComment, update, deleteRef, graphql };
 }
 
-const base = { repo: 'o/r', issue: 9, branch: 'issue-9-x' };
+const base = { repo: 'o/r', issue: workKeyFromIssue(9), branch: 'issue-9-x' };
 
 describe('parkedPrAction', () => {
   it.each(ALL)('decides for %s', (reason) => {

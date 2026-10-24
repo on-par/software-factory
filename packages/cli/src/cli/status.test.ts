@@ -1,5 +1,6 @@
 // packages/cli/src/cli/status.test.ts — factory status tests, moved from cli-commands.test.ts (#2798)
 
+import { workKeyFromIssue } from '@on-par/factory-core';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -207,7 +208,7 @@ describe('cli', () => {
 
       it('lists a fresh active claim', async () => {
         writeFileSync(paths().queue, 'app 1\n');
-        await FactoryCore.writePhaseSnapshot(FactoryCore.phaseSnapshotFile(paths().runs, 1), {
+        await FactoryCore.writePhaseSnapshot(FactoryCore.phaseSnapshotFile(paths().runs, workKeyFromIssue(1)), {
           issue: 1,
           phase: 'build',
           updatedAt: new Date().toISOString(),
@@ -257,7 +258,7 @@ describe('cli', () => {
     it('prints product, models, queue, events, and STOP state', async () => {
       writeFileSync(paths().product, 'alpha\n');
       writeFileSync(paths().queue, '# comment\napp 1\napp 2\n');
-      await FactoryCore.writePhaseSnapshot(FactoryCore.phaseSnapshotFile(paths().runs, 1), {
+      await FactoryCore.writePhaseSnapshot(FactoryCore.phaseSnapshotFile(paths().runs, workKeyFromIssue(1)), {
         issue: 1,
         phase: 'build',
         updatedAt: new Date().toISOString(),
@@ -354,7 +355,7 @@ describe('cli', () => {
 
     it('warns on malformed queue lines and never renders NaN', async () => {
       writeFileSync(paths().queue, 'app 1\napp abc\n');
-      await FactoryCore.writePhaseSnapshot(FactoryCore.phaseSnapshotFile(paths().runs, 1), {
+      await FactoryCore.writePhaseSnapshot(FactoryCore.phaseSnapshotFile(paths().runs, workKeyFromIssue(1)), {
         issue: 1,
         phase: 'build',
         updatedAt: new Date().toISOString(),

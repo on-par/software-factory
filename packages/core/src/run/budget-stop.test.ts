@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { spawn } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -50,7 +51,7 @@ let spend = 1.21;
 function request(): RunRequest {
   counter += 1;
   return {
-    issue: 3320,
+    issue: workKeyFromIssue(3320),
     repo: 'o/r',
     branch: 'issue-3320-x',
     specPath: '/tmp/wt/spec.md',

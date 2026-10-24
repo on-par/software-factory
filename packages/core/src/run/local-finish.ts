@@ -1,5 +1,6 @@
 // packages/core/src/run/local-finish.ts — clean-CHECK endings for runs that never reach SHIP: local-only (#508) and --no-pr
 
+import { issueNumberOf } from '../work/work-key.js';
 import type { CheckSummary } from '../types/index.js';
 import { upsertWorktreeKeep } from '../utils/worktree-keeps.js';
 import type { BuildRoute, RunOutcome } from './outcome.js';
@@ -42,7 +43,7 @@ export async function finishWithoutShip(
     try {
       if (request.worktreeKeepsPath) {
         upsertWorktreeKeep(request.worktreeKeepsPath, {
-          issue: request.issue,
+          issue: issueNumberOf(request.issue),
           path: worktree,
           reason: 'no-pr run',
           since: new Date().toISOString(),

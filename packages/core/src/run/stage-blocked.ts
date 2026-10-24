@@ -1,6 +1,7 @@
 // src/run/stage-blocked.ts — stage-boundary provider gate (#3226): which configured providers of a
 // stage are capped, which to skip, and when the whole stage is blocked until a timed reset.
 
+import { type WorkKey, issueNumberOf } from '../work/work-key.js';
 import { formatBreakerRemaining, type ProviderBreaker } from '../router/breaker.js';
 import { routerFailureOf } from '../router/executor-error.js';
 import type { ModelRouter } from '../router/index.js';
@@ -123,7 +124,7 @@ export async function allProvidersDown(stage: GateStage, deps: StageBlockedDeps)
 }
 
 /** The park message for an `all_providers_down` park: stage, each provider with its reason, and how to clear it. */
-export function allProvidersDownMessage(down: NonNullable<StageGateVerdict['down']>, issue: number): string {
+export function allProvidersDownMessage(down: NonNullable<StageGateVerdict['down']>, issue: WorkKey): string {
   const list = down.providers
     .map((p) => {
       const until =
@@ -138,9 +139,9 @@ export function allProvidersDownMessage(down: NonNullable<StageGateVerdict['down
 /** The one `all_providers_down` event payload for a park; `nextAvailableAt` is null because no reset is known. */
 export function allProvidersDownPayload(
   down: NonNullable<StageGateVerdict['down']>,
-  issue: number,
+  issue: WorkKey,
 ): AllProvidersDownPayload {
-  return { ...down, nextAvailableAt: null, issue, at: new Date().toISOString() };
+  return { ...down, nextAvailableAt: null, issue: issueNumberOf(issue), at: new Date().toISOString() };
 }
 
 /** What the lane watches after the park: the breaker-open providers, never the metered ones. */
@@ -185,7 +186,7 @@ export interface StageGateVerdict {
 
 /** The slice of a run request the gate reads. */
 export interface GateRequest {
-  issue: number;
+  issue: WorkKey;
   branch: string;
   codexDisabled: boolean;
   failover: { enabled: boolean };

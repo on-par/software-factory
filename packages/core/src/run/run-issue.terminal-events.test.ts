@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
@@ -48,7 +49,7 @@ const WORK: WorkRequest = {
 };
 
 const request: RunRequest = {
-  issue: 1,
+  issue: workKeyFromIssue(1),
   repo: 'o/r',
   branch: 'issue-1-fix-the-thing',
   specPath: '/tmp/wt/spec.md',

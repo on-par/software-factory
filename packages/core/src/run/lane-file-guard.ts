@@ -16,7 +16,7 @@ import type { EventKind } from '../events/kinds.js';
 import { claimIsLive, claimLiveness } from '../queue/claim-liveness.js';
 import type { DesignArtifact } from '../types/index.js';
 import { branchFor } from '../utils/index.js';
-import { workKeyFromIssue } from '../work/work-key.js';
+import { type WorkKey, issueNumberOf, workKeyFromIssue } from '../work/work-key.js';
 import type { BuildRoute, RunOutcome } from './outcome.js';
 
 export interface LaneFileClaim {
@@ -86,7 +86,7 @@ export interface LaneClaimReap {
   reason: LaneClaimStaleReason;
 }
 
-function runKeyFor(repo: string, issue: number): string {
+function runKeyFor(repo: string, issue: WorkKey): string {
   return `${repo}#${issue}`;
 }
 
@@ -94,13 +94,13 @@ export class LaneFileGuard {
   constructor(private file: string) {}
 
   /** Upsert this run's claim (no-op for an empty file set — nothing to guard). */
-  async register(repo: string, issue: number, files: string[]): Promise<void> {
+  async register(repo: string, issue: WorkKey, files: string[]): Promise<void> {
     if (files.length === 0) return;
     const data = await this.read();
     delete data.holds[runKeyFor(repo, issue)];
     data.claims[runKeyFor(repo, issue)] = {
       repo,
-      issue,
+      issue: issueNumberOf(issue),
       files,
       claimedAt: new Date().toISOString(),
       pid: process.pid,
@@ -109,7 +109,7 @@ export class LaneFileGuard {
   }
 
   /** Removes this run's claim, if any. Safe to call on a repo+issue with no claim. */
-  async release(repo: string, issue: number): Promise<void> {
+  async release(repo: string, issue: WorkKey): Promise<void> {
     const data = await this.read();
     const key = runKeyFor(repo, issue);
     if (!(key in data.claims)) return;
@@ -118,11 +118,11 @@ export class LaneFileGuard {
   }
 
   /** Records that `issue` was deferred behind `collision.issue`'s claim on `collision.file` (#3576). */
-  async recordHold(repo: string, issue: number, collision: LaneFileCollision): Promise<void> {
+  async recordHold(repo: string, issue: WorkKey, collision: LaneFileCollision): Promise<void> {
     const data = await this.read();
     data.holds[runKeyFor(repo, issue)] = {
       repo,
-      issue,
+      issue: issueNumberOf(issue),
       holder: collision.issue,
       file: collision.file,
       heldAt: new Date().toISOString(),
@@ -132,35 +132,35 @@ export class LaneFileGuard {
 
   /** The hold for `issue` while the holder's claim still lists the held file. A hold whose
    *  holder claim is gone (released, parked, reaped) or no longer lists the file is deleted. */
-  async liveHold(repo: string, issue: number): Promise<LaneFileHold | undefined> {
+  async liveHold(repo: string, issue: WorkKey): Promise<LaneFileHold | undefined> {
     const data = await this.read();
     const key = runKeyFor(repo, issue);
     const hold = data.holds[key];
     if (!hold) return undefined;
-    if (data.claims[runKeyFor(hold.repo, hold.holder)]?.files.includes(hold.file)) return hold;
+    if (data.claims[runKeyFor(hold.repo, workKeyFromIssue(hold.holder))]?.files.includes(hold.file)) return hold;
     delete data.holds[key];
     await this.write(data);
     return undefined;
   }
 
   /** Every claim for `issue`, whatever its repo. Read-only — for `factory reset --dry-run`. */
-  async claimsForIssue(issue: number): Promise<LaneFileClaim[]> {
+  async claimsForIssue(issue: WorkKey): Promise<LaneFileClaim[]> {
     const data = await this.read();
-    return Object.values(data.claims).filter((c) => c.issue === issue);
+    return Object.values(data.claims).filter((c) => c.issue === issueNumberOf(issue));
   }
 
   /** Removes every claim for `issue`, whatever its repo. For `factory reset`, which may not
    *  know the gh repo slug. Resolves true when any claim was removed. */
-  async releaseIssue(issue: number): Promise<boolean> {
+  async releaseIssue(issue: WorkKey): Promise<boolean> {
     const data = await this.read();
     let removed = false;
     for (const [key, claim] of Object.entries(data.claims)) {
-      if (claim.issue !== issue) continue;
+      if (claim.issue !== issueNumberOf(issue)) continue;
       delete data.claims[key];
       removed = true;
     }
     for (const [key, hold] of Object.entries(data.holds)) {
-      if (hold.issue !== issue) continue;
+      if (hold.issue !== issueNumberOf(issue)) continue;
       delete data.holds[key];
       removed = true;
     }
@@ -176,7 +176,7 @@ export class LaneFileGuard {
    *  verdict, or a throwing probe, keeps the claim blocking. */
   async findCollision(
     repo: string,
-    issue: number,
+    issue: WorkKey,
     files: string[],
     opts: FindCollisionOptions = {},
   ): Promise<LaneFileCollision | undefined> {
@@ -186,7 +186,7 @@ export class LaneFileGuard {
     const reaped: Array<{ key: string; claim: LaneFileClaim; reason: LaneClaimStaleReason }> = [];
     let collision: LaneFileCollision | undefined;
     for (const [key, claim] of Object.entries(data.claims)) {
-      if (claim.repo !== repo || claim.issue === issue) continue;
+      if (claim.repo !== repo || claim.issue === issueNumberOf(issue)) continue;
       const file = claim.files.find((f) => wanted.has(f));
       if (file === undefined) continue;
       let reason: LaneClaimStaleReason | undefined;
@@ -273,7 +273,7 @@ export class LaneFileGuard {
  *  released outcome — no park comment, no `factory:parked`. */
 export async function deferOnLaneCollision(
   guard: LaneFileGuard,
-  request: { repo: string; issue: number; branch: string },
+  request: { repo: string; issue: WorkKey; branch: string },
   collision: LaneFileCollision,
   route: BuildRoute | undefined,
   log: (type: EventKind, msg: string) => void,
@@ -307,7 +307,7 @@ export async function deferOnLaneCollision(
 export async function releaseLaneClaim(
   guard: LaneFileGuard,
   repo: string,
-  issue: number,
+  issue: WorkKey,
   log: (type: EventKind, msg: string) => void,
 ): Promise<boolean> {
   try {

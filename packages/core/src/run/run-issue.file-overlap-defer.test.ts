@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
@@ -62,7 +63,7 @@ const breakerDir = tempDirs.makeSync('run-issue-file-overlap-');
 afterAll(() => tempDirs.cleanup());
 
 const request: RunRequest = {
-  issue: 1,
+  issue: workKeyFromIssue(1),
   repo: 'o/r',
   branch: 'issue-1-fix-the-thing',
   specPath: '/tmp/wt/spec.md',
@@ -144,7 +145,7 @@ describe('runIssue — same-file lane hold defers instead of parking (#3576)', (
     const register = vi.spyOn(guard, 'register');
     const events: Array<[string, string]> = [];
     const ports = makePorts({ laneFileGuard: guard }, events);
-    const outcome = await runIssue({ ...request, issue: 1896 }, policy, ports);
+    const outcome = await runIssue({ ...request, issue: workKeyFromIssue(1896) }, policy, ports);
     expect(outcome).toMatchObject({ state: 'released', reason: 'file-overlap', holder: 3232, file: 'src/shared.ts' });
     expect(outcome.state).not.toBe('parked');
     expect(events.some(([type]) => type === 'held')).toBe(false);
@@ -153,7 +154,7 @@ describe('runIssue — same-file lane hold defers instead of parking (#3576)', (
     ).toBe(true);
     expect(issues.createComment).not.toHaveBeenCalled();
     expect(issues.updateComment).not.toHaveBeenCalled();
-    expect(recordHold).toHaveBeenCalledWith('o/r', 1896, collision);
+    expect(recordHold).toHaveBeenCalledWith('o/r', workKeyFromIssue(1896), collision);
     expect(register).not.toHaveBeenCalled();
     expect(ports.buildPhase).not.toHaveBeenCalled();
   });

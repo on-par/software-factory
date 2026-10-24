@@ -5,6 +5,7 @@
 // #2320 (resume at BUILD) extends this same record and store.
 // It also builds the #2583 park message for a config-caused CHECK failure.
 
+import type { WorkKey } from '../work/work-key.js';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -151,7 +152,7 @@ export function createCheckResumeStore(specPath: string): CheckResumeStore {
 }
 
 export function formatPreservedBuildMessage(opts: {
-  issue: number;
+  issue: WorkKey;
   branch: string;
   buildMinutes: number;
   fixTarget: string;
@@ -189,7 +190,7 @@ export function preservedFixTarget(
 
 /** Park message for a config-caused CHECK failure (#2583): file:line, the fix, and how to re-queue. */
 export function configParkMessage(opts: {
-  issue: number;
+  issue: WorkKey;
   failure: Pick<EnvironmentFailure, 'cause' | 'failingChecks' | 'logPaths'>;
   summary: CheckSummary;
   constitution: Constitution | null;

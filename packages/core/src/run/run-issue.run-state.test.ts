@@ -1,4 +1,5 @@
 // run-issue.run-state.test.ts — runIssue persists its run state through ports.recordRunState (#3194)
+import { workKeyFromIssue } from '../work/work-key.js';
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
@@ -56,7 +57,7 @@ const shipPhase = vi.fn<typeof realShipPhase>();
 
 function baseRequest(): RunRequest {
   return {
-    issue: 1,
+    issue: workKeyFromIssue(1),
     repo: 'o/r',
     branch: 'issue-1-fix-the-thing',
     specPath: '/tmp/wt/spec.md',

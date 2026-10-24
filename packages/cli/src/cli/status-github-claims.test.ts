@@ -1,5 +1,6 @@
 // packages/cli/src/cli/status-github-claims.test.ts — GitHub-label-queue claims in the Active band (#3344)
 
+import { workKeyFromIssue } from '@on-par/factory-core';
 import { writeFileSync } from 'node:fs';
 
 import * as FactoryCore from '@on-par/factory-core';
@@ -37,7 +38,7 @@ describe('cli status', () => {
       );
     };
     const writeSnapshot = (ageMs: number) =>
-      FactoryCore.writePhaseSnapshot(FactoryCore.phaseSnapshotFile(paths().runs, 3316), {
+      FactoryCore.writePhaseSnapshot(FactoryCore.phaseSnapshotFile(paths().runs, workKeyFromIssue(3316)), {
         issue: 3316,
         phase: 'check',
         updatedAt: new Date().toISOString(),

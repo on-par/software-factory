@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -62,7 +63,7 @@ const breakerDir = mkdtempSync(join(tmpdir(), 'run-issue-lane-claim-'));
 afterAll(() => rmSync(breakerDir, { recursive: true, force: true }));
 
 const request: RunRequest = {
-  issue: 1,
+  issue: workKeyFromIssue(1),
   repo: 'o/r',
   branch: 'issue-1-fix-the-thing',
   specPath: '/tmp/wt/spec.md',
@@ -108,7 +109,7 @@ const design: DesignArtifact = {
 describe('runIssue — stale lane-file claim reaping (#3063)', () => {
   it('reaps a stale claim via ports.laneClaimStaleness and proceeds to BUILD', async () => {
     const guard = new LaneFileGuard(join(breakerDir, 'lane-files.json'));
-    await guard.register('o/r', 100, ['src/shared.ts']);
+    await guard.register('o/r', workKeyFromIssue(100), ['src/shared.ts']);
     const events: Array<[string, string]> = [];
     const buildPhase = vi
       .fn<typeof realBuildPhase>()
@@ -137,7 +138,7 @@ describe('runIssue — stale lane-file claim reaping (#3063)', () => {
       laneFileGuard: guard,
       laneClaimStaleness: async () => 'issue-closed',
     };
-    const outcome = await runIssue({ ...request, issue: 200 }, policy, ports);
+    const outcome = await runIssue({ ...request, issue: workKeyFromIssue(200) }, policy, ports);
     expect(outcome).not.toMatchObject({ reason: 'held' });
     expect(buildPhase).toHaveBeenCalled();
     expect(events.some(([type, msg]) => type === 'lane_file_claim_reaped' && msg.includes('#100'))).toBe(true);
@@ -174,6 +175,6 @@ describe('runIssue — stale lane-file claim reaping (#3063)', () => {
     };
     await expect(runIssue(request, policy, ports)).resolves.toBeDefined();
     expect(events.some(([type, msg]) => type === 'lane_file_release_failed' && msg.includes('#1'))).toBe(true);
-    expect(await guard.claimsForIssue(1)).toHaveLength(1);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toHaveLength(1);
   });
 });

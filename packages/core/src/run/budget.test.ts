@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -24,7 +25,15 @@ describe('enforceIssueBudget', () => {
     const keepsFile = setup();
     const log = vi.fn();
     expect(
-      enforceIssueBudget({ phase: 'BUILD', spend, cap, issue: 1, worktreePath: '/wt', keepsFile, log }),
+      enforceIssueBudget({
+        phase: 'BUILD',
+        spend,
+        cap,
+        issue: workKeyFromIssue(1),
+        worktreePath: '/wt',
+        keepsFile,
+        log,
+      }),
     ).toBeUndefined();
     expect(existsSync(keepsFile)).toBe(false);
     expect(log).not.toHaveBeenCalled();
@@ -37,7 +46,7 @@ describe('enforceIssueBudget', () => {
       phase: 'BUILD',
       spend: 33.18,
       cap: 30,
-      issue: 3264,
+      issue: workKeyFromIssue(3264),
       worktreePath: '/wt/3264',
       keepsFile,
       log,
@@ -53,9 +62,9 @@ describe('enforceIssueBudget', () => {
   it('writes no keep when keepsFile is undefined', () => {
     setup();
     const log = vi.fn();
-    expect(enforceIssueBudget({ phase: 'PLAN', spend: 5, cap: 1, issue: 1, worktreePath: '/wt', log })).toContain(
-      'after PLAN',
-    );
+    expect(
+      enforceIssueBudget({ phase: 'PLAN', spend: 5, cap: 1, issue: workKeyFromIssue(1), worktreePath: '/wt', log }),
+    ).toContain('after PLAN');
     expect(log).toHaveBeenCalledTimes(1);
   });
 
@@ -67,7 +76,7 @@ describe('enforceIssueBudget', () => {
       phase: 'BUILD',
       spend: 5,
       cap: 1,
-      issue: 1,
+      issue: workKeyFromIssue(1),
       worktreePath: '/wt',
       keepsFile: join(base, 'nested', 'keeps.json'),
       log,
@@ -87,7 +96,7 @@ describe('enforceIssueBudget with a live stop (#3320)', () => {
       phase: 'BUILD',
       spend: 1.21,
       cap: 30,
-      issue: 3320,
+      issue: workKeyFromIssue(3320),
       worktreePath: '/wt',
       keepsFile,
       log,

@@ -1,4 +1,5 @@
 // packages/cli/src/cli/steer.test.ts — `factory steer` resolution, validation and append (#3401)
+import { workKeyFromIssue } from '@on-par/factory-core';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
@@ -44,7 +45,7 @@ const fixture = (status: RunStatus = 'building'): IssueRunState => ({
   prNumber: 7,
 });
 
-const file = () => runStateFile(dir, 42);
+const file = () => runStateFile(dir, workKeyFromIssue(42));
 
 beforeEach(async () => {
   dir = await tmp.make('steer-');
@@ -230,7 +231,7 @@ describe('cmdSteer runtime wiring', () => {
   let root: string;
   let lines: string[];
   let rt: SteerRuntime;
-  const rootFile = () => runStateFile(getFactoryPaths(root).runs, 42);
+  const rootFile = () => runStateFile(getFactoryPaths(root).runs, workKeyFromIssue(42));
 
   beforeEach(async () => {
     root = await tmp.make('steer-repo-');

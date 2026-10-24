@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { join } from 'node:path';
 
 import { createTempDirs } from '@on-par/factory-core/testing';
@@ -62,7 +63,7 @@ const breakerDir = dirs.makeSync('run-issue-attribution-');
 afterAll(() => dirs.cleanup());
 
 const request: RunRequest = {
-  issue: 1,
+  issue: workKeyFromIssue(1),
   repo: 'o/r',
   branch: 'issue-1-fix-the-thing',
   specPath: '/tmp/wt/spec.md',

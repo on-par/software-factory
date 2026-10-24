@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
@@ -60,7 +61,7 @@ afterAll(() => tempDirs.cleanup());
 let counter = 0;
 
 const request: RunRequest = {
-  issue: 1,
+  issue: workKeyFromIssue(1),
   repo: 'o/r',
   branch: 'issue-1-fix-the-thing',
   specPath: '/tmp/wt/spec.md',
@@ -236,7 +237,7 @@ describe('runIssue — stage-boundary provider gate (#3226)', () => {
           stage: 'plan',
           detail: 'untimed_breakers',
           nextAvailableAt: null,
-          issue: request.issue,
+          issue: 1,
           providers: [
             { provider: 'anthropic', reason: 'error', until: 'credentials-change' },
             { provider: 'openai', reason: 'error', until: 'credentials-change' },

@@ -4,7 +4,13 @@
 import { existsSync, rmSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 
-import { LaneFileGuard, phaseSnapshotFile, type PortLease, ReworkHistory } from '@on-par/factory-core';
+import {
+  LaneFileGuard,
+  phaseSnapshotFile,
+  type PortLease,
+  ReworkHistory,
+  workKeyFromIssue,
+} from '@on-par/factory-core';
 import {
   countUnpushedCommits,
   factoryBranchIssue,
@@ -153,7 +159,7 @@ export async function resetIssue(issue: number, deps: ResetDeps): Promise<ResetR
 
   // 4. Phase file
   try {
-    const file = phaseSnapshotFile(paths.runs, issue);
+    const file = phaseSnapshotFile(paths.runs, workKeyFromIssue(issue));
     if (existsSync(file)) {
       if (!dry) rmSync(file, { force: true });
       removed.push(dry ? `phase file ${file}` : 'phase file');
@@ -187,8 +193,9 @@ export async function resetIssue(issue: number, deps: ResetDeps): Promise<ResetR
   try {
     const guard = new LaneFileGuard(paths.laneFiles);
     if (dry) {
-      for (const c of await guard.claimsForIssue(issue)) removed.push(`lane-file claim ${c.repo}#${c.issue}`);
-    } else if (await guard.releaseIssue(issue)) removed.push('lane-file claim');
+      for (const c of await guard.claimsForIssue(workKeyFromIssue(issue)))
+        removed.push(`lane-file claim ${c.repo}#${c.issue}`);
+    } else if (await guard.releaseIssue(workKeyFromIssue(issue))) removed.push('lane-file claim');
   } catch (err) {
     kept.push(`lane-file claim (${errText(err)})`);
   }

@@ -1,5 +1,6 @@
 // packages/cli/src/cli/ship-steps.ts — named steps of the ship flow: sandbox logging, workspace setup, RunRequest builder (#2788)
 
+import { workKeyFromIssue } from '@on-par/factory-core';
 import { exec as execCb } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -370,7 +371,7 @@ export function buildRunRequest({
 }: RunRequestInput): RunRequest {
   const { repoConfigFileFor } = shipRuntime();
   return {
-    issue: issueNum,
+    issue: workKeyFromIssue(issueNum),
     repo: ghRepo,
     branch,
     specPath,

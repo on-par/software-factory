@@ -1,5 +1,6 @@
 // src/run/provider-failure-recorder.ts — Opens the provider breaker on a provider failure and announces a usage cap once (#3337).
 
+import { type WorkKey, issueNumberOf } from '../work/work-key.js';
 import type { ProviderCappedPayload } from '../events/kinds.js';
 import { DEFAULT_CAP_PROBE_MS, reportedCooldownMs, type ProviderBreaker } from '../router/breaker.js';
 import { redactText } from '../filing/redact.js';
@@ -10,7 +11,7 @@ import type { RunLogFn } from './attribution.js';
 export interface ProviderFailureRecorderDeps {
   breaker: ProviderBreaker;
   log: RunLogFn;
-  issue: number;
+  issue: WorkKey;
   /** Cooldown for failures that are not usage caps and report no reset time. */
   defaultCooldownMs: number;
   /** Clock for the `at` stamp of provider_auth_rejected. Default: Date.now. */
@@ -43,7 +44,7 @@ export const providerFailureRecorder =
               harness: harness ?? '',
               model: model ?? '',
               stage,
-              issue,
+              issue: issueNumberOf(issue),
               at: new Date((deps.now ?? Date.now)()).toISOString(),
               detail: redactText(redactSecrets(detail ?? '')),
             },
@@ -74,7 +75,14 @@ export const providerFailureRecorder =
       const source = reportedMs !== null ? 'reported' : 'default-1h';
       log('provider_capped', `${provider} capped until ${cappedUntil} (${source}) during ${stage} — failing over`, {
         failoverReason: reason,
-        providerCapped: { provider, stage, issue, cappedUntil, source, detail: redactSecrets(detail ?? '') },
+        providerCapped: {
+          provider,
+          stage,
+          issue: issueNumberOf(issue),
+          cappedUntil,
+          source,
+          detail: redactSecrets(detail ?? ''),
+        },
       });
     }
   };

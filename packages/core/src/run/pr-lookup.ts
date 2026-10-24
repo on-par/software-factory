@@ -1,5 +1,6 @@
 // packages/core/src/run/pr-lookup.ts — the one open-PR lookup: same-repo head guard, found/none/ambiguous/error (#3439, ADR-0035)
 
+import type { WorkKey } from '../work/work-key.js';
 import type { Octokit } from '@octokit/rest';
 
 /** One open same-repo PR that matched a lookup. */
@@ -72,7 +73,7 @@ export async function lookupOpenPrs(opts: {
 export function lookupOpenPrByIssue(opts: {
   octokit: Pick<Octokit, 'rest'>;
   repo: string;
-  issue: number;
+  issue: WorkKey;
   maxPages?: number;
 }): Promise<OpenPrLookup> {
   const pattern = new RegExp(`\\bcloses\\s+#${opts.issue}\\b`, 'i');

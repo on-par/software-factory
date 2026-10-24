@@ -18,6 +18,7 @@
 // CLI filesystem layout (ADR-0004). The CLI's shipIssue is a thin adapter that constructs
 // these ports and re-raises a parked/escalated outcome as LaneParkError.
 
+import { type WorkKey, issueNumberOf } from '../work/work-key.js';
 import { randomUUID } from 'node:crypto';
 import type { Octokit } from '@octokit/rest';
 
@@ -118,7 +119,7 @@ export interface RunRequest extends ReworkRequestFields {
   previousAttempt?: IssueRunState | null;
   /** ADR-0161 stack mode: the 1-based slice to plan. Set by runIssue's stack loop; undefined = the gate's current slice. */
   sliceIndex?: number;
-  issue: number;
+  issue: WorkKey;
   repo: string;
   branch: string;
   specPath: string;
@@ -309,6 +310,7 @@ async function runIssueOnce(
   observed: { checkSummary?: CheckSummary },
 ): Promise<RunOutcome> {
   let request = initialRequest;
+  const issueNumber = issueNumberOf(request.issue);
   if (request.codexWorkspacePaths) ports.router.setCodexWorkspacePaths?.(request.codexWorkspacePaths);
   const planPhase = ports.planPhase ?? planPhaseDefault;
   const slot = ports.hostBuildSlot ?? ((_phase, fn) => fn());
@@ -642,7 +644,7 @@ async function runIssueOnce(
         reused ??
         (await planPhase({
           previousAttempt: previousAttemptNote,
-          issue: request.issue,
+          issue: issueNumber,
           repo: request.repo,
           worktree: ports.workspace.path,
           specPath: request.specPath,
@@ -690,7 +692,7 @@ async function runIssueOnce(
           );
         }
         if (plan.parkReason === 'config') {
-          return await terminalParked('config', planConfigParkMessage(plan, request.issue));
+          return await terminalParked('config', planConfigParkMessage(plan, issueNumber));
         }
         return await terminalEscalated(`plan escalated: ${plan.escalate ?? 'unknown'}`);
       }
@@ -808,7 +810,7 @@ async function runIssueOnce(
         budgetGuard: budgetStop.guard,
         previousAttempt: previousAttemptNote,
         runId,
-        issue: request.issue,
+        issue: issueNumber,
         repo: request.repo,
         worktree: ports.workspace.path,
         specPath: request.specPath,
@@ -872,12 +874,12 @@ async function runIssueOnce(
 
     // CHECK
     await setPhase('check');
-    const priorFailureSignature = await ports.reworkHistory?.priorSignature(request.issue);
+    const priorFailureSignature = await ports.reworkHistory?.priorSignature(issueNumber);
     const checkOpts = {
       budgetGuard: budgetStop.guard,
       runId,
       hermeticGit: request.hermeticGit,
-      issue: request.issue,
+      issue: issueNumber,
       worktree: ports.workspace.path,
       specPath: request.specPath,
       constitution,
@@ -1002,7 +1004,7 @@ async function runIssueOnce(
           fixTarget = preservedFixTarget(env, constitution, request.repoConfigFile);
           try {
             await ports.checkResume.record({
-              issue: request.issue,
+              issue: issueNumber,
               branch: request.branch,
               worktree: ports.workspace.path,
               diffBase: buildDiffBase,
@@ -1051,7 +1053,7 @@ async function runIssueOnce(
       const verdict = classifyCheckFailure(failed, opts);
       if (verdict.checkFailure) {
         await ports.reworkHistory?.record(
-          request.issue,
+          issueNumber,
           verdict.checkFailure.failureSignature,
           verdict.checkFailure.failingChecks,
         );
@@ -1071,7 +1073,7 @@ async function runIssueOnce(
     await clearCheckResume();
     // Clean check — clear stale cross-run history so a future, genuinely different
     // failure is not mistaken for a repeat of one already resolved.
-    await ports.reworkHistory?.clear(request.issue);
+    await ports.reworkHistory?.clear(issueNumber);
 
     const unshipped = await finishWithoutShip(request, ports, log, {
       route,
@@ -1097,7 +1099,7 @@ async function runIssueOnce(
         const labels = withoutHumanOnlyLabels([label]);
         try {
           if (labels.length > 0) {
-            await ports.octokit.rest.issues.addLabels({ owner, repo: repoName, issue_number: request.issue, labels });
+            await ports.octokit.rest.issues.addLabels({ owner, repo: repoName, issue_number: issueNumber, labels });
           }
         } catch (err) {
           return await terminalParked(

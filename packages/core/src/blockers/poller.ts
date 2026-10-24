@@ -3,6 +3,7 @@
 // Deterministic: reads the trusted park comment plus GitHub `blocked_by`, never an LLM. Unknown or malformed
 // input fails closed (stays parked or goes `held`), never unparks.
 
+import { workKeyFromIssue } from '../work/work-key.js';
 import type { Octokit } from '@octokit/rest';
 
 import { PARKED_LABEL, type QueueGitHubClient } from '../queue/github-queue.js';
@@ -54,7 +55,7 @@ function message(err: unknown): string {
 async function pollOne(opts: PollBlockedParksOptions, n: number): Promise<BlockedParkPollResult> {
   const { client, owner, repo, store, logEvent = () => {} } = opts;
   const comment = await store.readParkComment(n);
-  const state = comment && readParkState([comment], n);
+  const state = comment && readParkState([comment], workKeyFromIssue(n));
   if (!comment || !state) return { issue: n, outcome: 'skipped', detail: 'no park comment' };
   if (state.reason !== 'blocked') return { issue: n, outcome: 'skipped', detail: `reason ${state.reason}` };
 
@@ -78,7 +79,7 @@ async function pollOne(opts: PollBlockedParksOptions, n: number): Promise<Blocke
 
   const hold = async (outcome: 'held' | 'capped', detail: string): Promise<BlockedParkPollResult> => {
     const patch: ParkCommentPatch = { reason: 'held', status: `held: ${detail}` };
-    const body = patchParkComment(comment.body, n, patch);
+    const body = patchParkComment(comment.body, workKeyFromIssue(n), patch);
     if (body !== null) await store.updateComment(comment.id, body);
     return { issue: n, outcome, detail };
   };
@@ -102,7 +103,10 @@ async function pollOne(opts: PollBlockedParksOptions, n: number): Promise<Blocke
     `#${n} auto-unparked → ${result.lane} (order ${result.order}): blockers ${blockers.map((b) => `#${b.number}`).join(', ')} resolved`,
   );
   try {
-    const body = patchParkComment(comment.body, n, { status: 'resumed', autoUnparks: state.autoUnparks + 1 });
+    const body = patchParkComment(comment.body, workKeyFromIssue(n), {
+      status: 'resumed',
+      autoUnparks: state.autoUnparks + 1,
+    });
     if (body !== null) await store.updateComment(comment.id, body);
   } catch (err) {
     logEvent('warn', n, `park comment not updated: ${message(err)}`);
@@ -130,7 +134,7 @@ const CLOSING_PRS_QUERY = `query($owner:String!,$name:String!,$number:Int!){repo
 export function createOctokitBlockedParkStore(octokit: Octokit, repo: string): BlockedParkStore {
   const [owner, name] = repo.split('/') as [string, string];
   return {
-    readParkComment: (issue) => findOwnParkComment({ octokit, repo, issue }),
+    readParkComment: (issue) => findOwnParkComment({ octokit, repo, issue: workKeyFromIssue(issue) }),
     async updateComment(commentId, body) {
       await octokit.rest.issues.updateComment({ owner, repo: name, comment_id: commentId, body });
     },

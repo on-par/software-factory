@@ -10,7 +10,6 @@ import {
   followEvents,
   listPendingApprovals,
   listQueuedSteering,
-  phaseSnapshotFile,
   ProviderBreaker,
   type QueueSnapshot,
   queueSteeringMessage,
@@ -26,7 +25,6 @@ import { type JSX, useEffect, useMemo, useState } from 'react';
 import {
   type DashboardState,
   initialDashboard,
-  isNonTerminalLane,
   lanesOf,
   legacyFailurePointerFor,
   partitionLanesByActivity,
@@ -44,6 +42,7 @@ import { TAB_ORDER, type TabName } from '../tabs/types.js';
 import { ApprovalPrompt } from './ApprovalPrompt.js';
 import { Dashboard, staleLanesLine } from './Dashboard.js';
 import { Header } from './Header.js';
+import { readLaneHeartbeats } from './lane-heartbeats.js';
 import { summarizeLane } from './LaneList.js';
 import { collapseMerged, LaneView } from './LaneView.js';
 import { RunDetail } from './RunDetail.js';
@@ -236,17 +235,7 @@ export function App({
       if (inFlight) return; // a slow read must not be overwritten by an older, later-landing one
       inFlight = true;
       try {
-        const next: Record<string, string | undefined> = {};
-        // Only non-terminal lanes can go stale, so only they need a heartbeat.
-        await Promise.all(
-          state.lanes.filter(isNonTerminalLane).map(async (lane) => {
-            try {
-              next[lane.issue] = (await readSnapshotFn(phaseSnapshotFile(runsDir, Number(lane.issue))))?.lastActivityAt;
-            } catch {
-              next[lane.issue] = undefined;
-            }
-          }),
-        );
+        const next = await readLaneHeartbeats(state.lanes, runsDir, readSnapshotFn);
         if (!cancelled) setHeartbeats(next);
       } finally {
         inFlight = false;

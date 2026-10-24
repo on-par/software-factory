@@ -1,5 +1,6 @@
 // packages/cli/src/cli/run.ts — the factory run handler, moved out of index.ts (#2800)
 
+import { workKeyFromIssue } from '@on-par/factory-core';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { styleText } from 'node:util';
@@ -184,7 +185,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
                     resolveSizeGateMode(factoryConfig) === 'stack' &&
                     resolveMergePolicy(factoryConfig, process.env, { auto: opts.autoMerge }).auto,
                   stackMode: resolveSizeGateMode(factoryConfig) === 'stack',
-                  laneFileHold: (n) => new LaneFileGuard(paths.laneFiles).liveHold(ghRepo, n),
+                  laneFileHold: (n) => new LaneFileGuard(paths.laneFiles).liveHold(ghRepo, workKeyFromIssue(n)),
                   onDeferred: (issue, message) => {
                     if (deferredIssues.has(issue)) return;
                     deferredIssues.add(issue);
@@ -320,7 +321,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
               'escalate',
               r.issue,
               `#${r.issue} parked: review rework cap ${r.cap} reached (${r.count} runs) — PR #${r.pr} review ${r.reviewIds.join(', ')}`,
-              parkPayload('escalate', r.issue, r.lane, []),
+              parkPayload('escalate', workKeyFromIssue(r.issue), r.lane, []),
             );
           } else if (r.outcome === 'error') {
             logEvent(paths.events, 'warn', r.issue, `review-rework poll for PR #${r.pr} failed: ${r.detail}`);
@@ -456,7 +457,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
               settleParkedPullRequest({
                 octokit: rt.getOctokit(),
                 repo: ghRepo,
-                issue,
+                issue: workKeyFromIssue(issue),
                 branch,
                 reason,
                 greenAndChecked: false,

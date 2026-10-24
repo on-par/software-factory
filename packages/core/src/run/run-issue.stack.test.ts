@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -66,7 +67,7 @@ let breakerCounter = 0;
 
 function baseRequest(overrides: Partial<RunRequest> = {}): RunRequest {
   return {
-    issue: 1,
+    issue: workKeyFromIssue(1),
     repo: 'o/r',
     branch: 'issue-1-fix-the-thing',
     specPath: '/tmp/wt/spec.md',

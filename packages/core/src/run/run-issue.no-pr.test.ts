@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -46,7 +47,7 @@ afterAll(() => tempDirs.cleanup());
 const keepsFile = join(tmp, 'worktree-keeps.json');
 
 const request: RunRequest = {
-  issue: 1,
+  issue: workKeyFromIssue(1),
   repo: 'o/r',
   branch: 'issue-1-fix-the-thing',
   specPath: '/tmp/wt/spec.md',

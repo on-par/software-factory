@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it, vi } from 'vitest';
 import type { Octokit } from '@octokit/rest';
 import { findAdoptablePr } from './adopt-pr.js';
@@ -18,7 +19,7 @@ function stub(pages: unknown[][] | Error) {
 }
 
 const find = (octokit: Pick<Octokit, 'rest'>, maxPages?: number) =>
-  findAdoptablePr({ octokit, repo: REPO, issue: 2253, branchPrefix: 'factory', maxPages });
+  findAdoptablePr({ octokit, repo: REPO, issue: workKeyFromIssue(2253), branchPrefix: 'factory', maxPages });
 
 describe('findAdoptablePr', () => {
   it('finds a single same-repo PR on a title-drifted branch', async () => {

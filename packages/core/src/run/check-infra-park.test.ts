@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -38,7 +39,7 @@ const WORK: WorkRequest = {
   acceptanceCriteria: [],
 };
 const request: RunRequest = {
-  issue: 1,
+  issue: workKeyFromIssue(1),
   repo: 'o/r',
   branch: 'issue-1-fix-the-thing',
   specPath: '/tmp/wt/spec.md',
@@ -119,7 +120,7 @@ describe('runIssue — check-infra park (#3371)', () => {
   });
 
   it('has a park hint naming the infrastructure cause', () => {
-    const hint = parkUnblockHint('check-infra', 7);
+    const hint = parkUnblockHint('check-infra', workKeyFromIssue(7));
     expect(hint).toContain('infrastructure');
     expect(hint).toContain('factory unpark 7');
   });

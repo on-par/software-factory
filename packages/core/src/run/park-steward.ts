@@ -1,5 +1,6 @@
 // src/run/park-steward.ts — hand a stuck parked run to the steward, split out of run-issue.ts
 
+import { issueNumberOf } from '../work/work-key.js';
 import { detectStuck } from '../steward/detect.js';
 import { runSteward } from '../steward/run.js';
 import type { RunOutcome } from './outcome.js';
@@ -27,7 +28,7 @@ export async function runParkSteward(
       {
         runId,
         repo: request.repo,
-        issue: { number: request.issue, title: request.work.title, body: request.work.brief },
+        issue: { number: issueNumberOf(request.issue), title: request.work.title, body: request.work.brief },
         stuck,
         planPath: request.specPath,
       },

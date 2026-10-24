@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -41,7 +42,7 @@ const WORK: WorkRequest = {
 };
 
 const request: RunRequest = {
-  issue: 1,
+  issue: workKeyFromIssue(1),
   repo: 'o/r',
   branch: 'issue-1-fix-the-thing',
   specPath: '/tmp/wt/spec.md',
@@ -227,7 +228,12 @@ describe('runIssue — issue park comment (#2314)', () => {
       'fail',
       expect.any(String),
       expect.objectContaining({
-        park: { reason: 'fail', decision: parkUnblockHint('fail', 1), lane: 'app', blockedBehind: [2, 3] },
+        park: {
+          reason: 'fail',
+          decision: parkUnblockHint('fail', workKeyFromIssue(1)),
+          lane: 'app',
+          blockedBehind: [2, 3],
+        },
       }),
     );
   });
@@ -239,7 +245,7 @@ describe('runIssue — issue park comment (#2314)', () => {
       'fail',
       expect.any(String),
       expect.objectContaining({
-        park: { reason: 'fail', decision: parkUnblockHint('fail', 1), lane: '', blockedBehind: [] },
+        park: { reason: 'fail', decision: parkUnblockHint('fail', workKeyFromIssue(1)), lane: '', blockedBehind: [] },
       }),
     );
   });

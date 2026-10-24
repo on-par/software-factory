@@ -1,7 +1,7 @@
 // packages/cli/src/cli/lane-park-comment.ts — upsert the issue park comment for a park raised outside runIssue (#3534)
 
-import type { ParkReason } from '@on-par/factory-core';
-import { publishParkComment } from '@on-par/factory-core/internal';
+import { issueNumberOf, type ParkPayload, type ParkReason, workKeyFromIssue } from '@on-par/factory-core';
+import { parkPayload, publishParkComment } from '@on-par/factory-core/internal';
 import type { Octokit } from '@octokit/rest';
 
 const failure = (issue: number, detail: string): string =>
@@ -18,9 +18,9 @@ export async function tryPublishParkComment(
 ): Promise<string | undefined> {
   try {
     const posted = await publishParkComment({ octokit: getOctokit(), repo, worktree, readHead, input });
-    return posted.ok ? undefined : failure(input.issue, posted.error);
+    return posted.ok ? undefined : failure(issueNumberOf(input.issue), posted.error);
   } catch (err) {
-    return failure(input.issue, err instanceof Error ? err.message : String(err));
+    return failure(issueNumberOf(input.issue), err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -41,7 +41,15 @@ export const laneParkCommenter =
     const { getOctokit, ghRepo, repoRoot, runId, lane, readParkSha } = opts;
     if (!getOctokit) return;
     const readHead = () => (branch ? readParkSha(branch) : Promise.reject(new Error('no branch')));
-    const input = { issue, reason, message, runId, branch: branch || '-', lane, blockers: [] };
+    const input = { issue: workKeyFromIssue(issue), reason, message, runId, branch: branch || '-', lane, blockers: [] };
     const failed = await tryPublishParkComment(getOctokit, ghRepo, repoRoot, readHead, input);
     if (failed) warn(issue, failed);
   };
+
+/** `parkPayload` for a park the lane raises: the lane tracks plain issue numbers, the run helpers take work keys. */
+export const laneParkPayload = (
+  reason: ParkReason,
+  issue: number,
+  lane: string | undefined,
+  blockedBehind: readonly number[],
+): ParkPayload => parkPayload(reason, workKeyFromIssue(issue), lane, blockedBehind);
