@@ -45,6 +45,8 @@ import { environmentReleaseMarker, parkPayload, publishParkComment, upsertMarker
 import { createRunPhaseLogger } from './run-phase-log.js';
 import { providerFailureRecorder } from './provider-failure-recorder.js';
 import { gateOpencodeBuildOnBreaker, providerFallbackPreferrer } from './provider-breaker-gate.js';
+import { loadReusablePlan } from './plan-reuse-load.js';
+import { providerCapGate } from './stage-blocked.js';
 import { fileFlakyTests } from './flaky-tests.js';
 import { finishWithoutShip } from './local-finish.js';
 import { enterStackSlice, stackWaitOutcome } from './stack-slice-entry.js';
@@ -489,6 +491,7 @@ async function runIssueOnce(
 
   const gateDeps = { router: ports.router, breaker: ports.breaker, log };
   const preferFallbackWhenProviderIsOpen = providerFallbackPreferrer(gateDeps);
+  const capGate = providerCapGate(ports.router, ports.breaker, request, log);
 
   try {
     if (ports.acquireEnvironment) {
@@ -603,11 +606,6 @@ async function runIssueOnce(
       buildMinutes = resumed.buildMinutes;
     } else {
       await setPhase('plan');
-      const planModel = await preferFallbackWhenProviderIsOpen(
-        request.modelPins.plan,
-        request.modelPins.planFallback,
-        'PLAN',
-      );
       // A pinned build model determines the route (#1367): an explicit repo `route` still wins, but
       // without one the pin's harness decides, so PLAN cannot send an Anthropic-pinned build to Codex.
       // decideBuildRoute holds the guards (local-only forces codex in PLAN and a pin must not undo it;
@@ -628,29 +626,11 @@ async function runIssueOnce(
         );
       }
 
-      const reusablePlan = async () => {
-        if (!ports.planReuse) return null;
-        let hit: Awaited<ReturnType<PlanReuseStore['load']>> = null;
-        try {
-          hit = await ports.planReuse.load(issueBodyHash(request.work.brief));
-        } catch (err) {
-          log('environment_warning', `could not read the plan-reuse record: ${errorMessage(err)} — planning`);
-        }
-        try {
-          await ports.planReuse.clear();
-        } catch (err) {
-          log('environment_warning', `could not clear the plan-reuse record: ${errorMessage(err)}`);
-        }
-        if (hit) {
-          ports.events('plan')(
-            'plan_reused',
-            `reusing frozen plan ${request.specPath} for #${request.issue} — body unchanged since the environment release, no PLAN model call`,
-          );
-        }
-        return hit;
-      };
+      const reused = await loadReusablePlan(ports.planReuse, request, log, ports.events('plan'));
+      const planGate = reused ? undefined : await capGate.enterPlan(route, ports.events('plan'));
+      if (planGate?.released) return planGate.released;
       const plan =
-        (await reusablePlan()) ??
+        reused ??
         (await planPhase({
           previousAttempt: previousAttemptNote,
           issue: request.issue,
@@ -663,11 +643,9 @@ async function runIssueOnce(
           octokit: ports.octokit,
           log: ports.events('plan'),
           timeoutSeconds: request.timeouts.plan,
-          modelOverride: planModel,
-          modelFallbacks:
-            planModel === request.modelPins.plan && request.modelPins.planFallback
-              ? [request.modelPins.planFallback]
-              : undefined,
+          modelOverride: request.modelPins.plan,
+          modelFallbacks: request.modelPins.planFallback ? [request.modelPins.planFallback] : undefined,
+          skipProviders: planGate?.skip.size ? planGate.skip : undefined,
           onProviderFailure: rememberProviderFailureFor('plan'),
           branch: request.branch,
           approvalGate: request.options.approvePlan ? ports.createApprovalGate?.() : undefined,
@@ -811,6 +789,8 @@ async function runIssueOnce(
         }
       }
 
+      const buildGate = await capGate.enterBuild(buildRoute, buildModel, route, breakerBlocked);
+      if (buildGate.released) return buildGate.released;
       const build = await buildPhase({
         budgetGuard: budgetStop.guard,
         previousAttempt: previousAttemptNote,
@@ -914,6 +894,7 @@ async function runIssueOnce(
       baselineCacheTtlHours: request.baselineCacheTtlHours,
       requiredChecksVerdict: ports.requiredChecksVerdict,
     };
+    capGate.watchCheck(builtRoute, builtModel);
     await runRequestedReviewRework(request, ports, checkOpts);
     const check = await checkPhase(checkOpts);
     checkSummary = check.summary;
@@ -1228,6 +1209,8 @@ async function runIssueOnce(
           'cannot refresh Claude OAuth — run `factory doctor` (#1014)',
       );
     }
+    const capped = await capGate.afterFailure(err, failurePhase, route);
+    if (capped) return capped;
     return await terminalParked(parkReasonFor(err), errorMessage(err));
   } finally {
     await release();

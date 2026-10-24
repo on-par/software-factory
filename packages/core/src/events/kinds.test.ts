@@ -268,6 +268,12 @@ describe('environment-released (#1928)', () => {
   });
 });
 
+describe('provider-cap-released (#3226)', () => {
+  it('is a terminal warn that is not a park', () => {
+    expect(EVENT_TRAITS['provider-cap-released']).toEqual({ severity: 'warn', isPark: false, isTerminal: true });
+  });
+});
+
 describe('config park (#2584)', () => {
   it('classifies config as a terminal park (#2584)', () => {
     const traits = { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' };

@@ -29,9 +29,13 @@ export interface LanePausedPayload {
   firstIssue: number;
   secondIssue: number;
   /** Absent for the signature breaker (#1928). */
-  cause?: 'environment';
+  cause?: 'environment' | 'provider-cap';
   /** Base SHA the failing checkers also failed on; set when `cause` is 'environment'. */
   baseSha?: string;
+  /** Earliest provider reset (ISO) the lane waits for; set when `cause` is 'provider-cap' (#3226). */
+  resetAt?: string;
+  /** Capped providers of the blocked stage; set when `cause` is 'provider-cap' (#3226). */
+  providers?: string[];
 }
 
 /** Payload of a `steward-triggered` event (#2084): `detectStuck` classified a parked run as

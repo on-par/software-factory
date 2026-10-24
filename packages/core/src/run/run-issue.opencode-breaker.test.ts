@@ -177,12 +177,13 @@ describe('runIssue — opencode provider breaker before BUILD (#2891)', () => {
     expect(call).toMatchObject({ route: 'codex', modelOverride: 'gpt-build' });
   });
 
-  it('does not consult the opencode breaker when failover is disabled', async () => {
-    const { events, call } = await run({
+  it('does not swap the opencode route when failover is disabled; a capped first provider releases instead (#3226)', async () => {
+    const { events, outcome, call } = await run({
       open: true,
       request: { failover: { enabled: false, cooldownMs: 60_000, fallbackModel: 'claude-sonnet-5' } },
     });
-    expect(call).toMatchObject({ route: 'opencode' });
+    expect(call).toBeUndefined();
+    expect(outcome).toMatchObject({ state: 'released', reason: 'provider-cap', providers: ['opencode-go'] });
     expect(events.some(([t]) => t.startsWith('provider_breaker'))).toBe(false);
   });
 });

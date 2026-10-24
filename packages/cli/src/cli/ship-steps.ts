@@ -58,6 +58,7 @@ export const TERMINAL_EVENT_KINDS = new Set<EventKind>([
   'ready',
   'no-pr-complete',
   'environment-released',
+  'provider-cap-released',
   'fail',
   'escalate',
   'held',
@@ -262,6 +263,16 @@ export function finishOutcome({
       styleText(
         'yellow',
         `⏸ Issue #${issueNum} → deferred: ${outcome.file} is claimed by in-flight issue #${outcome.holder}; re-queued, not parked`,
+      ),
+    );
+    return outcome.branch ?? '';
+  }
+
+  if (outcome.state === 'released' && outcome.reason === 'provider-cap') {
+    console.log(
+      styleText(
+        'yellow',
+        `⏸ Issue #${issueNum} → every provider for the stage is capped (${outcome.providers.join(', ')}); re-queued until ${outcome.resetAt}, not parked`,
       ),
     );
     return outcome.branch ?? '';

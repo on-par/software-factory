@@ -459,6 +459,8 @@ export class ModelRouter {
       budgetGuard?: BudgetGuard;
       /** Called once per agentic-task run with the context ceiling of the first attempted model (#3327). */
       onContextCeiling?: (notice: ContextCeilingNotice) => void;
+      /** Providers whose breaker is open at the stage boundary; their models are skipped, never pinning the call (#3226). */
+      skipProviders?: ReadonlySet<string>;
     } = {},
   ): Promise<RouterResult> {
     const {
@@ -472,6 +474,7 @@ export class ModelRouter {
       env,
       onPgid,
       retryCause,
+      skipProviders,
     } = options;
 
     if (!modelOverride && this.harnessCliAvailable) {
@@ -520,8 +523,15 @@ export class ModelRouter {
 
     let ceilingNoticed = false;
     const meteredSkips: { model: string; provider: string; plan: ProviderPlan }[] = [];
+    const breakerSkipped = new Set<string>();
 
     for (const model of models) {
+      const skipProvider = this.registry.get(model)?.provider;
+      if (skipProvider && skipProviders?.has(skipProvider)) {
+        onLog(`Skipping ${model} for ${task}: provider ${skipProvider} breaker open`);
+        breakerSkipped.add(skipProvider);
+        continue;
+      }
       if (isOpenCodeZenModel(model, this.registry.get(model))) {
         if (model !== models[0]) {
           onLog(
@@ -823,6 +833,13 @@ export class ModelRouter {
         attempts.at(-1)?.reason ?? 'unavailable',
         attempts,
         'only_metered_left',
+      );
+    }
+    if (attempts.length === 0 && breakerSkipped.size > 0) {
+      throw new ModelRouterError(
+        `No runnable models for task '${task}': provider breaker open for ${[...breakerSkipped].join(', ')}`,
+        'unavailable',
+        attempts,
       );
     }
     if (attempts.length === 0 && skippedForMissingCli && !skippedForOllama) {

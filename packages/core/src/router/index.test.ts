@@ -1771,4 +1771,35 @@ describe('failover.triggers (#3228)', () => {
     expect(result.model).toBe('oai-x');
     expect(exec.seen).toEqual(['oai-x']);
   });
+  it('skipProviders skips a stage-boundary-open provider without calling it or pinning the call (#3226)', async () => {
+    const exec = scripted({});
+    const logs: string[] = [];
+    const result = await run(exec, undefined, {
+      skipProviders: new Set(['anthropic']),
+      onLog: (l: string) => logs.push(l),
+    });
+    expect(result.model).toBe('oai-x');
+    expect(exec.seen).toEqual(['oai-x']);
+    expect(logs.some((l) => l.includes('Skipping anth-a') && l.includes('anthropic breaker open'))).toBe(true);
+  });
+
+  it('skipProviders throws unavailable without calling the executor when every provider is skipped (#3226)', async () => {
+    const exec = scripted({});
+    await expect(run(exec, undefined, { skipProviders: new Set(['anthropic', 'openai']) })).rejects.toMatchObject({
+      reason: 'unavailable',
+      message: expect.stringContaining('provider breaker open for anthropic, openai'),
+    });
+    expect(exec.seen).toEqual([]);
+  });
+
+  it('skipProviders also applies on the modelOverride + modelFallbacks path (#3226)', async () => {
+    const exec = scripted({});
+    const result = await run(exec, undefined, {
+      modelOverride: 'anth-a',
+      modelFallbacks: ['oai-x'],
+      skipProviders: new Set(['anthropic']),
+    });
+    expect(result.model).toBe('oai-x');
+    expect(exec.seen).toEqual(['oai-x']);
+  });
 });

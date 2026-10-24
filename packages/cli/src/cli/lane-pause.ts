@@ -63,6 +63,50 @@ export function pauseLaneForBrokenBase(
   );
 }
 
+/** Emits the provider-cap lane-paused event: the issue went back to queued and claiming resumes at `resetAt` (#3226). */
+export function pauseLaneForProviderCap(
+  ctx: LanePauseContext,
+  issue: number,
+  cap: { providers: string[]; resetAt: string },
+): void {
+  const { lane, paths, emitEvent } = ctx;
+  const payload: LanePausedPayload = {
+    lane,
+    signature: '',
+    failingChecks: [],
+    firstIssue: issue,
+    secondIssue: issue,
+    cause: 'provider-cap',
+    resetAt: cap.resetAt,
+    providers: cap.providers,
+  };
+  emitEvent(
+    paths.events,
+    'lane-paused',
+    lane,
+    `lane '${lane}' paused: every provider for #${issue}'s stage is capped (${cap.providers.join(', ')}); #${issue} released to queued, claiming resumes at ${cap.resetAt}`,
+    { lane, lanePaused: payload },
+  );
+}
+
+/** Waits (STOP-aware, in slices) until `until` epoch ms; true when the STOP file ended the wait (#3226). */
+export async function waitForProviderReset(
+  ctx: LanePauseContext,
+  until: number | undefined,
+  now: () => Date,
+  sleep: (ms: number) => Promise<void>,
+  pathExists: (path: string) => boolean,
+): Promise<boolean> {
+  while (until !== undefined && now().getTime() < until) {
+    if (pathExists(ctx.paths.stop)) {
+      ctx.emitEvent(ctx.paths.events, 'stopped', ctx.lane, 'STOP file present', { lane: ctx.lane });
+      return true;
+    }
+    await sleep(Math.min(until - now().getTime(), 60_000));
+  }
+  return false;
+}
+
 /** Emits the lane-breaker lane-paused event and posts the lane-paused comment (#1918, #1919). */
 export async function tripLaneBreaker(
   ctx: LanePauseContext,
