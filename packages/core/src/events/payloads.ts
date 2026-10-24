@@ -78,12 +78,12 @@ export interface ProviderBreakerClosePayload {
   cause: 'cooldown' | 'creds_changed' | 'manual_reset';
 }
 
-/** Payload of a `provider_restored` event (#3236): a provider breaker closed, by any path. */
+/** Payload of a `provider_restored` event (#3236): a provider breaker closed, by any path; `probe` is a passed restore probe (#3339). */
 export interface ProviderRestoredPayload {
   provider: string;
   /** ISO instant of the close. */
   at: string;
-  cause: 'creds_changed' | 'manual_reset' | 'timed_reset';
+  cause: 'creds_changed' | 'manual_reset' | 'timed_reset' | 'probe';
 }
 
 /** Payload of a `provider_refused` event (#3335): failover refuses a provider whose login is metered (`api`) or unproven (`unknown`). Never carries a credential value. */

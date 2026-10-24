@@ -182,6 +182,33 @@ describe('pickOrderedProvider', () => {
   });
 });
 
+describe('pickOrderedProvider restore probe (#3339)', () => {
+  async function dueDeps(probe: () => Promise<void>) {
+    counter += 1;
+    let t = 0;
+    const breaker = new ProviderBreaker(join(dir, `probe-${counter}.json`), () => t);
+    await breaker.open('anthropic', 'usage_cap', 60_000, { cappedUntil: new Date(60_000).toISOString() });
+    t = 120_000;
+    return { router: routerWith(ORDERED_MODELS), breaker, probe: vi.fn(probe) };
+  }
+
+  it('returns the restored earlier provider when the probe succeeds', async () => {
+    const deps = await dueDeps(async () => {});
+    const pick = await pickOrderedProvider(deps, ALL, 'build', new Set());
+    expect(pick).toEqual({ provider: 'claude', model: 'claude-w', skipped: new Set() });
+    expect(deps.probe).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips the provider when the probe fails', async () => {
+    const deps = await dueDeps(async () => {
+      throw capErr();
+    });
+    const pick = await pickOrderedProvider(deps, ALL, 'build', new Set());
+    expect(pick).toMatchObject({ provider: 'codex', model: 'codex-w' });
+    expect([...(pick?.skipped ?? [])]).toEqual(['anthropic']);
+  });
+});
+
 describe('runWithProviderFailover', () => {
   async function setup(worker = ALL) {
     const log = vi.fn();

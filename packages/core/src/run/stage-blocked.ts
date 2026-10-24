@@ -9,6 +9,7 @@ import type { FailoverReason, FailurePhase } from '../types/index.js';
 import type { ProviderOrder } from '../config/provider-order.js';
 import type { BuildRoute, RunOutcome } from './outcome.js';
 import { STAGE_ROLE } from './provider-breaker-gate.js';
+import { probeDueProviders, type ProviderProbe } from './provider-probe.js';
 
 type ParkedProvidersDown = Extract<RunOutcome, { state: 'parked' }>['providersDown'];
 
@@ -227,6 +228,7 @@ export function providerCapGate(
   breaker: ProviderBreaker,
   request: GateRequest,
   log: GateLog,
+  probe?: ProviderProbe,
 ) {
   const { issue, branch } = request;
   const order = request.providerOrder;
@@ -261,6 +263,8 @@ export function providerCapGate(
     stageLog?: GateLog,
   ): Promise<StageGateVerdict> => {
     current = { stage, candidates };
+    // probe past-due earlier providers before the gate's status() reads can time-close them (#3339)
+    if (order && probe) await probeDueProviders({ router, breaker, probe, log }, order, stage);
     return decide(
       stage,
       await allProvidersDown(stage, { router, breaker, candidates, failoverEnabled, log: stageLog }),

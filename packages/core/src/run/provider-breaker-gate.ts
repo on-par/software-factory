@@ -12,6 +12,7 @@ import {
 } from '../config/provider-order.js';
 import { routerFailureOf } from '../router/executor-error.js';
 import type { BuildRoute } from './outcome.js';
+import { probeIfDue, type ProviderProbe } from './provider-probe.js';
 
 type GateLog = (
   type: EventKind,
@@ -126,9 +127,10 @@ export interface ProviderPick {
   skipped: Set<string>;
 }
 
-/** The first entry of `order` for the stage's role whose provider is not excluded and whose breaker is closed (#3338). */
+/** The first entry of `order` for the stage's role whose provider is not excluded and whose breaker is closed (#3338).
+ *  A provider whose cap has passed is probed first and, when the probe passes, is the pick (#3339). */
 export async function pickOrderedProvider(
-  deps: { router: Pick<ModelRouter, 'registryRef'>; breaker: ProviderBreaker },
+  deps: { router: Pick<ModelRouter, 'registryRef'>; breaker: ProviderBreaker; probe?: ProviderProbe; log?: GateLog },
   order: ProviderOrder,
   stage: FailoverStage,
   exclude: ReadonlySet<SubscriptionProviderId>,
@@ -141,6 +143,14 @@ export async function pickOrderedProvider(
     if (exclude.has(sub)) {
       skipped.add(def.provider);
       continue;
+    }
+    if (deps.probe) {
+      const probed = await probeIfDue({ ...deps, probe: deps.probe }, order, sub, def.provider, id);
+      if (probed === 'restored') return { provider: sub, model: id, skipped };
+      if (probed !== 'not-due') {
+        skipped.add(def.provider);
+        continue;
+      }
     }
     if ((await deps.breaker.status(def.provider)).open) {
       skipped.add(def.provider);
@@ -160,6 +170,7 @@ export async function runWithProviderFailover<T>(
   deps: {
     router: Pick<ModelRouter, 'registryRef'>;
     breaker: ProviderBreaker;
+    probe?: ProviderProbe;
     log: GateLog;
     issue: number;
     order: ProviderOrder;
