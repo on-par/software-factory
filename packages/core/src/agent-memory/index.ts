@@ -1,6 +1,6 @@
 // src/agent-memory/index.ts — optional per-lane PLAN memory (#3624). Read-only; updates ship by PR.
 
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { open, readdir, stat } from 'node:fs/promises';
 import { basename, join, relative } from 'node:path';
 
 import { laneSlug } from '../queue/github-queue.js';
@@ -34,16 +34,20 @@ export async function readAgentMemory(
   maxBytes: number = AGENT_MEMORY_MAX_BYTES,
 ): Promise<AgentMemoryResult> {
   const path = agentMemoryPath(root, lane);
+  let handle;
   try {
-    const info = await stat(path);
+    handle = await open(path, 'r');
+    const info = await handle.stat();
     if (!info.isFile()) return { kind: 'unreadable', path, error: 'not a regular file' };
     if (info.size > maxBytes) return { kind: 'oversized', path, bytes: info.size, maxBytes };
-    const content = await readFile(path, 'utf8');
+    const content = await handle.readFile('utf8');
     if (content.trim() === '') return { kind: 'absent', path };
     return { kind: 'loaded', path, lane, bytes: info.size, content };
   } catch (err) {
     if (isNotFound(err)) return { kind: 'absent', path };
     return { kind: 'unreadable', path, error: errorMessage(err) };
+  } finally {
+    await handle?.close();
   }
 }
 
