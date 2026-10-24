@@ -40,6 +40,7 @@ import {
 } from '@on-par/factory-core/internal';
 import type { OpenPullRequestEvidence } from './index.js';
 import {
+  AwaitMergeStoppedError,
   AwaitingReviewError,
   LandConflictError,
   LandFailureError,
@@ -268,25 +269,27 @@ export function prLookupFailure(issueNum: number, branch: string, err: unknown):
   );
 }
 
-export async function isPrMerged(octokit: Octokit, owner: string, repoName: string, branch: string): Promise<boolean> {
+export async function latestPrForBranch(
+  octokit: Octokit,
+  owner: string,
+  repoName: string,
+  branch: string,
+): Promise<{ number: number; merged: boolean } | null> {
   const { data: prs } = await octokit.rest.pulls.list({
     owner,
     repo: repoName,
     state: 'all',
     head: `${owner}:${branch}`,
   });
-  if (prs.length === 0) return false;
-  // Ship-it branch names get reused across separate runs for the same issue
-  // (e.g. a "verify-and-close" pass recreates the exact branch name an
-  // earlier, already-merged PR used) — GitHub PR numbers only increase, so
-  // the highest-numbered PR under this head is always the current one.
-  // Checking "was ANY PR ever merged under this branch name" (the old
-  // `state: 'closed'` + `.some()` behavior) matched the stale prior PR and
-  // falsely reported a brand-new, still-open PR under the same name as
-  // merged — waitForMerge then logged "landed" and skipped calling land(),
-  // leaving the real PR open forever while the lane believed it was done.
+  if (prs.length === 0) return null;
+  // Branch names get reused across runs; PR numbers only increase, so the highest-numbered PR is the current one
+  // (a stale merged PR under the same name must not make a new open PR look merged).
   const latest = prs.reduce((newest: any, pr: any) => (pr.number > newest.number ? pr : newest));
-  return Boolean(latest.merged_at);
+  return { number: latest.number, merged: Boolean(latest.merged_at) };
+}
+
+export async function isPrMerged(octokit: Octokit, owner: string, repoName: string, branch: string): Promise<boolean> {
+  return (await latestPrForBranch(octokit, owner, repoName, branch))?.merged ?? false;
 }
 
 /** queue-preflight only (it must see fork PRs to park them); land uses the core lookup (#3439). */
@@ -351,6 +354,8 @@ export type WaitForMergeDeps = {
   createOctokit?: () => Octokit;
   pathExists?: (path: string) => boolean;
   checkMerged?: typeof isPrMerged;
+  /** #3291: final PR lookup when STOP ends the wait, to tell a merged PR from an open one. */
+  lookupPr?: typeof latestPrForBranch;
   loadConfig?: (configPath: string) => FactoryConfig;
   land?: (
     issueNum: number,
@@ -396,6 +401,7 @@ export async function waitForMerge(
     createOctokit = landRuntime().getOctokit,
     pathExists = existsSync,
     checkMerged = isPrMerged,
+    lookupPr = latestPrForBranch,
     loadConfig = landRuntime().configLoaders.loadFactoryConfigForRepo,
     land = landIssue,
     listIssueLabels = defaultListIssueLabels,
@@ -485,4 +491,9 @@ export async function waitForMerge(
     writeLine(`[factory] #${issue} awaiting human merge (poll 120s)`);
     await sleep(120_000);
   }
+  // STOP ended the wait (#3291): a merged PR still lands; an open one goes back to the queue, never released as done.
+  const pr = await lookupPr(octokit, owner, repoName, branch).catch(() => null);
+  if (!pr?.merged)
+    throw new AwaitMergeStoppedError(`STOP during await-merge: PR on ${branch} left open`, branch, pr?.number ?? null);
+  emitEvent(paths.events, 'landed', issue, 'PR merged');
 }

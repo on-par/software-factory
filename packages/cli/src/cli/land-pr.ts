@@ -83,6 +83,18 @@ export class AwaitingCiError extends Error {
   }
 }
 
+/** Thrown when STOP ended waitForMerge before the PR merged (#3291). Not a park: the lane
+ *  re-queues the issue so the next run's preflight adopts and lands the open PR. */
+export class AwaitMergeStoppedError extends Error {
+  constructor(
+    message: string,
+    readonly branch: string,
+    readonly prNumber: number | null,
+  ) {
+    super(message);
+  }
+}
+
 export class LandFailureError extends Error {
   constructor(
     message: string,

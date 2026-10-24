@@ -37,6 +37,7 @@ export type EventKind =
   | 'approval_granted'
   | 'approval_requested'
   | 'await-merge'
+  | 'await-merge-stopped'
   | 'awaiting-ci'
   | 'awaiting-review'
   | 'base-hold-cleared'
@@ -256,6 +257,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   approval_granted: { severity: 'info', isPark: false, isTerminal: false },
   approval_requested: { severity: 'warn', isPark: false, isTerminal: false },
   'await-merge': { severity: 'info', isPark: false, isTerminal: false, laneStatus: 'waiting-merge' },
+  // STOP ended an await-merge with the PR still open; the issue is re-queued for preflight adopt (#3291). Not a park.
+  'await-merge-stopped': { severity: 'warn', isPark: false, isTerminal: true, laneStatus: 'stopped' },
   // A PR whose CI never registered a run waits for a backoff re-check (#3208). Not a park.
   'awaiting-ci': { severity: 'info', isPark: false, isTerminal: false },
   'awaiting-review': { severity: 'info', isPark: false, isTerminal: false },
