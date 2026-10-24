@@ -122,6 +122,8 @@ async function buildPhaseImpl(opts: {
   disablePublish?: boolean;
   /** Opt-in (#1867, build.publishFromBuild): the claude route sends the publishing prompt (push, open PR, wait for CI). Default false = commit-only on every route. Ignored when disablePublish is set. */
   publishFromBuild?: boolean;
+  /** false when runIssue drives provider failover from models.providerOrder (#3338): a usage cap rethrows to the phase boundary instead of entering the cross-harness ladder. Default true. */
+  crossProviderLadder?: boolean;
   modelOverride?: string;
   /** modelOverride is the user's build pin (#367, #2510). A pinned build crosses harnesses only on
    *  usage_cap or rate_limit; any other failure (local_auth included) parks like a pinned plan. */
@@ -307,6 +309,7 @@ async function buildPhaseImpl(opts: {
   } catch (err) {
     const routerFailure = routerFailureOf(err);
     const reason = routerFailure?.reason;
+    if (opts.crossProviderLadder === false && reason === 'usage_cap') throw err;
     const attempts = routerFailure?.attempts;
     // These all indicate a provider problem rather than a bad task. Preserve
     // the frozen spec and continue on the other provider when one is available.

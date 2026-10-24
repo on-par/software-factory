@@ -8,6 +8,7 @@ import type {
   ProviderAuthRejectedPayload,
   ProviderBreakerClosePayload,
   ProviderCappedPayload,
+  ProviderFailoverPayload,
   ProviderRefusedPayload,
   ProviderRestoredPayload,
   StewardTriggeredPayload,
@@ -344,6 +345,7 @@ export interface FactoryEvent {
   providerBreakerClose?: ProviderBreakerClosePayload; // Close cause on a provider_breaker_close event (#3232).
   allProvidersDown?: AllProvidersDownPayload; // Stage, providers and detail on an all_providers_down park (#3235).
   providerCapped?: ProviderCappedPayload; // Usage-cap details on a provider_capped event (#3337).
+  providerFailover?: ProviderFailoverPayload; // Stage and providers on a provider_failover event (#3338).
   providerRefused?: ProviderRefusedPayload; // Refused metered login on a provider_refused event (#3335).
   park?: ParkPayload; // Structured park reason/decision/lane/queue on a park event (#3511).
   lanePaused?: LanePausedPayload; // Breaker details on a `lane-paused` event (#1916).

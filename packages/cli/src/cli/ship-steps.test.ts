@@ -278,3 +278,39 @@ it('finishOutcome returns the branch without throwing for a provider-cap release
     spy.mockRestore();
   }
 });
+
+it('buildRunRequest passes providerOrder through when given and omits it otherwise (#3338)', () => {
+  const repoRoot = '/tmp/primary';
+  const paths = getFactoryPaths(repoRoot, '/tmp/relocated-factory');
+  const input = {
+    issueNum: 3338,
+    ghRepo: 'on-par/software-factory',
+    repoRoot,
+    branch: 'issue-3338',
+    specPath: `${paths.plans}/issue-3338.md`,
+    work: { id: 'x', kind: 'github-issue', title: 'T', brief: 'T', acceptanceCriteria: [] },
+    product: undefined,
+    runStartedAt: '2026-10-19T00:00:00Z',
+    lane: undefined,
+    opts: {},
+    autoRework: false,
+    planApprovalEnabled: false,
+    factoryConfig: { sandbox: {} } as FactoryConfig,
+    repoConfig: { version: 2 },
+    classifierPolicy: { enabled: false },
+    loaders: { resolveSkipCI: () => false },
+    efficiency: { maxReworkRounds: 0, fastPath: false } as RunRequestInput['efficiency'],
+    sizeGateMode: undefined,
+    maxSlices: undefined,
+    timeouts: { plan: 1, build: 1, check: 1, approval: 1, tests: 1 },
+    modelPins: { sources: {} },
+    codexOff: false,
+    failoverSettings: { enabled: false, cooldownMs: 1, fallbackModel: '' },
+    activeSandboxPolicy: undefined,
+    processGroupGraceMs: 1,
+    paths,
+  } satisfies RunRequestInput;
+  const providerOrder = { boss: ['a'], worker: ['b'], checker: ['c'], triage: [] };
+  expect(buildRunRequest({ ...input, providerOrder }).providerOrder).toEqual(providerOrder);
+  expect('providerOrder' in buildRunRequest(input)).toBe(false);
+});

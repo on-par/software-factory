@@ -2,6 +2,7 @@
 import type { Octokit } from '@octokit/rest';
 
 import { recordFlakes, setFlakyIssue, type FlakyThresholdEntry } from '../checkers/flaky-ledger.js';
+import type { CheckPhaseResult } from '../phases/check.js';
 import type { RunPorts, RunRequest } from './run-issue.js';
 
 function errorMessage(err: unknown): string {
@@ -83,5 +84,41 @@ export async function fileFlakyTests(args: {
     } catch (err) {
       log('environment_warning', `could not file the flaky-test issue for ${hit.test}: ${errorMessage(err)}`);
     }
+  }
+}
+
+/** Logs CHECK's serial flake re-run verdict and files the tests that passed on re-run (#2303). */
+export async function reportFlakeRerun(
+  check: CheckPhaseResult,
+  request: Pick<RunRequest, 'issue' | 'repo' | 'localOnly' | 'noPr' | 'flakyLedgerPath'>,
+  octokit: Octokit,
+  log: ReturnType<RunPorts['events']>,
+): Promise<void> {
+  const flake = check.flakeRerun;
+  if (!flake || flake.verdict === 'not-run' || !check.baseline) return;
+  log(
+    'flaky_tests',
+    `tests re-run ${flake.verdict} on base ${check.baseline.baseSha.slice(0, 8)} (${flake.mode}${flake.tests.length > 0 ? `: ${flake.tests.join(', ')}` : ''})`,
+    {
+      flakyTests: {
+        sha: check.baseline.baseSha,
+        checker: 'tests',
+        mode: flake.mode,
+        tests: flake.tests,
+        verdict: flake.verdict,
+        ...(flake.logPath !== undefined ? { logPath: flake.logPath } : {}),
+      },
+    },
+  );
+  if (flake.verdict === 'passed' && flake.tests.length > 0 && request.flakyLedgerPath !== undefined) {
+    await fileFlakyTests({
+      request,
+      octokit,
+      log,
+      file: request.flakyLedgerPath,
+      baseSha: check.baseline.baseSha,
+      tests: flake.tests,
+      logPath: flake.logPath,
+    });
   }
 }

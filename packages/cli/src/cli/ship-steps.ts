@@ -34,7 +34,7 @@ import {
   rewriteQueueForDecomposition,
   worktreeWorkspace,
 } from '@on-par/factory-core';
-import type { CheckResumeRecord, WorktreeSandbox } from '@on-par/factory-core/internal';
+import type { CheckResumeRecord, ProviderOrder, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
   findOpenPR,
   isEgressEnforced,
@@ -337,6 +337,8 @@ export interface RunRequestInput {
   activeSandboxPolicy: SandboxPolicy | undefined;
   processGroupGraceMs: number;
   paths: ReturnType<typeof getFactoryPaths>;
+  /** models.providerOrder from the repo file, refused providers filtered (#3338); undefined = off. */
+  providerOrder?: ProviderOrder;
 }
 
 export function buildRunRequest({
@@ -367,6 +369,7 @@ export function buildRunRequest({
   activeSandboxPolicy,
   processGroupGraceMs,
   paths,
+  providerOrder,
 }: RunRequestInput): RunRequest {
   const { repoConfigFileFor } = shipRuntime();
   return {
@@ -422,6 +425,7 @@ export function buildRunRequest({
     },
     processGroupGraceMs,
     preferredRoute: repoConfig?.route,
+    ...(providerOrder ? { providerOrder } : {}),
     ...(ctx?.resumeFrom
       ? {
           resumeFrom: {

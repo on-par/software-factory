@@ -41,7 +41,15 @@ import { withRunAttribution, type RunLogFn as LogFn } from './attribution.js';
 import { environmentReleaseMarker, parkPayload, publishParkComment, upsertMarkerComment } from './park-comment.js';
 import { createRunPhaseLogger } from './run-phase-log.js';
 import { providerFailureRecorder } from './provider-failure-recorder.js';
-import { gateOpencodeBuildOnBreaker, providerFallbackPreferrer } from './provider-breaker-gate.js';
+import { codexBuildBlocked, gateBuildTarget, pickOrderedProvider, type ProviderPick } from './provider-breaker-gate.js';
+import {
+  buildPickOptions,
+  buildTargetForPick,
+  planPickOptions,
+  providerStageRunner,
+  runCheckStage,
+  worktreeRestorer,
+} from './provider-order-stages.js';
 import { loadReusablePlan } from './plan-reuse-load.js';
 import { designCheckpointPark } from './design-checkpoint.js';
 import {
@@ -51,7 +59,7 @@ import {
   providersDownOf,
   type StageGateVerdict,
 } from './stage-blocked.js';
-import { fileFlakyTests } from './flaky-tests.js';
+import { reportFlakeRerun } from './flaky-tests.js';
 import { finishWithoutShip } from './local-finish.js';
 import { enterStackSlice, stackWaitOutcome } from './stack-slice-entry.js';
 import { recordShippedSlice } from './slice-ship-record.js';
@@ -68,12 +76,14 @@ import { resolveReviewRouting, type ReviewRouting } from '../review/routing.js';
 import { captureDiffBase } from '../checkers/design-smells.js';
 import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings, SizeGateMode } from '../config/index.js';
+import { defaultExecFn, type ExecFn } from '../utils/exec.js';
+import type { ProviderOrder } from '../config/provider-order.js';
 import { decideBuildRoute, type EffectiveModelPins, routeForBuildModel } from '../config/repo.js';
 import type { RunStewardPorts } from '../steward/run.js';
 import { describeDotnetEnv, dotnetEnvReport } from '../environment/dotnet.js';
 import { ProcessGroupTracker } from '../environment/process-groups.js';
 import type { ModelRouter } from '../router/index.js';
-import { gateBuildOnBreaker, type ProviderBreaker } from '../router/breaker.js';
+import type { ProviderBreaker } from '../router/breaker.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { describeSteering, type ConsumedSteering } from '../steering/index.js';
 import type { CiFailureEvidence, CheckSummary, Constitution, FailoverReason, FailurePhase } from '../types/index.js';
@@ -176,6 +186,8 @@ export interface RunRequest extends ReworkRequestFields {
   codexWorkspacePaths?: { primaryRepoRoot: string; writableRoots: readonly string[] };
   /** Grace period before escalating to SIGKILL when tearing down tracked process groups. */
   processGroupGraceMs: number;
+  /** models.providerOrder from the repo file, refused providers filtered (#3338); undefined = off (today's behavior). */
+  providerOrder?: ProviderOrder;
   /** Repo config pins the build route; forced after PLAN so the frozen spec stays authoritative. */
   preferredRoute?: BuildRoute;
   /** Resume at CHECK on a kept worktree (#2564): PLAN and BUILD are skipped. */
@@ -208,6 +220,8 @@ export interface RunPorts extends CiReworkPorts {
    *  on the park; absent → only the steward-triggered event is logged (#2086). */
   steward?: RunStewardPorts;
   router: ModelRouter;
+  /** git seam for the stage-start worktree snapshot (#3338); default defaultExecFn. */
+  gitExec?: ExecFn;
   /** Shadow classifier model call (#1725). Defaults to classifyPrShadow. */
   classifyPr?: (input: PrShadowInput) => Promise<PrShadowVerdict>;
   octokit: Octokit;
@@ -498,7 +512,8 @@ async function runIssueOnce(
   });
 
   const gateDeps = { router: ports.router, breaker: ports.breaker, log };
-  const preferFallbackWhenProviderIsOpen = providerFallbackPreferrer(gateDeps);
+  const runStage = providerStageRunner({ ...gateDeps, issue: request.issue }, request.providerOrder);
+  const gitExec = ports.gitExec ?? defaultExecFn;
   const capGate = providerCapGate(ports.router, ports.breaker, request, log);
 
   try {
@@ -638,9 +653,9 @@ async function runIssueOnce(
       const planGate = reused ? undefined : await capGate.enterPlan(route, ports.events('plan'));
       if (planGate?.released) return planGate.released;
       if (planGate?.down) return await parkAllProvidersDown(planGate.down);
-      const plan =
-        reused ??
-        (await planPhase({
+      const planAt = (pick: ProviderPick | undefined) =>
+        planPhase({
+          ...planPickOptions(pick, request.modelPins, ports.router.registryRef, planGate?.skip),
           previousAttempt: previousAttemptNote,
           issue: request.issue,
           repo: request.repo,
@@ -652,9 +667,6 @@ async function runIssueOnce(
           octokit: ports.octokit,
           log: ports.events('plan'),
           timeoutSeconds: request.timeouts.plan,
-          modelOverride: request.modelPins.plan,
-          modelFallbacks: request.modelPins.planFallback ? [request.modelPins.planFallback] : undefined,
-          skipProviders: planGate?.skip.size ? planGate.skip : undefined,
           onProviderFailure: rememberProviderFailureFor('plan'),
           branch: request.branch,
           approvalGate: request.options.approvePlan ? ports.createApprovalGate?.() : undefined,
@@ -674,7 +686,8 @@ async function runIssueOnce(
           updateIssueBodyOnEnrich: request.noPr ? false : request.readinessUpdateIssueBody,
           preferredRoute: pinnedRoute,
           onWorkerResult: phaseLogger.plan,
-        }));
+        });
+      const plan = reused ?? (await runStage('plan', planAt));
       route = plan.route;
       if (!plan.ok) {
         if (plan.stackWait) return stackWaitOutcome(plan.stackWait, request.branch, route);
@@ -748,45 +761,37 @@ async function runIssueOnce(
           ports.events('build')('steering_applied', describeSteering(buildSteering));
         }
       }
-      let breakerBlocked = false;
-      if (request.failover.enabled) {
-        const providers = [
-          ...new Set(
-            ports.router
-              .resolveAll('build_codex')
-              .map((m) => ports.router.registryRef.get(m)?.provider)
-              .filter((p): p is string => Boolean(p)),
-          ),
-        ];
-        const gate = await gateBuildOnBreaker({ breaker: ports.breaker, providers, log: ports.events('build') });
-        breakerBlocked = gate.codexBlocked;
-      }
+      const breakerBlocked =
+        request.failover.enabled && (await codexBuildBlocked(ports.router, ports.breaker, ports.events('build')));
 
       // PLAN honors pinnedRoute; re-apply it so a plan port that ignores it cannot route elsewhere.
       let buildRoute = pinnedRoute ?? plan.route;
       let buildModel = request.modelPins.build;
       let buildSwapReason: FailoverReason | undefined;
-      if (request.failover.enabled && buildRoute === 'opencode') {
-        const gate = await gateOpencodeBuildOnBreaker(gateDeps, {
-          opencodeModel: buildModel ?? ports.router.resolveAll('build_opencode')[0],
-          routePinned: request.preferredRoute !== undefined,
-          codexDisabled: request.codexDisabled || breakerBlocked,
-        });
-        if (gate?.kind === 'blocked') return await terminalEscalated(`build escalated: ${gate.message}`);
-        if (gate?.kind === 'swap') {
-          buildRoute = gate.route;
-          buildModel = gate.model;
-          buildSwapReason = gate.reason;
-        }
+      // providerOrder drives BUILD's provider pick and reruns (#3338) unless the repo pins the route (ADR-0092).
+      const orderedBuild = request.providerOrder !== undefined && request.preferredRoute === undefined;
+      if (orderedBuild && request.providerOrder) {
+        const first = await pickOrderedProvider(gateDeps, request.providerOrder, 'build', new Set());
+        if (first)
+          ({ route: buildRoute, model: buildModel } = buildTargetForPick(
+            first,
+            buildModel,
+            ports.router.registryRef,
+            buildRoute,
+          ));
       }
-      if (request.failover.enabled && buildRoute === 'claude') {
-        const primaryClaude = buildModel ?? ports.router.resolveAll('build_claude')[0];
-        const fallbackCodex = request.modelPins.buildFallback ?? ports.router.resolveAll('build_codex')[0];
-        const selected = await preferFallbackWhenProviderIsOpen(primaryClaude, fallbackCodex, 'BUILD');
-        if (selected && selected !== primaryClaude) {
-          buildRoute = 'codex';
-          buildModel = selected;
-        }
+      if (request.failover.enabled && !orderedBuild) {
+        const gated = await gateBuildTarget(
+          gateDeps,
+          { route: buildRoute, model: buildModel },
+          {
+            routePinned: request.preferredRoute !== undefined,
+            codexDisabled: request.codexDisabled || breakerBlocked,
+            buildFallback: request.modelPins.buildFallback,
+          },
+        );
+        if (gated.blocked) return await terminalEscalated(`build escalated: ${gated.blocked}`);
+        ({ route: buildRoute, model: buildModel, swapReason: buildSwapReason } = gated);
       }
       if (buildModel) {
         const compatible = routeForBuildModel(ports.router.registryRef, buildModel) === buildRoute;
@@ -804,41 +809,54 @@ async function runIssueOnce(
       const buildGate = await capGate.enterBuild(buildRoute, buildModel, route, breakerBlocked);
       if (buildGate.released) return buildGate.released;
       if (buildGate.down) return await parkAllProvidersDown(buildGate.down);
-      const build = await buildPhase({
-        budgetGuard: budgetStop.guard,
-        previousAttempt: previousAttemptNote,
-        runId,
-        issue: request.issue,
-        repo: request.repo,
-        worktree: ports.workspace.path,
-        specPath: request.specPath,
-        branch: request.branch,
-        constitution,
-        route: buildRoute,
-        router: ports.router,
-        log: ports.events('build'),
-        timeoutSeconds: request.timeouts.build,
-        skipCI: request.skipCI,
-        disablePublish: Boolean(request.localOnly || request.noPr),
-        publishFromBuild: request.publishFromBuild,
-        modelOverride: buildModel,
-        pinnedModel: buildModel !== undefined && buildModel === request.modelPins.build,
-        routePinned: request.preferredRoute !== undefined,
-        onWorkerResult: phaseLogger.build,
-        codexFallbackModel: request.modelPins.buildFallback ?? ports.router.resolveAll('build_codex')[0],
-        onProviderFailure: rememberProviderFailureFor('build'),
-        sandbox: request.sandboxPolicy,
-        steering: buildSteering,
-        appPort,
-        appBaseUrl,
-        codexDisabled: request.codexDisabled || breakerBlocked,
-        localOnly: request.localOnly,
-        autoFailover: { enabled: request.failover.enabled, fallbackModel: request.failover.fallbackModel },
-        onPgid,
-        laneId: request.lane,
-        parentBaseRef: request.parentBaseRef,
-        openQuestions: plan.designArtifact?.openQuestions,
-      });
+      const fallbackBuildRoute = pinnedRoute ?? plan.route;
+      const restoreBuild = orderedBuild
+        ? await worktreeRestorer(gitExec, ports.workspace.path, ports.events('build'))
+        : undefined;
+      const buildAt = (pick: ProviderPick | undefined) =>
+        buildPhase({
+          ...buildPickOptions(
+            pick,
+            { route: buildRoute, model: buildModel },
+            request.modelPins.build,
+            ports.router.registryRef,
+            fallbackBuildRoute,
+          ),
+          ...(orderedBuild ? { crossProviderLadder: false } : {}),
+          budgetGuard: budgetStop.guard,
+          previousAttempt: previousAttemptNote,
+          runId,
+          issue: request.issue,
+          repo: request.repo,
+          worktree: ports.workspace.path,
+          specPath: request.specPath,
+          branch: request.branch,
+          constitution,
+          router: ports.router,
+          log: ports.events('build'),
+          timeoutSeconds: request.timeouts.build,
+          skipCI: request.skipCI,
+          disablePublish: Boolean(request.localOnly || request.noPr),
+          publishFromBuild: request.publishFromBuild,
+          routePinned: request.preferredRoute !== undefined,
+          onWorkerResult: phaseLogger.build,
+          codexFallbackModel: request.modelPins.buildFallback ?? ports.router.resolveAll('build_codex')[0],
+          onProviderFailure: rememberProviderFailureFor('build'),
+          sandbox: request.sandboxPolicy,
+          steering: buildSteering,
+          appPort,
+          appBaseUrl,
+          codexDisabled: request.codexDisabled || breakerBlocked,
+          localOnly: request.localOnly,
+          autoFailover: { enabled: request.failover.enabled, fallbackModel: request.failover.fallbackModel },
+          onPgid,
+          laneId: request.lane,
+          parentBaseRef: request.parentBaseRef,
+          openQuestions: plan.designArtifact?.openQuestions,
+        });
+      const build = await (orderedBuild
+        ? runStage('build', buildAt, { beforeRerun: restoreBuild })
+        : buildAt(undefined));
       route = build.route;
       if (!build.ok && build.reason !== 'budget_exceeded') {
         if (build.sandboxEnv) return await terminalParked('sandbox-env', build.sandboxEnv);
@@ -910,38 +928,19 @@ async function runIssueOnce(
     };
     capGate.watchCheck(builtRoute, builtModel);
     await runRequestedReviewRework(request, ports, checkOpts);
-    const check = await checkPhase(checkOpts);
+    const check = await (request.providerOrder
+      ? runCheckStage(
+          runStage,
+          { ...gateDeps, order: request.providerOrder },
+          checkPhase,
+          checkOpts,
+          await worktreeRestorer(gitExec, ports.workspace.path, ports.events('check')),
+        )
+      : checkPhase(checkOpts));
     checkSummary = check.summary;
     observed.checkSummary = check.summary;
     reworkRounds = check.reworkRounds;
-    const flake = check.flakeRerun;
-    if (flake && flake.verdict !== 'not-run' && check.baseline) {
-      log(
-        'flaky_tests',
-        `tests re-run ${flake.verdict} on base ${check.baseline.baseSha.slice(0, 8)} (${flake.mode}${flake.tests.length > 0 ? `: ${flake.tests.join(', ')}` : ''})`,
-        {
-          flakyTests: {
-            sha: check.baseline.baseSha,
-            checker: 'tests',
-            mode: flake.mode,
-            tests: flake.tests,
-            verdict: flake.verdict,
-            ...(flake.logPath !== undefined ? { logPath: flake.logPath } : {}),
-          },
-        },
-      );
-      if (flake.verdict === 'passed' && flake.tests.length > 0 && request.flakyLedgerPath !== undefined) {
-        await fileFlakyTests({
-          request,
-          octokit: ports.octokit,
-          log,
-          file: request.flakyLedgerPath,
-          baseSha: check.baseline.baseSha,
-          tests: flake.tests,
-          logPath: flake.logPath,
-        });
-      }
-    }
+    await reportFlakeRerun(check, request, ports.octokit, log);
     const clearCheckResume = async (): Promise<void> => {
       if (!request.resumeFrom) return;
       try {
