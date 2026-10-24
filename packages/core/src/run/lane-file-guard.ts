@@ -16,6 +16,7 @@ import type { EventKind } from '../events/kinds.js';
 import { claimIsLive, claimLiveness } from '../queue/claim-liveness.js';
 import type { DesignArtifact } from '../types/index.js';
 import { branchFor } from '../utils/index.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 import type { BuildRoute, RunOutcome } from './outcome.js';
 
 export interface LaneFileClaim {
@@ -338,7 +339,7 @@ export function createGithubLaneClaimStalenessProbe(opts: {
       if (data.state === 'closed') return 'issue-closed';
       const labels = (data.labels ?? []).map((l) => (typeof l === 'string' ? l : (l?.name ?? '')));
       if (claimIsLive(claimLiveness(labels, (now ?? Date.now)()))) return undefined;
-      const branch = branchFor(claim.issue, data.title, branchPrefix);
+      const branch = branchFor(workKeyFromIssue(claim.issue), data.title, branchPrefix);
       const { data: prs } = await octokit.rest.pulls.list({
         owner,
         repo: repoName,

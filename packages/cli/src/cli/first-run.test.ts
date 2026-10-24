@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
-import { ConstitutionLoader, getConstitutionsDir } from '@on-par/factory-core';
+import { ConstitutionLoader, getConstitutionsDir, workKeyFromIssue } from '@on-par/factory-core';
 import {
   describeConstitutionSource,
   laneWorktreePath,
@@ -182,7 +182,7 @@ describe('factory init → lane worktree constitution (integration)', () => {
       repoRoot: repo,
       parent: join(root, 'worktrees'),
       repo: 'acme/widget',
-      issue: 2413,
+      key: workKeyFromIssue(2413),
       prefix: 'factory',
     });
     await setupWorktree(repo, 'factory/2413-marker', worktree, 'origin/main');
@@ -215,7 +215,7 @@ describe('factory init → lane worktree constitution (integration)', () => {
       repoRoot: repo,
       parent: join(root, 'worktrees'),
       repo: 'acme/widget',
-      issue: 2387,
+      key: workKeyFromIssue(2387),
       prefix: 'factory',
     });
     await setupWorktree(repo, 'factory/2387-default-code', worktree, 'origin/main');

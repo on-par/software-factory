@@ -22,6 +22,7 @@ import { buildPhase } from './build.js';
 import { checkPhase } from './check.js';
 import { planPhase } from './plan.js';
 import { shipPhase } from './ship.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 
 function makeTwoModelStubConfig(): ModelsConfig {
   const base = makeStubModelsConfig().models['stub-model'];
@@ -54,7 +55,7 @@ describe('pipeline integration', () => {
     const title = 'Full pipeline green path';
     const { origin, repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, issue);
-    const branch = branchFor(issue, title);
+    const branch = branchFor(workKeyFromIssue(issue), title);
     const specPath = await kit.makeSpecPath(issue);
     const { octokit, calls } = makeFakeOctokit({ [issue]: title });
     const events: Array<[string, string]> = [];
@@ -144,7 +145,7 @@ describe('pipeline integration', () => {
       const title = 'Full pipeline rework path';
       const { repoRoot } = await kit.makeThrowawayRepo();
       const worktree = kit.trackWorktree(repoRoot, issue);
-      const branch = branchFor(issue, title);
+      const branch = branchFor(workKeyFromIssue(issue), title);
       const specPath = await kit.makeSpecPath(issue);
       const { octokit, calls } = makeFakeOctokit({ [issue]: title });
       const events: Array<[string, string]> = [];
@@ -234,7 +235,7 @@ describe('pipeline integration', () => {
     const title = 'Worktree reset between failover attempts';
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, issue);
-    const branch = branchFor(issue, title);
+    const branch = branchFor(workKeyFromIssue(issue), title);
     const specPath = await kit.makeSpecPath(issue);
     const { octokit } = makeFakeOctokit({ [issue]: title });
     const events: Array<[string, string]> = [];

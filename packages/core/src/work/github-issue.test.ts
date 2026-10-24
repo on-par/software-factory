@@ -40,6 +40,7 @@ describe('createGithubIssueAdapter', () => {
     const request = await adapter.resolve({ repo: 'on-par/software-factory', issue: 505 });
 
     expect(request.id).toBe('github-issue:on-par/software-factory#505');
+    expect(request.key).toBe('505');
     expect(request.kind).toBe('github-issue');
     expect(request.title).toBe('Fix widget flicker');
     expect(request.brief).toBe(FACTORY_TASK_BODY);

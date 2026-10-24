@@ -32,6 +32,7 @@ import {
   slugify,
   type WorktreeSandbox,
 } from './index.js';
+import { toWorkKey, workKeyFromIssue, type WorkKey } from '../work/work-key.js';
 
 let tmpDir: string | undefined;
 const execFile = promisify(execFileCb);
@@ -77,23 +78,34 @@ describe('utils', () => {
   });
 
   it('builds a ship-it branch from issue and title by default, matching slugify', () => {
-    expect(branchFor(22, 'Reliably detect a merged PR')).toBe(`ship-it/22-${slugify('Reliably detect a merged PR')}`);
-    expect(branchFor(7, 'Hello, World!')).toBe('ship-it/7-hello-world');
+    expect(branchFor(workKeyFromIssue(22), 'Reliably detect a merged PR')).toBe(
+      `ship-it/22-${slugify('Reliably detect a merged PR')}`,
+    );
+    expect(branchFor(workKeyFromIssue(7), 'Hello, World!')).toBe('ship-it/7-hello-world');
   });
 
   it('adds an -sK- segment only for slice 2 and later (ADR-0147)', () => {
-    expect(branchFor(12, 'Add X', 'factory')).toBe('factory/12-add-x');
-    expect(branchFor(12, 'Add X', 'factory', 1)).toBe('factory/12-add-x');
-    expect(branchFor(12, 'Add X', 'factory', 2)).toBe('factory/12-s2-add-x');
+    expect(branchFor(workKeyFromIssue(12), 'Add X', 'factory')).toBe('factory/12-add-x');
+    expect(branchFor(workKeyFromIssue(12), 'Add X', 'factory', 1)).toBe('factory/12-add-x');
+    expect(branchFor(workKeyFromIssue(12), 'Add X', 'factory', 2)).toBe('factory/12-s2-add-x');
+  });
+
+  it('branchFor accepts a WorkKey and renders a numeric key as before', () => {
+    expect(branchFor('123' as WorkKey, 'Title', 'factory')).toBe('factory/123-title');
+  });
+
+  it("branchFor keeps a tracker key's casing", () => {
+    expect(branchFor(toWorkKey('PROJ-123'), 'Title', 'factory')).toBe('factory/PROJ-123-title');
+    expect(branchFor(toWorkKey('PROJ-123'), 'Title', 'factory', 2)).toBe('factory/PROJ-123-s2-title');
   });
 
   it('allows comparison runs to use a custom branch prefix', () => {
-    expect(branchFor(7, 'Hello, World!', 'compare-local')).toBe('compare-local/7-hello-world');
+    expect(branchFor(workKeyFromIssue(7), 'Hello, World!', 'compare-local')).toBe('compare-local/7-hello-world');
   });
 
   it('falls back to ship-it when the custom branch prefix has no slug characters', () => {
     expect(branchPrefixSlug('!!!')).toBe('ship-it');
-    expect(branchFor(7, 'Hello, World!', '!!!')).toBe('ship-it/7-hello-world');
+    expect(branchFor(workKeyFromIssue(7), 'Hello, World!', '!!!')).toBe('ship-it/7-hello-world');
   });
 
   it('factoryBranchPrefixes lists the resolved prefix then the legacy one, deduped', () => {

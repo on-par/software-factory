@@ -17,6 +17,7 @@ import {
   resolveMergePolicy,
   resolveSandboxPolicy,
   touchRunActivity,
+  workKeyFromIssue,
 } from '@on-par/factory-core';
 import type { OpenPrLookup, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
@@ -91,7 +92,7 @@ export async function landIssue(
   // ADR-0161: a stack layer lands by its exact branch, never by title guess or the Closes PR (the top layer).
   const guesses = opts.branch
     ? [opts.branch]
-    : factoryBranchPrefixes(resolved).map((p) => branchFor(issueNum, title, p));
+    : factoryBranchPrefixes(resolved).map((p) => branchFor(workKeyFromIssue(issueNum), title, p));
   const guessedBranch = guesses[0];
 
   let lookup: OpenPrLookup = { status: 'none' };

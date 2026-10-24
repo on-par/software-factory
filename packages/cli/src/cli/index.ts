@@ -140,6 +140,7 @@ import {
   validateQueue,
   watchUsage,
   writeLocalRunReport,
+  workKeyFromIssue,
   writeProxyState,
 } from '@on-par/factory-core';
 import {
@@ -2687,7 +2688,7 @@ function worktreePathFor(
     repoRoot,
     parent: loaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).worktree.parent,
     repo: ghRepo,
-    issue: issueNum,
+    key: workKeyFromIssue(issueNum),
     prefix,
   });
 }

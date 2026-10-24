@@ -19,6 +19,7 @@ import { buildPhase } from './build.js';
 import { checkPhase } from './check.js';
 import { planPhase } from './plan.js';
 import { shipPhase } from './ship.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 
 const repo = 'on-par/software-factory';
 const issue = 34;
@@ -34,7 +35,7 @@ describe('pipeline injection integration', () => {
       const title = 'Pipeline injection adversarial test';
       const { repoRoot } = await kit.makeThrowawayRepo();
       const worktree = kit.trackWorktree(repoRoot, issue);
-      const branch = branchFor(issue, title);
+      const branch = branchFor(workKeyFromIssue(issue), title);
       const specPath = await kit.makeSpecPath(issue);
       const { octokit, calls } = makeFakeOctokit({ [issue]: title }, { [issue]: fixture.content });
       const events: Array<[string, string]> = [];

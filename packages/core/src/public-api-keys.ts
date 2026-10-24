@@ -82,3 +82,6 @@ export const ITERATE_INTERNAL_KEYS = [
   'createOctokitIterateGitHub',
   'createFileIterateStore',
 ];
+
+/** Root names added by the WorkKey identity (ADR-0168, #3639). */
+export const WORK_KEY_API_KEYS = ['isNumericWorkKey', 'issueNumberOf', 'toWorkKey', 'workKeyFromIssue'];

@@ -18,6 +18,7 @@ import { checkPhase } from './check.js';
 import { planPhase } from './plan.js';
 import { shipPhase } from './ship.js';
 import { reworkRouteFor } from '../run/outcome.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 
 const exec = promisify(execCb);
 const repo = 'on-par/software-factory';
@@ -134,7 +135,7 @@ describe('Codex-only pipeline with a fake codex CLI (#2406, #2635)', () => {
       const title = 'Codex only loop';
       const { repoRoot } = await kit.makeThrowawayRepo();
       const worktree = kit.trackWorktree(repoRoot, issue);
-      const branch = branchFor(issue, title);
+      const branch = branchFor(workKeyFromIssue(issue), title);
       const specPath = await kit.makeSpecPath(issue);
       const specFile = join(binDir, 'spec.md');
       writeFileSync(

@@ -15,6 +15,7 @@ import { checkPhase } from './check.js';
 import { planPhase } from './plan.js';
 import { shipPhase } from './ship.js';
 import { reworkRouteFor } from '../run/outcome.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 
 const AGENTS: Record<string, { model: string; cmd: string }> = {
   codex: { model: 'gpt-5.6-terra-medium', cmd: 'codex' },
@@ -53,7 +54,7 @@ describe.skipIf(!selected)(`real ${agent} CLI full loop (#2649)`, () => {
     const body = 'Add a file `hello.txt` at the repository root containing exactly `hello`.';
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, issue);
-    const branch = branchFor(issue, title);
+    const branch = branchFor(workKeyFromIssue(issue), title);
     const specPath = await kit.makeSpecPath(issue);
     const { octokit } = makeFakeOctokit({ [issue]: title }, { [issue]: body });
     const events: Array<[string, string]> = [];

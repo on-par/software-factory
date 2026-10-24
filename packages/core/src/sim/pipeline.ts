@@ -17,6 +17,7 @@ import { ModelRouter } from '../router/index.js';
 import type { RunPolicy } from '../run/policy.js';
 import type { DesignArtifact } from '../types/index.js';
 import { branchFor, cleanupWorktree, setupWorktree } from '../utils/index.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 import { withGitLock } from '../utils/lock.js';
 import {
   deriveSimSeed,
@@ -275,7 +276,7 @@ async function runSimIssue(
     latency: options.latency,
     clock: options.clock,
   });
-  const branch = branchFor(spec.issue, spec.title);
+  const branch = branchFor(workKeyFromIssue(spec.issue), spec.title);
   const specPath = join(workspace.plansDir, `issue-${spec.issue}.md`);
   const worktree = `${workspace.repoRoot}-wt-${spec.issue}`;
 

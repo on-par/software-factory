@@ -6,18 +6,19 @@ import {
   addBranchPrefixOption,
   resolveBranchPrefixOption,
 } from './branch-prefix.js';
+import { workKeyFromIssue } from '@on-par/factory-core';
 
 describe('resolveBranchPrefixOption', () => {
   it('defaults to factory when the flag is omitted', () => {
     const prefix = resolveBranchPrefixOption(undefined);
     expect(prefix).toBe('factory');
-    expect(branchFor(42, 'Add a flag', prefix as string)).toBe('factory/42-add-a-flag');
+    expect(branchFor(workKeyFromIssue(42), 'Add a flag', prefix as string)).toBe('factory/42-add-a-flag');
   });
 
   it('uses the override in the branch name', () => {
     const prefix = resolveBranchPrefixOption('sf');
     expect(prefix).toBe('sf');
-    expect(branchFor(42, 'Add a flag', prefix as string)).toBe('sf/42-add-a-flag');
+    expect(branchFor(workKeyFromIssue(42), 'Add a flag', prefix as string)).toBe('sf/42-add-a-flag');
   });
 
   it('normalizes the value', () => {

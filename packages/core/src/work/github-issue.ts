@@ -9,6 +9,7 @@ import {
   type WorkRequestState,
   type WorkSourceAdapter,
 } from './index.js';
+import { workKeyFromIssue } from './work-key.js';
 
 export const GITHUB_ISSUE_SOURCE = 'github-issue';
 
@@ -87,6 +88,7 @@ export function createGithubIssueAdapter(client: WorkIssueClient): WorkSourceAda
 
       return {
         id: `${GITHUB_ISSUE_SOURCE}:${params.repo}#${params.issue}`,
+        key: workKeyFromIssue(params.issue),
         kind: GITHUB_ISSUE_SOURCE,
         title: data.title,
         brief,

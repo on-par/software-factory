@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { sweepWorktrees } from './worktree-gc.js';
 import { legacyWorktreeDirName, worktreeDirName } from './worktree-name.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 
 describe('sweepWorktrees lane names', () => {
   let parentDir: string;
@@ -28,9 +29,12 @@ describe('sweepWorktrees lane names', () => {
     parentDir = mkdtempSync(join(tmpdir(), 'gc-parent-'));
     const root = join(parentDir, 'software-factory');
     mkdirSync(root, { recursive: true });
-    const newWt = makeWorktree(worktreeDirName(basename(root), 31, 'factory'), 30 * 24 * 60 * 60 * 1000);
-    const oldWt = makeWorktree(legacyWorktreeDirName(basename(root), 32, 'factory'));
-    const manualWt = makeWorktree(worktreeDirName(basename(root), 33, 'factory'));
+    const newWt = makeWorktree(
+      worktreeDirName(basename(root), workKeyFromIssue(31), 'factory'),
+      30 * 24 * 60 * 60 * 1000,
+    );
+    const oldWt = makeWorktree(legacyWorktreeDirName(basename(root), workKeyFromIssue(32), 'factory'));
+    const manualWt = makeWorktree(worktreeDirName(basename(root), workKeyFromIssue(33), 'factory'));
     expect(basename(newWt)).toBe('software-factory-31');
 
     const runCommand = async (cmd: string) => {
