@@ -4,7 +4,7 @@ import { existsSync, statSync } from 'node:fs';
 
 import { parkReasonFor } from '@on-par/factory-core';
 import type { EventKind, getFactoryPaths, ParkPayload, RunOutcome } from '@on-par/factory-core';
-import { formatLoadHold, logEvent, nextRecheckAt, PARKED_LABEL, parkPayload } from '@on-par/factory-core/internal';
+import { formatLoadHold, logEvent, PARKED_LABEL, parkPayload } from '@on-par/factory-core/internal';
 import type {
   AwaitingCiRecord,
   LoadGuardDecision,
@@ -25,7 +25,8 @@ import {
   waitForProvidersRestored,
 } from './lane-pause.js';
 import { waitForMerge } from './land.js';
-import { AwaitingCiError, AwaitingReviewError } from './land-pr.js';
+import { noteAwaitingCi } from './awaiting-ci-wiring.js';
+import { AwaitMergeStoppedError, AwaitingCiError, AwaitingReviewError } from './land-pr.js';
 import { restoredLoggingBreaker } from './provider-restored-log.js';
 import { releaseKeepOnRequeue } from './worktree-keep.js';
 import { shipIssue } from './ship.js';
@@ -387,19 +388,17 @@ export async function runLane(
       }
       if (err instanceof AwaitingCiError) {
         // #3208: no CI run ever registered. Keep the PR open and record it for the backoff re-check; never a park.
-        const firstSeenAt = now().getTime();
-        const rec = { issue, prNumber: err.prNumber, branch: landBranch ?? '', headSha: err.headSha, firstSeenAt };
-        await recordAwaitingCi?.({ ...rec, attempts: 0, nextRecheckAt: nextRecheckAt(firstSeenAt, 0) }).catch((e) =>
-          emitAwaitingCi(
-            'warn',
-            issue,
-            `could not record awaiting-ci for PR #${err.prNumber}: ${shipRuntime().errorDetail(e)}`,
-          ),
-        );
-        emitAwaitingCi('awaiting-ci', issue, `PR #${err.prNumber} awaiting CI on ${err.headSha}; re-checking soon`);
+        await noteAwaitingCi(err, issue, landBranch ?? '', now().getTime(), recordAwaitingCi, emitAwaitingCi);
         awaitingReview++;
         streak = null;
         await settle(issue, 'done');
+        continue;
+      }
+      if (err instanceof AwaitMergeStoppedError) {
+        // #3291: STOP ended the merge wait with the PR open; re-queue so the next run adopts and lands it.
+        emitEvent(paths.events, 'await-merge-stopped', issue, `${err.message}; issue re-queued`, { lane });
+        streak = null;
+        await settle(issue, 'queued');
         continue;
       }
       if (err instanceof IssueSkippedError) {
