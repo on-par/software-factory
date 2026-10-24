@@ -54,7 +54,14 @@ export async function attachedRunLocks(registryFile: string = defaultRegistryPat
   const active: string[] = [];
   for (const e of listRepos(await loadRegistry(registryFile))) {
     if (e.state === 'detached') continue;
-    if (listLiveRunLocks(getFactoryPaths(e.path, e.stateRoot), defaultIsPidAlive).length > 0) active.push(e.slug);
+    // An unreadable issue-locks dir fails closed: treat the repo as active.
+    let held: boolean;
+    try {
+      held = listLiveRunLocks(getFactoryPaths(e.path, e.stateRoot), defaultIsPidAlive).length > 0;
+    } catch {
+      held = true;
+    }
+    if (held) active.push(e.slug);
   }
   return active;
 }

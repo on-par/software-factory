@@ -174,7 +174,7 @@ export function runLockDirFor(paths: RunLockPaths, scope: RunLockScope): string 
   return scope.kind === 'checkout' ? paths.runLock : join(paths.runLocks, scope.key);
 }
 
-/** Live holders of the checkout lock and every issue lock. Never throws. */
+/** Live holders of the checkout lock and every issue lock. Throws if the issue locks dir is unreadable (other than missing). */
 export function listLiveRunLocks(
   paths: RunLockPaths,
   isPidAlive: (pid: number) => boolean = defaultIsPidAlive,
@@ -184,8 +184,10 @@ export function listLiveRunLocks(
     for (const entry of readdirSync(paths.runLocks, { withFileTypes: true })) {
       if (entry.isDirectory()) dirs.push(join(paths.runLocks, entry.name));
     }
-  } catch {
-    // no issue locks dir yet — only the checkout lock can be live.
+  } catch (err) {
+    // no issue locks dir yet — only the checkout lock can be live. Anything else
+    // (EACCES, EIO) means we cannot see issue locks, so fail loudly, not silently.
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
   }
   const live: Array<{ lockDir: string; holder: RunLockHolder }> = [];
   for (const lockDir of dirs) {

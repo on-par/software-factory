@@ -782,7 +782,14 @@ export function createAutoUpdateDeps(opts: {
         .filter((r) => r.status === 'queued' || r.status === 'running')
         .map((r) => `daemon:${r.repo}#${r.issue}`);
       for (const e of await attached()) {
-        if (listLiveRunLocks(getFactoryPaths(e.path, e.stateRoot), defaultIsPidAlive).length > 0) active.push(e.slug);
+        // An unreadable issue-locks dir fails closed: treat the repo as active.
+        let held: boolean;
+        try {
+          held = listLiveRunLocks(getFactoryPaths(e.path, e.stateRoot), defaultIsPidAlive).length > 0;
+        } catch {
+          held = true;
+        }
+        if (held) active.push(e.slug);
       }
       return active;
     },

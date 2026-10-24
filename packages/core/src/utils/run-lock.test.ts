@@ -304,4 +304,11 @@ describe('withScopedRunLock', () => {
     const live = listLiveRunLocks(paths, (pid) => pid === otherPid).map((l) => l.lockDir);
     expect(live).toEqual([paths.runLock, liveDir]);
   });
+
+  it('listLiveRunLocks rethrows when the issue locks dir is unreadable for a reason other than missing', () => {
+    const paths = makePaths();
+    mkdirSync(join(paths.runLocks, '..'), { recursive: true });
+    writeFileSync(paths.runLocks, 'not a directory');
+    expect(() => listLiveRunLocks(paths, () => true)).toThrow();
+  });
 });

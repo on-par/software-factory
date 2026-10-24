@@ -1,18 +1,19 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { getFactoryPaths } from '@on-par/factory-core';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { attachedRunLocks } from './self-update-apply.js';
 
 describe('attachedRunLocks per-issue locks', () => {
+  const tmp = createTempDirs();
   let dir: string;
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'self-update-locks-'));
+    dir = tmp.makeSync('self-update-locks-');
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => tmp.cleanup());
 
   it('attachedRunLocks counts a repo whose only live lock is a per-issue run lock', async () => {
     const repo = join(dir, 'issue-only');
