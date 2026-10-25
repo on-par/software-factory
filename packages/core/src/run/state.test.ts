@@ -8,7 +8,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTempDirs } from '../harness/temp-dir.js';
 import { clearRepoSlugCache } from '../logger/repo-slug.js';
 import type { IssueRunState } from '../types/index.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 import {
+  isValidIssueRunState,
   listIssueRuns,
   nextIssueRunState,
   readIssueRunState,
@@ -52,7 +54,7 @@ describe('run/state', () => {
 
   describe('runStateFile', () => {
     it('names the file issue-<n>.json inside runsDir', () => {
-      expect(runStateFile('/tmp/runs', 972)).toBe('/tmp/runs/issue-972.json');
+      expect(runStateFile('/tmp/runs', workKeyFromIssue(972))).toBe('/tmp/runs/issue-972.json');
     });
   });
 
@@ -61,7 +63,7 @@ describe('run/state', () => {
       const worktree = mkdtempSync(join(tmpdir(), 'run-state-worktree-'));
       initGitRepo(worktree);
       const runsDir = join(mkdtempSync(join(tmpdir(), 'run-state-runs-')), 'nested', 'runs');
-      const file = runStateFile(runsDir, 972);
+      const file = runStateFile(runsDir, workKeyFromIssue(972));
 
       const returned = await writeIssueRunState(file, fixtureState(worktree));
 
@@ -75,7 +77,7 @@ describe('run/state', () => {
       const worktree = mkdtempSync(join(tmpdir(), 'run-state-worktree-'));
       initGitRepo(worktree);
       const runsDir = mkdtempSync(join(tmpdir(), 'run-state-runs-'));
-      const file = runStateFile(runsDir, 972);
+      const file = runStateFile(runsDir, workKeyFromIssue(972));
 
       const returned = await writeIssueRunState(file, fixtureState(worktree, { repo: 'acme/widgets' }));
 
@@ -87,7 +89,7 @@ describe('run/state', () => {
     it('omits the repo key entirely when the slug cannot be resolved, without throwing', async () => {
       const worktree = mkdtempSync(join(tmpdir(), 'run-state-worktree-'));
       const runsDir = mkdtempSync(join(tmpdir(), 'run-state-runs-'));
-      const file = runStateFile(runsDir, 972);
+      const file = runStateFile(runsDir, workKeyFromIssue(972));
 
       const returned = await writeIssueRunState(file, fixtureState(worktree));
 
@@ -102,7 +104,7 @@ describe('run/state', () => {
       const worktree = mkdtempSync(join(tmpdir(), 'run-state-worktree-'));
       initGitRepo(worktree);
       const runsDir = mkdtempSync(join(tmpdir(), 'run-state-runs-'));
-      const file = runStateFile(runsDir, 972);
+      const file = runStateFile(runsDir, workKeyFromIssue(972));
       await writeIssueRunState(file, fixtureState(worktree));
 
       const read = await readIssueRunState(file);
@@ -115,7 +117,7 @@ describe('run/state', () => {
 
     it('reads a legacy record with no repo field back with repo undefined', async () => {
       const runsDir = mkdtempSync(join(tmpdir(), 'run-state-runs-'));
-      const file = runStateFile(runsDir, 972);
+      const file = runStateFile(runsDir, workKeyFromIssue(972));
       const legacy = fixtureState('/nonexistent');
       writeFileSync(file, JSON.stringify(legacy));
 
@@ -271,6 +273,21 @@ describe('listIssueRuns', () => {
     const { runs, skipped } = await listIssueRuns(fixtureDir());
     expect(runs.map((r) => r.issue)).toEqual([2, 3, 10]);
     expect(skipped).toEqual(['issue-5.json', 'issue-6.json', 'issue-7.json', 'issue-9.json']);
+  });
+
+  it('keeps a zero-padded file name valid when the record issue matches its number', async () => {
+    const dir = dirs.makeSync('list-runs-');
+    writeFileSync(join(dir, 'issue-007.json'), record(7));
+    const { runs, skipped } = await listIssueRuns(dir);
+    expect(runs.map((r) => r.issue)).toEqual([7]);
+    expect(skipped).toEqual([]);
+  });
+
+  it('validates a record against the number of its work key', () => {
+    const state = JSON.parse(record(7)) as IssueRunState;
+    expect(isValidIssueRunState(state, workKeyFromIssue(7))).toBe(true);
+    expect(isValidIssueRunState(state, workKeyFromIssue(8))).toBe(false);
+    expect(isValidIssueRunState(null, workKeyFromIssue(7))).toBe(false);
   });
 
   it('returns an empty result for a missing runs dir', async () => {

@@ -4,6 +4,7 @@ import type { ProcessGroupTracker } from '../environment/process-groups.js';
 import type { EventKind } from '../events/kinds.js';
 import type { BudgetGuard } from '../router/budget-guard.js';
 import { upsertWorktreeKeep } from '../utils/worktree-keeps.js';
+import { issueNumberOf, type WorkKey } from '../work/work-key.js';
 
 export const BUDGET_KEEP_REASON = 'budget_exceeded';
 
@@ -44,7 +45,7 @@ export function enforceIssueBudget(input: {
   phase: string;
   spend: number;
   cap: number | undefined;
-  issue: number;
+  key: WorkKey;
   worktreePath: string;
   keepsFile?: string;
   log: (type: EventKind, msg: string) => void;
@@ -52,7 +53,7 @@ export function enforceIssueBudget(input: {
   /** Set when the guard stopped a live session; always parks, with the during-phase message. */
   stop?: SessionBudgetStop;
 }): string | undefined {
-  const { phase, spend, cap, issue, worktreePath, keepsFile, log, now, stop } = input;
+  const { phase, spend, cap, key, worktreePath, keepsFile, log, now, stop } = input;
   if (cap === undefined || (!stop && spend <= cap)) return undefined;
   const message = stop
     ? `per-issue budget exceeded during ${phase}: $${stop.spendUsd.toFixed(2)} > $${cap.toFixed(2)} (stopped at model call ${stop.calls})`
@@ -61,13 +62,13 @@ export function enforceIssueBudget(input: {
   if (keepsFile) {
     try {
       upsertWorktreeKeep(keepsFile, {
-        issue,
+        issue: issueNumberOf(key),
         path: worktreePath,
         reason: BUDGET_KEEP_REASON,
         since: (now?.() ?? new Date()).toISOString(),
       });
     } catch (err: any) {
-      log('warn', `could not record the kept worktree for #${issue}: ${err?.message ?? String(err)}`);
+      log('warn', `could not record the kept worktree for #${key}: ${err?.message ?? String(err)}`);
     }
   }
   return message;

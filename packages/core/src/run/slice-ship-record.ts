@@ -7,12 +7,13 @@ import type { EventKind } from '../events/kinds.js';
 import { updateParentStackOrder } from '../phases/stack-order.js';
 import { upsertSlicePlanComment } from '../readiness/slice-plan-github.js';
 import { type SlicePlan, withSliceState } from '../readiness/slice-plan.js';
+import { issueNumberOf, type WorkKey } from '../work/work-key.js';
 
 /** Returns the failure message when the slice-plan comment write failed (the caller parks); undefined otherwise. */
 export async function recordShippedSlice(opts: {
   octokit: Octokit;
   repo: string;
-  issue: number;
+  key: WorkKey;
   branch: string;
   plan: SlicePlan;
   index: number;
@@ -20,7 +21,7 @@ export async function recordShippedSlice(opts: {
   stackMode: boolean;
   log: (type: EventKind, msg: string) => void;
 }): Promise<string | undefined> {
-  const { octokit, repo, issue, branch, plan, index, ship, stackMode, log } = opts;
+  const { octokit, repo, key, branch, plan, index, ship, stackMode, log } = opts;
   const count = plan.slices.length;
   if (ship.prNumber === undefined) {
     log('ship', `slice ${index}/${count} shipped with no PR number — slice plan not updated`);
@@ -31,7 +32,7 @@ export async function recordShippedSlice(opts: {
     await upsertSlicePlanComment({
       octokit,
       repo,
-      issue,
+      issue: issueNumberOf(key),
       plan: withSliceState(plan, index, state, ship.prNumber, branch),
     });
   } catch (err) {

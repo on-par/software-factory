@@ -4,6 +4,7 @@ import type { Octokit } from '@octokit/rest';
 
 import type { RunLogFn } from './attribution.js';
 import { readWorktreeHead as readWorktreeHeadDefault } from './ci-suppression-guard.js';
+import { issueNumberOf, workKeyFromIssue, type WorkKey } from '../work/work-key.js';
 import type { RunPorts, RunRequest } from './run-issue.js';
 import { issueBodyHash, type PlanReuseRecord } from './resume-context.js';
 
@@ -18,11 +19,11 @@ function errorMessage(err: unknown): string {
 export async function readNeedsDesignLabel(
   octokit: Octokit,
   repo: string,
-  issue: number,
+  key: WorkKey,
 ): Promise<{ present: boolean; error?: string }> {
   try {
     const [owner, name] = repo.split('/');
-    const { data } = await octokit.rest.issues.get({ owner, repo: name, issue_number: issue });
+    const { data } = await octokit.rest.issues.get({ owner, repo: name, issue_number: issueNumberOf(key) });
     const present = data.labels.some(
       (label) => (typeof label === 'string' ? label : (label.name ?? '')).trim().toLowerCase() === NEEDS_DESIGN_LABEL,
     );
@@ -33,11 +34,11 @@ export async function readNeedsDesignLabel(
 }
 
 /** The park message: why the run paused, where the plan is, and how to approve. */
-export function designCheckpointMessage(input: { issue: number; specPath: string; branch: string }): string {
+export function designCheckpointMessage(input: { key: WorkKey; specPath: string; branch: string }): string {
   return (
-    `design checkpoint: issue #${input.issue} is labeled ${NEEDS_DESIGN_LABEL}, so the run paused after PLAN for a human design review. ` +
+    `design checkpoint: issue #${input.key} is labeled ${NEEDS_DESIGN_LABEL}, so the run paused after PLAN for a human design review. ` +
     `Plan artifact: ${input.specPath} (branch ${input.branch}). ` +
-    `To approve, review the plan, remove the ${NEEDS_DESIGN_LABEL} label, then run \`factory unpark ${input.issue}\`. ` +
+    `To approve, review the plan, remove the ${NEEDS_DESIGN_LABEL} label, then run \`factory unpark ${input.key}\`. ` +
     'BUILD resumes on the same plan and branch. Editing the issue body re-plans.'
   );
 }
@@ -53,7 +54,7 @@ export async function designCheckpointPark(
   log: RunLogFn,
 ): Promise<string | undefined> {
   if (request.work.kind !== 'github-issue' || request.localOnly) return undefined;
-  const label = await readNeedsDesignLabel(ports.octokit, request.repo, request.issue);
+  const label = await readNeedsDesignLabel(ports.octokit, request.repo, workKeyFromIssue(request.issue));
   if (label.error) {
     log('environment_warning', `could not read labels for the design checkpoint: ${label.error} — continuing to BUILD`);
   }
@@ -71,5 +72,9 @@ export async function designCheckpointPark(
       log('environment_warning', `could not record the plan-reuse record: ${errorMessage(err)}`);
     }
   }
-  return designCheckpointMessage({ issue: request.issue, specPath: request.specPath, branch: request.branch });
+  return designCheckpointMessage({
+    key: workKeyFromIssue(request.issue),
+    specPath: request.specPath,
+    branch: request.branch,
+  });
 }

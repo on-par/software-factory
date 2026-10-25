@@ -87,7 +87,7 @@ import type { ProviderBreaker } from '../router/breaker.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import { describeSteering, type ConsumedSteering } from '../steering/index.js';
 import type { CiFailureEvidence, CheckSummary, Constitution, FailoverReason, FailurePhase } from '../types/index.js';
-import type { WorkRequest, WorkRequestSourceKind } from '../work/index.js';
+import { type WorkRequest, type WorkRequestSourceKind, workKeyFromIssue } from '../work/index.js';
 import {
   deferOnLaneCollision,
   releaseLaneClaim,
@@ -503,7 +503,7 @@ async function runIssueOnce(
 
   const assertBudget = async (phase: string): Promise<RunOutcome | undefined> => {
     // prettier-ignore
-    const message = enforceIssueBudget({ phase, spend: ports.getIssueSpend?.() ?? 0, cap: policy.budget.perIssueCapUsd, issue: request.issue, worktreePath: ports.workspace.path, keepsFile: request.worktreeKeepsPath, log, stop: budgetStop.stopped() });
+    const message = enforceIssueBudget({ phase, spend: ports.getIssueSpend?.() ?? 0, cap: policy.budget.perIssueCapUsd, key: workKeyFromIssue(request.issue), worktreePath: ports.workspace.path, keepsFile: request.worktreeKeepsPath, log, stop: budgetStop.stopped() });
     return message === undefined ? undefined : terminalParked('fail', message);
   };
 
@@ -1188,7 +1188,7 @@ async function runIssueOnce(
       const failure = await recordShippedSlice({
         octokit: ports.octokit,
         repo: request.repo,
-        issue: request.issue,
+        key: workKeyFromIssue(request.issue),
         branch: request.branch,
         plan: planSlice.plan,
         index: planSlice.index,

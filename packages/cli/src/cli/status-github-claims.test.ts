@@ -37,7 +37,7 @@ describe('cli status', () => {
       );
     };
     const writeSnapshot = (ageMs: number) =>
-      FactoryCore.writePhaseSnapshot(FactoryCore.phaseSnapshotFile(paths().runs, 3316), {
+      FactoryCore.writePhaseSnapshot(FactoryCore.phaseSnapshotFile(paths().runs, FactoryCore.workKeyFromIssue(3316)), {
         issue: 3316,
         phase: 'check',
         updatedAt: new Date().toISOString(),

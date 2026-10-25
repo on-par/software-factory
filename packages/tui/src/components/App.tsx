@@ -10,7 +10,6 @@ import {
   followEvents,
   listPendingApprovals,
   listQueuedSteering,
-  phaseSnapshotFile,
   ProviderBreaker,
   type QueueSnapshot,
   queueSteeringMessage,
@@ -44,6 +43,7 @@ import { TAB_ORDER, type TabName } from '../tabs/types.js';
 import { ApprovalPrompt } from './ApprovalPrompt.js';
 import { Dashboard, staleLanesLine } from './Dashboard.js';
 import { Header } from './Header.js';
+import { readLaneHeartbeat } from './lane-heartbeat.js';
 import { summarizeLane } from './LaneList.js';
 import { collapseMerged, LaneView } from './LaneView.js';
 import { RunDetail } from './RunDetail.js';
@@ -240,11 +240,7 @@ export function App({
         // Only non-terminal lanes can go stale, so only they need a heartbeat.
         await Promise.all(
           state.lanes.filter(isNonTerminalLane).map(async (lane) => {
-            try {
-              next[lane.issue] = (await readSnapshotFn(phaseSnapshotFile(runsDir, Number(lane.issue))))?.lastActivityAt;
-            } catch {
-              next[lane.issue] = undefined;
-            }
+            next[lane.issue] = await readLaneHeartbeat(runsDir, lane.issue, readSnapshotFn);
           }),
         );
         if (!cancelled) setHeartbeats(next);

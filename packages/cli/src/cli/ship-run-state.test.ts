@@ -1,4 +1,5 @@
 // packages/cli/src/cli/ship-run-state.test.ts — shipIssue persists IssueRunState as the run progresses (#3194)
+import { workKeyFromIssue } from '@on-par/factory-core';
 import { appendSteerEvent, readIssueRunState, runStateFile, writeIssueRunState } from '@on-par/factory-core/internal';
 import { describe, expect, it } from 'vitest';
 
@@ -16,7 +17,7 @@ describe('shipIssue run state (#3194)', () => {
     h.shipResult = { ok: true, prNumber: 7 };
     let seen: Awaited<ReturnType<typeof readIssueRunState>> = null;
     phases.buildPhase.mockImplementation(async () => {
-      seen = await readIssueRunState(runStateFile(paths().runs, 42));
+      seen = await readIssueRunState(runStateFile(paths().runs, workKeyFromIssue(42)));
       return h.buildResult;
     });
 
@@ -51,7 +52,7 @@ describe('shipIssue run state (#3194)', () => {
   it('a run parked in CHECK shows status parked and keeps its first-write startedAt', async () => {
     let firstStartedAt: string | undefined;
     phases.buildPhase.mockImplementation(async () => {
-      firstStartedAt = (await readIssueRunState(runStateFile(paths().runs, 42)))?.startedAt;
+      firstStartedAt = (await readIssueRunState(runStateFile(paths().runs, workKeyFromIssue(42))))?.startedAt;
       return h.buildResult;
     });
     h.checkResult = {
@@ -70,7 +71,7 @@ describe('shipIssue run state (#3194)', () => {
   });
 
   it('hands a re-dispatched parked issue its previous attempt before the recorder overwrites it (#3373)', async () => {
-    await writeIssueRunState(runStateFile(paths().runs, 42), {
+    await writeIssueRunState(runStateFile(paths().runs, workKeyFromIssue(42)), {
       issue: 42,
       lane: 'bugfix',
       status: 'parked',
@@ -111,7 +112,7 @@ describe('shipIssue run state (#3194)', () => {
       summary: 'use the new API',
     };
     phases.buildPhase.mockImplementation(async () => {
-      const file = runStateFile(paths().runs, 42);
+      const file = runStateFile(paths().runs, workKeyFromIssue(42));
       const state = await readIssueRunState(file);
       if (state) await writeIssueRunState(file, appendSteerEvent(state, event));
       return h.buildResult;
@@ -119,17 +120,17 @@ describe('shipIssue run state (#3194)', () => {
 
     await shipIssue(42, {}, ctx());
 
-    const final = await readIssueRunState(runStateFile(paths().runs, 42));
+    const final = await readIssueRunState(runStateFile(paths().runs, workKeyFromIssue(42)));
     expect(final?.steers).toEqual([event]);
   });
 });
 
 describe('phaseRecorder (#3146)', () => {
   it('writes a phase snapshot for the issue with matching updatedAt and lastActivityAt', async () => {
-    const { phaseSnapshotFile, readPhaseSnapshot } = await import('@on-par/factory-core');
+    const { phaseSnapshotFile, readPhaseSnapshot, workKeyFromIssue } = await import('@on-par/factory-core');
     const { phaseRecorder } = await import('./ship-run-state.js');
     await phaseRecorder(paths().runs, 42)('build');
-    const snap = await readPhaseSnapshot(phaseSnapshotFile(paths().runs, 42));
+    const snap = await readPhaseSnapshot(phaseSnapshotFile(paths().runs, workKeyFromIssue(42)));
     expect(snap).toMatchObject({ issue: 42, phase: 'build' });
     expect(snap?.lastActivityAt).toBe(snap?.updatedAt);
   });
