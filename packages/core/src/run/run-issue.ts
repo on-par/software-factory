@@ -129,7 +129,7 @@ export interface RunRequest extends ReworkRequestFields {
   previousAttempt?: IssueRunState | null;
   /** ADR-0161 stack mode: the 1-based slice to plan. Set by runIssue's stack loop; undefined = the gate's current slice. */
   sliceIndex?: number;
-  issue: number;
+  issue: number; // numeric queue/CLI boundary (until #3460/#3461): converted once via workKeyFromIssue; used only at unmigrated numeric seams and as the Octokit issue_number
   repo: string;
   branch: string;
   specPath: string;
@@ -339,7 +339,7 @@ async function runIssueOnce(
   const previousAttemptNote = renderPreviousAttempt(request.previousAttempt);
   const phaseLogger = createRunPhaseLogger({
     logsDir: request.logsDir,
-    issue: request.issue,
+    issue: workKey,
     runId,
     log: (type, message) => log(type, message),
   });
@@ -555,7 +555,7 @@ async function runIssueOnce(
         [
           'config preflight failed before PLAN:',
           ...lint.findings.map((f) => f.message),
-          `then run factory unpark ${request.issue}`,
+          `then run factory unpark ${workKey}`,
         ].join('\n'),
       );
     }
@@ -587,7 +587,7 @@ async function runIssueOnce(
       if (health?.kind === 'red' && health.baseSha !== undefined) {
         log(
           'environment-released',
-          `origin/main ${health.baseSha.slice(0, 8)} fails ${health.failingChecks.join(', ')} before PLAN — no model calls, releasing #${request.issue} to queued`,
+          `origin/main ${health.baseSha.slice(0, 8)} fails ${health.failingChecks.join(', ')} before PLAN — no model calls, releasing #${workKey} to queued`,
         );
         return {
           state: 'released',
@@ -619,7 +619,7 @@ async function runIssueOnce(
     if (resumed) {
       ports.events('check')(
         'check',
-        `resuming #${request.issue} from CHECK on kept branch ${request.branch} — PLAN and BUILD skipped`,
+        `resuming #${workKey} from CHECK on kept branch ${request.branch} — PLAN and BUILD skipped`,
       );
       route = resumed.route;
       planRoute = resumed.route;
@@ -698,11 +698,11 @@ async function runIssueOnce(
         if (decomposedChildren.length > 0) {
           await ports.onDecomposed?.(decomposedChildren);
           const childList = decomposedChildren.map((n) => `#${n}`).join(', ');
-          return { state: 'escalated', reason: `issue #${request.issue} decomposed into ${childList}`, route };
+          return { state: 'escalated', reason: `issue #${workKey} decomposed into ${childList}`, route };
         }
         if (plan.sliced) {
           return await terminalEscalated(
-            `issue #${request.issue} sliced into ${plan.sliced.sliceCount} slice(s): ${plan.escalate ?? 'slice plan recorded'}`,
+            `issue #${workKey} sliced into ${plan.sliced.sliceCount} slice(s): ${plan.escalate ?? 'slice plan recorded'}`,
           );
         }
         if (plan.parkReason === 'config') {
@@ -1021,7 +1021,7 @@ async function runIssueOnce(
         }
         log(
           'environment-released',
-          `every failing checker (${env.failingChecks.join(', ')}) also fails on base ${env.baseSha.slice(0, 8)} — no rework, releasing #${request.issue} to queued` +
+          `every failing checker (${env.failingChecks.join(', ')}) also fails on base ${env.baseSha.slice(0, 8)} — no rework, releasing #${workKey} to queued` +
             (preserve
               ? ` — ${formatPreservedBuildMessage({ issue: workKey, branch: request.branch, buildMinutes, fixTarget })}`
               : ''),

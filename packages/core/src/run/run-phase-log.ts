@@ -5,13 +5,14 @@ import { join } from 'node:path';
 
 import { redactText } from '../filing/redact.js';
 import type { RouterResult } from '../router/index.js';
+import type { WorkKey } from '../work/index.js';
 
 const MAX_BYTES = 1_048_576;
 const MARKER = /\n\[truncated (\d+) bytes\]$/;
 
 export interface RunPhaseLogOptions {
   logsDir?: string;
-  issue: number;
+  issue: WorkKey;
   runId: string;
   phase: 'plan' | 'build' | `build-r${number}`;
   result: RouterResult;
@@ -128,7 +129,7 @@ function appendCapped(prior: string, section: string): string {
 
 export function createRunPhaseLogger(opts: {
   logsDir?: string;
-  issue: number;
+  issue: WorkKey;
   runId: string;
   log: (type: 'warn', message: string) => void;
 }): RunPhaseLogger {
