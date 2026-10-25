@@ -1,10 +1,11 @@
 // packages/cli/src/cli/lane-park-comment.ts — upsert the issue park comment for a park raised outside runIssue (#3534)
 
-import type { ParkReason } from '@on-par/factory-core';
+import { workKeyFromIssue } from '@on-par/factory-core';
+import type { ParkReason, WorkKey } from '@on-par/factory-core';
 import { publishParkComment } from '@on-par/factory-core/internal';
 import type { Octokit } from '@octokit/rest';
 
-const failure = (issue: number, detail: string): string =>
+const failure = (issue: WorkKey, detail: string): string =>
   `could not post the issue park comment for #${issue}: ${detail}`;
 
 /** Upserts the single `factory-issue-state` comment. Fail-closed: returns the warning text
@@ -41,7 +42,7 @@ export const laneParkCommenter =
     const { getOctokit, ghRepo, repoRoot, runId, lane, readParkSha } = opts;
     if (!getOctokit) return;
     const readHead = () => (branch ? readParkSha(branch) : Promise.reject(new Error('no branch')));
-    const input = { issue, reason, message, runId, branch: branch || '-', lane, blockers: [] };
+    const input = { issue: workKeyFromIssue(issue), reason, message, runId, branch: branch || '-', lane, blockers: [] };
     const failed = await tryPublishParkComment(getOctokit, ghRepo, repoRoot, readHead, input);
     if (failed) warn(issue, failed);
   };

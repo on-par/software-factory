@@ -2,11 +2,11 @@ import type { Octokit } from '@octokit/rest';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ParkReason } from './outcome.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 import {
   environmentReleaseMarker,
   findOwnParkComment,
   issueStateMarker,
-  patchParkComment,
   parkPayload,
   parkUnblockHint,
   publishParkComment,
@@ -17,6 +17,8 @@ import {
   upsertParkComment,
   type ParkCommentInput,
 } from './park-comment.js';
+
+const K7 = workKeyFromIssue(7);
 
 const ME = 99;
 const REASONS: ParkReason[] = [
@@ -35,7 +37,7 @@ const REASONS: ParkReason[] = [
 
 function input(overrides: Partial<ParkCommentInput> = {}): ParkCommentInput {
   return {
-    issue: 7,
+    issue: K7,
     reason: 'fail',
     message: 'checks failed',
     runId: 'run-1',
@@ -78,13 +80,13 @@ function fakeOctokit(initial: FakeComment[] = []) {
 
 describe('issueStateMarker', () => {
   it('returns the exact hidden marker', () => {
-    expect(issueStateMarker(7)).toBe('<!-- factory-issue-state v1 issue:7 -->');
+    expect(issueStateMarker(K7)).toBe('<!-- factory-issue-state v1 issue:7 -->');
   });
 });
 
 describe('parkUnblockHint', () => {
   it.each(REASONS)('returns a single-line hint containing the issue number for %s', (reason) => {
-    const hint = parkUnblockHint(reason, 42);
+    const hint = parkUnblockHint(reason, workKeyFromIssue(42));
     expect(hint.length).toBeGreaterThan(0);
     expect(hint).not.toContain('\n');
     expect(hint).toContain('42');
@@ -95,10 +97,10 @@ describe('parkUnblockHint', () => {
 describe('parkPayload (#3511)', () => {
   it('carries the reason, the unblock hint as decision, the lane and a copy of blockedBehind', () => {
     const behind = [8, 9];
-    const payload = parkPayload('escalate', 7, 'app', behind);
+    const payload = parkPayload('escalate', K7, 'app', behind);
     expect(payload).toEqual({
       reason: 'escalate',
-      decision: parkUnblockHint('escalate', 7),
+      decision: parkUnblockHint('escalate', K7),
       lane: 'app',
       blockedBehind: [8, 9],
     });
@@ -106,7 +108,7 @@ describe('parkPayload (#3511)', () => {
   });
 
   it("defaults the lane to ''", () => {
-    expect(parkPayload('fail', 3, undefined, []).lane).toBe('');
+    expect(parkPayload('fail', workKeyFromIssue(3), undefined, []).lane).toBe('');
   });
 });
 
@@ -121,7 +123,7 @@ describe('renderParkComment', () => {
     expect(body).not.toContain('​');
     expect(body).not.toContain('evil');
     expect(body.match(/<!--/g)).toHaveLength(1);
-    expect(body.endsWith(issueStateMarker(7))).toBe(true);
+    expect(body.endsWith(issueStateMarker(K7))).toBe(true);
     expect(body).toContain('`'.repeat(8));
     expect(body).toContain('branch: branch second');
   });
@@ -137,7 +139,7 @@ describe('renderParkComment', () => {
 describe('readParkState', () => {
   it('round-trips reason, lane, branch, park SHA and blockers from renderParkComment', () => {
     const body = renderParkComment(input());
-    expect(readParkState([{ id: 1, body }], 7)).toEqual({
+    expect(readParkState([{ id: 1, body }], K7)).toEqual({
       reason: 'fail',
       autoUnparks: 0,
       lane: 'lane-a',
@@ -158,11 +160,11 @@ describe('readParkState', () => {
 
   it('returns null without comments or for a marker of another issue', () => {
     expect(readParkState([])).toBeNull();
-    expect(readParkState([{ id: 1, body: renderParkComment(input({ issue: 8 })) }], 7)).toBeNull();
+    expect(readParkState([{ id: 1, body: renderParkComment(input({ issue: workKeyFromIssue(8) })) }], K7)).toBeNull();
   });
 
   it('returns null for a marker without a state block or without a reason line', () => {
-    const marker = issueStateMarker(7);
+    const marker = issueStateMarker(K7);
     expect(readParkState([{ id: 1, body: `hello\n${marker}` }])).toBeNull();
     expect(readParkState([{ id: 1, body: `**Park state**\n\nno fence here\n${marker}` }])).toBeNull();
     expect(readParkState([{ id: 1, body: `**Park state**\n\`\`\`\`\`\nreason: x\n${marker}` }])).toBeNull();
@@ -172,12 +174,12 @@ describe('readParkState', () => {
   });
 
   it('reads a state block with only a reason line as no lane, SHA or blockers', () => {
-    const body = `**Park state**\n\n\`\`\`\`\`\nreason: fail\n\`\`\`\`\`\n${issueStateMarker(7)}`;
+    const body = `**Park state**\n\n\`\`\`\`\`\nreason: fail\n\`\`\`\`\`\n${issueStateMarker(K7)}`;
     expect(readParkState([{ id: 1, body }])).toEqual({ reason: 'fail', blockers: [], autoUnparks: 0 });
   });
 
   it('names the denied loopback bind and #3081 in the sandbox-env hint (#3332)', () => {
-    const hint = parkUnblockHint('sandbox-env', 7);
+    const hint = parkUnblockHint('sandbox-env', K7);
     expect(hint).toContain('EPERM');
     expect(hint).toContain('#3081');
     expect(hint).toContain('factory unpark 7');
@@ -209,7 +211,7 @@ describe('upsertParkComment', () => {
   });
 
   it('ignores a marker comment by another user and creates its own', async () => {
-    const f = fakeOctokit([{ id: 1, body: issueStateMarker(7), user: { id: 5 } }]);
+    const f = fakeOctokit([{ id: 1, body: issueStateMarker(K7), user: { id: 5 } }]);
     const result = await upsertParkComment({ octokit: f.octokit, repo: 'o/r', input: input() });
     expect(result.created).toBe(true);
     expect(f.updateComment).not.toHaveBeenCalled();
@@ -219,8 +221,8 @@ describe('upsertParkComment', () => {
     const filler: FakeComment[] = Array.from({ length: 100 }, (_, i) => ({ id: i + 10, body: 'x', user: { id: ME } }));
     const f = fakeOctokit([
       ...filler,
-      { id: 500, body: issueStateMarker(7), user: { id: ME } },
-      { id: 600, body: issueStateMarker(7), user: { id: ME } },
+      { id: 500, body: issueStateMarker(K7), user: { id: ME } },
+      { id: 600, body: issueStateMarker(K7), user: { id: ME } },
     ]);
     const result = await upsertParkComment({ octokit: f.octokit, repo: 'o/r', input: input() });
     expect(result).toEqual({ commentId: 500, created: false });
@@ -229,8 +231,8 @@ describe('upsertParkComment', () => {
 
   it('keeps the lowest id when a later page entry comes first in order', async () => {
     const f = fakeOctokit([
-      { id: 9, body: issueStateMarker(7), user: { id: ME } },
-      { id: 3, body: issueStateMarker(7), user: { id: ME } },
+      { id: 9, body: issueStateMarker(K7), user: { id: ME } },
+      { id: 3, body: issueStateMarker(K7), user: { id: ME } },
     ]);
     expect((await upsertParkComment({ octokit: f.octokit, repo: 'o/r', input: input() })).commentId).toBe(3);
   });
@@ -276,7 +278,7 @@ describe('publishParkComment', () => {
       error: 'create boom',
     });
 
-    const update = fakeOctokit([{ id: 1, body: issueStateMarker(7), user: { id: ME } }]);
+    const update = fakeOctokit([{ id: 1, body: issueStateMarker(K7), user: { id: ME } }]);
     update.updateComment.mockRejectedValue(new Error('update boom'));
     expect(await publishParkComment({ octokit: update.octokit, repo: 'o/r', input: base })).toMatchObject({
       ok: false,
@@ -304,7 +306,7 @@ describe('park comment counter and status', () => {
   });
 
   it('parses auto-unparks (malformed gives 0) and status', () => {
-    const read = (b: string) => readParkState([{ id: 1, body: b }], 7)!;
+    const read = (b: string) => readParkState([{ id: 1, body: b }], K7)!;
     expect(read(renderParkComment(input())).autoUnparks).toBe(0);
     expect(read(renderParkComment(input())).status).toBeUndefined();
     const ok = read(renderParkComment(input({ autoUnparks: 2, status: 'resumed' })));
@@ -320,59 +322,25 @@ describe('park comment counter and status', () => {
   });
 });
 
-describe('patchParkComment', () => {
-  it('replaces the reason and the unblock hint', () => {
-    const body = renderParkComment(input({ reason: 'blocked' }));
-    const out = patchParkComment(body, 7, { reason: 'held' })!;
-    expect(out).toContain('reason: held');
-    expect(out).not.toContain('reason: blocked');
-    expect(out).toContain(`**What unblocks this:** ${parkUnblockHint('held', 7)}`);
-    expect(readParkState([{ id: 1, body: out }], 7)?.reason).toBe('held');
-  });
-
-  it('appends then replaces status and auto-unparks, leaving other lines alone', () => {
-    const body = renderParkComment(input());
-    const first = patchParkComment(body, 7, { status: 'resumed', autoUnparks: 1 })!;
-    expect(first).toContain('status: resumed');
-    expect(first).toContain('auto-unparks: 1');
-    expect(first).toContain('branch: issue-7-x');
-    const second = patchParkComment(first, 7, { status: 'held: a\nb', autoUnparks: 2 })!;
-    expect(second.match(/^status:/gm)).toHaveLength(1);
-    expect(second).toContain('status: held: a b');
-    expect(second).toContain('auto-unparks: 2');
-    expect(second).toContain('reason: fail');
-    expect(second).toContain('**What unblocks this:** fix the failing');
-  });
-
-  it('tolerates a body with no hint line', () => {
-    const body = renderParkComment(input()).replace(/\*\*What unblocks this:\*\*.*\n/, '');
-    expect(patchParkComment(body, 7, { reason: 'held' })).toContain('reason: held');
-  });
-
-  it('returns null when there is no state block', () => {
-    expect(patchParkComment('nothing here', 7, { status: 'x' })).toBeNull();
-  });
-});
-
 describe('findOwnParkComment', () => {
   it('returns undefined when none match and ignores foreign authors and null bodies', async () => {
     const f = fakeOctokit([
-      { id: 1, body: issueStateMarker(7), user: { id: 5 } },
+      { id: 1, body: issueStateMarker(K7), user: { id: 5 } },
       { id: 2, body: null, user: { id: ME } },
     ]);
-    expect(await findOwnParkComment({ octokit: f.octokit, repo: 'o/r', issue: 7 })).toBeUndefined();
+    expect(await findOwnParkComment({ octokit: f.octokit, repo: 'o/r', issue: K7 })).toBeUndefined();
   });
 
   it('returns the lowest-id own marker comment across pages', async () => {
     const filler: FakeComment[] = Array.from({ length: 100 }, (_, i) => ({ id: i + 10, body: 'x', user: { id: ME } }));
     const f = fakeOctokit([
       ...filler,
-      { id: 600, body: issueStateMarker(7), user: { id: ME } },
-      { id: 500, body: issueStateMarker(7), user: { id: ME } },
+      { id: 600, body: issueStateMarker(K7), user: { id: ME } },
+      { id: 500, body: issueStateMarker(K7), user: { id: ME } },
     ]);
-    expect(await findOwnParkComment({ octokit: f.octokit, repo: 'o/r', issue: 7 })).toEqual({
+    expect(await findOwnParkComment({ octokit: f.octokit, repo: 'o/r', issue: K7 })).toEqual({
       id: 500,
-      body: issueStateMarker(7),
+      body: issueStateMarker(K7),
     });
   });
 });
@@ -392,23 +360,29 @@ describe('upsertParkComment auto-unparks counter', () => {
   });
 
   it('starts at zero when the existing comment is unreadable', async () => {
-    const f = fakeOctokit([{ id: 1, body: issueStateMarker(7), user: { id: ME } }]);
+    const f = fakeOctokit([{ id: 1, body: issueStateMarker(K7), user: { id: ME } }]);
     await upsertParkComment({ octokit: f.octokit, repo: 'o/r', input: input() });
     expect(f.store[0].body).not.toContain('auto-unparks');
   });
 });
 
 describe('upsertMarkerComment', () => {
-  const marker = environmentReleaseMarker(7);
+  const marker = environmentReleaseMarker(K7);
 
   it('has a marker distinct from the park-state marker', () => {
     expect(marker).toBe('<!-- factory-environment-release v1 issue:7 -->');
-    expect(marker).not.toBe(issueStateMarker(7));
+    expect(marker).not.toBe(issueStateMarker(K7));
   });
 
   it('creates when no own marker comment exists, appending a missing marker', async () => {
     const f = fakeOctokit([{ id: 1, body: `foreign ${marker}`, user: { id: 5 } }]);
-    const result = await upsertMarkerComment({ octokit: f.octokit, repo: 'o/r', issue: 7, marker, body: 'hello' });
+    const result = await upsertMarkerComment({
+      octokit: f.octokit,
+      repo: 'o/r',
+      issue: K7,
+      marker,
+      body: 'hello',
+    });
     expect(result).toEqual({ commentId: 1000, created: true });
     expect(f.updateComment).not.toHaveBeenCalled();
     expect(f.store[1].body).toBe(`hello\n${marker}`);
@@ -420,17 +394,29 @@ describe('upsertMarkerComment', () => {
       { id: 500, body: marker, user: { id: ME } },
     ]);
     const body = `new\n${marker}`;
-    const result = await upsertMarkerComment({ octokit: f.octokit, repo: 'o/r', issue: 7, marker, body });
+    const result = await upsertMarkerComment({
+      octokit: f.octokit,
+      repo: 'o/r',
+      issue: K7,
+      marker,
+      body,
+    });
     expect(result).toEqual({ commentId: 500, created: false });
     expect(f.createComment).not.toHaveBeenCalled();
     expect(f.store.find((c) => c.id === 500)?.body).toBe(body);
   });
 
   it('does not touch a park-state comment', async () => {
-    const f = fakeOctokit([{ id: 1, body: issueStateMarker(7), user: { id: ME } }]);
-    const result = await upsertMarkerComment({ octokit: f.octokit, repo: 'o/r', issue: 7, marker, body: 'x' });
+    const f = fakeOctokit([{ id: 1, body: issueStateMarker(K7), user: { id: ME } }]);
+    const result = await upsertMarkerComment({
+      octokit: f.octokit,
+      repo: 'o/r',
+      issue: K7,
+      marker,
+      body: 'x',
+    });
     expect(result.created).toBe(true);
-    expect(f.store[0].body).toBe(issueStateMarker(7));
+    expect(f.store[0].body).toBe(issueStateMarker(K7));
   });
 });
 
@@ -494,7 +480,7 @@ describe('park-time order (#3554)', () => {
 
   it('readParkedOrder returns the recorded order, undefined without a comment', async () => {
     const f = fakeOctokit([{ id: 1, body: renderParkComment(input({ order: 5 })), user: { id: ME } }]);
-    expect(await readParkedOrder({ octokit: f.octokit, repo: 'o/r', issue: 7 })).toBe(5);
-    expect(await readParkedOrder({ octokit: fakeOctokit().octokit, repo: 'o/r', issue: 7 })).toBeUndefined();
+    expect(await readParkedOrder({ octokit: f.octokit, repo: 'o/r', issue: K7 })).toBe(5);
+    expect(await readParkedOrder({ octokit: fakeOctokit().octokit, repo: 'o/r', issue: K7 })).toBeUndefined();
   });
 });

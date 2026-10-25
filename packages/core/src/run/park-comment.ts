@@ -11,11 +11,12 @@ import { fenceExcerpt, stripHiddenContent } from '../filing/sanitize.js';
 import { readWorktreeHead } from './ci-suppression-guard.js';
 import { QUEUE_ORDER_LABEL_PREFIX } from '../queue/queue-order.js';
 import type { ParkReason } from './outcome.js';
+import { issueNumberOf, type WorkKey } from '../work/work-key.js';
 
 export const ISSUE_STATE_MARKER_VERSION = 'v1';
 
 export interface ParkCommentInput {
-  issue: number;
+  issue: WorkKey;
   reason: ParkReason;
   message: string;
   runId: string;
@@ -53,11 +54,11 @@ const PAGE_SIZE = 100;
 const STATE_HEADING = '**Park state**';
 const MARKER_RE = new RegExp(`<!-- factory-issue-state ${ISSUE_STATE_MARKER_VERSION} issue:(\\d+) -->`);
 
-export function issueStateMarker(issue: number): string {
+export function issueStateMarker(issue: WorkKey): string {
   return `<!-- factory-issue-state ${ISSUE_STATE_MARKER_VERSION} issue:${issue} -->`;
 }
 
-export function environmentReleaseMarker(issue: number): string {
+export function environmentReleaseMarker(issue: WorkKey): string {
   return `<!-- factory-environment-release ${ISSUE_STATE_MARKER_VERSION} issue:${issue} -->`;
 }
 
@@ -82,14 +83,14 @@ const PARK_HINTS: Record<ParkReason, string> = {
     'the BUILD sandbox denied a loopback bind (listen EPERM on 127.0.0.1 or a TMPDIR pipe). This is an environment limit, not a code failure. Run the build in a sandbox mode that allows loopback binds (see #3081), then run `factory unpark <n>`.',
 };
 
-export function parkUnblockHint(reason: ParkReason, issue: number): string {
-  return PARK_HINTS[reason].replaceAll('<n>', String(issue));
+export function parkUnblockHint(reason: ParkReason, issue: WorkKey): string {
+  return PARK_HINTS[reason].replaceAll('<n>', issue);
 }
 
 /** Structured park payload for a park event (#3511); decision is the park comment's unblock hint. */
 export function parkPayload(
   reason: ParkReason,
-  issue: number,
+  issue: WorkKey,
   lane: string | undefined,
   blockedBehind: readonly number[],
 ): ParkPayload {
@@ -191,7 +192,7 @@ export interface ParkCommentPatch {
 }
 
 /** Rewrites the state block (and the unblock hint on a reason change) in place; null when there is no state block. */
-export function patchParkComment(body: string, issue: number, patch: ParkCommentPatch): string | null {
+export function patchParkComment(body: string, issue: WorkKey, patch: ParkCommentPatch): string | null {
   const fence = findStateFence(body);
   if (fence === null) return null;
   const { lines, open, close } = fence;
@@ -213,11 +214,11 @@ export function patchParkComment(body: string, issue: number, patch: ParkComment
 }
 
 /** Lowest-id marked comment decides; null when none, or when its state block is unreadable. */
-export function readParkState(comments: readonly ParkStateComment[], issue?: number): ParkState | null {
+export function readParkState(comments: readonly ParkStateComment[], issue?: WorkKey): ParkState | null {
   const marked = comments
     .filter((c) => {
       const m = MARKER_RE.exec(c.body);
-      return m !== null && (issue === undefined || Number(m[1]) === issue);
+      return m !== null && (issue === undefined || m[1] === issue);
     })
     .sort((a, b) => a.id - b.id);
   if (marked.length === 0) return null;
@@ -228,7 +229,7 @@ export function readParkState(comments: readonly ParkStateComment[], issue?: num
 export async function findOwnMarkerComment(deps: {
   octokit: Octokit;
   repo: string;
-  issue: number;
+  issue: WorkKey;
   marker: string;
 }): Promise<ParkStateComment | undefined> {
   const { octokit, repo, issue, marker } = deps;
@@ -239,7 +240,7 @@ export async function findOwnMarkerComment(deps: {
     const { data } = await octokit.rest.issues.listComments({
       owner,
       repo: name,
-      issue_number: issue,
+      issue_number: issueNumberOf(issue),
       per_page: PAGE_SIZE,
       page,
     });
@@ -257,7 +258,7 @@ export async function findOwnMarkerComment(deps: {
 export async function findOwnParkComment(deps: {
   octokit: Octokit;
   repo: string;
-  issue: number;
+  issue: WorkKey;
 }): Promise<ParkStateComment | undefined> {
   return findOwnMarkerComment({ ...deps, marker: issueStateMarker(deps.issue) });
 }
@@ -266,7 +267,7 @@ export async function findOwnParkComment(deps: {
 export async function upsertMarkerComment(deps: {
   octokit: Octokit;
   repo: string;
-  issue: number;
+  issue: WorkKey;
   marker: string;
   body: string;
 }): Promise<{ commentId: number; created: boolean }> {
@@ -278,7 +279,12 @@ export async function upsertMarkerComment(deps: {
     await octokit.rest.issues.updateComment({ owner, repo: name, comment_id: existing.id, body });
     return { commentId: existing.id, created: false };
   }
-  const { data } = await octokit.rest.issues.createComment({ owner, repo: name, issue_number: issue, body });
+  const { data } = await octokit.rest.issues.createComment({
+    owner,
+    repo: name,
+    issue_number: issueNumberOf(issue),
+    body,
+  });
   return { commentId: data.id, created: true };
 }
 
@@ -298,17 +304,22 @@ export async function upsertParkComment(deps: {
     await octokit.rest.issues.updateComment({ owner, repo: name, comment_id: existing.id, body });
     return { commentId: existing.id, created: false };
   }
-  const { data } = await octokit.rest.issues.createComment({ owner, repo: name, issue_number: input.issue, body });
+  const { data } = await octokit.rest.issues.createComment({
+    owner,
+    repo: name,
+    issue_number: issueNumberOf(input.issue),
+    body,
+  });
   return { commentId: data.id, created: true };
 }
 
 /** The one valid factory:order an issue holds, or undefined for zero, several or malformed labels. */
-async function readSingleOrderLabel(octokit: Octokit, repo: string, issue: number): Promise<number | undefined> {
+async function readSingleOrderLabel(octokit: Octokit, repo: string, issue: WorkKey): Promise<number | undefined> {
   const [owner, name] = repo.split('/');
   const { data } = await octokit.rest.issues.listLabelsOnIssue({
     owner,
     repo: name,
-    issue_number: issue,
+    issue_number: issueNumberOf(issue),
     per_page: 100,
   });
   const orders = data.map((l) => l.name).filter((n) => n.startsWith(QUEUE_ORDER_LABEL_PREFIX));
@@ -322,7 +333,7 @@ async function readSingleOrderLabel(octokit: Octokit, repo: string, issue: numbe
 export async function readParkedOrder(deps: {
   octokit: Octokit;
   repo: string;
-  issue: number;
+  issue: WorkKey;
 }): Promise<number | undefined> {
   const comment = await findOwnParkComment(deps);
   return comment === undefined ? undefined : readParkState([comment], deps.issue)?.order;
@@ -335,10 +346,10 @@ export async function publishParkComment(deps: {
   worktree?: string;
   input: Omit<ParkCommentInput, 'parkSha' | 'order'>;
   readHead?: (worktree: string) => Promise<string>;
-  readOrder?: (issue: number) => Promise<number | undefined>;
+  readOrder?: (issue: WorkKey) => Promise<number | undefined>;
 }): Promise<{ ok: true; commentId: number; created: boolean } | { ok: false; error: string }> {
   const { octokit, repo, worktree, input, readHead = readWorktreeHead } = deps;
-  const readOrder = deps.readOrder ?? ((issue: number) => readSingleOrderLabel(octokit, repo, issue));
+  const readOrder = deps.readOrder ?? ((issue: WorkKey) => readSingleOrderLabel(octokit, repo, issue));
   let order: number | undefined;
   try {
     order = await readOrder(input.issue);

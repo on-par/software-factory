@@ -2,7 +2,8 @@ import type { Octokit } from '@octokit/rest';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ParkReason } from './outcome.js';
-import { parkedPrAction, settleParkedPullRequest } from './park-pr.js';
+import { parkedPrAction, renderParkedPrComment, settleParkedPullRequest } from './park-pr.js';
+import { toWorkKey, workKeyFromIssue } from '../work/work-key.js';
 
 const ALL: ParkReason[] = [
   'escalate',
@@ -42,7 +43,13 @@ function fake(opts: { open?: boolean; draft?: boolean; updateError?: Error } = {
   return { octokit, createComment, update, deleteRef, graphql };
 }
 
-const base = { repo: 'o/r', issue: 9, branch: 'issue-9-x' };
+const base = { repo: 'o/r', issue: workKeyFromIssue(9), branch: 'issue-9-x' };
+
+describe('renderParkedPrComment', () => {
+  it('renders a non-numeric work key as-is', () => {
+    expect(renderParkedPrComment({ issue: toWorkKey('PROJ-12'), reason: 'fail', branch: 'b' })).toContain('#PROJ-12');
+  });
+});
 
 describe('parkedPrAction', () => {
   it.each(ALL)('decides for %s', (reason) => {

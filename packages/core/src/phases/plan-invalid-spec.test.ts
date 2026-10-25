@@ -7,6 +7,7 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { parseDesignArtifact } from '../design/index.js';
 import { publishParkComment } from '../run/park-comment.js';
 import { runPlanOutputs } from './plan-test-helpers.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -100,7 +101,7 @@ describe('PLAN with no valid design artifact (#3270)', () => {
       worktree,
       readHead: async () => 'head-sha',
       input: {
-        issue: 4243,
+        issue: workKeyFromIssue(4243),
         reason: 'escalate',
         message: `plan escalated: ${result.escalate}`,
         runId: 'run-4243',

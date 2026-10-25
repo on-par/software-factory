@@ -325,6 +325,7 @@ async function runIssueOnce(
   observed: { checkSummary?: CheckSummary },
 ): Promise<RunOutcome> {
   let request = initialRequest;
+  const workKey = workKeyFromIssue(request.issue);
   if (request.codexWorkspacePaths) ports.router.setCodexWorkspacePaths?.(request.codexWorkspacePaths);
   const planPhase = ports.planPhase ?? planPhaseDefault;
   const slot = ports.hostBuildSlot ?? ((_phase, fn) => fn());
@@ -447,8 +448,8 @@ async function runIssueOnce(
     const failure = reason === 'blocked' ? undefined : checkFailure;
     log(reason, terminalMessage, {
       ...parkLogExtra(failure, ciFailure),
-      park: parkPayload(reason, request.issue, request.lane, request.blockedBehind ?? []),
-      ...(down ? { allProvidersDown: allProvidersDownPayload(down, request.issue) } : {}),
+      park: parkPayload(reason, workKey, request.lane, request.blockedBehind ?? []),
+      ...(down ? { allProvidersDown: allProvidersDownPayload(down, workKey) } : {}),
     });
     if (reason === 'timeout') {
       log('stuck', `run exceeded its phase timeout without progressing — ${terminalMessage}`);
@@ -460,7 +461,7 @@ async function runIssueOnce(
         repo: request.repo,
         worktree: ports.workspace.path,
         input: {
-          issue: request.issue,
+          issue: workKey,
           reason,
           message: terminalMessage,
           runId,
@@ -474,7 +475,7 @@ async function runIssueOnce(
         settled = await settleParkedPullRequest({
           octokit: ports.octokit,
           repo: request.repo,
-          issue: request.issue,
+          issue: workKey,
           branch: request.branch,
           reason,
           prNumber: runPrNumber,
@@ -499,14 +500,13 @@ async function runIssueOnce(
   };
 
   const parkAllProvidersDown = (down: NonNullable<StageGateVerdict['down']>): Promise<RunOutcome> =>
-    terminalParked('all_providers_down', allProvidersDownMessage(down, request.issue), undefined, undefined, down);
+    terminalParked('all_providers_down', allProvidersDownMessage(down, workKey), undefined, undefined, down);
 
   const assertBudget = async (phase: string): Promise<RunOutcome | undefined> => {
     // prettier-ignore
-    const message = enforceIssueBudget({ phase, spend: ports.getIssueSpend?.() ?? 0, cap: policy.budget.perIssueCapUsd, key: workKeyFromIssue(request.issue), worktreePath: ports.workspace.path, keepsFile: request.worktreeKeepsPath, log, stop: budgetStop.stopped() });
+    const message = enforceIssueBudget({ phase, spend: ports.getIssueSpend?.() ?? 0, cap: policy.budget.perIssueCapUsd, key: workKey, worktreePath: ports.workspace.path, keepsFile: request.worktreeKeepsPath, log, stop: budgetStop.stopped() });
     return message === undefined ? undefined : terminalParked('fail', message);
   };
-
   const rememberProviderFailureFor = providerFailureRecorder({
     breaker: ports.breaker,
     log,
@@ -517,7 +517,7 @@ async function runIssueOnce(
   const gateDeps = { router: ports.router, breaker: ports.breaker, log, probe: providerProbe(ports) };
   const runStage = providerStageRunner({ ...gateDeps, issue: request.issue }, request.providerOrder);
   const gitExec = ports.gitExec ?? defaultExecFn;
-  const capGate = providerCapGate(ports.router, ports.breaker, request, log, gateDeps.probe);
+  const capGate = providerCapGate(ports.router, ports.breaker, { ...request, issue: workKey }, log, gateDeps.probe);
 
   try {
     if (ports.acquireEnvironment) {
@@ -981,11 +981,11 @@ async function runIssueOnce(
         }
         if (!request.localOnly && !request.noPr) {
           try {
-            const marker = environmentReleaseMarker(request.issue);
+            const marker = environmentReleaseMarker(workKey);
             await upsertMarkerComment({
               octokit: ports.octokit,
               repo: request.repo,
-              issue: request.issue,
+              issue: workKey,
               marker,
               body: `${renderEnvironmentReleaseComment(env)}\n${marker}`,
             });
@@ -1188,7 +1188,7 @@ async function runIssueOnce(
       const failure = await recordShippedSlice({
         octokit: ports.octokit,
         repo: request.repo,
-        key: workKeyFromIssue(request.issue),
+        key: workKey,
         branch: request.branch,
         plan: planSlice.plan,
         index: planSlice.index,

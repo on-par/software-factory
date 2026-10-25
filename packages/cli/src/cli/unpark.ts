@@ -1,5 +1,5 @@
 import type { Octokit } from '@octokit/rest';
-import { createLogger } from '@on-par/factory-core';
+import { createLogger, workKeyFromIssue } from '@on-par/factory-core';
 import { readParkedOrder, type UnparkInput, type UnparkJson } from '@on-par/factory-core/internal';
 
 export type { UnparkJson } from '@on-par/factory-core/internal';
@@ -27,5 +27,7 @@ export function keepOrderInput(
   repo: string,
   issue: number,
 ): Pick<UnparkInput, 'keepOrder' | 'readParkedOrder'> {
-  return keepOrder ? { keepOrder: true, readParkedOrder: () => readParkedOrder({ octokit, repo, issue }) } : {};
+  return keepOrder
+    ? { keepOrder: true, readParkedOrder: () => readParkedOrder({ octokit, repo, issue: workKeyFromIssue(issue) }) }
+    : {};
 }

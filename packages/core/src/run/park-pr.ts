@@ -8,6 +8,7 @@ import { markPrReadyWithRetry } from '../phases/ship-ready.js';
 import { shortDetail } from '../phases/ship-git.js';
 import { parkUnblockHint } from './park-comment.js';
 import type { ParkReason } from './outcome.js';
+import type { WorkKey } from '../work/work-key.js';
 
 export type ParkedPrDisposition = {
   action: 'closed' | 'readied' | 'left' | 'none' | 'failed';
@@ -41,7 +42,7 @@ export function parkedPrAction(reason: ParkReason, greenAndChecked: boolean): 'c
   }
 }
 
-export function renderParkedPrComment(input: { issue: number; reason: ParkReason; branch: string }): string {
+export function renderParkedPrComment(input: { issue: WorkKey; reason: ParkReason; branch: string }): string {
   const { issue, reason, branch } = input;
   return [
     `The factory closed this PR because the run for #${issue} parked with reason \`${reason}\`.`,
@@ -55,7 +56,7 @@ export function renderParkedPrComment(input: { issue: number; reason: ParkReason
 export async function settleParkedPullRequest(deps: {
   octokit: Octokit;
   repo: string;
-  issue: number;
+  issue: WorkKey;
   branch: string;
   reason: ParkReason;
   prNumber?: number;
