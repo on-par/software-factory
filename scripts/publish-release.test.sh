@@ -34,6 +34,8 @@ fresh_repo() {
     mkdir -p "$REPO/packages/$d"
     cp "$f" "$REPO/packages/$d/package.json"
   done
+  # The stable tags the cases push (v0.9.0, v$CURRENT) need a CHANGELOG section (#3676).
+  printf '# Changelog\n\n## Unreleased\n\n## 0.9.0 - 2026-10-11\n\n## [%s]\n' "${CURRENT:-0.0.0}" >"$REPO/CHANGELOG.md"
 }
 # drift: puts one published package a version ahead of the rest.
 drift() {
@@ -184,6 +186,61 @@ drift
 run 1 GITHUB_REF=refs/tags/v0.9.0
 expect_summary "NOT PUBLISHED: could not set the package versions to 0.9.0"
 [ ! -s "$NPM_CALL_LOG" ] || fail "$CASE: npm was called"
+
+# changelog <body>: replaces the scratch repo's CHANGELOG.md.
+changelog() {
+  printf '%s\n' "$1" >"$REPO/CHANGELOG.md"
+}
+
+CASE="stable tag with no CHANGELOG section"
+fresh_repo
+changelog $'# Changelog\n\n## Unreleased\n\n- not released yet\n\n## 0.8.9'
+run 1 GITHUB_REF=refs/tags/v0.9.0
+expect_summary "NOT PUBLISHED: CHANGELOG.md has no ## 0.9.0 section; promote Unreleased first (docs/ops/docs-and-changelog.md)"
+expect_output false
+[ ! -s "$NPM_CALL_LOG" ] || fail "$CASE: npm was called"
+[ ! -s "$GH_CALL_LOG" ] || fail "$CASE: gh was called"
+grep -q "\"version\": \"$CURRENT\"" "$REPO/packages/cli/package.json" || fail "$CASE: package versions were changed"
+
+CASE="stable tag with no CHANGELOG.md"
+fresh_repo
+rm "$REPO/CHANGELOG.md"
+run 1 GITHUB_REF=refs/tags/v0.9.0
+expect_summary "NOT PUBLISHED: CHANGELOG.md has no ## 0.9.0 section; promote Unreleased first (docs/ops/docs-and-changelog.md)"
+[ ! -s "$NPM_CALL_LOG" ] || fail "$CASE: npm was called"
+
+CASE="headings that only look like the version do not count"
+fresh_repo
+changelog $'## 0.9.00\n## 10.9.0\n## 0x9x0\n## 0.9.0-next.1\n### 0.9.0\n##  0.9.0\n- ## 0.9.0\n## v0.9.0\n## [0.9.0-next.1]'
+run 1 GITHUB_REF=refs/tags/v0.9.0
+expect_summary "NOT PUBLISHED: CHANGELOG.md has no ## 0.9.0 section; promote Unreleased first (docs/ops/docs-and-changelog.md)"
+
+CASE="dry run on a stable tag is gated too"
+fresh_repo
+changelog '## 0.8.9'
+run 1 PUBLISH_DRY_RUN=true GITHUB_REF=refs/tags/v0.9.0
+expect_summary "NOT PUBLISHED: CHANGELOG.md has no ## 0.9.0 section; promote Unreleased first (docs/ops/docs-and-changelog.md)"
+expect_publishes 0
+
+for heading in '## 0.9.0' '## [0.9.0]' '## [0.9.0] - 2026-10-11' '## 0.9.0 - 2026-10-11' $'## 0.9.0\r'; do
+  CASE="CHANGELOG heading '${heading%$'\r'}' passes"
+  fresh_repo
+  changelog $'# Changelog\n\n## Unreleased\n\n'"$heading"$'\n\n### Fixed\n\n- a fix'
+  run 0 GITHUB_REF=refs/tags/v0.9.0
+  expect_summary "PUBLISHED$(published_list 0.9.0) (--tag latest)"
+done
+
+CASE="next tag needs no CHANGELOG section"
+fresh_repo
+rm "$REPO/CHANGELOG.md"
+run 0 GITHUB_REF=refs/tags/v0.9.0-next.3
+expect_summary "PUBLISHED$(published_list 0.9.0-next.3) (--tag next)"
+
+CASE="main prerelease needs no CHANGELOG section"
+fresh_repo
+rm "$REPO/CHANGELOG.md"
+run 0 PUBLISH_PRERELEASE=true GITHUB_REF=refs/heads/main NPM_STUB_LATEST=0.9.4
+expect_summary "PUBLISHED$(published_list 0.9.5-next.1) (--tag next)"
 
 CASE="blocker lookup fails"
 fresh_repo

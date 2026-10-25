@@ -17,6 +17,9 @@
 # checked-out version.
 # #2627: before the first dry-run the runner's npm must be at least NPM_MIN_VERSION (the
 # first npm with trusted publishing, OIDC), else the run ends NOT PUBLISHED.
+# #3676: a stable vX.Y.Z tag (dry run or not) needs a `## X.Y.Z` or `## [X.Y.Z]` heading in
+# CHANGELOG.md, else the run ends NOT PUBLISHED before npm is touched. Prereleases skip this.
+# The process is in docs/ops/docs-and-changelog.md.
 #
 # Env:
 #   PUBLISH_DRY_RUN=true   dry-run only (green, never publishes)
@@ -74,6 +77,13 @@ not_published() {
 dry_run=false
 [ "${PUBLISH_DRY_RUN:-}" != "true" ] || dry_run=true
 
+# changelog_has_section <X.Y.Z>: 0 when CHANGELOG.md has a `## X.Y.Z` or `## [X.Y.Z]` heading,
+# optionally followed by a date. A missing CHANGELOG.md counts as no section (#3676).
+changelog_has_section() {
+  local v="${1//./\\.}"
+  [ -f CHANGELOG.md ] && grep -Eq "^## (\[$v\]|$v)([[:space:]]|$)" CHANGELOG.md
+}
+
 # next_prerelease_version: prints X.Y.Z-next.N for a main prerelease (see the header).
 next_prerelease_version() {
   local latest base n max=0 name versions
@@ -115,6 +125,8 @@ else
       [[ "$tag" =~ ^v((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-next\.(0|[1-9][0-9]*))?)$ ]] ||
         not_published "tag $tag does not parse as vX.Y.Z or vX.Y.Z-next.N" 1
       version="${BASH_REMATCH[1]}"
+      [[ "$version" == *-* ]] || changelog_has_section "$version" ||
+        not_published "CHANGELOG.md has no ## $version section; promote Unreleased first (docs/ops/docs-and-changelog.md)" 1
       bash scripts/set-release-version.sh "$version" || not_published "could not set the package versions to $version" 1
       ;;
     *)
