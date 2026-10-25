@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { readWorktreeKeeps } from '../utils/worktree-keeps.js';
+import { toWorkKey, workKeyFromIssue } from '../work/work-key.js';
 import { budgetGuardFor, enforceIssueBudget } from './budget.js';
 import { createTempDirs } from '../harness/temp-dir.js';
 
@@ -24,7 +25,7 @@ describe('enforceIssueBudget', () => {
     const keepsFile = setup();
     const log = vi.fn();
     expect(
-      enforceIssueBudget({ phase: 'BUILD', spend, cap, issue: 1, worktreePath: '/wt', keepsFile, log }),
+      enforceIssueBudget({ phase: 'BUILD', spend, cap, key: workKeyFromIssue(1), worktreePath: '/wt', keepsFile, log }),
     ).toBeUndefined();
     expect(existsSync(keepsFile)).toBe(false);
     expect(log).not.toHaveBeenCalled();
@@ -37,7 +38,7 @@ describe('enforceIssueBudget', () => {
       phase: 'BUILD',
       spend: 33.18,
       cap: 30,
-      issue: 3264,
+      key: workKeyFromIssue(3264),
       worktreePath: '/wt/3264',
       keepsFile,
       log,
@@ -53,9 +54,9 @@ describe('enforceIssueBudget', () => {
   it('writes no keep when keepsFile is undefined', () => {
     setup();
     const log = vi.fn();
-    expect(enforceIssueBudget({ phase: 'PLAN', spend: 5, cap: 1, issue: 1, worktreePath: '/wt', log })).toContain(
-      'after PLAN',
-    );
+    expect(
+      enforceIssueBudget({ phase: 'PLAN', spend: 5, cap: 1, key: workKeyFromIssue(1), worktreePath: '/wt', log }),
+    ).toContain('after PLAN');
     expect(log).toHaveBeenCalledTimes(1);
   });
 
@@ -67,13 +68,30 @@ describe('enforceIssueBudget', () => {
       phase: 'BUILD',
       spend: 5,
       cap: 1,
-      issue: 1,
+      key: workKeyFromIssue(1),
       worktreePath: '/wt',
       keepsFile: join(base, 'nested', 'keeps.json'),
       log,
     });
     expect(message).toContain('per-issue budget exceeded after BUILD');
     expect(log.mock.calls.map((c) => c[0])).toEqual(['budget_exceeded', 'warn']);
+  });
+
+  it('parks and warns for a non-numeric key without recording a keep', () => {
+    const keepsFile = setup();
+    const log = vi.fn();
+    const message = enforceIssueBudget({
+      phase: 'BUILD',
+      spend: 5,
+      cap: 1,
+      key: toWorkKey('PROJ-1'),
+      worktreePath: '/wt',
+      keepsFile,
+      log,
+    });
+    expect(message).toContain('per-issue budget exceeded after BUILD');
+    expect(log).toHaveBeenCalledWith('warn', expect.stringContaining('could not record the kept worktree for #PROJ-1'));
+    expect(existsSync(keepsFile)).toBe(false);
   });
 });
 
@@ -87,7 +105,7 @@ describe('enforceIssueBudget with a live stop (#3320)', () => {
       phase: 'BUILD',
       spend: 1.21,
       cap: 30,
-      issue: 3320,
+      key: workKeyFromIssue(3320),
       worktreePath: '/wt',
       keepsFile,
       log,

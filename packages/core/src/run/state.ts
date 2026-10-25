@@ -10,12 +10,13 @@ import { dirname, join, resolve } from 'node:path';
 
 import { resolveRepoSlug } from '../logger/repo-slug.js';
 import type { CheckerOutput, FailurePhase, IssueRunState, RunStatus } from '../types/index.js';
+import { toWorkKey, type WorkKey } from '../work/work-key.js';
 import type { BuildRoute, RunOutcome } from './outcome.js';
 
 /** Path of one issue's persisted run state inside `runsDir`
  *  (`getFactoryPaths(repoRoot).runs`). */
-export function runStateFile(runsDir: string, issue: number): string {
-  return resolve(runsDir, `issue-${issue}.json`);
+export function runStateFile(runsDir: string, key: WorkKey): string {
+  return resolve(runsDir, `issue-${key}.json`);
 }
 
 /** Persists `state`, filling `repo` from the run's worktree when the caller did not
@@ -70,12 +71,12 @@ export interface ListIssueRunsResult {
 }
 
 /** The one validity rule for a persisted run record (#3448): an object whose `issue` is an
- *  integer equal to the number in its file name, with string `startedAt` and `updatedAt`. */
-export function isValidIssueRunState(state: IssueRunState | null, issue: number): state is IssueRunState {
+ *  integer equal to the number of the work key (the file name's digits), with string `startedAt` and `updatedAt`. */
+export function isValidIssueRunState(state: IssueRunState | null, key: WorkKey): state is IssueRunState {
   return (
     state !== null &&
     Number.isInteger(state.issue) &&
-    state.issue === issue &&
+    state.issue === Number(key) &&
     typeof state.startedAt === 'string' &&
     typeof state.updatedAt === 'string'
   );
@@ -96,18 +97,18 @@ export async function listIssueRuns(runsDir: string, options: ListIssueRunsOptio
     throw err;
   }
 
-  const files: { name: string; issue: number }[] = [];
+  const files: { name: string; key: WorkKey }[] = [];
   for (const name of names) {
     const m = /^issue-(\d+)\.json$/.exec(name);
-    if (m !== null) files.push({ name, issue: Number(m[1]) });
+    if (m !== null) files.push({ name, key: toWorkKey(m[1]) });
   }
-  files.sort((a, b) => a.issue - b.issue || (a.name < b.name ? -1 : 1));
+  files.sort((a, b) => Number(a.key) - Number(b.key) || (a.name < b.name ? -1 : 1));
 
   const runs: IssueRunState[] = [];
   const skipped: string[] = [];
-  for (const { name, issue } of files) {
+  for (const { name, key } of files) {
     const state = await readRun(join(runsDir, name));
-    if (!isValidIssueRunState(state, issue)) {
+    if (!isValidIssueRunState(state, key)) {
       skipped.push(name);
       continue;
     }

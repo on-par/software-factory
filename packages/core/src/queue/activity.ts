@@ -8,6 +8,7 @@
 // only: never rewrites the queue file (see ADR-0086).
 
 import { phaseSnapshotFile, readPhaseSnapshot, type RunPhaseSnapshot } from '../run/phase-snapshot.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 import type { QueueEntry } from './index.js';
 import { CLAIMED_BY_LABEL_PREFIX, LANE_LABEL_PREFIX, parseClaimExpiresLabel, type QueueIssue } from './github-queue.js';
 
@@ -48,7 +49,7 @@ export async function partitionLocalQueueByActivity(
 
   const snapshots = await Promise.all(
     entries.map(async (entry) => {
-      const snapshot = await readSnapshot(phaseSnapshotFile(runsDir, entry.issue));
+      const snapshot = await readSnapshot(phaseSnapshotFile(runsDir, workKeyFromIssue(entry.issue)));
       if (!snapshot) return null;
       const age = now() - Date.parse(snapshot.lastActivityAt);
       return Number.isFinite(age) && age <= staleThresholdMs ? snapshot : null;
@@ -103,7 +104,7 @@ export async function partitionGithubClaimsByActivity(
   const snapshots = await Promise.all(
     issues.map(async (issue) => {
       if (!isLive(issue.labels)) return null;
-      const snapshot = await readSnapshot(phaseSnapshotFile(runsDir, issue.number));
+      const snapshot = await readSnapshot(phaseSnapshotFile(runsDir, workKeyFromIssue(issue.number)));
       if (!snapshot) return null;
       const age = now() - Date.parse(snapshot.lastActivityAt);
       return Number.isFinite(age) && age <= staleThresholdMs ? snapshot : null;

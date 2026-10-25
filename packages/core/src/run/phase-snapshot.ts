@@ -9,6 +9,7 @@ import { dirname, resolve } from 'node:path';
 
 import type { EventKind } from '../events/kinds.js';
 import type { FailurePhase } from '../types/index.js';
+import type { WorkKey } from '../work/work-key.js';
 
 export interface RunPhaseSnapshot {
   issue: number;
@@ -40,8 +41,8 @@ const PHASES: ReadonlySet<FailurePhase> = new Set<FailurePhase>(['plan', 'build'
 
 /** Path of one issue's persisted phase snapshot inside `runsDir`
  *  (`getFactoryPaths(repoRoot).runs`). */
-export function phaseSnapshotFile(runsDir: string, issue: number): string {
-  return resolve(runsDir, `issue-${issue}.phase.json`);
+export function phaseSnapshotFile(runsDir: string, key: WorkKey): string {
+  return resolve(runsDir, `issue-${key}.phase.json`);
 }
 
 // One promise chain per snapshot file. recordPhase (a plain write), touchRunActivity, and

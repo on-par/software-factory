@@ -21,6 +21,7 @@ import {
   GITHUB_ISSUE_SOURCE,
   LaneFileGuard,
   phaseSnapshotFile,
+  workKeyFromIssue,
   resolveAutoFailover,
   resolveCodexDisabled,
   resolveEfficiencyPolicy,
@@ -285,7 +286,9 @@ async function shipIssueFrom(
     }
     logEvent(paths.events, type, issueNum, msg, { ...extra, lane, phase });
     // Best-effort lastEvent summary (#1327): a write failure is swallowed, not logged (re-entrancy).
-    touchLastEvent(phaseSnapshotFile(paths.runs, issueNum), summarizeEvent(type, msg)).catch(() => {});
+    touchLastEvent(phaseSnapshotFile(paths.runs, workKeyFromIssue(issueNum)), summarizeEvent(type, msg)).catch(
+      () => {},
+    );
   };
   const log = mkLog();
   log('issue-title', issueTitle);
@@ -351,7 +354,7 @@ async function shipIssueFrom(
   const resolveBaseUrl = (appPort: number | undefined) => resolveLaneBaseUrl(paths, proxySettings, worktree, appPort);
 
   // Read before runIssue: the run-state recorder overwrites this file on its first update (#3373).
-  const previousAttempt = await readIssueRunState(runStateFile(paths.runs, issueNum));
+  const previousAttempt = await readIssueRunState(runStateFile(paths.runs, workKeyFromIssue(issueNum)));
   const reworkClaim = claimReworkRequests(paths, issueNum, ctx?.resumeFrom || ctx?.localOnly || noPr, log);
   const request = {
     ...buildRunRequest({
@@ -429,7 +432,8 @@ async function shipIssueFrom(
       specPath,
       startedAt: runStartedAt,
     }),
-    onActivity: () => touchRunActivity(phaseSnapshotFile(paths.runs, issueNum), new Date().toISOString()),
+    onActivity: () =>
+      touchRunActivity(phaseSnapshotFile(paths.runs, workKeyFromIssue(issueNum)), new Date().toISOString()),
     onDecomposed: (childIssues) => void decomposeQueue({ issueNum, childIssues, paths, planLog: mkLog('plan') }),
     writeLocalRunReport: (info) =>
       maybeWriteLocalRunReport({

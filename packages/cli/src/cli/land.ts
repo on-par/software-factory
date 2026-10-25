@@ -11,14 +11,7 @@ import type {
   MergePolicyOverrides,
 } from '@on-par/factory-core';
 import type { getFactoryPaths } from '@on-par/factory-core';
-import {
-  LaneFileGuard,
-  phaseSnapshotFile,
-  resolveMergePolicy,
-  resolveSandboxPolicy,
-  touchRunActivity,
-  workKeyFromIssue,
-} from '@on-par/factory-core';
+import { LaneFileGuard, resolveMergePolicy, resolveSandboxPolicy, workKeyFromIssue } from '@on-par/factory-core';
 import type { OpenPrLookup, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
   branchFor,
@@ -53,6 +46,7 @@ import type { LandLock } from './land-pr.js';
 import { enforceRiskAtLand } from './land-risk.js';
 import { landRuntime } from './land-runtime.js';
 import { riskPolicyLines } from './risk-policy.js';
+import { touchIssueActivity } from './ship-run-state.js';
 
 async function releaseLandedClaim(
   paths: ReturnType<typeof getFactoryPaths>,
@@ -428,7 +422,7 @@ export async function waitForMerge(
     signal?.throwIfAborted();
     // The merge wait logs nothing on its happy path, so each poll bumps the per-issue heartbeat:
     // status/TUI staleness rules (ADR-0086, ADR-0093) otherwise read a live wait as a dead run.
-    if (paths.runs) touchRunActivity(phaseSnapshotFile(paths.runs, issue), new Date().toISOString()).catch(() => {});
+    if (paths.runs) touchIssueActivity(paths.runs, issue).catch(() => {});
     let merged = false;
     try {
       merged = await checkMerged(octokit, owner, repoName, branch);

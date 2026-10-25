@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { workKeyFromIssue } from '../work/work-key.js';
 import type { RunPhaseSnapshot } from './phase-snapshot.js';
 import {
   phaseSnapshotFile,
@@ -17,14 +18,14 @@ import {
 describe('run/phase-snapshot', () => {
   describe('phaseSnapshotFile', () => {
     it('names the file issue-<n>.phase.json inside runsDir', () => {
-      expect(phaseSnapshotFile('/tmp/runs', 1325)).toBe('/tmp/runs/issue-1325.phase.json');
+      expect(phaseSnapshotFile('/tmp/runs', workKeyFromIssue(1325))).toBe('/tmp/runs/issue-1325.phase.json');
     });
   });
 
   describe('writePhaseSnapshot', () => {
     it('writes the record atomically into a not-yet-created directory', async () => {
       const runsDir = join(mkdtempSync(join(tmpdir(), 'phase-snapshot-runs-')), 'nested', 'runs');
-      const file = phaseSnapshotFile(runsDir, 1325);
+      const file = phaseSnapshotFile(runsDir, workKeyFromIssue(1325));
       const snapshot: RunPhaseSnapshot = {
         issue: 1325,
         phase: 'check',
@@ -40,7 +41,7 @@ describe('run/phase-snapshot', () => {
 
     it('overwrites a prior snapshot for the same issue', async () => {
       const runsDir = mkdtempSync(join(tmpdir(), 'phase-snapshot-runs-'));
-      const file = phaseSnapshotFile(runsDir, 1325);
+      const file = phaseSnapshotFile(runsDir, workKeyFromIssue(1325));
 
       await writePhaseSnapshot(file, {
         issue: 1325,
@@ -63,7 +64,7 @@ describe('run/phase-snapshot', () => {
   describe('readPhaseSnapshot', () => {
     it('round-trips a written record', async () => {
       const runsDir = mkdtempSync(join(tmpdir(), 'phase-snapshot-runs-'));
-      const file = phaseSnapshotFile(runsDir, 1325);
+      const file = phaseSnapshotFile(runsDir, workKeyFromIssue(1325));
       const snapshot: RunPhaseSnapshot = {
         issue: 1325,
         phase: 'ship',
@@ -79,7 +80,7 @@ describe('run/phase-snapshot', () => {
 
     it('round-trips a written lastEvent (#1327)', async () => {
       const runsDir = mkdtempSync(join(tmpdir(), 'phase-snapshot-runs-'));
-      const file = phaseSnapshotFile(runsDir, 1327);
+      const file = phaseSnapshotFile(runsDir, workKeyFromIssue(1327));
       const snapshot: RunPhaseSnapshot = {
         issue: 1327,
         phase: 'build',
@@ -160,7 +161,7 @@ describe('run/phase-snapshot', () => {
   describe('touchRunActivity', () => {
     it('bumps lastActivityAt while leaving phase and updatedAt untouched', async () => {
       const runsDir = mkdtempSync(join(tmpdir(), 'phase-snapshot-runs-'));
-      const file = phaseSnapshotFile(runsDir, 1326);
+      const file = phaseSnapshotFile(runsDir, workKeyFromIssue(1326));
       await writePhaseSnapshot(file, {
         issue: 1326,
         phase: 'check',
@@ -181,7 +182,7 @@ describe('run/phase-snapshot', () => {
 
     it('is a no-op when no snapshot exists yet', async () => {
       const runsDir = mkdtempSync(join(tmpdir(), 'phase-snapshot-runs-'));
-      const file = phaseSnapshotFile(runsDir, 1326);
+      const file = phaseSnapshotFile(runsDir, workKeyFromIssue(1326));
 
       await expect(touchRunActivity(file, '2026-09-08T00:05:00.000Z')).resolves.toBeUndefined();
       await expect(readPhaseSnapshot(file)).resolves.toBeNull();
@@ -295,7 +296,7 @@ describe('run/phase-snapshot', () => {
   describe('touchLastEvent (#1327)', () => {
     it('sets lastEvent while leaving phase/updatedAt/lastActivityAt untouched', async () => {
       const runsDir = mkdtempSync(join(tmpdir(), 'phase-snapshot-runs-'));
-      const file = phaseSnapshotFile(runsDir, 1327);
+      const file = phaseSnapshotFile(runsDir, workKeyFromIssue(1327));
       await writePhaseSnapshot(file, {
         issue: 1327,
         phase: 'build',
@@ -317,7 +318,7 @@ describe('run/phase-snapshot', () => {
 
     it('overwrites a prior lastEvent', async () => {
       const runsDir = mkdtempSync(join(tmpdir(), 'phase-snapshot-runs-'));
-      const file = phaseSnapshotFile(runsDir, 1327);
+      const file = phaseSnapshotFile(runsDir, workKeyFromIssue(1327));
       await writePhaseSnapshot(file, {
         issue: 1327,
         phase: 'build',
@@ -334,7 +335,7 @@ describe('run/phase-snapshot', () => {
 
     it('is a no-op when no snapshot exists yet', async () => {
       const runsDir = mkdtempSync(join(tmpdir(), 'phase-snapshot-runs-'));
-      const file = phaseSnapshotFile(runsDir, 1327);
+      const file = phaseSnapshotFile(runsDir, workKeyFromIssue(1327));
 
       await expect(touchLastEvent(file, 'build: compiling')).resolves.toBeUndefined();
       await expect(readPhaseSnapshot(file)).resolves.toBeNull();

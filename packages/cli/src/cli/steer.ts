@@ -14,7 +14,7 @@ import {
   type SteerPhase,
   type SteerSource,
 } from '@on-par/factory-core/internal';
-import { getFactoryPaths } from '@on-par/factory-core';
+import { getFactoryPaths, workKeyFromIssue } from '@on-par/factory-core';
 
 import type { CliExitError } from './index.js';
 
@@ -99,14 +99,14 @@ export function parseSteerRef(raw: string): SteerRef {
 
 export async function resolveSteerRun(runsDir: string, ref: SteerRef): Promise<{ file: string; state: IssueRunState }> {
   if (ref.kind !== 'pr') {
-    const file = runStateFile(runsDir, ref.number);
+    const file = runStateFile(runsDir, workKeyFromIssue(ref.number));
     const state = await readIssueRunState(file);
     if (state) return { file, state };
   }
   if (ref.kind !== 'issue') {
     const { runs } = await listIssueRuns(runsDir);
     const state = runs.find((r) => r.prNumber === ref.number);
-    if (state) return { file: runStateFile(runsDir, state.issue), state };
+    if (state) return { file: runStateFile(runsDir, workKeyFromIssue(state.issue)), state };
   }
   throw new SteerCliError(`no run found for ${ref.raw}`, 'no-run');
 }

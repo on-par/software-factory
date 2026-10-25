@@ -630,7 +630,7 @@ describe('cli', () => {
     const core = await import('@on-par/factory-core');
     const root = await mkdtemp(join(tmpdir(), 'wait-for-merge-'));
     const runs = join(root, 'runs');
-    const file = core.phaseSnapshotFile(runs, 21);
+    const file = core.phaseSnapshotFile(runs, core.workKeyFromIssue(21));
     await core.writePhaseSnapshot(file, {
       issue: 21,
       phase: 'ship',

@@ -19,6 +19,7 @@ import {
   redactSecretPatterns,
   respondToApproval,
   type RunPhaseSnapshot,
+  workKeyFromIssue,
 } from '@on-par/factory-core';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import { type JSX, useEffect, useMemo, useState } from 'react';
@@ -218,16 +219,13 @@ export function App({
 
   useEffect(() => {
     if (!breakerFile) return;
-    const read = () => {
-      void listBreakersFn(breakerFile).then(setBreakers);
-    };
+    const read = () => void listBreakersFn(breakerFile).then(setBreakers);
     read();
     const interval = setInterval(read, POLL_MS);
     return () => clearInterval(interval);
   }, [breakerFile, listBreakersFn]);
 
   const laneIssuesKey = state.lanes.map((l) => l.issue).join(',');
-
   useEffect(() => {
     if (!runsDir) return;
     let cancelled = false;
@@ -241,7 +239,8 @@ export function App({
         await Promise.all(
           state.lanes.filter(isNonTerminalLane).map(async (lane) => {
             try {
-              next[lane.issue] = (await readSnapshotFn(phaseSnapshotFile(runsDir, Number(lane.issue))))?.lastActivityAt;
+              const snap = await readSnapshotFn(phaseSnapshotFile(runsDir, workKeyFromIssue(Number(lane.issue))));
+              next[lane.issue] = snap?.lastActivityAt;
             } catch {
               next[lane.issue] = undefined;
             }

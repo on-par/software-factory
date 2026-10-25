@@ -12,6 +12,7 @@ import { coreFakes, errored, h, installShipHarness, logged, paths, runMainWith }
 installShipHarness();
 
 const runMain = (...args: string[]) => runMainWith(undefined, ...args);
+const snapshotFile = (n: number) => FactoryCore.phaseSnapshotFile(paths().runs, FactoryCore.workKeyFromIssue(n));
 
 describe('cli', () => {
   describe('status', () => {
@@ -207,7 +208,7 @@ describe('cli', () => {
 
       it('lists a fresh active claim', async () => {
         writeFileSync(paths().queue, 'app 1\n');
-        await FactoryCore.writePhaseSnapshot(FactoryCore.phaseSnapshotFile(paths().runs, 1), {
+        await FactoryCore.writePhaseSnapshot(snapshotFile(1), {
           issue: 1,
           phase: 'build',
           updatedAt: new Date().toISOString(),
@@ -257,7 +258,7 @@ describe('cli', () => {
     it('prints product, models, queue, events, and STOP state', async () => {
       writeFileSync(paths().product, 'alpha\n');
       writeFileSync(paths().queue, '# comment\napp 1\napp 2\n');
-      await FactoryCore.writePhaseSnapshot(FactoryCore.phaseSnapshotFile(paths().runs, 1), {
+      await FactoryCore.writePhaseSnapshot(snapshotFile(1), {
         issue: 1,
         phase: 'build',
         updatedAt: new Date().toISOString(),
@@ -354,7 +355,7 @@ describe('cli', () => {
 
     it('warns on malformed queue lines and never renders NaN', async () => {
       writeFileSync(paths().queue, 'app 1\napp abc\n');
-      await FactoryCore.writePhaseSnapshot(FactoryCore.phaseSnapshotFile(paths().runs, 1), {
+      await FactoryCore.writePhaseSnapshot(snapshotFile(1), {
         issue: 1,
         phase: 'build',
         updatedAt: new Date().toISOString(),

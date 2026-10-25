@@ -4,7 +4,13 @@
 import { existsSync, rmSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 
-import { LaneFileGuard, phaseSnapshotFile, type PortLease, ReworkHistory } from '@on-par/factory-core';
+import {
+  LaneFileGuard,
+  phaseSnapshotFile,
+  type PortLease,
+  ReworkHistory,
+  workKeyFromIssue,
+} from '@on-par/factory-core';
 import {
   countUnpushedCommits,
   factoryBranchIssue,
@@ -153,7 +159,7 @@ export async function resetIssue(issue: number, deps: ResetDeps): Promise<ResetR
 
   // 4. Phase file
   try {
-    const file = phaseSnapshotFile(paths.runs, issue);
+    const file = phaseSnapshotFile(paths.runs, workKeyFromIssue(issue));
     if (existsSync(file)) {
       if (!dry) rmSync(file, { force: true });
       removed.push(dry ? `phase file ${file}` : 'phase file');
