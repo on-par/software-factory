@@ -862,8 +862,12 @@ async function planPhaseImpl(opts: {
               log('size-gate-decomposed', reason);
               return { ...park(reason), decomposed: { childIssues } };
             }
-            log('size-gate-escalated', fileReason);
-            return park(fileReason);
+            // #728: a skipped decomposition (closed issue, pending proposal) names its cause in the park reason.
+            const reason = decomposeResult.skipped
+              ? `plan scope exceeds the bounded-build budget (${scope}) — ${decomposeResult.skipped.reason}`
+              : fileReason;
+            log('size-gate-escalated', reason);
+            return park(reason);
           }
         }
       }
