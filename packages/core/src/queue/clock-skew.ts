@@ -5,7 +5,7 @@ import { defaultFactoryConfig } from '@on-par/factory-config';
 import type { FactoryConfig } from '../config/index.js';
 
 /** Default largest tolerated |local - GitHub| clock difference before the reaper refuses (#3149). */
-export const DEFAULT_MAX_CLOCK_SKEW_MS = 60_000;
+export const DEFAULT_MAX_CLOCK_SKEW_MS = defaultFactoryConfig.queue.maxClockSkewMs;
 
 /** How long a successful skew measurement is reused (#3149). */
 export const CLOCK_SKEW_CACHE_TTL_MS = 10 * 60_000;

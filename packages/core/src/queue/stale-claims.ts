@@ -103,8 +103,9 @@ async function releaseOrRefuse(
 function defaultSkewProbe(opts: ReleaseStaleClaimsOptions): Promise<number | null> {
   const { client } = opts;
   if (!client.serverDate) return Promise.resolve(null);
+  const serverDate = client.serverDate.bind(client);
   return measureClockSkew({
-    serverDate: () => client.serverDate!(),
+    serverDate,
     now: opts.now,
     cache: defaultClockSkewCache,
   });
