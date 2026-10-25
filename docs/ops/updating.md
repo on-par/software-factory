@@ -1,8 +1,8 @@
 # Updating factoryd
 
 Reference: parent #1936, epic #2243. How factoryd updates itself, how to opt out, and
-how to roll back by hand. Parts of the flow are not shipped yet; each is marked with a
-"Not shipped yet" note and its tracking issue.
+how to roll back by hand. The update cycle (#1939) and `factory self-update --to` (#2355)
+have shipped; the full cycle works from 0.9.6.
 
 ## Update modes
 
@@ -46,18 +46,27 @@ the plist is regenerated. The `daemon.json` route needs no plist change.
 
 ## The update cycle
 
-> **Not shipped yet (#1939, #2355).** This section describes the planned behaviour.
+Every `checkIntervalMinutes`, factoryd checks npm for a newer version on its channel
+(`stable` ignores prereleases). When one is found:
 
-1. Drain: stop claiming new issues and let in-flight lanes finish, bounded by
-   `drainTimeoutMinutes`. `update.draining` in `factory status --json` shows it.
-2. Install the exact version into the running Node's prefix.
-3. Run `factory doctor`.
-4. Restart (see exit code 75 below).
+1. Preflight: `factory self-update --to <version> --dry-run` checks the version, install
+   kind and npm. If it fails, factoryd records `skipped` and does not drain.
+2. Drain: STOP is set in each attached repo, so lanes claim no new issues and in-flight
+   lanes finish, bounded by `drainTimeoutMinutes`. `update.draining` in
+   `factory status --json` shows it. On a drain timeout factoryd records `skipped`, clears
+   the STOP files and retries next interval.
+3. Apply: `factory self-update --to <version>` installs the exact version into the
+   running Node's prefix and runs `factory doctor`.
+4. Restart (see exit code 75 below). The STOP files set for the drain are cleared.
+
+You can run the same install by hand with `factory self-update --to <version>`.
+`--dry-run` validates without installing, and `--force` applies while a run is active.
 
 ## Rollback
 
-Automatic (not shipped yet, #1939): if install or doctor fails, the previous version is
-reinstalled and `lastResult.outcome` is `rolled-back`. Failed versions are skipped.
+Automatic: if install or doctor fails, the previous version is reinstalled and
+`lastResult.outcome` is `rolled-back`. factoryd does not retry a version that failed or
+rolled back; it waits for a newer release.
 
 Manual rollback:
 
@@ -71,8 +80,6 @@ factory daemon stop && factory daemon start
 - `<prefix>`: `dirname $(dirname $(which node))` for the Node that runs factoryd.
 
 ## Restart under launchd (exit code 75)
-
-> **Not shipped yet (#1939).**
 
 After a successful install factoryd exits with code 75 (EX_TEMPFAIL) and launchd
 `KeepAlive` relaunches it on the new version. An exit-75 line in `~/.factory/daemon.log`

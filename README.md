@@ -109,10 +109,14 @@ Every other key is optional. `pr.footer` defaults to `This PR was made by Softwa
 ## Updating
 
 ```bash
-npm install -g @on-par/factory-cli@latest
+npm install -g @on-par/factory-cli@latest   # Requires Node.js 24 or newer
+factory self-update --check                 # is a newer release on npm? (0.9.3 and later)
+factory self-update --to <version>          # install that exact stable version (0.9.6 and later)
 ```
 
-`factory self-update --check` reports whether a newer release is on npm. It works in 0.9.3 and later. Automatic updates are planned: the installer (#2355) and the daemon update loop (#1939). The planned design is in [docs/ops/updating.md](docs/ops/updating.md).
+`factory self-update --to` installs the version next to the running Node, runs `factory doctor`, restarts factoryd, and rolls back if the install or doctor fails. factoryd installed from npm runs the same update on its own when a new stable release appears. Update modes, opting out, and manual rollback are in [docs/ops/updating.md](docs/ops/updating.md). Release notes are in [CHANGELOG.md](CHANGELOG.md).
+
+The `version` fields in this repo's `package.json` files stay at the last committed version (0.9.4). The publish job writes the release or prerelease version at build time and never commits it, so use `factory --version` or `npm view @on-par/factory-cli dist-tags` to see real versions.
 
 ## CLI commands
 
@@ -144,7 +148,7 @@ factory check <N> [--json] [--no-judge] [--rejudge] [--deep]
 
 # Observe
 factory status                      Show active runs, the GitHub queue, provider health, and recent events
-factory status --json               One JSON object: STOP flag, provider breaker, active claims (--kpis ignored)
+factory status --json               One JSON object: STOP flag, active claims, providers and alerts, disk, update state (--kpis ignored)
 factory logs [--follow] [--json] [--issue <n>] [--limit <n>] [--since <cursor>]
                                     Print pipeline events (--limit/--since read only part of the log)
 factory cost                        Show recorded model spend by model
@@ -171,7 +175,7 @@ Exit codes: `0` when every child reached ready-for-review, was skipped as closed
 
 | Script                                                            | What it does                                                                                                                                                                                                                                 | Runs in                                                                   |
 | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `npm run test`                                                    | Vitest with coverage thresholds (the full-suite gate).                                                                                                                                                                                       | `verify.sh` (full path), CI                                               |
+| `npm run test`                                                    | Vitest with coverage thresholds (the full-suite gate).                                                                                                                                                                                       | `verify.sh` (both paths), CI                                              |
 | `npm run test:integration`                                        | Pipeline integration suites.                                                                                                                                                                                                                 | Nightly workflow, on demand                                               |
 | `npm run sim-monte-carlo -- [options]`                            | Headless simulator Monte Carlo runs: synthetic issues through fake PLAN→BUILD→CHECK→SHIP, no model or GitHub calls. Prints shipped/parked/escalated rates and exits 1 on a breached `--max-*-rate` threshold. `-- --help` lists the options. | On demand                                                                 |
 | `npm run sandbox-ab-report -- [--costs <file>] [--events <file>]` | Docker-sandbox vs baseline A/B comparison over `.factory/state/costs.jsonl` and `.factory/state/events.ndjson` (defaults from `getFactoryPaths`), with a go/no-go recommendation (#656).                                                     | On demand                                                                 |

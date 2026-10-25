@@ -30,7 +30,7 @@ Agents run with their permission prompts off (Claude Code with `--permission-mod
 npm install -g @on-par/factory-cli@latest
 ```
 
-`factory self-update --check` reports whether a newer release is on npm. It works in 0.9.3 and later. Automatic updates are planned: [#2355](https://github.com/on-par/software-factory/issues/2355), [#1939](https://github.com/on-par/software-factory/issues/1939).
+`factory self-update --check` reports whether a newer release is on npm. It works in 0.9.3 and later. `factory self-update --to <version>` (0.9.6 and later) installs that exact stable version next to the running Node, runs `factory doctor`, restarts factoryd, and rolls back if the install or doctor fails. factoryd installed from npm runs the same update on its own when a new stable release appears. See [docs/ops/updating.md](https://github.com/on-par/software-factory/blob/main/docs/ops/updating.md) and the [CHANGELOG](https://github.com/on-par/software-factory/blob/main/CHANGELOG.md).
 
 ## Documentation
 
