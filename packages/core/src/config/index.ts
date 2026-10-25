@@ -325,9 +325,15 @@ export const FactoryConfigSchema = z.object({
         .describe(
           'Review-rework runs allowed per issue (#3565). At the cap a trusted changes-requested review starts no run and parks the issue. 0 always parks.',
         ),
+      maxClockSkewMs: z
+        .number()
+        .int()
+        .nonnegative()
+        .default(60000)
+        .describe('Max ms this clock may differ from GitHub before the stale-claim reaper refuses (#3149).'),
       comment: z.string().optional(),
     })
-    .default({ claim_settle_ms: 3000, max_review_rework_runs: 2 }),
+    .default({ claim_settle_ms: 3000, max_review_rework_runs: 2, maxClockSkewMs: 60000 }),
   adr: z.object({ mandate: z.boolean().default(false), comment: z.string().optional() }).default({ mandate: false }),
   /** Ship-it lane workspace isolation (#1535). `'host'` is the existing sibling-worktree
    *  behavior; `'disposable-docker'` opts a repo into a managed, labeled container per

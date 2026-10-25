@@ -51,6 +51,7 @@ export type EventKind =
   | 'ci-rescued'
   | 'claim_expired_released'
   | 'claim_lost'
+  | 'reap_refused_clock_skew'
   | 'ci-rescue-failed'
   | 'conflict'
   | 'conflict_detected'
@@ -403,6 +404,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   plan_rejected: { severity: 'info', isPark: false, isTerminal: false },
   'post-merge-defect': { severity: 'info', isPark: false, isTerminal: false },
   pr_opened: { severity: 'info', isPark: false, isTerminal: false },
+  reap_refused_clock_skew: { severity: 'warn', isPark: false, isTerminal: false }, // #3149
   queue_added: { severity: 'info', isPark: false, isTerminal: false },
   queue_deferred_only: { severity: 'warn', isPark: false, isTerminal: false }, // #3660
   queue_admission_conflict: { severity: 'warn', isPark: false, isTerminal: false },

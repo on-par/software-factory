@@ -17,13 +17,19 @@ export async function reconcileQueue(
   ghRepo: string | undefined,
   octokit: Octokit | undefined,
   eventsFile: string,
+  maxClockSkewMs?: number,
 ): Promise<void> {
   const [owner, repo] = ghRepo?.split('/') ?? [];
   // Stale claim reap (#999): factory:in-progress claims naming a dead local pid go back to
   // factory:queued so the next run can claim them with no manual label surgery.
   try {
     if (ghRepo && octokit) {
-      const released = await ops.releaseStaleClaims({ client: createOctokitQueueClient(octokit), owner, repo });
+      const released = await ops.releaseStaleClaims({
+        client: createOctokitQueueClient(octokit),
+        owner,
+        repo,
+        maxClockSkewMs,
+      });
       console.log(formatClaimReconcileReport(released));
     } else {
       console.log('reconcile: skipping stale claims: no GitHub repo or token');

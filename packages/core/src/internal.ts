@@ -475,6 +475,7 @@ export type { StatelessLaneIssue } from './queue/stateless-lane.js';
 export { findStatelessLaneIssues, listRepoLaneLabels, listStatelessLaneIssues } from './queue/stateless-lane.js';
 export * from './queue/unpark.js';
 export { DEFAULT_CLAIM_SETTLE_MS, resolveQueueClaimSettleMs } from './queue/claim-settle.js';
+export * from './queue/clock-skew.js';
 // Green-and-ready PR reporting (#1000)
 export type {
   FindUnmergedGreenPrsOptions,

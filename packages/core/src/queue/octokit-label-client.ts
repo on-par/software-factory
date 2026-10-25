@@ -2,6 +2,7 @@
 
 import type { Octokit } from '@octokit/rest';
 
+import { githubServerDate } from './clock-skew.js';
 import { notFoundError } from './github-errors.js';
 import type { QueueGitHubClient, QueueIssue } from './github-queue.js';
 import { forgetRepoLabel } from './label-cache.js';
@@ -24,8 +25,9 @@ export function toQueueIssue(issue: RawIssue): QueueIssue {
 
 export function createOctokitLabelSweepMethods(
   octokit: Octokit,
-): Required<Pick<QueueGitHubClient, 'listRepoLabels' | 'deleteRepoLabel' | 'listAllOpenIssues'>> {
+): Required<Pick<QueueGitHubClient, 'listRepoLabels' | 'deleteRepoLabel' | 'listAllOpenIssues' | 'serverDate'>> {
   return {
+    serverDate: () => githubServerDate(octokit),
     async listRepoLabels({ owner, repo }) {
       const names: string[] = [];
       for (let page = 1; page <= REPO_LABEL_SWEEP_MAX_PAGES; page++) {
