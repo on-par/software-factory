@@ -17,6 +17,16 @@ import { landRuntime } from './land-runtime.js';
 
 export type CommandRunner = (command: string, options?: { cwd?: string; timeout?: number }) => Promise<unknown>;
 
+export async function defaultListIssueLabels(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  issue: number,
+): Promise<string[]> {
+  const { data } = await octokit.rest.issues.listLabelsOnIssue({ owner, repo, issue_number: issue });
+  return data.map((label) => label.name);
+}
+
 export async function squashMergeAndDelete(
   octokit: Octokit,
   owner: string,
@@ -24,8 +34,9 @@ export async function squashMergeAndDelete(
   branch: string,
   prNumber: number,
   /** `sha`: the CI-verified head commit. GitHub refuses the merge if the PR head has moved. */
-  opts: { admin?: boolean; run?: CommandRunner; sha?: string } = {},
+  opts: { admin?: boolean; run?: CommandRunner; sha?: string; signal?: AbortSignal } = {},
 ): Promise<void> {
+  opts.signal?.throwIfAborted(); // #3146: never merge once the claim is lost
   const { sha } = opts;
   if (opts.admin) {
     const run = opts.run ?? landRuntime().shellOps.exec;
@@ -254,6 +265,8 @@ export async function landOpenPullRequest(opts: {
   syncMain?: boolean;
   /** #3654: answers whether a head lacks commits from the base; undefined when unknown. Defaults to the GitHub compare API. */
   behindProbe?: (headSha: string, baseRef: string) => Promise<boolean | undefined>;
+  /** #3146: aborts when the lane loses its claim; checked before the merge. */
+  signal?: AbortSignal;
 }): Promise<void> {
   const {
     octokit,
@@ -429,12 +442,13 @@ export async function landOpenPullRequest(opts: {
             admin: adminMerge,
             run,
             sha: verifiedSha,
+            signal: opts.signal,
           });
           return 'merged' as const;
         });
         return outcome === 'merged';
       } catch (err: any) {
-        if (err instanceof CiFailedError || err instanceof LandConflictError) throw err;
+        if (err instanceof CiFailedError || err instanceof LandConflictError || opts.signal?.aborted) throw err;
         if (verifiedSha && isHeadModifiedMergeError(err)) {
           const msg = `PR #${prNumber} head moved past CI-verified commit ${verifiedSha} — refusing to merge an unverified head`;
           log('ci-failed', msg);

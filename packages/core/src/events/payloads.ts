@@ -78,6 +78,14 @@ export interface ProviderBreakerClosePayload {
   cause: 'cooldown' | 'creds_changed' | 'manual_reset';
 }
 
+/** Payload of a `claim_lost` event (#3146): this host's claim on `issue` was released or lapsed; another host owns it now. */
+export interface ClaimLostPayload {
+  hostId: string;
+  issue: number;
+  runId: string;
+  kind: 'released' | 'lapsed';
+}
+
 /** Payload of a `provider_restored` event (#3236): a provider breaker closed, by any path; `probe` is a passed restore probe (#3339). */
 export interface ProviderRestoredPayload {
   provider: string;

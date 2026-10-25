@@ -185,6 +185,7 @@ describe('stack queue preflight and merge ordering (ADR-0161)', () => {
       const { waitMerge, recordStackMerge, releaseIssue } = await run(2);
       expect(waitMerge).toHaveBeenCalledWith(7, 'factory/7-s2-x', '/repo', 'on-par/software-factory', paths, {
         landBranch: 'factory/7-s2-x',
+        signal: expect.any(AbortSignal),
       });
       expect(recordStackMerge).toHaveBeenCalledWith(7, 12);
       expect(releaseIssue).toHaveBeenCalledWith(7, 'queued');

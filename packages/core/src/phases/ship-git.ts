@@ -1,11 +1,24 @@
 // packages/core/src/phases/ship-git.ts — push-failure and remote-head helpers for SHIP
 
+import { exec as execCb } from 'node:child_process';
+import { promisify } from 'node:util';
+
 import { shellEscape } from '../utils/index.js';
 
 export type CommandRunner = (
   command: string,
   options?: { cwd?: string; timeout?: number },
 ) => Promise<{ stdout: string }>;
+
+const defaultRun: CommandRunner = promisify(execCb);
+
+/** Wraps a runner so no command starts once the lane's claim is lost (#3146): push and remote-head checks refuse to run. */
+export function claimGuardedRunner(signal: AbortSignal, run: CommandRunner = defaultRun): CommandRunner {
+  return (command, options) => {
+    signal.throwIfAborted();
+    return run(command, options);
+  };
+}
 
 /** Why a `git push` was refused, as far as git's own stderr says (#733). */
 export type PushFailureKind = 'non-fast-forward' | 'network' | 'unknown';

@@ -355,6 +355,7 @@ async function runIssueOnce(
   let laneFileClaimed = false;
   const setPhase = async (phase: FailurePhase): Promise<void> => {
     failurePhase = phase;
+    ports.claimSignal?.throwIfAborted();
     try {
       await ports.recordPhase?.(phase);
     } catch (err) {
@@ -1217,7 +1218,7 @@ async function runIssueOnce(
       ...(planSlice ? { slice: { index: planSlice.index, count: planSlice.plan.slices.length } } : {}),
     };
   } catch (err) {
-    if (isDecomposeSignal(err)) throw err;
+    if (isDecomposeSignal(err) || ports.claimSignal?.aborted) throw err;
     if ((err as { reason?: unknown } | null | undefined)?.reason === 'local_auth') {
       log(
         'environment_warning',

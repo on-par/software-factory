@@ -123,3 +123,14 @@ describe('shipIssue run state (#3194)', () => {
     expect(final?.steers).toEqual([event]);
   });
 });
+
+describe('phaseRecorder (#3146)', () => {
+  it('writes a phase snapshot for the issue with matching updatedAt and lastActivityAt', async () => {
+    const { phaseSnapshotFile, readPhaseSnapshot } = await import('@on-par/factory-core');
+    const { phaseRecorder } = await import('./ship-run-state.js');
+    await phaseRecorder(paths().runs, 42)('build');
+    const snap = await readPhaseSnapshot(phaseSnapshotFile(paths().runs, 42));
+    expect(snap).toMatchObject({ issue: 42, phase: 'build' });
+    expect(snap?.lastActivityAt).toBe(snap?.updatedAt);
+  });
+});

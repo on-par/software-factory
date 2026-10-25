@@ -380,6 +380,7 @@ describe('cli', () => {
             lane: 'app',
             blockedBehind: [2],
             onOutcome: expect.any(Function),
+            signal: expect.any(AbortSignal),
           },
         },
         {
@@ -391,6 +392,7 @@ describe('cli', () => {
             lane: 'app',
             blockedBehind: [],
             onOutcome: expect.any(Function),
+            signal: expect.any(AbortSignal),
           },
         },
       ]);

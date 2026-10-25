@@ -48,6 +48,7 @@ export type EventKind =
   | 'ci-infra'
   | 'ci-never-started'
   | 'ci-rescued'
+  | 'claim_lost'
   | 'ci-rescue-failed'
   | 'conflict'
   | 'conflict_detected'
@@ -118,6 +119,7 @@ export type EventKind =
   | 'lane_file_release_failed'
   | 'lane_install'
   | 'lane_install_failed'
+  | 'lease_renew_failed'
   | 'landed'
   | 'lane-done'
   | 'lane-paused'
@@ -274,6 +276,8 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   checker_started: { severity: 'info', isPark: false, isTerminal: false },
   // An infra-classified CI failure was rerun once and the re-watch went green (#2365). Not a park.
   'ci-rescued': { severity: 'info', isPark: false, isTerminal: false },
+  // #3146: the lane lost its claim to another host; stopped before push/PR/merge, never released or parked.
+  claim_lost: { severity: 'warn', isPark: false, isTerminal: true, laneStatus: 'stopped' },
   'ci-failed': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   // A PR whose one infra rerun also failed for infra on the same SHA (#2366). Parks; not an ADR-0155 steward trigger.
   'ci-infra': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
@@ -358,6 +362,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   lane_file_release_failed: { severity: 'warn', isPark: false, isTerminal: false },
   lane_install: { severity: 'info', isPark: false, isTerminal: false },
   lane_install_failed: { severity: 'warn', isPark: false, isTerminal: false },
+  lease_renew_failed: { severity: 'warn', isPark: false, isTerminal: false }, // #3146
   landed: { severity: 'info', isPark: false, isTerminal: true, laneStatus: 'merged' },
   'lane-done': { severity: 'info', isPark: false, isTerminal: false },
   // The lane circuit breaker stopped claiming issues (#1906). Not a park: both

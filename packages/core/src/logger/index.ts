@@ -13,6 +13,7 @@ import type { RunAttribution } from '../run/outcome.js';
 import type { EscalateKind } from '../types/index.js';
 import type {
   AllProvidersDownPayload,
+  ClaimLostPayload,
   EventKind,
   FlakyTestsPayload,
   LanePausedPayload,
@@ -66,6 +67,7 @@ export interface LogExtra {
   providerAuthRejected?: ProviderAuthRejectedPayload;
   providerBreakerClose?: ProviderBreakerClosePayload;
   providerRestored?: ProviderRestoredPayload;
+  claimLost?: ClaimLostPayload;
   stewardTriggered?: StewardTriggeredPayload;
   flakyTests?: FlakyTestsPayload;
   checkFailure?: CheckFailureInfo;
@@ -180,6 +182,7 @@ export function createLogger(eventsFile: string, ctx: LogContext = {}, opts: Log
       ...(extra?.providerAuthRejected ? { providerAuthRejected: extra.providerAuthRejected } : {}),
       ...(extra?.providerBreakerClose ? { providerBreakerClose: extra.providerBreakerClose } : {}),
       ...(extra?.providerRestored ? { providerRestored: extra.providerRestored } : {}),
+      ...(extra?.claimLost ? { claimLost: extra.claimLost } : {}),
       ...(extra?.stewardTriggered ? { stewardTriggered: extra.stewardTriggered } : {}),
       ...(extra?.flakyTests ? { flakyTests: extra.flakyTests } : {}),
       ...(extra?.checkFailure ? { checkFailure: extra.checkFailure } : {}),
