@@ -376,7 +376,7 @@ async function runIssueOnce(
     released = true;
     if (laneFileClaimed) {
       laneFileClaimed = false;
-      if (ports.laneFileGuard) await releaseLaneClaim(ports.laneFileGuard, request.repo, request.issue, log);
+      if (ports.laneFileGuard) await releaseLaneClaim(ports.laneFileGuard, request.repo, workKey, log);
     }
     const outcomes = await tracker.killAll({ graceMs: request.processGroupGraceMs });
     if (outcomes.length > 0) {
@@ -510,12 +510,12 @@ async function runIssueOnce(
   const rememberProviderFailureFor = providerFailureRecorder({
     breaker: ports.breaker,
     log,
-    issue: request.issue,
+    issue: workKey,
     defaultCooldownMs: request.failover.cooldownMs,
   });
 
   const gateDeps = { router: ports.router, breaker: ports.breaker, log, probe: providerProbe(ports) };
-  const runStage = providerStageRunner({ ...gateDeps, issue: request.issue }, request.providerOrder);
+  const runStage = providerStageRunner({ ...gateDeps, issue: workKey }, request.providerOrder);
   const gitExec = ports.gitExec ?? defaultExecFn;
   const capGate = providerCapGate(ports.router, ports.breaker, { ...request, issue: workKey }, log, gateDeps.probe);
 
@@ -652,7 +652,7 @@ async function runIssueOnce(
         );
       }
 
-      const reused = await loadReusablePlan(ports.planReuse, request, log, ports.events('plan'));
+      const reused = await loadReusablePlan(ports.planReuse, { ...request, issue: workKey }, log, ports.events('plan'));
       const planGate = reused ? undefined : await capGate.enterPlan(route, ports.events('plan'));
       if (planGate?.released) return planGate.released;
       if (planGate?.down) return await parkAllProvidersDown(planGate.down);
@@ -721,12 +721,12 @@ async function runIssueOnce(
       if (ports.laneFileGuard && plan.designArtifact) {
         const touchedFiles = touchedFilesFrom(plan.designArtifact);
         const staleOpts = ports.laneClaimStaleness && { isStale: ports.laneClaimStaleness, log: ports.events('plan') };
-        const collision = await ports.laneFileGuard.findCollision(request.repo, request.issue, touchedFiles, staleOpts);
+        const collision = await ports.laneFileGuard.findCollision(request.repo, workKey, touchedFiles, staleOpts);
         if (collision) {
-          return await deferOnLaneCollision(ports.laneFileGuard, request, collision, route, log);
+          return await deferOnLaneCollision(ports.laneFileGuard, { ...request, issue: workKey }, collision, route, log);
         }
         if (touchedFiles.length > 0) {
-          await ports.laneFileGuard.register(request.repo, request.issue, touchedFiles);
+          await ports.laneFileGuard.register(request.repo, workKey, touchedFiles);
           laneFileClaimed = true;
         }
       }
@@ -970,7 +970,7 @@ async function runIssueOnce(
           return terminalParked(
             'config',
             configParkMessage({
-              issue: request.issue,
+              issue: workKey,
               failure: env,
               summary: failed.summary,
               constitution,
@@ -1004,7 +1004,7 @@ async function runIssueOnce(
           fixTarget = preservedFixTarget(env, constitution, request.repoConfigFile);
           try {
             await ports.checkResume.record({
-              issue: request.issue,
+              issue: workKey,
               branch: request.branch,
               worktree: ports.workspace.path,
               diffBase: buildDiffBase,
@@ -1023,7 +1023,7 @@ async function runIssueOnce(
           'environment-released',
           `every failing checker (${env.failingChecks.join(', ')}) also fails on base ${env.baseSha.slice(0, 8)} — no rework, releasing #${request.issue} to queued` +
             (preserve
-              ? ` — ${formatPreservedBuildMessage({ issue: request.issue, branch: request.branch, buildMinutes, fixTarget })}`
+              ? ` — ${formatPreservedBuildMessage({ issue: workKey, branch: request.branch, buildMinutes, fixTarget })}`
               : ''),
         );
         if (ports.planReuse && !planSlice && !request.resumeFrom) {

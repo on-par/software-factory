@@ -126,7 +126,7 @@ describe('review-rework cap (#3565)', () => {
 describe('review-rework cap helpers', () => {
   it('countReviewReworkRuns counts only started records for the issue', () => {
     const store = { list: () => [rec(1, 42, 'x'), rec(2, 42), rec(3, 7, 'x')] };
-    expect(countReviewReworkRuns(store, 42)).toBe(1);
+    expect(countReviewReworkRuns(store, workKeyFromIssue(42))).toBe(1);
   });
 
   it('resolveMaxReviewReworkRuns reads the config, else 2', () => {
@@ -137,7 +137,7 @@ describe('review-rework cap helpers', () => {
   });
 
   it('reviewReworkCapMessage names the cap and the count', () => {
-    const msg = reviewReworkCapMessage({ issue: 42, pr: 900, cap: 2, count: 3, reviewIds: [7, 8] });
+    const msg = reviewReworkCapMessage({ issue: workKeyFromIssue(42), pr: 900, cap: 2, count: 3, reviewIds: [7, 8] });
     expect(msg).toContain('3 review-rework runs (cap 2');
     expect(msg).toContain('PR #900');
     expect(msg).toContain('factory unpark 42');
@@ -147,7 +147,7 @@ describe('review-rework cap helpers', () => {
     const base = {
       owner: 'o',
       repo: 'r',
-      issue: 42,
+      issue: workKeyFromIssue(42),
       pr: 900,
       lane: 'bugfix',
       branch: 'b',

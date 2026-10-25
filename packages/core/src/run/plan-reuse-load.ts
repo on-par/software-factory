@@ -2,11 +2,12 @@
 
 import { issueBodyHash, type PlanReuseStore } from './resume-context.js';
 import type { RunLogFn } from './attribution.js';
+import type { WorkKey } from '../work/work-key.js';
 
 /** The frozen plan to reuse when the issue body is unchanged since the environment release, else null. */
 export async function loadReusablePlan(
   store: PlanReuseStore | undefined,
-  request: { issue: number; specPath: string; work: { brief: string } },
+  request: { issue: WorkKey; specPath: string; work: { brief: string } },
   log: RunLogFn,
   planLog: RunLogFn,
 ): Promise<Awaited<ReturnType<PlanReuseStore['load']>>> {

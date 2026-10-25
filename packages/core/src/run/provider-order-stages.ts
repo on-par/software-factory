@@ -11,6 +11,7 @@ import { captureWorktreeState, resetWorktreeState } from '../router/worktree-sta
 import type { ExecFn } from '../utils/exec.js';
 import type { EventKind } from '../events/kinds.js';
 import type { ProviderFailoverPayload } from '../events/payloads.js';
+import type { WorkKey } from '../work/work-key.js';
 import type { BuildRoute } from './outcome.js';
 import {
   pickOrderedProvider,
@@ -30,7 +31,7 @@ export type StageRunner = <T>(
 
 /** Runs a stage through the provider failover loop when `order` is set; otherwise just once with no pick (today's call). */
 export function providerStageRunner(
-  deps: { router: ModelRouter; breaker: ProviderBreaker; probe?: ProviderProbe; log: StageLog; issue: number },
+  deps: { router: ModelRouter; breaker: ProviderBreaker; probe?: ProviderProbe; log: StageLog; issue: WorkKey },
   order: ProviderOrder | undefined,
 ): StageRunner {
   return (stage, attempt, hooks) =>

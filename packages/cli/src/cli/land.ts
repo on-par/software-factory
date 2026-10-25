@@ -55,7 +55,7 @@ async function releaseLandedClaim(
   log: (type: EventKind, msg: string) => void,
 ): Promise<void> {
   if (!paths.laneFiles) return;
-  await releaseLaneClaim(new LaneFileGuard(paths.laneFiles), ghRepo, issue, log);
+  await releaseLaneClaim(new LaneFileGuard(paths.laneFiles), ghRepo, workKeyFromIssue(issue), log);
 }
 
 export async function landIssue(

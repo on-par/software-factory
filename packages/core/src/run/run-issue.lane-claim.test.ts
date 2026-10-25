@@ -14,6 +14,7 @@ import type { DesignArtifact } from '../types/index.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import type { WorkRequest } from '../work/index.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 import type { RunPolicy } from './policy.js';
 import { LaneFileGuard } from './lane-file-guard.js';
 import type { Workspace } from './ports.js';
@@ -108,7 +109,7 @@ const design: DesignArtifact = {
 describe('runIssue — stale lane-file claim reaping (#3063)', () => {
   it('reaps a stale claim via ports.laneClaimStaleness and proceeds to BUILD', async () => {
     const guard = new LaneFileGuard(join(breakerDir, 'lane-files.json'));
-    await guard.register('o/r', 100, ['src/shared.ts']);
+    await guard.register('o/r', workKeyFromIssue(100), ['src/shared.ts']);
     const events: Array<[string, string]> = [];
     const buildPhase = vi
       .fn<typeof realBuildPhase>()
@@ -174,6 +175,6 @@ describe('runIssue — stale lane-file claim reaping (#3063)', () => {
     };
     await expect(runIssue(request, policy, ports)).resolves.toBeDefined();
     expect(events.some(([type, msg]) => type === 'lane_file_release_failed' && msg.includes('#1'))).toBe(true);
-    expect(await guard.claimsForIssue(1)).toHaveLength(1);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toHaveLength(1);
   });
 });

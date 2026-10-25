@@ -11,6 +11,7 @@ import {
   type SubscriptionProviderId,
 } from '../config/provider-order.js';
 import { routerFailureOf } from '../router/executor-error.js';
+import { issueNumberOf, type WorkKey } from '../work/work-key.js';
 import type { BuildRoute } from './outcome.js';
 import { probeIfDue, type ProviderProbe } from './provider-probe.js';
 
@@ -172,7 +173,7 @@ export async function runWithProviderFailover<T>(
     breaker: ProviderBreaker;
     probe?: ProviderProbe;
     log: GateLog;
-    issue: number;
+    issue: WorkKey;
     order: ProviderOrder;
   },
   stage: FailoverStage,
@@ -193,7 +194,7 @@ export async function runWithProviderFailover<T>(
       deps.log(
         'provider_failover',
         `${stage.toUpperCase()} hit a usage cap on ${pick.provider} — rerunning ${stage.toUpperCase()} from its start on ${next.provider} (${next.model})`,
-        { providerFailover: { stage, from: pick.provider, to: next.provider, issue: deps.issue } },
+        { providerFailover: { stage, from: pick.provider, to: next.provider, issue: issueNumberOf(deps.issue) } },
       );
       pick = next;
     }

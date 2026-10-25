@@ -13,6 +13,7 @@ import type { DesignArtifact } from '../types/index.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import type { WorkRequest } from '../work/index.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 import type { RunPolicy } from './policy.js';
 import { LaneFileGuard } from './lane-file-guard.js';
 import type { Workspace } from './ports.js';
@@ -137,7 +138,7 @@ function makePorts(overrides: Partial<RunPorts>, events: Array<[string, string]>
 
 describe('runIssue — same-file lane hold defers instead of parking (#3576)', () => {
   it('a live same-file collision defers the issue instead of parking it held', async () => {
-    const collision = { issue: 3232, file: 'src/shared.ts' };
+    const collision = { issue: workKeyFromIssue(3232), file: 'src/shared.ts' };
     const guard = new LaneFileGuard(join(breakerDir, 'lane-files-defer.json'));
     vi.spyOn(guard, 'findCollision').mockResolvedValue(collision);
     const recordHold = vi.spyOn(guard, 'recordHold').mockResolvedValue();
@@ -153,14 +154,14 @@ describe('runIssue — same-file lane hold defers instead of parking (#3576)', (
     ).toBe(true);
     expect(issues.createComment).not.toHaveBeenCalled();
     expect(issues.updateComment).not.toHaveBeenCalled();
-    expect(recordHold).toHaveBeenCalledWith('o/r', 1896, collision);
+    expect(recordHold).toHaveBeenCalledWith('o/r', workKeyFromIssue(1896), collision);
     expect(register).not.toHaveBeenCalled();
     expect(ports.buildPhase).not.toHaveBeenCalled();
   });
 
   it('still defers when recording the hold fails', async () => {
     const guard = new LaneFileGuard(join(breakerDir, 'lane-files-defer-fail.json'));
-    vi.spyOn(guard, 'findCollision').mockResolvedValue({ issue: 7, file: 'src/shared.ts' });
+    vi.spyOn(guard, 'findCollision').mockResolvedValue({ issue: workKeyFromIssue(7), file: 'src/shared.ts' });
     vi.spyOn(guard, 'recordHold').mockRejectedValue(new Error('ENOSPC'));
     const events: Array<[string, string]> = [];
     const outcome = await runIssue(request, policy, makePorts({ laneFileGuard: guard }, events));

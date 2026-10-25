@@ -10,6 +10,7 @@ import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import type { ProviderOrder } from '../config/provider-order.js';
 import { ModelRouterError } from '../router/executor-error.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 import {
   gateOpencodeBuildOnBreaker,
   pickOrderedProvider,
@@ -212,7 +213,7 @@ describe('pickOrderedProvider restore probe (#3339)', () => {
 describe('runWithProviderFailover', () => {
   async function setup(worker = ALL) {
     const log = vi.fn();
-    return { deps: { ...(await orderedDeps()), log, issue: 7, order: worker }, log };
+    return { deps: { ...(await orderedDeps()), log, issue: workKeyFromIssue(7), order: worker }, log };
   }
 
   it('reruns once on the next provider after a usage cap and logs one provider_failover', async () => {

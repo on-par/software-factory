@@ -5,12 +5,13 @@ import { DEFAULT_CAP_PROBE_MS, reportedCooldownMs, type ProviderBreaker } from '
 import { redactText } from '../filing/redact.js';
 import { redactSecrets } from '../router/failure-detail.js';
 import type { ProviderFailureInfo } from '../router/index.js';
+import { issueNumberOf, type WorkKey } from '../work/work-key.js';
 import type { RunLogFn } from './attribution.js';
 
 export interface ProviderFailureRecorderDeps {
   breaker: ProviderBreaker;
   log: RunLogFn;
-  issue: number;
+  issue: WorkKey;
   /** Cooldown for failures that are not usage caps and report no reset time. */
   defaultCooldownMs: number;
   /** Clock for the `at` stamp of provider_auth_rejected. Default: Date.now. */
@@ -43,7 +44,7 @@ export const providerFailureRecorder =
               harness: harness ?? '',
               model: model ?? '',
               stage,
-              issue,
+              issue: issueNumberOf(issue),
               at: new Date((deps.now ?? Date.now)()).toISOString(),
               detail: redactText(redactSecrets(detail ?? '')),
             },
@@ -74,7 +75,14 @@ export const providerFailureRecorder =
       const source = reportedMs !== null ? 'reported' : 'default-1h';
       log('provider_capped', `${provider} capped until ${cappedUntil} (${source}) during ${stage} — failing over`, {
         failoverReason: reason,
-        providerCapped: { provider, stage, issue, cappedUntil, source, detail: redactSecrets(detail ?? '') },
+        providerCapped: {
+          provider,
+          stage,
+          issue: issueNumberOf(issue),
+          cappedUntil,
+          source,
+          detail: redactSecrets(detail ?? ''),
+        },
       });
     }
   };
