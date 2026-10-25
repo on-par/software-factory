@@ -49,3 +49,13 @@ export function knownRepoLabels(client: LabelListClient, owner: string, repo: st
   }
   return labels;
 }
+
+/** Drops `name` from the known-labels set so a later ensureLabel recreates it (#1623). */
+export async function forgetRepoLabel(
+  client: LabelListClient,
+  owner: string,
+  repo: string,
+  name: string,
+): Promise<void> {
+  (await knownByClient.get(client)?.get(`${owner}/${repo}`))?.delete(name);
+}
