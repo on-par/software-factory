@@ -2708,7 +2708,7 @@ describe('cli', () => {
           },
         ),
       ).resolves.toEqual({ kind: 'defer' });
-      expect(events).toHaveBeenCalledWith(3258, 'waiting for prerequisites: #3256');
+      expect(events).toHaveBeenCalledWith(3258, 'waiting for prerequisites: #3256', 'open-prerequisites');
       expect(touched).not.toHaveBeenCalled();
     });
 

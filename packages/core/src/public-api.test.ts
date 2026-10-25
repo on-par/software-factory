@@ -857,6 +857,7 @@ const INTERNAL_API_KEYS = [
   // Stale-claim reaping (#999, lease-based since #1500)
   'findStaleClaims',
   'releaseStaleClaims',
+  'unqueueDeferredOnly',
   // Green-and-ready PR reporting (#1000)
   'createOctokitGreenPrClient',
   'findUnmergedGreenPrs',

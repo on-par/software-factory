@@ -207,7 +207,7 @@ describe('queue PR preflight', () => {
       },
     );
     expect(result).toEqual({ kind: 'defer' });
-    expect(onDeferred).toHaveBeenCalledWith(3258, 'waiting for prerequisites: #3256, #3257');
+    expect(onDeferred).toHaveBeenCalledWith(3258, 'waiting for prerequisites: #3256, #3257', 'open-prerequisites');
     expect(findSlicePlan).not.toHaveBeenCalled();
     expect(findOpenPR).not.toHaveBeenCalled();
   });

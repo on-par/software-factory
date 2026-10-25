@@ -68,6 +68,7 @@ import { runEndOfRunKpiSnapshot } from './kpi-sweep.js';
 import { waitForMerge } from './land.js';
 import { hostClaimGuards } from './host-claim-guards.js';
 import { DRAIN_MESSAGE, createNotifier, resolveNotifyCommand, withDiskLowNotify, withParkNotify } from './notify.js';
+import { createDeferralTracker, settleDeferredOnly } from './queue-startup.js';
 import { runLane } from './run-lane.js';
 import { restackFromSlicePlan } from './run-restack.js';
 import { writeRunFlagOverrides } from './run-flags.js';
@@ -106,6 +107,7 @@ export interface RunRuntime {
   ) => Promise<void>;
   sweepStaleLaneClaims: (paths: ReturnType<typeof getFactoryPaths>, ghRepo: string) => Promise<void>;
   sweepOrphanDrafts: (paths: ReturnType<typeof getFactoryPaths>, ghRepo: string) => Promise<void>;
+  reapExpiredClaims: (paths: ReturnType<typeof getFactoryPaths>, ghRepo: string) => Promise<void>;
   planRunLanes: typeof planRunLanes;
   preflightQueuedIssue: typeof preflightQueuedIssue;
   createQueuePreflightOps: typeof createQueuePreflightOps;
@@ -139,7 +141,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
   const branchPrefix = rt.branchPrefixOrExit(opts.branchPrefix);
 
   return rt.withRepoRunLock(paths, 'factory run', async () => {
-    const deferredIssues = new Set<number>();
+    const deferrals = createDeferralTracker(paths.events);
     const runStartedAt = new Date().toISOString();
     const stopStatus = readStopFileStatus(paths);
     if (stopStatus.present) {
@@ -161,6 +163,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
     }
     await rt.runAutoWorktreeGc(repoRoot, paths, ghRepo, 'all');
     await rt.sweepStaleLaneClaims(paths, ghRepo);
+    if (opts.localQueue !== true) await rt.reapExpiredClaims(paths, ghRepo);
     await rt.sweepOrphanDrafts(paths, ghRepo);
 
     const { lanes, diagnostics } = await rt.planRunLanes({
@@ -185,11 +188,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
                     resolveMergePolicy(factoryConfig, process.env, { auto: opts.autoMerge }).auto,
                   stackMode: resolveSizeGateMode(factoryConfig) === 'stack',
                   laneFileHold: (n) => new LaneFileGuard(paths.laneFiles).liveHold(ghRepo, n),
-                  onDeferred: (issue, message) => {
-                    if (deferredIssues.has(issue)) return;
-                    deferredIssues.add(issue);
-                    logEvent(paths.events, 'issue_deferred', issue, message);
-                  },
+                  onDeferred: deferrals.onDeferred,
                 }),
               ),
             onConflict: (issue, verdict) => {
@@ -475,6 +474,8 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
       await Promise.allSettled(pids);
       controller.abort();
       await watchdog;
+      if (opts.localQueue !== true)
+        await settleDeferredOnly(paths, ghRepo, rt.getOctokit, lanes, deferrals.prerequisite);
       logEvent(paths.events, 'run-done', 'all', 'all lanes finished');
       if (notifier) {
         notifier.notify({
