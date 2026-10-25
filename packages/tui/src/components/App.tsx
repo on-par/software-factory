@@ -10,6 +10,7 @@ import {
   followEvents,
   listPendingApprovals,
   listQueuedSteering,
+  phaseSnapshotFile,
   ProviderBreaker,
   type QueueSnapshot,
   queueSteeringMessage,
@@ -18,6 +19,7 @@ import {
   redactSecretPatterns,
   respondToApproval,
   type RunPhaseSnapshot,
+  workKeyFromIssue,
 } from '@on-par/factory-core';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import { type JSX, useEffect, useMemo, useState } from 'react';
@@ -43,7 +45,6 @@ import { TAB_ORDER, type TabName } from '../tabs/types.js';
 import { ApprovalPrompt } from './ApprovalPrompt.js';
 import { Dashboard, staleLanesLine } from './Dashboard.js';
 import { Header } from './Header.js';
-import { readLaneHeartbeat } from './lane-heartbeat.js';
 import { summarizeLane } from './LaneList.js';
 import { collapseMerged, LaneView } from './LaneView.js';
 import { RunDetail } from './RunDetail.js';
@@ -240,7 +241,13 @@ export function App({
         // Only non-terminal lanes can go stale, so only they need a heartbeat.
         await Promise.all(
           state.lanes.filter(isNonTerminalLane).map(async (lane) => {
-            next[lane.issue] = await readLaneHeartbeat(runsDir, lane.issue, readSnapshotFn);
+            try {
+              next[lane.issue] = (
+                await readSnapshotFn(phaseSnapshotFile(runsDir, workKeyFromIssue(Number(lane.issue))))
+              )?.lastActivityAt;
+            } catch {
+              next[lane.issue] = undefined;
+            }
           }),
         );
         if (!cancelled) setHeartbeats(next);
