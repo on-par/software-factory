@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
-import type { DeclaredHarnessProbe, EventKind, FactoryConfig, LeaseHealth } from '@on-par/factory-core';
+import type { DeclaredHarnessProbe, FactoryConfig, LeaseHealth } from '@on-par/factory-core';
 import {
   applyRepoConfig,
   ConstitutionLoader,
@@ -23,15 +23,13 @@ import {
   claudeStoredSessionState,
   codexChatgptSessionState,
   hasClaudeLoginEvidence,
+  DEFAULT_MAX_CLOCK_SKEW_MS,
   hasOpencodeLoginEvidence,
   isHarnessCliPresent,
   localAuthFailureSinceLogin,
-  logEvent,
   microVmName,
-  resolveBranchPrefix,
+  resolveQueueMaxClockSkewMs,
   shellEscape,
-  withFileLock,
-  withGitLock,
   wrapCommandInSandbox,
 } from '@on-par/factory-core/internal';
 
@@ -46,7 +44,6 @@ import {
   formatContainerReconcileReport,
   formatMicroVmReconcileReport,
   formatReconcileReport,
-  formatWorktreeReconcileReport,
   type GreenPrScanResult,
   leaseChecks,
   type LeaseHealthRow,
@@ -58,6 +55,8 @@ import {
 } from './doctor-health.js';
 import { OPENCODE_LIVE_AUTH_CHECK, opencodeLiveAuthCheck, runOpencodeAuthProbe } from './doctor-opencode-probe.js';
 import { resolveDoctorHarnesses } from './doctor-harness-view.js';
+import { clockSkewCheck, measureDoctorClockSkew } from './doctor-clock-skew.js';
+import { reconcileWorktrees } from './doctor-worktree-reconcile.js';
 import { reconcileQueue } from './doctor-queue-reconcile.js';
 import { HARNESS_SETUP, harnessInstallChecks, readyAgents, skipMissingAgentCheck } from './doctor-harness.js';
 import { failMissingAgentCheck as failMissing } from './doctor-harness.js';
@@ -1016,6 +1015,8 @@ export async function cmdDoctor(
   checks.splice(0, checks.length, ...reconcileAgentAuthChecks(checks));
 
   let verifyRows: ReturnType<typeof withPathResults> = [];
+  const skew = await measureDoctorClockSkew(rt);
+  let maxClockSkewMs = DEFAULT_MAX_CLOCK_SKEW_MS;
   if (repoRoot !== null) {
     const paths = getFactoryPaths(repoRoot);
     let factoryConfig: FactoryConfig;
@@ -1024,6 +1025,7 @@ export async function cmdDoctor(
     } catch {
       factoryConfig = loadFactoryConfig(); // schema errors are reported by the config row (#2611)
     }
+    maxClockSkewMs = resolveQueueMaxClockSkewMs(factoryConfig);
     const health = await inspectPortLeases({ registryFile: paths.ports });
     checks.push(...leaseChecks(health.map(rt.toLeaseRow)));
 
@@ -1128,32 +1130,23 @@ export async function cmdDoctor(
         }
       }
 
-      try {
-        const gcLog = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
-        const gcSandbox = rt.gcWorktreeSandbox(factoryConfig.sandbox, repoRoot);
-        const report = await withGitLock(repoRoot, () =>
-          withFileLock(paths.gitLock, () =>
-            rt.internalOps.sweepWorktrees(
-              {
-                repoRoot,
-                ttlDays: factoryConfig.worktree.gcTtlDays,
-                repo: ghRepo,
-                branchPrefix: resolveBranchPrefix(),
-              },
-              { log: gcLog, octokit, sandbox: gcSandbox },
-            ),
-          ),
-        );
-        console.log(formatWorktreeReconcileReport(report.removed));
-      } catch (err: any) {
-        console.log(`reconcile: worktree sweep failed: ${err?.message ?? String(err)}`);
-      }
+      await reconcileWorktrees(rt, repoRoot, paths, factoryConfig, ghRepo, octokit);
 
-      await reconcileQueue(rt.internalOps, ghRepo, octokit, getFactoryPaths(repoRoot).events);
+      await reconcileQueue(rt.internalOps, ghRepo, octokit, getFactoryPaths(repoRoot).events, maxClockSkewMs);
     }
   }
 
+  const skewRow = clockSkewCheck(skew, maxClockSkewMs);
+  if (skewRow) checks.push(skewRow);
   const text = formatDoctorChecks(checks, { inRepo: repoRoot !== null });
-  console.log(opts.json ? JSON.stringify({ ok: !doctorFailed(checks), checks, verify: verifyRows }, null, 2) : text);
+  console.log(
+    opts.json
+      ? JSON.stringify(
+          { ok: !doctorFailed(checks), checks, verify: verifyRows, clockSkewMs: skew.measured ? skew.skewMs : null },
+          null,
+          2,
+        )
+      : text,
+  );
   if (doctorFailed(checks)) process.exit(1);
 }

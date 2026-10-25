@@ -1,6 +1,6 @@
 // packages/core/src/queue/stale-claims.test.ts — Expired-lease claim detection and release (#1500).
 
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   claimedByLabel,
@@ -9,6 +9,7 @@ import {
   type QueueGitHubClient,
   type QueueIssue,
 } from './github-queue.js';
+import { defaultClockSkewCache } from './clock-skew.js';
 import { findStaleClaims, releaseStaleClaims } from './stale-claims.js';
 import { fakeIssueComments } from './fake-issue-comments.js';
 
@@ -241,5 +242,99 @@ describe('releaseStaleClaims orphan lease-label sweep (#1623)', () => {
     expect(out).toHaveLength(1);
     expect(out[0]!.outcome).toBe('released');
     expect(onLabelSweepError).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('releaseStaleClaims clock skew guard (#3149)', () => {
+  const label = claimExpiresLabel(NOW_SECONDS - 60);
+  const claimed = () => createFakeStore([{ number: 1, labels: [IN_PROGRESS_LABEL, label] }], [label]);
+
+  beforeEach(() => defaultClockSkewCache.clear());
+
+  it.each([300_000, -300_000])(
+    'releaseStaleClaims refuses to reap when the local clock is %i ms off GitHub',
+    async (skew) => {
+      const { state, client } = claimed();
+      const addLabels = vi.spyOn(client, 'addLabels');
+      const removeLabel = vi.spyOn(client, 'removeLabel');
+      const results = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now, clockSkewMs: async () => skew });
+      expect(results).toEqual([
+        {
+          issue: 1,
+          label,
+          expiresAt: NOW_SECONDS - 60,
+          released: false,
+          outcome: 'refused-clock-skew',
+          skewMs: skew,
+          detail: `local clock is ${skew}ms off GitHub (max 60000ms)`,
+        },
+      ]);
+      expect([...state.get(1)!].sort()).toEqual([IN_PROGRESS_LABEL, label].sort());
+      expect(addLabels).not.toHaveBeenCalled();
+      expect(removeLabel).not.toHaveBeenCalled();
+    },
+  );
+
+  it('still runs the orphan lease-label sweep after a refusal', async () => {
+    const { client } = claimed();
+    const onLabelSweep = vi.fn();
+    await releaseStaleClaims({ client, owner: 'o', repo: 'r', now, clockSkewMs: async () => 300_000, onLabelSweep });
+    expect(onLabelSweep).toHaveBeenCalledTimes(1);
+  });
+
+  it('releaseStaleClaims reaps as before when the clock skew is 2 seconds', async () => {
+    const { state, client } = claimed();
+    const clockSkewMs = vi.fn(async () => 2_000);
+    const results = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now, clockSkewMs });
+    expect(results).toEqual([{ issue: 1, label, expiresAt: NOW_SECONDS - 60, released: true, outcome: 'released' }]);
+    expect(state.get(1)!.has(IN_PROGRESS_LABEL)).toBe(false);
+    expect(state.get(1)!.has(label)).toBe(false);
+    expect(clockSkewMs).toHaveBeenCalledTimes(1);
+  });
+
+  it('honours maxClockSkewMs and treats a skew equal to it as acceptable', async () => {
+    const { client } = claimed();
+    const [r] = await releaseStaleClaims({
+      client,
+      owner: 'o',
+      repo: 'r',
+      now,
+      maxClockSkewMs: 5000,
+      clockSkewMs: async () => 5000,
+    });
+    expect(r!.outcome).toBe('released');
+  });
+
+  it('reaps when the skew cannot be measured', async () => {
+    const { client } = claimed();
+    const [r] = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now, clockSkewMs: async () => null });
+    expect(r!.outcome).toBe('released');
+  });
+
+  it('measures through client.serverDate by default and refuses on a 5 minute skew', async () => {
+    const { state, client } = claimed();
+    client.serverDate = async () => new Date(NOW_MS - 300_000).toUTCString();
+    const [r] = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now });
+    expect(r!.outcome).toBe('refused-clock-skew');
+    expect(r!.skewMs).toBe(300_000);
+    expect(state.get(1)!.has(IN_PROGRESS_LABEL)).toBe(true);
+  });
+
+  it('reaps when serverDate reports a small skew or the client has no serverDate', async () => {
+    const { client } = claimed();
+    client.serverDate = async () => new Date(NOW_MS - 2000).toUTCString();
+    expect((await releaseStaleClaims({ client, owner: 'o', repo: 'r', now }))[0]!.outcome).toBe('released');
+    defaultClockSkewCache.clear();
+    const plain = claimed();
+    expect((await releaseStaleClaims({ client: plain.client, owner: 'o', repo: 'r', now }))[0]!.outcome).toBe(
+      'released',
+    );
+  });
+
+  it('never consults the probe when nothing is stale', async () => {
+    const { client } = createFakeStore([{ number: 1, labels: [] }]);
+    const clockSkewMs = vi.fn(async () => 300_000);
+    await releaseStaleClaims({ client, owner: 'o', repo: 'r', now, clockSkewMs });
+    expect(clockSkewMs).not.toHaveBeenCalled();
   });
 });

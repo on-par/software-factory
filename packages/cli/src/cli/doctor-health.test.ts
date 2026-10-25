@@ -210,6 +210,21 @@ describe('formatClaimReconcileReport', () => {
     expect(report).toBe('reconcile: failed to release issue #42 (lease expired at 1700000000): boom');
   });
 
+  it('reports a claim refused for clock skew, not as a release or failure', () => {
+    const report = formatClaimReconcileReport([
+      {
+        issue: 42,
+        expiresAt: 1_700_000_000,
+        released: false,
+        outcome: 'refused-clock-skew',
+        detail: 'local clock is 300000ms off GitHub (max 60000ms)',
+      },
+    ]);
+    expect(report).toBe(
+      'reconcile: refused to release issue #42 (lease expired at 1700000000): local clock is 300000ms off GitHub (max 60000ms)',
+    );
+  });
+
   it('reports a renewed claim as skipped, not a failure', () => {
     const report = formatClaimReconcileReport([
       { issue: 42, expiresAt: 1_700_000_000, released: false, outcome: 'renewed' },

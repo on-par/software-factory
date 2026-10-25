@@ -85,6 +85,21 @@ describe('reapExpiredClaims', () => {
     expect(events).not.toContain('claim_expired_released');
   });
 
+  it('reapExpiredClaims logs reap_refused_clock_skew when the reap is refused for clock skew', async () => {
+    const refused = { released: false, outcome: 'refused-clock-skew' as const, skewMs: 300_000 };
+    const release = vi.fn(async () => [
+      { ...base, ...refused },
+      { ...base, issue: 4, ...refused },
+    ]);
+    await reapExpiredClaims(paths, 'o/r', () => octokit, release);
+    expect(release).toHaveBeenCalledWith(expect.objectContaining({ maxClockSkewMs: 60_000 }));
+    const events = await readFile(paths.events, 'utf8');
+    expect(events.match(/"type":"reap_refused_clock_skew"/g)).toHaveLength(1);
+    expect(events).toContain('#3339, #4');
+    expect(events).toContain('300000ms off GitHub');
+    expect(events).not.toContain('claim_expired_released');
+  });
+
   it('logs a warn and resolves when the release throws', async () => {
     const release = vi.fn(async () => {
       throw new Error('api down');

@@ -2,13 +2,20 @@ import { styleText } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
 
-import { LaneFileGuard, type getFactoryPaths, type QueueDiagnostic } from '@on-par/factory-core';
+import {
+  LaneFileGuard,
+  loadFactoryConfigForRepo,
+  type getFactoryPaths,
+  type QueueDiagnostic,
+} from '@on-par/factory-core';
 import {
   createGithubLaneClaimStalenessProbe,
   createOctokitQueueClient,
+  DEFAULT_MAX_CLOCK_SKEW_MS,
   logEvent,
   releaseStaleClaims,
   resolveBranchPrefix,
+  resolveQueueMaxClockSkewMs,
   unqueueDeferredOnly,
 } from '@on-par/factory-core/internal';
 import type { QueueDeferCause } from './queue-preflight.js';
@@ -53,7 +60,14 @@ export async function reapExpiredClaims(
     const octokit = getOctokit();
     if (!octokit) return;
     const [owner, repo] = ghRepo.split('/');
-    for (const r of await release({ client: createOctokitQueueClient(octokit), owner, repo })) {
+    let max = DEFAULT_MAX_CLOCK_SKEW_MS;
+    try {
+      max = resolveQueueMaxClockSkewMs(loadFactoryConfigForRepo(paths.config));
+    } catch {
+      // unreadable config: keep the default threshold
+    }
+    const results = await release({ client: createOctokitQueueClient(octokit), owner, repo, maxClockSkewMs: max });
+    for (const r of results) {
       if (r.outcome === 'released') {
         logEvent(
           paths.events,
@@ -64,6 +78,16 @@ export async function reapExpiredClaims(
       } else if (r.outcome === 'failed') {
         logEvent(paths.events, 'warn', r.issue, `expired claim release for #${r.issue} failed: ${r.detail}`);
       }
+    }
+    const refused = results.filter((r) => r.outcome === 'refused-clock-skew');
+    if (refused.length > 0) {
+      const issues = refused.map((r) => `#${r.issue}`).join(', ');
+      logEvent(
+        paths.events,
+        'reap_refused_clock_skew',
+        'all',
+        `refused to reap ${refused.length} expired claim(s) (${issues}): local clock is ${refused[0].skewMs}ms off GitHub, above queue.maxClockSkewMs ${max}ms — fix NTP on this host`,
+      );
     }
   } catch (err: any) {
     logEvent(paths.events, 'warn', 'all', `expired claim reap failed: ${err?.message ?? String(err)}`);

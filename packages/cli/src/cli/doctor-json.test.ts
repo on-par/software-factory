@@ -33,4 +33,28 @@ describe('doctor --json', () => {
       onPath: true,
     });
   });
+
+  it('doctor --json includes clockSkewMs measured from the GitHub Date header', async () => {
+    h.octokit = {
+      rest: {
+        rateLimit: {
+          get: vi.fn().mockResolvedValue({ headers: { date: new Date(Date.now() - 300_000).toUTCString() }, data: {} }),
+        },
+      },
+    };
+    await runMainWith(undefined, 'doctor', '--json');
+    const out = JSON.parse(logged().slice(logged().indexOf('{'))) as {
+      clockSkewMs: number | null;
+      checks: { name: string; ok: boolean; optional?: boolean }[];
+    };
+    expect(Math.abs((out.clockSkewMs ?? 0) - 300_000)).toBeLessThan(5000);
+    expect(out.checks.find((c) => c.name === 'clock skew')).toMatchObject({ ok: false, optional: true });
+  });
+
+  it('doctor --json has a null clockSkewMs when the response carries no Date header', async () => {
+    h.octokit = { rest: { rateLimit: { get: vi.fn().mockResolvedValue({ data: {} }) } } };
+    await runMainWith(undefined, 'doctor', '--json');
+    const out = JSON.parse(logged().slice(logged().indexOf('{'))) as { clockSkewMs: number | null };
+    expect(out).toHaveProperty('clockSkewMs', null);
+  });
 });
