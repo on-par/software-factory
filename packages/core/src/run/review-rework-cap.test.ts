@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { workKeyFromIssue } from '../work/work-key.js';
 import { createTempDirs } from '../harness/temp-dir.js';
 import { fakeIssueComments } from '../queue/fake-issue-comments.js';
 import { laneLabel, PARKED_LABEL, type QueueGitHubClient } from '../queue/github-queue.js';
@@ -165,7 +166,7 @@ describe('review-rework cap helpers', () => {
           return { ok: true };
         },
       });
-      expect(inputs).toMatchObject([{ issue: 42, reason: 'escalate' }]);
+      expect(inputs).toMatchObject([{ issue: workKeyFromIssue(42), reason: 'escalate' }]);
       expect(e.commentCalls()).toBe(0);
     });
 

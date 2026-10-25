@@ -17,6 +17,7 @@ import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import { parkUnblockHint } from './park-comment.js';
 import type { Workspace } from './ports.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
 const planPhase = vi.fn<typeof realPlanPhase>();
@@ -227,7 +228,12 @@ describe('runIssue — issue park comment (#2314)', () => {
       'fail',
       expect.any(String),
       expect.objectContaining({
-        park: { reason: 'fail', decision: parkUnblockHint('fail', 1), lane: 'app', blockedBehind: [2, 3] },
+        park: {
+          reason: 'fail',
+          decision: parkUnblockHint('fail', workKeyFromIssue(1)),
+          lane: 'app',
+          blockedBehind: [2, 3],
+        },
       }),
     );
   });
@@ -239,7 +245,7 @@ describe('runIssue — issue park comment (#2314)', () => {
       'fail',
       expect.any(String),
       expect.objectContaining({
-        park: { reason: 'fail', decision: parkUnblockHint('fail', 1), lane: '', blockedBehind: [] },
+        park: { reason: 'fail', decision: parkUnblockHint('fail', workKeyFromIssue(1)), lane: '', blockedBehind: [] },
       }),
     );
   });

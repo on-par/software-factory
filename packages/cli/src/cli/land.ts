@@ -102,7 +102,7 @@ export async function landIssue(
     };
     [, lookup] = await Promise.all([gitOps.gitFetch(repoRoot), findByGuess()]);
     if (lookup.status === 'none' && !opts.branch) {
-      lookup = await lookupOpenPrByIssue({ octokit, repo: ghRepo, issue: issueNum });
+      lookup = await lookupOpenPrByIssue({ octokit, repo: ghRepo, issue: workKeyFromIssue(issueNum) });
     }
     if (lookup.status === 'error') throw new Error(lookup.detail);
   } catch (err) {

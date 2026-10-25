@@ -5,6 +5,7 @@ import { laneLabel, PARKED_LABEL, QUEUED_LABEL, type QueueGitHubClient } from '.
 import { runUnpark } from '../queue/unpark.js';
 import { renderParkComment } from '../run/park-comment.js';
 import type { BlockedByItem } from './dependencies.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 import {
   type BlockedParkStore,
   type BlockerEvidence,
@@ -44,7 +45,7 @@ const parked = (...extra: string[]) => [PARKED_LABEL, laneLabel('build'), ...ext
 
 function comment(issue: number, over: { reason?: 'blocked' | 'fail'; autoUnparks?: number } = {}) {
   return renderParkComment({
-    issue,
+    issue: workKeyFromIssue(issue),
     reason: over.reason ?? 'blocked',
     message: 'blocked',
     runId: 'r1',

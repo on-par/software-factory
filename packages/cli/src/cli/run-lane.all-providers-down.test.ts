@@ -2,7 +2,7 @@ import { join } from 'node:path';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { getFactoryPaths, ProviderBreaker } from '@on-par/factory-core';
+import { getFactoryPaths, ProviderBreaker, workKeyFromIssue } from '@on-par/factory-core';
 import { allProvidersDown, allProvidersDownReleasePayload } from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
 
@@ -67,7 +67,7 @@ function lane(paths: ReturnType<typeof getFactoryPaths>, breaker: ProviderBreake
               'plan',
               gate.providers,
               gate.earliestResetAt,
-              issue,
+              workKeyFromIssue(issue),
               () => clock.ms,
             ),
           });

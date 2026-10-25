@@ -5,6 +5,7 @@ import type { FactoryConfig } from '../config/index.js';
 import { PARKED_LABEL, queueLabelSpecs, type QueueGitHubClient } from '../queue/github-queue.js';
 import type { ReviewReworkStore } from '../queue/review-rework-trigger.js';
 import { renderParkComment, type ParkCommentInput } from './park-comment.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 
 export function resolveMaxReviewReworkRuns(config: Pick<FactoryConfig, 'queue'>): number {
   return config.queue?.max_review_rework_runs ?? defaultFactoryConfig.queue.max_review_rework_runs;
@@ -44,7 +45,7 @@ export async function parkAtReviewReworkCap(deps: {
   if (parked) await queue.ensureLabel({ owner, repo, ...parked });
   await queue.addLabels({ owner, repo, issue_number: issue, labels: [PARKED_LABEL] });
   const input = {
-    issue,
+    issue: workKeyFromIssue(issue),
     reason: 'escalate' as const,
     message: reviewReworkCapMessage(deps),
     runId: '-',

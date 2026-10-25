@@ -1,5 +1,6 @@
 // packages/cli/src/cli/run-lane-park-payload.test.ts — runLane park events carry a structured park payload (#3511)
 
+import { workKeyFromIssue } from '@on-par/factory-core';
 import { parkUnblockHint } from '@on-par/factory-core/internal';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -32,7 +33,7 @@ describe('runLane park payload', () => {
     expect(parked[2].lane).toBe('app');
     expect(parked[2].park).toEqual({
       reason: 'escalate',
-      decision: parkUnblockHint('escalate', 7),
+      decision: parkUnblockHint('escalate', workKeyFromIssue(7)),
       lane: 'app',
       blockedBehind: [8, 9],
     });
@@ -57,7 +58,7 @@ describe('runLane park payload', () => {
     const parked = events.find((e) => e[0] === 'parked');
     expect(parked[2].park).toEqual({
       reason: 'escalate',
-      decision: parkUnblockHint('escalate', 5),
+      decision: parkUnblockHint('escalate', workKeyFromIssue(5)),
       lane: 'app',
       blockedBehind: [],
     });
