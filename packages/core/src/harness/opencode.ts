@@ -10,9 +10,13 @@ import { shellEscape } from '../utils/index.js';
 import { classifyFailure } from './classify.js';
 import type { CodingHarness, HarnessFailureReason, HarnessRequest, HarnessResult, HarnessUsage } from './index.js';
 import { HarnessError } from './index.js';
+import { describeOpenCodeAttempt, type OpenCodeAttemptOutput, writeOpenCodeEmptyTrace } from './opencode-attempt.js';
 import { classifyOpenCodeFailure } from './opencode-error.js';
 import { type OpenCodeVersionProbe, probeOpenCodeMajor } from './opencode-version.js';
 import { defaultClassifyError, type ProviderFailure } from './provider-failure.js';
+import { resolveStallSeconds, type StallWatch, type StallWatchOptions, startStallWatch } from './stall-watch.js';
+
+export { describeOpenCodeAttempt };
 
 export type OpenCodeExecFn = ExecFn;
 
@@ -274,6 +278,7 @@ export class OpenCodeHarness implements CodingHarness {
     private execFn: OpenCodeExecFn = defaultExecFn,
     versionProbe?: OpenCodeVersionProbe,
     private now: () => number = () => Date.now(),
+    private stallWatchOpts: Partial<Omit<StallWatchOptions, 'stallMs' | 'onStall'>> & { stallSeconds?: number } = {},
   ) {
     this.versionProbe = versionProbe ?? (() => probeOpenCodeMajor(this.execFn));
   }
@@ -309,6 +314,8 @@ export class OpenCodeHarness implements CodingHarness {
     const effort = registry.getEffort(model, request.task);
     const providerModel = registry.get(model)?.providerModel;
     const effortValue = effort === undefined ? undefined : String(effort);
+    const { stallSeconds: stallSecondsOverride, ...watchOpts } = this.stallWatchOpts;
+    const stallSeconds = stallSecondsOverride ?? resolveStallSeconds(process.env);
     const major = await this.getMajorVersion();
     const modelArgs = buildOpenCodeModelArgs(providerModel, effortValue, major);
     const isolationArgs = buildOpenCodeIsolationArgs(major);
@@ -317,7 +324,10 @@ export class OpenCodeHarness implements CodingHarness {
     // message (observed with deepseek-v4-flash on large plan prompts). One
     // retry with an explicit final-message instruction recovers those runs
     // without masking a genuinely broken provider (still throws after 2 tries).
-    // It also covers exit-0 runs truncated before the last `step_finish`.
+    // It also covers exit-0 runs truncated before the last `step_finish`. When both attempts still
+    // come back empty (#694), the diagnostic separates a tool-call-only final step
+    // (`finished=true lastFinish=tool-calls earlierTextChars>0`) from truncation (`finished=false`)
+    // and from no events at all.
     const FINAL_MESSAGE_NUDGE =
       '\n\nIMPORTANT: your final message must contain your complete answer as plain text. Do not end the session on a tool call or with an empty message.';
     const MAX_ATTEMPTS = 2;
@@ -329,6 +339,7 @@ export class OpenCodeHarness implements CodingHarness {
       let stdout = '';
       let stderr = '';
       let truncated = false;
+      const attempts: OpenCodeAttemptOutput[] = [];
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         const attemptPrompt = attempt === 1 ? prompt : prompt + FINAL_MESSAGE_NUDGE;
         // `--auto`: headless runs auto-REJECT permission prompts (e.g. reading the
@@ -348,6 +359,10 @@ export class OpenCodeHarness implements CodingHarness {
         await writeFile(promptPath, attemptPrompt, 'utf8');
         const cmd = `opencode run --auto --format json ${[isolationArgs, modelArgs].filter(Boolean).join(' ')} < ${shellEscape(promptPath)}`;
 
+        // The stall watch needs the child's pgid (detached exec); stdout chunks count as activity.
+        let watch: StallWatch | undefined;
+        let stalled = false;
+        const watched = onPgid !== undefined && stallSeconds > 0;
         try {
           ({ stdout, stderr } = await this.execFn(cmd, {
             cwd: worktree,
@@ -355,9 +370,35 @@ export class OpenCodeHarness implements CodingHarness {
             // JSON `tool_use` events carry full tool output.
             maxBuffer: 64 * 1024 * 1024,
             env,
-            onPgid,
+            onPgid: watched
+              ? (pgid) => {
+                  onPgid(pgid);
+                  watch = startStallWatch(pgid, {
+                    ...watchOpts,
+                    stallMs: stallSeconds * 1000,
+                    onStall: () => {
+                      stalled = true;
+                    },
+                  });
+                }
+              : onPgid,
+            ...(watched ? { onStdout: () => watch?.noteActivity() } : {}),
           }));
         } catch (err: any) {
+          if (stalled) {
+            throw new HarnessError(
+              `opencode run stalled: no CPU, network or output for ${stallSeconds}s (attempt ${attempt}); killed`,
+              'timeout',
+              {
+                exitCode: typeof err.code === 'number' ? err.code : undefined,
+                stderr: err.stderr,
+                signal: typeof err.signal === 'string' ? err.signal : undefined,
+                killed: true,
+                stalled: true,
+                kind: classifyOpenCodeFailure('timeout', '', this.now()).kind,
+              },
+            );
+          }
           // Under --format json, session errors arrive as stdout `error` events; kept as the diagnostic.
           const parsedErr = typeof err.stdout === 'string' ? parseOpenCodeJson(err.stdout) : undefined;
           const jsonErr = parsedErr?.errorText ?? '';
@@ -374,7 +415,10 @@ export class OpenCodeHarness implements CodingHarness {
             kind: failure.kind,
             ...(failure.resetAt ? { resetAt: failure.resetAt } : {}),
           });
+        } finally {
+          watch?.stop();
         }
+        attempts.push({ stdout, stderr });
 
         const parsed = parseOpenCodeJson(stdout);
         // A non-interactive run auto-rejects `ask` permissions, still exits 0, and the model carries
@@ -412,12 +456,18 @@ export class OpenCodeHarness implements CodingHarness {
         }
       }
 
+      const promptBytes = Buffer.byteLength(prompt);
+      const tracePath = await writeOpenCodeEmptyTrace(request.task, model, promptBytes, attempts);
+      const diagnostic = [
+        `task=${request.task} promptBytes=${promptBytes}`,
+        ...attempts.map((a, i) => describeOpenCodeAttempt(i + 1, a.stdout, a.stderr)),
+      ].join(' | ');
       throw new HarnessError(
         truncated
           ? `opencode run exited 0 without a final step_finish (${MAX_ATTEMPTS} attempts)`
           : `opencode CLI returned empty output (${MAX_ATTEMPTS} attempts)`,
         'empty_response',
-        { exitCode: 0 },
+        { exitCode: 0, stderr: stderr || undefined, diagnostic, ...(tracePath ? { tracePath } : {}) },
       );
     } finally {
       await rm(promptDir, { recursive: true, force: true });

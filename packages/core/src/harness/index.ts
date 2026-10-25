@@ -115,6 +115,10 @@ export class HarnessError extends Error {
       code?: string | number;
       signal?: string;
       killed?: boolean;
+      /** True when the stall watch killed an idle child before the phase timeout (#694). */
+      stalled?: boolean;
+      /** JSON file holding the raw (capped) output of each attempt of an empty run (#694). */
+      tracePath?: string;
       /** Provider-agnostic failure kind set by the adapter (#3225). */
       kind?: ProviderFailureKind;
       /** ISO instant at which the provider says it recovers, when it reported one (#3225). */
