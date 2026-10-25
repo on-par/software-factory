@@ -4,6 +4,7 @@
 // newly-emitted kind to be registered. EventKind is the closed set of kinds the factory emits, and
 // EVENT_TRAITS is the single table every consumer reads instead of keeping its own classification.
 
+import { DECOMPOSE_EVENT_TRAITS } from './decompose-traits.js';
 import type { EventTraits, LaneStatus } from './event-traits.js';
 
 export type { EventTraits, LaneStatus };
@@ -61,6 +62,7 @@ export type EventKind =
   | 'decompose_comment_posted'
   | 'decompose_duplicate_skipped'
   | 'decompose_failed'
+  | 'decompose_skipped'
   | 'decompose_file_failed'
   | 'decompose_filed'
   | 'decompose_started'
@@ -297,12 +299,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   // An unknown nested config key stripped by the runtime schema, warned once per key at run start (#3568).
   config_unknown_key: { severity: 'warn', isPark: false, isTerminal: false },
   constitution: { severity: 'info', isPark: false, isTerminal: false },
-  decompose_comment_posted: { severity: 'info', isPark: false, isTerminal: false },
-  decompose_duplicate_skipped: { severity: 'warn', isPark: false, isTerminal: false },
-  decompose_failed: { severity: 'warn', isPark: false, isTerminal: false },
-  decompose_file_failed: { severity: 'warn', isPark: false, isTerminal: false },
-  decompose_filed: { severity: 'info', isPark: false, isTerminal: false },
-  decompose_started: { severity: 'info', isPark: false, isTerminal: false },
+  ...DECOMPOSE_EVENT_TRAITS,
   'defect-window-closed': { severity: 'info', isPark: false, isTerminal: false },
   disk_low: { severity: 'warn', isPark: false, isTerminal: false },
   design_artifact_coerced: { severity: 'warn', isPark: false, isTerminal: false },
