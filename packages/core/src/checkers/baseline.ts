@@ -1,6 +1,5 @@
 // src/checkers/baseline.ts — re-run round-1 failing checkers on the base SHA in a temporary worktree (#1925)
 
-import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,7 +11,10 @@ import { runCommand } from '../utils/command-runner.js';
 import { GIT_COMMAND_TIMEOUT_MS } from '../utils/git-exec.js';
 import { type BaselineCache, hashBaselineCheckerConfig, hashBaselineEnv } from './baseline-cache.js';
 import { DESIGN_SMELLS_CHECKER, WORKER_OUTPUT_CHECKER } from './design-smells.js';
+import { DEPENDENCY_INSTALL_TIMEOUT_MS, dependencyInstallCommand } from './dependency-install.js';
 import { type CheckerContext, runAllCheckers } from './index.js';
+
+export { DEPENDENCY_INSTALL_TIMEOUT_MS, dependencyInstallCommand };
 
 export type BaselineVerdict = 'clean-on-base' | 'fails-on-base' | 'not-run';
 
@@ -130,24 +132,6 @@ export function compareBaseline(
     comparisons.push(comparison);
   }
   return comparisons;
-}
-
-/** Frozen installs by lockfile, first match wins (#2576). A fresh `git worktree add` has no
- *  node_modules, so without this `compile` on base fails with "tsc: command not found". */
-const JS_INSTALL_COMMANDS: ReadonlyArray<{ lockfile: string; argv: readonly string[] }> = [
-  { lockfile: 'pnpm-lock.yaml', argv: ['pnpm', 'install', '--frozen-lockfile'] },
-  { lockfile: 'yarn.lock', argv: ['yarn', 'install', '--frozen-lockfile'] },
-  { lockfile: 'bun.lock', argv: ['bun', 'install', '--frozen-lockfile'] },
-  { lockfile: 'bun.lockb', argv: ['bun', 'install', '--frozen-lockfile'] },
-  { lockfile: 'package-lock.json', argv: ['npm', 'ci', '--no-audit', '--no-fund'] },
-];
-export const DEPENDENCY_INSTALL_TIMEOUT_MS = 10 * 60_000;
-
-/** The frozen dependency install a fresh worktree (CHECK base or BUILD lane) needs; null when it is not a JS package. */
-export function dependencyInstallCommand(worktree: string): readonly string[] | null {
-  if (!existsSync(join(worktree, 'package.json'))) return null;
-  const match = JS_INSTALL_COMMANDS.find((c) => existsSync(join(worktree, c.lockfile)));
-  return match?.argv ?? ['npm', 'install', '--no-audit', '--no-fund', '--no-package-lock'];
 }
 
 export async function runBaselineCheckers(opts: BaselineOptions): Promise<BaselineReport> {
