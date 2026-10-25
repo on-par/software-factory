@@ -45,6 +45,7 @@ import {
   LandConflictError,
   LandFailureError,
   MergeGatedError,
+  defaultListIssueLabels,
   isLandLeftOpen,
   landOpenPullRequest,
 } from './land-pr.js';
@@ -71,7 +72,7 @@ export async function landIssue(
   octokit: Octokit,
   skipCI?: boolean,
   branchPrefix?: string,
-  opts: { allowGated?: boolean; branch?: string; enforceRisk?: boolean; syncMain?: boolean } = {},
+  opts: { allowGated?: boolean; branch?: string; enforceRisk?: boolean; syncMain?: boolean; signal?: AbortSignal } = {},
 ): Promise<{ branch: string; prNumber: number }> {
   const { configLoaders, gitOps, errorDetail, worktreePathFor } = landRuntime();
   const [owner, repoName] = ghRepo.split('/');
@@ -236,6 +237,7 @@ export async function landIssue(
         log,
         skipCI,
         syncMain: opts.syncMain,
+        signal: opts.signal,
         adminMerge: resolveMergePolicy(landFactoryConfig).admin,
         withLock: withLandLock,
         ensureWorktree: async () => {
@@ -254,7 +256,7 @@ export async function landIssue(
     await releaseLandedClaim(paths, ghRepo, issueNum, log);
     await withLandLock(() => gitOps.cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
   } catch (err: any) {
-    if (err instanceof LandConflictError || isLandLeftOpen(err)) throw err;
+    if (err instanceof LandConflictError || isLandLeftOpen(err) || opts.signal?.aborted) throw err;
     log('fail', `merge failed: ${err.message}`);
     throw new LandFailureError(`merge failed for issue #${issueNum}: ${err.message}`, 5);
   }
@@ -365,12 +367,13 @@ export type WaitForMergeDeps = {
     octokit: Octokit,
     skipCI?: boolean,
     branchPrefix?: string,
-    opts?: { allowGated?: boolean; branch?: string; enforceRisk?: boolean; syncMain?: boolean },
+    opts?: { allowGated?: boolean; branch?: string; enforceRisk?: boolean; syncMain?: boolean; signal?: AbortSignal },
   ) => Promise<{ branch: string; prNumber: number }>;
   /** ADR-0161 stack layer: land exactly this head branch. */
   landBranch?: string;
   /** #3324: forwarded to land. */
   syncMain?: boolean;
+  signal?: AbortSignal; // #3146: aborts when the lane loses its claim; checked every poll and before the merge
   listIssueLabels?: (octokit: Octokit, owner: string, repo: string, issue: number) => Promise<string[]>;
   sleep?: (ms: number) => Promise<void>;
   emitEvent?: typeof logEvent;
@@ -383,11 +386,6 @@ export type WaitForMergeDeps = {
    *  it (#1400). */
   mergeOverrides?: MergePolicyOverrides;
 };
-
-async function defaultListIssueLabels(octokit: Octokit, owner: string, repo: string, issue: number): Promise<string[]> {
-  const { data } = await octokit.rest.issues.listLabelsOnIssue({ owner, repo, issue_number: issue });
-  return data.map((label) => label.name);
-}
 
 export async function waitForMerge(
   issue: number,
@@ -413,6 +411,7 @@ export async function waitForMerge(
     mergeOverrides,
     landBranch,
     syncMain,
+    signal,
   } = deps;
   const { configLoaders, errorDetail, LaneParkError } = landRuntime();
   const factoryConfig = loadConfig(paths.config);
@@ -426,6 +425,7 @@ export async function waitForMerge(
   let consecutiveFailures = 0;
   let firstFailureAt: number | null = null;
   while (!pathExists(paths.stop)) {
+    signal?.throwIfAborted();
     // The merge wait logs nothing on its happy path, so each poll bumps the per-issue heartbeat:
     // status/TUI staleness rules (ADR-0086, ADR-0093) otherwise read a live wait as a dead run.
     if (paths.runs) touchRunActivity(phaseSnapshotFile(paths.runs, issue), new Date().toISOString()).catch(() => {});
@@ -483,6 +483,7 @@ export async function waitForMerge(
         ...(landBranch ? { branch: landBranch } : {}),
         enforceRisk: true,
         ...(syncMain ? { syncMain } : {}),
+        ...(signal ? { signal } : {}),
       });
       await releaseLandedClaim(paths, ghRepo, issue, (type, msg) => emitEvent(paths.events, type, issue, msg));
       return;

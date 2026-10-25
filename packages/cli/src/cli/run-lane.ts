@@ -4,17 +4,20 @@ import { existsSync, statSync } from 'node:fs';
 
 import { parkReasonFor } from '@on-par/factory-core';
 import type { EventKind, getFactoryPaths, ParkPayload, RunOutcome } from '@on-par/factory-core';
-import { formatLoadHold, logEvent, nextRecheckAt, PARKED_LABEL, parkPayload } from '@on-par/factory-core/internal';
-import type {
-  AwaitingCiRecord,
-  LoadGuardDecision,
-  QueueClaim,
-  QueueReleaseOutcome,
+import {
+  DEFAULT_CLAIM_LEASE_MS,
+  defaultClaimantId,
+  logEvent,
+  nextRecheckAt,
+  PARKED_LABEL,
+  parkPayload,
 } from '@on-par/factory-core/internal';
+import type { AwaitingCiRecord, QueueClaim, QueueReleaseOutcome } from '@on-par/factory-core/internal';
 
 import type { AwaitingCiParkReason } from './awaiting-ci-recheck.js';
 import { formatBaseHoldKept, type BaseHoldDecision } from './base-hold.js';
 import { holdForDisk } from './run-lane-disk-hold.js';
+import { holdForLoad } from './run-lane-load-hold.js';
 import { laneParkCommenter } from './lane-park-comment.js';
 import {
   pauseLaneForAllProvidersDown,
@@ -29,7 +32,8 @@ import { AwaitMergeStoppedError, AwaitingCiError, AwaitingReviewError } from './
 import { restoredLoggingBreaker } from './provider-restored-log.js';
 import { releaseKeepOnRequeue } from './worktree-keep.js';
 import { shipIssue } from './ship.js';
-import { withHeartbeat } from './lane-heartbeat.js';
+import { ClaimLostError, createClaimLease, laneRenewLogger, onClaimLost, withHeartbeat } from './lane-heartbeat.js';
+import { restackUnderHeartbeat } from './run-lane-restack.js';
 import { queueDecomposedChildren } from './run-lane-decompose.js';
 import type { RunLaneDeps } from './run-lane-deps.js';
 import { shipRuntime } from './ship-runtime.js';
@@ -58,6 +62,8 @@ export async function runLane(
     releaseIssue = async () => {},
     queueChildren,
     heartbeat,
+    leaseMs = DEFAULT_CLAIM_LEASE_MS,
+    hostId = defaultClaimantId(),
     reapWorktree = async () => {},
     closeParkedPr = async () => {},
     sweepFinished = async () => {},
@@ -161,22 +167,6 @@ export async function runLane(
     parked++;
   };
   const diskIo = { lane, paths, emitEvent, now, sleep, pathExists };
-  const decide = (guard: () => LoadGuardDecision): LoadGuardDecision => {
-    try {
-      return guard();
-    } catch {
-      return { kind: 'claim' };
-    }
-  };
-  const holdForLoad = async (guard: () => LoadGuardDecision): Promise<'claim' | 'stopped'> => {
-    for (let d = decide(guard); d.kind === 'hold'; d = decide(guard)) {
-      const retryAt = new Date(now().getTime() + d.retryMs);
-      emitEvent(paths.events, 'warn', lane, formatLoadHold(lane, d, retryAt), { lane });
-      await sleep(d.retryMs);
-      if (pathExists(paths.stop)) return 'stopped';
-    }
-    return 'claim';
-  };
   for (let i = 0; ; i++) {
     if (await waitForProviderReset(pauseCtx, providerPauseUntil, now, sleep, pathExists)) return;
     providerPauseUntil = undefined;
@@ -196,7 +186,7 @@ export async function runLane(
         emitEvent(paths.events, 'warn', lane, formatBaseHoldKept(lane, gate), { lane });
         return;
       }
-      if (loadGuard && (await holdForLoad(loadGuard)) === 'stopped') break;
+      if (loadGuard && (await holdForLoad(loadGuard, diskIo)) === 'stopped') break;
       if (diskGuard && (await holdForDisk(diskGuard, diskIo)) === 'stopped') break;
       if (pollReviewRework) {
         await pollReviewRework().catch((err) =>
@@ -225,6 +215,11 @@ export async function runLane(
       await releaseIssue(issue, 'queued');
       return;
     }
+    const lease = createClaimLease(issue, {
+      leaseMs,
+      now: () => now().getTime(),
+      onRenewFailed: laneRenewLogger(emitEvent, paths.events, lane, issue),
+    });
     const parkIssue = async (reason: string): Promise<void> => {
       emitEvent(paths.events, 'escalate', issue, reason, { lane });
       const msg = `issue #${issue} parked (${reason}); lane '${lane}' continuing, ${await remainingAfter(i)} issue(s) remaining`;
@@ -235,24 +230,8 @@ export async function runLane(
       if (await parkAndSettle(issue, msg, parkPayload('escalate', issue, lane, queuedBehind(i)))) parked++;
       streak = null;
     };
-    const runRestack = async (merged: {
-      index: number;
-      prNumber: number;
-    }): Promise<{ parkReason?: string; note: string }> => {
-      try {
-        const out = await withHeartbeat(issue, heartbeat, () => restack(issue, merged));
-        if (out.status === 'park') return { parkReason: out.reason, note: out.reason };
-        return {
-          note:
-            out.status === 'restacked'
-              ? `restacked slice(s) ${out.slices.map((r) => r.index).join(', ')} onto main after slice ${merged.index} merged`
-              : out.reason,
-        };
-      } catch (err) {
-        const reason = `restack failed: ${shipRuntime().errorDetail(err)}`;
-        return { parkReason: reason, note: reason };
-      }
-    };
+    const runRestack = (merged: { index: number; prNumber: number }) =>
+      restackUnderHeartbeat(issue, heartbeat, restack, merged);
     if (decision.kind === 'park') {
       await parkIssue(decision.reason);
       continue;
@@ -276,21 +255,26 @@ export async function runLane(
       const branch =
         decision.kind === 'adopt'
           ? decision.branch
-          : await withHeartbeat(issue, heartbeat, () =>
-              ship(
-                issue,
-                {},
-                {
-                  repoRoot,
-                  ghRepo,
-                  paths,
-                  lane,
-                  blockedBehind: queuedBehind(i),
-                  onOutcome: (o) => {
-                    sliceOutcome.value = o;
+          : await withHeartbeat(
+              issue,
+              heartbeat,
+              (signal) =>
+                ship(
+                  issue,
+                  {},
+                  {
+                    repoRoot,
+                    ghRepo,
+                    paths,
+                    lane,
+                    blockedBehind: queuedBehind(i),
+                    onOutcome: (o) => {
+                      sliceOutcome.value = o;
+                    },
+                    signal,
                   },
-                },
-              ),
+                ),
+              lease,
             );
       landBranch = branch;
       const shipped = sliceOutcome.value;
@@ -338,8 +322,11 @@ export async function runLane(
       if (layer) {
         // ADR-0161: land exactly this layer's branch, record it, and re-queue for the next layer.
         landing = branch;
-        await withHeartbeat(issue, heartbeat, () =>
-          waitMerge(issue, branch, repoRoot, ghRepo, paths, { landBranch: branch }),
+        await withHeartbeat(
+          issue,
+          heartbeat,
+          (signal) => waitMerge(issue, branch, repoRoot, ghRepo, paths, { landBranch: branch, signal }),
+          lease,
         );
         await recordStackMerge(issue, layer.prNumber).catch((err) =>
           emitEvent(
@@ -364,16 +351,28 @@ export async function runLane(
         continue;
       }
       landing = branch;
-      await withHeartbeat(issue, heartbeat, () =>
-        waitMerge(issue, branch, repoRoot, ghRepo, paths, {
-          syncMain: decision.kind === 'adopt' && decision.syncMain === true,
-        }),
+      await withHeartbeat(
+        issue,
+        heartbeat,
+        (signal) =>
+          waitMerge(issue, branch, repoRoot, ghRepo, paths, {
+            syncMain: decision.kind === 'adopt' && decision.syncMain === true,
+            signal,
+          }),
+        lease,
       );
       merged++;
       streak = null;
       await settle(issue, 'done');
     } catch (err: any) {
       const { LaneParkError, LaneEnvironmentPauseError, IssueSkippedError, IssueDecomposedError } = shipRuntime();
+      if (err instanceof ClaimLostError) {
+        // #3146: another host owns the claim. Keep the worktree; never release, reap, comment or park.
+        onClaimLost(err, emitEvent, paths.events, lane, hostId, runId);
+        activeIssues.delete(issue);
+        streak = null;
+        continue;
+      }
       if (err instanceof AwaitingReviewError) {
         // The land path already emitted awaiting-review and cleaned the worktree: a clean outcome, not a park.
         awaitingReview++;

@@ -116,6 +116,11 @@
       "properties": {},
       "additionalProperties": {}
     },
+    "claimLost": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": {}
+    },
     "stewardTriggered": {
       "type": "object",
       "properties": {},

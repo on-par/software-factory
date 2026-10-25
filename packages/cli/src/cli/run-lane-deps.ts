@@ -42,6 +42,8 @@ export type RunLaneDeps = {
       /** Issues still pending behind this one on the lane, for the park payload (#3511). */
       blockedBehind?: number[];
       onOutcome?: (outcome: RunOutcome) => void;
+      /** Aborts when this issue's claim lease is lost (#3146). */
+      signal?: AbortSignal;
     },
   ) => Promise<string>;
   waitMerge?: typeof waitForMerge;
@@ -67,6 +69,10 @@ export type RunLaneDeps = {
   /** Refreshes the claim lease every HEARTBEAT_INTERVAL_MS while an issue is in flight
    *  (#1500). Absent for static local-queue lanes, which carry no remote claim to lease. */
   heartbeat?: (issue: number) => Promise<unknown>;
+  /** Claim lease length the heartbeat keeps alive (#3146). Defaults to DEFAULT_CLAIM_LEASE_MS, matching GithubQueue. */
+  leaseMs?: number;
+  /** This host's claimant id, reported on `claim_lost` (#3146). Defaults to defaultClaimantId(). */
+  hostId?: string;
   /** Eager park-time worktree reap (#1007). Defaults to a no-op so injected-deps callers and
    *  tests are unaffected; cmdRun wires it to reapParkedLaneWorktree. */
   reapWorktree?: (issue: number) => Promise<void>;

@@ -3,7 +3,6 @@ import { resolve } from 'node:path';
 import { styleText } from 'node:util';
 import type {
   EventKind,
-  FailurePhase,
   GithubIssueParams,
   LocalOnlyPolicy,
   RunOutcome,
@@ -38,7 +37,6 @@ import {
   summarizeEvent,
   touchLastEvent,
   touchRunActivity,
-  writePhaseSnapshot,
 } from '@on-par/factory-core';
 import { shipHostBuildSlot } from './host-slot.js';
 import { claimReworkRequests } from './ship-review-rework.js';
@@ -69,7 +67,7 @@ import { restoredLoggingBreaker } from './provider-restored-log.js';
 import type { CliDeps, ConfigLoaderKey, CoreOpKey, GitOpKey, ShellOpKey } from './index.js';
 import { resolveRunBranch } from './run-branch.js';
 import { shipRuntime } from './ship-runtime.js';
-import { runStateRecorder } from './ship-run-state.js';
+import { phaseRecorder, runStateRecorder } from './ship-run-state.js';
 import { maybeWriteBenchmarkArtifacts, maybeWriteLocalRunReport } from './ship-reports.js';
 import { applyMeteredGuard, modelOverrideMessages, resolveProviderOrder } from './model-override-messages.js';
 import {
@@ -144,6 +142,8 @@ async function shipIssueFrom(
     /** Benchmark artifact directory (#509) — only set for local-only runs. */
     artifactsDir?: string;
     resumeFrom?: CheckResumeRecord; // Resume at CHECK on a kept worktree (#2564).
+    /** Aborts when the lane loses this issue's claim lease (#3146); becomes RunPorts.claimSignal. */
+    signal?: AbortSignal;
   },
   deps: Pick<
     CliDeps,
@@ -419,15 +419,8 @@ async function shipIssueFrom(
     reworkHistory,
     laneFileGuard,
     laneClaimStaleness: createGithubLaneClaimStalenessProbe({ octokit, branchPrefix: policy.effective.branchPrefix }),
-    recordPhase: (phase: FailurePhase) => {
-      const now = new Date().toISOString();
-      return writePhaseSnapshot(phaseSnapshotFile(paths.runs, issueNum), {
-        issue: issueNum,
-        phase,
-        updatedAt: now,
-        lastActivityAt: now,
-      });
-    },
+    recordPhase: phaseRecorder(paths.runs, issueNum),
+    claimSignal: ctx?.signal,
     recordRunState: runStateRecorder(paths.runs, {
       issue: issueNum,
       lane: lane ?? '',

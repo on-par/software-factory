@@ -6,6 +6,7 @@ import {
   reworkWorker as reworkWorkerDefault,
 } from '../phases/check.js';
 import type { PlanResult } from '../phases/plan.js';
+import { claimGuardedRunner } from '../phases/ship-git.js';
 import { stackPositionFor } from '../phases/stack-order.js';
 import type { shipPhase as shipPhaseDefault, ShipResult } from '../phases/ship.js';
 import type { ReviewRouting } from '../review/routing.js';
@@ -52,6 +53,8 @@ export interface CiReworkPorts {
   mergeBaseIntoWorktree?: typeof mergeBaseIntoWorktreeDefault;
   /** Downloads the failing Actions jobs' log tails for a non-CodeQL CI rework round (#3537). */
   collectFailingJobLogs?: typeof collectFailingJobLogsDefault;
+  /** Aborts when the lane loses this issue's claim lease (#3146): phase boundaries, push, PR creation and merge refuse to run. */
+  claimSignal?: AbortSignal;
 }
 
 export interface CiReworkLoopContext {
@@ -156,6 +159,7 @@ export async function shipWithCiRework(
     startedAt: request.startedAt,
     logsDir: request.logsDir,
     work: request.work,
+    ...(ports.claimSignal ? { run: claimGuardedRunner(ports.claimSignal) } : {}),
     laneId: request.lane,
     reviewRouting: inputs.reviewRouting,
     ...(inputs.pinNote ? { pinNotes: [inputs.pinNote] } : {}),
@@ -164,7 +168,9 @@ export async function shipWithCiRework(
       ? { stack: stackPositionFor(planSlice.plan, planSlice.index, request.parentBaseRef) }
       : {}),
   };
+  ports.claimSignal?.throwIfAborted();
   let ship = await shipPhase({ ...shipOpts, checkSummary: check.summary, reworkRounds: check.reworkRounds });
+  ports.claimSignal?.throwIfAborted();
 
   const [owner, repoName] = request.repo.split('/');
   const maxRounds = resolveMaxCiReworkRounds();
@@ -297,12 +303,14 @@ export async function shipWithCiRework(
     const recheck = await checkPhase(ctx.checkOpts);
     const ended = await ctx.onRecheck(recheck, rounds);
     if (ended) return { ship, outcome: ended };
+    ports.claimSignal?.throwIfAborted();
     ship = await shipPhase({
       ...shipOpts,
       checkSummary: recheck.summary,
       reworkRounds: recheck.reworkRounds,
       reentry: { prNumber: ship.prNumber, previousHeadSha: ship.headSha },
     });
+    ports.claimSignal?.throwIfAborted();
   }
   if (ship.ok) return { ship };
   const message = ship.denied

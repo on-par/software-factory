@@ -69,7 +69,10 @@ export function logEvent(
     attribution?: RunAttribution;
     paths?: string[];
     mode?: 'mechanical';
-  } & Pick<LogExtra, 'providerAuthRejected' | 'providerBreakerClose' | 'providerRestored' | 'providerRefused'>,
+  } & Pick<
+    LogExtra,
+    'providerAuthRejected' | 'providerBreakerClose' | 'providerRestored' | 'providerRefused' | 'claimLost'
+  >,
 ): void {
   const logger = createLogger(eventsFile, { issue, lane: extra?.lane, phase: extra?.phase });
   const level = extra?.level ?? levelForType(type);
@@ -86,6 +89,7 @@ export function logEvent(
   if (extra?.providerAuthRejected) meta.providerAuthRejected = extra.providerAuthRejected;
   if (extra?.providerBreakerClose) meta.providerBreakerClose = extra.providerBreakerClose;
   if (extra?.providerRestored) meta.providerRestored = extra.providerRestored;
+  if (extra?.claimLost) meta.claimLost = extra.claimLost;
   if (extra?.providerRefused) meta.providerRefused = extra.providerRefused;
   if (extra?.stewardTriggered) meta.stewardTriggered = extra.stewardTriggered;
   if (extra?.flakyTests) meta.flakyTests = extra.flakyTests;
@@ -482,16 +486,4 @@ export function ensureDir(path: string): void {
 
 // ---------- Escalation ----------
 
-/**
- * Shared escalation predicate. An output escalates iff some line begins with `ESCALATE:`.
- * Line-start semantics (stricter): a mid-paragraph mention of ESCALATE: in prose does NOT count.
- * Used by both production phases and the eval scorer so evals match production behavior.
- */
-export function isEscalation(output: string): boolean {
-  return output.split('\n').some((line) => line.startsWith('ESCALATE:'));
-}
-
-/** The first `ESCALATE:`-prefixed line, or undefined when the output is not an escalation. */
-export function escalationLine(output: string): string | undefined {
-  return output.split('\n').find((line) => line.startsWith('ESCALATE:'));
-}
+export { escalationLine, isEscalation } from './escalation.js';

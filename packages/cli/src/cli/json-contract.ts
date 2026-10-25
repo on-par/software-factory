@@ -123,6 +123,7 @@ export const logsLineJsonSchema = z.object({
   providerAuthRejected: loosePayloadSchema.optional(),
   providerBreakerClose: loosePayloadSchema.optional(),
   providerRestored: loosePayloadSchema.optional(),
+  claimLost: loosePayloadSchema.optional(),
   stewardTriggered: loosePayloadSchema.optional(),
   flakyTests: loosePayloadSchema.optional(),
   attribution: loosePayloadSchema.optional(),
