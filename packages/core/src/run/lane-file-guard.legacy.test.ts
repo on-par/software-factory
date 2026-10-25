@@ -1,22 +1,20 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { workKeyFromIssue } from '../work/work-key.js';
 import { LaneFileGuard } from './lane-file-guard.js';
 
-const tempDirs = new Set<string>();
+const temps = createTempDirs();
 
 afterEach(async () => {
-  for (const dir of tempDirs) await rm(dir, { recursive: true, force: true });
-  tempDirs.clear();
+  await temps.cleanup();
 });
 
 async function tmpFile(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'lane-file-guard-legacy-'));
-  tempDirs.add(dir);
+  const dir = await temps.make('lane-file-guard-legacy-');
   return join(dir, 'lane-files.json');
 }
 

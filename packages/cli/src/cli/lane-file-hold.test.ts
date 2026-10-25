@@ -1,19 +1,19 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { LaneFileGuard, workKeyFromIssue } from '@on-par/factory-core';
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { laneFileHoldLookup } from './lane-file-hold.js';
 
 describe('laneFileHoldLookup', () => {
+  const temps = createTempDirs();
   let dir: string;
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'lane-file-hold-'));
+    dir = await temps.make('lane-file-hold-');
   });
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await temps.cleanup();
   });
 
   it('returns the live hold with a numeric holder, and undefined without one', async () => {
