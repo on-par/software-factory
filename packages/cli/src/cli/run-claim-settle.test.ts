@@ -48,6 +48,7 @@ describe('factory run claim settle delay (#3239)', () => {
       runAutoWorktreeGc: async () => {},
       sweepStaleLaneClaims: async () => {},
       sweepOrphanDrafts: async () => {},
+      reapExpiredClaims: async () => {},
       planRunLanes: async (input) => {
         built = input.queue();
         throw new StopAtPlan('stop');

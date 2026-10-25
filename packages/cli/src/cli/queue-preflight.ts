@@ -32,6 +32,9 @@ export interface OpenPullRequestEvidence {
 }
 
 /** A slice PR's state as the queue preflight sees it (ADR-0147). */
+/** Why a queued issue was deferred, when a caller needs to tell causes apart (#3660). */
+export type QueueDeferCause = 'open-prerequisites';
+
 export type SlicePullState = 'open' | 'merged' | 'closed';
 
 /** Reports the in-flight issue holding a file this issue needs, if any. */
@@ -58,7 +61,7 @@ export interface QueuePreflightOps {
   getPrerequisiteState(issue: number): Promise<{ state: 'open' | 'closed'; mergedClosingPr: boolean }>;
   /** #3375: number of a PR that closes `issue` by reference, merged into the default branch and not reverted by a merged `Reverts owner/repo#N` PR; undefined when none. */
   getMergedClosingPr(issue: number): Promise<number | undefined>;
-  onDeferred?: (issue: number, message: string) => void;
+  onDeferred?: (issue: number, message: string, cause?: QueueDeferCause) => void;
   /** #3576: the in-flight issue and file this issue was deferred behind, while that claim is still live; undefined when none. */
   laneFileHold?: LaneFileHoldLookup;
   /** Backoff before each merge-state re-read (#3323). Defaults to setTimeout. */
@@ -77,7 +80,7 @@ export function makeQueuePreflightOps(
     watch: (ref: string) => Promise<CiOutcome>;
     autoMergeStack?: boolean;
     stackMode?: boolean;
-    onDeferred?: (issue: number, message: string) => void;
+    onDeferred?: (issue: number, message: string, cause?: QueueDeferCause) => void;
     laneFileHold?: LaneFileHoldLookup;
     sleep?: (ms: number) => Promise<void>;
   },
@@ -418,7 +421,11 @@ export async function preflightQueuedIssue(
   }
   if (closedUnmerged.length > 0) return { kind: 'park', reason: `prerequisite #${closedUnmerged[0]} closed unmerged` };
   if (open.length > 0) {
-    deps.onDeferred?.(issue.number, `waiting for prerequisites: ${open.map((number) => `#${number}`).join(', ')}`);
+    deps.onDeferred?.(
+      issue.number,
+      `waiting for prerequisites: ${open.map((number) => `#${number}`).join(', ')}`,
+      'open-prerequisites',
+    );
     return { kind: 'defer' };
   }
 

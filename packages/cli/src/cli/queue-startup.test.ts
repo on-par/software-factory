@@ -6,9 +6,9 @@ import { join } from 'node:path';
 
 import type { getFactoryPaths } from '@on-par/factory-core';
 import type { Octokit } from '@octokit/rest';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { sweepLaneClaims } from './queue-startup.js';
+import { reapExpiredClaims, sweepLaneClaims } from './queue-startup.js';
 
 let dir: string;
 let paths: ReturnType<typeof getFactoryPaths>;
@@ -52,5 +52,44 @@ describe('sweepLaneClaims', () => {
     const events = await readFile(paths.events, 'utf8');
     expect(events).toContain('lane_file_claim_reaped');
     expect(events).toContain('holder-not-running');
+  });
+});
+
+describe('reapExpiredClaims', () => {
+  const octokit = {} as Octokit;
+  const base = { issue: 3339, label: 'factory:claim-expires:1700000000', expiresAt: 1_700_000_000 };
+
+  it('makes no call without an octokit', async () => {
+    const release = vi.fn();
+    await reapExpiredClaims(paths, 'o/r', () => undefined, release);
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it('logs claim_expired_released for a released claim', async () => {
+    const release = vi.fn(async () => [{ ...base, released: true, outcome: 'released' as const }]);
+    await reapExpiredClaims(paths, 'o/r', () => octokit, release);
+    expect(release).toHaveBeenCalledWith(expect.objectContaining({ owner: 'o', repo: 'r' }));
+    const events = await readFile(paths.events, 'utf8');
+    expect(events).toContain('"type":"claim_expired_released"');
+    expect(events).toContain('#3339 claim lease expired');
+  });
+
+  it('logs a warn for a failed release and nothing for a renewed one', async () => {
+    const release = vi.fn(async () => [
+      { ...base, released: false, outcome: 'failed' as const, detail: 'boom' },
+      { ...base, issue: 1, released: false, outcome: 'renewed' as const },
+    ]);
+    await reapExpiredClaims(paths, 'o/r', () => octokit, release);
+    const events = await readFile(paths.events, 'utf8');
+    expect(events).toContain('expired claim release for #3339 failed: boom');
+    expect(events).not.toContain('claim_expired_released');
+  });
+
+  it('logs a warn and resolves when the release throws', async () => {
+    const release = vi.fn(async () => {
+      throw new Error('api down');
+    });
+    await expect(reapExpiredClaims(paths, 'o/r', () => octokit, release)).resolves.toBeUndefined();
+    expect(await readFile(paths.events, 'utf8')).toContain('expired claim reap failed: api down');
   });
 });

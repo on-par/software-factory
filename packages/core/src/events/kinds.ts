@@ -48,6 +48,7 @@ export type EventKind =
   | 'ci-infra'
   | 'ci-never-started'
   | 'ci-rescued'
+  | 'claim_expired_released'
   | 'claim_lost'
   | 'ci-rescue-failed'
   | 'conflict'
@@ -157,6 +158,7 @@ export type EventKind =
   | 'queue_admission_conflict'
   | 'queue_order_conflict'
   | 'queue_added'
+  | 'queue_deferred_only'
   | 'queue_reprioritized'
   | 'queue_rationale_comment_failed'
   | 'project_queue_refresh_failed'
@@ -277,6 +279,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   // An infra-classified CI failure was rerun once and the re-watch went green (#2365). Not a park.
   'ci-rescued': { severity: 'info', isPark: false, isTerminal: false },
   // #3146: the lane lost its claim to another host; stopped before push/PR/merge, never released or parked.
+  claim_expired_released: { severity: 'info', isPark: false, isTerminal: false }, // #3660
   claim_lost: { severity: 'warn', isPark: false, isTerminal: true, laneStatus: 'stopped' },
   'ci-failed': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'failed' },
   // A PR whose one infra rerun also failed for infra on the same SHA (#2366). Parks; not an ADR-0155 steward trigger.
@@ -404,6 +407,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'post-merge-defect': { severity: 'info', isPark: false, isTerminal: false },
   pr_opened: { severity: 'info', isPark: false, isTerminal: false },
   queue_added: { severity: 'info', isPark: false, isTerminal: false },
+  queue_deferred_only: { severity: 'warn', isPark: false, isTerminal: false }, // #3660
   queue_admission_conflict: { severity: 'warn', isPark: false, isTerminal: false },
   queue_order_conflict: { severity: 'warn', isPark: false, isTerminal: false },
   queue_reprioritized: { severity: 'info', isPark: false, isTerminal: false },

@@ -57,3 +57,24 @@ if `.factory/STOP` is present, that's why. A human who manually re-runs
 `factory run` right after setting STOP for some unrelated reason will find the
 run silently skips until they explicitly clear the file with `factory resume`
 or `rm .factory/STOP`.
+
+## Supervisors and LaunchAgents (Mini ops)
+
+STOP only makes each `factory run` spawn exit early. A launchd/LaunchAgent
+supervisor keeps respawning `factory run` every cycle, so a STOP'd repo's
+supervisor loops forever and looks healthy while doing nothing.
+
+For a repo that will stay STOP'd, unload its supervisor instead of leaving it
+spinning on STOP:
+
+```sh
+launchctl bootout gui/$(id -u)/<label>
+# or
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/<label>.plist
+```
+
+Bring it back later with `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<label>.plist`.
+
+On the Mini only the SF supervisor stays loaded. Other repos' agents (for
+example ship-it or co-habitat) must be booted out, not left looping on STOP.
+See [factoryd-launchd.md](./factoryd-launchd.md) for the supervisor itself.

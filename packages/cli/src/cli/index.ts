@@ -27,6 +27,7 @@ import {
   makeQueuePreflightOps,
   preflightQueuedIssue,
   type LaneFileHoldLookup,
+  type QueueDeferCause,
   type QueuePreflightOps,
 } from './queue-preflight.js';
 import {
@@ -2103,7 +2104,9 @@ export function resolveEnvironmentAcquirer(opts: {
   };
 }
 
-const { sweepStaleLaneClaims, sweepOrphanDrafts } = startupSweeps(() => (hasGitHubToken() ? getOctokit() : undefined));
+const { sweepStaleLaneClaims, sweepOrphanDrafts, reapExpiredClaims } = startupSweeps(() =>
+  hasGitHubToken() ? getOctokit() : undefined,
+);
 
 /** The autoGcOnRun-gated worktree sweep every pipeline entry point runs before shipping
  *  (`factory run`, and since #1756 the one-shot `factory ship` / `factory run-issue`). Never
@@ -3592,7 +3595,7 @@ export function createQueuePreflightOps(
   opts: {
     autoMergeStack?: boolean;
     stackMode?: boolean;
-    onDeferred?: (issue: number, message: string) => void;
+    onDeferred?: (issue: number, message: string, cause?: QueueDeferCause) => void;
     laneFileHold?: LaneFileHoldLookup;
   } = {},
 ): QueuePreflightOps {
@@ -4278,6 +4281,7 @@ function runRun(opts: RunOptions = {}): Promise<void> {
     runAutoWorktreeGc,
     sweepStaleLaneClaims,
     sweepOrphanDrafts,
+    reapExpiredClaims,
     planRunLanes,
     preflightQueuedIssue,
     createQueuePreflightOps,
