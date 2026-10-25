@@ -18,6 +18,7 @@ import type { PlanResult } from '../phases/plan.js';
 import { readSpec } from '../spec/index.js';
 import type { CheckSummary, Constitution } from '../types/index.js';
 import type { BuildRoutePin } from '../config/repo.js';
+import type { WorkKey } from '../work/work-key.js';
 
 export interface PlanReuseRecord {
   /** issueBodyHash of the brief the frozen spec was planned from. */
@@ -87,7 +88,7 @@ export function createPlanReuseStore(specPath: string): PlanReuseStore {
 
 /** Where a kept build resumes at CHECK after a config/environment release (#2564). */
 export interface CheckResumeRecord {
-  issue: number;
+  issue: WorkKey;
   branch: string;
   /** Absolute path of the kept lane worktree. */
   worktree: string;
@@ -138,7 +139,9 @@ export function createCheckResumeStore(specPath: string): CheckResumeStore {
       ) {
         return null;
       }
-      return stored as CheckResumeRecord;
+      const record = stored as CheckResumeRecord;
+      // Sidecars written before ADR-0168 hold a numeric issue.
+      return typeof r.issue === 'number' ? { ...record, issue: String(r.issue) as WorkKey } : record;
     },
     async record(entry) {
       await mkdir(dirname(path), { recursive: true });
@@ -151,7 +154,7 @@ export function createCheckResumeStore(specPath: string): CheckResumeStore {
 }
 
 export function formatPreservedBuildMessage(opts: {
-  issue: number;
+  issue: WorkKey;
   branch: string;
   buildMinutes: number;
   fixTarget: string;
@@ -189,7 +192,7 @@ export function preservedFixTarget(
 
 /** Park message for a config-caused CHECK failure (#2583): file:line, the fix, and how to re-queue. */
 export function configParkMessage(opts: {
-  issue: number;
+  issue: WorkKey;
   failure: Pick<EnvironmentFailure, 'cause' | 'failingChecks' | 'logPaths'>;
   summary: CheckSummary;
   constitution: Constitution | null;

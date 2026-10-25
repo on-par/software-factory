@@ -193,8 +193,9 @@ export async function resetIssue(issue: number, deps: ResetDeps): Promise<ResetR
   try {
     const guard = new LaneFileGuard(paths.laneFiles);
     if (dry) {
-      for (const c of await guard.claimsForIssue(issue)) removed.push(`lane-file claim ${c.repo}#${c.issue}`);
-    } else if (await guard.releaseIssue(issue)) removed.push('lane-file claim');
+      for (const c of await guard.claimsForIssue(workKeyFromIssue(issue)))
+        removed.push(`lane-file claim ${c.repo}#${c.issue}`);
+    } else if (await guard.releaseIssue(workKeyFromIssue(issue))) removed.push('lane-file claim');
   } catch (err) {
     kept.push(`lane-file claim (${errText(err)})`);
   }

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { LaneFileGuard } from '@on-par/factory-core';
+import { LaneFileGuard, workKeyFromIssue } from '@on-par/factory-core';
 
 import { waitForMerge } from './land.js';
 import { type CliDeps, main } from './index.js';
@@ -233,23 +233,23 @@ describe('land lane file claim release (#3067)', () => {
   it('landIssue releases the #1 lane file claim after the merge completes', async () => {
     openPrForIssue1();
     const guard = new LaneFileGuard(paths().laneFiles);
-    await guard.register(h.ghRepo, 1, ['src/a.ts']);
+    await guard.register(h.ghRepo, workKeyFromIssue(1), ['src/a.ts']);
     const res = await runMain('land', '1');
     expect(res.exited).toBe(false);
     expect(h.octokit.rest.pulls.merge).toHaveBeenCalled();
-    expect(await guard.claimsForIssue(1)).toEqual([]);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toEqual([]);
   });
 
   it('a failing claim release does not fail the land and logs lane_file_release_failed', async () => {
     openPrForIssue1();
     const guard = new LaneFileGuard(paths().laneFiles);
-    await guard.register(h.ghRepo, 1, ['src/a.ts']);
+    await guard.register(h.ghRepo, workKeyFromIssue(1), ['src/a.ts']);
     mkdirSync(`${paths().laneFiles}.tmp`);
     const res = await runMain('land', '1');
     expect(res.exited).toBe(false);
     expect(logged()).toContain('Landed PR #77');
     expect(readFileSync(paths().events, 'utf8')).toContain('lane_file_release_failed');
-    expect(await guard.claimsForIssue(1)).toHaveLength(1);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toHaveLength(1);
   });
 });
 
@@ -258,7 +258,7 @@ describe('waitForMerge lane file claim release (#3067)', () => {
     const root = await mkdtemp(join(tmpdir(), 'wait-for-merge-claim-'));
     const laneFiles = join(root, 'lane-files.json');
     const guard = new LaneFileGuard(laneFiles);
-    await guard.register('on-par/software-factory', 1, ['src/a.ts']);
+    await guard.register('on-par/software-factory', workKeyFromIssue(1), ['src/a.ts']);
     const waitPaths: any = {
       events: join(root, 'events.ndjson'),
       stop: join(root, 'STOP'),
@@ -279,7 +279,7 @@ describe('waitForMerge lane file claim release (#3067)', () => {
       sleep: async () => {},
     });
 
-    expect(await guard.claimsForIssue(1)).toEqual([]);
+    expect(await guard.claimsForIssue(workKeyFromIssue(1))).toEqual([]);
     await rm(root, { recursive: true, force: true });
   });
 });

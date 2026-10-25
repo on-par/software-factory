@@ -6,7 +6,6 @@ import { styleText } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
 import {
-  LaneFileGuard,
   applyRepoConfig,
   clearProxyState,
   getFactoryPaths,
@@ -66,6 +65,7 @@ import type {
 } from './index.js';
 import { awaitingCiLaneDeps } from './awaiting-ci-wiring.js';
 import { runEndOfRunKpiSnapshot } from './kpi-sweep.js';
+import { laneFileHoldLookup } from './lane-file-hold.js';
 import { waitForMerge } from './land.js';
 import { hostClaimGuards } from './host-claim-guards.js';
 import { DRAIN_MESSAGE, createNotifier, resolveNotifyCommand, withDiskLowNotify, withParkNotify } from './notify.js';
@@ -188,7 +188,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
                     resolveSizeGateMode(factoryConfig) === 'stack' &&
                     resolveMergePolicy(factoryConfig, process.env, { auto: opts.autoMerge }).auto,
                   stackMode: resolveSizeGateMode(factoryConfig) === 'stack',
-                  laneFileHold: (n) => new LaneFileGuard(paths.laneFiles).liveHold(ghRepo, n),
+                  laneFileHold: laneFileHoldLookup(paths.laneFiles, ghRepo),
                   onDeferred: deferrals.onDeferred,
                 }),
               ),

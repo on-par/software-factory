@@ -21,6 +21,7 @@ import type { CheckSummary, Constitution, DesignArtifact } from '../types/index.
 import type { StewardCommentGitHubClient, StewardIssueComment } from '../steward/comment.js';
 import type { RunStewardPorts } from '../steward/run.js';
 import type { WorkRequest } from '../work/index.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 import { LaneFileGuard } from './lane-file-guard.js';
 import type { RunPolicy } from './policy.js';
 import type { Environment, Workspace } from './ports.js';
@@ -2476,7 +2477,7 @@ describe('runIssue — preserved build on a non-code CHECK failure (#2564)', () 
     expect(outcome).toMatchObject({ state: 'released', buildPreserved: true });
     expect(checkResume.record).toHaveBeenCalledWith(
       expect.objectContaining({
-        issue: 42,
+        issue: workKeyFromIssue(42),
         branch: 'issue-1-fix-the-thing',
         worktree: '/tmp/wt',
         diffBase: 'd1',
