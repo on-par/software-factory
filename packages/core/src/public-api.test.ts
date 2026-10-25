@@ -331,7 +331,7 @@ const STACK = 'nextStackSlice restackAfterSquashMerge listRepoLaneLabels listSta
 const POLICY = 'isEgressEnforced describeDraftPrPolicy resolveDraftPrPolicy resolveConfiguredWritablePaths'.split(' '); // #2215, #3449, #3454
 const PO =
   'resolveRoleModel isOpenCodeZenModel subscriptionProviderOf PROVIDER_ORDER_ROLES SUBSCRIPTION_PROVIDERS'.split(' '); // #3334
-const PO2 = 'OPENCODE_GO_DEFAULT_MODEL subscriptionLogin filterRefusedProviders'.split(' '); // #3335
+const PO2 = 'OPENCODE_GO_DEFAULT_MODEL subscriptionLogin filterRefusedProviders sweepOrphanClaimLabels'.split(' '); // #3335, #1623
 const GATE = ['allProvidersDown', 'stageBlocked', 'PROVIDER_LEVEL_REASONS', 'TIMED_BREAKER_REASONS']; // #3226
 const EXTRA_INTERNAL_KEYS = [
   ...JOB_KEYS,

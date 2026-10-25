@@ -16,7 +16,9 @@ const NOW_MS = 1_700_000_000_000;
 const NOW_SECONDS = Math.floor(NOW_MS / 1000);
 const now = () => NOW_MS;
 
-function createFakeStore(issues: Array<{ number: number; labels: string[] }>) {
+function createFakeStore(issues: Array<{ number: number; labels: string[] }>, repoLabels: string[] = []) {
+  const deletedRepoLabels: string[] = [];
+  const repoLabelSet = new Set(repoLabels);
   const state = new Map<number, Set<string>>(issues.map((i) => [i.number, new Set(i.labels)]));
 
   const client: QueueGitHubClient = {
@@ -44,9 +46,19 @@ function createFakeStore(issues: Array<{ number: number; labels: string[] }>) {
     async ensureLabel() {
       return false;
     },
+    async listRepoLabels() {
+      return [...repoLabelSet];
+    },
+    async deleteRepoLabel({ name }) {
+      deletedRepoLabels.push(name);
+      repoLabelSet.delete(name);
+    },
+    async listAllOpenIssues() {
+      return [...state].map(([number, set]) => ({ number, labels: [...set] }));
+    },
   };
 
-  return { state, client };
+  return { state, client, deletedRepoLabels, repoLabelSet };
 }
 
 describe('findStaleClaims', () => {
@@ -186,5 +198,48 @@ describe('releaseStaleClaims', () => {
     ]);
     expect(removeLabel).not.toHaveBeenCalled();
     expect([...state.get(42)!].sort()).toEqual([IN_PROGRESS_LABEL, claimedByLabel('host-a-1'), renewed].sort());
+  });
+});
+
+describe('releaseStaleClaims orphan lease-label sweep (#1623)', () => {
+  it('releaseStaleClaims sweeps 56 orphaned lease labels and keeps the 4 on open issues (#1623)', async () => {
+    const expires = Array.from({ length: 50 }, (_, i) => claimExpiresLabel(NOW_SECONDS + 1000 + i));
+    const owners = Array.from({ length: 10 }, (_, i) => claimedByLabel(`host-${i}`));
+    const { client, deletedRepoLabels, repoLabelSet } = createFakeStore(
+      [
+        { number: 1, labels: [IN_PROGRESS_LABEL, expires[0]!, owners[0]!] },
+        { number: 2, labels: [IN_PROGRESS_LABEL, expires[1]!, owners[1]!] },
+      ],
+      [...expires, ...owners],
+    );
+    const onLabelSweep = vi.fn();
+    await expect(releaseStaleClaims({ client, owner: 'o', repo: 'r', now, onLabelSweep })).resolves.toEqual([]);
+    expect(deletedRepoLabels).toHaveLength(56);
+    expect([...repoLabelSet].sort()).toEqual([expires[0], expires[1], owners[0], owners[1]].sort());
+    expect(onLabelSweep).toHaveBeenCalledTimes(1);
+  });
+
+  it('releaseStaleClaims deletes leftover lease labels when no issue is claimed (#1623)', async () => {
+    const leftovers = [
+      claimExpiresLabel(NOW_SECONDS - 500),
+      claimExpiresLabel(NOW_SECONDS - 400),
+      claimedByLabel('h-9'),
+    ];
+    const { client, repoLabelSet } = createFakeStore([{ number: 3, labels: ['bug'] }], [...leftovers, 'bug']);
+    await releaseStaleClaims({ client, owner: 'o', repo: 'r', now });
+    expect([...repoLabelSet]).toEqual(['bug']);
+  });
+
+  it('releaseStaleClaims still returns releases when the sweep throws', async () => {
+    const stale = claimExpiresLabel(NOW_SECONDS - 60);
+    const { client } = createFakeStore([{ number: 1, labels: [IN_PROGRESS_LABEL, claimedByLabel('h-1'), stale] }]);
+    client.listRepoLabels = async () => {
+      throw new Error('rate limited');
+    };
+    const onLabelSweepError = vi.fn();
+    const out = await releaseStaleClaims({ client, owner: 'o', repo: 'r', now, onLabelSweepError });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.outcome).toBe('released');
+    expect(onLabelSweepError).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,5 +1,6 @@
-// packages/core/src/queue/stale-claims.ts — Release expired-lease claims back to factory:queued (#1500).
+// packages/core/src/queue/stale-claims.ts — Release expired-lease claims back to factory:queued (#1500); every run also sweeps orphaned lease labels (#1623).
 
+import { sweepOrphanClaimLabels, type OrphanClaimLabelSweep } from './claim-label-sweep.js';
 import { claimLiveness } from './claim-liveness.js';
 import {
   CLAIMED_BY_LABEL_PREFIX,
@@ -34,6 +35,10 @@ export interface ReleaseStaleClaimsOptions {
   repo: string;
   /** Defaults to `Date.now`. Injectable so tests can simulate elapsed time. */
   now?: () => number;
+  /** Called after the orphan lease-label sweep (#1623). */
+  onLabelSweep?: (sweep: OrphanClaimLabelSweep) => void;
+  /** Called when the orphan lease-label sweep throws; the sweep never fails the run (#1623). */
+  onLabelSweepError?: (err: unknown) => void;
 }
 
 export function findStaleClaims(issues: readonly QueueIssue[], opts: { now?: () => number } = {}): StaleClaim[] {
@@ -54,8 +59,22 @@ export async function releaseStaleClaims(opts: ReleaseStaleClaimsOptions): Promi
   const { client, owner, repo } = opts;
   const claimed = await client.listOpenIssuesWithLabels({ owner, repo, labels: [IN_PROGRESS_LABEL] });
   const stale = findStaleClaims(claimed, { now: opts.now });
-  if (stale.length === 0) return [];
+  const results = stale.length === 0 ? [] : await releaseAll(opts, claimed, stale);
+  try {
+    const sweep = await sweepOrphanClaimLabels({ client, owner, repo });
+    opts.onLabelSweep?.(sweep);
+  } catch (err) {
+    opts.onLabelSweepError?.(err);
+  }
+  return results;
+}
 
+async function releaseAll(
+  opts: ReleaseStaleClaimsOptions,
+  claimed: readonly QueueIssue[],
+  stale: readonly StaleClaim[],
+): Promise<StaleClaimRelease[]> {
+  const { client, owner, repo } = opts;
   const labelsByIssue = new Map(claimed.map((i) => [i.number, i.labels]));
   const queue = createGithubQueue({ client, owner, repo, now: opts.now });
   const results: StaleClaimRelease[] = [];

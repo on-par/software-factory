@@ -11,6 +11,7 @@ import { createOctokitComments, type QueueCommentClient } from './issue-comments
 import { createClaimReleaser } from './claim-release.js';
 import { createClaimSettler, type ClaimSettleOptions, type ClaimSettler } from './claim-settle.js';
 import { knownRepoLabels } from './label-cache.js';
+import { createOctokitLabelSweepMethods, dropReplacedRepoLabel, toQueueIssue } from './octokit-label-client.js';
 import type { OrderCollision } from './order-collision.js';
 import type { QueueEntry, QueueSnapshot, QueueSnapshotEntry } from './index.js';
 import {
@@ -182,6 +183,12 @@ export interface QueueGitHubClient extends QueueCommentClient {
   removeLabel(input: { owner: string; repo: string; issue_number: number; name: string }): Promise<void>;
   /** Create the label if missing. Must be idempotent — an already-existing label is not an error. Resolves `true` when it created the label, `false` when it already existed. */
   ensureLabel(input: { owner: string; repo: string } & QueueLabelSpec): Promise<boolean>;
+  /** Every repo label name, fully paginated; must throw rather than return a partial list (#1623). */
+  listRepoLabels?(input: { owner: string; repo: string }): Promise<string[]>;
+  /** Deletes the repo label; a 404 (already gone) resolves (#1623). */
+  deleteRepoLabel?(input: { owner: string; repo: string; name: string }): Promise<void>;
+  /** Every open issue (PRs may be included), fully paginated; must throw rather than return a partial list (#1623). */
+  listAllOpenIssues?(input: { owner: string; repo: string }): Promise<QueueIssue[]>;
 }
 
 export function queueOrderLabelSpec(position: number): QueueLabelSpec {
@@ -282,6 +289,7 @@ export async function readGithubQueueSnapshot(input: {
 export function createOctokitQueueClient(octokit: Octokit): QueueGitHubClient {
   return {
     ...createOctokitComments(octokit),
+    ...createOctokitLabelSweepMethods(octokit),
     async listOpenIssuesWithLabels({ owner, repo, labels }) {
       const { data } = await octokit.rest.issues.listForRepo({
         owner,
@@ -290,15 +298,7 @@ export function createOctokitQueueClient(octokit: Octokit): QueueGitHubClient {
         labels: labels.join(','),
         per_page: 100,
       });
-      return data
-        .filter((issue: { pull_request?: unknown }) => !issue.pull_request)
-        .map((issue: { number: number; title?: string; labels: Array<string | { name?: string }> }) => ({
-          number: issue.number,
-          labels: (issue.labels ?? [])
-            .map((label) => (typeof label === 'string' ? label : (label.name ?? '')))
-            .filter((name) => name !== ''),
-          ...(typeof issue.title === 'string' ? { title: issue.title } : {}),
-        }));
+      return data.filter((issue: { pull_request?: unknown }) => !issue.pull_request).map(toQueueIssue);
     },
     async getIssueLabels({ owner, repo, issue_number }) {
       const { data } = await octokit.rest.issues.listLabelsOnIssue({ owner, repo, issue_number, per_page: 100 });
@@ -554,6 +554,7 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     await client.addLabels({ owner, repo, issue_number: issue, labels: [expiresSpec.name] }); // add first (#3434)
     for (const name of fresh.filter((n) => n.startsWith(CLAIM_EXPIRES_LABEL_PREFIX) && n !== expiresSpec.name)) {
       await client.removeLabel({ owner, repo, issue_number: issue, name });
+      await dropReplacedRepoLabel(client, owner, repo, name, issue);
     }
     return true;
   }

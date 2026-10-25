@@ -467,6 +467,8 @@ export { createGithubQueueBackend, type GithubQueueBackendOptions, type QueueBac
 // Stale-claim reaping (#999, lease-based since #1500)
 export type { ReleaseStaleClaimsOptions, StaleClaim, StaleClaimRelease } from './queue/stale-claims.js';
 export { findStaleClaims, releaseStaleClaims } from './queue/stale-claims.js';
+export type { OrphanClaimLabelSweep } from './queue/claim-label-sweep.js';
+export { sweepOrphanClaimLabels } from './queue/claim-label-sweep.js';
 export type { DeferredOnlyResult } from './queue/deferred-only.js';
 export { unqueueDeferredOnly } from './queue/deferred-only.js';
 export type { StatelessLaneIssue } from './queue/stateless-lane.js';
