@@ -395,7 +395,7 @@ async function planPhaseImpl(opts: {
   const runnableRoutes = runnableBuildRoutes(router);
   const failureRoute = defaultBuildRoute(runnableRoutes);
 
-  let readiness = scoreEnrichedIssueReadiness({ title: issueTitle, body: issueBody });
+  let readiness = scoreEnrichedIssueReadiness({ title: issueTitle, body: issueBody, labels: work.labels });
   if (
     opts.enforceReadiness &&
     source.kind === GITHUB_ISSUE_SOURCE &&
@@ -425,7 +425,7 @@ async function planPhaseImpl(opts: {
           onLog: (msg) => log('router', msg),
         });
         lastModel = enrichment.model;
-        const candidate = scoreIssueReadiness({ title: issueTitle, body: enrichment.output });
+        const candidate = scoreIssueReadiness({ title: issueTitle, body: enrichment.output, labels: work.labels });
         if (candidate.template === 'factory-task' && candidate.pass) {
           const composed = composeEnrichedIssueBody(issueBody, enrichment.output);
           if (updateIssueBody) {

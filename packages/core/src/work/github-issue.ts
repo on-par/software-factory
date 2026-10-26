@@ -27,6 +27,8 @@ export interface WorkIssueClient {
     state?: WorkRequestState;
     /** True when the number belongs to a pull request (GitHub's issues API serves both). */
     isPullRequest?: boolean;
+    /** Issue label names, when the client reports them. */
+    labels?: string[];
   }>;
 }
 
@@ -56,6 +58,7 @@ export function createOctokitIssueClient(octokit: Octokit): WorkIssueClient {
         htmlUrl: data.html_url,
         state: data.state === 'closed' ? 'closed' : 'open',
         isPullRequest: data.pull_request != null,
+        labels: data.labels?.map((l) => (typeof l === 'string' ? l : (l.name ?? ''))).filter((name) => name !== ''),
       };
     },
   };
@@ -94,6 +97,7 @@ export function createGithubIssueAdapter(client: WorkIssueClient): WorkSourceAda
         brief,
         acceptanceCriteria: extractAcceptanceCriteria(brief),
         state: data.state,
+        ...(data.labels ? { labels: data.labels } : {}),
         reference: {
           externalId: String(params.issue),
           repo: params.repo,

@@ -146,6 +146,29 @@ describe('createGithubIssueAdapter', () => {
   });
 });
 
+describe('issue labels (#748)', () => {
+  it('sets WorkRequest.labels when the client returns them and omits the field otherwise', async () => {
+    const withLabels = createGithubIssueAdapter({
+      fetchIssue: async () => ({ title: 't', body: 'b', labels: ['spike'] }),
+    });
+    expect((await withLabels.resolve({ repo: 'o/r', issue: 1 })).labels).toEqual(['spike']);
+    const without = createGithubIssueAdapter(fakeClient({ title: 't', body: 'b' }));
+    expect('labels' in (await without.resolve({ repo: 'o/r', issue: 1 }))).toBe(false);
+  });
+
+  it('createOctokitIssueClient maps string and { name } labels, dropping empty names', async () => {
+    const octokit: any = {
+      rest: {
+        issues: {
+          get: async () => ({ data: { title: 't', body: 'b', labels: ['spike', { name: 'bug' }, { name: null }] } }),
+        },
+      },
+    };
+    const result = await createOctokitIssueClient(octokit).fetchIssue({ owner: 'o', repo: 'r', issue_number: 1 });
+    expect(result.labels).toEqual(['spike', 'bug']);
+  });
+});
+
 describe('createOctokitIssueClient', () => {
   it('maps an octokit-shaped fake response, passing owner/repo/issue_number through', async () => {
     let captured: { owner: string; repo: string; issue_number: number } | undefined;

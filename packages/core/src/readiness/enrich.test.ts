@@ -157,6 +157,12 @@ describe('scoreEnrichedIssueReadiness (#2660)', () => {
     expect(result.sizeReason).toContain('8 acceptance criteria');
   });
 
+  it('forwards labels so a spike-labeled oversized body is sizeOk (#748)', () => {
+    const body = composeEnrichedIssueBody(originalFiveAcs, expandedEightAcs);
+    const title = 'Harden the queue';
+    expect(scoreEnrichedIssueReadiness({ title, body, labels: ['spike'] }).sizeOk).toBe(true);
+  });
+
   it('falls back to the full body when the block fails readiness on its own', () => {
     const body = composeEnrichedIssueBody(originalFiveAcs, '## Verification\nnpm test');
     const input = { title: 'Harden the queue', body };
