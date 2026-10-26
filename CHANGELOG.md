@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Fixed
+
+- Lane port leases write .factory/ports.json atomically (unique tmp file + rename) under the existing file lock, and a reader retries once on a parse error, so the lane proxy no longer drops every route mid-write (#1619).
+
 ## 0.9.19 - 2026-10-26
 
 GitHub Actions runs now land after a successful `run-issue` or `ship` when
