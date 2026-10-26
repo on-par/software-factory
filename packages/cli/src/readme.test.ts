@@ -306,13 +306,13 @@ describe('README update and setup guard self-test', () => {
 
 const OLD_WORDING = [
   'Older Node versions are refused with a clear message.',
-  'So `.factory/` is local to this clone',
+  '`.factory/` local to this clone',
   'use it only on purpose',
   'running a Sound Buddy lane',
 ];
 const NEW_ROOT_WORDING = [
   'On older Node versions, the CLI stops and tells you which version it needs.',
-  "That keeps `.factory/` local to this clone. It isn't committed, so copy it yourself if you work from another machine or clone.",
+  'Commit `.factory/config.yaml` and `.factory/constitution.md` so every clone shares your standards.',
   'set it only when you mean to.',
   'running a lane on a real product repo (sped up)',
 ];
