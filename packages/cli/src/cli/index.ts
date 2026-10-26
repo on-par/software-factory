@@ -328,7 +328,7 @@ import { cmdHostedRunner } from './hosted-runner.js';
 import { resolveFactoryCheckoutCommit, runFilingPreview } from './filing.js';
 import { cmdRisk } from './risk.js';
 import { buildFeedbackDeps, type FeedbackDeps, resolveFeedbackRepo, runFeedback } from './feedback.js';
-import { ensureFactoryExcluded, writeSampleQueue } from './init-files.js';
+import { healFactoryExclude, writeSampleQueue } from './init-files.js';
 import { detectChecksForInit } from './detect-checks.js';
 import { applyRouterGuards, newRepoRouter } from './repo-router.js';
 import { cmdLogs } from './logs.js';
@@ -787,8 +787,8 @@ async function cmdInit(opts: { force?: boolean; yes?: boolean; detectChecks?: bo
   ensureDir(paths.logs);
   ensureDir(paths.plans);
 
-  // Add .factory/ to git exclude
-  ensureFactoryExcluded(resolve(repoRoot, '.git/info/exclude'));
+  // .factory/config.yaml is meant to be committed; drop the exclude line older inits added.
+  healFactoryExclude(resolve(repoRoot, '.git/info/exclude'));
 
   // Create sample queue if not exists
   writeSampleQueue(paths.queue);

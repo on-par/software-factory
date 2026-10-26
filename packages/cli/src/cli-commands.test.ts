@@ -703,21 +703,19 @@ describe('cli commands (via main dispatch)', () => {
       expect(out).toContain('Next: factory doctor');
     });
 
-    it('creates .factory dirs, the git exclude entry, and a sample queue', async () => {
+    it('creates .factory dirs and a sample queue without git-excluding .factory/ (#3689)', async () => {
       const res = await runMain('init');
       expect(res.exited).toBe(false);
       expect(existsSync(paths().queue)).toBe(true);
-      const exclude = readFileSync(join(h.repoRoot, '.git/info/exclude'), 'utf-8');
-      expect(exclude).toContain('.factory/');
+      expect(existsSync(join(h.repoRoot, '.git/info/exclude'))).toBe(false);
       expect(logged()).toContain('Initialized');
     });
 
-    it('does not duplicate the exclude entry or clobber an existing queue', async () => {
-      writeFileSync(join(h.repoRoot, '.git/info/exclude'), '.factory/\n');
+    it('drops a legacy .factory/ exclude line and does not clobber an existing queue', async () => {
+      writeFileSync(join(h.repoRoot, '.git/info/exclude'), '*.swp\n.factory/\n');
       writeFileSync(paths().queue, 'app 1\n');
       await runMain('init');
-      const exclude = readFileSync(join(h.repoRoot, '.git/info/exclude'), 'utf-8');
-      expect(exclude.match(/\.factory\//g)).toHaveLength(1);
+      expect(readFileSync(join(h.repoRoot, '.git/info/exclude'), 'utf-8')).toBe('*.swp\n');
       expect(readFileSync(paths().queue, 'utf-8')).toBe('app 1\n');
     });
 

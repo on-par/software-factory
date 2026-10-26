@@ -70,7 +70,14 @@ test -d .factory/
 test -f .factory/config.yaml
 test -d .factory/state/
 test -f .factory/state/queue
-grep -q "^\.factory/$" .git/info/exclude
+# #3689: init must not exclude .factory/ (config is meant to be committed).
+# Only state/ is ignored, via .factory/.gitignore.
+if [ -f .git/info/exclude ] && grep -qE '^[[:space:]]*\.factory/?[[:space:]]*$' .git/info/exclude; then
+  echo "expected no bare .factory/ line in .git/info/exclude after init, got:" >&2
+  cat .git/info/exclude >&2
+  exit 1
+fi
+grep -qx 'state/' .factory/.gitignore
 
 # Codex-only machine (#2406): with a fake signed-in codex CLI and no claude on PATH, doctor must
 # pass the coding agent prerequisite and report the ChatGPT sign-in. The run is hermetic (fake gh,
