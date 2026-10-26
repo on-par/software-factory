@@ -267,7 +267,8 @@ export class ProviderBreaker {
   }
 
   /** Takes the one cross-lane probe claim for the provider's current cap: an exclusive-create claim file next to the
-   *  breaker file. A claim older than PROBE_CLAIM_STALE_MS (a dead lane) is reclaimed (#3339). */
+   *  breaker file. A claim older than PROBE_CLAIM_STALE_MS (a dead lane) is reclaimed (#3339). The claim is kept only if the cap is
+   *  still due after the create: a lane that raced another lane's finished probe drops it (#3708). */
   async claimProbe(provider: string): Promise<'claimed' | 'taken' | 'not-due'> {
     const entry = (await this.read()).providers[provider];
     const at = entry ? this.dueCap(entry) : undefined;
@@ -283,12 +284,19 @@ export class ProviderBreaker {
         throw err;
       }
     };
+    // another lane may have closed or re-capped the cap between our read and our claim (#3708)
+    const confirm = async (): Promise<'claimed' | 'not-due'> => {
+      const current = (await this.read()).providers[provider];
+      if (current && this.dueCap(current) === at) return 'claimed';
+      await unlink(path).catch(() => undefined);
+      return 'not-due';
+    };
     try {
-      if ((await tryClaim()) === 'claimed') return 'claimed';
+      if ((await tryClaim()) === 'claimed') return await confirm();
       const claimedAt = Number(await readFile(path, 'utf-8'));
       if (Number.isFinite(claimedAt) && this.now() - claimedAt <= PROBE_CLAIM_STALE_MS) return 'taken';
       await unlink(path);
-      return (await tryClaim()) === 'claimed' ? 'claimed' : 'taken';
+      return (await tryClaim()) === 'claimed' ? await confirm() : 'taken';
     } catch {
       return 'taken'; // fail safe: neither probe nor time-close
     }

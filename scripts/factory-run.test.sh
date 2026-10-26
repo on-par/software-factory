@@ -294,6 +294,10 @@ done
 awk '/uses: actions\/checkout/{n++; if(n==1){f=1;next}} f&&/^      - /{exit} f' "$WF" | grep -qF 'token: ${{ secrets.FACTORY_GITHUB_TOKEN }}' \
   || fail "caller checkout must use FACTORY_GITHUB_TOKEN"
 echo "PASS caller checkout uses FACTORY_GITHUB_TOKEN"
+for k in FACTORY_MERGE FACTORY_MERGE_ADMIN; do
+  awk '/- name: Run factory$/{f=1;next} f&&/^      - /{exit} f' "$WF" | grep -qxF "          $k: '1'" || fail "Run factory step must set $k: '1'"
+done
+echo "PASS Run factory step enables merge with admin"
 ! grep -qF '@anthropic-ai/claude-code' "$WF" || fail "workflow still installs claude-code"
 echo "PASS factory-run.yml shape"
 

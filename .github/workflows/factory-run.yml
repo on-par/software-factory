@@ -91,6 +91,8 @@ jobs:
           EXPERIMENTAL: ${{ inputs.experimental }}
           FACTORY_PLAN_MODEL: ${{ inputs.plan_model }}
           FACTORY_BUILD_MODEL: ${{ inputs.build_model }}
+          FACTORY_MERGE: '1'
+          FACTORY_MERGE_ADMIN: '1'
           CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.provider == 'claude-cli' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
           ANTHROPIC_API_KEY: ${{ inputs.provider == 'claude-cli' && secrets.ANTHROPIC_API_KEY || '' }}
           OPENAI_API_KEY: ${{ inputs.provider == 'codex-cli' && secrets.OPENAI_API_KEY || '' }}
