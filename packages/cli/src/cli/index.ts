@@ -1621,7 +1621,7 @@ async function cmdClassifierBacktestEntry(opts: ClassifierBacktestOptions) {
         readFile: (path) => readFileSync(path, 'utf-8'),
         appendFile: (path, text) => appendFileSync(path, text),
         ensureDir,
-        readEvents: (path) => (existsSync(path) ? readEvents(path) : []),
+        readEvents: (path, opts) => readEvents(path, opts),
         now: () => new Date().toISOString(),
         log: (line) => console.log(line),
       },
@@ -2262,7 +2262,7 @@ async function cmdShip(
       }
       if (ghRepo) await runAutoWorktreeGc(repoRoot, paths, ghRepo, issueNum);
 
-      const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
+      const priorEvents = readEvents(paths.events, { includeSegments: true });
       if (hasUnresolvedPark(priorEvents, String(issueNum))) {
         logEvent(paths.events, 'human-restarted', issueNum, 'manual retry of a previously parked/failed run', {
           actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
@@ -2356,7 +2356,7 @@ async function cmdRunIssue(
       console.log(styleText('cyan', `one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
       await runAutoWorktreeGc(repoRoot, paths, ghRepo, issueNum);
 
-      const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
+      const priorEvents = readEvents(paths.events, { includeSegments: true });
       if (hasUnresolvedPark(priorEvents, String(issueNum))) {
         logEvent(paths.events, 'human-restarted', issueNum, 'manual retry of a previously parked/failed run', {
           actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
@@ -2565,7 +2565,7 @@ async function cmdRunBrief(
         );
       }
 
-      const priorEvents = existsSync(paths.events) ? readEvents(paths.events) : [];
+      const priorEvents = readEvents(paths.events, { includeSegments: true });
       if (hasUnresolvedPark(priorEvents, String(runNum))) {
         logEvent(paths.events, 'human-restarted', runNum, 'manual retry of a previously parked/failed run', {
           actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',

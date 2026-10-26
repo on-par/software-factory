@@ -358,3 +358,60 @@ describe('runLogs --limit/--since', () => {
     }
   });
 });
+
+describe('runLogs (rotated segments, #3711)', () => {
+  const tmp = createTempDirs();
+  let file: string;
+  const ev = (i: number) => line({ type: 'plan', issue: '1', msg: `event ${i}`, ts: '2026-01-01T00:00:00.000Z' });
+  const range = (from: number, to: number) => Array.from({ length: to - from }, (_, i) => from + i);
+
+  beforeEach(() => {
+    const dir = tmp.makeSync('factory-logs-rotated-');
+    file = join(dir, 'events.ndjson');
+    mkdirSync(eventSegmentsDir(file), { recursive: true });
+    const seg0 = range(0, 4).map(ev).join('');
+    writeFileSync(join(eventSegmentsDir(file), eventSegmentFileName(0)), seg0);
+    writeFileSync(
+      join(eventSegmentsDir(file), eventSegmentFileName(Buffer.byteLength(seg0))),
+      range(4, 8).map(ev).join(''),
+    );
+    writeFileSync(file, range(8, 10).map(ev).join(''));
+  });
+
+  afterEach(() => tmp.cleanup());
+
+  const msgs = (written: string[]) => written.map((l) => JSON.parse(l).msg);
+  const expected = range(0, 10).map((i) => `event ${i}`);
+
+  it('bare logs prints every event from 2 rotated segments and the live file, oldest first', () => {
+    const { written, out } = outStub();
+    runLogs(file, {}, { out, env: {} });
+    expect(written).toHaveLength(10);
+    written.forEach((l, i) => expect(l).toContain(`event ${i}`));
+  });
+
+  it('logs --json prints every event from 2 rotated segments and the live file, oldest first', () => {
+    const { written, out } = outStub();
+    runLogs(file, { json: true }, { out, env: {} });
+    expect(msgs(written)).toEqual(expected);
+  });
+
+  it('bare --json and --json --limit 100 print the same events', () => {
+    const bare = outStub();
+    runLogs(file, { json: true }, { out: bare.out, env: {} });
+    const limited = outStub();
+    runLogs(file, { json: true, limit: 100 }, { out: limited.out, env: {} });
+    expect(msgs(bare.written)).toEqual(msgs(limited.written));
+  });
+
+  it('--follow replays rotated segments before the live file and then tails new appends', async () => {
+    const { written, out } = outStub();
+    const stop = runLogs(file, { json: true, follow: true }, { out, env: {}, pollMs: 10 });
+    await waitFor(() => written.length >= 10);
+    expect(msgs(written.slice(0, 10))).toEqual(expected);
+    appendFileSync(file, ev(10));
+    await waitFor(() => written.length >= 11);
+    stop();
+    expect(msgs(written)).toEqual([...expected, 'event 10']);
+  });
+});
