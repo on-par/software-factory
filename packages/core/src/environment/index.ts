@@ -1,6 +1,7 @@
 // src/environment/index.ts — Port-lease registry for parallel lanes (.factory/ports.json)
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { dirname } from 'node:path';
 
@@ -75,22 +76,34 @@ interface PortRegistry {
 
 const EMPTY_REGISTRY: PortRegistry = { version: 1, leases: [] };
 
-function readRegistry(registryFile: string): PortRegistry {
-  if (!existsSync(registryFile)) return { ...EMPTY_REGISTRY, leases: [] };
+function parseRegistryOnce(registryFile: string): PortRegistry | null {
   try {
     const raw = JSON.parse(readFileSync(registryFile, 'utf-8'));
-    if (!raw || typeof raw !== 'object' || !Array.isArray(raw.leases)) {
-      return { ...EMPTY_REGISTRY, leases: [] };
-    }
+    if (!raw || typeof raw !== 'object' || !Array.isArray(raw.leases)) return null;
     return { version: 1, leases: raw.leases as PortLease[] };
   } catch {
-    return { ...EMPTY_REGISTRY, leases: [] };
+    return null;
   }
 }
 
+function readRegistry(registryFile: string): PortRegistry {
+  if (!existsSync(registryFile)) return { ...EMPTY_REGISTRY, leases: [] };
+  // One retry, no sleep: the proxy calls this synchronously per request.
+  return parseRegistryOnce(registryFile) ?? parseRegistryOnce(registryFile) ?? { ...EMPTY_REGISTRY, leases: [] };
+}
+
+/** Tmp file + rename in the same directory (atomic, no EXDEV): lock-free readers such as
+ *  the lane proxy must never see a truncated registry (#1619). */
 function writeRegistry(registryFile: string, registry: PortRegistry): void {
   mkdirSync(dirname(registryFile), { recursive: true });
-  writeFileSync(registryFile, `${JSON.stringify(registry, null, 2)}\n`);
+  const tmp = `${registryFile}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(tmp, `${JSON.stringify(registry, null, 2)}\n`);
+    renameSync(tmp, registryFile);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
 }
 
 /** Bind-probe: true when a process could listen on `port` on 127.0.0.1 right now. */
@@ -266,7 +279,7 @@ export async function reapStalePortLeases(opts: {
 }
 
 /** Lock-free read of the current live+stale leases, used by the proxy per-request
- *  (already tolerates a missing/corrupt registry file by returning `[]`). */
+ *  (writes are atomic renames; a parse error is retried once, then treated as `[]`). */
 export function readPortLeases(registryFile: string): PortLease[] {
   return readRegistry(registryFile).leases;
 }
