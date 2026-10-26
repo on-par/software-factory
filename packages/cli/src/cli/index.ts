@@ -272,7 +272,7 @@ import { cmdSupervise, type SuperviseOptions } from './supervise.js';
 import { setShipRuntime } from './ship-runtime.js';
 import { runQueueClear } from './queue-clear.js';
 import { buildProgram } from './program.js';
-import { buildCostJson } from './cost-json.js';
+import { buildCostJson, filterCostEntries, newestCostItems, parseCostFilterOrExit } from './cost-json.js';
 import { buildQueueAddJson } from './queue-add-json.js';
 import { renderQueueAddLines, renderUnparkLines } from './queue-output.js';
 import { buildQueueListJson } from './queue-list.js';
@@ -1353,7 +1353,8 @@ async function cmdModels(opts: { doctor?: boolean } = {}) {
 
 const CACHED_RATE_MARKER = ' (cached at full input rate)';
 
-async function cmdCost(opts: { issue?: string; json?: boolean } = {}) {
+async function cmdCost(opts: { issue?: string; json?: boolean; since?: string; limit?: string } = {}) {
+  const filter = parseCostFilterOrExit(opts);
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   if (opts.json) {
@@ -1363,24 +1364,23 @@ async function cmdCost(opts: { issue?: string; json?: boolean } = {}) {
     } catch (err) {
       throw new CliExitError(`factory: cost failed — ${errorDetail(err)}`, 1);
     }
-    console.log(JSON.stringify(buildCostJson(jsonCosts, opts.issue)));
+    console.log(JSON.stringify(buildCostJson(jsonCosts, filter)));
     return;
   }
-  const costs = internalOps.readCosts(paths.costs);
+  const costs = filterCostEntries(internalOps.readCosts(paths.costs), filter);
 
   if (opts.issue) {
-    const filtered = costs.filter((c) => c.issue === String(opts.issue));
-    if (filtered.length === 0) {
+    if (costs.length === 0) {
       console.log(`no cost data for issue ${opts.issue}`);
       return;
     }
     console.log(styleText('bold', `== Costs for issue ${opts.issue} ==`));
-    for (const c of filtered) {
+    for (const c of newestCostItems(costs, filter.limit)) {
       console.log(
         `  ${c.task} ${c.model} ${c.cost === null || c.cost === undefined ? 'unknown' : `$${c.cost.toFixed(4)}`}${c.failoverReason ? ` [failover: ${c.failoverReason}]` : ''}${c.cachedRateMissing === true ? CACHED_RATE_MARKER : ''}`,
       );
     }
-    const t = aggregateCosts(filtered).total;
+    const t = aggregateCosts(costs).total;
     console.log('  ---');
     console.log(`  Total: ${formatCostTotal(t.cost, t.unpricedCount)}`);
     return;

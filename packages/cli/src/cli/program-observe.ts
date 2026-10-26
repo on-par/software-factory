@@ -11,10 +11,12 @@ import type { CliDeps, ProgramHandlers } from './index.js';
 export function registerObserveCommands(program: Command, handlers: ProgramHandlers, deps: CliDeps): void {
   program
     .command('cost')
-    .description('Show recorded model spend by model (--issue for one issue)')
+    .description('Show recorded model spend by model (--issue, --since, --limit to narrow)')
     .option('--issue <number>', 'Show per-entry detail for one issue')
     .option('--json', 'Print one JSON object (schemaVersion 1): rows, perModel, total; unpriced cost is null')
-    .action((opts: { issue?: string; json?: boolean }) => handlers.cmdCost(opts));
+    .option('--since <iso>', 'Only entries at or after this ISO 8601 time; scopes rows, perModel and total')
+    .option('--limit <n>', 'Only the newest <n> rows (oldest first); perModel and total are not capped')
+    .action((opts: { issue?: string; json?: boolean; since?: string; limit?: string }) => handlers.cmdCost(opts));
 
   program
     .command('usage')
