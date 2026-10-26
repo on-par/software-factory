@@ -743,7 +743,7 @@ export async function reworkWorker(opts: ReworkWorkerOptions): Promise<{
     reworkModel,
     runId,
   } = opts;
-  const constitutionCtx = buildConstitutionContext(constitution);
+  const constitutionCtx = buildConstitutionContext(constitution, 'standards');
   const failures = summary.results.filter((r) => r.result === 'FAIL');
   const failureDetails = failures.map((f) => `### ${f.checker}\n${f.details}`).join('\n\n');
 

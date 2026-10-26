@@ -194,7 +194,8 @@ async function buildPhaseImpl(opts: {
   } = opts;
   let route = opts.route;
 
-  const constitutionCtx = buildConstitutionContext(constitution) + (await renderLintRulesInForce(worktree));
+  const constitutionCtx =
+    buildConstitutionContext(constitution, 'standards') + (await renderLintRulesInForce(worktree));
   const spec = await readFile(specPath, 'utf-8').catch(() => '');
   const designArtifact = await readDesignArtifact(specPath);
   const designGrounding = designArtifact ? renderDesignGrounding(designArtifact) : '';
