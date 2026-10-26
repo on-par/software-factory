@@ -203,6 +203,18 @@ export const defaultModelsConfig: ModelsDefaults = {
       harness: 'claude-cli',
       claudeFlag: 'claude-sonnet-5-5',
     },
+    /** Claude Haiku 5.5 — cheap classification model, claude CLI subscription auth. Prices per Anthropic pricing checked 2026-10-26 (prompts ≤100K tokens). Routed by `readiness_judge` through the `triage_cheap` tier (#783). */
+    'claude-haiku-5-5': {
+      provider: 'anthropic',
+      tier: ['triage_cheap'],
+      costPerMtokInput: 0.1,
+      costPerMtokOutput: 0.5,
+      contextWindow: 200000,
+      capabilities: ['triage', 'classification'],
+      envKey: null,
+      harness: 'claude-cli',
+      claudeFlag: 'claude-haiku-5-5',
+    },
     /** Codex CLI subscription auth (ChatGPT/OAuth), not an API key — do not gate availability on OPENAI_API_KEY. Explicitly pins -m gpt-5.6-sol instead of silently riding ~/.codex/config.toml's default model. */
     'gpt-5.6-sol': {
       provider: 'openai',
@@ -503,6 +515,7 @@ export const defaultModelsConfig: ModelsDefaults = {
       'glm-5.2',
     ],
     triage: ['qwen2.5-coder:14b', 'claude-sonnet-5', 'glm-5.2', 'gpt-5.6-luna-high'],
+    triage_cheap: ['qwen2.5-coder:14b', 'claude-haiku-5-5', 'claude-sonnet-5', 'glm-5.2', 'gpt-5.6-luna-high'],
   },
   providerOrder: {
     boss: ['claude-opus-5', 'gpt-5.6-terra-high', 'opencode-deepseek-v4-flash'],

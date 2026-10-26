@@ -31,9 +31,9 @@ export const defaultRoutesConfig: RoutesDefaults = {
       description: 'Create a complete factory-task issue body before PLAN',
     },
     readiness_judge: {
-      tier: 'triage',
+      tier: 'triage_cheap',
       description:
-        'Three-way readiness verdict (ready / ready-with-assumptions / not-ready) as one tool-less JSON object (ADR-0167)',
+        'Three-way readiness verdict (ready / ready-with-assumptions / not-ready) as one tool-less JSON object (ADR-0167); cheap tier (Haiku ahead of Sonnet, #783)',
       allowedTools: [],
       output: 'json',
     },
