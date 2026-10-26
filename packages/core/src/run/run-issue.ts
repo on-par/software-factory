@@ -97,7 +97,8 @@ import {
   type LaneClaimStalenessProbe,
   type LaneFileGuard,
 } from './lane-file-guard.js';
-import { parkReasonFor, reworkRouteFor, type BuildRoute, type ParkReason, type RunOutcome } from './outcome.js';
+import { designSmellFindingFor, parkReasonFor, reworkRouteFor } from './outcome.js';
+import type { BuildRoute, DesignSmellFinding, ParkReason, RunOutcome } from './outcome.js';
 import type { RunPolicy } from './policy.js';
 import {
   configParkMessage,
@@ -444,13 +445,14 @@ async function runIssueOnce(
     checkFailure?: { failureSignature: string; failingChecks: string[] },
     ciFailure?: CiFailureEvidence,
     down?: StageGateVerdict['down'],
+    designSmell?: DesignSmellFinding,
   ): Promise<RunOutcome> => {
     const terminalMessage = phaseLogger.parkMessage(message);
     // A blocked park never carries a failure signature, so the ADR-0139 lane breaker and the cross-run stuck check skip it (#2315).
     const failure = reason === 'blocked' ? undefined : checkFailure;
     log(reason, terminalMessage, {
       ...parkLogExtra(failure, ciFailure),
-      park: parkPayload(reason, workKey, request.lane, request.blockedBehind ?? []),
+      park: parkPayload(reason, workKey, request.lane, request.blockedBehind ?? [], designSmell),
       ...(down ? { allProvidersDown: allProvidersDownPayload(down, workKey) } : {}),
     });
     if (reason === 'timeout') {
@@ -462,15 +464,8 @@ async function runIssueOnce(
         octokit: ports.octokit,
         repo: request.repo,
         worktree: ports.workspace.path,
-        input: {
-          issue: workKey,
-          reason,
-          message: terminalMessage,
-          runId,
-          branch: request.branch,
-          lane: request.lane,
-          blockers: [],
-        },
+        // prettier-ignore
+        input: { issue: workKey, reason, message: terminalMessage, runId, branch: request.branch, lane: request.lane, blockers: [], ...(designSmell ? { designSmell } : {}) },
       });
       if (!posted.ok) log('environment_warning', `could not post the issue park comment: ${posted.error}`);
       if (shipStarted) {
@@ -495,6 +490,7 @@ async function runIssueOnce(
       ...(settled?.prNumber === undefined ? {} : { prNumber: settled.prNumber }),
       ...failure,
       ...(down ? { providersDown: providersDownOf(down) } : {}),
+      ...(designSmell ? { designSmell } : {}),
     };
     await runParkSteward(outcome, request, runId, ports, log);
     await writeReports(reportOutcomeFor(reason), reason, terminalMessage);
@@ -1224,7 +1220,8 @@ async function runIssueOnce(
     const capped = await capGate.afterFailure(err, failurePhase, route);
     if (capped?.released) return capped.released;
     if (capped?.down) return await parkAllProvidersDown(capped.down);
-    return await terminalParked(parkReasonFor(err), errorMessage(err));
+    // prettier-ignore
+    return await terminalParked(parkReasonFor(err), errorMessage(err), undefined, undefined, undefined, designSmellFindingFor(err));
   } finally {
     await release();
   }

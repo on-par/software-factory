@@ -1,7 +1,47 @@
 import { describe, expect, it } from 'vitest';
 
-import { parkEvents, parkReasonFor, reworkRouteFor } from './outcome.js';
-import type { RunOutcome } from './outcome.js';
+import { designSmellFindingFor, parkEvents, parkReasonFor, reworkRouteFor } from './outcome.js';
+import type { DesignSmellFinding, RunOutcome } from './outcome.js';
+
+const FINDING: DesignSmellFinding = { approachTried: 'cache', whyItStinks: 'stale reads', recommendation: 'split it' };
+
+describe('designSmellFindingFor (#1513)', () => {
+  it('reads the finding from a parked err.outcome and from an err.designSmell marker, dropping extra keys', () => {
+    expect(designSmellFindingFor({ outcome: { state: 'parked', reason: 'escalate', designSmell: FINDING } })).toEqual(
+      FINDING,
+    );
+    expect(designSmellFindingFor({ designSmell: { ...FINDING, extra: 1 } })).toStrictEqual(FINDING);
+  });
+
+  it('ignores missing or incomplete findings (#1513)', () => {
+    for (const err of [
+      undefined,
+      null,
+      new Error('x'),
+      { designSmell: 'nope' },
+      { designSmell: { ...FINDING, approachTried: '  ' } },
+      { designSmell: { ...FINDING, whyItStinks: 3 } },
+      { designSmell: { approachTried: 'a', whyItStinks: 'b' } },
+    ]) {
+      expect(designSmellFindingFor(err)).toBeUndefined();
+    }
+  });
+
+  it('parkEvents attaches the design-smell finding to the park event (#1513)', () => {
+    const err = Object.assign(new Error('smell'), {
+      outcome: { state: 'parked' as const, reason: 'escalate' as const, designSmell: FINDING },
+    });
+    expect(parkEvents(err)).toEqual([{ type: 'escalate', msg: 'smell', designSmell: FINDING }]);
+  });
+
+  it('never attaches the finding to the stuck companion event', () => {
+    const err = Object.assign(new Error('slow'), { reason: 'timeout', designSmell: FINDING });
+    const events = parkEvents(err);
+    expect(events[0]).toMatchObject({ type: 'timeout', designSmell: FINDING });
+    expect(events[1].type).toBe('stuck');
+    expect(events[1]).not.toHaveProperty('designSmell');
+  });
+});
 
 describe('parkReasonFor', () => {
   it('reads the reason off a parked RunOutcome carried on err.outcome (LaneParkError-shaped)', () => {

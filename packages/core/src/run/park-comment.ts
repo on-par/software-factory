@@ -10,7 +10,7 @@ import type { ParkPayload } from '../events/kinds.js';
 import { fenceExcerpt, stripHiddenContent } from '../filing/sanitize.js';
 import { readWorktreeHead } from './ci-suppression-guard.js';
 import { QUEUE_ORDER_LABEL_PREFIX } from '../queue/queue-order.js';
-import type { ParkReason } from './outcome.js';
+import type { DesignSmellFinding, ParkReason } from './outcome.js';
 import { issueNumberOf, type WorkKey } from '../work/work-key.js';
 
 export const ISSUE_STATE_MARKER_VERSION = 'v1';
@@ -28,6 +28,8 @@ export interface ParkCommentInput {
   status?: string;
   /** factory:order held when the issue parked (#3554). */
   order?: number;
+  /** Design-smell finding rendered above the unblock hint (#1513). */
+  designSmell?: DesignSmellFinding;
 }
 
 /** `reason` is a plain string because the parser reads untrusted text. */
@@ -93,14 +95,37 @@ export function parkPayload(
   issue: WorkKey,
   lane: string | undefined,
   blockedBehind: readonly number[],
+  designSmell?: DesignSmellFinding,
 ): ParkPayload {
-  return { reason, decision: parkUnblockHint(reason, issue), lane: lane ?? '', blockedBehind: [...blockedBehind] };
+  return {
+    reason,
+    decision: parkUnblockHint(reason, issue),
+    lane: lane ?? '',
+    blockedBehind: [...blockedBehind],
+    ...(designSmell ? { designSmell } : {}),
+  };
 }
 
 function clean(v: string): string {
   return stripHiddenContent(v)
     .replace(/[\r\n]+/g, ' ')
     .trim();
+}
+
+function designSmellLines(f: DesignSmellFinding): string[] {
+  const section = (title: string, text: string): string[] => [
+    `_${title}_`,
+    '',
+    fenceExcerpt(stripHiddenContent(text)),
+    '',
+  ];
+  return [
+    '**Design-smell finding**',
+    '',
+    ...section('Approach tried', f.approachTried),
+    ...section('Why it stinks', f.whyItStinks),
+    ...section('Recommendation', f.recommendation),
+  ];
 }
 
 export function renderParkComment(input: ParkCommentInput): string {
@@ -130,6 +155,7 @@ export function renderParkComment(input: ParkCommentInput): string {
     '',
     fenceExcerpt(stripHiddenContent(input.message)),
     '',
+    ...(input.designSmell ? designSmellLines(input.designSmell) : []),
     `**What unblocks this:** ${parkUnblockHint(input.reason, input.issue)}`,
     '',
     issueStateMarker(input.issue),

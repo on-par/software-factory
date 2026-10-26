@@ -238,6 +238,26 @@ describe('runIssue — issue park comment (#2314)', () => {
     );
   });
 
+  it('logs the design-smell finding on the park payload, comment and outcome (#1513)', async () => {
+    const F = { approachTried: 'cache it', whyItStinks: 'stale reads', recommendation: 'split the module' };
+    vi.mocked(buildPhase).mockRejectedValue(
+      Object.assign(new Error('smell'), { outcome: { state: 'parked', reason: 'escalate', designSmell: F } }),
+    );
+    const log = vi.fn<Log>();
+    const { octokit, createComment } = commentOctokit();
+    const outcome = await runIssue(request, policy, ports(log, octokit));
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'escalate', designSmell: F });
+    expect(log).toHaveBeenCalledWith(
+      'escalate',
+      expect.any(String),
+      expect.objectContaining({ park: expect.objectContaining({ designSmell: F }) }),
+    );
+    const body = createComment.mock.calls[0][0].body;
+    expect(body).toContain('cache it');
+    expect(body).toContain('stale reads');
+    expect(body).toContain('split the module');
+  });
+
   it("defaults the park payload lane to '' and blockedBehind to [] when the request has neither (#3511)", async () => {
     const log = vi.fn<Log>();
     await runIssue(request, overBudget, parkingPorts(log, commentOctokit().octokit));
