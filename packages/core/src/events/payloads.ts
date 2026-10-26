@@ -1,6 +1,6 @@
 // src/events/payloads.ts — structured payloads carried by specific EventKinds, split from kinds.ts
 
-import type { ParkReason } from '../run/outcome.js';
+import type { DesignSmellFinding, ParkReason } from '../run/outcome.js';
 import type { StuckTrigger } from '../steward/detect.js';
 
 /** Payload of a park event (#3511): why the issue parked, what a human must do, and what waits behind it. */
@@ -12,6 +12,8 @@ export interface ParkPayload {
   lane: string;
   /** Issue numbers still queued behind the parked issue on this lane, in order. */
   blockedBehind: number[];
+  /** The design-smell finding on a design-smell park (#1513); absent on every other park. */
+  designSmell?: DesignSmellFinding;
 }
 
 /** Payload of a `lane-paused` event. Two triggers: the lane circuit breaker

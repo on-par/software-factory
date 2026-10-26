@@ -190,6 +190,15 @@ export function preservedFixTarget(
   return failure.logPaths?.[0] ?? `the base (failing: ${failure.failingChecks.join(', ')})`;
 }
 
+/** Park message for a failed pre-PLAN config preflight: the findings first, then how to re-queue. */
+export function configPreflightMessage(findings: readonly { message: string }[], issue: WorkKey): string {
+  return [
+    'config preflight failed before PLAN:',
+    ...findings.map((f) => f.message),
+    `then run factory unpark ${issue}`,
+  ].join('\n');
+}
+
 /** Park message for a config-caused CHECK failure (#2583): file:line, the fix, and how to re-queue. */
 export function configParkMessage(opts: {
   issue: WorkKey;

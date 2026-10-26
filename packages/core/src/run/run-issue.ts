@@ -97,16 +97,26 @@ import {
   type LaneClaimStalenessProbe,
   type LaneFileGuard,
 } from './lane-file-guard.js';
-import { parkReasonFor, reworkRouteFor, type BuildRoute, type ParkReason, type RunOutcome } from './outcome.js';
+import {
+  designSmellFindingFor,
+  parkReasonFor,
+  reworkRouteFor,
+  type BuildRoute,
+  type DesignSmellFinding,
+  type ParkReason,
+  type RunOutcome,
+} from './outcome.js';
 import type { RunPolicy } from './policy.js';
 import {
   configParkMessage,
+  configPreflightMessage,
   formatPreservedBuildMessage,
   issueBodyHash,
   preservedFixTarget,
   type CheckResumeStore,
   type PlanReuseStore,
 } from './resume-context.js';
+import { leaseEnvironmentOrWarn, releaseEnvironmentOrWarn } from './environment-lease.js';
 import type { Environment, Workspace } from './ports.js';
 import { safeRecordRunState, terminalRunStateUpdate, thrownRunStateUpdate } from './run-state-record.js';
 import { isDecomposeSignal } from './run-state-record.js';
@@ -387,14 +397,7 @@ async function runIssueOnce(
         `terminated ${outcomes.length} process group(s)${outcomes.some((o) => o.forced) ? ' (SIGKILL escalation used)' : ''}`,
       );
     }
-    if (environment) {
-      try {
-        await environment.release();
-        log('environment_release', `released port ${environment.port} for worktree ${ports.workspace.path}`);
-      } catch (err) {
-        log('environment_release_failed', `port release failed: ${errorMessage(err)}`);
-      }
-    }
+    if (environment) await releaseEnvironmentOrWarn(environment, ports.workspace.path, log);
   };
 
   // Every escalated/parked exit reports the same way a thrown park did before the lift:
@@ -444,13 +447,14 @@ async function runIssueOnce(
     checkFailure?: { failureSignature: string; failingChecks: string[] },
     ciFailure?: CiFailureEvidence,
     down?: StageGateVerdict['down'],
+    designSmell?: DesignSmellFinding,
   ): Promise<RunOutcome> => {
     const terminalMessage = phaseLogger.parkMessage(message);
     // A blocked park never carries a failure signature, so the ADR-0139 lane breaker and the cross-run stuck check skip it (#2315).
     const failure = reason === 'blocked' ? undefined : checkFailure;
     log(reason, terminalMessage, {
       ...parkLogExtra(failure, ciFailure),
-      park: parkPayload(reason, workKey, request.lane, request.blockedBehind ?? []),
+      park: parkPayload(reason, workKey, request.lane, request.blockedBehind ?? [], designSmell),
       ...(down ? { allProvidersDown: allProvidersDownPayload(down, workKey) } : {}),
     });
     if (reason === 'timeout') {
@@ -470,6 +474,7 @@ async function runIssueOnce(
           branch: request.branch,
           lane: request.lane,
           blockers: [],
+          ...(designSmell ? { designSmell } : {}),
         },
       });
       if (!posted.ok) log('environment_warning', `could not post the issue park comment: ${posted.error}`);
@@ -495,6 +500,7 @@ async function runIssueOnce(
       ...(settled?.prNumber === undefined ? {} : { prNumber: settled.prNumber }),
       ...failure,
       ...(down ? { providersDown: providersDownOf(down) } : {}),
+      ...(designSmell ? { designSmell } : {}),
     };
     await runParkSteward(outcome, request, runId, ports, log);
     await writeReports(reportOutcomeFor(reason), reason, terminalMessage);
@@ -522,16 +528,7 @@ async function runIssueOnce(
   const capGate = providerCapGate(ports.router, ports.breaker, { ...request, issue: workKey }, log, gateDeps.probe);
 
   try {
-    if (ports.acquireEnvironment) {
-      try {
-        environment = await ports.acquireEnvironment();
-      } catch (err) {
-        log(
-          'environment_lease_failed',
-          `port lease unavailable (${errorMessage(err)}) — running without injected PORT`,
-        );
-      }
-    }
+    if (ports.acquireEnvironment) environment = await leaseEnvironmentOrWarn(ports.acquireEnvironment, log);
     const appPort = environment?.port;
     const onPgid = (pgid: number): void => {
       tracker.track(pgid);
@@ -552,14 +549,7 @@ async function runIssueOnce(
     // Any failing verdict parks with the `config` cause (#2587); checker findings come first in the message.
     const lint = lintFactoryConfig({ constitution, configFile: request.repoConfigFile });
     if (lint.verdict !== 'ok') {
-      return await terminalParked(
-        'config',
-        [
-          'config preflight failed before PLAN:',
-          ...lint.findings.map((f) => f.message),
-          `then run factory unpark ${workKey}`,
-        ].join('\n'),
-      );
+      return await terminalParked('config', configPreflightMessage(lint.findings, workKey));
     }
     // Unknown nested config keys are stripped by the runtime schema; warn once per key, never block (#3568, ADR-0160).
     if (request.repoConfigFile) {
@@ -1224,7 +1214,14 @@ async function runIssueOnce(
     const capped = await capGate.afterFailure(err, failurePhase, route);
     if (capped?.released) return capped.released;
     if (capped?.down) return await parkAllProvidersDown(capped.down);
-    return await terminalParked(parkReasonFor(err), errorMessage(err));
+    return await terminalParked(
+      parkReasonFor(err),
+      errorMessage(err),
+      undefined,
+      undefined,
+      undefined,
+      designSmellFindingFor(err),
+    );
   } finally {
     await release();
   }

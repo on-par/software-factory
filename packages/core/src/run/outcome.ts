@@ -67,6 +67,8 @@ export type RunOutcome =
   | {
       state: 'parked';
       reason: ParkReason;
+      /** Set only on a design-smell park (#1513). */
+      designSmell?: DesignSmellFinding;
       route?: BuildRoute;
       branch?: string;
       reworkRounds?: number;
@@ -147,6 +149,13 @@ export type RunOutcome =
       attribution?: RunAttribution;
     };
 
+/** What redesign/spike learned when a design smell could not be resolved (#1513). */
+export interface DesignSmellFinding {
+  approachTried: string;
+  whyItStinks: string;
+  recommendation: string;
+}
+
 /** Core classifies structurally — via a parked RunOutcome on `err.outcome` or a
  *  `parkReason` marker property — rather than `instanceof`, because core cannot import
  *  the CLI's error classes (LaneParkError, LandConflictError, CiFailedError). */
@@ -159,14 +168,33 @@ export function parkReasonFor(err: unknown): ParkReason {
   return 'fail';
 }
 
+/** The design-smell finding carried on a parked `err.outcome` or an `err.designSmell` marker; undefined unless all three fields are non-blank strings (#1513). */
+export function designSmellFindingFor(err: unknown): DesignSmellFinding | undefined {
+  const outcome = (err as { outcome?: RunOutcome } | null | undefined)?.outcome;
+  const candidate: unknown =
+    outcome && outcome.state === 'parked'
+      ? outcome.designSmell
+      : (err as { designSmell?: unknown } | null | undefined)?.designSmell;
+  if (candidate === null || typeof candidate !== 'object') return undefined;
+  const { approachTried, whyItStinks, recommendation } = candidate as Partial<
+    Record<keyof DesignSmellFinding, unknown>
+  >;
+  const filled = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '';
+  if (!filled(approachTried) || !filled(whyItStinks) || !filled(recommendation)) return undefined;
+  return { approachTried, whyItStinks, recommendation };
+}
+
 /** Terminal events to emit when a run parks. A timeout park additionally emits
  *  an explicit 'stuck' event so stuckRate observes runs that exceeded their
  *  phase timeout (#428). The other stuck condition — identical checker failures
  *  across consecutive rework rounds — is emitted by the check phase itself. */
-export function parkEvents(err: unknown): { type: EventKind; msg: string }[] {
+export function parkEvents(err: unknown): { type: EventKind; msg: string; designSmell?: DesignSmellFinding }[] {
   const reason = parkReasonFor(err);
   const msg = err instanceof Error ? err.message : String(err);
-  const events: { type: EventKind; msg: string }[] = [{ type: reason, msg }];
+  const designSmell = designSmellFindingFor(err);
+  const events: { type: EventKind; msg: string; designSmell?: DesignSmellFinding }[] = [
+    { type: reason, msg, ...(designSmell ? { designSmell } : {}) },
+  ];
   if (reason === 'timeout') {
     events.push({ type: 'stuck', msg: `run exceeded its phase timeout without progressing — ${msg}` });
   }
