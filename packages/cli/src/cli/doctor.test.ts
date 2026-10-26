@@ -380,16 +380,16 @@ describe('runDoctorChecks', () => {
     expect(both.find((c) => c.name === 'git identity')!.next).toBe('git config --global user.name "Your Name"');
   });
 
-  it('no sandbox runtime reports Codex workspace-write containment', () => {
+  it('no sandbox runtime reports the codex preflight result and mode', () => {
     const checks = runDoctorChecks(probes({ platform: 'linux', commandAvailable: (c) => c !== 'firejail' }));
-    const runtime = checks.find((c) => c.name === 'sandbox runtime')!;
-    expect(runtime.ok).toBe(false);
-    expect(runtime.optional).toBe(true);
-    expect(runtime.detail).toContain('uncontained');
-    expect(runtime.fix).toContain('firejail');
-    const codex = checks.find((c) => c.name === 'codex installed')!;
-    expect(codex.detail).toContain('codex runs in its own workspace-write sandbox');
-    expect(codex.detail).not.toContain('sandboxed builds available');
+    const rt = checks.find((c) => c.name === 'sandbox runtime')!;
+    expect([rt.ok, rt.optional]).toEqual([false, true]);
+    expect(`${rt.detail} ${rt.fix}`).toMatch(/uncontained.*firejail/);
+    const d = checks.find((c) => c.name === 'codex installed')!.detail;
+    expect(d).toContain('preflight: no OS sandbox runtime (sandbox-exec/firejail) on PATH');
+    expect(d).toContain('codex will use --sandbox workspace-write');
+    expect(d).toContain('to opt in to full access, list tasks under sandbox.codexFullAccessTasks');
+    expect(d).not.toContain('sandboxed builds available');
     expect(doctorFailed(checks)).toBe(false);
   });
 
