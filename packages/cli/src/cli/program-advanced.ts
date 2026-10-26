@@ -100,7 +100,7 @@ export function registerAdvancedCommands(program: Command, handlers: ProgramHand
   daemonCmd
     .command('run')
     .description('Run factoryd in the foreground: a localhost-only HTTP API over the repo registry')
-    .option('--port <n>', `Port to bind on 127.0.0.1 (default ${DEFAULT_FACTORYD_PORT})`)
+    .option('--port <n>', `Port to bind on the loopback host (default ${DEFAULT_FACTORYD_PORT})`)
     .option('--registry <file>', 'Registry file to serve (default ~/.factory/registry.json)')
     .option(
       '--update-mode <mode>',

@@ -28,6 +28,7 @@ import { setRepoState } from './repos-pause-resume.js';
 import { defaultRegistryPath, listRepos, loadRegistry, type RepoRegistryListing } from './registry.js';
 import { daemonRunFile, isValidRunId, readDaemonRun } from './run-store.js';
 import { type DaemonRunDeps, type DaemonRunExecutor, executeDaemonRun, submitDaemonRun } from './runs-submit.js';
+import { assertFactorydLoopbackHost } from './factoryd-loopback.js';
 import { daemonRuntimePaths } from './runtime-state.js';
 import { dirname } from 'node:path';
 
@@ -46,7 +47,7 @@ export interface FactorydOptions {
   runsDir?: string;
   /** Default DEFAULT_FACTORYD_PORT; pass 0 in tests for an ephemeral port. */
   port?: number;
-  /** Default '127.0.0.1' — never anything else in production code paths. */
+  /** Default '127.0.0.1'; must pass assertFactorydLoopbackHost (ADR-0034). */
   host?: string;
   /** One line per handled request. Default console.log; injectable for tests. */
   log?: (line: string) => void;
@@ -137,7 +138,7 @@ export function createFactorydServer(opts: FactorydOptions = {}): FactorydServer
   const runsDir = opts.runsDir ?? daemonRuntimePaths(dirname(registryFile)).runsDir;
   const desiredPort = opts.port ?? DEFAULT_FACTORYD_PORT;
   const host = opts.host ?? '127.0.0.1';
-  if (!['127.0.0.1', 'localhost', '::1'].includes(host)) throw new Error('factoryd requires loopback');
+  assertFactorydLoopbackHost(host);
   const log = opts.log ?? ((line: string) => console.log(line));
   const runExecutor =
     opts.runExecutor ?? (() => Promise.reject(new Error('no run executor wired into factoryd (#1366)')));

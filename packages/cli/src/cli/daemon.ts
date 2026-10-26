@@ -19,6 +19,7 @@ import { createRequire } from 'node:module';
 import { dirname, join, sep } from 'node:path';
 
 import {
+  assertFactorydLoopbackHost,
   DEFAULT_FACTORYD_PORT,
   defaultRegistryPath,
   listRepos,
@@ -26,12 +27,14 @@ import {
   type RunRuntime,
 } from '@on-par/factory-core/internal';
 import { defaultIsPidAlive, getFactoryPaths, type FactoryConfig } from '@on-par/factory-core';
+import { FACTORYD_LABEL, renderFactorydPlist } from './daemon-plist.js';
 import { repoHasLiveRunLock } from './repo-live-run-lock.js';
 
 import { bootstrapFailureMessage, reloadLaunchAgent } from './daemon-launchctl.js';
 import { defaultLoadConfig, readDaemonLoad, readLiveDaemonPid } from './daemon-load.js';
 import type { DaemonStatusJson } from './json-contract.js';
 export type { DaemonStatusJson } from './json-contract.js';
+export { FACTORYD_LABEL, renderFactorydPlist } from './daemon-plist.js';
 import { runSelfUpdateCommand } from './self-update-exec.js';
 import { clearSelfUpdateStops, writeSelfUpdateStop } from './self-update-stop.js';
 import {
@@ -42,8 +45,6 @@ import {
   type UpdateLastResult,
   type UpdateState,
 } from './update-state.js';
-
-export const FACTORYD_LABEL = 'com.onpar.factoryd';
 
 /** Expected daemon-control failure. index.ts's commander wrappers map it onto
  *  CliExitError (importing CliExitError here would be circular — index.ts
@@ -206,7 +207,9 @@ export interface ResolvedAutoUpdate {
 export interface FactorydConfig {
   /** Registry file served (default ~/.factory/registry.json). */
   registryFile: string;
-  /** Port to bind on 127.0.0.1 (default DEFAULT_FACTORYD_PORT). */
+  /** Loopback host to bind (FACTORYD_HOST, default 127.0.0.1); ADR-0034. */
+  host: string;
+  /** Port to bind on the loopback host (default DEFAULT_FACTORYD_PORT). */
   port: number;
   /** Resolved self-update setting (#2246). runAutoUpdateLoop acts on it (#1939). */
   autoUpdate: ResolvedAutoUpdate;
@@ -224,11 +227,18 @@ function positiveInt(value: unknown, fallback: number, name: string): number {
 }
 
 /** Resolves `factory daemon run` options into a FactorydConfig. Throws
- *  DaemonCtlError (code 2) on an invalid --port, --update-mode or daemon.json value. */
+ *  DaemonCtlError (code 2) on a non-loopback FACTORYD_HOST, an invalid --port, --update-mode or daemon.json value. */
 export function resolveFactorydConfig(
   opts: { port?: string; registry?: string; updateMode?: string; autoUpdate?: boolean },
-  deps: { install?: InstallInfo; fileConfig?: DaemonFileConfig } = {},
+  deps: { install?: InstallInfo; fileConfig?: DaemonFileConfig; env?: NodeJS.ProcessEnv } = {},
 ): FactorydConfig {
+  const rawHost = (deps.env ?? process.env).FACTORYD_HOST?.trim();
+  const host = rawHost || '127.0.0.1';
+  try {
+    assertFactorydLoopbackHost(host);
+  } catch (err) {
+    throw new DaemonCtlError(err instanceof Error ? err.message : String(err), 2);
+  }
   const port = opts.port === undefined ? DEFAULT_FACTORYD_PORT : Number(opts.port);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new DaemonCtlError(`invalid --port "${opts.port}" — expected an integer 0-65535`, 2);
@@ -255,42 +265,7 @@ export function resolveFactorydConfig(
     checkIntervalMinutes: positiveInt(fileAutoUpdate?.checkIntervalMinutes, 30, 'autoUpdate.checkIntervalMinutes'),
     drainTimeoutMinutes: positiveInt(fileAutoUpdate?.drainTimeoutMinutes, 60, 'autoUpdate.drainTimeoutMinutes'),
   };
-  return { registryFile: opts.registry ?? defaultRegistryPath(), port, autoUpdate, install, notices };
-}
-
-function xmlEscape(s: string): string {
-  return s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-}
-
-/** Pure renderer for ~/Library/LaunchAgents/com.onpar.factoryd.plist. KeepAlive
- *  relaunches factoryd after any exit; RunAtLoad starts it at login/bootstrap;
- *  launchd redirects stdout+stderr to the daemon log. ProgramArguments invokes
- *  the foreground `factory daemon run` command with its defaults. */
-export function renderFactorydPlist(opts: { nodePath: string; cliScriptPath: string; logPath: string }): string {
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>${FACTORYD_LABEL}</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>${xmlEscape(opts.nodePath)}</string>
-    <string>${xmlEscape(opts.cliScriptPath)}</string>
-    <string>daemon</string>
-    <string>run</string>
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-  <key>StandardOutPath</key>
-  <string>${xmlEscape(opts.logPath)}</string>
-  <key>StandardErrorPath</key>
-  <string>${xmlEscape(opts.logPath)}</string>
-</dict>
-</plist>
-`;
+  return { registryFile: opts.registry ?? defaultRegistryPath(), host, port, autoUpdate, install, notices };
 }
 
 /** Extracts the running pid from `launchctl print gui/<uid>/<label>` output. */

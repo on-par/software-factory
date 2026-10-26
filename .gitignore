@@ -42,3 +42,6 @@ __pycache__/
 
 # factory-run.yml checks its own scripts out here in the caller checkout (#3197).
 .factory-action/
+
+# Docker deploy secrets (#3685); only .env.example is committed.
+deploy/docker/.env

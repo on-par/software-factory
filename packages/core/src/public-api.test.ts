@@ -701,7 +701,7 @@ const INTERNAL_API_KEYS = [
   'parkUnblockHint',
   'createShipExecutor',
   'createStackSliceBranch',
-  'DEFAULT_FACTORYD_PORT',
+  ...'DEFAULT_FACTORYD_PORT assertFactorydLoopbackHost FACTORYD_LOOPBACK_HOSTS'.split(' '),
   // Durable explicit daemon runs (#1393)
   'createDaemonRunExclusive',
   'daemonRunFile',

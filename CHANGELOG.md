@@ -9,11 +9,13 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- Docker image and compose recipe for factoryd in `deploy/docker/`, built from a pinned `@on-par/factory-cli` release. It runs loopback-only via host networking (no published ports) with runtime-only secrets and a `/capabilities` health check. See the Docker deploy section of `docs/runbooks/factoryd.md` (#3685).
 - `factory draft` turns a free-text idea (`--text`, `--file` or stdin) into a factory-check-ready issue draft: one triage-tier model call (new tool-less `issue_draft` route) plus at most one repair, scored with `check --no-judge`'s readiness code. Prints Markdown or, with `--json`, one `schemaVersion` 1 object. It never files an issue, writes the queue or writes files (#3171).
 - This repo commits its own `.factory/config.yaml` and a Software Factory `.factory/constitution.md`, so the GitHub Actions dogfood run has config. Only `.factory/state/` is ignored, via `.factory/.gitignore`; the root `.gitignore` no longer ignores `.factory/` (#3689).
 
 ### Changed
 
+- `factory daemon run` reads `FACTORYD_HOST` and refuses any non-loopback value with exit 2 naming ADR-0034 (#3685).
 - GitHub-queue enqueue now converges when several hosts act at once. After writing its `factory:order:<n>` label an enqueue keeps one order label per issue and moves the higher-numbered issue off a shared position, emitting an `order_collision_repaired` event (at most 3 attempts). Lane scans read every page instead of the first 100. Blocked-park auto-unpark runs only on the host named by `FACTORY_FLEET_LEADER` when it is set; unset keeps every host polling (#3147).
 - The rendered constitution is capped at 8 KB with a `[truncated — see <file>]` marker. BUILD and rework prompts get only its Standards/Conventions/Rules/Guidelines sections, and fall back to the full text when none are found. PLAN keeps the full text (#1599).
 - BUILD (commit-only, opencode, codex, local-small) inlines the frozen spec's body once, without YAML frontmatter or `adr:` drafts, and no longer points the worker at the spec file (#1595).

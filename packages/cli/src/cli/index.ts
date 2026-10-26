@@ -3401,7 +3401,8 @@ async function cmdFactoryd(opts: {
     if (err instanceof DaemonCtlError) throw new CliExitError(err.message, err.code);
     throw err;
   }
-  const { registryFile, port } = config;
+  const { registryFile, host, port } = config;
+  const urlHost = host.includes(':') ? `[${host}]` : host;
 
   const runtime = daemonRuntimePaths(dirname(registryFile));
   const acquired = await acquirePidFile(runtime);
@@ -3442,19 +3443,19 @@ async function cmdFactoryd(opts: {
     allowParallel: true,
     execute: createShipExecutor({ cliEntrypoint: fileURLToPath(new URL('../cli.js', import.meta.url)) }),
   });
-  const daemon = createFactorydServer({ registryFile, runsDir: runtime.runsDir, port, log, runRuntime });
+  const daemon = createFactorydServer({ registryFile, runsDir: runtime.runsDir, port, host, log, runRuntime });
   const boundPort = await daemon.start();
   await writePortFile(runtime, boundPort);
   const banner = [
-    `factoryd: listening on 127.0.0.1:${boundPort}`,
+    `factoryd: listening on ${urlHost}:${boundPort}`,
     `  registry: ${registryFile}`,
     `  update mode: ${config.autoUpdate.mode} (channel ${config.autoUpdate.channel ?? 'none'}, install ${config.install.kind})`,
     `  update state: ${updateFile}`,
     `  pid file: ${runtime.pidFile} (pid ${process.pid})`,
     `  port file: ${runtime.portFile}`,
     `  log file: ${runtime.logFile}`,
-    `  GET http://127.0.0.1:${boundPort}/repos`,
-    `  POST http://127.0.0.1:${boundPort}/runs  {"runId","repo","issue"}`,
+    `  GET http://${urlHost}:${boundPort}/repos`,
+    `  POST http://${urlHost}:${boundPort}/runs  {"runId","repo","issue"}`,
   ];
   console.log(styleText('green', banner[0] ?? ''));
   for (const line of banner.slice(1)) console.log(line);

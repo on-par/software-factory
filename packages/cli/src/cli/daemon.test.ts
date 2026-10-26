@@ -110,8 +110,9 @@ describe('resolveFactorydConfig', () => {
 
   it('returns the registry, port, install and a resolved autoUpdate block', () => {
     const install: InstallInfo = { kind: 'unknown', prefix: '/p', version: '1.0.0' };
-    expect(resolveFactorydConfig({ registry }, { install })).toEqual({
+    expect(resolveFactorydConfig({ registry }, { install, env: {} })).toEqual({
       registryFile: registry,
+      host: '127.0.0.1',
       port: DEFAULT_FACTORYD_PORT,
       autoUpdate: {
         mode: 'manual',

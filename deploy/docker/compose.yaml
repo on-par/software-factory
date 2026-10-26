@@ -1,0 +1,18 @@
+# factoryd on a Linux host (#3685). Loopback-only (ADR-0034): host network, NO published port mapping.
+services:
+  factoryd:
+    build:
+      context: .
+      args:
+        FACTORY_VERSION: ${FACTORY_VERSION:?pin a release, e.g. FACTORY_VERSION=0.9.18}
+    image: factoryd:${FACTORY_VERSION}
+    network_mode: host
+    restart: unless-stopped
+    env_file: .env # provider and forge credentials, see .env.example; never committed
+    environment:
+      FACTORYD_HOST: 127.0.0.1
+    volumes:
+      - factory-home:/home/node/.factory
+      - ${FACTORY_REPO_DIR:?path to the repo checkout to attach}:/repos/app
+volumes:
+  factory-home:

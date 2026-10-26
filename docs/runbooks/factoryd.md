@@ -13,8 +13,10 @@ each checkout's `.factory/` directory.
 factory daemon run [--port N] [--registry FILE]
 ```
 
-Runs in the foreground and binds `127.0.0.1` only (binding to loopback is the
-authorization model — ADR-0034). `--port` defaults to 8787; `--registry`
+Runs in the foreground and binds loopback only: `127.0.0.1` by default, or
+`FACTORYD_HOST` set to `127.0.0.1`, `localhost` or `::1`. Any other value exits 2
+before binding with an error naming ADR-0034 (binding to loopback is the
+authorization model). `--port` defaults to 8787; `--registry`
 defaults to `~/.factory/registry.json` and is the single knob that relocates
 **all** daemon state.
 
@@ -85,3 +87,39 @@ never implicitly replays them. Inspect retained worktrees and PRs before retryin
 with a new run ID; worktree cleanup is manual.
 
 See [state-root.md](./state-root.md) for keeping state and config outside the checkout.
+
+## Docker deploy
+
+A Docker image and compose recipe in `deploy/docker/` run factoryd on a Linux
+server (#3685). Docker Desktop on macOS or Windows is not a supported target.
+
+**Auth model.** factoryd's HTTP API has no authentication; loopback binding is its
+authorization (ADR-0034). The compose file therefore uses `network_mode: host`
+and never a `ports:` mapping, so factoryd binds the host's `127.0.0.1` and is
+reachable only from the host itself. A non-loopback `FACTORYD_HOST` exits 2
+naming ADR-0034. Remote access needs a new ADR with real authentication.
+
+**Bring-up.**
+
+```bash
+cd deploy/docker
+cp .env.example .env   # set FACTORY_VERSION, FACTORY_REPO_DIR and the secrets
+docker compose up -d --build
+```
+
+**Secrets.** Credentials (`GH_TOKEN`, `ANTHROPIC_API_KEY`, ...) come only from
+`env_file: .env` at runtime. The image bakes none, so `docker history` shows no
+secret values. Never commit `.env`.
+
+**Attach a repo.** The checkout at `FACTORY_REPO_DIR` is mounted at `/repos/app`:
+
+```bash
+docker compose exec factoryd node -e "fetch('http://127.0.0.1:8787/repos',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({repo:'OWNER/NAME',path:'/repos/app'})}).then(r=>r.text()).then(console.log)"
+```
+
+**Health.** The image `HEALTHCHECK` calls `GET /capabilities`:
+`docker compose ps` or `docker inspect --format '{{.State.Health.Status}}' <container>`.
+
+**Update.** Self-update is `manual` in the container; the pinned version is the
+update channel. Bump `FACTORY_VERSION` in `.env` and run
+`docker compose up -d --build`. No host npm install is needed.

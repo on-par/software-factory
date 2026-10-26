@@ -348,6 +348,7 @@ export {
 // Daemon control-plane HTTP server (#777)
 export type { FactorydOptions, FactorydServer } from './daemon/factoryd-http.js';
 export { createFactorydServer, DEFAULT_FACTORYD_PORT } from './daemon/factoryd-http.js';
+export { assertFactorydLoopbackHost, FACTORYD_LOOPBACK_HOSTS } from './daemon/factoryd-loopback.js';
 
 // Durable explicit daemon runs (#1393)
 export type { DaemonRunRecord, DaemonRunStatus } from './daemon/run-store.js';
