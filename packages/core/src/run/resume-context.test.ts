@@ -135,6 +135,26 @@ describe('createPlanReuseStore', () => {
     await expect(readFile(planReusePath(nested))).rejects.toThrow(/ENOENT/);
     await expect(store.clear()).resolves.toBeUndefined();
   });
+
+  it('recordFrozen (#3325) records the frozen spec so the next load for the same body reuses it', async () => {
+    await writeSpec(specPath, { body: '# spec', data: { route: 'codex' } });
+    await createPlanReuseStore(specPath).recordFrozen('the brief');
+    expect(await createPlanReuseStore(specPath).load(issueBodyHash('the brief'))).toMatchObject({ route: 'codex' });
+  });
+
+  it('recordFrozen throws and records nothing without a frozen spec or a route', async () => {
+    await expect(createPlanReuseStore(specPath).recordFrozen('b')).rejects.toThrow(
+      `no frozen spec with a build route at ${specPath}`,
+    );
+    await writeSpec(specPath, { body: '# spec', data: {} });
+    await expect(createPlanReuseStore(specPath).recordFrozen('b')).rejects.toThrow(/no frozen spec/);
+    await expect(readFile(planReusePath(specPath))).rejects.toThrow(/ENOENT/);
+  });
+
+  it('recordFrozen rethrows a non-ENOENT spec read error', async () => {
+    await mkdir(specPath);
+    await expect(createPlanReuseStore(specPath).recordFrozen('b')).rejects.toThrow(/EISDIR/);
+  });
 });
 
 describe('check resume store (#2564)', () => {

@@ -29,6 +29,7 @@ import {
 } from './lane-pause.js';
 import { waitForMerge } from './land.js';
 import { AwaitMergeStoppedError, AwaitingCiError, AwaitingReviewError } from './land-pr.js';
+import { closeReplacedPullRequest, landWithOneRebuild } from './land-rebuild.js';
 import { restoredLoggingBreaker } from './provider-restored-log.js';
 import { releaseKeepOnRequeue } from './worktree-keep.js';
 import { shipIssue } from './ship.js';
@@ -66,6 +67,7 @@ export async function runLane(
     hostId = defaultClaimantId(),
     reapWorktree = async () => {},
     closeParkedPr = async () => {},
+    closeReplacedPr = (replaced) => closeReplacedPullRequest(ghRepo, replaced),
     sweepFinished = async () => {},
     activeIssues = new Set<number>(),
     countRemaining,
@@ -252,31 +254,22 @@ export async function runLane(
     const sliceOutcome: { value?: RunOutcome } = {};
     let landBranch = decision.kind === 'adopt' ? decision.branch : undefined;
     let landing: string | undefined;
+    const shipUnderLease = (ctx: { onOutcome: (o: RunOutcome) => void; rebuild?: { branch: string } }) =>
+      withHeartbeat(
+        issue,
+        heartbeat,
+        (signal) => ship(issue, {}, { repoRoot, ghRepo, paths, lane, blockedBehind: queuedBehind(i), signal, ...ctx }),
+        lease,
+      );
     try {
       const branch =
         decision.kind === 'adopt'
           ? decision.branch
-          : await withHeartbeat(
-              issue,
-              heartbeat,
-              (signal) =>
-                ship(
-                  issue,
-                  {},
-                  {
-                    repoRoot,
-                    ghRepo,
-                    paths,
-                    lane,
-                    blockedBehind: queuedBehind(i),
-                    onOutcome: (o) => {
-                      sliceOutcome.value = o;
-                    },
-                    signal,
-                  },
-                ),
-              lease,
-            );
+          : await shipUnderLease({
+              onOutcome: (o) => {
+                sliceOutcome.value = o;
+              },
+            });
       landBranch = branch;
       const shipped = sliceOutcome.value;
       if (shipped?.state === 'released' && shipped.reason === 'stack-wait') {
@@ -352,16 +345,20 @@ export async function runLane(
         continue;
       }
       landing = branch;
-      await withHeartbeat(
-        issue,
-        heartbeat,
-        (signal) =>
-          waitMerge(issue, branch, repoRoot, ghRepo, paths, {
-            syncMain: decision.kind === 'adopt' && decision.syncMain === true,
-            signal,
-          }),
-        lease,
-      );
+      // #3325: a merge-main conflict comes back to this lane, the only builder, for one rebuild.
+      await landWithOneRebuild(issue, branch, decision.kind === 'adopt' && decision.syncMain === true, {
+        land: (b, opts) =>
+          withHeartbeat(
+            issue,
+            heartbeat,
+            (signal) => waitMerge(issue, b, repoRoot, ghRepo, paths, { ...opts, signal }),
+            lease,
+          ),
+        ship: (rebuild, onOutcome) => shipUnderLease({ onOutcome, rebuild }),
+        closeReplaced: closeReplacedPr,
+        onRebuilt: (b) => (landing = landBranch = b),
+        emit: (kind, msg, extra) => emitEvent(paths.events, kind, issue, msg, { ...extra, lane }),
+      });
       merged++;
       streak = null;
       await settle(issue, 'done');

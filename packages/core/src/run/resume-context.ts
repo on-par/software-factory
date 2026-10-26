@@ -23,8 +23,8 @@ import type { WorkKey } from '../work/work-key.js';
 export interface PlanReuseRecord {
   /** issueBodyHash of the brief the frozen spec was planned from. */
   bodyHash: string;
-  /** Base SHA the CHECK environment release was decided on. */
-  baseSha: string;
+  /** Base SHA the CHECK environment release was decided on; absent for a rebuild (#3325). */
+  baseSha?: string;
   route: BuildRoutePin;
   releasedAt: string;
 }
@@ -51,8 +51,15 @@ function isEnoent(err: unknown): boolean {
   return (err as NodeJS.ErrnoException | null)?.code === 'ENOENT';
 }
 
-export function createPlanReuseStore(specPath: string): PlanReuseStore {
+export function createPlanReuseStore(specPath: string): PlanReuseStore & {
+  /** Records the frozen spec for reuse so a rebuild (#3325) skips PLAN. Throws when there is no frozen spec with a route. */
+  recordFrozen(brief: string): Promise<void>;
+} {
   const path = planReusePath(specPath);
+  const record = async (entry: PlanReuseRecord): Promise<void> => {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, `${JSON.stringify(entry, null, 2)}\n`);
+  };
   return {
     async load(bodyHash) {
       let stored: unknown;
@@ -76,12 +83,20 @@ export function createPlanReuseStore(specPath: string): PlanReuseStore {
       const { artifact } = parseDesignArtifact(spec.data);
       return { ok: true, route: spec.route, specPath, model: 'plan-reused', designArtifact: artifact };
     },
-    async record(entry) {
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, `${JSON.stringify(entry, null, 2)}\n`);
-    },
+    record,
     async clear() {
       await rm(path, { force: true });
+    },
+    async recordFrozen(brief) {
+      const route = await readSpec(specPath).then(
+        (spec) => spec.route,
+        (err: unknown) => {
+          if (isEnoent(err)) return null;
+          throw err;
+        },
+      );
+      if (route === null) throw new Error(`no frozen spec with a build route at ${specPath}`);
+      await record({ bodyHash: issueBodyHash(brief), route, releasedAt: new Date().toISOString() });
     },
   };
 }
