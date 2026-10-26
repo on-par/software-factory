@@ -2,7 +2,7 @@
 //
 // v1 wraps the underlying claude/codex CLI invocation in a platform sandbox
 // (macOS sandbox-exec, Linux firejail) that restricts filesystem writes to the
-// worktree + known state dirs (plus ecosystem cache defaults, #3567, and operator-listed sandbox.writablePaths, #3454) and gates network by an allowlist. Per-host
+// worktree + known state dirs (reads of host credential dirs ~/.ssh, ~/.aws, ~/.gnupg, ~/.config/gh are denied, #1586) (plus ecosystem cache defaults, #3567, and operator-listed sandbox.writablePaths, #3454) and gates network by an allowlist. Per-host
 // network filtering is not expressible in either runtime without a proxy —
 // see resolveSandboxPolicy's caller for the 'sandbox-degraded' warning this
 // implies when the allowlist is non-empty. On sandbox-exec, egress goes through a per-lane proxy
@@ -43,6 +43,11 @@ export type SandboxNetworkMode = 'report' | 'enforce';
 
 const SANDBOX_NETWORK_MODES: readonly SandboxNetworkMode[] = ['report', 'enforce'];
 
+/** Host credential dirs (relative to $HOME) the sandboxed agent may never read (#1586).
+ *  Harness auth stays readable: ~/.claude, ~/.claude.json, a CLAUDE_CONFIG_DIR profile,
+ *  ~/.codex and the macOS keychain are deliberately absent. */
+const HOST_CREDENTIAL_DIRS = ['.ssh', '.aws', '.gnupg', '.config/gh'] as const;
+
 export interface SandboxPolicy {
   runtime: SandboxRuntime;
   worktree: string;
@@ -55,6 +60,8 @@ export interface SandboxPolicy {
    *  ~/.claude.json.backup, ~/.claude.json.tmp.<pid>.<hash> (#1008). A subpath rule does
    *  NOT cover those siblings, which is why this is a separate field. */
   writableFilePrefixes: string[];
+  /** Absolute dirs the agent may not read: host credentials (#1586). A deny wins over an overlapping writable path. */
+  deniedReadPaths?: string[];
   allowHosts: string[];
   /** Report-only egress proxy URL (#2214); set only for sandbox-exec with a non-empty allowlist. */
   proxyUrl?: string;
@@ -231,12 +238,15 @@ export function resolveSandboxPolicy(
 
   const writableFilePrefixes = dedupeAbsolutePaths([resolve(home, '.claude.json')]);
 
+  const deniedReadPaths = dedupeAbsolutePaths(HOST_CREDENTIAL_DIRS.map((d) => resolve(home, d)));
+
   return {
     runtime: effectiveRuntime,
     worktree: opts.worktree,
     writablePaths,
     configuredWritablePaths: configured,
     writableFilePrefixes,
+    deniedReadPaths,
     allowHosts: buildEgressAllowlist(cfg.network.allow, opts.repoRoot),
     blockTelemetry: cfg.network.blockTelemetry === true,
     networkMode: resolveSandboxNetworkMode(cfg.network.mode, env),
@@ -265,6 +275,10 @@ export function buildDarwinProfile(policy: SandboxPolicy): string {
   const prefixRules = policy.writableFilePrefixes
     .map((p) => `(allow file-write* (regex ${sbplRegexPrefix(p)}))`)
     .join('\n');
+  const readDenyRules = (policy.deniedReadPaths ?? [])
+    .map((p) => `(deny file-read* (subpath ${sbplPath(p)}))`)
+    .join('\n');
+  const readDeny = readDenyRules ? `\n${readDenyRules}` : '';
   let networkDeny = '';
   if (policy.allowHosts.length === 0) {
     networkDeny = '\n(deny network-outbound)';
@@ -275,7 +289,7 @@ export function buildDarwinProfile(policy: SandboxPolicy): string {
   }
 
   return `(version 1)
-(allow default)
+(allow default)${readDeny}
 (deny file-write*)
 ${writeRules}
 ${prefixRules}
@@ -331,8 +345,10 @@ export function wrapCommandInSandbox(cmd: string, policy: SandboxPolicy): string
   const writeFlags = [...policy.writablePaths, ...policy.writableFilePrefixes]
     .map((p) => `--read-write=${shellEscape(p)}`)
     .join(' ');
+  const blacklist = (policy.deniedReadPaths ?? []).map((p) => `--blacklist=${shellEscape(p)}`).join(' ');
+  const blacklistFlags = blacklist ? ` ${blacklist}` : '';
   const netFlag = policy.allowHosts.length === 0 ? ' --net=none' : '';
-  return `firejail --quiet --noprofile --private-tmp --read-only=/ ${writeFlags}${netFlag} -- ${inner}`;
+  return `firejail --quiet --noprofile --private-tmp --read-only=/ ${writeFlags}${blacklistFlags}${netFlag} -- ${inner}`;
 }
 
 const RESOURCE_LIMIT_STDERR = /cpu time limit exceeded/i;
