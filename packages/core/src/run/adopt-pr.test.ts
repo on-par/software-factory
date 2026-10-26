@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Octokit } from '@octokit/rest';
 import { findAdoptablePr } from './adopt-pr.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 
 const REPO = 'acme/widgets';
 const pr = (number: number, ref: string, repo: string | null = REPO) => ({
@@ -18,7 +19,7 @@ function stub(pages: unknown[][] | Error) {
 }
 
 const find = (octokit: Pick<Octokit, 'rest'>, maxPages?: number) =>
-  findAdoptablePr({ octokit, repo: REPO, issue: 2253, branchPrefix: 'factory', maxPages });
+  findAdoptablePr({ octokit, repo: REPO, issue: workKeyFromIssue(2253), branchPrefix: 'factory', maxPages });
 
 describe('findAdoptablePr', () => {
   it('finds a single same-repo PR on a title-drifted branch', async () => {
@@ -38,6 +39,11 @@ describe('findAdoptablePr', () => {
 
   it('ignores other issues and non-factory branches', async () => {
     const { octokit } = stub([[pr(1, 'factory/22530-x'), pr(2, 'factory/253-x'), pr(3, 'feature/2253-x')]]);
+    expect(await find(octokit)).toEqual({ status: 'absent' });
+  });
+
+  it('does not match a PR whose branch does not parse', async () => {
+    const { octokit } = stub([[pr(4, 'main'), pr(5, '')]]);
     expect(await find(octokit)).toEqual({ status: 'absent' });
   });
 

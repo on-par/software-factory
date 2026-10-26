@@ -173,7 +173,7 @@ export interface ReleasedClaim {
   issue: number;
   expiresAt: number;
   released: boolean;
-  outcome?: 'released' | 'renewed' | 'failed';
+  outcome?: 'released' | 'renewed' | 'failed' | 'refused-clock-skew';
   detail?: string;
 }
 
@@ -182,11 +182,13 @@ export function formatClaimReconcileReport(released: ReleasedClaim[]): string {
 
   return released
     .map((c) =>
-      c.outcome === 'renewed'
-        ? `reconcile: skipped issue #${c.issue}: lease renewed since the stale read (was expired at ${c.expiresAt})`
-        : c.released
-          ? `reconcile: released issue #${c.issue} back to factory:queued (lease expired at ${c.expiresAt})`
-          : `reconcile: failed to release issue #${c.issue} (lease expired at ${c.expiresAt}): ${c.detail ?? 'unknown error'}`,
+      c.outcome === 'refused-clock-skew'
+        ? `reconcile: refused to release issue #${c.issue} (lease expired at ${c.expiresAt}): ${c.detail ?? 'local clock is skewed from GitHub'}`
+        : c.outcome === 'renewed'
+          ? `reconcile: skipped issue #${c.issue}: lease renewed since the stale read (was expired at ${c.expiresAt})`
+          : c.released
+            ? `reconcile: released issue #${c.issue} back to factory:queued (lease expired at ${c.expiresAt})`
+            : `reconcile: failed to release issue #${c.issue} (lease expired at ${c.expiresAt}): ${c.detail ?? 'unknown error'}`,
     )
     .join('\n');
 }

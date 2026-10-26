@@ -25,6 +25,7 @@ import type { SandboxPolicy } from '../sandbox/index.js';
 import { DECOMPOSED_LABEL } from '../queue/github-queue.js';
 import { findDuplicateStory } from './duplicate-guard.js';
 import type { SiblingIssue } from './duplicate-guard.js';
+import { checkDecomposeGuard, DECOMPOSE_PROPOSAL_MARKER } from './decompose-guard.js';
 import { buildDecompositionPrompt, buildDecompositionRetryPrompt } from './decompose-prompt.js';
 import { describeSliceOverlap, measureSliceOverlap } from './slice-overlap.js';
 import type { SliceOverlap } from './slice-overlap.js';
@@ -312,7 +313,7 @@ export function renderDecompositionComment(decomposition: DecompositionOutput): 
     );
   });
 
-  return lines.join('\n').trim();
+  return `${lines.join('\n').trim()}\n\n${DECOMPOSE_PROPOSAL_MARKER}`;
 }
 
 /** Renders a filed child issue's body with exactly the five factory-task headings
@@ -511,6 +512,8 @@ export interface DecomposeResult {
   failureReason?: string;
   /** Set when the INVEST-valid stories mostly edit the same files (#3351): nothing was posted or filed. */
   cohesive?: SliceOverlap;
+  /** Set when the #728 guard skipped decomposition (issue closed, or the factory's own proposal still awaits a human): nothing was run, posted or filed. */
+  skipped?: { kind: 'issue-closed' | 'proposal-pending'; reason: string };
 }
 export interface DecomposeDriverDeps {
   sandbox?: SandboxPolicy;
@@ -538,6 +541,10 @@ export interface DecomposeDriverDeps {
   /** Default true. False returns the validated decomposition without posting the epic
    *  comment or filing (slice mode, ADR-0147). */
   postComment?: boolean;
+  /** Clock for the #728 proposal-window check; tests only. Defaults to now. */
+  now?: Date;
+  /** Dedup window for the #728 guard; tests only. Defaults to 24h. */
+  proposalWindowMs?: number;
 }
 
 /**
@@ -578,15 +585,31 @@ export async function publishDecomposition(deps: {
  * Runs the bounded decomposition pass: up to maxAttempts model calls (retrying with the
  * INVEST violations), then — only when every story passes the core-owned INVEST gate —
  * posts the rendered breakdown as a comment on the original issue, and, when
- * `fileSubIssues` is set, files the stories as real linked sub-issues. Never throws to
- * the caller.
+ * `fileSubIssues` is set, files the stories as real linked sub-issues. When it would post,
+ * it first runs the #728 guard and skips (no model call, comment or filing) for a closed
+ * issue or a still-pending own proposal. Never throws to the caller.
  */
 export async function decomposeOversizedIssue(deps: DecomposeDriverDeps): Promise<DecomposeResult> {
   const { issue, repo, title, body, worktree, router, octokit, log, onProviderFailure } = deps;
   const timeoutSeconds = deps.timeoutSeconds;
   const maxAttempts = deps.maxAttempts ?? 2;
   try {
-    log('decompose_started', `decomposing oversized issue #${issue} into a proposed epic + INVEST stories`);
+    let guardNote = '';
+    if (deps.postComment !== false) {
+      const guard = await checkDecomposeGuard({
+        octokit,
+        repo,
+        issue,
+        now: deps.now,
+        windowMs: deps.proposalWindowMs,
+      });
+      if (guard.kind !== 'proceed') {
+        log('decompose_skipped', guard.reason);
+        return { posted: false, childIssues: [], skipped: { kind: guard.kind, reason: guard.reason } };
+      }
+      if (guard.warning !== undefined) guardNote = ` (guard unverified: ${guard.warning})`;
+    }
+    log('decompose_started', `decomposing oversized issue #${issue} into a proposed epic + INVEST stories${guardNote}`);
     let violations: string[] = [];
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {

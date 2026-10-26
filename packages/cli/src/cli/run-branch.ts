@@ -41,7 +41,7 @@ export async function resolveRunBranch(opts: {
   ) {
     return fresh;
   }
-  const found = await findAdoptablePr({ octokit, repo: ghRepo, issue: issueNum, branchPrefix });
+  const found = await findAdoptablePr({ octokit, repo: ghRepo, issue: workKeyFromIssue(issueNum), branchPrefix });
   const log = (kind: 'pr-adopted' | 'pr-adopt-ambiguous' | 'pr-adopt-lookup-failed', msg: string): void =>
     logEvent(eventsFile, kind, issueNum, msg, { lane: ctx?.lane });
   switch (found.status) {

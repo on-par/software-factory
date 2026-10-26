@@ -129,7 +129,7 @@ export interface RunRequest extends ReworkRequestFields {
   previousAttempt?: IssueRunState | null;
   /** ADR-0161 stack mode: the 1-based slice to plan. Set by runIssue's stack loop; undefined = the gate's current slice. */
   sliceIndex?: number;
-  issue: number;
+  issue: number; // numeric queue/CLI boundary (until #3460/#3461): converted once via workKeyFromIssue; used only at unmigrated numeric seams and as the Octokit issue_number
   repo: string;
   branch: string;
   specPath: string;
@@ -325,6 +325,7 @@ async function runIssueOnce(
   observed: { checkSummary?: CheckSummary },
 ): Promise<RunOutcome> {
   let request = initialRequest;
+  const workKey = workKeyFromIssue(request.issue);
   if (request.codexWorkspacePaths) ports.router.setCodexWorkspacePaths?.(request.codexWorkspacePaths);
   const planPhase = ports.planPhase ?? planPhaseDefault;
   const slot = ports.hostBuildSlot ?? ((_phase, fn) => fn());
@@ -338,7 +339,7 @@ async function runIssueOnce(
   const previousAttemptNote = renderPreviousAttempt(request.previousAttempt);
   const phaseLogger = createRunPhaseLogger({
     logsDir: request.logsDir,
-    issue: request.issue,
+    issue: workKey,
     runId,
     log: (type, message) => log(type, message),
   });
@@ -375,7 +376,7 @@ async function runIssueOnce(
     released = true;
     if (laneFileClaimed) {
       laneFileClaimed = false;
-      if (ports.laneFileGuard) await releaseLaneClaim(ports.laneFileGuard, request.repo, request.issue, log);
+      if (ports.laneFileGuard) await releaseLaneClaim(ports.laneFileGuard, request.repo, workKey, log);
     }
     const outcomes = await tracker.killAll({ graceMs: request.processGroupGraceMs });
     if (outcomes.length > 0) {
@@ -447,8 +448,8 @@ async function runIssueOnce(
     const failure = reason === 'blocked' ? undefined : checkFailure;
     log(reason, terminalMessage, {
       ...parkLogExtra(failure, ciFailure),
-      park: parkPayload(reason, request.issue, request.lane, request.blockedBehind ?? []),
-      ...(down ? { allProvidersDown: allProvidersDownPayload(down, request.issue) } : {}),
+      park: parkPayload(reason, workKey, request.lane, request.blockedBehind ?? []),
+      ...(down ? { allProvidersDown: allProvidersDownPayload(down, workKey) } : {}),
     });
     if (reason === 'timeout') {
       log('stuck', `run exceeded its phase timeout without progressing — ${terminalMessage}`);
@@ -460,7 +461,7 @@ async function runIssueOnce(
         repo: request.repo,
         worktree: ports.workspace.path,
         input: {
-          issue: request.issue,
+          issue: workKey,
           reason,
           message: terminalMessage,
           runId,
@@ -474,7 +475,7 @@ async function runIssueOnce(
         settled = await settleParkedPullRequest({
           octokit: ports.octokit,
           repo: request.repo,
-          issue: request.issue,
+          issue: workKey,
           branch: request.branch,
           reason,
           prNumber: runPrNumber,
@@ -499,25 +500,24 @@ async function runIssueOnce(
   };
 
   const parkAllProvidersDown = (down: NonNullable<StageGateVerdict['down']>): Promise<RunOutcome> =>
-    terminalParked('all_providers_down', allProvidersDownMessage(down, request.issue), undefined, undefined, down);
+    terminalParked('all_providers_down', allProvidersDownMessage(down, workKey), undefined, undefined, down);
 
   const assertBudget = async (phase: string): Promise<RunOutcome | undefined> => {
     // prettier-ignore
-    const message = enforceIssueBudget({ phase, spend: ports.getIssueSpend?.() ?? 0, cap: policy.budget.perIssueCapUsd, key: workKeyFromIssue(request.issue), worktreePath: ports.workspace.path, keepsFile: request.worktreeKeepsPath, log, stop: budgetStop.stopped() });
+    const message = enforceIssueBudget({ phase, spend: ports.getIssueSpend?.() ?? 0, cap: policy.budget.perIssueCapUsd, key: workKey, worktreePath: ports.workspace.path, keepsFile: request.worktreeKeepsPath, log, stop: budgetStop.stopped() });
     return message === undefined ? undefined : terminalParked('fail', message);
   };
-
   const rememberProviderFailureFor = providerFailureRecorder({
     breaker: ports.breaker,
     log,
-    issue: request.issue,
+    issue: workKey,
     defaultCooldownMs: request.failover.cooldownMs,
   });
 
   const gateDeps = { router: ports.router, breaker: ports.breaker, log, probe: providerProbe(ports) };
-  const runStage = providerStageRunner({ ...gateDeps, issue: request.issue }, request.providerOrder);
+  const runStage = providerStageRunner({ ...gateDeps, issue: workKey }, request.providerOrder);
   const gitExec = ports.gitExec ?? defaultExecFn;
-  const capGate = providerCapGate(ports.router, ports.breaker, request, log, gateDeps.probe);
+  const capGate = providerCapGate(ports.router, ports.breaker, { ...request, issue: workKey }, log, gateDeps.probe);
 
   try {
     if (ports.acquireEnvironment) {
@@ -555,7 +555,7 @@ async function runIssueOnce(
         [
           'config preflight failed before PLAN:',
           ...lint.findings.map((f) => f.message),
-          `then run factory unpark ${request.issue}`,
+          `then run factory unpark ${workKey}`,
         ].join('\n'),
       );
     }
@@ -587,7 +587,7 @@ async function runIssueOnce(
       if (health?.kind === 'red' && health.baseSha !== undefined) {
         log(
           'environment-released',
-          `origin/main ${health.baseSha.slice(0, 8)} fails ${health.failingChecks.join(', ')} before PLAN — no model calls, releasing #${request.issue} to queued`,
+          `origin/main ${health.baseSha.slice(0, 8)} fails ${health.failingChecks.join(', ')} before PLAN — no model calls, releasing #${workKey} to queued`,
         );
         return {
           state: 'released',
@@ -619,7 +619,7 @@ async function runIssueOnce(
     if (resumed) {
       ports.events('check')(
         'check',
-        `resuming #${request.issue} from CHECK on kept branch ${request.branch} — PLAN and BUILD skipped`,
+        `resuming #${workKey} from CHECK on kept branch ${request.branch} — PLAN and BUILD skipped`,
       );
       route = resumed.route;
       planRoute = resumed.route;
@@ -652,7 +652,7 @@ async function runIssueOnce(
         );
       }
 
-      const reused = await loadReusablePlan(ports.planReuse, request, log, ports.events('plan'));
+      const reused = await loadReusablePlan(ports.planReuse, { ...request, issue: workKey }, log, ports.events('plan'));
       const planGate = reused ? undefined : await capGate.enterPlan(route, ports.events('plan'));
       if (planGate?.released) return planGate.released;
       if (planGate?.down) return await parkAllProvidersDown(planGate.down);
@@ -698,11 +698,11 @@ async function runIssueOnce(
         if (decomposedChildren.length > 0) {
           await ports.onDecomposed?.(decomposedChildren);
           const childList = decomposedChildren.map((n) => `#${n}`).join(', ');
-          return { state: 'escalated', reason: `issue #${request.issue} decomposed into ${childList}`, route };
+          return { state: 'escalated', reason: `issue #${workKey} decomposed into ${childList}`, route };
         }
         if (plan.sliced) {
           return await terminalEscalated(
-            `issue #${request.issue} sliced into ${plan.sliced.sliceCount} slice(s): ${plan.escalate ?? 'slice plan recorded'}`,
+            `issue #${workKey} sliced into ${plan.sliced.sliceCount} slice(s): ${plan.escalate ?? 'slice plan recorded'}`,
           );
         }
         if (plan.parkReason === 'config') {
@@ -721,12 +721,12 @@ async function runIssueOnce(
       if (ports.laneFileGuard && plan.designArtifact) {
         const touchedFiles = touchedFilesFrom(plan.designArtifact);
         const staleOpts = ports.laneClaimStaleness && { isStale: ports.laneClaimStaleness, log: ports.events('plan') };
-        const collision = await ports.laneFileGuard.findCollision(request.repo, request.issue, touchedFiles, staleOpts);
+        const collision = await ports.laneFileGuard.findCollision(request.repo, workKey, touchedFiles, staleOpts);
         if (collision) {
-          return await deferOnLaneCollision(ports.laneFileGuard, request, collision, route, log);
+          return await deferOnLaneCollision(ports.laneFileGuard, { ...request, issue: workKey }, collision, route, log);
         }
         if (touchedFiles.length > 0) {
-          await ports.laneFileGuard.register(request.repo, request.issue, touchedFiles);
+          await ports.laneFileGuard.register(request.repo, workKey, touchedFiles);
           laneFileClaimed = true;
         }
       }
@@ -970,7 +970,7 @@ async function runIssueOnce(
           return terminalParked(
             'config',
             configParkMessage({
-              issue: request.issue,
+              issue: workKey,
               failure: env,
               summary: failed.summary,
               constitution,
@@ -981,11 +981,11 @@ async function runIssueOnce(
         }
         if (!request.localOnly && !request.noPr) {
           try {
-            const marker = environmentReleaseMarker(request.issue);
+            const marker = environmentReleaseMarker(workKey);
             await upsertMarkerComment({
               octokit: ports.octokit,
               repo: request.repo,
-              issue: request.issue,
+              issue: workKey,
               marker,
               body: `${renderEnvironmentReleaseComment(env)}\n${marker}`,
             });
@@ -1004,7 +1004,7 @@ async function runIssueOnce(
           fixTarget = preservedFixTarget(env, constitution, request.repoConfigFile);
           try {
             await ports.checkResume.record({
-              issue: request.issue,
+              issue: workKey,
               branch: request.branch,
               worktree: ports.workspace.path,
               diffBase: buildDiffBase,
@@ -1021,9 +1021,9 @@ async function runIssueOnce(
         }
         log(
           'environment-released',
-          `every failing checker (${env.failingChecks.join(', ')}) also fails on base ${env.baseSha.slice(0, 8)} — no rework, releasing #${request.issue} to queued` +
+          `every failing checker (${env.failingChecks.join(', ')}) also fails on base ${env.baseSha.slice(0, 8)} — no rework, releasing #${workKey} to queued` +
             (preserve
-              ? ` — ${formatPreservedBuildMessage({ issue: request.issue, branch: request.branch, buildMinutes, fixTarget })}`
+              ? ` — ${formatPreservedBuildMessage({ issue: workKey, branch: request.branch, buildMinutes, fixTarget })}`
               : ''),
         );
         if (ports.planReuse && !planSlice && !request.resumeFrom) {
@@ -1188,7 +1188,7 @@ async function runIssueOnce(
       const failure = await recordShippedSlice({
         octokit: ports.octokit,
         repo: request.repo,
-        key: workKeyFromIssue(request.issue),
+        key: workKey,
         branch: request.branch,
         plan: planSlice.plan,
         index: planSlice.index,

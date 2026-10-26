@@ -175,6 +175,7 @@ export interface QueueClaim {
 }
 
 export interface QueueGitHubClient extends QueueCommentClient {
+  serverDate?(): Promise<string | undefined>; // GitHub's HTTP Date header, for clock skew (#3149)
   /** Open issues carrying ALL of `labels`. Pull requests must be excluded. */
   listOpenIssuesWithLabels(input: { owner: string; repo: string; labels: string[] }): Promise<QueueIssue[]>;
   /** Current label names on one issue. */

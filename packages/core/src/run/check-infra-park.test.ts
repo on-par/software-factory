@@ -18,6 +18,7 @@ import { parkUnblockHint } from './park-comment.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 
 const tempDirs = createTempDirs();
 afterAll(() => tempDirs.cleanup());
@@ -119,7 +120,7 @@ describe('runIssue — check-infra park (#3371)', () => {
   });
 
   it('has a park hint naming the infrastructure cause', () => {
-    const hint = parkUnblockHint('check-infra', 7);
+    const hint = parkUnblockHint('check-infra', workKeyFromIssue(7));
     expect(hint).toContain('infrastructure');
     expect(hint).toContain('factory unpark 7');
   });

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { schemaErrorCheckerOutput } from '../checkers/index.js';
 import { writeSpec } from '../spec/index.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 import {
   checkResumePath,
   createCheckResumeStore,
@@ -146,7 +147,7 @@ describe('check resume store (#2564)', () => {
   });
 
   const entry: CheckResumeRecord = {
-    issue: 7,
+    issue: workKeyFromIssue(7),
     branch: 'issue-7-x',
     worktree: '/wt/7',
     diffBase: 'abc',
@@ -175,6 +176,12 @@ describe('check resume store (#2564)', () => {
     expect(await store.load()).toBeNull();
   });
 
+  it('normalises a legacy numeric issue in the sidecar to a WorkKey', async () => {
+    const spec = join(dir, 'issue-7.md');
+    await writeFile(checkResumePath(spec), JSON.stringify({ ...entry, issue: 7 }));
+    expect(await createCheckResumeStore(spec).load()).toEqual({ ...entry, issue: '7' });
+  });
+
   it('clear is idempotent', async () => {
     const store = createCheckResumeStore(join(dir, 'issue-7.md'));
     await store.record(entry);
@@ -189,9 +196,9 @@ describe('check resume store (#2564)', () => {
   });
 
   it('formats the preserved-build sentence', () => {
-    expect(formatPreservedBuildMessage({ issue: 7, branch: 'b', buildMinutes: 40, fixTarget: 'f:1' })).toBe(
-      '40 min of build preserved at b; fix f:1 then run factory resume 7 --from check',
-    );
+    expect(
+      formatPreservedBuildMessage({ issue: workKeyFromIssue(7), branch: 'b', buildMinutes: 40, fixTarget: 'f:1' }),
+    ).toBe('40 min of build preserved at b; fix f:1 then run factory resume 7 --from check');
   });
 
   describe('preservedFixTarget', () => {
@@ -248,7 +255,7 @@ describe('check resume store (#2564)', () => {
       const file = join(dir, 'constitution.md');
       await writeFile(file, '---\nversion: 1\ncheckers:\n  - bogus\n---\n');
       const msg = configParkMessage({
-        issue: 7,
+        issue: workKeyFromIssue(7),
         failure,
         summary: emptySummary,
         constitution: constitutionAt(file, ['bogus']),
@@ -264,7 +271,7 @@ describe('check resume store (#2564)', () => {
       const file = join(dir, 'constitution.md');
       await writeFile(file, '# C\n\ncheckers:\n  - tests\n');
       const msg = configParkMessage({
-        issue: 7,
+        issue: workKeyFromIssue(7),
         failure,
         summary: { ...emptySummary, results: [schemaErrorCheckerOutput('checkers[0]', 'entry 0 is a number')] },
         constitution: constitutionAt(file, ['tests']),
@@ -274,7 +281,7 @@ describe('check resume store (#2564)', () => {
     });
 
     it('falls back to a generic target and fix with no constitution', () => {
-      const msg = configParkMessage({ issue: 7, failure, summary: emptySummary, constitution: null });
+      const msg = configParkMessage({ issue: workKeyFromIssue(7), failure, summary: emptySummary, constitution: null });
       expect(msg).toContain('file: the constitution checkers list');
       expect(msg).toContain('fix: fix the constitution checkers list so every entry is a known checker name');
     });

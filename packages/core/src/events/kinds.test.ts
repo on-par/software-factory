@@ -256,6 +256,12 @@ describe('size-gate-escalated classification (#607)', () => {
   });
 });
 
+describe('decompose_skipped classification (#728)', () => {
+  it('is warn severity, not park, not terminal', () => {
+    expect(EVENT_TRAITS.decompose_skipped).toEqual({ severity: 'warn', isPark: false, isTerminal: false });
+  });
+});
+
 describe('size-gate-decomposed classification (#2662)', () => {
   it('is info severity, not park, not terminal', () => {
     expect(EVENT_TRAITS['size-gate-decomposed']).toEqual({ severity: 'info', isPark: false, isTerminal: false });

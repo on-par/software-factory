@@ -10,6 +10,7 @@ import type { ProviderOrder } from '../config/provider-order.js';
 import type { BuildRoute, RunOutcome } from './outcome.js';
 import { STAGE_ROLE } from './provider-breaker-gate.js';
 import { probeDueProviders, type ProviderProbe } from './provider-probe.js';
+import { issueNumberOf, type WorkKey } from '../work/work-key.js';
 
 type ParkedProvidersDown = Extract<RunOutcome, { state: 'parked' }>['providersDown'];
 
@@ -129,7 +130,7 @@ export async function allProvidersDown(stage: GateStage, deps: StageBlockedDeps)
 }
 
 /** The park message for an `all_providers_down` park: stage, each provider with its reason, and how to clear it. */
-export function allProvidersDownMessage(down: NonNullable<StageGateVerdict['down']>, issue: number): string {
+export function allProvidersDownMessage(down: NonNullable<StageGateVerdict['down']>, issue: WorkKey): string {
   const list = down.providers
     .map((p) => {
       const until =
@@ -144,9 +145,9 @@ export function allProvidersDownMessage(down: NonNullable<StageGateVerdict['down
 /** The one `all_providers_down` event payload for a park; `nextAvailableAt` is null because no reset is known. */
 export function allProvidersDownPayload(
   down: NonNullable<StageGateVerdict['down']>,
-  issue: number,
+  issue: WorkKey,
 ): AllProvidersDownPayload {
-  return { ...down, nextAvailableAt: null, issue, at: new Date().toISOString() };
+  return { ...down, nextAvailableAt: null, issue: issueNumberOf(issue), at: new Date().toISOString() };
 }
 
 /** The `all_providers_down` payload for a release to queued (#3340): `nextAvailableAt` is the earliest reset. */
@@ -154,7 +155,7 @@ export function allProvidersDownReleasePayload(
   stage: GateStage,
   providers: ProviderDown[],
   earliestResetAt: string,
-  issue: number,
+  issue: WorkKey,
   now: () => number = Date.now,
 ): AllProvidersDownPayload {
   const detail: AllProvidersDownReleaseDetail = providers.every((p) =>
@@ -162,7 +163,14 @@ export function allProvidersDownReleasePayload(
   )
     ? 'all_capped'
     : 'reset_pending';
-  return { stage, providers, detail, nextAvailableAt: earliestResetAt, issue, at: new Date(now()).toISOString() };
+  return {
+    stage,
+    providers,
+    detail,
+    nextAvailableAt: earliestResetAt,
+    issue: issueNumberOf(issue),
+    at: new Date(now()).toISOString(),
+  };
 }
 
 /** What the lane watches after the park: the breaker-open providers, never the metered ones. */
@@ -207,7 +215,7 @@ export interface StageGateVerdict {
 
 /** The slice of a run request the gate reads. */
 export interface GateRequest {
-  issue: number;
+  issue: WorkKey;
   branch: string;
   codexDisabled: boolean;
   failover: { enabled: boolean };

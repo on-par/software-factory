@@ -6,7 +6,6 @@ import { styleText } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
 import {
-  LaneFileGuard,
   applyRepoConfig,
   clearProxyState,
   getFactoryPaths,
@@ -17,6 +16,7 @@ import {
   resolveLaneBreakerThreshold,
   resolveMergePolicy,
   resolveSizeGateMode,
+  workKeyFromIssue,
 } from '@on-par/factory-core';
 import type { FactoryEvent, HealthKpis, KpiReconstruction, QueueDiagnostic } from '@on-par/factory-core';
 import {
@@ -65,6 +65,7 @@ import type {
 } from './index.js';
 import { awaitingCiLaneDeps } from './awaiting-ci-wiring.js';
 import { runEndOfRunKpiSnapshot } from './kpi-sweep.js';
+import { laneFileHoldLookup } from './lane-file-hold.js';
 import { waitForMerge } from './land.js';
 import { hostClaimGuards } from './host-claim-guards.js';
 import { DRAIN_MESSAGE, createNotifier, resolveNotifyCommand, withDiskLowNotify, withParkNotify } from './notify.js';
@@ -187,7 +188,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
                     resolveSizeGateMode(factoryConfig) === 'stack' &&
                     resolveMergePolicy(factoryConfig, process.env, { auto: opts.autoMerge }).auto,
                   stackMode: resolveSizeGateMode(factoryConfig) === 'stack',
-                  laneFileHold: (n) => new LaneFileGuard(paths.laneFiles).liveHold(ghRepo, n),
+                  laneFileHold: laneFileHoldLookup(paths.laneFiles, ghRepo),
                   onDeferred: deferrals.onDeferred,
                 }),
               ),
@@ -319,7 +320,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
               'escalate',
               r.issue,
               `#${r.issue} parked: review rework cap ${r.cap} reached (${r.count} runs) — PR #${r.pr} review ${r.reviewIds.join(', ')}`,
-              parkPayload('escalate', r.issue, r.lane, []),
+              parkPayload('escalate', workKeyFromIssue(r.issue), r.lane, []),
             );
           } else if (r.outcome === 'error') {
             logEvent(paths.events, 'warn', r.issue, `review-rework poll for PR #${r.pr} failed: ${r.detail}`);
@@ -455,7 +456,7 @@ export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
               settleParkedPullRequest({
                 octokit: rt.getOctokit(),
                 repo: ghRepo,
-                issue,
+                issue: workKeyFromIssue(issue),
                 branch,
                 reason,
                 greenAndChecked: false,

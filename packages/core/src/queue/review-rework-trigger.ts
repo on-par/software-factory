@@ -8,6 +8,7 @@ import type { Octokit } from '@octokit/rest';
 import type { ParkCommentInput } from '../run/park-comment.js';
 import { countReviewReworkRuns, parkAtReviewReworkCap } from '../run/review-rework-cap.js';
 import { factoryBranchIssue } from '../utils/index.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 import { isTrustedApprover, type CollaboratorPermissionClient } from './approval.js';
 import { IN_PROGRESS_LABEL, LANE_LABEL_PREFIX, PARKED_LABEL, type QueueGitHubClient } from './github-queue.js';
 import { createEnqueuers } from './github-queue-enqueue.js';
@@ -141,7 +142,8 @@ async function pollPull(
   const now = (opts.now ?? (() => new Date()))().toISOString();
 
   const cap = opts.maxRuns ?? defaultFactoryConfig.queue.max_review_rework_runs;
-  const count = countReviewReworkRuns(store, issue);
+  const key = workKeyFromIssue(issue);
+  const count = countReviewReworkRuns(store, key);
   if (count >= cap) {
     // Record first so a park that fails part-way is not commented on again by the next poll.
     for (const review of trusted) {
@@ -159,7 +161,7 @@ async function pollPull(
       queue,
       owner,
       repo,
-      issue,
+      issue: key,
       pr: pull.number,
       lane,
       branch: pull.headRef,

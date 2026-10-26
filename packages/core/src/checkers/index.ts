@@ -26,6 +26,14 @@ import { APP_SMOKE_CHECKER, appSmokeChecker } from './app-smoke.js';
 import { sandboxEnvMarkerLine } from '../environment/sandbox-env.js';
 import { writeCommandLog } from './command-log.js';
 import {
+  extractLintFindings,
+  formatLintFindings,
+  resolveLintDiff,
+  scopeLintCommand,
+  withMergeBaseWorktree,
+  type LintScope,
+} from './lint-scope.js';
+import {
   describeCommandFailureTail,
   describeTestFailure,
   extractFailedTestEvidence,
@@ -296,9 +304,6 @@ export const testsChecker: CheckerFn = async (ctx) => {
 };
 
 export const lintChecker: CheckerFn = async (ctx) => {
-  const details: string[] = [];
-  let result: CheckerOutput['result'] = 'PASS';
-
   let commands: LintCommand[];
   try {
     commands = await resolveLintCommands(ctx);
@@ -309,27 +314,87 @@ export const lintChecker: CheckerFn = async (ctx) => {
       details: `unexpected checker error: ${String(e?.message ?? e).slice(0, 500)}`,
     };
   }
-  for (const cmd of commands) {
-    const r = await runCommand(cmd.argv, {
-      cwd: ctx.worktree,
-      timeoutMs: 120_000,
-      env: ctx.env,
-      onPgid: ctx.onPgid,
-    });
-    if (r.ok) {
-      details.push(`${cmd.label}: OK`);
-    } else {
-      result = 'FAIL';
-      details.push(await commandFailureDetails(ctx, 'lint', cmd.label, r, describeCommandFailureTail(r, 300)));
-    }
-  }
-  if (details.length === 0) {
-    result = 'SKIP';
-    details.push(
-      `no linting configured (no checks.lint in ${describeChecksProbe(ctx)}, no package.json lint script, no tsconfig.json) — skipped`,
-    );
+  if (commands.length === 0) {
+    const probed = `no checks.lint in ${describeChecksProbe(ctx)}, no package.json lint script, no tsconfig.json`;
+    return { checker: 'lint', result: 'SKIP', details: `no linting configured (${probed}) — skipped` };
   }
 
+  const run = ctx.runCommand ?? runCommand;
+  const opts = { cwd: ctx.worktree, timeoutMs: 120_000, env: ctx.env, onPgid: ctx.onPgid };
+  const diff = await resolveLintDiff(ctx);
+  const details: string[] = [];
+  const findingsOf = (r: CommandResult) =>
+    formatLintFindings(extractLintFindings(`${r.stdout}\n${r.stderr}`, ctx.worktree));
+  let failed = false;
+  let ran = false;
+  const fail = async (cmd: LintCommand, r: CommandResult, lead?: string) => {
+    failed = true;
+    const summary = await commandFailureDetails(ctx, 'lint', cmd.label, r, describeCommandFailureTail(r, 300));
+    details.push(lead === undefined ? summary : `${lead}; ${summary}`);
+  };
+  const withFindings = (r: CommandResult, lead: string) => {
+    const found = findingsOf(r);
+    return found === '' ? lead : `${lead} — ${found}`;
+  };
+  const preExisting = async (cmd: LintCommand, r: CommandResult, mergeBase: string) => {
+    const log = await writeCommandLog(ctx, `lint-${cmd.label}`, r);
+    const what = findingsOf(r) || describeCommandFailureTail(r, 300);
+    const head = `${cmd.label}: OK — warning: pre-existing ${cmd.label} failures on merge base ${mergeBase.slice(0, 7)}: ${what}`;
+    details.push(log ? `${head}\nfull output: ${log}` : head);
+  };
+
+  const queued: { cmd: LintCommand; argv: string[]; r: CommandResult }[] = [];
+  for (const cmd of commands) {
+    const scope: LintScope =
+      'unavailable' in diff ? { kind: 'whole', argv: cmd.argv, profile: null } : scopeLintCommand(cmd, diff.changed);
+    if (scope.kind === 'skip' || scope.kind === 'write-mode') {
+      details.push(scope.reason);
+      continue;
+    }
+    ran = true;
+    const r = await run(scope.argv, opts);
+    if (r.ok) {
+      details.push(
+        scope.kind === 'files' ? `${cmd.label}: OK (${scope.files.length} changed files)` : `${cmd.label}: OK`,
+      );
+    } else if (scope.kind === 'files') {
+      await fail(cmd, r, withFindings(r, `${cmd.label}: new findings in changed files`));
+    } else if ('unavailable' in diff || r.timedOut) {
+      await fail(cmd, r);
+    } else if (diff.changed.length === 0) {
+      await preExisting(cmd, r, diff.mergeBase);
+    } else {
+      queued.push({ cmd, argv: scope.argv, r });
+    }
+  }
+  if (!('unavailable' in diff) && queued.length > 0) {
+    const base = await withMergeBaseWorktree(
+      { laneWorktree: ctx.worktree, mergeBase: diff.mergeBase, env: ctx.env, run },
+      async (dir) => {
+        const results: CommandResult[] = [];
+        for (const q of queued) results.push(await run(q.argv, { ...opts, cwd: dir }));
+        return results;
+      },
+    );
+    for (const [i, { cmd, r }] of queued.entries()) {
+      const baseRun = base.ok ? base.value[i]! : null;
+      if (baseRun === null || baseRun.timedOut) {
+        const why = baseRun === null && !base.ok ? base.error : 'merge-base run timed out';
+        await fail(cmd, r, `${cmd.label} failed; merge-base comparison inconclusive (${why})`);
+      } else if (baseRun.ok) {
+        await fail(
+          cmd,
+          r,
+          withFindings(r, `${cmd.label}: new findings (merge base ${diff.mergeBase.slice(0, 7)} passes)`),
+        );
+      } else {
+        await preExisting(cmd, r, diff.mergeBase);
+      }
+    }
+  }
+  if (failed && 'unavailable' in diff) details.push(`changed files unknown (${diff.unavailable}) — whole-repo result`);
+
+  const result: CheckerOutput['result'] = failed ? 'FAIL' : ran ? 'PASS' : 'SKIP';
   return { checker: 'lint', result, details: details.join('; ') };
 };
 
@@ -517,7 +582,7 @@ const BUILT_IN_CHECKERS: readonly (Checker & { description: string; optIn?: bool
   {
     name: 'lint',
     run: (ctx) => lintChecker(ctx),
-    description: "runs the repo's lint script",
+    description: "runs the repo's lint and format commands on the change; fails only on new findings",
   },
   {
     name: 'links',

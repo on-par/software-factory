@@ -2,7 +2,7 @@
 
 import { existsSync, statSync } from 'node:fs';
 
-import { parkReasonFor } from '@on-par/factory-core';
+import { parkReasonFor, workKeyFromIssue } from '@on-par/factory-core';
 import type { EventKind, getFactoryPaths, ParkPayload, RunOutcome } from '@on-par/factory-core';
 import {
   DEFAULT_CLAIM_LEASE_MS,
@@ -161,7 +161,7 @@ export async function runLane(
     await postParkComment(rec.issue, reason, message, rec.branch);
     await reapWorktree(rec.issue).catch(() => {});
     const msg = `issue #${rec.issue} parked (${reason}); lane '${lane}' continuing`;
-    if (!(await parkAndSettle(rec.issue, msg, parkPayload(reason, rec.issue, lane, [])))) {
+    if (!(await parkAndSettle(rec.issue, msg, parkPayload(reason, workKeyFromIssue(rec.issue), lane, [])))) {
       throw new Error(`could not park issue #${rec.issue}`);
     }
     parked++;
@@ -208,6 +208,7 @@ export async function runLane(
       pending.push(claimed);
     }
     const { issue, decision } = pending[i];
+    const key = workKeyFromIssue(issue);
     activeIssues.add(issue);
     if (pathExists(paths.stop)) {
       emitEvent(paths.events, 'stopped', issue, 'STOP file present', { lane });
@@ -227,7 +228,7 @@ export async function runLane(
       // A preflight-parked issue may still have a stale worktree from a prior run; the reap
       // is fail-closed and must never change lane flow.
       await reapWorktree(issue).catch(() => {});
-      if (await parkAndSettle(issue, msg, parkPayload('escalate', issue, lane, queuedBehind(i)))) parked++;
+      if (await parkAndSettle(issue, msg, parkPayload('escalate', key, lane, queuedBehind(i)))) parked++;
       streak = null;
     };
     const runRestack = (merged: { index: number; prNumber: number }) =>
@@ -475,7 +476,7 @@ export async function runLane(
       // checkout behind (#1007); fail-closed and never allowed to change lane flow.
       if (landing !== undefined) await closeParkedPr(issue, landing, reason).catch(() => {});
       await reapWorktree(issue).catch(() => {});
-      if (await parkAndSettle(issue, msg, parkPayload(reason, issue, lane, queuedBehind(i)))) parked++;
+      if (await parkAndSettle(issue, msg, parkPayload(reason, key, lane, queuedBehind(i)))) parked++;
       const down = sliceOutcome.value?.state === 'parked' ? sliceOutcome.value.providersDown : undefined;
       if (reason === 'all_providers_down' && down) {
         pauseLaneForAllProvidersDown(pauseCtx, issue, down);

@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -17,6 +17,7 @@ import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import { parkUnblockHint } from './park-comment.js';
 import type { Workspace } from './ports.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
 const planPhase = vi.fn<typeof realPlanPhase>();
@@ -227,7 +228,12 @@ describe('runIssue — issue park comment (#2314)', () => {
       'fail',
       expect.any(String),
       expect.objectContaining({
-        park: { reason: 'fail', decision: parkUnblockHint('fail', 1), lane: 'app', blockedBehind: [2, 3] },
+        park: {
+          reason: 'fail',
+          decision: parkUnblockHint('fail', workKeyFromIssue(1)),
+          lane: 'app',
+          blockedBehind: [2, 3],
+        },
       }),
     );
   });
@@ -239,7 +245,7 @@ describe('runIssue — issue park comment (#2314)', () => {
       'fail',
       expect.any(String),
       expect.objectContaining({
-        park: { reason: 'fail', decision: parkUnblockHint('fail', 1), lane: '', blockedBehind: [] },
+        park: { reason: 'fail', decision: parkUnblockHint('fail', workKeyFromIssue(1)), lane: '', blockedBehind: [] },
       }),
     );
   });
@@ -254,5 +260,20 @@ describe('runIssue — issue park comment (#2314)', () => {
     expect(outcome).not.toHaveProperty('failingChecks');
     expect(log.mock.calls.map(([type]) => type)).toContain('blocked');
     expect(createComment.mock.calls[0][0].body).toContain('reason: blocked');
+  });
+});
+
+describe('runIssue — WorkKey phase log identity (#3674)', () => {
+  it('writes phase logs under issue-<n> from the run WorkKey and keeps the issue reference in park messages', async () => {
+    const logsDir = join(breakerDir, 'work-key-logs');
+    vi.mocked(planPhase).mockImplementation(async (opts) => {
+      await opts.onWorkerResult?.({ model: 'm', output: 'planned', exitCode: 0, attempts: [] });
+      return { ...PLAN_OK, ok: false, escalate: 'x', sliced: { sliceCount: 3 } };
+    });
+    const outcome = await runIssue({ ...request, issue: 42, logsDir }, policy, ports(vi.fn<Log>()));
+    expect(outcome).toMatchObject({ state: 'escalated', reason: expect.stringContaining('issue #42 sliced into') });
+    const runs = await readdir(join(logsDir, 'issue-42'));
+    expect(runs).toHaveLength(1);
+    expect(await readFile(join(logsDir, 'issue-42', runs[0], 'plan.log'), 'utf8')).toContain('planned');
   });
 });

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createTempDirs } from '../harness/temp-dir.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import type { RunLogFn } from './attribution.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 import { providerFailureRecorder } from './provider-failure-recorder.js';
 
 const tmp = createTempDirs();
@@ -17,7 +18,13 @@ async function setup() {
   const breaker = new ProviderBreaker(join(dir, 'breaker.json'), () => 1, { fingerprint: () => 'fp' });
   const logs: Array<{ type: string; extra?: Parameters<RunLogFn>[2] }> = [];
   const log: RunLogFn = (type, _msg, extra) => logs.push({ type, extra });
-  const record = providerFailureRecorder({ breaker, log, issue: 7, defaultCooldownMs: 1000, now: () => 0 })('plan');
+  const record = providerFailureRecorder({
+    breaker,
+    log,
+    issue: workKeyFromIssue(7),
+    defaultCooldownMs: 1000,
+    now: () => 0,
+  })('plan');
   return { breaker, logs, record };
 }
 

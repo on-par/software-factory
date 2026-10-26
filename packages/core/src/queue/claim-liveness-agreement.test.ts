@@ -4,6 +4,7 @@ import type { Octokit } from '@octokit/rest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createGithubLaneClaimStalenessProbe } from '../run/lane-file-guard.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 import { claimOf } from '../worktree/worktree-gc-issues.js';
 import { findStaleClaims } from './stale-claims.js';
 
@@ -23,7 +24,9 @@ async function verdicts(labels: string[]) {
   const list = vi.fn(async () => ({ data: [] }));
   const octokit: Pick<Octokit, 'rest'> = Object.assign({} as Octokit, { rest: { issues: { get }, pulls: { list } } });
   const probe = createGithubLaneClaimStalenessProbe({ octokit, now: () => NOW, isPidAlive: () => false });
-  const guard = (await probe({ repo: 'acme/repo', issue: 1, files: ['a'], claimedAt: '', pid: 4242 })) === undefined;
+  const guard =
+    (await probe({ repo: 'acme/repo', issue: workKeyFromIssue(1), files: ['a'], claimedAt: '', pid: 4242 })) ===
+    undefined;
   return { reaper, gc, guard };
 }
 

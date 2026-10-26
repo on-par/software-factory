@@ -11,6 +11,7 @@ import { HarnessError } from '../harness/index.js';
 import { createTempDirs } from '../harness/temp-dir.js';
 import { providerFailureRecorder } from '../run/provider-failure-recorder.js';
 import { logEvent } from '../utils/index.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 import { ProviderBreaker } from './breaker.js';
 import { ModelRouter } from './index.js';
 
@@ -60,7 +61,7 @@ async function setup(anthropicError: string) {
   const router = new ModelRouter(models, routes, false, executor);
   const record = providerFailureRecorder({
     breaker,
-    issue: 3232,
+    issue: workKeyFromIssue(3232),
     defaultCooldownMs: 1000,
     log: (type, msg, extra) => {
       runLog.push({ type, extra });

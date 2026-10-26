@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { lookupOpenPrByBranch, lookupOpenPrByIssue } from './pr-lookup.js';
+import { workKeyFromIssue } from '../work/work-key.js';
 
 const REPO = 'acme/widgets';
 
@@ -23,7 +24,7 @@ function stub(pages: unknown[][] | Error) {
 describe('lookupOpenPrByIssue', () => {
   it('returns ambiguous for two matching same-repo open PRs, and none for a single fork PR', async () => {
     const two = stub([[pr(9, 'Closes #19'), pr(4, 'Closes #19')]]);
-    const res = await lookupOpenPrByIssue({ octokit: two.octokit, repo: REPO, issue: 19 });
+    const res = await lookupOpenPrByIssue({ octokit: two.octokit, repo: REPO, issue: workKeyFromIssue(19) });
     expect(res).toEqual({
       status: 'ambiguous',
       prs: [
@@ -32,12 +33,14 @@ describe('lookupOpenPrByIssue', () => {
       ],
     });
     const fork = stub([[pr(5, 'Closes #19', { repo: 'someone/widgets' })]]);
-    expect(await lookupOpenPrByIssue({ octokit: fork.octokit, repo: REPO, issue: 19 })).toEqual({ status: 'none' });
+    expect(await lookupOpenPrByIssue({ octokit: fork.octokit, repo: REPO, issue: workKeyFromIssue(19) })).toEqual({
+      status: 'none',
+    });
   });
 
   it('returns found for a single same-repo match', async () => {
     const { octokit } = stub([[pr(5, 'Closes #19')]]);
-    expect(await lookupOpenPrByIssue({ octokit, repo: REPO, issue: 19 })).toEqual({
+    expect(await lookupOpenPrByIssue({ octokit, repo: REPO, issue: workKeyFromIssue(19) })).toEqual({
       status: 'found',
       prNumber: 5,
       branch: 'factory/19-5',
@@ -47,13 +50,13 @@ describe('lookupOpenPrByIssue', () => {
 
   it('excludes a null head.repo and accepts a case-different full_name', async () => {
     const { octokit } = stub([[pr(5, 'Closes #19', { repo: null }), pr(6, 'closes #19', { repo: 'Acme/Widgets' })]]);
-    const res = await lookupOpenPrByIssue({ octokit, repo: REPO, issue: 19 });
+    const res = await lookupOpenPrByIssue({ octokit, repo: REPO, issue: workKeyFromIssue(19) });
     expect(res).toMatchObject({ status: 'found', prNumber: 6 });
   });
 
   it('ignores Closes #190, Fixes #19 and a null body', async () => {
     const { octokit } = stub([[pr(1, 'Closes #190'), pr(2, 'Fixes #19'), pr(3, null)]]);
-    expect(await lookupOpenPrByIssue({ octokit, repo: REPO, issue: 19 })).toEqual({ status: 'none' });
+    expect(await lookupOpenPrByIssue({ octokit, repo: REPO, issue: workKeyFromIssue(19) })).toEqual({ status: 'none' });
   });
 
   it('ignores malformed payloads without a head', async () => {
@@ -63,12 +66,12 @@ describe('lookupOpenPrByIssue', () => {
         { number: 2, body: 'Closes #19', head: {} },
       ],
     ]);
-    expect(await lookupOpenPrByIssue({ octokit, repo: REPO, issue: 19 })).toEqual({ status: 'none' });
+    expect(await lookupOpenPrByIssue({ octokit, repo: REPO, issue: workKeyFromIssue(19) })).toEqual({ status: 'none' });
   });
 
   it('returns error, not none, when the list call fails', async () => {
     const { octokit } = stub(new Error('rate limited'));
-    expect(await lookupOpenPrByIssue({ octokit, repo: REPO, issue: 19 })).toEqual({
+    expect(await lookupOpenPrByIssue({ octokit, repo: REPO, issue: workKeyFromIssue(19) })).toEqual({
       status: 'error',
       detail: 'rate limited',
     });
@@ -84,13 +87,16 @@ describe('lookupOpenPrByIssue', () => {
         },
       },
     };
-    expect(await lookupOpenPrByIssue({ octokit, repo: REPO, issue: 19 })).toEqual({ status: 'error', detail: 'boom' });
+    expect(await lookupOpenPrByIssue({ octokit, repo: REPO, issue: workKeyFromIssue(19) })).toEqual({
+      status: 'error',
+      detail: 'boom',
+    });
   });
 
   it('finds a match on page 2', async () => {
     const filler = Array.from({ length: 100 }, (_, i) => pr(1000 + i, 'nothing'));
     const { octokit, list } = stub([filler, [pr(5, 'Closes #19')]]);
-    expect(await lookupOpenPrByIssue({ octokit, repo: REPO, issue: 19 })).toMatchObject({
+    expect(await lookupOpenPrByIssue({ octokit, repo: REPO, issue: workKeyFromIssue(19) })).toMatchObject({
       status: 'found',
       prNumber: 5,
     });
@@ -100,7 +106,7 @@ describe('lookupOpenPrByIssue', () => {
   it('fails closed when the last allowed page is full', async () => {
     const filler = Array.from({ length: 100 }, (_, i) => pr(1000 + i, 'nothing'));
     const { octokit } = stub([filler, filler]);
-    expect(await lookupOpenPrByIssue({ octokit, repo: REPO, issue: 19, maxPages: 2 })).toEqual({
+    expect(await lookupOpenPrByIssue({ octokit, repo: REPO, issue: workKeyFromIssue(19), maxPages: 2 })).toEqual({
       status: 'error',
       detail: 'open PR list exceeds 200',
     });

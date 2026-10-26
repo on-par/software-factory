@@ -4,6 +4,7 @@
 // newly-emitted kind to be registered. EventKind is the closed set of kinds the factory emits, and
 // EVENT_TRAITS is the single table every consumer reads instead of keeping its own classification.
 
+import { DECOMPOSE_EVENT_TRAITS } from './decompose-traits.js';
 import type { EventTraits, LaneStatus } from './event-traits.js';
 
 export type { EventTraits, LaneStatus };
@@ -50,6 +51,7 @@ export type EventKind =
   | 'ci-rescued'
   | 'claim_expired_released'
   | 'claim_lost'
+  | 'reap_refused_clock_skew'
   | 'ci-rescue-failed'
   | 'conflict'
   | 'conflict_detected'
@@ -61,6 +63,7 @@ export type EventKind =
   | 'decompose_comment_posted'
   | 'decompose_duplicate_skipped'
   | 'decompose_failed'
+  | 'decompose_skipped'
   | 'decompose_file_failed'
   | 'decompose_filed'
   | 'decompose_started'
@@ -297,12 +300,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   // An unknown nested config key stripped by the runtime schema, warned once per key at run start (#3568).
   config_unknown_key: { severity: 'warn', isPark: false, isTerminal: false },
   constitution: { severity: 'info', isPark: false, isTerminal: false },
-  decompose_comment_posted: { severity: 'info', isPark: false, isTerminal: false },
-  decompose_duplicate_skipped: { severity: 'warn', isPark: false, isTerminal: false },
-  decompose_failed: { severity: 'warn', isPark: false, isTerminal: false },
-  decompose_file_failed: { severity: 'warn', isPark: false, isTerminal: false },
-  decompose_filed: { severity: 'info', isPark: false, isTerminal: false },
-  decompose_started: { severity: 'info', isPark: false, isTerminal: false },
+  ...DECOMPOSE_EVENT_TRAITS,
   'defect-window-closed': { severity: 'info', isPark: false, isTerminal: false },
   disk_low: { severity: 'warn', isPark: false, isTerminal: false },
   design_artifact_coerced: { severity: 'warn', isPark: false, isTerminal: false },
@@ -406,6 +404,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   plan_rejected: { severity: 'info', isPark: false, isTerminal: false },
   'post-merge-defect': { severity: 'info', isPark: false, isTerminal: false },
   pr_opened: { severity: 'info', isPark: false, isTerminal: false },
+  reap_refused_clock_skew: { severity: 'warn', isPark: false, isTerminal: false }, // #3149
   queue_added: { severity: 'info', isPark: false, isTerminal: false },
   queue_deferred_only: { severity: 'warn', isPark: false, isTerminal: false }, // #3660
   queue_admission_conflict: { severity: 'warn', isPark: false, isTerminal: false },

@@ -101,6 +101,7 @@ npm run test`;
     mode?: 'file' | 'slice';
     sizeBudget?: { tokenBudget: number; maxFiles: number };
     decomposition?: string;
+    state?: string;
   }) {
     const worktree = await tempDirs.make('plan-phase-test-');
     const stub = new StubModelExecutor({
@@ -121,7 +122,7 @@ npm run test`;
         rest: {
           users: { getAuthenticated: async () => ({ data: { id: 42 } }) },
           issues: {
-            get: async () => ({ data: { title: 'Cohesive change', body: bigBody } }),
+            get: async () => ({ data: { state: opts.state, title: 'Cohesive change', body: bigBody } }),
             listComments: async () => ({ data: [] }),
             createComment,
             create,
@@ -188,6 +189,21 @@ npm run test`;
       expect(logs.map((l) => l.type)).toContain('size_gate_cohesive');
     },
   );
+
+  it('parks with "already closed" and posts nothing when the file-mode post-plan gate hits a closed issue (#728)', async () => {
+    const { result, logs, createComment, create } = await run({
+      yaml: designYaml(4, 4),
+      sizeBudget: { tokenBudget: 10, maxFiles: 12 },
+      state: 'closed',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.escalate).toMatch(/already closed/);
+    expect(result.decomposed).toBeUndefined();
+    expect(createComment).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(logs.map((l) => l.type)).toEqual(expect.arrayContaining(['decompose_skipped', 'size-gate-escalated']));
+  });
 
   it('does not split an under-budget plan with more than 6 target types', async () => {
     const { result, stub } = await run({ yaml: designYaml(9, 5) });
