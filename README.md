@@ -155,6 +155,8 @@ factory triage [--product <p>]      Have a model propose a queue into .factory/s
 factory queue add <lane> <N...>     Queue GitHub issues into a lane (factory:queued labels)
 factory check <N> [--json] [--no-judge] [--rejudge] [--deep]
                                     Read-only pre-flight: model readiness verdict with its questions or assumptions, plus advisory fields and size (alias: ready)
+factory draft [--text <idea> | --file <path>] [--json]
+                                    Draft an issue from a free-text idea (never filed)
 
 # Observe
 factory status                      Show active runs, the GitHub queue, provider health, and recent events
@@ -166,6 +168,8 @@ factory usage                       Report 5-hour subscription usage
 ```
 
 `factory check` exits 0 when the verdict is ready or ready-with-assumptions, 1 when it is not-ready, 2 on a judge error, and 3 when it would split. `--no-judge` restores the free heading check (1 = missing fields).
+
+`factory draft` exits 0 when the draft is factory-ready, 1 when it is not, 2 on a model or input error, and 3 when it would split.
 
 ### `factory run-issue --run-children`
 

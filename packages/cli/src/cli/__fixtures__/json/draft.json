@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "title": "Unpark a lane from my phone",
+  "body": "## User story\n\nAs an operator, I want to unpark a lane from my phone.\n\n## Problem statement\n\nParked lanes can only be unparked from a terminal.\n\n## In scope\n\n- Accept an unpark request for one lane.\n\n## Out of scope\n\n- Editing the queue order.\n\n## Acceptance criteria\n\n- [ ] Given a parked lane, When the operator requests unpark, Then the lane resumes.\n\n## Regression test\n\nA test unparks a parked lane.\n\n## Verification\n\n- Run `npx vitest run`.",
+  "score": 100,
+  "exit": 0,
+  "reasons": [],
+  "model": "claude-haiku-5-5",
+  "cost": 0.004
+}

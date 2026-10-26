@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- `factory draft` turns a free-text idea (`--text`, `--file` or stdin) into a factory-check-ready issue draft: one triage-tier model call (new tool-less `issue_draft` route) plus at most one repair, scored with `check --no-judge`'s readiness code. Prints Markdown or, with `--json`, one `schemaVersion` 1 object. It never files an issue, writes the queue or writes files (#3171).
+
 ### Changed
 
 - GitHub-queue enqueue now converges when several hosts act at once. After writing its `factory:order:<n>` label an enqueue keeps one order label per issue and moves the higher-numbered issue off a shared position, emitting an `order_collision_repaired` event (at most 3 attempts). Lane scans read every page instead of the first 100. Blocked-park auto-unpark runs only on the host named by `FACTORY_FLEET_LEADER` when it is set; unset keeps every host polling (#3147).
