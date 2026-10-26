@@ -34,11 +34,15 @@ repo default is read-only. The workflow checks out its own scripts into `.factor
 untracked directory in the caller checkout; add `.factory-action/` to the caller's `.gitignore`.
 The factory only commits in lane worktrees, so it is never committed.
 
-A fresh runner checkout has no git identity, and `factory doctor` fails without one. Before it
-calls the factory, `factory-run.sh` sets any missing `user.name` or `user.email` in the
-checkout's local git config to `Software Factory Actions` /
-`factory-actions[bot]@users.noreply.github.com`. A field that is already set, locally or
-globally, is left alone, so set your own identity in an earlier step to override it.
+A fresh runner checkout has no git identity, and `factory doctor` fails without one.
+`factory-run.yml` sets the checkout's local git identity to `Software Factory Actions` /
+`factory-actions[bot]@users.noreply.github.com` before it calls `factory-run.sh`, so a
+caller that pins the script from an older tag (including this repo's dogfood workflow)
+still clears `git identity` as soon as the workflow file itself is on the branch in use.
+`factory-run.sh` also sets any missing `user.name` or `user.email` the same way for
+pinned external callers after the next CLI tag. A field that is already set, locally or
+globally, is left alone by the script path, so set your own identity in an earlier step
+to override it.
 
 ## Inputs
 

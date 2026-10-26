@@ -77,6 +77,10 @@ jobs:
           node-version: 24
       - name: Install factory CLI
         run: npm install -g "@on-par/factory-cli@${FACTORY_CLI_VERSION}"
+      - name: Set git identity for Actions
+        run: |
+          git config --local user.name "Software Factory Actions"
+          git config --local user.email "factory-actions[bot]@users.noreply.github.com"
       - name: Run factory
         env:
           COMMAND: ${{ inputs.command }}
