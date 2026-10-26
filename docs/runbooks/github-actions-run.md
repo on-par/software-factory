@@ -83,6 +83,13 @@ made with the Actions token leave follow-up `pull_request` workflows at `action_
 so the required `ci` check never reports. A ship that ends "left as draft (CI pending)" fails the
 run (exit 1) and is not a land.
 
+## Merging
+
+The `Run factory` step sets `FACTORY_MERGE=1` and `FACTORY_MERGE_ADMIN=1`, so a hosted run merges its
+green PR and uses admin privileges to merge through unmet requirements when `FACTORY_GITHUB_TOKEN`
+allows it. See [SECURITY.md](../../SECURITY.md#merge-is-opt-in) for what `FACTORY_MERGE_ADMIN` permits.
+Callers that pin `@vX.Y.Z` get this from the first tag published with it.
+
 ## Providers and secrets
 
 Each provider reads only its own repo secrets, under the names the Claude GitHub App and
