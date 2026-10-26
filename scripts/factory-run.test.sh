@@ -28,6 +28,8 @@ done
 echo "plan=${FACTORY_PLAN_MODEL:-}" >>"$FACTORY_SHIM_LOG"
 echo "build=${FACTORY_BUILD_MODEL:-}" >>"$FACTORY_SHIM_LOG"
 echo "experimental=${FACTORY_EXPERIMENTAL:-unset}" >>"$FACTORY_SHIM_LOG"
+echo "git_name=$(git config user.name 2>/dev/null)" >>"$FACTORY_SHIM_LOG"
+echo "git_email=$(git config user.email 2>/dev/null)" >>"$FACTORY_SHIM_LOG"
 if [ -n "${CODEX_API_KEY:-}" ]; then echo "codex_sum=$(printf %s "$CODEX_API_KEY" | cksum)" >>"$FACTORY_SHIM_LOG"; fi
 echo "shim ran"
 exit "${FACTORY_SHIM_RC:-0}"
@@ -46,13 +48,19 @@ RC=0
 ALL_OUT="$BINDIR/all-output.txt"
 : >"$ALL_OUT"
 
+# The wrapper writes git identity into the checkout it runs in, so run it in scratch repos.
+new_repo() { git init -q "$1"; }
+WORKREPO="$BINDIR/repo"
+new_repo "$WORKREPO"
+
 run() {
   : >"$SHIM_LOG"
   : >"$INSTALL_LOG"
   rm -f "$RUN_LOG"
   RC=0
-  env -i PATH="$BINDIR:$PATH" HOME="$BINDIR" FACTORY_SHIM_LOG="$SHIM_LOG" FACTORY_INSTALL_LOG="$INSTALL_LOG" FACTORY_RUN_LOG="$RUN_LOG" "$@" \
-    bash "$ROOT/scripts/factory-run.sh" >"$BINDIR/out.txt" 2>"$BINDIR/err.txt" || RC=$?
+  (cd "${RUN_CWD:-$WORKREPO}" && env -i PATH="$BINDIR:$PATH" HOME="$BINDIR" GIT_CONFIG_NOSYSTEM=1 \
+    FACTORY_SHIM_LOG="$SHIM_LOG" FACTORY_INSTALL_LOG="$INSTALL_LOG" FACTORY_RUN_LOG="$RUN_LOG" "$@" \
+    bash "$ROOT/scripts/factory-run.sh") >"$BINDIR/out.txt" 2>"$BINDIR/err.txt" || RC=$?
   [ -z "${NO_ALL_OUT:-}" ] || return 0
   cat "$BINDIR/out.txt" "$BINDIR/err.txt" >>"$ALL_OUT"
   [ ! -f "$RUN_LOG" ] || cat "$RUN_LOG" >>"$ALL_OUT"
@@ -104,6 +112,34 @@ run "$TOK" CLAUDE_CODE_OAUTH_TOKEN=sentinel-oauth-XYZ COMMAND=doctor FACTORY_SHI
 echo "PASS propagates factory exit code"
 
 OAUTH=CLAUDE_CODE_OAUTH_TOKEN=sentinel-oauth-XYZ
+
+# --- git identity ---
+BOT_NAME="Software Factory Actions"
+BOT_EMAIL="factory-actions[bot]@users.noreply.github.com"
+localcfg() { git -C "$1" config --local "$2" || true; }
+R="$BINDIR/id-unset"; new_repo "$R"
+RUN_CWD="$R" run "$TOK" "$OAUTH" COMMAND=doctor
+[ "$RC" -eq 0 ] || fail "identity-unset run exited $RC"
+[ "$(localcfg "$R" user.name)" = "$BOT_NAME" ] && [ "$(localcfg "$R" user.email)" = "$BOT_EMAIL" ] || fail "bot identity not set locally"
+grep -qxF "git_name=$BOT_NAME" "$SHIM_LOG" && grep -qxF "git_email=$BOT_EMAIL" "$SHIM_LOG" || fail "factory ran before identity was set"
+R="$BINDIR/id-set"; new_repo "$R"
+git -C "$R" config user.name "Jane Dev"; git -C "$R" config user.email "jane@example.com"
+RUN_CWD="$R" run "$TOK" "$OAUTH" COMMAND=doctor
+[ "$(localcfg "$R" user.name)" = "Jane Dev" ] && [ "$(localcfg "$R" user.email)" = "jane@example.com" ] || fail "existing local identity overwritten"
+R="$BINDIR/id-half"; new_repo "$R"
+git -C "$R" config user.name "Jane Dev"
+RUN_CWD="$R" run "$TOK" "$OAUTH" COMMAND=doctor
+[ "$(localcfg "$R" user.name)" = "Jane Dev" ] && [ "$(localcfg "$R" user.email)" = "$BOT_EMAIL" ] || fail "only the missing field should be set"
+R="$BINDIR/id-global"; new_repo "$R"
+printf '[user]\n\tname = Global Dev\n\temail = global@example.com\n' >"$BINDIR/global.gitconfig"
+RUN_CWD="$R" run "$TOK" "$OAUTH" COMMAND=doctor GIT_CONFIG_GLOBAL="$BINDIR/global.gitconfig"
+[ -z "$(localcfg "$R" user.name)" ] && [ -z "$(localcfg "$R" user.email)" ] || fail "effective global identity overridden locally"
+grep -qxF "git_name=Global Dev" "$SHIM_LOG" || fail "factory did not see the global identity"
+mkdir -p "$BINDIR/not-a-repo"
+RUN_CWD="$BINDIR/not-a-repo" run "$TOK" "$OAUTH" COMMAND=doctor GIT_CEILING_DIRECTORIES="$BINDIR"
+[ "$RC" -eq 0 ] || fail "run outside a git checkout exited $RC"
+echo "PASS sets the Actions bot git identity only for missing fields"
+
 CODEX_SUM() { printf %s "$1" | cksum; }
 
 # --- providers ---
