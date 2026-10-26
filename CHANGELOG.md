@@ -7,6 +7,14 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.18 - 2026-10-25
+
+A dogfood GitHub Actions caller and a CLI pin to 0.9.18 for the reusable
+`factory-run.yml` workflow, a disk guard, affected-test BUILD rounds, provider
+failover across capped providers, and a `factory land` that syncs BEHIND PRs. All
+seven published `@on-par` packages move to 0.9.18 in lockstep. Install or update with
+`npm install -g @on-par/factory-cli@latest`.
+
 ### Added
 
 - Docs and CHANGELOG process: every user- or ops-visible PR adds a `## Unreleased`
@@ -24,6 +32,11 @@ section to `## X.Y.Z - date`. See
   that runs this repo's `factory-run.yml` (#3197) by relative path, with the same inputs
   and secrets. Runbook:
   [docs/runbooks/github-actions-run.md](docs/runbooks/github-actions-run.md).
+- README: a GitHub Actions section that points outside callers at
+  `uses: on-par/software-factory/.github/workflows/factory-run.yml@v0.9.18` and the
+  runbook.
+- Runbook: a Config section. `.factory/config.yaml` is optional and packaged defaults
+  apply without it; commit `.factory/` or run `factory init` for real standards.
 
 ### Changed
 

@@ -83,6 +83,16 @@ factory ship 42              # PLAN → BUILD → CHECK → SHIP one issue
 
 While SHIP waits for CI, a PR with no checks reported yet counts as pending. `factory ship` ends at a green, ready-for-review PR. Merging stays with you: merge it, or run `factory land <N>`. `factory run` processes the whole queue in parallel lanes.
 
+## GitHub Actions
+
+You can also run one factory command (`run-issue <n>`, `ship <n>` or `doctor`) on a GitHub-hosted runner. Call the reusable workflow from your own repo, pinned to a release tag, and pass your own secrets (`FACTORY_GITHUB_TOKEN` plus the selected provider's key):
+
+```yaml
+uses: on-par/software-factory/.github/workflows/factory-run.yml@v0.9.18
+```
+
+The full caller, inputs, providers and secrets are in [docs/runbooks/github-actions-run.md](docs/runbooks/github-actions-run.md).
+
 ## Safety
 
 To run unattended, the factory starts agent CLIs with their permission prompts turned off:
