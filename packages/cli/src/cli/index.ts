@@ -22,6 +22,7 @@ import type { Octokit } from '@octokit/rest';
 import { LaneEnvironmentPauseError } from './lane-environment-pause-error.js';
 import { INVALID_BRANCH_PREFIX_MESSAGE, resolveBranchPrefixOption } from './branch-prefix.js';
 import { startupSweeps, warnQueueDiagnostics } from './queue-startup.js';
+import { applyFinishBeforeStart } from './triage-finish-first.js';
 import { proposeTriageQueue } from './triage-open-prs.js';
 import {
   makeQueuePreflightOps,
@@ -2942,7 +2943,8 @@ async function cmdTriage(opts: { product?: string; model?: string }) {
     const { stdout: listed } = await shellOps.exec(
       `gh issue list --repo ${shellEscape(ghRepo)} --state open --limit 100 --json number,title,labels,body`,
     );
-    const prompt = buildTriagePrompt({ repo: ghRepo, product, candidates: parseTriageCandidates(listed || '[]') });
+    const candidates = parseTriageCandidates(listed || '[]');
+    const prompt = buildTriagePrompt({ repo: ghRepo, product, candidates });
     logEvent(paths.events, 'triage', '-', `Triaging ${ghRepo} via the triage route`);
     const result = await router.run('triage', prompt, {
       worktree: repoRoot,
@@ -2953,8 +2955,9 @@ async function cmdTriage(opts: { product?: string; model?: string }) {
     model = result.model;
     const queue = await proposeTriageQueue(result.output, ghRepo, paths.events, shellOps.exec);
     if (queue) {
+      const preferred = await applyFinishBeforeStart(queue, candidates, ghRepo, paths.events, shellOps.exec);
       const header = triageQueueHeader(model, product);
-      writeFileSync(paths.queueProposed, header + queue);
+      writeFileSync(paths.queueProposed, header + preferred);
     }
   } catch (err: unknown) {
     plannerError = err;

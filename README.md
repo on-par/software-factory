@@ -76,7 +76,7 @@ Commit `.factory/config.yaml` and `.factory/constitution.md` so every clone shar
 **Step 3: Triage, then ship**
 
 ```bash
-factory triage               # a model proposes an ordered queue from your open issues
+factory triage               # a model proposes an ordered queue (started parents finish first)
 factory triage accept        # promotes the proposal to the queue
 factory ship 42              # PLAN → BUILD → CHECK → SHIP one issue
 ```
@@ -151,7 +151,7 @@ factory constitution --checkers     List every built-in checker
 factory models [--doctor]           List models with tiers, cost, and availability; --doctor probes provider CLIs
 
 # Queue
-factory triage [--product <p>]      Have a model propose a queue into .factory/state/queue.proposed
+factory triage [--product <p>]      Have a model propose a queue into .factory/state/queue.proposed (finishes started parents first)
 factory queue add <lane> <N...>     Queue GitHub issues into a lane (factory:queued labels)
 factory check <N> [--json] [--no-judge] [--rejudge] [--deep]
                                     Read-only pre-flight: model readiness verdict with its questions or assumptions, plus advisory fields and size (alias: ready)

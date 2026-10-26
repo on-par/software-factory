@@ -6,11 +6,15 @@ import {
   dropQueuedIssues,
   normalizeTriageQueue,
   parseOpenPrIssues,
+  parseParentReference,
   parseTriageCandidates,
+  preferStartedParents,
   TRIAGE_BODY_MAX_CHARS,
+  triageParentCoverage,
   truncateTriageBody,
 } from './index.js';
 import { validateQueue } from '../queue/index.js';
+import type { TriageCandidate } from './index.js';
 
 describe('truncateTriageBody', () => {
   it('keeps short bodies and caps long ones at the limit', () => {
@@ -148,5 +152,99 @@ describe('parseOpenPrIssues closing keywords (#2983)', () => {
   });
   it('ignores null and non-string title/body', () => {
     expect(parse([{ title: null, body: 5 }])).toEqual(new Set());
+  });
+});
+
+const cand = (number: number, body = '', labels: string[] = []): TriageCandidate => ({
+  number,
+  title: `t${number}`,
+  labels,
+  body,
+});
+const startedSetup = (labels20: string[] = []) => {
+  const open = [
+    cand(1),
+    cand(2),
+    cand(20, 'Part of #2', labels20),
+    cand(12, 'Decomposed from #1 by the factory size gate.'),
+  ];
+  const closed = [{ number: 11, body: 'Decomposed from #1' }];
+  return { open, coverage: triageParentCoverage(open, closed) };
+};
+
+describe('parseParentReference', () => {
+  it('reads Decomposed from and Part of references', () => {
+    expect(parseParentReference('Decomposed from #12 by the factory size gate.')).toBe(12);
+    expect(parseParentReference('intro\nPart of #3104.')).toBe(3104);
+  });
+  it('returns null without a reference or for #0', () => {
+    expect(parseParentReference('nothing here')).toBeNull();
+    expect(parseParentReference('Part of #0')).toBeNull();
+  });
+});
+
+describe('triageParentCoverage', () => {
+  it('splits built and unbuilt children per open parent', () => {
+    const { coverage } = startedSetup();
+    expect(coverage).toEqual([
+      { parent: 1, built: [11], unbuilt: [12] },
+      { parent: 2, built: [], unbuilt: [20] },
+    ]);
+  });
+  it('ignores closed parents and self references', () => {
+    const open = [cand(5, 'Part of #5'), cand(6, 'Part of #99')];
+    expect(triageParentCoverage(open, [{ number: 7, body: 'Part of #99' }])).toEqual([]);
+  });
+});
+
+describe('preferStartedParents (#3109)', () => {
+  it("picks the unbuilt child of a started open parent ahead of a new parent's child and records why", () => {
+    const { open, coverage } = startedSetup();
+    const res = preferStartedParents('app 20\napp 12\n', open, coverage);
+    expect(
+      res.queue.startsWith(
+        '# Finish before start: #12 (open parent #1, 1 of 2 children built) ahead of #20 (new parent #2)\n',
+      ),
+    ).toBe(true);
+    expect(res.queue.endsWith('app 12\napp 20\n')).toBe(true);
+    expect(res.reasons).toHaveLength(1);
+    expect(validateQueue(res.queue).ok).toBe(true);
+  });
+
+  it('never moves a child ahead of an issue with an explicit factory:order label', () => {
+    const { open, coverage } = startedSetup(['factory:order:1']);
+    expect(preferStartedParents('app 20\napp 12\n', open, coverage)).toEqual({
+      queue: 'app 20\napp 12\n',
+      reasons: [],
+    });
+    const withBarrier = [...open, cand(30, '', ['factory:order:2'])];
+    const queue = 'app 20\napp 30\napp 12\n';
+    expect(preferStartedParents(queue, withBarrier, coverage).queue).toBe(queue);
+    const barrierOnly = [...startedSetup().open, cand(30, '', ['factory:order:2'])];
+    expect(preferStartedParents('app 20\napp 30\napp 12\n', barrierOnly, startedSetup().coverage).reasons).toEqual([]);
+  });
+
+  it('returns the queue unchanged when no parent is started', () => {
+    const open = [cand(1), cand(2), cand(20, 'Part of #2'), cand(12, 'Part of #1')];
+    const coverage = triageParentCoverage(open, []);
+    expect(preferStartedParents('app 20\napp 12\n', open, coverage)).toEqual({
+      queue: 'app 20\napp 12\n',
+      reasons: [],
+    });
+    expect(preferStartedParents('', [], [])).toEqual({ queue: '', reasons: [] });
+  });
+
+  it('keeps comment lines, non-child entries and the entry multiset', () => {
+    const { open, coverage } = startedSetup();
+    const queue = '# Skipped (a PR is open): #9\napp 20\napp 40\napp 12\n';
+    const res = preferStartedParents(queue, open, coverage);
+    expect(res.queue).toContain('# Skipped (a PR is open): #9\n');
+    const entries = (q: string) =>
+      q
+        .split('\n')
+        .filter((l) => !l.startsWith('#') && l)
+        .sort();
+    expect(entries(res.queue)).toEqual(entries(queue));
+    expect(res.queue.endsWith('app 12\napp 40\napp 20\n')).toBe(true);
   });
 });

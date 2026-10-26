@@ -3,6 +3,7 @@
 // routing, failover, local-only mode and timeouts like every other task.
 
 import { factoryBranchIssue } from '../utils/index.js';
+import { QUEUE_ORDER_LABEL_PREFIX } from '../queue/queue-order.js';
 
 /** Max characters of an issue body sent to the triage model. */
 export const TRIAGE_BODY_MAX_CHARS = 1500;
@@ -165,4 +166,112 @@ export function dropQueuedIssues(queue: string, issues: ReadonlySet<number>): { 
     entries++;
   }
   return { queue: entries > 0 ? `${lines.join('\n')}\n` : '', dropped };
+}
+
+/** A closed issue (a built child candidate) as read from `gh issue list --state closed` (#3109). */
+export interface TriageClosedIssue {
+  number: number;
+  body: string;
+}
+
+/** Built and unbuilt children of one open decomposed parent (#3109). This is the seam a
+ *  parent-coverage helper (#3108) can feed; both arrays are ascending. */
+export interface ParentCoverage {
+  parent: number;
+  built: number[];
+  unbuilt: number[];
+}
+
+const PARENT_REF_RE = /^\s*(?:Decomposed from|Part of)\s+#(\d+)\b/im;
+
+/** The parent issue a child body names (`Decomposed from #N` or `Part of #N`), or null (#3109). */
+export function parseParentReference(body: string): number | null {
+  const match = PARENT_REF_RE.exec(body);
+  if (!match) return null;
+  const parent = Number(match[1]);
+  return parent > 0 ? parent : null;
+}
+
+/** Groups open candidates (unbuilt) and closed issues (built) under the open parents they reference (#3109). */
+export function triageParentCoverage(
+  open: readonly TriageCandidate[],
+  closed: readonly TriageClosedIssue[],
+): ParentCoverage[] {
+  const openNumbers = new Set(open.map((c) => c.number));
+  const byParent = new Map<number, ParentCoverage>();
+  const entry = (parent: number): ParentCoverage => {
+    let found = byParent.get(parent);
+    if (!found) {
+      found = { parent, built: [], unbuilt: [] };
+      byParent.set(parent, found);
+    }
+    return found;
+  };
+  for (const candidate of open) {
+    const parent = parseParentReference(candidate.body);
+    if (parent !== null && parent !== candidate.number && openNumbers.has(parent)) {
+      entry(parent).unbuilt.push(candidate.number);
+    }
+  }
+  for (const issue of closed) {
+    const parent = parseParentReference(issue.body);
+    if (parent !== null && parent !== issue.number && openNumbers.has(parent)) entry(parent).built.push(issue.number);
+  }
+  return [...byParent.values()]
+    .map((c) => ({ parent: c.parent, built: c.built.sort((a, b) => a - b), unbuilt: c.unbuilt.sort((a, b) => a - b) }))
+    .sort((a, b) => a.parent - b.parent);
+}
+
+/** Soft finish-before-start (#3109): within each stretch of the queue between entries pinned by a
+ *  `factory:order:<n>` label, unpinned children of a started open parent (one with a built child)
+ *  take the slots ahead of unpinned children of a parent with nothing built. Pinned entries, comment
+ *  lines, non-children and the order within each class stay put. Reason lines also lead the queue
+ *  as `# ` comments. Returns the input unchanged when nothing moves. */
+export function preferStartedParents(
+  queue: string,
+  candidates: readonly TriageCandidate[],
+  coverage: readonly ParentCoverage[],
+): { queue: string; reasons: string[] } {
+  const unchanged = { queue, reasons: [] };
+  const started = new Map<number, ParentCoverage>();
+  const fresh = new Map<number, ParentCoverage>();
+  for (const cov of coverage) {
+    for (const child of cov.unbuilt) (cov.built.length > 0 ? started : fresh).set(child, cov);
+  }
+  if (started.size === 0 || fresh.size === 0) return unchanged;
+  const pinned = new Set(
+    candidates.filter((c) => c.labels.some((l) => l.startsWith(QUEUE_ORDER_LABEL_PREFIX))).map((c) => c.number),
+  );
+  const lines = queue.split('\n');
+  if (lines[lines.length - 1] === '') lines.pop();
+  const issueAt = (line: string): number | null => {
+    const match = /^\S+\s+(\d+)$/.exec(line);
+    return match ? Number(match[1]) : null;
+  };
+  const segments: number[][] = [[]];
+  lines.forEach((line, index) => {
+    const issue = issueAt(line);
+    if (issue === null) return;
+    if (pinned.has(issue)) segments.push([]);
+    else if (started.has(issue) || fresh.has(issue)) segments[segments.length - 1].push(index);
+  });
+  const reasons: string[] = [];
+  const out = [...lines];
+  for (const slots of segments) {
+    const items = slots.map((i) => ({ line: lines[i], issue: issueAt(lines[i]) ?? 0, slot: i }));
+    const ordered = [...items.filter((i) => started.has(i.issue)), ...items.filter((i) => !started.has(i.issue))];
+    ordered.forEach((item, k) => {
+      out[slots[k]] = item.line;
+      const cov = started.get(item.issue);
+      if (!cov || slots[k] >= item.slot) return;
+      const passed = items.find((o) => fresh.has(o.issue) && o.slot < item.slot);
+      const other = passed ? fresh.get(passed.issue) : undefined;
+      if (!passed || !other) return;
+      reasons.push(
+        `Finish before start: #${item.issue} (open parent #${cov.parent}, ${cov.built.length} of ${cov.built.length + cov.unbuilt.length} children built) ahead of #${passed.issue} (new parent #${other.parent})`,
+      );
+    });
+  }
+  if (reasons.length === 0) return unchanged;
+  return { queue: `${reasons.map((r) => `# ${r}\n`).join('')}${out.join('\n')}\n`, reasons };
 }

@@ -177,7 +177,8 @@ export { CliModelExecutor, formatBreakerRemaining } from './router/index.js';
 // Phase helpers
 export { buildPlanPrompt, type PlanPromptOpts } from './phases/plan.js';
 export { buildTriagePrompt, normalizeTriageQueue, parseTriageCandidates } from './triage/index.js';
-export { dropQueuedIssues, parseOpenPrIssues } from './triage/index.js';
+export { dropQueuedIssues, parseOpenPrIssues, parseParentReference } from './triage/index.js';
+export { preferStartedParents, triageParentCoverage } from './triage/index.js';
 
 // Board-constrained local lane dispatch (#848)
 export type {
