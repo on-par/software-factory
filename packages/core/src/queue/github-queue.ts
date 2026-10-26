@@ -292,7 +292,7 @@ export function createOctokitQueueClient(octokit: Octokit): QueueGitHubClient {
     ...createOctokitComments(octokit),
     ...createOctokitLabelSweepMethods(octokit),
     async listOpenIssuesWithLabels({ owner, repo, labels }) {
-      const { data } = await octokit.rest.issues.listForRepo({
+      const data = await octokit.paginate(octokit.rest.issues.listForRepo, {
         owner,
         repo,
         state: 'open',

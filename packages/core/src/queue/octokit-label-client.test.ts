@@ -50,7 +50,13 @@ function fakeOctokit(opts: { issues: Array<{ number: number; labels: string[] }>
     })),
     deleteLabel,
   };
-  return { octokit: { rest: { issues } } as any, issues, state, repoLabels, deleteLabel };
+  return {
+    octokit: { paginate: async (fn: any, params: any) => (await fn(params)).data, rest: { issues } } as any,
+    issues,
+    state,
+    repoLabels,
+    deleteLabel,
+  };
 }
 
 function heartbeatQueue(octokit: unknown) {

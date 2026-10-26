@@ -2,10 +2,11 @@ import { chmodSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTempDirs } from '../harness/temp-dir.js';
-import type { QueueGitHubClient } from './github-queue.js';
+import { createOctokitQueueClient, type QueueGitHubClient } from './github-queue.js';
 import { orderByPrerequisites, runUnpark, UnparkError } from './unpark.js';
 import { readWorktreeKeeps, upsertWorktreeKeep } from '../worktree/worktree-keeps.js';
 import { fakeIssueComments } from './fake-issue-comments.js';
+import { fakePagedOctokit } from './fake-paged-octokit.js';
 
 function fakeClient(labels: Map<number, string[]>) {
   const addLabels = vi.fn(async ({ issue_number, labels: add }: { issue_number: number; labels: string[] }) => {
@@ -337,5 +338,14 @@ describe('runUnpark', () => {
       for (const issue of ordered) orders.push((await runUnpark({ ...base, client, issue })).order);
       expect(orders).toEqual([18, 19]);
     });
+  });
+
+  it('unpark after N=120 just-queued issues through the octokit client yields order N+1 (#3123)', async () => {
+    const labels = new Map<number, string[]>();
+    for (let n = 1; n <= 120; n++) labels.set(n, ['factory:queued', 'factory:lane:ops', `factory:order:${n}`]);
+    labels.set(500, ['factory:parked', 'factory:lane:ops']);
+    const client = createOctokitQueueClient(fakePagedOctokit(labels).octokit);
+    const res = await runUnpark({ ...base, client, issue: 500 });
+    expect(res.order).toBe(121);
   });
 });

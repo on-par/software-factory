@@ -1070,6 +1070,7 @@ describe('lanes', () => {
 describe('createOctokitQueueClient', () => {
   it('lists open issues with the given labels, dropping pull requests and normalising label shapes', async () => {
     const octokit: any = {
+      paginate: async (fn: (p: unknown) => Promise<{ data: unknown[] }>, params: unknown) => (await fn(params)).data,
       rest: {
         issues: {
           listForRepo: async (input: unknown) => {
