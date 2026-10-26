@@ -72,6 +72,7 @@ export async function collectCiFailureEvidence(opts: {
         const loc = a.most_recent_instance?.location;
         const location = loc?.path ? loc.path + (loc.start_line ? `:${loc.start_line}` : '') : '(unknown location)';
         return {
+          ...(typeof a.number === 'number' ? { number: a.number } : {}),
           ruleId: a.rule?.id ?? a.rule?.name ?? '(unknown rule)',
           location,
           message: clip(

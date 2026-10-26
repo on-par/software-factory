@@ -51,6 +51,15 @@ describe('collectCiFailureEvidence (#2814)', () => {
     );
   });
 
+  it('records the GitHub alert number when present (#3712)', async () => {
+    const { octokit } = fakeOctokit(
+      [{ name: 'CodeQL', status: 'completed', conclusion: 'failure' }],
+      [{ number: 7, rule: { id: 'js/xss' }, most_recent_instance: { location: { path: 'a.ts', start_line: 2 } } }],
+    );
+    const evidence = await collectCiFailureEvidence({ octokit, ...base });
+    expect(evidence.alerts[0]).toMatchObject({ number: 7, ruleId: 'js/xss', location: 'a.ts:2' });
+  });
+
   it('does not query code scanning when no failing check is CodeQL', async () => {
     const { octokit, listAlertsForRepo } = fakeOctokit(
       [{ name: 'tests', status: 'completed', conclusion: 'failure' }],

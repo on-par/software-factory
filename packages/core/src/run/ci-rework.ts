@@ -18,9 +18,12 @@ export const CI_REWORK_ENV = 'FACTORY_MAX_CI_REWORK_ROUNDS';
 
 const LIST_FILES_PAGE_SIZE = 100;
 const LIST_FILES_MAX_PAGES = 30;
+const BASE_ALERTS_PAGE_SIZE = 100;
+const BASE_ALERTS_MAX_PAGES = 10;
+const CODEQL_NEW_ALERTS = /new alerts? in code changed by this pull request/i;
 
 export const CI_REWORK_INSTRUCTIONS =
-  'CI (CodeQL) flagged the alerts above on files this PR changed. Fix the root cause in the code at the listed file:line. ' +
+  "CI (CodeQL) flagged the alerts above as introduced by this PR. A data-flow alert may sit in a file this PR did not change when the PR's changed code adds the flow to it. Fix the root cause in the code at the listed file:line or in the changed code that feeds it. " +
   'Suppression is forbidden: do not add `// codeql[...]`, `lgtm`, `eslint-disable` or `@ts-ignore` comments, do not exclude queries or paths in any config, and do not dismiss alerts. ' +
   'Commit the fix.';
 
@@ -43,17 +46,61 @@ function alertPath(location: string): string | undefined {
   return path === '' ? undefined : path;
 }
 
-/** Alerts whose file is among the PR's changed files; the rest are pre-existing or baseline. */
+/** Open CodeQL alerts on the PR base branch (#3712). `refs` holds "ruleId at location" for alerts without a number. */
+export interface BaseCodeqlAlerts {
+  baseRef: string;
+  numbers: number[];
+  refs: string[];
+}
+
+/** True when a failing CodeQL check's summary says the PR introduced new alerts (#3712). */
+export function codeqlReportsNewAlerts(evidence: CiFailureEvidence | undefined): boolean {
+  return (
+    !!evidence && evidence.failingChecks.some((c) => /codeql/i.test(c.name) && CODEQL_NEW_ALERTS.test(c.summary ?? ''))
+  );
+}
+
+/** True when some alert sits in a file the PR did not change (or at an unknown location), so base alerts matter. */
+export function needsBaseAlerts(evidence: CiFailureEvidence | undefined, changedFiles: readonly string[]): boolean {
+  if (!evidence) return false;
+  const changed = new Set(changedFiles);
+  return evidence.alerts.some((alert) => {
+    const path = alertPath(alert.location);
+    return path === undefined || !changed.has(path);
+  });
+}
+
+function classifyAlert(
+  alert: CiCodeScanningAlert,
+  changed: Set<string>,
+  baseAlerts: BaseCodeqlAlerts | undefined,
+  reportsNew: boolean,
+): { attributable: boolean; reason: string } {
+  const path = alertPath(alert.location);
+  if (path !== undefined && changed.has(path)) return { attributable: true, reason: 'file changed by this PR' };
+  if (baseAlerts) {
+    const onBase =
+      alert.number === undefined
+        ? baseAlerts.refs.includes(`${alert.ruleId} at ${alert.location}`)
+        : baseAlerts.numbers.includes(alert.number);
+    return onBase
+      ? { attributable: false, reason: `file not changed by this PR; also open on base ${baseAlerts.baseRef}` }
+      : { attributable: true, reason: `not open on base ${baseAlerts.baseRef}` };
+  }
+  if (reportsNew) return { attributable: true, reason: 'CodeQL reports new alerts in code changed by this PR' };
+  return { attributable: false, reason: 'file not changed by this PR' };
+}
+
+/** Alerts the PR introduced: in a changed file, or in an unchanged file but not open on base (or CodeQL says new). */
 export function attributableCodeqlAlerts(
   evidence: CiFailureEvidence | undefined,
   changedFiles: readonly string[],
+  baseAlerts?: BaseCodeqlAlerts,
 ): CiCodeScanningAlert[] {
   if (!evidence) return [];
   const changed = new Set(changedFiles);
-  return evidence.alerts.filter((alert) => {
-    const path = alertPath(alert.location);
-    return path !== undefined && changed.has(path);
-  });
+  const reportsNew = codeqlReportsNewAlerts(evidence);
+  return evidence.alerts.filter((alert) => classifyAlert(alert, changed, baseAlerts, reportsNew).attributable);
 }
 
 /** Failing check names on the PR base branch's latest commit (#2817). */
@@ -68,23 +115,22 @@ export function needsBaseChecks(evidence: CiFailureEvidence | undefined): boolea
   return !!evidence && evidence.failingChecks.some((c) => !(/codeql/i.test(c.name) && evidence.alerts.length > 0));
 }
 
-/** Attributes each failing item to the PR: alerts by changed file, other checks by the base commit (#2817). */
+/** Attributes each failing item to the PR: alerts by changed file, then base alerts (#3712); other checks by the base commit (#2817). */
 export function attributeCiFailure(
   evidence: CiFailureEvidence | undefined,
   changedFiles: readonly string[],
   base: BaseFailingChecks | undefined,
+  baseAlerts?: BaseCodeqlAlerts,
 ): CiAttribution {
   if (!evidence) return { baseline: false, items: [] };
   const changed = new Set(changedFiles);
   const items: CiAttributionItem[] = [];
+  const reportsNew = codeqlReportsNewAlerts(evidence);
   for (const alert of evidence.alerts) {
-    const path = alertPath(alert.location);
-    const attributable = path !== undefined && changed.has(path);
     items.push({
       kind: 'codeql-alert',
       ref: `${alert.ruleId} at ${alert.location}`,
-      attributable,
-      reason: attributable ? 'file changed by this PR' : 'file not changed by this PR',
+      ...classifyAlert(alert, changed, baseAlerts, reportsNew),
     });
   }
   const baseLabel = base ? `${base.baseRef}@${base.baseSha.slice(0, 12)}` : '';
@@ -125,10 +171,41 @@ export async function listBaseFailingChecks(
   return { baseRef, baseSha, failing: [...failing] };
 }
 
+/** Open CodeQL alerts on the latest base branch of the PR. Errors propagate; a list that may be partial throws. */
+export async function listBaseCodeqlAlerts(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  prNumber: number,
+): Promise<BaseCodeqlAlerts> {
+  const { data: pr } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
+  const baseRef = pr.base.ref;
+  const numbers: number[] = [];
+  const refs: string[] = [];
+  for (let page = 1; page <= BASE_ALERTS_MAX_PAGES; page++) {
+    const { data } = await octokit.rest.codeScanning.listAlertsForRepo({
+      owner,
+      repo,
+      ref: `refs/heads/${baseRef}`,
+      state: 'open',
+      per_page: BASE_ALERTS_PAGE_SIZE,
+      page,
+    });
+    for (const a of data) {
+      numbers.push(a.number);
+      const loc = a.most_recent_instance?.location;
+      const location = loc?.path ? loc.path + (loc.start_line ? `:${loc.start_line}` : '') : '(unknown location)';
+      refs.push(`${a.rule?.id ?? a.rule?.name ?? '(unknown rule)'} at ${location}`);
+    }
+    if (data.length < BASE_ALERTS_PAGE_SIZE) return { baseRef, numbers, refs };
+  }
+  throw new Error(`base CodeQL alert list exceeds ${BASE_ALERTS_PAGE_SIZE * BASE_ALERTS_MAX_PAGES} alerts`);
+}
+
 /** The same CheckSummary shape local CHECK rework consumes, with one FAIL `ci_codeql` result. */
 export function ciReworkSummary(alerts: readonly CiCodeScanningAlert[]): CheckSummary {
   const lines = alerts.map((a) => `- ${a.ruleId} at ${a.location} — ${a.message}`);
-  const details = ['CodeQL alerts on files this PR changed:', ...lines].join('\n');
+  const details = ['CodeQL alerts this PR introduced:', ...lines].join('\n');
   return {
     failures: 1,
     passes: 0,

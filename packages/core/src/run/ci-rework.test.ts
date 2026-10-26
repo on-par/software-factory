@@ -6,9 +6,12 @@ import {
   attributeCiFailure,
   ciCheckReworkSummary,
   ciReworkSummary,
+  codeqlReportsNewAlerts,
+  listBaseCodeqlAlerts,
   listBaseFailingChecks,
   listPrChangedFiles,
   MAX_CI_REWORK_ROUNDS,
+  needsBaseAlerts,
   resolveMaxCiReworkRounds,
 } from './ci-rework.js';
 
@@ -52,6 +55,46 @@ describe('attributableCodeqlAlerts', () => {
   it('returns [] for undefined evidence', () => {
     expect(attributableCodeqlAlerts(undefined, changed)).toEqual([]);
   });
+
+  it('keeps an unchanged-file alert that is absent on base (#3712)', () => {
+    const introduced = { ...alert('src/sink.ts:5'), number: 5 };
+    const preexisting = { ...alert('src/old.ts:1'), number: 6 };
+    const baseAlerts = { baseRef: 'main', numbers: [6], refs: [] };
+    expect(attributableCodeqlAlerts(evidence(introduced, preexisting), changed, baseAlerts)).toEqual([introduced]);
+  });
+});
+
+describe('needsBaseAlerts (#3712)', () => {
+  it('is false without evidence or when every alert is in a changed file', () => {
+    expect(needsBaseAlerts(undefined, ['src/a.ts'])).toBe(false);
+    expect(needsBaseAlerts(evidence(alert('src/a.ts:1')), ['src/a.ts'])).toBe(false);
+  });
+
+  it('is true for an unchanged-file alert or an unknown location', () => {
+    expect(needsBaseAlerts(evidence(alert('src/a.ts:1'), alert('src/z.ts:1')), ['src/a.ts'])).toBe(true);
+    expect(needsBaseAlerts(evidence(alert('(unknown location)')), ['src/a.ts'])).toBe(true);
+  });
+});
+
+describe('codeqlReportsNewAlerts (#3712)', () => {
+  const withCheck = (name: string, summary?: string): CiFailureEvidence => ({
+    failingChecks: [{ name, conclusion: 'failure', ...(summary === undefined ? {} : { summary }) }],
+    alerts: [],
+    truncated: false,
+  });
+
+  it('matches the CodeQL summary phrase case-insensitively', () => {
+    expect(codeqlReportsNewAlerts(withCheck('CodeQL', 'NEW ALERTS IN CODE CHANGED BY THIS PULL REQUEST — 3'))).toBe(
+      true,
+    );
+  });
+
+  it('ignores other wording, non-CodeQL checks, missing summaries and no evidence', () => {
+    expect(codeqlReportsNewAlerts(withCheck('CodeQL', '1 new alert'))).toBe(false);
+    expect(codeqlReportsNewAlerts(withCheck('lint', 'New alerts in code changed by this pull request'))).toBe(false);
+    expect(codeqlReportsNewAlerts(withCheck('CodeQL'))).toBe(false);
+    expect(codeqlReportsNewAlerts(undefined)).toBe(false);
+  });
 });
 
 describe('ciReworkSummary', () => {
@@ -62,7 +105,7 @@ describe('ciReworkSummary', () => {
       {
         checker: 'ci_codeql',
         result: 'FAIL',
-        details: 'CodeQL alerts on files this PR changed:\n- js/xss at src/a.ts:10 — msg',
+        details: 'CodeQL alerts this PR introduced:\n- js/xss at src/a.ts:10 — msg',
       },
     ]);
   });
@@ -105,6 +148,62 @@ describe('attributeCiFailure (#2817)', () => {
     expect(a.items[1].reason).toBe('file not changed by this PR');
     expect(a.baseline).toBe(false);
     expect(attributeCiFailure(ev({ alerts: [alert('src/z.ts:2')] }), ['src/a.ts'], undefined).baseline).toBe(true);
+  });
+
+  describe('CodeQL data-flow alerts in unchanged files (#3712)', () => {
+    const newPhrase = 'New alerts in code changed by this pull request — 3 high';
+    const codeql = (summary: string) => ({ name: 'CodeQL', conclusion: 'failure', summary });
+    const sink = { ...alert('packages/core/src/daemon/run-store.ts:81', 'js/insecure-temporary-file'), number: 230 };
+    const changed = ['packages/core/src/daemon/factoryd-http.ts'];
+
+    it('attributes an alert in an unchanged file that is absent on base and reported new by CodeQL (#3712)', () => {
+      const a = attributeCiFailure(ev({ failingChecks: [codeql(newPhrase)], alerts: [sink] }), changed, undefined, {
+        baseRef: 'main',
+        numbers: [1],
+        refs: [],
+      });
+      expect(a.baseline).toBe(false);
+      expect(a.items[0]).toMatchObject({ attributable: true, reason: 'not open on base main' });
+      expect(a.items.map((i) => i.reason)).not.toContain('file not changed by this PR');
+    });
+
+    it('keeps an alert in an unchanged file that is open on base as baseline even when CodeQL reports new alerts (#3712)', () => {
+      const a = attributeCiFailure(ev({ failingChecks: [codeql(newPhrase)], alerts: [sink] }), changed, undefined, {
+        baseRef: 'main',
+        numbers: [230],
+        refs: [],
+      });
+      expect(a.baseline).toBe(true);
+      expect(a.items[0].reason).toContain('also open on base main');
+    });
+
+    it('falls back to the CodeQL new-alerts summary when base alerts are unavailable (#3712)', () => {
+      const withPhrase = attributeCiFailure(
+        ev({ failingChecks: [codeql(newPhrase)], alerts: [sink] }),
+        changed,
+        undefined,
+      );
+      expect(withPhrase.baseline).toBe(false);
+      expect(withPhrase.items[0]).toMatchObject({
+        attributable: true,
+        reason: 'CodeQL reports new alerts in code changed by this PR',
+      });
+      const without = attributeCiFailure(
+        ev({ failingChecks: [codeql('1 new alert')], alerts: [sink] }),
+        changed,
+        undefined,
+      );
+      expect(without.baseline).toBe(true);
+      expect(without.items[0].reason).toBe('file not changed by this PR');
+    });
+
+    it('matches a base alert by rule and location when the alert has no number (#3712)', () => {
+      const noNumber = alert('src/z.ts:2', 'js/xss');
+      const open = { baseRef: 'main', numbers: [], refs: ['js/xss at src/z.ts:2'] };
+      expect(attributeCiFailure(ev({ alerts: [noNumber] }), changed, undefined, open).baseline).toBe(true);
+      const absent = { baseRef: 'main', numbers: [], refs: [] };
+      expect(attributeCiFailure(ev({ alerts: [noNumber] }), changed, undefined, absent).baseline).toBe(false);
+    });
   });
 
   it('marks a check also failing on base as non-attributable baseline', () => {
@@ -179,6 +278,48 @@ describe('listBaseFailingChecks', () => {
       baseSha: 'deadbeef',
       failing: ['test'],
     });
+  });
+});
+
+describe('listBaseCodeqlAlerts (#3712)', () => {
+  const alertRow = (n: number) => ({
+    number: n,
+    rule: { id: 'js/xss' },
+    most_recent_instance: { location: { path: `f${n}.ts`, start_line: n } },
+  });
+  const stub = (pages: unknown[][]) => {
+    const calls: { ref: string; state: string; page: number }[] = [];
+    const octokit = {
+      rest: {
+        pulls: { get: async () => ({ data: { base: { ref: 'main' } } }) },
+        codeScanning: {
+          listAlertsForRepo: async (a: { ref: string; state: string; page: number }) => {
+            calls.push(a);
+            return { data: pages[a.page - 1] ?? [] };
+          },
+        },
+      },
+    } as never;
+    return { octokit, calls };
+  };
+
+  it('reads open alerts on refs/heads/<base>, paginating until a short page', async () => {
+    const full = Array.from({ length: 100 }, (_, i) => alertRow(i + 1));
+    const { octokit, calls } = stub([full, [{ number: 500, rule: { name: 'named' } }]]);
+    const result = await listBaseCodeqlAlerts(octokit, 'o', 'r', 9);
+    expect(calls.map((c) => c.page)).toEqual([1, 2]);
+    expect(calls[0]).toMatchObject({ ref: 'refs/heads/main', state: 'open' });
+    expect(result.baseRef).toBe('main');
+    expect(result.numbers).toHaveLength(101);
+    expect(result.numbers.at(-1)).toBe(500);
+    expect(result.refs[0]).toBe('js/xss at f1.ts:1');
+    expect(result.refs.at(-1)).toBe('named at (unknown location)');
+  });
+
+  it('throws when the last allowed page is full', async () => {
+    const full = Array.from({ length: 100 }, (_, i) => alertRow(i + 1));
+    const { octokit } = stub(Array.from({ length: 10 }, () => full));
+    await expect(listBaseCodeqlAlerts(octokit, 'o', 'r', 9)).rejects.toThrow('exceeds 1000 alerts');
   });
 });
 
