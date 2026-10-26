@@ -254,7 +254,12 @@ describe('cli', () => {
       expect(() => {
         logEvent('issue_unparked', 7, '#7 auto-unparked');
         logEvent('warn', 7, 'park comment not updated');
+        logEvent('order_collision_repaired', 7, '#7 moved from order 1 to 2');
+        logEvent('order_collision_repaired', 7, '#7 stays shared, exhausted');
       }).not.toThrow();
+      const { onSkip } = ops.pollBlockedParks.mock.calls[0][0];
+      onSkip('blocked-park poll skipped: this host is not the fleet leader');
+      expect(logged()).toContain('reconcile: blocked-park poll skipped: this host is not the fleet leader');
     });
 
     it('--reconcile survives a rejected pollBlockedParks', async () => {

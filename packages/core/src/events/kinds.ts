@@ -6,6 +6,7 @@
 
 import { DECOMPOSE_EVENT_TRAITS } from './decompose-traits.js';
 import type { EventTraits, LaneStatus } from './event-traits.js';
+import { QUEUE_EVENT_TRAITS, type QueueEventKind } from './queue-traits.js';
 
 export type { EventTraits, LaneStatus };
 export type * from './payloads.js'; // every payload type; one line keeps this file under the max-lines ceiling
@@ -112,8 +113,7 @@ export type EventKind =
   | 'ingest_file_overlap_held'
   | 'ingested'
   | 'issue-title'
-  | 'issue_deferred'
-  | 'issue_unparked'
+  | QueueEventKind
   | 'iterate_queued'
   | 'iterate_rejected'
   | 'kpi-snapshot'
@@ -354,8 +354,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   ingest_file_overlap_held: { severity: 'warn', isPark: false, isTerminal: false },
   ingested: { severity: 'info', isPark: false, isTerminal: false },
   'issue-title': { severity: 'info', isPark: false, isTerminal: false },
-  issue_deferred: { severity: 'info', isPark: false, isTerminal: false },
-  issue_unparked: { severity: 'info', isPark: false, isTerminal: false },
+  ...QUEUE_EVENT_TRAITS,
   'kpi-snapshot': { severity: 'info', isPark: false, isTerminal: false },
   // End-of-run KPI sweep not run: the run opened no PR and merged nothing.
   'kpi-sweep-skipped': { severity: 'info', isPark: false, isTerminal: false },

@@ -1070,6 +1070,7 @@ describe('lanes', () => {
 describe('createOctokitQueueClient', () => {
   it('lists open issues with the given labels, dropping pull requests and normalising label shapes', async () => {
     const octokit: any = {
+      paginate: async (fn: (input: unknown) => Promise<{ data: unknown[] }>, input: unknown) => (await fn(input)).data,
       rest: {
         issues: {
           listForRepo: async (input: unknown) => {
@@ -1086,7 +1087,6 @@ describe('createOctokitQueueClient', () => {
       },
     };
     const captured: Record<string, unknown> = {};
-
     const client = createOctokitQueueClient(octokit);
     const result = await client.listOpenIssuesWithLabels({ owner: 'o', repo: 'r', labels: ['factory:queued'] });
 

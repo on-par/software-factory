@@ -23,6 +23,21 @@ export function toQueueIssue(issue: RawIssue): QueueIssue {
   };
 }
 
+/** Every open non-PR issue carrying ALL of `labels`, across all pages (#3147). */
+export async function listOpenQueueIssues(
+  octokit: Octokit,
+  { owner, repo, labels }: { owner: string; repo: string; labels: string[] },
+): Promise<QueueIssue[]> {
+  const data = await octokit.paginate(octokit.rest.issues.listForRepo, {
+    owner,
+    repo,
+    state: 'open',
+    labels: labels.join(','),
+    per_page: 100,
+  });
+  return data.filter((issue: { pull_request?: unknown }) => !issue.pull_request).map(toQueueIssue);
+}
+
 export function createOctokitLabelSweepMethods(
   octokit: Octokit,
 ): Required<Pick<QueueGitHubClient, 'listRepoLabels' | 'deleteRepoLabel' | 'listAllOpenIssues' | 'serverDate'>> {

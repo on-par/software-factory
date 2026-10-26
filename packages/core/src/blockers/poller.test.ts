@@ -10,6 +10,7 @@ import {
   type BlockedParkStore,
   type BlockerEvidence,
   createOctokitBlockedParkStore,
+  isFleetLeader,
   MAX_AUTO_UNPARKS,
   pollBlockedParks,
 } from './poller.js';
@@ -384,5 +385,65 @@ describe('createOctokitBlockedParkStore', () => {
     });
     const got = await createOctokitBlockedParkStore(octokit, 'o/r').readParkComment(5);
     expect(got?.id).toBe(2);
+  });
+});
+
+describe('isFleetLeader (#3147)', () => {
+  it('treats an unset or blank FACTORY_FLEET_LEADER as every host being leader', () => {
+    expect(isFleetLeader({}, 'a')).toBe(true);
+    expect(isFleetLeader({ FACTORY_FLEET_LEADER: '  ' }, 'a')).toBe(true);
+  });
+
+  it('matches the configured hostname case-insensitively', () => {
+    expect(isFleetLeader({ FACTORY_FLEET_LEADER: 'host-a' }, 'host-a')).toBe(true);
+    expect(isFleetLeader({ FACTORY_FLEET_LEADER: ' Host-A ' }, 'host-a')).toBe(true);
+  });
+
+  it('is false when another host is the leader', () => {
+    expect(isFleetLeader({ FACTORY_FLEET_LEADER: 'host-b' }, 'host-a')).toBe(false);
+  });
+});
+
+describe('pollBlockedParks fleet leader and order repair (#3147)', () => {
+  it('returns [] without touching GitHub or the store on a non-leader host', async () => {
+    const { client } = fakeClient(new Map([[5, parked()]]));
+    const list = vi.spyOn(client, 'listOpenIssuesWithLabels');
+    const { store } = fakeStore(new Map(), new Map());
+    const read = vi.spyOn(store, 'readParkComment');
+    const onSkip = vi.fn();
+    const results = await pollBlockedParks({ client, ...base, store, isLeader: () => false, onSkip });
+    expect(results).toEqual([]);
+    expect(list).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+    expect(onSkip).toHaveBeenCalledWith(expect.stringContaining('not the fleet leader'));
+  });
+
+  it('emits order_collision_repaired when an auto-unpark lost a position race', async () => {
+    const labels = new Map<number, string[]>([
+      [3, [QUEUED_LABEL, laneLabel('build'), 'factory:order:1']],
+      [5, parked()],
+    ]);
+    const { client: inner } = fakeClient(labels);
+    let laneScans = 0;
+    // The first lane scan is stale: it misses #3, so #5 picks the position #3 already holds.
+    const client: QueueGitHubClient = {
+      ...inner,
+      listOpenIssuesWithLabels: async (input) => {
+        const all = await inner.listOpenIssuesWithLabels(input);
+        if (input.labels.includes(laneLabel('build')) && !input.labels.includes(PARKED_LABEL) && laneScans++ === 0) {
+          return all.filter((m) => m.number !== 3);
+        }
+        return all;
+      },
+    };
+    const { store } = fakeStore(
+      new Map([[5, comment(5)]]),
+      new Map([[5, [blocker(9)]]]),
+      new Map([[9, { factoryFiled: true, mergedClosingPr: true }]]),
+    );
+    const logEvent = vi.fn();
+    const results = await pollBlockedParks({ client, ...base, store, logEvent });
+    expect(results[0]).toMatchObject({ issue: 5, outcome: 'unparked', order: 2 });
+    expect(logEvent).toHaveBeenCalledWith('order_collision_repaired', 5, expect.stringContaining('from order 1 to 2'));
   });
 });

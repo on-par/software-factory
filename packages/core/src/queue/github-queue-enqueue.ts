@@ -1,6 +1,7 @@
 // packages/core/src/queue/github-queue-enqueue.ts — GitHub queue enqueue paths: tail append and right-behind-the-parent placement (#3539).
 
 import { orderCollisionAt, scanLaneOrders } from './order-collision.js';
+import { dedupeOrderLabels, repairOrderCollision, type OrderCollisionRepair } from './order-repair.js';
 import { QUEUE_ORDER_LABEL_PREFIX } from './queue-order.js';
 import {
   laneLabel,
@@ -48,7 +49,12 @@ function orderOf(label: string): number | undefined {
 
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-export function createEnqueuers(client: QueueGitHubClient, owner: string, repo: string) {
+export function createEnqueuers(
+  client: QueueGitHubClient,
+  owner: string,
+  repo: string,
+  hooks?: { onOrderRepair?: (repair: OrderCollisionRepair) => void },
+) {
   async function enqueue(
     lane: string,
     issues: readonly number[],
@@ -88,7 +94,10 @@ export function createEnqueuers(client: QueueGitHubClient, owner: string, repo: 
         const current = await client.getIssueLabels({ owner, repo, issue_number: issue });
         if (current.some((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX))) {
           const orderLabel = current.find((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX)) ?? '';
-          const existing = Number(orderLabel.slice(QUEUE_ORDER_LABEL_PREFIX.length));
+          const parsed = Number(orderLabel.slice(QUEUE_ORDER_LABEL_PREFIX.length));
+          // A double unpark can leave two order labels; keep one so the lane never stalls (#3147).
+          const kept = await dedupeOrderLabels(client, owner, repo, issue);
+          const existing = kept ?? parsed;
           results.push({
             issue,
             outcome: 'already-queued',
@@ -106,10 +115,25 @@ export function createEnqueuers(client: QueueGitHubClient, owner: string, repo: 
         }
         await client.addLabels({ owner, repo, issue_number: issue, labels: specs.map((s) => s.name) });
         const collision = orderCollisionAt(scan, naive);
+        // Converge after the optimistic write: one order label, and no shared position with a lower issue (#3147).
+        const kept = await dedupeOrderLabels(client, owner, repo, issue);
+        const repair =
+          kept === undefined
+            ? undefined
+            : await repairOrderCollision({
+                client,
+                owner,
+                repo,
+                lane,
+                issue,
+                position: kept,
+                onRepair: hooks?.onOrderRepair,
+              });
         results.push({
           issue,
           outcome: 'queued',
-          position,
+          position: repair?.position ?? position,
+          ...(repair && repair.repairs.length > 0 ? { repaired: repair.repairs } : {}),
           labelsAdded: specs.map((s) => s.name).filter((name) => !current.includes(name)),
           labelsCreated: created,
           ...(collision && !useRequested ? { collision } : {}),
