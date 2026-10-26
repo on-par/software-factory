@@ -1,20 +1,16 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { loadRepoConfig, resolveT1SampleRate } from './repo.js';
 
-const tempDirs = new Set<string>();
-afterEach(async () => {
-  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
-  tempDirs.clear();
-});
+const tempDirs = createTempDirs();
+afterEach(() => tempDirs.cleanup());
 
 async function repoWith(classifier: unknown): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), 'repo-t1-rate-test-'));
-  tempDirs.add(root);
+  const root = await tempDirs.make('repo-t1-rate-test-');
   await mkdir(join(root, '.factory'), { recursive: true });
   await writeFile(join(root, '.factory', 'config.json'), JSON.stringify({ version: 2, classifier }));
   return root;
