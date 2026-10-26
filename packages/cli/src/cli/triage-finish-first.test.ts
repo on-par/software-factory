@@ -1,11 +1,12 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { applyFinishBeforeStart } from './triage-finish-first.js';
 
+const tmp = createTempDirs();
 const cand = (number: number, body = '') => ({ number, title: `t${number}`, labels: [], body });
 const open = [cand(1), cand(2), cand(20, 'Part of #2'), cand(12, 'Decomposed from #1')];
 const queue = 'app 20\napp 12\n';
@@ -14,10 +15,10 @@ describe('applyFinishBeforeStart (#3109)', () => {
   let dir: string;
   let events: string;
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'triage-finish-first-'));
+    dir = tmp.makeSync('triage-finish-first-');
     events = join(dir, 'events.jsonl');
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(async () => tmp.cleanup());
   const logged = () => {
     try {
       return readFileSync(events, 'utf-8');
