@@ -42,9 +42,11 @@ function idNumber(id: string): number {
 }
 
 export function parseCoveredParentIds(body: string | null | undefined): string[] {
-  const match = /^Covers parent criteria:\s*(.+)$/m.exec(body ?? '');
-  if (!match) return [];
-  const ids = match[1]
+  const prefix = 'Covers parent criteria:';
+  const line = (body ?? '').split('\n').find((l) => l.startsWith(prefix));
+  if (line === undefined) return [];
+  const ids = line
+    .slice(prefix.length)
     .split(',')
     .map((s) => s.trim())
     .filter((s) => isParentCriterionId(s));
