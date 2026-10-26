@@ -89,7 +89,7 @@ seven published `@on-par` packages move to 0.9.18 in lockstep. Install or update
 - OpenCode harness: empty output after retry, and unbounded hang, on the
   rework/`build_claude` route (#694, #3683).
 - Queue refuses to reap leases when the local clock is skewed from GitHub; `factory
-  doctor` reports the skew (#3149, #3684).
+doctor` reports the skew (#3149, #3684).
 
 ## 0.9.17 - 2026-10-24
 
