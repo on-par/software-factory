@@ -73,4 +73,33 @@ describe('reworkWorker extraInstructions (#2816)', () => {
     expect(prompt).toContain('3. Re-run only the affected tests: `x`.\n4. Commit');
     expect(prompt).not.toContain('smallest relevant verification command');
   });
+
+  it('renders only the standards view of the constitution (#1599)', async () => {
+    const prompts: string[] = [];
+    const router = {
+      run: async (_task: string, prompt: string) => {
+        prompts.push(prompt);
+        return { model: 'm', output: 'ok', exitCode: 0, attempts: [] };
+      },
+    } as any;
+    await reworkWorker({
+      issue: 1,
+      worktree: '/tmp/wt',
+      specPath: '/tmp/spec.md',
+      summary,
+      constitution: {
+        product: 'p',
+        version: 1,
+        checkers: [],
+        requireTests: false,
+        body: '## Conventions\n\nUse tabs.\n\n## Repository layout\n\nsrc/ holds code\n',
+        path: '/tmp/p.md',
+        source: 'bundled',
+      },
+      router,
+      log: () => {},
+    });
+    expect(prompts[0]).toContain('Use tabs.');
+    expect(prompts[0]).not.toContain('src/ holds code');
+  });
 });
