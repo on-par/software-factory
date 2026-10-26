@@ -78,83 +78,6 @@ afterEach(async () => {
 });
 
 describe('buildPhase FACTORY_CODEX kill-switch', () => {
-  it('falls back to build_claude and logs a warn when codex is disabled via the opt', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
-    const specPath = join(worktree, 'issue-79.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_codex: [{ output: 'codex output' }],
-        build_claude: [{ output: 'claude output' }],
-      },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
-    const logs: Array<{ type: string; msg: string }> = [];
-
-    const result = await buildPhase({
-      issue: 79,
-      repo: 'on-par/software-factory',
-      worktree,
-      specPath,
-      branch: 'ship-it/79-add-factory-codex-0-kill-switch',
-      route: 'codex',
-      router,
-      constitution: null,
-      log: (type, msg) => {
-        logs.push({ type, msg });
-      },
-      codexDisabled: true,
-    });
-
-    expect(result.ok).toBe(true);
-    expect(stub.calls[stub.calls.length - 1].task).toBe('build_claude');
-    expect(logs).toContainEqual({ type: 'warn', msg: 'codex unavailable — falling back to claude' });
-  });
-
-  it('drops a Codex-harness modelOverride when codex is disabled instead of running it on the claude route (#1367)', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
-    const specPath = join(worktree, 'issue-1367.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_codex: [{ output: 'codex output' }],
-        build_claude: [{ output: 'claude output' }],
-      },
-    });
-    // Put the claude-capable worker first so the claude route's own pick is observable: with
-    // the override dropped, the route must land on stub-worker, not the codex model.
-    const router = new ModelRouter(
-      { ...models, tiers: { worker: ['stub-worker', 'stub-codex', 'pinned-model'] } },
-      routes,
-      false,
-      stub,
-    );
-    const logs: Array<{ type: string; msg: string }> = [];
-
-    const result = await buildPhase({
-      issue: 1367,
-      repo: 'on-par/software-factory',
-      worktree,
-      specPath,
-      branch: 'ship-it/1367',
-      route: 'codex',
-      router,
-      constitution: null,
-      log: (type, msg) => {
-        logs.push({ type, msg });
-      },
-      codexDisabled: true,
-      modelOverride: 'stub-codex',
-    });
-
-    expect(result.ok).toBe(true);
-    const last = stub.calls[stub.calls.length - 1];
-    expect(last.task).toBe('build_claude');
-    expect(last.model).toBe('stub-worker');
-    expect(logs).toContainEqual({ type: 'warn', msg: 'codex unavailable — falling back to claude' });
-    expect(logs.some((l) => l.type === 'model_override_ignored' && l.msg.includes('stub-codex'))).toBe(true);
-  });
-
   it('uses build_codex and logs no warn when codex is not disabled', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);
@@ -219,10 +142,10 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
     });
   });
 
-  it('forces build_claude via the codexDisabled opt', async () => {
+  it('runs the codex route as given; buildPhase has no codex fallback of its own (#664)', async () => {
     const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
     tempDirs.add(worktree);
-    const specPath = join(worktree, 'issue-79.md');
+    const specPath = join(worktree, 'issue-664.md');
     const stub = new StubModelExecutor({
       scripts: {
         build_codex: [{ output: 'codex output' }],
@@ -233,23 +156,24 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
     const logs: Array<{ type: string; msg: string }> = [];
 
     const result = await buildPhase({
-      issue: 79,
+      issue: 664,
       repo: 'on-par/software-factory',
       worktree,
       specPath,
-      branch: 'ship-it/79-repo-config-codex-kill-switch',
+      branch: 'ship-it/664',
       route: 'codex',
       router,
       constitution: null,
       log: (type, msg) => {
         logs.push({ type, msg });
       },
-      codexDisabled: true,
+      routeCapabilities: { codexDisabled: true, codexBreakerOpen: false, localOnly: false },
     });
 
     expect(result.ok).toBe(true);
-    expect(stub.calls[stub.calls.length - 1].task).toBe('build_claude');
-    expect(logs).toContainEqual({ type: 'warn', msg: 'codex unavailable — falling back to claude' });
+    expect(result.route).toBe('codex');
+    expect(stub.calls[stub.calls.length - 1].task).toBe('build_codex');
+    expect(logs.some((l) => l.msg.includes('codex unavailable'))).toBe(false);
   });
 });
 

@@ -2,6 +2,7 @@ import type { BuildRoutePin } from '../config/repo.js';
 import type { EventKind } from '../events/kinds.js';
 import { updateSpecRoute } from '../spec/index.js';
 import { type BuildRouteName, defaultBuildRoute, resolveRunnableBuildRoute } from './plan-routes.js';
+import { resolveRoute, type RouteCapabilities } from './route-capabilities.js';
 
 /** Settle the build route after PLAN: the planner's choice, then local-only / codex-disabled /
  *  unrunnable-route fallbacks, then the repo pin. The persisted spec's frontmatter is kept in sync,
@@ -9,28 +10,28 @@ import { type BuildRouteName, defaultBuildRoute, resolveRunnableBuildRoute } fro
 export async function settlePlanRoute(opts: {
   parsedRoute: BuildRoutePin | null;
   runnableNow: readonly BuildRouteName[];
-  localOnly?: boolean;
-  isCodexDisabled: boolean;
+  capabilities: RouteCapabilities;
   preferredRoute?: BuildRoutePin;
   specPath: string;
   log: (type: EventKind, msg: string) => void;
 }): Promise<BuildRoutePin> {
-  const { parsedRoute, runnableNow, localOnly, isCodexDisabled, preferredRoute, specPath, log } = opts;
+  const { parsedRoute, runnableNow, capabilities, preferredRoute, specPath, log } = opts;
   // A planner-written command is kept only when build_command can run here (#2874).
   const commandRunnable = runnableNow.includes('command');
   let planned: BuildRouteName =
     (parsedRoute === 'command' && !commandRunnable ? undefined : parsedRoute) ?? defaultBuildRoute(runnableNow);
 
-  if (localOnly && planned !== 'codex') {
+  if (capabilities.localOnly && planned !== 'codex') {
     log('warn', 'local-only mode requires a local Codex harness — forcing route to codex');
     planned = 'codex';
     await updateSpecRoute(specPath, 'codex', 'local-only');
   }
 
-  if (planned === 'codex' && isCodexDisabled) {
+  const degraded = resolveRoute(planned, capabilities);
+  if (degraded.reason) {
     log('warn', 'codex unavailable — falling back to claude');
-    planned = 'claude';
-    await updateSpecRoute(specPath, 'claude', 'codex-disabled');
+    planned = degraded.route;
+    await updateSpecRoute(specPath, degraded.route, degraded.reason);
   }
 
   const resolved = resolveRunnableBuildRoute(planned, runnableNow);

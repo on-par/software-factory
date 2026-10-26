@@ -27,6 +27,7 @@ import type { SizeGateMode } from '../config/index.js';
 import type { BuildRoutePin } from '../config/repo.js';
 import type { PlanResult } from './plan-result.js';
 import { settlePlanRoute } from './plan-route.js';
+import { codexUnavailable, type RouteCapabilities } from './route-capabilities.js';
 import { blockedNoChangeSpecReason, noBuildReason, planSummary, specWriteDeniedResult } from './plan-spec-guards.js';
 import { decomposeOversizedIssue, renderChildIssueBody } from '../readiness/decompose.js';
 import { resolveSliceGate } from '../readiness/slice-gate.js';
@@ -320,7 +321,7 @@ async function planPhaseImpl(opts: {
   approvalGate?: ApprovalGate;
   drainSteering?: () => ConsumedSteering;
   maxReplans?: number;
-  codexDisabled?: boolean;
+  routeCapabilities?: RouteCapabilities;
   /** Input source to resolve before PLAN. Defaults to this run's GitHub issue. */
   workSource?: { kind: WorkRequestSourceKind; params: unknown };
   /** Source registry. Defaults to the built-in registry (GitHub issue adapter only). */
@@ -375,7 +376,7 @@ async function planPhaseImpl(opts: {
   const maxReplans = opts.maxReplans ?? 3;
   const enforceSizeGate = opts.enforceSizeGate ?? true;
   const localOnly = opts.localOnly ?? false;
-  const isCodexDisabled = opts.codexDisabled ?? false;
+  const routeCapabilities = opts.routeCapabilities ?? { codexDisabled: false, codexBreakerOpen: false, localOnly };
 
   const workSources = opts.workSources ?? createDefaultWorkSourceRegistry({ octokit });
   const source = opts.workSource ?? {
@@ -574,7 +575,7 @@ async function planPhaseImpl(opts: {
   const fastPathRouteOk = !opts.preferredRoute || opts.preferredRoute === 'codex';
   if (
     opts.fastPath &&
-    !isCodexDisabled &&
+    !codexUnavailable(routeCapabilities) &&
     fastPathRouteOk &&
     isFastPathEligible({ issueBody, readinessPassed: readiness.pass })
   ) {
@@ -736,8 +737,7 @@ async function planPhaseImpl(opts: {
     const route = await settlePlanRoute({
       parsedRoute: parsed.route,
       runnableNow,
-      localOnly,
-      isCodexDisabled,
+      capabilities: routeCapabilities,
       preferredRoute: opts.preferredRoute,
       specPath,
       log,

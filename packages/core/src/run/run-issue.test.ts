@@ -1368,7 +1368,7 @@ describe('runIssue — #1367: a pinned build model determines the build route', 
     expect(vi.mocked(buildPhase).mock.calls[0][0]).toMatchObject({
       route: 'claude',
       modelOverride: undefined,
-      codexDisabled: true,
+      routeCapabilities: expect.objectContaining({ codexDisabled: true }),
     });
     expect(events.some(([t]) => t === 'model_override_ignored')).toBe(true);
   });

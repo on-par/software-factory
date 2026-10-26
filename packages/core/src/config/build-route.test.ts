@@ -176,8 +176,7 @@ async function runBuildRoute(pin: string, flags: { localOnly?: boolean; codexDis
     const route = await settlePlanRoute({
       parsedRoute: 'claude',
       runnableNow: ['claude', 'codex'],
-      localOnly: opts.localOnly,
-      isCodexDisabled: opts.codexDisabled ?? false,
+      capabilities: opts.routeCapabilities ?? { localOnly: false, codexDisabled: false, codexBreakerOpen: false },
       preferredRoute: opts.preferredRoute,
       specPath,
       log: () => {},

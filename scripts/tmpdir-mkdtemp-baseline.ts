@@ -130,7 +130,7 @@ export const TMPDIR_MKDTEMP_BASELINE: Readonly<Record<string, number>> = {
   'packages/core/src/phases/build-repo-harness.test.ts': 2,
   'packages/core/src/phases/build-surfaces.test.ts': 2,
   'packages/core/src/phases/build.opencode-failover.test.ts': 1,
-  'packages/core/src/phases/build.test.ts': 64,
+  'packages/core/src/phases/build.test.ts': 62,
   'packages/core/src/phases/check-command-rework.test.ts': 2,
   'packages/core/src/phases/check.test.ts': 13,
   'packages/core/src/phases/codex-only.e2e.test.ts': 1,

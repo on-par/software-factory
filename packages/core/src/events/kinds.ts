@@ -193,6 +193,7 @@ export type EventKind =
   | 'run-done'
   | 'sandbox'
   | 'sandbox-degraded'
+  | 'route-degraded'
   | 'sandbox-disabled'
   | 'sandbox-env'
   | 'sandbox-unavailable'
@@ -444,6 +445,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   'run-done': { severity: 'info', isPark: false, isTerminal: true },
   sandbox: { severity: 'info', isPark: false, isTerminal: false },
   'sandbox-degraded': { severity: 'warn', isPark: false, isTerminal: false },
+  'route-degraded': { severity: 'warn', isPark: false, isTerminal: false },
   'sandbox-disabled': { severity: 'warn', isPark: false, isTerminal: false },
   // A sandbox denied a loopback bind (#3332): environment, not code; parks on the first hit with no rework.
   'sandbox-env': { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },

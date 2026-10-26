@@ -150,6 +150,7 @@ describe('levelForType', () => {
     ['resource_limit', 'warn'],
     ['sandbox-unavailable', 'warn'],
     ['sandbox-degraded', 'warn'],
+    ['route-degraded', 'warn'],
     ['sandbox-disabled', 'warn'],
     ['environment_warning', 'warn'],
     ['environment_orphan', 'warn'],

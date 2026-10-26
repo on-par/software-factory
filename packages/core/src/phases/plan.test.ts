@@ -2508,7 +2508,7 @@ npm run test`;
         log: (type, msg) => {
           logs.push({ type, msg });
         },
-        codexDisabled: true,
+        routeCapabilities: { codexDisabled: true, codexBreakerOpen: false, localOnly: false },
       });
 
       expect(result.route).toBe('claude');
@@ -2585,7 +2585,7 @@ npm run test`;
         log: (type, msg) => {
           logs.push({ type, msg });
         },
-        codexDisabled: true,
+        routeCapabilities: { codexDisabled: true, codexBreakerOpen: false, localOnly: false },
       });
 
       expect(result.route).toBe('claude');
