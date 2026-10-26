@@ -16,6 +16,7 @@ import type { AwaitingCiLaneOps } from './awaiting-ci-recheck.js';
 import type { BaseHoldDecision } from './base-hold.js';
 import type { ChildEnqueueResult } from './run-lane-decompose.js';
 import type { waitForMerge } from './land.js';
+import type { ReplacedPr } from './land-rebuild.js';
 
 export type RunLaneDeps = {
   /** Octokit for the park comment of a park raised outside runIssue (#3534). Absent = no comment. */
@@ -44,6 +45,8 @@ export type RunLaneDeps = {
       onOutcome?: (outcome: RunOutcome) => void;
       /** Aborts when this issue's claim lease is lost (#3146). */
       signal?: AbortSignal;
+      /** #3325: rebuild on this fresh branch from the frozen spec. */
+      rebuild?: { branch: string };
     },
   ) => Promise<string>;
   waitMerge?: typeof waitForMerge;
@@ -78,6 +81,8 @@ export type RunLaneDeps = {
   reapWorktree?: (issue: number) => Promise<void>;
   /** Settles the park's PR (closes it with the park reason, keeping the branch) when a park is raised while landing; default no-op. */
   closeParkedPr?: (issue: number, branch: string, reason: ParkReason) => Promise<void>;
+  /** #3325: closes the conflicting PR a rebuild replaced, with a comment linking the new one. Defaults to the GitHub API. */
+  closeReplacedPr?: (replaced: ReplacedPr) => Promise<void>;
   /** Between-issues worktree GC pass (#1757), run after every terminal outcome before the
    *  lane moves on. Defaults to a no-op so injected-deps callers and tests are unaffected;
    *  cmdRun wires it to sweepBetweenLaneIssues. */

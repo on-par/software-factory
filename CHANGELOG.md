@@ -19,6 +19,7 @@ section to `## X.Y.Z - date`. See
 ### Changed
 
 - BUILD prompts on the codex and opencode routes no longer inline `AGENTS.md`, which those harnesses load from the worktree themselves. A one-line pointer replaces it. claude and command routes keep the full text (#1600).
+- When merging `origin/main` into an open PR conflicts on source paths, the `factory run` lane rebuilds the issue once from its frozen spec, with no PLAN call, on a fresh `<branch>-rebuild` branch off `origin/main`. It opens a new PR that keeps `Closes #<issue>`, closes the old PR with a comment linking the new one, keeps the old branch, and logs `pr_refresh` with `action=rebuild newPr=#<n>`. A failed rebuild, or a conflict on an already rebuilt branch, parks `conflict` with the failing stage and the conflicting paths. Land itself never builds, and `factory land` still parks on the conflict (#3325).
 - `factory tui`'s Active tab says why it is idle (`no active work — GitHub queue empty` or `— all runs parked/finished`), and the run detail header shows issue, title, phase, elapsed time and last activity in one block (#1365).
 - The agent sandbox (`sandbox-exec` and `firejail`) now denies reads of `~/.ssh`, `~/.aws`, `~/.gnupg` and `~/.config/gh`. Harness auth files stay readable (#1586).
 - Claude Haiku 5.5 (`claude-haiku-5-5`, $0.10/$0.50 per Mtok) is a packaged claude-cli model. The readiness judge (`readiness_judge`) now routes through the new `triage_cheap` tier, which tries Haiku before Sonnet. `models.pins.triage` and `tiers.triage` still apply to it (#783).
