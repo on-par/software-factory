@@ -1,7 +1,7 @@
 {
   "name": "@on-par/factory-dashboard",
-  "version": "0.9.18",
-  "description": "Factory dashboard — Vite + React + Tailwind walking skeleton.",
+  "version": "0.9.19",
+  "description": "Factory dashboard \u2014 Vite + React + Tailwind walking skeleton.",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,12 +12,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@on-par/contracts": "^0.9.18",
+    "@on-par/contracts": "^0.9.19",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
-    "@on-par/factory-core": "^0.9.18",
+    "@on-par/factory-core": "^0.9.19",
     "@tailwindcss/vite": "^4.0.0",
     "@testing-library/react": "^16.3.3",
     "@types/react": "^19.3.0",
