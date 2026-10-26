@@ -189,6 +189,12 @@ function renderReviewRouting(routing: ReviewRouting): string {
       lines.push(`- \`${rule.id}\` (${rule.class}): ${paths === '' ? '(no paths)' : truncate(paths, 300)}`);
     }
   }
+  if (routing.sample) {
+    const { value, rate, held } = routing.sample;
+    lines.push(
+      `- T1 sample: ${value.toFixed(4)} vs rate ${rate} — ${held ? 'held for a human (t1-sampled)' : 'not sampled'}`,
+    );
+  }
   if (routing.shadow) lines.push(...renderShadowVerdict(routing.shadow));
   return lines.join('\n');
 }

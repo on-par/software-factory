@@ -110,7 +110,12 @@ export { resolveFilingPolicy, resolvePrClassifierPolicy, type EffectivePrClassif
 export { describeDraftPrPolicy, resolveDraftPrPolicy, type EffectiveDraftPrPolicy } from './config/run-section.js';
 export type { EffectiveConfig, TrustTier } from './config/repo.js';
 export { resolveBaseHealthChecks, resolveBaselineCacheTtlHours, resolveHermeticGit } from './config/base-health.js';
-export { resolveEffectiveConfig, resolveReviewFloorRules, resolveTrustTier } from './config/repo.js';
+export {
+  resolveEffectiveConfig,
+  resolveReviewFloorRules,
+  resolveT1SampleRate,
+  resolveTrustTier,
+} from './config/repo.js';
 export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix, resolveHostMaxBuilds } from './config/index.js';
 export { evaluateLoadGuard, formatLoadHold, readHostLoad, type LoadGuardDecision } from './environment/load-guard.js';
 export {

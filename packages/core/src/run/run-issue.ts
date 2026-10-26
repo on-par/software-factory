@@ -74,7 +74,7 @@ import {
   type PrShadowInput,
   type PrShadowVerdict,
 } from '../review/classifier.js';
-import { resolveReviewRouting, type ReviewRouting } from '../review/routing.js';
+import { decideT1Sample, resolveReviewRouting, type ReviewRouting, type T1SampleConfig } from '../review/routing.js';
 import { captureDiffBase } from '../checkers/design-smells.js';
 import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings, SizeGateMode } from '../config/index.js';
@@ -174,7 +174,7 @@ export interface RunRequest extends ReworkRequestFields {
   stewardEnabled?: boolean;
   /** Review floor rules for CHECK's design critic class-A skip (#3374); set regardless of the classifier gate. */
   reviewFloorRules?: ReviewFloorRuleSet;
-  prClassifier?: { rules: ReviewFloorRuleSet; gateLabel: string; modelPin?: string };
+  prClassifier?: { rules: ReviewFloorRuleSet; gateLabel: string; modelPin?: string } & T1SampleConfig;
   timeouts: { plan: number; build: number; check: number; approval: number; tests: number; compile?: number };
   modelPins: EffectiveModelPins;
   codexDisabled: boolean;
@@ -1087,14 +1087,14 @@ async function runIssueOnce(
         rules: request.prClassifier.rules,
         readChanges: ports.readReviewFloorChanges,
       });
+      reviewRouting = decideT1Sample(reviewRouting, request.prClassifier, request);
       if (reviewRouting.gated) {
         const label = request.prClassifier.gateLabel;
         const [owner, repoName] = request.repo.split('/');
         const labels = withoutHumanOnlyLabels([label]);
         try {
-          if (labels.length > 0) {
+          if (labels.length > 0)
             await ports.octokit.rest.issues.addLabels({ owner, repo: repoName, issue_number: request.issue, labels });
-          }
         } catch (err) {
           return await terminalParked(
             'held',
