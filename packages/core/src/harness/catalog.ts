@@ -27,6 +27,8 @@ export interface HarnessCatalogEntry {
   /** Built-in agentic harness with no dedicated build route: BUILD rides the generic commit-only
    *  `command` route (#2909). */
   genericBuildRoute?: boolean;
+  /** Repo instruction files the harness loads from the worktree on its own; BUILD does not inline them again (#1600). */
+  autoLoads?: readonly string[];
   /** How doctor probes reachability for this harness. */
   probe: HarnessProbe;
 }
@@ -46,12 +48,14 @@ const CATALOG_ENTRIES: HarnessCatalogEntry[] = [
   {
     id: 'codex-cli',
     agentic: true,
+    autoLoads: ['AGENTS.md'],
     probe: { kind: 'command', command: 'codex', okLabel: 'codex CLI', auth: 'cli' },
   },
   { id: 'ollama-http', agentic: false, probe: { kind: 'ollama', okLabel: 'ollama native' } },
   {
     id: 'opencode',
     agentic: true,
+    autoLoads: ['AGENTS.md'],
     probe: { kind: 'command', command: 'opencode', okLabel: 'opencode CLI', auth: 'cli' },
   },
   {
@@ -121,6 +125,11 @@ export function builtInHarnessRedeclaredMessage(id: string): string {
 
 export function isAgenticHarness(harnessId: string): boolean {
   return HARNESS_CATALOG[harnessId]?.agentic ?? false;
+}
+
+/** Repo instruction files a catalog harness auto-loads from the worktree (#1600); [] for unknown or declared ids. */
+export function harnessAutoLoads(harnessId: string | undefined): readonly string[] {
+  return (harnessId ? HARNESS_CATALOG[harnessId]?.autoLoads : undefined) ?? [];
 }
 
 /** True for a built-in harness whose BUILD runs through the generic `command` route (#2909). */

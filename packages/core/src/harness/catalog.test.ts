@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   HARNESS_CATALOG,
+  harnessAutoLoads,
   harnessCliCommand,
   isAgenticHarness,
   KNOWN_HARNESS_IDS,
@@ -112,5 +113,18 @@ describe('retired harness aliases', () => {
     expect(notice).toContain('my-model');
     expect(notice).toContain('retired');
     expect(notice).toContain('ollama-agentic');
+  });
+});
+
+describe('harnessAutoLoads (#1600)', () => {
+  it('lists AGENTS.md for codex-cli and opencode', () => {
+    expect(harnessAutoLoads('codex-cli')).toEqual(['AGENTS.md']);
+    expect(harnessAutoLoads('opencode')).toEqual(['AGENTS.md']);
+  });
+
+  it('is empty for other, unknown and undefined harnesses', () => {
+    for (const id of ['claude-cli', 'pi', 'command', 'ollama-http', 'nope', undefined]) {
+      expect(harnessAutoLoads(id)).toEqual([]);
+    }
   });
 });

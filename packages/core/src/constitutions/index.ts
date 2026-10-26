@@ -355,16 +355,49 @@ export function renderConstitutionBody(c: Constitution, view: ConstitutionView, 
   return capBody(selected, maxBytes, c.repoInstance?.relPath ?? basename(c.path));
 }
 
+/** Render options for buildConstitutionContext (#1600). */
+export interface ConstitutionRenderOptions {
+  /** `<standards source>` files the target harness already loads; their text is replaced by a pointer. */
+  omitSources?: readonly string[];
+}
+
+/** Replace the content of each `<standards source="X">` block (X in `sources`) with a one-line pointer. */
+function omitAutoLoadedSources(body: string, sources: readonly string[]): string {
+  let out = body;
+  for (const source of sources) {
+    const open = `${BLOCK_OPEN}${source}">\n\n`;
+    const stub = `${source} is loaded automatically by your agent harness from the worktree, so it is not repeated here. It is binding.`;
+    let pos = 0;
+    for (;;) {
+      const start = out.indexOf(open, pos);
+      if (start < 0) break;
+      const contentStart = start + open.length;
+      const close = out.indexOf(BLOCK_CLOSE, contentStart - 2);
+      if (close < 0) break;
+      const end = Math.max(close, contentStart);
+      out = out.slice(0, contentStart) + stub + out.slice(end);
+      pos = contentStart + stub.length + BLOCK_CLOSE.length;
+    }
+  }
+  return out;
+}
+
 /**
  * Build the prompt context for an already-resolved constitution. The whole
  * returned string (wrapper included) is at most CONSTITUTION_MAX_BYTES (#1599).
+ * `opts.omitSources` swaps auto-loaded instruction files for a pointer (#1600).
  */
-export function buildConstitutionContext(c: Constitution | null, view: ConstitutionView = 'full'): string {
+export function buildConstitutionContext(
+  c: Constitution | null,
+  view: ConstitutionView = 'full',
+  opts: ConstitutionRenderOptions = {},
+): string {
   // frontmatter-only constitutions have no prose to enforce — injecting an
   // empty <constitution> block would flip prompts into the "standards exist"
   // branch with nothing to comply with
   if (!c || !c.body.trim()) return '';
 
+  const rendered = opts.omitSources?.length ? { ...c, body: omitAutoLoadedSources(c.body, opts.omitSources) } : c;
   const origin =
     c.source === 'repo'
       ? `this repository's own agent instruction files (${REPO_INSTRUCTION_FILES.join(', ')})`
@@ -385,5 +418,5 @@ your output against them — not against your self-report.${dispute}
 
 `;
   const budget = CONSTITUTION_MAX_BYTES - Buffer.byteLength(prefix + suffix, 'utf8');
-  return prefix + renderConstitutionBody(c, view, budget) + suffix;
+  return prefix + renderConstitutionBody(rendered, view, budget) + suffix;
 }

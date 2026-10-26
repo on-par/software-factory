@@ -17,6 +17,7 @@ section to `## X.Y.Z - date`. See
 
 ### Changed
 
+- BUILD prompts on the codex and opencode routes no longer inline `AGENTS.md`, which those harnesses load from the worktree themselves. A one-line pointer replaces it. claude and command routes keep the full text (#1600).
 - `factory tui`'s Active tab says why it is idle (`no active work — GitHub queue empty` or `— all runs parked/finished`), and the run detail header shows issue, title, phase, elapsed time and last activity in one block (#1365).
 - The agent sandbox (`sandbox-exec` and `firejail`) now denies reads of `~/.ssh`, `~/.aws`, `~/.gnupg` and `~/.config/gh`. Harness auth files stay readable (#1586).
 - Claude Haiku 5.5 (`claude-haiku-5-5`, $0.10/$0.50 per Mtok) is a packaged claude-cli model. The readiness judge (`readiness_judge`) now routes through the new `triage_cheap` tier, which tries Haiku before Sonnet. `models.pins.triage` and `tiers.triage` still apply to it (#783).
