@@ -20,6 +20,7 @@ import { buildLogsJson, runLogs } from './logs.js';
 import { buildStatusJson } from './status-json.js';
 import {
   checkJsonSchema,
+  draftJsonSchema,
   costJsonSchema,
   daemonStatusJsonSchema,
   kpisJsonSchema,
@@ -90,6 +91,7 @@ const generatedContracts = [
   ['resume.schema.json', 'resume.json', resumeJsonSchema],
   ['unpark.schema.json', 'unpark.json', unparkJsonSchema],
   ['check.schema.json', 'check.json', checkJsonSchema],
+  ['draft.schema.json', 'draft.json', draftJsonSchema],
 ] as const;
 
 const queueLabels = (position: number): string[] => ['factory:queued', 'factory:lane:ops', `factory:order:${position}`];

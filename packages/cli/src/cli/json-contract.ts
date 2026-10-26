@@ -382,6 +382,17 @@ export const checkJsonSchema = z.object({
     .optional(),
 });
 
+export const draftJsonSchema = z.object({
+  schemaVersion: z.literal(1),
+  title: z.string(),
+  body: z.string(),
+  score: z.number(),
+  exit: z.union([z.literal(0), z.literal(1), z.literal(3)]),
+  reasons: z.array(z.string()),
+  model: z.string(),
+  cost: z.number().nullable(),
+});
+
 export type CheckJson = z.infer<typeof checkJsonSchema>;
 export type StatusJson = z.infer<typeof statusJsonSchema>;
 export type LogsLineJson = z.infer<typeof logsLineJsonSchema>;

@@ -293,9 +293,9 @@ describe('shipped defaults', () => {
     });
   });
 
-  it('has 23 routes, each pointing at a known tier', () => {
+  it('has 24 routes, each pointing at a known tier', () => {
     const routeIds = Object.keys(defaultRoutesConfig.routes);
-    expect(routeIds).toHaveLength(23);
+    expect(routeIds).toHaveLength(24);
 
     const tierIds = new Set(Object.keys(defaultModelsConfig.tiers));
     for (const [route, def] of Object.entries(defaultRoutesConfig.routes)) {
@@ -448,13 +448,24 @@ describe('steward route (#2111)', () => {
     expect(route?.output).toBe('json');
   });
 
-  it('leaves every route without a model pin, and every route but steward, detect_checks and readiness_judge without allowedTools/output', () => {
+  it('leaves every route without a model pin, and every route but steward, detect_checks, readiness_judge and issue_draft without allowedTools/output', () => {
     for (const [id, def] of Object.entries(defaultRoutesConfig.routes)) {
       expect(def.model, id).toBeUndefined();
+      if (id === 'issue_draft') {
+        expect(def.output, id).toBeUndefined();
+        continue;
+      }
       if (id === 'steward' || id === 'detect_checks' || id === 'readiness_judge') continue;
       expect(def.allowedTools, id).toBeUndefined();
       expect(def.output, id).toBeUndefined();
     }
+  });
+
+  it('ships a tool-less triage issue_draft route (#3171)', () => {
+    const route = defaultRoutesConfig.routes.issue_draft;
+    expect(route?.tier).toBe('triage');
+    expect(route?.allowedTools).toEqual([]);
+    expect(route?.output).toBeUndefined();
   });
 
   it('ships no model that pairs the claude-cli harness with a non-anthropic provider unless it sets an endpoint', () => {

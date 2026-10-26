@@ -335,6 +335,7 @@ import { cmdLogs } from './logs.js';
 import { mergeScopeNotice } from './merge-scope.js';
 import { selectOctokit } from './github-stub.js';
 import { createFactoryOctokit, type FactoryOctokitOptions } from './octokit.js';
+import { runDraftCommand } from './draft-command.js';
 import { checkErrorExit, checkReportExit, createDeepModelRunner, runIssueCheck } from './ready-check.js';
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
 import { readRunFlagOverrides, recordDraftPrFlag } from './run-flags.js';
@@ -1466,6 +1467,13 @@ async function cmdCheck(
   }
   const exit = checkReportExit(report);
   if (exit) throw new CliExitError(exit.message, exit.code);
+}
+
+async function cmdDraft(opts: { text?: string; file?: string; json?: boolean }) {
+  await runDraftCommand(opts, async () => {
+    const repoRoot = await getRepoRoot();
+    return createDeepModelRunner(newRepoRouter(repoRoot, configLoaders, coreOps.ModelRouter), repoRoot);
+  });
 }
 
 async function currentCommitSha(): Promise<string | null> {
@@ -4352,6 +4360,7 @@ export const PROGRAM_HANDLERS = {
   cmdHostedRunner,
   cmdHostedQueue,
   cmdCheck,
+  cmdDraft,
   cmdShip,
   cmdRunIssue,
   cmdRunBrief,

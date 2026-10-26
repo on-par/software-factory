@@ -15,6 +15,7 @@ const COMMITTED = join(ROOT, 'packages', 'cli', 'schemas');
 const tempDirs = createTempDirs();
 const expectedFiles = [
   'check.schema.json',
+  'draft.schema.json',
   'queue-add.schema.json',
   'cost.schema.json',
   'kpis.schema.json',

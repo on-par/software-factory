@@ -15,8 +15,8 @@ import { registerSetupCommands } from './program-setup.js';
 const countCommands = (cmd: Command): number => cmd.commands.reduce((n, c) => n + 1 + countCommands(c), 0);
 
 describe('buildProgram', () => {
-  it('buildProgram registers 67 commands', () => {
-    expect(countCommands(buildProgram(PROGRAM_HANDLERS, {}))).toBe(67);
+  it('buildProgram registers 68 commands', () => {
+    expect(countCommands(buildProgram(PROGRAM_HANDLERS, {}))).toBe(68);
   });
 
   it('each help-group registrar registers exactly its HELP_GROUPS commands', () => {
@@ -50,6 +50,19 @@ describe('buildProgram', () => {
     const program = buildProgram(PROGRAM_HANDLERS, {});
     expect(program.commands.find((c) => c.name() === 'check')?.aliases()).toEqual(['ready']);
     expect(program.options.some((o) => o.long === '--state-root')).toBe(true);
+  });
+
+  it('draft passes --text and --json to cmdDraft (#3171)', async () => {
+    const cmdDraft = vi.fn(async () => {});
+    await buildProgram({ ...PROGRAM_HANDLERS, cmdDraft }, {}).parseAsync([
+      'node',
+      'factory',
+      'draft',
+      '--text',
+      'x',
+      '--json',
+    ]);
+    expect(cmdDraft).toHaveBeenCalledWith({ text: 'x', json: true }, expect.anything());
   });
 
   it('unpark registers --keep-order and passes keepOrder to cmdUnpark (#3554)', async () => {

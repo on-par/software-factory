@@ -121,4 +121,14 @@ export function registerQueueCommands(program: Command, handlers: ProgramHandler
     .option('--no-judge', 'Skip the model judge (free, offline): heading-based exit 0/1/3 as before')
     .option('--rejudge', 'Bypass the readiness cache and call the judge again')
     .action(handlers.cmdCheck);
+
+  program
+    .command('draft')
+    .description(
+      'Draft a factory-check-ready issue from a free-text idea (--text, --file, or stdin): one triage-tier model call plus at most one repair, scored like `check --no-judge`. Prints Markdown, or one JSON object with --json. Never files, writes the queue or writes files (exit 0 ready, 1 not ready, 2 model or input error, 3 would split)',
+    )
+    .option('--text <idea>', 'The idea as text')
+    .option('--file <path>', 'Read the idea from a file')
+    .option('--json', 'Print one JSON object (schemaVersion 1): title, body, score, exit, reasons, model, cost')
+    .action(handlers.cmdDraft);
 }
