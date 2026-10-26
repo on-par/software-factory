@@ -1,14 +1,16 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { buildConstitutionContext, CONSTITUTION_MAX_BYTES, ConstitutionLoader } from './index.js';
 
 function bodyOf(ctx: string): string {
   return ctx.slice(ctx.indexOf('\n\n') + 2, ctx.indexOf('\n\n</constitution>'));
 }
+
+const tempDirs = createTempDirs();
 
 describe('buildConstitutionContext cap and standards view (#1599)', () => {
   let bundledDir: string;
@@ -16,14 +18,13 @@ describe('buildConstitutionContext cap and standards view (#1599)', () => {
   let loader: ConstitutionLoader;
 
   beforeEach(async () => {
-    bundledDir = await mkdtemp(join(tmpdir(), 'constitutions-'));
-    repoDir = await mkdtemp(join(tmpdir(), 'repo-'));
+    bundledDir = await tempDirs.make('constitutions-');
+    repoDir = await tempDirs.make('repo-');
     loader = new ConstitutionLoader(bundledDir);
   });
 
   afterEach(async () => {
-    await rm(bundledDir, { recursive: true, force: true });
-    await rm(repoDir, { recursive: true, force: true });
+    await tempDirs.cleanup();
   });
 
   it('caps a 20 KB constitution at 8 KB and ends the body with a truncation marker naming the cut file', async () => {
