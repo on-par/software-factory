@@ -39,3 +39,6 @@ __pycache__/
 
 # Logs
 *.log
+
+# factory-run.yml checks its own scripts out here in the caller checkout (#3197).
+.factory-action/

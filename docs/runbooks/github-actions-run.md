@@ -18,7 +18,7 @@ on:
         required: true
 jobs:
   factory:
-    uses: on-par/software-factory/.github/workflows/factory-run.yml@v0.9.4
+    uses: on-par/software-factory/.github/workflows/factory-run.yml@v0.9.18
     permissions: { contents: write, pull-requests: write, issues: write }
     with:
       command: run-issue
@@ -96,4 +96,15 @@ baseline cache) persists between runs.
 
 ## Pinning
 
-Always pin `@vX.Y.Z`; the workflow installs the matching `@on-par/factory-cli` version.
+Always pin `@vX.Y.Z`. Pin the tag of the CLI you want: at that tag, `FACTORY_CLI_VERSION` in
+`factory-run.yml` equals the tag's version, and the workflow installs that `@on-par/factory-cli`
+version and checks out that tag's scripts.
+
+## Dogfooding in this repo
+
+Software Factory runs the workflow on itself through `.github/workflows/factory.yml`. That caller
+has only a `workflow_dispatch` trigger and calls the workflow by relative path,
+`uses: ./.github/workflows/factory-run.yml`, not by a tag. It passes every input and secret through.
+It still installs `FACTORY_CLI_VERSION` and checks out tag `v<FACTORY_CLI_VERSION>`, so it works
+only after that version is tagged and published. External repos keep the pinned `@vX.Y.Z` pattern
+shown above.

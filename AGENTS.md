@@ -14,6 +14,7 @@ Software Factory is a TypeScript monorepo (npm workspaces under `packages/`) tha
 - Import across packages by published name (`@on-par/factory-core`), never by a relative path across a package boundary.
 - TypeScript is strict and ESM only. Use `.js` extensions on relative imports.
 - Record significant design decisions as ADRs in `docs/adr/` (see its README).
+- A user- or ops-visible change adds a `## Unreleased` entry to `CHANGELOG.md` and updates the docs users read (README, `docs/status.md`, `docs/agents.md`, `docs/models.md`, `docs/ops/`) in the same PR. Never hand-edit `package.json` versions. See [docs/ops/docs-and-changelog.md](docs/ops/docs-and-changelog.md).
 - Use domain terms (lane, park, claim, trust tier, ...) as defined in [CONTEXT.md](./CONTEXT.md).
 
 ## Known agent traps
