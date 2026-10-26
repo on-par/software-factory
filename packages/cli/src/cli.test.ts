@@ -2726,6 +2726,22 @@ describe('cli', () => {
       await expect(make('closed', true)).resolves.toEqual({ kind: 'build' });
     });
 
+    it('preflight treats prerequisite closed completed via merged children as met', async () => {
+      const result = await preflightQueuedIssue(
+        { number: 3641, labels: [] },
+        {
+          ...preflightDeps,
+          readIssueBody: async () => 'Prerequisite: #3640',
+          getPrerequisiteState: async () => ({
+            state: 'closed' as const,
+            mergedClosingPr: false,
+            mergedViaChildren: true,
+          }),
+        },
+      );
+      expect(result).toEqual({ kind: 'build' });
+    });
+
     it('parks a closed unmerged prerequisite with its exact reason', async () => {
       const result = await preflightQueuedIssue(
         { number: 3258, labels: [] },
