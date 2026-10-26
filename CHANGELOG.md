@@ -24,6 +24,7 @@ section to `## X.Y.Z - date`. See
 - Queue preflight treats a declared prerequisite closed completed through merged child-issue PRs as met instead of parking the dependent `prerequisite #N closed unmerged` (#3703).
 - `factory-run.yml` sets the git identity `Software Factory Actions <factory-actions[bot]@users.noreply.github.com>` on the caller checkout before `factory-run.sh`, so dogfood (which pins the script from tag `v0.9.18`) clears `git identity` without a new CLI release. `factory-run.sh` also sets the same identity when `user.name` or `user.email` is unset, for pinned external callers after the next tag. An existing identity in the script path is kept (#3197).
 - The readiness size check counts only top-level In scope and acceptance-criteria items, so nested sub-bullets no longer inflate an atomic issue past the 5/5 hint, and `spike`-labeled issues are exempt from it (no `size_hint`, `factory check` reports runs-as-is) (#748).
+- Actions dogfood: `factory-run.yml` checks out the caller repo with `FACTORY_GITHUB_TOKEN`, and `factory-run.sh` forces git's github.com auth header to that token, so pushes from `run-issue` and `ship` no longer land as `github-actions[bot]` with follow-up CI stuck at `action_required`. A `ship` that ends "left as draft (CI pending)" now exits 1 with an `::error::` instead of a green run (#3707).
 
 ## 0.9.18 - 2026-10-25
 

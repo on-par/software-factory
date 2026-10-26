@@ -31,6 +31,14 @@ echo "experimental=${FACTORY_EXPERIMENTAL:-unset}" >>"$FACTORY_SHIM_LOG"
 echo "git_name=$(git config user.name 2>/dev/null)" >>"$FACTORY_SHIM_LOG"
 echo "git_email=$(git config user.email 2>/dev/null)" >>"$FACTORY_SHIM_LOG"
 if [ -n "${CODEX_API_KEY:-}" ]; then echo "codex_sum=$(printf %s "$CODEX_API_KEY" | cksum)" >>"$FACTORY_SHIM_LOG"; fi
+# an empty value resets git's header list, so only the entries after the last one are sent
+hdr="$(git config --get-all "http.https://github.com/.extraheader" 2>/dev/null | awk '!NF{n=0;next}{a[n++]=$0}END{for(i=0;i<n;i++)print a[i]}' || true)"
+echo "header_count=$(printf '%s' "$hdr" | grep -c '^')" >>"$FACTORY_SHIM_LOG"
+if [ "$(printf '%s\n' "$hdr" | tail -n1)" = "AUTHORIZATION: basic $(printf 'x-access-token:%s' "${FACTORY_GITHUB_TOKEN:-}" | base64 | tr -d '\n')" ]; then
+  echo "push_auth=pat" >>"$FACTORY_SHIM_LOG"
+else echo "push_auth=other" >>"$FACTORY_SHIM_LOG"; fi
+echo "pager=$(git config core.pager 2>/dev/null)" >>"$FACTORY_SHIM_LOG"
+[ -z "${FACTORY_SHIM_SAY:-}" ] || echo "$FACTORY_SHIM_SAY"
 echo "shim ran"
 exit "${FACTORY_SHIM_RC:-0}"
 EOF2
@@ -140,6 +148,31 @@ RUN_CWD="$BINDIR/not-a-repo" run "$TOK" "$OAUTH" COMMAND=doctor GIT_CEILING_DIRE
 [ "$RC" -eq 0 ] || fail "run outside a git checkout exited $RC"
 echo "PASS sets the Actions bot git identity only for missing fields"
 
+# --- git push auth (#3707) ---
+R="$BINDIR/push-auth"; new_repo "$R"
+git -C "$R" config --local http.https://github.com/.extraheader "AUTHORIZATION: basic $(printf 'x-access-token:gh-actions-token' | base64)"
+for cmd in "run-issue 42" "ship 7"; do
+  RUN_CWD="$R" run "$TOK" "$OAUTH" GITHUB_TOKEN=gh-actions-token COMMAND="${cmd% *}" ISSUE="${cmd#* }"
+  [ "$RC" -eq 0 ] || fail "push-auth $cmd exited $RC"
+  grep -qxF push_auth=pat "$SHIM_LOG" && grep -qxF header_count=1 "$SHIM_LOG" || fail "push auth not PAT-only for $cmd: $(cat "$SHIM_LOG")"
+done
+RUN_CWD="$R" run "$TOK" "$OAUTH" GITHUB_TOKEN=gh-actions-token COMMAND=ship ISSUE=7 \
+  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.pager GIT_CONFIG_VALUE_0=cat
+grep -qxF push_auth=pat "$SHIM_LOG" && grep -qxF pager=cat "$SHIM_LOG" || fail "existing GIT_CONFIG entries not preserved"
+echo "PASS git push auth uses FACTORY_GITHUB_TOKEN"
+
+# --- CI-pending ship (#3707) ---
+SUMMARY="$BINDIR/summary.md"; : >"$SUMMARY"
+run "$TOK" "$OAUTH" COMMAND=ship ISSUE=7 "FACTORY_SHIM_SAY=PR #9 left as draft (CI pending)" GITHUB_STEP_SUMMARY="$SUMMARY"
+[ "$RC" -eq 1 ] || fail "CI-pending ship exited $RC, want 1"
+grep -F '::error::' "$BINDIR/err.txt" | grep -qF 'not landed' || fail "missing ::error:: not landed"
+grep -qF 'not landed' "$SUMMARY" || fail "step summary missing note"
+run "$TOK" "$OAUTH" COMMAND=ship ISSUE=7 "FACTORY_SHIM_SAY=PR #9 left as draft"
+[ "$RC" -eq 0 ] || fail "plain draft ship exited $RC"
+run "$TOK" "$OAUTH" COMMAND=ship ISSUE=7 "FACTORY_SHIM_SAY=PR #9 left as draft (CI pending)" FACTORY_SHIM_RC=3
+[ "$RC" -eq 3 ] || fail "non-zero exit not propagated for CI-pending, got $RC"
+echo "PASS CI-pending ship exits 1 with ::error::"
+
 CODEX_SUM() { printf %s "$1" | cksum; }
 
 # --- providers ---
@@ -216,6 +249,7 @@ echo "PASS wrapper model defaults match defaults.ts"
 for s in "${SENTINELS[@]}"; do
   ! grep -qF -- "$s" "$ALL_OUT" || fail "secret $s leaked into output or log"
 done
+! grep -qF -- "$(printf 'x-access-token:sentinel-pat-XYZ' | base64)" "$ALL_OUT" || fail "PAT auth header leaked into output or log"
 echo "PASS no sentinel secret in stdout, stderr or log"
 
 for pat in 'eval' 'set -x' 'github.token' 'printenv'; do
@@ -257,6 +291,9 @@ for pair in CLAUDE_CODE_OAUTH_TOKEN:claude-cli ANTHROPIC_API_KEY:claude-cli OPEN
   OPENCODE_API_KEY:opencode OPENROUTER_API_KEY:pi; do
   grep -F "inputs.provider == '${pair##*:}' && secrets.${pair%%:*}" "$WF" | grep -qF "          ${pair%%:*}:" || fail "run step must map ${pair%%:*} only for ${pair##*:}"
 done
+awk '/uses: actions\/checkout/{n++; if(n==1){f=1;next}} f&&/^      - /{exit} f' "$WF" | grep -qF 'token: ${{ secrets.FACTORY_GITHUB_TOKEN }}' \
+  || fail "caller checkout must use FACTORY_GITHUB_TOKEN"
+echo "PASS caller checkout uses FACTORY_GITHUB_TOKEN"
 ! grep -qF '@anthropic-ai/claude-code' "$WF" || fail "workflow still installs claude-code"
 echo "PASS factory-run.yml shape"
 
