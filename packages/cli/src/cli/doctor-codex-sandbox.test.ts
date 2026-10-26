@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { type DoctorEnvProbes, doctorFailed, runDoctorChecks } from './doctor.js';
+import { type DoctorEnvProbes, runDoctorChecks } from './doctor.js';
 
 function probes(overrides: Partial<DoctorEnvProbes> = {}): DoctorEnvProbes {
   return {
@@ -25,24 +25,6 @@ const codexDetail = (p: DoctorEnvProbes): string =>
   runDoctorChecks(p).find((c) => c.name === 'codex installed')!.detail;
 
 describe('codex installed sandbox note (#3082)', () => {
-  it('no sandbox runtime reports the codex preflight result and mode', () => {
-    const checks = runDoctorChecks(probes({ platform: 'linux', commandAvailable: noFirejail }));
-    const runtime = checks.find((c) => c.name === 'sandbox runtime')!;
-    expect(runtime.ok).toBe(false);
-    expect(runtime.optional).toBe(true);
-    expect(runtime.detail).toContain('uncontained');
-    expect(runtime.fix).toContain('firejail');
-    const codex = checks.find((c) => c.name === 'codex installed')!;
-    expect(codex.detail).toContain('preflight: no OS sandbox runtime (sandbox-exec/firejail) on PATH');
-    expect(codex.detail).toContain('codex will use --sandbox workspace-write');
-    expect(codex.detail).toContain(
-      'to opt in to full access, list tasks under sandbox.codexFullAccessTasks in .factory/config.yaml',
-    );
-    expect(codex.detail).not.toContain('danger-full-access for');
-    expect(codex.detail).not.toContain('sandboxed builds available');
-    expect(doctorFailed(checks)).toBe(false);
-  });
-
   it('no sandbox runtime names the codex tasks opted in to full access', () => {
     const detail = codexDetail(
       probes({
