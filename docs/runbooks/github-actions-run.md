@@ -48,6 +48,17 @@ The factory only commits in lane worktrees, so it is never committed.
 
 Inputs reach the wrapper only through step `env`, never interpolated into shell.
 
+## Config
+
+`.factory/config.yaml` is optional. When the caller repo has none, the packaged defaults apply.
+For your real product standards, commit `.factory/config.yaml` and `.factory/constitution.md`
+to the caller repo. `factory init` does not exclude those paths; only `.factory/state/` is
+ignored, via `.factory/.gitignore`. Alternatively, run `factory init` in the job before the
+factory command. A job that calls `factory-run.yml` with `uses:` cannot add steps, so that
+route needs a job of your own that installs the CLI. The workflow does not expose an input
+for each config key: `provider`, `plan_model` and `build_model` are the only model settings on the
+workflow. Put everything else in `.factory/config.yaml`.
+
 ## FACTORY_GITHUB_TOKEN
 
 Create a fine-grained PAT scoped to the caller repo with Contents, Pull requests and Issues

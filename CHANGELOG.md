@@ -7,6 +7,14 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.18 - 2026-10-25
+
+A dogfood GitHub Actions caller and a CLI pin to 0.9.18 for the reusable
+`factory-run.yml` workflow, a disk guard, affected-test BUILD rounds, provider
+failover across capped providers, and a `factory land` that syncs BEHIND PRs. All
+seven published `@on-par` packages move to 0.9.18 in lockstep. Install or update with
+`npm install -g @on-par/factory-cli@latest`.
+
 ### Added
 
 - Docs and CHANGELOG process: every user- or ops-visible PR adds a `## Unreleased`
@@ -24,6 +32,12 @@ section to `## X.Y.Z - date`. See
   that runs this repo's `factory-run.yml` (#3197) by relative path, with the same inputs
   and secrets. Runbook:
   [docs/runbooks/github-actions-run.md](docs/runbooks/github-actions-run.md).
+- README: a GitHub Actions section that points outside callers at
+  `uses: on-par/software-factory/.github/workflows/factory-run.yml@v0.9.18` and the
+  runbook.
+- Runbook: a Config section. `.factory/config.yaml` is optional and packaged defaults
+  apply without it; commit config and constitution for real standards (only
+  `.factory/state/` is ignored via `.factory/.gitignore`).
 
 ### Changed
 
@@ -56,6 +70,8 @@ section to `## X.Y.Z - date`. See
 - `factory-run.yml` installs `@on-par/factory-cli@0.9.18` (`FACTORY_CLI_VERSION`), the
   committed lockstep `package.json` versions are 0.9.18, and the runbook's external
   caller pins `@v0.9.18`. The runbook says to pin the tag of the CLI you want.
+- CHECK lint runs the discovered linters and formatters and fails only on new
+  findings (#1898, #3682).
 
 ### Fixed
 
@@ -68,6 +84,12 @@ section to `## X.Y.Z - date`. See
   calling it ambiguous (#3603).
 - `factory doctor` Verify rows and models-config errors name `config.yaml` on a
   `config.yaml` repo, not `.factory/config.json` (#3604).
+- `decomposeOversizedIssue` no longer posts a duplicate PLAN-retry comment when the
+  issue already has the decompose note (#728, #3681).
+- OpenCode harness: empty output after retry, and unbounded hang, on the
+  rework/`build_claude` route (#694, #3683).
+- Queue refuses to reap leases when the local clock is skewed from GitHub; `factory
+doctor` reports the skew (#3149, #3684).
 
 ## 0.9.17 - 2026-10-24
 
