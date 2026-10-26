@@ -40,6 +40,7 @@ else echo "push_auth=other" >>"$FACTORY_SHIM_LOG"; fi
 echo "pager=$(git config core.pager 2>/dev/null)" >>"$FACTORY_SHIM_LOG"
 [ -z "${FACTORY_SHIM_SAY:-}" ] || echo "$FACTORY_SHIM_SAY"
 echo "shim ran"
+if [ "$1" = land ]; then exit "${FACTORY_SHIM_LAND_RC:-0}"; fi
 exit "${FACTORY_SHIM_RC:-0}"
 EOF2
 cat >"$BINDIR/npm" <<'EOF2'
@@ -172,6 +173,35 @@ run "$TOK" "$OAUTH" COMMAND=ship ISSUE=7 "FACTORY_SHIM_SAY=PR #9 left as draft"
 run "$TOK" "$OAUTH" COMMAND=ship ISSUE=7 "FACTORY_SHIM_SAY=PR #9 left as draft (CI pending)" FACTORY_SHIM_RC=3
 [ "$RC" -eq 3 ] || fail "non-zero exit not propagated for CI-pending, got $RC"
 echo "PASS CI-pending ship exits 1 with ::error::"
+
+# --- land after ship with FACTORY_MERGE=1 (#3727) ---
+argv() { grep '^arg=' "$SHIM_LOG" | cut -d= -f2- | paste -sd' ' -; }
+run "$TOK" "$OAUTH" COMMAND=run-issue ISSUE=42 FACTORY_MERGE=1
+[ "$RC" -eq 0 ] && [ "$(argv)" = "run-issue 42 land 42" ] || fail "run-issue+merge: rc=$RC argv=$(argv)"
+[ "$(grep -c '^token_match=yes' "$SHIM_LOG")" -eq 2 ] || fail "land did not get FACTORY_GITHUB_TOKEN"
+run "$TOK" "$OAUTH" COMMAND=ship ISSUE=7 FACTORY_MERGE=1
+[ "$RC" -eq 0 ] && [ "$(argv)" = "ship 7 land 7" ] || fail "ship+merge: rc=$RC argv=$(argv)"
+run "$TOK" "$OAUTH" COMMAND=doctor FACTORY_MERGE=1
+[ "$RC" -eq 0 ] && [ "$(argv)" = "doctor" ] || fail "doctor+merge landed: argv=$(argv)"
+run "$TOK" "$OAUTH" COMMAND=run-issue ISSUE=42
+[ "$(argv)" = "run-issue 42" ] || fail "landed without FACTORY_MERGE: argv=$(argv)"
+for v in 0 true 11 ''; do
+  run "$TOK" "$OAUTH" COMMAND=run-issue ISSUE=42 "FACTORY_MERGE=$v"
+  [ "$RC" -eq 0 ] && [ "$(argv)" = "run-issue 42" ] || fail "landed with FACTORY_MERGE='$v': argv=$(argv)"
+done
+run "$TOK" "$OAUTH" COMMAND=run-issue ISSUE=42 FACTORY_MERGE=1 FACTORY_SHIM_RC=4
+[ "$RC" -eq 4 ] && [ "$(argv)" = "run-issue 42" ] || fail "landed after failed run-issue: rc=$RC argv=$(argv)"
+run "$TOK" "$OAUTH" COMMAND=ship ISSUE=7 FACTORY_MERGE=1 "FACTORY_SHIM_SAY=PR #9 left as draft (CI pending)"
+[ "$RC" -eq 1 ] && [ "$(argv)" = "ship 7" ] || fail "CI-pending+merge: rc=$RC argv=$(argv)"
+run "$TOK" "$OAUTH" COMMAND=ship ISSUE=7 FACTORY_MERGE=1 "FACTORY_SHIM_SAY=PR #9 left as draft"
+[ "$RC" -eq 0 ] && [ "$(argv)" = "ship 7" ] || fail "draft+merge: rc=$RC argv=$(argv)"
+: >"$SUMMARY"
+run "$TOK" "$OAUTH" COMMAND=run-issue ISSUE=42 FACTORY_MERGE=1 FACTORY_SHIM_LAND_RC=5 GITHUB_STEP_SUMMARY="$SUMMARY"
+[ "$RC" -eq 5 ] && [ "$(argv)" = "run-issue 42 land 42" ] || fail "land failure: rc=$RC argv=$(argv)"
+grep -F '::error::' "$BINDIR/err.txt" | grep -qF 'factory land 42 exited 5' || fail "missing ::error:: for land failure"
+grep -qF 'factory land 42 exited 5' "$SUMMARY" || fail "step summary missing land failure"
+[ "$(grep -c 'shim ran' "$RUN_LOG")" -eq 2 ] || fail "land output not in run log"
+echo "PASS FACTORY_MERGE=1 lands after run-issue/ship; draft, CI pending, failure and other values skip land"
 
 CODEX_SUM() { printf %s "$1" | cksum; }
 

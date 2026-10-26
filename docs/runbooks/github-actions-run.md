@@ -90,6 +90,16 @@ green PR and uses admin privileges to merge through unmet requirements when `FAC
 allows it. See [SECURITY.md](../../SECURITY.md#merge-is-opt-in) for what `FACTORY_MERGE_ADMIN` permits.
 Callers that pin `@vX.Y.Z` get this from the first tag published with it.
 
+`factory run-issue` and `factory ship` stop at a ready-for-review PR and never merge. With
+`FACTORY_MERGE=1`, `scripts/factory-run.sh` runs `factory land <issue>` in the same job after they
+exit 0, so an Actions run-issue or ship is ship then land:
+
+- A PR left as draft is not landed. "Left as draft (CI pending)" still fails the job with exit 1.
+- When land fails, the job fails with land's exit code and an `::error::` line, also written to the
+  step summary.
+- `FACTORY_MERGE` unset, or any value other than `1`, skips land. `doctor` never lands.
+- `land` is not a `command` input. The workflow still rejects it.
+
 ## Providers and secrets
 
 Each provider reads only its own repo secrets, under the names the Claude GitHub App and
