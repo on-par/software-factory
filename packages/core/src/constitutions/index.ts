@@ -242,8 +242,43 @@ export type ConstitutionView = 'full' | 'standards';
 export const CONSTITUTION_MAX_BYTES = 8192;
 
 const STANDARDS_HEADING = /\b(standards?|conventions?|rules|guidelines)\b/i;
-const STANDARDS_BLOCK = /<standards source="([^"]+)">\n\n([\s\S]*?)\n\n<\/standards>/g;
-const HEADING_LINE = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
+const BLOCK_OPEN = '<standards source="';
+const BLOCK_CLOSE = '\n\n</standards>';
+
+/** Parse an ATX heading line without backtracking regexes; null when `line` is not a heading. */
+function parseHeading(line: string): { level: number; text: string } | null {
+  let level = 0;
+  while (level < line.length && line[level] === '#') level++;
+  if (level < 1 || level > 6 || level >= line.length || !/\s/.test(line[level])) return null;
+  let text = line.slice(level).trim();
+  let end = text.length;
+  while (end > 0 && text[end - 1] === '#') end--;
+  text = text.slice(0, end).trimEnd();
+  return { level, text };
+}
+
+/** Split a body into its `<standards source="...">` blocks, scanning with indexOf (linear time). */
+function findStandardsBlocks(body: string): { source: string; content: string }[] {
+  const blocks: { source: string; content: string }[] = [];
+  let pos = 0;
+  for (;;) {
+    const open = body.indexOf(BLOCK_OPEN, pos);
+    if (open < 0) break;
+    const nameStart = open + BLOCK_OPEN.length;
+    const quote = body.indexOf('"', nameStart);
+    const source = quote < 0 ? '' : body.slice(nameStart, quote);
+    const contentStart = quote + '">\n\n'.length;
+    if (quote < 0 || source === '' || source.includes('\n') || !body.startsWith('">\n\n', quote)) {
+      pos = nameStart;
+      continue;
+    }
+    const close = body.indexOf(BLOCK_CLOSE, contentStart - 2);
+    if (close < 0) break;
+    blocks.push({ source, content: body.slice(contentStart, Math.max(close, contentStart)) });
+    pos = close + BLOCK_CLOSE.length;
+  }
+  return blocks;
+}
 
 /** Keep the sections of one block whose heading names standards, with their subsections; null when none match. */
 function matchingSections(content: string): string | null {
@@ -254,11 +289,11 @@ function matchingSections(content: string): string | null {
   let fence = false;
   for (const line of lines) {
     if (/^\s*(```|~~~)/.test(line)) fence = !fence;
-    const heading = fence ? null : HEADING_LINE.exec(line);
-    if (heading && current && heading[1].length <= currentLevel) current = null;
-    if (heading && !current && STANDARDS_HEADING.test(heading[2])) {
+    const heading = fence ? null : parseHeading(line);
+    if (heading && current && heading.level <= currentLevel) current = null;
+    if (heading && !current && STANDARDS_HEADING.test(heading.text)) {
       current = [];
-      currentLevel = heading[1].length;
+      currentLevel = heading.level;
       kept.push(current);
     }
     current?.push(line);
@@ -268,7 +303,7 @@ function matchingSections(content: string): string | null {
 
 /** Reduce a constitution body to its Standards/Conventions/Rules/Guidelines sections, per source block. */
 function selectStandardsSections(body: string): string {
-  const blocks = [...body.matchAll(STANDARDS_BLOCK)].map((m) => ({ source: m[1], content: m[2] }));
+  const blocks = findStandardsBlocks(body);
   const parts = blocks.length > 0 ? blocks : [{ source: null, content: body }];
   let anyMatch = false;
   const rendered = parts.map(({ source, content }) => {
