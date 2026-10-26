@@ -1,0 +1,60 @@
+# Dogfood caller: run factory-run.yml on this repo by hand (workflow_dispatch only).
+# Same-repo relative `uses:`; external repos pin the @vX.Y.Z tag instead
+# (see docs/runbooks/github-actions-run.md). Inputs mirror factory-run.yml's workflow_call.
+name: Factory
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: Factory command (allowlist run-issue, ship, doctor)
+        type: string
+        required: false
+        default: run-issue
+      issue:
+        description: Issue number (required for run-issue and ship)
+        type: string
+        required: false
+        default: ''
+      provider:
+        description: Agent provider (claude-cli, codex-cli, opencode, pi)
+        type: string
+        required: false
+        default: claude-cli
+      experimental:
+        description: Required true for the experimental providers opencode and pi
+        type: boolean
+        required: false
+        default: false
+      plan_model:
+        description: Override FACTORY_PLAN_MODEL (default per provider)
+        type: string
+        required: false
+        default: ''
+      build_model:
+        description: Override FACTORY_BUILD_MODEL (default per provider)
+        type: string
+        required: false
+        default: ''
+
+jobs:
+  factory:
+    uses: ./.github/workflows/factory-run.yml
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    with:
+      command: ${{ inputs.command }}
+      issue: ${{ inputs.issue }}
+      provider: ${{ inputs.provider }}
+      experimental: ${{ inputs.experimental }}
+      plan_model: ${{ inputs.plan_model }}
+      build_model: ${{ inputs.build_model }}
+    secrets:
+      FACTORY_GITHUB_TOKEN: ${{ secrets.FACTORY_GITHUB_TOKEN }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
+      OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}

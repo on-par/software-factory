@@ -81,7 +81,7 @@ section and push it again. The version is still free on npm.
 ## Versions
 
 The `version` fields in the root and `packages/*/package.json` files on `main` are not the
-released version. They stay at the last committed version (0.9.4). The publish job
+released version. They stay at the last committed version (0.9.18). The publish job
 writes the tag's version, or the next prerelease version, into the packages at build time
 with `scripts/set-release-version.sh` and never commits it. To see the real versions, run
 `factory --version` or `npm view @on-par/factory-cli dist-tags`.

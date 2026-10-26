@@ -20,6 +20,10 @@ section to `## X.Y.Z - date`. See
   `FACTORY_MIN_FREE_GB=0` turns it off (#2284).
 - Optional `tests.affected` command: BUILD and intermediate CHECK rework rounds run
   only the affected tests, and the full suite still runs before SHIP (#3260).
+- Dogfood caller `.github/workflows/factory.yml`: a `workflow_dispatch`-only workflow
+  that runs this repo's `factory-run.yml` (#3197) by relative path, with the same inputs
+  and secrets. Runbook:
+  [docs/runbooks/github-actions-run.md](docs/runbooks/github-actions-run.md).
 
 ### Changed
 
@@ -49,6 +53,9 @@ section to `## X.Y.Z - date`. See
   the issue as an environment error, with no rework (#3332).
 - CHANGELOG: sections for 0.9.5 to 0.9.17 backfilled from the GitHub release notes;
   entries that sat under Unreleased moved to the release that shipped them (#3676).
+- `factory-run.yml` installs `@on-par/factory-cli@0.9.18` (`FACTORY_CLI_VERSION`), the
+  committed lockstep `package.json` versions are 0.9.18, and the runbook's external
+  caller pins `@v0.9.18`. The runbook says to pin the tag of the CLI you want.
 
 ### Fixed
 

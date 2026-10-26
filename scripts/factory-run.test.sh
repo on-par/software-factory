@@ -229,8 +229,10 @@ lint() {
     actionlint "$@"
   elif command -v docker >/dev/null 2>&1; then
     local f dir
-    f="$1"; dir="$(dirname "$f")"
-    docker run --rm -v "$dir:/repo" -w /repo rhysd/actionlint:latest "/repo/$(basename "$f")"
+    f="$1"
+    # mount the repo root for in-repo files so local `uses: ./...` resolves
+    case "$f" in "$ROOT"/*) dir="$ROOT" ;; *) dir="$(dirname "$f")" ;; esac
+    docker run --rm -v "$dir:/repo" -w /repo rhysd/actionlint:latest "/repo/${f#"$dir"/}"
   elif [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
     fail "actionlint not installed"
   else
@@ -242,13 +244,33 @@ lint() {
 lint "$WF" || fail "actionlint rejected factory-run.yml"
 echo "PASS actionlint factory-run.yml"
 
+# --- dogfood caller (.github/workflows/factory.yml) ---
+DOGFOOD="$ROOT/.github/workflows/factory.yml"
+[ "$(awk '/^on:/{f=1;next} f&&/^[^ #]/{f=0} f&&/^  [A-Za-z_-]+:/{print $1}' "$DOGFOOD")" = "workflow_dispatch:" ] || fail "dogfood on: must be only workflow_dispatch"
+grep -qxF '    uses: ./.github/workflows/factory-run.yml' "$DOGFOOD" || fail "dogfood must call factory-run.yml by relative path"
+inputs_block() { awk '/^    inputs:/{f=1;next} f&&NF&&!/^     /{f=0} f' "$1"; }
+[ "$(inputs_block "$DOGFOOD")" = "$(inputs_block "$WF")" ] || fail "dogfood inputs differ from factory-run.yml workflow_call inputs"
+for i in $(inputs_block "$WF" | awk '/^      [a-z_]+:$/{sub(":","",$1); print $1}'); do
+  grep -qxF "      $i: \${{ inputs.$i }}" "$DOGFOOD" || fail "dogfood does not pass input $i"
+done
+for sec in $(awk '/^    secrets:/{f=1;next} f&&NF&&!/^     /{f=0} f&&/^      [A-Z_]+:$/{sub(":","",$1); print $1}' "$WF"); do
+  grep -qxF "      $sec: \${{ secrets.$sec }}" "$DOGFOOD" || fail "dogfood does not pass secret $sec"
+done
+for perm in 'contents: write' 'pull-requests: write' 'issues: write'; do
+  grep -qxF "      $perm" "$DOGFOOD" || fail "dogfood lacks permission $perm"
+done
+grep -qxF '.factory-action/' "$ROOT/.gitignore" || fail ".gitignore lacks .factory-action/"
+lint "$DOGFOOD" || fail "actionlint rejected factory.yml"
+echo "PASS dogfood caller factory.yml"
+
 # --- runbook caller ---
 CALLER="$BINDIR/.github/workflows/caller.yml"
 mkdir -p "$(dirname "$CALLER")"
 awk '/^```yaml/{if(!done){f=1;next}} f&&/^```/{f=0;done=1} f' "$RUNBOOK" >"$CALLER"
 [ -s "$CALLER" ] || fail "no yaml block in runbook"
 [ "$(awk '/^on:/{f=1;next} f&&/^[^ #]/{f=0} f&&/^  [A-Za-z_-]+:/{print $1}' "$CALLER")" = "workflow_dispatch:" ] || fail "caller on: must be only workflow_dispatch"
-grep -qE 'uses: on-par/software-factory/\.github/workflows/factory-run\.yml@v[0-9]' "$CALLER" || fail "caller must pin uses to a @v tag"
+grep -qxF "    uses: on-par/software-factory/.github/workflows/factory-run.yml@v$(awk '/^  FACTORY_CLI_VERSION:/{print $2}' "$WF")" "$CALLER" \
+  || fail "caller must pin uses to @v<FACTORY_CLI_VERSION>"
 grep -qE '^\s+FACTORY_GITHUB_TOKEN:' "$CALLER" || fail "caller must pass FACTORY_GITHUB_TOKEN"
 lint "$CALLER" || fail "actionlint rejected runbook caller"
 echo "PASS runbook example caller"

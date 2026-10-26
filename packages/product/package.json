@@ -1,7 +1,7 @@
 {
   "name": "@on-par/product",
   "private": true,
-  "version": "0.9.4",
+  "version": "0.9.18",
   "description": "Product app (proposer) — brain-dump to engineering-ready issues. Read-only: it proposes, it never writes the target codebase.",
   "type": "module",
   "main": "dist/index.js",
@@ -20,9 +20,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@on-par/adr-kit": "^0.9.4",
-    "@on-par/contracts": "^0.9.4",
-    "@on-par/repo-context": "^0.9.4",
+    "@on-par/adr-kit": "^0.9.18",
+    "@on-par/contracts": "^0.9.18",
+    "@on-par/repo-context": "^0.9.18",
     "commander": "^15.0.0"
   },
   "license": "MIT",
