@@ -12,6 +12,7 @@ import { writeSpec } from '../spec/index.js';
 import { planPhase } from './plan.js';
 import { StubModelExecutor } from './plan-test-helpers.js';
 import { settlePlanRoute } from './plan-route.js';
+import type { RouteCapabilities } from './route-capabilities.js';
 
 const models: ModelsConfig = {
   version: 1,
@@ -59,8 +60,10 @@ async function tempSpec(name: string, route: string): Promise<string> {
   return specPath;
 }
 
+const open: RouteCapabilities = { codexDisabled: false, codexBreakerOpen: false, localOnly: false };
+
 describe('settlePlanRoute command route (#2872)', () => {
-  const base = { runnableNow: ['claude', 'codex'] as const, isCodexDisabled: false, log: () => {} };
+  const base = { runnableNow: ['claude', 'codex'] as const, capabilities: open, log: () => {} };
 
   it('lets a pin override the planned route and rewrites the spec to command', async () => {
     const specPath = await tempSpec('a.md', 'claude');
@@ -98,6 +101,13 @@ describe('settlePlanRoute command route (#2872)', () => {
   it('keeps the planned route when it is runnable and unpinned', async () => {
     const specPath = await tempSpec('d.md', 'codex');
     expect(await settlePlanRoute({ ...base, parsedRoute: 'codex', specPath })).toBe('codex');
+  });
+
+  it('freezes route claude when the codex breaker is open before PLAN (#664)', async () => {
+    const specPath = await tempSpec('f.md', 'codex');
+    const capabilities = { ...open, codexBreakerOpen: true };
+    expect(await settlePlanRoute({ ...base, capabilities, parsedRoute: 'codex', specPath })).toBe('claude');
+    expect(await readFile(specPath, 'utf8')).toContain('route: claude');
   });
 });
 

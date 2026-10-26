@@ -35,13 +35,15 @@ import { unknownConfigKeyMessages } from '../config/config-schema-lint.js';
 import { planPhase as planPhaseDefault, type PlanResult } from '../phases/plan.js';
 import { planConfigParkMessage } from '../phases/plan-spec-guards.js';
 import { shipPhase as shipPhaseDefault } from '../phases/ship.js';
+import { codexUnavailable } from '../phases/route-capabilities.js';
+import { beginBuildRoute, compatibleBuildModel, laneRouteCapabilities } from './route-sync.js';
 import { classifyCheckFailure } from './check-verdict.js';
 import { withSingleTerminalEvent } from './terminal-events.js';
 import { withRunAttribution, type RunLogFn as LogFn } from './attribution.js';
 import { environmentReleaseMarker, parkPayload, publishParkComment, upsertMarkerComment } from './park-comment.js';
 import { createRunPhaseLogger } from './run-phase-log.js';
 import { providerFailureRecorder } from './provider-failure-recorder.js';
-import { codexBuildBlocked, gateBuildTarget, pickOrderedProvider, type ProviderPick } from './provider-breaker-gate.js';
+import { gateBuildTarget, pickOrderedProvider, type ProviderPick } from './provider-breaker-gate.js';
 import {
   buildPickOptions,
   buildTargetForPick,
@@ -78,7 +80,7 @@ import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings, SizeGateMode } from '../config/index.js';
 import { defaultExecFn, type ExecFn } from '../utils/exec.js';
 import type { ProviderOrder } from '../config/provider-order.js';
-import { decideBuildRoute, type EffectiveModelPins, routeForBuildModel } from '../config/repo.js';
+import { decideBuildRoute, type EffectiveModelPins } from '../config/repo.js';
 import type { RunStewardPorts } from '../steward/run.js';
 import { describeDotnetEnv, dotnetEnvReport } from '../environment/dotnet.js';
 import { ProcessGroupTracker } from '../environment/process-groups.js';
@@ -653,6 +655,7 @@ async function runIssueOnce(
       }
 
       const reused = await loadReusablePlan(ports.planReuse, { ...request, issue: workKey }, log, ports.events('plan'));
+      const routeCaps = await laneRouteCapabilities(request, ports, ports.events('plan'));
       const planGate = reused ? undefined : await capGate.enterPlan(route, ports.events('plan'));
       if (planGate?.released) return planGate.released;
       if (planGate?.down) return await parkAllProvidersDown(planGate.down);
@@ -674,7 +677,7 @@ async function runIssueOnce(
           branch: request.branch,
           approvalGate: request.options.approvePlan ? ports.createApprovalGate?.() : undefined,
           drainSteering: request.options.approvePlan ? ports.drainSteering : undefined,
-          codexDisabled: request.codexDisabled,
+          routeCapabilities: routeCaps,
           localOnly: request.localOnly,
           laneId: request.lane,
           workSource: request.workSource,
@@ -764,11 +767,11 @@ async function runIssueOnce(
           ports.events('build')('steering_applied', describeSteering(buildSteering));
         }
       }
-      const breakerBlocked =
-        request.failover.enabled && (await codexBuildBlocked(ports.router, ports.breaker, ports.events('build')));
 
       // PLAN honors pinnedRoute; re-apply it so a plan port that ignores it cannot route elsewhere.
-      let buildRoute = pinnedRoute ?? plan.route;
+      const begun = await beginBuildRoute(request, ports, routeCaps, pinnedRoute ?? plan.route);
+      const { buildCaps, syncSpecRoute } = begun;
+      let buildRoute = begun.route;
       let buildModel = request.modelPins.build;
       let buildSwapReason: FailoverReason | undefined;
       // providerOrder drives BUILD's provider pick and reruns (#3338) unless the repo pins the route (ADR-0092).
@@ -789,27 +792,17 @@ async function runIssueOnce(
           { route: buildRoute, model: buildModel },
           {
             routePinned: request.preferredRoute !== undefined,
-            codexDisabled: request.codexDisabled || breakerBlocked,
+            codexDisabled: codexUnavailable(buildCaps),
             buildFallback: request.modelPins.buildFallback,
           },
         );
         if (gated.blocked) return await terminalEscalated(`build escalated: ${gated.blocked}`);
         ({ route: buildRoute, model: buildModel, swapReason: buildSwapReason } = gated);
       }
-      if (buildModel) {
-        const compatible = routeForBuildModel(ports.router.registryRef, buildModel) === buildRoute;
-        if (!compatible) {
-          log(
-            'model_override_ignored',
-            `build model ${buildModel} is incompatible with the ${buildRoute} route${
-              buildRoute === request.preferredRoute ? ' pinned by .factory/config.json' : ''
-            } — using that route's default worker`,
-          );
-          buildModel = undefined;
-        }
-      }
+      await syncSpecRoute(buildRoute, 'breaker-gate');
+      buildModel = compatibleBuildModel(ports.router.registryRef, buildModel, buildRoute, request.preferredRoute, log);
 
-      const buildGate = await capGate.enterBuild(buildRoute, buildModel, route, breakerBlocked);
+      const buildGate = await capGate.enterBuild(buildRoute, buildModel, route, buildCaps.codexBreakerOpen);
       if (buildGate.released) return buildGate.released;
       if (buildGate.down) return await parkAllProvidersDown(buildGate.down);
       const fallbackBuildRoute = pinnedRoute ?? plan.route;
@@ -849,7 +842,7 @@ async function runIssueOnce(
           steering: buildSteering,
           appPort,
           appBaseUrl,
-          codexDisabled: request.codexDisabled || breakerBlocked,
+          routeCapabilities: buildCaps,
           localOnly: request.localOnly,
           autoFailover: { enabled: request.failover.enabled, fallbackModel: request.failover.fallbackModel },
           onPgid,
@@ -861,6 +854,7 @@ async function runIssueOnce(
         ? runStage('build', buildAt, { beforeRerun: restoreBuild })
         : buildAt(undefined));
       route = build.route;
+      await syncSpecRoute(build.route, 'build-failover');
       if (!build.ok && build.reason !== 'budget_exceeded') {
         if (build.sandboxEnv) return await terminalParked('sandbox-env', build.sandboxEnv);
         const why = build.noDiffDetail ? `\n\n${build.noDiffDetail}` : '';

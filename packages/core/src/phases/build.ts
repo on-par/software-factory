@@ -25,6 +25,7 @@ import { classifyNoDiff, renderNoDiffDetail, workerOutputTail, type NoDiffCause 
 import { loadAffectedConfig } from './check-affected.js';
 import { renderLintRulesInForce } from './build-lint-rules.js';
 import { failOverOpencodeBuild } from './build-opencode-failover.js';
+import { codexUnavailable, type RouteCapabilities } from './route-capabilities.js';
 import {
   buildClaudePrompt,
   buildCommitOnlyPrompt,
@@ -139,7 +140,8 @@ async function buildPhaseImpl(opts: {
   appPort?: number;
   /** Stable lane URL from the factory proxy (e.g. http://<lane>.factory.localhost), when running. */
   appBaseUrl?: string;
-  codexDisabled?: boolean;
+  /** The lane's route capabilities (#664); BUILD runs `route` as given and only reads this for failover targets. */
+  routeCapabilities?: RouteCapabilities;
   autoFailover?: {
     enabled: boolean;
     fallbackModel?: string;
@@ -228,7 +230,6 @@ async function buildPhaseImpl(opts: {
     );
   }
   const localOnly = opts.localOnly ?? false;
-  const isCodexDisabled = opts.codexDisabled ?? false;
 
   // Commit-only unless the repo opts in (#1867); local-only always stays commit-only (#508).
   const claudeRoutePrompt = (): string =>
@@ -251,22 +252,7 @@ async function buildPhaseImpl(opts: {
   let prompt: string;
   let taskType: 'build_codex' | 'build_claude' | 'build_opencode' | 'build_command';
 
-  let modelOverride = modelOverrideOpt;
-  if (route === 'codex' && isCodexDisabled) {
-    log('warn', 'codex unavailable — falling back to claude');
-    route = 'claude';
-    // A Codex-harness override would put that model first in the claude route's chain and run it
-    // anyway (an override skips the tier's provider filter), so a pinned or fallback codex model
-    // cannot ride the flip. Drop it and let the claude route pick its own worker (#1367).
-    if (modelOverride && router.registryRef.isCodexModel(modelOverride)) {
-      log(
-        'model_override_ignored',
-        `build model ${modelOverride} needs the codex route, which is unavailable — using the claude route's default worker`,
-      );
-      modelOverride = undefined;
-    }
-  }
-
+  const modelOverride = modelOverrideOpt;
   if (route === 'codex') {
     taskType = 'build_codex';
     prompt = localOnly ? buildLocalSmallPrompt({ issue, branch, spec }) : buildCommitOnlyPrompt(promptOpts);
@@ -356,7 +342,7 @@ async function buildPhaseImpl(opts: {
         err,
         attempts: attempts ?? [],
         runOpts,
-        build: opts,
+        build: { ...opts, codexDisabled: codexUnavailable(opts.routeCapabilities) },
         prompts: { claude: claudeRoutePrompt, codex: () => buildCommitOnlyPrompt(promptOpts) },
       }));
       crossHarnessReason = reason;
