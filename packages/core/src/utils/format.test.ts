@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { colorEnabled, formatEventLine, levelForType } from './format.js';
+import { colorEnabled, formatEventLine, levelForType, sanitizeTerminalText } from './format.js';
 
 const RESET = '\x1b[0m';
 const BOLD = '\x1b[1m';
@@ -137,6 +137,28 @@ describe('formatEventLine — lane option', () => {
   it('is byte-identical to the legacy format when no lane is passed', () => {
     expect(formatEventLine('plan', 209, 'msg')).toBe('[factory] plan #209: msg');
     expect(formatEventLine('plan', 209, 'msg', { color: true })).not.toContain('[app]');
+  });
+});
+
+const PAYLOAD = 'title \x1b]0;pwned\x07 end';
+
+describe('sanitizeTerminalText', () => {
+  it('strips OSC payload bytes and keeps unicode', () => {
+    expect(sanitizeTerminalText(PAYLOAD)).toBe('title ]0;pwned end');
+    expect(sanitizeTerminalText('héllo ✓')).toBe('héllo ✓');
+  });
+});
+
+describe('formatEventLine — untrusted fields', () => {
+  it('formatEventLine strips terminal escapes from untrusted fields (#1634)', () => {
+    const plain = formatEventLine(PAYLOAD, PAYLOAD, PAYLOAD, { lane: PAYLOAD, ts: PAYLOAD });
+    expect(plain).not.toContain('\x1b');
+    expect(plain).not.toContain('\x07');
+    const colored = formatEventLine(PAYLOAD, PAYLOAD, PAYLOAD, { color: true, lane: PAYLOAD, ts: PAYLOAD });
+    expect(colored).not.toContain('\x1b]');
+    expect(colored).not.toContain('\x07');
+    expect(colored).toContain('title ]0;pwned end');
+    expect(colored).toContain('\x1b[0m');
   });
 });
 

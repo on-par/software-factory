@@ -41,6 +41,7 @@ import {
   formatOpenFactoryDraftsLine,
   readOpenFactoryDrafts,
   resolveBranchPrefix,
+  sanitizeTerminalText,
 } from '@on-par/factory-core/internal';
 import type { DiskGuard, OpenFactoryDrafts, QueueOrderConflict } from '@on-par/factory-core/internal';
 
@@ -370,7 +371,9 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
     for (const e of events) {
       try {
         const ev = JSON.parse(e);
-        console.log(`    ${ev.type} #${ev.issue}: ${ev.msg}`);
+        console.log(
+          `    ${sanitizeTerminalText(String(ev.type))} #${sanitizeTerminalText(String(ev.issue))}: ${sanitizeTerminalText(String(ev.msg))}`,
+        );
       } catch {}
     }
   } else {

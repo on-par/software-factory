@@ -35,7 +35,7 @@ import { ensureWorktreeParentExcluded } from './worktree-location.js';
 
 export type { WorktreeSandbox } from './microvm.js';
 
-export { colorEnabled, formatEventLine, levelForType } from './format.js';
+export { colorEnabled, formatEventLine, levelForType, sanitizeTerminalText } from './format.js';
 
 // ---------- Event Logging ----------
 

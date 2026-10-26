@@ -3,6 +3,7 @@ import { Box, Text } from 'ink';
 import type { JSX } from 'react';
 
 import { isFailoverEvent } from '../state.js';
+import { sanitizeTerminalText } from '../text.js';
 
 const MAX_MSG_LENGTH = 100;
 
@@ -24,7 +25,7 @@ export function EventFeed({ events }: EventFeedProps): JSX.Element {
   return (
     <Box flexDirection="column">
       {events.map((e, i) => {
-        const line = truncate(`${e.type} #${e.issue}: ${e.msg}`, MAX_MSG_LENGTH);
+        const line = truncate(sanitizeTerminalText(`${e.type} #${e.issue}: ${e.msg}`), MAX_MSG_LENGTH);
         const failover = isFailoverEvent(e);
         return (
           <Text key={`${e.ts}-${i}`} color={failover ? 'yellow' : undefined}>

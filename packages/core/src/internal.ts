@@ -265,6 +265,7 @@ export {
   readCosts,
   reapCleanShipWorktree,
   reapLaneWorktree,
+  sanitizeTerminalText,
   setupWorktree,
   shellEscape,
   slugify,

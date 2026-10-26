@@ -54,6 +54,14 @@ describe('followPlain', () => {
     expect(fake.stop).toHaveBeenCalled();
   });
 
+  it('followPlain strips terminal escapes from the event message (#1634)', () => {
+    const fake = makeFakeFollow();
+    const { out, chunks } = makeFakeOut(false);
+    followPlain('events.ndjson', out, fake.follow);
+    fake.push({ ts: '2026-01-01T00:00:00.000Z', type: 'plan', issue: '1', msg: 'title \x1b]0;pwned\x07 end' });
+    expect(chunks.join('')).toBe('[factory] plan #1: title ]0;pwned end\n');
+  });
+
   it('defaults to process.stdout and the real followEvents', () => {
     expect(() => {
       const stop = followPlain('/nonexistent/events.ndjson');

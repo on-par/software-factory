@@ -74,6 +74,12 @@ describe('renderEvent', () => {
     expect(renderEvent(e, { json: false, color: false })).toBe('[factory] plan #1: hello');
   });
 
+  it('renderEvent strips terminal escapes from the event message (#1634)', () => {
+    const e: FactoryEvent = { ts: '', type: 'plan', issue: '1', msg: 'title \x1b]0;pwned\x07 end' };
+    const line = renderEvent(e, { json: false, color: false });
+    expect(line).toBe('[factory] plan #1: title ]0;pwned end');
+  });
+
   it('includes the lane token when lane is set', () => {
     const e: FactoryEvent = { ts: '', type: 'plan', issue: '1', msg: 'hello', lane: 'a' };
     expect(renderEvent(e, { json: false, color: false })).toBe('[factory] plan #1 [a]: hello');

@@ -60,34 +60,48 @@ const CATEGORY_STYLE: Record<Category, { symbol: string; typeColor: string }> = 
   other: { symbol: '•', typeColor: DIM },
 };
 
+/** Strip terminal control characters (C0, DEL, C1 — which includes the bare CSI byte) from text that
+ *  came from GitHub or the event log, so a crafted issue title or label cannot move the cursor, clear
+ *  the pane, retitle the terminal, or spoof a row (#1362, #1634). */
+export function sanitizeTerminalText(text: string): string {
+  // oxlint-disable-next-line no-control-regex -- stripping terminal control characters on purpose
+  return text.replace(/[\x00-\x1f\x7f-\x9f]/g, '');
+}
+
 export function formatEventLine(
   type: string,
   issue: string | number,
   msg: string,
   opts: { color?: boolean; lane?: string; ts?: string } = {},
 ): string {
+  const cleanType = sanitizeTerminalText(type);
+  const cleanIssue = sanitizeTerminalText(String(issue));
+  const cleanMsg = sanitizeTerminalText(msg);
+  const lane = opts.lane ? sanitizeTerminalText(opts.lane) : undefined;
+  const ts = opts.ts ? sanitizeTerminalText(opts.ts) : undefined;
+
   if (!opts.color) {
-    const tsPrefix = opts.ts ? `[${opts.ts}] ` : '';
-    return opts.lane
-      ? `${tsPrefix}[factory] ${type} #${issue} [${opts.lane}]: ${msg}`
-      : `${tsPrefix}[factory] ${type} #${issue}: ${msg}`;
+    const tsPrefix = ts ? `[${ts}] ` : '';
+    return lane
+      ? `${tsPrefix}[factory] ${cleanType} #${cleanIssue} [${lane}]: ${cleanMsg}`
+      : `${tsPrefix}[factory] ${cleanType} #${cleanIssue}: ${cleanMsg}`;
   }
 
-  const category = categorize(type);
+  const category = categorize(cleanType);
   const { symbol, typeColor } = CATEGORY_STYLE[category];
-  const coloredType = `${typeColor}${type.padEnd(7)}${RESET}`;
+  const coloredType = `${typeColor}${cleanType.padEnd(7)}${RESET}`;
 
   let renderedMsg: string;
   if (category === 'warn' || category === 'error') {
-    renderedMsg = `${category === 'warn' ? YELLOW : RED}${msg}${RESET}`;
+    renderedMsg = `${category === 'warn' ? YELLOW : RED}${cleanMsg}${RESET}`;
   } else if (category === 'router') {
-    renderedMsg = ROUTER_HIGHLIGHT.test(msg) ? `${YELLOW}${msg}${RESET}` : `${DIM}${msg}${RESET}`;
+    renderedMsg = ROUTER_HIGHLIGHT.test(cleanMsg) ? `${YELLOW}${cleanMsg}${RESET}` : `${DIM}${cleanMsg}${RESET}`;
   } else {
-    renderedMsg = msg;
+    renderedMsg = cleanMsg;
   }
 
-  const laneToken = opts.lane ? ` ${DIM}[${opts.lane}]${RESET}` : '';
-  const tsToken = opts.ts ? `${DIM}[${opts.ts}]${RESET} ` : '';
+  const laneToken = lane ? ` ${DIM}[${lane}]${RESET}` : '';
+  const tsToken = ts ? `${DIM}[${ts}]${RESET} ` : '';
 
-  return `${tsToken}${DIM}[factory]${RESET} ${symbol} ${coloredType} ${BOLD}#${issue}${RESET}${laneToken}: ${renderedMsg}`;
+  return `${tsToken}${DIM}[factory]${RESET} ${symbol} ${coloredType} ${BOLD}#${cleanIssue}${RESET}${laneToken}: ${renderedMsg}`;
 }

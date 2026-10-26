@@ -65,4 +65,14 @@ describe('ApprovalPrompt', () => {
     const { lastFrame } = render(<ApprovalPrompt request={makeRequest()} pendingCount={1} />);
     expect(lastFrame()).not.toContain('[1 of');
   });
+
+  it('ApprovalPrompt strips terminal escapes from branch and diff stat (#1634)', () => {
+    const payload = 'title \x1b]0;pwned\x07 end';
+    const request = makeRequest({ branch: `b${payload}`, diffStat: ` ${payload} | 2 ++\n` });
+    const { lastFrame } = render(<ApprovalPrompt request={request} pendingCount={1} denyReason={payload} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).not.toContain('\x1b]');
+    expect(frame).not.toContain('\x07');
+    expect(frame).toContain(']0;pwned');
+  });
 });

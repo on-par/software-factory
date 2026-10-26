@@ -31,6 +31,7 @@ section to `## X.Y.Z - date`. See
 
 ### Fixed
 
+- Terminal output (formatEventLine, `factory status`, `factory logs`, the TUI event feed, plain fallback and approval prompt) strips control characters from issue and event text, so escape sequences in an issue title can no longer rewrite the operator's terminal (#1634).
 - GitHub Actions runs now merge. With `FACTORY_MERGE=1`, `factory-run.sh` runs `factory land <issue>` in the same job after `run-issue` or `ship` exits 0. Before, the `Run factory` step set `FACTORY_MERGE=1` but the job ended at a ready PR. A draft PR is not landed, CI pending still fails the job, and a failed land fails the job with land's exit code. `land` is still not an allowed `command` input (#3727).
 - Two lanes sharing a breaker file no longer both run the usage-cap restore probe: a lane that claims the probe after another lane already closed or re-capped the provider drops its claim instead of probing again (#3708).
 - Bare `factory logs`, `--json` and `--follow`, the `human-restarted` park check for ship/run-issue/run-brief, `factory feedback`, `factory filing preview` and `factory classifier backtest` now read rotated event-log segments, not only the live `events.ndjson` (#3711).
