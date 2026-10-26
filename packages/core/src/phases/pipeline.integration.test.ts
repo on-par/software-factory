@@ -28,9 +28,11 @@ function makeTwoModelStubConfig(): ModelsConfig {
   const base = makeStubModelsConfig().models['stub-model'];
   return {
     version: 1,
+    // Both models share a provider: ModelRouter.run fails over only within the first model's
+    // provider per call (#3608); cross-provider moves happen at a phase boundary.
     models: {
       'model-a': { ...base },
-      'model-b': { ...base, provider: 'openai' },
+      'model-b': { ...base },
     },
     tiers: { boss: ['model-a', 'model-b'] },
     failover: {

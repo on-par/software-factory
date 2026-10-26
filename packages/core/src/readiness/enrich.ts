@@ -49,11 +49,15 @@ function extractEnrichedSections(body: string): string | null {
 }
 
 /** Readiness for PLAN's size gate: the factory:enriched sections win over the original text when they pass on their own (#2660). */
-export function scoreEnrichedIssueReadiness(input: { title: string; body: string }): ReadinessInfo {
+export function scoreEnrichedIssueReadiness(input: {
+  title: string;
+  body: string;
+  labels?: readonly string[];
+}): ReadinessInfo {
   const full = scoreIssueReadiness(input);
   const sections = extractEnrichedSections(input.body ?? '');
   if (sections === null) return full;
-  const enriched = scoreIssueReadiness({ title: input.title, body: sections });
+  const enriched = scoreIssueReadiness({ title: input.title, body: sections, labels: input.labels });
   return enriched.template === 'factory-task' && enriched.pass ? enriched : full;
 }
 

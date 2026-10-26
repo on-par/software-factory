@@ -40,6 +40,8 @@ export interface WorkRequest {
   reference?: WorkRequestReference;
   /** Tracker-native key (ADR-0168); set by tracker sources, absent for a local brief until #3640. */
   key?: WorkKey;
+  /** Source-native labels (GitHub issue labels); absent when the source has none. */
+  labels?: string[];
 }
 
 /**

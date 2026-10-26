@@ -34,6 +34,21 @@ bash scripts/verify.sh
 _No response_
 `;
 
+describe('scoreIssueReadiness spike exemption (#748)', () => {
+  const oversized = COMPLETE_FACTORY_TASK_BODY.replace(
+    'Fix the flicker in the widget renderer.',
+    Array.from({ length: 7 }, (_, n) => `- change ${n + 1}`).join('\n'),
+  );
+
+  it('is sizeOk for a spike-labeled factory-task body and not without the label', () => {
+    const spike = scoreIssueReadiness({ title: 'Investigate flicker', body: oversized, labels: ['spike'] });
+    expect(spike.template).toBe('factory-task');
+    expect(spike.sizeOk).toBe(true);
+    expect(spike.sizeReason).toBeUndefined();
+    expect(scoreIssueReadiness({ title: 'Investigate flicker', body: oversized }).sizeOk).toBe(false);
+  });
+});
+
 describe('scoreIssueReadiness', () => {
   it('scores a complete rendered factory-task body as fully ready', () => {
     const result = scoreIssueReadiness({ title: 'Fix widget flicker', body: COMPLETE_FACTORY_TASK_BODY });

@@ -1692,6 +1692,7 @@ npm run test`;
       comments?: { id: number; user: { id: number }; body: string }[];
       /** PLAN output; default is a small design. megaPlan trips the post-plan gate (14 changed files > 12). */
       plan?: string;
+      labels?: string[];
     }) {
       const worktree = await mkdtemp(join(tmpdir(), 'plan-phase-test-'));
       tempDirs.add(worktree);
@@ -1719,7 +1720,9 @@ npm run test`;
           rest: {
             users: { getAuthenticated: async () => ({ data: { id: BOT } }) },
             issues: {
-              get: async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
+              get: async () => ({
+                data: { title: 'Harden the import queue', body: oversizedBody, labels: opts.labels },
+              }),
               listComments: async () => ({ data: opts.comments ?? [] }),
               createComment,
               updateComment,
@@ -1748,6 +1751,15 @@ npm run test`;
       expect(createComment).not.toHaveBeenCalled();
       expect(events).toContain('size_hint');
       expect(events).not.toContain('size-gate-sliced');
+    });
+
+    it('a spike-labeled oversized factory-task issue logs no size_hint and records sizeGate passed (#748)', async () => {
+      const { result, events, create, createComment } = await run({ labels: ['spike'] });
+
+      expect(result.ok).toBe(true);
+      expect(events).not.toContain('size_hint');
+      expect(create).not.toHaveBeenCalled();
+      expect(createComment).not.toHaveBeenCalled();
     });
 
     it('stack mode does not slice from counts either (ADR-0161, #3350)', async () => {

@@ -4,12 +4,70 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
-import { checkIssueSize, estimatePlanSize, planOverBudget, type PlanSizeEstimate } from './size.js';
+import { checkIssueSize, estimatePlanSize, isSpikeIssue, planOverBudget, type PlanSizeEstimate } from './size.js';
 
 const items = (n: number) => Array.from({ length: n }, (_, i) => `- item ${i + 1}`).join('\n');
 const checkboxes = (n: number) => Array.from({ length: n }, (_, i) => `- [ ] criterion ${i + 1}`).join('\n');
 
+const withSubs = (n: number, subs: number, box = false) =>
+  Array.from({ length: n }, (_, i) =>
+    [
+      box ? `- [ ] criterion ${i + 1}` : `- item ${i + 1}`,
+      ...Array.from({ length: subs }, (_, j) => (box ? `  - [ ] detail ${j + 1}` : `  - detail ${j + 1}`)),
+    ].join('\n'),
+  ).join('\n');
+const indented = (text: string) =>
+  text
+    .split('\n')
+    .map((l) => `  ${l}`)
+    .join('\n');
+
 describe('checkIssueSize', () => {
+  it('counts 3 top-level in-scope items with 3 two-space sub-bullets as 3 (#748)', () => {
+    const inScope = `- allowlist\n  - a\n  - b\n  - c\n- denylist\n  - d\n  - e\n- third`;
+    expect(checkIssueSize({ inScope, acceptanceCriteria: checkboxes(2) })).toEqual({ sizeOk: true });
+  });
+
+  it('does not count nested checkboxes under a top-level acceptance criterion (#748)', () => {
+    const result = checkIssueSize({ inScope: items(2), acceptanceCriteria: withSubs(3, 2, true) });
+    expect(result).toEqual({ sizeOk: true });
+  });
+
+  it('still fails 6 top-level items that each carry sub-bullets, and a 2-space-indented top-level list of 6 (#748)', () => {
+    expect(checkIssueSize({ inScope: withSubs(6, 2), acceptanceCriteria: checkboxes(1) }).reason).toBe(
+      'too big: 6 in-scope items, 1 acceptance criteria',
+    );
+    expect(checkIssueSize({ inScope: indented(items(6)), acceptanceCriteria: checkboxes(1) }).reason).toBe(
+      'too big: 6 in-scope items, 1 acceptance criteria',
+    );
+    expect(checkIssueSize({ inScope: items(1), acceptanceCriteria: withSubs(6, 1, true) }).reason).toBe(
+      'too big: 1 in-scope items, 6 acceptance criteria',
+    );
+  });
+
+  it('counts an ordered list with 3-space-indented sub-bullets by its top-level items (#748)', () => {
+    const inScope = '1. one\n   - a\n2. two\n   - b\n3. three\n   - c\n4. four\n5. five';
+    expect(checkIssueSize({ inScope, acceptanceCriteria: '' })).toEqual({ sizeOk: true });
+  });
+
+  it('exempts a spike-labeled issue regardless of counts, case-insensitively (#748)', () => {
+    for (const labels of [['spike'], ['Spike'], [' bug ', 'SPIKE ']]) {
+      expect(checkIssueSize({ inScope: items(9), acceptanceCriteria: checkboxes(9), labels })).toEqual({
+        sizeOk: true,
+      });
+    }
+    for (const labels of [['spike-ish'], [] as string[]]) {
+      expect(checkIssueSize({ inScope: items(9), acceptanceCriteria: checkboxes(9), labels }).sizeOk).toBe(false);
+    }
+  });
+
+  it('isSpikeIssue matches only the exact label (#748)', () => {
+    expect(isSpikeIssue(undefined)).toBe(false);
+    expect(isSpikeIssue([])).toBe(false);
+    expect(isSpikeIssue(['kind:spike'])).toBe(false);
+    expect(isSpikeIssue(['spike'])).toBe(true);
+  });
+
   it('passes at the boundary — 5 in-scope bullets and 5 checkbox criteria', () => {
     const result = checkIssueSize({ inScope: items(5), acceptanceCriteria: checkboxes(5) });
     expect(result).toEqual({ sizeOk: true });

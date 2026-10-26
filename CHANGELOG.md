@@ -17,6 +17,10 @@ section to `## X.Y.Z - date`. See
 - BUILD (commit-only, opencode, codex, local-small) inlines the frozen spec's body once, without YAML frontmatter or `adr:` drafts, and no longer points the worker at the spec file (#1595).
 - The frozen spec's `route` now always matches the route that built the issue. One `RouteCapabilities` record per lane feeds both PLAN and BUILD, a single `resolveRoute` owns the codex→claude fallback, and a new `route-degraded` warn event is logged (and the spec rewritten) when the route changes after PLAN: breaker opened mid-lane, breaker gate swap, or failover inside BUILD (#664).
 
+### Fixed
+
+- The readiness size check counts only top-level In scope and acceptance-criteria items, so nested sub-bullets no longer inflate an atomic issue past the 5/5 hint, and `spike`-labeled issues are exempt from it (no `size_hint`, `factory check` reports runs-as-is) (#748).
+
 ## 0.9.18 - 2026-10-25
 
 A dogfood GitHub Actions caller and a CLI pin to 0.9.18 for the reusable

@@ -84,7 +84,8 @@ describe('runIssue — workspace artifacts integration (#1213)', () => {
     //    StubModelExecutor — no network/model calls. build_codex commits a product file (the
     //    "stub worker that commits a product file" this issue's scope names); check_design
     //    returns a valid PASS verdict so designSmellsChecker actually grades the diff instead
-    //    of erroring.
+    //    of erroring. The committed file must not be .md, docs/ or *.test.ts: a review-floor
+    //    class A diff makes design_smells SKIP (#3374/#3529) and the test would stop proving grading.
     const models: ModelsConfig = {
       version: 1,
       models: {
@@ -127,7 +128,8 @@ describe('runIssue — workspace artifacts integration (#1213)', () => {
           {
             output: 'built',
             effect: async (ctx) => {
-              writeFileSync(join(ctx.worktree, 'PRODUCT.md'), 'stub product output\n');
+              mkdirSync(join(ctx.worktree, 'src'), { recursive: true });
+              writeFileSync(join(ctx.worktree, 'src', 'widget.ts'), 'export const widget = true;\n');
               await commitAll(ctx.worktree, 'feat: stub work');
             },
           },
