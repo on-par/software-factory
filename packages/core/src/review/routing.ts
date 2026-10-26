@@ -1,6 +1,7 @@
 // packages/core/src/review/routing.ts — pre-SHIP PR classifier decision (#1724): turns the final diff
 // into a review floor and says whether the run must be held for a human. Never throws (fail closed).
 
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BASE_REF_CANDIDATES, defaultDiffRunner, type DiffRunner } from '../checkers/design-smells.js';
@@ -14,8 +15,12 @@ import {
   type ReviewFloorRuleSet,
 } from './floor.js';
 import type { PrShadowVerdict } from './classifier.js';
+import type { TrustTier } from '../config/repo.js';
 
 export { parseNumstat } from './floor.js';
+
+/** Gate reason for a class-A PR held by the T1 deterministic sample (#1958, ADR-0144). */
+export const T1_SAMPLED_REASON = 't1-sampled';
 
 /** The classifier's pre-SHIP decision for one run (#1724). */
 export interface ReviewRouting {
@@ -29,6 +34,8 @@ export interface ReviewRouting {
   error?: string;
   /** Shadow model verdict (#1725, ADR-0121) — recorded only; never affects `gated`. */
   shadow?: PrShadowVerdict;
+  /** T1 sample (#1958, ADR-0144); present only at T1 for an otherwise ungated A floor. */
+  sample?: { value: number; rate: number; held: boolean };
 }
 
 function errorMessage(err: unknown): string {
@@ -123,4 +130,23 @@ export async function resolveReviewRouting(input: {
   } catch (err) {
     return { floor: null, rules: [], gated: true, reason: 'classifier:error', error: errorMessage(err) };
   }
+}
+
+/** Deterministic sample position in [0,1) for one issue: sha256 of `<repo>#<issue>`, first 32 bits (#1958). */
+export function t1SampleValue(repo: string, issue: number): number {
+  const hex = createHash('sha256').update(`${repo}#${issue}`).digest('hex').slice(0, 8);
+  return parseInt(hex, 16) / 2 ** 32;
+}
+
+/** At T1, hold a deterministic sample of otherwise ungated class-A PRs for a human (ADR-0144, #1958).
+ *  Escalate-only: any other tier, a floor above A, or an already-gated routing is returned unchanged. */
+export function decideT1Sample(
+  routing: ReviewRouting,
+  input: { trustTier: TrustTier; rate: number; repo: string; issue: number },
+): ReviewRouting {
+  if (input.trustTier !== 'T1' || routing.gated || routing.floor !== 'A') return routing;
+  const value = t1SampleValue(input.repo, input.issue);
+  const held = value < input.rate;
+  const sample = { value, rate: input.rate, held };
+  return held ? { ...routing, gated: true, reason: T1_SAMPLED_REASON, sample } : { ...routing, sample };
 }

@@ -158,6 +158,8 @@ version: 2
   # maxDiffLines: 500
   # Merge trust tier for this repo (ADR-0144). Unset: T0, a human merges every PR.
   # trustTier: T0
+  # Share of class-A PRs held for a human at trust tier T1 (ADR-0144, #1958), 0 to 1. Unset: 0.25.
+  # t1SampleRate: 0.25
 # Which checks decide base health (#3290).
 # baseHealth:
   # Check-run names that decide whether main is green for the base-hold gate and base health. Unset:

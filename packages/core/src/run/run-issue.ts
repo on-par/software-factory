@@ -80,7 +80,7 @@ import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings, SizeGateMode } from '../config/index.js';
 import { defaultExecFn, type ExecFn } from '../utils/exec.js';
 import type { ProviderOrder } from '../config/provider-order.js';
-import { decideBuildRoute, type EffectiveModelPins } from '../config/repo.js';
+import { decideBuildRoute, type EffectiveModelPins, type TrustTier } from '../config/repo.js';
 import type { RunStewardPorts } from '../steward/run.js';
 import { describeDotnetEnv, dotnetEnvReport } from '../environment/dotnet.js';
 import { ProcessGroupTracker } from '../environment/process-groups.js';
@@ -122,7 +122,7 @@ import type { RequiredChecksVerdict } from '../utils/required-checks.js';
 import type { RunReportInfo } from './run-report-info.js';
 import { providerProbe, type ProviderProbe } from './provider-probe.js';
 import { renderPreviousAttempt } from './previous-attempt.js';
-import { withoutHumanOnlyLabels } from './max-lines-override.js';
+import { applyClassifierGateLabel, sampleT1Routing } from './classifier-gate.js';
 
 /** Everything one run needs decided, as a plain resolved value — the CLI adapter
  *  computes this today; no config/file/path resolution happens in here. */
@@ -174,7 +174,14 @@ export interface RunRequest extends ReworkRequestFields {
   stewardEnabled?: boolean;
   /** Review floor rules for CHECK's design critic class-A skip (#3374); set regardless of the classifier gate. */
   reviewFloorRules?: ReviewFloorRuleSet;
-  prClassifier?: { rules: ReviewFloorRuleSet; gateLabel: string; modelPin?: string };
+  /** trustTier undefined = T0 (ADR-0144); t1SampleRate undefined = the default (#1958). */
+  prClassifier?: {
+    rules: ReviewFloorRuleSet;
+    gateLabel: string;
+    modelPin?: string;
+    trustTier?: TrustTier;
+    t1SampleRate?: number;
+  };
   timeouts: { plan: number; build: number; check: number; approval: number; tests: number; compile?: number };
   modelPins: EffectiveModelPins;
   codexDisabled: boolean;
@@ -1080,31 +1087,22 @@ async function runIssueOnce(
     // PR classifier gate (#1724): escalate-only — a B/C floor (or any failure) adds the gate label.
     let reviewRouting: ReviewRouting | undefined;
     if (request.prClassifier) {
-      reviewRouting = await resolveReviewRouting({
+      const floorRouting = await resolveReviewRouting({
         worktree: ports.workspace.path,
         fallbackBaseRef: buildDiffBase,
         parentBaseRef: request.parentBaseRef,
         rules: request.prClassifier.rules,
         readChanges: ports.readReviewFloorChanges,
       });
+      reviewRouting = sampleT1Routing(floorRouting, request);
       if (reviewRouting.gated) {
-        const label = request.prClassifier.gateLabel;
-        const [owner, repoName] = request.repo.split('/');
-        const labels = withoutHumanOnlyLabels([label]);
-        try {
-          if (labels.length > 0) {
-            await ports.octokit.rest.issues.addLabels({ owner, repo: repoName, issue_number: request.issue, labels });
-          }
-        } catch (err) {
-          return await terminalParked(
-            'held',
-            `issue held: classifier gate label '${label}' could not be applied (${reviewRouting.reason}): ${errorMessage(err)} — needs a human`,
-          );
-        }
-        log(
-          'merge-gated',
-          `${reviewRouting.reason} — applied ${label}; auto-merge held for a human${reviewRouting.error ? ` (${reviewRouting.error})` : ''}`,
+        const heldReason = await applyClassifierGateLabel(
+          ports.octokit,
+          { repo: request.repo, issue: request.issue, label: request.prClassifier.gateLabel },
+          reviewRouting,
+          log,
         );
+        if (heldReason) return await terminalParked('held', heldReason);
       }
 
       // Shadow model verdict (#1725, ADR-0121): recorded only. It runs after the gate is fully

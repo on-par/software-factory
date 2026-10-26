@@ -235,6 +235,12 @@ export const RepoFactoryConfigV2Schema = z
           .enum(['T0', 'T1', 'T2'])
           .optional()
           .describe('Merge trust tier for this repo (ADR-0144). Unset: T0, a human merges every PR.'),
+        t1SampleRate: z
+          .number()
+          .min(0)
+          .max(1)
+          .optional()
+          .describe('Share of class-A PRs held for a human at trust tier T1 (ADR-0144, #1958), 0 to 1. Unset: 0.25.'),
       })
       .strict()
       .optional()
@@ -858,6 +864,13 @@ export type TrustTier = 'T0' | 'T1' | 'T2';
 /** Effective merge trust tier for this repo (ADR-0144, #2131): classifier.trustTier, else T0. */
 export function resolveTrustTier(repo: RepoFactoryConfig | null): TrustTier {
   return repo?.classifier?.trustTier ?? 'T0';
+}
+
+export const DEFAULT_T1_SAMPLE_RATE = 0.25;
+
+/** Share of class-A PRs held for a human at trust tier T1 (ADR-0144, #1958): classifier.t1SampleRate, else 0.25. */
+export function resolveT1SampleRate(repo: RepoFactoryConfig | null): number {
+  return repo?.classifier?.t1SampleRate ?? DEFAULT_T1_SAMPLE_RATE;
 }
 
 export { decideBuildRoute, resolveEffectiveBuildRoute, routeForBuildModel } from './build-route.js';
