@@ -1,5 +1,5 @@
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 
@@ -44,6 +44,11 @@ describe('init --yes', () => {
     return out;
   }
 
+  /** `git check-ignore` exit status: 0 ignored, 1 not ignored. */
+  function checkIgnore(root: string, path: string): number {
+    return spawnSync('git', ['check-ignore', '-q', path], { cwd: root }).status ?? -1;
+  }
+
   async function initInFreshRepo(...args: string[]) {
     const root = mkdtempSync(join(tmpdir(), 'factory-init-yes-'));
     tempDirs.push(root);
@@ -66,6 +71,23 @@ describe('init --yes', () => {
     const shortSnapshot = await initInFreshRepo('-y');
     const longSnapshot = await initInFreshRepo('--yes');
     expect(shortSnapshot).toEqual(longSnapshot);
+  });
+
+  // init must not git-ignore .factory/config.yaml (#3689).
+  it('leaves .factory/config.yaml committable in a fresh repo', async () => {
+    await initInFreshRepo();
+    expect(checkIgnore(tempDirs.at(-1)!, '.factory/config.yaml')).toBe(1);
+  });
+
+  it('re-init drops a legacy .factory/ exclude line and keeps the rest', async () => {
+    await initInFreshRepo();
+    const root = tempDirs.at(-1)!;
+    const exclude = join(root, '.git', 'info', 'exclude');
+    writeFileSync(exclude, '*.swp\n.factory/\n');
+    expect(checkIgnore(root, '.factory/config.yaml')).toBe(0);
+    await main(['node', 'factory', 'init']);
+    expect(readFileSync(exclude, 'utf-8')).toBe('*.swp\n');
+    expect(checkIgnore(root, '.factory/config.yaml')).toBe(1);
   });
 
   it('--help lists -y, --yes', () => {

@@ -173,7 +173,6 @@ describe('factory init → lane worktree constitution (integration)', () => {
       },
     });
     expect(existsSync(join(repo, '.factory/constitution.md'))).toBe(true);
-    expect(readFileSync(join(repo, '.git/info/exclude'), 'utf-8')).toContain('.factory/');
 
     const marker = 'FACTORY-2413-MARKER-' + Date.now();
     appendFileSync(join(repo, '.factory/constitution.md'), '\n\n' + marker + '\n');
@@ -186,7 +185,7 @@ describe('factory init → lane worktree constitution (integration)', () => {
       prefix: 'factory',
     });
     await setupWorktree(repo, 'factory/2413-marker', worktree, 'origin/main');
-    // .factory/ is git-excluded, so the lane worktree never contains the file.
+    // .factory/ is not committed, so the lane worktree never contains the file.
     expect(existsSync(join(worktree, '.factory/constitution.md'))).toBe(false);
 
     const resolved = new ConstitutionLoader().resolve(worktree, 'example-data-app', undefined, repo);

@@ -75,6 +75,9 @@ seven published `@on-par` packages move to 0.9.18 in lockstep. Install or update
 
 ### Fixed
 
+- `factory init` no longer adds `.factory/` to `.git/info/exclude`, so
+  `.factory/config.yaml` can be committed. Re-running init removes the bare `.factory/`
+  line older inits added. `.factory/.gitignore` still ignores `state/` (#3689).
 - A STOP during await-merge hands the issue back to the queue instead of releasing it
   as done, so the next run adopts and lands the green PR (#3291).
 - Lane setup no longer fails when a `factory/<n>-*` branch already exists after a

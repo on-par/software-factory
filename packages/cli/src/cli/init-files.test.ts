@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { ensureFactoryExcluded, SAMPLE_QUEUE, writeSampleQueue } from './init-files.js';
+import { healFactoryExclude, SAMPLE_QUEUE, writeSampleQueue } from './init-files.js';
 
 let dir: string;
 
@@ -16,33 +16,41 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe('ensureFactoryExcluded', () => {
-  it('creates the exclude file when it does not exist', () => {
+describe('healFactoryExclude', () => {
+  it('does not create the exclude file when it does not exist', () => {
     const file = join(dir, 'exclude');
-    expect(ensureFactoryExcluded(file)).toBe(true);
-    expect(readFileSync(file, 'utf-8')).toBe('\n.factory/\n');
+    expect(healFactoryExclude(file)).toBe(false);
+    expect(existsSync(file)).toBe(false);
   });
 
-  it('appends the entry on a new line after existing content', () => {
+  it('does nothing when the exclude path is under a file (.git is a worktree pointer)', () => {
+    writeFileSync(join(dir, 'git'), 'gitdir: elsewhere\n');
+    expect(healFactoryExclude(join(dir, 'git', 'info', 'exclude'))).toBe(false);
+  });
+
+  it('removes bare .factory/ and .factory lines and keeps everything else', () => {
     const file = join(dir, 'exclude');
-    writeFileSync(file, '# git ls-files --others --exclude-from=.git/info/exclude\n*.swp');
-    expect(ensureFactoryExcluded(file)).toBe(true);
+    writeFileSync(
+      file,
+      '# git ls-files --others --exclude-from=.git/info/exclude\n*.swp\n.factory/\n  .factory  \n/.factory/worktrees/\nfoo.factory/bar\n# .factory/\n',
+    );
+    expect(healFactoryExclude(file)).toBe(true);
     expect(readFileSync(file, 'utf-8')).toBe(
-      '# git ls-files --others --exclude-from=.git/info/exclude\n*.swp\n.factory/\n',
+      '# git ls-files --others --exclude-from=.git/info/exclude\n*.swp\n/.factory/worktrees/\nfoo.factory/bar\n# .factory/\n',
     );
   });
 
-  it('leaves the file alone when the entry is already present', () => {
+  it('leaves the file untouched when there is no bare .factory line', () => {
     const file = join(dir, 'exclude');
-    writeFileSync(file, '.factory/\n');
-    expect(ensureFactoryExcluded(file)).toBe(false);
-    expect(readFileSync(file, 'utf-8')).toBe('.factory/\n');
+    writeFileSync(file, '*.swp\n/.factory/worktrees/');
+    expect(healFactoryExclude(file)).toBe(false);
+    expect(readFileSync(file, 'utf-8')).toBe('*.swp\n/.factory/worktrees/');
   });
 
-  it('rethrows read errors other than ENOENT', () => {
+  it('rethrows other read errors', () => {
     const file = join(dir, 'exclude');
     mkdirSync(file);
-    expect(() => ensureFactoryExcluded(file)).toThrow(/EISDIR/);
+    expect(() => healFactoryExclude(file)).toThrow(/EISDIR/);
   });
 });
 
