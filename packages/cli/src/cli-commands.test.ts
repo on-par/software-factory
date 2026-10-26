@@ -107,6 +107,7 @@ import { listBuiltInCheckers } from '@on-par/factory-core/internal';
 import { openPrFixture } from './cli/__fixtures__/open-pr.js';
 import { FACTORYD_LABEL, factorydFiles, type DaemonCtlDeps } from './cli/daemon.js';
 import { HELP_GROUPS, OTHER_GROUP } from './cli/help-groups.js';
+import { statefulLabelFakes } from './cli/test-support/stateful-label-fakes.js';
 
 import {
   buildInitConfig,
@@ -2957,9 +2958,8 @@ bash scripts/verify.sh
         return '';
       };
       h.octokit.rest.issues.createLabel = vi.fn(async () => ({}));
-      h.octokit.rest.issues.addLabels = vi.fn(async () => ({}));
+      Object.assign(h.octokit.rest.issues, statefulLabelFakes());
       h.octokit.rest.issues.listForRepo = vi.fn(async () => ({ data: [] }));
-      h.octokit.rest.issues.listLabelsOnIssue = vi.fn(async () => ({ data: [] }));
     });
 
     it.each(['', '   '])('exits 2 for an empty or whitespace lane before any GitHub call', async (lane) => {
@@ -2998,9 +2998,10 @@ bash scripts/verify.sh
     });
 
     it('exits nonzero and reports a per-issue failure without dropping the successful issue', async () => {
-      h.octokit.rest.issues.addLabels = vi.fn(async ({ issue_number }: any) => {
-        if (issue_number === 10) throw new Error('label API down');
-        return {};
+      const addLabels = h.octokit.rest.issues.addLabels;
+      h.octokit.rest.issues.addLabels = vi.fn(async (input: any) => {
+        if (input.issue_number === 10) throw new Error('label API down');
+        return addLabels(input);
       });
 
       const res = await runMain('queue', 'add', 'daw', '10', '11');

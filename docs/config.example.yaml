@@ -337,6 +337,11 @@ auto_failover:
   enabled: true
   cooldown_minutes: 30
   fallback_model: "claude-sonnet-5"
+# Fleet-wide single-writer jobs (#3147).
+# fleet:
+  # Host id (FACTORY_HOST_ID, else the hostname) that alone runs blocked-park auto-unpark from
+  # `factory doctor --reconcile`; other hosts skip it. Unset: every host runs it.
+  # leader: "<host-id>"
 # GitHub-labels queue settings. claim_settle_ms is how long a lane waits after writing its claim
 # before it confirms the claim, so a lane on another host racing for the same issue is seen (#3145).
 # Non-negative integer milliseconds; 0 turns the wait off. max_review_rework_runs caps review-rework

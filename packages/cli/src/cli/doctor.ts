@@ -28,6 +28,7 @@ import {
   isHarnessCliPresent,
   localAuthFailureSinceLogin,
   microVmName,
+  resolveFleetLeader,
   resolveQueueMaxClockSkewMs,
   shellEscape,
   wrapCommandInSandbox,
@@ -1132,7 +1133,8 @@ export async function cmdDoctor(
 
       await reconcileWorktrees(rt, repoRoot, paths, factoryConfig, ghRepo, octokit);
 
-      await reconcileQueue(rt.internalOps, ghRepo, octokit, getFactoryPaths(repoRoot).events, maxClockSkewMs);
+      const fleetLeader = resolveFleetLeader(factoryConfig);
+      await reconcileQueue(rt.internalOps, ghRepo, octokit, paths.events, maxClockSkewMs, fleetLeader);
     }
   }
 

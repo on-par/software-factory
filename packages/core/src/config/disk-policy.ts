@@ -12,6 +12,19 @@ export const DiskConfigSchema = z
   })
   .default({ minFreeGb: 10 });
 
+/** Fleet-wide single-writer settings (#3147). Unset leader: every host runs the jobs. */
+export const FleetConfigSchema = z
+  .object({
+    leader: z
+      .string()
+      .optional()
+      .describe(
+        'Host id (FACTORY_HOST_ID, else hostname) that alone runs fleet-wide single-writer jobs such as blocked-park auto-unpark (#3147). Unset: every host runs them.',
+      ),
+    comment: z.string().optional(),
+  })
+  .default({});
+
 /** Host disk guard policy (#2284). FACTORY_MIN_FREE_GB beats disk.minFreeGb; 0 disables. */
 export interface DiskGuardPolicy {
   enabled: boolean;

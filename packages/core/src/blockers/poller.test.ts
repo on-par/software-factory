@@ -85,6 +85,51 @@ function fakeStore(
 }
 
 describe('pollBlockedParks', () => {
+  describe('fleet leader gate (#3147)', () => {
+    const setup = () => {
+      const { client } = fakeClient(new Map([[5, parked()]]));
+      const list = vi.spyOn(client, 'listOpenIssuesWithLabels');
+      const { store } = fakeStore(new Map([[5, comment(5)]]), new Map([[5, [blocker(9, { repository: 'x/y' })]]]));
+      return { client, list, store };
+    };
+
+    it('returns nothing and lists nothing on a host that is not the leader', async () => {
+      const { client, list, store } = setup();
+      expect(await pollBlockedParks({ client, ...base, store, fleetLeader: 'host-a', hostId: 'host-b' })).toEqual([]);
+      expect(list).not.toHaveBeenCalled();
+    });
+
+    it('polls on the leader and when no leader is set', async () => {
+      for (const fleetLeader of ['host-a', undefined]) {
+        const { client, store } = setup();
+        const results = await pollBlockedParks({ client, ...base, store, fleetLeader, hostId: 'host-a' });
+        expect(results.map((r) => r.outcome)).toEqual(['unparked']);
+      }
+    });
+
+    it('forwards an order_collision_repaired event from the unpark settle', async () => {
+      const { client, store } = setup();
+      const addLabels = client.addLabels.bind(client);
+      client.addLabels = async (input) => {
+        await addLabels(input);
+        const order = input.labels.find((l) => l.startsWith('factory:order:'));
+        if (order)
+          await addLabels({
+            ...input,
+            issue_number: 2,
+            labels: [order, laneLabel('build'), 'factory:in-progress'],
+          });
+      };
+      const logEvent = vi.fn();
+      await pollBlockedParks({ client, ...base, store, logEvent });
+      expect(logEvent).toHaveBeenCalledWith(
+        'order_collision_repaired',
+        5,
+        'lane build: order 1 shared; kept #2, moved #5 → 2',
+      );
+    });
+  });
+
   it('unparks a blocked parent whose factory-filed blocker closed completed with a merged PR', async () => {
     const labels = new Map([[5, parked()]]);
     const { client, addLabels, removeLabel } = fakeClient(labels);

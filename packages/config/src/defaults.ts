@@ -123,6 +123,7 @@ export interface FactoryDefaults {
     comment?: string;
   };
   disk: { minFreeGb: number; comment?: string };
+  fleet: { leader?: string; comment?: string };
   auto_failover: { enabled: boolean; cooldown_minutes: number; fallback_model: string; comment?: string };
   queue: { claim_settle_ms: number; max_review_rework_runs: number; maxClockSkewMs: number; comment?: string };
 }
@@ -731,6 +732,7 @@ export const defaultFactoryConfig: FactoryDefaults = {
     comment:
       'Supervisor circuit breaker for cross-harness build failover. On a quota trip (usage_cap/rate_limit) the Codex provider is skipped for cooldown_minutes: the lane that trips it falls over to fallback_model (when available); every later lane during the cooldown is routed straight to claude via the existing codexDisabled path (default tier order, not necessarily fallback_model). Configure enabled, cooldown_minutes and fallback_model in .factory/config.json; environment variables do not override this policy.',
   },
+  fleet: {},
   queue: {
     claim_settle_ms: 3000,
     max_review_rework_runs: 2,

@@ -13,6 +13,22 @@ section to `## X.Y.Z - date`. See
 - BUILD (commit-only, opencode, codex, local-small) inlines the frozen spec's body once, without YAML frontmatter or `adr:` drafts, and no longer points the worker at the spec file (#1595).
 - The frozen spec's `route` now always matches the route that built the issue. One `RouteCapabilities` record per lane feeds both PLAN and BUILD, a single `resolveRoute` owns the codex→claude fallback, and a new `route-degraded` warn event is logged (and the spec rewritten) when the route changes after PLAN: breaker opened mid-lane, breaker gate swap, or failover inside BUILD (#664).
 
+### Fixed
+
+- Queue: `enqueue` (and so `factory unpark` and the blocked-park auto-unpark) now settles
+  its order after writing. An issue with several `factory:order:*` labels keeps the lowest.
+  A position shared by concurrent enqueues is repaired by moving the higher-numbered queued
+  holders to the back, at most 3 attempts, and each repair emits an
+  `order_collision_repaired` event (#3147).
+- Queue lane scans paginate past 100 issues, so a lane with more than 100 members no longer
+  under-counts the next order position (#3147).
+
+### Added
+
+- `fleet.leader` config: the host id (`FACTORY_HOST_ID`, else the hostname) that alone runs
+  blocked-park auto-unpark from `factory doctor --reconcile`. Other hosts print a skip line.
+  Unset, every host polls as before (#3147).
+
 ## 0.9.18 - 2026-10-25
 
 A dogfood GitHub Actions caller and a CLI pin to 0.9.18 for the reusable

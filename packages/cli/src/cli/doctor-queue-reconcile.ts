@@ -2,7 +2,12 @@
 
 import type { Octokit } from '@octokit/rest';
 import { createLogger } from '@on-par/factory-core';
-import { createOctokitBlockedParkStore, createOctokitQueueClient } from '@on-par/factory-core/internal';
+import {
+  createOctokitBlockedParkStore,
+  createOctokitQueueClient,
+  isFleetLeader,
+  resolveFactoryHostId,
+} from '@on-par/factory-core/internal';
 
 import { formatClaimReconcileReport } from './doctor-health.js';
 import type { CliDeps } from './index.js';
@@ -18,6 +23,7 @@ export async function reconcileQueue(
   octokit: Octokit | undefined,
   eventsFile: string,
   maxClockSkewMs?: number,
+  fleetLeader?: string,
 ): Promise<void> {
   const [owner, repo] = ghRepo?.split('/') ?? [];
   // Stale claim reap (#999): factory:in-progress claims naming a dead local pid go back to
@@ -39,16 +45,22 @@ export async function reconcileQueue(
   }
 
   // Blocked-park poll (#2318): parents parked `blocked` resume once their blockers close.
+  const hostId = resolveFactoryHostId();
   try {
-    if (ghRepo && octokit) {
+    if (!isFleetLeader(fleetLeader, hostId)) {
+      console.log(`reconcile: skipping blocked parks: this host (${hostId}) is not fleet.leader (${fleetLeader})`);
+    } else if (ghRepo && octokit) {
       const results = await ops.pollBlockedParks({
         client: createOctokitQueueClient(octokit),
         owner,
         repo,
         store: createOctokitBlockedParkStore(octokit, ghRepo),
+        fleetLeader,
+        hostId,
         logEvent: (kind, issue, msg) => {
           const log = createLogger(eventsFile, { issue }, { out: { write: () => true } });
           if (kind === 'warn') log.warn('warn', msg);
+          else if (kind === 'order_collision_repaired') log.warn('order_collision_repaired', msg);
           else log.info('issue_unparked', msg);
         },
       });

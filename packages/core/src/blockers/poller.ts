@@ -5,7 +5,8 @@
 
 import type { Octokit } from '@octokit/rest';
 
-import { PARKED_LABEL, type QueueGitHubClient } from '../queue/github-queue.js';
+import { isFleetLeader, resolveFactoryHostId } from '../queue/fleet-leader.js';
+import { PARKED_LABEL, type OrderCollisionRepair, type QueueGitHubClient } from '../queue/github-queue.js';
 import { runUnpark, UnparkError } from '../queue/unpark.js';
 import { findOwnParkComment, type ParkCommentPatch, patchParkComment, readParkState } from '../run/park-comment.js';
 import type { ParkStateComment } from '../run/park-comment.js';
@@ -45,7 +46,16 @@ export interface PollBlockedParksOptions {
   repo: string;
   store: BlockedParkStore;
   /** Event sink; the CLI wires it to the events log. Defaults to a no-op. */
-  logEvent?: (kind: 'issue_unparked' | 'warn', issue: number, message: string) => void;
+  logEvent?: (kind: 'issue_unparked' | 'warn' | 'order_collision_repaired', issue: number, message: string) => void;
+  /** `fleet.leader`: when set, only the host with this id polls; others return no results (#3147). Unset: every host polls. */
+  fleetLeader?: string;
+  /** This host's id; defaults to `resolveFactoryHostId()`. */
+  hostId?: string;
+}
+
+function formatRepair(r: OrderCollisionRepair): string {
+  const moved = r.moved.map((m) => `#${m.issue} → ${m.to}`).join(', ');
+  return `lane ${r.lane}: order ${r.position} shared; kept #${r.kept}, moved ${moved}`;
 }
 
 function message(err: unknown): string {
@@ -90,7 +100,13 @@ async function pollOne(opts: PollBlockedParksOptions, n: number): Promise<Blocke
 
   let result;
   try {
-    result = await runUnpark({ client, owner, repo, issue: n });
+    result = await runUnpark({
+      client,
+      owner,
+      repo,
+      issue: n,
+      onOrderCollisionRepaired: (r) => logEvent('order_collision_repaired', n, formatRepair(r)),
+    });
   } catch (err) {
     if (err instanceof UnparkError && err.code === 'not-parked') {
       return { issue: n, outcome: 'raced', detail: err.message };
@@ -117,6 +133,7 @@ async function pollOne(opts: PollBlockedParksOptions, n: number): Promise<Blocke
 /** One failing parent never stops the poll of the others. */
 export async function pollBlockedParks(opts: PollBlockedParksOptions): Promise<BlockedParkPollResult[]> {
   const { client, owner, repo } = opts;
+  if (!isFleetLeader(opts.fleetLeader, opts.hostId ?? resolveFactoryHostId())) return [];
   const parked = await client.listOpenIssuesWithLabels({ owner, repo, labels: [PARKED_LABEL] });
   const results: BlockedParkPollResult[] = [];
   for (const { number } of parked) {

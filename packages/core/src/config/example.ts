@@ -393,6 +393,19 @@ function runtimeNamespace(): Node[] {
     section('host'),
     section('disk'),
     section('auto_failover'),
+    {
+      kind: 'object',
+      key: 'fleet',
+      doc: 'Fleet-wide single-writer jobs (#3147).',
+      children: [
+        {
+          kind: 'unset',
+          key: 'leader',
+          doc: 'Host id (FACTORY_HOST_ID, else the hostname) that alone runs blocked-park auto-unpark from `factory doctor --reconcile`; other hosts skip it. Unset: every host runs it.',
+          example: '"<host-id>"',
+        },
+      ],
+    },
     section('queue'),
     section('ingest'),
     intake,

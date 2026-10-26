@@ -45,5 +45,5 @@ export function fakePagedOctokit(labels: Map<number, string[]>): { octokit: Octo
       },
     },
   };
-  return { octokit: octokit as unknown as Octokit, listPages: () => pages };
+  return { octokit: octokit as never, listPages: () => pages };
 }
