@@ -12,7 +12,7 @@ import { createClaimReleaser } from './claim-release.js';
 import { createClaimSettler, type ClaimSettleOptions, type ClaimSettler } from './claim-settle.js';
 import { knownRepoLabels } from './label-cache.js';
 import { createOctokitLabelSweepMethods, dropReplacedRepoLabel, toQueueIssue } from './octokit-label-client.js';
-import type { OrderCollision } from './order-collision.js';
+import type { EnqueueSettleOptions, OrderCollision, OrderCollisionRepair } from './order-collision.js';
 import type { QueueEntry, QueueSnapshot, QueueSnapshotEntry } from './index.js';
 import {
   formatQueueOrderConflict,
@@ -21,7 +21,7 @@ import {
   type QueueOrderConflict,
 } from './queue-order.js';
 
-export { formatQueueOrderConflict, QUEUE_ORDER_LABEL_PREFIX, type QueueOrderConflict };
+export { formatQueueOrderConflict, QUEUE_ORDER_LABEL_PREFIX, type OrderCollisionRepair, type QueueOrderConflict };
 
 export const QUEUED_LABEL = 'factory:queued';
 export const IN_PROGRESS_LABEL = 'factory:in-progress';
@@ -346,6 +346,7 @@ export interface EnqueueResult {
   collision?: OrderCollision;
   /** Set only when preferOrder was asked for and other lane members held it; the issue went to the back (#3554). */
   preferredOrderHeldBy?: number[];
+  orderRepairs?: OrderCollisionRepair[]; // set only when the post-write settle moved a shared position (#3147)
 }
 
 export interface EnqueueOptions {
@@ -420,7 +421,7 @@ function classifyQueueClear(issues: readonly QueueIssue[]): QueueClearPreview {
   return { entries, wouldClear: entries.length - wouldSkip, wouldSkip };
 }
 
-export interface GithubQueueOptions extends ClaimSettleOptions {
+export interface GithubQueueOptions extends ClaimSettleOptions, EnqueueSettleOptions {
   client: QueueGitHubClient;
   owner: string;
   repo: string;
@@ -583,7 +584,7 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     }
   }
 
-  const { enqueue, enqueueAfter, enqueueFront } = createEnqueuers(client, owner, repo);
+  const { enqueue, enqueueAfter, enqueueFront } = createEnqueuers(client, owner, repo, options);
 
   function clearLabels(lane: string | undefined): string[] {
     return lane === undefined ? [QUEUED_LABEL] : [QUEUED_LABEL, laneLabel(lane)];

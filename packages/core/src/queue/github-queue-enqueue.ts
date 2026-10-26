@@ -1,12 +1,20 @@
 // packages/core/src/queue/github-queue-enqueue.ts — GitHub queue enqueue paths: tail append and right-behind-the-parent placement (#3539).
 
-import { orderCollisionAt, scanLaneOrders } from './order-collision.js';
+import { notFoundError } from './github-errors.js';
+import {
+  orderCollisionAt,
+  scanLaneOrders,
+  type EnqueueSettleOptions,
+  type OrderCollisionRepair,
+} from './order-collision.js';
 import { QUEUE_ORDER_LABEL_PREFIX } from './queue-order.js';
 import {
+  IN_PROGRESS_LABEL,
   laneLabel,
   QUEUED_LABEL,
   QUEUED_LABEL_COLOR,
   LANE_LABEL_COLOR,
+  queueOrderLabel,
   queueOrderLabelSpec,
   type EnqueueOptions,
   type EnqueueResult,
@@ -46,9 +54,80 @@ function orderOf(label: string): number | undefined {
   return Number.isSafeInteger(n) && n > 0 ? n : undefined;
 }
 
+/** Settle re-checks per enqueued issue: collapse, re-scan, repair (#3147). */
+const MAX_ORDER_SETTLE_ATTEMPTS = 3;
+
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-export function createEnqueuers(client: QueueGitHubClient, owner: string, repo: string) {
+export function createEnqueuers(
+  client: QueueGitHubClient,
+  owner: string,
+  repo: string,
+  { onOrderCollisionRepaired }: EnqueueSettleOptions = {},
+) {
+  async function removeIfPresent(issue: number, name: string): Promise<void> {
+    try {
+      await client.removeLabel({ owner, repo, issue_number: issue, name });
+    } catch (err) {
+      if (!notFoundError(err)) throw err; // already removed by a concurrent repairer
+    }
+  }
+
+  /** Keeps the lowest valid order label on `issue`, removing the rest; returns the kept position (#3147). */
+  async function collapse(issue: number): Promise<number | undefined> {
+    const orders = (await client.getIssueLabels({ owner, repo, issue_number: issue })).filter((label) =>
+      label.startsWith(QUEUE_ORDER_LABEL_PREFIX),
+    );
+    const keep = orders
+      .flatMap((name) => orderOf(name) ?? [])
+      .sort((a, b) => a - b)
+      .at(0);
+    if (keep === undefined) return undefined;
+    const keepName = orders.find((name) => orderOf(name) === keep);
+    for (const name of orders) if (name !== keepName) await removeIfPresent(issue, name);
+    return keep;
+  }
+
+  /**
+   * Post-write settle (#3147): collapses several order labels to the lowest, then re-scans the lane and, when
+   * `issue`'s position is shared, moves every other movable (queued, unclaimed) holder to a fresh max + 1. Bounded.
+   * The lowest-numbered non-movable holder (else lowest-numbered) keeps the position.
+   */
+  async function settleOrder(
+    lane: string,
+    issue: number,
+  ): Promise<{ position?: number; repairs: OrderCollisionRepair[] }> {
+    const repairs: OrderCollisionRepair[] = [];
+    for (let attempt = 1; attempt <= MAX_ORDER_SETTLE_ATTEMPTS; attempt++) {
+      const position = await collapse(issue);
+      if (position === undefined) continue; // a concurrent mover may be mid-move
+      const members = await client.listOpenIssuesWithLabels({ owner, repo, labels: [laneLabel(lane)] });
+      const heldAt = (labels: readonly string[]): string[] =>
+        labels.filter((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX) && orderOf(label) === position);
+      const group = members.filter((m) => heldAt(m.labels).length > 0).sort((a, b) => a.number - b.number);
+      if (group.length <= 1) return { position, repairs };
+      const movable = (m: { labels: readonly string[] }): boolean =>
+        m.labels.includes(QUEUED_LABEL) && !m.labels.includes(IN_PROGRESS_LABEL);
+      const keeper = group.find((m) => !movable(m)) ?? group[0];
+      const movers = group.filter((m) => m !== keeper && movable(m));
+      if (movers.length === 0) return { position, repairs };
+      let max = scanLaneOrders(members, QUEUED_LABEL, QUEUE_ORDER_LABEL_PREFIX).maxPos;
+      const moved: OrderCollisionRepair['moved'] = [];
+      for (const mover of movers) {
+        const to = ++max;
+        for (const name of heldAt(mover.labels)) await removeIfPresent(mover.number, name); // remove first: never two labels
+        await client.ensureLabel({ owner, repo, ...queueOrderLabelSpec(to) });
+        await client.addLabels({ owner, repo, issue_number: mover.number, labels: [queueOrderLabel(to)] });
+        await collapse(mover.number);
+        moved.push({ issue: mover.number, to });
+      }
+      const repair: OrderCollisionRepair = { lane, position, kept: keeper.number, moved };
+      repairs.push(repair);
+      onOrderCollisionRepaired?.(repair);
+    }
+    return { position: await collapse(issue), repairs };
+  }
+
   async function enqueue(
     lane: string,
     issues: readonly number[],
@@ -105,18 +184,28 @@ export function createEnqueuers(client: QueueGitHubClient, owner: string, repo: 
           if (await client.ensureLabel({ owner, repo, ...spec })) created.push(spec.name);
         }
         await client.addLabels({ owner, repo, issue_number: issue, labels: specs.map((s) => s.name) });
+        const settled = await settleOrder(lane, issue);
+        if (settled.position === undefined) {
+          results.push({
+            issue,
+            outcome: 'failed',
+            detail: 'order label removed concurrently; re-run to queue it (#3147)',
+          });
+          continue;
+        }
         const collision = orderCollisionAt(scan, naive);
         results.push({
           issue,
           outcome: 'queued',
-          position,
+          position: settled.position,
           labelsAdded: specs.map((s) => s.name).filter((name) => !current.includes(name)),
           labelsCreated: created,
           ...(collision && !useRequested ? { collision } : {}),
           ...(wantsOrder && holders.length > 0 ? { preferredOrderHeldBy: holders } : {}),
+          ...(settled.repairs.length > 0 ? { orderRepairs: settled.repairs } : {}),
         });
         if (!useRequested) {
-          next += 1;
+          next = Math.max(next + 1, settled.position + 1);
           naive += 1;
         }
       } catch (err) {

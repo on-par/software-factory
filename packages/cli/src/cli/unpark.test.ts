@@ -9,9 +9,13 @@ const names = (...n: string[]) => n.map((name) => ({ name }));
 
 /** Octokit mock for lane `ops`: #23 queued at order 23, #24 kept order:24 after `factory:queued` was removed, #12 parked. */
 function opsOctokit() {
+  const written: string[] = [];
   const issues = {
     createLabel: vi.fn(async () => ({})),
-    addLabels: vi.fn(async () => ({})),
+    addLabels: vi.fn(async ({ labels }: { labels: string[] }) => {
+      written.push(...labels);
+      return {};
+    }),
     removeLabel: vi.fn(async () => ({})),
     listForRepo: vi.fn(async () => ({
       data: [
@@ -20,9 +24,12 @@ function opsOctokit() {
         { number: 12, labels: names('factory:parked', 'factory:lane:ops') },
       ],
     })),
-    listLabelsOnIssue: vi.fn(async () => ({ data: names('factory:parked', 'factory:lane:ops') })),
+    listLabelsOnIssue: vi.fn(async () => ({ data: names('factory:parked', 'factory:lane:ops', ...written) })),
   };
-  return { issues, octokit: { paginate: async (fn: any, params: any) => (await fn(params)).data, rest: { issues } } as never };
+  return {
+    issues,
+    octokit: { paginate: async (fn: any, params: any) => (await fn(params)).data, rest: { issues } } as never,
+  };
 }
 
 describe('unpark order-label-kept-after-queued-removed', () => {

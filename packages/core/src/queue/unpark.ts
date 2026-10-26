@@ -9,9 +9,9 @@ import {
   type QueueGitHubClient,
 } from './github-queue.js';
 import { removeWorktreeKeep } from '../worktree/worktree-keeps.js';
-import type { OrderCollision } from './order-collision.js';
+import type { OrderCollision, OrderCollisionRepair } from './order-collision.js';
 
-export type { OrderCollision };
+export type { OrderCollision, OrderCollisionRepair };
 export * from './prerequisite-order.js';
 export * from './orphan-drafts.js';
 
@@ -39,6 +39,8 @@ export interface UnparkJson {
   order: number;
   /** Set only when the placement bumped past an order held without factory:queued (#2988). */
   collision?: OrderCollision;
+  /** Set only when enqueue's settle moved issues off a shared position (#3147). */
+  orderRepairs?: OrderCollisionRepair[];
   labelsBefore: string[];
   labelsAfter: string[];
 }
@@ -57,6 +59,8 @@ export interface UnparkInput {
   keepOrder?: boolean;
   /** Reads the order recorded in the issue's park state; only called when keepOrder is set. */
   readParkedOrder?: () => Promise<number | undefined>;
+  /** Called when enqueue's settle repaired a shared order position (#3147). */
+  onOrderCollisionRepaired?: (repair: OrderCollisionRepair) => void;
 }
 
 function message(err: unknown): string {
@@ -111,7 +115,12 @@ export async function runUnpark(input: UnparkInput): Promise<UnparkJson> {
       }
     }
 
-    const [r] = await createGithubQueue({ client, owner, repo }).enqueue(lane, [issue], {
+    const [r] = await createGithubQueue({
+      client,
+      owner,
+      repo,
+      onOrderCollisionRepaired: input.onOrderCollisionRepaired,
+    }).enqueue(lane, [issue], {
       ...(isMember ? { requireMember: issue } : {}),
       ...(preferOrder === undefined ? {} : { preferOrder }),
     });
@@ -143,6 +152,7 @@ export async function runUnpark(input: UnparkInput): Promise<UnparkJson> {
       lane,
       order: r.position,
       ...(r.collision ? { collision: r.collision } : {}),
+      ...(r.orderRepairs ? { orderRepairs: r.orderRepairs } : {}),
       labelsBefore: [...labelsBefore],
       labelsAfter,
     };

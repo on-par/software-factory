@@ -160,6 +160,7 @@ export type EventKind =
   | 'pr_opened'
   | 'queue_admission_conflict'
   | 'queue_order_conflict'
+  | 'order_collision_repaired'
   | 'queue_added'
   | 'queue_deferred_only'
   | 'queue_reprioritized'
@@ -410,6 +411,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   queue_deferred_only: { severity: 'warn', isPark: false, isTerminal: false }, // #3660
   queue_admission_conflict: { severity: 'warn', isPark: false, isTerminal: false },
   queue_order_conflict: { severity: 'warn', isPark: false, isTerminal: false },
+  order_collision_repaired: { severity: 'warn', isPark: false, isTerminal: false }, // #3147
   queue_reprioritized: { severity: 'info', isPark: false, isTerminal: false },
   queue_rationale_comment_failed: { severity: 'warn', isPark: false, isTerminal: false },
   project_queue_refresh_failed: { severity: 'warn', isPark: false, isTerminal: false },

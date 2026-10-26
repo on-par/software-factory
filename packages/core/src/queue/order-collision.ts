@@ -6,6 +6,21 @@ export interface OrderCollision {
   heldBy: number[];
 }
 
+/** One duplicate-position repair done by enqueue's post-write settle (#3147). */
+export interface OrderCollisionRepair {
+  lane: string;
+  position: number;
+  /** The holder that kept the position. */
+  kept: number;
+  moved: Array<{ issue: number; to: number }>;
+}
+
+/** Options for the enqueue settle step (#3147). */
+export interface EnqueueSettleOptions {
+  /** Called once per repair of a shared position; also surfaced as `EnqueueResult.orderRepairs`. */
+  onOrderCollisionRepaired?: (repair: OrderCollisionRepair) => void;
+}
+
 export interface LaneOrderScan {
   /** Max valid order over every member (queued, in-progress, order-only); 0 when none. */
   maxPos: number;
