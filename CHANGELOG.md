@@ -10,6 +10,7 @@ section to `## X.Y.Z - date`. See
 ### Added
 
 - `factory draft` turns a free-text idea (`--text`, `--file` or stdin) into a factory-check-ready issue draft: one triage-tier model call (new tool-less `issue_draft` route) plus at most one repair, scored with `check --no-judge`'s readiness code. Prints Markdown or, with `--json`, one `schemaVersion` 1 object. It never files an issue, writes the queue or writes files (#3171).
+- This repo commits its own `.factory/config.yaml` and a Software Factory `.factory/constitution.md`, so the GitHub Actions dogfood run has config. Only `.factory/state/` is ignored, via `.factory/.gitignore`; the root `.gitignore` no longer ignores `.factory/` (#3689).
 
 ### Changed
 
@@ -20,6 +21,7 @@ section to `## X.Y.Z - date`. See
 
 ### Fixed
 
+- `factory-run.sh` sets the git identity `Software Factory Actions <factory-actions[bot]@users.noreply.github.com>` in the checkout's local config when `user.name` or `user.email` is unset, so `factory doctor` no longer fails `git identity` on a fresh GitHub Actions runner. An existing identity is kept (#3197).
 - The readiness size check counts only top-level In scope and acceptance-criteria items, so nested sub-bullets no longer inflate an atomic issue past the 5/5 hint, and `spike`-labeled issues are exempt from it (no `size_hint`, `factory check` reports runs-as-is) (#748).
 
 ## 0.9.18 - 2026-10-25

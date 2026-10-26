@@ -95,6 +95,14 @@ esac
 
 export GITHUB_TOKEN="$FACTORY_GITHUB_TOKEN"
 export GH_TOKEN="$FACTORY_GITHUB_TOKEN"
+
+# A fresh runner checkout has no git identity and factory doctor fails without one.
+# Set only the missing fields, in the repo's local config; an existing identity wins.
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  [ -n "$(git config user.name || true)" ] || git config --local user.name "Software Factory Actions"
+  [ -n "$(git config user.email || true)" ] || git config --local user.email "factory-actions[bot]@users.noreply.github.com"
+fi
+
 set +e
 factory "${args[@]}" 2>&1 | tee "$LOG"
 rc=${PIPESTATUS[0]}

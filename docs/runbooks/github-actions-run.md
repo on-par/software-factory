@@ -34,6 +34,12 @@ repo default is read-only. The workflow checks out its own scripts into `.factor
 untracked directory in the caller checkout; add `.factory-action/` to the caller's `.gitignore`.
 The factory only commits in lane worktrees, so it is never committed.
 
+A fresh runner checkout has no git identity, and `factory doctor` fails without one. Before it
+calls the factory, `factory-run.sh` sets any missing `user.name` or `user.email` in the
+checkout's local git config to `Software Factory Actions` /
+`factory-actions[bot]@users.noreply.github.com`. A field that is already set, locally or
+globally, is left alone, so set your own identity in an earlier step to override it.
+
 ## Inputs
 
 - `command`: `run-issue` (default), `ship` or `doctor`. Anything else exits 2 with `command not allowed: <cmd>`.
@@ -119,3 +125,8 @@ has only a `workflow_dispatch` trigger and calls the workflow by relative path,
 It still installs `FACTORY_CLI_VERSION` and checks out tag `v<FACTORY_CLI_VERSION>`, so it works
 only after that version is tagged and published. External repos keep the pinned `@vX.Y.Z` pattern
 shown above.
+
+This repo commits `.factory/config.yaml` and `.factory/constitution.md`, so the runner checkout
+has them and `factory doctor` passes `.factory initialized`. The root `.gitignore` does not ignore
+`.factory/`. Only runtime state is ignored, by `.factory/.gitignore`, which contains just
+`state/`. Do not add `.factory/` back to the root `.gitignore`: the dogfood run then has no config.
