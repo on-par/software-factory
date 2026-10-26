@@ -1,17 +1,22 @@
-import { chmod, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { chmod, readdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { acquirePortLease, readPortLeases, releasePortLease } from './index.js';
+
+const temps = createTempDirs();
+afterEach(async () => {
+  await temps.cleanup();
+});
 
 const LOCK_OPTS = { pollMs: 5 };
 const alwaysFree = async () => true;
 const liveProbes = { isPidAlive: () => true, worktreeExists: () => true };
 
 async function withTmpDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
-  const dir = await mkdtemp(join(tmpdir(), 'ports-atomic-'));
+  const dir = await temps.make('ports-atomic-');
   try {
     return await fn(dir);
   } finally {

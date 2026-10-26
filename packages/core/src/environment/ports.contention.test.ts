@@ -1,12 +1,17 @@
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { acquirePortLease, readPortLeases } from './index.js';
+
+const temps = createTempDirs();
+afterEach(async () => {
+  await temps.cleanup();
+});
 
 const repoRoot = fileURLToPath(new URL('../../../..', import.meta.url));
 const indexSpec = pathToFileURL(join(repoRoot, 'packages/core/src/environment/index.ts')).href;
@@ -28,7 +33,7 @@ function runChild(childPath: string, args: string[]): Promise<{ code: number; st
 
 describe('ports.json across processes', () => {
   it('five processes leasing concurrently leave ports.json with five distinct ports', { timeout: 60_000 }, async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'factory-ports-contention-'));
+    const dir = await temps.make('factory-ports-contention-');
     try {
       const registryFile = join(dir, 'ports.json');
       const lockDir = join(dir, 'ports.lock');
@@ -73,7 +78,7 @@ process.stdout.write(JSON.stringify(lease.port));
     'a reader racing a writer process never sees an empty lease list while a lease exists',
     { timeout: 60_000 },
     async () => {
-      const dir = await mkdtemp(join(tmpdir(), 'factory-ports-race-'));
+      const dir = await temps.make('factory-ports-race-');
       try {
         const registryFile = join(dir, 'ports.json');
         const lockDir = join(dir, 'ports.lock');
