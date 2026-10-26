@@ -35,7 +35,7 @@ function hasEvidence(e: FactoryEvent): e is EvidenceEvent {
 
 /** Print the exact title and body an upstream report would carry. Returns false when no evidence matches. */
 export async function runFilingPreview(runId: string, deps: FilingPreviewDeps): Promise<boolean> {
-  const events = readEvents(deps.eventsFile).filter(hasEvidence);
+  const events = readEvents(deps.eventsFile, { includeSegments: true }).filter(hasEvidence);
   const record = isValidRunId(runId) ? await readDaemonRun(daemonRunFile(deps.runsDir, runId)) : null;
   const matches = record
     ? events.filter((e) => e.issue === String(record.issue) && (!e.repo || e.repo === record.repo))

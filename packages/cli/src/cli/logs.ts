@@ -4,6 +4,7 @@ import type { FactoryEvent } from '@on-par/factory-core';
 import { followEvents, readEvents } from '@on-par/factory-core';
 import {
   InvalidEventCursorError,
+  listEventSegmentPaths,
   colorEnabled,
   formatEventLine,
   readEventsSince,
@@ -85,16 +86,17 @@ export function runLogs(eventsFile: string, opts: LogsOptions, deps: LogsDeps = 
   };
 
   if (!opts.follow) {
-    for (const e of readEvents(eventsFile)) emit(e);
+    for (const e of readEvents(eventsFile, { includeSegments: true })) emit(e);
     return () => {};
   }
 
+  for (const seg of listEventSegmentPaths(eventsFile)) for (const e of readEvents(seg)) emit(e);
   const stopTailing = followEvents(eventsFile, emit, { fromStart: true, pollMs: deps.pollMs ?? 250 });
   return () => {
     stopTailing();
     // Catch up on anything written in the poll window right before stop() (e.g. a
     // Ctrl-C racing the final "build complete" event) so it isn't silently dropped.
-    for (const e of readEvents(eventsFile).slice(delivered)) emit(e);
+    for (const e of readEvents(eventsFile, { includeSegments: true }).slice(delivered)) emit(e);
   };
 }
 

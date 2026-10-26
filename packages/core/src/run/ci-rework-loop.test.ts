@@ -17,6 +17,7 @@ import type { WorkRequest } from '../work/index.js';
 import type { RunPolicy } from './policy.js';
 import type { Workspace } from './ports.js';
 import type { reworkWorker as realReworkWorker } from '../phases/check.js';
+import { CI_REWORK_INSTRUCTIONS } from './ci-rework.js';
 import { runIssue, type RunPorts, type RunRequest } from './run-issue.js';
 
 const planPhase = vi.fn<typeof realPlanPhase>();
@@ -31,6 +32,8 @@ const collectFailingJobLogs = vi.fn<NonNullable<RunPorts['collectFailingJobLogs'
 const listPrChangedFiles = vi.fn<(...args: unknown[]) => Promise<string[]>>();
 const listBaseFailingChecks =
   vi.fn<(...args: unknown[]) => Promise<{ baseRef: string; baseSha: string; failing: string[] }>>();
+const listBaseCodeqlAlerts =
+  vi.fn<(...args: unknown[]) => Promise<{ baseRef: string; numbers: number[]; refs: string[] }>>();
 
 const PLAN_OK: PlanResult = { ok: true, route: 'codex', specPath: '/tmp/wt/spec.md', model: 'm', designArtifact: null };
 const BUILD_OK: BuildResult = { ok: true, model: 'm', route: 'codex' };
@@ -111,6 +114,7 @@ function ports(log: Log): RunPorts {
     readReworkDiff,
     listPrChangedFiles: listPrChangedFiles as RunPorts['listPrChangedFiles'],
     listBaseFailingChecks: listBaseFailingChecks as RunPorts['listBaseFailingChecks'],
+    listBaseCodeqlAlerts: listBaseCodeqlAlerts as RunPorts['listBaseCodeqlAlerts'],
     mergeBaseIntoWorktree,
     collectFailingJobLogs,
   };
@@ -126,6 +130,7 @@ beforeEach(() => {
   readReworkDiff.mockReset().mockResolvedValue('');
   listPrChangedFiles.mockReset().mockResolvedValue(['packages/core/src/sandbox/egress-proxy.ts']);
   listBaseFailingChecks.mockReset().mockResolvedValue({ baseRef: 'main', baseSha: 'b'.repeat(40), failing: [] });
+  listBaseCodeqlAlerts.mockReset().mockResolvedValue({ baseRef: 'main', numbers: [], refs: [] });
   mergeBaseIntoWorktree.mockReset().mockResolvedValue({ ok: true, merged: true });
   collectFailingJobLogs.mockReset().mockResolvedValue({
     jobLogs: [
@@ -367,5 +372,74 @@ describe('shipWithCiRework — attributable non-CodeQL checks (#3537)', () => {
     });
     expect(reworkWorker).not.toHaveBeenCalled();
     expect(mergeBaseIntoWorktree).not.toHaveBeenCalled();
+  });
+});
+
+describe('shipWithCiRework — CodeQL data-flow alerts in unchanged files (#3712)', () => {
+  const CI_FAIL: ShipResult = {
+    ok: false,
+    prNumber: 9,
+    reason: 'CI failed for PR #9',
+    ciOutcome: 'failure',
+    ciFailure: {
+      failingChecks: [
+        { name: 'CodeQL', conclusion: 'failure', summary: 'New alerts in code changed by this pull request — 1 high' },
+      ],
+      alerts: [
+        {
+          ruleId: 'js/insecure-temporary-file',
+          location: 'packages/core/src/daemon/run-store.ts:81',
+          message: 'x',
+          number: 230,
+        },
+      ],
+      truncated: false,
+    },
+    headSha: 'sha',
+  };
+  const SUCCESS: ShipResult = { ok: true, prNumber: 9, ciOutcome: 'success' };
+
+  beforeEach(() => {
+    listPrChangedFiles.mockResolvedValue(['packages/core/src/daemon/factoryd-http.ts']);
+  });
+
+  it('an alert in an unchanged file absent on base gets one CI rework round', async () => {
+    shipPhase.mockResolvedValueOnce(CI_FAIL).mockResolvedValueOnce(SUCCESS);
+    const outcome = await runIssue(request, policy, ports(vi.fn<Log>()));
+    expect(outcome).toMatchObject({ state: 'ready' });
+    expect(reworkWorker).toHaveBeenCalledTimes(1);
+    const call = reworkWorker.mock.calls[0][0];
+    expect(call.summary.results[0].details).toContain('run-store.ts:81');
+    expect(call.extraInstructions).toBe(CI_REWORK_INSTRUCTIONS);
+  });
+
+  it('the rework log carries the introduced-by-PR reason, not the baseline note', async () => {
+    shipPhase.mockResolvedValueOnce(CI_FAIL).mockResolvedValueOnce(SUCCESS);
+    const log = vi.fn<Log>();
+    await runIssue(request, policy, ports(log));
+    expect(JSON.stringify(log.mock.calls)).not.toContain('baseline: no CI failure is attributable');
+    const rework = log.mock.calls.find((c) => c[0] === 'rework' && String(c[1]).includes('CI rework round 1/2'));
+    expect(rework?.[2]).toMatchObject({
+      ciFailure: { attribution: { items: [{ reason: 'not open on base main' }] } },
+    });
+  });
+
+  it('an alert in an unchanged file open on base still parks ci-failed baseline', async () => {
+    listBaseCodeqlAlerts.mockResolvedValue({ baseRef: 'main', numbers: [230], refs: [] });
+    shipPhase.mockResolvedValue(CI_FAIL);
+    const log = vi.fn<Log>();
+    const outcome = await runIssue(request, policy, ports(log));
+    expect(outcome).toMatchObject({ state: 'parked', reason: 'ci-failed' });
+    expect(JSON.stringify(log.mock.calls)).toContain('baseline: no CI failure is attributable to this PR');
+    expect(reworkWorker).not.toHaveBeenCalled();
+  });
+
+  it('a base-alert lookup error is logged and falls back to the CodeQL summary', async () => {
+    listBaseCodeqlAlerts.mockRejectedValue(new Error('boom'));
+    shipPhase.mockResolvedValueOnce(CI_FAIL).mockResolvedValueOnce(SUCCESS);
+    const log = vi.fn<Log>();
+    await runIssue(request, policy, ports(log));
+    expect(JSON.stringify(log.mock.calls)).toContain('could not read base CodeQL alerts');
+    expect(reworkWorker).toHaveBeenCalledTimes(1);
   });
 });

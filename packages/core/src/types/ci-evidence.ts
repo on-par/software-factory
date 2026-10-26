@@ -12,6 +12,8 @@ export interface CiCodeScanningAlert {
   ruleId: string;
   location: string;
   message: string;
+  /** GitHub alert number; stable across refs of one repo (#3712). */
+  number?: number;
 }
 
 /** One CI-failure item's attribution to the PR (#2817). */
@@ -20,7 +22,7 @@ export interface CiAttributionItem {
   /** Alert: "ruleId at path:line"; check: the check name. */
   ref: string;
   attributable: boolean;
-  /** e.g. 'file changed by this PR', 'also failing on base main@abc123def456', 'base checks unavailable'. */
+  /** e.g. 'file changed by this PR', 'also failing on base main@abc123def456', 'base checks unavailable', 'not open on base main'. */
   reason: string;
 }
 

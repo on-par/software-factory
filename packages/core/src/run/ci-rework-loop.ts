@@ -16,13 +16,16 @@ import { collectFailingJobLogs as collectFailingJobLogsDefault } from '../utils/
 import {
   attributableCodeqlAlerts,
   attributeCiFailure,
+  type BaseCodeqlAlerts,
   type BaseFailingChecks,
   CI_CHECK_REWORK_INSTRUCTIONS,
   CI_REWORK_INSTRUCTIONS,
   ciCheckReworkSummary,
   ciReworkSummary,
+  listBaseCodeqlAlerts as listBaseCodeqlAlertsDefault,
   listBaseFailingChecks as listBaseFailingChecksDefault,
   listPrChangedFiles as listPrChangedFilesDefault,
+  needsBaseAlerts,
   needsBaseChecks,
   resolveMaxCiReworkRounds,
 } from './ci-rework.js';
@@ -46,6 +49,8 @@ export interface CiReworkPorts {
   listPrChangedFiles?: typeof listPrChangedFilesDefault;
   /** Lists failing check names on the PR base branch's latest commit (#2817); defaults to the GitHub REST lister. */
   listBaseFailingChecks?: typeof listBaseFailingChecksDefault;
+  /** Lists open CodeQL alerts on the PR base branch for alert attribution (#3712); defaults to the GitHub REST lister. */
+  listBaseCodeqlAlerts?: typeof listBaseCodeqlAlertsDefault;
   /** Reads the worktree HEAD before a CI rework round (#2818); defaults to git rev-parse. */
   readWorktreeHead?: typeof readWorktreeHeadDefault;
   /** Reads the diff a CI rework round produced (#2818); defaults to git diff <before> HEAD. */
@@ -118,7 +123,7 @@ const guardError = (match: string): CiSuppressionFinding => ({
 });
 
 /**
- * Runs SHIP. When the CI watch fails on CodeQL alerts in files the PR changed, feeds them to the
+ * Runs SHIP. When the CI watch fails on CodeQL alerts the PR introduced (on changed files, or not open on base), feeds them to the
  * BUILD rework worker, re-runs CHECK and re-enters SHIP on the same PR, up to
  * resolveMaxCiReworkRounds() rounds — a counter separate from CHECK's own rework rounds.
  * When there are no such alerts but a non-CodeQL check fails that is not failing on the PR base (#3537),
@@ -135,6 +140,7 @@ export async function shipWithCiRework(
   const rework = ports.reworkWorker ?? reworkWorkerDefault;
   const listChanged = ports.listPrChangedFiles ?? listPrChangedFilesDefault;
   const listBase = ports.listBaseFailingChecks ?? listBaseFailingChecksDefault;
+  const listBaseAlerts = ports.listBaseCodeqlAlerts ?? listBaseCodeqlAlertsDefault;
   const readHead = ports.readWorktreeHead ?? readWorktreeHeadDefault;
   const readDiff = ports.readReworkDiff ?? readReworkDiffDefault;
   const mergeBase = ports.mergeBaseIntoWorktree ?? mergeBaseIntoWorktreeDefault;
@@ -196,7 +202,18 @@ export async function shipWithCiRework(
         ports.events('ship')('ship', `could not read base checks for PR #${ship.prNumber}: ${errorMessage(err)}`);
       }
     }
-    const attribution = attributeCiFailure(ship.ciFailure, changed, base);
+    let baseAlerts: BaseCodeqlAlerts | undefined;
+    if (needsBaseAlerts(ship.ciFailure, changed)) {
+      try {
+        baseAlerts = await listBaseAlerts(ports.octokit, owner, repoName, ship.prNumber);
+      } catch (err) {
+        ports.events('ship')(
+          'ship',
+          `could not read base CodeQL alerts for PR #${ship.prNumber}: ${errorMessage(err)}`,
+        );
+      }
+    }
+    const attribution = attributeCiFailure(ship.ciFailure, changed, base, baseAlerts);
     if (ship.ciFailure) lastCiFailure = { ...ship.ciFailure, attribution };
     if (attribution.baseline) {
       const note = 'baseline: no CI failure is attributable to this PR';
@@ -204,7 +221,7 @@ export async function shipWithCiRework(
       ports.events('ship')('ship', `${note} (PR #${ship.prNumber})`);
       break;
     }
-    const attributable = attributableCodeqlAlerts(ship.ciFailure, changed);
+    const attributable = attributableCodeqlAlerts(ship.ciFailure, changed, baseAlerts);
     const failingChecks =
       attributable.length === 0 && base ? attributableNonCodeqlChecks(ship.ciFailure, attribution.items) : [];
     if (attributable.length === 0 && failingChecks.length === 0) break;

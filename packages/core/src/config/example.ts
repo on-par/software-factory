@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { isPlainObject, loadFactoryConfig, loadModelsConfig, type FactoryConfig } from './index.js';
 import { DEFAULT_REVIEW_FLOOR_RULES } from '../review/floor.js';
 import {
+  DEFAULT_T1_SAMPLE_RATE,
   RepoFactoryConfigV2Schema,
   resolveEfficiencyPolicy,
   resolveLaneBreakerThreshold,
@@ -288,6 +289,7 @@ function modelNamespace(): Node[] {
         unset('autoEligible', doc('classifier', 'autoEligible'), '["<path prefix or glob>"]'),
         unset('maxDiffLines', doc('classifier', 'maxDiffLines'), DEFAULT_REVIEW_FLOOR_RULES.maxLines),
         unset('trustTier', doc('classifier', 'trustTier'), 'T0'),
+        unset('t1SampleRate', doc('classifier', 't1SampleRate'), DEFAULT_T1_SAMPLE_RATE),
       ],
     },
     {

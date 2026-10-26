@@ -102,7 +102,7 @@ const h = vi.hoisted(() => {
   };
 });
 
-import { listBuiltInCheckers } from '@on-par/factory-core/internal';
+import { eventSegmentFileName, eventSegmentsDir, listBuiltInCheckers } from '@on-par/factory-core/internal';
 
 import { openPrFixture } from './cli/__fixtures__/open-pr.js';
 import { FACTORYD_LABEL, factorydFiles, type DaemonCtlDeps } from './cli/daemon.js';
@@ -5058,21 +5058,6 @@ bash scripts/verify.sh
       expect(phases.planPhase).not.toHaveBeenCalled();
       expect(phases.shipPhase).not.toHaveBeenCalled();
     });
-
-    it('logs a human-restarted event when a prior run for the issue was parked', async () => {
-      writeFileSync(
-        paths().events,
-        [
-          JSON.stringify({ ts: '2026-07-01T00:00:00.000Z', type: 'fail', issue: '5', msg: 'checker failures' }),
-          '',
-        ].join('\n'),
-      );
-      const res = await runMain('run-issue', '5');
-      expect(res.exited).toBe(false);
-      const events = readFileSync(paths().events, 'utf-8');
-      expect(events).toContain('human-restarted');
-      expect(events).toContain('manual retry of a previously parked/failed run');
-    });
   });
 
   describe('run-brief (one-shot)', () => {
@@ -5230,30 +5215,27 @@ Please add a widget that does the thing.
       expect(errored()).toContain('Run failed for brief');
     });
 
-    it('logs a human-restarted event when a prior run for the digest-derived run number was parked', async () => {
-      const briefPath = writeBrief();
-      const digest = createHash('sha256').update(VALID_BRIEF).digest('hex');
-      const runNum = 9_000_000 + (Number.parseInt(digest.slice(0, 8), 16) % 1_000_000);
-      writeFileSync(
-        paths().events,
-        [
-          JSON.stringify({
-            ts: '2026-07-01T00:00:00.000Z',
-            type: 'fail',
-            issue: String(runNum),
-            msg: 'checker failures',
-          }),
-          '',
-        ].join('\n'),
-      );
-
-      const res = await runMain('run-brief', briefPath);
-
-      expect(res.exited).toBe(false);
-      const events = readFileSync(paths().events, 'utf-8');
-      expect(events).toContain('human-restarted');
-      expect(events).toContain('manual retry of a previously parked/failed run');
-    });
+    describe.each(['live file', 'rotated segment'])(
+      'human-restarted when the prior park sits in the %s (#3711)',
+      (where) => {
+        it.each(['ship', 'run-issue', 'run-brief'])('%s', async (cmd) => {
+          const digest = createHash('sha256').update(VALID_BRIEF).digest('hex');
+          const issue =
+            cmd === 'run-brief' ? String(9_000_000 + (Number.parseInt(digest.slice(0, 8), 16) % 1_000_000)) : '5';
+          const fail = JSON.stringify({ ts: '2026-07-01T00:00:00.000Z', type: 'fail', issue, msg: 'checker failures' });
+          if (where === 'live file') writeFileSync(paths().events, fail + '\n');
+          else {
+            mkdirSync(eventSegmentsDir(paths().events), { recursive: true });
+            writeFileSync(join(eventSegmentsDir(paths().events), eventSegmentFileName(0)), fail + '\n');
+          }
+          const res = await runMain(cmd, cmd === 'run-brief' ? writeBrief() : '5');
+          expect(res.exited).toBe(false);
+          const events = readFileSync(paths().events, 'utf-8');
+          expect(events).toContain('human-restarted');
+          expect(events).toContain('manual retry of a previously parked/failed run');
+        });
+      },
+    );
 
     describe('--workspace (local-only)', () => {
       it('runs PLAN/BUILD/CHECK in the caller workspace, disables publish, and skips SHIP', async () => {

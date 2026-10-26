@@ -43,6 +43,8 @@ import {
   resolveBaselineCacheTtlHours,
   resolveHermeticGit,
   resolveReviewFloorRules,
+  resolveT1SampleRate,
+  resolveTrustTier,
   withFileLock,
   withGitLock,
 } from '@on-par/factory-core/internal';
@@ -405,6 +407,8 @@ export function buildRunRequest({
           rules: resolveReviewFloorRules(repoConfig),
           gateLabel: resolveFilingPolicy(factoryConfig).selfFixLabel,
           modelPin: repoConfig?.models?.pins?.classifier,
+          trustTier: resolveTrustTier(repoConfig),
+          t1SampleRate: resolveT1SampleRate(repoConfig),
         }
       : undefined,
     timeouts,
