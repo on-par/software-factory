@@ -235,8 +235,131 @@ export function describeConstitutionSource(c: Constitution | null, product?: str
   return `Standards from bundled constitution '${c.product}' (${c.path})`;
 }
 
-/** Build the prompt context for an already-resolved constitution */
-export function buildConstitutionContext(c: Constitution | null): string {
+/** Which slice of the constitution a phase sees: PLAN gets 'full', BUILD and rework get 'standards' (#1599). */
+export type ConstitutionView = 'full' | 'standards';
+
+/** Upper bound, in UTF-8 bytes, of the rendered <constitution> context (#1599). */
+export const CONSTITUTION_MAX_BYTES = 8192;
+
+const STANDARDS_HEADING = /\b(standards?|conventions?|rules|guidelines)\b/i;
+const BLOCK_OPEN = '<standards source="';
+const BLOCK_CLOSE = '\n\n</standards>';
+
+/** Parse an ATX heading line without backtracking regexes; null when `line` is not a heading. */
+function parseHeading(line: string): { level: number; text: string } | null {
+  let level = 0;
+  while (level < line.length && line[level] === '#') level++;
+  if (level < 1 || level > 6 || level >= line.length || !/\s/.test(line[level])) return null;
+  let text = line.slice(level).trim();
+  let end = text.length;
+  while (end > 0 && text[end - 1] === '#') end--;
+  text = text.slice(0, end).trimEnd();
+  return { level, text };
+}
+
+/** Split a body into its `<standards source="...">` blocks, scanning with indexOf (linear time). */
+function findStandardsBlocks(body: string): { source: string; content: string }[] {
+  const blocks: { source: string; content: string }[] = [];
+  let pos = 0;
+  for (;;) {
+    const open = body.indexOf(BLOCK_OPEN, pos);
+    if (open < 0) break;
+    const nameStart = open + BLOCK_OPEN.length;
+    const quote = body.indexOf('"', nameStart);
+    const source = quote < 0 ? '' : body.slice(nameStart, quote);
+    const contentStart = quote + '">\n\n'.length;
+    if (quote < 0 || source === '' || source.includes('\n') || !body.startsWith('">\n\n', quote)) {
+      pos = nameStart;
+      continue;
+    }
+    const close = body.indexOf(BLOCK_CLOSE, contentStart - 2);
+    if (close < 0) break;
+    blocks.push({ source, content: body.slice(contentStart, Math.max(close, contentStart)) });
+    pos = close + BLOCK_CLOSE.length;
+  }
+  return blocks;
+}
+
+/** Keep the sections of one block whose heading names standards, with their subsections; null when none match. */
+function matchingSections(content: string): string | null {
+  const lines = content.split('\n');
+  const kept: string[][] = [];
+  let current: string[] | null = null;
+  let currentLevel = 0;
+  let fence = false;
+  for (const line of lines) {
+    if (/^\s*(```|~~~)/.test(line)) fence = !fence;
+    const heading = fence ? null : parseHeading(line);
+    if (heading && current && heading.level <= currentLevel) current = null;
+    if (heading && !current && STANDARDS_HEADING.test(heading.text)) {
+      current = [];
+      currentLevel = heading.level;
+      kept.push(current);
+    }
+    current?.push(line);
+  }
+  return kept.length === 0 ? null : kept.map((k) => k.join('\n').trim()).join('\n\n');
+}
+
+/** Reduce a constitution body to its Standards/Conventions/Rules/Guidelines sections, per source block. */
+function selectStandardsSections(body: string): string {
+  const blocks = findStandardsBlocks(body);
+  const parts = blocks.length > 0 ? blocks : [{ source: null, content: body }];
+  let anyMatch = false;
+  const rendered = parts.map(({ source, content }) => {
+    const sections = matchingSections(content);
+    if (sections !== null) anyMatch = true;
+    const text = sections ?? content;
+    return source === null ? text : `<standards source="${source}">\n\n${text}\n\n</standards>`;
+  });
+  return anyMatch ? rendered.join('\n\n') : body;
+}
+
+/** The source of the innermost <standards> block still open at the end of `head`, else `fallbackFile`. */
+function openSourceAt(head: string, fallbackFile: string): string {
+  const opens = [...head.matchAll(/<standards source="([^"]+)">/g)];
+  const lastOpen = opens[opens.length - 1];
+  if (!lastOpen || head.lastIndexOf('</standards>') > lastOpen.index) return fallbackFile;
+  return lastOpen[1];
+}
+
+/** Longest prefix of `text` within `maxBytes` UTF-8 bytes, without splitting a character, backed off to a line end. */
+function prefixWithin(text: string, maxBytes: number): string {
+  const raw = Buffer.from(text, 'utf8')
+    .subarray(0, Math.max(0, maxBytes))
+    .toString('utf8')
+    .replace(/\uFFFD$/, '');
+  const nl = raw.lastIndexOf('\n');
+  return (nl > 0 ? raw.slice(0, nl) : raw).trimEnd();
+}
+
+/** Cut `text` to at most `maxBytes` bytes, ending with a `[truncated — see <file>]` line naming the cut file. */
+function capBody(text: string, maxBytes: number, fallbackFile: string): string {
+  let budget = maxBytes;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const head = prefixWithin(text, budget);
+    const out = `${head}\n\n[truncated — see ${openSourceAt(head, fallbackFile)}]`;
+    const over = Buffer.byteLength(out, 'utf8') - maxBytes;
+    if (over <= 0) return out;
+    budget -= over;
+    if (budget <= 0) break;
+  }
+  const marker = `[truncated — see ${fallbackFile}]`;
+  return Buffer.byteLength(marker, 'utf8') <= maxBytes ? marker : '';
+}
+
+/** Render the constitution body for a phase's view, cut to at most `maxBytes` UTF-8 bytes. */
+export function renderConstitutionBody(c: Constitution, view: ConstitutionView, maxBytes: number): string {
+  const selected = view === 'standards' ? selectStandardsSections(c.body) : c.body;
+  if (Buffer.byteLength(selected, 'utf8') <= maxBytes) return selected;
+  return capBody(selected, maxBytes, c.repoInstance?.relPath ?? basename(c.path));
+}
+
+/**
+ * Build the prompt context for an already-resolved constitution. The whole
+ * returned string (wrapper included) is at most CONSTITUTION_MAX_BYTES (#1599).
+ */
+export function buildConstitutionContext(c: Constitution | null, view: ConstitutionView = 'full'): string {
   // frontmatter-only constitutions have no prose to enforce — injecting an
   // empty <constitution> block would flip prompts into the "standards exist"
   // branch with nothing to comply with
@@ -251,9 +374,8 @@ export function buildConstitutionContext(c: Constitution | null): string {
       ? ''
       : ' If a checker\nflags your work, refer to the Dispute Rules section to understand how\nto escalate.';
 
-  return `<constitution source="${c.source === 'repo' ? 'repo instruction files' : c.product}">
-
-${c.body}
+  const prefix = `<constitution source="${c.source === 'repo' ? 'repo instruction files' : c.product}">\n\n`;
+  const suffix = `
 
 </constitution>
 
@@ -262,4 +384,6 @@ Every piece of work must satisfy these standards. Checkers will verify
 your output against them — not against your self-report.${dispute}
 
 `;
+  const budget = CONSTITUTION_MAX_BYTES - Buffer.byteLength(prefix + suffix, 'utf8');
+  return prefix + renderConstitutionBody(c, view, budget) + suffix;
 }
