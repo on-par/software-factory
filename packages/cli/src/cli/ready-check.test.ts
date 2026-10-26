@@ -71,6 +71,13 @@ describe('runIssueCheck', () => {
     expect(lines).toContain('size: runs as-is');
   });
 
+  it('reports runs-as-is for a spike-labeled oversized issue (#748)', async () => {
+    const { d } = deps(body(7));
+    d.getIssue.mockResolvedValue({ title: 'Fix it', body: body(7), labels: [{ name: 'spike' }] } as never);
+    const r = await runIssueCheck(7, { judge: false }, d);
+    expect(r.size.verdict).toBe('runs-as-is');
+  });
+
   it('reports would-split with reason and exit 3', async () => {
     const { lines, d } = deps(body(7));
     const r = await runIssueCheck(7, { judge: false }, d);
