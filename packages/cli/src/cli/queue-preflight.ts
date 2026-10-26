@@ -18,6 +18,7 @@ import { errorDetail } from './index.js';
 import { findOpenPRForIssue } from './land.js';
 import { getPullRequestLandState } from './land-pr.js';
 import { findMergedClosingPr } from './queue-merged-closing-pr.js';
+import { childrenMerged } from './queue-preflight-children.js';
 
 /** Backoff before each merge-state re-read (#3323): GitHub reports UNKNOWN while it recomputes mergeability. */
 export const MERGE_STATE_REREAD_DELAYS_MS: readonly number[] = [2_000, 5_000, 10_000];
@@ -58,7 +59,10 @@ export interface QueuePreflightOps {
   /** Head SHA, the factory's own user id, and the reviews of a slice PR (#3366). */
   getPullReviews(prNumber: number): Promise<StackPullReviews>;
   readIssueBody(issue: number): Promise<string>;
-  getPrerequisiteState(issue: number): Promise<{ state: 'open' | 'closed'; mergedClosingPr: boolean }>;
+  /** `mergedViaChildren` (#3703): closed COMPLETED and every sub-issue is closed with a merged closing PR. */
+  getPrerequisiteState(
+    issue: number,
+  ): Promise<{ state: 'open' | 'closed'; mergedClosingPr: boolean; mergedViaChildren?: boolean }>;
   /** #3375: number of a PR that closes `issue` by reference, merged into the default branch and not reverted by a merged `Reverts owner/repo#N` PR; undefined when none. */
   getMergedClosingPr(issue: number): Promise<number | undefined>;
   onDeferred?: (issue: number, message: string, cause?: QueueDeferCause) => void;
@@ -159,12 +163,14 @@ export function makeQueuePreflightOps(
       let after: string | null = null;
       let mergedClosingPr = false;
       let state: 'open' | 'closed' | undefined;
+      let stateReason: string | undefined;
       do {
         const response: unknown = await octokit.graphql(
           `query QueuePrerequisite($owner: String!, $repo: String!, $number: Int!, $after: String) {
             repository(owner: $owner, name: $repo) {
               issue(number: $number) {
                 state
+                stateReason
                 closedByPullRequestsReferences(first: 100, includeClosedPrs: true, after: $after) {
                   nodes { merged }
                   pageInfo { hasNextPage endCursor }
@@ -184,6 +190,7 @@ export function makeQueuePreflightOps(
         if (state !== undefined && state !== nextState)
           throw new Error(`prerequisite #${issue} state changed during pagination`);
         state = nextState;
+        stateReason ??= typeof item.stateReason === 'string' ? item.stateReason : undefined;
         if (nextState === 'open') return { state: 'open', mergedClosingPr: false };
         if (!isRecord(item.closedByPullRequestsReferences))
           throw new Error(`prerequisite #${issue} closing PR evidence was incomplete`);
@@ -208,6 +215,9 @@ export function makeQueuePreflightOps(
         after = hasNextPage ? (cursor as string) : null;
       } while (after !== null && !mergedClosingPr);
       if (state === undefined) throw new Error(`prerequisite #${issue} state was unavailable`);
+      if (state === 'closed' && !mergedClosingPr && stateReason === 'COMPLETED') {
+        return { state, mergedClosingPr, mergedViaChildren: await childrenMerged(octokit, owner, repo, issue) };
+      }
       return { state, mergedClosingPr };
     },
   };
@@ -402,7 +412,8 @@ export async function preflightQueuedIssue(
     try {
       const evidence = await deps.getPrerequisiteState(prerequisite);
       if (evidence.state === 'open') open.push(prerequisite);
-      else if (evidence.state === 'closed' && !evidence.mergedClosingPr) closedUnmerged.push(prerequisite);
+      else if (evidence.state === 'closed' && !evidence.mergedClosingPr && evidence.mergedViaChildren !== true)
+        closedUnmerged.push(prerequisite);
       else if (evidence.state !== 'closed') errors.push(`#${prerequisite}: unexpected state`);
     } catch (err) {
       errors.push(`#${prerequisite}: ${errorDetail(err)}`);
