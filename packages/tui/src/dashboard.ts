@@ -4,6 +4,7 @@ import {
   type FactoryEvent,
   type FailoverReason,
   type LaneStatus,
+  type QueueSnapshot,
 } from '@on-par/factory-core';
 
 import { initialState, type PhaseName, reduceEvent, type RunState } from './state.js';
@@ -92,6 +93,41 @@ const NON_TERMINAL: ReadonlySet<LaneStatus> = new Set(['running', 'ready', 'wait
 /** True for lanes whose staleness depends on a heartbeat — the only ones worth polling a snapshot for. */
 export function isNonTerminalLane(lane: LaneState): boolean {
   return NON_TERMINAL.has(lane.status);
+}
+
+export type IdleReason = 'queue-empty' | 'all-parked-finished';
+
+/** True when any lane is running, ready or waiting to merge (#1365). */
+export function hasActiveLane(lanes: readonly LaneState[]): boolean {
+  return lanes.some(isNonTerminalLane);
+}
+
+/** Why the Active tab is idle. Undefined while a lane is active, or when the queue state is unknown
+ *  (no reader, no successful read yet, or the last read failed) (#1365). */
+export function computeIdleReason(
+  lanes: readonly LaneState[],
+  queue: QueueSnapshot | undefined,
+): IdleReason | undefined {
+  if (hasActiveLane(lanes)) return undefined;
+  if (!queue || queue.error !== undefined) return undefined;
+  return queue.entries.length === 0 ? 'queue-empty' : 'all-parked-finished';
+}
+
+export function idleLine(reason: IdleReason | undefined, source = 'GitHub'): string {
+  if (reason === 'queue-empty') return `no active work — ${source} queue empty`;
+  if (reason === 'all-parked-finished') return 'no active work — all runs parked/finished';
+  return 'no active work';
+}
+
+/** "2m ago"-style age of an ISO timestamp; "unknown" for a missing or unparsable one (#1365). */
+export function formatAgo(iso: string | undefined, now: number): string {
+  const t = iso ? Date.parse(iso) : NaN;
+  if (!Number.isFinite(t)) return 'unknown';
+  const s = Math.floor(Math.max(0, now - t) / 1000);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
 }
 
 export function reduceDashboard(state: DashboardState, e: FactoryEvent): DashboardState {

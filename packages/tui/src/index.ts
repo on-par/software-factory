@@ -20,8 +20,19 @@ export type { RunDetailProps } from './components/RunDetail.js';
 export { RunDetail } from './components/RunDetail.js';
 export type { StopBannerProps } from './components/StopBanner.js';
 export { StopBanner } from './components/StopBanner.js';
-export type { DashboardState, LaneActivityPartition, LaneGroup, LaneState, LaneStatus } from './dashboard.js';
+export type {
+  DashboardState,
+  IdleReason,
+  LaneActivityPartition,
+  LaneGroup,
+  LaneState,
+  LaneStatus,
+} from './dashboard.js';
 export {
+  computeIdleReason,
+  formatAgo,
+  hasActiveLane,
+  idleLine,
   initialDashboard,
   isLaneEvent,
   isNonTerminalLane,

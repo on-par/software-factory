@@ -33,6 +33,26 @@ describe('RunDetail', () => {
     expect(frame).toContain('Starting plan phase');
   });
 
+  it('shows a compact summary line right under the header when summary props are given (#1365)', () => {
+    const run = reduceEvent(initialState(), ev('plan', 'Starting plan phase'));
+    const { lastFrame } = render(
+      <RunDetail run={run} now={NOW} title="Fix it" elapsedMs={5000} lastActivityAt="2026-01-01T00:00:00.000Z" />,
+    );
+    const lines = (lastFrame() ?? '').split('\n');
+    const at = lines.findIndex((l) => l.includes('#296'));
+    const summary = lines[at + 1];
+    expect(summary).toContain('Fix it');
+    expect(summary).toContain('PLAN');
+    expect(summary).toContain('elapsed 00:');
+    expect(summary).toContain('last activity 5s ago');
+  });
+
+  it('omits the summary line without summary props (#1365)', () => {
+    const run = reduceEvent(initialState(), ev('plan', 'Starting plan phase'));
+    const { lastFrame } = render(<RunDetail run={run} now={NOW} />);
+    expect(lastFrame()).not.toContain('last activity');
+  });
+
   it('shows the back hint only when showBackHint is set', () => {
     const run = initialState();
     const withHint = render(<RunDetail run={run} now={NOW} showBackHint />);

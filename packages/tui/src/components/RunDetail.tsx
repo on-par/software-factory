@@ -16,6 +16,9 @@ export interface RunDetailProps {
   steeringQueued?: number;
   failureEvidence?: LaneFailureEvidence;
   legacyFailurePointer?: string;
+  title?: string;
+  elapsedMs?: number;
+  lastActivityAt?: string;
 }
 
 export function RunDetail({
@@ -26,12 +29,24 @@ export function RunDetail({
   steeringQueued,
   failureEvidence,
   legacyFailurePointer,
+  title,
+  elapsedMs,
+  lastActivityAt,
 }: RunDetailProps): JSX.Element {
   const hasEvents = run.feed.length > 0;
 
   return (
     <Box flexDirection="column">
-      <Header issue={run.issue} repo={repo} done={run.done} />
+      <Header
+        issue={run.issue}
+        repo={repo}
+        done={run.done}
+        title={title}
+        phase={run.activePhase}
+        elapsedMs={elapsedMs}
+        lastActivityAt={lastActivityAt}
+        now={now}
+      />
       {hasEvents ? <PhaseRow state={run} now={now} /> : <Text dimColor>waiting for factory events…</Text>}
       {failureEvidence && (
         <>
