@@ -85,6 +85,20 @@ describe('factory prompt builders are self-contained', () => {
     });
   }
 
+  it('inlining BUILD builders send no spec frontmatter (#1595)', () => {
+    const spec = '---\ndesign:\n  restatedProblem: x\nadr:\n  - title: y\n---\n# Spec: z\nbody';
+    const specPath = '.factory/plans/issue-1595.md';
+    const commitOnly = buildCommitOnlyPrompt({ issue: 1595, specPath, constitutionCtx: '', spec });
+    const opencode = buildOpencodePrompt({ issue: 1595, specPath, constitutionCtx: '', spec });
+    const localSmall = buildLocalSmallPrompt({ issue: 1595, branch: 'b', spec });
+    for (const prompt of [commitOnly, opencode, localSmall]) {
+      expect(prompt).not.toMatch(/^adr:/m);
+      expect(prompt).not.toMatch(/^design:/m);
+    }
+    expect(commitOnly).not.toContain(specPath);
+    expect(opencode).not.toContain(specPath);
+  });
+
   it('the claude BUILD prompt drops the ship-it reference but keeps the worktree fact', () => {
     const prompt = buildClaudePrompt({
       issue: 962,
