@@ -20,7 +20,7 @@ import {
 
 export type IssueSizeVerdict = 'runs-as-is' | 'would-split';
 
-export type DeepCheckTask = 'decompose' | 'readiness_judge';
+export type DeepCheckTask = 'decompose' | 'readiness_judge' | 'issue_draft';
 export type DeepCheckModelRunner = (
   task: DeepCheckTask,
   prompt: string,

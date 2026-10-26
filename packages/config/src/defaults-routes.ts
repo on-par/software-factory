@@ -42,6 +42,12 @@ export const defaultRoutesConfig: RoutesDefaults = {
       description:
         'Decompose an oversized factory-task issue into an epic + INVEST-sized stories (proposed as a comment, not filed)',
     },
+    issue_draft: {
+      tier: 'triage',
+      description:
+        'Draft a factory-task issue (title + body) from a free-text idea for `factory draft`; tool-less, never files (#3171)',
+      allowedTools: [],
+    },
     build_codex: {
       tier: 'worker',
       description: 'Codex CLI implementation from frozen spec',

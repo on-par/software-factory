@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { format, resolveConfig } from 'prettier';
 import {
   checkJsonSchema,
+  draftJsonSchema,
   costJsonSchema,
   daemonStatusJsonSchema,
   kpisJsonSchema,
@@ -36,6 +37,7 @@ const schemas = [
   ['resume.schema.json', resumeJsonSchema],
   ['unpark.schema.json', unparkJsonSchema],
   ['check.schema.json', checkJsonSchema],
+  ['draft.schema.json', draftJsonSchema],
 ] as const;
 
 /** Writes every CLI JSON Schema artifact, Prettier-formatted, into outputDirectory (created if absent). */

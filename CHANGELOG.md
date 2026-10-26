@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- `factory draft` turns a free-text idea (`--text`, `--file` or stdin) into a factory-check-ready issue draft: one triage-tier model call (new tool-less `issue_draft` route) plus at most one repair, scored with `check --no-judge`'s readiness code. Prints Markdown or, with `--json`, one `schemaVersion` 1 object. It never files an issue, writes the queue or writes files (#3171).
+
 ### Changed
 
 - The rendered constitution is capped at 8 KB with a `[truncated — see <file>]` marker. BUILD and rework prompts get only its Standards/Conventions/Rules/Guidelines sections, and fall back to the full text when none are found. PLAN keeps the full text (#1599).
