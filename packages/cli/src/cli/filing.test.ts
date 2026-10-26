@@ -1,8 +1,13 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { buildUpstreamReport, upstreamInputFromEvidence } from '@on-par/factory-core/internal';
+import {
+  buildUpstreamReport,
+  eventSegmentFileName,
+  eventSegmentsDir,
+  upstreamInputFromEvidence,
+} from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -100,6 +105,14 @@ describe('runFilingPreview', () => {
     expect(await runFilingPreview('run-1', s.deps)).toBe(true);
     expect(s.out).toContain('fp:ff_1');
     expect(s.out).not.toMatch(/private-app|acme/);
+  });
+
+  it('finds evidence logged only in a rotated segment (#3711)', async () => {
+    const s = setup([ev]);
+    mkdirSync(eventSegmentsDir(s.deps.eventsFile), { recursive: true });
+    renameSync(s.deps.eventsFile, join(eventSegmentsDir(s.deps.eventsFile), eventSegmentFileName(0)));
+    expect(await runFilingPreview('ff_1', s.deps)).toBe(true);
+    expect(s.out).toContain('fp:ff_1');
   });
 
   it('returns false and prints nothing for an unknown run id', async () => {

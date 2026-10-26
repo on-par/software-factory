@@ -53,8 +53,8 @@ export interface ClassifierBacktestDeps {
   readFile(path: string): string;
   appendFile(path: string, text: string): void;
   ensureDir(path: string): void;
-  /** Reads the local events log; [] when it does not exist. */
-  readEvents(path: string): FactoryEvent[];
+  /** Reads the local events log, rotated segments included; [] when none exist. */
+  readEvents(path: string, opts: { includeSegments: boolean }): FactoryEvent[];
   now(): string;
   log(line: string): void;
 }
@@ -115,7 +115,7 @@ export async function cmdClassifierBacktest(
     return;
   }
 
-  const local = deps.readEvents(paths.events);
+  const local = deps.readEvents(paths.events, { includeSegments: true });
   let events = [...local, ...reconstructHumanEvents(selected, local)];
   try {
     const defectSources = await fetchDefectSources(deps.octokit, owner, repo, mergedPrRefs(selected), {

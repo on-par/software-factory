@@ -168,7 +168,10 @@ export async function runFeedback(prUrl: string, opts: { note?: string }, deps: 
   const title = buildFeedbackTitle(findings, opts.note);
   const issue = factoryBranchIssue(pull.headRef, deps.branchPrefix);
 
-  const window = issue === null ? undefined : runWindow(readEvents(deps.paths.events), issue, `${pr.owner}/${pr.repo}`);
+  const window =
+    issue === null
+      ? undefined
+      : runWindow(readEvents(deps.paths.events, { includeSegments: true }), issue, `${pr.owner}/${pr.repo}`);
   const designPath = issue === null ? undefined : join(deps.paths.plans, `issue-${issue}.md`);
   const logPath = issue === null ? deps.paths.logs : join(deps.paths.logs, String(issue));
   const host = deps.host ?? hostname();

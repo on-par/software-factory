@@ -123,6 +123,13 @@ const opts = (o: Partial<ClassifierBacktestOptions> = {}): ClassifierBacktestOpt
 const PRS = [1, 2, 3, 4].map((n) => pr(n, `2026-08-0${n}T00:00:00.000Z`));
 
 describe('cmdClassifierBacktest', () => {
+  it('reads local events with includeSegments (#3711)', async () => {
+    const readEvents = vi.fn((_path: string, _opts: { includeSegments: boolean }) => [] as FactoryEvent[]);
+    const t = makeDeps(PRS, { readEvents });
+    await cmdClassifierBacktest(opts(), t.deps);
+    expect(readEvents).toHaveBeenCalledWith('/repo/.factory/events.ndjson', { includeSegments: true });
+  });
+
   it('prints the report table and writes one JSONL line per PR', async () => {
     const t = makeDeps(PRS);
     await cmdClassifierBacktest(opts(), t.deps);

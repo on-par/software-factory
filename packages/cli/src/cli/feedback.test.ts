@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -6,6 +6,8 @@ import {
   LANE_LABEL_PREFIX,
   QUEUE_ORDER_LABEL_PREFIX,
   QUEUED_LABEL,
+  eventSegmentFileName,
+  eventSegmentsDir,
 } from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -163,6 +165,19 @@ describe('runFeedback', () => {
       expect(c.body).toContain(s);
     }
     expect(c.body).not.toContain('2026-07-05');
+  });
+
+  it('includes a run window logged only in a rotated segment (#3711)', async () => {
+    const { deps, created } = setup();
+    mkdirSync(eventSegmentsDir(deps.paths.events), { recursive: true });
+    renameSync(deps.paths.events, join(eventSegmentsDir(deps.paths.events), eventSegmentFileName(0)));
+    writeFileSync(
+      deps.paths.events,
+      JSON.stringify({ ts: '2026-07-05T00:00:00.000Z', type: 'phase', issue: '43', msg: 'x' }) + '\n',
+    );
+    await runFeedback(PR, {}, deps);
+    expect(created[0].body).toContain('2026-07-01T10:00:00.000Z');
+    expect(created[0].body).toContain('2026-07-01T11:00:00.000Z');
   });
 
   it('never falls back to a built-in repo: no repo means a clear error and nothing filed', async () => {

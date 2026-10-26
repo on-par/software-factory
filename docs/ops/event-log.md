@@ -12,6 +12,9 @@
   `{"error":"malformed-cursor"|"unknown-cursor","message":"..."}`. A bad `--limit` gives
   `{"error":"invalid-limit",...}`.
 
+Bare `factory logs`, `--json` and `--follow` start from the full history: rotated segments in
+`state/logs/events/` oldest first, then the live file. `--limit` and `--since` are the cheap paged paths.
+
 ## Segment naming
 
 Cursors encode a segment id and a byte offset. A segment id is the segment's start offset in the
