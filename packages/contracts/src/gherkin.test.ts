@@ -55,4 +55,15 @@ describe('AcceptanceCriterionSchema', () => {
     };
     expect(() => AcceptanceCriterionSchema.parse(invalid)).toThrow();
   });
+
+  it('accepts a parent criterion ID alongside an intent ID in tracesTo (#3105)', () => {
+    const parsed = AcceptanceCriterionSchema.parse({
+      name: 'App boots',
+      given: [],
+      when: ['the process starts'],
+      then: ['it listens on the configured port'],
+      tracesTo: ['INT-PROBLEM-01', 'P2'],
+    });
+    expect(parsed.tracesTo).toEqual(['INT-PROBLEM-01', 'P2']);
+  });
 });

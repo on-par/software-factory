@@ -10,6 +10,7 @@ section to `## X.Y.Z - date`. See
 ### Added
 
 - At trust tier T1 the PR classifier gate holds a deterministic sample of class-A PRs (`sha256(repo#issue)` below `classifier.t1SampleRate`, default 0.25) by applying `no-auto-merge` and logging a `t1-sampled` merge-gated event (#1958).
+- The size gate gives a parent issue's acceptance criteria ids (`P1`, `P2`, ...), has each child criterion trace to them, rejects a decomposition that leaves a parent criterion uncovered (naming it), and writes `Covers parent criteria: ...` into each child body (#3105).
 - `factory draft` turns a free-text idea (`--text`, `--file` or stdin) into a factory-check-ready issue draft: one triage-tier model call (new tool-less `issue_draft` route) plus at most one repair, scored with `check --no-judge`'s readiness code. Prints Markdown or, with `--json`, one `schemaVersion` 1 object. It never files an issue, writes the queue or writes files (#3171).
 - This repo commits its own `.factory/config.yaml` and a Software Factory `.factory/constitution.md`, so the GitHub Actions dogfood run has config. Only `.factory/state/` is ignored, via `.factory/.gitignore`; the root `.gitignore` no longer ignores `.factory/` (#3689).
 

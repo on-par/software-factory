@@ -11,6 +11,16 @@ export const TracesToSchema = z.array(IntentStatementIdSchema);
 
 export type IntentStatementId = z.infer<typeof IntentStatementIdSchema>;
 
+/** `P<n>`: a parent issue's acceptance criterion, by 1-based checkbox position (#3105). */
+export const PARENT_CRITERION_ID_PATTERN = /^P[1-9]\d*$/;
+
+export const ParentCriterionIdSchema = z.string().regex(PARENT_CRITERION_ID_PATTERN, 'must look like P1');
+
+export type ParentCriterionId = z.infer<typeof ParentCriterionIdSchema>;
+
+/** What one acceptance criterion traces to: intent statements and/or parent criteria. */
+export const CriterionTracesToSchema = z.array(z.union([IntentStatementIdSchema, ParentCriterionIdSchema]));
+
 /** Structural shape of anything that cites intent — Story, Epic, or a future design artifact. */
 export interface Traceable {
   readonly tracesTo?: readonly IntentStatementId[];
@@ -28,4 +38,12 @@ export function formatIntentStatementId(dimension: string, ordinal: number): Int
 
 export function isIntentStatementId(value: unknown): value is IntentStatementId {
   return typeof value === 'string' && INTENT_STATEMENT_ID_PATTERN.test(value);
+}
+
+export function formatParentCriterionId(ordinal: number): ParentCriterionId {
+  return `P${Math.max(1, Math.trunc(ordinal))}`;
+}
+
+export function isParentCriterionId(value: unknown): value is ParentCriterionId {
+  return typeof value === 'string' && PARENT_CRITERION_ID_PATTERN.test(value);
 }

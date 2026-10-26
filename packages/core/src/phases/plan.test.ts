@@ -759,7 +759,7 @@ npm run test`;
           problemStatement: 'The slice is too big.',
           inScope: ['One file'],
           outOfScope: ['Everything else'],
-          acceptanceCriteria: [{ name: 'Works', given: [], when: ['run'], then: ['works'] }],
+          acceptanceCriteria: [{ name: 'Works', when: ['run'], then: ['works'], tracesTo: ['P1'] }],
           verification: [{ command: 'npm test', passWhen: 'passes' }],
           tracesTo: ['INT-PROBLEM-01'],
         },
@@ -1028,6 +1028,7 @@ npm run test`;
               given: ['a job fails'],
               when: ['the job fails transiently'],
               then: ['the job retries up to 3 times'],
+              tracesTo: ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'],
             },
           ],
           verification: [{ command: 'npm test', passWhen: 'the retry suite passes' }],
@@ -1047,7 +1048,15 @@ npm run test`;
           problemStatement: 'problem',
           inScope: ['in scope item'],
           outOfScope: ['persistent storage'],
-          acceptanceCriteria: [{ name: 'works', given: [], when: ['run'], then: ['works'] }],
+          acceptanceCriteria: [
+            {
+              name: 'works',
+              given: [],
+              when: ['run'],
+              then: ['works'],
+              tracesTo: ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'],
+            },
+          ],
           verification: [{ command: 'npm test', passWhen: 'passes' }],
         },
       ],
@@ -1135,7 +1144,7 @@ npm run test`;
       const body = composeEnrichedIssueBody(original, enriched);
       const stub = new StubModelExecutor({
         scripts: {
-          decompose: [{ output: validDecomposition }],
+          decompose: [{ output: validDecomposition.replace(',"P6"', '') }],
           plan: megaPlan(),
         },
       });
@@ -1632,7 +1641,11 @@ npm run test`;
     const BOT = 42;
     const PLAN_OUTPUT = specWithDesign('Spec');
 
-    const storyJson = (n: number, inScope: string[] = [`Scope ${n}`]) => ({
+    const storyJson = (
+      n: number,
+      inScope: string[] = [`Scope ${n}`],
+      parentIds: string[] = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'],
+    ) => ({
       title: `Story ${n}`,
       role: 'operator',
       want: `thing ${n} works`,
@@ -1640,13 +1653,13 @@ npm run test`;
       problemStatement: `Problem for slice ${n}`,
       inScope,
       outOfScope: ['Persistent storage'],
-      acceptanceCriteria: [{ name: `ac ${n}`, given: [], when: ['run'], then: ['works'] }],
+      acceptanceCriteria: [{ name: `ac ${n}`, given: [], when: ['run'], then: ['works'], tracesTo: parentIds }],
       verification: [{ command: 'npm test', passWhen: 'passes' }],
       tracesTo: ['INT-PROBLEM-01'],
     });
 
-    const decompositionOf = (count: number) => {
-      const stories = Array.from({ length: count }, (_, i) => storyJson(i + 1));
+    const decompositionOf = (count: number, parentIds?: string[]) => {
+      const stories = Array.from({ length: count }, (_, i) => storyJson(i + 1, undefined, parentIds));
       return JSON.stringify({
         epic: { title: 'Epic', why: 'why', doneWhen: ['done'], children: stories.map((s) => s.title) },
         stories,
@@ -1930,7 +1943,9 @@ npm run test`;
       }
 
       it('AC1: slices a whole issue, records one slice plan comment and ends before BUILD', async () => {
-        const { result, events, createComment, create } = await runPostPlan({ decompose: [decompositionOf(2)] });
+        const { result, events, createComment, create } = await runPostPlan({
+          decompose: [decompositionOf(2, ['P1'])],
+        });
 
         expect(result.ok).toBe(false);
         expect(result.sliced).toEqual({ sliceCount: 2 });
@@ -1970,7 +1985,7 @@ npm run test`;
 
       it('records the slice plan and parks (no proposal, no issues) when the decomposition is over the cap', async () => {
         const { result, createComment, create, events } = await runPostPlan({
-          decompose: [decompositionOf(6)],
+          decompose: [decompositionOf(6, ['P1'])],
           maxSlices: 5,
         });
 
