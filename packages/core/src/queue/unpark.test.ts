@@ -339,3 +339,28 @@ describe('runUnpark', () => {
     });
   });
 });
+
+describe('runUnpark pagination', () => {
+  it('#3123 unpark after queueing 1..N across more than one page places the issue at N+1', async () => {
+    const N = 120;
+    const labels = new Map<number, string[]>(
+      Array.from({ length: N }, (_, i): [number, string[]] => [
+        i + 1,
+        ['factory:queued', 'factory:lane:ops', `factory:order:${i + 1}`],
+      ]),
+    );
+    labels.set(500, ['factory:parked', 'factory:lane:ops']);
+    const { client: inner } = fakeClient(labels);
+    // Serve the lane in pages of 100, as GitHub does, and combine them the way octokit.paginate does.
+    const client: QueueGitHubClient = {
+      ...inner,
+      listOpenIssuesWithLabels: async (input) => {
+        const all = await inner.listOpenIssuesWithLabels(input);
+        const pages = [all.slice(0, 100), all.slice(100)];
+        return pages.flat();
+      },
+    };
+    const res = await runUnpark({ ...base, client, issue: 500 });
+    expect(res.order).toBe(N + 1);
+  });
+});

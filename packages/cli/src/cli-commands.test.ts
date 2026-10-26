@@ -173,6 +173,7 @@ function paths() {
 
 function defaultOctokit() {
   return {
+    paginate: async (fn: any, args: any) => (await fn(args)).data,
     rest: {
       issues: {
         get: vi.fn(async () => ({ data: { title: 'Fix the bug' } })),

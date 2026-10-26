@@ -13,6 +13,7 @@ section to `## X.Y.Z - date`. See
 
 ### Changed
 
+- GitHub-queue enqueue now converges when several hosts act at once. After writing its `factory:order:<n>` label an enqueue keeps one order label per issue and moves the higher-numbered issue off a shared position, emitting an `order_collision_repaired` event (at most 3 attempts). Lane scans read every page instead of the first 100. Blocked-park auto-unpark runs only on the host named by `FACTORY_FLEET_LEADER` when it is set; unset keeps every host polling (#3147).
 - The rendered constitution is capped at 8 KB with a `[truncated — see <file>]` marker. BUILD and rework prompts get only its Standards/Conventions/Rules/Guidelines sections, and fall back to the full text when none are found. PLAN keeps the full text (#1599).
 - BUILD (commit-only, opencode, codex, local-small) inlines the frozen spec's body once, without YAML frontmatter or `adr:` drafts, and no longer points the worker at the spec file (#1595).
 - The frozen spec's `route` now always matches the route that built the issue. One `RouteCapabilities` record per lane feeds both PLAN and BUILD, a single `resolveRoute` owns the codex→claude fallback, and a new `route-degraded` warn event is logged (and the spec rewritten) when the route changes after PLAN: breaker opened mid-lane, breaker gate swap, or failover inside BUILD (#664).

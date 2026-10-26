@@ -49,8 +49,12 @@ export async function reconcileQueue(
         logEvent: (kind, issue, msg) => {
           const log = createLogger(eventsFile, { issue }, { out: { write: () => true } });
           if (kind === 'warn') log.warn('warn', msg);
-          else log.info('issue_unparked', msg);
+          else if (kind === 'order_collision_repaired') {
+            if (msg.includes('exhausted')) log.warn('order_collision_repaired', msg);
+            else log.info('order_collision_repaired', msg);
+          } else log.info('issue_unparked', msg);
         },
+        onSkip: (msg) => console.log(`reconcile: ${msg}`),
       });
       const count = (o: string): number => results.filter((r) => r.outcome === o).length;
       console.log(

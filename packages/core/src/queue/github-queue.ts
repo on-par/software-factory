@@ -11,8 +11,9 @@ import { createOctokitComments, type QueueCommentClient } from './issue-comments
 import { createClaimReleaser } from './claim-release.js';
 import { createClaimSettler, type ClaimSettleOptions, type ClaimSettler } from './claim-settle.js';
 import { knownRepoLabels } from './label-cache.js';
-import { createOctokitLabelSweepMethods, dropReplacedRepoLabel, toQueueIssue } from './octokit-label-client.js';
+import { createOctokitLabelSweepMethods, dropReplacedRepoLabel, listOpenQueueIssues } from './octokit-label-client.js';
 import type { OrderCollision } from './order-collision.js';
+import type { OrderCollisionRepair } from './order-repair.js';
 import type { QueueEntry, QueueSnapshot, QueueSnapshotEntry } from './index.js';
 import {
   formatQueueOrderConflict,
@@ -176,7 +177,7 @@ export interface QueueClaim {
 
 export interface QueueGitHubClient extends QueueCommentClient {
   serverDate?(): Promise<string | undefined>; // GitHub's HTTP Date header, for clock skew (#3149)
-  /** Open issues carrying ALL of `labels`. Pull requests must be excluded. */
+  /** Open issues carrying ALL of `labels`, fully paginated (throw rather than return a partial list). Pull requests must be excluded. */
   listOpenIssuesWithLabels(input: { owner: string; repo: string; labels: string[] }): Promise<QueueIssue[]>;
   /** Current label names on one issue. */
   getIssueLabels(input: { owner: string; repo: string; issue_number: number }): Promise<string[]>;
@@ -291,16 +292,7 @@ export function createOctokitQueueClient(octokit: Octokit): QueueGitHubClient {
   return {
     ...createOctokitComments(octokit),
     ...createOctokitLabelSweepMethods(octokit),
-    async listOpenIssuesWithLabels({ owner, repo, labels }) {
-      const { data } = await octokit.rest.issues.listForRepo({
-        owner,
-        repo,
-        state: 'open',
-        labels: labels.join(','),
-        per_page: 100,
-      });
-      return data.filter((issue: { pull_request?: unknown }) => !issue.pull_request).map(toQueueIssue);
-    },
+    listOpenIssuesWithLabels: (input) => listOpenQueueIssues(octokit, input),
     async getIssueLabels({ owner, repo, issue_number }) {
       const { data } = await octokit.rest.issues.listLabelsOnIssue({ owner, repo, issue_number, per_page: 100 });
       return data.map((label) => label.name);
@@ -346,6 +338,7 @@ export interface EnqueueResult {
   collision?: OrderCollision;
   /** Set only when preferOrder was asked for and other lane members held it; the issue went to the back (#3554). */
   preferredOrderHeldBy?: number[];
+  repaired?: OrderCollisionRepair[]; // set only when a post-write repair moved the issue; `position` is then the final one (#3147)
 }
 
 export interface EnqueueOptions {
@@ -434,6 +427,7 @@ export interface GithubQueueOptions extends ClaimSettleOptions {
   now?: () => number;
   /** Called once per duplicated `factory:order:<n>` position seen by list/claimNext; those issues are claimed in issue-number order (#3101). Also receives issues with a missing, multiple or malformed order label, which are skipped and not claimed (#3192). */
   onOrderConflict?: (conflict: QueueOrderConflict) => void;
+  onOrderRepair?: (repair: OrderCollisionRepair) => void; // called per enqueue repair move (#3147)
 }
 
 /** Outcome of the reaper path: 'renewed' means the fresh read no longer showed an expired lease, so nothing was written. */
@@ -583,7 +577,9 @@ export function createGithubQueue(options: GithubQueueOptions): GithubQueue {
     }
   }
 
-  const { enqueue, enqueueAfter, enqueueFront } = createEnqueuers(client, owner, repo);
+  const { enqueue, enqueueAfter, enqueueFront } = createEnqueuers(client, owner, repo, {
+    onOrderRepair: options.onOrderRepair,
+  });
 
   function clearLabels(lane: string | undefined): string[] {
     return lane === undefined ? [QUEUED_LABEL] : [QUEUED_LABEL, laneLabel(lane)];

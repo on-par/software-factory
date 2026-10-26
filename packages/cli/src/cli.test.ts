@@ -2888,7 +2888,10 @@ describe('cli', () => {
     const listForRepo = vi.fn(async () => ({
       data: [{ number: 5, title: 'Five', labels: ['factory:queued', 'factory:lane:ops', 'factory:order:1'] }],
     }));
-    const fakeOctokit = { rest: { issues: { listForRepo } } } as any;
+    const fakeOctokit = {
+      paginate: async (fn: any, args: any) => (await fn(args)).data,
+      rest: { issues: { listForRepo } },
+    } as any;
 
     it('--local-queue reads the file and never resolves a token or builds octokit', async () => {
       const token = vi.fn(() => 'ghp_x');

@@ -22,7 +22,10 @@ function opsOctokit() {
     })),
     listLabelsOnIssue: vi.fn(async () => ({ data: names('factory:parked', 'factory:lane:ops') })),
   };
-  return { issues, octokit: { rest: { issues } } as never };
+  return {
+    issues,
+    octokit: { paginate: async (fn: any, args: any) => (await fn(args)).data, rest: { issues } } as never,
+  };
 }
 
 describe('unpark order-label-kept-after-queued-removed', () => {

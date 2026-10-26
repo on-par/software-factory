@@ -19,7 +19,10 @@ function opsOctokit() {
     })),
     listLabelsOnIssue: vi.fn(async () => ({ data: [] })),
   };
-  return { issues, octokit: { rest: { issues } } as never };
+  return {
+    issues,
+    octokit: { paginate: async (fn: any, args: any) => (await fn(args)).data, rest: { issues } } as never,
+  };
 }
 
 describe('queue add order-label-kept-after-queued-removed', () => {

@@ -10,6 +10,7 @@ import {
 } from './github-queue.js';
 import { removeWorktreeKeep } from '../worktree/worktree-keeps.js';
 import type { OrderCollision } from './order-collision.js';
+import type { OrderCollisionRepair } from './order-repair.js';
 
 export type { OrderCollision };
 export * from './prerequisite-order.js';
@@ -57,6 +58,8 @@ export interface UnparkInput {
   keepOrder?: boolean;
   /** Reads the order recorded in the issue's park state; only called when keepOrder is set. */
   readParkedOrder?: () => Promise<number | undefined>;
+  /** Called for each position move the post-write collision repair makes (#3147). */
+  onOrderRepair?: (repair: OrderCollisionRepair) => void;
 }
 
 function message(err: unknown): string {
@@ -111,10 +114,14 @@ export async function runUnpark(input: UnparkInput): Promise<UnparkJson> {
       }
     }
 
-    const [r] = await createGithubQueue({ client, owner, repo }).enqueue(lane, [issue], {
-      ...(isMember ? { requireMember: issue } : {}),
-      ...(preferOrder === undefined ? {} : { preferOrder }),
-    });
+    const [r] = await createGithubQueue({ client, owner, repo, onOrderRepair: input.onOrderRepair }).enqueue(
+      lane,
+      [issue],
+      {
+        ...(isMember ? { requireMember: issue } : {}),
+        ...(preferOrder === undefined ? {} : { preferOrder }),
+      },
+    );
     if (r === undefined || r.outcome !== 'queued' || r.position === undefined) {
       throw new UnparkError('unpark-failed', r?.detail ?? `enqueue returned ${r?.outcome}`);
     }

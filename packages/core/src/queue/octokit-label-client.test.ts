@@ -50,7 +50,9 @@ function fakeOctokit(opts: { issues: Array<{ number: number; labels: string[] }>
     })),
     deleteLabel,
   };
-  return { octokit: { rest: { issues } } as any, issues, state, repoLabels, deleteLabel };
+  const paginate = async (fn: (input: unknown) => Promise<{ data: unknown[] }>, input: unknown) =>
+    (await fn(input)).data;
+  return { octokit: { paginate, rest: { issues } } as any, issues, state, repoLabels, deleteLabel };
 }
 
 function heartbeatQueue(octokit: unknown) {
@@ -156,5 +158,26 @@ describe('createOctokitQueueClient repo-label sweep methods (#1623)', () => {
     ).resolves.toBe(true);
     f.deleteLabel.mockRejectedValueOnce({ status: 500 });
     await expect(client.deleteRepoLabel!({ owner: 'o', repo: 'r', name: 'x' })).rejects.toMatchObject({ status: 500 });
+  });
+});
+
+describe('listOpenIssuesWithLabels pagination (#3147)', () => {
+  it('listOpenIssuesWithLabels paginates a 150-member lane', async () => {
+    const all = Array.from({ length: 150 }, (_, i) => ({ number: i + 1, labels: ['factory:queued'] }));
+    const pages = [all.slice(0, 100), all.slice(100)];
+    const listForRepo = async () => ({ data: pages[0] });
+    const octokit: any = {
+      paginate: async (fn: unknown) => {
+        expect(fn).toBe(listForRepo);
+        return pages.flat();
+      },
+      rest: { issues: { listForRepo } },
+    };
+    const result = await createOctokitQueueClient(octokit).listOpenIssuesWithLabels({
+      owner: 'o',
+      repo: 'r',
+      labels: ['factory:queued'],
+    });
+    expect(result.map((r) => r.number)).toEqual(all.map((a) => a.number));
   });
 });
