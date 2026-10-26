@@ -63,7 +63,7 @@ describe('App', () => {
   it('shows a waiting message before any events arrive', () => {
     const { follow } = makeFakeFollow();
     const { lastFrame } = render(<App eventsFile="ignored" follow={follow} />);
-    expect(lastFrame()).toContain('idle — no active claims');
+    expect(lastFrame()).toContain('no active work');
   });
 
   it('shows only the run in progress when the log holds a finished run before it (#1369)', async () => {
@@ -74,7 +74,7 @@ describe('App', () => {
     fake.push(ev('await-merge', 'waiting to merge', '100', '2026-01-01T00:10:00.000Z'));
     fake.push(ev('run-done', 'all lanes finished', 'all', '2026-01-01T01:00:00.000Z'));
     await flush();
-    expect(lastFrame()).toContain('idle — no active claims');
+    expect(lastFrame()).toContain('no active work');
     expect(lastFrame()).not.toContain('#100');
 
     fake.push(ev('plan', 'Starting plan phase', '200'));

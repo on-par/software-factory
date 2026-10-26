@@ -16,7 +16,6 @@ import {
   queueSteeringMessage,
   readCostsFile,
   readPhaseSnapshot,
-  redactSecretPatterns,
   respondToApproval,
   type RunPhaseSnapshot,
   workKeyFromIssue,
@@ -25,9 +24,13 @@ import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import { type JSX, useEffect, useMemo, useState } from 'react';
 
 import {
+  computeIdleReason,
   type DashboardState,
+  hasActiveLane,
+  idleLine,
   initialDashboard,
   isNonTerminalLane,
+  laneElapsedMs,
   lanesOf,
   legacyFailurePointerFor,
   partitionLanesByActivity,
@@ -50,6 +53,7 @@ import { collapseMerged, LaneView } from './LaneView.js';
 import { RunDetail } from './RunDetail.js';
 import { SteeringComposer } from './SteeringComposer.js';
 import { StopBanner } from './StopBanner.js';
+import { useQueueSnapshot } from './use-queue-snapshot.js';
 
 const MAX_LOG_EVENTS = 5000;
 const POLL_MS = 2000;
@@ -136,7 +140,7 @@ export function App({
   const [view, setView] = useState<View>('lanes');
   const [stopFlag, setStopFlag] = useState(false);
   const [tab, setTab] = useState<TabName>('dashboard');
-  const [queueSnap, setQueueSnap] = useState<QueueSnapshot>({ entries: [] });
+  const { snapshot: queueSnap, loaded: queueLoaded } = useQueueSnapshot(queueReader, POLL_MS);
   const [costsRead, setCostsRead] = useState<CostsRead>({ entries: [], skipped: 0 });
   const [costsSelectedIssue, setCostsSelectedIssue] = useState<string | undefined>();
   const [costsExpanded, setCostsExpanded] = useState(false);
@@ -174,32 +178,6 @@ export function App({
     const interval = setInterval(() => setStopFlag(pathExists(stopFile)), 1500);
     return () => clearInterval(interval);
   }, [stopFile, pathExists]);
-
-  useEffect(() => {
-    if (!queueReader) return;
-    let cancelled = false;
-    let inFlight = false;
-    const read = async () => {
-      if (inFlight) return;
-      inFlight = true;
-      try {
-        const snapshot = await queueReader.read();
-        if (!cancelled) setQueueSnap(snapshot);
-      } catch (err) {
-        // GitHub-controlled text: redact anything token-shaped before it reaches the pane.
-        const message = redactSecretPatterns(err instanceof Error ? err.message : String(err));
-        if (!cancelled) setQueueSnap((prev) => ({ ...prev, error: `queue lookup failed — ${message}` }));
-      } finally {
-        inFlight = false;
-      }
-    };
-    void read();
-    const interval = setInterval(() => void read(), queueReader.pollMs ?? POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [queueReader]);
 
   useEffect(() => {
     if (!costsFile) return;
@@ -451,12 +429,27 @@ export function App({
 
   const stopReason = stopFlag || state.usageStop ? (state.usageStop ?? 'STOP flag present (.factory/STOP)') : undefined;
 
+  const idleText = hasActiveLane(activeLanes)
+    ? undefined
+    : idleLine(computeIdleReason(activeLanes, queueReader && queueLoaded ? queueSnap : undefined), queueReader?.source);
+
   function DashboardPane(): JSX.Element {
+    const body = <DashboardBody />;
+    if (activeLanes.length === 0 || !idleText) return body;
+    return (
+      <Box flexDirection="column">
+        <Text dimColor>{idleText}</Text>
+        {body}
+      </Box>
+    );
+  }
+
+  function DashboardBody(): JSX.Element {
     if (activeLanes.length === 0) {
       return (
         <Box flexDirection="column">
           <Header repo={repo} done={false} />
-          <Text dimColor>(idle — no active claims)</Text>
+          <Text dimColor>{idleText}</Text>
           {staleCount > 0 && <Text dimColor>{staleLanesLine(staleCount)}</Text>}
         </Box>
       );
@@ -473,6 +466,9 @@ export function App({
             steeringQueued={steeringQueued[activeLanes[0].issue]}
             failureEvidence={activeLanes[0].failureEvidence}
             legacyFailurePointer={legacyFailurePointerFor(activeLanes[0])}
+            title={activeLanes[0].title}
+            elapsedMs={laneElapsedMs(activeLanes[0], now)}
+            lastActivityAt={activeLanes[0].lastEventAt}
           />
           {staleCount > 0 && <Text dimColor>{staleLanesLine(staleCount)}</Text>}
         </Box>
@@ -502,6 +498,9 @@ export function App({
           steeringQueued={steeringQueued[detailRow.issue]}
           failureEvidence={detailRow.failureEvidence}
           legacyFailurePointer={legacyFailurePointerFor(detailRow)}
+          title={detailRow.title}
+          elapsedMs={laneElapsedMs(detailRow, now)}
+          lastActivityAt={detailRow.lastEventAt}
         />
       );
     }
