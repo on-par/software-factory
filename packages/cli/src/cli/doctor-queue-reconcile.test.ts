@@ -1,15 +1,16 @@
 // packages/cli/src/cli/doctor-queue-reconcile.test.ts — reconcileQueue's fleet.leader gate for blocked-park polling (#3147).
 
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import type { Octokit } from '@octokit/rest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { reconcileQueue } from './doctor-queue-reconcile.js';
 
 describe('reconcileQueue fleet.leader gate', () => {
+  const dirs = createTempDirs();
   let dir: string;
   let log: { mock: { calls: unknown[][] }; mockRestore: () => void };
   const octokit = {} as Octokit;
@@ -20,14 +21,14 @@ describe('reconcileQueue fleet.leader gate', () => {
   const logged = (): string => log.mock.calls.map((c) => String(c[0])).join('\n');
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'reconcile-'));
+    dir = dirs.makeSync('reconcile-');
     log = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.stubEnv('FACTORY_HOST_ID', 'host-b');
   });
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllEnvs();
     log.mockRestore();
-    rmSync(dir, { recursive: true, force: true });
+    await dirs.cleanup();
   });
 
   it('prints a skip line and does not poll when this host is not the leader', async () => {
