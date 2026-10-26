@@ -77,6 +77,12 @@ read/write (plus Workflows if the repo edits workflows) and store it as the repo
 trigger the required `ci` check, so the run exits 2 without it. A GitHub App installation token
 (for example via `actions/create-github-app-token`) is the preferred option later.
 
+The workflow's caller-repo checkout uses this token too, so `git push` from `run-issue` and `ship`
+(not just PRs) runs as the PAT owner, and `factory-run.sh` forces the same credential for git. Pushes
+made with the Actions token leave follow-up `pull_request` workflows at `action_required` with no jobs,
+so the required `ci` check never reports. A ship that ends "left as draft (CI pending)" fails the
+run (exit 1) and is not a land.
+
 ## Providers and secrets
 
 Each provider reads only its own repo secrets, under the names the Claude GitHub App and

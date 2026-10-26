@@ -67,6 +67,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          token: ${{ secrets.FACTORY_GITHUB_TOKEN }}
       - uses: actions/checkout@v7
         with:
           repository: on-par/software-factory

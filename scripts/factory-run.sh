@@ -4,6 +4,8 @@
 # and are validated before use; factory is called with an argument list, never eval.
 # #3199: PROVIDER picks the agent provider; the wrapper owns the provider rules (allowlist,
 # experimental gate, secret preflight and isolation, model defaults, CLI install).
+# #3707: git pushes authenticate as FACTORY_GITHUB_TOKEN (not the checkout's Actions token), and a
+# ship that ends "left as draft (CI pending)" exits 1 so it never counts as a land.
 set -euo pipefail
 
 CLAUDE_CODE_VERSION=2.1.308
@@ -96,6 +98,18 @@ esac
 export GITHUB_TOKEN="$FACTORY_GITHUB_TOKEN"
 export GH_TOKEN="$FACTORY_GITHUB_TOKEN"
 
+# actions/checkout persists its token as git's github.com extraheader, so pushes would go out as
+# github-actions[bot] and leave follow-up CI at action_required (#3707). Force the PAT header via
+# command-scope config: an empty value resets any inherited header, then ours is added.
+server="${GITHUB_SERVER_URL:-https://github.com}"
+auth_b64="$(printf 'x-access-token:%s' "$FACTORY_GITHUB_TOKEN" | base64 | tr -d '\n')"
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then printf '::add-mask::%s\n' "$auth_b64"; fi
+n="${GIT_CONFIG_COUNT:-0}"
+[[ "$n" =~ ^[0-9]+$ ]] || n=0
+export "GIT_CONFIG_KEY_${n}=http.${server}/.extraheader" "GIT_CONFIG_VALUE_${n}="
+export "GIT_CONFIG_KEY_$((n + 1))=http.${server}/.extraheader" "GIT_CONFIG_VALUE_$((n + 1))=AUTHORIZATION: basic ${auth_b64}"
+export GIT_CONFIG_COUNT=$((n + 2))
+
 # A fresh runner checkout has no git identity and factory doctor fails without one.
 # Set only the missing fields, in the repo's local config; an existing identity wins.
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -107,4 +121,12 @@ set +e
 factory "${args[@]}" 2>&1 | tee "$LOG"
 rc=${PIPESTATUS[0]}
 set -e
+
+if [ "$rc" -eq 0 ] && { [ "$COMMAND" = run-issue ] || [ "$COMMAND" = ship ]; } \
+  && grep -qF 'left as draft (CI pending)' "$LOG" 2>/dev/null; then
+  msg="factory-run: PR left as draft (CI pending): CI did not report, so the PR was not landed"
+  echo "::error::$msg" >&2
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then echo "$msg" >>"$GITHUB_STEP_SUMMARY"; fi
+  rc=1
+fi
 exit "$rc"
