@@ -157,7 +157,7 @@ function requiredFieldsFor(template: ReadinessTemplate): readonly string[] {
   }
 }
 
-export function scoreIssueReadiness(input: { title: string; body: string }): ReadinessInfo {
+export function scoreIssueReadiness(input: { title: string; body: string; labels?: readonly string[] }): ReadinessInfo {
   const body = input.body ?? '';
   const template = detectTemplate(input.title ?? '', extractIssueSections(body));
   // Label-line headings and preamble capture are opt-in and only applied once the body
@@ -189,6 +189,7 @@ export function scoreIssueReadiness(input: { title: string; body: string }): Rea
       ? checkIssueSize({
           inScope: findSection(sections, 'In scope') ?? '',
           acceptanceCriteria: findSection(sections, 'Acceptance criteria') ?? '',
+          labels: input.labels,
         })
       : { sizeOk: true };
 

@@ -278,7 +278,8 @@ export async function runIssueCheck(
   deps: IssueCheckDeps,
 ): Promise<IssueCheckReport> {
   const { title, body, labels } = await deps.getIssue(issue);
-  const readiness = scoreIssueReadiness({ title, body: body ?? '' });
+  const labelNames = (labels ?? []).map((l) => (typeof l === 'string' ? l : (l.name ?? ''))).filter(Boolean);
+  const readiness = scoreIssueReadiness({ title, body: body ?? '', labels: labelNames });
   const criteria = readiness.template === 'factory-task' ? gradeIssueCriteria(body ?? '') : null;
   let invest: IssueInvestReport | null = null;
   if (readiness.template === 'factory-task') {
@@ -304,7 +305,7 @@ export async function runIssueCheck(
     const result = await judgeReadiness({
       title,
       body: body ?? '',
-      labels: (labels ?? []).map((l) => (typeof l === 'string' ? l : (l.name ?? ''))).filter(Boolean),
+      labels: labelNames,
       run: async (prompt) => {
         const r = await runModel('readiness_judge', prompt);
         if (r.cost === null) unpriced = true;
