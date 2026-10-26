@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it } from 'vitest';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
@@ -130,7 +131,7 @@ describe('resolveReworkRoute', () => {
 describe('command route offering (#2874)', () => {
   const promptWith = (runnableRoutes?: ReturnType<typeof runnableBuildRoutes>) =>
     buildPlanPrompt({
-      issue: 1,
+      issue: workKeyFromIssue(1),
       issueTitle: 't',
       issueBody: 'b',
       specPath: '/s.md',

@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -110,7 +111,7 @@ async function run(opts: { mode: 'slice' | 'stack'; sliceIndex?: number }) {
   const router = new ModelRouter(models, routes, false, stub);
   const messages: string[] = [];
   const result = await planPhase({
-    issue: 607,
+    issue: workKeyFromIssue(607),
     repo: 'on-par/software-factory',
     worktree,
     specPath: join(worktree, 'issue-607.md'),

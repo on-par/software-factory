@@ -1,5 +1,6 @@
 // src/phases/ship.ts — SHIP phase: create/verify PR, mark ready for review
 
+import { issueNumberOf, type WorkKey } from '../work/work-key.js';
 import { exec as execCb } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -23,6 +24,7 @@ import {
   shortDetail,
   verifyRemoteHead,
 } from './ship-git.js';
+import { commitLeftoverBuildOutput } from './ship-leftover.js';
 import { markPrReadyWithRetry } from './ship-ready.js';
 import { readRisk, readSpecBody } from './ship-spec.js';
 import type { CheckSummary, CiFailureEvidence } from '../types/index.js';
@@ -77,7 +79,7 @@ export async function shipPhase(opts: Parameters<typeof shipPhaseImpl>[0]): Prom
 }
 
 async function shipPhaseImpl(opts: {
-  issue: number;
+  issue: WorkKey;
   repo: string;
   worktree: string;
   branch: string;
@@ -150,7 +152,7 @@ async function shipPhaseImpl(opts: {
       'approval_requested',
       `awaiting approval to ship ${branch}${checkSummary ? ` (checks: ${checkSummary.passes} pass, ${checkSummary.failures} fail, ${checkSummary.skips} skip)` : ''}`,
     );
-    const response = await approvalGate({ issue, branch, worktree, diffStat, checkSummary });
+    const response = await approvalGate({ issue: issueNumberOf(issue), branch, worktree, diffStat, checkSummary });
     if (!response.approved) {
       const reason = response.reason ?? 'denied';
       log('ship_denied', `ship denied for ${branch}: ${reason}`);
@@ -369,7 +371,7 @@ async function shipPhaseImpl(opts: {
     // Get title from issue (skipped for a non-github work source — no such issue exists)
     const title = inlineWork
       ? inlineWork.title
-      : (await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issue })).data.title;
+      : (await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issueNumberOf(issue) })).data.title;
 
     // Get diff stats (reuse the approval gate's diff stat when already computed)
     const stat = diffStat ?? (await computeDiffStat(run, worktree));
@@ -632,45 +634,6 @@ function conflictedPaths(statusLines: string[]): string[] {
       return xy.includes('U') || xy === 'AA' || xy === 'DD';
     })
     .map((line) => line.slice(3));
-}
-
-/**
- * Commit the dirt a build agent left after a green CHECK onto the ship-it branch — the working
- * tree is byte-for-byte what the checkers verified, so committing it is what ships the green
- * artifact instead of parking it (#1164/#1172).
- */
-async function commitLeftoverBuildOutput(o: {
-  run: CommandRunner;
-  worktree: string;
-  branch: string;
-  issue: number;
-  statusLines: string[];
-  log: (type: EventKind, msg: string) => void;
-}): Promise<{ ok: true } | { ok: false; reason: string }> {
-  const paths = o.statusLines
-    .slice(0, 5)
-    .map((line) => line.slice(3))
-    .join(', ');
-  const remainder = o.statusLines.length > 5 ? ` (+${o.statusLines.length - 5} more)` : '';
-  o.log('ship', `recovering leftover build output on ${o.branch}: ${paths}${remainder}`);
-  try {
-    await o.run('git add -A', { cwd: o.worktree });
-    try {
-      await o.run('git diff --cached --quiet', { cwd: o.worktree });
-      o.log('ship', 'nothing staged after git add -A; no leftover commit');
-      return { ok: true };
-    } catch (err) {
-      const code = (err as { code?: unknown } | null | undefined)?.code;
-      if (code !== 1) throw err;
-    }
-    await o.run(`git commit -m ${shellEscape(`chore(ship): commit build output left after check (#${o.issue})`)}`, {
-      cwd: o.worktree,
-    });
-  } catch (err) {
-    return { ok: false, reason: `could not commit leftover build output: ${shortDetail(err)}` };
-  }
-  o.log('ship', `committed ${o.statusLines.length} uncommitted path(s) left after check on ${o.branch}`);
-  return { ok: true };
 }
 
 /** The result of asking GitHub whether a PR exists for a branch. `error` is never collapsed

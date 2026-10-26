@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -19,7 +20,7 @@ describe('buildPhase context_ceiling event', () => {
     } as any;
     const logs: Array<{ type: string; msg: string }> = [];
     await buildPhase({
-      issue: 3327,
+      issue: workKeyFromIssue(3327),
       repo: 'on-par/software-factory',
       worktree,
       specPath: join(worktree, 'issue-3327.md'),

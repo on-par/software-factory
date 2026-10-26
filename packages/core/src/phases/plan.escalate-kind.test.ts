@@ -1,4 +1,5 @@
 // Planner size-gate verdict and ESCALATE classification (#3275).
+import { workKeyFromIssue } from '../work/work-key.js';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -98,7 +99,7 @@ const validDecomposition = JSON.stringify({
 
 const promptWith = (sizeGate?: { passed: boolean; enforced: boolean }) =>
   buildPlanPrompt({
-    issue: 36,
+    issue: workKeyFromIssue(36),
     issueTitle: 'Add eval runner',
     issueBody: 'Measure the current prompt.',
     specPath: '/tmp/spec.md',
@@ -153,7 +154,7 @@ describe('planPhase size gate and escalateKind (#3275)', () => {
     const events: string[] = [];
 
     const result = await planPhase({
-      issue: 903,
+      issue: workKeyFromIssue(903),
       repo: 'on-par/software-factory',
       worktree,
       specPath: join(worktree, 'issue-903.md'),
@@ -192,7 +193,7 @@ describe('planPhase size gate and escalateKind (#3275)', () => {
     const escalates: Array<{ msg: string; extra: unknown }> = [];
 
     const result = await planPhase({
-      issue: 45,
+      issue: workKeyFromIssue(45),
       repo: 'on-par/software-factory',
       worktree,
       specPath: join(worktree, 'issue-45.md'),

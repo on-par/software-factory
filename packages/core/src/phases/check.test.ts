@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { execFile as execFileCb } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -24,7 +25,6 @@ import {
   type EnvironmentFailure,
   excludeBaseFailing,
   isEnvironmentFailure,
-  markTestsFlaky,
   LENS_REVIEW_CHECKER,
   stuckSignature,
 } from './check.js';
@@ -221,7 +221,7 @@ describe('partial base overlap (#1929)', () => {
     const { worktree, specPath } = await makePartialWorktree();
     const { router, stub } = makeRouter();
     const result = await checkPhase({
-      issue: 1929,
+      issue: workKeyFromIssue(1929),
       worktree,
       specPath,
       router,
@@ -256,7 +256,7 @@ describe('partial base overlap (#1929)', () => {
     const { router, stub } = makeRouter();
     const seen: string[][] = [];
     const result = await checkPhase({
-      issue: 1929,
+      issue: workKeyFromIssue(1929),
       worktree,
       specPath,
       router,
@@ -294,7 +294,7 @@ describe('partial base overlap (#1929)', () => {
     } as any;
     const messages: string[] = [];
     const result = await checkPhase({
-      issue: 1929,
+      issue: workKeyFromIssue(1929),
       worktree,
       specPath,
       router: fakeRouter,
@@ -372,7 +372,7 @@ describe('rework cause environment (#1927)', () => {
     const kinds: string[] = [];
     const result = await checkPhase({
       ...extra,
-      issue: 77,
+      issue: workKeyFromIssue(77),
       worktree,
       specPath,
       router,
@@ -426,7 +426,7 @@ describe('rework cause environment (#1927)', () => {
       const { router, stub } = makeRouter();
       const messages: string[] = [];
       const result = await checkPhase({
-        issue: 77,
+        issue: workKeyFromIssue(77),
         worktree,
         specPath,
         router,
@@ -466,7 +466,7 @@ describe('rework cause environment (#1927)', () => {
       const { router, stub } = makeRouter();
       const messages: string[] = [];
       const result = await checkPhase({
-        issue: 77,
+        issue: workKeyFromIssue(77),
         worktree,
         specPath,
         router,
@@ -506,7 +506,7 @@ describe('rework cause environment (#1927)', () => {
       const { router, stub } = makeRouter();
       const messages: string[] = [];
       const result = await checkPhase({
-        issue: 77,
+        issue: workKeyFromIssue(77),
         worktree,
         specPath,
         router,
@@ -543,7 +543,7 @@ describe('rework cause environment (#1927)', () => {
     const { router } = makeRouter();
     const logCalls: Array<[string, string, ({ rework?: ReworkInfo } | undefined)?]> = [];
     const result = await checkPhase({
-      issue: 77,
+      issue: workKeyFromIssue(77),
       worktree,
       specPath,
       router,
@@ -581,7 +581,7 @@ describe('rework cause environment (#1927)', () => {
       const { router } = makeRouter();
       const logCalls: Array<[string, string, ({ rework?: ReworkInfo } | undefined)?]> = [];
       const result = await checkPhase({
-        issue: 77,
+        issue: workKeyFromIssue(77),
         worktree,
         specPath,
         router,
@@ -703,7 +703,7 @@ describe('checkPhase baseline (#1925)', () => {
     const { router } = makeRouter();
     const calls: unknown[] = [];
     const result = await checkPhase({
-      issue: 1,
+      issue: workKeyFromIssue(1),
       worktree,
       specPath,
       router,
@@ -722,7 +722,7 @@ describe('checkPhase baseline (#1925)', () => {
   it('reports a clean base without changing the outcome', { timeout: 120_000 }, async () => {
     const { worktree, specPath } = await makeFailingWorktree();
     const { router } = makeRouter();
-    const baseOpts = { issue: 77, worktree, specPath, router, constitution: null, autoRework: false };
+    const baseOpts = { issue: workKeyFromIssue(77), worktree, specPath, router, constitution: null, autoRework: false };
     const without = await checkPhase({ ...baseOpts, log: () => {} });
 
     const logs: string[] = [];
@@ -756,7 +756,7 @@ describe('checkPhase baseline (#1925)', () => {
     const { router } = makeRouter();
     const logs: string[] = [];
     await checkPhase({
-      issue: 77,
+      issue: workKeyFromIssue(77),
       worktree,
       specPath,
       router,
@@ -787,7 +787,7 @@ describe('checkPhase baseline (#1925)', () => {
     const { router } = makeRouter();
     const caches: unknown[] = [];
     const base = {
-      issue: 77,
+      issue: workKeyFromIssue(77),
       worktree,
       specPath,
       router,
@@ -810,7 +810,7 @@ describe('checkPhase baseline (#1925)', () => {
     const { router } = makeRouter();
     const logs: string[] = [];
     await checkPhase({
-      issue: 77,
+      issue: workKeyFromIssue(77),
       worktree,
       specPath,
       router,
@@ -833,7 +833,7 @@ describe('checkPhase baseline (#1925)', () => {
     const { router } = makeRouter();
     let calls = 0;
     const result = await checkPhase({
-      issue: 77,
+      issue: workKeyFromIssue(77),
       worktree,
       specPath,
       router,
@@ -854,7 +854,7 @@ describe('checkPhase baseline (#1925)', () => {
     const { worktree, specPath } = await makeFailingWorktree();
     const { router } = makeRouter();
     const result = await checkPhase({
-      issue: 77,
+      issue: workKeyFromIssue(77),
       worktree,
       specPath,
       router,
@@ -876,7 +876,7 @@ describe('checkPhase baseline (#1925)', () => {
     const logs: string[] = [];
     let calls = 0;
     const result = await checkPhase({
-      issue: 77,
+      issue: workKeyFromIssue(77),
       worktree,
       specPath,
       router,
@@ -902,7 +902,7 @@ describe('checkPhase auto rework', () => {
     const logs: Array<[string, string]> = [];
 
     await checkPhase({
-      issue: 817,
+      issue: workKeyFromIssue(817),
       worktree,
       specPath,
       router,
@@ -932,7 +932,7 @@ describe('checkPhase auto rework', () => {
       const logs: Array<[string, string]> = [];
 
       await checkPhase({
-        issue: 2634,
+        issue: workKeyFromIssue(2634),
         worktree,
         specPath,
         router,
@@ -961,7 +961,7 @@ describe('checkPhase auto rework', () => {
     } as any;
 
     await checkPhase({
-      issue: 1910,
+      issue: workKeyFromIssue(1910),
       worktree,
       specPath,
       router: fakeRouter,
@@ -981,7 +981,7 @@ describe('checkPhase auto rework', () => {
     const logs: Array<{ type: string; msg: string }> = [];
 
     const check = await checkPhase({
-      issue: 817,
+      issue: workKeyFromIssue(817),
       worktree,
       specPath,
       router,
@@ -1007,7 +1007,7 @@ describe('checkPhase auto rework', () => {
       const { router, stub } = makeRouter();
 
       const check = await checkPhase({
-        issue: 1211,
+        issue: workKeyFromIssue(1211),
         worktree,
         specPath,
         router,
@@ -1030,7 +1030,7 @@ describe('checkPhase auto rework', () => {
     const log = () => {};
 
     const check = await checkPhase({
-      issue: 77,
+      issue: workKeyFromIssue(77),
       worktree,
       specPath,
       router,
@@ -1049,7 +1049,7 @@ describe('checkPhase auto rework', () => {
     const { router, stub } = makeRouter();
 
     const check = await checkPhase({
-      issue: 77,
+      issue: workKeyFromIssue(77),
       worktree,
       specPath,
       router,
@@ -1073,7 +1073,7 @@ describe('checkPhase auto rework', () => {
       const { router, stub } = makeRouter();
 
       const check = await checkPhase({
-        issue: 77,
+        issue: workKeyFromIssue(77),
         worktree,
         specPath,
         router,
@@ -1103,7 +1103,7 @@ describe('checkPhase auto rework', () => {
     const reworks: ReworkInfo[] = [];
 
     await checkPhase({
-      issue: 78,
+      issue: workKeyFromIssue(78),
       worktree,
       specPath: join(worktree, 'issue-78.md'),
       router,
@@ -1124,7 +1124,7 @@ describe('checkPhase auto rework', () => {
     const log = () => {};
 
     const check = await checkPhase({
-      issue: 77,
+      issue: workKeyFromIssue(77),
       worktree,
       specPath,
       router,
@@ -1147,7 +1147,7 @@ describe('checkPhase auto rework', () => {
       const logCalls: Array<[string, string, ({ rework?: ReworkInfo } | undefined)?]> = [];
 
       await checkPhase({
-        issue: 77,
+        issue: workKeyFromIssue(77),
         worktree,
         specPath,
         router,
@@ -1173,7 +1173,7 @@ describe('checkPhase auto rework', () => {
       // First run establishes what signature this fixture produces (no priorFailureSignature yet).
       const first = await makeFailingWorktree();
       const baseline = await checkPhase({
-        issue: 77,
+        issue: workKeyFromIssue(77),
         worktree: first.worktree,
         specPath: first.specPath,
         router: makeRouter().router,
@@ -1190,7 +1190,7 @@ describe('checkPhase auto rework', () => {
       const logCalls: Array<[string, string, ({ rework?: ReworkInfo } | undefined)?]> = [];
 
       const check = await checkPhase({
-        issue: 77,
+        issue: workKeyFromIssue(77),
         worktree: second.worktree,
         specPath: second.specPath,
         router,
@@ -1224,7 +1224,7 @@ describe('checkPhase auto rework', () => {
       const { router, stub } = makeRouter();
 
       const check = await checkPhase({
-        issue: 77,
+        issue: workKeyFromIssue(77),
         worktree,
         specPath,
         router,
@@ -1257,7 +1257,7 @@ describe('checkPhase auto rework', () => {
     const logCalls: Array<[string, string, { rework?: ReworkInfo } | undefined]> = [];
 
     await checkPhase({
-      issue: 491,
+      issue: workKeyFromIssue(491),
       worktree,
       specPath,
       router,
@@ -1290,7 +1290,7 @@ describe('checkPhase auto rework', () => {
     const logCalls: Array<[string, string, { rework?: ReworkInfo } | undefined]> = [];
 
     await checkPhase({
-      issue: 492,
+      issue: workKeyFromIssue(492),
       worktree,
       specPath,
       router,
@@ -1316,7 +1316,7 @@ describe('checkPhase auto rework', () => {
     });
 
     await checkPhase({
-      issue: 77,
+      issue: workKeyFromIssue(77),
       worktree,
       specPath,
       router,
@@ -1344,7 +1344,7 @@ describe('checkPhase auto rework', () => {
       const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
 
       await checkPhase({
-        issue: 78,
+        issue: workKeyFromIssue(78),
         worktree,
         specPath,
         router,
@@ -1371,7 +1371,7 @@ describe('checkPhase auto rework', () => {
       const logCalls: Array<[string, string, ({ failoverReason?: string; rework?: ReworkInfo } | undefined)?]> = [];
 
       const check = await checkPhase({
-        issue: 642,
+        issue: workKeyFromIssue(642),
         worktree,
         specPath,
         router,
@@ -1408,7 +1408,7 @@ describe('checkPhase auto rework', () => {
     const logCalls: Array<[string, string, ({ failoverReason?: string; rework?: ReworkInfo } | undefined)?]> = [];
 
     await checkPhase({
-      issue: 642,
+      issue: workKeyFromIssue(642),
       worktree,
       specPath,
       router,
@@ -1441,7 +1441,7 @@ describe('checkPhase auto rework', () => {
       const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
 
       await checkPhase({
-        issue: 642,
+        issue: workKeyFromIssue(642),
         worktree,
         specPath,
         router,
@@ -1476,7 +1476,7 @@ describe('checkPhase auto rework', () => {
       const logs: Array<{ type: string; msg: string }> = [];
 
       await checkPhase({
-        issue: 99,
+        issue: workKeyFromIssue(99),
         worktree,
         specPath,
         router: fakeRouter,
@@ -1515,7 +1515,7 @@ async function captureReworkOptions(issue: number, extra: Partial<Parameters<typ
     },
   } as any;
   await checkPhase({
-    issue,
+    issue: workKeyFromIssue(issue),
     worktree,
     specPath,
     router,
@@ -1569,7 +1569,7 @@ describe('parentBaseRef (#2716)', () => {
     const seen: any[] = [];
     const sandbox = { runtime: 'none' } as SandboxPolicy;
     await checkPhase({
-      issue: 99,
+      issue: workKeyFromIssue(99),
       worktree,
       specPath,
       router: {} as any,
@@ -1595,7 +1595,7 @@ describe('parentBaseRef (#2716)', () => {
     const { worktree, specPath } = await makePassingWorktree();
     const seen: any[] = [];
     await checkPhase({
-      issue: 99,
+      issue: workKeyFromIssue(99),
       worktree,
       specPath,
       router: {} as any,
@@ -1668,7 +1668,7 @@ describe('checkPhase appPort', () => {
     const { router, stub } = makeRouter();
 
     const check = await checkPhase({
-      issue: 101,
+      issue: workKeyFromIssue(101),
       worktree,
       specPath: join(worktree, 'issue-101.md'),
       router,
@@ -1687,7 +1687,7 @@ describe('checkPhase appPort', () => {
     const { router } = makeRouter();
 
     const check = await checkPhase({
-      issue: 102,
+      issue: workKeyFromIssue(102),
       worktree,
       specPath: join(worktree, 'issue-102.md'),
       router,
@@ -1706,7 +1706,7 @@ describe('checkPhase appPort', () => {
     const logCalls: Array<[string, string]> = [];
 
     const check = await checkPhase({
-      issue: 103,
+      issue: workKeyFromIssue(103),
       worktree,
       specPath: join(worktree, 'issue-103.md'),
       router,
@@ -1730,7 +1730,7 @@ describe('checkPhase appPort', () => {
     const logCalls: Array<[string, string]> = [];
 
     await checkPhase({
-      issue: 104,
+      issue: workKeyFromIssue(104),
       worktree,
       specPath: join(worktree, 'issue-104.md'),
       router,
@@ -1750,7 +1750,7 @@ describe('checkPhase appPort', () => {
     const logCalls: Array<[string, string]> = [];
 
     await checkPhase({
-      issue: 105,
+      issue: workKeyFromIssue(105),
       worktree,
       specPath: join(worktree, 'issue-105.md'),
       router,
@@ -1769,7 +1769,7 @@ describe('checkPhase appPort', () => {
     const logCalls: Array<[string, string]> = [];
 
     await checkPhase({
-      issue: 106,
+      issue: workKeyFromIssue(106),
       worktree,
       specPath,
       router,
@@ -1790,7 +1790,7 @@ describe('checkPhase appPort', () => {
 
     await expect(
       checkPhase({
-        issue: 107,
+        issue: workKeyFromIssue(107),
         worktree,
         specPath: join(worktree, 'issue-107.md'),
         router,
@@ -1809,7 +1809,7 @@ describe('checkPhase appPort', () => {
 
     await expect(
       checkPhase({
-        issue: 108,
+        issue: workKeyFromIssue(108),
         worktree,
         specPath: join(worktree, 'issue-108.md'),
         router,
@@ -1858,7 +1858,7 @@ describe('checkPhase frozen evidence plan', () => {
     } as any;
     let evidenceCalls = 0;
     const check = await checkPhase({
-      issue: 3264,
+      issue: workKeyFromIssue(3264),
       worktree,
       specPath,
       router,
@@ -1889,7 +1889,7 @@ describe('checkPhase frozen evidence plan', () => {
   it('evidence-plan step records passing entries for the evidence pack', async () => {
     const { worktree, specPath } = await makeEvidencePlanWorktree(3265);
     const check = await checkPhase({
-      issue: 3265,
+      issue: workKeyFromIssue(3265),
       worktree,
       specPath,
       router: {} as ModelRouter,
@@ -1905,7 +1905,12 @@ describe('checkPhase frozen evidence plan', () => {
           reason: 'proof passed',
         })),
     });
-    const markdown = renderEvidencePack({ issue: 3265, checkSummary: check.summary, events: [], logFiles: [] });
+    const markdown = renderEvidencePack({
+      issue: workKeyFromIssue(3265),
+      checkSummary: check.summary,
+      events: [],
+      logFiles: [],
+    });
     expect(check.passed).toBe(true);
     expect(check.summary.results.find((result) => result.checker === 'evidence_plan')?.result).toBe('PASS');
     expect(markdown).toContain('Evidence plan');
@@ -1917,7 +1922,7 @@ describe('checkPhase frozen evidence plan', () => {
     const { worktree, specPath } = await makeEvidencePlanWorktree(3267);
     let calls = 0;
     const check = await checkPhase({
-      issue: 3267,
+      issue: workKeyFromIssue(3267),
       worktree,
       specPath,
       router: {} as ModelRouter,
@@ -1951,7 +1956,7 @@ describe('checkPhase frozen evidence plan', () => {
       return [];
     };
     const check = await checkPhase({
-      issue: 3269,
+      issue: workKeyFromIssue(3269),
       worktree,
       specPath,
       router: {} as ModelRouter,
@@ -1971,7 +1976,7 @@ describe('checkPhase frozen evidence plan', () => {
     const { worktree, specPath } = await makeEvidencePlanWorktree(3271);
     const runEvidence = vi.fn(async () => []);
     const check = await checkPhase({
-      issue: 3271,
+      issue: workKeyFromIssue(3271),
       worktree,
       specPath,
       router: {} as ModelRouter,
@@ -2004,7 +2009,7 @@ describe('checkPhase frozen evidence plan', () => {
     ]);
     const reasons = ['not allowlisted', 'screenshot: route /settings needs the app (#3253)', 'none: manual review'];
     const check = await checkPhase({
-      issue: 3268,
+      issue: workKeyFromIssue(3268),
       worktree,
       specPath,
       router: {} as ModelRouter,
@@ -2026,7 +2031,12 @@ describe('checkPhase frozen evidence plan', () => {
           reason: reasons[index]!,
         })),
     });
-    const markdown = renderEvidencePack({ issue: 3268, checkSummary: check.summary, events: [], logFiles: [] });
+    const markdown = renderEvidencePack({
+      issue: workKeyFromIssue(3268),
+      checkSummary: check.summary,
+      events: [],
+      logFiles: [],
+    });
     expect(check.passed).toBe(true);
     expect(check.summary.failures).toBe(0);
     const evidence = check.summary.results.find((result) => result.checker === 'evidence_plan');
@@ -2046,7 +2056,7 @@ describe('checkPhase frozen evidence plan', () => {
     const { worktree, specPath } = await makeEvidencePlanWorktree(3270);
     const baseline = vi.fn();
     const check = await checkPhase({
-      issue: 3270,
+      issue: workKeyFromIssue(3270),
       worktree,
       specPath,
       router: {} as ModelRouter,
@@ -2077,7 +2087,7 @@ describe('checkPhase success paths', () => {
     const logs: Array<{ type: string; msg: string }> = [];
 
     const check = await checkPhase({
-      issue: 88,
+      issue: workKeyFromIssue(88),
       worktree,
       specPath,
       router,
@@ -2104,7 +2114,7 @@ describe('checkPhase success paths', () => {
       let activityCalls = 0;
 
       const check = await checkPhase({
-        issue: 88,
+        issue: workKeyFromIssue(88),
         worktree,
         specPath,
         router,
@@ -2126,7 +2136,7 @@ describe('checkPhase success paths', () => {
     const logs: Array<{ type: string; msg: string }> = [];
 
     const check = await checkPhase({
-      issue: 94,
+      issue: workKeyFromIssue(94),
       worktree,
       specPath,
       router,
@@ -2162,7 +2172,7 @@ describe('checkPhase success paths', () => {
 
       const logs: Array<{ type: string; msg: string }> = [];
       const check = await checkPhase({
-        issue: 95,
+        issue: workKeyFromIssue(95),
         worktree,
         specPath,
         router,
@@ -2203,7 +2213,7 @@ describe('checkPhase success paths', () => {
     const logs: Array<{ type: string; msg: string }> = [];
 
     const check = await checkPhase({
-      issue: 89,
+      issue: workKeyFromIssue(89),
       worktree,
       specPath,
       router,
@@ -2234,7 +2244,7 @@ describe('checkPhase steering', () => {
     };
 
     await checkPhase({
-      issue: 100,
+      issue: workKeyFromIssue(100),
       worktree,
       specPath,
       router,
@@ -2292,7 +2302,7 @@ describe('checkPhase lifecycle events', () => {
       bus.on((e) => received.push(e));
 
       await checkPhase({
-        issue: 591,
+        issue: workKeyFromIssue(591),
         worktree,
         specPath,
         router,
@@ -2323,7 +2333,7 @@ describe('checkPhase lifecycle events', () => {
     bus.on((e) => received.push(e));
 
     await checkPhase({
-      issue: 592,
+      issue: workKeyFromIssue(592),
       worktree,
       specPath,
       router,
@@ -2494,7 +2504,7 @@ describe('checkPhase with lens_review signatures', () => {
     const events: Array<[string, string]> = [];
     let n = 0;
     const check = await checkPhase({
-      issue,
+      issue: workKeyFromIssue(issue),
       worktree,
       specPath: join(worktree, `issue-${issue}.md`),
       router,
@@ -2581,7 +2591,7 @@ describe('checkPhase tests timeout (#2299)', () => {
     const { router } = makeRouter();
     let seen: number | undefined;
     await checkPhase({
-      issue: 2299,
+      issue: workKeyFromIssue(2299),
       worktree,
       specPath: join(worktree, 'issue-2299.md'),
       router,
@@ -2637,7 +2647,7 @@ describe('flaky re-run verdict (#2301, #2302)', () => {
     const { router } = makeRouter();
     const logs: string[] = [];
     const result = await checkPhase({
-      issue: 5,
+      issue: workKeyFromIssue(5),
       worktree,
       specPath: join(worktree, 'spec.md'),
       router,
@@ -2720,34 +2730,5 @@ describe('flaky re-run verdict (#2301, #2302)', () => {
     const { result } = await run(['tests'], 'clean-on-base', fake, { maxReworkRounds: 0 });
     expect(fake).not.toHaveBeenCalled();
     expect(result.flakeRerun).toBeUndefined();
-  });
-});
-describe('markTestsFlaky (#2302)', () => {
-  const base: CheckSummary = {
-    results: [
-      { checker: 'tests', result: 'FAIL', details: 'x' },
-      { checker: 'lint', result: 'FAIL', details: 'y' },
-      { checker: 'types', result: 'PASS', details: 'z' },
-    ],
-    failures: 2,
-    passes: 1,
-    skips: 3,
-    total: 6,
-  };
-
-  it('joins targeted names, recomputes counts and preserves other fields', () => {
-    const out = markTestsFlaky(base, { verdict: 'passed', mode: 'targeted', tests: ['a', 'b'] });
-    expect(out.results[0]).toEqual({ checker: 'tests', result: 'PASS', details: 're-run passed; flaky: a, b' });
-    expect(out.results[1]).toBe(base.results[1]);
-    expect(out.failures).toBe(1);
-    expect(out.passes).toBe(2);
-    expect(out.skips).toBe(3);
-    expect(out.total).toBe(6);
-  });
-  it('falls back to full suite and leaves a non-FAIL tests result alone', () => {
-    const out = markTestsFlaky(base, { verdict: 'passed', mode: 'full', tests: [] });
-    expect(out.results[0]?.details).toBe('re-run passed; flaky: full suite');
-    const passing: CheckSummary = { ...base, results: [{ checker: 'tests', result: 'PASS', details: 'ok' }] };
-    expect(markTestsFlaky(passing, { verdict: 'passed', mode: 'full', tests: [] }).results[0]?.details).toBe('ok');
   });
 });

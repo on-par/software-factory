@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -61,7 +62,7 @@ describe('buildPhase with a harness declared in .factory/config.yaml', () => {
     };
 
     const result = await buildPhase({
-      issue: 2866,
+      issue: workKeyFromIssue(2866),
       repo: 'o/r',
       worktree,
       specPath: join(worktree, 'issue-2866.md'),

@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it } from 'vitest';
 
 import { extractSpecIntent, PR_BODY_FOOTER, renderPrBody, summarizeIntent } from './pr-body.js';
@@ -60,7 +61,7 @@ describe('renderPrBody', () => {
       checkSummary: { passes: 3, failures: 0, skips: 1, total: 4, results: [] },
       reworkRounds: 2,
       risk: 'Only the uploader.',
-      closes: 42,
+      closes: workKeyFromIssue(42),
     });
 
     expect(body).toBe(
@@ -115,7 +116,7 @@ describe('renderPrBody', () => {
       specBody: '## Goal\nDo a thing.\n',
       diffStat: 'a',
       checkSummary: { passes: 1, failures: 0, skips: 0, total: 1, results: [] },
-      closes: 42,
+      closes: workKeyFromIssue(42),
     });
     const bare = renderPrBody({ summaryLine: 'Implements local brief `b`.', diffStat: '' });
 
@@ -127,17 +128,22 @@ describe('renderPrBody', () => {
   });
 
   it.each(['  Custom {{repo}} footer  ', 'First line\nSecond line', '   '])('uses footer %j verbatim', (footer) => {
-    const body = renderPrBody({ summaryLine: 'x', diffStat: '', closes: 42, footer });
-    expect(body).toBe(`${renderPrBody({ summaryLine: 'x', diffStat: '', closes: 42, footer: '' })}\n\n${footer}`);
+    const body = renderPrBody({ summaryLine: 'x', diffStat: '', closes: workKeyFromIssue(42), footer });
+    expect(body).toBe(
+      `${renderPrBody({ summaryLine: 'x', diffStat: '', closes: workKeyFromIssue(42), footer: '' })}\n\n${footer}`,
+    );
     expect(body).not.toContain(PR_BODY_FOOTER);
   });
 
-  it.each([{ closes: 42 }, { partOf: 42 }, {}])('removes an empty footer and its separator after %j', (issue) => {
-    const body = renderPrBody({ summaryLine: 'x', diffStat: '', ...issue, footer: '' });
-    const lastSection = 'closes' in issue ? 'Closes #42' : 'partOf' in issue ? 'Part of #42' : '</details>';
-    expect(body.endsWith(lastSection)).toBe(true);
-    expect(body).not.toContain(PR_BODY_FOOTER);
-  });
+  it.each([{ closes: workKeyFromIssue(42) }, { partOf: workKeyFromIssue(42) }, {}])(
+    'removes an empty footer and its separator after %j',
+    (issue) => {
+      const body = renderPrBody({ summaryLine: 'x', diffStat: '', ...issue, footer: '' });
+      const lastSection = 'closes' in issue ? 'Closes #42' : 'partOf' in issue ? 'Part of #42' : '</details>';
+      expect(body.endsWith(lastSection)).toBe(true);
+      expect(body).not.toContain(PR_BODY_FOOTER);
+    },
+  );
 
   it('renders a one-line Proof, with not run and 0 rounds by default', () => {
     const body = renderPrBody({ summaryLine: 'x', diffStat: '' });
@@ -152,14 +158,24 @@ describe('renderPrBody', () => {
   });
 
   it('renders Part of for a non-final slice and never a closing keyword', () => {
-    const body = renderPrBody({ summaryLine: 'x', diffStat: '', partOf: 7 });
+    const body = renderPrBody({ summaryLine: 'x', diffStat: '', partOf: workKeyFromIssue(7) });
     expect(body).toContain('Part of #7');
     expect(body.endsWith(PR_BODY_FOOTER)).toBe(true);
     expect(body).not.toMatch(/Closes/);
   });
 
+  it('renders a WorkKey closes as "Closes #N"', () => {
+    const body = renderPrBody({ summaryLine: 'x', diffStat: '', closes: workKeyFromIssue(42) });
+    expect(body).toContain('Closes #42');
+  });
+
   it('prefers Closes when both closes and partOf are set', () => {
-    const body = renderPrBody({ summaryLine: 'x', diffStat: '', closes: 7, partOf: 7 });
+    const body = renderPrBody({
+      summaryLine: 'x',
+      diffStat: '',
+      closes: workKeyFromIssue(7),
+      partOf: workKeyFromIssue(7),
+    });
     expect(body).toContain('Closes #7');
     expect(body.endsWith(PR_BODY_FOOTER)).toBe(true);
     expect(body).not.toMatch(/Part of/);
@@ -176,7 +192,7 @@ describe('renderPrBody', () => {
 });
 
 describe('renderPrBody walkthrough (#3623)', () => {
-  const base = { summaryLine: 'Implements #1.', diffStat: ' a.ts | 1 +', closes: 1 };
+  const base = { summaryLine: 'Implements #1.', diffStat: ' a.ts | 1 +', closes: workKeyFromIssue(1) };
 
   it('embeds a Walkthrough section when a walkthrough is given', () => {
     const body = renderPrBody({ ...base, walkthrough: '### Intent\n- x' });

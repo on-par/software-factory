@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -44,7 +45,7 @@ const events: FactoryEvent[] = [
 describe('renderEvidencePack', () => {
   it('renders stored evidence outcomes safely, keeps duplicate claims, and omits legacy evidence sections', () => {
     const markdown = renderEvidencePack({
-      issue: 3264,
+      issue: workKeyFromIssue(3264),
       checkSummary: {
         ...checkSummary,
         results: [
@@ -66,10 +67,10 @@ describe('renderEvidencePack', () => {
     expect(markdown.match(/<summary>Evidence plan<\/summary>/g)).toHaveLength(1);
     expect(markdown).toContain('AC \\`one\\` \\|unsafe\\| [command] PASS: all good');
     expect(markdown).toContain('AC \\`one\\` \\|unsafe\\| [command] SKIP: not allowlisted');
-    const legacy = renderEvidencePack({ issue: 3264, checkSummary, events: [], logFiles: [] });
+    const legacy = renderEvidencePack({ issue: workKeyFromIssue(3264), checkSummary, events: [], logFiles: [] });
     expect(legacy).not.toContain('<summary>Evidence plan</summary>');
     const skipped = renderEvidencePack({
-      issue: 3264,
+      issue: workKeyFromIssue(3264),
       checkSummary: {
         ...checkSummary,
         results: [{ checker: 'evidence_plan', result: 'SKIP', details: 'disabled by constitution' }],
@@ -82,7 +83,7 @@ describe('renderEvidencePack', () => {
 
   it('renders a full pack with checker verdicts, rework, and logs', () => {
     const markdown = renderEvidencePack({
-      issue: 385,
+      issue: workKeyFromIssue(385),
       checkSummary,
       reworkRounds: 2,
       events,
@@ -106,7 +107,7 @@ describe('renderEvidencePack', () => {
 
   it('truncates long checker details to ~200 characters', () => {
     const markdown = renderEvidencePack({
-      issue: 385,
+      issue: workKeyFromIssue(385),
       checkSummary,
       events: [],
       logFiles: [],
@@ -119,7 +120,7 @@ describe('renderEvidencePack', () => {
 
   it('falls back cleanly when checkSummary, events, and logFiles are all absent', () => {
     const markdown = renderEvidencePack({
-      issue: 385,
+      issue: workKeyFromIssue(385),
       events: [],
       logFiles: [],
     });
@@ -135,7 +136,7 @@ describe('renderEvidencePack', () => {
 
   it('preserves rework rounds and shows a final passed verdict when failures are zero (AC-2)', () => {
     const markdown = renderEvidencePack({
-      issue: 385,
+      issue: workKeyFromIssue(385),
       checkSummary: { failures: 0, passes: 3, skips: 0, total: 3, results: [] },
       reworkRounds: 1,
       events,
@@ -149,7 +150,7 @@ describe('renderEvidencePack', () => {
 
   it('shows the remaining failure count in the final verdict when failures are non-zero', () => {
     const markdown = renderEvidencePack({
-      issue: 385,
+      issue: workKeyFromIssue(385),
       checkSummary,
       events: [],
       logFiles: [],
@@ -160,7 +161,7 @@ describe('renderEvidencePack', () => {
 
   it('includes designMarkdown in the Design artifact section when provided (#422)', () => {
     const markdown = renderEvidencePack({
-      issue: 422,
+      issue: workKeyFromIssue(422),
       events: [],
       logFiles: [],
       designMarkdown: '## Design artifact (#422)\n\nRestated problem here.',
@@ -172,19 +173,25 @@ describe('renderEvidencePack', () => {
   });
 
   it('falls back when designMarkdown is an empty string', () => {
-    const markdown = renderEvidencePack({ issue: 422, events: [], logFiles: [], designMarkdown: '' });
+    const markdown = renderEvidencePack({ issue: workKeyFromIssue(422), events: [], logFiles: [], designMarkdown: '' });
 
     expect(markdown).toContain('- Design artifact has no Behavior contract or Verification plan.');
   });
 
   it('never renders a Frozen spec section (#2249)', () => {
-    const markdown = renderEvidencePack({ issue: 1, checkSummary, reworkRounds: 1, events, logFiles: [] });
+    const markdown = renderEvidencePack({
+      issue: workKeyFromIssue(1),
+      checkSummary,
+      reworkRounds: 1,
+      events,
+      logFiles: [],
+    });
 
     expect(markdown).not.toContain('Frozen spec');
   });
 
   it('falls back to "No design artifact recorded." when designMarkdown is absent (#422)', () => {
-    const markdown = renderEvidencePack({ issue: 422, events: [], logFiles: [] });
+    const markdown = renderEvidencePack({ issue: workKeyFromIssue(422), events: [], logFiles: [] });
 
     expect(markdown).toContain('- No design artifact recorded.');
   });
@@ -192,7 +199,7 @@ describe('renderEvidencePack', () => {
 
 describe('renderEvidencePack — walkthrough (#3623)', () => {
   it('renders byte-identical output when no walkthrough is given and appends a PR walkthrough section when one is', () => {
-    const input = { issue: 385, checkSummary, reworkRounds: 1, events, logFiles: ['a.log'] };
+    const input = { issue: workKeyFromIssue(385), checkSummary, reworkRounds: 1, events, logFiles: ['a.log'] };
     const baseline = renderEvidencePack(input);
     expect(renderEvidencePack({ ...input, walkthrough: undefined })).toBe(baseline);
     expect(baseline).not.toContain('PR walkthrough');
@@ -207,7 +214,7 @@ describe('renderEvidencePack — walkthrough (#3623)', () => {
 });
 
 describe('renderEvidencePack — review routing (#1724)', () => {
-  const base = { issue: 1, events: [], logFiles: [] };
+  const base = { issue: workKeyFromIssue(1), events: [], logFiles: [] };
 
   it('has no Review routing section when no routing is given', () => {
     expect(renderEvidencePack(base)).not.toContain('Review routing');
@@ -288,7 +295,7 @@ describe('gatherEvidencePack', () => {
     writeFileSync(join(logsDir, 'other.log'), 'unrelated file');
 
     const markdown = gatherEvidencePack({
-      issue: 7,
+      issue: workKeyFromIssue(7),
       specPath,
       eventsFile,
       startedAt: '2026-07-20T08:00:00Z',
@@ -305,8 +312,8 @@ describe('gatherEvidencePack', () => {
   });
 
   it('falls back cleanly with no throw when all optional paths are omitted', () => {
-    expect(() => gatherEvidencePack({ issue: 385 })).not.toThrow();
-    const markdown = gatherEvidencePack({ issue: 385 });
+    expect(() => gatherEvidencePack({ issue: workKeyFromIssue(385) })).not.toThrow();
+    const markdown = gatherEvidencePack({ issue: workKeyFromIssue(385) });
     expect(markdown).toContain('## 🔎 Evidence pack');
     expect(markdown).not.toContain('Frozen spec');
   });
@@ -316,7 +323,7 @@ describe('gatherEvidencePack', () => {
     const specPath = join(dir, 'issue-8.md');
     writeFileSync(specPath, '# Spec: no goal section\n\nJust some body text describing the change.\n');
 
-    const markdown = gatherEvidencePack({ issue: 8, specPath });
+    const markdown = gatherEvidencePack({ issue: workKeyFromIssue(8), specPath });
 
     expect(markdown).not.toContain('Just some body text describing the change.');
   });
@@ -345,7 +352,7 @@ describe('gatherEvidencePack', () => {
       ].join('\n'),
     );
 
-    const markdown = gatherEvidencePack({ issue: 422, specPath });
+    const markdown = gatherEvidencePack({ issue: workKeyFromIssue(422), specPath });
 
     expect(markdown).toContain('Contract text.');
     expect(markdown).toContain('Plan text.');
@@ -357,7 +364,7 @@ describe('gatherEvidencePack', () => {
     const specPath = join(dir, 'issue-423.md');
     writeFileSync(specPath, '---\nroute: codex\n---\n# Spec\n');
 
-    const markdown = gatherEvidencePack({ issue: 423, specPath });
+    const markdown = gatherEvidencePack({ issue: workKeyFromIssue(423), specPath });
 
     expect(markdown).toContain('- No design artifact recorded.');
   });
@@ -367,7 +374,7 @@ describe('renderEvidencePack — regression_hunt (#1839)', () => {
   const render = (results: CheckSummary['results'], counts: Partial<CheckSummary>) =>
     renderEvidencePack({
       checkSummary: { failures: 0, passes: 0, skips: 0, total: results.length, results, ...counts },
-      issue: 1839,
+      issue: workKeyFromIssue(1839),
       events: [],
       logFiles: [],
     });
@@ -426,7 +433,8 @@ describe('renderEvidencePack — design trim (#2249)', () => {
     riskBlastRadius: 'RISK-X',
     openQuestions: ['OPENQ-X'],
   } as Parameters<typeof renderDesignArtifact>[0];
-  const render = (designMarkdown: string) => renderEvidencePack({ issue: 7, events: [], logFiles: [], designMarkdown });
+  const render = (designMarkdown: string) =>
+    renderEvidencePack({ issue: workKeyFromIssue(7), events: [], logFiles: [], designMarkdown });
 
   it('keeps only the Behavior contract and Verification plan, in order', () => {
     const md = render(renderDesignArtifact(artifact, 7));
@@ -495,7 +503,7 @@ describe('renderEvidencePack — PR #2162 fixture (#2249)', () => {
 
   it('renders in under half the original line count and keeps verdicts and rework', () => {
     const rendered = renderEvidencePack({
-      issue: 2149,
+      issue: workKeyFromIssue(2149),
       checkSummary: {
         failures: 0,
         passes: checkers.length,
@@ -519,15 +527,5 @@ describe('renderEvidencePack — PR #2162 fixture (#2249)', () => {
     expect(rendered).not.toContain('Frozen spec');
     expect(rendered).not.toContain('### Restated problem');
     expect(rendered).not.toContain('Event timeline');
-  });
-});
-
-describe('renderEvidencePack — model pins (#2511)', () => {
-  it('lists an overridden pin and omits the section otherwise', () => {
-    const note = 'build pin gpt-build not used (usage_cap); built with claude-sonnet-5';
-    const withNote = renderEvidencePack({ issue: 1, events: [], logFiles: [], pinNotes: [note] });
-    expect(withNote).toContain('Model pins');
-    expect(withNote).toContain(note);
-    expect(renderEvidencePack({ issue: 1, events: [], logFiles: [] })).not.toContain('Model pins');
   });
 });

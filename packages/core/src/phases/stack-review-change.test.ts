@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { StorySchema } from '@on-par/contracts';
 import type { Octokit } from '@octokit/rest';
 import { describe, expect, it, vi } from 'vitest';
@@ -68,7 +69,7 @@ function fake(
 }
 
 const park = (f: ReturnType<typeof fake>, p: SlicePlan = plan, log = vi.fn()) =>
-  parkOnLowerSliceChange({ octokit: f.octokit, repo: 'acme/widgets', issue: 5, plan: p, log });
+  parkOnLowerSliceChange({ octokit: f.octokit, repo: 'acme/widgets', issue: workKeyFromIssue(5), plan: p, log });
 
 function written(f: ReturnType<typeof fake>) {
   const body: string = f.createComment.mock.calls[0]![0].body;

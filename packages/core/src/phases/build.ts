@@ -1,5 +1,6 @@
 // src/phases/build.ts — BUILD phase: worker model implements the frozen spec
 
+import { type WorkKey } from '../work/work-key.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -98,7 +99,7 @@ export async function buildPhase(opts: Parameters<typeof buildPhaseImpl>[0]): Pr
 }
 
 async function buildPhaseImpl(opts: {
-  issue: number;
+  issue: WorkKey;
   repo: string;
   worktree: string;
   specPath: string;

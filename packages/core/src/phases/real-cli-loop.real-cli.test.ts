@@ -68,7 +68,7 @@ describe.skipIf(!selected)(`real ${agent} CLI full loop (#2649)`, () => {
     try {
       await setupWorktree(repoRoot, branch, worktree);
       const plan = await planPhase({
-        issue,
+        issue: workKeyFromIssue(issue),
         repo,
         worktree,
         specPath,
@@ -80,7 +80,7 @@ describe.skipIf(!selected)(`real ${agent} CLI full loop (#2649)`, () => {
       expect(plan.ok).toBe(true);
 
       const build = await buildPhase({
-        issue,
+        issue: workKeyFromIssue(issue),
         repo,
         worktree,
         specPath,
@@ -93,7 +93,7 @@ describe.skipIf(!selected)(`real ${agent} CLI full loop (#2649)`, () => {
       expect(build.ok).toBe(true);
 
       const check = await checkPhase({
-        issue,
+        issue: workKeyFromIssue(issue),
         worktree,
         specPath,
         router,
@@ -103,7 +103,15 @@ describe.skipIf(!selected)(`real ${agent} CLI full loop (#2649)`, () => {
       });
       expect(check.passed).toBe(true);
 
-      const ship = await shipPhase({ issue, repo, worktree, branch, octokit: octokit as any, watchCI: false, log });
+      const ship = await shipPhase({
+        issue: workKeyFromIssue(issue),
+        repo,
+        worktree,
+        branch,
+        octokit: octokit as any,
+        watchCI: false,
+        log,
+      });
       expect(ship.ok).toBe(true);
 
       expect(existsSync(join(worktree, 'hello.txt'))).toBe(true);

@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { buildPlanPrompt } from '../phases/plan.js';
 import type { ModelRouter } from '../router/index.js';
 import { runJudgeSamples } from './judge.js';
@@ -26,7 +27,7 @@ export async function runEval(opts: RunEvalOpts): Promise<EvalSummary> {
     opts.onLog?.(`running ${c.id}`);
     const constitutionCtx = c.constitution ?? '';
     const prompt = buildPlanPrompt({
-      issue: 0,
+      issue: workKeyFromIssue(0),
       issueTitle: c.title,
       issueBody: c.body,
       specPath: '<eval-spec>',

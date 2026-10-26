@@ -164,7 +164,7 @@ describe('OpenCode-only pipeline with a fake opencode CLI (#2635)', () => {
       // opencode runs with cwd = worktree, so it must exist before PLAN (the real loop leases it first).
       await setupWorktree(repoRoot, branch, worktree);
       const plan = await planPhase({
-        issue,
+        issue: workKeyFromIssue(issue),
         repo,
         worktree,
         specPath,
@@ -181,7 +181,7 @@ describe('OpenCode-only pipeline with a fake opencode CLI (#2635)', () => {
       ]);
 
       const build = await buildPhase({
-        issue,
+        issue: workKeyFromIssue(issue),
         repo,
         worktree,
         specPath,
@@ -195,7 +195,7 @@ describe('OpenCode-only pipeline with a fake opencode CLI (#2635)', () => {
       expect(build.model).toBe('fake-opencode');
 
       const check = await checkPhase({
-        issue,
+        issue: workKeyFromIssue(issue),
         worktree,
         specPath,
         router,
@@ -206,7 +206,15 @@ describe('OpenCode-only pipeline with a fake opencode CLI (#2635)', () => {
       expect(check.passed).toBe(true);
       expect(check.reworkRounds).toBe(1);
 
-      const ship = await shipPhase({ issue, repo, worktree, branch, octokit: octokit as any, watchCI: false, log });
+      const ship = await shipPhase({
+        issue: workKeyFromIssue(issue),
+        repo,
+        worktree,
+        branch,
+        octokit: octokit as any,
+        watchCI: false,
+        log,
+      });
       expect(ship.ok).toBe(true);
       await expect(exec(`git -C '${worktree}' log --oneline`)).resolves.toBeTruthy();
 

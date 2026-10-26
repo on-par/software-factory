@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createTempDirs } from '@on-par/factory-core/testing';
@@ -64,7 +65,7 @@ describe('checkPhase side effects', () => {
     let evidenceCalls = 0;
     const baseline = vi.fn();
     const check = await checkPhase({
-      issue: 3259,
+      issue: workKeyFromIssue(3259),
       worktree,
       specPath,
       router,

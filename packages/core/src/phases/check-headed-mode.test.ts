@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -31,7 +32,7 @@ async function check(
 ): Promise<{ warnings?: string[]; passed: boolean; logs: string[] }> {
   const logs: string[] = [];
   const result = await checkPhase({
-    issue: 3266,
+    issue: workKeyFromIssue(3266),
     worktree,
     specPath: join(worktree, 'missing-spec.md'),
     router: router as never,
@@ -88,7 +89,7 @@ describe('checkPhase headed-mode warnings', () => {
       },
     };
     const result = await checkPhase({
-      issue: 3266,
+      issue: workKeyFromIssue(3266),
       worktree,
       specPath: join(worktree, 'missing-spec.md'),
       router: router as never,

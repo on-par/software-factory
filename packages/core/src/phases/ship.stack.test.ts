@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it } from 'vitest';
 
 import { shipPhase } from './ship.js';
@@ -48,7 +49,7 @@ describe('shipPhase stack mode (#3348)', () => {
   const ship = (extra: Record<string, unknown>) => {
     const { octokit, calls } = createOctokit();
     const promise = shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'factory/23-slice-2',

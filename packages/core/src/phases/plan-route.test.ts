@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -142,7 +143,7 @@ describe('planPhase command route (#2872)', () => {
       },
     });
     const result = await planPhase({
-      issue: 3247,
+      issue: workKeyFromIssue(3247),
       repo: 'on-par/software-factory',
       worktree,
       specPath: join(worktree, 'spec.md'),
@@ -188,7 +189,7 @@ npm test`;
     const router = new ModelRouter(models, routes, false, stub);
 
     const result = await planPhase({
-      issue: 2872,
+      issue: workKeyFromIssue(2872),
       repo: 'on-par/software-factory',
       worktree,
       specPath,
@@ -253,7 +254,7 @@ npm test`;
     const router = new ModelRouter(declaredModels, declaredRoutes, false, stub);
 
     const result = await planPhase({
-      issue: 2874,
+      issue: workKeyFromIssue(2874),
       repo: 'on-par/software-factory',
       worktree,
       specPath,

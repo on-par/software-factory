@@ -1,9 +1,10 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it } from 'vitest';
 
 import { renderEvidencePack } from './evidence-pack.js';
 
 describe('renderEvidencePack — shadow model verdict (#1725)', () => {
-  const base = { issue: 1, events: [], logFiles: [] };
+  const base = { issue: workKeyFromIssue(1), events: [], logFiles: [] };
   const shadow = {
     modelClass: 'C' as const,
     floorClass: 'A' as const,

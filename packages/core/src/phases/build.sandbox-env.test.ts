@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -43,7 +44,7 @@ describe('buildPhase sandbox environment error (#3332)', () => {
     const collectDiff = vi.fn();
 
     const result = await buildPhase({
-      issue: 86,
+      issue: workKeyFromIssue(86),
       repo: 'on-par/software-factory',
       worktree,
       specPath: join(worktree, 'issue-86.md'),

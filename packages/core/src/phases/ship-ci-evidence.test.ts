@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it, vi } from 'vitest';
 
 import { shipPhase } from './ship.js';
@@ -59,7 +60,7 @@ describe('shipPhase — CI failure evidence (#2814)', () => {
     vi.useFakeTimers();
     try {
       const promise = shipPhase({
-        issue: 123,
+        issue: workKeyFromIssue(123),
         repo: 'on-par/software-factory',
         worktree: '/repo-factory-123',
         branch: 'ship-it/123-ci-poll',

@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '@on-par/factory-core';
 import { exec as execCb } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -211,7 +212,7 @@ describe('offline ship', () => {
       issue: 7,
     } as never);
     const result = await shipPhase({
-      issue: 7,
+      issue: workKeyFromIssue(7),
       repo: 'o/r',
       worktree,
       branch,

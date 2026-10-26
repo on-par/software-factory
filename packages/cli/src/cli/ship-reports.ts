@@ -11,7 +11,7 @@ import type {
   getFactoryPaths,
   writeLocalRunReport,
 } from '@on-par/factory-core';
-import { writeBenchmarkArtifacts } from '@on-par/factory-core';
+import { workKeyFromIssue, writeBenchmarkArtifacts } from '@on-par/factory-core';
 import { shipRuntime } from './ship-runtime.js';
 
 export async function maybeWriteLocalRunReport(opts: {
@@ -28,7 +28,7 @@ export async function maybeWriteLocalRunReport(opts: {
 }): Promise<string | undefined> {
   if (process.env.FACTORY_LOCAL_ONLY !== '1') return undefined;
   const report = await (opts.writeLocalRunReport ?? shipRuntime().defaultWriteLocalRunReport())({
-    issue: opts.issueNum,
+    issue: workKeyFromIssue(opts.issueNum),
     eventsFile: opts.paths.events,
     reportsDir: opts.paths.reports,
     startedAt: opts.startedAt,
@@ -63,7 +63,7 @@ export async function maybeWriteBenchmarkArtifacts(opts: {
   if (!opts.ctx?.localOnly || !opts.ctx.artifactsDir) return;
   try {
     const { manifestPath } = await writeBenchmarkArtifacts({
-      issue: opts.issueNum,
+      issue: workKeyFromIssue(opts.issueNum),
       artifactsDir: opts.ctx.artifactsDir,
       eventsFile: opts.paths.events,
       costsFile: opts.paths.costs,

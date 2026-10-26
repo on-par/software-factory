@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -114,7 +115,7 @@ describe('checkPhase auto rework on the command route (#2873)', () => {
       const logs: Array<[string, string]> = [];
 
       await checkPhase({
-        issue: 2873,
+        issue: workKeyFromIssue(2873),
         worktree,
         specPath,
         router,
@@ -142,7 +143,7 @@ describe('checkPhase auto rework on the command route (#2873)', () => {
     const logs: Array<[string, string]> = [];
 
     await checkPhase({
-      issue: 2873,
+      issue: workKeyFromIssue(2873),
       worktree,
       specPath,
       router,
@@ -203,7 +204,7 @@ describe('reworkWorker on a declared agentic harness (#3066)', () => {
     const logs: Array<[string, string]> = [];
 
     const result = await reworkWorker({
-      issue: 3066,
+      issue: workKeyFromIssue(3066),
       worktree,
       specPath: join(worktree, 'issue-3066.md'),
       summary: failingSummary,
@@ -236,7 +237,7 @@ describe('reworkWorker on a declared agentic harness (#3066)', () => {
     const logs: Array<[string, string]> = [];
 
     await reworkWorker({
-      issue: 3066,
+      issue: workKeyFromIssue(3066),
       worktree,
       specPath,
       summary: failingSummary,

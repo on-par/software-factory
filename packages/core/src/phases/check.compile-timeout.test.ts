@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -46,7 +47,7 @@ describe('checkPhase compile timeout (#3185)', () => {
     const router = new ModelRouter(models, routes, false, new StubModelExecutor({ defaultOutput: 'ok' }));
     let seen: number | undefined;
     await checkPhase({
-      issue: 3185,
+      issue: workKeyFromIssue(3185),
       worktree,
       specPath: join(worktree, 'issue-3185.md'),
       router,

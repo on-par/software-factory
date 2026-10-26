@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { execFileSync } from 'node:child_process';
 import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -74,7 +75,7 @@ async function runUnderCheck(
   const logs: string[] = [];
   const stub = new StubModelExecutor({ defaultOutput: 'ok' });
   await checkPhase({
-    issue: 3272,
+    issue: workKeyFromIssue(3272),
     worktree,
     specPath,
     router: new ModelRouter(models, routes, false, stub),

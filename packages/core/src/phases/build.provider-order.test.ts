@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -45,7 +46,7 @@ async function buildOnClaude(crossProviderLadder?: boolean) {
     scripts: { build_claude: [{ fail: 'usage_cap' }], build_codex: [{ output: 'codex output' }] },
   });
   const run = buildPhase({
-    issue: 3338,
+    issue: workKeyFromIssue(3338),
     repo: 'on-par/software-factory',
     worktree,
     specPath: join(worktree, 'issue-3338.md'),

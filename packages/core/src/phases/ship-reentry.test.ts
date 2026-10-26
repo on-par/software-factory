@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it, vi } from 'vitest';
 
 import { shipPhase } from './ship.js';
@@ -61,7 +62,7 @@ describe('shipPhase — CI rework re-entry (#2816)', () => {
     };
     const go = (reentry: { prNumber: number; previousHeadSha?: string }) =>
       shipPhase({
-        issue: 123,
+        issue: workKeyFromIssue(123),
         repo: 'on-par/software-factory',
         worktree: '/repo-factory-123',
         branch: BRANCH,
