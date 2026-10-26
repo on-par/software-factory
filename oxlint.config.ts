@@ -72,6 +72,9 @@ export default defineConfig({
     // typescript/prefer-promise-reject-errors stays off: tests reject with plain strings on purpose.
     'preserve-caught-error': 'error',
     'typescript/no-misused-promises': 'error',
+    // #2846: typescript/no-dynamic-delete stays off: its hits delete env vars and keys of persisted
+    // Record stores (breaker, lane-file-guard, baseline-cache), and a Map rewrite would change their JSON.
+    // no-useless-assignment stays off: it is a nursery rule and its hits are false positives.
     // Redundant or dead control flow.
     'no-else-return': 'error',
     'no-useless-return': 'error',
