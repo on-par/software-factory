@@ -36,6 +36,7 @@ import {
 import { npmCheck, resolveVerifyCommands, verifyCommandChecks, withPathResults } from './doctor-verify.js';
 import { configLintChecks, declaredHarnessChecks, modelsRegistryChecks } from './doctor-config.js';
 import { failoverProviderChecks } from './doctor-failover-providers.js';
+import { codexSandboxDetail } from './doctor-codex-sandbox.js';
 import { agentMemoryChecks } from './doctor-agent-memory.js';
 import { factoryIgnoredChecks } from './doctor-factory-ignored.js';
 import {
@@ -120,6 +121,8 @@ export interface DoctorEnvProbes {
   opencodeLoggedIn?: () => boolean;
   /** Repo-configured command harnesses (#2691); absent or [] means none. */
   commandHarnesses?: () => ConfiguredCommandHarness[];
+  /** Tasks in the repo's sandbox.codexFullAccessTasks (#3082); absent or [] means none. */
+  codexFullAccessTasks?: () => string[];
 }
 
 /** Section for rows about repo-configured command harnesses (#2691). */
@@ -470,7 +473,7 @@ function installFix(h: ConfiguredCommandHarness): string {
 
 /** Coding agent prerequisites: at least one agent CLI is required; each CLI is then reported
  *  on its own optional line, with sign-in reported separately from installation (#1269, #2422, #2555, #2556).
- *  The codex sandbox note is folded into the ok `codex installed` row, so each agent has one row (#2997).
+ *  The codex sandbox note is folded into the ok `codex installed` row, so each agent has one row (#2997, #3082).
  *  A repo-configured command harness whose executable is on PATH also counts as a coding agent (#2691). */
 export function agentCliChecks(probes: DoctorEnvProbes): DoctorCheck[] {
   const { commandAvailable, tryExec } = probes;
@@ -495,10 +498,7 @@ export function agentCliChecks(probes: DoctorEnvProbes): DoctorCheck[] {
           detail: `no coding agent CLI on PATH (claude, codex, opencode or pi); ${configured.map(describe).join('; ')}`,
           fix: installFix(configured[0]!),
         };
-  const codexSandbox =
-    detectSandboxRuntime(probes.platform ?? process.platform, commandAvailable) === 'none'
-      ? 'no sandbox runtime; codex runs in its own workspace-write sandbox'
-      : 'sandboxed builds available';
+  const codexSandbox = codexSandboxDetail(probes, safeOr(probes.codexFullAccessTasks, []));
   const checks: DoctorCheck[] = [
     agents.length > 0 ? { name: 'coding agent', ok: true, detail: `found ${agents.join(', ')}` } : missingRow,
     ...harnessInstallChecks(commandAvailable, tryExec).map((c) =>
@@ -953,6 +953,11 @@ export async function cmdDoctor(
     localAuthFailure: (agent) => localAuthFailureSinceLogin(agent),
     opencodeLoggedIn: () => hasOpencodeLoginEvidence(),
     commandHarnesses: () => (harnessView?.merged ? repoCommandHarnesses(harnessView.merged, harnessView.registry) : []),
+    codexFullAccessTasks: () =>
+      repoRoot === null
+        ? []
+        : (rt.configLoaders.loadFactoryConfigForRepo(getFactoryPaths(repoRoot).config).sandbox.codexFullAccessTasks ??
+          []),
   });
   checks.push(...failoverProviderChecks(rt, repoRoot));
 

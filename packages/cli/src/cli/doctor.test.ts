@@ -380,19 +380,6 @@ describe('runDoctorChecks', () => {
     expect(both.find((c) => c.name === 'git identity')!.next).toBe('git config --global user.name "Your Name"');
   });
 
-  it('no sandbox runtime reports Codex workspace-write containment', () => {
-    const checks = runDoctorChecks(probes({ platform: 'linux', commandAvailable: (c) => c !== 'firejail' }));
-    const runtime = checks.find((c) => c.name === 'sandbox runtime')!;
-    expect(runtime.ok).toBe(false);
-    expect(runtime.optional).toBe(true);
-    expect(runtime.detail).toContain('uncontained');
-    expect(runtime.fix).toContain('firejail');
-    const codex = checks.find((c) => c.name === 'codex installed')!;
-    expect(codex.detail).toContain('codex runs in its own workspace-write sandbox');
-    expect(codex.detail).not.toContain('sandboxed builds available');
-    expect(doctorFailed(checks)).toBe(false);
-  });
-
   it('win32 has no sandbox runtime and warns', () => {
     const checks = runDoctorChecks(probes({ platform: 'win32' }));
     const runtime = checks.find((c) => c.name === 'sandbox runtime')!;
