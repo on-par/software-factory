@@ -65,13 +65,14 @@ function execDetached(
     env: NodeJS.ProcessEnv;
     onStdout?: (chunk: string) => void;
   },
+  spawnFn: typeof spawn,
 ): Promise<ChildResult> & { child: ReturnType<typeof spawn> } {
   const maxBuffer = opts.maxBuffer ?? DEFAULT_MAX_BUFFER;
   const env = opts.env;
   const ownershipFile = env.FACTORY_DAEMON_GROUPS_FILE;
   const child = ownershipFile
     ? spawnSupervisedCommand(cmd, { cwd: opts.cwd, env, ownershipFile })
-    : spawn(cmd, { shell: true, detached: true, cwd: opts.cwd, env });
+    : spawnFn(cmd, { shell: true, detached: true, cwd: opts.cwd, env });
 
   let stdoutLen = 0;
   let stderrLen = 0;
@@ -162,6 +163,57 @@ function execDetached(
   return Object.assign(promise, { child });
 }
 
+/** Injectable process seams for defaultExecFn; defaults are the real spawn and killProcessGroup. */
+export interface ExecDeps {
+  spawn?: typeof spawn;
+  killProcessGroup?: typeof killProcessGroup;
+}
+
+/** Builds an ExecFn over the given process seams (tests inject fakes; production uses the defaults). */
+export function createDefaultExecFn(deps: ExecDeps = {}): ExecFn {
+  const spawnFn = deps.spawn ?? spawn;
+  const killGroup = deps.killProcessGroup ?? killProcessGroup;
+  return async (cmd, opts) => {
+    const env = childProcessEnv(process.env, opts.env, { githubAuth: opts.githubAuth });
+    if (!opts.onPgid) {
+      try {
+        return await exec(cmd, {
+          cwd: opts.cwd,
+          timeout: opts.timeoutMs,
+          maxBuffer: opts.maxBuffer,
+          env,
+        });
+      } catch (err) {
+        throw redactExecError(err);
+      }
+    }
+
+    const child = execDetached(
+      cmd,
+      {
+        cwd: opts.cwd,
+        timeoutMs: opts.timeoutMs,
+        maxBuffer: opts.maxBuffer,
+        env,
+        onStdout: opts.onStdout,
+      },
+      spawnFn,
+    );
+
+    const pid = child.child.pid;
+    if (pid !== undefined) opts.onPgid(pid);
+
+    try {
+      return await child;
+    } catch (err: any) {
+      if ((err?.killed || err?.signal) && pid !== undefined) {
+        await killGroup(pid, { graceMs: opts.killGraceMs });
+      }
+      throw redactExecError(err);
+    }
+  };
+}
+
 /** Sole adapter from the factory's ms-explicit exec options onto node's
  *  child_process `timeout` option (also milliseconds). `opts.env` (e.g. a
  *  lane's leased PORT) is merged over the parent env, never replacing it.
@@ -174,38 +226,4 @@ function execDetached(
  *  this catches grandchildren node's built-in timeout can't reach. Without
  *  `onPgid`, behavior is byte-for-byte unchanged from before this option
  *  existed. */
-export const defaultExecFn: ExecFn = async (cmd, opts) => {
-  const env = childProcessEnv(process.env, opts.env, { githubAuth: opts.githubAuth });
-  if (!opts.onPgid) {
-    try {
-      return await exec(cmd, {
-        cwd: opts.cwd,
-        timeout: opts.timeoutMs,
-        maxBuffer: opts.maxBuffer,
-        env,
-      });
-    } catch (err) {
-      throw redactExecError(err);
-    }
-  }
-
-  const child = execDetached(cmd, {
-    cwd: opts.cwd,
-    timeoutMs: opts.timeoutMs,
-    maxBuffer: opts.maxBuffer,
-    env,
-    onStdout: opts.onStdout,
-  });
-
-  const pid = child.child.pid;
-  if (pid !== undefined) opts.onPgid(pid);
-
-  try {
-    return await child;
-  } catch (err: any) {
-    if ((err?.killed || err?.signal) && pid !== undefined) {
-      await killProcessGroup(pid, { graceMs: opts.killGraceMs });
-    }
-    throw redactExecError(err);
-  }
-};
+export const defaultExecFn: ExecFn = createDefaultExecFn();

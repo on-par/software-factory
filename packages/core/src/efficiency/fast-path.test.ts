@@ -29,6 +29,36 @@ describe('fast-path planning', () => {
     ).toBe(false);
   });
 
+  it('rejects an issue body longer than 12 000 characters', () => {
+    const pad = (length: number) => completeIssue + 'x'.repeat(length - completeIssue.length);
+    expect(isFastPathEligible({ issueBody: pad(12_000), readinessPassed: true })).toBe(true);
+    expect(isFastPathEligible({ issueBody: pad(12_001), readinessPassed: true })).toBe(false);
+  });
+
+  it('rejects an issue with no in-scope, scope, files or implementation section', () => {
+    const noScope = completeIssue.replace('## Scope', '## Notes');
+    expect(isFastPathEligible({ issueBody: noScope, readinessPassed: true })).toBe(false);
+    for (const heading of ['In scope', 'Scope', 'Files', 'Implementation']) {
+      const issueBody = noScope.replace('## Notes', `## ${heading}`);
+      expect(isFastPathEligible({ issueBody, readinessPassed: true })).toBe(true);
+    }
+  });
+
+  it('rejects an issue with no acceptance criteria section', () => {
+    const issueBody = completeIssue.replace('## Acceptance criteria', '## Requirements');
+    expect(isFastPathEligible({ issueBody, readinessPassed: true })).toBe(false);
+  });
+
+  it('rejects an issue that has an Open questions section', () => {
+    const issueBody = `${completeIssue}\n## Open questions\n- Which module?`;
+    expect(isFastPathEligible({ issueBody, readinessPassed: true })).toBe(false);
+  });
+
+  it('rejects an issue that has a Design decision section', () => {
+    const issueBody = `${completeIssue}\n## Design decision\nPick A or B.`;
+    expect(isFastPathEligible({ issueBody, readinessPassed: true })).toBe(false);
+  });
+
   it('creates a compact, validated Codex spec without a model call', () => {
     const spec = buildFastPathSpec({ issue: 12, title: 'Remove blank status line', issueBody: completeIssue });
 
