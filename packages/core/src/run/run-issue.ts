@@ -109,14 +109,12 @@ import {
 import type { RunPolicy } from './policy.js';
 import {
   configParkMessage,
-  configPreflightMessage,
   formatPreservedBuildMessage,
   issueBodyHash,
   preservedFixTarget,
   type CheckResumeStore,
   type PlanReuseStore,
 } from './resume-context.js';
-import { leaseEnvironmentOrWarn, releaseEnvironmentOrWarn } from './environment-lease.js';
 import type { Environment, Workspace } from './ports.js';
 import { safeRecordRunState, terminalRunStateUpdate, thrownRunStateUpdate } from './run-state-record.js';
 import { isDecomposeSignal } from './run-state-record.js';
@@ -397,7 +395,14 @@ async function runIssueOnce(
         `terminated ${outcomes.length} process group(s)${outcomes.some((o) => o.forced) ? ' (SIGKILL escalation used)' : ''}`,
       );
     }
-    if (environment) await releaseEnvironmentOrWarn(environment, ports.workspace.path, log);
+    if (environment) {
+      try {
+        await environment.release();
+        log('environment_release', `released port ${environment.port} for worktree ${ports.workspace.path}`);
+      } catch (err) {
+        log('environment_release_failed', `port release failed: ${errorMessage(err)}`);
+      }
+    }
   };
 
   // Every escalated/parked exit reports the same way a thrown park did before the lift:
@@ -528,7 +533,16 @@ async function runIssueOnce(
   const capGate = providerCapGate(ports.router, ports.breaker, { ...request, issue: workKey }, log, gateDeps.probe);
 
   try {
-    if (ports.acquireEnvironment) environment = await leaseEnvironmentOrWarn(ports.acquireEnvironment, log);
+    if (ports.acquireEnvironment) {
+      try {
+        environment = await ports.acquireEnvironment();
+      } catch (err) {
+        log(
+          'environment_lease_failed',
+          `port lease unavailable (${errorMessage(err)}) — running without injected PORT`,
+        );
+      }
+    }
     const appPort = environment?.port;
     const onPgid = (pgid: number): void => {
       tracker.track(pgid);
@@ -549,7 +563,14 @@ async function runIssueOnce(
     // Any failing verdict parks with the `config` cause (#2587); checker findings come first in the message.
     const lint = lintFactoryConfig({ constitution, configFile: request.repoConfigFile });
     if (lint.verdict !== 'ok') {
-      return await terminalParked('config', configPreflightMessage(lint.findings, workKey));
+      return await terminalParked(
+        'config',
+        [
+          'config preflight failed before PLAN:',
+          ...lint.findings.map((f) => f.message),
+          `then run factory unpark ${workKey}`,
+        ].join('\n'),
+      );
     }
     // Unknown nested config keys are stripped by the runtime schema; warn once per key, never block (#3568, ADR-0160).
     if (request.repoConfigFile) {
