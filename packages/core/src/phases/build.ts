@@ -8,6 +8,7 @@ import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import { captureDiffBase, collectDesignDiff } from '../checkers/design-smells.js';
 import { resolveLintCommands, VERIFY_PS1_ARGV } from '../checkers/index.js';
 import { fileExists } from '../checkers/probe.js';
+import { harnessAutoLoads } from '../harness/catalog.js';
 import { buildConstitutionContext } from '../constitutions/index.js';
 import { readDesignArtifact, renderDesignGrounding } from '../design/index.js';
 import { laneEnv } from '../environment/index.js';
@@ -57,6 +58,18 @@ export interface BuildResult {
   /** Why the build ran on a model other than the one first tried (cross-harness or in-tier
    *  failover), so a summary can say a pin was not used (#2511). */
   failoverReason?: FailoverReason;
+}
+
+/** Instruction files that every model `route`'s BUILD task can run on auto-loads (#1600). Any model on a
+ *  harness without the file, no models, or a failed lookup → [] (keep the full text). */
+function autoLoadedBy(router: ModelRouter, route: BuildRoutePin, pin?: string): readonly string[] {
+  try {
+    const models = [...(pin ? [pin] : []), ...router.resolveAll(`build_${route}`)];
+    const lists = models.map((m) => harnessAutoLoads(router.registryRef.getHarnessId(m)));
+    return lists.length === 0 ? [] : lists[0].filter((f) => lists.every((l) => l.includes(f)));
+  } catch {
+    return [];
+  }
 }
 
 function netLabel(sandbox: SandboxPolicy): string {
@@ -197,8 +210,9 @@ async function buildPhaseImpl(opts: {
   } = opts;
   let route = opts.route;
 
-  const constitutionCtx =
-    buildConstitutionContext(constitution, 'standards') + (await renderLintRulesInForce(worktree));
+  const lintRules = await renderLintRulesInForce(worktree);
+  const constitutionCtxFor = (r: BuildRoutePin, pin?: string): string =>
+    buildConstitutionContext(constitution, 'standards', { omitSources: autoLoadedBy(router, r, pin) }) + lintRules;
   const spec = await readFile(specPath, 'utf-8').catch(() => '');
   const designArtifact = await readDesignArtifact(specPath);
   const designGrounding = designArtifact ? renderDesignGrounding(designArtifact) : '';
@@ -209,10 +223,9 @@ async function buildPhaseImpl(opts: {
     !hasVerifySh && (await fileExists(join(worktree, 'scripts/verify.ps1'))) ? VERIFY_PS1_ARGV.join(' ') : undefined;
   const lintCommands = hasVerifySh ? [] : await resolveLintCommands({ worktree }).catch(() => []);
   const affectedTestsCommand = loadAffectedConfig(worktree)?.command;
-  const promptOpts = {
+  const basePromptOpts = {
     issue,
     specPath,
-    constitutionCtx,
     spec,
     appPort,
     appBaseUrl,
@@ -222,6 +235,10 @@ async function buildPhaseImpl(opts: {
     affectedTestsCommand,
     previousAttempt,
   };
+  const promptOptsFor = (r: BuildRoutePin, pin?: string) => ({
+    ...basePromptOpts,
+    constitutionCtx: constitutionCtxFor(r, pin),
+  });
   if (designArtifact) {
     log(
       'design_artifact_received',
@@ -240,7 +257,7 @@ async function buildPhaseImpl(opts: {
           issue,
           branch,
           specPath,
-          constitutionCtx,
+          constitutionCtx: constitutionCtxFor('claude'),
           skipCI,
           appPort,
           appBaseUrl,
@@ -250,20 +267,22 @@ async function buildPhaseImpl(opts: {
           affectedTestsCommand,
           previousAttempt,
         })
-      : buildCommitOnlyPrompt(promptOpts);
+      : buildCommitOnlyPrompt(promptOptsFor('claude'));
   let prompt: string;
   let taskType: 'build_codex' | 'build_claude' | 'build_opencode' | 'build_command';
 
   const modelOverride = modelOverrideOpt;
   if (route === 'codex') {
     taskType = 'build_codex';
-    prompt = localOnly ? buildLocalSmallPrompt({ issue, branch, spec }) : buildCommitOnlyPrompt(promptOpts);
+    prompt = localOnly
+      ? buildLocalSmallPrompt({ issue, branch, spec })
+      : buildCommitOnlyPrompt(promptOptsFor('codex', modelOverride));
   } else if (route === 'opencode') {
     taskType = 'build_opencode';
-    prompt = buildOpencodePrompt(promptOpts);
+    prompt = buildOpencodePrompt(promptOptsFor('opencode', modelOverride));
   } else if (route === 'command') {
     taskType = 'build_command';
-    prompt = buildCommitOnlyPrompt(promptOpts);
+    prompt = buildCommitOnlyPrompt(promptOptsFor('command', modelOverride));
   } else {
     taskType = 'build_claude';
     prompt = claudeRoutePrompt();
@@ -332,7 +351,7 @@ async function buildPhaseImpl(opts: {
       });
       route = 'codex';
       crossHarnessReason = reason;
-      result = await router.run('build_codex', buildCommitOnlyPrompt(promptOpts), {
+      result = await router.run('build_codex', buildCommitOnlyPrompt(promptOptsFor('codex', fallback)), {
         ...runOpts,
         retryCause: 'failover',
         modelOverride: fallback,
@@ -345,7 +364,7 @@ async function buildPhaseImpl(opts: {
         attempts: attempts ?? [],
         runOpts,
         build: { ...opts, codexDisabled: codexUnavailable(opts.routeCapabilities) },
-        prompts: { claude: claudeRoutePrompt, codex: () => buildCommitOnlyPrompt(promptOpts) },
+        prompts: { claude: claudeRoutePrompt, codex: () => buildCommitOnlyPrompt(promptOptsFor('codex')) },
       }));
       crossHarnessReason = reason;
     } else if (taskType !== 'build_codex' || !crossHarnessOk || reason === undefined) throw err;

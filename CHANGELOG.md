@@ -15,6 +15,7 @@ section to `## X.Y.Z - date`. See
 
 ### Changed
 
+- BUILD prompts on the codex and opencode routes no longer inline `AGENTS.md`, which those harnesses load from the worktree themselves. A one-line pointer replaces it. claude and command routes keep the full text (#1600).
 - `factory tui`'s Active tab says why it is idle (`no active work — GitHub queue empty` or `— all runs parked/finished`), and the run detail header shows issue, title, phase, elapsed time and last activity in one block (#1365).
 - With no OS sandbox runtime on PATH, `factory doctor`'s `codex installed` line reports the Codex sandbox preflight result, the mode Codex will use (`--sandbox workspace-write`, plus any `sandbox.codexFullAccessTasks`) and how to opt in to full access (#3082).
 - GitHub-queue enqueue now converges when several hosts act at once. After writing its `factory:order:<n>` label an enqueue keeps one order label per issue and moves the higher-numbered issue off a shared position, emitting an `order_collision_repaired` event (at most 3 attempts). Lane scans read every page instead of the first 100. Blocked-park auto-unpark runs only on the host named by `FACTORY_FLEET_LEADER` when it is set; unset keeps every host polling (#3147).

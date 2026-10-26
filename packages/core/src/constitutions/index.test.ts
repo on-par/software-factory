@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import {
   buildConstitutionContext,
   ConstitutionLoader,
@@ -508,5 +509,52 @@ describe('buildConstitutionContext', () => {
     expect(c!.product).toBe('Acme App');
     expect(() => buildConstitutionContext(c)).not.toThrow();
     expect(buildConstitutionContext(c)).toContain('Bundled standards body.');
+  });
+});
+
+describe('buildConstitutionContext omitSources (#1600)', () => {
+  const tmp = createTempDirs();
+  let repoDir: string;
+  beforeEach(async () => {
+    repoDir = await tmp.make('constitution-omit-');
+  });
+  afterEach(() => tmp.cleanup());
+  const write = async (name: string, mark: string) =>
+    writeFile(join(repoDir, name), `# ${name}\n\n## Rules\n\n- ${mark}\n`);
+
+  it('swaps only the AGENTS.md block for a pointer', async () => {
+    await write('CLAUDE.md', 'CLAUDE-MARK-1600');
+    await write('AGENTS.md', 'AGENTS-MARK-1600');
+    const c = new ConstitutionLoader().loadFromRepo(repoDir);
+    for (const view of ['full', 'standards'] as const) {
+      const out = buildConstitutionContext(c, view, { omitSources: ['AGENTS.md'] });
+      expect(out).not.toContain('AGENTS-MARK-1600');
+      expect(out).toContain('CLAUDE-MARK-1600');
+      expect(out).toContain('<standards source="AGENTS.md">');
+      expect(out).toContain('AGENTS.md is loaded automatically by your agent harness');
+    }
+  });
+
+  it('is unchanged without options or with an empty list', async () => {
+    await write('CLAUDE.md', 'CLAUDE-MARK-1600');
+    await write('AGENTS.md', 'AGENTS-MARK-1600');
+    const c = new ConstitutionLoader().loadFromRepo(repoDir);
+    const base = buildConstitutionContext(c, 'standards');
+    expect(buildConstitutionContext(c, 'standards', {})).toBe(base);
+    expect(buildConstitutionContext(c, 'standards', { omitSources: [] })).toBe(base);
+    expect(base).toContain('AGENTS-MARK-1600');
+  });
+
+  it('stays non-empty when AGENTS.md is the only file', async () => {
+    await write('AGENTS.md', 'AGENTS-MARK-1600');
+    const c = new ConstitutionLoader().loadFromRepo(repoDir);
+    const out = buildConstitutionContext(c, 'standards', { omitSources: ['AGENTS.md'] });
+    expect(out).toContain('It is binding.');
+    expect(out).not.toContain('AGENTS-MARK-1600');
+  });
+
+  it('leaves an unterminated block alone', () => {
+    const c = { source: 'repo', product: 'x', body: '<standards source="AGENTS.md">\n\nAGENTS-MARK-1600' } as never;
+    expect(buildConstitutionContext(c, 'full', { omitSources: ['AGENTS.md'] })).toContain('AGENTS-MARK-1600');
   });
 });
