@@ -97,15 +97,8 @@ import {
   type LaneClaimStalenessProbe,
   type LaneFileGuard,
 } from './lane-file-guard.js';
-import {
-  designSmellFindingFor,
-  parkReasonFor,
-  reworkRouteFor,
-  type BuildRoute,
-  type DesignSmellFinding,
-  type ParkReason,
-  type RunOutcome,
-} from './outcome.js';
+import { designSmellFindingFor, parkReasonFor, reworkRouteFor } from './outcome.js';
+import type { BuildRoute, DesignSmellFinding, ParkReason, RunOutcome } from './outcome.js';
 import type { RunPolicy } from './policy.js';
 import {
   configParkMessage,
@@ -471,16 +464,8 @@ async function runIssueOnce(
         octokit: ports.octokit,
         repo: request.repo,
         worktree: ports.workspace.path,
-        input: {
-          issue: workKey,
-          reason,
-          message: terminalMessage,
-          runId,
-          branch: request.branch,
-          lane: request.lane,
-          blockers: [],
-          ...(designSmell ? { designSmell } : {}),
-        },
+        // prettier-ignore
+        input: { issue: workKey, reason, message: terminalMessage, runId, branch: request.branch, lane: request.lane, blockers: [], ...(designSmell ? { designSmell } : {}) },
       });
       if (!posted.ok) log('environment_warning', `could not post the issue park comment: ${posted.error}`);
       if (shipStarted) {
@@ -1235,14 +1220,8 @@ async function runIssueOnce(
     const capped = await capGate.afterFailure(err, failurePhase, route);
     if (capped?.released) return capped.released;
     if (capped?.down) return await parkAllProvidersDown(capped.down);
-    return await terminalParked(
-      parkReasonFor(err),
-      errorMessage(err),
-      undefined,
-      undefined,
-      undefined,
-      designSmellFindingFor(err),
-    );
+    // prettier-ignore
+    return await terminalParked(parkReasonFor(err), errorMessage(err), undefined, undefined, undefined, designSmellFindingFor(err));
   } finally {
     await release();
   }
