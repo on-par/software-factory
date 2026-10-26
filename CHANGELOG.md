@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Changed
+
+- BUILD (commit-only, opencode, codex, local-small) inlines the frozen spec's body once, without YAML frontmatter or `adr:` drafts, and no longer points the worker at the spec file (#1595).
+
 ## 0.9.18 - 2026-10-25
 
 A dogfood GitHub Actions caller and a CLI pin to 0.9.18 for the reusable
