@@ -1,5 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
@@ -10,6 +9,7 @@ import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
 import type { ShipResult, shipPhase as realShipPhase } from '../phases/ship.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import { scoreSpec } from '../eval/score.js';
@@ -68,8 +68,9 @@ function routerWith(defs: Record<string, ModelDef>): ModelRouter {
 
 const CODEX: ModelDef = { provider: 'openai', codex: true };
 
-const dir = mkdtempSync(join(tmpdir(), 'run-issue-route-degraded-'));
-afterAll(() => rmSync(dir, { recursive: true, force: true }));
+const tempDirs = createTempDirs();
+const dir = tempDirs.makeSync('run-issue-route-degraded-');
+afterAll(() => tempDirs.cleanup());
 let counter = 0;
 const specPath = (n: number) => join(dir, `spec-${n}.md`);
 

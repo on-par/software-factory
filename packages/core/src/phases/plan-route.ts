@@ -30,7 +30,7 @@ export async function settlePlanRoute(opts: {
   const degraded = resolveRoute(planned, capabilities);
   if (degraded.reason) {
     log('warn', 'codex unavailable — falling back to claude');
-    planned = degraded.route as BuildRouteName;
+    planned = degraded.route;
     await updateSpecRoute(specPath, degraded.route, degraded.reason);
   }
 

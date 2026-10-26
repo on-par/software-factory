@@ -1,11 +1,11 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { BuildRoutePin } from '../config/repo.js';
 import type { EventKind } from '../events/kinds.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { writeSpec } from '../spec/index.js';
 import {
   codexUnavailable,
@@ -41,13 +41,10 @@ describe('resolveRoute', () => {
 });
 
 describe('recordRouteDegradation', () => {
-  const dirs: string[] = [];
-  afterEach(async () => {
-    await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
-  });
+  const tempDirs = createTempDirs();
+  afterEach(() => tempDirs.cleanup());
   const spec = async (route: BuildRoutePin) => {
-    const dir = await mkdtemp(join(tmpdir(), 'route-cap-'));
-    dirs.push(dir);
+    const dir = await tempDirs.make('route-cap-');
     const specPath = join(dir, 's.md');
     await writeSpec(specPath, { body: '# Spec\n', data: { route } });
     return specPath;

@@ -16,10 +16,10 @@ export function codexUnavailable(capabilities: RouteCapabilities | undefined): b
 }
 
 /** The one place the "codex unavailable → claude" rule lives. Pure: callers persist the change. */
-export function resolveRoute(
-  plannedRoute: BuildRoutePin,
+export function resolveRoute<R extends BuildRoutePin>(
+  plannedRoute: R,
   capabilities: RouteCapabilities,
-): { route: BuildRoutePin; reason?: RouteDegradeReason } {
+): { route: R | 'claude'; reason?: RouteDegradeReason } {
   if (plannedRoute === 'codex' && codexUnavailable(capabilities)) {
     return { route: 'claude', reason: capabilities.codexDisabled ? 'codex-disabled' : 'breaker-open' };
   }
