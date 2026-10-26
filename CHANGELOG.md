@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- `factory cost` takes `--since <ISO8601>` (scopes rows, perModel and total) and `--limit <n>` (caps rows only), in text and `--json` output (#3187).
 - At trust tier T1 the PR classifier gate holds a deterministic sample of class-A PRs (`sha256(repo#issue)` below `classifier.t1SampleRate`, default 0.25) by applying `no-auto-merge` and logging a `t1-sampled` merge-gated event (#1958).
 - The size gate gives a parent issue's acceptance criteria ids (`P1`, `P2`, ...), has each child criterion trace to them, rejects a decomposition that leaves a parent criterion uncovered (naming it), and writes `Covers parent criteria: ...` into each child body (#3105).
 - A design-smell park carries its finding (approach tried, why it stinks, recommendation) on the park event payload and in the issue park comment (#1513).

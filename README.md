@@ -163,7 +163,7 @@ factory status                      Show active runs, the GitHub queue, provider
 factory status --json               One JSON object: STOP flag, active claims, providers and alerts, disk, update state (--kpis ignored)
 factory logs [--follow] [--json] [--issue <n>] [--limit <n>] [--since <cursor>]
                                     Print pipeline events (--limit/--since read only part of the log)
-factory cost                        Show recorded model spend by model
+factory cost [--issue <n>] [--since <iso>] [--limit <n>] [--json]  Show recorded model spend by model; --since scopes rows and totals, --limit caps rows only
 factory usage                       Report 5-hour subscription usage
 ```
 
