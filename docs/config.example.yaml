@@ -55,7 +55,8 @@ version: 2
     # buildFallback: "<model id>"
     # Checker model. Replaces the checker tier.
     # checker: "<model id>"
-    # Triage model. Replaces the triage tier.
+    # Triage model. Replaces the triage tier; also applies to the readiness judge (triage_cheap
+    # tier).
     # triage: "<model id>"
     # PR classifier model (classify_pr route). Unset: the checker tier. Changing it demotes the
     # classifier (ADR-0121).
@@ -90,6 +91,7 @@ version: 2
   # worker: ["codex-ollama-qwen3.5:9b", "qwen2.5-coder:14b", "qwen3.5:9b", "qwen3:8b", "gpt-5.6-terra-medium", "gpt-5.6-sol", "gpt-5.1-codex", "claude-sonnet-5", "glm-5.2", "qwen-3.5-coder", "opencode-sonnet"]
   # checker: ["qwen3.5:9b", "gemma4:12b", "qwen2.5-coder:14b", "qwen3:8b", "claude-sonnet-5", "gpt-5.6-luna-high", "glm-5.2"]
   # triage: ["qwen2.5-coder:14b", "claude-sonnet-5", "glm-5.2", "gpt-5.6-luna-high"]
+  # triage_cheap: ["qwen2.5-coder:14b", "claude-haiku-5-5", "claude-sonnet-5", "glm-5.2", "gpt-5.6-luna-high"]
 # Provider switches. Unset leaves a provider on. `false` removes its models from every tier.
 # providers:
   # anthropic: true

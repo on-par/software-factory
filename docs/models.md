@@ -6,12 +6,15 @@ Which coding agent CLIs the factory supports, and how to install and sign in to 
 
 Each task type maps to a tier, and each tier is a hand-ordered priority list in `defaults.ts` — free local models first (the boss tier starts with `claude-opus-5`), then cloud models ranked by capability. The router takes the first available model in the list; when a model hits a usage limit, rate limit, or error, it automatically fails over to the next one. (`defaults.ts` is the source of truth; the snapshot below can drift.)
 
-| Tier    | Priority order (experimental models excluded)                                                                                              | Cloud cost $/M output       | Use                     |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- | ----------------------- |
-| boss    | claude-opus-5 → qwen2.5-coder:14b → gemma4:12b → claude-fable-5 → claude-opus-4-8 → claude-sonnet-5 → gpt-5.6-terra-high                   | $25 → $40 → $25 → $15 → $10 | Specs, design, disputes |
-| worker  | codex-ollama-qwen3.5:9b → qwen2.5-coder:14b → qwen3.5:9b → qwen3:8b → gpt-5.6-terra-medium → gpt-5.6-sol → gpt-5.1-codex → claude-sonnet-5 | $10 → $10 → $15             | Implementation          |
-| checker | qwen3.5:9b → gemma4:12b → qwen2.5-coder:14b → qwen3:8b → claude-sonnet-5 → gpt-5.6-luna-high                                               | $15 → $10                   | Verification            |
-| triage  | qwen2.5-coder:14b → claude-sonnet-5 → gpt-5.6-luna-high                                                                                    | $15 → $10                   | Issue triage            |
+| Tier         | Priority order (experimental models excluded)                                                                                              | Cloud cost $/M output       | Use                                      |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- | ---------------------------------------- |
+| boss         | claude-opus-5 → qwen2.5-coder:14b → gemma4:12b → claude-fable-5 → claude-opus-4-8 → claude-sonnet-5 → gpt-5.6-terra-high                   | $25 → $40 → $25 → $15 → $10 | Specs, design, disputes                  |
+| worker       | codex-ollama-qwen3.5:9b → qwen2.5-coder:14b → qwen3.5:9b → qwen3:8b → gpt-5.6-terra-medium → gpt-5.6-sol → gpt-5.1-codex → claude-sonnet-5 | $10 → $10 → $15             | Implementation                           |
+| checker      | qwen3.5:9b → gemma4:12b → qwen2.5-coder:14b → qwen3:8b → claude-sonnet-5 → gpt-5.6-luna-high                                               | $15 → $10                   | Verification                             |
+| triage       | qwen2.5-coder:14b → claude-sonnet-5 → gpt-5.6-luna-high                                                                                    | $15 → $10                   | Issue triage                             |
+| triage_cheap | qwen2.5-coder:14b → claude-haiku-5-5 → claude-sonnet-5 → gpt-5.6-luna-high                                                                 | $0.50 → $15 → $10           | Readiness judge (tool-less JSON verdict) |
+
+`readiness_judge` uses `triage_cheap`, the cheap Haiku-first tier. `models.pins.triage` or `tiers.triage` also set it unless the repo sets `tiers.triage_cheap` explicitly.
 
 Models whose agent CLI is not on PATH are skipped, so a machine with only the Codex CLI routes every phase (PLAN, BUILD, CHECK, review, triage) to Codex models, and a machine with only Claude Code routes to Claude models. PLAN only picks a build route that can run on the machine and logs a `model-override` line when it reroutes. To send a phase to a specific agent when both are installed, pin it in `.factory/config.yaml` (`models.pins.plan`, `build`, `checker`, `triage`), set `route`, or reorder `tiers`. `factory triage --model <id>` picks the triage model for one run.
 

@@ -178,6 +178,19 @@ describe('ModelRouter.skipMissingHarnessClis (#2406)', () => {
   });
 });
 
+describe('readiness_judge cheap routing (#783)', () => {
+  it('routes readiness_judge to claude-haiku-5-5 ahead of claude-sonnet-5 and leaves other triage routes unchanged (#783)', () => {
+    const router = new ModelRouter(loadModelsConfig(), loadRoutesConfig());
+    expect(router.getTier('readiness_judge')).toBe('triage_cheap');
+    const judge = router.resolveAll('readiness_judge');
+    expect(judge.indexOf('claude-haiku-5-5')).toBeGreaterThanOrEqual(0);
+    expect(judge.indexOf('claude-haiku-5-5')).toBe(judge.indexOf('claude-sonnet-5') - 1);
+    for (const task of ['decompose', 'readiness_enrich', 'triage']) {
+      expect(router.resolveAll(task)).not.toContain('claude-haiku-5-5');
+    }
+  });
+});
+
 describe('readiness_enrich failover to Codex (#2466)', () => {
   const realModels = loadModelsConfig();
   const realRoutes = loadRoutesConfig();

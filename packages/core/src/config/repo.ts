@@ -124,7 +124,12 @@ export const RepoFactoryConfigV2Schema = z
               ),
             buildFallback: z.string().optional().describe('Codex-capable model to use after a Claude BUILD failure.'),
             checker: z.string().optional().describe('Checker model. Replaces the checker tier.'),
-            triage: z.string().optional().describe('Triage model. Replaces the triage tier.'),
+            triage: z
+              .string()
+              .optional()
+              .describe(
+                'Triage model. Replaces the triage tier; also applies to the readiness judge (triage_cheap tier).',
+              ),
             classifier: z
               .string()
               .optional()
@@ -381,7 +386,7 @@ export function loadRepoConfig(repoRoot: string, stateRoot?: string): RepoFactor
 // ---------- Applying to ModelsConfig ----------
 
 /** Apply a repo config's model registry, tier overrides, harnesses, provider flags, and checker/triage pins to a
- *  packaged ModelsConfig, in that order. Pure; `null` repo is the identity transform (the critical no-config
+ *  packaged ModelsConfig, in that order. Triage pins and triage tier overrides also apply to `triage_cheap`. Pure; `null` repo is the identity transform (the critical no-config
  *  regression surface). Throws naming the tier/model on an unknown or `trainsOnPrompts` id (pin it instead), an
  *  emptied tier, a redefined packaged id, a redeclared harness, a registry `endpoint` that is not an approved
  *  Anthropic-compatible intermediary or lacks an envKey, or a registry model reaching DeepSeek directly (ADR-0163). */
@@ -417,6 +422,9 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
       }
       tiers[tierName] = [...modelIds];
     }
+    if (repo.tiers.triage && !repo.tiers.triage_cheap && models.tiers.triage_cheap !== undefined) {
+      tiers.triage_cheap = [...tiers.triage];
+    }
   }
 
   if (repo.providers) {
@@ -447,6 +455,7 @@ export function applyRepoConfig(models: ModelsConfig, repo: RepoFactoryConfig | 
       );
     }
     tiers = { ...tiers, triage: [repo.models.pins.triage] };
+    if (tiers.triage_cheap !== undefined) tiers.triage_cheap = [repo.models.pins.triage];
   }
   if (repo.models?.pins?.classifier && !mergedModels[repo.models.pins.classifier]) {
     throw new Error(

@@ -74,9 +74,9 @@ describe('shipped defaults', () => {
     expect(defaultModelsConfig.models[retired?.replacement ?? '']).toBeDefined();
   });
 
-  it('has 25 models with the expected harness-bearing spot checks', () => {
+  it('has 26 models with the expected harness-bearing spot checks', () => {
     const modelIds = Object.keys(defaultModelsConfig.models);
-    expect(modelIds).toHaveLength(25);
+    expect(modelIds).toHaveLength(26);
 
     for (const id of [
       'claude-opus-5',
@@ -84,6 +84,7 @@ describe('shipped defaults', () => {
       'claude-fable-5',
       'claude-sonnet-5',
       'claude-sonnet-5-5',
+      'claude-haiku-5-5',
       'gpt-5.6-terra-high',
       'gpt-5.6-terra-medium',
       'gpt-5.6-luna-high',
@@ -244,6 +245,7 @@ describe('shipped defaults', () => {
     expect(defaultModelsConfig.tiers.worker).toHaveLength(11);
     expect(defaultModelsConfig.tiers.checker).toHaveLength(7);
     expect(defaultModelsConfig.tiers.triage).toHaveLength(4);
+    expect(defaultModelsConfig.tiers.triage_cheap).toHaveLength(5);
   });
 
   it('ships no OpenCode Zen (opencode/) model (#3334)', () => {
@@ -424,8 +426,8 @@ describe('detect_checks route', () => {
 describe('readiness_judge route (#3467)', () => {
   const route = defaultRoutesConfig.routes.readiness_judge;
 
-  it('is a tool-less JSON route on the triage tier with no model pin', () => {
-    expect(route?.tier).toBe('triage');
+  it('is a tool-less JSON route on the triage_cheap tier with no model pin', () => {
+    expect(route?.tier).toBe('triage_cheap');
     expect(route?.model).toBeUndefined();
     expect(route?.allowedTools).toEqual([]);
     expect(route?.output).toBe('json');
