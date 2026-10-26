@@ -71,7 +71,7 @@ cd /path/to/your/repo        # any git repo with a GitHub remote and open issues
 factory init                 # creates .factory/ with the default-code constitution
 ```
 
-`.factory/` is excluded via `.git/info/exclude`. That keeps `.factory/` local to this clone. It isn't committed, so copy it yourself if you work from another machine or clone. For other constitutions, see [Constitutions](#constitutions).
+Commit `.factory/config.yaml` and `.factory/constitution.md` so every clone shares your standards. Only `.factory/state/` is ignored (via `.factory/.gitignore`). For other constitutions, see [Constitutions](#constitutions).
 
 **Step 3: Triage, then ship**
 
