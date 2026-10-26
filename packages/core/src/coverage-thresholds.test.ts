@@ -20,4 +20,9 @@ describe('root coverage gate', () => {
   it.each(['json-summary', 'lcov', 'cobertura'])('keeps the %s coverage reporter CI uploads', (reporter) => {
     expect(configText).toContain(`'${reporter}'`);
   });
+
+  it('prints only the text-summary coverage reporter on the console', () => {
+    expect(configText).toContain("'text-summary'");
+    expect(configText).not.toMatch(/'text'[,\]]/);
+  });
 });

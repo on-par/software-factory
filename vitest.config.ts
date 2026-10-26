@@ -75,8 +75,8 @@ export default defineConfig({
         : [...configDefaults.exclude, INTEGRATION_GLOB, REAL_CLI_GLOB],
     coverage: {
       provider: 'v8',
-      // 'text' prints the per-file table; 'text-summary' prints the totals line.
-      reporter: coverageShard ? [] : ['text', 'text-summary', 'html', 'json-summary', 'lcov', 'cobertura'],
+      // 'text-summary' prints only the totals on the console (#1655); the file reporters feed the ratchet and CI.
+      reporter: coverageShard ? [] : ['text-summary', 'html', 'json-summary', 'lcov', 'cobertura'],
       // scripts/pack-hygiene.ts is the tarball guard behind every package's prepack and
       // the quickstart pack check (#2336); its bin shim (pack-hygiene-cli.ts) stays out.
       include: ['packages/*/src/**/*.{ts,tsx}', 'scripts/pack-hygiene.ts'],

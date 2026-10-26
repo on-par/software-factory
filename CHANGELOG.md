@@ -18,6 +18,7 @@ section to `## X.Y.Z - date`. See
 
 ### Changed
 
+- `scripts/verify.sh --no-coverage` is the documented flag for skipping the coverage ratchet; `--no-e2e` still works and prints a deprecation note, and coverage console output is the text summary only (#1655).
 - BUILD prompts on the codex and opencode routes no longer inline `AGENTS.md`, which those harnesses load from the worktree themselves. A one-line pointer replaces it. claude and command routes keep the full text (#1600).
 - `factory tui`'s Active tab says why it is idle (`no active work — GitHub queue empty` or `— all runs parked/finished`), and the run detail header shows issue, title, phase, elapsed time and last activity in one block (#1365).
 - The agent sandbox (`sandbox-exec` and `firejail`) now denies reads of `~/.ssh`, `~/.aws`, `~/.gnupg` and `~/.config/gh`. Harness auth files stay readable (#1586).

@@ -3,10 +3,10 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-# --no-e2e: run the same coverage-enforcing test command as the full path
-# (`npm run test`, i.e. `vitest run --coverage` with the thresholds in
-# vitest.config.ts) and skip only `coverage-ratchet`. The CHECK-phase tests
-# checker runs this, so a PR under a coverage threshold fails CHECK instead of
+# --no-coverage (alias --no-e2e, deprecated): run the same coverage-enforcing
+# test command as the full path (`npm run test`, i.e. `vitest run --coverage`
+# with the thresholds in vitest.config.ts) and skip only `coverage-ratchet`.
+# The CHECK-phase tests checker still passes --no-e2e, so a PR under a coverage threshold fails CHECK instead of
 # parking as ci-failed. CI (.github/workflows/ci.yml) runs `npm run test`
 # sharded and enforces the thresholds on the merged report.
 #
@@ -15,11 +15,15 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 # default include skips them, and they run on a schedule instead
 # (.github/workflows/nightly-integration.yml). Run them on demand with
 # `npm run test:integration`.
-NO_E2E=0
+NO_COVERAGE=0
 for arg in "$@"; do
-  if [ "$arg" = "--no-e2e" ]; then
-    NO_E2E=1
-  fi
+  case "$arg" in
+    --no-coverage) NO_COVERAGE=1 ;;
+    --no-e2e)
+      NO_COVERAGE=1
+      echo "verify: --no-e2e is deprecated; use --no-coverage (same behavior)" >&2
+      ;;
+  esac
 done
 
 # Same default as npm test / CI: 4 workers (scripts/test-workers.ts). On a heavily loaded
@@ -67,8 +71,8 @@ npm run test -- --maxWorkers="$FACTORY_TEST_MAX_WORKERS" "${REPORTER_ARGS[@]}"
 TEST_STEP_SECONDS=$((SECONDS - TEST_STEP_START))
 npm run --silent slowest-tests -- "$VITEST_REPORT" || true
 npm run --silent test-budget -- "$TEST_STEP_SECONDS" "$VITEST_REPORT"
-# The ratchet (thresholds must not lag measured coverage) is full-path only; --no-e2e skips it.
-if [ "$NO_E2E" != "1" ]; then
+# The ratchet (thresholds must not lag measured coverage) is full-path only; --no-coverage (and --no-e2e) skips it.
+if [ "$NO_COVERAGE" != "1" ]; then
   npm run coverage-ratchet
 fi
 npm run eval -- --stub

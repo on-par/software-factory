@@ -4,7 +4,7 @@ Software Factory is a TypeScript monorepo (npm workspaces under `packages/`) tha
 
 ## Rules
 
-- Run `bash scripts/verify.sh --no-e2e` and get it green before every commit. Run it from the repo root.
+- Run `bash scripts/verify.sh --no-coverage` and get it green before every commit. Run it from the repo root.
 - Never lower a coverage threshold in `vitest.config.ts`. When the ratchet says coverage rose, raise the threshold in the same PR.
 - Never merge past a required check that is genuinely `FAILURE` (`gh pr merge --admin` or equivalent). `main` must always be green.
 - Write or update the colocated `*.test.ts` next to every source change.

@@ -23,7 +23,7 @@ To go back to the published package, run `npm unlink -g @on-par/factory-cli` and
 `scripts/verify.sh` is the gate. Run it from the repo root and get it green before every commit:
 
 ```bash
-bash scripts/verify.sh --no-e2e   # format, build, ADR index, config checks, typecheck, lint, knip, vitest with coverage thresholds, stub evals, script tests
+bash scripts/verify.sh --no-coverage # format, build, ADR index, config checks, typecheck, lint, knip, vitest with coverage thresholds, stub evals, script tests
 bash scripts/verify.sh            # the same, plus the coverage ratchet
 ```
 
