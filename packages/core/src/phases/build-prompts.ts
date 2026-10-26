@@ -2,6 +2,7 @@
 
 import type { LintCommand } from '../checkers/index.js';
 import { ENV_ERROR_PREFIX, VERIFY_SANDBOX_ENV_MARKER } from '../environment/sandbox-env.js';
+import { parseSpec } from '../spec/index.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE } from '../utils/untrusted-input.js';
 import { MAX_LINES_OVERRIDE_RULE } from '../run/max-lines-override.js';
 import { READ_BEFORE_EDIT_RULE } from './build-lint-rules.js';
@@ -24,7 +25,7 @@ Rules:
 ${UNTRUSTED_ISSUE_BODY_NOTICE}
 
 Frozen spec:
-${compactForLocalModel(spec)}
+${compactForLocalModel(parseSpec(spec).body)}
 `;
 }
 
@@ -35,6 +36,7 @@ export function buildOpencodePrompt(opts: Parameters<typeof buildCommitOnlyPromp
 
 export function buildCommitOnlyPrompt(opts: {
   issue: number;
+  /** Not rendered: the spec is inlined (#1595); kept so buildPhase can share promptOpts. */
   specPath: string;
   constitutionCtx: string;
   spec: string;
@@ -49,7 +51,6 @@ export function buildCommitOnlyPrompt(opts: {
 }): string {
   const {
     issue,
-    specPath,
     constitutionCtx,
     spec,
     appPort,
@@ -60,14 +61,14 @@ export function buildCommitOnlyPrompt(opts: {
     affectedTestsCommand,
     previousAttempt,
   } = opts;
-  return `Implement issue #${issue} from the frozen spec below (also saved at ${specPath}). It is the approved plan: follow it and stay within its scope, with no unrelated refactors or drive-by changes.
+  return `Implement issue #${issue} from the frozen spec below. It is the approved plan: follow it and stay within its scope, with no unrelated refactors or drive-by changes.
 
 ${constitutionCtx}
 
 ${UNTRUSTED_ISSUE_BODY_NOTICE}
 
 ## Spec
-${spec}
+${parseSpec(spec).body.trim()}
 
 ${previousAttempt ? `${previousAttempt}\n\n` : ''}## Rules
 - ${READ_BEFORE_EDIT_RULE}
