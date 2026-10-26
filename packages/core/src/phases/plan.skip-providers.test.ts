@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { join } from 'node:path';
 
 import { createTempDirs } from '@on-par/factory-core/testing';
@@ -46,7 +47,7 @@ it('forwards skipProviders to the plan router call (#3226)', async () => {
   });
 
   await planPhase({
-    issue: 81,
+    issue: workKeyFromIssue(81),
     repo: 'on-par/software-factory',
     worktree,
     specPath: join(worktree, 'issue-81.md'),

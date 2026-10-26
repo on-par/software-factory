@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it } from 'vitest';
 
 import { buildClaudePrompt, buildCommitOnlyPrompt } from '../phases/build.js';
@@ -19,8 +20,8 @@ const state = (status: RunStatus, extra: Partial<IssueRunState> = {}): IssueRunS
   ...extra,
 });
 
-const base = { issue: 1, specPath: '/s.md', constitutionCtx: '', spec: 'spec' };
-const claudeBase = { issue: 1, branch: 'b', specPath: '/s.md', constitutionCtx: '' };
+const base = { issue: workKeyFromIssue(1), specPath: '/s.md', constitutionCtx: '', spec: 'spec' };
+const claudeBase = { issue: workKeyFromIssue(1), branch: 'b', specPath: '/s.md', constitutionCtx: '' };
 const CLOSING = 'print a line starting exactly with "ESCALATE:"';
 
 describe('renderPreviousAttempt', () => {

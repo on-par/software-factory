@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it, vi } from 'vitest';
 
 import { shipPhase } from './ship.js';
@@ -42,7 +43,7 @@ describe('ship no-CI repo (#2488)', () => {
     try {
       const start = Date.now();
       const promise = shipPhase({
-        issue: 123,
+        issue: workKeyFromIssue(123),
         repo: 'on-par/software-factory',
         worktree: '/repo-factory-123',
         branch: 'ship-it/123-ci-poll',

@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it } from 'vitest';
 
 import { shipPhase } from './ship.js';
@@ -65,7 +66,7 @@ describe('shipPhase existing PR divergence (#1815)', () => {
     };
     const logs: Array<[string, string]> = [];
     const result = await shipPhase({
-      issue: 1815,
+      issue: workKeyFromIssue(1815),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-1815',
       branch: BRANCH,

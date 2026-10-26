@@ -5,6 +5,7 @@
 // manifest.json — never the "no base ref" SKIP the workspace diff-base contract (ADR-0079)
 // exists to prevent.
 
+import { workKeyFromIssue } from '../work/work-key.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -191,7 +192,7 @@ describe('runIssue — workspace artifacts integration (#1213)', () => {
       // events.ndjson this test reads are produced by the same production code path.
       writeBenchmarkArtifacts: async (info) => {
         await writeBenchmarkArtifacts({
-          issue: request.issue,
+          issue: workKeyFromIssue(request.issue),
           artifactsDir,
           eventsFile,
           costsFile: join(stateDir, 'costs.ndjson'),

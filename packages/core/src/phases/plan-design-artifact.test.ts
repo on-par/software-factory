@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -93,7 +94,7 @@ async function runPlanOutputs(outputs: string[]) {
   const logs: Array<{ type: string; msg: string }> = [];
 
   const result = await planPhase({
-    issue: 2802,
+    issue: workKeyFromIssue(2802),
     repo: 'on-par/software-factory',
     worktree,
     specPath,

@@ -145,7 +145,7 @@ export const TMPDIR_MKDTEMP_BASELINE: Readonly<Record<string, number>> = {
   'packages/core/src/queue/index.test.ts': 1,
   'packages/core/src/queue/reprioritization-audit.test.ts': 13,
   'packages/core/src/readiness/slice-branching.test.ts': 1,
-  'packages/core/src/reports/benchmark-artifacts.test.ts': 4,
+  'packages/core/src/reports/benchmark-artifacts.test.ts': 3,
   'packages/core/src/reports/evidence-pack.test.ts': 1,
   'packages/core/src/reports/local-run.test.ts': 2,
   'packages/core/src/reports/sandbox-ab.test.ts': 1,

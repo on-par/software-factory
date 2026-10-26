@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -46,7 +47,7 @@ async function run(summaries: CheckSummary[], maxReworkRounds = 1) {
     },
   } as never;
   const result = await checkPhase({
-    issue: 1,
+    issue: workKeyFromIssue(1),
     worktree,
     specPath,
     router,

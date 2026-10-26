@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it } from 'vitest';
 
 import { shipPhase } from './ship.js';
@@ -63,7 +64,7 @@ describe('shipPhase existing PR push (#1813)', () => {
     };
     const logs: Array<[string, string]> = [];
     const result = await shipPhase({
-      issue: 1813,
+      issue: workKeyFromIssue(1813),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-1813',
       branch: BRANCH,

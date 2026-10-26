@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it } from 'vitest';
 
 import { shipPhase } from './ship.js';
@@ -42,7 +43,7 @@ const run = async (command: string) => {
 
 function ship(octokit: any, logs: Array<[string, string]>) {
   return shipPhase({
-    issue: 23,
+    issue: workKeyFromIssue(23),
     repo: 'on-par/software-factory',
     worktree: '/repo-factory-23',
     branch: 'ship-it/23-self-heal',

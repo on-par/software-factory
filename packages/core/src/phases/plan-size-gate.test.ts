@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -112,7 +113,7 @@ npm run test`;
     const create = vi.fn().mockResolvedValue({ data: { number: 902, id: 9902 } });
     const logs: Array<{ type: string; msg: string }> = [];
     const result = await planPhase({
-      issue: 3350,
+      issue: workKeyFromIssue(3350),
       repo: 'on-par/software-factory',
       worktree,
       specPath: join(worktree, 'issue-3350.md'),

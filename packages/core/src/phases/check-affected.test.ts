@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { execFileSync } from 'node:child_process';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -85,7 +86,7 @@ async function run(opts: { results: CommandResult[]; files?: string[]; affected?
     return opts.results[argvs.length - 1] ?? FULL_FAIL;
   };
   const result = await checkPhase({
-    issue: 3260,
+    issue: workKeyFromIssue(3260),
     worktree,
     specPath: `${worktree}.spec.md`,
     router,

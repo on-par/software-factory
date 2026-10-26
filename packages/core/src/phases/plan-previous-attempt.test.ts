@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it } from 'vitest';
 
 import { renderPreviousAttempt } from '../run/previous-attempt.js';
@@ -17,7 +18,13 @@ const building: IssueRunState = {
   startedAt: 't',
   updatedAt: 't',
 };
-const opts = { issue: 36, issueTitle: 't', issueBody: 'b', specPath: '/tmp/spec.md', constitutionCtx: '' };
+const opts = {
+  issue: workKeyFromIssue(36),
+  issueTitle: 't',
+  issueBody: 'b',
+  specPath: '/tmp/spec.md',
+  constitutionCtx: '',
+};
 
 describe('buildPlanPrompt previous attempt (#3373)', () => {
   it('buildPlanPrompt includes a previous-attempt note saying the last run stopped during BUILD without an outcome', () => {

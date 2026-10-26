@@ -1,5 +1,6 @@
 // src/phases/stack-review-change.ts — ADR-0161 stack mode: park the issue when review changes a lower slice.
 
+import { issueNumberOf, type WorkKey } from '../work/work-key.js';
 import type { Octokit } from '@octokit/rest';
 
 import type { EventKind } from '../events/kinds.js';
@@ -82,7 +83,7 @@ export async function detectLowerSliceChange(opts: {
 export async function parkOnLowerSliceChange(opts: {
   octokit: Octokit;
   repo: string;
-  issue: number;
+  issue: WorkKey;
   plan: SlicePlan;
   log: (type: EventKind, msg: string) => void;
 }): Promise<ReviewChangeParkResult | undefined> {
@@ -101,7 +102,7 @@ export async function parkOnLowerSliceChange(opts: {
   log('escalate', message);
 
   try {
-    await upsertSlicePlanComment({ octokit, repo, issue, plan: next });
+    await upsertSlicePlanComment({ octokit, repo, issue: issueNumberOf(issue), plan: next });
   } catch (err) {
     log('ship', `could not record the affected slices in the slice plan comment: ${messageOf(err)}`);
   }

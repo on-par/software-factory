@@ -58,7 +58,7 @@ describe('pipeline injection integration', () => {
       const constitution = null;
 
       const plan = await planPhase({
-        issue,
+        issue: workKeyFromIssue(issue),
         repo,
         worktree,
         specPath,
@@ -72,7 +72,7 @@ describe('pipeline injection integration', () => {
       await setupWorktree(repoRoot, branch, worktree);
 
       const build = await buildPhase({
-        issue,
+        issue: workKeyFromIssue(issue),
         repo,
         worktree,
         specPath,
@@ -84,11 +84,11 @@ describe('pipeline injection integration', () => {
       });
       expect(build.ok).toBe(true);
 
-      const check = await checkPhase({ issue, worktree, specPath, router, constitution, log });
+      const check = await checkPhase({ issue: workKeyFromIssue(issue), worktree, specPath, router, constitution, log });
       expect(check.passed).toBe(true);
 
       const ship = await shipPhase({
-        issue,
+        issue: workKeyFromIssue(issue),
         repo,
         worktree,
         branch,

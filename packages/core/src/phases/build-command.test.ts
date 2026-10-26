@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -57,7 +58,7 @@ async function run(stub: StubModelExecutor, issue: number, logs: string[] = []) 
   const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
   tempDirs.add(worktree);
   return buildPhase({
-    issue,
+    issue: workKeyFromIssue(issue),
     repo: 'on-par/software-factory',
     worktree,
     specPath: join(worktree, `issue-${issue}.md`),
@@ -130,7 +131,7 @@ describe('buildPhase command route (#2872)', () => {
     };
 
     const result = await buildPhase({
-      issue: 2909,
+      issue: workKeyFromIssue(2909),
       repo: 'on-par/software-factory',
       worktree,
       specPath: join(worktree, 'issue-2909.md'),
@@ -182,7 +183,7 @@ describe('buildPhase command route (#2872)', () => {
     };
 
     const result = await buildPhase({
-      issue: 3064,
+      issue: workKeyFromIssue(3064),
       repo: 'on-par/software-factory',
       worktree,
       specPath: join(worktree, 'issue-3064.md'),

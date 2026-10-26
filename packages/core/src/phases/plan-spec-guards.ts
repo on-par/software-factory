@@ -1,3 +1,4 @@
+import { type WorkKey } from '../work/work-key.js';
 import { existsSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
 
@@ -60,6 +61,6 @@ export function planSummary(r: PlanResult): string {
   return `${r.parkReason === 'config' ? 'plan parked (config)' : 'plan escalated'}: ${r.escalate ?? 'unknown'}`;
 }
 
-export function planConfigParkMessage(plan: PlanResult, issue: number): string {
+export function planConfigParkMessage(plan: PlanResult, issue: WorkKey): string {
   return `${plan.escalate}\nthen fix the harness writable roots and run factory unpark ${issue}`;
 }

@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -74,7 +75,7 @@ describe('buildPhase opencode failover (#2885)', () => {
     const runSpy = vi.spyOn(router, 'run');
     const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
     const run = buildPhase({
-      issue: 2885,
+      issue: workKeyFromIssue(2885),
       repo: 'on-par/software-factory',
       worktree,
       specPath: join(worktree, 'issue-2885.md'),

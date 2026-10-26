@@ -51,7 +51,7 @@ describe('PLAN with no valid design artifact (#3270)', () => {
   it('parks an invalid plan instead of building when the design is missing and the spec has no implementation (#3181 on 10/19)', async () => {
     const blockedNote =
       '---\nroute: codex\n---\nBlocked-build note: the #3175 schema module is not in this checkout.\n';
-    const { result, logs, stub } = await runPlanOutputs([blockedNote], 424, models, routes, tempDirs);
+    const { result, logs, stub } = await runPlanOutputs([blockedNote], workKeyFromIssue(424), models, routes, tempDirs);
     expect(result).toMatchObject({ ok: false, designArtifact: null });
     expect(result.escalate).toMatch(/^invalid plan:.*after 3 attempt\(s\).*no design block in spec frontmatter/);
     expect(stub.calls.filter((call) => call.task === 'plan')).toHaveLength(3);
@@ -62,7 +62,13 @@ describe('PLAN with no valid design artifact (#3270)', () => {
 
   it('continues with an implementation section despite a missing design artifact', async () => {
     const output = '---\nroute: codex\n---\n# Spec\n\n## Files / approach\nUpdate packages/core/src/phases/plan.ts.\n';
-    const { result, logs, stub, specPath } = await runPlanOutputs([output], 4241, models, routes, tempDirs);
+    const { result, logs, stub, specPath } = await runPlanOutputs(
+      [output],
+      workKeyFromIssue(4241),
+      models,
+      routes,
+      tempDirs,
+    );
     const invalid = logs.filter((entry) => entry.type === 'design_artifact_invalid');
     expect(result).toMatchObject({ ok: true, designArtifact: null });
     expect(stub.calls.filter((call) => call.task === 'plan')).toHaveLength(3);
@@ -73,7 +79,7 @@ describe('PLAN with no valid design artifact (#3270)', () => {
 
   it('parks an invalid plan when Files / approach contains only TBD', async () => {
     const output = '---\nroute: codex\n---\n# Spec\n\n## Files / approach\n- **TBD**.\n';
-    const { result, logs, stub } = await runPlanOutputs([output], 4242, models, routes, tempDirs);
+    const { result, logs, stub } = await runPlanOutputs([output], workKeyFromIssue(4242), models, routes, tempDirs);
     expect(result).toMatchObject({ ok: false, designArtifact: null });
     expect(result.escalate).toMatch(/^invalid plan:/);
     expect(stub.calls.filter((call) => call.task === 'plan')).toHaveLength(3);
@@ -84,7 +90,13 @@ describe('PLAN with no valid design artifact (#3270)', () => {
     const output = '---\nroute: codex\ndesign: {}\n---\n# Spec\n';
     const expectedErrors = parseDesignArtifact({ route: 'codex', design: {} }).errors;
     expect(expectedErrors.length).toBeGreaterThan(3);
-    const { result, octokit, worktree } = await runPlanOutputs([output], 4243, models, routes, tempDirs);
+    const { result, octokit, worktree } = await runPlanOutputs(
+      [output],
+      workKeyFromIssue(4243),
+      models,
+      routes,
+      tempDirs,
+    );
     const firstThree = expectedErrors.slice(0, 3);
     const fourth = expectedErrors[3]!;
     expect(result).toMatchObject({ ok: false, designArtifact: null });

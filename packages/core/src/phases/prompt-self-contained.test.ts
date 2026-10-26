@@ -2,6 +2,7 @@
 // files it names by path — never a leading slash-command token or a user-level Claude Code
 // skill. Constitutions (#721) are the per-repo extension point; skills are not.
 
+import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it } from 'vitest';
 
 import type { CheckSummary } from '../types/index.js';
@@ -26,7 +27,7 @@ const builders: Array<{ name: string; render: () => string }> = [
     name: 'buildPlanPrompt',
     render: () =>
       buildPlanPrompt({
-        issue: 962,
+        issue: workKeyFromIssue(962),
         issueTitle: 'sample',
         issueBody: 'sample body',
         specPath: '.factory/plans/issue-962.md',
@@ -37,7 +38,7 @@ const builders: Array<{ name: string; render: () => string }> = [
     name: 'buildClaudePrompt',
     render: () =>
       buildClaudePrompt({
-        issue: 962,
+        issue: workKeyFromIssue(962),
         branch: 'ship-it/962-factory-build-prompt-carries-no',
         specPath: '.factory/plans/issue-962.md',
         constitutionCtx: '',
@@ -47,7 +48,7 @@ const builders: Array<{ name: string; render: () => string }> = [
     name: 'buildCommitOnlyPrompt',
     render: () =>
       buildCommitOnlyPrompt({
-        issue: 962,
+        issue: workKeyFromIssue(962),
         specPath: '.factory/plans/issue-962.md',
         constitutionCtx: '',
         spec: '# spec',
@@ -57,7 +58,7 @@ const builders: Array<{ name: string; render: () => string }> = [
     name: 'buildOpencodePrompt',
     render: () =>
       buildOpencodePrompt({
-        issue: 962,
+        issue: workKeyFromIssue(962),
         specPath: '.factory/plans/issue-962.md',
         constitutionCtx: '',
         spec: '# spec',
@@ -66,7 +67,11 @@ const builders: Array<{ name: string; render: () => string }> = [
   {
     name: 'buildLocalSmallPrompt',
     render: () =>
-      buildLocalSmallPrompt({ issue: 962, branch: 'ship-it/962-factory-build-prompt-carries-no', spec: '# spec' }),
+      buildLocalSmallPrompt({
+        issue: workKeyFromIssue(962),
+        branch: 'ship-it/962-factory-build-prompt-carries-no',
+        spec: '# spec',
+      }),
   },
 ];
 
@@ -88,9 +93,9 @@ describe('factory prompt builders are self-contained', () => {
   it('inlining BUILD builders send no spec frontmatter (#1595)', () => {
     const spec = '---\ndesign:\n  restatedProblem: x\nadr:\n  - title: y\n---\n# Spec: z\nbody';
     const specPath = '.factory/plans/issue-1595.md';
-    const commitOnly = buildCommitOnlyPrompt({ issue: 1595, specPath, constitutionCtx: '', spec });
-    const opencode = buildOpencodePrompt({ issue: 1595, specPath, constitutionCtx: '', spec });
-    const localSmall = buildLocalSmallPrompt({ issue: 1595, branch: 'b', spec });
+    const commitOnly = buildCommitOnlyPrompt({ issue: workKeyFromIssue(1595), specPath, constitutionCtx: '', spec });
+    const opencode = buildOpencodePrompt({ issue: workKeyFromIssue(1595), specPath, constitutionCtx: '', spec });
+    const localSmall = buildLocalSmallPrompt({ issue: workKeyFromIssue(1595), branch: 'b', spec });
     for (const prompt of [commitOnly, opencode, localSmall]) {
       expect(prompt).not.toMatch(/^adr:/m);
       expect(prompt).not.toMatch(/^design:/m);
@@ -101,7 +106,7 @@ describe('factory prompt builders are self-contained', () => {
 
   it('the claude BUILD prompt drops the ship-it reference but keeps the worktree fact', () => {
     const prompt = buildClaudePrompt({
-      issue: 962,
+      issue: workKeyFromIssue(962),
       branch: 'ship-it/962-factory-build-prompt-carries-no',
       specPath: '.factory/plans/issue-962.md',
       constitutionCtx: '',
@@ -114,8 +119,18 @@ describe('factory prompt builders are self-contained', () => {
 describe('BUILD and rework prompts ask the worker to read the code before editing (T13)', () => {
   it('renders the read-before-edit rule once in each BUILD prompt and the rework prompt', async () => {
     const specPath = '.factory/plans/issue-962.md';
-    const commitOnly = buildCommitOnlyPrompt({ issue: 962, specPath, constitutionCtx: '', spec: '# spec' });
-    const claude = buildClaudePrompt({ issue: 962, branch: 'ship-it/962-x', specPath, constitutionCtx: '' });
+    const commitOnly = buildCommitOnlyPrompt({
+      issue: workKeyFromIssue(962),
+      specPath,
+      constitutionCtx: '',
+      spec: '# spec',
+    });
+    const claude = buildClaudePrompt({
+      issue: workKeyFromIssue(962),
+      branch: 'ship-it/962-x',
+      specPath,
+      constitutionCtx: '',
+    });
     for (const prompt of [commitOnly, claude]) {
       expect(prompt.split(READ_BEFORE_EDIT_RULE).length).toBe(2);
       expect(prompt).toContain('read the code you will change');
@@ -136,7 +151,7 @@ describe('BUILD and rework prompts ask the worker to read the code before editin
       },
     } as any;
     await reworkWorker({
-      issue: 962,
+      issue: workKeyFromIssue(962),
       worktree: '/tmp/wt',
       specPath,
       summary,

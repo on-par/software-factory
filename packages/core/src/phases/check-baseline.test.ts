@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -51,7 +52,7 @@ describe('checkPhase baseline cache wiring (#3540)', () => {
     const requiredChecksVerdict = async () => ({ green: true, reason: 'ok' });
     let forwarded: unknown;
     await checkPhase({
-      issue: 77,
+      issue: workKeyFromIssue(77),
       worktree,
       specPath: join(worktree, 'issue-77.md'),
       router: {} as ModelRouter,

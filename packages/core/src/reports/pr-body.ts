@@ -2,6 +2,7 @@
 // of the frozen spec's Goal and approach, a one-line proof (checker counts, rework rounds), an
 // optional risk line, the collapsed diff stat, the Closes / Part of line, and a configurable footer.
 
+import { type WorkKey } from '../work/work-key.js';
 import { defaultFactoryConfig } from '@on-par/factory-config';
 
 import type { CheckSummary } from '../types/index.js';
@@ -27,9 +28,9 @@ export interface PrBodyInput {
   reworkRounds?: number;
   /** The design artifact's Risk / blast radius; the Risk line is omitted when absent or blank. */
   risk?: string;
-  closes?: number;
+  closes?: WorkKey;
   /** Parent issue of a non-final ADR-0147 slice; renders `Part of #N` and never a closing keyword. */
-  partOf?: number;
+  partOf?: WorkKey;
   /** Stack-mode (ADR-0161) stack-order line, rendered right after the Summary. */
   stackOrder?: string;
   /** Large-PR walkthrough markdown (#3623), rendered as a Walkthrough section; omitted when undefined. */

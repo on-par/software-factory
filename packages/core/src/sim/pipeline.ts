@@ -330,7 +330,7 @@ async function runSimIssue(
 
   try {
     const plan = await planPhase({
-      issue: spec.issue,
+      issue: workKeyFromIssue(spec.issue),
       repo,
       worktree,
       specPath,
@@ -348,7 +348,7 @@ async function runSimIssue(
     await withGitLock(workspace.repoRoot, () => setupWorktree(workspace.repoRoot, branch, worktree));
 
     const build = await buildPhase({
-      issue: spec.issue,
+      issue: workKeyFromIssue(spec.issue),
       repo,
       worktree,
       specPath,
@@ -362,7 +362,7 @@ async function runSimIssue(
 
     phase = 'check';
     const check = await checkPhase({
-      issue: spec.issue,
+      issue: workKeyFromIssue(spec.issue),
       worktree,
       specPath,
       router,
@@ -379,7 +379,7 @@ async function runSimIssue(
 
     phase = 'ship';
     const ship = await shipPhase({
-      issue: spec.issue,
+      issue: workKeyFromIssue(spec.issue),
       repo,
       worktree,
       branch,

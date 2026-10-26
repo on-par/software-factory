@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -127,7 +128,7 @@ describe('checkPhase intent-to-add preparation', () => {
     let listed = '';
     const { log } = logCollector();
     const result = await checkPhase({
-      issue: 3271,
+      issue: workKeyFromIssue(3271),
       worktree,
       specPath,
       router: new ModelRouter(models, routes, false, new StubModelExecutor({ defaultOutput: 'ok' })),
@@ -154,7 +155,7 @@ describe('checkPhase intent-to-add preparation', () => {
     await writeFile(join(worktree, 'eligible.ts'), 'eligible');
     let listed = '';
     await checkPhase({
-      issue: 3271,
+      issue: workKeyFromIssue(3271),
       worktree,
       specPath,
       router: new ModelRouter(models, routes, false, new StubModelExecutor({ defaultOutput: 'ok' })),
@@ -183,7 +184,7 @@ describe('checkPhase intent-to-add preparation', () => {
     const { events, log } = logCollector();
     let round = 0;
     const result = await checkPhase({
-      issue: 3271,
+      issue: workKeyFromIssue(3271),
       worktree,
       specPath,
       router,
@@ -210,7 +211,7 @@ describe('checkPhase intent-to-add preparation', () => {
     const { events, log } = logCollector();
     let checkerRan = false;
     const result = await checkPhase({
-      issue: 3271,
+      issue: workKeyFromIssue(3271),
       worktree,
       specPath,
       router: new ModelRouter(models, routes, false, new StubModelExecutor({ defaultOutput: 'ok' })),

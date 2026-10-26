@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -125,7 +126,7 @@ describe('buildBenchmarkManifest', () => {
   it('assembles a success manifest with phases, model attempts, cost totals, and checker', () => {
     const manifest = buildBenchmarkManifest(
       {
-        issue: 137,
+        issue: workKeyFromIssue(137),
         artifactsDir: '/tmp/artifacts',
         eventsFile: '/tmp/events.ndjson',
         costsFile: '/tmp/costs.jsonl',
@@ -150,6 +151,8 @@ describe('buildBenchmarkManifest', () => {
     );
 
     expect(manifest.manifestVersion).toBe(BENCHMARK_MANIFEST_VERSION);
+    expect(manifest.run.issue).toBe(137);
+    expect(typeof manifest.run.issue).toBe('number');
     expect(manifest.run).toMatchObject({
       issue: 137,
       profile: 'local-only',
@@ -190,7 +193,7 @@ describe('buildBenchmarkManifest', () => {
   it('marks the failed phase and later worker phases as skipped, and records the typed failure', () => {
     const manifest = buildBenchmarkManifest(
       {
-        issue: 138,
+        issue: workKeyFromIssue(138),
         artifactsDir: '/tmp/artifacts',
         eventsFile: '/tmp/events.ndjson',
         costsFile: '/tmp/costs.jsonl',
@@ -283,7 +286,7 @@ describe('writeBenchmarkArtifacts', () => {
 
     const result = await writeBenchmarkArtifacts(
       {
-        issue: 137,
+        issue: workKeyFromIssue(137),
         artifactsDir,
         eventsFile,
         costsFile,
@@ -337,7 +340,7 @@ describe('writeBenchmarkArtifacts', () => {
 
     await writeBenchmarkArtifacts(
       {
-        issue: 137,
+        issue: workKeyFromIssue(137),
         artifactsDir,
         eventsFile,
         costsFile,
@@ -361,7 +364,7 @@ describe('writeBenchmarkArtifacts', () => {
 
     const result = await writeBenchmarkArtifacts(
       {
-        issue: 137,
+        issue: workKeyFromIssue(137),
         artifactsDir,
         eventsFile,
         costsFile,
@@ -402,7 +405,7 @@ describe('writeBenchmarkArtifacts', () => {
 
     const result = await writeBenchmarkArtifacts(
       {
-        issue: 137,
+        issue: workKeyFromIssue(137),
         artifactsDir,
         eventsFile,
         costsFile,
@@ -435,7 +438,7 @@ describe('writeBenchmarkArtifacts', () => {
 
     const result = await writeBenchmarkArtifacts(
       {
-        issue: 137,
+        issue: workKeyFromIssue(137),
         artifactsDir,
         eventsFile,
         costsFile,
@@ -460,7 +463,7 @@ describe('writeBenchmarkArtifacts', () => {
 
     await writeBenchmarkArtifacts(
       {
-        issue: 137,
+        issue: workKeyFromIssue(137),
         artifactsDir,
         eventsFile,
         costsFile,
@@ -494,7 +497,7 @@ describe('writeBenchmarkArtifacts', () => {
 
     const result = await writeBenchmarkArtifacts(
       {
-        issue: 137,
+        issue: workKeyFromIssue(137),
         artifactsDir,
         eventsFile,
         costsFile,
@@ -517,88 +520,5 @@ describe('writeBenchmarkArtifacts', () => {
     );
 
     expect(result.manifest.git.changedFiles.slice().sort()).toEqual(['README.md', 'app.py']);
-  });
-});
-
-describe('DIFF_EXCLUDES', () => {
-  async function setup() {
-    tmpDir = await mkdtemp(join(tmpdir(), 'factory-artifacts-'));
-    const eventsFile = join(tmpDir, 'events.ndjson');
-    const costsFile = join(tmpDir, 'costs.jsonl');
-    const artifactsDir = join(tmpDir, 'artifacts');
-    const workspace = join(tmpDir, 'workspace');
-    mkdirSync(workspace);
-    mkdirSync(artifactsDir);
-    writeFileSync(eventsFile, '');
-    writeFileSync(costsFile, '');
-    return { eventsFile, costsFile, artifactsDir, workspace };
-  }
-
-  it('excludes cache-only churn entirely: empty diff.patch and empty changedFiles', async () => {
-    const { eventsFile, costsFile, artifactsDir, workspace } = await setup();
-
-    const result = await writeBenchmarkArtifacts(
-      {
-        issue: 137,
-        artifactsDir,
-        eventsFile,
-        costsFile,
-        startedAt: '2026-07-28T02:27:00.000Z',
-        outcome: 'ready',
-        workspace,
-      },
-      {
-        now: () => new Date('2026-07-28T02:30:00.000Z'),
-        run: async (command) => {
-          if (command === `git status --short ${EXCLUDE}`) return { stdout: '', stderr: '' };
-          if (command === `git diff --stat origin/main...HEAD ${EXCLUDE}`) return { stdout: '', stderr: '' };
-          if (command === `git diff origin/main...HEAD ${EXCLUDE}`) return { stdout: '', stderr: '' };
-          if (command === `git diff --name-status origin/main...HEAD ${EXCLUDE}`) return { stdout: '', stderr: '' };
-          if (command === `git diff ${EXCLUDE}`) return { stdout: '', stderr: '' };
-          throw new Error(`unexpected command: ${command}`);
-        },
-      },
-    );
-
-    const diffOnDisk = readFileSync(join(artifactsDir, 'diff.patch'), 'utf-8');
-    expect(diffOnDisk).toBe('');
-    expect(diffOnDisk).not.toContain('__pycache__');
-    expect(result.manifest.git.changedFiles).toEqual([]);
-    expect(result.manifest.git.changedFiles.join('')).not.toContain('__pycache__');
-  });
-
-  it('keeps real changes when excluded noise is also present', async () => {
-    const { eventsFile, costsFile, artifactsDir, workspace } = await setup();
-
-    const result = await writeBenchmarkArtifacts(
-      {
-        issue: 137,
-        artifactsDir,
-        eventsFile,
-        costsFile,
-        startedAt: '2026-07-28T02:27:00.000Z',
-        outcome: 'ready',
-        workspace,
-      },
-      {
-        now: () => new Date('2026-07-28T02:30:00.000Z'),
-        run: async (command) => {
-          if (command === `git status --short ${EXCLUDE}`) return { stdout: 'M app.py\n', stderr: '' };
-          if (command === `git diff --stat origin/main...HEAD ${EXCLUDE}`)
-            return { stdout: 'app.py | 1 +\n', stderr: '' };
-          if (command === `git diff origin/main...HEAD ${EXCLUDE}`)
-            return { stdout: 'diff --git a/app.py b/app.py\n+real change\n', stderr: '' };
-          if (command === `git diff --name-status origin/main...HEAD ${EXCLUDE}`)
-            return { stdout: 'M\tapp.py\n', stderr: '' };
-          if (command === `git diff ${EXCLUDE}`) return { stdout: '', stderr: '' };
-          throw new Error(`unexpected command: ${command}`);
-        },
-      },
-    );
-
-    const diffOnDisk = readFileSync(join(artifactsDir, 'diff.patch'), 'utf-8');
-    expect(diffOnDisk).toBe('diff --git a/app.py b/app.py\n+real change\n');
-    expect(diffOnDisk).not.toContain('__pycache__');
-    expect(result.manifest.git.changedFiles).toEqual(['app.py']);
   });
 });

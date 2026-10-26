@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
@@ -120,7 +121,7 @@ describe('SHIP after CHECK intent-to-add', () => {
     let checkedPaths: string[] = [];
     const router = new ModelRouter(models, routes, false, new StubModelExecutor({ defaultOutput: 'ok' }));
     const check = await checkPhase({
-      issue: 3271,
+      issue: workKeyFromIssue(3271),
       worktree,
       specPath,
       router,
@@ -141,7 +142,7 @@ describe('SHIP after CHECK intent-to-add', () => {
 
     const openedPrs: string[] = [];
     const shipped = await shipPhase({
-      issue: 3271,
+      issue: workKeyFromIssue(3271),
       repo: 'on-par/software-factory',
       worktree,
       branch: 'ship-it/3271',

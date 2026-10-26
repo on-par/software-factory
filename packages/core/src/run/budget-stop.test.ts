@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { spawn } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -263,7 +264,7 @@ describe('buildPhase — budget stop (#3320)', () => {
     writeFileSync(specPath, '# spec');
     const { router, stub } = budgetRouter();
     const result = await realBuildPhase({
-      issue: 1,
+      issue: workKeyFromIssue(1),
       repo: 'o/r',
       worktree,
       specPath,
@@ -284,7 +285,7 @@ describe('reworkWorker — budget stop (#3320)', () => {
     const { router, stub } = budgetRouter();
     const log = vi.fn();
     const result = await reworkWorker({
-      issue: 1,
+      issue: workKeyFromIssue(1),
       worktree: dirs.makeSync('wt-'),
       specPath: '/tmp/s.md',
       summary: SUMMARY,

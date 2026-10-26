@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it } from 'vitest';
 
 import { shipPhase } from './ship.js';
@@ -64,7 +65,7 @@ function ship(
   const { octokit, calls } = createOctokit(extra.openPr);
   const logs: Array<[string, string]> = [];
   const promise = shipPhase({
-    issue: 23,
+    issue: workKeyFromIssue(23),
     repo: 'on-par/software-factory',
     worktree: '/repo-factory-23',
     branch: 'ship-it/23-large',

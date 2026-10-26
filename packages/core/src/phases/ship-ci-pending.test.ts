@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it, vi } from 'vitest';
 
 import { shipPhase } from './ship.js';
@@ -45,7 +46,7 @@ async function ship(checkRuns: any[], extra: { ciDeadlineMs?: number } = {}) {
   try {
     const start = Date.now();
     const promise = shipPhase({
-      issue: 7,
+      issue: workKeyFromIssue(7),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-7',
       branch: 'ship-it/7-slow-ci',

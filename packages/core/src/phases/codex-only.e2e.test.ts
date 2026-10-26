@@ -154,7 +154,7 @@ describe('Codex-only pipeline with a fake codex CLI (#2406, #2635)', () => {
       router.setCostSink((e) => costs.push(e.model));
 
       const plan = await planPhase({
-        issue,
+        issue: workKeyFromIssue(issue),
         repo,
         worktree,
         specPath,
@@ -172,7 +172,7 @@ describe('Codex-only pipeline with a fake codex CLI (#2406, #2635)', () => {
 
       await setupWorktree(repoRoot, branch, worktree);
       const build = await buildPhase({
-        issue,
+        issue: workKeyFromIssue(issue),
         repo,
         worktree,
         specPath,
@@ -186,7 +186,7 @@ describe('Codex-only pipeline with a fake codex CLI (#2406, #2635)', () => {
       expect(build.model).toBe('fake-gpt');
 
       const check = await checkPhase({
-        issue,
+        issue: workKeyFromIssue(issue),
         worktree,
         specPath,
         router,
@@ -197,7 +197,15 @@ describe('Codex-only pipeline with a fake codex CLI (#2406, #2635)', () => {
       expect(check.passed).toBe(true);
       expect(check.reworkRounds).toBe(1);
 
-      const ship = await shipPhase({ issue, repo, worktree, branch, octokit: octokit as any, watchCI: false, log });
+      const ship = await shipPhase({
+        issue: workKeyFromIssue(issue),
+        repo,
+        worktree,
+        branch,
+        octokit: octokit as any,
+        watchCI: false,
+        log,
+      });
       expect(ship.ok).toBe(true);
       await expect(exec(`git -C '${worktree}' log --oneline`)).resolves.toBeTruthy();
 

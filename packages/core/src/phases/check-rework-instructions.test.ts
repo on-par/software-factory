@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it } from 'vitest';
 
 import type { CheckSummary } from '../types/index.js';
@@ -25,7 +26,7 @@ describe('reworkWorker extraInstructions (#2816)', () => {
       },
     } as any;
     await reworkWorker({
-      issue: 1,
+      issue: workKeyFromIssue(1),
       worktree: '/tmp/wt',
       specPath: '/tmp/spec.md',
       summary: s,
@@ -83,7 +84,7 @@ describe('reworkWorker extraInstructions (#2816)', () => {
       },
     } as any;
     await reworkWorker({
-      issue: 1,
+      issue: workKeyFromIssue(1),
       worktree: '/tmp/wt',
       specPath: '/tmp/spec.md',
       summary,

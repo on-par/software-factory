@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { existsSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -49,7 +50,7 @@ async function runPlan(issue: number, output: string) {
   };
   const logs: Array<{ type: string; msg: string }> = [];
   const result = await planPhase({
-    issue,
+    issue: workKeyFromIssue(issue),
     repo: 'on-par/software-factory',
     worktree,
     specPath,
