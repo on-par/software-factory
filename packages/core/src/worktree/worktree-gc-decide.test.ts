@@ -208,6 +208,29 @@ describe('decideWorktree', () => {
   });
 });
 
+describe('decideWorktree with a timed-out remote check (#1627)', () => {
+  const held: GcDecision = { action: 'keep', why: 'held', held: 'remote check timed out' };
+  const timedOut = { remoteBranch: 'timed-out' as const };
+
+  it('holds a closed-PR clean worktree instead of reaping it as remote-gone', () => {
+    expect(decideWorktree(evidence({ prState: 'closed', git: timedOut }), policy)).toEqual(held);
+  });
+
+  it('holds a no-PR clean worktree with prior push', () => {
+    expect(decideWorktree(evidence({ prState: 'none', git: { ...timedOut, priorPush: true } }), policy)).toEqual(held);
+  });
+
+  it('holds rather than quarantining when the issue is not found', () => {
+    expect(decideWorktree(evidence({ prState: 'closed', existence: 'not-found', git: timedOut }), policy)).toEqual(
+      held,
+    );
+  });
+
+  it('still reaps a merged PR', () => {
+    expect(decideWorktree(evidence({ prState: 'merged', git: timedOut }), policy)).toEqual(rm('merged'));
+  });
+});
+
 describe('decideLaneRemoval', () => {
   const rec = { issue: 7, reason: 'budget_exceeded' };
   it.each([
