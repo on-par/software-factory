@@ -1553,7 +1553,7 @@ describe('runIssue — #1515: same-file lane guard', () => {
 
 describe('runIssue — PR classifier gate (#1724)', () => {
   const RULES = DEFAULT_REVIEW_FLOOR_RULES;
-  const classifier = { rules: RULES, gateLabel: 'no-auto-merge' };
+  const classifier = { rules: RULES, gateLabel: 'no-auto-merge', trustTier: 'T0' as const, t1SampleRate: 0.25 };
 
   function setup(opts: {
     changes?: { path: string; added: number; removed: number }[];

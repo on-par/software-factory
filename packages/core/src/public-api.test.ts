@@ -615,7 +615,7 @@ const INTERNAL_API_KEYS = [
   ...'BYTES_PER_GB DISK_ALERT_INTERVAL_MS claimDiskAlert createDiskGuard evaluateDiskGuard'.split(' '), // #2284
   ...'FACTORY_RUNTIME_CONFIG_KEYS isTrustedApprover resolveDiskGuard hostDiskAlertFile'.split(' '),
   'createOctokitCollaboratorPermissionClient',
-  ...'CONFIG_EXAMPLE_OMITTED_KEYS renderConfigExample'.split(' '),
+  ...'CONFIG_EXAMPLE_OMITTED_KEYS renderConfigExample resolveT1SampleRate'.split(' '),
   'resolveEvidenceAllowlist',
   'runEvidencePlan',
   // Design artifact (#422)

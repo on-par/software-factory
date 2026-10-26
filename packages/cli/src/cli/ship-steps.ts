@@ -43,6 +43,7 @@ import {
   resolveBaselineCacheTtlHours,
   resolveHermeticGit,
   resolveReviewFloorRules,
+  resolveT1SampleRate,
   resolveTrustTier,
   withFileLock,
   withGitLock,
@@ -407,7 +408,7 @@ export function buildRunRequest({
           gateLabel: resolveFilingPolicy(factoryConfig).selfFixLabel,
           modelPin: repoConfig?.models?.pins?.classifier,
           trustTier: resolveTrustTier(repoConfig),
-          t1SampleRate: repoConfig?.classifier?.t1SampleRate,
+          t1SampleRate: resolveT1SampleRate(repoConfig),
         }
       : undefined,
     timeouts,

@@ -214,34 +214,38 @@ describe('decideT1Sample (#1958)', () => {
   const value = t1SampleValue('o/r', 7);
 
   it('holds a sample below the rate at T1', () => {
-    const out = decideT1Sample(aFloor, { ...input, trustTier: 'T1', rate: value + 0.01 });
-    expect(out).toMatchObject({ gated: true, reason: 't1-sampled', sample: { value, held: true } });
+    const out = decideT1Sample(aFloor, { trustTier: 'T1', t1SampleRate: value + 0.01 }, input);
+    expect(out).toMatchObject({
+      gated: true,
+      reason: expect.stringContaining('t1-sampled'),
+      sample: { value, held: true },
+    });
   });
 
   it('does not hold a sample at or above the rate, but records it', () => {
-    const out = decideT1Sample(aFloor, { ...input, trustTier: 'T1', rate: value });
+    const out = decideT1Sample(aFloor, { trustTier: 'T1', t1SampleRate: value }, input);
     expect(out.gated).toBe(false);
     expect(out.reason).toBeUndefined();
     expect(out.sample).toEqual({ value, rate: value, held: false });
   });
 
   it('never samples at rate 0', () => {
-    expect(decideT1Sample(aFloor, { ...input, trustTier: 'T1', rate: 0 }).gated).toBe(false);
+    expect(decideT1Sample(aFloor, { trustTier: 'T1', t1SampleRate: 0 }, input).gated).toBe(false);
   });
 
   it('returns the routing untouched at T0 and T2 even when the sample is below the rate', () => {
     for (const trustTier of ['T0', 'T2'] as const) {
-      expect(decideT1Sample(aFloor, { ...input, trustTier, rate: 1 })).toBe(aFloor);
+      expect(decideT1Sample(aFloor, { trustTier, t1SampleRate: 1 }, input)).toBe(aFloor);
     }
   });
 
   it('never ungates a classifier:error routing', () => {
     const errored: ReviewRouting = { floor: null, rules: [], gated: true, reason: 'classifier:error', error: 'x' };
-    expect(decideT1Sample(errored, { ...input, trustTier: 'T1', rate: 1 })).toBe(errored);
+    expect(decideT1Sample(errored, { trustTier: 'T1', t1SampleRate: 1 }, input)).toBe(errored);
   });
 
   it('leaves a C floor gated with its own reason', () => {
     const c: ReviewRouting = { floor: 'C', rules: [], gated: true, reason: 'classifier:floor:C:workflows' };
-    expect(decideT1Sample(c, { ...input, trustTier: 'T1', rate: 1 })).toBe(c);
+    expect(decideT1Sample(c, { trustTier: 'T1', t1SampleRate: 1 }, input)).toBe(c);
   });
 });

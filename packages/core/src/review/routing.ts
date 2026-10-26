@@ -138,15 +138,29 @@ export function t1SampleValue(repo: string, issue: number): number {
   return parseInt(hex, 16) / 2 ** 32;
 }
 
+/** The tier and sample rate the T1 sample needs, resolved by the CLI (`resolveTrustTier`, `resolveT1SampleRate`). */
+export interface T1SampleConfig {
+  trustTier: TrustTier;
+  t1SampleRate: number;
+}
+
 /** At T1, hold a deterministic sample of otherwise ungated class-A PRs for a human (ADR-0144, #1958).
  *  Escalate-only: any other tier, a floor above A, or an already-gated routing is returned unchanged. */
 export function decideT1Sample(
   routing: ReviewRouting,
-  input: { trustTier: TrustTier; rate: number; repo: string; issue: number },
+  config: T1SampleConfig,
+  { repo, issue }: { repo: string; issue: number },
 ): ReviewRouting {
-  if (input.trustTier !== 'T1' || routing.gated || routing.floor !== 'A') return routing;
-  const value = t1SampleValue(input.repo, input.issue);
-  const held = value < input.rate;
-  const sample = { value, rate: input.rate, held };
-  return held ? { ...routing, gated: true, reason: T1_SAMPLED_REASON, sample } : { ...routing, sample };
+  if (config.trustTier !== 'T1' || routing.gated || routing.floor !== 'A') return routing;
+  const value = t1SampleValue(repo, issue);
+  const held = value < config.t1SampleRate;
+  const sample = { value, rate: config.t1SampleRate, held };
+  return held
+    ? {
+        ...routing,
+        gated: true,
+        reason: `${T1_SAMPLED_REASON} (sample ${value.toFixed(4)} < rate ${config.t1SampleRate})`,
+        sample,
+      }
+    : { ...routing, sample };
 }

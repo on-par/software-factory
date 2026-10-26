@@ -94,7 +94,12 @@ function request(issue: number, prClassifier: NonNullable<RunRequest['prClassifi
   };
 }
 
-const classifier = { rules: DEFAULT_REVIEW_FLOOR_RULES, gateLabel: 'no-auto-merge' };
+const classifier = {
+  rules: DEFAULT_REVIEW_FLOOR_RULES,
+  gateLabel: 'no-auto-merge',
+  trustTier: 'T0' as const,
+  t1SampleRate: 0.25,
+};
 const t1 = { ...classifier, trustTier: 'T1' as const, t1SampleRate: RATE };
 
 function setup(path: string, labelError?: Error) {
