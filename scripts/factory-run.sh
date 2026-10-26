@@ -6,6 +6,8 @@
 # experimental gate, secret preflight and isolation, model defaults, CLI install).
 # #3707: git pushes authenticate as FACTORY_GITHUB_TOKEN (not the checkout's Actions token), and a
 # ship that ends "left as draft (CI pending)" exits 1 so it never counts as a land.
+# #3727: ship and run-issue stop at a ready PR (#978), so with FACTORY_MERGE=1 the wrapper runs
+# `factory land <issue>` after them in the same job. land is still not an allowed COMMAND.
 set -euo pipefail
 
 CLAUDE_CODE_VERSION=2.1.308
@@ -128,5 +130,21 @@ if [ "$rc" -eq 0 ] && { [ "$COMMAND" = run-issue ] || [ "$COMMAND" = ship ]; } \
   echo "::error::$msg" >&2
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then echo "$msg" >>"$GITHUB_STEP_SUMMARY"; fi
   rc=1
+fi
+
+if [ "$rc" -eq 0 ] && [ "${FACTORY_MERGE:-}" = 1 ] && { [ "$COMMAND" = run-issue ] || [ "$COMMAND" = ship ]; }; then
+  if grep -qF 'left as draft' "$LOG" 2>/dev/null; then
+    echo "factory-run: PR left as draft, so it is not landed (draft wins over FACTORY_MERGE=1)"
+  else
+    set +e
+    factory land "$ISSUE" 2>&1 | tee -a "$LOG"
+    rc=${PIPESTATUS[0]}
+    set -e
+    if [ "$rc" -ne 0 ]; then
+      msg="factory-run: factory land $ISSUE exited $rc after $COMMAND succeeded; see the land output above"
+      echo "::error::$msg" >&2
+      if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then echo "$msg" >>"$GITHUB_STEP_SUMMARY"; fi
+    fi
+  fi
 fi
 exit "$rc"
