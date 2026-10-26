@@ -127,7 +127,8 @@ describe('runIssue — workspace artifacts integration (#1213)', () => {
           {
             output: 'built',
             effect: async (ctx) => {
-              writeFileSync(join(ctx.worktree, 'PRODUCT.md'), 'stub product output\n');
+              // Deliberately not `.md`: a docs-only diff is review floor A and design_smells skips it (#3374).
+              writeFileSync(join(ctx.worktree, 'product.txt'), 'stub product output\n');
               await commitAll(ctx.worktree, 'feat: stub work');
             },
           },

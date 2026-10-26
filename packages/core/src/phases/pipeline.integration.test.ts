@@ -30,7 +30,8 @@ function makeTwoModelStubConfig(): ModelsConfig {
     version: 1,
     models: {
       'model-a': { ...base },
-      'model-b': { ...base, provider: 'openai' },
+      // Same provider as model-a: failover stays within one provider per call (#3338).
+      'model-b': { ...base },
     },
     tiers: { boss: ['model-a', 'model-b'] },
     failover: {
