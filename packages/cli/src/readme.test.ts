@@ -250,6 +250,21 @@ function linuxFirejailProblems(block: string | undefined): string[] {
   return ok ? [] : ['no Linux firejail install step with the workspace-write fallback'];
 }
 
+function codexPreflightProblems(block: string | undefined): string[] {
+  if (block === undefined) return ['missing section'];
+  const ok = block
+    .split(/\n\s*\n/)
+    .some(
+      (p) =>
+        /factory doctor/.test(p) &&
+        /firejail/.test(p) &&
+        /preflight/i.test(p) &&
+        /workspace-write/.test(p) &&
+        /sandbox\.codexFullAccessTasks/.test(p),
+    );
+  return ok ? [] : ['no doctor codex preflight and full access opt-in wording'];
+}
+
 const gitIdentityProblems = (text: string): string[] =>
   text.includes('repo-local `git config`') ? [] : ['git identity text does not say repo-local git config works'];
 
@@ -261,6 +276,10 @@ describe('README update and setup text', () => {
   it('Linux setup says to install firejail first and why', () => {
     expect(linuxFirejailProblems(section(agentsGuide, '## Codex'))).toEqual([]);
     expect(linuxFirejailProblems(section(cliReadme, '## Install'))).toEqual([]);
+  });
+
+  it('root README Safety says doctor reports the codex preflight and full access opt-in', () => {
+    expect(codexPreflightProblems(section(rootReadme, '## Safety'))).toEqual([]);
   });
 
   it('git identity text says repo-local git config works too', () => {
@@ -297,7 +316,14 @@ describe('README update and setup guard self-test', () => {
     expect(linuxFirejailProblems(old)).toEqual(['no Linux firejail install step with the workspace-write fallback']);
   });
 
+  it('rejects the pre-fix Safety sentence without the codex preflight wording', () => {
+    const old =
+      '## Safety\n\nAgent runs are wrapped in an OS sandbox (`firejail` on Linux). `factory doctor` warns when no sandbox runtime is found.';
+    expect(codexPreflightProblems(old)).toEqual(['no doctor codex preflight and full access opt-in wording']);
+  });
+
   it('reports missing sections', () => {
+    expect(codexPreflightProblems(section('', '## Safety'))).toEqual(['missing section']);
     expect(updatingProblems('')).toEqual(['missing Updating section']);
     expect(linuxFirejailProblems(section('', '## Quick start'))).toEqual(['missing section']);
     expect(gitIdentityProblems('')).toHaveLength(1);

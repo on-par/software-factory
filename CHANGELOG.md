@@ -14,6 +14,7 @@ section to `## X.Y.Z - date`. See
 
 ### Changed
 
+- With no OS sandbox runtime on PATH, `factory doctor`'s `codex installed` line reports the Codex sandbox preflight result, the mode Codex will use (`--sandbox workspace-write`, plus any `sandbox.codexFullAccessTasks`) and how to opt in to full access (#3082).
 - GitHub-queue enqueue now converges when several hosts act at once. After writing its `factory:order:<n>` label an enqueue keeps one order label per issue and moves the higher-numbered issue off a shared position, emitting an `order_collision_repaired` event (at most 3 attempts). Lane scans read every page instead of the first 100. Blocked-park auto-unpark runs only on the host named by `FACTORY_FLEET_LEADER` when it is set; unset keeps every host polling (#3147).
 - The rendered constitution is capped at 8 KB with a `[truncated — see <file>]` marker. BUILD and rework prompts get only its Standards/Conventions/Rules/Guidelines sections, and fall back to the full text when none are found. PLAN keeps the full text (#1599).
 - BUILD (commit-only, opencode, codex, local-small) inlines the frozen spec's body once, without YAML frontmatter or `adr:` drafts, and no longer points the worker at the spec file (#1595).
