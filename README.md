@@ -226,6 +226,8 @@ Each lane leases a port from `.factory/state/ports.json` and every build/check c
 
 Product e2e suites should boot their app on `PORT` (strict-port) and point their test runner's base URL at `FACTORY_BASE_URL`. The constitution template scaffolds the full Playwright reference contract. When port leasing is disabled, checks still run but an `environment_warning` event flags the collision risk for app-testing worktrees. Factory-managed runs are headless by default, so e2e configs must honor `FACTORY_HEADLESS`. To run headed, set `FACTORY_HEADLESS=0` or run outside the factory. Unlike the port variables, `FACTORY_HEADLESS` and `PLAYWRIGHT_HEADLESS` are set even when no port lease is configured.
 
+Checker commands (compile, tests, lint, evidence, `app_smoke`) inherit only an allow-list of host variables: `PATH`, `HOME`, locale, `TERM`, `CI`, `NODE_OPTIONS`, `npm_config_*`, proxies, common toolchain roots and the lane contract above. Other host variables, such as `ANTHROPIC_API_KEY`, are not passed. The list lives in `packages/core/src/environment/checker-env.ts`; set `FACTORY_CHECKER_ENV_ALLOW=NAME,...` on the factory process to add names.
+
 ## Open-core boundary
 
 **What's OSS (this repo):** `packages/cli`, `packages/core`, and `packages/config` are the open-source core. The full local pipeline (router, constitutions, checkers, phases) runs from this repo alone, MIT-licensed.

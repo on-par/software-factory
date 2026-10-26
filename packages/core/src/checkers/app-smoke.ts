@@ -6,6 +6,7 @@ import { loadRepoConfig } from '../config/repo.js';
 import type { QaConfig } from '../config/qa-section.js';
 import { killProcessGroup } from '../environment/process-groups.js';
 import type { CheckerOutput } from '../types/index.js';
+import { checkerParentEnv } from '../environment/checker-env.js';
 import { childProcessEnv } from '../utils/github-credentials.js';
 import type { CommandResult } from '../utils/command-runner.js';
 import { stripAnsi, writeCommandLog } from './command-log.js';
@@ -139,7 +140,7 @@ async function runAppSmoke(
   const readyPath = qa.readyPath ?? '/';
   const readyTimeoutSeconds = qa.readyTimeoutSeconds ?? 60;
   const env = {
-    ...childProcessEnv(process.env, ctx.env),
+    ...childProcessEnv(checkerParentEnv(process.env), ctx.env),
     ...Object.fromEntries(VERIFICATION_SCRUBBED_ENV_VARS.map((name) => [name, undefined])),
     HOST: '127.0.0.1',
   };

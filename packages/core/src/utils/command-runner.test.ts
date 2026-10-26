@@ -223,6 +223,25 @@ describe('runCommand', () => {
   });
 });
 
+describe('runCommand parentEnv', () => {
+  it.each([
+    ['attached', undefined],
+    ['detached', () => {}],
+  ])('uses options.parentEnv instead of process.env (%s)', async (_name, onPgid) => {
+    vi.stubEnv('FOO_SECRET', 'x');
+    const result = await runCommand([process.execPath, '-e', 'process.stdout.write(JSON.stringify(process.env))'], {
+      parentEnv: { PATH: process.env.PATH, KEEP: '1' },
+      env: { ADDED: '2' },
+      onPgid,
+    });
+    vi.unstubAllEnvs();
+    const env = JSON.parse(result.stdout) as Record<string, string | undefined>;
+    expect(env.KEEP).toBe('1');
+    expect(env.ADDED).toBe('2');
+    expect(env.FOO_SECRET).toBeUndefined();
+  });
+});
+
 describe('describeCommandFailure', () => {
   it('prefers stderr', () => {
     const details = describeCommandFailure({

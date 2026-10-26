@@ -18,6 +18,7 @@ section to `## X.Y.Z - date`. See
 
 ### Changed
 
+- CHECK starts checker commands (compile, tests, lint, evidence, app_smoke) from an environment allow-list, so host secrets such as ANTHROPIC_API_KEY, OPENAI_API_KEY and cloud credentials no longer reach agent-written scripts; FACTORY_CHECKER_ENV_ALLOW=NAME,... passes extra variables (#1590).
 - BUILD prompts on the codex and opencode routes no longer inline `AGENTS.md`, which those harnesses load from the worktree themselves. A one-line pointer replaces it. claude and command routes keep the full text (#1600).
 - `factory tui`'s Active tab says why it is idle (`no active work — GitHub queue empty` or `— all runs parked/finished`), and the run detail header shows issue, title, phase, elapsed time and last activity in one block (#1365).
 - The agent sandbox (`sandbox-exec` and `firejail`) now denies reads of `~/.ssh`, `~/.aws`, `~/.gnupg` and `~/.config/gh`. Harness auth files stay readable (#1586).
