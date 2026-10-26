@@ -713,6 +713,7 @@ export type { UnknownConstitutionChecker } from './checkers/constitution-preflig
 // Readiness deep check (#1732)
 export type { DecompositionOutput } from './readiness/decompose.js';
 export { buildDecompositionPrompt, parseDecompositionOutput, publishDecomposition } from './readiness/decompose.js';
+export * from './readiness/parent-coverage.js';
 export {
   type Slice,
   type SlicePlan,

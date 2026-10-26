@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { readStopMarker } from '@on-par/factory-core/internal';
+import { computeParentCoverage, readStopMarker } from '@on-par/factory-core/internal';
 import { createTempDirs } from '@on-par/factory-core/testing';
 import { describe, expect, it } from 'vitest';
 
@@ -42,6 +42,7 @@ describe('buildStatusJson', () => {
       active: [{ lane: 'app', issue: 7, phase: 'build', ageSec: 125 }],
       update: null,
       openFactoryDrafts: { count: 2, oldestHours: 5 },
+      decomposedParents: null,
       disk: null,
       providers: [],
       activeAlerts: [],
@@ -56,6 +57,7 @@ describe('buildStatusJson', () => {
       'active',
       'update',
       'openFactoryDrafts',
+      'decomposedParents',
       'disk',
       'providers',
       'activeAlerts',
@@ -80,6 +82,30 @@ describe('buildStatusJson', () => {
     expect(out.active).toEqual([]);
     expect(out.product).toBeNull();
     expect(out.stop).toBe(false);
+    expect(statusJsonSchema.parse(out)).toEqual(out);
+  });
+
+  it('maps decomposedParents rows and defaults to null (#3108)', () => {
+    const base = {
+      repo: 'o/r',
+      product: null,
+      stop: false,
+      stopInfo: null,
+      breakers: [],
+      active: [],
+      update: null,
+      openFactoryDrafts: null,
+      disk: null,
+      now,
+    };
+    expect(buildStatusJson(base).decomposedParents).toBeNull();
+    const c = computeParentCoverage({ number: 10, body: '## Acceptance criteria\n- [ ] one\n- [ ] two\n' }, [
+      { number: 11, body: 'Covers parent criteria: P1', merged: true },
+    ]);
+    const out = buildStatusJson({ ...base, decomposedParents: [c] });
+    expect(out.decomposedParents).toEqual([
+      { issue: 10, covered: 1, total: 2, fullyCovered: false, uncovered: [{ id: 'P2', text: 'two' }] },
+    ]);
     expect(statusJsonSchema.parse(out)).toEqual(out);
   });
 

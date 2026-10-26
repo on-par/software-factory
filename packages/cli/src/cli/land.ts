@@ -23,6 +23,7 @@ import {
   lookupOpenPrByBranch,
   lookupOpenPrByIssue,
   publishRiskReceipt,
+  refreshParentCoverageAfterMerge,
   releaseLaneClaim,
   resolveEffectiveConfig,
   resolveFilingPolicy,
@@ -44,7 +45,10 @@ import {
 } from './land-pr.js';
 import type { LandLock } from './land-pr.js';
 import { enforceRiskAtLand } from './land-risk.js';
+import { isPrMerged, latestPrForBranch } from './land-merged.js';
 import { landRuntime } from './land-runtime.js';
+
+export { isPrMerged, latestPrForBranch };
 import { riskPolicyLines } from './risk-policy.js';
 import { touchIssueActivity } from './ship-run-state.js';
 
@@ -247,6 +251,7 @@ export async function landIssue(
       throw err;
     }
     log('merged', `squash-merged PR #${prNumber}`);
+    await refreshParentCoverageAfterMerge({ octokit, repo: ghRepo, childIssue: issueNum, log });
     await releaseLandedClaim(paths, ghRepo, issueNum, log);
     await withLandLock(() => gitOps.cleanupWorktree(repoRoot, worktree, log, worktreeSandbox));
   } catch (err: any) {
@@ -263,29 +268,6 @@ export function prLookupFailure(issueNum: number, branch: string, err: unknown):
     `PR lookup failed for issue #${issueNum} (${branch}): ${landRuntime().errorDetail(err)}`,
     5,
   );
-}
-
-export async function latestPrForBranch(
-  octokit: Octokit,
-  owner: string,
-  repoName: string,
-  branch: string,
-): Promise<{ number: number; merged: boolean } | null> {
-  const { data: prs } = await octokit.rest.pulls.list({
-    owner,
-    repo: repoName,
-    state: 'all',
-    head: `${owner}:${branch}`,
-  });
-  if (prs.length === 0) return null;
-  // Branch names get reused across runs; PR numbers only increase, so the highest-numbered PR is the current one
-  // (a stale merged PR under the same name must not make a new open PR look merged).
-  const latest = prs.reduce((newest: any, pr: any) => (pr.number > newest.number ? pr : newest));
-  return { number: latest.number, merged: Boolean(latest.merged_at) };
-}
-
-export async function isPrMerged(octokit: Octokit, owner: string, repoName: string, branch: string): Promise<boolean> {
-  return (await latestPrForBranch(octokit, owner, repoName, branch))?.merged ?? false;
 }
 
 /** queue-preflight only (it must see fork PRs to park them); land uses the core lookup (#3439). */
@@ -371,6 +353,8 @@ export type WaitForMergeDeps = {
   listIssueLabels?: (octokit: Octokit, owner: string, repo: string, issue: number) => Promise<string[]>;
   sleep?: (ms: number) => Promise<void>;
   emitEvent?: typeof logEvent;
+  /** #3108: refreshes the parent coverage comment when a human merged the child. */
+  refreshParentCoverage?: typeof refreshParentCoverageAfterMerge;
   mergeEnabled?: () => boolean;
   writeLine?: (line: string) => void;
   /** Injectable clock so the wall-clock failure budget is testable. Default `() => Date.now()`. */
@@ -399,6 +383,7 @@ export async function waitForMerge(
     listIssueLabels = defaultListIssueLabels,
     sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
     emitEvent = logEvent,
+    refreshParentCoverage = refreshParentCoverageAfterMerge,
     mergeEnabled,
     writeLine = (line) => console.log(line),
     now = () => Date.now(),
@@ -449,6 +434,12 @@ export async function waitForMerge(
     }
     if (merged) {
       emitEvent(paths.events, 'landed', issue, 'PR merged');
+      await refreshParentCoverage({
+        octokit,
+        repo: ghRepo,
+        childIssue: issue,
+        log: (type, msg) => emitEvent(paths.events, type, issue, msg),
+      });
       return;
     }
 

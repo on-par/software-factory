@@ -45,6 +45,15 @@
       "stopFiles": ["/tmp/lane-a/STOP"]
     }
   },
+  "decomposedParents": [
+    {
+      "issue": 12,
+      "covered": 2,
+      "total": 3,
+      "fullyCovered": false,
+      "uncovered": [{ "id": "P3", "text": "third thing" }]
+    }
+  ],
   "openFactoryDrafts": {
     "count": 3,
     "oldestHours": 30

@@ -966,6 +966,7 @@ describe('cli', () => {
       createOctokit: () => ({}) as any,
       pathExists: () => false,
       checkMerged: async () => true,
+      refreshParentCoverage: async () => null,
       loadConfig: () => fakeFactoryConfig(false),
       land: async () => {
         throw new Error('land should not be called');

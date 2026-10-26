@@ -74,8 +74,15 @@ export const KPIS_API_KEYS = [
   'renderKpiTrend',
 ];
 
-/** ./internal names added by the `/factory iterate` trigger (#3625) and the awaiting-ci re-check (#3208). */
+/** ./internal names added by the decomposed-parent criteria coverage (#3108). */
+const PARENT_COVERAGE_INTERNAL_KEYS =
+  'PARENT_COVERAGE_MARKER computeParentCoverage formatParentCoverageLine listDecomposedParentCoverage parseCoveredParentIds parseDecomposedFromParent readParentCoverage refreshParentCoverageAfterMerge renderParentCoverageComment upsertParentCoverageComment'.split(
+    ' ',
+  );
+
+/** ./internal names added by the `/factory iterate` trigger (#3625), the awaiting-ci re-check (#3208) and #3108. */
 export const ITERATE_INTERNAL_KEYS = [
+  ...PARENT_COVERAGE_INTERNAL_KEYS,
   'claimIterateCommand',
   'parseFactoryCommand',
   'pollIterateCommands',
