@@ -68,7 +68,7 @@ describe('concurrent lanes integration', () => {
         const specPath = await kit.makeSpecPath(issue);
 
         const plan = await planPhase({
-          issue,
+          issue: workKeyFromIssue(issue),
           repo,
           worktree,
           specPath,
@@ -88,7 +88,7 @@ describe('concurrent lanes integration', () => {
         });
 
         const build = await buildPhase({
-          issue,
+          issue: workKeyFromIssue(issue),
           repo,
           worktree,
           specPath,
@@ -100,11 +100,18 @@ describe('concurrent lanes integration', () => {
         });
         expect(build.ok).toBe(true);
 
-        const check = await checkPhase({ issue, worktree, specPath, router, constitution, log });
+        const check = await checkPhase({
+          issue: workKeyFromIssue(issue),
+          worktree,
+          specPath,
+          router,
+          constitution,
+          log,
+        });
         expect(check.passed).toBe(true);
 
         const ship = await shipPhase({
-          issue,
+          issue: workKeyFromIssue(issue),
           repo,
           worktree,
           branch,
@@ -188,7 +195,7 @@ describe('concurrent lanes integration', () => {
         });
 
         const build = await buildPhase({
-          issue,
+          issue: workKeyFromIssue(issue),
           repo,
           worktree,
           specPath,
@@ -201,7 +208,15 @@ describe('concurrent lanes integration', () => {
         });
         expect(build.ok).toBe(true);
 
-        const check = await checkPhase({ issue, worktree, specPath, router, constitution, log, appPort });
+        const check = await checkPhase({
+          issue: workKeyFromIssue(issue),
+          worktree,
+          specPath,
+          router,
+          constitution,
+          log,
+          appPort,
+        });
         expect(check.passed).toBe(true);
 
         const boundPort = (await readFile(join(worktree, 'bound-port.txt'), 'utf-8')).trim();

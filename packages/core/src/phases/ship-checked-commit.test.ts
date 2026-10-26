@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it } from 'vitest';
 
 import { shipPhase } from './ship.js';
@@ -29,7 +30,7 @@ async function ship(run: (command: string) => Promise<{ stdout: string }>) {
   const { octokit, bodies } = fakeOctokit();
   const logs: Array<[string, string]> = [];
   const result = await shipPhase({
-    issue: 1812,
+    issue: workKeyFromIssue(1812),
     repo: 'on-par/software-factory',
     worktree: '/repo-factory-1812',
     branch: 'ship-it/1812-checked-commit',

@@ -1,5 +1,6 @@
 // src/phases/check.ts — CHECK phase: independent checkers verify output, rework loop
 
+import { type WorkKey } from '../work/work-key.js';
 import { join } from 'node:path';
 
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
@@ -34,13 +35,13 @@ import { applySteering, type ConsumedSteering, describeSteering } from '../steer
 import type { RequiredChecksVerdict } from '../utils/required-checks.js';
 import { baselineCacheOptions, describeBaseline } from './check-baseline.js';
 import { LENS_REVIEW_CHECKER, lensShowstopperRefs, remainingShowstoppers } from './check-showstoppers.js';
+import { failureSignature } from './check-signature.js';
 import { affectedVerifyInstruction, createAffectedSelector, fullTestsBeforeShip } from './check-affected.js';
 import { resolveReworkRoute } from './plan-routes.js';
 
 export { LENS_REVIEW_CHECKER, lensShowstopperRefs, remainingShowstoppers };
 import type {
   BaseFailureCause,
-  CheckerOutput,
   CheckSummary,
   Constitution,
   FailoverReason,
@@ -105,28 +106,6 @@ const EXTERNAL_REASONS = new Set<FailoverReason>([
   'local_auth',
   'cli_missing',
 ]);
-
-/** Deterministic signature of the failing checks: name + volatility-stripped detail. */
-function failureSignature(summary: CheckSummary): string {
-  return summary.results
-    .filter((r) => r.result === 'FAIL')
-    .map((r) => `${r.checker}:${signatureDetail(r)}`)
-    .sort()
-    .join('|');
-}
-
-/** lens_review is signed by its showstopper refs (LLM prose drifts each round, #2238); everything else by normalized detail. */
-function signatureDetail(r: CheckerOutput): string {
-  if (r.checker === LENS_REVIEW_CHECKER) {
-    const refs = lensShowstopperRefs(r.details);
-    if (refs.length > 0) return refs.join(',');
-  }
-  return normalizeDetail(r.details);
-}
-
-function normalizeDetail(details: string): string {
-  return details.toLowerCase().replace(/\d+/g, '#').replace(/\s+/g, ' ').trim().slice(0, 200);
-}
 
 function failingCheckerNames(summary: CheckSummary): string[] {
   return summary.results.filter((r) => r.result === 'FAIL').map((r) => r.checker);
@@ -243,7 +222,7 @@ export async function checkPhase(opts: Parameters<typeof checkPhaseImpl>[0]): Pr
 }
 
 async function checkPhaseImpl(opts: {
-  issue: number;
+  issue: WorkKey;
   worktree: string;
   specPath: string;
   constitution: Constitution | null;
@@ -689,7 +668,7 @@ async function checkPhaseImpl(opts: {
 }
 
 export interface ReworkWorkerOptions {
-  issue: number;
+  issue: WorkKey;
   worktree: string;
   specPath: string;
   summary: CheckSummary;

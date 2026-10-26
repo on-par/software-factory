@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -83,7 +84,7 @@ async function runPrompt(worktree: string): Promise<string> {
   const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'done' }] } });
   const router = new ModelRouter(models, routes, false, stub);
   const result = await buildPhase({
-    issue: 3040,
+    issue: workKeyFromIssue(3040),
     repo: 'on-par/software-factory',
     worktree,
     specPath: join(worktree, 'issue-3040.md'),
@@ -246,7 +247,7 @@ describe('Lint rules in force', () => {
   it('renders the section on the commit-only route', async () => {
     const dir = await fixture({ '.oxlintrc.json': oxlintrc });
     const prompt = buildCommitOnlyPrompt({
-      issue: 1,
+      issue: workKeyFromIssue(1),
       specPath: '/s.md',
       spec: 's',
       constitutionCtx: await renderLintRulesInForce(dir),

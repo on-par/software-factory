@@ -1,5 +1,6 @@
 // src/phases/build-prompts.ts — BUILD prompt builders, split out of build.ts to stay under the max-lines ceiling (#3373)
 
+import { type WorkKey } from '../work/work-key.js';
 import type { LintCommand } from '../checkers/index.js';
 import { ENV_ERROR_PREFIX, VERIFY_SANDBOX_ENV_MARKER } from '../environment/sandbox-env.js';
 import { parseSpec } from '../spec/index.js';
@@ -7,7 +8,7 @@ import { UNTRUSTED_ISSUE_BODY_NOTICE } from '../utils/untrusted-input.js';
 import { MAX_LINES_OVERRIDE_RULE } from '../run/max-lines-override.js';
 import { READ_BEFORE_EDIT_RULE } from './build-lint-rules.js';
 
-export function buildLocalSmallPrompt(opts: { issue: number; branch: string; spec: string }): string {
+export function buildLocalSmallPrompt(opts: { issue: WorkKey; branch: string; spec: string }): string {
   const { issue, branch, spec } = opts;
   return `Local-small build for issue #${issue}.
 You are in the isolated worktree for branch ${branch}.
@@ -35,7 +36,7 @@ export function buildOpencodePrompt(opts: Parameters<typeof buildCommitOnlyPromp
 }
 
 export function buildCommitOnlyPrompt(opts: {
-  issue: number;
+  issue: WorkKey;
   /** Not rendered: the spec is inlined (#1595); kept so buildPhase can share promptOpts. */
   specPath: string;
   constitutionCtx: string;
@@ -84,7 +85,7 @@ ${promptTail(appPort, appBaseUrl, designGrounding)}`;
 }
 
 export function buildClaudePrompt(opts: {
-  issue: number;
+  issue: WorkKey;
   branch: string;
   specPath: string;
   constitutionCtx: string;

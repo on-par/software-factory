@@ -1,5 +1,6 @@
 // packages/core/src/run/ci-rework-loop.ts — SHIP with a bounded CI rework loop (#2816)
 
+import { workKeyFromIssue } from '../work/work-key.js';
 import {
   type checkPhase as checkPhaseDefault,
   type CheckPhaseResult,
@@ -141,7 +142,7 @@ export async function shipWithCiRework(
   const { builtRoute, builtModel, planSlice } = inputs;
   const log = ports.events();
   const shipOpts = {
-    issue: request.issue,
+    issue: workKeyFromIssue(request.issue),
     repo: request.repo,
     worktree: ports.workspace.path,
     branch: request.branch,
@@ -269,7 +270,7 @@ export async function shipWithCiRework(
       return suppressionPark([guardError(`could not read the worktree HEAD: ${errorMessage(err)}`)]);
     }
     const worked = await rework({
-      issue: request.issue,
+      issue: workKeyFromIssue(request.issue),
       worktree: ports.workspace.path,
       specPath: request.specPath,
       summary:

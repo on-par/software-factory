@@ -1,3 +1,4 @@
+import { type WorkKey } from '../work/work-key.js';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -59,7 +60,7 @@ export function withImplementation(frontmatter: string, title = '# Spec'): strin
 
 export async function runPlanOutputs(
   outputs: string[],
-  issue: number,
+  issue: WorkKey,
   models: ModelsConfig,
   routes: RoutesConfig,
   tempDirs: Set<string>,

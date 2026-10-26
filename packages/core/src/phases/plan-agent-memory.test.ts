@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -52,7 +53,7 @@ const routes: RoutesConfig = {
 describe('buildPlanPrompt agent memory (#3624)', () => {
   it('buildPlanPrompt output is unchanged when agentMemoryCtx is empty', () => {
     const base = {
-      issue: 36,
+      issue: workKeyFromIssue(36),
       issueTitle: 'Add eval runner',
       issueBody: 'Measure the current prompt.',
       specPath: '/tmp/spec.md',
@@ -89,7 +90,7 @@ npm test`;
       const router = new ModelRouter(models, routes, false, stub);
       const logs: { type: string; msg: string }[] = [];
       await planPhase({
-        issue: 7,
+        issue: workKeyFromIssue(7),
         repo: 'on-par/software-factory',
         worktree,
         specPath: join(worktree, 'issue-7.md'),

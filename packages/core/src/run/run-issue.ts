@@ -663,7 +663,7 @@ async function runIssueOnce(
         planPhase({
           ...planPickOptions(pick, request.modelPins, ports.router.registryRef, planGate?.skip),
           previousAttempt: previousAttemptNote,
-          issue: request.issue,
+          issue: workKey,
           repo: request.repo,
           worktree: ports.workspace.path,
           specPath: request.specPath,
@@ -709,7 +709,7 @@ async function runIssueOnce(
           );
         }
         if (plan.parkReason === 'config') {
-          return await terminalParked('config', planConfigParkMessage(plan, request.issue));
+          return await terminalParked('config', planConfigParkMessage(plan, workKey));
         }
         return await terminalEscalated(`plan escalated: ${plan.escalate ?? 'unknown'}`);
       }
@@ -822,7 +822,7 @@ async function runIssueOnce(
           budgetGuard: budgetStop.guard,
           previousAttempt: previousAttemptNote,
           runId,
-          issue: request.issue,
+          issue: workKey,
           repo: request.repo,
           worktree: ports.workspace.path,
           specPath: request.specPath,
@@ -892,7 +892,7 @@ async function runIssueOnce(
       budgetGuard: budgetStop.guard,
       runId,
       hermeticGit: request.hermeticGit,
-      issue: request.issue,
+      issue: workKey,
       worktree: ports.workspace.path,
       specPath: request.specPath,
       constitution,

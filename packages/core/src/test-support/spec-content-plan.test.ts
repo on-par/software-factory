@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -29,7 +30,7 @@ describe('specContentFor() against PLAN', () => {
     const logs: Array<{ type: string; msg: string }> = [];
 
     const result = await planPhase({
-      issue,
+      issue: workKeyFromIssue(issue),
       repo: 'on-par/software-factory',
       worktree,
       specPath: join(worktree, `issue-${issue}.md`),

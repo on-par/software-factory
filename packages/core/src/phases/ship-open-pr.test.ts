@@ -87,7 +87,7 @@ describe('ship on an issue with an open factory PR (#3099)', () => {
       expect(head.trim()).toBe(prSha);
 
       const plan = await planPhase({
-        issue,
+        issue: workKeyFromIssue(issue),
         repo,
         worktree,
         specPath,
@@ -98,7 +98,7 @@ describe('ship on an issue with an open factory PR (#3099)', () => {
       });
       expect(plan.ok).toBe(true);
       const build = await buildPhase({
-        issue,
+        issue: workKeyFromIssue(issue),
         repo,
         worktree,
         specPath,
@@ -111,7 +111,15 @@ describe('ship on an issue with an open factory PR (#3099)', () => {
       expect(build.ok).toBe(true);
       expect(stub.calls[0]?.task).toBe('plan');
 
-      const ship = await shipPhase({ issue, repo, worktree, branch, octokit: phaseOctokit, watchCI: false, log });
+      const ship = await shipPhase({
+        issue: workKeyFromIssue(issue),
+        repo,
+        worktree,
+        branch,
+        octokit: phaseOctokit,
+        watchCI: false,
+        log,
+      });
 
       expect(ship.ok).toBe(true);
       expect(ship.prNumber).toBe(2);

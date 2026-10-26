@@ -4,7 +4,7 @@ import type { QueueIntentSnapshot } from '../queue/project-board-poller.js';
 
 /** The minimal locally-authoritative record that may be dispatched to a lane. */
 export interface LocalLaneCandidate {
-  readonly issueNumber: number;
+  readonly issueNumber: number; // factory-workkey-boundary: queue dispatch, migrates with #3460
 }
 
 /** Supplies the latest successfully normalized board queue intent. */

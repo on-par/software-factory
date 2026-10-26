@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it } from 'vitest';
 
 import { ENV_ERROR_PREFIX, VERIFY_SANDBOX_ENV_MARKER } from '../environment/sandbox-env.js';
@@ -9,8 +10,8 @@ import {
 } from './build-prompts.js';
 
 const PWSH = 'pwsh -NoProfile -NonInteractive -File scripts/verify.ps1';
-const base = { issue: 1, specPath: 'spec.md', constitutionCtx: 'ctx', spec: 'spec' };
-const claudeBase = { issue: 1, branch: 'b', specPath: 'spec.md', constitutionCtx: 'ctx' };
+const base = { issue: workKeyFromIssue(1), specPath: 'spec.md', constitutionCtx: 'ctx', spec: 'spec' };
+const claudeBase = { issue: workKeyFromIssue(1), branch: 'b', specPath: 'spec.md', constitutionCtx: 'ctx' };
 
 describe('verify rule', () => {
   it('verify rule names the pwsh command when verifyCommand is set', () => {
@@ -70,7 +71,7 @@ describe('BUILD prompts inline the parsed spec body once (#1595)', () => {
   ].join('\n');
   const specPath = '.factory/plans/issue-1595.md';
   const designGrounding = '## Design grounding (from the frozen PLAN artifact)\nGROUNDING-MARKER';
-  const opts = { issue: 1595, specPath, constitutionCtx: '', spec, designGrounding };
+  const opts = { issue: workKeyFromIssue(1595), specPath, constitutionCtx: '', spec, designGrounding };
 
   function expectBodyOnce(prompt: string): void {
     expect(prompt.split('BODY-MARKER')).toHaveLength(2);
@@ -93,14 +94,19 @@ describe('BUILD prompts inline the parsed spec body once (#1595)', () => {
   });
 
   it('local-small prompt inlines the frontmatter-free body', () => {
-    const prompt = buildLocalSmallPrompt({ issue: 1595, branch: 'b', spec });
+    const prompt = buildLocalSmallPrompt({ issue: workKeyFromIssue(1595), branch: 'b', spec });
     expect(prompt).toContain('BODY-MARKER');
     expect(prompt).not.toMatch(/^adr:/m);
     expect(prompt).not.toContain('DESIGN-FM-MARKER');
   });
 
   it('a spec without frontmatter is still inlined once', () => {
-    const prompt = buildCommitOnlyPrompt({ issue: 1595, specPath, constitutionCtx: '', spec: '# spec-NOFM' });
+    const prompt = buildCommitOnlyPrompt({
+      issue: workKeyFromIssue(1595),
+      specPath,
+      constitutionCtx: '',
+      spec: '# spec-NOFM',
+    });
     expect(prompt.split('# spec-NOFM')).toHaveLength(2);
   });
 });

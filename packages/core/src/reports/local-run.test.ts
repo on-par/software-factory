@@ -1,11 +1,13 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { withTempDir } from '@on-par/factory-core/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { renderLocalRunReport, writeLocalRunReport } from './local-run.js';
+import { readIssueEvents, renderLocalRunReport, writeLocalRunReport } from './local-run.js';
 
 let tmpDir: string | undefined;
 
@@ -19,7 +21,7 @@ describe('local-only run reports', () => {
 
   it('renders model attempts, changed files, verification, and failures', () => {
     const markdown = renderLocalRunReport({
-      issue: 137,
+      issue: workKeyFromIssue(137),
       profile: 'local-only',
       outcome: 'failed',
       route: 'codex',
@@ -78,7 +80,7 @@ describe('local-only run reports', () => {
 
   it('renders empty-state sections when there are no events or changes', () => {
     const markdown = renderLocalRunReport({
-      issue: 300,
+      issue: workKeyFromIssue(300),
       profile: 'local-only',
       outcome: 'parked',
       startedAt: '2026-07-14T02:27:00.000Z',
@@ -103,7 +105,7 @@ describe('local-only run reports', () => {
 
   it('surfaces command observations captured in the event log', () => {
     const markdown = renderLocalRunReport({
-      issue: 301,
+      issue: workKeyFromIssue(301),
       profile: 'local-only',
       outcome: 'ready',
       startedAt: '2026-07-14T02:27:00.000Z',
@@ -138,7 +140,7 @@ describe('local-only run reports', () => {
 
     const report = await writeLocalRunReport(
       {
-        issue: 137,
+        issue: workKeyFromIssue(137),
         eventsFile,
         reportsDir,
         startedAt: '2026-07-14T02:27:00.000Z',
@@ -200,7 +202,7 @@ describe('local-only run reports', () => {
 
     const report = await writeLocalRunReport(
       {
-        issue: 137,
+        issue: workKeyFromIssue(137),
         eventsFile,
         reportsDir,
         startedAt: '2026-07-14T02:27:00.000Z',
@@ -226,5 +228,16 @@ describe('local-only run reports', () => {
     expect(written).not.toContain('stale-model');
     expect(written).not.toContain('PR #201');
     expect(written).toContain('PR #200 ready for review');
+  });
+
+  it('readIssueEvents keeps events for the WorkKey issue and drops longer keys sharing the prefix', async () => {
+    await withTempDir('local-run-events-', (dir) => {
+      const file = join(dir, 'events.ndjson');
+      const line = (issue: string, msg: string) =>
+        JSON.stringify({ ts: '2026-07-28T01:00:00.000Z', type: 'plan', issue, msg });
+      writeFileSync(file, `${line('7', 'keep')}\n${line('70', 'drop')}\n`);
+      const events = readIssueEvents(file, workKeyFromIssue(7), '2026-07-28T00:00:00.000Z');
+      expect(events.map((e) => e.msg)).toEqual(['keep']);
+    });
   });
 });

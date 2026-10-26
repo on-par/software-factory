@@ -1,3 +1,4 @@
+import { type WorkKey } from '../work/work-key.js';
 import { exec as execCb } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -14,7 +15,7 @@ type ReportRun = (
 export type LocalRunOutcome = 'ready' | 'parked' | 'failed' | 'escalated';
 
 export interface LocalRunReportInput {
-  issue: number;
+  issue: WorkKey;
   eventsFile: string;
   reportsDir: string;
   startedAt: string;
@@ -129,7 +130,7 @@ export function renderLocalRunReport(input: LocalRunReportRenderInput): string {
     .join('\n');
 }
 
-export function readIssueEvents(eventsFile: string, issue: number, startedAt: string): FactoryEvent[] {
+export function readIssueEvents(eventsFile: string, issue: WorkKey, startedAt: string): FactoryEvent[] {
   if (!existsSync(eventsFile)) return [];
   const started = Date.parse(startedAt);
   return readFileSync(eventsFile, 'utf-8')
@@ -138,7 +139,7 @@ export function readIssueEvents(eventsFile: string, issue: number, startedAt: st
     .flatMap((line) => {
       try {
         const event = JSON.parse(line) as FactoryEvent;
-        if (event.issue !== String(issue)) return [];
+        if (event.issue !== issue) return [];
         if (Number.isFinite(started) && Date.parse(event.ts) < started) return [];
         return [event];
       } catch {

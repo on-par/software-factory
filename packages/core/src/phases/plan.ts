@@ -1,5 +1,6 @@
 // src/phases/plan.ts — PLAN phase: boss model reads issue, explores repo, freezes spec, picks route
 
+import { issueNumberOf, type WorkKey } from '../work/work-key.js';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 
@@ -47,6 +48,7 @@ import { failoversFrom } from '../router/index.js';
 import { applySteering, type ConsumedSteering, describeSteering } from '../steering/index.js';
 import { archiveSpec, readSpec, writeSpec } from '../spec/index.js';
 import type { EscalateKind } from '../types/index.js';
+import { classifyEscalation } from './plan-escalation.js';
 import type { Constitution, FailoverReason, ReadinessInfo } from '../types/index.js';
 import { escalationLine, isEscalation } from '../utils/index.js';
 import { UNTRUSTED_ISSUE_BODY_NOTICE, wrapUntrustedIssueBody } from '../utils/untrusted-input.js';
@@ -69,6 +71,7 @@ import {
 } from './plan-routes.js';
 
 export type { PlanResult };
+export { classifyEscalation };
 export { buildDesignArtifactRetryPrompt, MAX_DESIGN_ARTIFACT_RETRIES };
 export { type BuildRouteName, defaultBuildRoute, resolveRunnableBuildRoute, runnableBuildRoutes };
 
@@ -80,7 +83,7 @@ export { type BuildRouteName, defaultBuildRoute, resolveRunnableBuildRoute, runn
 const GITHUB_ISSUE_UPDATE_API_VERSION = '2026-03-10';
 
 export interface PlanPromptOpts {
-  issue: number;
+  issue: WorkKey;
   issueTitle: string;
   issueBody: string;
   specPath: string;
@@ -94,16 +97,6 @@ export interface PlanPromptOpts {
   sizeGate?: { passed: boolean; reason?: string; enforced: boolean };
   /** Rendered "## Previous attempt" note (#3373); empty or absent = first run. */
   previousAttempt?: string;
-}
-
-/** Classify a planner ESCALATE line for the escalate event (#3275). */
-export function classifyEscalation(line: string | undefined): EscalateKind | undefined {
-  if (!line) return undefined;
-  const rest = line.replace(/^\s*ESCALATE:\s*/i, '');
-  if (/^missing-info:/i.test(rest)) return 'missing-info';
-  if (/^contradiction:/i.test(rest)) return 'contradiction';
-  if (/\b(split|slices?|smaller|too (big|large)|size)\b/i.test(rest)) return 'split';
-  return undefined;
 }
 
 export function buildPlanPrompt(opts: PlanPromptOpts): string {
@@ -291,7 +284,7 @@ export async function planPhase(opts: Parameters<typeof planPhaseImpl>[0]): Prom
 async function planPhaseImpl(opts: {
   /** Rendered "## Previous attempt" note (#3373); empty or absent = first run. */
   previousAttempt?: string;
-  issue: number;
+  issue: WorkKey;
   repo: string;
   worktree: string;
   specPath: string;
@@ -381,7 +374,7 @@ async function planPhaseImpl(opts: {
   const workSources = opts.workSources ?? createDefaultWorkSourceRegistry({ octokit });
   const source = opts.workSource ?? {
     kind: GITHUB_ISSUE_SOURCE,
-    params: { repo, issue } satisfies GithubIssueParams,
+    params: { repo, issue: issueNumberOf(issue) } satisfies GithubIssueParams,
   };
   const work = await workSources.resolve(source.kind, source.params);
   let issueTitle = work.title;
@@ -579,12 +572,12 @@ async function planPhaseImpl(opts: {
     fastPathRouteOk &&
     isFastPathEligible({ issueBody, readinessPassed: readiness.pass })
   ) {
-    const fastPath = buildFastPathSpec({ issue, title: issueTitle, issueBody });
+    const fastPath = buildFastPathSpec({ issue: issueNumberOf(issue), title: issueTitle, issueBody });
     await writeSpec(specPath, {
       body: fastPath.markdown,
       data: fastPath.frontmatter,
       designJson: JSON.stringify(fastPath.frontmatter.design, null, 2),
-      designMd: renderDesignArtifact(fastPath.frontmatter.design, issue),
+      designMd: renderDesignArtifact(fastPath.frontmatter.design, issueNumberOf(issue)),
     });
     log('fast_path', 'complete bounded issue bypassed model PLAN and emitted a compact Codex spec');
     return {
@@ -753,7 +746,7 @@ async function planPhaseImpl(opts: {
     if (designArtifact) {
       await writeSpec(specPath, {
         designJson: JSON.stringify(designArtifact, null, 2),
-        designMd: renderDesignArtifact(designArtifact, issue),
+        designMd: renderDesignArtifact(designArtifact, issueNumberOf(issue)),
       });
       log(
         'design_artifact_emitted',
@@ -913,7 +906,7 @@ async function planPhaseImpl(opts: {
 
     log('plan_approval_requested', `awaiting plan approval for issue #${issue} (route: ${route})`);
     const response = await approvalGate({
-      issue,
+      issue: issueNumberOf(issue),
       branch: branch ?? '',
       worktree,
       diffStat: '',

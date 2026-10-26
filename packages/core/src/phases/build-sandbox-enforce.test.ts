@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { join } from 'node:path';
 
 import { createTempDirs } from '@on-par/factory-core/testing';
@@ -54,7 +55,7 @@ it('logs an allowlist-enforced sandbox start event in enforce mode (#2215)', asy
   const logs: Array<{ type: string; msg: string }> = [];
 
   const result = await buildPhase({
-    issue: 94,
+    issue: workKeyFromIssue(94),
     repo: 'on-par/software-factory',
     worktree,
     specPath,

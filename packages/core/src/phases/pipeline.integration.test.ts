@@ -80,7 +80,7 @@ describe('pipeline integration', () => {
     const constitution = null;
 
     const plan = await planPhase({
-      issue,
+      issue: workKeyFromIssue(issue),
       repo,
       worktree,
       specPath,
@@ -95,7 +95,7 @@ describe('pipeline integration', () => {
     await setupWorktree(repoRoot, branch, worktree);
 
     const build = await buildPhase({
-      issue,
+      issue: workKeyFromIssue(issue),
       repo,
       worktree,
       specPath,
@@ -107,12 +107,12 @@ describe('pipeline integration', () => {
     });
     expect(build.ok).toBe(true);
 
-    const check = await checkPhase({ issue, worktree, specPath, router, constitution, log });
+    const check = await checkPhase({ issue: workKeyFromIssue(issue), worktree, specPath, router, constitution, log });
     expect(check.passed).toBe(true);
     expect(check.reworkRounds).toBe(0);
 
     const ship = await shipPhase({
-      issue,
+      issue: workKeyFromIssue(issue),
       repo,
       worktree,
       branch,
@@ -179,7 +179,7 @@ describe('pipeline integration', () => {
       const constitution = null;
 
       const plan = await planPhase({
-        issue,
+        issue: workKeyFromIssue(issue),
         repo,
         worktree,
         specPath,
@@ -194,7 +194,7 @@ describe('pipeline integration', () => {
       await setupWorktree(repoRoot, branch, worktree);
 
       const build = await buildPhase({
-        issue,
+        issue: workKeyFromIssue(issue),
         repo,
         worktree,
         specPath,
@@ -206,7 +206,7 @@ describe('pipeline integration', () => {
       });
       expect(build.ok).toBe(true);
 
-      const check = await checkPhase({ issue, worktree, specPath, router, constitution, log });
+      const check = await checkPhase({ issue: workKeyFromIssue(issue), worktree, specPath, router, constitution, log });
       expect(check.passed).toBe(true);
       expect(check.reworkRounds).toBe(1);
 
@@ -217,7 +217,7 @@ describe('pipeline integration', () => {
       expect(buildCalls[1].prompt).toContain('boom');
 
       const ship = await shipPhase({
-        issue,
+        issue: workKeyFromIssue(issue),
         repo,
         worktree,
         branch,
@@ -270,7 +270,7 @@ describe('pipeline integration', () => {
     const constitution = null;
 
     const plan = await planPhase({
-      issue,
+      issue: workKeyFromIssue(issue),
       repo,
       worktree,
       specPath,
@@ -284,7 +284,7 @@ describe('pipeline integration', () => {
     await setupWorktree(repoRoot, branch, worktree);
 
     const build = await buildPhase({
-      issue,
+      issue: workKeyFromIssue(issue),
       repo,
       worktree,
       specPath,

@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it } from 'vitest';
 
 import { buildClaudePrompt, buildCommitOnlyPrompt } from '../phases/build-prompts.js';
@@ -26,8 +27,13 @@ describe('max-lines override (#3466)', () => {
   });
 
   it('puts the rule in both BUILD prompts', () => {
-    const claude = buildClaudePrompt({ issue: 1, branch: 'b', specPath: '/s', constitutionCtx: '' });
-    const commitOnly = buildCommitOnlyPrompt({ issue: 1, specPath: '/s', constitutionCtx: '', spec: 'x' });
+    const claude = buildClaudePrompt({ issue: workKeyFromIssue(1), branch: 'b', specPath: '/s', constitutionCtx: '' });
+    const commitOnly = buildCommitOnlyPrompt({
+      issue: workKeyFromIssue(1),
+      specPath: '/s',
+      constitutionCtx: '',
+      spec: 'x',
+    });
     expect(claude).toContain(MAX_LINES_OVERRIDE_RULE);
     expect(commitOnly).toContain(MAX_LINES_OVERRIDE_RULE);
   });

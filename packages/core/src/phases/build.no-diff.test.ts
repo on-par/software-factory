@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { join } from 'node:path';
 
 import { createTempDirs } from '@on-par/factory-core/testing';
@@ -21,7 +22,7 @@ async function emptyBuild(output: string, openQuestions?: string[], excludedPath
   const worktree = await tempDirs.make('build-no-diff-test-');
   const logs: Array<{ type: string; msg: string }> = [];
   const result = await buildPhase({
-    issue: 3273,
+    issue: workKeyFromIssue(3273),
     repo: 'on-par/software-factory',
     worktree,
     specPath: join(worktree, 'issue-3273.md'),

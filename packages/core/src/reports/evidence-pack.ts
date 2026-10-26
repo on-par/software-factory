@@ -1,3 +1,4 @@
+import { type WorkKey } from '../work/work-key.js';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 
 import type { PrClassifierClaim, PrShadowVerdict } from '../review/classifier.js';
@@ -12,7 +13,7 @@ const RESULT_EMOJI: Record<string, string> = { PASS: '✅', FAIL: '❌', SKIP: '
 const DESIGN_CONTRACT_HEADINGS = ['Behavior contract', 'Verification plan'];
 
 export interface EvidencePackRenderInput {
-  issue: number;
+  issue: WorkKey;
   checkSummary?: CheckSummary;
   reworkRounds?: number;
   designMarkdown?: string;
@@ -29,7 +30,7 @@ export interface EvidencePackRenderInput {
 }
 
 export interface EvidencePackGatherInput {
-  issue: number;
+  issue: WorkKey;
   checkSummary?: CheckSummary;
   reworkRounds?: number;
   specPath?: string;
@@ -236,7 +237,7 @@ function readDesignMarkdown(specPath?: string): string | undefined {
   }
 }
 
-function readLogFiles(logsDir: string | undefined, issue: number): string[] {
+function readLogFiles(logsDir: string | undefined, issue: WorkKey): string[] {
   if (!logsDir) return [];
   try {
     if (!existsSync(logsDir)) return [];

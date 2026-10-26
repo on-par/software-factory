@@ -1,5 +1,6 @@
 // packages/core/src/reports/benchmark-artifacts.ts — versioned benchmark artifact
 // manifest for opt-in local-only runs (#509).
+import { issueNumberOf, type WorkKey } from '../work/work-key.js';
 import { exec as execCb } from 'node:child_process';
 import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -78,7 +79,7 @@ export interface BenchmarkModelAttempt {
 export interface BenchmarkManifest {
   manifestVersion: number;
   run: {
-    issue: number;
+    issue: number; // factory-workkey-boundary: persisted manifest shape, migrates with #3460
     profile: 'local-only';
     outcome: 'ready' | 'failed' | 'parked' | 'escalated';
     startedAt: string;
@@ -115,7 +116,7 @@ export interface BenchmarkManifest {
 }
 
 export interface BenchmarkArtifactsInput {
-  issue: number;
+  issue: WorkKey;
   artifactsDir: string;
   eventsFile: string;
   costsFile: string;
@@ -176,7 +177,7 @@ export function buildBenchmarkManifest(input: BenchmarkArtifactsInput, gathered:
   return {
     manifestVersion: BENCHMARK_MANIFEST_VERSION,
     run: {
-      issue: input.issue,
+      issue: issueNumberOf(input.issue), // factory-workkey-boundary: persisted manifest shape, migrates with #3460
       profile: 'local-only',
       outcome: input.outcome,
       startedAt: input.startedAt,
@@ -335,8 +336,7 @@ export async function writeBenchmarkArtifacts(
   const events = readIssueEvents(input.eventsFile, input.issue, input.startedAt);
   const startedMs = Date.parse(input.startedAt);
   const costs = readCosts(input.costsFile).filter(
-    (entry) =>
-      entry.issue === String(input.issue) && (!Number.isFinite(startedMs) || Date.parse(entry.ts) >= startedMs),
+    (entry) => entry.issue === input.issue && (!Number.isFinite(startedMs) || Date.parse(entry.ts) >= startedMs),
   );
   const statusPaths = await readChangedFiles(input.workspace, run);
   const {

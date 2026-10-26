@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -143,7 +144,7 @@ describe('shipPhase self-healing', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -202,7 +203,7 @@ describe('shipPhase self-healing', () => {
     };
 
     await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-s2-self-heal',
@@ -239,7 +240,7 @@ describe('shipPhase self-healing', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -281,7 +282,7 @@ describe('shipPhase self-healing', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -322,7 +323,7 @@ describe('shipPhase self-healing', () => {
       return { stdout: '' };
     };
     await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -353,7 +354,7 @@ describe('shipPhase self-healing', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -388,7 +389,7 @@ describe('shipPhase self-healing', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -410,7 +411,7 @@ describe('shipPhase self-healing', () => {
     };
     const logs: Array<[string, string]> = [];
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -437,7 +438,7 @@ describe('shipPhase self-healing', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -475,7 +476,7 @@ describe('shipPhase self-healing', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -512,7 +513,7 @@ describe('shipPhase self-healing', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -543,7 +544,7 @@ describe('shipPhase self-healing', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -571,7 +572,7 @@ describe('shipPhase self-healing', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -604,7 +605,7 @@ describe('shipPhase self-healing', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -640,7 +641,7 @@ describe('shipPhase self-healing', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -675,7 +676,7 @@ describe('shipPhase self-healing', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -708,7 +709,7 @@ describe('shipPhase self-healing', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -744,7 +745,7 @@ describe('shipPhase remote head verification (#735)', () => {
     const run = recoveryRun(() => undefined);
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -774,7 +775,7 @@ describe('shipPhase remote head verification (#735)', () => {
     });
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -806,7 +807,7 @@ describe('shipPhase remote head verification (#735)', () => {
     });
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -837,7 +838,7 @@ describe('shipPhase remote head verification (#735)', () => {
     });
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -871,7 +872,7 @@ describe('shipPhase remote head verification (#735)', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -899,7 +900,7 @@ describe('shipPhase remote head verification (#735)', () => {
     });
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -931,7 +932,7 @@ describe('shipPhase inline work source (#507)', () => {
     };
 
     const result = await shipPhase({
-      issue: 9000123,
+      issue: workKeyFromIssue(9000123),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-9000123',
       branch: 'ship-it/9000123-add-a-widget',
@@ -968,7 +969,7 @@ describe('shipPhase inline work source (#507)', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -999,7 +1000,7 @@ describe('shipPhase CI watch', () => {
     vi.useFakeTimers();
     try {
       const promise = shipPhase({
-        issue: 123,
+        issue: workKeyFromIssue(123),
         repo: 'on-par/software-factory',
         worktree: '/repo-factory-123',
         branch: 'ship-it/123-ci-poll',
@@ -1029,7 +1030,7 @@ describe('shipPhase CI watch', () => {
     vi.useFakeTimers();
     try {
       const promise = shipPhase({
-        issue: 123,
+        issue: workKeyFromIssue(123),
         repo: 'on-par/software-factory',
         worktree: '/repo-factory-123',
         branch: 'ship-it/123-ci-poll',
@@ -1081,7 +1082,7 @@ describe('shipPhase CI watch', () => {
     vi.useFakeTimers();
     try {
       const promise = shipPhase({
-        issue: 123,
+        issue: workKeyFromIssue(123),
         repo: 'on-par/software-factory',
         worktree: '/repo-factory-123',
         branch: 'ship-it/123-ci-poll',
@@ -1119,7 +1120,7 @@ describe('shipPhase CI watch', () => {
     vi.useFakeTimers();
     try {
       const promise = shipPhase({
-        issue: 123,
+        issue: workKeyFromIssue(123),
         repo: 'on-par/software-factory',
         worktree: '/repo-factory-123',
         branch: 'ship-it/123-ci-poll',
@@ -1155,7 +1156,7 @@ describe('shipPhase CI watch', () => {
       try {
         const start = Date.now();
         const promise = shipPhase({
-          issue: 123,
+          issue: workKeyFromIssue(123),
           repo: 'on-par/software-factory',
           worktree: '/repo-factory-123',
           branch: 'ship-it/123-ci-poll',
@@ -1214,7 +1215,7 @@ describe('shipPhase CI watch', () => {
     vi.useFakeTimers();
     try {
       const promise = shipPhase({
-        issue: 123,
+        issue: workKeyFromIssue(123),
         repo: 'on-par/software-factory',
         worktree: '/repo-factory-123',
         branch: 'ship-it/123-ci-poll',
@@ -1250,7 +1251,7 @@ describe('shipPhase evidence pack', () => {
     const checkSummary = { failures: 0, passes: 3, skips: 0, total: 3, results: [] };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -1294,7 +1295,7 @@ describe('shipPhase evidence pack', () => {
     const checkSummary = { failures: 0, passes: 3, skips: 0, total: 3, results: [] };
 
     await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -1330,7 +1331,7 @@ describe('shipPhase evidence pack', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -1384,7 +1385,7 @@ describe('shipPhase PR description', () => {
       };
 
       const result = await shipPhase({
-        issue: 23,
+        issue: workKeyFromIssue(23),
         repo: 'on-par/software-factory',
         worktree: dir,
         branch: 'ship-it/23-self-heal',
@@ -1445,7 +1446,7 @@ describe('shipPhase PR risk line', () => {
       };
 
       await shipPhase({
-        issue: 23,
+        issue: workKeyFromIssue(23),
         repo: 'on-par/software-factory',
         worktree: dir,
         branch: 'ship-it/23-risk',
@@ -1487,7 +1488,7 @@ describe('shipPhase approval gate', () => {
     const approvalGate = vi.fn(async () => ({ id: 'a1', approved: true, respondedAt: new Date().toISOString() }));
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -1545,7 +1546,7 @@ describe('shipPhase approval gate', () => {
     }));
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -1578,7 +1579,7 @@ describe('shipPhase approval gate', () => {
     const approvalGate = vi.fn(async () => ({ id: 'a3', approved: false, respondedAt: new Date().toISOString() }));
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -1608,7 +1609,7 @@ describe('shipPhase approval gate', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -1647,7 +1648,7 @@ describe('shipPhase never records ADRs', () => {
       };
 
       const result = await shipPhase({
-        issue: 482,
+        issue: workKeyFromIssue(482),
         repo: 'on-par/software-factory',
         worktree,
         branch: 'ship-it/482-adr-writer',
@@ -1727,7 +1728,7 @@ describe('shipPhase duplicate-PR guard (#520)', () => {
     };
 
     const result = await shipPhase({
-      issue: 511,
+      issue: workKeyFromIssue(511),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-511',
       branch: 'ship-it/511-baseline',
@@ -1764,7 +1765,7 @@ describe('shipPhase duplicate-PR guard (#520)', () => {
     };
 
     const result = await shipPhase({
-      issue: 511,
+      issue: workKeyFromIssue(511),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-511',
       branch: 'ship-it/511-baseline',
@@ -1793,7 +1794,7 @@ describe('shipPhase duplicate-PR guard (#520)', () => {
     };
 
     const result = await shipPhase({
-      issue: 511,
+      issue: workKeyFromIssue(511),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-511',
       branch: 'ship-it/511-baseline',
@@ -1823,7 +1824,7 @@ describe('shipPhase duplicate-PR guard (#520)', () => {
     };
 
     const result = await shipPhase({
-      issue: 511,
+      issue: workKeyFromIssue(511),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-511',
       branch: 'ship-it/511-baseline',
@@ -1852,7 +1853,7 @@ describe('shipPhase duplicate-PR guard (#520)', () => {
     };
 
     const result = await shipPhase({
-      issue: 511,
+      issue: workKeyFromIssue(511),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-511',
       branch: 'ship-it/511-baseline',
@@ -1882,7 +1883,7 @@ describe('shipPhase duplicate-PR guard (#520)', () => {
     };
 
     const result = await shipPhase({
-      issue: 511,
+      issue: workKeyFromIssue(511),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-511',
       branch: 'ship-it/511-baseline',
@@ -1968,7 +1969,7 @@ describe('shipPhase ambiguous-lookup fail-closed (#641)', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -2001,7 +2002,7 @@ describe('shipPhase ambiguous-lookup fail-closed (#641)', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -2045,7 +2046,7 @@ describe('shipPhase pulls.create 422 already-exists recovery (#641)', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -2076,7 +2077,7 @@ describe('shipPhase pulls.create 422 already-exists recovery (#641)', () => {
 
     await expect(
       shipPhase({
-        issue: 23,
+        issue: workKeyFromIssue(23),
         repo: 'on-par/software-factory',
         worktree: '/repo-factory-23',
         branch: 'ship-it/23-self-heal',
@@ -2105,7 +2106,7 @@ describe('shipPhase pulls.create 422 already-exists recovery (#641)', () => {
 
     await expect(
       shipPhase({
-        issue: 23,
+        issue: workKeyFromIssue(23),
         repo: 'on-par/software-factory',
         worktree: '/repo-factory-23',
         branch: 'ship-it/23-self-heal',
@@ -2142,7 +2143,7 @@ describe('shipPhase pulls.create 422 already-exists recovery (#641)', () => {
     };
 
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: 'ship-it/23-self-heal',
@@ -2174,7 +2175,7 @@ describe('shipPhase lifecycle events', () => {
     bus.on((e) => received.push(e));
 
     await shipPhase({
-      issue: 591,
+      issue: workKeyFromIssue(591),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-591',
       branch: 'ship-it/591-lifecycle',
@@ -2211,7 +2212,7 @@ describe('shipPhase lifecycle events', () => {
     bus.on((e) => received.push(e));
 
     await shipPhase({
-      issue: 592,
+      issue: workKeyFromIssue(592),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-592',
       branch: 'ship-it/592-lifecycle',
@@ -2266,7 +2267,7 @@ describe('shipPhase stale remote branch leased push (#1869)', () => {
     const { octokit, calls } = createOctokit();
     const logs: Array<[string, string]> = [];
     const result = await shipPhase({
-      issue: 23,
+      issue: workKeyFromIssue(23),
       repo: 'on-par/software-factory',
       worktree: '/repo-factory-23',
       branch: BRANCH,

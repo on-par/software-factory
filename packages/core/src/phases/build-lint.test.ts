@@ -1,3 +1,4 @@
+import { workKeyFromIssue } from '../work/work-key.js';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -61,7 +62,7 @@ describe('BUILD prompt lint and tsc rule (#2829)', () => {
     const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'done' }] } });
     const router = new ModelRouter(models, routes, false, stub);
     const result = await buildPhase({
-      issue: 2829,
+      issue: workKeyFromIssue(2829),
       repo: 'on-par/software-factory',
       worktree,
       specPath: join(worktree, 'issue-2829.md'),
@@ -80,7 +81,7 @@ describe('BUILD prompt lint and tsc rule (#2829)', () => {
     const cmds = await resolveLintCommands({ worktree });
     expect(cmds.map((c) => c.argv.join(' '))).toEqual(['npm run lint', 'npx tsc --noEmit']);
     const expected = `Also run ${cmds.map((c) => `\`${c.argv.join(' ')}\``).join(' and ')}`;
-    const base = { issue: 1, specPath: '/s.md', constitutionCtx: '', lintCommands: cmds };
+    const base = { issue: workKeyFromIssue(1), specPath: '/s.md', constitutionCtx: '', lintCommands: cmds };
     for (const prompt of [
       buildCommitOnlyPrompt({ ...base, spec: 'spec' }),
       buildClaudePrompt({ ...base, branch: 'b' }),
@@ -112,7 +113,7 @@ describe('BUILD prompt lint and tsc rule (#2829)', () => {
   });
 
   it('omits the lint rule without lint surfaces', () => {
-    const base = { issue: 1, specPath: '/s.md', constitutionCtx: '', spec: 'spec' };
+    const base = { issue: workKeyFromIssue(1), specPath: '/s.md', constitutionCtx: '', spec: 'spec' };
     expect(buildCommitOnlyPrompt(base)).toBe(buildCommitOnlyPrompt({ ...base, lintCommands: [] }));
   });
 });
