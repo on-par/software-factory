@@ -90,7 +90,7 @@ const validDecomposition = JSON.stringify({
       problemStatement: 'The slice is too big.',
       inScope: ['One file'],
       outOfScope: ['Everything else'],
-      acceptanceCriteria: [{ name: 'Works', given: [], when: ['run'], then: ['works'] }],
+      acceptanceCriteria: [{ name: 'Works', given: [], when: ['run'], then: ['works'], tracesTo: ['P1'] }],
       verification: [{ command: 'npm test', passWhen: 'passes' }],
       tracesTo: ['INT-PROBLEM-01'],
     },

@@ -90,7 +90,15 @@ npm run test`;
         problemStatement: 'Problem',
         inScope: ['Scope'],
         outOfScope: ['Other'],
-        acceptanceCriteria: [{ name: 'ac', given: [], when: ['run'], then: ['works'] }],
+        acceptanceCriteria: [
+          {
+            name: 'ac',
+            given: [],
+            when: ['run'],
+            then: ['works'],
+            tracesTo: ['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10'],
+          },
+        ],
         verification: [{ command: 'npm test', passWhen: 'passes' }],
         tracesTo: ['INT-PROBLEM-01'],
       },

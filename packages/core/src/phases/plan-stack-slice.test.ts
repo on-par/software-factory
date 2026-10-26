@@ -85,7 +85,9 @@ const storyJson = (n: number) => ({
   problemStatement: `Problem for slice ${n}`,
   inScope: [`Scope ${n}`],
   outOfScope: ['Persistent storage'],
-  acceptanceCriteria: [{ name: `ac ${n}`, given: [], when: ['run'], then: ['works'] }],
+  acceptanceCriteria: [
+    { name: `ac ${n}`, given: [], when: ['run'], then: ['works'], tracesTo: ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'] },
+  ],
   verification: [{ command: 'npm test', passWhen: 'passes' }],
   tracesTo: ['INT-PROBLEM-01'],
 });

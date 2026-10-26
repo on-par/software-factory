@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  CriterionTracesToSchema,
   formatIntentStatementId,
+  formatParentCriterionId,
   INTENT_STATEMENT_ID_PATTERN,
   IntentStatementIdSchema,
   isIntentStatementId,
+  isParentCriterionId,
   TracesToSchema,
 } from './trace.js';
 
@@ -68,5 +71,26 @@ describe('TracesToSchema', () => {
 
   it('rejects an array with one malformed member', () => {
     expect(() => TracesToSchema.parse(['INT-SCOPE-01', 'nope'])).toThrow();
+  });
+});
+
+describe('parent criterion ids (#3105)', () => {
+  it('mints P<n> from a 1-based ordinal', () => {
+    expect(formatParentCriterionId(3)).toBe('P3');
+  });
+
+  it('recognises P ids and rejects look-alikes', () => {
+    expect(isParentCriterionId('P1')).toBe(true);
+    expect(isParentCriterionId('P12')).toBe(true);
+    for (const bad of ['P0', 'p1', 'INT-PROBLEM-01', undefined]) expect(isParentCriterionId(bad)).toBe(false);
+  });
+
+  it('CriterionTracesToSchema accepts intent and parent ids, rejects anything else', () => {
+    expect(CriterionTracesToSchema.parse(['INT-PROBLEM-01', 'P1'])).toEqual(['INT-PROBLEM-01', 'P1']);
+    expect(() => CriterionTracesToSchema.parse(['P1', '#375'])).toThrow();
+  });
+
+  it('story-level TracesToSchema stays intent-only', () => {
+    expect(() => TracesToSchema.parse(['P1'])).toThrow();
   });
 });

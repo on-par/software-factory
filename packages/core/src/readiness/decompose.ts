@@ -26,7 +26,9 @@ import { DECOMPOSED_LABEL } from '../queue/github-queue.js';
 import { findDuplicateStory } from './duplicate-guard.js';
 import type { SiblingIssue } from './duplicate-guard.js';
 import { checkDecomposeGuard, DECOMPOSE_PROPOSAL_MARKER } from './decompose-guard.js';
+import { checkParentCriteriaCoverage, parentIdsTracedBy, parseParentCriteria } from './decompose-coverage.js';
 import { buildDecompositionPrompt, buildDecompositionRetryPrompt } from './decompose-prompt.js';
+import type { ParentCriterion } from './decompose-prompt.js';
 import { describeSliceOverlap, measureSliceOverlap } from './slice-overlap.js';
 import type { SliceOverlap } from './slice-overlap.js';
 import { MAX_ACCEPTANCE_CRITERIA_ITEMS, MAX_IN_SCOPE_ITEMS } from './size.js';
@@ -34,6 +36,8 @@ import { MAX_ACCEPTANCE_CRITERIA_ITEMS, MAX_IN_SCOPE_ITEMS } from './size.js';
 const errorDetail = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 export { buildDecompositionPrompt, buildDecompositionRetryPrompt };
+export { checkParentCriteriaCoverage, parseParentCriteria };
+export type { ParentCriterion };
 
 // ---------------------------------------------------------------------------
 // LLM output parsing (zod) — purpose-built, looser than the contracts schemas so
@@ -45,6 +49,7 @@ const AcceptanceCriterionInputSchema = z.object({
   given: z.array(z.string().min(1)).default([]),
   when: z.array(z.string().min(1)).min(1),
   then: z.array(z.string().min(1)).min(1),
+  tracesTo: z.array(z.string().min(1)).default([]),
 });
 
 const VerificationStepInputSchema = z.object({
@@ -156,6 +161,7 @@ export function parseDecompositionOutput(
           given: criterion.given,
           when: criterion.when,
           then: criterion.then,
+          tracesTo: criterion.tracesTo,
         })),
         verification: story.verification,
         filesLikelyTouched: normalizeFiles(story.filesLikelyTouched),
@@ -247,9 +253,11 @@ export function checkStoryInvest(story: Story): InvestReport {
   return { ok: violations.length === 0, violations };
 }
 
-/** Runs the INVEST gate over every story, collecting one line per violation. */
+/** Runs the INVEST gate over every story, then (when the parent has criteria) the parent-criterion
+ *  coverage check, collecting one line per violation. */
 export function validateDecomposition(
   decomposition: DecompositionOutput,
+  parentCriteria: readonly ParentCriterion[] = [],
 ): { ok: true } | { ok: false; violations: string[] } {
   const violations: string[] = [];
   for (const story of decomposition.stories) {
@@ -257,6 +265,13 @@ export function validateDecomposition(
     for (const violation of report.violations) {
       violations.push(`story "${story.title}" fails INVEST (${violation.letter}): ${violation.reason}`);
     }
+  }
+  if (parentCriteria.length > 0) {
+    const coverage = checkParentCriteriaCoverage(parentCriteria, decomposition.stories);
+    for (const c of coverage.uncovered) {
+      violations.push(`parent criterion ${c.id} ("${c.text}") is covered by no child acceptance criterion`);
+    }
+    for (const id of coverage.unknownIds) violations.push(`child criteria trace unknown parent criterion ${id}`);
   }
   return violations.length === 0 ? { ok: true } : { ok: false, violations };
 }
@@ -320,6 +335,7 @@ export function renderDecompositionComment(decomposition: DecompositionOutput): 
  *  (`FACTORY_TASK_REQUIRED_FIELDS`) so it scores as a ready factory-task on its own —
  *  and, deliberately, no `## Children` heading, which would classify it as an epic. */
 export function renderChildIssueBody(story: Story, parentIssue: number): string {
+  const covered = parentIdsTracedBy(story);
   const lines: string[] = [
     '## Problem statement',
     '',
@@ -346,6 +362,7 @@ export function renderChildIssueBody(story: Story, parentIssue: number): string 
     '',
     '---',
     '',
+    ...(covered.length > 0 ? [`Covers parent criteria: ${covered.join(', ')}`, ''] : []),
     `Decomposed from #${parentIssue} by the factory size gate.`,
   ];
 
@@ -611,12 +628,13 @@ export async function decomposeOversizedIssue(deps: DecomposeDriverDeps): Promis
     }
     log('decompose_started', `decomposing oversized issue #${issue} into a proposed epic + INVEST stories${guardNote}`);
     let violations: string[] = [];
+    const parentCriteria = parseParentCriteria(body);
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const prompt =
         attempt === 1
-          ? buildDecompositionPrompt({ title, body })
-          : buildDecompositionRetryPrompt({ title, body }, violations);
+          ? buildDecompositionPrompt({ title, body, parentCriteria })
+          : buildDecompositionRetryPrompt({ title, body, parentCriteria }, violations);
 
       const result = await router.run('decompose', prompt, {
         worktree,
@@ -629,7 +647,7 @@ export async function decomposeOversizedIssue(deps: DecomposeDriverDeps): Promis
         violations = [`decomposition did not parse: ${parsed.reason}`];
         continue;
       }
-      const validation = validateDecomposition(parsed.decomposition);
+      const validation = validateDecomposition(parsed.decomposition, parentCriteria);
       if (!validation.ok) {
         violations = validation.violations;
         continue;
