@@ -32,6 +32,7 @@ section to `## X.Y.Z - date`. See
 ### Fixed
 
 - GitHub Actions runs now merge. With `FACTORY_MERGE=1`, `factory-run.sh` runs `factory land <issue>` in the same job after `run-issue` or `ship` exits 0. Before, the `Run factory` step set `FACTORY_MERGE=1` but the job ended at a ready PR. A draft PR is not landed, CI pending still fails the job, and a failed land fails the job with land's exit code. `land` is still not an allowed `command` input (#3727).
+- Worktree GC runs its git calls through execGit (120 s deadline, no terminal prompt), so a stalled remote can no longer hang GC or `factory doctor --reconcile`; a timed-out remote check keeps the worktree as held with reason "remote check timed out" (#1627).
 - Two lanes sharing a breaker file no longer both run the usage-cap restore probe: a lane that claims the probe after another lane already closed or re-capped the provider drops its claim instead of probing again (#3708).
 - Bare `factory logs`, `--json` and `--follow`, the `human-restarted` park check for ship/run-issue/run-brief, `factory feedback`, `factory filing preview` and `factory classifier backtest` now read rotated event-log segments, not only the live `events.ndjson` (#3711).
 - SHIP CI attribution counts a CodeQL alert in a file the PR did not change as introduced by the PR when the alert is not open on the base branch, or, when base alerts can't be read, when the CodeQL check reports new alerts in code changed by the PR. Such alerts now get capped CI rework instead of a baseline ci-failed park (#3712).
