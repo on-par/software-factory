@@ -35,6 +35,8 @@ function keepRecordHolds(
 }
 
 const KEEP: GcDecision = { action: 'keep', why: 'no-evidence' };
+/** The remote state is unknown (#1627): never remote-gone, and not a heuristic-quarantine candidate. */
+const REMOTE_TIMED_OUT: GcDecision = { action: 'keep', why: 'held', held: 'remote check timed out' };
 
 /** Decomposed parent (#1756): reap only a clean, fully-pushed tree with no open PR. Null means
  *  "open PR: fall through to the PR chain". */
@@ -59,6 +61,7 @@ function decideFromPrChain(e: WorktreeEvidence): GcDecision {
   if (e.prState === 'closed') {
     if (!g.clean || g.zeroCommit) return KEEP;
     if (e.head !== null && g.mainTip !== null && g.headIsAncestorOfMain) return reap('merged', false);
+    if (g.remoteBranch === 'timed-out') return REMOTE_TIMED_OUT;
     return g.remoteBranch === 'absent' ? reap('remote-gone', false) : KEEP;
   }
   // 'none' or null: no GitHub verdict, local evidence only.
@@ -73,6 +76,7 @@ function decideFromPrChain(e: WorktreeEvidence): GcDecision {
   ) {
     return reap('merged', false);
   }
+  if (g.clean && g.remoteBranch === 'timed-out' && g.priorPush && !g.zeroCommit) return REMOTE_TIMED_OUT;
   if (g.clean && g.remoteBranch === 'absent' && g.priorPush && !g.zeroCommit) return reap('remote-gone', false);
   return KEEP;
 }
@@ -89,7 +93,7 @@ function decideHeuristic(e: WorktreeEvidence, policy: GcPolicy): GcDecision {
 
 /** Decides remove / quarantine / keep for one worktree from its evidence alone. Rule order:
  *  protected, keep record, live claim, parked-untracked hold, TTL, issue disposition, decomposed hold, PR/local chain,
- *  heuristic quarantine. */
+ *  heuristic quarantine. A held PR/local chain decision (remote check timed out) skips the heuristic tier. */
 export function decideWorktree(e: WorktreeEvidence, policy: GcPolicy): GcDecision {
   const g = e.git;
   if (e.protected) return { action: 'keep', why: 'protected' };
@@ -118,7 +122,7 @@ export function decideWorktree(e: WorktreeEvidence, policy: GcPolicy): GcDecisio
   }
   if (e.branch !== null) {
     const chain = decideFromPrChain(e);
-    if (chain.action !== 'keep') return chain;
+    if (chain.action !== 'keep' || chain.why === 'held') return chain;
   }
   return decideHeuristic(e, policy);
 }

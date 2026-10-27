@@ -113,7 +113,8 @@ export interface GcReport {
    *  shows up as a `removed` entry with `reason: 'no-active-claim'` instead. */
   noActiveClaim: NoActiveClaimCandidate[];
   /** Decomposed-parent worktrees (`factory:decomposed`) kept because they are dirty, hold
-   *  unpushed commits, or could not be verified (#1756). Populated in dry-run and real mode;
+   *  unpushed commits, or could not be verified (#1756), and worktrees kept because their
+   *  `git ls-remote` check timed out (#1627). Populated in dry-run and real mode;
    *  every entry is also counted in `kept`. */
   held: GcHeldCandidate[];
   /** Worktrees kept by a worktree-keeps.json record (#3316); also counted in kept. */

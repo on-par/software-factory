@@ -66,7 +66,14 @@ export async function landIssue(
   octokit: Octokit,
   skipCI?: boolean,
   branchPrefix?: string,
-  opts: { allowGated?: boolean; branch?: string; enforceRisk?: boolean; syncMain?: boolean; signal?: AbortSignal } = {},
+  opts: {
+    allowGated?: boolean;
+    branch?: string;
+    enforceRisk?: boolean;
+    syncMain?: boolean;
+    rebuildOnConflict?: boolean;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<{ branch: string; prNumber: number }> {
   const { configLoaders, gitOps, errorDetail, worktreePathFor } = landRuntime();
   const [owner, repoName] = ghRepo.split('/');
@@ -231,6 +238,7 @@ export async function landIssue(
         log,
         skipCI,
         syncMain: opts.syncMain,
+        rebuildOnConflict: opts.rebuildOnConflict,
         signal: opts.signal,
         adminMerge: resolveMergePolicy(landFactoryConfig).admin,
         withLock: withLandLock,
@@ -353,20 +361,13 @@ export type WaitForMergeDeps = {
   /** #3291: final PR lookup when STOP ends the wait, to tell a merged PR from an open one. */
   lookupPr?: typeof latestPrForBranch;
   loadConfig?: (configPath: string) => FactoryConfig;
-  land?: (
-    issueNum: number,
-    repoRoot: string,
-    ghRepo: string,
-    paths: ReturnType<typeof getFactoryPaths>,
-    octokit: Octokit,
-    skipCI?: boolean,
-    branchPrefix?: string,
-    opts?: { allowGated?: boolean; branch?: string; enforceRisk?: boolean; syncMain?: boolean; signal?: AbortSignal },
-  ) => Promise<{ branch: string; prNumber: number }>;
-  /** ADR-0161 stack layer: land exactly this head branch. */
+  land?: typeof landIssue;
+  /** Land exactly this head branch: an ADR-0161 stack layer, or a #3325 rebuild. */
   landBranch?: string;
   /** #3324: forwarded to land. */
   syncMain?: boolean;
+  /** #3325: forwarded to land. */
+  rebuildOnConflict?: boolean;
   signal?: AbortSignal; // #3146: aborts when the lane loses its claim; checked every poll and before the merge
   listIssueLabels?: (octokit: Octokit, owner: string, repo: string, issue: number) => Promise<string[]>;
   sleep?: (ms: number) => Promise<void>;
@@ -405,6 +406,7 @@ export async function waitForMerge(
     mergeOverrides,
     landBranch,
     syncMain,
+    rebuildOnConflict,
     signal,
   } = deps;
   const { configLoaders, errorDetail, LaneParkError } = landRuntime();
@@ -477,6 +479,7 @@ export async function waitForMerge(
         ...(landBranch ? { branch: landBranch } : {}),
         enforceRisk: true,
         ...(syncMain ? { syncMain } : {}),
+        ...(rebuildOnConflict ? { rebuildOnConflict } : {}),
         ...(signal ? { signal } : {}),
       });
       await releaseLandedClaim(paths, ghRepo, issue, (type, msg) => emitEvent(paths.events, type, issue, msg));

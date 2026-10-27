@@ -145,6 +145,7 @@ async function shipIssueFrom(
     resumeFrom?: CheckResumeRecord; // Resume at CHECK on a kept worktree (#2564).
     /** Aborts when the lane loses this issue's claim lease (#3146); becomes RunPorts.claimSignal. */
     signal?: AbortSignal;
+    rebuild?: { branch: string }; // #3325: a fresh branch off origin/main, built from the frozen spec with no PLAN
   },
   deps: Pick<
     CliDeps,
@@ -301,6 +302,7 @@ async function shipIssueFrom(
     console.log(styleText('yellow', `skipped: ${skipReason}`));
     throw new IssueSkippedError(skipReason, 'already-closed');
   }
+  if (ctx?.rebuild) await createPlanReuseStore(specPath).recordFrozen(work.brief); // #3325: runIssue skips PLAN
   const sandboxPolicy = resolveSandboxPolicy(policy.sandbox, {
     worktree,
     repoRoot,

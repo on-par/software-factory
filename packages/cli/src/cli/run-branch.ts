@@ -13,7 +13,7 @@ import { shipRuntime } from './ship-runtime.js';
 /**
  * Picks the lane branch. A plain GitHub-issue claim first looks for the issue's open factory PR so a requeue
  * continues on the stranded draft even after a title or prefix change (#2253); several candidates park as
- * escalate before any worktree exists. resume, local-only, slice and stack runs keep their branch selection.
+ * escalate before any worktree exists. resume, rebuild, local-only, slice and stack runs keep their branch selection.
  */
 export async function resolveRunBranch(opts: {
   issueNum: number;
@@ -22,13 +22,14 @@ export async function resolveRunBranch(opts: {
   branchPrefix?: string;
   sizeGateMode: SizeGateMode;
   work: WorkRequest;
-  ctx?: { localOnly?: LocalOnlyPolicy; resumeFrom?: CheckResumeRecord; lane?: string };
+  ctx?: { localOnly?: LocalOnlyPolicy; resumeFrom?: CheckResumeRecord; lane?: string; rebuild?: { branch: string } };
   /** --no-pr: always a fresh branch, never an adopted open PR's. */
   noPr?: boolean;
   octokit: Octokit;
   eventsFile: string;
 }): Promise<string> {
   const { issueNum, issueTitle, ghRepo, branchPrefix, sizeGateMode, work, ctx, noPr, octokit, eventsFile } = opts;
+  if (ctx?.rebuild) return ctx.rebuild.branch; // #3325: never adopt the conflicting PR being replaced
   const sliceIndex = await findSliceIndex({ sizeGateMode, ctx, work, octokit, ghRepo, issueNum });
   if (ctx?.resumeFrom) return ctx.resumeFrom.branch;
   const fresh = branchFor(workKeyFromIssue(issueNum), issueTitle, branchPrefix, sliceIndex);

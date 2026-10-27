@@ -1,8 +1,8 @@
 {
   "name": "@on-par/scbench-adapter",
   "private": true,
-  "version": "0.9.18",
-  "description": "SlopCodeBench (SCBench) adapter — drives Software Factory as the agent under test via `factory run-brief --workspace --artifacts`. Never touches GitHub issues, the queue, PRs, or merges.",
+  "version": "0.9.19",
+  "description": "SlopCodeBench (SCBench) adapter \u2014 drives Software Factory as the agent under test via `factory run-brief --workspace --artifacts`. Never touches GitHub issues, the queue, PRs, or merges.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -16,7 +16,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@on-par/factory-core": "^0.9.18",
+    "@on-par/factory-core": "^0.9.19",
     "execa": "^10.1.0",
     "zod": "^4.6.5"
   },
