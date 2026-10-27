@@ -710,9 +710,9 @@ export { findConfigSchemaErrors, type ConfigSchemaFinding } from './config/confi
 export type { ConfigLintFinding, ConfigLintInput, ConfigLintResult, ConfigLintVerdict } from './config/config-lint.js';
 export { findUnknownConstitutionCheckers, formatUnknownCheckerMessage } from './checkers/constitution-preflight.js';
 export type { UnknownConstitutionChecker } from './checkers/constitution-preflight.js';
-
 // Readiness deep check (#1732)
 export type { DecompositionOutput } from './readiness/decompose.js';
+export * from './readiness/parent-coverage.js';
 export { buildDecompositionPrompt, parseDecompositionOutput, publishDecomposition } from './readiness/decompose.js';
 export {
   type Slice,

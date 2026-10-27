@@ -39,10 +39,12 @@ import {
   readStopMarker,
   formatBreakerRemaining,
   formatOpenFactoryDraftsLine,
+  formatParentCoverageLine,
+  listDecomposedParentCoverage,
   readOpenFactoryDrafts,
   resolveBranchPrefix,
 } from '@on-par/factory-core/internal';
-import type { DiskGuard, OpenFactoryDrafts, QueueOrderConflict } from '@on-par/factory-core/internal';
+import type { DiskGuard, OpenFactoryDrafts, ParentCoverage, QueueOrderConflict } from '@on-par/factory-core/internal';
 
 import { formatBaseHoldStatus, readBaseHold } from './base-hold.js';
 import { notInitializedMessage } from './first-run.js';
@@ -153,6 +155,12 @@ async function readDrafts(ghRepo: string, rt: StatusRuntime): Promise<OpenFactor
   return readOpenFactoryDrafts({ octokit: rt.getOctokit(), owner, repo, prefix: resolveBranchPrefix() });
 }
 
+/** Coverage of open decomposed parents (#3108); null when no token or the lookup fails. */
+async function readDecomposedParents(ghRepo: string, rt: StatusRuntime): Promise<ParentCoverage[] | null> {
+  if (!rt.hasGitHubToken()) return null;
+  return listDecomposedParentCoverage({ octokit: rt.getOctokit(), repo: ghRepo });
+}
+
 /** Disk state for the Health band and JSON (#2284); null when unreadable. */
 function readStatusDisk(
   repoRoot: string,
@@ -208,6 +216,7 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
           active: view.active,
           update: buildStatusUpdateJson(readUpdateState(updateStatePath(daemonRuntimePaths().dir))),
           openFactoryDrafts: await readDrafts(ghRepo, rt),
+          decomposedParents: await readDecomposedParents(ghRepo, rt),
           disk: readStatusDisk(repoRoot, ghRepo, paths, rt),
           now: Date.now(),
         }),
@@ -306,6 +315,18 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
       }
     } catch (err) {
       console.log(`  (queue lookup failed — ${rt.errorDetail(err)})`);
+    }
+  }
+
+  console.log(styleText('bold', '\n== Decomposed parents =='));
+  if (!rt.hasGitHubToken()) {
+    console.log('  (no GitHub token — run `gh auth login`)');
+  } else {
+    const parents = await readDecomposedParents(ghRepo, rt);
+    if (parents === null) console.log('  (decomposed parent lookup failed)');
+    else if (parents.length === 0) console.log('  (none)');
+    for (const c of parents ?? []) {
+      console.log(styleText(c.fullyCovered ? 'green' : 'yellow', `  ${formatParentCoverageLine(c)}`));
     }
   }
 

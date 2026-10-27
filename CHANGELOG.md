@@ -11,6 +11,10 @@ section to `## X.Y.Z - date`. See
 
 - Lane port leases write .factory/ports.json atomically (unique tmp file + rename) under the existing file lock, and a reader retries once on a parse error, so the lane proxy no longer drops every route mid-write (#1619).
 
+### Added
+
+- `factory status` shows merged-child coverage of each decomposed parent's criteria, and a merge updates one coverage comment on the parent (#3108)
+
 ## 0.9.19 - 2026-10-26
 
 GitHub Actions runs now land after a successful `run-issue` or `ship` when

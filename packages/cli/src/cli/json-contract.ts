@@ -64,6 +64,17 @@ export const statusJsonSchema = z.object({
     })
     .nullable(),
   openFactoryDrafts: openFactoryDraftsJsonSchema,
+  decomposedParents: z
+    .array(
+      z.object({
+        issue: z.number(),
+        covered: z.number(),
+        total: z.number(),
+        fullyCovered: z.boolean(),
+        uncovered: z.array(z.object({ id: z.string(), text: z.string() })),
+      }),
+    )
+    .nullable(),
   disk: z.object({ freeGb: z.number(), thresholdGb: z.number(), low: z.boolean() }).nullable(),
   providers: z.array(
     z.object({
