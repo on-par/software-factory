@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { execGit, GIT_COMMAND_TIMEOUT_MS } from './git-exec.js';
 
@@ -78,5 +78,21 @@ describe('execGit', () => {
 
   it('defaults to a ceiling generous enough for a real fetch but far below a CI job timeout', () => {
     expect(GIT_COMMAND_TIMEOUT_MS).toBe(120_000);
+  });
+
+  it('sets GIT_TERMINAL_PROMPT=0 only when noPrompt is set', async () => {
+    vi.stubEnv('GIT_TERMINAL_PROMPT', '1');
+    try {
+      await execGit(['init', '-q'], { cwd: dir });
+      const args = ['-c', 'alias.envp=!printenv GIT_TERMINAL_PROMPT', 'envp'];
+
+      const quiet = await execGit(args, { cwd: dir, noPrompt: true });
+      const inherited = await execGit(args, { cwd: dir });
+
+      expect(quiet.stdout.trim()).toBe('0');
+      expect(inherited.stdout.trim()).toBe('1');
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

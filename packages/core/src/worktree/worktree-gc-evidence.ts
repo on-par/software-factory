@@ -1,11 +1,10 @@
 // src/worktree/worktree-gc-evidence.ts — gathers one evidence record per worktree for decideWorktree
 
-import { exec as execCb } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { promisify } from 'node:util';
 
 import type { EventKind } from '../events/kinds.js';
+import { execGit } from '../utils/git-exec.js';
 import { shellEscape } from '../utils/index.js';
 import {
   claimOf,
@@ -18,11 +17,61 @@ import {
 import type { GcHeadPrState, IssueWarnDedup, SweepDeps, WorktreeListEntry } from './worktree-gc-types.js';
 import type { WorktreeKeep } from './worktree-keeps.js';
 
-const exec = promisify(execCb);
+const UNSUPPORTED_BARE = new Set(['"', '$', '`', ';', '|', '&', '<', '>']);
 
-export async function defaultRunCommand(cmd: string, opts?: { cwd?: string }): Promise<{ stdout: string }> {
-  const { stdout } = await exec(cmd, opts);
-  return { stdout: stdout.toString() };
+/** Inverse of `shellEscape` for this module's own `git ...` command strings: bare words, single-quoted
+ *  spans and the `\'` escape. Anything else (shell syntax, a non-git argv[0], an open quote) throws. */
+function splitGitCommand(cmd: string): string[] {
+  const fail = (): never => {
+    throw new Error(`worktree-gc: unsupported git command: ${cmd}`);
+  };
+  const tokens: string[] = [];
+  let cur = '';
+  let inToken = false;
+  let quoted = false;
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i];
+    if (quoted) {
+      if (c === "'") quoted = false;
+      else cur += c;
+    } else if (c === "'") {
+      quoted = true;
+      inToken = true;
+    } else if (c === '\\') {
+      if (cmd[i + 1] !== "'") fail();
+      cur += "'";
+      inToken = true;
+      i++;
+    } else if (/\s/.test(c)) {
+      if (inToken) tokens.push(cur);
+      cur = '';
+      inToken = false;
+    } else if (UNSUPPORTED_BARE.has(c)) {
+      fail();
+    } else {
+      cur += c;
+      inToken = true;
+    }
+  }
+  if (quoted) fail();
+  if (inToken) tokens.push(cur);
+  if (tokens[0] !== 'git') fail();
+  return tokens;
+}
+
+/** Runs a GC git command through execGit: 120 s deadline, no shell, no credential prompts. */
+export async function defaultRunCommand(
+  cmd: string,
+  opts?: { cwd?: string },
+  runGit: typeof execGit = execGit,
+): Promise<{ stdout: string }> {
+  const [, ...args] = splitGitCommand(cmd);
+  const { stdout } = await runGit(args, { cwd: opts?.cwd, noPrompt: true });
+  return { stdout };
+}
+
+function isGitTimeout(err: unknown): boolean {
+  return (err as { name?: unknown } | null)?.name === 'GitTimeoutError';
 }
 
 function safeExec(
@@ -203,8 +252,9 @@ export interface WorktreeEvidence {
     /** isZeroCommitLane(head); also the decomposed-parent branchReapable probe. */
     zeroCommit: boolean;
     priorPush: boolean;
-    /** `git ls-remote --heads origin <branch>`; null on probe failure or a null branch. */
-    remoteBranch: 'present' | 'absent' | null;
+    /** `git ls-remote --heads origin <branch>`; 'timed-out' when the probe hit execGit's deadline;
+     *  null on any other probe failure or a null branch. */
+    remoteBranch: 'present' | 'absent' | 'timed-out' | null;
     headIsAncestorOfMain: boolean;
     mainTip: string | null;
     unpushedCount: number | null;
@@ -298,9 +348,18 @@ async function gatherGitEvidence(
 ): Promise<WorktreeEvidence['git']> {
   const { runCommand, repoRoot } = ctx;
   const { branch, head } = entry;
-  const lsRemote = branch
-    ? await safeExec(runCommand, `git ls-remote --heads origin ${shellEscape(branch)}`, { cwd: repoRoot })
-    : null;
+  let remoteBranch: WorktreeEvidence['git']['remoteBranch'] = null;
+  if (branch) {
+    try {
+      const out = await runCommand(`git ls-remote --heads origin ${shellEscape(branch)}`, { cwd: repoRoot });
+      remoteBranch = out.stdout.trim() === '' ? 'absent' : 'present';
+    } catch (err) {
+      if (isGitTimeout(err)) {
+        remoteBranch = 'timed-out';
+        ctx.log('warn', `worktree-gc: remote check timed out for ${branch} (${entry.path}); keeping`);
+      }
+    }
+  }
   const ancestor =
     head === null
       ? null
@@ -313,7 +372,7 @@ async function gatherGitEvidence(
       branch && (prState === null || prState === 'none')
         ? await hasPriorPushEvidence(runCommand, repoRoot, branch)
         : false,
-    remoteBranch: lsRemote === null ? null : lsRemote.stdout.trim() === '' ? 'absent' : 'present',
+    remoteBranch,
     headIsAncestorOfMain: ancestor !== null,
     mainTip: ctx.mainTip,
     unpushedCount: head ? await countUnpushedCommits(runCommand, repoRoot, head) : null,

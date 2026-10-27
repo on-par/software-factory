@@ -16,6 +16,8 @@ export interface GitExecOptions {
   cwd?: string;
   /** Override the default ceiling. Mostly for tests. */
   timeoutMs?: number;
+  /** Set GIT_TERMINAL_PROMPT=0 so git fails instead of prompting; for headless callers. */
+  noPrompt?: boolean;
 }
 
 export interface GitExecResult {
@@ -45,7 +47,11 @@ function isTimeoutRejection(err: unknown): boolean {
 export async function execGit(args: readonly string[], opts: GitExecOptions = {}): Promise<GitExecResult> {
   const timeoutMs = opts.timeoutMs ?? GIT_COMMAND_TIMEOUT_MS;
   try {
-    return await execFile('git', args, { cwd: opts.cwd, timeout: timeoutMs });
+    return await execFile('git', args, {
+      cwd: opts.cwd,
+      timeout: timeoutMs,
+      env: opts.noPrompt ? { ...process.env, GIT_TERMINAL_PROMPT: '0' } : undefined,
+    });
   } catch (err) {
     if (!isTimeoutRejection(err)) throw err;
     const cmd = ['git', ...args].join(' ');
