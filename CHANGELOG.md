@@ -35,6 +35,7 @@ criteria, design-smell park findings, and `factory draft`. All seven published
 
 ### Changed
 
+- CHECK starts checker commands (compile, tests, lint, evidence, app_smoke) from an environment allow-list, so host secrets such as ANTHROPIC_API_KEY, OPENAI_API_KEY and cloud credentials no longer reach agent-written scripts; FACTORY_CHECKER_ENV_ALLOW=NAME,... passes extra variables (#1590).
 - BUILD prompts on the codex and opencode routes no longer inline `AGENTS.md`, which those harnesses load from the worktree themselves. A one-line pointer replaces it. claude and command routes keep the full text (#1600).
 - When merging `origin/main` into an open PR conflicts on source paths, the `factory run` lane rebuilds the issue once from its frozen spec, with no PLAN call, on a fresh `<branch>-rebuild` branch off `origin/main`. It opens a new PR that keeps `Closes #<issue>`, closes the old PR with a comment linking the new one, keeps the old branch, and logs `pr_refresh` with `action=rebuild newPr=#<n>`. A failed rebuild, or a conflict on an already rebuilt branch, parks `conflict` with the failing stage and the conflicting paths. Land itself never builds, and `factory land` still parks on the conflict (#3325).
 - `factory tui`'s Active tab says why it is idle (`no active work — GitHub queue empty` or `— all runs parked/finished`), and the run detail header shows issue, title, phase, elapsed time and last activity in one block (#1365).
