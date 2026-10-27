@@ -70,8 +70,19 @@ export class MergeGatedError extends Error {
   }
 }
 
+/** What the lane needs to rebuild a PR whose merge with origin/main conflicted (#3325). */
+export type LandRebuild = { prNumber: number; branch: string; paths: string[]; mergeStateStatus: string };
+
 export class LandConflictError extends Error {
   readonly parkReason: ParkReason = 'conflict';
+
+  /** `rebuild` is set when land handed the conflict back for a rebuild instead of parking (#3325). */
+  constructor(
+    message: string,
+    readonly rebuild?: LandRebuild,
+  ) {
+    super(message);
+  }
 }
 
 export class AwaitingReviewError extends Error {
@@ -218,6 +229,8 @@ export async function syncDirtyPullRequest(opts: {
   log: (type: EventKind, msg: string, extra?: Pick<FactoryEvent, 'paths' | 'mode'>) => void;
   run?: CommandRunner;
   pathExists?: (path: string) => boolean;
+  rebuildOnConflict?: boolean;
+  state?: { mergeStateStatus?: string };
 }): Promise<void> {
   const { issue, branch, worktree, prNumber, log, run = landRuntime().shellOps.exec, pathExists = existsSync } = opts;
 
@@ -229,10 +242,15 @@ export async function syncDirtyPullRequest(opts: {
 
   const result = await syncLandBranch({ worktree, branch, run, log });
   if (!result.ok) {
-    const suffix = result.paths.length > 0 ? ` (${result.paths.join(', ')})` : '';
-    const msg = `land sync failed on ${branch}${suffix}: ${result.message} — parked`;
-    log('conflict', msg, result.paths.length > 0 ? { paths: result.paths } : undefined);
-    throw new LandConflictError(`issue #${issue}: ${msg}`);
+    const { paths } = result;
+    const msg = `land sync failed on ${branch}${paths.length > 0 ? ` (${paths.join(', ')})` : ''}: ${result.message}`;
+    if (opts.rebuildOnConflict && paths.length > 0) {
+      log('land', `${msg} — handing PR #${prNumber} back to the lane for a rebuild`);
+      const mergeStateStatus = opts.state?.mergeStateStatus ?? 'UNKNOWN';
+      throw new LandConflictError(`issue #${issue}: ${msg}`, { prNumber, branch, paths, mergeStateStatus });
+    }
+    log('conflict', `${msg} — parked`, paths.length > 0 ? { paths } : undefined);
+    throw new LandConflictError(`issue #${issue}: ${msg} — parked`);
   }
 }
 
@@ -267,6 +285,8 @@ export async function landOpenPullRequest(opts: {
   behindProbe?: (headSha: string, baseRef: string) => Promise<boolean | undefined>;
   /** #3146: aborts when the lane loses its claim; checked before the merge. */
   signal?: AbortSignal;
+  /** #3325: hand a merge-main conflict on real paths back as a LandConflictError carrying `rebuild`. */
+  rebuildOnConflict?: boolean;
 }): Promise<void> {
   const {
     octokit,
@@ -287,6 +307,7 @@ export async function landOpenPullRequest(opts: {
     withLock = (fn) => fn(),
     ensureWorktree,
     syncMain = false,
+    rebuildOnConflict,
     behindProbe = (sha: string, base: string) => probeHeadBehindBase(octokit, owner, repoName, base, sha),
   } = opts;
   const { errorDetail } = landRuntime();
@@ -399,7 +420,7 @@ export async function landOpenPullRequest(opts: {
       'pr_refresh',
       `PR #${prNumber} refreshed: mergeStateStatus=${state.mergeStateStatus ?? 'UNKNOWN'} action=merge-main reason=${reason} round=${syncRounds}/${MAX_LAND_SYNC_ROUNDS}`,
     );
-    await syncDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists });
+    await syncDirtyPullRequest({ issue, branch, worktree, prNumber, log, run, pathExists, rebuildOnConflict, state });
   };
 
   /** Syncs a DIRTY or behind PR with main under the land lock. Returns true when it synced. */

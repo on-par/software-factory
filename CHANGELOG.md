@@ -7,6 +7,19 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Fixed
+
+- Lane port leases write .factory/ports.json atomically (unique tmp file + rename) under the existing file lock, and a reader retries once on a parse error, so the lane proxy no longer drops every route mid-write (#1619).
+
+## 0.9.19 - 2026-10-26
+
+GitHub Actions runs now land after a successful `run-issue` or `ship` when
+`FACTORY_MERGE=1` (#3727), so dogfood merge flags actually merge. Also: TUI idle
+reasons, sandbox credential denials, Haiku triage routing, size-gate parent
+criteria, design-smell park findings, and `factory draft`. All seven published
+`@on-par` packages move to 0.9.19 in lockstep. Install or update with
+`npm install -g @on-par/factory-cli@latest`.
+
 ### Added
 
 - `factory status` shows merged-child coverage of each decomposed parent's criteria, and a merge updates one coverage comment on the parent (#3108)
@@ -20,12 +33,16 @@ section to `## X.Y.Z - date`. See
 ### Changed
 
 - BUILD prompts on the codex and opencode routes no longer inline `AGENTS.md`, which those harnesses load from the worktree themselves. A one-line pointer replaces it. claude and command routes keep the full text (#1600).
+- When merging `origin/main` into an open PR conflicts on source paths, the `factory run` lane rebuilds the issue once from its frozen spec, with no PLAN call, on a fresh `<branch>-rebuild` branch off `origin/main`. It opens a new PR that keeps `Closes #<issue>`, closes the old PR with a comment linking the new one, keeps the old branch, and logs `pr_refresh` with `action=rebuild newPr=#<n>`. A failed rebuild, or a conflict on an already rebuilt branch, parks `conflict` with the failing stage and the conflicting paths. Land itself never builds, and `factory land` still parks on the conflict (#3325).
 - `factory tui`'s Active tab says why it is idle (`no active work — GitHub queue empty` or `— all runs parked/finished`), and the run detail header shows issue, title, phase, elapsed time and last activity in one block (#1365).
 - The agent sandbox (`sandbox-exec` and `firejail`) now denies reads of `~/.ssh`, `~/.aws`, `~/.gnupg` and `~/.config/gh`. Harness auth files stay readable (#1586).
 - Claude Haiku 5.5 (`claude-haiku-5-5`, $0.10/$0.50 per Mtok) is a packaged claude-cli model. The readiness judge (`readiness_judge`) now routes through the new `triage_cheap` tier, which tries Haiku before Sonnet. `models.pins.triage` and `tiers.triage` still apply to it (#783).
 - With no OS sandbox runtime on PATH, `factory doctor`'s `codex installed` line reports the Codex sandbox preflight result, the mode Codex will use (`--sandbox workspace-write`, plus any `sandbox.codexFullAccessTasks`) and how to opt in to full access (#3082).
 - GitHub-queue enqueue now converges when several hosts act at once. After writing its `factory:order:<n>` label an enqueue keeps one order label per issue and moves the higher-numbered issue off a shared position, emitting an `order_collision_repaired` event (at most 3 attempts). Lane scans read every page instead of the first 100. Blocked-park auto-unpark runs only on the host named by `FACTORY_FLEET_LEADER` when it is set; unset keeps every host polling (#3147).
 - `factory-run.yml` sets `FACTORY_MERGE=1` and `FACTORY_MERGE_ADMIN=1` on the `Run factory` step, so GitHub Actions runs (including dogfood) merge their green PR, with admin bypass when `FACTORY_GITHUB_TOKEN` allows it. Callers pinned to `@vX.Y.Z` get this from the next tag.
+- `factory-run.yml` installs `@on-par/factory-cli@0.9.19` (`FACTORY_CLI_VERSION`), the
+  committed lockstep `package.json` versions are 0.9.19, and the runbook's external
+  caller pins `@v0.9.19`. The runbook says to pin the tag of the CLI you want.
 - The rendered constitution is capped at 8 KB with a `[truncated — see <file>]` marker. BUILD and rework prompts get only its Standards/Conventions/Rules/Guidelines sections, and fall back to the full text when none are found. PLAN keeps the full text (#1599).
 - BUILD (commit-only, opencode, codex, local-small) inlines the frozen spec's body once, without YAML frontmatter or `adr:` drafts, and no longer points the worker at the spec file (#1595).
 - The frozen spec's `route` now always matches the route that built the issue. One `RouteCapabilities` record per lane feeds both PLAN and BUILD, a single `resolveRoute` owns the codex→claude fallback, and a new `route-degraded` warn event is logged (and the spec rewritten) when the route changes after PLAN: breaker opened mid-lane, breaker gate swap, or failover inside BUILD (#664).
@@ -33,6 +50,7 @@ section to `## X.Y.Z - date`. See
 ### Fixed
 
 - GitHub Actions runs now merge. With `FACTORY_MERGE=1`, `factory-run.sh` runs `factory land <issue>` in the same job after `run-issue` or `ship` exits 0. Before, the `Run factory` step set `FACTORY_MERGE=1` but the job ended at a ready PR. A draft PR is not landed, CI pending still fails the job, and a failed land fails the job with land's exit code. `land` is still not an allowed `command` input (#3727).
+- Worktree GC runs its git calls through execGit (120 s deadline, no terminal prompt), so a stalled remote can no longer hang GC or `factory doctor --reconcile`; a timed-out remote check keeps the worktree as held with reason "remote check timed out" (#1627).
 - Two lanes sharing a breaker file no longer both run the usage-cap restore probe: a lane that claims the probe after another lane already closed or re-capped the provider drops its claim instead of probing again (#3708).
 - Bare `factory logs`, `--json` and `--follow`, the `human-restarted` park check for ship/run-issue/run-brief, `factory feedback`, `factory filing preview` and `factory classifier backtest` now read rotated event-log segments, not only the live `events.ndjson` (#3711).
 - SHIP CI attribution counts a CodeQL alert in a file the PR did not change as introduced by the PR when the alert is not open on the base branch, or, when base alerts can't be read, when the CodeQL check reports new alerts in code changed by the PR. Such alerts now get capped CI rework instead of a baseline ci-failed park (#3712).
