@@ -63,6 +63,24 @@ describe('appSmokeChecker', () => {
     expect(onPgid).toHaveBeenCalledWith(4242);
   });
 
+  it('starts the app from the env allow-list: no host secret, lane PORT and HOST kept (#1590)', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-secret-value');
+    let seen: Record<string, string | undefined> = {};
+    const app = fakeApp(1);
+    await appSmokeChecker(ctxOf(), {
+      startApp: (argv, o) => {
+        seen = o.env;
+        return app(argv, o);
+      },
+      probeReady: async () => null,
+      killGroup: async () => {},
+    });
+    vi.unstubAllEnvs();
+    expect(seen.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(seen.PORT).toBe('45123');
+    expect(seen.HOST).toBe('127.0.0.1');
+  });
+
   it('fails with "not ready after Ns" when nothing answers below 500', async () => {
     let t = 0;
     const killGroup = vi.fn(async () => {});

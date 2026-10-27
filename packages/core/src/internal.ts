@@ -117,6 +117,7 @@ export {
   resolveTrustTier,
 } from './config/repo.js';
 export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix, resolveHostMaxBuilds } from './config/index.js';
+export { CHECKER_ENV_ALLOW_VAR, CHECKER_ENV_ALLOWLIST, checkerParentEnv } from './environment/checker-env.js';
 export { evaluateLoadGuard, formatLoadHold, readHostLoad, type LoadGuardDecision } from './environment/load-guard.js';
 export {
   BYTES_PER_GB,

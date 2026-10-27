@@ -16,6 +16,9 @@ export interface RunCommandOptions {
   maxBuffer?: number;
   /** Undefined values explicitly remove inherited variables. */
   env?: NodeJS.ProcessEnv;
+  /** Environment the child inherits before `env` is merged over it. Defaults to `process.env`;
+   *  checker commands pass the allow-listed `checkerParentEnv()` (#1590). */
+  parentEnv?: Record<string, string | undefined>;
   /** When set, the child is spawned detached (its own process group) and
    *  its pid is reported here so a lane can track and later kill the
    *  whole group. */
@@ -175,7 +178,7 @@ export async function runCommand(argv: readonly string[], options: RunCommandOpt
   }
 
   const githubAuth = options.githubAuth ?? isGitHubClient(argv[0]);
-  const env = childProcessEnv(process.env, options.env, { githubAuth });
+  const env = childProcessEnv(options.parentEnv ?? process.env, options.env, { githubAuth });
 
   const result = options.onPgid
     ? await runCommandDetached(argv, options, env)
