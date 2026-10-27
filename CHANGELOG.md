@@ -11,6 +11,10 @@ section to `## X.Y.Z - date`. See
 
 - Lane port leases write .factory/ports.json atomically (unique tmp file + rename) under the existing file lock, and a reader retries once on a parse error, so the lane proxy no longer drops every route mid-write (#1619).
 
+### Added
+
+- `factory status` shows merged-child coverage of each decomposed parent's criteria, and a merge updates one coverage comment on the parent (#3108)
+
 ## 0.9.19 - 2026-10-26
 
 GitHub Actions runs now land after a successful `run-issue` or `ship` when
@@ -22,7 +26,6 @@ criteria, design-smell park findings, and `factory draft`. All seven published
 
 ### Added
 
-- `factory status` shows merged-child coverage of each decomposed parent's criteria, and a merge updates one coverage comment on the parent (#3108)
 - `factory cost` takes `--since <ISO8601>` (scopes rows, perModel and total) and `--limit <n>` (caps rows only), in text and `--json` output (#3187).
 - At trust tier T1 the PR classifier gate holds a deterministic sample of class-A PRs (`sha256(repo#issue)` below `classifier.t1SampleRate`, default 0.25) by applying `no-auto-merge` and logging a `t1-sampled` merge-gated event (#1958).
 - The size gate gives a parent issue's acceptance criteria ids (`P1`, `P2`, ...), has each child criterion trace to them, rejects a decomposition that leaves a parent criterion uncovered (naming it), and writes `Covers parent criteria: ...` into each child body (#3105).
