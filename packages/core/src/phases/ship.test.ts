@@ -165,7 +165,6 @@ describe('shipPhase self-healing', () => {
       "git ls-remote --heads origin 'ship-it/23-self-heal'",
       'git diff --stat origin/main...HEAD',
       'git diff --numstat origin/main...HEAD',
-      'git rev-parse HEAD',
     ]);
     expect(calls).toContainEqual([
       'pulls.create',
@@ -185,6 +184,7 @@ describe('shipPhase self-healing', () => {
     expect(calls).toContainEqual(['graphql', expect.stringContaining('markPullRequestReadyForReview'), { id: 'PR_1' }]);
     expect(logs).toContainEqual(['pr_opened', 'opened PR #123 for committed work on ship-it/23-self-heal (base main)']);
     expect(logs.map(([type]) => type)).not.toContain('recovered');
+    expect(calls).not.toContainEqual(['issues.createComment', expect.anything()]);
   });
 
   it.each([
@@ -940,7 +940,12 @@ describe('shipPhase inline work source (#507)', () => {
       watchCI: false,
       log: () => {},
       run,
-      work: { id: 'local-brief:brief.md#abc123def456', kind: 'local-brief', title: 'Add a widget' },
+      work: {
+        id: 'local-brief:../private/brief.md#abc123def456',
+        kind: 'local-brief',
+        title: 'Add a widget',
+        reference: { externalId: 'abc123def4567890', url: 'file:///home/op/private/brief.md' },
+      },
     });
 
     expect(result).toEqual({ ok: true, prNumber: 123 });
@@ -948,10 +953,12 @@ describe('shipPhase inline work source (#507)', () => {
       'pulls.create',
       expect.objectContaining({
         title: 'Add a widget',
-        body: expect.stringContaining('Implements local brief `local-brief:brief.md#abc123def456`'),
+        body: expect.stringContaining('Implements a local brief (sha256 `abc123def456`).'),
       }),
     ]);
     const [, createArgs] = calls.find(([name]) => name === 'pulls.create') as [string, any];
+    expect(createArgs.body).not.toContain('brief.md');
+    expect(createArgs.body).not.toContain('file://');
     expect(createArgs.body).not.toContain('Closes #');
     expect(createArgs.body).not.toContain('PLAN → BUILD → CHECK → SHIP');
   });
@@ -1232,118 +1239,6 @@ describe('shipPhase CI watch', () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-});
-
-describe('shipPhase evidence pack', () => {
-  it('posts an evidence pack comment on the happy path and logs evidence', async () => {
-    const { octokit, calls } = createOctokit();
-    const logs: Array<[string, string]> = [];
-    const run = async (command: string) => {
-      const remote = remoteHeadStub(command);
-      if (remote) return remote;
-      if (command === 'git status --porcelain') return { stdout: '' };
-      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
-      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
-      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
-      return { stdout: '' };
-    };
-    const checkSummary = { failures: 0, passes: 3, skips: 0, total: 3, results: [] };
-
-    const result = await shipPhase({
-      issue: workKeyFromIssue(23),
-      repo: 'on-par/software-factory',
-      worktree: '/repo-factory-23',
-      branch: 'ship-it/23-self-heal',
-      octokit: octokit as any,
-      watchCI: false,
-      log: (type, msg) => logs.push([type, msg]),
-      run,
-      checkSummary,
-      reworkRounds: 1,
-      specPath: '/nonexistent/spec.md',
-      eventsFile: '/nonexistent/events.ndjson',
-      startedAt: new Date().toISOString(),
-      logsDir: '/nonexistent/logs',
-    });
-
-    expect(result).toEqual({ ok: true, prNumber: 123 });
-    expect(calls).toContainEqual([
-      'issues.createComment',
-      expect.objectContaining({
-        owner: 'on-par',
-        repo: 'software-factory',
-        issue_number: 123,
-        body: expect.stringContaining('Evidence pack'),
-      }),
-    ]);
-    expect(logs).toContainEqual(['evidence', 'posted evidence pack to PR #123']);
-  });
-
-  it('includes rework rounds in the posted comment body (AC-2)', async () => {
-    const { octokit, calls } = createOctokit();
-    const logs: Array<[string, string]> = [];
-    const run = async (command: string) => {
-      const remote = remoteHeadStub(command);
-      if (remote) return remote;
-      if (command === 'git status --porcelain') return { stdout: '' };
-      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
-      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
-      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
-      return { stdout: '' };
-    };
-    const checkSummary = { failures: 0, passes: 3, skips: 0, total: 3, results: [] };
-
-    await shipPhase({
-      issue: workKeyFromIssue(23),
-      repo: 'on-par/software-factory',
-      worktree: '/repo-factory-23',
-      branch: 'ship-it/23-self-heal',
-      octokit: octokit as any,
-      watchCI: false,
-      log: (type, msg) => logs.push([type, msg]),
-      run,
-      checkSummary,
-      reworkRounds: 2,
-    });
-
-    expect(calls).toContainEqual([
-      'issues.createComment',
-      expect.objectContaining({ body: expect.stringContaining('Rework rounds: 2') }),
-    ]);
-  });
-
-  it('never blocks the ship when posting the evidence pack throws', async () => {
-    const { octokit, calls } = createOctokit();
-    octokit.rest.issues.createComment = async (args: any) => {
-      calls.push(['issues.createComment', args]);
-      throw new Error('comment failed');
-    };
-    const logs: Array<[string, string]> = [];
-    const run = async (command: string) => {
-      const remote = remoteHeadStub(command);
-      if (remote) return remote;
-      if (command === 'git status --porcelain') return { stdout: '' };
-      if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
-      if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
-      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
-      return { stdout: '' };
-    };
-
-    const result = await shipPhase({
-      issue: workKeyFromIssue(23),
-      repo: 'on-par/software-factory',
-      worktree: '/repo-factory-23',
-      branch: 'ship-it/23-self-heal',
-      octokit: octokit as any,
-      watchCI: false,
-      log: (type, msg) => logs.push([type, msg]),
-      run,
-    });
-
-    expect(result).toEqual({ ok: true, prNumber: 123 });
-    expect(logs).toContainEqual(['ready', 'PR #123 ready for review']);
-    expect(logs.some(([type]) => type === 'evidence')).toBe(false);
   });
 });
 

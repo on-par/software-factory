@@ -89,6 +89,8 @@ async function shipPhaseImpl(opts: {
   footer?: string;
   /** Stop at the draft PR: skip mark-ready (#3449). */
   draft?: boolean;
+  /** Post the evidence pack as a PR comment (pr.evidenceComment); default off. */
+  evidenceComment?: boolean;
   log: (type: EventKind, msg: string) => void;
   run?: CommandRunner;
   /** Runs the gh rerun argv for the CI infra rescue (#2365); default runCommand. */
@@ -106,7 +108,7 @@ async function shipPhaseImpl(opts: {
   pinNotes?: string[];
   /** The run's resolved work request; when its kind is not 'github-issue', the PR
    *  title/body come from it instead of fetching the (nonexistent) issue (#507). */
-  work?: Pick<WorkRequest, 'id' | 'kind' | 'title'>;
+  work?: Pick<WorkRequest, 'id' | 'kind' | 'title' | 'reference'>;
   /** The ADR-0147 slice this run ships; titles the PR `slice k/n` and only the final slice closes the issue. */
   slice?: { index: number; count: number };
   /** Stack-mode (ADR-0161) position: the PR opens on `stack.base` and its body names the stack order. Ignored for inline work. */
@@ -380,8 +382,10 @@ async function shipPhaseImpl(opts: {
     const stack = inlineWork ? undefined : opts.stack;
     const base = stack?.base ?? SHIP_BASE_BRANCH;
     const finalSlice = !slice || slice.index >= slice.count;
+    // The brief's path is local and often gitignored, so the PR names it by content digest only.
+    const briefDigest = inlineWork?.reference?.externalId.slice(0, 12);
     const summaryLine = inlineWork
-      ? `Implements local brief \`${inlineWork.id}\`.`
+      ? `Implements a local brief${briefDigest ? ` (sha256 \`${briefDigest}\`)` : ''}.`
       : slice
         ? `Implements slice ${slice.index}/${slice.count} of #${issue}.`
         : `Implements #${issue}.`;
@@ -436,7 +440,7 @@ async function shipPhaseImpl(opts: {
     return { ok: false, reason };
   }
 
-  if (!reentry)
+  if (!reentry && opts.evidenceComment)
     try {
       let checkedSha: string | undefined;
       try {

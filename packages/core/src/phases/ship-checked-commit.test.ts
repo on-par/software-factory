@@ -38,6 +38,7 @@ async function ship(run: (command: string) => Promise<{ stdout: string }>) {
     watchCI: false,
     log: (type, msg) => logs.push([type, msg]),
     run,
+    evidenceComment: true,
     checkSummary: { failures: 0, passes: 3, skips: 0, total: 3, results: [] },
     reworkRounds: 0,
     specPath: '/nonexistent/spec.md',

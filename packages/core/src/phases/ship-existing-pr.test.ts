@@ -72,6 +72,7 @@ describe('shipPhase existing PR push (#1813)', () => {
       watchCI: false,
       log: (type, msg) => logs.push([type, msg]),
       run,
+      evidenceComment: true,
     });
     return { result, events, commands, logs };
   }
