@@ -15,7 +15,7 @@ Never use `gh pr merge --admin`, or any merge that bypasses required status chec
 
 1. **The factory's own auto-merge.** It bypasses the review-approval requirement, which a bot cannot obtain. Its CI gate (`waitForMerge` in `packages/cli/src/cli/index.ts`) still refuses to merge unless CI reported a real `success`. It never merges on a failure or an unresolved or hung outcome.
 2. **A human confirms a required check is hung, not failed** (for example the #739 CI deadlock). Before merging:
-   1. Run `bash scripts/verify.sh --no-e2e` locally and get it green.
+   1. Run `bash scripts/verify.sh --no-coverage` locally and get it green.
    2. Run targeted checks for anything the fast path skips (coverage: `npm run test` then `npm run coverage-ratchet`).
    3. Say explicitly in the merge or PR comment that the check was hung and what you ran instead.
 
