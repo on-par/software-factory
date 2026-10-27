@@ -73,7 +73,7 @@ and the decisions record.
 If users or operators can see your change, add a one-line entry under `## Unreleased` in
 [CHANGELOG.md](CHANGELOG.md) (`Added`, `Changed` or `Fixed`, with the issue link), and update
 the README, `docs/status.md`, `docs/agents.md`, `docs/models.md` or `docs/ops/` in the same PR.
-Do not change `package.json` versions: they stay at the last committed version (0.9.20), and the
+Do not change `package.json` versions: they stay at the last committed version (0.9.21), and the
 publish job stamps the release version at build time without committing it. The release steps
 and the publish gate are in [docs/ops/docs-and-changelog.md](docs/ops/docs-and-changelog.md).
 

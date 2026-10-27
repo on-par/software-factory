@@ -7,6 +7,21 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.21 - 2026-10-27
+
+Republish / recovery: npm phantom-staged `@on-par/factory-core@0.9.20`
+(E409 on republish; packument never lists 0.9.20; known npm/cli#9889).
+Installs of `@on-par/factory-cli@0.9.20` cannot resolve `factory-core@0.9.20`.
+Same product content as 0.9.20. All seven published `@on-par` packages move
+to 0.9.21 in lockstep. Install or update with
+`npm install -g @on-par/factory-cli@latest`.
+
+### Changed
+
+- `factory-run.yml` installs `@on-par/factory-cli@0.9.21` (`FACTORY_CLI_VERSION`), the
+  committed lockstep `package.json` versions are 0.9.21, and the runbook's external
+  caller pins `@v0.9.21`. The runbook says to pin the tag of the CLI you want.
+
 ## 0.9.20 - 2026-10-27
 
 SHIP's evidence pack PR comment is opt-in (`pr.evidenceComment: true`), and a
