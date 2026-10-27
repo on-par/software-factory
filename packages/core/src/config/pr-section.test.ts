@@ -25,3 +25,10 @@ describe('pr.walkthrough (#3623)', () => {
     expect(PrConfigSections.pr.safeParse({ walkthrough: { other: 1 } }).success).toBe(false);
   });
 });
+
+describe('pr.evidenceComment', () => {
+  it('accepts a boolean and rejects anything else', () => {
+    expect(PrConfigSections.pr.parse({ evidenceComment: true })).toEqual({ evidenceComment: true });
+    expect(PrConfigSections.pr.safeParse({ evidenceComment: 'yes' }).success).toBe(false);
+  });
+});

@@ -239,7 +239,10 @@ function modelNamespace(): Node[] {
       kind: 'object',
       key: 'pr',
       doc: doc('pr'),
-      children: [unset('footer', doc('pr', 'footer'), inline(loadFactoryConfig().pr?.footer))],
+      children: [
+        unset('footer', doc('pr', 'footer'), inline(loadFactoryConfig().pr?.footer)),
+        unset('evidenceComment', doc('pr', 'evidenceComment'), 'true'),
+      ],
     },
     unset(
       'checks',

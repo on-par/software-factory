@@ -7,7 +7,13 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Changed
+
+- SHIP no longer posts the evidence pack as a PR comment by default. Set `pr.evidenceComment: true` in the repo config to post it. The PR body is unchanged.
+
 ### Fixed
+
+- A `run-brief` PR body no longer names the brief's file path, which is often gitignored or outside the repo. It names the brief by the first 12 characters of its sha256.
 
 - Lane port leases write .factory/ports.json atomically (unique tmp file + rename) under the existing file lock, and a reader retries once on a parse error, so the lane proxy no longer drops every route mid-write (#1619).
 
