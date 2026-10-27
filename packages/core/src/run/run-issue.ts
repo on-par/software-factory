@@ -74,7 +74,8 @@ import {
   type PrShadowInput,
   type PrShadowVerdict,
 } from '../review/classifier.js';
-import { decideT1Sample, resolveReviewRouting, type ReviewRouting, type T1SampleConfig } from '../review/routing.js';
+import { decideTrustTier, resolveReviewRouting, type ReviewRouting, type TrustTierConfig } from '../review/routing.js';
+import { logTrustTier } from './trust-tier-log.js';
 import { captureDiffBase } from '../checkers/design-smells.js';
 import type { ReworkHistory } from '../checkers/rework-history.js';
 import type { AutoFailoverSettings, SizeGateMode } from '../config/index.js';
@@ -175,7 +176,7 @@ export interface RunRequest extends ReworkRequestFields {
   stewardEnabled?: boolean;
   /** Review floor rules for CHECK's design critic class-A skip (#3374); set regardless of the classifier gate. */
   reviewFloorRules?: ReviewFloorRuleSet;
-  prClassifier?: { rules: ReviewFloorRuleSet; gateLabel: string; modelPin?: string } & T1SampleConfig;
+  prClassifier?: { rules: ReviewFloorRuleSet; gateLabel: string; modelPin?: string } & TrustTierConfig;
   timeouts: { plan: number; build: number; check: number; approval: number; tests: number; compile?: number };
   modelPins: EffectiveModelPins;
   codexDisabled: boolean;
@@ -1083,7 +1084,8 @@ async function runIssueOnce(
         rules: request.prClassifier.rules,
         readChanges: ports.readReviewFloorChanges,
       });
-      reviewRouting = decideT1Sample(reviewRouting, request.prClassifier, request);
+      reviewRouting = decideTrustTier(reviewRouting, request.prClassifier, request);
+      logTrustTier(reviewRouting, 'demotion', log);
       if (reviewRouting.gated) {
         const label = request.prClassifier.gateLabel;
         const [owner, repoName] = request.repo.split('/');
@@ -1102,6 +1104,7 @@ async function runIssueOnce(
           `${reviewRouting.reason} — applied ${label}; auto-merge held for a human${reviewRouting.error ? ` (${reviewRouting.error})` : ''}`,
         );
       }
+      logTrustTier(reviewRouting, 'receipt', log);
 
       // Shadow model verdict (#1725, ADR-0121): recorded only. It runs after the gate is fully
       // decided, so it cannot change the label or merge routing.

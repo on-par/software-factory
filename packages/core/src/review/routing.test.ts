@@ -5,6 +5,8 @@ import { DEFAULT_REVIEW_FLOOR_RULES } from './floor.js';
 import {
   classifierGateReason,
   decideT1Sample,
+  decideTrustTier,
+  effectiveTrustTier,
   parseNumstat,
   readReviewFloorChanges,
   resolveReviewRouting,
@@ -247,5 +249,81 @@ describe('decideT1Sample (#1958)', () => {
   it('leaves a C floor gated with its own reason', () => {
     const c: ReviewRouting = { floor: 'C', rules: [], gated: true, reason: 'classifier:floor:C:workflows' };
     expect(decideT1Sample(c, { trustTier: 'T1', t1SampleRate: 1 }, input)).toBe(c);
+  });
+});
+
+describe('effectiveTrustTier (#1960)', () => {
+  const demotion = { reason: 'slip on #99' };
+
+  it('drops a demoted tier one rung and floors at T0', () => {
+    expect(effectiveTrustTier('T2', demotion)).toBe('T1');
+    expect(effectiveTrustTier('T1', demotion)).toBe('T0');
+    expect(effectiveTrustTier('T0', demotion)).toBe('T0');
+  });
+
+  it('is the identity without a demotion', () => {
+    for (const tier of ['T0', 'T1', 'T2'] as const) expect(effectiveTrustTier(tier)).toBe(tier);
+  });
+
+  it('fails closed to T0 for an unknown tier', () => {
+    expect(effectiveTrustTier('T9' as never)).toBe('T0');
+  });
+});
+
+describe('decideTrustTier (#1960)', () => {
+  const aFloor: ReviewRouting = { floor: 'A', rules: [], gated: false };
+  const input = { repo: 'o/r', issue: 7 };
+  const value = t1SampleValue('o/r', 7);
+  const demotion = { reason: 'slip on #99' };
+
+  it('records a t2-auto receipt for an ungated A floor at T2', () => {
+    const out = decideTrustTier(aFloor, { trustTier: 'T2', t1SampleRate: 1 }, input);
+    expect(out).toMatchObject({
+      gated: false,
+      receipt: 't2-auto',
+      trustTier: { configured: 'T2', effective: 'T2' },
+    });
+    expect(out.sample).toBeUndefined();
+  });
+
+  it('leaves a gated class C routing gated with no receipt', () => {
+    const cFloor: ReviewRouting = { floor: 'C', rules: [], gated: true, reason: 'classifier:floor:C:x' };
+    const out = decideTrustTier(cFloor, { trustTier: 'T2', t1SampleRate: 0 }, input);
+    expect(out).toMatchObject({ gated: true, reason: 'classifier:floor:C:x' });
+    expect(out.receipt).toBeUndefined();
+  });
+
+  it('keeps a classifier error gated with no receipt', () => {
+    const errored: ReviewRouting = {
+      floor: null,
+      rules: [],
+      gated: true,
+      reason: 'classifier:error',
+      error: 'boom',
+    };
+    const out = decideTrustTier(errored, { trustTier: 'T2', t1SampleRate: 0 }, input);
+    expect(out.gated).toBe(true);
+    expect(out.receipt).toBeUndefined();
+  });
+
+  it('samples a demoted T2 like T1: held sample, no receipt', () => {
+    const out = decideTrustTier(aFloor, { trustTier: 'T2', t1SampleRate: value + 0.01, demotion }, input);
+    expect(out).toMatchObject({
+      gated: true,
+      reason: expect.stringContaining('t1-sampled'),
+      trustTier: { configured: 'T2', effective: 'T1', demotion: 'slip on #99' },
+    });
+    expect(out.receipt).toBeUndefined();
+  });
+
+  it('records an unheld sample and no receipt for a demoted T2 at rate 0', () => {
+    const out = decideTrustTier(aFloor, { trustTier: 'T2', t1SampleRate: 0, demotion }, input);
+    expect(out.gated).toBe(false);
+    expect(out.sample).toMatchObject({ held: false });
+    expect(out.receipt).toBeUndefined();
+  });
+
+  it('returns the routing untouched at T0 without a demotion', () => {
+    expect(decideTrustTier(aFloor, { trustTier: 'T0', t1SampleRate: 1 }, input)).toStrictEqual(aFloor);
   });
 });

@@ -22,6 +22,9 @@ export { parseNumstat } from './floor.js';
 /** Gate reason for a class-A PR held by the T1 deterministic sample (#1958, ADR-0144). */
 export const T1_SAMPLED_REASON = 't1-sampled';
 
+/** Receipt for a class-A PR sent to auto-merge at trust tier T2 (#1960, ADR-0144). */
+export const T2_AUTO_RECEIPT = 't2-auto';
+
 /** The classifier's pre-SHIP decision for one run (#1724). */
 export interface ReviewRouting {
   /** null when the floor could not be computed (error ⇒ gated). */
@@ -36,6 +39,10 @@ export interface ReviewRouting {
   shadow?: PrShadowVerdict;
   /** T1 sample (#1958, ADR-0144); present only at T1 for an otherwise ungated A floor. */
   sample?: { value: number; rate: number; held: boolean };
+  /** Configured and effective trust tier (#1960); present when the tier is not T0 or a demotion is set. */
+  trustTier?: { configured: TrustTier; effective: TrustTier; demotion?: string };
+  /** Present only for an ungated class-A routing at an effective T2 (#1960, ADR-0144). */
+  receipt?: typeof T2_AUTO_RECEIPT;
 }
 
 function errorMessage(err: unknown): string {
@@ -163,4 +170,42 @@ export function decideT1Sample(
         sample,
       }
     : { ...routing, sample };
+}
+
+/** An active, unacknowledged slip demotion (ADR-0148, #1959); drops the effective tier one rung. */
+export interface TrustTierDemotion {
+  reason: string;
+}
+
+/** T1 sample config plus the demotion that can lower the configured tier (#1960). */
+export interface TrustTierConfig extends T1SampleConfig {
+  demotion?: TrustTierDemotion;
+}
+
+/** The tier the gate acts on: a demotion drops the configured tier one rung; an unknown tier fails closed to T0. */
+export function effectiveTrustTier(tier: TrustTier, demotion?: TrustTierDemotion): TrustTier {
+  if (tier !== 'T0' && tier !== 'T1' && tier !== 'T2') return 'T0';
+  if (!demotion) return tier;
+  return tier === 'T2' ? 'T1' : 'T0';
+}
+
+/** Apply the trust-tier ladder (ADR-0144, #1960): T1 samples, an eligible class-A PR at T2 gets the
+ *  `t2-auto` receipt. Escalate-only: it never ungates a gated routing. */
+export function decideTrustTier(
+  routing: ReviewRouting,
+  config: TrustTierConfig,
+  { repo, issue }: { repo: string; issue: number },
+): ReviewRouting {
+  const effective = effectiveTrustTier(config.trustTier, config.demotion);
+  const sampled = decideT1Sample(routing, { trustTier: effective, t1SampleRate: config.t1SampleRate }, { repo, issue });
+  const tier =
+    config.trustTier !== 'T0' || config.demotion
+      ? {
+          configured: config.trustTier,
+          effective,
+          ...(config.demotion ? { demotion: config.demotion.reason } : {}),
+        }
+      : undefined;
+  const eligible = effective === 'T2' && !sampled.gated && sampled.floor === 'A';
+  return { ...sampled, ...(tier ? { trustTier: tier } : {}), ...(eligible ? { receipt: T2_AUTO_RECEIPT } : {}) };
 }
