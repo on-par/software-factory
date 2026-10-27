@@ -7,6 +7,14 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.20 - 2026-10-27
+
+SHIP's evidence pack PR comment is opt-in (`pr.evidenceComment: true`), and a
+`run-brief` PR body no longer names the brief's filesystem path. Also: atomic
+lane port leases (#1619) and `factory status` coverage of decomposed parents
+(#3108). All seven published `@on-par` packages move to 0.9.20 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Changed
 
 - SHIP no longer posts the evidence pack as a PR comment by default. Set `pr.evidenceComment: true` in the repo config to post it. The PR body is unchanged.
@@ -20,6 +28,9 @@ section to `## X.Y.Z - date`. See
 ### Added
 
 - `factory status` shows merged-child coverage of each decomposed parent's criteria, and a merge updates one coverage comment on the parent (#3108)
+- `factory-run.yml` installs `@on-par/factory-cli@0.9.20` (`FACTORY_CLI_VERSION`), the
+  committed lockstep `package.json` versions are 0.9.20, and the runbook's external
+  caller pins `@v0.9.20`. The runbook says to pin the tag of the CLI you want.
 
 ## 0.9.19 - 2026-10-26
 

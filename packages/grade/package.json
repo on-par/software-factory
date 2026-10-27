@@ -1,7 +1,7 @@
 {
   "name": "@on-par/factory-grade",
   "private": true,
-  "version": "0.9.19",
+  "version": "0.9.20",
   "description": "Grade: read-only grader for recorded factory runs. Loads runs through the @on-par/factory-core run store and emits a versioned GradeReport.",
   "type": "module",
   "main": "dist/index.js",
@@ -23,7 +23,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@on-par/factory-core": "^0.9.19",
+    "@on-par/factory-core": "^0.9.20",
     "zod": "^4.6.5"
   },
   "devDependencies": {

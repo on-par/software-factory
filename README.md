@@ -88,7 +88,7 @@ While SHIP waits for CI, a PR with no checks reported yet counts as pending. `fa
 You can also run one factory command (`run-issue <n>`, `ship <n>` or `doctor`) on a GitHub-hosted runner. Call the reusable workflow from your own repo, pinned to a release tag, and pass your own secrets (`FACTORY_GITHUB_TOKEN` plus the selected provider's key):
 
 ```yaml
-uses: on-par/software-factory/.github/workflows/factory-run.yml@v0.9.19
+uses: on-par/software-factory/.github/workflows/factory-run.yml@v0.9.20
 ```
 
 The full caller, inputs, providers and secrets are in [docs/runbooks/github-actions-run.md](docs/runbooks/github-actions-run.md).
@@ -126,7 +126,7 @@ factory self-update --to <version>          # install that exact stable version 
 
 `factory self-update --to` installs the version next to the running Node, runs `factory doctor`, restarts factoryd, and rolls back if the install or doctor fails. factoryd installed from npm runs the same update on its own when a new stable release appears. Update modes, opting out, and manual rollback are in [docs/ops/updating.md](docs/ops/updating.md). Release notes are in [CHANGELOG.md](CHANGELOG.md).
 
-The `version` fields in this repo's `package.json` files stay at the last committed version (0.9.19). The publish job writes the release or prerelease version at build time and never commits it, so use `factory --version` or `npm view @on-par/factory-cli dist-tags` to see real versions.
+The `version` fields in this repo's `package.json` files stay at the last committed version (0.9.20). The publish job writes the release or prerelease version at build time and never commits it, so use `factory --version` or `npm view @on-par/factory-cli dist-tags` to see real versions.
 
 ## CLI commands
 
