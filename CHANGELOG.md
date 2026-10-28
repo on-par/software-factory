@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- `factory run-brief <file> [file...] --stack` opens the briefs as a PR stack: each brief starts from and targets the previous brief's PR head branch; a failed brief or one with no PR (`--no-pr`) stops the stack and the rest are skipped and reported (#3763).
+
 ## 0.9.23 - 2026-10-28
 
 `--base-branch` for ship/run-issue/run-brief, plus multi-file `run-brief` (#3764, #3762).
