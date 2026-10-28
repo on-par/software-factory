@@ -18,6 +18,7 @@ section to `## X.Y.Z - date`. See
 ### Fixed
 
 - Evidence commands on macOS `sandbox-exec` can reach loopback, so a `dotnet test` fail-to-pass proof no longer aborts connecting to its testhost; other outbound stays denied (#3748).
+- A fail-to-pass proof that fails identically on base and head now gets one free CHECK re-run and parks `check-infra` instead of builder rework, and a test host it leaks is reported once inside the evidence failure rather than as a separate `side_effects` failure (#3749).
 
 ## 0.9.21 - 2026-10-27
 
