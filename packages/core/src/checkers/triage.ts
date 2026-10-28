@@ -23,8 +23,10 @@ export function triageCheckFailure(result: CheckerOutput): CheckFailureTriage {
   if (result.result !== 'FAIL') return { class: 'code' };
   if (result.checker === 'evidence_plan') {
     const failed = (result.evidencePlanResults ?? []).filter((e) => e.status === 'FAIL');
-    if (failed.length > 0 && failed.every((e) => e.sharedFailure !== undefined))
-      return { class: 'infra', kind: 'evidence-env', line: failed[0]!.sharedFailure!.slice(0, MAX_LINE) };
+    const shared = failed.map((e) => e.sharedFailure).filter((s): s is string => s !== undefined);
+    const [first] = shared;
+    if (first !== undefined && shared.length === failed.length)
+      return { class: 'infra', kind: 'evidence-env', line: first.slice(0, MAX_LINE) };
   }
   const lines = (result.details ?? '').split('\n');
   if (result.timedOut === true) {
