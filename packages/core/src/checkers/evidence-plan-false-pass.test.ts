@@ -129,6 +129,7 @@ describe('fail-to-pass evidence base comparison', () => {
     return runEvidencePlan([entry], new Map([['test', ['npm', 'run', 'test']]]), {
       worktree: lane,
       sandbox: policy(lane),
+      testRunner: 'vitest',
       env: { PORT: '3100' },
       testsTimeoutSeconds: 19,
       runCommand: async (_argv, options) => ({

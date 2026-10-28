@@ -309,6 +309,7 @@ describe('evidence plan runner', () => {
       {
         worktree,
         sandbox: policy('sandbox-exec', worktree),
+        testRunner: 'vitest',
         runCommand: async (argv, options) => {
           commands.push(argv[2]!);
           return commandResult(options?.cwd === worktree ? 0 : 1);
