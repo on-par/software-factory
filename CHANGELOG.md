@@ -66,6 +66,7 @@ Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
 
+- At classifier trust tier T2 an eligible class-A PR goes to the existing auto-merge path with a `t2-auto` receipt (event log and PR body), still behind required CI and the no-auto-merge gate; an active demotion drops the effective tier one rung, so a demoted T2 samples like T1 (#1960).
 - `factory status` shows merged-child coverage of each decomposed parent's criteria, and a merge updates one coverage comment on the parent (#3108)
 - `factory-run.yml` installs `@on-par/factory-cli@0.9.20` (`FACTORY_CLI_VERSION`), the
   committed lockstep `package.json` versions are 0.9.20, and the runbook's external

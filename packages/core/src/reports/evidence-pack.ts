@@ -195,6 +195,16 @@ function renderReviewRouting(routing: ReviewRouting): string {
       `- T1 sample: ${value.toFixed(4)} vs rate ${rate} — ${held ? 'held for a human (t1-sampled)' : 'not sampled'}`,
     );
   }
+  if (routing.trustTier) {
+    const { configured, effective, demotion } = routing.trustTier;
+    lines.push(
+      configured === effective
+        ? `- Trust tier: ${configured}`
+        : `- Trust tier: ${configured}, demoted to ${effective} (${demotion})`,
+    );
+  }
+  if (routing.receipt === 't2-auto')
+    lines.push('- Receipt: `t2-auto` — auto-merge without a human click, after required CI and policy gates');
   if (routing.shadow) lines.push(...renderShadowVerdict(routing.shadow));
   return lines.join('\n');
 }
