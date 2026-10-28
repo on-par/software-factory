@@ -39,7 +39,7 @@
     "prepack": "node ../../scripts/pack-hygiene-cli.ts prepack"
   },
   "dependencies": {
-    "@on-par/factory-core": "0.9.23",
+    "@on-par/factory-core": "^0.9.23",
     "ink": "^8.0.0",
     "react": "^19.3.0"
   },
