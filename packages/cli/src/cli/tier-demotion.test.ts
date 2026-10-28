@@ -134,7 +134,7 @@ describe('tier demotion (cli)', () => {
     const createComment = vi.fn(async (_args: unknown) => ({}));
     const octokit: Octokit = { rest: { issues: { createComment } } } as never;
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
-    await recordKpiTierDemotions({ path: s.path, events, now: NOW, octokit, owner: 'o', repo: 'r' });
+    await recordKpiTierDemotions(s.path, events, NOW, octokit, 'o', 'r');
     expect(createComment).toHaveBeenCalledWith(expect.objectContaining({ owner: 'o', repo: 'r', issue_number: 900 }));
     expect(err.mock.calls.join('\n')).toContain('trust tier demoted T2→T1 (PR #42)');
     err.mockRestore();
@@ -145,7 +145,7 @@ describe('tier demotion (cli)', () => {
     mkdirSync(join(s.dir, 'state', 'tier-demotions.jsonl'), { recursive: true });
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const octokit: Octokit = {} as never;
-    await recordKpiTierDemotions({ path: s.path, events, now: NOW, octokit, owner: 'o', repo: 'r' });
+    await recordKpiTierDemotions(s.path, events, NOW, octokit, 'o', 'r');
     expect(err.mock.calls.join('\n')).toContain('tier demotions not recorded');
     err.mockRestore();
   });

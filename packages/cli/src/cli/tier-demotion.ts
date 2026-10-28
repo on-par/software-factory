@@ -1,10 +1,11 @@
 // packages/cli/src/cli/tier-demotion.ts — record, apply and acknowledge trust tier demotions (#1959, ADR-0148)
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { styleText } from 'node:util';
 import type { Octokit } from '@octokit/rest';
-import { getFactoryPaths, type FactoryEvent, type RepoFactoryConfig } from '@on-par/factory-core';
+import { getFactoryPaths, loadRepoConfig, type FactoryEvent, type RepoFactoryConfig } from '@on-par/factory-core';
 import {
   acknowledgeTierDemotions,
   effectiveTrustTier,
@@ -85,20 +86,20 @@ export function cmdClassifierAckDemotion(deps: {
 }
 
 /** The `factory kpis` binding: record demotions, comment on the defect issue, and print one line per demotion. */
-export async function recordKpiTierDemotions(input: {
-  path: string;
-  events: FactoryEvent[];
-  now: string;
-  octokit: Octokit;
-  owner: string;
-  repo: string;
-}): Promise<void> {
+export async function recordKpiTierDemotions(
+  path: string,
+  events: FactoryEvent[],
+  now: string,
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+): Promise<void> {
   const warn = (m: string) => console.error(styleText('yellow', `factory: ${m}`));
   const comment = async (n: number, body: string) => {
-    await input.octokit.rest.issues.createComment({ owner: input.owner, repo: input.repo, issue_number: n, body });
+    await octokit.rest.issues.createComment({ owner, repo, issue_number: n, body });
   };
   try {
-    const fresh = await recordTierDemotions({ path: input.path, events: input.events, now: input.now, comment, warn });
+    const fresh = await recordTierDemotions({ path, events, now, comment, warn });
     for (const r of fresh) warn(`trust tier demoted ${r.from}→${r.to} (PR #${r.prNumber})`);
   } catch (err) {
     warn(`tier demotions not recorded (${err instanceof Error ? err.message : String(err)})`);
@@ -106,7 +107,10 @@ export async function recordKpiTierDemotions(input: {
 }
 
 /** `factory classifier ack-demotion`: acknowledge every open demotion for this repo and print the result. */
-export function runAckTierDemotion(repoRoot: string, repo: RepoFactoryConfig | null): void {
+export function runAckTierDemotion(
+  repoRoot: string = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim(),
+  repo: RepoFactoryConfig | null = loadRepoConfig(repoRoot),
+): void {
   cmdClassifierAckDemotion({
     path: getFactoryPaths(repoRoot).tierDemotions,
     configured: resolveTrustTier(repo),

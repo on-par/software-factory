@@ -95,7 +95,11 @@ export function parseTierDemotions(text: string): { records: TierDemotionRecord[
         value?.type !== 'tier-demoted' ||
         !isTier(value.from) ||
         !isTier(value.to) ||
-        typeof value.prNumber !== 'number'
+        !isTier(value.mergedUnder) ||
+        typeof value.prNumber !== 'number' ||
+        typeof value.issue !== 'string' ||
+        typeof value.recordedAt !== 'string' ||
+        !(value.acknowledgedAt === null || typeof value.acknowledgedAt === 'string')
       ) {
         malformed++;
         continue;

@@ -37,7 +37,16 @@ describe('factory classifier ack-demotion (#1959)', () => {
 
   it('acknowledges an open demotion', async () => {
     const file = join(repo, '.factory', 'state', 'tier-demotions.jsonl');
-    const open = { type: 'tier-demoted', from: 'T2', to: 'T1', prNumber: 42, acknowledgedAt: null };
+    const open = {
+      type: 'tier-demoted',
+      from: 'T2',
+      to: 'T1',
+      mergedUnder: 'T2',
+      prNumber: 42,
+      issue: '7',
+      recordedAt: '2026-01-01T00:00:00.000Z',
+      acknowledgedAt: null,
+    };
     writeFileSync(file, `${JSON.stringify(open)}\n`);
     await main(['node', 'factory', 'classifier', 'ack-demotion']);
     expect(logged()).toContain('acknowledged PR #42 T2→T1');

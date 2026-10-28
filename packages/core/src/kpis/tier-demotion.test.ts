@@ -68,6 +68,13 @@ describe('tier demotion', () => {
     expect(effectiveTrustTier('T2', parsed)).toBe('T0');
   });
 
+  it('treats a record missing acknowledgedAt as malformed', () => {
+    const [rec] = findSlipDemotions([land('7', 'T2'), defect('7', SLIP)], [], { now: NOW });
+    const { acknowledgedAt: _omit, ...partial } = rec!;
+    const parsed = parseTierDemotions(`${JSON.stringify(partial)}\n`);
+    expect(parsed).toEqual({ records: [], malformed: 1 });
+  });
+
   it('sets defectIssue from an issue back-reference and null for a revert', () => {
     const a = findSlipDemotions([land('7', 'T2'), defect('7', SLIP)], [], { now: NOW });
     const b = findSlipDemotions([land('8', 'T2'), defect('8', 'revert commit abc1234 reverts PR #43')], [], {

@@ -6,6 +6,7 @@ import { DEFAULT_GARDEN_MAX_CLUSTERS, DEFAULT_GARDEN_SINCE } from '@on-par/facto
 import { runTui } from '@on-par/factory-tui';
 import { BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION } from './branch-prefix.js';
 import type { ClassifierBacktestOptions } from './classifier-backtest.js';
+import { runAckTierDemotion } from './tier-demotion.js';
 import type { CliDeps, ProgramHandlers } from './index.js';
 
 export function registerObserveCommands(program: Command, handlers: ProgramHandlers, deps: CliDeps): void {
@@ -71,7 +72,7 @@ export function registerObserveCommands(program: Command, handlers: ProgramHandl
     .description(
       'Acknowledge recorded trust tier demotions so the effective tier returns to classifier.trustTier (ADR-0148)',
     )
-    .action(() => handlers.cmdClassifierAckDemotion());
+    .action(() => runAckTierDemotion());
   classifierCmd
     .command('backtest')
     .description('Replay the floor and shadow classifier over merged factory PRs and print the outcome report')
