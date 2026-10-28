@@ -25,7 +25,6 @@ section to `## X.Y.Z - date`. See
 - A fail-to-pass proof that fails identically on base and head now gets one free CHECK re-run and parks `check-infra` instead of builder rework, and a test host it leaks is reported once inside the evidence failure rather than as a separate `side_effects` failure (#3749).
 - A parked `run-brief` run no longer tries to comment on a nonexistent GitHub issue (which 404'd and logged a misleading warning); its park reason is reported in the event log and the CLI output. (#3751)
 
-
 ## 0.9.21 - 2026-10-27
 
 Republish / recovery: npm phantom-staged `@on-par/factory-core@0.9.20`
