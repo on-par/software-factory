@@ -47,7 +47,8 @@ async function reapUnderLock<R>(
   try {
     const factoryConfig = rt.configLoaders.loadFactoryConfigForRepo(paths.config);
     const branchPrefix =
-      prefixOverride ?? resolveEffectiveConfig(rt.configLoaders.loadRepoConfig(repoRoot)).branchPrefix;
+      prefixOverride ??
+      resolveEffectiveConfig(rt.configLoaders.loadRepoConfig(repoRoot), process.env, factoryConfig).branchPrefix;
     const resolved = rt.worktreePathFor(repoRoot, ghRepo, issue, branchPrefix);
     worktreePath = resolved;
     const log = (type: EventKind, msg: string) => logEvent(paths.events, type, issue, msg);

@@ -29,6 +29,15 @@ describe('resolveBranchPrefixOption', () => {
     expect(resolveBranchPrefixOption('')).toBeNull();
     expect(resolveBranchPrefixOption('!!!')).toBeNull();
   });
+
+  it('uses run.branchPrefix from config when the flag is omitted', () => {
+    expect(resolveBranchPrefixOption(undefined, { run: { branchPrefix: 'Acme Bots' } })).toBe('acme-bots');
+  });
+
+  it('lets the flag beat run.branchPrefix', () => {
+    expect(resolveBranchPrefixOption('sf', { run: { branchPrefix: 'acme' } })).toBe('sf');
+    expect(resolveBranchPrefixOption('!!!', { run: { branchPrefix: 'acme' } })).toBeNull();
+  });
 });
 
 describe('addBranchPrefixOption', () => {
@@ -49,7 +58,7 @@ describe('BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION', () => {
   it('tells the user legacy ship-it/ branches are included', () => {
     expect(BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION).toContain('ship-it/');
     expect(BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION).toBe(
-      'Branch-name prefix of factory branches to act on; legacy ship-it/ branches are always included (default: factory)',
+      'Branch-name prefix of factory branches to act on; legacy ship-it/ branches are always included (default: run.branchPrefix, else factory)',
     );
   });
 });

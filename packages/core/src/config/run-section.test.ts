@@ -33,4 +33,10 @@ describe('RunConfigSectionSchema', () => {
     expect(RunConfigSectionSchema.safeParse({ pr: { draft: 'yes' } }).success).toBe(false);
     expect(RunConfigSectionSchema.safeParse({ pr: { other: 1 } }).success).toBe(false);
   });
+  it('accepts run.branchPrefix and rejects one with no letter or digit', () => {
+    expect(RunConfigSectionSchema.parse({ branchPrefix: 'acme' })).toEqual({ branchPrefix: 'acme' });
+    expect(RunConfigSectionSchema.safeParse({ branchPrefix: '' }).success).toBe(false);
+    expect(RunConfigSectionSchema.safeParse({ branchPrefix: '!!!' }).success).toBe(false);
+    expect(RunConfigSectionSchema.safeParse({ branchPrefix: 1 }).success).toBe(false);
+  });
 });

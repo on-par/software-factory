@@ -35,6 +35,7 @@ import { HarnessDeclarationSchema } from './harness-declaration.js';
 import { ModelsSectionSchema } from './v2-models.js';
 import { readRepoConfigFile } from './repo-config-file.js';
 import { PrConfigSections } from './pr-section.js';
+import { slugify } from '../utils/branch-slug.js';
 
 // ---------- Routes ----------
 
@@ -176,6 +177,11 @@ const EfficiencySchema = z
 
 const RunSectionSchema = z
   .object({
+    branchPrefix: z
+      .string()
+      .refine((v) => slugify(v) !== '', 'must contain at least one letter or digit')
+      .default('factory')
+      .describe('Default branch-name prefix for factory branches, slug-normalized. --branch-prefix beats it.'),
     merge: MergeSchema.prefault({}),
     timeouts: TimeoutsSchema.prefault({}),
     sandbox: SandboxSchema.prefault({}),

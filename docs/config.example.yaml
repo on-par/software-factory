@@ -180,9 +180,13 @@ version: 2
   # Hours a cached baseline (base SHA) checker result is reused before CHECK and base health re-run
   # it (#3540). Unset: 24.
   # baselineCacheTtlHours: 24
-# Merge policy. `factory run` and `supervise` read `auto`; `factory land` reads `admin`. `factory
-# ship` and `run-issue` stop at a ready-for-review PR unless `pr.draft` / `--draft-pr` is set.
+# Branch prefix and merge policy. `factory run` and `supervise` read `auto`; `factory land` reads
+# `admin`. `factory ship` and `run-issue` stop at a ready-for-review PR unless `pr.draft` /
+# `--draft-pr` is set.
 # run:
+  # Branch-name prefix for factory branches, slug-normalized; must contain a letter or digit. Unset:
+  # factory. --branch-prefix beats it. Legacy ship-it/ branches are always recognized.
+  # branchPrefix: "factory"
   # merge:
     # Squash-merge eligible PRs. Unset: legacy merge.auto, then FACTORY_MERGE=1. --auto-merge /
     # --no-auto-merge beat all.

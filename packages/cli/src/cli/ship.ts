@@ -213,8 +213,8 @@ async function shipIssueFrom(
     pr: { draft: resolveDraftPrPolicy(factoryConfig, opts.draftPr).draft, ...factoryConfig.pr },
     effective:
       opts.branchPrefix === undefined
-        ? resolveEffectiveConfig(repoConfig)
-        : { ...resolveEffectiveConfig(repoConfig), branchPrefix: opts.branchPrefix },
+        ? resolveEffectiveConfig(repoConfig, process.env, factoryConfig)
+        : { ...resolveEffectiveConfig(repoConfig, process.env, factoryConfig), branchPrefix: opts.branchPrefix },
   };
   const router = new core.ModelRouter(
     policy.models,

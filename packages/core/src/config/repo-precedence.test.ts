@@ -134,4 +134,15 @@ describe('describeEffectiveConfig', () => {
       expect(at({})).toContainEqual('PR classifier: off (default)');
     });
   });
+
+  it('Branch prefix line shows run.branchPrefix with the repo config as its source', () => {
+    const router = new ModelRouter(models, routes, false, new StubModelExecutor({ scripts: {} }));
+    const line = (runtime?: { run?: { branchPrefix?: string } }) =>
+      describeEffectiveConfig({ router, repo: null, env: {}, repoConfigPath: 'c', runtime }).find((l) =>
+        l.startsWith('Branch prefix:'),
+      );
+    expect(line()).toBe('Branch prefix: factory (default)');
+    expect(line({ run: {} })).toBe('Branch prefix: factory (default)');
+    expect(line({ run: { branchPrefix: 'Acme' } })).toBe('Branch prefix: acme (c)');
+  });
 });

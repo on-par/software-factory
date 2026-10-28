@@ -24,6 +24,7 @@ export async function proposeTriageQueue(
   ghRepo: string,
   eventsPath: string,
   exec: TriageExec,
+  branchPrefix: string = resolveBranchPrefix(),
 ): Promise<string> {
   const normalized = normalizeTriageQueue(output);
   if (!normalized) return normalized;
@@ -38,7 +39,7 @@ export async function proposeTriageQueue(
     logEvent(eventsPath, 'warn', '-', `triage could not list open PRs, not filtering: ${detail}`);
     return normalized;
   }
-  const open = parseOpenPrIssues(prJson, resolveBranchPrefix());
+  const open = parseOpenPrIssues(prJson, branchPrefix);
   if (open === null) {
     logEvent(eventsPath, 'warn', '-', 'triage could not list open PRs, not filtering: malformed gh pr list output');
     return normalized;
