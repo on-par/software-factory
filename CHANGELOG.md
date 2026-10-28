@@ -19,8 +19,6 @@ Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
 
-- A post-merge defect on a PR auto-merged under trust tier T1 or T2 records a tier demotion, lowers the effective tier one step, and comments once on the defect issue; `factory classifier ack-demotion` restores the configured tier (#1959).
-
 - `run.branchPrefix` in `.factory/config.*` sets a lasting default branch-name prefix
   for the repo (#3747). Precedence: `--branch-prefix` > `run.branchPrefix` > `factory`.
   The value is slug-normalized like the flag, and a value with no letter or digit fails

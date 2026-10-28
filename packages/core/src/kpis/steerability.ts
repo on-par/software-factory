@@ -170,6 +170,3 @@ export function formatSteerabilityReport(report: SteerabilityReport): string[] {
   }
   return lines;
 }
-
-// Tier demotion rides this module's internal barrel line: internal.ts is at its max-lines ceiling (#1959).
-export * from './tier-demotion.js';
