@@ -1710,7 +1710,6 @@ async function cmdKpis(opts: { branchPrefix?: string; json?: boolean } = {}) {
   let allEvents = recon.events;
   const prSources = recon.sources;
   const { owner, repoName } = recon;
-
   if (prSources.length > 0) {
     try {
       const windowDays = resolveDefectWindowDays(configLoaders.loadFactoryConfigForRepo(paths.config));
