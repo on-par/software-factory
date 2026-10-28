@@ -262,7 +262,7 @@ import {
   MergeGatedError,
 } from './land-pr.js';
 import { setLandRuntime } from './land-runtime.js';
-import { recordKpiTierDemotions } from './tier-demotion.js';
+import { recordKpiTierDemotions, runAckTierDemotion } from './tier-demotion.js';
 import { cmdRun, type RunOptions } from './run.js';
 import type { RunLaneDeps } from './run-lane.js';
 import { shipIssue } from './ship.js';
@@ -1563,6 +1563,11 @@ function persistClassifierOutcomes(
 /** `factory risk <pr>` (#3385): the handler lives in ./risk.ts; this binds its runtime. */
 function runRisk(pr: string, opts: { policy?: string } = {}): Promise<void> {
   return cmdRisk(pr, opts, { getRepoRoot, getGitHubRepo, getOctokit, CliExitError, log: console.log });
+}
+
+async function cmdClassifierAckDemotion() {
+  const repoRoot = await getRepoRoot();
+  runAckTierDemotion(repoRoot, configLoaders.loadRepoConfig(repoRoot));
 }
 
 async function cmdClassifierReport(opts: { json?: boolean } = {}) {
@@ -4344,6 +4349,7 @@ export const PROGRAM_HANDLERS = {
   cmdRuns,
   cmdKpis,
   cmdClassifierReport,
+  cmdClassifierAckDemotion,
   cmdReport,
   cmdRisk: runRisk,
   cmdClassifierBacktestEntry,
