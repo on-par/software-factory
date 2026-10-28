@@ -43,6 +43,10 @@ sandbox:
       - npm.internal.example.com
 ```
 
+## Evidence commands
+
+Evidence commands run with no allowlist and no proxy. Outbound is denied except loopback: `sandbox-exec` adds a `localhost:*` allow, and firejail's `--net=none` keeps a loopback-only namespace. Test runners that use a loopback host (for example `dotnet test`) therefore work. DNS is not allowed.
+
 ## Telemetry hosts
 
 Known vendor telemetry hosts are classified separately from other unlisted hosts:

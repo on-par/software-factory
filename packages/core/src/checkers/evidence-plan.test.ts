@@ -194,12 +194,57 @@ describe('evidence plan runner', () => {
           ...original,
           allowHosts: [],
           proxyUrl: undefined,
+          allowLoopback: true,
         }),
       );
       expect(pgid).toBe(987);
       expect(original.allowHosts).toEqual(['example.com']);
       expect(original.writablePaths).toEqual(['/tmp/lane', '/tmp']);
     }
+  });
+
+  it('evidence runner allows loopback but denies other outbound on sandbox-exec (#3748)', async () => {
+    let wrapped = '';
+    await runEvidencePlan([entry('command', { command: 'check', passWhen: 'ok' })], new Map([['check', ['echo']]]), {
+      worktree: '/tmp/lane',
+      sandbox: policy('sandbox-exec'),
+      runCommand: async (argv) => {
+        wrapped = argv[2]!;
+        return commandResult(0);
+      },
+    });
+    expect(wrapped).toContain('(deny network-outbound)');
+    expect(wrapped).toContain('remote ip "localhost:*"');
+  });
+
+  it('fail-to-pass base and head both run with a loopback-allowed sandbox-exec profile (#3748)', async () => {
+    const worktree = await tempDirs.make('evidence-plan-loopback-');
+    await execGit(['init', '-q'], { cwd: worktree });
+    await execGit(['config', 'user.name', 'Evidence Test'], { cwd: worktree });
+    await execGit(['config', 'user.email', 'evidence@example.test'], { cwd: worktree });
+    await writeFile(join(worktree, 'fixture.txt'), 'base');
+    await execGit(['add', '.'], { cwd: worktree });
+    await execGit(['commit', '-qm', 'base'], { cwd: worktree });
+    const base = (await execGit(['rev-parse', 'HEAD'], { cwd: worktree })).stdout.trim();
+    await execGit(['update-ref', 'refs/remotes/origin/main', base], { cwd: worktree });
+    await writeFile(join(worktree, 'fixture.txt'), 'head');
+    await execGit(['commit', '-qam', 'head'], { cwd: worktree });
+    const commands: string[] = [];
+    const results = await runEvidencePlan(
+      [entry('fail-to-pass-test', { test: 'probe.test.ts' })],
+      new Map([['test', ['dotnet', 'test']]]),
+      {
+        worktree,
+        sandbox: policy('sandbox-exec', worktree),
+        runCommand: async (argv, options) => {
+          commands.push(argv[2]!);
+          return commandResult(options?.cwd === worktree ? 0 : 1);
+        },
+      },
+    );
+    expect(results[0]?.status).toBe('PASS');
+    expect(commands).toHaveLength(2);
+    for (const command of commands) expect(command).toContain('localhost:*');
   });
 
   it('fails on timeout, termination, and spawn rejection then continues in order', async () => {
