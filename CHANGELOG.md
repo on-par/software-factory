@@ -7,6 +7,12 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.23 - 2026-10-28
+
+`--base-branch` for ship/run-issue/run-brief, plus multi-file `run-brief` (#3764, #3762).
+All seven published `@on-par` packages move to 0.9.23 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Added
 
 - `factory ship`, `run-issue` and `run-brief` take `--base-branch <ref>`: the worktree starts from the freshly fetched `origin/<ref>`, the PR opens against `<ref>`, and pre-PLAN base health and CHECK compare against it; the run has the size gate off, and an empty or `-`-prefixed ref exits 2 before any worktree or PR (#3764).
