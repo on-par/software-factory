@@ -1,6 +1,5 @@
 // packages/core/src/run/run-issue.base-branch.test.ts — parentBaseRef from --base-branch reaches base health, CHECK and SHIP (#3764)
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+
 import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
@@ -12,6 +11,7 @@ import type { BuildResult, buildPhase as realBuildPhase } from '../phases/build.
 import type { CheckPhaseResult, checkPhase as realCheckPhase } from '../phases/check.js';
 import type { PlanResult, planPhase as realPlanPhase } from '../phases/plan.js';
 import type { shipPhase as realShipPhase } from '../phases/ship.js';
+import { createTempDirs } from '../harness/temp-dir.js';
 import { ProviderBreaker } from '../router/breaker.js';
 import { ModelRouter } from '../router/index.js';
 import type { CheckSummary } from '../types/index.js';
@@ -52,8 +52,9 @@ const MODELS: ModelsConfig = {
   routingRules: {},
 };
 
-const breakerDir = mkdtempSync(join(tmpdir(), 'run-issue-base-branch-'));
-afterAll(() => rmSync(breakerDir, { recursive: true, force: true }));
+const tempDirs = createTempDirs();
+const breakerDir = tempDirs.makeSync('run-issue-base-branch-');
+afterAll(() => tempDirs.cleanup());
 let breakerCounter = 0;
 
 const policy: RunPolicy = {
