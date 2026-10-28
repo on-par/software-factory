@@ -7,6 +7,12 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.22 - 2026-10-28
+
+`run.branchPrefix` lasting default, plus evidence/park fixes (#3748–#3751).
+All seven published `@on-par` packages move to 0.9.22 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Added
 
 - `run.branchPrefix` in `.factory/config.*` sets a lasting default branch-name prefix
