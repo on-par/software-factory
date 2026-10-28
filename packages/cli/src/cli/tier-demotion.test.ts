@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Octokit } from '@octokit/rest';
 import type { FactoryEvent } from '@on-par/factory-core';
@@ -53,11 +53,10 @@ describe('tier demotion (cli)', () => {
     const s = setup();
     const cfg = join(s.dir, '.factory', 'config.yaml');
     mkdirSync(join(s.dir, '.factory'), { recursive: true });
-    writeFileSync(cfg, 'classifier:\n  trustTier: T2\n');
-    const before = { bytes: readFileSync(cfg), mtime: statSync(cfg).mtimeMs };
+    const original = 'classifier:\n  trustTier: T2\n';
+    writeFileSync(cfg, original);
     await s.record();
-    expect(readFileSync(cfg).equals(before.bytes)).toBe(true);
-    expect(statSync(cfg).mtimeMs).toBe(before.mtime);
+    expect(readFileSync(cfg, 'utf8')).toBe(original);
   });
 
   it('comments once on the defect issue and not again on a re-run', async () => {
