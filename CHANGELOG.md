@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Added
 
+- `factory ship`, `run-issue` and `run-brief` take `--base-branch <ref>`: the worktree starts from the freshly fetched `origin/<ref>`, the PR opens against `<ref>`, and pre-PLAN base health and CHECK compare against it; the run has the size gate off, and an empty or `-`-prefixed ref exits 2 before any worktree or PR (#3764).
 - `factory run-brief <file> [file...]` takes several Markdown briefs and runs them one after another in argv order, with the same flags for each (#3762). A failed brief, including a missing or empty path, does not stop the rest. A per-brief summary is printed at the end, and the exit code is 1 if any brief failed. Each brief takes its own run lock as before. `--artifacts` still takes exactly one brief.
 
 ## 0.9.22 - 2026-10-28

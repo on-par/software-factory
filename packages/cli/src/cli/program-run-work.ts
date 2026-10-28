@@ -6,6 +6,9 @@ import { BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION, BRANCH_PREFIX_OPTION_DESCRIPTIO
 import type { ProgramHandlers } from './index.js';
 import type { SteerOptions } from './steer.js';
 
+const BASE_BRANCH_OPTION_DESCRIPTION =
+  'Start from the freshly fetched origin/<ref> instead of the default branch, and open the PR against <ref>; runs with the size gate off';
+
 export function registerRunWorkCommands(program: Command, handlers: ProgramHandlers): void {
   program
     .command('ship <issue>')
@@ -27,6 +30,7 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     )
     .option('--no-draft-pr', 'Mark the PR ready for review after CI, overriding run.pr.draft in the repo config')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
+    .option('--base-branch <ref>', BASE_BRANCH_OPTION_DESCRIPTION)
     .action(async (issueNum, opts) => {
       await handlers.cmdShip(handlers.parseIssueArg(issueNum), opts);
     });
@@ -49,6 +53,7 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     )
     .option('--no-draft-pr', 'Mark the PR ready for review after CI, overriding run.pr.draft in the repo config')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
+    .option('--base-branch <ref>', BASE_BRANCH_OPTION_DESCRIPTION)
     .option(
       '--run-children',
       'File mode only: when the size gate files child issues, run them (slice mode never files issues)',
@@ -93,6 +98,7 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
       'Local-only: write a versioned benchmark artifact manifest (manifest.json, request.json, events.ndjson, diff.patch) to this directory; requires --workspace',
     )
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
+    .option('--base-branch <ref>', BASE_BRANCH_OPTION_DESCRIPTION)
     .action(async (file: string, files: string[], opts) => {
       await handlers.cmdRunBrief([file, ...files], opts);
     });

@@ -34,7 +34,6 @@ import {
   resolveSizeGateMode,
   ReworkHistory,
   runIssue,
-  type SizeGateMode,
   summarizeEvent,
   touchLastEvent,
   touchRunActivity,
@@ -80,6 +79,7 @@ import {
   stubAwareShipPhase,
   TERMINAL_EVENT_KINDS,
 } from './ship-steps.js';
+import { baseRemoteRef, type ShipIssueOptions } from './ship-options.js';
 
 type ShipArgs = Parameters<typeof shipIssueFrom> extends [string, ...infer Rest] ? Rest : never;
 
@@ -104,24 +104,7 @@ export async function shipIssue(
 async function shipIssueFrom(
   repoRoot: string,
   issueNum: number,
-  opts: {
-    product?: string;
-    autoRework?: boolean;
-    interactive?: boolean;
-    sandbox?: boolean;
-    approvePlan?: boolean;
-    branchPrefix?: string;
-    /** `run-issue --size-gate` (ADR-0147); undefined defers to sizeGate.mode in the config. */
-    sizeGate?: SizeGateMode;
-    /** run-issue --max-slices (ADR-0156); undefined defers to sizeGate.maxSlices. */
-    maxSlices?: number;
-    /** `--pr-classifier` / `--no-pr-classifier` (#1724); undefined defers to config/env. */
-    prClassifier?: boolean;
-    /** --draft-pr / --no-draft-pr (#3449); undefined defers to run.pr.draft. */
-    draftPr?: boolean;
-    /** `--no-pr` sets false: stop after a clean CHECK with no GitHub writes; undefined = ship as usual. */
-    pr?: boolean;
-  },
+  opts: ShipIssueOptions,
   ctx?: {
     repoRoot: string;
     ghRepo: string;
@@ -256,11 +239,12 @@ async function shipIssueFrom(
       issue: issueNum,
     } satisfies GithubIssueParams));
   const issueTitle = work.title;
-  const noPr = opts.pr === false; // --no-pr never files child issues or slice PRs: size gate off
-  const sizeGateMode = noPr ? 'off' : (opts.sizeGate ?? resolveSizeGateMode(factoryConfig));
+  const noPr = opts.pr === false; // --no-pr / --base-branch never file child issues or slice PRs: size gate off
+  const sizeGateMode =
+    noPr || opts.baseBranch !== undefined ? 'off' : (opts.sizeGate ?? resolveSizeGateMode(factoryConfig));
   const maxSlices = opts.maxSlices ?? resolveSizeGateMaxSlices(factoryConfig);
   const { branchPrefix } = policy.effective;
-  const claim = { issueNum, issueTitle, ghRepo, sizeGateMode, work, ctx, octokit };
+  const claim = { issueNum, issueTitle, ghRepo, sizeGateMode, work, ctx, octokit, baseBranch: opts.baseBranch };
   const branch = await resolveRunBranch({ ...claim, branchPrefix, noPr, eventsFile: paths.events });
   const worktree = ctx?.resumeFrom
     ? ctx.resumeFrom.worktree
@@ -329,6 +313,7 @@ async function shipIssueFrom(
     ghName,
     git,
     paths,
+    startPoint: baseRemoteRef(opts.baseBranch),
   });
 
   const planApprovalEnabled = opts.approvePlan ?? resolvePlanApproval(factoryConfig);

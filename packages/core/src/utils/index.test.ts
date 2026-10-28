@@ -611,6 +611,18 @@ describe('gitFetch / setupWorktree', () => {
     expect(existsSync(join(worktree, 'README.md'))).toBe(true);
   });
 
+  it('fails before touching the lane when startPoint does not resolve after fetch (#3764)', async () => {
+    const { repoRoot } = await kit.makeThrowawayRepo();
+    const worktree = kit.trackWorktree(repoRoot, 207);
+    const branch = 'ship-it/207-missing-base';
+    await setupWorktree(repoRoot, branch, worktree);
+
+    await expect(setupWorktree(repoRoot, branch, worktree, 'origin/no-such-branch')).rejects.toThrow(
+      'base ref origin/no-such-branch does not resolve after git fetch origin',
+    );
+    expect(existsSync(join(worktree, 'README.md'))).toBe(true);
+  });
+
   it('creates a worktree from an explicitly supplied remote start point', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 203);

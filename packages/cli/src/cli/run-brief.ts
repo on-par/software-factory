@@ -28,6 +28,7 @@ import { availableAgentClis, missingAgentCliMessage, notInitializedMessage } fro
 import { withRepoRunLock } from './repo-run-lock.js';
 import { recordDraftPrFlag } from './run-flags.js';
 import { shipIssue } from './ship.js';
+import { baseBranchConflict, baseBranchOrExit } from './ship-options.js';
 
 /** index.ts bindings the handler needs; index.ts passes them so this module never imports it at runtime. */
 export interface RunBriefRuntime {
@@ -63,6 +64,7 @@ export interface RunBriefOptions {
   workspace?: string;
   artifacts?: string;
   branchPrefix?: string;
+  baseBranch?: string;
   draftPr?: boolean;
 }
 
@@ -128,6 +130,9 @@ async function prepareRunBrief(opts: RunBriefOptions, rt: RunBriefRuntime) {
   }
 
   const branchPrefix = rt.branchPrefixOrExit(opts.branchPrefix, paths.config);
+  baseBranchOrExit(opts.baseBranch);
+  const conflict = baseBranchConflict({ baseBranch: opts.baseBranch, workspace: opts.workspace });
+  if (conflict) throw new CliExitError(conflict, 2);
 
   let localOnly: LocalOnlyPolicy | undefined;
   if (opts.workspace !== undefined) {

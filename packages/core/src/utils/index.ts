@@ -176,6 +176,15 @@ export async function setupWorktree(
   // The base of record is the freshly fetched remote-tracking ref — never local
   // branch state, which can be stale, dirty, or ahead (#1167).
   await gitFetch(repoRoot);
+  if (startPoint) {
+    try {
+      await execGit(['rev-parse', '--verify', '-q', `${startPoint}^{commit}`], { cwd: repoRoot });
+    } catch {
+      throw new Error(
+        `base ref ${startPoint} does not resolve after git fetch origin — check the branch exists on origin`,
+      );
+    }
+  }
   // An earlier run's push (#1868) is recorded and reported here. When an open PR's head is
   // this branch and the caller gave no start point, the lane continues on it (#3099), so
   // SHIP pushes fast-forward to that PR. Otherwise it is never adopted or discarded here.

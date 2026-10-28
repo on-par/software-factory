@@ -137,6 +137,7 @@ The most-used commands, by the group `factory --help` lists them under. Run `fac
 factory ship <N>                    Plan → build → check one issue and open a ready-for-review PR; never merges
 factory run-issue <N>               Like ship, but loads the issue first and exits 2 if it cannot be found
 factory run-issue <N> --run-children Also run the child issues the size gate files when it splits <N>
+factory run-issue <N> --base-branch <ref>  Start from origin/<ref> and open the PR against <ref> (also ship, run-brief)
 factory run                         Claim queued issues and ship them, lanes in parallel; merges only when auto-merge is on
 factory supervise [--now]           Unattended loop: wait for usage headroom, run the queue, repeat until it is empty
 factory land <N>                    Squash-merge the issue's open PR once CI is green, then remove its worktree

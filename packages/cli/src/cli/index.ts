@@ -229,6 +229,7 @@ import {
   detectClaudePlan,
 } from '@on-par/factory-core/internal';
 import { CliExitError } from './errors.js';
+import { baseBranchConflict, baseBranchOrExit } from './ship-options.js';
 import { withRepoRunLock } from './repo-run-lock.js';
 
 export { CliExitError, withRepoRunLock };
@@ -2219,6 +2220,7 @@ async function cmdShip(
     sandbox?: boolean;
     approvePlan?: boolean;
     branchPrefix?: string;
+    baseBranch?: string;
     draftPr?: boolean;
   },
 ) {
@@ -2238,6 +2240,7 @@ async function cmdShip(
   }
 
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
+  baseBranchOrExit(opts.baseBranch);
 
   return withRepoRunLock(
     paths,
@@ -2292,6 +2295,7 @@ async function cmdRunIssue(
     sandbox?: boolean;
     approvePlan?: boolean;
     branchPrefix?: string;
+    baseBranch?: string;
     runChildren?: boolean;
     sizeGate?: string;
     maxSlices?: string;
@@ -2311,6 +2315,9 @@ async function cmdRunIssue(
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
   const sizeGate = sizeGateOrExit(rawSizeGate);
   const maxSlices = maxSlicesOrExit(rawMaxSlices);
+  const baseBranch = baseBranchOrExit(opts.baseBranch);
+  const conflict = baseBranchConflict({ baseBranch, sizeGate: rawSizeGate, runChildren });
+  if (conflict) throw new CliExitError(conflict, 2);
   if (opts.pr === false && ((sizeGate !== undefined && sizeGate !== 'off') || runChildren)) {
     throw new CliExitError(
       'factory: --no-pr runs with the size gate off — drop --size-gate/--run-children or drop --no-pr',
