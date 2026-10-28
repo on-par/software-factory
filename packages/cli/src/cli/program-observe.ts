@@ -67,6 +67,12 @@ export function registerObserveCommands(program: Command, handlers: ProgramHandl
     .option('--json', 'Print one JSON object with the same numbers')
     .action((opts: { json?: boolean }) => handlers.cmdClassifierReport(opts));
   classifierCmd
+    .command('ack-demotion')
+    .description(
+      'Acknowledge recorded trust tier demotions so the effective tier returns to classifier.trustTier (ADR-0148)',
+    )
+    .action(() => handlers.cmdClassifierAckDemotion());
+  classifierCmd
     .command('backtest')
     .description('Replay the floor and shadow classifier over merged factory PRs and print the outcome report')
     .requiredOption('--since <date>', 'Only PRs merged on or after this date (YYYY-MM-DD)')

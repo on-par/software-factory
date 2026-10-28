@@ -47,7 +47,6 @@ import {
   type LocalOnlyPolicy,
   type DoctorProbes,
   type ModelDiagnosis,
-  type PrSource,
   type ParkReason,
   type QueueDiagnostic,
   type ReapedLease,
@@ -99,8 +98,6 @@ import {
   loadRepoConfig,
   loadRoutesConfig,
   LOCAL_BRIEF_SOURCE,
-  joinClassifierOutcomes,
-  mergeClassifierOutcomes,
   parseClassifierOutcomes,
   summarizeClassifierOutcomes,
   formatClassifierReport,
@@ -261,7 +258,9 @@ import {
   LandFailureError,
   MergeGatedError,
 } from './land-pr.js';
+import { persistClassifierOutcomes } from './classifier-outcomes-persist.js';
 import { setLandRuntime } from './land-runtime.js';
+import { recordKpiTierDemotions, runAckTierDemotion } from './tier-demotion.js';
 import { cmdRun, type RunOptions } from './run.js';
 import type { RunLaneDeps } from './run-lane.js';
 import { shipIssue } from './ship.js';
@@ -1546,22 +1545,14 @@ async function appendKpiSnapshot(
   return { record, history: parseKpiHistory(updated) };
 }
 
-function persistClassifierOutcomes(
-  paths: ReturnType<typeof getFactoryPaths>,
-  events: Parameters<typeof joinClassifierOutcomes>[0],
-  sources: PrSource[],
-  opts: { now: string; windowDays: number },
-): void {
-  const records = joinClassifierOutcomes(events, sources, opts);
-  if (records.length === 0) return;
-  const updated = mergeClassifierOutcomes(readTextFileOrEmpty(paths.classifierOutcomes), records);
-  ensureDir(paths.state);
-  writeFileSync(paths.classifierOutcomes, updated);
-}
-
 /** `factory risk <pr>` (#3385): the handler lives in ./risk.ts; this binds its runtime. */
 function runRisk(pr: string, opts: { policy?: string } = {}): Promise<void> {
   return cmdRisk(pr, opts, { getRepoRoot, getGitHubRepo, getOctokit, CliExitError, log: console.log });
+}
+
+async function cmdClassifierAckDemotion() {
+  const repoRoot = await getRepoRoot();
+  runAckTierDemotion(repoRoot, configLoaders.loadRepoConfig(repoRoot));
 }
 
 async function cmdClassifierReport(opts: { json?: boolean } = {}) {
@@ -1723,6 +1714,14 @@ async function cmdKpis(opts: { branchPrefix?: string; json?: boolean } = {}) {
       } catch (err: any) {
         console.error(styleText('yellow', `factory: classifier outcomes not recorded (${err?.message ?? err})`));
       }
+      await recordKpiTierDemotions({
+        path: paths.tierDemotions,
+        events: allEvents,
+        now,
+        octokit: getOctokit(),
+        owner,
+        repo: repoName,
+      });
     } catch (err: any) {
       console.error(
         styleText(
@@ -4343,6 +4342,7 @@ export const PROGRAM_HANDLERS = {
   cmdRuns,
   cmdKpis,
   cmdClassifierReport,
+  cmdClassifierAckDemotion,
   cmdReport,
   cmdRisk: runRisk,
   cmdClassifierBacktestEntry,
