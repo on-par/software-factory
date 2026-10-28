@@ -111,6 +111,17 @@ describe('appendEvidencePlanStep', () => {
     expect(out.warnings).toEqual(['warning']);
   });
 
+  it('passes the test runner resolved from package.json to the evidence runner', async () => {
+    const { ctx, worktree } = await fixture([{ kind: 'command', claim: 'build', command: 'test', passWhen: 'ok' }]);
+    await writeFile(join(worktree, '.factory', 'config.json'), JSON.stringify({ version: 2 }));
+    let seen: unknown;
+    await appendEvidencePlanStep(summary, ctx, null, async (_entries, _allowlist, runnerContext) => {
+      seen = runnerContext.testRunner;
+      return [];
+    });
+    expect(seen).toBe('vitest');
+  });
+
   it('fails weak fail-to-pass proof with structured base and head outcomes for rework', async () => {
     const { ctx } = await fixture([{ kind: 'fail-to-pass-test', claim: 'new behavior', test: 'src/new.test.ts' }]);
     const weakProof = {

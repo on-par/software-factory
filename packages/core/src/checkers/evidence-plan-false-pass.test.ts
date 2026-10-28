@@ -61,6 +61,7 @@ describe('fail-to-pass evidence base comparison', () => {
     const results = await runEvidencePlan([entry], new Map([['test', ['npm', 'run', 'test']]]), {
       worktree: lane,
       sandbox: policy(lane),
+      testRunner: 'vitest',
       env: { PORT: '3100', FACTORY_BASE_URL: 'http://127.0.0.1:3100' },
       testsTimeoutSeconds: 19,
       runCommand: async (argv, options) => {
@@ -97,6 +98,7 @@ describe('fail-to-pass evidence base comparison', () => {
     const results = await runEvidencePlan([entry], new Map([['test', ['npm', 'run', 'test']]]), {
       worktree: lane,
       sandbox: policy(lane),
+      testRunner: 'vitest',
       env: { PORT: '3100', FACTORY_APP_PORT: '3100', FACTORY_BASE_URL: 'http://127.0.0.1:3100' },
       testsTimeoutSeconds: 19,
       runCommand: async (argv, options) => {
@@ -162,6 +164,7 @@ describe('fail-to-pass evidence base comparison', () => {
     const results = await runEvidencePlan([entry], new Map([['test', ['npm', 'run', 'test']]]), {
       worktree: lane,
       sandbox: policy(lane),
+      testRunner: 'vitest',
       runCommand: async (_argv, options) => {
         const cwd = options?.cwd ?? '';
         calls.push(cwd);
@@ -185,6 +188,7 @@ describe('fail-to-pass evidence base comparison', () => {
     const results = await runEvidencePlan([entry], new Map(), {
       worktree: lane,
       sandbox: policy(lane),
+      testRunner: 'vitest',
       runCommand: async () => {
         calls++;
         return commandResult(0);
@@ -201,6 +205,7 @@ describe('fail-to-pass evidence base comparison', () => {
     const results = await runEvidencePlan([entry], new Map([['test', ['npm', 'run', 'test']]]), {
       worktree: lane,
       sandbox: policy(lane),
+      testRunner: 'vitest',
       runCommand: async () => {
         calls++;
         return commandResult(calls === 1 ? 1 : 0);
@@ -217,6 +222,7 @@ describe('fail-to-pass evidence base comparison', () => {
       const results = await runEvidencePlan([entry], new Map([['test', ['npm', 'run', 'test']]]), {
         worktree: lane,
         sandbox: policy(lane),
+        testRunner: 'vitest',
         runCommand: async () => {
           calls++;
           if (calls === 1) return commandResult(0);
@@ -248,6 +254,7 @@ describe('fail-to-pass evidence base comparison', () => {
     const authoritative = await runEvidencePlan([entry], new Map([['test', ['npm', 'run', 'test']]]), {
       worktree: lane,
       sandbox: policy(lane),
+      testRunner: 'vitest',
       parentBaseRef: 'HEAD',
       runCommand: async (_argv, options) => {
         seen.push(options?.cwd ?? '');
@@ -260,6 +267,7 @@ describe('fail-to-pass evidence base comparison', () => {
     const invalid = await runEvidencePlan([entry], new Map([['test', ['npm', 'run', 'test']]]), {
       worktree: lane,
       sandbox: policy(lane),
+      testRunner: 'vitest',
       parentBaseRef: 'missing-parent',
       diffBase: base,
       runCommand: async (_argv, options) => {
@@ -282,6 +290,7 @@ describe('fail-to-pass evidence base comparison', () => {
       {
         worktree: lane,
         sandbox: policy(lane),
+        testRunner: 'vitest',
         runCommand: async () => {
           calls++;
           return commandResult(0);
@@ -304,6 +313,7 @@ describe('fail-to-pass evidence base comparison', () => {
     const results = await runEvidencePlan([entry], new Map([['test', ['npm', 'run', 'test']]]), {
       worktree: lane,
       sandbox: policy(lane),
+      testRunner: 'vitest',
       runCommand: async (_argv, options) => {
         if (options?.cwd !== lane) await unlink(join(options?.cwd ?? '', '.git'));
         return commandResult(options?.cwd === lane ? 0 : 1);

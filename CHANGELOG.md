@@ -15,6 +15,10 @@ section to `## X.Y.Z - date`. See
   config validation. `FACTORY_BRANCH_PREFIX` is still ignored. Legacy `ship-it/`
   branches are still recognized. `factory status --kpis` shows the prefix's source.
 
+### Changed
+
+- A fail-to-pass evidence proof runs only the planner's named tests through the runner's own filter (vitest, jest, pytest), and SKIPs with "selector could not be used" instead of running the whole suite (#3750).
+
 ### Fixed
 
 - Evidence commands on macOS `sandbox-exec` can reach loopback, so a `dotnet test` fail-to-pass proof no longer aborts connecting to its testhost; other outbound stays denied (#3748).

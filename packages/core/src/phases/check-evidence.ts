@@ -4,6 +4,7 @@ import type { EvidencePlanEntry } from '@on-par/contracts';
 import { loadRepoConfig } from '../config/repo.js';
 import { parseDesignArtifact } from '../design/index.js';
 import { resolveEvidenceAllowlist } from '../checkers/evidence-allowlist.js';
+import { resolveEvidenceTestRunner } from '../checkers/evidence-selector.js';
 import { runEvidencePlan, type EvidencePlanResult } from '../checkers/evidence-plan.js';
 import { createEvidenceSideEffectsGuard } from '../checkers/side-effects.js';
 import { summarizeCheckerOutputs, type CheckerContext } from '../checkers/index.js';
@@ -110,7 +111,8 @@ export async function appendEvidencePlanStep(
         const lockfiles = await readdir(ctx.worktree);
         const allowlist = resolveEvidenceAllowlist(packageJsonFromContext(ctx), repoConfig, lockfiles);
         guard = createEvidenceSideEffectsGuard(ctx);
-        const results = await runEvidence(entries, allowlist, ctx, guard);
+        const testRunner = resolveEvidenceTestRunner(allowlist, packageJsonFromContext(ctx));
+        const results = await runEvidence(entries, allowlist, { ...ctx, testRunner }, guard);
         output = outputForResults(results);
       } catch (error) {
         const message = (error instanceof Error ? error.message : String(error)).slice(-MAX_ERROR_LENGTH);

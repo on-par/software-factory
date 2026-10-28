@@ -161,8 +161,9 @@ ${constitutionCtx ? '5. The constitution above defines the standards for this pr
 7. EVIDENCE PLAN. Decide what evidence will prove each acceptance criterion in the issue.
    Write one evidencePlan entry per acceptance criterion. Its claim restates that criterion.
    Each entry has a kind, and each kind has required fields:
-   - fail-to-pass-test: claim, test — a test (file path plus test name) that fails before
-     the change and passes after it.
+   - fail-to-pass-test: claim, test — the test file path followed by each test name in double
+     quotes, e.g. src/foo.test.ts "does x" (pytest: tests/test_foo.py::test_x); no prose, flags
+     or shell syntax, or the proof SKIPs. It must fail before the change and pass after it.
    - command: claim, command, passWhen — exact command and human explanation; passWhen alone is not machine-checked. Add optional expect when output matters: exitCode defaults to 0; stdoutContains requires every case-sensitive literal substring in stdout.
    - screenshot: claim, route — the concrete app route or page to capture.
    - none: claim, reason — why no evidence can honestly prove this criterion.
@@ -209,7 +210,7 @@ design:
   evidencePlan:   # one entry per acceptance criterion — see step 7
     - kind: fail-to-pass-test
       claim: <acceptance criterion this proves>
-      test: <test file path and test name that fails before and passes after>
+      test: <test file path then each test name in double quotes, e.g. src/foo.test.ts "does x">
     - kind: command
       claim: <acceptance criterion>
       command: <exact command>

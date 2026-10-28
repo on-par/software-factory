@@ -128,6 +128,10 @@ describe('buildPlanPrompt', () => {
     expect(prompt).toContain('evidencePlan:');
   });
 
+  it('documents the quoted-name fail-to-pass selector format (#3750)', () => {
+    expect(riskyPrompt()).toContain('src/foo.test.ts "does x"');
+  });
+
   it('describes all four evidence kinds with their required fields (#2259)', () => {
     const prompt = riskyPrompt();
     for (const s of 'kind: fail-to-pass-test|kind: command|kind: screenshot|kind: none|claim:|test:|command:|passWhen:|exitCode:|stdoutContains:|route:|reason:'.split(
