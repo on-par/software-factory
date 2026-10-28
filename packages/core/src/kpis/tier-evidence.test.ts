@@ -157,3 +157,11 @@ describe('tier evidence (#1957)', () => {
     expect(coverageRatchetEvidence(true, now)).toEqual({ ok: true, measuredAt: '2026-10-28T00:00:00.000Z' });
   });
 });
+
+describe('unknown configured tier', () => {
+  it('names no eligible tier and shows the config error', () => {
+    const r = buildTierEvidence({ ...full, configuredTier: 'unknown', configError: 'bad yaml' });
+    expect(r.eligibleFor).toBe('none');
+    expect(formatTierEvidence(r)).toContain('configured tier: unknown (repo config invalid: bad yaml)');
+  });
+});

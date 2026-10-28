@@ -1567,14 +1567,16 @@ async function cmdClassifierReport(opts: { json?: boolean } = {}) {
       return undefined;
     }
   };
-  let configuredTier = resolveTrustTier(null);
+  let configuredTier: ReturnType<typeof resolveTrustTier> | 'unknown' = 'unknown';
+  let configError: string | undefined;
   try {
     configuredTier = resolveTrustTier(configLoaders.loadRepoConfig(repoRoot));
-  } catch {
-    // An invalid repo config falls back to T0 so the read-only report still renders.
+  } catch (err) {
+    configError = err instanceof Error ? err.message : String(err);
   }
   const tier = buildTierEvidence({
     configuredTier,
+    configError,
     records,
     mutationSummaryText: readOptional(join(repoRoot, 'mutation-summary.json')),
     coverageEvidenceText: readOptional(join(repoRoot, 'coverage-ratchet.json')),

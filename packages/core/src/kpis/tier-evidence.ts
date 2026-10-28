@@ -47,7 +47,10 @@ export interface RateEvidence {
 }
 
 export interface TierEvidenceReport {
-  configuredTier: TrustTier;
+  /** 'unknown' when the repo config failed to load. */
+  configuredTier: TrustTier | 'unknown';
+  /** Why the repo config failed to load; null when it loaded. */
+  configError: string | null;
   coverage: { status: TierCriterionStatus; ratchet: 'green' | 'red' | 'unknown'; measuredAt: string | null };
   mutation: { status: TierCriterionStatus; packages: MutationPackageEvidence[] };
   humanIntervention: RateEvidence & { caveat: string };
@@ -57,7 +60,9 @@ export interface TierEvidenceReport {
 }
 
 export interface TierEvidenceInputs {
-  configuredTier: TrustTier;
+  configuredTier: TrustTier | 'unknown';
+  /** Set when the repo config failed to load; the report then names no eligible tier. */
+  configError?: string;
   records: ClassifierOutcomeRecord[];
   /** Raw mutation-summary.json text (#805/#2130 format); undefined when the file is absent. */
   mutationSummaryText: string | undefined;
@@ -72,7 +77,7 @@ const DAY_MS = 86_400_000;
 const HUMAN_INTERVENTION_CAVEAT =
   'Human intervention counts class-A PRs a human edited before merge, over merged PRs whose defect window has closed. Approvals the tier requires are not counted. Edits made outside GitHub are not seen.';
 
-const NEXT_TIER: Record<TrustTier, TrustTier | null> = { T0: 'T1', T1: 'T2', T2: null };
+const NEXT_TIER: Record<TrustTier | 'unknown', TrustTier | null> = { T0: 'T1', T1: 'T2', T2: null, unknown: null };
 
 export function coverageRatchetEvidence(ok: boolean, measuredAt: Date): CoverageRatchetEvidence {
   return { ok, measuredAt: measuredAt.toISOString() };
@@ -169,6 +174,7 @@ export function buildTierEvidence(inputs: TierEvidenceInputs): TierEvidenceRepor
   const next = NEXT_TIER[inputs.configuredTier];
   return {
     configuredTier: inputs.configuredTier,
+    configError: inputs.configError ?? null,
     coverage,
     mutation,
     humanIntervention,
@@ -195,7 +201,12 @@ function rateText(e: RateEvidence): string {
 }
 
 export function formatTierEvidence(report: TierEvidenceReport): string[] {
-  const lines = ['Trust tier evidence (ADR-0148, read-only):', `configured tier: ${report.configuredTier}`];
+  const lines = ['Trust tier evidence (ADR-0148, read-only):'];
+  lines.push(
+    report.configError === null
+      ? `configured tier: ${report.configuredTier}`
+      : `configured tier: unknown (repo config invalid: ${report.configError})`,
+  );
   lines.push(
     `coverage ratchet: ${report.coverage.ratchet}${report.coverage.measuredAt ? ` (measured ${report.coverage.measuredAt})` : ''}`,
   );
