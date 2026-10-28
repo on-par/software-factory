@@ -66,8 +66,10 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     });
 
   program
-    .command('run-brief <file>')
-    .description('Like run-issue, but the work comes from a local Markdown brief instead of a GitHub issue')
+    .command('run-brief <file> [files...]')
+    .description(
+      'Like run-issue, but the work comes from local Markdown briefs; several run in order with the same flags, a failed one does not stop the rest, and any failure exits non-zero',
+    )
     .option('--product <name>', 'Override active product constitution')
     .option('--no-auto-rework', 'Disable automatic rework loop')
     .option('--interactive', 'Pause before opening the PR and wait for approval from the TUI')
@@ -91,8 +93,8 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
       'Local-only: write a versioned benchmark artifact manifest (manifest.json, request.json, events.ndjson, diff.patch) to this directory; requires --workspace',
     )
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
-    .action(async (file, opts) => {
-      await handlers.cmdRunBrief(file, opts);
+    .action(async (file: string, files: string[], opts) => {
+      await handlers.cmdRunBrief([file, ...files], opts);
     });
 
   program

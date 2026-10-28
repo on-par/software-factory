@@ -18,7 +18,7 @@ Options:
 Run work:
   ship [options] <issue>                 Plan → build → check one GitHub issue and open a ready-for-review PR; never merges (merge later with land)
   run-issue [options] <issue>            Like ship, but loads the issue first and exits 2 before any worktree or PR if it cannot be found
-  run-brief [options] <file>             Like run-issue, but the work comes from a local Markdown brief instead of a GitHub issue
+  run-brief [options] <file> [files...]  Like run-issue, but the work comes from local Markdown briefs; several run in order with the same flags, a failed one does not stop the rest, and any failure exits non-zero
   run [options]                          Claim queued issues (factory:queued labels) and ship them, lanes in parallel; merges only when auto-merge is on
   supervise [options]                    Unattended loop: wait for usage headroom, run the queue, repeat until it is empty
   land [options] <issue>                 Squash-merge the issue's open PR once CI is green, then remove its worktree (left open if CI fails or review is pending)
