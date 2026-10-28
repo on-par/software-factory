@@ -9,7 +9,7 @@ The run lock stops two factory processes from force-recreating the same per-issu
 | Checkout | `.factory/run.lock`            | `run`, `supervise`, `local-small-overnight`                                           |
 | Issue    | `.factory/locks/run/<WorkKey>` | `ship`, `run-issue`, `run-brief`, `resume`, and each `run-issue --run-children` child |
 
-Originally every command shared one checkout lock, so a second one-shot run was refused even for a different issue, whose worktree and branch are disjoint. One-shot runs now lock per WorkKey (ADR-0168), so different issues run in parallel on one checkout and the same issue still refuses. The WorkKey is path-safe and config-independent. A worktree path is not used as the key because it depends on `worktree.parent` and the branch prefix (ADR-0150), so two processes with different prefixes would get different keys for the same issue.
+Originally every command shared one checkout lock, so a second one-shot run was refused even for a different issue, whose worktree and branch are disjoint. One-shot runs now lock per WorkKey (ADR-0168), so different issues run in parallel on one checkout and the same issue still refuses. `run-brief` with several files takes each brief's lock in turn, one brief at a time, so a refused lock fails only that brief and the next one still runs. The WorkKey is path-safe and config-independent. A worktree path is not used as the key because it depends on `worktree.parent` and the branch prefix (ADR-0150), so two processes with different prefixes would get different keys for the same issue.
 
 `run`, `supervise` and `local-small-overnight` pick issues from the queue, so they cannot know their key up front. They keep the checkout-wide fence.
 

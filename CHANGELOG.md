@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- `factory run-brief <file> [file...]` takes several Markdown briefs and runs them one after another in argv order, with the same flags for each (#3762). A failed brief, including a missing or empty path, does not stop the rest. A per-brief summary is printed at the end, and the exit code is 1 if any brief failed. Each brief takes its own run lock as before. `--artifacts` still takes exactly one brief.
+
 ## 0.9.22 - 2026-10-28
 
 `run.branchPrefix` lasting default, plus evidence/park fixes (#3748–#3751).

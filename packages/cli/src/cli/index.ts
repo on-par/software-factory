@@ -43,8 +43,6 @@ import {
   type KpiReconstruction,
   type LaneProxy,
   type LeaseHealth,
-  type LocalBriefParams,
-  type LocalOnlyPolicy,
   type DoctorProbes,
   type ModelDiagnosis,
   type PrSource,
@@ -84,9 +82,7 @@ import {
   getFactoryPaths,
   GITHUB_ISSUE_SOURCE,
   hasUnresolvedPark,
-  InvalidArtifactsDirError,
   InvalidWorkRequestInputError,
-  InvalidWorkspaceError,
   isCommandAvailable,
   isProxyRunning,
   kpiBranchPrefixes,
@@ -98,7 +94,6 @@ import {
   loadModelsConfig,
   loadRepoConfig,
   loadRoutesConfig,
-  LOCAL_BRIEF_SOURCE,
   joinClassifierOutcomes,
   mergeClassifierOutcomes,
   parseClassifierOutcomes,
@@ -128,8 +123,6 @@ import {
   type SizeGateMode,
   resolveEffectiveModelPins,
   resolveEnvironmentProxy,
-  resolveArtifactsDir,
-  resolveLocalOnlyPolicy,
   resolveMergePolicy,
   resolveSkipCI,
   resolveTimeouts,
@@ -338,6 +331,7 @@ import { createFactoryOctokit, type FactoryOctokitOptions } from './octokit.js';
 import { runDraftCommand } from './draft-command.js';
 import { checkErrorExit, checkReportExit, createDeepModelRunner, runIssueCheck } from './ready-check.js';
 import { childRunSucceeded, formatChildRunSummary, runChildrenInOrder, type ChildRunResult } from './run-children.js';
+import { cmdRunBrief as cmdRunBriefWith, type RunBriefOptions } from './run-brief.js';
 import { readRunFlagOverrides, recordDraftPrFlag } from './run-flags.js';
 import { runStalenessGuard } from './staleness.js';
 import { cmdBaselineClear } from './baseline.js';
@@ -1083,12 +1077,6 @@ function maxSlicesOrExit(raw: string | undefined): number | undefined {
     throw new CliExitError(`factory: invalid --max-slices '${raw}' — expected a whole number from 1 to 20`, 2);
   }
   return n;
-}
-
-/** Deterministic run number for a brief, derived from its content digest.
- *  Reserved 9,000,000+ range keeps brief branches/worktrees clear of real issue numbers. */
-function briefRunNumber(sha256Hex: string): number {
-  return 9_000_000 + (Number.parseInt(sha256Hex.slice(0, 8), 16) % 1_000_000);
 }
 
 // Product names become a filename in the constitutions dir; keep them to a safe,
@@ -2476,123 +2464,6 @@ async function runDecomposedChildren(
       1,
     );
   }
-}
-
-async function cmdRunBrief(
-  briefPath: string,
-  opts: {
-    product?: string;
-    autoRework?: boolean;
-    interactive?: boolean;
-    /** `--no-pr` sets false: stop after CHECK, no GitHub writes. */
-    pr?: boolean;
-    sandbox?: boolean;
-    approvePlan?: boolean;
-    workspace?: string;
-    artifacts?: string;
-    branchPrefix?: string;
-    draftPr?: boolean;
-  },
-) {
-  if (availableAgentClis(coreOps.isCommandAvailable).length === 0) {
-    throw new CliExitError(`factory: ${missingAgentCliMessage()}`, 2);
-  }
-  const repoRoot = await getRepoRoot();
-  const paths = getFactoryPaths(repoRoot);
-  if (!existsSync(paths.root)) {
-    throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
-  }
-
-  const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
-
-  let localOnly: LocalOnlyPolicy | undefined;
-  if (opts.workspace !== undefined) {
-    try {
-      localOnly = resolveLocalOnlyPolicy(opts.workspace);
-    } catch (err) {
-      if (err instanceof InvalidWorkspaceError) throw new CliExitError(`factory: ${err.message}`, 2);
-      throw err;
-    }
-  }
-
-  let artifactsDir: string | undefined;
-  if (opts.artifacts !== undefined) {
-    if (!localOnly) {
-      throw new CliExitError('factory: --artifacts requires --workspace (local-only runs only)', 2);
-    }
-    try {
-      artifactsDir = resolveArtifactsDir(opts.artifacts);
-    } catch (err) {
-      if (err instanceof InvalidArtifactsDirError) throw new CliExitError(`factory: ${err.message}`, 2);
-      throw err;
-    }
-    console.log(styleText('cyan', `local-only: benchmark artifacts will be written to ${artifactsDir}`));
-  }
-
-  // Local-only runs never touch GitHub — no remote required, no mutation possible.
-  const ghRepo = localOnly ? 'local/workspace' : await getGitHubRepo();
-
-  // Pre-flight: resolve the brief through the canonical work-request seam
-  // BEFORE any worktree or PR exists — a malformed brief exits here, so BUILD never starts.
-  const workSources = createDefaultWorkSourceRegistry({ octokit: getOctokit() });
-  let work: WorkRequest;
-  try {
-    work = await workSources.resolve(LOCAL_BRIEF_SOURCE, { path: briefPath } satisfies LocalBriefParams);
-  } catch (err) {
-    if (err instanceof InvalidWorkRequestInputError) {
-      throw new CliExitError(`factory: ${err.message}`, 2);
-    }
-    throw new CliExitError(
-      `factory: could not resolve brief at ${briefPath} (${errorDetail(err)}) — no worktree or PR was created`,
-      2,
-    );
-  }
-  const digest = work.reference?.externalId ?? '';
-  const runNum = briefRunNumber(digest);
-
-  await withRepoRunLock(
-    paths,
-    'factory run-brief',
-    async () => {
-      recordDraftPrFlag(paths.runFlags, opts.draftPr);
-      console.log(styleText('cyan', `one-shot: resolved ${work.id} — running the pipeline (queue untouched)`));
-      logEvent(paths.events, 'work-source', runNum, `inline local brief ${briefPath} (sha256 ${digest})`);
-      if (localOnly) {
-        console.log(styleText('cyan', `local-only: workspace ${localOnly.workspace} — publishing disabled`));
-        logEvent(
-          paths.events,
-          'local-only',
-          runNum,
-          `caller-provided workspace ${localOnly.workspace} — publishing disabled`,
-        );
-      }
-
-      const priorEvents = readEvents(paths.events, { includeSegments: true });
-      if (hasUnresolvedPark(priorEvents, String(runNum))) {
-        logEvent(paths.events, 'human-restarted', runNum, 'manual retry of a previously parked/failed run', {
-          actor: process.env.FACTORY_ACTOR ?? process.env.USER ?? 'unknown',
-        });
-      }
-
-      try {
-        await shipIssue(
-          runNum,
-          { ...opts, branchPrefix },
-          {
-            repoRoot,
-            ghRepo,
-            workRequest: work,
-            workSource: { kind: LOCAL_BRIEF_SOURCE, params: { path: briefPath } satisfies LocalBriefParams },
-            localOnly,
-            artifactsDir,
-          },
-        );
-      } catch (err: any) {
-        throw new CliExitError(`Run failed for brief ${briefPath}: ${err.message}`, 1);
-      }
-    },
-    { scope: { kind: 'issue', key: workKeyFromIssue(runNum) } },
-  );
 }
 
 async function cmdLocalSmallDryRun(issueNum: number, opts: { spec?: string; output?: string }) {
@@ -4238,6 +4109,18 @@ async function resumeFromCheck(issueNum: number): Promise<void> {
 }
 
 /** index.ts bindings the commander registrations in program*.ts call (#2793); type-only imports there avoid a runtime cycle. */
+/** `factory run-brief` (#3762): the handler lives in ./run-brief.ts; this binds its runtime. */
+function cmdRunBrief(files: readonly string[], opts: RunBriefOptions): Promise<void> {
+  return cmdRunBriefWith(files, opts, {
+    isCommandAvailable: (cmd) => coreOps.isCommandAvailable(cmd),
+    getRepoRoot: () => getRepoRoot(),
+    getGitHubRepo: () => getGitHubRepo(),
+    getOctokit: () => getOctokit(),
+    branchPrefixOrExit,
+    errorDetail,
+  });
+}
+
 /** `factory supervise` (#2797): the handler lives in ./supervise.ts; this binds its runtime. */
 function runSupervise(opts: SuperviseOptions): Promise<void> {
   return cmdSupervise(opts, {
