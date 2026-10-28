@@ -353,8 +353,8 @@ const INTERNAL_API_KEYS = [
   ...'describeChecksProbe holdRunConfigSnapshot CHECKER_ENV_ALLOW_VAR'.split(' '), // #3600
   // `factory init --detect-checks`: heuristics, agent prompt and reply, shell-free tokenizer
   ...'CHECK_KINDS buildDetectChecksPrompt detectCheckHeuristics heuristicProposal parseDetectedChecks'.split(' '),
-  'tokenizeEvidenceCommand',
-  ...'BaselineCache resolveBaselineCacheTtlHours'.split(' '), // #3540
+  ...'tokenizeEvidenceCommand coverageRatchetEvidence DEFAULT_TIER_EVIDENCE_LIMITS'.split(' '), // #1957
+  ...'BaselineCache resolveBaselineCacheTtlHours buildTierEvidence formatTierEvidence'.split(' '), // #3540, #1957
   ...'openCodeVersion DEFAULT_CI_DEADLINE_MS allProvidersDownReleasePayload'.split(' '), // #3340
   'DEFAULT_CI_NO_CHECKS_GRACE_MS',
   'noChecksVerdictMs',

@@ -15,6 +15,7 @@ Install or update with `npm install -g @on-par/factory-cli@latest`.
 
 ### Added
 
+- `factory classifier report` (and `--json` as `tier`) shows trust-tier promotion evidence: configured tier, coverage ratchet, per-package mutation vs floor, human-intervention rate with a caveat, rule-of-three slips and `eligibleFor` with the unmet criteria; missing or stale evidence is `unknown`, never 0%; `npm run coverage-ratchet -- --out coverage-ratchet.json` writes the coverage evidence (#1957).
 - `factory ship`, `run-issue` and `run-brief` take `--base-branch <ref>`: the worktree starts from the freshly fetched `origin/<ref>`, the PR opens against `<ref>`, and pre-PLAN base health and CHECK compare against it; the run has the size gate off, and an empty or `-`-prefixed ref exits 2 before any worktree or PR (#3764).
 - `factory run-brief <file> [file...]` takes several Markdown briefs and runs them one after another in argv order, with the same flags for each (#3762). A failed brief, including a missing or empty path, does not stop the rest. A per-brief summary is printed at the end, and the exit code is 1 if any brief failed. Each brief takes its own run lock as before. `--artifacts` still takes exactly one brief.
 
