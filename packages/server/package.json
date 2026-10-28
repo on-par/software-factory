@@ -1,7 +1,7 @@
 {
   "name": "@on-par/factory-server",
   "private": true,
-  "version": "0.9.22",
+  "version": "0.9.23",
   "description": "Local HTTP server for the factory \u2014 exposes the lane lifecycle bus as an SSE stream on GET /events. Private, never published.",
   "type": "module",
   "main": "dist/index.js",
@@ -15,7 +15,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@on-par/contracts": "^0.9.22"
+    "@on-par/contracts": "^0.9.23"
   },
   "devDependencies": {
     "@types/node": "^26.6.5"
