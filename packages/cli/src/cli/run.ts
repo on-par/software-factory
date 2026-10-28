@@ -98,7 +98,7 @@ export interface RunRuntime {
   getRepoRoot: () => Promise<string>;
   getGitHubRepo: () => Promise<string>;
   getOctokit: () => Octokit;
-  branchPrefixOrExit: (raw: string | undefined) => string;
+  branchPrefixOrExit: (raw: string | undefined, configPath: string) => string;
   withRepoRunLock: typeof withRepoRunLock;
   runAutoWorktreeGc: (
     repoRoot: string,
@@ -139,7 +139,7 @@ export interface RunRuntime {
 export async function cmdRun(opts: RunOptions, rt: RunRuntime): Promise<void> {
   const repoRoot = await rt.getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const branchPrefix = rt.branchPrefixOrExit(opts.branchPrefix);
+  const branchPrefix = rt.branchPrefixOrExit(opts.branchPrefix, paths.config);
 
   return rt.withRepoRunLock(paths, 'factory run', async () => {
     const deferrals = createDeferralTracker(paths.events);

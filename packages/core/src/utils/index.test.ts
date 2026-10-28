@@ -923,7 +923,7 @@ ESCALATE: which behavior should win?`;
 
 describe('legacy branch prefix literal', () => {
   const root = resolve(fileURLToPath(import.meta.url), '../../../../..');
-  const allowedFile = 'packages/core/src/utils/index.ts';
+  const allowedFile = 'packages/core/src/utils/branch-slug.ts';
 
   function sourceFiles(dir: string): string[] {
     return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {

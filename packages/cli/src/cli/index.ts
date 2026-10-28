@@ -1013,7 +1013,7 @@ export async function cmdFeedback(
   opts: { note?: string; branchPrefix?: string; repo?: string; includeLocalPaths?: boolean },
 ): Promise<void> {
   const paths = getFactoryPaths(await getRepoRoot());
-  const prefix = opts.branchPrefix === undefined ? resolveBranchPrefix() : branchPrefixOrExit(opts.branchPrefix);
+  const prefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
   let repo: string | undefined;
   try {
     repo = resolveFeedbackRepo({
@@ -1043,7 +1043,7 @@ async function resolveFactoryCommit(): Promise<string | null> {
 
 export async function cmdFilingPreview(runId: string, opts: { branchPrefix?: string }): Promise<void> {
   const paths = getFactoryPaths(await getRepoRoot());
-  const prefix = opts.branchPrefix === undefined ? resolveBranchPrefix() : branchPrefixOrExit(opts.branchPrefix);
+  const prefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
   const found = await runFilingPreview(runId, {
     out: process.stdout,
     err: process.stderr,
@@ -1060,8 +1060,9 @@ export async function cmdFilingPreview(runId: string, opts: { branchPrefix?: str
   if (!found) throw new CliExitError(`no failure evidence found for run ${runId}`, 2);
 }
 
-function branchPrefixOrExit(raw: string | undefined): string {
-  const prefix = resolveBranchPrefixOption(raw);
+function branchPrefixOrExit(raw: string | undefined, configPath: string): string {
+  const config = raw === undefined ? configLoaders.loadFactoryConfigForRepo(configPath) : undefined;
+  const prefix = resolveBranchPrefixOption(raw, config);
   if (prefix === null) throw new CliExitError(INVALID_BRANCH_PREFIX_MESSAGE, 2);
   return prefix;
 }
@@ -1588,9 +1589,9 @@ async function cmdReport(opts: { steerability?: boolean; json?: boolean } = {}) 
 }
 
 async function cmdClassifierBacktestEntry(opts: ClassifierBacktestOptions) {
-  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
   const [owner, repo] = (await getGitHubRepo()).split('/');
   const repoConfig = configLoaders.loadRepoConfig(repoRoot);
   const effective = resolveEffectiveConfig(repoConfig);
@@ -1699,9 +1700,9 @@ async function cmdGarden(
 }
 
 async function cmdKpis(opts: { branchPrefix?: string; json?: boolean } = {}) {
-  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
   const events = readEvents(paths.events, { includeSegments: true });
   const costs = existsSync(paths.costs) ? internalOps.readCosts(paths.costs) : [];
 
@@ -1940,6 +1941,7 @@ async function cmdTui(opts: { localQueue?: boolean } = {}, runTuiImpl: typeof ru
     prClassifier: resolvePrClassifierPolicy(configLoaders.loadFactoryConfigForRepo(paths.config), process.env, {
       classifier: readRunFlagOverrides(paths.runFlags).prClassifier,
     }),
+    runtime: configLoaders.loadFactoryConfigForRepo(paths.config),
   });
   effectiveConfigLines.push(
     describeDraftPrPolicy(
@@ -2137,7 +2139,7 @@ async function runAutoWorktreeGc(
             repoRoot,
             ttlDays: factoryConfig.worktree.gcTtlDays,
             repo: ghRepo,
-            branchPrefix: resolveBranchPrefix(),
+            branchPrefix: resolveBranchPrefix(factoryConfig),
           },
           { log: gcLog, octokit: getOctokit(), sandbox: gcSandbox },
         ),
@@ -2156,7 +2158,7 @@ async function runAutoWorktreeGc(
 }
 
 export interface LaneGcDeps {
-  loadConfig?: (configPath: string) => Pick<FactoryConfig, 'worktree' | 'sandbox'>;
+  loadConfig?: (configPath: string) => Pick<FactoryConfig, 'worktree' | 'sandbox' | 'run'>;
   sweep?: typeof sweepWorktrees;
   emitEvent?: typeof logEvent;
   octokit?: () => NonNullable<Parameters<typeof sweepWorktrees>[1]>['octokit'];
@@ -2188,7 +2190,7 @@ export async function sweepBetweenLaneIssues(
     if (!cfg.worktree.autoGcOnRun) return 'disabled';
     const gcLog = (type: EventKind, msg: string) => emitEvent(paths.events, type, issue, msg, { lane });
     const sandbox = gcWorktreeSandbox(cfg.sandbox, repoRoot);
-    const gcOpts = { repoRoot, ttlDays: cfg.worktree.gcTtlDays, repo: ghRepo, branchPrefix: resolveBranchPrefix() };
+    const gcOpts = { repoRoot, ttlDays: cfg.worktree.gcTtlDays, repo: ghRepo, branchPrefix: resolveBranchPrefix(cfg) };
     const report = await withGitLock(repoRoot, () =>
       withFileLock(
         paths.mergeLock,
@@ -2247,7 +2249,7 @@ async function cmdShip(
     logEvent(paths.events, 'warn', issueNum, mergeNotice);
   }
 
-  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
 
   return withRepoRunLock(
     paths,
@@ -2318,7 +2320,7 @@ async function cmdRunIssue(
   }
 
   const { runChildren, sizeGate: rawSizeGate, maxSlices: rawMaxSlices, ...shipOpts } = opts;
-  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
   const sizeGate = sizeGateOrExit(rawSizeGate);
   const maxSlices = maxSlicesOrExit(rawMaxSlices);
   if (opts.pr === false && ((sizeGate !== undefined && sizeGate !== 'off') || runChildren)) {
@@ -2501,7 +2503,7 @@ async function cmdRunBrief(
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
 
-  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
 
   let localOnly: LocalOnlyPolicy | undefined;
   if (opts.workspace !== undefined) {
@@ -2757,7 +2759,7 @@ export async function cmdWorktreeGc(opts: { dryRun?: boolean; ttlDays?: string; 
   if (!Number.isFinite(ttlDays) || ttlDays < 0) {
     throw new CliExitError('factory: --ttl-days must be a non-negative number', 2);
   }
-  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
   const log = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
   // Best-effort GitHub evidence: tokenless/local-only repos keep today's pure-local behavior.
   const ghRepo = await getGitHubRepo().catch(() => undefined);
@@ -2778,7 +2780,7 @@ export async function cmdWorktreeKeep(issueArg: string, opts: { reason?: string;
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
   const ghRepo = await getGitHubRepo();
-  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
   await runWorktreeKeep(
     issue,
     { reason: opts.reason },
@@ -2813,7 +2815,7 @@ export async function cmdReset(
   }
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
   const sandbox = gcWorktreeSandbox(configLoaders.loadFactoryConfigForRepo(paths.config).sandbox, repoRoot);
   const log = (type: EventKind, msg: string) => logEvent(paths.events, type, '-', msg);
   const run = () =>
@@ -2852,10 +2854,10 @@ export async function cmdLand(
   shellOps = resolveShellOps(deps);
   octokitFactory = deps.octokit ?? octokitFactory;
   try {
-    const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
     const repoRoot = await getRepoRoot();
     const ghRepo = await getGitHubRepo();
     const paths = getFactoryPaths(repoRoot);
+    const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
     const octokit = getOctokit();
     const factoryConfig = configLoaders.loadFactoryConfigForRepo(paths.config);
     const skipCI = configLoaders.resolveSkipCI(factoryConfig);
@@ -2951,7 +2953,8 @@ async function cmdTriage(opts: { product?: string; model?: string }) {
       onLog: (msg) => logEvent(paths.events, 'triage', '-', msg),
     });
     model = result.model;
-    const queue = await proposeTriageQueue(result.output, ghRepo, paths.events, shellOps.exec);
+    const prefix = resolveBranchPrefix(configLoaders.loadFactoryConfigForRepo(paths.config));
+    const queue = await proposeTriageQueue(result.output, ghRepo, paths.events, shellOps.exec, prefix);
     if (queue) {
       const header = triageQueueHeader(model, product);
       writeFileSync(paths.queueProposed, header + queue);
@@ -3546,7 +3549,7 @@ export function createIngestHook(
         label: ingestCfg.label,
         lane: ingestCfg.lane,
         maxPerCycle: ingestCfg.maxPerCycle,
-        branchPrefix: deps.branchPrefix ?? resolveBranchPrefix(),
+        branchPrefix: deps.branchPrefix ?? resolveBranchPrefix(configLoaders.loadFactoryConfigForRepo(paths.config)),
         forceAdmit: process.env.FACTORY_INGEST_FORCE_ADMIT === '1',
       });
       for (const held of result.skippedFileOverlap) {
@@ -3796,10 +3799,10 @@ export async function sweepApprovedPRs(
 }
 
 export async function cmdResumeApproved(opts: { branchPrefix?: string } = {}) {
-  const branchPrefix = branchPrefixOrExit(opts.branchPrefix);
   const repoRoot = await getRepoRoot();
   const ghRepo = await getGitHubRepo();
   const paths = getFactoryPaths(repoRoot);
+  const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
   const result = await sweepApprovedPRs(repoRoot, ghRepo, paths, {}, { branchPrefix });
   console.log(
     styleText(

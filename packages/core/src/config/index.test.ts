@@ -1607,6 +1607,13 @@ describe('resolveExperimental', () => {
 describe('resolveBranchPrefix', () => {
   it('defaults to "factory"', () => {
     expect(resolveBranchPrefix()).toBe('factory');
+    expect(resolveBranchPrefix({})).toBe('factory');
+    expect(resolveBranchPrefix({ run: {} })).toBe('factory');
+  });
+
+  it('uses run.branchPrefix, slug-normalized like --branch-prefix', () => {
+    expect(resolveBranchPrefix({ run: { branchPrefix: 'acme' } })).toBe('acme');
+    expect(resolveBranchPrefix({ run: { branchPrefix: 'Acme Bots!' } })).toBe('acme-bots');
   });
 
   it('ignores FACTORY_BRANCH_PREFIX', () => {
@@ -1614,10 +1621,42 @@ describe('resolveBranchPrefix', () => {
     process.env.FACTORY_BRANCH_PREFIX = 'compare-local';
     try {
       expect(resolveBranchPrefix()).toBe('factory');
+      expect(resolveBranchPrefix({ run: { branchPrefix: 'acme' } })).toBe('acme');
     } finally {
       if (prev === undefined) delete process.env.FACTORY_BRANCH_PREFIX;
       else process.env.FACTORY_BRANCH_PREFIX = prev;
     }
+  });
+
+  describe('from a repo config file', () => {
+    const tmp = createTempDirs();
+    let dir: string;
+
+    beforeEach(async () => {
+      dir = await tmp.make('factory-branch-prefix-');
+    });
+
+    afterEach(() => tmp.cleanup());
+
+    it('run.branchPrefix sets the default', async () => {
+      const path = join(dir, 'config.json');
+      await writeFile(path, JSON.stringify({ run: { branchPrefix: 'Acme' } }));
+      expect(resolveBranchPrefix(loadFactoryConfigForRepo(path))).toBe('acme');
+    });
+
+    it('is "factory" when the file does not set run.branchPrefix', async () => {
+      const path = join(dir, 'config.json');
+      await writeFile(path, JSON.stringify({ run: { merge: { auto: true } } }));
+      expect(resolveBranchPrefix(loadFactoryConfigForRepo(path))).toBe('factory');
+    });
+
+    it.each(['', '!!!'])('rejects run.branchPrefix %j, as --branch-prefix does', async (value) => {
+      const path = join(dir, 'config.json');
+      await writeFile(path, JSON.stringify({ run: { branchPrefix: value } }));
+      expect(() => loadFactoryConfigForRepo(path)).toThrow(
+        /run\.branchPrefix: must contain at least one letter or digit/,
+      );
+    });
   });
 });
 

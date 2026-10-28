@@ -40,7 +40,10 @@ export async function sweepLaneClaims(
     if (!octokit) return;
     await new LaneFileGuard(paths.laneFiles).sweepStale({
       repo: ghRepo,
-      isStale: createGithubLaneClaimStalenessProbe({ octokit, branchPrefix: resolveBranchPrefix() }),
+      isStale: createGithubLaneClaimStalenessProbe({
+        octokit,
+        branchPrefix: resolveBranchPrefix(loadFactoryConfigForRepo(paths.config)),
+      }),
       log: (type, msg) => logEvent(paths.events, type, 'all', msg),
     });
   } catch (err: any) {

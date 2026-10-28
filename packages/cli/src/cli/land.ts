@@ -94,7 +94,9 @@ export async function landIssue(
   // PR that references this issue directly and use its real head branch.
   // Legacy-prefix (LEGACY_BRANCH_PREFIX) branches are guessed too, after the resolved prefix (#1708).
   const repoConfig = configLoaders.loadRepoConfig(repoRoot);
-  const resolved = branchPrefix ?? resolveEffectiveConfig(repoConfig).branchPrefix;
+  const resolved =
+    branchPrefix ??
+    resolveEffectiveConfig(repoConfig, process.env, configLoaders.loadFactoryConfigForRepo(paths.config)).branchPrefix;
   const title = await getIssueTitle(ghRepo, issueNum, octokit);
   // ADR-0161: a stack layer lands by its exact branch, never by title guess or the Closes PR (the top layer).
   const guesses = opts.branch

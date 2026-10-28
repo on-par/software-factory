@@ -7,6 +7,14 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- `run.branchPrefix` in `.factory/config.*` sets a lasting default branch-name prefix
+  for the repo (#3747). Precedence: `--branch-prefix` > `run.branchPrefix` > `factory`.
+  The value is slug-normalized like the flag, and a value with no letter or digit fails
+  config validation. `FACTORY_BRANCH_PREFIX` is still ignored. Legacy `ship-it/`
+  branches are still recognized. `factory status --kpis` shows the prefix's source.
+
 ## 0.9.21 - 2026-10-27
 
 Republish / recovery: npm phantom-staged `@on-par/factory-core@0.9.20`
