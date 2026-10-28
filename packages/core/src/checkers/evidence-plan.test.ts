@@ -57,12 +57,13 @@ describe('evidence plan runner', () => {
       null,
     );
     const entries = [
-      entry('fail-to-pass-test', { test: '"src/a test.ts" --run' }),
+      entry('fail-to-pass-test', { test: '"src/a test.test.ts" "does x"' }),
       entry('command', { command: 'lint --fix', passWhen: 'done' }),
     ];
     const results = await runEvidencePlan(entries, allowlist, {
       worktree,
       sandbox: policy('firejail', worktree),
+      testRunner: 'vitest',
       runCommand: async (argv, options) => {
         seen.push([...argv]);
         return commandResult(options?.cwd === worktree ? 0 : 1);
@@ -71,9 +72,11 @@ describe('evidence plan runner', () => {
     expect(results.map((r) => r.status)).toEqual(['PASS', 'PASS']);
     expect(seen).toHaveLength(3);
     expect(seen[0]?.[0]).toBe('/bin/sh');
-    expect(seen[0]?.[2]).toContain(shellEscape('src/a test.ts'));
-    expect(seen[0]?.[2]).toContain(shellEscape('--run'));
-    expect(seen[1]?.[2]).toContain(shellEscape('src/a test.ts'));
+    expect(seen[0]?.[2]).toContain(shellEscape('src/a test.test.ts'));
+    expect(seen[0]?.[2]).toContain('-t');
+    expect(seen[0]?.[2]).toContain(shellEscape('does x'));
+    expect(seen[0]?.[2]).not.toContain('--run');
+    expect(seen[1]?.[2]).toContain(shellEscape('src/a test.test.ts'));
   });
 
   it('evidence runner FAILs an allowlisted command that exits non-zero', async () => {
@@ -122,6 +125,76 @@ describe('evidence plan runner', () => {
       { worktree: '/tmp/lane', sandbox: policy(), runCommand: async () => commandResult(0) },
     );
     expect(result[0]!.reason).toMatch(/^unsupported shell syntax/);
+  });
+
+  it('a clean selector runs only the named tests on head and base', async () => {
+    const worktree = await tempDirs.make('evidence-plan-');
+    await execGit(['init', '-q'], { cwd: worktree });
+    await execGit(['config', 'user.name', 'Evidence Test'], { cwd: worktree });
+    await execGit(['config', 'user.email', 'evidence@example.test'], { cwd: worktree });
+    await writeFile(join(worktree, 'fixture.txt'), 'base');
+    await execGit(['add', '.'], { cwd: worktree });
+    await execGit(['commit', '-qm', 'base'], { cwd: worktree });
+    const base = (await execGit(['rev-parse', 'HEAD'], { cwd: worktree })).stdout.trim();
+    await execGit(['update-ref', 'refs/remotes/origin/main', base], { cwd: worktree });
+    await writeFile(join(worktree, 'fixture.txt'), 'head');
+    await execGit(['commit', '-qam', 'head'], { cwd: worktree });
+    const seen: string[] = [];
+    await runEvidencePlan(
+      [entry('fail-to-pass-test', { test: 'src/a.test.ts "does x"' })],
+      new Map([['test', ['npm', 'run', 'test']]]),
+      {
+        worktree,
+        sandbox: policy('firejail', worktree),
+        testRunner: 'vitest',
+        runCommand: async (argv, options) => {
+          seen.push(argv[2]!);
+          return commandResult(options?.cwd === worktree ? 0 : 1);
+        },
+      },
+    );
+    expect(seen).toHaveLength(2);
+    const tailArgs = ['--', 'src/a.test.ts', '-t', 'does x'].map(shellEscape).join(' ');
+    for (const command of seen) expect(command.replaceAll("'\\''", "'")).toContain(tailArgs);
+  });
+
+  it('a prose selector SKIPs as selector could not be used without spawning', async () => {
+    let calls = 0;
+    const result = await runEvidencePlan(
+      [entry('fail-to-pass-test', { test: 'src/a.test.ts proves the runner only runs targeted tests' })],
+      new Map([['test', ['npm', 'run', 'test']]]),
+      {
+        worktree: '/tmp/lane',
+        sandbox: policy(),
+        testRunner: 'vitest',
+        runCommand: async () => {
+          calls++;
+          return commandResult(0);
+        },
+      },
+    );
+    expect(result[0]!.status).toBe('SKIP');
+    expect(result[0]!.reason).toMatch(/^selector could not be used/);
+    expect(calls).toBe(0);
+  });
+
+  it('an unrecognised test runner SKIPs instead of running the whole suite', async () => {
+    let calls = 0;
+    const result = await runEvidencePlan(
+      [entry('fail-to-pass-test', { test: 'src/a.test.ts "does x"' })],
+      new Map([['test', ['npm', 'run', 'test']]]),
+      {
+        worktree: '/tmp/lane',
+        sandbox: policy(),
+        runCommand: async () => {
+          calls++;
+          return commandResult(0);
+        },
+      },
+    );
+    expect(result[0]!.status).toBe('SKIP');
+    expect(result[0]!.reason).toMatch(/^selector could not be used: test runner not recognised/);
+    expect(calls).toBe(0);
   });
 
   it('evidence runner skips unsupported evidence without spawning', async () => {
@@ -236,6 +309,7 @@ describe('evidence plan runner', () => {
       {
         worktree,
         sandbox: policy('sandbox-exec', worktree),
+        testRunner: 'vitest',
         runCommand: async (argv, options) => {
           commands.push(argv[2]!);
           return commandResult(options?.cwd === worktree ? 0 : 1);
