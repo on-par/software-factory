@@ -67,13 +67,12 @@ import { enterStackSlice, stackWaitOutcome } from './stack-slice-entry.js';
 import { recordShippedSlice } from './slice-ship-record.js';
 import type { ReviewFloorPathChange, ReviewFloorRuleSet } from '../review/floor.js';
 import {
-  CLASSIFIER_PROMPT_VERSION,
-  classifierPolicyVersion,
   classifyPrShadow,
   toClassificationRecord,
   type PrShadowInput,
   type PrShadowVerdict,
 } from '../review/classifier.js';
+import { shadowErrorVerdict } from './shadow-fallback.js';
 import { decideTrustTier, resolveReviewRouting, type ReviewRouting, type TrustTierConfig } from '../review/routing.js';
 import { logTrustTier } from './trust-tier-log.js';
 import { captureDiffBase } from '../checkers/design-smells.js';
@@ -1129,22 +1128,7 @@ async function runIssueOnce(
       try {
         shadow = await (ports.classifyPr ?? classifyPrShadow)(shadowInput);
       } catch (err) {
-        shadow = {
-          modelClass: null,
-          floorClass: reviewRouting.floor,
-          finalClass: reviewRouting.floor,
-          model: null,
-          promptVersion: CLASSIFIER_PROMPT_VERSION,
-          policyVersion: classifierPolicyVersion(request.prClassifier.rules),
-          diffSha: null,
-          adrIds: [],
-          costUsd: null,
-          claims: [],
-          unsupportedClaims: [],
-          notInspected: [],
-          droppedClaims: 0,
-          reason: `classifier error: ${errorMessage(err)}`,
-        };
+        shadow = shadowErrorVerdict(reviewRouting.floor, request.prClassifier.rules, errorMessage(err));
       }
       reviewRouting = { ...reviewRouting, shadow };
       log(
