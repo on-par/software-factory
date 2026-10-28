@@ -1,6 +1,6 @@
 {
   "name": "@on-par/factory-config",
-  "version": "0.9.21",
+  "version": "0.9.22",
   "description": "Shared configuration defaults and product constitutions for the Software Factory.",
   "type": "module",
   "main": "dist/index.js",
