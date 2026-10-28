@@ -113,6 +113,8 @@ async function shipPhaseImpl(opts: {
   slice?: { index: number; count: number };
   /** Stack-mode (ADR-0161) position: the PR opens on `stack.base` and its body names the stack order. Ignored for inline work. */
   stack?: StackPosition;
+  /** PR base for a non-stack run started from another branch (#3764); default main. */
+  baseBranch?: string;
   /** Lane id stamped onto emitted lifecycle events; defaults to `issue-<issue>` (#591). */
   laneId?: string;
   /** Lifecycle bus to emit onto; defaults to the process-wide `lifecycleBus` (#591). */
@@ -380,7 +382,7 @@ async function shipPhaseImpl(opts: {
 
     const slice = inlineWork ? undefined : opts.slice;
     const stack = inlineWork ? undefined : opts.stack;
-    const base = stack?.base ?? SHIP_BASE_BRANCH;
+    const base = stack?.base ?? opts.baseBranch ?? SHIP_BASE_BRANCH;
     const finalSlice = !slice || slice.index >= slice.count;
     // The brief's path is local and often gitignored, so the PR names it by content digest only.
     const briefDigest = inlineWork?.reference?.externalId.slice(0, 12);

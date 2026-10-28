@@ -39,6 +39,8 @@ export interface BaseHealthResult {
 }
 
 export interface BaseHealthOptions {
+  /** Remote-tracking ref to test (#3764); default origin/main. */
+  baseRef?: string;
   /** Lane worktree; git runs here, its files are never changed. */
   worktree: string;
   constitution: Constitution | null;
@@ -79,7 +81,7 @@ function errorMessage(err: unknown): string {
 async function resolveBaseSha(opts: BaseHealthOptions): Promise<string | undefined> {
   const run = opts.deps?.runCommand ?? runCommand;
   try {
-    const res = await run(['git', 'rev-parse', '--verify', 'origin/main^{commit}'], {
+    const res = await run(['git', 'rev-parse', '--verify', `${opts.baseRef ?? 'origin/main'}^{commit}`], {
       cwd: opts.worktree,
       timeoutMs: GIT_COMMAND_TIMEOUT_MS,
     });
@@ -104,10 +106,11 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
     log,
     deps = {},
   } = opts;
+  const ref = opts.baseRef ?? 'origin/main';
   try {
     const baseSha = await resolveBaseSha(opts);
     if (baseSha === undefined) {
-      const reason = 'origin/main not resolvable';
+      const reason = `${ref} not resolvable`;
       log('check', `base health skipped: ${reason}`);
       return { kind: 'skipped', failingChecks: [], cached: false, reason };
     }
@@ -166,13 +169,13 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
         failing = failing.filter((c) => c !== 'compile');
         log(
           'check',
-          `base health: compile timed out locally on origin/main ${baseSha} but GitHub CI is green (${verdict.reason}) — overriding compile to passing`,
+          `base health: compile timed out locally on ${ref} ${baseSha} but GitHub CI is green (${verdict.reason}) — overriding compile to passing`,
         );
       } else {
         ciPending = true;
         log(
           'check',
-          `base health: compile timed out locally on origin/main ${sha8}; GitHub CI not green (${verdict.reason}) — holding`,
+          `base health: compile timed out locally on ${ref} ${sha8}; GitHub CI not green (${verdict.reason}) — holding`,
         );
       }
     }
@@ -195,7 +198,7 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
       if (verdict?.green) {
         log(
           'check',
-          `base health: cached FAIL (${cachedFailing.join(', ')}) on origin/main ${sha8} but GitHub CI is green (${verdict.reason}) — re-running once with the cache bypassed`,
+          `base health: cached FAIL (${cachedFailing.join(', ')}) on ${ref} ${sha8} but GitHub CI is green (${verdict.reason}) — re-running once with the cache bypassed`,
         );
         for (const checker of cachedFailing) {
           if (cachePath !== undefined) {
@@ -251,7 +254,7 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
               );
               log(
                 'base_divergence',
-                `base divergence: origin/main ${baseSha} — ${checker} fails locally on a fresh re-run but GitHub CI is green (${verdict.reason}); holding until the SHA changes. Output tail: ${tail}`,
+                `base divergence: ${ref} ${baseSha} — ${checker} fails locally on a fresh re-run but GitHub CI is green (${verdict.reason}); holding until the SHA changes. Output tail: ${tail}`,
               );
             }
           }
@@ -263,7 +266,7 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
       log('check', `base health: cache hit for ${sha8} (${memoized ? 'shared with another lane' : 'baseline cache'})`);
     }
     if (failing.length > 0) {
-      log('check', `base health: origin/main ${sha8} is red (${failing.join(', ')})`);
+      log('check', `base health: ${ref} ${sha8} is red (${failing.join(', ')})`);
       const awaitingCi = ciPending && failing.length === 1 && failing[0] === 'compile';
       return {
         kind: 'red',
@@ -274,7 +277,7 @@ export async function checkBaseHealth(opts: BaseHealthOptions): Promise<BaseHeal
         ...(confirmedLocally ? { confirmedLocally: true } : {}),
       };
     }
-    log('check', `base health: origin/main ${sha8} is green`);
+    log('check', `base health: ${ref} ${sha8} is green`);
     return { kind: 'green', baseSha, failingChecks: [], cached };
   } catch (err) {
     const reason = errorMessage(err);

@@ -101,6 +101,14 @@ describe('resolveRunBranch', () => {
     expect(list).not.toHaveBeenCalled();
   });
 
+  it('never adopts an open PR when a base branch is set (#3764)', async () => {
+    const { octokit, list } = stub([pr(7, 'factory/2253-x')]);
+    expect(await run(octokit, { baseBranch: 'feat/x' })).toBe(
+      branchFor(workKeyFromIssue(2253), 'New title', 'factory'),
+    );
+    expect(list).not.toHaveBeenCalled();
+  });
+
   it('skips the lookup for stack runs', async () => {
     const { octokit, list } = stub([pr(7, 'factory/2253-x')]);
     const rest = {

@@ -65,6 +65,24 @@ describe('buildProgram', () => {
     expect(cmdDraft).toHaveBeenCalledWith({ text: 'x', json: true }, expect.anything());
   });
 
+  it('run-issue, run-brief and ship register --base-branch and pass it to their handlers (#3764)', async () => {
+    const cmdShip = vi.fn(async () => undefined);
+    const cmdRunIssue = vi.fn(async () => {});
+    const cmdRunBrief = vi.fn(async () => {});
+    const handlers = { ...PROGRAM_HANDLERS, cmdShip, cmdRunIssue, cmdRunBrief };
+    for (const name of ['ship', 'run-issue', 'run-brief']) {
+      const cmd = buildProgram(handlers, {}).commands.find((c) => c.name() === name);
+      expect(cmd?.options.some((o) => o.long === '--base-branch')).toBe(true);
+    }
+    const parse = (args: string[]) => buildProgram(handlers, {}).parseAsync(['node', 'factory', ...args]);
+    await parse(['ship', '5', '--base-branch', 'feat/x']);
+    await parse(['run-issue', '5', '--base-branch', 'feat/x']);
+    await parse(['run-brief', 'a.md', '--base-branch', 'feat/x']);
+    expect(cmdShip).toHaveBeenCalledWith(5, expect.objectContaining({ baseBranch: 'feat/x' }));
+    expect(cmdRunIssue).toHaveBeenCalledWith(5, expect.objectContaining({ baseBranch: 'feat/x' }));
+    expect(cmdRunBrief).toHaveBeenCalledWith(['a.md'], expect.objectContaining({ baseBranch: 'feat/x' }));
+  });
+
   it('unpark registers --keep-order and passes keepOrder to cmdUnpark (#3554)', async () => {
     const cmdUnpark = vi.fn(async () => {});
     const handlers = { ...PROGRAM_HANDLERS, cmdUnpark };

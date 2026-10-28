@@ -574,6 +574,7 @@ async function runIssueOnce(
           constitution,
           router: ports.router,
           env: laneEnv(appPort, process.env, appBaseUrl, ports.workspace.path, runId),
+          ...(request.parentBaseRef !== undefined ? { baseRef: request.parentBaseRef } : {}),
           cachePath: request.baselineCachePath,
           cacheTtlHours: request.baselineCacheTtlHours,
           timeoutSeconds: request.timeouts.check,
@@ -588,7 +589,7 @@ async function runIssueOnce(
       if (health?.kind === 'red' && health.baseSha !== undefined) {
         log(
           'environment-released',
-          `origin/main ${health.baseSha.slice(0, 8)} fails ${health.failingChecks.join(', ')} before PLAN — no model calls, releasing #${workKey} to queued`,
+          `${request.parentBaseRef ?? 'origin/main'} ${health.baseSha.slice(0, 8)} fails ${health.failingChecks.join(', ')} before PLAN — no model calls, releasing #${workKey} to queued`,
         );
         return {
           state: 'released',

@@ -50,6 +50,7 @@ import {
 } from '@on-par/factory-core/internal';
 import { recordGitPushes, resolveGitHubMode, GITHUB_STUB_CALLS_FILE } from './github-stub.js';
 import type { CliDeps, ConfigLoaderKey, GitOpKey } from './index.js';
+import { baseRemoteRef } from './ship-options.js';
 import { shipRuntime } from './ship-runtime.js';
 
 // Captures the message of the last terminal event runIssue emits (ready/fail/
@@ -142,6 +143,7 @@ export async function setupRunWorkspace({
   ghName,
   git,
   paths,
+  startPoint,
 }: {
   ctx?: { localOnly?: LocalOnlyPolicy; resumeFrom?: CheckResumeRecord };
   repoRoot: string;
@@ -154,6 +156,8 @@ export async function setupRunWorkspace({
   ghName: string;
   git: Required<Pick<CliDeps, GitOpKey>>;
   paths: ReturnType<typeof getFactoryPaths>;
+  /** Remote-tracking ref the worktree starts from (#3764); undefined = the default base. */
+  startPoint?: string;
 }): Promise<Workspace> {
   let workspace: Workspace;
   if (ctx?.resumeFrom) {
@@ -166,6 +170,7 @@ export async function setupRunWorkspace({
       worktreePath: worktree,
       log,
       sandbox: worktreeSandbox,
+      startPoint,
       findOpenPr: (br) => findOpenPR(octokit, ghOwner, ghName, br),
       keepsFile: paths.worktreeKeeps,
       setup: (root, br, wt, sp, sandbox, setupLog, setupOpts) =>
@@ -316,7 +321,7 @@ export interface RunRequestInput {
   product: string | undefined;
   runStartedAt: string;
   lane: string | undefined;
-  opts: { interactive?: boolean; sandbox?: boolean; pr?: boolean };
+  opts: { interactive?: boolean; sandbox?: boolean; pr?: boolean; baseBranch?: string };
   ctx?: {
     blockedBehind?: number[];
     workSource?: { kind: WorkRequestSourceKind; params: unknown };
@@ -393,6 +398,7 @@ export function buildRunRequest({
     },
     localOnly: Boolean(ctx?.localOnly),
     noPr: opts.pr === false,
+    ...(opts.baseBranch !== undefined ? { parentBaseRef: baseRemoteRef(opts.baseBranch) } : {}),
     blockUnresolvedRegressions: resolveDesignRegressionBlock(factoryConfig),
     hermeticGit: resolveHermeticGit(repoConfig),
     baselineCacheTtlHours: resolveBaselineCacheTtlHours(repoConfig),

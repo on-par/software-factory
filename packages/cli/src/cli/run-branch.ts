@@ -25,10 +25,13 @@ export async function resolveRunBranch(opts: {
   ctx?: { localOnly?: LocalOnlyPolicy; resumeFrom?: CheckResumeRecord; lane?: string; rebuild?: { branch: string } };
   /** --no-pr: always a fresh branch, never an adopted open PR's. */
   noPr?: boolean;
+  /** --base-branch (#3764): a run started from another ref never adopts an open PR. */
+  baseBranch?: string;
   octokit: Octokit;
   eventsFile: string;
 }): Promise<string> {
-  const { issueNum, issueTitle, ghRepo, branchPrefix, sizeGateMode, work, ctx, noPr, octokit, eventsFile } = opts;
+  const { issueNum, issueTitle, ghRepo, branchPrefix, sizeGateMode, work, ctx, noPr, baseBranch, octokit, eventsFile } =
+    opts;
   if (ctx?.rebuild) return ctx.rebuild.branch; // #3325: never adopt the conflicting PR being replaced
   const sliceIndex = await findSliceIndex({ sizeGateMode, ctx, work, octokit, ghRepo, issueNum });
   if (ctx?.resumeFrom) return ctx.resumeFrom.branch;
@@ -36,6 +39,7 @@ export async function resolveRunBranch(opts: {
   if (
     ctx?.localOnly ||
     noPr ||
+    baseBranch !== undefined ||
     sliceIndex !== undefined ||
     sizeGateMode === 'stack' ||
     work.kind !== GITHUB_ISSUE_SOURCE
