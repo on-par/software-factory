@@ -74,6 +74,7 @@ function ship(
     log: (type, msg) => logs.push([type, msg]),
     run: makeRun(numstat),
     walkthrough: extra.walkthrough,
+    evidenceComment: true,
     checkSummary: { failures: 0, passes: 3, skips: 0, total: 3, results: [] },
   });
   return { promise, calls, logs };

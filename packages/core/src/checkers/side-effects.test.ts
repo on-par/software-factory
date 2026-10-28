@@ -63,6 +63,40 @@ describe('evidence side effects guard', () => {
     expect(output.details).toContain('42');
   });
 
+  it('kills a leaked group and moves it to leakReport when evidence failed (#3749)', async () => {
+    let kills = 0;
+    const guard = createEvidenceSideEffectsGuard(
+      context('/tmp/lane', async () => {
+        kills++;
+        return [];
+      }),
+      { readStatus: async () => '', isAlive: () => true },
+    );
+    await guard.beforeCommand();
+    await guard.afterCommand('npm run lint', [42]);
+    const output = await guard.finish({ evidenceFailed: true });
+    expect(output).toMatchObject({ result: 'PASS' });
+    expect(kills).toBe(1);
+    expect(guard.leakReport().join('\n')).toContain('npm run lint');
+    expect(guard.leakReport().join('\n')).toContain('42');
+  });
+
+  it('reports one leak line per evidence command across head and base runs (#3749)', async () => {
+    const guard = createEvidenceSideEffectsGuard(
+      context('/tmp/lane', async () => []),
+      {
+        readStatus: async () => '',
+        isAlive: () => true,
+      },
+    );
+    await guard.beforeCommand();
+    await guard.afterCommand('npm test', [1, 2]);
+    await guard.afterCommand('npm test', [3, 4]);
+    const report = guard.leakReport();
+    expect(report).toHaveLength(1);
+    expect(report[0]).toContain('1, 2, 3, 4');
+  });
+
   it('side_effects passes for exempt delta and dead evidence groups', async () => {
     const worktree = await repository();
     await writeFile(join(worktree, '.gitignore'), 'ignored.tmp\n');

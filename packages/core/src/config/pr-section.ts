@@ -33,6 +33,12 @@ export const PrConfigSections = {
         .describe(
           'Large-PR walkthrough (#3623). SHIP adds a walkthrough (intent, main files, how to verify) to the PR body and evidence pack when the diff vs main has at least minLines changed lines AND at least minFiles files. Soft artifact: a failure to build it is logged and never blocks the PR.',
         ),
+      evidenceComment: z
+        .boolean()
+        .optional()
+        .describe(
+          'Post the evidence pack (checks, rework, timeline, artifacts) as a comment on the PR SHIP opens. Unset: off. The PR body is unchanged either way.',
+        ),
     })
     .strict()
     .optional()

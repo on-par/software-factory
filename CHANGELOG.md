@@ -7,7 +7,60 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.22 - 2026-10-28
+
+`run.branchPrefix` lasting default, plus evidence/park fixes (#3748–#3751).
+All seven published `@on-par` packages move to 0.9.22 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
+### Added
+
+- `run.branchPrefix` in `.factory/config.*` sets a lasting default branch-name prefix
+  for the repo (#3747). Precedence: `--branch-prefix` > `run.branchPrefix` > `factory`.
+  The value is slug-normalized like the flag, and a value with no letter or digit fails
+  config validation. `FACTORY_BRANCH_PREFIX` is still ignored. Legacy `ship-it/`
+  branches are still recognized. `factory status --kpis` shows the prefix's source.
+
+### Changed
+
+- A fail-to-pass evidence proof runs only the planner's named tests through the runner's own filter (vitest, jest, pytest), and SKIPs with "selector could not be used" instead of running the whole suite (#3750).
+
 ### Fixed
+
+- Evidence commands on macOS `sandbox-exec` can reach loopback, so a `dotnet test` fail-to-pass proof no longer aborts connecting to its testhost; other outbound stays denied (#3748).
+- A fail-to-pass proof that fails identically on base and head now gets one free CHECK re-run and parks `check-infra` instead of builder rework, and a test host it leaks is reported once inside the evidence failure rather than as a separate `side_effects` failure (#3749).
+- A parked `run-brief` run no longer tries to comment on a nonexistent GitHub issue (which 404'd and logged a misleading warning); its park reason is reported in the event log and the CLI output. (#3751)
+
+## 0.9.21 - 2026-10-27
+
+Republish / recovery: npm phantom-staged `@on-par/factory-core@0.9.20`
+(E409 on republish; packument never lists 0.9.20; known npm/cli#9889).
+Installs of `@on-par/factory-cli@0.9.20` cannot resolve `factory-core@0.9.20`.
+Same product content as 0.9.20. All seven published `@on-par` packages move
+to 0.9.21 in lockstep. Install or update with
+`npm install -g @on-par/factory-cli@latest`.
+
+### Changed
+
+- `factory-run.yml` installs `@on-par/factory-cli@0.9.21` (`FACTORY_CLI_VERSION`), the
+  committed lockstep `package.json` versions are 0.9.21, and the runbook's external
+  caller pins `@v0.9.21`. The runbook says to pin the tag of the CLI you want.
+
+## 0.9.20 - 2026-10-27
+
+SHIP's evidence pack PR comment is opt-in (`pr.evidenceComment: true`), and a
+`run-brief` PR body no longer names the brief's filesystem path. Also: atomic
+lane port leases (#1619) and `factory status` coverage of decomposed parents
+(#3108). All seven published `@on-par` packages move to 0.9.20 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
+### Changed
+
+- SHIP no longer posts the evidence pack as a PR comment by default. Set `pr.evidenceComment: true` in the repo config to post it. The PR body is unchanged.
+
+### Fixed
+
+- A `run-brief` PR body no longer names the brief's file path, which is often gitignored or outside the repo. It names the brief by the first 12 characters of its sha256.
 
 - Lane port leases write .factory/ports.json atomically (unique tmp file + rename) under the existing file lock, and a reader retries once on a parse error, so the lane proxy no longer drops every route mid-write (#1619).
 
@@ -15,6 +68,9 @@ section to `## X.Y.Z - date`. See
 
 - At classifier trust tier T2 an eligible class-A PR goes to the existing auto-merge path with a `t2-auto` receipt (event log and PR body), still behind required CI and the no-auto-merge gate; an active demotion drops the effective tier one rung, so a demoted T2 samples like T1 (#1960).
 - `factory status` shows merged-child coverage of each decomposed parent's criteria, and a merge updates one coverage comment on the parent (#3108)
+- `factory-run.yml` installs `@on-par/factory-cli@0.9.20` (`FACTORY_CLI_VERSION`), the
+  committed lockstep `package.json` versions are 0.9.20, and the runbook's external
+  caller pins `@v0.9.20`. The runbook says to pin the tag of the CLI you want.
 
 ## 0.9.19 - 2026-10-26
 

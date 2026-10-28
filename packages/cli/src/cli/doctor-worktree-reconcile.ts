@@ -26,7 +26,7 @@ export async function reconcileWorktrees(
             repoRoot,
             ttlDays: factoryConfig.worktree.gcTtlDays,
             repo: ghRepo,
-            branchPrefix: resolveBranchPrefix(),
+            branchPrefix: resolveBranchPrefix(factoryConfig),
           },
           { log: gcLog, octokit, sandbox: gcSandbox },
         ),

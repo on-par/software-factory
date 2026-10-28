@@ -7,6 +7,8 @@ import type { EvidenceAllowlist } from './evidence-allowlist.js';
 import { tokenizeEvidenceCommand } from './evidence-allowlist.js';
 import { runVerificationCommand } from './run-command.js';
 import type { CheckerContext } from './index.js';
+import type { EvidenceTestRunner } from './evidence-selector.js';
+import { SELECTOR_UNUSABLE_PREFIX, parseFailToPassSelector, selectorArgs } from './evidence-selector.js';
 import { verifyFailToPass } from './evidence-plan-false-pass.js';
 
 export interface EvidencePlanResult {
@@ -19,6 +21,8 @@ export interface EvidencePlanResult {
   headRun?: EvidenceTestRun;
   baseRun?: EvidenceTestRun;
   baseSha?: string;
+  /** set by verifyFailToPass when base and head failed identically (#3749); triage classes it infra */
+  sharedFailure?: string;
 }
 
 export interface EvidenceTestRun {
@@ -36,7 +40,7 @@ export interface EvidenceCommandLifecycle {
 export type EvidenceRunnerContext = Pick<
   CheckerContext,
   'worktree' | 'sandbox' | 'env' | 'onPgid' | 'runCommand' | 'testsTimeoutSeconds' | 'diffBase' | 'parentBaseRef'
->;
+> & { testRunner?: EvidenceTestRunner | null };
 
 const OUTPUT_LIMIT = 2000;
 const DEFAULT_TIMEOUT_SECONDS = 300;
@@ -113,6 +117,7 @@ function evidencePolicy(policy: SandboxPolicy | undefined): SandboxPolicy | null
     writablePaths: [...policy.writablePaths],
     writableFilePrefixes: [...policy.writableFilePrefixes],
     allowHosts: [],
+    allowLoopback: true,
   };
 }
 
@@ -215,14 +220,34 @@ export async function runEvidencePlan(
       continue;
     }
     if (entry.kind === 'fail-to-pass-test') {
-      const selector = tokenizeEvidenceCommand(entry.test);
-      if (!selector) {
+      if (!tokenizeEvidenceCommand(entry.test)) {
         results.push(result(entry, 'SKIP', UNSUPPORTED_SHELL_SYNTAX));
         continue;
       }
-      const npmScript = argv[0] === 'npm' && argv[1] === 'run';
-      if (npmScript && selector[0] !== '--') argv.push('--');
-      argv.push(...selector);
+      const selector = parseFailToPassSelector(entry.test);
+      if (!selector) {
+        results.push(
+          result(
+            entry,
+            'SKIP',
+            `${SELECTOR_UNUSABLE_PREFIX}: expected a test file path optionally followed by quoted test names (e.g. src/a.test.ts "does x"); the whole suite is never run instead`,
+          ),
+        );
+        continue;
+      }
+      const runner = ctx.testRunner;
+      if (!runner) {
+        results.push(
+          result(
+            entry,
+            'SKIP',
+            `${SELECTOR_UNUSABLE_PREFIX}: test runner not recognised (supported: vitest, jest, pytest); the whole suite is never run instead`,
+          ),
+        );
+        continue;
+      }
+      if (argv[0] === 'npm' && argv[1] === 'run') argv.push('--');
+      argv.push(...selectorArgs(selector, runner));
     }
     const policy = evidencePolicy(ctx.sandbox);
     if (!policy) {

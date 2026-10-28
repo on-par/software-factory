@@ -148,11 +148,17 @@ async function readActiveClaims(
   return view;
 }
 
-/** Open factory drafts for the Health band and JSON (#3553); null when no token or the listing fails. */
-async function readDrafts(ghRepo: string, rt: StatusRuntime): Promise<OpenFactoryDrafts | null> {
+/** Open factory drafts for the Health band and JSON (#3553); null when no token, the config is unreadable, or the listing fails. */
+async function readDrafts(ghRepo: string, configPath: string, rt: StatusRuntime): Promise<OpenFactoryDrafts | null> {
   if (!rt.hasGitHubToken()) return null;
   const [owner, repo] = ghRepo.split('/');
-  return readOpenFactoryDrafts({ octokit: rt.getOctokit(), owner, repo, prefix: resolveBranchPrefix() });
+  let prefix: string;
+  try {
+    prefix = resolveBranchPrefix(rt.configLoaders.loadFactoryConfigForRepo(configPath));
+  } catch {
+    return null;
+  }
+  return readOpenFactoryDrafts({ octokit: rt.getOctokit(), owner, repo, prefix });
 }
 
 /** Coverage of open decomposed parents (#3108); null when no token or the lookup fails. */
@@ -215,7 +221,7 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
           stages: inputs.stages,
           active: view.active,
           update: buildStatusUpdateJson(readUpdateState(updateStatePath(daemonRuntimePaths().dir))),
-          openFactoryDrafts: await readDrafts(ghRepo, rt),
+          openFactoryDrafts: await readDrafts(ghRepo, paths.config, rt),
           decomposedParents: await readDecomposedParents(ghRepo, rt),
           disk: readStatusDisk(repoRoot, ghRepo, paths, rt),
           now: Date.now(),
@@ -333,7 +339,7 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
   console.log(styleText('bold', '\n== Health =='));
   const update = buildStatusUpdateJson(readUpdateState(updateStatePath(daemonRuntimePaths().dir)));
   console.log(`  ${formatUpdateStatusLine(update)}`);
-  console.log(`  ${formatOpenFactoryDraftsLine(await readDrafts(ghRepo, rt))}`);
+  console.log(`  ${formatOpenFactoryDraftsLine(await readDrafts(ghRepo, paths.config, rt))}`);
   const disk = readStatusDisk(repoRoot, ghRepo, paths, rt);
   if (disk?.low) {
     console.log(styleText('red', `  DISK LOW: free=${disk.freeGb} GB threshold=${disk.thresholdGb} GB`));
@@ -351,6 +357,7 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
       prClassifier: resolvePrClassifierPolicy(rt.configLoaders.loadFactoryConfigForRepo(paths.config), process.env, {
         classifier: readRunFlagOverrides(paths.runFlags).prClassifier,
       }),
+      runtime: rt.configLoaders.loadFactoryConfigForRepo(paths.config),
     })) {
       console.log(`    ${line}`);
     }

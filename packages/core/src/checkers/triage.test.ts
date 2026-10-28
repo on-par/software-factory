@@ -64,6 +64,36 @@ describe('triageCheckFailure (#3371)', () => {
   });
 });
 
+describe('triageCheckFailure evidence_plan (#3749)', () => {
+  const entry = (extra: Record<string, unknown>) => ({
+    claim: 'c',
+    kind: 'fail-to-pass-test' as const,
+    status: 'FAIL' as const,
+    reason: 'r',
+    ...extra,
+  });
+  const evidence = (evidencePlanResults?: ReturnType<typeof entry>[]): CheckerOutput => ({
+    checker: 'evidence_plan',
+    result: 'FAIL',
+    details: 'x',
+    ...(evidencePlanResults ? { evidencePlanResults } : {}),
+  });
+
+  it('classes an evidence_plan fail-to-pass that failed identically on base and head as infra/evidence-env naming the test and shared line (#3749)', () => {
+    const line = 'fail-to-pass t.test.ts failed identically on base and head (exit 1): Socket bind refused';
+    expect(triageCheckFailure(evidence([entry({ sharedFailure: line })]))).toEqual({
+      class: 'infra',
+      kind: 'evidence-env',
+      line,
+    });
+  });
+
+  it('stays code when any failed entry lacks sharedFailure or there are no entries', () => {
+    expect(triageCheckFailure(evidence([entry({ sharedFailure: 's' }), entry({})]))).toEqual({ class: 'code' });
+    expect(triageCheckFailure(evidence())).toEqual({ class: 'code' });
+  });
+});
+
 describe('triageLaneFailures', () => {
   it('covers FAIL results only', () => {
     const summary: CheckSummary = {

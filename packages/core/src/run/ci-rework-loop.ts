@@ -159,6 +159,7 @@ export async function shipWithCiRework(
     ...(inputs.pr?.draft ? { draft: true } : {}),
     footer: inputs.pr?.footer,
     ...(inputs.pr?.walkthrough ? { walkthrough: inputs.pr.walkthrough } : {}),
+    ...(inputs.pr?.evidenceComment ? { evidenceComment: true } : {}),
     log: ports.events('ship'),
     approvalGate: request.options.interactive ? ports.createApprovalGate?.() : undefined,
     specPath: request.specPath,

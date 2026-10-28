@@ -15,6 +15,7 @@ import { z } from 'zod';
 
 import { isPlainObject, loadFactoryConfig, loadModelsConfig, type FactoryConfig } from './index.js';
 import { DEFAULT_REVIEW_FLOOR_RULES } from '../review/floor.js';
+import { LEGACY_BRANCH_PREFIX } from '../utils/branch-slug.js';
 import {
   DEFAULT_T1_SAMPLE_RATE,
   RepoFactoryConfigV2Schema,
@@ -239,7 +240,10 @@ function modelNamespace(): Node[] {
       kind: 'object',
       key: 'pr',
       doc: doc('pr'),
-      children: [unset('footer', doc('pr', 'footer'), inline(loadFactoryConfig().pr?.footer))],
+      children: [
+        unset('footer', doc('pr', 'footer'), inline(loadFactoryConfig().pr?.footer)),
+        unset('evidenceComment', doc('pr', 'evidenceComment'), 'true'),
+      ],
     },
     unset(
       'checks',
@@ -340,9 +344,15 @@ function runtimeNamespace(): Node[] {
       kind: 'object',
       key: 'run',
       doc:
-        'Merge policy. `factory run` and `supervise` read `auto`; `factory land` reads `admin`. ' +
+        'Branch prefix and merge policy. `factory run` and `supervise` read `auto`; `factory land` reads `admin`. ' +
         '`factory ship` and `run-issue` stop at a ready-for-review PR unless `pr.draft` / `--draft-pr` is set.',
       children: [
+        {
+          kind: 'unset',
+          key: 'branchPrefix',
+          doc: `Branch-name prefix for factory branches, slug-normalized; must contain a letter or digit. Unset: factory. --branch-prefix beats it. Legacy ${LEGACY_BRANCH_PREFIX}/ branches are always recognized.`,
+          example: '"factory"',
+        },
         {
           kind: 'object',
           key: 'merge',

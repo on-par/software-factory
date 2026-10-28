@@ -111,6 +111,9 @@ version: 2
   # replaces it verbatim; "" removes the footer and its separator. Plain string only, with no
   # templating or token substitution.
   # footer: "This PR was made by Software Factory"
+  # Post the evidence pack (checks, rework, timeline, artifacts) as a comment on the PR SHIP opens.
+  # Unset: off. The PR body is unchanged either way.
+  # evidenceComment: true
 # CHECK commands for this repo (build, test, lint). Each beats the file-based guess; `factory init
 # --detect-checks` writes them.
 # checks: { build: "dotnet build", test: "dotnet test", lint: "dotnet format --verify-no-changes" }
@@ -177,9 +180,13 @@ version: 2
   # Hours a cached baseline (base SHA) checker result is reused before CHECK and base health re-run
   # it (#3540). Unset: 24.
   # baselineCacheTtlHours: 24
-# Merge policy. `factory run` and `supervise` read `auto`; `factory land` reads `admin`. `factory
-# ship` and `run-issue` stop at a ready-for-review PR unless `pr.draft` / `--draft-pr` is set.
+# Branch prefix and merge policy. `factory run` and `supervise` read `auto`; `factory land` reads
+# `admin`. `factory ship` and `run-issue` stop at a ready-for-review PR unless `pr.draft` /
+# `--draft-pr` is set.
 # run:
+  # Branch-name prefix for factory branches, slug-normalized; must contain a letter or digit. Unset:
+  # factory. --branch-prefix beats it. Legacy ship-it/ branches are always recognized.
+  # branchPrefix: "factory"
   # merge:
     # Squash-merge eligible PRs. Unset: legacy merge.auto, then FACTORY_MERGE=1. --auto-merge /
     # --no-auto-merge beat all.

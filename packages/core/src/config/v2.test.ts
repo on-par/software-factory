@@ -71,6 +71,7 @@ describe('zero-config: { version: 2 }', () => {
     expect(cfg.routes).toEqual({});
 
     // run — nested defaults must be filled (prefault, not default)
+    expect(cfg.run.branchPrefix).toBe('factory');
     expect(cfg.run.merge).toEqual({ auto: false, admin: false });
     expect(cfg.run.timeouts).toEqual({
       plan_seconds: 1800,
@@ -100,7 +101,6 @@ describe('zero-config: { version: 2 }', () => {
     expect(cfg.run.efficiency).toEqual({ fastPath: false, maxReworkRounds: 1 });
     expect(cfg.run.ci).toEqual({ skip: false });
     expect(cfg.run.planApproval).toEqual({ enabled: false });
-    expect(cfg.run).not.toHaveProperty('branchPrefix');
     expect(cfg.run.byok).toEqual({ enabled: false });
 
     // budget
@@ -179,16 +179,17 @@ describe('sparse overlay', () => {
     expect(cfg.run.merge.auto).toBe(false);
   });
 
-  it('strips removed run.branchPrefix and run.worktree.prefix keys from old files', async () => {
+  it('keeps run.branchPrefix and strips the removed run.worktree.prefix key from old files', async () => {
     const path = await writeConfig({ version: 2, run: { branchPrefix: 'exp', worktree: { prefix: 'wt/' } } });
     const cfg = loadV2Config(path);
-    expect(cfg.run).not.toHaveProperty('branchPrefix');
+    expect(cfg.run.branchPrefix).toBe('exp');
+    expect(() => parseV2Config({ version: 2, run: { branchPrefix: '!!!' } })).toThrow('run.branchPrefix');
     expect(cfg.run.worktree).not.toHaveProperty('prefix');
   });
 
-  it('JSON schema lists neither branchPrefix nor worktree.prefix', () => {
+  it('JSON schema lists run.branchPrefix but not worktree.prefix', () => {
     const run = (factoryConfigV2JsonSchema() as any).properties.run.properties;
-    expect(run).not.toHaveProperty('branchPrefix');
+    expect(run).toHaveProperty('branchPrefix');
     expect(run.worktree.properties).not.toHaveProperty('prefix');
   });
 });
@@ -243,6 +244,7 @@ describe('full v2 config', () => {
       build_codex: { tier: 'worker', description: 'Codex build', requires: 'codex' },
     },
     run: {
+      branchPrefix: 'acme',
       merge: { auto: true, admin: true },
       timeouts: {
         plan_seconds: 900,

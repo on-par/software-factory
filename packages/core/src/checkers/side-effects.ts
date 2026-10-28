@@ -5,7 +5,9 @@ import type { CheckerContext } from './index.js';
 import type { EvidenceCommandLifecycle } from './evidence-plan.js';
 
 export interface EvidenceSideEffectsGuard extends EvidenceCommandLifecycle {
-  finish(): Promise<CheckerOutput>;
+  finish(options?: { evidenceFailed?: boolean }): Promise<CheckerOutput>;
+  /** One line per evidence command that left live process groups (all were sent to killAll) (#3749). */
+  leakReport(): string[];
 }
 
 interface StatusRecord {
@@ -70,11 +72,18 @@ export function createEvidenceSideEffectsGuard(
   let finalOutput: CheckerOutput | undefined;
   const findings = new Set<string>();
   const diagnostics = new Set<string>();
+  const leaks = new Map<string, Set<number>>();
 
   const snapshot = async (): Promise<StatusRecord[]> => parseStatus(await readStatus());
   const fail = (diagnostic: string): void => {
     diagnostics.add(diagnostic);
   };
+
+  const leakReport = (): string[] =>
+    [...leaks].map(
+      ([command, pgids]) =>
+        `evidence command ${JSON.stringify(command)} left live process group${pgids.size > 1 ? 's' : ''} ${[...pgids].sort((a, b) => a - b).join(', ')} (cleaned up)`,
+    );
 
   return {
     async beforeCommand() {
@@ -100,7 +109,9 @@ export function createEvidenceSideEffectsGuard(
           continue;
         }
         if (!alive) continue;
-        fail(`evidence command ${JSON.stringify(command)} left live process group ${pgid}`);
+        const leaked = leaks.get(command) ?? new Set<number>();
+        leaked.add(pgid);
+        leaks.set(command, leaked);
         if (!ctx.processGroupTracker) {
           fail(`no lane process tracker is available to clean process group ${pgid}`);
           continue;
@@ -112,7 +123,8 @@ export function createEvidenceSideEffectsGuard(
         }
       }
     },
-    async finish() {
+    leakReport,
+    async finish(options) {
       if (finalOutput) return finalOutput;
       if (!activated) {
         finalOutput = { checker: 'side_effects', result: 'SKIP', details: 'no evidence command executed' };
@@ -136,6 +148,7 @@ export function createEvidenceSideEffectsGuard(
       }
       const details = [
         ...[...findings].sort().map((path) => `changed worktree path ${describePath(path)}`),
+        ...(options?.evidenceFailed ? [] : leakReport()),
         ...diagnostics,
       ];
       finalOutput = {

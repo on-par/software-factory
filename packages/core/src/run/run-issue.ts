@@ -91,6 +91,7 @@ import type { SandboxPolicy } from '../sandbox/index.js';
 import { describeSteering, type ConsumedSteering } from '../steering/index.js';
 import type { CiFailureEvidence, CheckSummary, Constitution, FailoverReason, FailurePhase } from '../types/index.js';
 import { type WorkRequest, type WorkRequestSourceKind, workKeyFromIssue } from '../work/index.js';
+import { LOCAL_BRIEF_SOURCE } from '../work/local-brief.js';
 import {
   deferOnLaneCollision,
   releaseLaneClaim,
@@ -461,14 +462,16 @@ async function runIssueOnce(
     }
     let settled: ParkedPrDisposition | undefined;
     if (!request.localOnly && !request.noPr) {
-      const posted = await publishParkComment({
-        octokit: ports.octokit,
-        repo: request.repo,
-        worktree: ports.workspace.path,
-        // prettier-ignore
-        input: { issue: workKey, reason, message: terminalMessage, runId, branch: request.branch, lane: request.lane, blockers: [], ...(designSmell ? { designSmell } : {}) },
-      });
-      if (!posted.ok) log('environment_warning', `could not post the issue park comment: ${posted.error}`);
+      if (request.work.kind !== LOCAL_BRIEF_SOURCE) {
+        const posted = await publishParkComment({
+          octokit: ports.octokit,
+          repo: request.repo,
+          worktree: ports.workspace.path,
+          // prettier-ignore
+          input: { issue: workKey, reason, message: terminalMessage, runId, branch: request.branch, lane: request.lane, blockers: [], ...(designSmell ? { designSmell } : {}) },
+        });
+        if (!posted.ok) log('environment_warning', `could not post the issue park comment: ${posted.error}`);
+      }
       if (shipStarted) {
         settled = await settleParkedPullRequest({
           octokit: ports.octokit,

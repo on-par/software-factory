@@ -30,6 +30,7 @@ import {
   resolveBranchPrefix,
   resolveExperimental,
   resolveLocalOnly,
+  type BranchPrefixConfig,
   type EffectiveMergePolicy,
   type EffectivePrClassifierPolicy,
   type ModelsConfig,
@@ -524,12 +525,13 @@ export interface EffectiveConfig {
 export function resolveEffectiveConfig(
   repo: RepoFactoryConfig | null,
   env: NodeJS.ProcessEnv = process.env,
+  runtime?: BranchPrefixConfig,
 ): EffectiveConfig {
   return {
     localOnly: resolveLocalOnly(env),
     allowExperimental: resolveExperimental(env),
     codexDisabled: resolveCodexDisabled(repo, env),
-    branchPrefix: resolveBranchPrefix(),
+    branchPrefix: resolveBranchPrefix(runtime),
   };
 }
 
@@ -726,6 +728,8 @@ export interface DescribeEffectiveConfigOpts {
   mergePolicy?: EffectiveMergePolicy;
   /** PR classifier gate (#1724), resolved via `resolvePrClassifierPolicy`. Omitted ⇒ env-only. */
   prClassifier?: EffectivePrClassifierPolicy;
+  /** The loaded FactoryConfig's `run.branchPrefix`. Omitted ⇒ default prefix. */
+  runtime?: BranchPrefixConfig;
 }
 
 function sourceLabel(
@@ -802,14 +806,15 @@ export function describeEffectiveConfig(opts: DescribeEffectiveConfigOpts): stri
     `Provider ollama: ${repo?.providers?.ollama === false ? 'off' : 'on'} ${sourceLabel(repo?.providers?.ollama !== undefined ? 'repo' : 'default', repoConfigPath, '')}`,
   );
 
-  const effective = resolveEffectiveConfig(repo, env);
+  const effective = resolveEffectiveConfig(repo, env, opts.runtime);
   lines.push(
     `Local only: ${effective.localOnly ? 'on' : 'off'} ${sourceLabel(env.FACTORY_LOCAL_ONLY !== undefined ? 'env' : 'default', repoConfigPath, 'FACTORY_LOCAL_ONLY')}`,
   );
   lines.push(
     `Experimental models: ${effective.allowExperimental ? 'on' : 'off'} ${sourceLabel(env.FACTORY_EXPERIMENTAL !== undefined ? 'env' : 'default', repoConfigPath, 'FACTORY_EXPERIMENTAL')}`,
   );
-  lines.push(`Branch prefix: ${effective.branchPrefix} ${sourceLabel('default', repoConfigPath, '')}`);
+  const branchPrefixSource = opts.runtime?.run?.branchPrefix === undefined ? 'default' : 'repo';
+  lines.push(`Branch prefix: ${effective.branchPrefix} ${sourceLabel(branchPrefixSource, repoConfigPath, '')}`);
 
   const usage = resolveUsageCap(repo, env);
   lines.push(`Usage cap: $${usage.cap} ${sourceLabel(usage.source, repoConfigPath, 'FACTORY_USAGE_CAP')}`);

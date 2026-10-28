@@ -445,7 +445,7 @@ describe('draft PR (#3449)', () => {
     const log = vi.fn<Log>();
     const outcome = await runIssue(
       request,
-      { ...policy, pr: { draft: true, footer, walkthrough: { minLines: 7 } } },
+      { ...policy, pr: { draft: true, footer, walkthrough: { minLines: 7 }, evidenceComment: true } },
       ports(log),
     );
     expect(outcome).toMatchObject({ state: 'ready', prNumber: 9, draft: true });
@@ -453,6 +453,7 @@ describe('draft PR (#3449)', () => {
       expect(call[0].draft).toBe(true);
       expect(call[0].footer).toBe(footer);
       expect(call[0].walkthrough).toEqual({ minLines: 7 });
+      expect(call[0].evidenceComment).toBe(true);
     }
     expect(log).toHaveBeenCalledWith('ready', expect.stringContaining('PR #9 left as draft'));
   });
@@ -464,5 +465,6 @@ describe('draft PR (#3449)', () => {
     expect(shipPhase.mock.calls[0][0].draft).toBeUndefined();
     expect(shipPhase.mock.calls[0][0].footer).toBeUndefined();
     expect(shipPhase.mock.calls[0][0].walkthrough).toBeUndefined();
+    expect(shipPhase.mock.calls[0][0].evidenceComment).toBeUndefined();
   });
 });

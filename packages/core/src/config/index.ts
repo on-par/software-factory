@@ -25,6 +25,7 @@ import { DEFAULT_CI_DEADLINE_MS } from '../utils/ci-deadline.js';
 import { EventsConfigSchema } from '../events/rotation.js';
 import { runConfigSource } from './run-config-source.js';
 import { RunConfigSectionSchema } from './run-section.js';
+export { resolveBranchPrefix, type BranchPrefixConfig } from './run-section.js';
 import { PrConfigSections } from './pr-section.js';
 import { DiskConfigSchema } from './disk-policy.js';
 import { FACTORY_RUNTIME_CONFIG_KEYS } from './runtime-config-keys.js';
@@ -678,12 +679,6 @@ export function resolveLocalOnly(env: NodeJS.ProcessEnv = process.env): boolean 
 /** Experimental models: make experimental-tier models eligible for routing (FACTORY_EXPERIMENTAL=1). */
 export function resolveExperimental(env: NodeJS.ProcessEnv = process.env): boolean {
   return resolveEnabledFlag(env, 'FACTORY_EXPERIMENTAL', false);
-}
-
-/** Branch-name prefix shared by ship, land, and ingest so they agree on which
- *  factory branches/worktrees belong to this run. */
-export function resolveBranchPrefix(): string {
-  return 'factory';
 }
 
 /** Grace period (ms) between SIGTERM and SIGKILL when sweeping a lane's

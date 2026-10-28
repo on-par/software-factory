@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -110,6 +111,17 @@ describe('appendEvidencePlanStep', () => {
     expect(out.warnings).toEqual(['warning']);
   });
 
+  it('passes the test runner resolved from package.json to the evidence runner', async () => {
+    const { ctx, worktree } = await fixture([{ kind: 'command', claim: 'build', command: 'test', passWhen: 'ok' }]);
+    await writeFile(join(worktree, '.factory', 'config.json'), JSON.stringify({ version: 2 }));
+    let seen: unknown;
+    await appendEvidencePlanStep(summary, ctx, null, async (_entries, _allowlist, runnerContext) => {
+      seen = runnerContext.testRunner;
+      return [];
+    });
+    expect(seen).toBe('vitest');
+  });
+
   it('fails weak fail-to-pass proof with structured base and head outcomes for rework', async () => {
     const { ctx } = await fixture([{ kind: 'fail-to-pass-test', claim: 'new behavior', test: 'src/new.test.ts' }]);
     const weakProof = {
@@ -127,6 +139,34 @@ describe('appendEvidencePlanStep', () => {
     expect(gate?.result).toBe('FAIL');
     expect(gate?.details).toContain("test doesn't exercise the change");
     expect(gate?.evidencePlanResults).toEqual([weakProof]);
+  });
+
+  it('folds leaked evidence process groups into a failed evidence_plan and keeps side_effects PASS (#3749)', async () => {
+    const { ctx } = await fixture([{ kind: 'fail-to-pass-test', claim: 'new behavior', test: 'src/new.test.ts' }]);
+    let killed = 0;
+    ctx.processGroupTracker = {
+      killAll: async () => {
+        killed++;
+        return [];
+      },
+    };
+    const child = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });
+    const pgid = child.pid!;
+    try {
+      const out = await appendEvidencePlanStep(summary, ctx, null, async (_entries, _allowlist, _ctx, lifecycle) => {
+        await lifecycle?.beforeCommand();
+        await lifecycle?.afterCommand('npm run test', [pgid]);
+        return [{ claim: 'new behavior', kind: 'fail-to-pass-test', status: 'FAIL', reason: 'boom' }];
+      });
+      const gate = out.results.find((result) => result.checker === 'evidence_plan');
+      expect(gate?.result).toBe('FAIL');
+      expect(gate?.details).toContain('left live process group');
+      expect(gate?.details).toContain(String(pgid));
+      expect(out.results.find((result) => result.checker === 'side_effects')).toMatchObject({ result: 'PASS' });
+      expect(killed).toBe(1);
+    } finally {
+      process.kill(-pgid, 'SIGKILL');
+    }
   });
 
   it('skips disabled and blocked gates without calling the runner', async () => {

@@ -35,7 +35,7 @@ export interface SuperviseRuntime {
   getRepoRoot: () => Promise<string>;
   getGitHubRepo: () => Promise<string>;
   getOctokit: () => Octokit;
-  branchPrefixOrExit: (raw: string | undefined) => string;
+  branchPrefixOrExit: (raw: string | undefined, configPath: string) => string;
   warnQueueDiagnostics: (diagnostics: QueueDiagnostic[]) => void;
   resolveUsageKnobs: typeof resolveUsageKnobs;
   usageFlagOverrides: (opts: SuperviseOptions, threshold: 'resumeAt') => Parameters<typeof resolveUsageKnobs>[2];
@@ -50,9 +50,9 @@ export interface SuperviseRuntime {
 }
 
 export async function cmdSupervise(opts: SuperviseOptions, rt: SuperviseRuntime): Promise<void> {
-  const branchPrefix = rt.branchPrefixOrExit(opts.branchPrefix);
   const repoRoot = await rt.getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
+  const branchPrefix = rt.branchPrefixOrExit(opts.branchPrefix, paths.config);
   const factoryConfig = rt.configLoaders.loadFactoryConfigForRepo(paths.config);
   const ingestCfg = resolveIngestConfig(factoryConfig);
 

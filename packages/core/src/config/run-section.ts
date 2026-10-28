@@ -3,10 +3,17 @@
 
 import { z } from 'zod';
 
+import { branchPrefixSlug, slugify } from '../utils/branch-slug.js';
+
 /** `run.merge.*` mirrors FactoryConfigV2Schema's `run.merge`; `run.pr.draft` stops SHIP at a
- *  draft PR. Everything is optional with no defaults so "unset" survives parsing. */
+ *  draft PR; `run.branchPrefix` is the repo's default branch-name prefix. Everything is
+ *  optional with no defaults so "unset" survives parsing. */
 export const RunConfigSectionSchema = z
   .object({
+    branchPrefix: z
+      .string()
+      .refine((v) => slugify(v) !== '', 'must contain at least one letter or digit')
+      .optional(),
     merge: z
       .object({
         auto: z.boolean().optional(),
@@ -19,6 +26,16 @@ export const RunConfigSectionSchema = z
   })
   .strict()
   .optional();
+
+export type BranchPrefixConfig = { run?: { branchPrefix?: string } };
+
+/** Branch-name prefix shared by ship, land, and ingest so they agree on which
+ *  factory branches/worktrees belong to this run: run.branchPrefix (slugged) > 'factory'.
+ *  `--branch-prefix` beats both (resolveBranchPrefixOption). FACTORY_BRANCH_PREFIX is not read. */
+export function resolveBranchPrefix(config?: BranchPrefixConfig): string {
+  const configured = config?.run?.branchPrefix;
+  return configured === undefined ? 'factory' : branchPrefixSlug(configured);
+}
 
 export interface EffectiveDraftPrPolicy {
   draft: boolean;

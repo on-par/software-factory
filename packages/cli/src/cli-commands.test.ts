@@ -4149,6 +4149,20 @@ bash scripts/verify.sh
       );
     });
 
+    it('run.branchPrefix in the repo config is the default, and --branch-prefix beats it', async () => {
+      h.factoryConfig = { ...h.factoryConfig, run: { branchPrefix: 'Acme Bots' } };
+      expect((await runMain('worktree', 'gc')).exited).toBe(false);
+      expect(ops.sweepWorktrees).toHaveBeenLastCalledWith(
+        expect.objectContaining({ branchPrefix: 'acme-bots' }),
+        expect.anything(),
+      );
+      expect((await runMain('worktree', 'gc', '--branch-prefix', 'sf')).exited).toBe(false);
+      expect(ops.sweepWorktrees).toHaveBeenLastCalledWith(
+        expect.objectContaining({ branchPrefix: 'sf' }),
+        expect.anything(),
+      );
+    });
+
     it('exits 2 when --branch-prefix has no letters or digits', async () => {
       const res = await runMain('worktree', 'gc', '--branch-prefix', '!!!');
       expect(res).toEqual({ exited: true, code: 2 });
