@@ -235,6 +235,7 @@ import { withRepoRunLock } from './repo-run-lock.js';
 export { CliExitError, withRepoRunLock };
 import type { StopMarker } from '@on-par/factory-core/internal';
 import { formatSteerabilityReport } from '@on-par/factory-core/internal';
+import { buildTierEvidence, formatTierEvidence, resolveTrustTier } from '@on-par/factory-core/internal';
 import { type QueueReader, runTui } from '@on-par/factory-tui';
 import { clearSelfUpdateStop } from './self-update-stop.js';
 import { admissionStateReaderFor, runQueueReconcile } from './admission.js';
@@ -1556,15 +1557,38 @@ function runRisk(pr: string, opts: { policy?: string } = {}): Promise<void> {
 async function cmdClassifierReport(opts: { json?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
-  const report = summarizeClassifierOutcomes(parseClassifierOutcomes(readTextFileOrEmpty(paths.classifierOutcomes)));
+  const records = parseClassifierOutcomes(readTextFileOrEmpty(paths.classifierOutcomes));
+  const report = summarizeClassifierOutcomes(records);
   const steerability = await buildSteerabilityReport(paths);
+  const readOptional = (p: string) => {
+    try {
+      return existsSync(p) ? readFileSync(p, 'utf8') : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  let configuredTier = resolveTrustTier(null);
+  try {
+    configuredTier = resolveTrustTier(configLoaders.loadRepoConfig(repoRoot));
+  } catch {
+    // An invalid repo config falls back to T0 so the read-only report still renders.
+  }
+  const tier = buildTierEvidence({
+    configuredTier,
+    records,
+    mutationSummaryText: readOptional(join(repoRoot, 'mutation-summary.json')),
+    coverageEvidenceText: readOptional(join(repoRoot, 'coverage-ratchet.json')),
+    now: new Date(),
+  });
   if (opts.json) {
-    console.log(JSON.stringify({ ...report, steerability }));
+    console.log(JSON.stringify({ ...report, steerability, tier }));
     return;
   }
   for (const line of formatClassifierReport(report)) console.log(line);
   console.log('');
   for (const line of formatSteerabilityReport(steerability)) console.log(line);
+  console.log('');
+  for (const line of formatTierEvidence(tier)) console.log(line);
 }
 
 async function cmdReport(opts: { steerability?: boolean; json?: boolean } = {}) {
