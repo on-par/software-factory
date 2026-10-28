@@ -1565,11 +1565,6 @@ function runRisk(pr: string, opts: { policy?: string } = {}): Promise<void> {
   return cmdRisk(pr, opts, { getRepoRoot, getGitHubRepo, getOctokit, CliExitError, log: console.log });
 }
 
-async function cmdClassifierAckDemotion() {
-  const repoRoot = await getRepoRoot();
-  runAckTierDemotion(repoRoot, configLoaders.loadRepoConfig(repoRoot));
-}
-
 async function cmdClassifierReport(opts: { json?: boolean } = {}) {
   const repoRoot = await getRepoRoot();
   const paths = getFactoryPaths(repoRoot);
@@ -4349,7 +4344,7 @@ export const PROGRAM_HANDLERS = {
   cmdRuns,
   cmdKpis,
   cmdClassifierReport,
-  cmdClassifierAckDemotion,
+  cmdClassifierAckDemotion: async () => runAckTierDemotion(await getRepoRoot()),
   cmdReport,
   cmdRisk: runRisk,
   cmdClassifierBacktestEntry,
