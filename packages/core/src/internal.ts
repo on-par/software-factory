@@ -62,7 +62,6 @@ export {
   renderUpstreamOccurrenceComment,
   resolveTargetRepo,
 } from './filing/index.js';
-
 // Evidence sanitizer for untrusted text (#1841, #1852)
 export { stripHiddenContent } from './filing/sanitize.js';
 
@@ -752,6 +751,7 @@ export type { IssueRunState, RunStatus } from './types/index.js';
 export * from './run/state.js';
 export * from './run/steer.js';
 export * from './kpis/steerability.js';
+export * from './kpis/tier-demotion.js';
 export { createStackSliceBranch } from './run/stack-slice-branch.js';
 export { restackAfterSquashMerge, type StackRestackOptions, type StackRestackOutcome } from './run/stack-restack.js';
 export {

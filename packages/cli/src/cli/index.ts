@@ -262,6 +262,7 @@ import {
   MergeGatedError,
 } from './land-pr.js';
 import { setLandRuntime } from './land-runtime.js';
+import { recordKpiTierDemotions, runAckTierDemotion } from './tier-demotion.js';
 import { cmdRun, type RunOptions } from './run.js';
 import type { RunLaneDeps } from './run-lane.js';
 import { shipIssue } from './ship.js';
@@ -1705,12 +1706,10 @@ async function cmdKpis(opts: { branchPrefix?: string; json?: boolean } = {}) {
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
   const events = readEvents(paths.events, { includeSegments: true });
   const costs = existsSync(paths.costs) ? internalOps.readCosts(paths.costs) : [];
-
   const recon = await reconstructHumanEventsForKpis(events, branchPrefix);
   let allEvents = recon.events;
   const prSources = recon.sources;
   const { owner, repoName } = recon;
-
   if (prSources.length > 0) {
     try {
       const windowDays = resolveDefectWindowDays(configLoaders.loadFactoryConfigForRepo(paths.config));
@@ -1723,6 +1722,7 @@ async function cmdKpis(opts: { branchPrefix?: string; json?: boolean } = {}) {
       } catch (err: any) {
         console.error(styleText('yellow', `factory: classifier outcomes not recorded (${err?.message ?? err})`));
       }
+      await recordKpiTierDemotions(paths.tierDemotions, allEvents, now, getOctokit(), owner, repoName);
     } catch (err: any) {
       console.error(
         styleText(
@@ -4343,6 +4343,7 @@ export const PROGRAM_HANDLERS = {
   cmdRuns,
   cmdKpis,
   cmdClassifierReport,
+  cmdClassifierAckDemotion: async () => runAckTierDemotion(await getRepoRoot()),
   cmdReport,
   cmdRisk: runRisk,
   cmdClassifierBacktestEntry,

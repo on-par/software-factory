@@ -321,7 +321,7 @@ const PUBLIC_API_KEYS = [
 ];
 const JOB_KEYS = 'resolveHostMaxAgentJobs hostAgentJobsDir withHostAgentJobLease findStatelessLaneIssues'.split(' ');
 const TAIL =
-  'InvalidEventCursorError eventSegmentFileName eventSegmentsDir readEventsTail readEventsSince rotateEventLog listEventSegmentPaths findEventSegmentByIno'.split(
+  'InvalidEventCursorError eventSegmentFileName eventSegmentsDir readEventsTail readEventsSince rotateEventLog listEventSegmentPaths findEventSegmentByIno acknowledgeTierDemotions effectiveTrustTier findSlipDemotions MERGED_UNDER_TIER_PATTERN mergedUnderTier parseTierDemotions serializeTierDemotions tierDemotionComment'.split(
     ' ',
   );
 const STEER = 'STEER_SOURCES STEER_PHASES SteerEventError parseSteerEvent appendSteerEvent listSteerEvents'.split(' '); // #3400

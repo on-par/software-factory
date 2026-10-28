@@ -27,12 +27,12 @@ import {
   releaseLaneClaim,
   resolveEffectiveConfig,
   resolveFilingPolicy,
-  resolveTrustTier,
   withFileLock,
   withGitLock,
   worktreeSandboxFor,
 } from '@on-par/factory-core/internal';
 import type { OpenPullRequestEvidence } from './index.js';
+import { resolveEffectiveTrustTier } from './tier-demotion.js';
 import {
   AwaitMergeStoppedError,
   AwaitingReviewError,
@@ -219,7 +219,7 @@ export async function landIssue(
       issue: issueNum,
       prNumber,
       labels: gateLabels,
-      trustTier: resolveTrustTier(repoConfig),
+      trustTier: resolveEffectiveTrustTier(repoConfig, paths.tierDemotions),
       ...(riskPolicy.rules ? { rules: riskPolicy.rules } : {}),
       log,
     });

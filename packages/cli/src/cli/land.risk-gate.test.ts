@@ -25,6 +25,7 @@ function paths(): any {
   return {
     state,
     plans: join(state, 'plans'),
+    tierDemotions: join(state, 'tier-demotions.jsonl'),
     events: join(state, 'events.ndjson'),
     mergeLock: join(state, 'merge.lock'),
     gitLock: join(state, 'git.lock'),
@@ -166,6 +167,16 @@ describe('landIssue risk gate (#3381)', () => {
     await expect(land(true)).resolves.toMatchObject({ prNumber: 77 });
 
     octokit = makeOctokit(['packages/core/src/foo.ts'], ['needs-human']);
+    await expect(land(true)).rejects.toBeInstanceOf(AwaitingReviewError);
+    expect(octokit.rest.pulls.merge).not.toHaveBeenCalled();
+  });
+
+  it('an unacknowledged demotion holds a med-risk PR at configured T2', async () => {
+    octokit = makeOctokit(['packages/core/src/foo.ts']);
+    trustTier = 'T2';
+    const open = { type: 'tier-demoted', from: 'T2', to: 'T1', prNumber: 3, acknowledgedAt: null };
+    mkdirSync(join(paths().tierDemotions, '..'), { recursive: true });
+    writeFileSync(paths().tierDemotions, `${JSON.stringify(open)}\n`);
     await expect(land(true)).rejects.toBeInstanceOf(AwaitingReviewError);
     expect(octokit.rest.pulls.merge).not.toHaveBeenCalled();
   });
