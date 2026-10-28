@@ -113,6 +113,7 @@ function evidencePolicy(policy: SandboxPolicy | undefined): SandboxPolicy | null
     writablePaths: [...policy.writablePaths],
     writableFilePrefixes: [...policy.writableFilePrefixes],
     allowHosts: [],
+    allowLoopback: true,
   };
 }
 

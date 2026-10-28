@@ -15,6 +15,10 @@ section to `## X.Y.Z - date`. See
   config validation. `FACTORY_BRANCH_PREFIX` is still ignored. Legacy `ship-it/`
   branches are still recognized. `factory status --kpis` shows the prefix's source.
 
+### Fixed
+
+- Evidence commands on macOS `sandbox-exec` can reach loopback, so a `dotnet test` fail-to-pass proof no longer aborts connecting to its testhost; other outbound stays denied (#3748).
+
 ## 0.9.21 - 2026-10-27
 
 Republish / recovery: npm phantom-staged `@on-par/factory-core@0.9.20`

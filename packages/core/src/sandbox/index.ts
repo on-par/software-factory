@@ -69,6 +69,8 @@ export interface SandboxPolicy {
   blockTelemetry?: boolean;
   /** Egress control on sandbox-exec (#2215): report forwards everything; enforce blocks direct egress and unlisted hosts. */
   networkMode?: SandboxNetworkMode;
+  /** Allow loopback outbound when allowHosts is empty (sandbox-exec). Set only for evidence commands (#3748). */
+  allowLoopback?: boolean;
   cpuMs: number;
   memMb: number;
 }
@@ -255,6 +257,8 @@ export function resolveSandboxPolicy(
   };
 }
 
+const DARWIN_LOOPBACK_ALLOW = '(allow network-outbound (remote ip "localhost:*"))';
+
 function sbplPath(path: string): string {
   return `"${path.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
@@ -281,11 +285,12 @@ export function buildDarwinProfile(policy: SandboxPolicy): string {
   const readDeny = readDenyRules ? `\n${readDenyRules}` : '';
   let networkDeny = '';
   if (policy.allowHosts.length === 0) {
-    networkDeny = '\n(deny network-outbound)';
+    networkDeny = policy.allowLoopback
+      ? `\n(deny network-outbound)\n${DARWIN_LOOPBACK_ALLOW}`
+      : '\n(deny network-outbound)';
   } else if (policy.networkMode === 'enforce') {
     // Loopback (the lane proxy, leased dev servers) and DNS via mDNSResponder stay open; all else is denied (#2215).
-    networkDeny =
-      '\n(deny network-outbound)\n(allow network-outbound (remote ip "localhost:*"))\n(allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))';
+    networkDeny = `\n(deny network-outbound)\n${DARWIN_LOOPBACK_ALLOW}\n(allow network-outbound (remote unix-socket (path-literal "/private/var/run/mDNSResponder")))`;
   }
 
   return `(version 1)
@@ -347,6 +352,7 @@ export function wrapCommandInSandbox(cmd: string, policy: SandboxPolicy): string
     .join(' ');
   const blacklist = (policy.deniedReadPaths ?? []).map((p) => `--blacklist=${shellEscape(p)}`).join(' ');
   const blacklistFlags = blacklist ? ` ${blacklist}` : '';
+  // --net=none keeps a loopback interface, so allowLoopback needs no firejail flag (#3748).
   const netFlag = policy.allowHosts.length === 0 ? ' --net=none' : '';
   return `firejail --quiet --noprofile --private-tmp --read-only=/ ${writeFlags}${blacklistFlags}${netFlag} -- ${inner}`;
 }

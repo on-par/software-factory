@@ -74,6 +74,11 @@ describe('buildDarwinProfile enforce mode (#2215)', () => {
     expect(buildDarwinProfile(base)).not.toContain('network-outbound');
   });
 
+  it('enforce with a non-empty allowlist ignores allowLoopback (#3748)', () => {
+    const enforce = { ...base, networkMode: 'enforce' as const };
+    expect(buildDarwinProfile({ ...enforce, allowLoopback: true })).toBe(buildDarwinProfile(enforce));
+  });
+
   it('enforce with an empty allowlist equals the deny-all profile', () => {
     const empty = { ...base, allowHosts: [] as string[] };
     expect(buildDarwinProfile({ ...empty, networkMode: 'enforce' })).toBe(buildDarwinProfile(empty));
