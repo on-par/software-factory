@@ -19,6 +19,8 @@ export interface EvidencePlanResult {
   headRun?: EvidenceTestRun;
   baseRun?: EvidenceTestRun;
   baseSha?: string;
+  /** set by verifyFailToPass when base and head failed identically (#3749); triage classes it infra */
+  sharedFailure?: string;
 }
 
 export interface EvidenceTestRun {

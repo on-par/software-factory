@@ -6,6 +6,7 @@ import type { EvidencePlanEntry } from '@on-par/contracts';
 import { withTempDir } from '../harness/temp-dir.js';
 import { execGit } from '../utils/git-exec.js';
 import type { EvidencePlanResult, EvidenceRunnerContext } from './evidence-plan.js';
+import { stripAnsi } from './command-log.js';
 import { BASE_REF_CANDIDATES } from './design-smells.js';
 
 const SHA = /^[0-9a-f]{40,64}$/i;
@@ -62,6 +63,38 @@ function describeRun(label: string, run: EvidencePlanResult['headRun']): string 
   return `${label} ${state}`;
 }
 
+const DURATION = /\b\d+(?:\.\d+)?\s?(?:ms|s|m)\b/g;
+
+function normalizeSignature(tail: string | undefined, paths: string[]): string[] {
+  let text = stripAnsi(tail ?? '');
+  for (const path of paths) if (path) text = text.split(path).join('<worktree>');
+  return text
+    .replace(DURATION, '<t>')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+    .slice(-20);
+}
+
+function sharedFailureLine(
+  entry: EvidencePlanEntry,
+  head: EvidencePlanResult['headRun'],
+  base: EvidencePlanResult['headRun'],
+  paths: string[],
+): string | undefined {
+  if (entry.kind !== 'fail-to-pass-test' || !head || !base) return undefined;
+  if (head.timedOut || head.killed || base.timedOut || base.killed) return undefined;
+  if (head.exitCode !== base.exitCode || head.exitCode === 0) return undefined;
+  const headSignature = normalizeSignature(head.outputTail, paths);
+  const baseSignature = normalizeSignature(base.outputTail, paths);
+  if (headSignature.length === 0 || headSignature.length !== baseSignature.length) return undefined;
+  if (headSignature.some((line, index) => line !== baseSignature[index])) return undefined;
+  return `fail-to-pass ${entry.test} failed identically on base and head (exit ${head.exitCode}): ${headSignature[headSignature.length - 1]}`.slice(
+    0,
+    300,
+  );
+}
+
 export async function verifyFailToPass(
   entry: EvidencePlanEntry,
   head: EvidencePlanResult,
@@ -73,6 +106,7 @@ export async function verifyFailToPass(
   let baseSha: string | undefined;
   let mergeBaseSha: string | undefined;
   let baseRun: EvidencePlanResult['headRun'];
+  let baseWorktree: string | undefined;
   let primaryError: string | undefined;
   let cleanupError: string | undefined;
   try {
@@ -85,6 +119,7 @@ export async function verifyFailToPass(
 
     await withTempDir('factory-evidence-base-', async (parent) => {
       const worktree = join(parent, 'base');
+      baseWorktree = worktree;
       let addAttempted = false;
       try {
         addAttempted = true;
@@ -135,6 +170,7 @@ export async function verifyFailToPass(
   const headPasses = head.status === 'PASS' && head.headRun && !head.headRun.timedOut && !head.headRun.killed;
   let status: EvidencePlanResult['status'] = 'FAIL';
   let comparison: string;
+  let sharedFailure: string | undefined;
   if (headPasses && baseProvesFailure) {
     status = 'PASS';
     comparison = `merge-base ${mergeBaseDescription(mergeBaseSha)}: ${baseDescription}; head: ${headDescription}`;
@@ -142,6 +178,8 @@ export async function verifyFailToPass(
     comparison = `test doesn't exercise the change; claim ${entry.claim}; merge-base: ${baseDescription}; head: ${headDescription}`;
   } else {
     comparison = `inconclusive fail-to-pass proof; merge-base: ${baseDescription}; head: ${headDescription}`;
+    sharedFailure = sharedFailureLine(entry, head.headRun, baseRun, [ctx.worktree, baseWorktree ?? '']);
+    if (sharedFailure) comparison += `; ${sharedFailure}`;
   }
   return {
     ...head,
@@ -149,6 +187,7 @@ export async function verifyFailToPass(
     reason: `claim ${entry.claim}: ${comparison}`.slice(-DETAIL_LIMIT),
     ...(baseRun ? { baseRun } : {}),
     ...(baseSha ? { baseSha } : {}),
+    ...(sharedFailure ? { sharedFailure } : {}),
   };
 }
 

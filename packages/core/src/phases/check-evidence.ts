@@ -120,10 +120,13 @@ export async function appendEvidencePlanStep(
           details: `evidence plan setup failed: ${message}`,
           evidencePlanResults: [],
         };
-      } finally {
-        if (guard) sideEffectsOutput = await guard.finish();
-        else sideEffectsOutput = skipSideEffects('evidence plan setup failed before execution');
       }
+      if (guard) {
+        const evidenceFailed = output.result === 'FAIL';
+        sideEffectsOutput = await guard.finish({ evidenceFailed });
+        const leaks = evidenceFailed ? guard.leakReport() : [];
+        if (leaks.length) output = { ...output, details: [output.details, ...leaks].join('\n') };
+      } else sideEffectsOutput = skipSideEffects('evidence plan setup failed before execution');
     }
   }
 

@@ -32,11 +32,27 @@ const testsFail = (details: string, timedOut?: boolean): CheckerOutput => ({
   ...(timedOut ? { timedOut } : {}),
 });
 
-async function run(summaries: CheckSummary[], maxReworkRounds = 1) {
+async function run(summaries: CheckSummary[], maxReworkRounds = 1, evidence?: { sharedFailure?: string }) {
   const worktree = tempDirs.makeSync('check-triage-');
   await writeFile(join(worktree, 'package.json'), JSON.stringify({ scripts: { test: 'exit 1' } }));
   const specPath = join(worktree, 'issue-1.md');
-  await writeFile(specPath, '# Spec: triage\n');
+  if (evidence) {
+    const artifact = {
+      restatedProblem: 'p',
+      approach: { chosen: 'c', rejected: [] },
+      interfacesTouched: [],
+      targetTypes: [],
+      signatures: [],
+      callGraph: [],
+      behaviorContract: ['b'],
+      verificationPlan: [{ command: 'npm test', passWhen: 'passes' }],
+      riskBlastRadius: 'r',
+      openQuestions: [],
+      evidencePlan: [{ kind: 'fail-to-pass-test', claim: 'c1', test: 't.test.ts' }],
+    };
+    await writeFile(specPath, `---\ndesign: ${JSON.stringify(artifact)}\n---\nSpec\n`);
+  } else await writeFile(specPath, '# Spec: triage\n');
+  let evidenceCalls = 0;
   let routerCalls = 0;
   let checkerCalls = 0;
   const logs: Array<{ type: string; msg: string }> = [];
@@ -55,9 +71,28 @@ async function run(summaries: CheckSummary[], maxReworkRounds = 1) {
     log: (type, msg) => void logs.push({ type, msg }),
     maxReworkRounds,
     runCheckers: async () => summaries[Math.min(checkerCalls++, summaries.length - 1)]!,
-    runEvidence: (async () => undefined) as never,
+    runEvidence: evidence
+      ? async () => {
+          evidenceCalls++;
+          return [
+            {
+              claim: 'c1',
+              kind: 'fail-to-pass-test',
+              status: 'FAIL',
+              reason: 'inconclusive',
+              ...(evidence.sharedFailure ? { sharedFailure: evidence.sharedFailure } : {}),
+            },
+          ];
+        }
+      : ((async () => undefined) as never),
   });
-  return { result, logs, routerCalls: () => routerCalls, checkerCalls: () => checkerCalls };
+  return {
+    result,
+    logs,
+    routerCalls: () => routerCalls,
+    checkerCalls: () => checkerCalls,
+    evidenceCalls: () => evidenceCalls,
+  };
 }
 
 describe('checkPhase infra triage (#3371)', () => {
@@ -105,5 +140,24 @@ describe('checkPhase infra triage (#3371)', () => {
     expect(r.routerCalls()).toBe(1);
     expect(r.checkerCalls()).toBe(2);
     expect(r.logs.some((l) => l.type === 'check_triage')).toBe(false);
+  });
+
+  it('an evidence_plan fail-to-pass that fails identically on base and head parks check-infra with no router call (#3749)', async () => {
+    const r = await run([PASS], 1, {
+      sharedFailure: 'fail-to-pass t.test.ts failed identically on base and head (exit 1): Socket bind refused',
+    });
+    expect(r.routerCalls()).toBe(0);
+    expect(r.result.reworkRounds).toBe(0);
+    expect(r.result.passed).toBe(false);
+    expect(r.result.infra).toContain('check-infra');
+    expect(r.result.infra).toContain('evidence_plan');
+    expect(r.result.infra).toContain('t.test.ts');
+    expect(r.evidenceCalls()).toBe(2);
+  });
+
+  it('an evidence_plan fail-to-pass without sharedFailure reaches the router', async () => {
+    const r = await run([PASS], 1, {});
+    expect(r.routerCalls()).toBeGreaterThan(0);
+    expect(r.result.infra).toBeUndefined();
   });
 });
