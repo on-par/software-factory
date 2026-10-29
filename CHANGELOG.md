@@ -13,6 +13,9 @@ section to `## X.Y.Z - date`. See
 
 ### Changed
 
+- PR descriptions no longer list changed files: the collapsed diff stat is gone from the body, and the large-PR walkthrough drops its Main files list. The PR's Files tab already shows them.
+- PR titles and descriptions for `run-brief` work no longer say "local brief" or carry the brief's digest, path or a tracker-style id such as `ARA-12`. The Summary line is the brief's title, and when the PR is based on another open PR (`--stack` or `--base-branch`) it links that PR ("Builds on #N"). The leftover-output commit on a brief run no longer cites the run number as an issue, and the BUILD prompt asks for commit messages without brief ids.
+- The approval-gate diff stat and the walkthrough size check now diff against the PR's real base branch instead of always `origin/main`, so a stacked PR counts only its own changes.
 - Factory branch recognition no longer matches the legacy `ship-it/` prefix (`LEGACY_BRANCH_PREFIX` removed); `branchPrefixSlug()` and ingest now default to `factory`. The 11 stale remote `ship-it/*` branches are not deleted, and KPI history parsed from them is no longer counted (#3771).
 
 ### Removed

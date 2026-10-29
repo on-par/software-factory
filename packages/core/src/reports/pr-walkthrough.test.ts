@@ -51,8 +51,7 @@ describe('resolveWalkthroughThresholds', () => {
 });
 
 describe('renderPrWalkthrough', () => {
-  it('renders Intent, Main files and How to verify with Automated and Manual subsections', () => {
-    const files = [...entries(11, 1), { path: 'big`.ts', added: 200, deleted: 40 }];
+  it('renders Intent and How to verify with Automated and Manual subsections, and lists no files', () => {
     const checkSummary: CheckSummary = {
       passes: 3,
       failures: 1,
@@ -72,17 +71,14 @@ describe('renderPrWalkthrough', () => {
     };
     const md = renderPrWalkthrough({
       specBody: '## Goal\n\nRetry uploads.\n\n## Tests\n\n- covers retry\n',
-      files,
       checkSummary,
     });
 
-    for (const heading of ['### Intent', '### Main files', '### How to verify', '#### Automated', '#### Manual']) {
+    for (const heading of ['### Intent', '### How to verify', '#### Automated', '#### Manual']) {
       expect(md).toContain(heading);
     }
     expect(md).toContain('Retry uploads.');
-    expect(md).toContain("- `big'.ts` (+200 −40)");
-    expect(md.indexOf("big'.ts")).toBeLessThan(md.indexOf('f0.ts'));
-    expect(md).toContain('- …and 2 more files');
+    expect(md).not.toContain('Main files');
     expect(md).toContain('- Checkers: 3 pass, 1 fail, 2 skip');
     expect(md).toContain('- covers retry');
     expect(md).toContain('- Dialog looks right [screenshot]');
@@ -90,10 +86,9 @@ describe('renderPrWalkthrough', () => {
   });
 
   it('renders the fallbacks with no spec and no checker summary', () => {
-    const md = renderPrWalkthrough({ files: entries(1, 1) });
+    const md = renderPrWalkthrough({});
     expect(md).toContain('- No spec goal recorded.');
     expect(md).toContain('- Checkers: not run');
     expect(md).toContain('- None recorded.');
-    expect(md).not.toContain('…and');
   });
 });

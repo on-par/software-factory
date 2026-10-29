@@ -1,7 +1,14 @@
 import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it } from 'vitest';
 
-import { extractSpecIntent, PR_BODY_FOOTER, renderPrBody, summarizeIntent } from './pr-body.js';
+import {
+  briefSummaryLine,
+  stripBriefIds,
+  extractSpecIntent,
+  PR_BODY_FOOTER,
+  renderPrBody,
+  summarizeIntent,
+} from './pr-body.js';
 
 const SPEC_BODY = `# Spec: Add retry to the uploader (#42)
 ## Goal
@@ -49,15 +56,11 @@ describe('extractSpecIntent', () => {
   });
 });
 
-const DETAILS =
-  '<details>\n<summary>Changed files</summary>\n\n```\n src/uploader.ts | 10 +++++++---\n```\n\n</details>';
-
 describe('renderPrBody', () => {
-  it('renders the short layout: summary, what changed, proof, risk, diff stat, closes, footer', () => {
+  it('renders the short layout: summary, what changed, proof, risk, closes, footer', () => {
     const body = renderPrBody({
       summaryLine: 'Implements #42.',
       specBody: SPEC_BODY,
-      diffStat: ' src/uploader.ts | 10 +++++++---',
       checkSummary: { passes: 3, failures: 0, skips: 1, total: 4, results: [] },
       reworkRounds: 2,
       risk: 'Only the uploader.',
@@ -70,7 +73,6 @@ describe('renderPrBody', () => {
         '## What changed\nUploads fail on a transient 503 and the user has to start over. Retry so a blip does not lose work. Wrap `upload()` in `src/uploader.ts` with a 3-attempt exponential backoff.',
         '## Proof\nCheckers: 3 pass, 0 fail, 1 skip · Rework rounds: 2',
         '**Risk:** Only the uploader.',
-        DETAILS,
         'Closes #42',
         PR_BODY_FOOTER,
       ].join('\n\n'),
@@ -80,7 +82,7 @@ describe('renderPrBody', () => {
   it('caps What changed at 3 sentences and 600 chars on a sentence boundary', () => {
     const sentence = `${'word '.repeat(17)}ends here.`;
     const goal = Array.from({ length: 10 }, () => sentence).join(' ');
-    const body = renderPrBody({ summaryLine: 'x', specBody: `## Goal\n${goal}\n`, diffStat: '' });
+    const body = renderPrBody({ summaryLine: 'x', specBody: `## Goal\n${goal}\n` });
     const text = /## What changed\n(.*)\n/.exec(body)?.[1] ?? '';
 
     expect(text.length).toBeGreaterThan(0);
@@ -114,11 +116,10 @@ describe('renderPrBody', () => {
     const full = renderPrBody({
       summaryLine: 'Implements #42.',
       specBody: '## Goal\nDo a thing.\n',
-      diffStat: 'a',
       checkSummary: { passes: 1, failures: 0, skips: 0, total: 1, results: [] },
       closes: workKeyFromIssue(42),
     });
-    const bare = renderPrBody({ summaryLine: 'Implements local brief `b`.', diffStat: '' });
+    const bare = renderPrBody({ summaryLine: 'Add a widget.' });
 
     for (const body of [full, bare]) {
       const lines = body.split('\n');
@@ -128,51 +129,48 @@ describe('renderPrBody', () => {
   });
 
   it.each(['  Custom {{repo}} footer  ', 'First line\nSecond line', '   '])('uses footer %j verbatim', (footer) => {
-    const body = renderPrBody({ summaryLine: 'x', diffStat: '', closes: workKeyFromIssue(42), footer });
-    expect(body).toBe(
-      `${renderPrBody({ summaryLine: 'x', diffStat: '', closes: workKeyFromIssue(42), footer: '' })}\n\n${footer}`,
-    );
+    const body = renderPrBody({ summaryLine: 'x', closes: workKeyFromIssue(42), footer });
+    expect(body).toBe(`${renderPrBody({ summaryLine: 'x', closes: workKeyFromIssue(42), footer: '' })}\n\n${footer}`);
     expect(body).not.toContain(PR_BODY_FOOTER);
   });
 
   it.each([{ closes: workKeyFromIssue(42) }, { partOf: workKeyFromIssue(42) }, {}])(
     'removes an empty footer and its separator after %j',
     (issue) => {
-      const body = renderPrBody({ summaryLine: 'x', diffStat: '', ...issue, footer: '' });
-      const lastSection = 'closes' in issue ? 'Closes #42' : 'partOf' in issue ? 'Part of #42' : '</details>';
+      const body = renderPrBody({ summaryLine: 'x', ...issue, footer: '' });
+      const lastSection = 'closes' in issue ? 'Closes #42' : 'partOf' in issue ? 'Part of #42' : 'Rework rounds: 0';
       expect(body.endsWith(lastSection)).toBe(true);
       expect(body).not.toContain(PR_BODY_FOOTER);
     },
   );
 
   it('renders a one-line Proof, with not run and 0 rounds by default', () => {
-    const body = renderPrBody({ summaryLine: 'x', diffStat: '' });
+    const body = renderPrBody({ summaryLine: 'x' });
     expect(body).toContain('## Proof\nCheckers: not run · Rework rounds: 0\n\n');
   });
 
   it('omits the Risk line when risk is undefined or blank and flattens a multi-line risk', () => {
-    expect(renderPrBody({ summaryLine: 'x', diffStat: '' })).not.toMatch(/^\*\*Risk:\*\*/m);
-    expect(renderPrBody({ summaryLine: 'x', diffStat: '', risk: '   ' })).not.toMatch(/^\*\*Risk:\*\*/m);
-    const body = renderPrBody({ summaryLine: 'x', diffStat: '', risk: 'one\n  two\n\nthree' });
+    expect(renderPrBody({ summaryLine: 'x' })).not.toMatch(/^\*\*Risk:\*\*/m);
+    expect(renderPrBody({ summaryLine: 'x', risk: '   ' })).not.toMatch(/^\*\*Risk:\*\*/m);
+    const body = renderPrBody({ summaryLine: 'x', risk: 'one\n  two\n\nthree' });
     expect(body).toContain('\n**Risk:** one two three\n');
   });
 
   it('renders Part of for a non-final slice and never a closing keyword', () => {
-    const body = renderPrBody({ summaryLine: 'x', diffStat: '', partOf: workKeyFromIssue(7) });
+    const body = renderPrBody({ summaryLine: 'x', partOf: workKeyFromIssue(7) });
     expect(body).toContain('Part of #7');
     expect(body.endsWith(PR_BODY_FOOTER)).toBe(true);
     expect(body).not.toMatch(/Closes/);
   });
 
   it('renders a WorkKey closes as "Closes #N"', () => {
-    const body = renderPrBody({ summaryLine: 'x', diffStat: '', closes: workKeyFromIssue(42) });
+    const body = renderPrBody({ summaryLine: 'x', closes: workKeyFromIssue(42) });
     expect(body).toContain('Closes #42');
   });
 
   it('prefers Closes when both closes and partOf are set', () => {
     const body = renderPrBody({
       summaryLine: 'x',
-      diffStat: '',
       closes: workKeyFromIssue(7),
       partOf: workKeyFromIssue(7),
     });
@@ -182,22 +180,37 @@ describe('renderPrBody', () => {
   });
 
   it('omits What changed and the Closes line when there is no spec and no issue', () => {
-    const body = renderPrBody({ summaryLine: 'Implements local brief `b`.', diffStat: '' });
+    const body = renderPrBody({ summaryLine: 'Add a widget.' });
 
     expect(body).not.toContain('## What changed');
     for (const old of ['## Why', '## How', '## Tests', '## Verification']) expect(body).not.toContain(old);
     expect(body).not.toContain('Closes #');
-    expect(body).toContain('```\n\n```');
+  });
+});
+
+describe('renderPrBody changed files', () => {
+  it('never lists changed files or a diff stat; the PR shows them already', () => {
+    const body = renderPrBody({
+      summaryLine: 'Implements #42.',
+      specBody: SPEC_BODY,
+      checkSummary: { passes: 1, failures: 0, skips: 0, total: 1, results: [] },
+      risk: 'Only the uploader.',
+      walkthrough: '### Intent\n- x',
+      closes: workKeyFromIssue(42),
+    });
+    expect(body).not.toMatch(/changed files|files changed/i);
+    expect(body).not.toContain('<details>');
+    expect(body).not.toMatch(/\|\s*\d+\s*[+-]+/);
   });
 });
 
 describe('renderPrBody walkthrough (#3623)', () => {
-  const base = { summaryLine: 'Implements #1.', diffStat: ' a.ts | 1 +', closes: workKeyFromIssue(1) };
+  const base = { summaryLine: 'Implements #1.', closes: workKeyFromIssue(1) };
 
   it('embeds a Walkthrough section when a walkthrough is given', () => {
     const body = renderPrBody({ ...base, walkthrough: '### Intent\n- x' });
     expect(body).toContain('## Walkthrough\n### Intent\n- x');
-    expect(body.indexOf('## Walkthrough')).toBeLessThan(body.indexOf('<summary>Changed files</summary>'));
+    expect(body.indexOf('## Walkthrough')).toBeLessThan(body.indexOf('Closes #1'));
   });
 
   it('renders the same output when walkthrough is undefined', () => {
@@ -210,10 +223,43 @@ describe('renderPrBody stack order (#3348)', () => {
   it('renders stackOrder right after the Summary', () => {
     const body = renderPrBody({
       summaryLine: 'Implements slice 2/3 of #7.',
-      diffStat: 'x',
       stackOrder: '<!-- m -->\nLINE',
     });
     expect(body.indexOf('LINE')).toBeGreaterThan(body.indexOf('## Summary'));
     expect(body.indexOf('LINE')).toBeLessThan(body.indexOf('## Proof'));
+  });
+});
+
+describe('briefSummaryLine', () => {
+  it('describes the brief by its title and never by id, digest or path', () => {
+    expect(briefSummaryLine('Add a widget')).toBe('Add a widget.');
+    expect(briefSummaryLine('  Add a\nwidget.  ')).toBe('Add a widget.');
+    const body = renderPrBody({ summaryLine: briefSummaryLine('Add a widget') });
+    expect(body).not.toMatch(/local brief|sha256|\.md\b/i);
+  });
+
+  it('links the open PR the brief builds on', () => {
+    expect(briefSummaryLine('Add a gadget', 41)).toBe('Add a gadget. Builds on #41.');
+  });
+});
+
+describe('stripBriefIds', () => {
+  it.each([
+    ['ARA-12: Add a widget', 'Add a widget'],
+    ['[ARA-12] Add a widget', 'Add a widget'],
+    ['ARA-12 — Add a widget', 'Add a widget'],
+    ['Add a widget (ARA-12)', 'Add a widget'],
+    ['Implements a local brief (sha256 abc123). Add a widget', 'Add a widget'],
+    ['ARA-7', 'Untitled change'],
+  ])('removes the brief id or local-brief mention from %j', (input, expected) => {
+    expect(stripBriefIds(input)).toBe(expected);
+  });
+
+  it('keeps ordinary hyphenated words like UTF-8', () => {
+    expect(stripBriefIds('UTF-8 support for names')).toBe('UTF-8 support for names');
+  });
+
+  it('keeps the brief id out of the summary line', () => {
+    expect(briefSummaryLine('ARA-3: Fix the parser.', 41)).toBe('Fix the parser. Builds on #41.');
   });
 });
