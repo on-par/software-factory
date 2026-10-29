@@ -304,16 +304,7 @@ export { acquireLaneEnvironment, localOnlyWorkspace, worktreeWorkspace } from '.
 
 // Run composition (#675)
 export { runIssue, type RunPorts, type RunRequest } from './run/run-issue.js';
-export { runStack } from './run/stack-engine.js';
-export type {
-  SliceOutcome,
-  StackLogLevel,
-  StackPlan,
-  StackRunOptions,
-  StackRunResult,
-  StackSlice,
-  StackSliceResult,
-} from './run/stack-engine.js';
+export { runStack, type StackLogLevel, type StackRunResult } from './run/stack-engine.js';
 
 // Run phase snapshot (#1325, #1326, #1327)
 export type { RunPhaseSnapshot } from './run/phase-snapshot.js';
@@ -373,8 +364,7 @@ export type { ReworkHistoryEntry } from './checkers/rework-history.js';
 export { ReworkHistory } from './checkers/rework-history.js';
 
 // Same-file lane guard (#1515)
-export type { LaneFileClaim, LaneFileCollision } from './run/lane-file-guard.js';
-export { LaneFileGuard, touchedFilesFrom } from './run/lane-file-guard.js';
+export { LaneFileGuard, touchedFilesFrom, type LaneFileClaim, type LaneFileCollision } from './run/lane-file-guard.js';
 
 // Coding harness contract
 export type {

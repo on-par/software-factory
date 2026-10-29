@@ -15,6 +15,7 @@ import {
   readEvents,
   resolveArtifactsDir,
   resolveLocalOnlyPolicy,
+  runStack,
   workKeyFromIssue,
   type LocalBriefParams,
   type LocalOnlyPolicy,
@@ -30,6 +31,7 @@ import { withRepoRunLock } from './repo-run-lock.js';
 import { recordDraftPrFlag } from './run-flags.js';
 import { shipIssue } from './ship.js';
 import { baseBranchConflict, baseBranchOrExit } from './ship-options.js';
+import { consoleStackLog, printStackResult } from './stack-run.js';
 
 /** index.ts bindings the handler needs; index.ts passes them so this module never imports it at runtime. */
 export interface RunBriefRuntime {
@@ -39,15 +41,6 @@ export interface RunBriefRuntime {
   getOctokit: () => Octokit;
   branchPrefixOrExit: (raw: string | undefined, configPath: string) => string;
   errorDetail: (err: unknown) => string;
-}
-
-interface BriefRunResult {
-  file: string;
-  status: 'ready' | 'failed' | 'skipped';
-  prNumber?: number;
-  /** The base the brief ran on; only set when stacking (#3763). */
-  base?: string;
-  detail?: string;
 }
 
 /** Deterministic run number for a brief, derived from its content digest.
@@ -71,14 +64,6 @@ export interface RunBriefOptions {
   draftPr?: boolean;
   /** --stack (#3763): brief N+1 bases on brief N's PR head branch; stops at the first failure or missing PR. */
   stack?: boolean;
-}
-
-/** The base the next stacked brief starts from: this brief's PR head branch, or why the stack stops (#3763). */
-export function nextStackBase(outcome: RunOutcome | undefined): { base: string } | { stop: string } {
-  if (outcome && 'prNumber' in outcome && outcome.prNumber !== undefined && 'branch' in outcome && outcome.branch) {
-    return { base: outcome.branch };
-  }
-  return { stop: 'opened no PR' };
 }
 
 /** Runs each brief through the one-shot pipeline in argv order with the same flags. The checks that
@@ -106,50 +91,27 @@ export async function cmdRunBrief(files: readonly string[], opts: RunBriefOption
   }
 
   console.log(styleText('cyan', `run-brief: ${files.length} briefs — running them in order`));
-  let stackBase = opts.baseBranch;
-  let stackStop: string | undefined;
   if (opts.stack) {
     console.log(styleText('cyan', "run-brief: --stack — each brief bases on the previous brief's PR head"));
   }
-  const results: BriefRunResult[] = [];
-  for (const [i, file] of files.entries()) {
-    if (stackStop !== undefined) {
-      console.log(styleText('yellow', `run-brief: [${i + 1}/${files.length}] ${file} skipped: ${stackStop}`));
-      results.push({ file, status: 'skipped', detail: stackStop });
-      continue;
-    }
-    console.log(styleText('cyan', `run-brief: [${i + 1}/${files.length}] ${file}`));
-    const briefOpts = opts.stack ? { ...opts, baseBranch: stackBase, sizeGate: 'off' as const } : opts;
-    if (opts.stack && stackBase !== undefined) {
-      console.log(styleText('cyan', `run-brief: [${i + 1}/${files.length}] stacking on ${stackBase}`));
-    }
-    try {
-      const outcome = await runOneBrief(file, briefOpts, env, rt);
-      results.push({
-        file,
-        status: 'ready',
-        prNumber: outcome && 'prNumber' in outcome ? outcome.prNumber : undefined,
-        ...(opts.stack ? { base: stackBase } : {}),
-      });
-      if (opts.stack) {
-        const next = nextStackBase(outcome);
-        if ('base' in next) stackBase = next.base;
-        else stackStop = `stack stopped: ${file} ${next.stop}`;
-      }
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      console.error(styleText('red', detail));
-      results.push({ file, status: 'failed', detail });
-      if (opts.stack) stackStop = `stack stopped: ${file} failed`;
-    }
-  }
-  const ok = results.every((r) => r.status === 'ready');
-  for (const line of formatBriefRunSummary(results)) {
-    console.log(ok ? styleText('green', line) : styleText('yellow', line));
-  }
-  if (!ok) {
-    throw new CliExitError('Run failed for one or more briefs (listed above)', 1);
-  }
+  const result = await runStack(
+    files.map((file) => ({
+      title: file,
+      run: async (base) => {
+        const o = await runOneBrief(
+          file,
+          opts.stack ? { ...opts, baseBranch: base, sizeGate: 'off' as const } : opts,
+          env,
+          rt,
+        );
+        return (
+          o && { prNumber: 'prNumber' in o ? o.prNumber : undefined, branch: 'branch' in o ? o.branch : undefined }
+        );
+      },
+    })),
+    { base: opts.baseBranch, chain: opts.stack === true, prefix: 'run-brief', noun: 'brief', log: consoleStackLog },
+  );
+  printStackResult(result, 'Run failed for one or more briefs (listed above)');
 }
 
 /** The run-brief pre-flight shared by every brief in one invocation; any failure here exits 2. */
@@ -276,22 +238,4 @@ async function runOneBrief(
     { scope: { kind: 'issue', key: workKeyFromIssue(runNum) } },
   );
   return outcome;
-}
-
-/** Renders the per-brief summary lines in run order; the caller colours and prints them. */
-function formatBriefRunSummary(results: readonly BriefRunResult[]): string[] {
-  const lines = ['Briefs:'];
-  for (const r of results) {
-    if (r.status === 'ready') {
-      const base = r.base !== undefined ? ` (base ${r.base})` : '';
-      lines.push(r.prNumber !== undefined ? `  ${r.file} → PR #${r.prNumber}${base}` : `  ${r.file} → done (no PR)`);
-    } else if (r.status === 'skipped') {
-      lines.push(`  ${r.file} → skipped: ${r.detail}`);
-    } else {
-      lines.push(r.detail ? `  ${r.file} → failed: ${r.detail}` : `  ${r.file} → failed`);
-    }
-  }
-  const done = results.filter((r) => r.status === 'ready').length;
-  lines.push(`${done}/${results.length} briefs succeeded`);
-  return lines;
 }

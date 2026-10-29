@@ -31,12 +31,18 @@ describe('runStack (#3798)', () => {
     ];
     const a = mk();
     const { log, logs } = setup();
-    const r = await runStack(a.map((f) => f.slice), { ...opts, chain: true, log });
+    const r = await runStack(
+      a.map((f) => f.slice),
+      { ...opts, chain: true, log },
+    );
     expect(a.map((f) => f.run.mock.calls[0]![0])).toEqual([undefined, 'b1', 'b2']);
     expect(r.ok).toBe(true);
     expect(logs).toContainEqual(['info', 'run-x: [2/3] stacking on b1']);
     const b = mk();
-    await runStack(b.map((f) => f.slice), { ...opts, base: 'feat/x', chain: true, log });
+    await runStack(
+      b.map((f) => f.slice),
+      { ...opts, base: 'feat/x', chain: true, log },
+    );
     expect(b.map((f) => f.run.mock.calls[0]![0])).toEqual(['feat/x', 'b1', 'b2']);
   });
 
@@ -92,7 +98,10 @@ describe('runStack (#3798)', () => {
       fake('d', new Error('bad')),
     ];
     const { log } = setup();
-    const r = await runStack(plan.map((f) => f.slice), { base: 'feat/x', chain: true, prefix: 'p', noun: 'brief', log });
+    const r = await runStack(
+      plan.map((f) => f.slice),
+      { base: 'feat/x', chain: true, prefix: 'p', noun: 'brief', log },
+    );
     expect(r.summary).toEqual([
       'Briefs:',
       '  a → PR #11 (base feat/x)',
@@ -106,8 +115,17 @@ describe('runStack (#3798)', () => {
   it('renders ready, failed and skipped lines unchained', async () => {
     const plan = [fake('a', undefined), fake('b', new Error('')), fake('c', new Error('bad'))];
     const { log } = setup();
-    const r = await runStack(plan.map((f) => f.slice), { chain: false, prefix: 'p', noun: 'brief', log });
-    expect(r.summary).toEqual(['Briefs:', '  a → done (no PR)', '  b → failed', '  c → failed: bad', '1/3 briefs succeeded']);
+    const r = await runStack(
+      plan.map((f) => f.slice),
+      { chain: false, prefix: 'p', noun: 'brief', log },
+    );
+    expect(r.summary).toEqual([
+      'Briefs:',
+      '  a → done (no PR)',
+      '  b → failed',
+      '  c → failed: bad',
+      '1/3 briefs succeeded',
+    ]);
   });
 
   it('handles an empty plan', async () => {

@@ -74,8 +74,9 @@ describe('baseBranchConflict', () => {
   });
 
   it('rejects --size-gate other than off, --run-children and --workspace', () => {
-    expect(baseBranchConflict({ baseBranch: 'x', sizeGate: 'stack' })).toContain('size gate off');
-    expect(baseBranchConflict({ baseBranch: 'x', runChildren: true })).toContain('size gate off');
+    expect(baseBranchConflict({ baseBranch: 'x', sizeGate: 'stack' })).toBeUndefined();
+    expect(baseBranchConflict({ baseBranch: 'x', sizeGate: 'file' })).toContain('size gate off or stack');
+    expect(baseBranchConflict({ baseBranch: 'x', runChildren: true })).toContain('size gate off or stack');
     expect(baseBranchConflict({ baseBranch: 'x', workspace: '/w' })).toContain('needs a factory worktree');
   });
 });

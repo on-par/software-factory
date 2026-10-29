@@ -4,7 +4,6 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { nextStackBase } from './run-brief.js';
 import {
   errored,
   h,
@@ -28,22 +27,6 @@ function writeBrief(name: string): string {
 const branches = () => setupWorktree.mock.calls.map((c) => c[1]);
 const startPoints = () => setupWorktree.mock.calls.map((c) => c[3]);
 const shipBases = () => phases.shipPhase.mock.calls.map((c) => (c[0] as any).baseBranch);
-
-describe('nextStackBase (#3763)', () => {
-  it('returns the PR head branch for a shipped/ready outcome with a PR', () => {
-    const shipped = { state: 'shipped', branch: 'factory/9-a', prNumber: 4 } as any;
-    const ready = { state: 'ready', branch: 'factory/9-b', prNumber: 5 } as any;
-    expect(nextStackBase(shipped)).toEqual({ base: 'factory/9-a' });
-    expect(nextStackBase(ready)).toEqual({ base: 'factory/9-b' });
-  });
-
-  it('returns a stop reason when the outcome has no PR', () => {
-    expect(nextStackBase({ state: 'ready', branch: 'factory/9-a', prNumber: undefined } as any)).toEqual({
-      stop: 'opened no PR',
-    });
-    expect(nextStackBase(undefined)).toEqual({ stop: 'opened no PR' });
-  });
-});
 
 describe('run-brief --stack (#3763)', () => {
   it('without --stack every brief bases on the default branch', async () => {

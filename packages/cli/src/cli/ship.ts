@@ -239,9 +239,11 @@ async function shipIssueFrom(
       issue: issueNum,
     } satisfies GithubIssueParams));
   const issueTitle = work.title;
-  const noPr = opts.pr === false; // --no-pr / --base-branch never file child issues or slice PRs: size gate off
+  const noPr = opts.pr === false; // --no-pr never files child issues or slice PRs: size gate off; --base-branch keeps stack mode
   const sizeGateMode =
-    noPr || opts.baseBranch !== undefined ? 'off' : (opts.sizeGate ?? resolveSizeGateMode(factoryConfig));
+    noPr || (opts.baseBranch !== undefined && opts.sizeGate !== 'stack')
+      ? 'off'
+      : (opts.sizeGate ?? resolveSizeGateMode(factoryConfig));
   const maxSlices = opts.maxSlices ?? resolveSizeGateMaxSlices(factoryConfig);
   const { branchPrefix } = policy.effective;
   const claim = { issueNum, issueTitle, ghRepo, sizeGateMode, work, ctx, octokit, baseBranch: opts.baseBranch };
