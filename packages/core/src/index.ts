@@ -304,6 +304,16 @@ export { acquireLaneEnvironment, localOnlyWorkspace, worktreeWorkspace } from '.
 
 // Run composition (#675)
 export { runIssue, type RunPorts, type RunRequest } from './run/run-issue.js';
+export { runStack } from './run/stack-engine.js';
+export type {
+  SliceOutcome,
+  StackLogLevel,
+  StackPlan,
+  StackRunOptions,
+  StackRunResult,
+  StackSlice,
+  StackSliceResult,
+} from './run/stack-engine.js';
 
 // Run phase snapshot (#1325, #1326, #1327)
 export type { RunPhaseSnapshot } from './run/phase-snapshot.js';
