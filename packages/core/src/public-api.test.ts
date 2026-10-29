@@ -406,16 +406,12 @@ const INTERNAL_API_KEYS = [
   'findAdoptablePr',
   'parseGardenDuration',
   'renderGardenJson',
-  'clusterCheckFailures',
   'clusterGarden',
   'readHarvestEvents',
   'renderGardenReport',
   // Garden dedup (#2102)
   'dedupGardenClusters',
   'filterGardenOnlyNew', // --only-new (#2104)
-  'findGardenTrackingIssue',
-  'gardenClusterFingerprint',
-  'gardenKeyMarker',
   'markGardenTrackingUnknown',
   // Readiness deep check (#1732)
   'buildDecompositionPrompt',
@@ -504,14 +500,6 @@ const INTERNAL_API_KEYS = [
   'resolvePullRequestReference',
   'REVIEW_ACCESS_ERROR_EXIT_CODE',
   // Local queue reprioritization audit records (#869)
-  // Daemon-ready ProjectV2 queue intent projection (#866)
-  'createProjectQueuePoller',
-  'DEFAULT_PROJECT_QUEUE_POLL_MS',
-  // gh-authenticated ProjectV2 queue GraphQL client + live poller (#1046)
-  'createGithubProjectQueuePoller',
-  'createOctokitGraphqlClient',
-  // Coarse ProjectV2 status publishing (#868) and writing (#849)
-  'createProjectStatusWriter',
   // Failure fingerprint & evidence
   'captureFailure',
   'fingerprintFailure',
@@ -520,38 +508,12 @@ const INTERNAL_API_KEYS = [
   'createOctokitFilingClient',
   'DEFAULT_BUG_LABELS',
   'partitionGithubClaimsByActivity',
-  'findIssueByMarker',
-  'findMatchingIssue',
-  'fingerprintMarker',
-  'renderBugBody',
-  'renderOccurrenceComment',
-  'renderUpstreamOccurrenceComment',
   // Evidence sanitizer for untrusted text (#1841, #1852)
   'stripHiddenContent',
-  'REDACTION_PLACEHOLDERS',
-  'redactText',
   'buildUpstreamReport',
-  'factoryStackFrames',
-  'UPSTREAM_TITLE_PREFIX',
   'upstreamInputFromEvidence',
-  'upstreamReportMarker',
-  // Send upstream reports with outbox fallback (#1860)
-  'classifyUpstreamSendError',
-  'defaultUpstreamLedgerPath',
-  'defaultUpstreamOutboxDir',
-  'sendUpstreamReports',
-  'writeUpstreamOutbox',
-  'resolveTargetRepo',
   // Filing policy: when to file, caps, and self-fix labeling (#374)
-  'DEFAULT_FILING_POLICY',
-  'emptyLedger',
-  'evaluateFilingPolicy',
   'isAutoMergeBlocked',
-  'labelsFor',
-  'recordFiled',
-  'recordPark',
-  'rollDay',
-  'touchesSensitiveScope',
   // Config
   'resolveFilingPolicy',
   'resolveHermeticGit',
