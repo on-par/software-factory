@@ -2,7 +2,7 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { createTempDirs, type TempDirs } from '../harness/temp-dir.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor, type StubModelExecutorOptions } from '../router/stub.js';
-import type { SimRecordedCall } from '../sim/index.js';
+import type { SimRecordedCall } from '../fakes/octokit.js';
 
 export type FakeOctokitHandler = (...args: any[]) => unknown;
 

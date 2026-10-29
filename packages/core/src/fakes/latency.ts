@@ -1,4 +1,4 @@
-// packages/core/src/sim/latency.ts — shared timing primitive for the sim harness.
+// packages/core/src/fakes/latency.ts — shared timing primitive for the sim harness.
 // Zero imports outside node built-ins so it can be reused by any sim double.
 
 /** Fixed milliseconds, an explicit fixed spec, or a uniform distribution. */

@@ -13,7 +13,7 @@ import {
   releasePortLease,
 } from '../environment/index.js';
 import { ProcessGroupTracker } from '../environment/process-groups.js';
-import type { SimWorkspace } from '../sim/workspace.js';
+import type { SimWorkspace } from '../fakes/workspace.js';
 import type { WorktreeSandbox } from '../utils/microvm.js';
 import type { PrLookup } from '../phases/ship.js';
 import type { RemoteBranchRecord } from '../types/index.js';

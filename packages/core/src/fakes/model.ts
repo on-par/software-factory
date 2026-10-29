@@ -1,4 +1,4 @@
-// packages/core/src/sim/model.ts — reusable fake ModelExecutor: per-call response,
+// packages/core/src/fakes/model.ts — reusable fake ModelExecutor: per-call response,
 // latency, and scripted failure, injected straight into ModelRouter.
 
 import type { TaskType } from '../types/index.js';

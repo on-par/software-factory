@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
-import { SimModelExecutor } from '../sim/index.js';
+import { SimModelExecutor } from '../fakes/model.js';
 import { buildPhase } from './build.js';
 
 const tempDirs = new Set<string>();

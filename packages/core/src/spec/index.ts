@@ -1,7 +1,7 @@
 // src/spec/index.ts — the frozen-spec artifact set (#666): owns every path in the
 // three-file family (.factory/plans/issue-N.md plus the design JSON/MD sidecars), the
 // single route-normalization site, the only writer of the set, and the archive rule.
-// Every consumer (plan, eval/score, eval/golden, sim/regressions, design) routes through
+// Every consumer (plan, eval/score, eval/golden, design) routes through
 // this module.
 
 import { existsSync } from 'node:fs';
