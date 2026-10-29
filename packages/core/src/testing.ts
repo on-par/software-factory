@@ -9,6 +9,8 @@ export type { InjectionFixture, InjectionSurface } from './harness/injection-fix
 export { loadInjectionFixtures } from './harness/injection-fixtures.js';
 export type { StubCodingHarnessOptions, StubHarnessStep } from './harness/stub.js';
 export { StubCodingHarness } from './harness/stub.js';
+export type { FakeOctokitHandler, FakeOctokitResponses } from './harness/fake-octokit.js';
+export { fakeOctokit } from './harness/fake-octokit.js';
 export type {
   MonteCarloBreach,
   MonteCarloCliArgs,

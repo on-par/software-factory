@@ -2,44 +2,8 @@ import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { createTempDirs, type TempDirs } from '../harness/temp-dir.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor, type StubModelExecutorOptions } from '../router/stub.js';
-import type { SimRecordedCall } from '../sim/index.js';
 
-export type FakeOctokitHandler = (...args: any[]) => unknown;
-
-/**
- * Keys are dotted endpoint paths under `rest` (`'issues.get'`, `'pulls.list'`, ...) plus the special key
- * `'graphql'`. A function value is a handler (its return value, sync or a promise, is what the endpoint
- * resolves to; a throw rejects). Any other value is returned as is, so REST callers include their own
- * `{ data }` wrapper.
- */
-export type FakeOctokitResponses = Record<string, unknown>;
-
-/** Build a fake Octokit from per-endpoint responses and record every call. Unconfigured endpoints stay undefined. */
-export function fakeOctokit(responses: FakeOctokitResponses = {}): { octokit: any; calls: RecordedCall[] } {
-  const calls: RecordedCall[] = [];
-  const octokit: any = {};
-  for (const [key, response] of Object.entries(responses)) {
-    const respond = async (args: unknown[]): Promise<unknown> =>
-      typeof response === 'function' ? (response as FakeOctokitHandler)(...args) : response;
-    if (key === 'graphql') {
-      octokit.graphql = async (...args: unknown[]) => {
-        calls.push(['graphql', ...args]);
-        return respond(args);
-      };
-      continue;
-    }
-    const [namespace, method] = key.split('.');
-    octokit.rest ??= {};
-    octokit.rest[namespace] ??= {};
-    octokit.rest[namespace][method] = async (...args: unknown[]) => {
-      calls.push([key, ...args]);
-      return respond(args);
-    };
-  }
-  return { octokit, calls };
-}
-
-type RecordedCall = SimRecordedCall;
+export { fakeOctokit, type FakeOctokitHandler, type FakeOctokitResponses } from '../harness/fake-octokit.js';
 
 type StubModelEntry = ModelsConfig['models'][string];
 
