@@ -17,15 +17,7 @@ export {
 // Garden dedup (#2102)
 export { dedupGardenClusters, filterGardenOnlyNew, markGardenTrackingUnknown } from './garden/dedup.js';
 // Failure fingerprint & evidence
-export { captureFailure, fingerprintFailure, normalizeFailureMessage } from './failure/index.js';
-export type {
-  CaptureFailureInput,
-  EvidencePack,
-  FailureOrigin,
-  FailurePhase,
-  FailureSignatureInput,
-  FingerprintedFailure,
-} from './types/index.js';
+export type { FingerprintedFailure } from './types/index.js';
 export * from './config/provider-order-exports.js';
 // Auto-file a fingerprinted bug (#373)
 export type { FileBugResult, FilingGitHubClient } from './filing/index.js';
@@ -50,23 +42,17 @@ export {
   resolveTrustTier,
 } from './config/repo.js';
 export { resolveExperimental, resolveLocalOnly, resolveBranchPrefix, resolveHostMaxBuilds } from './config/index.js';
-export { CHECKER_ENV_ALLOW_VAR, CHECKER_ENV_ALLOWLIST, checkerParentEnv } from './environment/checker-env.js';
 export { evaluateLoadGuard, formatLoadHold, readHostLoad, type LoadGuardDecision } from './environment/load-guard.js';
 export {
-  BYTES_PER_GB,
   claimDiskAlert,
   createDiskGuard,
-  DISK_ALERT_INTERVAL_MS,
-  evaluateDiskGuard,
   formatDiskHold,
   hostDiskAlertFile,
-  readDiskFree,
   type DiskGuard,
   type DiskGuardDecision,
-  type DiskSample,
 } from './environment/disk-guard.js';
 export { hostAgentJobsDir, hostBuildSlotsDir, listHostSlots, withHostAgentJobLease } from './environment/host-slots.js';
-export { withHostBuildSlot, type HostAgentJobKind, type HostSlotStatus } from './environment/host-slots.js';
+export { type HostAgentJobKind, type HostSlotStatus } from './environment/host-slots.js';
 export { createRunSlotGate, withRunAndHostBuildSlot, type RunSlotGate } from './environment/run-slots.js';
 export { FACTORY_RUNTIME_CONFIG_KEYS, resolveHostLoadGuard, resolveHostMaxAgentJobs } from './config/index.js';
 export * from './queue/internal-exports.js';
@@ -82,15 +68,12 @@ export type { RepoConfigYamlMigration } from './config/repo-config-file.js';
 export { renderConfigExample } from './config/example.js';
 export { resolveEvidenceAllowlist, type EvidenceAllowlist } from './checkers/evidence-allowlist.js';
 export { runEvidencePlan, type EvidencePlanResult, type EvidenceRunnerContext } from './checkers/evidence-plan.js';
-// Design artifact (#422)
-export { DesignArtifactSchema, parseDesignArtifact, readDesignArtifact, renderDesignArtifact } from './design/index.js';
 // Concrete coding harnesses
 export { classifyFailure } from './harness/classify.js';
 export { type HarnessCheckResult, runHarnessCheck } from './harness/check.js';
 export { classifyOpenCodeErrorType, parseOpenCodeJson } from './harness/opencode.js';
 export * as openCodeVersion from './harness/opencode-version.js';
-export { type DockerEngineOptions, createDockerEngine } from './hosted/docker.js';
-export type { OrphanContainer, ReapedContainer } from './hosted/orphans.js';
+export { createDockerEngine } from './hosted/docker.js';
 export { listOrphanContainers, reapOrphanContainers } from './hosted/orphans.js';
 // Router
 export { harnessCliCommand } from './harness/catalog.js';
@@ -115,7 +98,7 @@ export type {
 export { runOvernightQueue } from './local-small/overnight.js';
 export { createLocalSmallDryRun } from './local-small/stepwise.js';
 // Eval internals
-export { judgeSpec, median, runJudgeSamples, scoreSpec } from './eval/index.js';
+export { median } from './eval/index.js';
 
 // Usage internals
 export { resolveRunUsageHarness, TRAILING_WINDOW_MS } from './usage/index.js';
@@ -182,7 +165,6 @@ export { findWorktreeKeep, removeWorktreeKeep, upsertWorktreeKeep } from './work
 // Daemon repo registry (~/.factory/registry.json) (#781)
 export { defaultRegistryPath, listRepos, loadRegistry } from './daemon/registry.js';
 export { createGithubLaneClaimStalenessProbe, releaseLaneClaim } from './run/lane-file-guard.js';
-export type { LaneClaimStalenessProbe, LaneFileHold } from './run/lane-file-guard.js';
 
 // Daemon control-plane HTTP server (#777)
 export { createFactorydServer, DEFAULT_FACTORYD_PORT } from './daemon/factoryd-http.js';
@@ -235,19 +217,10 @@ export type { QueueSnapshot } from './queue/index.js';
 export { formatQueueOrderConflict, type QueueOrderConflict } from './queue/queue-order.js';
 
 // Factory App admission-state compatibility (#1497)
-export type {
-  AdmissionLookup,
-  AdmissionRecord,
-  AdmissionState,
-  AdmissionStateReader,
-  QueueCompatibilityVerdict,
-} from './admission/index.js';
+export type { AdmissionLookup, AdmissionStateReader, QueueCompatibilityVerdict } from './admission/index.js';
 export {
-  ADMISSION_SNAPSHOT_VERSION,
-  ADMISSION_STATE_FILENAME,
   classifyQueueCompatibility,
   createFileAdmissionStateReader,
-  FACTORY_APP_REPAIR_HINT,
   formatAdmissionConflict,
   withAdmissionGuard,
 } from './admission/index.js';
@@ -266,24 +239,14 @@ export { DEFAULT_MAX_CLOCK_SKEW_MS, measureGithubClockSkew, resolveQueueMaxClock
 export type { UnmergedGreenPr } from './utils/green-prs.js';
 export { createOctokitGreenPrClient, findUnmergedGreenPrs } from './utils/green-prs.js';
 
-// Local queue reprioritization audit records (#869)
-export type { QueueReprioritizationRecord } from './types/index.js';
-
 // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
 export { wrapCommandInSandbox, shouldProxyEgress, isEgressEnforced } from './sandbox/index.js';
 export { resolveConfiguredWritablePaths } from './sandbox/writable-paths.js';
-export {
-  startEgressProxy,
-  egressSummaryMessage,
-  egressHostMessage,
-  isTelemetryHost,
-  TELEMETRY_HOST_PATTERNS,
-  type EgressProxy,
-} from './sandbox/egress-proxy.js';
+export { startEgressProxy, egressSummaryMessage, egressHostMessage } from './sandbox/egress-proxy.js';
 export { createRunRuntime, type RunRuntime } from './daemon/run-runtime.js';
 export { findOpenPR } from './phases/ship.js';
-export { settleParkedPullRequest, type ParkedPrDisposition } from './run/park-pr.js';
-export * from './run/adopt-pr.js'; // findAdoptablePr + the shared open-PR lookup (#3439)
+export { settleParkedPullRequest } from './run/park-pr.js';
+export { findAdoptablePr, lookupOpenPrByIssue, lookupOpenPrByBranch, type OpenPrLookup } from './run/adopt-pr.js'; // findAdoptablePr + the shared open-PR lookup (#3439)
 export { readStackSliceGate } from './phases/stack-approval.js';
 export type { StackPullReviews } from './phases/stack-approval.js';
 export { createShipExecutor } from './daemon/ship-executor.js';
@@ -408,25 +371,43 @@ export {
 } from './readiness/slice-plan.js';
 export type { SlicePlanCommentLookup } from './readiness/slice-plan-github.js';
 export { findSlicePlanComment, recordSliceMerged, upsertSlicePlanComment } from './readiness/slice-plan-github.js';
-export * from './blockers/index.js';
-export * from './events/tail.js';
+export { findDeclaredPrerequisites, createOctokitBlockedParkStore, pollBlockedParks } from './blockers/index.js';
+export {
+  eventSegmentsDir,
+  eventSegmentFileName,
+  listEventSegmentPaths,
+  readEventsTail,
+  readEventsSince,
+  InvalidEventCursorError,
+} from './events/tail.js';
 export * from './readiness/internal-exports.js';
 export type { IssueRunState, RunStatus } from './types/index.js';
-export * from './run/state.js';
-export * from './run/steer.js';
-export * from './kpis/steerability.js';
-export { createStackSliceBranch } from './run/stack-slice-branch.js';
-export { restackAfterSquashMerge, type StackRestackOptions, type StackRestackOutcome } from './run/stack-restack.js';
 export {
-  checkResumePath,
-  configParkMessage,
-  createCheckResumeStore,
-  createPlanReuseStore,
-  formatPreservedBuildMessage,
-  issueBodyHash,
-  planReusePath,
-  preservedFixTarget,
-} from './run/resume-context.js';
+  runStateFile,
+  writeIssueRunState,
+  readIssueRunState,
+  listIssueRuns,
+  nextIssueRunState,
+  type RunStateUpdate,
+  type IssueRunStateBase,
+} from './run/state.js';
+export {
+  appendSteerEvent,
+  SteerEventError,
+  STEER_SOURCES,
+  STEER_PHASES,
+  type SteerSource,
+  type SteerPhase,
+  type SteerEvent,
+} from './run/steer.js';
+export {
+  collectMergedPrSteers,
+  summarizeSteerability,
+  formatSteerabilityReport,
+  type SteerabilityReport,
+} from './kpis/steerability.js';
+export { restackAfterSquashMerge, type StackRestackOutcome } from './run/stack-restack.js';
+export { createCheckResumeStore, createPlanReuseStore } from './run/resume-context.js';
 export type { CheckResumeRecord, CheckResumeStore, PlanReuseRecord, PlanReuseStore } from './run/resume-context.js';
 // Pre-PLAN base health (#2339)
 export { BaselineCache } from './checkers/baseline-cache.js';
@@ -439,8 +420,6 @@ export { codexChatgptSessionState } from './utils/codex-config.js';
 export { localAuthFailureSinceLogin, recordLocalAuthFailure } from './utils/local-auth-record.js';
 export { syncLandBranch } from './land/sync.js';
 export { fetchHumanEventSourcesCached, runProducedPrOrMerge } from './kpis/sweep.js';
-export type { AgentInvocation, TokenCoverage, TokenCoverageEntry } from './metrics/token-coverage.js';
-export { agentInvocationsFromEvents, computeTokenCoverage } from './metrics/token-coverage.js';
 export { partitionGithubClaimsByActivity } from './queue/activity.js';
 export {
   type OpenFactoryDrafts,
