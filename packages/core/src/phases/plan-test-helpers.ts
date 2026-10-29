@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
+import { fakeOctokit } from '../test-support/index.js';
 import { planPhase } from './plan.js';
 import { StubModelExecutor as BaseStubModelExecutor, type StubModelExecutorOptions } from '../router/stub.js';
 import { MAX_DESIGN_ARTIFACT_RETRIES } from './plan-design-retry.js';
@@ -70,16 +71,12 @@ export async function runPlanOutputs(
   const specPath = join(worktree, `issue-${issue}.md`);
   const stub = new StubModelExecutor({ scripts: { plan: outputs.map((output) => ({ output })) } });
   const router = new ModelRouter(models, routes, false, stub);
-  const octokit: any = {
-    rest: {
-      issues: {
-        get: async () => ({ data: { title: 'Plan validity', body: 'Body.' } }),
-        listComments: async () => ({ data: [] }),
-        createComment: async (input: { body: string }) => ({ data: { id: 1, body: input.body } }),
-      },
-      users: { getAuthenticated: async () => ({ data: { id: 1 } }) },
-    },
-  };
+  const { octokit } = fakeOctokit({
+    'issues.get': { data: { title: 'Plan validity', body: 'Body.' } },
+    'issues.listComments': { data: [] },
+    'issues.createComment': (input: { body: string }) => ({ data: { id: 1, body: input.body } }),
+    'users.getAuthenticated': { data: { id: 1 } },
+  });
   const logs: Array<{ type: string; msg: string }> = [];
   const result = await planPhase({
     issue,
