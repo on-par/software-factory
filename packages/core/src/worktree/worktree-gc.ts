@@ -164,7 +164,7 @@ export async function sweepWorktrees(
   const repoRootResolved = resolve(repoRoot);
   const repoBase = basename(repoRootResolved);
   // Slugs are [a-z0-9-] only (branchPrefixSlug), so interpolating them into a regex is safe.
-  // Matches the resolved prefix and the legacy ship-it one.
+  // Matches the resolved prefix.
   const lanePattern = new RegExp('^(?:' + factoryBranchPrefixes(opts.branchPrefix).join('|') + ')/(\\d+)-');
 
   const candidates: WorktreeListEntry[] = entries.filter((entry) => {

@@ -248,7 +248,6 @@ export {
   type LaneWorktreeReapResult,
   branchFor,
   branchPrefixSlug,
-  LEGACY_BRANCH_PREFIX,
   factoryBranchPrefixes,
   factoryBranchIssue,
   cleanupWorktree,

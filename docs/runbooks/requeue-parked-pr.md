@@ -10,12 +10,12 @@ When a lane parks an issue (for example `ci-failed`) after opening a draft PR, t
 
 ## What the next claim does
 
-| Open factory PRs for the issue (`<prefix>/<n>-*`, configured or legacy `ship-it/`, same repo) | Result                                                                                                            |
-| --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Exactly one                                                                                   | Adopts its head branch and logs `pr-adopted` (PR number, branch, head SHA). BUILD/SHIP push to that PR.           |
-| Two or more                                                                                   | Parks as `escalate` before any worktree exists and logs `pr-adopt-ambiguous`. Close all but one PR, then requeue. |
-| None                                                                                          | Fresh branch from `origin/main`, as before.                                                                       |
-| Lookup fails                                                                                  | Warns with `pr-adopt-lookup-failed` and uses the fresh branch.                                                    |
+| Open factory PRs for the issue (`<prefix>/<n>-*`, configured prefix, same repo) | Result                                                                                                            |
+| ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Exactly one                                                                     | Adopts its head branch and logs `pr-adopted` (PR number, branch, head SHA). BUILD/SHIP push to that PR.           |
+| Two or more                                                                     | Parks as `escalate` before any worktree exists and logs `pr-adopt-ambiguous`. Close all but one PR, then requeue. |
+| None                                                                            | Fresh branch from `origin/main`, as before.                                                                       |
+| Lookup fails                                                                    | Warns with `pr-adopt-lookup-failed` and uses the fresh branch.                                                    |
 
 Resume, local-only, slice and stack runs keep their own branch selection and skip the lookup.
 

@@ -33,7 +33,7 @@ export interface AutoIngestOptions {
   lane?: string;
   /** Cap on issues appended per cycle. Defaults to 20. */
   maxPerCycle?: number;
-  /** Factory branch prefix used to recognize in-flight PRs. Defaults to branchPrefixSlug(). Legacy-prefix (LEGACY_BRANCH_PREFIX) PRs are also recognized. */
+  /** Factory branch prefix used to recognize in-flight PRs. Defaults to branchPrefixSlug() (`factory`). */
   branchPrefix?: string;
   /** Admits every candidate even when two name the same file. Defaults to false. */
   forceAdmit?: boolean;

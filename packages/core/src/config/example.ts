@@ -15,7 +15,6 @@ import { z } from 'zod';
 
 import { isPlainObject, loadFactoryConfig, loadModelsConfig, type FactoryConfig } from './index.js';
 import { DEFAULT_REVIEW_FLOOR_RULES } from '../review/floor.js';
-import { LEGACY_BRANCH_PREFIX } from '../utils/branch-slug.js';
 import {
   DEFAULT_T1_SAMPLE_RATE,
   RepoFactoryConfigV2Schema,
@@ -350,7 +349,7 @@ function runtimeNamespace(): Node[] {
         {
           kind: 'unset',
           key: 'branchPrefix',
-          doc: `Branch-name prefix for factory branches, slug-normalized; must contain a letter or digit. Unset: factory. --branch-prefix beats it. Legacy ${LEGACY_BRANCH_PREFIX}/ branches are always recognized.`,
+          doc: 'Branch-name prefix for factory branches, slug-normalized; must contain a letter or digit. Unset: factory. --branch-prefix beats it.',
           example: '"factory"',
         },
         {

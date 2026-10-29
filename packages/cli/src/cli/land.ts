@@ -18,7 +18,6 @@ import {
   factoryBranchPrefixes,
   getIssueTitle,
   isAutoMergeBlocked,
-  LEGACY_BRANCH_PREFIX,
   logEvent,
   lookupOpenPrByBranch,
   lookupOpenPrByIssue,
@@ -92,7 +91,6 @@ export async function landIssue(
   // lives on (same failure mode fixed for waitForMerge in #51). Guess the
   // branch from the current title first, but fall back to matching the open
   // PR that references this issue directly and use its real head branch.
-  // Legacy-prefix (LEGACY_BRANCH_PREFIX) branches are guessed too, after the resolved prefix (#1708).
   const repoConfig = configLoaders.loadRepoConfig(repoRoot);
   const resolved =
     branchPrefix ??
@@ -190,12 +188,7 @@ export async function landIssue(
     log('warn', `could not publish the risk receipt on PR #${prNumber}: ${errorDetail(err)}`);
   }
 
-  const worktree = worktreePathFor(
-    repoRoot,
-    ghRepo,
-    issueNum,
-    branch.startsWith(`${LEGACY_BRANCH_PREFIX}/`) ? LEGACY_BRANCH_PREFIX : resolved,
-  );
+  const worktree = worktreePathFor(repoRoot, ghRepo, issueNum, resolved);
   const landSandboxPolicy = resolveSandboxPolicy(landFactoryConfig.sandbox, {
     worktree,
     repoRoot,

@@ -77,11 +77,11 @@ describe('utils', () => {
     expect(shellEscape('')).toBe("''");
   });
 
-  it('builds a ship-it branch from issue and title by default, matching slugify', () => {
+  it('builds a factory branch from issue and title by default, matching slugify', () => {
     expect(branchFor(workKeyFromIssue(22), 'Reliably detect a merged PR')).toBe(
-      `ship-it/22-${slugify('Reliably detect a merged PR')}`,
+      `factory/22-${slugify('Reliably detect a merged PR')}`,
     );
-    expect(branchFor(workKeyFromIssue(7), 'Hello, World!')).toBe('ship-it/7-hello-world');
+    expect(branchFor(workKeyFromIssue(7), 'Hello, World!')).toBe('factory/7-hello-world');
   });
 
   it('adds an -sK- segment only for slice 2 and later (ADR-0147)', () => {
@@ -103,20 +103,27 @@ describe('utils', () => {
     expect(branchFor(workKeyFromIssue(7), 'Hello, World!', 'compare-local')).toBe('compare-local/7-hello-world');
   });
 
-  it('falls back to ship-it when the custom branch prefix has no slug characters', () => {
-    expect(branchPrefixSlug('!!!')).toBe('ship-it');
-    expect(branchFor(workKeyFromIssue(7), 'Hello, World!', '!!!')).toBe('ship-it/7-hello-world');
+  it('falls back to factory when the custom branch prefix has no slug characters', () => {
+    expect(branchPrefixSlug('!!!')).toBe('factory');
+    expect(branchFor(workKeyFromIssue(7), 'Hello, World!', '!!!')).toBe('factory/7-hello-world');
   });
 
-  it('factoryBranchPrefixes lists the resolved prefix then the legacy one, deduped', () => {
-    expect(factoryBranchPrefixes()).toEqual(['ship-it']);
-    expect(factoryBranchPrefixes('factory')).toEqual(['factory', 'ship-it']);
+  it('branchPrefixSlug defaults to factory', () => {
+    expect(branchPrefixSlug()).toBe('factory');
+    expect(branchPrefixSlug('')).toBe('factory');
+    expect(branchPrefixSlug(undefined)).toBe('factory');
+  });
+
+  it('factoryBranchPrefixes lists only the resolved prefix', () => {
+    expect(factoryBranchPrefixes()).toEqual(['factory']);
+    expect(factoryBranchPrefixes('factory')).toEqual(['factory']);
     expect(factoryBranchPrefixes('Ship It')).toEqual(['ship-it']);
+    expect(factoryBranchPrefixes('sf')).toEqual(['sf']);
   });
 
-  it('factoryBranchIssue recognizes the resolved and legacy prefixes only', () => {
+  it('factoryBranchIssue recognizes only the resolved prefix', () => {
     expect(factoryBranchIssue('factory/12-x', 'factory')).toBe(12);
-    expect(factoryBranchIssue('ship-it/7-y', 'factory')).toBe(7);
+    expect(factoryBranchIssue('ship-it/7-y', 'factory')).toBeNull();
     expect(factoryBranchIssue('sf/3-z', 'sf')).toBe(3);
     expect(factoryBranchIssue('feature/4-a', 'factory')).toBeNull();
     expect(factoryBranchIssue('factory/abc-x', 'factory')).toBeNull();
@@ -577,7 +584,7 @@ describe('gitFetch / setupWorktree', () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 201);
 
-    await setupWorktree(repoRoot, 'ship-it/201-fresh-worktree', worktree);
+    await setupWorktree(repoRoot, 'factory/201-fresh-worktree', worktree);
 
     expect(existsSync(join(worktree, 'README.md'))).toBe(true);
   });
@@ -589,7 +596,7 @@ describe('gitFetch / setupWorktree', () => {
     const worktree = kit.trackWorktree(repoRoot, 845);
 
     try {
-      await setupWorktree(repoRoot, 'ship-it/845-adjacent-worktree', worktree);
+      await setupWorktree(repoRoot, 'factory/845-adjacent-worktree', worktree);
 
       expect(resolve(worktree, '..')).toBe(resolve(repoRoot, '..'));
       expect(existsSync(join(worktree, 'README.md'))).toBe(true);
@@ -603,7 +610,7 @@ describe('gitFetch / setupWorktree', () => {
   it('removes and recreates an existing worktree and branch on a second setup call', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 202);
-    const branch = 'ship-it/202-rerun-worktree';
+    const branch = 'factory/202-rerun-worktree';
 
     await setupWorktree(repoRoot, branch, worktree);
     await setupWorktree(repoRoot, branch, worktree);
@@ -614,7 +621,7 @@ describe('gitFetch / setupWorktree', () => {
   it('fails before touching the lane when startPoint does not resolve after fetch (#3764)', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 207);
-    const branch = 'ship-it/207-missing-base';
+    const branch = 'factory/207-missing-base';
     await setupWorktree(repoRoot, branch, worktree);
 
     await expect(setupWorktree(repoRoot, branch, worktree, 'origin/no-such-branch')).rejects.toThrow(
@@ -656,7 +663,7 @@ describe('gitFetch / setupWorktree', () => {
 
       // repoRoot's refs/remotes/origin/main is now stale; setupWorktree must fetch.
       const worktree = kit.trackWorktree(repoRoot, 204);
-      await setupWorktree(repoRoot, 'ship-it/204-stale-main', worktree);
+      await setupWorktree(repoRoot, 'factory/204-stale-main', worktree);
 
       expect(existsSync(join(worktree, 'FRESH.txt'))).toBe(true);
     } finally {
@@ -672,7 +679,7 @@ describe('gitFetch / setupWorktree', () => {
     await execFile('git', ['commit', '-m', 'test: ahead-of-origin commit'], { cwd: repoRoot });
 
     const worktree = kit.trackWorktree(repoRoot, 205);
-    await setupWorktree(repoRoot, 'ship-it/205-dirty-main', worktree);
+    await setupWorktree(repoRoot, 'factory/205-dirty-main', worktree);
 
     expect(existsSync(join(worktree, 'DIRTY.txt'))).toBe(false);
     expect(existsSync(join(worktree, 'AHEAD.txt'))).toBe(false);
@@ -683,7 +690,7 @@ describe('gitFetch / setupWorktree', () => {
     const worktree = kit.trackWorktree(repoRoot, 206);
     const log = vi.fn();
 
-    await setupWorktree(repoRoot, 'ship-it/206-base-event', worktree, undefined, undefined, log);
+    await setupWorktree(repoRoot, 'factory/206-base-event', worktree, undefined, undefined, log);
 
     const call = log.mock.calls.find(([type]) => type === 'worktree-base');
     expect(call).toBeDefined();
@@ -736,7 +743,7 @@ describe('setupWorktree / cleanupWorktree sandbox lifecycle', () => {
   it('with sandbox undefined, runs no sbx commands (behavior unchanged)', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 653);
-    const branch = 'ship-it/653-no-sandbox';
+    const branch = 'factory/653-no-sandbox';
     const exec = vi.fn();
 
     await setupWorktree(repoRoot, branch, worktree);
@@ -748,7 +755,7 @@ describe('setupWorktree / cleanupWorktree sandbox lifecycle', () => {
   it('setupWorktree with a docker-sandbox descriptor creates the VM via the injected exec', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 654);
-    const branch = 'ship-it/654-docker-sandbox';
+    const branch = 'factory/654-docker-sandbox';
     const exec: ExecFn = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
     const sandbox: WorktreeSandbox = {
       runtime: 'docker-sandbox',
@@ -766,7 +773,7 @@ describe('setupWorktree / cleanupWorktree sandbox lifecycle', () => {
   it('setupWorktree forwards its log callback into createMicroVm so a fallback is observable', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 656);
-    const branch = 'ship-it/656-docker-sandbox-log';
+    const branch = 'factory/656-docker-sandbox-log';
     const exec: ExecFn = vi.fn().mockRejectedValue(new Error('sbx create boom'));
     const sandbox: WorktreeSandbox = {
       runtime: 'docker-sandbox',
@@ -785,7 +792,7 @@ describe('setupWorktree / cleanupWorktree sandbox lifecycle', () => {
   it('cleanupWorktree with the same descriptor removes the VM and is idempotent on a second call', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 655);
-    const branch = 'ship-it/655-docker-sandbox-cleanup';
+    const branch = 'factory/655-docker-sandbox-cleanup';
     const exec: ExecFn = vi.fn().mockResolvedValue({ stdout: '', stderr: '' });
     const sandbox: WorktreeSandbox = {
       runtime: 'docker-sandbox',
@@ -819,7 +826,7 @@ describe('reapLaneWorktree', () => {
   it('removes a clean worktree whose branch is on the remote and deletes the branch', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 301);
-    const branch = 'ship-it/301-pushed';
+    const branch = 'factory/301-pushed';
     await setupWorktree(repoRoot, branch, worktree);
     writeFileSync(join(worktree, 'WORK.txt'), 'done\n');
     await execFile('git', ['add', 'WORK.txt'], { cwd: worktree });
@@ -836,7 +843,7 @@ describe('reapLaneWorktree', () => {
   it('removes a clean worktree with a committed-but-unpushed change and keeps the branch', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 302);
-    const branch = 'ship-it/302-unpushed';
+    const branch = 'factory/302-unpushed';
     const log = vi.fn();
     await setupWorktree(repoRoot, branch, worktree);
     writeFileSync(join(worktree, 'WORK.txt'), 'only copy\n');
@@ -854,7 +861,7 @@ describe('reapLaneWorktree', () => {
   it('keeps a worktree with modified tracked files and logs a warn', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 303);
-    const branch = 'ship-it/303-dirty';
+    const branch = 'factory/303-dirty';
     const log = vi.fn();
     await setupWorktree(repoRoot, branch, worktree);
     writeFileSync(join(worktree, 'README.md'), 'live uncommitted work\n');
@@ -935,7 +942,6 @@ ESCALATE: which behavior should win?`;
 
 describe('legacy branch prefix literal', () => {
   const root = resolve(fileURLToPath(import.meta.url), '../../../../..');
-  const allowedFile = 'packages/core/src/utils/branch-slug.ts';
 
   function sourceFiles(dir: string): string[] {
     return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -947,9 +953,8 @@ describe('legacy branch prefix literal', () => {
     });
   }
 
-  it('appears in non-test source only in the LEGACY_BRANCH_PREFIX doc comment', () => {
+  it('does not appear in non-test source', () => {
     const offenders: string[] = [];
-    let allowed = 0;
     for (const pkg of readdirSync(join(root, 'packages'))) {
       const src = join(root, 'packages', pkg, 'src');
       if (!existsSync(src)) continue;
@@ -962,12 +967,10 @@ describe('legacy branch prefix literal', () => {
           .split('\n')
           .forEach((line, i) => {
             if (!line.includes('ship-it/')) return;
-            if (rel === allowedFile && /^(\/\*\*|\*|\/\/)/.test(line.trim())) allowed++;
-            else offenders.push(`${rel}:${i + 1}`);
+            offenders.push(`${rel}:${i + 1}`);
           });
       }
     }
     expect(offenders).toEqual([]);
-    expect(allowed).toBeGreaterThan(0);
   });
 });

@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Changed
+
+- Factory branch recognition no longer matches the legacy `ship-it/` prefix (`LEGACY_BRANCH_PREFIX` removed); `branchPrefixSlug()` and ingest now default to `factory`. The 11 stale remote `ship-it/*` branches are not deleted, and KPI history parsed from them is no longer counted (#3771).
+
 ## 0.9.23 - 2026-10-28
 
 `--base-branch` for ship/run-issue/run-brief, plus multi-file `run-brief` (#3764, #3762).
