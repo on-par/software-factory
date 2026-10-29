@@ -1,7 +1,8 @@
 # ADR-0005: Autonomous factory loops — auto-failover, self-healing, and discovery
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-20
+- Implemented in: `packages/core/src/phases/build.ts` (cross-harness build failover ladder on usage cap; breaker config in `packages/core/src/config/v2.ts`), `packages/core/src/failure/index.ts` (fingerprint and evidence, #372), `packages/core/src/filing/index.ts` (dedup and auto-file, #373), `packages/core/src/discovery/index.ts`, `author.ts` and `promote.ts` (discovery scan, draft Epic, validation and decompose)
 
 ## Context
 
@@ -160,6 +161,6 @@ flowchart TD
 - New failure mode to guard: the self-healing loop touches the tracker and the
   discovery loop touches the backlog, so both need caps and dedup, and any
   fix that modifies factory core, the merge path, or security is human-gated
-  (see #374). This ADR is Proposed until #366/#370/#371 land.
+  (see #374). Accepted: #366/#370/#371 landed.
 - Self-healing depends on #368/#272 for clean signals, so it sequences after the
   failover classification work. Discovery is independent.

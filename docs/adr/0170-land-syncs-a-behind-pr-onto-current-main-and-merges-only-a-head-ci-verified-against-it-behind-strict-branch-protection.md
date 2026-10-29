@@ -1,7 +1,8 @@
 # ADR-0170: Land syncs a behind PR onto current main and merges only a head CI-verified against it, behind strict branch protection
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-10-23
+- Implemented in: `packages/cli/src/cli/land-behind.ts` (`probeHeadBehindBase`, `MAX_LAND_SYNC_ROUNDS = 3`), `packages/cli/src/cli/land-pr.ts` (`landOpenPullRequest`: behind or BEHIND sync, bounded rounds, "base kept moving" refusal), `packages/cli/src/cli/base-hold.ts` (`evaluateBaseHold`: a moved SHA clears only on a green strict verdict)
 - Issue: #3619
 
 ## Context
@@ -87,8 +88,7 @@ subject to the green check.
   the race reopens.
 - Repos that do not enable strict protection still get the factory-side guarantee, but not for human
   merges.
-- This ADR changes no code. Two follow-up slices, each needing colocated tests: (a) land
-  behind-sync plus bounded rounds in `land-pr.ts`; (b) base-hold green-on-new-SHA in `base-hold.ts`.
+- Implemented by slice (a) in `land-behind.ts` / `land-pr.ts` (#3654) and slice (b) in `base-hold.ts`.
 
 ## References
 

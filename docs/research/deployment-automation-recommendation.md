@@ -319,7 +319,7 @@ implementation commits to a mechanism.
   document restates as requirements; `terraform plan -out` as a named
   cross-provider plan surface at cloud-provisioning-guardrails.md:47-51).
 - ADR-0025 / ADR-0026 (`docs/adr/0025-autonomous-cloud-provisioning-requires-a-human-approved-plan.md`,
-  `docs/adr/0026-autonomous-cloud-provisioning-requires-a-human-approved-plan-gate.md`)
+  `docs/adr/0025-autonomous-cloud-provisioning-requires-a-human-approved-plan.md`)
   — the binding gate + blast-radius classification; tool pick deliberately left
   open (ADR-0025:61-62, ADR-0026:52-53).
 - ADR-0020 (`docs/adr/0020-cost-kpis-are-scored-on-cost-bearing-cohorts-and-absent-cost-data-is-unknown-never-zero.md`)
@@ -329,7 +329,7 @@ implementation commits to a mechanism.
 - ADR-0009 (`docs/adr/0009-fenced-steal-of-stale-file-locks.md`) — locking
   philosophy referenced for Terraform state backends.
 - ADR-0023 / ADR-0024 (`docs/adr/0023-hosted-execution-on-vps-docker-with-stock-docker-sandboxing-and-github-app-installation-tokens.md`,
-  `docs/adr/0024-hosted-execution-runs-on-a-vps-docker-host-with-stock-docker-sandboxing-and-per-run-github-app-installation-tokens.md`)
+  `docs/adr/0023-hosted-execution-on-vps-docker-with-stock-docker-sandboxing-and-github-app-installation-tokens.md`)
   — hosted execution on Docker (the container build artifact), per-run scoped
   short-lived credentials, env-only injection.
 - Repo grounding — `packages/core/src/approvals/index.ts` (`ApprovalRequest`

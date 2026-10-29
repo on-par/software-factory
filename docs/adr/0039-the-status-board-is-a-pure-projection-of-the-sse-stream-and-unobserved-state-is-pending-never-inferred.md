@@ -58,4 +58,4 @@ connection surfaces only as the disconnected chip.
 
 - [Issue](https://github.com/on-par/software-factory/issues/593)
 - [ADR-0029 — Lane lifecycle events are an in-process fan-out, never a second source of truth](https://github.com/on-par/software-factory/blob/main/docs/adr/0029-lane-lifecycle-events-are-an-in-process-fan-out-never-a-second-source-of-truth.md)
-- [ADR-0031 — SSE resume is a bounded in-process replay ring, not durable event history](https://github.com/on-par/software-factory/blob/main/docs/adr/0031-sse-resume-is-a-bounded-in-process-replay-ring-not-durable-event-history.md)
+- [ADR-0046 — SSE resume ids are monotonic per attached repository](https://github.com/on-par/software-factory/blob/main/docs/adr/0046-sse-resume-ids-are-monotonic-per-attached-repository.md)
