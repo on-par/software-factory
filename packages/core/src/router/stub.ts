@@ -1,6 +1,6 @@
 import type { TaskType } from '../types/index.js';
 import type { FailoverReason, ModelExecutor, ModelExecutorContext } from './index.js';
-import { SimModelExecutor, type SimModelStep } from '../sim/index.js';
+import { SimModelExecutor, type SimModelStep } from '../fakes/model.js';
 
 type StubStep =
   | { output: string; effect?: (ctx: ModelExecutorContext) => Promise<void> | void }

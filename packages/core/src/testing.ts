@@ -9,78 +9,20 @@ export type { InjectionFixture, InjectionSurface } from './harness/injection-fix
 export { loadInjectionFixtures } from './harness/injection-fixtures.js';
 export type { StubCodingHarnessOptions, StubHarnessStep } from './harness/stub.js';
 export { StubCodingHarness } from './harness/stub.js';
+export type { SimClock, SimLatency } from './fakes/latency.js';
+export { applyLatency, realSimClock, resolveLatencyMs } from './fakes/latency.js';
+export type { SimModelCall, SimModelExecutorOptions, SimModelStep } from './fakes/model.js';
+export { failOnCall, SimModelExecutor } from './fakes/model.js';
 export type {
-  MonteCarloBreach,
-  MonteCarloCliArgs,
-  MonteCarloCliDeps,
-  MonteCarloFormat,
-  MonteCarloOptions,
-  MonteCarloRates,
-  MonteCarloReport,
-  MonteCarloRunSummary,
-  MonteCarloThresholds,
-  ShipPhaseBreakdownCliDeps,
-  SimClock,
-  SimFailureMode,
-  SimIssueOutcome,
-  SimIssueSpec,
-  SimJitterConfig,
-  SimJitterDraw,
-  SimJitterSeam,
-  SimLatency,
-  SimModelCall,
-  SimModelExecutorOptions,
-  SimModelStep,
   SimOctokit,
   SimOctokitEndpoint,
   SimOctokitOptions,
   SimOctokitStep,
-  SimPhaseJitter,
-  SimPhaseName,
-  SimPipelineEvent,
   SimRecordedCall,
-  SimRegressionFixture,
-  SimTerminalState,
-  SimulationOptions,
-  SimulationReport,
-  SimWorkspace,
-} from './sim/index.js';
-export {
-  aggregateMonteCarlo,
-  applyLatency,
-  createSeededRandom,
-  createSimOctokit,
-  createSimWorkspace,
-  deriveSimSeed,
-  failOnCall,
-  MONTE_CARLO_CLI_USAGE,
-  monteCarloExitCode,
-  parseMonteCarloArgs,
-  realSimClock,
-  renderMonteCarloTable,
-  resolveLatencyMs,
-  runMonteCarlo,
-  runMonteCarloCli,
-  runShipPhaseBreakdownReportCli,
-  runSimulation,
-  SIM_FAILURE_MODES,
-  SIM_FENCED_ENRICHMENT_OUTPUT,
-  SIM_MALFORMED_OUTPUT,
-  SIM_REGRESSION_FIXTURES,
-  simCommitAll,
-  simDefaultScripts,
-  SimJitter,
-  SimJitterExecutor,
-  SimModelExecutor,
-  simModelsConfig,
-  simMonteCarloIssues,
-  simRegressionFixture,
-  simRoutesConfig,
-  simSpecContent,
-  simSpecWithObjectInterface,
-  summarizeSimulationRun,
-  withSimJitter,
-} from './sim/index.js';
+} from './fakes/octokit.js';
+export { createSimOctokit } from './fakes/octokit.js';
+export type { SimWorkspace } from './fakes/workspace.js';
+export { createSimWorkspace, simCommitAll } from './fakes/workspace.js';
 export type { StubModelExecutorOptions } from './router/stub.js';
 export { StubModelExecutor } from './router/stub.js';
 export { simWorkspace } from './run/ports.js';

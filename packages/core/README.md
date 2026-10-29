@@ -6,12 +6,12 @@ Part of [Software Factory](https://github.com/on-par/software-factory), a multi-
 
 ## Entry points
 
-| Import                          | Stability                                                                                                                                  |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `@on-par/factory-core`          | Stable public API ([ADR-0004](https://github.com/on-par/software-factory/blob/main/docs/adr/0004-narrow-public-core-api.md))               |
-| `@on-par/factory-core/kpis`     | Browser-safe KPI helpers                                                                                                                   |
-| `@on-par/factory-core/internal` | Implementation detail for the factory's own packages; may change in any release                                                            |
-| `@on-par/factory-core/testing`  | Test doubles and contract kits (stub harnesses, simulators) for exercising the factory without real model CLIs; not part of the stable API |
+| Import                          | Stability                                                                                                                                      |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@on-par/factory-core`          | Stable public API ([ADR-0004](https://github.com/on-par/software-factory/blob/main/docs/adr/0004-narrow-public-core-api.md))                   |
+| `@on-par/factory-core/kpis`     | Browser-safe KPI helpers                                                                                                                       |
+| `@on-par/factory-core/internal` | Implementation detail for the factory's own packages; may change in any release                                                                |
+| `@on-par/factory-core/testing`  | Test doubles and contract kits (stub harnesses, fake executors) for exercising the factory without real model CLIs; not part of the stable API |
 
 The repo's own test fixtures (`src/test-support/`) are never published.
 

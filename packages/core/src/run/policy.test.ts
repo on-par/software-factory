@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { simModelsConfig, simRoutesConfig } from '../sim/pipeline.js';
+import { makeStubModelsConfig, makeStubRoutesConfig } from '../test-support/index.js';
 import type { RunPolicy } from './policy.js';
 
 describe('RunPolicy', () => {
   it('is a plain resolved value assembled from resolved config parts', () => {
     const policy: RunPolicy = {
-      models: simModelsConfig(),
-      routes: simRoutesConfig(),
+      models: makeStubModelsConfig(),
+      routes: makeStubRoutesConfig(),
       sandbox: {
         enabled: false,
         runtime: 'auto',

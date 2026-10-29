@@ -1,4 +1,4 @@
-// packages/core/src/sim/octokit.ts — reusable fake octokit covering the REST/graphql
+// packages/core/src/fakes/octokit.ts — reusable fake octokit covering the REST/graphql
 // surface core calls, with per-endpoint scripted response/latency/failure.
 
 import type { Octokit } from '@octokit/rest';

@@ -1,4 +1,4 @@
-// packages/core/src/sim/workspace.ts — throwaway local git workspace for simulated runs:
+// packages/core/src/fakes/workspace.ts — throwaway local git workspace for simulated runs:
 // a bare "origin" plus a clone, both under the OS temp dir, so pushes never leave the machine.
 
 import { realpathSync, rmSync } from 'node:fs';

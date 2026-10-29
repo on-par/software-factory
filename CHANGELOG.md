@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Removed
+
+- The headless simulator (packages/core/src/sim/) and the `sim-monte-carlo` and `ship-phase-breakdown-report` npm scripts are gone, and `@on-par/factory-core/testing` no longer exports the simulator, Monte Carlo, jitter, regression-fixture or ship-phase-breakdown-report CLI symbols (`runSimulation`, `runMonteCarlo*`, `SimJitter*`, `SIM_*`, ...). `SimModelExecutor`, `createSimOctokit`, `createSimWorkspace`, `simCommitAll` and `simWorkspace` remain (#3770).
+
 ## 0.9.23 - 2026-10-28
 
 `--base-branch` for ship/run-issue/run-brief, plus multi-file `run-brief` (#3764, #3762).
