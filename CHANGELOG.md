@@ -11,6 +11,10 @@ section to `## X.Y.Z - date`. See
 
 - core: trim unused `@on-par/factory-core/internal` re-exports for utils, worktree, config, models and router (#3784)
 
+### Removed
+
+- `@on-par/factory-core/internal` no longer re-exports 113 unused run, environment, admission, types, metrics, design, failure, hosted, eval, sandbox, kpis, events, blockers and CI names, and the unused token-coverage module is deleted (#3786).
+
 ## 0.9.24 - 2026-10-29
 
 PR text without changed files or brief ids, stacked `run-brief`, and the `ship-it/` prefix and simulator removed (#3792, #3763, #3771, #3770).

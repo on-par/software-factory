@@ -321,12 +321,12 @@ const PUBLIC_API_KEYS = [
 ];
 const JOB_KEYS = 'resolveHostMaxAgentJobs hostAgentJobsDir withHostAgentJobLease'.split(' ');
 const TAIL =
-  'InvalidEventCursorError eventSegmentFileName eventSegmentsDir readEventsTail readEventsSince rotateEventLog listEventSegmentPaths findEventSegmentByIno'.split(
+  'InvalidEventCursorError eventSegmentFileName eventSegmentsDir readEventsTail readEventsSince listEventSegmentPaths'.split(
     ' ',
   );
-const STEER = 'STEER_SOURCES STEER_PHASES SteerEventError parseSteerEvent appendSteerEvent listSteerEvents'.split(' '); // #3400
-const STEERED = 'collectMergedPrSteers isoWeekKey summarizeSteerability formatSteerabilityReport fileBug'.split(' '); // #3403
-const MORE = ['agentInvocationsFromEvents', 'computeTokenCoverage', 'readStackSliceGate']; // #3126, #3366
+const STEER = 'STEER_SOURCES STEER_PHASES SteerEventError appendSteerEvent'.split(' '); // #3400
+const STEERED = 'collectMergedPrSteers summarizeSteerability formatSteerabilityReport fileBug'.split(' '); // #3403
+const MORE = ['readStackSliceGate']; // #3366
 const STACK = 'nextStackSlice restackAfterSquashMerge listStatelessLaneIssues'.split(' ');
 const POLICY = 'isEgressEnforced describeDraftPrPolicy resolveDraftPrPolicy resolveConfiguredWritablePaths'.split(' '); // #2215, #3449, #3454
 const PO2 = 'OPENCODE_GO_DEFAULT_MODEL filterRefusedProviders sweepOrphanDrafts'.split(' '); // #3335, #1623
@@ -345,17 +345,14 @@ const EXTRA_INTERNAL_KEYS = [
 ];
 const INTERNAL_API_KEYS = [
   ...'AGENT_MEMORY_DIR AGENT_MEMORY_MAX_BYTES agentMemoryPath readAgentMemory'.split(' '), // #3624
-  ...'renderAgentMemory scanAgentMemory loadAgentMemoryCtx checkerParentEnv'.split(' '),
-  ...'resolveCompileCommand resolveLintCommands resolveTestsCommand CHECKER_ENV_ALLOWLIST'.split(' '), // #3473, #1590
-  ...'describeChecksProbe holdRunConfigSnapshot CHECKER_ENV_ALLOW_VAR'.split(' '), // #3600
+  ...'renderAgentMemory scanAgentMemory loadAgentMemoryCtx'.split(' '),
+  ...'resolveCompileCommand resolveLintCommands resolveTestsCommand'.split(' '), // #3473, #1590
+  ...'describeChecksProbe holdRunConfigSnapshot'.split(' '), // #3600
   // `factory init --detect-checks`: heuristics, agent prompt and reply, shell-free tokenizer
   ...'CHECK_KINDS buildDetectChecksPrompt detectCheckHeuristics heuristicProposal parseDetectedChecks'.split(' '),
   'tokenizeEvidenceCommand',
   ...'BaselineCache resolveBaselineCacheTtlHours'.split(' '), // #3540
-  ...'openCodeVersion DEFAULT_CI_DEADLINE_MS allProvidersDownReleasePayload'.split(' '), // #3340
-  'DEFAULT_CI_NO_CHECKS_GRACE_MS',
-  'noChecksVerdictMs',
-  'resolveCiNoChecksGraceMs',
+  ...'openCodeVersion allProvidersDownReleasePayload'.split(' '), // #3340
   'fetchRequiredChecksVerdict', // #3186 CI lookup for a timed-out compile; base health (#2339) follows
   'BASE_HEALTH_CHECKERS',
   'checkBaseHealth',
@@ -377,18 +374,10 @@ const INTERNAL_API_KEYS = [
   'readOpenFactoryDrafts',
   'formatOpenFactoryDraftsLine',
   'runStateFile',
-  'runStatusForPhase',
-  'terminalRunStatus',
   'writeIssueRunState',
   'createPlanReuseStore',
-  'issueBodyHash',
-  'planReusePath',
   // Check-resume record (#2564)
-  'checkResumePath',
   'createCheckResumeStore',
-  'formatPreservedBuildMessage',
-  'preservedFixTarget',
-  'configParkMessage',
   // Garden harvest (#2083)
   'DEFAULT_GARDEN_MAX_CLUSTERS',
   'DEFAULT_GARDEN_SINCE',
@@ -410,8 +399,9 @@ const INTERNAL_API_KEYS = [
   // Command-run summary (#3328)
   'summarizeCommandRun',
   'parseCommandCounts',
-  ...Object.keys(await import('./run/pr-lookup.js')), // open-PR lookup (#3439)
-  ...(await Promise.all([import('./blockers/index.js'), import('./queue/unpark.js')])).flatMap(Object.keys), // blockers (#2316), unpark (#2318)
+  ...'lookupOpenPrByIssue lookupOpenPrByBranch'.split(' '), // open-PR lookup (#3439)
+  ...'findDeclaredPrerequisites createOctokitBlockedParkStore pollBlockedParks'.split(' '), // blockers (#2316)
+  ...Object.keys(await import('./queue/unpark.js')), // unpark (#2318)
   'judgeReadiness',
   // Slice plan model (ADR-0147)
   'STATE_ROOT_ENV',
@@ -464,9 +454,6 @@ const INTERNAL_API_KEYS = [
   'REVIEW_ACCESS_ERROR_EXIT_CODE',
   // Local queue reprioritization audit records (#869)
   // Failure fingerprint & evidence
-  'captureFailure',
-  'fingerprintFailure',
-  'normalizeFailureMessage',
   // Auto-file a fingerprinted bug (#373)
   'createOctokitFilingClient',
   'DEFAULT_BUG_LABELS',
@@ -513,19 +500,15 @@ const INTERNAL_API_KEYS = [
   ...'RISK_RECEIPT_END RISK_RECEIPT_START listPrChangedFiles publishRiskReceipt renderRiskReceipt'.split(' '), // #3386
   ...'upsertRiskReceipt riskPolicyConfigFile loadRiskPolicy formatRiskPolicy'.split(' '), // #3387
   ...'resolveHostLoadGuard evaluateLoadGuard formatLoadHold readHostLoad resolveBaseHealthChecks'.split(' '), // #3048, #3290
-  ...'hostBuildSlotsDir listHostSlots syncLandBranch isValidIssueRunState listIssueRuns'.split(' '), // syncLandBranch: #1886; run readers: #3448
-  ...'withHostBuildSlot createRunSlotGate withRunAndHostBuildSlot readDiskFree formatDiskHold'.split(' '), // #3049, #2284
-  ...'BYTES_PER_GB DISK_ALERT_INTERVAL_MS claimDiskAlert createDiskGuard evaluateDiskGuard'.split(' '), // #2284
+  ...'hostBuildSlotsDir listHostSlots syncLandBranch listIssueRuns'.split(' '), // syncLandBranch: #1886; run readers: #3448
+  ...'createRunSlotGate withRunAndHostBuildSlot formatDiskHold'.split(' '), // #3049, #2284
+  ...'claimDiskAlert createDiskGuard'.split(' '), // #2284
   ...'FACTORY_RUNTIME_CONFIG_KEYS hostDiskAlertFile'.split(' '),
   'createOctokitCollaboratorPermissionClient',
   ...'renderConfigExample resolveT1SampleRate'.split(' '),
   'resolveEvidenceAllowlist',
   'runEvidencePlan',
   // Design artifact (#422)
-  'DesignArtifactSchema',
-  'parseDesignArtifact',
-  'readDesignArtifact',
-  'renderDesignArtifact',
   // Concrete coding harnesses
   'classifyFailure',
   'runHarnessCheck',
@@ -555,10 +538,7 @@ const INTERNAL_API_KEYS = [
   'readRepoConfigFile',
   'resolveRepoConfigPath',
   // Eval internals
-  'judgeSpec',
   'median',
-  'runJudgeSamples',
-  'scoreSpec',
   // Usage internals
   'TRAILING_WINDOW_MS',
   'resolveRunUsageHarness',
@@ -574,7 +554,6 @@ const INTERNAL_API_KEYS = [
   'parkPayload',
   'parkUnblockHint',
   'createShipExecutor',
-  'createStackSliceBranch',
   'DEFAULT_FACTORYD_PORT',
   // Durable explicit daemon runs (#1393)
   'daemonRunFile',
@@ -618,15 +597,10 @@ const INTERNAL_API_KEYS = [
   'startEgressProxy',
   'egressSummaryMessage',
   'egressHostMessage',
-  'isTelemetryHost',
-  'TELEMETRY_HOST_PATTERNS',
   'shouldProxyEgress',
   'claimReviewRework',
-  'classifyCiFailure',
-  'collectCiFailureEvidence',
   'watchChecks',
   'watchChecksWithInfraRerun',
-  'isPassingConclusion',
   'runCommand',
   ...'withFileLock withGitLock formatStopMarker readStopMarker'.split(' '),
   ...'RunLockHeldError withScopedRunLock runLockDirFor listLiveRunLocks'.split(' '),
@@ -667,13 +641,10 @@ const INTERNAL_API_KEYS = [
   'readGithubQueueSnapshot',
   'formatQueueOrderConflict',
   // Factory App admission-state compatibility (#1497)
-  'ADMISSION_SNAPSHOT_VERSION',
-  'ADMISSION_STATE_FILENAME',
   'classifyQueueCompatibility',
   'createFileAdmissionStateReader',
   'createGithubLaneClaimStalenessProbe',
   'releaseLaneClaim',
-  'FACTORY_APP_REPAIR_HINT',
   'formatAdmissionConflict',
   'formatBreakerRemaining',
   'withAdmissionGuard',
