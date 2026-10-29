@@ -86,17 +86,8 @@ export { runEvidencePlan, type EvidencePlanResult, type EvidenceRunnerContext } 
 export { DesignArtifactSchema, parseDesignArtifact, readDesignArtifact, renderDesignArtifact } from './design/index.js';
 // Concrete coding harnesses
 export { classifyFailure } from './harness/classify.js';
-export { type ClaudeExecFn, ClaudeCliHarness } from './harness/claude-cli.js';
-export { type CodexExecFn, CodexCliHarness } from './harness/codex-cli.js';
-export { type HarnessCheckOptions, type HarnessCheckResult, runHarnessCheck } from './harness/check.js';
-export { buildHarnessCommand, CommandHarness } from './harness/command.js';
-export { isAgenticHarness, isRetryableFailure, NON_RETRYABLE_FAILURE_REASONS } from './harness/index.js';
-export type { OllamaAgenticChange, OllamaAgenticExecFn, OllamaAgenticProposal } from './harness/ollama-agentic.js';
-export { OllamaAgenticHarness, PATCH_PROPOSAL_SCHEMA } from './harness/ollama-agentic.js';
-export { OllamaHttpHarness, type OllamaFetchFn } from './harness/ollama-http.js';
+export { type HarnessCheckResult, runHarnessCheck } from './harness/check.js';
 export { classifyOpenCodeErrorType, parseOpenCodeJson } from './harness/opencode.js';
-export { type OpenCodeExecFn, OpenCodeHarness } from './harness/opencode.js';
-export { parsePiJson, type PiExecFn, PiHarness } from './harness/pi.js';
 export * as openCodeVersion from './harness/opencode-version.js';
 export { type DockerEngineOptions, createDockerEngine } from './hosted/docker.js';
 export type { OrphanContainer, ReapedContainer } from './hosted/orphans.js';
@@ -107,26 +98,12 @@ export { isHarnessCliPresent } from './models/index.js';
 export { formatBreakerRemaining } from './router/index.js';
 
 // Phase helpers
-export { buildPlanPrompt, type PlanPromptOpts } from './phases/plan.js';
 export { buildTriagePrompt, normalizeTriageQueue, parseTriageCandidates } from './triage/index.js';
 export { dropQueuedIssues, parseOpenPrIssues } from './triage/index.js';
 
 // Board-constrained local lane dispatch (#848)
-export type {
-  BoardQueueDispatcher,
-  BoardQueueOrdering,
-  LocalLaneCandidate,
-  QueueIntentReader,
-} from './phases/board-queue-dispatch.js';
-export { createBoardQueueDispatcher } from './phases/board-queue-dispatch.js';
 
 // ProjectV2 queue-intent scheduler (#867)
-export type {
-  BoardQueueScheduler,
-  BoardQueueSchedulerOptions,
-  ProjectQueueProjectionReader,
-} from './phases/board-queue-scheduler.js';
-export { createBoardQueueScheduler } from './phases/board-queue-scheduler.js';
 
 // Local-small harness
 export type {
@@ -304,22 +281,11 @@ export {
   type EgressProxy,
 } from './sandbox/egress-proxy.js';
 export { createRunRuntime, type RunRuntime } from './daemon/run-runtime.js';
-export { findOpenPR, type PrLookup } from './phases/ship.js';
+export { findOpenPR } from './phases/ship.js';
 export { settleParkedPullRequest, type ParkedPrDisposition } from './run/park-pr.js';
 export * from './run/adopt-pr.js'; // findAdoptablePr + the shared open-PR lookup (#3439)
-export { detectLowerSliceChange, parkOnLowerSliceChange } from './phases/stack-review-change.js';
-export type {
-  LowerSliceChange,
-  LowerSliceChangeDetection,
-  ReviewChangeParkResult,
-} from './phases/stack-review-change.js';
-export { readReviewApproval, readStackSliceGate } from './phases/stack-approval.js';
-export type {
-  StackPullReviews,
-  StackSliceGate,
-  StackSliceGateReader,
-  StackSliceReview,
-} from './phases/stack-approval.js';
+export { readStackSliceGate } from './phases/stack-approval.js';
+export type { StackPullReviews } from './phases/stack-approval.js';
 export { createShipExecutor } from './daemon/ship-executor.js';
 
 // Review verdict (#1679)
@@ -424,40 +390,24 @@ export type { ConfigLintInput } from './config/config-lint.js';
 export { findUnknownConstitutionCheckers, formatUnknownCheckerMessage } from './checkers/constitution-preflight.js';
 export type { UnknownConstitutionChecker } from './checkers/constitution-preflight.js';
 // Readiness deep check (#1732)
-export type { DecompositionOutput } from './readiness/decompose.js';
-export * from './readiness/parent-coverage.js';
-export { buildDecompositionPrompt, parseDecompositionOutput, publishDecomposition } from './readiness/decompose.js';
 export {
-  type Slice,
+  type ParentCoverage,
+  computeParentCoverage,
+  formatParentCoverageLine,
+  listDecomposedParentCoverage,
+  refreshParentCoverageAfterMerge,
+  renderParentCoverageComment,
+} from './readiness/parent-coverage.js';
+export { buildDecompositionPrompt, parseDecompositionOutput } from './readiness/decompose.js';
+export {
   type SlicePlan,
-  type SlicePlanBuildResult,
-  type SlicePlanParseResult,
-  type SliceState,
-  DEFAULT_MAX_SLICES,
-  SLICE_CAP_CEILING,
-  overCapReason,
-  sliceCapExceeded,
-  SLICE_PLAN_MARKER,
   currentSlice,
-  markSliceMerged,
   nextStackSlice,
-  parentRefForSlice,
-  parseSlicePlanComment,
   renderSlicePlanComment,
-  slicePlanFromDecomposition,
-  stackSliceBranch,
-  withSliceBranchCreated,
   withSliceState,
-  withSlicesAffected,
-  withSlicesNotBuilt,
 } from './readiness/slice-plan.js';
-export type {
-  SliceMergeRecordResult,
-  SlicePlanCommentLookup,
-  SlicePlanUpsertResult,
-} from './readiness/slice-plan-github.js';
+export type { SlicePlanCommentLookup } from './readiness/slice-plan-github.js';
 export { findSlicePlanComment, recordSliceMerged, upsertSlicePlanComment } from './readiness/slice-plan-github.js';
-export { resolveSliceGate, type SliceGateOutcome } from './readiness/slice-gate.js';
 export * from './blockers/index.js';
 export * from './events/tail.js';
 export * from './readiness/internal-exports.js';

@@ -50,7 +50,7 @@ export const KPIS_API_KEYS = [
 
 /** ./internal names added by the decomposed-parent criteria coverage (#3108). */
 const PARENT_COVERAGE_INTERNAL_KEYS =
-  'PARENT_COVERAGE_MARKER computeParentCoverage formatParentCoverageLine listDecomposedParentCoverage parseCoveredParentIds parseDecomposedFromParent readParentCoverage refreshParentCoverageAfterMerge renderParentCoverageComment upsertParentCoverageComment'.split(
+  'computeParentCoverage formatParentCoverageLine listDecomposedParentCoverage refreshParentCoverageAfterMerge renderParentCoverageComment'.split(
     ' ',
   );
 
