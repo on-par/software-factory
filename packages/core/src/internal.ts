@@ -227,9 +227,7 @@ export { applyLocalSmallPatchStep, createLocalSmallDryRun } from './local-small/
 export { judgeSpec, median, runJudgeSamples, scoreSpec } from './eval/index.js';
 
 // Usage internals
-export { defaultTranscriptRoots, priceFor, TRAILING_WINDOW_MS, type RunUsageHarnessInput } from './usage/index.js';
-export { harnessHasUsageSignal, resolveRunUsageHarness, USAGE_NOT_AVAILABLE_FOR_AGENT } from './usage/index.js';
-export { readClaudeAccessToken } from './usage/subscription.js';
+export { resolveRunUsageHarness, TRAILING_WINDOW_MS } from './usage/index.js';
 
 // Utils
 export * from './internal-ci.js';
@@ -317,64 +315,17 @@ export {
 } from './worktree/worktree-gc.js';
 export { findWorktreeKeep, removeWorktreeKeep, upsertWorktreeKeep } from './worktree/worktree-keeps.js';
 // Daemon repo registry (~/.factory/registry.json) (#781)
-export {
-  type RepoRegistry,
-  type RepoRegistryEntry,
-  type RepoRegistryListing,
-  type RepoState,
-  type WriteRegistryOptions,
-  defaultRegistryPath,
-  dispatchableRepos,
-  emptyRegistry,
-  getRepo,
-  listRepos,
-  loadRegistry,
-  upsertRepo,
-  writeRegistry,
-} from './daemon/registry.js';
+export { defaultRegistryPath, listRepos, loadRegistry } from './daemon/registry.js';
 export { createGithubLaneClaimStalenessProbe, releaseLaneClaim } from './run/lane-file-guard.js';
 export type { LaneClaimStalenessProbe, LaneFileHold } from './run/lane-file-guard.js';
-// Daemon lane state resolution (#843)
-export { type DaemonLaneContext, createDaemonLaneContext } from './daemon/lane-context.js';
-export { type DaemonOrchestrator, runDaemonRepo } from './daemon/run-repo.js';
-export type {
-  EngineHandle,
-  EngineRunner,
-  EngineSupervisor,
-  EngineSupervisorOptions,
-} from './daemon/engine-supervisor.js';
-export {
-  DEFAULT_STALE_THRESHOLD_MS,
-  DEFAULT_SUPERVISOR_POLL_MS,
-  superviseActiveRepos,
-  superviseEngine,
-} from './daemon/engine-supervisor.js';
 
 // Daemon control-plane HTTP server (#777)
-export type { FactorydOptions, FactorydServer } from './daemon/factoryd-http.js';
 export { createFactorydServer, DEFAULT_FACTORYD_PORT } from './daemon/factoryd-http.js';
 
 // Durable explicit daemon runs (#1393)
-export type { DaemonRunRecord, DaemonRunStatus } from './daemon/run-store.js';
-export {
-  createDaemonRunExclusive,
-  daemonRunFile,
-  isValidRunId,
-  MAX_DETAIL_CHARS,
-  readDaemonRun,
-  writeDaemonRun,
-} from './daemon/run-store.js';
-export type {
-  DaemonRunDeps,
-  DaemonRunExecutor,
-  SubmitDaemonRunResult,
-  SubmitRunFailureReason,
-  SubmitRunRequest,
-} from './daemon/runs-submit.js';
-export { executeDaemonRun, submitDaemonRun } from './daemon/runs-submit.js';
+export { daemonRunFile, isValidRunId, readDaemonRun } from './daemon/run-store.js';
 
 // Daemon runtime state: pid/port/log files under ~/.factory (#1177)
-export type { AcquirePidFileOptions, AcquirePidFileResult, DaemonRuntimePaths } from './daemon/runtime-state.js';
 export {
   acquirePidFile,
   createDaemonLogSink,
@@ -384,21 +335,7 @@ export {
 } from './daemon/runtime-state.js';
 
 // Daemon attach gate (#778)
-export type { AttachFailureReason, AttachRepoDeps, AttachRepoResult } from './daemon/repos-attach.js';
-export { attachRepo, parseRemoteSlug, readOriginUrl } from './daemon/repos-attach.js';
-
-// Daemon checkout validation gate (#1398)
-export type {
-  CheckoutValidationDeps,
-  CheckoutValidationFailureReason,
-  CheckoutValidationResult,
-  ValidatedCheckout,
-} from './daemon/checkout-validation.js';
-export { parseCheckoutRequest, validateCheckout } from './daemon/checkout-validation.js';
-
-// Daemon pause/resume gate (#779)
-export type { SetRepoStateFailureReason, SetRepoStateResult, SettableRepoState } from './daemon/repos-pause-resume.js';
-export { setRepoState } from './daemon/repos-pause-resume.js';
+export { parseRemoteSlug } from './daemon/repos-attach.js';
 
 // GitHub-label-backed work queue (#824)
 export type {
@@ -514,42 +451,6 @@ export type { ProjectQueueStatus } from './projects/project-queue-reader.js';
 export type { GithubProjectQueuePollerOptions, ProjectGraphqlClient } from './projects/github-project-graphql.js';
 export { createGithubProjectQueuePoller, createOctokitGraphqlClient } from './projects/github-project-graphql.js';
 
-// Single-poller cached subscription-usage snapshot (#1029)
-export type {
-  UsageCoordinator,
-  UsageCoordinatorOptions,
-  UsageCoordinatorState,
-  WriteUsageStateOptions,
-} from './usage/coordinator.js';
-export {
-  createUsageCoordinator,
-  DEFAULT_USAGE_POLL_MS,
-  defaultUsageStatePath,
-  loadUsageState,
-  writeUsageState,
-} from './usage/coordinator.js';
-
-// UsageCoordinator admission-control acquire() API and grant ledger (#1030)
-export type { AcquireResult, GrantLedger, GrantLedgerEntry, GrantRequest } from './usage/grant-ledger.js';
-export {
-  defaultGrantLedgerPath,
-  DEFAULT_GRANT_TTL_MS,
-  isCappedModel,
-  loadGrantLedger,
-  pruneGrants,
-  USAGE_ADMISSION_CEILING_PCT,
-  USAGE_GRANT_RESERVATION_PCT,
-  writeGrantLedger,
-} from './usage/grant-ledger.js';
-
-// Engine lane parks and resumes on acquire denial (#1032)
-export type { LaneAcquire, LaneAdmission, LaneScheduler, LaneSchedulerOptions } from './usage/lane-scheduler.js';
-export { createLaneScheduler } from './usage/lane-scheduler.js';
-
-// Standalone local UsageCoordinator fallback (#1033)
-export { createLocalUsageCoordinator, type LocalUsageCoordinatorOptions } from './usage/local-coordinator.js';
-export { selectUsageCoordinator, type SelectUsageCoordinatorOptions } from './usage/select-coordinator.js';
-
 // Local queue reprioritization audit records (#869)
 export type { QueueReprioritizationRecord } from './types/index.js';
 export { createQueueRationaleAuditor, type QueueRationaleAuditor } from './queue/reprioritization-audit.js';
@@ -568,16 +469,6 @@ export type {
   ProjectBoardStatusWriterOptions,
 } from './queue/project-board-status-writer.js';
 export { createProjectBoardStatusWriter } from './queue/project-board-status-writer.js';
-// Daemon detach gate (#780)
-export type { BeginDetachResult, DetachRepoDeps, DrainOutcome } from './daemon/repos-detach.js';
-export {
-  beginDetach,
-  DEFAULT_DRAIN_POLL_INTERVAL_MS,
-  DEFAULT_DRAIN_TIMEOUT_MS,
-  DRAIN_BLOCKING_STATUSES,
-  drainAndDetach,
-  isDrainSafe,
-} from './daemon/repos-detach.js';
 // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
 export { wrapCommandInSandbox, shouldProxyEgress, isEgressEnforced } from './sandbox/index.js';
 export { resolveConfiguredWritablePaths } from './sandbox/writable-paths.js';

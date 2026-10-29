@@ -511,26 +511,6 @@ const INTERNAL_API_KEYS = [
   // gh-authenticated ProjectV2 queue GraphQL client + live poller (#1046)
   'createGithubProjectQueuePoller',
   'createOctokitGraphqlClient',
-  // Single-poller cached subscription-usage snapshot (#1029)
-  'createUsageCoordinator',
-  'DEFAULT_USAGE_POLL_MS',
-  'defaultUsageStatePath',
-  'loadUsageState',
-  'writeUsageState',
-  // UsageCoordinator admission-control acquire() API and grant ledger (#1030)
-  'defaultGrantLedgerPath',
-  'DEFAULT_GRANT_TTL_MS',
-  'isCappedModel',
-  'loadGrantLedger',
-  'pruneGrants',
-  'USAGE_ADMISSION_CEILING_PCT',
-  'USAGE_GRANT_RESERVATION_PCT',
-  'writeGrantLedger',
-  // Engine lane parks and resumes on acquire denial (#1032)
-  'createLaneScheduler',
-  // Standalone local UsageCoordinator fallback (#1033)
-  'createLocalUsageCoordinator',
-  'selectUsageCoordinator',
   // Coarse ProjectV2 status publishing (#868) and writing (#849)
   'createProjectStatusWriter',
   'createProjectBoardStatusWriter',
@@ -674,22 +654,12 @@ const INTERNAL_API_KEYS = [
   'runJudgeSamples',
   'scoreSpec',
   // Usage internals
-  'defaultTranscriptRoots',
-  'priceFor',
   'TRAILING_WINDOW_MS',
-  'harnessHasUsageSignal',
   'resolveRunUsageHarness',
-  'USAGE_NOT_AVAILABLE_FOR_AGENT',
-  'readClaudeAccessToken',
   // Daemon repo registry (#781)
   'defaultRegistryPath',
-  'dispatchableRepos',
-  'emptyRegistry',
-  'getRepo',
   'listRepos',
   'loadRegistry',
-  'upsertRepo',
-  'writeRegistry',
   // Daemon control-plane HTTP server (#777)
   'createFactorydServer',
   'createRunRuntime',
@@ -703,46 +673,18 @@ const INTERNAL_API_KEYS = [
   'createStackSliceBranch',
   'DEFAULT_FACTORYD_PORT',
   // Durable explicit daemon runs (#1393)
-  'createDaemonRunExclusive',
   'daemonRunFile',
-  'executeDaemonRun',
   'isValidRunId',
-  'MAX_DETAIL_CHARS',
   'readDaemonRun',
-  'submitDaemonRun',
-  'writeDaemonRun',
   // Daemon runtime state: pid/port/log files (#1177)
   'acquirePidFile',
   'createDaemonLogSink',
   'daemonRuntimePaths',
   'releaseRuntimeFiles',
   'writePortFile',
-  // Daemon lane state resolution (#843)
-  'createDaemonLaneContext',
-  // Daemon per-repo orchestration dispatch (#1041)
-  'runDaemonRepo',
-  // Daemon in-process engine supervisor (#1178)
-  'DEFAULT_STALE_THRESHOLD_MS',
-  'DEFAULT_SUPERVISOR_POLL_MS',
-  'superviseActiveRepos',
-  'superviseEngine',
   // Daemon attach gate (#778)
-  'attachRepo',
   'parseRemoteSlug',
-  'readOriginUrl',
   'readParkedOrder',
-  // Daemon checkout validation gate (#1398)
-  'parseCheckoutRequest',
-  'validateCheckout',
-  // Daemon pause/resume gate (#779)
-  'setRepoState',
-  // Daemon detach gate (#780)
-  'beginDetach',
-  'DEFAULT_DRAIN_POLL_INTERVAL_MS',
-  'DEFAULT_DRAIN_TIMEOUT_MS',
-  'DRAIN_BLOCKING_STATUSES',
-  'drainAndDetach',
-  'isDrainSafe',
   // Utils
   'branchFor',
   'branchPrefixSlug',
