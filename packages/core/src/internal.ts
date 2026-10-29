@@ -2,18 +2,11 @@
 // own packages (cli, tui, root scripts). No stability guarantee: these exports may
 // change or disappear without notice. See ADR-0004 for the public/internal split.
 // Garden harvest (#2083)
-export type {
-  GardenCluster,
-  GardenDimension,
-  GardenReportMeta,
-  GardenTracking,
-  HarvestedEvent,
-} from './garden/harvest.js';
+export type { GardenCluster } from './garden/harvest.js';
 export {
   DEFAULT_GARDEN_MAX_CLUSTERS,
   DEFAULT_GARDEN_SINCE,
   capGardenClusters,
-  clusterCheckFailures,
   clusterGarden,
   filterGardenWindow,
   parseGardenDuration,
@@ -22,14 +15,7 @@ export {
   renderGardenReport,
 } from './garden/harvest.js';
 // Garden dedup (#2102)
-export {
-  dedupGardenClusters,
-  filterGardenOnlyNew,
-  findGardenTrackingIssue,
-  gardenClusterFingerprint,
-  gardenKeyMarker,
-  markGardenTrackingUnknown,
-} from './garden/dedup.js';
+export { dedupGardenClusters, filterGardenOnlyNew, markGardenTrackingUnknown } from './garden/dedup.js';
 // Failure fingerprint & evidence
 export { captureFailure, fingerprintFailure, normalizeFailureMessage } from './failure/index.js';
 export type {
@@ -42,68 +28,15 @@ export type {
 } from './types/index.js';
 export * from './config/provider-order-exports.js';
 // Auto-file a fingerprinted bug (#373)
-export type {
-  CandidateIssue,
-  FileBugAction,
-  FileBugInput,
-  FileBugResult,
-  FilingGitHubClient,
-  OctokitFilingClientOptions,
-} from './filing/index.js';
-export {
-  createOctokitFilingClient,
-  DEFAULT_BUG_LABELS,
-  fileBug,
-  findIssueByMarker,
-  findMatchingIssue,
-  fingerprintMarker,
-  renderBugBody,
-  renderOccurrenceComment,
-  renderUpstreamOccurrenceComment,
-  resolveTargetRepo,
-} from './filing/index.js';
+export type { FileBugResult, FilingGitHubClient } from './filing/index.js';
+export { createOctokitFilingClient, DEFAULT_BUG_LABELS, fileBug } from './filing/index.js';
 
 // Evidence sanitizer for untrusted text (#1841, #1852)
 export { stripHiddenContent } from './filing/sanitize.js';
 
 // Redacted upstream factory report (#1858)
-export { REDACTION_PLACEHOLDERS, redactText, type RedactionClass, type RedactionContext } from './filing/redact.js';
-export type { UpstreamEnvironment, UpstreamReport, UpstreamReportInput } from './filing/upstream.js';
-
-// Send upstream reports with outbox fallback (#1860)
-export type {
-  PendingUpstreamReport,
-  UpstreamOutboxEntry,
-  UpstreamSendInput,
-  UpstreamSendOutcome,
-  UpstreamSendResult,
-} from './filing/upstream-send.js';
-export {
-  classifyUpstreamSendError,
-  defaultUpstreamLedgerPath,
-  defaultUpstreamOutboxDir,
-  sendUpstreamReports,
-  writeUpstreamOutbox,
-} from './filing/upstream-send.js';
-export {
-  buildUpstreamReport,
-  factoryStackFrames,
-  UPSTREAM_TITLE_PREFIX,
-  upstreamInputFromEvidence,
-  upstreamReportMarker,
-} from './filing/upstream.js';
-export type { FilingDecision, FilingLedger, FilingPolicy, FilingSkipReason } from './filing/policy.js';
-export {
-  DEFAULT_FILING_POLICY,
-  emptyLedger,
-  evaluateFilingPolicy,
-  isAutoMergeBlocked,
-  labelsFor,
-  recordFiled,
-  recordPark,
-  rollDay,
-  touchesSensitiveScope,
-} from './filing/policy.js';
+export { buildUpstreamReport, upstreamInputFromEvidence } from './filing/upstream.js';
+export { isAutoMergeBlocked } from './filing/policy.js';
 // Config
 export { resolveStateRoot, STATE_ROOT_ENV } from './config/state-root.js';
 export { resolveFilingPolicy, resolvePrClassifierPolicy, type EffectivePrClassifierPolicy } from './config/index.js';
@@ -389,25 +322,8 @@ export type {
 } from './utils/green-prs.js';
 export { createOctokitGreenPrClient, findUnmergedGreenPrs, owningIssueForPr } from './utils/green-prs.js';
 
-// Daemon-ready ProjectV2 queue intent projection (#866)
-export type {
-  ProjectQueuePoller,
-  ProjectQueuePollerOptions,
-  ProjectQueueProjection,
-} from './projects/project-queue-poller.js';
-export { createProjectQueuePoller, DEFAULT_PROJECT_QUEUE_POLL_MS } from './projects/project-queue-poller.js';
-export type { ProjectQueueStatus } from './projects/project-queue-reader.js';
-
-// gh-authenticated ProjectV2 queue GraphQL client + live poller (#1046)
-export type { GithubProjectQueuePollerOptions, ProjectGraphqlClient } from './projects/github-project-graphql.js';
-export { createGithubProjectQueuePoller, createOctokitGraphqlClient } from './projects/github-project-graphql.js';
-
 // Local queue reprioritization audit records (#869)
 export type { QueueReprioritizationRecord } from './types/index.js';
-
-// Publish only coarse daemon lifecycle status to configured ProjectV2 items (#868)
-export type { ProjectStatusWriter, ProjectStatusWriterOptions } from './projects/project-status-writer.js';
-export { createProjectStatusWriter } from './projects/project-status-writer.js';
 
 // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
 export { wrapCommandInSandbox, shouldProxyEgress, isEgressEnforced } from './sandbox/index.js';
