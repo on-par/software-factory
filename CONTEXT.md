@@ -39,7 +39,7 @@ Issues labeled `factory:needs-design` park as `held` after PLAN; see [approve-de
 
 ### Release
 
-Giving a claim back: `release(issue, outcome)` in [packages/core/src/queue/github-queue.ts](packages/core/src/queue/github-queue.ts) with a `QueueReleaseOutcome` of `queued`, `parked` or `done`. Stale claims are released by `releaseStaleClaims` in [packages/core/src/queue/stale-claims.ts](packages/core/src/queue/stale-claims.ts) ([ADR-0060](docs/adr/0060-a-stale-claim-is-one-whose-claimed-by-label-round-trips-to-this-host-and-whose-pid-is-dead.md), [ADR-0104](docs/adr/0104-claim-staleness-is-a-ttl-lease-with-heartbeat-not-host-pid-liveness.md)). Port leases are released by `releasePortLease` in [packages/core/src/run/ports.ts](packages/core/src/run/ports.ts).
+Giving a claim back: `release(issue, outcome)` in [packages/core/src/queue/github-queue.ts](packages/core/src/queue/github-queue.ts) with a `QueueReleaseOutcome` of `queued`, `parked` or `done`. Stale claims are released by `releaseStaleClaims` in [packages/core/src/queue/stale-claims.ts](packages/core/src/queue/stale-claims.ts) ([ADR-0104](docs/adr/0104-claim-staleness-is-a-ttl-lease-with-heartbeat-not-host-pid-liveness.md)). Port leases are released by `releasePortLease` in [packages/core/src/run/ports.ts](packages/core/src/run/ports.ts).
 
 ### Rework round
 

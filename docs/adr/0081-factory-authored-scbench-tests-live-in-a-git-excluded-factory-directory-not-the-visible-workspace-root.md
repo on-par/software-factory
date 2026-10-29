@@ -134,4 +134,4 @@ separate implementation work this ADR does not perform.
 - [SCBench compute_checkpoint_verbosity / compute_checkpoint_erosion at the pinned commit](https://github.com/SprocketLab/slop-code-bench/blob/13de1a7a6b8b3dc5cc532a0c322a0997afa5bec7/src/slop_code/metrics/checkpoint/composites.py#L8-L41)
 - [SCBench hidden-test collection scoping (_build_collect_cmd) at the pinned commit](https://github.com/SprocketLab/slop-code-bench/blob/13de1a7a6b8b3dc5cc532a0c322a0997afa5bec7/src/slop_code/evaluation/collection.py#L160-L187)
 - [packages/scbench-adapter/src/workspace.ts (GIT_EXCLUDE_ENTRIES, prepareWorkspace)](../../packages/scbench-adapter/src/workspace.ts)
-- [ADR-0080: The workspace diff base is the run-start HEAD, captured once, authoritative for CHECK](0080-the-workspace-diff-base-is-the-run-start-head-captured-once-authoritative-for-check.md)
+- [ADR-0079: The workspace diff base is the run-start HEAD, captured once, authoritative for CHECK](0079-the-workspace-diff-base-is-the-run-start-head-captured-once-remote-refs-outrank-it-unresolvable-yields-skip.md)

@@ -62,4 +62,4 @@ better than ADR-0060's "a permanently retired host leaves claims only it can fre
 
 - [Issue #1500 — Replace localClaimPid host-local liveness check with lease TTL + heartbeat](https://github.com/on-par/software-factory/issues/1500)
 - [Issue #1087 — Restore issues from dead factory claims](https://github.com/on-par/software-factory/issues/1087)
-- [ADR-0060 — A stale claim is one whose claimed-by label round-trips to this host and whose pid is dead](0060-a-stale-claim-is-one-whose-claimed-by-label-round-trips-to-this-host-and-whose-pid-is-dead.md)
+- ADR-0060 (superseded by this ADR; removed)
