@@ -229,8 +229,3 @@ async function runCommandAttached(
     ok: exitCode === 0 && !killed && !timedOut,
   };
 }
-
-/** First non-empty of stderr, stdout, or an exit-code note — for FAIL details. */
-export function describeCommandFailure(r: CommandResult): string {
-  return r.stderr || r.stdout || (r.timedOut ? `timed out` : `exit code ${r.exitCode}`);
-}

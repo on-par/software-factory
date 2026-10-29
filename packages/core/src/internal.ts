@@ -39,9 +39,9 @@ export { buildUpstreamReport, upstreamInputFromEvidence } from './filing/upstrea
 export { isAutoMergeBlocked } from './filing/policy.js';
 // Config
 export { resolveStateRoot, STATE_ROOT_ENV } from './config/state-root.js';
-export { resolveFilingPolicy, resolvePrClassifierPolicy, type EffectivePrClassifierPolicy } from './config/index.js';
-export { describeDraftPrPolicy, resolveDraftPrPolicy, type EffectiveDraftPrPolicy } from './config/run-section.js';
-export type { EffectiveConfig, TrustTier } from './config/repo.js';
+export { resolveFilingPolicy, resolvePrClassifierPolicy } from './config/index.js';
+export { describeDraftPrPolicy, resolveDraftPrPolicy } from './config/run-section.js';
+export type { TrustTier } from './config/repo.js';
 export { resolveBaseHealthChecks, resolveBaselineCacheTtlHours, resolveHermeticGit } from './config/base-health.js';
 export {
   resolveEffectiveConfig,
@@ -65,7 +65,6 @@ export {
   type DiskGuardDecision,
   type DiskSample,
 } from './environment/disk-guard.js';
-export { resolveDiskGuard, type DiskGuardPolicy } from './config/disk-policy.js';
 export { hostAgentJobsDir, hostBuildSlotsDir, listHostSlots, withHostAgentJobLease } from './environment/host-slots.js';
 export { withHostBuildSlot, type HostAgentJobKind, type HostSlotStatus } from './environment/host-slots.js';
 export { createRunSlotGate, withRunAndHostBuildSlot, type RunSlotGate } from './environment/run-slots.js';
@@ -73,7 +72,6 @@ export { FACTORY_RUNTIME_CONFIG_KEYS, resolveHostLoadGuard, resolveHostMaxAgentJ
 export * from './queue/internal-exports.js';
 export {
   migrateRepoConfigToYaml,
-  REPO_CONFIG_FILENAMES,
   REPO_CONFIG_YAML_HEADER,
   readRepoConfigFile,
   resolveRepoConfigPath,
@@ -81,7 +79,7 @@ export {
   setRepoConfigValue,
 } from './config/repo-config-file.js';
 export type { RepoConfigYamlMigration } from './config/repo-config-file.js';
-export { CONFIG_EXAMPLE_OMITTED_KEYS, renderConfigExample } from './config/example.js';
+export { renderConfigExample } from './config/example.js';
 export { resolveEvidenceAllowlist, type EvidenceAllowlist } from './checkers/evidence-allowlist.js';
 export { runEvidencePlan, type EvidencePlanResult, type EvidenceRunnerContext } from './checkers/evidence-plan.js';
 // Design artifact (#422)
@@ -106,7 +104,7 @@ export { listOrphanContainers, reapOrphanContainers } from './hosted/orphans.js'
 // Router
 export { harnessCliCommand } from './harness/catalog.js';
 export { isHarnessCliPresent } from './models/index.js';
-export { CliModelExecutor, formatBreakerRemaining } from './router/index.js';
+export { formatBreakerRemaining } from './router/index.js';
 
 // Phase helpers
 export { buildPlanPrompt, type PlanPromptOpts } from './phases/plan.js';
@@ -147,14 +145,11 @@ export { resolveRunUsageHarness, TRAILING_WINDOW_MS } from './usage/index.js';
 
 // Utils
 export * from './internal-ci.js';
-export type { CommandResult, RunCommandOptions } from './utils/command-runner.js';
-export { describeCommandFailure, runCommand } from './utils/command-runner.js';
-export type { CoverageMetrics, RatchetCheckResult, RatchetDrift } from './utils/coverage-ratchet.js';
+export { runCommand } from './utils/command-runner.js';
+export type { CoverageMetrics } from './utils/coverage-ratchet.js';
 export {
-  checkRatchetDrift,
   checkScopedRatchetDrift,
   DEFAULT_RATCHET_SLACK,
-  parseCoverageSummary,
   parseCoverageSummaryScopes,
   renderRatchetReport,
 } from './utils/coverage-ratchet.js';
@@ -168,12 +163,9 @@ export {
   colorEnabled,
   defaultRemoteBase,
   ensureDir,
-  escalationLine,
   formatEventLine,
   getIssueTitle,
   gitFetch,
-  isEscalation,
-  levelForType,
   logCost,
   logEvent,
   readCosts,
@@ -189,45 +181,25 @@ export {
   claudeStoredSessionState,
   hasClaudeLoginEvidence,
 } from './utils/claude-config.js';
-export type { ClaudeSessionState } from './utils/claude-config.js';
-export { formatStopMarker, readStopMarker, type StopMarker, type StopSource } from './utils/stop-marker.js';
+export { formatStopMarker, readStopMarker, type StopMarker } from './utils/stop-marker.js';
 export { hasOpencodeLoginEvidence } from './utils/opencode-config.js';
-export type { MicroVmLifecycleOptions, ReapedMicroVm, WorktreeSandbox } from './utils/microvm.js';
+export type { WorktreeSandbox } from './utils/microvm.js';
+export { listMicroVms, microVmName, reapOrphanMicroVm, worktreeSandboxFor } from './utils/microvm.js';
+export { withFileLock, withGitLock } from './utils/lock.js';
 export {
-  createMicroVm,
-  listMicroVms,
-  microVmName,
-  reapOrphanMicroVm,
-  removeMicroVm,
-  worktreeSandboxFor,
-} from './utils/microvm.js';
-export type { FileLockOptions, SyncFileLockOptions } from './utils/lock.js';
-export { withFileLock, withFileLockSync, withGitLock } from './utils/lock.js';
-export * from './utils/run-lock.js';
-export {
-  ensureWorktreeParentExcluded,
-  formatWorktreeLocation,
-  laneWorktreePath,
-  resolveWorktreeRoot,
-} from './utils/worktree-location.js';
-export type {
-  GcCandidate,
-  GcHeadPrState,
-  GcHeldCandidate,
-  GcReason,
-  GcReport,
-  SweepDeps,
-  WorktreeListEntry,
-} from './worktree/worktree-gc.js';
+  RunLockHeldError,
+  type RunLockScope,
+  runLockDirFor,
+  listLiveRunLocks,
+  withScopedRunLock,
+} from './utils/run-lock.js';
+export { formatWorktreeLocation, laneWorktreePath, resolveWorktreeRoot } from './utils/worktree-location.js';
 export {
   countUnpushedCommits,
-  findCredentialFiles,
   formatGcReport,
   isWorktreeClean,
   parseWorktreeList,
-  scrubFile,
   sweepWorktrees,
-  zeroFill,
 } from './worktree/worktree-gc.js';
 export { findWorktreeKeep, removeWorktreeKeep, upsertWorktreeKeep } from './worktree/worktree-keeps.js';
 // Daemon repo registry (~/.factory/registry.json) (#781)
@@ -314,13 +286,8 @@ export { sweepOrphanDrafts } from './queue/orphan-drafts.js';
 export { resolveQueueClaimSettleMs } from './queue/claim-settle.js';
 export { DEFAULT_MAX_CLOCK_SKEW_MS, measureGithubClockSkew, resolveQueueMaxClockSkewMs } from './queue/clock-skew.js';
 // Green-and-ready PR reporting (#1000)
-export type {
-  FindUnmergedGreenPrsOptions,
-  GreenPrGitHubClient,
-  OpenPullRequestSummary,
-  UnmergedGreenPr,
-} from './utils/green-prs.js';
-export { createOctokitGreenPrClient, findUnmergedGreenPrs, owningIssueForPr } from './utils/green-prs.js';
+export type { UnmergedGreenPr } from './utils/green-prs.js';
+export { createOctokitGreenPrClient, findUnmergedGreenPrs } from './utils/green-prs.js';
 
 // Local queue reprioritization audit records (#869)
 export type { QueueReprioritizationRecord } from './types/index.js';
@@ -450,10 +417,10 @@ export {
   describeReviewConstitutionSource,
 } from './constitutions/index.js';
 export * from './checkers/internal-exports.js';
-export { findTemplateTokens, isTemplateToken, type TemplateTokenFinding } from './config/template-tokens.js';
+export { isTemplateToken } from './config/template-tokens.js';
 export { findUnknownConfigKeyWarnings, lintFactoryConfig } from './config/config-lint.js';
-export { findConfigSchemaErrors, type ConfigSchemaFinding } from './config/config-schema-lint.js';
-export type { ConfigLintFinding, ConfigLintInput, ConfigLintResult, ConfigLintVerdict } from './config/config-lint.js';
+export { findConfigSchemaErrors } from './config/config-schema-lint.js';
+export type { ConfigLintInput } from './config/config-lint.js';
 export { findUnknownConstitutionCheckers, formatUnknownCheckerMessage } from './checkers/constitution-preflight.js';
 export type { UnknownConstitutionChecker } from './checkers/constitution-preflight.js';
 // Readiness deep check (#1732)
@@ -516,20 +483,17 @@ export { BaselineCache } from './checkers/baseline-cache.js';
 export { BASE_HEALTH_CHECKERS, checkBaseHealth, fetchRequiredChecksVerdict } from './checkers/base-health.js';
 export type { BaseHealthOptions, BaseHealthResult, RequiredChecksVerdict } from './checkers/base-health.js';
 // Codex ChatGPT session freshness for doctor (#2509)
-export { codexChatgptSessionState, type CodexSessionState } from './utils/codex-config.js';
+export { codexChatgptSessionState } from './utils/codex-config.js';
 
 // Last run-time local_auth failure per agent, read by doctor (#2733)
-export {
-  localAuthAgentFor,
-  localAuthCredentialPath,
-  localAuthFailureSinceLogin,
-  localAuthRecordPath,
-  recordLocalAuthFailure,
-} from './utils/local-auth-record.js';
-export type { LocalAuthAgent, LocalAuthFailure } from './utils/local-auth-record.js';
+export { localAuthFailureSinceLogin, recordLocalAuthFailure } from './utils/local-auth-record.js';
 export { syncLandBranch } from './land/sync.js';
 export { fetchHumanEventSourcesCached, runProducedPrOrMerge } from './kpis/sweep.js';
 export type { AgentInvocation, TokenCoverage, TokenCoverageEntry } from './metrics/token-coverage.js';
 export { agentInvocationsFromEvents, computeTokenCoverage } from './metrics/token-coverage.js';
 export { partitionGithubClaimsByActivity } from './queue/activity.js';
-export * from './utils/open-factory-drafts.js';
+export {
+  type OpenFactoryDrafts,
+  readOpenFactoryDrafts,
+  formatOpenFactoryDraftsLine,
+} from './utils/open-factory-drafts.js';
