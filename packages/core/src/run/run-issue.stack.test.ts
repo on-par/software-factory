@@ -275,6 +275,30 @@ describe('runIssue — stack mode builds one slice per run (ADR-0161)', () => {
     }
   });
 
+  it('branches slice 1 from parentBaseRef when set', async () => {
+    const { ports, createSliceBranch } = stackSetup();
+    await runIssue(baseRequest({ parentBaseRef: 'origin/feat/x' }), policy, ports);
+
+    expect(createSliceBranch.mock.calls[0]![0]).toMatchObject({ branch: branch(1), startPoint: 'origin/feat/x' });
+    expect(shipPhase.mock.calls[0]![0].stack).toMatchObject({ index: 1, base: 'feat/x' });
+  });
+
+  it("records each slice's branch and PR when slices chain through parentBaseRef", async () => {
+    const { ports, bodies } = stackSetup();
+    await runIssue(baseRequest({ parentBaseRef: 'origin/feat/x' }), policy, ports);
+    await runIssue(baseRequest({ parentBaseRef: branch(1) }), policy, ports);
+    await runIssue(baseRequest({ parentBaseRef: branch(2) }), policy, ports);
+
+    const last = parseSlicePlanComment(bodies.at(-1)!);
+    expect(last?.ok).toBe(true);
+    if (last?.ok !== true) return;
+    expect(last.plan.slices.map((sl) => [sl.prNumber, sl.branch])).toEqual([
+      [101, branch(1)],
+      [102, branch(2)],
+      [103, branch(3)],
+    ]);
+  });
+
   it('stops the chain at the first non-ready slice', async () => {
     const { ports } = stackSetup();
     checkPhase

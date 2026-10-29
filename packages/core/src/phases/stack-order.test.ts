@@ -32,6 +32,10 @@ describe('stackPositionFor', () => {
     });
   });
 
+  it('puts slice 1 on the parent base when one is set', () => {
+    expect(stackPositionFor(plan(), 1, 'origin/feat/x').base).toBe('feat/x');
+  });
+
   it('puts slice k on the parent branch and strips origin/', () => {
     const p = stackPositionFor(plan([41]), 2, 'origin/factory/7-slice-1');
     expect(p).toMatchObject({ base: 'factory/7-slice-1', basePr: 41 });

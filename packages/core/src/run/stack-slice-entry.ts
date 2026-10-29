@@ -43,7 +43,7 @@ export async function enterStackSlice(args: {
   const { slice, request, ports, log, park } = args;
   const { plan: slicePlan, index } = slice;
   const count = slicePlan.slices.length;
-  const parent = parentRefForSlice(slicePlan, index, MAIN_REF);
+  const parent = parentRefForSlice(slicePlan, index, request.parentBaseRef ?? MAIN_REF);
   if (parent === undefined) {
     return {
       outcome: await park(
