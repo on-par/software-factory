@@ -1,7 +1,6 @@
 import { workKeyFromIssue } from '../work/work-key.js';
 import { execFile as execFileCb } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -9,7 +8,8 @@ import { LaneLifecycleEventSchema } from '@on-par/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createLifecycleBus } from '../bus/index.js';
-import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import type { RoutesConfig } from '../config/index.js';
+import { createPhaseTestSetup, stubModel, stubModelsConfig } from '../test-support/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
@@ -30,27 +30,7 @@ import {
 } from './check.js';
 import { environmentLogPaths, renderEnvironmentReleaseComment } from './environment-release.js';
 
-const models: ModelsConfig = {
-  version: 1,
-  models: {
-    'stub-model': {
-      provider: 'openai',
-      tier: 'boss',
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
-      contextWindow: 1000,
-      capabilities: [],
-      envKey: null,
-    },
-  },
-  tiers: { boss: ['stub-model'] },
-  failover: {
-    triggers: ['rate_limit', 'unavailable', 'auth'],
-    maxRetries: 2,
-    cooldownMs: 0,
-  },
-  routingRules: {},
-};
+const models = stubModelsConfig({ 'stub-model': stubModel({ provider: 'openai' }) }, { boss: ['stub-model'] });
 
 const routes: RoutesConfig = {
   version: 1,
@@ -59,31 +39,13 @@ const routes: RoutesConfig = {
   },
 };
 
-const codexModels: ModelsConfig = {
-  ...models,
-  models: {
-    'codex-worker': {
-      provider: 'openai',
-      tier: 'boss',
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
-      contextWindow: 1000,
-      capabilities: ['codex'],
-      envKey: null,
-      codex: true,
-    },
-    'claude-worker': {
-      provider: 'anthropic',
-      tier: 'boss',
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
-      contextWindow: 1000,
-      capabilities: ['claude'],
-      envKey: null,
-    },
+const codexModels = stubModelsConfig(
+  {
+    'codex-worker': stubModel({ provider: 'openai', capabilities: ['codex'], codex: true }),
+    'claude-worker': stubModel({ provider: 'anthropic', capabilities: ['claude'] }),
   },
-  tiers: { boss: ['codex-worker', 'claude-worker'] },
-};
+  { boss: ['codex-worker', 'claude-worker'] },
+);
 
 const codexRoutes: RoutesConfig = {
   version: 1,
@@ -95,29 +57,14 @@ const codexRoutes: RoutesConfig = {
 
 const execFile = promisify(execFileCb);
 
-const twoModels: ModelsConfig = {
-  ...models,
-  models: {
-    ...models.models,
-    'second-model': {
-      provider: 'openai',
-      tier: 'boss',
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
-      contextWindow: 1000,
-      capabilities: [],
-      envKey: null,
-    },
-  },
-  tiers: { boss: ['stub-model', 'second-model'] },
-};
+const twoModels = stubModelsConfig(
+  { ...models.models, 'second-model': stubModel({ provider: 'openai' }) },
+  { boss: ['stub-model', 'second-model'] },
+);
 
-const tempDirs = new Set<string>();
+const setup = createPhaseTestSetup();
 
-afterEach(async () => {
-  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
-  tempDirs.clear();
-});
+afterEach(() => setup.cleanup());
 
 describe('partial base overlap (#1929)', () => {
   const summaryOf = (...results: Array<[string, 'PASS' | 'FAIL']>): CheckSummary => ({
@@ -616,8 +563,7 @@ describe('rework cause environment (#1927)', () => {
     'includes the round-1 full-output log and the base log dir in logPaths (#1928)',
     { timeout: 120_000 },
     async () => {
-      const logsDir = await mkdtemp(join(tmpdir(), 'check-env-logs-'));
-      tempDirs.add(logsDir);
+      const logsDir = await setup.worktree('check-env-logs-');
       const { result } = await runWithVerdict('fails-on-base', { logsDir });
       const paths = result.environment?.logPaths ?? [];
       expect(paths.some((p) => p.startsWith(join(logsDir, 'issue-77', 'check-r0')))).toBe(true);
@@ -897,8 +843,7 @@ describe('checkPhase baseline (#1925)', () => {
 describe('checkPhase auto rework', () => {
   it('uses the completed Codex route and model for rework', { timeout: 120_000 }, async () => {
     const { worktree, specPath } = await makeFailingWorktree();
-    const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'rework complete' }] } });
-    const router = new ModelRouter(codexModels, codexRoutes, false, stub);
+    const { router, stub } = setup.router(codexModels, codexRoutes, { build_codex: [{ output: 'rework complete' }] });
     const logs: Array<[string, string]> = [];
 
     await checkPhase({
@@ -1068,8 +1013,7 @@ describe('checkPhase auto rework', () => {
     { timeout: 120_000 },
     async () => {
       const { worktree, specPath } = await makeFailingWorktree();
-      const logsDir = await mkdtemp(join(tmpdir(), 'check-phase-logs-'));
-      tempDirs.add(logsDir);
+      const logsDir = await setup.worktree('check-phase-logs-');
       const { router, stub } = makeRouter();
 
       const check = await checkPhase({
@@ -2197,19 +2141,16 @@ describe('checkPhase success paths', () => {
     const { worktree, specPath } = await makeFailingWorktree();
     // The scripted worker "fixes" the repo the first time it is invoked by
     // rewriting the failing test script to pass, so the next check round is clean.
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_claude: [
-          {
-            output: 'fixed the failing test',
-            effect: async (ctx) => {
-              await writeFile(join(ctx.worktree, 'package.json'), JSON.stringify({ scripts: { test: 'exit 0' } }));
-            },
+    const { router, stub } = setup.router(models, routes, {
+      build_claude: [
+        {
+          output: 'fixed the failing test',
+          effect: async (ctx) => {
+            await writeFile(join(ctx.worktree, 'package.json'), JSON.stringify({ scripts: { test: 'exit 0' } }));
           },
-        ],
-      },
+        },
+      ],
     });
-    const router = new ModelRouter(models, routes, false, stub);
     const logs: Array<{ type: string; msg: string }> = [];
 
     const check = await checkPhase({
@@ -2350,8 +2291,7 @@ describe('checkPhase lifecycle events', () => {
 });
 
 async function makePassingWorktree(): Promise<{ worktree: string; specPath: string }> {
-  const worktree = await mkdtemp(join(tmpdir(), 'check-phase-pass-'));
-  tempDirs.add(worktree);
+  const worktree = await setup.worktree('check-phase-pass-');
 
   await writeFixture(
     worktree,
@@ -2371,8 +2311,7 @@ async function makeEvidencePlanWorktree(
   issue: number,
   evidencePlan?: unknown[],
 ): Promise<{ worktree: string; specPath: string }> {
-  const worktree = await mkdtemp(join(tmpdir(), `check-evidence-${issue}-`));
-  tempDirs.add(worktree);
+  const worktree = await setup.worktree(`check-evidence-${issue}-`);
   await writeFixture(worktree, 'package.json', JSON.stringify({ scripts: { test: 'true' } }));
   const specPath = join(worktree, `issue-${issue}.md`);
   const artifact = {
@@ -2396,8 +2335,7 @@ async function makeEvidencePlanWorktree(
 }
 
 async function makeSpecOnlyWorktree(): Promise<{ worktree: string; specPath: string }> {
-  const worktree = await mkdtemp(join(tmpdir(), 'check-phase-spec-only-'));
-  tempDirs.add(worktree);
+  const worktree = await setup.worktree('check-phase-spec-only-');
 
   const specPath = join(worktree, 'issue-94.md');
   await writeFixture(worktree, 'issue-94.md', '# Spec: no package.json at all\n');
@@ -2406,8 +2344,7 @@ async function makeSpecOnlyWorktree(): Promise<{ worktree: string; specPath: str
 }
 
 async function makeFailingWorktree(): Promise<{ worktree: string; specPath: string }> {
-  const worktree = await mkdtemp(join(tmpdir(), 'check-phase-test-'));
-  tempDirs.add(worktree);
+  const worktree = await setup.worktree('check-phase-test-');
 
   await writeFixture(
     worktree,
@@ -2424,8 +2361,7 @@ async function makeFailingWorktree(): Promise<{ worktree: string; specPath: stri
 }
 
 async function makeCleanGitWorktree(): Promise<{ worktree: string; specPath: string }> {
-  const worktree = await mkdtemp(join(tmpdir(), 'check-phase-clean-git-'));
-  tempDirs.add(worktree);
+  const worktree = await setup.worktree('check-phase-clean-git-');
   const specPath = join(worktree, 'issue-817.md');
   await writeFixture(worktree, 'package.json', JSON.stringify({ scripts: { test: 'exit 0' } }));
   await writeFixture(worktree, 'issue-817.md', '# Spec: empty worker diff\n');
@@ -2441,8 +2377,7 @@ async function makeCleanGitWorktree(): Promise<{ worktree: string; specPath: str
 /** makeCleanGitWorktree without the origin/main ref — a remote-less checkout whose only
  *  usable diff base is the run-start SHA buildPhase captured (#1211). */
 async function makeRemoteLessGitWorktree(): Promise<{ worktree: string; specPath: string; baseSha: string }> {
-  const worktree = await mkdtemp(join(tmpdir(), 'check-phase-remoteless-git-'));
-  tempDirs.add(worktree);
+  const worktree = await setup.worktree('check-phase-remoteless-git-');
   const specPath = join(worktree, 'issue-1211.md');
   await writeFixture(worktree, 'package.json', JSON.stringify({ scripts: { test: 'exit 0' } }));
   await writeFixture(worktree, 'issue-1211.md', '# Spec: empty worker diff, no remote\n');
@@ -2456,8 +2391,7 @@ async function makeRemoteLessGitWorktree(): Promise<{ worktree: string; specPath
 }
 
 async function makeTestFailureEvidenceWorktree(): Promise<{ worktree: string; specPath: string }> {
-  const worktree = await mkdtemp(join(tmpdir(), 'check-phase-test-evidence-'));
-  tempDirs.add(worktree);
+  const worktree = await setup.worktree('check-phase-test-evidence-');
   const diagnostic = 'diagnostic output '.repeat(100);
 
   await writeFixture(
@@ -2476,8 +2410,7 @@ async function makeTestFailureEvidenceWorktree(): Promise<{ worktree: string; sp
 }
 
 async function makeLintFailingWorktree(): Promise<{ worktree: string; specPath: string }> {
-  const worktree = await mkdtemp(join(tmpdir(), 'check-phase-lint-failure-'));
-  tempDirs.add(worktree);
+  const worktree = await setup.worktree('check-phase-lint-failure-');
 
   await writeFixture(worktree, 'package.json', JSON.stringify({ scripts: { test: 'exit 0', lint: 'exit 1' } }));
 
@@ -2547,8 +2480,7 @@ describe('checkPhase with lens_review signatures', () => {
 });
 
 async function makeEnvAssertingWorktree(issue: number): Promise<string> {
-  const worktree = await mkdtemp(join(tmpdir(), `check-phase-env-${issue}-`));
-  tempDirs.add(worktree);
+  const worktree = await setup.worktree(`check-phase-env-${issue}-`);
 
   const check =
     "process.env.PORT === '3142' && process.env.FACTORY_APP_PORT === '3142' && process.env.FACTORY_BASE_URL === 'http://127.0.0.1:3142'";
@@ -2563,8 +2495,7 @@ async function makeEnvAssertingWorktree(issue: number): Promise<string> {
 }
 
 async function makeWorktreeWithFiles(issue: number, files: Record<string, string>): Promise<string> {
-  const worktree = await mkdtemp(join(tmpdir(), `check-phase-files-${issue}-`));
-  tempDirs.add(worktree);
+  const worktree = await setup.worktree(`check-phase-files-${issue}-`);
 
   for (const [path, contents] of Object.entries(files)) {
     await writeFixture(worktree, path, contents);
@@ -2614,10 +2545,6 @@ describe('checkPhase tests timeout (#2299)', () => {
 });
 
 describe('flaky re-run verdict (#2301, #2302)', () => {
-  const dirs: string[] = [];
-  afterEach(async () => {
-    await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })));
-  });
   const okResult = {
     command: ['npm', 'test'],
     stdout: '',
@@ -2641,8 +2568,7 @@ describe('flaky re-run verdict (#2301, #2302)', () => {
     runCommand: ReturnType<typeof vi.fn>,
     extra: { maxReworkRounds?: number } = {},
   ) => {
-    const worktree = await mkdtemp(join(tmpdir(), 'check-flaky-'));
-    dirs.push(worktree);
+    const worktree = await setup.worktree('check-flaky-');
     await writeFile(join(worktree, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run' } }));
     const { router } = makeRouter();
     const logs: string[] = [];
