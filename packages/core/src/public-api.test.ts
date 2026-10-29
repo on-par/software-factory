@@ -326,7 +326,7 @@ const TAIL =
   );
 const STEER = 'STEER_SOURCES STEER_PHASES SteerEventError parseSteerEvent appendSteerEvent listSteerEvents'.split(' '); // #3400
 const STEERED = 'collectMergedPrSteers isoWeekKey summarizeSteerability formatSteerabilityReport fileBug'.split(' '); // #3403
-const MORE = ['agentInvocationsFromEvents', 'computeTokenCoverage', 'readReviewApproval', 'readStackSliceGate']; // #3126, #3366
+const MORE = ['agentInvocationsFromEvents', 'computeTokenCoverage', 'readStackSliceGate']; // #3126, #3366
 const STACK = 'nextStackSlice restackAfterSquashMerge listStatelessLaneIssues'.split(' ');
 const POLICY = 'isEgressEnforced describeDraftPrPolicy resolveDraftPrPolicy resolveConfiguredWritablePaths'.split(' '); // #2215, #3449, #3454
 const PO2 = 'OPENCODE_GO_DEFAULT_MODEL filterRefusedProviders sweepOrphanDrafts'.split(' '); // #3335, #1623
@@ -412,43 +412,17 @@ const INTERNAL_API_KEYS = [
   'parseCommandCounts',
   ...Object.keys(await import('./run/pr-lookup.js')), // open-PR lookup (#3439)
   ...(await Promise.all([import('./blockers/index.js'), import('./queue/unpark.js')])).flatMap(Object.keys), // blockers (#2316), unpark (#2318)
-  'READINESS_INPUT_CAP',
-  'READINESS_PROMPT_VERSION',
-  'ReadinessVerdictSchema',
-  'buildReadinessJudgePrompt',
-  'buildReadinessJudgeRepairPrompt',
-  'detectEpic',
   'judgeReadiness',
-  'parseReadinessVerdict',
-  'prepareReadinessInput',
-  'readCachedVerdict',
-  'readinessCacheKey',
-  'writeCachedVerdict',
   // Slice plan model (ADR-0147)
-  'DEFAULT_MAX_SLICES',
-  'SLICE_CAP_CEILING',
-  'overCapReason',
-  'sliceCapExceeded',
-  'SLICE_PLAN_MARKER',
   'STATE_ROOT_ENV',
   'currentSlice',
   'findSlicePlanComment',
-  'markSliceMerged',
-  'parseSlicePlanComment',
-  'publishDecomposition',
   'publishParkComment',
   'recordSliceMerged',
   'renderSlicePlanComment',
-  'resolveSliceGate',
   'resolveStateRoot',
-  'slicePlanFromDecomposition',
   'upsertSlicePlanComment',
   'withSliceState',
-  'withSlicesAffected',
-  'withSlicesNotBuilt',
-  'parentRefForSlice',
-  'stackSliceBranch',
-  'withSliceBranchCreated',
   // Worktree location (#1758)
   'formatWorktreeLocation',
   'laneWorktreePath',
@@ -556,27 +530,13 @@ const INTERNAL_API_KEYS = [
   'classifyFailure',
   'runHarnessCheck',
   'classifyOpenCodeErrorType',
-  'ClaudeCliHarness',
-  'CodexCliHarness',
-  'buildHarnessCommand',
-  'CommandHarness',
-  'isAgenticHarness',
-  'isRetryableFailure',
-  'NON_RETRYABLE_FAILURE_REASONS',
-  'OllamaAgenticHarness',
-  'PATCH_PROPOSAL_SCHEMA',
-  'OllamaHttpHarness',
-  'OpenCodeHarness',
-  'PiHarness',
   'parseOpenCodeJson',
-  'parsePiJson',
   // Hosted execution: Docker container engine adapter (#899)
   'createDockerEngine',
   // Hosted execution: orphan sf-job-* container scan + reap (#1527)
   'listOrphanContainers',
   'reapOrphanContainers',
   // Router, phase helpers, triage prompt and queue normalization (#1650, #2981)
-  'buildPlanPrompt',
   'buildTriagePrompt',
   'dropQueuedIssues',
   'normalizeTriageQueue',
@@ -611,8 +571,6 @@ const INTERNAL_API_KEYS = [
   'createRunRuntime',
   'findOpenPR',
   'settleParkedPullRequest',
-  'detectLowerSliceChange',
-  'parkOnLowerSliceChange',
   'parkPayload',
   'parkUnblockHint',
   'createShipExecutor',
@@ -728,9 +686,7 @@ const INTERNAL_API_KEYS = [
   'findUnmergedGreenPrs',
   // Read-only GitHub ProjectV2 queue-intent polling (#847)
   // Board-constrained local lane dispatch (#848)
-  'createBoardQueueDispatcher',
   // ProjectV2 queue-intent scheduler (#867)
-  'createBoardQueueScheduler',
   // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
   'wrapCommandInSandbox',
 ];

@@ -154,4 +154,4 @@ export interface CodingHarness {
 export type { ProviderFailure, ProviderFailureKind } from './provider-failure.js';
 
 export type { HarnessCatalogEntry } from './catalog.js';
-export { HARNESS_CATALOG, isAgenticHarness, KNOWN_HARNESS_IDS } from './catalog.js';
+export { HARNESS_CATALOG, KNOWN_HARNESS_IDS } from './catalog.js';
