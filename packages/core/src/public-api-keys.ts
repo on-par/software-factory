@@ -58,7 +58,6 @@ const PARENT_COVERAGE_INTERNAL_KEYS =
 export const ITERATE_INTERNAL_KEYS = [
   ...PARENT_COVERAGE_INTERNAL_KEYS,
   'claimIterateCommand',
-  'parseFactoryCommand',
   'pollIterateCommands',
   'createOctokitIterateGitHub',
   'createFileIterateStore',

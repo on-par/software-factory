@@ -124,7 +124,7 @@ export default defineConfig({
             'packages/config/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 100, statements: 99 },
             'packages/contracts/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 99, statements: 99 },
             'packages/repo-context/src/**/*.{ts,tsx}': { lines: 99, functions: 99, branches: 98, statements: 99 },
-            'packages/core/src/**/*.{ts,tsx}': { lines: 97, functions: 96, branches: 90, statements: 96 },
+            'packages/core/src/**/*.{ts,tsx}': { lines: 97, functions: 96, branches: 91, statements: 96 },
             // branches: measured 88.72 on main both with and without the integration
             // suites — this floor was already unmet before #755 touched anything, and
             // moving the integration suites to nightly does not change any metric here.

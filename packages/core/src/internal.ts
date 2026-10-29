@@ -200,29 +200,12 @@ export { createBoardQueueScheduler } from './phases/board-queue-scheduler.js';
 // Local-small harness
 export type {
   OvernightItemOutcome,
-  OvernightItemStatus,
   OvernightPreflightResult,
   OvernightQueueDeps,
-  OvernightQueueInput,
-  OvernightQueueResult,
-  OvernightQueueState,
   OvernightStateItem,
 } from './local-small/overnight.js';
 export { runOvernightQueue } from './local-small/overnight.js';
-export type {
-  LocalSmallContextPack,
-  LocalSmallDryRunInput,
-  LocalSmallDryRunResult,
-  LocalSmallLimits,
-  LocalSmallPatchChange,
-  LocalSmallPatchProposal,
-  LocalSmallPatchStepInput,
-  LocalSmallPatchStepResult,
-  LocalSmallPatchStepStatus,
-  LocalSmallStep,
-  LocalSmallStepPlan,
-} from './local-small/stepwise.js';
-export { applyLocalSmallPatchStep, createLocalSmallDryRun } from './local-small/stepwise.js';
+export { createLocalSmallDryRun } from './local-small/stepwise.js';
 // Eval internals
 export { judgeSpec, median, runJudgeSamples, scoreSpec } from './eval/index.js';
 
@@ -339,29 +322,17 @@ export { parseRemoteSlug } from './daemon/repos-attach.js';
 
 // GitHub-label-backed work queue (#824)
 export type {
-  EnqueueOutcome,
   EnqueueResult,
   GithubQueue,
-  GithubQueueOptions,
   QueueClaim,
-  QueueClearAction,
-  QueueClearEntry,
-  QueueClearOutcome,
   QueueClearPreview,
-  QueueClearPreviewEntry,
   QueueClearResult,
   QueueGitHubClient,
   QueueIssue,
-  QueueLabelSpec,
-  QueueMigrationStep,
-  QueuePreflight,
   QueuePreflightDecision,
   QueueReleaseOutcome,
 } from './queue/github-queue.js';
 export {
-  claimedByLabel,
-  CLAIMED_BY_LABEL_PREFIX,
-  claimExpiresLabel,
   CLAIM_EXPIRES_LABEL_PREFIX,
   createGithubQueue,
   createOctokitQueueClient,
@@ -371,19 +342,15 @@ export {
   LANE_LABEL_PREFIX,
   laneLabel,
   laneSlug,
-  MAX_LABEL_NAME_LENGTH,
-  parseClaimExpiresLabel,
   PARKED_LABEL,
-  DECOMPOSED_LABEL,
   planQueueMigration,
   QUEUED_LABEL,
   QUEUE_ORDER_LABEL_PREFIX,
   queueOrderLabel,
-  queueLabelSpecs,
   readGithubQueueSnapshot,
 } from './queue/github-queue.js';
-export type { QueueEntry, QueueSnapshot, QueueSnapshotEntry } from './queue/index.js';
-export { formatQueueOrderConflict, type QueueOrderConflict, type QueueOrderLabelProblem } from './queue/queue-order.js';
+export type { QueueSnapshot } from './queue/index.js';
+export { formatQueueOrderConflict, type QueueOrderConflict } from './queue/queue-order.js';
 
 // Factory App admission-state compatibility (#1497)
 export type {
@@ -403,21 +370,16 @@ export {
   withAdmissionGuard,
 } from './admission/index.js';
 
-// Backend-agnostic queue seam (#1499)
-export { createGithubQueueBackend, type GithubQueueBackendOptions, type QueueBackend } from './queue/queue-backend.js';
-
 // Stale-claim reaping (#999, lease-based since #1500)
-export type { ReleaseStaleClaimsOptions, StaleClaim, StaleClaimRelease } from './queue/stale-claims.js';
-export { findStaleClaims, releaseStaleClaims } from './queue/stale-claims.js';
-export type { OrphanClaimLabelSweep } from './queue/claim-label-sweep.js';
-export { sweepOrphanClaimLabels } from './queue/claim-label-sweep.js';
-export type { DeferredOnlyResult } from './queue/deferred-only.js';
+export { releaseStaleClaims } from './queue/stale-claims.js';
 export { unqueueDeferredOnly } from './queue/deferred-only.js';
 export type { StatelessLaneIssue } from './queue/stateless-lane.js';
-export { findStatelessLaneIssues, listRepoLaneLabels, listStatelessLaneIssues } from './queue/stateless-lane.js';
-export * from './queue/unpark.js';
-export { DEFAULT_CLAIM_SETTLE_MS, resolveQueueClaimSettleMs } from './queue/claim-settle.js';
-export * from './queue/clock-skew.js';
+export { listStatelessLaneIssues } from './queue/stateless-lane.js';
+export { runUnpark, UnparkError } from './queue/unpark.js';
+export type { OrderCollision, UnparkInput, UnparkJson } from './queue/unpark.js';
+export { sweepOrphanDrafts } from './queue/orphan-drafts.js';
+export { resolveQueueClaimSettleMs } from './queue/claim-settle.js';
+export { DEFAULT_MAX_CLOCK_SKEW_MS, measureGithubClockSkew, resolveQueueMaxClockSkewMs } from './queue/clock-skew.js';
 // Green-and-ready PR reporting (#1000)
 export type {
   FindUnmergedGreenPrsOptions,
@@ -426,17 +388,6 @@ export type {
   UnmergedGreenPr,
 } from './utils/green-prs.js';
 export { createOctokitGreenPrClient, findUnmergedGreenPrs, owningIssueForPr } from './utils/green-prs.js';
-
-// Read-only GitHub ProjectV2 queue-intent polling (#847)
-export type {
-  ProjectBoardConfig,
-  ProjectBoardPoller,
-  ProjectBoardPollerOptions,
-  QueueIntentItem,
-  QueueIntentSnapshot,
-  QueueIntentStatus,
-} from './queue/project-board-poller.js';
-export { createProjectBoardPoller, DEFAULT_PROJECT_BOARD_POLL_MS } from './queue/project-board-poller.js';
 
 // Daemon-ready ProjectV2 queue intent projection (#866)
 export type {
@@ -453,22 +404,11 @@ export { createGithubProjectQueuePoller, createOctokitGraphqlClient } from './pr
 
 // Local queue reprioritization audit records (#869)
 export type { QueueReprioritizationRecord } from './types/index.js';
-export { createQueueRationaleAuditor, type QueueRationaleAuditor } from './queue/reprioritization-audit.js';
 
 // Publish only coarse daemon lifecycle status to configured ProjectV2 items (#868)
 export type { ProjectStatusWriter, ProjectStatusWriterOptions } from './projects/project-status-writer.js';
 export { createProjectStatusWriter } from './projects/project-status-writer.js';
 
-// Coarse ProjectV2 status writing (#849)
-export type {
-  ProjectBoardCoarseStatus,
-  ProjectBoardStatusConfig,
-  ProjectBoardStatusItem,
-  ProjectBoardStatusValues,
-  ProjectBoardStatusWriter,
-  ProjectBoardStatusWriterOptions,
-} from './queue/project-board-status-writer.js';
-export { createProjectBoardStatusWriter } from './queue/project-board-status-writer.js';
 // Sandbox command wrapping — used by the CLI's doctor probe (#1008)
 export { wrapCommandInSandbox, shouldProxyEgress, isEgressEnforced } from './sandbox/index.js';
 export { resolveConfiguredWritablePaths } from './sandbox/writable-paths.js';
@@ -671,9 +611,9 @@ export {
   recordLocalAuthFailure,
 } from './utils/local-auth-record.js';
 export type { LocalAuthAgent, LocalAuthFailure } from './utils/local-auth-record.js';
-export { syncLandBranch, type LandSyncOptions, type LandSyncResult } from './land/sync.js';
+export { syncLandBranch } from './land/sync.js';
 export { fetchHumanEventSourcesCached, runProducedPrOrMerge } from './kpis/sweep.js';
 export type { AgentInvocation, TokenCoverage, TokenCoverageEntry } from './metrics/token-coverage.js';
 export { agentInvocationsFromEvents, computeTokenCoverage } from './metrics/token-coverage.js';
-export { partitionGithubClaimsByActivity, type GithubActiveClaim } from './queue/activity.js';
+export { partitionGithubClaimsByActivity } from './queue/activity.js';
 export * from './utils/open-factory-drafts.js';
