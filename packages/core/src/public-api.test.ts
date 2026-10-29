@@ -319,7 +319,7 @@ const PUBLIC_API_KEYS = [
   'watchUsage',
   'fetchSubscriptionUsage',
 ];
-const JOB_KEYS = 'resolveHostMaxAgentJobs hostAgentJobsDir withHostAgentJobLease findStatelessLaneIssues'.split(' ');
+const JOB_KEYS = 'resolveHostMaxAgentJobs hostAgentJobsDir withHostAgentJobLease'.split(' ');
 const TAIL =
   'InvalidEventCursorError eventSegmentFileName eventSegmentsDir readEventsTail readEventsSince rotateEventLog listEventSegmentPaths findEventSegmentByIno'.split(
     ' ',
@@ -327,11 +327,11 @@ const TAIL =
 const STEER = 'STEER_SOURCES STEER_PHASES SteerEventError parseSteerEvent appendSteerEvent listSteerEvents'.split(' '); // #3400
 const STEERED = 'collectMergedPrSteers isoWeekKey summarizeSteerability formatSteerabilityReport fileBug'.split(' '); // #3403
 const MORE = ['agentInvocationsFromEvents', 'computeTokenCoverage', 'readReviewApproval', 'readStackSliceGate']; // #3126, #3366
-const STACK = 'nextStackSlice restackAfterSquashMerge listRepoLaneLabels listStatelessLaneIssues'.split(' ');
+const STACK = 'nextStackSlice restackAfterSquashMerge listStatelessLaneIssues'.split(' ');
 const POLICY = 'isEgressEnforced describeDraftPrPolicy resolveDraftPrPolicy resolveConfiguredWritablePaths'.split(' '); // #2215, #3449, #3454
 const PO =
   'resolveRoleModel isOpenCodeZenModel subscriptionProviderOf PROVIDER_ORDER_ROLES SUBSCRIPTION_PROVIDERS'.split(' '); // #3334
-const PO2 = 'OPENCODE_GO_DEFAULT_MODEL subscriptionLogin filterRefusedProviders sweepOrphanClaimLabels'.split(' '); // #3335, #1623
+const PO2 = 'OPENCODE_GO_DEFAULT_MODEL subscriptionLogin filterRefusedProviders sweepOrphanDrafts'.split(' '); // #3335, #1623
 const GATE = ['allProvidersDown', 'stageBlocked', 'PROVIDER_LEVEL_REASONS', 'TIMED_BREAKER_REASONS']; // #3226
 const EXTRA_INTERNAL_KEYS = [
   ...JOB_KEYS,
@@ -504,7 +504,6 @@ const INTERNAL_API_KEYS = [
   'resolvePullRequestReference',
   'REVIEW_ACCESS_ERROR_EXIT_CODE',
   // Local queue reprioritization audit records (#869)
-  'createQueueRationaleAuditor',
   // Daemon-ready ProjectV2 queue intent projection (#866)
   'createProjectQueuePoller',
   'DEFAULT_PROJECT_QUEUE_POLL_MS',
@@ -513,7 +512,6 @@ const INTERNAL_API_KEYS = [
   'createOctokitGraphqlClient',
   // Coarse ProjectV2 status publishing (#868) and writing (#849)
   'createProjectStatusWriter',
-  'createProjectBoardStatusWriter',
   // Failure fingerprint & evidence
   'captureFailure',
   'fingerprintFailure',
@@ -584,7 +582,7 @@ const INTERNAL_API_KEYS = [
   'resolveEffectiveConfig',
   'resolveExperimental',
   'resolveLocalOnly',
-  ...'resolveHostMaxBuilds resolveQueueClaimSettleMs evaluateRisk decideRiskMerge NEEDS_HUMAN_LABEL RISK_HIGH_LABEL RISK_MED_LABEL CLOCK_SKEW_CACHE_TTL_MS DEFAULT_MAX_CLOCK_SKEW_MS createClockSkewCache defaultClockSkewCache githubServerDate isClockSkewExcessive measureClockSkew measureGithubClockSkew parseHttpDateMs resolveQueueMaxClockSkewMs'.split(
+  ...'resolveHostMaxBuilds resolveQueueClaimSettleMs evaluateRisk decideRiskMerge NEEDS_HUMAN_LABEL RISK_HIGH_LABEL RISK_MED_LABEL DEFAULT_MAX_CLOCK_SKEW_MS measureGithubClockSkew resolveQueueMaxClockSkewMs'.split(
     ' ',
   ), // #3380, #3381, #3149
   ...'RISK_RECEIPT_END RISK_RECEIPT_START listPrChangedFiles publishRiskReceipt renderRiskReceipt'.split(' '), // #3386
@@ -593,7 +591,7 @@ const INTERNAL_API_KEYS = [
   ...'hostBuildSlotsDir listHostSlots syncLandBranch isValidIssueRunState listIssueRuns'.split(' '), // syncLandBranch: #1886; run readers: #3448
   ...'withHostBuildSlot createRunSlotGate withRunAndHostBuildSlot readDiskFree formatDiskHold'.split(' '), // #3049, #2284
   ...'BYTES_PER_GB DISK_ALERT_INTERVAL_MS claimDiskAlert createDiskGuard evaluateDiskGuard'.split(' '), // #2284
-  ...'FACTORY_RUNTIME_CONFIG_KEYS isTrustedApprover resolveDiskGuard hostDiskAlertFile'.split(' '),
+  ...'FACTORY_RUNTIME_CONFIG_KEYS resolveDiskGuard hostDiskAlertFile'.split(' '),
   'createOctokitCollaboratorPermissionClient',
   ...'CONFIG_EXAMPLE_OMITTED_KEYS renderConfigExample resolveT1SampleRate'.split(' '),
   'resolveEvidenceAllowlist',
@@ -638,7 +636,6 @@ const INTERNAL_API_KEYS = [
   'fetchHumanEventSourcesCached',
   'runProducedPrOrMerge',
   // Local-small harness
-  'applyLocalSmallPatchStep',
   'createLocalSmallDryRun',
   'runOvernightQueue',
   'REPO_CONFIG_FILENAMES',
@@ -750,15 +747,11 @@ const INTERNAL_API_KEYS = [
   'parseCoverageSummaryScopes',
   'renderRatchetReport',
   // GitHub-label-backed work queue (#824)
-  'claimedByLabel',
-  'CLAIMED_BY_LABEL_PREFIX',
-  'claimExpiresLabel',
   'CLAIM_EXPIRES_LABEL_PREFIX',
   'createGithubQueue',
   'createOctokitQueueClient',
   'createFileReviewReworkStore',
   'createOctokitReviewReworkGitHub',
-  'latestDecisiveReviews',
   'pollReviewRework',
   'countReviewReworkRuns',
   'parkAtReviewReworkCap',
@@ -766,20 +759,15 @@ const INTERNAL_API_KEYS = [
   'reviewReworkCapMessage',
   'defaultClaimantId',
   'DEFAULT_CLAIM_LEASE_MS',
-  'DEFAULT_CLAIM_SETTLE_MS',
   'IN_PROGRESS_LABEL',
   'LANE_LABEL_PREFIX',
   'laneLabel',
   'laneSlug',
-  'MAX_LABEL_NAME_LENGTH',
-  'parseClaimExpiresLabel',
   'PARKED_LABEL',
-  'DECOMPOSED_LABEL',
   'planQueueMigration',
   'QUEUED_LABEL',
   'QUEUE_ORDER_LABEL_PREFIX',
   'queueOrderLabel',
-  'queueLabelSpecs',
   'readGithubQueueSnapshot',
   'formatQueueOrderConflict',
   // Factory App admission-state compatibility (#1497)
@@ -794,9 +782,7 @@ const INTERNAL_API_KEYS = [
   'formatBreakerRemaining',
   'withAdmissionGuard',
   // Backend-agnostic queue seam (#1499)
-  'createGithubQueueBackend',
   // Stale-claim reaping (#999, lease-based since #1500)
-  'findStaleClaims',
   'releaseStaleClaims',
   'unqueueDeferredOnly',
   // Green-and-ready PR reporting (#1000)
@@ -804,8 +790,6 @@ const INTERNAL_API_KEYS = [
   'findUnmergedGreenPrs',
   'owningIssueForPr',
   // Read-only GitHub ProjectV2 queue-intent polling (#847)
-  'createProjectBoardPoller',
-  'DEFAULT_PROJECT_BOARD_POLL_MS',
   // Board-constrained local lane dispatch (#848)
   'createBoardQueueDispatcher',
   // ProjectV2 queue-intent scheduler (#867)

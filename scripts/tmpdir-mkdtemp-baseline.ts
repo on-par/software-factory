@@ -116,7 +116,7 @@ export const TMPDIR_MKDTEMP_BASELINE: Readonly<Record<string, number>> = {
   'packages/core/src/hosted/store.sqlite.test.ts': 1,
   'packages/core/src/ingest/index.test.ts': 2,
   'packages/core/src/local-small/overnight.test.ts': 1,
-  'packages/core/src/local-small/stepwise.test.ts': 14,
+  'packages/core/src/local-small/stepwise.test.ts': 5,
   'packages/core/src/logger/concurrency.test.ts': 1,
   'packages/core/src/logger/index.ci-failure.test.ts': 1,
   'packages/core/src/logger/index.test.ts': 31,
