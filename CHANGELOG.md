@@ -7,6 +7,12 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+## 0.9.24 - 2026-10-29
+
+PR text without changed files or brief ids, stacked `run-brief`, and the `ship-it/` prefix and simulator removed (#3792, #3763, #3771, #3770).
+All seven published `@on-par` packages move to 0.9.24 in lockstep.
+Install or update with `npm install -g @on-par/factory-cli@latest`.
+
 ### Added
 
 - `factory run-brief <file> [file...] --stack` opens the briefs as a PR stack: each brief starts from and targets the previous brief's PR head branch; a failed brief or one with no PR (`--no-pr`) stops the stack and the rest are skipped and reported (#3763).

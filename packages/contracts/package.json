@@ -1,6 +1,6 @@
 {
   "name": "@on-par/contracts",
-  "version": "0.9.23",
+  "version": "0.9.24",
   "description": "Shared typed seam: engineering-ready issue/epic/story, Gherkin acceptance criteria, and the DesignArtifact schema.",
   "type": "module",
   "main": "dist/index.js",
