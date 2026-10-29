@@ -7,50 +7,29 @@ import { LaneLifecycleEventSchema } from '@on-par/contracts';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createLifecycleBus } from '../bus/index.js';
+import { fakeOctokit } from '../test-support/index.js';
 import { findMergedPR, findOpenPR, shipPhase } from './ship.js';
 
-function createOctokit(prDraft = true) {
-  const calls: any[] = [];
-  const octokit = {
-    graphql: async (query: string, vars: any) => {
-      calls.push(['graphql', query, vars]);
-      return { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } };
-    },
-    rest: {
-      pulls: {
-        list: async (args: any) => {
-          calls.push(['pulls.list', args]);
-          return { data: [] };
-        },
-        create: async (args: any) => {
-          calls.push(['pulls.create', args]);
-          return { data: { number: 123 } };
-        },
-        get: async (args: any) => {
-          calls.push(['pulls.get', args]);
-          return { data: { draft: prDraft, node_id: 'PR_1' } };
-        },
-      },
-      issues: {
-        get: async (args: any) => {
-          calls.push(['issues.get', args]);
-          return { data: { title: 'Self-heal committed work' } };
-        },
-        createComment: async (args: any) => {
-          calls.push(['issues.createComment', args]);
-          return { data: { id: 1 } };
-        },
-      },
-      checks: {
-        listForRef: async (args: any) => {
-          calls.push(['checks.listForRef', args]);
-          return { data: { check_runs: [] } };
-        },
-      },
-    },
-  };
+interface ShipOctokitOptions {
+  prDraft?: boolean;
+  prList?: unknown[];
+  /** Check-run sequence: each checks.listForRef call returns the next entry, repeating the last. */
+  checks?: any[][];
+}
 
-  return { octokit, calls };
+function shipOctokit({ prDraft = true, prList = [], checks = [[]] }: ShipOctokitOptions = {}) {
+  const { listForRef, callCount } = scriptChecks(checks);
+  const { octokit, calls: recorded } = fakeOctokit({
+    graphql: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } },
+    'pulls.list': { data: prList },
+    'pulls.create': { data: { number: 123 } },
+    'pulls.get': { data: { draft: prDraft, node_id: 'PR_1' } },
+    'issues.get': { data: { title: 'Self-heal committed work' } },
+    'issues.createComment': { data: { id: 1 } },
+    'checks.listForRef': listForRef,
+  });
+  const calls: any[] = recorded;
+  return { octokit, calls, callCount };
 }
 
 function scriptChecks(sequence: any[][]) {
@@ -70,51 +49,6 @@ const oneFailure = [
   { status: 'completed', conclusion: 'failure' },
 ];
 
-function createWatchOctokit(sequence: any[][]) {
-  const calls: any[] = [];
-  const { listForRef, callCount } = scriptChecks(sequence);
-  const octokit = {
-    graphql: async (query: string, vars: any) => {
-      calls.push(['graphql', query, vars]);
-      return { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } };
-    },
-    rest: {
-      pulls: {
-        list: async (args: any) => {
-          calls.push(['pulls.list', args]);
-          return { data: [{ number: 123 }] };
-        },
-        create: async (args: any) => {
-          calls.push(['pulls.create', args]);
-          return { data: { number: 123 } };
-        },
-        get: async (args: any) => {
-          calls.push(['pulls.get', args]);
-          return { data: { draft: false, node_id: 'PR_1' } };
-        },
-      },
-      issues: {
-        get: async (args: any) => {
-          calls.push(['issues.get', args]);
-          return { data: { title: 'Self-heal committed work' } };
-        },
-        createComment: async (args: any) => {
-          calls.push(['issues.createComment', args]);
-          return { data: { id: 1 } };
-        },
-      },
-      checks: {
-        listForRef: async (args: any) => {
-          calls.push(['checks.listForRef', args]);
-          return listForRef(args);
-        },
-      },
-    },
-  };
-
-  return { octokit, calls, callCount };
-}
-
 const STUB_HEAD_SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
 
 /** stdout for the two remote-head verification commands the recovery path runs before opening a
@@ -129,7 +63,7 @@ function remoteHeadStub(command: string, remoteSha = STUB_HEAD_SHA): { stdout: s
 
 describe('shipPhase self-healing', () => {
   it('pushes and opens a house-format PR when committed work is clean and ahead', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const commands: string[] = [];
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
@@ -191,7 +125,7 @@ describe('shipPhase self-healing', () => {
     [{ index: 2, count: 3 }, true],
     [{ index: 3, count: 3 }, false],
   ])('titles and words the PR for slice %j (ADR-0147)', async (slice, partOf) => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const run = async (command: string) => {
       const remote = remoteHeadStub(command);
       if (remote) return remote;
@@ -227,7 +161,7 @@ describe('shipPhase self-healing', () => {
   });
 
   it('does not mark a pull request ready when it is not a draft', async () => {
-    const { octokit, calls } = createOctokit(false);
+    const { octokit, calls } = shipOctokit({ prDraft: false });
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
       const remote = remoteHeadStub(command);
@@ -256,7 +190,7 @@ describe('shipPhase self-healing', () => {
   });
 
   it('does not park when leftover dirt stages to nothing after a green check (#3212)', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const commands: string[] = [];
     const logs: Array<[string, string]> = [];
     let statusCount = 0;
@@ -304,7 +238,7 @@ describe('shipPhase self-healing', () => {
   });
 
   it('logs the first five leftover paths and the remaining count', async () => {
-    const { octokit } = createOctokit();
+    const { octokit } = shipOctokit();
     const commands: string[] = [];
     const logs: Array<[string, string]> = [];
     let statusCount = 0;
@@ -342,7 +276,7 @@ describe('shipPhase self-healing', () => {
   });
 
   it('does not push or open a PR when there are no commits ahead of origin/main', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const commands: string[] = [];
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
@@ -377,7 +311,7 @@ describe('shipPhase self-healing', () => {
   });
 
   it('aborts before PR creation when git push fails', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
@@ -405,7 +339,7 @@ describe('shipPhase self-healing', () => {
   });
 
   it('returns the open-PR lookup error as the reason', async () => {
-    const { octokit } = createOctokit();
+    const { octokit } = shipOctokit();
     octokit.rest.pulls.list = async () => {
       throw new Error('boom');
     };
@@ -426,7 +360,7 @@ describe('shipPhase self-healing', () => {
   });
 
   it('does not emit the ready log line or touch the PR when the push fails', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
@@ -459,7 +393,7 @@ describe('shipPhase self-healing', () => {
   });
 
   it('names a non-fast-forward push rejection and logs its stderr', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
@@ -496,7 +430,7 @@ describe('shipPhase self-healing', () => {
   });
 
   it('distinguishes a network push failure from non-fast-forward', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
@@ -532,7 +466,7 @@ describe('shipPhase self-healing', () => {
   });
 
   it('handles a non-Error throw from git push', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
@@ -560,7 +494,7 @@ describe('shipPhase self-healing', () => {
   });
 
   it('falls back to "no error output" when the push failure carries no text', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
@@ -588,7 +522,7 @@ describe('shipPhase self-healing', () => {
   });
 
   it('fails closed without creating a PR when the open-PR lookup errors', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     octokit.rest.pulls.list = async (args: any) => {
       calls.push(['pulls.list', args]);
       throw new Error('list failed');
@@ -628,7 +562,7 @@ describe('shipPhase self-healing', () => {
   });
 
   it('builds the PR body with an empty diff stat when computeDiffStat throws', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
       const remote = remoteHeadStub(command);
@@ -659,7 +593,7 @@ describe('shipPhase self-healing', () => {
   });
 
   it('fails with a warn naming the PR, and logs no ready, when marking the PR ready for review throws (#3551)', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     octokit.rest.pulls.get = async (args: any) => {
       calls.push(['pulls.get', args]);
       throw new Error('pulls.get failed');
@@ -692,7 +626,7 @@ describe('shipPhase self-healing', () => {
   });
 
   it('reports fail and returns not ok when a PR cannot be created or found', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     octokit.rest.pulls.create = async (args: any) => {
       calls.push(['pulls.create', args]);
       return { data: { number: 0 } };
@@ -740,7 +674,7 @@ describe('shipPhase remote head verification (#735)', () => {
   }
 
   it('matches → PR is created and both SHAs are logged', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const logs: Array<[string, string]> = [];
     const run = recoveryRun(() => undefined);
 
@@ -764,7 +698,7 @@ describe('shipPhase remote head verification (#735)', () => {
   });
 
   it('mismatch → no PR, non-success, both SHAs logged', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const logs: Array<[string, string]> = [];
     const mismatchedSha = 'ffffffffffffffffffffffffffffffffffffffff';
     const run = recoveryRun((command) => {
@@ -795,7 +729,7 @@ describe('shipPhase remote head verification (#735)', () => {
   });
 
   it('git ls-remote throws → abort', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const logs: Array<[string, string]> = [];
     const run = recoveryRun((command) => {
       if (command === "git ls-remote --heads origin 'ship-it/23-self-heal'") {
@@ -830,7 +764,7 @@ describe('shipPhase remote head verification (#735)', () => {
   });
 
   it('git ls-remote returns no matching ref → abort', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const logs: Array<[string, string]> = [];
     const run = recoveryRun((command) => {
       if (command === "git ls-remote --heads origin 'ship-it/23-self-heal'") return { stdout: '' };
@@ -856,7 +790,7 @@ describe('shipPhase remote head verification (#735)', () => {
   });
 
   it('git rev-parse HEAD throws → abort before ls-remote is even run', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const logs: Array<[string, string]> = [];
     const commands: string[] = [];
     const run = async (command: string) => {
@@ -888,7 +822,7 @@ describe('shipPhase remote head verification (#735)', () => {
   });
 
   it('an unrelated ref in the ls-remote listing does not fool the comparison', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const logs: Array<[string, string]> = [];
     const run = recoveryRun((command) => {
       if (command === "git ls-remote --heads origin 'ship-it/23-self-heal'") {
@@ -917,7 +851,7 @@ describe('shipPhase remote head verification (#735)', () => {
 
 describe('shipPhase inline work source (#507)', () => {
   it('titles and bodies the PR from a non-github work request without fetching the issue', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     octokit.rest.issues.get = async () => {
       throw new Error('issues.get should never be called for an inline work source');
     };
@@ -964,7 +898,7 @@ describe('shipPhase inline work source (#507)', () => {
   });
 
   it('behaves exactly like today when work is a github-issue request (run-issue passthrough is inert)', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const run = async (command: string) => {
       const remote = remoteHeadStub(command);
       if (remote) return remote;
@@ -1000,7 +934,11 @@ describe('shipPhase inline work source (#507)', () => {
 
 describe('shipPhase CI watch', () => {
   it('logs CI green and stops polling once all checks complete successfully', async () => {
-    const { octokit, callCount } = createWatchOctokit([pending, pending, allSuccess]);
+    const { octokit, callCount } = shipOctokit({
+      prDraft: false,
+      prList: [{ number: 123 }],
+      checks: [pending, pending, allSuccess],
+    });
     const logs: Array<[string, string]> = [];
     const run = async (c: string) => remoteHeadStub(c) ?? { stdout: '' };
 
@@ -1030,7 +968,11 @@ describe('shipPhase CI watch', () => {
   });
 
   it('fails and leaves the PR unready once a check run fails', async () => {
-    const { octokit, calls, callCount } = createWatchOctokit([pending, oneFailure]);
+    const { octokit, calls, callCount } = shipOctokit({
+      prDraft: false,
+      prList: [{ number: 123 }],
+      checks: [pending, oneFailure],
+    });
     const logs: Array<[string, string]> = [];
     const run = async (c: string) => remoteHeadStub(c) ?? { stdout: '' };
 
@@ -1069,7 +1011,7 @@ describe('shipPhase CI watch', () => {
   it('parks as infra-failure and logs ci-rescue-failed when the one rerun also fails for infra', async () => {
     const sha = 'ship-infra-sha-2366';
     const infraRun = { id: 9, head_sha: sha, status: 'completed', conclusion: 'failure' };
-    const { octokit } = createWatchOctokit([[infraRun]]);
+    const { octokit } = shipOctokit({ prDraft: false, prList: [{ number: 123 }], checks: [[infraRun]] });
     (octokit.rest as any).actions = {
       getJobForWorkflowRun: async () => ({
         data: {
@@ -1120,7 +1062,7 @@ describe('shipPhase CI watch', () => {
   });
 
   it('gives up after the 10-minute deadline when checks never complete', async () => {
-    const { octokit, callCount } = createWatchOctokit([pending]);
+    const { octokit, callCount } = shipOctokit({ prDraft: false, prList: [{ number: 123 }], checks: [pending] });
     const logs: Array<[string, string]> = [];
     const run = async (c: string) => remoteHeadStub(c) ?? { stdout: '' };
 
@@ -1152,7 +1094,7 @@ describe('shipPhase CI watch', () => {
 
   describe('CI wait visibility (#2386)', () => {
     async function runShip(sequence: any[][], extra: { statusTotal?: number } = {}) {
-      const { octokit } = createWatchOctokit(sequence);
+      const { octokit } = shipOctokit({ prDraft: false, prList: [{ number: 123 }], checks: sequence });
       (octokit as any).rest.repos = {
         getCombinedStatusForRef: async () => ({
           data: { total_count: extra.statusTotal ?? 0, statuses: [], sha: 'deadbeef' },
@@ -1212,7 +1154,7 @@ describe('shipPhase CI watch', () => {
   });
 
   it('still logs CI pending when watching CI throws on every poll (fail-closed retry exhausts as timeout, never rejects)', async () => {
-    const { octokit } = createWatchOctokit([allSuccess]);
+    const { octokit } = shipOctokit({ prDraft: false, prList: [{ number: 123 }], checks: [allSuccess] });
     octokit.rest.checks.listForRef = async () => {
       throw new Error('checks API unavailable');
     };
@@ -1269,7 +1211,7 @@ describe('shipPhase PR description', () => {
           '',
         ].join('\n'),
       );
-      const { octokit, calls } = createOctokit();
+      const { octokit, calls } = shipOctokit();
       const run = async (command: string) => {
         const remote = remoteHeadStub(command);
         if (remote) return remote;
@@ -1331,7 +1273,7 @@ describe('shipPhase PR risk line', () => {
           openQuestions: [],
         }),
       );
-      const { octokit, calls } = createOctokit();
+      const { octokit, calls } = shipOctokit();
       const run = async (command: string) => {
         const remote = remoteHeadStub(command);
         if (remote) return remote;
@@ -1364,7 +1306,7 @@ describe('shipPhase PR risk line', () => {
 
 describe('shipPhase approval gate', () => {
   it('approves: gate resolving approved:true lets ship proceed and logs ship, then approval_requested, then approval_granted', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const logs: Array<[string, string]> = [];
     const diffStatCalls: string[] = [];
     const run = async (command: string) => {
@@ -1423,7 +1365,7 @@ describe('shipPhase approval gate', () => {
   });
 
   it('denies: gate resolving approved:false stops before push/PR and logs ship_denied with the reason', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const logs: Array<[string, string]> = [];
     const commands: string[] = [];
     const run = async (command: string) => {
@@ -1463,7 +1405,7 @@ describe('shipPhase approval gate', () => {
   });
 
   it('denies with the default "denied" reason when the gate response omits one', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
       const remote = remoteHeadStub(command);
@@ -1491,7 +1433,7 @@ describe('shipPhase approval gate', () => {
   });
 
   it('no gate: behaves exactly like the non-interactive path (no approval_requested/granted logs)', async () => {
-    const { octokit } = createOctokit();
+    const { octokit } = shipOctokit();
     const logs: Array<[string, string]> = [];
     const run = async (command: string) => {
       const remote = remoteHeadStub(command);
@@ -1530,7 +1472,7 @@ describe('shipPhase never records ADRs', () => {
         JSON.stringify([{ title: 'Stale draft', context: 'c', decision: 'd', consequences: 'q', status: 'proposed' }]),
       );
 
-      const { octokit } = createOctokit();
+      const { octokit } = shipOctokit();
       const commands: string[] = [];
       const logs: Array<[string, string]> = [];
       const run = async (command: string) => {
@@ -1796,21 +1738,21 @@ describe('shipPhase duplicate-PR guard (#520)', () => {
 
 describe('findOpenPR / findMergedPR (#641)', () => {
   it('findOpenPR: found', async () => {
-    const { octokit } = createOctokit();
+    const { octokit } = shipOctokit();
     octokit.rest.pulls.list = (async () => ({ data: [{ number: 7 }] })) as any;
     const result = await findOpenPR(octokit as any, 'on-par', 'software-factory', 'ship-it/23-x');
     expect(result).toEqual({ status: 'found', prNumber: 7 });
   });
 
   it('findOpenPR: absent', async () => {
-    const { octokit } = createOctokit();
+    const { octokit } = shipOctokit();
     octokit.rest.pulls.list = async () => ({ data: [] });
     const result = await findOpenPR(octokit as any, 'on-par', 'software-factory', 'ship-it/23-x');
     expect(result).toEqual({ status: 'absent' });
   });
 
   it('findOpenPR: error is never reported as absent', async () => {
-    const { octokit } = createOctokit();
+    const { octokit } = shipOctokit();
     octokit.rest.pulls.list = async () => {
       throw new Error('boom');
     };
@@ -1820,21 +1762,21 @@ describe('findOpenPR / findMergedPR (#641)', () => {
   });
 
   it('findMergedPR: found', async () => {
-    const { octokit } = createOctokit();
+    const { octokit } = shipOctokit();
     octokit.rest.pulls.list = (async () => ({ data: [{ number: 9, merged_at: '2026-08-01T00:00:00Z' }] })) as any;
     const result = await findMergedPR(octokit as any, 'on-par', 'software-factory', 'ship-it/23-x');
     expect(result).toEqual({ status: 'found', prNumber: 9 });
   });
 
   it('findMergedPR: absent (closed but not merged)', async () => {
-    const { octokit } = createOctokit();
+    const { octokit } = shipOctokit();
     octokit.rest.pulls.list = (async () => ({ data: [{ number: 9, merged_at: null }] })) as any;
     const result = await findMergedPR(octokit as any, 'on-par', 'software-factory', 'ship-it/23-x');
     expect(result).toEqual({ status: 'absent' });
   });
 
   it('findMergedPR: error', async () => {
-    const { octokit } = createOctokit();
+    const { octokit } = shipOctokit();
     octokit.rest.pulls.list = async () => {
       throw new Error('boom');
     };
@@ -1845,7 +1787,7 @@ describe('findOpenPR / findMergedPR (#641)', () => {
 
 describe('shipPhase ambiguous-lookup fail-closed (#641)', () => {
   it('fails closed when the merged-PR lookup errors and git has not proven the branch landed', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     let listCalls = 0;
     octokit.rest.pulls.list = async (args: any) => {
       calls.push(['pulls.list', args]);
@@ -1879,7 +1821,7 @@ describe('shipPhase ambiguous-lookup fail-closed (#641)', () => {
   });
 
   it('a proven-landed tree overrides a merged-PR lookup error', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     let listCalls = 0;
     octokit.rest.pulls.list = async (args: any) => {
       calls.push(['pulls.list', args]);
@@ -1915,7 +1857,7 @@ describe('shipPhase ambiguous-lookup fail-closed (#641)', () => {
 
 describe('shipPhase pulls.create 422 already-exists recovery (#641)', () => {
   it('re-queries and reuses the existing PR when pulls.create 422s as already-exists', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     let listCalls = 0;
     octokit.rest.pulls.list = (async (args: any) => {
       calls.push(['pulls.list', args]);
@@ -1956,7 +1898,7 @@ describe('shipPhase pulls.create 422 already-exists recovery (#641)', () => {
   });
 
   it('propagates a non-422 pulls.create rejection unchanged', async () => {
-    const { octokit } = createOctokit();
+    const { octokit } = shipOctokit();
     octokit.rest.pulls.create = async () => {
       throw Object.assign(new Error('Internal Server Error'), { status: 500 });
     };
@@ -1985,7 +1927,7 @@ describe('shipPhase pulls.create 422 already-exists recovery (#641)', () => {
   });
 
   it('propagates a 422 whose message is not an already-exists case', async () => {
-    const { octokit } = createOctokit();
+    const { octokit } = shipOctokit();
     octokit.rest.pulls.create = async () => {
       throw Object.assign(new Error('No commits between main and ship-it/23-x'), { status: 422 });
     };
@@ -2014,7 +1956,7 @@ describe('shipPhase pulls.create 422 already-exists recovery (#641)', () => {
   });
 
   it('fails closed when re-querying after a 422 already-exists finds nothing', async () => {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     octokit.rest.pulls.list = async (args: any) => {
       calls.push(['pulls.list', args]);
       return { data: [] };
@@ -2055,7 +1997,7 @@ describe('shipPhase pulls.create 422 already-exists recovery (#641)', () => {
 
 describe('shipPhase lifecycle events', () => {
   it('emits started then done on the success path, validated against the shared schema', async () => {
-    const { octokit } = createOctokit();
+    const { octokit } = shipOctokit();
     const run = async (command: string) => {
       const remote = remoteHeadStub(command);
       if (remote) return remote;
@@ -2095,7 +2037,7 @@ describe('shipPhase lifecycle events', () => {
   });
 
   it('emits started then failed when there are no commits ahead of origin/main', async () => {
-    const { octokit } = createOctokit();
+    const { octokit } = shipOctokit();
     const run = async (command: string) => {
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '0\n' };
@@ -2159,7 +2101,7 @@ describe('shipPhase stale remote branch leased push (#1869)', () => {
   const at = (sha: string) => ({ stdout: `${sha}\trefs/heads/${BRANCH}\n` });
 
   async function ship(run: (c: string) => Promise<{ stdout: string }>) {
-    const { octokit, calls } = createOctokit();
+    const { octokit, calls } = shipOctokit();
     const logs: Array<[string, string]> = [];
     const result = await shipPhase({
       issue: workKeyFromIssue(23),

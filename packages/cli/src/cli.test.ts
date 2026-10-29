@@ -3427,25 +3427,25 @@ More prose here.
   describe('resume-approved sweep', () => {
     describe('issueFromFactoryBranch', () => {
       it('parses the issue number out of a factory branch name', () => {
-        expect(issueFromFactoryBranch('ship-it/154-land-awaiting')).toBe(154);
-        expect(issueFromFactoryBranch('ship-it/7-')).toBe(7);
+        expect(issueFromFactoryBranch('factory/154-land-awaiting')).toBe(154);
+        expect(issueFromFactoryBranch('factory/7-')).toBe(7);
       });
 
-      it('recognizes the factory default, a custom prefix, and legacy ship-it', () => {
+      it('recognizes the factory default and a custom prefix, not legacy ship-it', () => {
         expect(issueFromFactoryBranch('factory/9-a', 'factory')).toBe(9);
         expect(issueFromFactoryBranch('sf/9-a', 'sf')).toBe(9);
-        expect(issueFromFactoryBranch('ship-it/9-a', 'sf')).toBe(9);
+        expect(issueFromFactoryBranch('ship-it/9-a', 'sf')).toBeUndefined();
         expect(issueFromFactoryBranch('factory/9-a', 'sf')).toBeUndefined();
       });
 
       it('returns undefined for branches without a leading issue number', () => {
-        expect(issueFromFactoryBranch('ship-it/abc-x')).toBeUndefined();
+        expect(issueFromFactoryBranch('factory/abc-x')).toBeUndefined();
         expect(issueFromFactoryBranch('main')).toBeUndefined();
       });
     });
 
     describe('listOpenFactoryPRs', () => {
-      it('keeps factory/* and legacy ship-it/* branches and drops the rest', async () => {
+      it('keeps factory/* branches and drops legacy factory/* and the rest', async () => {
         const octokit: any = {
           graphql: vi.fn(async () => ({
             repository: {
@@ -3462,12 +3462,12 @@ More prose here.
           })),
         };
         const result = await listOpenFactoryPRs(octokit, 'o', 'r', 'factory');
-        expect(result.map((p) => p.number)).toEqual([1, 2]);
+        expect(result.map((p) => p.number)).toEqual([1]);
         const custom = await listOpenFactoryPRs(octokit, 'o', 'r', 'sf');
-        expect(custom.map((p) => p.number)).toEqual([2, 4]);
+        expect(custom.map((p) => p.number)).toEqual([4]);
       });
 
-      it('filters to ship-it/* branches and paginates through every page', async () => {
+      it('filters to factory/* branches and paginates through every page', async () => {
         const calls: any[] = [];
         const octokit: any = {
           graphql: vi.fn(async (_query: string, vars: any) => {
@@ -3478,7 +3478,7 @@ More prose here.
                   pullRequests: {
                     pageInfo: { hasNextPage: true, endCursor: 'CURSOR1' },
                     nodes: [
-                      { number: 1, headRefName: 'ship-it/1-a', reviewDecision: 'APPROVED', isDraft: false },
+                      { number: 1, headRefName: 'factory/1-a', reviewDecision: 'APPROVED', isDraft: false },
                       { number: 2, headRefName: 'chore/unrelated', reviewDecision: null, isDraft: false },
                     ],
                   },
@@ -3489,7 +3489,7 @@ More prose here.
               repository: {
                 pullRequests: {
                   pageInfo: { hasNextPage: false, endCursor: null },
-                  nodes: [{ number: 3, headRefName: 'ship-it/3-b', reviewDecision: 'REVIEW_REQUIRED', isDraft: true }],
+                  nodes: [{ number: 3, headRefName: 'factory/3-b', reviewDecision: 'REVIEW_REQUIRED', isDraft: true }],
                 },
               },
             };
@@ -3499,8 +3499,8 @@ More prose here.
         const result = await listOpenFactoryPRs(octokit, 'on-par', 'software-factory');
 
         expect(result).toEqual([
-          { number: 1, branch: 'ship-it/1-a', reviewDecision: 'APPROVED', isDraft: false },
-          { number: 3, branch: 'ship-it/3-b', reviewDecision: 'REVIEW_REQUIRED', isDraft: true },
+          { number: 1, branch: 'factory/1-a', reviewDecision: 'APPROVED', isDraft: false },
+          { number: 3, branch: 'factory/3-b', reviewDecision: 'REVIEW_REQUIRED', isDraft: true },
         ]);
         expect(calls).toHaveLength(2);
         expect(calls[0].cursor).toBeUndefined();
@@ -3520,10 +3520,10 @@ More prose here.
         const result = await sweepApprovedPRs(repoRoot, ghRepo, paths, {
           createOctokit: () => octokit,
           loadConfig: () => fakeFactoryConfig,
-          listPRs: async () => [{ number: 320, branch: 'ship-it/12-x', reviewDecision: 'APPROVED' }],
+          listPRs: async () => [{ number: 320, branch: 'factory/12-x', reviewDecision: 'APPROVED' }],
           land: async (...args: any[]) => {
             calls.push(['land', args]);
-            return { branch: 'ship-it/12-x', prNumber: 320 };
+            return { branch: 'factory/12-x', prNumber: 320 };
           },
           emitEvent: (eventsFile: string, type: string, issue: string | number, msg: string) =>
             calls.push(['event', eventsFile, type, issue, msg]),
@@ -3542,7 +3542,7 @@ More prose here.
         expect(events[0][4]).toBe('sweep: 1 landed, 0 skipped, 0 failed of 1 open factory PRs');
       });
 
-      it('lands approved PRs on both the factory and legacy ship-it prefixes', async () => {
+      it('lands approved PRs on the resolved prefix', async () => {
         const landCalls: any[] = [];
         const listCalls: any[] = [];
         const result = await sweepApprovedPRs(
@@ -3556,7 +3556,7 @@ More prose here.
               listCalls.push(args);
               return [
                 { number: 40, branch: 'factory/30-x', reviewDecision: 'APPROVED' },
-                { number: 41, branch: 'ship-it/31-y', reviewDecision: 'APPROVED' },
+                { number: 41, branch: 'factory/31-y', reviewDecision: 'APPROVED' },
               ];
             },
             land: async (...args: any[]) => {
@@ -3583,9 +3583,9 @@ More prose here.
           createOctokit: () => octokit,
           loadConfig: () => fakeFactoryConfig,
           listPRs: async () => [
-            { number: 1, branch: 'ship-it/1-a', reviewDecision: 'REVIEW_REQUIRED' },
-            { number: 2, branch: 'ship-it/2-b', reviewDecision: undefined },
-            { number: 3, branch: 'ship-it/x-bad', reviewDecision: 'APPROVED' },
+            { number: 1, branch: 'factory/1-a', reviewDecision: 'REVIEW_REQUIRED' },
+            { number: 2, branch: 'factory/2-b', reviewDecision: undefined },
+            { number: 3, branch: 'factory/x-bad', reviewDecision: 'APPROVED' },
           ],
           land: async (...args: any[]) => {
             landCalls.push(args);
@@ -3601,9 +3601,9 @@ More prose here.
         expect(landCalls).toEqual([]);
         expect(run1.landed).toEqual([]);
         expect(run1.skipped).toEqual([
-          { pr: 1, branch: 'ship-it/1-a', reason: 'not approved (reviewDecision: REVIEW_REQUIRED)' },
-          { pr: 2, branch: 'ship-it/2-b', reason: 'not approved (reviewDecision: none)' },
-          { pr: 3, branch: 'ship-it/x-bad', reason: 'no issue number in branch' },
+          { pr: 1, branch: 'factory/1-a', reason: 'not approved (reviewDecision: REVIEW_REQUIRED)' },
+          { pr: 2, branch: 'factory/2-b', reason: 'not approved (reviewDecision: none)' },
+          { pr: 3, branch: 'factory/x-bad', reason: 'no issue number in branch' },
         ]);
         expect(run1.failed).toEqual([]);
         expect(run2).toEqual(run1);
@@ -3616,13 +3616,13 @@ More prose here.
           createOctokit: () => octokit,
           loadConfig: () => fakeFactoryConfig,
           listPRs: async () => [
-            { number: 10, branch: 'ship-it/10-a', reviewDecision: 'APPROVED' },
-            { number: 11, branch: 'ship-it/11-b', reviewDecision: 'APPROVED' },
+            { number: 10, branch: 'factory/10-a', reviewDecision: 'APPROVED' },
+            { number: 11, branch: 'factory/11-b', reviewDecision: 'APPROVED' },
           ],
           land: async (issueNum: number) => {
-            if (issueNum === 10) throw new LandConflictError('land sync conflict on ship-it/10-a — parked');
+            if (issueNum === 10) throw new LandConflictError('land sync conflict on factory/10-a — parked');
             landed.push(issueNum);
-            return { branch: 'ship-it/11-b', prNumber: 11 };
+            return { branch: 'factory/11-b', prNumber: 11 };
           },
           emitEvent: (_eventsFile: string, type: string, issue: string | number, msg: string) =>
             events.push([type, issue, msg]),

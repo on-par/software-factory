@@ -36,7 +36,7 @@ branch refs/heads/main
 
 worktree /repo/main-factory-ship-it-5
 HEAD def456
-branch refs/heads/ship-it/5-feature
+branch refs/heads/factory/5-feature
 
 worktree /repo/main-factory-ship-it-6
 HEAD ghi789
@@ -46,7 +46,7 @@ detached
     const entries = parseWorktreeList(porcelain);
     expect(entries).toEqual([
       { path: '/repo/main', head: 'abc123', branch: 'main' },
-      { path: '/repo/main-factory-ship-it-5', head: 'def456', branch: 'ship-it/5-feature' },
+      { path: '/repo/main-factory-ship-it-5', head: 'def456', branch: 'factory/5-feature' },
       { path: '/repo/main-factory-ship-it-6', head: 'ghi789', branch: null },
     ]);
   });
@@ -189,7 +189,7 @@ describe('sweepWorktrees', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${legacy}\nHEAD bbb\nbranch refs/heads/ship-it/5-a\n\nworktree ${shared}\nHEAD ccc\nbranch refs/heads/ship-it/6-b\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${legacy}\nHEAD bbb\nbranch refs/heads/factory/5-a\n\nworktree ${shared}\nHEAD ccc\nbranch refs/heads/factory/6-b\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') return { stdout: 'aaa\n' };
@@ -234,7 +234,7 @@ describe('sweepWorktrees', () => {
       commands.push(cmd);
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/5-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/5-feature\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -270,7 +270,7 @@ describe('sweepWorktrees', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/6-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/6-feature\n\n`,
         };
       }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
@@ -290,7 +290,7 @@ describe('sweepWorktrees', () => {
     expect(report.removed[0].reason).toBe('remote-gone');
   });
 
-  it('treats lane worktrees on the resolved prefix and legacy ship-it as candidates, not manual branches', async () => {
+  it('treats lane worktrees on the resolved prefix as candidates, not manual or legacy ship-it branches', async () => {
     const { repoRoot: root } = setup();
     const newWt = makeWorktree(`${basename(root)}-factory-factory-21`);
     const legacyWt = makeWorktree(`${basename(root)}-ship-it-22`);
@@ -315,7 +315,7 @@ describe('sweepWorktrees', () => {
     };
 
     const report = await sweepWorktrees({ repoRoot: root, ttlDays: 7, branchPrefix: 'factory' }, { runCommand });
-    expect(report.removed.map((r) => r.path).sort()).toEqual([newWt, legacyWt].sort());
+    expect(report.removed.map((r) => r.path).sort()).toEqual([newWt]);
     expect(existsSync(manualWt)).toBe(true);
   });
 
@@ -327,14 +327,14 @@ describe('sweepWorktrees', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/7-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/7-feature\n\n`,
         };
       }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
         throw new Error('exit 1');
       }
       if (cmd.startsWith('git ls-remote')) {
-        return { stdout: 'bbb\trefs/heads/ship-it/7-feature\n' };
+        return { stdout: 'bbb\trefs/heads/factory/7-feature\n' };
       }
       return { stdout: '' };
     };
@@ -354,14 +354,14 @@ describe('sweepWorktrees', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/8-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/8-feature\n\n`,
         };
       }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
         throw new Error('exit 1');
       }
       if (cmd.startsWith('git ls-remote')) {
-        return { stdout: 'bbb\trefs/heads/ship-it/8-feature\n' };
+        return { stdout: 'bbb\trefs/heads/factory/8-feature\n' };
       }
       return { stdout: '' };
     };
@@ -380,14 +380,14 @@ describe('sweepWorktrees', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/9-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/9-feature\n\n`,
         };
       }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
         throw new Error('exit 1');
       }
       if (cmd.startsWith('git ls-remote')) {
-        return { stdout: 'bbb\trefs/heads/ship-it/9-feature\n' };
+        return { stdout: 'bbb\trefs/heads/factory/9-feature\n' };
       }
       return { stdout: '' };
     };
@@ -408,7 +408,7 @@ describe('sweepWorktrees', () => {
       commands.push(cmd);
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/10-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/10-feature\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -440,7 +440,7 @@ describe('sweepWorktrees', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/11-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/11-feature\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -473,7 +473,7 @@ describe('sweepWorktrees', () => {
       commands.push(cmd);
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD aaa\nbranch refs/heads/ship-it/12-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD aaa\nbranch refs/heads/factory/12-feature\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -503,7 +503,7 @@ describe('sweepWorktrees', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/13-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/13-feature\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -532,7 +532,7 @@ describe('sweepWorktrees', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/14-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/14-feature\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -562,7 +562,7 @@ describe('sweepWorktrees', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/15-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/15-feature\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -572,7 +572,7 @@ describe('sweepWorktrees', () => {
         throw new Error('exit 1');
       }
       if (cmd.startsWith('git ls-remote')) {
-        return { stdout: 'bbb\trefs/heads/ship-it/15-feature\n' }; // live remote branch
+        return { stdout: 'bbb\trefs/heads/factory/15-feature\n' }; // live remote branch
       }
       return { stdout: '' };
     };
@@ -596,7 +596,7 @@ describe('sweepWorktrees', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/16-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/16-feature\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -625,7 +625,7 @@ describe('sweepWorktrees', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/17-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/17-feature\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -653,7 +653,7 @@ describe('sweepWorktrees', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/18-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/18-feature\n\n`,
         };
       }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
@@ -666,7 +666,7 @@ describe('sweepWorktrees', () => {
         throw new Error('no tracking ref');
       }
       if (cmd.startsWith('git reflog show')) {
-        return { stdout: 'bbb refs/remotes/origin/ship-it/18-feature@{0}: fetch\n' };
+        return { stdout: 'bbb refs/remotes/origin/factory/18-feature@{0}: fetch\n' };
       }
       return { stdout: '' };
     };
@@ -684,7 +684,7 @@ describe('sweepWorktrees', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/19-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/19-feature\n\n`,
         };
       }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
@@ -700,7 +700,7 @@ describe('sweepWorktrees', () => {
         return { stdout: '' };
       }
       if (cmd.startsWith('git config --get')) {
-        return { stdout: 'refs/heads/ship-it/19-feature\n' };
+        return { stdout: 'refs/heads/factory/19-feature\n' };
       }
       return { stdout: '' };
     };
@@ -721,7 +721,7 @@ describe('sweepWorktrees', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/20-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/20-feature\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -794,7 +794,7 @@ describe('sweepWorktrees', () => {
       commands.push(cmd);
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/30-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/30-feature\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -815,7 +815,7 @@ describe('sweepWorktrees', () => {
     expect(report.removed[0].branchDeleted).toBe(true);
 
     const pruneIdx = commands.indexOf('git worktree prune');
-    const branchDeleteIdx = commands.indexOf("git branch -D 'ship-it/30-feature'");
+    const branchDeleteIdx = commands.indexOf("git branch -D 'factory/30-feature'");
     expect(pruneIdx).toBeGreaterThan(-1);
     expect(branchDeleteIdx).toBeGreaterThan(pruneIdx);
   });
@@ -830,7 +830,7 @@ describe('sweepWorktrees', () => {
       commands.push(cmd);
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/31-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/31-feature\n\n`,
         };
       }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
@@ -851,7 +851,7 @@ describe('sweepWorktrees', () => {
     expect(report.removed[0].branchDeleted).toBe(true);
 
     const pruneIdx = commands.indexOf('git worktree prune');
-    const branchDeleteIdx = commands.indexOf("git branch -D 'ship-it/31-feature'");
+    const branchDeleteIdx = commands.indexOf("git branch -D 'factory/31-feature'");
     expect(pruneIdx).toBeGreaterThan(-1);
     expect(branchDeleteIdx).toBeGreaterThan(pruneIdx);
   });
@@ -867,14 +867,14 @@ describe('sweepWorktrees', () => {
       commands.push(cmd);
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/32-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/32-feature\n\n`,
         };
       }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
         throw new Error('exit 1');
       }
       if (cmd.startsWith('git ls-remote')) {
-        return { stdout: 'bbb\trefs/heads/ship-it/32-feature\n' };
+        return { stdout: 'bbb\trefs/heads/factory/32-feature\n' };
       }
       return { stdout: '' };
     };
@@ -894,7 +894,7 @@ describe('sweepWorktrees', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/33-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/33-feature\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -987,7 +987,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       commands.push(cmd);
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/21-merged\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/21-merged\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -1013,7 +1013,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       owner: 'owner',
       repo: 'example-app',
       state: 'all',
-      head: 'owner:ship-it/21-merged',
+      head: 'owner:factory/21-merged',
     });
     expect(
       commands.some(
@@ -1034,7 +1034,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/22-open\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/22-open\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -1064,7 +1064,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/23-closed\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/23-closed\n\n`,
         };
       }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
@@ -1098,14 +1098,14 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/24-live\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/24-live\n\n`,
         };
       }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
         throw new Error('exit 1');
       }
       if (cmd.startsWith('git ls-remote')) {
-        return { stdout: 'xxx\trefs/heads/ship-it/24-live\n' }; // live upstream
+        return { stdout: 'xxx\trefs/heads/factory/24-live\n' }; // live upstream
       }
       return { stdout: '' };
     };
@@ -1132,14 +1132,14 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       commands.push(cmd);
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/200-live\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/200-live\n\n`,
         };
       }
       if (cmd.startsWith('git merge-base --is-ancestor')) {
         throw new Error('exit 1');
       }
       if (cmd.startsWith('git ls-remote')) {
-        return { stdout: 'xxx\trefs/heads/ship-it/200-live\n' }; // live upstream
+        return { stdout: 'xxx\trefs/heads/factory/200-live\n' }; // live upstream
       }
       return { stdout: '' };
     };
@@ -1165,7 +1165,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/25-delivered\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/25-delivered\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -1196,7 +1196,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/26-x\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/26-x\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -1228,7 +1228,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/27-x\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/27-x\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -1262,7 +1262,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/28-dirty\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/28-dirty\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -1294,7 +1294,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/28b-x\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/28b-x\n\n`,
         };
       }
       if (cmd.startsWith('git status --porcelain')) {
@@ -1323,7 +1323,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/28c-x\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/28c-x\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -1352,7 +1352,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/29-dirty\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/29-dirty\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -1384,7 +1384,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const runCommand = vi.fn(async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/8-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/8-feature\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -1426,7 +1426,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/9-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/9-feature\n\n`,
         };
       }
       if (cmd === 'git rev-parse --verify origin/main') {
@@ -1462,7 +1462,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const runCommand = async (cmd: string) => {
         commands.push(cmd);
         if (cmd === 'git worktree list --porcelain') {
-          return { stdout: laneListing(root, wt, 'ship-it/41-parked') };
+          return { stdout: laneListing(root, wt, 'factory/41-parked') };
         }
         return { stdout: '' }; // status probe => clean
       };
@@ -1474,7 +1474,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       expect(report.removed).toHaveLength(1);
       expect(report.removed[0].reason).toBe('issue-parked');
       expect(report.removed[0].branchDeleted).toBe(true);
-      expect(commands).toContain("git branch -D 'ship-it/41-parked'");
+      expect(commands).toContain("git branch -D 'factory/41-parked'");
       expect(issuesGet).toHaveBeenCalledWith({ owner: 'owner', repo: 'example-app', issue_number: 41 });
     });
 
@@ -1490,7 +1490,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const runCommand = async (cmd: string) => {
         commands.push(cmd);
         if (cmd === 'git worktree list --porcelain') {
-          return { stdout: laneListing(root, wt, 'ship-it/42-closed') };
+          return { stdout: laneListing(root, wt, 'factory/42-closed') };
         }
         if (cmd.startsWith('git ls-remote')) {
           return { stdout: '' }; // never pushed
@@ -1521,7 +1521,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       );
       const runCommand = async (cmd: string) => {
         if (cmd === 'git worktree list --porcelain') {
-          return { stdout: laneListing(root, wt, 'ship-it/43-dirty') };
+          return { stdout: laneListing(root, wt, 'factory/43-dirty') };
         }
         if (cmd.startsWith('git status --porcelain')) {
           return { stdout: ' M ship.ts\n' }; // live work
@@ -1545,7 +1545,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { octokit } = fakeOctokit(() => ({ data: [{ number: 9, state: 'open' }] }));
       const runCommand = async (cmd: string) => {
         if (cmd === 'git worktree list --porcelain') {
-          return { stdout: laneListing(root, wt, 'ship-it/44-live') };
+          return { stdout: laneListing(root, wt, 'factory/44-live') };
         }
         return { stdout: '' };
       };
@@ -1573,7 +1573,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
           return {
             stdout:
               `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\n` +
-              `worktree ${legacy}\nHEAD bbb\nbranch refs/heads/ship-it/9-x\n\n` +
+              `worktree ${legacy}\nHEAD bbb\nbranch refs/heads/factory/9-x\n\n` +
               `worktree ${manual}\nHEAD ccc\nbranch refs/heads/manual/foo\n\n`,
           };
         }
@@ -1604,7 +1604,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       );
       const runCommand = async (cmd: string) => {
         if (cmd === 'git worktree list --porcelain') {
-          return { stdout: laneListing(root, wt, 'ship-it/45-x') };
+          return { stdout: laneListing(root, wt, 'factory/45-x') };
         }
         return { stdout: '' };
       };
@@ -1633,7 +1633,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
         );
         const runCommand = async (cmd: string) => {
           if (cmd === 'git worktree list --porcelain') {
-            return { stdout: laneListing(root, wt, 'ship-it/9678562-ghost') };
+            return { stdout: laneListing(root, wt, 'factory/9678562-ghost') };
           }
           return { stdout: '' };
         };
@@ -1676,7 +1676,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
             return {
               stdout:
                 `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\n` +
-                `worktree ${wtA}\nHEAD bbb\nbranch refs/heads/ship-it/9678562-ghost\n\n`,
+                `worktree ${wtA}\nHEAD bbb\nbranch refs/heads/factory/9678562-ghost\n\n`,
             };
           }
           return { stdout: '' };
@@ -1694,8 +1694,8 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
             return {
               stdout:
                 `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\n` +
-                `worktree ${wtA}\nHEAD bbb\nbranch refs/heads/ship-it/9678562-ghost\n\n` +
-                `worktree ${wtB}\nHEAD ccc\nbranch refs/heads/ship-it/9872774-ghost\n\n`,
+                `worktree ${wtA}\nHEAD bbb\nbranch refs/heads/factory/9678562-ghost\n\n` +
+                `worktree ${wtB}\nHEAD ccc\nbranch refs/heads/factory/9872774-ghost\n\n`,
             };
           }
           return { stdout: '' };
@@ -1729,7 +1729,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
         );
         const withWorktree = async (cmd: string) => {
           if (cmd === 'git worktree list --porcelain') {
-            return { stdout: laneListing(root, wt, 'ship-it/9678562-ghost') };
+            return { stdout: laneListing(root, wt, 'factory/9678562-ghost') };
           }
           return { stdout: '' };
         };
@@ -1753,7 +1753,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
         const wt2 = makeWorktree(`${basename(root)}-factory-ship-it-9678562-b`);
         const reappeared = async (cmd: string) => {
           if (cmd === 'git worktree list --porcelain') {
-            return { stdout: laneListing(root, wt2, 'ship-it/9678562-ghost') };
+            return { stdout: laneListing(root, wt2, 'factory/9678562-ghost') };
           }
           return { stdout: '' };
         };
@@ -1784,8 +1784,8 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
           return {
             stdout:
               `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\n` +
-              `worktree ${wtA}\nHEAD bbb\nbranch refs/heads/ship-it/46-x\n\n` +
-              `worktree ${wtB}\nHEAD ccc\nbranch refs/heads/ship-it/46-y\n\n`,
+              `worktree ${wtA}\nHEAD bbb\nbranch refs/heads/factory/46-x\n\n` +
+              `worktree ${wtB}\nHEAD ccc\nbranch refs/heads/factory/46-y\n\n`,
           };
         }
         return { stdout: '' };
@@ -1851,14 +1851,14 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
           throw Object.assign(new Error('Not Found'), { status: 404 });
         },
       );
-      const { commands, runCommand } = noOtherReasonRunCommand(root, wt, 'ship-it/50-ghost');
+      const { commands, runCommand } = noOtherReasonRunCommand(root, wt, 'factory/50-ghost');
 
       const report = await sweepWorktrees(
         { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
         { runCommand, octokit },
       );
 
-      expect(report.issueNotFound).toEqual([{ path: wt, branch: 'ship-it/50-ghost', issue: 50 }]);
+      expect(report.issueNotFound).toEqual([{ path: wt, branch: 'factory/50-ghost', issue: 50 }]);
       expect(report.issueUnverifiable).toEqual([]);
       expect(report.removed).toEqual([]);
       expect(commands.some((c) => c.includes('worktree remove'))).toBe(false);
@@ -1870,7 +1870,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-51`);
 
       const { octokit } = fakeOctokit(() => ({ data: [] }));
-      const { runCommand } = noOtherReasonRunCommand(root, wt, 'ship-it/51-live');
+      const { runCommand } = noOtherReasonRunCommand(root, wt, 'factory/51-live');
 
       const report = await sweepWorktrees(
         { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
@@ -1891,7 +1891,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
           throw Object.assign(new Error('API rate limit exceeded'), { status: 403 });
         },
       );
-      const { runCommand } = noOtherReasonRunCommand(root, wt, 'ship-it/52-flaky');
+      const { runCommand } = noOtherReasonRunCommand(root, wt, 'factory/52-flaky');
 
       const logs: Array<[string, string]> = [];
       const report = await sweepWorktrees(
@@ -1899,7 +1899,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
         { runCommand, octokit, log: (type, msg) => logs.push([type, msg]) },
       );
 
-      expect(report.issueUnverifiable).toEqual([{ path: wt, branch: 'ship-it/52-flaky', issue: 52 }]);
+      expect(report.issueUnverifiable).toEqual([{ path: wt, branch: 'factory/52-flaky', issue: 52 }]);
       expect(report.issueNotFound).toEqual([]);
       expect(logs.some(([type, msg]) => type === 'warn' && msg.includes('#52'))).toBe(true);
     });
@@ -1914,7 +1914,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
           throw Object.assign(new Error('Not Found'), { status: 404 });
         },
       );
-      const { runCommand } = noOtherReasonRunCommand(root, wt, 'ship-it/53-real');
+      const { runCommand } = noOtherReasonRunCommand(root, wt, 'factory/53-real');
 
       const report = await sweepWorktrees(
         { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
@@ -1938,7 +1938,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
           throw Object.assign(new Error('Not Found'), { status: 404 });
         },
       );
-      const { commands, runCommand } = noOtherReasonRunCommand(root, wt, 'ship-it/54-ghost');
+      const { commands, runCommand } = noOtherReasonRunCommand(root, wt, 'factory/54-ghost');
 
       const logs: Array<[string, string]> = [];
       const report = await sweepWorktrees(
@@ -1979,8 +1979,8 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
           return {
             stdout:
               `worktree ${root}\nHEAD bbb\nbranch refs/heads/main\n\n` +
-              `worktree ${ghost}\nHEAD bbb\nbranch refs/heads/ship-it/55-ghost\n\n` +
-              `worktree ${healthy}\nHEAD bbb\nbranch refs/heads/ship-it/56-live\n\n`,
+              `worktree ${ghost}\nHEAD bbb\nbranch refs/heads/factory/55-ghost\n\n` +
+              `worktree ${healthy}\nHEAD bbb\nbranch refs/heads/factory/56-live\n\n`,
           };
         }
         if (cmd === 'git rev-parse --verify origin/main') return { stdout: 'bbb\n' };
@@ -2027,14 +2027,14 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
         () => ({ data: [{ number: 1, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
         () => ({ data: { state: 'open', labels: [] } }),
       );
-      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/60-done');
+      const { runCommand } = cleanRunCommand(root, wt, 'factory/60-done');
 
       const report = await sweepWorktrees(
         { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
         { runCommand, octokit },
       );
 
-      expect(report.noActiveClaim).toEqual([{ path: wt, branch: 'ship-it/60-done', issue: 60, prState: 'merged' }]);
+      expect(report.noActiveClaim).toEqual([{ path: wt, branch: 'factory/60-done', issue: 60, prState: 'merged' }]);
     });
 
     it('flags a closed (unmerged) PR worktree whose issue has no active claim label', async () => {
@@ -2045,7 +2045,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
         () => ({ data: [{ number: 2, state: 'closed' }] }),
         () => ({ data: { state: 'open', labels: [] } }),
       );
-      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/61-abandoned');
+      const { runCommand } = cleanRunCommand(root, wt, 'factory/61-abandoned');
 
       const report = await sweepWorktrees(
         { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
@@ -2053,7 +2053,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       );
 
       expect(report.noActiveClaim).toEqual([
-        { path: wt, branch: 'ship-it/61-abandoned', issue: 61, prState: 'closed' },
+        { path: wt, branch: 'factory/61-abandoned', issue: 61, prState: 'closed' },
       ]);
     });
 
@@ -2065,7 +2065,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
         () => ({ data: [{ number: 3, state: 'open' }] }),
         () => ({ data: { state: 'open', labels: [] } }),
       );
-      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/62-active');
+      const { runCommand } = cleanRunCommand(root, wt, 'factory/62-active');
 
       const report = await sweepWorktrees(
         { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
@@ -2083,7 +2083,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
         () => ({ data: [{ number: 4, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
         () => ({ data: { state: 'open', labels: ['factory:claimed-by:lane-7'] } }),
       );
-      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/63-claimed');
+      const { runCommand } = cleanRunCommand(root, wt, 'factory/63-claimed');
 
       const report = await sweepWorktrees(
         { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
@@ -2102,14 +2102,14 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
         () => ({ data: [{ number: 7, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
         () => ({ data: { state: 'open', labels: ['factory:claimed-by:lane-7', expiredLabel] } }),
       );
-      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/66-lapsed');
+      const { runCommand } = cleanRunCommand(root, wt, 'factory/66-lapsed');
 
       const report = await sweepWorktrees(
         { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
         { runCommand, octokit },
       );
 
-      expect(report.noActiveClaim).toEqual([{ path: wt, branch: 'ship-it/66-lapsed', issue: 66, prState: 'merged' }]);
+      expect(report.noActiveClaim).toEqual([{ path: wt, branch: 'factory/66-lapsed', issue: 66, prState: 'merged' }]);
     });
 
     it('does not flag a merged-PR worktree whose claim label carries a live (unexpired) lease', async () => {
@@ -2121,7 +2121,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
         () => ({ data: [{ number: 8, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
         () => ({ data: { state: 'open', labels: ['factory:claimed-by:lane-7', liveLabel] } }),
       );
-      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/67-active-lease');
+      const { runCommand } = cleanRunCommand(root, wt, 'factory/67-active-lease');
 
       const report = await sweepWorktrees(
         { repoRoot: root, ttlDays: 7, dryRun: true, repo: 'owner/example-app' },
@@ -2141,7 +2141,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
           throw Object.assign(new Error('API rate limit exceeded'), { status: 403 });
         },
       );
-      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/64-flaky');
+      const { runCommand } = cleanRunCommand(root, wt, 'factory/64-flaky');
 
       const logs: Array<[string, string]> = [];
       const report = await sweepWorktrees(
@@ -2161,7 +2161,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
         () => ({ data: [{ number: 6, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
         () => ({ data: { state: 'open', labels: [] } }),
       );
-      const { runCommand } = cleanRunCommand(root, wt, 'ship-it/65-nondry');
+      const { runCommand } = cleanRunCommand(root, wt, 'factory/65-nondry');
 
       const report = await sweepWorktrees(
         { repoRoot: root, ttlDays: 7, repo: 'owner/example-app' },
@@ -2197,7 +2197,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const commands: string[] = [];
       const runCommand = async (cmd: string) => {
         commands.push(cmd);
-        if (cmd === 'git worktree list --porcelain') return { stdout: listing(root, wt, 'ship-it/61-big') };
+        if (cmd === 'git worktree list --porcelain') return { stdout: listing(root, wt, 'factory/61-big') };
         if (cmd.startsWith('git status --porcelain')) return { stdout: opts.dirty ? ' M file\n' : '' };
         if (cmd.includes('--not --remotes=origin')) {
           if (opts.unpushed === 'throw') throw new Error('boom');
@@ -2218,7 +2218,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       expect(report.removed[0].reason).toBe('issue-decomposed');
       expect(report.removed[0].branchDeleted).toBe(true);
       expect(h.commands.some((c) => c.startsWith('git worktree remove --force'))).toBe(true);
-      expect(h.commands).toContain("git branch -D 'ship-it/61-big'");
+      expect(h.commands).toContain("git branch -D 'factory/61-big'");
       expect(report.held).toEqual([]);
     });
 
@@ -2287,7 +2287,7 @@ describe('formatGcReport', () => {
       removed: [
         {
           path: '/repo/foo-factory-ship-it-1',
-          branch: 'ship-it/1-x',
+          branch: 'factory/1-x',
           ageDays: 3.2,
           reason: 'merged',
           scrubbedFiles: [],
@@ -2300,7 +2300,7 @@ describe('formatGcReport', () => {
       noActiveClaim: [],
       held: [],
     });
-    expect(text).toContain('/repo/foo-factory-ship-it-1 (ship-it/1-x, 3d old) — merged');
+    expect(text).toContain('/repo/foo-factory-ship-it-1 (factory/1-x, 3d old) — merged');
     expect(text).toContain('would remove 1 worktree(s), kept 2');
   });
 
@@ -2337,7 +2337,7 @@ describe('formatGcReport', () => {
       removed: [
         {
           path: '/repo/foo-factory-ship-it-3',
-          branch: 'ship-it/3-x',
+          branch: 'factory/3-x',
           ageDays: 1,
           reason: 'merged',
           scrubbedFiles: [],
@@ -2350,7 +2350,7 @@ describe('formatGcReport', () => {
       noActiveClaim: [],
       held: [],
     });
-    expect(text).toContain('/repo/foo-factory-ship-it-3 (ship-it/3-x, 1d old) — merged, deleted branch ship-it/3-x');
+    expect(text).toContain('/repo/foo-factory-ship-it-3 (factory/3-x, 1d old) — merged, deleted branch factory/3-x');
   });
 
   it('omits the deleted-branch suffix when branchDeleted is false', () => {
@@ -2360,7 +2360,7 @@ describe('formatGcReport', () => {
       removed: [
         {
           path: '/repo/foo-factory-ship-it-4',
-          branch: 'ship-it/4-x',
+          branch: 'factory/4-x',
           ageDays: 1,
           reason: 'ttl-expired',
           scrubbedFiles: [],
@@ -2381,15 +2381,15 @@ describe('formatGcReport', () => {
       dryRun: true,
       kept: 0,
       removed: [],
-      issueNotFound: [{ path: '/repo/foo-factory-ship-it-5', branch: 'ship-it/5-x', issue: 5 }],
-      issueUnverifiable: [{ path: '/repo/foo-factory-ship-it-6', branch: 'ship-it/6-x', issue: 6 }],
+      issueNotFound: [{ path: '/repo/foo-factory-ship-it-5', branch: 'factory/5-x', issue: 5 }],
+      issueUnverifiable: [{ path: '/repo/foo-factory-ship-it-6', branch: 'factory/6-x', issue: 6 }],
       noActiveClaim: [],
       held: [],
     });
     expect(text).toContain('1 worktree(s) flagged — owning issue not found (404):');
-    expect(text).toContain('  /repo/foo-factory-ship-it-5 (ship-it/5-x) — issue #5 not found');
+    expect(text).toContain('  /repo/foo-factory-ship-it-5 (factory/5-x) — issue #5 not found');
     expect(text).toContain('1 worktree(s) unverifiable — GitHub issue lookup failed:');
-    expect(text).toContain('  /repo/foo-factory-ship-it-6 (ship-it/6-x) — issue #6 unverifiable');
+    expect(text).toContain('  /repo/foo-factory-ship-it-6 (factory/6-x) — issue #6 unverifiable');
   });
 
   it('renders the noActiveClaim section when present', () => {
@@ -2399,11 +2399,11 @@ describe('formatGcReport', () => {
       removed: [],
       issueNotFound: [],
       issueUnverifiable: [],
-      noActiveClaim: [{ path: '/repo/foo-factory-ship-it-7', branch: 'ship-it/7-x', issue: 7, prState: 'merged' }],
+      noActiveClaim: [{ path: '/repo/foo-factory-ship-it-7', branch: 'factory/7-x', issue: 7, prState: 'merged' }],
       held: [],
     });
     expect(text).toContain('1 worktree(s) flagged — merged/closed PR with no active claim:');
-    expect(text).toContain('  /repo/foo-factory-ship-it-7 (ship-it/7-x) — issue #7 merged, no active claim');
+    expect(text).toContain('  /repo/foo-factory-ship-it-7 (factory/7-x) — issue #7 merged, no active claim');
   });
 
   it('renders a quarantine suffix and splits the summary counts', () => {
@@ -2413,7 +2413,7 @@ describe('formatGcReport', () => {
       removed: [
         {
           path: '/repo/foo-factory-ship-it-8',
-          branch: 'ship-it/8-x',
+          branch: 'factory/8-x',
           ageDays: 4,
           reason: 'merged',
           scrubbedFiles: [],
@@ -2422,7 +2422,7 @@ describe('formatGcReport', () => {
         },
         {
           path: '/repo/foo-factory-ship-it-9',
-          branch: 'ship-it/9-ghost',
+          branch: 'factory/9-ghost',
           ageDays: 2,
           reason: 'issue-not-found',
           scrubbedFiles: [],
@@ -2437,7 +2437,7 @@ describe('formatGcReport', () => {
       held: [],
     });
     expect(text).toContain(
-      '/repo/foo-factory-ship-it-9 (ship-it/9-ghost, 2d old) — issue-not-found, quarantined to /repo/.factory/state/quarantine/foo-factory-ship-it-9',
+      '/repo/foo-factory-ship-it-9 (factory/9-ghost, 2d old) — issue-not-found, quarantined to /repo/.factory/state/quarantine/foo-factory-ship-it-9',
     );
     expect(text).toContain('removed 1 worktree(s), quarantined 1, kept 1');
   });
@@ -2453,7 +2453,7 @@ describe('formatGcReport', () => {
       held: [
         {
           path: '/repo/foo-factory-ship-it-3',
-          branch: 'ship-it/3-x',
+          branch: 'factory/3-x',
           issue: 3,
           why: 'decomposed parent has uncommitted changes',
         },
@@ -2461,7 +2461,7 @@ describe('formatGcReport', () => {
     });
     expect(text).toContain('1 worktree(s) kept — decomposed parent with local work:');
     expect(text).toContain(
-      '/repo/foo-factory-ship-it-3 (ship-it/3-x) — issue #3: decomposed parent has uncommitted changes',
+      '/repo/foo-factory-ship-it-3 (factory/3-x) — issue #3: decomposed parent has uncommitted changes',
     );
   });
 });

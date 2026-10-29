@@ -300,7 +300,7 @@ async function runSimIssue(
       docker: { rolloutPercent: 0 },
     },
     budget: {},
-    effective: { localOnly: false, allowExperimental: false, codexDisabled: false, branchPrefix: 'ship-it' },
+    effective: { localOnly: false, allowExperimental: false, codexDisabled: false, branchPrefix: 'factory' },
   };
   const router = new ModelRouter(policy.models, policy.routes, false, routedExecutor);
   let route: BuildRoutePin = 'claude';
