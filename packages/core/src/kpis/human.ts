@@ -1,7 +1,7 @@
 // src/kpis/human.ts — Reconstruct explicit human-intervention events (#420)
 
 import { isParkKind } from '../events/kinds.js';
-import { branchPrefixSlug, factoryBranchIssue, LEGACY_BRANCH_PREFIX } from '../utils/index.js';
+import { branchPrefixSlug, factoryBranchIssue } from '../utils/index.js';
 import type { FactoryEvent, HumanEventType } from '../types/index.js';
 
 export const HUMAN_EVENT_TYPES: ReadonlySet<string> = new Set<HumanEventType>([
@@ -25,7 +25,7 @@ export interface CommitSource {
 }
 
 export interface PrSource {
-  issue: string; // numeric string parsed from the factory/<n>- or legacy-prefix (LEGACY_BRANCH_PREFIX) <n>- branch
+  issue: string; // numeric string parsed from the `<prefix>/<n>-` branch
   prNumber: number;
   commits: CommitSource[];
   /** Approving reviews. */
@@ -165,9 +165,9 @@ export interface HumanSourceClient {
 /** Branch prefix used by factory runs since #1714, recognised for KPIs whatever the configured prefix (#2342). */
 const FACTORY_BRANCH_PREFIX = 'factory';
 
-/** Prefixes whose PRs count as factory PRs for KPI reconstruction: configured slug, `factory`, legacy `ship-it`, deduped, in that order (#2342). */
+/** Prefixes whose PRs count as factory PRs for KPI reconstruction: configured slug, then `factory`, deduped (#2342). */
 export function kpiBranchPrefixes(configured?: string): string[] {
-  return [...new Set([branchPrefixSlug(configured), FACTORY_BRANCH_PREFIX, LEGACY_BRANCH_PREFIX])];
+  return [...new Set([branchPrefixSlug(configured), FACTORY_BRANCH_PREFIX])];
 }
 
 export interface KpiReconstruction {

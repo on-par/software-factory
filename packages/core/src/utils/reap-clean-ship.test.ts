@@ -26,7 +26,7 @@ describe('reapCleanShipWorktree', () => {
   it('removes a clean zero-commit lane worktree and deletes its branch', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 401);
-    const branch = 'ship-it/401-x';
+    const branch = 'factory/401-x';
     await setupWorktree(repoRoot, branch, worktree);
 
     const result = await reapCleanShipWorktree(repoRoot, worktree, { issue: 401 });
@@ -39,7 +39,7 @@ describe('reapCleanShipWorktree', () => {
   it('keeps a worktree with commits beyond the base', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 402);
-    const branch = 'ship-it/402-x';
+    const branch = 'factory/402-x';
     await setupWorktree(repoRoot, branch, worktree);
     writeFileSync(join(worktree, 'WORK.txt'), 'work\n');
     await execFile('git', ['add', 'WORK.txt'], { cwd: worktree });
@@ -55,7 +55,7 @@ describe('reapCleanShipWorktree', () => {
   it('keeps the worktree as kept-unverified when commits beyond the base cannot be counted', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 409);
-    const branch = 'ship-it/409-x';
+    const branch = 'factory/409-x';
     await setupWorktree(repoRoot, branch, worktree);
     await execFile('git', ['update-ref', '-d', 'refs/remotes/origin/main'], { cwd: repoRoot });
     await execFile('git', ['symbolic-ref', '-d', 'refs/remotes/origin/HEAD'], { cwd: repoRoot }).catch(() => {});
@@ -70,7 +70,7 @@ describe('reapCleanShipWorktree', () => {
   it('keeps a worktree with modified tracked files', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 403);
-    const branch = 'ship-it/403-x';
+    const branch = 'factory/403-x';
     await setupWorktree(repoRoot, branch, worktree);
     writeFileSync(join(worktree, 'README.md'), 'live uncommitted work\n');
 
@@ -83,7 +83,7 @@ describe('reapCleanShipWorktree', () => {
   it('keeps a worktree with untracked files', async () => {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 404);
-    const branch = 'ship-it/404-x';
+    const branch = 'factory/404-x';
     await setupWorktree(repoRoot, branch, worktree);
     writeFileSync(join(worktree, 'NEW.txt'), 'untracked\n');
 

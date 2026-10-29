@@ -10,7 +10,7 @@ import { IssueWarnDedup } from './worktree-gc-types.js';
 import { sweepWorktrees } from './worktree-gc.js';
 
 const PORCELAIN = [1, 2, 3]
-  .map((n) => `worktree /nonexistent/repo-factory-${n}\nHEAD h${n}\nbranch refs/heads/ship-it/7-w${n}\n`)
+  .map((n) => `worktree /nonexistent/repo-factory-${n}\nHEAD h${n}\nbranch refs/heads/factory/7-w${n}\n`)
   .join('\n');
 
 function fakes() {
@@ -45,7 +45,7 @@ describe('gatherWorktreeEvidence', () => {
         repoRoot: '/nonexistent/repo',
         repo: 'o/r',
         dryRun: false,
-        lanePattern: /^ship-it\/(\d+)-/,
+        lanePattern: /^factory\/(\d+)-/,
         protectedIssues: new Set([7]),
         keeps: new Map(),
         mainTip: null,
@@ -55,7 +55,7 @@ describe('gatherWorktreeEvidence', () => {
     const e = await gatherWorktreeEvidence(ctx, {
       path: '/nonexistent/repo-factory-1',
       head: 'h',
-      branch: 'ship-it/7-w',
+      branch: 'factory/7-w',
     });
     expect(e.protected).toBe(true);
     expect(issuesGet).not.toHaveBeenCalled();
@@ -119,7 +119,7 @@ describe('sweep with a stalled remote', () => {
       commands.push(cmd);
       if (cmd === 'git worktree list --porcelain') {
         return {
-          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/ship-it/6-feature\n\n`,
+          stdout: `worktree ${root}\nHEAD aaa\nbranch refs/heads/main\n\nworktree ${wt}\nHEAD bbb\nbranch refs/heads/factory/6-feature\n\n`,
         };
       }
       if (cmd.startsWith('git merge-base --is-ancestor')) throw new Error('exit 1');
