@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-
+import { fakeOctokit } from '../harness/fake-octokit.js';
 import { claimExpiresLabel } from '../queue/github-queue.js';
 import {
   findCredentialFiles,
@@ -960,7 +960,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     return double as NonNullable<SweepDeps['octokit']>;
   }
 
-  function fakeOctokit(
+  function octokitFixture(
     result: () => Promise<{ data: Array<Record<string, unknown>> }> | { data: Array<Record<string, unknown>> },
     issueResult: () => Promise<{ data: Record<string, unknown> }> | { data: Record<string, unknown> } = () => ({
       // Default: an open, unlabeled issue — no issue-disposition verdict beyond 'keep', so the
@@ -970,8 +970,8 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
   ) {
     const pullsList = vi.fn(async (_params: unknown) => result());
     const issuesGet = vi.fn(async (_params: unknown) => issueResult());
-    const octokit = asSweepOctokit({ rest: { pulls: { list: pullsList }, issues: { get: issuesGet } } });
-    return { octokit, pullsList, issuesGet };
+    const { octokit } = fakeOctokit({ 'pulls.list': pullsList, 'issues.get': issuesGet });
+    return { octokit: asSweepOctokit(octokit), pullsList, issuesGet };
   }
 
   it('removes a worktree whose branch has a merged PR on GitHub with zero local push evidence', async () => {
@@ -979,7 +979,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const wtName = `${basename(root)}-factory-ship-it-21`;
     const wt = makeWorktree(wtName);
 
-    const { octokit, pullsList } = fakeOctokit(async () => ({
+    const { octokit, pullsList } = octokitFixture(async () => ({
       data: [{ number: 1, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }],
     }));
     const commands: string[] = [];
@@ -1030,7 +1030,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const wtName = `${basename(root)}-factory-ship-it-22`;
     const wt = makeWorktree(wtName);
 
-    const { octokit } = fakeOctokit(async () => ({ data: [{ number: 1, state: 'open' }] }));
+    const { octokit } = octokitFixture(async () => ({ data: [{ number: 1, state: 'open' }] }));
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
@@ -1060,7 +1060,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const wtName = `${basename(root)}-factory-ship-it-23`;
     const wt = makeWorktree(wtName);
 
-    const { octokit } = fakeOctokit(async () => ({ data: [{ number: 1, state: 'closed', merged_at: null }] }));
+    const { octokit } = octokitFixture(async () => ({ data: [{ number: 1, state: 'closed', merged_at: null }] }));
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
@@ -1091,7 +1091,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     // An active claim label neutralizes the #1355 no-active-claim quarantine tier below, so this
     // fixture isolates exactly what it's named for: the PR-state/local-evidence chain alone.
-    const { octokit } = fakeOctokit(
+    const { octokit } = octokitFixture(
       async () => ({ data: [{ number: 1, state: 'closed', merged_at: null }] }),
       () => ({ data: { state: 'open', labels: ['factory:claimed-by:lane-24'] } }),
     );
@@ -1126,7 +1126,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
 
     // Same PR/remote shape as the 'kept' case above, but no active claim label — the lane
     // finished (or was abandoned) per GitHub, so #1355's heuristic tier now quarantines it.
-    const { octokit } = fakeOctokit(async () => ({ data: [{ number: 1, state: 'closed', merged_at: null }] }));
+    const { octokit } = octokitFixture(async () => ({ data: [{ number: 1, state: 'closed', merged_at: null }] }));
     const commands: string[] = [];
     const runCommand = async (cmd: string) => {
       commands.push(cmd);
@@ -1161,7 +1161,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const wtName = `${basename(root)}-factory-ship-it-25`;
     const wt = makeWorktree(wtName);
 
-    const { octokit } = fakeOctokit(async () => ({ data: [{ number: 1, state: 'closed', merged_at: null }] }));
+    const { octokit } = octokitFixture(async () => ({ data: [{ number: 1, state: 'closed', merged_at: null }] }));
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
@@ -1190,7 +1190,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const wtName = `${basename(root)}-factory-ship-it-26`;
     const wt = makeWorktree(wtName);
 
-    const { octokit } = fakeOctokit(async () => {
+    const { octokit } = octokitFixture(async () => {
       throw new Error('rate limited');
     });
     const runCommand = async (cmd: string) => {
@@ -1224,7 +1224,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const wtName = `${basename(root)}-factory-ship-it-27`;
     const wt = makeWorktree(wtName);
 
-    const { octokit } = fakeOctokit(async () => ({ data: [] }));
+    const { octokit } = octokitFixture(async () => ({ data: [] }));
     const runCommand = async (cmd: string) => {
       if (cmd === 'git worktree list --porcelain') {
         return {
@@ -1256,7 +1256,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const wtName = `${basename(root)}-factory-ship-it-28`;
     const wt = makeWorktree(wtName);
 
-    const { octokit } = fakeOctokit(async () => ({
+    const { octokit } = octokitFixture(async () => ({
       data: [{ number: 1, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }],
     }));
     const runCommand = async (cmd: string) => {
@@ -1288,7 +1288,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const wtName = `${basename(root)}-factory-ship-it-28b`;
     const wt = makeWorktree(wtName);
 
-    const { octokit } = fakeOctokit(async () => ({
+    const { octokit } = octokitFixture(async () => ({
       data: [{ number: 1, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }],
     }));
     const runCommand = async (cmd: string) => {
@@ -1317,7 +1317,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     const wtName = `${basename(root)}-factory-ship-it-28c`;
     const wt = makeWorktree(wtName);
 
-    const { octokit, pullsList } = fakeOctokit(async () => ({
+    const { octokit, pullsList } = octokitFixture(async () => ({
       data: [{ number: 1, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }],
     }));
     const runCommand = async (cmd: string) => {
@@ -1454,7 +1454,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-41`);
 
-      const { octokit, issuesGet } = fakeOctokit(
+      const { octokit, issuesGet } = octokitFixture(
         () => ({ data: [{ number: 9, state: 'open' }] }),
         () => ({ data: { state: 'open', labels: [{ name: 'factory:parked' }] } }),
       );
@@ -1482,7 +1482,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-42`);
 
-      const { octokit } = fakeOctokit(
+      const { octokit } = octokitFixture(
         () => ({ data: [] }), // no PR ever existed
         () => ({ data: { state: 'closed', labels: [] } }),
       );
@@ -1515,7 +1515,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-43`);
 
-      const { octokit } = fakeOctokit(
+      const { octokit } = octokitFixture(
         () => ({ data: [{ number: 9, state: 'open' }] }),
         () => ({ data: { state: 'open', labels: [{ name: 'factory:parked' }] } }),
       );
@@ -1542,7 +1542,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-44`);
 
-      const { octokit } = fakeOctokit(() => ({ data: [{ number: 9, state: 'open' }] }));
+      const { octokit } = octokitFixture(() => ({ data: [{ number: 9, state: 'open' }] }));
       const runCommand = async (cmd: string) => {
         if (cmd === 'git worktree list --porcelain') {
           return { stdout: laneListing(root, wt, 'factory/44-live') };
@@ -1564,7 +1564,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const legacy = makeWorktree(`${basename(root)}-ship-it-9`);
       const manual = makeWorktree(`${basename(root)}-manual-x`);
 
-      const { octokit, issuesGet } = fakeOctokit(
+      const { octokit, issuesGet } = octokitFixture(
         () => ({ data: [{ number: 3, state: 'open' }] }),
         () => ({ data: { state: 'open', labels: [{ name: 'factory:parked' }] } }),
       );
@@ -1596,7 +1596,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-45`);
 
-      const { octokit } = fakeOctokit(
+      const { octokit } = octokitFixture(
         () => ({ data: [{ number: 9, state: 'open' }] }), // open PR ⇒ keep on the fallback path
         () => {
           throw new Error('rate limited');
@@ -1625,7 +1625,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
         const { repoRoot: root } = setup();
         const wt = makeWorktree(`${basename(root)}-factory-ship-it-9678562`);
 
-        const { octokit } = fakeOctokit(
+        const { octokit } = octokitFixture(
           () => ({ data: [] }),
           () => {
             throw Object.assign(new Error('Not Found'), { status: 404 });
@@ -1665,7 +1665,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
         const wtA = makeWorktree(`${basename(root)}-factory-ship-it-9678562`);
         const wtB = makeWorktree(`${basename(root)}-factory-ship-it-9872774`);
 
-        const { octokit } = fakeOctokit(
+        const { octokit } = octokitFixture(
           () => ({ data: [] }),
           () => {
             throw Object.assign(new Error('Not Found'), { status: 404 });
@@ -1721,7 +1721,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
         const { repoRoot: root } = setup();
         const wt = makeWorktree(`${basename(root)}-factory-ship-it-9678562`);
 
-        const { octokit } = fakeOctokit(
+        const { octokit } = octokitFixture(
           () => ({ data: [] }),
           () => {
             throw Object.assign(new Error('Not Found'), { status: 404 });
@@ -1775,7 +1775,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const wtA = makeWorktree(`${basename(root)}-factory-ship-it-46`);
       const wtB = makeWorktree(`${basename(root)}-ship-it-46`);
 
-      const { octokit, issuesGet } = fakeOctokit(
+      const { octokit, issuesGet } = octokitFixture(
         () => ({ data: [{ number: 9, state: 'open' }] }),
         () => ({ data: { state: 'closed', labels: [] } }),
       );
@@ -1803,7 +1803,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-lane-47`);
 
-      const { octokit, issuesGet } = fakeOctokit(
+      const { octokit, issuesGet } = octokitFixture(
         () => ({ data: [{ number: 9, state: 'open' }] }),
         () => ({ data: { state: 'closed', labels: [] } }),
       );
@@ -1845,7 +1845,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-50`);
 
-      const { octokit, issuesGet } = fakeOctokit(
+      const { octokit, issuesGet } = octokitFixture(
         () => ({ data: [] }), // no PR
         () => {
           throw Object.assign(new Error('Not Found'), { status: 404 });
@@ -1869,7 +1869,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-51`);
 
-      const { octokit } = fakeOctokit(() => ({ data: [] }));
+      const { octokit } = octokitFixture(() => ({ data: [] }));
       const { runCommand } = noOtherReasonRunCommand(root, wt, 'factory/51-live');
 
       const report = await sweepWorktrees(
@@ -1885,7 +1885,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-52`);
 
-      const { octokit } = fakeOctokit(
+      const { octokit } = octokitFixture(
         () => ({ data: [] }),
         () => {
           throw Object.assign(new Error('API rate limit exceeded'), { status: 403 });
@@ -1908,7 +1908,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-53`);
 
-      const { octokit } = fakeOctokit(
+      const { octokit } = octokitFixture(
         () => ({ data: [{ number: 1, state: 'open' }] }), // open PR ⇒ keep, no removal
         () => {
           throw Object.assign(new Error('Not Found'), { status: 404 });
@@ -1932,7 +1932,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-54`);
 
-      const { octokit } = fakeOctokit(
+      const { octokit } = octokitFixture(
         () => ({ data: [] }), // no PR ⇒ no hard-evidence reason
         () => {
           throw Object.assign(new Error('Not Found'), { status: 404 });
@@ -2023,7 +2023,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-60`);
 
-      const { octokit } = fakeOctokit(
+      const { octokit } = octokitFixture(
         () => ({ data: [{ number: 1, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
         () => ({ data: { state: 'open', labels: [] } }),
       );
@@ -2041,7 +2041,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-61`);
 
-      const { octokit } = fakeOctokit(
+      const { octokit } = octokitFixture(
         () => ({ data: [{ number: 2, state: 'closed' }] }),
         () => ({ data: { state: 'open', labels: [] } }),
       );
@@ -2061,7 +2061,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-62`);
 
-      const { octokit } = fakeOctokit(
+      const { octokit } = octokitFixture(
         () => ({ data: [{ number: 3, state: 'open' }] }),
         () => ({ data: { state: 'open', labels: [] } }),
       );
@@ -2079,7 +2079,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-63`);
 
-      const { octokit } = fakeOctokit(
+      const { octokit } = octokitFixture(
         () => ({ data: [{ number: 4, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
         () => ({ data: { state: 'open', labels: ['factory:claimed-by:lane-7'] } }),
       );
@@ -2098,7 +2098,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-66`);
 
       const expiredLabel = claimExpiresLabel(Math.floor(Date.now() / 1000) - 3600);
-      const { octokit } = fakeOctokit(
+      const { octokit } = octokitFixture(
         () => ({ data: [{ number: 7, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
         () => ({ data: { state: 'open', labels: ['factory:claimed-by:lane-7', expiredLabel] } }),
       );
@@ -2117,7 +2117,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-67`);
 
       const liveLabel = claimExpiresLabel(Math.floor(Date.now() / 1000) + 3600);
-      const { octokit } = fakeOctokit(
+      const { octokit } = octokitFixture(
         () => ({ data: [{ number: 8, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
         () => ({ data: { state: 'open', labels: ['factory:claimed-by:lane-7', liveLabel] } }),
       );
@@ -2135,7 +2135,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-64`);
 
-      const { octokit } = fakeOctokit(
+      const { octokit } = octokitFixture(
         () => ({ data: [{ number: 5, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
         () => {
           throw Object.assign(new Error('API rate limit exceeded'), { status: 403 });
@@ -2157,7 +2157,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-65`);
 
-      const { octokit, issuesGet } = fakeOctokit(
+      const { octokit, issuesGet } = octokitFixture(
         () => ({ data: [{ number: 6, state: 'closed', merged_at: '2026-08-14T00:00:00Z' }] }),
         () => ({ data: { state: 'open', labels: [] } }),
       );
@@ -2190,7 +2190,7 @@ describe('sweepWorktrees with GitHub PR evidence', () => {
     function harness(opts: { unpushed?: string; beyondBase?: string; dirty?: boolean; openPr?: boolean }) {
       const { repoRoot: root } = setup();
       const wt = makeWorktree(`${basename(root)}-factory-ship-it-61`);
-      const { octokit } = fakeOctokit(
+      const { octokit } = octokitFixture(
         () => ({ data: opts.openPr ? [{ number: 5, state: 'open' }] : [] }),
         DECOMPOSED_ISSUE,
       );

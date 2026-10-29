@@ -1,5 +1,6 @@
 import type { Octokit } from '@octokit/rest';
 import { describe, expect, it, vi } from 'vitest';
+import { fakeOctokit } from '../harness/fake-octokit.js';
 
 import type { FactoryLogger } from '../logger/index.js';
 import { createGithubProjectQueuePoller, createOctokitGraphqlClient } from './github-project-graphql.js';
@@ -52,15 +53,15 @@ function asGraphqlOctokit(double: GraphqlOctokitDouble): Pick<Octokit, 'graphql'
   return double as Pick<Octokit, 'graphql'>;
 }
 
-function fakeOctokit(graphqlMock: (query: string, variables: any) => Promise<unknown>): Pick<Octokit, 'graphql'> {
-  return asGraphqlOctokit({ graphql: graphqlMock });
+function octokitFixture(graphqlMock: (query: string, variables: any) => Promise<unknown>): Pick<Octokit, 'graphql'> {
+  return asGraphqlOctokit(fakeOctokit({ graphql: graphqlMock }).octokit);
 }
 
 describe('createOctokitGraphqlClient', () => {
   it('forwards the query and variables to octokit.graphql and resolves its result', async () => {
     const response = { some: 'result' };
     const graphqlMock = vi.fn(async (_query: string, _variables: any) => response);
-    const client = createOctokitGraphqlClient(fakeOctokit(graphqlMock));
+    const client = createOctokitGraphqlClient(octokitFixture(graphqlMock));
 
     const result = await client('query { viewer { id } }', { projectId: PROJECT_ID, cursor: null });
 
@@ -75,7 +76,7 @@ describe('createOctokitGraphqlClient', () => {
 describe('createGithubProjectQueuePoller', () => {
   function buildPoller(graphqlMock: (query: string, variables: any) => Promise<unknown>) {
     return createGithubProjectQueuePoller({
-      octokit: fakeOctokit(graphqlMock),
+      octokit: octokitFixture(graphqlMock),
       projectId: PROJECT_ID,
       laneFieldName: 'Lane',
       orderFieldName: 'Order',

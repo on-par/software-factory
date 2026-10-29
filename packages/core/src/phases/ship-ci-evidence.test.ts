@@ -1,5 +1,6 @@
 import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it, vi } from 'vitest';
+import { fakeOctokit } from '../harness/fake-octokit.js';
 
 import { shipPhase } from './ship.js';
 
@@ -10,29 +11,23 @@ const CODEQL_RUN = {
   output: { title: 'CodeQL', summary: '1 new alert including 1 high severity' },
 };
 
-function fakeOctokit(runs: unknown[], alerts: unknown[]) {
+function octokitFixture(runs: unknown[], alerts: unknown[]) {
   const calls: string[] = [];
-  const octokit = {
+  const { octokit } = fakeOctokit({
     graphql: async () => {
       calls.push('graphql');
       return {};
     },
-    rest: {
-      pulls: {
-        list: async () => ({ data: [{ number: 123 }] }),
-        get: async () => {
-          calls.push('pulls.get');
-          return { data: { draft: false, node_id: 'PR_1' } };
-        },
-      },
-      issues: {
-        get: async () => ({ data: { title: 'Fix CodeQL' } }),
-        createComment: async () => ({ data: { id: 1 } }),
-      },
-      checks: { listForRef: async () => ({ data: { check_runs: runs } }) },
-      codeScanning: { listAlertsForRepo: async () => ({ data: alerts }) },
+    'pulls.list': async () => ({ data: [{ number: 123 }] }),
+    'pulls.get': async () => {
+      calls.push('pulls.get');
+      return { data: { draft: false, node_id: 'PR_1' } };
     },
-  };
+    'issues.get': async () => ({ data: { title: 'Fix CodeQL' } }),
+    'issues.createComment': async () => ({ data: { id: 1 } }),
+    'checks.listForRef': async () => ({ data: { check_runs: runs } }),
+    'codeScanning.listAlertsForRepo': async () => ({ data: alerts }),
+  });
   return { octokit, calls };
 }
 
@@ -52,7 +47,7 @@ describe('shipPhase — CI failure evidence (#2814)', () => {
         message: { text: 'The URL of this request depends on a user-provided value.' },
       },
     };
-    const { octokit, calls } = fakeOctokit(
+    const { octokit, calls } = octokitFixture(
       [{ name: 'lint', status: 'completed', conclusion: 'success' }, CODEQL_RUN],
       [alert],
     );

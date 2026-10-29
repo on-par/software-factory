@@ -1,9 +1,10 @@
 import type { Octokit } from '@octokit/rest';
 import { describe, expect, it, vi } from 'vitest';
+import { fakeOctokit } from '../harness/fake-octokit.js';
 
 import { CI_EVIDENCE_LIMITS, collectCiFailureEvidence, collectFailingJobLogs } from './ci-evidence.js';
 
-function fakeOctokit(runs: unknown[] | Error, alerts?: unknown[] | Error | null) {
+function octokitFixture(runs: unknown[] | Error, alerts?: unknown[] | Error | null) {
   const listForRef = vi.fn(async () => {
     if (runs instanceof Error) throw runs;
     return { data: { check_runs: runs } };
@@ -12,9 +13,11 @@ function fakeOctokit(runs: unknown[] | Error, alerts?: unknown[] | Error | null)
     if (alerts instanceof Error) throw alerts;
     return { data: alerts ?? [] };
   });
-  const rest = { checks: { listForRef }, ...(alerts !== null ? { codeScanning: { listAlertsForRepo } } : {}) };
-  const octokit: Octokit = Object.assign(Object.create(null), { rest });
-  return { octokit, listForRef, listAlertsForRepo };
+  const { octokit } = fakeOctokit({
+    'checks.listForRef': listForRef,
+    ...(alerts !== null ? { 'codeScanning.listAlertsForRepo': listAlertsForRepo } : {}),
+  });
+  return { octokit: octokit as Octokit, listForRef, listAlertsForRepo };
 }
 
 const base = { owner: 'o', repo: 'r', ref: 'branch', prNumber: 123 };
@@ -22,7 +25,7 @@ const base = { owner: 'o', repo: 'r', ref: 'branch', prNumber: 123 };
 describe('collectCiFailureEvidence (#2814)', () => {
   it('collects failing checks and CodeQL alerts from the PR merge ref', async () => {
     const message = 'The URL of this request depends on a user-provided value.';
-    const { octokit, listAlertsForRepo } = fakeOctokit(
+    const { octokit, listAlertsForRepo } = octokitFixture(
       [
         { name: 'lint', status: 'completed', conclusion: 'success' },
         { name: 'CodeQL', status: 'completed', conclusion: 'failure', output: { summary: '1 new alert' } },
@@ -52,7 +55,7 @@ describe('collectCiFailureEvidence (#2814)', () => {
   });
 
   it('records the GitHub alert number when present (#3712)', async () => {
-    const { octokit } = fakeOctokit(
+    const { octokit } = octokitFixture(
       [{ name: 'CodeQL', status: 'completed', conclusion: 'failure' }],
       [{ number: 7, rule: { id: 'js/xss' }, most_recent_instance: { location: { path: 'a.ts', start_line: 2 } } }],
     );
@@ -61,7 +64,7 @@ describe('collectCiFailureEvidence (#2814)', () => {
   });
 
   it('does not query code scanning when no failing check is CodeQL', async () => {
-    const { octokit, listAlertsForRepo } = fakeOctokit(
+    const { octokit, listAlertsForRepo } = octokitFixture(
       [{ name: 'tests', status: 'completed', conclusion: 'failure' }],
       [],
     );
@@ -82,7 +85,7 @@ describe('collectCiFailureEvidence (#2814)', () => {
       rule: { id: `rule-${i}` },
       most_recent_instance: { location: { path: 'a.ts' }, message: { text: 'y'.repeat(1000) } },
     }));
-    const { octokit } = fakeOctokit(runs, alerts);
+    const { octokit } = octokitFixture(runs, alerts);
     const evidence = await collectCiFailureEvidence({ octokit, ...base });
     expect(evidence.failingChecks).toHaveLength(CI_EVIDENCE_LIMITS.maxChecks);
     expect(evidence.alerts).toHaveLength(CI_EVIDENCE_LIMITS.maxAlerts);
@@ -99,7 +102,7 @@ describe('collectCiFailureEvidence (#2814)', () => {
   });
 
   it('handles null conclusion, missing name, and alerts without a location', async () => {
-    const { octokit } = fakeOctokit(
+    const { octokit } = octokitFixture(
       [
         { status: 'completed', conclusion: null },
         { name: 'CodeQL', status: 'completed', conclusion: 'failure' },
@@ -112,16 +115,16 @@ describe('collectCiFailureEvidence (#2814)', () => {
   });
 
   it('never throws: records list and code-scanning errors', async () => {
-    const listFail = fakeOctokit(new Error('boom'));
+    const listFail = octokitFixture(new Error('boom'));
     const a = await collectCiFailureEvidence({ octokit: listFail.octokit, ...base });
     expect(a).toEqual({ failingChecks: [], alerts: [], truncated: false, errors: ['checks: boom'] });
 
-    const csFail = fakeOctokit([{ name: 'CodeQL', status: 'completed', conclusion: 'failure' }], new Error('403'));
+    const csFail = octokitFixture([{ name: 'CodeQL', status: 'completed', conclusion: 'failure' }], new Error('403'));
     const b = await collectCiFailureEvidence({ octokit: csFail.octokit, ...base });
     expect(b.failingChecks).toHaveLength(1);
     expect(b.errors).toEqual(['code-scanning: 403']);
 
-    const missing = fakeOctokit([{ name: 'CodeQL', status: 'completed', conclusion: 'failure' }], null);
+    const missing = octokitFixture([{ name: 'CodeQL', status: 'completed', conclusion: 'failure' }], null);
     const c = await collectCiFailureEvidence({ octokit: missing.octokit, ...base });
     expect(c.failingChecks).toHaveLength(1);
     expect(c.errors?.[0]).toMatch(/^code-scanning: /);

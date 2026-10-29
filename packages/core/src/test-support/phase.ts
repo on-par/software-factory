@@ -3,7 +3,7 @@ import { createTempDirs, type TempDirs } from '../harness/temp-dir.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor, type StubModelExecutorOptions } from '../router/stub.js';
 
-export { fakeOctokit, type FakeOctokitHandler, type FakeOctokitResponses } from '../harness/fake-octokit.js';
+export { fakeOctokit } from '../harness/fake-octokit.js';
 
 type StubModelEntry = ModelsConfig['models'][string];
 

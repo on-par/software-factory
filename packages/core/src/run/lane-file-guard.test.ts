@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import type { Octokit } from '@octokit/rest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fakeOctokit } from '../harness/fake-octokit.js';
 
 import type { DesignArtifact } from '../types/index.js';
 import {
@@ -349,15 +350,15 @@ describe('LaneFileGuard.sweepStale', () => {
     return { file, guard, events, log };
   }
 
-  function fakeOctokit(issue: { state: string; labels: string[]; title: string }, prs: unknown[] = []) {
+  function octokitFixture(issue: { state: string; labels: string[]; title: string }, prs: unknown[] = []) {
     const get = vi.fn(async () => ({ data: issue }));
     const list = vi.fn(async () => ({ data: prs }));
-    return Object.assign({} as Octokit, { rest: { issues: { get }, pulls: { list } } }) as Pick<Octokit, 'rest'>;
+    return fakeOctokit({ 'issues.get': get, 'pulls.list': list }).octokit as Pick<Octokit, 'rest'>;
   }
 
   it('sweepStale reaps a claim whose holder PR is merged and emits lane_file_claim_reaped naming #1', async () => {
     const { guard, events, log } = await seed(1);
-    const octokit = fakeOctokit({ state: 'open', labels: [], title: 'Do thing' }, [
+    const octokit = octokitFixture({ state: 'open', labels: [], title: 'Do thing' }, [
       { state: 'closed', merged_at: '2026-01-01T00:00:00Z' },
     ]);
     const reaped = await guard.sweepStale({
@@ -375,7 +376,7 @@ describe('LaneFileGuard.sweepStale', () => {
 
   it('sweepStale reaps a claim whose holder issue is closed', async () => {
     const { guard, events, log } = await seed(1);
-    const octokit = fakeOctokit({ state: 'closed', labels: [], title: 'X' });
+    const octokit = octokitFixture({ state: 'closed', labels: [], title: 'X' });
     await guard.sweepStale({
       isStale: createGithubLaneClaimStalenessProbe({ octokit, branchPrefix: 'factory' }),
       log,

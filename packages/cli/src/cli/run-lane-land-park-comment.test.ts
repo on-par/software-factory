@@ -6,6 +6,7 @@ import {
   publishParkComment,
   type QueueGitHubClient,
 } from '@on-par/factory-core/internal';
+import { fakeOctokit } from '@on-par/factory-core/testing';
 import type { Octokit } from '@octokit/rest';
 import { workKeyFromIssue } from '@on-par/factory-core';
 import { describe, expect, it, vi } from 'vitest';
@@ -20,7 +21,7 @@ const N = 3534;
 
 type Stored = { id: number; body: string; user: { id: number } };
 
-function fakeOctokit(seed: Stored[]) {
+function octokitFixture(seed: Stored[]) {
   const comments = [...seed];
   let rejecting = false;
   const updateComment = vi.fn(async (a: { comment_id: number; body: string }) => {
@@ -35,14 +36,21 @@ function fakeOctokit(seed: Stored[]) {
     return { data: { id: 100 + comments.length } };
   });
   const listComments = vi.fn(async () => ({ data: comments }));
-  const octokit = Object.assign({} as Octokit, {
-    rest: {
-      users: { getAuthenticated: async () => ({ data: { id: 1 } }) },
-      issues: { listComments, updateComment, createComment },
-    },
+  const { octokit } = fakeOctokit({
+    'users.getAuthenticated': async () => ({ data: { id: 1 } }),
+    'issues.listComments': listComments,
+    'issues.updateComment': updateComment,
+    'issues.createComment': createComment,
     paginate: async (fn: (a: unknown) => Promise<{ data: unknown[] }>, a: unknown) => (await fn(a)).data,
   });
-  return { octokit, reject: () => (rejecting = true), comments, updateComment, createComment, listComments };
+  return {
+    octokit: octokit as Octokit,
+    reject: () => (rejecting = true),
+    comments,
+    updateComment,
+    createComment,
+    listComments,
+  };
 }
 
 const marker = `<!-- factory-issue-state v1 issue:${N} -->`;
@@ -50,7 +58,7 @@ const stateLine = (comments: Stored[], key: string): string | undefined =>
   new RegExp(`^${key}: (.*)$`, 'm').exec(comments[0]?.body ?? '')?.[1];
 
 // Seed the older park's comment through the real publisher so it is a genuine marked comment (id 42).
-async function seedComment(reason: 'fail' | 'blocked', fake: ReturnType<typeof fakeOctokit>): Promise<void> {
+async function seedComment(reason: 'fail' | 'blocked', fake: ReturnType<typeof octokitFixture>): Promise<void> {
   await publishParkComment({
     octokit: fake.octokit,
     repo: 'on-par/software-factory',
@@ -65,7 +73,7 @@ async function seedComment(reason: 'fail' | 'blocked', fake: ReturnType<typeof f
 
 async function park(
   err: Error,
-  fake: ReturnType<typeof fakeOctokit>,
+  fake: ReturnType<typeof octokitFixture>,
   ship?: (c: any) => void,
   overrides: RunLaneDeps = {},
 ) {
@@ -93,7 +101,7 @@ async function park(
 
 describe('land-time park comment', () => {
   it('a land-time ci-failed park upserts the issue park comment', async () => {
-    const fake = fakeOctokit([]);
+    const fake = octokitFixture([]);
     await seedComment('fail', fake);
     await park(new CiUnverifiedError('CI unverified', 353), fake);
     expect(stateLine(fake.comments, 'reason')).toBe('ci-failed');
@@ -110,7 +118,7 @@ describe('land-time park comment', () => {
   ])(
     'a land-time ci-infra or conflict park with no prior comment creates one marked comment (%s)',
     async (err, reason) => {
-      const fake = fakeOctokit([]);
+      const fake = octokitFixture([]);
       await park(err, fake);
       expect(fake.createComment).toHaveBeenCalledTimes(1);
       const body = fake.createComment.mock.calls[0][0].body;
@@ -120,7 +128,7 @@ describe('land-time park comment', () => {
   );
 
   it('a rejected park comment write still parks and logs a warning', async () => {
-    const fake = fakeOctokit([]);
+    const fake = octokitFixture([]);
     await seedComment('fail', fake);
     fake.reject();
     const { events, releaseIssue } = await park(new CiUnverifiedError('CI unverified', 353), fake);
@@ -132,7 +140,7 @@ describe('land-time park comment', () => {
   });
 
   it('a land-time park with no park sha reader wired still upserts the comment with park-sha unset', async () => {
-    const fake = fakeOctokit([]);
+    const fake = octokitFixture([]);
     await seedComment('fail', fake);
     const { events } = await park(new CiUnverifiedError('CI unverified', 353), fake, undefined, {
       readParkSha: undefined,
@@ -159,7 +167,7 @@ describe('land-time park comment', () => {
   });
 
   it('a land-time ci-failed park over a stale blocked comment makes pollBlockedParks skip the issue', async () => {
-    const fake = fakeOctokit([]);
+    const fake = octokitFixture([]);
     await seedComment('blocked', fake);
     await park(new CiUnverifiedError('CI unverified', 353), fake);
     const listBlockedBy = vi.fn(async () => []);
@@ -178,7 +186,7 @@ describe('land-time park comment', () => {
   });
 
   it('a runIssue park does not write the comment twice', async () => {
-    const fake = fakeOctokit([]);
+    const fake = octokitFixture([]);
     const events: string[] = [];
     await runLane('app', [N], '/repo', 'on-par/software-factory', paths, {
       ship: async (_i, _o, ctx) => {

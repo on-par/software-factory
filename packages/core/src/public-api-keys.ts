@@ -5,6 +5,7 @@ export const TESTING_API_KEYS = [
   'codingHarnessContractCases',
   'makeContractRequest',
   'loadInjectionFixtures',
+  'fakeOctokit',
   'SimModelExecutor',
   'createSimOctokit',
   'createSimWorkspace',

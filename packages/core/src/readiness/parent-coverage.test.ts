@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { fakeOctokit } from '../harness/fake-octokit.js';
 
 import {
   computeParentCoverage,
@@ -40,7 +41,7 @@ interface Comment {
   user: { id: number };
 }
 
-function fakeOctokit(issues: FakeIssue[], parentOf: Record<number, number[]>, comments: Comment[] = []) {
+function octokitFixture(issues: FakeIssue[], parentOf: Record<number, number[]>, comments: Comment[] = []) {
   const createComment = vi.fn(async (a: { body: string }) => {
     const c = { id: 100 + comments.length, body: a.body, user: { id: 1 } };
     comments.push(c);
@@ -51,24 +52,23 @@ function fakeOctokit(issues: FakeIssue[], parentOf: Record<number, number[]>, co
     if (c) c.body = a.body;
     return { data: c };
   });
-  const octokit = {
-    rest: {
-      users: { getAuthenticated: vi.fn(async () => ({ data: { id: 1 } })) },
-      issues: {
-        get: vi.fn(async (a: { issue_number: number }) => ({
-          data: issues.find((i) => i.number === a.issue_number),
-        })),
-        listForRepo: vi.fn(async () => ({ data: issues.filter((i) => i.labels?.includes('factory:decomposed')) })),
-        listComments: vi.fn(async () => ({ data: comments })),
-        createComment,
-        updateComment,
-      },
-    },
-    request: vi.fn(async (_route: string, a: { issue_number: number }) => ({
-      data: (parentOf[a.issue_number] ?? []).map((n) => issues.find((i) => i.number === n)),
-    })),
-  };
-  return { octokit: octokit as never, createComment, updateComment, comments, raw: octokit };
+  const get = vi.fn(async (a: { issue_number: number }) => ({
+    data: issues.find((i) => i.number === a.issue_number),
+  }));
+  const listForRepo = vi.fn(async () => ({ data: issues.filter((i) => i.labels?.includes('factory:decomposed')) }));
+  const request = vi.fn(async (_route: string, a: { issue_number: number }) => ({
+    data: (parentOf[a.issue_number] ?? []).map((n) => issues.find((i) => i.number === n)),
+  }));
+  const { octokit } = fakeOctokit({
+    'users.getAuthenticated': vi.fn(async () => ({ data: { id: 1 } })),
+    'issues.get': get,
+    'issues.listForRepo': listForRepo,
+    'issues.listComments': vi.fn(async () => ({ data: comments })),
+    'issues.createComment': createComment,
+    'issues.updateComment': updateComment,
+    request,
+  });
+  return { octokit: octokit as never, createComment, updateComment, comments, get, listForRepo, request };
 }
 
 const merged = (n: number, ids: string, parent = 10) =>
@@ -168,7 +168,7 @@ describe('refreshParentCoverageAfterMerge', () => {
       { number: 11, body: childBody(10, 'P1, P2'), state: 'open' },
       { number: 12, body: childBody(10, 'P3'), state: 'open' },
     ];
-    return { issues, fake: fakeOctokit(issues, { 10: [11, 12] }) };
+    return { issues, fake: octokitFixture(issues, { 10: [11, 12] }) };
   };
 
   it('two sequential child merges leave one updated coverage comment on the parent', async () => {
@@ -200,18 +200,18 @@ describe('refreshParentCoverageAfterMerge', () => {
   });
 
   it('returns null without parent calls when the child has no parent line', async () => {
-    const fake = fakeOctokit([{ number: 20, body: 'plain', state: 'closed' }], {});
+    const fake = octokitFixture([{ number: 20, body: 'plain', state: 'closed' }], {});
     const log = vi.fn();
     expect(
       await refreshParentCoverageAfterMerge({ octokit: fake.octokit, repo: 'o/r', childIssue: 20, log }),
     ).toBeNull();
-    expect(fake.raw.request).not.toHaveBeenCalled();
+    expect(fake.request).not.toHaveBeenCalled();
     expect(log).not.toHaveBeenCalled();
   });
 
   it('logs one warn and resolves null when GitHub throws', async () => {
-    const fake = fakeOctokit([], {});
-    fake.raw.rest.issues.get.mockRejectedValue(new Error('boom'));
+    const fake = octokitFixture([], {});
+    fake.get.mockRejectedValue(new Error('boom'));
     const log = vi.fn();
     expect(
       await refreshParentCoverageAfterMerge({ octokit: fake.octokit, repo: 'o/r', childIssue: 11, log }),
@@ -223,7 +223,7 @@ describe('refreshParentCoverageAfterMerge', () => {
 
 describe('upsertParentCoverageComment', () => {
   it('creates then updates', async () => {
-    const fake = fakeOctokit([], {});
+    const fake = octokitFixture([], {});
     const coverage = computeParentCoverage({ number: 10, body: PARENT_BODY }, []);
     expect(await upsertParentCoverageComment({ octokit: fake.octokit, repo: 'o/r', coverage })).toEqual({
       commentId: 100,
@@ -243,13 +243,13 @@ describe('listDecomposedParentCoverage', () => {
       { number: 20, body: PARENT_BODY, state: 'open', labels: ['factory:decomposed'] },
       { number: 25, body: PARENT_BODY, state: 'open', labels: ['factory:decomposed'], pull_request: {} },
     ];
-    const fake = fakeOctokit(issues, {});
+    const fake = octokitFixture(issues, {});
     const res = await listDecomposedParentCoverage({ octokit: fake.octokit, repo: 'o/r' });
     expect(res?.map((c) => c.parent)).toEqual([20, 30]);
   });
   it('returns null on error', async () => {
-    const fake = fakeOctokit([], {});
-    fake.raw.rest.issues.listForRepo.mockRejectedValue(new Error('x'));
+    const fake = octokitFixture([], {});
+    fake.listForRepo.mockRejectedValue(new Error('x'));
     expect(await listDecomposedParentCoverage({ octokit: fake.octokit, repo: 'o/r' })).toBeNull();
   });
 });

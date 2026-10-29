@@ -2,6 +2,7 @@ import { StorySchema } from '@on-par/contracts';
 import type { Story } from '@on-par/contracts';
 import type { Octokit } from '@octokit/rest';
 import { describe, expect, it, vi } from 'vitest';
+import { fakeOctokit } from '../harness/fake-octokit.js';
 
 import type { SlicePlan } from '../readiness/slice-plan.js';
 import { toWorkKey, workKeyFromIssue, type WorkKey } from '../work/work-key.js';
@@ -34,19 +35,21 @@ const plan: SlicePlan = {
   ],
 };
 
-function fakeOctokit() {
+function octokitFixture() {
   const issues = {
     listComments: vi.fn(async () => ({ data: [] })),
     createComment: vi.fn(async () => ({ data: { id: 9 } })),
   };
-  const octokit = Object.assign({} as Octokit, {
-    rest: { users: { getAuthenticated: async () => ({ data: { id: 1 } }) }, issues },
+  const { octokit } = fakeOctokit({
+    'users.getAuthenticated': async () => ({ data: { id: 1 } }),
+    'issues.listComments': issues.listComments,
+    'issues.createComment': issues.createComment,
   });
-  return { octokit, issues };
+  return { octokit: octokit as Octokit, issues };
 }
 
 function run(key: WorkKey, ship: { prNumber?: number; alreadyDelivered?: boolean }) {
-  const { octokit, issues } = fakeOctokit();
+  const { octokit, issues } = octokitFixture();
   const log = vi.fn();
   const result = recordShippedSlice({
     octokit,

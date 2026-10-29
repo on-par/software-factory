@@ -1,33 +1,28 @@
 import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it } from 'vitest';
+import { fakeOctokit } from '../harness/fake-octokit.js';
 
 import { shipPhase } from './ship.js';
 
 const HEAD_SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
 
-function fakeOctokit() {
+function octokitFixture() {
   const bodies: string[] = [];
-  const octokit = {
+  const { octokit } = fakeOctokit({
     graphql: async () => ({}),
-    rest: {
-      pulls: {
-        list: async () => ({ data: [{ number: 123 }] }),
-        get: async () => ({ data: { draft: false, node_id: 'PR_1' } }),
-      },
-      issues: {
-        get: async () => ({ data: { title: 'Name the checked commit' } }),
-        createComment: async (args: { body: string }) => {
-          bodies.push(args.body);
-          return { data: { id: 1 } };
-        },
-      },
+    'pulls.list': async () => ({ data: [{ number: 123 }] }),
+    'pulls.get': async () => ({ data: { draft: false, node_id: 'PR_1' } }),
+    'issues.get': async () => ({ data: { title: 'Name the checked commit' } }),
+    'issues.createComment': async (args: { body: string }) => {
+      bodies.push(args.body);
+      return { data: { id: 1 } };
     },
-  };
+  });
   return { octokit, bodies };
 }
 
 async function ship(run: (command: string) => Promise<{ stdout: string }>) {
-  const { octokit, bodies } = fakeOctokit();
+  const { octokit, bodies } = octokitFixture();
   const logs: Array<[string, string]> = [];
   const result = await shipPhase({
     issue: workKeyFromIssue(1812),
