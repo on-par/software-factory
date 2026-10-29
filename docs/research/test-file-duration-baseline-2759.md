@@ -292,7 +292,6 @@ because it includes transform, setup and collect time.
 | 203  | `packages/core/src/hosted/container.test.ts`                               | 0.01         |
 | 204  | `packages/core/src/utils/ci-watch.test.ts`                                 | 0.01         |
 | 205  | `packages/dashboard/src/laneBoardState.test.ts`                            | 0.01         |
-| 206  | `scripts/mutation-summary.test.ts`                                         | 0.01         |
 | 207  | `packages/core/src/queue/project-board-poller.test.ts`                     | 0.01         |
 | 208  | `packages/core/src/adr/index.test.ts`                                      | 0.01         |
 | 209  | `packages/contracts/src/hosted.test.ts`                                    | 0.01         |
