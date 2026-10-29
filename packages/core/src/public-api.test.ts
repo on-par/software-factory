@@ -329,9 +329,7 @@ const STEERED = 'collectMergedPrSteers isoWeekKey summarizeSteerability formatSt
 const MORE = ['agentInvocationsFromEvents', 'computeTokenCoverage', 'readReviewApproval', 'readStackSliceGate']; // #3126, #3366
 const STACK = 'nextStackSlice restackAfterSquashMerge listStatelessLaneIssues'.split(' ');
 const POLICY = 'isEgressEnforced describeDraftPrPolicy resolveDraftPrPolicy resolveConfiguredWritablePaths'.split(' '); // #2215, #3449, #3454
-const PO =
-  'resolveRoleModel isOpenCodeZenModel subscriptionProviderOf PROVIDER_ORDER_ROLES SUBSCRIPTION_PROVIDERS'.split(' '); // #3334
-const PO2 = 'OPENCODE_GO_DEFAULT_MODEL subscriptionLogin filterRefusedProviders sweepOrphanDrafts'.split(' '); // #3335, #1623
+const PO2 = 'OPENCODE_GO_DEFAULT_MODEL filterRefusedProviders sweepOrphanDrafts'.split(' '); // #3335, #1623
 const GATE = ['allProvidersDown', 'stageBlocked', 'PROVIDER_LEVEL_REASONS', 'TIMED_BREAKER_REASONS']; // #3226
 const EXTRA_INTERNAL_KEYS = [
   ...JOB_KEYS,
@@ -341,7 +339,6 @@ const EXTRA_INTERNAL_KEYS = [
   ...STEERED,
   ...STACK,
   ...POLICY,
-  ...PO,
   ...PO2,
   ...GATE,
   ...ITERATE_INTERNAL_KEYS,
@@ -366,23 +363,17 @@ const INTERNAL_API_KEYS = [
   'hasClaudeLoginEvidence',
   // #3214
   'detectClaudePlan',
-  'codexHasApiKey',
-  'detectProviderPlan',
   'meteredPrimaryRouteWarnings',
   'providerPlan',
   'claudeStoredSessionState',
   // Last run-time local_auth failure per agent (#2733)
-  'localAuthAgentFor',
-  'localAuthCredentialPath',
   'localAuthFailureSinceLogin',
-  'localAuthRecordPath',
   'recordLocalAuthFailure',
   'hasOpencodeLoginEvidence',
   // Persisted per-issue run state (#2271)
   'readIssueRunState',
   'nextIssueRunState',
   // Open factory draft PR count (#3553)
-  'summarizeOpenFactoryDrafts',
   'readOpenFactoryDrafts',
   'formatOpenFactoryDraftsLine',
   'runStateFile',
@@ -459,7 +450,6 @@ const INTERNAL_API_KEYS = [
   'stackSliceBranch',
   'withSliceBranchCreated',
   // Worktree location (#1758)
-  'ensureWorktreeParentExcluded',
   'formatWorktreeLocation',
   'laneWorktreePath',
   'resolveWorktreeRoot',
@@ -485,7 +475,6 @@ const INTERNAL_API_KEYS = [
   'describeConstitutionSource',
   'listBuiltInCheckers',
   'findUnknownConstitutionCheckers',
-  'findTemplateTokens',
   'isTemplateToken',
   'harnessCliCommand',
   'isHarnessCliPresent',
@@ -553,9 +542,9 @@ const INTERNAL_API_KEYS = [
   ...'hostBuildSlotsDir listHostSlots syncLandBranch isValidIssueRunState listIssueRuns'.split(' '), // syncLandBranch: #1886; run readers: #3448
   ...'withHostBuildSlot createRunSlotGate withRunAndHostBuildSlot readDiskFree formatDiskHold'.split(' '), // #3049, #2284
   ...'BYTES_PER_GB DISK_ALERT_INTERVAL_MS claimDiskAlert createDiskGuard evaluateDiskGuard'.split(' '), // #2284
-  ...'FACTORY_RUNTIME_CONFIG_KEYS resolveDiskGuard hostDiskAlertFile'.split(' '),
+  ...'FACTORY_RUNTIME_CONFIG_KEYS hostDiskAlertFile'.split(' '),
   'createOctokitCollaboratorPermissionClient',
-  ...'CONFIG_EXAMPLE_OMITTED_KEYS renderConfigExample resolveT1SampleRate'.split(' '),
+  ...'renderConfigExample resolveT1SampleRate'.split(' '),
   'resolveEvidenceAllowlist',
   'runEvidencePlan',
   // Design artifact (#422)
@@ -587,7 +576,6 @@ const INTERNAL_API_KEYS = [
   'listOrphanContainers',
   'reapOrphanContainers',
   // Router, phase helpers, triage prompt and queue normalization (#1650, #2981)
-  'CliModelExecutor',
   'buildPlanPrompt',
   'buildTriagePrompt',
   'dropQueuedIssues',
@@ -600,7 +588,6 @@ const INTERNAL_API_KEYS = [
   // Local-small harness
   'createLocalSmallDryRun',
   'runOvernightQueue',
-  'REPO_CONFIG_FILENAMES',
   'REPO_CONFIG_YAML_HEADER',
   'migrateRepoConfigToYaml',
   'setRepoConfigValue',
@@ -651,14 +638,11 @@ const INTERNAL_API_KEYS = [
   'colorEnabled',
   'defaultRemoteBase',
   'ensureDir',
-  'escalationLine',
   'factoryBranchIssue',
   'factoryBranchPrefixes',
   'formatEventLine',
   'getIssueTitle',
   'gitFetch',
-  'isEscalation',
-  'levelForType',
   'logCost',
   'logEvent',
   'readCosts',
@@ -666,9 +650,7 @@ const INTERNAL_API_KEYS = [
   'claudeConfigDirOverride',
   'claudeKeychainService',
   // docker-sandbox microVM lifecycle + orphan scan/reap (#653, #1527)
-  'createMicroVm',
   'microVmName',
-  'removeMicroVm',
   'worktreeSandboxFor',
   'listMicroVms',
   'reapOrphanMicroVm',
@@ -687,25 +669,19 @@ const INTERNAL_API_KEYS = [
   'watchChecks',
   'watchChecksWithInfraRerun',
   'isPassingConclusion',
-  'describeCommandFailure',
   'runCommand',
-  ...'withFileLock withFileLockSync withGitLock readRunLockHolder formatStopMarker readStopMarker'.split(' '),
-  ...'RunLockHeldError withRunLock withScopedRunLock runLockDirFor listLiveRunLocks'.split(' '),
+  ...'withFileLock withGitLock formatStopMarker readStopMarker'.split(' '),
+  ...'RunLockHeldError withScopedRunLock runLockDirFor listLiveRunLocks'.split(' '),
   'countUnpushedCommits',
-  'findCredentialFiles',
   'formatGcReport',
   'isWorktreeClean',
   'parseWorktreeList',
   'reapCleanShipWorktree',
   'reapLaneWorktree',
-  'scrubFile',
   'sweepWorktrees',
-  'zeroFill',
   ...'findWorktreeKeep removeWorktreeKeep upsertWorktreeKeep'.split(' '), // #3318
-  'checkRatchetDrift',
   'checkScopedRatchetDrift',
   'DEFAULT_RATCHET_SLACK',
-  'parseCoverageSummary',
   'parseCoverageSummaryScopes',
   'renderRatchetReport',
   // GitHub-label-backed work queue (#824)
@@ -750,7 +726,6 @@ const INTERNAL_API_KEYS = [
   // Green-and-ready PR reporting (#1000)
   'createOctokitGreenPrClient',
   'findUnmergedGreenPrs',
-  'owningIssueForPr',
   // Read-only GitHub ProjectV2 queue-intent polling (#847)
   // Board-constrained local lane dispatch (#848)
   'createBoardQueueDispatcher',

@@ -25,7 +25,6 @@
   "packages/core/src/hosted/runner.test.ts": 502,
   "packages/core/src/hosted/store-contract.ts": 628,
   "packages/core/src/index.ts": 643,
-  "packages/core/src/internal.ts": 789,
   "packages/core/src/kpis/index.test.ts": 1620,
   "packages/core/src/kpis/index.ts": 1055,
   "packages/core/src/logger/index.test.ts": 510,
