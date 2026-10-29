@@ -27,6 +27,7 @@ Install or update with `npm install -g @on-par/factory-cli@latest`.
 ### Removed
 
 - The headless simulator (packages/core/src/sim/) and the `sim-monte-carlo` and `ship-phase-breakdown-report` npm scripts are gone, and `@on-par/factory-core/testing` no longer exports the simulator, Monte Carlo, jitter, regression-fixture or ship-phase-breakdown-report CLI symbols (`runSimulation`, `runMonteCarlo*`, `SimJitter*`, `SIM_*`, ...). `SimModelExecutor`, `createSimOctokit`, `createSimWorkspace`, `simCommitAll` and `simWorkspace` remain (#3770).
+- `@on-par/factory-core/internal` no longer re-exports 99 unused daemon and usage names, and the unused usage coordinator, grant ledger, lane scheduler, engine supervisor and run-repo modules are deleted (#3780).
 
 ## 0.9.23 - 2026-10-28
 
