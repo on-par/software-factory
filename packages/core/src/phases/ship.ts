@@ -10,7 +10,7 @@ import type { ApprovalGate } from '../approvals/index.js';
 import { type LifecycleBus, withLifecycle } from '../bus/index.js';
 import type { EventKind } from '../events/kinds.js';
 import { gatherEvidencePack } from '../reports/evidence-pack.js';
-import { renderPrBody } from '../reports/pr-body.js';
+import { briefSummaryLine, renderPrBody, stripBriefIds } from '../reports/pr-body.js';
 import { computeDiffStat } from './ship-diff-stat.js';
 import { lazyWalkthrough, type WalkthroughShipOpts } from './ship-walkthrough.js';
 import { renderStackOrderLine, type StackPosition } from './stack-order.js';
@@ -142,16 +142,17 @@ async function shipPhaseImpl(opts: {
     checkSummary,
   } = opts;
   const [owner, repoName] = repo.split('/');
-  const getWalkthrough = lazyWalkthrough(run, worktree, opts, log);
-
-  let diffStat: string | undefined;
+  const inlineWork = opts.work && opts.work.kind !== GITHUB_ISSUE_SOURCE ? opts.work : undefined;
+  const stack = inlineWork ? undefined : opts.stack;
+  const base = stack?.base ?? opts.baseBranch ?? SHIP_BASE_BRANCH;
+  const getWalkthrough = lazyWalkthrough(run, worktree, { ...opts, base }, log);
 
   if (approvalGate) {
     // Log a 'ship'-typed event before anything else so the TUI's activePhase
     // advances to SHIP first — otherwise a denial reports failedPhase as
     // whichever phase (CHECK/BUILD) last logged, which is misleading.
     log('ship', `Starting ship phase for ${branch}`);
-    diffStat = await computeDiffStat(run, worktree);
+    const diffStat = await computeDiffStat(run, worktree, base);
     log(
       'approval_requested',
       `awaiting approval to ship ${branch}${checkSummary ? ` (checks: ${checkSummary.passes} pass, ${checkSummary.failures} fail, ${checkSummary.skips} skip)` : ''}`,
@@ -278,7 +279,7 @@ async function shipPhaseImpl(opts: {
         run,
         worktree,
         branch,
-        issue,
+        issue: inlineWork ? undefined : issue,
         statusLines: recoveryState.statusLines,
         log,
       });
@@ -370,29 +371,24 @@ async function shipPhaseImpl(opts: {
     }
     log('ship', `remote head ${pushed.remoteSha} matches local HEAD ${pushed.localSha} for ${branch}`);
 
-    const inlineWork = opts.work && opts.work.kind !== GITHUB_ISSUE_SOURCE ? opts.work : undefined;
-
     // Get title from issue (skipped for a non-github work source — no such issue exists)
     const title = inlineWork
       ? inlineWork.title
       : (await octokit.rest.issues.get({ owner, repo: repoName, issue_number: issueNumberOf(issue) })).data.title;
 
-    // Get diff stats (reuse the approval gate's diff stat when already computed)
-    const stat = diffStat ?? (await computeDiffStat(run, worktree));
-
     const slice = inlineWork ? undefined : opts.slice;
-    const stack = inlineWork ? undefined : opts.stack;
-    const base = stack?.base ?? opts.baseBranch ?? SHIP_BASE_BRANCH;
     const finalSlice = !slice || slice.index >= slice.count;
-    // The brief's path is local and often gitignored, so the PR names it by content digest only.
-    const briefDigest = inlineWork?.reference?.externalId.slice(0, 12);
+    // A brief is a local file reviewers cannot open, so the body describes it by its title and links the
+    // open PR it builds on (a --stack or --base-branch base), never its id, digest or path.
+    const basePr =
+      inlineWork && base !== SHIP_BASE_BRANCH ? await findOpenPR(octokit, owner, repoName, base) : undefined;
     const summaryLine = inlineWork
-      ? `Implements a local brief${briefDigest ? ` (sha256 \`${briefDigest}\`)` : ''}.`
+      ? briefSummaryLine(title, basePr?.status === 'found' ? basePr.prNumber : undefined)
       : slice
         ? `Implements slice ${slice.index}/${slice.count} of #${issue}.`
         : `Implements #${issue}.`;
     const prTitle = inlineWork
-      ? title
+      ? stripBriefIds(title)
       : slice
         ? `${title} — slice ${slice.index}/${slice.count} (#${issue})`
         : `${title} (#${issue})`;
@@ -411,7 +407,6 @@ async function shipPhaseImpl(opts: {
           footer: opts.footer,
           stackOrder: stack ? renderStackOrderLine(stack) : undefined,
           specBody: await readSpecBody(opts.specPath),
-          diffStat: stat,
           checkSummary,
           reworkRounds: opts.reworkRounds,
           risk: await readRisk(opts.specPath),

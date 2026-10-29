@@ -19,6 +19,8 @@ export interface WalkthroughShipOpts {
   checkSummary?: CheckSummary;
   /** pr.walkthrough thresholds (#3623); undefined uses the defaults. */
   walkthrough?: Partial<WalkthroughThresholds>;
+  /** The PR's base branch; the size threshold diffs against it, so a stacked PR counts only its own changes. */
+  base: string;
 }
 
 /** Memoised walkthrough builder: the markdown (undefined below the thresholds), built at most once. A failure is a `warn`, never a throw. */
@@ -39,11 +41,10 @@ async function buildWalkthrough(
   log: (type: EventKind, msg: string) => void,
 ): Promise<string | undefined> {
   try {
-    const files = parseNumstat(await computeNumstat(run, worktree));
+    const files = parseNumstat(await computeNumstat(run, worktree, opts.base));
     if (!meetsWalkthroughThreshold(files, resolveWalkthroughThresholds(opts.walkthrough))) return undefined;
     const md = renderPrWalkthrough({
       specBody: await readSpecBody(opts.specPath),
-      files,
       checkSummary: opts.checkSummary,
     });
     log('evidence', `walkthrough generated (${files.length} files)`);

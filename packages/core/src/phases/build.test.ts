@@ -2049,6 +2049,12 @@ describe('BUILD prompt required elements (#1976)', () => {
     expect(buildLocalSmallPrompt({ issue: workKeyFromIssue(1), branch: 'b', spec: '# spec' })).toContain('ESCALATE:');
   });
 
+  it('tells the worker to keep brief ids out of commit messages', () => {
+    expect(
+      buildCommitOnlyPrompt({ issue: workKeyFromIssue(1), specPath: 's', constitutionCtx: '', spec: '' }),
+    ).toContain('clear conventional message (no brief ids)');
+  });
+
   it('does not regress the slimmed fixed instruction text length', () => {
     // before: 2472 chars (now ~1924). Caps include the #3372 read-before-edit bullet (+237), the #3466 max-lines rule bullet (+335) and the #3332 sandbox environment-error rule (+286), the only allowed growth. The 60% target is unreachable: the mandated notice and headless note alone are ~700.
     expect(

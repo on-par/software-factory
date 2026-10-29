@@ -88,9 +88,10 @@ describe('shipPhase PR walkthrough (#3623)', () => {
     expect(await promise).toEqual({ ok: true, prNumber: 123 });
 
     const comment = bodyOf(calls, 'issues.createComment');
-    for (const part of ['PR walkthrough', '### Intent', '### Main files', '### How to verify']) {
+    for (const part of ['PR walkthrough', '### Intent', '### How to verify']) {
       expect(comment).toContain(part);
     }
+    expect(comment).not.toContain('Main files');
     expect(bodyOf(calls, 'pulls.create')).toContain('## Walkthrough');
   });
 

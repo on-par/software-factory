@@ -1,5 +1,5 @@
 // src/reports/pr-walkthrough.ts — the large-PR walkthrough (#3623): a short, deterministic markdown
-// digest (intent, main files, how to verify) SHIP embeds in the PR body and the evidence pack when the
+// digest (intent, how to verify) SHIP embeds in the PR body and the evidence pack when the
 // diff vs main has at least `minLines` changed lines AND at least `minFiles` changed files.
 //
 // Soft by default: a failure is a `warn` event and never parks or blocks merge. Harden it (park SHIP
@@ -11,7 +11,6 @@ import { defaultPrWalkthrough } from '@on-par/factory-config';
 import type { CheckSummary } from '../types/index.js';
 import { extractSpecIntent, summarizeIntent } from './pr-body.js';
 
-const MAX_FILES_LISTED = 10;
 const TESTS_LIMIT = 1500;
 const MANUAL_KINDS = new Set(['screenshot', 'none']);
 
@@ -29,7 +28,6 @@ export interface NumstatEntry {
 export interface PrWalkthroughInput {
   /** Frozen spec body with the frontmatter stripped. */
   specBody?: string;
-  files: NumstatEntry[];
   checkSummary?: CheckSummary;
 }
 
@@ -60,13 +58,6 @@ export function meetsWalkthroughThreshold(entries: NumstatEntry[], thresholds: W
 export function renderPrWalkthrough(input: PrWalkthroughInput): string {
   const intent = input.specBody === undefined ? {} : extractSpecIntent(input.specBody);
   const summary = summarizeIntent(intent);
-  const sorted = [...input.files].sort(
-    (a, b) => b.added + b.deleted - (a.added + a.deleted) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
-  );
-  const listed = sorted
-    .slice(0, MAX_FILES_LISTED)
-    .map((f) => `- \`${f.path.replace(/`/g, "'")}\` (+${f.added} −${f.deleted})`);
-  const more = sorted.length - MAX_FILES_LISTED;
   const tests = intent.tests === undefined ? undefined : truncate(intent.tests, TESTS_LIMIT);
   const checks = input.checkSummary;
   const manual = (checks?.results ?? [])
@@ -77,10 +68,6 @@ export function renderPrWalkthrough(input: PrWalkthroughInput): string {
   return [
     '### Intent',
     summary ?? '- No spec goal recorded.',
-    '',
-    '### Main files',
-    ...listed,
-    ...(more > 0 ? [`- …and ${more} more file${more === 1 ? '' : 's'}`] : []),
     '',
     '### How to verify',
     '#### Automated',

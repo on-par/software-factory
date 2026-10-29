@@ -97,7 +97,6 @@ describe('shipPhase self-healing', () => {
       "git push -u origin 'ship-it/23-self-heal'",
       'git rev-parse HEAD',
       "git ls-remote --heads origin 'ship-it/23-self-heal'",
-      'git diff --stat origin/main...HEAD',
       'git diff --numstat origin/main...HEAD',
     ]);
     expect(calls).toContainEqual([
@@ -561,16 +560,18 @@ describe('shipPhase self-healing', () => {
     ).toBe(true);
   });
 
-  it('builds the PR body with an empty diff stat when computeDiffStat throws', async () => {
+  it('opens the PR with no changed-files list and never runs git diff --stat without an approval gate', async () => {
     const { octokit, calls } = shipOctokit();
     const logs: Array<[string, string]> = [];
+    const commands: string[] = [];
     const run = async (command: string) => {
+      commands.push(command);
       const remote = remoteHeadStub(command);
       if (remote) return remote;
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command === 'git rev-list --count origin/main..HEAD') return { stdout: '1\n' };
       if (command === 'git diff --quiet origin/main..HEAD') throw new Error('trees differ');
-      if (command === 'git diff --stat origin/main...HEAD') throw new Error('diff failed');
+      if (command === 'git diff --stat origin/main...HEAD') return { stdout: ' ship.ts | 12 ++++++++++++\n' };
       return { stdout: '' };
     };
 
@@ -586,10 +587,10 @@ describe('shipPhase self-healing', () => {
     });
 
     expect(result).toEqual({ ok: true, prNumber: 123 });
-    expect(calls).toContainEqual([
-      'pulls.create',
-      expect.objectContaining({ body: expect.stringContaining('```\n\n```') }),
-    ]);
+    const body = String(calls.find(([name]) => name === 'pulls.create')?.[1].body);
+    expect(body).not.toMatch(/changed files/i);
+    expect(body).not.toContain('ship.ts |');
+    expect(commands).not.toContain('git diff --stat origin/main...HEAD');
   });
 
   it('fails with a warn naming the PR, and logs no ready, when marking the PR ready for review throws (#3551)', async () => {
@@ -887,14 +888,101 @@ describe('shipPhase inline work source (#507)', () => {
       'pulls.create',
       expect.objectContaining({
         title: 'Add a widget',
-        body: expect.stringContaining('Implements a local brief (sha256 `abc123def456`).'),
+        body: expect.stringContaining('## Summary\nAdd a widget.'),
       }),
     ]);
     const [, createArgs] = calls.find(([name]) => name === 'pulls.create') as [string, any];
+    expect(createArgs.body).not.toMatch(/local brief/i);
+    expect(createArgs.body).not.toContain('abc123');
+    expect(createArgs.body).not.toContain('sha256');
+    expect(createArgs.body).not.toContain('local-brief:');
     expect(createArgs.body).not.toContain('brief.md');
     expect(createArgs.body).not.toContain('file://');
     expect(createArgs.body).not.toContain('Closes #');
     expect(createArgs.body).not.toContain('PLAN → BUILD → CHECK → SHIP');
+  });
+
+  it('links the open PR a stacked brief builds on instead of naming the brief', async () => {
+    const { octokit, calls } = shipOctokit();
+    octokit.rest.pulls.list = async (args: any) => {
+      calls.push(['pulls.list', args]);
+      return { data: args.head === 'on-par:factory/9-a' ? [{ number: 41 }] : [] };
+    };
+    const run = async (command: string) => {
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command.startsWith('git rev-list --count ')) return { stdout: '1\n' };
+      if (command.startsWith('git diff --quiet ')) throw new Error('trees differ');
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: workKeyFromIssue(9000124),
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-9000124',
+      branch: 'factory/9000124-add-a-gadget',
+      octokit: octokit as any,
+      watchCI: false,
+      log: () => {},
+      run,
+      baseBranch: 'factory/9-a',
+      work: {
+        id: 'local-brief:briefs/gadget.md#fedcba987654',
+        kind: 'local-brief',
+        title: 'Add a gadget',
+        reference: { externalId: 'fedcba9876543210', url: 'file:///home/op/briefs/gadget.md' },
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    const [, createArgs] = calls.find(([name]) => name === 'pulls.create') as [string, any];
+    expect(createArgs.base).toBe('factory/9-a');
+    expect(createArgs.body).toContain('## Summary\nAdd a gadget. Builds on #41.');
+    for (const leak of [/local brief/i, /fedcba/, /sha256/, /gadget\.md/, /local-brief:/, /briefs\//]) {
+      expect(createArgs.body).not.toMatch(leak);
+    }
+  });
+
+  it('drops a tracker-style brief id from the PR title and summary, and diffs a stacked PR against its base', async () => {
+    const { octokit, calls } = shipOctokit();
+    const commands: string[] = [];
+    const run = async (command: string) => {
+      commands.push(command);
+      const remote = remoteHeadStub(command);
+      if (remote) return remote;
+      if (command === 'git status --porcelain') return { stdout: '' };
+      if (command.startsWith('git rev-list --count ')) return { stdout: '1\n' };
+      if (command.startsWith('git diff --quiet ')) throw new Error('trees differ');
+      return { stdout: '' };
+    };
+
+    const result = await shipPhase({
+      issue: workKeyFromIssue(9000125),
+      repo: 'on-par/software-factory',
+      worktree: '/repo-factory-9000125',
+      branch: 'factory/9000125-add-a-gizmo',
+      octokit: octokit as any,
+      watchCI: false,
+      log: () => {},
+      run,
+      baseBranch: 'factory/9-a',
+      approvalGate: async () => ({ id: 'a1', approved: true, respondedAt: '2026-10-29T00:00:00.000Z' }),
+      work: {
+        id: 'local-brief:briefs/ARA-12.md#0123456789ab',
+        kind: 'local-brief',
+        title: 'ARA-12: Add a gizmo',
+        reference: { externalId: '0123456789abcdef', url: 'file:///home/op/briefs/ARA-12.md' },
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    const [, createArgs] = calls.find(([name]) => name === 'pulls.create') as [string, any];
+    expect(createArgs.title).toBe('Add a gizmo');
+    expect(createArgs.body).toContain('## Summary\nAdd a gizmo.');
+    expect(`${createArgs.title}\n${createArgs.body}`).not.toMatch(/ARA-12|local brief|sha256/i);
+    expect(commands).toContain('git diff --stat origin/factory/9-a...HEAD');
+    expect(commands).not.toContain('git diff --stat origin/main...HEAD');
   });
 
   it('behaves exactly like today when work is a github-issue request (run-issue passthrough is inert)', async () => {
@@ -1242,7 +1330,7 @@ describe('shipPhase PR description', () => {
       expect(body).not.toMatch(/^\*\*Risk:\*\*/m);
       expect(body).not.toContain('route: codex');
       expect(body).not.toContain('Recovering uncommitted work.');
-      expect(body.indexOf('## What changed')).toBeLessThan(body.indexOf('ship.ts | 12'));
+      expect(body).not.toContain('ship.ts | 12');
       expect(body.endsWith(ending)).toBe(true);
       if (footer !== undefined) expect(body).not.toContain('This PR was made by Software Factory');
       expect(body).toContain('Closes #23');
@@ -1347,7 +1435,7 @@ describe('shipPhase approval gate', () => {
         checkSummary,
       }),
     );
-    // git diff --stat runs exactly once — the PR body reuses the approval gate's diffStat.
+    // git diff --stat runs exactly once, for the approval gate; the PR body has no diff stat.
     expect(diffStatCalls).toHaveLength(1);
     const shipIdx = logs.findIndex(([type]) => type === 'ship');
     const requestedIdx = logs.findIndex(([type]) => type === 'approval_requested');
@@ -1358,10 +1446,8 @@ describe('shipPhase approval gate', () => {
     expect(requestedIdx).toBeGreaterThan(shipIdx);
     expect(grantedIdx).toBeGreaterThan(requestedIdx);
     expect(logs[requestedIdx][1]).toContain('checks: 3 pass, 0 fail, 0 skip');
-    expect(calls).toContainEqual([
-      'pulls.create',
-      expect.objectContaining({ body: expect.stringContaining('ship.ts | 12 ++++++++++++') }),
-    ]);
+    const body = String(calls.find(([name]: [string]) => name === 'pulls.create')?.[1].body);
+    expect(body).not.toContain('ship.ts | 12');
   });
 
   it('denies: gate resolving approved:false stops before push/PR and logs ship_denied with the reason', async () => {
