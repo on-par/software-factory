@@ -80,7 +80,7 @@ describe('normalizeTriageQueue', () => {
 });
 
 describe('parseOpenPrIssues', () => {
-  it('collects issue numbers from factory and legacy branches only', () => {
+  it('collects issue numbers from factory branches only, not legacy ship-it', () => {
     const json = JSON.stringify([
       { headRefName: 'factory/1-foo' },
       { headRefName: 'factory/3-bar' },
@@ -89,7 +89,7 @@ describe('parseOpenPrIssues', () => {
       {},
       null,
     ]);
-    expect(parseOpenPrIssues(json, 'factory')).toEqual(new Set([1, 3, 7]));
+    expect(parseOpenPrIssues(json, 'factory')).toEqual(new Set([1, 3]));
   });
 
   it('returns null for malformed input', () => {

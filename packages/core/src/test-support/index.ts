@@ -134,3 +134,5 @@ export class PipelineTestKit {
     this.workspaces.length = 0;
   }
 }
+
+export * from './phase.js';

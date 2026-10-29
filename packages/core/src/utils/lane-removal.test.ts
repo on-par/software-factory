@@ -16,7 +16,7 @@ describe('reapLaneWorktree untracked files', () => {
   async function lane() {
     const { repoRoot } = await kit.makeThrowawayRepo();
     const worktree = kit.trackWorktree(repoRoot, 4242);
-    await setupWorktree(repoRoot, 'ship-it/4242-x', worktree);
+    await setupWorktree(repoRoot, 'factory/4242-x', worktree);
     return { repoRoot, worktree, keepsFile: join(repoRoot, 'keeps.json') };
   }
 

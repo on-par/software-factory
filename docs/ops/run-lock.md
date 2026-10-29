@@ -11,6 +11,12 @@ The run lock stops two factory processes from force-recreating the same per-issu
 
 Originally every command shared one checkout lock, so a second one-shot run was refused even for a different issue, whose worktree and branch are disjoint. One-shot runs now lock per WorkKey (ADR-0168), so different issues run in parallel on one checkout and the same issue still refuses. `run-brief` with several files takes each brief's lock in turn, one brief at a time, so a refused lock fails only that brief and the next one still runs. The WorkKey is path-safe and config-independent. A worktree path is not used as the key because it depends on `worktree.parent` and the branch prefix (ADR-0150), so two processes with different prefixes would get different keys for the same issue.
 
+### Stacked briefs (`--stack`)
+
+`factory run-brief a.md b.md c.md --stack` opens the briefs as a PR stack: a.md's PR targets the trunk (or `--base-branch`), b.md's targets a.md's PR head branch, c.md's targets b.md's. Each layer reuses the `--base-branch` path: the worktree starts from `origin/<previous head>`, BUILD and CHECK diff against that parent via `parentBaseRef` (the same parent-base mechanism as the ADR-0161 stack slices), and the PR targets the previous head. The size gate is off for every brief. A failed brief, or one that opens no PR (for example `--no-pr`), stops the stack: the remaining briefs are skipped and reported, and the command exits 1. `--stack` cannot combine with `--workspace`, and with a single brief it does nothing.
+
+Brief stacks have no issue slice-plan comment, so the factory's `restackAfterSquashMerge` and the queue/land restack hook do not run for them. Merge bottom-up; GitHub's native stacked-PR support rebases the upper layers and retargets the next PR to the trunk after a squash merge. If review changes a lower layer, re-run the upper briefs.
+
 `run`, `supervise` and `local-small-overnight` pick issues from the queue, so they cannot know their key up front. They keep the checkout-wide fence.
 
 ## Cross-tier rule

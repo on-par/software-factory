@@ -52,7 +52,7 @@ function makeDeps(state: string, over: Partial<ResetDeps> = {}) {
       sh(`git worktree remove --force '${p}'`);
       sh('git worktree prune');
     },
-    readLeases: () => [{ worktreeId: wt192, branch: 'ship-it/192-some-title', port: 3100, pid: 1, acquiredAt: 'now' }],
+    readLeases: () => [{ worktreeId: wt192, branch: 'factory/192-some-title', port: 3100, pid: 1, acquiredAt: 'now' }],
     releaseLease,
     ...over,
   };
@@ -76,7 +76,7 @@ beforeEach(() => {
   sh(`git init -q --bare '${join(root, 'origin.git')}'`);
   sh(`git remote add origin '${join(root, 'origin.git')}' && git push -q origin main`);
   wt192 = join(root, 'wt-192');
-  sh(`git worktree add -q -b ship-it/192-some-title '${wt192}'`);
+  sh(`git worktree add -q -b factory/192-some-title '${wt192}'`);
   sh('git branch factory/193-other');
 });
 
@@ -91,7 +91,7 @@ describe('runReset', () => {
     await runReset([192], deps);
 
     expect(existsSync(wt192)).toBe(false);
-    expect(sh('git branch --list "ship-it/192-*"').trim()).toBe('');
+    expect(sh('git branch --list "factory/192-*"').trim()).toBe('');
     expect(sh('git branch --list "factory/193-*"')).toContain('factory/193-other');
     expect(readdirSafe(join(state, 'plans'))).toEqual([]);
     expect(existsSync(join(state, 'runs', 'issue-192.phase.json'))).toBe(false);
@@ -115,7 +115,7 @@ describe('runReset', () => {
     expect(lines).toHaveLength(2);
     for (const part of [
       '#192: removed worktree',
-      'branch ship-it/192-some-title',
+      'branch factory/192-some-title',
       'plan files (3)',
       'phase file',
       'rework history',
@@ -136,7 +136,7 @@ describe('runReset', () => {
     const [line] = await runReset([192], deps);
 
     expect(line).toContain(`kept worktree ${wt192} (current checkout)`);
-    expect(line).toContain('branch ship-it/192-some-title (checked out in');
+    expect(line).toContain('branch factory/192-some-title (checked out in');
     expect(existsSync(wt192)).toBe(true);
     expect(releaseLease).not.toHaveBeenCalled();
   });
@@ -199,7 +199,7 @@ describe('runReset failure reporting', () => {
 
     const [line] = await runReset([192], deps);
 
-    expect(line).toContain('kept branch ship-it/192-some-title (locked)');
+    expect(line).toContain('kept branch factory/192-some-title (locked)');
     expect(line).toContain('port lease 3100 (busy)');
   });
 
@@ -292,7 +292,7 @@ describe('runReset --dry-run', () => {
     expect(line.startsWith('#192 (dry run): would remove')).toBe(true);
     for (const part of [
       `worktree ${wt192}`,
-      'branch ship-it/192-some-title',
+      'branch factory/192-some-title',
       `plan file ${join(state, 'plans', 'issue-192.md')}`,
       `plan file ${join(state, 'plans', 'issue-192.design.json')}`,
       `plan file ${join(state, 'plans', 'issue-192.design.md')}`,
@@ -318,7 +318,7 @@ describe('runReset --dry-run', () => {
     const [line] = await runReset([192], deps);
 
     expect(line).toContain(`would keep worktree ${wt192} (current checkout)`);
-    expect(line).toContain('branch ship-it/192-some-title (checked out in');
+    expect(line).toContain('branch factory/192-some-title (checked out in');
   });
 
   it('prints nothing to reset for an unknown issue', async () => {
@@ -361,7 +361,7 @@ describe('runReset safety (#1789)', () => {
     const { deps, releaseLease } = makeDeps(state);
     const [line] = await runReset([192], deps);
     expect(existsSync(wt192)).toBe(true);
-    expect(sh('git branch --list ship-it/192-some-title')).not.toBe('');
+    expect(sh('git branch --list factory/192-some-title')).not.toBe('');
     expect(existsSync(join(state, 'plans', 'issue-192.md'))).toBe(false);
     expect(existsSync(join(state, 'logs', 'issue-192'))).toBe(false);
     expect(releaseLease).not.toHaveBeenCalled();
@@ -374,7 +374,7 @@ describe('runReset safety (#1789)', () => {
     const { deps } = makeDeps(state);
     const [line] = await runReset([192], deps);
     expect(existsSync(wt192)).toBe(true);
-    expect(sh('git branch --list ship-it/192-some-title')).not.toBe('');
+    expect(sh('git branch --list factory/192-some-title')).not.toBe('');
     expect(line).toContain('1 unpushed commit(s); pass --force to remove');
     expect(existsSync(join(state, 'plans', 'issue-192.md'))).toBe(false);
   });
@@ -382,13 +382,13 @@ describe('runReset safety (#1789)', () => {
   it('keeps an unpushed branch that has no worktree', async () => {
     const state = seedState();
     const extra = join(root, 'wt-extra');
-    sh(`git worktree add -q -b ship-it/192-extra '${extra}'`);
+    sh(`git worktree add -q -b factory/192-extra '${extra}'`);
     sh('git commit -q --allow-empty -m extra', extra);
     sh(`git worktree remove --force '${extra}'`);
     const { deps } = makeDeps(state);
     const [line] = await runReset([192], deps);
-    expect(line).toContain('branch ship-it/192-extra (1 unpushed commit(s); pass --force to remove)');
-    expect(sh('git branch --list ship-it/192-extra')).not.toBe('');
+    expect(line).toContain('branch factory/192-extra (1 unpushed commit(s); pass --force to remove)');
+    expect(sh('git branch --list factory/192-extra')).not.toBe('');
   });
 
   it('keeps a worktree whose HEAD is unresolvable as unverifiable', async () => {
@@ -409,7 +409,7 @@ describe('runReset safety (#1789)', () => {
     const { deps } = makeDeps(state, { force: true });
     const [line] = await runReset([192], deps);
     expect(existsSync(wt192)).toBe(false);
-    expect(sh('git branch --list ship-it/192-some-title')).toBe('');
+    expect(sh('git branch --list factory/192-some-title')).toBe('');
     expect(line).not.toContain('kept worktree');
   });
 

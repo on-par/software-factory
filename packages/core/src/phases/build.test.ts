@@ -1,6 +1,5 @@
 import { workKeyFromIssue } from '../work/work-key.js';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { LaneLifecycleEventSchema } from '@on-par/contracts';
@@ -9,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createLifecycleBus } from '../bus/index.js';
 import type { collectDesignDiff } from '../checkers/design-smells.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import { createPhaseTestSetup, stubModel, stubModelsConfig } from '../test-support/index.js';
 import { ModelRouter } from '../router/index.js';
 import { StubModelExecutor } from '../router/stub.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
@@ -22,46 +22,14 @@ import {
   buildPhase,
 } from './build.js';
 
-const models: ModelsConfig = {
-  version: 1,
-  models: {
-    'stub-worker': {
-      provider: 'custom',
-      tier: 'worker',
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
-      contextWindow: 1000,
-      capabilities: [],
-      envKey: null,
-    },
-    'stub-codex': {
-      provider: 'openai',
-      tier: 'worker',
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
-      contextWindow: 1000,
-      capabilities: ['codex'],
-      envKey: null,
-      codex: true,
-    },
-    'pinned-model': {
-      provider: 'custom',
-      tier: 'worker',
-      costPerMtokInput: 0,
-      costPerMtokOutput: 0,
-      contextWindow: 1000,
-      capabilities: [],
-      envKey: null,
-    },
+const models = stubModelsConfig(
+  {
+    'stub-worker': stubModel({ tier: 'worker' }),
+    'stub-codex': stubModel({ provider: 'openai', tier: 'worker', capabilities: ['codex'], codex: true }),
+    'pinned-model': stubModel({ tier: 'worker' }),
   },
-  tiers: { worker: ['stub-codex', 'stub-worker', 'pinned-model'] },
-  failover: {
-    triggers: ['rate_limit', 'unavailable', 'auth'],
-    maxRetries: 2,
-    cooldownMs: 0,
-  },
-  routingRules: {},
-};
+  { worker: ['stub-codex', 'stub-worker', 'pinned-model'] },
+);
 
 const routes: RoutesConfig = {
   version: 1,
@@ -71,25 +39,18 @@ const routes: RoutesConfig = {
   },
 };
 
-const tempDirs = new Set<string>();
+const setup = createPhaseTestSetup();
 
-afterEach(async () => {
-  await Promise.all([...tempDirs].map((dir) => rm(dir, { recursive: true, force: true })));
-  tempDirs.clear();
-});
+afterEach(() => setup.cleanup());
 
 describe('buildPhase FACTORY_CODEX kill-switch', () => {
   it('uses build_codex and logs no warn when codex is not disabled', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-79.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_codex: [{ output: 'codex output' }],
-        build_claude: [{ output: 'claude output' }],
-      },
+    const { router, stub } = setup.router(models, routes, {
+      build_codex: [{ output: 'codex output' }],
+      build_claude: [{ output: 'claude output' }],
     });
-    const router = new ModelRouter(models, routes, false, stub);
     const logs: Array<{ type: string; msg: string }> = [];
 
     const result = await buildPhase({
@@ -113,8 +74,7 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
   });
 
   it('forwards the per-run .NET isolation env to router.run on a .NET worktree (#1910)', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     await writeFile(join(worktree, 'App.sln'), '');
     const captured: { options?: any } = {};
     const fakeRouter = {
@@ -144,16 +104,12 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
   });
 
   it('runs the codex route as given; buildPhase has no codex fallback of its own (#664)', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-664.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_codex: [{ output: 'codex output' }],
-        build_claude: [{ output: 'claude output' }],
-      },
+    const { router, stub } = setup.router(models, routes, {
+      build_codex: [{ output: 'codex output' }],
+      build_claude: [{ output: 'claude output' }],
     });
-    const router = new ModelRouter(models, routes, false, stub);
     const logs: Array<{ type: string; msg: string }> = [];
 
     const result = await buildPhase({
@@ -180,8 +136,7 @@ describe('buildPhase FACTORY_CODEX kill-switch', () => {
 
 describe('buildPhase local-only codex prompt', () => {
   it('sends the compact local-small prompt with the trimmed spec', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-82.md');
     await writeFile(specPath, '   # Frozen spec 82\nDo the small thing.   \n');
 
@@ -212,8 +167,7 @@ describe('buildPhase local-only codex prompt', () => {
   });
 
   it('truncates an oversized spec for the local model', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-83.md');
     const bigSpec = 'x'.repeat(7000);
     await writeFile(specPath, bigSpec);
@@ -247,15 +201,11 @@ describe('buildPhase local-only codex prompt', () => {
 
 describe('buildPhase escalation', () => {
   it('returns not-ok and surfaces the ESCALATE line when the worker escalates', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-84.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_claude: [{ output: 'progress line\nESCALATE: the acceptance criteria are ambiguous\nmore text' }],
-      },
+    const { router } = setup.router(models, routes, {
+      build_claude: [{ output: 'progress line\nESCALATE: the acceptance criteria are ambiguous\nmore text' }],
     });
-    const router = new ModelRouter(models, routes, false, stub);
     const logs: Array<{ type: string; msg: string }> = [];
 
     const result = await buildPhase({
@@ -278,11 +228,9 @@ describe('buildPhase escalation', () => {
   });
 
   it('includes the skip-CI guidance in the claude prompt when skipCI is set', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-85.md');
-    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'ready for review' }] } });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router, stub } = setup.router(models, routes, { build_claude: [{ output: 'ready for review' }] });
 
     const result = await buildPhase({
       issue: workKeyFromIssue(85),
@@ -305,12 +253,10 @@ describe('buildPhase escalation', () => {
 
 describe('buildPhase disablePublish', () => {
   it('claude route + disablePublish: true sends the commit-only prompt, never the publish prompt', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-508.md');
     await writeFile(specPath, '# Frozen spec 508\nDo the thing.\n');
-    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'committed' }] } });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router, stub } = setup.router(models, routes, { build_claude: [{ output: 'committed' }] });
 
     const result = await buildPhase({
       issue: workKeyFromIssue(508),
@@ -333,11 +279,9 @@ describe('buildPhase disablePublish', () => {
   });
 
   it('claude route with publishFromBuild sends the publish prompt without a slash command prefix', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-509.md');
-    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'ready for review' }] } });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router, stub } = setup.router(models, routes, { build_claude: [{ output: 'ready for review' }] });
 
     const result = await buildPhase({
       issue: workKeyFromIssue(509),
@@ -360,11 +304,9 @@ describe('buildPhase disablePublish', () => {
   });
 
   it('codex route + disablePublish: true keeps the already commit-only prompt unchanged', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-510.md');
-    const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'committed' }] } });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router, stub } = setup.router(models, routes, { build_codex: [{ output: 'committed' }] });
 
     const result = await buildPhase({
       issue: workKeyFromIssue(510),
@@ -386,12 +328,10 @@ describe('buildPhase disablePublish', () => {
 
 describe('buildPhase atomic commit policy', () => {
   it('codex route renders the atomic policy', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-538-codex.md');
     await writeFile(specPath, '# Frozen spec 538\nDo the thing.\n');
-    const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'committed' }] } });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router, stub } = setup.router(models, routes, { build_codex: [{ output: 'committed' }] });
 
     const result = await buildPhase({
       issue: workKeyFromIssue(538),
@@ -414,12 +354,10 @@ describe('buildPhase atomic commit policy', () => {
   });
 
   it('claude route + disablePublish renders the atomic policy', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-538-claude-disable-publish.md');
     await writeFile(specPath, '# Frozen spec 538\nDo the thing.\n');
-    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'committed' }] } });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router, stub } = setup.router(models, routes, { build_claude: [{ output: 'committed' }] });
 
     const result = await buildPhase({
       issue: workKeyFromIssue(538),
@@ -441,11 +379,9 @@ describe('buildPhase atomic commit policy', () => {
   });
 
   it('claude publish route renders the atomic policy', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-538-claude-publish.md');
-    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'ready for review' }] } });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router, stub } = setup.router(models, routes, { build_claude: [{ output: 'ready for review' }] });
 
     const result = await buildPhase({
       issue: workKeyFromIssue(538),
@@ -468,8 +404,7 @@ describe('buildPhase atomic commit policy', () => {
   });
 
   it('local-small prompt keeps single-slice one-commit behavior', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-538-local-small.md');
     await writeFile(specPath, '# Frozen spec 538\nDo the small thing.\n');
     const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'codex output' }] } });
@@ -497,15 +432,11 @@ describe('buildPhase atomic commit policy', () => {
 
 describe('buildPhase modelOverride', () => {
   it('uses the default tier-order model when no modelOverride is given', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-80.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_claude: [{ output: 'claude output' }],
-      },
+    const { router, stub } = setup.router(models, routes, {
+      build_claude: [{ output: 'claude output' }],
     });
-    const router = new ModelRouter(models, routes, false, stub);
 
     const result = await buildPhase({
       issue: workKeyFromIssue(80),
@@ -524,15 +455,11 @@ describe('buildPhase modelOverride', () => {
   });
 
   it('pins the build model via modelOverride, bypassing default tier order', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-81.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_claude: [{ output: 'claude output' }],
-      },
+    const { router, stub } = setup.router(models, routes, {
+      build_claude: [{ output: 'claude output' }],
     });
-    const router = new ModelRouter(models, routes, false, stub);
 
     const result = await buildPhase({
       issue: workKeyFromIssue(81),
@@ -554,8 +481,7 @@ describe('buildPhase modelOverride', () => {
 
 describe('buildPhase sandbox', () => {
   it('logs the sandbox start event and forwards the policy + onSandboxEvent to router.run', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-91.md');
     const sandbox: SandboxPolicy = {
       runtime: 'sandbox-exec',
@@ -600,8 +526,7 @@ describe('buildPhase sandbox', () => {
   });
 
   it('logs a report-only open-network sandbox start event when the policy grants allowHosts', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-93.md');
     const sandbox: SandboxPolicy = {
       runtime: 'sandbox-exec',
@@ -612,8 +537,7 @@ describe('buildPhase sandbox', () => {
       cpuMs: 300_000,
       memMb: 4096,
     };
-    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'claude output' }] } });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router } = setup.router(models, routes, { build_claude: [{ output: 'claude output' }] });
     const logs: Array<{ type: string; msg: string }> = [];
 
     const result = await buildPhase({
@@ -640,11 +564,9 @@ describe('buildPhase sandbox', () => {
   });
 
   it('does not log a sandbox start event when no sandbox policy is set', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-92.md');
-    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'claude output' }] } });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router } = setup.router(models, routes, { build_claude: [{ output: 'claude output' }] });
     const logs: Array<{ type: string; msg: string }> = [];
 
     await buildPhase({
@@ -667,11 +589,9 @@ describe('buildPhase sandbox', () => {
 
 describe('buildPhase steering', () => {
   it('appends the operator guidance block to the claude route prompt when steering is passed', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-93.md');
-    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'claude output' }] } });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router, stub } = setup.router(models, routes, { build_claude: [{ output: 'claude output' }] });
 
     const result = await buildPhase({
       issue: workKeyFromIssue(93),
@@ -696,11 +616,9 @@ describe('buildPhase steering', () => {
   });
 
   it('appends the operator guidance block to the codex route prompt when steering is passed', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-94.md');
-    const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'codex output' }] } });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router, stub } = setup.router(models, routes, { build_codex: [{ output: 'codex output' }] });
 
     const result = await buildPhase({
       issue: workKeyFromIssue(94),
@@ -725,11 +643,9 @@ describe('buildPhase steering', () => {
   });
 
   it('leaves the prompt unchanged (no steering block) when no steering is passed', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-95.md');
-    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'claude output' }] } });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router, stub } = setup.router(models, routes, { build_claude: [{ output: 'claude output' }] });
 
     await buildPhase({
       issue: workKeyFromIssue(95),
@@ -753,15 +669,11 @@ const sameProviderModels: ModelsConfig = { ...models, tiers: { worker: ['stub-wo
 
 describe('buildPhase failover events', () => {
   it('emits a structured failover event when the router fails over to a different model', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-90.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_claude: [{ fail: 'timeout' }, { output: 'claude output' }],
-      },
+    const { router } = setup.router(sameProviderModels, routes, {
+      build_claude: [{ fail: 'timeout' }, { output: 'claude output' }],
     });
-    const router = new ModelRouter(sameProviderModels, routes, false, stub);
     const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
 
     const result = await buildPhase({
@@ -783,8 +695,7 @@ describe('buildPhase failover events', () => {
   });
 
   it('omits the detail suffix from the failover log when the failed attempt carries no descriptive detail', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-93.md');
     let calls = 0;
     const executor = {
@@ -819,8 +730,7 @@ describe('buildPhase failover events', () => {
 
 describe('buildPhase timeoutSeconds', () => {
   it('forwards a custom timeoutSeconds to router.run instead of the 7200s default', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-95.md');
     const captured: { options?: any } = {};
     const fakeRouter = {
@@ -850,8 +760,7 @@ describe('buildPhase timeoutSeconds', () => {
 
 describe('buildPhase design artifact receipt (#422)', () => {
   it('logs design_artifact_received with the open-question count when a valid .design.json sits beside the spec', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-422.md');
     await writeFile(specPath, '---\nroute: claude\n---\n# Spec\n');
     await writeFile(
@@ -889,8 +798,7 @@ describe('buildPhase design artifact receipt (#422)', () => {
   });
 
   it('injects the design grounding block into the claude worker prompt for a deepened .design.json', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-480.md');
     await writeFile(specPath, '---\nroute: claude\n---\n# Spec\n');
     await writeFile(
@@ -940,8 +848,7 @@ describe('buildPhase design artifact receipt (#422)', () => {
     delete process.env.FACTORY_LOCAL_ONLY;
 
     try {
-      const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('build-phase-test-');
       const specPath = join(worktree, 'issue-481.md');
       await writeFile(specPath, '---\nroute: codex\n---\n# Spec\n');
       await writeFile(
@@ -959,8 +866,7 @@ describe('buildPhase design artifact receipt (#422)', () => {
           openQuestions: [],
         }),
       );
-      const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'codex output' }] } });
-      const router = new ModelRouter(models, routes, false, stub);
+      const { router, stub } = setup.router(models, routes, { build_codex: [{ output: 'codex output' }] });
 
       const result = await buildPhase({
         issue: workKeyFromIssue(481),
@@ -987,8 +893,7 @@ describe('buildPhase design artifact receipt (#422)', () => {
   });
 
   it('does not include the design grounding heading for a pre-#480 (shallow) .design.json', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-482.md');
     await writeFile(specPath, '---\nroute: claude\n---\n# Spec\n');
     await writeFile(
@@ -1028,8 +933,7 @@ describe('buildPhase design artifact receipt (#422)', () => {
   });
 
   it('does not log design_artifact_received and still succeeds when no .design.json exists', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-426.md');
     await writeFile(specPath, '---\nroute: claude\n---\n# Spec\n');
     const fakeRouter = {
@@ -1068,8 +972,7 @@ describe('buildPhase appPort', () => {
   });
 
   it('injects laneEnv and the port prompt block on the codex route when appPort is set', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-96.md');
     const captured: { options?: any; prompt?: string } = {};
     const fakeRouter = {
@@ -1109,8 +1012,7 @@ describe('buildPhase appPort', () => {
   });
 
   it('injects laneEnv and the port prompt block on the claude route when appPort is set', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-97.md');
     const captured: { options?: any; prompt?: string } = {};
     const fakeRouter = {
@@ -1150,8 +1052,7 @@ describe('buildPhase appPort', () => {
   });
 
   it('reaches the executor env as FACTORY_BASE_URL while FACTORY_APP_PORT stays the raw port, and the prompt mentions the stable URL', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-99.md');
     const captured: { options?: any; prompt?: string } = {};
     const fakeRouter = {
@@ -1189,8 +1090,7 @@ describe('buildPhase appPort', () => {
   });
 
   it('forwards onPgid to router.run options', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-96b.md');
     const captured: { options?: any } = {};
     const fakeRouter = {
@@ -1219,8 +1119,7 @@ describe('buildPhase appPort', () => {
   });
 
   it('carries headless-only env and no port prompt block when appPort is unset', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-98.md');
     const captured: { options?: any; prompt?: string } = {};
     const fakeRouter = {
@@ -1251,50 +1150,26 @@ describe('buildPhase appPort', () => {
 });
 
 describe('buildPhase cross-harness failover', () => {
-  const failoverModels: ModelsConfig = {
-    version: 1,
-    models: {
-      'codex-a': {
+  const failoverModels = stubModelsConfig(
+    {
+      'codex-a': stubModel({
         provider: 'openai',
         tier: 'worker',
-        costPerMtokInput: 0,
-        costPerMtokOutput: 0,
-        contextWindow: 1000,
         capabilities: ['codex'],
-        envKey: null,
         codex: true,
         harness: 'codex-cli',
-      },
-      'codex-b': {
+      }),
+      'codex-b': stubModel({
         provider: 'openai',
         tier: 'worker',
-        costPerMtokInput: 0,
-        costPerMtokOutput: 0,
-        contextWindow: 1000,
         capabilities: ['codex'],
-        envKey: null,
         codex: true,
         harness: 'codex-cli',
-      },
-      'claude-sonnet-5': {
-        provider: 'anthropic',
-        tier: 'worker',
-        costPerMtokInput: 0,
-        costPerMtokOutput: 0,
-        contextWindow: 1000,
-        capabilities: [],
-        envKey: null,
-        harness: 'claude-cli',
-      },
+      }),
+      'claude-sonnet-5': stubModel({ provider: 'anthropic', tier: 'worker', harness: 'claude-cli' }),
     },
-    tiers: { worker: ['codex-a', 'codex-b', 'claude-sonnet-5'] },
-    failover: {
-      triggers: ['rate_limit', 'unavailable', 'auth'],
-      maxRetries: 2,
-      cooldownMs: 0,
-    },
-    routingRules: {},
-  };
+    { worker: ['codex-a', 'codex-b', 'claude-sonnet-5'] },
+  );
   const failoverRoutes: RoutesConfig = {
     version: 1,
     routes: {
@@ -1304,12 +1179,11 @@ describe('buildPhase cross-harness failover', () => {
   };
 
   async function runPinned(fail: 'local_auth' | 'usage_cap') {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
-    const stub = new StubModelExecutor({
-      scripts: { build_codex: [{ fail }, { fail }], build_claude: [{ output: 'claude output' }] },
+    const worktree = await setup.worktree('build-phase-test-');
+    const { router, stub } = setup.router(failoverModels, failoverRoutes, {
+      build_codex: [{ fail }, { fail }],
+      build_claude: [{ output: 'claude output' }],
     });
-    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
     const logCalls: string[] = [];
     const run = buildPhase({
       issue: workKeyFromIssue(2510),
@@ -1345,16 +1219,12 @@ describe('buildPhase cross-harness failover', () => {
   });
 
   it('continues a codex build on claude when every codex worker is quota-exhausted', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-367.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
-        build_claude: [{ output: 'claude output' }],
-      },
+    const { router, stub } = setup.router(failoverModels, failoverRoutes, {
+      build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
+      build_claude: [{ output: 'claude output' }],
     });
-    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
     const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
 
     const result = await buildPhase({
@@ -1391,18 +1261,14 @@ describe('buildPhase cross-harness failover', () => {
   it.each(['usage_cap', 'rate_limit', 'timeout', 'unavailable', 'local_auth'] as const)(
     'continues a Claude build on Codex when the Claude provider fails with %s',
     async (failure) => {
-      const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-      tempDirs.add(worktree);
+      const worktree = await setup.worktree('build-phase-test-');
       const specPath = join(worktree, 'issue-368.md');
       await writeFile(specPath, '# Frozen spec\nImplement the bounded change.\n');
-      const stub = new StubModelExecutor({
-        scripts: {
-          build_claude:
-            failure === 'rate_limit' ? [{ fail: failure }, { fail: failure }, { fail: failure }] : [{ fail: failure }],
-          build_codex: [{ output: 'codex output' }],
-        },
+      const { router, stub } = setup.router(failoverModels, failoverRoutes, {
+        build_claude:
+          failure === 'rate_limit' ? [{ fail: failure }, { fail: failure }, { fail: failure }] : [{ fail: failure }],
+        build_codex: [{ output: 'codex output' }],
       });
-      const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
 
       const result = await buildPhase({
         issue: workKeyFromIssue(368),
@@ -1432,17 +1298,13 @@ describe('buildPhase cross-harness failover', () => {
   );
 
   it('codex→claude quota failover with disablePublish: true sends the commit-only prompt, not /ship-it', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-508.md');
     await writeFile(specPath, '# Frozen spec 508\nDo the thing.\n');
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
-        build_claude: [{ output: 'claude output' }],
-      },
+    const { router, stub } = setup.router(failoverModels, failoverRoutes, {
+      build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
+      build_claude: [{ output: 'claude output' }],
     });
-    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
 
     const result = await buildPhase({
       issue: workKeyFromIssue(508),
@@ -1465,16 +1327,12 @@ describe('buildPhase cross-harness failover', () => {
   });
 
   it('tags the claude fallback run with retryCause: failover on the cost row', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-367.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
-        build_claude: [{ output: 'claude output' }],
-      },
+    const { router } = setup.router(failoverModels, failoverRoutes, {
+      build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
+      build_claude: [{ output: 'claude output' }],
     });
-    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
     const costRows: Array<{ task: string; retryCause?: string }> = [];
     router.setCostSink((entry) => costRows.push(entry));
 
@@ -1496,11 +1354,11 @@ describe('buildPhase cross-harness failover', () => {
   });
 
   it('passes no retryCause on the cost row for a plain, non-fallback build run', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-367.md');
-    const stub = new StubModelExecutor({ scripts: { build_codex: [{ output: 'codex output' }] } });
-    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
+    const { router } = setup.router(failoverModels, failoverRoutes, {
+      build_codex: [{ output: 'codex output' }],
+    });
     const costRows: Array<{ task: string; retryCause?: string }> = [];
     router.setCostSink((entry) => costRows.push(entry));
 
@@ -1522,8 +1380,7 @@ describe('buildPhase cross-harness failover', () => {
   });
 
   it('continues a codex build on claude when every codex worker is rate-limited', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-367.md');
     const stub = new StubModelExecutor({
       scripts: {
@@ -1559,16 +1416,12 @@ describe('buildPhase cross-harness failover', () => {
   });
 
   it('does not swap harnesses for a non-quota failure — the lane still parks', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-367.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_codex: [{ fail: 'error' }, { fail: 'error' }],
-        build_claude: [{ output: 'claude output' }],
-      },
+    const { router, stub } = setup.router(failoverModels, failoverRoutes, {
+      build_codex: [{ fail: 'error' }, { fail: 'error' }],
+      build_claude: [{ output: 'claude output' }],
     });
-    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
     const logCalls: Array<[string, string, ({ failoverReason?: string } | undefined)?]> = [];
 
     await expect(
@@ -1592,16 +1445,12 @@ describe('buildPhase cross-harness failover', () => {
   });
 
   it('re-throws when the claude fallback re-run itself fails', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-367.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
-        build_claude: [{ fail: 'error' }, { fail: 'error' }],
-      },
+    const { router } = setup.router(failoverModels, failoverRoutes, {
+      build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
+      build_claude: [{ fail: 'error' }, { fail: 'error' }],
     });
-    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
 
     await expect(
       buildPhase({
@@ -1619,16 +1468,12 @@ describe('buildPhase cross-harness failover', () => {
   });
 
   it('autoFailover.enabled: false rethrows the quota error without touching claude', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-367.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
-        build_claude: [{ output: 'claude output' }],
-      },
+    const { router, stub } = setup.router(failoverModels, failoverRoutes, {
+      build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
+      build_claude: [{ output: 'claude output' }],
     });
-    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
     const logCalls: Array<[string, string]> = [];
 
     await expect(
@@ -1653,16 +1498,12 @@ describe('buildPhase cross-harness failover', () => {
   });
 
   it('autoFailover.enabled: true calls onQuotaExhausted exactly once with provider and reason', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-367.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
-        build_claude: [{ output: 'claude output' }],
-      },
+    const { router } = setup.router(failoverModels, failoverRoutes, {
+      build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
+      build_claude: [{ output: 'claude output' }],
     });
-    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
     const onQuotaExhausted = vi.fn();
 
     const result = await buildPhase({
@@ -1684,16 +1525,12 @@ describe('buildPhase cross-harness failover', () => {
   });
 
   it('still completes the claude fallback when onQuotaExhausted itself throws', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-367.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
-        build_claude: [{ output: 'claude output' }],
-      },
+    const { router } = setup.router(failoverModels, failoverRoutes, {
+      build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
+      build_claude: [{ output: 'claude output' }],
     });
-    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
     const logCalls: Array<[string, string]> = [];
 
     const result = await buildPhase({
@@ -1722,33 +1559,20 @@ describe('buildPhase cross-harness failover', () => {
   });
 
   it('routes to a fallbackModel when it is an available build_claude worker', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-367.md');
     const modelsWithSecondClaude: ModelsConfig = {
       ...failoverModels,
       models: {
         ...failoverModels.models,
-        'claude-haiku': {
-          provider: 'anthropic',
-          tier: 'worker',
-          costPerMtokInput: 0,
-          costPerMtokOutput: 0,
-          contextWindow: 1000,
-          capabilities: [],
-          envKey: null,
-          harness: 'claude-cli',
-        },
+        'claude-haiku': stubModel({ provider: 'anthropic', tier: 'worker', harness: 'claude-cli' }),
       },
       tiers: { worker: ['codex-a', 'codex-b', 'claude-haiku', 'claude-sonnet-5'] },
     };
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
-        build_claude: [{ output: 'claude output' }],
-      },
+    const { router, stub } = setup.router(modelsWithSecondClaude, failoverRoutes, {
+      build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
+      build_claude: [{ output: 'claude output' }],
     });
-    const router = new ModelRouter(modelsWithSecondClaude, failoverRoutes, false, stub);
 
     const result = await buildPhase({
       issue: workKeyFromIssue(367),
@@ -1769,16 +1593,12 @@ describe('buildPhase cross-harness failover', () => {
   });
 
   it('falls back to the default build_claude worker when fallbackModel is unknown', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-367.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
-        build_claude: [{ output: 'claude output' }],
-      },
+    const { router, stub } = setup.router(failoverModels, failoverRoutes, {
+      build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
+      build_claude: [{ output: 'claude output' }],
     });
-    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
 
     const result = await buildPhase({
       issue: workKeyFromIssue(367),
@@ -1799,17 +1619,13 @@ describe('buildPhase cross-harness failover', () => {
   });
 
   async function runFailover(extra: { publishFromBuild?: boolean }) {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-1867.md');
     await writeFile(specPath, '# Frozen spec 1867\nDo the thing.\n');
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
-        build_claude: [{ output: 'claude output' }],
-      },
+    const { router, stub } = setup.router(failoverModels, failoverRoutes, {
+      build_codex: [{ fail: 'usage_cap' }, { fail: 'usage_cap' }],
+      build_claude: [{ output: 'claude output' }],
     });
-    const router = new ModelRouter(failoverModels, failoverRoutes, false, stub);
     const result = await buildPhase({
       issue: workKeyFromIssue(1867),
       repo: 'on-par/software-factory',
@@ -1840,13 +1656,9 @@ describe('buildPhase cross-harness failover', () => {
 
 describe('buildPhase lifecycle events', () => {
   it('emits started then done on the success path, validated against the shared schema', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-591.md');
-    const stub = new StubModelExecutor({
-      scripts: { build_claude: [{ output: 'build output' }] },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router } = setup.router(models, routes, { build_claude: [{ output: 'build output' }] });
     const bus = createLifecycleBus();
     const received: any[] = [];
     bus.on((e) => received.push(e));
@@ -1878,15 +1690,11 @@ describe('buildPhase lifecycle events', () => {
   });
 
   it('emits started then failed on the escalation path, with a non-empty detail', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-592.md');
-    const stub = new StubModelExecutor({
-      scripts: {
-        build_claude: [{ output: 'progress line\nESCALATE: the acceptance criteria are ambiguous\nmore text' }],
-      },
+    const { router } = setup.router(models, routes, {
+      build_claude: [{ output: 'progress line\nESCALATE: the acceptance criteria are ambiguous\nmore text' }],
     });
-    const router = new ModelRouter(models, routes, false, stub);
     const bus = createLifecycleBus();
     const received: any[] = [];
     bus.on((e) => received.push(e));
@@ -1917,8 +1725,7 @@ describe('buildPhase no-diff post-condition', () => {
     }) as any;
 
   it('fails the build when the diff collector reports an empty diff', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-961-empty.md');
     const logs: Array<{ type: string; msg: string }> = [];
 
@@ -1941,8 +1748,7 @@ describe('buildPhase no-diff post-condition', () => {
   });
 
   it('fails with no_diff when the slice has no changes beyond its parent base ref (#2717)', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-2717-empty.md');
     const logs: Array<{ type: string; msg: string }> = [];
     let receivedOpts: Parameters<typeof collectDesignDiff>[2];
@@ -1975,8 +1781,7 @@ describe('buildPhase no-diff post-condition', () => {
   });
 
   it('does not pass baseRefOverride when no parentBaseRef is given (#2717)', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-2717-default.md');
     let receivedOpts: Parameters<typeof collectDesignDiff>[2];
 
@@ -2003,8 +1808,7 @@ describe('buildPhase no-diff post-condition', () => {
   });
 
   it('fails with junk_only_diff when the filtered diff is empty but excluded paths exist', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-1162-junk.md');
     const logs: Array<{ type: string; msg: string }> = [];
 
@@ -2034,8 +1838,7 @@ describe('buildPhase no-diff post-condition', () => {
   });
 
   it('passes the captured pre-build base to the diff collector as fallbackBaseRef', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-1162-fallback.md');
     let receivedOpts: { fallbackBaseRef?: string } | undefined;
 
@@ -2062,8 +1865,7 @@ describe('buildPhase no-diff post-condition', () => {
   });
 
   it('succeeds when the diff collector reports a real diff', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-961-real.md');
 
     const result = await buildPhase({
@@ -2084,8 +1886,7 @@ describe('buildPhase no-diff post-condition', () => {
   });
 
   it('passes when a real source change survives the junk filter (junk alongside real change)', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-1162-mixed.md');
 
     const result = await buildPhase({
@@ -2112,8 +1913,7 @@ describe('buildPhase no-diff post-condition', () => {
   });
 
   it('treats an uncollectable diff (skipReason) as a pass, not a worker failure', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-961-skip.md');
     const logs: Array<{ type: string; msg: string }> = [];
     const skipReason = 'no base ref (tried origin/main, origin/master) — not a git checkout or no remote base';
@@ -2136,8 +1936,7 @@ describe('buildPhase no-diff post-condition', () => {
   });
 
   it('lets escalation win over no_diff and never calls the diff collector', async () => {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-961-escalate.md');
     let collectDiffCalled = false;
 
@@ -2264,11 +2063,9 @@ describe('BUILD prompt required elements (#1976)', () => {
 
 describe('buildPhase publishFromBuild (#1867)', () => {
   async function runClaude(extra: { publishFromBuild?: boolean; disablePublish?: boolean }) {
-    const worktree = await mkdtemp(join(tmpdir(), 'build-phase-test-'));
-    tempDirs.add(worktree);
+    const worktree = await setup.worktree('build-phase-test-');
     const specPath = join(worktree, 'issue-1867.md');
-    const stub = new StubModelExecutor({ scripts: { build_claude: [{ output: 'done' }] } });
-    const router = new ModelRouter(models, routes, false, stub);
+    const { router, stub } = setup.router(models, routes, { build_claude: [{ output: 'done' }] });
     const result = await buildPhase({
       issue: workKeyFromIssue(1867),
       repo: 'on-par/software-factory',

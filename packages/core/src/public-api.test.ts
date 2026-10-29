@@ -753,7 +753,6 @@ const INTERNAL_API_KEYS = [
   'escalationLine',
   'factoryBranchIssue',
   'factoryBranchPrefixes',
-  'LEGACY_BRANCH_PREFIX',
   'formatEventLine',
   'getIssueTitle',
   'gitFetch',

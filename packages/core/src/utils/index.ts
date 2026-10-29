@@ -26,7 +26,7 @@ import type {
   RemoteBranchRecord,
   ReworkInfo,
 } from '../types/index.js';
-import { branchPrefixSlug, LEGACY_BRANCH_PREFIX, slugify } from './branch-slug.js';
+import { branchPrefixSlug, slugify } from './branch-slug.js';
 import { levelForType } from './format.js';
 import { execGit } from './git-exec.js';
 import { moveLaneBranchAside } from './lane-branch-aside.js';
@@ -430,15 +430,14 @@ export async function reapCleanShipWorktree(
   return { outcome: 'removed', branch, branchDeleted };
 }
 
-export { branchPrefixSlug, LEGACY_BRANCH_PREFIX, slugify };
+export { branchPrefixSlug, slugify };
 
-/** Prefixes recognized as factory branches: the resolved slug first, then the legacy one, deduped. */
+/** Prefixes recognized as factory branches: the resolved slug only. */
 export function factoryBranchPrefixes(prefix?: string): string[] {
-  const resolved = branchPrefixSlug(prefix);
-  return resolved === LEGACY_BRANCH_PREFIX ? [resolved] : [resolved, LEGACY_BRANCH_PREFIX];
+  return [branchPrefixSlug(prefix)];
 }
 
-/** Issue number of a `<prefix>/<n>-…` factory branch on any recognized prefix; null otherwise. */
+/** Issue number of a `<prefix>/<n>-…` factory branch on the resolved prefix; null otherwise. */
 export function factoryBranchIssue(branch: string, prefix?: string): number | null {
   for (const p of factoryBranchPrefixes(prefix)) {
     const match = new RegExp(`^${p}/(\\d+)-`).exec(branch); // slugs are [a-z0-9-] only

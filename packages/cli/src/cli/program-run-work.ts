@@ -1,7 +1,6 @@
 // packages/cli/src/cli/program-run-work.ts — registers the Run work help-group commands (#2793)
 
 import type { Command } from 'commander';
-import { LEGACY_BRANCH_PREFIX } from '@on-par/factory-core/internal';
 import { BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION, BRANCH_PREFIX_OPTION_DESCRIPTION } from './branch-prefix.js';
 import type { ProgramHandlers } from './index.js';
 import type { SteerOptions } from './steer.js';
@@ -99,6 +98,10 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     )
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .option('--base-branch <ref>', BASE_BRANCH_OPTION_DESCRIPTION)
+    .option(
+      '--stack',
+      "Several briefs: open them as a PR stack — each brief starts from and targets the previous brief's PR head branch; a failure or missing PR (e.g. --no-pr) stops the stack and skips the rest",
+    )
     .action(async (file: string, files: string[], opts) => {
       await handlers.cmdRunBrief([file, ...files], opts);
     });
@@ -120,7 +123,7 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
   program
     .command('resume-approved')
     .description(
-      `Land open factory PRs (factory/*, plus legacy ${LEGACY_BRANCH_PREFIX}/*) whose review is now approved; skip the rest`,
+      'Land open factory PRs (factory/* or the configured prefix) whose review is now approved; skip the rest',
     )
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_MATCH_OPTION_DESCRIPTION)
     .action(async (opts) => {

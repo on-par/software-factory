@@ -2303,7 +2303,7 @@ bash scripts/verify.sh
               data: [
                 {
                   number: 77,
-                  head: { ref: 'ship-it/1-fix-the-bug' },
+                  head: { ref: 'factory/1-fix-the-bug' },
                   state: 'closed',
                   merged_at: mergedAt,
                   merge_commit_sha: 'abcdef1234567',
@@ -2364,7 +2364,7 @@ bash scripts/verify.sh
               data: [
                 {
                   number: 77,
-                  head: { ref: 'ship-it/1-fix-the-bug' },
+                  head: { ref: 'factory/1-fix-the-bug' },
                   state: 'closed',
                   merged_at: mergedAt,
                   merge_commit_sha: 'abcdef1234567',
@@ -2397,7 +2397,7 @@ bash scripts/verify.sh
               data: [
                 {
                   number: 77,
-                  head: { ref: 'ship-it/1-fix-the-bug' },
+                  head: { ref: 'factory/1-fix-the-bug' },
                   state: 'closed',
                   merged_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
                   merge_commit_sha: 'abcdef1234567',
@@ -2429,7 +2429,7 @@ bash scripts/verify.sh
               data: [
                 {
                   number: 77,
-                  head: { ref: 'ship-it/1-fix-the-bug' },
+                  head: { ref: 'factory/1-fix-the-bug' },
                   state: 'closed',
                   merged_at: mergedAt,
                   merge_commit_sha: 'abcdef1234567',
@@ -4209,7 +4209,7 @@ bash scripts/verify.sh
       const wt = join(h.repoRoot, '..', 'wt-777');
       h.execImpl = (cmd: string) => {
         if (cmd.includes('rev-parse')) return h.repoRoot;
-        if (cmd.includes('worktree list')) return `worktree ${wt}\nHEAD abc\nbranch refs/heads/ship-it/777-x\n`;
+        if (cmd.includes('worktree list')) return `worktree ${wt}\nHEAD abc\nbranch refs/heads/factory/777-x\n`;
         if (cmd.includes('git status')) return ' M a.ts\n';
         return '';
       };
@@ -4365,7 +4365,7 @@ bash scripts/verify.sh
               pullRequests: {
                 pageInfo: { hasNextPage: false },
                 nodes: [
-                  { number: 12, headRefName: 'ship-it/5-fix-the-bug', reviewDecision: 'APPROVED', isDraft: false },
+                  { number: 12, headRefName: 'factory/5-fix-the-bug', reviewDecision: 'APPROVED', isDraft: false },
                 ],
               },
             },
