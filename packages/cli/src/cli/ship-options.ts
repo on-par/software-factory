@@ -3,6 +3,7 @@ import type { SizeGateMode } from '@on-par/factory-core';
 import { CliExitError } from './errors.js';
 
 export interface ShipIssueOptions {
+  parkOverBudget?: boolean;
   product?: string;
   autoRework?: boolean;
   interactive?: boolean;

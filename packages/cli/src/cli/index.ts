@@ -228,6 +228,7 @@ import {
   readStopMarker,
   detectClaudePlan,
   findSlicePlanComment,
+  listBlockedBy,
 } from '@on-par/factory-core/internal';
 import { CliExitError } from './errors.js';
 import { baseBranchConflict, baseBranchOrExit } from './ship-options.js';
@@ -2372,6 +2373,19 @@ async function cmdRunIssue(
       try {
         if (sizeGate === 'stack') {
           await runIssueStack(issueNum, baseBranch, {
+            repo: ghRepo,
+            list: (issue) => listBlockedBy({ octokit: getOctokit(), repo: ghRepo }, issue),
+            shipMember: async (issue, base, onOutcome) => {
+              const memberWork =
+                issue === issueNum
+                  ? work
+                  : await workSources.resolve(GITHUB_ISSUE_SOURCE, { repo: ghRepo, issue } satisfies GithubIssueParams);
+              await shipIssue(
+                issue,
+                { ...shipOpts, branchPrefix, sizeGate, maxSlices, baseBranch: base, parkOverBudget: true },
+                { repoRoot, ghRepo, workRequest: memberWork, onOutcome },
+              );
+            },
             readSlicePlan: async () => {
               const lookup = await findSlicePlanComment({ octokit: getOctokit(), repo: ghRepo, issue: issueNum });
               return lookup.status === 'found' ? lookup.plan : undefined;

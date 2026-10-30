@@ -21,6 +21,7 @@ export async function resolveRunBranch(opts: {
   ghRepo: string;
   branchPrefix?: string;
   sizeGateMode: SizeGateMode;
+  parkOverBudget?: boolean;
   work: WorkRequest;
   ctx?: { localOnly?: LocalOnlyPolicy; resumeFrom?: CheckResumeRecord; lane?: string; rebuild?: { branch: string } };
   /** --no-pr: always a fresh branch, never an adopted open PR's. */
@@ -33,7 +34,9 @@ export async function resolveRunBranch(opts: {
   const { issueNum, issueTitle, ghRepo, branchPrefix, sizeGateMode, work, ctx, noPr, baseBranch, octokit, eventsFile } =
     opts;
   if (ctx?.rebuild) return ctx.rebuild.branch; // #3325: never adopt the conflicting PR being replaced
-  const sliceIndex = await findSliceIndex({ sizeGateMode, ctx, work, octokit, ghRepo, issueNum });
+  const sliceIndex = opts.parkOverBudget
+    ? undefined
+    : await findSliceIndex({ sizeGateMode, ctx, work, octokit, ghRepo, issueNum });
   if (ctx?.resumeFrom) return ctx.resumeFrom.branch;
   const fresh = branchFor(workKeyFromIssue(issueNum), issueTitle, branchPrefix, sliceIndex);
   if (

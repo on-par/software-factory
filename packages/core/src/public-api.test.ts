@@ -345,6 +345,7 @@ const EXTRA_INTERNAL_KEYS = [
   ...ITERATE_INTERNAL_KEYS,
 ];
 const INTERNAL_API_KEYS = [
+  'listBlockedBy',
   ...'AGENT_MEMORY_DIR AGENT_MEMORY_MAX_BYTES agentMemoryPath readAgentMemory'.split(' '), // #3624
   ...'renderAgentMemory scanAgentMemory loadAgentMemoryCtx'.split(' '),
   ...'resolveCompileCommand resolveLintCommands resolveTestsCommand'.split(' '), // #3473, #1590

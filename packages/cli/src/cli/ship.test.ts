@@ -71,6 +71,18 @@ describe('shipIssue (direct)', () => {
       expect(setup.mock.calls[0]?.[1]).toBe('factory/5-s2-fix-the-bug');
     });
 
+    it('keeps a chain member whole and passes the stack gate with a base', async () => {
+      const setup = custom();
+      const fake = sliceOctokit(async () => ({ data: [{ id: 1, user: { id: 7 }, body: planComment }] }));
+      await shipIssue(5, { sizeGate: 'stack', baseBranch: 'main', parkOverBudget: true }, ctx(), {
+        setupWorktree: setup,
+        octokit: () => fake,
+      });
+      expect(fake.rest.issues.listComments).not.toHaveBeenCalled();
+      expect(setup.mock.calls[0]?.[1]).toBe('factory/5-fix-the-bug');
+      expect(phases.planPhase.mock.calls[0]?.[0]).toMatchObject({ sizeGateMode: 'stack', parkOverBudget: true });
+    });
+
     it('does not look up the slice plan in file mode', async () => {
       const setup = custom();
       const fake = sliceOctokit(async () => ({ data: [] }));

@@ -88,6 +88,13 @@ describe('resolveRunBranch', () => {
     expect(list).not.toHaveBeenCalled();
   });
 
+  it('does not read a slice plan for a whole chain member', async () => {
+    const { octokit, list } = stub([]);
+    const branch = await run(octokit, { sizeGateMode: 'stack', parkOverBudget: true });
+    expect(branch).toBe(branchFor(workKeyFromIssue(2253), 'New title', 'factory'));
+    expect(list).not.toHaveBeenCalled();
+  });
+
   it('skips the lookup for localOnly runs', async () => {
     const { octokit, list } = stub([pr(7, 'factory/2253-x')]);
     const localOnly = { workspace: dir } as any;

@@ -40,25 +40,24 @@ function repositoryOf(item: RawBlockedByItem, fallback: string): string {
 /** Lists the issues that block `issue` (GET .../dependencies/blocked_by). */
 export async function listBlockedBy(deps: DependencyClientDeps, issue: number): Promise<BlockedByItem[]> {
   const [owner, repo] = deps.repo.split('/') as [string, string];
-  const response = await deps.octokit.request(
-    'GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by',
-    {
-      owner,
-      repo,
-      issue_number: issue,
-      per_page: 100,
-    },
-  );
-  const data: unknown = response.data;
-  if (!Array.isArray(data)) {
-    throw new Error('blocked_by listing did not return an array');
+  const items: BlockedByItem[] = [];
+  for (let page = 1; ; page++) {
+    const response = await deps.octokit.request(
+      'GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by',
+      { owner, repo, issue_number: issue, per_page: 100, page },
+    );
+    const data: unknown = response.data;
+    if (!Array.isArray(data)) throw new Error('blocked_by listing did not return an array');
+    items.push(
+      ...(data as RawBlockedByItem[]).map((item) => ({
+        number: item.number,
+        state: item.state === 'closed' ? ('closed' as const) : ('open' as const),
+        stateReason: item.state_reason ?? null,
+        repository: repositoryOf(item, deps.repo),
+      })),
+    );
+    if (data.length < 100) return items;
   }
-  return (data as RawBlockedByItem[]).map((item) => ({
-    number: item.number,
-    state: item.state === 'closed' ? 'closed' : 'open',
-    stateReason: item.state_reason ?? null,
-    repository: repositoryOf(item, deps.repo),
-  }));
 }
 
 /**

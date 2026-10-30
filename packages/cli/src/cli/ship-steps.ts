@@ -311,7 +311,7 @@ export interface RunRequestInput {
   product: string | undefined;
   runStartedAt: string;
   lane: string | undefined;
-  opts: { interactive?: boolean; sandbox?: boolean; pr?: boolean; baseBranch?: string };
+  opts: { interactive?: boolean; sandbox?: boolean; pr?: boolean; baseBranch?: string; parkOverBudget?: boolean };
   ctx?: {
     blockedBehind?: number[];
     workSource?: { kind: WorkRequestSourceKind; params: unknown };
@@ -395,6 +395,7 @@ export function buildRunRequest({
     readinessUpdateIssueBody: resolveReadinessUpdateIssueBody(factoryConfig),
     publishFromBuild: resolveBuildPublish(factoryConfig),
     sizeGateMode,
+    parkOverBudget: opts.parkOverBudget,
     maxSlices,
     sizeBudget: resolveSizeGateBudget(factoryConfig),
     reviewFloorRules: resolveReviewFloorRules(repoConfig),
