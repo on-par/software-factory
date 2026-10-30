@@ -1,3 +1,4 @@
+import { renderPrWalkthrough } from './pr-walkthrough.js';
 import { workKeyFromIssue } from '../work/work-key.js';
 import { describe, expect, it } from 'vitest';
 
@@ -57,6 +58,36 @@ describe('extractSpecIntent', () => {
 });
 
 describe('renderPrBody', () => {
+  it('omits internal plan names and file lists from verification', () => {
+    const specBody = '## Goal\nImprove reliability.\n## Tests\nevidencePlan: `secret.test.ts`\n- other.ts\n';
+    const checkSummary = {
+      passes: 3,
+      failures: 1,
+      skips: 2,
+      total: 6,
+      results: [
+        {
+          checker: 'evidence_plan',
+          result: 'PASS' as const,
+          details: 'ok',
+          evidencePlanResults: [
+            {
+              kind: 'screenshot' as const,
+              claim: 'evidencePlan `screen.ts`\nother.ts',
+              status: 'PASS' as const,
+              reason: 'ok',
+            },
+          ],
+        },
+      ],
+    };
+    const walkthrough = renderPrWalkthrough({ specBody, checkSummary });
+    const body = renderPrBody({ summaryLine: 'Change.', specBody, checkSummary, walkthrough });
+    for (const text of ['evidencePlan', 'secret.test.ts', 'other.ts', 'screen.ts']) expect(body).not.toContain(text);
+    expect(body).toContain('Checkers: 3 pass, 1 fail, 2 skip');
+    expect(body).toContain('Manual evidence: 1 recorded');
+  });
+
   it('renders the short layout: summary, what changed, proof, risk, closes, footer', () => {
     const body = renderPrBody({
       summaryLine: 'Implements #42.',

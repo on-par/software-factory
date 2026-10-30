@@ -35,6 +35,7 @@ export interface PrBodyInput {
   stackOrder?: string;
   /** Large-PR walkthrough markdown (#3623), rendered as a Walkthrough section; omitted when undefined. */
   walkthrough?: string;
+  typescriptLines?: { net: number; nonTest: number } | 'unavailable';
 }
 
 const KEY = String.raw`[A-Z][A-Z0-9]{1,9}-\d+`;
@@ -76,13 +77,20 @@ export function renderPrBody(input: PrBodyInput): string {
   const proof = input.checkSummary
     ? `Checkers: ${input.checkSummary.passes} pass, ${input.checkSummary.failures} fail, ${input.checkSummary.skips} skip · Rework rounds: ${rounds}`
     : `Checkers: not run · Rework rounds: ${rounds}`;
+  const counts = input.typescriptLines;
+  const lineCounts =
+    counts === undefined
+      ? ''
+      : counts === 'unavailable'
+        ? '\nTypeScript net lines: unavailable · TypeScript non-test net lines: unavailable'
+        : `\nTypeScript net lines: ${counts.net} · TypeScript non-test net lines: ${counts.nonTest}`;
   const risk = input.risk?.replace(/\s+/g, ' ').trim();
 
   return [
     section('Summary', input.summaryLine),
     input.stackOrder,
     whatChanged === undefined ? undefined : section('What changed', whatChanged),
-    section('Proof', proof),
+    section('Proof', proof + lineCounts),
     risk ? `**Risk:** ${risk}` : undefined,
     input.walkthrough ? section('Walkthrough', input.walkthrough) : undefined,
     input.closes !== undefined

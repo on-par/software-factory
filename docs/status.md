@@ -24,4 +24,6 @@ What works today and what is experimental.
 | Constitutions + checker rework loop                   | ✅ Working      | Up to 3 rework rounds with dispute resolution                                                                                                                                                                                                                                 |
 | Server (`packages/server`)                            | ✅ Working      | Loopback `GET /events` relays the lane lifecycle bus as SSE (`Last-Event-ID` resume via a bounded replay ring); `POST /repos/:owner/:repo/lanes/:laneId/pause` pauses a lane. No auth.                                                                                        |
 
+PR risk receipts show the overall tier and matched rule reasons without paths. Walkthrough verification reports checker and manual evidence counts without plan claims. PR Proof reports TypeScript and non-test net lines (added minus deleted) against the PR base; non-test excludes test files and test or fixture directories. Failed diff counts are unavailable.
+
 See the [README](../README.md) for Quick Start, and [agents.md](agents.md) for the supported coding agent CLIs.

@@ -18,7 +18,6 @@ import { evaluateRisk, type RiskEvaluation } from './risk.js';
 
 export const RISK_RECEIPT_START = '<!-- factory:risk-receipt v1 -->';
 export const RISK_RECEIPT_END = '<!-- /factory:risk-receipt -->';
-const MAX_PATHS_PER_RULE = 10;
 
 export interface PublishRiskReceiptResult {
   evaluation: RiskEvaluation;
@@ -26,29 +25,20 @@ export interface PublishRiskReceiptResult {
   updated: boolean;
 }
 
-function cell(path: string): string {
-  return `\`${path.replaceAll('`', '').replaceAll('|', '\\|')}\``;
-}
-
 /** Render the evaluation as a marked markdown block for the PR body. */
 export function renderRiskReceipt(evaluation: RiskEvaluation): string {
-  const rows = evaluation.rules.map((rule) => {
-    const shown = rule.paths.slice(0, MAX_PATHS_PER_RULE).map(cell);
-    const extra = rule.paths.length - shown.length;
-    const parts = extra > 0 ? [...shown, `… and ${extra} more`] : shown;
-    return `| \`${rule.id}\` | ${rule.tier} | ${parts.length > 0 ? parts.join(', ') : '(none)'} |`;
-  });
+  const rows = evaluation.rules.map(
+    (rule) => `- \`${rule.id}\`: ${rule.tier} risk (${rule.id === 'empty-diff' ? 'diff is empty' : 'rule matched'}).`,
+  );
   return [
     RISK_RECEIPT_START,
     '### Risk receipt',
     '',
     `**Tier: ${evaluation.tier}**`,
     '',
-    '| Rule | Tier | Paths |',
-    '| --- | --- | --- |',
     ...rows,
     '',
-    "_Computed by the factory from the PR's changed paths. Regenerated on each land._",
+    "_Computed by the factory from the PR's changes. Regenerated on each land._",
     RISK_RECEIPT_END,
   ].join('\n');
 }

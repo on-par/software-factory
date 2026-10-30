@@ -11,7 +11,6 @@ import { defaultPrWalkthrough } from '@on-par/factory-config';
 import type { CheckSummary } from '../types/index.js';
 import { extractSpecIntent, summarizeIntent } from './pr-body.js';
 
-const TESTS_LIMIT = 1500;
 const MANUAL_KINDS = new Set(['screenshot', 'none']);
 
 export interface WalkthroughThresholds {
@@ -58,12 +57,10 @@ export function meetsWalkthroughThreshold(entries: NumstatEntry[], thresholds: W
 export function renderPrWalkthrough(input: PrWalkthroughInput): string {
   const intent = input.specBody === undefined ? {} : extractSpecIntent(input.specBody);
   const summary = summarizeIntent(intent);
-  const tests = intent.tests === undefined ? undefined : truncate(intent.tests, TESTS_LIMIT);
   const checks = input.checkSummary;
   const manual = (checks?.results ?? [])
     .flatMap((result) => result.evidencePlanResults ?? [])
-    .filter((result) => MANUAL_KINDS.has(result.kind))
-    .map((result) => `- ${result.claim.replace(/[\r\n]+/g, ' ')} [${result.kind}]`);
+    .filter((result) => MANUAL_KINDS.has(result.kind));
 
   return [
     '### Intent',
@@ -72,18 +69,13 @@ export function renderPrWalkthrough(input: PrWalkthroughInput): string {
     '### How to verify',
     '#### Automated',
     checks ? `- Checkers: ${checks.passes} pass, ${checks.failures} fail, ${checks.skips} skip` : '- Checkers: not run',
-    ...(tests ? ['', tests] : []),
     '',
     '#### Manual',
-    ...(manual.length > 0 ? manual : ['- None recorded.']),
+    manual.length > 0 ? `- Manual evidence: ${manual.length} recorded.` : '- None recorded.',
   ].join('\n');
 }
 
 function toCount(value: string): number {
   const n = Number(value);
   return Number.isInteger(n) && n > 0 ? n : 0;
-}
-
-function truncate(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
 }

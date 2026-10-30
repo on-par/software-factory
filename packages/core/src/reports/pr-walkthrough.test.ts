@@ -80,8 +80,9 @@ describe('renderPrWalkthrough', () => {
     expect(md).toContain('Retry uploads.');
     expect(md).not.toContain('Main files');
     expect(md).toContain('- Checkers: 3 pass, 1 fail, 2 skip');
-    expect(md).toContain('- covers retry');
-    expect(md).toContain('- Dialog looks right [screenshot]');
+    expect(md).not.toContain('- covers retry');
+    expect(md).toContain('- Manual evidence: 1 recorded.');
+    expect(md).not.toContain('Dialog looks right');
     expect(md).not.toContain('Unit claim');
   });
 
