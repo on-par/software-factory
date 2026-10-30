@@ -1,9 +1,8 @@
 // packages/core/src/run/run-issue.stack-one-run.test.ts — a 3-slice stack builds in one run through the real
 // PLAN slice gate; only GitHub, the model executor and BUILD/CHECK/SHIP are faked (#3798).
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { createTempDirs } from '@on-par/factory-core/testing';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import type { RoutesConfig } from '../config/index.js';
@@ -97,8 +96,9 @@ const routes: RoutesConfig = {
   },
 };
 
-const breakerDir = mkdtempSync(join(tmpdir(), 'run-issue-stack-one-run-'));
-afterAll(() => rmSync(breakerDir, { recursive: true, force: true }));
+const dirs = createTempDirs();
+const breakerDir = dirs.makeSync('run-issue-stack-one-run-');
+afterAll(() => dirs.cleanup());
 
 function request(parentBaseRef: string | undefined): RunRequest {
   return {
