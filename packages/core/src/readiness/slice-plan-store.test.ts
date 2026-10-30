@@ -1,11 +1,11 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { StorySchema } from '@on-par/contracts';
 import type { Octokit } from '@octokit/rest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { createTempDirs } from '../harness/temp-dir.js';
 import { renderSlicePlanComment } from './slice-plan.js';
 import type { SlicePlan } from './slice-plan.js';
 import { fileSlicePlanStore, issueCommentSlicePlanStore } from './slice-plan-store.js';
@@ -30,26 +30,20 @@ function plan(issue: number): SlicePlan {
   return { issue, slices: [{ index: 1, title: 'Slice', story, state: 'pending' }] };
 }
 
-const dirs: string[] = [];
-afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-});
-const tmp = (): string => {
-  const d = mkdtempSync(join(tmpdir(), 'slice-plan-store-'));
-  dirs.push(d);
-  return d;
-};
+const tempDirs = createTempDirs();
+afterEach(() => tempDirs.cleanup());
+const tmp = (): Promise<string> => tempDirs.make('slice-plan-store-');
 
 describe('fileSlicePlanStore', () => {
   it('round-trips a slice plan through its state file', async () => {
-    const file = join(tmp(), 'nested', 'slice-plans', '7.md');
+    const file = join(await tmp(), 'nested', 'slice-plans', '7.md');
     const store = fileSlicePlanStore(file);
     expect(await store.save(plan(7))).toEqual({ where: file });
     expect(await store.find()).toEqual({ status: 'found', plan: plan(7), where: file });
   });
 
   it('reports not-found for a missing file and invalid for unreadable data', async () => {
-    const dir = tmp();
+    const dir = await tmp();
     const file = join(dir, 'p.md');
     const store = fileSlicePlanStore(file);
     expect(await store.find()).toEqual({ status: 'not-found' });
@@ -60,7 +54,7 @@ describe('fileSlicePlanStore', () => {
   });
 
   it('propagates read errors other than a missing file', async () => {
-    await expect(fileSlicePlanStore(tmp()).find()).rejects.toThrow();
+    await expect(fileSlicePlanStore(await tmp()).find()).rejects.toThrow();
   });
 });
 

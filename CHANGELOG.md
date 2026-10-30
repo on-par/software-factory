@@ -9,6 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ### Changed
 
+- `factory run-brief <file> --stack` now slices an over-budget brief and builds the slices as stacked PRs in one run; the slice plan is kept in `.factory/state/slice-plans/` (#3813).
 - `factory run-issue <n> --stack` (or `--size-gate stack`) builds every slice of an oversized issue in one run, each slice's PR based on the previous slice's PR head; the stack stops at the first failed slice, `--base-branch` sets slice 1's base, `--no-pr` is refused, and `run-brief --stack` runs through the same stack engine (#3798).
 - core: trim unused `@on-par/factory-core/internal` re-exports for utils, worktree, config, models and router (#3784)
 

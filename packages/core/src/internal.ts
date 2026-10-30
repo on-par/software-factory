@@ -371,8 +371,8 @@ export {
 } from './readiness/slice-plan.js';
 export type { SlicePlanCommentLookup } from './readiness/slice-plan-github.js';
 export { findSlicePlanComment, recordSliceMerged, upsertSlicePlanComment } from './readiness/slice-plan-github.js';
-export type { SlicePlanLookup, SlicePlanStore } from './readiness/slice-plan-store.js';
-export { fileSlicePlanStore, issueCommentSlicePlanStore } from './readiness/slice-plan-store.js';
+export type { SlicePlanStore } from './readiness/slice-plan-store.js';
+export { fileSlicePlanStore } from './readiness/slice-plan-store.js';
 export { findDeclaredPrerequisites, createOctokitBlockedParkStore, pollBlockedParks } from './blockers/index.js';
 export {
   eventSegmentsDir,

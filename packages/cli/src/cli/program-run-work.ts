@@ -104,7 +104,7 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     .option('--base-branch <ref>', BASE_BRANCH_OPTION_DESCRIPTION)
     .option(
       '--stack',
-      "Several briefs: open them as a PR stack — each brief starts from and targets the previous brief's PR head branch; a failure or missing PR (e.g. --no-pr) stops the stack and skips the rest",
+      "Several briefs: open them as a PR stack — each brief starts from and targets the previous brief's PR head branch; a failure or missing PR (e.g. --no-pr) stops the stack and skips the rest. One brief: an over-budget brief is sliced and built as a stacked PR set in one run",
     )
     .action(async (file: string, files: string[], opts) => {
       await handlers.cmdRunBrief([file, ...files], opts);

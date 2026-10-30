@@ -139,6 +139,7 @@ factory run-issue <N>               Like ship, but loads the issue first and exi
 factory run-issue <N> --run-children Also run the child issues the size gate files when it splits <N>
 factory run-issue <N> --base-branch <ref>  Start from origin/<ref> and open the PR against <ref> (also ship, run-brief)
 factory run-brief a.md b.md --stack   Open the briefs as a PR stack (each on the previous brief's PR head)
+factory run-brief big.md --stack       Slice an over-budget brief and build the slices as a PR stack in one run
 factory run-issue 42 --stack        Build an oversized issue as a PR stack in one run (each slice on the previous slice's PR head)
 factory run                         Claim queued issues and ship them, lanes in parallel; merges only when auto-merge is on
 factory supervise [--now]           Unattended loop: wait for usage headroom, run the queue, repeat until it is empty

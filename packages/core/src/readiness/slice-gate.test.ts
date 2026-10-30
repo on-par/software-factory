@@ -89,7 +89,14 @@ function fake(comments: { id: number; user: { id: number } | null; body?: string
   return { octokit, createComment, updateComment };
 }
 
-function setup(decompose: string[], f: ReturnType<typeof fake>, oversized = true, maxSlices = 10, sliceIndex?: number, store?: SlicePlanStore) {
+function setup(
+  decompose: string[],
+  f: ReturnType<typeof fake>,
+  oversized = true,
+  maxSlices = 10,
+  sliceIndex?: number,
+  store?: SlicePlanStore,
+) {
   const stub = new StubModelExecutor({ scripts: { decompose: decompose.map((output) => ({ output })) } });
   const router = new ModelRouter(models, routes, false, stub);
   const events: { type: string; msg: string }[] = [];

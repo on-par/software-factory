@@ -407,6 +407,7 @@ const INTERNAL_API_KEYS = [
   // Slice plan model (ADR-0147)
   'STATE_ROOT_ENV',
   'currentSlice',
+  'fileSlicePlanStore',
   'findSlicePlanComment',
   'publishParkComment',
   'recordSliceMerged',

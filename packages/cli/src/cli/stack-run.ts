@@ -34,9 +34,22 @@ export async function runIssueStack(
   baseBranch: string | undefined,
   deps: IssueStackDeps,
 ): Promise<void> {
+  await runSliceStack(
+    { prefix: 'run-issue', label: `#${issueNum}`, failLabel: `issue #${issueNum}` },
+    baseBranch,
+    deps,
+  );
+}
+
+/** The stack loop shared by `run-issue --stack` and `run-brief <file> --stack` (#3813); `subject` names the work in console text. */
+export async function runSliceStack(
+  subject: { prefix: string; label: string; failLabel: string },
+  baseBranch: string | undefined,
+  deps: IssueStackDeps,
+): Promise<void> {
   let plan = await deps.readSlicePlan();
   if (plan === undefined) {
-    console.log(styleText('cyan', `run-issue: --stack — sizing #${issueNum}`));
+    console.log(styleText('cyan', `${subject.prefix}: --stack — sizing ${subject.label}`));
     let sizingError: unknown;
     try {
       await deps.ship(baseBranch, () => {});
@@ -51,7 +64,7 @@ export async function runIssueStack(
   }
   const pending = plan.slices.filter((s) => s.state === 'pending');
   if (pending.length === 0) {
-    console.log(styleText('cyan', `run-issue: every slice of #${issueNum} is already built`));
+    console.log(styleText('cyan', `${subject.prefix}: every slice of ${subject.label} is already built`));
     return;
   }
   const count = plan.slices.length;
@@ -64,7 +77,7 @@ export async function runIssueStack(
   console.log(
     styleText(
       'cyan',
-      `run-issue: --stack — #${issueNum} has ${count} slices; building ${pending.length} in order, each on the previous slice's PR head`,
+      `${subject.prefix}: --stack — ${subject.label} has ${count} slices; building ${pending.length} in order, each on the previous slice's PR head`,
     ),
   );
   const result = await runStack(
@@ -78,7 +91,7 @@ export async function runIssueStack(
         return outcome && { prNumber: 'prNumber' in outcome ? outcome.prNumber : undefined, branch: outcome.branch };
       },
     })),
-    { base, chain: true, prefix: 'run-issue', noun: 'slice', log: consoleStackLog },
+    { base, chain: true, prefix: subject.prefix, noun: 'slice', log: consoleStackLog },
   );
-  printStackResult(result, `Run failed for one or more slices of issue #${issueNum} (listed above)`);
+  printStackResult(result, `Run failed for one or more slices of ${subject.failLabel} (listed above)`);
 }
