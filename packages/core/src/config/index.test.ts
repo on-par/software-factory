@@ -1025,11 +1025,24 @@ describe('sizeGate.maxSlices (ADR-0156)', () => {
 });
 
 describe('parseSizeGateMode (#2048)', () => {
-  it('passes file, slice and off through', () => {
-    expect(parseSizeGateMode('file')).toBe('file');
-    expect(parseSizeGateMode('slice')).toBe('slice');
+  it('passes off and stack through', () => {
     expect(parseSizeGateMode('off')).toBe('off');
     expect(parseSizeGateMode('stack')).toBe('stack');
+  });
+
+  it('rejects file and slice as modes once aliasing is skipped (#3835)', () => {
+    expect(parseSizeGateMode('file')).toBeUndefined();
+    expect(parseSizeGateMode('slice')).toBeUndefined();
+  });
+
+  it('aliases the raw file and slice strings to stack before validation (#3835)', () => {
+    const warn = vi.fn();
+    expect(parseSizeGateMode(aliasDeprecatedSizeGateMode('slice', warn))).toBe('stack');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toContain('--stack');
+    const quiet = vi.fn();
+    expect(aliasDeprecatedSizeGateMode('bogus', quiet)).toBe('bogus');
+    expect(quiet).not.toHaveBeenCalled();
   });
 
   it('returns undefined for anything else', () => {

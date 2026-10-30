@@ -1066,11 +1066,11 @@ function branchPrefixOrExit(raw: string | undefined, configPath: string): string
 
 function sizeGateOrExit(raw: string | undefined): SizeGateMode | undefined {
   if (raw === undefined) return undefined;
-  const mode = parseSizeGateMode(raw);
+  const mode = parseSizeGateMode(aliasDeprecatedSizeGateMode(raw));
   if (mode === undefined) {
     throw new CliExitError(`factory: invalid --size-gate '${raw}' — expected one of: ${SIZE_GATE_MODES.join(', ')}`, 2);
   }
-  return aliasDeprecatedSizeGateMode(mode);
+  return mode;
 }
 
 function maxSlicesOrExit(raw: string | undefined): number | undefined {

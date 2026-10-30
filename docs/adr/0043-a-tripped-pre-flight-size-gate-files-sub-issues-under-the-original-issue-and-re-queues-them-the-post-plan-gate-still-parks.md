@@ -1,8 +1,9 @@
 # ADR-0043: A tripped pre-flight size gate files sub-issues under the original issue and re-queues them; the post-plan gate still parks
 
-- Status: Accepted
+- Status: Superseded by ADR-0161
 - Date: 2026-08-21
 - Amended by: [ADR-0147](0147-size-gate-slice-mode-ships-an-oversized-issue-as-sequential-slice-prs-under-the-same-issue-instead-of-filing-sub-issues.md) (adds `sizeGate.mode`; this behavior is now the `file` mode)
+- Update (#3835): stack ([ADR-0161](0161-size-gate-stack-mode-ships-an-oversized-issue-as-a-native-github-stacked-pr-set-built-in-one-run.md)) is now the only size gate mode besides `off`; `file` and `slice` are deprecated aliases for stack.
 
 ## Context
 

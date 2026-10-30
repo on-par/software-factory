@@ -1,6 +1,6 @@
-// packages/core/src/readiness/slice-gate.ts — the PLAN pre-flight gate for ADR-0147 slice mode.
+// packages/core/src/readiness/slice-gate.ts — the PLAN pre-flight gate for ADR-0161 stack mode.
 //
-// In slice mode an oversized issue stays whole and no issue is ever filed (ADR-0156). This module finds the trusted slice plan comment
+// In stack mode an oversized issue stays whole and no issue is ever filed (ADR-0156). This module finds the trusted slice plan comment
 // (or decomposes once, without filing or commenting, and records a new plan) and tells PLAN which
 // slice to plan. It never throws: every GitHub I/O failure or unusable plan comes back as a park;
 // a cohesive decomposition (slices mostly edit the same files) comes back as `cohesive` with no plan recorded (#3351);
@@ -90,8 +90,8 @@ function selectStackSlice(plan: SlicePlan, issue: number) {
   return selectWithPlan(plan, issue, undefined);
 }
 
-function selectForGate(plan: SlicePlan, deps: { issue: number; sliceIndex?: number; stack?: boolean }) {
-  if (deps.stack === true && deps.sliceIndex === undefined) return selectStackSlice(plan, deps.issue);
+function selectForGate(plan: SlicePlan, deps: { issue: number; sliceIndex?: number }) {
+  if (deps.sliceIndex === undefined) return selectStackSlice(plan, deps.issue);
   return selectWithPlan(plan, deps.issue, deps.sliceIndex);
 }
 
@@ -105,8 +105,6 @@ export async function resolveSliceGate(deps: {
   maxSlices: number;
   /** ADR-0161 stack mode: plan this 1-based slice instead of currentSlice(plan). */
   sliceIndex?: number;
-  /** ADR-0161 stack mode: plan the lowest pending slice once the slice below has a PR. */
-  stack?: boolean;
   /** Where the slice plan lives; defaults to the issue's slice-plan comment (#3813). */
   store?: SlicePlanStore;
   worktree: string;

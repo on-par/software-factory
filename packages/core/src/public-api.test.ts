@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import * as publicApi from './index.js';
+import { SIZE_GATE_MODES } from './index.js';
 import * as internalApi from './internal.js';
 import * as kpisApi from './kpis-entry.js';
 import * as testingApi from './testing.js';
@@ -670,6 +671,9 @@ const INTERNAL_API_KEYS = [
 describe('public API surface (ADR-0004)', () => {
   it('root export exposes exactly the documented public API', () => {
     expect(Object.keys(publicApi).sort()).toEqual([...PUBLIC_API_KEYS, ...WORK_KEY_API_KEYS].sort());
+  });
+  it('SIZE_GATE_MODES lists exactly off and stack (#3835)', () => {
+    expect(SIZE_GATE_MODES).toEqual(['off', 'stack']);
   });
   it('root export has no internal or testing symbols', () => {
     for (const key of [

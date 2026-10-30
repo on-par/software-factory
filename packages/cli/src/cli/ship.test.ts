@@ -67,7 +67,7 @@ describe('shipIssue (direct)', () => {
     it('builds slice 2 on the -s2- branch when slice 1 is merged', async () => {
       const setup = custom();
       const fake = sliceOctokit(async () => ({ data: [{ id: 1, user: { id: 7 }, body: planComment }] }));
-      await shipIssue(5, { sizeGate: 'slice' }, ctx(), { setupWorktree: setup, octokit: () => fake });
+      await shipIssue(5, { sizeGate: 'stack' }, ctx(), { setupWorktree: setup, octokit: () => fake });
       expect(setup.mock.calls[0]?.[1]).toBe('factory/5-s2-fix-the-bug');
     });
 
@@ -83,10 +83,10 @@ describe('shipIssue (direct)', () => {
       expect(phases.planPhase.mock.calls[0]?.[0]).toMatchObject({ sizeGateMode: 'stack', parkOverBudget: true });
     });
 
-    it('does not look up the slice plan in file mode', async () => {
+    it('does not look up the slice plan in off mode', async () => {
       const setup = custom();
       const fake = sliceOctokit(async () => ({ data: [] }));
-      await shipIssue(5, { sizeGate: 'file' }, ctx(), { setupWorktree: setup, octokit: () => fake });
+      await shipIssue(5, { sizeGate: 'off' }, ctx(), { setupWorktree: setup, octokit: () => fake });
       expect(fake.rest.issues.listComments).not.toHaveBeenCalled();
       expect(setup.mock.calls[0]?.[1]).toBe('factory/5-fix-the-bug');
     });
@@ -129,7 +129,7 @@ describe('shipIssue (direct)', () => {
         throw new Error('network down');
       });
       await expect(
-        shipIssue(5, { sizeGate: 'slice' }, ctx(), { setupWorktree: setup, octokit: () => fake }),
+        shipIssue(5, { sizeGate: 'stack' }, ctx(), { setupWorktree: setup, octokit: () => fake }),
       ).rejects.toBeInstanceOf(LaneParkError);
       expect(setup).not.toHaveBeenCalled();
     });

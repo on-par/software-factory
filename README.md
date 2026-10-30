@@ -177,7 +177,7 @@ factory usage                       Report 5-hour subscription usage
 
 ### Size gate: stack by default
 
-Oversized issues stack by default: `factory run-issue <N>` (or `--stack`) ships an oversized issue as stacked slice PRs. `run-issue --run-children` was removed and exits 2. `--size-gate file|slice` and `sizeGate.mode: file|slice` are deprecated aliases for stack that print one warning naming `--stack`. `--size-gate off` still skips both gates.
+Oversized issues stack by default: `factory run-issue <N>` (or `--stack`) ships an oversized issue as stacked slice PRs. `run-issue --run-children` was removed and exits 2. `--size-gate file|slice` and `sizeGate.mode: file|slice` are deprecated aliases for stack that print one warning naming `--stack`. `--size-gate` accepts `stack` or `off`; `off` skips both gates.
 
 ## Root npm scripts
 

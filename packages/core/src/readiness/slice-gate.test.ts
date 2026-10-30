@@ -149,14 +149,6 @@ describe('resolveSliceGate', () => {
     expect(await run()).toEqual({ kind: 'park', reason: 'slice plan lookup failed: github down' });
   });
 
-  it('parks without decomposing when the current slice already has an open PR', async () => {
-    const plan = withSliceState(planOf(2), 1, 'pr-open', 81);
-    const f = fake([{ id: 1, user: { id: BOT }, body: renderSlicePlanComment(plan) }]);
-    const { stub, run } = setup([], f);
-    expect(await run()).toMatchObject({ kind: 'park', reason: expect.stringContaining('PR #81') });
-    expect(stub.calls).toEqual([]);
-  });
-
   describe('explicit sliceIndex (ADR-0161 stack mode)', () => {
     const found = (plan: SlicePlan) => fake([{ id: 1, user: { id: BOT }, body: renderSlicePlanComment(plan) }]);
 
@@ -192,7 +184,7 @@ describe('resolveSliceGate', () => {
   });
 
   describe("stack mode builds slice k once slice k-1's PR is open or merged (#3798)", () => {
-    const run = (plan: SlicePlan, stack = true) => {
+    const run = (plan: SlicePlan) => {
       const f = fake([{ id: 1, user: { id: BOT }, body: renderSlicePlanComment(plan) }]);
       return resolveSliceGate({
         issue,
@@ -201,7 +193,6 @@ describe('resolveSliceGate', () => {
         body: 'b',
         oversized: false,
         maxSlices: 10,
-        stack,
         worktree: '/tmp/wt',
         router: new ModelRouter(models, routes, false, new StubModelExecutor({ scripts: {} })),
         octokit: f.octokit,
@@ -234,10 +225,6 @@ describe('resolveSliceGate', () => {
     it('falls back to selectSlice when no slice is pending', async () => {
       const plan = withSliceState(withSliceState(planOf(2), 1, 'merged'), 2, 'merged');
       expect(await run(plan)).toMatchObject({ kind: 'park', reason: expect.stringContaining('every slice') });
-    });
-
-    it('keeps the pr-open park outside stack mode', async () => {
-      expect(await run(slice1Open(), false)).toMatchObject({ kind: 'park', reason: expect.stringContaining('PR #10') });
     });
   });
 

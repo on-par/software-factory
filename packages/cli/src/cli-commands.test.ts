@@ -1172,8 +1172,8 @@ describe('cli commands (via main dispatch)', () => {
         const res = await runMain('run-issue', '5', '--size-gate', 'bogus');
         expect(res).toMatchObject({ exited: true, code: 2 });
         expect(errored()).toContain('--size-gate');
-        expect(errored()).toContain('file');
-        expect(errored()).toContain('off');
+        expect(errored()).toContain('off, stack');
+        expect(errored()).not.toContain('file');
         expect(phases.planPhase).not.toHaveBeenCalled();
       });
 

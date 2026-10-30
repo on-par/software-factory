@@ -1,4 +1,4 @@
-// packages/cli/src/cli/slice-index.ts — which slice a ship run resumes at (ADR-0147, ADR-0161)
+// packages/cli/src/cli/slice-index.ts — which slice a ship run resumes at (ADR-0161)
 
 import type { Octokit } from '@octokit/rest';
 import { GITHUB_ISSUE_SOURCE } from '@on-par/factory-core';
@@ -8,7 +8,7 @@ import type { CheckResumeRecord } from '@on-par/factory-core/internal';
 
 import { shipRuntime } from './ship-runtime.js';
 
-/** ADR-0147: slice k >= 2 builds on its own branch, so the slice plan is read before the worktree exists. */
+/** ADR-0161: slice k >= 2 builds on its own branch, so the slice plan is read before the worktree exists. */
 export async function findSliceIndex({
   sizeGateMode,
   ctx,
@@ -27,17 +27,11 @@ export async function findSliceIndex({
   const { errorDetail, LaneParkError } = shipRuntime();
   let sliceIndex: number | undefined;
   // ADR-0161: stack mode resumes at the lowest pending slice.
-  if (
-    (sizeGateMode === 'slice' || sizeGateMode === 'stack') &&
-    !ctx?.localOnly &&
-    !ctx?.resumeFrom &&
-    work.kind === GITHUB_ISSUE_SOURCE
-  ) {
+  if (sizeGateMode === 'stack' && !ctx?.localOnly && !ctx?.resumeFrom && work.kind === GITHUB_ISSUE_SOURCE) {
     try {
       const lookup = await findSlicePlanComment({ octokit, repo: ghRepo, issue: issueNum });
       if (lookup.status === 'found') {
-        const next = sizeGateMode === 'stack' ? nextStackSlice(lookup.plan) : undefined;
-        sliceIndex = (next ?? currentSlice(lookup.plan))?.index;
+        sliceIndex = (nextStackSlice(lookup.plan) ?? currentSlice(lookup.plan))?.index;
       }
     } catch (err) {
       throw new LaneParkError(
