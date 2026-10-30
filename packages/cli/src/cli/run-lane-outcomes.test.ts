@@ -68,7 +68,7 @@ describe('cli', () => {
         'event',
         'lane-done',
         'app',
-        'lane complete (2 merged, 0 awaiting review, 0 skipped, 0 decomposed, 0 parked)',
+        'lane complete (2 merged, 0 awaiting review, 0 skipped, 0 parked)',
         { lane: 'app' },
       ]);
     });
@@ -100,7 +100,7 @@ describe('cli', () => {
         'event',
         'lane-done',
         'app',
-        'lane complete (1 merged, 1 awaiting review, 0 skipped, 0 decomposed, 0 parked)',
+        'lane complete (1 merged, 1 awaiting review, 0 skipped, 0 parked)',
         { lane: 'app' },
       ]);
     });
@@ -166,7 +166,7 @@ describe('cli', () => {
         'event',
         'lane-done',
         'app',
-        'lane complete (1 merged, 0 awaiting review, 1 skipped, 0 decomposed, 0 parked)',
+        'lane complete (1 merged, 0 awaiting review, 1 skipped, 0 parked)',
         { lane: 'app' },
       ]);
     });
@@ -203,7 +203,7 @@ describe('cli', () => {
         'event',
         'lane-done',
         'app',
-        'lane complete (1 merged, 0 awaiting review, 0 skipped, 0 decomposed, 1 parked)',
+        'lane complete (1 merged, 0 awaiting review, 0 skipped, 1 parked)',
         { lane: 'app' },
       ]);
     });

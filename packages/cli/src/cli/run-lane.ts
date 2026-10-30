@@ -97,7 +97,6 @@ export async function runLane(
   let merged = 0;
   let awaitingReview = 0;
   let skipped = 0;
-  const decomposed = 0;
   let parked = 0;
   const buildClaim = (issue: number): QueueClaim => ({ issue, decision: { kind: 'build' } });
   const pending: QueueClaim[] = issues.map(buildClaim);
@@ -449,7 +448,7 @@ export async function runLane(
     paths.events,
     'lane-done',
     lane,
-    `lane complete (${merged} merged, ${awaitingReview} awaiting review, ${skipped} skipped, ${decomposed} decomposed, ${parked} parked)`,
+    `lane complete (${merged} merged, ${awaitingReview} awaiting review, ${skipped} skipped, ${parked} parked)`,
     { lane },
   );
 }
