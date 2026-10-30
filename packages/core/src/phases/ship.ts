@@ -145,7 +145,7 @@ async function shipPhaseImpl(opts: {
   const inlineWork = opts.work && opts.work.kind !== GITHUB_ISSUE_SOURCE ? opts.work : undefined;
   const stack = inlineWork ? undefined : opts.stack;
   const base = stack?.base ?? opts.baseBranch ?? SHIP_BASE_BRANCH;
-  const getWalkthrough = lazyWalkthrough(run, worktree, { ...opts, base }, log);
+  const walkthrough = lazyWalkthrough(run, worktree, { ...opts, base }, log);
 
   if (approvalGate) {
     // Log a 'ship'-typed event before anything else so the TUI's activePhase
@@ -410,7 +410,8 @@ async function shipPhaseImpl(opts: {
           checkSummary,
           reworkRounds: opts.reworkRounds,
           risk: await readRisk(opts.specPath),
-          walkthrough: await getWalkthrough(),
+          walkthrough: await walkthrough.walkthrough(),
+          typescriptLines: await walkthrough.counts(),
           closes: inlineWork || !finalSlice ? undefined : issue,
           partOf: !inlineWork && !finalSlice ? issue : undefined,
         }),
@@ -454,7 +455,7 @@ async function shipPhaseImpl(opts: {
         reviewRouting: opts.reviewRouting,
         pinNotes: opts.pinNotes,
         headSha: checkedSha,
-        walkthrough: await getWalkthrough(),
+        walkthrough: await walkthrough.walkthrough(),
       });
       await octokit.rest.issues.createComment({ owner, repo: repoName, issue_number: prNumber, body });
       log('evidence', `posted evidence pack to PR #${prNumber}`);

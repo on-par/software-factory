@@ -83,6 +83,33 @@ function ship(
 const bodyOf = (calls: Array<[string, any]>, name: string): string => String(calls.find(([n]) => n === name)?.[1].body);
 
 describe('shipPhase PR walkthrough (#3623)', () => {
+  it('shows TypeScript net and non-test counts in a small PR body', async () => {
+    const diff = [
+      '10\t2\tsrc/a.ts',
+      '1\t5\tsrc/b.tsx',
+      '2\t0\tsrc/a.test.ts',
+      '3\t0\ttests/a.ts',
+      '4\t0\tsrc/__fixtures__/a.tsx',
+      '-\t-\tsrc/binary.ts',
+      '5\t1\tsrc/{old.js => new.d.ts}',
+      '2\t0\t"src/quoted name.ts"',
+      '9\t1\ta.js',
+    ].join('\n');
+    const { promise, calls } = ship(diff);
+    await promise;
+    const body = bodyOf(calls, 'pulls.create');
+    expect(body).toContain('TypeScript net lines: 19');
+    expect(body).toContain('TypeScript non-test net lines: 10');
+    expect(body).not.toContain('src/a.ts');
+    expect(body).not.toContain('## Walkthrough');
+  });
+
+  it('reports zero for an empty diff', async () => {
+    const { promise, calls } = ship('');
+    await promise;
+    expect(bodyOf(calls, 'pulls.create')).toContain('TypeScript net lines: 0');
+  });
+
   it('embeds a walkthrough in the evidence pack and PR body when the diff meets both thresholds', async () => {
     const { promise, calls } = ship(numstatFor(5, 60));
     expect(await promise).toEqual({ ok: true, prNumber: 123 });
@@ -113,6 +140,7 @@ describe('shipPhase PR walkthrough (#3623)', () => {
     const { promise, calls, logs } = ship(new Error('bad revision'));
     expect(await promise).toEqual({ ok: true, prNumber: 123 });
     expect(logs).toContainEqual(['warn', expect.stringContaining('walkthrough skipped')]);
+    expect(bodyOf(calls, 'pulls.create')).toContain('TypeScript net lines: unavailable');
     expect(bodyOf(calls, 'issues.createComment')).toContain('Evidence pack');
     expect(bodyOf(calls, 'issues.createComment')).not.toContain('PR walkthrough');
   });

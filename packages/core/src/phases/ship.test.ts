@@ -954,6 +954,7 @@ describe('shipPhase inline work source (#507)', () => {
       if (command === 'git status --porcelain') return { stdout: '' };
       if (command.startsWith('git rev-list --count ')) return { stdout: '1\n' };
       if (command.startsWith('git diff --quiet ')) throw new Error('trees differ');
+      if (command === 'git diff --numstat origin/factory/9-a...HEAD') return { stdout: '2\t5\tsrc/a.ts' };
       return { stdout: '' };
     };
 
@@ -981,6 +982,8 @@ describe('shipPhase inline work source (#507)', () => {
     expect(createArgs.title).toBe('Add a gizmo');
     expect(createArgs.body).toContain('## Summary\nAdd a gizmo.');
     expect(`${createArgs.title}\n${createArgs.body}`).not.toMatch(/ARA-12|local brief|sha256/i);
+    expect(createArgs.body).toContain('TypeScript net lines: -3');
+    expect(commands.filter((cmd) => cmd === 'git diff --numstat origin/factory/9-a...HEAD')).toHaveLength(1);
     expect(commands).toContain('git diff --stat origin/factory/9-a...HEAD');
     expect(commands).not.toContain('git diff --stat origin/main...HEAD');
   });
