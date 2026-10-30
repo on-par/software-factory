@@ -115,7 +115,7 @@ async function shipIssueFrom(
     blockedBehind?: number[];
     workRequest?: WorkRequest;
     /** Receives the core RunOutcome before shipIssue maps it to a return/throw — lets
-     *  `run-issue --run-children` read the PR number as data (#1747). */
+     *  stacked runs and the run lane read the PR number as data (#1747). */
     onOutcome?: (outcome: RunOutcome) => void;
     /** Input source for planPhase to resolve; defaults inside planPhase to this run's GitHub issue. */
     workSource?: { kind: WorkRequestSourceKind; params: unknown };

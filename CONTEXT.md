@@ -18,7 +18,7 @@ One attempt to take one issue through PLAN → BUILD → CHECK → SHIP, ending 
 
 ### Run lock
 
-A fail-fast (never queued) lock that stops two processes from force-recreating the same per-issue worktree and branch. It has two tiers. The checkout tier is `.factory/run.lock`, taken by `run`, `supervise` and `local-small-overnight`, which pick issues dynamically. The issue tier is `.factory/locks/run/<WorkKey>`, taken by `ship`, `run-issue`, `run-brief`, `resume` and each `--run-children` child. Each tier refuses while a live holder of the other exists, so parallel one-shot CLI runs mean different issues, still bounded by claims and `host.maxBuilds` slots. See [docs/ops/run-lock.md](docs/ops/run-lock.md) and [packages/core/src/utils/run-lock.ts](packages/core/src/utils/run-lock.ts).
+A fail-fast (never queued) lock that stops two processes from force-recreating the same per-issue worktree and branch. It has two tiers. The checkout tier is `.factory/run.lock`, taken by `run`, `supervise` and `local-small-overnight`, which pick issues dynamically. The issue tier is `.factory/locks/run/<WorkKey>`, taken by `ship`, `run-issue`, `run-brief` and `resume`. Each tier refuses while a live holder of the other exists, so parallel one-shot CLI runs mean different issues, still bounded by claims and `host.maxBuilds` slots. See [docs/ops/run-lock.md](docs/ops/run-lock.md) and [packages/core/src/utils/run-lock.ts](packages/core/src/utils/run-lock.ts).
 
 ### Claim
 
