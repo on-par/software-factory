@@ -13,6 +13,7 @@ section to `## X.Y.Z - date`. See
 
 ### Changed
 
+- `factory status` no longer shows decomposed parents and landing a child no longer updates the parent's coverage comment; `status --json` keeps `decomposedParents` as a deprecated, always-empty array that a later release removes (#3834).
 - The run lane's "lane complete" event no longer prints an always-zero decomposed count, and the core queue's unused enqueueAfter was removed (#3841)
 - Codex now runs with --sandbox danger-full-access by default, like Claude; set sandbox.codexSandbox: workspace-write to keep Codex's own sandbox (#3824)
 - The size gate defaults to stack; `file` and `slice` (config or `--size-gate`) are deprecated aliases for stack that print one warning, and `run-issue --run-children` was removed and exits 2 (#3832).

@@ -261,7 +261,9 @@
         {
           "type": "null"
         }
-      ]
+      ],
+      "deprecated": true,
+      "description": "Deprecated: always an empty array. A later release removes this field (#3834)."
     },
     "disk": {
       "anyOf": [

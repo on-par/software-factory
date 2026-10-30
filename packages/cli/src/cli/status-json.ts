@@ -1,6 +1,6 @@
 import type { ActiveQueueClaim } from '@on-par/factory-core';
 import { providerPlan, TIMED_BREAKER_REASONS } from '@on-par/factory-core/internal';
-import type { OpenFactoryDrafts, ParentCoverage } from '@on-par/factory-core/internal';
+import type { OpenFactoryDrafts } from '@on-par/factory-core/internal';
 
 import type { StatusJson } from './json-contract.js';
 import type { StatusUpdateJson } from './update-state.js';
@@ -85,7 +85,6 @@ export function buildStatusJson(input: {
   active: ReadonlyArray<Pick<ActiveQueueClaim, 'lane' | 'issue' | 'phase' | 'lastActivityAt'>>;
   update: StatusUpdateJson | null;
   openFactoryDrafts: OpenFactoryDrafts | null;
-  decomposedParents?: ReadonlyArray<ParentCoverage> | null;
   disk: StatusJson['disk'];
   now: number;
 }): StatusJson {
@@ -148,14 +147,8 @@ export function buildStatusJson(input: {
     active,
     update: input.update,
     openFactoryDrafts: input.openFactoryDrafts,
-    decomposedParents:
-      input.decomposedParents?.map((c) => ({
-        issue: c.parent,
-        covered: c.covered.length,
-        total: c.criteria.length,
-        fullyCovered: c.fullyCovered,
-        uncovered: c.uncovered.map(({ id, text }) => ({ id, text })),
-      })) ?? null,
+    // Deprecated, always empty; a later release removes it (#3834).
+    decomposedParents: [],
     disk: input.disk,
     providers,
     activeAlerts,

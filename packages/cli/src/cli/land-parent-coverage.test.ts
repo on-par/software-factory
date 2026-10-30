@@ -1,4 +1,4 @@
-// packages/cli/src/cli/land-parent-coverage.test.ts — land and waitForMerge refresh parent coverage after a merge (#3108)
+// packages/cli/src/cli/land-parent-coverage.test.ts — land no longer touches the decomposed parent (#3834)
 
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -8,42 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { openPrFixture } from './__fixtures__/open-pr.js';
 import { type CliDeps, main } from './index.js';
-import { waitForMerge } from './land.js';
 
-const fakeConfig: any = {
-  merge: { auto: false, comment: '' },
-  ci: { skip: false, comment: '' },
-  filing: {
-    enabled: true,
-    excludeReasons: [],
-    repeatThreshold: 3,
-    maxPerRun: 5,
-    maxPerDay: 20,
-    selfFixLabel: 'no-auto-merge',
-    bugLabels: ['bug'],
-    sensitivePaths: [],
-  },
-};
-
-describe('waitForMerge parent coverage (#3108)', () => {
-  it('refreshes the parent coverage once when a human merged the child', async () => {
-    const refreshParentCoverage = vi.fn(async () => null);
-    const events: any[] = [];
-    await waitForMerge(7, 'ship-it/7-x', '/repo', 'o/r', { events: '/e', stop: '/STOP' } as any, {
-      createOctokit: () => ({}) as any,
-      pathExists: () => false,
-      loadConfig: () => fakeConfig,
-      checkMerged: async () => true,
-      refreshParentCoverage,
-      emitEvent: (_f: string, type: string, _i: string | number, msg: string) => events.push([type, msg]),
-    });
-    expect(refreshParentCoverage).toHaveBeenCalledTimes(1);
-    expect(refreshParentCoverage).toHaveBeenCalledWith(expect.objectContaining({ repo: 'o/r', childIssue: 7 }));
-    expect(events).toContainEqual(['landed', 'PR merged']);
-  });
-});
-
-describe('land refreshes parent coverage after the merge (#3108)', () => {
+describe('land leaves a decomposed parent alone (#3834)', () => {
   const tmp = createTempDirs();
   const childBody = 'Decomposed from #40 by the factory size gate.\nCovers parent criteria: P1\n';
   const ghRepo = 'on-par/software-factory';
@@ -132,19 +98,13 @@ describe('land refreshes parent coverage after the merge (#3108)', () => {
     await main(['node', 'factory', 'land', '5'], deps);
   };
 
-  it('writes the parent coverage comment after squash-merging a decomposed child', async () => {
+  it('lands a child with a Covers parent criteria line without reading or writing the parent', async () => {
     await runLand();
-    expect(octokit.rest.issues.createComment).toHaveBeenCalledWith(
-      expect.objectContaining({ issue_number: 40, body: expect.stringContaining('**1/2**') }),
-    );
-  });
-
-  it('a coverage refresh failure does not fail the land', async () => {
-    octokit.request = vi.fn(async () => {
-      throw new Error('sub_issues down');
-    });
-    await runLand();
-    expect(process.exitCode).toBeUndefined();
     expect(logSpy.mock.calls.map((c: unknown[]) => c.join(' ')).join('\n')).toContain('Landed PR #77');
+    expect(process.exitCode).toBeUndefined();
+    const parentCall = (call: unknown[]): boolean => (call[0] as { issue_number?: number }).issue_number === 40;
+    expect(octokit.rest.issues.createComment.mock.calls.filter(parentCall)).toEqual([]);
+    expect(octokit.rest.issues.get.mock.calls.filter(parentCall)).toEqual([]);
+    expect(octokit.request).not.toHaveBeenCalled();
   });
 });
