@@ -11,7 +11,7 @@ export function countDirectTmpdirMkdtemp(source: string): number {
 
 export const TMPDIR_MKDTEMP_BASELINE: Readonly<Record<string, number>> = {
   'packages/cli/src/agents-guide.test.ts': 1,
-  'packages/cli/src/cli-commands.test.ts': 4,
+  'packages/cli/src/cli-commands.test.ts': 3,
   'packages/cli/src/cli-init-yes.test.ts': 1,
   'packages/cli/src/cli-migrate.test.ts': 1,
   'packages/cli/src/cli.test.ts': 4,
