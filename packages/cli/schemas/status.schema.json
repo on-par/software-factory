@@ -219,42 +219,49 @@
       ]
     },
     "decomposedParents": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "properties": {
-          "issue": {
-            "type": "number"
-          },
-          "covered": {
-            "type": "number"
-          },
-          "total": {
-            "type": "number"
-          },
-          "fullyCovered": {
-            "type": "boolean"
-          },
-          "uncovered": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "id": {
-                  "type": "string"
-                },
-                "text": {
-                  "type": "string"
-                }
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "issue": {
+                "type": "number"
               },
-              "required": ["id", "text"],
-              "additionalProperties": false
-            }
+              "covered": {
+                "type": "number"
+              },
+              "total": {
+                "type": "number"
+              },
+              "fullyCovered": {
+                "type": "boolean"
+              },
+              "uncovered": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "text"],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": ["issue", "covered", "total", "fullyCovered", "uncovered"],
+            "additionalProperties": false
           }
         },
-        "required": ["issue", "covered", "total", "fullyCovered", "uncovered"],
-        "additionalProperties": false
-      },
+        {
+          "type": "null"
+        }
+      ],
       "deprecated": true,
       "description": "Deprecated: always an empty array. A later release removes this field (#3834)."
     },

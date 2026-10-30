@@ -74,6 +74,7 @@ export const statusJsonSchema = z.object({
         uncovered: z.array(z.object({ id: z.string(), text: z.string() })),
       }),
     )
+    .nullable()
     .meta({
       deprecated: true,
       description: 'Deprecated: always an empty array. A later release removes this field (#3834).',
