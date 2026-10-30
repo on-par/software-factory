@@ -22,7 +22,7 @@ describe('ship --no-pr', () => {
   it('run-issue --no-pr with a size gate other than off exits 2 before any phase runs', async () => {
     const res = await runMain('run-issue', '5', '--no-pr', '--size-gate', 'slice');
     expect(res).toEqual({ exited: true, code: 2 });
-    expect(errored()).toContain('--no-pr runs with the size gate off');
+    expect(errored()).toContain('--stack opens a PR per slice');
     expect(phases.planPhase).not.toHaveBeenCalled();
   });
 });
