@@ -1,5 +1,5 @@
 {
-  "packages/cli/src/cli-commands.test.ts": 2573,
+  "packages/cli/src/cli-commands.test.ts": 2038,
   "packages/cli/src/cli.test.ts": 4086,
   "packages/cli/src/cli/daemon.test.ts": 1179,
   "packages/cli/src/cli/daemon.ts": 817,
