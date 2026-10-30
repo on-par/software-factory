@@ -30,18 +30,17 @@ export async function recordShippedSlice(opts: {
     return undefined;
   }
   const state = ship.alreadyDelivered ? 'merged' : 'pr-open';
+  // An injected store is a brief's slice-plan file (#3813); the default is the issue comment.
+  const where = store ? 'slice plan file' : 'slice plan comment';
   try {
     await (store ?? issueCommentSlicePlanStore({ octokit, repo, issue: issueNumberOf(key) })).save(
       withSliceState(plan, index, state, ship.prNumber, branch),
     );
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    return `slice ${index}/${count} PR #${ship.prNumber} opened but recording it in the slice plan comment failed: ${reason}`;
+    return `slice ${index}/${count} PR #${ship.prNumber} opened but recording it in the ${where} failed: ${reason}`;
   }
-  log(
-    'ship',
-    `recorded slice ${index}/${count} as ${state} (PR #${ship.prNumber}, branch ${branch}) in the slice plan comment`,
-  );
+  log('ship', `recorded slice ${index}/${count} as ${state} (PR #${ship.prNumber}, branch ${branch}) in the ${where}`);
   if (stackMode && !ship.alreadyDelivered) {
     await updateParentStackOrder({ octokit, repo, plan, index, prNumber: ship.prNumber, log });
   }

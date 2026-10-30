@@ -527,13 +527,15 @@ async function planPhaseImpl(opts: {
     }
     if (gate.kind === 'slice') {
       const { plan, slice } = gate;
+      // A brief's slice number is a stand-in run number (#3813): keep it out of the body and label.
+      const parentIssue = source.kind === GITHUB_ISSUE_SOURCE ? sliceIssue : undefined;
       issueTitle = `${issueTitle} — slice ${slice.index}/${plan.slices.length}: ${slice.title}`;
-      issueBody = renderChildIssueBody(slice.story, sliceIssue);
+      issueBody = renderChildIssueBody(slice.story, parentIssue);
       readiness = scoreIssueReadiness({ title: issueTitle, body: issueBody });
       planningSlice = true;
       plannedSlice = { plan, index: slice.index };
-      sliceLabel = `slice ${slice.index}/${plan.slices.length} of #${sliceIssue}`;
-      log('plan', `planning slice ${slice.index}/${plan.slices.length} of #${sliceIssue}: ${slice.title}`);
+      sliceLabel = `slice ${slice.index}/${plan.slices.length}${parentIssue === undefined ? '' : ` of #${parentIssue}`}`;
+      log('plan', `planning ${sliceLabel}: ${slice.title}`);
       if (readiness.sizeOk === false) {
         log(
           'size_hint',

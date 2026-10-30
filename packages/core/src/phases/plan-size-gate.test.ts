@@ -1,4 +1,5 @@
 import { workKeyFromIssue } from '../work/work-key.js';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -262,22 +263,25 @@ npm run test`;
           acceptanceCriteria: [],
         }),
       });
+      const specPath = join(worktree, 'brief-9000077.md');
+      const logs: string[] = [];
       const result = await planPhase({
-        issue: workKeyFromIssue(77),
+        // A brief's run number is a stand-in in the reserved 9,000,000+ range.
+        issue: workKeyFromIssue(9_000_077),
         repo: 'on-par/software-factory',
         worktree,
-        specPath: join(worktree, 'brief-77.md'),
+        specPath,
         router,
         constitution: null,
         octokit: { rest: { issues: { createComment } } } as any,
-        log: () => {},
+        log: (_type, msg) => logs.push(msg),
         workSources,
         workSource: { kind: 'local-brief', params: {} },
         sizeGateMode: opts.mode,
         slicePlanStore: opts.store,
         sizeBudget: { tokenBudget: 1_000_000, maxFiles: 12 },
       });
-      return { result, stub, createComment };
+      return { result, stub, createComment, specPath, logs };
     }
 
     const memoryStore = () => {
@@ -311,6 +315,19 @@ npm run test`;
       expect(result.ok).toBe(true);
       expect(stub.calls.map((c) => c.task)).toEqual(['plan']);
       expect(saved).toEqual([]);
+    });
+
+    it('a brief slice is planned with no stand-in run number in its issue body or slice label', async () => {
+      const { store } = memoryStore();
+      await runBrief({ files: 13, store, mode: 'stack' });
+      const { result, stub, specPath, logs } = await runBrief({ files: 3, store, mode: 'stack' });
+
+      expect(result.slice?.index).toBe(1);
+      const planned = [...stub.calls.map((c) => c.prompt), readFileSync(specPath, 'utf8')].join('\n');
+      const body = /<untrusted-issue-body>\n([\s\S]*?)\n<\/untrusted-issue-body>/.exec(planned)?.[1] ?? '';
+      expect(body).toContain('Problem 1');
+      expect(body).not.toMatch(/9000077|#9\d/);
+      expect(logs).toContain('planning slice 1/2: Story 1');
     });
 
     it('file mode without a store is not gated', async () => {

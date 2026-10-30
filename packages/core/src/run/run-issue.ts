@@ -1177,7 +1177,9 @@ async function runIssueOnce(
         plan: planSlice.plan,
         index: planSlice.index,
         ship,
-        stackMode: request.sizeGateMode === 'stack',
+        // Brief PRs carry no stack-order line (shipPhase ignores the stack for inline work), so skip
+        // the parent-PR update: its branch names hold the brief's stand-in number (#3813).
+        stackMode: request.sizeGateMode === 'stack' && request.work.kind !== LOCAL_BRIEF_SOURCE,
         store: ports.slicePlanStore,
         log,
       });
