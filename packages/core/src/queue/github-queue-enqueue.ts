@@ -1,4 +1,4 @@
-// packages/core/src/queue/github-queue-enqueue.ts — GitHub queue enqueue paths: tail append and right-behind-the-parent placement (#3539).
+// packages/core/src/queue/github-queue-enqueue.ts — GitHub queue enqueue paths: tail append and front placement (#3539, #3552).
 
 import { orderCollisionAt, scanLaneOrders } from './order-collision.js';
 import { dedupeOrderLabels, repairOrderCollision, type OrderCollisionRepair } from './order-repair.js';
@@ -14,16 +14,6 @@ import {
   type QueueGitHubClient,
   type QueueLabelSpec,
 } from './github-queue.js';
-
-export interface ChildEnqueueResult {
-  /** One per input issue, in input (build) order. */
-  results: EnqueueResult[];
-  /** 'after-parent': children took orders p+1..p+k behind the parent's factory:order:p.
-   *  'tail': parent had no single valid order label, or the shift failed; children were appended via enqueue. */
-  placement: 'after-parent' | 'tail';
-  /** Set only when the shift of later in-lane issues failed (placement is then 'tail'). */
-  detail?: string;
-}
 
 export interface FrontEnqueueResult {
   /** One per input issue, in input order. */
@@ -223,19 +213,6 @@ export function createEnqueuers(
     return { results: inOrder(), tail: false };
   }
 
-  async function enqueueAfter(lane: string, parent: number, issues: readonly number[]): Promise<ChildEnqueueResult> {
-    const parentLabels = await client.getIssueLabels({ owner, repo, issue_number: parent });
-    const parentOrders = parentLabels.filter((label) => label.startsWith(QUEUE_ORDER_LABEL_PREFIX));
-    const p = parentOrders.length === 1 ? orderOf(parentOrders[0] ?? '') : undefined;
-    if (p === undefined) return { results: await enqueue(lane, issues), placement: 'tail' };
-    const out = await insertAfter(lane, p, issues, new Set([parent, ...issues]));
-    return {
-      results: out.results,
-      placement: out.tail ? 'tail' : 'after-parent',
-      ...(out.detail ? { detail: out.detail } : {}),
-    };
-  }
-
   async function enqueueFront(lane: string, issues: readonly number[]): Promise<FrontEnqueueResult> {
     const out = await insertAfter(lane, 0, issues, new Set(issues));
     return {
@@ -245,5 +222,5 @@ export function createEnqueuers(
     };
   }
 
-  return { enqueue, enqueueAfter, enqueueFront };
+  return { enqueue, enqueueFront };
 }
