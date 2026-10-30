@@ -85,4 +85,24 @@ describe('recordShippedSlice', () => {
     expect(await result).toContain('recording it in the slice plan comment failed');
     expect(issues.listComments).not.toHaveBeenCalled();
   });
+
+  it('saves through an injected store and leaves GitHub comments alone', async () => {
+    const { octokit, issues } = fakeOctokit();
+    const save = vi.fn(async () => ({ where: 'plan.md' }));
+    const result = await recordShippedSlice({
+      octokit,
+      repo: 'o/r',
+      key: toWorkKey('brief-1'),
+      branch: 'b',
+      plan,
+      index: 1,
+      ship: { prNumber: 7 },
+      stackMode: false,
+      store: { find: vi.fn(), save },
+      log: vi.fn(),
+    });
+    expect(result).toBeUndefined();
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ slices: expect.any(Array) }));
+    expect(issues.createComment).not.toHaveBeenCalled();
+  });
 });

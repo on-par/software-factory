@@ -64,6 +64,7 @@ import {
 import { reportFlakeRerun } from './flaky-tests.js';
 import { finishWithoutShip } from './local-finish.js';
 import { enterStackSlice } from './stack-slice-entry.js';
+import type { SlicePlanStore } from '../readiness/slice-plan-store.js';
 import { recordShippedSlice } from './slice-ship-record.js';
 import type { ReviewFloorPathChange, ReviewFloorRuleSet } from '../review/floor.js';
 import {
@@ -219,6 +220,8 @@ export interface RunRequest extends ReworkRequestFields {
  *  layout, approvals/steering directories, report/artifact destinations) are the caller's
  *  responsibility to wire — runIssue only calls the closures it is handed. */
 export interface RunPorts extends CiReworkPorts {
+  /** Run-state slice-plan store for briefs (#3813); absent = the issue's slice-plan comment. */
+  slicePlanStore?: SlicePlanStore;
   /** ADR-0161 stack mode: creates a slice branch in the worktree. Defaults to createStackSliceBranch. */
   createSliceBranch?: (opts: { worktree: string; branch: string; startPoint: string }) => Promise<void>;
   /** Stuck-run steward seams (#2124). Used only when request.stewardEnabled is true and detectStuck fires
@@ -686,6 +689,7 @@ async function runIssueOnce(
           enforceSizeGate: !request.noPr && (request.sizeGateMode ?? 'file') !== 'off',
           sizeGateMode: request.sizeGateMode,
           sliceIndex: request.sliceIndex,
+          slicePlanStore: ports.slicePlanStore,
           maxSlices: request.maxSlices,
           sizeBudget: request.sizeBudget,
           blockUnresolvedRegressions: request.blockUnresolvedRegressions,
@@ -1174,6 +1178,7 @@ async function runIssueOnce(
         index: planSlice.index,
         ship,
         stackMode: request.sizeGateMode === 'stack',
+        store: ports.slicePlanStore,
         log,
       });
       if (failure !== undefined) return await terminalParked('fail', failure);

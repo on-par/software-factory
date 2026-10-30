@@ -32,6 +32,7 @@ import { codexUnavailable, type RouteCapabilities } from './route-capabilities.j
 import { blockedNoChangeSpecReason, noBuildReason, planSummary, specWriteDeniedResult } from './plan-spec-guards.js';
 import { decomposeOversizedIssue, renderChildIssueBody } from '../readiness/decompose.js';
 import { resolveSliceGate } from '../readiness/slice-gate.js';
+import type { SlicePlanStore } from '../readiness/slice-plan-store.js';
 import { DEFAULT_MAX_SLICES } from '../readiness/slice-plan.js';
 import {
   DEFAULT_MAX_FILES,
@@ -327,6 +328,8 @@ async function planPhaseImpl(opts: {
   enforceSizeGate?: boolean;
   /** sizeGate.mode (ADR-0147). 'slice' records a slice plan and plans only the current slice; 'stack' (ADR-0161) uses the slice-mode gates and may plan an explicit `sliceIndex`. Ignored when enforceSizeGate is false. */
   sizeGateMode?: SizeGateMode;
+  /** Slice-plan store for a non-issue source in slice/stack mode (#3813); issue sources default to the issue comment. */
+  slicePlanStore?: SlicePlanStore;
   /** Slice cap for sizeGate.mode 'slice' (ADR-0156); default DEFAULT_MAX_SLICES. */
   maxSlices?: number;
   /** sizeGate.tokenBudget / maxFiles (#3350); default DEFAULT_TOKEN_BUDGET / DEFAULT_MAX_FILES. */
@@ -480,14 +483,17 @@ async function planPhaseImpl(opts: {
   // ADR-0161: stack uses the slice-mode gates; it may plan an explicit slice.
   const sizeBudget = opts.sizeBudget ?? { tokenBudget: DEFAULT_TOKEN_BUDGET, maxFiles: DEFAULT_MAX_FILES };
   const sliceMode = opts.sizeGateMode === 'slice' || opts.sizeGateMode === 'stack';
+  const sliceGateOn = source.kind === GITHUB_ISSUE_SOURCE || (sliceMode && opts.slicePlanStore !== undefined);
+  const sliceIssue =
+    source.kind === GITHUB_ISSUE_SOURCE ? (source.params as GithubIssueParams).issue : issueNumberOf(issue);
+  const sliceRepo = source.kind === GITHUB_ISSUE_SOURCE ? (source.params as GithubIssueParams).repo : repo;
   let planningSlice = false;
   let sliceLabel = '';
   let plannedSlice: PlanResult['slice'];
-  if (enforceSizeGate && sliceMode && source.kind === GITHUB_ISSUE_SOURCE) {
-    const params = source.params as GithubIssueParams;
+  if (enforceSizeGate && sliceMode && sliceGateOn) {
     const gate = await resolveSliceGate({
-      issue: params.issue,
-      repo: params.repo,
+      issue: sliceIssue,
+      repo: sliceRepo,
       title: issueTitle,
       body: issueBody,
       // #3350: issue prose never slices; only an existing trusted slice plan selects a slice here.
@@ -495,6 +501,7 @@ async function planPhaseImpl(opts: {
       maxSlices: opts.maxSlices ?? DEFAULT_MAX_SLICES,
       ...(opts.sizeGateMode === 'stack' && opts.sliceIndex !== undefined ? { sliceIndex: opts.sliceIndex } : {}),
       stack: opts.sizeGateMode === 'stack',
+      store: opts.slicePlanStore,
       worktree,
       router,
       octokit,
@@ -521,12 +528,12 @@ async function planPhaseImpl(opts: {
     if (gate.kind === 'slice') {
       const { plan, slice } = gate;
       issueTitle = `${issueTitle} — slice ${slice.index}/${plan.slices.length}: ${slice.title}`;
-      issueBody = renderChildIssueBody(slice.story, params.issue);
+      issueBody = renderChildIssueBody(slice.story, sliceIssue);
       readiness = scoreIssueReadiness({ title: issueTitle, body: issueBody });
       planningSlice = true;
       plannedSlice = { plan, index: slice.index };
-      sliceLabel = `slice ${slice.index}/${plan.slices.length} of #${params.issue}`;
-      log('plan', `planning slice ${slice.index}/${plan.slices.length} of #${params.issue}: ${slice.title}`);
+      sliceLabel = `slice ${slice.index}/${plan.slices.length} of #${sliceIssue}`;
+      log('plan', `planning slice ${slice.index}/${plan.slices.length} of #${sliceIssue}: ${slice.title}`);
       if (readiness.sizeOk === false) {
         log(
           'size_hint',
@@ -778,8 +785,7 @@ async function planPhaseImpl(opts: {
       // instead of handing a mega-slice to BUILD. File mode files the decomposition as sub-issues
       // and re-queues them (#2662).
       const overBudget = planOverBudget(estimatePlanSize(designArtifact, { worktree }), sizeBudget);
-      if (enforceSizeGate && source.kind === GITHUB_ISSUE_SOURCE && overBudget !== null) {
-        const params = source.params as GithubIssueParams;
+      if (enforceSizeGate && sliceGateOn && overBudget !== null) {
         const scope = overBudget;
         const fileReason = `plan scope exceeds the bounded-build budget (${scope}) — parked for decomposition`;
         const park = (reason: string): PlanResult => ({
@@ -798,13 +804,14 @@ async function planPhaseImpl(opts: {
             return park(reason);
           }
           const gate = await resolveSliceGate({
-            issue: params.issue,
-            repo: params.repo,
+            issue: sliceIssue,
+            repo: sliceRepo,
             title: issueTitle,
             body: issueBody,
             oversized: true,
             sizeReason: `plan scope exceeds the bounded-build budget: ${scope}`,
             maxSlices: opts.maxSlices ?? DEFAULT_MAX_SLICES,
+            store: opts.slicePlanStore,
             worktree,
             router,
             octokit,
@@ -828,6 +835,8 @@ async function planPhaseImpl(opts: {
           }
         } else {
           // File mode (#2662): file the decomposition as sub-issues and re-queue them instead of parking.
+          // Only a GitHub issue source reaches here: any other source needs slice mode to pass sliceGateOn.
+          const params = source.params as GithubIssueParams;
           const decomposeResult = await decomposeOversizedIssue({
             issue: params.issue,
             repo: params.repo,
