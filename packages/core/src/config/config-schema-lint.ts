@@ -7,6 +7,7 @@ import { codexSandboxValueIssue } from './sandbox-schema.js';
 import { readRepoConfigFile } from './repo-config-file.js';
 import { repoRoutingConfigIssues } from './repo.js';
 import { unknownRuntimeConfigKeys } from './unknown-runtime-keys.js';
+import { parseSizeGateMode, sizeGateUnknownModeLine } from './size-gate.js';
 
 export interface ConfigSchemaFinding {
   /** Display path (relPath). */
@@ -191,4 +192,33 @@ export function codexSandboxWarningMessages(configFile: { absPath: string; relPa
   return findCodexSandboxWarnings(configFile).map(
     (w) => `${w.file}${w.line ? `:${w.line}` : ''}: ${w.message}; ${w.fix}`,
   );
+}
+
+/** Warning for an unknown sizeGate.mode value, which remains compatible by running as stack. */
+export function findSizeGateWarnings(configFile: { absPath: string; relPath: string }): ConfigSchemaFinding[] {
+  const { absPath, relPath } = configFile;
+  if (!existsSync(absPath)) return [];
+  let raw: unknown;
+  try {
+    raw = readRepoConfigFile(absPath);
+  } catch {
+    return [];
+  }
+  if (!isPlainObject(raw)) return [];
+  const mode = isPlainObject(raw.sizeGate) ? raw.sizeGate.mode : undefined;
+  if (mode === undefined || parseSizeGateMode(mode) !== undefined || typeof mode !== 'string') return [];
+  const lc = new LineCounter();
+  const doc: Document | undefined = /\.ya?ml$/i.test(absPath)
+    ? parseDocument(readFileSync(absPath, 'utf8').replace(/^\uFEFF/, ''), { lineCounter: lc })
+    : undefined;
+  const line = doc ? yamlLineForPath(doc, lc, ['sizeGate', 'mode']) : undefined;
+  return [
+    {
+      file: relPath,
+      ...(line !== undefined ? { line } : {}),
+      path: 'sizeGate.mode',
+      message: sizeGateUnknownModeLine(mode),
+      fix: `set 'sizeGate.mode' to 'off' or 'stack'`,
+    },
+  ];
 }

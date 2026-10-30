@@ -4,9 +4,18 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { createTempDirs } from '../harness/temp-dir.js';
-import { loadFactoryConfig, loadFactoryConfigForRepo, resolveSizeGateBudget } from './index.js';
+import { loadFactoryConfig, loadFactoryConfigForRepo, resolveSizeGateBudget, resolveSizeGateMode } from './index.js';
 
 describe('sizeGate.tokenBudget / maxFiles (#3350)', () => {
+  it.each(['Off', 'none', 'bogus'])('warns once and falls back to stack for unknown mode %j', (mode) => {
+    const config = { ...loadFactoryConfig(), sizeGate: { mode } };
+    const warnings: string[] = [];
+
+    expect(resolveSizeGateMode(config, (line) => warnings.push(line))).toBe('stack');
+    expect(resolveSizeGateMode(config, (line) => warnings.push(line))).toBe('stack');
+    expect(warnings).toEqual([`factory: unknown size gate mode '${mode}' runs as stack; allowed values: off, stack`]);
+  });
+
   it('resolveSizeGateBudget reads tokenBudget and maxFiles and falls back to defaults', () => {
     const base = loadFactoryConfig();
     expect(

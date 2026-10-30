@@ -16,6 +16,11 @@ export function sizeGateDeprecationLine(mode: string): string {
   return `factory: size gate mode '${mode}' is deprecated and runs as stack; use --stack (or sizeGate.mode: stack) (#3832)`;
 }
 
+/** The warning for an unknown size gate mode, which still falls back to stack for compatibility. */
+export function sizeGateUnknownModeLine(mode: string): string {
+  return `factory: unknown size gate mode '${mode}' runs as stack; allowed values: off, stack`;
+}
+
 const DEPRECATED_SIZE_GATE_MODES = new Set<unknown>(['file', 'slice']);
 
 /** Maps the raw deprecated `file` and `slice` inputs to `stack`, warning once per call; other values pass through (#3832). */
@@ -27,13 +32,20 @@ export function aliasDeprecatedSizeGateMode<T>(mode: T, warn: (line: string) => 
 
 const warnedSizeGateConfigs = new WeakSet();
 
-/** sizeGate.mode from the factory config; missing or unknown resolves to `stack`, `file` and `slice` alias to it with one warning per config. */
-export function resolveSizeGateMode(config: FactoryConfig): SizeGateMode {
+/** sizeGate.mode from the factory config; missing resolves to `stack`, while deprecated and unknown values warn once per config. */
+export function resolveSizeGateMode(config: FactoryConfig, warn: (line: string) => void = console.warn): SizeGateMode {
   const raw = config.sizeGate?.mode;
   if (DEPRECATED_SIZE_GATE_MODES.has(raw)) {
     if (warnedSizeGateConfigs.has(config)) return 'stack';
     warnedSizeGateConfigs.add(config);
-    return aliasDeprecatedSizeGateMode(raw) as SizeGateMode;
+    return aliasDeprecatedSizeGateMode(raw, warn) as SizeGateMode;
+  }
+  if (raw !== undefined && parseSizeGateMode(raw) === undefined) {
+    if (!warnedSizeGateConfigs.has(config)) {
+      warnedSizeGateConfigs.add(config);
+      warn(sizeGateUnknownModeLine(String(raw)));
+    }
+    return 'stack';
   }
   return parseSizeGateMode(raw) ?? 'stack';
 }
