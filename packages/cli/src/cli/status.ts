@@ -246,9 +246,9 @@ export async function cmdStatus(opts: StatusOptions, rt: StatusRuntime): Promise
     effective.allowExperimental,
     effective.localOnly,
   );
-  router.setCodexFullAccessTasks?.(
-    rt.configLoaders.loadFactoryConfigForRepo(paths.config).sandbox.codexFullAccessTasks,
-  );
+  const sandbox = rt.configLoaders.loadFactoryConfigForRepo(paths.config).sandbox;
+  router.setCodexFullAccessTasks?.(sandbox.codexFullAccessTasks);
+  router.setCodexSandbox?.(sandbox.codexSandbox);
   router.setLocalAuthSink?.(recordLocalAuthFailure);
   const product = rt.readActiveProduct(paths.product) ?? '(none)';
 

@@ -276,6 +276,8 @@ export function makeCoreFakes() {
         setCostSink: vi.fn((sink: (entry: any) => void) => {
           h.costSinkCallback = sink;
         }),
+        setCodexFullAccessTasks: vi.fn(),
+        setCodexSandbox: vi.fn(),
         skipMissingHarnessClis: vi.fn(),
         run: vi.fn(async (task: string, prompt: string, opts: any) => h.routerRun(task, prompt, opts)),
       };
