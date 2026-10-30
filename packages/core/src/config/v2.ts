@@ -31,6 +31,7 @@
 import { z } from 'zod';
 
 import { failoverConfigWarnings } from './failover-triggers.js';
+import { CODEX_SANDBOX_MODES } from './sandbox-schema.js';
 import { HarnessDeclarationSchema } from './harness-declaration.js';
 import { ModelsSectionSchema } from './v2-models.js';
 import { readRepoConfigFile } from './repo-config-file.js';
@@ -86,6 +87,11 @@ const SandboxSchema = z
   .object({
     enabled: z.boolean().default(true).describe('Contain agentic build runs (disable per-run with FACTORY_SANDBOX=0).'),
     codexFullAccessTasks: z.array(z.string()).default([]).describe('Codex task names allowed danger-full-access.'),
+    codexSandbox: z
+      .enum(CODEX_SANDBOX_MODES)
+      .optional()
+      .catch(undefined)
+      .describe("Codex sandbox mode: danger-full-access or workspace-write. Unset keeps today's behavior."),
     writablePaths: z.array(z.string()).default([]).describe('Extra writable dirs (absolute or ~/...).'),
     network: z
       .object({

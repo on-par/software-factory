@@ -3,7 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTempDirs } from '../harness/temp-dir.js';
-import { findConfigSchemaErrors, findUnknownConfigKeyWarnings } from './config-schema-lint.js';
+import {
+  findCodexSandboxWarnings,
+  findConfigSchemaErrors,
+  findUnknownConfigKeyWarnings,
+} from './config-schema-lint.js';
 
 describe('findConfigSchemaErrors (#2611)', () => {
   const dirs: string[] = [];
@@ -138,5 +142,42 @@ describe('findUnknownConfigKeyWarnings (#3568)', () => {
     expect(warn('config.yaml', '')).toEqual([]);
     expect(warn('config.yaml', '- a\n')).toEqual([]);
     expect(warn('config.yaml', 'a: [unclosed\n')).toEqual([]);
+  });
+});
+
+describe('findCodexSandboxWarnings (#3829)', () => {
+  const temp = createTempDirs();
+  afterEach(() => temp.cleanup());
+
+  function files(name: string, content: string) {
+    const dir = temp.makeSync('codex-sandbox-');
+    writeFileSync(join(dir, name), content);
+    return { absPath: join(dir, name), relPath: `.factory/${name}` };
+  }
+
+  it('reports an unknown sandbox.codexSandbox with file, line and fix (#3829)', () => {
+    const file = files('config.yaml', 'sandbox:\n  codexSandbox: read-only\n');
+    const [f, ...rest] = findCodexSandboxWarnings(file);
+    expect(rest).toEqual([]);
+    expect(f).toMatchObject({ file: '.factory/config.yaml', line: 2, path: 'sandbox.codexSandbox' });
+    expect(f!.message).toContain('"read-only"');
+    expect(f!.message).toContain('later release');
+    expect(f!.fix).toContain('"danger-full-access" or "workspace-write"');
+    expect(findConfigSchemaErrors(file)).toEqual([]);
+  });
+
+  it('reports a JSON config without a line', () => {
+    const [f] = findCodexSandboxWarnings(files('config.json', '{"sandbox":{"codexSandbox":5}}'));
+    expect(f).toMatchObject({ path: 'sandbox.codexSandbox' });
+    expect(f!.line).toBeUndefined();
+  });
+
+  it('returns nothing for a valid value, no key, or a missing, non-mapping or unparsable file', () => {
+    expect(findCodexSandboxWarnings(files('config.yaml', 'sandbox:\n  codexSandbox: workspace-write\n'))).toEqual([]);
+    expect(findCodexSandboxWarnings(files('config.yaml', 'sandbox:\n  enabled: true\n'))).toEqual([]);
+    expect(findCodexSandboxWarnings(files('config.yaml', '- a\n'))).toEqual([]);
+    expect(findCodexSandboxWarnings(files('config.yaml', 'a: [unclosed\n'))).toEqual([]);
+    const missing = files('config.yaml', '');
+    expect(findCodexSandboxWarnings({ ...missing, absPath: `${missing.absPath}.nope` })).toEqual([]);
   });
 });

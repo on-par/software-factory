@@ -4,6 +4,7 @@
 // newly-emitted kind to be registered. EventKind is the closed set of kinds the factory emits, and
 // EVENT_TRAITS is the single table every consumer reads instead of keeping its own classification.
 
+import { CONFIG_EVENT_TRAITS, type ConfigEventKind } from './config-traits.js';
 import { DECOMPOSE_EVENT_TRAITS } from './decompose-traits.js';
 import type { EventTraits, LaneStatus } from './event-traits.js';
 import { QUEUE_EVENT_TRAITS, type QueueEventKind } from './queue-traits.js';
@@ -58,7 +59,7 @@ export type EventKind =
   | 'conflict_detected'
   | 'conflict_resolved'
   | 'config'
-  | 'config_unknown_key'
+  | ConfigEventKind
   | 'constitution'
   | 'context_ceiling'
   | 'decompose_comment_posted'
@@ -298,8 +299,7 @@ export const EVENT_TRAITS: Record<EventKind, EventTraits> = {
   context_ceiling: { severity: 'info', isPark: false, isTerminal: false },
   // A config-caused CHECK failure parked with file, line and fix (#2583/#2584): fails the same way on every requeue.
   config: { severity: 'error', isPark: true, isTerminal: true, laneStatus: 'parked' },
-  // An unknown nested config key stripped by the runtime schema, warned once per key at run start (#3568).
-  config_unknown_key: { severity: 'warn', isPark: false, isTerminal: false },
+  ...CONFIG_EVENT_TRAITS,
   constitution: { severity: 'info', isPark: false, isTerminal: false },
   ...DECOMPOSE_EVENT_TRAITS,
   'defect-window-closed': { severity: 'info', isPark: false, isTerminal: false },

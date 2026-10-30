@@ -4,7 +4,7 @@ import { findUnknownConstitutionCheckers, formatUnknownCheckerMessage } from '..
 import type { Constitution } from '../types/index.js';
 import { preflightConfigTokens } from './template-tokens.js';
 
-export { findUnknownConfigKeyWarnings } from './config-schema-lint.js';
+export { findCodexSandboxWarnings, findUnknownConfigKeyWarnings } from './config-schema-lint.js';
 
 export type ConfigLintVerdict = 'ok' | 'escalate' | 'park';
 

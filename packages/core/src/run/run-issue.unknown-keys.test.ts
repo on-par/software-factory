@@ -150,4 +150,37 @@ describe('runIssue unknown config keys (#3568)', () => {
     );
     expect(events.some(([type]) => type === 'config_unknown_key')).toBe(false);
   });
+
+  async function eventsFor(config: string): Promise<Array<[string, string]>> {
+    const absPath = join(dirs.makeSync('unknown-keys-cfg-'), 'config.yaml');
+    writeFileSync(absPath, config);
+    const planPhase = vi
+      .fn<typeof realPlanPhase>()
+      .mockResolvedValue({ ok: true, route: 'claude', specPath: '/tmp/wt/spec.md', model: 'm', designArtifact: null });
+    const buildPhase = vi
+      .fn<typeof realBuildPhase>()
+      .mockResolvedValue({ ok: false, model: 'm', route: 'claude', reason: 'no_diff' });
+    const events: Array<[string, string]> = [];
+    await runIssue(
+      { ...baseRequest, repoConfigFile: { absPath, relPath: '.factory/config.yaml' } },
+      policy,
+      portsWith(planPhase, buildPhase, (t, m) => events.push([t, m])),
+    );
+    expect(planPhase).toHaveBeenCalledTimes(1);
+    return events;
+  }
+
+  it('logs one config_invalid_value warning for an unknown sandbox.codexSandbox and proceeds to PLAN (#3829)', async () => {
+    const events = await eventsFor('sandbox:\n  codexSandbox: read-only\n');
+    const warnings = events.filter(([type]) => type === 'config_invalid_value');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0][1]).toContain('.factory/config.yaml:2');
+    expect(warnings[0][1]).toContain('read-only');
+    expect(warnings[0][1]).toContain('set sandbox.codexSandbox to "danger-full-access" or "workspace-write"');
+  });
+
+  it('logs no config warning for a valid sandbox.codexSandbox (#3829)', async () => {
+    const events = await eventsFor('sandbox:\n  codexSandbox: workspace-write\n');
+    expect(events.some(([type]) => type === 'config_invalid_value' || type === 'config_unknown_key')).toBe(false);
+  });
 });
