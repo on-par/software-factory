@@ -1,5 +1,5 @@
 // packages/core/src/run/stack-slice-entry.ts — ADR-0161: stack mode builds one slice per run (#3367), on main or on its parent slice's branch.
-import { upsertSlicePlanComment } from '../readiness/slice-plan-github.js';
+import { issueCommentSlicePlanStore } from '../readiness/slice-plan-store.js';
 import { parentRefForSlice, stackSliceBranch, withSliceBranchCreated } from '../readiness/slice-plan.js';
 import type { PlanResult } from '../phases/plan.js';
 import type { RunOutcome } from './outcome.js';
@@ -46,7 +46,10 @@ export async function enterStackSlice(args: {
   }
   const recorded = withSliceBranchCreated(slicePlan, index, branch);
   try {
-    await upsertSlicePlanComment({ octokit: ports.octokit, repo: request.repo, issue: request.issue, plan: recorded });
+    await (
+      ports.slicePlanStore ??
+      issueCommentSlicePlanStore({ octokit: ports.octokit, repo: request.repo, issue: request.issue })
+    ).save(recorded);
   } catch (err) {
     return { outcome: await park(`could not record ${branch} in the slice plan comment: ${errorMessage(err)}`) };
   }

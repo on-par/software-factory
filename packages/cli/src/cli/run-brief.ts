@@ -1,6 +1,7 @@
 // packages/cli/src/cli/run-brief.ts — the factory run-brief handler, moved out of index.ts (#3762)
 
 import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { styleText } from 'node:util';
 
 import type { Octokit } from '@octokit/rest';
@@ -23,7 +24,7 @@ import {
   type SizeGateMode,
   type WorkRequest,
 } from '@on-par/factory-core';
-import { logEvent } from '@on-par/factory-core/internal';
+import { fileSlicePlanStore, logEvent, type SlicePlanStore } from '@on-par/factory-core/internal';
 
 import { CliExitError } from './errors.js';
 import { availableAgentClis, missingAgentCliMessage, notInitializedMessage } from './first-run.js';
@@ -31,7 +32,7 @@ import { withRepoRunLock } from './repo-run-lock.js';
 import { recordDraftPrFlag } from './run-flags.js';
 import { shipIssue } from './ship.js';
 import { baseBranchConflict, baseBranchOrExit } from './ship-options.js';
-import { consoleStackLog, printStackResult } from './stack-run.js';
+import { consoleStackLog, printStackResult, runSliceStack } from './stack-run.js';
 
 /** index.ts bindings the handler needs; index.ts passes them so this module never imports it at runtime. */
 export interface RunBriefRuntime {
@@ -85,6 +86,10 @@ export async function cmdRunBrief(files: readonly string[], opts: RunBriefOption
     );
   }
   const env = await prepareRunBrief(opts, rt);
+  if (files.length === 1 && opts.stack) {
+    await runStackedBrief(files[0], opts, env, rt);
+    return;
+  }
   if (files.length === 1) {
     await runOneBrief(files[0], opts, env, rt);
     return;
@@ -163,21 +168,32 @@ async function prepareRunBrief(opts: RunBriefOptions, rt: RunBriefRuntime) {
   return { repoRoot, paths, branchPrefix, localOnly, artifactsDir, ghRepo, workSources };
 }
 
-/** One brief through the one-shot pipeline under its own per-brief lock. Throws CliExitError(2) when
- *  the brief cannot be resolved (no worktree or PR exists yet) and CliExitError(1) on a pipeline failure. */
-async function runOneBrief(
-  briefPath: string,
-  opts: RunBriefOptions & { sizeGate?: SizeGateMode },
-  env: Awaited<ReturnType<typeof prepareRunBrief>>,
-  rt: RunBriefRuntime,
-): Promise<RunOutcome | undefined> {
-  const { repoRoot, paths, branchPrefix, localOnly, artifactsDir, ghRepo, workSources } = env;
+type BriefEnv = Awaited<ReturnType<typeof prepareRunBrief>>;
 
-  // Pre-flight: resolve the brief through the canonical work-request seam
-  // BEFORE any worktree or PR exists — a malformed brief exits here, so BUILD never starts.
+/** `run-brief <file> --stack` (#3813): an over-budget brief is sliced and its slices build as a stack in
+ *  this one run; the slice plan lives in the run's state file, not on any issue. */
+async function runStackedBrief(file: string, opts: RunBriefOptions, env: BriefEnv, rt: RunBriefRuntime): Promise<void> {
+  const { runNum } = await resolveBrief(file, env, rt);
+  const store = fileSlicePlanStore(join(env.paths.state, 'slice-plans', `${runNum}.md`));
+  await runSliceStack({ prefix: 'run-brief', label: file, failLabel: `brief ${file}` }, opts.baseBranch, {
+    readSlicePlan: async () => {
+      const lookup = await store.find();
+      return lookup.status === 'found' ? lookup.plan : undefined;
+    },
+    ship: async (base, onOutcome) => {
+      const outcome = await runOneBrief(file, { ...opts, baseBranch: base, sizeGate: 'stack' }, env, rt, {
+        slicePlanStore: store,
+      });
+      if (outcome) onOutcome(outcome);
+    },
+  });
+}
+
+/** Resolves the brief through the canonical work-request seam BEFORE any worktree or PR exists. */
+async function resolveBrief(briefPath: string, env: BriefEnv, rt: RunBriefRuntime) {
   let work: WorkRequest;
   try {
-    work = await workSources.resolve(LOCAL_BRIEF_SOURCE, { path: briefPath } satisfies LocalBriefParams);
+    work = await env.workSources.resolve(LOCAL_BRIEF_SOURCE, { path: briefPath } satisfies LocalBriefParams);
   } catch (err) {
     if (err instanceof InvalidWorkRequestInputError) {
       throw new CliExitError(`factory: ${err.message}`, 2);
@@ -188,7 +204,22 @@ async function runOneBrief(
     );
   }
   const digest = work.reference?.externalId ?? '';
-  const runNum = briefRunNumber(digest);
+  return { work, digest, runNum: briefRunNumber(digest) };
+}
+
+/** One brief through the one-shot pipeline under its own per-brief lock. Throws CliExitError(2) when
+ *  the brief cannot be resolved (no worktree or PR exists yet) and CliExitError(1) on a pipeline failure. */
+async function runOneBrief(
+  briefPath: string,
+  opts: RunBriefOptions & { sizeGate?: SizeGateMode },
+  env: BriefEnv,
+  rt: RunBriefRuntime,
+  extra?: { slicePlanStore?: SlicePlanStore },
+): Promise<RunOutcome | undefined> {
+  const { repoRoot, paths, branchPrefix, localOnly, artifactsDir, ghRepo } = env;
+
+  // Pre-flight: a malformed brief exits here, so BUILD never starts.
+  const { work, digest, runNum } = await resolveBrief(briefPath, env, rt);
 
   let outcome: RunOutcome | undefined;
   await withRepoRunLock(
@@ -226,6 +257,7 @@ async function runOneBrief(
             workSource: { kind: LOCAL_BRIEF_SOURCE, params: { path: briefPath } satisfies LocalBriefParams },
             localOnly,
             artifactsDir,
+            slicePlanStore: extra?.slicePlanStore,
             onOutcome: (o) => {
               outcome = o;
             },

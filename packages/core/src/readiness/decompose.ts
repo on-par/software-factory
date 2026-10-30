@@ -333,9 +333,14 @@ export function renderDecompositionComment(decomposition: DecompositionOutput): 
 
 /** Renders a filed child issue's body with exactly the five factory-task headings
  *  (`FACTORY_TASK_REQUIRED_FIELDS`) so it scores as a ready factory-task on its own —
- *  and, deliberately, no `## Children` heading, which would classify it as an epic. */
-export function renderChildIssueBody(story: Story, parentIssue: number): string {
+ *  and, deliberately, no `## Children` heading, which would classify it as an epic.
+ *  With no `parentIssue` (a brief slice, #3813) the "Decomposed from #N" line is left out. */
+export function renderChildIssueBody(story: Story, parentIssue?: number): string {
   const covered = parentIdsTracedBy(story);
+  const footer = [
+    ...(covered.length > 0 ? [`Covers parent criteria: ${covered.join(', ')}`, ''] : []),
+    ...(parentIssue === undefined ? [] : [`Decomposed from #${parentIssue} by the factory size gate.`]),
+  ];
   const lines: string[] = [
     '## Problem statement',
     '',
@@ -360,10 +365,7 @@ export function renderChildIssueBody(story: Story, parentIssue: number): string 
     '',
     ...story.verification.map((step) => `- ${step.command} — passes when: ${step.passWhen}`),
     '',
-    '---',
-    '',
-    ...(covered.length > 0 ? [`Covers parent criteria: ${covered.join(', ')}`, ''] : []),
-    `Decomposed from #${parentIssue} by the factory size gate.`,
+    ...(footer.length > 0 ? ['---', '', ...footer] : []),
   ];
 
   return lines.join('\n').trim();

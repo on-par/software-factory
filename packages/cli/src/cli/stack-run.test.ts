@@ -5,7 +5,7 @@ import type { RunOutcome } from '@on-par/factory-core';
 import { withSliceState, type SlicePlan } from '@on-par/factory-core/internal';
 
 import { CliExitError } from './errors.js';
-import { runIssueStack } from './stack-run.js';
+import { runIssueStack, runSliceStack } from './stack-run.js';
 
 const story = (n: number) => ({
   schemaVersion: 1 as const,
@@ -137,5 +137,19 @@ describe('runIssueStack (#3798)', () => {
 
     expect(ship).not.toHaveBeenCalled();
     expect(logged()).toContain('every slice of #7 is already built');
+  });
+});
+
+describe('runSliceStack (#3813)', () => {
+  it('prints the run-brief subject in console text and the failure message', async () => {
+    const { ship } = fakeShip(2);
+    const err = await runSliceStack({ prefix: 'run-brief', label: 'big.md', failLabel: 'brief big.md' }, undefined, {
+      readSlicePlan: async () => freshPlan(),
+      ship,
+    }).catch((e: unknown) => e);
+
+    expect(logged()).toContain('run-brief: --stack — big.md has 3 slices; building 3 in order');
+    expect(logged()).toContain('run-brief: [1/3] slice 1/3');
+    expect((err as CliExitError).message).toBe('Run failed for one or more slices of brief big.md (listed above)');
   });
 });

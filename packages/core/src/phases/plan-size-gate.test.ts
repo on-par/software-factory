@@ -1,4 +1,5 @@
 import { workKeyFromIssue } from '../work/work-key.js';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -6,6 +7,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTempDirs } from '../harness/temp-dir.js';
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
 import { ModelRouter } from '../router/index.js';
+import type { SlicePlan } from '../readiness/slice-plan.js';
+import type { SlicePlanStore } from '../readiness/slice-plan-store.js';
+import { WorkSourceRegistry } from '../work/index.js';
 import { planPhase } from './plan.js';
 import { StubModelExecutor } from './plan-test-helpers.js';
 
@@ -219,5 +223,119 @@ npm run test`;
 
     expect(result.ok).toBe(true);
     expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
+  });
+
+  describe('a brief source with a slice-plan store (#3813)', () => {
+    const slicerOutput = JSON.stringify({
+      epic: { title: 'Epic', why: 'why', doneWhen: ['done'], children: ['Story 1', 'Story 2'] },
+      stories: [1, 2].map((n) => ({
+        title: `Story ${n}`,
+        role: 'operator',
+        want: `thing ${n} works`,
+        soThat: 'value',
+        problemStatement: `Problem ${n}`,
+        inScope: [`scope ${n}`],
+        outOfScope: ['other'],
+        acceptanceCriteria: [{ name: `ac ${n}`, given: [], when: ['run'], then: ['works'] }],
+        verification: [{ command: 'npm test', passWhen: 'passes' }],
+        filesLikelyTouched: [`src/s${n}.ts`, `src/s${n}.test.ts`],
+        tracesTo: ['INT-PROBLEM-01'],
+      })),
+    });
+
+    async function runBrief(opts: { files: number; store?: SlicePlanStore; mode: 'file' | 'stack' }) {
+      const worktree = await tempDirs.make('plan-phase-test-');
+      const stub = new StubModelExecutor({
+        scripts: {
+          plan: [{ output: `---\nroute: codex\n${designYaml(opts.files, opts.files)}---\n# Spec\n` }],
+          decompose: [{ output: slicerOutput }],
+        },
+      });
+      const router = new ModelRouter(models, routes, false, stub);
+      const createComment = vi.fn().mockResolvedValue({ data: { id: 9999 } });
+      const workSources = new WorkSourceRegistry().register({
+        kind: 'local-brief',
+        resolve: async () => ({
+          id: 'local-brief:1',
+          kind: 'local-brief',
+          title: 'Big brief',
+          brief: 'Do many things.',
+          acceptanceCriteria: [],
+        }),
+      });
+      const specPath = join(worktree, 'brief-9000077.md');
+      const logs: string[] = [];
+      const result = await planPhase({
+        // A brief's run number is a stand-in in the reserved 9,000,000+ range.
+        issue: workKeyFromIssue(9_000_077),
+        repo: 'on-par/software-factory',
+        worktree,
+        specPath,
+        router,
+        constitution: null,
+        octokit: { rest: { issues: { createComment } } } as any,
+        log: (_type, msg) => logs.push(msg),
+        workSources,
+        workSource: { kind: 'local-brief', params: {} },
+        sizeGateMode: opts.mode,
+        slicePlanStore: opts.store,
+        sizeBudget: { tokenBudget: 1_000_000, maxFiles: 12 },
+      });
+      return { result, stub, createComment, specPath, logs };
+    }
+
+    const memoryStore = () => {
+      const saved: SlicePlan[] = [];
+      const store: SlicePlanStore = {
+        find: async () => (saved[0] ? { status: 'found', plan: saved[0], where: 'mem' } : { status: 'not-found' }),
+        save: async (plan) => {
+          saved.push(plan);
+          return { where: 'mem' };
+        },
+      };
+      return { store, saved };
+    };
+
+    it('a brief source with a slice-plan store in stack mode slices an over-budget plan and records it in the store', async () => {
+      const { store, saved } = memoryStore();
+      const { result, stub, createComment } = await runBrief({ files: 13, store, mode: 'stack' });
+
+      expect(result.ok).toBe(false);
+      expect(result.sliced).toEqual({ sliceCount: 2 });
+      expect(stub.calls.map((c) => c.task)).toEqual(['plan', 'decompose']);
+      expect(saved).toHaveLength(1);
+      expect(saved[0]?.slices).toHaveLength(2);
+      expect(createComment).not.toHaveBeenCalled();
+    });
+
+    it('a brief source within budget in stack mode does not slice', async () => {
+      const { store, saved } = memoryStore();
+      const { result, stub } = await runBrief({ files: 3, store, mode: 'stack' });
+
+      expect(result.ok).toBe(true);
+      expect(stub.calls.map((c) => c.task)).toEqual(['plan']);
+      expect(saved).toEqual([]);
+    });
+
+    it('a brief slice is planned with no stand-in run number in its issue body or slice label', async () => {
+      const { store } = memoryStore();
+      await runBrief({ files: 13, store, mode: 'stack' });
+      const { result, stub, specPath, logs } = await runBrief({ files: 3, store, mode: 'stack' });
+
+      expect(result.slice?.index).toBe(1);
+      const planned = [...stub.calls.map((c) => c.prompt), readFileSync(specPath, 'utf8')].join('\n');
+      const body = /<untrusted-issue-body>\n([\s\S]*?)\n<\/untrusted-issue-body>/.exec(planned)?.[1] ?? '';
+      expect(body).toContain('Problem 1');
+      expect(body).not.toMatch(/9000077|#9\d/);
+      expect(logs).toContain('planning slice 1/2: Story 1');
+    });
+
+    it('file mode without a store is not gated', async () => {
+      const { result, stub, createComment } = await runBrief({ files: 13, mode: 'file' });
+
+      expect(result.ok).toBe(true);
+      expect(stub.calls.map((c) => c.task)).toEqual(['plan']);
+      expect(createComment).not.toHaveBeenCalled();
+    });
   });
 });

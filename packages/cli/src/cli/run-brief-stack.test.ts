@@ -1,14 +1,19 @@
 // `factory run-brief a.md b.md --stack` (#3763): brief N+1 bases on brief N's PR head branch.
-import { writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+import { shipPhase as realShipPhase } from '@on-par/factory-core';
+import { fileSlicePlanStore, nextStackSlice, withSliceState, type SlicePlan } from '@on-par/factory-core/internal';
 
 import {
   errored,
   h,
   installShipHarness,
   logged,
+  paths,
   phases,
   runMainWith,
   setupWorktree,
@@ -118,5 +123,192 @@ describe('run-brief --stack (#3763)', () => {
     expect(res).toEqual({ exited: true, code: 2 });
     expect(errored()).toContain('--stack needs factory worktrees and PRs');
     expect(phases.planPhase).not.toHaveBeenCalled();
+  });
+});
+
+const story = (n: number) => ({
+  schemaVersion: 1 as const,
+  kind: 'story' as const,
+  filesLikelyTouched: [],
+  labels: [],
+  title: `Story ${n}`,
+  role: 'operator',
+  want: `thing ${n} works`,
+  soThat: 'value',
+  problemStatement: `Problem ${n}`,
+  inScope: [`Scope ${n}`],
+  outOfScope: ['Persistent storage'],
+  acceptanceCriteria: [{ name: `ac ${n}`, given: [], when: ['run'], then: ['works'] }],
+  verification: [{ command: 'npm test', passWhen: 'passes' }],
+  tracesTo: ['INT-PROBLEM-01'],
+});
+const threeSlices = (issue: number): SlicePlan => ({
+  issue,
+  slices: [1, 2, 3].map((n) => ({ index: n, title: `S${n}`, story: story(n) as never, state: 'pending' as const })),
+});
+
+/** Worktrees are real git repos so core's slice-branch checkout works; every branch and start point gets an origin ref. */
+function realGitWorktrees(): void {
+  const git = (cwd: string, ...args: string[]) =>
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, stdio: 'ignore' });
+  const known = new Set<string>(['origin/main']);
+  h.setupWorktreeImpl = async (_repoRoot, branch, worktree, startPoint) => {
+    mkdirSync(worktree, { recursive: true });
+    if (!existsSync(join(worktree, '.git'))) {
+      git(worktree, 'init', '-q');
+      git(worktree, 'commit', '-q', '--allow-empty', '-m', 'init');
+    }
+    known.add(`origin/${branch}`);
+    if (startPoint !== undefined) known.add(startPoint);
+    for (const ref of known) {
+      git(worktree, 'update-ref', `refs/remotes/${ref}`, 'HEAD');
+      git(worktree, 'update-ref', `refs/heads/${ref.replace(/^origin\//, '')}`, 'HEAD');
+    }
+  };
+}
+
+/** planPhase double: with no stored plan it slices the brief into three (saving the plan to the injected
+ *  store); with one it plans the lowest pending slice, as the real pre-PLAN stack gate does. */
+function fakeSlicingPlan(seed?: (issue: number) => SlicePlan) {
+  phases.planPhase.mockImplementation(async (opts: any) => {
+    const store = opts.slicePlanStore;
+    const issue = Number(opts.issue);
+    const found = await store.find();
+    if (found.status === 'not-found') {
+      await store.save(seed ? seed(issue) : threeSlices(issue));
+      return {
+        ok: false,
+        route: 'claude',
+        specPath: opts.specPath,
+        model: '',
+        escalate: 'plan scope exceeds the bounded-build budget — sliced into 3 slice(s)',
+        designArtifact: null,
+        sliced: { sliceCount: 3 },
+      } as any;
+    }
+    const next = nextStackSlice(found.plan);
+    return { ok: true, route: 'claude', slice: { plan: found.plan, index: next!.index } } as any;
+  });
+}
+
+/** shipPhase double that runs the real core shipPhase on stubbed git; records what reaches the GitHub PR API,
+ *  including the parent-PR body edits the stack recorder makes through the run's octokit. */
+function recordPrWrites() {
+  const writes: string[] = [];
+  const opened: { number: number; head: string }[] = [];
+  const octokit = {
+    graphql: async () => ({ markPullRequestReadyForReview: { pullRequest: { isDraft: false } } }),
+    rest: {
+      pulls: {
+        list: async ({ head }: any) => ({ data: opened.filter((pr) => head === `on-par:${pr.head}`) }),
+        create: async ({ title, body, head }: any) => {
+          writes.push(title, body);
+          opened.push({ number: 100 + opened.length, head });
+          return { data: { number: opened.at(-1)!.number } };
+        },
+        get: async () => ({ data: { draft: true, node_id: 'PR_1' } }),
+      },
+      issues: { createComment: async () => ({ data: { id: 1 } }) },
+      checks: { listForRef: async () => ({ data: { check_runs: [] } }) },
+    },
+  };
+  const sha = 'a'.repeat(40);
+  const run = async (cmd: string) => {
+    if (cmd === 'git rev-parse HEAD') return { stdout: `${sha}\n` };
+    const remote = /^git ls-remote --heads origin '(.+)'$/.exec(cmd);
+    if (remote) return { stdout: `${sha}\trefs/heads/${remote[1]}\n` };
+    if (cmd.startsWith('git rev-list --count')) return { stdout: '1\n' };
+    if (cmd.startsWith('git diff --quiet')) throw new Error('trees differ');
+    return { stdout: '' };
+  };
+  phases.shipPhase.mockImplementation(async (opts) =>
+    realShipPhase({ ...opts, octokit: octokit as any, run, watchCI: false }),
+  );
+  h.octokit.rest.pulls.update = vi.fn(async ({ body }: any) => writes.push(body));
+  return writes;
+}
+
+describe('run-brief <file> --stack with a single brief (#3813)', () => {
+  it("a single oversized brief with --stack slices it and builds every slice on the previous slice's PR head", async () => {
+    realGitWorktrees();
+    fakeSlicingPlan();
+    const res = await runMain('run-brief', writeBrief('big'), '--stack');
+    expect(errored()).toBe('');
+
+    expect(res.exited).toBe(false);
+    const sizes = phases.planPhase.mock.calls.map((c) => (c[0] as any).sizeGateMode);
+    expect(sizes).toEqual(['stack', 'stack', 'stack', 'stack']);
+    const stores = phases.planPhase.mock.calls.map((c) => (c[0] as any).slicePlanStore);
+    expect(new Set(stores).size).toBe(1);
+    expect(stores[0]).toBeDefined();
+    const ships = phases.shipPhase.mock.calls.map((c) => c[0] as any);
+    expect(ships.map((o) => o.branch)).toEqual([1, 2, 3].map((k) => expect.stringMatching(new RegExp(`-slice-${k}$`))));
+    expect(ships.map((o) => o.stack.base)).toEqual(['main', ships[0].branch, ships[1].branch]);
+    expect(existsSync(join(paths().state, 'slice-plans'))).toBe(true);
+    expect(logged()).toContain('run-brief: --stack — sizing');
+    expect(logged()).toContain('3/3 slices succeeded');
+    expect(errored()).toBe('');
+  });
+
+  it('a re-run of a stacked brief reads the stored slice plan and builds only pending slices', async () => {
+    const file = writeBrief('big');
+    realGitWorktrees();
+    fakeSlicingPlan();
+    await runMain('run-brief', file, '--stack');
+    const [dir] = [join(paths().state, 'slice-plans')];
+    const planFile = join(dir, readdirSync(dir)[0]!);
+    const store = fileSlicePlanStore(planFile);
+    const stored = await store.find();
+    if (stored.status !== 'found') throw new Error('plan missing');
+    await store.save(withSliceState(threeSlices(stored.plan.issue), 1, 'pr-open', 101, 'factory/slice-1'));
+    phases.planPhase.mockClear();
+    setupWorktree.mockClear();
+    phases.shipPhase.mockClear();
+
+    const res = await runMain('run-brief', file, '--stack');
+
+    expect(errored()).toBe('');
+    expect(res.exited).toBe(false);
+    expect(phases.planPhase).toHaveBeenCalledTimes(2);
+    const ships = phases.shipPhase.mock.calls.map((c) => c[0] as any);
+    expect(ships.map((o) => o.stack.index)).toEqual([2, 3]);
+    expect(ships[0].stack.base).toBe('factory/slice-1');
+    expect(logged()).toContain('building 2 in order');
+  });
+
+  it('a single brief within budget with --stack ships one PR and writes no slice plan', async () => {
+    const res = await runMain('run-brief', writeBrief('small'), '--stack');
+
+    expect(errored()).toBe('');
+    expect(res.exited).toBe(false);
+    expect((phases.planPhase.mock.calls[0]![0] as any).sizeGateMode).toBe('stack');
+    expect(phases.shipPhase).toHaveBeenCalledTimes(1);
+    expect(existsSync(join(paths().state, 'slice-plans'))).toBe(false);
+  });
+
+  it("no brief slice's PR title or body carries the brief's stand-in run number", async () => {
+    realGitWorktrees();
+    fakeSlicingPlan();
+    const writes = recordPrWrites();
+
+    const res = await runMain('run-brief', writeBrief('big'), '--stack');
+
+    expect(errored()).toBe('');
+    expect(res.exited).toBe(false);
+    const ships = phases.shipPhase.mock.calls.map((c) => c[0] as any);
+    expect(ships.map((o) => String(o.issue))).toEqual(Array(3).fill(expect.stringMatching(/^9\d{6}$/)));
+    expect(writes).toHaveLength(6); // a title and a body per slice PR; no parent-PR body edits
+    expect(writes[0]).toBe('Add big');
+    for (const text of writes) expect(text).not.toMatch(/9\d{6}|#9/);
+  });
+
+  it('several briefs with --stack keep one brief per slice with the size gate off and no slice-plan store', async () => {
+    await runMain('run-brief', writeBrief('alpha'), writeBrief('beta'), '--stack');
+
+    for (const call of phases.planPhase.mock.calls) {
+      expect((call[0] as any).sizeGateMode).toBe('off');
+      expect((call[0] as any).slicePlanStore).toBeUndefined();
+    }
+    expect(phases.planPhase).toHaveBeenCalledTimes(2);
   });
 });

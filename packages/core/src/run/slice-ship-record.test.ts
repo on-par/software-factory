@@ -85,4 +85,44 @@ describe('recordShippedSlice', () => {
     expect(await result).toContain('recording it in the slice plan comment failed');
     expect(issues.listComments).not.toHaveBeenCalled();
   });
+
+  function runWithStore(save: () => Promise<{ where: string }>) {
+    const { octokit, issues } = fakeOctokit();
+    const log = vi.fn();
+    const result = recordShippedSlice({
+      octokit,
+      repo: 'o/r',
+      key: toWorkKey('brief-1'),
+      branch: 'b',
+      plan,
+      index: 1,
+      ship: { prNumber: 7 },
+      stackMode: false,
+      store: { find: vi.fn(), save },
+      log,
+    });
+    return { result, issues, log };
+  }
+
+  it('saves through an injected store, leaves GitHub comments alone and logs the slice plan file', async () => {
+    const save = vi.fn(async () => ({ where: 'plan.md' }));
+    const { result, issues, log } = runWithStore(save);
+    expect(await result).toBeUndefined();
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ slices: expect.any(Array) }));
+    expect(issues.createComment).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith('ship', expect.stringMatching(/in the slice plan file$/));
+  });
+
+  it('names the slice plan file when saving to an injected store fails', async () => {
+    const { result } = runWithStore(async () => {
+      throw new Error('disk full');
+    });
+    expect(await result).toBe('slice 1/2 PR #7 opened but recording it in the slice plan file failed: disk full');
+  });
+
+  it('names the slice plan comment in the issue log line', async () => {
+    const { result, log } = run(workKeyFromIssue(42), { prNumber: 7 });
+    await result;
+    expect(log).toHaveBeenCalledWith('ship', expect.stringMatching(/in the slice plan comment$/));
+  });
 });

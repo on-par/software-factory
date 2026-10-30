@@ -22,7 +22,8 @@ import {
 } from './slice-plan.js';
 import type { Slice, SlicePlan } from './slice-plan.js';
 import type { SliceOverlap } from './slice-overlap.js';
-import { findSlicePlanComment, upsertSlicePlanComment } from './slice-plan-github.js';
+import { issueCommentSlicePlanStore } from './slice-plan-store.js';
+import type { SlicePlanStore } from './slice-plan-store.js';
 
 export type SliceGateOutcome =
   | { kind: 'none' }
@@ -106,6 +107,8 @@ export async function resolveSliceGate(deps: {
   sliceIndex?: number;
   /** ADR-0161 stack mode: plan the lowest pending slice once the slice below has a PR. */
   stack?: boolean;
+  /** Where the slice plan lives; defaults to the issue's slice-plan comment (#3813). */
+  store?: SlicePlanStore;
   worktree: string;
   router: ModelRouter;
   octokit: Octokit;
@@ -116,9 +119,10 @@ export async function resolveSliceGate(deps: {
   const { issue, repo, octokit, log } = deps;
   const reasonText = deps.sizeReason ?? 'too big';
 
-  let lookup: Awaited<ReturnType<typeof findSlicePlanComment>>;
+  const store = deps.store ?? issueCommentSlicePlanStore({ octokit, repo, issue });
+  let lookup: Awaited<ReturnType<SlicePlanStore['find']>>;
   try {
-    lookup = await findSlicePlanComment({ octokit, repo, issue });
+    lookup = await store.find();
   } catch (error) {
     return { kind: 'park', reason: `slice plan lookup failed: ${errorDetail(error)}` };
   }
@@ -126,7 +130,7 @@ export async function resolveSliceGate(deps: {
   if (lookup.status === 'invalid') {
     return {
       kind: 'park',
-      reason: `slice plan comment ${lookup.commentId} on #${issue} is unreadable (${lookup.error}) — parked`,
+      reason: `slice plan ${lookup.where} is unreadable (${lookup.error}) — parked`,
     };
   }
   if (lookup.status === 'found') {
@@ -181,9 +185,9 @@ export async function resolveSliceGate(deps: {
     };
   }
 
-  let upserted: Awaited<ReturnType<typeof upsertSlicePlanComment>>;
+  let saved: Awaited<ReturnType<SlicePlanStore['save']>>;
   try {
-    upserted = await upsertSlicePlanComment({ octokit, repo, issue, plan: built.plan });
+    saved = await store.save(built.plan);
   } catch (error) {
     return { kind: 'park', reason: `posting the slice plan failed: ${errorDetail(error)}` };
   }
@@ -196,7 +200,7 @@ export async function resolveSliceGate(deps: {
   }
   log(
     'size-gate-sliced',
-    `issue exceeds the size gate (${reasonText}) — sliced into ${built.plan.slices.length} slice(s), slice plan comment ${upserted.commentId}`,
+    `issue exceeds the size gate (${reasonText}) — sliced into ${built.plan.slices.length} slice(s), slice plan ${saved.where}`,
   );
   const selected = selectForGate(built.plan, deps);
   if (selected.kind !== 'slice') return selected;

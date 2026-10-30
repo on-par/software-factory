@@ -40,7 +40,7 @@ import {
 } from '@on-par/factory-core';
 import { shipHostBuildSlot } from './host-slot.js';
 import { claimReworkRequests } from './ship-review-rework.js';
-import type { CheckResumeRecord, WorktreeSandbox } from '@on-par/factory-core/internal';
+import type { CheckResumeRecord, SlicePlanStore, WorktreeSandbox } from '@on-par/factory-core/internal';
 import {
   createCheckResumeStore,
   createGithubLaneClaimStalenessProbe,
@@ -129,6 +129,8 @@ async function shipIssueFrom(
     /** Aborts when the lane loses this issue's claim lease (#3146); becomes RunPorts.claimSignal. */
     signal?: AbortSignal;
     rebuild?: { branch: string }; // #3325: a fresh branch off origin/main, built from the frozen spec with no PLAN
+    /** Run-state slice-plan store for a stacked brief (#3813); becomes RunPorts.slicePlanStore. */
+    slicePlanStore?: SlicePlanStore;
   },
   deps: Pick<
     CliDeps,
@@ -413,6 +415,7 @@ async function shipIssueFrom(
     laneClaimStaleness: createGithubLaneClaimStalenessProbe({ octokit, branchPrefix: policy.effective.branchPrefix }),
     recordPhase: phaseRecorder(paths.runs, issueNum),
     claimSignal: ctx?.signal,
+    ...(ctx?.slicePlanStore ? { slicePlanStore: ctx.slicePlanStore } : {}),
     recordRunState: runStateRecorder(paths.runs, {
       issue: issueNum,
       lane: lane ?? '',
