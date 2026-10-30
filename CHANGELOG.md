@@ -9,7 +9,7 @@ section to `## X.Y.Z - date`. See
 
 ## 0.9.25 - 2026-10-30
 
-One stack engine for `run-issue` and `run-brief` (`--size-gate` takes `off` or `stack`, `file` and `slice` are deprecated aliases for `stack`, and `--run-children` is removed), PR bodies whose risk receipt no longer lists changed paths or internal plan names, and Codex running with no sandbox by default (#3832, #3825, #3824).
+One stack engine for `run-issue` and `run-brief` (`--size-gate` takes `off` or `stack`, `file` and `slice` are deprecated aliases for `stack`, and `--run-children` is removed), PR bodies whose risk receipt no longer lists changed paths or internal plan names, and Codex running with no sandbox by default (#3832, #3817, #3824).
 All seven published `@on-par` packages move to 0.9.25 in lockstep.
 Install or update with `npm install -g @on-par/factory-cli@latest`.
 
@@ -28,13 +28,14 @@ Install or update with `npm install -g @on-par/factory-cli@latest`.
 - Codex now runs with --sandbox danger-full-access by default, like Claude; set sandbox.codexSandbox: workspace-write to keep Codex's own sandbox (#3824).
 - The size gate defaults to stack; `file` and `slice` (config or `--size-gate`) are deprecated aliases for stack that print one warning, and `run-issue --run-children` was removed and exits 2 (#3832).
 - PR receipts and verification summaries omit paths and plan evidence, and Proof reports TypeScript net line counts (#3817).
-- core: trim unused `@on-par/factory-core/internal` re-exports for utils, worktree, config, models and router (#3784).
 
 ### Removed
 
 - `@on-par/factory-core/internal` no longer re-exports 99 unused daemon and usage names, and the unused usage coordinator, grant ledger, lane scheduler, engine supervisor and run-repo modules are deleted (#3780).
 - `@on-par/factory-core/internal` no longer re-exports 112 unused queue, local-small and land names, and the unused prerequisite-order module, local-small patch step and ProjectV2 board poller are deleted (#3782).
 - `@on-par/factory-core/internal` no longer re-exports 64 unused filing, projects and garden names, and the unused ProjectV2 GraphQL poller module and filing-policy evaluator are deleted (#3783).
+- core: trim unused `@on-par/factory-core/internal` re-exports for utils, worktree, config, models and router (#3784).
+- `@on-par/factory-core/internal` no longer re-exports 89 unused harness, phases and readiness names (#3785).
 - `@on-par/factory-core/internal` no longer re-exports 113 unused run, environment, admission, types, metrics, design, failure, hosted, eval, sandbox, kpis, events, blockers and CI names, and the unused token-coverage module is deleted (#3786).
 
 ## 0.9.24 - 2026-10-29
