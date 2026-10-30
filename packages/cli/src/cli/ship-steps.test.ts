@@ -128,32 +128,6 @@ it('retains runtime none for harnesses while --no-sandbox still disables it', ()
   consoleError.mockRestore();
 });
 
-it('finishOutcome returns the branch without throwing for a stack-wait release (#3367)', () => {
-  const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
-  try {
-    const branch = finishOutcome({
-      outcome: {
-        state: 'released',
-        reason: 'stack-wait',
-        branch: 'factory/9-slice-2',
-        reworkRounds: 0,
-        prNumber: 101,
-        slice: { index: 1, count: 3 },
-      },
-      opts: {},
-      paths: getFactoryPaths('/tmp/primary', '/tmp/relocated-factory'),
-      issueNum: 9,
-      worktree: '/tmp/wt',
-      terminalMessage: undefined,
-      log: () => {},
-    });
-    expect(branch).toBe('factory/9-slice-2');
-    expect(spy.mock.calls.join('\n')).toContain('waiting for approval or merge of slice 1/3 PR #101');
-  } finally {
-    spy.mockRestore();
-  }
-});
-
 it('finishOutcome returns the branch without throwing for a file-overlap release (#3576)', () => {
   const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
   try {

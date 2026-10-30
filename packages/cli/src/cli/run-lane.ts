@@ -272,13 +272,6 @@ export async function runLane(
             });
       landBranch = branch;
       const shipped = sliceOutcome.value;
-      if (shipped?.state === 'released' && shipped.reason === 'stack-wait') {
-        // ADR-0161: the slice below awaits review, so release the issue and do not park (#3367).
-        awaitingReview++;
-        streak = null;
-        await settle(issue, 'queued');
-        continue;
-      }
       if (shipped?.state === 'released' && shipped.reason === 'file-overlap') {
         // #3576: another live lane owns a file this issue touches; re-queue it, never park.
         streak = null;

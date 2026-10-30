@@ -216,26 +216,6 @@ describe('runIssue — stack mode builds one slice per run (ADR-0161)', () => {
     expect(shipPhase.mock.calls[1]![0].stack).toMatchObject({ index: 2, base: 'main' });
   });
 
-  it("releases without branching while slice 1's PR waits for review, and the slice plan says so (#3367)", async () => {
-    const { ports, createSliceBranch, bodies } = stackSetup();
-    await runIssue(baseRequest(), policy, ports);
-    planPhase.mockReset().mockResolvedValue({
-      ok: false,
-      route: 'codex',
-      specPath: '/tmp/wt/spec.md',
-      model: '',
-      escalate: 'slice 2/3 of #1 waits for approval or merge of slice 1/3 PR #101',
-      designArtifact: null,
-      stackWait: { index: 1, count: 3, prNumber: 101 },
-    });
-    const outcome = await runIssue(baseRequest(), policy, ports);
-
-    expect(outcome).toMatchObject({ state: 'released', reason: 'stack-wait', prNumber: 101 });
-    expect(createSliceBranch).toHaveBeenCalledTimes(1);
-    expect(buildPhase).toHaveBeenCalledTimes(1);
-    expect(bodies.at(-1)).toContain('PR open #101 — waiting for approval or merge before slice 2');
-  });
-
   it('parks over-cap through the gate and builds no slice', async () => {
     const { ports } = stackSetup();
     planPhase.mockImplementation(async () => ({

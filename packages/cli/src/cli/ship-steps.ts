@@ -258,16 +258,6 @@ export function finishOutcome({
     return outcome.branch;
   }
 
-  if (outcome.state === 'released' && outcome.reason === 'stack-wait') {
-    console.log(
-      styleText(
-        'yellow',
-        `⏸ Issue #${issueNum} → waiting for approval or merge of slice ${outcome.slice.index}/${outcome.slice.count} PR #${outcome.prNumber}; released, not parked`,
-      ),
-    );
-    return outcome.branch ?? '';
-  }
-
   if (outcome.state === 'released' && outcome.reason === 'file-overlap') {
     console.log(
       styleText(
