@@ -36,8 +36,8 @@ describe('run-issue --stack (#3798)', () => {
     expect(errored().replace(first, '')).toContain('--stack opens a PR per slice');
   });
 
-  it('--stack --size-gate file exits 2', async () => {
-    const res = await runMain('run-issue', '5', '--stack', '--size-gate', 'file');
+  it('--stack --size-gate off exits 2', async () => {
+    const res = await runMain('run-issue', '5', '--stack', '--size-gate', 'off');
 
     expect(res).toEqual({ exited: true, code: 2 });
     expect(errored()).toContain('--stack is --size-gate stack');

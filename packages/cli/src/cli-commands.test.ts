@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { eventSegmentFileName, eventSegmentsDir } from '@on-par/factory-core/internal';
-import { describe, expect, it, vi, afterEach } from 'vitest';
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
 
 import { FACTORYD_LABEL, factorydFiles } from './cli/daemon.js';
 import { HELP_GROUPS, OTHER_GROUP } from './cli/help-groups.js';
@@ -1087,22 +1087,57 @@ describe('cli commands (via main dispatch)', () => {
         expect(enforced()).toBe(false);
       });
 
-      it('--size-gate file beats an off config', async () => {
-        h.factoryConfig = { ...h.factoryConfig, sizeGate: { mode: 'off' } };
-        await runMain('run-issue', '5', '--size-gate', 'file');
-        expect(enforced()).toBe(true);
-      });
-
-      it('--size-gate slice passes sizeGateMode slice to planPhase', async () => {
-        await runMain('run-issue', '5', '--size-gate', 'slice');
-        expect(phases.planPhase.mock.calls.at(-1)?.[0].sizeGateMode).toBe('slice');
-      });
-
-      it('sizeGate.mode slice in the config passes sizeGateMode slice to planPhase', async () => {
-        h.factoryConfig = { ...h.factoryConfig, sizeGate: { mode: 'slice' } };
+      it('an unset sizeGate.mode passes sizeGateMode stack to planPhase', async () => {
         await runMain('run-issue', '5');
-        expect(phases.planPhase.mock.calls.at(-1)?.[0].sizeGateMode).toBe('slice');
+        expect(phases.planPhase.mock.calls.at(-1)?.[0].sizeGateMode).toBe('stack');
       });
+
+      const stubStack = () => {
+        h.octokit.request = vi.fn().mockResolvedValue({ data: [] });
+        h.octokit.rest.issues.listComments.mockResolvedValue({ data: [] });
+      };
+      let warnSpy: ReturnType<typeof vi.spyOn>;
+      beforeEach(() => {
+        warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      });
+      afterEach(() => warnSpy.mockRestore());
+      const deprecationLines = () =>
+        warnSpy.mock.calls.map((c: unknown[]) => c.join(' ')).filter((l: string) => l.includes('deprecated'));
+
+      it.each(['file', 'slice'])(
+        '--size-gate %s prints one deprecation line naming --stack and runs as --stack',
+        async (mode) => {
+          stubStack();
+          await runMain('run-issue', '5', '--size-gate', mode);
+          expect(deprecationLines()).toHaveLength(1);
+          expect(deprecationLines()[0]).toContain('--stack');
+          expect(phases.planPhase.mock.calls.at(-1)?.[0].sizeGateMode).toBe('stack');
+        },
+      );
+
+      it('--size-gate off skips the size gates with no deprecation line', async () => {
+        await runMain('run-issue', '5', '--size-gate', 'off');
+        expect(enforced()).toBe(false);
+        expect(deprecationLines()).toHaveLength(0);
+      });
+
+      it('--size-gate stack runs as --stack with no deprecation line', async () => {
+        stubStack();
+        await runMain('run-issue', '5', '--size-gate', 'stack');
+        expect(phases.planPhase.mock.calls.at(-1)?.[0].sizeGateMode).toBe('stack');
+        expect(deprecationLines()).toHaveLength(0);
+      });
+
+      it.each(['file', 'slice'])(
+        'sizeGate.mode %s in the config prints one deprecation line and passes sizeGateMode stack to planPhase',
+        async (mode) => {
+          h.factoryConfig = { ...h.factoryConfig, sizeGate: { mode } };
+          await runMain('run-issue', '5');
+          expect(deprecationLines()).toHaveLength(1);
+          expect(deprecationLines()[0]).toContain('--stack');
+          expect(phases.planPhase.mock.calls.at(-1)?.[0].sizeGateMode).toBe('stack');
+        },
+      );
 
       it('sizeGate.mode stack in the config passes sizeGateMode stack to planPhase', async () => {
         h.factoryConfig = { ...h.factoryConfig, sizeGate: { mode: 'stack' } };
@@ -1111,7 +1146,7 @@ describe('cli commands (via main dispatch)', () => {
       });
 
       it('--max-slices 6 passes maxSlices 6 to planPhase (ADR-0156)', async () => {
-        await runMain('run-issue', '5', '--size-gate', 'slice', '--max-slices', '6');
+        await runMain('run-issue', '5', '--max-slices', '6');
         expect(phases.planPhase.mock.calls.at(-1)?.[0].maxSlices).toBe(6);
       });
 
@@ -1159,25 +1194,6 @@ describe('cli commands (via main dispatch)', () => {
       });
     });
 
-    it('--help lists --run-children with its one-line description (#1750)', async () => {
-      const originalWrite = process.stdout.write;
-      const written: string[] = [];
-      process.stdout.write = ((chunk: string | Uint8Array) => {
-        written.push(String(chunk));
-        return true;
-      }) as typeof process.stdout.write;
-      let res: Awaited<ReturnType<typeof runMain>>;
-      try {
-        res = await runMain('run-issue', '--help');
-      } finally {
-        process.stdout.write = originalWrite;
-      }
-      expect(res.exited).toBe(true);
-      const text = written.join('').replace(/\s+/g, ' ');
-      expect(text).toContain('--run-children');
-      expect(text).toContain('File mode only: when the size gate files child issues, run them');
-    });
-
     it('names the branch with the default factory prefix when --branch-prefix is omitted', async () => {
       const branches: string[] = [];
       h.setupWorktreeImpl = async (_r, branch) => {
@@ -1198,181 +1214,33 @@ describe('cli commands (via main dispatch)', () => {
       expect(calls[0][0]).toEqual('sf/5-fix-the-bug');
       expect(calls[0][1]).toContain('-factory-sf-');
     });
-    it('names the child issues and suggests --run-children when the size gate decomposes the issue', async () => {
+    it('names the child issues and points at --stack when the size gate decomposes the issue', async () => {
       h.planResult = { ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: [10, 11] } };
       const res = await runMain('run-issue', '5');
       expect(res).toMatchObject({ exited: true, code: 1 });
       expect(errored()).toContain('#10');
       expect(errored()).toContain('#11');
-      expect(errored()).toContain('--run-children');
+      expect(errored()).toContain('--stack');
+      expect(errored()).not.toContain('--run-children');
       expect(phases.planPhase).toHaveBeenCalledTimes(1);
       expect(phases.buildPhase).not.toHaveBeenCalled();
       expect(phases.shipPhase).not.toHaveBeenCalled();
     });
 
-    it('accepts --run-children and ships a non-decomposed issue exactly as without it', async () => {
-      const res = await runMain('run-issue', '5', '--run-children');
-      expect(res.exited).toBe(false);
-      expect(logged()).toContain('PR #99 ready for review');
-      expect(phases.planPhase).toHaveBeenCalledTimes(1);
-      expect(phases.buildPhase).toHaveBeenCalledTimes(1);
-      expect(phases.checkPhase).toHaveBeenCalledTimes(1);
-      expect(phases.shipPhase).toHaveBeenCalledTimes(1);
-    });
-
-    describe('--run-children', () => {
-      const decompose = (children: number[]) =>
-        ({ ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: children } }) as any;
-
-      it('runs children in order, prints the summary, takes no labels/merge, and holds the lock', async () => {
-        const { existsSync } = await import('node:fs');
-        const childLocks = [10, 11].map((n) => join(paths().state, 'locks', 'run', String(n)));
-        writeFileSync(paths().queue, 'app 7\n');
-        const lockSeen: boolean[] = [];
-        const recordLock = async () => {
-          lockSeen.push(existsSync(childLocks[lockSeen.length] as string));
-          return h.planResult;
-        };
-        phases.planPhase
-          .mockImplementationOnce(async () => decompose([10, 11]))
-          .mockImplementationOnce(recordLock)
-          .mockImplementationOnce(recordLock);
-        phases.shipPhase
-          .mockResolvedValueOnce({ ok: true, prNumber: 101 } as any)
-          .mockResolvedValueOnce({ ok: true, prNumber: 102 } as any);
-        h.octokit.rest.issues.addLabels = vi.fn(async () => ({}));
-
-        const res = await runMain('run-issue', '5', '--run-children');
-
-        expect(res.exited).toBe(false);
-        const issues = h.octokit.rest.issues.get.mock.calls.map((c: any[]) => c[0].issue_number);
-        expect(issues.slice(0, 3)).toEqual([5, 10, 10]);
-        expect(phases.planPhase).toHaveBeenCalledTimes(3);
-        expect(phases.buildPhase).toHaveBeenCalledTimes(2);
-        expect(phases.checkPhase).toHaveBeenCalledTimes(2);
-        expect(phases.shipPhase).toHaveBeenCalledTimes(2);
-        expect(h.octokit.rest.issues.addLabels).not.toHaveBeenCalled();
-        expect(h.octokit.rest.pulls.merge).not.toHaveBeenCalled();
-        expect(readFileSync(paths().queue, 'utf-8')).toBe('app 7\n');
-        expect(logged()).toContain('#10 → PR #101 ready for review');
-        expect(logged()).toContain('#11 → PR #102 ready for review');
-        expect(logged()).toContain('2/2 children ready for review');
-        expect(lockSeen).toEqual([true, true]);
-        expect(childLocks.some((l) => existsSync(l))).toBe(false);
+    describe('--run-children (removed)', () => {
+      const removedMessage = '--run-children was removed; oversized issues stack with --stack';
+      it.each([
+        ['', []],
+        ['with --no-pr', ['--no-pr']],
+        ['with --base-branch', ['--base-branch', 'main']],
+      ])('--run-children %s exits 2 with the removal message before any worktree or PR', async (_name, extra) => {
+        const res = await runMain('run-issue', '5', '--run-children', ...(extra as string[]));
+        expect(res).toEqual({ exited: true, code: 2 });
+        expect(errored()).toContain(removedMessage);
+        expect(setupWorktree).not.toHaveBeenCalled();
+        expect(phases.planPhase).not.toHaveBeenCalled();
+        expect(phases.shipPhase).not.toHaveBeenCalled();
       });
-
-      it('continues past a failed child and exits 1', async () => {
-        phases.planPhase.mockImplementationOnce(async () => decompose([10, 11, 12]));
-        phases.shipPhase
-          .mockResolvedValueOnce({ ok: true, prNumber: 101 } as any)
-          .mockResolvedValueOnce({ ok: false } as any)
-          .mockResolvedValueOnce({ ok: true, prNumber: 112 } as any);
-        const res = await runMain('run-issue', '5', '--run-children');
-        expect(res).toMatchObject({ exited: true, code: 1 });
-        expect(logged()).toContain('#11 → failed');
-        expect(logged()).toContain('#12 → PR #112 ready for review');
-        expect(logged()).toContain('2/3 children ready for review');
-        expect(phases.planPhase).toHaveBeenCalledTimes(4);
-      });
-
-      it('an escalated child does not stop later children', async () => {
-        phases.planPhase
-          .mockImplementationOnce(async () => decompose([10, 11]))
-          .mockImplementationOnce(async () => ({ ok: false, route: 'claude', escalate: 'needs human' }) as any);
-        phases.shipPhase.mockResolvedValueOnce({ ok: true, prNumber: 111 } as any);
-        const res = await runMain('run-issue', '5', '--run-children');
-        expect(res).toMatchObject({ exited: true, code: 1 });
-        expect(logged()).toContain('#10 → failed');
-        expect(logged()).toContain('#11 → PR #111 ready for review');
-      });
-
-      it('stops starting children once .factory/STOP appears, and leaves STOP in place', async () => {
-        const stopPath = join(paths().state, 'STOP');
-        phases.planPhase.mockImplementationOnce(async () => decompose([10, 11]));
-        phases.shipPhase.mockImplementationOnce(async () => {
-          writeFileSync(stopPath, '');
-          return { ok: true, prNumber: 110 } as any;
-        });
-        const res = await runMain('run-issue', '5', '--run-children');
-        expect(res).toMatchObject({ exited: true, code: 1 });
-        expect(phases.shipPhase).toHaveBeenCalledTimes(1);
-        expect(phases.planPhase).toHaveBeenCalledTimes(2);
-        expect(logged()).toContain('#10 → PR #110 ready for review');
-        expect(logged()).toContain('#11 → not run: .factory/STOP present');
-        expect(readFileSync(stopPath, 'utf-8')).toBe('');
-      });
-
-      it('runs a nested decomposition in place of the child, before later siblings', async () => {
-        phases.planPhase
-          .mockImplementationOnce(async () => decompose([10, 11]))
-          .mockImplementationOnce(async () => decompose([20, 21]));
-        phases.shipPhase
-          .mockResolvedValueOnce({ ok: true, prNumber: 120 } as any)
-          .mockResolvedValueOnce({ ok: true, prNumber: 121 } as any)
-          .mockResolvedValueOnce({ ok: true, prNumber: 111 } as any);
-        const res = await runMain('run-issue', '5', '--run-children');
-        expect(res.exited).toBe(false);
-        const issues = h.octokit.rest.issues.get.mock.calls.map((c: any[]) => c[0].issue_number);
-        expect(issues.slice(0, 5)).toEqual([5, 10, 20, 20, 21]);
-        expect(phases.planPhase).toHaveBeenCalledTimes(5);
-        expect(phases.shipPhase).toHaveBeenCalledTimes(3);
-        expect(logged()).toContain('#10 → decomposed into #20, #21');
-        expect(logged()).toContain('3/3 children ready for review');
-      });
-
-      const closeIssue10 = () => {
-        const get = h.octokit.rest.issues.get;
-        h.octokit.rest.issues.get = vi.fn(async (args: any) => {
-          const res = await get(args);
-          return args.issue_number === 10 ? { ...res, data: { ...res.data, state: 'closed' } } : res;
-        });
-      };
-
-      it('skips a closed child, keeps going, and exits 0', async () => {
-        phases.planPhase.mockImplementationOnce(async () => decompose([10, 11]));
-        phases.shipPhase.mockResolvedValueOnce({ ok: true, prNumber: 111 } as any);
-        closeIssue10();
-        const res = await runMain('run-issue', '5', '--run-children');
-        expect(res.exited).toBe(false);
-        expect(phases.shipPhase).toHaveBeenCalledTimes(1);
-        expect(logged()).toContain('#10 → skipped:');
-        expect(logged()).toContain('#11 → PR #111 ready for review');
-        expect(logged()).toContain('1/2 children ready for review, 1 skipped');
-      });
-
-      it('still exits 1 when a child after a skipped one fails', async () => {
-        phases.planPhase.mockImplementationOnce(async () => decompose([10, 11]));
-        phases.shipPhase.mockResolvedValueOnce({ ok: false } as any);
-        closeIssue10();
-        const res = await runMain('run-issue', '5', '--run-children');
-        expect(res).toMatchObject({ exited: true, code: 1 });
-        expect(logged()).toContain('#10 → skipped:');
-        expect(logged()).toContain('#11 → failed');
-      });
-
-      it('records a child that cannot be resolved as failed', async () => {
-        phases.planPhase.mockImplementationOnce(async () => decompose([10]));
-        const get = h.octokit.rest.issues.get;
-        h.octokit.rest.issues.get = vi.fn(async (args: any) => {
-          if (args.issue_number === 10) throw new Error('Not Found');
-          return get(args);
-        });
-        const res = await runMain('run-issue', '5', '--run-children');
-        expect(res).toMatchObject({ exited: true, code: 1 });
-        expect(logged()).toContain('could not resolve issue #10');
-      });
-    });
-
-    it('resolves the issue through the canonical work-request seam and ships it through all phases', async () => {
-      const res = await runMain('run-issue', '5');
-      expect(res.exited).toBe(false);
-      expect(logged()).toContain('PR #99 ready for review');
-      expect(logged()).toContain(`github-issue:${h.ghRepo}#5`);
-      expect(phases.planPhase).toHaveBeenCalledTimes(1);
-      expect(phases.buildPhase).toHaveBeenCalledTimes(1);
-      expect(phases.checkPhase).toHaveBeenCalledTimes(1);
-      expect(phases.shipPhase).toHaveBeenCalledTimes(1);
-      expect(h.octokit.rest.issues.get).toHaveBeenCalledWith(expect.objectContaining({ issue_number: 5 }));
     });
 
     // Regression (#681): a closed issue exits 0 (not 1) through the CLI command,

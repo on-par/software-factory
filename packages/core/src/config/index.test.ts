@@ -27,6 +27,8 @@ import {
   resolvePrClassifierPolicy,
   resolveBuildPublish,
   resolveSizeGateMode,
+  aliasDeprecatedSizeGateMode,
+  isExplicitStackMode,
   resolveSizeGateMaxSlices,
   parseMaxSlices,
   parseSizeGateMode,
@@ -886,32 +888,86 @@ describe('loadRoutesConfig', () => {
 });
 
 describe('resolveSizeGateMode (#2048)', () => {
-  it('defaults to file', () => {
-    expect(resolveSizeGateMode(loadFactoryConfig())).toBe('file');
+  const withMode = (mode?: string) => ({ ...loadFactoryConfig(), sizeGate: mode === undefined ? {} : { mode } });
+
+  it('resolves an unset sizeGate.mode to stack', () => {
+    expect(resolveSizeGateMode(loadFactoryConfig())).toBe('stack');
   });
 
-  it('resolves off', () => {
-    const config = loadFactoryConfig();
-    expect(resolveSizeGateMode({ ...config, sizeGate: { mode: 'off' } })).toBe('off');
+  it('loads a repo config with no sizeGate.mode and resolves it to stack', async () => {
+    const tmp = createTempDirs();
+    try {
+      const path = join(await tmp.make('factory-size-gate-'), 'factory.json');
+      await writeFile(path, JSON.stringify({}));
+      expect(resolveSizeGateMode(loadFactoryConfigForRepo(path))).toBe('stack');
+    } finally {
+      await tmp.cleanup();
+    }
   });
 
-  it('resolves slice', () => {
-    const config = loadFactoryConfig();
-    expect(resolveSizeGateMode({ ...config, sizeGate: { mode: 'slice' } })).toBe('slice');
+  it.each(['file', 'slice'])('resolves %s to stack with one deprecation line naming --stack', (mode) => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      expect(resolveSizeGateMode(withMode(mode))).toBe('stack');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain('--stack');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
-  it('resolves stack', () => {
-    const config = loadFactoryConfig();
-    expect(resolveSizeGateMode({ ...config, sizeGate: { mode: 'stack' } })).toBe('stack');
+  it('warns once for repeated resolves of the same config', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const config = withMode('file');
+      resolveSizeGateMode(config);
+      expect(resolveSizeGateMode(config)).toBe('stack');
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
-  it('stays file by default now that stack exists', () => {
-    expect(resolveSizeGateMode(loadFactoryConfig())).toBe('file');
+  it('resolves off and stack without a warning', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      expect(resolveSizeGateMode(withMode('off'))).toBe('off');
+      expect(resolveSizeGateMode(withMode('stack'))).toBe('stack');
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
-  it.each(['SLICE', 'OFF', ' off ', '', 'STACK', ' stack '])('resolves unknown mode %j to file', (mode) => {
-    const config = loadFactoryConfig();
-    expect(resolveSizeGateMode({ ...config, sizeGate: { mode } })).toBe('file');
+  it.each(['SLICE', 'OFF', ' off ', '', 'STACK', ' stack '])(
+    'resolves unknown mode %j to stack without a warning',
+    (mode) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        expect(resolveSizeGateMode(withMode(mode))).toBe('stack');
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
+  it('isExplicitStackMode is true only for stack', () => {
+    expect(isExplicitStackMode(withMode('stack'))).toBe(true);
+    for (const mode of [undefined, 'file', 'slice', 'off', ' stack ']) {
+      expect(isExplicitStackMode(withMode(mode))).toBe(false);
+    }
+  });
+
+  it('aliasDeprecatedSizeGateMode maps file and slice to stack and leaves off and stack alone', () => {
+    const warn = vi.fn();
+    expect(aliasDeprecatedSizeGateMode('file', warn)).toBe('stack');
+    expect(aliasDeprecatedSizeGateMode('slice', warn)).toBe('stack');
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockClear();
+    expect(aliasDeprecatedSizeGateMode('off', warn)).toBe('off');
+    expect(aliasDeprecatedSizeGateMode('stack', warn)).toBe('stack');
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('loads a config file with sizeGate.mode stack and resolves it to stack', async () => {
@@ -927,14 +983,14 @@ describe('resolveSizeGateMode (#2048)', () => {
     }
   });
 
-  it('loads a config file with an unknown sizeGate.mode and resolves it to file', async () => {
+  it('loads a config file with an unknown sizeGate.mode and resolves it to stack', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'factory-config-'));
     try {
       const path = join(dir, 'factory.json');
       const base = loadFactoryConfig();
       await writeFile(path, JSON.stringify({ ...base, sizeGate: { mode: 'bogus' } }));
       const config = loadFactoryConfig(path);
-      expect(resolveSizeGateMode(config)).toBe('file');
+      expect(resolveSizeGateMode(config)).toBe('stack');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

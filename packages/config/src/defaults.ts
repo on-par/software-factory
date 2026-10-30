@@ -78,8 +78,8 @@ export interface FactoryDefaults {
   readiness: { updateIssueBody: boolean };
   /** BUILD policy (#1867). publishFromBuild: true lets the claude BUILD worker push and open a PR before CHECK; default false = commit-only, SHIP publishes. contextCeiling is the per-harness Codex auto-compact token limit for BUILD/rework, 0 = off (#3327). */
   build: { publishFromBuild: boolean; contextCeiling: Record<string, number> };
-  /** Size gate policy (ADR-0147). file: gates file child issues / park (ADR-0043); slice: keep an oversized issue whole and ship it as slice PRs, never filing issues (ADR-0156); off: skip both gates. maxSlices (1-20): cap on a not-yet-started slice plan; over it the plan is recorded and the run parks. tokenBudget / maxFiles (#3350): the post-plan gate splits only when the plan's estimated tokens exceed tokenBudget or its changed files exceed maxFiles; a plan changing 3 files or fewer never splits. */
-  sizeGate: { mode: 'file' | 'slice' | 'off' | 'stack'; maxSlices: number; tokenBudget: number; maxFiles: number };
+  /** Size gate policy (ADR-0147). mode unset runs as stack (ADR-0161), a stacked PR set; file and slice are deprecated aliases for stack (#3832); off: skip both gates. maxSlices (1-20): cap on a not-yet-started slice plan; over it the plan is recorded and the run parks. tokenBudget / maxFiles (#3350): the post-plan gate splits only when the plan's estimated tokens exceed tokenBudget or its changed files exceed maxFiles; a plan changing 3 files or fewer never splits. */
+  sizeGate: { mode?: 'file' | 'slice' | 'off' | 'stack'; maxSlices: number; tokenBudget: number; maxFiles: number };
   sandbox: {
     enabled: boolean;
     runtime: 'auto' | 'sandbox-exec' | 'firejail' | 'docker-sandbox' | 'none';
@@ -672,7 +672,7 @@ export const defaultFactoryConfig: FactoryDefaults = {
    */
   build: { publishFromBuild: false, contextCeiling: { 'codex-cli': 120000 } },
   /** Size gates on: an oversized issue files child issues or parks (ADR-0043). Slice cap 10 (ADR-0156). */
-  sizeGate: { mode: 'file', maxSlices: 10, tokenBudget: 150000, maxFiles: 12 },
+  sizeGate: { maxSlices: 10, tokenBudget: 150000, maxFiles: 12 },
   sandbox: {
     enabled: true,
     runtime: 'auto',

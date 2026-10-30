@@ -4,10 +4,10 @@ The run lock stops two factory processes from force-recreating the same per-issu
 
 ## Two tiers (#3643)
 
-| Tier     | Path                           | Commands                                                                              |
-| -------- | ------------------------------ | ------------------------------------------------------------------------------------- |
-| Checkout | `.factory/run.lock`            | `run`, `supervise`, `local-small-overnight`                                           |
-| Issue    | `.factory/locks/run/<WorkKey>` | `ship`, `run-issue`, `run-brief`, `resume`, and each `run-issue --run-children` child |
+| Tier     | Path                           | Commands                                    |
+| -------- | ------------------------------ | ------------------------------------------- |
+| Checkout | `.factory/run.lock`            | `run`, `supervise`, `local-small-overnight` |
+| Issue    | `.factory/locks/run/<WorkKey>` | `ship`, `run-issue`, `run-brief`, `resume`  |
 
 Originally every command shared one checkout lock, so a second one-shot run was refused even for a different issue, whose worktree and branch are disjoint. One-shot runs now lock per WorkKey (ADR-0168), so different issues run in parallel on one checkout and the same issue still refuses. `run-brief` with several files takes each brief's lock in turn, one brief at a time, so a refused lock fails only that brief and the next one still runs. The WorkKey is path-safe and config-independent. A worktree path is not used as the key because it depends on `worktree.parent` and the branch prefix (ADR-0150), so two processes with different prefixes would get different keys for the same issue.
 
@@ -19,7 +19,7 @@ Brief stacks have no issue slice-plan comment, so the factory's `restackAfterSqu
 
 ### Stacked issues (`run-issue --stack`)
 
-`factory run-issue 42 --stack` (the same as `--size-gate stack`) builds an oversized issue as a PR stack in one run. When the issue has no slice plan yet, a sizing run lets the PLAN phase slice it (ADR-0165); an issue that fits the budget ships as one PR and the command ends there. Otherwise every pending slice is built in order inside the one run lock, with no release between slices: slice 1 bases on `--base-branch` or the trunk, and each later slice bases on the previous slice's PR head. Each slice still goes through the full PLAN, BUILD, CHECK and SHIP. The first failed or parked slice stops the stack: the remaining slices are skipped and reported, and the command exits 1. `--no-pr` exits 2, because every slice opens a PR. A plain `run-issue` with `sizeGate.mode: stack` in the config still builds one slice per run.
+`factory run-issue 42 --stack` (the same as `--size-gate stack`) builds an oversized issue as a PR stack in one run. When the issue has no slice plan yet, a sizing run lets the PLAN phase slice it (ADR-0165); an issue that fits the budget ships as one PR and the command ends there. Otherwise every pending slice is built in order inside the one run lock, with no release between slices: slice 1 bases on `--base-branch` or the trunk, and each later slice bases on the previous slice's PR head. Each slice still goes through the full PLAN, BUILD, CHECK and SHIP. The first failed or parked slice stops the stack: the remaining slices are skipped and reported, and the command exits 1. `--no-pr` exits 2, because every slice opens a PR. A plain `run-issue` builds one slice per run, because stack is the default `sizeGate.mode`.
 
 `run`, `supervise` and `local-small-overnight` pick issues from the queue, so they cannot know their key up front. They keep the checkout-wide fence.
 

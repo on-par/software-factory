@@ -53,13 +53,10 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     .option('--no-draft-pr', 'Mark the PR ready for review after CI, overriding run.pr.draft in the repo config')
     .option('--branch-prefix <prefix>', BRANCH_PREFIX_OPTION_DESCRIPTION)
     .option('--base-branch <ref>', BASE_BRANCH_OPTION_DESCRIPTION)
-    .option(
-      '--run-children',
-      'File mode only: when the size gate files child issues, run them (slice mode never files issues)',
-    )
+    .option('--run-children', 'Removed: exits 2 — oversized issues stack with --stack')
     .option(
       '--size-gate <mode>',
-      'Size gate mode for this run: file (file child issues / park), slice (ship as sequential slice PRs under the same issue; never files issues), off (skip both gates) or stack (stacked PR set built in one run; same as --stack); beats sizeGate.mode in the config',
+      'Size gate mode for this run: stack (default; stacked PR set built in one run; same as --stack) or off (skip both gates); file and slice are deprecated aliases for stack; beats sizeGate.mode in the config',
     )
     .option(
       '--stack',
