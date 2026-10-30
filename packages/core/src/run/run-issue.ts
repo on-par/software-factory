@@ -63,7 +63,7 @@ import {
 } from './stage-blocked.js';
 import { reportFlakeRerun } from './flaky-tests.js';
 import { finishWithoutShip } from './local-finish.js';
-import { enterStackSlice, stackWaitOutcome } from './stack-slice-entry.js';
+import { enterStackSlice } from './stack-slice-entry.js';
 import { recordShippedSlice } from './slice-ship-record.js';
 import type { ReviewFloorPathChange, ReviewFloorRuleSet } from '../review/floor.js';
 import {
@@ -696,7 +696,6 @@ async function runIssueOnce(
       const plan = reused ?? (await runStage('plan', planAt));
       route = plan.route;
       if (!plan.ok) {
-        if (plan.stackWait) return stackWaitOutcome(plan.stackWait, request.branch, route);
         const decomposedChildren = plan.decomposed?.childIssues ?? [];
         if (decomposedChildren.length > 0) {
           await ports.onDecomposed?.(decomposedChildren);

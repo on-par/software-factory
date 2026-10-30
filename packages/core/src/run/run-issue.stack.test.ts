@@ -216,26 +216,6 @@ describe('runIssue — stack mode builds one slice per run (ADR-0161)', () => {
     expect(shipPhase.mock.calls[1]![0].stack).toMatchObject({ index: 2, base: 'main' });
   });
 
-  it("releases without branching while slice 1's PR waits for review, and the slice plan says so (#3367)", async () => {
-    const { ports, createSliceBranch, bodies } = stackSetup();
-    await runIssue(baseRequest(), policy, ports);
-    planPhase.mockReset().mockResolvedValue({
-      ok: false,
-      route: 'codex',
-      specPath: '/tmp/wt/spec.md',
-      model: '',
-      escalate: 'slice 2/3 of #1 waits for approval or merge of slice 1/3 PR #101',
-      designArtifact: null,
-      stackWait: { index: 1, count: 3, prNumber: 101 },
-    });
-    const outcome = await runIssue(baseRequest(), policy, ports);
-
-    expect(outcome).toMatchObject({ state: 'released', reason: 'stack-wait', prNumber: 101 });
-    expect(createSliceBranch).toHaveBeenCalledTimes(1);
-    expect(buildPhase).toHaveBeenCalledTimes(1);
-    expect(bodies.at(-1)).toContain('PR open #101 — waiting for approval or merge before slice 2');
-  });
-
   it('parks over-cap through the gate and builds no slice', async () => {
     const { ports } = stackSetup();
     planPhase.mockImplementation(async () => ({
@@ -273,6 +253,30 @@ describe('runIssue — stack mode builds one slice per run (ADR-0161)', () => {
       expect(writeIdx).toBeGreaterThanOrEqual(0);
       expect(record.mock.invocationCallOrder[writeIdx]).toBeLessThan(buildPhase.mock.invocationCallOrder[k - 1]);
     }
+  });
+
+  it('branches slice 1 from parentBaseRef when set', async () => {
+    const { ports, createSliceBranch } = stackSetup();
+    await runIssue(baseRequest({ parentBaseRef: 'origin/feat/x' }), policy, ports);
+
+    expect(createSliceBranch.mock.calls[0]![0]).toMatchObject({ branch: branch(1), startPoint: 'origin/feat/x' });
+    expect(shipPhase.mock.calls[0]![0].stack).toMatchObject({ index: 1, base: 'feat/x' });
+  });
+
+  it("records each slice's branch and PR when slices chain through parentBaseRef", async () => {
+    const { ports, bodies } = stackSetup();
+    await runIssue(baseRequest({ parentBaseRef: 'origin/feat/x' }), policy, ports);
+    await runIssue(baseRequest({ parentBaseRef: branch(1) }), policy, ports);
+    await runIssue(baseRequest({ parentBaseRef: branch(2) }), policy, ports);
+
+    const last = parseSlicePlanComment(bodies.at(-1)!);
+    expect(last?.ok).toBe(true);
+    if (last?.ok !== true) return;
+    expect(last.plan.slices.map((sl) => [sl.prNumber, sl.branch])).toEqual([
+      [101, branch(1)],
+      [102, branch(2)],
+      [103, branch(3)],
+    ]);
   });
 
   it('stops the chain at the first non-ready slice', async () => {

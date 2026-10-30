@@ -22,6 +22,4 @@ export interface PlanResult {
   /** Set on an ok result when PLAN planned one slice of a sliced issue (ADR-0147). SHIP titles the PR
    *  from it, and runIssue records the PR in the slice plan comment. */
   slice?: { plan: SlicePlan; index: number };
-  /** ADR-0161: set with `ok: false` when the stack slice below is not yet approved or merged. */
-  stackWait?: { index: number; count: number; prNumber: number };
 }

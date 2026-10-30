@@ -227,9 +227,11 @@ import {
   formatStopMarker,
   readStopMarker,
   detectClaudePlan,
+  findSlicePlanComment,
 } from '@on-par/factory-core/internal';
 import { CliExitError } from './errors.js';
 import { baseBranchConflict, baseBranchOrExit } from './ship-options.js';
+import { runIssueStack } from './stack-run.js';
 import { withRepoRunLock } from './repo-run-lock.js';
 
 export { CliExitError, withRepoRunLock };
@@ -2298,6 +2300,7 @@ async function cmdRunIssue(
     baseBranch?: string;
     runChildren?: boolean;
     sizeGate?: string;
+    stack?: boolean;
     maxSlices?: string;
     draftPr?: boolean;
   },
@@ -2311,13 +2314,19 @@ async function cmdRunIssue(
     throw new CliExitError(`factory: ${notInitializedMessage()}`, 2);
   }
 
-  const { runChildren, sizeGate: rawSizeGate, maxSlices: rawMaxSlices, ...shipOpts } = opts;
+  const { runChildren, sizeGate: rawSizeGate, maxSlices: rawMaxSlices, stack, ...shipOpts } = opts;
   const branchPrefix = branchPrefixOrExit(opts.branchPrefix, paths.config);
-  const sizeGate = sizeGateOrExit(rawSizeGate);
+  if (stack && rawSizeGate !== undefined && rawSizeGate !== 'stack') {
+    throw new CliExitError('factory: --stack is --size-gate stack — drop one of them', 2);
+  }
+  const sizeGate = stack ? 'stack' : sizeGateOrExit(rawSizeGate);
   const maxSlices = maxSlicesOrExit(rawMaxSlices);
   const baseBranch = baseBranchOrExit(opts.baseBranch);
-  const conflict = baseBranchConflict({ baseBranch, sizeGate: rawSizeGate, runChildren });
+  const conflict = baseBranchConflict({ baseBranch, sizeGate, runChildren });
   if (conflict) throw new CliExitError(conflict, 2);
+  if (sizeGate === 'stack' && opts.pr === false) {
+    throw new CliExitError('factory: --stack opens a PR per slice — drop --no-pr or drop --stack', 2);
+  }
   if (opts.pr === false && ((sizeGate !== undefined && sizeGate !== 'off') || runChildren)) {
     throw new CliExitError(
       'factory: --no-pr runs with the size gate off — drop --size-gate/--run-children or drop --no-pr',
@@ -2361,12 +2370,29 @@ async function cmdRunIssue(
       }
 
       try {
+        if (sizeGate === 'stack') {
+          await runIssueStack(issueNum, baseBranch, {
+            readSlicePlan: async () => {
+              const lookup = await findSlicePlanComment({ octokit: getOctokit(), repo: ghRepo, issue: issueNum });
+              return lookup.status === 'found' ? lookup.plan : undefined;
+            },
+            ship: async (base, onOutcome) => {
+              await shipIssue(
+                issueNum,
+                { ...shipOpts, branchPrefix, sizeGate, maxSlices, baseBranch: base },
+                { repoRoot, ghRepo, workRequest: work, onOutcome },
+              );
+            },
+          });
+          return;
+        }
         await shipIssue(
           issueNum,
           { ...shipOpts, branchPrefix, sizeGate, maxSlices },
           { repoRoot, ghRepo, workRequest: work },
         );
       } catch (err: any) {
+        if (err instanceof CliExitError) throw err;
         if (err instanceof IssueSkippedError) return;
         if (err instanceof IssueDecomposedError && runChildren) {
           await runDecomposedChildren(

@@ -64,8 +64,8 @@ export function baseBranchConflict(opts: {
   if (workspace !== undefined) {
     return 'factory: --base-branch needs a factory worktree — drop --workspace or drop --base-branch';
   }
-  if ((sizeGate !== undefined && sizeGate !== 'off') || runChildren) {
-    return 'factory: --base-branch runs with the size gate off — drop --size-gate/--run-children or drop --base-branch';
+  if ((sizeGate !== undefined && sizeGate !== 'off' && sizeGate !== 'stack') || runChildren) {
+    return 'factory: --base-branch runs with the size gate off or stack — drop --size-gate/--run-children or drop --base-branch';
   }
   return undefined;
 }

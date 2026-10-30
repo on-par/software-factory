@@ -59,7 +59,11 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     )
     .option(
       '--size-gate <mode>',
-      'Size gate mode for this run: file (file child issues / park), slice (ship as sequential slice PRs under the same issue; never files issues), off (skip both gates) or stack (stacked PR set, ADR-0161; runs as slice until stacks are built); beats sizeGate.mode in the config',
+      'Size gate mode for this run: file (file child issues / park), slice (ship as sequential slice PRs under the same issue; never files issues), off (skip both gates) or stack (stacked PR set built in one run; same as --stack); beats sizeGate.mode in the config',
+    )
+    .option(
+      '--stack',
+      "Build an oversized issue as a stacked PR set in one run: each slice's PR bases on the previous slice's PR head, the stack stops at the first failed slice; same as --size-gate stack",
     )
     .option(
       '--max-slices <count>',

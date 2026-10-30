@@ -79,11 +79,11 @@ describe('runLane heartbeat', () => {
             if (scenario === 'queued') {
               ctx?.onOutcome?.({
                 state: 'released',
-                reason: 'stack-wait',
+                reason: 'file-overlap',
+                holder: 4,
+                file: 'a.ts',
                 branch: 'b',
                 reworkRounds: 0,
-                prNumber: 55,
-                slice: { index: 1, count: 3 },
               });
             }
             return 'b';

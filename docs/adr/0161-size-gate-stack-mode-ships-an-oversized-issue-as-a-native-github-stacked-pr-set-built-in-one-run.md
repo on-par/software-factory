@@ -35,15 +35,13 @@ The default stays `file`, and `slice` and `off` are unchanged.
 with Gherkin acceptance criteria, in build order, capped by `sizeGate.maxSlices`. Each checklist item also records the
 slice's branch and, once opened, its PR number. The comment is still the only record of slice state.
 
-### One slice per run
+### One slice at a time, the whole stack in one run
 
-- Each run builds one slice. Slice k+1 is built only after slice k's PR is approved on its head SHA or merged, so
-  review of slice k shapes slice k+1. The next run picks the lowest `pending` slice (#3367).
-- A merged slice below: the slice branches from `origin/main` and its PR targets `main`. An approved open slice
-  below: the slice branches from slice k-1's branch and its PR targets that branch. Slice 1 always uses `main`.
-- Otherwise the run returns a `released` (`stack-wait`) outcome, logs the PR it waits on, and creates no branch.
-  The issue goes back to `factory:queued` and is never parked. The slice-plan comment shows
-  `PR open #N — waiting for approval or merge before slice k+1`.
+- `factory run-issue --stack` builds every pending slice in order inside one run (#3798). Slice k is planned as
+  soon as slice k-1's PR is open or merged, so no run waits on review. The lane (`factory run`) still builds one
+  slice per run; its queue preflight claims the next slice when the PR below is approved or merged (see Queue).
+- A merged slice below: the slice branches from `origin/main` and its PR targets `main`. An open slice below: the
+  slice branches from slice k-1's branch and its PR targets that branch. Slice 1 uses `main` or `--base-branch`.
 - CHECK diffs slice k against its parent branch, not `main`, and the CHECK baseline (ADR-0147's base comparison) runs
   on the parent branch's head.
 - BUILD's no-diff check, CHECK and the review floor diff slice k against its parent branch

@@ -2,7 +2,7 @@
 import { upsertSlicePlanComment } from '../readiness/slice-plan-github.js';
 import { parentRefForSlice, stackSliceBranch, withSliceBranchCreated } from '../readiness/slice-plan.js';
 import type { PlanResult } from '../phases/plan.js';
-import type { BuildRoute, RunOutcome } from './outcome.js';
+import type { RunOutcome } from './outcome.js';
 import type { RunPorts, RunRequest } from './run-issue.js';
 import { createStackSliceBranch } from './stack-slice-branch.js';
 
@@ -12,23 +12,6 @@ type PlanSlice = NonNullable<PlanResult['slice']>;
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-/** ADR-0161 (#3367): the slice below is not yet approved or merged, so the run releases the issue to queued. */
-export function stackWaitOutcome(
-  wait: NonNullable<PlanResult['stackWait']>,
-  branch: string,
-  route: BuildRoute,
-): RunOutcome {
-  return {
-    state: 'released',
-    reason: 'stack-wait',
-    route,
-    branch,
-    reworkRounds: 0,
-    prNumber: wait.prNumber,
-    slice: { index: wait.index, count: wait.count },
-  };
 }
 
 /** Creates slice k's branch from its parent ref and records it in the slice plan comment, before BUILD.
@@ -43,7 +26,7 @@ export async function enterStackSlice(args: {
   const { slice, request, ports, log, park } = args;
   const { plan: slicePlan, index } = slice;
   const count = slicePlan.slices.length;
-  const parent = parentRefForSlice(slicePlan, index, MAIN_REF);
+  const parent = parentRefForSlice(slicePlan, index, request.parentBaseRef ?? MAIN_REF);
   if (parent === undefined) {
     return {
       outcome: await park(

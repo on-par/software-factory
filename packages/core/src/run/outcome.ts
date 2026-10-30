@@ -104,17 +104,6 @@ export type RunOutcome =
       attribution?: RunAttribution;
     }
   | {
-      /** ADR-0161: the stack slice below (`slice.index`, PR `prNumber`) awaits approval or merge, so the issue goes back to queued and is not parked. */
-      state: 'released';
-      reason: 'stack-wait';
-      route?: BuildRoute;
-      branch?: string;
-      reworkRounds: number;
-      prNumber: number;
-      slice: { index: number; count: number };
-      attribution?: RunAttribution;
-    }
-  | {
       /** #3576: PLAN touched `file`, which in-flight issue `holder` still claims; the issue goes back to queued, not parked. */
       state: 'released';
       reason: 'file-overlap';
