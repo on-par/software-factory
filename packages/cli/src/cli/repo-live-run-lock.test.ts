@@ -1,20 +1,16 @@
 // packages/cli/src/cli/repo-live-run-lock.test.ts — fail-closed live-run check for an attached repo (#3643)
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
-import { describe, expect, it } from 'vitest';
+import { createTempDirs } from '@on-par/factory-core/testing';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { repoHasLiveRunLock } from './repo-live-run-lock.js';
 
+const tmp = createTempDirs();
+afterEach(() => tmp.cleanup());
+
 describe('repoHasLiveRunLock', () => {
   it('is false for a repo with no run locks', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'live-run-lock-'));
-    try {
-      expect(repoHasLiveRunLock({ path: dir })).toBe(false);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const dir = tmp.makeSync('live-run-lock-');
+    expect(repoHasLiveRunLock({ path: dir })).toBe(false);
   });
 
   it('fails closed when the lock listing throws', () => {
