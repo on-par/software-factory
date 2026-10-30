@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AwaitingReviewError } from './land-pr.js';
-import { IssueDecomposedError, IssueSkippedError, LaneParkError } from './index.js';
+import { IssueSkippedError, LaneParkError } from './index.js';
 import { runLane } from './run-lane.js';
 
 describe('cli', () => {
@@ -181,40 +181,6 @@ describe('cli', () => {
       expect(calls.filter((c) => c[0] === 'release')).toEqual([['release', 1, 'queued']]);
     });
 
-    it('releases decompose children as done and claims further only once children are exhausted', async () => {
-      const calls: any[] = [];
-      const toClaim = [1];
-      await runLane('app', [], '/repo', 'on-par/software-factory', paths, {
-        ship: async (issue) => {
-          calls.push(['ship', issue]);
-          if (issue === 1) throw new IssueDecomposedError('issue #1 decomposed into #10, #11', [10, 11]);
-          return `ship-it/${issue}-x`;
-        },
-        waitMerge: async () => {},
-        pathExists: () => false,
-        emitEvent: () => {},
-        claimNext: async () => {
-          calls.push(['claimNext']);
-          return buildClaim(toClaim.shift());
-        },
-        releaseIssue: async (issue, outcome) => {
-          calls.push(['release', issue, outcome]);
-        },
-      });
-
-      expect(calls.filter((c) => c[0] === 'ship')).toEqual([
-        ['ship', 1],
-        ['ship', 10],
-        ['ship', 11],
-      ]);
-      expect(calls.filter((c) => c[0] === 'release')).toEqual([
-        ['release', 1, 'done'],
-        ['release', 10, 'done'],
-        ['release', 11, 'done'],
-      ]);
-      expect(calls.filter((c) => c[0] === 'claimNext')).toHaveLength(2);
-    });
-
     it('performs no release calls when no queue deps are provided', async () => {
       const calls: any[] = [];
       await runLane('app', [1], '/repo', 'on-par/software-factory', paths, {
@@ -263,7 +229,6 @@ describe('cli', () => {
       it.each([
         ['awaiting review', () => new AwaitingReviewError('PR #9 awaiting review', 9)],
         ['skipped', () => new IssueSkippedError('already closed', 'already-closed')],
-        ['decomposed', () => new IssueDecomposedError('split', [])],
       ])('sweeps once after a %s outcome', async (_name, makeErr) => {
         const calls: any[] = [];
         await runLane('app', [5], '/repo', 'on-par/software-factory', paths, {

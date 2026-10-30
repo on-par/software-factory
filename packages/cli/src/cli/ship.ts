@@ -73,7 +73,6 @@ import { maybeWriteBenchmarkArtifacts, maybeWriteLocalRunReport } from './ship-r
 import { applyMeteredGuard, modelOverrideMessages, resolveProviderOrder } from './model-override-messages.js';
 import {
   buildRunRequest,
-  decomposeQueue,
   finishOutcome,
   logSandboxPolicy,
   setupRunWorkspace,
@@ -436,7 +435,6 @@ async function shipIssueFrom(
     }),
     onActivity: () =>
       touchRunActivity(phaseSnapshotFile(paths.runs, workKeyFromIssue(issueNum)), new Date().toISOString()),
-    onDecomposed: (childIssues) => void decomposeQueue({ issueNum, childIssues, paths, planLog: mkLog('plan') }),
     writeLocalRunReport: (info) =>
       maybeWriteLocalRunReport({
         issueNum,

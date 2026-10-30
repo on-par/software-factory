@@ -112,7 +112,6 @@ import {
 } from './resume-context.js';
 import type { Environment, Workspace } from './ports.js';
 import { safeRecordRunState, terminalRunStateUpdate, thrownRunStateUpdate } from './run-state-record.js';
-import { isDecomposeSignal } from './run-state-record.js';
 import { runStatusForPhase, type RunStateUpdate } from './state.js';
 import { type ParkedPrDisposition, settleParkedPullRequest } from './park-pr.js';
 import { runParkSteward } from './park-steward.js';
@@ -260,10 +259,6 @@ export interface RunPorts extends CiReworkPorts {
    *  `laneClaimStaleness` (#3063) lets it reap provably finished holders; undefined = never reap. */
   laneFileGuard?: LaneFileGuard;
   laneClaimStaleness?: LaneClaimStalenessProbe;
-  /** PLAN's pre-flight size gate decomposed this issue into filed sub-issues. The hook
-   *  owns the (path-bound) queue rewrite and is expected to throw to signal the caller;
-   *  if it returns normally, runIssue treats the decomposition as an escalation. */
-  onDecomposed?: (childIssues: number[]) => void | Promise<void>;
   writeLocalRunReport?: (info: RunReportInfo) => Promise<string | undefined>;
   writeBenchmarkArtifacts?: (info: RunReportInfo) => Promise<void>;
   /** Records the truthful current phase for downstream connectors (#1325) — called once
@@ -318,7 +313,7 @@ export async function runIssue(request: RunRequest, policy: RunPolicy, rawPorts:
   try {
     outcome = await runIssueOnce(request, policy, ports, observed);
   } catch (err) {
-    const update = thrownRunStateUpdate(isDecomposeSignal(err), request.branch, observed.checkSummary);
+    const update = thrownRunStateUpdate(request.branch, observed.checkSummary);
     await safeRecordRunState(ports.recordRunState, log, update);
     throw err;
   }
@@ -703,12 +698,6 @@ async function runIssueOnce(
       const plan = reused ?? (await runStage('plan', planAt));
       route = plan.route;
       if (!plan.ok) {
-        const decomposedChildren = plan.decomposed?.childIssues ?? [];
-        if (decomposedChildren.length > 0) {
-          await ports.onDecomposed?.(decomposedChildren);
-          const childList = decomposedChildren.map((n) => `#${n}`).join(', ');
-          return { state: 'escalated', reason: `issue #${workKey} decomposed into ${childList}`, route };
-        }
         if (plan.sliced) {
           return await terminalEscalated(
             `issue #${workKey} sliced into ${plan.sliced.sliceCount} slice(s): ${plan.escalate ?? 'slice plan recorded'}`,
@@ -1208,7 +1197,7 @@ async function runIssueOnce(
       ...(planSlice ? { slice: { index: planSlice.index, count: planSlice.plan.slices.length } } : {}),
     };
   } catch (err) {
-    if (isDecomposeSignal(err) || ports.claimSignal?.aborted) throw err;
+    if (ports.claimSignal?.aborted) throw err;
     if ((err as { reason?: unknown } | null | undefined)?.reason === 'local_auth') {
       log(
         'environment_warning',

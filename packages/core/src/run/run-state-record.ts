@@ -40,22 +40,12 @@ export function terminalRunStateUpdate(outcome: RunOutcome, summary: CheckSummar
   };
 }
 
-/** The terminal update when `runIssueOnce` threw: a decompose signal is an escalation, anything else a failure. */
-export function thrownRunStateUpdate(
-  decompose: boolean,
-  branch: string,
-  summary: CheckSummary | undefined,
-): RunStateUpdate {
+/** The terminal update when `runIssueOnce` threw: always a failure, carrying the failing checks. */
+export function thrownRunStateUpdate(branch: string, summary: CheckSummary | undefined): RunStateUpdate {
   const failures = failingResults(summary);
   return {
-    status: decompose ? 'escalated' : 'failed',
+    status: 'failed',
     branch,
-    ...(decompose || failures.length === 0 ? {} : { failures }),
+    ...(failures.length === 0 ? {} : { failures }),
   };
-}
-
-/** Structural marker for the decompose-hook's thrown signal (core cannot import the
- *  CLI's IssueDecomposedError; see outcome.ts's parkReasonFor for the same convention). */
-export function isDecomposeSignal(err: unknown): boolean {
-  return Array.isArray((err as { childIssues?: unknown } | null | undefined)?.childIssues);
 }

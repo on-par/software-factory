@@ -150,16 +150,4 @@ describe('runIssue — #3194: persisted run state', () => {
     expect(failures).toHaveLength(5);
     expect(failures[0][1]).toContain('disk full');
   });
-
-  it('records escalated and rethrows when the decompose hook throws', async () => {
-    planPhase.mockResolvedValue({ ...PLAN_OK, ok: false, decomposed: { childIssues: [2] } });
-    const onDecomposed = vi.fn(() => {
-      throw Object.assign(new Error('decomposed'), { childIssues: [2] });
-    });
-    const recordRunState = vi.fn().mockResolvedValue(undefined);
-    await expect(runIssue(baseRequest(), basePolicy(), basePorts({ onDecomposed, recordRunState }))).rejects.toThrow(
-      'decomposed',
-    );
-    expect(recordRunState.mock.calls.at(-1)?.[0].status).toBe('escalated');
-  });
 });

@@ -35,7 +35,6 @@ import { releaseKeepOnRequeue } from './worktree-keep.js';
 import { shipIssue } from './ship.js';
 import { ClaimLostError, createClaimLease, laneRenewLogger, onClaimLost, withHeartbeat } from './lane-heartbeat.js';
 import { restackUnderHeartbeat } from './run-lane-restack.js';
-import { queueDecomposedChildren } from './run-lane-decompose.js';
 import type { RunLaneDeps } from './run-lane-deps.js';
 import { shipRuntime } from './ship-runtime.js';
 
@@ -61,7 +60,6 @@ export async function runLane(
     recordAwaitingCi,
     recheckAwaitingCi,
     releaseIssue = async () => {},
-    queueChildren,
     heartbeat,
     leaseMs = DEFAULT_CLAIM_LEASE_MS,
     hostId = defaultClaimantId(),
@@ -99,7 +97,7 @@ export async function runLane(
   let merged = 0;
   let awaitingReview = 0;
   let skipped = 0;
-  let decomposed = 0;
+  const decomposed = 0;
   let parked = 0;
   const buildClaim = (issue: number): QueueClaim => ({ issue, decision: { kind: 'build' } });
   const pending: QueueClaim[] = issues.map(buildClaim);
@@ -356,7 +354,7 @@ export async function runLane(
       streak = null;
       await settle(issue, 'done');
     } catch (err: any) {
-      const { LaneParkError, LaneEnvironmentPauseError, IssueSkippedError, IssueDecomposedError } = shipRuntime();
+      const { LaneParkError, LaneEnvironmentPauseError, IssueSkippedError } = shipRuntime();
       if (err instanceof ClaimLostError) {
         // #3146: another host owns the claim. Keep the worktree; never release, reap, comment or park.
         onClaimLost(err, emitEvent, paths.events, lane, hostId, runId);
@@ -397,39 +395,6 @@ export async function runLane(
       if (err instanceof IssueSkippedError) {
         // shipIssue already emitted skipped-already-closed; nothing was attempted.
         skipped++;
-        await settle(issue, 'done');
-        continue;
-      }
-      if (err instanceof IssueDecomposedError) {
-        // shipIssue already rewrote the queue — splice the children in after the
-        // current issue so this same lane run ships them, deduping ones already queued.
-        // On a GitHub lane the children are first written to the tracker (#3539); only the ones
-        // that were not written are spliced in-memory, the rest are claimed next through claimNext.
-        let clean = true;
-        let unwritten = err.childIssues;
-        if (queueChildren && err.childIssues.length > 0) {
-          ({ unwritten, clean } = await queueDecomposedChildren(
-            queueChildren,
-            issue,
-            err.childIssues,
-            lane,
-            paths.events,
-            emitEvent,
-          ));
-        }
-        const fresh = unwritten.filter((n) => !seen.has(n));
-        for (const n of fresh) seen.add(n);
-        pending.splice(i + 1, 0, ...fresh.map(buildClaim));
-        if (clean) {
-          decomposed++;
-          emitEvent(
-            paths.events,
-            'decompose_filed',
-            issue,
-            `lane '${lane}' continuing with ${fresh.length} child issue(s) in place of #${issue}`,
-            { lane },
-          );
-        }
         await settle(issue, 'done');
         continue;
       }

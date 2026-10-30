@@ -14,7 +14,6 @@ import type { Octokit } from '@octokit/rest';
 
 import type { AwaitingCiLaneOps } from './awaiting-ci-recheck.js';
 import type { BaseHoldDecision } from './base-hold.js';
-import type { ChildEnqueueResult } from './run-lane-decompose.js';
 import type { waitForMerge } from './land.js';
 import type { ReplacedPr } from './land-rebuild.js';
 
@@ -66,9 +65,6 @@ export type RunLaneDeps = {
    *  Fail-closed: a rejection is logged as a warn and never changes lane flow. */
   recheckAwaitingCi?: (ops: AwaitingCiLaneOps) => Promise<void>;
   releaseIssue?: (issue: number, outcome: QueueReleaseOutcome) => Promise<void>;
-  /** Writes decomposed children into the GitHub queue (queued, lane, order right behind the parent)
-   *  before the lane moves on, so a restart never loses them (#3539). Absent for static local lanes. */
-  queueChildren?: (parent: number, children: number[]) => Promise<ChildEnqueueResult>;
   /** Refreshes the claim lease every HEARTBEAT_INTERVAL_MS while an issue is in flight
    *  (#1500). Absent for static local-queue lanes, which carry no remote claim to lease. */
   heartbeat?: (issue: number) => Promise<unknown>;

@@ -716,7 +716,6 @@ setShipRuntime(() => ({
   LaneParkError,
   LaneEnvironmentPauseError,
   IssueSkippedError,
-  IssueDecomposedError,
 }));
 
 export { LaneEnvironmentPauseError, shipIssue };
@@ -2420,14 +2419,6 @@ async function cmdRunIssue(
       } catch (err: any) {
         if (err instanceof CliExitError) throw err;
         if (err instanceof IssueSkippedError) return;
-        if (err instanceof IssueDecomposedError) {
-          const children = err.childIssues.map((n) => `#${n}`).join(', ');
-          throw new CliExitError(
-            `Run failed for issue #${issueNum}: the size gate decomposed it into ${children} — no child issue was run. ` +
-              `Oversized issues stack: re-run with \`factory run-issue ${issueNum} --stack\`.`,
-            1,
-          );
-        }
         throw new CliExitError(`Run failed for issue #${issueNum}: ${err.message}`, 1);
       }
     },
@@ -3422,19 +3413,18 @@ export interface PlannedLane {
   lane: string;
   /** Seed issues to work before claiming. Always empty in GitHub-queue mode. */
   issues: number[];
-  deps: Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'heartbeat' | 'countRemaining' | 'queueChildren'>;
+  deps: Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'heartbeat' | 'countRemaining'>;
 }
 
 export function laneQueueDeps(
   queue: GithubQueue,
   lane: string,
-): Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'heartbeat' | 'countRemaining' | 'queueChildren'> {
+): Pick<RunLaneDeps, 'claimNext' | 'releaseIssue' | 'heartbeat' | 'countRemaining'> {
   return {
     claimNext: () => queue.claimNext(lane),
     releaseIssue: (issue, outcome) => queue.release(issue, outcome),
     heartbeat: (issue) => queue.heartbeat(issue),
     countRemaining: async () => (await queue.list(lane)).length,
-    queueChildren: (parent, children) => queue.enqueueAfter(lane, parent, children),
   };
 }
 
@@ -3501,17 +3491,6 @@ export class IssueSkippedError extends Error {
   }
 }
 
-/** The target issue tripped the PLAN pre-flight size gate and was decomposed into real
- *  filed sub-issues; the queue was rewritten. Not a park — the lane continues with the
- *  children in place of the oversized issue. (#823) */
-export class IssueDecomposedError extends Error {
-  constructor(
-    message: string,
-    readonly childIssues: number[],
-  ) {
-    super(message);
-  }
-}
 export function issueFromFactoryBranch(branch: string, prefix?: string): number | undefined {
   return factoryBranchIssue(branch, prefix) ?? undefined;
 }

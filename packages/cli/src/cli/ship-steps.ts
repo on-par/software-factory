@@ -1,7 +1,6 @@
 // packages/cli/src/cli/ship-steps.ts — named steps of the ship flow: sandbox logging, workspace setup, RunRequest builder (#2788)
 
 import { exec as execCb } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify, styleText } from 'node:util';
@@ -31,7 +30,6 @@ import {
   resolveReadinessUpdateIssueBody,
   resolveCiWatchDeadlineMs,
   resolveSizeGateBudget,
-  rewriteQueueForDecomposition,
   worktreeWorkspace,
 } from '@on-par/factory-core';
 import type { CheckResumeRecord, ProviderOrder, WorktreeSandbox } from '@on-par/factory-core/internal';
@@ -190,35 +188,6 @@ export async function setupRunWorkspace({
     log('workspace', `local-only: using caller-provided workspace ${worktree} (no factory worktree created)`);
   }
   return workspace;
-}
-
-/** Rewrites the queue for a decomposed issue, then throws so the lane moves on to the children. */
-export function decomposeQueue({
-  issueNum,
-  childIssues,
-  paths,
-  planLog,
-}: {
-  issueNum: number;
-  childIssues: number[];
-  paths: ReturnType<typeof getFactoryPaths>;
-  planLog: (type: EventKind, msg: string) => void;
-}): never {
-  const { readTextFileOrEmpty, errorDetail, IssueDecomposedError } = shipRuntime();
-  const childList = childIssues.map((n) => `#${n}`).join(', ');
-  try {
-    const before = readTextFileOrEmpty(paths.queue);
-    const rewrite = rewriteQueueForDecomposition(before, { issue: issueNum, childIssues });
-    if (rewrite.changed) {
-      writeFileSync(paths.queue, rewrite.content);
-      planLog('decompose_filed', `queue entry for #${issueNum} replaced with ${childList}`);
-    } else {
-      planLog('decompose_filed', `#${issueNum} had no queue entry to replace — continuing the lane with ${childList}`);
-    }
-  } catch (err) {
-    planLog('decompose_file_failed', `queue rewrite for #${issueNum} failed: ${errorDetail(err)}`);
-  }
-  throw new IssueDecomposedError(`issue #${issueNum} decomposed into ${childList}`, childIssues);
 }
 
 /** Maps the core RunOutcome to the shipped branch name, or throws the park/pause error the lane expects. */

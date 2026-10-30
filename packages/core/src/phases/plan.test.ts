@@ -734,7 +734,7 @@ npm run test`;
       ],
     });
 
-    it('parks a plan whose design artifact exceeds the bounded-build budget when filing yields no children', async () => {
+    it('parks an over-budget plan without filing child issues when no slice or stack mode is set', async () => {
       const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-901.md');
       const { router, stub } = setup.router(
@@ -749,6 +749,7 @@ npm run test`;
         }),
       );
       const createComment = vi.fn().mockResolvedValue({});
+      const create = vi.fn().mockResolvedValue({ data: { number: 902, id: 9902 } });
       const events: string[] = [];
 
       const result = await planPhase({
@@ -758,28 +759,33 @@ npm run test`;
         specPath,
         router,
         constitution: null,
-        octokit: fakeOctokit({
-          'issues.get': async () => ({
-            data: {
-              title: 'Mega slice',
-              body: '## Problem statement\nToo big.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test',
+        octokit: {
+          rest: {
+            issues: {
+              get: async () => ({
+                data: {
+                  title: 'Mega slice',
+                  body: '## Problem statement\nToo big.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test',
+                },
+              }),
+              createComment,
+              create,
             },
-          }),
-          'issues.createComment': createComment,
-        }).octokit,
+          },
+          request: vi.fn().mockResolvedValue({ data: [] }),
+        } as any,
         log: (type) => events.push(type),
       });
 
       expect(result.ok).toBe(false);
-      expect(result.escalate).toMatch(/bounded-build budget/);
-      expect(result.decomposed).toBeUndefined();
-      expect(stub.calls.map((call) => call.task)).toContain('decompose');
-      expect(createComment).toHaveBeenCalledTimes(1);
+      expect(result.escalate).toContain('parked for decomposition');
+      expect('decomposed' in result).toBe(false);
+      expect(create).not.toHaveBeenCalled();
+      expect(stub.calls.map((call) => call.task)).not.toContain('decompose');
       expect(events).toContain('size-gate-escalated');
-      expect(events).toContain('decompose_comment_posted');
     });
 
-    it('parks an over-budget design artifact the same way in explicit file mode when filing yields no children', async () => {
+    it('parks an over-budget design artifact the same way in explicit file mode without decomposing', async () => {
       const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-901.md');
       const { router, stub } = setup.router(
@@ -817,66 +823,11 @@ npm run test`;
       });
 
       expect(result.ok).toBe(false);
-      expect(result.escalate).toMatch(/bounded-build budget/);
-      expect(result.decomposed).toBeUndefined();
+      expect(result.escalate).toContain('parked for decomposition');
       expect(result.sliced).toBeUndefined();
-      expect(stub.calls.map((call) => call.task)).toContain('decompose');
-      expect(createComment).toHaveBeenCalledTimes(1);
+      expect(stub.calls.map((call) => call.task)).not.toContain('decompose');
+      expect(createComment).not.toHaveBeenCalled();
       expect(events).toContain('size-gate-escalated');
-      expect(events).toContain('decompose_comment_posted');
-    });
-
-    it('files sub-issues and returns decomposed when an over-budget plan trips the post-plan gate in file mode (#2662)', async () => {
-      const worktree = await setup.worktree('plan-phase-test-');
-      const specPath = join(worktree, 'issue-901.md');
-      const { router } = setup.router(
-        models,
-        routes,
-        undefined,
-        new StubModelExecutor({
-          scripts: {
-            plan: [{ output: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n` }],
-            decompose: [{ output: validDecomposition }],
-          },
-        }),
-      );
-      const createComment = vi.fn().mockResolvedValue({});
-      const create = vi.fn().mockResolvedValue({ data: { number: 902, id: 9902 } });
-      const request = vi.fn().mockResolvedValue({ data: [] });
-      const events: string[] = [];
-
-      const result = await planPhase({
-        issue: workKeyFromIssue(901),
-        repo: 'on-par/software-factory',
-        worktree,
-        specPath,
-        router,
-        constitution: null,
-        octokit: {
-          rest: {
-            issues: {
-              get: async () => ({
-                data: {
-                  title: 'Mega slice',
-                  body: '## Problem statement\nToo big.\n## In scope\n- one\n## Out of scope\n- rest\n## Acceptance criteria\n- [ ] works\n## Verification\nnpm test',
-                },
-              }),
-              createComment,
-              create,
-            },
-          },
-          request,
-        } as any,
-        log: (type) => events.push(type),
-      });
-
-      expect(result.ok).toBe(false);
-      expect(result.decomposed).toEqual({ childIssues: [902] });
-      expect(result.escalate).toMatch(/bounded-build budget.*decomposed into #902/);
-      expect(result.sliced).toBeUndefined();
-      expect(events).toContain('decompose_filed');
-      expect(events).toContain('size-gate-decomposed');
-      expect(events).not.toContain('size-gate-escalated');
     });
 
     it('leaves a bounded design artifact alone (no decompose, plan proceeds)', async () => {
@@ -1005,78 +956,8 @@ npm run test`;
       ],
     });
 
-    const investFailingDecomposition = JSON.stringify({
-      epic: { title: 'Epic', why: 'why', doneWhen: ['done'], children: ['Story one'] },
-      stories: [
-        {
-          title: 'Story one',
-          role: 'operator',
-          want: 'the thing works',
-          soThat: 'value',
-          problemStatement: 'problem',
-          inScope: ['in scope item'],
-          outOfScope: ['persistent storage'],
-          acceptanceCriteria: [
-            {
-              name: 'works',
-              given: [],
-              when: ['run'],
-              then: ['works'],
-              tracesTo: ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'],
-            },
-          ],
-          verification: [{ command: 'npm test', passWhen: 'passes' }],
-        },
-      ],
-    });
-
     // #3350: counts never split; an over-budget design artifact (14 changed files > 12) does, post-plan.
     const megaPlan = () => [{ output: `---\nroute: codex\n${megaSliceYaml}---\n# Spec\n` }];
-
-    it('decomposes and parks a complete oversized factory-task by default', async () => {
-      const worktree = await setup.worktree('plan-phase-test-');
-      const specPath = join(worktree, 'issue-607.md');
-      const { router, stub } = setup.router(
-        models,
-        routes,
-        undefined,
-        new StubModelExecutor({
-          scripts: {
-            decompose: [{ output: validDecomposition }],
-            plan: megaPlan(),
-          },
-        }),
-      );
-      const createComment = vi.fn().mockResolvedValue({});
-      const events: string[] = [];
-
-      const result = await planPhase({
-        issue: workKeyFromIssue(607),
-        repo: 'on-par/software-factory',
-        worktree,
-        specPath,
-        router,
-        constitution: null,
-        octokit: fakeOctokit({
-          'issues.get': async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
-          'issues.createComment': createComment,
-        }).octokit,
-        log: (type) => events.push(type),
-      });
-
-      expect(result.ok).toBe(false);
-      expect(result.escalate).toMatch(/bounded-build budget/);
-      expect(stub.calls.map((call) => call.task)).toEqual(['plan', 'decompose']);
-      expect(createComment).toHaveBeenCalledTimes(1);
-      expect(createComment).toHaveBeenCalledWith({
-        owner: 'on-par',
-        repo: 'software-factory',
-        issue_number: 607,
-        body: expect.stringContaining('## Proposed epic: Harden the import queue'),
-      });
-      expect(events).toContain('size-gate-escalated');
-      expect(events).toContain('decompose_comment_posted');
-    });
 
     it('scores the size gate on the factory:enriched sections of an already-enriched body (5 -> 8 ACs) (#2660)', async () => {
       const worktree = await setup.worktree('plan-phase-test-');
@@ -1143,53 +1024,13 @@ npm run test`;
         log: (type: any, msg: any, extra: any) => logs.push({ type, msg, extra }),
       });
 
-      expect(stub.calls.map((call) => call.task)).toEqual(['plan', 'decompose']);
+      expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
       const hint = logs.find((l) => l.type === 'size_hint');
       expect(hint?.msg).toMatch(/8 acceptance criteria/);
       expect(hint?.extra.readiness.sizeOk).toBe(false);
-      expect(logs.some((l) => l.type === 'size-gate-decomposed')).toBe(true);
-      expect(logs.some((l) => l.type === 'size-gate-escalated')).toBe(false);
+      expect(logs.some((l) => l.type === 'size-gate-escalated')).toBe(true);
       expect(result.ok).toBe(false);
-      expect(result.decomposed).toEqual({ childIssues: [2700] });
-    });
-
-    it('parks with size-gate-escalated even when the decomposition fails INVEST', async () => {
-      const worktree = await setup.worktree('plan-phase-test-');
-      const specPath = join(worktree, 'issue-607.md');
-      const { router, stub } = setup.router(
-        models,
-        routes,
-        undefined,
-        new StubModelExecutor({
-          scripts: {
-            decompose: [{ output: investFailingDecomposition }, { output: investFailingDecomposition }],
-            plan: megaPlan(),
-          },
-        }),
-      );
-      const createComment = vi.fn().mockResolvedValue({});
-      const events: string[] = [];
-
-      const result = await planPhase({
-        issue: workKeyFromIssue(607),
-        repo: 'on-par/software-factory',
-        worktree,
-        specPath,
-        router,
-        constitution: null,
-        octokit: fakeOctokit({
-          'issues.get': async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
-          'issues.createComment': createComment,
-        }).octokit,
-        log: (type) => events.push(type),
-      });
-
-      expect(result.ok).toBe(false);
-      expect(result.escalate).toMatch(/bounded-build budget/);
-      expect(stub.calls.map((call) => call.task)).toEqual(['plan', 'decompose', 'decompose']);
-      expect(createComment).not.toHaveBeenCalled();
-      expect(events).toContain('decompose_failed');
-      expect(events).toContain('size-gate-escalated');
+      expect(result.escalate).toMatch(/parked for decomposition/);
     });
 
     it('proceeds to PLAN when enforceSizeGate is false', async () => {
@@ -1228,102 +1069,6 @@ npm run test`;
       expect(stub.calls.map((call) => call.task)).toEqual(['plan']);
       expect(createComment).not.toHaveBeenCalled();
       expect(events).not.toContain('size-gate-escalated');
-    });
-
-    it('files real sub-issues and returns them on decomposed.childIssues when filing succeeds (#823)', async () => {
-      const worktree = await setup.worktree('plan-phase-test-');
-      const specPath = join(worktree, 'issue-607.md');
-      const { router } = setup.router(
-        models,
-        routes,
-        undefined,
-        new StubModelExecutor({
-          scripts: {
-            decompose: [{ output: validDecomposition }],
-            plan: megaPlan(),
-          },
-        }),
-      );
-      const createComment = vi.fn().mockResolvedValue({});
-      let nextIssue = 700;
-      const create = vi.fn().mockImplementation(() => {
-        nextIssue += 1;
-        return Promise.resolve({ data: { number: nextIssue, id: 6000 + nextIssue } });
-      });
-      const request = vi.fn().mockResolvedValue({ data: [] });
-      const events: string[] = [];
-
-      const result = await planPhase({
-        issue: workKeyFromIssue(607),
-        repo: 'on-par/software-factory',
-        worktree,
-        specPath,
-        router,
-        constitution: null,
-        octokit: {
-          rest: {
-            issues: {
-              get: async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
-              createComment,
-              create,
-            },
-          },
-          request,
-        } as any,
-        log: (type) => events.push(type),
-      });
-
-      expect(result.ok).toBe(false);
-      expect(result.decomposed).toEqual({ childIssues: [701] });
-      expect(result.escalate).toMatch(/decomposed into #701/);
-      expect(create).toHaveBeenCalledTimes(1);
-      expect(request).toHaveBeenCalledTimes(2); // GET duplicate check + POST sub-issue link
-      expect(events).toContain('decompose_filed');
-      expect(events).toContain('size-gate-decomposed');
-      expect(events).not.toContain('size-gate-escalated');
-    });
-
-    it('leaves decomposed unset and keeps the parked-for-decomposition message when filing yields no children', async () => {
-      const worktree = await setup.worktree('plan-phase-test-');
-      const specPath = join(worktree, 'issue-607.md');
-      const { router } = setup.router(
-        models,
-        routes,
-        undefined,
-        new StubModelExecutor({
-          scripts: {
-            decompose: [{ output: validDecomposition }],
-            plan: megaPlan(),
-          },
-        }),
-      );
-      const createComment = vi.fn().mockResolvedValue({});
-      const events: string[] = [];
-
-      const result = await planPhase({
-        issue: workKeyFromIssue(607),
-        repo: 'on-par/software-factory',
-        worktree,
-        specPath,
-        router,
-        constitution: null,
-        octokit: {
-          rest: {
-            issues: {
-              get: async () => ({ data: { title: 'Harden the import queue', body: oversizedBody } }),
-              createComment,
-              // no `create` — filing fails, degrading to the park-and-comment path
-            },
-          },
-        } as any,
-        log: (type) => events.push(type),
-      });
-
-      expect(result.ok).toBe(false);
-      expect(result.decomposed).toBeUndefined();
-      expect(result.escalate).toMatch(/parked for decomposition/);
-      expect(events).toContain('decompose_file_failed');
-      expect(events).toContain('size-gate-escalated');
     });
   });
 
@@ -1803,7 +1548,6 @@ npm run test`;
       expect(body).toContain('<!-- factory:slice-plan v1 -->');
       expect(body).not.toContain('## Proposed epic');
       expect(body.match(/^- \[ \] \d+\/6\./gm)).toHaveLength(6);
-      expect(result.decomposed).toBeUndefined();
       expect(result.escalate).toContain('6 slices');
       expect(result.escalate).toContain('cap 5');
       expect(result.escalate).toContain('--max-slices 6');
