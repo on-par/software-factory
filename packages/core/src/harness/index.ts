@@ -1,6 +1,7 @@
 // src/harness/index.ts — CodingHarness contract: the common target every
 // provider adapter (Claude CLI, Codex CLI, Ollama, OpenCode, Pi) must satisfy.
 
+import type { CodexSandboxMode } from '../config/sandbox-schema.js';
 import type { ModelRegistry } from '../models/index.js';
 import type { SandboxPolicy } from '../sandbox/index.js';
 import type { FailoverReason, TaskType } from '../types/index.js';
@@ -55,6 +56,8 @@ export interface HarnessRequest {
   primaryRepoRoot?: string;
   /** Configured Codex task names allowed danger-full-access, independent of OS sandbox policy. */
   codexFullAccessTasks?: readonly string[];
+  /** Configured Codex sandbox mode (sandbox.codexSandbox, #3830); undefined = today's behavior. Not read by the harness yet (#3824). */
+  codexSandbox?: CodexSandboxMode;
   /** Extra child-env vars (e.g. the lane's PORT lease) merged over the parent env. */
   env?: Record<string, string>;
   /** When set, the harness's exec child is spawned detached (its own

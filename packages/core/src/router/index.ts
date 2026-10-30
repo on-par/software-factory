@@ -1,6 +1,7 @@
 // src/router/index.ts — Model router with cost-tier routing and same-provider failover
 
 import type { ModelsConfig, RoutesConfig } from '../config/index.js';
+import type { CodexSandboxMode } from '../config/sandbox-schema.js';
 import { isOpenCodeZenModel } from '../config/provider-order.js';
 import { harnessCliCommand, retiredHarnessNotice } from '../harness/catalog.js';
 import { classifyFailure } from '../harness/classify.js';
@@ -127,6 +128,7 @@ export interface ModelExecutorContext {
   writableRoots?: readonly string[];
   primaryRepoRoot?: string;
   codexFullAccessTasks?: readonly string[];
+  codexSandbox?: CodexSandboxMode;
   /** Codex auto-compact limit for agentic build tasks, from build.contextCeiling (#3327). */
   contextCeiling?: number;
   /** Extra child-env vars (e.g. the lane's PORT lease) merged over the parent env. */
@@ -243,6 +245,7 @@ export class CliModelExecutor implements ModelExecutor {
       | 'writableRoots'
       | 'primaryRepoRoot'
       | 'codexFullAccessTasks'
+      | 'codexSandbox'
       | 'contextCeiling'
       | 'env'
       | 'onPgid'
@@ -261,6 +264,7 @@ export class CliModelExecutor implements ModelExecutor {
       writableRoots: ctx.writableRoots,
       primaryRepoRoot: ctx.primaryRepoRoot,
       codexFullAccessTasks: ctx.codexFullAccessTasks,
+      codexSandbox: ctx.codexSandbox,
       contextCeiling: ctx.contextCeiling,
       env: ctx.env,
       onPgid: ctx.onPgid,
@@ -293,6 +297,7 @@ export class ModelRouter {
   private readonly retiredHarnessNoticed = new Set<string>();
   private localAuthSink?: (agent: LocalAuthAgent) => void;
   private codexFullAccessTasks: readonly string[] = [];
+  private codexSandbox?: CodexSandboxMode;
   private contextCeilings: Readonly<Record<string, number>> = { 'codex-cli': DEFAULT_CODEX_CONTEXT_CEILING };
   private stageSkipProviders?: ReadonlySet<string>;
   private codexWorkspacePaths?: { primaryRepoRoot: string; writableRoots: readonly string[] };
@@ -317,6 +322,11 @@ export class ModelRouter {
   /** Resolved config allowlist, available even when the OS sandbox is disabled. */
   setCodexFullAccessTasks(tasks: readonly string[] | undefined): void {
     this.codexFullAccessTasks = [...(tasks ?? [])];
+  }
+
+  /** Resolved sandbox.codexSandbox (#3830); undefined (unset or ignored unknown value) keeps today's behavior. */
+  setCodexSandbox(mode: CodexSandboxMode | undefined): void {
+    this.codexSandbox = mode;
   }
 
   /** Per-harness context ceilings from build.contextCeiling; undefined restores the packaged default (#3327). */
@@ -648,6 +658,7 @@ export class ModelRouter {
             sandbox,
             ...this.codexWorkspacePaths,
             codexFullAccessTasks: this.codexFullAccessTasks,
+            codexSandbox: this.codexSandbox,
             contextCeiling: contextCeilingFor(task, harnessId, this.contextCeilings),
             env,
             onPgid,

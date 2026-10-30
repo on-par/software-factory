@@ -3,7 +3,14 @@ import { join } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { h, installCliCommandsHarness, paths, runMain, runMainWith } from './test-support/cli-commands-harness.js';
+import {
+  coreFakes,
+  h,
+  installCliCommandsHarness,
+  paths,
+  runMain,
+  runMainWith,
+} from './test-support/cli-commands-harness.js';
 
 installCliCommandsHarness();
 
@@ -22,6 +29,17 @@ describe('cli commands (via main dispatch)', () => {
         }),
       );
       expect(h.runTuiCalls).toHaveLength(0);
+    });
+
+    it('tui sets the router codex sandbox from config (#3830)', async () => {
+      h.factoryConfig = {
+        ...h.factoryConfig,
+        sandbox: { ...h.factoryConfig.sandbox, codexSandbox: 'workspace-write' },
+      };
+      await runMain('tui');
+      expect(vi.mocked(coreFakes.ModelRouter).mock.results.at(-1)?.value.setCodexSandbox).toHaveBeenCalledWith(
+        'workspace-write',
+      );
     });
 
     it('calls runTui with the events file, detected repo, and a GitHub-backed queue reader by default', async () => {

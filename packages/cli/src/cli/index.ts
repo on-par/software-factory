@@ -1595,7 +1595,9 @@ async function cmdClassifierBacktestEntry(opts: ClassifierBacktestOptions) {
     effective.allowExperimental,
     effective.localOnly,
   );
-  router.setCodexFullAccessTasks?.(configLoaders.loadFactoryConfigForRepo(paths.config).sandbox.codexFullAccessTasks);
+  const sandbox = configLoaders.loadFactoryConfigForRepo(paths.config).sandbox;
+  router.setCodexFullAccessTasks?.(sandbox.codexFullAccessTasks);
+  router.setCodexSandbox?.(sandbox.codexSandbox);
   applyRouterGuards(router);
   try {
     await cmdClassifierBacktest(
@@ -1921,7 +1923,9 @@ async function cmdTui(opts: { localQueue?: boolean } = {}, runTuiImpl: typeof ru
     effective.allowExperimental,
     effective.localOnly,
   );
-  router.setCodexFullAccessTasks?.(configLoaders.loadFactoryConfigForRepo(paths.config).sandbox.codexFullAccessTasks);
+  const sandbox = configLoaders.loadFactoryConfigForRepo(paths.config).sandbox;
+  router.setCodexFullAccessTasks?.(sandbox.codexFullAccessTasks);
+  router.setCodexSandbox?.(sandbox.codexSandbox);
   applyRouterGuards(router);
   const effectiveConfigLines = describeEffectiveConfig({
     router,
@@ -2851,7 +2855,9 @@ async function cmdTriage(opts: { product?: string; model?: string }) {
     effective.allowExperimental,
     effective.localOnly,
   );
-  router.setCodexFullAccessTasks?.(configLoaders.loadFactoryConfigForRepo(paths.config).sandbox.codexFullAccessTasks);
+  const sandbox = configLoaders.loadFactoryConfigForRepo(paths.config).sandbox;
+  router.setCodexFullAccessTasks?.(sandbox.codexFullAccessTasks);
+  router.setCodexSandbox?.(sandbox.codexSandbox);
   applyRouterGuards(router);
   router.skipMissingHarnessClis(coreOps.isCommandAvailable);
   router.setCostSink((entry) => logCost(paths.costs, { ...entry, issue: '-' }));
