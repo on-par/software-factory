@@ -294,6 +294,7 @@ describe('CliModelExecutor', () => {
         worktree,
         timeoutSeconds,
         task: 'build_codex',
+        codexSandbox: 'workspace-write',
         registry,
         routesConfig,
       })

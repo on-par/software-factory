@@ -324,7 +324,7 @@ export class ModelRouter {
     this.codexFullAccessTasks = [...(tasks ?? [])];
   }
 
-  /** Resolved sandbox.codexSandbox (#3830); undefined (unset or ignored unknown value) keeps today's behavior. */
+  /** Resolved sandbox.codexSandbox (#3830); undefined (unset or ignored unknown value) means no Codex sandbox (#3824). */
   setCodexSandbox(mode: CodexSandboxMode | undefined): void {
     this.codexSandbox = mode;
   }

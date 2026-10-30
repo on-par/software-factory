@@ -108,7 +108,7 @@ export function logSandboxPolicy(
     activeSandboxPolicy = sandboxPolicy;
     log(
       'sandbox',
-      'outer sandbox off; harness sandbox in use (codex --sandbox workspace-write; harnesses without their own sandbox run unwrapped)',
+      'outer sandbox off; codex runs without its own sandbox unless sandbox.codexSandbox is workspace-write; harnesses without their own sandbox run unwrapped',
     );
     logConfiguredWritablePaths(sandboxPolicy, log);
   } else if (sandboxPolicy.runtime === 'docker-sandbox') {

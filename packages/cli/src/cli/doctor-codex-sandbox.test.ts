@@ -30,6 +30,7 @@ describe('codex installed sandbox note (#3082)', () => {
       probes({
         platform: 'linux',
         commandAvailable: noFirejail,
+        codexSandbox: () => 'workspace-write',
         codexFullAccessTasks: () => ['build_codex', '', 'build_codex'],
       }),
     );
@@ -42,6 +43,7 @@ describe('codex installed sandbox note (#3082)', () => {
       probes({
         platform: 'linux',
         commandAvailable: noFirejail,
+        codexSandbox: () => 'workspace-write',
         codexFullAccessTasks: () => {
           throw new Error('bad config');
         },
@@ -51,8 +53,40 @@ describe('codex installed sandbox note (#3082)', () => {
   });
 
   it('a sandbox runtime keeps the sandboxed-builds note without a preflight', () => {
-    const detail = codexDetail(probes({ platform: 'linux', codexFullAccessTasks: () => ['build_codex'] }));
+    const detail = codexDetail(
+      probes({ platform: 'linux', codexSandbox: () => 'workspace-write', codexFullAccessTasks: () => ['build_codex'] }),
+    );
     expect(detail).toContain('sandboxed builds available');
     expect(detail).not.toContain('preflight:');
+  });
+
+  it('unset mode says codex runs without its own sandbox and names the workspace-write opt-in', () => {
+    const none = codexDetail(probes({ platform: 'linux', commandAvailable: noFirejail }));
+    expect(none).toContain('codex runs without its own sandbox (--sandbox danger-full-access) by default');
+    expect(none).toContain('set sandbox.codexSandbox: workspace-write');
+    expect(none).not.toContain('codex will use --sandbox workspace-write');
+    const withRuntime = codexDetail(probes({ platform: 'linux', codexSandbox: () => undefined }));
+    expect(withRuntime).toContain('sandboxed builds available; codex runs without its own sandbox');
+  });
+
+  it('workspace-write mode keeps the workspace-write preflight note', () => {
+    const detail = codexDetail(
+      probes({ platform: 'linux', commandAvailable: noFirejail, codexSandbox: () => 'workspace-write' }),
+    );
+    expect(detail).toContain('codex will use --sandbox workspace-write');
+    expect(detail).toContain('to opt in to full access, list tasks under sandbox.codexFullAccessTasks');
+  });
+
+  it('a throwing codexSandbox probe falls back to the default note', () => {
+    const detail = codexDetail(
+      probes({
+        platform: 'linux',
+        commandAvailable: noFirejail,
+        codexSandbox: () => {
+          throw new Error('bad config');
+        },
+      }),
+    );
+    expect(detail).toContain('by default');
   });
 });
