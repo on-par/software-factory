@@ -90,7 +90,7 @@ describe('resolveRunBranch', () => {
 
   it('does not read a slice plan for a whole chain member', async () => {
     const { octokit, list } = stub([]);
-    const branch = await run(octokit, { sizeGateMode: 'stack', parkOverBudget: true });
+    const branch = await run(octokit, { sizeGateMode: 'stack', explicitStack: true, parkOverBudget: true });
     expect(branch).toBe(branchFor(workKeyFromIssue(2253), 'New title', 'factory'));
     expect(list).not.toHaveBeenCalled();
   });
@@ -116,7 +116,7 @@ describe('resolveRunBranch', () => {
     expect(list).not.toHaveBeenCalled();
   });
 
-  it('skips the lookup for stack runs', async () => {
+  it('skips the lookup for explicit stack runs', async () => {
     const { octokit, list } = stub([pr(7, 'factory/2253-x')]);
     const rest = {
       ...octokit.rest,
@@ -124,10 +124,21 @@ describe('resolveRunBranch', () => {
       issues: { listComments: async () => ({ data: [] }) },
     };
     const stackOctokit = { rest } as any;
-    expect(await run(stackOctokit, { sizeGateMode: 'stack' })).toBe(
+    expect(await run(stackOctokit, { sizeGateMode: 'stack', explicitStack: true })).toBe(
       branchFor(workKeyFromIssue(2253), 'New title', 'factory'),
     );
     expect(list).not.toHaveBeenCalled();
+  });
+
+  it('adopts the open factory PR for a stack run that is not explicit', async () => {
+    const { octokit } = stub([pr(7, 'factory/2253-old-title')]);
+    const rest = {
+      ...octokit.rest,
+      users: { getAuthenticated: async () => ({ data: { id: 1 } }) },
+      issues: { listComments: async () => ({ data: [] }) },
+    };
+    expect(await run({ rest } as any, { sizeGateMode: 'stack' })).toBe('factory/2253-old-title');
+    expect(events().some((e) => e.type === 'pr-adopted')).toBe(true);
   });
 
   it('skips the lookup for non-github work', async () => {

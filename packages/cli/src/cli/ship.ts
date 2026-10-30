@@ -48,6 +48,7 @@ import {
   egressHostMessage,
   egressSummaryMessage,
   holdRunConfigSnapshot,
+  isExplicitStackMode,
   logCost,
   logEvent,
   readIssueRunState,
@@ -246,12 +247,16 @@ async function shipIssueFrom(
     noPr || (opts.baseBranch !== undefined && opts.sizeGate !== 'stack')
       ? 'off'
       : (opts.sizeGate ?? resolveSizeGateMode(factoryConfig));
+  const explicitStack =
+    sizeGateMode === 'stack' &&
+    (opts.sizeGate !== undefined ? opts.explicitStack === true : isExplicitStackMode(factoryConfig));
   const maxSlices = opts.maxSlices ?? resolveSizeGateMaxSlices(factoryConfig);
   const { branchPrefix } = policy.effective;
   const claim = { issueNum, issueTitle, ghRepo, sizeGateMode, work, ctx, octokit, baseBranch: opts.baseBranch };
   const branch = await resolveRunBranch({
     ...claim,
     branchPrefix,
+    explicitStack,
     noPr,
     parkOverBudget: opts.parkOverBudget,
     eventsFile: paths.events,

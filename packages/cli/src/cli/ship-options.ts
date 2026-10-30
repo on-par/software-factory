@@ -12,6 +12,8 @@ export interface ShipIssueOptions {
   branchPrefix?: string;
   /** `run-issue --size-gate` (ADR-0147); undefined defers to sizeGate.mode in the config. */
   sizeGate?: SizeGateMode;
+  /** #3832: true when stack came from --stack or --size-gate stack; a defaulted or aliased stack still adopts an open PR. */
+  explicitStack?: boolean;
   /** run-issue --max-slices (ADR-0156); undefined defers to sizeGate.maxSlices. */
   maxSlices?: number;
   /** `--pr-classifier` / `--no-pr-classifier` (#1724); undefined defers to config/env. */
@@ -57,16 +59,15 @@ export function baseBranchOrExit(raw: string | undefined): string | undefined {
 export function baseBranchConflict(opts: {
   baseBranch?: string;
   sizeGate?: string;
-  runChildren?: boolean;
   workspace?: string;
 }): string | undefined {
-  const { baseBranch, sizeGate, runChildren, workspace } = opts;
+  const { baseBranch, sizeGate, workspace } = opts;
   if (baseBranch === undefined) return undefined;
   if (workspace !== undefined) {
     return 'factory: --base-branch needs a factory worktree — drop --workspace or drop --base-branch';
   }
-  if ((sizeGate !== undefined && sizeGate !== 'off' && sizeGate !== 'stack') || runChildren) {
-    return 'factory: --base-branch runs with the size gate off or stack — drop --size-gate/--run-children or drop --base-branch';
+  if (sizeGate !== undefined && sizeGate !== 'off' && sizeGate !== 'stack') {
+    return 'factory: --base-branch runs with the size gate off or stack — drop --size-gate or drop --base-branch';
   }
   return undefined;
 }

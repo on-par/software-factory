@@ -91,6 +91,38 @@ describe('shipIssue (direct)', () => {
       expect(setup.mock.calls[0]?.[1]).toBe('factory/5-fix-the-bug');
     });
 
+    describe('open factory PR adoption with the default stack (#3832)', () => {
+      const openPr = () => {
+        const fake = defaultOctokit() as any;
+        fake.rest.pulls.list = vi.fn(async ({ state }: any) => ({
+          data:
+            state === 'open'
+              ? [{ number: 77, head: { ref: 'factory/5-old-title', sha: 'abc', repo: { full_name: h.ghRepo } } }]
+              : [],
+        }));
+        return fake;
+      };
+      const branchFor = async (opts: Parameters<typeof shipIssue>[1], mode?: string) => {
+        const setup = custom();
+        h.factoryConfig = { ...h.factoryConfig, sizeGate: mode === undefined ? {} : { mode } };
+        const fake = openPr();
+        await shipIssue(5, opts, ctx(), { setupWorktree: setup, octokit: () => fake });
+        return setup.mock.calls[0]?.[1];
+      };
+
+      it.each([undefined, 'file', 'slice'])('adopts the open PR branch when sizeGate.mode is %s', async (mode) => {
+        expect(await branchFor({}, mode)).toBe('factory/5-old-title');
+      });
+
+      it('keeps a fresh branch for an explicit --stack', async () => {
+        expect(await branchFor({ sizeGate: 'stack', explicitStack: true })).toBe('factory/5-fix-the-bug');
+      });
+
+      it('keeps a fresh branch when the config says stack', async () => {
+        expect(await branchFor({}, 'stack')).toBe('factory/5-fix-the-bug');
+      });
+    });
+
     it('parks before creating a worktree when the slice plan lookup throws', async () => {
       const setup = custom();
       const fake = sliceOctokit(async () => {

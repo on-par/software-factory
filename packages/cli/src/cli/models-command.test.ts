@@ -77,7 +77,7 @@ describe('cli commands (via main dispatch)', () => {
         vi.stubEnv('FACTORY_GITHUB_STUB_DIR', stubDir);
         const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
-        await shipIssue(5, {}, { repoRoot: h.repoRoot, ghRepo: h.ghRepo }, { octokit: undefined });
+        await shipIssue(5, { sizeGate: 'off' }, { repoRoot: h.repoRoot, ghRepo: h.ghRepo }, { octokit: undefined });
 
         const plan = phases.planPhase.mock.calls.at(-1)?.[0] as any;
         expect(plan.branch).toBe('factory/5-stubbed-title'); // slug of the fixture title

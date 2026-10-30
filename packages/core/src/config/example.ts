@@ -60,11 +60,10 @@ const RUNTIME_NOTES: Record<string, string> = {
     'after CHECK. FACTORY_BUILD_PUBLISH=1/0 beats it. ' +
     'contextCeiling (default { codex-cli: 120000 }) is the per-harness context ceiling for BUILD and rework: Codex compacts the session at that many tokens; 0 turns it off; only codex-cli honours it today (#3327).',
   sizeGate:
-    'Size gate policy at PLAN (ADR-0147, ADR-0156). mode: file (default) files child issues for an oversized issue and parks ' +
-    'when the post-plan gate trips; slice keeps the issue whole, never files issues, records a slice plan comment and ships one slice per run; off skips both gates and sends the whole issue to BUILD; stack (ADR-0161) ships one stacked slice PR per run and builds the next slice only after the PR below is approved or merged. ' +
+    'Size gate policy at PLAN (ADR-0147, ADR-0156). mode: unset (default) or `stack` (ADR-0161) ships an oversized issue as stacked slice PRs, one per run, building the next slice only after the PR below is approved or merged; `file` and `slice` are deprecated aliases for stack and print a warning; `off` skips both gates and sends the whole issue to BUILD. ' +
     'maxSlices (1-20, default 10) caps a slice plan that has not started: an over-cap plan is recorded and parks, and `--max-slices <n>` beats it for one run. ' +
     "tokenBudget (default 150000) and maxFiles (default 12) (#3350): the post-plan gate splits only when the plan's estimated tokens exceed tokenBudget or its changed files exceed maxFiles; a plan changing 3 files or fewer never splits. " +
-    '`factory run-issue --size-gate <mode>` beats mode for one run.',
+    '`factory run-issue --size-gate <mode>` / `--stack` beats mode for one run.',
   timeouts:
     'Phase timeouts in seconds. tests_seconds caps the tests checker command (scripts/verify.sh, npm test or pytest). compile_seconds caps the compile checker command (npm run build, make or cargo build). ' +
     'FACTORY_PLAN_TIMEOUT, FACTORY_BUILD_TIMEOUT, FACTORY_CHECK_TIMEOUT, FACTORY_APPROVAL_TIMEOUT, ' +

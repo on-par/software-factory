@@ -136,7 +136,7 @@ The most-used commands, by the group `factory --help` lists them under. Run `fac
 # Run work
 factory ship <N>                    Plan → build → check one issue and open a ready-for-review PR; never merges
 factory run-issue <N>               Like ship, but loads the issue first and exits 2 if it cannot be found
-factory run-issue <N> --run-children Also run the child issues the size gate files when it splits <N>
+factory run-issue <N> --stack        Build an oversized <N> as a stacked PR set in one run (the size gate default)
 factory run-issue <N> --base-branch <ref>  Start from origin/<ref> and open the PR against <ref> (also ship, run-brief)
 factory run-brief a.md b.md --stack   Open the briefs as a PR stack (each on the previous brief's PR head)
 factory run-brief big.md --stack       Slice an over-budget brief and build the slices as a PR stack in one run
@@ -175,19 +175,9 @@ factory usage                       Report 5-hour subscription usage
 
 `factory draft` exits 0 when the draft is factory-ready, 1 when it is not, 2 on a model or input error, and 3 when it would split.
 
-### `factory run-issue --run-children`
+### Size gate: stack by default
 
-When the size gate decides an issue is too big, it files child issues and stops the run. Without the flag, `run-issue` exits 1, names the children, and suggests re-running with `--run-children`. Each child's criteria trace to the parent's criteria (`P1`, `P2`, ...), the child body lists the ones it covers, and a split that leaves a parent criterion uncovered is rejected. With the flag, it runs those children itself:
-
-- **Order.** Children run one at a time, in the build order the size gate filed them, each under its own issue run lock, inside the parent's.
-- **Nested splits.** If a child is decomposed again, its new children replace it and run before the remaining siblings. No issue runs twice.
-- **Closed children** are skipped.
-- **Failures don't stop the run.** A child that fails or escalates is recorded, and the next child still runs.
-- **`.factory/state/STOP`** is checked before each child starts. Once it is present, no further child starts, and the file is left in place (ADR-0111). A child already running finishes.
-- **Summary.** At the end, `run-issue` prints one line per child: its PR, or why it failed, was skipped, or did not run.
-- **No labels, no merge.** Like `ship`, it never touches the queue's `factory:*` labels and never merges. Each successful child ends at its own ready-for-review PR.
-
-Exit codes: `0` when every child reached ready-for-review, was skipped as closed, or was replaced by its own children. `1` when any child failed or was not started because of STOP, or when the issue was decomposed and `--run-children` was not passed. `2` when the parent issue cannot be resolved, before any worktree or PR exists. If the issue is not decomposed, the flag changes nothing.
+Oversized issues stack by default: `factory run-issue <N>` (or `--stack`) ships an oversized issue as stacked slice PRs. `run-issue --run-children` was removed and exits 2. `--size-gate file|slice` and `sizeGate.mode: file|slice` are deprecated aliases for stack that print one warning naming `--stack`. `--size-gate off` still skips both gates.
 
 ## Root npm scripts
 
