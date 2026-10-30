@@ -158,7 +158,6 @@ export async function resolveSliceGate(deps: {
     log,
     timeoutSeconds: deps.timeoutSeconds,
     onProviderFailure: deps.onProviderFailure,
-    fileSubIssues: false,
     postComment: false,
   });
   const { decomposition } = decomposed;

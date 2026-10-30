@@ -1214,19 +1214,6 @@ describe('cli commands (via main dispatch)', () => {
       expect(calls[0][0]).toEqual('sf/5-fix-the-bug');
       expect(calls[0][1]).toContain('-factory-sf-');
     });
-    it('names the child issues and points at --stack when the size gate decomposes the issue', async () => {
-      h.planResult = { ok: false, route: 'claude', escalate: 'decomposed', decomposed: { childIssues: [10, 11] } };
-      const res = await runMain('run-issue', '5');
-      expect(res).toMatchObject({ exited: true, code: 1 });
-      expect(errored()).toContain('#10');
-      expect(errored()).toContain('#11');
-      expect(errored()).toContain('--stack');
-      expect(errored()).not.toContain('--run-children');
-      expect(phases.planPhase).toHaveBeenCalledTimes(1);
-      expect(phases.buildPhase).not.toHaveBeenCalled();
-      expect(phases.shipPhase).not.toHaveBeenCalled();
-    });
-
     describe('--run-children (removed)', () => {
       const removedMessage = '--run-children was removed; oversized issues stack with --stack';
       it.each([

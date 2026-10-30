@@ -30,7 +30,7 @@ import type { PlanResult } from './plan-result.js';
 import { settlePlanRoute } from './plan-route.js';
 import { codexUnavailable, type RouteCapabilities } from './route-capabilities.js';
 import { blockedNoChangeSpecReason, noBuildReason, planSummary, specWriteDeniedResult } from './plan-spec-guards.js';
-import { decomposeOversizedIssue, renderChildIssueBody } from '../readiness/decompose.js';
+import { renderChildIssueBody } from '../readiness/decompose.js';
 import { resolveSliceGate } from '../readiness/slice-gate.js';
 import type { SlicePlanStore } from '../readiness/slice-plan-store.js';
 import { DEFAULT_MAX_SLICES } from '../readiness/slice-plan.js';
@@ -782,7 +782,7 @@ async function planPhaseImpl(opts: {
         log('design_open_questions', `plan has ${designArtifact.openQuestions.length} open question(s): ${truncated}`);
       }
 
-      // Build-scope gate (#3350): park or decompose plans that exceed the bounded BUILD budget.
+      // Build-scope gate (#3350): park or slice plans that exceed the bounded BUILD budget.
       const overBudget = planOverBudget(estimatePlanSize(designArtifact, { worktree }), sizeBudget);
       if (enforceSizeGate && sliceGateOn && overBudget !== null) {
         const scope = overBudget;
@@ -837,38 +837,8 @@ async function planPhaseImpl(opts: {
             return park(reason);
           }
         } else {
-          // File mode (#2662): file the decomposition as sub-issues and re-queue them instead of parking.
-          // Only a GitHub issue source reaches here: any other source needs slice mode to pass sliceGateOn.
-          const params = source.params as GithubIssueParams;
-          const decomposeResult = await decomposeOversizedIssue({
-            issue: params.issue,
-            repo: params.repo,
-            title: issueTitle,
-            body: issueBody,
-            worktree,
-            router,
-            sandbox: opts.sandbox,
-            octokit,
-            log: (type, msg) => log(type, msg),
-            timeoutSeconds: Math.min(timeoutSeconds ?? 1800, 300),
-            onProviderFailure,
-            fileSubIssues: true,
-          });
-          // #3351: slices that mostly edit the same files keep the issue whole; PLAN continues.
-          if (decomposeResult.cohesive === undefined) {
-            const { childIssues } = decomposeResult;
-            if (childIssues.length > 0) {
-              const reason = `plan scope exceeds the bounded-build budget (${scope}) — decomposed into ${childIssues.map((n) => `#${n}`).join(', ')}`;
-              log('size-gate-decomposed', reason);
-              return { ...park(reason), decomposed: { childIssues } };
-            }
-            // #728: a skipped decomposition (closed issue, pending proposal) names its cause in the park reason.
-            const reason = decomposeResult.skipped
-              ? `plan scope exceeds the bounded-build budget (${scope}) — ${decomposeResult.skipped.reason}`
-              : fileReason;
-            log('size-gate-escalated', reason);
-            return park(reason);
-          }
+          log('size-gate-escalated', fileReason);
+          return park(fileReason);
         }
       }
       const unresolved = findUnresolvedRegressions(designArtifact);

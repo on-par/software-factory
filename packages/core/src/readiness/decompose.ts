@@ -522,8 +522,7 @@ export async function fileDecomposition(deps: {
 export interface DecomposeResult {
   /** The rendered breakdown was posted as a comment on the original issue. */
   posted: boolean;
-  /** Numbers of the child issues filed under the original issue, in build order.
-   *  Empty unless deps.fileSubIssues was set AND every child was filed successfully. */
+  /** Always empty: PLAN no longer files child issues. Kept for callers. */
   childIssues: number[];
   /** The decomposition that passed the INVEST gate, set whenever one did. */
   decomposition?: DecompositionOutput;
@@ -553,10 +552,6 @@ export interface DecomposeDriverDeps {
    *  decompose never reports into the breaker, so a lane keeps re-attempting a
    *  known-capped provider on every relaunch cycle with no gating at all. */
   onProviderFailure?: (info: ProviderFailureInfo) => void | Promise<void>;
-  /** File the decomposition as real GitHub issues linked as native sub-issues of the
-   *  original issue, instead of only commenting. Off by default: both
-   *  file-mode PLAN size gates (pre-flight and post-plan build-scope) opt in (#823, #2662). */
-  fileSubIssues?: boolean;
   /** Default true. False returns the validated decomposition without posting the epic
    *  comment or filing (slice mode, ADR-0147). */
   postComment?: boolean;
@@ -567,8 +562,7 @@ export interface DecomposeDriverDeps {
 }
 
 /**
- * Posts the rendered epic comment and, when `fileSubIssues` is set, files the stories as
- * linked sub-issues. Never throws: a failure logs decompose_failed and returns nothing posted.
+ * Posts the rendered epic comment. Never throws: a failure logs decompose_failed and returns nothing posted.
  */
 export async function publishDecomposition(deps: {
   decomposition: DecompositionOutput;
@@ -576,7 +570,6 @@ export async function publishDecomposition(deps: {
   repo: string;
   octokit: Octokit;
   log: (type: EventKind, msg: string) => void;
-  fileSubIssues?: boolean;
 }): Promise<{ posted: boolean; childIssues: number[] }> {
   const { decomposition, issue, repo, octokit, log } = deps;
   const [owner, name] = repo.split('/');
@@ -591,9 +584,7 @@ export async function publishDecomposition(deps: {
       'decompose_comment_posted',
       `posted proposed epic + ${decomposition.stories.length} INVEST-compliant stories as a comment on issue #${issue}`,
     );
-
-    const childIssues = deps.fileSubIssues ? await fileDecomposition({ decomposition, issue, repo, octokit, log }) : [];
-    return { posted: true, childIssues };
+    return { posted: true, childIssues: [] };
   } catch (error) {
     log('decompose_failed', `decomposition of issue #${issue} failed: ${errorDetail(error)}`);
     return { posted: false, childIssues: [] };
@@ -603,9 +594,8 @@ export async function publishDecomposition(deps: {
 /**
  * Runs the bounded decomposition pass: up to maxAttempts model calls (retrying with the
  * INVEST violations), then — only when every story passes the core-owned INVEST gate —
- * posts the rendered breakdown as a comment on the original issue, and, when
- * `fileSubIssues` is set, files the stories as real linked sub-issues. When it would post,
- * it first runs the #728 guard and skips (no model call, comment or filing) for a closed
+ * posts the rendered breakdown as a comment on the original issue. When it would post,
+ * it first runs the #728 guard and skips (no model call or comment) for a closed
  * issue or a still-pending own proposal. Never throws to the caller.
  */
 export async function decomposeOversizedIssue(deps: DecomposeDriverDeps): Promise<DecomposeResult> {
@@ -668,7 +658,6 @@ export async function decomposeOversizedIssue(deps: DecomposeDriverDeps): Promis
         repo,
         octokit,
         log,
-        fileSubIssues: deps.fileSubIssues,
       });
       return { ...published, decomposition: parsed.decomposition };
     }

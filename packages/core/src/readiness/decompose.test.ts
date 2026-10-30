@@ -408,7 +408,6 @@ describe('decomposeOversizedIssue', () => {
       sandbox,
       octokit,
       log,
-      fileSubIssues: true,
       postComment: false,
     });
 
@@ -652,160 +651,6 @@ describe('decomposeOversizedIssue', () => {
     expect(stub.calls).toHaveLength(2);
     const failed = events.find((e) => e.type === 'decompose_failed');
     expect(failed?.msg).toContain('decomposition did not parse');
-  });
-
-  it('files one child issue per story and links each as a sub-issue of the original issue when fileSubIssues is set', async () => {
-    const stub = new StubModelExecutor({ scripts: { decompose: [{ output: VALID_DECOMPOSITION_JSON }] } });
-    const router = new ModelRouter(models, routes, false, stub);
-    const { octokit, create, request } = makeOctokit();
-    const { log, events } = makeLog();
-
-    const result = await decomposeOversizedIssue({
-      issue: 606,
-      repo,
-      title: 'Harden the import queue',
-      body: 'body',
-      worktree: '/tmp/wt',
-      router,
-      octokit,
-      log,
-      fileSubIssues: true,
-    });
-
-    expect(create).toHaveBeenCalledTimes(2);
-    expect(create).toHaveBeenNthCalledWith(1, {
-      owner: 'on-par',
-      repo: 'software-factory',
-      title: 'Retry failed import jobs',
-      body: expect.stringContaining('## Problem statement'),
-    });
-    expect(create).toHaveBeenNthCalledWith(2, {
-      owner: 'on-par',
-      repo: 'software-factory',
-      title: 'Instrument queue throughput',
-      body: expect.stringContaining('## Problem statement'),
-    });
-    expect(request).toHaveBeenCalledTimes(3);
-    expect(request).toHaveBeenNthCalledWith(1, 'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues', {
-      owner: 'on-par',
-      repo: 'software-factory',
-      issue_number: 606,
-    });
-    expect(request).toHaveBeenNthCalledWith(2, 'POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues', {
-      owner: 'on-par',
-      repo: 'software-factory',
-      issue_number: 606,
-      sub_issue_id: 5901,
-    });
-    expect(request).toHaveBeenNthCalledWith(3, 'POST /repos/{owner}/{repo}/issues/{issue_number}/sub_issues', {
-      owner: 'on-par',
-      repo: 'software-factory',
-      issue_number: 606,
-      sub_issue_id: 5902,
-    });
-    expect(result).toMatchObject({ posted: true, childIssues: [901, 902] });
-    expect(events.some((e) => e.type === 'decompose_filed')).toBe(true);
-  });
-
-  it('files nothing when fileSubIssues is not set', async () => {
-    const stub = new StubModelExecutor({ scripts: { decompose: [{ output: VALID_DECOMPOSITION_JSON }] } });
-    const router = new ModelRouter(models, routes, false, stub);
-    const { octokit, createComment, create, request } = makeOctokit();
-    const { log } = makeLog();
-
-    const result = await decomposeOversizedIssue({
-      issue: 606,
-      repo,
-      title: 'Harden the import queue',
-      body: 'body',
-      worktree: '/tmp/wt',
-      router,
-      octokit,
-      log,
-    });
-
-    expect(create).not.toHaveBeenCalled();
-    expect(request).not.toHaveBeenCalled();
-    expect(createComment).toHaveBeenCalledTimes(1);
-    expect(result.childIssues).toEqual([]);
-  });
-
-  it('returns no child issues and logs decompose_file_failed when an issue create fails', async () => {
-    const stub = new StubModelExecutor({ scripts: { decompose: [{ output: VALID_DECOMPOSITION_JSON }] } });
-    const router = new ModelRouter(models, routes, false, stub);
-    const { octokit, create, request } = makeOctokit();
-    create.mockImplementationOnce(() => Promise.resolve({ data: { number: 901, id: 5901 } }));
-    create.mockImplementationOnce(() => Promise.reject(new Error('secondary rate limit')));
-    const { log, events } = makeLog();
-
-    const result = await decomposeOversizedIssue({
-      issue: 606,
-      repo,
-      title: 'Harden the import queue',
-      body: 'body',
-      worktree: '/tmp/wt',
-      router,
-      octokit,
-      log,
-      fileSubIssues: true,
-    });
-
-    expect(result).toMatchObject({ posted: true, childIssues: [] });
-    expect(request).toHaveBeenCalledTimes(2); // GET duplicate check + link for the first, successfully-created child
-    const failed = events.find((e) => e.type === 'decompose_file_failed');
-    expect(failed?.msg).toContain('secondary rate limit');
-    expect(failed?.msg).toContain('#901');
-  });
-
-  it('still returns the filed children when only the sub-issue link fails', async () => {
-    const stub = new StubModelExecutor({ scripts: { decompose: [{ output: VALID_DECOMPOSITION_JSON }] } });
-    const router = new ModelRouter(models, routes, false, stub);
-    const { octokit, create, request } = makeOctokit();
-    request.mockResolvedValueOnce({ data: [] }); // GET duplicate check succeeds
-    request.mockRejectedValueOnce(new Error('sub-issues API unavailable')); // first POST link fails
-    const { log, events } = makeLog();
-
-    const result = await decomposeOversizedIssue({
-      issue: 606,
-      repo,
-      title: 'Harden the import queue',
-      body: 'body',
-      worktree: '/tmp/wt',
-      router,
-      octokit,
-      log,
-      fileSubIssues: true,
-    });
-
-    expect(create).toHaveBeenCalledTimes(2);
-    expect(result).toMatchObject({ posted: true, childIssues: [901, 902] });
-    const failed = events.find((e) => e.type === 'decompose_file_failed');
-    expect(failed?.msg).toContain('sub-issues API unavailable');
-    expect(failed?.msg).toContain('#901');
-  });
-
-  it('files nothing when the decomposition fails the INVEST gate / does not parse', async () => {
-    const stub = new StubModelExecutor({
-      scripts: { decompose: [{ output: INVEST_FAILING_JSON }, { output: INVEST_FAILING_JSON }] },
-    });
-    const router = new ModelRouter(models, routes, false, stub);
-    const { octokit, create } = makeOctokit();
-    const { log } = makeLog();
-
-    const result = await decomposeOversizedIssue({
-      issue: 606,
-      repo,
-      title: 't',
-      body: 'b',
-      worktree: '/tmp/wt',
-      router,
-      octokit,
-      log,
-      fileSubIssues: true,
-    });
-
-    expect(create).not.toHaveBeenCalled();
-    expect(result.childIssues).toEqual([]);
   });
 });
 
@@ -1064,28 +909,6 @@ describe('publishDecomposition', () => {
     return parsed.decomposition;
   })();
 
-  it('posts the epic comment and files the children when fileSubIssues is set', async () => {
-    const createComment = vi.fn().mockResolvedValue({});
-    const create = vi.fn().mockResolvedValue({ data: { number: 901, id: 5901 } });
-    const request = vi.fn().mockResolvedValue({ data: [] });
-    const addLabels = vi.fn().mockResolvedValue({});
-    const octokit = { rest: { issues: { createComment, create, addLabels } }, request } as any;
-    const events: string[] = [];
-
-    const result = await publishDecomposition({
-      decomposition,
-      issue: 606,
-      repo,
-      octokit,
-      log: (type) => events.push(type),
-      fileSubIssues: true,
-    });
-
-    expect(result.posted).toBe(true);
-    expect(result.childIssues.length).toBe(decomposition.stories.length);
-    expect(create).toHaveBeenCalled();
-    expect(events).toContain('decompose_comment_posted');
-  });
   it('returns nothing posted without throwing when createComment fails', async () => {
     const createComment = vi.fn().mockRejectedValue(new Error('boom'));
     const octokit = { rest: { issues: { createComment } } } as any;
@@ -1097,7 +920,6 @@ describe('publishDecomposition', () => {
       repo,
       octokit,
       log: (type, msg) => events.push({ type, msg }),
-      fileSubIssues: true,
     });
 
     expect(result).toEqual({ posted: false, childIssues: [] });

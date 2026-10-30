@@ -751,34 +751,12 @@ describe('runIssue — outcome mapping', () => {
   });
 });
 
-describe('runIssue — decomposition', () => {
-  it('invokes onDecomposed and rethrows its signal instead of treating it as a park', async () => {
-    vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, ok: false, decomposed: { childIssues: [2, 3] } });
-    const onDecomposed = vi.fn(() => {
-      const err = new Error('decomposed') as Error & { childIssues: number[] };
-      err.childIssues = [2, 3];
-      throw err;
-    });
-    await expect(runIssue(baseRequest(), basePolicy(), basePorts({ onDecomposed }))).rejects.toThrow('decomposed');
-    expect(onDecomposed).toHaveBeenCalledWith([2, 3]);
-    expect(buildPhase).not.toHaveBeenCalled();
-  });
-
-  it('returns an escalated outcome when the decompose hook does not throw', async () => {
-    vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, ok: false, decomposed: { childIssues: [2] } });
-    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ onDecomposed: vi.fn() }));
-    expect(outcome).toMatchObject({ state: 'escalated' });
-  });
-});
-
 describe('runIssue — sliced whole issue (ADR-0147)', () => {
   it('returns an escalated outcome naming the slice plan and never builds', async () => {
     vi.mocked(planPhase).mockResolvedValue({ ...PLAN_OK, ok: false, escalate: 'x', sliced: { sliceCount: 3 } });
-    const onDecomposed = vi.fn();
-    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts({ onDecomposed }));
+    const outcome = await runIssue(baseRequest(), basePolicy(), basePorts());
     expect(outcome).toMatchObject({ state: 'escalated', reason: expect.stringMatching(/sliced into 3 slice/) });
     expect(buildPhase).not.toHaveBeenCalled();
-    expect(onDecomposed).not.toHaveBeenCalled();
   });
 });
 
