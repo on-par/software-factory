@@ -326,16 +326,16 @@ async function planPhaseImpl(opts: {
   fastPath?: boolean;
   /** Park oversized factory-task issues (sizeOk: false) instead of proceeding. Default true. */
   enforceSizeGate?: boolean;
-  /** sizeGate.mode (ADR-0147). 'slice' records a slice plan and plans only the current slice; 'stack' (ADR-0161) uses the slice-mode gates and may plan an explicit `sliceIndex`. Ignored when enforceSizeGate is false. */
+  /** sizeGate.mode. 'stack' (ADR-0161) records a slice plan and plans the lowest pending slice, or an explicit `sliceIndex`. Ignored when enforceSizeGate is false. */
   sizeGateMode?: SizeGateMode;
   parkOverBudget?: boolean;
-  /** Slice-plan store for a non-issue source in slice/stack mode (#3813); issue sources default to the issue comment. */
+  /** Slice-plan store for a non-issue source in stack mode (#3813); issue sources default to the issue comment. */
   slicePlanStore?: SlicePlanStore;
-  /** Slice cap for sizeGate.mode 'slice' (ADR-0156); default DEFAULT_MAX_SLICES. */
+  /** Slice cap for sizeGate.mode 'stack' (ADR-0156, ADR-0161); default DEFAULT_MAX_SLICES. */
   maxSlices?: number;
   /** sizeGate.tokenBudget / maxFiles (#3350); default DEFAULT_TOKEN_BUDGET / DEFAULT_MAX_FILES. */
   sizeBudget?: SizeBudget;
-  /** ADR-0161 stack mode: plan this 1-based slice of the trusted slice plan. Default: the current slice. Ignored outside stack mode. */
+  /** ADR-0161 stack mode: plan this 1-based slice of the trusted slice plan. Default: the lowest pending slice. Ignored outside stack mode. */
   sliceIndex?: number;
   /** Stop PLAN before BUILD when a worse/unknown behaviorDelta row is not in openQuestions (#1819). Default false = log only. */
   blockUnresolvedRegressions?: boolean;
@@ -481,17 +481,17 @@ async function planPhaseImpl(opts: {
     }
   }
 
-  // ADR-0161: stack uses the slice-mode gates; it may plan an explicit slice.
+  // ADR-0161: stack mode records a slice plan and may plan an explicit slice.
   const sizeBudget = opts.sizeBudget ?? { tokenBudget: DEFAULT_TOKEN_BUDGET, maxFiles: DEFAULT_MAX_FILES };
-  const sliceMode = opts.sizeGateMode === 'slice' || opts.sizeGateMode === 'stack';
-  const sliceGateOn = source.kind === GITHUB_ISSUE_SOURCE || (sliceMode && opts.slicePlanStore !== undefined);
+  const stackMode = opts.sizeGateMode === 'stack';
+  const sliceGateOn = source.kind === GITHUB_ISSUE_SOURCE || (stackMode && opts.slicePlanStore !== undefined);
   const sliceIssue =
     source.kind === GITHUB_ISSUE_SOURCE ? (source.params as GithubIssueParams).issue : issueNumberOf(issue);
   const sliceRepo = source.kind === GITHUB_ISSUE_SOURCE ? (source.params as GithubIssueParams).repo : repo;
   let planningSlice = false;
   let sliceLabel = '';
   let plannedSlice: PlanResult['slice'];
-  if (enforceSizeGate && sliceMode && sliceGateOn && !opts.parkOverBudget) {
+  if (enforceSizeGate && stackMode && sliceGateOn && !opts.parkOverBudget) {
     const gate = await resolveSliceGate({
       issue: sliceIssue,
       repo: sliceRepo,
@@ -500,8 +500,7 @@ async function planPhaseImpl(opts: {
       // #3350: issue prose never slices; only an existing trusted slice plan selects a slice here.
       oversized: false,
       maxSlices: opts.maxSlices ?? DEFAULT_MAX_SLICES,
-      ...(opts.sizeGateMode === 'stack' && opts.sliceIndex !== undefined ? { sliceIndex: opts.sliceIndex } : {}),
-      stack: opts.sizeGateMode === 'stack',
+      ...(opts.sliceIndex !== undefined ? { sliceIndex: opts.sliceIndex } : {}),
       store: opts.slicePlanStore,
       worktree,
       router,
@@ -799,8 +798,8 @@ async function planPhaseImpl(opts: {
           log('size-gate-escalated', fileReason);
           return park(fileReason);
         }
-        // ADR-0147: in slice mode the post-plan gate slices a whole issue; a slice is never sliced again.
-        if (sliceMode) {
+        // ADR-0147: in stack mode the post-plan gate slices a whole issue; a slice is never sliced again.
+        if (stackMode) {
           if (planningSlice) {
             const reason = `${sliceLabel} exceeds the bounded-build budget (${scope}) — parked; a slice is never sliced again`;
             log('size-gate-escalated', reason);

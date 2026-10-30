@@ -111,7 +111,7 @@ npm run test`;
 
   async function run(opts: {
     yaml: string;
-    mode?: 'file' | 'slice' | 'stack';
+    mode?: 'off' | 'stack';
     parkOverBudget?: boolean;
     sizeBudget?: { tokenBudget: number; maxFiles: number };
     decomposition?: string;
@@ -147,7 +147,7 @@ npm run test`;
         request: vi.fn().mockResolvedValue({ data: [] }),
       } as any,
       log: (type: any, msg: any) => logs.push({ type, msg }),
-      sizeGateMode: opts.mode ?? 'file',
+      sizeGateMode: opts.mode ?? 'off',
       parkOverBudget: opts.parkOverBudget,
       sizeBudget: opts.sizeBudget,
     });
@@ -169,7 +169,7 @@ npm run test`;
     expect(create).not.toHaveBeenCalled();
   });
 
-  it.each(['file', 'slice'] as const)(
+  it.each(['stack'] as const)(
     'does not slice a many-AC issue whose plan touches three files (%s mode)',
     async (mode) => {
       const { result, stub, logs, createComment, create } = await run({ yaml: designYaml(3, 3), mode });
@@ -196,7 +196,7 @@ npm run test`;
     expect(logs.find((l) => l.type === 'size-gate-escalated')?.msg).toMatch(/tokens.*budget 10/);
   });
 
-  it.each(['slice'] as const)(
+  it.each(['stack'] as const)(
     'keeps a cohesive over-budget issue whole and logs size_gate_cohesive (%s mode)',
     async (mode) => {
       const parsed = JSON.parse(decomposition);
@@ -244,7 +244,7 @@ npm run test`;
       })),
     });
 
-    async function runBrief(opts: { files: number; store?: SlicePlanStore; mode: 'file' | 'stack' }) {
+    async function runBrief(opts: { files: number; store?: SlicePlanStore; mode: 'off' | 'stack' }) {
       const worktree = await tempDirs.make('plan-phase-test-');
       const stub = new StubModelExecutor({
         scripts: {
@@ -331,8 +331,8 @@ npm run test`;
       expect(logs).toContain('planning slice 1/2: Story 1');
     });
 
-    it('file mode without a store is not gated', async () => {
-      const { result, stub, createComment } = await runBrief({ files: 13, mode: 'file' });
+    it('stack mode without a store is not gated', async () => {
+      const { result, stub, createComment } = await runBrief({ files: 13, mode: 'stack' });
 
       expect(result.ok).toBe(true);
       expect(stub.calls.map((c) => c.task)).toEqual(['plan']);

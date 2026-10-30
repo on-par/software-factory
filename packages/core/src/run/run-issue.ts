@@ -683,7 +683,7 @@ async function runIssueOnce(
           workSource: request.workSource,
           enforceReadiness: true,
           fastPath: request.efficiency.fastPath,
-          enforceSizeGate: !request.noPr && (request.sizeGateMode ?? 'file') !== 'off',
+          enforceSizeGate: !request.noPr && request.sizeGateMode !== 'off',
           sizeGateMode: request.sizeGateMode,
           parkOverBudget: request.parkOverBudget,
           sliceIndex: request.sliceIndex,
@@ -1171,7 +1171,7 @@ async function runIssueOnce(
         ship,
         // Brief PRs carry no stack-order line (shipPhase ignores the stack for inline work), so skip
         // the parent-PR update: its branch names hold the brief's stand-in number (#3813).
-        stackMode: request.sizeGateMode === 'stack' && request.work.kind !== LOCAL_BRIEF_SOURCE,
+        stackMode: request.work.kind !== LOCAL_BRIEF_SOURCE,
         store: ports.slicePlanStore,
         log,
       });

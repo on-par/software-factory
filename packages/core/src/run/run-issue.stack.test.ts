@@ -354,7 +354,7 @@ describe('runIssue — stack mode builds one slice per run (ADR-0161)', () => {
     expect(buildPhase).not.toHaveBeenCalled();
   });
 
-  it.each(['slice', 'file', 'off'] as const)('%s mode makes a single pass and creates no branch', async (mode) => {
+  it.each(['off'] as const)('%s mode makes a single pass and creates no branch', async (mode) => {
     const { ports, createSliceBranch } = stackSetup();
     await runIssue(baseRequest({ sizeGateMode: mode }), policy, ports);
 
@@ -379,12 +379,6 @@ describe('runIssue — stack mode builds one slice per run (ADR-0161)', () => {
       const shipped = shipPhase.mock.calls.find((c) => c[0].branch === o.branch);
       expect(shipped?.[0].stack?.base).toBe(o.startPoint);
     }
-  });
-
-  it('passes no stack in slice mode', async () => {
-    const { ports } = stackSetup();
-    await runIssue(baseRequest({ sizeGateMode: 'slice' }), policy, ports);
-    expect(shipPhase.mock.calls.every((c) => c[0].stack === undefined)).toBe(true);
   });
 
   it("rewrites slice 1's PR when slice 2 opens (#3348)", async () => {

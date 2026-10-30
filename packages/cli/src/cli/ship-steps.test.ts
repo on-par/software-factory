@@ -194,7 +194,7 @@ it('findSliceIndex in stack mode returns the lowest pending slice (#3367)', asyn
   } as never;
   const args = { ctx: undefined, work, octokit, ghRepo: 'o/r', issueNum: 9 };
   expect(await findSliceIndex({ ...args, sizeGateMode: 'stack' })).toBe(2);
-  expect(await findSliceIndex({ ...args, sizeGateMode: 'slice' })).toBe(1);
+  expect(await findSliceIndex({ ...args, sizeGateMode: 'off' })).toBeUndefined();
 });
 
 describe('logSandboxPolicy egress enforcement (#2215)', () => {

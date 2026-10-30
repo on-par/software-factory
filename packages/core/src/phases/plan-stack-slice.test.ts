@@ -106,7 +106,7 @@ const planComment = () => {
   return renderSlicePlanComment(built.plan);
 };
 
-async function run(opts: { mode: 'slice' | 'stack'; sliceIndex?: number }) {
+async function run(opts: { mode: 'off' | 'stack'; sliceIndex?: number }) {
   const worktree = await mkdtemp(join(tmpdir(), 'plan-stack-slice-test-'));
   tempDirs.add(worktree);
   const stub = new StubModelExecutor({ scripts: { plan: [{ output: specWithDesign('Spec') }] } });
@@ -156,14 +156,6 @@ describe('planPhase sliceIndex (ADR-0161 stack mode)', () => {
     expect(prompt).toContain('Problem for slice 1');
     expect(result.slice?.index).toBe(1);
     expect(messages.some((m) => m.includes('not built yet'))).toBe(false);
-  });
-
-  it('slice mode ignores sliceIndex and plans the current slice', async () => {
-    const { result, prompt } = await run({ mode: 'slice', sliceIndex: 2 });
-    expect(result.ok).toBe(true);
-    expect(prompt).toContain('Problem for slice 1');
-    expect(prompt).not.toContain('Problem for slice 2');
-    expect(result.slice?.index).toBe(1);
   });
 
   it('stack mode parks when sliceIndex is not in the slice plan', async () => {

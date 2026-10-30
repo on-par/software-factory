@@ -785,7 +785,7 @@ npm run test`;
       expect(events).toContain('size-gate-escalated');
     });
 
-    it('parks an over-budget design artifact the same way in explicit file mode without decomposing', async () => {
+    it('parks an over-budget design artifact the same way in off mode without decomposing', async () => {
       const worktree = await setup.worktree('plan-phase-test-');
       const specPath = join(worktree, 'issue-901.md');
       const { router, stub } = setup.router(
@@ -819,7 +819,7 @@ npm run test`;
           'issues.createComment': createComment,
         }).octokit,
         log: (type) => events.push(type),
-        sizeGateMode: 'file',
+        sizeGateMode: 'off',
       });
 
       expect(result.ok).toBe(false);
@@ -1412,7 +1412,7 @@ npm run test`;
     async function run(opts: {
       decompose?: string[];
       maxSlices?: number;
-      mode?: 'slice' | 'stack';
+      mode?: 'off' | 'stack';
       comments?: { id: number; user: { id: number }; body: string }[];
       /** PLAN output; default is a small design. megaPlan trips the post-plan gate (14 changed files > 12). */
       plan?: string;
@@ -1461,7 +1461,7 @@ npm run test`;
           request,
         } as any,
         log: (type) => events.push(type),
-        sizeGateMode: opts.mode ?? 'slice',
+        sizeGateMode: opts.mode ?? 'stack',
         maxSlices: opts.maxSlices,
       });
       return { result, stub, events, createComment, create, update };
@@ -1657,7 +1657,7 @@ npm run test`;
             request: vi.fn().mockResolvedValue({ data: [] }),
           } as any,
           log: (type) => events.push(type),
-          sizeGateMode: 'slice',
+          sizeGateMode: 'stack',
           maxSlices: opts.maxSlices,
         });
         return { result, stub, events, createComment, updateComment, create };

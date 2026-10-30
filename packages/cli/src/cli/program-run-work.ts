@@ -64,7 +64,7 @@ export function registerRunWorkCommands(program: Command, handlers: ProgramHandl
     )
     .option(
       '--max-slices <count>',
-      'Slice mode: most slices a not-yet-started slice plan may have (1-20); an over-cap plan is recorded and parks; beats sizeGate.maxSlices (default 10)',
+      'Stack mode: most slices a not-yet-started slice plan may have (1-20); an over-cap plan is recorded and parks; beats sizeGate.maxSlices (default 10)',
     )
     .action(async (issueNum, opts) => {
       await handlers.cmdRunIssue(handlers.parseIssueArg(issueNum), opts);
