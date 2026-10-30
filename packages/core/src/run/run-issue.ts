@@ -166,7 +166,7 @@ export interface RunRequest extends ReworkRequestFields {
   readinessUpdateIssueBody?: boolean;
   /** build.publishFromBuild resolved (#1867); undefined = off (commit-only BUILD on every route). */
   publishFromBuild?: boolean;
-  /** sizeGate.mode resolved (ADR-0147, #2048); undefined = file (both size gates on). */
+  /** sizeGate.mode resolved (ADR-0147, #2048, #3837); undefined = both size gates on, no stack slicing. */
   sizeGateMode?: SizeGateMode;
   parkOverBudget?: boolean;
   /** sizeGate.maxSlices or --max-slices resolved (ADR-0156); undefined = DEFAULT_MAX_SLICES. */

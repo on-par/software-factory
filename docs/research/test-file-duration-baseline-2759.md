@@ -209,7 +209,6 @@ because it includes transform, setup and collect time.
 | 120  | `packages/core/src/usage/usage-coordinator.poll.test.ts`                   | 0.03         |
 | 121  | `packages/tui/src/components/LaneList.test.tsx`                            | 0.03         |
 | 122  | `packages/core/src/checkers/probe.test.ts`                                 | 0.03         |
-| 123  | `packages/cli/src/cli/run-children.test.ts`                                | 0.03         |
 | 124  | `packages/core/src/environment/dotnet.test.ts`                             | 0.03         |
 | 125  | `packages/core/src/run/resume-context.test.ts`                             | 0.02         |
 | 126  | `packages/core/src/sim/latency.test.ts`                                    | 0.02         |
