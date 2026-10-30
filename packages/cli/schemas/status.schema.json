@@ -219,49 +219,44 @@
       ]
     },
     "decomposedParents": {
-      "anyOf": [
-        {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "issue": {
-                "type": "number"
-              },
-              "covered": {
-                "type": "number"
-              },
-              "total": {
-                "type": "number"
-              },
-              "fullyCovered": {
-                "type": "boolean"
-              },
-              "uncovered": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string"
-                    },
-                    "text": {
-                      "type": "string"
-                    }
-                  },
-                  "required": ["id", "text"],
-                  "additionalProperties": false
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "issue": {
+            "type": "number"
+          },
+          "covered": {
+            "type": "number"
+          },
+          "total": {
+            "type": "number"
+          },
+          "fullyCovered": {
+            "type": "boolean"
+          },
+          "uncovered": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
                 }
-              }
-            },
-            "required": ["issue", "covered", "total", "fullyCovered", "uncovered"],
-            "additionalProperties": false
+              },
+              "required": ["id", "text"],
+              "additionalProperties": false
+            }
           }
         },
-        {
-          "type": "null"
-        }
-      ]
+        "required": ["issue", "covered", "total", "fullyCovered", "uncovered"],
+        "additionalProperties": false
+      },
+      "deprecated": true,
+      "description": "Deprecated: always an empty array. A later release removes this field (#3834)."
     },
     "disk": {
       "anyOf": [

@@ -354,14 +354,6 @@ export type { ConfigLintInput } from './config/config-lint.js';
 export { findUnknownConstitutionCheckers, formatUnknownCheckerMessage } from './checkers/constitution-preflight.js';
 export type { UnknownConstitutionChecker } from './checkers/constitution-preflight.js';
 // Readiness deep check (#1732)
-export {
-  type ParentCoverage,
-  computeParentCoverage,
-  formatParentCoverageLine,
-  listDecomposedParentCoverage,
-  refreshParentCoverageAfterMerge,
-  renderParentCoverageComment,
-} from './readiness/parent-coverage.js';
 export { buildDecompositionPrompt, parseDecompositionOutput } from './readiness/decompose.js';
 export {
   type SlicePlan,
