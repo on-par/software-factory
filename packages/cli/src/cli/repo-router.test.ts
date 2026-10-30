@@ -1,18 +1,26 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   getFactoryPaths,
   loadFactoryConfig,
+  loadFactoryConfigForRepo,
   loadModelsConfig,
   loadRoutesConfig,
   ModelRouter,
 } from '@on-par/factory-core';
 import { recordLocalAuthFailure } from '@on-par/factory-core/internal';
+import { createTempDirs } from '@on-par/factory-core/testing';
 
 import { newRepoRouter, type RepoRouterLoaders } from './repo-router.js';
 
-afterEach(() => {
+const dirs = createTempDirs();
+
+afterEach(async () => {
   vi.restoreAllMocks();
+  await dirs.cleanup();
 });
 
 describe('newRepoRouter', () => {
@@ -54,5 +62,38 @@ describe('newRepoRouter', () => {
     expect(typeof localOnly).toBe('boolean');
     expect(setCodexFullAccessTasks).toHaveBeenCalledWith(['build_codex']);
     expect(setLocalAuthSink).toHaveBeenCalledWith(recordLocalAuthFailure);
+  });
+
+  it('passes sandbox.codexSandbox to setCodexSandbox (#3830)', () => {
+    const factory = loadFactoryConfig();
+    const loaders: RepoRouterLoaders = {
+      loadRepoConfig: vi.fn(() => null),
+      loadModelsConfig: vi.fn(() => loadModelsConfig()),
+      loadRoutesConfig: vi.fn(() => loadRoutesConfig()),
+      loadFactoryConfigForRepo: vi.fn(() => ({
+        ...factory,
+        sandbox: { ...factory.sandbox, codexSandbox: 'workspace-write' as const },
+      })),
+    };
+    const setCodexSandbox = vi.spyOn(ModelRouter.prototype, 'setCodexSandbox');
+    newRepoRouter('/repo', loaders, ModelRouter);
+    expect(setCodexSandbox).toHaveBeenCalledWith('workspace-write');
+  });
+
+  it('an unknown sandbox.codexSandbox in config reaches setCodexSandbox as undefined (#3830)', () => {
+    const root = dirs.makeSync('repo-router-');
+    const configPath = getFactoryPaths(root).config;
+    mkdirSync(dirname(configPath), { recursive: true });
+    writeFileSync(configPath, 'sandbox:\n  codexSandbox: read-only\n');
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const loaders: RepoRouterLoaders = {
+      loadRepoConfig: vi.fn(() => null),
+      loadModelsConfig: vi.fn(() => loadModelsConfig()),
+      loadRoutesConfig: vi.fn(() => loadRoutesConfig()),
+      loadFactoryConfigForRepo,
+    };
+    const setCodexSandbox = vi.spyOn(ModelRouter.prototype, 'setCodexSandbox');
+    newRepoRouter(root, loaders, ModelRouter);
+    expect(setCodexSandbox).toHaveBeenCalledWith(undefined);
   });
 });

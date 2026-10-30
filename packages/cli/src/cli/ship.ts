@@ -210,6 +210,7 @@ async function shipIssueFrom(
     policy.effective.localOnly,
   );
   router.setCodexFullAccessTasks?.(policy.sandbox.codexFullAccessTasks);
+  router.setCodexSandbox?.(policy.sandbox.codexSandbox);
   router.setContextCeilings?.(factoryConfig.build.contextCeiling);
   router.setLocalAuthSink?.(recordLocalAuthFailure);
   router.setProviderHold?.((p) => breaker.isHeldUntilCredentialsChange(p));

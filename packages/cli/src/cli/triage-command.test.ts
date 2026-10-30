@@ -1,8 +1,16 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { errored, h, installCliCommandsHarness, logged, paths, runMain } from './test-support/cli-commands-harness.js';
+import {
+  coreFakes,
+  errored,
+  h,
+  installCliCommandsHarness,
+  logged,
+  paths,
+  runMain,
+} from './test-support/cli-commands-harness.js';
 
 installCliCommandsHarness();
 
@@ -60,6 +68,19 @@ describe('cli commands (via main dispatch)', () => {
       const res = await runMain('triage', 'accept');
       expect(res.exited).toBe(false);
       expect(logged()).toContain('2 issue(s) promoted');
+    });
+
+    it('triage sets the router codex sandbox from config (#3830)', async () => {
+      h.execImpl = execWithIssues;
+      h.factoryConfig = {
+        ...h.factoryConfig,
+        sandbox: { ...h.factoryConfig.sandbox, codexSandbox: 'workspace-write' },
+      };
+      h.routerRun = async () => ({ model: 'gpt-5.6-terra-high', output: 'app 5\n' });
+      await runMain('triage');
+      expect(vi.mocked(coreFakes.ModelRouter).mock.results.at(-1)?.value.setCodexSandbox).toHaveBeenCalledWith(
+        'workspace-write',
+      );
     });
 
     it('passes --model to the router as the model override', async () => {

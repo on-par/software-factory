@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { writablePathError } from '../sandbox/writable-paths.js';
 
 export const CODEX_SANDBOX_MODES = ['danger-full-access', 'workspace-write'] as const;
+export type CodexSandboxMode = (typeof CODEX_SANDBOX_MODES)[number];
 
 export const SandboxConfigSchema = z
   .object({

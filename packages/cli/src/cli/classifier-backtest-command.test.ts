@@ -3,7 +3,15 @@ import { join } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { errored, h, installCliCommandsHarness, logged, paths, runMain } from './test-support/cli-commands-harness.js';
+import {
+  coreFakes,
+  errored,
+  h,
+  installCliCommandsHarness,
+  logged,
+  paths,
+  runMain,
+} from './test-support/cli-commands-harness.js';
 
 installCliCommandsHarness();
 
@@ -44,6 +52,19 @@ describe('cli commands (via main dispatch)', () => {
       expect(res.exited).toBe(true);
       expect(res.code).toBe(2);
       expect(errored()).toContain("invalid --since 'yesterday'");
+    });
+
+    it('classifier backtest sets the router codex sandbox from config (#3830)', async () => {
+      h.factoryConfig = {
+        ...h.factoryConfig,
+        sandbox: { ...h.factoryConfig.sandbox, codexSandbox: 'workspace-write' },
+      };
+      const labels = join(h.repoRoot, 'labels.csv');
+      writeFileSync(labels, 'pr,class\n');
+      await runMain('classifier', 'backtest', '--since', '2026-01-01', '--labels', labels);
+      expect(vi.mocked(coreFakes.ModelRouter).mock.results.at(-1)?.value.setCodexSandbox).toHaveBeenCalledWith(
+        'workspace-write',
+      );
     });
 
     it('replays a merged PR through the wired deps and writes the JSONL file', async () => {
