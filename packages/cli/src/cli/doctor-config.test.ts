@@ -172,6 +172,34 @@ describe('configLintChecks (#2610, #2612)', () => {
     expect(warning!.detail).toContain('sandbox.foo');
   });
 
+  it('warns, without failing, on an unknown sandbox.codexSandbox value (#3829)', () => {
+    const rows = configLintChecks(setup(VALID_CONSTITUTION, 'sandbox:\n  codexSandbox: read-only\n'));
+    expect(rows.some((r) => r.ok)).toBe(true);
+    const warning = rows.find((r) => r.detail.includes('codexSandbox'));
+    expect(warning).toMatchObject({ name: 'config', ok: false, optional: true, section: REPO_SECTION });
+    for (const part of [
+      'sandbox.codexSandbox',
+      'read-only',
+      'danger-full-access',
+      'workspace-write',
+      'later release',
+    ]) {
+      expect(warning!.detail).toContain(part);
+    }
+    expect(doctorFailed(rows)).toBe(false);
+  });
+
+  it('prints no codexSandbox row for an unset or valid value (#3829)', () => {
+    for (const config of [
+      VALID_CONFIG,
+      'sandbox:\n  codexSandbox: danger-full-access\n',
+      'sandbox:\n  codexSandbox: workspace-write\n',
+    ]) {
+      const rows = configLintChecks(setup(VALID_CONSTITUTION, config));
+      expect(rows.some((r) => r.detail.includes('codexSandbox'))).toBe(false);
+    }
+  });
+
   it('prints no unknown-key row for a config of known keys (#3568)', () => {
     const rows = configLintChecks(setup(VALID_CONSTITUTION, VALID_CONFIG));
     expect(rows.some((r) => r.detail.includes('unknown key'))).toBe(false);

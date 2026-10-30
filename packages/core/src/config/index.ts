@@ -33,7 +33,7 @@ import { FACTORY_RUNTIME_CONFIG_KEYS } from './runtime-config-keys.js';
 import type { FilingPolicy } from '../filing/policy.js';
 import { builtInHarnessRedeclaredMessage, KNOWN_HARNESS_IDS, retiredHarnessReplacement } from '../harness/catalog.js';
 import type { FailoverReason } from '../types/index.js';
-import { SandboxConfigSchema } from './sandbox-schema.js';
+import { SandboxConfigSchema, warnCodexSandboxOnce } from './sandbox-schema.js';
 import { ModelEffortsSchema } from './effort.js';
 import { resolvePrecedence, type ConfigSource } from './precedence.js';
 import { HarnessDeclarationSchema, type HarnessDeclaration } from './harness-declaration.js';
@@ -467,6 +467,7 @@ export function loadFactoryConfigForRepo(configPath: string): FactoryConfig {
   if (!isPlainObject(raw)) {
     throw new Error(`Invalid ${configPath}: expected a JSON object`);
   }
+  warnCodexSandboxOnce(configPath, raw);
 
   const result = FactoryConfigSchema.safeParse(mergeRuntimeOverlay(raw));
   if (!result.success) {

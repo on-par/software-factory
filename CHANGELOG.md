@@ -7,6 +7,10 @@ section to `## X.Y.Z - date`. See
 
 ## Unreleased
 
+### Added
+
+- `sandbox.codexSandbox` config key (`danger-full-access` | `workspace-write`, unset by default); an unknown value is ignored with a run warning and a non-failing `factory doctor` row, and is not read yet (#3829).
+
 ### Changed
 
 - Build open same-repository blocked-by issues in prerequisite order with `run-issue --stack`. #3814

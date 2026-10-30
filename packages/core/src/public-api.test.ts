@@ -447,6 +447,7 @@ const INTERNAL_API_KEYS = [
   'isHarnessCliPresent',
   'lintFactoryConfig',
   'findConfigSchemaErrors',
+  'findCodexSandboxWarnings',
   'findUnknownConfigKeyWarnings',
   'formatUnknownCheckerMessage',
   'describePullRequestAccessError',

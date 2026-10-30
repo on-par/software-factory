@@ -347,7 +347,7 @@ export {
 } from './constitutions/index.js';
 export * from './checkers/internal-exports.js';
 export { isTemplateToken } from './config/template-tokens.js';
-export { findUnknownConfigKeyWarnings, lintFactoryConfig } from './config/config-lint.js';
+export { findCodexSandboxWarnings, findUnknownConfigKeyWarnings, lintFactoryConfig } from './config/config-lint.js';
 export { findConfigSchemaErrors } from './config/config-schema-lint.js';
 export type { ConfigLintInput } from './config/config-lint.js';
 export { findUnknownConstitutionCheckers, formatUnknownCheckerMessage } from './checkers/constitution-preflight.js';
