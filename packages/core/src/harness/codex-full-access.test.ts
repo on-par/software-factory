@@ -57,7 +57,13 @@ describe('CodexCliHarness full-access config', () => {
       {},
       { env: { FACTORY_CODEX_FULL_ACCESS: '1' }, log: (l) => lines.push(l) },
     );
-    const request = makeContractRequest({ model: 'codex-model', registry, task: 'plan', sandbox: sandboxPolicy });
+    const request = makeContractRequest({
+      model: 'codex-model',
+      registry,
+      task: 'plan',
+      sandbox: sandboxPolicy,
+      codexSandbox: 'workspace-write',
+    });
 
     await harness.run(request).catch(() => {});
     await harness.run(request).catch(() => {});
@@ -81,6 +87,7 @@ describe('CodexCliHarness full-access config', () => {
       model: 'codex-model',
       registry,
       task: 'build_codex',
+      codexSandbox: 'workspace-write',
       codexFullAccessTasks: ['build_codex'],
     });
     await harness.run(request).catch(() => {});
@@ -93,13 +100,24 @@ describe('CodexCliHarness full-access config', () => {
     ]);
   });
 
-  it('defaults to workspace-write without a policy or config', async () => {
+  it('explicit workspace-write mode applies without a policy or config', async () => {
     const rec = recordingExec();
     const log = vi.fn();
     const harness = new CodexCliHarness(rec.fn, {}, { env: {}, log });
 
-    await harness.run(makeContractRequest({ model: 'codex-model', registry })).catch(() => {});
-    await harness.run(makeContractRequest({ model: 'codex-model', registry, sandbox: sandboxPolicy })).catch(() => {});
+    await harness
+      .run(makeContractRequest({ model: 'codex-model', registry, codexSandbox: 'workspace-write' }))
+      .catch(() => {});
+    await harness
+      .run(
+        makeContractRequest({
+          model: 'codex-model',
+          registry,
+          sandbox: sandboxPolicy,
+          codexSandbox: 'workspace-write',
+        }),
+      )
+      .catch(() => {});
 
     expect(rec.calls[0].cmd).toContain('--sandbox workspace-write');
     expect(rec.calls[0].cmd).not.toContain('danger-full-access');

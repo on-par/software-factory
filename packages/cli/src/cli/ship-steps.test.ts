@@ -121,7 +121,7 @@ it('retains runtime none for harnesses while --no-sandbox still disables it', ()
   expect(logSandboxPolicy({}, policy, log)).toBe(policy);
   expect(log).toHaveBeenCalledWith(
     'sandbox',
-    'outer sandbox off; harness sandbox in use (codex --sandbox workspace-write; harnesses without their own sandbox run unwrapped)',
+    'outer sandbox off; codex runs without its own sandbox unless sandbox.codexSandbox is workspace-write; harnesses without their own sandbox run unwrapped',
   );
   expect(log.mock.calls.flat().join(' ')).not.toContain('running uncontained');
   const consoleError = vi.spyOn(console, 'error').mockImplementationOnce(() => {});

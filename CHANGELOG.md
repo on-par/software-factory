@@ -13,6 +13,7 @@ section to `## X.Y.Z - date`. See
 
 ### Changed
 
+- Codex now runs with --sandbox danger-full-access by default, like Claude; set sandbox.codexSandbox: workspace-write to keep Codex's own sandbox (#3824)
 - Build open same-repository blocked-by issues in prerequisite order with `run-issue --stack`. #3814
 
 - PR receipts and verification summaries omit paths and plan evidence, and Proof reports TypeScript net line counts (#3817).

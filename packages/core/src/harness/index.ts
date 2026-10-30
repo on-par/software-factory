@@ -56,7 +56,7 @@ export interface HarnessRequest {
   primaryRepoRoot?: string;
   /** Configured Codex task names allowed danger-full-access, independent of OS sandbox policy. */
   codexFullAccessTasks?: readonly string[];
-  /** Configured Codex sandbox mode (sandbox.codexSandbox, #3830); undefined = today's behavior. Not read by the harness yet (#3824). */
+  /** Codex sandbox mode (sandbox.codexSandbox): undefined or 'danger-full-access' = no Codex sandbox (default, #3824); 'workspace-write' = Codex's own sandbox with network/writable-root flags. */
   codexSandbox?: CodexSandboxMode;
   /** Extra child-env vars (e.g. the lane's PORT lease) merged over the parent env. */
   env?: Record<string, string>;

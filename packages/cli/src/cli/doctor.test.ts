@@ -179,7 +179,7 @@ describe('runDoctorChecks', () => {
     expect(byName('git repository').detail).toBe('/repo');
     expect(byName('git auth')).toMatchObject({ ok: true });
     expect(byName('git auth').detail).not.toContain('github.com');
-    expect(byName('codex installed').detail).toMatch(/; sandboxed builds available$/);
+    expect(byName('codex installed').detail).toContain('codex runs without its own sandbox');
     expect(byName('git worktree clean').detail).toBe('clean');
     expect(byName('.factory initialized').detail).toBe('.factory/ present');
     expect(byName('git identity').detail).toBe('Test User <test@example.com>');
@@ -387,8 +387,8 @@ describe('runDoctorChecks', () => {
     expect(`${rt.detail} ${rt.fix}`).toMatch(/uncontained.*firejail/);
     const d = checks.find((c) => c.name === 'codex installed')!.detail;
     expect(d).toContain('preflight: no OS sandbox runtime (sandbox-exec/firejail) on PATH');
-    expect(d).toContain('codex will use --sandbox workspace-write');
-    expect(d).toContain('to opt in to full access, list tasks under sandbox.codexFullAccessTasks');
+    expect(d).toContain('codex runs without its own sandbox (--sandbox danger-full-access) by default');
+    expect(d).toContain('set sandbox.codexSandbox: workspace-write');
     expect(d).not.toContain('sandboxed builds available');
     expect(doctorFailed(checks)).toBe(false);
   });
